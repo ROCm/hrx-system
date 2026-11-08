@@ -1342,6 +1342,24 @@ static iree_status_t loom_vector_packet_record(
 static iree_status_t loom_vector_packet_record_captured(
     loom_vector_packetization_t* packetization, loom_value_id_t source,
     loom_type_t source_type, bool* out_selected) {
+  loom_target_legalization_context_t* context = packetization->context;
+  if (!loom_target_legalization_has_source_vector_carrier(context, source_type,
+                                                          source)) {
+    // A selected native operation owns its complete result even when general
+    // computation and boundary carriers require smaller packets. Retain that
+    // snapshot instead of replaying its producer or widening every carrier.
+    const loom_value_t* value = loom_module_value(context->module, source);
+    if (loom_value_is_block_arg(value)) {
+      return iree_ok_status();
+    }
+    loom_target_contract_query_result_t query_result =
+        loom_target_contract_query_result_empty();
+    IREE_RETURN_IF_ERROR(loom_target_legalization_query_contract(
+        context, loom_value_def_op(value), &query_result));
+    if (query_result.outcome != LOOM_TARGET_CONTRACT_QUERY_LEGAL) {
+      return iree_ok_status();
+    }
+  }
   IREE_RETURN_IF_ERROR(
       loom_vector_packet_record(packetization, source, source_type,
                                 LOOM_VECTOR_PACKET_SOURCE_ACTION_OPERATION));

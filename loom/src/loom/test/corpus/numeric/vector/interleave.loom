@@ -3,21 +3,16 @@
 // observable while preserving packed byte carriers.
 func.def @packed_byte_even_odd_mask(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %begin = index.constant 0 : index
-  %end = index.constant 64 : index
-  %step = index.constant 16 : index
-  %input_bytes = buffer.view %input[%base] : buffer -> view<64xi8>
-  %output_bytes = buffer.view %output[%base] : buffer -> view<64xi8>
-  %even_mask = vector.splati 1 : vector<8xi8>
-  %odd_mask = vector.splati -3 : vector<8xi8>
-  scf.for %i = [%begin to %end step %step] {
-    %packet = vector.load %input_bytes[%i] : view<64xi8> -> vector<16xi8>
-    %even, %odd = vector.deinterleave<0> %packet : vector<16xi8> -> vector<8xi8>, vector<8xi8>
-    %masked_even = vector.xori %even, %even_mask : vector<8xi8>
-    %masked_odd = vector.xori %odd, %odd_mask : vector<8xi8>
-    %result = vector.interleave<0> %masked_even, %masked_odd : vector<8xi8>, vector<8xi8> -> vector<16xi8>
-    vector.store %result, %output_bytes[%i] : vector<16xi8>, view<64xi8>
-  }
+  %input_bytes = buffer.view %input[%base] : buffer -> view<264xi8>
+  %output_bytes = buffer.view %output[%base] : buffer -> view<264xi8>
+  %packet = vector.load %input_bytes[0] : view<264xi8> -> vector<264xi8>
+  %even, %odd = vector.deinterleave<0> %packet : vector<264xi8> -> vector<132xi8>, vector<132xi8>
+  %even_mask = vector.splati 1 : vector<132xi8>
+  %odd_mask = vector.splati -3 : vector<132xi8>
+  %masked_even = vector.xori %even, %even_mask : vector<132xi8>
+  %masked_odd = vector.xori %odd, %odd_mask : vector<132xi8>
+  %result = vector.interleave<0> %masked_even, %masked_odd : vector<132xi8>, vector<132xi8> -> vector<264xi8>
+  vector.store %result, %output_bytes[0] : vector<264xi8>, view<264xi8>
   func.return
 }
 
@@ -26,20 +21,20 @@ func.def @packed_byte_even_odd_mask(%input: buffer, %output: buffer) {
 func.def @packed_byte_even_odd_mask_oracle(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %begin = index.constant 0 : index
-  %end = index.constant 64 : index
+  %end = index.constant 264 : index
   %step = index.constant 1 : index
   %pair_width = index.constant 2 : index
   %even_mask = scalar.constant 1 : i8
   %odd_mask = scalar.constant -3 : i8
-  %input_bytes = buffer.view %input[%base] : buffer -> view<64xi8>
-  %output_bytes = buffer.view %output[%base] : buffer -> view<64xi8>
+  %input_bytes = buffer.view %input[%base] : buffer -> view<264xi8>
+  %output_bytes = buffer.view %output[%base] : buffer -> view<264xi8>
   scf.for %i = [%begin to %end step %step] {
     %parity = index.rem %i, %pair_width : index
     %is_odd = index.cmp ne, %parity, %begin : index
     %mask = scf.select %is_odd, %odd_mask, %even_mask : i8
-    %value = view.load %input_bytes[%i] : view<64xi8> -> i8
+    %value = view.load %input_bytes[%i] : view<264xi8> -> i8
     %result = scalar.xori %value, %mask : i8
-    view.store %result, %output_bytes[%i] : i8, view<64xi8>
+    view.store %result, %output_bytes[%i] : i8, view<264xi8>
   }
   func.return
 }
@@ -93,22 +88,22 @@ func.def @irregular_byte_row_mask_oracle(%input: buffer, %output: buffer) {
 
 check.scenario @packed_byte_even_odd_mask_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
-    %input = check.generate.iota offset(-128) step(1) period(256) : tensor<64xi8>
-    %output_storage = check.generate.fill value(91) : tensor<72xi8>
-    %output = check.tensor.view %output_storage offset(4) : tensor<72xi8> -> tensor<64xi8>
-    check.compare<@packed_byte_even_odd_mask, @packed_byte_even_odd_mask_oracle>(%input, %output) : (tensor<64xi8>, tensor<64xi8>) -> () {
-      check.expect.bitwise actual(%input) expected(%input) : tensor<64xi8>
-      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<72xi8>
+    %input = check.generate.iota offset(-128) step(1) period(256) : tensor<264xi8>
+    %output_storage = check.generate.fill value(91) : tensor<272xi8>
+    %output = check.tensor.view %output_storage offset(4) : tensor<272xi8> -> tensor<264xi8>
+    check.compare<@packed_byte_even_odd_mask, @packed_byte_even_odd_mask_oracle>(%input, %output) : (tensor<264xi8>, tensor<264xi8>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<264xi8>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<272xi8>
     }
   }
   check.trial[4](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
-    %input = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<64xi8>
-    %output_storage = check.generate.fill value(-37) : tensor<72xi8>
-    %output = check.tensor.view %output_storage offset(4) : tensor<72xi8> -> tensor<64xi8>
-    check.compare<@packed_byte_even_odd_mask, @packed_byte_even_odd_mask_oracle>(%input, %output) : (tensor<64xi8>, tensor<64xi8>) -> () {
-      check.expect.bitwise actual(%input) expected(%input) : tensor<64xi8>
-      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<72xi8>
+    %input = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<264xi8>
+    %output_storage = check.generate.fill value(-37) : tensor<272xi8>
+    %output = check.tensor.view %output_storage offset(4) : tensor<272xi8> -> tensor<264xi8>
+    check.compare<@packed_byte_even_odd_mask, @packed_byte_even_odd_mask_oracle>(%input, %output) : (tensor<264xi8>, tensor<264xi8>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<264xi8>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<272xi8>
     }
   }
   check.return
@@ -118,6 +113,16 @@ check.scenario @irregular_byte_row_mask_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(-128) step(2) period(128) : tensor<336xi8>
     %output_storage = check.generate.fill value(83) : tensor<344xi8>
+    %output = check.tensor.view %output_storage offset(4) : tensor<344xi8> -> tensor<336xi8>
+    check.compare<@irregular_byte_row_mask, @irregular_byte_row_mask_oracle>(%input, %output) : (tensor<336xi8>, tensor<336xi8>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<336xi8>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<344xi8>
+    }
+  }
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<336xi8>
+    %output_storage = check.generate.fill value(-37) : tensor<344xi8>
     %output = check.tensor.view %output_storage offset(4) : tensor<344xi8> -> tensor<336xi8>
     check.compare<@irregular_byte_row_mask, @irregular_byte_row_mask_oracle>(%input, %output) : (tensor<336xi8>, tensor<336xi8>) -> () {
       check.expect.bitwise actual(%input) expected(%input) : tensor<336xi8>

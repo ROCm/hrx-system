@@ -18,26 +18,23 @@ extern "C" {
 // Maximum number of 32-bit lanes supported by direct memory descriptors.
 #define LOOM_AMDGPU_MAX_MEMORY_32BIT_LANES 4u
 
-// Maximum number of scalarized 32-bit vector lanes the source-to-low path will
-// keep live as individual VGPRs. Tile-level register fragments commonly use
-// one lane per workitem in a wave, so this must cover a full 32-lane fragment.
+// Fixed lane workspace used by bounded arithmetic recipes. Logical vectors
+// and structural register tuples may be wider; shared packetization limits
+// each arithmetic operation independently of its surrounding storage.
 #define LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES 32u
 
-// Maximum number of 32-bit register units in one directly represented vector
-// value. Native i1 masks use one SGPR pair per logical element and therefore
-// reach twice the scalarized numeric-lane budget.
+// Fixed register workspace for bounded vector recipes. Native i1 masks use
+// one SGPR pair per logical element, twice the arithmetic lane workspace.
 #define LOOM_AMDGPU_MAX_VECTOR_STORAGE_REGISTER_UNITS \
   (LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES * 2u)
 
-// Maximum number of logical elements in one directly represented vector
-// value. Packed byte and halfword payloads may carry twice the scalarized
-// numeric-lane budget.
+// Fixed element workspace for bounded vector recipes. Packed byte and
+// halfword payloads can carry twice the arithmetic lane workspace.
 #define LOOM_AMDGPU_MAX_VECTOR_STORAGE_ELEMENTS \
   (LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES * 2u)
 
-// Maximum number of direct memory packets needed to move one source vector.
-// Arbitrary positive-stride vectors may require one physical packet per
-// logical element, including the widest packed byte and halfword vectors.
+// Fixed packet workspace for one direct memory recipe. Strided payloads may
+// need one packet per element, independently of their packed register count.
 #define LOOM_AMDGPU_MAX_MEMORY_PACKET_COUNT \
   LOOM_AMDGPU_MAX_VECTOR_STORAGE_ELEMENTS
 
@@ -45,9 +42,8 @@ extern "C" {
 #define LOOM_AMDGPU_MAX_PACKED_16BIT_FLOAT_LANES \
   (LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES * 2u)
 
-// Maximum number of opaque packed 32-bit registers accepted as a register
-// payload. This covers wide matrix operands that are passed through as an
-// already-packed VGPR tuple, not scalarized vector arithmetic.
+// Fixed packed-word workspace used by opaque payload recipes. Complete
+// register tuples use their actual geometry without this recipe bound.
 #define LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS 16u
 
 // Maximum number of 32-bit registers in one target matrix fragment. Wide CDNA

@@ -1417,25 +1417,6 @@ static bool loom_vector_packet_value_is_exclusive_to_op(
   return loom_use_user_op(*loom_value_single_use(value)) == root_op;
 }
 
-// Captured values are sliced from an already materialized target carrier.
-// Values without a complete carrier mapping must be legalized before the
-// terminal store is reconsidered.
-static bool loom_vector_packet_captured_values_have_carriers(
-    const loom_vector_packetization_t* packetization) {
-  loom_target_legalization_context_t* context = packetization->context;
-  for (uint32_t i = 0; i < packetization->value_count; ++i) {
-    const loom_vector_packetized_value_t* value = &packetization->values[i];
-    if (value->source_mode != LOOM_VECTOR_PACKET_SOURCE_MODE_CAPTURED) {
-      continue;
-    }
-    if (!loom_target_legalization_has_source_vector_carrier(
-            context, value->source_type, value->source)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 iree_status_t loom_vector_packet_legalize_store(
     loom_target_legalization_context_t* context, loom_op_t* op,
     const loom_target_vector_packet_policy_t* policy, bool* out_rewritten) {
@@ -1528,9 +1509,8 @@ iree_status_t loom_vector_packet_legalize_store(
                                                  /*allow_streaming=*/true));
   }
 
-  if (!loom_vector_packet_captured_values_have_carriers(&packetization) ||
-      (producer_selected &&
-       !loom_vector_packet_can_materialize(&packetization, &shape))) {
+  if (producer_selected &&
+      !loom_vector_packet_can_materialize(&packetization, &shape)) {
     return iree_ok_status();
   }
   if (!producer_selected) {

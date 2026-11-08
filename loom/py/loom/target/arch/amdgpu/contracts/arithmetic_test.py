@@ -1567,6 +1567,108 @@ def test_vector_extract_rules_publish_contract_only_shape_rows() -> None:
         assert GuardKind.VECTOR_EXTRACT_SHAPE in guard_kinds
 
 
+def test_vector_bitcast_preserves_numeric_and_mask_storage_domains() -> None:
+    compiled = _COMPILED_ARITHMETIC_RULES
+    numeric_types = {
+        "i8",
+        "i16",
+        "i32",
+        "i64",
+        "f8E4M3",
+        "f8E5M2",
+        "f16",
+        "bf16",
+        "f32",
+        "f64",
+    }
+    accepted_pairs = set()
+    for rule in _rules_for_source_op(compiled, vector.vector_bitcast):
+        assert rule.flags & LOWER_RULE_FLAG_CONTRACT_ONLY
+        assert rule.emit_count == 0
+        source, result = _rule_type_patterns(compiled, rule)
+        accepted_pairs.update(
+            (lhs, rhs) for lhs in source.elements for rhs in result.elements
+        )
+    assert accepted_pairs == {
+        (lhs, rhs) for lhs in numeric_types for rhs in numeric_types
+    } | {("i1", "i1")}
+
+
+def test_vector_permutations_publish_complete_physical_storage_family() -> None:
+    compiled = _COMPILED_ARITHMETIC_RULES
+    physical_bytes = {
+        "i8": 1,
+        "f8E4M3": 1,
+        "f8E5M2": 1,
+        "i16": 2,
+        "f16": 2,
+        "bf16": 2,
+        "i32": 4,
+        "f32": 4,
+        "i1": 8,
+        "i64": 8,
+        "f64": 8,
+    }
+    for source_op in (
+        vector.vector_interleave,
+        vector.vector_deinterleave,
+        vector.vector_shuffle,
+    ):
+        payloads = set()
+        for rule in _rules_for_source_op(compiled, source_op):
+            assert rule.flags & LOWER_RULE_FLAG_CONTRACT_ONLY
+            assert rule.emit_count == 0
+            (pattern,) = _rule_type_patterns(compiled, rule)
+            guards = compiled.guards[
+                rule.guard_start : rule.guard_start + rule.guard_count
+            ]
+            uses_permute = any(
+                guard.kind == GuardKind.DESCRIPTOR_AVAILABLE for guard in guards
+            )
+            for element in pattern.elements:
+                assert uses_permute == (physical_bytes[element] < 4)
+                if source_op is vector.vector_shuffle:
+                    assert pattern.minimum_lanes == 1
+                    assert pattern.maximum_lanes == "UINT16_MAX"
+                else:
+                    assert pattern.minimum_static_elements == 1
+                    assert (
+                        pattern.maximum_static_elements
+                        == f"(UINT16_MAX / {physical_bytes[element]}u)"
+                    )
+                payloads.add(element)
+        assert payloads == physical_bytes.keys()
+
+
+def test_vector_select_packets_bound_wave_mask_count_for_every_payload() -> None:
+    compiled = _COMPILED_ARITHMETIC_RULES
+    payloads = set()
+    for rule in _rules_for_source_op(compiled, vector.vector_select):
+        if not rule.flags & LOWER_RULE_FLAG_CONTRACT_ONLY:
+            continue
+        condition, result = _rule_type_patterns(compiled, rule)
+        assert condition.elements == ("i1",)
+        assert (
+            condition.maximum_static_elements
+            == "LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES"
+        )
+        payloads.update(result.elements)
+        guards = compiled.guards[rule.guard_start : rule.guard_start + rule.guard_count]
+        assert any(guard.kind == GuardKind.DESCRIPTOR_AVAILABLE for guard in guards)
+    assert payloads == {
+        "i8",
+        "i16",
+        "i32",
+        "i64",
+        "f8E4M3",
+        "f8E5M2",
+        "f16",
+        "bf16",
+        "f32",
+        "f64",
+    }
+
+
 def test_vector_construct_rules_publish_contract_only_storage_rows() -> None:
     compiled = _COMPILED_ARITHMETIC_RULES
 

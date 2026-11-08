@@ -479,7 +479,7 @@ static iree_status_t loom_amdgpu_legalize_static_vector_shape(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_legalize_vector_shuffle(
+static iree_status_t loom_amdgpu_legalize_vector_permutation(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result) {
@@ -492,15 +492,20 @@ static iree_status_t loom_amdgpu_legalize_vector_shuffle(
     return iree_ok_status();
   }
   if (context->mode != LOOM_TARGET_LEGALIZATION_MODE_FINAL ||
-      loom_amdgpu_vector_shuffle_can_lower(context->module,
-                                           context->descriptor_set, op)) {
+      loom_amdgpu_vector_permutation_can_lower(context->module,
+                                               context->descriptor_set, op)) {
     out_result->action = LOOM_TARGET_LEGALIZER_ACTION_DEFER;
     return iree_ok_status();
   }
 
   bool rewritten = false;
-  IREE_RETURN_IF_ERROR(loom_vector_descriptor_to_scalar_rewrite_op(
-      context->pass, context->rewriter, op, &rewritten));
+  if (loom_vector_transpose_isa(op)) {
+    IREE_RETURN_IF_ERROR(loom_vector_transpose_to_shuffle_rewrite_op(
+        context->rewriter, op, &rewritten));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_vector_descriptor_to_scalar_rewrite_op(
+        context->pass, context->rewriter, op, &rewritten));
+  }
   if (rewritten) {
     out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
   }
@@ -1315,7 +1320,11 @@ static const loom_target_legalizer_rule_t kAmdgpuLegalizerRules[] = {
     },
     {
         .root_kind = LOOM_OP_VECTOR_SHUFFLE,
-        .legalize = loom_amdgpu_legalize_vector_shuffle,
+        .legalize = loom_amdgpu_legalize_vector_permutation,
+    },
+    {
+        .root_kind = LOOM_OP_VECTOR_TRANSPOSE,
+        .legalize = loom_amdgpu_legalize_vector_permutation,
     },
     // Retain native packed pairs. Other shapes and profiles use the shared
     // per-element reference, with policy enforced by that provider.
