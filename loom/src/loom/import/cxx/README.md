@@ -3050,6 +3050,39 @@ unsigned update(unsigned input, bool enabled) {
 }
 ```
 
+Semantic handles can be declared before choosing their value. A branch joins
+only values established on every continuing arm:
+
+```cpp
+#include <loomcxx/buffer.h>
+using Buffer = loom::type::buffer<const unsigned char>;
+
+Buffer select(Buffer first, Buffer second, bool condition) {
+  Buffer result;
+  if (condition) result = first;
+  else result = second;
+  return result;
+}
+```
+
+The declaration creates neither an allocation nor a default resource. The
+selection imports as an ordinary SSA region result. The same rule applies to
+pointers, views, encodings, pipeline handles, and records containing them. A
+view's dynamic dimensions and encoding stay with its payload at every join.
+
+Record members can be initialized independently. Reading an initialized member
+does not require the other members, and a loop can carry an initialized counter
+while first constructing a buffer member in its body. A `do` loop executes that
+first body before producing its result; a possibly zero-trip `while` or `for`
+loop cannot establish an otherwise missing value for a subsequent read.
+
+A read before initialization produces a source diagnostic. Returning or passing
+a complete semantic record, including supplying its destructor's value
+receiver, requires all transported members to be initialized. Native objects
+retain their ordinary addressable-storage behavior, including guarded reads,
+default member initializers, and destructors that observe only initialized
+fields.
+
 Automatic storage supports the same scalar and vector types as
 typed pointer storage. The importer emits `buffer.alloca<private>` at the
 object's declaration, using its source size and alignment, and initializes it

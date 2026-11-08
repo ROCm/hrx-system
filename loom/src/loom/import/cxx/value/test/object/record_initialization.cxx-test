@@ -99,14 +99,14 @@ func.def public @seed_value() -> (i32) {
 }
 
 func.def public @synthesized() -> (i32, i32, i32) {
-  %count$25 = func.call pure @seed_value() : () -> (i32)
+  %25 = func.call pure @seed_value() : () -> (i32)
   %26 = scalar.constant 1 : i32
-  %27 = scalar.andi %count$25, %26 : i32
+  %27 = scalar.andi %25, %26 : i32
   %28 = scalar.constant 0 : i32
   %29 = scalar.cmpi ne, %27, %28 : i32
-  %count$33 = scalar.addi %count$25, %26 : i32
+  %count$33 = scalar.addi %25, %26 : i32
   %34 = scalar.constant 2 : i32
-  %count$35 = scalar.addi %count$25, %34 : i32
+  %count$35 = scalar.addi %25, %34 : i32
   %352 = scf.select %29, %count$33, %count$35 : i32
   func.return %352, %352, %352 : i32, i32, i32
 }

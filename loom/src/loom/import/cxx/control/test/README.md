@@ -18,6 +18,8 @@ structured regions, state carried across joins, and observable effects.
 | Returns across loops, aggregate results, and memory effects | `structured_returns` |
 | Switch selection, fallthrough, and interaction with loop exits | `switches` |
 | Source rejection and deep-expression admission | `control_invalid`, `deep_conditionals` |
+| Source construction, partial records, independent copies, and mandatory first loop bodies | `construction`, `construction_ssa` |
+| Semantic carrier families, native storage preservation, and unavailable-value diagnostics | `construction_carriers`, `construction_native`, `construction_invalid` |
 | Cleanup of a proven counted recurrence | `condition_loop_cleanup` |
 
 Related source cases share a fixture through `// ====`. `// ----` introduces

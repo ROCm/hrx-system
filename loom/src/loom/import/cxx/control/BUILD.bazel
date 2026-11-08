@@ -14,12 +14,36 @@ package(
 )
 
 loom_cc_library(
+    name = "construction",
+    srcs = ["construction.cc"],
+    hdrs = ["construction.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = ["//third_party:cxx_parser"],
+)
+
+loom_cc_test(
+    name = "construction_test",
+    srcs = ["construction_test.cc"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        ":construction",
+        "//loom/src/loom/import/cxx/source",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_library(
     name = "analysis",
     srcs = ["analysis.cc"],
     hdrs = ["analysis.h"],
     cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [
+        ":construction",
         "//loom/src/loom/import/cxx/lifetime:destruction",
         "//loom/src/loom/import/cxx/source",
         "//loom/src/loom/import/cxx/source:attributes",

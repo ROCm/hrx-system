@@ -465,6 +465,7 @@ bool ControlFlow::preVisit(cxx::AST* ast) {
                    : cxx::ast_cast<cxx::ForStatementAST>(owners_.back());
   if (structured(ast) || (loop && loop->statement == ast)) {
     owners_.push_back(ast);
+    construction_.enter();
   }
   return true;
 }
@@ -511,6 +512,12 @@ void ControlFlow::postVisit(cxx::AST* ast) {
     if (classify_storage(expression)) {
       storage_expressions_.insert(expression);
     }
+    if (cxx::ast_cast<cxx::MemberExpressionAST>(expression) &&
+        construction_.tracked(owner)) {
+      if (auto destination = classify_destination(expression)) {
+        destinations_.insert_or_assign(expression, *destination);
+      }
+    }
     retain_temporary_destruction(expression);
   }
   if (auto* statement = cxx::ast_cast<cxx::StatementAST>(ast)) {
@@ -552,7 +559,21 @@ void ControlFlow::postVisit(cxx::AST* ast) {
     }
   }
   if (!owners_.empty() && owners_.back() == ast) {
+    construction_.leave(ast, written(ast));
     owners_.pop_back();
+  }
+  switch (ast->kind()) {
+    case cxx::ASTKind::ReturnStatement:
+      construction_.return_from_function();
+      break;
+    case cxx::ASTKind::BreakStatement:
+      construction_.break_from_region();
+      break;
+    case cxx::ASTKind::ContinueStatement:
+      construction_.continue_iteration();
+      break;
+    default:
+      break;
   }
 }
 
@@ -693,6 +714,7 @@ void ControlFlow::visit(cxx::CompoundStatementAST* ast) {
   }
 
   SwitchFacts facts;
+  auto incoming = construction_.state();
   bool clause_owner_active = false;
   auto finish_clause = [&] {
     if (!clause_owner_active) {
@@ -708,6 +730,7 @@ void ControlFlow::visit(cxx::CompoundStatementAST* ast) {
     auto outcomes = sequence_paths(clause.statements);
     clause.falls_through = outcomes & Fallthrough;
     facts.clause_paths.push_back(outcomes);
+    construction_.leave(owner, clause.writes);
     owners_.pop_back();
     clause_owner_active = false;
   };
@@ -720,6 +743,8 @@ void ControlFlow::visit(cxx::CompoundStatementAST* ast) {
                            !facts.layout.clauses.back().statements.empty();
       if (starts_clause) {
         finish_clause();
+        construction_.restore(
+            Construction::join(construction_.state(), incoming));
         facts.layout.clauses.push_back({});
       }
       active_switch_label_ = child;
@@ -736,6 +761,7 @@ void ControlFlow::visit(cxx::CompoundStatementAST* ast) {
       }
       if (starts_clause) {
         owners_.push_back(child);
+        construction_.enter(/*declaration_scope=*/false);
         clause_owner_active = true;
       }
       continue;
@@ -762,13 +788,68 @@ void ControlFlow::visit(cxx::CompoundStatementAST* ast) {
 }
 
 void ControlFlow::visit(cxx::IfStatementAST* ast) {
+  for (auto* attribute : cxx::ListView{ast->attributeList}) {
+    accept(attribute);
+  }
+  accept(ast->initializer);
+  accept(ast->condition);
   if (ast->constexprValue.has_value()) {
-    accept(ast->initializer);
-    accept(ast->condition);
     accept(*ast->constexprValue ? ast->statement : ast->elseStatement);
   } else {
-    cxx::ASTVisitor::visit(ast);
+    auto incoming = construction_.state();
+    accept(ast->statement);
+    auto then_state = construction_.state();
+    construction_.restore(std::move(incoming));
+    accept(ast->elseStatement);
+    construction_.restore(
+        Construction::join(std::move(then_state), construction_.state()));
   }
+}
+
+void ControlFlow::visit(cxx::WhileStatementAST* ast) {
+  for (auto* attribute : cxx::ListView{ast->attributeList}) {
+    accept(attribute);
+  }
+  accept(ast->condition);
+  auto condition_exit = construction_.state();
+  accept(ast->statement);
+  construction_.finish_loop(std::move(condition_exit));
+}
+
+void ControlFlow::visit(cxx::DoStatementAST* ast) {
+  for (auto* attribute : cxx::ListView{ast->attributeList}) {
+    accept(attribute);
+  }
+  accept(ast->statement);
+  construction_.reach_latch();
+  accept(ast->expression);
+  construction_.finish_loop(construction_.state());
+}
+
+void ControlFlow::visit(cxx::ForStatementAST* ast) {
+  for (auto* attribute : cxx::ListView{ast->attributeList}) {
+    accept(attribute);
+  }
+  accept(ast->initializer);
+  accept(ast->condition);
+  auto condition_exit = construction_.state();
+  // Retain the frontend's lexical write order while keeping latch-only
+  // assignments out of both the first body entry and the zero-trip exit.
+  accept(ast->expression);
+  construction_.restore(condition_exit);
+  accept(ast->statement);
+  construction_.finish_loop(std::move(condition_exit));
+}
+
+void ControlFlow::visit(cxx::ConditionalExpressionAST* ast) {
+  accept(ast->condition);
+  auto incoming = construction_.state();
+  accept(ast->iftrueExpression);
+  auto then_state = construction_.state();
+  construction_.restore(std::move(incoming));
+  accept(ast->iffalseExpression);
+  construction_.restore(
+      Construction::join(std::move(then_state), construction_.state()));
 }
 
 void ControlFlow::visit(cxx::SwitchStatementAST* ast) {
@@ -782,7 +863,12 @@ void ControlFlow::visit(cxx::SwitchStatementAST* ast) {
                         "runtime switch requires a compound statement body");
   }
   switch_stack_.push_back(ast);
+  auto incoming = construction_.state();
   accept(ast->statement);
+  if (switches_.at(ast).layout.has_default) {
+    incoming = {false, {}};
+  }
+  construction_.finish_switch(std::move(incoming));
   switch_stack_.pop_back();
 }
 
@@ -798,11 +884,24 @@ void ControlFlow::visit(cxx::AssignmentExpressionAST* ast) {
   cxx::ASTVisitor::visit(ast);
   if (ordinary_call) {
     retain_call(*direct_operator_call(ast), ast);
+  } else if (auto target = destination(ast->leftExpression)) {
+    construction_.assign(
+        target->binding, target->component_offset,
+        target->member ? target->member->component_count : SIZE_MAX);
   }
 }
 
 void ControlFlow::visit(cxx::BinaryExpressionAST* ast) {
-  cxx::ASTVisitor::visit(ast);
+  if (!ast->symbol && (ast->op == cxx::TokenKind::T_AMP_AMP ||
+                       ast->op == cxx::TokenKind::T_BAR_BAR)) {
+    accept(ast->leftExpression);
+    auto skipped = construction_.state();
+    accept(ast->rightExpression);
+    construction_.restore(
+        Construction::join(std::move(skipped), construction_.state()));
+  } else {
+    cxx::ASTVisitor::visit(ast);
+  }
   if (auto call = direct_operator_call(ast)) {
     retain_call(*call, ast);
   }
@@ -1030,10 +1129,6 @@ void ControlFlow::analyze_default_constructor(const cxx::Type* type,
                         "default record constructor has no source "
                         "initialization plan");
   }
-  if (cxx::ctor_initializers(body)) {
-    initializing_constructors_.insert(canonical);
-  }
-
   // A synthesized constructor is an expression-local initialization plan, not
   // a lexical child of every source construct that invokes it. Its own
   // structured expressions still retain their mutation summaries.
@@ -1053,6 +1148,22 @@ void ControlFlow::analyze_default_constructor(const cxx::Type* type,
       require_identity(referent);
     }
     accept(initializer);
+    auto* empty = cxx::ast_cast<cxx::ParenMemInitializerAST>(initializer);
+    if (empty && !empty->lparenLoc && !empty->expressionList) {
+      // The frontend includes implicit default construction of class members
+      // in this list. An empty semantic handle begins its source lifetime but
+      // supplies no value; a nested record may still have real initializers.
+      auto* member_type = source_object_type(initializer->symbol);
+      analyze_default_constructor(member_type, initializer->constructor,
+                                  initializer);
+      if (default_constructor_initializes(initializer->constructor) ||
+          types_.record_constructor_requires_call(
+              member_type, initializer->constructor, initializer)) {
+        initializing_constructors_.insert(canonical);
+      }
+    } else {
+      initializing_constructors_.insert(canonical);
+    }
   }
   owners_ = std::move(enclosing_owners);
 }
@@ -1410,8 +1521,8 @@ void ControlFlow::retain_automatic_storage(cxx::VariableSymbol* variable,
                                            bool record_constructor_call) {
   auto traits = unit_.typeTraits();
   if (!traits.is_reference(variable->type()) &&
-      (!initializer || record_constructor_call ||
-       traits.is_array(variable->type()) ||
+      ((!initializer && !types_.requires_value_transport(variable->type())) ||
+       record_constructor_call || traits.is_array(variable->type()) ||
        traits.is_volatile(variable->type()))) {
     binding_storage_[variable].automatic_storage = true;
   }
@@ -2236,6 +2347,13 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
     retain_automatic_storage(variable, ast->initializer,
                              record_constructor_call);
     analyze_default_constructor(variable->type(), variable->constructor(), ast);
+    if (!ast->initializer && !storage_backed(variable)) {
+      construction_.declare(
+          variable, types_.partition(variable->type(), ast).component_count);
+      if (default_constructor_initializes(variable->constructor())) {
+        construction_.assign(variable, 0, SIZE_MAX);
+      }
+    }
     retain_automatic_destruction(variable, ast);
   }
 }
@@ -2526,6 +2644,10 @@ void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,
 
 std::optional<Destination> ControlFlow::classify_destination(
     cxx::ExpressionAST* expression) {
+  if (auto found = destinations_.find(expression);
+      found != destinations_.end()) {
+    return found->second;
+  }
   auto* identity = unwrap_object_identity(unit_, expression);
   if (identity != expression) {
     return classify_destination(identity);

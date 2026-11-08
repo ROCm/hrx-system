@@ -1,0 +1,107 @@
+// RUN: emit vm-object-lifetime
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+[[loom::noinline]] static void trial(bool enabled) {
+  unsigned value;
+  if (enabled) {
+    value = 7;
+  }
+  if (enabled) {
+    event(value);
+  }
+}
+void run() {
+  trial(false);
+  trial(true);
+}
+
+// ----
+event 7
+OK 0
+retired 0
+
+// ====
+// RUN: emit vm-object-lifetime
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Partial {
+  // Remains uninitialized and is never observed.
+  unsigned unused;
+  // The destructor reads only this initialized field.
+  unsigned last;
+  ~Partial() { event(last); }
+};
+void run() {
+  Partial value;
+  value.last = 7;
+}
+
+// ----
+event 7
+OK 0
+retired 0
+
+// ====
+// RUN: emit vm-object-lifetime
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Object {
+  // The implicit constructor evaluates this default member initializer.
+  unsigned value = 7;
+  ~Object() { event(value); }
+};
+void run() {
+  Object value;
+  event(value.value);
+}
+
+// ----
+event 7
+event 7
+OK 0
+retired 0
+
+// ====
+// RUN: emit vm-object-lifetime
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Object {
+  // The explicit constructor initializes this before its observable body.
+  unsigned value;
+  Object() : value(7) { event(1); }
+  ~Object() { event(value); }
+};
+void run() {
+  Object value;
+  event(value.value);
+}
+
+// ----
+event 1
+event 7
+event 7
+OK 0
+retired 0
+
+// ====
+// RUN: emit vm-object-lifetime
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+[[loom::noinline]] static void trial(unsigned count) {
+  unsigned value;
+  unsigned index = 0;
+  do {
+    if (index == 0) {
+      value = 7;
+    } else {
+      ++value;
+    }
+    ++index;
+  } while (index < count);
+  event(value);
+}
+void run() {
+  trial(1);
+  trial(3);
+}
+
+// ----
+event 7
+event 9
+OK 0
+retired 0

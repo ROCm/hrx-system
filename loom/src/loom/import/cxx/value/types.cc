@@ -359,6 +359,72 @@ bool Types::requires_binding(const cxx::Type* input, cxx::AST* owner) {
              : false;
 }
 
+bool Types::requires_value_transport(const cxx::Type* input) {
+  input = unqualified(input);
+  auto traits = unit_.typeTraits();
+  if (traits.is_pointer(input) || traits.is_reference(input)) {
+    return true;
+  }
+  if (auto* array = cxx::type_cast<cxx::BoundedArrayType>(input)) {
+    return requires_value_transport(array->elementType());
+  }
+  auto* record_type = cxx::type_cast<cxx::ClassType>(input);
+  if (!record_type) {
+    return false;
+  }
+  if (auto found = value_transport_.find(input);
+      found != value_transport_.end()) {
+    return found->second;
+  }
+  auto* source = record_type->definition();
+  traits.requireCompleteClass(source);
+  source = record_type->definition();
+  bool required = type_binding(source) != nullptr;
+  for (auto* base : source->baseClasses()) {
+    required |= requires_value_transport(source_object_type(base));
+  }
+  for (auto* symbol : source->members()) {
+    auto* field = cxx::symbol_cast<cxx::FieldSymbol>(symbol);
+    if (field && !field->isStatic()) {
+      required |= requires_value_transport(field->type());
+    }
+  }
+  value_transport_.emplace(input, required);
+  return required;
+}
+
+std::span<const ValueProjection> Types::projections(const cxx::Type* input,
+                                                    cxx::AST* owner) {
+  input = unqualified(input);
+  if (auto found = construction_groups_.find(input);
+      found != construction_groups_.end()) {
+    return found->second;
+  }
+  const auto& admitted = partition(input, owner);
+  std::vector<ValueProjection> result;
+  auto append = [&](const cxx::Type* type, size_t offset) {
+    for (auto child : projections(type, owner)) {
+      child.component_offset += offset;
+      result.push_back(child);
+    }
+  };
+  if (admitted.kind == ValueKind::Record && admitted.component_count) {
+    for (const auto& member :
+         static_cast<const RecordPartition&>(admitted).members) {
+      append(member.type(), member.component_offset);
+    }
+  } else if (admitted.kind == ValueKind::Array) {
+    const auto& array = static_cast<const ArrayPartition&>(admitted);
+    for (size_t offset = 0; offset < admitted.component_count;
+         offset += array.element->component_count) {
+      append(array.source->elementType(), offset);
+    }
+  } else {
+    result.push_back({input, &admitted, 0});
+  }
+  return construction_groups_.emplace(input, std::move(result)).first->second;
+}
+
 const ArrayPartition* Types::array(const cxx::Type* input, cxx::AST* owner) {
   auto* source = cxx::type_cast<cxx::BoundedArrayType>(unqualified(input));
   if (!source) {
