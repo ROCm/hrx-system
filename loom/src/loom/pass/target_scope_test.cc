@@ -50,8 +50,8 @@ class TargetScopeTest : public ::testing::Test {
     const int64_t count = 1;
     const int64_t stride = 1;
     IREE_ASSERT_OK(loom_pipeline_strand_build(
-        &builder_, LOOM_PIPELINE_STRAND_BUILD_FLAG_HAS_TARGET, worker_, nullptr,
-        0, &origin, 1, nullptr, 0, &count, 1, nullptr, 0, &stride, 1,
+        &builder_, LOOM_PIPELINE_STRAND_BUILD_FLAG_HAS_TARGET, 0, worker_,
+        nullptr, 0, &origin, 1, nullptr, 0, &count, 1, nullptr, 0, &stride, 1,
         LOOM_LOCATION_UNKNOWN, &strand_));
     loom_builder_enter_region(&builder_, strand_,
                               loom_pipeline_strand_body(strand_));

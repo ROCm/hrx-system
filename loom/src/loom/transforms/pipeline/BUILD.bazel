@@ -40,6 +40,35 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "workgroup",
+    srcs = ["workgroup.c"],
+    hdrs = ["workgroup.h"],
+    deps = [
+        "//loom/src/loom/analysis/pipeline:resources",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:builders",
+        "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/pipeline",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/pass:builder",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:facts",
+        "//loom/src/loom/target:function_contract",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:pass_environment",
+        "//loom/src/loom/transforms/kernel:kernel_resources",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "realization",
     srcs = ["realization.c"],
     hdrs = ["realization.h"],
@@ -62,6 +91,7 @@ loom_cc_library(
         "//loom/src/loom/target:function_version",
         "//loom/src/loom/target:pass_environment",
         "//loom/src/loom/transforms/cfg:cfg_simplify",
+        "//loom/src/loom/transforms/kernel:kernel_resources",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],

@@ -103,12 +103,28 @@ typedef struct loom_pipeline_resource_channel_t {
   const loom_pipeline_channel_geometry_t* geometry;
 } loom_pipeline_resource_channel_t;
 
+// Specialized authored worker geometry. This is a domain of execution units,
+// not a count of records and not a request to repeat the strand body per
+// record.
+typedef struct loom_pipeline_worker_axis_t {
+  // First worker coordinate along this axis.
+  uint64_t origin;
+  // Number of workers along this axis.
+  uint64_t count;
+  // Coordinate increment between workers along this axis.
+  uint64_t stride;
+} loom_pipeline_worker_axis_t;
+
 typedef struct loom_pipeline_resource_strand_t {
   // Source declaration retaining target and worker-domain geometry.
   loom_op_t* declaration;
   // Outlined ordinary call whose operands supply the actual captures.
   // Its operand order is the callee's formal order, not a resource ABI.
   loom_op_t* call;
+  // Specialized worker coordinates retained by construction analysis.
+  const loom_pipeline_worker_axis_t* axes;
+  // Number of worker axes.
+  iree_host_size_t rank;
 } loom_pipeline_resource_strand_t;
 
 typedef struct loom_pipeline_resources_t {

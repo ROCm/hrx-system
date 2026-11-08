@@ -31,7 +31,7 @@ func.def inline @__pipeline_strand_0() {
 }
 
 // ====
-// RUN: pass inline-callables,outline-pipeline-strands,cfg-simplify
+// RUN: pass inline-callables,outline-pipeline-strands
 
 // Ordinary inline helpers and outlining preserve execution placement. The
 // outlined body carries kernel operations until physical realization places it.
@@ -67,7 +67,7 @@ func.def inline @__pipeline_strand_0(%output: view<128xi32>) {
 
 // ====
 
-// RUN: pass outline-pipeline-strands,cfg-simplify,outline-pipeline-strands
+// RUN: pass outline-pipeline-strands,outline-pipeline-strands
 
 // The capture set includes a dependent payload width and a bound that is used
 // only in a predicate. Worker selection remains outside the function.

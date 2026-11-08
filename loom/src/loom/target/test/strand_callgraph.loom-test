@@ -454,17 +454,86 @@ pipeline.def public target(@core) @run() run(%value: i32) {
 }
 
 func.def inline @__pipeline_strand_0(%value: i32) {
-  cfg.br ^_bb1
-^_bb1:
   %source_result = func.call @source_identity(%value) : (i32) -> (i32)
   %result = low.invoke noinline @identity(%source_result) : (i32) -> (i32)
   func.return
 }
 
 func.def inline @__pipeline_strand_1(%value: i32) {
-  cfg.br ^_bb1
-^_bb1:
   %source_result = func.call @source_identity_spec0(%value) : (i32) -> (i32)
   %result = low.invoke noinline @identity_spec0(%source_result) : (i32) -> (i32)
+  func.return
+}
+
+// ====
+// RUN: pass specialize-target-callgraph,outline-pipeline-strands,specialize-target-callgraph,canonicalize,symbol-dce
+
+// Outlining preserves an unchanged inherited context while explicit worker
+// requirements keep their independently selected helper versions.
+test.target<low_core> @construction {subgroup_size = 32}
+
+test.target<low_core> @other {subgroup_size = 64}
+
+func.def noinline @width() -> (index) {
+  %width = target.subgroup.size : index
+  func.return %width : index
+}
+
+pipeline.def public target(@construction) @mixed_workers() run(%input: i32) {
+  %parent_width = func.call @width() : () -> (index)
+  test.use %parent_width : index
+  pipeline.strand workers([0], [1], [1]) {
+    %worker_width = func.call @width() : () -> (index)
+    %result = index.cast %worker_width : index to i32
+    %sum = scalar.addi %input, %result : i32
+    test.use %sum : i32
+  }
+  pipeline.strand target(@other) workers([1], [1], [1]) {
+    %worker_width = func.call @width() : () -> (index)
+    %result = index.cast %worker_width : index to i32
+    %sum = scalar.addi %input, %result : i32
+    test.use %sum : i32
+  }
+}
+
+// ----
+test.target<low_core> @construction {subgroup_size = 32}
+
+test.target<low_core> @other {subgroup_size = 64}
+
+func.def noinline @width_spec1() -> (index) {
+  %width = index.constant 64 : index
+  func.return %width : index
+}
+
+func.def noinline @width_spec0() -> (index) {
+  %width = index.constant 32 : index
+  func.return %width : index
+}
+
+pipeline.def public target(@construction) @mixed_workers() run(%input: i32) {
+  %parent_width = func.call pure @width_spec0() : () -> (index)
+  test.use %parent_width : index
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @__pipeline_strand_1(%input) : (i32)
+  }
+  pipeline.strand target(@other) workers([1], [1], [1]) {
+    func.call @__pipeline_strand_0(%input) : (i32)
+  }
+}
+
+func.def inline @__pipeline_strand_0(%input: i32) {
+  %worker_width = func.call pure @width_spec1() : () -> (index)
+  %result = index.cast %worker_width : index to i32
+  %sum = scalar.addi %input, %result : i32
+  test.use %sum : i32
+  func.return
+}
+
+func.def inline @__pipeline_strand_1(%input: i32) {
+  %worker_width = func.call pure @width_spec0() : () -> (index)
+  %result = index.cast %worker_width : index to i32
+  %sum = scalar.addi %input, %result : i32
+  test.use %sum : i32
   func.return
 }

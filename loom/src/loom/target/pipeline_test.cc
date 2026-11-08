@@ -41,7 +41,7 @@ typedef struct PipelineRunCounts {
   int boundary_cleanup_ordinal = 0;
   // Lexical pass-run ordinal of the first target-required call inlining.
   int first_target_inlining_ordinal = 0;
-  // Lexical pass-run ordinal of preparatory source call inlining.
+  // Lexical pass-run ordinal of initial preparatory source call inlining.
   int preparatory_target_inlining_ordinal = 0;
   // Required source inlining after execution realization adds new helpers.
   int execution_target_inlining_ordinal = 0;

@@ -24,5 +24,6 @@ loom_check_test_suite(
         "outline.loom-test",
         "serial.loom-test",
         "specialization.loom-test",
+        "workgroup.loom-test",
     ],
 )

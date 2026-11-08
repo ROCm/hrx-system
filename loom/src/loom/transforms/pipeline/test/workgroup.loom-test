@@ -1,0 +1,192 @@
+// RUN: pass specialize-target-callgraph,outline-pipeline-strands,realize-pipeline-workgroup,inline-callables,cfg-simplify,canonicalize,symbol-dce
+
+// Worker count comes from ordinary SSA calculations. The launch and its body
+// agree on the size while one invocation processes the entire record loop.
+test.target<low_core> @device {subgroup_size = 32}
+
+pipeline.def<kernel> public target(@device) @resident() run(%output: view<128xi32>, %records: index) {
+  %threads = index.constant 128 : index
+  %subgroup = target.subgroup.size : index
+  %waves = index.div %threads, %subgroup : index
+  pipeline.strand<cooperative> workers([0], [%waves], [1]) {
+    %thread = kernel.workitem.id<x> : index
+    %width = kernel.workgroup.size<x> : index
+    %begin = index.constant 0 : index
+    %step = index.constant 1 : index
+    %initial = index.cast %thread : index to i32
+    %increment = index.cast %width : index to i32
+    %result = scf.for %record = [%begin to %records step %step](%value = %initial : i32) -> (i32) {
+      %next = scalar.addi %value, %increment : i32
+      scf.yield %next : i32
+    }
+    view.store %result, %output[%thread] : i32, view<128xi32>
+  }
+}
+
+// ----
+test.target<low_core> @device {subgroup_size = 32}
+
+kernel.def target(@device) export("resident") @resident() {
+  %19 = index.constant 1 : index
+  %25 = index.constant 128 : index
+  kernel.launch.config workgroups(%19, %19, %19) workgroup_size(%25, %19, %19) : index
+} launch(%output: buffer, %records: index) {
+  %23 = index.constant 0 : offset
+  %24 = buffer.view %output[%23] : buffer -> view<128xi32>
+  %thread = kernel.workitem.id<x> : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial = index.cast %thread : index to i32
+  %increment = scalar.constant 128 : i32
+  %result = scf.for %record = [%begin to %records step %step](%value = %initial : i32) -> (i32) {
+    %next = scalar.addi %value, %increment : i32
+    scf.yield %next : i32
+  }
+  view.store %result, %24[%thread] : i32, view<128xi32>
+  kernel.return
+}
+
+// ====
+// RUN: pass specialize-target-callgraph,outline-pipeline-strands,realize-pipeline-workgroup,inline-callables,cfg-simplify,canonicalize,symbol-dce
+
+test.target<low_core> @device {subgroup_size = 64}
+
+pipeline.def<kernel> retain target(@device) @wide_group() run(%width: index, %output: view<[%width]xi32>) where [eq(%width, 256)] {
+  pipeline.strand<cooperative> workers([0], [4], [1]) {
+    %thread = kernel.workitem.id<x> : index
+    %group_width = kernel.workgroup.size<x> : index
+    %value = index.cast %group_width : index to i32
+    view.store %value, %output[%thread] : i32, view<[%width]xi32>
+  }
+}
+
+// ----
+test.target<low_core> @device {subgroup_size = 64}
+
+kernel.def retain target(@device) @wide_group() {
+  %9 = index.constant 1 : index
+  %15 = index.constant 256 : index
+  kernel.launch.config workgroups(%9, %9, %9) workgroup_size(%15, %9, %9) : index
+} launch(%width: index, %output: buffer) where [eq(%width, 256)] {
+  %13 = index.constant 0 : offset
+  %14 = buffer.view %output[%13] : buffer -> view<256xi32>
+  %thread = kernel.workitem.id<x> : index
+  %value = scalar.constant 256 : i32
+  view.store %value, %14[%thread] : i32, view<256xi32>
+  kernel.return
+}
+
+// ====
+// RUN: pass outline-pipeline-strands,realize-pipeline-workgroup
+
+// An independent instance per wave cannot be silently reinterpreted as one
+// cooperating group.
+pipeline.def<kernel> @independent() run(%output: view<1xi32>) {
+  // ERROR@+1: LOWERING/072 {requirement="cooperative strand participation"}
+  pipeline.strand workers([0], [4], [1]) {
+    %value = scalar.constant 1 : i32
+    view.store %value, %output[0] : i32, view<1xi32>
+  }
+}
+
+// ====
+// RUN: pass outline-pipeline-strands,realize-pipeline-workgroup
+
+pipeline.def<kernel> @offset_group() run(%output: view<1xi32>) {
+  // ERROR@+1: LOWERING/072 {requirement="a nonempty contiguous wave domain starting at zero"}
+  pipeline.strand<cooperative> workers([2], [4], [1]) {
+    %value = scalar.constant 1 : i32
+    view.store %value, %output[0] : i32, view<1xi32>
+  }
+}
+
+// ====
+// RUN: pass outline-pipeline-strands,realize-pipeline-workgroup
+
+pipeline.def<kernel> @dynamic_group() run(%count: index, %output: view<1xi32>) {
+  // ERROR@+1: LOWERING/066 {requirement="specialized finite worker geometry"}
+  pipeline.strand<cooperative> workers([0], [%count], [1]) {
+    %value = scalar.constant 1 : i32
+    view.store %value, %output[0] : i32, view<1xi32>
+  }
+}
+
+// ====
+// RUN: pass outline-pipeline-strands,realize-pipeline-workgroup
+
+// Multiple independent declarations are not ordered by their source position.
+// ERROR@+1: LOWERING/072 {requirement="one cooperative strand"}
+pipeline.def<kernel> @multiple_groups() run(%output: view<1xi32>) {
+  pipeline.strand<cooperative> workers([0], [4], [1]) {
+    %value = scalar.constant 1 : i32
+    view.store %value, %output[0] : i32, view<1xi32>
+  }
+  pipeline.strand<cooperative> workers([0], [4], [1]) {
+    %value = scalar.constant 2 : i32
+    view.store %value, %output[0] : i32, view<1xi32>
+  }
+}
+
+// ====
+// RUN: pass outline-pipeline-strands,realize-pipeline-workgroup
+
+// Selecting one workgroup cannot erase an enclosing child schedule.
+pipeline.decl @child() run(%output: view<1xi32>)
+
+// ERROR@+1: LOWERING/072 {requirement="realized child control and channel bindings"}
+pipeline.def<kernel> @scheduled_child() run(%output: view<1xi32>) {
+  pipeline.serial {
+    pipeline.compose @child(%output) : (view<1xi32>)
+  }
+  pipeline.strand<cooperative> workers([0], [4], [1]) {
+    %value = scalar.constant 1 : i32
+    view.store %value, %output[0] : i32, view<1xi32>
+  }
+}
+
+// ====
+// RUN: pass specialize-target-callgraph,outline-pipeline-strands,specialize-target-callgraph,realize-pipeline-workgroup,inline-callables{policy=target},canonicalize,cfg-simplify,symbol-dce
+
+// A retained helper keeps its target context while the outlined worker moves
+// into the kernel that owns the workgroup-size query.
+test.target<low_core> @device {subgroup_size = 32}
+
+func.def noinline @adjust(%value: i32) -> (i32) {
+  %width = target.subgroup.size : index
+  %increment = index.cast %width : index to i32
+  %result = scalar.addi %value, %increment : i32
+  func.return %result : i32
+}
+
+pipeline.def<kernel> public target(@device) @call_from_resident() run(%output: view<128xi32>) {
+  pipeline.strand<cooperative> workers([0], [4], [1]) {
+    %thread = kernel.workitem.id<x> : index
+    %width = kernel.workgroup.size<x> : index
+    %value = index.cast %width : index to i32
+    %result = func.call @adjust(%value) : (i32) -> (i32)
+    view.store %result, %output[%thread] : i32, view<128xi32>
+  }
+}
+
+// ----
+test.target<low_core> @device {subgroup_size = 32}
+
+func.def noinline @adjust(%value: i32) -> (i32) {
+  %increment = scalar.constant 32 : i32
+  %result = scalar.addi %value, %increment : i32
+  func.return %result : i32
+}
+
+kernel.def target(@device) export("call_from_resident") @call_from_resident() {
+  %12 = index.constant 1 : index
+  %19 = index.constant 128 : index
+  kernel.launch.config workgroups(%12, %12, %12) workgroup_size(%19, %12, %12) : index
+} launch(%output: buffer) {
+  %16 = index.constant 0 : offset
+  %17 = buffer.view %output[%16] : buffer -> view<128xi32>
+  %thread = kernel.workitem.id<x> : index
+  %value = scalar.constant 128 : i32
+  %result = func.call pure @adjust(%value) : (i32) -> (i32)
+  view.store %result, %17[%thread] : i32, view<128xi32>
+  kernel.return
+}

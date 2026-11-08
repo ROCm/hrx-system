@@ -33,23 +33,6 @@ static iree_status_t loom_pipeline_workers_reject(
   return iree_diagnostic_emit(diagnostic_emitter, &emission);
 }
 
-static bool loom_pipeline_worker_coordinate(
-    int64_t literal, loom_value_slice_t values, uint16_t* dynamic_index,
-    const loom_value_fact_table_t* facts, uint64_t* out_value) {
-  int64_t value = literal;
-  if (literal == INT64_MIN && !loom_value_facts_as_exact_i64(
-                                  loom_value_fact_table_lookup(
-                                      facts, values.values[(*dynamic_index)++]),
-                                  &value)) {
-    return false;
-  }
-  if (value < 0) {
-    return false;
-  }
-  *out_value = (uint64_t)value;
-  return true;
-}
-
 typedef struct loom_pipeline_transport_block_t {
   // Canonical asynchronous stream in this block, or NULL.
   const loom_kernel_async_stream_t* stream;
@@ -652,34 +635,8 @@ static iree_status_t loom_pipeline_worker_build(
     bool* out_valid) {
   *out_valid = false;
   const loom_op_t* declaration = worker->source->declaration;
-  const loom_attribute_t origins =
-      loom_pipeline_strand_static_origins(declaration);
-  const loom_attribute_t counts =
-      loom_pipeline_strand_static_counts(declaration);
-  const loom_attribute_t strides =
-      loom_pipeline_strand_static_strides(declaration);
-  loom_pipeline_worker_axis_t* axes = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, origins.count,
-                                                 sizeof(*axes), (void**)&axes));
-  uint16_t origin_index = 0, count_index = 0, stride_index = 0;
-  for (uint32_t i = 0; i < origins.count; ++i) {
-    if (!loom_pipeline_worker_coordinate(
-            origins.i64_array[i], loom_pipeline_strand_origins(declaration),
-            &origin_index, construction_facts, &axes[i].origin) ||
-        !loom_pipeline_worker_coordinate(
-            counts.i64_array[i], loom_pipeline_strand_counts(declaration),
-            &count_index, construction_facts, &axes[i].count) ||
-        !loom_pipeline_worker_coordinate(
-            strides.i64_array[i], loom_pipeline_strand_strides(declaration),
-            &stride_index, construction_facts, &axes[i].stride) ||
-        axes[i].stride == 0) {
-      return loom_pipeline_workers_reject(
-          declaration, IREE_SV("specialized finite worker geometry"),
-          diagnostic_emitter);
-    }
-  }
-  worker->axes = axes;
-  worker->rank = origins.count;
+  worker->axes = worker->source->axes;
+  worker->rank = worker->source->rank;
   loom_region_t* body = loom_func_like_body(worker->function);
   if (!body) {
     return loom_pipeline_workers_reject(worker->source->call,

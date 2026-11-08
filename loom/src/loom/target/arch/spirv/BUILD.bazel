@@ -383,6 +383,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/spirv/descriptors:low_registry",
         "//loom/src/loom/target/arch/spirv/lower",
         "//loom/src/loom/target/arch/spirv/ops",
+        "//loom/src/loom/transforms/pipeline:workgroup",
         "//runtime/src/iree/base",
     ],
 )

@@ -21,6 +21,7 @@
 #include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/pass_registry.h"
 #include "loom/target/arch/amdgpu/profile.h"
+#include "loom/transforms/pipeline/workgroup.h"
 #include "loom/transforms/scalar/wide_division_legalization.h"
 
 static const loom_target_low_legality_provider_t*
@@ -108,6 +109,11 @@ static iree_status_t loom_amdgpu_provider_build_source_finalization(
 
 static iree_status_t loom_amdgpu_provider_contribute_pipeline(
     const loom_target_pipeline_contribution_t* contribution) {
+  if (contribution->phase ==
+      LOOM_TARGET_PIPELINE_PHASE_SOURCE_EXECUTION_LOWERING) {
+    return loom_pipeline_workgroup_build_pipeline(contribution->builder,
+                                                  IREE_SV("amdgpu"));
+  }
   loom_pass_ir_body_build_fn_t build_body = NULL;
   if (contribution->phase == LOOM_TARGET_PIPELINE_PHASE_SOURCE_TO_LOW) {
     // Shared source preparation has finished threading branch conditions.

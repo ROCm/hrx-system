@@ -14,6 +14,7 @@
 #include "loom/target/arch/spirv/ops/registry.h"
 #include "loom/target/arch/spirv/ops/target.h"
 #include "loom/target/arch/spirv/profile.h"
+#include "loom/transforms/pipeline/workgroup.h"
 
 static const loom_low_verify_provider_t* const kLoomSpirvLowVerifyProviders[] =
     {
@@ -30,6 +31,16 @@ static iree_status_t loom_spirv_provider_select_profile(
   const loom_spirv_target_profile_t* profile = NULL;
   IREE_RETURN_IF_ERROR(loom_spirv_target_profile_select(selector, &profile));
   *out_profile = profile ? &profile->base : NULL;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_spirv_provider_contribute_pipeline(
+    const loom_target_pipeline_contribution_t* contribution) {
+  if (contribution->phase ==
+      LOOM_TARGET_PIPELINE_PHASE_SOURCE_EXECUTION_LOWERING) {
+    return loom_pipeline_workgroup_build_pipeline(contribution->builder,
+                                                  IREE_SV("spirv"));
+  }
   return iree_ok_status();
 }
 
@@ -55,6 +66,7 @@ const loom_target_provider_t loom_spirv_target_provider = {
             .values = kLoomSpirvLowVerifyProviders,
         },
     .target_fact_type = &loom_spirv_target_fact_type,
+    .contribute_pipeline = loom_spirv_provider_contribute_pipeline,
     .select_profile = loom_spirv_provider_select_profile,
 };
 

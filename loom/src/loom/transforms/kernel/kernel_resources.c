@@ -12,7 +12,6 @@
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/op_defs.h"
-#include "loom/ops/pipeline/ops.h"
 
 #define LOOM_KERNEL_RESOURCES_STATISTICS(V, statistics_type)                 \
   V(statistics_type, kernel_entries_normalized, "kernel-entries-normalized", \
@@ -52,8 +51,8 @@ static iree_status_t loom_kernel_resources_build_zero_offset(
 }
 
 static iree_status_t loom_kernel_resources_normalize_view_arg(
-    loom_pass_t* pass, loom_builder_t* builder, loom_module_t* module,
-    loom_value_id_t arg_id, loom_value_id_t zero_offset, loom_type_t view_type,
+    loom_builder_t* builder, loom_module_t* module, loom_value_id_t arg_id,
+    loom_value_id_t zero_offset, loom_type_t view_type,
     loom_location_id_t location) {
   IREE_RETURN_IF_ERROR(
       loom_module_set_value_type(module, arg_id, loom_type_buffer()));
@@ -62,23 +61,13 @@ static iree_status_t loom_kernel_resources_normalize_view_arg(
   IREE_RETURN_IF_ERROR(loom_buffer_view_build(builder, arg_id, zero_offset,
                                               view_type, location, &view_op));
   loom_value_id_t view_id = loom_buffer_view_result(view_op);
-  IREE_RETURN_IF_ERROR(
-      loom_value_replace_all_uses_except(module, arg_id, view_id, view_op));
-  loom_kernel_resources_statistics_t* statistics =
-      loom_kernel_resources_statistics(pass);
-  ++statistics->view_args_normalized;
-  return iree_ok_status();
+  return loom_value_replace_all_uses_except(module, arg_id, view_id, view_op);
 }
 
-iree_status_t loom_normalize_kernel_resources_run(loom_pass_t* pass,
-                                                  loom_module_t* module,
-                                                  loom_func_like_t function) {
-  const bool is_kernel_pipeline =
-      loom_pipeline_def_isa(function.op) &&
-      loom_pipeline_def_scope(function.op) == LOOM_PIPELINE_SCOPE_KERNEL;
-  if (!loom_func_like_is_kernel_entry(function) && !is_kernel_pipeline) {
-    return iree_ok_status();
-  }
+iree_status_t loom_kernel_resources_normalize(loom_module_t* module,
+                                              loom_func_like_t function,
+                                              uint16_t* out_normalized_count) {
+  *out_normalized_count = 0;
   loom_region_t* body = loom_func_like_body(function);
   if (!body) {
     return iree_ok_status();
@@ -99,7 +88,6 @@ iree_status_t loom_normalize_kernel_resources_run(loom_pass_t* pass,
     builder.ip.parent_op = function.op;
   }
 
-  bool changed_function = false;
   loom_value_id_t zero_offset = LOOM_VALUE_ID_INVALID;
   const uint16_t specialization_count =
       (uint16_t)loom_func_like_specialization_count(function);
@@ -114,15 +102,27 @@ iree_status_t loom_normalize_kernel_resources_run(loom_pass_t* pass,
           &builder, function.op->location, &zero_offset));
     }
     IREE_RETURN_IF_ERROR(loom_kernel_resources_normalize_view_arg(
-        pass, &builder, module, arg_id, zero_offset, arg_type,
+        &builder, module, arg_id, zero_offset, arg_type,
         function.op->location));
-    changed_function = true;
+    ++*out_normalized_count;
   }
+  return iree_ok_status();
+}
 
-  if (changed_function) {
+iree_status_t loom_normalize_kernel_resources_run(loom_pass_t* pass,
+                                                  loom_module_t* module,
+                                                  loom_func_like_t function) {
+  if (!loom_func_like_is_kernel_entry(function)) {
+    return iree_ok_status();
+  }
+  uint16_t normalized_count = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_kernel_resources_normalize(module, function, &normalized_count));
+  if (normalized_count) {
     loom_kernel_resources_statistics_t* statistics =
         loom_kernel_resources_statistics(pass);
     ++statistics->kernel_entries_normalized;
+    statistics->view_args_normalized += normalized_count;
     loom_pass_mark_changed(pass);
   }
   return iree_ok_status();

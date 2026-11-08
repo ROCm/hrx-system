@@ -418,6 +418,12 @@ struct loom_target_provider_t {
   const loom_pass_registry_t* pass_registry;
   // Optional pass-pipeline contribution callback.
   loom_target_provider_pipeline_contribution_fn_t contribute_pipeline;
+  // True when execution-resource planning needs loop policies expanded and
+  // control flow lowered while strands still borrow construction storage.
+  // Common preparation owns those transforms before outlining. Ordinary
+  // workgroup realization instead preserves structured worker bodies for the
+  // kernel pipeline, which expands their loop policies once after inlining.
+  bool requires_lexical_worker_preparation;
   // Optional per-caller call policy selector. Missing permits direct calls.
   // This is an emission requirement, not an authored hint.
   loom_target_select_call_policy_fn_t select_call_policy;
@@ -453,6 +459,15 @@ struct loom_target_provider_t {
   // Optional projection from execution-device CPU facts to a native profile.
   loom_target_provider_select_cpu_profile_fn_t select_cpu_profile;
 };
+
+// Returns the target-family fact representation owned by |provider|, or NULL
+// for providers contributing mechanics without owning a target family.
+static inline const loom_target_fact_type_t* loom_target_provider_fact_type(
+    const loom_target_provider_t* provider) {
+  return provider->target_fact_type != NULL ? provider->target_fact_type
+         : provider->profile_type != NULL   ? provider->profile_type->fact_type
+                                            : NULL;
+}
 
 // Selects the emission policy for one call in |resolved_target|. Providers
 // without a selector permit direct calls.
