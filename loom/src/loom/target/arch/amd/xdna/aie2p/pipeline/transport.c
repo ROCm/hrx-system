@@ -1108,6 +1108,7 @@ iree_status_t loom_aie2p_native_select_transfers(
       }
       status = loom_aie2p_native_select_worker_distributions(
           context, realization, i, &next_source, &valid);
+      ordered_distributions |= context->workers[i].distribution_phases != NULL;
     }
   }
   if (iree_status_is_ok(status) && valid) {

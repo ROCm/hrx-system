@@ -73,6 +73,7 @@ loom_test(
         "collective_cursors.loom",
         "concurrent_distribution.loom",
         "conditional_admission.loom",
+        "distribution_lifetimes.loom",
         "finite_ingress.loom",
         "granted_results.loom",
         "ordered_prefix.loom",
