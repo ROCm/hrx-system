@@ -348,3 +348,15 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
+
+loom_cc_test(
+    name = "device_selection_test",
+    srcs = ["device_selection_test.cc"],
+    args = ["--device=loom-unavailable"],
+    deps = [
+        ":testbench_actual",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

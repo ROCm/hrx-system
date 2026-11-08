@@ -779,9 +779,11 @@ def shared_tool_bazel_step(
             "//loom/src/loom/tools/loom-serve:execution_test",
             "//loom/src/loom/tools/loom-check:execution_test",
             "//loom/src/loom/tools/loom-check/test:core_test",
-            "//loom/src/loom/tools/loom-test:execution_test",
-            "//loom/src/loom/tools/loom-test:scenario_execution_test",
+            "//loom/src/loom/tools/loom-test:run_test",
+            "//loom/src/loom/tools/loom-test:vm_run_test",
+            "//loom/src/loom/tools/loom-test:xfail_test",
             "//loom/src/loom/tools/loom-benchmark:execution_test",
+            "//loom/src/loom/tooling/execution/hal:device_selection_test",
             "//loom/src/loom/tooling/execution/hal:command_scenario_execution_test",
             "//loom/src/loom/tooling/execution/hal:command_scenario_specialization_test",
             "//loom/src/loom/tools/loom-benchmark/test:benchmark_scenario_correctness_test",
@@ -1222,8 +1224,10 @@ def cmake_shared_tool_steps(command_name: str) -> list[CiStep]:
             command_name,
             "Test shared Loom tools",
             regex=(
-                r"^(loom/tools/(loom-compile|loom-opt|loom-format|loom-link|loom-import-cxx|loom-run|loom-serve|loom-check|loom-test|loom-benchmark)/(execution_test|scenario_execution_test)"
+                r"^(loom/tools/(loom-compile|loom-opt|loom-format|loom-link|loom-import-cxx|loom-run|loom-serve|loom-check|loom-benchmark)/(execution_test|scenario_execution_test)"
+                r"|loom/tools/loom-test/(run_test|vm_run_test|xfail_test)"
                 r"|loom/tools/loom-check/test/.*"
+                r"|loom/tooling/execution/hal/device_selection_test"
                 r"|loom/tooling/execution/hal/command_scenario_(execution|specialization)_test"
                 r"|loom/tools/loom-benchmark/test/benchmark_scenario_correctness_test"
                 r"|loom/tooling/target/cpu/test/run_cxx_input_test"

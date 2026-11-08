@@ -4,12 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/tools/loom-test/scenario_test_provider.h"
+
 #include <stdint.h>
-#include <stdio.h>
 
 #include "iree/hal/api.h"
 #include "loom/ir/module.h"
-#include "loom/tools/loom-test/main.h"
 
 typedef struct loom_test_scenario_failure_profile_t {
   // Stable diagnostic name for the profile.
@@ -252,31 +252,32 @@ static iree_status_t loom_test_scenario_populate_requirements(
   return iree_ok_status();
 }
 
-int main(int argc, char** argv) {
-  loom_test_scenario_failure_profile_t target = {
-      .name = IREE_SV("controlled-target"),
-      .inject_failures = true,
-  };
-  loom_test_scenario_failure_profile_t oracle = {
-      .name = IREE_SV("controlled-oracle"),
-      .inject_failures = false,
-  };
-  const loom_test_configuration_t configuration = {
-      .tool_name = "loom-test-scenario-failure-test",
-      .populate_requirement_providers =
-          {
-              .fn = loom_test_scenario_populate_requirements,
-          },
-      .scenario_target_profile =
-          {
-              .fn = loom_test_scenario_failure_bind_profile,
-              .user_data = &target,
-          },
-      .scenario_oracle_profile =
-          {
-              .fn = loom_test_scenario_failure_bind_profile,
-              .user_data = &oracle,
-          },
-  };
-  return loom_test_main(argc, argv, &configuration);
+static loom_test_scenario_failure_profile_t loom_test_scenario_failure_target =
+    {
+        .name = IREE_SVL("controlled-target"),
+        .inject_failures = true,
+};
+
+static loom_test_scenario_failure_profile_t loom_test_scenario_failure_oracle =
+    {
+        .name = IREE_SVL("controlled-oracle"),
+        .inject_failures = false,
+};
+
+void loom_test_scenario_test_provider_configure(
+    loom_test_configuration_t* configuration) {
+  configuration->populate_requirement_providers =
+      (loom_test_populate_requirement_providers_callback_t){
+          .fn = loom_test_scenario_populate_requirements,
+      };
+  configuration->scenario_target_profile =
+      (loom_testbench_bind_scenario_profile_callback_t){
+          .fn = loom_test_scenario_failure_bind_profile,
+          .user_data = &loom_test_scenario_failure_target,
+      };
+  configuration->scenario_oracle_profile =
+      (loom_testbench_bind_scenario_profile_callback_t){
+          .fn = loom_test_scenario_failure_bind_profile,
+          .user_data = &loom_test_scenario_failure_oracle,
+      };
 }
