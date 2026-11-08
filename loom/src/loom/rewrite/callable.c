@@ -389,7 +389,8 @@ static iree_status_t loom_callable_preserve_consuming_call_result_names(
 
 static iree_status_t loom_callable_inline_single_block_call(
     loom_rewriter_t* rewriter, loom_op_t* call_op, loom_func_like_t callee,
-    loom_ir_clone_observer_t clone_observer) {
+    loom_ir_clone_observer_t clone_observer,
+    iree_arena_allocator_t* scratch_arena) {
   if (!call_op->parent_block ||
       iree_any_bit_set(call_op->flags, LOOM_OP_FLAG_DEAD)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -411,16 +412,16 @@ static iree_status_t loom_callable_inline_single_block_call(
   const loom_ir_remap_options_t remap_options = {.clone_observer =
                                                      clone_observer};
   loom_ir_remap_t remap = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_ir_remap_initialize(rewriter->module, rewriter->module,
-                               rewriter->arena, &remap_options, &remap));
+  IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(rewriter->module,
+                                                rewriter->module, scratch_arena,
+                                                &remap_options, &remap));
   IREE_RETURN_IF_ERROR(loom_callable_bind_entry_args(&remap, callee, call));
 
   loom_value_slice_t call_results = loom_call_like_results(call);
   loom_value_id_t* replacements = NULL;
   if (call_results.count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        rewriter->arena, call_results.count, sizeof(loom_value_id_t),
+        scratch_arena, call_results.count, sizeof(loom_value_id_t),
         (void**)&replacements));
   }
 
@@ -587,7 +588,8 @@ static iree_status_t loom_callable_inline_cfg_call(
     loom_call_like_t call, const loom_callable_cfg_body_t* body,
     loom_callable_build_branch_fn_t build_branch,
     loom_callable_block_order_t* block_order,
-    loom_ir_clone_observer_t clone_observer) {
+    loom_ir_clone_observer_t clone_observer,
+    iree_arena_allocator_t* scratch_arena) {
   if (!build_branch) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -619,7 +621,7 @@ static iree_status_t loom_callable_inline_cfg_call(
   loom_ir_remap_op_projection_t* return_projections = NULL;
   if (body->return_count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        rewriter->arena, body->return_count, sizeof(*return_projections),
+        scratch_arena, body->return_count, sizeof(*return_projections),
         (void**)&return_projections));
     memset(return_projections, 0,
            (iree_host_size_t)body->return_count * sizeof(*return_projections));
@@ -635,9 +637,9 @@ static iree_status_t loom_callable_inline_cfg_call(
           },
   };
   loom_ir_remap_t remap = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_ir_remap_initialize(rewriter->module, rewriter->module,
-                               rewriter->arena, &remap_options, &remap));
+  IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(rewriter->module,
+                                                rewriter->module, scratch_arena,
+                                                &remap_options, &remap));
 
   const loom_value_slice_t call_operands = loom_call_like_operands(call);
   const loom_location_id_t call_location = call_op->location;
@@ -678,7 +680,7 @@ static iree_status_t loom_callable_inline_cfg_call(
   const loom_value_id_t value_checkpoint =
       loom_rewriter_value_checkpoint(rewriter);
   if (iree_status_is_ok(status) && call_results.count > 0) {
-    status = iree_arena_allocate_array(rewriter->arena, call_results.count,
+    status = iree_arena_allocate_array(scratch_arena, call_results.count,
                                        sizeof(*continuation_arguments),
                                        (void**)&continuation_arguments);
   }
@@ -752,7 +754,8 @@ static iree_status_t loom_callable_inline_call_impl(
     loom_rewriter_t* rewriter, loom_op_t* call_op, loom_func_like_t callee,
     loom_callable_build_branch_fn_t build_branch,
     loom_callable_block_order_t* block_order,
-    loom_ir_clone_observer_t clone_observer) {
+    loom_ir_clone_observer_t clone_observer,
+    iree_arena_allocator_t* scratch_arena) {
   if (!call_op || !call_op->parent_block ||
       iree_any_bit_set(call_op->flags, LOOM_OP_FLAG_DEAD)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -770,20 +773,25 @@ static iree_status_t loom_callable_inline_call_impl(
   IREE_RETURN_IF_ERROR(loom_callable_validate_cfg_body(rewriter->module,
                                                        call_op, callee, &body));
   if (loom_callable_body_is_linear(rewriter->module, callee)) {
-    return loom_callable_inline_single_block_call(rewriter, call_op, callee,
-                                                  clone_observer);
+    return loom_callable_inline_single_block_call(
+        rewriter, call_op, callee, clone_observer, scratch_arena);
   }
   return loom_callable_inline_cfg_call(rewriter, call_op, callee, call, &body,
                                        build_branch, block_order,
-                                       clone_observer);
+                                       clone_observer, scratch_arena);
 }
 
 iree_status_t loom_callable_inline_call_with_branch(
     loom_rewriter_t* rewriter, loom_op_t* call_op, loom_func_like_t callee,
     loom_callable_build_branch_fn_t build_branch,
     loom_ir_clone_observer_t clone_observer) {
-  return loom_callable_inline_call_impl(rewriter, call_op, callee, build_branch,
-                                        NULL, clone_observer);
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(rewriter->arena->block_pool, &scratch_arena);
+  iree_status_t status =
+      loom_callable_inline_call_impl(rewriter, call_op, callee, build_branch,
+                                     NULL, clone_observer, &scratch_arena);
+  iree_arena_deinitialize(&scratch_arena);
+  return status;
 }
 
 static bool loom_callable_inline_site_less(
@@ -807,11 +815,15 @@ LOOM_DEFINE_ADAPTIVE_SORT(loom_callable_sort_inline_sites,
 
 static iree_status_t loom_callable_inline_region_calls(
     loom_rewriter_t* rewriter, const loom_callable_inline_site_t* const* sites,
-    iree_host_size_t site_count) {
+    iree_host_size_t site_count, iree_arena_allocator_t* scratch_arena) {
   if (site_count == 1) {
-    return loom_callable_inline_call_with_branch(
+    const iree_arena_checkpoint_t scratch_checkpoint =
+        iree_arena_checkpoint_save(scratch_arena);
+    iree_status_t status = loom_callable_inline_call_impl(
         rewriter, sites[0]->call_op, sites[0]->callee, sites[0]->build_branch,
-        sites[0]->clone_observer);
+        NULL, sites[0]->clone_observer, scratch_arena);
+    iree_arena_checkpoint_restore(&scratch_checkpoint);
+    return status;
   }
 
   loom_region_t* region = sites[0]->call_op->parent_block->parent_region;
@@ -834,9 +846,12 @@ static iree_status_t loom_callable_inline_region_calls(
   for (iree_host_size_t i = 0; i < site_count && iree_status_is_ok(status);
        ++i) {
     const loom_callable_inline_site_t* site = sites[i];
-    status = loom_callable_inline_call_impl(rewriter, site->call_op,
-                                            site->callee, site->build_branch,
-                                            &order, site->clone_observer);
+    const iree_arena_checkpoint_t scratch_checkpoint =
+        iree_arena_checkpoint_save(scratch_arena);
+    status = loom_callable_inline_call_impl(
+        rewriter, site->call_op, site->callee, site->build_branch, &order,
+        site->clone_observer, scratch_arena);
+    iree_arena_checkpoint_restore(&scratch_checkpoint);
   }
   if (iree_status_is_ok(status) && order.next_blocks) {
     uint16_t physical_index = 0;
@@ -859,16 +874,19 @@ iree_status_t loom_callable_inline_calls_with_branch(
   if (site_count == 0) {
     return iree_ok_status();
   }
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(rewriter->arena->block_pool, &scratch_arena);
   loom_callable_inline_site_ptr_t* ordered_sites = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(rewriter->arena, site_count,
-                                                 sizeof(*ordered_sites),
-                                                 (void**)&ordered_sites));
-  for (iree_host_size_t i = 0; i < site_count; ++i) {
-    ordered_sites[i] = &sites[i];
+  iree_status_t status =
+      iree_arena_allocate_array(&scratch_arena, site_count,
+                                sizeof(*ordered_sites), (void**)&ordered_sites);
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < site_count; ++i) {
+      ordered_sites[i] = &sites[i];
+    }
+    loom_callable_sort_inline_sites(ordered_sites, site_count);
   }
-  loom_callable_sort_inline_sites(ordered_sites, site_count);
 
-  iree_status_t status = iree_ok_status();
   for (iree_host_size_t begin = 0;
        begin < site_count && iree_status_is_ok(status);) {
     const loom_region_t* region =
@@ -879,9 +897,10 @@ iree_status_t loom_callable_inline_calls_with_branch(
       ++end;
     }
     status = loom_callable_inline_region_calls(rewriter, ordered_sites + begin,
-                                               end - begin);
+                                               end - begin, &scratch_arena);
     begin = end;
   }
+  iree_arena_deinitialize(&scratch_arena);
   return status;
 }
 
