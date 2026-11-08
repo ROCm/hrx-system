@@ -61,6 +61,7 @@ class ProgressGraph {
             bool retain_source = false) {
     copies_.emplace_back();
     CopyGroup& copy = copies_.back();
+    copy.worker = copies_.size() - 1;
     copy.admission.channel = &channels_[source].identity;
     for (uint32_t destination : destinations) {
       copy.destinations.push_back({
@@ -78,6 +79,17 @@ class ProgressGraph {
     copy.batch = {.records = &copy.cohort, .record_count = 1};
   }
 
+  void CopyPhases(uint32_t source, const std::vector<uint32_t>& destinations,
+                  const std::vector<uint64_t>& records) {
+    const size_t worker = copies_.size();
+    for (uint64_t count : records) {
+      Copy(source, destinations);
+      copies_.back().worker = worker;
+      copies_.back().cohort.admissions = count;
+      copies_.back().cohort.transfers = count;
+    }
+  }
+
   void Select(bool retain_observations = true,
               std::vector<uint32_t> observation_sources = {}) {
     if (retain_observations && observation_sources.empty()) {
@@ -86,11 +98,22 @@ class ProgressGraph {
       }
     }
     std::vector<loom_pipeline_worker_t> workers(copies_.size());
-    for (size_t i = 0; i < copies_.size(); ++i) {
-      workers[i].transport.cohorts = &copies_[i].cohort;
-      workers[i].transport.cohort_count = 1;
-      workers[i].transport.batches = &copies_[i].batch;
-      workers[i].transport.batch_count = 1;
+    std::vector<std::vector<loom_pipeline_transport_cohort_t>> cohorts(
+        workers.size());
+    std::vector<std::vector<loom_pipeline_transport_batch_t>> batches(
+        workers.size());
+    for (const auto& copy : copies_) {
+      cohorts[copy.worker].push_back(copy.cohort);
+      batches[copy.worker].push_back(copy.batch);
+    }
+    for (size_t i = 0; i < workers.size(); ++i) {
+      for (size_t j = 0; j < batches[i].size(); ++j) {
+        batches[i][j].records = &cohorts[i][j];
+      }
+      workers[i].transport.cohorts = cohorts[i].data();
+      workers[i].transport.cohort_count = cohorts[i].size();
+      workers[i].transport.batches = batches[i].data();
+      workers[i].transport.batch_count = batches[i].size();
     }
     const loom_pipeline_invocations_t invocations = {
         .worker_count = workers.size(),
@@ -121,6 +144,8 @@ class ProgressGraph {
 
  private:
   struct CopyGroup {
+    // Physical transport owner; several phases may share this FIFO cursor.
+    size_t worker = 0;
     // Source identity captured by the retained acquisition action.
     loom_channel_plan_action_t admission = {};
     // Optional independently retained source obligation.
@@ -248,6 +273,74 @@ TEST(PipelineProgressTest, DifferentCardinalityDoesNotProveRecordProgress) {
   EXPECT_EQ(graph.Reader(0), UINT32_MAX);
   EXPECT_TRUE(graph.Observations(0).empty());
   EXPECT_EQ(graph.Observations(1), (std::vector<uint32_t>{1}));
+}
+
+TEST(PipelineProgressTest, CompletePhasesComposeThroughFanout) {
+  ProgressGraph graph(4, 6144);
+  graph.CopyPhases(0, {1, 2}, {3072, 3072});
+  graph.Copy(2, {3});
+  graph.Observe(1);
+  graph.Observe(3);
+  graph.Select();
+  EXPECT_EQ(graph.Reader(0), 1u);
+  EXPECT_EQ(graph.Observations(0), (std::vector<uint32_t>{1, 3}));
+}
+
+TEST(PipelineProgressTest, MissingPhaseDoesNotProveProgress) {
+  ProgressGraph graph(2, 6144);
+  graph.CopyPhases(0, {1}, {2048, 3072});
+  graph.Observe(1);
+  graph.Select();
+  EXPECT_EQ(graph.Reader(0), UINT32_MAX);
+  EXPECT_TRUE(graph.Observations(0).empty());
+}
+
+TEST(PipelineProgressTest, IndependentPhaseSourcesDoNotCompose) {
+  ProgressGraph graph(3, 3072);
+  graph.SetReads(2, 6144);
+  graph.SetWrites(2, 6144);
+  graph.CopyPhases(0, {2}, {1024, 2048});
+  graph.CopyPhases(1, {2}, {2048, 1024});
+  graph.Observe(2);
+  graph.Select();
+  EXPECT_TRUE(graph.Observations(0).empty());
+  EXPECT_TRUE(graph.Observations(1).empty());
+}
+
+TEST(PipelineProgressTest, IndependentWorkersDoNotComposePartialCopies) {
+  ProgressGraph graph(2, 6144);
+  graph.CopyPhases(0, {1}, {3072});
+  graph.CopyPhases(0, {1}, {3072});
+  graph.Observe(1);
+  graph.Select();
+  EXPECT_EQ(graph.Reader(0), UINT32_MAX);
+  EXPECT_TRUE(graph.Observations(0).empty());
+}
+
+TEST(PipelineProgressTest, DisabledEndpointDoesNotComposePartialCopies) {
+  ProgressGraph graph(2, 6144);
+  graph.CopyPhases(0, {1}, {3072, 3072});
+  graph.SetWrites(1, 0);
+  graph.Observe(1);
+  graph.Select();
+  EXPECT_EQ(graph.Reader(0), UINT32_MAX);
+  EXPECT_TRUE(graph.Observations(0).empty());
+}
+
+TEST(PipelineProgressTest, PhaseCardinalityDoesNotExpandStorage) {
+  size_t baseline = 0;
+  for (uint64_t records : {2ull, 6144ull, 6144000000000ull}) {
+    ProgressGraph graph(3, records);
+    graph.CopyPhases(0, {1, 2}, {records / 2, records / 2});
+    graph.Observe(1);
+    graph.Observe(2);
+    graph.Select();
+    EXPECT_EQ(graph.Observations(0), (std::vector<uint32_t>{1, 2}));
+    if (!baseline) {
+      baseline = graph.Bytes();
+    }
+    EXPECT_EQ(graph.Bytes(), baseline);
+  }
 }
 
 TEST(PipelineProgressTest, RetainedSourceObligationIsNotCopyCompletion) {

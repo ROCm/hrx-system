@@ -36,9 +36,15 @@ static iree_status_t loom_aie2p_native_input_begin(
     loom_builder_set_block(&builder, prefix);
   }
   for (iree_host_size_t i = 0; i + 1 < input->source->phase_count; ++i) {
+    const loom_aie2p_native_input_phase_t* phase = &input->phases[i];
+    const uint32_t word =
+        phase->descriptor |
+        loom_xdna_register_field_encode(
+            LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_TASK_QUEUE_REPEAT_COUNT,
+            phase->repetitions - 1);
     loom_value_id_t task;
-    IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
-        code, &builder, input->phases[i].descriptor, &task));
+    IREE_RETURN_IF_ERROR(
+        loom_aie2p_worker_constant(code, &builder, word, &task));
     IREE_RETURN_IF_ERROR(loom_aie2p_worker_control_write(
         code, &builder, input->control_packet, input->input_queue, &task, 1));
   }

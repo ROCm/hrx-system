@@ -50,6 +50,9 @@ typedef struct loom_pipeline_progress_observations_t {
 // channel copies. A source ordinal maps to one selected observer ordinal, or
 // UINT32_MAX when no observation is established. The result belongs to arena.
 // Workers and channels use the complete invocation inventory order.
+// Ordered ordinary-copy phases compose only when one worker accounts for
+// every source read and destination write. Distinct sources sharing a
+// destination do not gain an equal-record relation from their combined count.
 //
 // Each node retains the cheapest observer offered by its immediate downstream
 // nodes. This is a bounded greedy selection, not a global minimum over paths.

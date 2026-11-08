@@ -46,6 +46,48 @@ typedef struct loom_pipeline_progress_population_t {
   uint32_t* merged;
 } loom_pipeline_progress_population_t;
 
+typedef struct loom_pipeline_progress_contribution_t {
+  // Sole FIFO reader/writer whose ordered phases contribute these records.
+  uint32_t worker;
+  // Canonical source channel of this ordinary, non-retained copy.
+  uint32_t source;
+  // Canonical destination channel preserving the copied record order.
+  uint32_t destination;
+  // Exact records contributed by this phase, without expanding repetitions.
+  uint64_t records;
+} loom_pipeline_progress_contribution_t;
+
+static bool loom_pipeline_progress_contribution_less(
+    const loom_pipeline_progress_contribution_t* lhs,
+    const loom_pipeline_progress_contribution_t* rhs) {
+  if (lhs->worker != rhs->worker) {
+    return lhs->worker < rhs->worker;
+  }
+  if (lhs->source != rhs->source) {
+    return lhs->source < rhs->source;
+  }
+  return lhs->destination < rhs->destination;
+}
+LOOM_DEFINE_ADAPTIVE_SORT(loom_pipeline_progress_sort_contributions,
+                          loom_pipeline_progress_contribution_t,
+                          loom_pipeline_progress_contribution_less)
+
+static void loom_pipeline_progress_append_edge(
+    uint32_t source, uint32_t destination, loom_pipeline_progress_node_t* nodes,
+    loom_pipeline_progress_edge_t* edges,
+    loom_pipeline_progress_population_t* population, uint32_t* count) {
+  const uint32_t index = (*count)++;
+  edges[index] = (loom_pipeline_progress_edge_t){
+      .next = nodes[destination].upstream, .source = source};
+  if (population->first) {
+    population->edges[index] = (loom_pipeline_progress_downstream_t){
+        .next = population->first[source], .destination = destination};
+    population->first[source] = index;
+  }
+  nodes[destination].upstream = index;
+  ++nodes[source].pending;
+}
+
 static bool loom_pipeline_progress_channel_less(const uint32_t* lhs,
                                                 const uint32_t* rhs) {
   return *lhs < *rhs;
@@ -158,6 +200,8 @@ iree_status_t loom_pipeline_progress_select(
         endpoints[i].observer && endpoints[i].reads ? (uint32_t)i : UINT32_MAX;
   }
   uint32_t edge_count = 0;
+  loom_pipeline_progress_contribution_t* contributions = NULL;
+  iree_host_size_t contribution_count = 0;
   for (iree_host_size_t i = 0; i < invocations->worker_count; ++i) {
     const loom_pipeline_transport_t* transport = &workers[i].transport;
     for (iree_host_size_t k = 0; k < transport->batch_count; ++k) {
@@ -169,27 +213,56 @@ iree_status_t loom_pipeline_progress_select(
       }
       const uint32_t source = loom_pipeline_invocations_channel_index(
           invocations, cohort->admission->channel);
-      if (!endpoints[source].reads ||
-          endpoints[source].reads != cohort->admissions) {
+      if (!endpoints[source].reads) {
         continue;
       }
       for (iree_host_size_t d = 0; d < cohort->destination_count; ++d) {
         const uint32_t destination = loom_pipeline_invocations_channel_index(
             invocations, cohort->destinations[d].channel);
-        if (endpoints[destination].writes != cohort->transfers) {
+        const uint64_t records = cohort->transfers;
+        if (endpoints[source].reads != records ||
+            endpoints[destination].writes != records) {
+          // Several ordered phases can partition one FIFO stream. Retain
+          // only partial ordinary copies; complete edges need no join state.
+          if (records > endpoints[source].reads ||
+              records > endpoints[destination].writes) {
+            continue;
+          }
+          if (!contributions) {
+            IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+                arena, edge_capacity, sizeof(*contributions),
+                (void**)&contributions));
+          }
+          contributions[contribution_count++] =
+              (loom_pipeline_progress_contribution_t){
+                  .worker = (uint32_t)i,
+                  .source = source,
+                  .destination = destination,
+                  .records = records};
           continue;
         }
-        edges[edge_count] = (loom_pipeline_progress_edge_t){
-            .next = nodes[destination].upstream, .source = source};
-        if (observation_source_count) {
-          population.edges[edge_count] = (loom_pipeline_progress_downstream_t){
-              .next = population.first[source], .destination = destination};
-          population.first[source] = edge_count;
-        }
-        nodes[destination].upstream = edge_count++;
-        ++nodes[source].pending;
+        loom_pipeline_progress_append_edge(source, destination, nodes, edges,
+                                           &population, &edge_count);
       }
     }
+  }
+  loom_pipeline_progress_sort_contributions(contributions, contribution_count);
+  for (iree_host_size_t begin = 0; begin < contribution_count;) {
+    const loom_pipeline_progress_contribution_t* first = &contributions[begin];
+    uint64_t records = first->records;
+    iree_host_size_t end = begin + 1;
+    while (
+        end < contribution_count &&
+        !loom_pipeline_progress_contribution_less(first, &contributions[end])) {
+      records += contributions[end++].records;
+    }
+    if (records == endpoints[first->source].reads &&
+        records == endpoints[first->destination].writes) {
+      loom_pipeline_progress_append_edge(first->source, first->destination,
+                                         nodes, edges, &population,
+                                         &edge_count);
+    }
+    begin = end;
   }
   iree_host_size_t head = 0, tail = 0;
   for (iree_host_size_t i = 0; i < count; ++i) {

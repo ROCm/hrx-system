@@ -74,6 +74,7 @@ loom_test(
         "concurrent_distribution.loom",
         "conditional_admission.loom",
         "finite_ingress.loom",
+        "finite_input_phases.loom",
         "ordered_prefix.loom",
         "ordered_replay.loom",
         "packet_iterator_lifetimes.loom",
