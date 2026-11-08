@@ -430,9 +430,11 @@ iree_runtime_cc_library(
     name = "queue",
     srcs = [
         "lifecycle.c",
+        "publication.c",
         "queue.c",
     ],
     hdrs = [
+        "publication.h",
         "queue.h",
         "state.h",
     ],
@@ -445,6 +447,7 @@ iree_runtime_cc_library(
         ":program",
         ":ring",
         ":scratch",
+        ":submission",
         ":transfer",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
