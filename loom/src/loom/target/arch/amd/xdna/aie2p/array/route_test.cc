@@ -7,6 +7,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/array/route.h"
 
 #include <tuple>
+#include <vector>
 
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
@@ -59,6 +60,14 @@ TEST_P(Aie2pRouteTest, SharedSourceUsesOneLaneAndRetainsPacketPrefixes) {
   }
   for (uint16_t row = source.row; row < 5; ++row) {
     EXPECT_EQ(routing.link_channels.northbound[row * family->column_count], 1u);
+  }
+  std::vector<size_t> counts(family->column_count * family->row_count);
+  for (size_t i = 0; i < routing.route_count; ++i) {
+    const auto coordinate = routing.routes[i].coordinate;
+    ++counts[coordinate.column * family->row_count + coordinate.row];
+  }
+  for (size_t i = 0; i < counts.size(); ++i) {
+    EXPECT_EQ(routing.tile_route_counts[i], counts[i]);
   }
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&blocks);

@@ -25,6 +25,9 @@ typedef struct loom_aie2p_array_route_builder_t {
   loom_aie2p_array_route_plan_t* routes;
   // Number of populated route records.
   iree_host_size_t route_count;
+  // Populated route count per column-major tile, bounding switch admission
+  // storage without rescanning the complete array's routes.
+  iree_host_size_t* tile_route_counts;
   // Construction-owned multicast prefixes, indexed without route rescanning.
   struct {
     // Root node per canonical source channel, or IREE_HOST_SIZE_MAX before use.

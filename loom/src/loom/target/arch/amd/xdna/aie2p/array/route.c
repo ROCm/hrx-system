@@ -69,6 +69,11 @@ iree_status_t loom_aie2p_array_route_builder_initialize(
 
   const iree_host_size_t tile_count =
       (iree_host_size_t)family->column_count * family->row_count;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, tile_count, sizeof(*out_builder->tile_route_counts),
+      (void**)&out_builder->tile_route_counts));
+  memset(out_builder->tile_route_counts, 0,
+         tile_count * sizeof(*out_builder->tile_route_counts));
   uint32_t* occupied_channels = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, tile_count * LOOM_AIE2P_ARRAY_ROUTE_DIRECTION_COUNT,
@@ -126,6 +131,8 @@ static void loom_aie2p_array_append_route(
       .destination_port = destination_port,
       .destination_channel = destination_channel,
   };
+  ++builder->tile_route_counts[coordinate.column * builder->family->row_count +
+                               coordinate.row];
 }
 
 static uint8_t loom_aie2p_array_dma_stream_channel(
