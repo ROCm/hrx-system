@@ -25,6 +25,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/pass/environment.h"
 #include "loom/pass/types.h"
+#include "loom/pass/value_facts.h"
 #include "loom/rewrite/module_projection.h"
 #include "loom/target/function_version.h"
 #include "loom/target/low_descriptor_registry_core_test.h"
@@ -640,6 +641,8 @@ static void BM_InlineComposition(benchmark::State& state, CallableMode mode,
     loom_module_t* module = fixture.CloneModule();
     iree_arena_allocator_t pass_arena;
     iree_arena_initialize(fixture.block_pool(), &pass_arena);
+    loom_pass_value_fact_owner_t value_facts;
+    loom_pass_value_fact_owner_initialize(fixture.block_pool(), &value_facts);
 
     loom_function_version_owner_t version_owner = {};
     std::vector<loom_target_function_version_t> target_versions;
@@ -667,6 +670,7 @@ static void BM_InlineComposition(benchmark::State& state, CallableMode mode,
         .statistic_storage = statistic_storage.data(),
         .environment =
             mode == CallableMode::kTargetLow ? &pass_environment : nullptr,
+        .value_facts = &value_facts,
     };
     iree_string_view_t pass_options = IREE_SV("");
     if (mode == CallableMode::kTargetLow) {
@@ -697,6 +701,7 @@ static void BM_InlineComposition(benchmark::State& state, CallableMode mode,
             pass_info, statistic_storage, IREE_SV("calls-transferred")),
     };
     fixture.ValidateOutput(module, metrics);
+    loom_pass_value_fact_owner_deinitialize(&value_facts);
     iree_arena_deinitialize(&pass_arena);
     loom_module_free(module);
     state.ResumeTiming();

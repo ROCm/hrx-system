@@ -208,7 +208,25 @@ static iree_status_t loom_ir_clone_op_attrs(loom_ir_remap_t* remap,
                                             const loom_op_t* source_op,
                                             loom_attribute_t* target_attrs) {
   const loom_attribute_t* source_attrs = loom_op_const_attrs(source_op);
+  // Identity clones can retain immutable module-owned payloads when no symbol
+  // or SSA reference inside them needs remapping.
+  const bool can_reuse_payloads =
+      remap->source_module == remap->target_module &&
+      !remap->remap_same_module_symbols;
+  if (!can_reuse_payloads) {
+    for (uint8_t i = 0; i < source_op->attribute_count; ++i) {
+      IREE_RETURN_IF_ERROR(
+          loom_ir_remap_attribute(remap, source_attrs[i], &target_attrs[i]));
+    }
+    return iree_ok_status();
+  }
+  const loom_attribute_owner_id_t* source_owners =
+      loom_op_attribute_owners(source_op);
   for (uint8_t i = 0; i < source_op->attribute_count; ++i) {
+    if (source_owners[i] == 0) {
+      target_attrs[i] = source_attrs[i];
+      continue;
+    }
     IREE_RETURN_IF_ERROR(
         loom_ir_remap_attribute(remap, source_attrs[i], &target_attrs[i]));
   }
@@ -828,17 +846,12 @@ static iree_status_t loom_ir_remap_block_arg_types_in_place(
   return iree_ok_status();
 }
 
-iree_status_t loom_ir_remap_op_references(loom_rewriter_t* rewriter,
-                                          loom_op_t* op,
-                                          loom_ir_remap_t* remap) {
-  if (remap->source_module != rewriter->module ||
-      remap->target_module != rewriter->module) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "in-place op reference remapping requires same-module remap");
-  }
-  IREE_RETURN_IF_ERROR(loom_ir_remap_op_subtree_values_to_self(remap, op));
-
+// Remaps an existing subtree after all of its definitions have been projected
+// into |remap|. Establishing the complete correspondence first allows forward
+// references while keeping this recursive payload walk linear.
+static iree_status_t loom_ir_remap_op_references_impl(loom_rewriter_t* rewriter,
+                                                      loom_op_t* op,
+                                                      loom_ir_remap_t* remap) {
   IREE_RETURN_IF_ERROR(loom_ir_remap_op_operands_in_place(rewriter, op, remap));
   IREE_RETURN_IF_ERROR(loom_ir_remap_op_successors_in_place(op, remap));
   IREE_RETURN_IF_ERROR(
@@ -859,11 +872,24 @@ iree_status_t loom_ir_remap_op_references(loom_rewriter_t* rewriter,
       loom_op_t* child_op = NULL;
       loom_block_for_each_op(block, child_op) {
         IREE_RETURN_IF_ERROR(
-            loom_ir_remap_op_references(rewriter, child_op, remap));
+            loom_ir_remap_op_references_impl(rewriter, child_op, remap));
       }
     }
   }
   return iree_ok_status();
+}
+
+iree_status_t loom_ir_remap_op_references(loom_rewriter_t* rewriter,
+                                          loom_op_t* op,
+                                          loom_ir_remap_t* remap) {
+  if (remap->source_module != rewriter->module ||
+      remap->target_module != rewriter->module) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "in-place op reference remapping requires same-module remap");
+  }
+  IREE_RETURN_IF_ERROR(loom_ir_remap_op_subtree_values_to_self(remap, op));
+  return loom_ir_remap_op_references_impl(rewriter, op, remap);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1306,8 +1332,10 @@ iree_status_t loom_ir_move_block_ops_before(
       continue;
     }
 
+    // Capture preflight established self mappings for every definition in each
+    // moved subtree before mutation began.
     IREE_RETURN_IF_ERROR(
-        loom_ir_remap_op_references(rewriter, source_op, remap));
+        loom_ir_remap_op_references_impl(rewriter, source_op, remap));
     IREE_RETURN_IF_ERROR(
         loom_rewriter_move_before(rewriter, source_op, before_op));
     source_op = next_op;

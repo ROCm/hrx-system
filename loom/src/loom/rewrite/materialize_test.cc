@@ -842,6 +842,78 @@ TEST_F(MaterializeTest, ClonesBlockOpsCanOmitTerminators) {
   ASSERT_TRUE(loom_test_constant_isa(loom_block_op(target_block, 0)));
 }
 
+TEST_F(MaterializeTest, ReusesSameModuleReferenceFreeAttributePayloads) {
+  loom_string_id_t alpha = LOOM_STRING_ID_INVALID;
+  loom_string_id_t beta = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_string(source_, IREE_SV("alpha"), &alpha));
+  IREE_ASSERT_OK(loom_module_intern_string(source_, IREE_SV("beta"), &beta));
+  const loom_named_attr_t entries[] = {
+      {.name_id = alpha, .value = loom_attr_i64(1)},
+      {.name_id = beta, .value = loom_attr_i64(2)},
+  };
+  loom_attribute_t source_value;
+  IREE_ASSERT_OK(loom_module_make_canonical_attr_dict(
+      source_, loom_make_named_attr_slice(entries, IREE_ARRAYSIZE(entries)),
+      &source_value));
+  loom_op_t* source_constant = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(
+      &source_builder_, source_value, loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+      LOOM_LOCATION_UNKNOWN, &source_constant));
+  ASSERT_EQ(loom_op_attribute_owners(source_constant)[0], 0u);
+
+  loom_ir_remap_t remap =
+      InitializeSameModuleRemap(/*allow_unmapped_values=*/true);
+  loom_op_t* cloned_constant = nullptr;
+  IREE_ASSERT_OK(loom_ir_clone_op(&source_builder_, source_constant, &remap,
+                                  &cloned_constant));
+
+  const loom_attribute_t cloned_value =
+      loom_test_constant_value(cloned_constant);
+  ASSERT_EQ(cloned_value.kind, LOOM_ATTR_DICT);
+  EXPECT_EQ(cloned_value.dict_entries, source_value.dict_entries);
+}
+
+TEST_F(MaterializeTest, RemapsSameModuleReferenceCarryingAttributePayloads) {
+  const loom_type_t index = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_op_t* source_constant = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(&source_builder_, loom_attr_i64(1),
+                                          index, LOOM_LOCATION_UNKNOWN,
+                                          &source_constant));
+  const loom_value_id_t source_value =
+      loom_test_constant_result(source_constant);
+  loom_op_t* replacement_constant = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(&source_builder_, loom_attr_i64(2),
+                                          index, LOOM_LOCATION_UNKNOWN,
+                                          &replacement_constant));
+  const loom_value_id_t replacement_value =
+      loom_test_constant_result(replacement_constant);
+  const loom_predicate_t predicate = {
+      LOOM_PREDICATE_EQ, 2, {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST}, {},
+      {source_value, 1},
+  };
+  loom_op_t* source_assume = nullptr;
+  IREE_ASSERT_OK(loom_test_assume_build(&source_builder_, &source_value, 1,
+                                        &predicate, 1, &index, 1,
+                                        LOOM_LOCATION_UNKNOWN, &source_assume));
+  const loom_attribute_t source_predicates =
+      loom_test_assume_predicates(source_assume);
+  ASSERT_NE(loom_op_attribute_owners(source_assume)[0], 0u);
+
+  loom_ir_remap_t remap =
+      InitializeSameModuleRemap(/*allow_unmapped_values=*/true);
+  IREE_ASSERT_OK(
+      loom_ir_remap_map_value(&remap, source_value, replacement_value));
+  loom_op_t* cloned_assume = nullptr;
+  IREE_ASSERT_OK(loom_ir_clone_op(&source_builder_, source_assume, &remap,
+                                  &cloned_assume));
+
+  const loom_attribute_t cloned_predicates =
+      loom_test_assume_predicates(cloned_assume);
+  ASSERT_EQ(cloned_predicates.kind, LOOM_ATTR_PREDICATE_LIST);
+  EXPECT_NE(cloned_predicates.predicate_list, source_predicates.predicate_list);
+  EXPECT_EQ(cloned_predicates.predicate_list[0].args[0], replacement_value);
+}
+
 TEST_F(MaterializeTest, MovesBlockOpsAndRemapsCapturedBlockArgs) {
   loom_type_t f32_type = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
   loom_type_t tile_type = loom_type_shaped_1d(
@@ -904,6 +976,66 @@ TEST_F(MaterializeTest, MovesBlockOpsAndRemapsCapturedBlockArgs) {
   EXPECT_EQ(loom_module_value(source_, negated)->use_count, 0u);
   EXPECT_TRUE(iree_any_bit_set(map_op->flags, LOOM_OP_FLAG_DEAD));
   EXPECT_FALSE(iree_any_bit_set(neg_op->flags, LOOM_OP_FLAG_DEAD));
+  loom_rewriter_deinitialize(&rewriter);
+}
+
+TEST_F(MaterializeTest, RemapsNestedOpReferences) {
+  const loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_op_t* source_constant = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(&source_builder_, loom_attr_i64(1),
+                                          i32, LOOM_LOCATION_UNKNOWN,
+                                          &source_constant));
+  const loom_value_id_t source_value =
+      loom_test_constant_result(source_constant);
+  loom_op_t* replacement_constant = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(&source_builder_, loom_attr_i64(2),
+                                          i32, LOOM_LOCATION_UNKNOWN,
+                                          &replacement_constant));
+  const loom_value_id_t replacement_value =
+      loom_test_constant_result(replacement_constant);
+
+  loom_op_t* outer = BuildRegionOwner(&source_builder_);
+  const loom_builder_ip_t outer_ip = loom_builder_enter_region(
+      &source_builder_, outer, loom_test_block_args_body(outer));
+  loom_op_t* inner = BuildRegionOwner(&source_builder_);
+  const loom_builder_ip_t inner_ip = loom_builder_enter_region(
+      &source_builder_, inner, loom_test_block_args_body(inner));
+  loom_op_t* nested_constant = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(&source_builder_, loom_attr_i64(3),
+                                          i32, LOOM_LOCATION_UNKNOWN,
+                                          &nested_constant));
+  const loom_value_id_t nested_value =
+      loom_test_constant_result(nested_constant);
+  const loom_value_id_t operands[] = {source_value, nested_value};
+  loom_op_t* nested_use = nullptr;
+  IREE_ASSERT_OK(loom_test_use_build(&source_builder_, operands,
+                                     IREE_ARRAYSIZE(operands),
+                                     LOOM_LOCATION_UNKNOWN, &nested_use));
+  loom_op_t* inner_yield = nullptr;
+  IREE_ASSERT_OK(loom_test_yield_build(&source_builder_, nullptr, 0,
+                                       LOOM_LOCATION_UNKNOWN, &inner_yield));
+  loom_builder_restore(&source_builder_, inner_ip);
+  loom_op_t* outer_yield = nullptr;
+  IREE_ASSERT_OK(loom_test_yield_build(&source_builder_, nullptr, 0,
+                                       LOOM_LOCATION_UNKNOWN, &outer_yield));
+  loom_builder_restore(&source_builder_, outer_ip);
+
+  loom_ir_remap_t remap =
+      InitializeSameModuleRemap(/*allow_unmapped_values=*/true);
+  IREE_ASSERT_OK(
+      loom_ir_remap_map_value(&remap, source_value, replacement_value));
+  loom_rewriter_t rewriter = {};
+  loom_rewriter_initialize(&rewriter, source_, &remap_arena_);
+  IREE_ASSERT_OK(loom_ir_remap_op_references(&rewriter, outer, &remap));
+
+  const loom_value_slice_t remapped_operands = loom_test_use_values(nested_use);
+  ASSERT_EQ(remapped_operands.count, IREE_ARRAYSIZE(operands));
+  EXPECT_EQ(remapped_operands.values[0], replacement_value);
+  EXPECT_EQ(remapped_operands.values[1], nested_value);
+  loom_value_id_t remapped_nested_value = LOOM_VALUE_ID_INVALID;
+  EXPECT_TRUE(loom_ir_remap_try_lookup_value(&remap, nested_value,
+                                             &remapped_nested_value));
+  EXPECT_EQ(remapped_nested_value, nested_value);
   loom_rewriter_deinitialize(&rewriter);
 }
 
