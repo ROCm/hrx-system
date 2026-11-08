@@ -609,17 +609,20 @@ static iree_status_t loom_low_physical_domains_build_preferences(
          domain_count * atomic_word_count * sizeof(*domain_atomic_units));
   for (iree_host_size_t d = 0; d < domain_count; ++d) {
     domains[d].atomic_units = domain_atomic_units + d * atomic_word_count;
-    for (uint32_t r = 0; r < descriptor_set->physical_register_count; ++r) {
-      if (!loom_low_physical_bits_test(domains[d].registers, r)) {
-        continue;
-      }
-      const loom_low_physical_register_t* physical_register =
-          &descriptor_set->physical_registers[r];
-      const uint16_t* atomic_units =
-          descriptor_set->physical_register_atomic_units +
-          physical_register->atomic_unit_start;
-      for (uint16_t j = 0; j < physical_register->atomic_unit_count; ++j) {
-        loom_low_physical_bits_set(domains[d].atomic_units, atomic_units[j]);
+    for (iree_host_size_t w = 0; w < word_count; ++w) {
+      for (uint64_t members = domains[d].registers[w]; members != 0;
+           members &= members - 1) {
+        const uint32_t r =
+            (uint32_t)(w * 64) +
+            (uint32_t)iree_math_count_trailing_zeros_u64(members);
+        const loom_low_physical_register_t* physical_register =
+            &descriptor_set->physical_registers[r];
+        const uint16_t* atomic_units =
+            descriptor_set->physical_register_atomic_units +
+            physical_register->atomic_unit_start;
+        for (uint16_t j = 0; j < physical_register->atomic_unit_count; ++j) {
+          loom_low_physical_bits_set(domains[d].atomic_units, atomic_units[j]);
+        }
       }
     }
   }
@@ -723,14 +726,17 @@ static iree_status_t loom_low_physical_domains_build_preferences(
       const uint32_t interval_index = components[member].interval_index;
       const uint16_t reg_class_id =
           liveness->intervals[interval_index].value_class.register_class_id;
-      for (uint32_t r = 0; r < descriptor_set->physical_register_count; ++r) {
-        if (!loom_low_physical_bits_test(domain->narrower, r)) {
-          continue;
+      for (iree_host_size_t w = 0; w < word_count; ++w) {
+        for (uint64_t members = domain->narrower[w]; members != 0;
+             members &= members - 1) {
+          const uint32_t r =
+              (uint32_t)(w * 64) +
+              (uint32_t)iree_math_count_trailing_zeros_u64(members);
+          loom_low_physical_register_mark_candidates(
+              descriptor_set, r, candidate_units_by_class[reg_class_id],
+              candidate_unit_counts_by_class[reg_class_id],
+              narrower_words + offsets[interval_index]);
         }
-        loom_low_physical_register_mark_candidates(
-            descriptor_set, r, candidate_units_by_class[reg_class_id],
-            candidate_unit_counts_by_class[reg_class_id],
-            narrower_words + offsets[interval_index]);
       }
       member = components[member].next;
     } while (member != component->parent);
@@ -858,41 +864,42 @@ static iree_status_t loom_low_physical_domains_build_preferences(
           const uint32_t member_interval = components[member].interval_index;
           const uint16_t member_class = liveness->intervals[member_interval]
                                             .value_class.register_class_id;
-          for (uint16_t narrow_class_id = 0;
-               narrow_class_id < descriptor_set->reg_class_count;
-               ++narrow_class_id) {
-            if (!loom_low_physical_bits_test(
-                    domain_classes + a * class_word_count, narrow_class_id)) {
-              continue;
-            }
-            const loom_low_reg_class_t* narrow_class =
-                &descriptor_set->reg_classes[narrow_class_id];
-            const uint16_t candidate_units =
-                narrow_class->physical_atomic_unit_count;
-            const uint64_t required_candidates =
-                peak_units / candidate_units +
-                (peak_units % candidate_units != 0);
-            const uint16_t reserve_count = (uint16_t)iree_min(
-                required_candidates, (uint64_t)narrow_class->allocatable_count);
-            uint16_t selected_count = 0;
-            for (uint16_t c = 0; c < narrow_class->allocatable_count; ++c) {
-              const uint16_t candidate_ordinal =
-                  descriptor_set->physical_register_allocation_ordinals
-                      [narrow_class->physical_register_candidate_start + c];
-              const uint32_t physical_register_id =
-                  loom_low_descriptor_set_physical_register_candidate(
-                      descriptor_set, narrow_class_id, candidate_ordinal);
-              if (!loom_low_physical_bits_test(domains[a].registers,
-                                               physical_register_id)) {
-                continue;
-              }
-              loom_low_physical_register_mark_candidates(
-                  descriptor_set, physical_register_id,
-                  candidate_units_by_class[member_class],
-                  candidate_unit_counts_by_class[member_class],
-                  overlapping_words + offsets[member_interval]);
-              if (++selected_count == reserve_count) {
-                break;
+          for (iree_host_size_t w = 0; w < class_word_count; ++w) {
+            for (uint64_t members = domain_classes[a * class_word_count + w];
+                 members != 0; members &= members - 1) {
+              const uint16_t narrow_class_id =
+                  (uint16_t)(w * 64 +
+                             iree_math_count_trailing_zeros_u64(members));
+              const loom_low_reg_class_t* narrow_class =
+                  &descriptor_set->reg_classes[narrow_class_id];
+              const uint16_t candidate_units =
+                  narrow_class->physical_atomic_unit_count;
+              const uint64_t required_candidates =
+                  peak_units / candidate_units +
+                  (peak_units % candidate_units != 0);
+              const uint16_t reserve_count =
+                  (uint16_t)iree_min(required_candidates,
+                                     (uint64_t)narrow_class->allocatable_count);
+              uint16_t selected_count = 0;
+              for (uint16_t c = 0; c < narrow_class->allocatable_count; ++c) {
+                const uint16_t candidate_ordinal =
+                    descriptor_set->physical_register_allocation_ordinals
+                        [narrow_class->physical_register_candidate_start + c];
+                const uint32_t physical_register_id =
+                    loom_low_descriptor_set_physical_register_candidate(
+                        descriptor_set, narrow_class_id, candidate_ordinal);
+                if (!loom_low_physical_bits_test(domains[a].registers,
+                                                 physical_register_id)) {
+                  continue;
+                }
+                loom_low_physical_register_mark_candidates(
+                    descriptor_set, physical_register_id,
+                    candidate_units_by_class[member_class],
+                    candidate_unit_counts_by_class[member_class],
+                    overlapping_words + offsets[member_interval]);
+                if (++selected_count == reserve_count) {
+                  break;
+                }
               }
             }
           }
