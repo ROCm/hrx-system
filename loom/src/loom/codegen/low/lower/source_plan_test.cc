@@ -1099,6 +1099,107 @@ TEST_F(LowLowerSourcePlanTest, PlansEntryResourcesAfterStorageDemand) {
   EXPECT_EQ(observer_.entry.emission_count, 1u);
 }
 
+class LowLowerAdaptedEntryTest : public LowLowerSourcePlanTest,
+                                 public ::testing::WithParamInterface<bool> {};
+
+TEST_P(LowLowerAdaptedEntryTest, PreservesBodyCarrierUntilEntryConversion) {
+  struct EntryState {
+    // Whether setup forwards physical arguments through another block.
+    bool interpose = false;
+    // Number of completed entry conversions.
+    unsigned conversion_count = 0;
+  } state = {.interpose = GetParam()};
+  policy_.map_argument = {
+      +[](void*, loom_low_lower_context_t* context, const loom_op_t* source_op,
+          uint16_t index, loom_value_id_t argument,
+          loom_low_lower_abi_argument_t* out_argument) {
+        const auto* policy = loom_test_low_lower_policy();
+        IREE_RETURN_IF_ERROR(
+            policy->map_argument.fn(policy->map_argument.user_data, context,
+                                    source_op, index, argument, out_argument));
+        if (index == 0) {
+          out_argument->body_type = out_argument->abi_type;
+          out_argument->abi_type =
+              loom_low_register_carrier_type_with_unit_count(
+                  out_argument->abi_type, 2);
+        }
+        return iree_ok_status();
+      },
+      nullptr,
+  };
+  policy_.entry_setup = {
+      +[](void*, loom_low_lower_context_t* context) {
+        uint16_t count = 0;
+        const auto* mapping =
+            loom_low_lower_context_argument_map(context, &count);
+        const auto* arguments = loom_func_like_arg_ids(
+            loom_low_lower_context_source_function(context), &count);
+        EXPECT_TRUE(loom_type_equal(
+            loom_low_lower_value_binding_type(context, arguments[0]),
+            mapping[0].body_type));
+        EXPECT_FALSE(
+            loom_low_lower_source_value_has_low_mapping(context, arguments[0]));
+        return iree_ok_status();
+      },
+      +[](void* user_data, loom_low_lower_context_t* context) {
+        auto& state = *static_cast<EntryState*>(user_data);
+        const auto source = loom_low_lower_context_source_function(context);
+        const auto* source_entry =
+            loom_region_entry_block(loom_func_like_body(source));
+        const auto argument = source_entry->arg_ids[0];
+        uint16_t count = 0;
+        const auto* mapping =
+            loom_low_lower_context_argument_map(context, &count);
+        auto* builder = loom_low_lower_context_builder(context);
+        if (state.interpose) {
+          loom_low_lower_entry_interposition_t entry = {};
+          IREE_RETURN_IF_ERROR(loom_low_lower_interpose_entry_block(
+              context, nullptr, 0, &entry));
+          loom_op_t* branch = nullptr;
+          IREE_RETURN_IF_ERROR(loom_low_br_build(
+              builder, entry.body_block, entry.forwarded_args,
+              entry.forwarded_arg_count, LOOM_LOCATION_UNKNOWN, &branch));
+          loom_builder_set_block(builder, entry.body_block);
+        }
+        loom_block_t* entry_block = nullptr;
+        IREE_RETURN_IF_ERROR(
+            loom_low_lower_lookup_block(context, source_entry, &entry_block));
+        const auto carrier = loom_block_arg_id(entry_block, 0);
+        EXPECT_TRUE(loom_type_equal(
+            loom_module_value_type(loom_low_lower_context_module(context),
+                                   carrier),
+            mapping[0].abi_type));
+        EXPECT_TRUE(loom_type_equal(
+            loom_low_lower_value_binding_type(context, argument),
+            mapping[0].body_type));
+        EXPECT_FALSE(
+            loom_low_lower_source_value_has_low_mapping(context, argument));
+        EXPECT_EQ(
+            loom_low_lower_lookup_value(context, source_entry->arg_ids[1]),
+            loom_block_arg_id(entry_block, 1));
+        loom_op_t* slice = nullptr;
+        IREE_RETURN_IF_ERROR(
+            loom_low_slice_build(builder, carrier, 0, mapping[0].body_type,
+                                 LOOM_LOCATION_UNKNOWN, &slice));
+        IREE_RETURN_IF_ERROR(loom_low_lower_bind_value(
+            context, argument, loom_low_slice_result(slice)));
+        EXPECT_TRUE(loom_type_equal(
+            loom_low_lower_value_binding_type(context, argument),
+            mapping[0].body_type));
+        ++state.conversion_count;
+        return iree_ok_status();
+      },
+      &state,
+  };
+  IREE_ASSERT_OK(
+      loom_low_lower_function(module_, function_, &options_, &result_));
+  EXPECT_EQ(result_.error_count, 0u);
+  EXPECT_EQ(state.conversion_count, 1u);
+}
+
+INSTANTIATE_TEST_SUITE_P(DirectAndInterposed, LowLowerAdaptedEntryTest,
+                         ::testing::Bool());
+
 TEST_F(LowLowerSourcePlanTest, RejectsEntryResourcesBeforeLowConstruction) {
   policy_.entry_setup = {PlanEntry, EmitEntry, &observer_};
   observer_.entry.reject = true;

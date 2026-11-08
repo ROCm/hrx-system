@@ -717,9 +717,12 @@ iree_status_t loom_low_lower_interpose_entry_block(
       continue;
     }
     IREE_ASSERT_LT(direct_argument_index, forwarded_arg_count);
-    IREE_RETURN_IF_ERROR(loom_low_lower_replace_value_binding(
-        context, source_arguments[i],
-        loom_block_arg_id(body_block, direct_argument_index)));
+    if (loom_type_kind(context->lowering->boundary.argument_map[i].body_type) ==
+        LOOM_TYPE_NONE) {
+      IREE_RETURN_IF_ERROR(loom_low_lower_replace_value_binding(
+          context, source_arguments[i],
+          loom_block_arg_id(body_block, direct_argument_index)));
+    }
     ++direct_argument_index;
   }
   IREE_ASSERT_EQ(direct_argument_index, forwarded_arg_count);

@@ -108,8 +108,10 @@ iree_status_t loom_low_lower_function_boundary_create(
     loom_low_lower_context_t* context, loom_region_t* source_body,
     loom_symbol_ref_t low_func_ref);
 
-// Binds source entry arguments represented directly in the target ABI to the
-// corresponding target-Low entry block arguments.
+// Binds direct source arguments that consume their ABI carrier unchanged.
+// Arguments with a selected body_type remain unmaterialized until entry setup
+// binds their adapted values. Their physical entry arguments retain source
+// display names independently of those body bindings.
 iree_status_t loom_low_lower_function_boundary_bind_entry_arguments(
     loom_low_lower_context_t* context, const loom_block_t* source_entry_block,
     loom_block_t* low_entry_block);
