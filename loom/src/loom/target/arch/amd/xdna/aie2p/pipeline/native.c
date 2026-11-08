@@ -171,6 +171,10 @@ static iree_status_t loom_aie2p_native_select_channel_accesses(
     *access = (loom_aie2p_native_channel_access_t){.channel = channel};
     if (context->pool_tiles[channel->pool_index]->facts->kind ==
         LOOM_XDNA_TILE_KIND_MEMORY) {
+      if (!channel->replay.record_count) {
+        ++worker->channels.remote_count;
+        continue;
+      }
       const loom_pipeline_invocation_t* invocation =
           realization->invocations.workers[worker - context->workers]
               .invocation;
@@ -185,8 +189,7 @@ static iree_status_t loom_aie2p_native_select_channel_accesses(
                     .workers[invocation->ordinal *
                                  context->distribution_execution.engine_count +
                              engine];
-      if (!channel->replay.record_count || channel->replay.credits != 1 ||
-          distributor == IREE_HOST_SIZE_MAX ||
+      if (channel->replay.credits != 1 || distributor == IREE_HOST_SIZE_MAX ||
           (realization->invocations.workers[distributor].invocation !=
                invocation &&
            (realization->invocations.workers[distributor].invocation->parent !=
@@ -198,6 +201,7 @@ static iree_status_t loom_aie2p_native_select_channel_accesses(
             IREE_SV("a finite SRAM batch whose producer owns the complete "
                     "distribution lifetime"));
       }
+      access->batch_publication = true;
       continue;
     }
     const loom_xdna_tile_coordinate_t owner =
@@ -224,7 +228,7 @@ static iree_status_t loom_aie2p_native_select_channel_accesses(
         &realization->invocations, action->channel);
     const loom_aie2p_native_channel_access_t* access =
         &worker->channels.accesses[worker->channels.indices[index]];
-    if (access->window) {
+    if (!access->batch_publication) {
       continue;
     }
     if ((action->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE &&

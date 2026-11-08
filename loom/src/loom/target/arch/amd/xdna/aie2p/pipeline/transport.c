@@ -11,6 +11,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/sharing.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/sram.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/switch.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
 
@@ -853,6 +854,14 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
       }
     }
   }
+  const loom_op_t* conflict = loom_aie2p_native_sram_reply_conflict(
+      &realization->invocations, source, worker, i);
+  if (conflict) {
+    return loom_aie2p_native_reject(
+        context, conflict,
+        IREE_SV("DMA completion before an SRAM credit request uses the "
+                "same core reply stream"));
+  }
   // One core receives a single ordered token stream. Separate task paths may
   // share it only when the previous wait retires before the next issue, or
   // when the same source wait retires every task together.
@@ -944,6 +953,7 @@ iree_status_t loom_aie2p_native_select_transfers(
   iree_host_size_t cohort_count = 0;
   iree_host_size_t destination_count = 0;
   iree_host_size_t child_control_count = 0;
+  iree_host_size_t remote_control_count = 0;
   for (iree_host_size_t i = 0; i < realization->invocations.worker_count; ++i) {
     for (const loom_kernel_async_stream_t* stream =
              realization->workers[i].asynchronous.streams;
@@ -951,6 +961,7 @@ iree_status_t loom_aie2p_native_select_transfers(
       transfer_count += stream->transfer_count;
     }
     cohort_count += realization->workers[i].transport.cohort_count;
+    remote_control_count += context->workers[i].channels.remote_count * 2;
     const bool child =
         realization->invocations.workers[i].invocation->ordinal != 0;
     for (iree_host_size_t j = 0;
@@ -967,7 +978,7 @@ iree_status_t loom_aie2p_native_select_transfers(
   }
   iree_host_size_t source_count =
       transfer_count * 4 + cohort_count + destination_count +
-      child_control_count +
+      child_control_count + remote_control_count +
       context->collective_count * context->execution.engine_count;
   for (iree_host_size_t i = 0; i < realization->invocations.channel_count;
        ++i) {
@@ -1108,6 +1119,15 @@ iree_status_t loom_aie2p_native_select_transfers(
       }
       const iree_host_size_t tile =
           context->pool_tiles[access->channel->pool_index] - context->tiles;
+      if (!access->batch_publication) {
+        status = loom_aie2p_native_select_control_route(
+            context, realization, i, &context->tiles[tile], true, &next_source,
+            next_controller, &valid);
+        if (!iree_status_is_ok(status) || !valid) {
+          break;
+        }
+        continue;
+      }
       if (!owner->control_packets ||
           owner->control_packets[tile] == UINT8_MAX) {
         return loom_aie2p_native_reject(

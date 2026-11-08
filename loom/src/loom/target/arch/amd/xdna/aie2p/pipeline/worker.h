@@ -111,9 +111,11 @@ iree_status_t loom_aie2p_worker_control_write_encoded(
     uint8_t packet_id, loom_value_id_t command, const loom_value_id_t* words,
     iree_host_size_t count);
 
-// Reads 1..4 consecutive registers from a 16-byte-aligned address through a
-// selected return route. The scalar stream has been drained before the request:
-// its packet header and values cannot interleave with outstanding task tokens.
+// Reads 1..4 consecutive registers at the exact supplied byte address through
+// a selected return route. The caller satisfies the register aperture's
+// alignment; no prefix registers are read. The stream is drained before
+// request: its packet header and values cannot interleave with outstanding task
+// tokens.
 iree_status_t loom_aie2p_worker_control_read(
     loom_aie2p_worker_builder_t* context, loom_builder_t* builder,
     uint8_t packet_id, uint8_t reply_id, uint32_t register_offset,
