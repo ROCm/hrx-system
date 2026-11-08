@@ -1,68 +1,70 @@
 // A complete two-record batch stays resident across three ordered replays.
+// The 36 KiB records exceed the compute DMA slot-step field; fixed receivers
+// and contiguous retained sends use no iterator step.
 // Each helper retains one source obligation while copying another; nested
 // fanouts and loop-carried reads must preserve the same admitted records.
 
 aie2p.target<array> @array_target
 
-func.def inline @ingress(%input: buffer, %incoming: channel<tile<16xi32>>) {
+func.def inline @ingress(%input: buffer, %incoming: channel<tile<9216xi32>>) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c4 = index.constant 4 : index
-  %bytes = index.constant 64 : offset
+  %bytes = index.constant 36864 : offset
   scf.for %record = [%c0 to %c4 step %c1] {
     %offset = index.scale %record, %bytes : index, offset -> offset
-    %external = buffer.view %input[%offset] : buffer -> view<16xi32>
-    %write, %payload = channel.reserve %incoming : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
-    %copy = kernel.async.copy %external to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+    %external = buffer.view %input[%offset] : buffer -> view<9216xi32>
+    %write, %payload = channel.reserve %incoming : channel<tile<9216xi32>> -> (write<tile<9216xi32>>, view<9216xi32>)
+    %copy = kernel.async.copy %external to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<9216xi32> to view<9216xi32> -> kernel.async.token
     %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
     kernel.async.wait %group {newer_groups = 0} : kernel.async.group
-    channel.publish %write : write<tile<16xi32>>
+    channel.publish %write : write<tile<9216xi32>>
   }
   func.return
 }
 
-func.def inline @copy_retained(%read: read<tile<16xi32>>, %destination: channel<tile<16xi32>>) -> (read<tile<16xi32>>) {
-  %retained, %outgoing = channel.fanout %read : read<tile<16xi32>> -> (read<tile<16xi32>>, read<tile<16xi32>>)
-  %write, %payload = channel.reserve %destination : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
-  channel.copy %outgoing -> %write : read<tile<16xi32>>, write<tile<16xi32>>
-  func.return %retained : read<tile<16xi32>>
+func.def inline @copy_retained(%read: read<tile<9216xi32>>, %destination: channel<tile<9216xi32>>) -> (read<tile<9216xi32>>) {
+  %retained, %outgoing = channel.fanout %read : read<tile<9216xi32>> -> (read<tile<9216xi32>>, read<tile<9216xi32>>)
+  %write, %payload = channel.reserve %destination : channel<tile<9216xi32>> -> (write<tile<9216xi32>>, view<9216xi32>)
+  channel.copy %outgoing -> %write : read<tile<9216xi32>>, write<tile<9216xi32>>
+  func.return %retained : read<tile<9216xi32>>
 }
 
-func.def inline @distribute(%incoming: channel<tile<16xi32>>, %left: channel<tile<16xi32>>, %right: channel<tile<16xi32>>) {
+func.def inline @distribute(%incoming: channel<tile<9216xi32>>, %left: channel<tile<9216xi32>>, %right: channel<tile<9216xi32>>) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
   %c3 = index.constant 3 : index
   scf.for %batch = [%c0 to %c2 step %c1] {
-    %first, %first_payload = channel.acquire %incoming : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
-    %second, %second_payload = channel.acquire %incoming : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
-    %last_first, %last_second = scf.for %replay = [%c0 to %c3 step %c1](%a = %first : read<tile<16xi32>>, %b = %second : read<tile<16xi32>>) -> (read<tile<16xi32>>, read<tile<16xi32>>) {
-      %a_left = func.call @copy_retained(%a, %left) : (read<tile<16xi32>>, channel<tile<16xi32>>) -> (read<tile<16xi32>>)
-      %a_right = func.call @copy_retained(%a_left, %right) : (read<tile<16xi32>>, channel<tile<16xi32>>) -> (read<tile<16xi32>>)
-      %b_left = func.call @copy_retained(%b, %left) : (read<tile<16xi32>>, channel<tile<16xi32>>) -> (read<tile<16xi32>>)
-      %b_right = func.call @copy_retained(%b_left, %right) : (read<tile<16xi32>>, channel<tile<16xi32>>) -> (read<tile<16xi32>>)
-      scf.yield %a_right, %b_right : read<tile<16xi32>>, read<tile<16xi32>>
+    %first, %first_payload = channel.acquire %incoming : channel<tile<9216xi32>> -> (read<tile<9216xi32>>, view<9216xi32>)
+    %second, %second_payload = channel.acquire %incoming : channel<tile<9216xi32>> -> (read<tile<9216xi32>>, view<9216xi32>)
+    %last_first, %last_second = scf.for %replay = [%c0 to %c3 step %c1](%a = %first : read<tile<9216xi32>>, %b = %second : read<tile<9216xi32>>) -> (read<tile<9216xi32>>, read<tile<9216xi32>>) {
+      %a_left = func.call @copy_retained(%a, %left) : (read<tile<9216xi32>>, channel<tile<9216xi32>>) -> (read<tile<9216xi32>>)
+      %a_right = func.call @copy_retained(%a_left, %right) : (read<tile<9216xi32>>, channel<tile<9216xi32>>) -> (read<tile<9216xi32>>)
+      %b_left = func.call @copy_retained(%b, %left) : (read<tile<9216xi32>>, channel<tile<9216xi32>>) -> (read<tile<9216xi32>>)
+      %b_right = func.call @copy_retained(%b_left, %right) : (read<tile<9216xi32>>, channel<tile<9216xi32>>) -> (read<tile<9216xi32>>)
+      scf.yield %a_right, %b_right : read<tile<9216xi32>>, read<tile<9216xi32>>
     }
-    channel.release %last_first : read<tile<16xi32>>
-    channel.release %last_second : read<tile<16xi32>>
+    channel.release %last_first : read<tile<9216xi32>>
+    channel.release %last_second : read<tile<9216xi32>>
   }
   func.return
 }
 
-func.def inline @egress(%source: channel<tile<16xi32>>, %output: buffer, %base: offset) {
+func.def inline @egress(%source: channel<tile<9216xi32>>, %output: buffer, %base: offset) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %count = index.constant 12 : index
-  %bytes = index.constant 64 : offset
+  %bytes = index.constant 36864 : offset
   scf.for %record = [%c0 to %count step %c1] {
-    %read, %payload = channel.acquire %source : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+    %read, %payload = channel.acquire %source : channel<tile<9216xi32>> -> (read<tile<9216xi32>>, view<9216xi32>)
     %relative = index.scale %record, %bytes : index, offset -> offset
     %offset = index.add %base, %relative : offset
-    %external = buffer.view %output[%offset] : buffer -> view<16xi32>
-    %copy = kernel.async.copy %payload to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+    %external = buffer.view %output[%offset] : buffer -> view<9216xi32>
+    %copy = kernel.async.copy %payload to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<9216xi32> to view<9216xi32> -> kernel.async.token
     %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
     kernel.async.wait %group {newer_groups = 0} : kernel.async.group
-    channel.release %read : read<tile<16xi32>>
+    channel.release %read : read<tile<9216xi32>>
   }
   func.return
 }
@@ -71,34 +73,34 @@ pipeline.def<kernel> public retain target(@array_target) @retained_batch() run(%
   %input_unique, %output_unique = buffer.assume.noalias %input_arg, %output_arg : buffer, buffer
   %input, %output = buffer.assume.alignment %input_unique, %output_unique {minimum_alignment = 64} : buffer, buffer
   %c0 = index.constant 0 : offset
-  %bytes = index.constant 64 : offset
-  %batch_bytes = index.constant 128 : offset
-  %right_offset = index.constant 768 : offset
+  %bytes = index.constant 36864 : offset
+  %batch_bytes = index.constant 73728 : offset
+  %right_offset = index.constant 442368 : offset
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
   %sram = pipeline.memory<workgroup>[0, 1] : pool
   %first_core = pipeline.memory<workgroup>[0, 2] : pool
   %second_core = pipeline.memory<workgroup>[0, 3] : pool
   %batch_storage = buffer.alloca<workgroup> pool(%sram) align(64) %batch_bytes : buffer
-  %batch_slots = buffer.view %batch_storage[%c0] : buffer -> view<2x16xi32>
-  %batch = channel.bind<fifo> %batch_slots, %c2 : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %batch_slots = buffer.view %batch_storage[%c0] : buffer -> view<2x9216xi32>
+  %batch = channel.bind<fifo> %batch_slots, %c2 : view<2x9216xi32>, index -> channel<tile<9216xi32>>
   %left_storage = buffer.alloca<workgroup> pool(%first_core) align(64) %bytes : buffer
-  %left_slots = buffer.view %left_storage[%c0] : buffer -> view<1x16xi32>
-  %left = channel.bind<fifo> %left_slots, %c1 : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %left_slots = buffer.view %left_storage[%c0] : buffer -> view<1x9216xi32>
+  %left = channel.bind<fifo> %left_slots, %c1 : view<1x9216xi32>, index -> channel<tile<9216xi32>>
   %right_storage = buffer.alloca<workgroup> pool(%second_core) align(64) %bytes : buffer
-  %right_slots = buffer.view %right_storage[%c0] : buffer -> view<1x16xi32>
-  %right = channel.bind<fifo> %right_slots, %c1 : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %right_slots = buffer.view %right_storage[%c0] : buffer -> view<1x9216xi32>
+  %right = channel.bind<fifo> %right_slots, %c1 : view<1x9216xi32>, index -> channel<tile<9216xi32>>
   pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
-    func.call @ingress(%input, %batch) : (buffer, channel<tile<16xi32>>)
+    func.call @ingress(%input, %batch) : (buffer, channel<tile<9216xi32>>)
   }
   pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
-    func.call @distribute(%batch, %left, %right) : (channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>)
+    func.call @distribute(%batch, %left, %right) : (channel<tile<9216xi32>>, channel<tile<9216xi32>>, channel<tile<9216xi32>>)
   }
   pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
-    func.call @egress(%left, %output, %c0) : (channel<tile<16xi32>>, buffer, offset)
+    func.call @egress(%left, %output, %c0) : (channel<tile<9216xi32>>, buffer, offset)
   }
   pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
-    func.call @egress(%right, %output, %right_offset) : (channel<tile<16xi32>>, buffer, offset)
+    func.call @egress(%right, %output, %right_offset) : (channel<tile<9216xi32>>, buffer, offset)
   }
 }
 
@@ -108,16 +110,16 @@ func.def @reference(%input: buffer, %output: buffer) {
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
   %c3 = index.constant 3 : index
-  %words = index.constant 16 : index
-  %source = buffer.view %input[%origin] : buffer -> view<2x2x16xi32>
-  %destination = buffer.view %output[%origin] : buffer -> view<2x2x3x2x16xi32>
+  %words = index.constant 9216 : index
+  %source = buffer.view %input[%origin] : buffer -> view<2x2x9216xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<2x2x3x2x9216xi32>
   scf.for %consumer = [%c0 to %c2 step %c1] {
     scf.for %batch = [%c0 to %c2 step %c1] {
       scf.for %replay = [%c0 to %c3 step %c1] {
         scf.for %record = [%c0 to %c2 step %c1] {
           scf.for %word = [%c0 to %words step %c1] {
-            %value = view.load %source[%batch, %record, %word] : view<2x2x16xi32> -> i32
-            view.store %value, %destination[%consumer, %batch, %replay, %record, %word] : i32, view<2x2x3x2x16xi32>
+            %value = view.load %source[%batch, %record, %word] : view<2x2x9216xi32> -> i32
+            view.store %value, %destination[%consumer, %batch, %replay, %record, %word] : i32, view<2x2x3x2x9216xi32>
           }
         }
       }
@@ -129,13 +131,13 @@ func.def @reference(%input: buffer, %output: buffer) {
 check.scenario public @retained_batch_replay {
   check.trial[3](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
-    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<96xi32>
-    %input = check.tensor.view %input_storage offset(64) : tensor<96xi32> -> tensor<64xi32>
-    %output_storage = check.generate.fill value(-9999) : tensor<416xi32>
-    %output = check.tensor.view %output_storage offset(64) : tensor<416xi32> -> tensor<384xi32>
-    check.compare<@retained_batch, @reference>(%input, %output) : (tensor<64xi32>, tensor<384xi32>) -> () {
-      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<96xi32>
-      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<416xi32>
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<36896xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<36896xi32> -> tensor<36864xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<221216xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<221216xi32> -> tensor<221184xi32>
+    check.compare<@retained_batch, @reference>(%input, %output) : (tensor<36864xi32>, tensor<221184xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<36896xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<221216xi32>
     }
   }
   check.return

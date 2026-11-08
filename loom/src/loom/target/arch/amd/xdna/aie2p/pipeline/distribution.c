@@ -51,11 +51,14 @@ static iree_status_t loom_aie2p_native_select_distribution_endpoint(
         IREE_SV("a channel record length representable by its memory DMA");
     return iree_ok_status();
   }
-  const uint64_t step_units =
-      channel->byte_stride / dma->transfer_length_granularity;
+  // A retained batch is one contiguous transfer. Single-slot transfers also
+  // return to the same address, regardless of the logical record stride.
+  const uint32_t capacity = batch_records ? 1 : channel->source->capacity;
+  const uint32_t byte_stride = capacity > 1 ? channel->byte_stride : 0;
+  const uint64_t step_units = byte_stride / dma->transfer_length_granularity;
   if (channel->byte_offset % dma->address_alignment ||
-      channel->byte_stride % dma->transfer_length_granularity ||
-      channel->source->capacity > (UINT64_C(1) << dma->iteration_bits) ||
+      byte_stride % dma->transfer_length_granularity ||
+      capacity > (UINT64_C(1) << dma->iteration_bits) ||
       step_units > (UINT64_C(1) << dma->step_size_bits)) {
     *out_reason = IREE_SV(
         "DMA-aligned channel storage with a representable "
@@ -96,9 +99,8 @@ static iree_status_t loom_aie2p_native_select_distribution_endpoint(
   }
   return loom_aie2p_native_select_sequence(
       context, tile, out_endpoint->engine, direction,
-      batch_records ? repetitions / batch_records : repetitions,
-      batch_records ? 1 : channel->source->capacity, channel->byte_offset,
-      batch_records ? 0 : channel->byte_stride, credit_interval, words,
+      batch_records ? repetitions / batch_records : repetitions, capacity,
+      channel->byte_offset, byte_stride, credit_interval, words,
       &out_endpoint->sequence, out_reason, out_valid);
 }
 
@@ -324,15 +326,11 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
     loom_aie2p_native_distribution_endpoint_t* receiver =
         &distribution->receivers[ordinal];
     receiver->wait_for_idle = true;
-    if ((tile->facts->kind == LOOM_XDNA_TILE_KIND_MEMORY &&
-         receiver->tile->facts->kind != LOOM_XDNA_TILE_KIND_COMPUTE &&
-         tile->coordinate.column != receiver->tile->coordinate.column) ||
-        (tile == receiver->tile && (engine >= dma->loopback_channel_count ||
-                                    engine != receiver->engine))) {
+    if (tile == receiver->tile &&
+        (engine >= dma->loopback_channel_count || engine != receiver->engine)) {
       return loom_aie2p_native_reject(
           context, first->admission->op,
-          IREE_SV("same-column SRAM-to-SRAM routes and matching same-tile DMA "
-                  "channels"));
+          IREE_SV("matching same-tile DMA channels"));
     }
   }
   // Packet identities belong to the physical path, so every phase can select
@@ -682,14 +680,6 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
               context->workers[reader->worker].execution ==
                   LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION;
           distribution->sender.wait_for_idle |= receiver->wait_for_idle;
-          if (sender->tile->facts->kind == LOOM_XDNA_TILE_KIND_MEMORY &&
-              receiver->tile->facts->kind != LOOM_XDNA_TILE_KIND_COMPUTE &&
-              sender->tile->coordinate.column !=
-                  receiver->tile->coordinate.column) {
-            return loom_aie2p_native_reject(
-                context, destination->copy,
-                IREE_SV("same-column channel-copy routes between SRAM tiles"));
-          }
           if (sender->tile == receiver->tile &&
               (sender->engine >=
                    sender->tile->facts->dma.loopback_channel_count ||

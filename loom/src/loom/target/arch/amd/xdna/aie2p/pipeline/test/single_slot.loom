@@ -1,0 +1,81 @@
+// A 36 KiB record exceeds the compute DMA iterator's 32 KiB step limit.
+// A single slot never advances that iterator. Ordinary ingress and on-chip
+// forwarding repeatedly reuse it, with a complete output check after egress.
+aie2p.target<array> @array_target
+
+pipeline.def<kernel> public retain target(@array_target) @wide_records() run(%input_arg: buffer, %output_arg: buffer) {
+  %input_unique, %output_unique = buffer.assume.noalias %input_arg, %output_arg : buffer, buffer
+  %input, %output = buffer.assume.alignment %input_unique, %output_unique {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %record_bytes = index.constant 36864 : offset
+  %capacity = index.constant 1 : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %records = index.constant 3 : index
+  %source_memory = pipeline.memory<workgroup>[0, 2] : pool
+  %destination_memory = pipeline.memory<workgroup>[0, 3] : pool
+  %source_storage = buffer.alloca<workgroup> pool(%source_memory) align(64) %record_bytes : buffer
+  %source_slots = buffer.view %source_storage[%origin] : buffer -> view<1x9216xi32>
+  %source = channel.bind<fifo> %source_slots, %capacity : view<1x9216xi32>, index -> channel<tile<9216xi32>>
+  %destination_storage = buffer.alloca<workgroup> pool(%destination_memory) align(64) %record_bytes : buffer
+  %destination_slots = buffer.view %destination_storage[%origin] : buffer -> view<1x9216xi32>
+  %destination = channel.bind<fifo> %destination_slots, %capacity : view<1x9216xi32>, index -> channel<tile<9216xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %records step %step] {
+      %offset = index.scale %record, %record_bytes : index, offset -> offset
+      %external = buffer.view %input[%offset] : buffer -> view<9216xi32>
+      %write, %payload = channel.reserve %source : channel<tile<9216xi32>> -> (write<tile<9216xi32>>, view<9216xi32>)
+      %copy = kernel.async.copy %external to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<9216xi32> to view<9216xi32> -> kernel.async.token
+      %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+      channel.publish %write : write<tile<9216xi32>>
+    }
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %records step %step] {
+      %read = channel.accept %source : channel<tile<9216xi32>> -> read<tile<9216xi32>>
+      %write, %payload = channel.reserve %destination : channel<tile<9216xi32>> -> (write<tile<9216xi32>>, view<9216xi32>)
+      channel.copy %read -> %write : read<tile<9216xi32>>, write<tile<9216xi32>>
+    }
+  }
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %records step %step] {
+      %read, %payload = channel.acquire %destination : channel<tile<9216xi32>> -> (read<tile<9216xi32>>, view<9216xi32>)
+      %offset = index.scale %record, %record_bytes : index, offset -> offset
+      %external = buffer.view %output[%offset] : buffer -> view<9216xi32>
+      %copy = kernel.async.copy %payload to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<9216xi32> to view<9216xi32> -> kernel.async.token
+      %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+      channel.release %read : read<tile<9216xi32>>
+    }
+  }
+}
+
+func.def @reference(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %words = index.constant 27648 : index
+  %source = buffer.view %input[%origin] : buffer -> view<27648xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<27648xi32>
+  scf.for %word = [%begin to %words step %step] {
+    %value = view.load %source[%word] : view<27648xi32> -> i32
+    view.store %value, %destination[%word] : i32, view<27648xi32>
+  }
+  func.return
+}
+
+check.scenario public @single_slot_replay {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<27680xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<27680xi32> -> tensor<27648xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<27680xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<27680xi32> -> tensor<27648xi32>
+    check.compare<@wide_records, @reference>(%input, %output) : (tensor<27648xi32>, tensor<27648xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<27680xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<27680xi32>
+    }
+  }
+  check.return
+}

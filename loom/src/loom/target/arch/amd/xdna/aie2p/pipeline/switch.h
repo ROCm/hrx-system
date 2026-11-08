@@ -52,6 +52,10 @@ typedef struct loom_aie2p_native_switch_t {
 
 // Admits physical route edges against packet/circuit ownership and switch
 // resources, retaining the complete initialization banks in the pass arena.
+// Destination sets connected by a shared output require one arbiter. Disjoint
+// sets share only when fed exclusively by the same input, so arbitration adds
+// no blocking dependency between independent streams. This does not prove
+// progress for dependencies already present in the selected routes.
 // Allocation errors return a status; route conflicts emit the pipeline's
 // target-support diagnostic and leave the caller's false |out_valid| intact.
 iree_status_t loom_aie2p_native_switches_build(

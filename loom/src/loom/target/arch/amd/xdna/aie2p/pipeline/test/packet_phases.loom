@@ -1,5 +1,6 @@
 // A broadcast, selective replay, and repeated broadcast share one DMA path.
 // The middle phase introduces new classes and reverses first-use receiver order.
+// Both receivers occupy a different column from the SRAM or compute source.
 aie2p.target<array> @device
 
 func.def inline @send(%read: read<tile<16xi32>>, %destination: channel<tile<16xi32>>) -> (read<tile<16xi32>>) {
@@ -59,11 +60,11 @@ pipeline.def<kernel> @phases(%source_row: index) run(%input_arg: buffer, %left_a
   %storage = buffer.alloca<workgroup> pool(%memory) align(64) %batch_bytes : buffer
   %slots = buffer.view %storage[%origin] : buffer -> view<2x16xi32>
   %source = channel.bind<fifo> %slots, %c2 : view<2x16xi32>, index -> channel<tile<16xi32>>
-  %left_memory = pipeline.memory<workgroup>[0, 2] : pool
+  %left_memory = pipeline.memory<workgroup>[1, 2] : pool
   %left_storage = buffer.alloca<workgroup> pool(%left_memory) align(64) %bytes : buffer
   %left_slots = buffer.view %left_storage[%origin] : buffer -> view<1x16xi32>
   %left = channel.bind<fifo> %left_slots, %c1 : view<1x16xi32>, index -> channel<tile<16xi32>>
-  %right_memory = pipeline.memory<workgroup>[0, 3] : pool
+  %right_memory = pipeline.memory<workgroup>[1, 3] : pool
   %right_storage = buffer.alloca<workgroup> pool(%right_memory) align(64) %bytes : buffer
   %right_slots = buffer.view %right_storage[%origin] : buffer -> view<1x16xi32>
   %right = channel.bind<fifo> %right_slots, %c1 : view<1x16xi32>, index -> channel<tile<16xi32>>
@@ -90,10 +91,10 @@ pipeline.def<kernel> @phases(%source_row: index) run(%input_arg: buffer, %left_a
     channel.release %last_b : read<tile<16xi32>>
     func.call @broadcast_pair(%source, %left, %right) : (channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>)
   }
-  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+  pipeline.strand workers([1, 2], [1, 1], [1, 1]) {
     func.call @drain(%left, %left_output, %c7) : (channel<tile<16xi32>>, buffer, index)
   }
-  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+  pipeline.strand workers([1, 3], [1, 1], [1, 1]) {
     func.call @drain(%right, %right_output, %c7) : (channel<tile<16xi32>>, buffer, index)
   }
 }

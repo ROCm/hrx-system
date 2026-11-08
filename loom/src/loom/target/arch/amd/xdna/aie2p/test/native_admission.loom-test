@@ -329,34 +329,38 @@ pipeline.def<kernel> public retain target(@device) @interleaved_distribution() r
 
 aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
 
-// SRAM-to-SRAM cross-column routes would need a detour through compute rows;
-// the monotonic router cannot implement that path.
-pipeline.def<kernel> public retain target(@device) @cross_column_sram_distribution() run(%input_arg: buffer) {
-  %input = buffer.assume.alignment %input_arg {minimum_alignment = 64} : buffer
-  %source_memory = pipeline.memory<workgroup>[0, 1] : pool
-  %destination_memory = pipeline.memory<workgroup>[1, 1] : pool
-  %bytes = index.constant 64 : offset
+// Two slots really rotate. Padding makes their step one word larger than the
+// compute DMA iterator can encode, while both records still fit local memory.
+pipeline.def<kernel> public retain target(@device) @wide_rotating_stride() run() {
+  %source_memory = pipeline.memory<workgroup>[0, 2] : pool
+  %destination_memory = pipeline.memory<workgroup>[0, 3] : pool
+  %source_bytes = index.constant 32836 : offset
+  %destination_bytes = index.constant 128 : offset
   %origin = index.constant 0 : offset
-  %capacity = index.constant 1 : index
-  %source_storage = buffer.alloca<workgroup> pool(%source_memory) align(64) %bytes : buffer
-  %source_slots = buffer.view %source_storage[%origin] : buffer -> view<1x16xi32>
-  %source = channel.bind<fifo> %source_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
-  %destination_storage = buffer.alloca<workgroup> pool(%destination_memory) align(64) %bytes : buffer
-  %destination_slots = buffer.view %destination_storage[%origin] : buffer -> view<1x16xi32>
-  %destination = channel.bind<fifo> %destination_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %capacity = index.constant 2 : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %source_storage = buffer.alloca<workgroup> pool(%source_memory) align(64) %source_bytes : buffer
+  %source_slots = buffer.view %source_storage[%origin] : buffer -> view<2x16xi32, #encoding.layout.strided<strides=[8193, 1]>>
+  %source = channel.bind<fifo> %source_slots, %capacity : view<2x16xi32, #encoding.layout.strided<strides=[8193, 1]>>, index -> channel<tile<16xi32>>
+  %destination_storage = buffer.alloca<workgroup> pool(%destination_memory) align(64) %destination_bytes : buffer
+  %destination_slots = buffer.view %destination_storage[%origin] : buffer -> view<2x16xi32>
+  %destination = channel.bind<fifo> %destination_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
   pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
-    %external = buffer.view %input[%origin] : buffer -> view<16xi32>
-    %write, %payload = channel.reserve %source : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
-    %copy = kernel.async.copy %external to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
-    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
-    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
-    channel.publish %write : write<tile<16xi32>>
+    scf.for %record = [%begin to %capacity step %step] {
+      %write, %payload = channel.reserve %source : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      %values = vector.splati 42 : vector<16xi32>
+      vector.store %values, %payload[0] : vector<16xi32>, view<16xi32>
+      channel.publish %write : write<tile<16xi32>>
+    }
   }
   pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
-    %read, %payload = channel.acquire %source : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
-    %write, %destination_payload = channel.reserve %destination : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
-    // ERROR@+1: XDNA/051 {requirement="same-column channel-copy routes between SRAM tiles"}
-    channel.copy %read -> %write : read<tile<16xi32>>, write<tile<16xi32>>
+    scf.for %record = [%begin to %capacity step %step] {
+      // ERROR@+1: XDNA/051 {requirement="DMA-aligned channel storage with a representable rotating slot stride"}
+      %read = channel.accept %source : channel<tile<16xi32>> -> read<tile<16xi32>>
+      %write, %payload = channel.reserve %destination : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      channel.copy %read -> %write : read<tile<16xi32>>, write<tile<16xi32>>
+    }
   }
 }
 
