@@ -672,18 +672,20 @@ bool loom_low_schedule_candidate_score_less(
       }
       // Pressure relief is not a license to leave an issue slot empty.
       // Spillable work that remains below every bounded pressure horizon can
-      // run while recovery waits for its inputs. Unspillable activation stays
-      // under the completion policy above: its downstream ownership cannot be
-      // recovered after an optimistic setup choice. Preserve pair-placement
-      // opportunities here because neither component's standalone stall
-      // represents their combined issue cost.
+      // run while recovery waits for its inputs. Candidates creating no live
+      // units can also fill the gap under the same completion guards. Growing
+      // unspillable paths retain their completion ordering because later
+      // ownership cannot be recovered. Preserve pair-placement opportunities
+      // because neither component's standalone stall represents their combined
+      // issue cost.
       if (compare_mode == LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF &&
           lhs->pressure_risk == LOOM_LOW_SCHEDULE_PRESSURE_RISK_NONE &&
           rhs->pressure_risk == LOOM_LOW_SCHEDULE_PRESSURE_RISK_NONE &&
           lhs->pressure_cliff_penalty == rhs->pressure_cliff_penalty &&
-          !iree_any_bit_set(
-              lhs->flags | rhs->flags,
-              LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_UNSPILLABLE_ACTIVATION) &&
+          (!iree_any_bit_set(
+               lhs->flags | rhs->flags,
+               LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_UNSPILLABLE_ACTIVATION) ||
+           (lhs->produced_live_units == 0 && rhs->produced_live_units == 0)) &&
           !loom_low_schedule_candidate_pair_affinity_differs(lhs, rhs) &&
           lhs->effective_stall_cycles != rhs->effective_stall_cycles) {
         return lhs->effective_stall_cycles < rhs->effective_stall_cycles;
@@ -719,10 +721,11 @@ bool loom_low_schedule_candidate_score_less(
     if (lhs->effective_stall_cycles != rhs->effective_stall_cycles) {
       return lhs->effective_stall_cycles < rhs->effective_stall_cycles;
     }
-    // Pressure-equivalent candidates that cannot yet retire storage have no
-    // recovery benefit to justify opening a later live range. Preserve source
-    // order once their actual issue delay also ties; the split between data
-    // and resource stalls does not change when either candidate can issue.
+    // Pressure-equivalent candidates that cannot yet retire storage normally
+    // retain source order instead of opening later live ranges. Equivalent
+    // leaf materializations outside shared packing resources can distinguish
+    // useful latency without opening a new aggregate ownership chain. The
+    // split between data and resource stalls does not change issue readiness.
     if (compare_mode != LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT &&
         lhs->pressure_progress_kind ==
             LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE &&
@@ -730,6 +733,20 @@ bool loom_low_schedule_candidate_score_less(
             LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE &&
         pressure_efficiency_order == 0 && pressure_order == 0 &&
         lhs->source_ordinal != rhs->source_ordinal) {
+      // Growing shared packing state can fragment a later wide value even
+      // when immediate occupancy ties. Preserve its source-order recovery;
+      // independent setup leaves can use the retained consumer critical path.
+      if (!iree_any_bit_set(
+              lhs->flags | rhs->flags,
+              LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_GROWS_PACKING_RESOURCE) &&
+          iree_all_bits_set(
+              lhs->flags & rhs->flags,
+              LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_REMATERIALIZABLE_LEAF) &&
+          lhs->selected_descriptor_ordinal ==
+              rhs->selected_descriptor_ordinal &&
+          lhs->critical_path_cycles != rhs->critical_path_cycles) {
+        return lhs->critical_path_cycles > rhs->critical_path_cycles;
+      }
       return lhs->source_ordinal < rhs->source_ordinal;
     }
     // When candidates reach the same issue cycle, keep work on the longer

@@ -1,0 +1,69 @@
+// The two narrow results occupy r0 and r1 across the branch. Each aliases one
+// of the wide value's two possible pairs, even though both classes separately
+// fit their capacities. Retire the wide projection before opening those narrow
+// lifetimes. Exact allocation must recover this order without memory traffic.
+// RUN: emit low-allocation-query @overlapping_domains strategy=resource-stall spill-free spill-count values=%wide,%part,%first,%second lifetimes=%wide,%part,%first,%second
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @overlapping_domains(%input: reg<test.i32 x2>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %wide = copy %input : reg<test.i32 x2> -> reg<test.explicit32 x2>
+  %part = slice %wide[0] : reg<test.explicit32 x2> -> reg<test.explicit32>
+  %result = copy %part : reg<test.explicit32> -> reg<test.i32>
+  %first = test.packing.create %lhs
+  %second = test.packing.create %rhs
+  low.br ^consume(%result: reg<test.i32>, %first: reg<test.packed.narrow>, %second: reg<test.packed.narrow>)
+^consume(%value: reg<test.i32>, %left: reg<test.packed.narrow>, %right: reg<test.packed.narrow>):
+  %left_result = copy %left : reg<test.packed.narrow> -> reg<test.i32>
+  %right_result = copy %right : reg<test.packed.narrow> -> reg<test.i32>
+  return %value, %left_result, %right_result
+}
+
+// ----
+spills: 0
+materialized traffic: stores=0 reloads=0
+value %wide: test.explicit32 -> physical_register[4:2]
+value %part: test.explicit32 -> physical_register[0:1]
+value %first: test.packed.narrow -> physical_register[0:1]
+value %second: test.packed.narrow -> physical_register[1:1]
+lifetime %wide[0]: [1, 2)
+lifetime %wide[1]: [1, 1)
+lifetime %part[0]: [2, 3)
+lifetime %first[0]: [4, 6)
+lifetime %second[0]: [5, 6)
+
+// ====
+
+// Locking the overlapping order makes the same storage conflict unavoidable.
+// Allocation cannot reinterpret the author's schedule contract to repair it.
+// RUN: emit low-allocation-query @locked_overlap strategy=resource-stall spill-free
+
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @locked_overlap(%input: reg<test.i32 x2>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %first = test.packing.create %lhs
+  %second = test.packing.create %rhs
+  // ERROR@+1: BACKEND/005 "unspillable-register-exhausted"
+  %wide = copy %input : reg<test.i32 x2> -> reg<test.explicit32 x2>
+  %part = slice %wide[0] : reg<test.explicit32 x2> -> reg<test.explicit32>
+  %result = copy %part : reg<test.explicit32> -> reg<test.i32>
+  low.br ^consume(%result: reg<test.i32>, %first: reg<test.packed.narrow>, %second: reg<test.packed.narrow>)
+^consume(%value: reg<test.i32>, %left: reg<test.packed.narrow>, %right: reg<test.packed.narrow>):
+  %left_result = copy %left : reg<test.packed.narrow> -> reg<test.i32>
+  %right_result = copy %right : reg<test.packed.narrow> -> reg<test.i32>
+  return %value, %left_result, %right_result
+}
+
+// ====
+
+// A single value wider than the entire class has no legal schedule.
+// RUN: emit low-allocation-query @oversized_value strategy=resource-stall spill-free
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @oversized_value(%input: reg<test.i32 x8>) -> (reg<test.i32 x8>) asm {
+  // ERROR@+1: BACKEND/005 "unspillable-register-exhausted"
+  %wide = copy %input : reg<test.i32 x8> -> reg<test.explicit32 x8>
+  %result = copy %wide : reg<test.explicit32 x8> -> reg<test.i32 x8>
+  return %result
+}
