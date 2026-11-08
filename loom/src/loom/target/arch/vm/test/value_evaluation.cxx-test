@@ -357,3 +357,63 @@ event 33
 event 11
 OK 0
 retired 0
+
+// ====
+
+// Forwarded and copied generic closures read stable pointer values. Distinct
+// index types exercise concrete call operators over the same captured field.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+template<int Index, class Function>
+static void each(Function&& function) {
+  function(Index);
+  if constexpr (Index < 2) each<Index + 1>(function);
+}
+template<class Index>
+static int read_value(const int* input, Index index) { return input[index]; }
+template<class Function>
+static void copied_call(Function function) { function(0L); }
+template<bool Mutates> struct Mode { static constexpr bool mutates = Mutates; };
+void run() {
+  const int values[] = {3, 7, 11, 19, 31};
+  const int* input = values + 2;
+  int index = 0;
+  int sum = 0;
+  each<0>([&](auto value) { sum += input[index + value]; });
+  event(sum);
+  auto read = [&input](auto step) {
+    event(input[step]);
+    event(step[input]);
+    event(*(input + step));
+    event(*(step + input));
+    event(*(input - step));
+    event(read_value(input, step));
+  };
+  read(1);
+  copied_call(read);
+  auto selected = [&](auto mode) {
+    if constexpr (decltype(mode)::mutates) { ++input; }
+    return input[1];
+  };
+  event(selected(Mode<false>{}));
+  auto nested = [&](auto step) { return [input, step] { return input[step]; }(); };
+  event(nested(2));
+}
+
+// ----
+event 61
+event 19
+event 19
+event 19
+event 19
+event 7
+event 19
+event 11
+event 11
+event 11
+event 11
+event 11
+event 11
+event 19
+event 31
+OK 0
+retired 0

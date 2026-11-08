@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <limits>
+#include <string>
 
 #include "iree/testing/gtest.h"
 #include "loom/import/cxx/source/expressions.h"
@@ -85,6 +86,55 @@ TEST(ControlFlowTest, LambdaConstructionVisitsCapturesButNotDeferredBody) {
   ASSERT_NE(calls[0].function, nullptr);
   EXPECT_EQ(cxx::to_string(calls[0].function->name()), "initialize");
   EXPECT_TRUE(analysis.written(body).empty());
+}
+
+// Comparison classification is independent of pointer comparison lowering:
+// the capture analysis consumes resolved value reads, not operator spelling.
+TEST(ControlFlowTest, DependentPointerComparisonsReadCapturedValues) {
+  for (const char* comparison : {"==", "!=", "<", "<=", ">", ">="}) {
+    SCOPED_TRACE(comparison);
+    std::string text = R"(
+      bool entry(const int* input, const int* other) {
+        auto compare = [&input](auto value) { return input )";
+    text += comparison;
+    text += R"( value; };
+        return compare(other);
+      }
+    )";
+    loom_cxx_import_options_t options;
+    loom_cxx_import_options_initialize(&options);
+    Source source(iree_make_string_view(text.data(), text.size()),
+                  IREE_SV("capture_comparisons.cxx"), options);
+    auto* function = definition(source);
+    ASSERT_NE(function, nullptr);
+    auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                     function->functionBody)
+                     ->statement;
+    auto* lambda = FirstLambda::find(body);
+    ASSERT_NE(lambda, nullptr);
+    auto* field = cxx::capture_field(lambda->captureList->value);
+    ASSERT_NE(field, nullptr);
+    auto* primary = lambda->symbol->closureType()->functionCallOperator();
+    ASSERT_EQ(primary->specializations().size(), 1u);
+    auto* concrete = cxx::symbol_cast<cxx::FunctionSymbol>(
+        primary->specializations().front().symbol);
+    ASSERT_NE(concrete, nullptr);
+    auto* concrete_body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+        concrete->declaration()->functionBody);
+    ASSERT_NE(concrete_body, nullptr);
+
+    Types types(source.unit(), source.diagnostics());
+    ControlFlow construction(source.unit(), source.diagnostics(), types, body,
+                             function->symbol);
+    ControlFlow invocation(source.unit(), source.diagnostics(), types,
+                           concrete_body->statement, concrete);
+    std::unordered_set<cxx::FieldSymbol*> identities;
+    invocation.collect_pointer_capture_identities(identities);
+    EXPECT_TRUE(identities.empty());
+    EXPECT_FALSE(construction.resolve_pointer_reference_captures(identities));
+    construction.publish_pointer_reference_snapshots(types);
+    EXPECT_TRUE(types.pointer_reference_is_snapshot(field));
+  }
 }
 
 TEST(ControlFlowTest,

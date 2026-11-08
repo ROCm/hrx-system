@@ -22,6 +22,8 @@ loom_check_test_suite(
         "const.cxx-test",
         "const_default_initialization.cxx-test",
         "lambdas.cxx-test",
+        "lambdas_invalid.cxx-test",
+        "lambdas_lowering.cxx-test",
         "layout_attributes.cxx-test",
         "layout_attributes_roundtrip.cxx-test",
         "list_initialization_invalid.cxx-test",

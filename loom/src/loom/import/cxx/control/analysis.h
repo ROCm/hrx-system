@@ -306,10 +306,15 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Propagates reference and receiver facts in both directions across one
   // retained call edge.
   CallPropagation propagate_call(const DirectCall& call, ControlFlow& callee);
+  // Adds identity-observing capture uses from this concrete call operator to
+  // the shared result. Uninstantiated template patterns are never analyzed.
+  void collect_pointer_capture_identities(
+      std::unordered_set<cxx::FieldSymbol*>& identities) const;
   // Resolves deferred read-only pointer captures after callable effects reach
   // a fixed point. Returns whether rejecting a value snapshot added a new
   // identity fact that must propagate through the call graph.
-  bool resolve_pointer_reference_captures();
+  bool resolve_pointer_reference_captures(
+      const std::unordered_set<cxx::FieldSymbol*>& identities);
   // Publishes every remaining stable pointer snapshot to the source type
   // representation contract before callable signatures are built.
   void publish_pointer_reference_snapshots(Types& types) const;
@@ -337,6 +342,8 @@ class ControlFlow final : private cxx::ASTVisitor {
     std::unordered_set<cxx::Symbol*> written_bindings;
     // Ordinary automatic pointer captures awaiting whole-callable selection.
     std::vector<PointerReferenceCapture> captures;
+    // Capture fields whose evaluated uses observe pointer-object identity.
+    std::unordered_set<cxx::FieldSymbol*> identity_captures;
   };
 
   struct BindingStorageFacts {
@@ -361,6 +368,8 @@ class ControlFlow final : private cxx::ASTVisitor {
     Diverge = 16,
   };
 
+  PointerReferenceFacts& pointer_reference_facts();
+  void retain_pointer_capture_identity(cxx::Symbol* symbol);
   bool preVisit(cxx::AST* ast) override;
   void postVisit(cxx::AST* ast) override;
   void visit(cxx::CaseStatementAST* ast) override;
@@ -505,9 +514,12 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::unordered_set<cxx::Symbol*> written_references_;
   // Exact current-object field replacements in declaration encounter order.
   std::vector<cxx::Symbol*> receiver_writes_;
-  // Lazily allocated capture and write facts. Ordinary callables carry only
-  // this pointer and never allocate or scan their bodies for this analysis.
+  // Capture and write facts are allocated only when captures or identity uses
+  // need them. Ordinary callables leave this pointer empty.
   std::unique_ptr<PointerReferenceFacts> pointer_reference_facts_;
+  // Direct operand of the active lvalue-to-rvalue conversion during the body
+  // walk. Its captured pointer use reads the value without observing identity.
+  cxx::ExpressionAST* pointer_value_read_ = nullptr;
   // Calls retained once for sparse fixed-point propagation.
   std::vector<DirectCall> calls_;
   // Array copy plans own normalized default arguments and source identity.
@@ -538,6 +550,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::unique_ptr<ReferenceWriteFacts> reference_write_facts_;
   // True when a direct or transitive use requires current-object identity.
   bool receiver_requires_storage_ = false;
+  // Only concrete closure call operators classify pointer capture uses;
+  // synthesized copies transfer references without observing their referents.
+  bool observes_pointer_captures_ = false;
   // Common origin of every runtime reference return seen in the body.
   ReferenceReturn reference_return_ = ReferenceReturn::None;
   // Source ordinal retained when every reference return aliases one parameter.

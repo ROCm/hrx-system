@@ -20,7 +20,7 @@ files through `// ====` sections and retain exact expectations maintained with
 | Defaults, zero initialization, and conditional initializer effects | `record_initialization`, `value_initialization`, `const_default_initialization` |
 | Object qualification and invalid list initialization | `const`, `list_initialization_invalid` |
 | Class conversions and overload precedence | `class_conversions*` |
-| Closure captures and recursive forwarding | `lambdas` |
+| Closure captures, dependent pointer reads, recursive forwarding, and identity-observing rejections | `lambdas*` |
 | Record, array, and tuple decomposition | `structured_bindings` |
 
 For example, a by-value helper may change a dynamically selected array member

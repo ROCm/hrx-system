@@ -1,0 +1,102 @@
+// RUN: verify
+// Mutating a captured pointer observes the pointer object's identity and keeps
+// the ordinary storage contract.
+// ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+int* write_pointer_capture(int* input) {
+  return [&] { return ++input; }();
+}
+
+// ====
+// A write to the enclosing pointer after construction also prevents a stale
+// pointer-value snapshot.
+// ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+int* write_pointer_owner(int* input, int* replacement) {
+  auto read = [&] { return input; };
+  input = replacement;
+  return read();
+}
+
+// ====
+static void replace_pointer(int*& input, int* replacement) {
+  input = replacement;
+}
+
+// Transitive write effects reach capture selection through the retained call
+// graph rather than freezing the pointer snapshot before callees are known.
+// ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+int* write_pointer_through_call(int* input, int* replacement) {
+  auto read = [&] { return input; };
+  replace_pointer(input, replacement);
+  return read();
+}
+
+// ====
+// Both reached specializations constrain the one closure representation.
+template<bool Mutates> struct Mode { static constexpr bool mutates = Mutates; };
+// ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+int mixed_specializations(const int* input) {
+  auto read = [&](auto mode) {
+    if constexpr (decltype(mode)::mutates) { ++input; }
+    return input[0];
+  };
+  return read(Mode<false>{}) + read(Mode<true>{});
+}
+
+// ====
+// A dependent by-reference overload observes the pointer object even when its
+// implementation only reads the current pointee.
+template<class Index>
+static int read_reference(const int*& input, Index index) { return input[index]; }
+// ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+int dependent_reference(const int* input, int index) {
+  return [&](auto step) { return read_reference(input, step); }(index);
+}
+
+// ====
+// Operator spelling does not determine whether its operand is a value read.
+struct Index { int value; };
+static int operator+(const int*& input, Index index) { return input[index.value]; }
+// ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+int dependent_operator(const int* input, int index) {
+  return [&](auto step) { return input + step; }(Index{index});
+}
+
+// ====
+// The pointer object's address remains observable through a dependent call.
+template<class Index>
+static int read_address(const int* const* input, Index index) { return (*input)[index]; }
+// ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+int dependent_address(const int* input, int index) {
+  return [&](auto step) { return read_address(&input, step); }(index);
+}
+
+// ====
+// Direct local reference binding also retains the pointer object's identity.
+// ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+int dependent_alias(const int* input, int index) {
+  return [&](auto step) {
+    auto& alias = input;
+    return alias[step];
+  }(index);
+}
+
+// ====
+// A volatile pointer cannot be replaced by a value captured at construction.
+// ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+int dependent_volatile(const int* volatile input, int index) {
+  return [&](auto step) { return input[step]; }(index);
+}
+
+// ====
+// Reference init-captures retain their explicit object-reference contract.
+// ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+int dependent_init_reference(const int* input, int index) {
+  return [&alias = input](auto step) { return alias[step]; }(index);
+}
+
+// ====
+// A nested reference capture preserves the enclosing closure field's identity.
+// ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+int dependent_nested_reference(const int* input, int index) {
+  return [&](auto step) { return [&input, step] { return input[step]; }(); }(index);
+}
