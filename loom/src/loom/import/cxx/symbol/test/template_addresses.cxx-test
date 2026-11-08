@@ -39,16 +39,20 @@ func.def @choose_right(%input: i32) -> (i32) {
 struct Base { unsigned value; };
 struct Left : Base {};
 struct Right : Base {};
-struct Both : Left, Right {};
+struct Both : Left, Right {
+  constexpr const unsigned& left_value() const { return Left::value; }
+  constexpr const unsigned& right_value() const { return Right::value; }
+};
 extern Both object;
+static_assert(&object.left_value() != &object.right_value());
 template <const unsigned& value>
 unsigned choose(unsigned input) {
   if constexpr (&value == &object.Left::value) return input + 3;
   return input + 7;
 }
 unsigned entry(unsigned input) {
-  return choose<object.Left::value>(input) +
-         choose<object.Right::value>(input);
+  return choose<object.left_value()>(input) +
+         choose<object.right_value()>(input);
 }
 
 // ----
@@ -84,7 +88,8 @@ struct Both : Left, Right {
     return static_cast<const Left&>(*this);
   }
 };
-struct Selected : Left, Right { using Left::value; };
+struct Other { unsigned value; };
+struct Selected : Left, Other { using Left::value; };
 struct Anonymous { struct { struct { unsigned value; }; }; };
 extern Both object;
 extern Selected selected;
@@ -98,8 +103,15 @@ using AnonymousValue = Ref<anonymous.value>;
 using Direct = Ref<object.Left::value>;
 using Returned = Ref<object.left_base().value>;
 using Converted = Ref<static_cast<const Left&>(object).value>;
+using Recovered = Ref<static_cast<const Left&>(object.left_base()).value>;
 static_assert(__is_same(Direct, Returned));
 static_assert(__is_same(Direct, Converted));
+static_assert(__is_same(Direct, Recovered));
+static_assert(static_cast<Selected*>(static_cast<Base*>(&selected)) == &selected);
+constexpr Selected* empty_selected = nullptr;
+constexpr Base* empty_base = nullptr;
+static_assert(static_cast<Base*>(empty_selected) == nullptr);
+static_assert(static_cast<Selected*>(empty_base) == nullptr);
 
 // ====
 // Field addresses retain their declared object through direct access,

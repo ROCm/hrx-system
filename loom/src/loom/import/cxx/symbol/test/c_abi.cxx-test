@@ -28,3 +28,30 @@ func.def public @entry(%value_x: f32, %value_y: i32) -> (f32, i32) {
 }
 
 func.decl source_signature(#func.abi.c.signature<arguments = [2], results = [2], types = [#func.abi.c.type<floating, byte_length = 4, byte_alignment = 4, component_count = 1, format = f32>, #func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>, #func.abi.c.type<record, byte_length = 8, byte_alignment = 4, component_count = 2, name = "Pair", fields = [#func.abi.c.field<"x", type = 0, byte_offset = 0>, #func.abi.c.field<"y", type = 1, byte_offset = 4>]>]>) @pair_swap(%6: f32, %7: i32) -> (f32, i32)
+
+// ====
+// Ordinary construction and assignment do not require a nontrivial call ABI.
+struct Record {
+  int value;
+  Record(int input) : value(input) {}
+  Record& operator=(const Record& other) { value = other.value; return *this; }
+};
+extern "C" int read(Record input) { return input.value; }
+// ----
+func.def public source_signature(#func.abi.c.signature<arguments = [1], results = [0], types = [#func.abi.c.type<signed_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>, #func.abi.c.type<record, byte_length = 4, byte_alignment = 4, component_count = 1, name = "Record", fields = [#func.abi.c.field<"value", type = 0, byte_offset = 0>]>]>) @read(%input_value: i32) -> (i32) {
+  func.return %input_value : i32
+}
+
+// ====
+// Pointer passing preserves the pointee's identity without transferring its
+// construction or destruction across the C call boundary.
+struct Record { int value; ~Record() {} };
+extern "C" int read(const Record* input) { return input->value; }
+// ----
+func.def public source_signature(#func.abi.c.signature<arguments = [0], results = [1], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<signed_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @read(%input: buffer, %input_byte_offset: offset) -> (i32) {
+  %3 = index.constant 0 : offset
+  %4 = index.add %input_byte_offset, %3 : offset
+  %5 = buffer.view %input[%4] : buffer -> view<1xi32>
+  %value = view.load %5[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
