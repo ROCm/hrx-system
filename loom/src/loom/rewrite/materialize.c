@@ -208,7 +208,25 @@ static iree_status_t loom_ir_clone_op_attrs(loom_ir_remap_t* remap,
                                             const loom_op_t* source_op,
                                             loom_attribute_t* target_attrs) {
   const loom_attribute_t* source_attrs = loom_op_const_attrs(source_op);
+  // Identity clones can retain immutable module-owned payloads when no symbol
+  // or SSA reference inside them needs remapping.
+  const bool can_reuse_payloads =
+      remap->source_module == remap->target_module &&
+      !remap->remap_same_module_symbols;
+  if (!can_reuse_payloads) {
+    for (uint8_t i = 0; i < source_op->attribute_count; ++i) {
+      IREE_RETURN_IF_ERROR(
+          loom_ir_remap_attribute(remap, source_attrs[i], &target_attrs[i]));
+    }
+    return iree_ok_status();
+  }
+  const loom_attribute_owner_id_t* source_owners =
+      loom_op_attribute_owners(source_op);
   for (uint8_t i = 0; i < source_op->attribute_count; ++i) {
+    if (source_owners[i] == 0) {
+      target_attrs[i] = source_attrs[i];
+      continue;
+    }
     IREE_RETURN_IF_ERROR(
         loom_ir_remap_attribute(remap, source_attrs[i], &target_attrs[i]));
   }
