@@ -7,13 +7,10 @@
 #include "libamdf/cts/gpu/linux/io_uring/file_io_resources.h"
 
 #include <fcntl.h>
-#include <linux/magic.h>
-#include <linux/stat.h>
 #include <poll.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <sys/statfs.h>
 #include <sys/syscall.h>
 #include <sys/uio.h>
 #include <sys/utsname.h>
@@ -172,6 +169,11 @@ void GpuFileIoResources::CreateFile(const std::vector<uint32_t>& words,
   data_file_ = mkstemp(path.data());
   ASSERT_GE(data_file_, 0) << std::strerror(errno);
   ASSERT_EQ(unlink(path.c_str()), 0) << std::strerror(errno);
+  ASSERT_NO_FATAL_FAILURE(
+      PrepareFileStorage(data_file_, mode, page_byte_length_));
+  if (::testing::Test::IsSkipped()) {
+    return;
+  }
   size_t written = 0;
   const auto* bytes = reinterpret_cast<const uint8_t*>(words.data());
   const size_t byte_length = words.size() * sizeof(uint32_t);
@@ -188,40 +190,8 @@ void GpuFileIoResources::CreateFile(const std::vector<uint32_t>& words,
     ASSERT_GT(result, 0) << std::strerror(errno);
     written += static_cast<size_t>(result);
   }
-  struct statfs filesystem = {};
-  ASSERT_EQ(fstatfs(data_file_, &filesystem), 0);
-  ::testing::Test::RecordProperty("io_filesystem_type",
-                                  std::to_string(filesystem.f_type));
-  ::testing::Test::RecordProperty(
-      "io_mode", mode == FileMode::kDirect ? "direct" : "buffered");
   if (mode == FileMode::kDirect) {
-    if (filesystem.f_type == TMPFS_MAGIC) {
-      GTEST_SKIP() << "direct-storage witness requires a disk-backed file";
-    }
-    struct statx alignment = {};
-    const int alignment_result = static_cast<int>(syscall(
-        __NR_statx, data_file_, "", AT_EMPTY_PATH, STATX_DIOALIGN, &alignment));
-    if (alignment_result < 0 && (errno == ENOSYS || errno == EOPNOTSUPP)) {
-      GTEST_SKIP() << "statx direct-I/O alignment query is unavailable: "
-                   << std::strerror(errno);
-    }
-    ASSERT_EQ(alignment_result, 0) << std::strerror(errno);
-    if (!(alignment.stx_mask & STATX_DIOALIGN) ||
-        alignment.stx_dio_mem_align == 0 ||
-        alignment.stx_dio_offset_align == 0) {
-      GTEST_SKIP() << "filesystem does not report a direct-I/O contract";
-    }
-    ASSERT_EQ(page_byte_length_ % alignment.stx_dio_mem_align, 0u);
-    ASSERT_EQ(page_byte_length_ % alignment.stx_dio_offset_align, 0u);
-    ::testing::Test::RecordProperty("io_direct_memory_alignment",
-                                    alignment.stx_dio_mem_align);
-    ::testing::Test::RecordProperty("io_direct_offset_alignment",
-                                    alignment.stx_dio_offset_align);
-    ASSERT_EQ(fdatasync(data_file_), 0) << std::strerror(errno);
-    const int flags = fcntl(data_file_, F_GETFL);
-    ASSERT_GE(flags, 0);
-    ASSERT_EQ(fcntl(data_file_, F_SETFL, flags | O_DIRECT), 0)
-        << std::strerror(errno);
+    ASSERT_NO_FATAL_FAILURE(EnableDirectFileIo(data_file_, byte_length));
   }
 }
 
@@ -495,9 +465,8 @@ void GpuFileIoResources::VerifyFile(const std::vector<uint32_t>& expected_file,
   // Verification happens only after the GPU consumed and reloaded the
   // payload. Clearing O_DIRECT here cannot change the qualified device path.
   if (mode == FileMode::kDirect) {
-    const int flags = fcntl(data_file_, F_GETFL);
-    ASSERT_GE(flags, 0);
-    ASSERT_EQ(fcntl(data_file_, F_SETFL, flags & ~O_DIRECT), 0);
+    ASSERT_NO_FATAL_FAILURE(
+        FinishDirectFileIo(data_file_, static_cast<size_t>(file_info.st_size)));
   }
   std::vector<uint32_t> actual_file(expected_file.size());
   auto* bytes = reinterpret_cast<uint8_t*>(actual_file.data());

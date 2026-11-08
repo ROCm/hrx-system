@@ -20,10 +20,10 @@
 #include <vector>
 
 #include "amdf/gpu.h"
+#include "libamdf/cts/gpu/linux/file_storage.h"
 #include "libamdf/cts/gpu/util/memory.h"
 #include "util/wait.h"
 
-enum class FileMode { kBuffered, kDirect };
 enum class FileIoPath {
   kDevice,
   kDeviceWait,
@@ -52,8 +52,8 @@ class GpuFileIoResources {
   // Registers ordinary WB caller pages without assuming CPU/GPU VA identity.
   void CreateRegisteredPages(size_t byte_length, uint32_t initial_word,
                              GpuMemory** out_memory);
-  // Creates and unlinks a private file; direct mode requires its native
-  // contract.
+  // Creates and unlinks a private file. Direct mode prepares its native storage
+  // policy before seeding, then flushes and evicts the seed before execution.
   void CreateFile(const std::vector<uint32_t>& words, FileMode mode);
   // Retains fixed file/buffer references and enables a restricted native ring.
   // Ordinary host submission has no SQPOLL thread. Entry count is a power of
@@ -80,7 +80,8 @@ class GpuFileIoResources {
   // unread CQ occupancy, close the notification race. With no pending I/O,
   // returns so the caller can observe GPU-only admission and termination.
   void ServiceDeviceIo(uint64_t* enter_calls, uint64_t* wait_calls);
-  // Checks every byte after GPU retirement; direct mode ends before this read.
+  // After GPU retirement, checks that direct I/O left the file cache empty,
+  // then ends direct mode and verifies every byte through a buffered read.
   void VerifyFile(const std::vector<uint32_t>& expected_file, FileMode mode);
 
   // Native page size used by registration, ring storage, guards and file

@@ -4,12 +4,26 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
 load("//libamdf/build_tools/bazel:cts.bzl", "amdf_cts_test_suite")
 
 package(
     default_visibility = ["//visibility:private"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
+)
+
+amdf_cc_library(
+    name = "file_storage",
+    testonly = True,
+    srcs = ["file_storage.cc"],
+    hdrs = ["file_storage.h"],
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//libamdf/cts/gpu/linux/io_uring:__pkg__"],
+    deps = [
+        "//third_party:google_test",
+        "//third_party:linux_io_uapi",
+    ],
 )
 
 amdf_cts_test_suite(
@@ -28,6 +42,7 @@ amdf_cts_test_suite(
     }),
     visibility = ["//visibility:public"],
     deps = [
+        ":file_storage",
         "//libamdf/cts/gpu/aql:dispatch_fixture",
         "//libamdf/cts/gpu/kernels:transform",
         "//libamdf/cts/gpu/kernels:transform_kernels",
