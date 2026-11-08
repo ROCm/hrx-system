@@ -70,7 +70,7 @@ void observe(unsigned v78);
 
 [[loom::symbol("cleanup_return")]]
 unsigned cleanup_return(bool choose) {
-  unsigned v3 = unsigned{};
+  unsigned v3{};
   if (choose) {
     Guard___Guard_value(2u);
     Guard___Guard_value(1u);
@@ -108,7 +108,7 @@ void cleanup_expressions(bool choose) {
   auto* v32 = loom::buffer::alloca<loom::memory_space::private_, 1>(loom::type::offset{1});
   auto v34 = loom::buffer::view<1>(v32, {});
   loom::view::store(loom::convert<unsigned char>(0), v34, 0);
-  unsigned v37 = unsigned{};
+  unsigned v37{};
   if (choose) {
     loom::type::offset v41 = loom::type::offset{0} + loom::type::offset{0};
     loom::assume(loom::predicate::range(v41, 0, 0));

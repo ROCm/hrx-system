@@ -100,7 +100,7 @@ float configured_scalars();
 
 [[loom::symbol("configured_scalars")]]
 float configured_scalars() {
-  float v5 = float{};
+  float v5{};
   if (enabled) {
     v5 = scale;
   } else {

@@ -1,0 +1,308 @@
+// Fresh resource results preserve branch effects, callable exits, and
+// cleanup through public C++ export, reimport, and execution.
+// RUN: emit vm-object-lifetime
+#include <loomcxx/view.h>
+
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+using Buffer = loom::type::buffer<const unsigned char>;
+struct Slice {
+  // Selected immutable resource.
+  Buffer data;
+  // Scalar returned alongside the selected resource.
+  unsigned last;
+};
+struct Marker {
+  // Cleanup event identifying this scope.
+  unsigned value;
+  ~Marker() { event(value); }
+};
+
+[[loom::noinline]] static Slice choose(Slice incoming, bool first, bool early) {
+  Marker marker{8};
+  Slice selected = incoming;
+  if (first) {
+    event(1);
+    if (early) {
+      return {loom::buffer::root(loom::buffer::constant("\x07")), 0};
+    }
+    selected = {loom::buffer::root(loom::buffer::constant("\x16\x17")), 1};
+  } else {
+    event(2);
+    selected = {loom::buffer::root(loom::buffer::constant("\x21\x22\x23")), 2};
+  }
+  event(3);
+  return selected;
+}
+
+[[loom::noinline]] static void trial(bool first, bool early) {
+  Slice initial{loom::buffer::root(loom::buffer::constant("\x0b")), 0};
+  Slice selected = choose(initial, first, early);
+  event(loom::view::load(loom::buffer::view<1>(selected.data, {}), 0));
+  event(selected.last);
+}
+
+void run() {
+  trial(false, false);
+  trial(false, true);
+  trial(true, false);
+  trial(true, true);
+}
+
+// ----
+event 2
+event 3
+event 8
+event 33
+event 2
+event 2
+event 3
+event 8
+event 33
+event 2
+event 1
+event 3
+event 8
+event 22
+event 1
+event 1
+event 8
+event 7
+event 0
+OK 0
+retired 0
+
+// ====
+// Numeric results retain their widths, lane values, and address domains.
+// RUN: emit vm-object-lifetime
+#include <loomcxx/index.h>
+
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+template <class T>
+[[loom::noinline]] T choose(T first, T second, bool condition) {
+  T result = first;
+  if (condition) {
+    result = first;
+  } else {
+    result = second;
+  }
+  return result;
+}
+
+using Vector = unsigned __attribute__((ext_vector_type(4)));
+
+[[loom::noinline]] static void trial(bool condition) {
+  auto wide = choose(0x10000000bull, 0x200000016ull, condition);
+  event(static_cast<unsigned>(wide >> 32));
+  event(static_cast<unsigned>(wide));
+  event(static_cast<unsigned>(choose(13.0f, 23.0f, condition)));
+  event(static_cast<unsigned>(choose(14.0, 24.0, condition)));
+  auto position =
+      choose(loom::type::index{15}, loom::type::index{25}, condition);
+  event(loom::index::cast<unsigned>(position));
+  auto origin =
+      choose(loom::type::offset{16}, loom::type::offset{26}, condition);
+  event(loom::offset::cast<unsigned>(origin));
+  auto lanes =
+      choose(Vector{17, 18, 19, 20}, Vector{27, 28, 29, 30}, condition);
+  event(lanes[0]);
+  event(lanes[3]);
+}
+
+void run() {
+  trial(true);
+  trial(false);
+}
+
+// ----
+event 1
+event 11
+event 13
+event 14
+event 15
+event 16
+event 17
+event 20
+event 2
+event 22
+event 23
+event 24
+event 25
+event 26
+event 27
+event 30
+OK 0
+retired 0
+
+// ====
+// RUN: emit vm-object-lifetime
+#include <loomcxx/view.h>
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+using Buffer = loom::type::buffer<const unsigned char>;
+struct Marker {
+  // Cleanup event identifying this scope.
+  unsigned value;
+  ~Marker() { event(value); }
+};
+[[loom::noinline]] static unsigned first_byte(Buffer data) {
+  return loom::view::load(loom::buffer::view<1>(data, {}), 0);
+}
+[[loom::noinline]] static Buffer choose(Buffer first, Buffer second,
+                                        unsigned stop) {
+  Marker outer{9};
+  Buffer result;
+  unsigned index = 0;
+  do {
+    Marker inner{8};
+    result = first;
+    if (index == stop) {
+      break;
+    }
+    result = second;
+    ++index;
+  } while (index < 4);
+  return result;
+}
+void run() {
+  auto first = loom::buffer::root(loom::buffer::constant("\x16"));
+  auto second = loom::buffer::root(loom::buffer::constant("\x21"));
+  event(first_byte(choose(first, second, 0)));
+  event(first_byte(choose(first, second, 2)));
+}
+
+// ----
+event 8
+event 9
+event 22
+event 8
+event 8
+event 8
+event 9
+event 22
+OK 0
+retired 0
+
+// ====
+// RUN: emit vm-object-lifetime
+#include <loomcxx/view.h>
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+using Buffer = loom::type::buffer<const unsigned char>;
+struct Marker {
+  // Cleanup event identifying this scope.
+  unsigned value;
+  ~Marker() { event(value); }
+};
+[[loom::noinline]] static unsigned first_byte(Buffer data) {
+  return loom::view::load(loom::buffer::view<1>(data, {}), 0);
+}
+[[loom::noinline]] static Buffer choose(Buffer first, Buffer second,
+                                        bool early) {
+  Marker outer{9};
+  Buffer result;
+  unsigned index = 0;
+  do {
+    Marker inner{8};
+    if (early && index == 1) {
+      return second;
+    }
+    result = first;
+    ++index;
+  } while (index < 3);
+  event(7);
+  return result;
+}
+void run() {
+  auto first = loom::buffer::root(loom::buffer::constant("\x16"));
+  auto second = loom::buffer::root(loom::buffer::constant("\x21"));
+  event(first_byte(choose(first, second, false)));
+  event(first_byte(choose(first, second, true)));
+}
+
+// ----
+event 8
+event 8
+event 8
+event 7
+event 9
+event 22
+event 8
+event 8
+event 9
+event 33
+OK 0
+retired 0
+
+// ====
+// RUN: emit vm-object-lifetime
+#include <loomcxx/view.h>
+
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+using Buffer = loom::type::buffer<const unsigned char>;
+
+struct Owners {
+  // First independently replaceable root.
+  Buffer first;
+  // Second independently replaceable root.
+  Buffer second;
+};
+
+[[loom::noinline]] static void observe(Buffer payload) {
+  event(loom::view::load(loom::buffer::view<1>(payload, {}), 0));
+}
+
+[[loom::noinline]] static Owners replace_and_read(Owners current, Buffer next,
+                                                  bool replace_second,
+                                                  bool observe_second) {
+  if (replace_second) {
+    current.second = next;
+  } else {
+    current.first = next;
+  }
+  if (observe_second) {
+    observe(current.second);
+  } else {
+    observe(current.first);
+  }
+  return current;
+}
+
+[[loom::noinline]] static void trial(bool replace_second, bool observe_second) {
+  Owners owners{loom::buffer::root(loom::buffer::constant("\x0b")),
+                loom::buffer::root(loom::buffer::constant("\x0c"))};
+  auto saved = owners.first;
+  owners = replace_and_read(owners,
+                            loom::buffer::root(loom::buffer::constant("\x16")),
+                            replace_second, observe_second);
+  observe(saved);
+  observe(owners.first);
+  observe(owners.second);
+}
+
+void run() {
+  trial(false, false);
+  trial(false, true);
+  trial(true, false);
+  trial(true, true);
+}
+
+// ----
+event 22
+event 11
+event 22
+event 12
+event 12
+event 11
+event 22
+event 12
+event 11
+event 11
+event 11
+event 22
+event 22
+event 11
+event 11
+event 22
+OK 0
+retired 0

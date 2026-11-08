@@ -58,6 +58,7 @@ loom_check_test_suite(
         "reference_transfers.loom-test",
         "storage.loom-test",
         "storage_transfers.loom-test",
+        "structured_results.loom-test",
     ],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/emit:vm_binary",
@@ -83,6 +84,15 @@ loom_check_test(
 )
 
 loom_check_test(
+    name = "structured_results_cxx_test",
+    src = "structured_results.cxx-test",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/emit:vm_binary",
+    ]),
+)
+
+loom_check_test(
     name = "special_members_test",
     src = "special_members.cxx-test",
     target_compatible_with = loom_config_compatible_with([
@@ -100,11 +110,15 @@ iree_py_test(
         "--checker=$(rootpath //loom/src/loom/tools/loom-check:loom-check-test)",
         "--source=$(rootpath special_members.cxx-test)",
         "--source=$(rootpath value_evaluation.cxx-test)",
+        "--source=$(rootpath structured_results.cxx-test)",
+        "--source=$(rootpath structured_results.loom-test)",
         "--source=$(rootpath buffer_projection.loom-test)",
     ],
     data = [
         "buffer_projection.loom-test",
         "special_members.cxx-test",
+        "structured_results.cxx-test",
+        "structured_results.loom-test",
         "value_evaluation.cxx-test",
         "//loom/src/loom/tools/loom-check:loom-check-test",
         "//loom/src/loom/tools/loom-import-cxx",

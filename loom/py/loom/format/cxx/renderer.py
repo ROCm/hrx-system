@@ -816,36 +816,25 @@ class CxxRenderer(CxxFunctionRenderer):
         self._render_block(block, yield_targets=results)
         self.writer.close()
 
-    def _while_result_initializer(self, result: int, initial: list[int]) -> str:
+    def _declare_structured_result(self, result: int) -> None:
+        """Declares the source value supplied by every continuing region edge."""
+
         value_type = self.module.values[result].type
-        result_type = repr(value_type)
-        for source in initial:
-            if (
-                isinstance(value_type, BufferType)
-                and isinstance(self.module.values[source].type, BufferType)
-                and (
-                    self.buffer_access.is_immutable(result, self.buffer_projection)
-                    or not self.buffer_access.is_immutable(
-                        source, self.buffer_projection
-                    )
-                )
-            ):
-                return self._buffer_argument(source, self._buffer_element(result))
-            if self._compatible_cxx_carrier(result, source):
-                return self._loop_initializer(source)
+        type_name = self._function_result_component_type(result)
+        # Explicit initialization keeps ordinary numeric locals on the value
+        # path. Resource handles begin their lifetime without a payload.
+        initializer = ""
         if isinstance(value_type, ScalarType):
-            if result_type in {"index", "offset"}:
-                return self._literal(0, result)
-            return f"{self.cpp_type(result)}{{}}"
-        if (
+            initializer = "{0}" if repr(value_type) in {"index", "offset"} else "{}"
+        elif (
             isinstance(value_type, ShapedType)
             and value_type.type_kind == TypeKind.VECTOR
         ):
-            return f"{self.cpp_type(result)}{{}}"
-        raise CxxRenderError(
-            None,
-            f"while result type {value_type!r} has no initializable C++ carrier",
-        )
+            initializer = "{}"
+        name = self.names[result]
+        self.expressions[result] = name
+        self.expression_types[result] = type_name
+        self.writer.line(f"{type_name} {name}{initializer};")
 
     def _assign_values(
         self, targets: Sequence[int | None], sources: Sequence[int]
@@ -1058,15 +1047,7 @@ class CxxRenderer(CxxFunctionRenderer):
             for index, result in enumerate(results):
                 if index in forward_only:
                     continue
-                self._declare(
-                    result,
-                    self._while_result_initializer(result, initial),
-                    expression_type=(
-                        self._function_result_component_type(result)
-                        if isinstance(self.module.values[result].type, BufferType)
-                        else None
-                    ),
-                )
+                self._declare_structured_result(result)
             header_targets = [
                 None if index in forward_only else argument
                 for index, argument in enumerate(before.arg_ids)
@@ -1091,7 +1072,7 @@ class CxxRenderer(CxxFunctionRenderer):
 
         continuation = self._temporary_name("loop_continues")
         self.writer.line(f"bool {continuation} = true;")
-        self.writer.open(f"while ({continuation})")
+        self.writer.open("do")
         self._render_block(
             before,
             condition_target=continuation,
@@ -1103,7 +1084,7 @@ class CxxRenderer(CxxFunctionRenderer):
         self.writer.open(f"if ({continuation})")
         self._render_block(after, yield_targets=header_targets)
         self.writer.close()
-        self.writer.close()
+        self.writer.close(f" while ({continuation});")
 
     def _render_if(self, operation: Operation) -> None:
         resolved = self._resolved(operation)
@@ -1121,7 +1102,7 @@ class CxxRenderer(CxxFunctionRenderer):
                     assignment_target_id
                 )
             else:
-                self._declare(result, f"{self.cpp_type(result)}{{}}")
+                self._declare_structured_result(result)
         then_region = resolved.region("then_region")
         else_region = resolved.region("else_region")
         if then_region is None or len(then_region.blocks) != 1:
