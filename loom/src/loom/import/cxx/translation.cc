@@ -84,6 +84,13 @@
 namespace loom::cxx_import {
 namespace {
 class Translator final : private Initialization::Evaluation {
+  struct Mutation {
+    // Automatic binding owning this complete source subobject.
+    cxx::Symbol* binding;
+    // Retained type and component slice carried across the region edge.
+    ValueProjection projection;
+  };
+
  public:
   Translator(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
              loom_module_t* module, const loom_cxx_import_options_t& options)
@@ -677,6 +684,11 @@ class Translator final : private Initialization::Evaluation {
                         source_object_type(active.binding), active.destruction,
                         active.source);
       } else {
+        if (!values_.initialized(active.binding)) {
+          fail(active.source,
+               "destruction of a semantic value requires all receiver "
+               "subobjects to be initialized");
+        }
         destroy_value(values_.at(active.binding), active.destruction,
                       active.source);
       }
@@ -1459,6 +1471,9 @@ class Translator final : private Initialization::Evaluation {
   Value binding(cxx::Symbol* symbol, cxx::AST* owner) {
     auto found = locals_.find(symbol);
     if (found == locals_.end()) {
+      if (!values_.initialized(symbol)) {
+        fail(owner, "source value is read before initialization");
+      }
       return values_.at(symbol);
     }
     if (unit_.typeTraits().is_array(source_object_type(symbol))) {
@@ -1541,15 +1556,22 @@ class Translator final : private Initialization::Evaluation {
       activate_automatic_destruction(variable, owner);
       return;
     }
-    IREE_ASSERT(initializer);
+    if (!requires_initialization) {
+      values_.declare(variable, types_.partition(variable->type(), owner));
+      activate_automatic_destruction(variable, owner);
+      return;
+    }
     types_.partition(variable->type(), owner);
     if (types_.address_domain(types_.unqualified(variable->type()), owner) ==
         LOOM_SCALAR_TYPE_NONE) {
       types_.admit_construction(variable->constructor(), variable->type(),
                                 owner);
     }
-    auto value =
-        apply_constexpr_contract(expression(initializer), constexpr_contract);
+    auto value = apply_constexpr_contract(
+        initializer ? expression(initializer)
+                    : initialization_.value(variable->type(), nullptr,
+                                            variable->constructor(), owner),
+        constexpr_contract);
     adopt_temporary_result(initializer, value);
     values_.set(variable, name(value, cxx::to_string(variable->name())));
     activate_automatic_destruction(variable, owner);
@@ -2192,10 +2214,15 @@ class Translator final : private Initialization::Evaluation {
 
   Value read(const ObjectLvalue& target, cxx::AST* owner) {
     if (auto* destination = std::get_if<Destination>(&target.location)) {
-      auto value = values_.at(destination->binding);
-      return destination->member ? value.project(*destination->member,
-                                                 destination->component_offset)
-                                 : value;
+      const auto& partition = destination->member
+                                  ? *destination->member
+                                  : values_.partition(destination->binding);
+      auto value = values_.project(destination->binding, partition,
+                                   destination->component_offset, value_arena_);
+      if (!value) {
+        fail(owner, "source subobject is read before initialization");
+      }
+      return *value;
     }
     if (auto* object = std::get_if<StorageProjection>(&target.location)) {
       return objects_.load(*object, target.type, owner);
@@ -2206,13 +2233,18 @@ class Translator final : private Initialization::Evaluation {
 
   void write(const ObjectLvalue& target, Value value, cxx::AST* owner) {
     if (auto* destination = std::get_if<Destination>(&target.location)) {
-      auto binding = values_.at(destination->binding);
-      values_.set(destination->binding,
-                  name(destination->member
-                           ? value_arena_.replace(
-                                 binding, destination->component_offset, value)
-                           : value,
-                       cxx::to_string(destination->binding->name())));
+      if (destination->member) {
+        values_.replace(destination->binding, destination->component_offset,
+                        value, value_arena_);
+        if (values_.initialized(destination->binding)) {
+          values_.set(destination->binding,
+                      name(values_.at(destination->binding),
+                           cxx::to_string(destination->binding->name())));
+        }
+      } else {
+        values_.set(destination->binding,
+                    name(value, cxx::to_string(destination->binding->name())));
+      }
     } else if (auto* object =
                    std::get_if<StorageProjection>(&target.location)) {
       objects_.store(*object, value, target.type, owner);
@@ -2527,10 +2559,10 @@ class Translator final : private Initialization::Evaluation {
     auto* pointer_type = unit_.typeTraits().add_pointer(ast->type);
     std::vector<const cxx::Type*> sources = {pointer_type};
     sources.reserve(1 + written.size());
-    for (auto* symbol : written) {
-      sources.push_back(types_.unqualified_value(source_object_type(symbol)));
+    for (const auto& mutation : written) {
+      sources.push_back(mutation.projection.type);
     }
-    auto initial = current(written);
+    auto initial = values_;
     auto source = locations_.get(ast);
     auto outputs = bind_signature(types_, sources, ast, &builder_);
     loom_op_t* op;
@@ -2553,9 +2585,10 @@ class Translator final : private Initialization::Evaluation {
       loom_builder_restore(&builder_, saved);
     };
     build_arm(loom_scf_if_then_region(op), ast->iftrueExpression);
-    bind_values(written, initial.data());
+    values_ = initial;
     build_arm(loom_scf_if_else_region(op), ast->iffalseExpression);
     conditional_cleanup_anchors_.pop_back();
+    values_ = std::move(initial);
     bind_values(written,
                 loom_op_results(op) + kPointerPartition.component_count);
     return value_arena_.capture(
@@ -4005,10 +4038,10 @@ class Translator final : private Initialization::Evaluation {
     if constexpr (has_value) {
       sources.push_back(ast->type);
     }
-    for (auto* symbol : written) {
-      sources.push_back(types_.unqualified_value(source_object_type(symbol)));
+    for (const auto& mutation : written) {
+      sources.push_back(mutation.projection.type);
     }
-    auto initial = current(written);
+    auto initial = values_;
     auto source = locations_.get(ast);
     auto outputs = bind_signature(types_, sources, ast, &builder_);
     loom_op_t* op;
@@ -4033,7 +4066,7 @@ class Translator final : private Initialization::Evaluation {
     check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
                                source, &yield));
     loom_builder_restore(&builder_, saved);
-    bind_values(written, initial.data());
+    values_ = initial;
     saved =
         loom_builder_enter_region(&builder_, op, loom_scf_if_else_region(op));
     temporary_mark = temporary_destructions_.size();
@@ -4051,6 +4084,7 @@ class Translator final : private Initialization::Evaluation {
                                source, &yield));
     loom_builder_restore(&builder_, saved);
     conditional_cleanup_anchors_.pop_back();
+    values_ = std::move(initial);
     bind_values(written, loom_op_results(op) + value_count);
     if constexpr (has_value) {
       return value_arena_.capture(types_.partition(ast->type, ast),
@@ -4072,9 +4106,9 @@ class Translator final : private Initialization::Evaluation {
     // Source conditional whose unfinished arms this frame owns.
     cxx::ConditionalExpressionAST* expression;
     // Source bindings that either arm may replace.
-    std::vector<cxx::Symbol*> written;
-    // Binding components restored before entering the else arm.
-    std::vector<loom_value_id_t> initial;
+    std::vector<Mutation> written;
+    // Binding availability restored before entering either continuation.
+    ValueBindings initial;
     // Structured conditional receiving the two source arm values.
     loom_op_t* operation;
     // Insertion point enclosing |operation|.
@@ -4098,10 +4132,10 @@ class Translator final : private Initialization::Evaluation {
         types_.partition(expression->type, expression).component_count;
     std::vector<const cxx::Type*> sources = {expression->type};
     sources.reserve(1 + written.size());
-    for (auto* symbol : written) {
-      sources.push_back(types_.unqualified_value(source_object_type(symbol)));
+    for (const auto& mutation : written) {
+      sources.push_back(mutation.projection.type);
     }
-    auto initial = current(written);
+    auto initial = values_;
     auto outputs = bind_signature(types_, sources, expression, &builder_);
     loom_op_t* operation;
     check(loom_scf_if_build(&builder_, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION,
@@ -4141,6 +4175,7 @@ class Translator final : private Initialization::Evaluation {
     IREE_ASSERT(!conditional_cleanup_anchors_.empty());
     IREE_ASSERT_EQ(conditional_cleanup_anchors_.back(), frame.operation);
     conditional_cleanup_anchors_.pop_back();
+    values_ = frame.initial;
     bind_values(frame.written,
                 loom_op_results(frame.operation) + frame.value_count);
     return value_arena_.capture(
@@ -4193,7 +4228,7 @@ class Translator final : private Initialization::Evaluation {
       value.reset();
       if (frame.building_then) {
         loom_builder_restore(&builder_, frame.enclosing);
-        bind_values(frame.written, frame.initial.data());
+        values_ = frame.initial;
         loom_builder_enter_region(&builder_, frame.operation,
                                   loom_scf_if_else_region(frame.operation));
         frame.building_then = false;
@@ -4598,6 +4633,9 @@ class Translator final : private Initialization::Evaluation {
       if (auto found = values_.find(id->symbol); found != values_.end()) {
         return found->second;
       }
+      if (values_.contains(id->symbol)) {
+        fail(ast, "source value is read before initialization");
+      }
       if (locals_.contains(id->symbol)) {
         return binding(id->symbol, ast);
       }
@@ -4717,6 +4755,11 @@ class Translator final : private Initialization::Evaluation {
         if (unit_.typeTraits().is_lvalue_reference(field->type()) &&
             !types_.pointer_reference_is_snapshot(field)) {
           return name(load(ast), cxx::to_string(field->name()));
+        }
+        if (auto destination = control_->destination(member);
+            destination && values_.contains(destination->binding) &&
+            !locals_.contains(destination->binding)) {
+          return read(ObjectLvalue{member->type, *destination}, member);
         }
         auto value = expression(member->baseExpression);
         auto slice = types_.selection(field, member->subobjectPath, ast);
@@ -5144,8 +5187,8 @@ class Translator final : private Initialization::Evaluation {
     }
     const size_t control_count = sources.size();
     sources.reserve(control_count + written.size());
-    for (auto* symbol : written) {
-      sources.push_back(types_.unqualified_value(source_object_type(symbol)));
+    for (const auto& mutation : written) {
+      sources.push_back(mutation.projection.type);
     }
     auto source = locations_.get(owner);
     auto result_signature = bind_signature(types_, sources, owner, &builder_);
@@ -5438,8 +5481,8 @@ class Translator final : private Initialization::Evaluation {
     }
     const size_t control_count = sources.size();
     sources.reserve(control_count + written.size());
-    for (auto* symbol : written) {
-      sources.push_back(types_.unqualified_value(source_object_type(symbol)));
+    for (const auto& mutation : written) {
+      sources.push_back(mutation.projection.type);
     }
     auto signature = bind_signature(types_, sources, selection, &builder_);
 
@@ -5558,8 +5601,8 @@ class Translator final : private Initialization::Evaluation {
       }
       const size_t control_count = sources.size();
       sources.reserve(control_count + written.size());
-      for (auto* symbol : written) {
-        sources.push_back(types_.unqualified_value(source_object_type(symbol)));
+      for (const auto& mutation : written) {
+        sources.push_back(mutation.projection.type);
       }
       auto signature = bind_signature(types_, sources, selection, &builder_);
       loom_op_t* op;
@@ -6021,8 +6064,8 @@ class Translator final : private Initialization::Evaluation {
       auto written = live_mutations(ast);
       std::vector<const cxx::Type*> sources;
       sources.reserve(written.size());
-      for (auto* symbol : written) {
-        sources.push_back(types_.unqualified_value(source_object_type(symbol)));
+      for (const auto& mutation : written) {
+        sources.push_back(mutation.projection.type);
       }
       auto results = bind_signature(types_, sources, ast, &builder_);
       loom_op_t* op;
@@ -6142,8 +6185,8 @@ class Translator final : private Initialization::Evaluation {
     auto outer_values = values_;
     std::vector<const cxx::Type*> sources = {unit_.control()->getBoolType()};
     sources.reserve(1 + written.size());
-    for (auto* symbol : written) {
-      sources.push_back(types_.unqualified_value(source_object_type(symbol)));
+    for (const auto& mutation : written) {
+      sources.push_back(mutation.projection.type);
     }
     auto source = locations_.get(owner);
     auto result_signature = bind_signature(types_, sources, owner, &builder_);
@@ -6179,13 +6222,13 @@ class Translator final : private Initialization::Evaluation {
   // Executes a loop latch only when the body reaches it. The inactive arm
   // forwards source state, skipping a for step and condition reinitialization.
   template <typename Execute>
-  void guarded_latch(cxx::AST* owner, const std::vector<cxx::Symbol*>& written,
+  void guarded_latch(cxx::AST* owner, const std::vector<Mutation>& written,
                      loom_value_id_t active, Execute execute) {
     auto outer_values = values_;
     std::vector<const cxx::Type*> sources;
     sources.reserve(written.size());
-    for (auto* symbol : written) {
-      sources.push_back(types_.unqualified_value(source_object_type(symbol)));
+    for (const auto& mutation : written) {
+      sources.push_back(mutation.projection.type);
     }
     auto source = locations_.get(owner);
     auto result_signature = bind_signature(types_, sources, owner, &builder_);
@@ -6231,26 +6274,37 @@ class Translator final : private Initialization::Evaluation {
     }
     auto written = live_mutations(ast);
     if (decision && values_.contains(decision)) {
-      std::erase(written, decision);
-      written.push_back(decision);
+      std::erase_if(written, [&](const auto& value) {
+        return value.binding == decision;
+      });
+      written.push_back(whole_mutation(decision));
     }
-    auto initial = current(written);
+    auto incoming = live_mutations(control_->written(ast));
+    if (decision && values_.contains(decision)) {
+      std::erase_if(incoming, [&](const auto& value) {
+        return value.binding == decision;
+      });
+      incoming.push_back(whole_mutation(decision));
+    }
+    size_t result_count = 0;
+    for (const auto& mutation : written) {
+      result_count += mutation.projection.partition->component_count;
+    }
+    auto initial = current(incoming);
     auto outer_values = values_;
     auto source = locations_.get(ast);
     auto dependent_state_sources = dependent_source_types(written, ast);
     auto bind_loop_signatures =
         [&](std::span<const loom_type_t> header_suffix_types,
             bool require_result_types) {
-          if (!dependent_state_sources.empty()) {
+          bool distinct_header = incoming.size() != written.size();
+          if (!dependent_state_sources.empty() || require_result_types ||
+              distinct_header) {
+            auto header_sources = source_types(incoming);
+            auto result_sources = source_types(written);
             return bind_condition_loop_signatures(
-                types_, dependent_state_sources, ast, &builder_,
-                header_suffix_types, require_result_types);
-          }
-          if (require_result_types) {
-            auto state_sources = source_types(written);
-            return bind_condition_loop_signatures(
-                types_, state_sources, ast, &builder_, header_suffix_types,
-                require_result_types);
+                types_, header_sources, result_sources, ast, &builder_,
+                header_suffix_types, require_result_types || distinct_header);
           }
           return BoundConditionLoopSignatures{};
         };
@@ -6283,11 +6337,11 @@ class Translator final : private Initialization::Evaluation {
             &builder_, header_initial.data(), header_initial.size(),
             signatures.header_types.empty() ? nullptr
                                             : signatures.header_types.data(),
-            signatures.result_types.data(), initial.size(), nullptr, 0, source,
+            signatures.result_types.data(), result_count, nullptr, 0, source,
             &op));
         auto* before = loom_scf_while_before(op);
         auto saved = loom_builder_enter_region(&builder_, op, before);
-        bind(written, before);
+        bind(incoming, before);
         auto header_active =
             loom_region_entry_arg_id(before, header_initial.size() - 1u);
         auto condition =
@@ -6325,7 +6379,7 @@ class Translator final : private Initialization::Evaluation {
             }
           });
         }
-        auto yielded = current(written);
+        auto yielded = current(incoming);
         yielded.push_back(flow.reaches_latch);
         check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
                                    source, &terminator));
@@ -6339,10 +6393,10 @@ class Translator final : private Initialization::Evaluation {
                                             : signatures.header_types.data(),
             signatures.result_types.empty() ? nullptr
                                             : signatures.result_types.data(),
-            initial.size(), nullptr, 0, source, &op));
+            result_count, nullptr, 0, source, &op));
         auto* before = loom_scf_while_before(op);
         auto saved = loom_builder_enter_region(&builder_, op, before);
-        bind(written, before);
+        bind(incoming, before);
         auto flow = loop_body(body, /*tracks_break=*/true);
         auto condition =
             guarded_condition(ast, flow.reaches_latch, evaluate_condition);
@@ -6360,7 +6414,7 @@ class Translator final : private Initialization::Evaluation {
           reinitialize_condition(declaration, constexpr_contract, ast);
           finish_full_expression(mark);
         }
-        auto yielded = current(written);
+        auto yielded = current(incoming);
         check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
                                    source, &terminator));
         loom_builder_restore(&builder_, saved);
@@ -6382,10 +6436,10 @@ class Translator final : private Initialization::Evaluation {
                                         : signatures.header_types.data(),
         signatures.result_types.empty() ? nullptr
                                         : signatures.result_types.data(),
-        initial.size(), nullptr, 0, source, &op));
+        result_count, nullptr, 0, source, &op));
     auto* before = loom_scf_while_before(op);
     auto saved = loom_builder_enter_region(&builder_, op, before);
-    bind(written, before);
+    bind(incoming, before);
     if (test == LoopTest::AfterBody) {
       loop_body(body);
     }
@@ -6415,7 +6469,7 @@ class Translator final : private Initialization::Evaluation {
       reinitialize_condition(declaration, constexpr_contract, ast);
       finish_full_expression(mark);
     }
-    auto yielded = current(written);
+    auto yielded = current(incoming);
     check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
                                source, &terminator));
     loom_builder_restore(&builder_, saved);
@@ -6495,7 +6549,8 @@ class Translator final : private Initialization::Evaluation {
                       ? expression(schedule.unroll_factor()).ssa()
                       : 0;
     auto written = live_mutations(loop);
-    std::erase(written, induction);
+    std::erase_if(
+        written, [&](const auto& value) { return value.binding == induction; });
     auto initial = current(written);
     BoundSignature result_signature;
     auto state_sources = dependent_source_types(written, loop);
@@ -6533,69 +6588,105 @@ class Translator final : private Initialization::Evaluation {
     bind_values(written, loom_op_results(op));
   }
 
-  std::vector<cxx::Symbol*> live_mutations(cxx::AST* owner) {
-    return live_mutations(control_->written(owner));
+  Mutation whole_mutation(cxx::Symbol* symbol) {
+    return {symbol,
+            {types_.unqualified_value(source_object_type(symbol)),
+             &values_.partition(symbol), 0}};
   }
 
-  std::vector<cxx::Symbol*> live_mutations(
-      std::span<cxx::Symbol* const> candidates) {
-    std::vector<cxx::Symbol*> result;
+  std::vector<Mutation> live_mutations(cxx::AST* owner) {
+    return live_mutations(control_->written(owner), owner);
+  }
+
+  std::vector<Mutation> live_mutations(std::span<cxx::Symbol* const> candidates,
+                                       cxx::AST* owner = nullptr) {
+    std::vector<Mutation> result;
     for (auto* symbol : candidates) {
-      if (values_.contains(symbol)) {
-        result.push_back(symbol);
+      if (auto found = values_.find(symbol); found != values_.end()) {
+        result.push_back({symbol,
+                          {types_.unqualified_value(source_object_type(symbol)),
+                           &found->second.partition(), 0}});
+        continue;
+      }
+      if (!values_.contains(symbol)) {
+        continue;
+      }
+      auto* type = types_.unqualified_value(source_object_type(symbol));
+      for (const auto& projection :
+           types_.projections(type, current_function_.source)) {
+        if (values_.initialized(symbol, projection.component_offset,
+                                projection.partition->component_count) ||
+            (owner && control_->initialized(owner, symbol, projection))) {
+          result.push_back({symbol, projection});
+        }
       }
     }
     return result;
   }
 
   std::vector<const cxx::Type*> source_types(
-      std::span<cxx::Symbol* const> symbols) {
+      std::span<const Mutation> mutations) {
     std::vector<const cxx::Type*> result;
-    result.reserve(symbols.size());
-    for (auto* symbol : symbols) {
-      result.push_back(types_.unqualified_value(source_object_type(symbol)));
+    result.reserve(mutations.size());
+    for (const auto& mutation : mutations) {
+      result.push_back(mutation.projection.type);
     }
     return result;
   }
 
-  // Returns the complete state type list only when at least one source type
-  // depends on destination identities. Ordinary scalar loops take the empty,
-  // allocation-free path and let the generated builders infer their schemes.
+  // Ordinary scalar loops keep inferred schemes; dependent source groups bind
+  // their destination identities before region or result creation.
   std::vector<const cxx::Type*> dependent_source_types(
-      std::span<cxx::Symbol* const> symbols, cxx::AST* owner) {
-    for (auto* symbol : symbols) {
-      if (types_.requires_binding(
-              types_.unqualified_value(source_object_type(symbol)), owner)) {
-        return source_types(symbols);
+      std::span<const Mutation> mutations, cxx::AST* owner) {
+    for (const auto& mutation : mutations) {
+      if (types_.requires_binding(mutation.projection.type, owner)) {
+        return source_types(mutations);
       }
     }
     return {};
   }
 
-  std::vector<loom_value_id_t> current(
-      const std::vector<cxx::Symbol*>& symbols) {
+  std::vector<loom_value_id_t> current(std::span<const Mutation> mutations) {
     std::vector<loom_value_id_t> result;
-    for (auto* symbol : symbols) {
-      values_.at(symbol).append_to(result);
+    for (const auto& mutation : mutations) {
+      auto value =
+          values_.project(mutation.binding, *mutation.projection.partition,
+                          mutation.projection.component_offset, value_arena_);
+      if (!value) {
+        fail(current_function_.source,
+             "source state is not initialized on every continuing path");
+      }
+      value->append_to(result);
     }
     return result;
   }
-  void bind(const std::vector<cxx::Symbol*>& symbols, loom_region_t* region,
-            size_t index = 0) {
-    for (auto* symbol : symbols) {
-      const auto& partition = values_.at(symbol).partition();
-      values_.set(symbol, name(region_value(region, index, partition),
-                               cxx::to_string(symbol->name())));
+
+  void bind_mutation(const Mutation& mutation, Value value) {
+    auto* binding = mutation.binding;
+    value = name(value, cxx::to_string(binding->name()));
+    if (&value.partition() == &values_.partition(binding)) {
+      values_.set(binding, value);
+    } else {
+      values_.replace(binding, mutation.projection.component_offset, value,
+                      value_arena_);
     }
   }
-  void bind_values(const std::vector<cxx::Symbol*>& symbols,
+
+  void bind(std::span<const Mutation> mutations, loom_region_t* region,
+            size_t index = 0) {
+    for (const auto& mutation : mutations) {
+      bind_mutation(mutation, region_value(region, index,
+                                           *mutation.projection.partition));
+    }
+  }
+
+  void bind_values(std::span<const Mutation> mutations,
                    const loom_value_id_t* components) {
-    for (auto* symbol : symbols) {
-      const auto& partition = values_.at(symbol).partition();
+    for (const auto& mutation : mutations) {
+      const auto& partition = *mutation.projection.partition;
       auto count = partition.component_count;
-      values_.set(symbol,
-                  name(value_arena_.capture(partition, {components, count}),
-                       cxx::to_string(symbol->name())));
+      bind_mutation(mutation,
+                    value_arena_.capture(partition, {components, count}));
       if (count) {
         components += count;
       }

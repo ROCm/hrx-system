@@ -210,14 +210,17 @@ int* local(int* input) {
 }
 
 // ====
-// RUN: verify
-// An indeterminate pointer object still needs a memory representation before
-// a later source assignment can initialize it.
+// RUN: roundtrip
+// Declaration-only pointers acquire their complete root/origin group on
+// assignment without creating an addressable pointer object.
 int* deferred(int* input) {
-  // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
   int* result;
   result = input;
   return result;
+}
+// ----
+func.def public @deferred(%input: buffer, %input_byte_offset: offset) -> (buffer, offset) {
+  func.return %input, %input_byte_offset : buffer, offset
 }
 
 // ====

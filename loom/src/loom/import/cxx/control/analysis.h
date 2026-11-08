@@ -21,6 +21,7 @@
 #include <variant>
 #include <vector>
 
+#include "loom/import/cxx/control/construction.h"
 #include "loom/import/cxx/lifetime/destruction.h"
 #include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/value/types.h"
@@ -273,6 +274,14 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Whether this source function invokes a synthesized default constructor
   // whose retained plan initializes at least one subobject.
   bool default_constructor_initializes(cxx::FunctionSymbol* constructor) const;
+  // Definite availability of a complete subobject on this owner's outgoing
+  // nonreturning paths. Initialized input components remain available too.
+  bool initialized(cxx::AST* owner, cxx::Symbol* binding,
+                   const ValueProjection& projection) const {
+    return construction_.initialized(owner, binding,
+                                     projection.component_offset,
+                                     projection.partition->component_count);
+  }
   // Frontend-completed array-member copy, retained before call propagation.
   const ArrayCopyInitialization* array_copy(cxx::AST* initializer) const;
   // Whether a reference parameter must carry durable storage identity.
@@ -376,6 +385,10 @@ class ControlFlow final : private cxx::ASTVisitor {
   void visit(cxx::DefaultStatementAST* ast) override;
   void visit(cxx::CompoundStatementAST* ast) override;
   void visit(cxx::IfStatementAST* ast) override;
+  void visit(cxx::WhileStatementAST* ast) override;
+  void visit(cxx::DoStatementAST* ast) override;
+  void visit(cxx::ForStatementAST* ast) override;
+  void visit(cxx::ConditionalExpressionAST* ast) override;
   void visit(cxx::SwitchStatementAST* ast) override;
   void visit(cxx::AssignmentExpressionAST* ast) override;
   void visit(cxx::BinaryExpressionAST* ast) override;
@@ -501,6 +514,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Active write-summary owners during construction only, including direct
   // for-loop bodies without a compound statement.
   std::vector<cxx::AST*> owners_;
+  // Sparse source-construction facts propagated during this same traversal.
+  Construction construction_;
   // Stable encounter order determines region argument/result order.
   std::unordered_map<cxx::AST*, std::vector<cxx::Symbol*>> writes_;
   // Sparse physical-representation facts indexed by source binding identity.

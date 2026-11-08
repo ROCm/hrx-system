@@ -42,6 +42,17 @@ struct SubobjectPartition {
   size_t component_offset;
 };
 
+// One independently constructed source subobject. Dependent handles remain
+// complete groups: a view's dimensions, encoding, and payload travel together.
+struct ValueProjection {
+  // Source type supplying the destination's dependent type scheme.
+  const cxx::Type* type;
+  // Complete semantic partition of this subobject.
+  const Partition* partition;
+  // First component relative to the complete enclosing source value.
+  size_t component_offset;
+};
+
 // Canonical source record structure, built once at admission. Members retain
 // their own partitions so nested dependent values bind types from the current
 // destination identities instead of caching another value's extents/layout.
@@ -381,6 +392,12 @@ class Types {
   // identities. Such values must use append_bound() after reserving every
   // destination component ID in transport order.
   bool requires_binding(const cxx::Type* input, cxx::AST* owner);
+  // Whether this source type contains handles without a native byte-storage
+  // representation. Native objects retain their ordinary storage semantics.
+  bool requires_value_transport(const cxx::Type* input);
+  // Cached independently constructible groups, in source declaration order.
+  std::span<const ValueProjection> projections(const cxx::Type* input,
+                                               cxx::AST* owner);
   // Returns a record's admitted source schema, or null for a non-record type.
   const RecordPartition* record(const cxx::Type* input, cxx::AST* owner);
   // Whether a member call may replace value components of its receiver. Const
@@ -552,6 +569,11 @@ class Types {
   std::unordered_set<cxx::FieldSymbol*> pointer_reference_snapshots_;
   // Completed memory admission; layouts remain owned by the source symbols.
   std::unordered_set<cxx::ClassSymbol*> storage_records_;
+  // Source representation classification, independent of SSA admission.
+  std::unordered_map<const cxx::Type*, bool> value_transport_;
+  // Flattened construction groups computed once by source type admission.
+  std::unordered_map<const cxx::Type*, std::vector<ValueProjection>>
+      construction_groups_;
 };
 
 }  // namespace loom::cxx_import

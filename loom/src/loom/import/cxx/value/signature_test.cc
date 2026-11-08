@@ -163,14 +163,14 @@ TEST_F(ValueBuilderTest, LeavesStaticConditionLoopSignaturesInferred) {
       source_.unit().control()->getUnsignedIntType()};
 
   auto condition = bind_condition_loop_signatures(
-      types_, sources, source_.unit().ast(), &builder_);
+      types_, sources, sources, source_.unit().ast(), &builder_);
   EXPECT_TRUE(condition.identities.empty());
   EXPECT_TRUE(condition.header_types.empty());
   EXPECT_TRUE(condition.result_types.empty());
   EXPECT_EQ(builder_.reserved_value_count, 0u);
 
   auto differing_arity = bind_condition_loop_signatures(
-      types_, sources, source_.unit().ast(), &builder_, {},
+      types_, sources, sources, source_.unit().ast(), &builder_, {},
       /*require_result_types=*/true);
   EXPECT_TRUE(differing_arity.identities.empty());
   EXPECT_TRUE(differing_arity.header_types.empty());
@@ -229,7 +229,7 @@ TEST_F(ValueBuilderTest, BindsConditionLoopHeaderAndResultsIndependently) {
   const std::array<loom_type_t, 1> header_suffix = {
       loom_type_scalar(LOOM_SCALAR_TYPE_I1)};
   auto signatures = bind_condition_loop_signatures(
-      types, sources, source.unit().ast(), &builder_, header_suffix,
+      types, sources, sources, source.unit().ast(), &builder_, header_suffix,
       /*require_result_types=*/true);
   ASSERT_EQ(signatures.identities.size(), 7u);
   ASSERT_EQ(signatures.header_types.size(), 4u);
@@ -265,6 +265,26 @@ TEST_F(ValueBuilderTest, BindsConditionLoopHeaderAndResultsIndependently) {
   auto after_view = loom_module_value_type(module_, after->arg_ids[2]);
   EXPECT_EQ(loom_type_dim_value_id_at(after_view, 0), after->arg_ids[0]);
   EXPECT_EQ(loom_type_encoding_value_id(after_view), after->arg_ids[1]);
+
+  // A post-test loop may first construct its dependent result in the before
+  // region, with no incoming handle or shape identities at all.
+  auto fresh = bind_condition_loop_signatures(
+      types, {}, sources, source.unit().ast(), &builder_, {}, true);
+  ASSERT_TRUE(fresh.header_types.empty());
+  ASSERT_EQ(fresh.result_types.size(), 3u);
+  ASSERT_EQ(fresh.identities.size(), 3u);
+  loom_op_t* fresh_loop;
+  IREE_ASSERT_OK(loom_scf_while_build(&builder_, nullptr, 0, nullptr,
+                                      fresh.result_types.data(), 3, nullptr, 0,
+                                      LOOM_LOCATION_UNKNOWN, &fresh_loop));
+  auto* fresh_before =
+      loom_region_entry_block(loom_scf_while_before(fresh_loop));
+  auto* fresh_after = loom_region_entry_block(loom_scf_while_after(fresh_loop));
+  EXPECT_EQ(fresh_before->arg_count, 0u);
+  ASSERT_EQ(fresh_after->arg_count, 3u);
+  auto fresh_view = loom_module_value_type(module_, fresh_after->arg_ids[2]);
+  EXPECT_EQ(loom_type_dim_value_id_at(fresh_view, 0), fresh_after->arg_ids[0]);
+  EXPECT_EQ(loom_type_encoding_value_id(fresh_view), fresh_after->arg_ids[1]);
 }
 
 }  // namespace

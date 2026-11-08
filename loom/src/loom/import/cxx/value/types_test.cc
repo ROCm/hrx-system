@@ -24,6 +24,44 @@ namespace {
 
 using TypesWithModuleTest = ValueBuilderTest;
 
+TEST_F(TypesWithModuleTest, ConstructionGroupsKeepDependentHandlesWhole) {
+  Source source(IREE_SV(R"(
+    namespace loom::type {
+    using size_type = __SIZE_TYPE__;
+    inline constexpr size_type dynamic = ~size_type{0};
+    template <size_type... Extents>
+    struct [[loom::type("shape")]] shape {};
+    template <class Shape, class T, class Encoding = void>
+    struct [[loom::type("view")]] view {};
+    }
+    using View = loom::type::view<loom::type::shape<loom::type::dynamic>, float>;
+    struct Field { View value; unsigned position; };
+    struct Pair { Field first; Field second; };
+    struct Native { unsigned value; unsigned other; };
+    struct NativeStorage { unsigned bits : 3; };
+  )"),
+                IREE_SV("construction_groups.cxx"), options());
+  Types types(source.unit(), source.diagnostics());
+  auto source_type = [&](const char* name) {
+    return (*source.unit().globalScope()->find(name).begin())->type();
+  };
+  EXPECT_TRUE(types.requires_value_transport(source_type("Pair")));
+  EXPECT_FALSE(types.requires_value_transport(source_type("Native")));
+  // Storage classification must not require value admission of native types.
+  EXPECT_FALSE(types.requires_value_transport(source_type("NativeStorage")));
+  auto groups = types.projections(source_type("Pair"), source.unit().ast());
+  ASSERT_EQ(groups.size(), 4u);
+  EXPECT_EQ(groups[0].partition->kind, ValueKind::View);
+  EXPECT_EQ(groups[0].partition->component_count, 2u);
+  EXPECT_EQ(groups[0].component_offset, 0u);
+  EXPECT_EQ(groups[1].component_offset, 2u);
+  EXPECT_EQ(groups[2].partition, groups[0].partition);
+  EXPECT_EQ(groups[2].component_offset, 3u);
+  EXPECT_EQ(groups[3].component_offset, 5u);
+  EXPECT_EQ(groups.data(),
+            types.projections(source_type("Pair"), source.unit().ast()).data());
+}
+
 TEST_F(TypesWithModuleTest, ProjectsSpecialAndRegisteredOpaqueHandles) {
   Source source(IREE_SV(R"(
     template<class T> struct [[loom::type("buffer")]] Buffer { T* data; };

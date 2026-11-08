@@ -1,0 +1,88 @@
+// RUN: verify
+// Every declaration carrier follows the same source construction contract.
+// Device-only values are verified as High IR rather than executed in the VM.
+#include <loomcxx/pipeline.h>
+#include <loomcxx/vector.h>
+#include <loomcxx/view.h>
+
+template <class T>
+[[loom::noinline]] T choose(T first, T second, bool condition) {
+  T result;
+  if (condition) {
+    result = first;
+  } else {
+    result = second;
+  }
+  return result;
+}
+
+using Scalar = unsigned;
+Scalar choose_scalar(Scalar first, Scalar second, bool condition) {
+  return choose(first, second, condition);
+}
+
+typedef unsigned NativeVector __attribute__((ext_vector_type(4)));
+NativeVector choose_native_vector(NativeVector first, NativeVector second,
+                                  bool condition) {
+  return choose(first, second, condition);
+}
+
+using Pointer = const unsigned char*;
+Pointer choose_pointer(Pointer first, Pointer second, bool condition) {
+  return choose(first, second, condition);
+}
+
+using Buffer = loom::type::buffer<const unsigned char>;
+Buffer choose_buffer(Buffer first, Buffer second, bool condition) {
+  return choose(first, second, condition);
+}
+
+using StaticView = loom::type::view<loom::type::shape<4>, const unsigned char>;
+StaticView choose_static_view(StaticView first, StaticView second,
+                              bool condition) {
+  return choose(first, second, condition);
+}
+
+using DynamicView = loom::type::view<loom::type::shape<loom::type::dynamic>,
+                                     const unsigned char>;
+DynamicView choose_dynamic_view(DynamicView first, DynamicView second,
+                                bool condition) {
+  return choose(first, second, condition);
+}
+
+using Encoding = loom::type::encoding<loom::encoding::role::layout, 1>;
+Encoding choose_encoding(Encoding first, Encoding second, bool condition) {
+  return choose(first, second, condition);
+}
+
+using EncodedView = loom::type::view<loom::type::shape<loom::type::dynamic>,
+                                     const unsigned char, Encoding>;
+EncodedView choose_encoded_view(EncodedView first, EncodedView second,
+                                bool condition) {
+  return choose(first, second, condition);
+}
+
+using Tile = loom::type::tile<loom::type::shape<4>, unsigned>;
+Tile choose_tile(Tile first, Tile second, bool condition) {
+  return choose(first, second, condition);
+}
+
+using Pool = loom::type::pool;
+Pool choose_pool(Pool first, Pool second, bool condition) {
+  return choose(first, second, condition);
+}
+
+using Channel = loom::type::channel<Tile>;
+Channel choose_channel(Channel first, Channel second, bool condition) {
+  return choose(first, second, condition);
+}
+
+using Read = loom::type::read<Tile>;
+Read choose_read(Read first, Read second, bool condition) {
+  return choose(first, second, condition);
+}
+
+using Write = loom::type::write<Tile>;
+Write choose_write(Write first, Write second, bool condition) {
+  return choose(first, second, condition);
+}

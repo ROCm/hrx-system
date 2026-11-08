@@ -1,0 +1,67 @@
+// RUN: roundtrip
+// The branch result contains only the initialized member. No payload is
+// invented for the scalar field that is assigned after the join.
+#include <loomcxx/buffer.h>
+using Buffer = loom::type::buffer<const unsigned char>;
+struct Packet {
+  // Selected resource identity.
+  Buffer data;
+  // Assigned independently after the resource join.
+  unsigned position;
+};
+Packet entry(Buffer first, Buffer second, bool condition) {
+  Packet result;
+  if (condition) {
+    result.data = first;
+  } else {
+    result.data = second;
+  }
+  result.position = 4;
+  return result;
+}
+
+// ----
+func.def public @entry(%first: buffer, %second: buffer, %condition: i1) -> (buffer, i32) {
+  %result = scf.if %condition -> (buffer) {
+    scf.yield %first : buffer
+  } else {
+    scf.yield %second : buffer
+  }
+  %result_position = scalar.constant 4 : i32
+  func.return %result, %result_position : buffer, i32
+}
+
+// ====
+// A post-test loop carries an initialized scalar into its first body while
+// constructing the resource there. The final group has both source members.
+#include <loomcxx/buffer.h>
+using Buffer = loom::type::buffer<const unsigned char>;
+struct Packet {
+  // Initialized in the mandatory first loop body.
+  Buffer data;
+  // Running state carried through each iteration.
+  unsigned position;
+};
+Packet entry(Buffer input, unsigned count) {
+  Packet result;
+  result.position = 0;
+  do {
+    result.data = input;
+    ++result.position;
+  } while (result.position < count);
+  return result;
+}
+
+// ----
+func.def public @entry(%input: buffer, %count: i32) -> (buffer, i32) {
+  %4 = scalar.constant 0 : i32
+  %result$8, %result$9 = scf.while(%result = %4 : i32) -> (buffer, i32) {
+    %10 = scalar.constant 1 : i32
+    %result_position = scalar.addi %result, %10 : i32
+    %12 = scalar.cmpi ult, %result_position, %count : i32
+    scf.condition %12, %input, %result_position : i1, buffer, i32
+  } do(%result$6: buffer, %result$7: i32) {
+    scf.yield %result$7 : i32
+  }
+  func.return %result$8, %result$9 : buffer, i32
+}

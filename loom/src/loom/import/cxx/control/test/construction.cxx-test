@@ -1,0 +1,212 @@
+// RUN: emit vm-object-lifetime
+// Declared semantic values become ordinary SSA only after construction. Each
+// control edge carries complete source subobjects, including dependent groups.
+#include <loomcxx/view.h>
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+using Buffer = loom::type::buffer<const unsigned char>;
+struct Packet {
+  // Independently initialized resource handle.
+  Buffer data;
+  // State that may exist before the resource is selected.
+  unsigned position;
+};
+struct Marker {
+  // Cleanup event identifying this scope.
+  unsigned value;
+  ~Marker() { event(value); }
+};
+[[loom::noinline]] static unsigned first_byte(Buffer data) {
+  return loom::view::load(loom::buffer::view<1>(data, {}), 0);
+}
+[[loom::noinline]] static Packet select(Buffer first, Buffer second,
+                                        bool choose) {
+  Packet result;
+  if (choose) {
+    result.data = first;
+  } else {
+    result.data = second;
+  }
+  result.position = 4;
+  return result;
+}
+[[loom::noinline]] static Packet iterate(Buffer first, Buffer second,
+                                         unsigned count, bool stop) {
+  Marker outer{90};
+  Packet result;
+  result.position = 7;
+  unsigned iteration = 0;
+  do {
+    Marker inner{80};
+    event(result.position);
+    if (iteration & 1) {
+      result.data = second;
+    } else {
+      result.data = first;
+    }
+    ++result.position;
+    ++iteration;
+    if (stop && iteration == 2) {
+      break;
+    }
+    if (iteration < 3) {
+      continue;
+    }
+    event(70);
+  } while (iteration < count);
+  return result;
+}
+[[loom::noinline]] static Buffer early(Buffer first, Buffer second, bool exit) {
+  Marker outer{60};
+  Buffer result;
+  unsigned iteration = 0;
+  do {
+    Marker inner{50};
+    if (exit && iteration == 1) {
+      return first;
+    }
+    result = second;
+    ++iteration;
+  } while (iteration < 2);
+  return result;
+}
+[[loom::noinline]] static Buffer switch_value(Buffer first, Buffer second,
+                                              unsigned choice) {
+  Buffer result;
+  switch (choice) {
+    case 0:
+      result = first;
+      break;
+    case 1:
+      result = second;
+      break;
+    default:
+      result = first;
+      break;
+  }
+  return result;
+}
+[[loom::noinline]] static Buffer conditional(Buffer first, Buffer second,
+                                             bool choose) {
+  Buffer result;
+  choose ? (result = first) : (result = second);
+  return result;
+}
+void run() {
+  auto first = loom::buffer::root(loom::buffer::constant("\x16"));
+  auto second = loom::buffer::root(loom::buffer::constant("\x21"));
+  auto a = select(first, second, true);
+  auto snapshot = a;
+  a.data = second;
+  event(first_byte(snapshot.data));
+  event(first_byte(a.data));
+  event(snapshot.position);
+  auto b = select(first, second, false);
+  event(first_byte(b.data));
+  auto one = iterate(first, second, 1, false);
+  event(first_byte(one.data));
+  event(one.position);
+  auto many = iterate(first, second, 3, false);
+  event(first_byte(many.data));
+  event(many.position);
+  auto stopped = iterate(first, second, 4, true);
+  event(first_byte(stopped.data));
+  event(stopped.position);
+  event(first_byte(early(first, second, true)));
+  event(first_byte(early(first, second, false)));
+  event(first_byte(switch_value(first, second, 0)));
+  event(first_byte(switch_value(first, second, 1)));
+  event(first_byte(switch_value(first, second, 2)));
+  event(first_byte(conditional(first, second, true)));
+  event(first_byte(conditional(first, second, false)));
+}
+
+// ----
+event 22
+event 33
+event 4
+event 33
+event 7
+event 80
+event 90
+event 22
+event 8
+event 7
+event 80
+event 8
+event 80
+event 9
+event 70
+event 80
+event 90
+event 22
+event 10
+event 7
+event 80
+event 8
+event 80
+event 90
+event 33
+event 9
+event 50
+event 50
+event 60
+event 22
+event 50
+event 50
+event 60
+event 33
+event 22
+event 33
+event 22
+event 22
+event 33
+OK 0
+retired 0
+
+// ====
+// RUN: emit vm-object-lifetime
+// A dynamic view is one construction group even though its extent and payload
+// occupy separate SSA values. Replacing it also replaces its dependent extent.
+#include <loomcxx/view.h>
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+using View = loom::type::view<loom::type::shape<loom::type::dynamic>,
+                              const unsigned char>;
+struct Slice {
+  // Complete view, including the current dynamic extent.
+  View data;
+  // Scalar independent of the view's dependent group.
+  unsigned stamp;
+};
+[[loom::inline]] static Slice choose(unsigned count) {
+  Slice result;
+  unsigned index = 0;
+  do {
+    if (index % 2 == 0) {
+      result.data = loom::buffer::view<loom::type::dynamic>(
+          loom::buffer::constant("\x16\x17"), {2});
+      result.stamp = 10;
+    } else {
+      result.data = loom::buffer::view<loom::type::dynamic>(
+          loom::buffer::constant("\x21\x22\x23"), {3});
+      result.stamp = 20;
+    }
+    ++index;
+  } while (index < count);
+  return result;
+}
+void run() {
+  auto first = choose(1);
+  auto second = choose(4);
+  event(loom::view::load(first.data, 0));
+  event(first.stamp);
+  event(loom::view::load(second.data, 0));
+  event(second.stamp);
+}
+
+// ----
+event 22
+event 10
+event 33
+event 20
+OK 0
+retired 0
