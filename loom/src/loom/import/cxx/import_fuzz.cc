@@ -117,13 +117,28 @@ class ImportFuzzState {
   std::array<loom_cxx_preamble_t*, kDataModels.size()> preambles_ = {};
 };
 
+ImportFuzzState& GetImportFuzzState() {
+  static ImportFuzzState state;
+  return state;
+}
+
 }  // namespace
+
+extern "C" int LLVMFuzzerInitialize(int* argc, char*** argv) {
+  (void)argc;
+  (void)argv;
+  // Keep one-time registry and preamble construction outside the per-input
+  // coverage window. Otherwise libFuzzer attributes setup counters to whichever
+  // corpus file happens to run first.
+  (void)GetImportFuzzState();
+  return 0;
+}
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   if (size > kMaximumInputByteCount) {
     return 0;
   }
-  static ImportFuzzState state;
+  ImportFuzzState& state = GetImportFuzzState();
   const size_t data_model_index = size ? data[0] % kDataModels.size() : 0;
   const loom_cxx_fp_model_t fp_model = size > 1 && (data[1] & 1)
                                            ? LOOM_CXX_FP_MODEL_FAST
