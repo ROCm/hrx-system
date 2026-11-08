@@ -121,8 +121,8 @@ typedef struct loom_low_allocation_class_capacity_t {
   loom_low_allocation_location_kind_t location_kind;
   // Maximum allocation units when |is_bounded| is true.
   uint32_t max_units;
-  // Number of bits in one allocation unit.
-  uint16_t alloc_unit_bits;
+  // Number of memory bits in one spilled allocation unit.
+  uint16_t spill_unit_bits;
   // Storage space used when this class spills.
   loom_low_spill_slot_space_t spill_slot_space;
   // True when values in this class can be assigned to spill slots.

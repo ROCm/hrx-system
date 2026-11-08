@@ -3090,8 +3090,8 @@ static iree_status_t loom_low_verify_reg_class(
         reg_class->alloc_unit_bits != 0 || reg_class->allocatable_count != 0 ||
         reg_class->storage.fixed_locations.fixed_location_base != 0 ||
         reg_class->storage.fixed_locations.fixed_location_count != 0 ||
-        reg_class->alias_set_id != 0 ||
-        reg_class->spill_class_id != LOOM_LOW_REG_CLASS_NONE ||
+        reg_class->alias_set_id != 0 || reg_class->spill_unit_bits != 0 ||
+        reg_class->spill_alignment_log2 != 0 ||
         reg_class->full_register_part_mask != 0 ||
         reg_class->spill_slot_space != 0) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -3254,14 +3254,13 @@ static iree_status_t loom_low_verify_reg_class(
                             reg_class_index, fixed_location_base,
                             reg_class->allocatable_count);
   }
-  if (reg_class->spill_class_id != LOOM_LOW_REG_CLASS_NONE &&
-      reg_class->spill_class_id >= descriptor_set->reg_class_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+  if (reg_class->spill_unit_bits == 0 ||
+      (reg_class->spill_alignment_log2 & 15u) >
+          (reg_class->spill_alignment_log2 >> 4)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low register class %" PRIu32
-                            " references spill class %" PRIu16
-                            " but only %" PRIu32 " classes exist",
-                            reg_class_index, reg_class->spill_class_id,
-                            descriptor_set->reg_class_count);
+                            " has invalid spill width or alignment limits",
+                            reg_class_index);
   }
   return iree_ok_status();
 }

@@ -590,7 +590,7 @@ loom_low_allocation_interval_assignment_consumption_query_callback(
 static iree_status_t loom_low_allocation_interval_assignment_spill_traffic(
     loom_low_allocation_interval_assignment_state_t* state,
     const loom_low_allocation_assignment_t* assignment,
-    uint16_t alloc_unit_bits,
+    uint16_t spill_unit_bits,
     loom_low_allocation_spill_plan_traffic_t* out_traffic) {
   IREE_ASSERT(state->spill_traffic_by_value_ordinal);
   const loom_value_ordinal_t value_ordinal = loom_local_value_domain_ordinal(
@@ -600,7 +600,7 @@ static iree_status_t loom_low_allocation_interval_assignment_spill_traffic(
   if (traffic->store_count == UINT32_MAX) {
     IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_traffic(
         state->context->module, state->context->function_cfg_graph, assignment,
-        alloc_unit_bits, &state->spill_traffic_workspace, traffic));
+        spill_unit_bits, &state->spill_traffic_workspace, traffic));
   }
   *out_traffic = *traffic;
   return iree_ok_status();
@@ -615,7 +615,7 @@ static iree_status_t loom_low_allocation_interval_assignment_record_spill(
       &state->result.assignments[assignment_index];
   loom_low_allocation_spill_plan_traffic_t traffic = {0};
   IREE_RETURN_IF_ERROR(loom_low_allocation_interval_assignment_spill_traffic(
-      state, assignment, capacity->alloc_unit_bits, &traffic));
+      state, assignment, capacity->spill_unit_bits, &traffic));
   if (!state->spill_decisions) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         state->scratch_arena, state->interval_count,
@@ -2109,10 +2109,9 @@ static iree_status_t loom_low_allocation_interval_assignment_finalize_spills(
              ->reg_classes[assignment->descriptor_reg_class_id];
     loom_low_allocation_spill_plan_traffic_t traffic = {0};
     IREE_RETURN_IF_ERROR(loom_low_allocation_interval_assignment_spill_traffic(
-        state, assignment, reg_class->alloc_unit_bits, &traffic));
+        state, assignment, reg_class->spill_unit_bits, &traffic));
     IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_append(
-        assignment, decision->assignment_index, reg_class->alloc_unit_bits,
-        (loom_low_spill_slot_space_t)reg_class->spill_slot_space, &traffic,
+        assignment, decision->assignment_index, reg_class, &traffic,
         result->spill_plans, &result->spill_plan_count));
     loom_low_allocation_spill_remark_record(
         result->remarks, &result->remark_count, decision->assignment_index,

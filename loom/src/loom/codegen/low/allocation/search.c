@@ -1370,7 +1370,7 @@ static iree_status_t loom_low_allocation_search_assignment_spill_traffic_cost(
   if (!has_cached_traffic || traffic.store_count == UINT32_MAX) {
     IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_traffic(
         context->module, context->cfg_graph, assignment,
-        capacity->alloc_unit_bits, context->spill_traffic_workspace, &traffic));
+        capacity->spill_unit_bits, context->spill_traffic_workspace, &traffic));
     if (has_cached_traffic) {
       context->spill_traffic_by_value_ordinal[value_ordinal] = traffic;
     }
@@ -2010,7 +2010,7 @@ iree_status_t loom_low_allocation_search_find_active_spill_victim_set(
     // one spill/reload round trip for that temporary footprint instead of
     // treating an incoming spill as an immediately free register assignment.
     const uint64_t definition_bytes =
-        ((uint64_t)incoming.unit_count * capacity->alloc_unit_bits + 7u) / 8u;
+        ((uint64_t)incoming.unit_count * capacity->spill_unit_bits + 7u) / 8u;
     incoming_traffic_cost = iree_math_saturating_add_u64(incoming_traffic_cost,
                                                          definition_bytes * 2u);
     // Compare traffic per remaining register lifetime. Spilling the incoming

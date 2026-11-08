@@ -96,7 +96,8 @@ class WriteInterferenceTest : public ::testing::Test {
     register_class_.name_string_ref = LOOM_STRING_REF(0, 0, 1);
     register_class_.alloc_unit_bits = 32;
     register_class_.allocatable_count = 32768;
-    register_class_.spill_class_id = LOOM_LOW_REG_CLASS_NONE;
+    register_class_.spill_unit_bits = register_class_.alloc_unit_bits;
+    register_class_.spill_alignment_log2 = 0x40;
     operands_[0].role = LOOM_LOW_OPERAND_ROLE_PREDICATE;
     operands_[1].role = LOOM_LOW_OPERAND_ROLE_RESULT;
     operands_[2].role = operands_[3].role = LOOM_LOW_OPERAND_ROLE_OPERAND;

@@ -42,12 +42,14 @@ from loom.target.low_descriptors import (
     OperandFormMatchKind,
     PhysicalRegisterView,
     PressureDelta,
+    RegClass,
     RegClassAlt,
     RegClassAltFlag,
     Resource,
     ResourceKind,
     ScheduleClass,
     ScheduleClassFlag,
+    SpillSlotSpace,
     descriptor_stable_id,
 )
 from loom.target.test.descriptors import (
@@ -976,3 +978,18 @@ def test_operand_form_preserves_effect_identity(change: str) -> None:
     else:
         with pytest.raises(ValueError, match="must preserve semantic effect ordinals"):
             compiler.compile_descriptor_set(descriptor_set)
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"spill_unit_bits": 0},
+        {"spill_unit_bits": 65536},
+        {"spill_min_alignment": 3},
+        {"spill_max_alignment": 65536},
+        {"spill_min_alignment": 64, "spill_max_alignment": 16},
+    ],
+)
+def test_register_spill_layout_rejects_invalid_machine_facts(options) -> None:
+    with pytest.raises(ValueError, match="spill"):
+        RegClass("test.words", 32, SpillSlotSpace.STACK, **options)

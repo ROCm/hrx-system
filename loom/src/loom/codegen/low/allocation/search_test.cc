@@ -122,7 +122,7 @@ loom_low_allocation_class_capacity_t Capacity(uint32_t max_units) {
       .descriptor_reg_class_id = 0,
       .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
       .max_units = max_units,
-      .alloc_unit_bits = 32,
+      .spill_unit_bits = 32,
       .spill_slot_space = LOOM_LOW_SPILL_SLOT_SPACE_UNKNOWN,
       .is_spillable = true,
       .is_bounded = true,
@@ -146,7 +146,8 @@ loom_low_reg_class_t RegClass(uint32_t allocatable_count,
       .flags = flags,
       .alloc_unit_bits = 32,
       .allocatable_count = (uint16_t)allocatable_count,
-      .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+      .spill_unit_bits = 32,
+      .spill_alignment_log2 = 0x40,
   };
   return reg_class;
 }

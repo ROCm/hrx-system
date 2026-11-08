@@ -266,7 +266,7 @@ loom_low_allocation_target_constraints_valid_reg_class_capacity(
       .location_kind =
           loom_low_allocation_storage_reg_class_location_kind(reg_class),
       .max_units = max_units,
-      .alloc_unit_bits = reg_class->alloc_unit_bits,
+      .spill_unit_bits = reg_class->spill_unit_bits,
       .spill_slot_space =
           (loom_low_spill_slot_space_t)reg_class->spill_slot_space,
       .is_spillable = is_spillable,

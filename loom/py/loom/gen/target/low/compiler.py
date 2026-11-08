@@ -1394,18 +1394,6 @@ def compile_descriptor_set(
         instruction_classes,
     )
 
-    changed = True
-    while changed:
-        changed = False
-        for reg_class_name in list(used_reg_class_names):
-            spill_class = reg_class_inputs[reg_class_name].spill_class
-            if spill_class is not None:
-                if spill_class not in reg_class_inputs:
-                    raise ValueError(f"register class '{reg_class_name}' references unknown spill class '{spill_class}'")
-                if spill_class not in used_reg_class_names:
-                    used_reg_class_names.add(spill_class)
-                    changed = True
-
     for part_name in list(used_register_part_names):
         register_part = register_part_inputs[part_name]
         reg_class = reg_class_inputs[register_part.reg_class]

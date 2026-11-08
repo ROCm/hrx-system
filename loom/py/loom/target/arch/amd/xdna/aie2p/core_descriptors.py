@@ -621,6 +621,11 @@ def _reg_classes() -> tuple[RegClass, ...]:
             RegClass(
                 name=_low_register_class_name(machine_name),
                 alloc_unit_bits=machine_class.layout.register_size_bits,
+                spill_unit_bits=machine_class.layout.spill_size_bits,
+                spill_min_alignment=(machine_class.layout.spill_alignment_bits + 7)
+                // 8,
+                spill_max_alignment=(machine_class.layout.spill_alignment_bits + 7)
+                // 8,
                 spill_slot_space=SpillSlotSpace.PRIVATE,
                 flags=(
                     RegClassFlag.PHYSICAL,
@@ -654,6 +659,9 @@ def _reg_classes() -> tuple[RegClass, ...]:
             RegClass(
                 name=register_class_name,
                 alloc_unit_bits=layout.register_size_bits,
+                spill_unit_bits=layout.spill_size_bits,
+                spill_min_alignment=(layout.spill_alignment_bits + 7) // 8,
+                spill_max_alignment=(layout.spill_alignment_bits + 7) // 8,
                 spill_slot_space=SpillSlotSpace.PRIVATE,
                 flags=(
                     RegClassFlag.PHYSICAL,

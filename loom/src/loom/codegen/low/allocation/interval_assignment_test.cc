@@ -205,7 +205,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
       .alloc_unit_bits = 32,
       .allocatable_count = 4,
-      .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+      .spill_unit_bits = 32,
+      .spill_alignment_log2 = 0x40,
   };
   loom_low_descriptor_set_t descriptor_set = {
       .stable_id = descriptor_set_id,
@@ -361,6 +362,25 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   EXPECT_EQ(result.remarks[0].budget_units, 1u);
   EXPECT_EQ(result.remarks[0].required_units, 2u);
 
+  // Wider native memory payloads affect both candidate pruning and the final
+  // reservation. Register capacity and liveness are unchanged.
+  reg_class.spill_unit_bits = 64;
+  reg_class.spill_alignment_log2 = 0x66;
+  result = {};
+  IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(
+      &bounded_context, &decision_arena_, &result));
+  EXPECT_TRUE(result.reached_spill_traffic_limit);
+  EXPECT_EQ(result.spill_traffic_bytes, 32u);
+  spill_traffic_exclusive_limit = 33;
+  result = {};
+  IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(
+      &bounded_context, &decision_arena_, &result));
+  EXPECT_FALSE(result.reached_spill_traffic_limit);
+  ASSERT_EQ(result.spill_plan_count, 1u);
+  EXPECT_EQ(result.spill_plans[0].byte_size, 16u);
+  EXPECT_EQ(result.spill_plans[0].byte_alignment, 64u);
+  EXPECT_EQ(result.spill_traffic_bytes, 32u);
+
   loom_local_value_domain_release(&value_domain);
 }
 
@@ -446,7 +466,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
                LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS,
       .alloc_unit_bits = 512,
       .allocatable_count = 2,
-      .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+      .spill_unit_bits = 512,
+      .spill_alignment_log2 = 0x40,
       .physical_atomic_unit_count = 2,
   };
   loom_low_physical_register_t physical_registers[] = {
@@ -743,7 +764,8 @@ TEST_P(LowFixedSubrangeAssignmentTest, PreservesOffsetAndTiedOwner) {
       .flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
       .alloc_unit_bits = 32,
       .allocatable_count = 8,
-      .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+      .spill_unit_bits = 32,
+      .spill_alignment_log2 = 0x40,
   };
   loom_low_descriptor_set_t descriptor_set = {
       .stable_id = descriptor_set_id,
@@ -922,14 +944,16 @@ class LowRequiredRegisterRelocationTest
             .alloc_unit_bits = 64,
             .allocatable_count = capacity_,
             .alias_set_id = 1,
-            .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+            .spill_unit_bits = 64,
+            .spill_alignment_log2 = 0x40,
         },
         {
             .flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
             .alloc_unit_bits = 32,
             .allocatable_count = 4,
             .alias_set_id = 1,
-            .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+            .spill_unit_bits = 32,
+            .spill_alignment_log2 = 0x40,
         },
     };
     const loom_low_descriptor_set_t descriptors = {
@@ -1307,7 +1331,8 @@ TEST_P(LowLinearEntryPlacementTest, PreservesOrRelocatesIncomingStorage) {
                     : LOOM_LOW_REG_CLASS_FLAG_VIRTUAL_ONLY)),
       .alloc_unit_bits = 32,
       .allocatable_count = physical ? test_case.capacity : uint16_t{0},
-      .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+      .spill_unit_bits = 32,
+      .spill_alignment_log2 = 0x40,
   };
   const loom_low_descriptor_set_t descriptors = {
       .stable_id = 17,

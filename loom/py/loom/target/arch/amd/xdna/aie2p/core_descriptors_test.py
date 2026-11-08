@@ -598,6 +598,15 @@ def test_low_register_classes_retain_machine_candidate_order() -> None:
                 register_class.physical_registers
                 == machine_classes[register_class.name].candidates
             )
+            layout = machine_classes[register_class.name].layout
+            assert register_class.spill_unit_bits == layout.spill_size_bits
+            assert (
+                register_class.spill_min_alignment
+                == (layout.spill_alignment_bits + 7) // 8
+            )
+            assert (
+                register_class.spill_max_alignment == register_class.spill_min_alignment
+            )
         assert RegClassFlag.PHYSICAL in register_class.flags
         assert RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS in register_class.flags
         assert RegClassFlag.UNSPILLABLE in register_class.flags

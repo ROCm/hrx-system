@@ -168,7 +168,8 @@ TEST_F(LowAllocationCoalescingTest, ConcatRequiresCompatibleSourceStorage) {
       .flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
       .alloc_unit_bits = 32,
       .allocatable_count = 8,
-      .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+      .spill_unit_bits = 32,
+      .spill_alignment_log2 = 0x40,
   };
   loom_low_descriptor_set_t descriptor_set = {
       .stable_id = 17,

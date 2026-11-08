@@ -18,8 +18,6 @@
 #include "loom/util/adaptive_sort.h"
 #include "loom/util/cfg_graph.h"
 
-#define LOOM_LOW_ALLOCATION_SPILL_PLAN_MAX_NATURAL_ALIGNMENT 16u
-
 // Operand spilling does not rewrite attributes or dependent types. Their
 // referenced argument retains its definition and incoming payloads, with a
 // store at block entry instead of predecessor stores and argument removal.
@@ -44,29 +42,35 @@ static uint32_t loom_low_allocation_spill_plan_natural_chunk_units(
   return 1;
 }
 
-iree_status_t loom_low_allocation_spill_plan_layout(
-    const loom_low_allocation_assignment_t* assignment,
-    uint16_t alloc_unit_bits, uint32_t* out_byte_size,
-    uint32_t* out_byte_alignment) {
-  uint64_t bit_size = (uint64_t)assignment->unit_count * alloc_unit_bits;
-  uint64_t byte_size = (bit_size + 7u) / 8u;
+static iree_status_t loom_low_allocation_spill_plan_byte_size(
+    uint32_t unit_count, uint16_t spill_unit_bits, uint32_t* out_byte_size) {
+  const uint64_t byte_size = ((uint64_t)unit_count * spill_unit_bits + 7u) / 8u;
   if (byte_size > UINT32_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "spill slot byte size exceeds uint32_t");
   }
-  uint32_t unit_byte_size = ((uint32_t)alloc_unit_bits + 7u) / 8u;
+  *out_byte_size = (uint32_t)byte_size;
+  return iree_ok_status();
+}
+
+iree_status_t loom_low_allocation_spill_plan_layout(
+    const loom_low_allocation_assignment_t* assignment,
+    const loom_low_reg_class_t* reg_class, uint32_t* out_byte_size,
+    uint32_t* out_byte_alignment) {
+  IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_byte_size(
+      assignment->unit_count, reg_class->spill_unit_bits, out_byte_size));
+  const uint32_t unit_byte_size =
+      ((uint32_t)reg_class->spill_unit_bits + 7u) / 8u;
   const uint32_t chunk_units =
       loom_low_allocation_spill_plan_natural_chunk_units(
           assignment->unit_count);
-  uint64_t natural_alignment = (uint64_t)unit_byte_size * chunk_units;
-  if (natural_alignment >
-      LOOM_LOW_ALLOCATION_SPILL_PLAN_MAX_NATURAL_ALIGNMENT) {
-    natural_alignment = LOOM_LOW_ALLOCATION_SPILL_PLAN_MAX_NATURAL_ALIGNMENT;
-  }
-  const uint32_t byte_alignment =
-      iree_math_round_up_to_pow2_u32((uint32_t)natural_alignment);
-  *out_byte_size = (uint32_t)byte_size;
-  *out_byte_alignment = byte_alignment;
+  const uint32_t minimum_alignment = 1u
+                                     << (reg_class->spill_alignment_log2 & 15u);
+  const uint32_t maximum_alignment = 1u
+                                     << (reg_class->spill_alignment_log2 >> 4);
+  *out_byte_alignment = iree_math_round_up_to_pow2_u32(
+      iree_max(minimum_alignment,
+               iree_min(unit_byte_size * chunk_units, maximum_alignment)));
   return iree_ok_status();
 }
 
@@ -1622,34 +1626,32 @@ static iree_status_t loom_low_allocation_spill_plan_traffic_for_layout(
 iree_status_t loom_low_allocation_spill_plan_traffic(
     const loom_module_t* module, const loom_cfg_graph_t* cfg_graph,
     const loom_low_allocation_assignment_t* assignment,
-    uint16_t alloc_unit_bits,
+    uint16_t spill_unit_bits,
     loom_low_allocation_spill_plan_traffic_workspace_t* workspace,
     loom_low_allocation_spill_plan_traffic_t* out_traffic) {
   uint32_t byte_size = 0;
-  uint32_t byte_alignment = 0;
-  IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_layout(
-      assignment, alloc_unit_bits, &byte_size, &byte_alignment));
+  IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_byte_size(
+      assignment->unit_count, spill_unit_bits, &byte_size));
   return loom_low_allocation_spill_plan_traffic_for_layout(
       module, cfg_graph, assignment, byte_size, workspace, out_traffic);
 }
 
 iree_status_t loom_low_allocation_spill_plan_append(
     const loom_low_allocation_assignment_t* assignment,
-    uint32_t assignment_index, uint16_t alloc_unit_bits,
-    loom_low_spill_slot_space_t spill_slot_space,
+    uint32_t assignment_index, const loom_low_reg_class_t* reg_class,
     const loom_low_allocation_spill_plan_traffic_t* traffic,
     loom_low_allocation_spill_plan_t* spill_plans,
     iree_host_size_t* inout_spill_plan_count) {
   uint32_t byte_size = 0;
   uint32_t byte_alignment = 0;
   IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_layout(
-      assignment, alloc_unit_bits, &byte_size, &byte_alignment));
+      assignment, reg_class, &byte_size, &byte_alignment));
 
   spill_plans[(*inout_spill_plan_count)++] = (loom_low_allocation_spill_plan_t){
       .value_id = assignment->value_id,
       .assignment_index = assignment_index,
       .slot_index = assignment->location_base,
-      .slot_space = spill_slot_space,
+      .slot_space = (loom_low_spill_slot_space_t)reg_class->spill_slot_space,
       .byte_size = byte_size,
       .byte_alignment = byte_alignment,
       .store_count = traffic->store_count,

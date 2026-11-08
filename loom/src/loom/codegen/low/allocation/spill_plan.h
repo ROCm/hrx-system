@@ -245,7 +245,7 @@ enum {
 // Computes the byte size and alignment required for spilling |assignment|.
 iree_status_t loom_low_allocation_spill_plan_layout(
     const loom_low_allocation_assignment_t* assignment,
-    uint16_t alloc_unit_bits, uint32_t* out_byte_size,
+    const loom_low_reg_class_t* reg_class, uint32_t* out_byte_size,
     uint32_t* out_byte_alignment);
 
 // Returns true and the complete result byte size when |use_op| is a slice of
@@ -294,17 +294,16 @@ iree_status_t loom_low_allocation_spill_plan_traffic_workspace_initialize(
 iree_status_t loom_low_allocation_spill_plan_traffic(
     const loom_module_t* module, const loom_cfg_graph_t* cfg_graph,
     const loom_low_allocation_assignment_t* assignment,
-    uint16_t alloc_unit_bits,
+    uint16_t spill_unit_bits,
     loom_low_allocation_spill_plan_traffic_workspace_t* workspace,
     loom_low_allocation_spill_plan_traffic_t* out_traffic);
 
 // Appends the spill materialization plan for |assignment| using its previously
 // computed |traffic|. The traffic fact must describe the same assignment and
-// allocation-unit width passed here.
+// memory width retained by |reg_class|.
 iree_status_t loom_low_allocation_spill_plan_append(
     const loom_low_allocation_assignment_t* assignment,
-    uint32_t assignment_index, uint16_t alloc_unit_bits,
-    loom_low_spill_slot_space_t spill_slot_space,
+    uint32_t assignment_index, const loom_low_reg_class_t* reg_class,
     const loom_low_allocation_spill_plan_traffic_t* traffic,
     loom_low_allocation_spill_plan_t* spill_plans,
     iree_host_size_t* inout_spill_plan_count);
