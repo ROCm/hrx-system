@@ -366,6 +366,8 @@ typedef struct loom_aie2p_native_distribution_t {
   struct loom_aie2p_native_distribution_t* next;
   // First geometry owning this physical engine/route path; self when unshared.
   const struct loom_aie2p_native_distribution_t* path;
+  // First invocation selecting this geometry; later uses retain its identity.
+  const loom_pipeline_invocation_t* invocation;
   // Canonical ownership and copy schedule used to intern geometry variants.
   const loom_pipeline_transport_batch_t* source;
   // Loop table owning source; shared geometries may come from different calls.
@@ -438,6 +440,15 @@ typedef struct loom_aie2p_native_distribution_command_t {
   // Selected reuse group for this controller's status observation.
   loom_aie2p_native_retirement_t* retirement;
 } loom_aie2p_native_distribution_command_t;
+
+// Descriptor state restored at the channel's construction boundary,
+// independently of the child visits that submit work using that descriptor.
+typedef struct loom_aie2p_native_endpoint_initialization_t {
+  // Next distinct endpoint initialized by this construction on this engine.
+  const struct loom_aie2p_native_endpoint_initialization_t* next;
+  // Selected partial-ring iterator, already retired before owner reentry.
+  const loom_aie2p_native_distribution_endpoint_t* endpoint;
+} loom_aie2p_native_endpoint_initialization_t;
 
 typedef enum loom_aie2p_native_execution_e {
   LOOM_AIE2P_NATIVE_EXECUTION_CORE,
@@ -615,6 +626,9 @@ typedef struct loom_aie2p_native_context_t {
   // NULL when there are no ordered distributions. Each row retains the
   // invocation's complete transitive execution participants.
   iree_host_size_t* distribution_controllers;
+  // Invocation-major per-engine descriptor initialization. NULL when every
+  // endpoint finishes a complete ring turn or belongs to root configuration.
+  const loom_aie2p_native_endpoint_initialization_t** endpoint_initializers;
   // Physical join selected for each canonical execution schedule row.
   loom_aie2p_native_join_t** joins;
   // Distinct join trees; equal participant sets share one initialized instance.
@@ -684,6 +698,20 @@ iree_status_t loom_aie2p_native_emit_configuration(
 iree_status_t loom_aie2p_native_emit_programs(
     loom_aie2p_native_context_t* context, loom_rewriter_t* rewriter,
     const loom_pipeline_realization_t* realization, bool* out_valid);
+
+// Binds unique native endpoint state to its channel's constructing owner.
+// Existing distribution controller selection and retirement precede this
+// step. It consumes retained geometry and ownership, without source traversal.
+iree_status_t loom_aie2p_native_select_initializers(
+    loom_aie2p_native_context_t* context,
+    const loom_pipeline_realization_t* realization, bool* out_valid);
+
+// Initializes this engine's selected descriptors at construction entry. Task
+// publication remains at the transferring child's entry, which may repeat while
+// the constructing owner and its hardware iterator stay live.
+iree_status_t loom_aie2p_native_initialize_endpoints(
+    loom_aie2p_native_context_t* context, loom_builder_t* builder,
+    iree_host_size_t engine, const loom_pipeline_invocation_t* invocation);
 
 // Selects the lock trees consumed by serial child retirement, using retained
 // engine participation and physical resource capacities only.

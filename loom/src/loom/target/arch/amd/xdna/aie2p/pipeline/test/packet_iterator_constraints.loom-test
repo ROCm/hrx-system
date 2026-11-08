@@ -1,0 +1,119 @@
+// RUN: emit source-low @entry target=amd.xdna.aie2p:amd.xdna.strix.17f0_10 output=none
+
+// A partial receiver turn followed by a different packet geometry cannot
+// start an independent iterator at slot zero. The second geometry completes
+// a whole turn, but the preceding geometry has already advanced the ring.
+aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
+
+func.def inline @drain(%channel: channel<tile<1xi32>>, %output: buffer, %base: offset, %count: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %bytes = index.constant 4 : offset
+  %increment = scalar.constant 1 : i32
+  scf.for %record = [%begin to %count step %step] {
+    %read, %payload = channel.acquire<mutable> %channel : channel<tile<1xi32>> -> (read<tile<1xi32>, mutable>, view<1xi32>)
+    %value = view.load %payload[0] : view<1xi32> -> i32
+    %adjusted = scalar.addi %value, %increment : i32
+    view.store %adjusted, %payload[0] : i32, view<1xi32>
+    %relative = index.scale %record, %bytes : index, offset -> offset
+    %offset = index.add %base, %relative : offset
+    %external = buffer.view %output[%offset] : buffer -> view<1xi32>
+    %copy = kernel.async.copy %payload to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<1xi32> to view<1xi32> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<1xi32>, mutable>
+  }
+  func.return
+}
+
+pipeline.def @partial() run(%source: channel<tile<1xi32>>, %left: channel<tile<1xi32>>, %right: channel<tile<1xi32>>, %input: buffer, %output_left: buffer, %output_right: buffer, %offset: offset, %right_offset: offset) {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %external = buffer.view %input[%offset] : buffer -> view<1xi32>
+    %write, %payload = channel.reserve %source : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+    %copy = kernel.async.copy %external to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<1xi32> to view<1xi32> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.publish %write : write<tile<1xi32>>
+    func.call @drain(%left, %output_left, %offset, %c1) : (channel<tile<1xi32>>, buffer, offset, index)
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %read, %payload = channel.acquire %source : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+    %a, %b, %c, %keep = channel.fanout %read : read<tile<1xi32>> -> (read<tile<1xi32>>, read<tile<1xi32>>, read<tile<1xi32>>, read<tile<1xi32>>)
+    %wa, %pa = channel.reserve %left : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+    channel.copy %a -> %wa : read<tile<1xi32>>, write<tile<1xi32>>
+    %wb, %pb = channel.reserve %right : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+    channel.copy %b -> %wb : read<tile<1xi32>>, write<tile<1xi32>>
+    %wc, %pc = channel.reserve %right : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+    channel.copy %c -> %wc : read<tile<1xi32>>, write<tile<1xi32>>
+    channel.release %keep : read<tile<1xi32>>
+  }
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    func.call @drain(%right, %output_right, %right_offset, %c2) : (channel<tile<1xi32>>, buffer, offset, index)
+  }
+}
+
+pipeline.def @whole() run(%source: channel<tile<1xi32>>, %left: channel<tile<1xi32>>, %right: channel<tile<1xi32>>, %input: buffer, %output_left: buffer, %output_right: buffer, %offset: offset, %right_offset: offset) {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %external = buffer.view %input[%offset] : buffer -> view<1xi32>
+    %write, %payload = channel.reserve %source : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+    %copy = kernel.async.copy %external to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<1xi32> to view<1xi32> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.publish %write : write<tile<1xi32>>
+    func.call @drain(%left, %output_left, %offset, %c3) : (channel<tile<1xi32>>, buffer, offset, index)
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    // ERROR@+1: XDNA/051 {requirement="complete destination-ring turns on the same packet path"}
+    %read, %payload = channel.acquire %source : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+    %a, %b, %c, %d, %e, %keep = channel.fanout %read : read<tile<1xi32>> -> (read<tile<1xi32>>, read<tile<1xi32>>, read<tile<1xi32>>, read<tile<1xi32>>, read<tile<1xi32>>, read<tile<1xi32>>)
+    %wa, %pa = channel.reserve %left : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+    channel.copy %a -> %wa : read<tile<1xi32>>, write<tile<1xi32>>
+    %wd, %pd = channel.reserve %left : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+    channel.copy %d -> %wd : read<tile<1xi32>>, write<tile<1xi32>>
+    %we, %pe = channel.reserve %left : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+    channel.copy %e -> %we : read<tile<1xi32>>, write<tile<1xi32>>
+    %wb, %pb = channel.reserve %right : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+    channel.copy %b -> %wb : read<tile<1xi32>>, write<tile<1xi32>>
+    %wc, %pc = channel.reserve %right : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+    channel.copy %c -> %wc : read<tile<1xi32>>, write<tile<1xi32>>
+    channel.release %keep : read<tile<1xi32>>
+  }
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    func.call @drain(%right, %output_right, %right_offset, %c2) : (channel<tile<1xi32>>, buffer, offset, index)
+  }
+}
+
+pipeline.def<kernel> public retain target(@device) @entry() run(%input_arg: buffer, %left_arg: buffer, %right_arg: buffer) {
+  %input, %output_left, %output_right = buffer.assume.alignment %input_arg, %left_arg, %right_arg {minimum_alignment = 4} : buffer, buffer, buffer
+  %origin = index.constant 0 : offset
+  %source_bytes = index.constant 4 : offset
+  %left_bytes = index.constant 12 : offset
+  %right_bytes = index.constant 8 : offset
+  %begin = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %source_pool = pipeline.memory<workgroup>[0, 1] : pool
+  %left_pool = pipeline.memory<workgroup>[0, 2] : pool
+  %right_pool = pipeline.memory<workgroup>[0, 3] : pool
+  %source_buffer = buffer.alloca<workgroup> pool(%source_pool) align(4) %source_bytes : buffer
+  %source_slots = buffer.view %source_buffer[%origin] : buffer -> view<1x1xi32>
+  %source = channel.bind<fifo> %source_slots, %c1 : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %left_buffer = buffer.alloca<workgroup> pool(%left_pool) align(4) %left_bytes : buffer
+  %left_slots = buffer.view %left_buffer[%origin] : buffer -> view<3x1xi32>
+  %left = channel.bind<fifo> %left_slots, %c3 : view<3x1xi32>, index -> channel<tile<1xi32>>
+  %right_buffer = buffer.alloca<workgroup> pool(%right_pool) align(4) %right_bytes : buffer
+  %right_slots = buffer.view %right_buffer[%origin] : buffer -> view<2x1xi32>
+  %right = channel.bind<fifo> %right_slots, %c2 : view<2x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.serial {
+    pipeline.compose @partial(%source, %left, %right, %input, %output_left, %output_right, %origin, %origin) : (channel<tile<1xi32>>, channel<tile<1xi32>>, channel<tile<1xi32>>, buffer, buffer, buffer, offset, offset)
+    pipeline.compose @whole(%source, %left, %right, %input, %output_left, %output_right, %source_bytes, %right_bytes) : (channel<tile<1xi32>>, channel<tile<1xi32>>, channel<tile<1xi32>>, buffer, buffer, buffer, offset, offset)
+  }
+}
+
+// ----

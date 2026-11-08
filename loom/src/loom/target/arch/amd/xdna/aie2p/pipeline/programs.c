@@ -95,6 +95,8 @@ static iree_status_t loom_aie2p_native_program_boundary(
     IREE_RETURN_IF_ERROR(loom_aie2p_native_initialize_cursors(
         context, builder, state_arguments[0], engine, child->first_channel,
         child->first_channel + child->resources->channel_count));
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_initialize_endpoints(
+        context, builder, engine, child));
   }
   if (child && context->distribution_controllers) {
     const iree_host_size_t worker =

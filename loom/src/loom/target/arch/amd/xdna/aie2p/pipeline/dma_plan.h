@@ -109,6 +109,8 @@ typedef struct loom_aie2p_native_dma_sequence_t {
   uint16_t descriptor_count;
   // Number of autonomous start tasks, bounded by the hardware queue depth.
   uint8_t task_count;
+  // Next logical slot after all tasks, relative to a start at slot zero.
+  uint32_t terminal_slot;
   // The single iterating descriptor ends away from the initial ring slot.
   bool rewind_iteration;
   // Arena-owned complete descriptor images in physical ordinal order.
