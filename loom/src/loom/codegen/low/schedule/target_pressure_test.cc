@@ -688,5 +688,78 @@ TEST_F(RegisterPackingPressureTest, RoundedMembersReleaseOnlyCompleteGroups) {
   }
 }
 
+TEST_F(RegisterPackingPressureTest, CompletionFollowsLiveNominations) {
+  loom_low_schedule_node_t nodes[7] = {};
+  for (auto& node : nodes) {
+    node.scheduled_ordinal = LOOM_LOW_SCHEDULE_NODE_NONE;
+  }
+  loom_low_schedule_value_record_t values[4] = {};
+  for (auto& value : values) {
+    value.register_class_id = 0;
+    value.unit_count = 1;
+  }
+  uint32_t producers[] = {0, 1, 2, 3};
+  uint32_t sinks[] = {4, 5, 4, 6, UINT32_MAX, UINT32_MAX, UINT32_MAX};
+  loom_value_ordinal_t ordinals[] = {0, 1, 2, 3};
+  uint32_t active_sink = LOOM_LOW_SCHEDULE_NODE_NONE;
+  uint32_t active_count = 0;
+  state_.nodes = nodes;
+  state_.values = values;
+  state_.value_producer_nodes = producers;
+  state_.node_register_packing.completion_sinks = sinks;
+  pressure_.block_value_ordinals = ordinals;
+  pressure_.block_value_count = IREE_ARRAYSIZE(ordinals);
+  pressure_.active_register_packing_completion_sinks = &active_sink;
+  pressure_.active_register_packing_completion_value_counts = &active_count;
+  auto add = [&](uint32_t ordinal) {
+    values[ordinal].flags |= LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE;
+    loom_low_schedule_target_pressure_add_packing_completion_value(
+        &state_, &pressure_, ordinal);
+  };
+  auto remove = [&](uint32_t ordinal) {
+    loom_low_schedule_target_pressure_remove_packing_completion_value(
+        &state_, &pressure_, ordinal);
+    values[ordinal].flags &= ~LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE;
+  };
+  auto advance = [&](uint32_t node) {
+    loom_low_schedule_target_pressure_repair_packing_completions(
+        &state_, &pressure_, node);
+  };
+
+  advance(0);
+  EXPECT_EQ(active_sink, LOOM_LOW_SCHEDULE_NODE_NONE);
+  add(1);
+  EXPECT_EQ(active_sink, 5u);
+  add(0);
+  add(2);
+  EXPECT_EQ(active_sink, 4u);
+  EXPECT_EQ(active_count, 2u);
+  remove(0);
+  advance(0);
+  EXPECT_EQ(active_sink, 4u);
+  EXPECT_EQ(active_count, 1u);
+
+  // Scheduling a completion retires its nomination even when its value has
+  // further uses. The next live nomination remains selected independently.
+  nodes[4].scheduled_ordinal = 0;
+  advance(4);
+  EXPECT_EQ(active_sink, 5u);
+  remove(1);
+  advance(1);
+  EXPECT_EQ(active_sink, LOOM_LOW_SCHEDULE_NODE_NONE);
+  advance(2);
+  EXPECT_EQ(active_sink, LOOM_LOW_SCHEDULE_NODE_NONE);
+
+  // An empty result is invalidated by a newly live producer, and block reset
+  // discards the old nominations before another block initializes its values.
+  add(3);
+  EXPECT_EQ(active_sink, 6u);
+  EXPECT_EQ(active_count, 1u);
+  loom_low_schedule_target_pressure_reset_packing_completions(&state_,
+                                                              &pressure_);
+  EXPECT_EQ(active_sink, LOOM_LOW_SCHEDULE_NODE_NONE);
+  EXPECT_EQ(active_count, 0u);
+}
+
 }  // namespace
 }  // namespace loom
