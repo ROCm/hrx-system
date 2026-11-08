@@ -30,6 +30,8 @@ struct SubobjectPathCollector final : cxx::ASTVisitor {
   std::vector<std::vector<cxx::Symbol*>> member_paths;
   // Paths retained by resolved derived-to-base conversions.
   std::vector<std::vector<cxx::Symbol*>> cast_paths;
+  // Derived-to-base paths retained by inverse class conversions.
+  std::vector<std::vector<cxx::Symbol*>> inverse_paths;
 
   bool preVisit(cxx::AST* ast) override {
     if (auto* identifier = cxx::ast_cast<cxx::IdExpressionAST>(ast);
@@ -45,8 +47,12 @@ struct SubobjectPathCollector final : cxx::ASTVisitor {
     }
     if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(ast);
         cast && cast->subobjectPath) {
-      cast_paths.emplace_back(cxx::ListView(cast->subobjectPath).begin(),
-                              cxx::ListView(cast->subobjectPath).end());
+      auto& paths =
+          cast->castKind == cxx::ImplicitCastKind::kBaseToDerivedConversion
+              ? inverse_paths
+              : cast_paths;
+      paths.emplace_back(cxx::ListView(cast->subobjectPath).begin(),
+                         cxx::ListView(cast->subobjectPath).end());
     }
     return true;
   }
@@ -731,7 +737,11 @@ TEST(ConstantArchiveTest, PreservesSelectedSubobjectPaths) {
                           "}"
                           "using Converted = "
                           "    Ref<select(static_cast<const Left&>(object))>;"
-                          "static_assert(__is_same(Member, Converted));"),
+                          "static_assert(__is_same(Member, Converted));"
+                          "struct Unique : Left {};"
+                          "const Unique& recover(const Base& base) {"
+                          "  return static_cast<const Unique&>(base);"
+                          "}"),
                   IREE_SV("selected_paths.cxx"), options);
     cxx::ArchiveWriter writer;
     cxx::SemanticArchiveRoots roots;
@@ -768,6 +778,7 @@ TEST(ConstantArchiveTest, PreservesSelectedSubobjectPaths) {
   EXPECT_TRUE(hasBasePath(restored_paths.implicit_paths, {right, base}));
   EXPECT_TRUE(hasBasePath(restored_paths.member_paths, {left, base}));
   EXPECT_TRUE(hasBasePath(restored_paths.cast_paths, {left}));
+  EXPECT_TRUE(hasBasePath(restored_paths.inverse_paths, {left, base}));
 
   auto* cloned = restored.ast->clone(destination.unit().arena());
   SubobjectPathCollector cloned_paths;
@@ -776,6 +787,7 @@ TEST(ConstantArchiveTest, PreservesSelectedSubobjectPaths) {
   EXPECT_TRUE(hasBasePath(cloned_paths.implicit_paths, {right, base}));
   EXPECT_TRUE(hasBasePath(cloned_paths.member_paths, {left, base}));
   EXPECT_TRUE(hasBasePath(cloned_paths.cast_paths, {left}));
+  EXPECT_TRUE(hasBasePath(cloned_paths.inverse_paths, {left, base}));
 }
 
 TEST(ConstantArchiveTest, PreservesTypedAggregateReadsAfterDecoderDestruction) {

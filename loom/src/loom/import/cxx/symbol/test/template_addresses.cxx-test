@@ -103,8 +103,15 @@ using AnonymousValue = Ref<anonymous.value>;
 using Direct = Ref<object.Left::value>;
 using Returned = Ref<object.left_base().value>;
 using Converted = Ref<static_cast<const Left&>(object).value>;
+using Recovered = Ref<static_cast<const Left&>(object.left_base()).value>;
 static_assert(__is_same(Direct, Returned));
 static_assert(__is_same(Direct, Converted));
+static_assert(__is_same(Direct, Recovered));
+static_assert(static_cast<Selected*>(static_cast<Base*>(&selected)) == &selected);
+constexpr Selected* empty_selected = nullptr;
+constexpr Base* empty_base = nullptr;
+static_assert(static_cast<Base*>(empty_selected) == nullptr);
+static_assert(static_cast<Selected*>(empty_base) == nullptr);
 
 // ====
 // Field addresses retain their declared object through direct access,
