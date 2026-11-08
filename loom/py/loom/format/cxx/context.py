@@ -1044,6 +1044,11 @@ class CxxRenderContext:
                     return f"loom::type::index{{{value}}}"
                 if name == "offset":
                     return f"loom::type::offset{{{value}}}"
+                if name in {"i8", "i16"} and isinstance(value_type, ScalarType):
+                    element = self.types.scalar(
+                        literal_type, result_id in self.signed_values
+                    )
+                    return f"static_cast<{element}>({value})"
                 if name == "i64" and value >= 0:
                     return f"{value}ull"
                 if (

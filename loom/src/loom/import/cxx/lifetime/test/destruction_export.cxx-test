@@ -122,7 +122,7 @@ void cleanup_expressions(bool choose) {
   consume(v37);
   Guard___Guard_value(v37);
   unsigned char v47 = loom::view::load(v34, 0);
-  if (v47 != 0u) {
+  if (v47 != static_cast<unsigned char>(0)) {
     Guard___Guard_storage(loom::buffer::cast<unsigned>(loom::buffer::root(v28)), loom::type::offset{0});
   }
   auto* v52 = loom::buffer::alloca<loom::memory_space::private_, 4>(loom::type::offset{4});
