@@ -1,5 +1,37 @@
 // RUN: with-low-asm pass cfg-simplify
 
+// An unknown external predicate participates in the loop merge. The constant
+// backedge does not prove that the first iteration is skipped.
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @external_loop_input(%again: reg<test.i32>, %initial: reg<test.i32>, %replacement: reg<test.i32>) -> (reg<test.i32>) asm {
+  %false = test.const.i32 0
+  low.br ^loop(%again: reg<test.i32>, %initial: reg<test.i32>)
+^loop(%condition: reg<test.i32>, %value: reg<test.i32>):
+  low.cond_br %condition, ^body, ^exit : reg<test.i32>
+^body:
+  low.br ^loop(%false: reg<test.i32>, %replacement: reg<test.i32>)
+^exit:
+  return %value
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @external_loop_input(%again: reg<test.i32>, %initial: reg<test.i32>, %replacement: reg<test.i32>) -> (reg<test.i32>) asm {
+  %false = test.const.i32 0
+  low.br ^loop(%again: reg<test.i32>, %initial: reg<test.i32>)
+^loop(%condition: reg<test.i32>, %value: reg<test.i32>):
+  low.cond_br %condition, ^body, ^exit : reg<test.i32>
+^body:
+  low.br ^loop(%false: reg<test.i32>, %replacement: reg<test.i32>)
+^exit:
+  return %value
+}
+
+// ====
+// RUN: with-low-asm pass cfg-simplify
+
 // An unused cursor update can leave a diamond after inlining. Both edges
 // reach the same return and the predicate must disappear with the diamond.
 test.target<low_core> @test_target

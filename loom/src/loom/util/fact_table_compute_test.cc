@@ -1267,6 +1267,47 @@ TEST_F(FactTableComputeTest, DependentResultsPublishOnlyFinalChanges) {
 class FactEntryInputTest : public FactTableComputeTest,
                            public ::testing::WithParamInterface<bool> {};
 
+TEST_P(FactEntryInputTest, IndependentCarriersHaveDefinedInputFacts) {
+  const loom_type_t types[] = {
+      loom_type_scalar(LOOM_SCALAR_TYPE_I1),
+      loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32,
+                          loom_dim_pack_static(4), 0),
+      loom_type_shaped_1d(LOOM_TYPE_TENSOR, LOOM_SCALAR_TYPE_F32,
+                          loom_dim_pack_static(4), 0),
+      loom_type_pool(),
+      loom_type_buffer(),
+      loom_type_shaped_1d(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_I32,
+                          loom_dim_pack_static(4), 0),
+  };
+  loom_string_id_t name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_builder_intern_string(&builder_, IREE_SV("inputs"), &name));
+  uint16_t symbol = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_add_symbol(module_, name, &symbol));
+  loom_op_t* definition = nullptr;
+  IREE_ASSERT_OK(loom_test_func_build(
+      &builder_, 0, 0, 0, {0, symbol}, types, IREE_ARRAYSIZE(types), nullptr, 0,
+      nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &definition));
+  const auto function = loom_func_like_cast(module_, definition);
+  loom_region_t* body = loom_func_like_body(function);
+  if (GetParam()) {
+    body->flags |= LOOM_REGION_INSTANCE_FLAG_CFG;
+  }
+  loom_builder_enter_region(&builder_, definition, body);
+  loom_op_t* terminator = nullptr;
+  IREE_ASSERT_OK(loom_test_yield_build(&builder_, nullptr, 0,
+                                       LOOM_LOCATION_UNKNOWN, &terminator));
+
+  for (unsigned refresh = 0; refresh < 2; ++refresh) {
+    IREE_ASSERT_OK(loom_value_fact_table_compute(&table_, module_, function));
+    for (uint16_t index = 0; index < IREE_ARRAYSIZE(types); ++index) {
+      SCOPED_TRACE(index);
+      EXPECT_TRUE(loom_value_fact_table_has_entry(
+          &table_, loom_region_entry_arg_id(body, index)));
+    }
+  }
+}
+
 TEST_F(FactTableComputeTest, SingleLaneTargetMakesScalarArgumentsUniform) {
   std::vector<loom_type_t> arg_types;
   for (loom_scalar_type_t scalar_type = LOOM_SCALAR_TYPE_NONE + 1;

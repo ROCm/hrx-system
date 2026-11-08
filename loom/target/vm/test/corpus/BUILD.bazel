@@ -159,6 +159,7 @@ loom_corpus_test(
     execution_profiles = [VM_REFERENCE_PROFILE],
     profile_sources = {
         VM_REFERENCE_PROFILE.name: [
+            "control/loop/scalar_state.loom",
             "function/call/calls.loom",
             "function/call/direct.loom",
             "memory/buffer/packing.loom",
