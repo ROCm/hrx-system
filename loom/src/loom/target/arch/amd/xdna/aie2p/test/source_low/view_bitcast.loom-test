@@ -16,15 +16,12 @@ func.def @packet_alias(%input: buffer, %replacement: i8) -> (i8, i32) {
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @packet_alias(%replacement: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
   %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
-  %14 = mov.static-byte-offset 81
-  %15 = mov.address-index %14
-  st.i8.index %replacement, %input, %15
-  %16 = mov.static-byte-offset 76
-  %17 = mov.address-index %16
-  %byte = lda.i8.index %input, %17
-  %19 = mov.static-byte-offset 80
-  %20 = mov.address-index %19
-  %word = lda.i32.index %input, %20
+  %14 = mov.static-address-index 81
+  st.i8.index %replacement, %input, %14
+  %15 = mov.static-address-index 76
+  %byte = lda.i8.index %input, %15
+  %17 = mov.static-address-index 80
+  %word = lda.i32.index %input, %17
   return %byte, %word
 }
 

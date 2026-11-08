@@ -61,30 +61,22 @@ func.def @subview_vector_strided(%input: buffer, %output: buffer) {
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @subview_vector_strided() asm {
   %input_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %25 = mov.static-byte-offset 124
-  %26 = mov.address-index %25
-  %27 = lda.i32.index %input_aligned, %26
-  %28 = mov.static-byte-offset 128
-  %29 = mov.address-index %28
+  %25 = mov.static-address-index 124
+  %26 = lda.i32.index %input_aligned, %25
+  %27 = mov.static-address-index 128
+  %28 = lda.i32.index %input_aligned, %27
+  %29 = mov.static-address-index 132
   %30 = lda.i32.index %input_aligned, %29
-  %31 = mov.static-byte-offset 132
-  %32 = mov.address-index %31
-  %33 = lda.i32.index %input_aligned, %32
-  %34 = mov.static-byte-offset 136
-  %35 = mov.address-index %34
-  %36 = lda.i32.index %input_aligned, %35
-  %37 = mov.static-byte-offset 88
-  %38 = mov.address-index %37
-  st.i32.index %27, %output_aligned, %38
-  %39 = mov.static-byte-offset 92
-  %40 = mov.address-index %39
-  st.i32.index %30, %output_aligned, %40
-  %41 = mov.static-byte-offset 96
-  %42 = mov.address-index %41
-  st.i32.index %33, %output_aligned, %42
-  %43 = mov.static-byte-offset 100
-  %44 = mov.address-index %43
-  st.i32.index %36, %output_aligned, %44
+  %31 = mov.static-address-index 136
+  %32 = lda.i32.index %input_aligned, %31
+  %33 = mov.static-address-index 88
+  st.i32.index %26, %output_aligned, %33
+  %34 = mov.static-address-index 92
+  st.i32.index %28, %output_aligned, %34
+  %35 = mov.static-address-index 96
+  st.i32.index %30, %output_aligned, %35
+  %36 = mov.static-address-index 100
+  st.i32.index %32, %output_aligned, %36
   return
 }
 
@@ -109,10 +101,9 @@ func.def @subview_vector_aligned(%input: buffer, %output: buffer) {
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @subview_vector_aligned() asm {
   %input_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %19 = mov.static-byte-offset 256
-  %20 = mov.address-index %19
-  %21 = vlda.256.i32x8.index %input_aligned, %20
-  vst.256.i32x8 %21, %output_aligned, 192
+  %19 = mov.static-address-index 256
+  %20 = vlda.256.i32x8.index %input_aligned, %19
+  vst.256.i32x8 %20, %output_aligned, 192
   return
 }
 

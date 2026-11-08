@@ -245,44 +245,37 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @shaped_c
   %44 = vshuffle %37, %39, %43
   %45 = mova.i32 53
   %46 = vshuffle %37, %39, %45
-  %96 = slice %44[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  vst.128.bf16x8 %96, %output_aligned, 0
+  %89 = slice %44[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  vst.128.bf16x8 %89, %output_aligned, 0
   %52 = mova.i32 16
   %53 = vshift %44, %46, %52
   %54 = slice %53[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %55 = mov.static-byte-offset 256
-  %56 = mov.address-index %55
-  vst.128.bf16x8.index %54, %output_aligned, %56
-  %59 = mova.i32 32
-  %60 = vshift %44, %46, %59
-  %61 = slice %60[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %62 = mov.static-byte-offset 512
-  %63 = mov.address-index %62
-  vst.128.bf16x8.index %61, %output_aligned, %63
-  %66 = mova.i32 48
-  %67 = vshift %44, %46, %66
-  %68 = slice %67[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %69 = mov.static-byte-offset 768
-  %70 = mov.address-index %69
-  vst.128.bf16x8.index %68, %output_aligned, %70
-  %94 = slice %46[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %73 = mov.static-byte-offset 1024
-  %74 = mov.address-index %73
-  vst.128.bf16x8.index %94, %output_aligned, %74
-  %77 = vshift %46, %46, %52
-  %78 = slice %77[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %79 = mov.static-byte-offset 1280
-  %80 = mov.address-index %79
-  vst.128.bf16x8.index %78, %output_aligned, %80
-  %83 = vshift %46, %46, %59
+  %55 = mov.static-address-index 256
+  vst.128.bf16x8.index %54, %output_aligned, %55
+  %58 = mova.i32 32
+  %59 = vshift %44, %46, %58
+  %60 = slice %59[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %61 = mov.static-address-index 512
+  vst.128.bf16x8.index %60, %output_aligned, %61
+  %64 = mova.i32 48
+  %65 = vshift %44, %46, %64
+  %66 = slice %65[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %67 = mov.static-address-index 768
+  vst.128.bf16x8.index %66, %output_aligned, %67
+  %87 = slice %46[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %70 = mov.static-address-index 1024
+  vst.128.bf16x8.index %87, %output_aligned, %70
+  %73 = vshift %46, %46, %52
+  %74 = slice %73[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %75 = mov.static-address-index 1280
+  vst.128.bf16x8.index %74, %output_aligned, %75
+  %78 = vshift %46, %46, %58
+  %79 = slice %78[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %80 = mov.static-address-index 1536
+  vst.128.bf16x8.index %79, %output_aligned, %80
+  %83 = vshift %46, %46, %64
   %84 = slice %83[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %85 = mov.static-byte-offset 1536
-  %86 = mov.address-index %85
-  vst.128.bf16x8.index %84, %output_aligned, %86
-  %89 = vshift %46, %46, %66
-  %90 = slice %89[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %91 = mov.static-byte-offset 1792
-  %92 = mov.address-index %91
-  vst.128.bf16x8.index %90, %output_aligned, %92
+  %85 = mov.static-address-index 1792
+  vst.128.bf16x8.index %84, %output_aligned, %85
   return
 }

@@ -935,10 +935,24 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
         address_index_move.constraints
     )
 
-    static_offset = descriptors["amd.xdna.aie2p.materialize.static-byte-offset.i32"]
-    assert static_offset.asm_forms[0].mnemonic == "mov.static-byte-offset"
-    assert static_offset.operands[0].reg_alts[0].reg_class == "aie2p.er"
-    assert Constraint(ConstraintKind.REMATERIALIZABLE, 0) in static_offset.constraints
+    for name, register_class, mnemonic in (
+        ("static-byte-offset.i32", "aie2p.er", "mov.static-byte-offset"),
+        ("static-address-index.i20", "aie2p.edj", "mov.static-address-index"),
+    ):
+        static_offset = descriptors[f"amd.xdna.aie2p.materialize.{name}"]
+        assert static_offset.asm_forms[0].mnemonic == mnemonic
+        assert len(static_offset.operands) == 1
+        assert static_offset.operands[0].reg_alts[0].reg_class == register_class
+        assert static_offset.operands[0].encoding_adapter_id != 0
+        assert static_offset.immediates[0].field_name == "i"
+        assert static_offset.immediates[0].bit_width == 32
+        assert static_offset.immediates[0].signed_min == -(2**31)
+        assert static_offset.immediates[0].unsigned_max == 2**31 - 1
+        assert static_offset.immediates[0].kind is ImmediateKind.SIGNED
+        assert static_offset.effects == ()
+        assert Constraint(ConstraintKind.REMATERIALIZABLE, 0) in (
+            static_offset.constraints
+        )
 
     for name in (
         "accumulator.clear.i32x64",

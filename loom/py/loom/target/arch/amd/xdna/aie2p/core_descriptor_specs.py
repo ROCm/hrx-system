@@ -1841,6 +1841,16 @@ _BASE_DESCRIPTOR_SPECS = (
     ),
     _DescriptorSpec(
         "MOVXM",
+        f"{_TARGET_KEY}.materialize.static-address-index.i20",
+        "integer.materialize.static-address-index.i20",
+        "II_MOVXM_eDJ",
+        (("dst", "eDJ"),),
+        asm_mnemonic="mov.static-address-index",
+        rematerializable=True,
+        flags=(DescriptorFlag.SAFE_TO_SPECULATE,),
+    ),
+    _DescriptorSpec(
+        "MOVXM",
         f"{_TARGET_KEY}.materialize.local-address.i32",
         "memory.materialize.local-address.i32",
         "II_MOVXM_eP",

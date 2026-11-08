@@ -222,17 +222,15 @@ func.def @exchange_bf16_materialized_last_chunk(%input: buffer, %output: buffer,
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @exchange_bf16_materialized_last_chunk(%replacement: reg<aie2p.vec256 x4>) -> (reg<aie2p.vec256 x4>) asm {
   %source_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %destination_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %16 = mov.static-byte-offset 448
-  %17 = mov.address-index %16
-  %18 = vlda.512.bf16x32.index %source_aligned, %17
-  %19 = mov.static-byte-offset 512
-  %20 = mov.address-index %19
-  %21 = vlda.512.bf16x32.index %source_aligned, %20
-  %value = concat(%18, %21) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
-  %23 = slice %replacement[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
-  vst.512.bf16x32 %23, %destination_aligned, 448
-  %24 = slice %replacement[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
-  vst.512.bf16x32.index %24, %destination_aligned, %20
+  %16 = mov.static-address-index 448
+  %17 = vlda.512.bf16x32.index %source_aligned, %16
+  %18 = mov.static-address-index 512
+  %19 = vlda.512.bf16x32.index %source_aligned, %18
+  %value = concat(%17, %19) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %21 = slice %replacement[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  vst.512.bf16x32 %21, %destination_aligned, 448
+  %22 = slice %replacement[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  vst.512.bf16x32.index %22, %destination_aligned, %18
   return %value
 }
 
@@ -252,17 +250,15 @@ func.def @exchange_bf16_materialized_signed_upper(%input: buffer, %output: buffe
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @exchange_bf16_materialized_signed_upper(%replacement: reg<aie2p.vec256 x4>) -> (reg<aie2p.vec256 x4>) asm {
   %source_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %destination_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %16 = mov.static-byte-offset 2147483520
-  %17 = mov.address-index %16
-  %18 = vlda.512.bf16x32.index %source_aligned, %17
-  %19 = mov.static-byte-offset 2147483584
-  %20 = mov.address-index %19
-  %21 = vlda.512.bf16x32.index %source_aligned, %20
-  %value = concat(%18, %21) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
-  %23 = slice %replacement[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
-  vst.512.bf16x32.index %23, %destination_aligned, %17
-  %26 = slice %replacement[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
-  vst.512.bf16x32.index %26, %destination_aligned, %20
+  %16 = mov.static-address-index 2147483520
+  %17 = vlda.512.bf16x32.index %source_aligned, %16
+  %18 = mov.static-address-index 2147483584
+  %19 = vlda.512.bf16x32.index %source_aligned, %18
+  %value = concat(%17, %19) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %21 = slice %replacement[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  vst.512.bf16x32.index %21, %destination_aligned, %16
+  %23 = slice %replacement[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  vst.512.bf16x32.index %23, %destination_aligned, %18
   return %value
 }
 

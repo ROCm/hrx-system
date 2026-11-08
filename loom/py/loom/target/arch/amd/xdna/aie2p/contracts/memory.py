@@ -501,16 +501,17 @@ def _register_address_emits(
         emits.append(
             EmitDescriptorOp(
                 descriptor=_descriptor(
-                    "amd.xdna.aie2p.materialize.static-byte-offset.i32"
+                    "amd.xdna.aie2p.materialize.static-address-index.i20"
                 ),
-                results={"dst": byte_offset},
-                result_types={"dst": _OFFSET},
+                results={"dst": address_index},
+                result_types={"dst": DescriptorResultType()},
                 immediates={"i": static_byte_offset},
                 source_memory=source_memory,
                 form=DescriptorEmitForm.OP,
             )
         )
-    elif (
+        return tuple(emits), address_index
+    if (
         address_form is _MemoryAddressForm.DYNAMIC_ZERO_STATIC
         and additional_static_byte_offset == 0
     ):
