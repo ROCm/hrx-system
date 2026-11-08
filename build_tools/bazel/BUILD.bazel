@@ -194,6 +194,13 @@ selects.config_setting_group(
 )
 
 config_setting(
+    name = "memory_sanitizer_target",
+    values = {
+        "cc_output_directory_tag": "msan",
+    },
+)
+
+config_setting(
     name = "undefined_sanitizer_target",
     values = {
         "cc_output_directory_tag": "ubsan",
