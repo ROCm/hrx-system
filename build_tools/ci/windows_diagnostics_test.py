@@ -403,9 +403,19 @@ class WindowsDiagnosticsTest(unittest.TestCase):
                 access_output = next(
                     artifacts / name for name in tools if "windows-file-access" in name
                 )
-                observations = [
-                    json.loads(line) for line in access_output.read_text().splitlines()
-                ]
+                self.assertTrue(
+                    (artifacts / tools[access_output.name]["stderr_output"]).is_file()
+                )
+                access_text = access_output.read_text()
+                observations = []
+                for line_number, line in enumerate(access_text.splitlines(), start=1):
+                    try:
+                        observations.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        self.fail(
+                            f"{access_output.name} line {line_number} is not JSON: "
+                            f"{line!r}\ncomplete output:\n{access_text}"
+                        )
                 file_access = [entry["file_access"] for entry in observations]
                 self.assertEqual(file_access[0]["read"]["winerror"], 2)
                 self.assertTrue(
@@ -1095,6 +1105,33 @@ class WindowsDiagnosticsTest(unittest.TestCase):
             self.assertIsNone(output)
             self.assertEqual(capture.tools[0]["returncode"], 23)
             self.assertIn("tool error", (root / capture.tools[0]["output"]).read_text())
+
+    def test_protocol_tool_separates_stderr(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            capture = diagnostics.Capture(root, os.environ)
+            output = capture.tool(
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; "
+                    "print('{\"record\": 42}'); "
+                    "print('loader warning', file=sys.stderr)",
+                ],
+                root,
+                "protocol",
+                separate_stderr=True,
+            )
+
+            record = capture.tools[0]
+            self.assertEqual(output, root / record["output"])
+            self.assertEqual(
+                json.loads((root / record["output"]).read_text()), {"record": 42}
+            )
+            self.assertEqual(
+                (root / record["stderr_output"]).read_text().strip(),
+                "loader warning",
+            )
 
     def test_metadata_write_failure_preserves_build_failure(self):
         with tempfile.TemporaryDirectory() as directory:

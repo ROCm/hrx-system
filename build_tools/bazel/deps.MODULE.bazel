@@ -104,6 +104,22 @@ python_repository(
     urls = ["https://github.com/astral-sh/python-build-standalone/releases/download/20260414/cpython-3.12.13+20260414-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"],
 )
 
+compact_windows_python_repository = use_repo_rule(
+    "//build_tools/bazel/python_runtime:repository.bzl",
+    "compact_windows_python_repository",
+)
+
+compact_windows_python_repository(
+    name = "hrx_python_windows_x86_64_compact",
+    python_version = "3.12.13",
+    sha256 = "c5a9e011e284c49c48106ca177342f3e3f64e95b4c6652d4a382cc7c9bb1cc46",
+    strip_prefix = "python",
+    urls = [
+        "https://github.com/astral-sh/python-build-standalone/releases/download/20260414/cpython-3.12.13+20260414-x86_64-pc-windows-msvc-install_only.tar.gz",
+        "https://releases.astral.sh/github/astral-sh/python-build-standalone/releases/download/20260414/cpython-3.12.13+20260414-x86_64-pc-windows-msvc-install_only.tar.gz",
+    ],
+)
+
 register_toolchains("//build_tools/bazel/python_runtime:all")
 
 amdgpu_device_toolchain_repo = use_repo_rule(

@@ -430,11 +430,12 @@ python dev.py cmake doctor
 ```
 
 Keep source and build paths short, and use a separate CMake tree for each
-compiler. Bazel's Python runfiles require symbolic links: enable Windows
-Developer Mode or grant the account the Create symbolic links user right.
-`python dev.py bazel configure` and `python dev.py bazel doctor` check that
-the current process can create one. The Windows long-path policy can help tools
-that support it, but does not remove path limits from every tool.
+compiler. Bazel's managed Python runfiles exceed the legacy Win32 path limit
+and use symbolic links, so Windows Bazel hosts require `LongPathsEnabled=1`
+plus Developer Mode or an equivalent Create symbolic links user right.
+Provision both policies in the base image for CI jobs that cannot elevate.
+`python dev.py bazel configure` and `python dev.py bazel doctor` diagnose both
+capabilities. Long-path support does not remove path limits from every tool.
 
 Windows Bazel builds use `clang-cl` by default and require `BAZEL_LLVM` to name
 the LLVM installation root. The MSVC ABI tools and SDK still come from the
