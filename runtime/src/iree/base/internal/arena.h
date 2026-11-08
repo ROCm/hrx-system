@@ -211,9 +211,10 @@ typedef struct iree_arena_checkpoint_t {
   // Oversized-allocation list head at the checkpoint.
   iree_arena_oversized_allocation_t* allocation_head;
   // Current fixed-size block at the checkpoint.
+  // The oldest block is not stored: block growth only prepends, so a nonempty
+  // checkpoint retains the arena's current tail and an empty checkpoint
+  // restores a null tail.
   iree_arena_block_t* block_head;
-  // Oldest fixed-size block retained by the arena at the checkpoint.
-  iree_arena_block_t* block_tail;
   // Total bytes owned by the arena at the checkpoint.
   iree_host_size_t total_allocation_size;
   // Total bytes consumed from the arena at the checkpoint.

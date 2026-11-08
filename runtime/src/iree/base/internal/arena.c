@@ -311,26 +311,26 @@ iree_arena_checkpoint_t iree_arena_checkpoint_save(
       .arena = arena,
       .allocation_head = arena->allocation_head,
       .block_head = arena->block_head,
-      .block_tail = arena->block_tail,
       .total_allocation_size = arena->total_allocation_size,
       .used_allocation_size = arena->used_allocation_size,
       .block_bytes_remaining = arena->block_bytes_remaining,
   };
 }
 
-void iree_arena_checkpoint_restore(const iree_arena_checkpoint_t* checkpoint) {
-  IREE_ASSERT_ARGUMENT(checkpoint);
-  IREE_ARENA_TRACE_ZONE_BEGIN(z0);
-
-  // The checkpoint itself may be stored in arena memory that this operation
-  // discards. Copy it before releasing any storage.
+// Restores a checkpoint after the arena acquired blocks or oversized
+// allocations. This path is kept out of line so same-block scratch rewinds do
+// not carry list traversal and release machinery in their instruction working
+// set.
+//
+// The checkpoint and arena may live in arena storage. The checkpoint is copied
+// before any mutation, and the arena state is published before blocks become
+// available to other threads so neither is accessed after release.
+static IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD void
+iree_arena_checkpoint_restore_acquired_storage(
+    const iree_arena_checkpoint_t* checkpoint) {
   const iree_arena_checkpoint_t saved_state = *checkpoint;
   iree_arena_allocator_t* arena = saved_state.arena;
-  IREE_ASSERT_ARGUMENT(arena);
 
-  // Identify the prefixes allocated after the checkpoint before publishing
-  // the restored arena state. The arena object itself may live in retained
-  // arena storage, so no arena fields are accessed after releasing blocks.
   iree_arena_oversized_allocation_t* released_allocation_head =
       arena->allocation_head;
   iree_arena_oversized_allocation_t* allocation = released_allocation_head;
@@ -352,11 +352,13 @@ void iree_arena_checkpoint_restore(const iree_arena_checkpoint_t* checkpoint) {
   } else {
     released_block_head = NULL;
   }
+  iree_arena_block_t* retained_block_tail =
+      saved_state.block_head != NULL ? arena->block_tail : NULL;
 
   iree_arena_block_pool_t* block_pool = arena->block_pool;
   arena->allocation_head = saved_state.allocation_head;
   arena->block_head = saved_state.block_head;
-  arena->block_tail = saved_state.block_tail;
+  arena->block_tail = retained_block_tail;
   arena->total_allocation_size = saved_state.total_allocation_size;
   arena->used_allocation_size = saved_state.used_allocation_size;
   arena->block_bytes_remaining = saved_state.block_bytes_remaining;
@@ -385,6 +387,38 @@ void iree_arena_checkpoint_restore(const iree_arena_checkpoint_t* checkpoint) {
     void* free_ptr =
         (uint8_t*)saved_state.block_head - saved_state.block_bytes_remaining;
     IREE_ASAN_POISON_MEMORY_REGION(free_ptr, saved_state.block_bytes_remaining);
+  }
+}
+
+void iree_arena_checkpoint_restore(const iree_arena_checkpoint_t* checkpoint) {
+  IREE_ASSERT_ARGUMENT(checkpoint);
+  IREE_ARENA_TRACE_ZONE_BEGIN(z0);
+
+  iree_arena_allocator_t* arena = checkpoint->arena;
+  IREE_ASSERT_ARGUMENT(arena);
+
+  // Releasing acquired storage is uncommon for scratch checkpoints and may
+  // publish the arena's own containing block. Keep that ownership transition
+  // in the out-of-line path and return without touching the arena again.
+  if (IREE_UNLIKELY(arena->allocation_head != checkpoint->allocation_head ||
+                    arena->block_head != checkpoint->block_head)) {
+    iree_arena_checkpoint_restore_acquired_storage(checkpoint);
+    IREE_ARENA_TRACE_ZONE_END(z0);
+    return;
+  }
+
+  // No ownership lists changed, so total storage and list links are already
+  // identical to the checkpoint. Rewind only the bump-pointer accounting.
+  const iree_host_size_t used_allocation_size =
+      checkpoint->used_allocation_size;
+  const iree_host_size_t block_bytes_remaining =
+      checkpoint->block_bytes_remaining;
+  iree_arena_block_t* block_head = checkpoint->block_head;
+  arena->used_allocation_size = used_allocation_size;
+  arena->block_bytes_remaining = block_bytes_remaining;
+  if (block_head != NULL && block_bytes_remaining != 0) {
+    void* free_ptr = (uint8_t*)block_head - block_bytes_remaining;
+    IREE_ASAN_POISON_MEMORY_REGION(free_ptr, block_bytes_remaining);
   }
 
   IREE_ARENA_TRACE_ZONE_END(z0);
