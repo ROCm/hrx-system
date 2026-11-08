@@ -272,11 +272,15 @@ def _difference(initial_value: int | None, final_value: int | None) -> int | Non
 
 
 def executable_identity(path: Path) -> ExecutableIdentity:
+    return ExecutableIdentity(byte_count=path.stat().st_size, sha256=_file_sha256(path))
+
+
+def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as executable_file:
-        while data := executable_file.read(_HASH_CHUNK_SIZE):
+    with path.open("rb") as source_file:
+        while data := source_file.read(_HASH_CHUNK_SIZE):
             digest.update(data)
-    return ExecutableIdentity(byte_count=path.stat().st_size, sha256=digest.hexdigest())
+    return digest.hexdigest()
 
 
 def source_identity(repository_root: Path) -> SourceIdentity:
@@ -374,6 +378,47 @@ def write_stop_request(path: Path) -> None:
     finally:
         if temporary_path.exists():
             temporary_path.unlink()
+
+
+def install_compacted_corpus(corpus_dir: Path, compacted_dir: Path) -> None:
+    """Installs a successful libFuzzer merge without risking the live corpus."""
+
+    def regular_files(directory: Path) -> list[Path]:
+        files = []
+        for path in directory.iterdir():
+            if path.is_symlink() or not path.is_file():
+                raise ValueError(f"fuzz corpus contains a non-regular file: {path}")
+            files.append(path)
+        return sorted(files)
+
+    corpus_files = regular_files(corpus_dir)
+    compacted_files = regular_files(compacted_dir)
+    if corpus_files and not compacted_files:
+        raise ValueError("libFuzzer produced an empty compacted corpus")
+
+    # Install every selected input before removing anything. Preserve the merge
+    # output names so replay order remains stable. Hard links publish complete
+    # files without overwriting an old input, even if a corpus uses adversarial
+    # names. If the process is interrupted or a filesystem operation fails, the
+    # live corpus is either the original set plus some selected inputs or the
+    # complete selected set plus redundant inputs. Both preserve the full code
+    # coverage established by the successful merge.
+    retained_paths = set()
+    for source_path in compacted_files:
+        digest = _file_sha256(source_path)
+        destination_path = corpus_dir / source_path.name
+        suffix = 0
+        while destination_path.exists():
+            if _file_sha256(destination_path) == digest:
+                break
+            suffix += 1
+            destination_path = corpus_dir / f"{source_path.name}-{digest}-{suffix}"
+        else:
+            os.link(source_path, destination_path)
+        retained_paths.add(destination_path)
+    for corpus_path in corpus_files:
+        if corpus_path not in retained_paths:
+            corpus_path.unlink()
 
 
 def _run_git(repository_root: Path, arguments: list[str]) -> bytes:

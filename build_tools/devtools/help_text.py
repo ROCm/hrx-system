@@ -935,6 +935,7 @@ iree-bazel-fuzz --mutation-time=60 //runtime/src/iree/tokenizer:special_tokens_f
 iree-bazel-fuzz --workers=2 --mutation-time=60 //path:parser_fuzz //path:schema_fuzz
 iree-bazel-fuzz --workers=4 --mutation-time=3600 --shard=0/4 //runtime/...
 iree-bazel-fuzz --workers=2 --mutation-time=3600 --quiet-output //loom/...
+iree-bazel-fuzz --compact-corpus --workers=4 --quiet-output //runtime/...
 iree-bazel-fuzz --compile-only //...
 ```
 
@@ -949,6 +950,14 @@ mutation window. The runner publishes a unique nonempty `-stop_file` when the
 window expires; libFuzzer completes its current input, writes final statistics,
 and exits successfully. Raw `-max_total_time`, `-runs`, merge, inner worker, and
 stop-file arguments are mutually exclusive with this campaign-level budget.
+
+`--compact-corpus` runs libFuzzer's lossless merge into isolated storage for
+each nonempty persistent corpus. All merges must succeed before any retained
+set is installed. Selected inputs are installed before redundant inputs are
+removed, so interruption or filesystem failure leaves a coverage-equivalent
+superset instead of an incomplete corpus. Scheduled main-branch campaigns run
+this maintenance before saving their trusted cache; pull requests only replay
+and extend the restored corpus.
 
 Interactive campaigns stream each fuzzer's output directly. Scheduled campaigns
 use `--quiet-output`: the runner still parses the stream and retains a bounded

@@ -756,6 +756,18 @@ class CliTest(unittest.TestCase):
         self.assertNotIn("launch script", description)
         self.assertNotIn("run at most", description)
 
+    def test_bazel_fuzz_corpus_compaction_describes_transaction(self):
+        args = cli.parse_arguments(
+            ["bazel", "fuzz", "--compact-corpus", "--workers=4", "//loom/..."]
+        )
+
+        plan = args.handler(args)
+        description = normalized_plan_description(plan)
+
+        self.assertIn("bazel build --config=fuzzer '<fuzz targets>'", description)
+        self.assertIn("run at most 4 launch scripts concurrently", description)
+        self.assertIn("install the complete retained set", description)
+
     def test_bazel_compile_commands_defaults_to_repo_roots(self):
         args = cli.parse_arguments(["bazel", "compile-commands"])
 
