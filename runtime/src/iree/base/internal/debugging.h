@@ -69,7 +69,7 @@ IREE_ATTRIBUTE_ALWAYS_INLINE static inline void iree_debug_break(void) {
 // https://github.com/llvm/llvm-project/blob/main/compiler-rt/lib/tsan/rtl/tsan_interceptors_posix.cpp
 //
 // NOTE: don't assume the presence of a sanitizer implies clang+llvm+x86! GCC
-// supports all of the sanitizers and MSVC supports ASAN and almost all of them
+// supports several sanitizers and MSVC supports ASAN and almost all of them
 // can be used on non-x86 platforms.
 
 #if defined(IREE_SANITIZER_ADDRESS)
@@ -81,10 +81,9 @@ IREE_ATTRIBUTE_ALWAYS_INLINE static inline void iree_debug_break(void) {
 #include <sanitizer/tsan_interface.h>
 #endif  // IREE_SANITIZER_THREAD
 
-// For whenever we want to provide specialized msan/tsan hooks:
-//   #if defined(IREE_SANITIZER_MEMORY)
-//   #include <sanitizer/msan_interface.h>
-//   #endif  // IREE_SANITIZER_MEMORY
+#if defined(IREE_SANITIZER_MEMORY)
+#include <sanitizer/msan_interface.h>
+#endif  // IREE_SANITIZER_MEMORY
 
 // Suppresses leak detection false-positives in a region. May be nested.
 // Do not use this for any IREE-owned code: fix your leaks! This is useful when
@@ -125,6 +124,17 @@ IREE_ATTRIBUTE_ALWAYS_INLINE static inline void iree_debug_break(void) {
 #define IREE_ASAN_UNPOISON_MEMORY_REGION(addr, size) \
   ((void)(addr), (void)(size))
 #endif  // IREE_SANITIZER_ADDRESS
+
+// Marks custom-allocator storage as uninitialized without changing its
+// contents. When origin tracking is enabled the current call site becomes the
+// origin, including when initialized storage is recycled for a new allocation
+// lifetime.
+#if defined(IREE_SANITIZER_MEMORY)
+#define IREE_MSAN_ALLOCATED_MEMORY(addr, size) \
+  __msan_allocated_memory((addr), (size))
+#else
+#define IREE_MSAN_ALLOCATED_MEMORY(addr, size) ((void)(addr), (void)(size))
+#endif  // IREE_SANITIZER_MEMORY
 
 // Annotates synchronization edges that TSAN cannot infer from platform calls or
 // custom ownership transfers.

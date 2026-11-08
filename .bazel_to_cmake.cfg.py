@@ -14,6 +14,10 @@ REPO_MAP = {
     "@hrx": "",
 }
 
+CONDITION_MAPPINGS = {
+    "//build_tools/bazel:memory_sanitizer_target": "IREE_ENABLE_MSAN",
+}
+
 # Root tool aliases whose executables share a runtime package.
 TARGET_MAPPINGS = {
     "//tools:vm-as": ["iree::tools::vm::vm-as"],

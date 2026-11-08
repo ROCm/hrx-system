@@ -200,6 +200,10 @@ iree_status_t iree_arena_block_pool_acquire(iree_arena_block_pool_t* block_pool,
   block->next = NULL;
   *out_block = block;
 
+  // Payload starts a new allocation lifetime even when the backing allocator
+  // or a previous owner initialized it. The free-list trailer remains defined.
+  IREE_MSAN_ALLOCATED_MEMORY(*out_ptr, block_pool->usable_block_size);
+
   IREE_ARENA_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
@@ -387,6 +391,7 @@ iree_arena_checkpoint_restore_acquired_storage(
     void* free_ptr =
         (uint8_t*)saved_state.block_head - saved_state.block_bytes_remaining;
     IREE_ASAN_POISON_MEMORY_REGION(free_ptr, saved_state.block_bytes_remaining);
+    IREE_MSAN_ALLOCATED_MEMORY(free_ptr, saved_state.block_bytes_remaining);
   }
 }
 
@@ -414,11 +419,22 @@ void iree_arena_checkpoint_restore(const iree_arena_checkpoint_t* checkpoint) {
   const iree_host_size_t block_bytes_remaining =
       checkpoint->block_bytes_remaining;
   iree_arena_block_t* block_head = checkpoint->block_head;
+#if defined(IREE_SANITIZER_MEMORY)
+  const iree_host_size_t discarded_length =
+      block_bytes_remaining - arena->block_bytes_remaining;
+#endif  // IREE_SANITIZER_MEMORY
   arena->used_allocation_size = used_allocation_size;
   arena->block_bytes_remaining = block_bytes_remaining;
   if (block_head != NULL && block_bytes_remaining != 0) {
     void* free_ptr = (uint8_t*)block_head - block_bytes_remaining;
     IREE_ASAN_POISON_MEMORY_REGION(free_ptr, block_bytes_remaining);
+#if defined(IREE_SANITIZER_MEMORY)
+    // Unused capacity is already uninitialized. Only the discarded allocations
+    // need new shadow and origins; small scratch rewinds do not touch the tail.
+    if (discarded_length != 0) {
+      IREE_MSAN_ALLOCATED_MEMORY(free_ptr, discarded_length);
+    }
+#endif  // IREE_SANITIZER_MEMORY
   }
 
   IREE_ARENA_TRACE_ZONE_END(z0);
@@ -468,10 +484,13 @@ iree_status_t iree_arena_allocate(iree_arena_allocator_t* arena,
                             iree_memory_order_relaxed);
     });
     *out_ptr = (uint8_t*)allocation + sizeof(iree_arena_oversized_allocation_t);
+    IREE_MSAN_ALLOCATED_MEMORY(*out_ptr, byte_length);
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
 
+  // Acquired blocks and rewound capacity have uninitialized MSAN shadow, so
+  // bump allocations inherit it without a per-allocation annotation.
   // Check to see if the current block (if any) has space - if not, get another.
   if (arena->block_head == NULL ||
       arena->block_bytes_remaining < aligned_length) {
