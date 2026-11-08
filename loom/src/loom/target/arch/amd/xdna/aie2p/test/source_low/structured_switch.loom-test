@@ -21,20 +21,20 @@ func.def @structured_switch(%selector: index, %lhs: i32, %rhs: i32) -> (i32) {
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @structured_switch(%selector: reg<aie2p.er>, %lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %18 = eqz %selector
-  low.cond_br %18, ^_bb2, ^_bb1 : reg<aie2p.er>
+  low.cond_br %18, ^_bb4, ^_bb1 : reg<aie2p.er>
 ^_bb1:
   %19 = mov.short 3
   %20 = eq %selector, %19
-  low.cond_br %20, ^_bb3, ^_bb4 : reg<aie2p.er>
+  low.cond_br %20, ^_bb2, ^_bb3 : reg<aie2p.er>
 ^_bb2:
-  %sum = add.nc %lhs, %rhs
-  low.br ^_bb5(%sum: reg<aie2p.er>)
-^_bb3:
   %difference = sub %lhs, %rhs
   low.br ^_bb5(%difference: reg<aie2p.er>)
-^_bb4:
+^_bb3:
   %product = mul %lhs, %rhs
   low.br ^_bb5(%product: reg<aie2p.er>)
+^_bb4:
+  %sum = add.nc %lhs, %rhs
+  low.br ^_bb5(%sum: reg<aie2p.er>)
 ^_bb5(%result: reg<aie2p.er>):
   return %result
 }
