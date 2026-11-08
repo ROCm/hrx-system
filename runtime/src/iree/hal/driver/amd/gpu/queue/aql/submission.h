@@ -226,7 +226,8 @@ iree_status_t iree_hal_amd_gpu_aql_submission_retirement(
     iree_hal_amd_gpu_aql_submission_t** out_submission);
 
 // Native completion is necessary but producer payload retirement is separate.
-// True joins every retained dependency and returns the first failure, if any.
+// True joins every retained dependency and returns the capture's recorded
+// failure, the first failed dependency's status, or OK when both succeeded.
 bool iree_hal_amd_gpu_aql_submission_retirement_ready(
     const iree_hal_amd_gpu_aql_submission_t* submission,
     iree_status_code_t* out_status_code);

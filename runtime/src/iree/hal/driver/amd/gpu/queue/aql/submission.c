@@ -365,7 +365,8 @@ void iree_hal_amd_gpu_aql_submission_set_frontier(
 bool iree_hal_amd_gpu_aql_submission_retirement_ready(
     const iree_hal_amd_gpu_aql_submission_t* submission,
     iree_status_code_t* out_status_code) {
-  *out_status_code = IREE_STATUS_OK;
+  *out_status_code = (iree_status_code_t)iree_atomic_load(
+      &submission->failure_code, iree_memory_order_relaxed);
   for (iree_host_size_t i = 0; i < submission->wait_count; ++i) {
     if (submission->waits[i].signal) {
       iree_status_code_t code;

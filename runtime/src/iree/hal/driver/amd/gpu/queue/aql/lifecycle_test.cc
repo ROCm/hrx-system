@@ -7,6 +7,7 @@
 #include <array>
 
 #include "iree/async/proactor_platform.h"
+#include "iree/async/semaphore.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/state.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -18,17 +19,35 @@ namespace {
 class AqlLifecycleTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    IREE_ASSERT_OK(iree_allocator_malloc(iree_allocator_system(),
-                                         sizeof(*contract_),
-                                         reinterpret_cast<void**>(&contract_)));
-    contract_->scopes = scopes_.data();
+    const uint16_t binding_types[] = {IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS};
+    const iree_hal_buffer_binding_layout_t layout = {
+        sizeof(iree_hal_buffer_native_binding_t), 1, 0, binding_types};
+    IREE_ASSERT_OK(iree_hal_memory_contract_create(
+        this, 2, &layout, iree_allocator_system(), &contract_));
+    for (uint32_t i = 0; i < 2; ++i) {
+      contract_->scopes[i].interfaces =
+          1u << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS;
+      contract_->scopes[i].bindings[IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS] =
+          0;
+      contract_->scopes[i].usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+    }
+    family_.spec = &family_spec_;
+    family_.memory.domain = this;
+    queue_.base.queue_family = &family_;
+    context_.event_sink = {
+        [](void* user_data, const iree_hal_device_event_t* event) {
+          EXPECT_EQ(event->severity, IREE_HAL_DEVICE_EVENT_SEVERITY_ERROR);
+          ++static_cast<AqlLifecycleTest*>(user_data)->diagnostics_;
+        },
+        this};
+    iree_slim_mutex_initialize(&completion_.drain_mutex);
     context_.gpu = &gpu_;
     gpu_.user_queue_inactivate = [](amdf_user_queue_t* native) {
       auto* self = reinterpret_cast<AqlLifecycleTest*>(native);
       EXPECT_EQ(self->destroyed_, 0u);
       EXPECT_NE(self->queue_.storage.mapping, nullptr);
       ++self->native_stops_;
-      self->native_stopped_ = true;
+      self->native_access_ended_ = true;
       return AMDF_STATUS_OK;
     };
     queue_.context = &context_;
@@ -65,7 +84,7 @@ class AqlLifecycleTest : public ::testing::Test {
   }
   void TearDown() override {
     EXPECT_EQ(destroyed_, 6u);
-    iree_allocator_free(iree_allocator_system(), contract_);
+    iree_hal_memory_contract_release(contract_);
     iree_hal_amd_gpu_capture_pool_deinitialize(&queue_.captures);
     for (auto* reader : readers_) {
       iree_hal_amd_gpu_signal_release(reader);
@@ -78,8 +97,14 @@ class AqlLifecycleTest : public ::testing::Test {
     iree_async_frontier_tracker_release(queue_.frontier.tracker);
     iree_hal_semaphore_release(semaphore_);
     iree_async_proactor_release(proactor_);
+    iree_slim_mutex_deinitialize(&completion_.drain_mutex);
   }
-  void Capture(bool partial = false) {
+  void Capture(bool partial = false,
+               iree_hal_semaphore_t* second_signal = nullptr) {
+    iree_hal_semaphore_t* signal_semaphores[] = {semaphore_, second_signal};
+    uint64_t signal_values[] = {signal_value_, signal_value_};
+    const iree_hal_semaphore_list_t signals = {
+        second_signal ? 2u : 1u, signal_semaphores, signal_values};
     std::array<iree_hal_buffer_ref_t, 6> references;
     for (size_t i = 0; i < references.size(); ++i) {
       iree_hal_buffer_t* buffer = nullptr;
@@ -89,7 +114,7 @@ class AqlLifecycleTest : public ::testing::Test {
           iree_make_byte_span(bytes_[i].data(), bytes_[i].size()),
           {[](void* data, iree_hal_buffer_t*) {
              auto* self = static_cast<AqlLifecycleTest*>(data);
-             EXPECT_TRUE(self->native_stopped_);
+             EXPECT_TRUE(self->native_access_ended_);
              self->ExpectPending();
              ++self->destroyed_;
            },
@@ -99,11 +124,6 @@ class AqlLifecycleTest : public ::testing::Test {
     }
     if (partial) {
       std::array<iree_hal_transfer_operation_t, 6> operations = {};
-      const iree_hal_queue_family_spec_t spec = {
-          .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
-                        IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
-      };
-      const iree_hal_queue_family_t family = {.spec = &spec};
       const uint32_t pattern = 0;
       for (size_t i = 0; i < references.size(); ++i) {
         references[i].buffer->memory = {
@@ -122,8 +142,7 @@ class AqlLifecycleTest : public ::testing::Test {
         };
       }
       IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_transfer(
-          &queue_.captures, nullptr, &family, {},
-          {1, &semaphore_, &signal_value_}, operations.size(),
+          &queue_.captures, nullptr, &family_, {}, signals, operations.size(),
           operations.data(), 0, 0, &capture_));
     } else {
       const iree_hal_amd_gpu_aql_dispatch_request_t request = {
@@ -131,8 +150,7 @@ class AqlLifecycleTest : public ::testing::Test {
           .bindings = {references.size(), references.data()},
       };
       IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_capture(
-          &queue_.captures, nullptr, &request, {},
-          {1, &semaphore_, &signal_value_}, 0, 0, &capture_));
+          &queue_.captures, nullptr, &request, {}, signals, 0, 0, &capture_));
     }
     for (auto reference : references) {
       iree_hal_buffer_release(reference.buffer);
@@ -155,6 +173,56 @@ class AqlLifecycleTest : public ::testing::Test {
     iree_atomic_store(&queue_.failure, IREE_STATUS_ABORTED,
                       iree_memory_order_relaxed);
     iree_hal_amd_gpu_aql_queue_close(&queue_.base);
+  }
+  void FailFeedback() {
+    feedback_.context = &context_;
+    feedback_.control = &feedback_control_;
+    iree_atomic_store(&feedback_.failure_code, IREE_STATUS_ABORTED,
+                      iree_memory_order_release);
+    queue_.options.feedback = &feedback_;
+    EnableNativeCompletion();
+  }
+  void EnableNativeCompletion() {
+    iree_atomic_store(&queue_.failure, IREE_STATUS_OK,
+                      iree_memory_order_release);
+    queue_.growth.context = &context_;
+    gpu_.user_queue_query_scratch =
+        [](amdf_user_queue_t*, amdf_gpu_aql_scratch_request_t* request) {
+          request->byte_length = 0;
+          return AMDF_STATUS_OK;
+        };
+    iree_hal_amd_gpu_aql_scratch_initialize(
+        &queue_.growth, queue_.storage.queue, nullptr, &queue_.scratch);
+  }
+  bool Poll() {
+    auto source = iree_hal_amd_gpu_aql_queue_completion_source(&queue_.base);
+    iree_slim_mutex_lock(&completion_.drain_mutex);
+    iree_hal_amd_gpu_completion_scope_t scope = {
+        .completion = &completion_,
+        .source = &source,
+        .fn = source.fn,
+    };
+    iree_hal_amd_gpu_completion_wait_t wait = {};
+    const bool progressed =
+        source.fn(source.user_data, AMDF_STATUS_OK, &scope, &wait, nullptr);
+    EXPECT_FALSE(iree_hal_amd_gpu_completion_scope_finish(&scope));
+    iree_slim_mutex_unlock(&completion_.drain_mutex);
+    return progressed;
+  }
+  void ExpectFrontier(uint64_t value, bool expected) {
+    iree_async_single_frontier_t frontier;
+    iree_async_single_frontier_initialize(&frontier, queue_.frontier.axis,
+                                          value);
+    bool satisfied = !expected;
+    IREE_EXPECT_OK(iree_async_frontier_tracker_query(
+        queue_.frontier.tracker,
+        iree_async_single_frontier_as_const_frontier(&frontier), &satisfied));
+    EXPECT_EQ(satisfied, expected);
+  }
+  void CompletePiece(uint32_t index) {
+    iree_atomic_store(reinterpret_cast<iree_atomic_int64_t*>(
+                          issued_[index].signal->host_value),
+                      0, iree_memory_order_release);
   }
   void ExpectPending() {
     uint64_t value = UINT64_MAX;
@@ -213,17 +281,32 @@ class AqlLifecycleTest : public ::testing::Test {
             &satisfied));
   }
 
+  // Family metadata borrowed by the production queue and failure diagnostics.
+  iree_hal_queue_family_t family_ = {};
+  // Real transfer capabilities used by split-operation capture construction.
+  const iree_hal_queue_family_spec_t family_spec_ = {
+      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
+                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
+  };
+  // The real completion scope serializes report parsing and queue ownership.
+  iree_hal_amd_gpu_completion_t completion_ = {};
+  // Empty report ring after the dependency has published its first failure.
+  iree_hal_amd_gpu_feedback_control_t feedback_control_ = {};
+  // Logical failure is independent of each native completion word.
+  iree_hal_amd_gpu_feedback_t feedback_ = {};
+  // Immediate diagnostic delivery is distinct from final output publication.
+  uint32_t diagnostics_ = 0;
   // Actual concrete protocol ownership state, without creating native hardware.
   iree_hal_amd_gpu_aql_queue_t queue_ = {};
-  // Host issued actions; GPU completion storage is deliberately absent.
+  // Host issued actions parallel to native completion storage.
   std::array<iree_hal_amd_gpu_aql_retirement_t, 4> issued_ = {};
-  // Native dependency exposing only the synchronous stop boundary.
+  // Native dependency exposing stop and scratch-query boundaries.
   amdf_gpu_api_t gpu_ = {};
   // Borrowed API owner, live through every capture and stop call.
   iree_hal_amd_gpu_context_t context_ = {};
   // Immutable dispatch metadata, unused by this ownership-only path.
   iree_hal_amd_gpu_aql_function_t function_ = {};
-  // Native dependency cells retain their original uncompleted values.
+  // Native completion cells, changed only by the controlled dependency.
   std::array<uint64_t, 4> native_values_ = {};
   // Real independent dependency metadata, not borrowed capture pointers.
   std::array<iree_hal_amd_gpu_signal_t, 4> native_signals_ = {};
@@ -237,8 +320,6 @@ class AqlLifecycleTest : public ::testing::Test {
   std::array<iree_hal_amd_gpu_signal_t*, 4> readers_ = {};
   // Six application buffers with final-release observations.
   std::array<std::array<uint8_t, 16>, 6> bytes_ = {};
-  // Queue/program address contract for the split transfer capture.
-  std::array<iree_hal_memory_scope_access_t, 2> scopes_ = {};
   // Stable contract retained by the six actual HAL buffers.
   iree_hal_memory_contract_t* contract_ = nullptr;
   // One qualified address slot per buffer; no address is consumed by cleanup.
@@ -255,7 +336,7 @@ class AqlLifecycleTest : public ::testing::Test {
   // Number of native removal calls; repeated terminal cleanup is idempotent.
   uint32_t native_stops_ = 0;
   // Native access proof observed by every buffer final-release callback.
-  bool native_stopped_ = false;
+  bool native_access_ended_ = false;
   // Number of buffer references whose final release has run.
   uint32_t destroyed_ = 0;
 };
@@ -293,6 +374,124 @@ TEST_F(AqlLifecycleTest, UnpublishedSuffixRetainsItsIndependentHostOwnership) {
   iree_hal_amd_gpu_aql_submission_release(capture_);
   EXPECT_EQ(destroyed_, 6u);
   ExpectFailed();
+}
+
+TEST_F(AqlLifecycleTest, PublicationFailureRetiresWithoutSignalingSuccess) {
+  iree_hal_semaphore_t* rejected_signal = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
+      proactor_, nullptr, 0, 2, iree_allocator_system(), &rejected_signal));
+  Capture(false, rejected_signal);
+  EnableNativeCompletion();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_publish_signal(
+      semaphore_, signal_value_, readers_[0]));
+  iree_hal_semaphore_fail(rejected_signal,
+                          iree_status_from_code(IREE_STATUS_ABORTED));
+  iree_status_t status = iree_hal_amd_gpu_semaphore_publish_signal(
+      rejected_signal, signal_value_, readers_[0]);
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_ABORTED);
+  iree_hal_amd_gpu_aql_submission_fail(capture_, status);
+  iree_status_free(status);
+
+  struct Observation {
+    // Payload retirement must precede the first public completion notification.
+    uint32_t* destroyed;
+    // Each registered output wait receives exactly one terminal callback.
+    uint32_t calls = 0;
+    // Captured callback result distinguishes transient success from final
+    // failure.
+    iree_status_code_t code = IREE_STATUS_UNKNOWN;
+  } observation{&destroyed_};
+  iree_async_semaphore_timepoint_t timepoint = {
+      .callback =
+          [](void* user_data, iree_async_semaphore_timepoint_t*,
+             iree_status_t status) {
+            auto* observation = static_cast<Observation*>(user_data);
+            EXPECT_EQ(*observation->destroyed, 6u);
+            ++observation->calls;
+            observation->code = iree_status_code(status);
+            iree_status_free(status);
+          },
+      .user_data = &observation,
+  };
+  IREE_ASSERT_OK(iree_async_semaphore_acquire_timepoint(
+      reinterpret_cast<iree_async_semaphore_t*>(semaphore_), signal_value_,
+      &timepoint));
+  EXPECT_FALSE(Poll());
+  ExpectPending();
+  EXPECT_EQ(observation.calls, 0u);
+  EXPECT_EQ(destroyed_, 0u);
+  native_access_ended_ = true;
+  CompletePiece(0);
+  EXPECT_TRUE(Poll());
+  EXPECT_EQ(observation.calls, 1u);
+  EXPECT_EQ(observation.code, IREE_STATUS_ABORTED);
+  ExpectFailed();
+  iree_status_code_t completion_code = IREE_STATUS_OK;
+  EXPECT_TRUE(
+      iree_hal_amd_gpu_signal_query_retirement(readers_[0], &completion_code));
+  EXPECT_EQ(completion_code, IREE_STATUS_ABORTED);
+  iree_hal_semaphore_release(rejected_signal);
+}
+
+TEST_F(AqlLifecycleTest, ShaderFailureWaitsForIssuedCompletion) {
+  Capture();
+  FailFeedback();
+  EXPECT_FALSE(Poll());
+  EXPECT_GT(diagnostics_, 0u);
+  ExpectPending();
+  ExpectFrontier(1, false);
+  EXPECT_EQ(destroyed_, 0u);
+  native_access_ended_ = true;
+  CompletePiece(0);
+  EXPECT_TRUE(Poll());
+  EXPECT_EQ(destroyed_, 6u);
+  ExpectFailed();
+  ExpectFrontier(1, true);
+  EXPECT_EQ(native_stops_, 0u);
+}
+
+TEST_F(AqlLifecycleTest,
+       ShaderFailureJoinsEveryIssuedPieceAndUnpublishedSuffix) {
+  Capture(true);
+  FailFeedback();
+  EXPECT_FALSE(Poll());
+  ExpectPending();
+  CompletePiece(0);
+  EXPECT_TRUE(Poll());
+  ExpectPending();
+  ExpectFrontier(1, true);
+  ExpectFrontier(2, false);
+  EXPECT_EQ(destroyed_, 0u);
+  native_access_ended_ = true;
+  CompletePiece(1);
+  EXPECT_TRUE(Poll());
+  ExpectPending();
+  EXPECT_EQ(destroyed_, 0u);
+  iree_hal_amd_gpu_aql_submission_release(capture_);
+  EXPECT_EQ(destroyed_, 6u);
+  ExpectFailed();
+  ExpectFrontier(2, true);
+  EXPECT_EQ(native_stops_, 0u);
+}
+
+TEST_F(AqlLifecycleTest,
+       ShaderFailureRetiresRejectedSuffixBeforeLastNativePiece) {
+  Capture(true);
+  FailFeedback();
+  EXPECT_FALSE(Poll());
+  iree_hal_amd_gpu_aql_submission_release(capture_);
+  ExpectPending();
+  CompletePiece(0);
+  EXPECT_TRUE(Poll());
+  ExpectPending();
+  EXPECT_EQ(destroyed_, 0u);
+  native_access_ended_ = true;
+  CompletePiece(1);
+  EXPECT_TRUE(Poll());
+  EXPECT_EQ(destroyed_, 6u);
+  ExpectFailed();
+  ExpectFrontier(2, true);
+  EXPECT_EQ(native_stops_, 0u);
 }
 
 }  // namespace

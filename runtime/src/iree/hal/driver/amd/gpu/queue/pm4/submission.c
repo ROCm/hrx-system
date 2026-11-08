@@ -507,7 +507,8 @@ void iree_hal_amd_gpu_pm4_submission_retain(
 bool iree_hal_amd_gpu_pm4_submission_retirement_ready(
     const iree_hal_amd_gpu_pm4_submission_t* submission,
     iree_status_code_t* out_status_code) {
-  *out_status_code = IREE_STATUS_OK;
+  *out_status_code = (iree_status_code_t)iree_atomic_load(
+      &submission->failure_code, iree_memory_order_relaxed);
   if (submission->native_wait_count) {
     for (iree_host_size_t i = 0; i < submission->wait_count; ++i) {
       const iree_hal_amd_gpu_signal_t* signal = submission->waits[i].signal;

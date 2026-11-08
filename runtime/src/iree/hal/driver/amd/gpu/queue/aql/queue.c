@@ -112,6 +112,8 @@ static iree_status_t iree_hal_amd_gpu_aql_check_acceptance(
   return iree_hal_amd_gpu_aql_check_failure(queue);
 }
 
+// Records failure without releasing any accepted native or host ownership.
+// Final capture release publishes failed signals after its payload joins.
 static void iree_hal_amd_gpu_aql_fail_submission(
     iree_hal_amd_gpu_aql_queue_t* queue,
     iree_hal_amd_gpu_aql_submission_t* submission, iree_status_t status) {
@@ -121,7 +123,7 @@ static void iree_hal_amd_gpu_aql_fail_submission(
   iree_hal_amd_gpu_context_report_status(
       queue->context, queue->base.queue_family->device, status);
   iree_hal_amd_gpu_aql_submission_fail(submission, status);
-  iree_hal_semaphore_list_fail(submission->signals, status);
+  iree_status_free(status);
 }
 
 static void iree_hal_amd_gpu_aql_abandon(
@@ -1824,18 +1826,13 @@ static bool iree_hal_amd_gpu_aql_retire(
   if (feedback_failure != IREE_STATUS_OK &&
       !queue->feedback_failure_delivered) {
     iree_hal_amd_gpu_completion_scope_unlock(scope);
-    // This consumer owns published captures until native completion, even
-    // after their public timelines fail from a shader report.
+    // Shader reports invalidate results without ending native borrows. This
+    // consumer retains each capture until its accepted pieces complete.
     for (uint64_t i = position; i < published; ++i) {
       iree_hal_amd_gpu_aql_fail_submission(
           queue,
           queue->issued[i & (queue->options.retirement_capacity - 1)]
               .submission,
-          iree_make_status(feedback_failure, "GPU sanitizer failure"));
-    }
-    if (published && queue->frontier.tracker) {
-      iree_async_frontier_tracker_fail_axis(
-          queue->frontier.tracker, queue->frontier.axis,
           iree_make_status(feedback_failure, "GPU sanitizer failure"));
     }
     queue->feedback_failure_delivered = true;
