@@ -49,22 +49,53 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @add_signed_word(%
 
 // ====
 
-func.def @assemble_wide_word(%low: i32, %high: i32) -> (i64) {
+func.def @assemble_wide_word(%low: i32, %high: i32) -> (i64, i64) {
   %low_word = scalar.extui %low : i32 to i64
   %high_word = scalar.extui %high : i32 to i64
   %word_bits = scalar.constant 32 : i64
   %high_half = scalar.shli %high_word, %word_bits : i64
   %result = scalar.ori %low_word, %high_half : i64
-  func.return %result : i64
+  %exclusive = scalar.xori %high_half, %low_word : i64
+  func.return %result, %exclusive : i64, i64
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> abi(object_function) @assemble_wide_word(%low: reg<aie2p.er>, %high: reg<aie2p.er>) -> (reg<aie2p.er x2>) asm {
-  %11 = mov.short 0
-  %22 = or %low, %11
-  %23 = or %11, %high
-  %result = concat(%22, %23) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
-  return %result
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @assemble_wide_word(%low: reg<aie2p.er>, %high: reg<aie2p.er>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
+  %result = concat(%low, %high) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %exclusive = concat(%low, %high) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  return %result, %exclusive
+}
+
+// ====
+
+// Retained facts select both word orders; overlapping operands keep bitwise ops.
+func.def @join_word_facts(%low_input: i64, %high_input: i64, %overlap: i64) -> (i64, i64, i64, i64) {
+  %low = scalar.assume %low_input [range(%low_input, 0, 4294967295)] : i64
+  %high = scalar.assume %high_input [multiple_of(%high_input, 4294967296)] : i64
+  %joined_or = scalar.ori %high, %low : i64
+  %joined_xor = scalar.xori %low, %high : i64
+  %overlapping_or = scalar.ori %overlap, %high : i64
+  %overlapping_xor = scalar.xori %low, %overlap : i64
+  func.return %joined_or, %joined_xor, %overlapping_or, %overlapping_xor : i64, i64, i64, i64
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @join_word_facts(%low: reg<aie2p.er x2>, %high: reg<aie2p.er x2>, %overlap: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
+  %20 = slice %low[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %21 = slice %high[1] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %joined_or = concat(%20, %21) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %joined_xor = concat(%20, %21) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %26 = slice %overlap[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %27 = slice %overlap[1] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %28 = slice %high[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %30 = or %26, %28
+  %31 = or %27, %21
+  %overlapping_or = concat(%30, %31) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %34 = slice %low[1] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %37 = xor %20, %26
+  %38 = xor %34, %27
+  %overlapping_xor = concat(%37, %38) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  return %joined_or, %joined_xor, %overlapping_or, %overlapping_xor
 }
 
 // ====

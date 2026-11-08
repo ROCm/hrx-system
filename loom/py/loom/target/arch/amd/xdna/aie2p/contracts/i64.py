@@ -134,6 +134,33 @@ def _pair_bitwise_rule(source_op: Op, operation: str) -> DescriptorRule:
     )
 
 
+def _pair_word_join_rule(source_op: Op, low: str, high: str) -> DescriptorRule:
+    """Disjoint bitwise word fields need only register composition."""
+    low_word = ValueRef.temporary("low_word")
+    high_word = ValueRef.temporary("high_word")
+    return DescriptorRule(
+        source_op=source_op,
+        priority=1,
+        guards=(
+            *_typed_guards(("lhs", "rhs", "result"), _I64),
+            Guard.value_i64_range(low, 0, 2**32 - 1),
+            Guard.value_divisible_by(high, 2**32),
+        ),
+        emit=(
+            EmitRegisterSlice(
+                source=ValueRef.operand(low), result=low_word, unit_count=1
+            ),
+            EmitRegisterSlice(
+                source=ValueRef.operand(high),
+                result=high_word,
+                unit_offset=1,
+                unit_count=1,
+            ),
+            _concat_pair(low_word, high_word),
+        ),
+    )
+
+
 def _pair_vector_binary_rule(source_op: Op, descriptor_key: str) -> DescriptorRule:
     descriptor = _descriptor(descriptor_key)
     return DescriptorRule(
@@ -1329,6 +1356,11 @@ AIE2P_I64_RULES = (
     _pair_bitwise_rule(scalar_bitwise.scalar_andi, "and.i32"),
     _pair_bitwise_rule(scalar_bitwise.scalar_ori, "or.i32"),
     _pair_bitwise_rule(scalar_bitwise.scalar_xori, "xor.i32"),
+    *(
+        _pair_word_join_rule(source_op, low, high)
+        for source_op in (scalar_bitwise.scalar_ori, scalar_bitwise.scalar_xori)
+        for low, high in (("lhs", "rhs"), ("rhs", "lhs"))
+    ),
     _pair_add_sub_rule(
         scalar_arithmetic.scalar_addi,
         "add.carry_out.i32",
