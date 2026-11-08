@@ -23,17 +23,16 @@ class KernelClassClassifierBenchmarkFixture {
  public:
   KernelClassClassifierBenchmarkFixture(iree_host_size_t site_count,
                                         uint32_t decision_count)
-      : fact_entries_(site_count * kKernelArgumentCount),
-        argument_values_(site_count * kKernelArgumentCount),
+      : argument_values_(site_count * kKernelArgumentCount),
         sites_(site_count),
         decisions_(decision_count) {
     iree_arena_block_pool_initialize(32 * 1024, iree_allocator_system(),
                                      &block_pool_);
+    iree_arena_initialize(&block_pool_, &facts_arena_);
     iree_arena_initialize(&block_pool_, &collection_arena_);
 
-    fact_table_.entries = fact_entries_.data();
-    fact_table_.count = fact_entries_.size();
-    fact_table_.capacity = fact_entries_.size();
+    IREE_CHECK_OK(loom_value_fact_table_initialize(
+        &fact_table_, &facts_arena_, site_count * kKernelArgumentCount));
     for (iree_host_size_t i = 0; i < site_count; ++i) {
       const iree_host_size_t first_argument = i * kKernelArgumentCount;
       argument_values_[first_argument + 0] =
@@ -42,12 +41,15 @@ class KernelClassClassifierBenchmarkFixture {
           static_cast<loom_value_id_t>(first_argument + 1);
       argument_values_[first_argument + 2] =
           static_cast<loom_value_id_t>(first_argument + 2);
-      fact_entries_[first_argument + 0] =
-          loom_value_facts_exact_i64(static_cast<int64_t>(i));
-      fact_entries_[first_argument + 1] =
-          loom_value_facts_exact_i64(static_cast<int64_t>((i * 7) % 5));
-      fact_entries_[first_argument + 2] =
-          loom_value_facts_exact_i64(static_cast<int64_t>(1000003 * i + 17));
+      IREE_CHECK_OK(loom_value_fact_table_define(
+          &fact_table_, first_argument + 0,
+          loom_value_facts_exact_i64(static_cast<int64_t>(i))));
+      IREE_CHECK_OK(loom_value_fact_table_define(
+          &fact_table_, first_argument + 1,
+          loom_value_facts_exact_i64(static_cast<int64_t>((i * 7) % 5))));
+      IREE_CHECK_OK(loom_value_fact_table_define(
+          &fact_table_, first_argument + 2,
+          loom_value_facts_exact_i64(static_cast<int64_t>(1000003 * i + 17))));
       sites_[i] = {
           .facts = &fact_table_,
           .argument_values = &argument_values_[first_argument],
@@ -157,6 +159,7 @@ class KernelClassClassifierBenchmarkFixture {
 
   ~KernelClassClassifierBenchmarkFixture() {
     iree_arena_deinitialize(&collection_arena_);
+    iree_arena_deinitialize(&facts_arena_);
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
 
@@ -181,8 +184,8 @@ class KernelClassClassifierBenchmarkFixture {
   static constexpr uint16_t kKernelArgumentCount = 3;
 
   iree_arena_block_pool_t block_pool_ = {};
+  iree_arena_allocator_t facts_arena_ = {};
   iree_arena_allocator_t collection_arena_ = {};
-  std::vector<loom_value_facts_t> fact_entries_;
   std::vector<loom_value_id_t> argument_values_;
   std::vector<loom_kernel_class_site_t> sites_;
   loom_value_fact_table_t fact_table_ = {};

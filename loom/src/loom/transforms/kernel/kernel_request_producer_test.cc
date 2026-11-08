@@ -254,15 +254,16 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
     return ProducerPtr(producer);
   }
 
-  void BuildSites(iree_arena_allocator_t* arena,
-                  loom_value_fact_table_t* out_facts,
-                  loom_kernel_class_site_t out_sites[2],
-                  loom_value_id_t out_argument_values[2]) {
-    IREE_CHECK_OK(
+  iree_status_t BuildSites(iree_arena_allocator_t* arena,
+                           loom_value_fact_table_t* out_facts,
+                           loom_kernel_class_site_t out_sites[2],
+                           loom_value_id_t out_argument_values[2]) {
+    IREE_RETURN_IF_ERROR(
         loom_value_fact_table_initialize(out_facts, arena, /*capacity=*/2));
-    out_facts->count = 2;
-    out_facts->entries[0] = loom_value_facts_exact_i64(64);
-    out_facts->entries[1] = loom_value_facts_exact_i64(256);
+    IREE_RETURN_IF_ERROR(loom_value_fact_table_define(
+        out_facts, 0, loom_value_facts_exact_i64(64)));
+    IREE_RETURN_IF_ERROR(loom_value_fact_table_define(
+        out_facts, 1, loom_value_facts_exact_i64(256)));
     out_argument_values[0] = 0;
     out_argument_values[1] = 1;
     out_sites[0] = {
@@ -273,6 +274,7 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
         .facts = out_facts,
         .argument_values = &out_argument_values[1],
     };
+    return iree_ok_status();
   }
 
   iree_arena_block_pool_t block_pool_;
@@ -601,22 +603,24 @@ template.def<@schedule> priority(1) @variable(%rows: index, %fixed: index, %offs
     iree_arena_allocator_t arena;
     iree_arena_initialize(&block_pool_, &arena);
     constexpr size_t kSites = 999;
-    std::vector<loom_value_facts_t> facts(kSites * 5);
     std::vector<loom_value_id_t> arguments(kSites * 5);
     std::vector<loom_kernel_class_site_t> sites(kSites);
-    const loom_value_fact_table_t observations = {
-        .entries = facts.data(),
-        .count = facts.size(),
-        .capacity = facts.size(),
-    };
+    loom_value_fact_table_t observations = {};
+    IREE_ASSERT_OK(
+        loom_value_fact_table_initialize(&observations, &arena, kSites * 5));
     for (size_t i = 0; i < kSites; ++i) {
       const int64_t width = i % 3 == 0 ? 8 : i % 3 == 1 ? 16 : 32 + i;
       const int64_t padding = i % 4;
-      facts[i * 5] = loom_value_facts_exact_i64(width - padding);
-      facts[i * 5 + 1] = loom_value_facts_exact_i64(padding);
-      facts[i * 5 + 2] = loom_value_facts_exact_i64(i % 3 == 2);
-      facts[i * 5 + 3] = loom_value_facts_exact_i64(256 * i);
-      facts[i * 5 + 4] = loom_value_facts_unknown();
+      IREE_ASSERT_OK(loom_value_fact_table_define(
+          &observations, i * 5, loom_value_facts_exact_i64(width - padding)));
+      IREE_ASSERT_OK(loom_value_fact_table_define(
+          &observations, i * 5 + 1, loom_value_facts_exact_i64(padding)));
+      IREE_ASSERT_OK(loom_value_fact_table_define(
+          &observations, i * 5 + 2, loom_value_facts_exact_i64(i % 3 == 2)));
+      IREE_ASSERT_OK(loom_value_fact_table_define(
+          &observations, i * 5 + 3, loom_value_facts_exact_i64(256 * i)));
+      IREE_ASSERT_OK(loom_value_fact_table_define(&observations, i * 5 + 4,
+                                                  loom_value_facts_unknown()));
       for (size_t j = 0; j < 5; ++j) {
         arguments[i * 5 + j] = i * 5 + j;
       }
@@ -723,7 +727,8 @@ TEST_P(KernelRequestProducerTest,
   loom_value_fact_table_t site_facts = {};
   loom_kernel_class_site_t sites[2] = {};
   loom_value_id_t argument_values[2] = {};
-  BuildSites(&scratch_arena, &site_facts, sites, argument_values);
+  IREE_ASSERT_OK(
+      BuildSites(&scratch_arena, &site_facts, sites, argument_values));
 
   RequestCapture capture = {
       .block_pool = &block_pool_,
@@ -793,7 +798,8 @@ TEST_P(KernelRequestProducerTest, StopsAfterSinkFailureBeforeMaterialization) {
   loom_value_fact_table_t site_facts = {};
   loom_kernel_class_site_t sites[2] = {};
   loom_value_id_t argument_values[2] = {};
-  BuildSites(&scratch_arena, &site_facts, sites, argument_values);
+  IREE_ASSERT_OK(
+      BuildSites(&scratch_arena, &site_facts, sites, argument_values));
 
   RejectRequestState state = {};
   const loom_kernel_class_collection_options_t collection_options =

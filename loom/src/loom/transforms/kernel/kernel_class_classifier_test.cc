@@ -311,23 +311,27 @@ class ManualBinaryClassifier {
         .kernel_argument_count = 2,
         .specialization_count = 0,
     };
+  }
 
-    fact_table_.entries = fact_entries_;
-    fact_table_.count = 8;
-    fact_table_.capacity = 8;
+  iree_status_t InitializeSites(iree_arena_allocator_t* arena) {
+    IREE_RETURN_IF_ERROR(
+        loom_value_fact_table_initialize(&fact_table_, arena, 8));
     for (iree_host_size_t i = 0; i < 4; ++i) {
       const loom_value_id_t first_value = static_cast<loom_value_id_t>(i * 2);
       argument_values_[i][0] = first_value;
       argument_values_[i][1] = first_value + 1;
-      fact_entries_[first_value + 0] =
-          loom_value_facts_exact_i64(static_cast<int64_t>(i / 2));
-      fact_entries_[first_value + 1] =
-          loom_value_facts_exact_i64(static_cast<int64_t>(i % 2));
+      IREE_RETURN_IF_ERROR(loom_value_fact_table_define(
+          &fact_table_, first_value,
+          loom_value_facts_exact_i64(static_cast<int64_t>(i / 2))));
+      IREE_RETURN_IF_ERROR(loom_value_fact_table_define(
+          &fact_table_, first_value + 1,
+          loom_value_facts_exact_i64(static_cast<int64_t>(i % 2))));
       sites_[i] = {
           .facts = &fact_table_,
           .argument_values = argument_values_[i],
       };
     }
+    return iree_ok_status();
   }
 
   loom_kernel_class_classifier_t* classifier() { return &classifier_; }
@@ -354,7 +358,6 @@ class ManualBinaryClassifier {
   loom_kernel_class_decision_t decisions_[2] = {};
   loom_kernel_class_classifier_t classifier_ = {};
 
-  loom_value_facts_t fact_entries_[8] = {};
   loom_value_id_t argument_values_[4][2] = {};
   loom_value_fact_table_t fact_table_ = {};
   loom_kernel_class_site_t sites_[4] = {};
@@ -504,6 +507,7 @@ TEST_F(KernelClassClassifierTest,
 
 TEST_F(KernelClassClassifierTest, CorrelatedDecisionsRetainObservedQuotient) {
   ManualBinaryClassifier fixture(/*has_generic_residual=*/true);
+  IREE_ASSERT_OK(fixture.InitializeSites(&analysis_arena_));
   fixture.decisions()[1].argument_values =
       fixture.decisions()[0].argument_values;
   fixture.decisions()[1].projection_ordinals =
@@ -525,6 +529,7 @@ TEST_F(KernelClassClassifierTest,
        ManyCorrelatedDecisionsRetainLinearTraceStorage) {
   constexpr uint32_t kDecisionCount = 128;
   ManualBinaryClassifier fixture(/*has_generic_residual=*/true);
+  IREE_ASSERT_OK(fixture.InitializeSites(&analysis_arena_));
   std::vector<loom_kernel_class_decision_t> decisions(kDecisionCount,
                                                       fixture.decisions()[0]);
   fixture.classifier()->decisions = decisions.data();
@@ -545,6 +550,7 @@ TEST_F(KernelClassClassifierTest,
 TEST_F(KernelClassClassifierTest,
        ClassLimitRetainsGenericResidualWithoutAliasingClasses) {
   ManualBinaryClassifier fixture(/*has_generic_residual=*/true);
+  IREE_ASSERT_OK(fixture.InitializeSites(&analysis_arena_));
   loom_kernel_class_collection_options_t options =
       loom_kernel_class_collection_options_default();
   options.class_limit = 2;
@@ -568,6 +574,7 @@ TEST_F(KernelClassClassifierTest,
 TEST_F(KernelClassClassifierTest,
        ClassLimitFailsWhenDecisionHasNoGenericResidual) {
   ManualBinaryClassifier fixture(/*has_generic_residual=*/false);
+  IREE_ASSERT_OK(fixture.InitializeSites(&analysis_arena_));
   loom_kernel_class_collection_options_t options =
       loom_kernel_class_collection_options_default();
   options.class_limit = 2;
@@ -582,6 +589,7 @@ TEST_F(KernelClassClassifierTest,
 TEST_F(KernelClassClassifierTest,
        UnprojectableSoftDecisionRetainsGenericResidual) {
   ManualBinaryClassifier fixture(/*has_generic_residual=*/true);
+  IREE_ASSERT_OK(fixture.InitializeSites(&analysis_arena_));
   fixture.classifier()->decision_count = 1;
   fixture.decisions()[0].unavailable_reason =
       LOOM_KERNEL_CLASS_DECISION_UNPROJECTABLE_INPUT;
@@ -602,6 +610,7 @@ TEST_F(KernelClassClassifierTest,
 TEST_F(KernelClassClassifierTest,
        UnprojectableHardRequirementFailsInsteadOfWidening) {
   ManualBinaryClassifier fixture(/*has_generic_residual=*/true);
+  IREE_ASSERT_OK(fixture.InitializeSites(&analysis_arena_));
   fixture.classifier()->decision_count = 1;
   fixture.decisions()[0].unavailable_reason =
       LOOM_KERNEL_CLASS_DECISION_UNPROJECTABLE_INPUT;
@@ -622,6 +631,7 @@ TEST_F(KernelClassClassifierTest,
 TEST_F(KernelClassClassifierTest,
        SelectedResultDependentActionRetainsGenericResidual) {
   ManualBinaryClassifier fixture(/*has_generic_residual=*/true);
+  IREE_ASSERT_OK(fixture.InitializeSites(&analysis_arena_));
   fixture.classifier()->decision_count = 1;
   fixture.actions(0)[0].contract_flags =
       LOOM_KERNEL_CLASS_CONTRACT_FLAG_RESULT_DEPENDENT;
@@ -642,6 +652,7 @@ TEST_F(KernelClassClassifierTest,
 TEST_F(KernelClassClassifierTest,
        UnselectedResultDependentActionDoesNotSuppressInputOnlyAction) {
   ManualBinaryClassifier fixture(/*has_generic_residual=*/true);
+  IREE_ASSERT_OK(fixture.InitializeSites(&analysis_arena_));
   fixture.classifier()->decision_count = 1;
   fixture.actions(0)[0].contract_flags =
       LOOM_KERNEL_CLASS_CONTRACT_FLAG_RESULT_DEPENDENT;

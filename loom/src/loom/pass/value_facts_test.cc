@@ -240,7 +240,8 @@ TEST_F(PassValueFactsTest, ProducerRangeControlsInitialStorage) {
       &owner, module, scope, reserved_values, &facts));
   ASSERT_NE(facts, nullptr);
   EXPECT_EQ(facts->first_value_id, second_value & ~UINT32_C(63));
-  EXPECT_EQ(facts->capacity, second_value + 1 - facts->first_value_id);
+  EXPECT_EQ(facts->capacity,
+            (iree_host_size_t)LOOM_VALUE_FACT_SEGMENT_CAPACITY);
   EXPECT_LT(facts->capacity, loom_value_table_capacity(&module->values));
   EXPECT_EQ(loom_value_fact_table_lookup(facts, second_value).range_lo, 7);
 
@@ -371,7 +372,9 @@ TEST_F(PassValueFactsTest, RegionScopeComputesRequestedProjection) {
 
   // Expanding another region can append module values without invalidating
   // this region's analysis. Its existing fact storage and scope stay reusable.
-  loom_value_facts_t* entries = facts->entries;
+  loom_value_fact_segment_t* const config_segment =
+      facts->segments[(config_value - facts->first_value_id) >>
+                      LOOM_VALUE_FACT_SEGMENT_SHIFT];
   const iree_host_size_t initial_capacity = facts->capacity;
   loom_builder_t builder;
   loom_builder_initialize(module, &module->arena, loom_region_entry_block(body),
@@ -397,7 +400,10 @@ TEST_F(PassValueFactsTest, RegionScopeComputesRequestedProjection) {
           .capacity = appended_value + 1,
       },
       &reused_facts));
-  EXPECT_EQ(reused_facts->entries, entries);
+  EXPECT_EQ(
+      reused_facts->segments[(config_value - reused_facts->first_value_id) >>
+                             LOOM_VALUE_FACT_SEGMENT_SHIFT],
+      config_segment);
   EXPECT_EQ(reused_facts->capacity, initial_capacity);
   EXPECT_EQ(counts.recomputation_count, 1u);
   EXPECT_EQ(counts.cache_hit_count, 2u);
@@ -417,7 +423,9 @@ TEST_F(PassValueFactsTest, RegionScopeComputesRequestedProjection) {
             23);
   EXPECT_GT(body_facts->capacity, initial_capacity);
   const iree_host_size_t body_touched_count = body_facts->touched_count;
-  entries = body_facts->entries;
+  loom_value_fact_segment_t* const appended_segment =
+      body_facts->segments[(appended_value - body_facts->first_value_id) >>
+                           LOOM_VALUE_FACT_SEGMENT_SHIFT];
 
   // Preparing the small region again clears only populated entries and keeps
   // the enlarged storage; no facts from the expanded body can leak into it.
@@ -425,28 +433,31 @@ TEST_F(PassValueFactsTest, RegionScopeComputesRequestedProjection) {
       &owner, module,
       loom_pass_value_fact_scope_region(function, config, function.op),
       &reused_facts));
-  EXPECT_EQ(reused_facts->entries, entries);
+  EXPECT_EQ(
+      reused_facts->segments[(appended_value - reused_facts->first_value_id) >>
+                             LOOM_VALUE_FACT_SEGMENT_SHIFT],
+      appended_segment);
   EXPECT_EQ(reused_facts->touched_count, 0u);
   EXPECT_EQ(counts.scope_clear_count, 2u);
   EXPECT_EQ(counts.cleared_value_count, touched_count + body_touched_count);
   EXPECT_FALSE(loom_value_fact_table_has_entry(reused_facts, appended_value));
   EXPECT_FALSE(loom_value_fact_table_has_entry(reused_facts, config_value));
 
-  // Once direct storage is oversized, a later hint does not allocate
-  // speculative headroom. Definition-time growth remains available if the
-  // acquired scope actually defines beyond the current interval.
-  const iree_host_size_t oversized_capacity = reused_facts->capacity;
-  EXPECT_GT(oversized_capacity,
-            iree_arena_block_pool_max_allocation_size(block_pool()) /
-                sizeof(*reused_facts->entries));
+  // A later producer range grows through pooled segments without replacing
+  // payloads retained for values in the current scope.
+  const iree_host_size_t previous_capacity = reused_facts->capacity;
   IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire_range(
       &owner, module, body_scope,
       (loom_value_fact_range_t){
           .first_value_id = 0,
-          .capacity = 2 * oversized_capacity,
+          .capacity = 2 * previous_capacity,
       },
       &reused_facts));
-  EXPECT_EQ(reused_facts->capacity, oversized_capacity);
+  EXPECT_GE(reused_facts->capacity, 2 * previous_capacity);
+  EXPECT_EQ(
+      reused_facts->segments[(appended_value - reused_facts->first_value_id) >>
+                             LOOM_VALUE_FACT_SEGMENT_SHIFT],
+      appended_segment);
   EXPECT_EQ(loom_value_fact_table_lookup(reused_facts, appended_value).range_lo,
             23);
 
@@ -513,12 +524,12 @@ TEST_F(PassValueFactsTest, InvalidateClearsActiveScopeWithoutLosingStorage) {
   IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
       &owner, module, loom_pass_value_fact_scope_function(function), &facts));
   ASSERT_NE(facts, nullptr);
-  loom_value_facts_t* entries = owner.table.entries;
+  loom_value_fact_segment_t* const segment = owner.table.segments[0];
   EXPECT_EQ(loom_value_fact_table_lookup(facts, value).range_lo, 99);
 
   loom_pass_value_fact_owner_invalidate(&owner);
 
-  EXPECT_EQ(owner.table.entries, entries);
+  EXPECT_EQ(owner.table.segments[0], segment);
   EXPECT_TRUE(loom_value_facts_is_unknown(
       loom_value_fact_table_lookup(&owner.table, value)));
   EXPECT_EQ(owner.table.touched_count, 0u);

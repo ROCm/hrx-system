@@ -166,17 +166,9 @@ static iree_status_t loom_pass_value_fact_owner_reserve_scope(
   if (table_covers_range) {
     return iree_ok_status();
   }
-  const iree_host_size_t pooled_entry_capacity =
-      iree_arena_block_pool_max_allocation_size(owner->block_pool) /
-      sizeof(*owner->table.entries);
-  if (owner->table.capacity > pooled_entry_capacity) {
-    // An oversized table is already reusable for the rest of the compiler
-    // invocation. Do not replace it or allocate speculative hint headroom;
-    // definition-time growth remains available if the scope actually needs it.
-    return iree_ok_status();
-  }
   const loom_value_id_t storage_first_value_id =
-      reserved_values.first_value_id & ~UINT32_C(63);
+      reserved_values.first_value_id &
+      ~(loom_value_id_t)LOOM_VALUE_FACT_SEGMENT_MASK;
   const bool omits_existing_prefix =
       storage_first_value_id > owner->table.first_value_id;
   if (owner->table.capacity != 0 && omits_existing_prefix) {

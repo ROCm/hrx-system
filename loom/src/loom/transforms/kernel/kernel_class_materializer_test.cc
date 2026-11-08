@@ -245,7 +245,6 @@ kernel.def @classified() {
   loom_value_fact_table_t site_facts = {};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&site_facts, &analysis_arena,
                                                   kSiteCount * 4));
-  site_facts.count = kSiteCount * 4;
   for (iree_host_size_t i = 0; i < kSiteCount; ++i) {
     const iree_host_size_t value_base = i * 4;
     site_argument_values[value_base + 0] =
@@ -256,16 +255,20 @@ kernel.def @classified() {
         static_cast<loom_value_id_t>(value_base + 2);
     site_argument_values[value_base + 3] =
         static_cast<loom_value_id_t>(value_base + 3);
-    site_facts.entries[value_base + 0] =
-        loom_value_facts_exact_i64(static_cast<int64_t>(i));
-    site_facts.entries[value_base + 1] =
-        loom_value_facts_exact_i64(static_cast<int64_t>((i * 7) % 5));
+    IREE_ASSERT_OK(loom_value_fact_table_define(
+        &site_facts, value_base + 0,
+        loom_value_facts_exact_i64(static_cast<int64_t>(i))));
+    IREE_ASSERT_OK(loom_value_fact_table_define(
+        &site_facts, value_base + 1,
+        loom_value_facts_exact_i64(static_cast<int64_t>((i * 7) % 5))));
     const int64_t effective_n =
         static_cast<int64_t>(i + static_cast<iree_host_size_t>((i * 7) % 5));
-    site_facts.entries[value_base + 2] =
-        loom_value_facts_exact_i64(effective_n >= 128 ? 1 : -1);
-    site_facts.entries[value_base + 3] =
-        loom_value_facts_exact_i64(static_cast<int64_t>(1000003 * i + 17));
+    IREE_ASSERT_OK(loom_value_fact_table_define(
+        &site_facts, value_base + 2,
+        loom_value_facts_exact_i64(effective_n >= 128 ? 1 : -1)));
+    IREE_ASSERT_OK(loom_value_fact_table_define(
+        &site_facts, value_base + 3,
+        loom_value_facts_exact_i64(static_cast<int64_t>(1000003 * i + 17))));
     sites[i] = {
         .facts = &site_facts,
         .argument_values = &site_argument_values[value_base],
@@ -434,11 +437,12 @@ kernel.def @classified() {
       loom_value_facts_exact_i64(7),  loom_value_facts_exact_i64(8),
       loom_value_facts_exact_i64(32), loom_value_facts_unknown(),
   };
-  const loom_value_fact_table_t site_facts = {
-      .entries = facts,
-      .count = 6,
-      .capacity = 6,
-  };
+  loom_value_fact_table_t site_facts = {};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&site_facts, &arena,
+                                                  IREE_ARRAYSIZE(facts)));
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(facts); ++i) {
+    IREE_ASSERT_OK(loom_value_fact_table_define(&site_facts, i, facts[i]));
+  }
   const loom_value_id_t arguments[] = {0, 1, 2, 3, 4, 5};
   const loom_kernel_class_site_t sites[] = {
       {.facts = &site_facts, .argument_values = arguments},
@@ -586,8 +590,8 @@ kernel.def @classified() {
   loom_value_fact_table_t site_facts = {};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&site_facts, &analysis_arena,
                                                   /*capacity=*/1));
-  site_facts.count = 1;
-  site_facts.entries[0] = loom_value_facts_exact_i64(256);
+  IREE_ASSERT_OK(loom_value_fact_table_define(&site_facts, 0,
+                                              loom_value_facts_exact_i64(256)));
   const loom_value_id_t site_argument_value = 0;
   const loom_kernel_class_site_t site = {
       .facts = &site_facts,
