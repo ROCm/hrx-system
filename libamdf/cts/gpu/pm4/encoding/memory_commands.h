@@ -25,6 +25,13 @@ enum class Pm4MemoryComparison : uint32_t {
 
 namespace pm4 {
 
+// DWORD polling offload is selected by the carrier. Native PM4 enables it;
+// AQL PM4-IB retains its ordinary polling encoding.
+enum class WaitOffload : uint32_t {
+  kDisabled = 0,
+  kEnabled = 1,
+};
+
 // COPY_DATA count selection. A transfer width does not imply atomicity.
 enum class CopyDataWidth : uint32_t {
   k32Bit = 0,
@@ -37,12 +44,19 @@ enum class CopyDataPolicy : uint32_t {
   kStreaming = 1,
 };
 
-// Encodes an ordinary MEC memory wait into seven or nine caller-owned DWORDs
-// and returns that count. The naturally aligned target has separately qualified
-// WAIT semantics. The comparison uses (loaded_value & mask) versus value.
-// No ACE offload or payload-cache operation is performed.
+// Encodes a MEC memory wait into seven caller-owned DWORDs and returns seven.
+// The naturally aligned target has separately qualified WAIT semantics. The
+// comparison uses (loaded_value & mask) versus value. The carrier selects ACE
+// polling offload; this does not select the preemptable operation or acquire
+// payload caches.
 size_t WaitMemory32(uint32_t* words, uint64_t address, uint32_t value,
-                    Pm4MemoryComparison comparison, uint32_t mask);
+                    Pm4MemoryComparison comparison, uint32_t mask,
+                    WaitOffload offload);
+
+// Encodes the same memory comparison into nine caller-owned DWORDs and returns
+// nine. The target is eight-byte aligned. Polling stays on MEC: offloaded
+// unresolved 64-bit waits can corrupt the poll address on GFX11.5 firmware,
+// including native PM4 queues. No payload-cache operation is performed.
 size_t WaitMemory64(uint32_t* words, uint64_t address, uint64_t value,
                     Pm4MemoryComparison comparison, uint64_t mask);
 

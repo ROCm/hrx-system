@@ -166,7 +166,8 @@ void Pm4CommandWriter::SystemBarrier() {
 
 void Pm4CommandWriter::WaitCompute() {
   words_[word_count_++] = MakeHeader(0x46, 2);
-  words_[word_count_++] = 7 | (4 << 8);  // CS_PARTIAL_FLUSH.
+  // CS_PARTIAL_FLUSH with MEC offload until the EOP queue is empty.
+  words_[word_count_++] = 7 | (4 << 8) | (1u << 31);
 }
 
 void Pm4CommandWriter::AcquireFromSystem() {
@@ -331,7 +332,8 @@ void Pm4CommandWriter::WaitMemory32(uint64_t address, uint32_t value,
                                     Pm4MemoryComparison comparison,
                                     uint32_t mask) {
   word_count_ +=
-      pm4::WaitMemory32(words_ + word_count_, address, value, comparison, mask);
+      pm4::WaitMemory32(words_ + word_count_, address, value, comparison, mask,
+                        pm4::WaitOffload::kEnabled);
 }
 
 void Pm4CommandWriter::WaitMemory64(uint64_t address, uint64_t value,

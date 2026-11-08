@@ -11,14 +11,15 @@
 namespace pm4 {
 
 size_t WaitMemory32(uint32_t* words, uint64_t address, uint32_t value,
-                    Pm4MemoryComparison comparison, uint32_t mask) {
+                    Pm4MemoryComparison comparison, uint32_t mask,
+                    WaitOffload offload) {
   words[0] = 0xc0053c00u;
   words[1] = static_cast<uint32_t>(comparison) | (1u << 4);
   words[2] = static_cast<uint32_t>(address);
   words[3] = static_cast<uint32_t>(address >> 32);
   words[4] = value;
   words[5] = mask;
-  words[6] = 4;
+  words[6] = 4 | (static_cast<uint32_t>(offload) << 31);
   return 7;
 }
 
