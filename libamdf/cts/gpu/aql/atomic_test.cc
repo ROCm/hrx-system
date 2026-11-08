@@ -224,7 +224,8 @@ class AqlAtomicTest : public AqlQueueTest,
         if constexpr (sizeof(T) == 4) {
           word_count += pm4::WaitMemory32(
               words.data() + word_count, gpu_address + kInputOffset,
-              test.reference, test.comparison, test.mask);
+              test.reference, test.comparison, test.mask,
+              pm4::WaitOffload::kDisabled);
         } else {
           word_count += pm4::WaitMemory64(
               words.data() + word_count, gpu_address + kInputOffset,
@@ -238,7 +239,8 @@ class AqlAtomicTest : public AqlQueueTest,
                                           pm4::CopyDataWidth::k32Bit);
         word_count += pm4::WaitMemory32(
             words.data() + word_count, gpu_address + kAcknowledgedOffset, epoch,
-            Pm4MemoryComparison::kEqual, UINT32_MAX);
+            Pm4MemoryComparison::kEqual, UINT32_MAX,
+            pm4::WaitOffload::kDisabled);
         std::memcpy(commands->host.pointer, words.data(), sizeof(words));
         // Acquire publishes the host-written IB. Release NONE keeps the control
         // observation independent of any carrier-completion cache operation.
