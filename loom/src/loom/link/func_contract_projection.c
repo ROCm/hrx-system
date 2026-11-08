@@ -28,12 +28,8 @@ typedef struct loom_link_func_contract_projection_module_t {
 struct loom_link_func_contract_projection_t {
   // Borrowed immutable provider index.
   const loom_link_module_index_t* index;
-  // Host allocator owning this object and the private identity module.
-  iree_allocator_t allocator;
-  // Block pool backing the scratch arena, identity module, and readers.
-  iree_arena_block_pool_t* block_pool;
-  // Reset-free storage for projection tables and contract arrays.
-  iree_arena_allocator_t arena;
+  // Borrowed invocation storage owning this object and its cached state.
+  iree_arena_allocator_t* arena;
   // Private module owning all projected values, types, and attributes.
   loom_module_t* identity_module;
   // Identity-module symbol refs indexed by index-wide symbol ordinal.
@@ -83,8 +79,8 @@ static iree_status_t loom_link_func_contract_projection_get_module_state(
   loom_link_func_contract_projection_module_t* module =
       projection->modules[module_ordinal];
   if (module == NULL) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate(&projection->arena,
-                                             sizeof(*module), (void**)&module));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate(projection->arena, sizeof(*module),
+                                             (void**)&module));
     *module = (loom_link_func_contract_projection_module_t){
         .projection = projection,
         .indexed_module =
@@ -128,7 +124,7 @@ static iree_status_t loom_link_func_contract_projection_initialize_remap(
   };
   return loom_ir_remap_initialize(module->indexed_module->materialized_module,
                                   module->projection->identity_module,
-                                  &module->projection->arena, &options,
+                                  module->projection->arena, &options,
                                   &module->materialized_remap);
 }
 
@@ -145,12 +141,12 @@ static iree_status_t loom_link_func_contract_projection_values(
 
   loom_value_id_t* source_values = NULL;
   loom_value_id_t* target_values = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      &projection->arena, value_count, sizeof(*source_values),
-      (void**)&source_values));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      &projection->arena, value_count, sizeof(*target_values),
-      (void**)&target_values));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(projection->arena, value_count,
+                                                 sizeof(*source_values),
+                                                 (void**)&source_values));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(projection->arena, value_count,
+                                                 sizeof(*target_values),
+                                                 (void**)&target_values));
   iree_host_size_t position = 0;
   if (source->workload_arguments.count != 0) {
     memcpy(source_values + position, source->workload_arguments.values,
@@ -197,7 +193,7 @@ static iree_status_t loom_link_func_contract_projection_attributes(
   }
   loom_attribute_t* attributes = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(&projection->arena, attribute_count,
+      iree_arena_allocate_array(projection->arena, attribute_count,
                                 sizeof(*attributes), (void**)&attributes));
   for (uint8_t i = 0; i < attribute_count; ++i) {
     IREE_RETURN_IF_ERROR(
@@ -217,7 +213,7 @@ static iree_status_t loom_link_func_contract_projection_tied_results(
   }
   loom_tied_result_t* tied_results = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(&projection->arena, source->tied_result_count,
+      iree_arena_allocate_array(projection->arena, source->tied_result_count,
                                 sizeof(*tied_results), (void**)&tied_results));
   memcpy(tied_results, source->tied_results,
          source->tied_result_count * sizeof(*tied_results));
@@ -318,7 +314,7 @@ static iree_status_t loom_link_func_contract_projection_initialize_reader(
   };
   return loom_bytecode_function_projection_reader_allocate(
       provider->bytecode.contents, provider->bytecode.filename, metadata,
-      module->projection->identity_module, &options, &module->projection->arena,
+      module->projection->identity_module, &options, module->projection->arena,
       &module->bytecode_reader);
 }
 
@@ -373,32 +369,34 @@ static iree_status_t loom_link_func_contract_projection_bytecode_load(
 }
 
 iree_status_t loom_link_func_contract_projection_allocate(
-    const loom_link_module_index_t* index, iree_arena_block_pool_t* block_pool,
+    const loom_link_module_index_t* index, iree_arena_allocator_t* arena,
     iree_allocator_t allocator,
     loom_link_func_contract_projection_t** out_projection) {
   IREE_ASSERT_ARGUMENT(index);
-  IREE_ASSERT_ARGUMENT(block_pool);
+  IREE_ASSERT_ARGUMENT(arena);
   IREE_ASSERT_ARGUMENT(out_projection);
   *out_projection = NULL;
 
   loom_link_func_contract_projection_t* projection = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(allocator, sizeof(*projection),
-                                             (void**)&projection));
+  iree_status_t status =
+      iree_arena_allocate(arena, sizeof(*projection), (void**)&projection);
+  if (!iree_status_is_ok(status)) {
+    return status;
+  }
   memset(projection, 0, sizeof(*projection));
   projection->index = index;
-  projection->allocator = allocator;
-  projection->block_pool = block_pool;
-  iree_arena_initialize(block_pool, &projection->arena);
+  projection->arena = arena;
 
   const iree_host_size_t symbol_count =
       loom_link_module_index_symbol_count(index);
   const iree_host_size_t module_count =
       loom_link_module_index_module_count(index);
-  iree_status_t status = loom_module_allocate(
-      loom_link_module_index_context(index), IREE_SV("link.contracts"),
-      block_pool, /*hints=*/NULL, allocator, &projection->identity_module);
+  status = loom_module_allocate(loom_link_module_index_context(index),
+                                IREE_SV("link.contracts"), arena->block_pool,
+                                /*hints=*/NULL, allocator,
+                                &projection->identity_module);
   if (iree_status_is_ok(status) && symbol_count != 0) {
-    status = iree_arena_allocate_array(&projection->arena, symbol_count,
+    status = iree_arena_allocate_array(projection->arena, symbol_count,
                                        sizeof(*projection->symbol_refs),
                                        (void**)&projection->symbol_refs);
     if (iree_status_is_ok(status)) {
@@ -408,7 +406,7 @@ iree_status_t loom_link_func_contract_projection_allocate(
     }
   }
   if (iree_status_is_ok(status) && symbol_count != 0) {
-    status = iree_arena_allocate_array(&projection->arena, symbol_count,
+    status = iree_arena_allocate_array(projection->arena, symbol_count,
                                        sizeof(*projection->contracts),
                                        (void**)&projection->contracts);
     if (iree_status_is_ok(status)) {
@@ -417,7 +415,7 @@ iree_status_t loom_link_func_contract_projection_allocate(
     }
   }
   if (iree_status_is_ok(status) && module_count != 0) {
-    status = iree_arena_allocate_array(&projection->arena, module_count,
+    status = iree_arena_allocate_array(projection->arena, module_count,
                                        sizeof(*projection->modules),
                                        (void**)&projection->modules);
     if (iree_status_is_ok(status)) {
@@ -449,8 +447,6 @@ void loom_link_func_contract_projection_free(
     }
   }
   loom_module_free(projection->identity_module);
-  iree_arena_deinitialize(&projection->arena);
-  iree_allocator_free(projection->allocator, projection);
 }
 
 loom_module_t* loom_link_func_contract_projection_module(
@@ -474,7 +470,7 @@ iree_status_t loom_link_func_contract_projection_load(
   loom_link_func_contract_t* contract = projection->contracts[symbol->ordinal];
   if (contract == NULL) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate(
-        &projection->arena, sizeof(*contract), (void**)&contract));
+        projection->arena, sizeof(*contract), (void**)&contract));
     memset(contract, 0, sizeof(*contract));
     loom_link_func_contract_projection_module_t* module = NULL;
     IREE_RETURN_IF_ERROR(loom_link_func_contract_projection_get_module_state(

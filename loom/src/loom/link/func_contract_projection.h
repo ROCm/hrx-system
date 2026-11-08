@@ -29,14 +29,16 @@ typedef struct loom_link_func_contract_projection_t
 // headers and bytecode providers decode only their indexed header payloads;
 // function bodies are never visited.
 //
-// The projection borrows |index| and |block_pool| for its lifetime. It is an
-// invocation-local object and requires external synchronization.
+// The projection borrows |index| and allocates its header and cached state from
+// |arena|. It is an invocation-local object and requires external
+// synchronization. The arena must outlive the matching free call.
 iree_status_t loom_link_func_contract_projection_allocate(
-    const loom_link_module_index_t* index, iree_arena_block_pool_t* block_pool,
+    const loom_link_module_index_t* index, iree_arena_allocator_t* arena,
     iree_allocator_t allocator,
     loom_link_func_contract_projection_t** out_projection);
 
-// Frees |projection| and every projected contract.
+// Releases resources held by |projection| and every projected contract.
+// Projection storage is reclaimed when its owning arena resets.
 void loom_link_func_contract_projection_free(
     loom_link_func_contract_projection_t* projection);
 
