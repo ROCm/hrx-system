@@ -115,4 +115,12 @@ iree_status_t loom_aie2p_worker_control_read(
     uint8_t packet_id, uint8_t reply_id, uint32_t register_offset,
     iree_host_size_t count, loom_value_id_t* out_values);
 
+// Polls until the masked register bits are clear and leaves builder in the
+// completion block. The caller owns the scalar reply stream exclusively across
+// the wait, as for control_read. register_offset selects one 32-bit register.
+iree_status_t loom_aie2p_worker_control_wait_clear(
+    loom_aie2p_worker_builder_t* context, loom_builder_t* builder,
+    loom_region_t* region, uint8_t packet_id, uint8_t reply_id,
+    uint32_t register_offset, uint32_t mask);
+
 #endif  // LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_PIPELINE_WORKER_H_

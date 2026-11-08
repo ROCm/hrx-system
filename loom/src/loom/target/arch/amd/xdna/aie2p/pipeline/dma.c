@@ -10,6 +10,42 @@
 #include "loom/target/arch/amd/xdna/array/registers.h"
 #include "loom/transforms/view/offset_expression.h"
 
+loom_aie2p_native_queue_status_t loom_aie2p_native_queue_status(
+    const loom_aie2p_native_context_t* context,
+    const loom_aie2p_native_tile_t* tile, uint16_t engine,
+    loom_xdna_dma_direction_t direction) {
+  const loom_xdna_register_field_id_t* fields =
+      tile->memory_layout
+          ? tile->memory_layout->directions[direction - 1].status
+          : NULL;
+  static const loom_xdna_register_field_id_t shim_status[2][6] = {
+      {LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_STATUS_TASK_QUEUE_SIZE,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_STATUS_CHANNEL_RUNNING,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_STATUS_STALLED_LOCK_ACQUIRE,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_STATUS_STALLED_LOCK_RELEASE,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_STATUS_STALLED_STREAM_BACKPRESSURE,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_STATUS_STALLED_COMPLETION_TOKEN},
+      {LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_STATUS_TASK_QUEUE_SIZE,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_STATUS_CHANNEL_RUNNING,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_STATUS_STALLED_LOCK_ACQUIRE,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_STATUS_STALLED_LOCK_RELEASE,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_STATUS_STALLED_STREAM_STARVATION,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_STATUS_STALLED_TOKEN_OR_COUNT_FIFO},
+  };
+  if (!fields) {
+    fields = shim_status[direction - 1];
+  }
+  uint32_t mask = loom_xdna_register_field_encode(fields[0], 7);
+  for (iree_host_size_t i = 1; i < 6; ++i) {
+    mask |= loom_xdna_register_field_encode(fields[i], 1);
+  }
+  return (loom_aie2p_native_queue_status_t){
+      .address = loom_xdna_register_field_address(context->family, fields[0],
+                                                  tile->coordinate, &engine),
+      .pending_mask = mask,
+  };
+}
+
 static uint32_t loom_aie2p_native_register_offset(
     const loom_aie2p_native_context_t* context,
     const loom_aie2p_native_tile_t* tile, loom_xdna_register_field_id_t field,
