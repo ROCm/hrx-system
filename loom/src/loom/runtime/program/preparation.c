@@ -35,6 +35,8 @@ typedef enum loom_runtime_preparation_function_e {
   LOOM_RUNTIME_PREPARATION_FUNCTION_PARAMETER_BANK,
   LOOM_RUNTIME_PREPARATION_FUNCTION_BIND_PARAMETERS,
   LOOM_RUNTIME_PREPARATION_FUNCTION_SOURCE_SCOPE,
+  LOOM_RUNTIME_PREPARATION_FUNCTION_STORAGE,
+  LOOM_RUNTIME_PREPARATION_FUNCTION_FEEDBACK,
   LOOM_RUNTIME_PREPARATION_FUNCTION_COUNT,
 } loom_runtime_preparation_function_t;
 
@@ -75,6 +77,24 @@ struct loom_runtime_preparation_t {
   iree_string_view_t memory_forecast;
   // Owned cold-selected host entry for binding resolved invocation parameters.
   iree_string_view_t bind_parameters;
+  // Cold mutable root geometry, independent of checkpoint placement.
+  struct {
+    // Number of initialized source-visible root declarations.
+    iree_host_size_t count;
+    // Allocated declaration capacity.
+    iree_host_size_t capacity;
+    // Owned declarations in source ordinal order.
+    loom_runtime_preparation_storage_t* values;
+  } storage;
+  // Cold host destinations for explicitly requested device feedback.
+  struct {
+    // Number of initialized source-visible feedback slots.
+    iree_host_size_t count;
+    // Allocated capacity of the declaration table.
+    iree_host_size_t capacity;
+    // Owned positive byte capacities in source ordinal order.
+    uint64_t* values;
+  } feedback;
   // Cold arena catalog, without device or physical ownership.
   struct {
     // Number of initialized finite VA-byte capacities.
@@ -206,6 +226,12 @@ void loom_runtime_preparation_module_recycle(
   }
   preparation->memory_forecast = iree_string_view_empty();
   preparation->bind_parameters = iree_string_view_empty();
+  preparation->storage.count = 0;
+  preparation->storage.capacity = 0;
+  preparation->storage.values = NULL;
+  preparation->feedback.count = 0;
+  preparation->feedback.capacity = 0;
+  preparation->feedback.values = NULL;
   preparation->arenas.count = 0;
   preparation->arenas.capacity = 0;
   preparation->arenas.values = NULL;
@@ -724,6 +750,42 @@ static iree_status_t loom_runtime_preparation_set_workspace_limit(
   return iree_ok_status();
 }
 
+static iree_status_t loom_runtime_preparation_add_storage(
+    loom_runtime_preparation_t* preparation, const iree_vm_call_packet_t* call,
+    bool feedback) {
+  const uint64_t byte_length = iree_vm_call_value_argument_load(call, 0);
+  const uint64_t alignment =
+      feedback ? 1 : iree_vm_call_value_argument_load(call, 1);
+  if (!byte_length || byte_length > INT64_MAX || byte_length > SIZE_MAX ||
+      !alignment || alignment > INT64_MAX || alignment > SIZE_MAX ||
+      (alignment & (alignment - 1))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "storage requires a positive host extent and power-of-two alignment");
+  }
+  iree_host_size_t* count =
+      feedback ? &preparation->feedback.count : &preparation->storage.count;
+  if (*count == INT32_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "storage declaration ordinal exceeds i32");
+  }
+  if (feedback) {
+    IREE_RETURN_IF_ERROR(loom_runtime_preparation_grow_array(
+        preparation, *count, sizeof(*preparation->feedback.values),
+        &preparation->feedback.capacity,
+        (void**)&preparation->feedback.values));
+    preparation->feedback.values[*count] = byte_length;
+  } else {
+    IREE_RETURN_IF_ERROR(loom_runtime_preparation_grow_array(
+        preparation, *count, sizeof(*preparation->storage.values),
+        &preparation->storage.capacity, (void**)&preparation->storage.values));
+    preparation->storage.values[*count] =
+        (loom_runtime_preparation_storage_t){byte_length, alignment};
+  }
+  iree_vm_call_value_result_store(call, 0, (*count)++);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_runtime_preparation_module_start(
     iree_vm_module_t* base,
     const iree_vm_module_function_start_params_t* params,
@@ -738,7 +800,18 @@ static iree_status_t loom_runtime_preparation_module_start(
   const iree_vm_call_packet_t* call = &params->call;
   const loom_runtime_preparation_function_t function =
       (loom_runtime_preparation_function_t)params->function_ordinal;
+  const bool declares_storage =
+      function == LOOM_RUNTIME_PREPARATION_FUNCTION_STORAGE ||
+      function == LOOM_RUNTIME_PREPARATION_FUNCTION_FEEDBACK;
   iree_status_t status = iree_ok_status();
+  if (declares_storage &&
+      (module->capture.base ||
+       !iree_any_bit_set(module->capture.flags,
+                         LOOM_RUNTIME_PREPARATION_FLAG_STORAGE))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "mutable storage registration requires a supported cold capture");
+  }
   if ((function == LOOM_RUNTIME_PREPARATION_FUNCTION_PARAMETER ||
        function == LOOM_RUNTIME_PREPARATION_FUNCTION_SOURCE ||
        function == LOOM_RUNTIME_PREPARATION_FUNCTION_SOURCE_APPEND ||
@@ -774,7 +847,8 @@ static iree_status_t loom_runtime_preparation_module_start(
       function == LOOM_RUNTIME_PREPARATION_FUNCTION_SOURCE_SCOPE ||
       function == LOOM_RUNTIME_PREPARATION_FUNCTION_MEMORY_FORECAST ||
       function == LOOM_RUNTIME_PREPARATION_FUNCTION_PARAMETER_ARENA ||
-      function == LOOM_RUNTIME_PREPARATION_FUNCTION_BIND_PARAMETERS) {
+      function == LOOM_RUNTIME_PREPARATION_FUNCTION_BIND_PARAMETERS ||
+      declares_storage) {
     if (!preparation) {
       preparation = module->recycled;
       module->recycled = NULL;
@@ -796,8 +870,12 @@ static iree_status_t loom_runtime_preparation_module_start(
           loom_runtime_preparation_source_count(module->capture.base);
       module->capture.preparation = preparation;
     }
-    if (function == LOOM_RUNTIME_PREPARATION_FUNCTION_MEMORY_FORECAST ||
-        function == LOOM_RUNTIME_PREPARATION_FUNCTION_BIND_PARAMETERS) {
+    if (declares_storage) {
+      status = loom_runtime_preparation_add_storage(
+          preparation, call,
+          function == LOOM_RUNTIME_PREPARATION_FUNCTION_FEEDBACK);
+    } else if (function == LOOM_RUNTIME_PREPARATION_FUNCTION_MEMORY_FORECAST ||
+               function == LOOM_RUNTIME_PREPARATION_FUNCTION_BIND_PARAMETERS) {
       iree_string_view_t* entry =
           function == LOOM_RUNTIME_PREPARATION_FUNCTION_MEMORY_FORECAST
               ? &preparation->memory_forecast
@@ -900,6 +978,8 @@ static const iree_vm_module_signature_type_t preparation_source_arguments[] = {
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0}};
 static const iree_vm_module_signature_type_t preparation_arena_arguments[] = {
     {IREE_VM_SCALAR_TYPE_I64, 0}};
+static const iree_vm_module_signature_type_t preparation_storage_arguments[] = {
+    {IREE_VM_SCALAR_TYPE_I64, 0}, {IREE_VM_SCALAR_TYPE_I64, 0}};
 static const iree_vm_module_signature_type_t preparation_bank_arguments[] = {
     {IREE_VM_SCALAR_TYPE_I32, 0},
     {IREE_VM_SCALAR_TYPE_I32, 0},
@@ -920,6 +1000,8 @@ static const iree_vm_module_callable_type_declaration_t
                        .results = {preparation_stage_results, 1, 1, 0, 0}}},
         {.signature = {.arguments = {preparation_workspace_limit_arguments, 2,
                                      2, 0, 0}}},
+        {.signature = {.arguments = {preparation_storage_arguments, 2, 2, 0, 0},
+                       .results = {preparation_stage_results, 1, 1, 0, 0}}},
         {.signature = {.arguments = {preparation_stage_arguments, 2, 1, 1, 0},
                        .results = {preparation_stage_results, 1, 1, 0, 0}}},
         {.signature = {.arguments = {preparation_source_arguments, 2, 0, 2, 0},
@@ -939,38 +1021,44 @@ static const iree_vm_module_export_declaration_t preparation_exports[] = {
      .callable_type_ordinal = 1,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_BIND_PARAMETERS},
     {.export_name = IREE_SVL("config"),
-     .callable_type_ordinal = 7,
+     .callable_type_ordinal = 8,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_CONFIG},
     {.export_name = IREE_SVL("config_i64"),
-     .callable_type_ordinal = 6,
+     .callable_type_ordinal = 7,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_CONFIG_I64},
     {.export_name = IREE_SVL("dispatch"),
-     .callable_type_ordinal = 4,
+     .callable_type_ordinal = 5,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_DISPATCH},
+    {.export_name = IREE_SVL("feedback"),
+     .callable_type_ordinal = 0,
+     .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_FEEDBACK},
     {.export_name = IREE_SVL("memory_forecast"),
      .callable_type_ordinal = 1,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_MEMORY_FORECAST},
     {.export_name = IREE_SVL("parameter"),
-     .callable_type_ordinal = 8,
+     .callable_type_ordinal = 9,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_PARAMETER},
     {.export_name = IREE_SVL("parameter_arena"),
      .callable_type_ordinal = 0,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_PARAMETER_ARENA},
     {.export_name = IREE_SVL("parameter_bank"),
-     .callable_type_ordinal = 9,
+     .callable_type_ordinal = 10,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_PARAMETER_BANK},
     {.export_name = IREE_SVL("source"),
-     .callable_type_ordinal = 5,
+     .callable_type_ordinal = 6,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_SOURCE},
     {.export_name = IREE_SVL("source_append"),
-     .callable_type_ordinal = 7,
+     .callable_type_ordinal = 8,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_SOURCE_APPEND},
     {.export_name = IREE_SVL("source_scope"),
      .callable_type_ordinal = 2,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_SOURCE_SCOPE},
     {.export_name = IREE_SVL("stage"),
-     .callable_type_ordinal = 4,
+     .callable_type_ordinal = 5,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_STAGE},
+    {.export_name = IREE_SVL("storage"),
+     .callable_type_ordinal = 4,
+     .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_STORAGE},
     {.export_name = IREE_SVL("workspace_limit"),
      .callable_type_ordinal = 3,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_WORKSPACE_LIMIT},
@@ -1047,7 +1135,7 @@ iree_status_t loom_runtime_preparation_module_create(
       .counts = {.function_count = LOOM_RUNTIME_PREPARATION_FUNCTION_COUNT,
                  .callable_type_count = IREE_ARRAYSIZE(preparation_callables),
                  .export_count = IREE_ARRAYSIZE(preparation_exports),
-                 .callable_fields = {.value_count = 19, .ref_count = 11}},
+                 .callable_fields = {.value_count = 22, .ref_count = 11}},
   };
   iree_status_t status = iree_vm_module_initialize(
       &preparation_module_vtable, &module->descriptor, &module->base);
@@ -1282,8 +1370,22 @@ bool loom_runtime_preparation_equal(const loom_runtime_preparation_t* lhs,
       !iree_string_view_equal(lhs->bind_parameters, rhs->bind_parameters) ||
       loom_runtime_preparation_arena_count(lhs) !=
           loom_runtime_preparation_arena_count(rhs) ||
-      lhs->banks.count != rhs->banks.count) {
+      lhs->banks.count != rhs->banks.count ||
+      lhs->storage.count != rhs->storage.count ||
+      lhs->feedback.count != rhs->feedback.count) {
     return false;
+  }
+  for (iree_host_size_t i = 0; i < lhs->storage.count; ++i) {
+    if (lhs->storage.values[i].byte_length !=
+            rhs->storage.values[i].byte_length ||
+        lhs->storage.values[i].alignment != rhs->storage.values[i].alignment) {
+      return false;
+    }
+  }
+  for (iree_host_size_t i = 0; i < lhs->feedback.count; ++i) {
+    if (lhs->feedback.values[i] != rhs->feedback.values[i]) {
+      return false;
+    }
   }
   for (uint32_t i = 0; i < loom_runtime_preparation_arena_count(lhs); ++i) {
     if (loom_runtime_preparation_arena_capacity(lhs, i) !=
@@ -1393,4 +1495,24 @@ iree_status_t loom_runtime_preparation_stage_check_parameters(
       loom_runtime_parameter_layout_check(canonical_program, program),
       "stage '%.*s' differs from the shared layout", (int)stage->root.size,
       stage->root.data);
+}
+
+iree_host_size_t loom_runtime_preparation_storage_count(
+    const loom_runtime_preparation_t* preparation) {
+  return preparation ? preparation->storage.count : 0;
+}
+
+const loom_runtime_preparation_storage_t* loom_runtime_preparation_storage(
+    const loom_runtime_preparation_t* preparation, iree_host_size_t ordinal) {
+  return &preparation->storage.values[ordinal];
+}
+
+iree_host_size_t loom_runtime_preparation_feedback_count(
+    const loom_runtime_preparation_t* preparation) {
+  return preparation ? preparation->feedback.count : 0;
+}
+
+uint64_t loom_runtime_preparation_feedback_capacity(
+    const loom_runtime_preparation_t* preparation, iree_host_size_t ordinal) {
+  return preparation->feedback.values[ordinal];
 }

@@ -109,7 +109,7 @@ iree_status_t loom_service_finite_load_free(loom_service_finite_load_t* load);
 //   prepare_batch(state, stage_tags: buffer, batch: ptr<finite.batch>) ->
 //     (stage: i32, payload, result_plan: buffer)
 //   collect_batch(state: buffer, batch: ptr<finite.batch>)
-//   run(stage: i32, input, output: hal.buffer)
+//   run(state: buffer, stage: i32, input, output: hal.buffer)
 // Cold prepare imports declare command or direct-dispatch stages and their
 // configuration. Command stages can also declare checkpoint parameter domains.
 // prepare_batch may use the same stage/config imports to declare request
@@ -120,18 +120,19 @@ iree_status_t loom_service_finite_load_free(loom_service_finite_load_t* load);
 // Model state is shared across serialized calls; request state retains its
 // identity until that request ends. Positive units bound the next epoch; equal
 // tags permit batching. The finite module exposes stable members without
-// copying their state. Source may explicitly call finite.batch_pack for the
-// ordinary [offset, length] directory followed by concatenated states.
-// Successful device readiness authorizes collect_batch to commit progress and
-// publish next offers. Zero units finishes a member and requires complete
-// published rows; positive units require no rows. An empty output alone does
-// not finish work. Both stage kinds have two dynamic roots (input/output)
-// aligned to LOOM_SERVICE_FINITE_BUFFER_ALIGNMENT. Commands may additionally
-// have compiler-reflected private workspace; direct stages use their compiled
-// launch configuration without a command buffer or runner workspace. Command
-// stages declared by one request share a parameter binding map; retained
-// request choices can bind different checkpoint banks. Direct stages have no
-// checkpoint parameters. Source run uses runner.execute_2 for both kinds and
+// copying their state. Source may explicitly call finite.batch_pack for the ordinary
+// [offset, length] directory followed by concatenated states. Successful device
+// readiness authorizes collect_batch to commit progress and publish next
+// offers. Zero units finishes a member and requires complete published rows;
+// positive units require no rows. An empty output alone does not finish work.
+// Both stage kinds have input/output roots followed by cold-declared retained
+// storage roots. Input/output are aligned to
+// LOOM_SERVICE_FINITE_BUFFER_ALIGNMENT. Commands may additionally have
+// compiler-reflected private workspace; direct stages use their compiled launch
+// configuration without a command buffer or runner workspace. Command stages
+// declared by one request share a parameter binding map; retained request
+// choices can bind different checkpoint banks. Direct stages have no checkpoint
+// parameters. Source run uses runner.execute_N with every declared root and
 // publishes device results. Native consumers choose whether to compose device
 // work or explicitly download a host snapshot. Cold prepare may call
 // prepare.memory_forecast(root) to select a synchronous control entry with

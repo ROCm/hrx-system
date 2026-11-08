@@ -23,10 +23,10 @@ func.def public @embedding_prepare_batch_v1(%state: buffer, %tags: buffer, %batc
   func.return %result_0, %result_1, %result_2 : i32, buffer, buffer
 }
 
-func.decl @run(%stage: i32, %input: hal.buffer, %output: hal.buffer)
+func.decl @run(%state: buffer, %stage: i32, %input: hal.buffer, %output: hal.buffer)
 
-func.def public @embedding_run_v1(%stage: i32, %input: hal.buffer, %output: hal.buffer) {
-  func.call @run(%stage, %input, %output) : (i32, hal.buffer, hal.buffer)
+func.def public @embedding_run_v1(%state: buffer, %stage: i32, %input: hal.buffer, %output: hal.buffer) {
+  func.call @run(%state, %stage, %input, %output) : (buffer, i32, hal.buffer, hal.buffer)
   func.return
 }
 

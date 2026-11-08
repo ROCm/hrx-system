@@ -24,6 +24,20 @@ func.decl import("prepare") @parameter_bank(%stage: i32, %binding: i32, %arena: 
 
 func.decl import("prepare") @bind_parameters(%root: buffer)
 
+func.decl import("prepare") @storage(%bytes: i64, %alignment: i64) -> (i32)
+
+func.decl import("prepare") @feedback(%bytes: i64) -> (i32)
+
+func.def public @declare_storage(%bytes: i64, %alignment: i64) -> (i32) {
+  %ordinal = func.call @storage(%bytes, %alignment) : (i64, i64) -> (i32)
+  func.return %ordinal : i32
+}
+
+func.def public @declare_feedback(%bytes: i64) -> (i32) {
+  %ordinal = func.call @feedback(%bytes) : (i64) -> (i32)
+  func.return %ordinal : i32
+}
+
 func.def public @declare_arena(%capacity: i64) -> (i32) {
   %arena = func.call @parameter_arena(%capacity) : (i64) -> (i32)
   func.return %arena : i32

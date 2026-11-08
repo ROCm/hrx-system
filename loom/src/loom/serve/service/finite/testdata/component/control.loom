@@ -55,7 +55,7 @@ func.def public @prepare_batch(%state: buffer, %tags: buffer, %batch: ptr<@Finit
   func.return %stage, %input, %plan : i32, buffer, buffer
 }
 
-func.def public @run(%stage: i32, %input: hal.buffer, %output: hal.buffer) {
+func.def public @run(%state: buffer, %stage: i32, %input: hal.buffer, %output: hal.buffer) {
   %work = func.call @execute_2(%stage, %input, %output) : (i32, hal.buffer, hal.buffer) -> (i64)
   func.return
 }

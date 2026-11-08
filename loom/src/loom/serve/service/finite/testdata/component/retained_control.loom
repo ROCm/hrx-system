@@ -1,0 +1,117 @@
+type.decl import("finite", "batch") @FiniteBatch
+
+func.decl import("finite", "batch_state") @finite_batch_state(%batch: ptr<@FiniteBatch>, %ordinal: i64) -> (buffer)
+
+func.decl import("finite", "batch_offer") @finite_batch_offer(%batch: ptr<@FiniteBatch>, %ordinal: i64, %units: i64, %tag: i64)
+
+func.decl import("storage", "buffer") @storage_buffer(%ordinal: i32) -> (hal.buffer)
+
+func.decl import("storage") @copy(%source: hal.buffer, %source_offset: i64, %target: hal.buffer, %target_offset: i64, %length: i64) -> (i64)
+
+func.decl import("storage") @fill(%target: hal.buffer, %offset: i64, %length: i64, %pattern: i32) -> (i64)
+
+func.decl import("storage") @completed(%slot: i32) -> (buffer)
+
+func.decl import("runner") @execute_3(%stage: i32, %input: hal.buffer, %output: hal.buffer, %state: hal.buffer) -> (i64)
+
+func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
+
+func.def public @prepare_request(%state: buffer, %input: buffer) -> (buffer, i64, i64) {
+  %origin = index.constant 0 : offset
+  %input_bytes = index.constant 20 : offset
+  %length = index.constant 24 : offset
+  %request = buffer.alloca<private> align(8) %length : buffer
+  buffer.copy %input[%origin], %request[%origin], %input_bytes
+  %cursor = buffer.view %request[%input_bytes] : buffer -> view<1xi32>
+  %c0_i32 = scalar.constant 0 : i32
+  view.store %c0_i32, %cursor[0] : i32, view<1xi32>
+  %c1 = scalar.constant 1 : i64
+  %c0 = scalar.constant 0 : i64
+  func.return %request, %c1, %c0 : buffer, i64, i64
+}
+
+func.def public @prepare_batch(%state: buffer, %tags: buffer, %batch: ptr<@FiniteBatch>) -> (i32, buffer, buffer) {
+  %c0 = scalar.constant 0 : i64
+  %c1 = scalar.constant 1 : i64
+  %c4 = scalar.constant 4 : i64
+  %c16 = scalar.constant 16 : i64
+  %request = func.call @finite_batch_state(%batch, %c0) : (ptr<@FiniteBatch>, i64) -> (buffer)
+  %origin = index.constant 0 : offset
+  %metadata_offset = index.constant 16 : offset
+  %metadata = buffer.view %request[%metadata_offset] : buffer -> view<2xi32>
+  %goal = view.load %metadata[0] : view<2xi32> -> i32
+  %cursor = view.load %metadata[1] : view<2xi32> -> i32
+  %done = scalar.cmpi eq, %cursor, %goal : i32
+  %done32 = scalar.extui %done : i1 to i32
+  %done64 = scalar.extui %done : i1 to i64
+  %control = buffer.view %state[%origin] : buffer -> view<2xi32>
+  view.store %cursor, %control[0] : i32, view<2xi32>
+  view.store %done32, %control[1] : i32, view<2xi32>
+  %empty_length = index.constant 56 : offset
+  %final_length = index.constant 72 : offset
+  %length = scf.select %done, %final_length, %empty_length : offset
+  %plan = buffer.alloca<private> align(8) %length : buffer
+  %values = buffer.view %plan[%origin] : buffer -> view<7xi64>
+  view.store %c16, %values[0] : i64, view<7xi64>
+  view.store %c16, %values[1] : i64, view<7xi64>
+  view.store %c1, %values[2] : i64, view<7xi64>
+  view.store %done64, %values[3] : i64, view<7xi64>
+  view.store %c0, %values[4] : i64, view<7xi64>
+  view.store %done64, %values[5] : i64, view<7xi64>
+  view.store %c4, %values[6] : i64, view<7xi64>
+  scf.if %done {
+    %row = buffer.view %plan[%empty_length] : buffer -> view<2xi64>
+    view.store %c0, %row[0] : i64, view<2xi64>
+    view.store %c4, %row[1] : i64, view<2xi64>
+  }
+  %c0_i32 = scalar.constant 0 : i32
+  func.return %c0_i32, %request, %plan : i32, buffer, buffer
+}
+
+func.def public @run(%state: buffer, %stage: i32, %input: hal.buffer, %output: hal.buffer) {
+  %origin = index.constant 0 : offset
+  %control = buffer.view %state[%origin] : buffer -> view<2xi32>
+  %cursor = view.load %control[0] : view<2xi32> -> i32
+  %done = view.load %control[1] : view<2xi32> -> i32
+  %c0_i32 = scalar.constant 0 : i32
+  %c0 = scalar.constant 0 : i64
+  %c4 = scalar.constant 4 : i64
+  %c16 = scalar.constant 16 : i64
+  %root = func.call @storage_buffer(%c0_i32) : (i32) -> (hal.buffer)
+  %initial = scalar.cmpi eq, %cursor, %c0_i32 : i32
+  scf.if %initial {
+    %copy = func.call @copy(%input, %c0, %root, %c0, %c16) : (hal.buffer, i64, hal.buffer, i64, i64) -> (i64)
+    %fill = func.call @fill(%root, %c16, %c4, %c0_i32) : (hal.buffer, i64, i64, i32) -> (i64)
+  }
+  %final = scalar.cmpi ne, %done, %c0_i32 : i32
+  scf.if %final {
+    %gather = func.call @copy(%root, %c0, %output, %c0, %c16) : (hal.buffer, i64, hal.buffer, i64, i64) -> (i64)
+  } else {
+    %work = func.call @execute_3(%stage, %input, %output, %root) : (i32, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    %reply = func.call @feedback(%c0_i32, %root, %c16, %c4) : (i32, hal.buffer, i64, i64) -> (i64)
+  }
+  func.return
+}
+
+func.def public @collect_batch(%state: buffer, %batch: ptr<@FiniteBatch>) {
+  %origin = index.constant 0 : offset
+  %c0_i32 = scalar.constant 0 : i32
+  %c0 = scalar.constant 0 : i64
+  %c1 = scalar.constant 1 : i64
+  %control = buffer.view %state[%origin] : buffer -> view<2xi32>
+  %done = view.load %control[1] : view<2xi32> -> i32
+  %final = scalar.cmpi ne, %done, %c0_i32 : i32
+  scf.if %final {
+    func.call @finite_batch_offer(%batch, %c0, %c0, %c0) : (ptr<@FiniteBatch>, i64, i64, i64)
+  } else {
+    %reply = func.call @completed(%c0_i32) : (i32) -> (buffer)
+    %reply_view = buffer.view %reply[%origin] : buffer -> view<1xi32>
+    %cursor = view.load %reply_view[0] : view<1xi32> -> i32
+    %request = func.call @finite_batch_state(%batch, %c0) : (ptr<@FiniteBatch>, i64) -> (buffer)
+    %cursor_offset = index.constant 20 : offset
+    %request_cursor = buffer.view %request[%cursor_offset] : buffer -> view<1xi32>
+    view.store %cursor, %request_cursor[0] : i32, view<1xi32>
+    func.call @finite_batch_offer(%batch, %c0, %c1, %c0) : (ptr<@FiniteBatch>, i64, i64, i64)
+  }
+  func.return
+}
