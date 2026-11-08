@@ -1,0 +1,618 @@
+// RUN: with-checks emit aie2p-xdna output=sections
+
+// A generated 64-byte frame fits beside 65,472 bytes of authored storage.
+// The adjacent producer owns the neighbor-memory channel, leaving the consumer
+// tile exactly full. Nine loop-carried indices force EDJ spilling.
+aie2p.target<array> @array_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @full_worker_storage() asm {
+  %worker_count = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %producer_ordinal = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %consumer_ordinal = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %channel_capacity = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %records_per_invocation = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %tile_column = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %producer_row = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %consumer_row = constant.u32 3 : reg<aie2p.array.scalar : index>
+  %workers = group %worker_count
+  %producer = worker %workers, %producer_ordinal, @produce_record
+  %consumer = worker %workers, %consumer_ordinal, @consume_with_full_storage
+  %sender = sender %producer, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %consumer, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %sender, %receiver, %channel_capacity, %records_per_invocation : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %producer, %tile_column, %producer_row
+  constrain.location %consumer, %tile_column, %consumer_row
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @produce_record() asm {
+  %output = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %value = mov.short 7
+  st %value, %output, 0
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume_with_full_storage() asm {
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %storage = storage {byte_alignment = 64, byte_length = 65472} : low.storage<workgroup>
+  %address = storage_address %storage : low.storage<workgroup> -> reg<aie2p.ep>
+  %iterations = mov.short 2
+  %step = mov.short 1
+  %initial_value = lda %input, 0
+  %offset0 = mov.static-byte-offset 64
+  %index0 = mov.address-index %offset0
+  st.i32.index %initial_value, %address, %index0
+  %offset1 = mov.static-byte-offset 128
+  %index1 = mov.address-index %offset1
+  st.i32.index %initial_value, %address, %index1
+  %offset2 = mov.static-byte-offset 192
+  %index2 = mov.address-index %offset2
+  st.i32.index %initial_value, %address, %index2
+  %offset3 = mov.static-byte-offset 256
+  %index3 = mov.address-index %offset3
+  st.i32.index %initial_value, %address, %index3
+  %offset4 = mov.static-byte-offset 320
+  %index4 = mov.address-index %offset4
+  st.i32.index %initial_value, %address, %index4
+  %offset5 = mov.static-byte-offset 384
+  %index5 = mov.address-index %offset5
+  st.i32.index %initial_value, %address, %index5
+  %offset6 = mov.static-byte-offset 448
+  %index6 = mov.address-index %offset6
+  st.i32.index %initial_value, %address, %index6
+  %offset7 = mov.static-byte-offset 512
+  %index7 = mov.address-index %offset7
+  st.i32.index %initial_value, %address, %index7
+  %offset8 = mov.static-byte-offset 576
+  %index8 = mov.address-index %offset8
+  st.i32.index %initial_value, %address, %index8
+  low.br ^loop(%iterations: reg<aie2p.er>, %index0: reg<aie2p.edj>, %index1: reg<aie2p.edj>, %index2: reg<aie2p.edj>, %index3: reg<aie2p.edj>, %index4: reg<aie2p.edj>, %index5: reg<aie2p.edj>, %index6: reg<aie2p.edj>, %index7: reg<aie2p.edj>, %index8: reg<aie2p.edj>)
+^loop(%remaining: reg<aie2p.er>, %carried0: reg<aie2p.edj>, %carried1: reg<aie2p.edj>, %carried2: reg<aie2p.edj>, %carried3: reg<aie2p.edj>, %carried4: reg<aie2p.edj>, %carried5: reg<aie2p.edj>, %carried6: reg<aie2p.edj>, %carried7: reg<aie2p.edj>, %carried8: reg<aie2p.edj>):
+  %value0 = lda.i32.index %address, %carried0
+  %value1 = lda.i32.index %address, %carried1
+  %sum1 = add.rr %value0, %value1
+  %value2 = lda.i32.index %address, %carried2
+  %sum2 = add.rr %sum1, %value2
+  %value3 = lda.i32.index %address, %carried3
+  %sum3 = add.rr %sum2, %value3
+  %value4 = lda.i32.index %address, %carried4
+  %sum4 = add.rr %sum3, %value4
+  %value5 = lda.i32.index %address, %carried5
+  %sum5 = add.rr %sum4, %value5
+  %value6 = lda.i32.index %address, %carried6
+  %sum6 = add.rr %sum5, %value6
+  %value7 = lda.i32.index %address, %carried7
+  %sum7 = add.rr %sum6, %value7
+  %value8 = lda.i32.index %address, %carried8
+  %sum8 = add.rr %sum7, %value8
+  st %sum8, %address, 0
+  %next = sub %remaining, %step
+  low.cond_br %next, ^repeat, ^done : reg<aie2p.er>
+^repeat:
+  low.br ^loop(%next: reg<aie2p.er>, %carried0: reg<aie2p.edj>, %carried1: reg<aie2p.edj>, %carried2: reg<aie2p.edj>, %carried3: reg<aie2p.edj>, %carried4: reg<aie2p.edj>, %carried5: reg<aie2p.edj>, %carried6: reg<aie2p.edj>, %carried7: reg<aie2p.edj>, %carried8: reg<aie2p.edj>)
+^done:
+  return
+}
+
+// ----
+CHECK: .storage.full_worker_storage$worker$1.stack: address=0x0007ffc0 bytes=64 reserved
+CHECK: .storage.full_worker_storage$worker$1.workgroup: address=0x00070000 bytes=65472 reserved
+
+// ====
+// RUN: emit aie2p-xdna
+
+// Reserving the entire consumer tile leaves no room for its generated frame.
+// Admission diagnoses the authored worker before publishing an image.
+aie2p.target<array> @array_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @full_worker_storage() asm {
+  %worker_count = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %producer_ordinal = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %consumer_ordinal = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %channel_capacity = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %records_per_invocation = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %tile_column = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %producer_row = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %consumer_row = constant.u32 3 : reg<aie2p.array.scalar : index>
+  %workers = group %worker_count
+  %producer = worker %workers, %producer_ordinal, @produce_record
+  // ERROR@+1: XDNA/049 {column="0", row="3", required="65600", capacity="65536"}
+  %consumer = worker %workers, %consumer_ordinal, @consume_with_full_storage
+  %sender = sender %producer, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %consumer, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %sender, %receiver, %channel_capacity, %records_per_invocation : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %producer, %tile_column, %producer_row
+  constrain.location %consumer, %tile_column, %consumer_row
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @produce_record() asm {
+  %output = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %value = mov.short 7
+  st %value, %output, 0
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume_with_full_storage() asm {
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %storage = storage {byte_alignment = 64, byte_length = 65536} : low.storage<workgroup>
+  %address = storage_address %storage : low.storage<workgroup> -> reg<aie2p.ep>
+  %iterations = mov.short 2
+  %step = mov.short 1
+  %initial_value = lda %input, 0
+  %offset0 = mov.static-byte-offset 64
+  %index0 = mov.address-index %offset0
+  st.i32.index %initial_value, %address, %index0
+  %offset1 = mov.static-byte-offset 128
+  %index1 = mov.address-index %offset1
+  st.i32.index %initial_value, %address, %index1
+  %offset2 = mov.static-byte-offset 192
+  %index2 = mov.address-index %offset2
+  st.i32.index %initial_value, %address, %index2
+  %offset3 = mov.static-byte-offset 256
+  %index3 = mov.address-index %offset3
+  st.i32.index %initial_value, %address, %index3
+  %offset4 = mov.static-byte-offset 320
+  %index4 = mov.address-index %offset4
+  st.i32.index %initial_value, %address, %index4
+  %offset5 = mov.static-byte-offset 384
+  %index5 = mov.address-index %offset5
+  st.i32.index %initial_value, %address, %index5
+  %offset6 = mov.static-byte-offset 448
+  %index6 = mov.address-index %offset6
+  st.i32.index %initial_value, %address, %index6
+  %offset7 = mov.static-byte-offset 512
+  %index7 = mov.address-index %offset7
+  st.i32.index %initial_value, %address, %index7
+  %offset8 = mov.static-byte-offset 576
+  %index8 = mov.address-index %offset8
+  st.i32.index %initial_value, %address, %index8
+  low.br ^loop(%iterations: reg<aie2p.er>, %index0: reg<aie2p.edj>, %index1: reg<aie2p.edj>, %index2: reg<aie2p.edj>, %index3: reg<aie2p.edj>, %index4: reg<aie2p.edj>, %index5: reg<aie2p.edj>, %index6: reg<aie2p.edj>, %index7: reg<aie2p.edj>, %index8: reg<aie2p.edj>)
+^loop(%remaining: reg<aie2p.er>, %carried0: reg<aie2p.edj>, %carried1: reg<aie2p.edj>, %carried2: reg<aie2p.edj>, %carried3: reg<aie2p.edj>, %carried4: reg<aie2p.edj>, %carried5: reg<aie2p.edj>, %carried6: reg<aie2p.edj>, %carried7: reg<aie2p.edj>, %carried8: reg<aie2p.edj>):
+  %value0 = lda.i32.index %address, %carried0
+  %value1 = lda.i32.index %address, %carried1
+  %sum1 = add.rr %value0, %value1
+  %value2 = lda.i32.index %address, %carried2
+  %sum2 = add.rr %sum1, %value2
+  %value3 = lda.i32.index %address, %carried3
+  %sum3 = add.rr %sum2, %value3
+  %value4 = lda.i32.index %address, %carried4
+  %sum4 = add.rr %sum3, %value4
+  %value5 = lda.i32.index %address, %carried5
+  %sum5 = add.rr %sum4, %value5
+  %value6 = lda.i32.index %address, %carried6
+  %sum6 = add.rr %sum5, %value6
+  %value7 = lda.i32.index %address, %carried7
+  %sum7 = add.rr %sum6, %value7
+  %value8 = lda.i32.index %address, %carried8
+  %sum8 = add.rr %sum7, %value8
+  st %sum8, %address, 0
+  %next = sub %remaining, %step
+  low.cond_br %next, ^repeat, ^done : reg<aie2p.er>
+^repeat:
+  low.br ^loop(%next: reg<aie2p.er>, %carried0: reg<aie2p.edj>, %carried1: reg<aie2p.edj>, %carried2: reg<aie2p.edj>, %carried3: reg<aie2p.edj>, %carried4: reg<aie2p.edj>, %carried5: reg<aie2p.edj>, %carried6: reg<aie2p.edj>, %carried7: reg<aie2p.edj>, %carried8: reg<aie2p.edj>)
+^done:
+  return
+}
+
+// ----
+
+// ====
+// RUN: with-checks emit aie2p-xdna output=sections
+
+// An authored four-byte stack grows into a native aligned spill frame. Only
+// its relocatable reservation moves; the workgroup allocation stays fixed.
+aie2p.target<array> @array_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @full_worker_storage() asm {
+  %worker_count = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %producer_ordinal = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %consumer_ordinal = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %channel_capacity = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %records_per_invocation = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %tile_column = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %producer_row = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %consumer_row = constant.u32 3 : reg<aie2p.array.scalar : index>
+  %workers = group %worker_count
+  %producer = worker %workers, %producer_ordinal, @produce_record
+  %consumer = worker %workers, %consumer_ordinal, @consume_with_full_storage
+  %sender = sender %producer, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %consumer, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %sender, %receiver, %channel_capacity, %records_per_invocation : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %producer, %tile_column, %producer_row
+  constrain.location %consumer, %tile_column, %consumer_row
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @produce_record() asm {
+  %output = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %value = mov.short 7
+  st %value, %output, 0
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume_with_full_storage() asm {
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %authored_stack = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  %stack_address = storage_address %authored_stack : low.storage<stack> -> reg<aie2p.ep>
+  %storage = storage {byte_alignment = 64, byte_length = 640} : low.storage<workgroup>
+  %address = storage_address %storage : low.storage<workgroup> -> reg<aie2p.ep>
+  %iterations = mov.short 2
+  %step = mov.short 1
+  %initial_value = lda %input, 0
+  st %initial_value, %stack_address, 0
+  %offset0 = mov.static-byte-offset 64
+  %index0 = mov.address-index %offset0
+  st.i32.index %initial_value, %address, %index0
+  %offset1 = mov.static-byte-offset 128
+  %index1 = mov.address-index %offset1
+  st.i32.index %initial_value, %address, %index1
+  %offset2 = mov.static-byte-offset 192
+  %index2 = mov.address-index %offset2
+  st.i32.index %initial_value, %address, %index2
+  %offset3 = mov.static-byte-offset 256
+  %index3 = mov.address-index %offset3
+  st.i32.index %initial_value, %address, %index3
+  %offset4 = mov.static-byte-offset 320
+  %index4 = mov.address-index %offset4
+  st.i32.index %initial_value, %address, %index4
+  %offset5 = mov.static-byte-offset 384
+  %index5 = mov.address-index %offset5
+  st.i32.index %initial_value, %address, %index5
+  %offset6 = mov.static-byte-offset 448
+  %index6 = mov.address-index %offset6
+  st.i32.index %initial_value, %address, %index6
+  %offset7 = mov.static-byte-offset 512
+  %index7 = mov.address-index %offset7
+  st.i32.index %initial_value, %address, %index7
+  %offset8 = mov.static-byte-offset 576
+  %index8 = mov.address-index %offset8
+  st.i32.index %initial_value, %address, %index8
+  low.br ^loop(%iterations: reg<aie2p.er>, %index0: reg<aie2p.edj>, %index1: reg<aie2p.edj>, %index2: reg<aie2p.edj>, %index3: reg<aie2p.edj>, %index4: reg<aie2p.edj>, %index5: reg<aie2p.edj>, %index6: reg<aie2p.edj>, %index7: reg<aie2p.edj>, %index8: reg<aie2p.edj>)
+^loop(%remaining: reg<aie2p.er>, %carried0: reg<aie2p.edj>, %carried1: reg<aie2p.edj>, %carried2: reg<aie2p.edj>, %carried3: reg<aie2p.edj>, %carried4: reg<aie2p.edj>, %carried5: reg<aie2p.edj>, %carried6: reg<aie2p.edj>, %carried7: reg<aie2p.edj>, %carried8: reg<aie2p.edj>):
+  %value0 = lda.i32.index %address, %carried0
+  %value1 = lda.i32.index %address, %carried1
+  %sum1 = add.rr %value0, %value1
+  %value2 = lda.i32.index %address, %carried2
+  %sum2 = add.rr %sum1, %value2
+  %value3 = lda.i32.index %address, %carried3
+  %sum3 = add.rr %sum2, %value3
+  %value4 = lda.i32.index %address, %carried4
+  %sum4 = add.rr %sum3, %value4
+  %value5 = lda.i32.index %address, %carried5
+  %sum5 = add.rr %sum4, %value5
+  %value6 = lda.i32.index %address, %carried6
+  %sum6 = add.rr %sum5, %value6
+  %value7 = lda.i32.index %address, %carried7
+  %sum7 = add.rr %sum6, %value7
+  %value8 = lda.i32.index %address, %carried8
+  %sum8 = add.rr %sum7, %value8
+  st %sum8, %address, 0
+  %next = sub %remaining, %step
+  low.cond_br %next, ^repeat, ^done : reg<aie2p.er>
+^repeat:
+  low.br ^loop(%next: reg<aie2p.er>, %carried0: reg<aie2p.edj>, %carried1: reg<aie2p.edj>, %carried2: reg<aie2p.edj>, %carried3: reg<aie2p.edj>, %carried4: reg<aie2p.edj>, %carried5: reg<aie2p.edj>, %carried6: reg<aie2p.edj>, %carried7: reg<aie2p.edj>, %carried8: reg<aie2p.edj>)
+^done:
+  return
+}
+
+// ----
+CHECK: .storage.full_worker_storage$worker$1.stack: address=0x00070000 bytes=64 reserved
+CHECK: .storage.full_worker_storage$worker$1.workgroup: address=0x0007c040 bytes=640 reserved
+
+// ====
+// RUN: with-checks emit aie2p-xdna output=pipeline-report
+
+// Memory reports use the final 64-byte frame, not its four-byte source
+// estimate, and retain the placement and occupied-bank extents.
+aie2p.target<array> @array_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @full_worker_storage() asm {
+  %worker_count = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %producer_ordinal = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %consumer_ordinal = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %channel_capacity = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %records_per_invocation = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %tile_column = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %producer_row = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %consumer_row = constant.u32 3 : reg<aie2p.array.scalar : index>
+  %workers = group %worker_count
+  %producer = worker %workers, %producer_ordinal, @produce_record
+  %consumer = worker %workers, %consumer_ordinal, @consume_with_full_storage
+  %sender = sender %producer, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %consumer, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %sender, %receiver, %channel_capacity, %records_per_invocation : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %producer, %tile_column, %producer_row
+  constrain.location %consumer, %tile_column, %consumer_row
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @produce_record() asm {
+  %output = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %value = mov.short 7
+  st %value, %output, 0
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume_with_full_storage() asm {
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %authored_stack = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  %stack_address = storage_address %authored_stack : low.storage<stack> -> reg<aie2p.ep>
+  %storage = storage {byte_alignment = 64, byte_length = 640} : low.storage<workgroup>
+  %address = storage_address %storage : low.storage<workgroup> -> reg<aie2p.ep>
+  %iterations = mov.short 2
+  %step = mov.short 1
+  %initial_value = lda %input, 0
+  st %initial_value, %stack_address, 0
+  %offset0 = mov.static-byte-offset 64
+  %index0 = mov.address-index %offset0
+  st.i32.index %initial_value, %address, %index0
+  %offset1 = mov.static-byte-offset 128
+  %index1 = mov.address-index %offset1
+  st.i32.index %initial_value, %address, %index1
+  %offset2 = mov.static-byte-offset 192
+  %index2 = mov.address-index %offset2
+  st.i32.index %initial_value, %address, %index2
+  %offset3 = mov.static-byte-offset 256
+  %index3 = mov.address-index %offset3
+  st.i32.index %initial_value, %address, %index3
+  %offset4 = mov.static-byte-offset 320
+  %index4 = mov.address-index %offset4
+  st.i32.index %initial_value, %address, %index4
+  %offset5 = mov.static-byte-offset 384
+  %index5 = mov.address-index %offset5
+  st.i32.index %initial_value, %address, %index5
+  %offset6 = mov.static-byte-offset 448
+  %index6 = mov.address-index %offset6
+  st.i32.index %initial_value, %address, %index6
+  %offset7 = mov.static-byte-offset 512
+  %index7 = mov.address-index %offset7
+  st.i32.index %initial_value, %address, %index7
+  %offset8 = mov.static-byte-offset 576
+  %index8 = mov.address-index %offset8
+  st.i32.index %initial_value, %address, %index8
+  low.br ^loop(%iterations: reg<aie2p.er>, %index0: reg<aie2p.edj>, %index1: reg<aie2p.edj>, %index2: reg<aie2p.edj>, %index3: reg<aie2p.edj>, %index4: reg<aie2p.edj>, %index5: reg<aie2p.edj>, %index6: reg<aie2p.edj>, %index7: reg<aie2p.edj>, %index8: reg<aie2p.edj>)
+^loop(%remaining: reg<aie2p.er>, %carried0: reg<aie2p.edj>, %carried1: reg<aie2p.edj>, %carried2: reg<aie2p.edj>, %carried3: reg<aie2p.edj>, %carried4: reg<aie2p.edj>, %carried5: reg<aie2p.edj>, %carried6: reg<aie2p.edj>, %carried7: reg<aie2p.edj>, %carried8: reg<aie2p.edj>):
+  %value0 = lda.i32.index %address, %carried0
+  %value1 = lda.i32.index %address, %carried1
+  %sum1 = add.rr %value0, %value1
+  %value2 = lda.i32.index %address, %carried2
+  %sum2 = add.rr %sum1, %value2
+  %value3 = lda.i32.index %address, %carried3
+  %sum3 = add.rr %sum2, %value3
+  %value4 = lda.i32.index %address, %carried4
+  %sum4 = add.rr %sum3, %value4
+  %value5 = lda.i32.index %address, %carried5
+  %sum5 = add.rr %sum4, %value5
+  %value6 = lda.i32.index %address, %carried6
+  %sum6 = add.rr %sum5, %value6
+  %value7 = lda.i32.index %address, %carried7
+  %sum7 = add.rr %sum6, %value7
+  %value8 = lda.i32.index %address, %carried8
+  %sum8 = add.rr %sum7, %value8
+  st %sum8, %address, 0
+  %next = sub %remaining, %step
+  low.cond_br %next, ^repeat, ^done : reg<aie2p.er>
+^repeat:
+  low.br ^loop(%next: reg<aie2p.er>, %carried0: reg<aie2p.edj>, %carried1: reg<aie2p.edj>, %carried2: reg<aie2p.edj>, %carried3: reg<aie2p.edj>, %carried4: reg<aie2p.edj>, %carried5: reg<aie2p.edj>, %carried6: reg<aie2p.edj>, %carried7: reg<aie2p.edj>, %carried8: reg<aie2p.edj>)
+^done:
+  return
+}
+
+// ----
+CHECK: COMPILE-REPORT: pipeline root=full_worker_storage * worker_storage_byte_count=704 * maximum_tile_local_memory_byte_count=49856 * maximum_bank_storage_byte_count=640 *
+CHECK: COMPILE-REPORT: pipeline.worker[1] * worker_storage_byte_count=704 * local_memory_byte_count=49856 * maximum_bank_storage_byte_count=640 *
+
+// ====
+// RUN: with-checks emit aie2p-xdna output=sections
+
+// The spilling producer owns the four-byte neighbor channel ring. Its frame
+// follows the ring and alignment padding instead of overlapping the transport.
+aie2p.target<array> @array_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @full_worker_storage() asm {
+  %worker_count = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %producer_ordinal = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %consumer_ordinal = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %channel_capacity = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %records_per_invocation = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %tile_column = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %producer_row = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %consumer_row = constant.u32 3 : reg<aie2p.array.scalar : index>
+  %workers = group %worker_count
+  %producer = worker %workers, %producer_ordinal, @produce_record
+  %consumer = worker %workers, %consumer_ordinal, @consume_with_full_storage
+  %sender = sender %producer, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %consumer, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %sender, %receiver, %channel_capacity, %records_per_invocation : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %producer, %tile_column, %producer_row
+  constrain.location %consumer, %tile_column, %consumer_row
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @produce_record() asm {
+  %output = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %storage = storage {byte_alignment = 64, byte_length = 65408} : low.storage<workgroup>
+  %address = storage_address %storage : low.storage<workgroup> -> reg<aie2p.ep>
+  %iterations = mov.short 2
+  %step = mov.short 1
+  %initial_value = mov.short 7
+  %offset0 = mov.static-byte-offset 64
+  %index0 = mov.address-index %offset0
+  st.i32.index %initial_value, %address, %index0
+  %offset1 = mov.static-byte-offset 128
+  %index1 = mov.address-index %offset1
+  st.i32.index %initial_value, %address, %index1
+  %offset2 = mov.static-byte-offset 192
+  %index2 = mov.address-index %offset2
+  st.i32.index %initial_value, %address, %index2
+  %offset3 = mov.static-byte-offset 256
+  %index3 = mov.address-index %offset3
+  st.i32.index %initial_value, %address, %index3
+  %offset4 = mov.static-byte-offset 320
+  %index4 = mov.address-index %offset4
+  st.i32.index %initial_value, %address, %index4
+  %offset5 = mov.static-byte-offset 384
+  %index5 = mov.address-index %offset5
+  st.i32.index %initial_value, %address, %index5
+  %offset6 = mov.static-byte-offset 448
+  %index6 = mov.address-index %offset6
+  st.i32.index %initial_value, %address, %index6
+  %offset7 = mov.static-byte-offset 512
+  %index7 = mov.address-index %offset7
+  st.i32.index %initial_value, %address, %index7
+  %offset8 = mov.static-byte-offset 576
+  %index8 = mov.address-index %offset8
+  st.i32.index %initial_value, %address, %index8
+  low.br ^loop(%iterations: reg<aie2p.er>, %index0: reg<aie2p.edj>, %index1: reg<aie2p.edj>, %index2: reg<aie2p.edj>, %index3: reg<aie2p.edj>, %index4: reg<aie2p.edj>, %index5: reg<aie2p.edj>, %index6: reg<aie2p.edj>, %index7: reg<aie2p.edj>, %index8: reg<aie2p.edj>)
+^loop(%remaining: reg<aie2p.er>, %carried0: reg<aie2p.edj>, %carried1: reg<aie2p.edj>, %carried2: reg<aie2p.edj>, %carried3: reg<aie2p.edj>, %carried4: reg<aie2p.edj>, %carried5: reg<aie2p.edj>, %carried6: reg<aie2p.edj>, %carried7: reg<aie2p.edj>, %carried8: reg<aie2p.edj>):
+  %value0 = lda.i32.index %address, %carried0
+  %value1 = lda.i32.index %address, %carried1
+  %sum1 = add.rr %value0, %value1
+  %value2 = lda.i32.index %address, %carried2
+  %sum2 = add.rr %sum1, %value2
+  %value3 = lda.i32.index %address, %carried3
+  %sum3 = add.rr %sum2, %value3
+  %value4 = lda.i32.index %address, %carried4
+  %sum4 = add.rr %sum3, %value4
+  %value5 = lda.i32.index %address, %carried5
+  %sum5 = add.rr %sum4, %value5
+  %value6 = lda.i32.index %address, %carried6
+  %sum6 = add.rr %sum5, %value6
+  %value7 = lda.i32.index %address, %carried7
+  %sum7 = add.rr %sum6, %value7
+  %value8 = lda.i32.index %address, %carried8
+  %sum8 = add.rr %sum7, %value8
+  st %sum8, %address, 0
+  st %sum8, %output, 0
+  %next = sub %remaining, %step
+  low.cond_br %next, ^repeat, ^done : reg<aie2p.er>
+^repeat:
+  low.br ^loop(%next: reg<aie2p.er>, %carried0: reg<aie2p.edj>, %carried1: reg<aie2p.edj>, %carried2: reg<aie2p.edj>, %carried3: reg<aie2p.edj>, %carried4: reg<aie2p.edj>, %carried5: reg<aie2p.edj>, %carried6: reg<aie2p.edj>, %carried7: reg<aie2p.edj>, %carried8: reg<aie2p.edj>)
+^done:
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume_with_full_storage() asm {
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  return
+}
+
+// ----
+CHECK: .storage.full_worker_storage$worker$0.stack: address=0x0007ffc0 bytes=64 reserved
+CHECK: .storage.full_worker_storage$worker$0.workgroup: address=0x00070000 bytes=65408 reserved
+
+// ====
+// RUN: with-checks emit aie2p-xdna output=sections
+
+// A source stack spanning two banks can grow after its old reservation is
+// released. The smaller workgroup allocation keeps its earlier bank address.
+aie2p.target<array> @array_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @full_worker_storage() asm {
+  %worker_count = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %producer_ordinal = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %consumer_ordinal = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %channel_capacity = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %records_per_invocation = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %tile_column = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %producer_row = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %consumer_row = constant.u32 3 : reg<aie2p.array.scalar : index>
+  %workers = group %worker_count
+  %producer = worker %workers, %producer_ordinal, @produce_record
+  %consumer = worker %workers, %consumer_ordinal, @consume_with_full_storage
+  %sender = sender %producer, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %consumer, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %sender, %receiver, %channel_capacity, %records_per_invocation : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %producer, %tile_column, %producer_row
+  constrain.location %consumer, %tile_column, %consumer_row
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @produce_record() asm {
+  %output = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %value = mov.short 7
+  st %value, %output, 0
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume_with_full_storage() asm {
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %authored_stack = storage {byte_alignment = 64, byte_length = 32768} : low.storage<stack>
+  %stack_address = storage_address %authored_stack : low.storage<stack> -> reg<aie2p.ep>
+  %storage = storage {byte_alignment = 64, byte_length = 640} : low.storage<workgroup>
+  %address = storage_address %storage : low.storage<workgroup> -> reg<aie2p.ep>
+  %iterations = mov.short 2
+  %step = mov.short 1
+  %initial_value = lda %input, 0
+  st %initial_value, %stack_address, 0
+  %offset0 = mov.static-byte-offset 64
+  %index0 = mov.address-index %offset0
+  st.i32.index %initial_value, %address, %index0
+  %offset1 = mov.static-byte-offset 128
+  %index1 = mov.address-index %offset1
+  st.i32.index %initial_value, %address, %index1
+  %offset2 = mov.static-byte-offset 192
+  %index2 = mov.address-index %offset2
+  st.i32.index %initial_value, %address, %index2
+  %offset3 = mov.static-byte-offset 256
+  %index3 = mov.address-index %offset3
+  st.i32.index %initial_value, %address, %index3
+  %offset4 = mov.static-byte-offset 320
+  %index4 = mov.address-index %offset4
+  st.i32.index %initial_value, %address, %index4
+  %offset5 = mov.static-byte-offset 384
+  %index5 = mov.address-index %offset5
+  st.i32.index %initial_value, %address, %index5
+  %offset6 = mov.static-byte-offset 448
+  %index6 = mov.address-index %offset6
+  st.i32.index %initial_value, %address, %index6
+  %offset7 = mov.static-byte-offset 512
+  %index7 = mov.address-index %offset7
+  st.i32.index %initial_value, %address, %index7
+  %offset8 = mov.static-byte-offset 576
+  %index8 = mov.address-index %offset8
+  st.i32.index %initial_value, %address, %index8
+  low.br ^loop(%iterations: reg<aie2p.er>, %index0: reg<aie2p.edj>, %index1: reg<aie2p.edj>, %index2: reg<aie2p.edj>, %index3: reg<aie2p.edj>, %index4: reg<aie2p.edj>, %index5: reg<aie2p.edj>, %index6: reg<aie2p.edj>, %index7: reg<aie2p.edj>, %index8: reg<aie2p.edj>)
+^loop(%remaining: reg<aie2p.er>, %carried0: reg<aie2p.edj>, %carried1: reg<aie2p.edj>, %carried2: reg<aie2p.edj>, %carried3: reg<aie2p.edj>, %carried4: reg<aie2p.edj>, %carried5: reg<aie2p.edj>, %carried6: reg<aie2p.edj>, %carried7: reg<aie2p.edj>, %carried8: reg<aie2p.edj>):
+  %value0 = lda.i32.index %address, %carried0
+  %value1 = lda.i32.index %address, %carried1
+  %sum1 = add.rr %value0, %value1
+  %value2 = lda.i32.index %address, %carried2
+  %sum2 = add.rr %sum1, %value2
+  %value3 = lda.i32.index %address, %carried3
+  %sum3 = add.rr %sum2, %value3
+  %value4 = lda.i32.index %address, %carried4
+  %sum4 = add.rr %sum3, %value4
+  %value5 = lda.i32.index %address, %carried5
+  %sum5 = add.rr %sum4, %value5
+  %value6 = lda.i32.index %address, %carried6
+  %sum6 = add.rr %sum5, %value6
+  %value7 = lda.i32.index %address, %carried7
+  %sum7 = add.rr %sum6, %value7
+  %value8 = lda.i32.index %address, %carried8
+  %sum8 = add.rr %sum7, %value8
+  st %sum8, %address, 0
+  %next = sub %remaining, %step
+  low.cond_br %next, ^repeat, ^done : reg<aie2p.er>
+^repeat:
+  low.br ^loop(%next: reg<aie2p.er>, %carried0: reg<aie2p.edj>, %carried1: reg<aie2p.edj>, %carried2: reg<aie2p.edj>, %carried3: reg<aie2p.edj>, %carried4: reg<aie2p.edj>, %carried5: reg<aie2p.edj>, %carried6: reg<aie2p.edj>, %carried7: reg<aie2p.edj>, %carried8: reg<aie2p.edj>)
+^done:
+  return
+}
+
+// ----
+CHECK: .storage.full_worker_storage$worker$1.stack: address=0x00074280 bytes=32832 reserved
+CHECK: .storage.full_worker_storage$worker$1.workgroup: address=0x00074000 bytes=640 reserved

@@ -119,29 +119,20 @@ static void loom_aie2p_array_report_accumulate_channel_storage(
 static void loom_aie2p_array_report_query_tile_usage(
     const loom_aie2p_array_plan_t* plan, loom_xdna_tile_coordinate_t coordinate,
     const loom_xdna_tile_memory_facts_t* memory,
+    const loom_aie2p_linked_tile_t* linked,
     loom_aie2p_array_report_tile_usage_t* out_usage) {
   *out_usage = (loom_aie2p_array_report_tile_usage_t){0};
   uint32_t high_water = memory->local_base;
-  for (iree_host_size_t i = 0; i < plan->worker_storage_count; ++i) {
-    const loom_aie2p_array_worker_storage_plan_t* storage =
-        &plan->worker_storage[i];
-    if (!loom_aie2p_array_report_coordinate_equal(
-            plan->workers[storage->worker_index].coordinate, coordinate)) {
+  for (iree_host_size_t i = 0; i < linked->assembly.section_count; ++i) {
+    const loom_aie2p_linked_section_placement_t* placement =
+        &linked->section_placements[i];
+    if (placement->memory_space != LOOM_XDNA_MEMORY_SPACE_DATA) {
       continue;
     }
-    out_usage->worker_storage_byte_count += storage->byte_length;
-    high_water =
-        iree_max(high_water, storage->owner_offset + storage->byte_length);
-  }
-  for (iree_host_size_t i = 0; i < plan->read_only_data_count; ++i) {
-    const loom_aie2p_array_read_only_data_plan_t* data =
-        &plan->read_only_data[i];
-    if (!loom_aie2p_array_report_coordinate_equal(
-            plan->workers[data->worker_index].coordinate, coordinate)) {
-      continue;
-    }
-    out_usage->worker_storage_byte_count += data->byte_length;
-    high_water = iree_max(high_water, data->owner_offset + data->byte_length);
+    const uint32_t byte_length = (uint32_t)loom_native_section_byte_length(
+        &linked->assembly.sections[i]);
+    out_usage->worker_storage_byte_count += byte_length;
+    high_water = iree_max(high_water, placement->owner_offset + byte_length);
   }
   for (iree_host_size_t i = 0; i < plan->worker_plan_count; ++i) {
     const loom_aie2p_array_worker_plan_t* worker = &plan->worker_plans[i];
@@ -166,26 +157,17 @@ static void loom_aie2p_array_report_query_tile_usage(
   for (uint8_t bank = 0; bank < memory->bank_count; ++bank) {
     const uint32_t bank_offset = memory->local_base + bank * bank_byte_count;
     uint32_t occupied_byte_count = 0;
-    for (iree_host_size_t i = 0; i < plan->worker_storage_count; ++i) {
-      const loom_aie2p_array_worker_storage_plan_t* storage =
-          &plan->worker_storage[i];
-      if (!loom_aie2p_array_report_coordinate_equal(
-              plan->workers[storage->worker_index].coordinate, coordinate)) {
+    for (iree_host_size_t i = 0; i < linked->assembly.section_count; ++i) {
+      const loom_aie2p_linked_section_placement_t* placement =
+          &linked->section_placements[i];
+      if (placement->memory_space != LOOM_XDNA_MEMORY_SPACE_DATA) {
         continue;
       }
       occupied_byte_count += loom_aie2p_array_report_overlap_byte_count(
-          storage->owner_offset, storage->byte_length, bank_offset,
-          bank_byte_count);
-    }
-    for (iree_host_size_t i = 0; i < plan->read_only_data_count; ++i) {
-      const loom_aie2p_array_read_only_data_plan_t* data =
-          &plan->read_only_data[i];
-      if (!loom_aie2p_array_report_coordinate_equal(
-              plan->workers[data->worker_index].coordinate, coordinate)) {
-        continue;
-      }
-      occupied_byte_count += loom_aie2p_array_report_overlap_byte_count(
-          data->owner_offset, data->byte_length, bank_offset, bank_byte_count);
+          placement->owner_offset,
+          (uint32_t)loom_native_section_byte_length(
+              &linked->assembly.sections[i]),
+          bank_offset, bank_byte_count);
     }
     for (iree_host_size_t i = 0; i < plan->worker_plan_count; ++i) {
       const loom_aie2p_array_worker_plan_t* worker = &plan->worker_plans[i];
@@ -436,16 +418,6 @@ iree_status_t loom_aie2p_array_report_record(
       .dma_channel_count = (uint32_t)plan->dma_channel_count,
       .route_count = (uint32_t)plan->route_count,
   };
-  for (iree_host_size_t i = 0; i < plan->worker_storage_count; ++i) {
-    summary.worker_storage_byte_count += plan->worker_storage[i].byte_length;
-  }
-  for (iree_host_size_t i = 0; i < plan->read_only_data_count; ++i) {
-    summary.worker_storage_byte_count += plan->read_only_data[i].byte_length;
-  }
-  for (iree_host_size_t i = 0; i < plan->worker_plan_count; ++i) {
-    summary.worker_storage_byte_count +=
-        plan->worker_plans[i].fold_state.byte_length;
-  }
   for (iree_host_size_t i = 0; i < plan->channel_count; ++i) {
     summary.channel_storage_byte_count +=
         loom_aie2p_array_report_channel_storage_byte_count(plan, (uint32_t)i);
@@ -470,7 +442,9 @@ iree_status_t loom_aie2p_array_report_record(
         loom_xdna_array_tile_facts(plan->family, worker->coordinate);
     loom_aie2p_array_report_tile_usage_t usage = {0};
     loom_aie2p_array_report_query_tile_usage(plan, worker->coordinate,
-                                             &tile_facts->memory, &usage);
+                                             &tile_facts->memory,
+                                             tiles[i].linked_tile, &usage);
+    summary.worker_storage_byte_count += usage.worker_storage_byte_count;
 
     const uint32_t code_byte_count = (uint32_t)realization->code.byte_length;
     const uint32_t code_headroom =

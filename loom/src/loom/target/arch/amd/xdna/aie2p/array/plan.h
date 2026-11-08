@@ -257,6 +257,9 @@ typedef struct loom_aie2p_array_worker_plan_t {
   uint32_t resident_state_count;
   // Private ordered-fold state reserved before channel rings are placed.
   loom_aie2p_array_fold_state_plan_t fold_state;
+  // Final occupied prefix of each local-memory bank, including channel rings
+  // and service state. Borrowed from the arena-owned physical placement state.
+  const uint32_t* local_memory_bank_cursors;
 } loom_aie2p_array_worker_plan_t;
 
 // Final local-data placement for one compiled worker storage domain.

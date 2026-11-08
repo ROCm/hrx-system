@@ -8,6 +8,7 @@
 
 #include "iree/io/vec_stream.h"
 #include "iree/schemas/xdna_executable.h"
+#include "loom/analysis/source_storage_packing.h"
 #include "loom/analysis/symbol_facts.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/target_binding.h"
@@ -268,36 +269,125 @@ static iree_status_t loom_aie2p_xdna_emit_product_issue(
   return iree_diagnostic_emit(request->diagnostic_emitter, &emission);
 }
 
+// Final register allocation can add or enlarge the worker's stack. Its source
+// reservation is relocatable; all other planned storage keeps its addresses.
+static iree_status_t loom_aie2p_xdna_place_stack(
+    const loom_aie2p_xdna_artifact_request_t* request,
+    const loom_aie2p_array_plan_t* plan, uint32_t worker_index,
+    const loom_aie2p_leaf_storage_requirement_t* requirement,
+    loom_aie2p_tile_storage_placement_t* out_placement, bool* out_fits) {
+  *out_fits = false;
+  const loom_aie2p_array_worker_t* worker = &plan->workers[worker_index];
+  const loom_aie2p_array_worker_plan_t* worker_plan =
+      &plan->worker_plans[worker_index];
+  const loom_xdna_tile_facts_t* tile =
+      loom_xdna_array_tile_facts(plan->family, worker_plan->coordinate);
+  uint64_t source_stack_begin = 0;
+  uint64_t source_stack_end = 0;
+  if (worker->source->requirements.storage_layout.space_sizes.stack_bytes !=
+      0) {
+    const loom_aie2p_array_worker_storage_plan_t* source_stack =
+        &plan->worker_storage[worker_plan->first_storage];
+    source_stack_begin = source_stack->owner_offset;
+    source_stack_end = source_stack_begin + source_stack->byte_length;
+  }
+
+  // Removing one contiguous stack reservation can split at most one occupied
+  // bank prefix. The remaining prefixes include authored data, constants,
+  // channel rings, and fold state without recovering their source operations.
+  loom_source_storage_packing_range_t* ranges = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      request->scratch_arena, tile->memory.bank_count + 1u, sizeof(*ranges),
+      (void**)&ranges));
+  iree_host_size_t range_count = 0;
+  const uint32_t bank_length =
+      tile->memory.local_capacity / tile->memory.bank_count;
+  for (uint8_t bank = 0; bank < tile->memory.bank_count; ++bank) {
+    const uint64_t begin = (uint64_t)bank * bank_length;
+    const uint64_t end = begin + worker_plan->local_memory_bank_cursors[bank];
+    const uint64_t before_end = iree_min(end, source_stack_begin);
+    if (begin < before_end) {
+      ranges[range_count++] = (loom_source_storage_packing_range_t){
+          .byte_offset = begin,
+          .byte_length = before_end - begin,
+      };
+    }
+    const uint64_t after_begin = iree_max(begin, source_stack_end);
+    if (after_begin < end) {
+      ranges[range_count++] = (loom_source_storage_packing_range_t){
+          .byte_offset = after_begin,
+          .byte_length = end - after_begin,
+      };
+    }
+  }
+  loom_source_storage_packing_t* packing = NULL;
+  IREE_RETURN_IF_ERROR(loom_source_storage_packing_allocate(
+      (loom_source_storage_packing_interference_callback_t){0}, ranges,
+      range_count, request->scratch_arena, &packing));
+  uint64_t offset = 0;
+  IREE_RETURN_IF_ERROR(loom_source_storage_packing_reserve(
+      packing, requirement->byte_length, requirement->minimum_alignment, NULL,
+      0, &offset));
+  const uint64_t extent =
+      loom_source_storage_packing_requirement(packing).byte_length;
+  if (extent > tile->memory.local_capacity) {
+    const loom_diagnostic_param_t params[] = {
+        loom_param_u32(worker->coordinate.column),
+        loom_param_u32(worker->coordinate.row),
+        loom_param_u64(extent),
+        loom_param_u64(tile->memory.local_capacity),
+    };
+    const loom_diagnostic_emission_t emission = {
+        .op = loom_value_def_op(
+            loom_module_value(request->module, worker->value_id)),
+        .error = LOOM_ERR_XDNA_049,
+        .params = params,
+        .param_count = IREE_ARRAYSIZE(params),
+    };
+    return iree_diagnostic_emit(request->diagnostic_emitter, &emission);
+  }
+  *out_placement = (loom_aie2p_tile_storage_placement_t){
+      .storage_space = LOOM_STORAGE_SPACE_STACK,
+      .owner_offset = (uint32_t)offset,
+      .load_address = tile->memory.local_load_base + (uint32_t)offset,
+  };
+  *out_fits = true;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_aie2p_xdna_plan_tile_link(
+    const loom_aie2p_xdna_artifact_request_t* request,
     const loom_aie2p_array_plan_t* plan, uint32_t worker_index,
     const loom_aie2p_leaf_realization_t* realization,
     loom_aie2p_tile_storage_placement_t* storage_placements,
     loom_aie2p_tile_read_only_data_placement_t* read_only_data_placements,
-    loom_aie2p_tile_link_layout_t* out_layout) {
-  if (realization->storage_domain_count > LOOM_STORAGE_SPACE_COUNT_) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AIE2P resident worker has too many storage domains");
-  }
+    loom_aie2p_tile_link_layout_t* out_layout, bool* out_fits) {
+  *out_fits = false;
   const loom_aie2p_array_worker_plan_t* worker_plan =
       &plan->worker_plans[worker_index];
+  iree_host_size_t placement_index = worker_plan->first_storage;
+  // Stack is the first structural storage space. Non-stack domains retain
+  // their exact source placement, regardless of whether a stack was authored.
+  placement_index +=
+      plan->workers[worker_index]
+          .source->requirements.storage_layout.space_sizes.stack_bytes != 0;
   for (iree_host_size_t i = 0; i < realization->storage_domain_count; ++i) {
     const loom_aie2p_leaf_storage_domain_t* domain =
         &realization->storage_domains[i];
-    const iree_host_size_t placement_index = worker_plan->first_storage + i;
-    const loom_aie2p_array_worker_storage_plan_t* placement =
-        placement_index < plan->worker_storage_count
-            ? &plan->worker_storage[placement_index]
-            : NULL;
-    const loom_aie2p_leaf_storage_requirement_t* requirement =
-        loom_aie2p_leaf_storage_requirement(realization, domain->storage_space);
-    if (placement == NULL || placement->worker_index != worker_index ||
-        placement->storage_space != domain->storage_space ||
-        placement->byte_length != requirement->byte_length) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AIE2P resident storage changed after physical array planning");
+    if (domain->storage_space == LOOM_STORAGE_SPACE_STACK) {
+      bool stack_fits = false;
+      IREE_RETURN_IF_ERROR(loom_aie2p_xdna_place_stack(
+          request, plan, worker_index,
+          loom_aie2p_leaf_storage_requirement(realization,
+                                              LOOM_STORAGE_SPACE_STACK),
+          &storage_placements[i], &stack_fits));
+      if (!stack_fits) {
+        return iree_ok_status();
+      }
+      continue;
     }
+    const loom_aie2p_array_worker_storage_plan_t* placement =
+        &plan->worker_storage[placement_index++];
     storage_placements[i] = (loom_aie2p_tile_storage_placement_t){
         .storage_space = domain->storage_space,
         .owner_offset = placement->owner_offset,
@@ -348,6 +438,7 @@ static iree_status_t loom_aie2p_xdna_plan_tile_link(
       .read_only_data_placements = read_only_data_placements,
       .read_only_data_placement_count = realization->read_only_data_count,
   };
+  *out_fits = true;
   return iree_ok_status();
 }
 
@@ -458,9 +549,14 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
           (void**)&read_only_data_placements));
     }
     loom_aie2p_tile_link_layout_t link_layout = {0};
+    bool storage_fits = false;
     IREE_RETURN_IF_ERROR(loom_aie2p_xdna_plan_tile_link(
-        plan, (uint32_t)worker_index, &contribution->realization,
-        storage_placements, read_only_data_placements, &link_layout));
+        request, plan, (uint32_t)worker_index, &contribution->realization,
+        storage_placements, read_only_data_placements, &link_layout,
+        &storage_fits));
+    if (!storage_fits) {
+      return iree_ok_status();
+    }
     IREE_RETURN_IF_ERROR(loom_aie2p_tile_link(contribution, &link_layout,
                                               request->scratch_arena,
                                               &linked_tiles[worker_index]));

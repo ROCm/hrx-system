@@ -176,6 +176,17 @@ backing while preserving the caller's live values. Placement charges that
 complete bound against the tile's other storage before producing the image.
 Functions needing no stack storage contribute no frame bytes.
 
+Stack backing shares the tile's SRAM with authored buffers, channel rings,
+constants, and other worker storage. It consumes only the space left after
+those reservations; it cannot replace or overlap them. For a 64 KiB tile,
+64,832 bytes of resident data plus 640 bytes of worker storage leaves exactly
+64 bytes for a helper's frame. Reserving another 64 bytes makes that program
+fail compilation with `XDNA/049`, identifying the tile and reporting 65,600
+required bytes versus 65,536 available. Configuration declarations participate
+even when they follow `program.load`. Direct array emission preserves its
+planned non-stack addresses and places the final stack after allocation.
+Compile reports include the final placed stack, including generated spills.
+
 Spill support preserves physical register constraints and architectural-state
 ownership. Link and carry state retain their call and instruction ordering
 contracts. Constant initialization can be reconstructed beside its users to

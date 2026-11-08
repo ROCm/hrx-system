@@ -1259,6 +1259,8 @@ static iree_status_t loom_aie2p_array_plan_workers(
 
     loom_aie2p_array_tile_state_t* tile_state =
         loom_aie2p_array_tile_state(builder, worker->coordinate);
+    builder->worker_plans[i].local_memory_bank_cursors =
+        tile_state->resources.bank_cursors;
     for (uint32_t space_index = 0; space_index < LOOM_STORAGE_SPACE_COUNT_;
          ++space_index) {
       const loom_storage_space_t storage_space =
