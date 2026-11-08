@@ -1209,6 +1209,10 @@ static loomc_status_t loomc_spirv_vulkaninfo_import_features_from_structs(
   if (iree_string_view_is_empty(core_features)) {
     core_features = features;
   }
+  iree_string_view_t vulkan11_features = iree_string_view_empty();
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_lookup_feature_struct(
+      import, features, extended_features,
+      IREE_SV("VkPhysicalDeviceVulkan11Features"), &vulkan11_features));
   iree_string_view_t vulkan12_features = iree_string_view_empty();
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_lookup_feature_struct(
       import, features, extended_features,
@@ -1309,6 +1313,10 @@ static loomc_status_t loomc_spirv_vulkaninfo_import_features_from_structs(
       import, storage8_features, IREE_SV("storageBuffer8BitAccess"),
       LOOMC_SPIRV_FEATURE_STORAGE_BUFFER_8BIT_ACCESS,
       loomc_make_cstring_view("vulkaninfo:storageBuffer8BitAccess")));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_bool_feature(
+      import, vulkan11_features, IREE_SV("storageBuffer16BitAccess"),
+      LOOMC_SPIRV_FEATURE_STORAGE_BUFFER_16BIT_ACCESS,
+      loomc_make_cstring_view("vulkaninfo:storageBuffer16BitAccess")));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_bool_feature(
       import, storage16_features, IREE_SV("storageBuffer16BitAccess"),
       LOOMC_SPIRV_FEATURE_STORAGE_BUFFER_16BIT_ACCESS,
