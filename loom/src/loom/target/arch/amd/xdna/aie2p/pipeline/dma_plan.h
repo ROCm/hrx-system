@@ -101,7 +101,7 @@ typedef struct loom_aie2p_native_memory_layout_t {
 extern const loom_aie2p_native_memory_layout_t loom_aie2p_compute_memory;
 extern const loom_aie2p_native_memory_layout_t loom_aie2p_sram_memory;
 
-// Complete finite descriptor and task program for one DMA endpoint.
+// Immutable descriptor images and startup tasks for one DMA endpoint.
 typedef struct loom_aie2p_native_dma_sequence_t {
   // First descriptor in the contiguous allocation owned by this sequence.
   uint16_t descriptor;

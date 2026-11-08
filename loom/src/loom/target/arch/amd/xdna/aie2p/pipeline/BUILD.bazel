@@ -121,11 +121,13 @@ loom_cc_library(
         "native.c",
         "phases.c",
         "programs.c",
+        "refill.c",
         "switch.c",
         "transport.c",
     ],
     hdrs = [
         "native.h",
+        "refill.h",
         "switch.h",
     ],
     deps = [
@@ -135,6 +137,7 @@ loom_cc_library(
         "//loom/src/loom/analysis:source_storage_packing",
         "//loom/src/loom/analysis:storage_geometry",
         "//loom/src/loom/analysis/pipeline:execution",
+        "//loom/src/loom/analysis/pipeline:progress",
         "//loom/src/loom/analysis/pipeline:schedule",
         "//loom/src/loom/codegen/low:builder",
         "//loom/src/loom/codegen/low:launch_config_program",
@@ -200,6 +203,18 @@ loom_cc_test(
         "//loom/src/loom/target/arch/amd/xdna/array:facts",
         "//loom/src/loom/testing:diagnostic_matchers",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "refill_test",
+    srcs = ["refill_test.cc"],
+    deps = [
+        ":native",
+        "//loom/src/loom/pass:types",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

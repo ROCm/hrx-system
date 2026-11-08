@@ -12,6 +12,7 @@
 #include "loom/ops/type_registry.h"
 #include "loom/ops/view/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
 #include "loom/transforms/pipeline/channel_materialization.h"
 
 typedef struct loom_aie2p_native_endpoint_t {
@@ -34,6 +35,8 @@ typedef struct loom_aie2p_native_endpoint_t {
   // Local publication prefix of a finite SRAM batch; not persisted across
   // invocations because admission excludes producer-side slot reuse.
   iree_host_size_t publication;
+  // DMA task windows advanced by this endpoint's read admissions.
+  const loom_aie2p_native_refill_t* refills;
   // Native consuming-credit acquire helper, created on first use.
   loom_symbol_ref_t acquire;
   // Native producing-credit acquire helper, created on first use.
@@ -291,6 +294,13 @@ static iree_status_t loom_aie2p_native_channel_action(
         IREE_RETURN_IF_ERROR(loom_aie2p_native_invoke(
             builder, *acquire, &emitter->acquire_delta, 1, NULL, NULL));
       }
+      if (!write) {
+        for (const loom_aie2p_native_refill_t* refill = endpoint->refills;
+             refill; refill = refill->next_reader) {
+          IREE_RETURN_IF_ERROR(
+              loom_aie2p_native_emit_refill(builder, refill, state));
+        }
+      }
       record = emitter->origin;
       const loom_aie2p_native_channel_t* physical = endpoint->access->channel;
       if ((write ? physical->cursor.writer : physical->cursor.reader)
@@ -447,6 +457,18 @@ iree_status_t loom_aie2p_native_emit_worker(
     IREE_RETURN_IF_ERROR(loom_aie2p_native_endpoint(
         context, &worker->channels.accesses[i], &emitter.endpoints[i]));
   }
+  iree_host_size_t refill_count = 0;
+  for (loom_aie2p_native_refill_t* refill = worker->refills; refill;
+       refill = refill->next) {
+    const iree_host_size_t channel = refill->progress - context->channels;
+    loom_aie2p_native_endpoint_t* endpoint =
+        &emitter.endpoints[worker->channels.indices[channel]];
+    refill->next_reader = endpoint->refills;
+    endpoint->refills = refill;
+    ++refill_count;
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_native_prepare_refills(context, worker->refills));
   loom_aie2p_worker_builder_t* code = &context->code;
   if (has_sram) {
     IREE_RETURN_IF_ERROR(loom_rewriter_enable_worklist(rewriter));
@@ -519,7 +541,8 @@ iree_status_t loom_aie2p_native_emit_worker(
                                 LOOM_LOCATION_UNKNOWN, &origin));
   emitter.origin = loom_index_constant_result(origin);
   loom_value_id_t* state = NULL;
-  const iree_host_size_t state_capacity = endpoint_count * (has_sram ? 3 : 2);
+  const iree_host_size_t state_capacity =
+      endpoint_count * (has_sram ? 3 : 2) + refill_count * 2;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, state_capacity, sizeof(*state), (void**)&state));
   loom_value_id_t* state_views = NULL;
@@ -600,6 +623,19 @@ iree_status_t loom_aie2p_native_emit_worker(
                                 loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
                                 LOOM_LOCATION_UNKNOWN, &cast));
       state[state_count++] = loom_index_cast_result(cast);
+    }
+  }
+  for (loom_aie2p_native_refill_t* refill = worker->refills; refill;
+       refill = refill->next) {
+    refill->state_index = state_count;
+    const uint32_t initial[] = {0, refill->remaining_tasks};
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(initial); ++i) {
+      loom_op_t* value;
+      IREE_RETURN_IF_ERROR(loom_scalar_constant_build(
+          &rewriter->builder, loom_attr_i64((int32_t)initial[i]), delta_type,
+          LOOM_LOCATION_UNKNOWN, &value));
+      state_views[state_count] = LOOM_VALUE_ID_INVALID;
+      state[state_count++] = loom_scalar_constant_result(value);
     }
   }
   loom_type_t* carriers = NULL;

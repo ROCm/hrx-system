@@ -196,3 +196,26 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
+
+loom_cc_library(
+    name = "progress",
+    srcs = ["progress.c"],
+    hdrs = ["progress.h"],
+    deps = [
+        ":invocations",
+        ":workers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "progress_test",
+    srcs = ["progress_test.cc"],
+    deps = [
+        ":progress",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

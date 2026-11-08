@@ -99,6 +99,7 @@ static iree_status_t loom_aie2p_native_select_distribution_endpoint(
   }
   return loom_aie2p_native_select_sequence(
       context, tile, out_endpoint->engine, direction,
+      shared || batch_records ? NULL : channel,
       batch_records ? repetitions / batch_records : repetitions, capacity,
       channel->byte_offset, byte_stride, credit_interval, words,
       &out_endpoint->sequence, out_reason, out_valid);

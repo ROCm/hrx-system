@@ -10,6 +10,7 @@
 #include "loom/ops/channel/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/pipeline/ops.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
 #include "loom/target/arch/amd/xdna/error_catalog.h"
 #include "loom/target/function_version.h"
 #include "loom/util/fact_extensions.h"
@@ -1006,6 +1007,7 @@ static iree_status_t loom_aie2p_native_select(
           IREE_SV("a DMA-owned ingress for retained FIFO replay"));
     }
   }
+  IREE_RETURN_IF_ERROR(loom_aie2p_native_select_progress(context, realization));
   IREE_RETURN_IF_ERROR(
       loom_aie2p_native_select_collectives(context, realization, out_valid));
   if (!*out_valid) {
