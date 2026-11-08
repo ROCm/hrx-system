@@ -98,6 +98,32 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "realization_test",
+    srcs = ["realization_test.cc"],
+    deps = [
+        ":realization",
+        "//loom/src/loom/analysis/pipeline:invocations",
+        "//loom/src/loom/analysis/pipeline:resources",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:builders",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/pipeline",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:pass_environment",
+        "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "worker_materialization",
     srcs = ["worker_materialization.c"],

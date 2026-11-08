@@ -51,10 +51,12 @@ typedef struct loom_pipeline_realization_t {
   // Bound worker instances, in complete invocations.workers order.
   loom_pipeline_worker_t* workers;
   // Independent consuming bodies, created only after selection succeeds.
+  // A worker fully realized by other mechanics has a zero instance here.
   loom_pipeline_worker_materialization_t* instances;
   // Compilation owner receiving workers and their generated helper versions.
   loom_function_version_owner_t* version_owner;
   // Exact execution contexts retained at cloning, in the same worker order.
+  // NULL for workers whose selected mechanics require no instruction body.
   loom_target_function_version_t** worker_versions;
   // Fresh context ordinal reserved for a changed entry execution contract.
   loom_target_context_ordinal_t entry_target_context;
@@ -67,10 +69,15 @@ typedef struct loom_pipeline_realization_callback_t {
   iree_status_t (*select)(void* user_data, loom_module_t* module,
                           const loom_pipeline_realization_t* realization,
                           bool* out_valid);
+  // Queries the retained physical selection by worker ordinal. A descriptor
+  // or configuration realization can consume the source plan without creating
+  // an instruction body. This indexed fact performs no source analysis.
+  bool (*has_worker_body)(const void* user_data, iree_host_size_t worker_index);
   // Consumes one admitted worker instance. Its ordinal domain is acquired;
   // the immutable source worker's domain remains released.
   // The callback consumes channel/movement plans and emits ordinary executable
   // operations; it does not rediscover the worker body or compile it privately.
+  // Called only for workers whose selection requires an instruction body.
   // Original entry arguments remain in order until common capture realization
   // and pruning; mechanics may append invocation operands to that signature.
   iree_status_t (*worker)(void* user_data, loom_rewriter_t* rewriter,

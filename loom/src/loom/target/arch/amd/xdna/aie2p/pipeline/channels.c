@@ -442,9 +442,6 @@ iree_status_t loom_aie2p_native_emit_worker(
       &realization->instances[worker_index];
   const loom_channel_materialization_instance_t* channels = &instance->channels;
   loom_aie2p_native_worker_t* worker = &context->workers[worker_index];
-  if (worker->execution != LOOM_AIE2P_NATIVE_EXECUTION_CORE) {
-    return iree_ok_status();
-  }
   loom_aie2p_native_channel_emitter_t emitter = {
       .context = context,
       .invocations = &realization->invocations,

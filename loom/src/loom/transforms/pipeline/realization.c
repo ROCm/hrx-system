@@ -107,7 +107,8 @@ static iree_status_t loom_pipeline_realization_report(
 static iree_status_t loom_pipeline_realization_clone_workers(
     loom_pass_t* pass, loom_rewriter_t* rewriter,
     const loom_target_function_version_snapshot_t* versions,
-    loom_pipeline_realization_t* realization) {
+    loom_pipeline_realization_t* realization,
+    const loom_pipeline_realization_callback_t* callback) {
   loom_module_t* module = rewriter->module;
   const loom_target_pass_capability_t* capability =
       loom_target_pass_capability_from_pass(pass);
@@ -143,6 +144,12 @@ static iree_status_t loom_pipeline_realization_clone_workers(
   }
   uint32_t next_name = 0;
   for (iree_host_size_t i = 0; i < realization->invocations.worker_count; ++i) {
+    if (!callback->has_worker_body(callback->user_data, i)) {
+      realization->instances[i] = (loom_pipeline_worker_materialization_t){0};
+      // Name ordinals follow source workers, including descriptor-only roles.
+      ++next_name;
+      continue;
+    }
     loom_pipeline_worker_t* worker = &realization->workers[i];
     const loom_target_function_version_t* source_version =
         loom_target_function_version_snapshot_at(
@@ -462,7 +469,7 @@ iree_status_t loom_pipeline_realize_invocations(
   }
   if (iree_status_is_ok(status) && valid) {
     status = loom_pipeline_realization_clone_workers(pass, &rewriter, versions,
-                                                     &realization);
+                                                     &realization, callback);
   }
   for (iree_host_size_t i = 0; iree_status_is_ok(status) && valid &&
                                i < realization.invocations.worker_count;
@@ -470,6 +477,9 @@ iree_status_t loom_pipeline_realize_invocations(
     loom_pipeline_worker_t* worker = &realization.workers[i];
     loom_channel_materialization_instance_t* instance =
         &realization.instances[i].channels;
+    if (!instance->function.op) {
+      continue;
+    }
     loom_local_value_domain_restore(&instance->value_domain);
     status = callback->worker(callback->user_data, &rewriter, &realization, i);
     loom_local_value_domain_release(&instance->value_domain);
