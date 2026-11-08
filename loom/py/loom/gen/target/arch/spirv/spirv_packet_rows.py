@@ -81,6 +81,7 @@ from loom.target.arch.spirv.ordinary_vector_float import (  # noqa: E402
 )
 from loom.target.arch.spirv.ordinary_vector_integer import (  # noqa: E402
     INTEGER_BIT_COUNT_INSTRUCTIONS,
+    INTEGER_DOT_INSTRUCTIONS,
     ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
 )
 from loom.target.arch.spirv.scalar_alu import (  # noqa: E402
@@ -954,6 +955,7 @@ def _ordinary_vector_rows() -> list[_PacketRow]:
         *ORDINARY_VECTOR_FLOAT_PRESERVE_COMPARE_INSTRUCTIONS,
         *ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
         *INTEGER_BIT_COUNT_INSTRUCTIONS,
+        *INTEGER_DOT_INSTRUCTIONS,
         *ORDINARY_VECTOR_CONVERSION_INSTRUCTIONS,
         *ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTIONS,
         *SPIRV_SUBGROUP_BALLOT_PACKING_INSTRUCTIONS,

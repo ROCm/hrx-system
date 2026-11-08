@@ -1306,6 +1306,16 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
   if (!loom_vector_to_scalar_resolve_descriptor(def_op->kind, &descriptor)) {
     return iree_ok_status();
   }
+  // Grouped dots own target-selectable arithmetic across multiple input lanes.
+  // Extracting one result must not replace that producer with its reference
+  // multiply/add program. Its own legalization chooses native packets or
+  // expands the reference at the definition before consumers select lanes.
+  if (descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_DOT2F ||
+      descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_DOT4I ||
+      descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_DOT8I4 ||
+      descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_DOT4F8) {
+    return iree_ok_status();
+  }
   // Mechanical lane lowering clones one scalar operation and returns one
   // value. Target legalization owns multi-result mechanical producers so their
   // complete result tuple remains intact. Explicit lane programs such as

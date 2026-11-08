@@ -1397,22 +1397,6 @@ static const loom_target_legalizer_rule_t kAmdgpuLegalizerRules[] = {
         .legalize = loom_amdgpu_legalize_vector_transform,
     },
     {
-        .root_kind = LOOM_OP_VECTOR_DOT2F,
-        .legalize = loom_amdgpu_retain_native_vector_op,
-    },
-    {
-        .root_kind = LOOM_OP_VECTOR_DOT4I,
-        .legalize = loom_amdgpu_retain_native_vector_op,
-    },
-    {
-        .root_kind = LOOM_OP_VECTOR_DOT8I4,
-        .legalize = loom_amdgpu_retain_native_vector_op,
-    },
-    {
-        .root_kind = LOOM_OP_VECTOR_DOT4F8,
-        .legalize = loom_amdgpu_retain_native_vector_op,
-    },
-    {
         .root_kind = LOOM_OP_VECTOR_DECODE,
         .legalize = loom_amdgpu_legalize_vector_decode,
     },

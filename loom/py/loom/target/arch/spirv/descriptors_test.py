@@ -53,6 +53,7 @@ from loom.target.arch.spirv.ordinary_vector_float import (
 )
 from loom.target.arch.spirv.ordinary_vector_integer import (
     INTEGER_BIT_COUNT_INSTRUCTIONS,
+    INTEGER_DOT_INSTRUCTIONS,
     ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
 )
 from loom.target.arch.spirv.scalar_alu import (
@@ -493,6 +494,7 @@ def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
         *ORDINARY_VECTOR_FLOAT_PRESERVE_COMPARE_INSTRUCTIONS,
         *ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
         *INTEGER_BIT_COUNT_INSTRUCTIONS,
+        *INTEGER_DOT_INSTRUCTIONS,
         *ORDINARY_VECTOR_CONVERSION_INSTRUCTIONS,
         *ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTIONS,
         *SPIRV_SUBGROUP_BALLOT_PACKING_INSTRUCTIONS,

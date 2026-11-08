@@ -559,6 +559,42 @@ FEATURE_ATOMS = (
             "LOOM_SPIRV_OP_GROUP_NON_UNIFORM_SHUFFLE_DOWN",
         ),
     ),
+    FeatureAtom(
+        key="integer_dot_product",
+        c_suffix="INTEGER_DOT_PRODUCT",
+        name="spirv.integer_dot_product",
+        doc="SPV_KHR_integer_dot_product operations.",
+        minimum_spirv_version=SPIRV_VERSION_1_0,
+        extensions=("SPV_KHR_integer_dot_product",),
+        capabilities=("LOOM_SPIRV_CAPABILITY_DOT_PRODUCT",),
+        opcodes=("LOOM_SPIRV_OP_S_DOT", "LOOM_SPIRV_OP_U_DOT", "LOOM_SPIRV_OP_SU_DOT"),
+    ),
+    *(
+        FeatureAtom(
+            key=f"integer_dot_product_{key}",
+            c_suffix=f"INTEGER_DOT_PRODUCT_{key.upper()}",
+            name=f"spirv.integer_dot_product.{key}",
+            doc=doc,
+            minimum_spirv_version=SPIRV_VERSION_1_0,
+            required=("integer_dot_product", "int8")
+            if key == "input4x8_bit"
+            else ("integer_dot_product",),
+            capabilities=(f"LOOM_SPIRV_CAPABILITY_DOT_PRODUCT_{capability}",),
+        )
+        for key, capability, doc in (
+            (
+                "input_all",
+                "INPUT_ALL",
+                "Integer dots admit all native integer vector types.",
+            ),
+            ("input4x8_bit", "INPUT4X8_BIT", "Integer dots admit four-byte vectors."),
+            (
+                "input4x8_bit_packed",
+                "INPUT4X8_BIT_PACKED",
+                "Integer dots admit four bytes packed in an i32.",
+            ),
+        )
+    ),
 )
 
 FEATURE_PROFILES = (

@@ -82,6 +82,7 @@ from loom.target.arch.spirv.contracts.integer_bits import (
     bit_count_rules,
     rotation_rules,
 )
+from loom.target.arch.spirv.contracts.integer_dot import integer_dot_rules
 from loom.target.arch.spirv.contracts.memory import (
     STORAGE_BUFFER_MEMORY_SPACES as _STORAGE_BUFFER_MEMORY_SPACES,
 )
@@ -1448,6 +1449,7 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         *rounding_rules(),
         *bit_count_rules(),
         *rotation_rules(),
+        *integer_dot_rules(),
         *SPIRV_ORDINARY_VECTOR_CONTRACT_CASES,
         # Singleton vectors use the scalar physical carrier. Native BF16 rows
         # precede these software alternatives just as for scalar constants.
