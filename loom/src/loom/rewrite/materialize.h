@@ -62,8 +62,9 @@ iree_status_t loom_ir_clone_block_ops(
     loom_ir_remap_t* remap, const loom_ir_clone_block_options_t* options);
 
 // Clones |source_region| and returns a new target-module-owned region.
-// Successor edges are projected through the parallel region block ordinals;
-// the clone does not retain source-to-target block mappings in |remap|.
+// Successor edges from structurally verified source IR are projected through
+// the parallel region block ordinals; the clone does not retain
+// source-to-target block mappings in |remap|.
 // Block layout is preserved independently of dominance order. Direct value
 // definitions are mapped before a multi-block region's uses and argument types,
 // including references to definitions in later-listed blocks.
@@ -77,8 +78,9 @@ iree_status_t loom_ir_clone_region(loom_builder_t* builder,
 // New blocks are inserted beginning at |target_block_index| with one block
 // table shift. Block arguments and multi-block region result definitions are
 // mapped before operation payloads, independently of block layout. Successor
-// edges are projected by source block ordinal. The builder's current parent op
-// is retained as the parent of cloned ops.
+// edges from structurally verified source IR are projected by source block
+// ordinal. The builder's current parent op is retained as the parent of cloned
+// ops.
 // Block labels are intentionally omitted: labels are region-local presentation
 // names and retaining them while splicing into an existing region can create
 // duplicate names. Block comments, flags, value names, locations, and all
@@ -91,12 +93,11 @@ iree_status_t loom_ir_clone_region_blocks(loom_builder_t* builder,
 
 // Rewrites every remappable payload in an existing op subtree through |remap|.
 //
-// This mutates ordinary operands, explicitly mapped successor targets, result
-// types, attributes, nested block argument types, and nested child ops in-place
-// through |rewriter| so use lists, type-use lists, effect summaries, and
-// worklist state remain coherent. Result values and nested block arguments keep
-// their existing IDs; this helper is for same-module move/consume transforms,
-// not cross-module cloning.
+// This mutates ordinary operands, result types, attributes, nested block
+// argument types, and nested child ops in-place through |rewriter| so use
+// lists, type-use lists, effect summaries, and worklist state remain coherent.
+// Result values and nested block arguments keep their existing IDs; this helper
+// is for same-module move/consume transforms, not cross-module cloning.
 iree_status_t loom_ir_remap_op_references(loom_rewriter_t* rewriter,
                                           loom_op_t* op,
                                           loom_ir_remap_t* remap);
