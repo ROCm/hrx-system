@@ -18,6 +18,7 @@
 #include "loom/target/function_version.h"
 #include "loom/target/pass_environment.h"
 #include "loom/transforms/cfg/cfg_simplify.h"
+#include "loom/transforms/kernel/kernel_resources.h"
 
 // Observe the source proof before physical selection or consuming rewrites.
 // These rows describe transport eligibility, not a selected DMA implementation.
@@ -304,6 +305,15 @@ iree_status_t loom_pipeline_realize(
     loom_pass_t* pass, loom_module_t* module, loom_func_like_t function,
     const loom_pipeline_realization_inventory_t* inventory,
     const loom_pipeline_realization_callback_t* callback) {
+  // This closed execution now owns an invocation ABI. Source compositions
+  // retain view arguments until their execution owner admits that boundary.
+  uint16_t normalized_count = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_kernel_resources_normalize(module, function, &normalized_count));
+  if (normalized_count) {
+    loom_pass_value_fact_owner_invalidate(pass->value_facts);
+    loom_pass_mark_changed(pass);
+  }
   loom_value_fact_table_t* facts = NULL;
   IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
       pass, module,

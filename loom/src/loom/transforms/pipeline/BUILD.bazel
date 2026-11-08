@@ -62,6 +62,7 @@ loom_cc_library(
         "//loom/src/loom/target:function_version",
         "//loom/src/loom/target:pass_environment",
         "//loom/src/loom/transforms/cfg:cfg_simplify",
+        "//loom/src/loom/transforms/kernel:kernel_resources",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
