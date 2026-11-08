@@ -401,63 +401,70 @@ func.def public target(@target) @call_workitem_helper_again(%exit_early: i1) -> 
                OpName %exit_early_1 "exit_early"
                OpName %lane_1 "lane"
                OpDecorate %local_invocation_id BuiltIn LocalInvocationId
-               OpMemberDecorate %_struct_19 0 Offset 0
-               OpDecorate %_struct_19 Block
-               OpDecorate %18 DescriptorSet 0
-               OpDecorate %18 Binding 0
-               OpDecorate %22 DescriptorSet 0
-               OpDecorate %22 Binding 1
-               OpDecorate %32 DescriptorSet 0
-               OpDecorate %32 Binding 0
-               OpDecorate %33 DescriptorSet 0
-               OpDecorate %33 Binding 1
+               OpMemberDecorate %_struct_24 0 Offset 0
+               OpDecorate %_struct_24 Block
+               OpDecorate %23 DescriptorSet 0
+               OpDecorate %23 Binding 0
+               OpDecorate %27 DescriptorSet 0
+               OpDecorate %27 Binding 1
+               OpDecorate %38 DescriptorSet 0
+               OpDecorate %38 Binding 0
+               OpDecorate %39 DescriptorSet 0
+               OpDecorate %39 Binding 1
        %bool = OpTypeBool
-        %int = OpTypeInt 32 1
-          %4 = OpTypeFunction %int %bool
+       %long = OpTypeInt 64 1
+          %4 = OpTypeFunction %long %bool
        %uint = OpTypeInt 32 0
      %v3uint = OpTypeVector %uint 3
 %_ptr_Input_v3uint = OpTypePointer Input %v3uint
 %local_invocation_id = OpVariable %_ptr_Input_v3uint Input
+        %int = OpTypeInt 32 1
+      %ulong = OpTypeInt 64 0
       %int_0 = OpConstant %int 0
- %_struct_19 = OpTypeStruct %int
-%_ptr_StorageBuffer__struct_19 = OpTypePointer StorageBuffer %_struct_19
+ %_struct_24 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_24 = OpTypePointer StorageBuffer %_struct_24
 %_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
-         %18 = OpVariable %_ptr_StorageBuffer__struct_19 StorageBuffer
-         %22 = OpVariable %_ptr_StorageBuffer__struct_19 StorageBuffer
+         %23 = OpVariable %_ptr_StorageBuffer__struct_24 StorageBuffer
+         %27 = OpVariable %_ptr_StorageBuffer__struct_24 StorageBuffer
        %void = OpTypeVoid
-         %24 = OpTypeFunction %void
-         %32 = OpVariable %_ptr_StorageBuffer__struct_19 StorageBuffer
-         %33 = OpVariable %_ptr_StorageBuffer__struct_19 StorageBuffer
-%workitem_helper = OpFunction %int Inline %4
+         %29 = OpTypeFunction %void
+         %38 = OpVariable %_ptr_StorageBuffer__struct_24 StorageBuffer
+         %39 = OpVariable %_ptr_StorageBuffer__struct_24 StorageBuffer
+%workitem_helper = OpFunction %long Inline %4
  %exit_early = OpFunctionParameter %bool
           %6 = OpLabel
          %11 = OpLoad %v3uint %local_invocation_id
-         %12 = OpCompositeExtract %uint %11 0
-       %lane = OpBitcast %int %12
-               OpSelectionMerge %15 None
-               OpBranchConditional %exit_early %14 %15
-         %14 = OpLabel
+         %13 = OpCompositeExtract %uint %11 0
+         %14 = OpBitcast %int %13
+         %15 = OpBitcast %uint %14
+         %17 = OpUConvert %ulong %15
+       %lane = OpBitcast %long %17
+               OpSelectionMerge %20 None
+               OpBranchConditional %exit_early %19 %20
+         %19 = OpLabel
                OpReturnValue %lane
-         %15 = OpLabel
+         %20 = OpLabel
                OpReturnValue %lane
                OpFunctionEnd
-%call_workitem_helper = OpFunction %void None %24
-         %25 = OpLabel
-         %26 = OpAccessChain %_ptr_StorageBuffer_int %18 %int_0
-         %27 = OpLoad %int %26 Aligned 4
-%exit_early_0 = OpINotEqual %bool %27 %int_0
-     %lane_0 = OpFunctionCall %int %workitem_helper %exit_early_0
-         %30 = OpAccessChain %_ptr_StorageBuffer_int %22 %int_0
-               OpStore %30 %lane_0 Aligned 4
+%call_workitem_helper = OpFunction %void None %29
+         %30 = OpLabel
+         %31 = OpAccessChain %_ptr_StorageBuffer_int %23 %int_0
+         %32 = OpLoad %int %31 Aligned 4
+%exit_early_0 = OpINotEqual %bool %32 %int_0
+     %lane_0 = OpFunctionCall %long %workitem_helper %exit_early_0
+         %35 = OpSConvert %int %lane_0
+         %36 = OpAccessChain %_ptr_StorageBuffer_int %27 %int_0
+               OpStore %36 %35 Aligned 4
                OpReturn
                OpFunctionEnd
-%call_workitem_helper_again = OpFunction %void None %24
-         %34 = OpLabel
-         %35 = OpAccessChain %_ptr_StorageBuffer_int %32 %int_0
-         %36 = OpLoad %int %35 Aligned 4
-%exit_early_1 = OpINotEqual %bool %36 %int_0
-     %lane_1 = OpFunctionCall %int %workitem_helper %exit_early_1
-         %39 = OpAccessChain %_ptr_StorageBuffer_int %33 %int_0
-               OpStore %39 %lane_1 Aligned 4
+%call_workitem_helper_again = OpFunction %void None %29
+         %40 = OpLabel
+         %41 = OpAccessChain %_ptr_StorageBuffer_int %38 %int_0
+         %42 = OpLoad %int %41 Aligned 4
+%exit_early_1 = OpINotEqual %bool %42 %int_0
+     %lane_1 = OpFunctionCall %long %workitem_helper %exit_early_1
+         %45 = OpSConvert %int %lane_1
+         %46 = OpAccessChain %_ptr_StorageBuffer_int %39 %int_0
+               OpStore %46 %45 Aligned 4
                OpReturn
                OpFunctionEnd

@@ -35,6 +35,28 @@ low.kernel.def target<spirv.logical.core>(@hal_target) abi_layout({signature = (
 
 spirv.target<vulkan1_3> @hal_target {abi = hal_kernel}
 
+// Logical coordinates accept either complete physical carrier. Fixed-width
+// scalar payloads continue to require their declared width.
+low.kernel.def target<spirv.logical.core>(@hal_target) abi_layout({signature = (index, index, i32) -> ()}) workgroup_size(1, 1, 1) @index_abi_carriers(%native: reg<spirv.id : index>, %wide: reg<spirv.id : i64>, %fixed: reg<spirv.id : i32>) asm {
+  return
+}
+
+// ERROR@+1: SPIRV/030 {function_name="index_abi_narrow_payload"}
+low.kernel.def target<spirv.logical.core>(@hal_target) abi_layout({signature = (index) -> ()}) workgroup_size(1, 1, 1) @index_abi_narrow_payload(%value: reg<spirv.id : i16>) asm {
+  return
+}
+
+// ERROR@+1: SPIRV/030 {function_name="fixed_abi_wide_payload"}
+low.kernel.def target<spirv.logical.core>(@hal_target) abi_layout({signature = (i32) -> ()}) workgroup_size(1, 1, 1) @fixed_abi_wide_payload(%value: reg<spirv.id : i64>) asm {
+  return
+}
+
+// ====
+
+// RUN: verify
+
+spirv.target<vulkan1_3> @hal_target {abi = hal_kernel}
+
 // Dead binding imports may be absent while the authored ABI remains intact.
 low.kernel.def target<spirv.logical.core>(@hal_target) abi_layout({signature = (buffer, buffer) -> ()}) workgroup_size(1, 1, 1) @logical_abi_sparse_bindings() asm {
   %second = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>

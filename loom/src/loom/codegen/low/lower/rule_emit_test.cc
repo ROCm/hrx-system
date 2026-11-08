@@ -296,12 +296,21 @@ TEST_P(LowLowerWideRuleEmitTest, PlansAndEmitsEveryOperandAndResult) {
             *out_can_materialize = true;
             return iree_ok_status();
           },
-      .result_type = loom_low_lower_value_binding_type,
+      .result_type =
+          [](const loom_low_lower_context_t* context, loom_value_id_t value,
+             const void* plan) {
+            EXPECT_EQ(*static_cast<const loom_value_id_t*>(plan), value);
+            return loom_low_lower_value_binding_type(context, value);
+          },
       .prepare =
           [](loom_low_lower_context_t* context, loom_value_id_t value,
              const void** out_plan) {
-            *out_plan = loom_module_value(
-                loom_low_lower_context_module(context), value);
+            loom_value_id_t* retained = nullptr;
+            IREE_RETURN_IF_ERROR(loom_low_lower_allocate_plan_data(
+                context, sizeof(*retained),
+                reinterpret_cast<void**>(&retained)));
+            *retained = value;
+            *out_plan = retained;
             return iree_ok_status();
           },
       .emit =
@@ -310,9 +319,8 @@ TEST_P(LowLowerWideRuleEmitTest, PlansAndEmitsEveryOperandAndResult) {
                   [](loom_low_lower_context_t* context, const loom_op_t*,
                      loom_value_id_t value, const void* plan,
                      loom_value_id_t* out_value) {
-                    EXPECT_EQ(plan, loom_module_value(
-                                        loom_low_lower_context_module(context),
-                                        value));
+                    EXPECT_EQ(*static_cast<const loom_value_id_t*>(plan),
+                              value);
                     *out_value = loom_low_lower_lookup_value(context, value);
                     return iree_ok_status();
                   },

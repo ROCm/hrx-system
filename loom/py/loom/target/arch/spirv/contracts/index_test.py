@@ -15,6 +15,7 @@ from loom.dialect.scf import defs as scf
 from loom.dsl import OpPhase
 from loom.target.arch.spirv.contracts.index import (
     SPIRV_INDEX_CONVERSION_RULES,
+    SPIRV_INDEX_LOWERING_RULES,
     SPIRV_INDEX_NUMERIC_RULES,
 )
 from loom.target.arch.spirv.contracts.logical_core import (
@@ -80,32 +81,42 @@ def _numeric_rule_key(rule: ContractCase) -> tuple[str, str, str]:
 
 
 def test_index_conversion_contract_contains_only_boundary_operations() -> None:
-    actual = Counter(rule.source_op.name for rule in SPIRV_INDEX_CONVERSION_RULES)
-    expected = Counter(
-        {
-            index.index_constant.name: 2,
-            index.index_cast.name: 24,
-            index.index_assume.name: 1,
-        }
-    )
-
-    assert actual == expected
+    assert {rule.source_op for rule in SPIRV_INDEX_CONVERSION_RULES} == {
+        index.index_constant,
+        index.index_cast,
+        index.index_assume,
+    }
 
 
 def test_index_cast_contract_covers_every_address_boundary_pair() -> None:
     scalar_types = {"i1", "i8", "i16", "i32", "i64", "index", "offset"}
     address_types = {"index", "offset"}
     expected = {
-        (source_type, result_type)
+        (source_type, result_type, representation)
         for source_type in scalar_types
         for result_type in scalar_types
         if source_type in address_types or result_type in address_types
+        for representation in (
+            (1, 2) if "index" in (source_type, result_type) else (None,)
+        )
     }
-    actual = {
-        (_value_type_element(rule, "input"), _value_type_element(rule, "result"))
-        for rule in SPIRV_INDEX_CONVERSION_RULES
-        if rule.source_op is index.index_cast
-    }
+    actual = set()
+    for rule in SPIRV_INDEX_CONVERSION_RULES:
+        if rule.source_op is not index.index_cast:
+            continue
+        representations = {
+            guard.count
+            for guard in rule.guards
+            if guard.kind == GuardKind.LOW_VALUE_REPRESENTATION
+        }
+        assert len(representations) <= 1
+        actual.add(
+            (
+                _value_type_element(rule, "input"),
+                _value_type_element(rule, "result"),
+                next(iter(representations), None),
+            )
+        )
 
     assert actual == expected
 
@@ -122,9 +133,22 @@ def test_index_i32_casts_preserve_the_semantic_type_boundary() -> None:
         == {"i32", "index"}
     ]
 
-    assert len(rules) == 2
+    assert len(rules) == 4
     assert all(isinstance(rule, DescriptorRule) for rule in rules)
-    assert all(rule.descriptor.key == "spirv.op_copy_object.i32" for rule in rules)
+    for rule in rules:
+        representation = next(
+            guard.count
+            for guard in rule.guards
+            if guard.kind == GuardKind.LOW_VALUE_REPRESENTATION
+        )
+        expected = (
+            "spirv.op_copy_object.i32"
+            if representation == 1
+            else "spirv.op_s_convert.i64.i32"
+            if _value_type_element(rule, "input") == "index"
+            else "spirv.op_s_convert.i32.i64"
+        )
+        assert rule.descriptor.key == expected
 
 
 def test_spirv_unsigned_temporaries_use_descriptor_result_types() -> None:
@@ -198,6 +222,64 @@ def test_index_numeric_contract_covers_the_complete_address_matrix() -> None:
 
     assert len(SPIRV_INDEX_NUMERIC_RULES) == 44
     assert actual == expected
+
+    native_bit_operations = {
+        operation.name
+        for operation in (
+            index.index_rotli,
+            index.index_rotri,
+            index.index_ctlzi,
+            index.index_cttzi,
+            index.index_ctpopi,
+        )
+    }
+    materializer_widths = {
+        "spirv.native_index": 32,
+        "spirv.native_index_arithmetic": 32,
+        "spirv.wide_index_arithmetic": 64,
+    }
+    expected_lowering = Counter()
+    for key in expected:
+        operation, source_type, _ = key
+        if source_type == "offset":
+            expected_lowering[(*key, None, None)] = 1
+            continue
+        widths = (32,) if operation in native_bit_operations else (32, 64)
+        carriers = (
+            (None,)
+            if operation in (index.index_cmp.name, index.index_scale.name)
+            else (1, 2)
+        )
+        for width in widths:
+            for carrier in carriers:
+                expected_lowering[(*key, width, carrier)] = 1
+
+    actual_lowering = Counter()
+    for rule in SPIRV_INDEX_LOWERING_RULES:
+        widths = {
+            materializer_widths[value.materializer]
+            for step in rule.emit
+            for value in step.operands.values()
+            if value.materializer
+        }
+        carriers = {
+            guard.count
+            for guard in rule.guards
+            if guard.kind == GuardKind.LOW_VALUE_REPRESENTATION
+        }
+        assert len(widths) <= 1
+        assert len(carriers) <= 1
+        actual_lowering[
+            (
+                *_numeric_rule_key(rule),
+                next(iter(widths), None),
+                next(iter(carriers), None),
+            )
+        ] += 1
+    assert actual_lowering == expected_lowering, (
+        actual_lowering - expected_lowering,
+        expected_lowering - actual_lowering,
+    )
 
 
 def test_index_contract_accounts_for_every_target_lowered_index_operation() -> None:

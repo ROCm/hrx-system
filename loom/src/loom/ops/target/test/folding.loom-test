@@ -133,12 +133,13 @@ pipeline.def public target(@construction) @nested_worker() run(%output: channel<
 
 // ====
 
-// Signed index rewrites use the worker's carrier width too. Source ranges in
-// the full U32 envelope are not signed-positive proofs on a 32-bit worker.
+// Signed index rewrites use the worker's carrier capabilities. The quirky
+// worker has only a 32-bit carrier, so positive U32 ranges cannot establish
+// signed-positive proofs there; the construction target supports 64 bits.
 // RUN: pass cse,canonicalize,cse
 test.target<low_core> @construction {index_bitwidth = 64}
 
-test.target<low_core> @worker {index_bitwidth = 32}
+test.target<quirky> @worker {index_bitwidth = 32}
 
 pipeline.def public target(@construction) @worker_index_carrier() run(%output: channel<tile<2xi64>>, %x: index, %y: index) {
   %high = index.assume %x [range(%x, 2147483648, 2147483663)] : index
@@ -158,7 +159,7 @@ pipeline.def public target(@construction) @worker_index_carrier() run(%output: c
 // ----
 test.target<low_core> @construction {index_bitwidth = 64}
 
-test.target<low_core> @worker {index_bitwidth = 32}
+test.target<quirky> @worker {index_bitwidth = 32}
 
 pipeline.def public target(@construction) @worker_index_carrier() run(%output: channel<tile<2xi64>>, %x: index, %y: index) {
   %high = index.assume %x [range(%x, 2147483648, 2147483663)] : index

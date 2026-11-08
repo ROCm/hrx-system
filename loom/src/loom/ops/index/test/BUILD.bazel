@@ -24,6 +24,7 @@ loom_check_test_suite(
         "packet_bounds.loom-test",
         "roundtrip.loom-test",
         "subtraction.loom-test",
+        "unresolved_carrier.loom-test",
         "verify.loom-test",
         "wide_carrier_facts.loom-test",
     ],

@@ -13,6 +13,8 @@
 #include "loom/target/arch/spirv/error_catalog.h"
 #include "loom/target/arch/spirv/lower/collective_arithmetic.h"
 #include "loom/target/arch/spirv/lower/cooperative_arithmetic.h"
+#include "loom/target/arch/spirv/lower/index.h"
+#include "loom/target/arch/spirv/lower/index_operands.h"
 #include "loom/target/arch/spirv/lower/lower.h"
 #include "loom/target/arch/spirv/lower/matrix.h"
 #include "loom/target/arch/spirv/lower/workgroup.h"
@@ -232,6 +234,9 @@ static iree_status_t loom_spirv_map_value(void* user_data,
                                           loom_value_id_t source_value_id,
                                           loom_type_t source_type,
                                           loom_type_t* out_low_type) {
+  if (loom_type_equal(source_type, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX))) {
+    return loom_spirv_map_index_value(context, source_value_id, out_low_type);
+  }
   if (loom_type_is_view(source_type)) {
     bool is_workgroup = false;
     uint16_t register_class_id = LOOM_LOW_REG_CLASS_NONE;
@@ -286,6 +291,11 @@ static iree_status_t loom_spirv_map_contract_value(
   *out_mapped_value = loom_low_lower_rule_mapped_value_none();
   const loom_type_t source_type =
       loom_module_value_type(environment->module, source_value_id);
+  if (loom_type_equal(source_type, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX))) {
+    *out_mapped_value = loom_low_lower_rule_mapped_value_register(
+        SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, LOOM_LOW_REPRESENTATION_ID_NONE, 1);
+    return iree_ok_status();
+  }
   if (!loom_type_is_view(source_type)) {
     return iree_ok_status();
   }
@@ -354,6 +364,12 @@ static iree_status_t loom_spirv_map_argument(
       .abi_type = loom_type_none(),
       .body_type = loom_type_none(),
   };
+  if (loom_type_equal(source_type, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX))) {
+    // Address-domain ABI slots follow the source value's required carrier.
+    // HAL reflection records that slot width for parameter packing.
+    return loom_spirv_map_index_value(context, source_argument_id,
+                                      &out_argument->abi_type);
+  }
   return loom_spirv_map_type(user_data, context, source_function_op,
                              source_type, &out_argument->abi_type);
 }
@@ -565,6 +581,10 @@ static const loom_low_lower_policy_t kSpirvLowLowerPolicy = {
     .map_abi_layout = {.fn = loom_spirv_map_abi_layout, .user_data = NULL},
     .map_type = {.fn = loom_spirv_map_type, .user_data = NULL},
     .map_value = {.fn = loom_spirv_map_value, .user_data = NULL},
+    .join_result_type = loom_spirv_join_index_type,
+    .control_operand = {.prepare = loom_spirv_prepare_control_operand,
+                        .emit = loom_spirv_emit_control_operand},
+    .source_plan_observer = &loom_spirv_index_representation_observer,
     .map_contract_value = {.fn = loom_spirv_map_contract_value,
                            .user_data = NULL},
     .map_argument = {.fn = loom_spirv_map_argument, .user_data = NULL},

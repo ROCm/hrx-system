@@ -1,0 +1,68 @@
+// RUN: pass source-to-low{control-flow=structured-low}
+
+// Counted control retains the full exclusive endpoint in a uniform register
+// pair, even though the initial constant has an ordinary one-word producer.
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @exclusive_endpoint() -> (index) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4294967296 : index
+  %step = index.constant 4294967295 : index
+  %last = scf.for %position = [%begin to %end step %step](%current = %begin : index) -> (index) {
+    scf.yield %position : index
+  }
+  func.return %last : index
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @exclusive_endpoint() -> (reg<amdgpu.sgpr x2>) asm {
+  %8 = s_mov_b32 0
+  %9 = s_mov_b32 0
+  %begin = concat(%8, %9) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %11 = s_mov_b32 0
+  %12 = s_mov_b32 1
+  %end = concat(%11, %12) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %step = s_mov_b32 4294967295
+  %15 = s_mov_b32 0
+  %16 = concat(%step, %15) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %last = low.scf.for signed [%begin to %end step %16] iter_args(%begin: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) do(%position: reg<amdgpu.sgpr x2>, %current: reg<amdgpu.sgpr x2>) {
+    low.scf.yield %position : reg<amdgpu.sgpr x2>
+  }
+  return %last
+}
+
+// ====
+
+// Entry and backedge values both reach the selected state carrier. A zero-trip
+// loop must preserve the signed initial value without evaluating the body.
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @zero_trip_state(%count_input: index, %initial: index) -> (index) {
+  %count = index.assume %count_input [range(%count_input, 0, 2)] : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %wide = index.constant 4294967296 : index
+  %result = scf.for %position = [%begin to %count step %step](%current = %initial : index) -> (index) {
+    scf.yield %wide : index
+  }
+  func.return %result : index
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @zero_trip_state(%count: reg<amdgpu.sgpr>, %initial: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x2>) asm {
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
+  %15 = s_mov_b32 0
+  %16 = s_mov_b32 1
+  %wide = concat(%15, %16) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %18 = s_ashr_i32_rhs_inline %initial, 31
+  %19 = concat(%initial, %18) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %result = low.scf.for signed [%begin to %count step %step] iter_args(%19: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) do(%position: reg<amdgpu.sgpr>, %current: reg<amdgpu.sgpr x2>) {
+    low.scf.yield %wide : reg<amdgpu.sgpr x2>
+  }
+  return %result
+}

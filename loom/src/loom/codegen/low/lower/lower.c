@@ -229,15 +229,29 @@ iree_status_t loom_low_lower_remap_values(loom_low_lower_context_t* context,
   }
   const bool is_callable_exit =
       loom_low_lower_source_op_is_callable_exit(context, source_op);
+  const bool is_nested_exit =
+      is_callable_exit && source_op->parent_block->parent_region !=
+                              loom_func_like_body(context->source_function);
+  const bool is_structured_payload =
+      is_nested_exit || loom_scf_for_isa(source_op) ||
+      loom_scf_while_isa(source_op) || loom_scf_yield_isa(source_op) ||
+      loom_scf_condition_isa(source_op);
+  const uint16_t operand_start = loom_scf_for_isa(source_op)         ? 3
+                                 : loom_scf_condition_isa(source_op) ? 1
+                                                                     : 0;
   loom_value_id_t* low_values = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, value_count, sizeof(*low_values), (void**)&low_values));
   for (iree_host_size_t i = 0; i < value_count; ++i) {
     low_values[i] = loom_low_lower_lookup_value(context, source_values[i]);
+    if (is_structured_payload) {
+      IREE_RETURN_IF_ERROR(loom_low_lower_structural_materialize_operand(
+          context, source_op, operand_start + (uint16_t)i, &low_values[i]));
+    }
     const loom_type_t required_low_type =
         required_types ? required_types[i]
                        : loom_module_value_type(context->module, low_values[i]);
-    if (is_callable_exit) {
+    if (is_callable_exit && !is_nested_exit) {
       IREE_RETURN_IF_ERROR(loom_low_lower_control_materialize_operand(
           context, source_op, i, required_low_type, &low_values[i]));
     }
@@ -456,6 +470,12 @@ static iree_status_t loom_low_lower_emit_scf_for(
       loom_low_lower_lookup_value(context, loom_scf_for_upper_bound(source_op));
   loom_value_id_t low_step =
       loom_low_lower_lookup_value(context, loom_scf_for_step(source_op));
+  IREE_RETURN_IF_ERROR(loom_low_lower_structural_materialize_operand(
+      context, source_op, 0, &low_lower_bound));
+  IREE_RETURN_IF_ERROR(loom_low_lower_structural_materialize_operand(
+      context, source_op, 1, &low_upper_bound));
+  IREE_RETURN_IF_ERROR(loom_low_lower_structural_materialize_operand(
+      context, source_op, 2, &low_step));
 
   loom_value_slice_t iter_args = loom_scf_for_iter_args(source_op);
   loom_value_id_t* low_iter_args = NULL;
@@ -517,6 +537,13 @@ static iree_status_t loom_low_lower_emit_scf_while(
   IREE_RETURN_IF_ERROR(loom_low_lower_structural_take_types(
       context, source_op, &result_types, &header_types));
 
+  // Incoming conversions define their own values. Finish them before reserving
+  // the identities consumed by the while builder's dependent type scheme.
+  loom_value_id_t* low_iter_args = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_remap_values(
+      context, source_op, iter_args.values, iter_args.count, header_types,
+      &low_iter_args));
+
   const iree_host_size_t identity_count =
       (iree_host_size_t)source_before->arg_count + source_op->result_count;
   loom_value_id_t* identities = NULL;
@@ -534,11 +561,6 @@ static iree_status_t loom_low_lower_emit_scf_while(
   IREE_RETURN_IF_ERROR(loom_low_lower_remap_type_scheme(
       context, loom_op_const_results(source_op), result_identities,
       source_op->result_count, result_types));
-
-  loom_value_id_t* low_iter_args = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_remap_values(
-      context, source_op, iter_args.values, iter_args.count, header_types,
-      &low_iter_args));
 
   loom_op_t* low_while_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_scf_while_build(

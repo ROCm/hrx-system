@@ -39,6 +39,7 @@ loom_target_contract_table_cc_libraries(
         "//loom/src/loom/ops/view",
         "//loom/src/loom/target/arch/spirv/descriptors:descriptors_ids",
         "//loom/src/loom/target/arch/spirv/lower:cooperative_initializer",
+        "//loom/src/loom/target/arch/spirv/lower:index",
     ],
     shared_strings = "instruction_strings",
 )

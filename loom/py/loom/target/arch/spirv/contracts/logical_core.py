@@ -71,8 +71,12 @@ from loom.target.arch.spirv.contracts.float_width import (
     float_width_widen_rules,
 )
 from loom.target.arch.spirv.contracts.index import (
+    NATIVE_INDEX_ARITHMETIC_MATERIALIZER,
+    NATIVE_INDEX_MATERIALIZER,
     SPIRV_INDEX_CONVERSION_RULES,
-    SPIRV_INDEX_NUMERIC_RULES,
+    SPIRV_INDEX_LOWERING_RULES,
+    WIDE_INDEX_ARITHMETIC_MATERIALIZER,
+    index_result_carrier_rules,
 )
 from loom.target.arch.spirv.contracts.integer_bits import (
     bit_count_rules,
@@ -498,6 +502,7 @@ def _builtin_index_rule(
             _descriptor_emit(
                 descriptor=descriptor,
                 results={"dst": ValueRef.result("result")},
+                result_types={"dst": _INDEX},
             ),
         ),
     )
@@ -505,9 +510,12 @@ def _builtin_index_rule(
 
 def _builtin_index_rules() -> tuple[DescriptorRule, ...]:
     return tuple(
-        _builtin_index_rule(query, dimension)
+        rule
         for query in BUILTIN_INDEX_QUERIES
         for dimension in BUILTIN_DIMENSIONS
+        for rule in index_result_carrier_rules(
+            _builtin_index_rule(query, dimension), 32, unsigned=True
+        )
     )
 
 
@@ -524,6 +532,7 @@ def _builtin_scalar_index_rule(query: BuiltinQuery) -> DescriptorRule:
             _descriptor_emit(
                 descriptor=descriptor,
                 results={"dst": ValueRef.result("result")},
+                result_types={"dst": _INDEX},
             ),
         ),
     )
@@ -531,7 +540,11 @@ def _builtin_scalar_index_rule(query: BuiltinQuery) -> DescriptorRule:
 
 def _builtin_scalar_index_rules() -> tuple[DescriptorRule, ...]:
     return tuple(
-        _builtin_scalar_index_rule(query) for query in BUILTIN_SCALAR_INDEX_QUERIES
+        rule
+        for query in BUILTIN_SCALAR_INDEX_QUERIES
+        for rule in index_result_carrier_rules(
+            _builtin_scalar_index_rule(query), 32, unsigned=True
+        )
     )
 
 
@@ -1410,11 +1423,16 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
     name="spirv.logical.core",
     descriptor_set=SPIRV_LOGICAL_CORE_DESCRIPTOR_SET,
     public_header="loom/target/arch/spirv/contracts/logical_core.h",
-    materializers=(COOPERATIVE_INITIALIZER_MATERIALIZER,),
+    materializers=(
+        COOPERATIVE_INITIALIZER_MATERIALIZER,
+        NATIVE_INDEX_MATERIALIZER,
+        NATIVE_INDEX_ARITHMETIC_MATERIALIZER,
+        WIDE_INDEX_ARITHMETIC_MATERIALIZER,
+    ),
     cases=(
         *_scalar_constant_rules(),
         *SPIRV_INDEX_CONVERSION_RULES,
-        *SPIRV_INDEX_NUMERIC_RULES,
+        *SPIRV_INDEX_LOWERING_RULES,
         *_builtin_index_rules(),
         *_builtin_scalar_index_rules(),
         _conversion_alias_rule(scalar_conversion.scalar_bitcast, _F8E4M3, _I8),

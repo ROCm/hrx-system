@@ -1,0 +1,161 @@
+// RUN: pass source-to-low{control-flow=structured-low}
+
+// The exclusive endpoint is wider than every body coordinate. Its full value
+// selects the receiving control carrier, independently of the initial constant.
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @exclusive_endpoint() -> (index) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4294967296 : index
+  %step = index.constant 4294967295 : index
+  %last = scf.for %position = [%begin to %end step %step](%current = %begin : index) -> (index) {
+    scf.yield %position : index
+  }
+  func.return %last : index
+}
+
+// ----
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @exclusive_endpoint() -> (reg<spirv.id : i64>) asm {
+  %begin = OpConstant.i64 0
+  %end = OpConstant.i64 4294967296
+  %step = OpConstant.i64 4294967295
+  %last = low.scf.for signed [%begin to %end step %step] iter_args(%begin: reg<spirv.id : i64>) -> (reg<spirv.id : i64>) do(%position: reg<spirv.id : i64>, %current: reg<spirv.id : i64>) {
+    low.scf.yield %position : reg<spirv.id : i64>
+  }
+  return %last
+}
+
+// ====
+
+// A loop's receiving state preserves its initial value when no iteration runs.
+// The body establishes a wide result without changing the input's ABI carrier.
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @zero_trip_state(%count_input: index, %initial: index) -> (index) {
+  %count = index.assume %count_input [range(%count_input, 0, 2)] : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %wide = index.constant 4294967296 : index
+  %result = scf.for %position = [%begin to %count step %step](%current = %initial : index) -> (index) {
+    scf.yield %wide : index
+  }
+  func.return %result : index
+}
+
+// ----
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @zero_trip_state(%count: reg<spirv.id : index>, %initial: reg<spirv.id : index>) -> (reg<spirv.id : i64>) asm {
+  %begin = OpConstant.i32 0 : reg<spirv.id : index>
+  %step = OpConstant.i32 1 : reg<spirv.id : index>
+  %wide = OpConstant.i64 4294967296
+  %16 = OpSConvert.i32.i64 %initial
+  %result = low.scf.for signed [%begin to %count step %step] iter_args(%16: reg<spirv.id : i64>) -> (reg<spirv.id : i64>) do(%position: reg<spirv.id : index>, %current: reg<spirv.id : i64>) {
+    low.scf.yield %wide : reg<spirv.id : i64>
+  }
+  return %result
+}
+
+// ====
+
+// A condition can forward a different tuple from the next iteration's state.
+// Each receiving signature owns its conversions, including nested exits.
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @condition_payload(%condition: i1, %initial: index) -> (index) {
+  %wide = index.constant 4294967296 : index
+  %result, %payload = scf.while(%current = %initial : index) -> (index, index) {
+    scf.condition %condition, %current, %wide : i1, index, index
+  } do(%state: index, %forwarded: index) {
+    func.exit %condition : i1 {
+      func.return %initial : index
+    }
+    %next = scf.if %condition -> (index) {
+      scf.yield %forwarded : index
+    } else {
+      scf.yield %initial : index
+    }
+    scf.yield %next : index
+  }
+  func.return %result : index
+}
+
+// ----
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @condition_payload(%condition: reg<spirv.id : i1>, %initial: reg<spirv.id : index>) -> (reg<spirv.id : i64>) asm {
+  %wide = OpConstant.i64 4294967296
+  %14 = OpSConvert.i32.i64 %initial
+  %result, %payload = low.scf.while(%current = %14 : reg<spirv.id : i64>) -> (reg<spirv.id : i64>, reg<spirv.id : i64>) {
+    low.scf.condition %condition, %current, %wide : reg<spirv.id : i1>, reg<spirv.id : i64>, reg<spirv.id : i64>
+  } do(%state: reg<spirv.id : i64>, %forwarded: reg<spirv.id : i64>) {
+    low.func.exit %condition : reg<spirv.id : i1> {
+      %20 = OpSConvert.i32.i64 %initial
+      return %20
+    }
+    %next = low.scf.if %condition -> (reg<spirv.id : i64>) {
+      low.scf.yield %forwarded : reg<spirv.id : i64>
+    } else {
+      %22 = OpSConvert.i32.i64 %initial
+      low.scf.yield %22 : reg<spirv.id : i64>
+    }
+    low.scf.yield %next : reg<spirv.id : i64>
+  }
+  return %result
+}
+
+// ====
+
+// Builtins keep their native unsigned interpretation when a structured result
+// requires wide transport. Native bit counts project their input back to 32 bits.
+spirv.target<vulkan1_3> @target
+
+kernel.def target(@target) @native_bits_in_wide_state() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%condition: i1, %input: offset, %output: buffer) {
+  %wide = index.cast %input : offset to index
+  %count = index.ctpopi %wide : index
+  %group = kernel.workgroup.id<x> : index
+  %result, %group_result = scf.if %condition -> (index, index) {
+    scf.yield %count, %group : index, index
+  } else {
+    scf.yield %wide, %wide : index, index
+  }
+  %base = index.constant 0 : offset
+  %destination = buffer.view %output[%base] : buffer -> view<2xi64>
+  %count_output = index.cast %result : index to i64
+  %group_output = index.cast %group_result : index to i64
+  view.store %count_output, %destination[0] : i64, view<2xi64>
+  view.store %group_output, %destination[1] : i64, view<2xi64>
+  kernel.return
+}
+
+// ----
+spirv.target<vulkan1_3> @target
+
+low.kernel.def target<spirv.logical.core>(@target) abi_layout({signature = (i1, offset, buffer) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @native_bits_in_wide_state(%condition: reg<spirv.id : i1>, %input: reg<spirv.offset64>) asm {
+  %output = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %wide = OpBitcast.offset64.i64 %input
+  %17 = OpSConvert.i64.i32 %wide : reg<spirv.id : index>
+  %18 = OpBitCount.i32 %17 : reg<spirv.id : index>
+  %count = OpSConvert.i32.i64 %18
+  %20 = OpLoadBuiltin.workgroup_id.x
+  %21 = OpBitcast.i32.u32 %20
+  %22 = OpUConvert.u32.u64 %21
+  %group = OpBitcast.u64.i64 %22
+  %count_output, %group_output = low.scf.if %condition -> (reg<spirv.id : i64>, reg<spirv.id : i64>) {
+    low.scf.yield %count, %group : reg<spirv.id : i64>, reg<spirv.id : i64>
+  } else {
+    low.scf.yield %wide, %wide : reg<spirv.id : i64>, reg<spirv.id : i64>
+  }
+  %26 = OpConstant.offset64 0
+  %27 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %26
+  OpStore.storage_buffer.i64 %27, %count_output
+  %28 = OpConstant.offset64 8
+  %29 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %28
+  OpStore.storage_buffer.i64 %29, %group_output
+  return
+}

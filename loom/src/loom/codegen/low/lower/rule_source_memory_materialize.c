@@ -758,7 +758,18 @@ loom_low_lower_rule_materialize_source_memory_address_coordinate_value(
       loom_module_value_type(module, source_value_id);
   loom_value_id_t low_value_id =
       loom_low_lower_lookup_value(context, source_value_id);
-  const loom_scalar_type_t scalar_type = loom_type_element_type(source_type);
+  loom_scalar_type_t scalar_type = loom_type_element_type(source_type);
+  if (scalar_type == LOOM_SCALAR_TYPE_INDEX) {
+    // A typed Low register retains the producer's chosen index carrier.
+    // Consume that numeric type through the same declared conversions as
+    // fixed-width source integers, without recovering ranges during emission.
+    const loom_type_t* payload = loom_type_register_value_type(
+        loom_module_value_type(module, low_value_id));
+    if (payload &&
+        loom_scalar_type_is_integer(loom_type_element_type(*payload))) {
+      scalar_type = loom_type_element_type(*payload);
+    }
+  }
   if (loom_scalar_type_is_integer(scalar_type)) {
     return loom_low_lower_rule_source_memory_convert_integer(
         context, rule_set,

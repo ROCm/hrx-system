@@ -728,22 +728,27 @@ TEST_F(LowLowerRuleMatchTest, SelectsFirstMatchAndResetsReusedSelection) {
   EXPECT_EQ(selection.failure.diagnostic_index, LOOM_LOW_LOWER_DIAGNOSTIC_NONE);
 }
 
-TEST_F(LowLowerRuleMatchTest,
-       DecodesCompactAndFixedWidthGuardReferenceStreams) {
+TEST_F(LowLowerRuleMatchTest, DecodesCompactGuardProgramsWithScaledOffsets) {
   loom_low_lower_guard_t guards[257] = {};
   guards[256].kind = LOOM_LOW_LOWER_GUARD_ATTR_I64_RANGE;
   guards[256].diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
   guards[256].payload_ordinal = 1;
   guards[256].selector.attribute.attr_index = 0;
-  const loom_low_lower_guard_payload_t guard_payload = {
-      .i64_range = {.minimum = 4, .maximum = 8},
+  guards[1] = guards[256];
+  guards[0] = guards[256];
+  guards[0].payload_ordinal = 2;
+  const loom_low_lower_guard_payload_t guard_payloads[] = {
+      {.i64_range = {.minimum = 4, .maximum = 8}},
+      {.i64_range = {.minimum = 0, .maximum = 3}},
   };
   const loom_low_lower_guard_ref_t compact_guard_refs[] = {
-      LOOM_LOW_LOWER_GUARD_REF_ESCAPE, 0x00, 0x01};
-  const loom_low_lower_guard_ref_t fixed_guard_refs[] = {
-      LOOM_LOW_LOWER_GUARD_REF_ESCAPE, 0x00, 0x00,
-      LOOM_LOW_LOWER_GUARD_REF_ESCAPE, 0x00, 0x01};
-  loom_low_lower_rule_t rule = {.guard_count = 1};
+      0x01, LOOM_LOW_LOWER_GUARD_REF_ESCAPE, 0x00, 0x01};
+  const loom_low_lower_guard_ref_t halfword_guard_refs[] = {
+      0x00, 0x00, 0x01, LOOM_LOW_LOWER_GUARD_REF_ESCAPE, 0x00, 0x01};
+  const loom_low_lower_guard_ref_t word_guard_refs[] = {
+      0x00, 0x00, 0x00, 0x00, 0x01, LOOM_LOW_LOWER_GUARD_REF_ESCAPE,
+      0x00, 0x01};
+  loom_low_lower_rule_t rule = {.guard_count = 2};
   const loom_low_lower_rule_span_t span = {
       .source_op_kind = LOOM_OP_INDEX_CONSTANT,
       .rule_start = 0,
@@ -754,8 +759,8 @@ TEST_F(LowLowerRuleMatchTest,
       .span_count = 1,
       .rules = &rule,
       .rule_count = 1,
-      .guard_payloads = &guard_payload,
-      .guard_payload_count = 1,
+      .guard_payloads = guard_payloads,
+      .guard_payload_count = IREE_ARRAYSIZE(guard_payloads),
       .guards = guards,
       .guard_count = IREE_ARRAYSIZE(guards),
       .guard_refs = compact_guard_refs,
@@ -772,9 +777,16 @@ TEST_F(LowLowerRuleMatchTest,
   EXPECT_EQ(selection.rule, &rule);
 
   rule.guard_start = 1;
-  rule_set.guard_refs = fixed_guard_refs;
-  rule_set.guard_ref_count = IREE_ARRAYSIZE(fixed_guard_refs);
-  rule_set.guard_ref_encoding = LOOM_LOW_LOWER_GUARD_REF_ENCODING_FIXED_WIDTH;
+  rule_set.guard_refs = halfword_guard_refs;
+  rule_set.guard_ref_count = IREE_ARRAYSIZE(halfword_guard_refs);
+  rule_set.guard_ref_offset_shift = 1;
+  IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
+      &match_context, &rule_set, source_op, &selection));
+  EXPECT_EQ(selection.rule, &rule);
+
+  rule_set.guard_refs = word_guard_refs;
+  rule_set.guard_ref_count = IREE_ARRAYSIZE(word_guard_refs);
+  rule_set.guard_ref_offset_shift = 2;
   IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
       &match_context, &rule_set, source_op, &selection));
   EXPECT_EQ(selection.rule, &rule);

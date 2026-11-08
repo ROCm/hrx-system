@@ -90,12 +90,12 @@ class GeneratedLowerRuleSet:
 
 @dataclass(frozen=True, slots=True)
 class _GuardRefStorage[RowT]:
-    """Generated guard rows and their compact or direct reference storage."""
+    """Generated guard rows and compact references with aligned program starts."""
 
     rows: tuple[RowT, ...]
     values: tuple[int, ...]
     starts: tuple[int, ...]
-    uses_fixed_width: bool
+    offset_shift: int
 
 
 def _intern_rows[RowT: Hashable](
@@ -114,16 +114,12 @@ def _intern_rows[RowT: Hashable](
     return tuple(unique_rows), tuple(row_refs)
 
 
-def _encode_guard_ref_storage[RowT](rows: tuple[RowT, ...], refs: tuple[int, ...]) -> _GuardRefStorage[RowT]:
-    """Makes the 255 most-used guard rows directly byte-addressable."""
-
-    if len(rows) <= 255:
-        return _GuardRefStorage(
-            rows=rows,
-            values=refs,
-            starts=tuple(range(len(refs) + 1)),
-            uses_fixed_width=False,
-        )
+def _encode_guard_ref_storage[RowT](
+    rows: tuple[RowT, ...],
+    refs: tuple[int, ...],
+    program_starts: Sequence[int],
+) -> _GuardRefStorage[RowT]:
+    """Encodes disjoint whole programs with compact refs and scaled u16 starts."""
 
     frequencies = [0] * len(rows)
     for ref in refs:
@@ -142,30 +138,28 @@ def _encode_guard_ref_storage[RowT](rows: tuple[RowT, ...], refs: tuple[int, ...
     remapped_ordinals = [0] * len(rows)
     for new_ordinal, old_ordinal in enumerate(ordered_ordinals):
         remapped_ordinals[old_ordinal] = new_ordinal
-
-    values = []
-    starts = []
-    for ref in refs:
-        starts.append(len(values))
-        remapped_ref = remapped_ordinals[ref]
-        if remapped_ref < 255:
-            values.append(remapped_ref)
-        else:
-            values.extend((0xFF, remapped_ref & 0xFF, remapped_ref >> 8))
-    starts.append(len(values))
-    if len(values) > _U16_MAX:
-        return _GuardRefStorage(
-            rows=rows,
-            values=tuple(byte for ref in refs for byte in (0xFF, ref & 0xFF, ref >> 8)),
-            starts=tuple(range(len(refs) + 1)),
-            uses_fixed_width=True,
-        )
-    return _GuardRefStorage(
-        rows=tuple(rows[ordinal] for ordinal in ordered_ordinals),
-        values=tuple(values),
-        starts=tuple(starts),
-        uses_fixed_width=False,
-    )
+    encoded_refs = tuple((remapped_ordinals[ref],) if remapped_ordinals[ref] < 255 else (0xFF, remapped_ordinals[ref] & 0xFF, remapped_ordinals[ref] >> 8) for ref in refs)
+    boundaries = frozenset(program_starts)
+    # Each logical reference occupies at most three bytes. Word-aligned starts
+    # therefore cover every program in the validated u16 logical row domain.
+    for shift in range(3):
+        values: list[int] = []
+        starts: list[int] = []
+        alignment_mask = (1 << shift) - 1
+        for ordinal, encoded in enumerate(encoded_refs):
+            if ordinal in boundaries:
+                values.extend((0,) * (-len(values) & alignment_mask))
+            starts.append(len(values) >> shift)
+            values.extend(encoded)
+        starts.append(len(values) >> shift)
+        if all(starts[ordinal] <= _U16_MAX for ordinal in boundaries):
+            return _GuardRefStorage(
+                rows=tuple(rows[ordinal] for ordinal in ordered_ordinals),
+                values=tuple(values),
+                starts=tuple(starts),
+                offset_shift=shift,
+            )
+    raise ValueError("guard programs exceed the validated u16 logical row domain")
 
 
 def _primary_descriptor_feature_classes(
@@ -424,7 +418,11 @@ def _generate_source(
     descriptor_refs = {key: index for index, key in enumerate(descriptor_ref_keys)}
     report_key_ordinals = {key: index + 1 for index, key in enumerate(report_keys)}
     unique_guards, logical_guard_refs = _intern_rows(table.guards)
-    guard_ref_storage = _encode_guard_ref_storage(unique_guards, logical_guard_refs)
+    guard_ref_storage = _encode_guard_ref_storage(
+        unique_guards,
+        logical_guard_refs,
+        tuple(row.guard_start for row in (*table.rules, *table.source_nodes)),
+    )
     unique_guards = guard_ref_storage.rows
     wide_report_keys = tuple(
         (rule_index, report_key_ordinals[rule.report_key])
@@ -893,7 +891,7 @@ def _generate_source(
             storage_operand_schemas_name=storage_operand_schemas_name,
             guard_refs=guard_ref_storage.values,
             guard_refs_name=guard_refs_name,
-            guard_refs_use_fixed_width=guard_ref_storage.uses_fixed_width,
+            guard_ref_offset_shift=guard_ref_storage.offset_shift,
             literal_data_name=literal_data_name,
             attr_copies_name=attr_copies_name,
             tied_results_name=tied_results_name,
