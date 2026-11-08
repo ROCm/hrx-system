@@ -16,6 +16,8 @@ func.decl import("runner") @execute_3(%stage: i32, %input: hal.buffer, %output: 
 
 func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
 
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+
 func.def public @prepare_request(%state: buffer, %input: buffer) -> (buffer, i64, i64) {
   %origin = index.constant 0 : offset
   %input_bytes = index.constant 20 : offset
@@ -44,9 +46,15 @@ func.def public @prepare_batch(%state: buffer, %tags: buffer, %batch: ptr<@Finit
   %done = scalar.cmpi eq, %cursor, %goal : i32
   %done32 = scalar.extui %done : i1 to i32
   %done64 = scalar.extui %done : i1 to i64
-  %control = buffer.view %state[%origin] : buffer -> view<2xi32>
-  view.store %cursor, %control[0] : i32, view<2xi32>
-  view.store %done32, %control[1] : i32, view<2xi32>
+  %control = buffer.view %state[%origin] : buffer -> view<3xi32>
+  view.store %cursor, %control[0] : i32, view<3xi32>
+  view.store %done32, %control[1] : i32, view<3xi32>
+  %input = buffer.view %request[%origin] : buffer -> view<4xf32>
+  %first = view.load %input[0] : view<4xf32> -> f32
+  %c0_f32 = scalar.constant 0.0 : f32
+  %accepted = scalar.cmpf oge, %first, %c0_f32 : f32
+  %accepted32 = scalar.extui %accepted : i1 to i32
+  view.store %accepted32, %control[2] : i32, view<3xi32>
   %empty_length = index.constant 56 : offset
   %final_length = index.constant 72 : offset
   %length = scf.select %done, %final_length, %empty_length : offset
@@ -70,9 +78,9 @@ func.def public @prepare_batch(%state: buffer, %tags: buffer, %batch: ptr<@Finit
 
 func.def public @run(%state: buffer, %stage: i32, %input: hal.buffer, %output: hal.buffer) {
   %origin = index.constant 0 : offset
-  %control = buffer.view %state[%origin] : buffer -> view<2xi32>
-  %cursor = view.load %control[0] : view<2xi32> -> i32
-  %done = view.load %control[1] : view<2xi32> -> i32
+  %control = buffer.view %state[%origin] : buffer -> view<3xi32>
+  %cursor = view.load %control[0] : view<3xi32> -> i32
+  %done = view.load %control[1] : view<3xi32> -> i32
   %c0_i32 = scalar.constant 0 : i32
   %c0 = scalar.constant 0 : i64
   %c4 = scalar.constant 4 : i64
@@ -90,6 +98,9 @@ func.def public @run(%state: buffer, %stage: i32, %input: hal.buffer, %output: h
     %work = func.call @execute_3(%stage, %input, %output, %root) : (i32, hal.buffer, hal.buffer, hal.buffer) -> (i64)
     %reply = func.call @feedback(%c0_i32, %root, %c16, %c4) : (i32, hal.buffer, i64, i64) -> (i64)
   }
+  %accepted = view.load %control[2] : view<3xi32> -> i32
+  %error = buffer.constant utf8("Source rejected after accepting device state and feedback work.") : buffer
+  func.call @require(%accepted, %error) : (i32, buffer)
   func.return
 }
 

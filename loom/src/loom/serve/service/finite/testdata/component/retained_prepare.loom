@@ -15,7 +15,7 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
   %stage = func.call @dispatch(%root, %c0) : (buffer, i64) -> (i32)
   %storage = func.call @storage(%c20, %c16) : (i64, i64) -> (i32)
   %feedback = func.call @feedback(%c4) : (i64) -> (i32)
-  %state_bytes = index.constant 8 : offset
+  %state_bytes = index.constant 12 : offset
   %state = buffer.alloca<private> align(4) %state_bytes : buffer
   %empty = buffer.constant utf8("") : buffer
   %name = buffer.constant utf8("retained-epochs") : buffer

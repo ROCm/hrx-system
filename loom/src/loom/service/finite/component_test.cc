@@ -720,6 +720,24 @@ TEST_F(FiniteComponentTest, DeviceStateSurvivesEpochsAndResultsSurviveReuse) {
   ASSERT_NO_FATAL_FAILURE(CheckResult(1, 4.0f));
 }
 
+TEST_F(FiniteComponentTest,
+       RejectedEpochRetainsStateAndFeedbackThroughRemoval) {
+  ASSERT_NO_FATAL_FAILURE(UseRetainedSources());
+  loom_service_finite_model_t* model = nullptr;
+  IREE_ASSERT_OK(Prepare(component_, &model));
+  // The source rejects after submitting persistent-state writes and feedback.
+  // No result or successful readiness protects their borrowed destinations.
+  ASSERT_NO_FATAL_FAILURE(Submit(model, 0, 16, true));
+  IREE_ASSERT_OK(Retire(component_));
+  loom_service_finite_component_free(std::exchange(component_, nullptr));
+  IREE_ASSERT_OK(loom_service_finite_component_allocate(
+      device_, storage_owner_, &options_, owner_.observer(), host_allocator_,
+      &component_));
+  IREE_ASSERT_OK(Prepare(component_, &model));
+  ASSERT_NO_FATAL_FAILURE(RunRetainedEpochs(model, 0, 3));
+  ASSERT_NO_FATAL_FAILURE(CheckResult(0, 8.0f));
+}
+
 TEST_F(FiniteComponentTest, DemandSourcesRebindWithoutResidentWeightsOrJit) {
   ASSERT_NO_FATAL_FAILURE(UseDemandSources());
   loom_service_finite_model_t* model = nullptr;

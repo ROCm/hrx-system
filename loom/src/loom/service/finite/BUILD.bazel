@@ -209,6 +209,7 @@ loom_cc_library(
         "//loom/src/loom/runtime/device",
         "//loom/src/loom/runtime/execution",
         "//loom/src/loom/runtime/execution:dispatch",
+        "//loom/src/loom/runtime/execution:retirement",
         "//loom/src/loom/runtime/host",
         "//loom/src/loom/runtime/parameter:bank",
         "//loom/src/loom/runtime/parameter:module",
