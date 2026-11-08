@@ -768,7 +768,7 @@ bool loom_aie2p_native_select_ingress_descriptor(
     const loom_aie2p_native_context_t* context,
     const loom_pipeline_worker_t* source,
     const loom_movement_request_t* request, uint32_t byte_stride,
-    uint32_t repetitions, loom_aie2p_native_worker_t* worker);
+    uint32_t repetitions, uint32_t period, loom_aie2p_native_worker_t* worker);
 
 // Replaces retained copies/groups/waits using the selected transport helpers.
 // Channel access carriers are replaced by the following channel rewrite.

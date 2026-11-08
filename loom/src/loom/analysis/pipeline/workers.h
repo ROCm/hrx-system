@@ -124,6 +124,24 @@ typedef struct loom_pipeline_transport_batch_t {
   uint64_t replays;
 } loom_pipeline_transport_batch_t;
 
+// One uniform input sequence feeding independently published records. The
+// address proof describes visits without expanding the dynamic transfer list.
+// Source stability and physical transport support remain separate gates.
+typedef struct loom_pipeline_transport_input_t {
+  // Destination reservation made once for each transfer.
+  const loom_channel_plan_action_t* reservation;
+  // Canonical movement site executed throughout this sequence.
+  const loom_kernel_async_transfer_t* transfer;
+  // Transfer count before the source address repeats, dividing repetitions.
+  uint64_t period;
+  // First byte relative to the enclosing storage root.
+  int64_t source_byte_offset;
+  // Byte displacement per transfer within each source address period.
+  int64_t source_byte_stride;
+  // Constant byte displacement within every reserved destination record.
+  int64_t destination_byte_offset;
+} loom_pipeline_transport_input_t;
+
 typedef struct loom_pipeline_transport_t {
   // All observable sites in structural execution order, visiting loop bodies
   // before their continuations; NULL when ordinary execution is required. For
@@ -137,6 +155,9 @@ typedef struct loom_pipeline_transport_t {
   const loom_kernel_async_stream_t* const* streams;
   // Number of movement-bearing blocks on the execution chain.
   iree_host_size_t stream_count;
+  // Uniform borrowed-input address proof, or NULL for ordinary instruction
+  // execution. Borrowed from the worker analysis arena.
+  const loom_pipeline_transport_input_t* input;
   // Source-record cohorts whose complete ownership is transferred through
   // channel.copy. Empty for ordinary instruction-executing channel use.
   const loom_pipeline_transport_cohort_t* cohorts;

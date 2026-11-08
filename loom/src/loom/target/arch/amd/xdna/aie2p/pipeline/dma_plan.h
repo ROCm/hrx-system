@@ -129,14 +129,14 @@ bool loom_aie2p_native_encode_descriptor(
 // Coalesces an immutable external sequence where native geometry permits it;
 // otherwise retains fixed-source repetition or the short address iterator.
 // Stable-source ownership and exact consumer completion precede this query.
+// The address period divides record_count. Repeated periods must fit the
+// descriptor's transfer dimensions without an independent iterator cursor.
 // The caller supplies zero-initialized words and DMA-aligned record strides.
-bool loom_aie2p_native_encode_ingress(const loom_xdna_array_family_t* family,
-                                      const loom_storage_geometry_t* record,
-                                      const loom_xdna_dma_facts_t* dma,
-                                      uint32_t record_bytes,
-                                      uint32_t byte_stride,
-                                      uint32_t repetitions, uint32_t words[8],
-                                      uint32_t* out_repetitions);
+bool loom_aie2p_native_encode_ingress(
+    const loom_xdna_array_family_t* family,
+    const loom_storage_geometry_t* record, const loom_xdna_dma_facts_t* dma,
+    uint32_t record_bytes, uint32_t byte_stride, uint32_t record_count,
+    uint32_t period, uint32_t words[8], uint32_t* out_repetitions);
 
 // Builds a finite program within the caller's available descriptor bank. All
 // tasks fit the hardware queue before any completion wait. The layout is NULL

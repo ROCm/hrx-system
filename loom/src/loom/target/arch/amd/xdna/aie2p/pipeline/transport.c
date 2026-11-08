@@ -68,7 +68,7 @@ bool loom_aie2p_native_select_ingress_descriptor(
     const loom_aie2p_native_context_t* context,
     const loom_pipeline_worker_t* source,
     const loom_movement_request_t* request, uint32_t byte_stride,
-    uint32_t repetitions, loom_aie2p_native_worker_t* worker) {
+    uint32_t repetitions, uint32_t period, loom_aie2p_native_worker_t* worker) {
   const loom_xdna_dma_facts_t* dma =
       &context
            ->tiles[worker->tile->coordinate.column * context->family->row_count]
@@ -81,7 +81,8 @@ bool loom_aie2p_native_select_ingress_descriptor(
   const uint32_t record_bytes = (uint32_t)request->transferred_byte_count;
   return loom_aie2p_native_encode_ingress(
       context->family, &record, dma, record_bytes, byte_stride, repetitions,
-      worker->repetition.shim_words, &worker->repetition.shim_repetitions);
+      period, worker->repetition.shim_words,
+      &worker->repetition.shim_repetitions);
 }
 
 // Labels appended edges, including reused prefixes retained by packet routes.

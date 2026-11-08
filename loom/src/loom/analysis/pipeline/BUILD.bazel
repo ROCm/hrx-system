@@ -168,6 +168,7 @@ loom_cc_library(
         "//loom/src/loom/analysis:kernel_synchronization_legality",
         "//loom/src/loom/analysis:movement",
         "//loom/src/loom/analysis:storage_access",
+        "//loom/src/loom/analysis:symbolic_expr",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/error:parameter",

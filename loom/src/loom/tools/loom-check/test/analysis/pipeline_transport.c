@@ -101,9 +101,24 @@ static iree_status_t loom_check_test_pipeline_schedule_print(
 
 static iree_status_t loom_check_test_pipeline_transport_print(
     const loom_module_t* module, const loom_pipeline_worker_t* worker,
-    iree_host_size_t worker_index, iree_arena_allocator_t* arena,
-    iree_string_builder_t* output) {
+    iree_host_size_t worker_index, bool input_addresses,
+    iree_arena_allocator_t* arena, iree_string_builder_t* output) {
   const loom_pipeline_transport_t* transport = &worker->transport;
+  if (input_addresses) {
+    const loom_pipeline_transport_input_t* input = transport->input;
+    if (!input) {
+      return iree_string_builder_append_format(
+          output, "worker %" PRIhsz ": input=unproven\n", worker_index);
+    }
+    return iree_string_builder_append_format(
+        output,
+        "worker %" PRIhsz ": repetitions=%" PRIu64 " period=%" PRIu64
+        " source_offset=%" PRId64 " source_stride=%" PRId64
+        " destination_offset=%" PRId64 "\n",
+        worker_index, transport->repetitions, input->period,
+        input->source_byte_offset, input->source_byte_stride,
+        input->destination_byte_offset);
+  }
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output,
       "worker %" PRIhsz
@@ -326,6 +341,8 @@ static iree_status_t loom_check_test_pipeline_transport_execute(
   iree_string_view_t selection = iree_string_view_trim(request->target_options);
   const bool admissions =
       iree_string_view_consume_suffix(&selection, IREE_SV(" admissions"));
+  const bool input_addresses =
+      iree_string_view_consume_suffix(&selection, IREE_SV(" input"));
   if (!iree_string_view_starts_with_char(selection, '@') ||
       selection.size < 2) {
     return iree_make_status(
@@ -477,7 +494,8 @@ static iree_status_t loom_check_test_pipeline_transport_execute(
   }
   for (iree_host_size_t i = 0; i < resources.strand_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_check_test_pipeline_transport_print(
-        module, &workers[i], i, arena, &request->result->actual_output));
+        module, &workers[i], i, input_addresses, arena,
+        &request->result->actual_output));
     if (admissions && workers[i].completion.requirement ==
                           LOOM_CHANNEL_COMPLETION_REQUIREMENT_NONE) {
       for (iree_host_size_t j = 0; j < workers[i].channels.action_count; ++j) {

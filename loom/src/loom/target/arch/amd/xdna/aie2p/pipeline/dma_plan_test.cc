@@ -29,7 +29,8 @@ const loom_storage_geometry_t kThreeDimensionRecord = {
 
 void ExpectIngress(const loom_storage_geometry_t& geometry,
                    uint32_t record_bytes, uint32_t byte_stride,
-                   uint32_t record_count, uint32_t task_repetitions,
+                   uint32_t record_count, uint32_t period,
+                   uint32_t task_repetitions,
                    std::array<uint32_t, 8> expected) {
   const auto* family = loom_xdna_npu2_array_family();
   const auto* facts =
@@ -38,7 +39,7 @@ void ExpectIngress(const loom_storage_geometry_t& geometry,
   uint32_t repetitions = 0;
   ASSERT_TRUE(loom_aie2p_native_encode_ingress(
       family, &geometry, &facts->dma, record_bytes, byte_stride, record_count,
-      words.data(), &repetitions));
+      period, words.data(), &repetitions));
   EXPECT_EQ(repetitions, task_repetitions);
   EXPECT_EQ(words, expected);
 }
@@ -50,24 +51,24 @@ TEST(Aie2pDmaPlanTest, DenseSequenceUsesOneTransfer) {
       .rank = 1,
       .axes = {{18496, 1}},
   };
-  ExpectIngress(geometry, 18496, 18496, 3360, 1,
+  ExpectIngress(geometry, 18496, 18496, 3360, 3360, 1,
                 {15536640, 0, 0, 0, 0xc0000000, 0x02000000, 0, 0x02000000});
 }
 
 TEST(Aie2pDmaPlanTest, StridedSequenceAddsAnAddressDimension) {
   ExpectIngress(
-      kStridedRecord, 16, 32, 3361, 1,
+      kStridedRecord, 16, 32, 3361, 3361, 1,
       {13444, 0, 0, 0x00200000, 0xc0200003, 0x02000007, 0, 0x02000000});
 }
 
 TEST(Aie2pDmaPlanTest, FixedSourceKeepsRecordGeometryAndTaskRepetition) {
-  ExpectIngress(kStridedRecord, 16, 0, 3361, 3361,
+  ExpectIngress(kStridedRecord, 16, 0, 3361, 3361, 3361,
                 {4, 0, 0, 0x00200000, 0xc0000003, 0x02000000, 0, 0x02000000});
 }
 
 TEST(Aie2pDmaPlanTest, ThreeDimensionsRetainTheIndependentIterator) {
   ExpectIngress(
-      kThreeDimensionRecord, 16, 64, 64, 64,
+      kThreeDimensionRecord, 16, 64, 64, 64, 64,
       {4, 0, 0, 0x00200000, 0xc0100003, 0x02000007, 0x03f0000f, 0x02000000});
 }
 
@@ -79,9 +80,30 @@ TEST(Aie2pDmaPlanTest, UnrepresentableSequenceCannotTruncateItsIterator) {
     uint32_t words[8] = {};
     uint32_t repetitions = 0;
     EXPECT_FALSE(loom_aie2p_native_encode_ingress(
-        family, &kThreeDimensionRecord, &facts->dma, 16, 64, count, words,
-        &repetitions));
+        family, &kThreeDimensionRecord, &facts->dma, 16, 64, count, count,
+        words, &repetitions));
   }
+}
+
+TEST(Aie2pDmaPlanTest, RepeatedPeriodsRestartTheCompleteTransferGeometry) {
+  ExpectIngress(kStridedRecord, 16, 32, 40, 8, 5,
+                {32, 0, 0, 0x00200000, 0xc0200003, 0x02000007, 0, 0x02000000});
+}
+
+TEST(Aie2pDmaPlanTest, SingleAddressPeriodUsesFixedSourceRepetition) {
+  ExpectIngress(kStridedRecord, 16, 0, 40, 1, 40,
+                {4, 0, 0, 0x00200000, 0xc0000003, 0x02000000, 0, 0x02000000});
+}
+
+TEST(Aie2pDmaPlanTest, RepeatedPeriodsCannotDuplicateIteratorState) {
+  const auto* family = loom_xdna_npu2_array_family();
+  const auto* facts =
+      loom_xdna_array_tile_kind_facts(family, LOOM_XDNA_TILE_KIND_SHIM_NOC);
+  uint32_t words[8] = {};
+  uint32_t repetitions = 0;
+  EXPECT_FALSE(loom_aie2p_native_encode_ingress(family, &kThreeDimensionRecord,
+                                                &facts->dma, 16, 64, 1280, 8,
+                                                words, &repetitions));
 }
 
 uint32_t Decode(uint32_t word, loom_xdna_register_field_id_t field) {
