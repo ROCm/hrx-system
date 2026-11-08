@@ -444,6 +444,15 @@ class LowLowerPassTest : public ::testing::Test {
                   &invocation_facts, helper),
               expect_direct_callers);
 
+    // The caller has no entry or result seeds. Preserve the ordinary cache
+    // scope instead of introducing a distinct empty boundary-fact scope.
+    const loom_value_fact_table_view_t caller_facts =
+        loom_low_source_invocation_facts_for_function(&invocation_facts,
+                                                      caller);
+    EXPECT_EQ(caller_facts.table, nullptr);
+    EXPECT_EQ(caller_facts.value_ids, nullptr);
+    EXPECT_EQ(caller_facts.value_count, 0u);
+
     const loom_value_fact_table_view_t helper_facts =
         loom_low_source_invocation_facts_for_function(&invocation_facts,
                                                       helper);

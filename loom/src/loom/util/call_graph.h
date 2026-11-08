@@ -85,6 +85,20 @@ iree_status_t loom_call_graph_build(const loom_module_t* module,
                                     iree_arena_allocator_t* arena,
                                     loom_call_graph_t* out_graph);
 
+// Optional consumer of callsites discovered during graph construction. The
+// visitor retains callsite-specific state without a second source traversal.
+typedef struct loom_call_graph_call_visitor_t {
+  // Owner of the retained callsite information.
+  void* user_data;
+  // Receives every tracked call before edges are deduplicated.
+  iree_status_t (*fn)(void* user_data, loom_symbol_id_t caller,
+                      loom_call_like_t call);
+} loom_call_graph_call_visitor_t;
+
+iree_status_t loom_call_graph_build_with_calls(
+    const loom_module_t* module, iree_arena_allocator_t* arena,
+    loom_call_graph_call_visitor_t visitor, loom_call_graph_t* out_graph);
+
 //===----------------------------------------------------------------------===//
 // Queries
 //===----------------------------------------------------------------------===//

@@ -162,9 +162,52 @@ static iree_status_t loom_view_widen_reference_extension(
   return iree_ok_status();
 }
 
+static iree_status_t loom_view_narrow_reference_extension(
+    const loom_value_fact_domain_t* domain, const loom_module_t* module,
+    loom_type_t type, loom_value_fact_table_t* target,
+    const loom_value_fact_table_t* previous_table, loom_value_facts_t previous,
+    const loom_value_fact_table_t* next_table, loom_value_facts_t next,
+    loom_value_facts_t* inout_facts) {
+  (void)domain;
+  (void)module;
+  (void)type;
+  loom_value_fact_view_reference_t reference = {0};
+  loom_value_fact_view_reference_t incoming = {0};
+  loom_view_query_references(previous_table, previous, next_table, next,
+                             &reference, &incoming);
+  // Offset intervals are comparable only in the same retained coordinate.
+  if (reference.root_value_id != LOOM_VALUE_ID_INVALID &&
+      reference.root_value_id == incoming.root_value_id) {
+    reference.base_byte_offset = loom_value_facts_narrow(
+        LOOM_SCALAR_TYPE_I64, reference.base_byte_offset,
+        incoming.base_byte_offset);
+    if (reference.minimum_alignment == 1) {
+      reference.minimum_alignment = incoming.minimum_alignment;
+    }
+    if (reference.root_minimum_alignment == 1) {
+      reference.root_minimum_alignment = incoming.root_minimum_alignment;
+    }
+  }
+  reference.footprint_byte_length = loom_value_facts_narrow(
+      LOOM_SCALAR_TYPE_OFFSET, reference.footprint_byte_length,
+      incoming.footprint_byte_length);
+  if (reference.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN) {
+    reference.memory_space = incoming.memory_space;
+  }
+  if (reference.nullability == LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN) {
+    reference.nullability = incoming.nullability;
+  }
+  loom_value_facts_t narrowed = loom_value_facts_unknown();
+  IREE_RETURN_IF_ERROR(loom_value_facts_make_view_reference(
+      &target->context, reference, &narrowed));
+  inout_facts->extension_id = narrowed.extension_id;
+  return iree_ok_status();
+}
+
 const loom_value_fact_domain_t loom_view_fact_domain = {
     .meet_extension = loom_view_meet_reference_extension,
     .widen_extension = loom_view_widen_reference_extension,
+    .narrow_extension = loom_view_narrow_reference_extension,
 };
 
 //===----------------------------------------------------------------------===//

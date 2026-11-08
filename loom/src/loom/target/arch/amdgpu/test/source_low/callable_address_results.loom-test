@@ -239,3 +239,61 @@ low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 2,
   global_store_b64_saddr %47, %second_bits, %output_view {offset = 8}
   return
 }
+
+// ====
+
+// The returned storage excludes the unrelated global receipt argument.
+func.def noinline @select_and_record(%left: buffer, %right: buffer, %receipt: buffer, %choice: i1) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %receipt_view = buffer.view %receipt[%origin] : buffer -> view<1xi32>
+  %record = scalar.extui %choice : i1 to i32
+  view.store %record, %receipt_view[0] : i32, view<1xi32>
+  %selected = scf.select %choice, %left, %right : buffer
+  func.return %selected : buffer
+}
+
+func.def public @read_selected(%receipt: buffer, %left_value: i32, %right_value: i32, %choice: i1) -> (i32) {
+  %length = index.constant 4 : offset
+  %origin = index.constant 0 : offset
+  %left = buffer.alloca<private> align(4) %length : buffer
+  %right = buffer.alloca<private> align(4) %length : buffer
+  %left_view = buffer.view %left[%origin] : buffer -> view<1xi32>
+  %right_view = buffer.view %right[%origin] : buffer -> view<1xi32>
+  view.store %left_value, %left_view[0] : i32, view<1xi32>
+  view.store %right_value, %right_view[0] : i32, view<1xi32>
+  %selected = func.call @select_and_record(%left, %right, %receipt, %choice) : (buffer, buffer, buffer, i1) -> (buffer)
+  %selected_view = buffer.view %selected[%origin] : buffer -> view<1xi32>
+  %value = view.load %selected_view[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def noinline target<amdgpu.gfx11.generic.core> @select_and_record(%left: reg<amdgpu.vgpr>, %right: reg<amdgpu.vgpr>, %receipt_view: reg<amdgpu.sgpr x2>, %choice: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %record = v_cndmask_b32_src0_lit_src1_inline %choice {imm32 = 0, true_value = 1}
+  %34 = v_mov_b32 0
+  global_store_b32_saddr %34, %record, %receipt_view
+  %selected = v_cndmask_b32 %right, %left, %choice
+  return %selected
+}
+
+low.func.def public target<amdgpu.gfx11.generic.core> abi(hal_kernel) @read_selected(%left_value: reg<amdgpu.sgpr>, %right_value: reg<amdgpu.sgpr>, %choice: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %receipt = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %41 = storage {byte_alignment = 4, byte_length = 8} : low.storage<private>
+  %left_view = storage_address %41 : low.storage<private> -> reg<amdgpu.vgpr>
+  %right_view = storage_address %41 {offset = 4} : low.storage<private> -> reg<amdgpu.vgpr>
+  %44 = v_mov_b32_copy %left_value
+  scratch_store_b32_vaddr %left_view, %44
+  %45 = v_mov_b32_copy %right_value
+  scratch_store_b32_vaddr %right_view, %45
+  %46 = s_cmp_lg_i32_src1_inline %choice {rhs = 0}
+  %47 = s_mov_b64_exec_read
+  %48 = slice %47[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %49 = slice %47[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %50 = s_mov_b32 0
+  %51 = s_cselect_b32 %48, %50, %46
+  %52 = s_cselect_b32 %49, %50, %46
+  %53 = concat(%51, %52) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %selected_view = low.func.call @select_and_record(%left_view, %right_view, %receipt, %53) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>)
+  %value = scratch_load_b32_vaddr %selected_view
+  return %value
+}

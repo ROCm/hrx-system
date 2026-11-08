@@ -442,6 +442,16 @@ struct loom_value_fact_domain_t {
       loom_value_facts_t previous, const loom_value_fact_table_t* next_table,
       loom_value_facts_t next, uint32_t feedback_round,
       loom_value_facts_t* inout_facts);
+
+  // Refines two sound extension overapproximations with finite descending
+  // height. Domains with independent fields narrow them separately. Without a
+  // callback, the first nonempty extension is retained unchanged.
+  iree_status_t (*narrow_extension)(
+      const loom_value_fact_domain_t* domain, const loom_module_t* module,
+      loom_type_t type, loom_value_fact_table_t* target,
+      const loom_value_fact_table_t* previous_table,
+      loom_value_facts_t previous, const loom_value_fact_table_t* next_table,
+      loom_value_facts_t next, loom_value_facts_t* inout_facts);
 };
 
 //===----------------------------------------------------------------------===//
@@ -512,6 +522,16 @@ iree_status_t loom_value_fact_table_widen_for_type(
     loom_value_facts_t previous, const loom_value_fact_table_t* next_table,
     loom_value_facts_t next, uint32_t feedback_round,
     loom_value_facts_t* out_facts);
+
+// Narrows sound overapproximations with finite descending height. This is the
+// descending counterpart of widening, used when boundaries begin at unknown.
+// Domains retain already bounded components while admitting previously absent
+// information. Both inputs must describe every execution of the same value.
+iree_status_t loom_value_fact_table_narrow_for_type(
+    loom_value_fact_table_t* target, const loom_module_t* module,
+    loom_type_t type, const loom_value_fact_table_t* previous_table,
+    loom_value_facts_t previous, const loom_value_fact_table_t* next_table,
+    loom_value_facts_t next, loom_value_facts_t* out_facts);
 
 //===----------------------------------------------------------------------===//
 // Fact extensions

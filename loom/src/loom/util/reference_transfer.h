@@ -25,14 +25,15 @@ iree_status_t loom_value_facts_rebind_reference_origin(
     loom_fact_context_t* context, loom_value_fact_reference_origin_t origin,
     loom_value_facts_t* inout_facts);
 
-// Reframes a caller-owned reference as one callee entry argument. A view's
-// passed address becomes the callee-local root at byte offset zero; its proven
-// address alignment, footprint, memory space, and nullability survive. Caller
-// SSA and alias-scope identities do not cross the function boundary. Facts
-// without a storage reference remain unchanged.
-iree_status_t loom_value_facts_rebase_call_argument(
-    loom_fact_context_t* context, loom_value_id_t argument_id,
-    loom_value_fact_reference_origin_t argument_origin,
+// Reframes a reference in a receiving SSA coordinate. A view's passed address
+// becomes the new root at byte offset zero; proven address alignment,
+// footprint, memory space, and nullability survive. The producer supplies a
+// translated origin, or UNKNOWN when no cross-boundary provenance is retained.
+// Original SSA and alias-scope identities do not cross the boundary.
+// Nonreferences are unchanged.
+iree_status_t loom_value_facts_rebase_reference(
+    loom_fact_context_t* context, loom_value_id_t receiving_value,
+    loom_value_fact_reference_origin_t receiving_origin,
     loom_value_facts_t* inout_facts);
 
 // Reference substitution for one direct call. All storage arguments contribute

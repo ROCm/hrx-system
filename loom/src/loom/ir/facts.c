@@ -55,6 +55,54 @@ static int64_t loom_value_facts_exact_i64_divisor(int64_t value) {
   return (value != 0 && value != INT64_MIN) ? llabs(value) : 1;
 }
 
+loom_value_facts_t loom_value_facts_narrow(loom_scalar_type_t scalar_type,
+                                           loom_value_facts_t previous,
+                                           loom_value_facts_t next) {
+  loom_value_facts_t result;
+  if (loom_value_facts_is_float(previous) || loom_value_facts_is_float(next)) {
+    const bool has_interval =
+        previous.range_lo != INT64_MIN || previous.range_hi != INT64_MAX;
+    result = has_interval && !loom_value_facts_is_exact(next) ? previous : next;
+    result.flags |=
+        (previous.flags | next.flags) & LOOM_VALUE_FACT_FLOAT_PREDICATE_MASK;
+  } else {
+    int64_t lower = INT64_MIN;
+    int64_t upper = INT64_MAX;
+    loom_value_facts_scalar_type_domain(scalar_type, &lower, &upper);
+    const bool exact = loom_value_facts_is_exact(next);
+    result = loom_value_facts_make(
+        exact || previous.range_lo <= lower
+            ? iree_max(previous.range_lo, next.range_lo)
+            : previous.range_lo,
+        exact || previous.range_hi >= upper
+            ? iree_min(previous.range_hi, next.range_hi)
+            : previous.range_hi,
+        exact || previous.known_divisor == 1 ? next.known_divisor
+                                             : previous.known_divisor);
+    result.flags |= (previous.flags | next.flags) &
+                    (LOOM_VALUE_FACT_NON_ZERO | LOOM_VALUE_FACT_POWER_OF_TWO |
+                     LOOM_VALUE_FACT_SUBGROUP_LANE_MASK);
+    const uint32_t topology =
+        previous.flags & LOOM_VALUE_FACT_TOPOLOGY_DOMAIN_MASK;
+    result.flags |=
+        topology ? topology : next.flags & LOOM_VALUE_FACT_TOPOLOGY_DOMAIN_MASK;
+  }
+  const loom_value_fact_uniform_scope_t uniform =
+      iree_max(loom_value_facts_uniform_scope(previous),
+               loom_value_facts_uniform_scope(next));
+  if (uniform != LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE) {
+    loom_value_facts_mark_uniform_at_scope(&result, uniform);
+  } else if (loom_value_facts_is_lane_predicate(previous) ||
+             loom_value_facts_is_lane_predicate(next)) {
+    loom_value_facts_mark_lane_predicate(&result);
+  } else if (loom_value_facts_is_lane_varying(previous) ||
+             loom_value_facts_is_lane_varying(next)) {
+    loom_value_facts_mark_lane_varying(&result);
+  }
+  result.extension_id = LOOM_VALUE_FACT_EXTENSION_ID_NONE;
+  return result;
+}
+
 void loom_value_facts_propagate_unary_distribution(loom_value_facts_t input,
                                                    loom_value_facts_t* out) {
   if (loom_value_facts_is_exact(*out)) {

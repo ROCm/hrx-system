@@ -84,6 +84,12 @@ bool loom_callable_effects_body_is_readonly(const loom_module_t* module,
 // does not imply purity: clocks, counters, and fences remain effectful.
 bool loom_callable_effects_may_access_memory(loom_func_like_t function);
 
+// Returns whether a callable may create resource identities. Definitions use
+// their cached body summary, including unknown nested effects. Declarations
+// require a pure or read-only contract to exclude resource creation. Ordinary
+// writes to borrowed storage do not create a resource identity.
+bool loom_callable_effects_may_create_resources(loom_func_like_t function);
+
 // Returns the retained upper bound on memory spaces invalidated by a callable.
 // Definitions use their cached body summary; pure and read-only declarations
 // exclude writes. Unknown effects and fences that can import external writes

@@ -494,6 +494,7 @@ loom_cc_library(
         ":pass_registry",
         ":profile",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:callable_effects",
         "//loom/src/loom/pass:builder",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",

@@ -271,3 +271,84 @@ check.scenario @retained_address_results_execute {
   }
   check.return
 }
+
+func.def noinline @record_member(%record: view<2xi32>, %member: index) -> (view<1xi32>) where [range(%member, 0, 1)] {
+  %result = view.subview %record[%member] : view<2xi32> -> view<1xi32>
+  func.return %result : view<1xi32>
+}
+
+func.def noinline @read_member(%member: view<1xi32>) -> (i32) {
+  %value = view.load %member[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+func.def readonly noinline @tagged_member(%record: view<2xi32>, %tag: view<1xi32>) -> (view<1xi32>) {
+  %value = view.load %tag[0] : view<1xi32> -> i32
+  %mask = scalar.constant 1 : i32
+  %selected = scalar.andi %value, %mask : i32
+  %member = index.cast %selected : i32 to index
+  %result = view.subview %record[%member] : view<2xi32> -> view<1xi32>
+  func.return %result : view<1xi32>
+}
+
+kernel.def target(@target) @retained_view_calls() {
+  %groups = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%groups, %groups, %groups) workgroup_size(%threads, %groups, %groups) : index
+} launch(%input_storage: buffer, %output_storage: buffer) {
+  %thread = kernel.workitem.id<x> : index
+  %members = index.constant 2 : index
+  %position = index.mul %thread, %members : index
+  %member = index.rem %thread, %members : index
+  %origin = index.constant 0 : offset
+  %input = buffer.view %input_storage[%origin] : buffer -> view<256xi32>
+  %output = buffer.view %output_storage[%origin] : buffer -> view<256xi32>
+  %record = view.subview %input[%position] : view<256xi32> -> view<2xi32>
+  %selected = func.call @record_member(%record, %member) : (view<2xi32>, index) -> (view<1xi32>)
+  %value = func.call @read_member(%selected) : (view<1xi32>) -> (i32)
+  view.store %value, %output[%thread] : i32, view<256xi32>
+  %tag = view.subview %input[%thread] : view<256xi32> -> view<1xi32>
+  %tagged = func.call @tagged_member(%record, %tag) : (view<2xi32>, view<1xi32>) -> (view<1xi32>)
+  %tagged_value = func.call @read_member(%tagged) : (view<1xi32>) -> (i32)
+  %half = index.constant 128 : index
+  %tagged_position = index.add %thread, %half : index
+  view.store %tagged_value, %output[%tagged_position] : i32, view<256xi32>
+  kernel.return
+}
+
+func.def @retained_view_calls_oracle(%input_storage: buffer, %output_storage: buffer) {
+  %origin = index.constant 0 : offset
+  %input = buffer.view %input_storage[%origin] : buffer -> view<256xi32>
+  %output = buffer.view %output_storage[%origin] : buffer -> view<256xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 128 : index
+  %step = index.constant 1 : index
+  %members = index.constant 2 : index
+  scf.for %thread = [%begin to %end step %step] {
+    %base = index.mul %thread, %members : index
+    %member = index.rem %thread, %members : index
+    %position = index.add %base, %member : index
+    %value = view.load %input[%position] : view<256xi32> -> i32
+    view.store %value, %output[%thread] : i32, view<256xi32>
+    %tag = view.load %input[%thread] : view<256xi32> -> i32
+    %mask = scalar.constant 1 : i32
+    %selected = scalar.andi %tag, %mask : i32
+    %selected_member = index.cast %selected : i32 to index
+    %tagged_position = index.add %base, %selected_member : index
+    %tagged_value = view.load %input[%tagged_position] : view<256xi32> -> i32
+    %output_position = index.add %thread, %end : index
+    view.store %tagged_value, %output[%output_position] : i32, view<256xi32>
+  }
+  func.return
+}
+
+check.scenario @retained_view_calls_execute {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(7) step(3) : tensor<256xi32>
+    %output = check.generate.fill value(-1) : tensor<256xi32>
+    check.compare<@retained_view_calls, @retained_view_calls_oracle>(%input, %output) : (tensor<256xi32>, tensor<256xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<256xi32>
+    }
+  }
+  check.return
+}

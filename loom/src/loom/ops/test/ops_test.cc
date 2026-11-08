@@ -401,12 +401,12 @@ TEST_F(BuilderTest, DirectIdentitySummaryUpdatesOnErase) {
       LOOM_LOCATION_UNKNOWN, &allocation_op));
 
   EXPECT_EQ(module_->body->resource_identity_count, 1u);
-  EXPECT_TRUE(loom_region_has_resource_identities(module_->body));
+  EXPECT_TRUE(loom_region_may_create_resources(module_->body));
   EXPECT_FALSE(loom_region_has_memory_accesses(module_->body));
 
   IREE_ASSERT_OK(loom_op_erase(module_, allocation_op));
   EXPECT_EQ(module_->body->resource_identity_count, 0u);
-  EXPECT_FALSE(loom_region_has_resource_identities(module_->body));
+  EXPECT_FALSE(loom_region_may_create_resources(module_->body));
 }
 
 TEST_F(BuilderTest, UnknownOpEffectsAreConservative) {
@@ -419,6 +419,7 @@ TEST_F(BuilderTest, UnknownOpEffectsAreConservative) {
 
   EXPECT_EQ(loom_op_effective_traits(module_, op), LOOM_TRAIT_UNKNOWN_EFFECTS);
   EXPECT_TRUE(loom_op_may_write(module_, op));
+  EXPECT_TRUE(loom_region_may_create_resources(module_->body));
   EXPECT_EQ(module_->body->read_effect_count, 1u);
   EXPECT_EQ(module_->body->write_effect_count, 1u);
   EXPECT_EQ(module_->body->memory_access_count, 1u);
