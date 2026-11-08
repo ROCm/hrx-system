@@ -1079,6 +1079,26 @@ ERR_STRUCTURE_065 = ErrorDef(
     ),
 )
 
+# ERR_STRUCTURE_066: CFG conversion would violate a single-block region.
+ERR_STRUCTURE_066 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=66,
+    severity=Severity.ERROR,
+    summary="CFG conversion would violate a single-block region.",
+    message=(
+        "{pass_name} cannot lower '{op_name}' because its containing region "
+        "must remain single-block"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("pass_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Move runtime control to a CFG-capable nested region such as "
+        "pipeline.serial, or fold or fully unroll it before CFG conversion"
+    ),
+)
+
 ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_001,
     ERR_STRUCTURE_002,
@@ -1143,4 +1163,5 @@ ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_063,
     ERR_STRUCTURE_064,
     ERR_STRUCTURE_065,
+    ERR_STRUCTURE_066,
 )
