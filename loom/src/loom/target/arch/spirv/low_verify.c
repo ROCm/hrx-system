@@ -476,6 +476,9 @@ static bool loom_spirv_low_logical_scalar_matches_value_type(
       return value_type.value_class == LOOM_SPIRV_VALUE_CLASS_SCALAR &&
              value_type.scalar_type == LOOM_SPIRV_SCALAR_TYPE_S16;
     case LOOM_SCALAR_TYPE_INDEX:
+      return value_type.value_class == LOOM_SPIRV_VALUE_CLASS_SCALAR &&
+             (value_type.scalar_type == LOOM_SPIRV_SCALAR_TYPE_S32 ||
+              value_type.scalar_type == LOOM_SPIRV_SCALAR_TYPE_S64);
     case LOOM_SCALAR_TYPE_I32:
       return value_type.value_class == LOOM_SPIRV_VALUE_CLASS_SCALAR &&
              value_type.scalar_type == LOOM_SPIRV_SCALAR_TYPE_S32;

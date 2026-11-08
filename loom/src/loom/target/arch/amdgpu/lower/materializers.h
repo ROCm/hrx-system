@@ -48,12 +48,14 @@ iree_status_t loom_amdgpu_emit_prepared_native_i1_mask(
 
 // Preserves VGPR carriers and projects SGPR tuples into equally wide VGPRs.
 loom_type_t loom_amdgpu_materialized_vgpr_register_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value);
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan);
 
 // Projects each i64 lane to its low word, preserving the producer's bank.
 // Native 64-bit shifts consume only this word of each defined [0, 63] count.
 loom_type_t loom_amdgpu_materialized_i64_low_words_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value);
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan);
 
 // Emits structural register slices for the low word of each i64 source lane.
 iree_status_t loom_amdgpu_materialize_i64_low_words(
@@ -62,19 +64,23 @@ iree_status_t loom_amdgpu_materialize_i64_low_words(
 
 // Applies the active target's scalar-source limit to a binary VOP3 RHS.
 loom_type_t loom_amdgpu_materialized_vop3_binary_rhs_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value);
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan);
 
 // Exposes the address's low word in a VGPR.
 loom_type_t loom_amdgpu_materialized_vgpr_address_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value);
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan);
 
 // Exposes the address's low word in an SGPR.
 loom_type_t loom_amdgpu_materialized_sgpr_address_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value);
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan);
 
 // Normalizes an address to an SGPR pair without changing its source mapping.
 loom_type_t loom_amdgpu_materialized_sgpr64_address_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value);
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan);
 
 // Retains the address's signed or unsigned extension as an immutable recipe.
 iree_status_t loom_amdgpu_prepare_sgpr64_address(
@@ -89,7 +95,8 @@ iree_status_t loom_amdgpu_emit_prepared_sgpr64_address(
 
 // Exposes the address's low word in its producer's register class.
 loom_type_t loom_amdgpu_materialized_address_register_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value);
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan);
 
 // Projects the selected 32-bit address operand without changing register class.
 iree_status_t loom_amdgpu_lookup_address_register(
@@ -98,7 +105,8 @@ iree_status_t loom_amdgpu_lookup_address_register(
 
 // Native predicates carry an EXEC-width mask in an SGPR pair.
 loom_type_t loom_amdgpu_materialized_native_i1_mask_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value);
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan);
 
 // Returns true when the source value has an SGPR or VGPR register mapping
 // whose bits can be consumed by a VGPR operand.

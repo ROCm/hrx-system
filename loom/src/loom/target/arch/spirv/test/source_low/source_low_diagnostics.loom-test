@@ -233,35 +233,6 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @storag
 
 spirv.target<vulkan1_3> @target
 
-func.def target(@target) @storage_buffer_i32_rejects_wide_index(%input: buffer, %element0: index) -> (i32) where [range(%element0, 0, 2147483648)] {
-  %input_base = index.constant 0 : offset
-  %element = index.assume %element0 [range(%element0, 0, 2147483648)] : index
-  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%input_base] : buffer -> view<2147483649xi32>
-  // ERROR@+1: SPIRV/028 {required_range_lo="-2147483648", required_range_hi="2147483647", constraint_key="source_memory.address_numeric_carriers"}
-  %loaded = view.load %input_view[%element] : view<2147483649xi32> -> i32
-  func.return %loaded : i32
-}
-
-// ====
-
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @storage_buffer_i32_rejects_wide_dynamic_stride(%input: buffer, %columns0: index, %row0: index) -> (i32) where [range(%columns0, 1, 2147483648)] {
-  %input_base = index.constant 0 : offset
-  %columns = index.assume %columns0 [range(%columns0, 1, 2147483648)] : index
-  %row = index.assume %row0 [range(%row0, 0, 3)] : index
-  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%input_base] : buffer -> view<4x[%columns]xi32>
-  // ERROR@+1: SPIRV/028 {required_range_lo="-2147483648", required_range_hi="2147483647", constraint_key="source_memory.address_numeric_carriers"}
-  %loaded = view.load %input_view[%row, 0] : view<4x[%columns]xi32> -> i32
-  func.return %loaded : i32
-}
-
-// ====
-
-spirv.target<vulkan1_3> @target
-
 func.def target(@target) @workgroup_i32_rejects_wide_element_index() -> (i32) {
   %byte_length = index.constant 8589934596 : offset
   %scratch_base = index.constant 0 : offset
@@ -470,16 +441,6 @@ func.def target(@target) @index_to_offset_requires_non_negative_proof(%input: in
 
 spirv.target<vulkan1_3> @target
 
-func.def target(@target) @offset_to_index_requires_s32_proof(%input: offset) -> (index) {
-  // ERROR@+1: SPIRV/026 {source_type="offset", result_type="index", required_range_lo="0", required_range_hi="2147483647", constraint_key="index_cast.s32_exact"}
-  %result = index.cast %input : offset to index
-  func.return %result : index
-}
-
-// ====
-
-spirv.target<vulkan1_3> @target
-
 func.def target(@target) @index_div_requires_unsigned_dividend(%lhs0: index, %rhs0: index) -> (index) {
   %lhs, %rhs = index.assume %lhs0, %rhs0 [range(%lhs0, -8, -1), range(%rhs0, 1, 8)] : index, index
   // ERROR@+1: SPIRV/027 {field_name="lhs", value_type="index", required_range_lo="0", required_range_hi="4294967295", constraint_key="spirv.index.dividend.u32"}
@@ -574,14 +535,10 @@ func.def target(@target) @vector_f64_requires_target_features(%lhs: f64, %rhs: f
 
 spirv.target<vulkan1_3> @target
 
-func.def target(@target) @index_constants_require_signed_carrier() -> (index, index, index) {
+func.def target(@target) @index_constants_reject_negative_underflow() -> (index) {
   // ERROR@+1: TARGET/005 {op_name="index.constant", subject_name="value", minimum="-2147483648", maximum="2147483647"}
   %underflow = index.constant -2147483649 : index
-  // ERROR@+1: TARGET/005 {op_name="index.constant", subject_name="value", minimum="-2147483648", maximum="2147483647"}
-  %overflow = index.constant 2147483648 : index
-  // ERROR@+1: TARGET/005 {op_name="index.constant", subject_name="value", minimum="-2147483648", maximum="2147483647"}
-  %unsigned_maximum = index.constant 4294967295 : index
-  func.return %underflow, %overflow, %unsigned_maximum : index, index, index
+  func.return %underflow : index
 }
 
 // ====
@@ -593,14 +550,4 @@ func.def target(@target) @explicit_fma_requires_fused_instruction(%a: f32, %b: f
   // ERROR@+1: TARGET/001 {op_name="scalar.fmaf"}
   %result = scalar.fmaf %a, %b, %c : f32
   func.return %result : f32
-}
-
-// ====
-
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @computed_index_must_fit_physical_carrier(%lhs: index, %rhs: index) -> (index) where [range(%lhs, 65536, 65537), range(%rhs, 65536, 65537)] {
-  // ERROR@+1: TARGET/005 {op_name="index.mul", subject_role="result", subject_name="product", constraint_key="index.maximum_carrier", minimum="-2147483648", maximum="4294967295"}
-  %product = index.mul %lhs, %rhs : index
-  func.return %product : index
 }

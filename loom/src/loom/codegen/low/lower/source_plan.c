@@ -1636,9 +1636,6 @@ static iree_status_t loom_low_lower_plan_op(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_consumption_region_query_t* consumption_query, bool is_callable_exit,
     loom_low_lower_source_candidate_plan_t* candidate_plan) {
-  if (source_op->tied_result_count != 0) {
-    loom_low_lower_plan_tied_result_types(context, source_op);
-  }
   if (source_op->region_count != 0) {
     if (loom_low_lower_supported_structured_source_op(context, source_op)) {
       return loom_low_lower_structural_plan_op(context, source_op);
@@ -1649,6 +1646,9 @@ static iree_status_t loom_low_lower_plan_op(
     return loom_low_lower_emit_target_context_error(context, source_op,
                                                     LOOM_ERR_TARGET_030, params,
                                                     IREE_ARRAYSIZE(params));
+  }
+  if (source_op->tied_result_count != 0) {
+    loom_low_lower_plan_tied_result_types(context, source_op);
   }
   const loom_trait_flags_t traits =
       loom_op_effective_traits(context->module, source_op);
@@ -2569,6 +2569,9 @@ iree_status_t loom_low_lower_source_plan_build(
   if (iree_status_is_ok(status) && context->result->error_count == 0) {
     status = loom_low_lower_function_boundary_plan(context,
                                                    &context->planning_arena);
+  }
+  if (iree_status_is_ok(status) && context->result->error_count == 0) {
+    status = loom_low_lower_structural_finalize_boundaries(context);
   }
   if (iree_status_is_ok(status) && context->result->error_count == 0 &&
       context->policy->entry_setup.plan != NULL) {

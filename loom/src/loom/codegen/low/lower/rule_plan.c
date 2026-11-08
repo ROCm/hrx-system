@@ -1178,7 +1178,11 @@ static loom_type_t loom_low_lower_rule_plan_operand_type(
       context, rule_set, source, resolved, ordinal);
   if (ref->materializer_index != 0) {
     return loom_low_lower_rule_value_materializer(rule_set, ref)
-        ->result_type(context, value);
+        ->result_type(
+            context, value,
+            resolved->materializer_mask & (1u << ordinal)
+                ? loom_low_lower_resolved_emit_materializer(resolved, ordinal)
+                : NULL);
   }
   return loom_low_lower_value_binding_type(context, value);
 }

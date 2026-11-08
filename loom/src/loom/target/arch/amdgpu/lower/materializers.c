@@ -146,7 +146,9 @@ iree_status_t loom_amdgpu_prepare_native_i1_mask(
 }
 
 loom_type_t loom_amdgpu_materialized_vgpr_register_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value) {
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan) {
+  (void)plan;
   const loom_type_t type =
       loom_low_lower_value_binding_type(context, source_value);
   if (loom_low_register_type_class_id(type) == LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
@@ -158,7 +160,9 @@ loom_type_t loom_amdgpu_materialized_vgpr_register_type(
 }
 
 loom_type_t loom_amdgpu_materialized_i64_low_words_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value) {
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan) {
+  (void)plan;
   const loom_type_t type =
       loom_low_lower_value_binding_type(context, source_value);
   return loom_low_register_carrier_type_with_unit_count(
@@ -171,7 +175,7 @@ iree_status_t loom_amdgpu_materialize_i64_low_words(
   const loom_value_id_t source =
       loom_low_lower_lookup_value(context, source_value);
   const loom_type_t result_type =
-      loom_amdgpu_materialized_i64_low_words_type(context, source_value);
+      loom_amdgpu_materialized_i64_low_words_type(context, source_value, NULL);
   const uint32_t lane_count = loom_low_register_type_unit_count(result_type);
   const loom_type_t word_type =
       loom_low_register_carrier_type_with_unit_count(result_type, 1);
@@ -185,7 +189,9 @@ iree_status_t loom_amdgpu_materialize_i64_low_words(
 }
 
 loom_type_t loom_amdgpu_materialized_vop3_binary_rhs_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value) {
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan) {
+  (void)plan;
   const loom_amdgpu_descriptor_set_info_t* info =
       loom_amdgpu_target_info_descriptor_set_at(
           loom_low_lower_context_descriptor_set(context)
@@ -194,11 +200,14 @@ loom_type_t loom_amdgpu_materialized_vop3_binary_rhs_type(
           info, LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOP3_TWO_SCALAR_SOURCES)) {
     return loom_low_lower_value_binding_type(context, source_value);
   }
-  return loom_amdgpu_materialized_vgpr_register_type(context, source_value);
+  return loom_amdgpu_materialized_vgpr_register_type(context, source_value,
+                                                     plan);
 }
 
 loom_type_t loom_amdgpu_materialized_vgpr_address_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value) {
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan) {
+  (void)plan;
   (void)source_value;
   return loom_low_register_type(
       loom_low_lower_context_descriptor_set(context)->stable_id,
@@ -206,7 +215,9 @@ loom_type_t loom_amdgpu_materialized_vgpr_address_type(
 }
 
 loom_type_t loom_amdgpu_materialized_sgpr_address_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value) {
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan) {
+  (void)plan;
   (void)source_value;
   return loom_low_register_type(
       loom_low_lower_context_descriptor_set(context)->stable_id,
@@ -214,7 +225,9 @@ loom_type_t loom_amdgpu_materialized_sgpr_address_type(
 }
 
 loom_type_t loom_amdgpu_materialized_sgpr64_address_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value) {
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan) {
+  (void)plan;
   (void)source_value;
   return loom_low_register_type(
       loom_low_lower_context_descriptor_set(context)->stable_id,
@@ -249,13 +262,17 @@ iree_status_t loom_amdgpu_emit_prepared_sgpr64_address(
 }
 
 loom_type_t loom_amdgpu_materialized_address_register_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value) {
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan) {
+  (void)plan;
   return loom_low_register_carrier_type_with_unit_count(
       loom_low_lower_value_binding_type(context, source_value), 1);
 }
 
 loom_type_t loom_amdgpu_materialized_native_i1_mask_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value) {
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan) {
+  (void)plan;
   (void)source_value;
   return loom_low_register_type(
       loom_low_lower_context_descriptor_set(context)->stable_id,

@@ -239,10 +239,6 @@ _ALL_PROFILE_XFAILS = {
     "memory/address/dynamic_record_fields.loom:@atomic_record_fields": "TARGET/003",
     "memory/address/generic.loom:@generic_atomic_uniform_i64": "TARGET/003",
     "memory/address/generic.loom:@generic_workgroup_publication": "TARGET/032",
-    # Loaded i64 coordinates exceed the target's exact signed 32-bit index.
-    "memory/address/integer_casts.loom:@loaded_integer_address_joins": "SPIRV/026",
-    "memory/address/scaling.loom:@scale_unsigned_offsets": "SPIRV/026",
-    "memory/address/scaling.loom:@signed_wide_sum": "TARGET/005",
     "memory/atomic/float64_contention.loom:@contended_atomic_f64": "TARGET/003",
     "memory/atomic/float_bitwise.loom:@atomic_bitwise_f32": "TARGET/003",
     "memory/atomic/float_bitwise.loom:@atomic_bitwise_f64": "TARGET/003",
@@ -293,8 +289,6 @@ _ALL_PROFILE_XFAILS = {
     "memory/view/subview.loom:@subview_atomic_origins": "TARGET/003",
     "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp4_bf16": "TARGET/002",
     "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp4_wide_bf16": "TARGET/002",
-    "numeric/integer/wide/address_comparison.loom:@mixed_width_index_comparisons": "SPIRV/026",
-    "numeric/integer/wide/address_comparison.loom:@positive_word_index_comparisons": "SPIRV/026",
     "numeric/predicate/extract.loom:@predicate_extract": "TARGET/003",
     "numeric/vector/broadcast_arithmetic.loom:@broadcast_fma": "TARGET/001",
 }
@@ -327,6 +321,7 @@ _NO_EXTENDED_TYPES_XFAILS = {
     "kernel/subgroup/reduce.loom:@subgroup_packet_reductions": "TARGET/003",
     "memory/address/generic.loom:@generic_copy_half": "TARGET/003",
     "memory/address/generic.loom:@generic_narrow_half_store": "TARGET/003",
+    "memory/address/integer_casts.loom:@loaded_integer_address_joins": "TARGET/003",
     "memory/address/integer_terms.loom:@narrow_coordinates": "TARGET/003",
     "memory/address/integer_terms.loom:@uniform_narrow_coordinates": "TARGET/003",
     "memory/address/integer_terms.loom:@workgroup_narrow_coordinates": "TARGET/003",
@@ -503,11 +498,7 @@ _SPIRV_EXECUTION_XFAILS = {
     "kernel/workgroup/reduce_tree.loom:@workgroup_tree_three_waves_values": "TARGET/003",
     "kernel/workgroup/scan.loom:@workgroup_scan_float_values": "TARGET/032",
     "kernel/workgroup/scan.loom:@workgroup_scan_vector_values": "TARGET/032",
-    "memory/address/address.loom:@launch_arithmetic_values": "SPIRV/027,TARGET/005",
     "memory/address/generic.loom:@generic_workgroup_publication_values": "TARGET/032",
-    "memory/address/integer_casts.loom:@loaded_integer_address_join_values": "SPIRV/026",
-    "memory/address/scaling.loom:@scaled_offset_values": "SPIRV/026",
-    "memory/address/scaling.loom:@signed_wide_sum_values": "TARGET/005",
     "memory/atomic/float_bitwise.loom:@atomic_bitwise_f32_values": "TARGET/003",
     "memory/atomic/float_bitwise.loom:@atomic_bitwise_f64_values": "TARGET/003",
     "memory/atomic/workgroup/global.loom:@generic_workgroup_fence_values": "TARGET/032",
@@ -580,10 +571,6 @@ _SPIRV_EXECUTION_XFAILS = {
     "numeric/float/trigonometry.loom:@ordinary_trigonometry": "LOWERING/036",
     "numeric/float/turns.loom:@turn_values": "LOWERING/036",
     "numeric/integer/bitfield.loom:@bitfield_values": "TARGET/003",
-    # SPIR-V indices have a 32-bit carrier even when i64 arithmetic is enabled.
-    "numeric/integer/division.loom:@wide_index_division_values": "SPIRV/026,SPIRV/027,TARGET/005",
-    "numeric/integer/wide/address_comparison.loom:@mixed_width_index_comparison_values": "SPIRV/026",
-    "numeric/integer/wide/address_comparison.loom:@positive_word_index_comparison_values": "SPIRV/026",
     "numeric/matrix/nvfp4.loom:@nvfp4_matrix_values": "TARGET/002",
     # BF16-capable profiles reach the missing FMA contract; other devices reject
     # the narrow carrier before arithmetic selection.

@@ -18,6 +18,163 @@
 #include "loom/ops/ref/ops.h"
 #include "loom/ops/scf/ops.h"
 
+struct loom_low_lower_structural_boundary_t {
+  // Next receiving signature in source traversal order.
+  loom_low_lower_structural_boundary_t* next;
+  // Source operation supplying the incoming operands.
+  const loom_op_t* source_op;
+  // First incoming operand ordinal within source_op.
+  uint16_t operand_start;
+  // Number of incoming operands. Followed by this many receiving value IDs;
+  // INVALID denotes the corresponding callable result instead of an SSA value.
+  uint16_t operand_count;
+};
+
+struct loom_low_lower_structural_conversion_t {
+  // Next unequal incoming carrier in source traversal and operand order.
+  loom_low_lower_structural_conversion_t* next;
+  // Source operation consuming this conversion.
+  const loom_op_t* source_op;
+  // Target-owned recipe prepared while source facts were available.
+  const void* recipe;
+  // Exact receiving carrier, independent of the original producer binding.
+  loom_type_id_t type_id;
+  // Operand ordinal within source_op.
+  uint16_t operand_index;
+};
+
+static iree_status_t loom_low_lower_structural_plan_boundary(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    uint16_t operand_start, const loom_value_id_t* receivers,
+    uint16_t operand_count) {
+  if (operand_count == 0 || context->policy->control_operand.prepare == NULL) {
+    return iree_ok_status();
+  }
+  loom_low_lower_structural_boundary_t* boundary = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      &context->analysis_arena,
+      sizeof(*boundary) + operand_count * sizeof(loom_value_id_t),
+      (void**)&boundary));
+  *boundary = (loom_low_lower_structural_boundary_t){
+      .source_op = source_op,
+      .operand_start = operand_start,
+      .operand_count = operand_count,
+  };
+  loom_value_id_t* receiver_ids = (loom_value_id_t*)(boundary + 1);
+  for (uint16_t i = 0; i < operand_count; ++i) {
+    receiver_ids[i] = receivers ? receivers[i] : LOOM_VALUE_ID_INVALID;
+  }
+  loom_low_lower_structural_plan_t* plan =
+      &context->lowering->source_plan.structural;
+  if (plan->last_boundary) {
+    plan->last_boundary->next = boundary;
+  } else {
+    plan->first_boundary = boundary;
+  }
+  plan->last_boundary = boundary;
+  return iree_ok_status();
+}
+
+iree_status_t loom_low_lower_structural_finalize_boundaries(
+    loom_low_lower_context_t* context) {
+  loom_low_lower_structural_plan_t* plan =
+      &context->lowering->source_plan.structural;
+  loom_low_lower_structural_conversion_t* last_conversion = NULL;
+  iree_status_t status = iree_ok_status();
+  for (const loom_low_lower_structural_boundary_t* boundary =
+           plan->first_boundary;
+       boundary != NULL && iree_status_is_ok(status) &&
+       context->result->error_count == 0;
+       boundary = boundary->next) {
+    const loom_value_id_t* receiver_ids =
+        (const loom_value_id_t*)(boundary + 1);
+    const loom_value_id_t* operands =
+        loom_op_const_operands(boundary->source_op);
+    for (uint16_t i = 0;
+         i < boundary->operand_count && iree_status_is_ok(status) &&
+         context->result->error_count == 0;
+         ++i) {
+      const uint16_t operand_index = boundary->operand_start + i;
+      const loom_type_t required_type =
+          receiver_ids[i] == LOOM_VALUE_ID_INVALID
+              ? context->lowering->boundary.result_types[i]
+              : loom_low_lower_value_binding_type(context, receiver_ids[i]);
+      if (loom_type_equal(loom_low_lower_value_binding_type(
+                              context, operands[operand_index]),
+                          required_type)) {
+        continue;
+      }
+      const void* recipe = NULL;
+      status = context->policy->control_operand.prepare(
+          context->policy->control_operand.user_data, context,
+          boundary->source_op, operands[operand_index], required_type, &recipe);
+      loom_low_lower_structural_conversion_t* conversion = NULL;
+      if (iree_status_is_ok(status) && context->result->error_count == 0) {
+        status = loom_low_lower_allocate_function_array(
+            context, 1, sizeof(*conversion), (void**)&conversion);
+      }
+      if (iree_status_is_ok(status) && context->result->error_count == 0) {
+        *conversion = (loom_low_lower_structural_conversion_t){
+            .source_op = boundary->source_op,
+            .recipe = recipe,
+            .operand_index = operand_index,
+        };
+        status = loom_module_intern_type_id(context->module, required_type,
+                                            &conversion->type_id);
+        if (last_conversion) {
+          last_conversion->next = conversion;
+        } else {
+          plan->next_conversion = conversion;
+        }
+        last_conversion = conversion;
+      }
+    }
+  }
+  plan->first_boundary = NULL;
+  plan->last_boundary = NULL;
+  return status;
+}
+
+iree_status_t loom_low_lower_structural_materialize_operand(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    uint16_t operand_index, loom_value_id_t* inout_low_value) {
+  loom_low_lower_structural_plan_t* plan =
+      &context->lowering->source_plan.structural;
+  const loom_low_lower_structural_conversion_t* conversion =
+      plan->next_conversion;
+  if (conversion == NULL || conversion->source_op != source_op ||
+      conversion->operand_index != operand_index) {
+    return iree_ok_status();
+  }
+  plan->next_conversion = conversion->next;
+  return context->policy->control_operand.emit(
+      context->policy->control_operand.user_data, context, source_op,
+      loom_op_const_operands(source_op)[operand_index], *inout_low_value,
+      loom_type_table_get(&context->module->types, conversion->type_id),
+      conversion->recipe, inout_low_value);
+}
+
+static iree_status_t loom_low_lower_structural_join_type(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_value, loom_type_t* inout_type) {
+  loom_type_t incoming_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_low_lower_map_value(context, source_op,
+                                                source_value, &incoming_type));
+  if (context->result->error_count != 0 ||
+      loom_type_equal(*inout_type, incoming_type)) {
+    return iree_ok_status();
+  }
+  const loom_type_t source_type =
+      loom_module_value_type(context->module, source_value);
+  *inout_type = context->policy->join_result_type
+                    ? context->policy->join_result_type(
+                          source_type, *inout_type, incoming_type)
+                    : loom_type_none();
+  return loom_type_kind(*inout_type) == LOOM_TYPE_NONE
+             ? loom_low_lower_emit_no_target_contract(context, source_op)
+             : iree_ok_status();
+}
+
 static iree_status_t loom_low_lower_structural_require_blocks(
     loom_low_lower_context_t* context) {
   loom_low_lower_structural_plan_t* plan =
@@ -100,6 +257,30 @@ loom_type_t loom_low_lower_structural_block_argument_type(
 
 iree_status_t loom_low_lower_structural_plan_op(
     loom_low_lower_context_t* context, const loom_op_t* source_op) {
+  if (loom_scf_yield_isa(source_op)) {
+    const loom_op_t* parent = source_op->parent_op;
+    const loom_value_id_t* receivers = loom_op_const_results(parent);
+    if (loom_scf_for_isa(parent)) {
+      receivers =
+          loom_region_const_entry_block(loom_scf_for_body(parent))->arg_ids + 1;
+    } else if (loom_scf_while_isa(parent)) {
+      receivers =
+          loom_region_const_entry_block(loom_scf_while_before(parent))->arg_ids;
+    }
+    return loom_low_lower_structural_plan_boundary(
+        context, source_op, 0, receivers, source_op->operand_count);
+  }
+  if (loom_scf_condition_isa(source_op)) {
+    return loom_low_lower_structural_plan_boundary(
+        context, source_op, 1, loom_op_const_results(source_op->parent_op),
+        loom_scf_condition_forwarded(source_op).count);
+  }
+  if (loom_low_lower_source_op_is_callable_exit(context, source_op) &&
+      source_op->parent_block->parent_region !=
+          loom_func_like_body(context->source_function)) {
+    return loom_low_lower_structural_plan_boundary(context, source_op, 0, NULL,
+                                                   source_op->operand_count);
+  }
   const loom_trait_flags_t traits =
       loom_op_effective_traits(context->module, source_op);
   if (loom_traits_are_fact_identity(traits) ||
@@ -146,16 +327,51 @@ iree_status_t loom_low_lower_structural_plan_op(
   if (loom_scf_for_isa(source_op)) {
     const loom_block_t* body =
         loom_region_const_entry_block(loom_scf_for_body(source_op));
-    loom_low_lower_inherit_value_type(
-        context, loom_scf_for_lower_bound(source_op), body->arg_ids[0]);
     const loom_value_slice_t iter_args = loom_scf_for_iter_args(source_op);
+    if (context->policy->control_operand.prepare == NULL) {
+      loom_low_lower_inherit_value_type(
+          context, loom_scf_for_lower_bound(source_op), body->arg_ids[0]);
+      for (uint16_t i = 0; i < iter_args.count; ++i) {
+        loom_low_lower_inherit_value_type(context, iter_args.values[i],
+                                          body->arg_ids[i + 1]);
+        loom_low_lower_inherit_value_type(context, iter_args.values[i],
+                                          loom_op_const_results(source_op)[i]);
+      }
+      return iree_ok_status();
+    }
+
+    // The induction domain can be wider than its initial value. Retain one
+    // receiving carrier for the complete range, without changing any bound's
+    // producer or the representation used by its other consumers.
+    loom_type_t induction_type = loom_type_none();
+    IREE_RETURN_IF_ERROR(loom_low_lower_map_value(
+        context, source_op, body->arg_ids[0], &induction_type));
+    if (context->result->error_count != 0) {
+      return iree_ok_status();
+    }
+    IREE_RETURN_IF_ERROR(loom_low_lower_plan_value_type(
+        context, body->arg_ids[0], induction_type));
+    const loom_value_id_t bound_receivers[] = {
+        body->arg_ids[0], body->arg_ids[0], body->arg_ids[0]};
+    IREE_RETURN_IF_ERROR(loom_low_lower_structural_plan_boundary(
+        context, source_op, 0, bound_receivers, 3));
     for (uint16_t i = 0; i < iter_args.count; ++i) {
-      loom_low_lower_inherit_value_type(context, iter_args.values[i],
-                                        body->arg_ids[i + 1]);
-      loom_low_lower_inherit_value_type(context, iter_args.values[i],
+      loom_type_t state_type = loom_type_none();
+      IREE_RETURN_IF_ERROR(loom_low_lower_map_value(
+          context, source_op, body->arg_ids[i + 1], &state_type));
+      IREE_RETURN_IF_ERROR(loom_low_lower_structural_join_type(
+          context, source_op, loom_op_const_results(source_op)[i],
+          &state_type));
+      if (context->result->error_count != 0) {
+        return iree_ok_status();
+      }
+      IREE_RETURN_IF_ERROR(loom_low_lower_plan_value_type(
+          context, body->arg_ids[i + 1], state_type));
+      loom_low_lower_inherit_value_type(context, body->arg_ids[i + 1],
                                         loom_op_const_results(source_op)[i]);
     }
-    return iree_ok_status();
+    return loom_low_lower_structural_plan_boundary(
+        context, source_op, 3, body->arg_ids + 1, iter_args.count);
   }
   const loom_block_t* header =
       loom_scf_while_isa(source_op)
@@ -172,6 +388,8 @@ iree_status_t loom_low_lower_structural_plan_op(
     IREE_RETURN_IF_ERROR(loom_low_lower_structural_plan_types(
         context, source_op, header->arg_ids, header_count,
         /*retain_bindings=*/true));
+    IREE_RETURN_IF_ERROR(loom_low_lower_structural_plan_boundary(
+        context, source_op, 0, header->arg_ids, header_count));
     const loom_block_t* after =
         loom_region_const_entry_block(loom_scf_while_after(source_op));
     for (uint16_t i = 0; i < after->arg_count; ++i) {

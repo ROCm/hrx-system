@@ -160,10 +160,12 @@ typedef iree_status_t (*loom_low_lower_emit_value_materialization_fn_t)(
     loom_value_id_t* out_low_value_id);
 
 // Returns the exact carrier produced by a selected materializer. Source
-// producers have published their bindings; this query does not emit or choose
-// a preferred source mapping.
+// producers have published their bindings and preparation has completed. The
+// query consumes that retained recipe (NULL for direct materializers) without
+// allocating, emitting, or choosing a preferred source mapping.
 typedef loom_type_t (*loom_low_lower_materialized_value_type_fn_t)(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value_id);
+    const loom_low_lower_context_t* context, loom_value_id_t source_value_id,
+    const void* plan);
 
 typedef struct loom_low_lower_value_materializer_t {
   // Selection-time predicate proving this materializer can handle the source

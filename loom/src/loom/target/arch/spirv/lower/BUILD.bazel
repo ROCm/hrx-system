@@ -69,6 +69,7 @@ loom_cc_library(
     ],
     visibility = _SPIRV_ROOT_VISIBILITY,
     deps = [
+        ":index",
         "//loom/src/loom/analysis:contract_vector",
         "//loom/src/loom/analysis:source_storage_packing",
         "//loom/src/loom/analysis:storage_interference",
@@ -107,6 +108,32 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "index",
+    srcs = [
+        "index.c",
+        "index_operands.c",
+    ],
+    hdrs = [
+        "index.h",
+        "index_operands.h",
+    ],
+    visibility = ["//loom/src/loom/target/arch/spirv/contracts:__pkg__"],
+    deps = [
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/codegen/low/lower:representation_observer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/spirv:registers",
+        "//loom/src/loom/target/arch/spirv/descriptors",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "cooperative_initializer",
     srcs = ["cooperative_initializer.c"],
     hdrs = ["cooperative_initializer.h"],
@@ -123,7 +150,11 @@ loom_cc_library(
 
 loom_check_test_suite(
     name = "index_tests",
-    srcs = ["index_test.loom-test"],
+    srcs = [
+        "index_control_test.loom-test",
+        "index_memory_test.loom-test",
+        "index_test.loom-test",
+    ],
     tags = ["hostonly"],
     target_compatible_with = loom_config_compatible_with(["//loom/config/emit:spirv_binary"]),
 )

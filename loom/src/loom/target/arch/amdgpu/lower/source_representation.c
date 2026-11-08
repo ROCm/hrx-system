@@ -37,6 +37,7 @@ typedef enum loom_amdgpu_matrix_representation_action_e {
   LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_MMA = 2,
   LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_FRAGMENT = 3,
   LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_SELECT = 4,
+  LOOM_AMDGPU_SOURCE_REPRESENTATION_ACTION_LOOP = 11,
 } loom_amdgpu_matrix_representation_action_t;
 static_assert(
     (uint8_t)LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_FLEXIBLE_RESULT >
@@ -237,6 +238,44 @@ static void loom_amdgpu_address_representation_constrain_value(
   };
   loom_low_lower_representation_record_candidates(recorder, value_id,
                                                   candidates, candidate_count);
+}
+
+static void loom_amdgpu_address_representation_observe_loop(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_representation_recorder_t* recorder) {
+  const loom_module_t* module = loom_low_lower_context_module(context);
+  const loom_value_fact_table_t* facts =
+      loom_low_lower_context_fact_table(context);
+  const loom_value_id_t* operands = loom_op_const_operands(source_op);
+  const bool is_signed = loom_type_element_type(loom_module_value_type(
+                             module, operands[0])) == LOOM_SCALAR_TYPE_INDEX;
+  bool needs_wide = false;
+  bool requires_vgpr = false;
+  for (uint16_t i = 0; i < 3; ++i) {
+    const loom_value_facts_t operand_facts =
+        loom_value_fact_table_lookup(facts, operands[i]);
+    // Counted index control compares signed values. A positive u32 payload
+    // needs its zero-extended high word even when storage can remain narrow.
+    needs_wide |=
+        is_signed ? operand_facts.range_lo >= INT32_MIN &&
+                        operand_facts.range_hi > INT32_MAX
+                  : !loom_value_facts_fit_unsigned_bit_count(operand_facts, 32);
+    requires_vgpr |= !loom_value_facts_is_subgroup_uniform(operand_facts);
+  }
+  if (!needs_wide) {
+    return;
+  }
+  const loom_block_t* body =
+      loom_region_const_entry_block(loom_scf_for_body(source_op));
+  const loom_low_representation_candidate_t candidates[] = {
+      {.representation = requires_vgpr
+                             ? LOOM_AMDGPU_ADDRESS_REPRESENTATION_WIDE_VGPR
+                             : LOOM_AMDGPU_ADDRESS_REPRESENTATION_WIDE_SGPR},
+      {.representation = LOOM_AMDGPU_ADDRESS_REPRESENTATION_WIDE_VGPR,
+       .cost = {.runtime = 1}},
+  };
+  loom_low_lower_representation_record_candidates(
+      recorder, body->arg_ids[0], candidates, requires_vgpr ? 1 : 2);
 }
 
 static void loom_amdgpu_address_representation_observe_fixed_cast(
@@ -672,13 +711,19 @@ static void loom_amdgpu_source_representation_observe_boundary(
                                                           recorder);
   }
   if (action >=
-      LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_FLEXIBLE_RESULT) {
+          LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_FLEXIBLE_RESULT &&
+      action <=
+          LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_TRANSPORT_PAYLOAD) {
     loom_amdgpu_source_integer_representation_observe_boundary(
         (loom_amdgpu_source_integer_representation_action_t)action, context,
         source_op, recorder);
     return;
   }
   switch ((loom_amdgpu_matrix_representation_action_t)action) {
+    case LOOM_AMDGPU_SOURCE_REPRESENTATION_ACTION_LOOP:
+      loom_amdgpu_address_representation_observe_loop(context, source_op,
+                                                      recorder);
+      return;
     case LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_PIN_VALUE:
       if (iree_any_bit_set(
               flags, LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_OPERANDS)) {
@@ -802,6 +847,8 @@ static const loom_low_lower_representation_boundary_t
         {LOOM_OP_SCALAR_CONSTANT,
          LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_CONSTANT_RESULT,
          LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
+        {LOOM_OP_SCF_FOR, LOOM_AMDGPU_SOURCE_REPRESENTATION_ACTION_LOOP,
+         LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_NONE},
         {LOOM_OP_SCF_SELECT, LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_SELECT,
          LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_NONE},
         {LOOM_OP_VIEW_LOAD,
@@ -868,13 +915,13 @@ static const loom_low_lower_representation_boundary_span_t
     kAmdgpuSourceRepresentationBoundarySpans[LOOM_DIALECT_KERNEL -
                                              LOOM_DIALECT_SCALAR + 1] = {
         [LOOM_DIALECT_SCALAR - LOOM_DIALECT_SCALAR] = {0, 9},
-        [LOOM_DIALECT_SCF - LOOM_DIALECT_SCALAR] = {9, 1},
-        [LOOM_DIALECT_VIEW - LOOM_DIALECT_SCALAR] = {10, 3},
-        [LOOM_DIALECT_VECTOR - LOOM_DIALECT_SCALAR] = {13, 13},
-        [LOOM_DIALECT_INDEX - LOOM_DIALECT_SCALAR] = {26, 1},
-        [LOOM_DIALECT_KERNEL - LOOM_DIALECT_SCALAR] = {27, 3},
+        [LOOM_DIALECT_SCF - LOOM_DIALECT_SCALAR] = {9, 2},
+        [LOOM_DIALECT_VIEW - LOOM_DIALECT_SCALAR] = {11, 3},
+        [LOOM_DIALECT_VECTOR - LOOM_DIALECT_SCALAR] = {14, 13},
+        [LOOM_DIALECT_INDEX - LOOM_DIALECT_SCALAR] = {27, 1},
+        [LOOM_DIALECT_KERNEL - LOOM_DIALECT_SCALAR] = {28, 3},
 };
-static_assert(9 + 1 + 3 + 13 + 1 + 3 ==
+static_assert(9 + 2 + 3 + 13 + 1 + 3 ==
                   IREE_ARRAYSIZE(kAmdgpuSourceRepresentationBoundaries),
               "AMDGPU representation spans must cover every boundary");
 static_assert((loom_op_kind_t)LOOM_OP_SCALAR_SITOFP <
@@ -894,6 +941,8 @@ static_assert((loom_op_kind_t)LOOM_OP_SCALAR_SITOFP <
                   (loom_op_kind_t)LOOM_OP_SCALAR_BITCAST <
                       (loom_op_kind_t)LOOM_OP_SCALAR_CONSTANT &&
                   (loom_op_kind_t)LOOM_OP_SCALAR_CONSTANT <
+                      (loom_op_kind_t)LOOM_OP_SCF_FOR &&
+                  (loom_op_kind_t)LOOM_OP_SCF_FOR <
                       (loom_op_kind_t)LOOM_OP_SCF_SELECT &&
                   (loom_op_kind_t)LOOM_OP_SCF_SELECT <
                       (loom_op_kind_t)LOOM_OP_VIEW_LOAD &&

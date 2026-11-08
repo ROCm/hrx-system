@@ -513,6 +513,11 @@ loom_cc_test(
 )
 
 loom_check_test(
+    name = "control_operands_test",
+    src = "control_operands_test.loom-test",
+)
+
+loom_check_test(
     name = "uniform_predicate_select_test",
     src = "uniform_predicate_select.loom-test",
 )
