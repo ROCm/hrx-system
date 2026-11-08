@@ -99,6 +99,7 @@ static iree_status_t loom_aie2p_native_select_distribution_endpoint(
   }
   return loom_aie2p_native_select_sequence(
       context, tile, out_endpoint->engine, direction,
+      shared || batch_records ? NULL : channel,
       batch_records ? repetitions / batch_records : repetitions, capacity,
       channel->byte_offset, byte_stride, credit_interval, words,
       &out_endpoint->sequence, out_reason, out_valid);
@@ -642,6 +643,7 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
                                           reason);
         }
         const uint32_t source_route = path ? 0 : (*next_source)++;
+        distribution->routes.first = context->routing.route_count;
         for (iree_host_size_t j = 0; j < cohort->destination_count; ++j) {
           const loom_pipeline_transport_destination_t* destination =
               &cohort->destinations[j];
@@ -706,6 +708,8 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
           }
           loom_aie2p_native_route_label(context, route_first, UINT8_MAX);
         }
+        distribution->routes.count =
+            context->routing.route_count - distribution->routes.first;
       }
       *tail = distribution;
       tail = &distribution->next;

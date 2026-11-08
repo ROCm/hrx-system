@@ -10,6 +10,7 @@
 #include "loom/ops/channel/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/pipeline/ops.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
 #include "loom/target/arch/amd/xdna/error_catalog.h"
 #include "loom/target/function_version.h"
 #include "loom/util/fact_extensions.h"
@@ -464,8 +465,7 @@ static iree_status_t loom_aie2p_native_configure_channels(
     const iree_host_size_t channel_index =
         loom_pipeline_invocations_channel_index(&realization->invocations,
                                                 source_action->channel);
-    const loom_aie2p_native_channel_t* channel =
-        &context->channels[channel_index];
+    loom_aie2p_native_channel_t* channel = &context->channels[channel_index];
     loom_aie2p_native_configuration_cursor_t* position =
         &positions[channel_index];
     loom_aie2p_native_configuration_action_t* action = &actions[action_index];
@@ -520,6 +520,11 @@ static iree_status_t loom_aie2p_native_configure_channels(
       action->expected = acquire ? 1 : -1;
       action->value = acquire ? 0 : 1;
     }
+    if (loom_channel_release_isa(op) && action->value == 1 &&
+        action->lock == channel->free_lock && channel->source->capacity == 1) {
+      ++channel->configuration_returns.count;
+      channel->configuration_returns.last = action;
+    }
   }
   worker->configuration_actions = actions;
   worker->configuration_records = records;
@@ -531,31 +536,17 @@ static bool loom_aie2p_native_can_repeat(
     const loom_pipeline_realization_t* realization,
     const loom_pipeline_worker_t* source, loom_aie2p_native_worker_t* worker) {
   const loom_pipeline_transport_t* transport = &source->transport;
-  if (!transport->induction || !transport->sources_stable ||
-      transport->count != 4 || transport->stream_count != 1 ||
-      transport->streams[0]->transfer_count != 1 ||
-      transport->repetitions < 2) {
+  const loom_pipeline_transport_input_t* input = transport->input;
+  if (!input || !transport->sources_stable || transport->repetitions < 2) {
     return false;
   }
-  const loom_pipeline_transport_step_t* steps = transport->steps;
-  if (steps[0].kind != LOOM_PIPELINE_TRANSPORT_STEP_CHANNEL ||
-      steps[0].source.channel->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE ||
-      steps[1].kind != LOOM_PIPELINE_TRANSPORT_STEP_TRANSFER ||
-      steps[2].kind != LOOM_PIPELINE_TRANSPORT_STEP_WAIT ||
-      steps[3].kind != LOOM_PIPELINE_TRANSPORT_STEP_CHANNEL ||
-      steps[3].source.channel->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_PUBLISH ||
-      loom_channel_publish_write(steps[3].op) !=
-          loom_channel_reserve_write(steps[0].op)) {
-    return false;
-  }
-  const loom_movement_request_t* request = &steps[1].source.transfer->request;
-  if (request->kind != LOOM_MOVEMENT_KIND_KERNEL_ASYNC_COPY ||
-      request->source.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL ||
+  const loom_movement_request_t* request = &input->transfer->request;
+  if (request->source.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL ||
       request->dest.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
     return false;
   }
   const loom_aie2p_native_channel_t* channel = loom_aie2p_native_channel(
-      context, realization, steps[0].source.channel->channel);
+      context, realization, input->reservation->channel);
   // Consumer completion observes every DMA publication, and therefore the last
   // external read and local write, before the invocation can retire storage.
   // Egress must instead observe global-write completion before releasing its
@@ -567,37 +558,9 @@ static bool loom_aie2p_native_can_repeat(
            .block_execution_counts) {
     return false;
   }
-  const loom_view_region_t *external, *local;
-  loom_view_region_table_try_lookup(&source->asynchronous.movement.view_regions,
-                                    request->source.value_id, &external);
-  loom_view_region_table_try_lookup(&source->asynchronous.movement.view_regions,
-                                    request->dest.value_id, &local);
-  if (local->base_view_value_id != loom_channel_reserve_view(steps[0].op) ||
-      !loom_symbolic_expr_is_constant(&local->projection_byte_offset)) {
-    return false;
-  }
-  const loom_symbolic_expr_t* offset = &external->begin_byte_offset;
-  int64_t begin = offset->constant, stride = 0;
-  if (offset->term_count) {
-    int64_t initial, increment, displacement;
-    if (!loom_symbolic_expr_is_linear(offset) || offset->term_count != 1 ||
-        offset->terms[0].value_id != transport->induction->value ||
-        !loom_value_facts_as_exact_i64(
-            loom_value_fact_recurrence_operand_facts(
-                &source->facts, transport->induction->initial_value),
-            &initial) ||
-        !loom_value_facts_as_exact_i64(
-            loom_value_fact_recurrence_operand_facts(
-                &source->facts, transport->induction->step),
-            &increment) ||
-        !iree_checked_mul_i64(offset->terms[0].coefficient, initial,
-                              &displacement) ||
-        !iree_checked_add_i64(begin, displacement, &begin) ||
-        !iree_checked_mul_i64(offset->terms[0].coefficient, increment,
-                              &stride)) {
-      return false;
-    }
-  }
+  const int64_t begin = input->source_byte_offset;
+  const int64_t stride = input->source_byte_stride;
+  const uint64_t period = input->period;
   const loom_xdna_dma_facts_t* local_dma =
       &context->pool_tiles[channel->pool_index]->facts->dma;
   const loom_xdna_dma_facts_t* shim_dma =
@@ -607,7 +570,7 @@ static bool loom_aie2p_native_can_repeat(
   if (channel->replay.record_count &&
       ((uint64_t)request->transferred_byte_count !=
            channel->record_byte_length ||
-       local->projection_byte_offset.constant != 0 ||
+       input->destination_byte_offset != 0 ||
        stride != channel->record_byte_length ||
        transport->repetitions % channel->replay.record_count)) {
     return false;
@@ -624,7 +587,7 @@ static bool loom_aie2p_native_can_repeat(
           (UINT64_C(1) << local_dma->step_size_bits) ||
       !loom_aie2p_native_select_ingress_descriptor(
           context, source, request, (uint32_t)stride,
-          (uint32_t)transport->repetitions, worker)) {
+          (uint32_t)transport->repetitions, (uint32_t)period, worker)) {
     return false;
   }
   worker->repetition.count = (uint32_t)transport->repetitions;
@@ -1006,6 +969,7 @@ static iree_status_t loom_aie2p_native_select(
           IREE_SV("a DMA-owned ingress for retained FIFO replay"));
     }
   }
+  IREE_RETURN_IF_ERROR(loom_aie2p_native_select_progress(context, realization));
   IREE_RETURN_IF_ERROR(
       loom_aie2p_native_select_collectives(context, realization, out_valid));
   if (!*out_valid) {

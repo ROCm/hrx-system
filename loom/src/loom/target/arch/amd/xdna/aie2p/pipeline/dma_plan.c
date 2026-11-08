@@ -277,13 +277,11 @@ bool loom_aie2p_native_encode_descriptor(
   return true;
 }
 
-bool loom_aie2p_native_encode_ingress(const loom_xdna_array_family_t* family,
-                                      const loom_storage_geometry_t* record,
-                                      const loom_xdna_dma_facts_t* dma,
-                                      uint32_t record_bytes,
-                                      uint32_t byte_stride,
-                                      uint32_t repetitions, uint32_t words[8],
-                                      uint32_t* out_repetitions) {
+bool loom_aie2p_native_encode_ingress(
+    const loom_xdna_array_family_t* family,
+    const loom_storage_geometry_t* record, const loom_xdna_dma_facts_t* dma,
+    uint32_t record_bytes, uint32_t byte_stride, uint32_t record_count,
+    uint32_t period, uint32_t words[8], uint32_t* out_repetitions) {
   iree_string_view_t reason;
   if (byte_stride) {
     // Local descriptor lengths and FIFO credits delimit records independently
@@ -300,39 +298,44 @@ bool loom_aie2p_native_encode_ingress(const loom_xdna_array_family_t* family,
         memmove(sequence.axes + 1, sequence.axes,
                 record->rank * sizeof(*sequence.axes));
         sequence.axes[0] = (loom_storage_geometry_axis_t){
-            .extent = repetitions,
+            .extent = period,
             .element_stride = stride_bits / record->element_bit_count};
         sequence.rank++;
         sequence.layout_kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED;
       }
     }
     if (representable && loom_aie2p_native_encode_descriptor(
-                             family, &sequence, dma, record_bytes, repetitions,
+                             family, &sequence, dma, record_bytes, period,
                              LOOM_XDNA_TILE_KIND_SHIM_NOC, words, &reason)) {
-      *out_repetitions = 1;
+      *out_repetitions = period == record_count ? 1 : record_count / period;
       return true;
     }
     // A short stream can retain all native dimensions for each record and use
     // the independent descriptor iterator for its sequence axis.
     const uint64_t step = byte_stride / dma->transfer_length_granularity;
-    if (repetitions > (UINT64_C(1) << dma->iteration_bits) ||
+    if (period > (UINT64_C(1) << dma->iteration_bits) ||
         step > (UINT64_C(1) << dma->step_size_bits)) {
       return false;
     }
     words[6] =
         loom_xdna_register_field_encode(
             LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD6_ITERATION_WRAP,
-            repetitions - 1) |
+            period - 1) |
         loom_xdna_register_field_encode(
             LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD6_ITERATION_STEP_SIZE,
             step - 1);
+  }
+  // A task chain duplicates descriptor-local iterator state. Repeated periods
+  // must restart in the transfer dimensions or retain a single fixed address.
+  if (period != record_count && period != 1) {
+    return false;
   }
   if (!loom_aie2p_native_encode_descriptor(family, record, dma, record_bytes, 1,
                                            LOOM_XDNA_TILE_KIND_SHIM_NOC, words,
                                            &reason)) {
     return false;
   }
-  *out_repetitions = repetitions;
+  *out_repetitions = record_count;
   return true;
 }
 

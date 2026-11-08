@@ -11,6 +11,8 @@
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/configuration_descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/ops/target.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/sharing.h"
 #include "loom/target/arch/amd/xdna/aie2p/records/target_records.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
 #include "loom/target/facts_builder.h"
@@ -654,6 +656,18 @@ static iree_status_t loom_aie2p_native_config_submit_distribution(
       config, &distribution->sender, LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM);
 }
 
+static iree_status_t loom_aie2p_native_config_wait_queue(
+    loom_aie2p_native_configuration_t* config,
+    const loom_aie2p_native_tile_t* tile, uint16_t engine,
+    loom_xdna_dma_direction_t direction) {
+  const loom_aie2p_native_queue_status_t status =
+      loom_aie2p_native_queue_status(config->context, tile, engine, direction);
+  const uint64_t values[] = {status.address, status.pending_mask, 0};
+  return loom_aie2p_native_config_op(
+      config, AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_WAIT_MASK32,
+      values, IREE_ARRAYSIZE(values), loom_named_attr_slice_empty());
+}
+
 static iree_status_t loom_aie2p_native_config_wait_distribution_endpoint(
     loom_aie2p_native_configuration_t* config,
     const loom_aie2p_native_distribution_endpoint_t* endpoint,
@@ -661,13 +675,8 @@ static iree_status_t loom_aie2p_native_config_wait_distribution_endpoint(
   if (!endpoint->wait_for_idle) {
     return iree_ok_status();
   }
-  const loom_aie2p_native_queue_status_t status =
-      loom_aie2p_native_queue_status(config->context, endpoint->tile,
-                                     endpoint->engine, direction);
-  const uint64_t values[] = {status.address, status.pending_mask, 0};
-  return loom_aie2p_native_config_op(
-      config, AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_WAIT_MASK32,
-      values, IREE_ARRAYSIZE(values), loom_named_attr_slice_empty());
+  return loom_aie2p_native_config_wait_queue(config, endpoint->tile,
+                                             endpoint->engine, direction);
 }
 
 static iree_status_t loom_aie2p_native_config_communicate(
@@ -794,6 +803,12 @@ static iree_status_t loom_aie2p_native_config_communicate(
         }
         IREE_RETURN_IF_ERROR(loom_aie2p_native_config_set_lock(
             config, tile, action->lock, action->value));
+        if (channel->delivery && action->lock == channel->free_lock &&
+            action->expected < 0 &&
+            action != channel->configuration_returns.last) {
+          IREE_RETURN_IF_ERROR(loom_aie2p_native_config_write(
+              config, channel->delivery->address, channel->delivery->task));
+        }
         break;
       }
     }
@@ -1054,6 +1069,20 @@ iree_status_t loom_aie2p_native_emit_configuration(
             loom_aie2p_native_config_wait_distribution_endpoint(
                 &config, &distribution->receivers[j],
                 LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY));
+      }
+    }
+  }
+  // The final observed record proves delivery, while explicit queue retirement
+  // also covers each reader-issued task's trailing hardware state updates.
+  // This runs once at epoch completion, before a later invocation can rewind
+  // an immutable descriptor or reuse its storage.
+  for (iree_host_size_t i = 0; i < realization->invocations.worker_count; ++i) {
+    for (const loom_aie2p_native_refill_t* refill = context->workers[i].refills;
+         refill; refill = refill->next) {
+      for (const loom_aie2p_native_refill_queue_t* queue = refill->queues;
+           queue; queue = queue->next) {
+        IREE_RETURN_IF_ERROR(loom_aie2p_native_config_wait_queue(
+            &config, queue->tile, queue->engine, queue->direction));
       }
     }
   }

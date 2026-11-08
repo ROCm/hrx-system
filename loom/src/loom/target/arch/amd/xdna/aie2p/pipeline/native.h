@@ -17,6 +17,10 @@
 #include "loom/target/arch/amd/xdna/array/registers.h"
 #include "loom/transforms/pipeline/realization.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // One endpoint's admitted cursor behavior for this execution occurrence.
 typedef struct loom_aie2p_native_cursor_t {
   // Representative strand owning the cursor, or UINT32_MAX until selected.
@@ -70,6 +74,19 @@ typedef struct loom_aie2p_native_channel_t {
     // Ready/free credits exchanged at each complete batch boundary.
     uint32_t credits;
   } replay;
+  // Existing compute reader whose nth admission proves this FIFO's nth record
+  // has been transported. NULL when no exact one-to-one progress is retained.
+  const struct loom_aie2p_native_channel_t* progress;
+  // Exact singleton credit-return sites owned by an existing configuration
+  // reader. The final site retires ownership without granting more work.
+  struct {
+    // Number of complete records reclaimed by the straight-line continuation.
+    uint32_t count;
+    // Last credit return, or NULL when this reader has no such continuation.
+    const struct loom_aie2p_native_configuration_action_t* last;
+  } configuration_returns;
+  // Receiver-granted sender whose payload path actually carries control too.
+  struct loom_aie2p_native_delivery_t* delivery;
 } loom_aie2p_native_channel_t;
 
 // One worker's admitted access to a channel's resident memory and credits.
@@ -351,6 +368,13 @@ typedef struct loom_aie2p_native_distribution_t {
   uint8_t packet_count;
   // Source transmissions in a uniform circuit stream; zero for packet programs.
   uint32_t repetitions;
+  // Exact route-edge interval produced for this uniform source's fanout.
+  struct {
+    // First edge in the route builder's stable append-only table.
+    iree_host_size_t first;
+    // Number of edges, excluding routes owned by other distributions.
+    iree_host_size_t count;
+  } routes;
 } loom_aie2p_native_distribution_t;
 
 // One ordered use of an immutable distribution geometry. The controller's
@@ -500,6 +524,8 @@ typedef struct loom_aie2p_native_worker_t {
   uint8_t control_packet_count;
   // An external-write path already owns the core's completion stream.
   bool has_egress;
+  // Reader-driven continuation groups sharing one window counter pair.
+  struct loom_aie2p_native_refill_t* refills;
 } loom_aie2p_native_worker_t;
 
 typedef struct loom_aie2p_native_join_function_t {
@@ -599,6 +625,9 @@ typedef struct loom_aie2p_native_context_t {
   // Canonical packet source tree per tile's core and tile-control output.
   // UINT32_MAX marks an unused output; destinations share its physical links.
   uint32_t* control_sources;
+  // Optional receiver-granted payload path per destination tile. Allocated
+  // only when resident task refill needs control routes.
+  struct loom_aie2p_native_delivery_t** deliveries;
   // Complete desired routing state for each traversed switch.
   loom_aie2p_native_switch_t* switches;
   // Typed ordinary helper emitter.
@@ -680,8 +709,9 @@ iree_status_t loom_aie2p_native_bind_distribution_phases(
 iree_status_t loom_aie2p_native_select_control_route(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization,
-    iree_host_size_t worker_index, loom_aie2p_native_tile_t* tile, bool reply,
-    uint32_t* next_source, uint8_t* next_controller, bool* out_valid);
+    iree_host_size_t worker_index, const loom_aie2p_native_tile_t* tile,
+    bool reply, uint32_t* next_source, uint8_t* next_controller,
+    bool* out_valid);
 
 iree_status_t loom_aie2p_native_distribution_boundary(
     loom_aie2p_native_context_t* context, loom_builder_t* builder,
@@ -707,9 +737,13 @@ loom_aie2p_native_queue_status_t loom_aie2p_native_queue_status(
     const loom_aie2p_native_tile_t* tile, uint16_t engine,
     loom_xdna_dma_direction_t direction);
 
+// Selects startup tasks and, when required, a retained reader continuation.
+// progress_channel is NULL for queues without an equal-ordinal channel proof,
+// including queues whose admission belongs to an ordered distribution phase.
 iree_status_t loom_aie2p_native_select_sequence(
     loom_aie2p_native_context_t* context, loom_aie2p_native_tile_t* tile,
-    uint8_t engine, loom_xdna_dma_direction_t direction, uint32_t repetitions,
+    uint8_t engine, loom_xdna_dma_direction_t direction,
+    const loom_aie2p_native_channel_t* progress_channel, uint32_t repetitions,
     uint32_t capacity, uint32_t byte_offset, uint32_t byte_stride,
     uint32_t credit_interval, const uint32_t template_words[8],
     loom_aie2p_native_dma_sequence_t* out_sequence,
@@ -734,7 +768,7 @@ bool loom_aie2p_native_select_ingress_descriptor(
     const loom_aie2p_native_context_t* context,
     const loom_pipeline_worker_t* source,
     const loom_movement_request_t* request, uint32_t byte_stride,
-    uint32_t repetitions, loom_aie2p_native_worker_t* worker);
+    uint32_t repetitions, uint32_t period, loom_aie2p_native_worker_t* worker);
 
 // Replaces retained copies/groups/waits using the selected transport helpers.
 // Channel access carriers are replaced by the following channel rewrite.
@@ -767,5 +801,9 @@ iree_status_t loom_aie2p_native_collective_end(
     void* user_data, loom_builder_t* builder, iree_host_size_t engine,
     const loom_pipeline_invocation_schedule_t* scope,
     const loom_pipeline_collective_t* collective, loom_value_id_t* values);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
 
 #endif  // LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_PIPELINE_NATIVE_H_

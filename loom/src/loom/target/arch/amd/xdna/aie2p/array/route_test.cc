@@ -298,4 +298,88 @@ TEST(Aie2pRouteTest, MemoryMulticastBranchesInTheReceivingComputeRow) {
   }
 }
 
+TEST(Aie2pRouteTest, ReceiverGrantSharesOnlyItsPayloadSuffix) {
+  iree_arena_block_pool_t blocks;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&blocks, &arena);
+  const auto* family = loom_xdna_npu2_array_family();
+  loom_aie2p_array_route_builder_t routing;
+  IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(family, 8, 64,
+                                                           &arena, &routing));
+  // Four real compute DMA senders occupy every lane of the final two links.
+  const loom_xdna_tile_coordinate_t sources[] = {
+      {0, 3}, {0, 3}, {0, 4}, {0, 5}};
+  const uint8_t engines[] = {0, 1, 0, 0};
+  size_t carrier_count = 0;
+  for (uint32_t i = 0; i < 4; ++i) {
+    ASSERT_TRUE(loom_aie2p_array_route_workers(&routing, i, i, sources[i],
+                                               engines[i], {0, 1}, i, false));
+    if (!i) {
+      carrier_count = routing.route_count;
+    }
+  }
+  loom_aie2p_array_route_sharing_t sharing;
+  IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
+      &routing, 0, carrier_count, {0, 1}, &arena, &sharing));
+  const loom_xdna_tile_coordinate_t control_sources[] = {{0, 4}, {1, 5}};
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(control_sources); ++i) {
+    const uint32_t source = 4 + i;
+    const size_t first = routing.route_count;
+    ASSERT_TRUE(loom_aie2p_array_route_control(&routing, source, source,
+                                               control_sources[i], &sharing));
+    EXPECT_TRUE(sharing.used);
+    // Cross-column control enters the carrier column on its compute row,
+    // preserving the path before it joins the granted payload suffix.
+    if (control_sources[i].column != sharing.destination.column) {
+      EXPECT_EQ(routing.routes[first].coordinate.row, control_sources[i].row);
+      EXPECT_EQ(routing.routes[first].destination_port,
+                LOOM_XDNA_STREAM_PORT_WEST);
+    }
+    // Both controls converge on the carrier and retain exactly its suffix,
+    // so one physical input/packet cannot fork and duplicate the control write.
+    for (size_t i = first; i < routing.route_count; ++i) {
+      const auto& edge = routing.routes[i];
+      if (edge.coordinate.row == 3 || edge.coordinate.row == 2) {
+        EXPECT_EQ(edge.destination_port, LOOM_XDNA_STREAM_PORT_SOUTH);
+        EXPECT_EQ(edge.destination_channel, 0);
+      }
+      if (edge.coordinate.row == 2 || edge.coordinate.row == 1) {
+        EXPECT_EQ(edge.source_port, LOOM_XDNA_STREAM_PORT_NORTH);
+        EXPECT_EQ(edge.source_channel, 0);
+      }
+    }
+    EXPECT_EQ(routing.routes[routing.route_count - 1].destination_port,
+              LOOM_XDNA_STREAM_PORT_TILE_CONTROL);
+  }
+  // An existing source prefix cannot extend the shared stream to another
+  // destination outside the granted packet domain.
+  EXPECT_FALSE(loom_aie2p_array_route_stream(
+      &routing, 6, 4, {0, 4}, LOOM_XDNA_STREAM_PORT_CORE, 0, {0, 2},
+      LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, true));
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&blocks);
+}
+
+TEST(Aie2pRouteTest, AvailableControlLaneKeepsPayloadUnshared) {
+  iree_arena_block_pool_t blocks;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&blocks, &arena);
+  loom_aie2p_array_route_builder_t routing;
+  IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
+      loom_xdna_npu2_array_family(), 2, 16, &arena, &routing));
+  ASSERT_TRUE(loom_aie2p_array_route_workers(&routing, 0, 0, {0, 2}, 0, {0, 1},
+                                             0, false));
+  loom_aie2p_array_route_sharing_t sharing;
+  IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
+      &routing, 0, routing.route_count, {0, 1}, &arena, &sharing));
+  const size_t first = routing.route_count;
+  ASSERT_TRUE(loom_aie2p_array_route_control(&routing, 1, 1, {0, 2}, &sharing));
+  EXPECT_FALSE(sharing.used);
+  EXPECT_EQ(routing.routes[first].destination_channel, 1);
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&blocks);
+}
+
 }  // namespace

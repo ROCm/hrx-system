@@ -101,7 +101,7 @@ typedef struct loom_aie2p_native_memory_layout_t {
 extern const loom_aie2p_native_memory_layout_t loom_aie2p_compute_memory;
 extern const loom_aie2p_native_memory_layout_t loom_aie2p_sram_memory;
 
-// Complete finite descriptor and task program for one DMA endpoint.
+// Immutable descriptor images and startup tasks for one DMA endpoint.
 typedef struct loom_aie2p_native_dma_sequence_t {
   // First descriptor in the contiguous allocation owned by this sequence.
   uint16_t descriptor;
@@ -129,14 +129,14 @@ bool loom_aie2p_native_encode_descriptor(
 // Coalesces an immutable external sequence where native geometry permits it;
 // otherwise retains fixed-source repetition or the short address iterator.
 // Stable-source ownership and exact consumer completion precede this query.
+// The address period divides record_count. Repeated periods must fit the
+// descriptor's transfer dimensions without an independent iterator cursor.
 // The caller supplies zero-initialized words and DMA-aligned record strides.
-bool loom_aie2p_native_encode_ingress(const loom_xdna_array_family_t* family,
-                                      const loom_storage_geometry_t* record,
-                                      const loom_xdna_dma_facts_t* dma,
-                                      uint32_t record_bytes,
-                                      uint32_t byte_stride,
-                                      uint32_t repetitions, uint32_t words[8],
-                                      uint32_t* out_repetitions);
+bool loom_aie2p_native_encode_ingress(
+    const loom_xdna_array_family_t* family,
+    const loom_storage_geometry_t* record, const loom_xdna_dma_facts_t* dma,
+    uint32_t record_bytes, uint32_t byte_stride, uint32_t record_count,
+    uint32_t period, uint32_t words[8], uint32_t* out_repetitions);
 
 // Builds a finite program within the caller's available descriptor bank. All
 // tasks fit the hardware queue before any completion wait. The layout is NULL

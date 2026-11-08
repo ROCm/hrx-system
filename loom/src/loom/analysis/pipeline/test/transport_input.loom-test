@@ -1,0 +1,421 @@
+// RUN: emit pipeline-transport @test input
+
+// Five complete periods retain the exact source range and restart point.
+func.def @ingress(%input: buffer, %records: channel<tile<4xi32>>) {
+  %begin = index.constant 0 : index
+  %end = index.constant 40 : index
+  %step = index.constant 1 : index
+  %divisor = index.constant 1 : index
+  %modulus = index.constant 8 : index
+  %stride = index.constant 32 : index
+  cfg.br ^header(%begin: index)
+^header(%record: index):
+  %more = index.cmp ult, %record, %end : index
+  cfg.cond_br %more, ^copy, ^done
+^copy:
+  %quotient = index.div %record, %divisor : index
+  %panel = index.rem %quotient, %modulus : index
+  %byte_index = index.mul %panel, %stride : index
+  %offset = index.cast %byte_index : index to offset
+  %source = buffer.view %input[%offset] : buffer -> view<4xi32>
+  %write, %payload = channel.reserve %records : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %copy = kernel.async.copy %source to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.publish %write : write<tile<4xi32>>
+  %next = index.add %record, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def public @test() run(%input_arg: buffer, %storage_arg: buffer) {
+  %input = buffer.assume.memory_space<global> %input_arg : buffer
+  %storage = buffer.assume.memory_space<workgroup> %storage_arg : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x4xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<2x4xi32>, index -> channel<tile<4xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @ingress(%input, %records) : (buffer, channel<tile<4xi32>>)
+  }
+}
+
+// ----
+worker 0: repetitions=40 period=8 source_offset=0 source_stride=32 destination_offset=0
+
+// ====
+// RUN: emit pipeline-transport @test input
+
+// A nonzero residue and stride retain the actual first address.
+func.def @ingress(%input: buffer, %records: channel<tile<4xi32>>) {
+  %begin = index.constant 1 : index
+  %end = index.constant 81 : index
+  %step = index.constant 2 : index
+  %divisor = index.constant 1 : index
+  %modulus = index.constant 8 : index
+  %stride = index.constant 32 : index
+  cfg.br ^header(%begin: index)
+^header(%record: index):
+  %more = index.cmp ult, %record, %end : index
+  cfg.cond_br %more, ^copy, ^done
+^copy:
+  %quotient = index.div %record, %divisor : index
+  %panel = index.rem %quotient, %modulus : index
+  %byte_index = index.mul %panel, %stride : index
+  %offset = index.cast %byte_index : index to offset
+  %source = buffer.view %input[%offset] : buffer -> view<4xi32>
+  %write, %payload = channel.reserve %records : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %copy = kernel.async.copy %source to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.publish %write : write<tile<4xi32>>
+  %next = index.add %record, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def public @test() run(%input_arg: buffer, %storage_arg: buffer) {
+  %input = buffer.assume.memory_space<global> %input_arg : buffer
+  %storage = buffer.assume.memory_space<workgroup> %storage_arg : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x4xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<2x4xi32>, index -> channel<tile<4xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @ingress(%input, %records) : (buffer, channel<tile<4xi32>>)
+  }
+}
+
+// ----
+worker 0: repetitions=40 period=4 source_offset=32 source_stride=64 destination_offset=0
+
+// ====
+// RUN: emit pipeline-transport @test input
+
+// An exact quotient of the induction step advances one source record.
+func.def @ingress(%input: buffer, %records: channel<tile<4xi32>>) {
+  %begin = index.constant 16 : index
+  %end = index.constant 96 : index
+  %step = index.constant 2 : index
+  %divisor = index.constant 2 : index
+  %modulus = index.constant 8 : index
+  %stride = index.constant 32 : index
+  cfg.br ^header(%begin: index)
+^header(%record: index):
+  %more = index.cmp ult, %record, %end : index
+  cfg.cond_br %more, ^copy, ^done
+^copy:
+  %quotient = index.div %record, %divisor : index
+  %panel = index.rem %quotient, %modulus : index
+  %byte_index = index.mul %panel, %stride : index
+  %offset = index.cast %byte_index : index to offset
+  %source = buffer.view %input[%offset] : buffer -> view<4xi32>
+  %write, %payload = channel.reserve %records : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %copy = kernel.async.copy %source to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.publish %write : write<tile<4xi32>>
+  %next = index.add %record, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def public @test() run(%input_arg: buffer, %storage_arg: buffer) {
+  %input = buffer.assume.memory_space<global> %input_arg : buffer
+  %storage = buffer.assume.memory_space<workgroup> %storage_arg : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x4xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<2x4xi32>, index -> channel<tile<4xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @ingress(%input, %records) : (buffer, channel<tile<4xi32>>)
+  }
+}
+
+// ----
+worker 0: repetitions=40 period=8 source_offset=0 source_stride=32 destination_offset=0
+
+// ====
+// RUN: emit pipeline-transport @test input
+
+// A range wholly inside one period is affine from its actual origin.
+func.def @ingress(%input: buffer, %records: channel<tile<4xi32>>) {
+  %begin = index.constant 3 : index
+  %end = index.constant 7 : index
+  %step = index.constant 1 : index
+  %divisor = index.constant 1 : index
+  %modulus = index.constant 8 : index
+  %stride = index.constant 32 : index
+  cfg.br ^header(%begin: index)
+^header(%record: index):
+  %more = index.cmp ult, %record, %end : index
+  cfg.cond_br %more, ^copy, ^done
+^copy:
+  %quotient = index.div %record, %divisor : index
+  %panel = index.rem %quotient, %modulus : index
+  %byte_index = index.mul %panel, %stride : index
+  %offset = index.cast %byte_index : index to offset
+  %source = buffer.view %input[%offset] : buffer -> view<4xi32>
+  %write, %payload = channel.reserve %records : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %copy = kernel.async.copy %source to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.publish %write : write<tile<4xi32>>
+  %next = index.add %record, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def public @test() run(%input_arg: buffer, %storage_arg: buffer) {
+  %input = buffer.assume.memory_space<global> %input_arg : buffer
+  %storage = buffer.assume.memory_space<workgroup> %storage_arg : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x4xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<2x4xi32>, index -> channel<tile<4xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @ingress(%input, %records) : (buffer, channel<tile<4xi32>>)
+  }
+}
+
+// ----
+worker 0: repetitions=4 period=4 source_offset=96 source_stride=32 destination_offset=0
+
+// ====
+// RUN: emit pipeline-transport @test input
+
+// A final partial period cannot be rounded up into extra reads.
+func.def @ingress(%input: buffer, %records: channel<tile<4xi32>>) {
+  %begin = index.constant 0 : index
+  %end = index.constant 41 : index
+  %step = index.constant 1 : index
+  %divisor = index.constant 1 : index
+  %modulus = index.constant 8 : index
+  %stride = index.constant 32 : index
+  cfg.br ^header(%begin: index)
+^header(%record: index):
+  %more = index.cmp ult, %record, %end : index
+  cfg.cond_br %more, ^copy, ^done
+^copy:
+  %quotient = index.div %record, %divisor : index
+  %panel = index.rem %quotient, %modulus : index
+  %byte_index = index.mul %panel, %stride : index
+  %offset = index.cast %byte_index : index to offset
+  %source = buffer.view %input[%offset] : buffer -> view<4xi32>
+  %write, %payload = channel.reserve %records : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %copy = kernel.async.copy %source to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.publish %write : write<tile<4xi32>>
+  %next = index.add %record, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def public @test() run(%input_arg: buffer, %storage_arg: buffer) {
+  %input = buffer.assume.memory_space<global> %input_arg : buffer
+  %storage = buffer.assume.memory_space<workgroup> %storage_arg : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x4xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<2x4xi32>, index -> channel<tile<4xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @ingress(%input, %records) : (buffer, channel<tile<4xi32>>)
+  }
+}
+
+// ----
+worker 0: input=unproven
+
+// ====
+// RUN: emit pipeline-transport @test input
+
+// An interior wrap cannot be represented by one unrotated period.
+func.def @ingress(%input: buffer, %records: channel<tile<4xi32>>) {
+  %begin = index.constant 3 : index
+  %end = index.constant 43 : index
+  %step = index.constant 1 : index
+  %divisor = index.constant 1 : index
+  %modulus = index.constant 8 : index
+  %stride = index.constant 32 : index
+  cfg.br ^header(%begin: index)
+^header(%record: index):
+  %more = index.cmp ult, %record, %end : index
+  cfg.cond_br %more, ^copy, ^done
+^copy:
+  %quotient = index.div %record, %divisor : index
+  %panel = index.rem %quotient, %modulus : index
+  %byte_index = index.mul %panel, %stride : index
+  %offset = index.cast %byte_index : index to offset
+  %source = buffer.view %input[%offset] : buffer -> view<4xi32>
+  %write, %payload = channel.reserve %records : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %copy = kernel.async.copy %source to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.publish %write : write<tile<4xi32>>
+  %next = index.add %record, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def public @test() run(%input_arg: buffer, %storage_arg: buffer) {
+  %input = buffer.assume.memory_space<global> %input_arg : buffer
+  %storage = buffer.assume.memory_space<workgroup> %storage_arg : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x4xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<2x4xi32>, index -> channel<tile<4xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @ingress(%input, %records) : (buffer, channel<tile<4xi32>>)
+  }
+}
+
+// ----
+worker 0: input=unproven
+
+// ====
+// RUN: emit pipeline-transport @test input
+
+// A step relatively prime to the modulus needs a nonaffine sequence.
+func.def @ingress(%input: buffer, %records: channel<tile<4xi32>>) {
+  %begin = index.constant 0 : index
+  %end = index.constant 120 : index
+  %step = index.constant 3 : index
+  %divisor = index.constant 1 : index
+  %modulus = index.constant 8 : index
+  %stride = index.constant 32 : index
+  cfg.br ^header(%begin: index)
+^header(%record: index):
+  %more = index.cmp ult, %record, %end : index
+  cfg.cond_br %more, ^copy, ^done
+^copy:
+  %quotient = index.div %record, %divisor : index
+  %panel = index.rem %quotient, %modulus : index
+  %byte_index = index.mul %panel, %stride : index
+  %offset = index.cast %byte_index : index to offset
+  %source = buffer.view %input[%offset] : buffer -> view<4xi32>
+  %write, %payload = channel.reserve %records : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %copy = kernel.async.copy %source to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.publish %write : write<tile<4xi32>>
+  %next = index.add %record, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def public @test() run(%input_arg: buffer, %storage_arg: buffer) {
+  %input = buffer.assume.memory_space<global> %input_arg : buffer
+  %storage = buffer.assume.memory_space<workgroup> %storage_arg : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x4xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<2x4xi32>, index -> channel<tile<4xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @ingress(%input, %records) : (buffer, channel<tile<4xi32>>)
+  }
+}
+
+// ----
+worker 0: input=unproven
+
+// ====
+// RUN: emit pipeline-transport @test input
+
+// Quotient repeats are not one uniform stride per admitted record.
+func.def @ingress(%input: buffer, %records: channel<tile<4xi32>>) {
+  %begin = index.constant 0 : index
+  %end = index.constant 80 : index
+  %step = index.constant 1 : index
+  %divisor = index.constant 2 : index
+  %modulus = index.constant 8 : index
+  %stride = index.constant 32 : index
+  cfg.br ^header(%begin: index)
+^header(%record: index):
+  %more = index.cmp ult, %record, %end : index
+  cfg.cond_br %more, ^copy, ^done
+^copy:
+  %quotient = index.div %record, %divisor : index
+  %panel = index.rem %quotient, %modulus : index
+  %byte_index = index.mul %panel, %stride : index
+  %offset = index.cast %byte_index : index to offset
+  %source = buffer.view %input[%offset] : buffer -> view<4xi32>
+  %write, %payload = channel.reserve %records : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %copy = kernel.async.copy %source to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.publish %write : write<tile<4xi32>>
+  %next = index.add %record, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def public @test() run(%input_arg: buffer, %storage_arg: buffer) {
+  %input = buffer.assume.memory_space<global> %input_arg : buffer
+  %storage = buffer.assume.memory_space<workgroup> %storage_arg : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x4xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<2x4xi32>, index -> channel<tile<4xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @ingress(%input, %records) : (buffer, channel<tile<4xi32>>)
+  }
+}
+
+// ----
+worker 0: input=unproven
+
+// ====
+// RUN: emit pipeline-transport @test input
+
+// A step equal to the modulus repeatedly reads the same source record.
+func.def @ingress(%input: buffer, %records: channel<tile<4xi32>>) {
+  %begin = index.constant 3 : index
+  %end = index.constant 83 : index
+  %step = index.constant 8 : index
+  %divisor = index.constant 1 : index
+  %modulus = index.constant 8 : index
+  %stride = index.constant 32 : index
+  cfg.br ^header(%begin: index)
+^header(%record: index):
+  %more = index.cmp ult, %record, %end : index
+  cfg.cond_br %more, ^copy, ^done
+^copy:
+  %quotient = index.div %record, %divisor : index
+  %panel = index.rem %quotient, %modulus : index
+  %byte_index = index.mul %panel, %stride : index
+  %offset = index.cast %byte_index : index to offset
+  %source = buffer.view %input[%offset] : buffer -> view<4xi32>
+  %write, %payload = channel.reserve %records : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %copy = kernel.async.copy %source to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.publish %write : write<tile<4xi32>>
+  %next = index.add %record, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def public @test() run(%input_arg: buffer, %storage_arg: buffer) {
+  %input = buffer.assume.memory_space<global> %input_arg : buffer
+  %storage = buffer.assume.memory_space<workgroup> %storage_arg : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x4xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<2x4xi32>, index -> channel<tile<4xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @ingress(%input, %records) : (buffer, channel<tile<4xi32>>)
+  }
+}
+
+// ----
+worker 0: repetitions=10 period=10 source_offset=96 source_stride=0 destination_offset=0
