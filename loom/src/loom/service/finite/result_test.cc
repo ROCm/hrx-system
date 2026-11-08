@@ -26,13 +26,13 @@ class ResultTest : public ::testing::Test {
     iree_vm_buffer_release(plan_);
   }
 
-  iree_status_t CreatePlan() {
+  iree_status_t CreatePlan(size_t word_count = 16) {
     IREE_RETURN_IF_ERROR(iree_vm_buffer_create(
-        sizeof(words_), 8, iree_allocator_system(), &plan_));
+        word_count * 8, 8, iree_allocator_system(), &plan_));
     iree_byte_span_t bytes;
     IREE_RETURN_IF_ERROR(
-        iree_vm_buffer_map_write(plan_, 0, sizeof(words_), &bytes));
-    for (size_t i = 0; i < words_.size(); ++i) {
+        iree_vm_buffer_map_write(plan_, 0, word_count * 8, &bytes));
+    for (size_t i = 0; i < word_count; ++i) {
       iree_unaligned_store_le_u64(bytes.data + i * 8, words_[i]);
     }
     return iree_ok_status();
@@ -74,6 +74,28 @@ TEST_F(ResultTest, SourceBufferReuseCannotMutateCheckedRows) {
   EXPECT_EQ(second.length, 8u);
   EXPECT_EQ(third.offset, 16u);
   EXPECT_EQ(third.length, 4u);
+}
+
+TEST_F(ResultTest, UnpublishedEpochHasNoResultPayload) {
+  words_ = {32, 0, 2, 0, 0, 0, 7, 0, 0, 11};
+  IREE_ASSERT_OK(CreatePlan(10));
+  IREE_ASSERT_OK(CreateResult(iree_allocator_system()));
+  EXPECT_EQ(loom_service_finite_result_length(result_), 0u);
+  EXPECT_EQ(loom_service_finite_result_row_count(result_, 0), 0u);
+  EXPECT_EQ(loom_service_finite_result_row_count(result_, 1), 0u);
+  EXPECT_EQ(loom_service_finite_result_input_tokens(result_, 0), 7u);
+  EXPECT_EQ(loom_service_finite_result_input_tokens(result_, 1), 11u);
+}
+
+TEST_F(ResultTest, PublishedPeerKeepsOriginalOrdinal) {
+  words_ = {32, 4, 2, 1, 0, 0, 7, 0, 1, 11, 0, 1};
+  IREE_ASSERT_OK(CreatePlan(12));
+  IREE_ASSERT_OK(CreateResult(iree_allocator_system()));
+  EXPECT_EQ(loom_service_finite_result_row_count(result_, 0), 0u);
+  EXPECT_EQ(loom_service_finite_result_row_count(result_, 1), 1u);
+  const auto row = loom_service_finite_result_row(result_, 1, 0);
+  EXPECT_EQ(row.offset, 0u);
+  EXPECT_EQ(row.length, 4u);
 }
 
 TEST_F(ResultTest, RejectsMalformedSourcePlanBeforePublication) {

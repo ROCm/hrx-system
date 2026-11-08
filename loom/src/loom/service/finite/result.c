@@ -61,7 +61,7 @@ iree_status_t loom_service_finite_result_create(
   const uint64_t length = iree_unaligned_load_le_u64(bytes.data + 8);
   const uint64_t count = iree_unaligned_load_le_u64(bytes.data + 16);
   const uint64_t rows = iree_unaligned_load_le_u64(bytes.data + 24);
-  if (!output_length || output_length > output_capacity || !length ||
+  if (!output_length || output_length > output_capacity ||
       length > result_capacity || length > output_length ||
       count != request_count || count > (bytes.data_length - 32) / 24 ||
       rows != (bytes.data_length - 32 - count * 24) / 16 ||
@@ -74,7 +74,8 @@ iree_status_t loom_service_finite_result_create(
     const uint8_t* record = bytes.data + 32 + i * 24;
     const uint64_t row_count = iree_unaligned_load_le_u64(record + 8);
     if (iree_unaligned_load_le_u64(record) != first_row ||
-        row_count != expected_rows[i] || row_count > rows - first_row) {
+        (row_count && row_count != expected_rows[i]) ||
+        row_count > rows - first_row) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "source result rows differ from request %zu", i);
     }
@@ -152,6 +153,12 @@ iree_host_size_t loom_service_finite_result_length(
 loom_runtime_execution_frontier_t loom_service_finite_result_ready(
     const loom_service_finite_result_t* result) {
   return result->ready;
+}
+
+iree_host_size_t loom_service_finite_result_row_count(
+    const loom_service_finite_result_t* result, iree_host_size_t request) {
+  return (iree_host_size_t)iree_unaligned_load_le_u64(result->records +
+                                                      request * 24 + 8);
 }
 
 uint64_t loom_service_finite_result_input_tokens(

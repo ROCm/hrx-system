@@ -343,13 +343,15 @@ class SourceTextServiceTest : public ::testing::Test {
   }
 
   void Observe(const loom_serve_service_t& interface) {
-    interface.runtime.vtable->set_observer(
-        interface.runtime.self,
-        {[](void* payload) {
-           iree_notification_post(static_cast<iree_notification_t*>(payload),
-                                  IREE_ALL_WAITERS);
-         },
-         loom_serve_http_server_notification(server_)});
+    const loom_runtime_wake_callback_t observer = {
+        [](void* payload) {
+          iree_notification_post(static_cast<iree_notification_t*>(payload),
+                                 IREE_ALL_WAITERS);
+        },
+        loom_serve_http_server_notification(server_),
+    };
+    loom_runtime_device_group_set_observer(group_, observer);
+    interface.runtime.vtable->set_observer(interface.runtime.self, observer);
   }
 
   void Accept(int client, const loom_serve_service_t& interface,
@@ -386,6 +388,7 @@ class SourceTextServiceTest : public ::testing::Test {
     auto* notification = loom_serve_http_server_notification(server_);
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(notification);
+      IREE_ASSERT_OK(loom_runtime_device_group_advance(group_));
       bool progress = false;
       IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self,
                                                        flags, &progress));

@@ -1066,14 +1066,14 @@ iree_status_t loom_service_finite_model_prepare_batch(
       iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
                                                model->control.tags),
       loom_service_finite_batch_begin(model->control.batch, count, requests,
-                                      false)};
+                                      NULL)};
   iree_vm_variant_t results[3] = {0};
   iree_vm_buffer_t* plan = NULL;
   iree_status_t status = iree_vm_invoke(
       loom_runtime_program_invocation(model->control.program),
       model->control.prepare_batch, iree_vm_variant_span_from_array(arguments),
       iree_vm_variant_span_from_array(results));
-  loom_service_finite_batch_end(model->control.batch);
+  status = loom_service_finite_batch_end(model->control.batch, status);
   int32_t stage = 0;
   loom_runtime_preparation_t* declarations =
       loom_runtime_preparation_module_take(model->control.preparation);
@@ -1121,17 +1121,18 @@ iree_status_t loom_service_finite_model_prepare_batch(
 
 iree_status_t loom_service_finite_model_collect_batch(
     loom_service_finite_model_t* model, iree_host_size_t count,
-    loom_service_prepared_request_t* requests) {
+    loom_service_prepared_request_t* requests,
+    const loom_service_finite_result_t* result) {
   iree_vm_variant_t arguments[] = {
       iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
                                                model->control.state),
       loom_service_finite_batch_begin(model->control.batch, count, requests,
-                                      true)};
+                                      result)};
   iree_status_t status = iree_vm_invoke(
       loom_runtime_program_invocation(model->control.program),
       model->control.collect_batch, iree_vm_variant_span_from_array(arguments),
       iree_vm_variant_span_empty());
-  loom_service_finite_batch_end(model->control.batch);
+  status = loom_service_finite_batch_end(model->control.batch, status);
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
   return status;
 }
@@ -1244,4 +1245,87 @@ void loom_service_finite_model_complete(loom_service_finite_model_t* model) {
   loom_runtime_residency_release(
       loom_service_executables_residency(model->executables));
   loom_service_finite_model_release_batch(model);
+}
+
+static uint64_t loom_service_finite_generator_batch_limit(void* self) {
+  return loom_service_finite_model_batch_limit(self);
+}
+static const iree_tokenizer_t* loom_service_finite_generator_tokenizer(
+    void* self) {
+  return loom_service_finite_model_tokenizer(self);
+}
+static loom_runtime_residency_t* loom_service_finite_generator_residency(
+    void* self) {
+  return loom_service_finite_model_residency(self);
+}
+static loom_service_execution_update_t loom_service_finite_generator_update(
+    void* self) {
+  return loom_service_finite_model_execution_update(self);
+}
+static void loom_service_finite_generator_set_observer(
+    void* self, loom_runtime_wake_callback_t observer) {
+  loom_service_finite_model_set_observer(self, observer);
+}
+static bool loom_service_finite_generator_is_pending(void* self) {
+  return loom_service_finite_model_is_pending(self);
+}
+static iree_status_t loom_service_finite_generator_query_status(void* self) {
+  return loom_service_finite_model_query_status(self);
+}
+static iree_status_t loom_service_finite_generator_prepare_request(
+    void* self, iree_vm_buffer_t* input,
+    loom_service_prepared_request_t* out_work) {
+  return loom_service_finite_model_prepare_request(self, input, out_work);
+}
+static void loom_service_finite_generator_release_request(
+    void* self, loom_service_prepared_request_t* work) {
+  iree_vm_buffer_release(work->bytes);
+  memset(work, 0, sizeof(*work));
+}
+static iree_status_t loom_service_finite_generator_prepare_batch(
+    void* self, iree_host_size_t count, loom_service_prepared_request_t* work,
+    const iree_host_size_t* expected_rows) {
+  return loom_service_finite_model_prepare_batch(self, count, work,
+                                                 expected_rows);
+}
+static iree_status_t loom_service_finite_generator_advance_batch(
+    void* self, bool cancel, bool* out_complete) {
+  return loom_service_finite_model_advance_batch(self, cancel, out_complete);
+}
+static iree_status_t loom_service_finite_generator_submit(
+    void* self, loom_service_finite_result_t** out_result,
+    loom_runtime_execution_frontier_t* out_frontier) {
+  return loom_service_finite_model_submit(self, out_result, out_frontier);
+}
+static iree_status_t loom_service_finite_generator_collect(
+    void* self, iree_host_size_t count, loom_service_prepared_request_t* work,
+    const loom_service_finite_result_t* result) {
+  return loom_service_finite_model_collect_batch(self, count, work, result);
+}
+static void loom_service_finite_generator_complete(void* self) {
+  loom_service_finite_model_complete(self);
+}
+static void loom_service_finite_generator_release_batch(void* self) {
+  loom_service_finite_model_release_batch(self);
+}
+loom_service_finite_generator_t loom_service_finite_model_generator(
+    loom_service_finite_model_t* model) {
+  static const loom_service_finite_generator_vtable_t vtable = {
+      .batch_limit = loom_service_finite_generator_batch_limit,
+      .tokenizer = loom_service_finite_generator_tokenizer,
+      .residency = loom_service_finite_generator_residency,
+      .execution_update = loom_service_finite_generator_update,
+      .set_observer = loom_service_finite_generator_set_observer,
+      .is_pending = loom_service_finite_generator_is_pending,
+      .query_status = loom_service_finite_generator_query_status,
+      .prepare_request = loom_service_finite_generator_prepare_request,
+      .release_request = loom_service_finite_generator_release_request,
+      .prepare_batch = loom_service_finite_generator_prepare_batch,
+      .advance_batch = loom_service_finite_generator_advance_batch,
+      .submit = loom_service_finite_generator_submit,
+      .collect = loom_service_finite_generator_collect,
+      .complete = loom_service_finite_generator_complete,
+      .release_batch = loom_service_finite_generator_release_batch,
+  };
+  return (loom_service_finite_generator_t){model, &vtable};
 }

@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -31,6 +32,7 @@
 #include "loom/service/finite/call.h"
 #include "loom/service/finite/decision/protocol.h"
 #include "loom/service/finite/embedding/protocol.h"
+#include "loom/service/finite/model.h"
 #include "loom/service/finite/service.h"
 
 namespace {
@@ -72,9 +74,9 @@ class SourceDecisionServiceTest : public ::testing::Test {
         loom_runtime_test_application_device_group(application), 0);
     ASSERT_NO_FATAL_FAILURE(CreateModel(model_source_.c_str(), &models_[0]));
     IREE_ASSERT_OK(loom_service_finite_service_allocate(
-        host_, models_[0], loom_service_decision_protocol(),
-        IREE_SV("decisions"), 16, 16, 0, nullptr, host_allocator_,
-        &services_[0]));
+        host_, loom_service_finite_model_generator(models_[0]),
+        loom_service_decision_protocol(), IREE_SV("decisions"), 16, 16, 0,
+        nullptr, host_allocator_, &services_[0]));
     interfaces_[0] = loom_serve_finite_http_interface(services_[0]);
     EXPECT_EQ(interfaces_[0].runtime.capacity_domain,
               loom_runtime_pool_residency_cache(storage_owner_));
@@ -196,9 +198,9 @@ class SourceDecisionServiceTest : public ::testing::Test {
     ASSERT_NO_FATAL_FAILURE(
         CreateModel(embedding_source_.c_str(), &models_[1]));
     IREE_ASSERT_OK(loom_service_finite_service_allocate(
-        host_, models_[1], loom_service_embedding_protocol(),
-        IREE_SV("vectors"), 16, 16, 0, nullptr, host_allocator_,
-        &services_[1]));
+        host_, loom_service_finite_model_generator(models_[1]),
+        loom_service_embedding_protocol(), IREE_SV("vectors"), 16, 16, 0,
+        nullptr, host_allocator_, &services_[1]));
     interfaces_[1] = loom_serve_finite_http_interface(services_[1]);
     interfaces_[0].runtime.vtable->set_observer(interfaces_[0].runtime.self,
                                                 {});
@@ -402,8 +404,9 @@ TEST_F(SourceDecisionServiceTest, AdmissionAllocationFailureRetiresHttpClaim) {
       }};
   loom_service_finite_service_t* service = nullptr;
   IREE_ASSERT_OK(loom_service_finite_service_allocate(
-      host_, models_[0], loom_service_decision_protocol(), IREE_SV("decisions"),
-      1, 0, 0, nullptr, allocator, &service));
+      host_, loom_service_finite_model_generator(models_[0]),
+      loom_service_decision_protocol(), IREE_SV("decisions"), 1, 0, 0, nullptr,
+      allocator, &service));
   std::unique_ptr<loom_service_finite_service_t,
                   decltype(&loom_service_finite_service_free)>
       owner(service, loom_service_finite_service_free);
@@ -504,9 +507,10 @@ TEST_F(SourceDecisionServiceTest, PacksQuestionsAndRetainsResultsAcrossReset) {
   const int bad = Send(
       R"({"model":"decisions","state":"a","questions":{"bad":{"type":"score","instructions":"?","criteria":["one"]}}})");
   ASSERT_NO_FATAL_FAILURE(Accept(bad));
-  EXPECT_TRUE(Step());
-  EXPECT_TRUE(Step());
-  EXPECT_TRUE(Step());
+  while (std::strcmp(interfaces_[0].snapshot(interfaces_[0].runtime.self).phase,
+                     "running") != 0) {
+    ASSERT_TRUE(Step());
+  }
   const linger reset = {1, 0};
   ASSERT_EQ(setsockopt(c, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)), 0);
   ASSERT_EQ(close(c), 0);

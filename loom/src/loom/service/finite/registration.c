@@ -75,7 +75,8 @@ iree_status_t loom_service_finite_registration_prepare(
     const loom_service_finite_registration_options_t* options =
         &registration->options;
     status = loom_service_finite_service_allocate(
-        loom_runtime_device_host(registration->device), registration->model,
+        loom_runtime_device_host(registration->device),
+        loom_service_finite_model_generator(registration->model),
         options->protocol, options->name, options->capacity,
         options->variant_capacity, options->heartbeat_interval, options->stream,
         registration->host_allocator, &registration->service);

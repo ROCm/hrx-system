@@ -23,8 +23,8 @@ typedef struct loom_service_finite_batch_module_t {
   loom_service_prepared_request_t* requests;
   // Number of members in the active view.
   iree_host_size_t count;
-  // Only successful collection may publish the next work offers.
-  bool collecting;
+  // Accepted output metadata; NULL while preparing, borrowed while collecting.
+  const loom_service_finite_result_t* result;
 } loom_service_finite_batch_module_t;
 
 static void loom_service_finite_batch_destroy(void* pointer) {
@@ -54,21 +54,36 @@ iree_vm_ref_type_t loom_service_finite_batch_type(void) { return &batch_type; }
 
 iree_vm_variant_t loom_service_finite_batch_begin(
     iree_vm_module_t* base, iree_host_size_t count,
-    loom_service_prepared_request_t* requests, bool collecting) {
+    loom_service_prepared_request_t* requests,
+    const loom_service_finite_result_t* result) {
   loom_service_finite_batch_module_t* module =
       (loom_service_finite_batch_module_t*)base;
   module->requests = requests;
   module->count = count;
-  module->collecting = collecting;
+  module->result = result;
   return iree_vm_variant_from_ptr_borrowed(module, &batch_type);
 }
 
-void loom_service_finite_batch_end(iree_vm_module_t* base) {
+iree_status_t loom_service_finite_batch_end(iree_vm_module_t* base,
+                                            iree_status_t status) {
   loom_service_finite_batch_module_t* module =
       (loom_service_finite_batch_module_t*)base;
+  if (module->result) {
+    for (iree_host_size_t i = 0; i < module->count && iree_status_is_ok(status);
+         ++i) {
+      const bool published =
+          loom_service_finite_result_row_count(module->result, i) != 0;
+      if (published != (module->requests[i].units == 0)) {
+        status = iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "finite completion must agree with published result rows");
+      }
+    }
+  }
   module->requests = NULL;
   module->count = 0;
-  module->collecting = false;
+  module->result = NULL;
+  return status;
 }
 
 enum loom_service_finite_batch_function_e {
@@ -92,8 +107,7 @@ static iree_status_t loom_service_finite_batch_start(
                             "finite batch is not active");
   }
   const iree_host_size_t function = params->function_ordinal;
-  if ((function == BATCH_OFFER || function == BATCH_FINISH) &&
-      !batch->collecting) {
+  if ((function == BATCH_OFFER || function == BATCH_FINISH) && !batch->result) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "finite offers require successful collection");
   }

@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -232,8 +233,9 @@ void SourceEmbeddingServiceTest::CreateModel(const std::string& directory) {
 void SourceEmbeddingServiceTest::CreateService(
     iree_duration_t heartbeat_interval) {
   IREE_ASSERT_OK(loom_service_finite_service_allocate(
-      host_, model_, loom_service_embedding_protocol(), IREE_SV("fixture"), 16,
-      16, heartbeat_interval, nullptr, host_allocator_, &service_));
+      host_, loom_service_finite_model_generator(model_),
+      loom_service_embedding_protocol(), IREE_SV("fixture"), 16, 16,
+      heartbeat_interval, nullptr, host_allocator_, &service_));
   interface_ = loom_serve_finite_http_interface(service_);
   EXPECT_EQ(interface_.runtime.capacity_domain,
             loom_runtime_pool_residency_cache(storage_owner_));
@@ -362,10 +364,10 @@ void SourceEmbeddingServiceTest::CheckAbandonedCohort(
     clients[i] = Send(bodies[i]);
     ASSERT_NO_FATAL_FAILURE(Accept(clients[i], &connections[i]));
   }
-  ASSERT_TRUE(Step());  // CPU request preparation.
-  ASSERT_TRUE(Step());  // Source batch preparation.
-  ASSERT_TRUE(Step());  // Accepted device work; readiness may still be pending.
-  ASSERT_STREQ(interface_.snapshot(interface_.runtime.self).phase, "running");
+  while (std::strcmp(interface_.snapshot(interface_.runtime.self).phase,
+                     "running") != 0) {
+    ASSERT_TRUE(Step());
+  }
 
   if (!iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
     for (size_t i = 0; i < IREE_ARRAYSIZE(clients); ++i) {

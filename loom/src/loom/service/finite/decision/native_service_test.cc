@@ -650,7 +650,7 @@ TEST_F(NativeDecisionServiceTest, JsonCancellationJoinsEncodingBorrowers) {
   ASSERT_NO_FATAL_FAILURE(Open(1, kRequest, LOOM_SERVICE_FINITE_OUTPUT_JSON));
   ASSERT_NO_FATAL_FAILURE(DriveUntil([&] {
     return std::string(interface_.snapshot(interface_.runtime.self).phase) ==
-           "encoding";
+           "collecting";
   }));
   loom_service_finite_call_close(std::exchange(calls_[0], nullptr));
   ASSERT_NO_FATAL_FAILURE(DriveUntil(

@@ -26,8 +26,10 @@ typedef struct loom_service_finite_result_t loom_service_finite_result_t;
 // header is [physical output bytes, result bytes, request count, row count],
 // followed by [first row, row count, input tokens] per request, then
 // [byte offset, F32 count] per row. Rows lie within the result prefix of
-// output. expected_rows is protocol-derived, one entry per original request. A
-// newly created result has no device storage until the producer calls bind.
+// output. Each request has either zero published rows or its complete protocol
+// result, given by expected_rows. Zero rows permit nonterminal progress and do
+// not indicate completion; only source collection determines that. A newly
+// created result has no device storage until the producer calls bind.
 // Copying separates retained rows from source buffers reused by a later
 // invocation.
 iree_status_t loom_service_finite_result_create(
@@ -71,6 +73,9 @@ loom_runtime_execution_frontier_t loom_service_finite_result_ready(
 
 // Trusted queries into the checked plan. Request and row ordinals retain the
 // original cohort associations even when other requests have been cancelled.
+// Number of published rows; zero is an unpublished result, not completion.
+iree_host_size_t loom_service_finite_result_row_count(
+    const loom_service_finite_result_t* result, iree_host_size_t request);
 uint64_t loom_service_finite_result_input_tokens(
     const loom_service_finite_result_t* result, iree_host_size_t request);
 iree_hal_buffer_ref_t loom_service_finite_result_row(

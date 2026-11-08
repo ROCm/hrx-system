@@ -7,6 +7,7 @@
 #define LOOM_SERVICE_FINITE_REGISTRATION_H_
 
 #include "loom/runtime/parameter/activation.h"
+#include "loom/service/finite/model.h"
 #include "loom/service/finite/service.h"
 
 #ifdef __cplusplus

@@ -10,6 +10,7 @@
 #include "iree/vm/environment.h"
 #include "iree/vm/module.h"
 #include "iree/vm/variant.h"
+#include "loom/service/finite/result.h"
 #include "loom/service/prepared_request.h"
 
 #ifdef __cplusplus
@@ -40,12 +41,17 @@ iree_status_t loom_service_finite_batch_module_create(
 // allocation, state copy, or ownership transfer occurs. Original ordinals
 // include cancelled members until the accepted cohort retires. Only collection
 // can update offers; preparation borrows the states without changing them.
+// result is NULL for preparation and the accepted result for collection.
 iree_vm_variant_t loom_service_finite_batch_begin(
     iree_vm_module_t* module, iree_host_size_t count,
-    loom_service_prepared_request_t* requests, bool collecting);
+    loom_service_prepared_request_t* requests,
+    const loom_service_finite_result_t* result);
 
-// Invalidates the view before its caller releases or reuses member storage.
-void loom_service_finite_batch_end(iree_vm_module_t* module);
+// Invalidates the view before member storage can be reused. On successful
+// collection, checks that terminal offers agree with the published rows.
+// Consumes the source invocation status, preserving its error on failure.
+iree_status_t loom_service_finite_batch_end(iree_vm_module_t* module,
+                                            iree_status_t status);
 
 #ifdef __cplusplus
 }  // extern "C"

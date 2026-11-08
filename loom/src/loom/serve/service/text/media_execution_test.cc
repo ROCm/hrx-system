@@ -14,7 +14,9 @@
 #include "loom/serve/service/text/media_epoch.h"
 #include "loom/serve/service/text/media_projector.h"
 #include "loom/serve/service/text/service_test_fixture.h"
+#include "loom/service/finite/call.h"
 #include "loom/service/finite/embedding/protocol.h"
+#include "loom/service/finite/service.h"
 
 namespace {
 
@@ -100,7 +102,7 @@ class MediaExecutionTest : public SourceTextServiceTest {
   void RemoveProducer() {
     ASSERT_NO_FATAL_FAILURE(Wait(loom_service_finite_result_ready(result_)));
     IREE_ASSERT_OK(loom_service_finite_model_collect_batch(
-        producer_, prepared_.size(), prepared_.data()));
+        producer_, prepared_.size(), prepared_.data(), result_));
     loom_service_finite_model_complete(producer_);
     IREE_ASSERT_OK(
         loom_service_finite_model_free(std::exchange(producer_, nullptr)));
@@ -136,6 +138,175 @@ class MediaExecutionTest : public SourceTextServiceTest {
   // Final consumer output, read only by the test oracle.
   std::vector<uint8_t> output_;
 };
+
+class NativeMediaHandoffTest : public MediaExecutionTest {
+ protected:
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(MediaExecutionTest::SetUp());
+    IREE_ASSERT_OK(loom_service_finite_service_allocate(
+        host_, loom_service_finite_model_generator(producer_),
+        loom_service_embedding_protocol(), IREE_SV("media"), 3, 0, 0, nullptr,
+        host_allocator_, &native_service_));
+    interface_.runtime =
+        loom_service_finite_service_interface(native_service_).runtime;
+    Observe(interface_);
+    IREE_ASSERT_OK(
+        loom_serve_text_epoch_initialize(3, host_allocator_, &epoch_));
+  }
+
+  void TearDown() override {
+    if (native_service_) {
+      AdvanceUntil(
+          interface_,
+          [&] {
+            return !interface_.runtime.vtable->has_requests(
+                       interface_.runtime.self) &&
+                   !interface_.runtime.vtable->is_pending(
+                       interface_.runtime.self);
+          },
+          LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
+      loom_service_finite_service_free(native_service_);
+    }
+    for (auto* call : calls_) {
+      loom_service_finite_call_close(call);
+    }
+    MediaExecutionTest::TearDown();
+    loom_serve_text_epoch_deinitialize(&epoch_);
+  }
+
+  // Finite owner borrowing the producer until its asynchronous work retires.
+  loom_service_finite_service_t* native_service_ = nullptr;
+  // Existing fixture event-loop adapter; no HTTP requests use this interface.
+  loom_serve_service_t interface_ = {};
+  // Independent caller interests, retaining device results after model removal.
+  std::array<loom_service_finite_call_t*, 3> calls_ = {};
+  // Stable text membership and feedback storage across two accepted epochs.
+  loom_serve_text_epoch_t epoch_ = {};
+};
+
+TEST_F(NativeMediaHandoffTest, CancelledPeerAndRemovedProducerPreserveText) {
+  const char* bodies[] = {
+      R"({"model":"media","input":["a","b"]})",
+      R"({"model":"media","input":["bb","a","xxx"]})",
+      R"({"model":"media","input":["b","a"]})",
+  };
+  for (size_t i = 0; i < calls_.size(); ++i) {
+    iree_string_builder_t body;
+    iree_string_builder_initialize(host_allocator_, &body);
+    IREE_ASSERT_OK(iree_string_builder_append_cstring(&body, bodies[i]));
+    auto status = loom_service_finite_service_try_open(
+        native_service_, &body, LOOM_SERVICE_FINITE_OUTPUT_DEVICE, &calls_[i]);
+    iree_string_builder_deinitialize(&body);
+    IREE_ASSERT_OK(status);
+    ASSERT_NE(calls_[i], nullptr);
+  }
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
+    return loom_service_finite_call_output(calls_[2]) != nullptr ||
+           loom_service_finite_call_is_complete(calls_[2]);
+  }));
+  ASSERT_NE(loom_service_finite_call_output(calls_[0]), nullptr);
+  ASSERT_NE(loom_service_finite_call_output(calls_[2]), nullptr);
+  const auto first = *loom_service_finite_call_output(calls_[0]);
+  const auto last = *loom_service_finite_call_output(calls_[2]);
+  ASSERT_EQ(first.result, last.result);
+  EXPECT_EQ(first.request_index, 0u);
+  EXPECT_EQ(last.request_index, 2u);
+  EXPECT_FALSE(loom_service_finite_call_is_complete(calls_[1]));
+  loom_service_finite_call_close(std::exchange(calls_[1], nullptr));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
+    return loom_service_finite_call_is_complete(calls_[0]) &&
+           loom_service_finite_call_is_complete(calls_[2]);
+  }));
+  for (size_t i : {0u, 2u}) {
+    IREE_ASSERT_OK(loom_service_finite_call_status(calls_[i]));
+  }
+  const auto finite = loom_service_finite_service_interface(native_service_);
+  EXPECT_EQ(finite.telemetry.counters->batches, 1u);
+  loom_service_finite_service_free(std::exchange(native_service_, nullptr));
+  IREE_ASSERT_OK(
+      loom_service_finite_model_free(std::exchange(producer_, nullptr)));
+
+  const loom_serve_text_media_input_span_t images[] = {
+      {
+          .input_offset = 1,
+          .input_count = 2,
+          .request_index = static_cast<uint32_t>(first.request_index),
+          .result = first.result,
+      },
+      {
+          .input_offset = 0,
+          .input_count = 2,
+          .request_index = static_cast<uint32_t>(last.request_index),
+          .result = last.result,
+      },
+  };
+  const loom_serve_text_media_input_t media[] = {{&images[0], 1},
+                                                 {&images[1], 1}};
+  const std::array<std::vector<int32_t>, 3> tokens = {
+      {{2, 0, 0, 1}, {0, 0, 2}, {1, 2}}};
+  const std::array<std::vector<int32_t>, 3> expected = {
+      {{2, Fingerprint(1), Fingerprint(2, 1), 1},
+       {Fingerprint(2), Fingerprint(1, 1), 2},
+       tokens[2]}};
+  const auto mode = LOOM_SERVICE_TEXT_SCHEDULE_PACKED;
+  const loom_serve_text_epoch_options_t options = {
+      .context_capacity = 96,
+      .chunk_size = 4,
+      .continuation_epochs = 1,
+      .schedule_mode = mode,
+      .shapes = shapes_,
+      .shape_count = IREE_ARRAYSIZE(shapes_),
+  };
+  std::array<size_t, 3> offsets = {};
+  for (size_t chunk = 0; chunk < 2; ++chunk) {
+    const size_t count = chunk ? 3 : 2;
+    loom_serve_text_epoch_row_t rows[3] = {};
+    loom_serve_packed_span_t scheduled[3] = {};
+    loom_serve_packing_plan_t plan = {.span_count = count, .shape_index = 1};
+    for (size_t row = 0; row < count; ++row) {
+      rows[row] = {
+          .input_tokens = tokens[row].data() + offsets[row],
+          .input_count = tokens[row].size() - offsets[row],
+          .input_offset = offsets[row],
+          .media = row < 2 ? &media[row] : nullptr,
+          .output_count = 4,
+          .position = offsets[row],
+      };
+      scheduled[row] = {row, chunk ? rows[row].input_count : (row ? 1u : 2u)};
+      plan.token_count += scheduled[row].token_count;
+    }
+    loom_serve_text_continuation_t continuation;
+    loom_serve_text_epoch_prepare(&options, rows, 3, &plan, scheduled, &epoch_,
+                                  &continuation);
+    loom_runtime_execution_frontier_t ready;
+    IREE_ASSERT_OK(loom_serve_text_epoch_submit(
+        model_, mode, &epoch_, &continuation, nullptr, &ready));
+    if (chunk) {
+      // The accepted native capture is now the last owner of projected rows.
+      loom_service_finite_call_close(std::exchange(calls_[0], nullptr));
+      loom_service_finite_call_close(std::exchange(calls_[2], nullptr));
+    }
+    ASSERT_NO_FATAL_FAILURE(Wait(ready));
+    IREE_ASSERT_OK(loom_serve_text_epoch_complete(model_, mode, &epoch_));
+    for (size_t row = 0; row < count; ++row) {
+      EXPECT_EQ(epoch_.results[row].known_count, scheduled[row].token_count);
+      offsets[row] += epoch_.results[row].known_count;
+    }
+  }
+  for (size_t row = 0; row < 3; ++row) {
+    Oracle oracle;
+    for (int32_t value : expected[row]) {
+      oracle.Consume(value);
+    }
+    auto* state = loom_serve_text_model_row(model_, row);
+    for (size_t token = 0; token < 4; ++token) {
+      EXPECT_EQ(loom_serve_text_row_token(state), oracle.Predict());
+      oracle.Consume(oracle.Predict());
+      IREE_ASSERT_OK(loom_serve_text_row_decode(state));
+    }
+    IREE_ASSERT_OK(loom_serve_text_row_reset(state));
+  }
+}
 
 TEST_F(MediaExecutionTest, ProjectorAlignsAndReturnsItsHostAllocation) {
   constexpr size_t alignment = alignof(loom_runtime_readiness_task_t);

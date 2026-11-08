@@ -104,8 +104,10 @@ TEST_F(SourceEmbeddingServiceTest,
       interface_.inspection.request_at(interface_.runtime.self, 0, &preparing));
   EXPECT_EQ(preparing.id, 1u);
   EXPECT_STREQ(preparing.phase, "preparing");
-  EXPECT_TRUE(Step());  // Rejection collected; valid cohort constructed.
-  EXPECT_TRUE(Step());  // One command submitted, with compact feedback.
+  while (std::strcmp(interface_.snapshot(interface_.runtime.self).phase,
+                     "running") != 0) {
+    ASSERT_TRUE(Step());
+  }
   for (iree_host_size_t i = 0; i < 3; ++i) {
     loom_service_request_snapshot_t snapshot = {};
     ASSERT_TRUE(interface_.inspection.request_at(interface_.runtime.self, i,
@@ -124,11 +126,15 @@ TEST_F(SourceEmbeddingServiceTest,
             static_cast<loom_serve_http_connection_t*>(value));
       },
       cancelled, iree_infinite_timeout());
-  EXPECT_TRUE(Step());  // Capture only live result views for CPU encoding.
-  EXPECT_STREQ(interface_.snapshot(interface_.runtime.self).phase, "encoding");
-  EXPECT_EQ(interface_.snapshot(interface_.runtime.self).active_requests, 2u);
-  EXPECT_EQ(interface_.telemetry.counters->cancelled, 1u);
+  EXPECT_TRUE(Step());  // Collect source progress and encode live results.
+  EXPECT_STREQ(interface_.snapshot(interface_.runtime.self).phase,
+               "collecting");
+  // Original accepted membership remains stable until source collection
+  // retires.
+  EXPECT_EQ(interface_.snapshot(interface_.runtime.self).active_requests, 3u);
+  EXPECT_EQ(interface_.telemetry.counters->cancelled, 0u);
   Drain();
+  EXPECT_EQ(interface_.telemetry.counters->cancelled, 1u);
   const std::string result_a = Read(a);
   EXPECT_EQ(result_a.find("HTTP/1.1 200"), 0u);
   // Fourth component was computed on device from the *whole* cohort's four
@@ -415,7 +421,7 @@ class DeviceResultTest : public SourceEmbeddingServiceTest {
           ready.values[i]));
     }
     IREE_ASSERT_OK(loom_service_finite_model_collect_batch(
-        model_, prepared_.size(), prepared_.data()));
+        model_, prepared_.size(), prepared_.data(), results_[ordinal]));
     for (const auto& prepared : prepared_) {
       EXPECT_EQ(prepared.units, 0u);
       EXPECT_NE(prepared.bytes, nullptr);
