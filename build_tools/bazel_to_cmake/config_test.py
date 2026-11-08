@@ -1131,6 +1131,24 @@ cc_library(
 
         self.assertEqual(converter.body, "")
 
+    def test_external_tools_retain_native_test_dependencies(self):
+        for rule in ("iree_executable_test", "iree_tool_test"):
+            with self.subTest(rule=rule):
+                output = bazel_to_cmake_converter.convert_build_file(
+                    f"""{rule}(
+    name="check", src="//third_party:spirv_val",
+    data=["input.spv"], tools=["//third_party:spirv_dis"],
+    env={{"HELPER": "$(rootpath //third_party:spirv_dis)"}},
+)""",
+                    SimpleNamespace(REPO_MAP={"@hrx": ""}),
+                    "/repo/runtime/src/iree/base",
+                    repo_root="/repo",
+                )
+                self.assertIn("iree::third_party::spirv_val", output)
+                self.assertIn("iree::third_party::spirv_dis", output)
+                self.assertIn("input.spv", output)
+                self.assertIn("HELPER=", output)
+
     def test_generated_files_resolve_output_arguments_and_locations(self):
         converter = bazel_to_cmake_converter.Converter()
         functions = bazel_to_cmake_converter.BuildFileFunctions(

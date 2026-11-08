@@ -14,6 +14,7 @@ load(
     "IreeExecutableInfo",
     "iree_executable_alias",
     "iree_executable_test",
+    "iree_tool_test",
 )
 load(
     "//build_tools/bazel:runfiles.bzl",
@@ -219,6 +220,111 @@ def _test_executable_wrapper_composes_source_suppressions_impl(env, target):
     )
     env.expect.that_collection(target[DefaultInfo].default_runfiles.files.to_list()).contains(output)
 
+def _execution_configuration_aspect_impl(target, ctx):
+    return [TestingAspectInfo(
+        actions = target.actions,
+        attrs = ctx.rule.attr,
+    )]
+
+_execution_configuration_aspect = aspect(
+    implementation = _execution_configuration_aspect_impl,
+    attr_aspects = ["src", "data", "tools"],
+)
+
+def _external_tool_test_configuration():
+    return {
+        "//command_line_option:copt": ["-DIREE_TEST_TARGET_CONFIG"],
+        "//command_line_option:extra_execution_platforms": [
+            str(Label(":test_incompatible_execution_platform")),
+            str(Label(":test_execution_platform")),
+        ],
+        "//command_line_option:host_copt": ["-DIREE_TEST_EXEC_CONFIG"],
+        "//command_line_option:platforms": [Label(":test_execution_platform")],
+        "@bazel_tools//tools/test:incompatible_use_default_test_toolchain": True,
+    }
+
+def _external_tool_fixture(name):
+    util.helper_target(
+        iree_cc_binary,
+        name = name,
+        srcs = [name + ".cc"],
+        data = [":generate_rule_fixture.data"],
+        copts = select({
+            ":on_test_execution_platform": ["-DIREE_TEST_EXEC_PLATFORM"],
+            "//conditions:default": [],
+        }),
+        tags = ["manual"],
+    )
+
+def _expect_compile_option(env, target, present, absent):
+    actions = [action for action in target[TestingAspectInfo].actions if action.mnemonic == "CppCompile"]
+    env.expect.that_int(len(actions)).equals(1)
+    env.expect.that_collection(actions[0].argv).contains(present)
+    env.expect.that_collection(actions[0].argv).not_contains(absent)
+
+def _test_executable_helpers_use_test_execution_configuration(name, **kwargs):
+    _external_tool_fixture(name + "_tool")
+    _external_tool_fixture(name + "_runner")
+    _external_tool_fixture(name + "_data")
+    iree_executable_test(
+        name = name + "_subject",
+        src = ":" + name + "_runner",
+        args = ["--tool=$(rootpath :" + name + "_tool)"],
+        data = [":" + name + "_data"],
+        env = {"IREE_HELPER": "$(rootpath :" + name + "_tool)"},
+        tools = [":" + name + "_tool"],
+        tags = ["manual"],
+    )
+    analysis_test(
+        name = name,
+        config_settings = _external_tool_test_configuration(),
+        impl = _test_executable_helpers_use_test_execution_configuration_impl,
+        target = name + "_subject",
+        testing_aspect = _execution_configuration_aspect,
+        **kwargs
+    )
+
+def _expect_external_tool(env, target, tool):
+    _expect_compile_option(env, tool, "-DIREE_TEST_EXEC_CONFIG", "-DIREE_TEST_TARGET_CONFIG")
+    action = [action for action in tool[TestingAspectInfo].actions if action.mnemonic == "CppCompile"][0]
+    env.expect.that_collection(action.argv).contains("-DIREE_TEST_EXEC_PLATFORM")
+    runfiles = target[DefaultInfo].default_runfiles.files.to_list()
+    env.expect.that_collection(runfiles).contains(tool[DefaultInfo].files_to_run.executable)
+    _expect_basename(env, runfiles, "generate_rule_fixture.data")
+
+def _test_executable_helpers_use_test_execution_configuration_impl(env, target):
+    attrs = target[TestingAspectInfo].attrs
+    _expect_compile_option(env, attrs.src, "-DIREE_TEST_TARGET_CONFIG", "-DIREE_TEST_EXEC_CONFIG")
+    _expect_compile_option(env, attrs.data[0], "-DIREE_TEST_TARGET_CONFIG", "-DIREE_TEST_EXEC_CONFIG")
+    tool = attrs.tools[0]
+    _expect_external_tool(env, target, tool)
+    path = tool[DefaultInfo].files_to_run.executable.short_path
+    env.expect.that_str(target[IreeExecutableInfo].env["IREE_HELPER"]).equals(path)
+    env.expect.that_collection(target[IreeRunfilesArgumentsInfo].arguments).contains_exactly([
+        "--tool=" + path,
+    ])
+
+def _test_tool_checks_artifacts_in_execution_configuration(name, **kwargs):
+    _external_tool_fixture(name + "_tool")
+    iree_tool_test(
+        name = name + "_subject",
+        src = ":" + name + "_tool",
+        data = [":generate_rule_fixture.in"],
+        tags = ["manual"],
+    )
+    analysis_test(
+        name = name,
+        config_settings = _external_tool_test_configuration(),
+        impl = _test_tool_checks_artifacts_in_execution_configuration_impl,
+        target = name + "_subject",
+        testing_aspect = _execution_configuration_aspect,
+        **kwargs
+    )
+
+def _test_tool_checks_artifacts_in_execution_configuration_impl(env, target):
+    _expect_external_tool(env, target, target[TestingAspectInfo].attrs.src)
+    _expect_basename(env, target[DefaultInfo].default_runfiles.files.to_list(), "generate_rule_fixture.in")
+
 def executable_rules_test_suite(name):
     test_suite(
         name = name,
@@ -228,5 +334,7 @@ def executable_rules_test_suite(name):
             _test_executable_test_applies_resource_group_tags,
             _test_cross_package_wrapper_launches_source,
             _test_executable_wrapper_composes_source_suppressions,
+            _test_executable_helpers_use_test_execution_configuration,
+            _test_tool_checks_artifacts_in_execution_configuration,
         ],
     )

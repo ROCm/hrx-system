@@ -1042,12 +1042,14 @@ class LoomBuildFileFunctions(
         src,
         args=None,
         data=None,
+        tools=None,
         env=None,
         tags=None,
         runner="//loom/src/loom/tools/loom-check:loom-check-test",
         target_compatible_with=None,
         **kwargs,
     ):
+        data = (data or []) + (tools or [])
         if self._should_skip_target(tags=tags, **kwargs):
             return
         target_compatible_with = self._apply_loom_target_compatible_with(
@@ -1141,6 +1143,7 @@ class LoomBuildFileFunctions(
         size="small",
         args=None,
         data=None,
+        tools=None,
         env=None,
         tags=None,
         runner="//loom/src/loom/tools/loom-check:loom-check-test",
@@ -1151,6 +1154,7 @@ class LoomBuildFileFunctions(
         **kwargs,
     ):
         del size
+        data = (data or []) + (tools or [])
         if self._should_skip_target(tags=tags, **kwargs):
             return
         target_compatible_with = self._apply_loom_target_compatible_with(

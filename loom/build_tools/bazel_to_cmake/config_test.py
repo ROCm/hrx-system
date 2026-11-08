@@ -35,6 +35,27 @@ class ConfigTest(unittest.TestCase):
             REPO_ROOT / ".bazel_to_cmake.cfg.py", "loom/.bazel_to_cmake.cfg.py"
         )
 
+    def test_check_helpers_retain_cmake_dependencies_and_environment(self):
+        for rule, source in (
+            ("loom_check_test", 'src="fixture.loom-test"'),
+            ("loom_check_test_suite", 'srcs=["fixture.loom-test"]'),
+        ):
+            with self.subTest(rule=rule):
+                output = bazel_to_cmake_converter.convert_build_file(
+                    f"""{rule}(
+    name="check", {source},
+    data=["input.txt"],
+    tools=["//third_party:spirv_val"],
+    env={{"LOOM_SPIRV_VAL": "$(rootpath //third_party:spirv_val)"}},
+)""",
+                    SimpleNamespace(PROJECTS=[self.project], REPO_MAP={"@hrx": ""}),
+                    str(REPO_ROOT / "loom/src/loom/target/emit/spirv/test"),
+                    repo_root=str(REPO_ROOT),
+                )
+                self.assertIn("iree::third_party::spirv_val", output)
+                self.assertIn("input.txt", output)
+                self.assertIn("LOOM_SPIRV_VAL=", output)
+
     def test_library_group_preserves_dependencies_and_package_policy(self):
         output = bazel_to_cmake_converter.convert_build_file(
             'loom_cc_library_group(name="aggregate", deps=[":first", ":second"])',

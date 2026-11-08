@@ -234,6 +234,7 @@ def loom_check_test(
         size = "small",
         tags = [],
         data = [],
+        tools = [],
         env = {},
         runner = Label("//loom/src/loom/tools/loom-check:loom-check-test"),
         **kwargs):
@@ -245,6 +246,7 @@ def loom_check_test(
       size: Test size (default: "small").
       tags: Additional tags to apply to the test.
       data: Additional runfiles made available to loom-check.
+      tools: External helpers built for the test execution platform.
       env: Additional test environment variables.
       runner: loom-check compatible runner binary.
       **kwargs: Additional attributes passed to iree_executable_test.
@@ -260,6 +262,7 @@ def loom_check_test(
         args = args + ["$(rootpath %s)" % src],
         env = env,
         data = data + [src],
+        tools = tools,
         resource_group = resource_group,
         size = size,
         tags = tags + ["loom-check"] + policy_tags,
@@ -272,6 +275,7 @@ def loom_check_test_suite(
         size = "small",
         tags = [],
         data = [],
+        tools = [],
         env = {},
         runner = Label("//loom/src/loom/tools/loom-check:loom-check-test"),
         test_name_prefix_to_strip = "",
@@ -288,6 +292,7 @@ def loom_check_test_suite(
       size: Test size (default: "small").
       tags: Additional tags to apply to each generated test and the suite.
       data: Additional runfiles made available to each generated test.
+      tools: External helpers built for the test execution platform.
       env: Additional test environment variables for each generated test.
       runner: loom-check compatible runner binary.
       test_name_prefix_to_strip: Optional source path prefix to remove before
@@ -309,6 +314,7 @@ def loom_check_test_suite(
             size = size,
             tags = tags,
             data = data,
+            tools = tools,
             env = env,
             runner = runner,
             **kwargs

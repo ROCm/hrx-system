@@ -2659,8 +2659,11 @@ class BuildFileFunctions(
             f")\n\n"
         )
 
-    def iree_executable_test(self, src, **kwargs):
-        self.native_test(src=src, **kwargs)
+    def iree_executable_test(self, src, data=None, tools=None, **kwargs):
+        self.native_test(src=src, data=(data or []) + (tools or []), **kwargs)
+
+    def iree_tool_test(self, src, **kwargs):
+        self.iree_executable_test(src=src, **kwargs)
 
     def iree_executable_alias(self, name, tags=None, **kwargs):
         if self._should_skip_target(tags=tags, **kwargs):
