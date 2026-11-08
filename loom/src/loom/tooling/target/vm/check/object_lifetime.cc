@@ -330,16 +330,21 @@ iree_status_t Emit(const loom_check_emit_provider_t*,
         IREE_STATUS_INVALID_ARGUMENT,
         "vm-object-lifetime runs @run with optional borrowed-argument");
   }
+  loomc_target_profile_t* target_profile = nullptr;
+  IREE_RETURN_IF_ERROR(loom_check_compile_session_select_target_profile(
+      request->environment->compile_session, IREE_SV("vm:core"),
+      &target_profile));
   const loom_check_compile_artifact_options_t options = {
       .artifact_format = IREE_SV("vm"),
       .root = IREE_SV("run"),
-      .target = IREE_SV("vm:core"),
+      .target_profile = target_profile,
       .lower_source_to_low = true,
       .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
   };
   loomc_result_t* result = nullptr;
   iree_status_t status =
       loom_check_compile_artifact(request, &options, &result);
+  loomc_target_profile_release(target_profile);
   const loomc_artifact_t* artifact = nullptr;
   if (iree_status_is_ok(status) && result) {
     status = loom_check_compile_select_artifact(

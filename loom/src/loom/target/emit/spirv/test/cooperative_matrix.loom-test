@@ -1,10 +1,8 @@
 
-// RUN: emit spirv-dis validate
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda+hal features=FLOAT16,STORAGE_BUFFER_16BIT_ACCESS,COOPERATIVE_MATRIX_KHR validate
 // REQUIRES: spirv-dis, spirv-val
 
-spirv.target<vulkan1_3> @hal_target_coop_f16 {abi = hal_kernel, contract_feature_bits = 2318}
-
-low.kernel.def target<spirv.logical.core>(@hal_target_coop_f16) workgroup_size(32, 1, 1) @spirv_raw_bda_cooperative_matrix_f16(%byte_offset: reg<spirv.offset64>) asm {
+low.kernel.def target<spirv.logical.core> workgroup_size(32, 1, 1) @spirv_raw_bda_cooperative_matrix_f16(%byte_offset: reg<spirv.offset64>) asm {
   %lhs_buffer = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %rhs_buffer = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %init_buffer = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
@@ -158,12 +156,10 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_f16) workgroup_size(3
 // ====
 
 
-// RUN: emit spirv-dis validate
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda+hal features=INT8,STORAGE_BUFFER_8BIT_ACCESS,COOPERATIVE_MATRIX_KHR validate
 // REQUIRES: spirv-dis, spirv-val
 
-spirv.target<vulkan1_3> @hal_target_coop_s8 {abi = hal_kernel, contract_feature_bits = 2214}
-
-low.kernel.def target<spirv.logical.core>(@hal_target_coop_s8) workgroup_size(32, 1, 1) @spirv_raw_bda_cooperative_matrix_s8_signed_saturating(%byte_offset: reg<spirv.offset64>) asm {
+low.kernel.def target<spirv.logical.core> workgroup_size(32, 1, 1) @spirv_raw_bda_cooperative_matrix_s8_signed_saturating(%byte_offset: reg<spirv.offset64>) asm {
   %lhs_buffer = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %rhs_buffer = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %init_buffer = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
@@ -317,12 +313,10 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_s8) workgroup_size(32
 // ====
 
 
-// RUN: emit spirv-dis validate
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda+hal features=INT8,STORAGE_BUFFER_8BIT_ACCESS,COOPERATIVE_MATRIX_KHR validate
 // REQUIRES: spirv-dis, spirv-val
 
-spirv.target<vulkan1_3> @hal_target_coop_u8 {abi = hal_kernel, contract_feature_bits = 2214}
-
-low.kernel.def target<spirv.logical.core>(@hal_target_coop_u8) workgroup_size(32, 1, 1) @spirv_raw_bda_cooperative_matrix_u8(%byte_offset: reg<spirv.offset64>) asm {
+low.kernel.def target<spirv.logical.core> workgroup_size(32, 1, 1) @spirv_raw_bda_cooperative_matrix_u8(%byte_offset: reg<spirv.offset64>) asm {
   %lhs_buffer = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %rhs_buffer = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %init_buffer = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
@@ -476,12 +470,10 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_u8) workgroup_size(32
 // ====
 
 
-// RUN: emit spirv-dis validate
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda+hal features=STORAGE_BUFFER_16BIT_ACCESS,COOPERATIVE_MATRIX_KHR,BFLOAT16_TYPE_KHR,BFLOAT16_COOPERATIVE_MATRIX_KHR validate
 // REQUIRES: spirv-dis, spirv-val
 
-spirv.target<vulkan1_3> @hal_target_coop_bf16 {abi = hal_kernel, contract_feature_bits = 22790}
-
-low.kernel.def target<spirv.logical.core>(@hal_target_coop_bf16) workgroup_size(32, 1, 1) @spirv_raw_bda_cooperative_matrix_bf16(%byte_offset: reg<spirv.offset64>) asm {
+low.kernel.def target<spirv.logical.core> workgroup_size(32, 1, 1) @spirv_raw_bda_cooperative_matrix_bf16(%byte_offset: reg<spirv.offset64>) asm {
   %lhs_buffer = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %rhs_buffer = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %init_buffer = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
@@ -633,3 +625,18 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_bf16) workgroup_size(
                OpCooperativeMatrixStoreKHR %out_view %result %uint_0 %output_stride Aligned 16
                OpReturn
                OpFunctionEnd
+
+// ====
+
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda+hal features=-COOPERATIVE_MATRIX_KHR validate
+// REQUIRES: spirv-dis, spirv-val
+
+// A known-unavailable capability must reach Low validation too.
+low.kernel.def target<spirv.logical.core> workgroup_size(32, 1, 1) @unavailable_matrix() asm {
+  %seed_value = OpConstant.f32 0
+  // ERROR@+1: TARGET/046 {function_name="unavailable_matrix", opcode="spirv.op_composite_construct.cooperative.f32.16x16.accumulator"}
+  %seed = OpCompositeConstruct.cooperative.f32.16x16.accumulator %seed_value : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  return
+}
+
+// ----
