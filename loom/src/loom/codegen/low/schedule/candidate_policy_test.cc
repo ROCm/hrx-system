@@ -763,10 +763,10 @@ TEST_F(CandidatePolicyTest, RecoveryPrioritizesEquivalentMaterializations) {
        {LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF,
         LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION}) {
     SCOPED_TRACE(mode);
-    for (bool reaches_unspillable : {false, true}) {
-      SCOPED_TRACE(reaches_unspillable);
+    for (bool reaches_constrained : {false, true}) {
+      SCOPED_TRACE(reaches_constrained);
       auto earlier = base;
-      if (reaches_unspillable) {
+      if (reaches_constrained) {
         earlier.flags |=
             LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_CONSTRAINED_ACTIVATION;
       }
@@ -809,7 +809,7 @@ TEST_F(CandidatePolicyTest, RecoveryPrioritizesEquivalentMaterializations) {
       ExpectPreferred(mode, earlier, constrained);
       auto infeasible = critical;
       infeasible.flags |=
-          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY;
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_CONSTRAINED_CAPACITY;
       ExpectPreferred(mode, earlier, infeasible);
 
       // The source ordinal remains the stable tie-break for equal paths.
