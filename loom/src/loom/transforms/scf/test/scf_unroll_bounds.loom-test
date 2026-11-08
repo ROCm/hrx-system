@@ -268,3 +268,54 @@ func.def @partial_tile_unroll_remains_dynamic(%remaining: index) {
   }
   func.return
 }
+
+// ====
+
+func.def @guarded_strided_copy_preserves_source_interval(%payload: buffer, %base: offset, %lane0: index, %value: i32) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 255)] : index
+  %end = index.constant 3072 : index
+  %step = index.constant 1024 : index
+  %offset = index.constant 768 : index
+  %factor = index.constant 2 : index
+  %view = buffer.view %payload[%base] : buffer -> view<3072xi32>
+  scf.for %channel = [%lane to %end step %step] unroll(%factor) {
+    %position = index.add %channel, %offset : index
+    view.store %value, %view[%position] : i32, view<3072xi32>
+  }
+  func.return
+}
+
+// ----
+func.def @guarded_strided_copy_preserves_source_interval(%payload: buffer, %base: offset, %lane0: index, %value: i32) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 255)] : index
+  %end = index.constant 3072 : index
+  %offset = index.constant 768 : index
+  %view = buffer.view %payload[%base] : buffer -> view<3072xi32>
+  %12 = index.constant 2048 : index
+  cfg.br ^_bb1(%lane: index)
+^_bb1(%20: index):
+  %22 = index.cmp slt, %20, %end : index
+  cfg.cond_br %22, ^_bb2, ^_bb6
+^_bb2:
+  %channel = index.assume %20 [range(%20, 0, 2303), ge(%20, %lane)] : index
+  %position = index.add %channel, %offset : index
+  view.store %value, %view[%position] : i32, view<3072xi32>
+  %15 = index.constant 1024 : index
+  %channel_1024 = index.add %channel, %15 : index
+  %17 = index.cmp slt, %channel_1024, %end : index
+  cfg.cond_br %17, ^_bb3, ^_bb4
+^_bb3:
+  %18 = index.assume %channel_1024 [range(%channel_1024, 0, 2303)] : index
+  %position_1 = index.add %18, %offset : index
+  view.store %value, %view[%position_1] : i32, view<3072xi32>
+  cfg.br ^_bb4
+^_bb4:
+  %23 = index.sub %end, %channel : index
+  %24 = index.cmp ult, %12, %23 : index
+  cfg.cond_br %24, ^_bb5, ^_bb6
+^_bb5:
+  %25 = index.add %channel, %12 : index
+  cfg.br ^_bb1(%25: index)
+^_bb6:
+  func.return
+}

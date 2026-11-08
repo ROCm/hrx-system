@@ -912,6 +912,26 @@ static iree_status_t loom_scf_unroll_clone_guarded_iteration(
           context->rewriter, iteration_index, bounded_index));
       iteration_index = bounded_index;
     }
+    // A guarded copy visits only source iterations. The guard alone loses
+    // the tighter interval implied by the original lower bound and stride.
+    const loom_value_facts_t upper_facts = loom_value_fact_table_lookup(
+        context->fact_table, loom_scf_for_upper_bound(source));
+    const bool upper_has_predecessor = upper_facts.range_hi != INT64_MIN;
+    const bool source_is_tighter =
+        upper_has_predecessor && iv_facts.range_hi < upper_facts.range_hi - 1;
+    if (source_is_tighter) {
+      const loom_predicate_t range = {
+          .kind = LOOM_PREDICATE_RANGE,
+          .arg_count = 3,
+          .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
+                       LOOM_PRED_ARG_CONST},
+          .args = {iteration_index, iv_facts.range_lo, iv_facts.range_hi},
+      };
+      loom_op_t* assume = NULL;
+      IREE_RETURN_IF_ERROR(loom_index_assume_build(
+          builder, &iteration_index, 1, &range, 1, &type, 1, location, &assume));
+      iteration_index = loom_index_assume_results(assume).values[0];
+    }
     IREE_RETURN_IF_ERROR(
         loom_ir_remap_map_value(remap, source_iv, iteration_index));
   }
