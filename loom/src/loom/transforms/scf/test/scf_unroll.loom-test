@@ -882,9 +882,10 @@ func.def @interleaved_partial_factor_static_tail_loop() {
   %factor = index.constant 2 : index
   %5 = index.constant 2 : index
   %6 = index.constant 4 : index
-  scf.for %i = [%start to %6 step %5] {
+  scf.for %7 = [%start to %6 step %5] {
     %8 = index.constant 1 : index
-    %i_1 = index.add %i, %8 : index
+    %9 = index.add %7, %8 : index
+    %i, %i_1 = index.assume %7, %9 [range(%7, 0, 4), ge(%7, %start), lt(%7, %end), range(%9, 0, 4), ge(%9, %start), lt(%9, %end)] : index, index
     test.use %i : index
     test.use %i_1 : index
   }
@@ -922,7 +923,7 @@ func.def @interleaved_partial_factor_dynamic_tail_loop(%end: index) {
   scf.for %13 = [%start to %12 step %5] {
     %14 = index.constant 1 : index
     %15 = index.add %13, %14 : index
-    %i, %i_1 = index.assume %13, %15 [lt(%13, %end), lt(%15, %end)] : index, index
+    %i, %i_1 = index.assume %13, %15 [range(%13, 0, 9223372036854775806), ge(%13, %start), lt(%13, %end), range(%15, 0, 9223372036854775806), ge(%15, %start), lt(%15, %end)] : index, index
     test.use %i : index
     test.use %i_1 : index
   }
@@ -964,7 +965,7 @@ func.def @interleaved_partial_config_factor_dynamic_tail_loop(%end: index) {
   scf.for %14 = [%start to %13 step %6] {
     %15 = index.constant 1 : index
     %16 = index.add %14, %15 : index
-    %i, %i_1 = index.assume %14, %16 [lt(%14, %end), lt(%16, %end)] : index, index
+    %i, %i_1 = index.assume %14, %16 [range(%14, 0, 9223372036854775806), ge(%14, %start), lt(%14, %end), range(%16, 0, 9223372036854775806), ge(%16, %start), lt(%16, %end)] : index, index
     test.use %i : index
     test.use %i_1 : index
   }
@@ -1013,12 +1014,13 @@ func.def @interleaved_partial_config_step_dynamic_tail_loop(%end: index) {
   scf.for %21 = [%start to %20 step %6] {
     %22 = index.constant 2 : index
     %23 = index.add %21, %22 : index
-    %i, %i_2 = index.assume %21, %23 [lt(%21, %end), lt(%23, %end)] : index, index
+    %i, %i_2 = index.assume %21, %23 [range(%21, 0, 9223372036854775806), multiple_of(%21, 2), ge(%21, %start), lt(%21, %end), range(%23, 0, 9223372036854775806), multiple_of(%23, 2), ge(%23, %start), lt(%23, %end)] : index, index
     test.use %i : index
     test.use %i_2 : index
   }
   %26 = index.constant 2 : index
-  scf.for %i = [%20 to %end step %26] {
+  scf.for %27 = [%20 to %end step %26] {
+    %i = index.assume %27 [range(%27, 0, 9223372036854775806), multiple_of(%27, 2)] : index
     test.use %i : index
   }
   func.return
@@ -1059,12 +1061,13 @@ func.def @interleaved_partial_factor_dynamic_tail_step_two(%end: index) {
   scf.for %20 = [%start to %19 step %5] {
     %21 = index.constant 2 : index
     %22 = index.add %20, %21 : index
-    %i, %i_2 = index.assume %20, %22 [lt(%20, %end), lt(%22, %end)] : index, index
+    %i, %i_2 = index.assume %20, %22 [range(%20, 0, 9223372036854775806), multiple_of(%20, 2), ge(%20, %start), lt(%20, %end), range(%22, 0, 9223372036854775806), multiple_of(%22, 2), ge(%22, %start), lt(%22, %end)] : index, index
     test.use %i : index
     test.use %i_2 : index
   }
   %25 = index.constant 2 : index
-  scf.for %i = [%19 to %end step %25] {
+  scf.for %26 = [%19 to %end step %25] {
+    %i = index.assume %26 [range(%26, 0, 9223372036854775806), multiple_of(%26, 2)] : index
     test.use %i : index
   }
   func.return

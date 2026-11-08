@@ -1,0 +1,584 @@
+// RUN: pass vector-memory-footprint,unroll-scf-for,canonicalize,scf-to-cfg,vector-memory-footprint
+
+// The source IV reaches at most 9. Guarding a copied IV with < 12 alone
+// loses the two positions needed by the shifted scalar access.
+func.def @guarded_source_interval(%payload: buffer, %base: offset, %start0: index, %value: i32) {
+  %start = index.assume %start0 [range(%start0, 0, 1)] : index
+  %end = index.constant 12 : index
+  %step = index.constant 4 : index
+  %shift = index.constant 2 : index
+  %factor = index.constant 2 : index
+  %view = buffer.view %payload[%base] : buffer -> view<12xi32>
+  scf.for %i = [%start to %end step %step] unroll(%factor) {
+    %position = index.add %i, %shift : index
+    view.store %value, %view[%position] : i32, view<12xi32>
+  }
+  func.return
+}
+
+// ----
+func.def @guarded_source_interval(%payload: buffer, %base: offset, %start0: index, %value: i32) {
+  %start = index.assume %start0 [range(%start0, 0, 1)] : index
+  %end = index.constant 12 : index
+  %shift = index.constant 2 : index
+  %view = buffer.view %payload[%base] : buffer -> view<12xi32>
+  %12 = index.constant 8 : index
+  cfg.br ^_bb1(%start: index)
+^_bb1(%20: index):
+  %22 = index.cmp slt, %20, %end : index
+  cfg.cond_br %22, ^_bb2, ^_bb6
+^_bb2:
+  %i = index.assume %20 [range(%20, 0, 9), ge(%20, %start)] : index
+  %position = index.add %i, %shift : index
+  view.store %value, %view[%position] : i32, view<12xi32>
+  %15 = index.constant 4 : index
+  %16 = index.add %i, %15 : index
+  %17 = index.cmp slt, %16, %end : index
+  cfg.cond_br %17, ^_bb3, ^_bb4
+^_bb3:
+  %i_4 = index.assume %16 [range(%16, 0, 9)] : index
+  %position_1 = index.add %i_4, %shift : index
+  view.store %value, %view[%position_1] : i32, view<12xi32>
+  cfg.br ^_bb4
+^_bb4:
+  %23 = index.sub %end, %i : index
+  %24 = index.cmp ult, %12, %23 : index
+  cfg.cond_br %24, ^_bb5, ^_bb6
+^_bb5:
+  %25 = index.add %i, %12 : index
+  cfg.br ^_bb1(%25: index)
+^_bb6:
+  func.return
+}
+
+// ====
+
+// An exact trip count still needs source facts when the main bound is
+// start + 8: independent endpoint intervals lose that correlation.
+func.def @interleaved_source_interval(%payload: buffer, %base: offset, %start0: index) {
+  %start = index.assume %start0 [range(%start0, 0, 1)] : index
+  %end = index.constant 12 : index
+  %step = index.constant 4 : index
+  %shift = index.constant 1 : index
+  %factor = index.constant 2 : index
+  %view = buffer.view %payload[%base] : buffer -> view<12xi32>
+  scf.for %i = [%start to %end step %step] unroll(%factor) schedule(interleaved) {
+    %position = index.add %i, %shift : index
+    %packet = vector.load %view[%position] : view<12xi32> -> vector<2xi32>
+    test.use %packet : vector<2xi32>
+  }
+  func.return
+}
+
+// ----
+func.def @interleaved_source_interval(%payload: buffer, %base: offset, %start0: index) {
+  %start = index.assume %start0 [range(%start0, 0, 1)] : index
+  %end = index.constant 12 : index
+  %shift = index.constant 1 : index
+  %view = buffer.view %payload[%base] : buffer -> view<12xi32>
+  %12 = index.constant 8 : index
+  %13 = index.constant 8 : index
+  %14 = index.add %start, %13 : index
+  cfg.br ^_bb1(%start: index)
+^_bb1(%29: index):
+  %31 = index.cmp slt, %29, %14 : index
+  cfg.cond_br %31, ^_bb2, ^_bb4
+^_bb2:
+  %30 = index.assume %29 [range(%29, 0, 8), ge(%29, %start), lt(%29, %14)] : index
+  %16 = index.constant 4 : index
+  %17 = index.add %30, %16 : index
+  %i$18, %i_4 = index.assume %30, %17 [range(%30, 0, 9), ge(%30, %start), lt(%30, %end), range(%17, 0, 9), ge(%17, %start), lt(%17, %end)] : index, index
+  %position$20 = index.add %i$18, %shift : index
+  %position_1 = index.add %i_4, %shift : index
+  %packet$22 = vector.load %view[%position$20] : view<12xi32> -> vector<2xi32>
+  test.use %packet$22 : vector<2xi32>
+  %packet_1 = vector.load %view[%position_1] : view<12xi32> -> vector<2xi32>
+  test.use %packet_1 : vector<2xi32>
+  %32 = index.sub %14, %30 : index
+  %33 = index.cmp ult, %12, %32 : index
+  cfg.cond_br %33, ^_bb3, ^_bb4
+^_bb3:
+  %34 = index.add %30, %12 : index
+  cfg.br ^_bb1(%34: index)
+^_bb4:
+  %i$26 = index.assume %14 [range(%14, 0, 9)] : index
+  %position$27 = index.add %i$26, %shift : index
+  %packet$28 = vector.load %view[%position$27] : view<12xi32> -> vector<2xi32>
+  test.use %packet$28 : vector<2xi32>
+  func.return
+}
+
+// ====
+
+func.def @recurrence_source_interval(%payload: buffer, %base: offset, %start0: index, %initial: i32) -> (i32) {
+  %start = index.assume %start0 [range(%start0, 0, 1)] : index
+  %end = index.constant 12 : index
+  %step = index.constant 4 : index
+  %shift = index.constant 2 : index
+  %factor = index.constant 2 : index
+  %view = buffer.view %payload[%base] : buffer -> view<12xi32>
+  %result = scf.for %i = [%start to %end step %step](%sum = %initial : i32) -> (i32) unroll(%factor) schedule(recurrence) {
+    %position = index.add %i, %shift : index
+    %value = view.load %view[%position] : view<12xi32> -> i32
+    %next = scalar.addi %sum, %value : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @recurrence_source_interval(%payload: buffer, %base: offset, %start0: index, %initial: i32) -> (i32) {
+  %start = index.assume %start0 [range(%start0, 0, 1)] : index
+  %end = index.constant 12 : index
+  %shift = index.constant 2 : index
+  %view = buffer.view %payload[%base] : buffer -> view<12xi32>
+  %17 = index.constant 8 : index
+  %18 = index.constant 8 : index
+  %19 = index.add %start, %18 : index
+  cfg.br ^_bb1(%start: index, %initial: i32)
+^_bb1(%42: index, %sum: i32):
+  %45 = index.cmp slt, %42, %19 : index
+  cfg.cond_br %45, ^_bb2, ^_bb5
+^_bb2:
+  %44 = index.assume %42 [range(%42, 0, 8), ge(%42, %start), lt(%42, %19)] : index
+  %23 = index.constant 4 : index
+  %24 = index.add %44, %23 : index
+  %i$25, %i_4 = index.assume %44, %24 [range(%44, 0, 9), ge(%44, %start), lt(%44, %end), range(%24, 0, 9), ge(%24, %start), lt(%24, %end)] : index, index
+  %position$27 = index.add %i$25, %shift : index
+  %value$28 = view.load %view[%position$27] : view<12xi32> -> i32
+  %position_1 = index.add %i_4, %shift : index
+  %value_1 = view.load %view[%position_1] : view<12xi32> -> i32
+  scf.schedule.fence
+  %next$31 = scalar.addi %sum, %value$28 : i32
+  scf.schedule.fence
+  %next_1 = scalar.addi %next$31, %value_1 : i32
+  %46 = index.sub %19, %44 : index
+  %47 = index.cmp ult, %17, %46 : index
+  cfg.cond_br %47, ^_bb3, ^_bb4
+^_bb3:
+  %48 = index.add %44, %17 : index
+  cfg.br ^_bb1(%48: index, %next_1: i32)
+^_bb4:
+  cfg.br ^_bb6(%next_1: i32)
+^_bb5:
+  cfg.br ^_bb6(%sum: i32)
+^_bb6(%41: i32):
+  %i$37 = index.assume %19 [range(%19, 0, 9)] : index
+  %position$38 = index.add %i$37, %shift : index
+  %value$39 = view.load %view[%position$38] : view<12xi32> -> i32
+  %next$40 = scalar.addi %41, %value$39 : i32
+  func.return %next$40 : i32
+}
+
+// ====
+
+// The unsigned split's remainder/select arithmetic loses divisibility. Only
+// entered main and tail bodies may recover the source grid and last IV.
+func.def @unsigned_tail_grid(%payload: buffer, %base: offset, %end0: offset, %value: i32) {
+  %start = index.constant 0 : offset
+  %end = index.assume %end0 [range(%end0, 13, 16)] : offset
+  %step = index.constant 4 : offset
+  %shift = index.constant 3 : offset
+  %factor = index.constant 3 : index
+  %view = buffer.view %payload[%base] : buffer -> view<16xi32>
+  scf.for %i = [%start to %end step %step] unroll(%factor) schedule(interleaved) {
+    %position0 = index.add %i, %shift : offset
+    %position = index.cast %position0 : offset to index
+    view.store %value, %view[%position] : i32, view<16xi32>
+  }
+  func.return
+}
+
+// ----
+func.def @unsigned_tail_grid(%payload: buffer, %base: offset, %end0: offset, %value: i32) {
+  %start = index.constant 0 : offset
+  %end = index.assume %end0 [range(%end0, 13, 16)] : offset
+  %shift = index.constant 3 : offset
+  %view = buffer.view %payload[%base] : buffer -> view<16xi32>
+  %13 = index.constant 12 : offset
+  %48 = index.constant 0 : offset
+  %17 = index.cast %end : offset to i32
+  %19 = scalar.constant 12 : i32
+  %20 = scalar.remui %17, %19 : i32
+  %21 = index.cast %20 : i32 to offset
+  %22 = index.constant 8 : offset
+  %23 = index.cmp ule, %21, %22 : offset
+  %24 = index.constant 0 : offset
+  %25 = scf.select %23, %21, %24 : offset
+  %26 = index.sub %end, %25 : offset
+  %27 = index.assume %26 [ge(%26, %48), le(%26, %end)] : offset
+  cfg.br ^_bb1(%start: offset)
+^_bb1(%55: offset):
+  %57 = index.cmp ult, %55, %27 : offset
+  cfg.cond_br %57, ^_bb2, ^_bb4
+^_bb2:
+  %56 = index.assume %55 [range(%55, 0, 12), multiple_of(%55, 12), lt(%55, %27)] : offset
+  %29 = index.constant 4 : offset
+  %30 = index.add %56, %29 : offset
+  %31 = index.constant 8 : offset
+  %32 = index.add %56, %31 : offset
+  %i$33, %i_4, %i_8 = index.assume %56, %30, %32 [range(%56, 0, 12), multiple_of(%56, 4), ge(%56, %start), lt(%56, %end), range(%30, 0, 12), multiple_of(%30, 4), ge(%30, %start), lt(%30, %end), range(%32, 0, 12), multiple_of(%32, 4), ge(%32, %start), lt(%32, %end)] : offset, offset, offset
+  %position0$36 = index.add %i$33, %shift : offset
+  %position0_1 = index.add %i_4, %shift : offset
+  %position0_2 = index.add %i_8, %shift : offset
+  %position$39 = index.cast %position0$36 : offset to index
+  %position_1 = index.cast %position0_1 : offset to index
+  %position_2 = index.cast %position0_2 : offset to index
+  view.store %value, %view[%position$39] : i32, view<16xi32>
+  view.store %value, %view[%position_1] : i32, view<16xi32>
+  view.store %value, %view[%position_2] : i32, view<16xi32>
+  %58 = index.sub %27, %56 : offset
+  %59 = index.cmp ult, %13, %58 : offset
+  cfg.cond_br %59, ^_bb3, ^_bb4
+^_bb3:
+  %60 = index.add %56, %13 : offset
+  cfg.br ^_bb1(%60: offset)
+^_bb4:
+  %42 = index.constant 4 : offset
+  cfg.br ^_bb5(%27: offset)
+^_bb5(%49: offset):
+  %51 = index.cmp ult, %49, %end : offset
+  cfg.cond_br %51, ^_bb6, ^_bb8
+^_bb6:
+  %50 = index.assume %49 [range(%49, 5, 15), ge(%49, %27), lt(%49, %end)] : offset
+  %i$44 = index.assume %50 [range(%50, 0, 12), multiple_of(%50, 4)] : offset
+  %position0$45 = index.add %i$44, %shift : offset
+  %position$46 = index.cast %position0$45 : offset to index
+  view.store %value, %view[%position$46] : i32, view<16xi32>
+  %52 = index.sub %end, %50 : offset
+  %53 = index.cmp ult, %42, %52 : offset
+  cfg.cond_br %53, ^_bb7, ^_bb8
+^_bb7:
+  %54 = index.add %50, %42 : offset
+  cfg.br ^_bb5(%54: offset)
+^_bb8:
+  func.return
+}
+
+// ====
+// RUN: pass specialize-target-callgraph,vector-memory-footprint,unroll-scf-for,canonicalize,scf-to-cfg,vector-memory-footprint
+
+// The speculative copied IV would exceed MAX32. Its distance guard must
+// establish the original domain before forming the copy or remapping uses.
+test.target<quirky> @target
+
+func.def public target(@target) @distance_guard_source_interval(%payload: buffer, %base: offset, %start0: index, %value: i32) {
+  %start = index.assume %start0 [range(%start0, 2147483628, 2147483629)] : index
+  %end = index.constant 2147483644 : index
+  %origin = index.constant 2147483628 : index
+  %step = index.constant 4 : index
+  %shift = index.constant 2 : index
+  %factor = index.constant 3 : index
+  %view = buffer.view %payload[%base] : buffer -> view<16xi32>
+  scf.for %i = [%start to %end step %step] unroll(%factor) {
+    %relative = index.sub %i, %origin : index
+    %position = index.add %relative, %shift : index
+    view.store %value, %view[%position] : i32, view<16xi32>
+  }
+  func.return
+}
+
+// ----
+test.target<quirky> @target
+
+func.def public target(@target) @distance_guard_source_interval(%payload: buffer, %base: offset, %start0: index, %value: i32) {
+  %start = index.assume %start0 [range(%start0, 2147483628, 2147483629)] : index
+  %end = index.constant 2147483644 : index
+  %origin = index.constant 2147483628 : index
+  %shift = index.constant 2 : index
+  %view = buffer.view %payload[%base] : buffer -> view<16xi32>
+  %14 = index.constant 12 : index
+  cfg.br ^_bb1(%start: index)
+^_bb1(%33: index):
+  %35 = index.cmp slt, %33, %end : index
+  cfg.cond_br %35, ^_bb2, ^_bb8
+^_bb2:
+  %i = index.assume %33 [range(%33, 2147483628, 2147483641), ge(%33, %start)] : index
+  %relative = index.sub %i, %origin : index
+  %position = index.add %relative, %shift : index
+  view.store %value, %view[%position] : i32, view<16xi32>
+  %18 = index.constant 4 : index
+  %19 = index.add %i, %18 : index
+  %20 = index.cmp slt, %19, %end : index
+  cfg.cond_br %20, ^_bb3, ^_bb4
+^_bb3:
+  %i_4 = index.assume %19 [range(%19, 2147483628, 2147483641)] : index
+  %relative_1 = index.sub %i_4, %origin : index
+  %position_1 = index.add %relative_1, %shift : index
+  view.store %value, %view[%position_1] : i32, view<16xi32>
+  cfg.br ^_bb4
+^_bb4:
+  %24 = index.sub %end, %i : index
+  %25 = index.constant 8 : index
+  %26 = index.cmp ult, %25, %24 : index
+  cfg.cond_br %26, ^_bb5, ^_bb6
+^_bb5:
+  %32 = index.assume %i [le(%i, 2147483635)] : index
+  %27 = index.constant 8 : index
+  %28 = index.add %32, %27 : index
+  %i_8 = index.assume %28 [range(%28, 2147483628, 2147483641), ge(%28, %i), lt(%28, %end)] : index
+  %relative_2 = index.sub %i_8, %origin : index
+  %position_2 = index.add %relative_2, %shift : index
+  view.store %value, %view[%position_2] : i32, view<16xi32>
+  cfg.br ^_bb6
+^_bb6:
+  %36 = index.sub %end, %i : index
+  %37 = index.cmp ult, %14, %36 : index
+  cfg.cond_br %37, ^_bb7, ^_bb8
+^_bb7:
+  %38 = index.add %i, %14 : index
+  cfg.br ^_bb1(%38: index)
+^_bb8:
+  func.return
+}
+
+// ====
+// RUN: pass unroll-scf-for,canonicalize
+
+// The IV is referenced only by types. Every cloned type must use the
+// source-domain alias just as an ordinary operand would.
+func.def @type_only_source_interval(%payload: buffer, %base: offset, %start0: index) {
+  %start = index.assume %start0 [range(%start0, 1, 2)] : index
+  %end = index.constant 13 : index
+  %step = index.constant 4 : index
+  %factor = index.constant 2 : index
+  scf.for %i = [%start to %end step %step] unroll(%factor) schedule(interleaved) {
+    %view = buffer.view %payload[%base] : buffer -> view<[%i]xi32>
+    test.use %view : view<[%i]xi32>
+  }
+  func.return
+}
+
+// ----
+func.def @type_only_source_interval(%payload: buffer, %base: offset, %start0: index) {
+  %start = index.assume %start0 [range(%start0, 1, 2)] : index
+  %end = index.constant 13 : index
+  %9 = index.constant 8 : index
+  %10 = index.constant 8 : index
+  %11 = index.add %start, %10 : index
+  scf.for %12 = [%start to %11 step %9] {
+    %13 = index.constant 4 : index
+    %14 = index.add %12, %13 : index
+    %i, %i_4 = index.assume %12, %14 [range(%12, 1, 10), ge(%12, %start), lt(%12, %end), range(%14, 1, 10), ge(%14, %start), lt(%14, %end)] : index, index
+    %view = buffer.view %payload[%base] : buffer -> view<[%i]xi32>
+    %view_1 = buffer.view %payload[%base] : buffer -> view<[%i_4]xi32>
+    test.use %view : view<[%i]xi32>
+    test.use %view_1 : view<[%i_4]xi32>
+  }
+  %i = index.assume %11 [range(%11, 1, 10)] : index
+  %view = buffer.view %payload[%base] : buffer -> view<[%i]xi32>
+  test.use %view : view<[%i]xi32>
+  func.return
+}
+
+// ====
+// RUN: pass unroll-scf-for,canonicalize,scf-to-cfg,vector-memory-footprint
+
+// Retaining the source domain cannot make a genuinely invalid origin legal.
+func.def @invalid_shifted_scalar(%payload: buffer, %base: offset, %start0: index, %value: i32) {
+  %start = index.assume %start0 [range(%start0, 0, 1)] : index
+  %end = index.constant 12 : index
+  %step = index.constant 4 : index
+  %shift = index.constant 3 : index
+  %factor = index.constant 2 : index
+  %view = buffer.view %payload[%base] : buffer -> view<12xi32>
+  scf.for %i = [%start to %end step %step] unroll(%factor) {
+    %position = index.add %i, %shift : index
+    // ERROR@+2: SUBRANGE/024 {op_name="view.store", view_axis="0"}
+    // ERROR@+1: SUBRANGE/024 {op_name="view.store", view_axis="0"}
+    view.store %value, %view[%position] : i32, view<12xi32>
+  }
+  func.return
+}
+
+// ====
+// RUN: pass unroll-scf-for,canonicalize,scf-to-cfg,vector-memory-footprint
+
+func.def @invalid_shifted_vector(%payload: buffer, %base: offset, %start0: index) {
+  %start = index.assume %start0 [range(%start0, 0, 1)] : index
+  %end = index.constant 12 : index
+  %step = index.constant 4 : index
+  %shift = index.constant 2 : index
+  %factor = index.constant 2 : index
+  %view = buffer.view %payload[%base] : buffer -> view<12xi32>
+  scf.for %i = [%start to %end step %step] unroll(%factor) schedule(interleaved) {
+    %position = index.add %i, %shift : index
+    // ERROR@+2: SUBRANGE/010 {op_name="vector.load", vector_extent="2"}
+    // ERROR@+1: SUBRANGE/010 {op_name="vector.load", vector_extent="2"}
+    %packet = vector.load %view[%position] : view<12xi32> -> vector<2xi32>
+    test.use %packet : vector<2xi32>
+  }
+  func.return
+}
+
+// ====
+// RUN: pass specialize-target-callgraph,vector-memory-footprint,unroll-scf-for,canonicalize,scf-to-cfg,vector-memory-footprint
+
+// Materialized tile lanes overflow the independent signed-64 interval.
+// Their source-domain assumptions must restore both ends, even though the
+// original last reachable IV is already upper - 1.
+test.target<low_core> @target
+
+func.def public target(@target) @wide_scheduled_grid(%payload: buffer, %base: offset, %start0: index, %value: i32) {
+  %start = index.assume %start0 [range(%start0, 9223372036854775760, 9223372036854775764), multiple_of(%start0, 4)] : index
+  %end = index.constant 9223372036854775805 : index
+  %step = index.constant 8 : index
+  %offset = index.constant 3 : index
+  %origin = index.constant 9223372036854775760 : index
+  %factor = index.constant 4 : index
+  %view = buffer.view %payload[%base] : buffer -> view<48xi32>
+  scf.for %i = [%start to %end step %step] unroll(%factor) schedule(interleaved) {
+    %relative = index.sub %i, %origin : index
+    %position = index.add %relative, %offset : index
+    view.store %value, %view[%position] : i32, view<48xi32>
+  }
+  func.return
+}
+
+// ----
+test.target<low_core> @target
+
+func.def public target(@target) @wide_scheduled_grid(%payload: buffer, %base: offset, %start0: index, %value: i32) {
+  %start = index.assume %start0 [range(%start0, 9223372036854775760, 9223372036854775764), multiple_of(%start0, 4)] : index
+  %end = index.constant 9223372036854775805 : index
+  %offset = index.constant 3 : index
+  %origin = index.constant 9223372036854775760 : index
+  %view = buffer.view %payload[%base] : buffer -> view<48xi32>
+  %14 = index.constant 32 : index
+  %15 = index.constant 32 : index
+  %16 = index.add %start, %15 : index
+  cfg.br ^_bb1(%start: index)
+^_bb1(%46: index):
+  %48 = index.cmp slt, %46, %16 : index
+  cfg.cond_br %48, ^_bb2, ^_bb4
+^_bb2:
+  %47 = index.assume %46 [range(%46, 9223372036854775760, 9223372036854775792), multiple_of(%46, 4), ge(%46, %start), lt(%46, %16)] : index
+  %18 = index.constant 8 : index
+  %19 = index.add %47, %18 : index
+  %20 = index.constant 16 : index
+  %21 = index.add %47, %20 : index
+  %22 = index.constant 24 : index
+  %23 = index.add %47, %22 : index
+  %i$24, %i_8, %i_16, %i_24 = index.assume %47, %19, %21, %23 [range(%47, 9223372036854775760, 9223372036854775804), multiple_of(%47, 4), ge(%47, %start), lt(%47, %end), range(%19, 9223372036854775760, 9223372036854775804), multiple_of(%19, 4), ge(%19, %start), lt(%19, %end), range(%21, 9223372036854775760, 9223372036854775804), multiple_of(%21, 4), ge(%21, %start), lt(%21, %end), range(%23, 9223372036854775760, 9223372036854775804), multiple_of(%23, 4), ge(%23, %start), lt(%23, %end)] : index, index, index, index
+  %relative$28 = index.sub %i$24, %origin : index
+  %relative_1 = index.sub %i_8, %origin : index
+  %relative_2 = index.sub %i_16, %origin : index
+  %relative_3 = index.sub %i_24, %origin : index
+  %position$32 = index.add %relative$28, %offset : index
+  %position_1 = index.add %relative_1, %offset : index
+  %position_2 = index.add %relative_2, %offset : index
+  %position_3 = index.add %relative_3, %offset : index
+  view.store %value, %view[%position$32] : i32, view<48xi32>
+  view.store %value, %view[%position_1] : i32, view<48xi32>
+  view.store %value, %view[%position_2] : i32, view<48xi32>
+  view.store %value, %view[%position_3] : i32, view<48xi32>
+  %49 = index.sub %16, %47 : index
+  %50 = index.cmp ult, %14, %49 : index
+  cfg.cond_br %50, ^_bb3, ^_bb4
+^_bb3:
+  %51 = index.add %47, %14 : index
+  cfg.br ^_bb1(%51: index)
+^_bb4:
+  %36 = index.constant 8 : index
+  cfg.br ^_bb5(%16: index)
+^_bb5(%40: index):
+  %42 = index.cmp slt, %40, %end : index
+  cfg.cond_br %42, ^_bb6, ^_bb8
+^_bb6:
+  %i$41 = index.assume %40 [range(%40, 9223372036854775792, 9223372036854775804), multiple_of(%40, 4), ge(%40, %16)] : index
+  %relative$38 = index.sub %i$41, %origin : index
+  %position$39 = index.add %relative$38, %offset : index
+  view.store %value, %view[%position$39] : i32, view<48xi32>
+  %43 = index.sub %end, %i$41 : index
+  %44 = index.cmp ult, %36, %43 : index
+  cfg.cond_br %44, ^_bb7, ^_bb8
+^_bb7:
+  %45 = index.add %i$41, %36 : index
+  cfg.br ^_bb5(%45: index)
+^_bb8:
+  func.return
+}
+
+// ====
+// RUN: pass specialize-target-callgraph,vector-memory-footprint,unroll-scf-for,canonicalize,scf-to-cfg,vector-memory-footprint
+
+// Offset arithmetic uses unsigned carrier wrapping rather than index arithmetic.
+test.target<low_core> @target
+
+func.def public target(@target) @wide_offset_scheduled_grid(%payload: buffer, %base: offset, %start0: offset, %value: i32) {
+  %start = index.assume %start0 [range(%start0, 9223372036854775760, 9223372036854775764), multiple_of(%start0, 4)] : offset
+  %end = index.constant 9223372036854775805 : offset
+  %step = index.constant 8 : offset
+  %offset = index.constant 3 : offset
+  %origin = index.constant 9223372036854775760 : offset
+  %factor = index.constant 4 : index
+  %view = buffer.view %payload[%base] : buffer -> view<48xi32>
+  scf.for %i = [%start to %end step %step] unroll(%factor) schedule(interleaved) {
+    %relative = index.sub %i, %origin : offset
+    %position0 = index.add %relative, %offset : offset
+    %position = index.cast %position0 : offset to index
+    view.store %value, %view[%position] : i32, view<48xi32>
+  }
+  func.return
+}
+
+// ----
+test.target<low_core> @target
+
+func.def public target(@target) @wide_offset_scheduled_grid(%payload: buffer, %base: offset, %start0: offset, %value: i32) {
+  %start = index.assume %start0 [range(%start0, 9223372036854775760, 9223372036854775764), multiple_of(%start0, 4)] : offset
+  %end = index.constant 9223372036854775805 : offset
+  %offset = index.constant 3 : offset
+  %origin = index.constant 9223372036854775760 : offset
+  %view = buffer.view %payload[%base] : buffer -> view<48xi32>
+  %15 = index.constant 32 : offset
+  %16 = index.constant 32 : offset
+  %17 = index.add %start, %16 : offset
+  cfg.br ^_bb1(%start: offset)
+^_bb1(%50: offset):
+  %52 = index.cmp ult, %50, %17 : offset
+  cfg.cond_br %52, ^_bb2, ^_bb3
+^_bb2:
+  %51 = index.assume %50 [range(%50, 9223372036854775760, 9223372036854775792), multiple_of(%50, 4), ge(%50, %start), lt(%50, %17)] : offset
+  %19 = index.constant 8 : offset
+  %20 = index.add %51, %19 : offset
+  %21 = index.constant 16 : offset
+  %22 = index.add %51, %21 : offset
+  %23 = index.constant 24 : offset
+  %24 = index.add %51, %23 : offset
+  %i$25, %i_8, %i_16, %i_24 = index.assume %51, %20, %22, %24 [range(%51, 9223372036854775760, 9223372036854775804), multiple_of(%51, 4), ge(%51, %start), lt(%51, %end), range(%20, 9223372036854775760, 9223372036854775804), multiple_of(%20, 4), ge(%20, %start), lt(%20, %end), range(%22, 9223372036854775760, 9223372036854775804), multiple_of(%22, 4), ge(%22, %start), lt(%22, %end), range(%24, 9223372036854775760, 9223372036854775804), multiple_of(%24, 4), ge(%24, %start), lt(%24, %end)] : offset, offset, offset, offset
+  %relative$29 = index.sub %i$25, %origin : offset
+  %relative_1 = index.sub %i_8, %origin : offset
+  %relative_2 = index.sub %i_16, %origin : offset
+  %relative_3 = index.sub %i_24, %origin : offset
+  %position0$33 = index.add %relative$29, %offset : offset
+  %position0_1 = index.add %relative_1, %offset : offset
+  %position0_2 = index.add %relative_2, %offset : offset
+  %position0_3 = index.add %relative_3, %offset : offset
+  %position$37 = index.cast %position0$33 : offset to index
+  %position_1 = index.cast %position0_1 : offset to index
+  %position_2 = index.cast %position0_2 : offset to index
+  %position_3 = index.cast %position0_3 : offset to index
+  view.store %value, %view[%position$37] : i32, view<48xi32>
+  view.store %value, %view[%position_1] : i32, view<48xi32>
+  view.store %value, %view[%position_2] : i32, view<48xi32>
+  view.store %value, %view[%position_3] : i32, view<48xi32>
+  %53 = index.add %51, %15 : offset
+  cfg.br ^_bb1(%53: offset)
+^_bb3:
+  %41 = index.constant 8 : offset
+  cfg.br ^_bb4(%17: offset)
+^_bb4(%46: offset):
+  %48 = index.cmp ult, %46, %end : offset
+  cfg.cond_br %48, ^_bb5, ^_bb6
+^_bb5:
+  %i$47 = index.assume %46 [range(%46, 9223372036854775792, 9223372036854775804), multiple_of(%46, 4), ge(%46, %17)] : offset
+  %relative$43 = index.sub %i$47, %origin : offset
+  %position0$44 = index.add %relative$43, %offset : offset
+  %position$45 = index.cast %position0$44 : offset to index
+  view.store %value, %view[%position$45] : i32, view<48xi32>
+  %49 = index.add %i$47, %41 : offset
+  cfg.br ^_bb4(%49: offset)
+^_bb6:
+  func.return
+}
