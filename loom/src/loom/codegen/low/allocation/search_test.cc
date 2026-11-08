@@ -1801,22 +1801,29 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
   ASSERT_EQ(victim_set.assignment_count, 1u);
   EXPECT_EQ(victim_set.assignment_indices[0], 1u);
 
-  // A closed producer can avoid its predicted memory traffic. Partial users
-  // preserve the wide producer even when their reloads coalesce to full width.
-  rematerialization_flags[1] = LOOM_LOW_REMATERIALIZATION_VALUE_CLASSIFIED |
-                               LOOM_LOW_REMATERIALIZATION_VALUE_ELIGIBLE |
-                               LOOM_LOW_REMATERIALIZATION_VALUE_CLOSED;
-  for (bool has_narrow_uses : {false, true}) {
-    spill_traffic[1].has_narrow_uses = has_narrow_uses;
-    IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
-        &context, &intervals[0], &capacity,
-        /*interval_requires_register=*/false, &workspace, &arena_,
-        &victim_set));
-    ASSERT_TRUE(victim_set.found);
-    ASSERT_EQ(victim_set.assignment_count, 1u);
-    EXPECT_EQ(victim_set.assignment_indices[0], has_narrow_uses ? 1u : 0u);
-    EXPECT_EQ(spill_traffic[1].store_bytes, 8u);
-    EXPECT_EQ(spill_traffic[1].reload_bytes, 64u);
+  // A closed producer avoids memory traffic only when its ownership permits
+  // private reconstruction. Partial users also preserve the wide producer
+  // even when their reloads coalesce to full width.
+  for (bool has_stable_capture : {false, true}) {
+    rematerialization_flags[1] =
+        LOOM_LOW_REMATERIALIZATION_VALUE_CLASSIFIED |
+        LOOM_LOW_REMATERIALIZATION_VALUE_ELIGIBLE |
+        LOOM_LOW_REMATERIALIZATION_VALUE_CLOSED |
+        (has_stable_capture ? LOOM_LOW_REMATERIALIZATION_VALUE_STABLE_CAPTURE
+                            : 0);
+    for (bool has_narrow_uses : {false, true}) {
+      spill_traffic[1].has_narrow_uses = has_narrow_uses;
+      IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
+          &context, &intervals[0], &capacity,
+          /*interval_requires_register=*/false, &workspace, &arena_,
+          &victim_set));
+      ASSERT_TRUE(victim_set.found);
+      ASSERT_EQ(victim_set.assignment_count, 1u);
+      EXPECT_EQ(victim_set.assignment_indices[0],
+                has_stable_capture && !has_narrow_uses ? 0u : 1u);
+      EXPECT_EQ(spill_traffic[1].store_bytes, 8u);
+      EXPECT_EQ(spill_traffic[1].reload_bytes, 64u);
+    }
   }
   rematerialization_flags[1] = 0;
   spill_traffic[1].has_narrow_uses = false;

@@ -35,6 +35,10 @@ enum loom_low_rematerialization_value_flag_bits_e {
   // A replayable native register move may carry a closed constant between
   // register classes without retaining an external register lifetime.
   LOOM_LOW_REMATERIALIZATION_VALUE_CONSTANT_TRANSPORT = 1u << 5,
+  // Original uses permit an independent capture of this value. A closed
+  // producer still needs storage when its ownership-sensitive uses forbid
+  // replacing it with private reconstructions.
+  LOOM_LOW_REMATERIALIZATION_VALUE_STABLE_CAPTURE = 1u << 7,
 };
 
 // One immutable function snapshot. The caller owns the module ordinal map

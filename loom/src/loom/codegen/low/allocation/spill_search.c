@@ -63,10 +63,11 @@ loom_low_allocation_spill_search_assignment_spill_traffic_cost(
     context->spill_traffic_by_value_ordinal[value_ordinal] = traffic;
   }
   if (!traffic.has_narrow_uses &&
-      iree_any_bit_set(context->rematerialization_flags[value_ordinal],
-                       LOOM_LOW_REMATERIALIZATION_VALUE_CLOSED)) {
-    // Whole-value users can initialize a closed recipe without memory traffic.
-    // Narrow users retain their wide producer instead of rebuilding every unit.
+      iree_all_bits_set(context->rematerialization_flags[value_ordinal],
+                        LOOM_LOW_REMATERIALIZATION_VALUE_CLOSED |
+                            LOOM_LOW_REMATERIALIZATION_VALUE_STABLE_CAPTURE)) {
+    // Stable whole-value users can initialize a closed recipe without memory
+    // traffic. Ownership-sensitive and narrow uses retain the original value.
     return iree_ok_status();
   }
   *out_cost =

@@ -9,6 +9,7 @@
 #include "loom/codegen/low/descriptor_traits.h"
 #include "loom/codegen/low/representation_binding.h"
 #include "loom/ir/context.h"
+#include "loom/ops/low/capture.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/registers.h"
 
@@ -101,6 +102,9 @@ static iree_status_t loom_low_rematerialization_classify(
         loom_value_consuming_use_count(loom_module_value(module, value_id)) != 0
             ? LOOM_LOW_REMATERIALIZATION_VALUE_CONSUMED
             : 0;
+    if (loom_low_capture_source_is_stable(module, value_id)) {
+      flags |= LOOM_LOW_REMATERIALIZATION_VALUE_STABLE_CAPTURE;
+    }
     uint16_t register_class_id = LOOM_LOW_REG_CLASS_NONE;
     const loom_low_reg_class_t* register_class = NULL;
     loom_low_register_type_resolver_try_resolve(
