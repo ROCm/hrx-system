@@ -8,11 +8,18 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from build_tools.devtools.doctor import doctor_plan
-from build_tools.devtools.environment import ToolEnvironment, ToolMode
+from build_tools.devtools.doctor import LANE_TOOLS, doctor_plan
+from build_tools.devtools.environment import REPO_ROOT, ToolEnvironment, ToolMode
 
 
 class DoctorPlanTest(unittest.TestCase):
+    def test_bazel_version_matches_repository_baseline(self):
+        expected_version = (REPO_ROOT / ".bazelversion").read_text().strip()
+        bazel_check = next(
+            check for check in LANE_TOOLS["bazel"] if check[0] == "bazel"
+        )
+        self.assertRegex(f"bazel {expected_version}", bazel_check[2])
+
     def test_git_status_requires_checkout_metadata(self):
         for layout in ["archive", "checkout", "worktree"]:
             with (

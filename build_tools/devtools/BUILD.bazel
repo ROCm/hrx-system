@@ -362,6 +362,7 @@ py_test(
     name = "doctor_test",
     size = _PRESUBMIT_TEST_SIZE,
     srcs = ["doctor_test.py"],
+    data = ["//:.bazelversion"],
     main = "doctor_test.py",
     tags = _PRESUBMIT_TEST_TAGS,
     deps = [":devtools"],
