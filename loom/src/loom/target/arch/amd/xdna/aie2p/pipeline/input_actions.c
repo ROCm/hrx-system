@@ -46,7 +46,8 @@ static iree_status_t loom_aie2p_native_input_begin(
     IREE_RETURN_IF_ERROR(
         loom_aie2p_worker_constant(code, &builder, word, &task));
     IREE_RETURN_IF_ERROR(loom_aie2p_worker_control_write(
-        code, &builder, input->control_packet, input->input_queue, &task, 1));
+        code, &builder, input->path->control_packet, input->path->input_queue,
+        &task, 1));
   }
   if (payload) {
     loom_op_t* op;
@@ -64,7 +65,8 @@ static iree_status_t loom_aie2p_native_input_begin(
   loom_value_id_t task;
   IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(code, &builder, word, &task));
   IREE_RETURN_IF_ERROR(loom_aie2p_worker_control_write(
-      code, &builder, input->control_packet, input->input_queue, &task, 1));
+      code, &builder, input->path->control_packet, input->path->input_queue,
+      &task, 1));
   return loom_aie2p_worker_return(&builder, NULL, 0);
 }
 
@@ -93,10 +95,10 @@ iree_status_t loom_aie2p_native_prepare_input(
     loom_op_t* function;
     IREE_RETURN_IF_ERROR(loom_aie2p_worker_helper(
         &context->code, NULL, 0, NULL, 0, &builder, &input->retire, &function));
-    const iree_host_size_t shim = input->shim - context->tiles;
+    const iree_host_size_t shim = input->path->shim - context->tiles;
     IREE_RETURN_IF_ERROR(loom_aie2p_native_queue_retire(
-        context, &builder, loom_low_func_def_body(function), input->shim,
-        input->input_engine, LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM,
+        context, &builder, loom_low_func_def_body(function), input->path->shim,
+        input->path->input_engine, LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM,
         owner->control_packets[shim], owner->control_replies[shim]));
     const iree_host_size_t count =
         input->shared_receiver ? 1 : input->source->phase_count;

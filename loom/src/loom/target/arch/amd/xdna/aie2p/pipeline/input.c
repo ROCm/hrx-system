@@ -155,11 +155,8 @@ static uint32_t loom_aie2p_native_input_receive_window(
 static iree_status_t loom_aie2p_native_input_receivers(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization,
-    loom_aie2p_native_input_t* input, iree_string_view_t* reason,
-    bool* out_valid) {
-  const uint32_t window =
-      loom_aie2p_native_input_receive_window(context, input);
-  input->shared_receiver = window != 0;
+    loom_aie2p_native_input_t* input, const loom_aie2p_native_input_t* shared,
+    uint32_t window, iree_string_view_t* reason, bool* out_valid) {
   const iree_host_size_t tail = input->source->phase_count - 1;
   for (iree_host_size_t i = 0; i <= tail; ++i) {
     loom_aie2p_native_input_phase_t* phase = &input->phases[i];
@@ -179,8 +176,11 @@ static iree_status_t loom_aie2p_native_input_receivers(
     IREE_RETURN_IF_ERROR(loom_aie2p_native_select_channel_endpoint(
         context, &realization->invocations, input->invocation,
         phase->destination, LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY,
-        repetitions, 1, 0, window && i ? &input->phases[0].receiver : NULL,
-        &phase->receiver, reason, out_valid));
+        repetitions, 1, 0,
+        shared ? &shared->phases[i].receiver
+               : (window && i ? &input->phases[0].receiver : NULL),
+        window ? NULL : phase->destination, &phase->receiver, reason,
+        out_valid));
     if (!*out_valid) {
       return iree_ok_status();
     }
@@ -213,6 +213,42 @@ static iree_status_t loom_aie2p_native_input_receivers(
   return iree_ok_status();
 }
 
+static loom_aie2p_native_input_path_t* loom_aie2p_native_find_input_path(
+    const loom_aie2p_native_context_t* context,
+    const loom_pipeline_invocations_t* invocations,
+    const loom_aie2p_native_worker_t* owner,
+    const loom_aie2p_native_tile_t* shim,
+    const loom_aie2p_native_input_t* input) {
+  // The list is bounded by physical shim queues, not worker occurrences.
+  // Common execution admission already proved nonoverlap on this engine.
+  // Borrow it only when each input has its controller's lifetime; two inputs
+  // in the same invocation cannot share a terminal retirement boundary.
+  for (loom_aie2p_native_input_path_t* path = owner->input_paths; path;
+       path = path->next) {
+    const loom_aie2p_native_input_t* first = path->first;
+    const loom_aie2p_native_input_t* last = path->last;
+    if (path->shim != shim ||
+        first->shared_receiver != input->shared_receiver ||
+        first->source->phase_count != input->source->phase_count ||
+        last->controller == input->controller ||
+        invocations->workers[last->controller].invocation != last->invocation ||
+        invocations->workers[input->controller].invocation !=
+            input->invocation) {
+      continue;
+    }
+    bool same_receivers = true;
+    for (iree_host_size_t i = 0; i < input->source->phase_count; ++i) {
+      same_receivers &=
+          first->phases[i].receiver.tile ==
+          context->pool_tiles[input->phases[i].destination->pool_index];
+    }
+    if (same_receivers) {
+      return path;
+    }
+  }
+  return NULL;
+}
+
 iree_status_t loom_aie2p_native_route_input(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization,
@@ -221,36 +257,58 @@ iree_status_t loom_aie2p_native_route_input(
   *out_valid = false;
   const loom_pipeline_worker_t* source = &realization->workers[input->worker];
   const loom_op_t* declaration = source->source->declaration;
-  input->shim =
+  loom_aie2p_native_tile_t* shim =
       &context->tiles[context->workers[input->worker].tile->coordinate.column *
                       context->family->row_count];
-  loom_aie2p_native_tile_t* shim = input->shim;
+  loom_aie2p_native_worker_t* owner =
+      &context->workers[context->execution
+                            .workers[context->core_engines[input->controller]]];
+  const uint32_t window =
+      loom_aie2p_native_input_receive_window(context, input);
+  input->shared_receiver = window != 0;
+  loom_aie2p_native_input_path_t* path = loom_aie2p_native_find_input_path(
+      context, &realization->invocations, owner, shim, input);
+  const bool shared_path = path != NULL;
   const loom_xdna_dma_facts_t* dma = &shim->facts->dma;
   const uint64_t descriptors = input->source->phase_count;
   uint16_t descriptor_base, descriptor_count;
   uint16_t* used = loom_aie2p_native_descriptor_bank(
-      shim, shim->next_mm2s, &descriptor_base, &descriptor_count);
-  if (shim->next_mm2s == dma->channel_count_per_direction ||
+      shim, path ? path->input_engine : shim->next_mm2s, &descriptor_base,
+      &descriptor_count);
+  if ((!path && shim->next_mm2s == dma->channel_count_per_direction) ||
       descriptors > descriptor_count - *used ||
       input->source->phase_count > dma->task_queue_depth) {
     return loom_aie2p_native_reject(
         context, declaration,
         IREE_SV("shim queues and immutable descriptors for phased input"));
   }
-  input->input_engine = shim->next_mm2s++;
-  const uint16_t engine = input->input_engine;
   const uint64_t origin = (uint64_t)shim->coordinate.column
                           << context->family->column_shift;
-  input->input_queue =
-      (uint32_t)(loom_xdna_register_field_address(
-                     context->family,
-                     LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_TASK_QUEUE_START_BD_ID,
-                     shim->coordinate, &engine) -
-                 origin);
+  if (!path) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate(context->pass->arena,
+                                             sizeof(*path), (void**)&path));
+    *path = (loom_aie2p_native_input_path_t){
+        .next = owner->input_paths,
+        .first = input,
+        .shim = shim,
+        .input_engine = shim->next_mm2s++,
+    };
+    owner->input_paths = path;
+    const uint16_t engine = path->input_engine;
+    path->input_queue =
+        (uint32_t)(loom_xdna_register_field_address(
+                       context->family,
+                       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_TASK_QUEUE_START_BD_ID,
+                       shim->coordinate, &engine) -
+                   origin);
+  }
+  input->path = path;
+  path->last = input;
   iree_string_view_t reason;
   bool receivers_valid = false;
   IREE_RETURN_IF_ERROR(loom_aie2p_native_input_receivers(
-      context, realization, input, &reason, &receivers_valid));
+      context, realization, input, shared_path ? path->first : NULL, window,
+      &reason, &receivers_valid));
   if (!receivers_valid) {
     return loom_aie2p_native_reject(context, declaration, reason);
   }
@@ -309,10 +367,10 @@ iree_status_t loom_aie2p_native_route_input(
     context->bindings[binding].access |= LOOM_AIE2P_ARRAY_BINDING_ACCESS_READ;
     IREE_RETURN_IF_ERROR(loom_aie2p_native_input_descriptor(
         context, shim, phase->descriptor, binding, offset, span, phase->words));
-    if ((!input->shared_receiver || !i) &&
+    if (!shared_path && (!input->shared_receiver || !i) &&
         !loom_aie2p_native_input_route(
             context, next_source, canonical, shim->coordinate,
-            LOOM_XDNA_STREAM_PORT_DMA, input->input_engine,
+            LOOM_XDNA_STREAM_PORT_DMA, path->input_engine,
             phase->receiver.tile->coordinate, LOOM_XDNA_STREAM_PORT_DMA,
             phase->receiver.engine, (uint8_t)i)) {
       return loom_aie2p_native_reject(
@@ -338,10 +396,7 @@ iree_status_t loom_aie2p_native_route_input(
       }
     }
   }
-  loom_aie2p_native_worker_t* owner =
-      &context->workers[context->execution
-                            .workers[context->core_engines[input->controller]]];
-  input->control_packet = owner->control_packets[shim - context->tiles];
+  path->control_packet = owner->control_packets[shim - context->tiles];
   *out_valid = true;
   return iree_ok_status();
 }

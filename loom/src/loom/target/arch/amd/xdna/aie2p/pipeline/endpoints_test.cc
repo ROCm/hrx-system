@@ -16,6 +16,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/distribution.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_plan.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
 #include "loom/target/arch/amd/xdna/array/facts.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
 
@@ -88,7 +89,7 @@ class EndpointStorageTest
     IREE_EXPECT_OK(loom_aie2p_native_select_channel_endpoint(
         &context_, &invocations_, &children_[child], &channel,
         std::get<2>(GetParam()), repetitions, 1, reserved_tasks,
-        endpoint && share_queue ? &endpoints_[0] : nullptr,
+        endpoint && share_queue ? &endpoints_[0] : nullptr, &channel,
         &endpoints_[endpoint], &reason, &valid));
     EXPECT_TRUE(valid) << std::string(reason.data, reason.size);
     return valid;
@@ -217,6 +218,45 @@ TEST_P(EndpointStorageTest, SameChildAndEarlierSelectionSweepsCannotAlias) {
   ASSERT_TRUE(Select(3, 1, 1, 4));
   EXPECT_NE(endpoints_[3].storage, endpoints_[0].storage);
   EXPECT_NE(endpoints_[3].storage, endpoints_[1].storage);
+}
+
+TEST_P(EndpointStorageTest, SharedQueueRetainsEachChildsRefillOwnership) {
+  const auto& dma = tile_->facts->dma;
+  // Neither child fits in an autonomous sequence, even with the whole bank.
+  // Each reader must replenish the shared queue using its own record progress.
+  const uint32_t full_sequence_bound = dma.maximum_task_repeat_count *
+                                       dma.task_queue_depth *
+                                       dma.buffer_descriptor_count;
+  for (size_t i = 0; i < 2; ++i) {
+    auto& channel = channels_[i];
+    const uint32_t repetitions = full_sequence_bound + i + 1;
+    channel.progress = &channel;
+    channel.cursor.reader.maximum_admissions = repetitions;
+    channel.cursor.reader.exact_admissions = true;
+    ASSERT_TRUE(Select(i, i + 1, i + 1, repetitions));
+    const auto* refill = workers_[i + 1].refills;
+    ASSERT_NE(refill, nullptr);
+    EXPECT_EQ(refill->next, nullptr);
+    EXPECT_EQ(refill->progress, &channel);
+    EXPECT_EQ(refill->window, dma.maximum_task_repeat_count);
+    EXPECT_EQ(refill->remaining_tasks, (repetitions - 1) / refill->window);
+    const auto* queue = refill->queues;
+    ASSERT_NE(queue, nullptr);
+    EXPECT_EQ(queue->next, nullptr);
+    EXPECT_EQ(queue->tile, tile_);
+    EXPECT_EQ(queue->engine, endpoints_[0].engine);
+    EXPECT_EQ(queue->direction, std::get<2>(GetParam()));
+    EXPECT_EQ(queue->task, endpoints_[i].sequence.tasks[0]);
+    EXPECT_EQ(endpoints_[i].sequence.task_count, 1u);
+  }
+  EXPECT_NE(workers_[1].refills, workers_[2].refills);
+  EXPECT_NE(workers_[1].refills->queues->final_task,
+            workers_[2].refills->queues->final_task);
+  const uint8_t next_engine =
+      std::get<2>(GetParam()) == LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM
+          ? tile_->next_mm2s
+          : tile_->next_s2mm;
+  EXPECT_EQ(next_engine, std::get<1>(GetParam()) + 1);
 }
 
 TEST_P(EndpointStorageTest, ImportedAndDifferentControllerStateRemainResident) {

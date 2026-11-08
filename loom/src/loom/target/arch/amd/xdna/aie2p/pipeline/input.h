@@ -47,6 +47,26 @@ typedef struct loom_aie2p_native_input_phase_t {
   uint32_t words[8];
 } loom_aie2p_native_input_phase_t;
 
+// Queues and packet routes shared by nonoverlapping input occurrences on one
+// admitted controller core. Descriptor geometry remains occurrence-owned.
+typedef struct loom_aie2p_native_input_path_t {
+  // Next physical path owned by the same instruction engine.
+  struct loom_aie2p_native_input_path_t* next;
+  // First occurrence supplying the fixed receiver topology and configuration.
+  const struct loom_aie2p_native_input_t* first;
+  // Last assigned occurrence in invocation-major selection order. Independent
+  // inputs in that invocation cannot borrow this path's retirement boundary.
+  const struct loom_aie2p_native_input_t* last;
+  // Physical shim serving the stable caller buffers.
+  loom_aie2p_native_tile_t* shim;
+  // Memory-to-stream engine shared by all source phases.
+  uint8_t input_engine;
+  // Selected core-to-shim control packet class.
+  uint8_t control_packet;
+  // Tile-relative input task publication register.
+  uint32_t input_queue;
+} loom_aie2p_native_input_path_t;
+
 typedef struct loom_aie2p_native_input_t {
   // Communication-only source worker.
   uint32_t worker;
@@ -63,14 +83,8 @@ typedef struct loom_aie2p_native_input_t {
   loom_aie2p_native_input_phase_t* phases;
   // All phase receivers share one ordered physical queue and payload route.
   bool shared_receiver;
-  // Physical shim serving the stable caller buffers.
-  loom_aie2p_native_tile_t* shim;
-  // Memory-to-stream engine shared by all source phases.
-  uint8_t input_engine;
-  // Selected core-to-shim control packet class.
-  uint8_t control_packet;
-  // Tile-relative input task publication register.
-  uint32_t input_queue;
+  // Physical queues and routes, independent of this occurrence's descriptors.
+  loom_aie2p_native_input_path_t* path;
   // Private SSA bulk-position counter assigned during worker materialization.
   iree_host_size_t state_index;
   // Generated source-admission helper in the observing worker's context.
