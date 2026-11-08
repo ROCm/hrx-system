@@ -154,9 +154,13 @@ loom_cc_library(
     name = "main",
     srcs = [
         "main.c",
+        "options.c",
+        "run.c",
     ],
     hdrs = [
         "main.h",
+        "options.h",
+        "run.h",
     ],
     deps = [
         ":xfail",
@@ -176,6 +180,7 @@ loom_cc_library(
         "//loom/src/loom/tooling/input:format",
         "//loom/src/loom/tooling/input:loomc",
         "//loom/src/loom/tooling/io:file",
+        "//loom/src/loom/tooling/testbench:api",
         "//loom/src/loom/tooling/testbench:compiled_provider",
         "//loom/src/loom/tooling/testbench:device_event",
         "//loom/src/loom/tooling/testbench:executor",
@@ -194,6 +199,20 @@ loom_cc_library(
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal/memory:heap_pool",
         "//runtime/src/iree/io:stream",
+    ],
+)
+
+loom_cc_test(
+    name = "run_test",
+    srcs = ["run_test.cc"],
+    deps = [
+        ":main",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
     ],
 )
 
