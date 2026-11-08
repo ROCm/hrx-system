@@ -124,7 +124,7 @@ typedef struct loom_low_lower_realization_offer_record_t {
 } loom_low_lower_realization_offer_record_t;
 
 typedef struct loom_low_lower_realization_construction_t {
-  // Arena scoped to shared source-memory preparation.
+  // Arena scoped to source-plan construction and finalization.
   iree_arena_allocator_t* arena;
   // Borrowed source CFG facts used to prove placement and loop eligibility.
   const loom_value_fact_cfg_region_t* cfg;
@@ -224,14 +224,18 @@ static bool loom_low_lower_realization_loop_domain(
 }
 
 iree_status_t loom_low_lower_realizations_create(
-    loom_low_lower_context_t* context,
-    iree_arena_allocator_t* construction_arena) {
+    loom_low_lower_context_t* context) {
+  if (context->lowering->source_plan.realizations != NULL) {
+    return iree_ok_status();
+  }
   const loom_value_fact_cfg_region_t* cfg = loom_low_lower_context_cfg(context);
   if (cfg == NULL || cfg->loops.loop_count == 0 ||
       loom_low_lower_source_plan_uses_structured_control_flow(context)) {
     return iree_ok_status();
   }
   loom_low_lower_realizations_t* state = NULL;
+  iree_arena_allocator_t* construction_arena =
+      context->lowering->source_plan.realization_construction_arena;
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
       context, 1, sizeof(*state), (void**)&state));
   loom_low_lower_realization_construction_t* construction = NULL;
@@ -545,16 +549,19 @@ static void loom_low_lower_realizations_mark_source_inputs(
   }
 }
 
-iree_status_t loom_low_lower_realizations_prepare_selection(
-    loom_low_lower_context_t* context) {
+iree_status_t loom_low_lower_realizations_select(
+    loom_low_lower_context_t* context, bool* out_selected) {
+  if (out_selected != NULL) {
+    *out_selected = false;
+  }
   loom_low_lower_realizations_t* state =
       context->lowering->source_plan.realizations;
   if (state == NULL) {
     return iree_ok_status();
   }
   loom_low_lower_realization_construction_t* construction = state->construction;
-  IREE_RETURN_IF_ERROR(
-      loom_low_lower_realizations_select_offers(context, construction, NULL));
+  IREE_RETURN_IF_ERROR(loom_low_lower_realizations_select_offers(
+      context, construction, out_selected));
   construction->offers.first = NULL;
   construction->offers.last = NULL;
   construction->offers.count = 0;
@@ -660,6 +667,15 @@ static bool loom_low_lower_realization_find_anchor(
       anchor = definition;
     }
   }
+  if (recipe->require_loop_motion) {
+    const loom_cfg_loop_nest_t* loops = &state->cfg->loops;
+    const uint16_t loop =
+        loom_cfg_loop_nest_innermost(loops, use->parent_block->region_index);
+    if (loop == LOOM_CFG_LOOP_NEST_NONE ||
+        loom_cfg_loop_nest_contains(loops, loop, block->region_index)) {
+      return false;
+    }
+  }
   *out_block = block;
   *out_anchor = anchor;
   return true;
@@ -692,6 +708,7 @@ iree_status_t loom_low_lower_realization_request(
     const loom_low_lower_realization_recipe_t* recipe,
     const loom_low_lower_realization_t** out_realization) {
   *out_realization = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_realizations_create(context));
   loom_low_lower_realizations_t* state =
       context->lowering->source_plan.realizations;
   if (state == NULL ||
@@ -876,19 +893,13 @@ static iree_status_t loom_low_lower_realizations_order_events(
 }
 
 iree_status_t loom_low_lower_realizations_finalize(
-    loom_low_lower_context_t* context, bool* out_storage_refinement_required) {
-  *out_storage_refinement_required = false;
+    loom_low_lower_context_t* context) {
   loom_low_lower_realizations_t* state =
       context->lowering->source_plan.realizations;
   if (state == NULL) {
     return iree_ok_status();
   }
   loom_low_lower_realization_construction_t* construction = state->construction;
-  bool selected = false;
-  IREE_RETURN_IF_ERROR(loom_low_lower_realizations_select_offers(
-      context, construction, &selected));
-  *out_storage_refinement_required = selected;
-  loom_low_lower_realizations_mark_source_inputs(context, state);
   if (construction->count == 0) {
     state->construction = NULL;
     return iree_ok_status();

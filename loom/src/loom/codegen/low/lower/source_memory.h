@@ -111,8 +111,7 @@ iree_status_t loom_low_lower_source_memory_observe(
 // selection. Target realization offers are committed before operation
 // selection, while the shared owner remains open for selected-rule offers.
 iree_status_t loom_low_lower_source_memory_prepare(
-    loom_low_lower_context_t* context,
-    iree_arena_allocator_t* realization_construction_arena);
+    loom_low_lower_context_t* context);
 
 // Advances the retained access cursor in the shared selection/emission walk.
 // Each traversal resets the cursor to the first record before entering ops.

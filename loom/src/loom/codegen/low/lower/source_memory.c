@@ -802,8 +802,7 @@ iree_status_t loom_low_lower_source_memory_observe(
 }
 
 iree_status_t loom_low_lower_source_memory_prepare(
-    loom_low_lower_context_t* context,
-    iree_arena_allocator_t* realization_construction_arena) {
+    loom_low_lower_context_t* context) {
   const loom_low_lower_select_op_callback_t callback =
       context->policy->prepare_source_memory;
   if (context->lowering->source_plan.memory.first == NULL ||
@@ -811,8 +810,7 @@ iree_status_t loom_low_lower_source_memory_prepare(
        !context->lowering->source_plan.has_source_memory_recurrences)) {
     return iree_ok_status();
   }
-  iree_status_t status = loom_low_lower_realizations_create(
-      context, realization_construction_arena);
+  iree_status_t status = loom_low_lower_realizations_create(context);
   for (loom_low_lower_source_memory_record_t* record =
            context->lowering->source_plan.memory.first;
        callback.fn != NULL && record && iree_status_is_ok(status) &&
@@ -832,7 +830,7 @@ iree_status_t loom_low_lower_source_memory_prepare(
   context->lowering->source_plan.memory.current = NULL;
   if (iree_status_is_ok(status) &&
       !loom_low_lower_context_diagnostic_limit_reached(context)) {
-    status = loom_low_lower_realizations_prepare_selection(context);
+    status = loom_low_lower_realizations_select(context, NULL);
   }
   iree_arena_reset(&context->planning_arena);
   return status;

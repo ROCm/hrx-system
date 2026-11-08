@@ -40,10 +40,10 @@ iree_status_t loom_amdgpu_select_integer_division_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_amdgpu_integer_division_plan_t* out_plan, bool* out_selected);
 
-// Publishes result carriers selected by the retained division plan.
+// Publishes result carriers and retains reusable divisor preparation.
 iree_status_t loom_amdgpu_finalize_integer_division_plan(
-    loom_low_lower_context_t* context,
-    const loom_amdgpu_integer_division_plan_t* plan);
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_integer_division_plan_t* plan);
 
 // Marks source values consumed by the retained division plan.
 void loom_amdgpu_mark_integer_division_plan_storage_demands(

@@ -65,6 +65,7 @@ NUMERIC_CORPUS = loom_corpus_manifest(
         "integer/bitwise_divisibility.loom",
         "integer/constant_division.loom",
         "integer/division.loom",
+        "integer/division_loops.loom",
         "integer/narrow_consumers.loom",
         "integer/rotation.loom",
         "integer/scalar_observations.loom",
