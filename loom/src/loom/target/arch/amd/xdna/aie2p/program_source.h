@@ -85,7 +85,9 @@ loom_aie2p_program_source_table_lookup(
     const loom_aie2p_program_source_table_t* table, loom_symbol_ref_t symbol);
 
 // Admits the entry-to-direct-leaf native call closure of |entry|. A nested
-// retained helper emits one XDNA diagnostic and leaves |out_admitted| false.
+// retained helper, resource import, or authored mutable storage emits one XDNA
+// diagnostic and leaves |out_admitted| false. Compiler-generated frames are
+// admitted separately after allocation.
 // The entry and every admitted helper remain indexed for materialization;
 // program_data retains their union in entry-then-callee reference order.
 iree_status_t loom_aie2p_program_source_admit_direct_helpers(

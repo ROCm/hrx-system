@@ -146,6 +146,7 @@ loom_cc_library(
         ":bundle_encoding",
         ":leaf_plan_metadata",
         ":leaf_program",
+        ":stack_frame",
         "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low/schedule:physical_issue",
@@ -206,6 +207,23 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "stack_frame",
+    srcs = ["stack_frame.c"],
+    hdrs = ["stack_frame.h"],
+    deps = [
+        ":leaf_program",
+        "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/codegen/low:storage_layout",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:parameter",
+        "//loom/src/loom/target/arch/amd/xdna:error_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "leaf_compile",
     srcs = ["leaf_compile.c"],
     hdrs = ["leaf_compile.h"],
@@ -214,10 +232,12 @@ loom_cc_library(
         ":bundle_plan",
         ":leaf_object",
         ":program_capacity",
+        ":stack_frame",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:storage_layout",
         "//loom/src/loom/codegen/low/allocation:diagnostics",
         "//loom/src/loom/codegen/low/allocation:target_constraints",
         "//loom/src/loom/error:error_defs",
@@ -432,6 +452,18 @@ loom_cc_test(
     deps = [
         ":bundle_alignment",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/encoding",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "stack_frame_test",
+    srcs = ["stack_frame_test.cc"],
+    deps = [
+        ":stack_frame",
+        "//loom/src/loom/codegen/low:storage_layout",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

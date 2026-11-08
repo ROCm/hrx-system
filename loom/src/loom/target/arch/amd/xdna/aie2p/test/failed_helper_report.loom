@@ -3,9 +3,7 @@ aie2p.target<array> @device {device_profile = "amd.xdna.strix_halo.17f0_11"}
 // Nine loop-carried address indices exceed the eight-register hardware bank.
 // Indexed stores make every carrier observable while rotation keeps all nine
 // live across the backedge.
-low.func.def noinline target<amd.xdna.aie2p.core> @exhaust_indices(%iterations: reg<aie2p.er>) asm {
-  %scratch = storage {byte_alignment = 64, byte_length = 640} : low.storage<private>
-  %address = storage_address %scratch : low.storage<private> -> reg<aie2p.ep>
+low.func.def noinline target<amd.xdna.aie2p.core> @exhaust_indices(%iterations: reg<aie2p.er>, %address: reg<aie2p.ep>) asm {
   %step = mov.short 1
   %offset0 = mov.static-byte-offset 64
   %index0 = mov.address-index %offset0
@@ -47,6 +45,9 @@ low.func.def noinline target<amd.xdna.aie2p.core> @exhaust_indices(%iterations: 
 // The source worker retains a large lowering before its direct helper rejects.
 // Report consumers must still receive that source-level expansion evidence.
 pipeline.def<kernel> public retain target(@device) @failed_helper_report() run() {
+  %core = pipeline.memory<workgroup>[0, 3] : pool
+  %bytes = index.constant 640 : offset
+  %scratch = buffer.alloca<workgroup> pool(%core) align(64) %bytes : buffer
   pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
     %begin = index.constant 1 : index
     %end = index.constant 3 : index
@@ -55,7 +56,7 @@ pipeline.def<kernel> public retain target(@device) @failed_helper_report() run()
       %integer = index.cast %index : index to i32
       %value = scalar.sitofp %integer : i32 to f32
       %product = scalar.mulf %value, %value : f32
-      low.invoke @exhaust_indices(%product) : (f32)
+      low.invoke @exhaust_indices(%product, %scratch) : (f32, buffer)
     }
   }
 }

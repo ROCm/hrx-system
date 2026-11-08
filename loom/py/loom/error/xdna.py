@@ -979,6 +979,39 @@ ERR_XDNA_063 = ErrorDef(
     ),
 )
 
+# ERR_XDNA_064: A function frame cannot be represented by native stack setup.
+ERR_XDNA_064 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=64,
+    severity=Severity.ERROR,
+    summary="AIE2P function stack frame exceeds the native adjustment range.",
+    message=(
+        "AIE2P function '@{function_name}' requires a {required_bytes}-byte "
+        "stack frame, but native frame adjustments support at most "
+        "{maximum_bytes} bytes"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("required_bytes", ParamKind.U64),
+        ErrorParam("maximum_bytes", ParamKind.U64),
+    ),
+    fix_hint="Reduce function-local storage or register pressure.",
+)
+
+# ERR_XDNA_065: A native helper requires entry-only resource binding.
+ERR_XDNA_065 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=65,
+    severity=Severity.ERROR,
+    summary="AIE2P native helper requires entry-owned resources.",
+    message=(
+        "AIE2P retained helper '@{helper_name}' declares resource imports or "
+        "mutable storage; helpers receive their resources through arguments"
+    ),
+    params=(ErrorParam("helper_name", ParamKind.STRING),),
+    fix_hint="Declare resources in the entry and pass their addresses to the helper.",
+)
+
 ALL_XDNA_ERRORS = (
     ERR_XDNA_001,
     ERR_XDNA_005,
@@ -1035,4 +1068,6 @@ ALL_XDNA_ERRORS = (
     ERR_XDNA_061,
     ERR_XDNA_062,
     ERR_XDNA_063,
+    ERR_XDNA_064,
+    ERR_XDNA_065,
 )

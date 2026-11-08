@@ -540,6 +540,7 @@ _IMPLICIT_REGISTER_LAYOUT_OVERRIDES = {
     # The link register participates in both the 20-bit address and 32-bit
     # scalar domains. RET consumes the architectural return address.
     "lr": "mLRa",
+    "sp": "mSPm",
 }
 
 _IMPLICIT_REGISTER_LAYOUTS = {

@@ -1103,6 +1103,34 @@ static iree_status_t loom_aie2p_bundle_plan_append_move(
       route_id, packet_index, logical_issue_cycle);
 }
 
+// Native frame instructions participate in the same fixed-register timing and
+// resource admission as scheduled packets and generated physical moves.
+static iree_status_t loom_aie2p_bundle_plan_append_stack_instruction(
+    loom_aie2p_bundle_plan_builder_t* builder, bool entering,
+    uint32_t logical_issue_cycle) {
+  const loom_aie2p_stack_frame_t* stack = &builder->options->stack;
+  const bool initialize = entering && stack->storage.byte_length != 0;
+  if (!initialize && stack->byte_length == 0) {
+    return iree_ok_status();
+  }
+  const uint32_t ordinal = initialize
+                               ? AIE2P_CORE_DESCRIPTOR_REF_STATE_STACK_POINTER
+                               : AIE2P_CORE_DESCRIPTOR_REF_STACK_ADJUST;
+  const int64_t displacement =
+      entering ? (int64_t)stack->byte_length : -(int64_t)stack->byte_length;
+  return loom_aie2p_bundle_plan_admit_instruction(
+      builder, logical_issue_cycle,
+      (loom_aie2p_planned_slot_t){
+          .encoded_slot = loom_aie2p_bundle_encoding_encode_state_immediate(
+              builder->descriptor_set, ordinal, initialize ? 0 : displacement),
+          .scheduled_packet_index = LOOM_AIE2P_BUNDLE_PLAN_PACKET_NONE,
+          .flags = initialize
+                       ? LOOM_AIE2P_PLANNED_SLOT_FLAG_STACK_INITIALIZATION
+                       : 0,
+      },
+      (loom_aie2p_slot_realization_t){.descriptor_ordinal = ordinal});
+}
+
 static iree_status_t loom_aie2p_bundle_plan_append_link_move(
     loom_aie2p_bundle_plan_builder_t* builder, bool save_link,
     uint32_t logical_issue_cycle) {
@@ -1506,6 +1534,12 @@ static iree_status_t loom_aie2p_bundle_plan_append_terminator(
     const loom_aie2p_block_analysis_t* block_analysis,
     iree_host_size_t block_bundle_start) {
   if (block_analysis->terminator == LOOM_AIE2P_BLOCK_TERMINATOR_RETURN) {
+    if (builder->options->stack.byte_length != 0) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_stack_instruction(
+          builder, /*entering=*/false, block_analysis->terminator_issue_cycle));
+      IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_flush_pending(
+          builder, builder->pending.end_cycle));
+    }
     if (builder->options->preserve_link_register) {
       IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_link_move(
           builder, /*save_link=*/false,
@@ -1855,9 +1889,8 @@ static iree_status_t loom_aie2p_bundle_plan_append_loop_setup_instruction(
   return loom_aie2p_bundle_plan_admit_instruction(
       builder, logical_issue_cycle,
       (loom_aie2p_planned_slot_t){
-          .encoded_slot =
-              loom_aie2p_bundle_encoding_encode_loop_setup_descriptor(
-                  builder->descriptor_set, descriptor_ordinal, immediate),
+          .encoded_slot = loom_aie2p_bundle_encoding_encode_state_immediate(
+              builder->descriptor_set, descriptor_ordinal, immediate),
           .scheduled_packet_index = LOOM_AIE2P_BUNDLE_PLAN_PACKET_NONE,
           .flags = LOOM_AIE2P_PLANNED_SLOT_FLAG_HARDWARE_LOOP_SETUP,
       },
@@ -2190,21 +2223,29 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
   loom_aie2p_bundle_plan_analysis_t analysis;
   bool analysis_accepted = false;
   IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_analyze(
-      frame, options->diagnostic_emitter, arena, scratch_arena, &analysis,
-      &analysis_accepted));
+      frame, &options->stack.storage_layout, options->diagnostic_emitter, arena,
+      scratch_arena, &analysis, &analysis_accepted));
   if (!analysis_accepted) {
     return iree_ok_status();
   }
-  if (options->preserve_link_register) {
-    iree_host_size_t link_move_count = 1;
+  if (options->preserve_link_register || options->stack.byte_length != 0 ||
+      options->stack.storage.byte_length != 0) {
+    const iree_host_size_t exit_slot_count =
+        options->preserve_link_register + (options->stack.byte_length != 0);
+    iree_host_size_t envelope_slot_count =
+        options->preserve_link_register +
+        (options->stack.byte_length != 0 ||
+         options->stack.storage.byte_length != 0);
     for (iree_host_size_t i = 0; i < frame->schedule.block_count; ++i) {
-      link_move_count +=
-          analysis.blocks[i].terminator == LOOM_AIE2P_BLOCK_TERMINATOR_RETURN;
+      envelope_slot_count +=
+          exit_slot_count *
+          (analysis.blocks[i].terminator == LOOM_AIE2P_BLOCK_TERMINATOR_RETURN);
     }
-    if (!iree_host_size_checked_add(analysis.move_slot_count, link_move_count,
+    if (!iree_host_size_checked_add(analysis.move_slot_count,
+                                    envelope_slot_count,
                                     &analysis.move_slot_count)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AIE2P link-preservation capacity exceeds host "
+                              "AIE2P function-envelope capacity exceeds host "
                               "size");
     }
   }
@@ -2365,6 +2406,8 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
   builder.current_block_index = 0;
   builder.pending.minimum_issue_cycle = 0;
   builder.pending.end_cycle = 0;
+  IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_stack_instruction(
+      &builder, /*entering=*/true, /*logical_issue_cycle=*/0));
   if (options->preserve_link_register) {
     IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_link_move(
         &builder, /*save_link=*/true, /*logical_issue_cycle=*/0));
@@ -2433,6 +2476,8 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
   };
   IREE_RETURN_IF_ERROR(
       loom_aie2p_leaf_plan_retain_metadata(frame, arena, &plan));
+  plan.stack_frame_byte_length = options->stack.byte_length;
+  plan.storage_requirements[LOOM_STORAGE_SPACE_STACK] = options->stack.storage;
   *out_plan = plan;
   *out_planned = true;
   return iree_ok_status();

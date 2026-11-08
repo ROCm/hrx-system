@@ -165,6 +165,23 @@ iree_status_t loom_aie2p_program_source_admit_direct_helpers(
     if (!helper_resolved) {
       return iree_ok_status();
     }
+    if (helper->requirements.resource_count != 0 ||
+        helper->requirements.storage_layout.record_count != 0) {
+      const loom_diagnostic_param_t params[] = {
+          loom_param_string(loom_aie2p_program_source_symbol_name(
+              table->module, helper->symbol.symbol_id)),
+      };
+      const loom_diagnostic_emission_t emission = {
+          .module = table->module,
+          .op = helper->function_op,
+          .error = LOOM_ERR_XDNA_065,
+          .params = params,
+          .param_count = IREE_ARRAYSIZE(params),
+      };
+      IREE_RETURN_IF_ERROR(
+          iree_diagnostic_emit(table->diagnostic_emitter, &emission));
+      return iree_ok_status();
+    }
     if (helper->requirements.direct_callees.count != 0) {
       IREE_RETURN_IF_ERROR(loom_aie2p_program_source_emit_nested_call(
           table, entry, helper,

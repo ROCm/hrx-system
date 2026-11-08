@@ -37,6 +37,9 @@ from loom.target.arch.amd.xdna.aie2p.core_fifo_descriptors import (
     _fifo_store_descriptor_specs,
 )
 from loom.target.arch.amd.xdna.aie2p.core_machine_data import CORE_MACHINE_TABLE
+from loom.target.arch.amd.xdna.aie2p.core_stack_descriptors import (
+    STACK_DESCRIPTOR_SPECS,
+)
 from loom.target.arch.amd.xdna.aie2p.core_stream_descriptors import (
     _cascade_descriptor_specs,
     _cascade_matrix_descriptor_specs,
@@ -842,6 +845,7 @@ def _loop_setup_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
 _BASE_DESCRIPTOR_SPECS = (
     *_address_descriptor_specs(),
     *_loop_setup_descriptor_specs(),
+    *STACK_DESCRIPTOR_SPECS,
     _DescriptorSpec(
         "ADD_NC_mv_add_ri",
         f"{_TARGET_KEY}.add.i32.immediate.shift",

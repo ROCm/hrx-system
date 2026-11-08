@@ -1090,5 +1090,95 @@ TEST_F(Aie2pProgramCompileTest,
                           }));
 }
 
+TEST_F(Aie2pProgramCompileTest,
+       InitializesAndReleasesWorkerStackAtEveryReturn) {
+  constexpr char kSource[] = R"(
+aie2p.target<core> @target
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @entry(%condition: reg<aie2p.er>) asm {
+  %storage = storage {byte_alignment = 32, byte_length = 32} : low.storage<stack>
+  %address = storage_address %storage : low.storage<stack> -> reg<aie2p.ep>
+  st %condition, %address, 0
+  low.cond_br %condition, ^first, ^second : reg<aie2p.er>
+^first:
+  return
+^second:
+  return
+}
+)";
+  ModulePtr module = ParseModule(IREE_SV(kSource));
+  loom_op_t* entry = FindFunction(module.get(), IREE_SV("entry"));
+  const loom_aie2p_leaf_compile_options_t options = {
+      .descriptor_registry = &low_registry_.registry,
+  };
+  bool compiled = false;
+  loom_aie2p_leaf_contribution_t contribution = {};
+  IREE_ASSERT_OK(
+      CompileProgram(module.get(), entry, &options, &compiled, &contribution));
+  ASSERT_TRUE(compiled);
+  EXPECT_EQ(contribution.realization.stack_frame_byte_length, 64u);
+  EXPECT_EQ(contribution.realization.stack.byte_length, 64u);
+  EXPECT_EQ(contribution.realization.stack.minimum_alignment, 64u);
+  ASSERT_EQ(contribution.realization.storage_domain_count, 1u);
+
+  const auto adjust =
+      loom_aie2p_encoding_find_instruction(IREE_SV("PADDXM_pstm_sp_imm"));
+  const auto movxm = loom_aie2p_encoding_find_instruction(IREE_SV("MOVXM"));
+  const auto sp = loom_aie2p_machine_find_physical_register(IREE_SV("sp"));
+  const auto adapter =
+      loom_aie2p_machine_find_register_adapter(IREE_SV("OP_mMvSclDstCg"));
+  uint8_t sp_encoding = 0;
+  ASSERT_TRUE(loom_aie2p_machine_encode_register(adapter, sp, &sp_encoding));
+
+  // The same detached code is placed independently in two tile apertures.
+  for (uint32_t address : {0x70000u, 0x78000u}) {
+    const loom_aie2p_tile_storage_placement_t storage = {
+        .storage_space = LOOM_STORAGE_SPACE_STACK,
+        .owner_offset = 0,
+        .load_address = address,
+    };
+    const loom_aie2p_tile_link_layout_t placement = {
+        .program_address = 0,
+        .program_byte_capacity = LOOM_AIE2P_CORE_PROGRAM_MEMORY_SIZE,
+        .storage_placements = &storage,
+        .storage_placement_count = 1,
+    };
+    loom_aie2p_linked_tile_t linked = {};
+    IREE_ASSERT_OK(loom_aie2p_tile_link(&contribution, &placement,
+                                        &program_arena_, &linked));
+    std::vector<DecodedProgramBundle> bundles;
+    IREE_ASSERT_OK(
+        DecodeProgram(linked.assembly.sections[0].contents, &bundles));
+    size_t initialization_count = 0;
+    size_t release_count = 0;
+    for (const auto& bundle : bundles) {
+      if (const auto* slot = FindInstructionSlot(bundle, movxm)) {
+        loom_aie2p_encoding_field_value_t fields[2];
+        iree_host_size_t count = 0;
+        IREE_ASSERT_OK(loom_aie2p_encoding_unpack_instruction(
+            movxm, slot->value, IREE_ARRAYSIZE(fields), fields, &count));
+        ASSERT_EQ(count, 2u);
+        if (fields[0].value == sp_encoding) {
+          EXPECT_EQ(fields[1].value, address + 64u);
+          ++initialization_count;
+        } else {
+          EXPECT_EQ(fields[1].value, address + 32u);
+        }
+      }
+      if (const auto* slot = FindInstructionSlot(bundle, adjust)) {
+        loom_aie2p_encoding_field_value_t fields[1];
+        iree_host_size_t count = 0;
+        IREE_ASSERT_OK(loom_aie2p_encoding_unpack_instruction(
+            adjust, slot->value, IREE_ARRAYSIZE(fields), fields, &count));
+        ASSERT_EQ(count, 1u);
+        // Signed 19-bit byte displacement with six implicit low zero bits.
+        EXPECT_EQ(fields[0].value, 0x1fffu);
+        ++release_count;
+      }
+    }
+    EXPECT_EQ(initialization_count, 1u);
+    EXPECT_EQ(release_count, 2u);
+  }
+}
+
 }  // namespace
 }  // namespace loom

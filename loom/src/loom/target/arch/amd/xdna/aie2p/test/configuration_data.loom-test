@@ -245,9 +245,9 @@ low.func.def target<amd.xdna.aie2p.core>(@core) abi(object_function) @worker() a
 }
 
 // ----
-.text.worker: address=0x00000000 bytes=56 initialized
-  b80010184440c08007003a112030e001003082003a114030e001003082003a118030e001003082005c005030820000000000000000000000
-.storage.worker.stack: address=0x00078020 bytes=32 reserved
-.storage.worker.scratch: address=0x00078040 bytes=32 reserved
+.text.worker: address=0x00000000 bytes=66 initialized
+  4400e1890700b800101844c0c08007003a111030e001003082003a114030e001003082003a118030e001003082005c0050308200c4010000f8ff0000000000000000
+.storage.worker.stack: address=0x00078040 bytes=64 reserved
+.storage.worker.scratch: address=0x00078020 bytes=32 reserved
 .storage.worker.private: address=0x00078080 bytes=64 reserved
 .storage.worker.workgroup: address=0x00078100 bytes=256 reserved

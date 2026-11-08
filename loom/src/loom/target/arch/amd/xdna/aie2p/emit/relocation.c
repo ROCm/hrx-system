@@ -425,8 +425,9 @@ iree_status_t loom_aie2p_native_object_apply_fixups(
         }
         const uint64_t target_length =
             loom_native_section_byte_length(target_section);
-        if ((target_length == 0 && target_offset != 0) ||
-            (target_length != 0 && target_offset >= target_length)) {
+        // Address formation includes one-past pointers, notably the top of an
+        // upward-growing stack. No memory access occurs at this relocation.
+        if (target_offset > target_length) {
           return iree_make_status(
               IREE_STATUS_OUT_OF_RANGE,
               "AIE2P local address lies outside its storage domain");

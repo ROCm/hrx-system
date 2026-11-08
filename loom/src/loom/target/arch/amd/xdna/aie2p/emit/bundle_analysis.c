@@ -126,12 +126,11 @@ static iree_status_t loom_aie2p_bundle_plan_analyze_move_range(
 static iree_status_t loom_aie2p_bundle_plan_analyze_storage_address(
     const loom_low_emission_frame_t* frame,
     const loom_low_packet_view_t* packet,
+    const loom_low_storage_layout_t* layout,
     iree_diagnostic_emitter_t diagnostic_emitter,
     loom_aie2p_planned_storage_fixup_t* out_fixup, bool* out_accepted) {
   *out_accepted = false;
   const loom_op_t* op = packet->node->op;
-  const loom_low_storage_layout_t* layout =
-      &frame->schedule.requirements.storage_layout;
   loom_low_storage_layout_reference_t reference;
   loom_low_storage_layout_lookup_reference(&layout->index, layout->records,
                                            loom_low_storage_address_storage(op),
@@ -342,6 +341,7 @@ static void loom_aie2p_bundle_plan_analyze_hardware_loops(
 
 iree_status_t loom_aie2p_bundle_plan_analyze(
     const loom_low_emission_frame_t* frame,
+    const loom_low_storage_layout_t* storage_layout,
     iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_allocator_t* plan_arena, iree_arena_allocator_t* scratch_arena,
     loom_aie2p_bundle_plan_analysis_t* out_analysis, bool* out_accepted) {
@@ -430,7 +430,7 @@ iree_status_t loom_aie2p_bundle_plan_analyze(
                        expected_storage_fixup_count);
         accepted = false;
         IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_analyze_storage_address(
-            frame, &packet, diagnostic_emitter,
+            frame, &packet, storage_layout, diagnostic_emitter,
             &out_analysis->storage_fixups[out_analysis->storage_fixup_count],
             &accepted));
         if (!accepted) {

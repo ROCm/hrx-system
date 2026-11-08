@@ -437,6 +437,7 @@ static iree_status_t loom_aie2p_program_compile_impl(
           compiler->requested_detail_flags;
     }
     const loom_aie2p_leaf_compile_options_t helper_options = {
+        .is_helper = true,
         .function_target_facts = helper_input->function_target_facts,
         .memory_accesses = helper_input->memory_accesses,
         .loop_execution = helper_input->loop_execution,
@@ -497,6 +498,11 @@ static iree_status_t loom_aie2p_program_compile_impl(
     resolved_entry_options.allocation_reserved_ranges = entry_reservations;
     resolved_entry_options.allocation_reserved_range_count =
         entry_reservation_count;
+  }
+  for (iree_host_size_t i = 1; i <= direct_helpers.count; ++i) {
+    resolved_entry_options.callee_stack_byte_length =
+        iree_max(resolved_entry_options.callee_stack_byte_length,
+                 contributions[i].realization.stack_frame_byte_length);
   }
   resolved_entry_options.preserve_link_register = may_return;
   resolved_entry_options.link_shadow_register = link_shadow_register;
