@@ -157,3 +157,34 @@ low.func.def public target<test.low.core>(@target) abi(object_function) @repeat_
   %result = low.func.call pure @double_value(%repeated) : (reg<test.i32>) -> (reg<test.i32>)
   return %result
 }
+
+// ====
+// RUN: emit source-low output=low
+
+// This unbound helper acquires its target during call-graph specialization.
+// Count shared expressions once before inline profitability, including wide
+// values whose repeated construction would otherwise exceed the budget.
+test.target<low_core> @target
+
+func.def @double_lane(%value: i32) -> (i32) {
+  %left = vector.splat %value : vector<16xi32>
+  %right = vector.splat %value : vector<16xi32>
+  %sum = vector.addi %left, %right : vector<16xi32>
+  %result = vector.extract %sum[0] : vector<16xi32> -> i32
+  func.return %result : i32
+}
+
+func.def public target(@target) @combine(%lhs: i32, %rhs: i32) -> (i32) {
+  %left = func.call @double_lane(%lhs) : (i32) -> (i32)
+  %right = func.call @double_lane(%rhs) : (i32) -> (i32)
+  %result = scalar.addi %left, %right : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def public target<test.low.core>(@target) abi(object_function) @combine(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result$20 = test.add.i32 %lhs, %lhs
+  %result$21 = test.add.i32 %rhs, %rhs
+  %result$22 = test.add.i32 %result$20, %result$21
+  return %result$22
+}

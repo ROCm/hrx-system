@@ -248,6 +248,21 @@ static iree_status_t loom_target_pipeline_build_combine_body(
   return loom_target_pipeline_build_run(builder, IREE_SV("combine"));
 }
 
+static iree_status_t loom_target_pipeline_build_cse_body(
+    loom_builder_t* builder, void* user_data) {
+  (void)user_data;
+  return loom_target_pipeline_build_run(builder, IREE_SV("cse"));
+}
+
+static iree_status_t loom_target_pipeline_build_deduplicate_target_functions(
+    loom_builder_t* builder, void* user_data) {
+  (void)user_data;
+  loom_op_t* for_op = NULL;
+  return loom_target_pipeline_build_for_target_functions(
+      builder, IREE_SV("source"), loom_target_pipeline_build_cse_body, NULL,
+      &for_op);
+}
+
 static iree_status_t
 loom_target_pipeline_build_cleanup_expanded_target_functions(
     loom_builder_t* builder, void* user_data) {
@@ -796,6 +811,13 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
   // any target-aware function pass observes those callees.
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
       builder, IREE_SV("specialize-target-callgraph")));
+  // Newly specialized helpers have not participated in target-function CSE.
+  // Cost the shared expressions callers would materialize instead of charging
+  // separately for repeated constants, casts, and view construction.
+  loom_op_t* specialized_source_changed = NULL;
+  IREE_RETURN_IF_ERROR(loom_pass_ir_build_if_changed(
+      builder, loom_target_pipeline_build_deduplicate_target_functions, NULL,
+      &specialized_source_changed));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_preparatory_source_inlining(
       builder, user_data));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
