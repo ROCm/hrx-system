@@ -21,7 +21,6 @@ typedef struct hrx_stream_s* hrx_stream_t;
 typedef struct hrx_fence_s* hrx_fence_t;
 typedef struct hrx_buffer_view_s* hrx_buffer_view_t;
 typedef struct hrx_executable_s* hrx_executable_t;
-typedef struct hrx_physical_memory_s* hrx_physical_memory_t;
 typedef struct hrx_event_s* hrx_event_t;
 typedef struct hrx_graph_s* hrx_graph_t;
 typedef struct hrx_graph_exec_s* hrx_graph_exec_t;
@@ -684,88 +683,6 @@ HRX_API hrx_status_t hrx_queue_map(
     const hrx_semaphore_list_t* signal_semaphores, size_t mapping_count,
     const hrx_memory_mapping_t* mappings, hrx_queue_map_flags_t flags);
 
-//===----------------------------------------------------------------------===//
-// Legacy scalar virtual memory (allocator methods)
-//===----------------------------------------------------------------------===//
-
-// Deprecated compatibility surface for the ROCr-backed HIP implementation.
-// New callers use virtual buffers, ordinary MAPPING_SOURCE
-// buffers, and hrx_queue_map. Scalar physical handles are initially unmapped
-// and belong to the allocator that created them. They cannot be used as
-// queue_map sources.
-
-// Queries scalar support and optional granularity outputs in bytes. Unsupported
-// allocators return OK, false, and zero granularity; native query errors
-// propagate.
-HRX_API hrx_status_t hrx_allocator_query_virtual_memory(
-    hrx_allocator_t allocator, hrx_memory_type_t mem_type, bool* supported,
-    size_t* min_page_size, size_t* recommended_page_size);
-
-// Reserves addresses without physical backing for all families of the
-// allocator's device. The caller owns the returned buffer and must release it
-// through virtual_memory_release, not buffer_release.
-HRX_API hrx_status_t hrx_allocator_virtual_memory_reserve(
-    hrx_allocator_t allocator, size_t size, hrx_buffer_t* virtual_buffer);
-
-// Consumes the reservation only on success. Failure leaves it owned by the
-// caller so mappings can be removed and release retried. All uses must complete
-// and every mapping and additional buffer reference must be released first.
-HRX_API hrx_status_t hrx_allocator_virtual_memory_release(
-    hrx_allocator_t allocator, hrx_buffer_t virtual_buffer);
-
-// Creates an initially unmapped physical handle owned by the caller. Native
-// granularity and whole-allocation mapping restrictions still apply.
-HRX_API hrx_status_t hrx_allocator_physical_memory_allocate(
-    hrx_allocator_t allocator, hrx_memory_type_t mem_type, size_t size,
-    hrx_physical_memory_t* physical);
-
-// Consumes the handle only on success. The caller must first remove all
-// mappings and complete all uses; failure retains ownership for retry.
-HRX_API hrx_status_t hrx_allocator_physical_memory_free(
-    hrx_allocator_t allocator, hrx_physical_memory_t physical);
-
-// Installs a physical mapping without granting access. Both handles remain
-// caller-owned, and physical storage must remain live until the mapping is
-// gone.
-HRX_API hrx_status_t hrx_allocator_virtual_memory_map(
-    hrx_allocator_t allocator, hrx_buffer_t virtual_buffer,
-    size_t virtual_offset, hrx_physical_memory_t physical,
-    size_t physical_offset, size_t size);
-
-// Removes a mapped interval after all of its users have completed.
-HRX_API hrx_status_t hrx_allocator_virtual_memory_unmap(
-    hrx_allocator_t allocator, hrx_buffer_t virtual_buffer,
-    size_t virtual_offset, size_t size);
-
-// Memory protection bitfield. Values match iree_hal_memory_protection_t.
-typedef uint64_t hrx_memory_protection_t;
-#define HRX_MEMORY_PROTECTION_NONE 0ull
-#define HRX_MEMORY_PROTECTION_READ (1ull << 0)
-#define HRX_MEMORY_PROTECTION_WRITE (1ull << 1)
-#define HRX_MEMORY_PROTECTION_READ_WRITE \
-  (HRX_MEMORY_PROTECTION_READ | HRX_MEMORY_PROTECTION_WRITE)
-
-typedef enum hrx_virtual_memory_access_scope_t {
-  HRX_VIRTUAL_MEMORY_ACCESS_SCOPE_ALL = 0,
-  HRX_VIRTUAL_MEMORY_ACCESS_SCOPE_HOST = 1,
-  HRX_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE = 2,
-} hrx_virtual_memory_access_scope_t;
-
-// Changes access for the allocator's device scope after conflicting uses
-// finish.
-HRX_API hrx_status_t hrx_allocator_virtual_memory_protect(
-    hrx_allocator_t allocator, hrx_buffer_t virtual_buffer,
-    size_t virtual_offset, size_t size, hrx_memory_protection_t protection);
-
-// Changes access for the specified host/device scope. The allocator selects the
-// device receiving access, which may differ from the reservation's allocator.
-HRX_API hrx_status_t hrx_allocator_virtual_memory_protect_scoped(
-    hrx_allocator_t allocator, hrx_buffer_t virtual_buffer,
-    size_t virtual_offset, size_t size,
-    hrx_virtual_memory_access_scope_t access_scope,
-    hrx_memory_protection_t protection);
-
-//===----------------------------------------------------------------------===//
 // Events (stream synchronization points)
 //===----------------------------------------------------------------------===//
 

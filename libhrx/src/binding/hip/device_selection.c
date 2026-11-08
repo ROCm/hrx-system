@@ -170,9 +170,8 @@ iree_status_t iree_hip_device_selection_apply(
     void* self, iree_string_view_t driver_name, iree_allocator_t host_allocator,
     iree_host_size_t* device_count, iree_hal_device_info_t* device_infos) {
   const iree_hip_device_selection_t* selection = self;
-  const bool legacy =
-      iree_string_view_equal(driver_name, IREE_SV("legacy-amdgpu"));
-  const char* rocr = legacy ? NULL : selection->rocr_visible_devices;
+  (void)driver_name;
+  const char* rocr = selection->rocr_visible_devices;
   const char* frontend = iree_hip_device_selection_frontend_filter(selection);
   if (frontend && !frontend[0]) {
     frontend = NULL;

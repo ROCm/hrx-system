@@ -40,14 +40,11 @@ TEST(HipDevicePropertiesTest, RejectsMalformedAndOutOfRangeTargets) {
 TEST(HipDevicePropertiesTest, AmdUuidMatchesRocrHexCharacters) {
   const iree_hal_uuid_t source = {
       {0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10}};
-  for (auto driver : {IREE_SV("amd"), IREE_SV("legacy-amdgpu")}) {
-    uint8_t bytes[16] = {};
-    iree_hip_format_device_uuid(driver, &source, bytes);
-    EXPECT_EQ(std::string(reinterpret_cast<const char*>(bytes), sizeof(bytes)),
-              "fedcba9876543210");
-  }
-  const iree_hal_uuid_t leading_zero = {{0x01, 0x23}};
   uint8_t bytes[16] = {};
+  iree_hip_format_device_uuid(IREE_SV("amd"), &source, bytes);
+  EXPECT_EQ(std::string(reinterpret_cast<const char*>(bytes), sizeof(bytes)),
+            "fedcba9876543210");
+  const iree_hal_uuid_t leading_zero = {{0x01, 0x23}};
   iree_hip_format_device_uuid(IREE_SV("amd"), &leading_zero, bytes);
   EXPECT_EQ(std::string(reinterpret_cast<const char*>(bytes), sizeof(bytes)),
             "0123000000000000");

@@ -17,7 +17,6 @@ the AMD GPU targets enabled in the build and selected against the actual device.
 | Transfers | `transfer` | Host/device copies, stream ordering, numerical output, and range rejection |
 | Executables | `executable` | Loading configured HSACO, function lookup, dispatch, and exact output |
 | Virtual memory | `virtual_memory`, `virtual_memory_gpu` | Scope-qualified capabilities, batched mapping, aliases, permissions, and backing ownership |
-| Legacy virtual memory ABI | `legacy_virtual_memory`, `legacy_virtual_memory_gpu` | Scalar reservation/physical-handle operations and explicit unsupported behavior on CPU |
 | C++ bindings | `cxx_api` | Public C++ wrapper ownership and calls |
 | HIP devices | `hip/device_selection_test.cpp`, `hip/occupancy_test.cpp` | Compatibility visibility, selected device identity, and launch occupancy |
 | HIP modules and graphs | `hip/module_execution_test.cpp`, `hip/module_library_execution_test.cpp` | Module/library ownership, arguments, globals, captured execution, and dependencies |
@@ -89,12 +88,9 @@ namespace; exact native HRX URIs select their driver directly:
 |-------|----------------|
 | `amdgpu` | Default: native AMD GPU HAL, with RDNA and CDNA enumeration |
 | `rdna` / `cdna` | Native AMD GPU HAL, restricted to that architecture family |
-| `legacy-amdgpu` | Explicit opt-in to the legacy ROCr-based HAL |
 
-The requested driver must be compiled into the library. Backend selection is
-explicit in comparisons so that a default change cannot silently change the
-measured implementation. Compatibility visibility variables are processed before
-the frontend creates its device group.
+The native AMD GPU driver must be compiled into the library. Compatibility
+visibility variables are processed before the frontend creates its device group.
 
 Bazel targets supply `--hrx-library` or `HRX_TEST_LIBAMDHIP64` for the exact library
 under test. A manually staged HIP executable needs `HRX_TEST_LIBAMDHIP64` set to

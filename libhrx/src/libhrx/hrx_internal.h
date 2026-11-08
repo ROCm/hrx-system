@@ -208,14 +208,6 @@ static_assert(HRX_ENCODING_TYPE_DENSE_ROW_MAJOR ==
                   IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
               "encoding type mismatch");
 
-// Memory protection bitfield.
-static_assert(HRX_MEMORY_PROTECTION_NONE == IREE_HAL_MEMORY_PROTECTION_NONE,
-              "memory protection mismatch");
-static_assert(HRX_MEMORY_PROTECTION_READ == IREE_HAL_MEMORY_PROTECTION_READ,
-              "memory protection mismatch");
-static_assert(HRX_MEMORY_PROTECTION_WRITE == IREE_HAL_MEMORY_PROTECTION_WRITE,
-              "memory protection mismatch");
-
 // Map permissions share memory access values; operation flags are translated.
 static_assert(HRX_MAP_READ == IREE_HAL_MEMORY_ACCESS_READ,
               "map flags mismatch");
