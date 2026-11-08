@@ -1786,6 +1786,17 @@ void loom_value_facts_fmai(const loom_value_facts_t* a,
                            const loom_value_facts_t* b,
                            const loom_value_facts_t* c,
                            loom_value_facts_t* out) {
+  // Exact zero's stored divisor of one does not constrain the surviving term.
+  // A zero product also makes the result independent of either factor's
+  // distribution and preserves all predicates on the addend.
+  if (loom_value_facts_is_zero(*a) || loom_value_facts_is_zero(*b)) {
+    *out = *c;
+    return;
+  }
+  if (loom_value_facts_is_zero(*c)) {
+    loom_value_facts_muli(a, b, out);
+    return;
+  }
   // fmai(a, b, c) computes a*b + c.
   // Read all inputs first (output may alias inputs).
   const loom_value_facts_t a_facts = *a;

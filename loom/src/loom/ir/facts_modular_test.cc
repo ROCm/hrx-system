@@ -157,6 +157,29 @@ TEST(ModularIntegerFacts, OutOfDomainShiftDoesNotFold) {
   EXPECT_EQ(result.range_hi, INT8_MAX);
 }
 
+TEST(ModularIntegerFacts, ZeroMultiplyAddTermsRetainDivisibilityAcrossWidths) {
+  const loom_value_facts_t zero = loom_value_facts_exact_i64(0);
+  for (int32_t bit_count : {1, 8, 16, 32, 64}) {
+    SCOPED_TRACE(bit_count);
+    const int64_t divisor = bit_count == 1 ? 1 : 16;
+    const loom_value_facts_t factor = loom_value_facts_exact_i64(divisor);
+    const loom_value_facts_t input =
+        loom_value_facts_make(0, bit_count == 1 ? 1 : 31, 1);
+    loom_value_facts_t output;
+    loom_value_facts_fmai_modular(&input, &factor, &zero, bit_count, &output);
+    EXPECT_EQ(output.known_divisor, divisor);
+    EXPECT_EQ(output.range_lo, bit_count == 8 ? INT8_MIN : 0);
+    EXPECT_EQ(output.range_hi, bit_count == 1   ? 1
+                               : bit_count == 8 ? INT8_MAX
+                                                : 496);
+    const loom_value_facts_t addend = output;
+    loom_value_facts_fmai_modular(&input, &zero, &addend, bit_count, &output);
+    EXPECT_TRUE(loom_value_facts_equal(output, addend));
+    loom_value_facts_fmai_modular(&zero, &input, &addend, bit_count, &output);
+    EXPECT_TRUE(loom_value_facts_equal(output, addend));
+  }
+}
+
 TEST(ModularIntegerFacts, OutputMayAliasInputs) {
   loom_value_facts_t lhs = loom_value_facts_exact_i64(INT64_MAX);
   const loom_value_facts_t one = loom_value_facts_exact_i64(1);

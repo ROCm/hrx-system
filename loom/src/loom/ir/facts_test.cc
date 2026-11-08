@@ -1268,6 +1268,59 @@ TEST(MuliTransfer, InPlaceAccumulation) {
 }
 
 //===----------------------------------------------------------------------===//
+// Transfer functions: fmai
+//===----------------------------------------------------------------------===//
+
+TEST(FmaiTransfer, ZeroAddendPreservesProductDivisibility) {
+  const loom_value_facts_t multiplier = loom_value_facts_exact_i64(768);
+  const loom_value_facts_t zero = loom_value_facts_exact_i64(0);
+  for (const auto input :
+       {loom_value_facts_make(0, 7, 1), loom_value_facts_make(-7, 0, 1),
+        loom_value_facts_unknown()}) {
+    loom_value_facts_t output;
+    loom_value_facts_fmai(&input, &multiplier, &zero, &output);
+    EXPECT_EQ(output.known_divisor, 768);
+    if (input.range_lo != INT64_MIN) {
+      EXPECT_EQ(output.range_lo, input.range_lo * 768);
+      EXPECT_EQ(output.range_hi, input.range_hi * 768);
+    } else {
+      EXPECT_EQ(output.range_lo, INT64_MIN);
+      EXPECT_EQ(output.range_hi, INT64_MAX);
+    }
+  }
+}
+
+TEST(FmaiTransfer, ZeroProductPreservesAddendFacts) {
+  loom_value_facts_t addend = loom_value_facts_make(16, 64, 16);
+  loom_value_facts_mark_workgroup_uniform(&addend);
+  loom_value_facts_t varying = loom_value_facts_unknown();
+  loom_value_facts_mark_lane_varying(&varying);
+  const loom_value_facts_t zero = loom_value_facts_exact_i64(0);
+  for (int zero_operand = 0; zero_operand < 2; ++zero_operand) {
+    for (int output_operand = 0; output_operand < 3; ++output_operand) {
+      loom_value_facts_t operands[] = {varying, varying, addend};
+      operands[zero_operand] = zero;
+      loom_value_facts_fmai(&operands[0], &operands[1], &operands[2],
+                            &operands[output_operand]);
+      EXPECT_TRUE(loom_value_facts_equal(operands[output_operand], addend));
+    }
+  }
+}
+
+TEST(FmaiTransfer, ZeroAddendSupportsEveryOutputAlias) {
+  for (int output_operand = 0; output_operand < 3; ++output_operand) {
+    loom_value_facts_t operands[] = {loom_value_facts_make(0, 7, 1),
+                                     loom_value_facts_exact_i64(768),
+                                     loom_value_facts_exact_i64(0)};
+    loom_value_facts_fmai(&operands[0], &operands[1], &operands[2],
+                          &operands[output_operand]);
+    EXPECT_EQ(operands[output_operand].range_lo, 0);
+    EXPECT_EQ(operands[output_operand].range_hi, 5376);
+    EXPECT_EQ(operands[output_operand].known_divisor, 768);
+  }
+}
+
+//===----------------------------------------------------------------------===//
 // Transfer functions: negi / absi
 //===----------------------------------------------------------------------===//
 
