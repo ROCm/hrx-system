@@ -170,29 +170,8 @@ void GpuFileIoResources::CreateFile(const std::vector<uint32_t>& words,
   ASSERT_GE(data_file_, 0) << std::strerror(errno);
   ASSERT_EQ(unlink(path.c_str()), 0) << std::strerror(errno);
   ASSERT_NO_FATAL_FAILURE(
-      PrepareFileStorage(data_file_, mode, page_byte_length_));
-  if (::testing::Test::IsSkipped()) {
-    return;
-  }
-  size_t written = 0;
-  const auto* bytes = reinterpret_cast<const uint8_t*>(words.data());
-  const size_t byte_length = words.size() * sizeof(uint32_t);
-  const amdf::cts::WaitDeadline deadline;
-  while (written < byte_length) {
-    ASSERT_NE(deadline.remaining_ns(), 0u)
-        << "timed out transferring file bytes";
-    const ssize_t result =
-        pwrite(data_file_, bytes + written, byte_length - written, written);
-    if (result < 0 && errno == EINTR) {
-      ASSERT_TRUE(deadline.Pause()) << "interrupted file transfer timed out";
-      continue;
-    }
-    ASSERT_GT(result, 0) << std::strerror(errno);
-    written += static_cast<size_t>(result);
-  }
-  if (mode == FileMode::kDirect) {
-    ASSERT_NO_FATAL_FAILURE(EnableDirectFileIo(data_file_, byte_length));
-  }
+      InitializeFileStorage(data_file_, mode, page_byte_length_, words.data(),
+                            words.size() * sizeof(uint32_t)));
 }
 
 void GpuFileIoResources::CreateRing(GpuMemory* payload, FileIoPath path,

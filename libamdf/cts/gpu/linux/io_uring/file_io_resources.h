@@ -20,8 +20,8 @@
 #include <vector>
 
 #include "amdf/gpu.h"
-#include "libamdf/cts/gpu/linux/file_storage.h"
 #include "libamdf/cts/gpu/util/memory.h"
+#include "libamdf/cts/util/file_storage.h"
 #include "util/wait.h"
 
 enum class FileIoPath {

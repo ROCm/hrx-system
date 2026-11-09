@@ -58,6 +58,29 @@ amdf_cc_test(
 )
 
 amdf_cc_library(
+    name = "file_storage",
+    testonly = True,
+    srcs = ["file_storage.cc"],
+    hdrs = ["file_storage.h"],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        "//third_party:google_test",
+        "//third_party:linux_io_uapi",
+    ],
+)
+
+amdf_cc_test(
+    name = "file_storage_test",
+    srcs = ["file_storage_test.cc"],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":file_storage",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_library(
     name = "mapped_memory",
     testonly = True,
     srcs = ["mapped_memory.cc"],

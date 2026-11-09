@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "libamdf/cts/gpu/linux/file_storage.h"
+#include "libamdf/cts/util/file_storage.h"
 
 #include <fcntl.h>
 #include <linux/btrfs.h>
@@ -20,7 +20,9 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -53,8 +55,6 @@ void ExpectFileCacheEmpty(int file, size_t byte_length) {
             0)
       << "direct file I/O populated the page cache";
 }
-
-}  // namespace
 
 void PrepareFileStorage(int file, FileMode mode, size_t buffer_alignment) {
   struct statfs filesystem = {};
@@ -123,17 +123,45 @@ void PrepareFileStorage(int file, FileMode mode, size_t buffer_alignment) {
                                   geometry.stx_dio_offset_align);
   ::testing::Test::RecordProperty("io_direct_alignment_source",
                                   alignment_source);
-}
-
-void EnableDirectFileIo(int file, size_t byte_length) {
-  SCOPED_TRACE("before direct file I/O");
-  ASSERT_EQ(fdatasync(file), 0) << std::strerror(errno);
-  const int advice_result = posix_fadvise(file, 0, 0, POSIX_FADV_DONTNEED);
-  ASSERT_EQ(advice_result, 0) << std::strerror(advice_result);
-  ASSERT_NO_FATAL_FAILURE(ExpectFileCacheEmpty(file, byte_length));
   const int flags = fcntl(file, F_GETFL);
   ASSERT_GE(flags, 0) << std::strerror(errno);
   ASSERT_EQ(fcntl(file, F_SETFL, flags | O_DIRECT), 0) << std::strerror(errno);
+}
+
+}  // namespace
+
+void InitializeFileStorage(int file, FileMode mode, size_t buffer_alignment,
+                           const void* seed, size_t byte_length) {
+  ASSERT_NO_FATAL_FAILURE(PrepareFileStorage(file, mode, buffer_alignment));
+  if (::testing::Test::IsSkipped()) {
+    return;
+  }
+
+  std::unique_ptr<void, decltype(&std::free)> aligned_seed(nullptr, &std::free);
+  if (mode == FileMode::kDirect && byte_length != 0) {
+    void* allocation = nullptr;
+    const int allocation_result =
+        posix_memalign(&allocation, buffer_alignment, byte_length);
+    ASSERT_EQ(allocation_result, 0) << std::strerror(allocation_result);
+    aligned_seed.reset(allocation);
+    std::memcpy(allocation, seed, byte_length);
+    seed = allocation;
+  }
+  const auto* bytes = static_cast<const uint8_t*>(seed);
+  size_t written = 0;
+  while (written < byte_length) {
+    const ssize_t result =
+        pwrite(file, bytes + written, byte_length - written, written);
+    if (result < 0 && errno == EINTR) {
+      continue;
+    }
+    ASSERT_GT(result, 0) << std::strerror(errno);
+    written += static_cast<size_t>(result);
+  }
+  if (mode == FileMode::kDirect) {
+    SCOPED_TRACE("after direct file initialization");
+    ASSERT_NO_FATAL_FAILURE(ExpectFileCacheEmpty(file, byte_length));
+  }
 }
 
 void FinishDirectFileIo(int file, size_t byte_length) {

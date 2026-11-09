@@ -22,7 +22,7 @@
 #include <utility>
 
 #include "gtest/gtest.h"
-#include "libamdf/cts/gpu/linux/file_storage.h"
+#include "libamdf/cts/util/file_storage.h"
 
 namespace {
 
@@ -36,13 +36,12 @@ void Store(uint8_t* memory, uint32_t offset, uint32_t value) {
                    __ATOMIC_RELEASE);
 }
 
-void TransferFile(int file, bool write, void* pointer, size_t byte_length) {
+void ReadFile(int file, void* pointer, size_t byte_length) {
   auto* bytes = static_cast<uint8_t*>(pointer);
   size_t offset = 0;
   while (offset < byte_length) {
     const ssize_t result =
-        write ? pwrite(file, bytes + offset, byte_length - offset, offset)
-              : pread(file, bytes + offset, byte_length - offset, offset);
+        pread(file, bytes + offset, byte_length - offset, offset);
     if (result < 0 && errno == EINTR) {
       continue;
     }
@@ -62,18 +61,9 @@ void FilePoolIo::CreateFile(const std::vector<uint32_t>& seed, bool direct,
   file_ = mkstemp(path.data());
   ASSERT_GE(file_, 0) << std::strerror(errno);
   ASSERT_EQ(unlink(path.c_str()), 0);
-  ASSERT_NO_FATAL_FAILURE(PrepareFileStorage(
-      file_, direct ? FileMode::kDirect : FileMode::kBuffered,
-      buffer_alignment));
-  if (::testing::Test::IsSkipped()) {
-    return;
-  }
-  const size_t byte_length = seed.size() * sizeof(uint32_t);
-  ASSERT_NO_FATAL_FAILURE(TransferFile(
-      file_, true, const_cast<uint32_t*>(seed.data()), byte_length));
-  if (direct) {
-    ASSERT_NO_FATAL_FAILURE(EnableDirectFileIo(file_, byte_length));
-  }
+  ASSERT_NO_FATAL_FAILURE(InitializeFileStorage(
+      file_, direct ? FileMode::kDirect : FileMode::kBuffered, buffer_alignment,
+      seed.data(), seed.size() * sizeof(uint32_t)));
 }
 
 void FilePoolIo::Register(void* pointer, size_t byte_length) {
@@ -219,8 +209,8 @@ void FilePoolIo::VerifyFile(const std::vector<uint32_t>& expected) {
         FinishDirectFileIo(file_, static_cast<size_t>(information.st_size)));
   }
   std::vector<uint32_t> observed(expected.size());
-  ASSERT_NO_FATAL_FAILURE(TransferFile(file_, false, observed.data(),
-                                       observed.size() * sizeof(uint32_t)));
+  ASSERT_NO_FATAL_FAILURE(
+      ReadFile(file_, observed.data(), observed.size() * sizeof(uint32_t)));
   EXPECT_EQ(observed, expected);
 }
 
