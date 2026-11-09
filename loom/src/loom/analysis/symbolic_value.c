@@ -1035,20 +1035,28 @@ bool loom_symbolic_expr_kernel_coordinate_launch_bound_value(
   return *out_bound_value != LOOM_VALUE_ID_INVALID;
 }
 
-static bool loom_symbolic_expr_unsigned_remainder_def(
-    const loom_op_t* op, loom_value_id_t* out_dividend,
-    loom_value_id_t* out_divisor) {
-  if (loom_index_rem_isa(op)) {
-    *out_dividend = loom_index_rem_lhs(op);
-    *out_divisor = loom_index_rem_rhs(op);
-    return true;
+static bool loom_symbolic_expr_remainder_def(const loom_op_t* op,
+                                             loom_value_id_t result,
+                                             loom_value_id_t* out_dividend,
+                                             loom_value_id_t* out_divisor) {
+  switch (op->kind) {
+    case LOOM_OP_INDEX_DIVREM:
+    case LOOM_OP_SCALAR_DIVREMSI:
+    case LOOM_OP_SCALAR_DIVREMUI:
+      if (loom_op_const_results(op)[1] != result) {
+        return false;
+      }
+      break;
+    case LOOM_OP_INDEX_REM:
+    case LOOM_OP_SCALAR_REMSI:
+    case LOOM_OP_SCALAR_REMUI:
+      break;
+    default:
+      return false;
   }
-  if (loom_scalar_remui_isa(op)) {
-    *out_dividend = loom_scalar_remui_lhs(op);
-    *out_divisor = loom_scalar_remui_rhs(op);
-    return true;
-  }
-  return false;
+  *out_dividend = loom_op_const_operands(op)[0];
+  *out_divisor = loom_op_const_operands(op)[1];
+  return true;
 }
 
 static bool loom_symbolic_expr_remainder_bound_relation(
@@ -1078,18 +1086,25 @@ static iree_status_t loom_symbolic_expr_remainder_bound_proves_relation(
       loom_symbolic_expr_value_defining_op(context, left_source);
   loom_value_id_t dividend = LOOM_VALUE_ID_INVALID;
   loom_value_id_t divisor = LOOM_VALUE_ID_INVALID;
-  if (left_op &&
-      loom_symbolic_expr_unsigned_remainder_def(left_op, &dividend, &divisor)) {
+  if (left_op && loom_symbolic_expr_remainder_def(left_op, left_source,
+                                                  &dividend, &divisor)) {
     bool right_matches_divisor = false;
     IREE_RETURN_IF_ERROR(loom_symbolic_values_match(
         context, right_value, divisor, &right_matches_divisor));
-    bool dividend_non_negative = false;
-    IREE_RETURN_IF_ERROR(loom_symbolic_value_is_non_negative(
-        context, dividend, &dividend_non_negative));
+    // Index division requires a nonnegative logical coordinate. Scalar
+    // remainder is below a positive divisor for every dividend: signed
+    // negative remainders remain negative, and unsigned remainder interprets
+    // all input bits before reducing them into the divisor's positive range.
+    bool dividend_in_domain = true;
+    if (left_op->kind == LOOM_OP_INDEX_REM ||
+        left_op->kind == LOOM_OP_INDEX_DIVREM) {
+      IREE_RETURN_IF_ERROR(loom_symbolic_value_is_non_negative(
+          context, dividend, &dividend_in_domain));
+    }
     bool divisor_positive = false;
     IREE_RETURN_IF_ERROR(loom_symbolic_expr_value_facts_are_positive(
         context, divisor, &divisor_positive));
-    if (right_matches_divisor && dividend_non_negative && divisor_positive) {
+    if (right_matches_divisor && dividend_in_domain && divisor_positive) {
       *out_matched = loom_symbolic_expr_remainder_bound_relation(
           relation, /*swapped=*/false, out_result);
       return iree_ok_status();
@@ -1100,18 +1115,21 @@ static iree_status_t loom_symbolic_expr_remainder_bound_proves_relation(
       loom_symbolic_expr_assumption_source_value(context, right_value);
   const loom_op_t* right_op =
       loom_symbolic_expr_value_defining_op(context, right_source);
-  if (right_op && loom_symbolic_expr_unsigned_remainder_def(right_op, &dividend,
-                                                            &divisor)) {
+  if (right_op && loom_symbolic_expr_remainder_def(right_op, right_source,
+                                                   &dividend, &divisor)) {
     bool left_matches_divisor = false;
     IREE_RETURN_IF_ERROR(loom_symbolic_values_match(
         context, left_value, divisor, &left_matches_divisor));
-    bool dividend_non_negative = false;
-    IREE_RETURN_IF_ERROR(loom_symbolic_value_is_non_negative(
-        context, dividend, &dividend_non_negative));
+    bool dividend_in_domain = true;
+    if (right_op->kind == LOOM_OP_INDEX_REM ||
+        right_op->kind == LOOM_OP_INDEX_DIVREM) {
+      IREE_RETURN_IF_ERROR(loom_symbolic_value_is_non_negative(
+          context, dividend, &dividend_in_domain));
+    }
     bool divisor_positive = false;
     IREE_RETURN_IF_ERROR(loom_symbolic_expr_value_facts_are_positive(
         context, divisor, &divisor_positive));
-    if (left_matches_divisor && dividend_non_negative && divisor_positive) {
+    if (left_matches_divisor && dividend_in_domain && divisor_positive) {
       *out_matched = loom_symbolic_expr_remainder_bound_relation(
           relation, /*swapped=*/true, out_result);
     }

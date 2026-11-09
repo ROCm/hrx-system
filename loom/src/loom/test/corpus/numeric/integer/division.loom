@@ -471,6 +471,66 @@ func.def @division_i64_boundary(%ordinal: index) -> (i64, i64, i64, i64) {
   func.return %signed_quotient, %signed_remainder, %unsigned_quotient, %unsigned_remainder : i64, i64, i64, i64
 }
 
+// Decode a flat coordinate into runtime rows and columns. Separate authored
+// div/rem operations exercise combining, native pairs, and reference lowering.
+// The dimensions are computed once per invocation and every active element is
+// read once; the two extra positions exercise the exact end and inactive tail.
+func.def @runtime_coordinate_lookup(%input: buffer, %output: buffer, %rows_input: index, %columns_input: index) {
+  %rows_zero_based = index.assume %rows_input [range(%rows_input, 0, 7)] : index
+  %columns_zero_based = index.assume %columns_input [range(%columns_input, 0, 7)] : index
+  %begin = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %end = index.constant 66 : index
+  %base = index.constant 0 : offset
+  %rows = index.add %rows_zero_based, %unit : index
+  %columns = index.add %columns_zero_based, %unit : index
+  %count = index.mul %rows, %columns : index
+  %source = buffer.view %input[%base] : buffer -> view<[%rows]x[%columns]xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<66xi32>
+  scf.for %linear = [%begin to %end step %unit] {
+    %active = index.cmp ult, %linear, %count : index
+    %result = scf.if %active -> (i32) {
+      %row = index.div %linear, %columns : index
+      %column = index.rem %linear, %columns : index
+      %value = view.load %source[%row, %column] : view<[%rows]x[%columns]xi32> -> i32
+      scf.yield %value : i32
+    } else {
+      %inactive = scalar.constant -12345 : i32
+      scf.yield %inactive : i32
+    }
+    view.store %result, %destination[%linear] : i32, view<66xi32>
+  }
+  func.return
+}
+
+// A flat lookup supplies the same values without division, remainder, or
+// runtime-shaped addressing. The output retains guards on both sides.
+func.def @runtime_coordinate_lookup_oracle(%input: buffer, %output: buffer, %rows_input: index, %columns_input: index) {
+  %rows_zero_based = index.assume %rows_input [range(%rows_input, 0, 7)] : index
+  %columns_zero_based = index.assume %columns_input [range(%columns_input, 0, 7)] : index
+  %begin = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %end = index.constant 66 : index
+  %base = index.constant 0 : offset
+  %rows = index.add %rows_zero_based, %unit : index
+  %columns = index.add %columns_zero_based, %unit : index
+  %count = index.mul %rows, %columns : index
+  %source = buffer.view %input[%base] : buffer -> view<64xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<66xi32>
+  scf.for %linear = [%begin to %end step %unit] {
+    %active = index.cmp ult, %linear, %count : index
+    %result = scf.if %active -> (i32) {
+      %value = view.load %source[%linear] : view<64xi32> -> i32
+      scf.yield %value : i32
+    } else {
+      %inactive = scalar.constant -12345 : i32
+      scf.yield %inactive : i32
+    }
+    view.store %result, %destination[%linear] : i32, view<66xi32>
+  }
+  func.return
+}
+
 check.scenario @integer_division_i32_values {
   check.trial[10](%trial: index, %entropy: check.entropy) {
     check.compare<@division_i32_boundary>(%trial) : (index) -> [actual(%actual_signed_quotient: i32, %actual_signed_remainder: i32, %actual_unsigned_quotient: i32, %actual_unsigned_remainder: i32), expected(%expected_signed_quotient: i32, %expected_signed_remainder: i32, %expected_unsigned_quotient: i32, %expected_unsigned_remainder: i32)] {
@@ -711,5 +771,19 @@ check.scenario @wide_index_division_values {
     }
   }
 
+  check.return
+}
+
+check.scenario @runtime_coordinate_lookup_values configure[8](%rows: index, %configuration_entropy: check.entropy) {
+  check.trial[8](%columns: index, %entropy: check.entropy) {
+    %input_storage = check.generate.iota offset(-311) step(7) : tensor<72xi32>
+    %output_storage = check.generate.fill value(-889275714) : tensor<74xi32>
+    %input = check.tensor.view %input_storage offset(16) : tensor<72xi32> -> tensor<64xi32>
+    %output = check.tensor.view %output_storage offset(16) : tensor<74xi32> -> tensor<66xi32>
+    check.compare<@runtime_coordinate_lookup, @runtime_coordinate_lookup_oracle>(%input, %output, %rows, %columns) : (tensor<64xi32>, tensor<66xi32>, index, index) -> () {
+      check.expect.bitwise actual(%input_storage) expected(%input_storage) : tensor<72xi32>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<74xi32>
+    }
+  }
   check.return
 }

@@ -289,6 +289,65 @@ TEST(RemsiTransfer, MinimumDivisorHasRepresentableRemainderBounds) {
   EXPECT_EQ(out.range_hi, INT64_MAX);
 }
 
+TEST(RemsiTransfer, DynamicDivisorsPreserveDividendSign) {
+  for (const auto divisor :
+       {loom_value_facts_make(1, 64, 1), loom_value_facts_make(-64, -1, 1),
+        loom_value_facts_make(INT64_MIN, -1, 1)}) {
+    const int64_t bound = divisor.range_lo == INT64_MIN ? INT64_MAX : 63;
+    for (const auto dividend :
+         {loom_value_facts_make(0, INT64_MAX, 1),
+          loom_value_facts_make(INT64_MIN, 0, 1), loom_value_facts_unknown()}) {
+      loom_value_facts_t remainder;
+      loom_value_facts_remsi(&dividend, &divisor, &remainder);
+      EXPECT_EQ(remainder.range_lo, dividend.range_lo >= 0 ? 0 : -bound);
+      EXPECT_EQ(remainder.range_hi, dividend.range_hi <= 0 ? 0 : bound);
+    }
+  }
+}
+
+TEST(RemsiTransfer, RepresentativeIntervalsContainEveryResult) {
+  constexpr int64_t kEndpoints[] = {-8, -5, -1, 0, 1, 3, 7};
+  for (int64_t dividend_lower : kEndpoints) {
+    for (int64_t dividend_upper : kEndpoints) {
+      if (dividend_lower > dividend_upper) {
+        continue;
+      }
+      const auto dividend =
+          loom_value_facts_make(dividend_lower, dividend_upper, 1);
+      for (int64_t divisor_lower : kEndpoints) {
+        for (int64_t divisor_upper : kEndpoints) {
+          if (divisor_lower > divisor_upper) {
+            continue;
+          }
+          const auto divisor =
+              loom_value_facts_make(divisor_lower, divisor_upper, 1);
+          SCOPED_TRACE(::testing::Message()
+                       << "dividend=[" << dividend_lower << ","
+                       << dividend_upper << "] divisor=[" << divisor_lower
+                       << "," << divisor_upper << "]");
+          loom_value_facts_t remainder;
+          loom_value_facts_remsi(&dividend, &divisor, &remainder);
+          if (divisor_lower > 0 || divisor_upper < 0) {
+            if (dividend_lower >= 0) {
+              EXPECT_GE(remainder.range_lo, 0);
+            }
+            if (dividend_upper <= 0) {
+              EXPECT_LE(remainder.range_hi, 0);
+            }
+          }
+          for (int64_t lhs = dividend_lower; lhs <= dividend_upper; ++lhs) {
+            for (int64_t rhs = divisor_lower; rhs <= divisor_upper; ++rhs) {
+              if (rhs != 0) {
+                ExpectContains(remainder, lhs % rhs);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST(QuotientPreimage, WideCarrierBoundaryPoints) {
   for (int32_t bit_count : {16, 32, 64}) {
     const auto domain = loom_value_facts_make_signed_bit_count_range(bit_count);
