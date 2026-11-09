@@ -20,7 +20,6 @@ from build_tools.bazel.configure_api import (
     as_bazel_path,
     bazelrc_line,
 )
-from runtime.build_tools.bazel import configure as runtime_configure
 
 DEPENDENCY_MODES = frozenset(("pinned", "package", "auto"))
 
@@ -90,8 +89,7 @@ def _apply_option(request: ConfigRequest, name: str, value: str) -> None:
 
 def _finalize(request: ConfigRequest) -> None:
     state = configuration(request)
-    runtime = runtime_configure.configuration(request)
-    if "amd-gpu" in runtime.drivers and not state.rocm_path:
+    if not state.rocm_path:
         environment_path = os.environ.get("IREE_ROCM_PATH")
         if environment_path:
             _set_rocm_path(state, environment_path)
