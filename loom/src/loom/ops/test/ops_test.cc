@@ -268,7 +268,7 @@ TEST_F(BuilderTest, AllocOpWithSuccessorsKeepsTrailingFieldsDistinct) {
 
   loom_op_successors(op)[0] = then_block;
   loom_op_successors(op)[1] = else_block;
-  loom_op_regions(op)[0] = child_region;
+  loom_op_set_region(op, 0, child_region);
   loom_op_operands(op)[0] = 42;
   loom_op_results(op)[0] = 7;
   loom_op_attrs(op)[0] = loom_attr_i64(99);
@@ -801,8 +801,16 @@ TEST_F(BuilderTest, RegionAccessor) {
                                           0, 0, LOOM_LOCATION_UNKNOWN, &op));
   // Set a sentinel region pointer.
   loom_region_t sentinel_region = {0};
-  loom_op_regions(op)[0] = &sentinel_region;
+  loom_op_set_region(op, 0, &sentinel_region);
   EXPECT_EQ(loom_test_map_body(op), &sentinel_region);
+  EXPECT_EQ(loom_region_parent_op(&sentinel_region), op);
+
+  loom_region_t replacement_region = {0};
+  loom_op_set_region(op, 0, &replacement_region);
+  EXPECT_EQ(loom_region_parent_op(&sentinel_region), nullptr);
+  EXPECT_EQ(loom_region_parent_op(&replacement_region), op);
+  loom_op_set_region(op, 0, nullptr);
+  EXPECT_EQ(loom_region_parent_op(&replacement_region), nullptr);
 }
 
 TEST_F(BuilderTest, TrailingStorageAlignment) {

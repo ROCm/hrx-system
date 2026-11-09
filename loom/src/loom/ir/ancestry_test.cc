@@ -75,6 +75,9 @@ TEST_F(AncestryTest, FindsNestedOperationsBlocksAndValues) {
       &builder, 0, condition, LOOM_LOCATION_UNKNOWN, &region_op));
   loom_region_t* region = loom_test_optional_region_body(region_op);
   loom_block_t* region_block = loom_region_entry_block(region);
+  EXPECT_EQ(loom_region_parent_op(module_->body), nullptr);
+  EXPECT_EQ(loom_region_parent_op(loom_func_like_body(function)), function_op);
+  EXPECT_EQ(loom_region_parent_op(region), region_op);
   loom_value_id_t region_argument = LOOM_VALUE_ID_INVALID;
   IREE_ASSERT_OK(loom_module_define_value(
       module_, loom_type_scalar(LOOM_SCALAR_TYPE_I32), &region_argument));

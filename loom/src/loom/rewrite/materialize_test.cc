@@ -381,6 +381,7 @@ TEST_F(MaterializeTest, ClonesNestedRegionsAndBlockArguments) {
   EXPECT_EQ(loom_test_map_inputs(cloned_map_op).values[0], target_input);
   loom_region_t* cloned_body = loom_test_map_body(cloned_map_op);
   ASSERT_NE(cloned_body, nullptr);
+  EXPECT_EQ(loom_region_parent_op(cloned_body), cloned_map_op);
   ASSERT_EQ(loom_region_entry_arg_count(cloned_body), 1u);
   loom_block_t* cloned_block = loom_region_entry_block(cloned_body);
   ASSERT_EQ(cloned_block->op_count, 2u);

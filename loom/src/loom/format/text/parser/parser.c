@@ -123,7 +123,7 @@ iree_status_t loom_parse_keyword(loom_parser_t* parser, uint16_t keyword_id) {
 // Op finalization from accumulator to loom_op_t.
 //===----------------------------------------------------------------------===//
 
-static void loom_parser_set_region_parent_op(loom_region_t* region,
+static void loom_parser_set_child_parent_ops(loom_region_t* region,
                                              loom_op_t* parent_op) {
   if (!region) {
     return;
@@ -490,15 +490,12 @@ static iree_status_t loom_finalize_op(
     }
   }
 
-  // Copy regions.
-  if (parsed->region_count > 0) {
-    memcpy(loom_op_regions(op), parsed->regions,
-           parsed->region_count * sizeof(loom_region_t*));
-    for (uint8_t i = 0; i < parsed->region_count; ++i) {
-      loom_parser_set_region_parent_op(parsed->regions[i], op);
-      if (parser->finalize_operations && parsed->regions[i]) {
-        loom_module_record_region_summaries(op, parsed->regions[i]);
-      }
+  // Attach regions assembled before their owning operation was allocated.
+  for (uint8_t i = 0; i < parsed->region_count; ++i) {
+    loom_op_set_region(op, i, parsed->regions[i]);
+    loom_parser_set_child_parent_ops(parsed->regions[i], op);
+    if (parser->finalize_operations && parsed->regions[i]) {
+      loom_module_record_region_summaries(op, parsed->regions[i]);
     }
   }
 

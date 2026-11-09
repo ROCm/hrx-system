@@ -691,7 +691,7 @@ static iree_status_t loom_bytecode_body_reader_read_op(
     loom_region_t* region = NULL;
     IREE_RETURN_IF_ERROR(loom_bytecode_body_reader_read_region(
         body_reader, cursor, builder, record.op, depth + 1, &region));
-    loom_op_regions(record.op)[i] = region;
+    loom_op_set_region(record.op, (uint8_t)i, region);
   }
   ++body_reader->counts.op_count;
   IREE_RETURN_IF_ERROR(loom_builder_finalize_op(builder, record.op));
@@ -950,7 +950,7 @@ iree_status_t LOOM_BYTECODE_BODY_MATERIALIZE_REGION(
     status = loom_bytecode_body_reader_read_region(
         &body_reader, &cursor, builder, parent_op, 0, &region);
     if (iree_status_is_ok(status)) {
-      loom_op_regions(parent_op)[region_index] = region;
+      loom_op_set_region(parent_op, region_index, region);
     }
   }
   if (iree_status_is_ok(status)) {

@@ -325,14 +325,15 @@ static void loom_region_reset_summaries(loom_region_t* region) {
 }
 
 // Walks all blocks in a region recursively, adding uses, setting def pointers,
-// setting parent pointers, and recording direct semantic summaries for each
-// op.
+// restoring structural ownership, and recording direct semantic summaries for
+// each op.
 static iree_status_t loom_region_compute_uses(loom_module_t* module,
                                               loom_region_t* region,
                                               loom_op_t* parent_op) {
   if (!region) {
     return iree_ok_status();
   }
+  region->parent_op = parent_op;
   loom_block_t* block = NULL;
   loom_region_for_each_block(region, block) {
     block->parent_region = region;

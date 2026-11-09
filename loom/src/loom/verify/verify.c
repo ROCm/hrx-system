@@ -126,6 +126,20 @@ loom_verify_emit_wrong_terminator(loom_verify_state_t* state,
   return loom_verify_pending_diagnostic_status(state);
 }
 
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static iree_status_t
+loom_verify_emit_wrong_region_owner(loom_verify_state_t* state,
+                                    const loom_op_t* op,
+                                    const loom_op_vtable_t* vtable,
+                                    uint8_t region_index) {
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_op_vtable_name(vtable)),
+      loom_param_u32(region_index),
+  };
+  loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_067, params,
+                              IREE_ARRAYSIZE(params));
+  return loom_verify_pending_diagnostic_status(state);
+}
+
 IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static void
 loom_verify_emit_non_command_effect(loom_verify_state_t* state,
                                     const loom_op_t* op,
@@ -626,6 +640,10 @@ IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t loom_verify_op(
           .owner_initial_error_count = initial_error_count,
           .region_index = i,
       };
+      if (regions[i] && loom_region_parent_op(regions[i]) != op) {
+        IREE_RETURN_IF_ERROR(
+            loom_verify_emit_wrong_region_owner(state, op, vtable, i));
+      }
       IREE_RETURN_IF_ERROR(loom_verify_region(
           state, regions[i], descriptor ? &contract : NULL, isolated));
     }

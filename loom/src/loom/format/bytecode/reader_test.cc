@@ -5066,11 +5066,13 @@ TEST_F(ReaderTest, ReadsNestedRegionBodyModule) {
   ASSERT_TRUE(loom_test_func_isa(func_op));
   loom_region_t* body = loom_test_func_body(func_op);
   ASSERT_NE(body, nullptr);
+  EXPECT_EQ(loom_region_parent_op(body), func_op);
   loom_block_t* entry = loom_region_entry_block(body);
   ASSERT_EQ(entry->op_count, 1u);
   ASSERT_TRUE(loom_test_map_isa(entry->first_op));
   loom_region_t* map_body = loom_test_map_body(entry->first_op);
   ASSERT_NE(map_body, nullptr);
+  EXPECT_EQ(loom_region_parent_op(map_body), entry->first_op);
   EXPECT_EQ(map_body->block_count, 1u);
   loom_block_t* map_entry = loom_region_entry_block(map_body);
   ASSERT_EQ(map_entry->op_count, 1u);

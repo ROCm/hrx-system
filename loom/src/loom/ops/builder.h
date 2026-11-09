@@ -152,10 +152,10 @@ void loom_builder_set_after(loom_builder_t* builder, const loom_op_t* op);
 // entering a nested region to ensure correct parent ancestry.
 void loom_builder_set_block(loom_builder_t* builder, loom_block_t* block);
 
-// Enters a nested region for building ops inside it. Saves the
-// current insertion point (use loom_builder_restore to return),
-// sets the insertion block to the region's entry block, and sets
-// parent_op so that ops created inside inherit correct ancestry.
+// Enters a nested region for building ops inside it. Saves the current
+// insertion point (use loom_builder_restore to return) and sets the insertion
+// block to the region's entry block. Attached regions derive their owning op
+// directly; |parent_op| supplies the prospective owner for a detached region.
 //
 //   loom_builder_ip_t saved = loom_builder_enter_region(
 //       &builder, parent_op, region);

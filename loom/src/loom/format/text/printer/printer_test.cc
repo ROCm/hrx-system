@@ -1790,7 +1790,7 @@ TEST_F(PrintOpTest, BlockLabel) {
   IREE_ASSERT_OK(loom_module_intern_string(module_, IREE_SV("next"),
                                            &second_block->label_id));
   IREE_ASSERT_OK(loom_block_add_arg(module_, second_block, def(f32)));
-  loom_op_regions(op)[0] = then_region;
+  loom_op_set_region(op, 0, then_region);
 
   std::string output = print_op(op, LOOM_TEXT_PRINT_DEFAULT);
   EXPECT_EQ(output,

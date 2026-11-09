@@ -992,23 +992,6 @@ static iree_host_size_t loom_fact_refinement_find_local_node(
   return low > block_start ? low - 1 : LOOM_FACT_REFINEMENT_NO_NODE;
 }
 
-static const loom_op_t* loom_fact_refinement_region_parent_op(
-    const loom_block_t* block) {
-  if (!block || !block->parent_region) {
-    return NULL;
-  }
-  if (block->first_op) {
-    return block->first_op->parent_op;
-  }
-  const loom_block_t* sibling = NULL;
-  loom_region_for_each_block(block->parent_region, sibling) {
-    if (sibling->first_op) {
-      return sibling->first_op->parent_op;
-    }
-  }
-  return NULL;
-}
-
 static iree_status_t loom_fact_refinement_resolve_block_entry(
     loom_fact_refinement_source_t* source, const loom_block_t* block,
     iree_host_size_t* out_node) {
@@ -1048,7 +1031,7 @@ static iree_status_t loom_fact_refinement_resolve_block_entry(
     if (!region || region->block_count == 0 || region->blocks[0] != current) {
       break;
     }
-    const loom_op_t* parent_op = loom_fact_refinement_region_parent_op(current);
+    const loom_op_t* parent_op = loom_region_parent_op(current->parent_region);
     if (!parent_op || loom_traits_is_isolated(parent_op->traits)) {
       break;
     }

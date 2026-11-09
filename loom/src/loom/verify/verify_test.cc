@@ -466,6 +466,25 @@ TEST_F(VerifyTest, ValidAddiPasses) {
   EXPECT_EQ(result.error_count, 0u);
 }
 
+TEST_F(VerifyTest, RegionOwnerMustMatchContainingOperation) {
+  EnterTestFunc(nullptr, 0, nullptr);
+  TerminateFunc();
+  loom_op_t* function_op = loom_module_block(module_)->first_op;
+  ASSERT_NE(function_op, nullptr);
+  loom_region_t* body = loom_test_func_body(function_op);
+  ASSERT_EQ(loom_region_parent_op(body), function_op);
+  body->parent_op = nullptr;
+
+  DiagnosticCapture capture;
+  auto result = VerifyStructured(&capture);
+  EXPECT_EQ(result.error_count, 1u);
+  const CapturedDiagnostic* entry = FindDiagnostic(
+      capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_STRUCTURE, 67));
+  ASSERT_NE(entry, nullptr) << "Expected STRUCTURE/067 region-owner error";
+  EXPECT_EQ(GetStringParam(*entry, 0), "test.func");
+  ExpectU32Param(*entry, 1, 0);
+}
+
 TEST_F(VerifyTest, ScopedEnumsRequireExplicitAttributeDescriptors) {
   loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
   EnterTestFunc(nullptr, 0, nullptr);
@@ -652,8 +671,9 @@ TEST_F(VerifyTest, ZeroBlockFunctionBodyFails) {
       /*region_count=*/1, /*tied_result_count=*/0, vtable->attribute_count,
       LOOM_LOCATION_UNKNOWN, &function_op));
   loom_op_attrs(function_op)[0] = loom_attr_symbol(DefineTestCallee());
-  IREE_ASSERT_OK(loom_module_allocate_region(module_, 0,
-                                             &loom_op_regions(function_op)[0]));
+  loom_region_t* body = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate_region(module_, 0, &body));
+  loom_op_set_region(function_op, 0, body);
   IREE_ASSERT_OK(loom_builder_finalize_op(&builder_, function_op));
 
   DiagnosticCapture capture;
