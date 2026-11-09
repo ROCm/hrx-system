@@ -58,13 +58,13 @@ typedef struct loom_type_value_span_t {
   loom_value_id_t single_value;
 } loom_type_value_span_t;
 
-typedef struct loom_type_propagator_queue_marks_t {
-  // Transaction generation in which the value was queued.
-  uint32_t value_generation;
-
-  // Transaction generation in which the forwarding group was queued.
-  uint32_t forwarding_generation;
-} loom_type_propagator_queue_marks_t;
+enum loom_type_propagator_queue_flag_bits_e {
+  // Value adjacency is present in value_worklist.
+  LOOM_TYPE_PROPAGATOR_QUEUE_FLAG_VALUE = 1u << 0,
+  // Forwarding group is present in forwarding_worklist.
+  LOOM_TYPE_PROPAGATOR_QUEUE_FLAG_FORWARDING = 1u << 1,
+};
+typedef uint8_t loom_type_propagator_queue_flags_t;
 
 struct loom_type_propagator_t {
   // Module whose value table provides canonical value payloads.
@@ -85,18 +85,15 @@ struct loom_type_propagator_t {
   // Number of local value ordinals addressable by the dense arrays below.
   iree_host_size_t ordinal_capacity;
 
-  // Current transaction generation for worklist marks.
-  uint32_t transaction_generation;
-
   // Candidate payloads in first-touch order for the active transaction.
   loom_type_propagator_type_store_t candidates;
 
   // Exact rejected payloads retained for the current fixed-point iteration.
   loom_type_propagator_type_store_t rejections;
 
-  // Queue generation marks indexed by value ordinal. A forwarding group's
-  // first destination value owns its forwarding mark.
-  loom_type_propagator_queue_marks_t* queue_marks;
+  // Worklist occupancy indexed by value ordinal. A forwarding group's first
+  // destination value owns its forwarding flag.
+  loom_type_propagator_queue_flags_t* queue_flags;
 
   // Parent op owning the region that defines each block argument, when known.
   loom_op_t** owner_ops;
@@ -208,7 +205,7 @@ static iree_status_t loom_type_propagator_ensure_ordinal_capacity(
 
   uint32_t* candidate_indices = NULL;
   uint32_t* rejection_indices = NULL;
-  loom_type_propagator_queue_marks_t* queue_marks = NULL;
+  loom_type_propagator_queue_flags_t* queue_flags = NULL;
   loom_op_t** owner_ops = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       propagator->arena, new_capacity, sizeof(*candidate_indices),
@@ -218,12 +215,12 @@ static iree_status_t loom_type_propagator_ensure_ordinal_capacity(
       (void**)&rejection_indices));
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(propagator->arena, new_capacity,
-                                sizeof(*queue_marks), (void**)&queue_marks));
+                                sizeof(*queue_flags), (void**)&queue_flags));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       propagator->arena, new_capacity, sizeof(*owner_ops), (void**)&owner_ops));
   memset(candidate_indices, 0xFF, new_capacity * sizeof(*candidate_indices));
   memset(rejection_indices, 0xFF, new_capacity * sizeof(*rejection_indices));
-  memset(queue_marks, 0, new_capacity * sizeof(*queue_marks));
+  memset(queue_flags, 0, new_capacity * sizeof(*queue_flags));
   memset(owner_ops, 0, new_capacity * sizeof(*owner_ops));
 
   if (old_capacity > 0) {
@@ -231,14 +228,14 @@ static iree_status_t loom_type_propagator_ensure_ordinal_capacity(
            old_capacity * sizeof(*candidate_indices));
     memcpy(rejection_indices, propagator->rejections.indices,
            old_capacity * sizeof(*rejection_indices));
-    memcpy(queue_marks, propagator->queue_marks,
-           old_capacity * sizeof(*queue_marks));
+    memcpy(queue_flags, propagator->queue_flags,
+           old_capacity * sizeof(*queue_flags));
     memcpy(owner_ops, propagator->owner_ops, old_capacity * sizeof(*owner_ops));
   }
 
   propagator->candidates.indices = candidate_indices;
   propagator->rejections.indices = rejection_indices;
-  propagator->queue_marks = queue_marks;
+  propagator->queue_flags = queue_flags;
   propagator->owner_ops = owner_ops;
   propagator->ordinal_capacity = new_capacity;
   return iree_ok_status();
@@ -287,7 +284,6 @@ iree_status_t loom_type_propagator_allocate(
   propagator->arena = arena;
   propagator->refine_boundary = refine_boundary;
   propagator->scope = scope;
-  propagator->transaction_generation = 1;
   loom_segmented_storage_initialize(
       sizeof(loom_type_propagator_type_segment_t),
       iree_alignof(loom_type_propagator_type_segment_t),
@@ -309,11 +305,17 @@ void loom_type_propagator_deinitialize(loom_type_propagator_t* propagator) {
 
 static void loom_type_propagator_next_transaction(
     loom_type_propagator_t* propagator) {
-  ++propagator->transaction_generation;
-  if (propagator->transaction_generation == 0) {
-    memset(propagator->queue_marks, 0,
-           propagator->ordinal_capacity * sizeof(*propagator->queue_marks));
-    propagator->transaction_generation = 1;
+  // A conflict can abandon entries before they are popped. The worklists are
+  // the exact sparse index of those remaining flags, so clearing them costs
+  // only work already charged to the prior transaction.
+  for (iree_host_size_t i = 0; i < propagator->value_worklist_count; ++i) {
+    const loom_value_ordinal_t ordinal = propagator->value_worklist[i];
+    propagator->queue_flags[ordinal] &= ~LOOM_TYPE_PROPAGATOR_QUEUE_FLAG_VALUE;
+  }
+  for (iree_host_size_t i = 0; i < propagator->forwarding_worklist_count; ++i) {
+    const loom_value_ordinal_t ordinal = propagator->forwarding_worklist[i];
+    propagator->queue_flags[ordinal] &=
+        ~LOOM_TYPE_PROPAGATOR_QUEUE_FLAG_FORWARDING;
   }
   propagator->candidates.count = 0;
   propagator->value_worklist_count = 0;
@@ -565,15 +567,15 @@ static loom_type_t loom_type_propagator_value_type(
 
 static iree_status_t loom_type_propagator_enqueue_value(
     loom_type_propagator_t* propagator, loom_value_ordinal_t value_ordinal) {
-  if (propagator->queue_marks[value_ordinal].value_generation ==
-      propagator->transaction_generation) {
+  if (iree_any_bit_set(propagator->queue_flags[value_ordinal],
+                       LOOM_TYPE_PROPAGATOR_QUEUE_FLAG_VALUE)) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_type_propagator_grow_ordinal_list(
       propagator, &propagator->value_worklist, propagator->value_worklist_count,
       &propagator->value_worklist_capacity));
-  propagator->queue_marks[value_ordinal].value_generation =
-      propagator->transaction_generation;
+  propagator->queue_flags[value_ordinal] |=
+      LOOM_TYPE_PROPAGATOR_QUEUE_FLAG_VALUE;
   propagator->value_worklist[propagator->value_worklist_count++] =
       value_ordinal;
   return iree_ok_status();
@@ -585,16 +587,16 @@ static iree_status_t loom_type_propagator_enqueue_forwarding(
   IREE_RETURN_IF_ERROR(loom_type_propagator_register_value(
       propagator, key_value_id, &key_ordinal));
   if (key_ordinal == LOOM_VALUE_ORDINAL_INVALID ||
-      propagator->queue_marks[key_ordinal].forwarding_generation ==
-          propagator->transaction_generation) {
+      iree_any_bit_set(propagator->queue_flags[key_ordinal],
+                       LOOM_TYPE_PROPAGATOR_QUEUE_FLAG_FORWARDING)) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_type_propagator_grow_ordinal_list(
       propagator, &propagator->forwarding_worklist,
       propagator->forwarding_worklist_count,
       &propagator->forwarding_worklist_capacity));
-  propagator->queue_marks[key_ordinal].forwarding_generation =
-      propagator->transaction_generation;
+  propagator->queue_flags[key_ordinal] |=
+      LOOM_TYPE_PROPAGATOR_QUEUE_FLAG_FORWARDING;
   propagator->forwarding_worklist[propagator->forwarding_worklist_count++] =
       key_ordinal;
   return iree_ok_status();
@@ -1838,7 +1840,8 @@ iree_status_t loom_type_propagator_apply_op(loom_type_propagator_t* propagator,
     if (propagator->value_worklist_count > 0) {
       const loom_value_ordinal_t value_ordinal =
           propagator->value_worklist[--propagator->value_worklist_count];
-      propagator->queue_marks[value_ordinal].value_generation = 0;
+      propagator->queue_flags[value_ordinal] &=
+          ~LOOM_TYPE_PROPAGATOR_QUEUE_FLAG_VALUE;
       const loom_value_id_t value_id =
           propagator->value_domain.value_ids[value_ordinal];
       IREE_RETURN_IF_ERROR(loom_type_propagator_process_value_adjacency(
@@ -1849,7 +1852,8 @@ iree_status_t loom_type_propagator_apply_op(loom_type_propagator_t* propagator,
     const loom_value_ordinal_t key_ordinal =
         propagator
             ->forwarding_worklist[--propagator->forwarding_worklist_count];
-    propagator->queue_marks[key_ordinal].forwarding_generation = 0;
+    propagator->queue_flags[key_ordinal] &=
+        ~LOOM_TYPE_PROPAGATOR_QUEUE_FLAG_FORWARDING;
     const loom_value_id_t key_value_id =
         propagator->value_domain.value_ids[key_ordinal];
     loom_value_t* key_value =
