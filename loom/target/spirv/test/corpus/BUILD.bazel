@@ -324,8 +324,6 @@ _NO_EXTENDED_TYPES_XFAILS = {
     "memory/address/integer_casts.loom:@loaded_integer_address_joins": "TARGET/003",
     "memory/address/integer_terms.loom:@narrow_coordinates": "TARGET/003",
     "memory/address/integer_terms.loom:@uniform_narrow_coordinates": "TARGET/003",
-    "memory/address/integer_terms.loom:@workgroup_narrow_coordinates": "TARGET/003",
-    "memory/address/narrow.loom:@varying_narrow_casts": "TARGET/003",
     "memory/address/signed_terms.loom:@signed_lookup": "TARGET/003",
     "memory/address/signed_terms.loom:@workgroup_signed_coordinates": "TARGET/003",
     "memory/address/table_index.loom:@lookup_scalar": "TARGET/003",
