@@ -2451,6 +2451,14 @@ A function returning a reference to that object does not extend its lifetime.
 An immediately invoked lambda destroys its owned captures when the temporary
 closure's full expression ends, after the invocation returns.
 
+Array initialization preserves the distinction between explicit element clauses
+and omitted elements. A default argument used to construct an omitted element
+is destroyed before the next element starts construction. The same rule applies
+to default arguments of element copy constructors when copying a complete array.
+Temporaries written in explicit element initializers retain their enclosing
+full-expression lifetime. Binding a reference to an element of a temporary
+array extends the lifetime of the complete array.
+
 ### Ordinary overloaded operators
 
 Admitted values can use ordinary member and free operator functions. The C++

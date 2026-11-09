@@ -210,8 +210,8 @@ Value Initialization::value(const cxx::Type* type,
             unit_.typeTraits().requires_zero_initialization(type, constructor),
         owner, retained);
   }
-  return from_elements(type, elements, implicit_element, constructor, owner,
-                       retained);
+  return from_elements(type, elements, implicit_element, constructor,
+                       initializer, owner, retained);
 }
 
 Value Initialization::closure(cxx::LambdaExpressionAST* expression) {
@@ -677,13 +677,24 @@ Value Initialization::from_elements(const cxx::Type* type,
                                     cxx::List<cxx::ExpressionAST*>* elements,
                                     cxx::VariableSymbol* implicit_element,
                                     cxx::FunctionSymbol* constructor,
+                                    cxx::ExpressionAST* initializer,
                                     cxx::AST* owner,
                                     std::optional<Value> retained) {
   type = types_.unqualified(type);
   if (auto* array = types_.array(type, owner)) {
     std::vector<loom_value_id_t> components;
     components.reserve(array->component_count);
+    auto* element_type = array->source->elementType();
+    const bool leaf = !unit_.typeTraits().is_array(element_type);
     for (size_t index = 0; index < array->source->size(); ++index) {
+      // A selected array constructor carries arguments for each leaf, not
+      // aggregate element clauses. Omitted elements also have their own
+      // default-argument temporary boundary, including a repeated source plan.
+      const bool explicit_clause = !constructor && elements;
+      std::optional<Evaluation::FullExpression> full_expression;
+      if (!explicit_clause && leaf) {
+        full_expression = evaluation_.begin_full_expression();
+      }
       std::optional<Value> prior;
       if (retained) {
         prior = retained->project(*array->element,
@@ -691,26 +702,28 @@ Value Initialization::from_elements(const cxx::Type* type,
       }
       cxx::ExpressionAST* initializing_expression = nullptr;
       Value initialized;
-      if (elements) {
+      if (constructor) {
+        initializing_expression = initializer;
+        initialized =
+            value(element_type, initializer, constructor, owner, prior);
+      } else if (elements) {
         initializing_expression = elements->value;
-        initialized = evaluation_.convert(elements->value,
-                                          array->source->elementType(), owner);
+        initialized = evaluation_.convert(elements->value, element_type, owner);
         elements = elements->next;
       } else if (implicit_element) {
         initializing_expression = implicit_element->initializer();
-        initialized =
-            value(array->source->elementType(), implicit_element->initializer(),
-                  implicit_element->constructor(), owner, prior);
-      } else if (constructor) {
-        initialized = value(array->source->elementType(), nullptr, constructor,
-                            owner, prior);
+        initialized = value(element_type, implicit_element->initializer(),
+                            implicit_element->constructor(), owner, prior);
       } else if (prior) {
         initialized = *prior;
       } else {
-        initialized = zero(array->source->elementType(), owner);
+        initialized = zero(element_type, owner);
       }
       evaluation_.adopt(initializing_expression);
       initialized.append_to(components);
+      if (full_expression) {
+        evaluation_.finish_full_expression(*full_expression);
+      }
     }
     return arena_.capture(*array, components);
   }
@@ -973,17 +986,28 @@ void Initialization::object(StorageProjection destination,
   }
   if (list) {
     if (auto* array = cxx::type_cast<cxx::BoundedArrayType>(shape)) {
+      auto* element_type = unit_.typeTraits().get_element_type(object_type);
+      const bool leaf = !unit_.typeTraits().is_array(element_type);
       for (size_t index = 0; index < array->size(); ++index) {
-        const bool explicit_clause = index < elements.size();
-        auto* clause = index < elements.size() ? elements[index] : nullptr;
-        auto* element_constructor = clause ? nullptr : constructor;
-        if (!clause && implicit_element) {
+        const bool explicit_clause = !constructor && index < elements.size();
+        auto* clause = constructor       ? initializer
+                       : explicit_clause ? elements[index]
+                                         : nullptr;
+        auto* element_constructor = constructor;
+        if (!constructor && !explicit_clause && implicit_element) {
           clause = implicit_element->initializer();
           element_constructor = implicit_element->constructor();
         }
-        object(storage_.element(destination, array, index, owner),
-               unit_.typeTraits().get_element_type(object_type), clause,
-               element_constructor, owner, retained && !explicit_clause);
+        std::optional<Evaluation::FullExpression> full_expression;
+        if (!explicit_clause && leaf) {
+          full_expression = evaluation_.begin_full_expression();
+        }
+        object(storage_.element(destination, array, index, owner), element_type,
+               clause, element_constructor, owner,
+               retained && !explicit_clause);
+        if (full_expression) {
+          evaluation_.finish_full_expression(*full_expression);
+        }
       }
       return;
     }
@@ -1120,10 +1144,17 @@ void Initialization::storage(StorageAllocation allocation,
       diagnostics_.reject(
           unit_, owner, "automatic arrays require element-wise initialization");
     }
+    auto* element_type = unit_.typeTraits().get_element_type(type);
+    if (unit_.typeTraits().is_class(element_type) ||
+        unit_.typeTraits().is_array(element_type) ||
+        types_.native_vector(element_type)) {
+      object(storage_.project(allocation.pointer, type, owner), type,
+             initializer, constructor, owner);
+      return;
+    }
     auto elements = source.arguments();
     auto* braced = source.bracedInitList();
     auto* implicit_element = braced ? braced->implicitElement : nullptr;
-    auto* element_type = unit_.typeTraits().get_element_type(type);
     for (size_t index = 0; index < array->size(); ++index) {
       auto* clause = index < elements.size() ? elements[index] : nullptr;
       auto* element_constructor = clause ? nullptr : constructor;
@@ -1131,20 +1162,11 @@ void Initialization::storage(StorageAllocation allocation,
         clause = implicit_element->initializer();
         element_constructor = implicit_element->constructor();
       }
-      if (unit_.typeTraits().is_class(element_type) ||
-          unit_.typeTraits().is_array(element_type) ||
-          types_.native_vector(element_type)) {
-        object(
-            storage_.element(storage_.project(allocation.pointer, type, owner),
-                             array, index, owner),
-            element_type, clause, element_constructor, owner);
-      } else {
-        auto element = value(element_type, clause, element_constructor, owner);
-        auto position = scalars_.integer(index, LOOM_SCALAR_TYPE_INDEX,
-                                         locations_.get(owner));
-        storage_.store({allocation.view, position}, element.ssa(), element_type,
-                       owner);
-      }
+      auto element = value(element_type, clause, element_constructor, owner);
+      auto position = scalars_.integer(index, LOOM_SCALAR_TYPE_INDEX,
+                                       locations_.get(owner));
+      storage_.store({allocation.view, position}, element.ssa(), element_type,
+                     owner);
     }
   } else if (unit_.typeTraits().is_class(type)) {
     object(storage_.project(allocation.pointer, type, owner), type, initializer,

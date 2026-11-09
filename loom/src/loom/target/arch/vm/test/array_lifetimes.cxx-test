@@ -1,0 +1,267 @@
+// RUN: emit vm-object-lifetime
+// INPUT: cxx root=run
+// Default constructor arguments are evaluated separately for each element.
+// Their temporaries retire before construction of the next element.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Guard {
+  // Payload observed by construction or destruction.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+struct Element {
+  // Payload observed by construction or destruction.
+  unsigned value;
+  Element(const Guard& argument = Guard{8}) : value(argument.value) {
+    observe(100 + value);
+  }
+};
+void run() {
+  Element elements[2];
+  observe(elements[0].value + elements[1].value);
+}
+
+// ----
+event 108
+event 8
+event 108
+event 8
+event 16
+OK 0
+retired 0
+
+// ====
+// An empty array initializer uses the same per-element default-argument
+// lifetime.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Guard {
+  // Payload observed by construction or destruction.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+struct Element {
+  // Payload observed by construction or destruction.
+  unsigned value;
+  Element(const Guard& argument = Guard{8}) : value(argument.value) {
+    observe(100 + value);
+  }
+};
+void run() {
+  Element elements[2]{};
+  observe(elements[0].value + elements[1].value);
+}
+
+// ----
+event 108
+event 8
+event 108
+event 8
+event 16
+OK 0
+retired 0
+
+// ====
+// Explicit initializer temporaries survive the whole list. Omitted element
+// default arguments finish before the following element starts.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Guard {
+  // Payload observed by construction or destruction.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+struct Element {
+  // Payload observed by construction or destruction.
+  unsigned value;
+  Element(const Guard& argument = Guard{8}) : value(argument.value) {
+    observe(100 + value);
+  }
+};
+void run() {
+  Element elements[3]{Element{Guard{3}}};
+  observe(elements[0].value + elements[1].value + elements[2].value);
+}
+
+// ----
+event 103
+event 108
+event 8
+event 108
+event 8
+event 3
+event 19
+OK 0
+retired 0
+
+// ====
+// Default construction repeats the selected leaf plan through every array
+// extent.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Guard {
+  // Payload observed by construction or destruction.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+struct Element {
+  // Payload observed by construction or destruction.
+  unsigned value;
+  Element(const Guard& argument = Guard{8}) : value(argument.value) {
+    observe(100 + value);
+  }
+};
+void run() {
+  Element elements[2][2];
+  observe(elements[0][0].value + elements[1][1].value);
+}
+
+// ----
+event 108
+event 8
+event 108
+event 8
+event 108
+event 8
+event 108
+event 8
+event 16
+OK 0
+retired 0
+
+// ====
+// A synthesized member initializer preserves the array leaf constructor
+// arguments.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Guard {
+  // Payload observed by construction or destruction.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+struct Element {
+  // Payload observed by construction or destruction.
+  unsigned value;
+  Element(const Guard& argument = Guard{8}) : value(argument.value) {
+    observe(100 + value);
+  }
+};
+struct Packet {
+  // Elements initialized by the synthesized constructor.
+  Element elements[2];
+};
+void run() {
+  Packet packet;
+  observe(packet.elements[0].value + packet.elements[1].value);
+}
+
+// ----
+event 108
+event 8
+event 108
+event 8
+event 16
+OK 0
+retired 0
+
+// ====
+// An implicit array member copy evaluates and retires its default arguments
+// independently for each copied element.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Guard {
+  // Payload observed by construction or destruction.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+struct Element {
+  // Payload observed by construction or destruction.
+  unsigned value;
+  Element(const Element& other, const Guard& argument = Guard{6})
+      : value(other.value + argument.value) {
+    observe(200 + value);
+  }
+  Element(const Guard& argument = Guard{8}) : value(argument.value) {
+    observe(100 + value);
+  }
+};
+struct Packet {
+  // Elements initialized by the synthesized constructor.
+  Element elements[2];
+};
+void run() {
+  Packet source{{Element{Guard{1}}, Element{Guard{2}}}};
+  Packet copied(source);
+  observe(copied.elements[0].value + copied.elements[1].value);
+}
+
+// ----
+event 101
+event 102
+event 2
+event 1
+event 207
+event 6
+event 208
+event 6
+event 15
+OK 0
+retired 0
+
+// ====
+// Binding to an array subobject extends the complete temporary through the
+// scope.
+[[loom::import("lifetime", "event")]] void observe(unsigned);
+struct Holder {
+  // Elements whose sum identifies complete-object destruction.
+  unsigned values[2];
+  ~Holder() { observe(values[0] + values[1]); }
+};
+void run() {
+  const unsigned& value = Holder{{4, 5}}.values[1];
+  observe(value);
+  observe(6);
+}
+
+// ----
+event 5
+event 6
+event 9
+OK 0
+retired 0
+
+// ====
+// Saving a decayed pointer does not extend the complete temporary. The pointer
+// is never dereferenced after destruction.
+[[loom::import("lifetime", "event")]] void observe(unsigned);
+struct Holder {
+  // Elements whose sum identifies complete-object destruction.
+  unsigned values[2];
+  ~Holder() { observe(values[0] + values[1]); }
+};
+void run() {
+  auto* unused = Holder{{4, 5}}.values;
+  observe(6);
+}
+
+// ----
+event 9
+event 6
+OK 0
+retired 0
+
+// ====
+// An element reference extends the complete temporary array, whose elements
+// retire in reverse construction order.
+[[loom::import("lifetime", "event")]] void observe(unsigned);
+struct Guard {
+  // Payload reported at element destruction.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+using Pair = Guard[2];
+void run() {
+  const Guard& value = Pair{{4}, {5}}[1];
+  observe(value.value + 10);
+}
+
+// ----
+event 15
+event 5
+event 4
+OK 0
+retired 0

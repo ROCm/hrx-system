@@ -49,8 +49,8 @@ class Initialization {
     // temporaries evaluated while producing it remain owned by their enclosing
     // full expression.
     virtual void adopt(cxx::ExpressionAST* expression) = 0;
-    // Member initializer expressions are independent full expressions even
-    // though their destination subobjects share one constructor receiver.
+    // Member initializers and omitted/copy array-element default arguments
+    // finish their temporaries independently of the containing construction.
     virtual FullExpression begin_full_expression() = 0;
     virtual void finish_full_expression(FullExpression expression) = 0;
     // Captures the durable storage identity selected by one reference
@@ -163,7 +163,8 @@ class Initialization {
   Value from_elements(const cxx::Type* type,
                       cxx::List<cxx::ExpressionAST*>* elements,
                       cxx::VariableSymbol* implicit_element,
-                      cxx::FunctionSymbol* constructor, cxx::AST* owner,
+                      cxx::FunctionSymbol* constructor,
+                      cxx::ExpressionAST* initializer, cxx::AST* owner,
                       std::optional<Value> retained);
   // Constructs a native vector from its complete source initializer. Pure
   // constant lanes are retained as frontend values so the producer can choose

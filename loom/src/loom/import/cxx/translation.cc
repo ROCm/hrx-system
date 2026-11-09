@@ -2065,10 +2065,10 @@ class Translator final : private Initialization::Evaluation {
             unit_.typeTraits().remove_reference(signature->returnType()), ast);
       }
     }
-    if (ast->valueCategory == cxx::ValueCategory::kPrValue &&
-        !unit_.typeTraits().is_array(ast->type)) {
+    if (ast->valueCategory == cxx::ValueCategory::kPrValue) {
       auto value = expression(ast);
-      if (unit_.typeTraits().is_class(ast->type)) {
+      if (unit_.typeTraits().is_class(ast->type) ||
+          unit_.typeTraits().is_array(ast->type)) {
         return materialize_temporary(ast, value);
       }
       auto allocation = storage_.allocate(
