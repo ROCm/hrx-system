@@ -1,0 +1,444 @@
+// RUN: pass vector-memory-footprint
+
+// Quotient and remainder roles must survive a paired operation. The product
+// guard bounds the row, and the divisor bounds the column.
+func.def @decode_paired_dynamic_coordinates(%input: buffer, %rows_input: index, %columns_input: index, %linear_input: index) {
+  %rows = index.assume %rows_input [range(%rows_input, 1, 64)] : index
+  %columns = index.assume %columns_input [range(%columns_input, 1, 64)] : index
+  %linear = index.assume %linear_input [range(%linear_input, 0, 4095)] : index
+  %base = index.constant 0 : offset
+  %count = index.mul %rows, %columns : index
+  %view = buffer.view %input[%base] : buffer -> view<[%rows]x[%columns]xi32>
+  %live = index.cmp ult, %linear, %count : index
+  scf.if %live {
+    %row, %column = index.divrem %linear, %columns : index
+    %value = view.load %view[%row, %column] : view<[%rows]x[%columns]xi32> -> i32
+    test.use %value : i32
+  }
+  func.return
+}
+
+// ====
+
+func.def @decode_si_8(%input: buffer, %rows_input: i8, %columns_input: i8, %linear_input: i8) {
+  %rows = scalar.assume %rows_input [range(%rows_input, 1, 8)] : i8
+  %columns = scalar.assume %columns_input [range(%columns_input, 1, 8)] : i8
+  %linear = scalar.assume %linear_input [range(%linear_input, 0, 63)] : i8
+  %base = index.constant 0 : offset
+  %count = scalar.muli %rows, %columns : i8
+  %rows_index = index.cast %rows : i8 to index
+  %columns_index = index.cast %columns : i8 to index
+  %view = buffer.view %input[%base] : buffer -> view<[%rows_index]x[%columns_index]xi32>
+  %live = scalar.cmpi slt, %linear, %count : i8
+  scf.if %live {
+    %row_bits, %column_bits = scalar.divremsi %linear, %columns : i8
+    %row = index.cast %row_bits : i8 to index
+    %column = index.cast %column_bits : i8 to index
+    %value = view.load %view[%row, %column] : view<[%rows_index]x[%columns_index]xi32> -> i32
+    test.use %value : i32
+  }
+  func.return
+}
+
+// ====
+
+func.def @decode_si_16(%input: buffer, %rows_input: i16, %columns_input: i16, %linear_input: i16) {
+  %rows = scalar.assume %rows_input [range(%rows_input, 1, 8)] : i16
+  %columns = scalar.assume %columns_input [range(%columns_input, 1, 8)] : i16
+  %linear = scalar.assume %linear_input [range(%linear_input, 0, 63)] : i16
+  %base = index.constant 0 : offset
+  %count = scalar.muli %rows, %columns : i16
+  %rows_index = index.cast %rows : i16 to index
+  %columns_index = index.cast %columns : i16 to index
+  %view = buffer.view %input[%base] : buffer -> view<[%rows_index]x[%columns_index]xi32>
+  %live = scalar.cmpi slt, %linear, %count : i16
+  scf.if %live {
+    %row_bits, %column_bits = scalar.divremsi %linear, %columns : i16
+    %row = index.cast %row_bits : i16 to index
+    %column = index.cast %column_bits : i16 to index
+    %value = view.load %view[%row, %column] : view<[%rows_index]x[%columns_index]xi32> -> i32
+    test.use %value : i32
+  }
+  func.return
+}
+
+// ====
+
+func.def @decode_si_32(%input: buffer, %rows_input: i32, %columns_input: i32, %linear_input: i32) {
+  %rows = scalar.assume %rows_input [range(%rows_input, 1, 8)] : i32
+  %columns = scalar.assume %columns_input [range(%columns_input, 1, 8)] : i32
+  %linear = scalar.assume %linear_input [range(%linear_input, 0, 63)] : i32
+  %base = index.constant 0 : offset
+  %count = scalar.muli %rows, %columns : i32
+  %rows_index = index.cast %rows : i32 to index
+  %columns_index = index.cast %columns : i32 to index
+  %view = buffer.view %input[%base] : buffer -> view<[%rows_index]x[%columns_index]xi32>
+  %live = scalar.cmpi slt, %linear, %count : i32
+  scf.if %live {
+    %row_bits, %column_bits = scalar.divremsi %linear, %columns : i32
+    %row = index.cast %row_bits : i32 to index
+    %column = index.cast %column_bits : i32 to index
+    %value = view.load %view[%row, %column] : view<[%rows_index]x[%columns_index]xi32> -> i32
+    test.use %value : i32
+  }
+  func.return
+}
+
+// ====
+
+func.def @decode_si_64(%input: buffer, %rows_input: i64, %columns_input: i64, %linear_input: i64) {
+  %rows = scalar.assume %rows_input [range(%rows_input, 1, 8)] : i64
+  %columns = scalar.assume %columns_input [range(%columns_input, 1, 8)] : i64
+  %linear = scalar.assume %linear_input [range(%linear_input, 0, 63)] : i64
+  %base = index.constant 0 : offset
+  %count = scalar.muli %rows, %columns : i64
+  %rows_index = index.cast %rows : i64 to index
+  %columns_index = index.cast %columns : i64 to index
+  %view = buffer.view %input[%base] : buffer -> view<[%rows_index]x[%columns_index]xi32>
+  %live = scalar.cmpi slt, %linear, %count : i64
+  scf.if %live {
+    %row_bits, %column_bits = scalar.divremsi %linear, %columns : i64
+    %row = index.cast %row_bits : i64 to index
+    %column = index.cast %column_bits : i64 to index
+    %value = view.load %view[%row, %column] : view<[%rows_index]x[%columns_index]xi32> -> i32
+    test.use %value : i32
+  }
+  func.return
+}
+
+// ====
+
+func.def @decode_ui_8(%input: buffer, %rows_input: i8, %columns_input: i8, %linear_input: i8) {
+  %rows = scalar.assume %rows_input [range(%rows_input, 1, 8)] : i8
+  %columns = scalar.assume %columns_input [range(%columns_input, 1, 8)] : i8
+  %linear = scalar.assume %linear_input [range(%linear_input, 0, 63)] : i8
+  %base = index.constant 0 : offset
+  %count = scalar.muli %rows, %columns : i8
+  %rows_index = index.cast %rows : i8 to index
+  %columns_index = index.cast %columns : i8 to index
+  %view = buffer.view %input[%base] : buffer -> view<[%rows_index]x[%columns_index]xi32>
+  %live = scalar.cmpi ult, %linear, %count : i8
+  scf.if %live {
+    %row_bits, %column_bits = scalar.divremui %linear, %columns : i8
+    %row = index.cast %row_bits : i8 to index
+    %column = index.cast %column_bits : i8 to index
+    %value = view.load %view[%row, %column] : view<[%rows_index]x[%columns_index]xi32> -> i32
+    test.use %value : i32
+  }
+  func.return
+}
+
+// ====
+
+func.def @decode_ui_16(%input: buffer, %rows_input: i16, %columns_input: i16, %linear_input: i16) {
+  %rows = scalar.assume %rows_input [range(%rows_input, 1, 8)] : i16
+  %columns = scalar.assume %columns_input [range(%columns_input, 1, 8)] : i16
+  %linear = scalar.assume %linear_input [range(%linear_input, 0, 63)] : i16
+  %base = index.constant 0 : offset
+  %count = scalar.muli %rows, %columns : i16
+  %rows_index = index.cast %rows : i16 to index
+  %columns_index = index.cast %columns : i16 to index
+  %view = buffer.view %input[%base] : buffer -> view<[%rows_index]x[%columns_index]xi32>
+  %live = scalar.cmpi ult, %linear, %count : i16
+  scf.if %live {
+    %row_bits, %column_bits = scalar.divremui %linear, %columns : i16
+    %row = index.cast %row_bits : i16 to index
+    %column = index.cast %column_bits : i16 to index
+    %value = view.load %view[%row, %column] : view<[%rows_index]x[%columns_index]xi32> -> i32
+    test.use %value : i32
+  }
+  func.return
+}
+
+// ====
+
+func.def @decode_ui_32(%input: buffer, %rows_input: i32, %columns_input: i32, %linear_input: i32) {
+  %rows = scalar.assume %rows_input [range(%rows_input, 1, 8)] : i32
+  %columns = scalar.assume %columns_input [range(%columns_input, 1, 8)] : i32
+  %linear = scalar.assume %linear_input [range(%linear_input, 0, 63)] : i32
+  %base = index.constant 0 : offset
+  %count = scalar.muli %rows, %columns : i32
+  %rows_index = index.cast %rows : i32 to index
+  %columns_index = index.cast %columns : i32 to index
+  %view = buffer.view %input[%base] : buffer -> view<[%rows_index]x[%columns_index]xi32>
+  %live = scalar.cmpi ult, %linear, %count : i32
+  scf.if %live {
+    %row_bits, %column_bits = scalar.divremui %linear, %columns : i32
+    %row = index.cast %row_bits : i32 to index
+    %column = index.cast %column_bits : i32 to index
+    %value = view.load %view[%row, %column] : view<[%rows_index]x[%columns_index]xi32> -> i32
+    test.use %value : i32
+  }
+  func.return
+}
+
+// ====
+
+func.def @decode_ui_64(%input: buffer, %rows_input: i64, %columns_input: i64, %linear_input: i64) {
+  %rows = scalar.assume %rows_input [range(%rows_input, 1, 8)] : i64
+  %columns = scalar.assume %columns_input [range(%columns_input, 1, 8)] : i64
+  %linear = scalar.assume %linear_input [range(%linear_input, 0, 63)] : i64
+  %base = index.constant 0 : offset
+  %count = scalar.muli %rows, %columns : i64
+  %rows_index = index.cast %rows : i64 to index
+  %columns_index = index.cast %columns : i64 to index
+  %view = buffer.view %input[%base] : buffer -> view<[%rows_index]x[%columns_index]xi32>
+  %live = scalar.cmpi ult, %linear, %count : i64
+  scf.if %live {
+    %row_bits, %column_bits = scalar.divremui %linear, %columns : i64
+    %row = index.cast %row_bits : i64 to index
+    %column = index.cast %column_bits : i64 to index
+    %value = view.load %view[%row, %column] : view<[%rows_index]x[%columns_index]xi32> -> i32
+    test.use %value : i32
+  }
+  func.return
+}
+
+// ====
+
+func.def @paired_quotient_is_not_remainder(%input: buffer, %rows_input: index, %columns_input: index, %linear_input: index) {
+  %rows = index.assume %rows_input [range(%rows_input, 1, 64)] : index
+  %columns = index.assume %columns_input [range(%columns_input, 1, 64)] : index
+  %linear = index.assume %linear_input [range(%linear_input, 0, 4095)] : index
+  %base = index.constant 0 : offset
+  %count = index.mul %rows, %columns : index
+  %view = buffer.view %input[%base] : buffer -> view<[%rows]x[%columns]xi32>
+  %live = index.cmp ult, %linear, %count : index
+  scf.if %live {
+    %row, %column = index.divrem %linear, %columns : index
+    // ERROR@+1: SUBRANGE/024 {op_name="view.load", view_axis="1"}
+    %value = view.load %view[%row, %row] : view<[%rows]x[%columns]xi32> -> i32
+    test.use %value : i32
+  }
+  func.return
+}
+
+// ====
+
+func.def @paired_remainder_is_not_quotient(%input: buffer, %rows_input: index, %columns_input: index, %linear_input: index) {
+  %rows = index.assume %rows_input [range(%rows_input, 1, 64)] : index
+  %columns = index.assume %columns_input [range(%columns_input, 1, 64)] : index
+  %linear = index.assume %linear_input [range(%linear_input, 0, 4095)] : index
+  %base = index.constant 0 : offset
+  %count = index.mul %rows, %columns : index
+  %view = buffer.view %input[%base] : buffer -> view<[%rows]x[%columns]xi32>
+  %live = index.cmp ult, %linear, %count : index
+  scf.if %live {
+    %row, %column = index.divrem %linear, %columns : index
+    // ERROR@+1: SUBRANGE/024 {op_name="view.load", view_axis="0"}
+    %value = view.load %view[%column, %column] : view<[%rows]x[%columns]xi32> -> i32
+    test.use %value : i32
+  }
+  func.return
+}
+
+// ====
+
+func.def @paired_product_requires_strict_guard(%input: buffer, %rows_input: index, %columns_input: index, %linear_input: index) {
+  %rows = index.assume %rows_input [range(%rows_input, 1, 64)] : index
+  %columns = index.assume %columns_input [range(%columns_input, 1, 64)] : index
+  %linear = index.assume %linear_input [range(%linear_input, 0, 4095)] : index
+  %base = index.constant 0 : offset
+  %count = index.mul %rows, %columns : index
+  %view = buffer.view %input[%base] : buffer -> view<[%rows]x[%columns]xi32>
+  %live = index.cmp ule, %linear, %count : index
+  scf.if %live {
+    %row, %column = index.divrem %linear, %columns : index
+    // ERROR@+1: SUBRANGE/024 {op_name="view.load", view_axis="0"}
+    %value = view.load %view[%row, %column] : view<[%rows]x[%columns]xi32> -> i32
+    test.use %value : i32
+  }
+  func.return
+}
+
+// ====
+
+// A remainder is bounded by its own divisor, not another value with the
+// same numeric interval.
+func.def @distinct_runtime_divisors(%input: buffer, %linear_input: index, %divisor_input: index, %extent_input: index) {
+  %linear = index.assume %linear_input [range(%linear_input, 0, 63)] : index
+  %divisor = index.assume %divisor_input [range(%divisor_input, 1, 8)] : index
+  %extent = index.assume %extent_input [range(%extent_input, 1, 8)] : index
+  %quotient, %remainder = index.divrem %linear, %divisor : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<[%extent]xi32>
+  // ERROR@+1: SUBRANGE/024 {op_name="view.load", view_axis="0"}
+  %value = view.load %view[%remainder] : view<[%extent]xi32> -> i32
+  test.use %quotient, %value : index, i32
+  func.return
+}
+
+// ====
+
+// Unsigned input bits do not need a signed nonnegative range. Reducing by a
+// positive runtime divisor supplies it for the remainder.
+func.def @unsigned_full_bit_pattern(%input: buffer, %bits: i64, %divisor_input: i64) {
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 64)] : i64
+  %quotient, %remainder = scalar.divremui %bits, %divisor : i64
+  %extent = index.cast %divisor : i64 to index
+  %coordinate = index.cast %remainder : i64 to index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<[%extent]xi32>
+  %value = view.load %view[%coordinate] : view<[%extent]xi32> -> i32
+  test.use %quotient, %value : i64, i32
+  func.return
+}
+
+// ====
+
+// A signed remainder retains the dividend's sign. Its strict upper bound
+// against the divisor does not establish the coordinate's lower bound.
+func.def @signed_remainder_needs_lower_bound(%input: buffer, %bits: i32, %divisor_input: i32) {
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 64)] : i32
+  %quotient, %remainder = scalar.divremsi %bits, %divisor : i32
+  %extent = index.cast %divisor : i32 to index
+  %coordinate = index.cast %remainder : i32 to index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<[%extent]xi32>
+  // ERROR@+1: SUBRANGE/023 {op_name="view.load", view_axis="0"}
+  %value = view.load %view[%coordinate] : view<[%extent]xi32> -> i32
+  test.use %quotient, %value : i32, i32
+  func.return
+}
+
+// ====
+
+// Combining author-friendly separate operations must retain the proof.
+// RUN: pass combine,vector-memory-footprint
+
+func.def @decode_dynamic_coordinates(%input: buffer, %rows_input: index, %columns_input: index, %linear_input: index) {
+  %rows = index.assume %rows_input [range(%rows_input, 1, 64)] : index
+  %columns = index.assume %columns_input [range(%columns_input, 1, 64)] : index
+  %linear = index.assume %linear_input [range(%linear_input, 0, 4095)] : index
+  %base = index.constant 0 : offset
+  %count = index.mul %rows, %columns : index
+  %view = buffer.view %input[%base] : buffer -> view<[%rows]x[%columns]xi32>
+  %live = index.cmp ult, %linear, %count : index
+  scf.if %live {
+    %row = index.div %linear, %columns : index
+    %column = index.rem %linear, %columns : index
+    %value = view.load %view[%row, %column] : view<[%rows]x[%columns]xi32> -> i32
+    test.use %value : i32
+  }
+  func.return
+}
+
+// ----
+func.def @decode_dynamic_coordinates(%input: buffer, %rows_input: index, %columns_input: index, %linear_input: index) {
+  %rows = index.assume %rows_input [range(%rows_input, 1, 64)] : index
+  %columns = index.assume %columns_input [range(%columns_input, 1, 64)] : index
+  %linear = index.assume %linear_input [range(%linear_input, 0, 4095)] : index
+  %base = index.constant 0 : offset
+  %count = index.mul %rows, %columns : index
+  %view = buffer.view %input[%base] : buffer -> view<[%rows]x[%columns]xi32>
+  %live = index.cmp ult, %linear, %count : index
+  scf.if %live {
+    %14 = index.assume %linear [lt(%linear, %count)] : index
+    %row, %column = index.divrem %14, %columns : index
+    %value = view.load %view[%row, %column] : view<[%rows]x[%columns]xi32> -> i32
+    test.use %value : i32
+  }
+  func.return
+}
+
+// ====
+
+// RUN: pass target-legalize{mode=eager,policy=reference-only},dce,canonicalize,vector-memory-footprint
+
+// Reference division must retain the strict remainder bound. The narrow
+// case additionally crosses widening and truncation of the arithmetic carrier.
+test.target<low_core> @target
+
+func.def target(@target) @reconstructed_si8_remainder(%input: buffer, %bits_input: i8, %divisor_input: i8) -> (i8, i32) {
+  %bits = scalar.assume %bits_input [range(%bits_input, 0, 63)] : i8
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 8)] : i8
+  %quotient, %remainder = scalar.divremsi %bits, %divisor : i8
+  %extent = index.cast %divisor : i8 to index
+  %coordinate = index.cast %remainder : i8 to index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<[%extent]xi32>
+  %value = view.load %view[%coordinate] : view<[%extent]xi32> -> i32
+  func.return %quotient, %value : i8, i32
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @reconstructed_si8_remainder(%input: buffer, %bits_input: i8, %divisor_input: i8) -> (i8, i32) {
+  %bits = scalar.assume %bits_input [range(%bits_input, 0, 63)] : i8
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 8)] : i8
+  %14 = scalar.extsi %bits : i8 to i32
+  %15 = scalar.extsi %divisor : i8 to i32
+  %25 = scalar.divui %14, %15 : i32
+  %22 = scalar.muli %25, %15 : i32
+  %23 = scalar.subi %14, %22 : i32
+  %24 = scalar.assume %23 [range(%23, 0, 7), lt(%23, %15)] : i32
+  %quotient = scalar.trunci %25 : i32 to i8
+  %19 = scalar.trunci %24 : i32 to i8
+  %remainder = scalar.assume %19 [lt(%19, %divisor)] : i8
+  %extent = index.cast %divisor : i8 to index
+  %coordinate = index.cast %remainder : i8 to index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<[%extent]xi32>
+  %value = view.load %view[%coordinate] : view<[%extent]xi32> -> i32
+  func.return %quotient, %value : i8, i32
+}
+
+// ====
+
+// RUN: pass target-legalize{mode=eager,policy=reference-only},dce,canonicalize,vector-memory-footprint
+
+// Reference division must retain the strict remainder bound. The narrow
+// case additionally crosses widening and truncation of the arithmetic carrier.
+test.target<low_core> @target
+
+func.def target(@target) @reconstructed_ui32_remainder(%input: buffer, %bits_input: i32, %divisor_input: i32) -> (i32, i32) {
+  %bits = scalar.assume %bits_input [range(%bits_input, 0, 63)] : i32
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 8)] : i32
+  %quotient, %remainder = scalar.divremui %bits, %divisor : i32
+  %extent = index.cast %divisor : i32 to index
+  %coordinate = index.cast %remainder : i32 to index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<[%extent]xi32>
+  %value = view.load %view[%coordinate] : view<[%extent]xi32> -> i32
+  func.return %quotient, %value : i32, i32
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @reconstructed_ui32_remainder(%input: buffer, %bits_input: i32, %divisor_input: i32) -> (i32, i32) {
+  %bits = scalar.assume %bits_input [range(%bits_input, 0, 63)] : i32
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 8)] : i32
+  %quotient = scalar.divui %bits, %divisor : i32
+  %15 = scalar.muli %quotient, %divisor : i32
+  %16 = scalar.subi %bits, %15 : i32
+  %remainder = scalar.assume %16 [range(%16, 0, 7), lt(%16, %divisor)] : i32
+  %extent = index.cast %divisor : i32 to index
+  %coordinate = index.cast %remainder : i32 to index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<[%extent]xi32>
+  %value = view.load %view[%coordinate] : view<[%extent]xi32> -> i32
+  func.return %quotient, %value : i32, i32
+}
+
+// ====
+
+// The extent can itself be the quotient result of another paired operation.
+// Divisibility makes the strict bound survive the shared scale.
+func.def @matching_paired_quotients(%input: buffer, %position_input: index, %width_input: index) {
+  %position = index.assume %position_input [range(%position_input, 0, 255)] : index
+  %width = index.assume %width_input [range(%width_input, 16, 256), multiple_of(%width_input, 16)] : index
+  %scale = index.constant 16 : index
+  %groups, %tail = index.divrem %width, %scale : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<[%groups]xi32>
+  %active = index.cmp ult, %position, %width : index
+  scf.if %active {
+    %group, %lane = index.divrem %position, %scale : index
+    %value = view.load %view[%group] : view<[%groups]xi32> -> i32
+    test.use %value, %lane : i32, index
+  }
+  test.use %tail : index
+  func.return
+}

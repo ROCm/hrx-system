@@ -41,9 +41,19 @@ static const loom_op_t* loom_symbolic_quotient_value_defining_op(
 }
 
 static bool loom_symbolic_quotient_def(
-    const loom_op_t* op, loom_symbolic_quotient_def_t* out_quotient) {
+    const loom_op_t* op, loom_value_id_t result,
+    loom_symbolic_quotient_def_t* out_quotient) {
   switch (op->kind) {
+    case LOOM_OP_INDEX_DIVREM:
+    case LOOM_OP_SCALAR_DIVREMSI:
+    case LOOM_OP_SCALAR_DIVREMUI:
+      if (loom_op_const_results(op)[0] != result) {
+        return false;
+      }
+      out_quotient->scale_kind = LOOM_SYMBOLIC_QUOTIENT_SCALE_DIVISOR;
+      break;
     case LOOM_OP_INDEX_DIV:
+    case LOOM_OP_SCALAR_DIVSI:
     case LOOM_OP_SCALAR_DIVUI:
       out_quotient->scale_kind = LOOM_SYMBOLIC_QUOTIENT_SCALE_DIVISOR;
       break;
@@ -396,7 +406,8 @@ static iree_status_t loom_symbolic_quotient_pair_proves_relation(
   const loom_op_t* right_op =
       loom_symbolic_quotient_value_defining_op(context, right_source);
   loom_symbolic_quotient_def_t right = {0};
-  if (!right_op || !loom_symbolic_quotient_def(right_op, &right)) {
+  if (!right_op ||
+      !loom_symbolic_quotient_def(right_op, right_source, &right)) {
     return iree_ok_status();
   }
 
@@ -633,7 +644,8 @@ iree_status_t loom_symbolic_expr_quotient_bound_proves_relation(
   const loom_op_t* quotient_op =
       loom_symbolic_quotient_value_defining_op(context, quotient_source);
   loom_symbolic_quotient_def_t quotient = {0};
-  if (!quotient_op || !loom_symbolic_quotient_def(quotient_op, &quotient)) {
+  if (!quotient_op ||
+      !loom_symbolic_quotient_def(quotient_op, quotient_source, &quotient)) {
     return iree_ok_status();
   }
 

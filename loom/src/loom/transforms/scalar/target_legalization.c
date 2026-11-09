@@ -1031,25 +1031,40 @@ static iree_status_t loom_scalar_legalize_narrow_binary(
   return iree_ok_status();
 }
 
-// Preserves the shared quotient/remainder computation while widening narrow
-// integer carriers. Targets that accept the i32 combined operation can select
-// one native divide. The portable fallback computes the quotient once and
-// reconstructs the remainder so every target can reuse its quotient recipe.
-static iree_status_t loom_scalar_preserve_reconstructed_facts(
+// Arithmetic reconstruction and narrow truncation need not infer the original
+// remainder's range or its strict bound against a runtime positive divisor.
+static iree_status_t loom_scalar_preserve_remainder_facts(
     loom_target_legalization_context_t* context,
     loom_value_id_t original_result, loom_value_id_t reconstructed_result,
-    loom_type_t result_type, loom_location_id_t location,
-    loom_value_id_t* out_result) {
+    loom_value_id_t divisor, loom_type_t result_type,
+    loom_location_id_t location, loom_value_id_t* out_result) {
   *out_result = reconstructed_result;
   if (!context->fact_table) {
     return iree_ok_status();
   }
-  loom_predicate_t predicates[LOOM_VALUE_FACT_INTEGER_REFINEMENT_CAPACITY];
-  const uint16_t predicate_count = loom_value_facts_export_integer_refinements(
+  const loom_value_facts_t remainder_facts =
+      loom_value_fact_table_lookup(context->fact_table, original_result);
+  const loom_value_facts_t divisor_facts =
+      loom_value_fact_table_lookup(context->fact_table, divisor);
+  loom_predicate_t predicates[LOOM_VALUE_FACT_INTEGER_REFINEMENT_CAPACITY + 1];
+  uint16_t predicate_count = loom_value_facts_export_integer_refinements(
       reconstructed_result,
       loom_value_fact_table_lookup(context->fact_table, reconstructed_result),
-      loom_value_fact_table_lookup(context->fact_table, original_result),
-      predicates, IREE_ARRAYSIZE(predicates));
+      remainder_facts, predicates, IREE_ARRAYSIZE(predicates));
+  // For a positive divisor this signed upper bound holds for both signed and
+  // unsigned remainder, including a signed negative dividend. Nonnegativity
+  // remains a separate numeric fact; unsigned high-bit divisors do not satisfy
+  // this signed comparison.
+  if (loom_value_facts_is_positive(divisor_facts) &&
+      remainder_facts.range_hi >= divisor_facts.range_lo) {
+    predicates[predicate_count++] = (loom_predicate_t){
+        .kind = LOOM_PREDICATE_LT,
+        .arg_count = 2,
+        .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE,
+                     LOOM_PRED_ARG_NONE},
+        .args = {reconstructed_result, divisor, 0},
+    };
+  }
   if (predicate_count == 0) {
     return iree_ok_status();
   }
@@ -1061,6 +1076,10 @@ static iree_status_t loom_scalar_preserve_reconstructed_facts(
   return iree_ok_status();
 }
 
+// Preserves the shared quotient/remainder computation while widening narrow
+// integer carriers. Targets that accept the i32 combined operation can select
+// one native divide. The portable fallback computes the quotient once and
+// reconstructs the remainder so every target can reuse its quotient recipe.
 static iree_status_t loom_scalar_legalize_divrem(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
@@ -1126,10 +1145,11 @@ static iree_status_t loom_scalar_legalize_divrem(
         builder, /*instance_flags=*/0, lhs, loom_scalar_muli_result(product),
         result_type, op->location, &remainder));
     replacements[0] = loom_op_results(quotient)[0];
-    IREE_RETURN_IF_ERROR(loom_scalar_preserve_reconstructed_facts(
-        context, old_results[1], loom_scalar_subi_result(remainder),
-        result_type, op->location, &replacements[1]));
+    replacements[1] = loom_scalar_subi_result(remainder);
   }
+  IREE_RETURN_IF_ERROR(loom_scalar_preserve_remainder_facts(
+      context, old_results[1], replacements[1], loom_op_const_operands(op)[1],
+      result_type, op->location, &replacements[1]));
 
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, replacements, IREE_ARRAYSIZE(replacements), checkpoint));

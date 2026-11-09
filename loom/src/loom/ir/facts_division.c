@@ -244,9 +244,11 @@ void loom_value_facts_remsi(const loom_value_facts_t* lhs,
   // produces a representable signed upper bound.
   const int64_t remainder_bound =
       (int64_t)(maximum_divisor_magnitude - UINT64_C(1));
-  // Signed remainder preserves the sign of the dividend. Conservative
-  // bound: [-remainder_bound, remainder_bound].
-  *out = loom_value_facts_make(-remainder_bound, remainder_bound, 1);
+  // Signed remainder preserves the sign of the dividend, independently of
+  // the divisor's sign. Keep that information for dynamic divisors too.
+  *out =
+      loom_value_facts_make(lhs_facts.range_lo >= 0 ? 0 : -remainder_bound,
+                            lhs_facts.range_hi <= 0 ? 0 : remainder_bound, 1);
   loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
 }
 

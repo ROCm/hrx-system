@@ -70,14 +70,31 @@ static iree_status_t loom_index_legalize_divrem(
   loom_value_id_t replacements[2] = {loom_index_div_result(quotient),
                                      loom_index_sub_result(remainder)};
   if (context->fact_table) {
-    loom_predicate_t predicates[LOOM_VALUE_FACT_INTEGER_REFINEMENT_CAPACITY];
-    const uint16_t predicate_count =
-        loom_value_facts_export_integer_refinements(
-            replacements[1],
-            loom_value_fact_table_lookup(context->fact_table, replacements[1]),
-            loom_value_fact_table_lookup(context->fact_table,
-                                         loom_op_const_results(op)[1]),
-            predicates, IREE_ARRAYSIZE(predicates));
+    const loom_value_facts_t remainder_facts = loom_value_fact_table_lookup(
+        context->fact_table, loom_op_const_results(op)[1]);
+    const loom_value_facts_t divisor_facts =
+        loom_value_fact_table_lookup(context->fact_table, rhs);
+    loom_predicate_t
+        predicates[LOOM_VALUE_FACT_INTEGER_REFINEMENT_CAPACITY + 1];
+    uint16_t predicate_count = loom_value_facts_export_integer_refinements(
+        replacements[1],
+        loom_value_fact_table_lookup(context->fact_table, replacements[1]),
+        remainder_facts, predicates, IREE_ARRAYSIZE(predicates));
+    // The reconstructed arithmetic loses the strict bound against a runtime
+    // divisor. Preserve it with the numeric refinements when the index domain
+    // is established and the numeric interval alone cannot express it.
+    if (loom_value_facts_is_positive(divisor_facts) &&
+        loom_value_facts_is_non_negative(
+            loom_value_fact_table_lookup(context->fact_table, lhs)) &&
+        remainder_facts.range_hi >= divisor_facts.range_lo) {
+      predicates[predicate_count++] = (loom_predicate_t){
+          .kind = LOOM_PREDICATE_LT,
+          .arg_count = 2,
+          .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE,
+                       LOOM_PRED_ARG_NONE},
+          .args = {replacements[1], rhs, 0},
+      };
+    }
     if (predicate_count != 0) {
       const loom_type_t result_type =
           loom_module_value_type(context->module, replacements[1]);
