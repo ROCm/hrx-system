@@ -24,6 +24,7 @@ loom_check_test_suite(
         "hint_lifetime.loom-test",
         "integer_division.loom-test",
         "integer_float_chains.loom-test",
+        "integer_joins.loom-test",
         "integer_power_of_two.loom-test",
         "loop_fact_publication.loom-test",
         "managed_lifetimes.loom-test",

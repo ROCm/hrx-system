@@ -1008,6 +1008,100 @@ TEST(FactsMeet, OverlappingRanges) {
   EXPECT_EQ(out.known_divisor, 4);  // gcd(8, 12) = 4.
 }
 
+TEST(FactsMeet, RetainsCommonIntegerPredicates) {
+  const int64_t values[] = {INT64_MIN,        -8,       -1, 0, 1, 2, 3, 4, 8,
+                            INT64_C(1) << 62, INT64_MAX};
+  for (int64_t left : values) {
+    for (int64_t right : values) {
+      SCOPED_TRACE(left);
+      SCOPED_TRACE(right);
+      const auto lhs = loom_value_facts_exact_i64(left);
+      const auto rhs = loom_value_facts_exact_i64(right);
+      loom_value_facts_t joined;
+      loom_value_facts_meet(&lhs, &rhs, &joined);
+      EXPECT_EQ(loom_value_facts_is_non_zero(joined), left != 0 && right != 0);
+      const bool left_power = left > 0 && (left & (left - 1)) == 0;
+      const bool right_power = right > 0 && (right & (right - 1)) == 0;
+      EXPECT_EQ(loom_value_facts_is_power_of_two(joined),
+                left_power && right_power);
+      EXPECT_LE(joined.range_lo, left);
+      EXPECT_GE(joined.range_hi, right);
+    }
+  }
+}
+
+TEST(FactsMeet, RangedPredicatesSurviveOnlyCommonArms) {
+  loom_value_facts_t small = loom_value_facts_make(2, 8, 2);
+  small.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+  loom_value_facts_t large = loom_value_facts_make(16, 64, 16);
+  large.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+  loom_value_facts_t joined;
+  loom_value_facts_meet(&small, &large, &joined);
+  EXPECT_TRUE(loom_value_facts_is_power_of_two(joined));
+  EXPECT_EQ(joined.range_lo, 2);
+  EXPECT_EQ(joined.range_hi, 64);
+  EXPECT_EQ(joined.known_divisor, 2);
+
+  const auto unproven = loom_value_facts_make(16, 64, 16);
+  loom_value_facts_meet(&joined, &unproven, &joined);
+  EXPECT_FALSE(loom_value_facts_is_power_of_two(joined));
+
+  loom_value_facts_t nonzero = loom_value_facts_make(-8, 8, 1);
+  nonzero.flags |= LOOM_VALUE_FACT_NON_ZERO;
+  const auto negative = loom_value_facts_make(-16, -1, 1);
+  loom_value_facts_meet(&nonzero, &negative, &joined);
+  EXPECT_TRUE(loom_value_facts_is_non_zero(joined));
+  EXPECT_FALSE(loom_value_facts_is_non_negative(joined));
+  const auto unknown = loom_value_facts_unknown();
+  loom_value_facts_meet(&joined, &unknown, &joined);
+  EXPECT_FALSE(loom_value_facts_is_non_zero(joined));
+}
+
+TEST(FactsMeet, OutputAliasingPreservesPredicatesAndDistribution) {
+  std::vector<loom_value_facts_t> inputs = {
+      loom_value_facts_unknown(), loom_value_facts_exact_i64(0),
+      loom_value_facts_exact_i64(1), loom_value_facts_exact_i64(8),
+      loom_value_facts_make(-16, -1, 1)};
+  for (auto scope : {LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE,
+                     LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP,
+                     LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP,
+                     LOOM_VALUE_FACT_UNIFORM_SCOPE_CLUSTER}) {
+    auto input = loom_value_facts_make(2, 16, 2);
+    input.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+    loom_value_facts_mark_uniform_at_scope(&input, scope);
+    inputs.push_back(input);
+  }
+  auto varying = loom_value_facts_make(-8, 8, 1);
+  varying.flags |= LOOM_VALUE_FACT_NON_ZERO;
+  loom_value_facts_mark_lane_varying(&varying);
+  inputs.push_back(varying);
+  auto predicate = loom_value_facts_make(0, 1, 1);
+  loom_value_facts_mark_lane_predicate(&predicate);
+  inputs.push_back(predicate);
+  auto lane_mask = loom_value_facts_make(0, INT64_MAX, 1);
+  loom_value_facts_mark_subgroup_lane_mask(&lane_mask);
+  loom_value_facts_mark_subgroup_uniform(&lane_mask);
+  inputs.push_back(lane_mask);
+
+  for (const auto& lhs : inputs) {
+    for (const auto& rhs : inputs) {
+      SCOPED_TRACE(lhs.flags);
+      SCOPED_TRACE(rhs.flags);
+      loom_value_facts_t expected;
+      loom_value_facts_meet(&lhs, &rhs, &expected);
+      loom_value_facts_t reverse;
+      loom_value_facts_meet(&rhs, &lhs, &reverse);
+      EXPECT_TRUE(loom_value_facts_equal(reverse, expected));
+      auto output = lhs;
+      loom_value_facts_meet(&output, &rhs, &output);
+      EXPECT_TRUE(loom_value_facts_equal(output, expected));
+      output = rhs;
+      loom_value_facts_meet(&lhs, &output, &output);
+      EXPECT_TRUE(loom_value_facts_equal(output, expected));
+    }
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // Execution distribution
 //===----------------------------------------------------------------------===//

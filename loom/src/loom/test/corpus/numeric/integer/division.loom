@@ -532,9 +532,9 @@ func.def @runtime_coordinate_lookup_oracle(%input: buffer, %output: buffer, %row
 }
 
 // Runtime group widths exercise common-divisor ordering through the complete
-// pipeline. The channel extent consists of complete groups, and the two extra
-// output positions test the exact end and inactive tail.
-func.def @runtime_group_lookup(%input: buffer, %output: buffer, %kind_input: index, %width_input: index) {
+// pipeline, including a runtime choice of grouping policy. The channel extent
+// consists of complete groups; two extra outputs test the end and inactive tail.
+func.def @runtime_group_lookup(%input: buffer, %output: buffer, %kind_input: index, %width_input: index, %use_runtime_width: i1) {
   %kind = index.assume %kind_input [range(%kind_input, 0, 4)] : index
   %width_zero_based = index.assume %width_input [range(%width_input, 0, 3)] : index
   %begin = index.constant 0 : index
@@ -544,7 +544,9 @@ func.def @runtime_group_lookup(%input: buffer, %output: buffer, %kind_input: ind
   %granularity = index.constant 16 : index
   %width_units = index.add %width_zero_based, %unit : index
   %width = index.mul %width_units, %granularity : index
-  %group_width = index.shli %unit, %kind : index
+  %runtime_width = index.shli %unit, %kind : index
+  %fallback_width = index.constant 8 : index
+  %group_width = scf.select %use_runtime_width, %runtime_width, %fallback_width : index
   %groups = index.div %width, %group_width : index
   %source = buffer.view %input[%base] : buffer -> view<[%groups]xi32>
   %destination = buffer.view %output[%base] : buffer -> view<66xi32>
@@ -565,7 +567,7 @@ func.def @runtime_group_lookup(%input: buffer, %output: buffer, %kind_input: ind
 
 // The oracle uses a fixed source view and a logical shift, independently of
 // the subject's dynamic quotient extent. Both receive the same runtime inputs.
-func.def @runtime_group_lookup_oracle(%input: buffer, %output: buffer, %kind_input: index, %width_input: index) {
+func.def @runtime_group_lookup_oracle(%input: buffer, %output: buffer, %kind_input: index, %width_input: index, %use_runtime_width: i1) {
   %kind = index.assume %kind_input [range(%kind_input, 0, 4)] : index
   %width_zero_based = index.assume %width_input [range(%width_input, 0, 3)] : index
   %begin = index.constant 0 : index
@@ -580,7 +582,14 @@ func.def @runtime_group_lookup_oracle(%input: buffer, %output: buffer, %kind_inp
   scf.for %channel = [%begin to %end step %unit] {
     %active = index.cmp ult, %channel, %width : index
     %result = scf.if %active -> (i32) {
-      %group = index.shrui %channel, %kind : index
+      %group = scf.if %use_runtime_width -> (index) {
+        %runtime_group = index.shrui %channel, %kind : index
+        scf.yield %runtime_group : index
+      } else {
+        %fallback_shift = index.constant 3 : index
+        %fallback_group = index.shrui %channel, %fallback_shift : index
+        scf.yield %fallback_group : index
+      }
       %value = view.load %source[%group] : view<64xi32> -> i32
       scf.yield %value : i32
     } else {
@@ -851,11 +860,23 @@ check.scenario @runtime_coordinate_lookup_values configure[8](%rows: index, %con
 
 check.scenario @runtime_group_lookup_values configure[5](%kind: index, %configuration_entropy: check.entropy) {
   check.trial[4](%width: index, %entropy: check.entropy) {
+    %use_runtime_width = check.literal value(true) : i1
     %input_storage = check.generate.iota offset(-311) step(7) : tensor<72xi32>
     %output_storage = check.generate.fill value(-889275714) : tensor<74xi32>
     %input = check.tensor.view %input_storage offset(16) : tensor<72xi32> -> tensor<64xi32>
     %output = check.tensor.view %output_storage offset(16) : tensor<74xi32> -> tensor<66xi32>
-    check.compare<@runtime_group_lookup, @runtime_group_lookup_oracle>(%input, %output, %kind, %width) : (tensor<64xi32>, tensor<66xi32>, index, index) -> () {
+    check.compare<@runtime_group_lookup, @runtime_group_lookup_oracle>(%input, %output, %kind, %width, %use_runtime_width) : (tensor<64xi32>, tensor<66xi32>, index, index, i1) -> () {
+      check.expect.bitwise actual(%input_storage) expected(%input_storage) : tensor<72xi32>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<74xi32>
+    }
+  }
+  check.trial[4](%width: index, %entropy: check.entropy) {
+    %use_runtime_width = check.literal value(false) : i1
+    %input_storage = check.generate.iota offset(-311) step(7) : tensor<72xi32>
+    %output_storage = check.generate.fill value(-889275714) : tensor<74xi32>
+    %input = check.tensor.view %input_storage offset(16) : tensor<72xi32> -> tensor<64xi32>
+    %output = check.tensor.view %output_storage offset(16) : tensor<74xi32> -> tensor<66xi32>
+    check.compare<@runtime_group_lookup, @runtime_group_lookup_oracle>(%input, %output, %kind, %width, %use_runtime_width) : (tensor<64xi32>, tensor<66xi32>, index, index, i1) -> () {
       check.expect.bitwise actual(%input_storage) expected(%input_storage) : tensor<72xi32>
       check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<74xi32>
     }
