@@ -56,6 +56,7 @@ loom_check_test_suite(
         "object_source_copy.loom-test",
         "object_source_release.loom-test",
         "object_state.loom-test",
+        "object_structured_selection.loom-test",
         "reference_transfers.loom-test",
         "storage.loom-test",
         "storage_transfers.loom-test",

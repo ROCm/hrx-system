@@ -1,0 +1,174 @@
+// Permuting owners around a call transfers only the selected owner into it.
+// Its finalizer runs inside the callee; the other owner remains available.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%identity: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "read") @read(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def noinline @replace(%old: ref<@Object>, %next: ref<@Object>) -> (ref<@Object>) {
+  ref.release %old : ref<@Object>
+  %current = ref.borrow %next : ref<@Object> -> ptr<@Object>
+  func.call @read(%current) : (ptr<@Object>)
+  func.return %next : ref<@Object>
+}
+
+func.def noinline @trial(%choose_first: i1) {
+  %first_id = scalar.constant 11 : i32
+  %second_id = scalar.constant 12 : i32
+  %next_id = scalar.constant 22 : i32
+  %first, %first_unused = func.call @create(%first_id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  ref.release %first_unused : ptr<@Object>
+  %second, %second_unused = func.call @create(%second_id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  ref.release %second_unused : ptr<@Object>
+  %next, %next_unused = func.call @create(%next_id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  ref.release %next_unused : ptr<@Object>
+  %selected, %other = scf.if %choose_first -> (ref<@Object>, ref<@Object>) {
+    scf.yield %first, %second : ref<@Object>, ref<@Object>
+  } else {
+    scf.yield %second, %first : ref<@Object>, ref<@Object>
+  }
+  %updated = func.call @replace(%selected, %next) : (ref<@Object>, ref<@Object>) -> (ref<@Object>)
+  %current_first, %current_second = scf.if %choose_first -> (ref<@Object>, ref<@Object>) {
+    scf.yield %updated, %other : ref<@Object>, ref<@Object>
+  } else {
+    scf.yield %other, %updated : ref<@Object>, ref<@Object>
+  }
+  %first_pointer = ref.borrow %current_first : ref<@Object> -> ptr<@Object>
+  func.call @read(%first_pointer) : (ptr<@Object>)
+  %second_pointer = ref.borrow %current_second : ref<@Object> -> ptr<@Object>
+  func.call @read(%second_pointer) : (ptr<@Object>)
+  ref.release %current_first : ref<@Object>
+  ref.release %current_second : ref<@Object>
+  func.call @observe() : ()
+  func.return
+}
+
+func.def public @run() {
+  %first = scalar.constant 1 : i1
+  %second = scalar.constant 0 : i1
+  func.call @trial(%first) : (i1)
+  func.call @trial(%second) : (i1)
+  func.return
+}
+
+// ----
+create 11
+create 12
+create 22
+destroy 11
+read 22
+read 22
+read 12
+destroy 22
+destroy 12
+live 0
+create 11
+create 12
+create 22
+destroy 12
+read 22
+read 11
+read 22
+destroy 11
+destroy 22
+live 0
+OK 0
+retired 0
+
+// ====
+// A selected saved pointer protects the old payload across replacement.
+// Its final read ends that protection before the next native observation.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%identity: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "read") @read(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def noinline @replace(%old: ref<@Object>, %next: ref<@Object>) -> (ref<@Object>) {
+  ref.release %old : ref<@Object>
+  %current = ref.borrow %next : ref<@Object> -> ptr<@Object>
+  func.call @read(%current) : (ptr<@Object>)
+  func.return %next : ref<@Object>
+}
+
+func.def noinline @trial(%choose_first: i1) {
+  %first_id = scalar.constant 11 : i32
+  %second_id = scalar.constant 12 : i32
+  %next_id = scalar.constant 22 : i32
+  %first, %first_unused = func.call @create(%first_id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  ref.release %first_unused : ptr<@Object>
+  %second, %second_unused = func.call @create(%second_id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  ref.release %second_unused : ptr<@Object>
+  %next, %next_unused = func.call @create(%next_id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  ref.release %next_unused : ptr<@Object>
+  %saved = scf.if %choose_first -> (ptr<@Object>) {
+    // REMARK@+1: DOMINANCE/021 {reason="the pointer escapes this block through control or storage"}
+    %pointer = ref.borrow %first : ref<@Object> -> ptr<@Object>
+    scf.yield %pointer : ptr<@Object>
+  } else {
+    // REMARK@+1: DOMINANCE/021 {reason="the pointer escapes this block through control or storage"}
+    %pointer = ref.borrow %second : ref<@Object> -> ptr<@Object>
+    scf.yield %pointer : ptr<@Object>
+  }
+  %selected, %other = scf.if %choose_first -> (ref<@Object>, ref<@Object>) {
+    scf.yield %first, %second : ref<@Object>, ref<@Object>
+  } else {
+    scf.yield %second, %first : ref<@Object>, ref<@Object>
+  }
+  %updated = func.call @replace(%selected, %next) : (ref<@Object>, ref<@Object>) -> (ref<@Object>)
+  %current_first, %current_second = scf.if %choose_first -> (ref<@Object>, ref<@Object>) {
+    scf.yield %updated, %other : ref<@Object>, ref<@Object>
+  } else {
+    scf.yield %other, %updated : ref<@Object>, ref<@Object>
+  }
+  func.call @read(%saved) : (ptr<@Object>)
+  %first_pointer = ref.borrow %current_first : ref<@Object> -> ptr<@Object>
+  func.call @read(%first_pointer) : (ptr<@Object>)
+  %second_pointer = ref.borrow %current_second : ref<@Object> -> ptr<@Object>
+  func.call @read(%second_pointer) : (ptr<@Object>)
+  ref.release %current_first : ref<@Object>
+  ref.release %current_second : ref<@Object>
+  func.call @observe() : ()
+  func.return
+}
+
+func.def public @run() {
+  %first = scalar.constant 1 : i1
+  %second = scalar.constant 0 : i1
+  func.call @trial(%first) : (i1)
+  func.call @trial(%second) : (i1)
+  func.return
+}
+
+// ----
+create 11
+create 12
+create 22
+read 22
+read 11
+destroy 11
+read 22
+read 12
+destroy 22
+destroy 12
+live 0
+create 11
+create 12
+create 22
+read 22
+read 12
+destroy 12
+read 11
+read 22
+destroy 11
+destroy 22
+live 0
+OK 0
+retired 0
