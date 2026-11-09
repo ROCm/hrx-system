@@ -286,6 +286,7 @@ struct loom_runtime_test_weight_activation_wake_t {
   void Await() {
     std::unique_lock<std::mutex> lock(mutex);
     condition.wait(lock, [this] { return ready; });
+    ready = false;
   }
   // Protects readiness publication to the outer owner.
   std::mutex mutex;
