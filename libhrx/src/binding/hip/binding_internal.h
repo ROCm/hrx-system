@@ -11,8 +11,8 @@
 #include "common/module.h"
 
 // Returns a dlopen handle scoped to THIS shared object (the HIP shim), or NULL
-// if it could not be established. The handle is resolved once and cached for
-// the process lifetime; callers must NOT dlclose() it.
+// if it could not be established. Successful resolution retains the handle for
+// the process lifetime; a failed lookup can retry. Callers must NOT dlclose it.
 //
 // Dynamic entry-point lookup resolves symbols through this handle. A runtime
 // opened with RTLD_LOCAL is intentionally absent from the process-global

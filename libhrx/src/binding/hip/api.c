@@ -1672,9 +1672,17 @@ static hipError_t iree_hip_ensure_initialized(void) {
       .device_selector = {.self = &selection,
                           .select = iree_hip_device_selection_apply},
   };
-  iree_status_t status = iree_hal_streaming_tls_key_create(
-      iree_hip_per_thread_stream_state_destroy,
-      &iree_hip_per_thread_stream_key);
+  // Native driver connections survive execution teardown. Keep the embedded
+  // owner and its code available even when callers close their loader handles.
+  iree_status_t status = iree_hip_self_dl_handle()
+                             ? iree_ok_status()
+                             : iree_make_status(IREE_STATUS_UNAVAILABLE,
+                                                "retaining HIP runtime module");
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_tls_key_create(
+        iree_hip_per_thread_stream_state_destroy,
+        &iree_hip_per_thread_stream_key);
+  }
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_init_global(&options, iree_allocator_system());
   }
@@ -28049,27 +28057,33 @@ HIPAPI const char* hipGetErrorName(hipError_t error) {
   return iree_hip_lookup_error_name(error, &is_known);
 }
 
-// Handle scoped to THIS shared object (the HIP shim), resolved once. See the
+// Handle scoped to THIS shared object (the HIP shim), retained once. See the
 // declaration in binding_internal.h and the note on hipGetProcAddress() for why
-// the process-global scope is insufficient.
+// the process-global scope is insufficient. Initialization and symbol lookup
+// are cold paths; a loader failure leaves the next attempt free to retry.
 static void* iree_hip_self_dl_handle_cached = NULL;
+static iree_slim_mutex_t iree_hip_self_dl_handle_mutex;
 static iree_once_flag iree_hip_self_dl_handle_once = IREE_ONCE_FLAG_INIT;
 static void iree_hip_init_self_dl_handle(void) {
-  Dl_info info;
-  // Use a private symbol as the module anchor. Public HIP symbols are
-  // preemptible and may resolve to another runtime already loaded in the
-  // process. Reopening this module with RTLD_NOLOAD returns a scoped handle;
-  // the extra reference intentionally pins the always-loaded HIP runtime.
-  if (dladdr((void*)&iree_hip_init_self_dl_handle, &info) != 0 &&
-      info.dli_fname) {
-    iree_hip_self_dl_handle_cached =
-        dlopen(info.dli_fname, RTLD_LAZY | RTLD_NOLOAD);
-  }
+  iree_slim_mutex_initialize(&iree_hip_self_dl_handle_mutex);
 }
 
 void* iree_hip_self_dl_handle(void) {
   iree_call_once(&iree_hip_self_dl_handle_once, iree_hip_init_self_dl_handle);
-  return iree_hip_self_dl_handle_cached;
+  iree_slim_mutex_lock(&iree_hip_self_dl_handle_mutex);
+  if (!iree_hip_self_dl_handle_cached) {
+    Dl_info info;
+    // Public HIP symbols are preemptible. Anchor the module with a private
+    // symbol and retain its existing loader identity without loading a copy.
+    if (dladdr((void*)&iree_hip_init_self_dl_handle, &info) != 0 &&
+        info.dli_fname) {
+      iree_hip_self_dl_handle_cached =
+          dlopen(info.dli_fname, RTLD_LAZY | RTLD_NOLOAD);
+    }
+  }
+  void* handle = iree_hip_self_dl_handle_cached;
+  iree_slim_mutex_unlock(&iree_hip_self_dl_handle_mutex);
+  return handle;
 }
 
 enum {
