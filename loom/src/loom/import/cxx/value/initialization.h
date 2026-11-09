@@ -48,7 +48,7 @@ class Initialization {
     // Transfers a completed prvalue result into its destination object. Side
     // temporaries evaluated while producing it remain owned by their enclosing
     // full expression.
-    virtual void adopt(cxx::ExpressionAST* expression, Value value) = 0;
+    virtual void adopt(cxx::ExpressionAST* expression) = 0;
     // Member initializer expressions are independent full expressions even
     // though their destination subobjects share one constructor receiver.
     virtual FullExpression begin_full_expression() = 0;

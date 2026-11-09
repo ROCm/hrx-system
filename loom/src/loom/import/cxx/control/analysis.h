@@ -23,6 +23,7 @@
 
 #include "loom/import/cxx/control/construction.h"
 #include "loom/import/cxx/lifetime/destruction.h"
+#include "loom/import/cxx/lifetime/origins.h"
 #include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/value/bindings.h"
 #include "loom/import/cxx/value/types.h"
@@ -221,6 +222,10 @@ class ControlFlow final : private cxx::ASTVisitor {
   ~ControlFlow();
   ControlFlow(const ControlFlow&) = delete;
   ControlFlow& operator=(const ControlFlow&) = delete;
+
+  const TemporaryOrigins& temporary_origins() const {
+    return temporary_origins_;
+  }
 
   // Unique bindings mutated under a structured statement, direct for-loop body,
   // or conditional value expression, in encounter order. Includes mutations in
@@ -542,6 +547,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   Types& types_;
   // Source definition whose implicit object fields participate in SSA flow.
   cxx::FunctionSymbol* function_;
+  // Canonical construction and lifetime-extension facts from this source walk.
+  TemporaryOrigins temporary_origins_;
   // Source-owned static declarations retained by the existing body walk.
   std::vector<cxx::InitDeclaratorAST*> static_locals_;
   // Active write-summary owners during construction only, including direct

@@ -263,7 +263,7 @@ Value Initialization::closure(cxx::LambdaExpressionAST* expression) {
                   : evaluation_.reference(referent, capture)
             : value(field->type(), initializer, field->constructor(), capture);
     if (!is_reference || pointer_snapshot) {
-      evaluation_.adopt(initializer, initialized);
+      evaluation_.adopt(initializer);
     }
     if (!captures.emplace(field, initialized).second) {
       diagnostics_.reject(unit_, capture,
@@ -666,7 +666,7 @@ Value Initialization::default_record(const RecordPartition& record,
                      : value(source_object_type(field), source,
                              initializer->constructor, initializer, prior);
         if (!referent) {
-          evaluation_.adopt(source, initialized);
+          evaluation_.adopt(source);
         }
         evaluation_.publish_receiver_member(field, initialized);
       });
@@ -709,7 +709,7 @@ Value Initialization::from_elements(const cxx::Type* type,
       } else {
         initialized = zero(array->source->elementType(), owner);
       }
-      evaluation_.adopt(initializing_expression, initialized);
+      evaluation_.adopt(initializing_expression);
       initialized.append_to(components);
     }
     return arena_.capture(*array, components);
@@ -720,7 +720,7 @@ Value Initialization::from_elements(const cxx::Type* type,
     if (elements && !elements->next &&
         types_.unqualified(elements->value->type) == types_.unqualified(type)) {
       auto initialized = evaluation_.expression(elements->value);
-      evaluation_.adopt(elements->value, initialized);
+      evaluation_.adopt(elements->value);
       return initialized;
     }
     ReceiverScope receiver(evaluation_, *record);
@@ -745,9 +745,9 @@ Value Initialization::from_elements(const cxx::Type* type,
           initialized = elements ? evaluation_.convert(elements->value,
                                                        member.type(), owner)
                                  : zero(member.type(), owner);
+          evaluation_.adopt(initializing_expression);
         }
       }
-      evaluation_.adopt(initializing_expression, initialized);
       evaluation_.publish_receiver_member(member.source, initialized);
       if (elements) {
         elements = elements->next;
@@ -774,7 +774,7 @@ Value Initialization::from_elements(const cxx::Type* type,
     if (elements && !elements->next &&
         types_.unqualified(elements->value->type) == types_.unqualified(type)) {
       auto initialized = evaluation_.expression(elements->value);
-      evaluation_.adopt(elements->value, initialized);
+      evaluation_.adopt(elements->value);
       return initialized;
     }
     diagnostics_.reject(
@@ -1017,7 +1017,7 @@ void Initialization::object(StorageProjection destination,
   }
   auto initialized = value(shape, initializer, constructor, owner);
   objects_.store(destination, initialized, object_type, owner);
-  evaluation_.adopt(initializer, initialized);
+  evaluation_.adopt(initializer);
 }
 
 void Initialization::copy_array(StorageProjection destination,

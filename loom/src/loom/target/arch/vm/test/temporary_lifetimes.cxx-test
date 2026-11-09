@@ -1,0 +1,146 @@
+// RUN: emit vm-object-lifetime
+// INPUT: cxx root=run
+// A copy returned by value belongs to the caller. The constructor's implicit
+// conversion and argument initializer describe one result object.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+
+struct Guard {
+  // Payload reported at the actual destruction boundary.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+
+[[loom::noinline]] static Guard copy_of(const Guard& source) { return source; }
+
+void run() {
+  Guard source{7};
+  {
+    Guard copied = copy_of(source);
+    observe(copied.value + 10);
+  }
+  observe(20);
+}
+
+// ----
+event 17
+event 7
+event 20
+event 7
+OK 0
+retired 0
+
+// ====
+// Direct reference binding extends a temporary; returning its reference through
+// a function does not. The expired reference is never read.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+
+struct Guard {
+  // Payload reported at the actual destruction boundary.
+  unsigned value;
+  [[loom::noinline]] Guard& self() { return *this; }
+  ~Guard() { observe(value); }
+};
+
+void run() {
+  {
+    const Guard& extended = Guard{1};
+    observe(2);
+  }
+  {
+    const Guard& expired = Guard{3}.self();
+    observe(4);
+  }
+}
+
+// ----
+event 2
+event 1
+event 3
+event 4
+OK 0
+retired 0
+
+// ====
+// The temporary closure owns its capture. It destroys that capture after the
+// invocation and before the following statement.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+
+struct Guard {
+  // Payload reported by the closure's captured object's destructor.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+
+void run() {
+  [captured = Guard{5}] { observe(captured.value + 1); }();
+  observe(7);
+}
+
+// ----
+event 6
+event 5
+event 7
+OK 0
+retired 0
+
+// ====
+// Both temporaries begin with identical SSA components. The receiver is
+// constructed before its argument, and only the receiver is replaced.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+
+struct Guard {
+  // Each object owns a distinct current value even when the values compare equal.
+  unsigned value;
+  [[loom::noinline]] unsigned replace_from(const Guard& other) {
+    value = other.value + 10;
+    return value;
+  }
+  ~Guard() { observe(value); }
+};
+
+void run() {
+  unsigned shared = 1;
+  const auto result = Guard{shared}.replace_from(Guard{shared});
+  observe(result + 100);
+}
+
+// ----
+event 1
+event 11
+event 111
+OK 0
+retired 0
+
+// ====
+// A returned reference into a nonzero-offset base still names the complete
+// temporary. Addressing that base preserves the other fields for destruction.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+
+struct Prefix {
+  // Earlier base occupying a distinct component and source-layout interval.
+  unsigned prefix;
+};
+struct Base {
+  // Component replaced through the returned base reference.
+  unsigned value;
+  [[loom::noinline]] Base& replace(unsigned next) {
+    value = next;
+    return *this;
+  }
+};
+struct Derived : Prefix, Base {
+  // Later component that remains part of the complete temporary.
+  unsigned tail;
+  ~Derived() { observe(prefix * 100 + value * 10 + tail); }
+};
+
+void run() {
+  const auto result = (Derived{{4}, {5}, 6}.replace(7).value = 8);
+  observe(result);
+}
+
+// ----
+event 486
+event 8
+OK 0
+retired 0

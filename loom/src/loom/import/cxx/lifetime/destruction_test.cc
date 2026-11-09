@@ -43,6 +43,8 @@ TEST(DestructionTest, RetainsSelectedCompleteObjectDestructorAndArrayExtent) {
       Guard one{};
       Guard many[2][3]{};
       Plain plain{};
+      Guard& borrowed = one;
+      const Guard& constant_borrow = one;
     }
   )"),
                 IREE_SV("destruction.cxx"), options);
@@ -63,6 +65,10 @@ TEST(DestructionTest, RetainsSelectedCompleteObjectDestructorAndArrayExtent) {
 
   EXPECT_FALSE(
       destruction_for(source.unit(), variables.variables.at("plain")->type()));
+  EXPECT_FALSE(destruction_for(source.unit(),
+                               variables.variables.at("borrowed")->type()));
+  EXPECT_FALSE(destruction_for(
+      source.unit(), variables.variables.at("constant_borrow")->type()));
 }
 
 }  // namespace
