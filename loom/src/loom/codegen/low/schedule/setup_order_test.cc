@@ -531,7 +531,7 @@ TEST_F(SetupOrderTest, ContinuationsConsumeRetainedStorageIdentity) {
       {kNotRematerializable, true, false, kResult, kResult},
       {kObservable, true, false, kResult, kResult},
       {kOtherBlock, true, false, kResult, kResult},
-      {kConstant, false, true, kSource, 0},
+      {kConstant, false, true, kSource, kSource},
       {kConstant, true, true, kSource, kSource},
       {kConstant, true, true, kResult, kResult},
       {kConstant, true, true, kSource | kResult, kSource | kResult},
@@ -739,6 +739,57 @@ TEST_F(SetupOrderTest, OrdersSharedCompletionAfterItsPrerequisites) {
   EXPECT_EQ(state_.setup_order.completion_nodes[1], 3u);
   EXPECT_EQ(state_.setup_order.completion_nodes[2], 3u);
   EXPECT_EQ(state_.setup_order.entry_nodes[3], 1u);
+}
+
+TEST_F(SetupOrderTest, PrivateConstantsShareTheirConsumersPrerequisites) {
+  const loom_low_reg_class_t reg_class = {
+      .alloc_unit_bits = 32,
+      .allocatable_count = 32,
+  };
+  const loom_low_descriptor_set_t descriptors = {
+      .reg_classes = &reg_class,
+      .reg_class_count = 1,
+  };
+  loom_value_id_t value_ids[] = {7, 19};
+  loom_local_value_domain_t domain = {
+      .value_ids = value_ids,
+      .value_count = IREE_ARRAYSIZE(value_ids),
+  };
+  loom_low_schedule_value_record_t values[] = {
+      {.unit_count = 1, .register_class_id = 0},
+      {.unit_count = 1, .register_class_id = 0},
+  };
+  const loom_low_descriptor_t descriptor = {};
+  for (bool retained : {false, true}) {
+    SCOPED_TRACE(retained);
+    Initialize({4});
+    uint64_t placement_word = 0;
+    options_.per_user_placement_values = {64, &placement_word};
+    state_.target.descriptor_set = &descriptors;
+    state_.value_domain = &domain;
+    state_.values = values;
+    for (uint32_t i = 0; i < 2; ++i) {
+      if (retained) {
+        iree_bitmap_set(options_.per_user_placement_values, value_ids[i]);
+      }
+      nodes_[i].descriptor = &descriptor;
+      nodes_[i].kind = LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR;
+      nodes_[i].result_count = 1;
+      loom_low_schedule_node_result_ordinals(&nodes_[i])[0] = i;
+      loom_low_schedule_setup_order_classify_node(
+          &state_, i, /*order_structural_setup=*/false);
+      Append(i, 3);
+    }
+    Append(2, 3);
+
+    // Neither constant alone unlocks the consumer. Retained placement keeps
+    // both after its other prerequisite and makes the first unlock the second.
+    if (retained) {
+      ExpectAddedOrder({{0, 1}, {2, 0}});
+    } else {
+      ExpectAddedOrder({});
+    }
+  }
 }
 
 TEST_F(SetupOrderTest, ComposedSetupSharesItsTerminalConsumer) {

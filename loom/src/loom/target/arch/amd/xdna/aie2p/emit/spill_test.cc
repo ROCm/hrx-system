@@ -62,7 +62,8 @@ class Aie2pSpillTest : public ::testing::TestWithParam<uint64_t> {
   void CheckTransfers(uint16_t class_id, uint32_t units, uint32_t bytes,
                       uint32_t alignment, uint32_t defined_parts,
                       std::initializer_list<Piece> expected,
-                      uint32_t narrow_offset = 0, uint32_t narrow_units = 0) {
+                      uint32_t narrow_offset = 0, uint32_t narrow_units = 0,
+                      uint16_t memory_class = LOOM_LOW_REG_CLASS_NONE) {
     const auto* descriptors = loom_aie2p_core_descriptor_set();
     const auto type =
         loom_low_register_type(descriptors->stable_id, class_id, units);
@@ -150,6 +151,14 @@ class Aie2pSpillTest : public ::testing::TestWithParam<uint64_t> {
       uint32_t previous_chunk = UINT32_MAX;
       int64_t far_displacement = 0;
       for (auto* op = anchor->next_op; op != nullptr; op = op->next_op) {
+        if (loom_low_copy_isa(op)) {
+          // Changing the physical carrier preserves the logical chunk width.
+          EXPECT_EQ(loom_low_register_type_unit_count(loom_module_value_type(
+                        module_, loom_low_copy_source(op))),
+                    loom_low_register_type_unit_count(loom_module_value_type(
+                        module_, loom_low_copy_result(op))));
+          continue;
+        }
         if (loom_low_const_isa(op)) {
           far_displacement =
               loom_attr_as_i64(loom_low_const_attrs(op).entries[0].value);
@@ -185,6 +194,9 @@ class Aie2pSpillTest : public ::testing::TestWithParam<uint64_t> {
             module_, action == 0 ? loom_low_op_results(op).values[0]
                                  : loom_low_op_operands(op).values[0]);
         const auto actual_class = loom_low_register_type_class_id(actual_type);
+        if (memory_class != LOOM_LOW_REG_CLASS_NONE) {
+          EXPECT_EQ(actual_class, memory_class);
+        }
         EXPECT_EQ(loom_low_register_parts_operand_mask(descriptors, operand,
                                                        actual_class),
                   part.mask ? part.mask
@@ -389,6 +401,59 @@ TEST_P(Aie2pSpillTest, PreservesTupleWordsAndNarrowOffsetsAtEncodingBoundary) {
     EXPECT_EQ(op, nullptr);
     EXPECT_EQ(emitted.emitted_value_count,
               word_count + far_count * 3 + (action == 1 ? 1 : 0));
+  }
+}
+
+TEST_P(Aie2pSpillTest, ConstrainedCarriersUseTheirFullPhysicalBank) {
+  for (uint16_t class_id : {
+           AIE2P_CORE_REG_CLASS_ID_AIE2P_ERF2,
+           AIE2P_CORE_REG_CLASS_ID_AIE2P_ERS16,
+           AIE2P_CORE_REG_CLASS_ID_AIE2P_MR16_VCOMPARE,
+           AIE2P_CORE_REG_CLASS_ID_AIE2P_MR26_FIFO_ST,
+           AIE2P_CORE_REG_CLASS_ID_AIE2P_MR26_LOCK,
+           AIE2P_CORE_REG_CLASS_ID_AIE2P_MR27_SELECT,
+           AIE2P_CORE_REG_CLASS_ID_AIE2P_MR28_TLAST,
+           AIE2P_CORE_REG_CLASS_ID_AIE2P_MR29_INSERT,
+           AIE2P_CORE_REG_CLASS_ID_AIE2P_MR31_DIVS,
+           AIE2P_CORE_REG_CLASS_ID_AIE2P_MR31_SCD,
+       }) {
+    SCOPED_TRACE(class_id);
+    CheckTransfers(class_id, 1, 4, 4, 0, {{0, 0, 4}}, 0, 0,
+                   AIE2P_CORE_REG_CLASS_ID_AIE2P_ER);
+  }
+  for (uint16_t class_id : {AIE2P_CORE_REG_CLASS_ID_AIE2P_EPS,
+                            AIE2P_CORE_REG_CLASS_ID_AIE2P_MPFS}) {
+    SCOPED_TRACE(class_id);
+    CheckTransfers(class_id, 1, 4, 4, 0, {{0, 0, 4}}, 0, 0,
+                   AIE2P_CORE_REG_CLASS_ID_AIE2P_EP);
+  }
+  for (uint16_t class_id : {AIE2P_CORE_REG_CLASS_ID_AIE2P_EBMLL,
+                            AIE2P_CORE_REG_CLASS_ID_AIE2P_MBMSM}) {
+    SCOPED_TRACE(class_id);
+    CheckTransfers(class_id, 1, 64, 64, 0, {{0, 0, 64}}, 0, 0,
+                   AIE2P_CORE_REG_CLASS_ID_AIE2P_MBMS);
+  }
+}
+
+TEST_P(Aie2pSpillTest, ConstrainedTupleCarriersPreserveChunkWidthsAndOffsets) {
+  for (uint16_t class_id : {AIE2P_CORE_REG_CLASS_ID_AIE2P_ERF2,
+                            AIE2P_CORE_REG_CLASS_ID_AIE2P_ERS16}) {
+    SCOPED_TRACE(class_id);
+    CheckTransfers(class_id, 2, 8, 4, 0, {{0, 0, 4}, {4, 0, 4, 1}}, 0, 0,
+                   AIE2P_CORE_REG_CLASS_ID_AIE2P_ER);
+    CheckTransfers(class_id, 2, 8, 4, 0, {{4, 0, 4}}, 1, 1,
+                   AIE2P_CORE_REG_CLASS_ID_AIE2P_ER);
+  }
+  CheckTransfers(AIE2P_CORE_REG_CLASS_ID_AIE2P_EPS, 2, 8, 4, 0,
+                 {{0, 0, 4}, {4, 0, 4, 1}}, 0, 0,
+                 AIE2P_CORE_REG_CLASS_ID_AIE2P_EP);
+  for (uint16_t class_id : {AIE2P_CORE_REG_CLASS_ID_AIE2P_EBMLL,
+                            AIE2P_CORE_REG_CLASS_ID_AIE2P_MBMSM}) {
+    SCOPED_TRACE(class_id);
+    CheckTransfers(class_id, 2, 128, 64, 0, {{0, 0, 64}, {64, 0, 64, 1}}, 0, 0,
+                   AIE2P_CORE_REG_CLASS_ID_AIE2P_MBMS);
+    CheckTransfers(class_id, 2, 128, 64, 0, {{64, 0, 64}}, 1, 1,
+                   AIE2P_CORE_REG_CLASS_ID_AIE2P_MBMS);
   }
 }
 

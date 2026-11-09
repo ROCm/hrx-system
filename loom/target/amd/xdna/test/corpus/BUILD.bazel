@@ -54,6 +54,7 @@ loom_corpus_test(
             "function/rodata.loom:@rodata_values": "XDNA/051",
             "memory/packed/transport.loom:@packed_byte_transport_all_bits": "XDNA/051",
             "memory/packed/transport.loom:@packed_word_transport_all_bits": "XDNA/051",
+            "memory/packed/transport.loom:@strided_byte_packet_values": "XDNA/051",
             "memory/storage/load_snapshot.loom:@computed_snapshot_across_barrier_values": "XDNA/051",
             "memory/storage/load_snapshot.loom:@extract_inside_loop_values": "XDNA/051",
             "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp8_grouped_values": "XDNA/058",
