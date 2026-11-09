@@ -294,7 +294,8 @@ static iree_status_t loom_pipeline_control_call_worker(
     const loom_pipeline_control_options_t* options,
     const loom_pipeline_control_site_t* site,
     const loom_value_id_t* state_arguments) {
-  loom_pipeline_worker_t* worker = &realization->workers[site->worker];
+  loom_channel_materialization_instance_t* worker =
+      &realization->instances[site->worker].channels;
   const loom_op_t* call =
       loom_region_entry_block(loom_pipeline_strand_body(site->target))
           ->first_op;

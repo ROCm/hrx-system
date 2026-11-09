@@ -22,8 +22,8 @@ typedef struct loom_channel_plan_membership_t {
   const loom_channel_plan_callable_t* const* callables;
   // Disjoint-set forwarding classes for owned accesses, excluding channels.
   loom_value_ordinal_t* admission_parents;
-  // Source admission for each class, or INVALID for an ambiguous class.
-  loom_value_id_t* admissions;
+  // Source admission ordinal for each class, or INVALID for ambiguity.
+  loom_value_ordinal_t* admissions;
   // Whether a value receives an owned access through a forwarding edge.
   bool* admission_forwarded;
   // Number of distinct roots in each class, saturated at two for ambiguity.
@@ -312,7 +312,7 @@ iree_status_t loom_channel_plan_build(
     membership.parents[i] = i;
     membership.channels[i] = NULL;
     membership.admission_parents[i] = i;
-    membership.admissions[i] = LOOM_VALUE_ID_INVALID;
+    membership.admissions[i] = LOOM_VALUE_ORDINAL_INVALID;
     membership.admission_forwarded[i] = false;
     membership.admission_origins[i] = 0;
   }
@@ -410,10 +410,10 @@ iree_status_t loom_channel_plan_build(
     const loom_value_ordinal_t representative = membership.admission_parents[i];
     if (known && membership.admission_origins[representative] == 0) {
       membership.admission_origins[representative] = 1;
-      membership.admissions[representative] = value_id;
+      membership.admissions[representative] = i;
     } else {
       membership.admission_origins[representative] = 2;
-      membership.admissions[representative] = LOOM_VALUE_ID_INVALID;
+      membership.admissions[representative] = LOOM_VALUE_ORDINAL_INVALID;
     }
   }
   for (loom_value_ordinal_t i = 0; i < value_count; ++i) {
@@ -421,7 +421,7 @@ iree_status_t loom_channel_plan_build(
     const loom_channel_identity_t* channel =
         membership.channels[membership.parents[i]];
     membership.channels[i] = channel;
-    const loom_value_id_t admission =
+    const loom_value_ordinal_t admission =
         membership.admissions[membership.admission_parents[i]];
     membership.admissions[i] = admission;
     if (!channel &&

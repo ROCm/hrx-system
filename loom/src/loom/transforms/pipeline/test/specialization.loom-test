@@ -44,8 +44,9 @@ func.decl @head(%state: buffer, %value: index)
 func.decl @down(%state: buffer, %value: index)
 
 func.def @__pipeline_worker_0(%state: buffer, %value: index) {
-  %32 = index.constant 1 : index
-  %head_group = index.assume %32 [range(%32, 0, 2)] : index
+  %44 = index.constant 1 : index
+  %37 = index.constant 1 : index
+  %head_group = index.assume %37 [range(%44, 0, 2)] : index
   %head_value = index.add %head_group, %value : index
   func.call @head(%state, %head_value) : (buffer, index)
   func.return
@@ -56,39 +57,39 @@ func.def @__pipeline_worker_1(%state: buffer, %value: index) {
   func.return
 }
 
-func.decl @__test_phase_join(%34: index)
+func.decl @__test_phase_join(%46: index)
 
-func.decl @__test_phase_enter(%35: index)
+func.decl @__test_phase_enter(%47: index)
 
-func.def inline @__pipeline_engine_0(%36: buffer, %38: index) {
+func.def inline @__pipeline_engine_0(%48: buffer, %50: index) {
   cfg.br ^_bb1
 ^_bb1:
-  func.call @__pipeline_worker_1(%36, %38) : (buffer, index)
+  func.call @__pipeline_worker_1(%48, %50) : (buffer, index)
   func.return
 }
 
-func.def inline @__pipeline_engine_1(%42: buffer, %44: index) {
+func.def inline @__pipeline_engine_1(%54: buffer, %56: index) {
   cfg.br ^_bb1
 ^_bb1:
-  func.call @__pipeline_worker_0(%42, %44) : (buffer, index)
+  func.call @__pipeline_worker_0(%54, %56) : (buffer, index)
   func.return
 }
 
-func.def public inline @__pipeline_engine_2(%48: buffer, %49: index) {
+func.def public inline @__pipeline_engine_2(%60: buffer, %61: index) {
   cfg.br ^_bb1
 ^_bb1:
   cfg.br ^_bb2
 ^_bb2:
-  %56 = index.constant 0 : index
-  func.call @__test_phase_enter(%56) : (index)
-  func.call @__pipeline_engine_1(%48, %49) : (buffer, index)
-  %57 = index.constant 0 : index
-  func.call @__test_phase_join(%57) : (index)
-  %54 = index.constant 0 : index
-  func.call @__test_phase_enter(%54) : (index)
-  func.call @__pipeline_engine_0(%48, %49) : (buffer, index)
-  %55 = index.constant 0 : index
-  func.call @__test_phase_join(%55) : (index)
+  %68 = index.constant 0 : index
+  func.call @__test_phase_enter(%68) : (index)
+  func.call @__pipeline_engine_1(%60, %61) : (buffer, index)
+  %69 = index.constant 0 : index
+  func.call @__test_phase_join(%69) : (index)
+  %66 = index.constant 0 : index
+  func.call @__test_phase_enter(%66) : (index)
+  func.call @__pipeline_engine_0(%60, %61) : (buffer, index)
+  %67 = index.constant 0 : index
+  func.call @__test_phase_join(%67) : (index)
   cfg.br ^_bb3
 ^_bb3:
   func.return

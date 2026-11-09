@@ -73,6 +73,7 @@ loom_cc_library(
     srcs = ["realization.c"],
     hdrs = ["realization.h"],
     deps = [
+        ":worker_materialization",
         "//loom/src/loom/analysis/pipeline:invocations",
         "//loom/src/loom/analysis/pipeline:resources",
         "//loom/src/loom/analysis/pipeline:workers",
@@ -97,6 +98,72 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "realization_test",
+    srcs = ["realization_test.cc"],
+    deps = [
+        ":realization",
+        "//loom/src/loom/analysis/pipeline:invocations",
+        "//loom/src/loom/analysis/pipeline:resources",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:builders",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/pipeline",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:pass_environment",
+        "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "worker_materialization",
+    srcs = ["worker_materialization.c"],
+    hdrs = ["worker_materialization.h"],
+    deps = [
+        ":channel_materialization",
+        "//loom/src/loom/analysis:symbolic_expr",
+        "//loom/src/loom/analysis/pipeline:workers",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/rewrite:remap",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/transforms/view:offset_expression",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "worker_materialization_test",
+    srcs = ["worker_materialization_test.cc"],
+    deps = [
+        ":worker_materialization",
+        "//loom/src/loom/analysis:channel_plan",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "channel_materialization",
     srcs = ["channel_materialization.c"],
@@ -107,6 +174,7 @@ loom_cc_library(
         "//loom/src/loom/ops/cfg",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/rewrite:callable",
+        "//loom/src/loom/rewrite:remap",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/util:cfg_graph",
         "//runtime/src/iree/base",

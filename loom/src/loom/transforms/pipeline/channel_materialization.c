@@ -25,6 +25,8 @@ typedef struct loom_channel_materialization_clone_state_t {
   loom_op_t** returns;
   // Next source exit in clone visitation order.
   iree_host_size_t return_index;
+  // Additional occurrence products translated by the same clone traversal.
+  loom_ir_clone_observer_t observer;
 } loom_channel_materialization_clone_state_t;
 
 static iree_status_t loom_channel_materialization_clone_op(
@@ -48,16 +50,29 @@ static iree_status_t loom_channel_materialization_clone_op(
       source_op == plan->returns[state->return_index]) {
     state->returns[state->return_index++] = target_op;
   }
-  return iree_ok_status();
+  return state->observer.fn ? state->observer.fn(state->observer.user_data,
+                                                 source_op, target_op)
+                            : iree_ok_status();
+}
+
+static void loom_channel_materialization_clone_finish(
+    void* user_data, const loom_op_t* source_op, loom_op_t* target_op) {
+  loom_channel_materialization_clone_state_t* state = user_data;
+  if (state->observer.finish_fn) {
+    state->observer.finish_fn(state->observer.user_data, source_op, target_op);
+  }
 }
 
 iree_status_t loom_channel_materialization_clone(
     loom_rewriter_t* rewriter, loom_func_like_t source_function,
-    const loom_channel_plan_t* source_plan, loom_symbol_ref_t target_symbol,
+    const loom_channel_plan_t* source_plan,
+    const loom_cfg_graph_t* source_graph, loom_symbol_ref_t target_symbol,
+    loom_ir_clone_observer_t observer,
     loom_channel_materialization_instance_t* out_instance) {
   *out_instance = (loom_channel_materialization_instance_t){0};
   const loom_local_value_domain_t* source_domain = source_plan->value_domain;
-  loom_channel_materialization_clone_state_t state = {.source = source_plan};
+  loom_channel_materialization_clone_state_t state = {.source = source_plan,
+                                                      .observer = observer};
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(rewriter->arena, source_domain->value_count,
                                 sizeof(*state.values), (void**)&state.values));
@@ -71,9 +86,14 @@ iree_status_t loom_channel_materialization_clone(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       rewriter->arena, source_plan->return_count, sizeof(*state.returns),
       (void**)&state.returns));
+  loom_ir_remap_t remap;
   const loom_callable_clone_options_t options = {
       .observer = {.fn = loom_channel_materialization_clone_op,
+                   .finish_fn = observer.finish_fn
+                                    ? loom_channel_materialization_clone_finish
+                                    : NULL,
                    .user_data = &state},
+      .retained_remap = &remap,
   };
   loom_func_like_t function = {0};
   IREE_RETURN_IF_ERROR(loom_callable_clone_definition(
@@ -100,16 +120,41 @@ iree_status_t loom_channel_materialization_clone(
           {
               .module = rewriter->module,
               .region = target_region,
+              .arena = rewriter->arena,
               .value_ids = state.values,
               .value_count = source_domain->value_count,
               .definition_count = source_domain->definition_count,
               .value_capacity = source_domain->value_count,
+              .operation_traits = source_domain->operation_traits,
           },
       .plan = *source_plan,
+      .graph = *source_graph,
+      .remap = remap,
   };
   out_instance->plan.value_domain = &out_instance->value_domain;
   out_instance->plan.actions = state.actions;
   out_instance->plan.returns = state.returns;
+  loom_cfg_graph_t* graph = &out_instance->graph;
+  graph->region = target_region;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      rewriter->arena, graph->block_count, sizeof(*graph->blocks),
+      (void**)&graph->blocks));
+  for (iree_host_size_t i = 0; i < graph->block_count; ++i) {
+    graph->blocks[i] = source_graph->blocks[i];
+    graph->blocks[i].block = target_region->blocks[i];
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(rewriter->arena, graph->edge_count,
+                                sizeof(*graph->edges), (void**)&graph->edges));
+  for (iree_host_size_t i = 0; i < graph->edge_count; ++i) {
+    graph->edges[i] = source_graph->edges[i];
+    loom_cfg_edge_info_t* edge = &graph->edges[i];
+    edge->terminator = target_region->blocks[edge->source_block_index]->last_op;
+    if (edge->selector_value_id != LOOM_VALUE_ID_INVALID) {
+      edge->selector_value_id = state.values[loom_local_value_domain_ordinal(
+          source_domain, edge->selector_value_id)];
+    }
+  }
   return iree_ok_status();
 }
 

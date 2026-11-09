@@ -203,7 +203,8 @@ class ChannelMaterializationTest : public ::testing::Test {
   }
 
   void MaterializePlan(const loom_channel_plan_t& plan, loom_value_id_t initial,
-                       Boundary boundary) {
+                       Boundary boundary,
+                       const loom_cfg_graph_t* retained_graph = nullptr) {
     std::vector<loom_type_t> carriers(plan.value_count);
     std::vector<uint8_t> erased(plan.value_count, 0);
     for (loom_value_ordinal_t i = 0; i < plan.value_count; ++i) {
@@ -229,10 +230,13 @@ class ChannelMaterializationTest : public ::testing::Test {
     loom_rewriter_t rewriter;
     loom_rewriter_initialize(&rewriter, module_, &arena_);
     loom_cfg_graph_t graph;
-    IREE_ASSERT_OK(loom_cfg_graph_build(module_, plan.value_domain->region,
-                                        &arena_, &graph));
+    if (!retained_graph) {
+      IREE_ASSERT_OK(loom_cfg_graph_build(module_, plan.value_domain->region,
+                                          &arena_, &graph));
+      retained_graph = &graph;
+    }
     IREE_ASSERT_OK(
-        loom_channel_materialize(&rewriter, &plan, &graph, &options));
+        loom_channel_materialize(&rewriter, &plan, retained_graph, &options));
     loom_rewriter_deinitialize(&rewriter);
   }
 
@@ -370,6 +374,115 @@ TEST_F(ChannelMaterializationTest, HelperReturnDoesNotDrain) {
   EXPECT_TRUE(loom_func_return_isa(entry_->last_op));
 }
 
+TEST_F(ChannelMaterializationTest, ClonedAdmissionsBelongToTheirInstance) {
+  const auto incoming = Argument(read_type_);
+  loom_op_t* op;
+  IREE_ASSERT_OK(loom_channel_release_build(&builder_, incoming,
+                                            LOOM_LOCATION_UNKNOWN, &op));
+  std::vector<loom_value_id_t> admissions = {Reserve()};
+  Publish(admissions.back());
+  for (bool mutable_access : {false, true}) {
+    loom_type_t read_type = read_type_;
+    if (mutable_access) {
+      IREE_ASSERT_OK(
+          loom_read_type_make(module_, LOOM_READ_TYPE_BUILD_FLAG_HAS_MODE,
+                              loom_read_type_payload(read_type_),
+                              LOOM_READ_TYPE_MODE_MUTABLE, &read_type));
+    }
+    IREE_ASSERT_OK(loom_channel_acquire_build(
+        &builder_,
+        mutable_access ? LOOM_CHANNEL_ACQUIRE_BUILD_FLAG_HAS_MODE : 0,
+        mutable_access ? LOOM_CHANNEL_MODE_MUTABLE : 0, channel_, read_type,
+        view_type_, LOOM_LOCATION_UNKNOWN, &op));
+    admissions.push_back(loom_channel_acquire_read(op));
+    IREE_ASSERT_OK(loom_channel_release_build(&builder_, admissions.back(),
+                                              LOOM_LOCATION_UNKNOWN, &op));
+    IREE_ASSERT_OK(loom_channel_accept_build(
+        &builder_, mutable_access ? LOOM_CHANNEL_ACCEPT_BUILD_FLAG_HAS_MODE : 0,
+        mutable_access ? LOOM_CHANNEL_MODE_MUTABLE : 0, channel_, read_type,
+        LOOM_LOCATION_UNKNOWN, &op));
+    admissions.push_back(loom_channel_accept_read(op));
+    IREE_ASSERT_OK(loom_channel_release_build(&builder_, admissions.back(),
+                                              LOOM_LOCATION_UNKNOWN, &op));
+  }
+  IREE_ASSERT_OK(loom_channel_accept_build(
+      &builder_, 0, 0, channel_, read_type_, LOOM_LOCATION_UNKNOWN, &op));
+  const auto shared = loom_channel_accept_read(op);
+  const loom_type_t results[] = {read_type_, read_type_};
+  loom_op_t* fanout;
+  IREE_ASSERT_OK(loom_channel_fanout_build(&builder_, shared, results, 2,
+                                           nullptr, 0, LOOM_LOCATION_UNKNOWN,
+                                           &fanout));
+  for (size_t i = 0; i < 2; ++i) {
+    IREE_ASSERT_OK(loom_channel_release_build(
+        &builder_, loom_op_results(fanout)[i], LOOM_LOCATION_UNKNOWN, &op));
+  }
+  Return();
+  Verify();
+  IREE_ASSERT_OK(loom_local_value_domain_acquire_for_region(module_, region_,
+                                                            &arena_, &domain_));
+  const loom_channel_identity_t identity = {channel_};
+  const loom_channel_plan_binding_t bindings[] = {{channel_, &identity},
+                                                  {incoming, &identity}};
+  loom_channel_plan_t plan;
+  loom_channel_plan_rejection_t rejection;
+  IREE_ASSERT_OK(loom_channel_plan_build(&domain_, bindings,
+                                         IREE_ARRAYSIZE(bindings), nullptr,
+                                         &arena_, &plan, &rejection));
+  ASSERT_EQ(rejection.kind, LOOM_CHANNEL_PLAN_REJECTION_NONE);
+  std::vector<loom_value_ordinal_t> ordinals;
+  for (auto value : admissions) {
+    ordinals.push_back(loom_local_value_domain_ordinal(&domain_, value));
+    EXPECT_EQ(loom_channel_plan_admission(&plan, value), value);
+  }
+  const auto incoming_ordinal =
+      loom_local_value_domain_ordinal(&domain_, incoming);
+  const auto shared_ordinal = loom_local_value_domain_ordinal(&domain_, shared);
+  const loom_value_ordinal_t fanout_ordinals[] = {
+      loom_local_value_domain_ordinal(&domain_, loom_op_results(fanout)[0]),
+      loom_local_value_domain_ordinal(&domain_, loom_op_results(fanout)[1])};
+  loom_rewriter_t rewriter;
+  loom_rewriter_initialize(&rewriter, module_, &arena_);
+  loom_builder_set_block(&rewriter.builder, loom_module_block(module_));
+  loom_cfg_graph_t graph;
+  IREE_ASSERT_OK(loom_cfg_graph_build(module_, region_, &arena_, &graph));
+  loom_channel_materialization_instance_t instances[2];
+  const char* names[] = {"first_reader", "second_reader"};
+  for (size_t i = 0; i < 2; ++i) {
+    IREE_ASSERT_OK(loom_channel_materialization_clone(
+        &rewriter, loom_func_like_cast(module_, function_), &plan, &graph,
+        Symbol(names[i]), {}, &instances[i]));
+  }
+  loom_rewriter_deinitialize(&rewriter);
+  loom_local_value_domain_release(&domain_);
+  // Both instances retain the same ordinal relation, but their admission
+  // values belong to different bodies. Restoring either domain must resolve
+  // its own source site, including accesses forwarded through fanout.
+  for (size_t i : {1u, 0u}) {
+    auto& instance = instances[i];
+    loom_local_value_domain_restore(&instance.value_domain);
+    for (size_t a = 0; a < admissions.size(); ++a) {
+      const auto value = instance.value_domain.value_ids[ordinals[a]];
+      EXPECT_NE(value, admissions[a]);
+      EXPECT_EQ(loom_channel_plan_admission(&instance.plan, value), value);
+    }
+    const auto local_shared = instance.value_domain.value_ids[shared_ordinal];
+    for (auto ordinal : fanout_ordinals) {
+      EXPECT_EQ(loom_channel_plan_admission(
+                    &instance.plan, instance.value_domain.value_ids[ordinal]),
+                local_shared);
+    }
+    EXPECT_EQ(
+        loom_channel_plan_admission(
+            &instance.plan, instance.value_domain.value_ids[incoming_ordinal]),
+        LOOM_VALUE_ID_INVALID);
+    loom_local_value_domain_release(&instance.value_domain);
+  }
+  loom_local_value_domain_restore(&domain_);
+  EXPECT_EQ(loom_channel_plan_admission(&plan, shared), shared);
+  Verify();
+}
+
 TEST_F(ChannelMaterializationTest, ClonedOccurrencesKeepLoopOwnershipSeparate) {
   const auto width = Argument(loom_type_scalar(LOOM_SCALAR_TYPE_INDEX));
   loom_type_id_t payload;
@@ -416,6 +529,8 @@ TEST_F(ChannelMaterializationTest, ClonedOccurrencesKeepLoopOwnershipSeparate) {
   // The same source argument is bound by two different constructions. Their
   // identities remain distinct even when the callable and storage could alias.
   const loom_channel_identity_t identities[] = {{channel_}, {channel_}};
+  loom_cfg_graph_t graph;
+  IREE_ASSERT_OK(loom_cfg_graph_build(module_, region_, &arena_, &graph));
   loom_channel_materialization_instance_t instances[2];
   loom_channel_plan_t plans[2];
   loom_rewriter_t rewriter;
@@ -430,8 +545,8 @@ TEST_F(ChannelMaterializationTest, ClonedOccurrencesKeepLoopOwnershipSeparate) {
                                            &arena_, &plans[i], &rejection));
     ASSERT_EQ(rejection.kind, LOOM_CHANNEL_PLAN_REJECTION_NONE);
     IREE_ASSERT_OK(loom_channel_materialization_clone(
-        &rewriter, loom_func_like_cast(module_, function_), &plans[i],
-        Symbol(names[i]), &instances[i]));
+        &rewriter, loom_func_like_cast(module_, function_), &plans[i], &graph,
+        Symbol(names[i]), {}, &instances[i]));
     EXPECT_TRUE(loom_local_value_domain_is_acquired(&domain_));
     EXPECT_FALSE(
         loom_local_value_domain_is_acquired(&instances[i].value_domain));
@@ -469,7 +584,23 @@ TEST_F(ChannelMaterializationTest, ClonedOccurrencesKeepLoopOwnershipSeparate) {
     EXPECT_EQ(write, body->blocks[1]->arg_ids[0]);
     loom_local_value_domain_restore(&instance.value_domain);
     EXPECT_EQ(loom_channel_plan_channel(&instance.plan, write), &identities[i]);
-    MaterializePlan(instance.plan, initial, Boundary::Execution);
+    EXPECT_EQ(loom_channel_plan_admission(&instance.plan, write),
+              LOOM_VALUE_ID_INVALID);
+    EXPECT_EQ(instance.graph.predecessor_indices, graph.predecessor_indices);
+    EXPECT_EQ(instance.graph.reverse_postorder.values,
+              graph.reverse_postorder.values);
+    EXPECT_EQ(instance.value_domain.arena, &arena_);
+    for (size_t e = 0; e < graph.edge_count; ++e) {
+      const auto& edge = instance.graph.edges[e];
+      EXPECT_EQ(edge.terminator,
+                body->blocks[edge.source_block_index]->last_op);
+      EXPECT_NE(edge.terminator, graph.edges[e].terminator);
+      if (edge.selector_value_id != LOOM_VALUE_ID_INVALID) {
+        EXPECT_EQ(edge.selector_value_id, entry->arg_ids[1]);
+      }
+    }
+    MaterializePlan(instance.plan, initial, Boundary::Execution,
+                    &instance.graph);
     loom_local_value_domain_release(&instance.value_domain);
     ExpectCall(entry->first_op, admission_, {initial});
     ExpectCall(body->blocks[2]->first_op, publication_, {write});

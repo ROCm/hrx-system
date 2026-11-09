@@ -118,6 +118,7 @@ loom_cc_library(
         "configuration.c",
         "distribution.c",
         "dma.c",
+        "dma_resources.c",
         "native.c",
         "phases.c",
         "programs.c",
@@ -127,6 +128,7 @@ loom_cc_library(
         "transport.c",
     ],
     hdrs = [
+        "dma_resources.h",
         "native.h",
         "refill.h",
         "sharing.h",
@@ -171,12 +173,23 @@ loom_cc_library(
         "//loom/src/loom/transforms/pipeline:channel_materialization",
         "//loom/src/loom/transforms/pipeline:control",
         "//loom/src/loom/transforms/pipeline:realization",
+        "//loom/src/loom/transforms/pipeline:worker_materialization",
         "//loom/src/loom/transforms/view:offset_expression",
         "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "dma_resources_test",
+    srcs = ["dma_resources_test.cc"],
+    deps = [
+        ":native",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

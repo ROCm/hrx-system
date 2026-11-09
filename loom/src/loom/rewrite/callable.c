@@ -1186,9 +1186,16 @@ iree_status_t loom_callable_clone_definition(
       .source_ref = loom_func_like_callee(source),
       .target_ref = target_ref,
   };
+  loom_callable_clone_symbol_state_t* retained_symbol_state = &symbol_state;
+  if (options && options->retained_remap) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate(scratch_arena,
+                                             sizeof(*retained_symbol_state),
+                                             (void**)&retained_symbol_state));
+    *retained_symbol_state = symbol_state;
+  }
   const loom_ir_remap_options_t remap_options = {
       .remap_symbol = loom_ir_remap_symbol_callback_make(
-          loom_callable_clone_remap_symbol, &symbol_state),
+          loom_callable_clone_remap_symbol, retained_symbol_state),
       .remap_same_module_symbols = true,
       .clone_observer =
           options ? options->observer : (loom_ir_clone_observer_t){0},
@@ -1213,5 +1220,11 @@ iree_status_t loom_callable_clone_definition(
         "cloned function did not bind the requested target symbol");
   }
   *out_cloned = cloned;
+  if (options && options->retained_remap) {
+    remap.clone_observer = (loom_ir_clone_observer_t){0};
+    remap.op_projection.entries = NULL;
+    remap.op_projection.count = remap.op_projection.cursor = 0;
+    *options->retained_remap = remap;
+  }
   return iree_ok_status();
 }
