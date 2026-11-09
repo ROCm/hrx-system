@@ -21,7 +21,7 @@
 #include "iree/tooling/device_util.h"
 
 IREE_FLAG(int64_t, queue_family, -1,
-          "Provisioned transfer queue family ordinal; -1 selects the first "
+          "Transfer queue family ordinal; -1 selects the first "
           "available family.");
 
 namespace {
@@ -34,12 +34,15 @@ class QueueDevice {
  public:
   ~QueueDevice() {
     iree_hal_pool_release(memory_pool_);
+    for (auto* queue : queues_) {
+      iree_hal_queue_release(queue);
+    }
     iree_hal_device_group_release(group_);
     iree_hal_device_release(device_);
     iree_async_proactor_pool_release(proactors_);
   }
 
-  iree_status_t Initialize() {
+  iree_status_t Initialize(size_t requested_queue_count) {
     const iree_allocator_t allocator = {this, Allocate};
     IREE_RETURN_IF_ERROR(iree_async_proactor_pool_create(
         1, nullptr, iree_async_proactor_pool_options_default(), allocator,
@@ -68,26 +71,46 @@ class QueueDevice {
                               spec->family_count);
     }
     std::vector<iree_hal_pool_family_access_t> families;
-    for (iree_host_size_t i = 0; i < spec->family_count; ++i) {
+    for (iree_host_size_t i = 0;
+         i < spec->family_count && iree_status_is_ok(status); ++i) {
       const auto& family = spec->families[i];
+      const bool can_acquire = iree_any_bit_set(
+          family.flags, IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_DYNAMIC_ACQUISITION);
       if ((FLAG_queue_family < 0 || (uint64_t)FLAG_queue_family == i) &&
-          family.provisioned_queue_count &&
+          (family.provisioned_queue_count || can_acquire) &&
           iree_all_bits_set(family.role_flags,
                             IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER)) {
-        families.push_back({iree_hal_device_queue_family(device_, i),
-                            IREE_HAL_BUFFER_USAGE_TRANSFER});
-        for (uint32_t j = 0; j < family.provisioned_queue_count; ++j) {
-          queues_.push_back(iree_hal_device_queue(device_, i, j));
+        const auto* queue_family = iree_hal_device_queue_family(device_, i);
+        families.push_back({queue_family, IREE_HAL_BUFFER_USAGE_TRANSFER});
+        for (uint32_t j = 0; j < family.provisioned_queue_count &&
+                             queues_.size() < requested_queue_count;
+             ++j) {
+          auto* queue = iree_hal_device_queue(device_, i, j);
+          iree_hal_queue_retain(queue);
+          queues_.push_back(queue);
+        }
+        // CPU families can provide independent queues over shared executors.
+        // Acquire only the inventory this row needs, outside measured work.
+        iree_hal_queue_params_t queue_params;
+        iree_hal_queue_params_initialize(&queue_params);
+        while (can_acquire && queues_.size() < requested_queue_count &&
+               iree_status_is_ok(status)) {
+          iree_hal_queue_t* queue = nullptr;
+          status = iree_hal_queue_acquire(queue_family, &queue_params, &queue);
+          if (iree_status_is_ok(status)) {
+            queues_.push_back(queue);
+          }
         }
         const auto id = iree_hal_device_id(device_);
         label_ = std::string(id.data, id.size) + "/family:" + std::to_string(i);
         break;
       }
     }
+    IREE_RETURN_IF_ERROR(status);
     if (queues_.empty()) {
       return iree_make_status(
           IREE_STATUS_UNAVAILABLE,
-          "no provisioned transfer queue in the selected families");
+          "no available transfer queue in the selected families");
     }
     const iree_hal_pool_scope_t scope = {
         .family_count = families.size(),
@@ -139,7 +162,7 @@ class QueueDevice {
   iree_hal_pool_t* memory_pool_ = nullptr;
   // Device and selected family identity included with every result.
   std::string label_;
-  // Borrowed transfer-capable queues in advertised inventory order.
+  // Retained provisioned queues followed by any dynamically acquired queues.
   std::vector<iree_hal_queue_t*> queues_;
   // Successful HAL host allocations, including all device worker threads.
   std::atomic<uint64_t> allocation_count_ = 0;
@@ -360,7 +383,8 @@ class TransferChain {
 template <Submission kSubmission, bool kSubmitOnly, bool kUsedStaging = false>
 void BM_TransferChain(benchmark::State& state) {
   QueueDevice device;
-  iree::Status status = device.Initialize();
+  iree::Status status =
+      device.Initialize(kSubmission == Submission::kCrossQueue ? 2 : 1);
   if (!status.ok()) {
     state.SkipWithError(status.ToString().c_str());
     return;
@@ -492,16 +516,17 @@ static void ReportDurations(benchmark::State& state, const std::string& name,
 // workers.
 static void BM_Concurrent(benchmark::State& state, Queues placement,
                           Workload workload) {
+  const size_t caller_count = state.range(0);
   QueueDevice device;
-  iree::Status status = device.Initialize();
+  iree::Status status =
+      device.Initialize(placement == Queues::kSeparate ? caller_count : 1);
   if (!status.ok()) {
     state.SkipWithError(status.ToString().c_str());
     return;
   }
   state.SetLabel(device.label());
-  const size_t caller_count = state.range(0);
   if (placement == Queues::kSeparate && device.queue_count() < caller_count) {
-    state.SkipWithMessage("not enough provisioned transfer queues");
+    state.SkipWithMessage("not enough transfer queues in the selected family");
     return;
   }
   struct Caller {
