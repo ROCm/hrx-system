@@ -201,6 +201,9 @@ typedef struct loom_aie2p_native_dma_completion_t {
   uint16_t selector;
 } loom_aie2p_native_dma_completion_t;
 
+// Minimum static sites needed to amortize a shared native submission call.
+enum { LOOM_AIE2P_NATIVE_DMA_SUBMIT_MIN_SHARED_USES = 3 };
+
 // Repeated external-address patch bodies for one physical descriptor family.
 // The local descriptor family fixes routes, chain geometry, and patch policy;
 // relocation bases, shim commands, and queue words remain call arguments.
@@ -233,6 +236,9 @@ typedef struct loom_aie2p_native_dma_descriptor_t {
   const struct loom_aie2p_native_transfer_t* first_transfer;
   // Most recently assigned copy, retaining its retirement and address policy.
   const struct loom_aie2p_native_transfer_t* last_transfer;
+  // Admitted static sites with intrinsically dynamic external addresses.
+  // These retain the external patch body after optional address refinement.
+  iree_host_size_t dynamic_external_use_count;
   // Endpoint sequence, excluding dynamic addresses and completion releases.
   loom_aie2p_native_dma_sequence_t sequence;
   // Local arrival credit; NULL for shim, egress, and autonomous descriptors.

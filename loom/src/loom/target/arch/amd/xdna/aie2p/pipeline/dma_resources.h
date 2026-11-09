@@ -59,7 +59,9 @@ iree_status_t loom_aie2p_native_select_task_descriptors(
 
 // Refines admitted core tasks with fixed-address variants using only spare
 // descriptors. Variants inherit routes and completion credits; dynamic tasks
-// and exhausted banks retain their original patchable descriptors.
+// and exhausted banks retain their original patchable descriptors. Mixed local
+// addresses also retain a shared descriptor when specialization would split
+// an outlineable external patch body whose local patch remains required.
 iree_status_t loom_aie2p_native_refine_transfer_addresses(
     loom_aie2p_native_context_t* context, iree_host_size_t worker_count);
 

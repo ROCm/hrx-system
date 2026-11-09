@@ -351,6 +351,8 @@ iree_status_t loom_aie2p_native_select_task_descriptors(
   }
   task->local_descriptor->last_transfer = task->first_transfer;
   task->shim_descriptor->last_transfer = task->first_transfer;
+  task->local_descriptor->dynamic_external_use_count +=
+      task->shim_address_dynamic;
   if (task->local_descriptor->completion) {
     task->local_descriptor->completion->last_transfer = task->first_transfer;
   }
@@ -361,6 +363,17 @@ iree_status_t loom_aie2p_native_select_task_descriptors(
   }
   *out_valid = true;
   return iree_ok_status();
+}
+
+static bool loom_aie2p_native_submission_fits(
+    const loom_aie2p_native_transfer_task_t* task, bool local_dynamic,
+    bool local_queue_argument) {
+  const loom_aie2p_call_abi_requirements_t requirements = {
+      .scalar_count = (uint16_t)(task->transfer_count * (2 + local_dynamic) +
+                                 1 + local_queue_argument),
+      .pointer_count = (uint16_t)task->transfer_count,
+  };
+  return loom_aie2p_call_abi_requirements_fit(requirements);
 }
 
 // Admission first packs all required geometries, preserving the programs that
@@ -403,6 +416,17 @@ iree_status_t loom_aie2p_native_refine_transfer_addresses(
           variant = variant->address_variants;
         }
         if (!variant) {
+          // Preserve an outlineable external patch body when its local patch
+          // cannot disappear. Splitting fixed sites into another body would
+          // duplicate the external work and consume more tile instructions.
+          if (!shim && original->address_required &&
+              task->shim_address_dynamic &&
+              original->dynamic_external_use_count >=
+                  LOOM_AIE2P_NATIVE_DMA_SUBMIT_MIN_SHARED_USES &&
+              loom_aie2p_native_submission_fits(task, true, false)) {
+            original->last_transfer = task->first_transfer;
+            continue;
+          }
           loom_aie2p_native_tile_t* tile =
               shim ? task->path->shim : task->path->local;
           const uint8_t engine =
@@ -498,13 +522,8 @@ iree_status_t loom_aie2p_native_group_submissions(
           descriptor->address_origin ? descriptor->address_origin : descriptor;
       const bool local_queue_argument =
           !descriptor->address_dynamic && origin->address_variants;
-      const loom_aie2p_call_abi_requirements_t requirements = {
-          .scalar_count = (uint16_t)(task->transfer_count *
-                                         (2 + descriptor->address_dynamic) +
-                                     1 + local_queue_argument),
-          .pointer_count = (uint16_t)task->transfer_count,
-      };
-      if (!loom_aie2p_call_abi_requirements_fit(requirements)) {
+      if (!loom_aie2p_native_submission_fits(task, descriptor->address_dynamic,
+                                             local_queue_argument)) {
         continue;
       }
       loom_aie2p_native_dma_submit_t* group =
