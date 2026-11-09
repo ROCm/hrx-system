@@ -34,8 +34,9 @@ typedef struct loom_storage_reference_facts_t {
   // SSA value that owns the backing reservation identity.
   loom_value_id_t backing_value_id;
 
-  // Storage space of the backing reference.
-  loom_storage_space_t storage_space;
+  // Storage space of the backing reference (loom_storage_space_t). A full word
+  // keeps the raw interned representation free of trailing padding.
+  uint32_t storage_space;
 } loom_storage_reference_facts_t;
 
 static_assert(sizeof(loom_storage_reference_facts_t) == 112,
