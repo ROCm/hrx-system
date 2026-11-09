@@ -95,13 +95,14 @@ static iree_status_t loom_aie2p_spill_emit(
   const uint32_t chunk_count = unit_count / recipe->unit_count;
   const bool bridge = recipe->reg_class_id !=
                       loom_low_register_type_class_id(traffic->value_type);
-  loom_type_t chunk_type = traffic->value_type;
+  const loom_type_t logical_chunk_type =
+      chunk_count == 1 ? traffic->value_type
+                       : loom_low_register_carrier_type_with_unit_count(
+                             traffic->value_type, recipe->unit_count);
+  loom_type_t chunk_type = logical_chunk_type;
   if (bridge) {
     chunk_type = loom_low_register_type(
         plan->descriptors->stable_id, recipe->reg_class_id, recipe->unit_count);
-  } else if (chunk_count != 1) {
-    chunk_type = loom_low_register_carrier_type_with_unit_count(
-        traffic->value_type, recipe->unit_count);
   }
   // The shared reservation inventory owns storage. Native transfers consume
   // its projected depth, independent of the frame's final tile address.
@@ -121,14 +122,23 @@ static iree_status_t loom_aie2p_spill_emit(
        ++chunk) {
     const uint32_t unit_offset = chunk * recipe->unit_count;
     loom_value_id_t source = source_value_id;
-    if (store && (chunk_count != 1 || bridge)) {
+    if (store && chunk_count != 1) {
       loom_op_t* op = NULL;
-      status = bridge ? loom_low_copy_build(builder, source, /*detached=*/false,
-                                            chunk_type, location, &op)
-                      : loom_low_slice_build(builder, source, unit_offset,
-                                             chunk_type, location, &op);
+      status = loom_low_slice_build(builder, source, unit_offset,
+                                    logical_chunk_type, location, &op);
       if (iree_status_is_ok(status)) {
-        source = bridge ? loom_low_copy_result(op) : loom_low_slice_result(op);
+        source = loom_low_slice_result(op);
+        values[value_count++] = (loom_low_spill_materialized_value_t){
+            .value_id = source,
+        };
+      }
+    }
+    if (iree_status_is_ok(status) && store && bridge) {
+      loom_op_t* op = NULL;
+      status = loom_low_copy_build(builder, source, /*detached=*/false,
+                                   chunk_type, location, &op);
+      if (iree_status_is_ok(status)) {
+        source = loom_low_copy_result(op);
         values[value_count++] = (loom_low_spill_materialized_value_t){
             .value_id = source,
         };
@@ -206,7 +216,7 @@ static iree_status_t loom_aie2p_spill_emit(
       if (bridge) {
         loom_op_t* copy = NULL;
         status = loom_low_copy_build(builder, result, /*detached=*/false,
-                                     traffic->value_type, location, &copy);
+                                     logical_chunk_type, location, &copy);
         if (iree_status_is_ok(status)) {
           result = loom_low_copy_result(copy);
           values[value_count++] = (loom_low_spill_materialized_value_t){

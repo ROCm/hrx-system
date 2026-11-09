@@ -85,15 +85,15 @@ static bool loom_low_schedule_setup_order_is_member(
   if (node->result_count != 1) {
     return false;
   }
-  // Input-free rematerializable values remain pressure-scheduled. A required
-  // private value cannot be cloned and instead retains the complete target
-  // setup chain that produced it.
+  // Repair owns the placement of private producers, including input-free
+  // constants. Their complete setup chain must remain available together:
+  // deferring each constant until it alone unlocks a consumer can strand a
+  // consumer that needs several constants while unrelated live ranges grow.
   bool requires_register = false;
   const bool has_per_user_placement =
       loom_low_schedule_setup_order_has_per_user_placement(state, node,
                                                            &requires_register);
-  return has_per_user_placement &&
-         (node->operand_count != 0 || requires_register);
+  return has_per_user_placement;
 }
 
 // Artificial prerequisites must preserve the footprint of constrained storage.

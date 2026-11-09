@@ -63,35 +63,45 @@ _FIFO_FORMS = ("VLDA_dmx_lda_fifohl", "VST_dmx_sts_fifohl")
 
 def _stack_recipes() -> tuple[StackRecipe, ...]:
     recipes = []
+    # Spill traffic uses the full physical bank. A fixed/subset consumer gets
+    # a copy bridge whose placement is independent of memory ordering; native
+    # loads into a singleton could otherwise occupy it across another spill
+    # needed by that consumer. Coalescing removes the bridge when lifetimes fit.
+    scalar_classes = (
+        "eR",
+        "eRF2",
+        "eRS16",
+        "mR16_vcompare",
+        "mR26_fifo_st",
+        "mR26_lock",
+        "mR27_select",
+        "mR28_tlast",
+        "mR29_insert",
+        "mR31_divs",
+        "mR31_scd",
+    )
+    pointer_classes = ("eP", "ePS", "mPfs")
     for register_class, bank in (
-        *(
-            (name, "eR")
-            for name in (
-                "eR",
-                "eRF2",
-                "eRS16",
-                "mR16_vcompare",
-                "mR26_fifo_st",
-                "mR26_lock",
-                "mR27_select",
-                "mR28_tlast",
-                "mR29_insert",
-                "mR31_divs",
-                "mR31_scd",
-            )
-        ),
-        *((name, name) for name in ("eDC", "eDJ", "eDN", "eM", "eP")),
-        ("ePS", "eP"),
-        ("mPfs", "eP"),
+        *((name, "eR") for name in scalar_classes),
+        *((name, name) for name in ("eDC", "eDJ", "eDN", "eM")),
+        *((name, "eP") for name in pointer_classes),
     ):
+        # Keep every native stack descriptor available for authored assembly;
+        # source_classes selects only the compiler's materialization recipe.
+        source_classes = ()
+        if register_class == bank:
+            if bank == "eR":
+                source_classes = (*scalar_classes, "eS", "mS2", "mS3")
+            elif bank == "eP":
+                source_classes = pointer_classes
+            else:
+                source_classes = (register_class,)
         recipes.append(
             StackRecipe(
                 register_class,
                 1,
                 (StackPiece("", _SCALAR_FORMS, 4, 0, 4, itinerary_bank=bank),),
-                (register_class, "eS", "mS2", "mS3")
-                if register_class == "eR"
-                else (register_class,),
+                source_classes,
             )
         )
     for units, forms, length in (
@@ -103,14 +113,15 @@ def _stack_recipes() -> tuple[StackRecipe, ...]:
                 "VEC256", units, (StackPiece("", forms, length, 0, 32),), ("VEC256",)
             )
         )
+    accumulator_classes = ("eBMLL", "mBMSm", "mBMs")
     recipes.extend(
         StackRecipe(
             register_class,
             1,
             (StackPiece("", _ACCUMULATOR_FORMS, 64, 0, 64),),
-            (register_class,),
+            accumulator_classes if register_class == "mBMs" else (),
         )
-        for register_class in ("eBMLL", "mBMSm", "mBMs")
+        for register_class in accumulator_classes
     )
     for register_class, fields in DIMENSION_FIELDS.items():
         prefix = f"aie2p.{register_class.lower()}"
