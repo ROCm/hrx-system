@@ -976,6 +976,7 @@ loom_value_facts_t loom_value_facts_quotient_preimage(
 // Left-shift ranges widen when the mathematical product may overflow; the
 // modular wrapper then applies the destination carrier. Amounts outside the
 // fact carrier yield unknown facts without assuming unreachable execution.
+// A power-of-two source retains that guarantee when the result stays positive.
 void loom_value_facts_shli(const loom_value_facts_t* lhs,
                            const loom_value_facts_t* rhs,
                            loom_value_facts_t* out);

@@ -56,7 +56,7 @@ func.def @guarded_matching_quotients_require_divisible_upper(%payload: buffer, %
 
 // ====
 
-// RUN: with-checks pass scf-to-cfg,vector-memory-footprint
+// RUN: pass scf-to-cfg,vector-memory-footprint
 
 // CFG lowering retains the product guard in the operand-indexed path facts.
 func.def @guarded_product_quotient_proves_dynamic_axis_bound_cfg(%payload: buffer, %base: offset, %linear0: index, %row_count0: index, %column_count0: index, %value: i32) {
@@ -74,14 +74,25 @@ func.def @guarded_product_quotient_proves_dynamic_axis_bound_cfg(%payload: buffe
 }
 
 // ----
-CHECK: cfg.cond_br %in_bounds, *
-CHECK: %row = index.div *
-CHECK: view.store %value, %view[%row] : i32, view<[%row_count]xi32>
-CHECK-NOT: scf.if *
+func.def @guarded_product_quotient_proves_dynamic_axis_bound_cfg(%payload: buffer, %base: offset, %linear0: index, %row_count0: index, %column_count0: index, %value: i32) {
+  %linear = index.assume %linear0 [range(%linear0, 0, 65535)] : index
+  %row_count = index.assume %row_count0 [range(%row_count0, 1, 256)] : index
+  %column_count = index.assume %column_count0 [range(%column_count0, 1, 256)] : index
+  %element_count = index.mul %row_count, %column_count : index
+  %in_bounds = index.cmp ult, %linear, %element_count : index
+  cfg.cond_br %in_bounds, ^_bb1, ^_bb2
+^_bb1:
+  %row = index.div %linear, %column_count : index
+  %view = buffer.view %payload[%base] : buffer -> view<[%row_count]xi32>
+  view.store %value, %view[%row] : i32, view<[%row_count]xi32>
+  cfg.br ^_bb2
+^_bb2:
+  func.return
+}
 
 // ====
 
-// RUN: with-checks pass canonicalize,scf-to-cfg,vector-memory-footprint
+// RUN: pass canonicalize,scf-to-cfg,vector-memory-footprint
 
 // Canonicalization rewrites division by a power of two to a shift while the
 // product guard remains a multiplication. Both spellings carry the same scale.
@@ -100,12 +111,23 @@ func.def @canonicalized_power_of_two_quotient_proves_dynamic_axis_bound(%payload
 }
 
 // ----
-CHECK: %element_count = index.mul %row_count, %column_count : index
-CHECK: cfg.cond_br %in_bounds, *
-CHECK: %row = index.shrui *
-CHECK: view.store %value, %view[%row] : i32, view<[%row_count]xi32>
-CHECK-NOT: index.div *
-CHECK-NOT: scf.if *
+func.def @canonicalized_power_of_two_quotient_proves_dynamic_axis_bound(%payload: buffer, %base: offset, %linear0: index, %row_count0: index, %value: i32) {
+  %linear = index.assume %linear0 [range(%linear0, 0, 65535)] : index
+  %row_count = index.assume %row_count0 [range(%row_count0, 1, 256)] : index
+  %column_count = index.constant 4 : index
+  %element_count = index.mul %row_count, %column_count : index
+  %in_bounds = index.cmp ult, %linear, %element_count : index
+  cfg.cond_br %in_bounds, ^_bb1, ^_bb2
+^_bb1:
+  %12 = index.assume %linear [lt(%linear, %element_count)] : index
+  %13 = index.constant 2 : index
+  %row = index.shrui %12, %13 : index
+  %view = buffer.view %payload[%base] : buffer -> view<[%row_count]xi32>
+  view.store %value, %view[%row] : i32, view<[%row_count]xi32>
+  cfg.br ^_bb2
+^_bb2:
+  func.return
+}
 
 // ====
 
@@ -178,6 +200,275 @@ func.def @guarded_nonstrict_product_rejects_quotient_bound(%payload: buffer, %ba
     %view = buffer.view %payload[%base] : buffer -> view<[%row_count]xi32>
     // ERROR@+1: SUBRANGE/024 {op_name="view.store", view_axis="0"}
     view.store %value, %view[%row] : i32, view<[%row_count]xi32>
+  }
+  func.return
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// Runtime widths computed from a shift retain the same strict quotient proof
+// in standalone and paired division, with the guard written in reverse order.
+func.def @runtime_power_groups(%input: buffer, %channel_input: index, %width_input: index, %kind_input: index) {
+  %channel = index.assume %channel_input [range(%channel_input, 0, 65)] : index
+  %width = index.assume %width_input [range(%width_input, 16, 64), multiple_of(%width_input, 16)] : index
+  %kind = index.assume %kind_input [range(%kind_input, 0, 4)] : index
+  %unit = index.constant 1 : index
+  %tile = index.shli %unit, %kind : index
+  %groups = index.div %width, %tile : index
+  %paired_groups, %width_tail = index.divrem %width, %tile : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<[%groups]xi32>
+  %paired_source = buffer.view %input[%base] : buffer -> view<[%paired_groups]xi32>
+  %active = index.cmp ugt, %width, %channel : index
+  scf.if %active {
+    %group = index.div %channel, %tile : index
+    %paired_group, %channel_tail = index.divrem %channel, %tile : index
+    %first = view.load %source[%paired_group] : view<[%groups]xi32> -> i32
+    %second = view.load %paired_source[%group] : view<[%paired_groups]xi32> -> i32
+    test.use %first, %second : i32, i32
+  }
+  func.return
+}
+
+// ====
+
+// An interval endpoint need not be a power of two: every admitted divisor
+// in [1, 31] divides 16. Signed/unsigned and standalone/paired forms agree.
+func.def @dynamic_power_groups_i8(%input: buffer, %channel_input: i8, %width_input: i8, %tile_input: i8) {
+  %channel = scalar.assume %channel_input [range(%channel_input, 0, 65)] : i8
+  %width = scalar.assume %width_input [range(%width_input, 16, 64), multiple_of(%width_input, 16)] : i8
+  %tile = scalar.assume %tile_input [range(%tile_input, 1, 31), power_of_two(%tile_input)] : i8
+  %groups_bits = scalar.divsi %width, %tile : i8
+  %paired_groups_bits, %width_tail = scalar.divremui %width, %tile : i8
+  %groups = index.cast %groups_bits : i8 to index
+  %paired_groups = index.cast %paired_groups_bits : i8 to index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<[%groups]xi32>
+  %paired_source = buffer.view %input[%base] : buffer -> view<[%paired_groups]xi32>
+  %active = scalar.cmpi slt, %channel, %width : i8
+  scf.if %active {
+    %signed_bits = scalar.divsi %channel, %tile : i8
+    %unsigned_bits = scalar.divui %channel, %tile : i8
+    %signed_pair_bits, %signed_tail = scalar.divremsi %channel, %tile : i8
+    %unsigned_pair_bits, %unsigned_tail = scalar.divremui %channel, %tile : i8
+    %signed = index.cast %signed_bits : i8 to index
+    %unsigned = index.cast %unsigned_bits : i8 to index
+    %signed_pair = index.cast %signed_pair_bits : i8 to index
+    %unsigned_pair = index.cast %unsigned_pair_bits : i8 to index
+    %signed_value = view.load %source[%signed] : view<[%groups]xi32> -> i32
+    %unsigned_value = view.load %paired_source[%unsigned] : view<[%paired_groups]xi32> -> i32
+    %signed_pair_value = view.load %source[%signed_pair] : view<[%groups]xi32> -> i32
+    %unsigned_pair_value = view.load %paired_source[%unsigned_pair] : view<[%paired_groups]xi32> -> i32
+    test.use %signed_value, %unsigned_value, %signed_pair_value, %unsigned_pair_value : i32, i32, i32, i32
+  }
+  func.return
+}
+
+// ====
+
+// An interval endpoint need not be a power of two: every admitted divisor
+// in [1, 31] divides 16. Signed/unsigned and standalone/paired forms agree.
+func.def @dynamic_power_groups_i16(%input: buffer, %channel_input: i16, %width_input: i16, %tile_input: i16) {
+  %channel = scalar.assume %channel_input [range(%channel_input, 0, 65)] : i16
+  %width = scalar.assume %width_input [range(%width_input, 16, 64), multiple_of(%width_input, 16)] : i16
+  %tile = scalar.assume %tile_input [range(%tile_input, 1, 31), power_of_two(%tile_input)] : i16
+  %groups_bits = scalar.divsi %width, %tile : i16
+  %paired_groups_bits, %width_tail = scalar.divremui %width, %tile : i16
+  %groups = index.cast %groups_bits : i16 to index
+  %paired_groups = index.cast %paired_groups_bits : i16 to index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<[%groups]xi32>
+  %paired_source = buffer.view %input[%base] : buffer -> view<[%paired_groups]xi32>
+  %active = scalar.cmpi slt, %channel, %width : i16
+  scf.if %active {
+    %signed_bits = scalar.divsi %channel, %tile : i16
+    %unsigned_bits = scalar.divui %channel, %tile : i16
+    %signed_pair_bits, %signed_tail = scalar.divremsi %channel, %tile : i16
+    %unsigned_pair_bits, %unsigned_tail = scalar.divremui %channel, %tile : i16
+    %signed = index.cast %signed_bits : i16 to index
+    %unsigned = index.cast %unsigned_bits : i16 to index
+    %signed_pair = index.cast %signed_pair_bits : i16 to index
+    %unsigned_pair = index.cast %unsigned_pair_bits : i16 to index
+    %signed_value = view.load %source[%signed] : view<[%groups]xi32> -> i32
+    %unsigned_value = view.load %paired_source[%unsigned] : view<[%paired_groups]xi32> -> i32
+    %signed_pair_value = view.load %source[%signed_pair] : view<[%groups]xi32> -> i32
+    %unsigned_pair_value = view.load %paired_source[%unsigned_pair] : view<[%paired_groups]xi32> -> i32
+    test.use %signed_value, %unsigned_value, %signed_pair_value, %unsigned_pair_value : i32, i32, i32, i32
+  }
+  func.return
+}
+
+// ====
+
+// An interval endpoint need not be a power of two: every admitted divisor
+// in [1, 31] divides 16. Signed/unsigned and standalone/paired forms agree.
+func.def @dynamic_power_groups_i32(%input: buffer, %channel_input: i32, %width_input: i32, %tile_input: i32) {
+  %channel = scalar.assume %channel_input [range(%channel_input, 0, 65)] : i32
+  %width = scalar.assume %width_input [range(%width_input, 16, 64), multiple_of(%width_input, 16)] : i32
+  %tile = scalar.assume %tile_input [range(%tile_input, 1, 31), power_of_two(%tile_input)] : i32
+  %groups_bits = scalar.divsi %width, %tile : i32
+  %paired_groups_bits, %width_tail = scalar.divremui %width, %tile : i32
+  %groups = index.cast %groups_bits : i32 to index
+  %paired_groups = index.cast %paired_groups_bits : i32 to index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<[%groups]xi32>
+  %paired_source = buffer.view %input[%base] : buffer -> view<[%paired_groups]xi32>
+  %active = scalar.cmpi slt, %channel, %width : i32
+  scf.if %active {
+    %signed_bits = scalar.divsi %channel, %tile : i32
+    %unsigned_bits = scalar.divui %channel, %tile : i32
+    %signed_pair_bits, %signed_tail = scalar.divremsi %channel, %tile : i32
+    %unsigned_pair_bits, %unsigned_tail = scalar.divremui %channel, %tile : i32
+    %signed = index.cast %signed_bits : i32 to index
+    %unsigned = index.cast %unsigned_bits : i32 to index
+    %signed_pair = index.cast %signed_pair_bits : i32 to index
+    %unsigned_pair = index.cast %unsigned_pair_bits : i32 to index
+    %signed_value = view.load %source[%signed] : view<[%groups]xi32> -> i32
+    %unsigned_value = view.load %paired_source[%unsigned] : view<[%paired_groups]xi32> -> i32
+    %signed_pair_value = view.load %source[%signed_pair] : view<[%groups]xi32> -> i32
+    %unsigned_pair_value = view.load %paired_source[%unsigned_pair] : view<[%paired_groups]xi32> -> i32
+    test.use %signed_value, %unsigned_value, %signed_pair_value, %unsigned_pair_value : i32, i32, i32, i32
+  }
+  func.return
+}
+
+// ====
+
+// An interval endpoint need not be a power of two: every admitted divisor
+// in [1, 31] divides 16. Signed/unsigned and standalone/paired forms agree.
+func.def @dynamic_power_groups_i64(%input: buffer, %channel_input: i64, %width_input: i64, %tile_input: i64) {
+  %channel = scalar.assume %channel_input [range(%channel_input, 0, 65)] : i64
+  %width = scalar.assume %width_input [range(%width_input, 16, 64), multiple_of(%width_input, 16)] : i64
+  %tile = scalar.assume %tile_input [range(%tile_input, 1, 31), power_of_two(%tile_input)] : i64
+  %groups_bits = scalar.divsi %width, %tile : i64
+  %paired_groups_bits, %width_tail = scalar.divremui %width, %tile : i64
+  %groups = index.cast %groups_bits : i64 to index
+  %paired_groups = index.cast %paired_groups_bits : i64 to index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<[%groups]xi32>
+  %paired_source = buffer.view %input[%base] : buffer -> view<[%paired_groups]xi32>
+  %active = scalar.cmpi slt, %channel, %width : i64
+  scf.if %active {
+    %signed_bits = scalar.divsi %channel, %tile : i64
+    %unsigned_bits = scalar.divui %channel, %tile : i64
+    %signed_pair_bits, %signed_tail = scalar.divremsi %channel, %tile : i64
+    %unsigned_pair_bits, %unsigned_tail = scalar.divremui %channel, %tile : i64
+    %signed = index.cast %signed_bits : i64 to index
+    %unsigned = index.cast %unsigned_bits : i64 to index
+    %signed_pair = index.cast %signed_pair_bits : i64 to index
+    %unsigned_pair = index.cast %unsigned_pair_bits : i64 to index
+    %signed_value = view.load %source[%signed] : view<[%groups]xi32> -> i32
+    %unsigned_value = view.load %paired_source[%unsigned] : view<[%paired_groups]xi32> -> i32
+    %signed_pair_value = view.load %source[%signed_pair] : view<[%groups]xi32> -> i32
+    %unsigned_pair_value = view.load %paired_source[%unsigned_pair] : view<[%paired_groups]xi32> -> i32
+    test.use %signed_value, %unsigned_value, %signed_pair_value, %unsigned_pair_value : i32, i32, i32, i32
+  }
+  func.return
+}
+
+// ====
+
+// A general positive divisor need not divide the aligned width: channel 31,
+// width 32, and divisor 3 produce equal quotients.
+func.def @missing_power(%input: buffer, %channel_input: index, %width_input: index, %tile_input: index) {
+  %channel = index.assume %channel_input [range(%channel_input, 0, 65)] : index
+  %width = index.assume %width_input [range(%width_input, 16, 64), multiple_of(%width_input, 16)] : index
+  %tile = index.assume %tile_input [range(%tile_input, 1, 16)] : index
+  %groups = index.div %width, %tile : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<[%groups]xi32>
+  %active = index.cmp ult, %channel, %width : index
+  scf.if %active {
+    %group = index.div %channel, %tile : index
+    // ERROR@+1: SUBRANGE/024 {op_name="view.load", view_axis="0"}
+    %value = view.load %source[%group] : view<[%groups]xi32> -> i32
+    test.use %value : i32
+  }
+  func.return
+}
+
+// ====
+
+// Alignment to eight does not suffice for a possible divisor of sixteen:
+// channel 23 and width 24 both produce group one.
+func.def @incomplete_groups(%input: buffer, %channel_input: index, %width_input: index, %tile_input: index) {
+  %channel = index.assume %channel_input [range(%channel_input, 0, 65)] : index
+  %width = index.assume %width_input [range(%width_input, 16, 64), multiple_of(%width_input, 8)] : index
+  %tile = index.assume %tile_input [range(%tile_input, 1, 16), power_of_two(%tile_input)] : index
+  %groups = index.div %width, %tile : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<[%groups]xi32>
+  %active = index.cmp ult, %channel, %width : index
+  scf.if %active {
+    %group = index.div %channel, %tile : index
+    // ERROR@+1: SUBRANGE/024 {op_name="view.load", view_axis="0"}
+    %value = view.load %source[%group] : view<[%groups]xi32> -> i32
+    test.use %value : i32
+  }
+  func.return
+}
+
+// ====
+
+// Two independent power-of-two divisors need not be equal, even when they
+// have identical numeric facts.
+func.def @distinct_divisors(%input: buffer, %channel_input: index, %width_input: index, %tile_input: index, %other_input: index) {
+  %channel = index.assume %channel_input [range(%channel_input, 0, 65)] : index
+  %width = index.assume %width_input [range(%width_input, 16, 64), multiple_of(%width_input, 16)] : index
+  %tile = index.assume %tile_input [range(%tile_input, 1, 16), power_of_two(%tile_input)] : index
+  %other = index.assume %other_input [range(%other_input, 1, 16), power_of_two(%other_input)] : index
+  %groups = index.div %width, %tile : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<[%groups]xi32>
+  %active = index.cmp ult, %channel, %width : index
+  scf.if %active {
+    %group = index.div %channel, %other : index
+    // ERROR@+1: SUBRANGE/024 {op_name="view.load", view_axis="0"}
+    %value = view.load %source[%group] : view<[%groups]xi32> -> i32
+    test.use %value : i32
+  }
+  func.return
+}
+
+// ====
+
+// The nonstrict guard admits the extent itself, whose quotient is exactly
+// the first invalid group.
+func.def @nonstrict_guard(%input: buffer, %channel_input: index, %width_input: index, %tile_input: index) {
+  %channel = index.assume %channel_input [range(%channel_input, 0, 65)] : index
+  %width = index.assume %width_input [range(%width_input, 16, 64), multiple_of(%width_input, 16)] : index
+  %tile = index.assume %tile_input [range(%tile_input, 1, 16), power_of_two(%tile_input)] : index
+  %groups = index.div %width, %tile : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<[%groups]xi32>
+  %active = index.cmp ule, %channel, %width : index
+  scf.if %active {
+    %group = index.div %channel, %tile : index
+    // ERROR@+1: SUBRANGE/024 {op_name="view.load", view_axis="0"}
+    %value = view.load %source[%group] : view<[%groups]xi32> -> i32
+    test.use %value : i32
+  }
+  func.return
+}
+
+// ====
+
+// A large divisor stays in the signed fact carrier. The interval endpoint
+// deliberately includes seven values above its greatest possible power of two.
+func.def @full_width_power_group(%input: buffer, %channel_input: index, %width_input: index, %tile_input: index) {
+  %channel = index.assume %channel_input [range(%channel_input, 0, 4611686018427387904)] : index
+  %width = index.assume %width_input [range(%width_input, 2305843009213693952, 4611686018427387904), multiple_of(%width_input, 2305843009213693952)] : index
+  %tile = index.assume %tile_input [range(%tile_input, 1, 2305843009213693959), power_of_two(%tile_input)] : index
+  %groups = index.div %width, %tile : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<[%groups]xi8>
+  %active = index.cmp ult, %channel, %width : index
+  scf.if %active {
+    %group = index.div %channel, %tile : index
+    %value = view.load %source[%group] : view<[%groups]xi8> -> i8
+    test.use %value : i8
   }
   func.return
 }

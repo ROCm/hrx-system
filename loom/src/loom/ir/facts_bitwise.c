@@ -159,6 +159,18 @@ void loom_value_facts_xori(const loom_value_facts_t* lhs,
 // Transfer functions: shifts
 //===----------------------------------------------------------------------===//
 
+static void loom_value_facts_propagate_shift_flags(loom_value_facts_t source,
+                                                   loom_value_facts_t amount,
+                                                   loom_value_facts_t* out) {
+  // A positive shifted result retains the source's single set bit. The
+  // numeric transfer excludes shifting it away or into the signed high bit.
+  if (loom_value_facts_is_power_of_two(source) &&
+      loom_value_facts_is_positive(*out)) {
+    out->flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+  }
+  loom_value_facts_propagate_binary_distribution(source, amount, out);
+}
+
 // Performs a 64-bit arithmetic right shift without relying on the host C
 // implementation's handling of signed negative operands. The shift must be in
 // [0, 63].
@@ -221,7 +233,7 @@ void loom_value_facts_shli(const loom_value_facts_t* lhs,
       loom_value_facts_meet(&ordinary, &sign_bit, out);
     }
   }
-  loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
+  loom_value_facts_propagate_shift_flags(lhs_facts, rhs_facts, out);
 }
 
 void loom_value_facts_shrui(const loom_value_facts_t* lhs,
@@ -266,7 +278,7 @@ void loom_value_facts_shrui(const loom_value_facts_t* lhs,
                   : 1;
     *out = loom_value_facts_make(lo, hi, divisor);
   }
-  loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
+  loom_value_facts_propagate_shift_flags(lhs_facts, rhs_facts, out);
 }
 
 void loom_value_facts_shrsi(const loom_value_facts_t* lhs,
@@ -292,7 +304,7 @@ void loom_value_facts_shrsi(const loom_value_facts_t* lhs,
             : 1;
     *out = loom_value_facts_make(lo, hi, divisor);
   }
-  loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
+  loom_value_facts_propagate_shift_flags(lhs_facts, rhs_facts, out);
 }
 
 static void loom_value_facts_rotate(const loom_value_facts_t* lhs,

@@ -149,6 +149,100 @@ TEST(ShliTransfer, BoundedShiftAmount) {
   EXPECT_EQ(out.known_divisor, 10);
 }
 
+TEST(ShiftTransfer, PositiveResultsPreservePowerOfTwo) {
+  auto source = loom_value_facts_make(2, 16, 1);
+  source.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+  loom_value_facts_mark_lane_varying(&source);
+  const auto amount = loom_value_facts_make(0, 1, 1);
+  for (int32_t bit_count : {8, 16, 32, 64}) {
+    loom_value_facts_t results[4];
+    loom_value_facts_shli(&source, &amount, &results[0]);
+    loom_value_facts_shli_modular(&source, &amount, bit_count, &results[1]);
+    loom_value_facts_shrui(&source, &amount, bit_count, &results[2]);
+    loom_value_facts_shrsi(&source, &amount, &results[3]);
+    for (const auto result : results) {
+      EXPECT_TRUE(loom_value_facts_is_power_of_two(result));
+      EXPECT_TRUE(loom_value_facts_is_lane_varying(result));
+    }
+    // A contiguous interval containing other integers has no such guarantee.
+    source.flags &= ~LOOM_VALUE_FACT_POWER_OF_TWO;
+    loom_value_facts_shli(&source, &amount, &results[0]);
+    loom_value_facts_shli_modular(&source, &amount, bit_count, &results[1]);
+    loom_value_facts_shrui(&source, &amount, bit_count, &results[2]);
+    loom_value_facts_shrsi(&source, &amount, &results[3]);
+    for (const auto result : results) {
+      EXPECT_FALSE(loom_value_facts_is_power_of_two(result));
+    }
+    source.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+  }
+}
+
+TEST(ShiftTransfer, PowerOfTwoGuaranteesMatchConcreteCarrierResults) {
+  for (int32_t bit_count : {1, 8, 16, 32, 64}) {
+    const uint64_t mask = UINT64_MAX >> (64 - bit_count);
+    const int32_t highest_power = bit_count == 1 ? 0 : bit_count - 2;
+    for (int32_t first_power : {0, highest_power / 2}) {
+      const int64_t minimum = INT64_C(1) << first_power;
+      const int64_t maximum = INT64_C(1) << highest_power;
+      auto source = loom_value_facts_make(minimum, maximum, 1);
+      source.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+      for (int64_t first_shift : {INT64_C(0), (int64_t)bit_count / 2}) {
+        for (int64_t last_shift : {first_shift, (int64_t)bit_count - 1}) {
+          SCOPED_TRACE(::testing::Message()
+                       << bit_count << " bits, powers " << first_power << ":"
+                       << highest_power << ", shifts " << first_shift << ":"
+                       << last_shift);
+          const auto amount = loom_value_facts_make(first_shift, last_shift, 1);
+          loom_value_facts_t results[3];
+          loom_value_facts_shli_modular(&source, &amount, bit_count,
+                                        &results[0]);
+          loom_value_facts_shrui(&source, &amount, bit_count, &results[1]);
+          loom_value_facts_shrsi(&source, &amount, &results[2]);
+          for (int32_t power = first_power; power <= highest_power; ++power) {
+            const uint64_t value = UINT64_C(1) << power;
+            for (int64_t shift = first_shift; shift <= last_shift; ++shift) {
+              const uint64_t bits[] = {(value << shift) & mask, value >> shift,
+                                       value >> shift};
+              for (int i = 0; i < 3; ++i) {
+                const int64_t expected = bit_count == 1 || bits[i] <= mask / 2
+                                             ? (int64_t)bits[i]
+                                             : -1 - (int64_t)(mask - bits[i]);
+                EXPECT_LE(results[i].range_lo, expected);
+                EXPECT_GE(results[i].range_hi, expected);
+                if (loom_value_facts_is_power_of_two(results[i])) {
+                  EXPECT_GT(expected, 0);
+                  EXPECT_EQ(bits[i] & (bits[i] - 1), 0);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(ShiftTransfer, LostBitsAndInvalidAmountsDoNotPreservePowerOfTwo) {
+  const auto one = loom_value_facts_exact_i64(1);
+  const auto amounts = loom_value_facts_make(0, 63, 1);
+  loom_value_facts_t result;
+  loom_value_facts_shli(&one, &amounts, &result);
+  EXPECT_FALSE(loom_value_facts_is_power_of_two(result));
+  loom_value_facts_shrui(&one, &amounts, 64, &result);
+  EXPECT_FALSE(loom_value_facts_is_power_of_two(result));
+  loom_value_facts_shrsi(&one, &amounts, &result);
+  EXPECT_FALSE(loom_value_facts_is_power_of_two(result));
+  for (const auto amount :
+       {loom_value_facts_make(-1, 0, 1), loom_value_facts_make(0, 64, 1)}) {
+    loom_value_facts_shli(&one, &amount, &result);
+    EXPECT_FALSE(loom_value_facts_is_power_of_two(result));
+    loom_value_facts_shrui(&one, &amount, 64, &result);
+    EXPECT_FALSE(loom_value_facts_is_power_of_two(result));
+    loom_value_facts_shrsi(&one, &amount, &result);
+    EXPECT_FALSE(loom_value_facts_is_power_of_two(result));
+  }
+}
+
 TEST(ShliTransfer, SignBitShift) {
   loom_value_facts_t shift = loom_value_facts_exact_i64(63);
   loom_value_facts_t out;
