@@ -81,6 +81,71 @@ TEST_F(InputsTest, ImmediateReplayStateUsesOneDeduplicatedValue) {
   EXPECT_EQ(values[other - inputs_.value_base], 23u);
 }
 
+class FixedAddressesTest : public InputsTest,
+                           public ::testing::WithParamInterface<bool> {};
+
+TEST_P(FixedAddressesTest, SubspanUsesItsRootMemoryLifetime) {
+  static const iree_hal_buffer_vtable_t transient_vtable = {
+      .destroy = [](iree_hal_buffer_t*) {},
+      .query_memory =
+          [](const iree_hal_buffer_t* buffer) { return buffer->memory; },
+  };
+  const bool transient = GetParam();
+  if (transient) {
+    buffer_.resource.vtable = &transient_vtable;
+  }
+  binding_.device_address = 0x1000;
+  iree_hal_buffer_t* subspan = nullptr;
+  IREE_ASSERT_OK(iree_hal_buffer_subspan(&buffer_, 4, 32,
+                                         iree_allocator_system(), &subspan));
+  uint32_t input = 0;
+  IREE_EXPECT_OK(iree_hal_amd_gpu_command_inputs_add_binding(
+      &inputs_, iree_hal_make_buffer_ref(subspan, 4, 4), 1, 4, 4, false,
+      &input));
+  iree_hal_amd_gpu_command_inputs_seal(&inputs_);
+  EXPECT_EQ(iree_hal_amd_gpu_command_inputs_are_fixed_addresses(&inputs_),
+            !transient);
+  uint64_t value = 0;
+  IREE_EXPECT_OK(
+      iree_hal_amd_gpu_command_inputs_write(&inputs_, nullptr, 0, &value));
+  EXPECT_EQ(value, 0x1004u);
+  iree_hal_buffer_release(subspan);
+}
+
+INSTANTIATE_TEST_SUITE_P(MemoryLifetime, FixedAddressesTest, ::testing::Bool());
+
+class ReplayInputsTest : public InputsTest,
+                         public ::testing::WithParamInterface<uint32_t> {};
+
+TEST_P(ReplayInputsTest, InvocationStateCannotBecomeFixedAddressRepairs) {
+  const uint64_t images[] = {0x1000, 0x2000};
+  uint32_t input = 0;
+  switch (GetParam()) {
+    case 0:
+      IREE_ASSERT_OK(iree_hal_amd_gpu_command_inputs_add_binding(
+          &inputs_, iree_hal_make_indirect_buffer_ref(0, 0, 4), 1, 4, 4, false,
+          &input));
+      break;
+    case 1:
+      IREE_ASSERT_OK(
+          iree_hal_amd_gpu_command_inputs_add_image(&inputs_, images, &input));
+      break;
+    case 2:
+      IREE_ASSERT_OK(
+          iree_hal_amd_gpu_command_inputs_add_length(&inputs_, 0, &input));
+      break;
+    case 3:
+      IREE_ASSERT_OK(
+          iree_hal_amd_gpu_command_inputs_add_constant(&inputs_, 0, &input));
+      break;
+  }
+  iree_hal_amd_gpu_command_inputs_seal(&inputs_);
+  EXPECT_FALSE(iree_hal_amd_gpu_command_inputs_are_fixed_addresses(&inputs_));
+}
+
+INSTANTIATE_TEST_SUITE_P(InputKinds, ReplayInputsTest,
+                         ::testing::Values(0u, 1u, 2u, 3u));
+
 TEST_F(InputsTest, IndirectAtomicUsesShareOneQualifiedInput) {
   const auto add = iree_hal_amd_gpu_control_rmw({
       .operand = 1,

@@ -92,11 +92,12 @@ uint32_t* iree_hal_amd_gpu_pm4_fixup_packets_emit(
 
 // Native invocation extent, excluding caller-owned waits, optional padding,
 // and retirement. The reservation remains exclusive through emission, so the
-// same initialized/join facts govern both sizing and encoding.
+// same initialized/join facts govern both sizing and encoding. fixup_count is
+// zero when this invocation preserves previously applied invariant repairs.
 uint32_t iree_hal_amd_gpu_pm4_program_word_count(
     const iree_hal_amd_gpu_program_t* program,
     const iree_hal_amd_gpu_program_instance_t* instance,
-    const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
+    const iree_hal_amd_gpu_pm4_barrier_profile_t* profile, uint32_t fixup_count,
     uint32_t fixup_word_count);
 
 // Publishes host input, initializes a cold placement, applies all fixups, and
@@ -110,7 +111,7 @@ uint32_t* iree_hal_amd_gpu_pm4_program_emit(
     iree_hal_amd_gpu_pm4_program_block_t entry,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     uint64_t argument_address,
-    iree_hal_amd_gpu_pm4_program_arguments_t* arguments,
+    iree_hal_amd_gpu_pm4_program_arguments_t* arguments, uint32_t fixup_count,
     uint32_t fixup_word_count, const uint32_t* fixup_words, uint32_t padding,
     uint32_t* words);
 

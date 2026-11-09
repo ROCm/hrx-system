@@ -170,6 +170,7 @@ iree_status_t iree_hal_amd_gpu_pm4_command_buffer_create(
   if (iree_status_is_ok(status)) {
     *buffer->program = (iree_hal_amd_gpu_pm4_command_program_t){
         .host_allocator = host_allocator,
+        .invariant_fixups = true,
     };
     iree_atomic_ref_count_init(&buffer->program->ref_count);
   }
@@ -247,6 +248,8 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_seal(
       iree_hal_amd_gpu_recording_fixup_count(&buffer->recording.storage),
       program));
   IREE_TRACE_ZONE_BEGIN(z0);
+  const bool preserve_private_data = buffer->program->invariant_fixups;
+  buffer->program->invariant_fixups = false;
   iree_hal_amd_gpu_fixup_t
       packet_fixups[IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_CAPACITY];
   const bool bounded =
@@ -271,7 +274,18 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_seal(
     iree_hal_amd_gpu_recording_deinitialize(&buffer->recording.storage);
     memcpy(buffer->packet_fixups, packet_fixups,
            program->fixup_count * sizeof(*packet_fixups));
-    buffer->program->fixup_word_count = fixup_word_count;
+    buffer->program->fixup_word_count = (uint16_t)fixup_word_count;
+    bool invariant =
+        preserve_private_data &&
+        iree_hal_amd_gpu_command_inputs_are_fixed_addresses(&buffer->inputs);
+    const uint32_t first_input =
+        iree_hal_amd_gpu_pm4_command_first_input(buffer);
+    for (uint32_t i = 0; i < program->fixup_count && invariant; ++i) {
+      const uint32_t source = packet_fixups[i].source & 0xFFFFFFu;
+      invariant = source == IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE ||
+                  source >= first_input;
+    }
+    buffer->program->invariant_fixups = invariant;
   }
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -791,6 +805,11 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
   const uint16_t copy_count = indirect_parameters && !indirect
                                   ? function->base.kernarg->indirect_copy_count
                                   : 0;
+  if (prepare_packet || copy_count) {
+    // The body rewrites private geometry/arguments. Even fixed address repairs
+    // cannot remove the join protecting a prior invocation's shader readers.
+    buffer->program->invariant_fixups = false;
+  }
   const uint32_t dispatch_words =
       indirect_parameters
           ? iree_hal_amd_gpu_pm4_dispatch_indirect_word_count(copy_count)

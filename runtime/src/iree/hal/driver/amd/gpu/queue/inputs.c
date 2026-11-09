@@ -358,6 +358,24 @@ void iree_hal_amd_gpu_command_inputs_seal(
   buffer->index = NULL;
 }
 
+bool iree_hal_amd_gpu_command_inputs_are_fixed_addresses(
+    const iree_hal_amd_gpu_command_inputs_t* inputs) {
+  for (uint32_t i = 0; i < inputs->count; ++i) {
+    const iree_hal_amd_gpu_command_input_t* input = &inputs->entries[i];
+    if (input->kind != IREE_HAL_AMD_GPU_INPUT_DIRECT) {
+      return false;
+    }
+    const iree_hal_buffer_t* root =
+        iree_hal_buffer_allocated_buffer((iree_hal_buffer_t*)input->key);
+    const iree_hal_buffer_vtable_t* vtable =
+        (const iree_hal_buffer_vtable_t*)root->resource.vtable;
+    if (vtable->query_memory) {
+      return false;
+    }
+  }
+  return true;
+}
+
 iree_status_t iree_hal_amd_gpu_command_inputs_capture(
     const iree_hal_amd_gpu_command_inputs_t* buffer,
     iree_hal_buffer_binding_table_t bindings,

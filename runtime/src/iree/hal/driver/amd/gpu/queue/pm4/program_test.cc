@@ -71,22 +71,27 @@ TEST_P(ProgramTest, NativeEntryPublishesItsActualProducers) {
   };
   const uint32_t fixup_word_count = packets ? IREE_ARRAYSIZE(fixup_words) : 0;
   const uint32_t count = iree_hal_amd_gpu_pm4_program_word_count(
-      &program, &instance, &profile, fixup_word_count);
+      &program, &instance, &profile, program.fixup_count, fixup_word_count);
   const uint32_t padding = chain ? 6 : 0;
   iree_hal_amd_gpu_pm4_program_arguments_t arguments = {};
   std::array<uint32_t, 128> words;
   words.fill(0xDEADBEEF);
   auto* end = iree_hal_amd_gpu_pm4_program_emit(
       &program, &instance, entry, &profile, kArgumentAddress, &arguments,
-      fixup_word_count, fixup_words, padding, words.data());
+      program.fixup_count, fixup_word_count, fixup_words, padding,
+      words.data());
   ASSERT_EQ(end - words.data(), count + padding);
   ASSERT_LT(count + padding, words.size());
   EXPECT_EQ(*end, 0xDEADBEEFu);
-  EXPECT_EQ(arguments.fixup.entries,
-            program.upload_address + program.fixup_offset);
-  EXPECT_EQ(arguments.fixup.values, kArgumentAddress + sizeof(arguments));
-  EXPECT_EQ(arguments.fixup.target, instance.address);
-  EXPECT_EQ(arguments.fixup.entry_count, program.fixup_count);
+  if (fixups && !packets) {
+    EXPECT_EQ(arguments.fixup.entries,
+              program.upload_address + program.fixup_offset);
+    EXPECT_EQ(arguments.fixup.values, kArgumentAddress + sizeof(arguments));
+    EXPECT_EQ(arguments.fixup.target, instance.address);
+    EXPECT_EQ(arguments.fixup.entry_count, program.fixup_count);
+  } else {
+    EXPECT_EQ(arguments.fixup.entry_count, 0u);
+  }
   if (!initialized && large) {
     EXPECT_EQ(arguments.copy.source, program.upload_address);
     EXPECT_EQ(arguments.copy.target, instance.address);
@@ -145,6 +150,42 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Combine(::testing::Values(0u, 1u, 2u), ::testing::Bool(),
                        ::testing::Values(0u, 1u, 2u), ::testing::Bool(),
                        ::testing::Bool(), ::testing::Bool()));
+
+TEST(ProgramReplayTest, PreservedAddressesNeedNoRepairOrReaderJoin) {
+  const iree_hal_amd_gpu_gfxip_version_t versions[] = {
+      {11, 0, 0}, {12, 0, 0}, {12, 5, 0}};
+  for (const auto version : versions) {
+    iree_hal_amd_gpu_pm4_barrier_profile_t profile;
+    IREE_ASSERT_OK(
+        iree_hal_amd_gpu_pm4_barrier_profile_initialize(version, &profile));
+    iree_hal_amd_gpu_pm4_program_pool_t pool = {};
+    const iree_hal_amd_gpu_program_t program = {
+        .pool = &pool.storage,
+        .fixup_count = 4,
+    };
+    const iree_hal_amd_gpu_program_instance_t instance = {
+        .address = UINT64_C(0x2345670000),
+        .last_epoch = 1,
+        .initialized = true,
+        .join_previous = true,
+    };
+    const iree_hal_amd_gpu_pm4_program_block_t entry = {256, 1024};
+    std::array<uint32_t, 13> words;
+    words.fill(0xDEADBEEF);
+    auto* end = iree_hal_amd_gpu_pm4_program_emit(&program, &instance, entry,
+                                                  &profile, 0, nullptr, 0, 0,
+                                                  nullptr, 0, words.data());
+    EXPECT_EQ(end - words.data(), iree_hal_amd_gpu_pm4_program_word_count(
+                                      &program, &instance, &profile, 0, 0));
+    const std::vector<uint32_t> expected = {
+        0xc0065800, 0,          0xffffffff, 0xff,
+        0,          0,          0x0a,       profile.acquire | 1u,
+        0xc0023f00, 0x45670100, 0x23,       1024u | (1u << 23),
+    };
+    EXPECT_EQ(std::vector<uint32_t>(words.data(), end), expected);
+    EXPECT_EQ(*end, 0xDEADBEEFu);
+  }
+}
 
 TEST(FixupPacketTest, RelocatesPointersAndShiftedCodeAddressesWithoutReads) {
   const uint64_t values[] = {UINT64_C(0x1234fffffff0),

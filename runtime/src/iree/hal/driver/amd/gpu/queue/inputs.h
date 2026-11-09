@@ -127,6 +127,12 @@ iree_status_t iree_hal_amd_gpu_command_inputs_add_constant(
 void iree_hal_amd_gpu_command_inputs_seal(
     iree_hal_amd_gpu_command_inputs_t* inputs);
 
+// Returns whether every input is a captured address with an immutable prepared
+// memory view. Called during sealing, never during submission. Table bindings,
+// queue-specific images, lengths, and replay-state initializers do not qualify.
+bool iree_hal_amd_gpu_command_inputs_are_fixed_addresses(
+    const iree_hal_amd_gpu_command_inputs_t* inputs);
+
 // Captures an externally validated binding table into binding_count entries.
 // Checks aggregated native requirements once and retains used buffers unless
 // explicitly borrowed. Failure leaves zeroed unused entries and retained
