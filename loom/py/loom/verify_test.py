@@ -514,6 +514,98 @@ test.split_func @projected(%value: i32) {
     assert not diagnostics.has_errors
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "func.def @f() -> (i32) { func.unreachable }",
+        """
+kernel.def @k() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch() {
+  func.unreachable
+}
+""",
+    ],
+)
+def test_verifier_accepts_declared_unreachable_exit(source: str) -> None:
+    from loom.builders import default_ops
+
+    parser = Parser()
+    parser.register_ops(default_ops())
+    parser.register_types(ALL_BUILTIN_TYPES)
+    module = parser.parse(source)
+
+    diagnostics = verify_module(module)
+
+    assert not diagnostics.has_errors, str(diagnostics.diagnostics)
+
+
+def test_verifier_does_not_allow_unreachable_in_nested_region() -> None:
+    from loom.builders import default_ops
+
+    parser = Parser()
+    parser.register_ops(default_ops())
+    parser.register_types(ALL_BUILTIN_TYPES)
+    module = parser.parse(
+        """
+func.def @f(%condition: i1) {
+  scf.if %condition {
+    func.unreachable
+  }
+  func.return
+}
+"""
+    )
+
+    diagnostics = verify_module(module)
+
+    assert _diagnostic_text_contains(diagnostics, "region terminated by wrong op")
+
+
+def test_verifier_requires_declared_unreachable_exit() -> None:
+    module = _module_with_body_ops(
+        Operation(name="func.unreachable"), append_yield=False
+    )
+
+    diagnostics = verify_module(module, ops=(*ALL_TEST_OPS, *ALL_FUNC_OPS))
+
+    assert _diagnostic_text_contains(diagnostics, "region terminated by wrong op")
+
+
+@pytest.mark.parametrize("region_index", [0, 1, 2, 3])
+@pytest.mark.parametrize("wrong_block_count", [False, True])
+def test_verifier_checks_every_variadic_region(
+    region_index: int, wrong_block_count: bool
+) -> None:
+    declaration = Op(
+        "test.selection",
+        regions=[
+            RegionDef("default", single_block=True, terminator="test.yield"),
+            RegionDef(
+                "cases", variadic=True, single_block=True, terminator="test.yield"
+            ),
+        ],
+    )
+    regions = [
+        Region(blocks=[Block(ops=[Operation(name="test.yield")])]) for _ in range(4)
+    ]
+    if wrong_block_count:
+        regions[region_index].blocks.append(Block(ops=[Operation(name="test.yield")]))
+    else:
+        regions[region_index].blocks[0].ops.clear()
+    module = _module_with_body_ops(Operation(name=declaration.name, regions=regions))
+
+    diagnostics = verify_module(module, ops=(*ALL_TEST_OPS, declaration))
+
+    assert _diagnostic_text_contains(
+        diagnostics,
+        "single-block region has wrong block count"
+        if wrong_block_count
+        else "block is missing required terminator",
+    )
+
+
 def test_python_verifier_remaps_dependent_callable_results() -> None:
     from loom.builders import default_ops
 
@@ -757,6 +849,22 @@ def test_verifier_accepts_non_entry_loop_header() -> None:
     diagnostics = verify_module(module, ops=ALL_TEST_OPS)
 
     assert not diagnostics.has_errors
+
+
+def test_verifier_rejects_branch_in_single_block_region() -> None:
+    declaration = Op(
+        "test.single",
+        regions=[RegionDef("body", single_block=True, terminator="test.yield")],
+    )
+    block = Block()
+    block.ops.append(Operation(name="test.br", successors=[block]))
+    module = _module_with_body_ops(
+        Operation(name=declaration.name, regions=[Region(blocks=[block])])
+    )
+
+    diagnostics = verify_module(module, ops=(*ALL_TEST_OPS, declaration))
+
+    assert _diagnostic_text_contains(diagnostics, "region terminated by wrong op")
 
 
 def test_verifier_reports_empty_block_missing_region_terminator() -> None:

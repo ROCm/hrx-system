@@ -1,0 +1,118 @@
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx roundtrip
+// Signed case keys use scoped, non-fallthrough branches and one result carrier.
+func.def public @choose(%selector: index, %first: i32, %second: i32) -> (i32) {
+  %result = scf.switch %selector -> (i32) {
+    case -9223372036854775808 {
+      scf.yield %first : i32
+    }
+    case 4294967296 {
+      %sum = scalar.addi %first, %second : i32
+      scf.yield %sum : i32
+    }
+    default {
+      scf.yield %second : i32
+    }
+  }
+  func.return %result : i32
+}
+
+// ----
+#include <loomcxx/index.h>
+
+[[loom::symbol("choose")]]
+unsigned choose(loom::type::index selector, unsigned first, unsigned second);
+
+[[loom::symbol("choose")]]
+unsigned choose(loom::type::index selector, unsigned first, unsigned second) {
+  unsigned result{};
+  switch (static_cast<long long>(selector)) {
+    case (-9223372036854775807ll - 1ll): {
+      result = first;
+      break;
+    }
+    case 4294967296ll: {
+      result = first + second;
+      break;
+    }
+    default: {
+      result = second;
+      break;
+    }
+  }
+  return result;
+}
+
+// ====
+// The early void kernel return must survive even though the final one is implicit.
+kernel.def @early_exit() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%done: i1, %output: buffer) {
+  func.exit %done : i1 {
+    kernel.return
+  }
+  %base = index.constant 0 : offset
+  %destination = buffer.view %output[%base] : buffer -> view<1xi32>
+  %value = scalar.constant 9 : i32
+  view.store %value, %destination[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ----
+#include <loomcxx/kernel.h>
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void early_exit(bool done, unsigned* output) {
+  if (done) {
+    return;
+  }
+  auto destination = loom::buffer::view<1>(output, {});
+  loom::view::store(9u, destination, 0);
+}
+
+// ====
+// No result is manufactured when all switch arms return from the function.
+func.def public @total(%selector: index) -> (i32) {
+  %true = scalar.constant 1 : i1
+  scf.switch %selector {
+    case 0 {
+      func.exit %true : i1 {
+        %first = scalar.constant 11 : i32
+        func.return %first : i32
+      }
+    }
+    default {
+      func.exit %true : i1 {
+        %second = scalar.constant 22 : i32
+        func.return %second : i32
+      }
+    }
+  }
+  func.unreachable
+}
+
+// ----
+#include <loomcxx/index.h>
+
+[[loom::symbol("total")]]
+unsigned total(loom::type::index selector);
+
+[[loom::symbol("total")]]
+unsigned total(loom::type::index selector) {
+  switch (static_cast<long long>(selector)) {
+    case 0ll: {
+      if (1) {
+        return 11u;
+      }
+      break;
+    }
+    default: {
+      if (1) {
+        return 22u;
+      }
+      break;
+    }
+  }
+  __builtin_unreachable();
+}

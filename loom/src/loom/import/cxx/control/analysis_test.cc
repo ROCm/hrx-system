@@ -981,6 +981,25 @@ TEST(ControlFlowTest, ReturnSummariesRetainFallthroughAndNestedExits) {
       {"while (true) { break; }", ExitFlow::None, true},
       {"do { break; } while (true);", ExitFlow::None, true},
       {"while (x) { while (true) {} return; }", ExitFlow::None, true},
+      {"__builtin_unreachable();", ExitFlow::None, false},
+      {"(__builtin_unreachable());", ExitFlow::None, false},
+      {"(void)__builtin_unreachable();", ExitFlow::None, false},
+      {"(x = 3, __builtin_unreachable());", ExitFlow::None, false},
+      {"x ? __builtin_unreachable() : __builtin_unreachable();", ExitFlow::None,
+       false},
+      {"x ? __builtin_unreachable() : void();", ExitFlow::None, true},
+      {"(void)noexcept(__builtin_unreachable()); return;", ExitFlow::All,
+       false},
+      {"using T = decltype(__builtin_unreachable()); return;", ExitFlow::All,
+       false},
+      {"(void)sizeof((__builtin_unreachable(), 1)); return;", ExitFlow::All,
+       false},
+      {"(void)requires { __builtin_unreachable(); }; return;", ExitFlow::All,
+       false},
+      {"(void)[&] { __builtin_unreachable(); }; return;", ExitFlow::All, false},
+      {"if (x) __builtin_unreachable(); else return;", ExitFlow::Some, false},
+      {"if (x) return; else __builtin_unreachable();", ExitFlow::Some, false},
+      {"__builtin_unreachable(); return;", ExitFlow::None, false},
   };
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);
@@ -1020,6 +1039,10 @@ TEST(ControlFlowTest, ReturnSummariesRetainCallableExitRequirements) {
       {"if constexpr(false) { while (y) return; } else return;", false, 0},
       {"if (x) return; for (;;) { if (y) return; }", true, 1},
       {"while (x) return; for (;;) { if (y) return; }", true, 2},
+      {"if (x) return; else __builtin_unreachable();", true, 1},
+      {"if (x) return; else for (;;) {}", true, 1},
+      {"if (x) return; __builtin_unreachable();", true, 1},
+      {"if (x) return; for (;;) {}", true, 1},
   };
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);
