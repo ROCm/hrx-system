@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <immintrin.h>
 #include <tuple>
 
 #include "iree/testing/gtest.h"
@@ -1616,6 +1617,31 @@ TEST(KmtApiTest, CopyAndCommitPathBCodeWritesCopiesAlignedRangesAndTails) {
   EXPECT_TRUE(std::equal(source.begin(), source.end(), storage.begin() + 64));
   EXPECT_TRUE(std::all_of(storage.begin(), storage.begin() + 64,
                           [](uint8_t value) { return value == 0xcc; }));
+  EXPECT_EQ(storage[64 + source.size()], 0xcc);
+}
+
+TEST(KmtApiTest, CopyAndCommitPathBCodeWritesSurvivesLaterWriteback) {
+  alignas(64) std::array<uint8_t, 512> storage = {};
+  std::fill(storage.begin(), storage.end(), 0xcc);
+  std::array<uint8_t, 200> source = {};
+  for (size_t i = 0; i < source.size(); ++i) {
+    source[i] = static_cast<uint8_t>((i * 17) & 0xff);
+  }
+
+  CommandAperture aperture = {};
+  aperture.gpu_cpu_ptr = storage.data();
+  aperture.gpu_va_size = storage.size();
+  const CpuCopyRange range = {64, source.data(), source.size()};
+  Error error = {};
+
+  ASSERT_TRUE(CopyAndCommitPathBCodeWrites(aperture, &range, 1, &error))
+      << ErrorMessage(&error);
+  for (size_t line = 64; line < 64 + source.size(); line += 64) {
+    _mm_clflush(storage.data() + line);
+  }
+  _mm_mfence();
+
+  EXPECT_TRUE(std::equal(source.begin(), source.end(), storage.begin() + 64));
   EXPECT_EQ(storage[64 + source.size()], 0xcc);
 }
 

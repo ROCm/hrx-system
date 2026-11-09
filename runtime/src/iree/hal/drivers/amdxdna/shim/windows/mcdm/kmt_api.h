@@ -554,8 +554,10 @@ bool CommitPathBCodeWrites(const KmtApi& api, const Device& device,
                            const CpuWriteRange* ranges, size_t range_count,
                            Error* out_error);
 
-// Copies CPU source ranges into the command aperture with non-temporal stores
-// and publishes them before a later opcode-9 marker submission.
+// Copies CPU source ranges into the cacheable command aperture. Full cache
+// lines are stored non-temporally after those lines are evicted, so a later
+// writeback cannot replace the new bytes. The caller still submits opcode-9
+// before a consumer of the range.
 bool CopyAndCommitPathBCodeWrites(const CommandAperture& aperture,
                                   const CpuCopyRange* ranges,
                                   size_t range_count, Error* out_error);

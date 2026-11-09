@@ -258,6 +258,9 @@ bool SyncMappedCpuCacheRange(void* mapping, uint64_t mapping_size,
     _mm_clflush(reinterpret_cast<void const*>(line));
     line += kCacheLineSize;
   }
+  // CLFLUSH writebacks are not globally visible to the NPU until a fence.
+  // The following opcode-9 or ioctl must not race the writeback.
+  _mm_mfence();
   return true;
 }
 
@@ -1735,9 +1738,10 @@ bool SyncCommandApertureCode(const KmtApi& api, const Device& device,
   // below the LLC, while a KMT transition on the aperture costs ~300us -- more
   // than an order of magnitude above a hardware-queue submit -- because the
   // driver services it over the whole 64MiB allocation rather than the
-  // requested range. The written bytes already reach memory via the
-  // non-temporal stores and fence in CopyAndCommitPathBCodeWrites, and the NPU
-  // side is still invalidated by the opcode-9 publication that follows.
+  // requested range. CopyAndCommitPathBCodeWrites evicts the destination
+  // lines before its streaming stores, so this flush cannot write a stale
+  // line back over the command. The NPU side is invalidated by the opcode-9
+  // publication that follows.
   const uint64_t last_level_cache_size = LastLevelCacheSize();
   if (aperture.gpu_cpu_ptr && last_level_cache_size &&
       length < last_level_cache_size) {
@@ -2715,6 +2719,25 @@ bool CopyAndCommitPathBCodeWrites(const CommandAperture& aperture,
 
     const size_t length = static_cast<size_t>(range.length);
     const size_t streamed_length = length & ~(kCacheLineSize - 1);
+    // The aperture mapping is cacheable. A streaming store does not update a
+    // line that is already dirty, and the clflush below (and in
+    // SyncCommandApertureCode) writes that stale line back over the new
+    // command. Evict the destination lines before the streaming stores.
+    if (streamed_length != 0) {
+      for (size_t offset = 0; offset < streamed_length;
+           offset += kCacheLineSize) {
+        if (has_clflushopt) {
+          FlushCpuCacheLineOptimized(dst + offset);
+        } else {
+          _mm_clflush(reinterpret_cast<void const*>(dst + offset));
+        }
+      }
+      if (has_clflushopt) {
+        _mm_sfence();
+      } else {
+        _mm_mfence();
+      }
+    }
     for (size_t offset = 0; offset < streamed_length;
          offset += kCacheLineSize) {
       _mm_stream_si128(reinterpret_cast<__m128i*>(dst + offset),
