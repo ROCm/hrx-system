@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -50,6 +51,7 @@
 #include "loom/import/cxx/binding/template_definitions.h"
 #include "loom/import/cxx/check.h"
 #include "loom/import/cxx/control/analysis.h"
+#include "loom/import/cxx/control/regions.h"
 #include "loom/import/cxx/receiver/scopes.h"
 #include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/error.h"
@@ -62,6 +64,7 @@
 #include "loom/import/cxx/value/bindings.h"
 #include "loom/import/cxx/value/bitcast.h"
 #include "loom/import/cxx/value/initialization.h"
+#include "loom/import/cxx/value/lvalues.h"
 #include "loom/import/cxx/value/objects.h"
 #include "loom/import/cxx/value/representation.h"
 #include "loom/import/cxx/value/scalar.h"
@@ -843,7 +846,7 @@ class Translator final : private Initialization::Evaluation {
     IREE_ASSERT(!action.storage);
     IREE_ASSERT(!action.activity);
     auto saved = loom_builder_save(&builder_);
-    loom_builder_set_before(&builder_, conditional_cleanup_anchors_.front());
+    loom_builder_restore(&builder_, conditional_cleanup_anchors_.front());
     auto object_allocation = storage_.allocate(
         action.object_type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0,
         action.source);
@@ -1519,10 +1522,17 @@ class Translator final : private Initialization::Evaluation {
       auto* referent = unit_.typeTraits().remove_reference(variable->type());
       const bool previous_extension = extend_temporary_lifetime_;
       extend_temporary_lifetime_ = true;
-      auto target = reference_lvalue(referent_expression, owner,
-                                     unit_.typeTraits().is_const(referent)
-                                         ? LvalueAccess::Read
-                                         : LvalueAccess::Write);
+      auto target =
+          control_->reference_requires_storage(variable)
+              ? Lvalue{ObjectLvalue{
+                    referent,
+                    storage_.project(
+                        reference_value(referent_expression, owner).pointer(),
+                        referent, owner)}}
+              : reference_lvalue(referent_expression, owner,
+                                 unit_.typeTraits().is_const(referent)
+                                     ? LvalueAccess::Read
+                                     : LvalueAccess::Write);
       extend_temporary_lifetime_ = previous_extension;
       references_.emplace(variable, std::move(target));
       return;
@@ -2088,52 +2098,79 @@ class Translator final : private Initialization::Evaluation {
 
   enum class IncrementResult { Previous, Updated };
 
-  // One complete object selected by an automatic binding or evaluated memory
-  // address. Reads and writes share this projection even when another binding
-  // changes.
-  struct ObjectLvalue {
-    // Source object type retains qualifiers and storage access rules.
-    const cxx::Type* type;
-    // An automatic SSA partition or an evaluated storage projection.
-    std::variant<Destination, StorageAccess, StorageProjection> location;
-  };
+  std::optional<Value> selected_operation(
+      loom_value_id_t condition, const cxx::Type* result_type,
+      std::span<cxx::Symbol* const> bindings, cxx::AST* owner,
+      const std::function<std::optional<Value>(size_t)>& operation) {
+    auto written = live_mutations(bindings);
+    std::vector<const cxx::Type*> sources;
+    const size_t result_count =
+        result_type ? types_.partition(result_type, owner).component_count : 0;
+    if (result_type) {
+      sources.push_back(result_type);
+    }
+    for (const auto& mutation : written) {
+      sources.push_back(mutation.projection.type);
+    }
+    auto outputs = bind_signature(types_, sources, owner, &builder_);
+    auto initial = values_;
+    auto source = locations_.get(owner);
+    loom_op_t* op;
+    check(loom_scf_if_build(&builder_, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION,
+                            condition, outputs.types.data(),
+                            outputs.types.size(), nullptr, 0, source, &op));
+    conditional_cleanup_anchors_.push_back(
+        {op->parent_block, op->parent_op, op});
+    for (size_t arm = 0; arm < 2; ++arm) {
+      auto* region =
+          arm == 0 ? loom_scf_if_then_region(op) : loom_scf_if_else_region(op);
+      auto saved = loom_builder_enter_region(&builder_, op, region);
+      const size_t temporary_mark = temporary_destructions_.size();
+      auto value = operation(arm);
+      materialize_conditional_temporaries(temporary_mark);
+      std::vector<loom_value_id_t> yielded;
+      if (result_type) {
+        value->append_to(yielded);
+      }
+      auto mutations = current(written);
+      yielded.insert(yielded.end(), mutations.begin(), mutations.end());
+      loom_op_t* yield;
+      check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
+                                 source, &yield));
+      loom_builder_restore(&builder_, saved);
+      values_ = initial;
+    }
+    conditional_cleanup_anchors_.pop_back();
+    bind_values(written, loom_op_results(op) + result_count);
+    if (!result_type) {
+      return std::nullopt;
+    }
+    return value_arena_.capture(types_.partition(result_type, owner),
+                                {loom_op_results(op), result_count});
+  }
 
-  // One lane projected from its complete vector lvalue. The source base and
-  // index have both been evaluated exactly once.
-  struct VectorLaneLvalue {
-    // Complete vector destination receiving the functional lane update.
-    ObjectLvalue destination;
-    // Vector snapshot used by one immediate compound operation. A durable C++
-    // reference has no snapshot and observes the current destination value on
-    // every later use while preserving its once-evaluated lane selector.
-    std::optional<Value> value;
-    // Lane selector before projection to Loom's index domain.
-    loom_value_id_t index;
-    // Source selector type retaining its integer width and signedness.
-    const cxx::Type* index_type;
-  };
-
-  // One frontend-validated named component projected from its complete vector
-  // lvalue. The selector is static and retains its canonical family on the
-  // member expression; no index value or selector table is allocated.
-  struct VectorComponentLvalue {
-    // Complete vector destination receiving functional lane updates.
-    ObjectLvalue destination;
-    // Vector snapshot used by one immediate compound operation.
-    std::optional<Value> value;
-    // Resolved static selector and source member spelling.
-    cxx::MemberExpressionAST* selection;
-  };
-
-  // Resolving a source lvalue executes every address and index expression once.
-  // An immediate lane or component operation may retain the complete vector
-  // snapshot; durable references instead reload their destination on each
-  // later use.
-  struct Lvalue {
-    // Complete object or one evaluated projection of a complete vector object.
-    std::variant<ObjectLvalue, VectorLaneLvalue, VectorComponentLvalue>
-        projection;
-  };
+  std::optional<Value> dispatch_selection(
+      const SelectedLvalue& selected, const cxx::Type* result_type,
+      std::span<cxx::Symbol* const> bindings, cxx::AST* owner,
+      const std::function<std::optional<Value>(size_t)>& operation,
+      size_t ordinal = 0) {
+    if (ordinal + 1 == selected.alternatives.size()) {
+      return operation(ordinal);
+    }
+    auto* ordinal_type = unit_.control()->getUnsignedIntType();
+    auto expected =
+        scalars_.integer(ordinal, LOOM_SCALAR_TYPE_I32, locations_.get(owner));
+    auto condition = scalars_.binary(cxx::TokenKind::T_EQUAL_EQUAL,
+                                     selected.selector, expected, ordinal_type,
+                                     unit_.control()->getBoolType(), owner);
+    return selected_operation(
+        condition, result_type, bindings, owner,
+        [&](size_t arm) -> std::optional<Value> {
+          return arm == 0 ? operation(ordinal)
+                          : dispatch_selection(selected, result_type, bindings,
+                                               owner, operation, ordinal + 1);
+        });
+  }
 
   // Result of one ordinary source call. Exact reference aliases retain the
   // already evaluated destination in addition to its current value so a
@@ -2141,10 +2178,8 @@ class Translator final : private Initialization::Evaluation {
   struct EvaluatedCallResult {
     // Ordinary result value, absent for a void source function.
     std::optional<Value> value;
-    // Exact external destination named by a value-reference result.
+    // Exact source destination named by a value-reference result.
     std::optional<Lvalue> reference_target;
-    // Whether a value-reference result names the active implicit object.
-    bool current_receiver = false;
   };
 
   enum class LvalueAccess { Read, Write };
@@ -2213,6 +2248,9 @@ class Translator final : private Initialization::Evaluation {
   }
 
   Value read(const ObjectLvalue& target, cxx::AST* owner) {
+    if (std::holds_alternative<CurrentReceiver>(target.location)) {
+      return current_receiver_value(owner);
+    }
     if (auto* destination = std::get_if<Destination>(&target.location)) {
       const auto& partition = destination->member
                                   ? *destination->member
@@ -2232,6 +2270,10 @@ class Translator final : private Initialization::Evaluation {
   }
 
   void write(const ObjectLvalue& target, Value value, cxx::AST* owner) {
+    if (std::holds_alternative<CurrentReceiver>(target.location)) {
+      replace_current_receiver(value);
+      return;
+    }
     if (auto* destination = std::get_if<Destination>(&target.location)) {
       if (destination->member) {
         values_.replace(destination->binding, destination->component_offset,
@@ -2254,48 +2296,59 @@ class Translator final : private Initialization::Evaluation {
     }
   }
 
-  Lvalue vector_lane_destination(
-      cxx::SubscriptExpressionAST* subscript, cxx::AST* owner,
-      std::optional<Destination> retained_destination,
-      LvalueAccess access = LvalueAccess::Write, bool retain_value = true) {
-    if (subscript->symbol) {
-      fail(subscript, "overloaded indexing is not admitted");
+  Lvalue project_vector_lane(const Lvalue& target, loom_value_id_t index,
+                             const cxx::Type* index_type,
+                             const cxx::Type* element_type, cxx::AST* owner,
+                             bool retain_value) {
+    if (const auto* selected = target.selection()) {
+      auto* lane_type = unit_.control()->getUnsignedLongLongIntType();
+      auto lane = scalars_.convert(index, index_type, lane_type, owner);
+      std::vector<Lvalue> alternatives;
+      alternatives.reserve(selected->alternatives.size());
+      for (const auto& alternative : selected->alternatives) {
+        alternatives.push_back(project_vector_lane(
+            alternative, lane, lane_type, element_type, owner, retain_value));
+      }
+      return {std::make_shared<const SelectedLvalue>(
+          selected->selector, element_type, std::move(alternatives), lane)};
     }
-    auto* left_type = subscript->baseExpression->type;
-    auto* right_type = subscript->indexExpression->type;
-    bool left_vector = types_.native_vector(left_type);
-    bool right_vector = types_.native_vector(right_type);
-    if (!left_vector && !right_vector) {
-      fail(subscript, "vector lane destination requires a vector operand");
+    const auto& object = std::get<ObjectLvalue>(target.projection);
+    if (const auto* storage =
+            std::get_if<StorageProjection>(&object.location)) {
+      auto* pointer_type = unit_.typeTraits().add_pointer(element_type);
+      return {ObjectLvalue{
+          element_type,
+          storage_.advance(*storage, index, pointer_type, index_type,
+                           cxx::TokenKind::T_PLUS, owner)}};
     }
+    std::optional<Value> snapshot;
+    if (retain_value) {
+      snapshot = read(object, owner);
+    }
+    return {VectorLaneLvalue{object, snapshot, index, index_type}};
+  }
 
-    cxx::ExpressionAST* vector_expression =
+  Lvalue vector_lane_destination(cxx::SubscriptExpressionAST* subscript,
+                                 cxx::AST* owner,
+                                 LvalueAccess access = LvalueAccess::Write,
+                                 bool retain_value = true) {
+    const bool left_vector =
+        types_.native_vector(subscript->baseExpression->type);
+    auto* vector =
         left_vector ? subscript->baseExpression : subscript->indexExpression;
-    cxx::ExpressionAST* index_expression =
+    auto* index =
         left_vector ? subscript->indexExpression : subscript->baseExpression;
     if (left_vector) {
-      auto vector_destination = object_destination(
-          vector_expression, owner, access, retained_destination);
-      auto index_value = expression(index_expression);
-      std::optional<Value> vector_value;
-      if (retain_value) {
-        vector_value = read(vector_destination, vector_expression);
-      }
-      return {VectorLaneLvalue{vector_destination, std::move(vector_value),
-                               index_value.ssa(), index_expression->type}};
+      auto target = reference_lvalue(vector, owner, access);
+      auto coordinate = expression(index);
+      return project_vector_lane(target, coordinate.ssa(), index->type,
+                                 subscript->type, owner, retain_value);
     }
-
-    // The commuted spelling i[v] still evaluates its written left operand
-    // before resolving and loading the vector on the right.
-    auto index_value = expression(index_expression);
-    auto vector_destination = object_destination(vector_expression, owner,
-                                                 access, retained_destination);
-    std::optional<Value> vector_value;
-    if (retain_value) {
-      vector_value = read(vector_destination, vector_expression);
-    }
-    return {VectorLaneLvalue{vector_destination, std::move(vector_value),
-                             index_value.ssa(), index_expression->type}};
+    // Commuted i[v] syntax still evaluates its written left operand first.
+    auto coordinate = expression(index);
+    auto target = reference_lvalue(vector, owner, access);
+    return project_vector_lane(target, coordinate.ssa(), index->type,
+                               subscript->type, owner, retain_value);
   }
 
   const cxx::Identifier* vector_component_identifier(
@@ -2404,58 +2457,42 @@ class Translator final : private Initialization::Evaluation {
                                  selection);
   }
 
-  StorageProjection vector_lane_address(cxx::SubscriptExpressionAST* subscript,
-                                        cxx::AST* owner) {
-    auto* left_type = subscript->baseExpression->type;
-    auto* right_type = subscript->indexExpression->type;
-    const bool left_vector = types_.native_vector(left_type);
-    const bool right_vector = types_.native_vector(right_type);
-    IREE_ASSERT(left_vector != right_vector);
-
-    cxx::ExpressionAST* vector_expression =
-        left_vector ? subscript->baseExpression : subscript->indexExpression;
-    cxx::ExpressionAST* index_expression =
-        left_vector ? subscript->indexExpression : subscript->baseExpression;
-    StorageProjection base;
-    Value index;
-    if (left_vector) {
-      base = object_address(vector_expression);
-      index = expression(index_expression);
-    } else {
-      // Commuted i[v] syntax still evaluates its left operand first.
-      index = expression(index_expression);
-      base = object_address(vector_expression);
-    }
-    auto* vector = types_.native_vector(vector_expression->type);
-    IREE_ASSERT(vector);
-    auto* pointer_type = unit_.typeTraits().add_pointer(vector->elementType());
-    return storage_.advance(base, index.ssa(), pointer_type,
-                            index_expression->type, cxx::TokenKind::T_PLUS,
-                            owner);
-  }
-
-  bool vector_lane_is_storage_backed(
-      cxx::SubscriptExpressionAST* subscript) const {
-    auto destination = control_->destination(subscript);
-    if (!destination) {
-      // A builtin vector lane without an automatic destination is reached
-      // through storage, such as a dereferenced vector pointer.
-      return true;
-    }
-    auto* binding = destination->binding;
-    if (is_direct_subobject(binding)) {
-      return control_->receiver_requires_storage();
-    }
-    if (unit_.typeTraits().is_reference(source_object_type(binding))) {
-      return control_->reference_requires_storage(binding);
-    }
-    return control_->storage_backed(binding);
-  }
-
   Lvalue destination(cxx::ExpressionAST* expression, cxx::AST* owner,
                      LvalueAccess access = LvalueAccess::Write,
                      bool preserve_identity = false) {
     auto* projected = unwrap_object_identity(unit_, expression);
+    if (unit_.typeTraits().is_class(projected->type) &&
+        is_current_object(unit_, projected)) {
+      if (access == LvalueAccess::Write) {
+        types_.require_mutable(projected->type, owner);
+      }
+      const auto& receiver = *receivers_.current();
+      if (receiver.storage) {
+        return {ObjectLvalue{projected->type, *receiver.storage}};
+      }
+      return {ObjectLvalue{projected->type,
+                           CurrentReceiver{receivers_.current()->record}}};
+    }
+    if (cxx::ast_cast<cxx::ConditionalExpressionAST>(projected)) {
+      return reference_lvalue(projected, owner, access);
+    }
+    if (auto called = reference_call(projected)) {
+      if (called->reference_target) {
+        return *called->reference_target;
+      }
+      if (called->value && called->value->is_pointer()) {
+        return {ObjectLvalue{projected->type,
+                             storage_.project(called->value->pointer(),
+                                              projected->type, owner)}};
+      }
+      if (called->value) {
+        // An exact alias of an unnamed receiver still names that temporary.
+        // Materialization moves its existing cleanup action onto storage.
+        return {ObjectLvalue{projected->type,
+                             materialize_temporary(projected, *called->value)}};
+      }
+      fail(owner, "reference result has no retained source destination");
+    }
     if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(projected)) {
       if (auto found = references_.find(id->symbol);
           found != references_.end()) {
@@ -2470,6 +2507,15 @@ class Translator final : private Initialization::Evaluation {
         types_.require_mutable(projected->type, owner);
       }
       return {ObjectLvalue{projected->type, *reference}};
+    }
+    if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(projected);
+        member && member->accessOp == cxx::TokenKind::T_DOT &&
+        member->vectorComponentKind == cxx::VectorComponentKind::kNone &&
+        !control_->destination(member) && !control_->storage_backed(member)) {
+      auto base = reference_lvalue(member->baseExpression, owner, access);
+      return base.project(
+          types_.selection(member->symbol, member->subobjectPath, member),
+          member->type, storage_, owner);
     }
     if ((cxx::ast_cast<cxx::CallExpressionAST>(projected) ||
          (cxx::ast_cast<cxx::SubscriptExpressionAST>(projected) &&
@@ -2492,8 +2538,7 @@ class Translator final : private Initialization::Evaluation {
     if (auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(projected);
         subscript && (types_.native_vector(subscript->baseExpression->type) ||
                       types_.native_vector(subscript->indexExpression->type))) {
-      return vector_lane_destination(subscript, owner,
-                                     control_->destination(expression), access);
+      return vector_lane_destination(subscript, owner, access);
     }
     auto retained = control_->destination(expression);
     if (!retained && projected != expression) {
@@ -2501,6 +2546,147 @@ class Translator final : private Initialization::Evaluation {
     }
     return {object_destination(expression, owner, access, retained,
                                preserve_identity)};
+  }
+
+  Lvalue reference_conditional(cxx::ConditionalExpressionAST* expression,
+                               cxx::AST* owner, LvalueAccess access) {
+    auto condition = this->expression(expression->condition).ssa();
+    auto written = live_mutations(expression);
+    auto initial = values_;
+    ConditionalRegions regions(builder_);
+    conditional_cleanup_anchors_.push_back(loom_builder_save(&builder_));
+    std::array<std::optional<Lvalue>, 2> targets;
+    std::array<std::vector<loom_value_id_t>, 2> mutations;
+    for (size_t arm = 0; arm < targets.size(); ++arm) {
+      auto saved = regions.enter(arm);
+      const size_t temporary_mark = temporary_destructions_.size();
+      targets[arm] = reference_lvalue(arm == 0 ? expression->iftrueExpression
+                                               : expression->iffalseExpression,
+                                      owner, access);
+      materialize_conditional_temporaries(temporary_mark);
+      mutations[arm] = current(written);
+      loom_builder_restore(&builder_, saved);
+      values_ = initial;
+    }
+    conditional_cleanup_anchors_.pop_back();
+
+    std::array<const StorageProjection*, 2> storage = {};
+    bool has_lane = false;
+    for (size_t arm = 0; arm < targets.size(); ++arm) {
+      const auto& target = *targets[arm];
+      if (const auto* object = std::get_if<ObjectLvalue>(&target.projection)) {
+        storage[arm] = std::get_if<StorageProjection>(&object->location);
+      }
+      has_lane |= std::holds_alternative<VectorLaneLvalue>(target.projection);
+      if (const auto* nested = target.selection()) {
+        has_lane |= nested->lane.has_value();
+      }
+    }
+    const bool addressable = storage[0] && storage[1];
+    if (!addressable && (storage[0] || storage[1])) {
+      fail(owner, "mixed reference selection requires addressable origins");
+    }
+
+    std::vector<Lvalue> alternatives;
+    auto* ordinal_type = unit_.control()->getUnsignedIntType();
+    auto* lane_type = unit_.control()->getUnsignedLongLongIntType();
+    auto source = locations_.get(owner);
+    for (size_t arm = 0; arm < targets.size(); ++arm) {
+      auto saved = regions.enter(arm);
+      auto& target = *targets[arm];
+      std::vector<loom_value_id_t> yielded;
+      if (addressable) {
+        Value(storage[arm]->pointer).append_to(yielded);
+      } else {
+        auto ordinal =
+            scalars_.integer(alternatives.size(), LOOM_SCALAR_TYPE_I32, source);
+        std::optional<loom_value_id_t> lane;
+        if (const auto* nested = target.selection()) {
+          alternatives.insert(alternatives.end(), nested->alternatives.begin(),
+                              nested->alternatives.end());
+          ordinal = scalars_.binary(cxx::TokenKind::T_PLUS, nested->selector,
+                                    ordinal, ordinal_type, ordinal_type, owner);
+          lane = nested->lane;
+        } else {
+          if (const auto* indexed =
+                  std::get_if<VectorLaneLvalue>(&target.projection)) {
+            lane = scalars_.convert(indexed->index, indexed->index_type,
+                                    lane_type, owner);
+          }
+          alternatives.push_back(std::move(target));
+        }
+        yielded.push_back(ordinal);
+        if (has_lane) {
+          yielded.push_back(
+              lane ? *lane : scalars_.integer(0, LOOM_SCALAR_TYPE_I64, source));
+        }
+      }
+      yielded.insert(yielded.end(), mutations[arm].begin(),
+                     mutations[arm].end());
+      loom_op_t* yield;
+      check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
+                                 source, &yield));
+      loom_builder_restore(&builder_, saved);
+    }
+
+    std::vector<const cxx::Type*> sources;
+    if (addressable) {
+      sources.push_back(unit_.typeTraits().add_pointer(expression->type));
+    } else {
+      sources.push_back(ordinal_type);
+      if (has_lane) {
+        sources.push_back(lane_type);
+      }
+    }
+    const size_t result_count =
+        addressable ? kPointerPartition.component_count : 1 + size_t(has_lane);
+    for (const auto& mutation : written) {
+      sources.push_back(mutation.projection.type);
+    }
+    auto outputs = bind_signature(types_, sources, owner, &builder_);
+    auto* op = regions.build(condition, outputs.types, source);
+    auto* results = loom_op_results(op);
+    bind_values(written, results + result_count);
+    if (addressable) {
+      return {ObjectLvalue{
+          expression->type,
+          StorageProjection{
+              {results[0], results[1]},
+              std::min(storage[0]->alignment, storage[1]->alignment),
+              storage[0]->pointer_width_constrained &&
+                  storage[1]->pointer_width_constrained}}};
+    }
+    std::optional<loom_value_id_t> coordinate;
+    if (has_lane) {
+      coordinate = results[1];
+      for (size_t ordinal = 0; ordinal < alternatives.size(); ++ordinal) {
+        auto* lane =
+            std::get_if<VectorLaneLvalue>(&alternatives[ordinal].projection);
+        if (!lane) {
+          continue;
+        }
+        lane->index = *coordinate;
+        lane->index_type = lane_type;
+        if (ordinal == 0) {
+          // Calls use the first alternative as their fixed SSA position. On
+          // other arms its original index never executes: lane zero provides
+          // a valid position for the reversible scalar permutation even when
+          // the two vectors have different lengths.
+          auto zero = scalars_.integer(0, LOOM_SCALAR_TYPE_I32, source);
+          auto first = scalars_.binary(cxx::TokenKind::T_EQUAL_EQUAL,
+                                       results[0], zero, ordinal_type,
+                                       unit_.control()->getBoolType(), owner);
+          zero = scalars_.integer(0, LOOM_SCALAR_TYPE_I64, source);
+          loom_op_t* position;
+          check(loom_scf_select_build(&builder_, first, *coordinate, zero,
+                                      types_.get(lane_type, owner), source,
+                                      &position));
+          lane->index = loom_scf_select_result(position);
+        }
+      }
+    }
+    return {std::make_shared<const SelectedLvalue>(
+        results[0], expression->type, std::move(alternatives), coordinate)};
   }
 
   Lvalue reference_lvalue(cxx::ExpressionAST* expression, cxx::AST* owner,
@@ -2516,31 +2702,29 @@ class Translator final : private Initialization::Evaluation {
       if (projected->valueCategory == cxx::ValueCategory::kPrValue) {
         return {ObjectLvalue{projected->type, object_address(projected)}};
       }
-      auto condition = this->expression(conditional->condition).ssa();
-      auto select = conditional_reference(conditional, condition);
-      return {ObjectLvalue{
-          projected->type,
-          storage_.project(select.pointer(), projected->type, owner)}};
+      return reference_conditional(conditional, owner, access);
     }
     auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(projected);
     const bool vector_lane =
         subscript && (types_.native_vector(subscript->baseExpression->type) ||
                       types_.native_vector(subscript->indexExpression->type));
     if (vector_lane) {
-      if (vector_lane_is_storage_backed(subscript)) {
-        return {ObjectLvalue{projected->type,
-                             vector_lane_address(subscript, owner)}};
-      }
-      return vector_lane_destination(subscript, owner,
-                                     control_->destination(projected), access,
+      return vector_lane_destination(subscript, owner, access,
                                      /*retain_value=*/false);
     }
+
     auto target =
         destination(projected, owner, access, /*preserve_identity=*/true);
     return target;
   }
 
   Value reference_value(cxx::ExpressionAST* expression, cxx::AST* owner) {
+    auto* projected = unwrap_object_identity(unit_, expression);
+    if (auto* conditional =
+            cxx::ast_cast<cxx::ConditionalExpressionAST>(projected)) {
+      auto condition = this->expression(conditional->condition).ssa();
+      return conditional_reference(conditional, condition);
+    }
     auto target = reference_lvalue(expression, owner, LvalueAccess::Read);
     auto* object = std::get_if<ObjectLvalue>(&target.projection);
     auto* projection =
@@ -2569,13 +2753,14 @@ class Translator final : private Initialization::Evaluation {
     check(loom_scf_if_build(&builder_, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION,
                             condition, outputs.types.data(),
                             outputs.types.size(), nullptr, 0, source, &op));
-    conditional_cleanup_anchors_.push_back(op);
+    conditional_cleanup_anchors_.push_back(
+        {op->parent_block, op->parent_op, op});
     auto build_arm = [&](loom_region_t* region,
                          cxx::ExpressionAST* expression) {
       auto saved = loom_builder_enter_region(&builder_, op, region);
       const size_t temporary_mark = temporary_destructions_.size();
       std::vector<loom_value_id_t> yielded;
-      Value(object_address(expression).pointer).append_to(yielded);
+      reference_value(expression, ast).append_to(yielded);
       materialize_conditional_temporaries(temporary_mark);
       auto mutations = current(written);
       yielded.insert(yielded.end(), mutations.begin(), mutations.end());
@@ -2597,6 +2782,13 @@ class Translator final : private Initialization::Evaluation {
   }
 
   Value read(const Lvalue& target, cxx::AST* owner) {
+    if (const auto* selected = target.selection()) {
+      return *dispatch_selection(*selected, selected->type, {}, owner,
+                                 [&](size_t arm) -> std::optional<Value> {
+                                   return read(selected->alternatives[arm],
+                                               owner);
+                                 });
+    }
     if (auto* object = std::get_if<ObjectLvalue>(&target.projection)) {
       return read(*object, owner);
     }
@@ -2613,6 +2805,14 @@ class Translator final : private Initialization::Evaluation {
   }
 
   void write(const Lvalue& target, Value value, cxx::AST* owner) {
+    if (const auto* selected = target.selection()) {
+      dispatch_selection(*selected, nullptr, selected->bindings, owner,
+                         [&](size_t arm) -> std::optional<Value> {
+                           write(selected->alternatives[arm], value, owner);
+                           return std::nullopt;
+                         });
+      return;
+    }
     if (auto* object = std::get_if<ObjectLvalue>(&target.projection)) {
       write(*object, value, owner);
       return;
@@ -2696,7 +2896,6 @@ class Translator final : private Initialization::Evaluation {
     if (argument->valueCategory != cxx::ValueCategory::kPrValue) {
       if (auto called = reference_call(argument)) {
         IREE_ASSERT(called->value && !called->value->is_pointer());
-        IREE_ASSERT(!called->current_receiver);
         target = std::move(called->reference_target);
         if (!target) {
           value = *called->value;
@@ -2902,11 +3101,9 @@ class Translator final : private Initialization::Evaluation {
              "member call receiver must preserve its admitted record type");
       }
       return admit({ImplicitObjectABI::Value,
-                    called->reference_target || called->current_receiver
-                        ? std::nullopt
-                        : called->value,
-                    record, std::move(called->reference_target),
-                    called->current_receiver, written_fields});
+                    called->reference_target ? std::nullopt : called->value,
+                    record, std::move(called->reference_target), false,
+                    written_fields});
     }
 
     bool direct_prvalue =
@@ -2944,6 +3141,10 @@ class Translator final : private Initialization::Evaluation {
     auto target =
         destination(receiver, owner,
                     mutable_access ? LvalueAccess::Write : LvalueAccess::Read);
+    if (target.selection()) {
+      return admit({ImplicitObjectABI::Value, std::nullopt, record,
+                    std::move(target), false, written_fields});
+    }
     auto* object = std::get_if<ObjectLvalue>(&target.projection);
     if (!object) {
       fail(receiver, "member call receiver requires a complete object");
@@ -2984,11 +3185,7 @@ class Translator final : private Initialization::Evaluation {
                     selected.component_offset - selected.root->component_offset,
                     selected.partition}}};
     } else if (result.target) {
-      auto& target = std::get<ObjectLvalue>(result.target->projection);
-      target.type = type;
-      auto& destination = std::get<Destination>(target.location);
-      destination.component_offset += selected.component_offset;
-      destination.member = selected.partition;
+      result.target = result.target->project(selected, type, storage_, owner);
     } else {
       result.enclosing =
           ReceiverArgument::EnclosingTemporary{*result.value, &selected};
@@ -3680,8 +3877,13 @@ class Translator final : private Initialization::Evaluation {
     if (returns_receiver_alias) {
       return {
           .value = receiver_result ? *receiver_result : *receiver->value,
-          .reference_target = receiver->target,
-          .current_receiver = receiver->current,
+          .reference_target =
+              receiver->current
+                  ? Lvalue{ObjectLvalue{
+                        unit_.typeTraits().remove_reference(
+                            signature->returnType()),
+                        CurrentReceiver{receivers_.current()->record}}}
+                  : receiver->target,
       };
     }
     if (reference_result_alias) {
@@ -3708,7 +3910,8 @@ class Translator final : private Initialization::Evaluation {
     auto receiver_abi = receiver ? receiver->abi : ImplicitObjectABI::None;
     auto callee = functions_.declare(function, call, receiver_abi);
     auto references = functions_.reference_parameters(function);
-    if (references.empty()) {
+    if (references.empty() &&
+        !(receiver && receiver->target && receiver->target->selection())) {
       std::vector<loom_value_id_t> arguments;
       for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
         auto* argument = source_arguments.next();
@@ -3730,20 +3933,6 @@ class Translator final : private Initialization::Evaluation {
                                     std::move(arguments), source),
       };
     }
-    std::vector<loom_value_id_t> arguments;
-    std::vector<ReferenceWriteback> writebacks;
-    std::optional<ReferenceResultAlias> reference_result_alias;
-    auto return_parameter =
-        unit_.typeTraits().is_reference(signature->returnType())
-            ? functions_.reference_return_parameter(function)
-            : std::nullopt;
-    writebacks.reserve(references.size());
-    const size_t receiver_argument_count =
-        !receiver ? 0
-        : receiver->abi == ImplicitObjectABI::Value
-            ? receiver->record->component_count
-            : kPointerPartition.component_count;
-
     std::vector<EvaluatedCallArgument> evaluated_arguments;
     evaluated_arguments.reserve(parameters.size());
     size_t reference_index = 0;
@@ -3769,6 +3958,69 @@ class Translator final : private Initialization::Evaluation {
     while (auto* argument = source_arguments.next()) {
       expression(argument).append_to(variadic_arguments);
     }
+    return emit_projected_call(call, function, callee, std::move(receiver),
+                               std::move(evaluated_arguments),
+                               std::move(variadic_arguments), source);
+  }
+
+  void permute_selection(const SelectedLvalue& selected, cxx::AST* owner) {
+    dispatch_selection(
+        selected, nullptr, selected.bindings, owner,
+        [&](size_t ordinal) -> std::optional<Value> {
+          if (ordinal != 0) {
+            auto first = read(selected.alternatives.front(), owner);
+            auto chosen = read(selected.alternatives[ordinal], owner);
+            write(selected.alternatives.front(), chosen, owner);
+            write(selected.alternatives[ordinal], first, owner);
+          }
+          return std::nullopt;
+        });
+  }
+
+  EvaluatedCallResult emit_projected_call(
+      cxx::AST* call, cxx::FunctionSymbol* function, loom_symbol_ref_t callee,
+      std::optional<ReceiverArgument> receiver,
+      std::vector<EvaluatedCallArgument> evaluated_arguments,
+      std::vector<loom_value_id_t> variadic_arguments,
+      loom_location_id_t source) {
+    auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
+    auto return_parameter =
+        unit_.typeTraits().is_reference(signature->returnType())
+            ? functions_.reference_return_parameter(function)
+            : std::nullopt;
+    std::optional<Lvalue> result_target;
+    if (return_parameter) {
+      result_target = evaluated_arguments[*return_parameter].target;
+    }
+    if (receiver && receiver->target &&
+        functions_.returns_current_receiver_reference(function)) {
+      result_target = receiver->target;
+    }
+    std::vector<Lvalue> permutations;
+    auto prepare_target = [&](std::optional<Lvalue>& target) {
+      if (!target) {
+        return;
+      }
+      if (const auto* selected = target->selection()) {
+        permutations.push_back(*target);
+        permute_selection(*selected, call);
+        target = selected->alternatives.front();
+      }
+    };
+    if (receiver) {
+      prepare_target(receiver->target);
+    }
+    for (auto& evaluated : evaluated_arguments) {
+      prepare_target(evaluated.target);
+    }
+    const size_t receiver_argument_count =
+        !receiver ? 0
+        : receiver->abi == ImplicitObjectABI::Value
+            ? receiver->record->component_count
+            : kPointerPartition.component_count;
+    std::vector<loom_value_id_t> arguments;
+    std::vector<ReferenceWriteback> writebacks;
+    std::optional<ReferenceResultAlias> reference_result_alias;
     for (size_t ordinal = 0; ordinal < evaluated_arguments.size(); ++ordinal) {
       auto& evaluated = evaluated_arguments[ordinal];
       materialize_call_argument(evaluated, call);
@@ -3781,9 +4033,18 @@ class Translator final : private Initialization::Evaluation {
     }
     arguments.insert(arguments.end(), variadic_arguments.begin(),
                      variadic_arguments.end());
-    return emit_evaluated_call(call, function, callee, std::move(receiver),
-                               std::move(arguments), std::move(writebacks),
-                               std::move(reference_result_alias), source);
+    auto called = emit_evaluated_call(
+        call, function, callee, std::move(receiver), std::move(arguments),
+        std::move(writebacks), std::move(reference_result_alias), source);
+    for (auto iterator = permutations.rbegin(); iterator != permutations.rend();
+         ++iterator) {
+      permute_selection(*iterator->selection(), call);
+    }
+    if (result_target && !permutations.empty()) {
+      called.reference_target = result_target;
+      called.value = read(*result_target, call);
+    }
+    return called;
   }
 
   EvaluatedCallResult ordinary_operator_call(cxx::ExpressionAST* expression,
@@ -4048,7 +4309,8 @@ class Translator final : private Initialization::Evaluation {
     check(loom_scf_if_build(&builder_, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION,
                             condition, outputs.types.data(),
                             outputs.types.size(), nullptr, 0, source, &op));
-    conditional_cleanup_anchors_.push_back(op);
+    conditional_cleanup_anchors_.push_back(
+        {op->parent_block, op->parent_op, op});
     auto saved =
         loom_builder_enter_region(&builder_, op, loom_scf_if_then_region(op));
     size_t temporary_mark = temporary_destructions_.size();
@@ -4142,7 +4404,8 @@ class Translator final : private Initialization::Evaluation {
                             condition, outputs.types.data(),
                             outputs.types.size(), nullptr, 0,
                             locations_.get(expression), &operation));
-    conditional_cleanup_anchors_.push_back(operation);
+    conditional_cleanup_anchors_.push_back(
+        {operation->parent_block, operation->parent_op, operation});
     auto enclosing = loom_builder_enter_region(
         &builder_, operation, loom_scf_if_then_region(operation));
     return {expression,
@@ -4173,7 +4436,8 @@ class Translator final : private Initialization::Evaluation {
   Value finish_conditional_value(const ConditionalValueFrame& frame) {
     loom_builder_restore(&builder_, frame.enclosing);
     IREE_ASSERT(!conditional_cleanup_anchors_.empty());
-    IREE_ASSERT_EQ(conditional_cleanup_anchors_.back(), frame.operation);
+    IREE_ASSERT_EQ(conditional_cleanup_anchors_.back().before_op,
+                   frame.operation);
     conditional_cleanup_anchors_.pop_back();
     values_ = frame.initial;
     bind_values(frame.written,
@@ -7001,7 +7265,7 @@ class Translator final : private Initialization::Evaluation {
   std::optional<size_t> full_expression_mark_;
   // Structured conditional expressions hoist branch-only temporary storage
   // before the outermost conditional operation so cleanup remains dominated.
-  std::vector<loom_op_t*> conditional_cleanup_anchors_;
+  std::vector<loom_builder_ip_t> conditional_cleanup_anchors_;
   // Local reference initialization transfers materialized result objects from
   // full-expression cleanup to the surrounding lexical destruction stack.
   bool extend_temporary_lifetime_ = false;

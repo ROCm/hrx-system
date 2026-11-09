@@ -45,6 +45,7 @@ loom_check_test_suite(
         "reference_evaluation.cxx-test",
         "reference_parameters.cxx-test",
         "reference_parameters_invalid.cxx-test",
+        "reference_selection.cxx-test",
         "special_members_invalid.cxx-test",
         "structured_bindings.cxx-test",
         "value_initialization.cxx-test",

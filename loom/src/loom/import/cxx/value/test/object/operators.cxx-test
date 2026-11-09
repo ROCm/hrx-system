@@ -245,44 +245,37 @@ func.def public @temporary_reference() -> (i32) {
   %6 = scalar.constant 3 : i32
   %7 = scalar.constant 2 : i32
   %8 = scalar.constant 5 : i32
-  %9 = index.constant 4 : offset
-  %10 = buffer.alloca<private> align(4) %9 : buffer
-  %11 = index.constant 0 : offset
-  %12 = buffer.view %10[%11] : buffer -> view<4xi8>
-  %13 = index.constant 0 : offset
-  %14 = index.add %11, %13 : offset
-  %15 = index.assume %14 [range(%14, 0, 0)] : offset
-  %16 = buffer.view %10[%15] : buffer -> view<1xi32>
-  view.store %8, %16[0] : i32, view<1xi32>
-  %17, %18 = func.call @MemberOrder__operator_add_assign_storage(%10, %11, %7) : (buffer, offset, i32) -> (buffer, offset)
-  %19 = index.constant 0 : offset
-  %20 = index.add %18, %19 : offset
-  %21 = buffer.view %17[%20] : buffer -> view<1xi32>
+  %9 = func.call pure @MemberOrder__operator_add_assign_value(%8, %7) : (i32, i32) -> (i32)
+  %10 = index.constant 4 : offset
+  %11 = buffer.alloca<private> align(4) %10 : buffer
+  %12 = index.constant 0 : offset
+  %13 = buffer.view %11[%12] : buffer -> view<4xi8>
+  %14 = index.constant 0 : offset
+  %15 = index.add %12, %14 : offset
+  %16 = index.assume %15 [range(%15, 0, 0)] : offset
+  %17 = buffer.view %11[%16] : buffer -> view<1xi32>
+  view.store %9, %17[0] : i32, view<1xi32>
+  %18 = index.constant 0 : offset
+  %19 = index.add %12, %18 : offset
+  %20 = index.assume %19 [range(%19, 0, 0)] : offset
+  %21 = buffer.view %11[%20] : buffer -> view<1xi32>
   %22 = view.load %21[0] : view<1xi32> -> i32
   %23 = scalar.addi %22, %6 : i32
-  view.store %23, %21[0] : i32, view<1xi32>
+  %24 = index.assume %19 [range(%19, 0, 0)] : offset
+  %25 = buffer.view %11[%24] : buffer -> view<1xi32>
+  view.store %23, %25[0] : i32, view<1xi32>
   func.return %23 : i32
 }
 
-func.def @mutate(%value_value$24: i32) -> (i32, i32) {
-  %value_value$27 = scalar.constant 7 : i32
-  %28 = scalar.constant 3 : i32
-  func.return %28, %value_value$27 : i32, i32
+func.def @mutate(%value_value$26: i32) -> (i32, i32) {
+  %value_value$29 = scalar.constant 7 : i32
+  %30 = scalar.constant 3 : i32
+  func.return %30, %value_value$29 : i32, i32
 }
 
 func.def @MemberOrder__operator_add_assign_value(%this_value: i32, %amount: i32) -> (i32) {
   %value = scalar.addi %this_value, %amount : i32
   func.return %value : i32
-}
-
-func.def @MemberOrder__operator_add_assign_storage(%this: buffer, %this_byte_offset: offset, %amount: i32) -> (buffer, offset) {
-  %38 = index.constant 0 : offset
-  %39 = index.add %this_byte_offset, %38 : offset
-  %40 = buffer.view %this[%39] : buffer -> view<1xi32>
-  %41 = view.load %40[0] : view<1xi32> -> i32
-  %42 = scalar.addi %41, %amount : i32
-  view.store %42, %40[0] : i32, view<1xi32>
-  func.return %this, %this_byte_offset : buffer, offset
 }
 
 // ====
@@ -371,27 +364,17 @@ func.def @Sink__operator_add_assign_value(%this_value: i32, %amount: i32) -> (i3
 // ----
 func.def public @nonreceiver_reference() -> (i32) {
   %selector_own = scalar.constant 2 : i32
-  %2 = index.constant 4 : offset
-  %other_storage = buffer.alloca<private> align(4) %2 : buffer
-  %other_storage_byte_offset = index.constant 0 : offset
-  %other_view = buffer.view %other_storage[%other_storage_byte_offset] : buffer -> view<1xi32>
-  %6 = scalar.constant 4 : i32
-  view.store %6, %other_view[0] : i32, view<1xi32>
-  %7 = scalar.constant 3 : i32
-  func.call pure @ReferenceSelector__operator_add_assign_value(%selector_own, %other_storage, %other_storage_byte_offset) : (i32, buffer, offset)
-  %8 = index.assume %other_storage_byte_offset [range(%other_storage_byte_offset, 0, 0)] : offset
-  %9 = buffer.view %other_storage[%8] : buffer -> view<1xi32>
-  %10 = view.load %9[0] : view<1xi32> -> i32
-  %11 = scalar.addi %10, %7 : i32
-  view.store %11, %9[0] : i32, view<1xi32>
-  %12 = scalar.constant 10 : i32
-  %13 = scalar.muli %selector_own, %12 : i32
-  %other = view.load %other_view[0] : view<1xi32> -> i32
-  %15 = scalar.addi %13, %other : i32
-  func.return %15 : i32
+  %other$2 = scalar.constant 4 : i32
+  %3 = scalar.constant 3 : i32
+  func.call pure @ReferenceSelector__operator_add_assign_value(%selector_own, %other$2) : (i32, i32)
+  %other$4 = scalar.addi %other$2, %3 : i32
+  %5 = scalar.constant 10 : i32
+  %6 = scalar.muli %selector_own, %5 : i32
+  %7 = scalar.addi %6, %other$4 : i32
+  func.return %7 : i32
 }
 
-func.def @ReferenceSelector__operator_add_assign_value(%this_own: i32, %other: buffer, %other_byte_offset: offset) {
+func.def @ReferenceSelector__operator_add_assign_value(%this_own: i32, %other: i32) {
   func.return
 }
 

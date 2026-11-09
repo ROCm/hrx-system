@@ -202,22 +202,22 @@ void observe(const int* cursor, int* result) {
 // ----
 func.def public @observe(%cursor$0: buffer, %cursor_byte_offset$1: offset, %result: buffer, %result_byte_offset$3: offset) {
   %index$4 = scalar.constant 0 : i32
-  %index$14, %total, %cursor$16, %cursor_byte_offset$17 = scf.while(%index$6 = %index$4 : i32, %total = %index$4 : i32, %cursor = %cursor$0 : buffer, %cursor_byte_offset = %cursor_byte_offset$1 : offset) -> (i32, i32, buffer, offset) {
+  %index$14, %cursor$15, %cursor_byte_offset$16, %total = scf.while(%index$6 = %index$4 : i32, %cursor = %cursor$0 : buffer, %cursor_byte_offset = %cursor_byte_offset$1 : offset, %total = %index$4 : i32) -> (i32, buffer, offset, i32) {
     %18 = scalar.constant 1 : i32
     %index$19 = scalar.addi %index$6, %18 : i32
     %20 = scalar.constant 2 : i32
     %21 = scalar.cmpi ult, %index$6, %20 : i32
-    scf.condition %21, %index$19, %total, %cursor, %cursor_byte_offset : i1, i32, i32, buffer, offset
-  } do(%index: i32, %total$11: i32, %cursor: buffer, %cursor_byte_offset$13: offset) {
+    scf.condition %21, %index$19, %cursor, %cursor_byte_offset, %total : i1, i32, buffer, offset, i32
+  } do(%index: i32, %cursor: buffer, %cursor_byte_offset$12: offset, %total$13: i32) {
     %46 = scalar.constant 4 : i64
-    %26 = index.cast %cursor_byte_offset$13 : offset to i64
+    %26 = index.cast %cursor_byte_offset$12 : offset to i64
     %27 = scalar.addi %26, %46 : i64
     %28 = scalar.assume %27 [range(%27, 0, 9223372036854775807)] : i64
     %cursor_byte_offset$29 = index.cast %28 : i64 to offset
-    %30 = buffer.view %cursor[%cursor_byte_offset$13] : buffer -> view<1xi32>
+    %30 = buffer.view %cursor[%cursor_byte_offset$12] : buffer -> view<1xi32>
     %31 = view.load %30[0] : view<1xi32> -> i32
-    %total$32 = scalar.addi %total$11, %31 : i32
-    scf.yield %index, %total$32, %cursor, %cursor_byte_offset$29 : i32, i32, buffer, offset
+    %total$32 = scalar.addi %total$13, %31 : i32
+    scf.yield %index, %cursor, %cursor_byte_offset$29, %total$32 : i32, buffer, offset, i32
   }
   %45 = scalar.constant 4 : i64
   %37 = index.cast %result_byte_offset$3 : offset to i64
@@ -226,7 +226,7 @@ func.def public @observe(%cursor$0: buffer, %cursor_byte_offset$1: offset, %resu
   %result_byte_offset$40 = index.cast %39 : i64 to offset
   %41 = buffer.view %result[%result_byte_offset$3] : buffer -> view<1xi32>
   view.store %total, %41[0] : i32, view<1xi32>
-  %42 = buffer.view %cursor$16[%cursor_byte_offset$17] : buffer -> view<1xi32>
+  %42 = buffer.view %cursor$15[%cursor_byte_offset$16] : buffer -> view<1xi32>
   %43 = view.load %42[0] : view<1xi32> -> i32
   %44 = buffer.view %result[%result_byte_offset$40] : buffer -> view<1xi32>
   view.store %43, %44[0] : i32, view<1xi32>

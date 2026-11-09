@@ -682,46 +682,32 @@ func.def public @reference_parameter_receiver(%input: i32) -> (i32) {
 }
 
 func.def public @forwarded_current_receiver(%input: i32) -> (i32) {
-  %17 = index.constant 4 : offset
-  %value_storage = buffer.alloca<private> align(4) %17 : buffer
-  %value_storage_byte_offset = index.constant 0 : offset
-  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<4xi8>
-  %21 = index.constant 0 : offset
-  %22 = index.add %value_storage_byte_offset, %21 : offset
-  %23 = index.assume %22 [range(%22, 0, 0)] : offset
-  %24 = buffer.view %value_storage[%23] : buffer -> view<1xi32>
-  view.store %input, %24[0] : i32, view<1xi32>
-  func.call @ReceiverValue__forward_storage(%value_storage, %value_storage_byte_offset) : (buffer, offset)
-  %25 = index.constant 0 : offset
-  %26 = index.add %value_storage_byte_offset, %25 : offset
-  %27 = index.assume %26 [range(%26, 0, 0)] : offset
-  %28 = buffer.view %value_storage[%27] : buffer -> view<1xi32>
-  %member = view.load %28[0] : view<1xi32> -> i32
-  func.return %member : i32
+  %value_member = func.call pure @ReceiverValue__forward_value(%input) : (i32) -> (i32)
+  func.return %value_member : i32
 }
 
 func.def public @storage_reference_receiver(%input: i32) -> (i32) {
-  %32 = index.constant 4 : offset
-  %value_storage = buffer.alloca<private> align(4) %32 : buffer
+  %20 = index.constant 4 : offset
+  %value_storage = buffer.alloca<private> align(4) %20 : buffer
   %value_storage_byte_offset = index.constant 0 : offset
   %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<4xi8>
-  %36 = index.constant 0 : offset
-  %37 = index.add %value_storage_byte_offset, %36 : offset
-  %38 = index.assume %37 [range(%37, 0, 0)] : offset
-  %39 = buffer.view %value_storage[%38] : buffer -> view<1xi32>
-  view.store %input, %39[0] : i32, view<1xi32>
+  %24 = index.constant 0 : offset
+  %25 = index.add %value_storage_byte_offset, %24 : offset
+  %26 = index.assume %25 [range(%25, 0, 0)] : offset
+  %27 = buffer.view %value_storage[%26] : buffer -> view<1xi32>
+  view.store %input, %27[0] : i32, view<1xi32>
   func.call pure @move___AddressedReceiverValue_(%value_storage, %value_storage_byte_offset) : (buffer, offset)
   %pointer, %pointer_byte_offset = func.call pure @AddressedReceiverValue__address_storage(%value_storage, %value_storage_byte_offset) : (buffer, offset) -> (buffer, offset)
-  %42 = buffer.view %pointer[%pointer_byte_offset] : buffer -> view<1xi32>
-  %43 = view.load %42[0] : view<1xi32> -> i32
-  %44 = scalar.constant 1 : i32
-  %45 = scalar.addi %43, %44 : i32
-  view.store %45, %42[0] : i32, view<1xi32>
-  %46 = index.constant 0 : offset
-  %47 = index.add %value_storage_byte_offset, %46 : offset
-  %48 = index.assume %47 [range(%47, 0, 0)] : offset
-  %49 = buffer.view %value_storage[%48] : buffer -> view<1xi32>
-  %member = view.load %49[0] : view<1xi32> -> i32
+  %30 = buffer.view %pointer[%pointer_byte_offset] : buffer -> view<1xi32>
+  %31 = view.load %30[0] : view<1xi32> -> i32
+  %32 = scalar.constant 1 : i32
+  %33 = scalar.addi %31, %32 : i32
+  view.store %33, %30[0] : i32, view<1xi32>
+  %34 = index.constant 0 : offset
+  %35 = index.add %value_storage_byte_offset, %34 : offset
+  %36 = index.assume %35 [range(%35, 0, 0)] : offset
+  %37 = buffer.view %value_storage[%36] : buffer -> view<1xi32>
+  %member = view.load %37[0] : view<1xi32> -> i32
   func.return %member : i32
 }
 
@@ -730,8 +716,8 @@ func.def @move___ReceiverValue_(%value_member: i32) {
 }
 
 func.def @ReceiverValue__operator_positive_value(%this_member: i32) -> (i32) {
-  %54 = scalar.constant 4 : i32
-  %member = scalar.addi %this_member, %54 : i32
+  %42 = scalar.constant 4 : i32
+  %member = scalar.addi %this_member, %42 : i32
   func.return %member : i32
 }
 
@@ -746,8 +732,8 @@ func.def @ReceiverValue__advance_value(%this_member: i32, %amount: i32) -> (i32)
 }
 
 func.def @ReceiverValue__increment_value(%this_member: i32) -> (i32) {
-  %66 = scalar.constant 1 : i32
-  %member = scalar.addi %this_member, %66 : i32
+  %54 = scalar.constant 1 : i32
+  %member = scalar.addi %this_member, %54 : i32
   func.return %member : i32
 }
 
@@ -755,16 +741,16 @@ func.def @ReceiverValue__observe_value(%this_member: i32) -> (i32) {
   func.return %this_member : i32
 }
 
-func.def @mutate_receiver(%value_member$70: i32) -> (i32) {
-  func.call pure @move___ReceiverValue_(%value_member$70) : (i32)
-  %value_member$72 = func.call pure @ReceiverValue__increment_value(%value_member$70) : (i32) -> (i32)
-  func.return %value_member$72 : i32
+func.def @mutate_receiver(%value_member$58: i32) -> (i32) {
+  func.call pure @move___ReceiverValue_(%value_member$58) : (i32)
+  %value_member$60 = func.call pure @ReceiverValue__increment_value(%value_member$58) : (i32) -> (i32)
+  func.return %value_member$60 : i32
 }
 
-func.def @ReceiverValue__forward_storage(%this: buffer, %this_byte_offset: offset) {
-  %75, %76 = func.call pure @ReceiverValue__self_storage(%this, %this_byte_offset) : (buffer, offset) -> (buffer, offset)
-  func.call @mutate_forwarded_receiver(%75, %76) : (buffer, offset)
-  func.return
+func.def @ReceiverValue__forward_value(%this_member: i32) -> (i32) {
+  func.call pure @ReceiverValue__self_value(%this_member) : (i32)
+  %63 = func.call pure @mutate_forwarded_receiver(%this_member) : (i32) -> (i32)
+  func.return %63 : i32
 }
 
 func.def @move___AddressedReceiverValue_(%value: buffer, %value_byte_offset: offset) {
@@ -772,24 +758,19 @@ func.def @move___AddressedReceiverValue_(%value: buffer, %value_byte_offset: off
 }
 
 func.def @AddressedReceiverValue__address_storage(%this: buffer, %this_byte_offset: offset) -> (buffer, offset) {
-  %83 = index.constant 0 : offset
-  %84 = index.add %this_byte_offset, %83 : offset
-  func.return %this, %84 : buffer, offset
+  %70 = index.constant 0 : offset
+  %71 = index.add %this_byte_offset, %70 : offset
+  func.return %this, %71 : buffer, offset
 }
 
-func.def @mutate_forwarded_receiver(%value: buffer, %value_byte_offset: offset) {
-  %87 = scalar.constant 5 : i32
-  %88 = index.constant 0 : offset
-  %89 = index.add %value_byte_offset, %88 : offset
-  %90 = buffer.view %value[%89] : buffer -> view<1xi32>
-  %91 = view.load %90[0] : view<1xi32> -> i32
-  %92 = scalar.addi %91, %87 : i32
-  view.store %92, %90[0] : i32, view<1xi32>
+func.def @mutate_forwarded_receiver(%value_member$72: i32) -> (i32) {
+  %74 = scalar.constant 5 : i32
+  %value_member$75 = scalar.addi %value_member$72, %74 : i32
+  func.return %value_member$75 : i32
+}
+
+func.def @ReceiverValue__self_value(%this_member: i32) {
   func.return
-}
-
-func.def @ReceiverValue__self_storage(%this: buffer, %this_byte_offset: offset) -> (buffer, offset) {
-  func.return %this, %this_byte_offset : buffer, offset
 }
 
 // ====

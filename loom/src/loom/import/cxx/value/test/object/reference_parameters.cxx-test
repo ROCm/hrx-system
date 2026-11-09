@@ -1261,42 +1261,22 @@ func.def public @storage_prvalue() -> (i32) {
 }
 
 func.def public @mutate_returned_xvalue(%input: i32) -> (i32) {
-  %20 = index.constant 4 : offset
-  %state_storage = buffer.alloca<private> align(4) %20 : buffer
-  %state_storage_byte_offset = index.constant 0 : offset
-  %state_view = buffer.view %state_storage[%state_storage_byte_offset] : buffer -> view<4xi8>
-  %24 = index.constant 0 : offset
-  %25 = index.add %state_storage_byte_offset, %24 : offset
-  %26 = index.assume %25 [range(%25, 0, 0)] : offset
-  %27 = buffer.view %state_storage[%26] : buffer -> view<1xi32>
-  view.store %input, %27[0] : i32, view<1xi32>
-  func.call pure @identity_rvalue(%state_storage, %state_storage_byte_offset) : (buffer, offset)
-  %28 = scalar.constant 2 : i32
-  %29 = index.constant 0 : offset
-  %30 = index.add %state_storage_byte_offset, %29 : offset
-  %31 = index.assume %30 [range(%30, 0, 0)] : offset
-  %32 = buffer.view %state_storage[%31] : buffer -> view<1xi32>
-  %33 = view.load %32[0] : view<1xi32> -> i32
-  %34 = scalar.addi %33, %28 : i32
-  view.store %34, %32[0] : i32, view<1xi32>
-  %35 = index.constant 0 : offset
-  %36 = index.add %state_storage_byte_offset, %35 : offset
-  %37 = index.assume %36 [range(%36, 0, 0)] : offset
-  %38 = buffer.view %state_storage[%37] : buffer -> view<1xi32>
-  %value = view.load %38[0] : view<1xi32> -> i32
-  func.return %value : i32
+  func.call pure @identity_rvalue(%input) : (i32)
+  %20 = scalar.constant 2 : i32
+  %state_value = scalar.addi %input, %20 : i32
+  func.return %state_value : i32
 }
 
 func.def public @read_const_prvalue() -> (i32) {
-  %41 = scalar.constant 8 : i32
-  %42 = func.call pure @read_const_rvalue(%41) : (i32) -> (i32)
-  func.return %42 : i32
+  %23 = scalar.constant 8 : i32
+  %24 = func.call pure @read_const_rvalue(%23) : (i32) -> (i32)
+  func.return %24 : i32
 }
 
 func.def public @read_returned_prvalue() -> (i32) {
-  %44 = scalar.constant 9 : i32
-  func.call pure @identity_value_rvalue(%44) : (i32)
-  func.return %44 : i32
+  %26 = scalar.constant 9 : i32
+  func.call pure @identity_value_rvalue(%26) : (i32)
+  func.return %26 : i32
 }
 
 func.def public @mutate_chained_xvalue(%input: i32) -> (i32) {
@@ -1305,65 +1285,53 @@ func.def public @mutate_chained_xvalue(%input: i32) -> (i32) {
   func.return %state_value : i32
 }
 
-func.def public @mutate_conditional_xvalue(%choose: i1, %left_value: i32, %right_value: i32) -> (i32) {
-  %52 = index.constant 4 : offset
-  %left_storage = buffer.alloca<private> align(4) %52 : buffer
-  %left_storage_byte_offset = index.constant 0 : offset
-  %left_view = buffer.view %left_storage[%left_storage_byte_offset] : buffer -> view<4xi8>
-  %56 = index.constant 0 : offset
-  %57 = index.add %left_storage_byte_offset, %56 : offset
-  %58 = index.assume %57 [range(%57, 0, 0)] : offset
-  %59 = buffer.view %left_storage[%58] : buffer -> view<1xi32>
-  view.store %left_value, %59[0] : i32, view<1xi32>
-  %60 = index.constant 4 : offset
-  %right_storage = buffer.alloca<private> align(4) %60 : buffer
-  %right_storage_byte_offset = index.constant 0 : offset
-  %right_view = buffer.view %right_storage[%right_storage_byte_offset] : buffer -> view<4xi8>
-  %64 = index.constant 0 : offset
-  %65 = index.add %right_storage_byte_offset, %64 : offset
-  %66 = index.assume %65 [range(%65, 0, 0)] : offset
-  %67 = buffer.view %right_storage[%66] : buffer -> view<1xi32>
-  view.store %right_value, %67[0] : i32, view<1xi32>
-  %68, %69 = scf.if %choose -> (buffer, offset) {
-    scf.yield %left_storage, %left_storage_byte_offset : buffer, offset
+func.def public @mutate_conditional_xvalue(%choose: i1, %left_value$31: i32, %right_value$32: i32) -> (i32) {
+  %36 = scf.if %choose -> (i32) {
+    %34 = scalar.constant 0 : i32
+    scf.yield %34 : i32
   } else {
-    scf.yield %right_storage, %right_storage_byte_offset : buffer, offset
+    %35 = scalar.constant 1 : i32
+    scf.yield %35 : i32
   }
-  func.call @increment_conditional_rvalue(%68, %69) : (buffer, offset)
-  %70 = index.constant 0 : offset
-  %71 = index.add %left_storage_byte_offset, %70 : offset
-  %72 = index.assume %71 [range(%71, 0, 0)] : offset
-  %73 = buffer.view %left_storage[%72] : buffer -> view<1xi32>
-  %value$74 = view.load %73[0] : view<1xi32> -> i32
-  %75 = index.constant 0 : offset
-  %76 = index.add %right_storage_byte_offset, %75 : offset
-  %77 = index.assume %76 [range(%76, 0, 0)] : offset
-  %78 = buffer.view %right_storage[%77] : buffer -> view<1xi32>
-  %value$79 = view.load %78[0] : view<1xi32> -> i32
-  %80 = scalar.addi %value$74, %value$79 : i32
-  func.return %80 : i32
+  %37 = scalar.constant 0 : i32
+  %38 = scalar.cmpi eq, %36, %37 : i32
+  %left_value$39, %right_value$40 = scf.if %38 -> (i32, i32) {
+    scf.yield %left_value$31, %right_value$32 : i32, i32
+  } else {
+    scf.yield %right_value$32, %left_value$31 : i32, i32
+  }
+  %left_value$41 = func.call pure @increment_conditional_rvalue(%left_value$39) : (i32) -> (i32)
+  %42 = scalar.constant 0 : i32
+  %43 = scalar.cmpi eq, %36, %42 : i32
+  %left_value$44, %right_value$45 = scf.if %43 -> (i32, i32) {
+    scf.yield %left_value$41, %right_value$40 : i32, i32
+  } else {
+    scf.yield %right_value$40, %left_value$41 : i32, i32
+  }
+  %46 = scalar.addi %left_value$44, %right_value$45 : i32
+  func.return %46 : i32
 }
 
-func.def @increment_rvalue(%state_value$81: i32) -> (i32) {
-  %83 = scalar.constant 1 : i32
-  %state_value$84 = scalar.addi %state_value$81, %83 : i32
-  func.return %state_value$84 : i32
+func.def @increment_rvalue(%state_value$47: i32) -> (i32) {
+  %49 = scalar.constant 1 : i32
+  %state_value$50 = scalar.addi %state_value$47, %49 : i32
+  func.return %state_value$50 : i32
 }
 
-func.def @invoke_rvalue__lambda_int____(%function_value$85: i32) -> (i32, i32) {
-  %88, %function_value$89 = func.call pure @operator_call_value(%function_value$85) : (i32) -> (i32, i32)
-  func.return %88, %function_value$89 : i32, i32
+func.def @invoke_rvalue__lambda_int____(%function_value$51: i32) -> (i32, i32) {
+  %54, %function_value$55 = func.call pure @operator_call_value(%function_value$51) : (i32) -> (i32, i32)
+  func.return %54, %function_value$55 : i32, i32
 }
 
 func.def @address_rvalue(%state: buffer, %state_byte_offset: offset) -> (i32) {
-  %93 = index.constant 0 : offset
-  %94 = index.add %state_byte_offset, %93 : offset
-  %95 = buffer.view %state[%94] : buffer -> view<1xi32>
-  %value = view.load %95[0] : view<1xi32> -> i32
+  %59 = index.constant 0 : offset
+  %60 = index.add %state_byte_offset, %59 : offset
+  %61 = buffer.view %state[%60] : buffer -> view<1xi32>
+  %value = view.load %61[0] : view<1xi32> -> i32
   func.return %value : i32
 }
 
-func.def @identity_rvalue(%state: buffer, %state_byte_offset: offset) {
+func.def @identity_rvalue(%state_value: i32) {
   func.return
 }
 
@@ -1375,26 +1343,21 @@ func.def @identity_value_rvalue(%state_value: i32) {
   func.return
 }
 
-func.def @increment_chained_rvalue(%state_value$102: i32) -> (i32) {
-  %104 = scalar.constant 2 : i32
-  %state_value$105 = scalar.addi %state_value$102, %104 : i32
-  func.return %state_value$105 : i32
+func.def @increment_chained_rvalue(%state_value$67: i32) -> (i32) {
+  %69 = scalar.constant 2 : i32
+  %state_value$70 = scalar.addi %state_value$67, %69 : i32
+  func.return %state_value$70 : i32
 }
 
-func.def @increment_conditional_rvalue(%state: buffer, %state_byte_offset: offset) {
-  %108 = scalar.constant 3 : i32
-  %109 = index.constant 0 : offset
-  %110 = index.add %state_byte_offset, %109 : offset
-  %111 = buffer.view %state[%110] : buffer -> view<1xi32>
-  %112 = view.load %111[0] : view<1xi32> -> i32
-  %113 = scalar.addi %112, %108 : i32
-  view.store %113, %111[0] : i32, view<1xi32>
-  func.return
+func.def @increment_conditional_rvalue(%state_value$71: i32) -> (i32) {
+  %73 = scalar.constant 3 : i32
+  %state_value$74 = scalar.addi %state_value$71, %73 : i32
+  func.return %state_value$74 : i32
 }
 
 func.def @operator_call_value(%this_value: i32) -> (i32, i32) {
-  %117 = scalar.constant 1 : i32
-  %value = scalar.addi %this_value, %117 : i32
+  %78 = scalar.constant 1 : i32
+  %value = scalar.addi %this_value, %78 : i32
   func.return %value, %value : i32, i32
 }
 

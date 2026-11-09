@@ -149,6 +149,21 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "lvalues",
+    srcs = ["lvalues.cc"],
+    hdrs = ["lvalues.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        ":bindings",
+        ":representation",
+        ":storage",
+        ":types",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_library(
     name = "objects",
     srcs = ["objects.cc"],
     hdrs = ["objects.h"],

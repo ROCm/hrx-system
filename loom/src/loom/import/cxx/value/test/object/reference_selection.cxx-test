@@ -1,0 +1,156 @@
+// RUN: roundtrip
+// Independent automatic references use one ordinary call. Each selected
+// source binding receives its own updated result.
+[[loom::noinline]] static void replace(unsigned& left, unsigned& right,
+                                      unsigned next) {
+  left = next;
+  right = next + 1u;
+}
+unsigned selected(bool choose_left, bool choose_right, unsigned first,
+                  unsigned second, unsigned third, unsigned fourth,
+                  unsigned next) {
+  unsigned& left = choose_left ? first : second;
+  unsigned& right = choose_right ? third : fourth;
+  replace(left, right, next);
+  return first + second + third + fourth;
+}
+
+// ----
+func.def public @selected(%choose_left: i1, %choose_right: i1, %first$2: i32, %second$3: i32, %third$4: i32, %fourth$5: i32, %next: i32) -> (i32) {
+  %10 = scf.if %choose_left -> (i32) {
+    %8 = scalar.constant 0 : i32
+    scf.yield %8 : i32
+  } else {
+    %9 = scalar.constant 1 : i32
+    scf.yield %9 : i32
+  }
+  %13 = scf.if %choose_right -> (i32) {
+    %11 = scalar.constant 0 : i32
+    scf.yield %11 : i32
+  } else {
+    %12 = scalar.constant 1 : i32
+    scf.yield %12 : i32
+  }
+  %14 = scalar.constant 0 : i32
+  %15 = scalar.cmpi eq, %10, %14 : i32
+  %first$16, %second$17 = scf.if %15 -> (i32, i32) {
+    scf.yield %first$2, %second$3 : i32, i32
+  } else {
+    scf.yield %second$3, %first$2 : i32, i32
+  }
+  %18 = scalar.constant 0 : i32
+  %19 = scalar.cmpi eq, %13, %18 : i32
+  %third$20, %fourth$21 = scf.if %19 -> (i32, i32) {
+    scf.yield %third$4, %fourth$5 : i32, i32
+  } else {
+    scf.yield %fourth$5, %third$4 : i32, i32
+  }
+  %first$22, %third$23 = func.call pure @replace(%first$16, %third$20, %next) : (i32, i32, i32) -> (i32, i32)
+  %24 = scalar.constant 0 : i32
+  %25 = scalar.cmpi eq, %13, %24 : i32
+  %third$26, %fourth$27 = scf.if %25 -> (i32, i32) {
+    scf.yield %third$23, %fourth$21 : i32, i32
+  } else {
+    scf.yield %fourth$21, %third$23 : i32, i32
+  }
+  %28 = scalar.constant 0 : i32
+  %29 = scalar.cmpi eq, %10, %28 : i32
+  %first$30, %second$31 = scf.if %29 -> (i32, i32) {
+    scf.yield %first$22, %second$17 : i32, i32
+  } else {
+    scf.yield %second$17, %first$22 : i32, i32
+  }
+  %32 = scalar.addi %first$30, %second$31 : i32
+  %33 = scalar.addi %32, %third$26 : i32
+  %34 = scalar.addi %33, %fourth$27 : i32
+  func.return %34 : i32
+}
+
+func.def noinline @replace(%left: i32, %right$36: i32, %next: i32) -> (i32, i32) {
+  %40 = scalar.constant 1 : i32
+  %right$41 = scalar.addi %next, %40 : i32
+  func.return %next, %right$41 : i32, i32
+}
+
+// ====
+// Mutable reference syntax alone is not a callable write effect. Exact
+// receiver aliases remain values when both observations are read-only.
+struct Cell;
+static unsigned inspect(Cell& value);
+struct Cell {
+  // Value observed through two aliases of the current receiver.
+  unsigned payload;
+  Cell& self() { return *this; }
+  unsigned observe() { return inspect(self()) + inspect(*this); }
+};
+static unsigned inspect(Cell& value) { return value.payload; }
+unsigned observed(unsigned input) {
+  Cell value{input};
+  return value.observe();
+}
+
+// ----
+func.def public @observed(%input: i32) -> (i32) {
+  %2 = func.call pure @Cell__observe_value(%input) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def @Cell__observe_value(%this_payload: i32) -> (i32) {
+  func.call pure @Cell__self_value(%this_payload) : (i32)
+  %5 = func.call pure @inspect(%this_payload) : (i32) -> (i32)
+  %6 = func.call pure @inspect(%this_payload) : (i32) -> (i32)
+  %7 = scalar.addi %5, %6 : i32
+  func.return %7 : i32
+}
+
+func.def @inspect(%value_payload: i32) -> (i32) {
+  func.return %value_payload : i32
+}
+
+func.def @Cell__self_value(%this_payload: i32) {
+  func.return
+}
+
+// ====
+// A nested assignment through a returned receiver updates only its owning
+// field in the callable signature; neighboring fields stay unchanged.
+struct Pair {
+  // Neighbor retained unchanged by the nested assignment.
+  unsigned first;
+  // Subobject replaced through the returned receiver.
+  unsigned second;
+};
+struct Envelope {
+  // Leading field outside the written range.
+  unsigned prefix;
+  // Direct field carrying the nested writeback.
+  Pair pair;
+  // Trailing field outside the written range.
+  unsigned suffix;
+  Envelope& self() { return *this; }
+  void update(unsigned next) { self().pair.second = next; }
+};
+unsigned projected(unsigned input, unsigned next) {
+  Envelope value{1u, {2u, input}, 3u};
+  value.update(next);
+  return value.pair.second + value.suffix;
+}
+
+// ----
+func.def public @projected(%input: i32, %next: i32) -> (i32) {
+  %value_prefix = scalar.constant 1 : i32
+  %value_pair_first$4 = scalar.constant 2 : i32
+  %value_suffix = scalar.constant 3 : i32
+  %value_pair_first$6, %value_pair_second = func.call pure @Envelope__update_value(%value_prefix, %value_pair_first$4, %input, %value_suffix, %next) : (i32, i32, i32, i32, i32) -> (i32, i32)
+  %8 = scalar.addi %value_pair_second, %value_suffix : i32
+  func.return %8 : i32
+}
+
+func.def @Envelope__update_value(%this_prefix: i32, %this_pair_first: i32, %this_pair_second: i32, %this_suffix: i32, %next: i32) -> (i32, i32) {
+  func.call pure @Envelope__self_value(%this_prefix, %this_pair_first, %this_pair_second, %this_suffix) : (i32, i32, i32, i32)
+  func.return %this_pair_first, %next : i32, i32
+}
+
+func.def @Envelope__self_value(%this_prefix: i32, %this_pair_first: i32, %this_pair_second: i32, %this_suffix: i32) {
+  func.return
+}

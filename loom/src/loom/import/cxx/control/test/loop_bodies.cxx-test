@@ -232,18 +232,18 @@ unsigned entry(unsigned bound) {
 func.def public @entry(%bound$0: i32) -> (i32) {
   %total$2 = scalar.constant 0 : i32
   %index$3 = scalar.constant 0 : i32
-  %index$10, %total$11, %bound$12 = scf.while(%index = %index$3 : i32, %total = %total$2 : i32, %bound = %bound$0 : i32) -> (i32, i32, i32) {
+  %index$10, %bound$11, %total$12 = scf.while(%index = %index$3 : i32, %bound = %bound$0 : i32, %total = %total$2 : i32) -> (i32, i32, i32) {
     %13 = scalar.cmpi ult, %index, %bound : i32
-    scf.condition %13, %index, %total, %bound : i1, i32, i32, i32
-  } do(%index$7: i32, %total$8: i32, %bound$9: i32) {
+    scf.condition %13, %index, %bound, %total : i1, i32, i32, i32
+  } do(%index$7: i32, %bound$8: i32, %total$9: i32) {
     %14 = scalar.constant 1 : i32
-    %bound$15 = scalar.subi %bound$9, %14 : i32
-    %total$16 = scalar.addi %total$8, %bound$9 : i32
+    %bound$15 = scalar.subi %bound$8, %14 : i32
+    %total$16 = scalar.addi %total$9, %bound$8 : i32
     %17 = scalar.constant 1 : i32
     %index$18 = scalar.addi %index$7, %17 : i32
-    scf.yield %index$18, %total$16, %bound$15 : i32, i32, i32
+    scf.yield %index$18, %bound$15, %total$16 : i32, i32, i32
   }
-  func.return %total$11 : i32
+  func.return %total$12 : i32
 }
 
 // ====

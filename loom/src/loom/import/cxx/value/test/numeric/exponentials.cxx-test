@@ -146,10 +146,10 @@ func.def public @poisson(%lambda: f64, %uniforms: buffer, %uniforms_byte_offset:
   %limit = scalar.expf<afn> %4 : f64
   %count$6 = scalar.constant 0 : i32
   %product$7 = scalar.constant 1.0 : f64
-  %product$12, %count$13 = scf.while(%product$8 = %product$7 : f64, %count$9 = %count$6 : i32) -> (f64, i32) {
+  %count$12, %product$13 = scf.while(%count$8 = %count$6 : i32, %product$9 = %product$7 : f64) -> (i32, f64) {
     %14 = scalar.constant 1 : i32
-    %count$15 = scalar.addi %count$9, %14 : i32
-    %16 = scalar.extui %count$9 : i32 to i64
+    %count$15 = scalar.addi %count$8, %14 : i32
+    %16 = scalar.extui %count$8 : i32 to i64
     %17 = scalar.constant 8 : i64
     %18 = scalar.muli %16, %17 : i64
     %19 = index.cast %uniforms_byte_offset : offset to i64
@@ -158,13 +158,13 @@ func.def public @poisson(%lambda: f64, %uniforms: buffer, %uniforms_byte_offset:
     %22 = index.cast %21 : i64 to offset
     %23 = buffer.view %uniforms[%22] : buffer -> view<1xf64>
     %24 = view.load %23[0] : view<1xf64> -> f64
-    %product$25 = scalar.mulf %product$8, %24 : f64
+    %product$25 = scalar.mulf %product$9, %24 : f64
     %26 = scalar.cmpf ogt, %product$25, %limit : f64
-    scf.condition %26, %product$25, %count$15 : i1, f64, i32
-  } do(%product: f64, %count: i32) {
-    scf.yield %product, %count : f64, i32
+    scf.condition %26, %count$15, %product$25 : i1, i32, f64
+  } do(%count: i32, %product: f64) {
+    scf.yield %count, %product : i32, f64
   }
   %27 = scalar.constant 1 : i32
-  %28 = scalar.subi %count$13, %27 : i32
+  %28 = scalar.subi %count$12, %27 : i32
   func.return %28 : i32
 }

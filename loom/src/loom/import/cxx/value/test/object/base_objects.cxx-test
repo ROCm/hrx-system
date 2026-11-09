@@ -157,29 +157,29 @@ unsigned enclosing(unsigned input) {
 func.def public @enclosing(%input: i32) -> (i32) {
   %2 = index.constant 12 : offset
   %value_storage = buffer.alloca<private> align(4) %2 : buffer
-  %77 = index.constant 0 : offset
-  %11 = buffer.view %value_storage[%77] : buffer -> view<1xi32>
+  %80 = index.constant 0 : offset
+  %11 = buffer.view %value_storage[%80] : buffer -> view<1xi32>
   view.store %input, %11[0] : i32, view<1xi32>
   %16 = scalar.constant 2 : i32
-  %76 = index.constant 4 : offset
-  %18 = buffer.view %value_storage[%76] : buffer -> view<1xi32>
+  %79 = index.constant 4 : offset
+  %18 = buffer.view %value_storage[%79] : buffer -> view<1xi32>
   view.store %16, %18[0] : i32, view<1xi32>
   %21 = scalar.constant 3 : i32
-  %75 = index.constant 8 : offset
-  %23 = buffer.view %value_storage[%75] : buffer -> view<1xi32>
+  %78 = index.constant 8 : offset
+  %23 = buffer.view %value_storage[%78] : buffer -> view<1xi32>
   view.store %21, %23[0] : i32, view<1xi32>
   %51 = scalar.constant 5 : i32
   %55 = view.load %11[0] : view<1xi32> -> i32
   %56 = scalar.addi %55, %51 : i32
   view.store %56, %11[0] : i32, view<1xi32>
-  %57 = scalar.constant 7 : i32
-  %61 = view.load %18[0] : view<1xi32> -> i32
-  %62 = scalar.addi %61, %57 : i32
-  view.store %62, %18[0] : i32, view<1xi32>
-  %63 = scalar.constant 11 : i32
-  %67 = view.load %23[0] : view<1xi32> -> i32
-  %68 = scalar.addi %67, %63 : i32
-  view.store %68, %23[0] : i32, view<1xi32>
+  %58 = scalar.constant 7 : i32
+  %62 = view.load %18[0] : view<1xi32> -> i32
+  %63 = scalar.addi %62, %58 : i32
+  view.store %63, %18[0] : i32, view<1xi32>
+  %65 = scalar.constant 11 : i32
+  %69 = view.load %23[0] : view<1xi32> -> i32
+  %70 = scalar.addi %69, %65 : i32
+  view.store %70, %23[0] : i32, view<1xi32>
   %tag = view.load %11[0] : view<1xi32> -> i32
   %value = view.load %18[0] : view<1xi32> -> i32
   %37 = scalar.muli %value, %21 : i32
