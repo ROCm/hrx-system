@@ -475,26 +475,123 @@ TEST_P(DmaAddressVariantsTest, FixedVariantsShareTheExternalPatchBody) {
   }
 }
 
-TEST_P(DmaAddressVariantsTest, DynamicLocalPatchesKeepTheirOwnSubmissionBody) {
-  for (uint32_t i = 0; i < 4; ++i) {
-    AddTask(i * 4, 1, false, true);
+TEST_P(DmaAddressVariantsTest, MixedLocalAddressesKeepOneSubmissionBody) {
+  // One segment and the largest shareable dynamic chain each retain one body.
+  // Required admission sees the later dynamic sites before refinement starts.
+  for (uint32_t count : {1u, 4u}) {
+    for (uint32_t i = 0; i < 4; ++i) {
+      AddTask(i * count * 4, count, false, true);
+    }
+    for (uint32_t i = 0; i < 3; ++i) {
+      AddTask(0, count, true, true);
+    }
+  }
+  const uint16_t locks = local_.next_lock;
+  Refine();
+  EXPECT_EQ(Used(false), 5u);
+  EXPECT_EQ(Used(true), 5u);
+  EXPECT_EQ(local_.next_lock, locks);
+  EXPECT_NE(tasks_[0].task.submit_group, tasks_[7].task.submit_group);
+  for (size_t first : {0u, 7u}) {
+    const auto* descriptor = tasks_[first].task.local_descriptor;
+    const auto* group = tasks_[first].task.submit_group;
+    ASSERT_NE(group, nullptr);
+    EXPECT_EQ(group->use_count, 7u);
+    EXPECT_FALSE(group->local_queue_argument);
+    EXPECT_TRUE(descriptor->address_dynamic);
+    EXPECT_TRUE(descriptor->address_required);
+    EXPECT_EQ(descriptor->address_variants, nullptr);
+    for (size_t i = first; i < first + 7; ++i) {
+      const auto& task = tasks_[i].task;
+      EXPECT_EQ(task.submit_group, group);
+      EXPECT_EQ(task.local_descriptor, descriptor);
+      for (const auto* transfer = task.first_transfer; transfer;
+           transfer = transfer->task_next) {
+        EXPECT_EQ(transfer->local_descriptor, descriptor);
+      }
+    }
+  }
+}
+
+TEST_P(DmaAddressVariantsTest, UnsharedSitesKeepFixedLocalAddresses) {
+  AddTask(4, 1, false, true);
+  AddTask(0, 1, true, true);
+  Refine();
+  EXPECT_EQ(Used(false), 2u);
+  EXPECT_EQ(Used(true), 1u);
+  EXPECT_FALSE(tasks_[0].task.local_descriptor->address_dynamic);
+  EXPECT_TRUE(tasks_[1].task.local_descriptor->address_dynamic);
+  EXPECT_NE(tasks_[0].task.submit_group, tasks_[1].task.submit_group);
+}
+
+TEST_P(DmaAddressVariantsTest, UnshareableChainsKeepFixedLocalAddresses) {
+  AddTask(20, 5, false, true);
+  for (uint32_t i = 0; i < 3; ++i) {
+    AddTask(0, 5, true, true);
+  }
+  Refine();
+  // Five dynamic segments need 16 scalar arguments and cannot share a body.
+  // The fixed site's smaller signature must still retain its specialization.
+  EXPECT_EQ(Used(false), 10u);
+  EXPECT_EQ(Used(true), 5u);
+  EXPECT_FALSE(tasks_[0].task.local_descriptor->address_dynamic);
+  ASSERT_NE(tasks_[0].task.submit_group, nullptr);
+  EXPECT_EQ(tasks_[0].task.submit_group->use_count, 1u);
+  for (size_t i = 1; i < tasks_.size(); ++i) {
+    EXPECT_TRUE(tasks_[i].task.local_descriptor->address_dynamic);
+    EXPECT_EQ(tasks_[i].task.submit_group, nullptr);
+  }
+}
+
+TEST_P(DmaAddressVariantsTest, FixedExternalSitesStillRemoveBothPatches) {
+  for (uint32_t i = 0; i < 3; ++i) {
+    AddTask(i * 4);
   }
   for (uint32_t i = 0; i < 3; ++i) {
     AddTask(0, 1, true, true);
   }
   Refine();
-  auto* fixed = tasks_[0].task.submit_group;
-  auto* dynamic = tasks_[4].task.submit_group;
+  EXPECT_EQ(Used(false), 4u);
+  EXPECT_EQ(Used(true), 4u);
+  for (size_t i = 0; i < 3; ++i) {
+    EXPECT_FALSE(tasks_[i].task.local_descriptor->address_dynamic);
+    EXPECT_FALSE(tasks_[i].task.shim_descriptor->address_dynamic);
+    EXPECT_EQ(tasks_[i].task.submit_group, nullptr);
+  }
+  const auto* group = tasks_[3].task.submit_group;
+  ASSERT_NE(group, nullptr);
+  EXPECT_EQ(group->use_count, 3u);
+  for (size_t i = 3; i < tasks_.size(); ++i) {
+    EXPECT_EQ(tasks_[i].task.submit_group, group);
+    EXPECT_TRUE(tasks_[i].task.local_descriptor->address_dynamic);
+    EXPECT_TRUE(tasks_[i].task.shim_descriptor->address_dynamic);
+  }
+}
+
+TEST_P(DmaAddressVariantsTest, ExistingFixedVariantRemainsReusable) {
+  AddTask(4);
+  for (uint32_t i = 0; i < 3; ++i) {
+    AddTask(4, 1, false, true);
+    AddTask(0, 1, true, true);
+  }
+  Refine();
+  EXPECT_EQ(Used(false), 2u);
+  EXPECT_EQ(Used(true), 2u);
+  const auto* variant = tasks_[0].task.local_descriptor;
+  const auto* fixed = tasks_[1].task.submit_group;
+  const auto* dynamic = tasks_[2].task.submit_group;
   ASSERT_NE(fixed, nullptr);
   ASSERT_NE(dynamic, nullptr);
   EXPECT_NE(fixed, dynamic);
-  EXPECT_EQ(fixed->use_count, 4u);
+  EXPECT_EQ(fixed->use_count, 3u);
   EXPECT_EQ(dynamic->use_count, 3u);
   EXPECT_TRUE(fixed->local_queue_argument);
   EXPECT_FALSE(dynamic->local_queue_argument);
-  for (size_t i = 0; i < tasks_.size(); ++i) {
-    EXPECT_EQ(tasks_[i].task.submit_group, i < 4 ? fixed : dynamic);
-    EXPECT_EQ(tasks_[i].task.local_descriptor->address_dynamic, i >= 4);
+  for (size_t i = 1; i < tasks_.size(); i += 2) {
+    EXPECT_EQ(tasks_[i].task.local_descriptor, variant);
+    EXPECT_EQ(tasks_[i].task.submit_group, fixed);
+    EXPECT_EQ(tasks_[i + 1].task.submit_group, dynamic);
+    EXPECT_EQ(tasks_[i + 1].task.local_descriptor, variant->address_origin);
   }
 }
 
