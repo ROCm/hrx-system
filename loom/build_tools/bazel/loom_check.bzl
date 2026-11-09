@@ -265,7 +265,7 @@ def loom_check_test(
         tools = tools,
         resource_group = resource_group,
         size = size,
-        tags = tags + ["loom-check"] + policy_tags,
+        tags = tags + ["loom-check", "msan"] + policy_tags,
         **kwargs
     )
 

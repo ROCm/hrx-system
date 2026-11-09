@@ -239,7 +239,7 @@ Bazel selects sanitizer instrumentation with named configurations:
 | `--config=asan` | AddressSanitizer with use-after-scope checks. |
 | `--config=ubsan` | UndefinedBehaviorSanitizer with the function and vptr checks disabled to match the runtime's type-erased dispatch and `-fno-rtti` C++ mode. |
 | `--config=tsan` | ThreadSanitizer. |
-| `--config=msan` | MemorySanitizer; execution also requires instrumented native dependencies. |
+| `--config=msan` | MemorySanitizer with origin tracking; in-process native dependencies must also be instrumented. |
 | `--config=fuzzer` | libFuzzer build mode with ASAN enabled. |
 
 Examples:
@@ -247,7 +247,12 @@ Examples:
 ```bash
 python dev.py bazel test //runtime/... --config=asan
 python dev.py bazel test //runtime/src/iree/async/... --config=tsan
+python build_tools/devtools/ci.py iree-bazel-cpu-msan
 ```
+
+The [CPU MSAN profile](build_tools/ci/README.md#select-a-reproduction) selects
+qualified host compiler, arena, and VM tests without requiring instrumentation
+of external tools or GPU execution.
 
 CMake exposes `IREE_ENABLE_ASAN`, `IREE_ENABLE_UBSAN`, `IREE_ENABLE_TSAN`,
 and `IREE_ENABLE_MSAN`. Use a separate build tree for each configuration:

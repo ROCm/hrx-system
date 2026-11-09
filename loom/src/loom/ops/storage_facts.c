@@ -46,7 +46,7 @@ iree_status_t loom_storage_facts_make_reference(
     loom_value_facts_t* out_facts) {
   if (!context || !reference ||
       reference->backing_value_id == LOOM_VALUE_ID_INVALID ||
-      !loom_storage_space_is_valid(reference->storage_space) ||
+      reference->storage_space >= LOOM_STORAGE_SPACE_COUNT_ ||
       reference->minimum_alignment == 0) {
     *out_facts = loom_value_facts_unknown();
     return iree_ok_status();

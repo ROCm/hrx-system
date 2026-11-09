@@ -244,7 +244,10 @@ iree_execution_test_suite(
     name = "scenario_execution_test",
     data = ["//loom/src/loom/tools/loom-test/testdata:scenario_cases.loom"],
     manifests = ["scenario_execution.test.json"],
-    tags = ["hostonly"],
+    tags = [
+        "hostonly",
+        "msan",
+    ],
     target_compatible_with = _VM_EXECUTION_COMPATIBLE_WITH,
     tools = {
         "loom-test": ":loom-test",

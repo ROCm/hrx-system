@@ -240,6 +240,18 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "storage_facts_test",
+    srcs = ["storage_facts_test.cc"],
+    deps = [
+        ":storage_facts",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "func_symbol_facts_test",
     srcs = ["func_symbol_facts_test.cc"],
     deps = [

@@ -67,6 +67,25 @@ python build_tools/devtools/ci.py iree-bazel-xdna-asan
 python build_tools/devtools/ci.py iree-cmake-cpu-ubsan
 ```
 
+`iree-bazel-cpu-msan` runs the `msan` test category on a CPU runner. The category
+covers Loom's `loom-check` fixtures, native arena lifetime/origin controls, and
+VM scenario execution. Test definitions own membership: `loom_check_test`
+applies the tag to its fixtures, and other qualified subjects opt in beside
+their test declaration. The profile builds only the selected test closures and
+uses the same run-requirement admission as other CPU jobs. The CPU sanitizer
+aggregate includes this profile.
+
+MSAN instruments the host compiler and VM interpreter, including compilation
+for GPU targets. GPU execution and generated native code are outside that
+instrumentation. The default CPU configuration leaves optional importers
+disabled, and C++ unit tests are outside the qualified category because the
+runner does not provide an instrumented C++ standard library. External tools
+such as `spirv-val` use the separate execution configuration. Bazel's MSAN
+configuration also undefines inherited `_FORTIFY_SOURCE`: late ThinLTO lowering
+of fortified memory calls can otherwise leave destination shadow poisoned.
+Origin tracking and optimization remain enabled when combining MSAN with `opt`.
+CMake MSAN commands retain their build-only scope.
+
 `--target` can narrow profiles that accept Bazel target patterns. CMake profiles
 select their tests through CTest names and labels. `--verbose` prints the
 underlying commands. Bazel CI commands stop at the first failed test by default.

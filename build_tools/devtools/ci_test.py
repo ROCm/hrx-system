@@ -1416,66 +1416,24 @@ class CiTest(unittest.TestCase):
         ):
             ci.steps_from_args(args)
 
-    def test_sanitizer_command_runs_only_testable_configurations(self):
-        args = ci.parse_arguments(
-            [
-                "iree-bazel-cpu-sanitizers",
-                "--target",
-                "//runtime/...",
-            ]
-        )
+    def test_cpu_sanitizer_aggregate_configures_once_and_preserves_scope(self):
+        with mock.patch.object(
+            ci_config,
+            "BAZEL_CPU_SANITIZER_TEST_TAG_FILTERS",
+            {"first": ("first-subject",), "second": ("second-subject",)},
+        ):
+            steps = ci.cpu_sanitizer_steps(("//selected/...",))
 
-        steps = ci.steps_from_args(args)
-
-        self.assertTrue(
-            any(
-                step.argv[:4] == ("python3", "dev.py", "bazel", "test")
-                and "--config=asan" in step.argv
-                and step.argv.index("--config=asan") < step.argv.index("--")
-                for step in steps
+        self.assertEqual(len(steps), 3)
+        self.assertEqual(steps[0].argv[:4], ("python3", "dev.py", "bazel", "configure"))
+        for step, config in zip(steps[1:], ("first", "second")):
+            self.assertEqual(step.argv[:4], ("python3", "dev.py", "bazel", "test"))
+            self.assertIn(f"--config={config}", step.argv)
+            self.assertIn("//selected/...", step.argv)
+            self.assertLess(
+                step.argv.index("--config=" + config), step.argv.index("--")
             )
-        )
-        self.assertTrue(
-            any(
-                step.argv[:4] == ("python3", "dev.py", "bazel", "test")
-                and "--config=ubsan" in step.argv
-                and step.argv.index("--config=ubsan") < step.argv.index("--")
-                for step in steps
-            )
-        )
-        self.assertTrue(
-            any(
-                step.argv[:4] == ("python3", "dev.py", "bazel", "test")
-                and "--config=tsan" in step.argv
-                and step.argv.index("--config=tsan") < step.argv.index("--")
-                for step in steps
-            )
-        )
-        tsan_test_step = next(
-            step for step in steps if step.name == "Test IREE with TSAN"
-        )
-        tsan_test_env = [
-            arg
-            for arg in tsan_test_step.argv
-            if arg.startswith("--test_env=TSAN_OPTIONS=")
-        ]
-        self.assertEqual(len(tsan_test_env), 1)
-        self.assertTrue(
-            tsan_test_env[0].startswith("--test_env=TSAN_OPTIONS=suppressions=")
-        )
-        tsan_suppression_path = Path(
-            tsan_test_env[0].removeprefix("--test_env=TSAN_OPTIONS=suppressions=")
-        )
-        self.assertTrue(tsan_suppression_path.is_absolute())
-        self.assertTrue(tsan_suppression_path.is_file())
-        self.assertFalse(any("--config=msan" in step.argv for step in steps))
-        sanitizer_test_steps = [
-            step for step in steps if step.name.startswith("Test IREE")
-        ]
-        for xfail_target in ci_config.CPU_SANITIZERS_XFAIL_TARGETS:
-            self.assertTrue(
-                any(xfail_target in step.argv for step in sanitizer_test_steps)
-            )
+            self.assertGreater(step.argv.index("//selected/..."), step.argv.index("--"))
 
     def test_bazel_cpu_single_sanitizer_command_runs_one_configuration(self):
         args = ci.parse_arguments(
@@ -1530,28 +1488,42 @@ class CiTest(unittest.TestCase):
         )
         self.assertIn("--//loom/config/serve:audio_codecs=wav,mp3,flac", fuzz_step.argv)
 
-    def test_bazel_cpu_msan_command_builds_without_tests(self):
-        args = ci.parse_arguments(
-            [
-                "iree-bazel-cpu-msan",
-                "--target",
-                "//runtime/...",
-            ]
-        )
+    def test_focused_cpu_sanitizer_builds_only_its_selected_test_closures(self):
+        with (
+            mock.patch.object(
+                ci_config,
+                "BAZEL_CPU_SANITIZER_TEST_TAG_FILTERS",
+                {"focused": ("instrumented-subject",)},
+            ),
+            mock.patch.object(
+                ci_config, "CPU_SANITIZERS_XFAIL_TARGETS", ("-//other:failure",)
+            ),
+            mock.patch.dict(os.environ, {"IREE_CI_PLATFORM_COVERAGE": "1"}, clear=True),
+        ):
+            steps = ci.cpu_config_steps(("//selected/...",), "focused")
 
-        steps = ci.steps_from_args(args)
-        command_lines = [step.command_line() for step in steps]
-
-        self.assertTrue(
-            any(
-                step.argv[:4] == ("python3", "dev.py", "bazel", "build")
-                and "--config=msan" in step.argv
-                and step.argv.index("--config=msan") < step.argv.index("--")
-                and step.argv.index("//runtime/...") > step.argv.index("--")
-                for step in steps
-            )
+        # A broad platform build would analyze unqualified native dependencies
+        # even though the test invocation filters them out.
+        self.assertEqual(len(steps), 1)
+        step = steps[0]
+        self.assertEqual(step.argv[:4], ("python3", "dev.py", "bazel", "test"))
+        self.assertIn("--build_tests_only", step.argv)
+        self.assertIn("--config=focused", step.argv)
+        self.assertIn("//selected/...", step.argv)
+        self.assertNotIn("-//other:failure", step.argv)
+        self.assertFalse(
+            any(arg.startswith("--test_lang_filters=") for arg in step.argv)
         )
-        self.assertFalse(any("bazel test" in line for line in command_lines))
+        filters = next(
+            arg for arg in step.argv if arg.startswith("--test_tag_filters=")
+        )
+        self.assertIn("instrumented-subject", filters.split("=", 1)[1].split(","))
+        self.assertIsNotNone(step.requirement_audit)
+
+    def test_cpu_sanitizer_rejects_unknown_configuration(self):
+        with mock.patch.object(ci_config, "BAZEL_CPU_SANITIZER_TEST_TAG_FILTERS", {}):
+            with self.assertRaisesRegex(ValueError, "unknown Bazel sanitizer config"):
+                ci.cpu_config_steps(("//selected/...",), "unknown")
 
     def test_amdgpu_command_tests_one_semantic_graph(self):
         args = ci.parse_arguments(

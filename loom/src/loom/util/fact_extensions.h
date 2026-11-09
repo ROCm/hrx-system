@@ -655,7 +655,9 @@ bool loom_value_facts_query_view_reference(
 // Creates a bounded raw extension payload for type-owned fact domains. The
 // |payload_tag| namespace belongs to the value type domain; it is not a global
 // schema ID. Payloads larger than LOOM_VALUE_FACT_RAW_PAYLOAD_LENGTH_LIMIT
-// degrade to unknown facts.
+// degrade to unknown facts. Interning hashes and compares every payload byte;
+// the owning domain supplies a canonical representation without uninitialized
+// bytes or implicit structure padding.
 iree_status_t loom_value_facts_make_extension_payload(
     loom_fact_context_t* context, uint8_t payload_tag, const void* payload,
     iree_host_size_t payload_length, loom_value_facts_t* out);

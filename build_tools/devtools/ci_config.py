@@ -20,11 +20,17 @@ from build_tools.devtools import run_requirements
 
 IREE_TARGET_DIRECTORIES = ("runtime", "loom")
 
-# Aggregate sanitizer commands run configurations with executable test coverage.
+# Broad sanitizer profiles shared by Bazel and CMake.
 SANITIZER_TEST_CONFIGS = ("asan", "ubsan", "tsan")
-# Explicit MSAN commands support local build checks. CI images lack the
-# instrumented host dependencies needed to run these tests.
-SANITIZER_BUILD_CONFIGS = ("msan",)
+# Positive tags restrict a CPU sanitizer to its qualified test closures. Empty
+# tags retain broad build/test coverage. MSAN subjects own the tag; external
+# helper processes do not need instrumented dependencies.
+BAZEL_CPU_SANITIZER_TEST_TAG_FILTERS = {
+    **{config: () for config in SANITIZER_TEST_CONFIGS},
+    "msan": ("msan",),
+}
+# CMake MSAN commands remain build checks until their execution scope is qualified.
+CMAKE_SANITIZER_BUILD_CONFIGS = ("msan",)
 # Tests whose production resource layout conflicts with host TSAN use this
 # conventional Bazel tag and CTest label.
 HOST_TSAN_INCOMPATIBLE_TEST_LABEL = "notsan"
