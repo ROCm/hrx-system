@@ -584,3 +584,40 @@ func.def @composed_powers(%choose: i1, %other: i1) -> (i1, i1, i1, i1, i1, i1) {
   %zero_power = scalar.constant false : i1
   func.return %product_power, %wrapped_power, %wrapped_nonzero, %signed_power, %unsigned_power, %zero_power : i1, i1, i1, i1, i1, i1
 }
+
+// ====
+
+// Magnitude and sign preserve zero exclusion; signed minimum still prevents
+// a positive absolute-value proof. Positive abs also retains power-of-two.
+func.def @nonzero_magnitudes(%input: i32, %wide: i64, %choose: i1) -> (i1, i1, i1, i1, i1, i1, i64) {
+  %nonzero = scalar.assume %input [range(%input, -8, 8), ne(%input, 0)] : i32
+  %negative = scalar.negi %nonzero : i32
+  %absolute = scalar.absi %nonzero : i32
+  %sign = scalar.signi %nonzero : i32
+  %n = test.fact_non_zero %negative : i32 -> i1
+  %a = test.fact_non_zero %absolute : i32 -> i1
+  %s = test.fact_non_zero %sign : i32 -> i1
+  %minimum = test.fact_range_lo %absolute : i32 -> i64
+  %wide_nonzero = scalar.assume %wide [ne(%wide, 0)] : i64
+  %wide_absolute = scalar.absi %wide_nonzero : i64
+  %wn = test.fact_non_zero %wide_absolute : i64 -> i1
+  %wp = test.fact_positive %wide_absolute : i64 -> i1
+  %c2 = scalar.constant 2 : i32
+  %c8 = scalar.constant 8 : i32
+  %power = scf.select %choose, %c2, %c8 : i32
+  %positive_absolute = scalar.absi %power : i32
+  %p = test.fact_power_of_two %positive_absolute : i32 -> i1
+  func.return %n, %a, %s, %wn, %wp, %p, %minimum : i1, i1, i1, i1, i1, i1, i64
+}
+
+// ----
+func.def @nonzero_magnitudes(%input: i32, %wide: i64, %choose: i1) -> (i1, i1, i1, i1, i1, i1, i64) {
+  %n = scalar.constant true : i1
+  %a = scalar.constant true : i1
+  %s = scalar.constant true : i1
+  %minimum = scalar.constant 1 : i64
+  %wn = scalar.constant true : i1
+  %wp = scalar.constant false : i1
+  %p = scalar.constant true : i1
+  func.return %n, %a, %s, %wn, %wp, %p, %minimum : i1, i1, i1, i1, i1, i1, i64
+}

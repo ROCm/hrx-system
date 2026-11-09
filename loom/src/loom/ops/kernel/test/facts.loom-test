@@ -609,7 +609,7 @@ kernel.def @scalar_conversion_lane_distribution_facts() {
   %narrow_lo = scalar.constant -128 : i64
   %narrow_hi = scalar.constant 127 : i64
   %extended_is_varying = scalar.constant true : i1
-  %extended_lo = scalar.constant 0 : i64
+  %extended_lo = scalar.constant 1 : i64
   %extended_hi = scalar.constant 255 : i64
   test.use %narrow_is_varying, %narrow_lo, %narrow_hi, %extended_is_varying, %extended_lo, %extended_hi : i1, i64, i64, i1, i64, i64
   kernel.return

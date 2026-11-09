@@ -644,6 +644,72 @@ func.def @runtime_group_lookup_oracle(%input: buffer, %output: buffer, %kind_inp
   func.return
 }
 
+// Nonzero signed metadata supplies a sign magnitude or an unsigned size.
+// The same runtime shape controls remainder addressing across wrap boundaries.
+func.def @runtime_remainder_lookup(%input: buffer, %output: buffer, %sample_input: index, %negative_input: index) {
+  %selection = index.assume %sample_input [range(%sample_input, 0, 23)] : index
+  %begin = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %offset_policy = index.constant 2 : index
+  %magnitudes = index.constant 8 : index
+  %sample_zero_based = index.rem %selection, %magnitudes : index
+  %sample = index.add %sample_zero_based, %unit : index
+  %policy = index.div %selection, %magnitudes : index
+  %negative_case = index.cmp ne, %negative_input, %begin : index
+  %positive = index.cast %sample : index to i8
+  %negative = scalar.negi %positive : i8
+  %raw = scf.select %negative_case, %negative, %positive : i8
+  %sign = scalar.signi %raw : i8
+  %sign_absolute = scalar.absi %sign : i8
+  %widened = scalar.extui %raw : i8 to i16
+  %offset = index.cast %raw : i8 to offset
+  %sign_width = index.cast %sign_absolute : i8 to index
+  %unsigned_width = index.cast %widened : i16 to index
+  %offset_width = index.cast %offset : offset to index
+  %is_unsigned = index.cmp eq, %policy, %unit : index
+  %is_offset = index.cmp eq, %policy, %offset_policy : index
+  %width0 = scf.select %is_unsigned, %unsigned_width, %sign_width : index
+  %width = scf.select %is_offset, %offset_width, %width0 : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<[%width]xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<258xi32>
+  %end = index.constant 258 : index
+  scf.for %position = [%begin to %end step %unit] {
+    %coordinate = index.rem %position, %width : index
+    %value = view.load %source[%coordinate] : view<[%width]xi32> -> i32
+    view.store %value, %destination[%position] : i32, view<258xi32>
+  }
+  func.return
+}
+
+// The oracle derives each positive size from the sample ordinal. It uses no
+// signed payload operations or casts and reads a fixed source view.
+func.def @runtime_remainder_lookup_oracle(%input: buffer, %output: buffer, %sample_input: index, %negative_input: index) {
+  %selection = index.assume %sample_input [range(%sample_input, 0, 23)] : index
+  %begin = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %magnitudes = index.constant 8 : index
+  %sample_zero_based = index.rem %selection, %magnitudes : index
+  %sample = index.add %sample_zero_based, %unit : index
+  %policy = index.div %selection, %magnitudes : index
+  %negative_case = index.cmp ne, %negative_input, %begin : index
+  %byte_extent = index.constant 256 : index
+  %negative_unsigned = index.sub %byte_extent, %sample : index
+  %unsigned_width = scf.select %negative_case, %negative_unsigned, %sample : index
+  %is_sign = index.cmp eq, %policy, %begin : index
+  %width = scf.select %is_sign, %unit, %unsigned_width : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<256xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<258xi32>
+  %end = index.constant 258 : index
+  scf.for %position = [%begin to %end step %unit] {
+    %coordinate = index.rem %position, %width : index
+    %value = view.load %source[%coordinate] : view<256xi32> -> i32
+    view.store %value, %destination[%position] : i32, view<258xi32>
+  }
+  func.return
+}
+
 check.scenario @integer_division_i32_values {
   check.trial[10](%trial: index, %entropy: check.entropy) {
     check.compare<@division_i32_boundary>(%trial) : (index) -> [actual(%actual_signed_quotient: i32, %actual_signed_remainder: i32, %actual_unsigned_quotient: i32, %actual_unsigned_remainder: i32), expected(%expected_signed_quotient: i32, %expected_signed_remainder: i32, %expected_unsigned_quotient: i32, %expected_unsigned_remainder: i32)] {
@@ -922,6 +988,20 @@ check.scenario @runtime_group_lookup_values configure[5](%kind: index, %configur
     check.compare<@runtime_group_lookup, @runtime_group_lookup_oracle>(%input, %output, %kind, %width, %use_runtime_width) : (tensor<64xi32>, tensor<66xi32>, index, index, i1) -> () {
       check.expect.bitwise actual(%input_storage) expected(%input_storage) : tensor<72xi32>
       check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<74xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @runtime_remainder_lookup_values configure[2](%negative: index, %configuration_entropy: check.entropy) {
+  check.trial[24](%sample: index, %entropy: check.entropy) {
+    %input_storage = check.generate.iota offset(-311) step(7) : tensor<264xi32>
+    %output_storage = check.generate.fill value(-889275714) : tensor<266xi32>
+    %input = check.tensor.view %input_storage offset(16) : tensor<264xi32> -> tensor<256xi32>
+    %output = check.tensor.view %output_storage offset(16) : tensor<266xi32> -> tensor<258xi32>
+    check.compare<@runtime_remainder_lookup, @runtime_remainder_lookup_oracle>(%input, %output, %sample, %negative) : (tensor<256xi32>, tensor<258xi32>, index, index) -> () {
+      check.expect.bitwise actual(%input_storage) expected(%input_storage) : tensor<264xi32>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<266xi32>
     }
   }
   check.return

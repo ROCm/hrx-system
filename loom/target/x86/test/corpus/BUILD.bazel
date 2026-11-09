@@ -70,7 +70,6 @@ loom_corpus_test(
             "numeric/float/logarithm.loom:@ordinary_logarithm_values": "LOWERING/036",
             "numeric/float/roots.loom:@cube_root_values": "LOWERING/036",
             "numeric/float/turns.loom:@turn_values": "LOWERING/036",
-            "numeric/integer/scalar_observations.loom:@address_cast_values": "TARGET/002",
         },
     },
 )

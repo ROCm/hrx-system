@@ -310,13 +310,12 @@ func.def target(@target) @int8_operation_requires_target_feature(%lhs: i8, %rhs:
 spirv.target<vulkan1_3> @target
 
 func.def target(@target) @int8_address_term_requires_target_feature(%input: i8, %table: buffer) -> (i32) {
-  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_s_convert.i8.i32", constraint_key="descriptor_available"}
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_u_convert.u8.u32", constraint_key="descriptor_available"}
   %coordinate = index.cast %input : i8 to index
   %bias = index.constant 128 : index
   %position = index.add %coordinate, %bias : index
   %base = index.constant 0 : offset
   %view = buffer.view %table[%base] : buffer -> view<256xi32>
-  // ERROR@+1: SPIRV/028 {constraint_key="source_memory.address_numeric_carriers"}
   %loaded = view.load %view[%position] : view<256xi32> -> i32
   func.return %loaded : i32
 }

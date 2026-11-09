@@ -81,3 +81,43 @@ func.def @signed_range(%input: i32) -> (i64, i64) {
   %maximum = scalar.constant 2147483647 : i64
   func.return %minimum, %maximum : i64, i64
 }
+
+// ====
+
+// Mixed lanes preserve zero exclusion independently. Uniform sign summaries
+// can also establish an exact magnitude without making the signed input exact.
+func.def @nonzero_lane_magnitudes(%input: i8) -> (i1, i1, i1, i1, i1, i64) {
+  %nonzero = scalar.assume %input [range(%input, -8, 8), ne(%input, 0)] : i8
+  %inactive = scalar.constant 0 : i8
+  %lanes = vector.from_elements %nonzero, %inactive : vector<2xi8>
+  %negative = vector.negi %lanes : vector<2xi8>
+  %absolute = vector.absi %lanes : vector<2xi8>
+  %uniform = vector.splat %nonzero : vector<2xi8>
+  %sign = vector.signi %uniform : vector<2xi8>
+  %sign_magnitude = vector.absi %sign : vector<2xi8>
+  %offsets = vector.index_cast %lanes : vector<2xi8> to vector<2xoffset>
+  %a = vector.extract %negative[0] : vector<2xi8> -> i8
+  %b = vector.extract %absolute[0] : vector<2xi8> -> i8
+  %c = vector.extract %absolute[1] : vector<2xi8> -> i8
+  %d = vector.extract %sign[1] : vector<2xi8> -> i8
+  %e = vector.extract %offsets[0] : vector<2xoffset> -> offset
+  %magnitude = vector.extract %sign_magnitude[0] : vector<2xi8> -> i8
+  %an = test.fact_non_zero %a : i8 -> i1
+  %bn = test.fact_non_zero %b : i8 -> i1
+  %cn = test.fact_non_zero %c : i8 -> i1
+  %dn = test.fact_non_zero %d : i8 -> i1
+  %en = test.fact_non_zero %e : offset -> i1
+  %value = test.fact_range_lo %magnitude : i8 -> i64
+  func.return %an, %bn, %cn, %dn, %en, %value : i1, i1, i1, i1, i1, i64
+}
+
+// ----
+func.def @nonzero_lane_magnitudes(%input: i8) -> (i1, i1, i1, i1, i1, i64) {
+  %an = scalar.constant true : i1
+  %bn = scalar.constant true : i1
+  %cn = scalar.constant false : i1
+  %dn = scalar.constant true : i1
+  %en = scalar.constant true : i1
+  %value = scalar.constant 1 : i64
+  func.return %an, %bn, %cn, %dn, %en, %value : i1, i1, i1, i1, i1, i64
+}

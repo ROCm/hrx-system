@@ -1065,6 +1065,9 @@ void loom_value_facts_negi(const loom_value_facts_t* input,
                            loom_value_facts_t* out);
 void loom_value_facts_absi(const loom_value_facts_t* input,
                            loom_value_facts_t* out);
+// Sign maps integer inputs to -1, 0, or 1 (Boolean inputs remain [0,1]).
+void loom_value_facts_signi(const loom_value_facts_t* input,
+                            loom_value_facts_t* out);
 
 // Ternary: fused multiply-add (a*b + c).
 void loom_value_facts_fmai(const loom_value_facts_t* a,

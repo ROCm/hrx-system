@@ -1505,6 +1505,71 @@ TEST(AbsiTransfer, MinimumSignedValueMayRemainNegative) {
   }
 }
 
+TEST(UnaryIntegerFacts, NonzeroAliasesAndMagnitudeBounds) {
+  auto input = loom_value_facts_make(-8, 8, 2);
+  input.flags |= LOOM_VALUE_FACT_NON_ZERO;
+  loom_value_facts_mark_workgroup_uniform(&input);
+  for (auto transfer :
+       {loom_value_facts_negi, loom_value_facts_absi, loom_value_facts_signi}) {
+    loom_value_facts_t output;
+    transfer(&input, &output);
+    EXPECT_TRUE(loom_value_facts_is_non_zero(output));
+    EXPECT_TRUE(loom_value_facts_is_workgroup_uniform(output));
+    auto aliased = input;
+    transfer(&aliased, &aliased);
+    EXPECT_TRUE(loom_value_facts_equal(output, aliased));
+  }
+  loom_value_facts_t output;
+  loom_value_facts_absi(&input, &output);
+  EXPECT_EQ(output.range_lo, 1);
+  EXPECT_EQ(output.range_hi, 8);
+  EXPECT_EQ(output.known_divisor, 2);
+  auto powers = loom_value_facts_make(2, 8, 2);
+  powers.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+  loom_value_facts_absi(&powers, &output);
+  EXPECT_TRUE(loom_value_facts_equal(powers, output));
+  loom_value_facts_signi(&powers, &output);
+  EXPECT_TRUE(loom_value_facts_is_exact(output));
+  EXPECT_EQ(output.range_lo, 1);
+  const auto zero = loom_value_facts_exact_i64(0);
+  loom_value_facts_subi(&zero, &input, &output);
+  EXPECT_TRUE(loom_value_facts_is_non_zero(output));
+}
+
+TEST(IntegerExtensionFacts, NonzeroAndDivisibilityAcrossWidths) {
+  for (int32_t bit_count : {1, 8, 16, 32}) {
+    SCOPED_TRACE(bit_count);
+    const int64_t extent = INT64_C(1) << bit_count;
+    const int64_t minimum = bit_count == 1 ? 0 : -extent / 2;
+    const int64_t maximum = bit_count == 1 ? 1 : extent / 2 - 1;
+    auto input = loom_value_facts_make(minimum, maximum, 1);
+    input.flags |= LOOM_VALUE_FACT_NON_ZERO;
+    loom_value_facts_mark_lane_varying(&input);
+    auto widened = loom_value_facts_zero_extend(input, bit_count);
+    EXPECT_TRUE(loom_value_facts_is_non_zero(widened));
+    EXPECT_TRUE(loom_value_facts_is_lane_varying(widened));
+    for (int64_t value : {minimum, INT64_C(-1), INT64_C(1), maximum}) {
+      if (value == 0 || value < input.range_lo || value > input.range_hi) {
+        continue;
+      }
+      const int64_t expected = static_cast<uint64_t>(value) & (extent - 1);
+      EXPECT_LE(widened.range_lo, expected);
+      EXPECT_GE(widened.range_hi, expected);
+    }
+    auto signed_widened = loom_value_facts_sign_extend(input, bit_count);
+    EXPECT_TRUE(loom_value_facts_is_non_zero(signed_widened));
+    input.flags &= ~LOOM_VALUE_FACT_NON_ZERO;
+    widened = loom_value_facts_zero_extend(input, bit_count);
+    EXPECT_FALSE(loom_value_facts_is_non_zero(widened));
+    EXPECT_EQ(widened.range_lo, 0);
+    if (bit_count > 1) {
+      input.known_divisor = 4;
+      widened = loom_value_facts_zero_extend(input, bit_count);
+      EXPECT_EQ(widened.known_divisor, 4);
+    }
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // Transfer functions: rotates
 //===----------------------------------------------------------------------===//
