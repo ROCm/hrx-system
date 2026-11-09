@@ -89,6 +89,8 @@ typedef struct loom_value_fact_segment_t {
   loom_value_facts_t entries[LOOM_VALUE_FACT_SEGMENT_CAPACITY];
   // Scope membership for entries in this segment.
   uint64_t touched_bits;
+  // First value ID of the next touched segment, or INVALID at the tail.
+  loom_value_id_t next_touched_segment_id;
   // Transient publication generations while iterative replay is active.
   uint32_t* replay_generations;
 } loom_value_fact_segment_t;
@@ -164,8 +166,8 @@ struct loom_fact_context_t {
 };
 
 struct loom_value_fact_table_t {
-  // Arena for reusable fact segments, their pointer directory, touched-value,
-  // and oversized extension storage.
+  // Arena for reusable fact segments, their pointer directory, and oversized
+  // extension storage.
   iree_arena_allocator_t* arena;
   // Arena for pooled extension entries, payloads, hash buckets, and scratch.
   iree_arena_allocator_t* transient_arena;
@@ -184,13 +186,11 @@ struct loom_value_fact_table_t {
   iree_host_size_t count;
   // Allocated entry count across the active segments.
   iree_host_size_t capacity;
-  // Values with numeric facts or direct-origin storage in the scope,
+  // First value ID of the touched-segment list, or INVALID when empty.
+  loom_value_id_t first_touched_segment_id;
+  // Number of values with numeric facts or direct-origin storage in the scope,
   // including temporarily undefined entries.
-  loom_value_id_t* touched_values;
-  // Number of populated entries in touched_values.
   iree_host_size_t touched_count;
-  // Allocated touched_values entry count.
-  iree_host_size_t touched_capacity;
   // Type kinds of results defined in the current scope. Incremental rewrites
   // retain kinds until the scope is cleared, making this a conservative set.
   uint32_t result_type_kind_bits;
@@ -511,9 +511,8 @@ iree_status_t loom_value_fact_table_reserve(loom_value_fact_table_t* table,
 
 // Clears facts populated in the current scope and forgets transient extension
 // payload, hash, and scratch state. Callers that provided a separate transient
-// arena should reset that arena after this call. Direct-address segments,
-// touched-value storage, and oversized extension entries remain allocated for
-// reuse.
+// arena should reset that arena after this call. Direct-address segments and
+// oversized extension entries remain allocated for reuse.
 void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table);
 
 // Retains unique scope membership without defining numeric facts. Direct-origin
@@ -521,6 +520,29 @@ void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table);
 // work.
 iree_status_t loom_value_fact_table_touch(loom_value_fact_table_t* table,
                                           loom_value_id_t value_id);
+
+// Allocation-free cursor over the values retained in a populated fact scope.
+// Values appear exactly once in deterministic but unspecified order. Updating
+// facts or origins for existing members is permitted; changing scope membership
+// or clearing the table invalidates an active cursor.
+typedef struct loom_value_fact_scope_iterator_t {
+  // Table whose touched-segment list is being traversed.
+  const loom_value_fact_table_t* table;
+  // First value ID of the current segment, or INVALID after exhaustion.
+  loom_value_id_t segment_value_id;
+  // Values in the current segment that have not yet been returned.
+  uint64_t remaining_bits;
+} loom_value_fact_scope_iterator_t;
+
+// Begins iterating values retained in |table|. A NULL or empty table produces
+// an empty range.
+void loom_value_fact_table_scope_begin(
+    const loom_value_fact_table_t* table,
+    loom_value_fact_scope_iterator_t* out_iterator);
+
+// Returns the next retained value or INVALID at the end of the range.
+loom_value_id_t loom_value_fact_scope_next(
+    loom_value_fact_scope_iterator_t* iterator);
 
 // Retains a dependency in a preallocated active collector. Reads allocate
 // nothing; their owning solve publishes complete snapshots at completion.
@@ -739,14 +761,6 @@ iree_status_t loom_value_fact_table_define(loom_value_fact_table_t* table,
 // update without removing its scope membership or allocating another record.
 void loom_value_fact_table_undefine(loom_value_fact_table_t* table,
                                     loom_value_id_t value_id);
-
-// Returns the sparse value index for the populated fact scope. The borrowed
-// values are unique, appear in first-definition order, and remain valid until
-// the scope is cleared. Values temporarily undefined during a cyclic solve
-// remain in the index so consumers observe the complete analyzed scope.
-void loom_value_fact_table_scope_values(const loom_value_fact_table_t* table,
-                                        const loom_value_id_t** out_value_ids,
-                                        iree_host_size_t* out_value_count);
 
 // Returns true when the populated scope has defined a result of |type_kind|.
 static inline bool loom_value_fact_table_has_result_type_kind(

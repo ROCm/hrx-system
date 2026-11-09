@@ -443,11 +443,12 @@ iree_status_t loom_value_fact_table_define_exact_lane_origin(
             (table->exact_lane_origins.count - index) *
                 sizeof(*table->exact_lane_origins.entries));
   }
-  table->exact_lane_origins.entries[index] =
-      (loom_value_fact_exact_lane_origin_entry_t){
-          .value_id = value_id,
-          .origin = origin,
-      };
+  loom_value_fact_exact_lane_origin_entry_t* entry =
+      &table->exact_lane_origins.entries[index];
+  *entry = (loom_value_fact_exact_lane_origin_entry_t){
+      .value_id = value_id,
+      .origin = origin,
+  };
   ++table->exact_lane_origins.count;
   return iree_ok_status();
 }
@@ -997,15 +998,16 @@ static void loom_value_fact_table_clear_origin_families(
     const uint32_t origin_id =
         table->contextual_query_origins.entries[loom_value_fact_range_offset(
             table->contextual_query_origins.range, value_id)];
-    if (origin_id &&
-        table->contextual_query_origins.origins[origin_id - 1].family_kind !=
-            LOOM_PARAMETERIZED_ATTR_KIND_ANY) {
-      table->contextual_query_origins.origins[origin_id - 1] =
-          (loom_value_fact_contextual_query_origin_t){
-              .family_kind = LOOM_PARAMETERIZED_ATTR_KIND_ANY,
-          };
-      loom_value_fact_table_record_origin(
-          table, value_id, LOOM_VALUE_FACT_ORIGIN_CONTEXTUAL_QUERY, true);
+    if (origin_id) {
+      loom_value_fact_contextual_query_origin_t* origin =
+          &table->contextual_query_origins.origins[origin_id - 1];
+      if (origin->family_kind != LOOM_PARAMETERIZED_ATTR_KIND_ANY) {
+        *origin = (loom_value_fact_contextual_query_origin_t){
+            .family_kind = LOOM_PARAMETERIZED_ATTR_KIND_ANY,
+        };
+        loom_value_fact_table_record_origin(
+            table, value_id, LOOM_VALUE_FACT_ORIGIN_CONTEXTUAL_QUERY, true);
+      }
     }
   }
   if ((families & LOOM_VALUE_FACT_ORIGIN_LAYOUT) && table->layout_origins) {
@@ -1019,17 +1021,24 @@ void loom_value_fact_table_clear_origins(loom_value_fact_table_t* table,
 }
 
 void loom_value_fact_table_clear_origin_scope(loom_value_fact_table_t* table) {
-  for (iree_host_size_t i = 0; i < table->touched_count; ++i) {
+  loom_value_fact_scope_iterator_t iterator;
+  loom_value_fact_table_scope_begin(table, &iterator);
+  for (loom_value_id_t value_id = loom_value_fact_scope_next(&iterator);
+       value_id != LOOM_VALUE_ID_INVALID;
+       value_id = loom_value_fact_scope_next(&iterator)) {
     loom_value_fact_table_clear_origin_families(
-        table, table->touched_values[i],
+        table, value_id,
         LOOM_VALUE_FACT_ORIGIN_UNIFORM_ELEMENT |
             LOOM_VALUE_FACT_ORIGIN_STATIC_LANE |
             LOOM_VALUE_FACT_ORIGIN_UNIFORM_SCALE);
   }
   if (table->exact_scalar_origins.entries) {
-    for (iree_host_size_t i = 0; i < table->touched_count; ++i) {
+    loom_value_fact_table_scope_begin(table, &iterator);
+    for (loom_value_id_t value_id = loom_value_fact_scope_next(&iterator);
+         value_id != LOOM_VALUE_ID_INVALID;
+         value_id = loom_value_fact_scope_next(&iterator)) {
       loom_value_fact_table_clear_origin_families(
-          table, table->touched_values[i], LOOM_VALUE_FACT_ORIGIN_EXACT_SCALAR);
+          table, value_id, LOOM_VALUE_FACT_ORIGIN_EXACT_SCALAR);
     }
   }
   for (iree_host_size_t i = 0;

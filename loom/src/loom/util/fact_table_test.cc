@@ -6,9 +6,11 @@
 
 #include "loom/util/fact_table.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <vector>
 
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
@@ -17,6 +19,20 @@
 
 namespace loom {
 namespace {
+
+static std::vector<loom_value_id_t> CollectScopeValues(
+    const loom_value_fact_table_t* table) {
+  std::vector<loom_value_id_t> values;
+  loom_value_fact_scope_iterator_t iterator;
+  loom_value_fact_table_scope_begin(table, &iterator);
+  for (loom_value_id_t value_id = loom_value_fact_scope_next(&iterator);
+       value_id != LOOM_VALUE_ID_INVALID;
+       value_id = loom_value_fact_scope_next(&iterator)) {
+    values.push_back(value_id);
+  }
+  std::sort(values.begin(), values.end());
+  return values;
+}
 
 class FactTableTest : public ::testing::Test {
  protected:
@@ -179,17 +195,15 @@ TEST_F(FactTableTest, UndefinedEntriesRetainScopeMembershipAcrossGrowth) {
   IREE_ASSERT_OK(
       loom_value_fact_table_define(&table, 129, loom_value_facts_exact_i64(9)));
 
-  const loom_value_id_t* scope_values = nullptr;
-  iree_host_size_t scope_value_count = 0;
-  loom_value_fact_table_scope_values(&table, &scope_values, &scope_value_count);
-  ASSERT_EQ(scope_value_count, 2u);
+  auto scope_values = CollectScopeValues(&table);
+  ASSERT_EQ(scope_values.size(), 2u);
   EXPECT_EQ(scope_values[0], 2u);
   EXPECT_EQ(scope_values[1], 129u);
 
   loom_value_fact_table_t clone;
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&clone, &arena_, 4));
   IREE_ASSERT_OK(loom_value_fact_table_clone_values(
-      &clone, {&table, scope_values, scope_value_count}, nullptr));
+      &clone, {&table, scope_values.data(), scope_values.size()}, nullptr));
   EXPECT_FALSE(loom_value_fact_table_has_entry(&clone, 2));
   EXPECT_EQ(loom_value_fact_table_lookup(&clone, 129).range_lo, 9);
   IREE_ASSERT_OK(
@@ -197,8 +211,7 @@ TEST_F(FactTableTest, UndefinedEntriesRetainScopeMembershipAcrossGrowth) {
   EXPECT_EQ(table.touched_count, 2u);
 
   loom_value_fact_table_clear_scope(&table);
-  loom_value_fact_table_scope_values(&table, &scope_values, &scope_value_count);
-  EXPECT_EQ(scope_value_count, 0u);
+  EXPECT_TRUE(CollectScopeValues(&table).empty());
   EXPECT_FALSE(loom_value_fact_table_has_entry(&table, 2));
   EXPECT_FALSE(loom_value_fact_table_has_entry(&table, 129));
   IREE_ASSERT_OK(loom_value_fact_table_define(&table, 129,
@@ -208,6 +221,8 @@ TEST_F(FactTableTest, UndefinedEntriesRetainScopeMembershipAcrossGrowth) {
 
 TEST_F(FactTableTest, ZeroInitIsValid) {
   loom_value_fact_table_t table = {0};
+  EXPECT_TRUE(CollectScopeValues(nullptr).empty());
+  EXPECT_TRUE(CollectScopeValues(&table).empty());
   // Lookup on empty table returns unknown.
   loom_value_facts_t facts = loom_value_fact_table_lookup(&table, 0);
   EXPECT_TRUE(loom_value_facts_is_unknown(facts));
@@ -312,7 +327,6 @@ TEST_F(FactTableTest, ClearScopeClearsOnlyTouchedEntriesAndKeepsStorage) {
       loom_value_fact_table_define(&table, 8, loom_value_facts_exact_i64(7)));
 
   loom_value_fact_segment_t* const first_segment = table.segments[0];
-  loom_value_id_t* const touched_values = table.touched_values;
   EXPECT_EQ(table.touched_count, 2u);
   EXPECT_TRUE(
       loom_value_facts_is_exact(loom_value_fact_table_lookup(&table, 5)));
@@ -323,7 +337,6 @@ TEST_F(FactTableTest, ClearScopeClearsOnlyTouchedEntriesAndKeepsStorage) {
   iree_arena_reset(&transient_arena);
 
   EXPECT_EQ(table.segments[0], first_segment);
-  EXPECT_EQ(table.touched_values, touched_values);
   EXPECT_EQ(table.touched_count, 0u);
   EXPECT_EQ(table.count, 0u);
   EXPECT_TRUE(
@@ -1230,9 +1243,9 @@ TEST_F(FactTableTest, CloneValuesReinternsExtensions) {
   iree_arena_initialize(&block_pool_, &target_arena);
   loom_value_fact_table_t target = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&target, &target_arena, 8));
+  const auto scope_values = CollectScopeValues(&source);
   IREE_ASSERT_OK(loom_value_fact_table_clone_values(
-      &target, {&source, source.touched_values, source.touched_count},
-      nullptr));
+      &target, {&source, scope_values.data(), scope_values.size()}, nullptr));
 
   loom_value_facts_t cloned_facts = loom_value_fact_table_lookup(&target, 7);
   EXPECT_NE(cloned_facts.extension_id, LOOM_VALUE_FACT_EXTENSION_ID_NONE);

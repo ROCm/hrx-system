@@ -654,13 +654,13 @@ static void loom_fact_refinement_append_observation(
   }
   IREE_ASSERT(*inout_observation_count < observation_capacity,
               "observation capacity must cover every predicate argument");
-  observations[(*inout_observation_count)++] =
-      (loom_fact_refinement_observation_t){
-          .anchor = anchor,
-          .source = source,
-          .kind = LOOM_FACT_REFINEMENT_OBSERVATION_PREDICATE,
-          .payload.predicate = normalized,
-      };
+  const iree_host_size_t observation_index = (*inout_observation_count)++;
+  observations[observation_index] = (loom_fact_refinement_observation_t){
+      .anchor = anchor,
+      .source = source,
+      .kind = LOOM_FACT_REFINEMENT_OBSERVATION_PREDICATE,
+      .payload.predicate = normalized,
+  };
 }
 
 static void loom_fact_refinement_append_exact_alias_observation(
@@ -682,13 +682,13 @@ static void loom_fact_refinement_append_exact_alias_observation(
   }
   IREE_ASSERT(*inout_observation_count < observation_capacity,
               "observation capacity must cover every identity pair");
-  observations[(*inout_observation_count)++] =
-      (loom_fact_refinement_observation_t){
-          .anchor = anchor,
-          .source = source,
-          .kind = LOOM_FACT_REFINEMENT_OBSERVATION_EXACT_ALIAS,
-          .payload.exact_alias = alias,
-      };
+  const iree_host_size_t observation_index = (*inout_observation_count)++;
+  observations[observation_index] = (loom_fact_refinement_observation_t){
+      .anchor = anchor,
+      .source = source,
+      .kind = LOOM_FACT_REFINEMENT_OBSERVATION_EXACT_ALIAS,
+      .payload.exact_alias = alias,
+  };
 }
 
 static bool loom_fact_refinement_candidate_is_still_exact(
