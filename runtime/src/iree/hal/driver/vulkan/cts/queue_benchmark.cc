@@ -230,6 +230,31 @@ class TransferChain {
                                      values_.size() * sizeof(uint32_t));
   }
 
+  // Exercise both host transfer directions before measuring a resident chain.
+  // Retained staging resources must not silently change steady-state costs.
+  iree_status_t PrimeStaging() {
+    const auto length = values_.size() * sizeof(uint32_t);
+    uint64_t next_value = submitted_value_ + 1;
+    iree_hal_semaphore_list_t signals = {1, &timeline_, &next_value};
+    IREE_RETURN_IF_ERROR(
+        iree_hal_queue_upload(queue_, iree_hal_semaphore_list_empty(), signals,
+                              values_.data(), buffer_, 0, length, nullptr));
+    submitted_value_ = next_value;
+    IREE_RETURN_IF_ERROR(Wait());
+    std::vector<uint32_t> received(values_.size());
+    ++next_value;
+    IREE_RETURN_IF_ERROR(iree_hal_queue_download(
+        queue_, iree_hal_semaphore_list_empty(), signals, buffer_, 0,
+        received.data(), length, nullptr));
+    submitted_value_ = next_value;
+    IREE_RETURN_IF_ERROR(Wait());
+    if (received != values_) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "staged round trip did not preserve input");
+    }
+    return iree_ok_status();
+  }
+
   iree_status_t Submit(Submission submission) {
     const iree_host_size_t count = submission == Submission::kRecorded ? 1
                                    : submission == Submission::kMixed
@@ -307,7 +332,7 @@ class TransferChain {
   std::vector<uint32_t> values_;
 };
 
-template <Submission kSubmission, bool kSubmitOnly>
+template <Submission kSubmission, bool kSubmitOnly, bool kUsedStaging = false>
 void BM_TransferChain(benchmark::State& state) {
   QueueDevice device;
   iree::Status status = device.Initialize();
@@ -325,6 +350,9 @@ void BM_TransferChain(benchmark::State& state) {
   // resident dependency chain. The first use includes device setup work.
   if (status.ok()) {
     status = chain.Reset();
+  }
+  if (status.ok() && kUsedStaging) {
+    status = chain.PrimeStaging();
   }
   if (status.ok()) {
     status = chain.Submit(kSubmission);
@@ -386,6 +414,13 @@ BENCHMARK_TEMPLATE(BM_TransferChain, Submission::kExecute, true)
     ->Name("VulkanTransferChain/ExecuteSubmit")
     ->Arg(1)
     ->Arg(8)
+    ->Arg(32)
+    ->Arg(512)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+BENCHMARK_TEMPLATE(BM_TransferChain, Submission::kExecute, false, true)
+    ->Name("VulkanTransferChain/ExecuteAfterStaging")
+    ->Arg(1)
     ->Arg(32)
     ->Arg(512)
     ->MeasureProcessCPUTime()
