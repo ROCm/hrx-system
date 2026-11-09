@@ -66,25 +66,52 @@ typedef struct iree_hal_amd_gpu_pm4_program_arguments_t {
   iree_hal_amd_gpu_blit_arguments_t copy;
 } iree_hal_amd_gpu_pm4_program_arguments_t;
 
+// Four pointer replacements reuse retired recorder storage without a separate
+// allocation. Keeping this small bounds CPU work and primary-ring traffic;
+// larger or byte-unaligned tables use the parallel shader replacement path.
+enum {
+  IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_CAPACITY = 8,
+  IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_VALUE_CAPACITY =
+      IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_CAPACITY + 5,
+  IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_WORD_CAPACITY =
+      IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_CAPACITY * 5,
+};
+
+// Returns the confirmed WRITE_DATA extent for an admitted small table, or
+// zero when a destination needs the shader's byte-aligned store semantics.
+// Adjacent replacement words share one packet. Called only during sealing.
+uint32_t iree_hal_amd_gpu_pm4_fixup_packet_word_count(
+    const iree_hal_amd_gpu_fixup_t* entries, uint32_t entry_count);
+
+// Evaluates the bounded recorded replacements using CPU-cacheable values and
+// emits confirmed immediate writes. Neither the target nor output is read.
+// All destinations are DWORD aligned as established by the sealing plan.
+uint32_t* iree_hal_amd_gpu_pm4_fixup_packets_emit(
+    const iree_hal_amd_gpu_fixup_t* entries, uint32_t entry_count,
+    const uint64_t* values, uint64_t target_address, uint32_t* words);
+
 // Native invocation extent, excluding caller-owned waits, optional padding,
 // and retirement. The reservation remains exclusive through emission, so the
 // same initialized/join facts govern both sizing and encoding.
 uint32_t iree_hal_amd_gpu_pm4_program_word_count(
     const iree_hal_amd_gpu_program_t* program,
     const iree_hal_amd_gpu_program_instance_t* instance,
-    const iree_hal_amd_gpu_pm4_barrier_profile_t* profile);
+    const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
+    uint32_t fixup_word_count);
 
 // Publishes host input, initializes a cold placement, applies all fixups, and
 // enters the resident block. Actual producer/consumer cache paths determine
 // visibility. Padding precedes the final entry, including terminal CHAIN.
-// No command, binding, or fixup entry is walked on the host here.
+// A bounded, already encoded fixup sequence replaces the shader when supplied.
+// No recorded command or unbounded fixup table is walked on the host here.
 uint32_t* iree_hal_amd_gpu_pm4_program_emit(
     const iree_hal_amd_gpu_program_t* program,
     const iree_hal_amd_gpu_program_instance_t* instance,
     iree_hal_amd_gpu_pm4_program_block_t entry,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     uint64_t argument_address,
-    iree_hal_amd_gpu_pm4_program_arguments_t* arguments, uint32_t padding,
+    iree_hal_amd_gpu_pm4_program_arguments_t* arguments,
+    uint32_t fixup_word_count, const uint32_t* fixup_words, uint32_t padding,
     uint32_t* words);
 
 // Emits a launch for a nonempty, admitted fixup table. Workgroups contain 64

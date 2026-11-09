@@ -377,7 +377,7 @@ void Graph(benchmark::State& state) {
 
 void GraphArguments(benchmark::Benchmark* benchmark) {
   for (int host : {0, 1}) {
-    for (int count : {1, 32, 256}) {
+    for (int count : {1, 2, 4, 8, 16, 32, 256}) {
       for (int batch : {1, 32}) {
         benchmark->Args({count, batch, host});
       }
