@@ -612,6 +612,17 @@ class Translator final : private Initialization::Evaluation {
     size_t destruction_mark;
   };
 
+  // Evaluated source reference into one nontrivial temporary object. Geometry
+  // remains explicit when a returned reference denotes a base or subobject.
+  struct TemporaryReference {
+    // Stable construction-instance index in the current cleanup queue.
+    size_t index;
+    // First SSA component within the complete temporary's current value.
+    size_t component_offset = 0;
+    // Source-layout displacement if the complete object becomes addressable.
+    uint64_t byte_offset = 0;
+  };
+
   // One completed source object awaiting destruction. Automatic bindings and
   // current receiver fields resolve their latest value at the cleanup edge;
   // temporary objects retain the value or storage created by their expression.
@@ -632,8 +643,8 @@ class Translator final : private Initialization::Evaluation {
     std::optional<StorageProjection> storage;
     // Conditional temporary activation flag, stored outside its source arm.
     std::optional<StorageAccess> activity;
-    // Current value identity used to transfer or replace result ownership.
-    std::optional<Value> identity;
+    // Canonical construction site; each evaluation gets its own cleanup entry.
+    cxx::ExpressionAST* origin = nullptr;
     // Source declaration or expression owning the implicit call location.
     cxx::AST* source = nullptr;
   };
@@ -815,31 +826,6 @@ class Translator final : private Initialization::Evaluation {
     }
   }
 
-  static bool same_value(Value left, Value right) {
-    return &left.partition() == &right.partition() &&
-           std::ranges::equal(left.components(), right.components());
-  }
-
-  bool owns_temporary_result(cxx::ExpressionAST* expression) {
-    if (!expression ||
-        expression->valueCategory != cxx::ValueCategory::kPrValue ||
-        !unit_.typeTraits().is_class(expression->type)) {
-      return false;
-    }
-    return cxx::ast_cast<cxx::CallExpressionAST>(expression) ||
-           cxx::ast_cast<cxx::TypeConstructionAST>(expression) ||
-           cxx::ast_cast<cxx::BracedTypeConstructionAST>(expression) ||
-           cxx::ast_cast<cxx::BracedInitListAST>(expression) ||
-           cxx::ast_cast<cxx::ParenInitializerAST>(expression) ||
-           cxx::ast_cast<cxx::ConditionalExpressionAST>(expression) ||
-           (cxx::ast_cast<cxx::SubscriptExpressionAST>(expression) &&
-            cxx::ast_cast<cxx::SubscriptExpressionAST>(expression)->symbol) ||
-           direct_operator_call(expression).has_value() ||
-           (cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression) &&
-            cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression)
-                ->conversionFunction);
-  }
-
   void materialize_conditional_temporary(DestructionAction& action) {
     IREE_ASSERT(!conditional_cleanup_anchors_.empty());
     IREE_ASSERT(action.value);
@@ -875,26 +861,51 @@ class Translator final : private Initialization::Evaluation {
     IREE_ASSERT_LE(mark, temporary_destructions_.size());
     for (size_t index = mark; index < temporary_destructions_.size(); ++index) {
       auto& action = temporary_destructions_[index];
-      if (action.value) {
-        materialize_conditional_temporary(action);
+      if (action && action->value) {
+        materialize_conditional_temporary(*action);
       }
     }
   }
 
-  Value retain_temporary(cxx::ExpressionAST* expression, Value value) {
-    if (!owns_temporary_result(expression)) {
+  std::optional<TemporaryReference> temporary_result(
+      cxx::ExpressionAST* expression) const {
+    auto* origin = control_->temporary_origins().materialization(expression);
+    auto found = temporary_results_.find(origin);
+    return found == temporary_results_.end()
+               ? std::nullopt
+               : std::optional(TemporaryReference{found->second});
+  }
+
+  void forget_temporary(size_t index) {
+    const auto& action = *temporary_destructions_[index];
+    auto found = temporary_results_.find(action.origin);
+    if (found != temporary_results_.end() && found->second == index) {
+      temporary_results_.erase(found);
+    }
+    temporary_destructions_[index].reset();
+  }
+
+  Value retain_temporary(cxx::ExpressionAST* expression, Value value,
+                         size_t evaluation_mark) {
+    auto* origin = control_->temporary_origins().result(expression);
+    if (!origin) {
       return value;
     }
-    auto destruction = destruction_for(unit_, expression->type);
-    if (!destruction) {
+    const auto& destruction = control_->temporary_origins().destruction(origin);
+    // Transparent syntax can complete an object already created by a child.
+    // A later evaluation of the same source construction is a distinct object.
+    auto found = temporary_results_.find(origin);
+    if (found != temporary_results_.end() && found->second >= evaluation_mark) {
+      temporary_destructions_[found->second]->value = value;
       return value;
     }
     IREE_ASSERT(full_expression_mark_);
-    temporary_destructions_.push_back({
-        .destruction = *destruction,
+    temporary_results_.insert_or_assign(origin, temporary_destructions_.size());
+    temporary_destructions_.push_back(DestructionAction{
+        .destruction = destruction,
         .object_type = expression->type,
         .value = value,
-        .identity = value,
+        .origin = origin,
         .source = expression,
     });
     return value;
@@ -915,84 +926,73 @@ class Translator final : private Initialization::Evaluation {
     IREE_ASSERT_LE(expression.mark, temporary_destructions_.size());
     for (size_t index = temporary_destructions_.size(); index > expression.mark;
          --index) {
-      emit_destruction(temporary_destructions_[index - 1]);
+      if (temporary_destructions_[index - 1]) {
+        emit_destruction(*temporary_destructions_[index - 1]);
+        forget_temporary(index - 1);
+      }
     }
     temporary_destructions_.resize(expression.mark);
     full_expression_mark_ = expression.parent_mark;
   }
 
-  bool adopt_temporary(Value value) {
-    IREE_ASSERT(full_expression_mark_);
-    auto mark = *full_expression_mark_;
-    for (size_t index = temporary_destructions_.size(); index > mark; --index) {
-      auto& action = temporary_destructions_[index - 1];
-      if (action.identity && same_value(*action.identity, value)) {
-        temporary_destructions_.erase(temporary_destructions_.begin() +
-                                      (index - 1));
-        return true;
-      }
-    }
-    return false;
-  }
-
-  // Carries a mutable receiver result into its pending temporary
-  // destruction. Cleanup must observe the updated source object and its
-  // current transferable identity.
-  void update_temporary(Value previous, Value updated) {
-    IREE_ASSERT(full_expression_mark_);
-    auto mark = *full_expression_mark_;
-    for (size_t index = temporary_destructions_.size(); index > mark; --index) {
-      auto& action = temporary_destructions_[index - 1];
-      if (!action.identity || !same_value(*action.identity, previous)) {
-        continue;
-      }
-      IREE_ASSERT(action.value && !action.storage);
-      action.value = updated;
-      action.identity = updated;
-      return;
+  // Result ownership transfers by construction identity, independently of
+  // the immutable payload and the number of transparent syntax wrappers.
+  void adopt_temporary_result(cxx::ExpressionAST* expression) {
+    auto* origin = control_->temporary_origins().result(expression);
+    auto found = temporary_results_.find(origin);
+    if (found != temporary_results_.end()) {
+      forget_temporary(found->second);
     }
   }
 
-  bool adopt_temporary_result(cxx::ExpressionAST* expression, Value value) {
-    if (!expression ||
-        !cxx::materializedTemporary(unit_.typeTraits(), expression)) {
-      return false;
+  void update_temporary(std::optional<TemporaryReference> temporary,
+                        Value updated, const cxx::Type* type, cxx::AST* owner) {
+    if (temporary) {
+      auto& action = *temporary_destructions_[temporary->index];
+      if (action.storage) {
+        objects_.store(
+            storage_.subobject(*action.storage, temporary->byte_offset, owner),
+            updated, type, owner);
+      } else {
+        action.value = value_arena_.replace(
+            *action.value, temporary->component_offset, updated);
+      }
     }
-    return adopt_temporary(value);
   }
 
-  StorageProjection materialize_temporary(cxx::ExpressionAST* expression,
-                                          Value value) {
-    IREE_ASSERT(full_expression_mark_);
-    auto mark = *full_expression_mark_;
-    for (size_t index = temporary_destructions_.size(); index > mark; --index) {
-      auto& action = temporary_destructions_[index - 1];
-      if (!action.identity || !same_value(*action.identity, value)) {
-        continue;
-      }
+  StorageProjection materialize_temporary(
+      cxx::ExpressionAST* expression, Value value,
+      std::optional<TemporaryReference> temporary = std::nullopt) {
+    if (!temporary) {
+      temporary = temporary_result(expression);
+    }
+    if (temporary) {
+      auto& action = *temporary_destructions_[temporary->index];
       if (!action.storage) {
         if (conditional_cleanup_anchors_.empty()) {
           auto allocation = storage_.allocate(
-              expression->type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0,
+              action.object_type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0,
               expression);
           action.storage = storage_.project(allocation.pointer,
-                                            expression->type, expression);
-          objects_.store(*action.storage, value, expression->type, expression);
+                                            action.object_type, expression);
+          objects_.store(*action.storage, *action.value, action.object_type,
+                         expression);
           action.value.reset();
         } else {
           materialize_conditional_temporary(action);
         }
       }
       auto storage = *action.storage;
-      if (extend_temporary_lifetime_) {
-        active_destructions_.push_back(std::move(action));
-        temporary_destructions_.erase(temporary_destructions_.begin() +
-                                      (index - 1));
+      if (temporary->byte_offset) {
+        storage =
+            storage_.subobject(storage, temporary->byte_offset, expression);
+      }
+      if (control_->temporary_origins().extended(action.origin)) {
+        active_destructions_.push_back(action);
+        forget_temporary(temporary->index);
       }
       return storage;
     }
-    IREE_ASSERT(!cxx::materializedTemporary(unit_.typeTraits(), expression) ||
-                !destruction_for(unit_, expression->type));
     auto allocation = storage_.allocate(
         expression->type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, expression);
     auto storage =
@@ -1142,7 +1142,7 @@ class Translator final : private Initialization::Evaluation {
     } else {
       auto value = convert(statement->expression, current_function_.return_type,
                            statement);
-      adopt_temporary_result(statement->expression, value);
+      adopt_temporary_result(statement->expression);
       value.append_to(returned.values);
     }
     return returned;
@@ -1225,9 +1225,9 @@ class Translator final : private Initialization::Evaluation {
     locals_.clear();
     active_destructions_.clear();
     temporary_destructions_.clear();
+    temporary_results_.clear();
     full_expression_mark_.reset();
     conditional_cleanup_anchors_.clear();
-    extend_temporary_lifetime_ = false;
     break_destruction_marks_.clear();
     continue_destruction_marks_.clear();
     immutable_storage_.clear();
@@ -1520,8 +1520,6 @@ class Translator final : private Initialization::Evaluation {
              "reference locals require one initializer expression");
       }
       auto* referent = unit_.typeTraits().remove_reference(variable->type());
-      const bool previous_extension = extend_temporary_lifetime_;
-      extend_temporary_lifetime_ = true;
       auto target =
           control_->reference_requires_storage(variable)
               ? Lvalue{ObjectLvalue{
@@ -1533,7 +1531,6 @@ class Translator final : private Initialization::Evaluation {
                                  unit_.typeTraits().is_const(referent)
                                      ? LvalueAccess::Read
                                      : LvalueAccess::Write);
-      extend_temporary_lifetime_ = previous_extension;
       references_.emplace(variable, std::move(target));
       return;
     }
@@ -1582,7 +1579,7 @@ class Translator final : private Initialization::Evaluation {
                     : initialization_.value(variable->type(), nullptr,
                                             variable->constructor(), owner),
         constexpr_contract);
-    adopt_temporary_result(initializer, value);
+    adopt_temporary_result(initializer);
     values_.set(variable, name(value, cxx::to_string(variable->name())));
     activate_automatic_destruction(variable, owner);
   }
@@ -1672,7 +1669,7 @@ class Translator final : private Initialization::Evaluation {
     auto* decision = declaration->symbol;
     auto value = apply_constexpr_contract(expression(declaration->initializer),
                                           constexpr_contract);
-    adopt_temporary_result(declaration->initializer, value);
+    adopt_temporary_result(declaration->initializer);
     if (auto found = locals_.find(decision); found != locals_.end()) {
       storage_.store({found->second.view, std::nullopt}, value.ssa(),
                      decision->type(), owner);
@@ -2068,10 +2065,10 @@ class Translator final : private Initialization::Evaluation {
             unit_.typeTraits().remove_reference(signature->returnType()), ast);
       }
     }
-    if (ast->valueCategory == cxx::ValueCategory::kPrValue &&
-        !unit_.typeTraits().is_array(ast->type)) {
+    if (ast->valueCategory == cxx::ValueCategory::kPrValue) {
       auto value = expression(ast);
-      if (unit_.typeTraits().is_class(ast->type)) {
+      if (unit_.typeTraits().is_class(ast->type) ||
+          unit_.typeTraits().is_array(ast->type)) {
         return materialize_temporary(ast, value);
       }
       auto allocation = storage_.allocate(
@@ -2180,6 +2177,8 @@ class Translator final : private Initialization::Evaluation {
     std::optional<Value> value;
     // Exact source destination named by a value-reference result.
     std::optional<Lvalue> reference_target;
+    // Unnamed source object aliased by this reference result, if nontrivial.
+    std::optional<TemporaryReference> temporary;
   };
 
   enum class LvalueAccess { Read, Write };
@@ -2489,7 +2488,8 @@ class Translator final : private Initialization::Evaluation {
         // An exact alias of an unnamed receiver still names that temporary.
         // Materialization moves its existing cleanup action onto storage.
         return {ObjectLvalue{projected->type,
-                             materialize_temporary(projected, *called->value)}};
+                             materialize_temporary(projected, *called->value,
+                                                   called->temporary)}};
       }
       fail(owner, "reference result has no retained source destination");
     }
@@ -2834,16 +2834,16 @@ class Translator final : private Initialization::Evaluation {
 
   struct ReferenceWriteback {
     // Once-evaluated lvalue receiving the mutable result, absent for a prvalue
-    // temporary whose current value is retained by |source|.
+    // temporary identified by its evaluated cleanup token.
     std::optional<Lvalue> target;
-    // Source value transported through the call operand.
-    Value source;
     // Admitted value representation transported through the call.
     const Partition* partition;
     // Unqualified source value type used to bind the returned value.
     const cxx::Type* value_type;
     // First flattened call operand for this source parameter.
     size_t argument_offset;
+    // Exact evaluated temporary receiving this writeback, if nontrivial.
+    std::optional<TemporaryReference> temporary;
   };
 
   // One reference result proven to alias an already evaluated source argument.
@@ -2856,6 +2856,8 @@ class Translator final : private Initialization::Evaluation {
     std::optional<Lvalue> target;
     // First flattened call operand occupied by the aliased parameter.
     size_t argument_offset;
+    // Evaluated unnamed object retained when the reference escapes this call.
+    std::optional<TemporaryReference> temporary;
   };
 
   // One source argument evaluated exactly once, before its components are
@@ -2873,6 +2875,8 @@ class Translator final : private Initialization::Evaluation {
     const Partition* reference_partition = nullptr;
     // Unqualified value type of a mutable value reference.
     const cxx::Type* writeback_type = nullptr;
+    // Exact temporary construction evaluated for this argument.
+    std::optional<TemporaryReference> temporary;
   };
 
   EvaluatedCallArgument evaluate_call_argument(
@@ -2880,7 +2884,7 @@ class Translator final : private Initialization::Evaluation {
       const ReferenceParameter* reference, cxx::AST* owner) {
     if (!reference) {
       auto value = expression(argument);
-      adopt_temporary_result(argument, value);
+      adopt_temporary_result(argument);
       return {.value = value};
     }
     auto* expected_type = types_.unqualified_value(parameter->type());
@@ -2893,10 +2897,12 @@ class Translator final : private Initialization::Evaluation {
     }
     std::optional<Lvalue> target;
     std::optional<Value> value;
+    std::optional<TemporaryReference> temporary;
     if (argument->valueCategory != cxx::ValueCategory::kPrValue) {
       if (auto called = reference_call(argument)) {
         IREE_ASSERT(called->value && !called->value->is_pointer());
         target = std::move(called->reference_target);
+        temporary = called->temporary;
         if (!target) {
           value = *called->value;
         }
@@ -2907,12 +2913,14 @@ class Translator final : private Initialization::Evaluation {
       }
     } else {
       value = expression(argument);
+      temporary = temporary_result(argument);
     }
     return {
         .value = value,
         .target = std::move(target),
         .reference_partition = &expected_partition,
         .writeback_type = reference->mutable_access ? expected_type : nullptr,
+        .temporary = temporary,
     };
   }
 
@@ -2938,21 +2946,15 @@ class Translator final : private Initialization::Evaluation {
     if (argument.writeback_type) {
       writebacks.push_back({
           .target = std::move(argument.target),
-          .source = *argument.value,
           .partition = argument.reference_partition,
           .value_type = argument.writeback_type,
           .argument_offset = argument_offset,
+          .temporary = argument.temporary,
       });
     }
   }
 
   struct ReceiverArgument {
-    struct EnclosingTemporary {
-      // Complete temporary whose lifetime encloses the selected base call.
-      Value value;
-      // Retained base slice replaced by the callee's updated receiver.
-      const SubobjectProjection* selection;
-    };
     // Native callable specialization selected by receiver ownership.
     ImplicitObjectABI abi;
     // Prvalue record or resolved storage pointer, when evaluated eagerly.
@@ -2965,8 +2967,8 @@ class Translator final : private Initialization::Evaluation {
     bool current;
     // Exact top-level fields returned by a value receiver call.
     std::span<cxx::Symbol* const> written_fields;
-    // Present only when a value receiver projects a base of a temporary.
-    std::optional<EnclosingTemporary> enclosing;
+    // Exact evaluated temporary whose current payload cleanup must observe.
+    std::optional<TemporaryReference> temporary;
   };
 
   ReceiverArgument current_receiver_argument(
@@ -3103,7 +3105,7 @@ class Translator final : private Initialization::Evaluation {
       return admit({ImplicitObjectABI::Value,
                     called->reference_target ? std::nullopt : called->value,
                     record, std::move(called->reference_target), false,
-                    written_fields});
+                    written_fields, called->temporary});
     }
 
     bool direct_prvalue =
@@ -3135,7 +3137,7 @@ class Translator final : private Initialization::Evaluation {
                 written_fields};
       }
       return admit({ImplicitObjectABI::Value, value, record, std::nullopt,
-                    false, written_fields});
+                    false, written_fields, temporary_result(receiver)});
     }
 
     auto target =
@@ -3187,8 +3189,10 @@ class Translator final : private Initialization::Evaluation {
     } else if (result.target) {
       result.target = result.target->project(selected, type, storage_, owner);
     } else {
-      result.enclosing =
-          ReceiverArgument::EnclosingTemporary{*result.value, &selected};
+      if (result.temporary) {
+        result.temporary->component_offset += selected.component_offset;
+        result.temporary->byte_offset += selected.byte_offset;
+      }
       result.value =
           result.value->project(*selected.partition, selected.component_offset);
     }
@@ -3240,16 +3244,8 @@ class Translator final : private Initialization::Evaluation {
       write(*receiver.target, value, owner);
     } else {
       IREE_ASSERT(receiver.value);
-      if (receiver.enclosing) {
-        auto complete = receiver.enclosing->value;
-        update_temporary(
-            complete,
-            value_arena_.replace(
-                complete, receiver.enclosing->selection->component_offset,
-                value));
-      } else {
-        update_temporary(*receiver.value, value);
-      }
+      update_temporary(receiver.temporary, value,
+                       receiver.record->source->type(), owner);
     }
   }
 
@@ -3863,7 +3859,8 @@ class Translator final : private Initialization::Evaluation {
       if (writeback.target) {
         write(*writeback.target, updated, call);
       } else {
-        update_temporary(writeback.source, updated);
+        update_temporary(writeback.temporary, updated, writeback.value_type,
+                         call);
       }
       if (reference_result_alias && reference_result_alias->argument_offset ==
                                         writeback.argument_offset) {
@@ -3884,12 +3881,14 @@ class Translator final : private Initialization::Evaluation {
                             signature->returnType()),
                         CurrentReceiver{receivers_.current()->record}}}
                   : receiver->target,
+          .temporary = receiver->temporary,
       };
     }
     if (reference_result_alias) {
       return {
           .value = reference_result_alias->value,
           .reference_target = std::move(reference_result_alias->target),
+          .temporary = reference_result_alias->temporary,
       };
     }
     return {
@@ -3917,7 +3916,7 @@ class Translator final : private Initialization::Evaluation {
         auto* argument = source_arguments.next();
         IREE_ASSERT(argument);
         auto value = expression(argument);
-        adopt_temporary_result(argument, value);
+        adopt_temporary_result(argument);
         value.append_to(arguments);
       }
       while (auto* variadic_argument = source_arguments.next()) {
@@ -4026,7 +4025,8 @@ class Translator final : private Initialization::Evaluation {
       materialize_call_argument(evaluated, call);
       if (return_parameter == ordinal) {
         reference_result_alias = {*evaluated.value, evaluated.target,
-                                  receiver_argument_count + arguments.size()};
+                                  receiver_argument_count + arguments.size(),
+                                  evaluated.temporary};
       }
       append_call_argument(std::move(evaluated), receiver_argument_count,
                            arguments, writebacks);
@@ -4422,7 +4422,7 @@ class Translator final : private Initialization::Evaluation {
                                Value value) {
     auto* arm = frame.building_then ? frame.expression->iftrueExpression
                                     : frame.expression->iffalseExpression;
-    adopt_temporary_result(arm, value);
+    adopt_temporary_result(arm);
     materialize_conditional_temporaries(frame.temporary_mark);
     std::vector<loom_value_id_t> yielded;
     value.append_to(yielded);
@@ -4458,12 +4458,12 @@ class Translator final : private Initialization::Evaluation {
           expression, condition,
           [&] {
             auto value = this->expression(expression->iftrueExpression);
-            adopt_temporary_result(expression->iftrueExpression, value);
+            adopt_temporary_result(expression->iftrueExpression);
             return value;
           },
           [&] {
             auto value = this->expression(expression->iffalseExpression);
-            adopt_temporary_result(expression->iffalseExpression, value);
+            adopt_temporary_result(expression->iffalseExpression);
             return value;
           });
     }
@@ -4680,11 +4680,13 @@ class Translator final : private Initialization::Evaluation {
   }
 
   Value expression(cxx::ExpressionAST* ast) override {
-    return retain_temporary(ast, expression_impl(ast));
+    const size_t evaluation_mark = temporary_destructions_.size();
+    auto value = expression_impl(ast);
+    return retain_temporary(ast, value, evaluation_mark);
   }
 
-  void adopt(cxx::ExpressionAST* expression, Value value) override {
-    adopt_temporary_result(expression, value);
+  void adopt(cxx::ExpressionAST* expression) override {
+    adopt_temporary_result(expression);
   }
 
   Value expression_impl(cxx::ExpressionAST* ast) {
@@ -7267,16 +7269,16 @@ class Translator final : private Initialization::Evaluation {
   // Nontrivial prvalue results retained until the innermost full expression
   // completes. Result-object transfer removes only the selected final value;
   // side temporaries retain reverse construction order.
-  std::vector<DestructionAction> temporary_destructions_;
+  std::vector<std::optional<DestructionAction>> temporary_destructions_;
+  // Latest evaluated result at each retained construction site. Cleanup tokens
+  // remain stable when another result is adopted or extended to lexical scope.
+  std::unordered_map<cxx::ExpressionAST*, size_t> temporary_results_;
   // Temporary prefix owned by the current full expression. Lexical caller
   // tokens retain parent marks without a heap-backed translator stack.
   std::optional<size_t> full_expression_mark_;
   // Structured conditional expressions hoist branch-only temporary storage
   // before the outermost conditional operation so cleanup remains dominated.
   std::vector<loom_builder_ip_t> conditional_cleanup_anchors_;
-  // Local reference initialization transfers materialized result objects from
-  // full-expression cleanup to the surrounding lexical destruction stack.
-  bool extend_temporary_lifetime_ = false;
   // Lexical cleanup boundaries for the innermost break and continue targets.
   std::vector<size_t> break_destruction_marks_;
   std::vector<size_t> continue_destruction_marks_;

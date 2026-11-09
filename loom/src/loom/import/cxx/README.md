@@ -2425,6 +2425,40 @@ result without another constructor or destructor. Exported C++ retains the
 resulting calls, effects, and cleanup, independently of the original class
 spelling.
 
+Each temporary has its own lifetime even when its initial value equals another
+object's value. Calls that update a temporary through a reference preserve that
+object's latest state for destruction, including references into a base class:
+
+```cpp
+void retire(unsigned value);
+
+struct Sample {
+  unsigned value;
+  Sample& replace(unsigned next) {
+    value = next;
+    return *this;
+  }
+  ~Sample() { retire(value); }
+};
+
+void submit() {
+  Sample{7}.replace(9);  // retire(9) runs at the end of this statement.
+}
+```
+
+Direct reference binding can extend a temporary through the reference's scope.
+A function returning a reference to that object does not extend its lifetime.
+An immediately invoked lambda destroys its owned captures when the temporary
+closure's full expression ends, after the invocation returns.
+
+Array initialization preserves the distinction between explicit element clauses
+and omitted elements. A default argument used to construct an omitted element
+is destroyed before the next element starts construction. The same rule applies
+to default arguments of element copy constructors when copying a complete array.
+Temporaries written in explicit element initializers retain their enclosing
+full-expression lifetime. Binding a reference to an element of a temporary
+array extends the lifetime of the complete array.
+
 ### Ordinary overloaded operators
 
 Admitted values can use ordinary member and free operator functions. The C++

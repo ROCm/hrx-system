@@ -10,6 +10,16 @@ Cases share `automatic_destruction.cxx-test` through `// ====` sections. The
 identity, closure captures, and structured bindings, including their source
 lifetime consequences.
 
+The neighboring `origins_test` checks construction identity and the reference
+forms that extend lifetimes. The VM's
+[temporary lifetime cases](../../../../target/arch/vm/test/temporary_lifetimes.cxx-test)
+execute returned copies, closure cleanup, distinct equal-valued objects, and
+references into nonzero-offset bases. The source roundtrip target executes
+those same observations again after public C++ export and reimport.
+The adjacent `array_lifetimes.cxx-test` covers repeated constructor arguments,
+explicit versus omitted element clauses, nested and member arrays, copies,
+and complete-array lifetime extension.
+
 ```sh
 iree-bazel-test --config=asan --config=loom-importer-cxx \
   //loom/src/loom/import/cxx/lifetime/test:compiler_test

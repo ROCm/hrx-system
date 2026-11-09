@@ -103,6 +103,24 @@ loom_check_test(
     ]),
 )
 
+loom_check_test(
+    name = "temporary_lifetimes_test",
+    src = "temporary_lifetimes.cxx-test",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/emit:vm_binary",
+    ]),
+)
+
+loom_check_test(
+    name = "array_lifetimes_test",
+    src = "array_lifetimes.cxx-test",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/emit:vm_binary",
+    ]),
+)
+
 iree_py_test(
     name = "source_roundtrip_test",
     size = "small",
@@ -111,16 +129,20 @@ iree_py_test(
         "--importer=$(rootpath //loom/src/loom/tools/loom-import-cxx)",
         "--checker=$(rootpath //loom/src/loom/tools/loom-check:loom-check-test)",
         "--source=$(rootpath special_members.cxx-test)",
+        "--source=$(rootpath temporary_lifetimes.cxx-test)",
+        "--source=$(rootpath array_lifetimes.cxx-test)",
         "--source=$(rootpath value_evaluation.cxx-test)",
         "--source=$(rootpath structured_results.cxx-test)",
         "--source=$(rootpath structured_results.loom-test)",
         "--source=$(rootpath buffer_projection.loom-test)",
     ],
     data = [
+        "array_lifetimes.cxx-test",
         "buffer_projection.loom-test",
         "special_members.cxx-test",
         "structured_results.cxx-test",
         "structured_results.loom-test",
+        "temporary_lifetimes.cxx-test",
         "value_evaluation.cxx-test",
         "//loom/src/loom/tools/loom-check:loom-check-test",
         "//loom/src/loom/tools/loom-import-cxx",

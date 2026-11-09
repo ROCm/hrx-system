@@ -271,7 +271,8 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
     : unit_(unit),
       diagnostics_(diagnostics),
       types_(types),
-      function_(function) {
+      function_(function),
+      temporary_origins_(unit) {
   if (function_) {
     auto* closure = cxx::symbol_cast<cxx::ClassSymbol>(function_->parent());
     if (closure && closure->isClosureType()) {
@@ -519,6 +520,7 @@ bool ControlFlow::preVisit(cxx::AST* ast) {
 
 void ControlFlow::postVisit(cxx::AST* ast) {
   if (auto* expression = cxx::ast_cast<cxx::ExpressionAST>(ast)) {
+    temporary_origins_.retain(expression);
     cxx::Symbol* owner = nullptr;
     bool reference_member = false;
     if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression)) {
@@ -1956,15 +1958,11 @@ void ControlFlow::retain_destructor_call(const Destruction& destruction,
 }
 
 void ControlFlow::retain_temporary_destruction(cxx::ExpressionAST* expression) {
-  if (!expression ||
-      expression->valueCategory != cxx::ValueCategory::kPrValue ||
-      !unit_.typeTraits().is_class(expression->type)) {
+  auto* origin = temporary_origins_.result(expression);
+  if (origin != expression) {
     return;
   }
-  auto selected = destruction_for(unit_, expression->type);
-  if (!selected) {
-    return;
-  }
+  const auto& selected = temporary_origins_.destruction(origin);
   if (!temporary_destruction_facts_) {
     temporary_destruction_facts_ =
         std::make_unique<TemporaryDestructionFacts>();
@@ -1975,9 +1973,9 @@ void ControlFlow::retain_temporary_destruction(cxx::ExpressionAST* expression) {
       }
     }
   }
-  auto* canonical = selected->function->canonical();
+  auto* canonical = selected.function->canonical();
   if (temporary_destruction_facts_->candidates.insert(canonical).second) {
-    temporary_destruction_facts_->destructions.emplace_back(*selected,
+    temporary_destruction_facts_->destructions.emplace_back(selected,
                                                             expression);
   }
 }
@@ -2482,6 +2480,7 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
       }
       reference_aliases_.emplace(
           variable, ReferenceAlias{destination, std::move(identity)});
+      temporary_origins_.extend(referent);
     }
     retain_reference_initializers(variable, ast->initializer, ast);
     const bool record_constructor_call =
