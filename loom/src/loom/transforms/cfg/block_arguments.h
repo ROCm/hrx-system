@@ -30,6 +30,8 @@ bool loom_cfg_block_arguments_can_bind(const loom_module_t* module,
 // Returns whether forwarding an argument to an existing equal-valued source
 // preserves independent ownership. Equality and availability are separate
 // proofs: consuming uses and required storage identities keep the boundary.
+// Managed handles require a lifetime proof beyond payload equality and retain
+// their transfer boundaries, including when carried by Low register types.
 // Uses cached occurrence classifications without following users or aliases.
 bool loom_cfg_block_argument_can_forward(const loom_module_t* module,
                                          loom_value_id_t argument,

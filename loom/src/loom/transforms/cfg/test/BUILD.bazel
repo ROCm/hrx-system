@@ -34,5 +34,6 @@ loom_check_test_suite(
         "cfg_simplify_scf_pipeline.loom-test",
         "dead_state.loom-test",
         "low_branches.loom-test",
+        "managed_forwarding.loom-test",
     ],
 )

@@ -1,0 +1,146 @@
+// Replacing one of two owners of a shared payload preserves the other owner.
+// Constant selector refinement must preserve ownership transfers during CFG
+// simplification.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%identity: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "read") @read(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def noinline @replace_and_read(%first: ref<@Object>, %second: ref<@Object>, %replacement: ref<@Object>, %replace_second: i1, %observe_second: i1) -> (ref<@Object>, ref<@Object>) {
+  cfg.cond_br %replace_second, ^replace_second, ^replace_first
+^replace_first:
+  ref.release %first : ref<@Object>
+  cfg.br ^read_current(%replacement: ref<@Object>, %second: ref<@Object>)
+^replace_second:
+  ref.release %second : ref<@Object>
+  cfg.br ^read_current(%first: ref<@Object>, %replacement: ref<@Object>)
+^read_current(%current_first: ref<@Object>, %current_second: ref<@Object>):
+  cfg.cond_br %observe_second, ^read_second, ^read_first
+^read_first:
+  %left_pointer = ref.borrow %current_first : ref<@Object> -> ptr<@Object>
+  func.call @read(%left_pointer) : (ptr<@Object>)
+  cfg.br ^done(%current_first: ref<@Object>, %current_second: ref<@Object>)
+^read_second:
+  %right_pointer = ref.borrow %current_second : ref<@Object> -> ptr<@Object>
+  func.call @read(%right_pointer) : (ptr<@Object>)
+  cfg.br ^done(%current_first: ref<@Object>, %current_second: ref<@Object>)
+^done(%result_first: ref<@Object>, %result_second: ref<@Object>):
+  func.return %result_first, %result_second : ref<@Object>, ref<@Object>
+}
+
+func.def public @run() {
+  %old_id = scalar.constant 11 : i32
+  %next_id = scalar.constant 22 : i32
+  %first, %unused_old = func.call @create(%old_id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  ref.release %unused_old : ptr<@Object>
+  %second = ref.duplicate %first : ref<@Object>
+  %replacement, %unused_next = func.call @create(%next_id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  ref.release %unused_next : ptr<@Object>
+  %write_first = scalar.constant 0 : i1
+  %read_second = scalar.constant 1 : i1
+  %current_first, %current_second = func.call @replace_and_read(%first, %second, %replacement, %write_first, %read_second) : (ref<@Object>, ref<@Object>, ref<@Object>, i1, i1) -> (ref<@Object>, ref<@Object>)
+  %first_pointer = ref.borrow %current_first : ref<@Object> -> ptr<@Object>
+  func.call @read(%first_pointer) : (ptr<@Object>)
+  %second_pointer = ref.borrow %current_second : ref<@Object> -> ptr<@Object>
+  func.call @read(%second_pointer) : (ptr<@Object>)
+  ref.release %current_first : ref<@Object>
+  func.call @observe() : ()
+  ref.release %current_second : ref<@Object>
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 11
+create 22
+read 11
+read 22
+read 11
+destroy 22
+live 1
+destroy 11
+live 0
+OK 0
+retired 0
+
+// ====
+
+// RUN: with-low-asm pass cfg-simplify
+vm.target<core> @vm
+
+// A returned identity must remain downstream of its ownership transfer.
+// A payload-equality proof alone cannot bypass that boundary.
+type.decl import("provider", "object") @Object
+
+low.func.decl target<vm.core>(@vm) @observe(%value: reg<vm.ref : ptr<@Object>>)
+
+low.func.def target<vm.core>(@vm) @forward_ref(%input: reg<vm.ref : ref<@Object>>) -> (reg<vm.ref : ref<@Object>>) asm {
+  low.br ^current(%input: reg<vm.ref : ref<@Object>>)
+^current(%value: reg<vm.ref : ref<@Object>>):
+  %pointer = borrow %value : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ptr<@Object>>
+  low.func.call @observe(%pointer) : (reg<vm.ref : ptr<@Object>>)
+  low.br ^exit(%value: reg<vm.ref : ref<@Object>>)
+^exit(%result: reg<vm.ref : ref<@Object>>):
+  return %result
+}
+
+// ----
+vm.target<core> @vm
+
+type.decl import("provider", "object") @Object
+
+low.func.decl target<vm.core>(@vm) @observe(%value: reg<vm.ref : ptr<@Object>>)
+
+low.func.def target<vm.core>(@vm) @forward_ref(%input: reg<vm.ref : ref<@Object>>) -> (reg<vm.ref : ref<@Object>>) asm {
+  low.br ^current(%input: reg<vm.ref : ref<@Object>>)
+^current(%value: reg<vm.ref : ref<@Object>>):
+  %pointer = borrow %value : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ptr<@Object>>
+  low.func.call @observe(%pointer) : (reg<vm.ref : ptr<@Object>>)
+  low.br ^exit(%value: reg<vm.ref : ref<@Object>>)
+^exit(%result: reg<vm.ref : ref<@Object>>):
+  return %result
+}
+
+// ====
+
+// RUN: with-low-asm pass cfg-simplify
+vm.target<core> @vm
+
+// A returned identity must remain downstream of its ownership transfer.
+// A payload-equality proof alone cannot bypass that boundary.
+type.decl import("provider", "object") @Object
+
+low.func.decl target<vm.core>(@vm) @observe(%value: reg<vm.ref : ptr<@Object>>)
+
+low.func.def target<vm.core>(@vm) @forward_ptr(%input: reg<vm.ref : ptr<@Object>>) -> (reg<vm.ref : ptr<@Object>>) asm {
+  low.br ^current(%input: reg<vm.ref : ptr<@Object>>)
+^current(%value: reg<vm.ref : ptr<@Object>>):
+  %copy = copy %value : reg<vm.ref : ptr<@Object>> -> reg<vm.ref : ptr<@Object>>
+  low.release %copy : reg<vm.ref : ptr<@Object>>
+  low.func.call @observe(%value) : (reg<vm.ref : ptr<@Object>>)
+  low.br ^exit(%value: reg<vm.ref : ptr<@Object>>)
+^exit(%result: reg<vm.ref : ptr<@Object>>):
+  return %result
+}
+
+// ----
+vm.target<core> @vm
+
+type.decl import("provider", "object") @Object
+
+low.func.decl target<vm.core>(@vm) @observe(%value: reg<vm.ref : ptr<@Object>>)
+
+low.func.def target<vm.core>(@vm) @forward_ptr(%input: reg<vm.ref : ptr<@Object>>) -> (reg<vm.ref : ptr<@Object>>) asm {
+  low.br ^current(%input: reg<vm.ref : ptr<@Object>>)
+^current(%value: reg<vm.ref : ptr<@Object>>):
+  %copy = copy %value : reg<vm.ref : ptr<@Object>> -> reg<vm.ref : ptr<@Object>>
+  low.release %copy : reg<vm.ref : ptr<@Object>>
+  low.func.call @observe(%value) : (reg<vm.ref : ptr<@Object>>)
+  low.br ^exit(%value: reg<vm.ref : ptr<@Object>>)
+^exit(%result: reg<vm.ref : ptr<@Object>>):
+  return %result
+}

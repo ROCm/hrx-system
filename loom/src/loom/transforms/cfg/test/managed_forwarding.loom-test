@@ -1,0 +1,69 @@
+// RUN: pass cfg-simplify
+
+// A returned identity must remain downstream of its ownership transfer.
+// A payload-equality proof alone cannot bypass that boundary.
+type.decl import("provider", "object") @Object
+
+func.decl @observe(%value: ptr<@Object>)
+
+func.def @forward_ref(%input: ref<@Object>) -> (ref<@Object>) {
+  cfg.br ^current(%input: ref<@Object>)
+^current(%value: ref<@Object>):
+  %pointer = ref.borrow %value : ref<@Object> -> ptr<@Object>
+  func.call @observe(%pointer) : (ptr<@Object>)
+  cfg.br ^exit(%value: ref<@Object>)
+^exit(%result: ref<@Object>):
+  func.return %result : ref<@Object>
+}
+
+// ----
+type.decl import("provider", "object") @Object
+
+func.decl @observe(%value: ptr<@Object>)
+
+func.def @forward_ref(%input: ref<@Object>) -> (ref<@Object>) {
+  cfg.br ^current(%input: ref<@Object>)
+^current(%value: ref<@Object>):
+  %pointer = ref.borrow %value : ref<@Object> -> ptr<@Object>
+  func.call @observe(%pointer) : (ptr<@Object>)
+  cfg.br ^exit(%value: ref<@Object>)
+^exit(%result: ref<@Object>):
+  func.return %result : ref<@Object>
+}
+
+// ====
+
+// RUN: pass cfg-simplify
+
+// A returned identity must remain downstream of its ownership transfer.
+// A payload-equality proof alone cannot bypass that boundary.
+type.decl import("provider", "object") @Object
+
+func.decl @observe(%value: ptr<@Object>)
+
+func.def @forward_ptr(%input: ptr<@Object>) -> (ptr<@Object>) {
+  cfg.br ^current(%input: ptr<@Object>)
+^current(%value: ptr<@Object>):
+  %copy = ref.duplicate %value : ptr<@Object>
+  ref.release %copy : ptr<@Object>
+  func.call @observe(%value) : (ptr<@Object>)
+  cfg.br ^exit(%value: ptr<@Object>)
+^exit(%result: ptr<@Object>):
+  func.return %result : ptr<@Object>
+}
+
+// ----
+type.decl import("provider", "object") @Object
+
+func.decl @observe(%value: ptr<@Object>)
+
+func.def @forward_ptr(%input: ptr<@Object>) -> (ptr<@Object>) {
+  cfg.br ^current(%input: ptr<@Object>)
+^current(%value: ptr<@Object>):
+  %copy = ref.duplicate %value : ptr<@Object>
+  ref.release %copy : ptr<@Object>
+  func.call @observe(%value) : (ptr<@Object>)
+  cfg.br ^exit(%value: ptr<@Object>)
+^exit(%result: ptr<@Object>):
+  func.return %result : ptr<@Object>
+}
