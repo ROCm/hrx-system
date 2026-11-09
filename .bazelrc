@@ -228,6 +228,9 @@ build:msan --config=sanitizer
 build:msan --features=msan
 build:msan --copt=-fsanitize=memory
 build:msan --copt=-fsanitize-memory-track-origins
+# Fortified libc calls can become plain stores after MSAN instrumentation in
+# ThinLTO. Expose memory intrinsics before instrumentation so shadow stays valid.
+build:msan --copt=-U_FORTIFY_SOURCE
 build:msan --linkopt=-fsanitize=memory
 build:msan --cc_output_directory_tag=msan
 build:msan --copt=-DMEMORY_SANITIZER
