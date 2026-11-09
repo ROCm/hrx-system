@@ -267,6 +267,14 @@ static iree_status_t hrx_graph_record_partition(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_command_buffer_begin(command_buffer));
 
+  // Queue execution orders work but does not import or publish payload writes.
+  const iree_hal_barrier_t acquire_barrier = {
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+      .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
+  };
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_command_buffer_barrier(command_buffer, &acquire_barrier));
+
   const iree_string_view_t label_name = iree_make_cstring_view("tbd_partition");
   const iree_hal_label_location_t* location = NULL;
   const iree_hal_label_color_t label_color = iree_hal_label_color_unspecified();
@@ -343,6 +351,13 @@ static iree_status_t hrx_graph_record_partition(
     }
   }
 
+  if (iree_status_is_ok(status)) {
+    const iree_hal_barrier_t release_barrier = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+        .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+    };
+    status = iree_hal_command_buffer_barrier(command_buffer, &release_barrier);
+  }
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_end_debug_group(command_buffer);
   }
