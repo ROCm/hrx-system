@@ -15,6 +15,15 @@ package(
     licenses = ["notice"],
 )
 
+iree_runtime_cc_benchmark(
+    name = "transfer_chain_benchmark",
+    args = ["--device=xdna"],
+    deps = [
+        "//runtime/src/iree/hal/cts/queue:queue_benchmark",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
 iree_runtime_cc_library(
     name = "backends",
     testonly = True,
