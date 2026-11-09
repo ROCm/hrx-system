@@ -15,6 +15,8 @@ struct iree_hal_amd_fabric_allocation_entry_t {
   amdf_endpoint_id_t endpoint_id;
   // NUMA placement, or UINT32_MAX for unspecified placement.
   uint32_t node_id;
+  // Live device acquisitions, protected by the fabric allocation mutex.
+  iree_host_size_t acquisition_count;
   // Fabric-owned queue shared by logical contexts of this endpoint and node.
   iree_hal_amd_fabric_allocation_queue_t* queue;
 };
@@ -73,6 +75,7 @@ iree_status_t iree_hal_amd_fabric_acquire_allocation_queue(
       if (iree_status_is_ok(status)) {
         entry->endpoint_id = *endpoint_id;
         entry->node_id = node_id;
+        entry->acquisition_count = 0;
         entry->next = fabric->allocations;
         fabric->allocations = entry;
       } else {
@@ -81,11 +84,39 @@ iree_status_t iree_hal_amd_fabric_acquire_allocation_queue(
     }
   }
   if (iree_status_is_ok(status)) {
+    ++entry->acquisition_count;
     iree_hal_amd_fabric_allocation_queue_retain(entry->queue);
     *out_queue = entry->queue;
   }
   iree_slim_mutex_unlock(&fabric->allocation_mutex);
   return status;
+}
+
+void iree_hal_amd_fabric_release_allocation_queue(
+    iree_hal_amd_fabric_t* fabric,
+    iree_hal_amd_fabric_allocation_queue_t* queue) {
+  if (!queue) {
+    return;
+  }
+  iree_hal_amd_fabric_allocation_entry_t* retired = NULL;
+  iree_slim_mutex_lock(&fabric->allocation_mutex);
+  iree_hal_amd_fabric_allocation_entry_t** link = &fabric->allocations;
+  while ((*link)->queue != queue) {
+    link = &(*link)->next;
+  }
+  iree_hal_amd_fabric_allocation_entry_t* entry = *link;
+  if (--entry->acquisition_count == 0) {
+    *link = entry->next;
+    retired = entry;
+  }
+  iree_slim_mutex_unlock(&fabric->allocation_mutex);
+  // Joining the final worker must not hold the cache lock and serialize new
+  // device acquisitions behind its thread exit.
+  if (retired) {
+    iree_hal_amd_fabric_allocation_queue_release(retired->queue);
+    iree_allocator_free(fabric->host_allocator, retired);
+  }
+  iree_hal_amd_fabric_allocation_queue_release(queue);
 }
 
 void iree_hal_amd_fabric_retain(iree_hal_amd_fabric_t* fabric) {
@@ -101,12 +132,7 @@ void iree_hal_amd_fabric_release(iree_hal_amd_fabric_t* fabric) {
   if (iree_atomic_ref_count_dec(&fabric->ref_count) != 1) {
     return;
   }
-  while (fabric->allocations) {
-    iree_hal_amd_fabric_allocation_entry_t* entry = fabric->allocations;
-    fabric->allocations = entry->next;
-    iree_hal_amd_fabric_allocation_queue_release(entry->queue);
-    iree_allocator_free(fabric->host_allocator, entry);
-  }
+  IREE_ASSERT(!fabric->allocations);
   if (fabric->instance) {
     const amdf_status_t status =
         fabric->api->instance_destroy(fabric->instance);

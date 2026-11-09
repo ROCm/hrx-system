@@ -23,7 +23,8 @@ typedef struct iree_hal_amd_fabric_allocation_entry_t
 // Shared native identity and allocation domains for AMD execution engines.
 // The driver and every materialized device retain this owner independently.
 // Discovery is immutable; endpoint-local allocation queues are acquired on
-// demand. Engine resources and private scopes belong to the consuming device.
+// demand and retired with their last device acquisition. Engine resources and
+// private scopes belong to the consuming device.
 // Sharing native identity does not grant access across sealed HAL groups.
 typedef struct iree_hal_amd_fabric_t {
   // References held by native owners; never modified directly by consumers.
@@ -42,7 +43,7 @@ typedef struct iree_hal_amd_fabric_t {
   amdf_endpoint_summary_t* endpoints;
   // Protects cold allocation-domain construction, never native batch execution.
   iree_slim_mutex_t allocation_mutex;
-  // Owned native queues, one per physical endpoint and requested NUMA node.
+  // Active allocation domains, one per physical endpoint and requested node.
   iree_hal_amd_fabric_allocation_entry_t* allocations;
 } iree_hal_amd_fabric_t;
 
@@ -81,10 +82,22 @@ iree_status_t iree_hal_amd_fabric_query_physical_device_identity(
 // Logical contexts of the same endpoint share a queue at the same placement;
 // other endpoints progress independently. Native provider synchronization is
 // unchanged. The selected progress entry supplies |node_id|; UINT32_MAX leaves
-// placement unspecified. The caller releases the returned queue reference.
+// placement unspecified. Each successful acquisition must be paired with
+// iree_hal_amd_fabric_release_allocation_queue while the fabric remains live.
+// Providers and accepted requests may retain independent queue references.
 iree_status_t iree_hal_amd_fabric_acquire_allocation_queue(
     iree_hal_amd_fabric_t* fabric, const amdf_endpoint_id_t* endpoint_id,
     uint32_t node_id, iree_hal_amd_fabric_allocation_queue_t** out_queue);
+
+// Releases one device acquisition after its native work and callback tails
+// have drained. The last acquisition removes the shared domain and releases
+// its worker; the native connection remains available for later devices.
+// Independent queue references remain valid until released. This is a cold
+// lifecycle operation and must not run from the queue's worker. NULL is
+// ignored.
+void iree_hal_amd_fabric_release_allocation_queue(
+    iree_hal_amd_fabric_t* fabric,
+    iree_hal_amd_fabric_allocation_queue_t* queue);
 
 #ifdef __cplusplus
 }  // extern "C"

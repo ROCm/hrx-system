@@ -151,7 +151,8 @@ static void iree_hal_amd_xdna_device_free(iree_hal_amd_xdna_device_t* device) {
   iree_hal_allocator_release(device->allocator);
   iree_hal_amd_xdna_command_arena_free(device->command_arena);
   iree_hal_amd_fabric_allocation_queue_drain(device->memory.allocation_queue);
-  iree_hal_amd_fabric_allocation_queue_release(device->memory.allocation_queue);
+  iree_hal_amd_fabric_release_allocation_queue(device->context->fabric,
+                                               device->memory.allocation_queue);
   iree_async_notification_release(device->memory.notification);
   iree_hal_device_spec_release(device->spec);
   iree_hal_amd_xdna_context_free(device->context);
@@ -273,8 +274,8 @@ iree_status_t iree_hal_amd_xdna_device_create(
     iree_hal_queue_release(device->queue);
     iree_hal_amd_xdna_command_arena_free(device->command_arena);
     iree_hal_allocator_release(device->allocator);
-    iree_hal_amd_fabric_allocation_queue_release(
-        device->memory.allocation_queue);
+    iree_hal_amd_fabric_release_allocation_queue(
+        context->fabric, device->memory.allocation_queue);
     iree_async_notification_release(device->memory.notification);
     iree_hal_device_spec_release(device->spec);
     iree_async_proactor_pool_entry_release(device->proactor_entry);

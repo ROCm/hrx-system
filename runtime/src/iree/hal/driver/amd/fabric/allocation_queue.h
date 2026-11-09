@@ -27,7 +27,8 @@ typedef struct iree_hal_amd_fabric_allocation_queue_t
 
 // Creates a ref-counted native allocation queue. A concrete NUMA node pins the
 // worker before it starts; UINT32_MAX leaves placement unspecified. Failure
-// publishes no output. The fabric retains queues for its allocation domains.
+// publishes no output. The fabric retains queues while devices acquire their
+// allocation domains; providers and accepted work hold independent references.
 iree_status_t iree_hal_amd_fabric_allocation_queue_create(
     uint32_t node_id, iree_allocator_t host_allocator,
     iree_hal_amd_fabric_allocation_queue_t** out_queue);
