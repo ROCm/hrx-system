@@ -23,7 +23,7 @@ namespace {
 class SpirvModuleValueTableTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    iree_arena_block_pool_initialize(4096, iree_allocator_system(),
+    iree_arena_block_pool_initialize(128 * 1024, iree_allocator_system(),
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
     iree_host_size_t vtable_count = 0;
@@ -83,6 +83,18 @@ class SpirvModuleValueTableTest : public ::testing::Test {
     };
   }
 
+  loom_spirv_value_type_t OffsetValueType() {
+    return loom_spirv_value_type_t{
+        .value_class = LOOM_SPIRV_VALUE_CLASS_OFFSET64,
+    };
+  }
+
+  loom_spirv_value_type_t StorageAddressValueType() {
+    return loom_spirv_value_type_t{
+        .value_class = LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS,
+    };
+  }
+
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
   loom_module_t* module_ = NULL;
@@ -125,6 +137,77 @@ TEST_F(SpirvModuleValueTableTest, ReservesDefinesAndLooksUpValueRefs) {
   EXPECT_EQ(value_ref.type_id, 7u);
   EXPECT_TRUE(
       loom_spirv_value_type_equal(value_ref.value_type, U32ValueType()));
+
+  loom_local_value_domain_release(&value_domain);
+}
+
+TEST_F(SpirvModuleValueTableTest, PreservesCompleteRefsAcrossStorageSegments) {
+  loom_value_id_t first_value = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t last_first_segment_value = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t first_second_segment_value = LOOM_VALUE_ID_INVALID;
+  for (int64_t i = 0; i < 1025; ++i) {
+    const loom_value_id_t value_id = BuildValue(i);
+    if (i == 0) {
+      first_value = value_id;
+    }
+    if (i == 1023) {
+      last_first_segment_value = value_id;
+    }
+    if (i == 1024) {
+      first_second_segment_value = value_id;
+    }
+  }
+
+  loom_local_value_domain_t value_domain = {};
+  IREE_ASSERT_OK(loom_local_value_domain_acquire_for_region(
+      module_, body_, &scratch_arena_, &value_domain));
+  iree_arena_block_pool_statistics_t before_statistics = {};
+  iree_arena_block_pool_query_statistics(&block_pool_, &before_statistics);
+  loom_spirv_module_value_table_t table = {};
+  IREE_ASSERT_OK(loom_spirv_module_value_table_initialize(
+      &value_domain, &scratch_arena_, &table));
+  ASSERT_EQ(table.ref_segment_count, 2u);
+  iree_arena_block_pool_statistics_t after_statistics = {};
+  iree_arena_block_pool_query_statistics(&block_pool_, &after_statistics);
+  EXPECT_EQ(after_statistics.oversized_allocation_count,
+            before_statistics.oversized_allocation_count);
+
+  loom_spirv_module_value_table_define(&table, first_value,
+                                       loom_spirv_module_value_ref_t{
+                                           .id = 100,
+                                           .type_id = 6,
+                                           .value_type = OffsetValueType(),
+                                       });
+  loom_spirv_module_value_table_define(
+      &table, last_first_segment_value,
+      loom_spirv_module_value_ref_t{
+          .id = 101,
+          .type_id = 6,
+          .value_type = StorageAddressValueType(),
+      });
+  loom_spirv_module_value_table_define(&table, first_second_segment_value,
+                                       loom_spirv_module_value_ref_t{
+                                           .id = 102,
+                                           .type_id = 6,
+                                           .value_type = OffsetValueType(),
+                                       });
+
+  const loom_spirv_module_value_ref_t first_ref =
+      loom_spirv_module_value_table_lookup(&table, first_value);
+  EXPECT_EQ(first_ref.id, 100u);
+  EXPECT_EQ(first_ref.type_id, 6u);
+  EXPECT_EQ(first_ref.value_type.value_class, LOOM_SPIRV_VALUE_CLASS_OFFSET64);
+  const loom_spirv_module_value_ref_t boundary_ref =
+      loom_spirv_module_value_table_lookup(&table, last_first_segment_value);
+  EXPECT_EQ(boundary_ref.id, 101u);
+  EXPECT_EQ(boundary_ref.type_id, 6u);
+  EXPECT_EQ(boundary_ref.value_type.value_class,
+            LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS);
+  const loom_spirv_module_value_ref_t next_ref =
+      loom_spirv_module_value_table_lookup(&table, first_second_segment_value);
+  EXPECT_EQ(next_ref.id, 102u);
+  EXPECT_EQ(next_ref.type_id, 6u);
+  EXPECT_EQ(next_ref.value_type.value_class, LOOM_SPIRV_VALUE_CLASS_OFFSET64);
 
   loom_local_value_domain_release(&value_domain);
 }
