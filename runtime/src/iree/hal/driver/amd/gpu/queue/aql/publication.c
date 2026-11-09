@@ -164,9 +164,7 @@ static amdf_status_t iree_hal_amd_gpu_aql_emit_waits(
   amdf_status_t status = AMDF_STATUS_OK;
   for (iree_host_size_t i = 0; i < wait_count && amdf_status_is_ok(status);
        ++i) {
-    if (waits[i].signal) {
-      dependencies[count++] = waits[i].signal->device_address;
-    }
+    dependencies[count++] = waits[i].signal->device_address;
     if (count == 5 || (i + 1 == wait_count && count)) {
       status = iree_hal_amd_gpu_aql_write_packet(
           ring, storage, position++,
@@ -185,9 +183,9 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
     iree_hal_amd_gpu_aql_queue_t* queue,
     const iree_hal_amd_gpu_aql_dispatch_request_t* request,
     iree_host_size_t wait_count, iree_hal_amd_gpu_aql_wait_t* waits,
-    uint32_t native_wait_count, iree_hal_semaphore_list_t signals,
-    uint32_t before, uint32_t after, uint64_t* addresses,
-    const iree_hal_amd_gpu_profile_operation_t* profile,
+    iree_hal_amd_gpu_aql_wait_counts_t counts,
+    iree_hal_semaphore_list_t signals, uint32_t before, uint32_t after,
+    uint64_t* addresses, const iree_hal_amd_gpu_profile_operation_t* profile,
     iree_hal_amd_gpu_aql_submission_t** inout_submission,
     iree_status_t* out_status) {
   const uint64_t position = (uint64_t)iree_atomic_load(
@@ -252,7 +250,7 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
   }
   const bool prefix = dispatch && (before & (3u << 11));
   const bool suffix = !dispatch || sampled || (after & (3u << 9));
-  const uint32_t packet_count = (native_wait_count + 4) / 5 + prefix +
+  const uint32_t packet_count = (counts.native_count + 4) / 5 + prefix +
                                 indirect + dispatch + suffix + cooperative;
   iree_hal_amd_gpu_aql_ring_t* ring = &queue->producer.ring;
   if (ring->reserved - ring->consumed + packet_count > ring->capacity) {
@@ -304,7 +302,7 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
     status = iree_hal_amd_gpu_aql_submission_retirement(
         &queue->captures,
         iree_make_byte_span(action->capture, sizeof(action->capture)), profile,
-        request, wait_count, waits, native_wait_count, signals, &submission);
+        request, wait_count, waits, counts, signals, &submission);
     if (!iree_status_is_ok(status)) {
       iree_hal_amd_gpu_signal_release(signal);
       *out_status = status;
@@ -381,8 +379,9 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
   if (indirect) {
     const uint64_t patch_offset =
         argument_offset + iree_align_uint64(kernarg_length, 8);
-    const uint64_t target_position =
-        ring->reserved + (native_wait_count + 4) / 5 + prefix + cooperative + 1;
+    const uint64_t target_position = ring->reserved +
+                                     (counts.native_count + 4) / 5 + prefix +
+                                     cooperative + 1;
     iree_hal_amd_gpu_aql_indirect_prepare(
         layout, &request->geometry, request->flags,
         iree_hal_amd_gpu_aql_ring_packet_address(ring, target_position),
@@ -407,7 +406,7 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
   iree_hal_amd_gpu_aql_accept(queue, submission, signal, position, argument_end,
                               true, true);
   amdf_status_t publication_status = iree_hal_amd_gpu_aql_emit_waits(
-      ring, &queue->storage, wait_count, waits, &packet_position);
+      ring, &queue->storage, counts.native_count, waits, &packet_position);
   const uint64_t signal_address = signal->device_address;
   iree_hal_amd_gpu_aql_publish_retirement(queue, position);
   if (prefix && amdf_status_is_ok(publication_status)) {
@@ -545,7 +544,7 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_control(
   iree_hal_amd_gpu_aql_accept(queue, submission, signal, position, end, true,
                               true);
   amdf_status_t publication_status = iree_hal_amd_gpu_aql_emit_waits(
-      ring, &queue->storage, submission->wait_count, submission->waits,
+      ring, &queue->storage, submission->native_wait_count, submission->waits,
       &packet_position);
   if (prefix && amdf_status_is_ok(publication_status)) {
     publication_status = iree_hal_amd_gpu_aql_write_packet(
@@ -666,8 +665,9 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_execute(
   if (argument_result != IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE) {
     return argument_result;
   }
-  // Admission candidates include only waits this chunk will emit. Failed
-  // preparation must not add another queue's causal proof to the FIFO prefix.
+  // The accepted prefix already includes same-queue dependencies. Cross-queue
+  // proofs join a private candidate until preparation succeeds, so rejection
+  // cannot advance the queue's causal prefix.
   uint64_t* frontier = queue->producer.frontier;
   if (first && submission->native_wait_count) {
     frontier += queue->producer.queue_count;
@@ -769,7 +769,7 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_execute(
   iree_hal_amd_gpu_aql_accept(queue, submission, signal, position, argument_end,
                               terminal, true);
   amdf_status_t publication_status = iree_hal_amd_gpu_aql_emit_waits(
-      ring, &queue->storage, first ? submission->wait_count : 0,
+      ring, &queue->storage, first ? submission->native_wait_count : 0,
       submission->waits, &packet_position);
   // publish() changes initialization state, so native prelude emission must
   // consume the pre-publication facts captured above.
@@ -816,8 +816,10 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_transfer(
     const iree_hal_amd_gpu_aql_dispatch_request_t request = {0};
     return iree_hal_amd_gpu_aql_publish(
         queue, &request, submission->wait_count, submission->waits,
-        submission->native_wait_count, submission->signals, submission->before,
-        submission->after, NULL, NULL, &submission, out_status);
+        (iree_hal_amd_gpu_aql_wait_counts_t){.native_count =
+                                                 submission->native_wait_count},
+        submission->signals, submission->before, submission->after, NULL, NULL,
+        &submission, out_status);
   }
   const uint64_t position = (uint64_t)iree_atomic_load(
       &queue->producer.count, iree_memory_order_relaxed);
@@ -903,7 +905,7 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_transfer(
                               arguments->end, terminal,
                               !transfer->host_completion_required);
   amdf_status_t publication_status = iree_hal_amd_gpu_aql_emit_waits(
-      ring, &queue->storage, first ? submission->wait_count : 0,
+      ring, &queue->storage, first ? submission->native_wait_count : 0,
       submission->waits, &packet_position);
   iree_hal_amd_gpu_aql_publish_retirement(queue, position);
   if (prefix && amdf_status_is_ok(publication_status)) {

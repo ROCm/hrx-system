@@ -1663,6 +1663,30 @@ iree_status_t iree_hal_streaming_launch_kernel(
       flags |= IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT;
     }
 
+    // Native pointer arguments acquire published inputs before execution and
+    // release results before stream completion. Bound HAL operands retain the
+    // default range maintenance required by their memory contracts.
+    static const iree_hal_barrier_t native_before = {
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+        .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
+    };
+    static const iree_hal_barrier_t native_after = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+        .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+    };
+    static const iree_hal_barrier_list_t native_before_list = {
+        .count = 1,
+        .values = &native_before,
+    };
+    static const iree_hal_barrier_list_t native_after_list = {
+        .count = 1,
+        .values = &native_after,
+    };
+    static const iree_hal_queue_barriers_t native_barriers = {
+        .before = &native_before_list,
+        .after = &native_after_list,
+    };
+
     for (;;) {
       iree_slim_mutex_lock(&stream->mutex);
       if (IREE_UNLIKELY(stream->capture_status !=
@@ -1715,7 +1739,11 @@ iree_status_t iree_hal_streaming_launch_kernel(
               config,
               iree_make_const_byte_span(arguments.constants,
                                         arguments.constants_size),
-              arguments.bindings, /*barriers=*/NULL, flags);
+              arguments.bindings,
+              (flags & IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS)
+                  ? &native_barriers
+                  : NULL,
+              flags);
         }
         iree_hal_streaming_submission_finish_locked(stream, &submission,
                                                     iree_status_is_ok(status));

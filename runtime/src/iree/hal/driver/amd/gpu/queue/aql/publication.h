@@ -43,13 +43,15 @@ uint64_t iree_hal_amd_gpu_aql_execute_argument_length(
 // Publishes a prepared direct dispatch or empty barrier with its retained
 // dependency ownership. Only successful acceptance advances ring and argument
 // credit. On acceptance, the retirement record takes the returned capture.
+// counts.retained_count sizes a new inline capture; a supplied capture already
+// owns its readers and needs only counts.native_count for packet reservation.
 iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
     struct iree_hal_amd_gpu_aql_queue_t* queue,
     const iree_hal_amd_gpu_aql_dispatch_request_t* request,
     iree_host_size_t wait_count, iree_hal_amd_gpu_aql_wait_t* waits,
-    uint32_t native_wait_count, iree_hal_semaphore_list_t signals,
-    uint32_t before, uint32_t after, uint64_t* addresses,
-    const iree_hal_amd_gpu_profile_operation_t* profile,
+    iree_hal_amd_gpu_aql_wait_counts_t counts,
+    iree_hal_semaphore_list_t signals, uint32_t before, uint32_t after,
+    uint64_t* addresses, const iree_hal_amd_gpu_profile_operation_t* profile,
     iree_hal_amd_gpu_aql_submission_t** inout_submission,
     iree_status_t* out_status);
 
