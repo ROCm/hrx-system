@@ -1,0 +1,201 @@
+// Complete views cross command, pipeline, and native kernel launch boundaries.
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx roundtrip
+#include <loomcxx/command.h>
+#include <loomcxx/kernel.h>
+#include <loomcxx/pipeline.h>
+
+using Index = loom::type::index;
+using Layout = loom::type::encoding<loom::encoding::role::layout, 2>;
+using View = loom::type::view<loom::type::shape<loom::type::dynamic, 4>,
+                            float, Layout>;
+using Bytes = loom::type::buffer<unsigned char>;
+
+static loom::kernel::configuration configuration(View input) {
+  return {{1, 1, 1}, {64, 1, 1}};
+}
+
+[[loom::kernel(configuration)]] void kernel(float* output) {
+  auto destination = loom::buffer::view<1>(output, {});
+  loom::view::store(1.0f, destination, 0u);
+}
+
+[[loom::command_program]] void consume([[loom::launch]] View first, View second);
+[[loom::pipeline("kernel")]] void resident([[loom::launch]] View input);
+[[loom::pipeline("kernel")]] void materialized([[loom::launch]] Bytes input);
+
+[[loom::command_program]]
+void submit(bool condition, Index first_length, Index second_length,
+            Layout first_layout, Layout second_layout,
+            [[loom::launch]] Bytes parameters, View first, View second,
+            Bytes output) {
+  View selected;
+  if (condition) selected = first;
+  else selected = second;
+  Index length = first_length;
+  Layout layout = first_layout;
+  if (condition) {
+    length = second_length;
+    layout = second_layout;
+  }
+  auto weight = loom::command::parameter<loom::type::shape<loom::type::dynamic, 4>,
+      const float, Layout>(parameters, length, layout, "weight");
+  [[loom::serial]] {
+    loom::command::launch<consume>(selected, selected);
+    loom::kernel::launch<kernel>(loom::kernel::workload(selected),
+                                loom::buffer::cast<float>(output));
+    loom::kernel::launch<resident>(selected);
+    loom::kernel::launch<materialized>(selected);
+  }
+}
+
+// ----
+#include <loomcxx/command.h>
+#include <loomcxx/kernel.h>
+#include <loomcxx/pipeline.h>
+
+[[loom::pipeline("kernel"), loom::symbol("resident")]]
+void resident([[loom::launch]] loom::type::view<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>> v55);
+
+[[loom::pipeline("kernel"), loom::symbol("materialized")]]
+void materialized([[loom::launch]] loom::type::buffer<unsigned char> v56);
+
+[[loom::command_program, loom::symbol("submit")]]
+void submit(bool condition, loom::type::index first_length, loom::type::index second_length, loom::type::encoding<loom::encoding::role::layout> first_layout, loom::type::encoding<loom::encoding::role::layout> second_layout, [[loom::launch]] loom::type::buffer<unsigned char> parameters, loom::type::view<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>> first, loom::type::view<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>> second, loom::type::buffer<unsigned char> output);
+
+[[loom::command_program, loom::symbol("consume")]]
+void consume([[loom::launch]] loom::type::view<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>> v51, loom::type::view<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>> v52);
+
+static loom::kernel::configuration kernel_configuration(loom::type::view<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>> input) {
+  return {{1u, 1u, 1u}, {64u, 1u, 1u}};
+}
+
+[[loom::kernel(kernel_configuration)]]
+void kernel(float* output) {
+  auto destination = loom::buffer::view<1>(output, {});
+  loom::view::store(1.0f, destination, loom::type::index{0});
+}
+
+[[loom::command_program, loom::symbol("submit")]]
+void submit(bool condition, loom::type::index first_length, loom::type::index second_length, loom::type::encoding<loom::encoding::role::layout> first_layout, loom::type::encoding<loom::encoding::role::layout> second_layout, [[loom::launch]] loom::type::buffer<unsigned char> parameters, loom::type::view<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>> first, loom::type::view<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>> second, loom::type::buffer<unsigned char> output) {
+  loom::type::view<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>> selected;
+  if (condition) {
+    selected = first;
+  } else {
+    selected = second;
+  }
+  loom::type::index length{0};
+  loom::type::encoding<loom::encoding::role::layout> layout;
+  if (condition) {
+    auto next_length = second_length;
+    auto next_layout = second_layout;
+    length = next_length;
+    layout = next_layout;
+  } else {
+    auto next_length_2 = first_length;
+    auto next_layout_2 = first_layout;
+    length = next_length_2;
+    layout = next_layout_2;
+  }
+  auto weight = loom::command::parameter<loom::type::shape<loom::type::dynamic, 4>, const float, loom::type::encoding<loom::encoding::role::layout, 2>>(parameters, length, layout, "weight");
+  [[loom::serial]] {
+    loom::command::launch<consume>(selected, selected);
+    loom::kernel::launch<kernel>(loom::kernel::workload(selected), loom::buffer::cast<float>(output));
+    loom::kernel::launch<resident>(selected);
+    loom::kernel::launch<materialized>(selected);
+  }
+}
+
+// ====
+// Composition preserves the complete view required by its declared binding.
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx roundtrip
+#include <loomcxx/pipeline.h>
+
+using View = loom::type::view<loom::type::shape<loom::type::dynamic>, float>;
+[[loom::pipeline("kernel")]] void views([[loom::launch]] View input);
+
+[[loom::pipeline("kernel")]]
+void choose(bool condition, [[loom::launch]] View first, View second) {
+  View selected;
+  if (condition) selected = first;
+  else selected = second;
+  loom::pipeline::compose<views>(selected);
+}
+
+// ----
+#include <loomcxx/pipeline.h>
+
+[[loom::pipeline("kernel"), loom::symbol("choose")]]
+void choose(bool condition, [[loom::launch]] loom::type::view<loom::type::shape<loom::type::dynamic>, float> first, loom::type::view<loom::type::shape<loom::type::dynamic>, float> second);
+
+[[loom::pipeline("kernel"), loom::symbol("views")]]
+void views([[loom::launch]] loom::type::view<loom::type::shape<loom::type::dynamic>, float> v8);
+
+[[loom::pipeline("kernel"), loom::symbol("choose")]]
+void choose(bool condition, [[loom::launch]] loom::type::view<loom::type::shape<loom::type::dynamic>, float> first, loom::type::view<loom::type::shape<loom::type::dynamic>, float> second) {
+  loom::type::view<loom::type::shape<loom::type::dynamic>, float> selected;
+  if (condition) {
+    selected = first;
+  } else {
+    selected = second;
+  }
+  loom::pipeline::compose<views>(selected);
+}
+
+// ====
+// Channel construction observes layout; copied channels carry payload metadata.
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx roundtrip
+#include <loomcxx/pipeline.h>
+
+using Layout = loom::type::encoding<loom::encoding::role::layout, 2>;
+using Payload = loom::type::tile<loom::type::shape<loom::type::dynamic, 4>,
+                               float, Layout>;
+using Stream = loom::type::channel<Payload>;
+using Slots = loom::type::view<loom::type::shape<2, loom::type::dynamic, 4>, float>;
+[[loom::pipeline("kernel")]] void sink([[loom::launch]] Stream input);
+
+[[loom::pipeline("kernel")]]
+void streaming(bool condition, loom::type::index capacity,
+               Layout first_layout, Layout second_layout,
+               [[loom::launch]] Slots slots) {
+  Layout layout = first_layout;
+  if (condition) layout = second_layout;
+  auto first = loom::channel::bind<loom::channel::discipline::fifo>(
+      slots, capacity, layout);
+  auto second = loom::channel::bind<loom::channel::discipline::fifo>(
+      slots, capacity, second_layout);
+  Stream selected;
+  if (condition) selected = first;
+  else selected = second;
+  loom::pipeline::compose<sink>(selected);
+}
+
+// ----
+#include <loomcxx/pipeline.h>
+
+[[loom::pipeline("kernel"), loom::symbol("streaming")]]
+void streaming(bool condition, loom::type::index capacity, loom::type::encoding<loom::encoding::role::layout> first_layout, loom::type::encoding<loom::encoding::role::layout> second_layout, [[loom::launch]] loom::type::view<loom::type::shape<2, loom::type::dynamic, 4>, float> slots);
+
+[[loom::pipeline("kernel"), loom::symbol("sink")]]
+void sink([[loom::launch]] loom::type::channel<loom::type::tile<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>>> v14);
+
+[[loom::pipeline("kernel"), loom::symbol("streaming")]]
+void streaming(bool condition, loom::type::index capacity, loom::type::encoding<loom::encoding::role::layout> first_layout, loom::type::encoding<loom::encoding::role::layout> second_layout, [[loom::launch]] loom::type::view<loom::type::shape<2, loom::type::dynamic, 4>, float> slots) {
+  loom::type::encoding<loom::encoding::role::layout> layout;
+  if (condition) {
+    layout = second_layout;
+  } else {
+    layout = first_layout;
+  }
+  auto first = loom::channel::bind<loom::channel::discipline::fifo>(slots, capacity, layout);
+  auto second = loom::channel::bind<loom::channel::discipline::fifo>(slots, capacity, second_layout);
+  loom::type::channel<loom::type::tile<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>>> selected;
+  if (condition) {
+    selected = first;
+  } else {
+    selected = second;
+  }
+  loom::pipeline::compose<sink>(selected);
+}

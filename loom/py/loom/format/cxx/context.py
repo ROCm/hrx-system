@@ -13,7 +13,7 @@ import math
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loom.dsl import Op, TargetLikeInterface
 from loom.fields import compute_layout, resolve_fields
@@ -29,7 +29,6 @@ from loom.ir import (
     Block,
     BufferType,
     DialectType,
-    DynamicDim,
     DynamicEncoding,
     Module,
     Operation,
@@ -43,6 +42,9 @@ from loom.ir import (
     TypeKind,
     Utf8Attr,
 )
+
+if TYPE_CHECKING:
+    from loom.format.cxx.commands import SourceParameter
 
 _OPS: tuple[Op, ...] = source_ops()
 _OP_BY_NAME = {operation.name: operation for operation in _OPS}
@@ -182,11 +184,6 @@ class CxxRenderContext:
             list
         )
         self.parent_operations: dict[int, Operation] = {}
-        # Dynamic view type identities become constructor arguments in C++.
-        # Record those uses because they are not ordinary operation operands.
-        self.view_construction_type_users: dict[int, list[Operation]] = (
-            collections.defaultdict(list)
-        )
         self.assumption_inputs: set[int] = set()
         for operation, block, parent in _walk_operations_with_blocks(self.module.body):
             if parent is not None:
@@ -199,26 +196,6 @@ class CxxRenderContext:
             for result in operation.results:
                 self.definitions[result] = operation
                 self.definition_blocks[result] = block
-                result_type = self.module.values[result].type
-                if not isinstance(result_type, ShapedType) or operation.name not in {
-                    "buffer.view",
-                    "view.subview",
-                }:
-                    continue
-                for dimension in result_type.dims:
-                    if (
-                        isinstance(dimension, DynamicDim)
-                        and dimension.value_id is not None
-                    ):
-                        self.view_construction_type_users[dimension.value_id].append(
-                            operation
-                        )
-                if operation.name == "buffer.view" and isinstance(
-                    result_type.encoding, DynamicEncoding
-                ):
-                    self.view_construction_type_users[
-                        result_type.encoding.value_id
-                    ].append(operation)
             if operation.name in {"scalar.assume", "index.assume"}:
                 self.assumption_inputs.update(operation.operands)
         self.operation_scopes, self.value_scopes = self._collect_value_scopes()
@@ -256,7 +233,21 @@ class CxxRenderContext:
         self.value_origins = list(range(len(self.module.values)))
         self.rendered_assumptions_by_block: dict[int, set[tuple[object, ...]]] = {}
         self.assignment_targets: dict[int, int] = {}
-        self.suppressed_forwarding_values: set[int] = set()
+        # Structured identities carried implicitly or never independently used.
+        self.suppressed_forwarding_values: frozenset[int] = frozenset()
+        # Complete positional groups retained for the immutable input module.
+        self.flat_source_parameter_cache: dict[
+            tuple[int, ...], list[SourceParameter]
+        ] = {}
+        # Staged groups indexed by source values, split position, and binding kind.
+        self.staged_source_parameter_cache: dict[
+            tuple[tuple[int, ...], int, bool],
+            tuple[list[SourceParameter], list[SourceParameter]],
+        ] = {}
+        # Formal/actual payload pairs shared by demand analysis and call rendering.
+        self.pipeline_argument_bindings: dict[int, list[tuple[int, int]]] = {}
+        # Payload whose source binding hides each dimension or layout expression.
+        self.hidden_source_dependencies: dict[int, int] = {}
         self.target_names: dict[str, str] = {}
         self.target_type_names: dict[str, str] = {}
         self.function_names: dict[str, str] = {}
@@ -1266,6 +1257,14 @@ class CxxRenderContext:
     def expression(self, value_id: int) -> str:
         expression = self.expressions.get(value_id)
         if expression is None:
+            owner = self.hidden_source_dependencies.get(value_id)
+            if owner is not None:
+                raise CxxRenderError(
+                    None,
+                    f"dependency %{self.module.values[value_id].name} carried by "
+                    f"%{self.module.values[owner].name} has no independent C++ "
+                    "expression",
+                )
             raise CxxRenderError(
                 None, f"value %{self.module.values[value_id].name} is not in scope"
             )

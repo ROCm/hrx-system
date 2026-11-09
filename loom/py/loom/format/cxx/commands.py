@@ -24,6 +24,14 @@ from loom.ir import (
     Utf8Attr,
 )
 
+_SOURCE_OPERAND_PROJECTIONS = {
+    "func.call": "_ordinary_source_operands",
+    "func.return": "_ordinary_source_operands",
+    "command.launch": "_command_source_operands",
+    "pipeline.compose": "_pipeline_source_operands",
+    "kernel.launch": "_kernel_source_operands",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class SourceParameter:
@@ -114,6 +122,10 @@ class CxxCommandRenderer(CxxExpressionRenderer):
             raise CxxRenderError(
                 operation, "staged signature has an invalid specialization count"
             )
+        key = (tuple(arguments), specialization_count, allow_nonstorage_bindings)
+        cached = self.staged_source_parameter_cache.get(key)
+        if cached is not None:
+            return cached
         specializations = arguments[:specialization_count]
         bindings = arguments[specialization_count:]
         binding_parameters: list[SourceParameter] = []
@@ -148,7 +160,9 @@ class CxxCommandRenderer(CxxExpressionRenderer):
         specialization_parameters = self._flat_source_parameters(
             operation, specializations[:boundary], signature="staged signature"
         )
-        return specialization_parameters, binding_parameters
+        result = specialization_parameters, binding_parameters
+        self.staged_source_parameter_cache[key] = result
+        return result
 
     def _flat_source_parameters(
         self,
@@ -159,6 +173,10 @@ class CxxCommandRenderer(CxxExpressionRenderer):
     ) -> list[SourceParameter]:
         """Reconstructs source values from complete positional component groups."""
 
+        key = tuple(values)
+        cached = self.flat_source_parameter_cache.get(key)
+        if cached is not None:
+            return cached
         parameters: list[SourceParameter] = []
         end = len(values)
         while end:
@@ -174,7 +192,14 @@ class CxxCommandRenderer(CxxExpressionRenderer):
             parameters.append(SourceParameter(value, dependencies, binding=False))
             end = start
         parameters.reverse()
+        self.flat_source_parameter_cache[key] = parameters
         return parameters
+
+    def _hide_source_dependencies(self, parameter: SourceParameter) -> None:
+        """Records metadata transported inside a complete source binding."""
+
+        for dependency in parameter.dependencies:
+            self.hidden_source_dependencies[dependency] = parameter.value_id
 
     def _staged_parameter_type(self, operation: Operation, value_id: int) -> str:
         value_type = self.module.values[value_id].type
@@ -218,6 +243,7 @@ class CxxCommandRenderer(CxxExpressionRenderer):
         )
         parameters: list[str] = []
         for ordinal, parameter in enumerate((*specializations, *bindings)):
+            self._hide_source_dependencies(parameter)
             name = self.names[parameter.value_id]
             type_name = self._staged_parameter_type(operation, parameter.value_id)
             attribute = (
@@ -355,15 +381,18 @@ class CxxCommandRenderer(CxxExpressionRenderer):
             + ";"
         )
 
-    def _pipeline_source_arguments(
+    def _pipeline_source_bindings(
         self,
         operation: Operation,
         pipeline: Operation,
         specializations: list[int],
         bindings: list[int],
-    ) -> list[str]:
-        """Reconstructs one pipeline call's source parameter order."""
+    ) -> list[tuple[int, int]]:
+        """Retains formal/actual payload pairs in the source parameter order."""
 
+        cached = self.pipeline_argument_bindings.get(id(operation))
+        if cached is not None:
+            return cached
         source_specializations, source_bindings = self._source_parameters(
             pipeline,
             self._pipeline_arguments(pipeline),
@@ -373,7 +402,7 @@ class CxxCommandRenderer(CxxExpressionRenderer):
             raise CxxRenderError(
                 operation, "pipeline call binding arity is inconsistent"
             )
-        arguments: list[str] = []
+        arguments: list[tuple[int, int]] = []
         specialization_ordinal = 0
         for parameter in source_specializations:
             specialization_ordinal += len(parameter.dependencies) + 1
@@ -382,9 +411,7 @@ class CxxCommandRenderer(CxxExpressionRenderer):
                     operation, "pipeline call specialization arity is inconsistent"
                 )
             arguments.append(
-                self._staged_argument(
-                    parameter.value_id, specializations[specialization_ordinal - 1]
-                )
+                (parameter.value_id, specializations[specialization_ordinal - 1])
             )
         for parameter, binding in zip(source_bindings, bindings, strict=True):
             specialization_ordinal += len(parameter.dependencies)
@@ -392,12 +419,105 @@ class CxxCommandRenderer(CxxExpressionRenderer):
                 raise CxxRenderError(
                     operation, "pipeline call specialization arity is inconsistent"
                 )
-            arguments.append(self._staged_argument(parameter.value_id, binding))
+            arguments.append((parameter.value_id, binding))
         if specialization_ordinal != len(specializations):
             raise CxxRenderError(
                 operation, "pipeline call specialization arity is inconsistent"
             )
+        self.pipeline_argument_bindings[id(operation)] = arguments
         return arguments
+
+    def _pipeline_source_arguments(
+        self,
+        operation: Operation,
+        pipeline: Operation,
+        specializations: list[int],
+        bindings: list[int],
+    ) -> list[str]:
+        return [
+            self._staged_argument(parameter, argument)
+            for parameter, argument in self._pipeline_source_bindings(
+                operation, pipeline, specializations, bindings
+            )
+        ]
+
+    def _ordinary_source_operands(self, operation: Operation) -> list[int]:
+        return [
+            parameter.value_id
+            for parameter in self._flat_source_parameters(
+                operation, list(operation.operands)
+            )
+        ]
+
+    def _command_source_operands(self, operation: Operation) -> list[int]:
+        resolved = self._resolved(operation)
+        specializations = resolved.value_ids("specializations")
+        bindings = resolved.value_ids("bindings")
+        parameters, binding_parameters = self._source_parameters(
+            operation,
+            [*specializations, *bindings],
+            specialization_count=len(specializations),
+        )
+        return [parameter.value_id for parameter in (*parameters, *binding_parameters)]
+
+    def _pipeline_source_operands(self, operation: Operation) -> list[int]:
+        resolved = self._resolved(operation)
+        pipeline = self.pipeline_callables.get(str(resolved.attr("callee")))
+        if pipeline is None:
+            raise CxxRenderError(operation, "composed pipeline is not present")
+        return [
+            argument
+            for _, argument in self._pipeline_source_bindings(
+                operation,
+                pipeline,
+                resolved.value_ids("specializations"),
+                resolved.value_ids("bindings"),
+            )
+        ]
+
+    def _kernel_source_operands(self, operation: Operation) -> list[int]:
+        resolved = self._resolved(operation)
+        pipeline = self.pipeline_callables.get(str(resolved.attr("callee")))
+        workloads = resolved.value_ids("workloads")
+        arguments = resolved.value_ids("arguments")
+        if pipeline is not None:
+            return [
+                argument
+                for _, argument in self._pipeline_source_bindings(
+                    operation, pipeline, workloads, arguments
+                )
+            ]
+        return self._kernel_workload_operands(operation) + arguments
+
+    def _kernel_workload_operands(self, operation: Operation) -> list[int]:
+        resolved = self._resolved(operation)
+        symbol = str(resolved.attr("callee"))
+        component_counts = self.kernel_workload_component_counts.get(symbol)
+        if component_counts is None:
+            raise CxxRenderError(
+                operation, f"launched kernel {symbol!r} is not present"
+            )
+        workloads = resolved.value_ids("workloads")
+        if sum(component_counts) != len(workloads):
+            raise CxxRenderError(
+                operation, "kernel launch workload arity is inconsistent"
+            )
+        arguments: list[int] = []
+        component_ordinal = 0
+        for component_count in component_counts:
+            component_ordinal += component_count
+            arguments.append(workloads[component_ordinal - 1])
+        return arguments
+
+    def _source_value_operands(self, operation: Operation) -> list[int]:
+        """Returns expressions used by rendering, excluding bundled metadata."""
+
+        project = _SOURCE_OPERAND_PROJECTIONS.get(operation.name)
+        return (
+            getattr(self, project)(operation)
+            if project is not None
+            else list(operation.operands)
+        )
 
     def _staged_argument(self, parameter: int, argument: int) -> str:
         """Preserves the byte-buffer contract of staged source parameters."""
@@ -451,16 +571,9 @@ class CxxCommandRenderer(CxxExpressionRenderer):
             raise CxxRenderError(
                 operation, f"launched command program {symbol!r} is not present"
             )
-        specializations = resolved.value_ids("specializations")
-        bindings = resolved.value_ids("bindings")
-        source_specializations, source_bindings = self._source_parameters(
-            operation,
-            [*specializations, *bindings],
-            specialization_count=len(specializations),
-        )
         arguments = [
-            self._staged_argument(parameter.value_id, parameter.value_id)
-            for parameter in (*source_specializations, *source_bindings)
+            self._staged_argument(value, value)
+            for value in self._command_source_operands(operation)
         ]
         self.writer.line(f"loom::command::launch<{callee}>({', '.join(arguments)});")
         return ("callee",)
@@ -487,22 +600,10 @@ class CxxCommandRenderer(CxxExpressionRenderer):
                 operation, f"launched kernel {symbol!r} is not present"
             )
         callee = self.kernel_names[symbol]
-        workloads = resolved.value_ids("workloads")
-        component_counts = self.kernel_workload_component_counts.get(symbol)
-        if component_counts is None:
-            raise CxxRenderError(
-                operation,
-                f"kernel {symbol!r} has no rendered launch configuration",
-            )
-        if sum(component_counts) != len(workloads):
-            raise CxxRenderError(
-                operation, "kernel launch workload arity is inconsistent"
-            )
-        workload_arguments: list[str] = []
-        component_ordinal = 0
-        for component_count in component_counts:
-            component_ordinal += component_count
-            workload_arguments.append(self.expression(workloads[component_ordinal - 1]))
+        workload_arguments = [
+            self.expression(value)
+            for value in self._kernel_workload_operands(operation)
+        ]
         arguments = resolved.value_ids("arguments")
         if len(arguments) != len(expected_elements):
             raise CxxRenderError(

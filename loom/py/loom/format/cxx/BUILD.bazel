@@ -6,6 +6,7 @@
 
 load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -31,6 +32,7 @@ iree_py_library(
         "renderer.py",
         "translation_unit.py",
         "types.py",
+        "value_transport.py",
         "view_access.py",
     ],
     deps = [
@@ -56,6 +58,7 @@ iree_py_test(
     name = "cxx_test",
     srcs = [
         "buffer_access_test.py",
+        "context_test.py",
         "naming_test.py",
         "printer_test.py",
         "registry_test.py",
@@ -66,6 +69,7 @@ iree_py_test(
     ],
     args = [
         "loom.format.cxx.buffer_access_test",
+        "loom.format.cxx.context_test",
         "loom.format.cxx.naming_test",
         "loom.format.cxx.registry_test",
         "loom.format.cxx.renderer_test",
@@ -84,6 +88,17 @@ iree_py_library(
     name = "test_support",
     testonly = True,
     srcs = ["test_support.py"],
+)
+
+loom_check_test(
+    name = "value_observations_test",
+    src = "value_observations.loom-test",
+    data = ["//loom/py/loom/tools:loom-export-cxx"],
+    env = {
+        "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
+    },
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
 iree_py_test(

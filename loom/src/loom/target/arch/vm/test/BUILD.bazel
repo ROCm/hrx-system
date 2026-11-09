@@ -130,3 +130,29 @@ iree_py_test(
     ]),
     deps = ["//loom/py/loom/tools:export_cxx"],
 )
+
+iree_py_test(
+    name = "view_transport_test",
+    size = "small",
+    srcs = ["source_roundtrip_test.py"],
+    args = [
+        "--importer=$(rootpath //loom/src/loom/tools/loom-import-cxx)",
+        "--runner=$(rootpath //loom/src/loom/tools/loom-test)",
+        "--assertions",
+        "$(rootpath view_transport.cxx)",
+        "$(rootpath view_transport_checks.cxx)",
+    ],
+    data = [
+        "view_transport.cxx",
+        "view_transport_checks.cxx",
+        "//loom/src/loom/tools/loom-import-cxx",
+        "//loom/src/loom/tools/loom-test",
+    ],
+    main = "source_roundtrip_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/execute:vm_iree_vm",
+    ]),
+    deps = ["//loom/py/loom/tools:export_cxx"],
+)

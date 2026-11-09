@@ -93,8 +93,9 @@ kernel.def @widened_view() {
   %small = buffer.view %input[%zero] : buffer -> view<4xi32>
   %large = buffer.view %input[%zero] : buffer -> view<8xi32>
   %result = scf.while(%before = %small : view<4xi32>) -> (view<8xi32>) {
-    %false = scalar.constant 0 : i1
-    scf.condition %false, %large : i1, view<8xi32>
+    %active = view.load %before[0] : view<4xi32> -> i32
+    %flag = scalar.trunci %active : i32 to i1
+    scf.condition %flag, %large : i1, view<8xi32>
   } do(%after: view<8xi32>) {
     scf.yield %small : view<4xi32>
   }
@@ -111,6 +112,7 @@ kernel.def @widened_view() {
         result
         == """\
 #include <loomcxx/kernel.h>
+#include <loomcxx/numeric.h>
 
 [[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
 void widened_view(const unsigned* input, unsigned* output) {
@@ -120,7 +122,9 @@ void widened_view(const unsigned* input, unsigned* output) {
   loom::type::view<loom::type::shape<8>, const unsigned> result;
   bool loop_continues = true;
   do {
-    loop_continues = 0;
+    unsigned active = loom::view::load(before, 0);
+    bool flag = loom::convert<bool>(active);
+    loop_continues = flag;
     result = large;
     if (loop_continues) {
       before = small;

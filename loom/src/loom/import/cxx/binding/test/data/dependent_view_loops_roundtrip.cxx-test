@@ -51,8 +51,8 @@ void crop_for(const unsigned* input, unsigned* output, unsigned rows, unsigned s
     unsigned rows_3 = rows_1 - 1u;
     loom::assume(rows_3 != 0u);
     loom::assume(rows_3 <= 8u);
-    selected_dim0 = loom::index::cast(rows_3);
-    selected = loom::view::subview<loom::type::dynamic, 7>(selected, loom::type::indices{loom::type::index{1}, loom::type::index{0}}, loom::type::indices{selected_dim0});
+    loom::type::index selected_dim0_3 = loom::index::cast(rows_3);
+    selected = loom::view::subview<loom::type::dynamic, 7>(selected, loom::type::indices{loom::type::index{1}, loom::type::index{0}}, loom::type::indices{selected_dim0_3});
     rows_1 = rows_3;
   }
   unsigned v60 = loom::view::load(selected, loom::type::index{0}, loom::type::index{0});

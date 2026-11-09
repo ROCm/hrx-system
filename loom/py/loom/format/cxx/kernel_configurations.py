@@ -223,6 +223,13 @@ class CxxKernelConfigurationRenderer(CxxPipelineRenderer):
             self.kernel_source_launch_attributes[id(kernel)] = (
                 self._source_launch_attributes(kernel)
             )
+            fields = self._resolved(kernel)
+            parameters = self._configuration_parameters(
+                kernel, list(fields.region("config").blocks[0].arg_ids)
+            )
+            self.kernel_workload_component_counts[str(fields.attr("callee"))] = tuple(
+                parameter.component_count for parameter in parameters
+            )
 
     def _configuration_parameters(
         self, kernel: Operation, arguments: list[int]
@@ -245,8 +252,9 @@ class CxxKernelConfigurationRenderer(CxxPipelineRenderer):
     def _bind_configuration_parameters(
         self, kernel: Operation, block: Block
     ) -> list[str]:
-        symbol = str(self._resolved(kernel).attr("callee"))
         parameters = self._configuration_parameters(kernel, list(block.arg_ids))
+        for parameter in self._flat_source_parameters(kernel, list(block.arg_ids)):
+            self._hide_source_dependencies(parameter)
         declarations: list[str] = []
         for parameter in parameters:
             name = self.names[parameter.value_id]
@@ -254,9 +262,6 @@ class CxxKernelConfigurationRenderer(CxxPipelineRenderer):
             declarations.append(f"{type_name} {name}")
             self.expressions[parameter.value_id] = name
             self.expression_types[parameter.value_id] = type_name
-        self.kernel_workload_component_counts[symbol] = tuple(
-            parameter.component_count for parameter in parameters
-        )
         return declarations
 
     def _configuration_result_expression(self, value_id: int) -> str:
@@ -308,7 +313,6 @@ class CxxKernelConfigurationRenderer(CxxPipelineRenderer):
         if id(kernel) not in self.kernel_source_launch_attributes:
             source_attributes = self._source_launch_attributes(kernel)
         if source_attributes is not None:
-            self.kernel_workload_component_counts[symbol] = ()
             return source_attributes
 
         config = self._resolved(kernel).region("config")
