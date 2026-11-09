@@ -7,6 +7,8 @@
 #ifndef LOOM_ANALYSIS_PIPELINE_INVOCATIONS_H_
 #define LOOM_ANALYSIS_PIPELINE_INVOCATIONS_H_
 
+#include "loom/analysis/pipeline/construction_storage.h"
+#include "loom/analysis/pipeline/lifetimes.h"
 #include "loom/analysis/pipeline/workers.h"
 
 #ifdef __cplusplus
@@ -24,7 +26,7 @@ typedef struct loom_pipeline_invocation_allocation_t {
   // Source root in the occurrence's retained facts.
   loom_value_id_t root_value_id;
   // Placement owned by the construction that allocated this root.
-  const loom_pipeline_resource_allocation_t* allocation;
+  const loom_pipeline_storage_allocation_t* allocation;
 } loom_pipeline_invocation_allocation_t;
 
 // Parallel to one retained schedule step. Its kind belongs to the source plan;
@@ -61,8 +63,11 @@ struct loom_pipeline_invocation_t {
   const loom_pipeline_schedule_t* schedule;
   // Immutable facts seeded from this occurrence's actual arguments.
   const loom_value_fact_table_t* facts;
-  // Local resource identities and placements; parent resources stay separate.
+  // Local resource identities and requirements; parent resources stay separate.
   const loom_pipeline_resources_t* resources;
+  // Placed local allocations, indexed like resources->allocations. Imported
+  // placements retain their original owner through the visible table below.
+  const loom_pipeline_storage_allocation_t* storage;
   // Visible allocation placements, sorted by source root ID.
   const loom_pipeline_invocation_allocation_t* allocations;
   // Number of visible allocation roots.
@@ -90,7 +95,7 @@ typedef struct loom_pipeline_invocation_channel_t {
   // Fresh protocol, independent of source value IDs in other occurrences.
   const loom_pipeline_resource_channel_t* source;
   // Backing placement, or NULL for caller-owned external storage.
-  const loom_pipeline_resource_allocation_t* allocation;
+  const loom_pipeline_storage_allocation_t* allocation;
 } loom_pipeline_invocation_channel_t;
 
 // Complete static inventory in construction order. Runtime loops revisit these
@@ -111,6 +116,8 @@ typedef struct loom_pipeline_invocations_t {
   iree_host_size_t channel_count;
   // Channel ordinals sorted by canonical identity address for indexed lookup.
   const iree_host_size_t* channel_order;
+  // Complete construction coexistence tree, owned by this invocation graph.
+  loom_pipeline_lifetimes_t lifetimes;
 } loom_pipeline_invocations_t;
 
 typedef struct loom_pipeline_invocation_environment_t {
@@ -131,8 +138,9 @@ typedef struct loom_pipeline_invocation_environment_t {
 //
 // Runtime CFG loops stay in their source schedule. Recursive construction and
 // unavailable child bodies require another realization and emit a diagnostic.
-// All static child allocations currently reserve disjoint ranges in the
-// supplied backing stores; a consumer cannot infer reuse from their ordering.
+// Construction lifetimes determine final storage placement: serialized child
+// lifetimes share ranges, while parent-owned and concurrent storage coexist.
+// The graph and its immutable placements are published together.
 // Source mutation invalidates the graph. A consuming projection translates its
 // retained sites and keeps outer protocol identity across child completion.
 // Worker calls remain source sites. Their complete inventory lets realization
@@ -164,7 +172,7 @@ iree_status_t loom_pipeline_invocations_analyze_workers(
 
 // Returns the retained placement for a visible root, or NULL for external
 // storage. This lookup does not traverse parents or recompute alias facts.
-const loom_pipeline_resource_allocation_t*
+const loom_pipeline_storage_allocation_t*
 loom_pipeline_invocation_lookup_allocation(
     const loom_pipeline_invocation_t* invocation, loom_value_id_t root);
 

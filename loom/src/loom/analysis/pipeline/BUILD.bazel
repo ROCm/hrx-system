@@ -120,13 +120,22 @@ loom_cc_library(
 
 loom_cc_library(
     name = "invocations",
-    srcs = ["invocations.c"],
-    hdrs = ["invocations.h"],
+    srcs = [
+        "construction_storage.c",
+        "invocations.c",
+        "lifetimes.c",
+    ],
+    hdrs = [
+        "construction_storage.h",
+        "invocations.h",
+        "lifetimes.h",
+    ],
     deps = [
         ":arguments",
         ":resources",
         ":schedule",
         ":workers",
+        "//loom/src/loom/analysis:source_storage_packing",
         "//loom/src/loom/analysis:storage_access",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
@@ -138,6 +147,21 @@ loom_cc_library(
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "construction_storage_test",
+    srcs = ["construction_storage_test.cc"],
+    deps = [
+        ":invocations",
+        ":resources",
+        ":schedule",
+        "//loom/src/loom/analysis:source_storage_packing",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
