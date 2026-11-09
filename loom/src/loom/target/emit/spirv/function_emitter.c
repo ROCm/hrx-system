@@ -1248,15 +1248,13 @@ iree_status_t loom_spirv_emit_low_op(loom_spirv_emit_state_t* state,
                                                       &state->abi_plan, op);
   }
   if (loom_low_storage_reserve_isa(op)) {
-    loom_spirv_module_workgroup_storage_emit_reserve(
-        &state->value_domain, &state->workgroup_storage, op);
     return iree_ok_status();
   }
   if (loom_low_storage_address_isa(op)) {
     loom_spirv_module_value_ref_t value_ref = {0};
     IREE_RETURN_IF_ERROR(loom_spirv_module_workgroup_storage_emit_address(
-        &state->value_domain, &state->workgroup_storage, op,
-        state->type_context, state->builder, &value_ref));
+        &state->value_table, op, state->type_context, state->builder,
+        &value_ref));
     return loom_spirv_emit_define_value(
         state, loom_low_storage_address_result(op), value_ref, true);
   }
@@ -1611,11 +1609,6 @@ static iree_status_t loom_spirv_emit_function_state_initialize(
   const loom_region_t* body = loom_low_function_const_body(low_function_op);
   iree_status_t status = loom_local_value_domain_acquire_for_region_tree(
       context->module, body, context->scratch_arena, &out_state->value_domain);
-  if (iree_status_is_ok(status)) {
-    status = loom_spirv_module_workgroup_storage_initialize(
-        &out_state->value_domain, context->scratch_arena,
-        &out_state->workgroup_storage);
-  }
   if (iree_status_is_ok(status)) {
     status = loom_spirv_module_value_table_initialize(&out_state->value_domain,
                                                       context->scratch_arena,
