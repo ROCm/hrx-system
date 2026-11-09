@@ -85,9 +85,9 @@ amdf_cc_library(
     target_compatible_with = _FILE_IO_HOST_COMPATIBILITY,
     deps = [
         "//libamdf/cts/gpu:gpu_device_fixture",
-        "//libamdf/cts/gpu/linux:file_storage",
         "//libamdf/cts/gpu/util:memory",
         "//libamdf/cts/gpu/util:user_queue",
+        "//libamdf/cts/util:file_storage",
         "//libamdf/cts/util:wait",
         "//third_party:google_test",
         "//third_party:linux_io_uapi",
