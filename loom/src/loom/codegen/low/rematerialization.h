@@ -123,7 +123,9 @@ iree_status_t loom_low_allocation_rematerialize_failure(
 // Candidate selection consumes the immutable allocation snapshot. Application
 // retains only value IDs and ordering facts, then queries fresh uses for each
 // rewrite so producers see uses introduced by earlier consumer clones.
-// Every recipe producer and use retains its repeated execution domain.
+// Multi-packet recipes retain their repeated execution domain. One recreatable
+// packet can replace a reload at a repeated use. Detached storage boundaries
+// remain in place instead of extending their original source lifetimes again.
 // Callers rebuild allocation once after the complete batch. One optional
 // diagnostic summarizes the batch; its trigger class is the first spill plan.
 //

@@ -51,7 +51,7 @@ test.target<low_core> @target
 low.func.def target<test.low.core>(@target) @consuming_constants() -> (reg<test.f32 x2>, reg<test.f32 x2>, reg<test.f32>, reg<test.f32>, reg<test.f32>) asm {
   %literal = test.const.i32 7
   %saved = copy %literal : reg<test.i32> -> reg<test.i32>
-  %moved = move %literal : reg<test.i32> -> reg<test.i32>
+  %moved = move %literal {detached = true} : reg<test.i32> -> reg<test.i32>
   %pair = concat(%moved, %saved) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
   low.br ^consume
 ^consume:
@@ -80,12 +80,12 @@ low.func.def target<test.low.core>(@target) @consuming_constants() -> (reg<test.
   %other2 = copy %blocker2 : reg<test.i32> -> reg<test.f32>
   %literal_remat$17 = test.const.i32 7
   %saved_remat$18 = copy %literal_remat$17 : reg<test.i32> -> reg<test.i32>
-  %moved_remat$19 = move %literal_remat$17 : reg<test.i32> -> reg<test.i32>
+  %moved_remat$19 = move %literal_remat$17 {detached = true} : reg<test.i32> -> reg<test.i32>
   %pair_remat$20 = concat(%moved_remat$19, %saved_remat$18) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
   %first = copy %pair_remat$20 : reg<test.i32 x2> -> reg<test.f32 x2>
   %literal_remat$21 = test.const.i32 7
   %saved_remat$22 = copy %literal_remat$21 : reg<test.i32> -> reg<test.i32>
-  %moved_remat$23 = move %literal_remat$21 : reg<test.i32> -> reg<test.i32>
+  %moved_remat$23 = move %literal_remat$21 {detached = true} : reg<test.i32> -> reg<test.i32>
   %pair_remat$24 = concat(%moved_remat$23, %saved_remat$22) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
   %second = copy %pair_remat$24 : reg<test.i32 x2> -> reg<test.f32 x2>
   return %first, %second, %other0, %other1, %other2

@@ -384,6 +384,17 @@ static iree_status_t loom_low_rematerialization_plan_recipe(
     }
     loom_op_t* op = loom_value_def_op(
         loom_module_value(module, facts->value_ids[cursor->ordinal]));
+    // Replaying a detached transfer from its original input restores the
+    // physical lifetime that allocation split, making the two repairs undo
+    // each other. Only closed reconstruction recreates the input too and
+    // therefore preserves the detached storage boundary.
+    if (!(rebuild_composition &&
+          iree_any_bit_set(flags, LOOM_LOW_REMATERIALIZATION_VALUE_CLOSED)) &&
+        ((loom_low_copy_isa(op) && loom_low_copy_detached(op)) ||
+         (loom_low_move_isa(op) && loom_low_move_detached(op)))) {
+      eligible = false;
+      break;
+    }
     // Copies preserve the complete input width and can replay a stable capture.
     // Aggregate identities need the closed recipe: replaying only their final
     // composition retains every input and can multiply wide setup for slices.
