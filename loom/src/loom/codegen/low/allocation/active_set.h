@@ -38,7 +38,8 @@ typedef struct loom_low_allocation_active_entry_t {
 typedef struct loom_low_allocation_active_set_t {
   // Densely packed active assignment indices, in unspecified order.
   uint32_t* assignment_indices;
-  // Membership and expiration links indexed by assignment index.
+  // Membership and expiration links indexed by assignment index. Only
+  // assignments inserted into this set have initialized entries.
   loom_low_allocation_active_entry_t* entries;
   // First assignment expiring at each program point, or UINT32_MAX.
   uint32_t* expiration_heads;

@@ -1171,17 +1171,19 @@ loom_low_allocation_interval_assignment_try_relocate_entry_blocker(
         state->result.assignment_indices_by_value_ordinal[ordinal];
     if (context->entry_locations[ordinal].location_kind ==
             LOOM_LOW_ALLOCATION_LOCATION_UNASSIGNED ||
-        assignment_index == UINT32_MAX ||
-        state->active.entries[assignment_index].position == UINT32_MAX) {
+        assignment_index == UINT32_MAX) {
       continue;
     }
     const loom_low_allocation_assignment_t* blocker =
         &state->result.assignments[assignment_index];
     const loom_low_allocation_abi_location_t* incoming =
         &context->entry_locations[ordinal];
+    // Immediately spilled inputs never enter the active set. Match the
+    // incoming register before reading its initialized membership record.
     if (blocker->descriptor_reg_class_id != incoming->descriptor_reg_class_id ||
         blocker->location_kind != incoming->location_kind ||
-        blocker->location_base != incoming->location_base) {
+        blocker->location_base != incoming->location_base ||
+        state->active.entries[assignment_index].position == UINT32_MAX) {
       continue;
     }
     if (!loom_low_allocation_interval_assignment_can_relocate_value(
