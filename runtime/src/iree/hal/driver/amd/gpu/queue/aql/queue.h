@@ -91,6 +91,20 @@ uint32_t iree_hal_amd_gpu_aql_queue_maximum_program_packet_count(
 iree_status_t iree_hal_amd_gpu_aql_queue_set_profile(
     iree_hal_queue_t* queue, iree_hal_amd_gpu_profile_t* profile);
 
+struct iree_hal_amd_gpu_aql_submission_t;
+
+// Records failure without releasing accepted capture or native ownership.
+// Consumes status; the existing retirement path publishes final failure.
+void iree_hal_amd_gpu_aql_queue_fail_submission(
+    iree_hal_queue_t* queue,
+    struct iree_hal_amd_gpu_aql_submission_t* submission, iree_status_t status);
+
+// Records a native terminal failure and wakes existing admission/retirement.
+// Accepted native uses remain unproven until the normal failure join completes.
+void iree_hal_amd_gpu_aql_queue_fail_native(iree_hal_queue_t* queue,
+                                            amdf_status_t status,
+                                            const char* operation);
+
 // Wakes pending admission after the device latches a logical shader failure.
 // Accepted native work retains its resources until actual completion.
 void iree_hal_amd_gpu_aql_queue_notify_failure(iree_hal_queue_t* queue);

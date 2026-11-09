@@ -6,6 +6,68 @@
 
 #include "iree/hal/driver/amd/gpu/queue/aql/submission.h"
 
+iree_status_t iree_hal_amd_gpu_aql_submission_admit_waits(
+    const void* domain, const iree_hal_amd_gpu_signal_pool_t* ordered_pool,
+    iree_host_size_t wait_count, iree_hal_amd_gpu_aql_wait_t* waits,
+    bool native_eligible, iree_hal_amd_gpu_aql_wait_counts_t* out_counts,
+    iree_host_size_t* out_wait_index,
+    iree_hal_amd_gpu_aql_wait_kind_t* out_kind) {
+  *out_kind = IREE_HAL_AMD_GPU_AQL_WAIT_READY;
+  *out_counts = (iree_hal_amd_gpu_aql_wait_counts_t){0};
+  iree_hal_amd_gpu_aql_wait_counts_t counts = {0};
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < wait_count && *out_kind == IREE_HAL_AMD_GPU_AQL_WAIT_READY &&
+       iree_status_is_ok(status);
+       ++i) {
+    iree_hal_amd_gpu_aql_wait_t* wait = &waits[i];
+    if (native_eligible && iree_hal_amd_gpu_semaphore_isa(wait->semaphore)) {
+      iree_hal_amd_gpu_semaphore_wait_t acquired;
+      status = iree_hal_amd_gpu_semaphore_acquire_wait(
+          wait->semaphore, wait->value, domain, &acquired);
+      if (iree_status_is_ok(status)) {
+        if (acquired.state == IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_DEFERRED) {
+          *out_kind = IREE_HAL_AMD_GPU_AQL_WAIT_SUBMISSION;
+        } else if (acquired.state == IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE) {
+          wait->signal = acquired.signal;
+          ++counts.retained_count;
+          if (acquired.signal->block->pool != ordered_pool) {
+            // Only admitted records move: the unresolved suffix keeps its
+            // ownership and the deferred wait index still names its record.
+            if (i != counts.native_count) {
+              iree_hal_amd_gpu_aql_wait_t previous = waits[counts.native_count];
+              waits[counts.native_count] = *wait;
+              *wait = previous;
+            }
+            ++counts.native_count;
+          }
+        } else if (acquired.state == IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_HOST) {
+          *out_kind = IREE_HAL_AMD_GPU_AQL_WAIT_COMPLETION;
+        }
+      }
+    } else {
+      uint64_t value = 0;
+      status = iree_hal_semaphore_query(wait->semaphore, &value);
+      if (iree_status_is_ok(status) && value < wait->value) {
+        *out_kind = IREE_HAL_AMD_GPU_AQL_WAIT_COMPLETION;
+      }
+    }
+    if (*out_kind != IREE_HAL_AMD_GPU_AQL_WAIT_READY) {
+      *out_wait_index = i;
+    }
+  }
+  if (*out_kind != IREE_HAL_AMD_GPU_AQL_WAIT_READY ||
+      !iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < wait_count; ++i) {
+      iree_hal_amd_gpu_signal_release(waits[i].signal);
+      waits[i].signal = NULL;
+    }
+  } else {
+    *out_counts = counts;
+  }
+  return status;
+}
+
 static iree_status_t iree_hal_amd_gpu_aql_submission_allocate(
     iree_hal_amd_gpu_capture_pool_t* pool, iree_byte_span_t inline_storage,
     const iree_hal_amd_gpu_profile_operation_t* profile,
@@ -128,13 +190,14 @@ iree_status_t iree_hal_amd_gpu_aql_submission_retirement(
     const iree_hal_amd_gpu_profile_operation_t* profile,
     const iree_hal_amd_gpu_aql_dispatch_request_t* request,
     iree_host_size_t wait_count, const iree_hal_amd_gpu_aql_wait_t* waits,
-    uint32_t native_wait_count, iree_hal_semaphore_list_t signals,
+    iree_hal_amd_gpu_aql_wait_counts_t counts,
+    iree_hal_semaphore_list_t signals,
     iree_hal_amd_gpu_aql_submission_t** out_submission) {
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_submission_allocate(
-      pool, inline_storage, profile, request, native_wait_count, signals, false,
-      out_submission));
+      pool, inline_storage, profile, request, counts.retained_count, signals,
+      false, out_submission));
   iree_hal_amd_gpu_aql_submission_t* submission = *out_submission;
-  submission->native_wait_count = native_wait_count;
+  submission->native_wait_count = counts.native_count;
   for (iree_host_size_t i = 0, target = 0; i < wait_count; ++i) {
     if (waits[i].signal) {
       submission->waits[target++] =

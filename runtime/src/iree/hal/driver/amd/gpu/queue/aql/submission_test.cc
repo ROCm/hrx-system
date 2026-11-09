@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstring>
+#include <vector>
 
 #include "iree/async/proactor_platform.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/signal.h"
@@ -16,6 +17,176 @@
 #include "iree/testing/status_matchers.h"
 
 namespace {
+
+class AqlDependencyTest : public ::testing::Test {
+ protected:
+  struct NativeQueue {
+    // Stable native queue identity and finite reader ownership.
+    iree_hal_amd_gpu_signal_pool_t pool;
+    // Native allocation metadata, attached until all readers return.
+    iree_hal_amd_gpu_signal_block_t block;
+    // Independent ownership for four emulated native completion cells.
+    std::array<iree_hal_amd_gpu_signal_t, 4> signals = {};
+    // Hardware-owned coherent completion words.
+    std::array<uint64_t, 4> values = {};
+    // Two-queue causal snapshots attached to the native allocation.
+    std::array<uint64_t, 2 + 4 * 2> frontiers = {};
+  };
+
+  void SetUp() override {
+    IREE_ASSERT_OK(iree_async_proactor_create_platform(
+        iree_async_proactor_options_default(), iree_allocator_system(),
+        &proactor_));
+    for (size_t i = 0; i < queues_.size(); ++i) {
+      auto& queue = queues_[i];
+      iree_hal_amd_gpu_signal_pool_initialize({}, &queue.pool);
+      iree_hal_amd_gpu_signal_block_initialize(
+          queue.signals.data(), queue.signals.size(), 2, queue.frontiers.data(),
+          &queue.block);
+      iree_hal_amd_gpu_signal_block_attach(
+          &queue.pool, this, queue.values.data(), 0x1000 + i * 0x1000,
+          sizeof(uint64_t), 0, &queue.block);
+    }
+  }
+
+  void TearDown() override {
+    for (auto& wait : waits_) {
+      iree_hal_amd_gpu_signal_release(wait.signal);
+    }
+    for (auto* semaphore : semaphores_) {
+      iree_hal_semaphore_release(semaphore);
+    }
+    for (auto* producer : producers_) {
+      iree_hal_amd_gpu_signal_retire(producer, IREE_STATUS_OK);
+      iree_hal_amd_gpu_signal_release(producer);
+    }
+    for (auto& queue : queues_) {
+      iree_hal_amd_gpu_signal_block_deinitialize(&queue.block);
+      iree_hal_amd_gpu_signal_pool_deinitialize(&queue.pool);
+    }
+    iree_async_proactor_release(proactor_);
+  }
+
+  iree_hal_semaphore_t* Semaphore(uint64_t initial_value = 0) {
+    iree_hal_semaphore_t* semaphore = nullptr;
+    IREE_CHECK_OK(
+        iree_hal_amd_gpu_semaphore_create(proactor_, nullptr, initial_value, 2,
+                                          iree_allocator_system(), &semaphore));
+    semaphores_.push_back(semaphore);
+    return semaphore;
+  }
+
+  iree_hal_amd_gpu_signal_t* AddNativeWait(size_t queue_index) {
+    auto* producer =
+        iree_hal_amd_gpu_signal_pool_try_acquire(&queues_[queue_index].pool, 1);
+    IREE_ASSERT(producer);
+    producers_.push_back(producer);
+    const uint64_t frontier[2] = {queue_index == 0 ? 3u : 0u,
+                                  queue_index == 1 ? 7u : 0u};
+    iree_hal_amd_gpu_signal_publish_frontier(producer, frontier);
+    auto* semaphore = Semaphore();
+    IREE_CHECK_OK(
+        iree_hal_amd_gpu_semaphore_publish_signal(semaphore, 1, producer));
+    waits_.push_back({.semaphore = semaphore, .value = 1});
+    return producer;
+  }
+
+  iree_status_t Admit(const void* domain) {
+    return iree_hal_amd_gpu_aql_submission_admit_waits(
+        domain, &queues_[0].pool, waits_.size(), waits_.data(), true, &counts_,
+        &wait_index_, &kind_);
+  }
+
+  // Real timeline infrastructure shared by both native queues.
+  iree_async_proactor_t* proactor_ = nullptr;
+  // Native allocation dependencies; admission itself is production code.
+  std::array<NativeQueue, 2> queues_;
+  // Owned HAL timelines, released before their native allocation metadata.
+  std::vector<iree_hal_semaphore_t*> semaphores_;
+  // Original native producer references, independent of cached and wait refs.
+  std::vector<iree_hal_amd_gpu_signal_t*> producers_;
+  // Borrowed semaphore records and any reader references admitted into them.
+  std::vector<iree_hal_amd_gpu_aql_wait_t> waits_;
+  // Exact ownership and packet-operand extents produced by admission.
+  iree_hal_amd_gpu_aql_wait_counts_t counts_ = {};
+  // Unresolved record selected by deferred admission.
+  iree_host_size_t wait_index_ = SIZE_MAX;
+  // Resolution returned by the production admission path.
+  iree_hal_amd_gpu_aql_wait_kind_t kind_ = IREE_HAL_AMD_GPU_AQL_WAIT_READY;
+};
+
+TEST_F(AqlDependencyTest, PartitionsCrossQueueOperandsWithoutDroppingReaders) {
+  auto* same_first = AddNativeWait(0);
+  waits_.push_back({.semaphore = Semaphore(1), .value = 1});
+  auto* other_first = AddNativeWait(1);
+  auto* same_second = AddNativeWait(0);
+  auto* other_second = AddNativeWait(1);
+  IREE_ASSERT_OK(Admit(this));
+  EXPECT_EQ(kind_, IREE_HAL_AMD_GPU_AQL_WAIT_READY);
+  EXPECT_EQ(counts_.retained_count, 4u);
+  EXPECT_EQ(counts_.native_count, 2u);
+  EXPECT_EQ(waits_[0].signal, other_first);
+  EXPECT_EQ(waits_[1].signal, other_second);
+  size_t same_count = 0;
+  for (size_t i = counts_.native_count; i < waits_.size(); ++i) {
+    if (waits_[i].signal) {
+      EXPECT_TRUE(waits_[i].signal == same_first ||
+                  waits_[i].signal == same_second);
+      ++same_count;
+    }
+  }
+  EXPECT_EQ(same_count, 2u);
+  for (auto* signal : producers_) {
+    EXPECT_EQ(iree_atomic_ref_count_load(&signal->state.live.ref_count), 3);
+  }
+}
+
+TEST_F(AqlDependencyTest, DeferredAdmissionReturnsEveryAcquiredReader) {
+  AddNativeWait(0);
+  AddNativeWait(1);
+  waits_.push_back({.semaphore = Semaphore(), .value = 1});
+  auto* deferred = waits_.back().semaphore;
+  IREE_ASSERT_OK(Admit(this));
+  EXPECT_EQ(kind_, IREE_HAL_AMD_GPU_AQL_WAIT_SUBMISSION);
+  EXPECT_EQ(wait_index_, 2u);
+  EXPECT_EQ(waits_[wait_index_].semaphore, deferred);
+  EXPECT_EQ(counts_.retained_count, 0u);
+  EXPECT_EQ(counts_.native_count, 0u);
+  for (const auto& wait : waits_) {
+    EXPECT_EQ(wait.signal, nullptr);
+  }
+  for (auto* signal : producers_) {
+    EXPECT_EQ(iree_atomic_ref_count_load(&signal->state.live.ref_count), 2);
+  }
+}
+
+TEST_F(AqlDependencyTest, FailedAdmissionReturnsEveryAcquiredReader) {
+  AddNativeWait(0);
+  AddNativeWait(1);
+  auto* failed = Semaphore();
+  iree_hal_semaphore_fail(failed, iree_make_status(IREE_STATUS_ABORTED));
+  waits_.push_back({.semaphore = failed, .value = 1});
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED, Admit(this));
+  EXPECT_EQ(counts_.retained_count, 0u);
+  EXPECT_EQ(counts_.native_count, 0u);
+  for (const auto& wait : waits_) {
+    EXPECT_EQ(wait.signal, nullptr);
+  }
+  for (auto* signal : producers_) {
+    EXPECT_EQ(iree_atomic_ref_count_load(&signal->state.live.ref_count), 2);
+  }
+}
+
+TEST_F(AqlDependencyTest, ForeignNativeDomainRequiresHostCompletion) {
+  AddNativeWait(0);
+  const uint64_t foreign_domain = 0;
+  IREE_ASSERT_OK(Admit(&foreign_domain));
+  EXPECT_EQ(kind_, IREE_HAL_AMD_GPU_AQL_WAIT_COMPLETION);
+  EXPECT_EQ(wait_index_, 0u);
+  EXPECT_EQ(counts_.retained_count, 0u);
+  EXPECT_EQ(counts_.native_count, 0u);
+  EXPECT_EQ(waits_[0].signal, nullptr);
+}
 
 struct Executable {
   // Real HAL resource whose payload dependency has no native work.
@@ -139,7 +310,7 @@ TEST_P(AqlSubmissionTest, CapturesInputsAndReleasesPayloadBeforeCompletion) {
   if (GetParam()) {
     IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_retirement(
         &pool_, iree_make_byte_span(inline_storage, sizeof(inline_storage)),
-        nullptr, &request, 0, nullptr, 0, {1, &semaphore, &value}, &capture));
+        nullptr, &request, 0, nullptr, {}, {1, &semaphore, &value}, &capture));
     EXPECT_EQ(capture->pool, nullptr);
     EXPECT_EQ(capture->dispatch.constants.data_length, 0u);
   } else {
@@ -196,7 +367,11 @@ TEST_P(AqlSubmissionTest, DependencyReadersJoinProducerHostRetirement) {
       &pool_,
       GetParam() ? iree_make_byte_span(inline_storage, sizeof(inline_storage))
                  : iree_byte_span_empty(),
-      nullptr, &barrier, 1, &dependency, 1, {}, &consumer));
+      nullptr, &barrier, 1, &dependency,
+      {.retained_count = 1, .native_count = 0}, {}, &consumer));
+  EXPECT_EQ(consumer->wait_count, 1u);
+  EXPECT_EQ(consumer->native_wait_count, 0u);
+  EXPECT_EQ(consumer->waits[0].signal, producer);
   native.value = 0;  // Firmware has finished; the host still owns the payload.
   iree_status_code_t code = IREE_STATUS_OK;
   EXPECT_FALSE(
@@ -262,7 +437,7 @@ TEST_P(AqlSubmissionTest, RejectionReleasesPayloadBeforeFailingPublicSignals) {
   if (GetParam()) {
     IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_retirement(
         &pool_, iree_make_byte_span(inline_storage, sizeof(inline_storage)),
-        nullptr, &request, 0, nullptr, 0, {1, &semaphore, &one}, &capture));
+        nullptr, &request, 0, nullptr, {}, {1, &semaphore, &one}, &capture));
     EXPECT_EQ(capture->pool, nullptr);
   } else {
     IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_capture(
@@ -298,7 +473,7 @@ TEST_P(AqlSubmissionTest, OptionalProfileSharesInlineAndPooledCapture) {
     if (GetParam()) {
       IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_retirement(
           &pool_, iree_make_byte_span(inline_storage, sizeof(inline_storage)),
-          profiled ? &operation : nullptr, &barrier, 0, nullptr, 0, {},
+          profiled ? &operation : nullptr, &barrier, 0, nullptr, {}, {},
           &capture));
       EXPECT_EQ(capture->pool, nullptr);
     } else {

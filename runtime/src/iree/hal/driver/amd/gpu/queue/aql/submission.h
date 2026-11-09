@@ -31,6 +31,35 @@ typedef struct iree_hal_amd_gpu_aql_wait_t {
   iree_hal_amd_gpu_signal_t* signal;
 } iree_hal_amd_gpu_aql_wait_t;
 
+// Admission keeps native synchronization separate from signal ownership.
+// Same-queue signals need no wait operand but retain their retirement outcome.
+typedef struct iree_hal_amd_gpu_aql_wait_counts_t {
+  // Exact reader references transferred to an inline retirement capture.
+  uint32_t retained_count;
+  // Leading wait records whose signals require native dependency packets.
+  uint32_t native_count;
+} iree_hal_amd_gpu_aql_wait_counts_t;
+
+typedef enum iree_hal_amd_gpu_aql_wait_kind_e {
+  IREE_HAL_AMD_GPU_AQL_WAIT_READY,
+  IREE_HAL_AMD_GPU_AQL_WAIT_COMPLETION,
+  IREE_HAL_AMD_GPU_AQL_WAIT_SUBMISSION,
+} iree_hal_amd_gpu_aql_wait_kind_t;
+
+// Resolves owned or borrowed wait records without allocating. Ready admission
+// partitions native wait operands into the leading counts.native_count records;
+// other retained signals remain available for causal joins and host retirement.
+// The ordered pool belongs to this native queue or a fully joined earlier owner
+// of its slot. Foreign domains and deferred values keep their host wait path.
+// Deferred or failed admission releases every acquired reader and clears
+// counts.
+iree_status_t iree_hal_amd_gpu_aql_submission_admit_waits(
+    const void* domain, const iree_hal_amd_gpu_signal_pool_t* ordered_pool,
+    iree_host_size_t wait_count, iree_hal_amd_gpu_aql_wait_t* waits,
+    bool native_eligible, iree_hal_amd_gpu_aql_wait_counts_t* out_counts,
+    iree_host_size_t* out_wait_index,
+    iree_hal_amd_gpu_aql_wait_kind_t* out_kind);
+
 // Borrowed call arguments; native packing consumes these directly when ready.
 typedef struct iree_hal_amd_gpu_aql_dispatch_request_t {
   // Executable dominating the immutable function, or NULL for a barrier.
@@ -88,7 +117,7 @@ typedef struct iree_hal_amd_gpu_aql_submission_t {
   iree_host_size_t wait_count;
   // Inline dependency records, including independently retained native readers.
   iree_hal_amd_gpu_aql_wait_t* waits;
-  // Native reader count, or UINT32_MAX before dependency admission.
+  // Leading native wait operand count, or UINT32_MAX before admission.
   uint32_t native_wait_count;
   // First rejection or execution error, preserved through all native pieces.
   iree_atomic_int32_t failure_code;
@@ -222,7 +251,8 @@ iree_status_t iree_hal_amd_gpu_aql_submission_retirement(
     const iree_hal_amd_gpu_profile_operation_t* profile,
     const iree_hal_amd_gpu_aql_dispatch_request_t* request,
     iree_host_size_t wait_count, const iree_hal_amd_gpu_aql_wait_t* waits,
-    uint32_t native_wait_count, iree_hal_semaphore_list_t signals,
+    iree_hal_amd_gpu_aql_wait_counts_t counts,
+    iree_hal_semaphore_list_t signals,
     iree_hal_amd_gpu_aql_submission_t** out_submission);
 
 // Native completion is necessary but producer payload retirement is separate.
