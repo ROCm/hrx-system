@@ -72,6 +72,9 @@ struct loom_value_fact_extension_entry_t {
   } payload;
 };
 
+static_assert(sizeof(loom_value_fact_extension_entry_t) == 120,
+              "fact extension entries must remain pool-sized");
+
 //===----------------------------------------------------------------------===//
 // Payload interning
 //===----------------------------------------------------------------------===//

@@ -105,16 +105,19 @@ class NativeStorageTest : public ::testing::Test {
     const int64_t lengths[] = {64, 24, 2, 64};
     const uint64_t alignments[] = {UINT64_MAX, 4, 2, UINT64_MAX};
     for (size_t i = 1; i < 5; ++i) {
+      const int16_t static_element_byte_count = i == 3 ? 2 : 4;
+      const uint8_t memory_space = i == 4
+                                       ? LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL
+                                       : LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP;
       const loom_value_fact_view_reference_t view = {
           .base_byte_offset = loom_value_facts_exact_i64(offsets[i - 1]),
           .footprint_byte_length = loom_value_facts_exact_i64(lengths[i - 1]),
           .minimum_alignment = alignments[i - 1],
           .root_minimum_alignment = 64,
-          .static_element_byte_count = i == 3 ? 2 : 4,
-          .memory_space = i == 4 ? LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL
-                                 : LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
           .root_value_id = i == 4 ? arguments_[4] : arguments_[0],
           .buffer_value_id = i == 4 ? LOOM_VALUE_ID_INVALID : arguments_[0],
+          .static_element_byte_count = static_element_byte_count,
+          .memory_space = memory_space,
       };
       IREE_ASSERT_OK(loom_value_facts_make_view_reference(
           &source_.facts.context, view, &facts));

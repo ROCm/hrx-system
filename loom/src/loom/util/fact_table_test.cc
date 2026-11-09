@@ -806,6 +806,70 @@ TEST(FactTableStorageTest, PooledExtensionEntriesClearWithScope) {
   iree_arena_block_pool_deinitialize(&block_pool);
 }
 
+TEST(FactTableStorageTest,
+     PooledExtensionEntriesReach1024WithoutOversizedStorage) {
+  iree_arena_block_pool_t block_pool = {};
+  iree_arena_block_pool_initialize(131072, iree_allocator_system(),
+                                   &block_pool);
+  iree_arena_allocator_t arena = {};
+  iree_arena_initialize(&block_pool, &arena);
+  iree_arena_allocator_t transient_arena = {};
+  iree_arena_initialize(&block_pool, &transient_arena);
+  loom_value_fact_table_t table = {};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize_with_arenas(
+      &table, &arena, &transient_arena, 0));
+
+  const auto populate = [](loom_value_fact_table_t* table) -> iree_status_t {
+    for (uint32_t i = 0; i < 1024; ++i) {
+      loom_value_facts_t facts;
+      IREE_RETURN_IF_ERROR(loom_value_facts_make_uniform_element(
+          &table->context, loom_value_facts_exact_i64(i), &facts));
+      if (facts.extension_id != i + 1) {
+        return iree_make_status(IREE_STATUS_INTERNAL,
+                                "extension ID mismatch at %u", i);
+      }
+    }
+    return iree_ok_status();
+  };
+
+  IREE_ASSERT_OK(populate(&table));
+  EXPECT_EQ(table.extensions.capacity, 1024u);
+  EXPECT_FALSE(table.has_persistent_extension_entries);
+  for (const uint32_t i : {0u, 511u, 512u, 1023u}) {
+    loom_value_facts_t facts = loom_value_facts_unknown();
+    facts.extension_id = i + 1;
+    loom_value_fact_uniform_element_t uniform = {};
+    ASSERT_TRUE(loom_value_facts_query_uniform_element(&table.context, facts,
+                                                       &uniform));
+    EXPECT_EQ(uniform.element.range_lo, i);
+    EXPECT_EQ(uniform.element.range_hi, i);
+  }
+  iree_arena_block_pool_statistics_t warm_statistics;
+  iree_arena_block_pool_query_statistics(&block_pool, &warm_statistics);
+#if IREE_STATISTICS_ENABLE
+  EXPECT_EQ(warm_statistics.oversized_allocation_count, 0u);
+  EXPECT_EQ(warm_statistics.oversized_allocation_bytes, 0u);
+#endif  // IREE_STATISTICS_ENABLE
+
+  loom_value_fact_table_clear_scope(&table);
+  iree_arena_reset(&transient_arena);
+  EXPECT_EQ(table.extensions.entries, nullptr);
+  EXPECT_EQ(table.extensions.capacity, 0u);
+  IREE_ASSERT_OK(populate(&table));
+  iree_arena_block_pool_statistics_t reused_statistics;
+  iree_arena_block_pool_query_statistics(&block_pool, &reused_statistics);
+#if IREE_STATISTICS_ENABLE
+  EXPECT_EQ(reused_statistics.block_system_allocation_count,
+            warm_statistics.block_system_allocation_count);
+  EXPECT_EQ(reused_statistics.oversized_allocation_count,
+            warm_statistics.oversized_allocation_count);
+#endif  // IREE_STATISTICS_ENABLE
+
+  iree_arena_deinitialize(&transient_arena);
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&block_pool);
+}
+
 TEST_F(FactTableTest, SmallStaticLanesExtensionRoundTrips) {
   loom_value_fact_table_t table = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));

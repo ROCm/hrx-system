@@ -230,11 +230,11 @@ TEST_F(SourceMemoryPlanTest, MaterializedCarrierKeepsStorageProvenance) {
       .footprint_byte_length = loom_value_facts_exact_i64(128),
       .minimum_alignment = 64,
       .root_minimum_alignment = 64,
-      .static_element_byte_count = 4,
-      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
       .root_value_id = root,
       .buffer_value_id = LOOM_VALUE_ID_INVALID,
       .alias_scope_id = 7,
+      .static_element_byte_count = 4,
+      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
   };
   auto carrier_facts = loom_value_facts_unknown();
   IREE_ASSERT_OK(loom_value_facts_make_view_reference(&facts.context, reference,

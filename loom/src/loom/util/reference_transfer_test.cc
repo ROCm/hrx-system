@@ -192,12 +192,12 @@ TEST_F(ReferenceTransferTest, ViewOriginsPreserveCoordinatesAcrossTables) {
       .footprint_byte_length = loom_value_facts_exact_i64(32),
       .minimum_alignment = 16,
       .root_minimum_alignment = 64,
-      .static_element_byte_count = 4,
-      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
+      .origin = {1, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY, buffer},
       .root_value_id = buffer,
       .buffer_value_id = buffer,
       .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
-      .origin = {1, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY, buffer},
+      .static_element_byte_count = 4,
+      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
   };
   loom_value_facts_t source;
   IREE_ASSERT_OK(loom_value_facts_make_view_reference(
@@ -246,13 +246,13 @@ TEST_F(ReferenceTransferTest, CallArgumentRebasesPassedViewAddress) {
       .footprint_byte_length = loom_value_facts_exact_i64(32),
       .minimum_alignment = 16,
       .root_minimum_alignment = 64,
-      .static_element_byte_count = 1,
-      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
+      .origin = {1, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY, caller_buffer},
       .root_value_id = caller_buffer,
       .buffer_value_id = caller_buffer,
       .alias_scope_id = caller_buffer,
+      .static_element_byte_count = 1,
+      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
       .nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL,
-      .origin = {1, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY, caller_buffer},
   };
   loom_value_facts_t facts;
   IREE_ASSERT_OK(loom_value_facts_make_view_reference(
