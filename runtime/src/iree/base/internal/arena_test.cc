@@ -871,6 +871,72 @@ TEST(Arena, GrowArrayRespectsMinimum) {
   iree_arena_block_pool_deinitialize(&pool);
 }
 
+TEST(Arena, GrowArrayPreservesGeometricCapacityAcrossBlockBoundary) {
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(kBlockSize, iree_allocator_system(), &pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&pool, &arena);
+
+  const iree_host_size_t block_capacity =
+      iree_arena_block_pool_max_allocation_size(&pool) / sizeof(uint32_t);
+  iree_host_size_t capacity = 1;
+  while (capacity * 2 <= block_capacity) {
+    capacity *= 2;
+  }
+  uint32_t* values = NULL;
+  IREE_ASSERT_OK(iree_arena_allocate_array(&arena, capacity, sizeof(*values),
+                                           (void**)&values));
+  const iree_host_size_t geometric_capacity = capacity * 2;
+
+  IREE_ASSERT_OK(iree_arena_grow_array(&arena, capacity, capacity + 1,
+                                       sizeof(*values), &capacity,
+                                       (void**)&values));
+  EXPECT_EQ(capacity, geometric_capacity);
+  EXPECT_NE(arena.allocation_head, nullptr);
+
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&pool);
+}
+
+TEST(Arena, GrowArrayBlockFitUsesFullBlockBeforeOversizedStorage) {
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(kBlockSize, iree_allocator_system(), &pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&pool, &arena);
+
+  const iree_host_size_t block_capacity =
+      iree_arena_block_pool_max_allocation_size(&pool) / sizeof(uint32_t);
+  ASSERT_GT(block_capacity, 2u);
+  iree_host_size_t capacity = block_capacity / 2 + 1;
+  uint32_t* values = NULL;
+  IREE_ASSERT_OK(iree_arena_allocate_array(&arena, capacity, sizeof(*values),
+                                           (void**)&values));
+  values[0] = 100;
+  values[capacity - 1] = 200;
+
+  const iree_host_size_t first_count = capacity;
+  IREE_ASSERT_OK(iree_arena_grow_array_block_fit(
+      &arena, first_count, first_count + 1, sizeof(*values), &capacity,
+      (void**)&values));
+  EXPECT_EQ(capacity, block_capacity);
+  EXPECT_EQ(arena.allocation_head, nullptr);
+  EXPECT_EQ(values[0], 100u);
+  EXPECT_EQ(values[first_count - 1], 200u);
+  values[capacity - 1] = 300;
+
+  IREE_ASSERT_OK(iree_arena_grow_array_block_fit(&arena, capacity, capacity + 1,
+                                                 sizeof(*values), &capacity,
+                                                 (void**)&values));
+  EXPECT_EQ(capacity, block_capacity * 2);
+  EXPECT_NE(arena.allocation_head, nullptr);
+  EXPECT_EQ(values[0], 100u);
+  EXPECT_EQ(values[first_count - 1], 200u);
+  EXPECT_EQ(values[block_capacity - 1], 300u);
+
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&pool);
+}
+
 //===----------------------------------------------------------------------===//
 // iree_arena_allocator (iree_allocator_t interface)
 //===----------------------------------------------------------------------===//

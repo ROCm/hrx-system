@@ -615,6 +615,40 @@ iree_status_t iree_arena_grow_array(iree_arena_allocator_t* arena,
   return status;
 }
 
+iree_status_t iree_arena_grow_array_block_fit(iree_arena_allocator_t* arena,
+                                              iree_host_size_t existing_count,
+                                              iree_host_size_t minimum_capacity,
+                                              iree_host_size_t element_size,
+                                              iree_host_size_t* inout_capacity,
+                                              void** inout_ptr) {
+  if (*inout_ptr != NULL && existing_count < *inout_capacity &&
+      minimum_capacity <= *inout_capacity) {
+    return iree_ok_status();
+  }
+  iree_host_size_t doubled_capacity = 0;
+  if (element_size != 0 &&
+      iree_host_size_checked_mul(*inout_capacity, 2, &doubled_capacity)) {
+    const iree_host_size_t block_capacity =
+        iree_arena_block_pool_max_allocation_size(arena->block_pool) /
+        element_size;
+    if (*inout_capacity < block_capacity &&
+        minimum_capacity <= block_capacity &&
+        doubled_capacity > block_capacity) {
+      void* new_ptr = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, block_capacity,
+                                                     element_size, &new_ptr));
+      if (*inout_ptr && existing_count > 0) {
+        memcpy(new_ptr, *inout_ptr, existing_count * element_size);
+      }
+      *inout_ptr = new_ptr;
+      *inout_capacity = block_capacity;
+      return iree_ok_status();
+    }
+  }
+  return iree_arena_grow_array(arena, existing_count, minimum_capacity,
+                               element_size, inout_capacity, inout_ptr);
+}
+
 static iree_status_t iree_arena_allocator_ctl(void* self,
                                               iree_allocator_command_t command,
                                               const void* params,
