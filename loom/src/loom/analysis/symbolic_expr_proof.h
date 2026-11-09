@@ -53,8 +53,10 @@ typedef struct loom_symbolic_value_difference_t {
 } loom_symbolic_value_difference_t;
 
 // Attempts to prove left <= right. The implementation uses exact term
-// cancellation first and falls back to interval facts without allocating new
-// retained expression storage.
+// cancellation first, then retained relations, conditional cases, and interval
+// facts. Hypothetical conditions own temporary expression storage; every exit
+// preserves the caller's active scope, prepared summaries, and borrowed
+// records.
 iree_status_t loom_symbolic_expr_prove_le(
     loom_symbolic_expr_context_t* context,
     const loom_symbolic_expr_t* left_expression,

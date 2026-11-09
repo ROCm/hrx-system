@@ -12,6 +12,7 @@
 #include "loom/analysis/condition_facts.h"
 #include "loom/analysis/symbolic_product.h"
 #include "loom/analysis/symbolic_projection.h"
+#include "loom/analysis/symbolic_scope.h"
 #include "loom/analysis/symbolic_value.h"
 #include "loom/ir/attribute.h"
 #include "loom/util/adaptive_sort.h"
@@ -1676,8 +1677,8 @@ static iree_status_t loom_symbolic_expr_select_iterator_for_le(
 // Rebuilds an existing linear expression while an active condition scope can
 // resolve each retained SSA identity to its selected value. Expressions handed
 // to the proof API may have been composed after their SSA producers expanded,
-// so resetting the value memo alone cannot specialize those already-retained
-// terms. relation_value_id is an equal SSA value that preserves the strongest
+// so an independent value memo alone cannot specialize those retained terms.
+// relation_value_id is an equal SSA value that preserves the strongest
 // available predicate and selector provenance for exactly this purpose.
 static bool loom_symbolic_expr_has_select_dependencies(
     const loom_symbolic_expr_context_t* context,
@@ -1765,8 +1766,8 @@ loom_symbolic_expr_recompose_for_active_condition(
 __attribute__((minsize))
 #endif  // IREE_HAVE_ATTRIBUTE(minsize)
 IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static iree_status_t
-loom_symbolic_expr_prove_le_by_recomposed_condition(
-    const loom_symbolic_expr_context_t* context,
+loom_symbolic_expr_prove_le_in_condition_scope(
+    loom_symbolic_expr_context_t* context,
     const loom_symbolic_expr_t* left_expression,
     const loom_symbolic_expr_t* right_expression,
     const loom_condition_fact_scope_t* condition_scope,
@@ -1777,9 +1778,22 @@ loom_symbolic_expr_prove_le_by_recomposed_condition(
   loom_symbolic_expr_context_initialize(context->module, context->value_domain,
                                         context->fact_table, arena,
                                         &scoped_context);
+  loom_symbolic_scope_t scoped_storage = {
+      .condition_query = loom_symbolic_expr_condition_query(context),
+  };
+  IREE_RETURN_IF_ERROR(
+      loom_intern_table_initialize(arena, 0, &scoped_storage.index));
+  scoped_context.scoped_storage = &scoped_storage;
   scoped_context.value_identities = context->value_identities;
   scoped_context.condition_scope = condition_scope;
   scoped_context.maximum_term_count = context->maximum_term_count;
+
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_le_with_scope(
+      &scoped_context, left_expression, right_expression,
+      LOOM_SYMBOLIC_EXPR_PROOF_SCOPE_CONDITION_ASSUMPTION, out_result));
+  if (*out_result != LOOM_SYMBOLIC_PROOF_UNKNOWN) {
+    return iree_ok_status();
+  }
 
   loom_symbolic_expr_t scoped_left = {0};
   bool left_has_composite_expansion = false;
@@ -1815,29 +1829,17 @@ loom_symbolic_expr_prove_le_with_condition_assumption(
   loom_condition_derivation_t derivation;
   loom_condition_derivation_initialize(&derivation_arena, &derivation);
   iree_status_t status = loom_condition_facts_query_complete(
-      &context->condition_query, context->fact_table, condition, assumed_truth,
-      &derivation);
+      loom_symbolic_expr_condition_query(context), context->fact_table,
+      condition, assumed_truth, &derivation);
   if (iree_status_is_ok(status) &&
       (derivation.integer_facts.integer_relation_count != 0 ||
        derivation.boolean_fact_count != 0)) {
-    const loom_condition_fact_scope_t* previous_scope =
-        context->condition_scope;
     loom_condition_fact_scope_t condition_scope;
-    loom_condition_fact_scope_initialize_local(previous_scope, &derivation,
-                                               &condition_scope);
-    context->condition_scope = &condition_scope;
-    loom_symbolic_expr_context_reset(context);
-    status = loom_symbolic_expr_prove_le_with_scope(
-        context, left_expression, right_expression,
-        LOOM_SYMBOLIC_EXPR_PROOF_SCOPE_CONDITION_ASSUMPTION, out_result);
-    if (iree_status_is_ok(status) &&
-        *out_result == LOOM_SYMBOLIC_PROOF_UNKNOWN) {
-      status = loom_symbolic_expr_prove_le_by_recomposed_condition(
-          context, left_expression, right_expression, &condition_scope,
-          &derivation_arena, out_result);
-    }
-    context->condition_scope = previous_scope;
-    loom_symbolic_expr_context_reset(context);
+    loom_condition_fact_scope_initialize_local(context->condition_scope,
+                                               &derivation, &condition_scope);
+    status = loom_symbolic_expr_prove_le_in_condition_scope(
+        context, left_expression, right_expression, &condition_scope,
+        &derivation_arena, out_result);
   }
   iree_arena_deinitialize(&derivation_arena);
   return status;
@@ -1873,7 +1875,7 @@ static iree_status_t loom_symbolic_expr_prove_le_by_select_cases(
     bool condition_is_proven = false;
     if (context->condition_scope) {
       status = loom_condition_fact_scope_proves_condition(
-          &context->condition_query, context->fact_table,
+          loom_symbolic_expr_condition_query(context), context->fact_table,
           context->condition_scope, condition, &proven_condition,
           &condition_is_proven);
       if (!iree_status_is_ok(status)) {
@@ -1921,7 +1923,6 @@ static iree_status_t loom_symbolic_expr_prove_le_by_select_cases(
     }
   }
 
-  const loom_condition_fact_scope_t* previous_scope = context->condition_scope;
   loom_condition_derivation_t residual_derivation;
   loom_condition_fact_scope_t residual_scope;
   if (iree_status_is_ok(status) && *out_result == LOOM_SYMBOLIC_PROOF_UNKNOWN &&
@@ -1929,28 +1930,18 @@ static iree_status_t loom_symbolic_expr_prove_le_by_select_cases(
     loom_condition_derivation_initialize(&condition_arena,
                                          &residual_derivation);
     status = loom_condition_facts_query_conjunction_complete(
-        &context->condition_query, context->fact_table,
+        loom_symbolic_expr_condition_query(context), context->fact_table,
         residual_assumptions.values, residual_assumptions.count,
         &residual_derivation);
     if (iree_status_is_ok(status)) {
       loom_condition_fact_scope_initialize_local(
-          previous_scope, &residual_derivation, &residual_scope);
-      context->condition_scope = &residual_scope;
-      loom_symbolic_expr_context_reset(context);
-      status = loom_symbolic_expr_prove_le_with_scope(
-          context, left_expression, right_expression,
-          LOOM_SYMBOLIC_EXPR_PROOF_SCOPE_CONDITION_ASSUMPTION, out_result);
-      if (iree_status_is_ok(status) &&
-          *out_result == LOOM_SYMBOLIC_PROOF_UNKNOWN) {
-        status = loom_symbolic_expr_prove_le_by_recomposed_condition(
-            context, left_expression, right_expression, &residual_scope,
-            &condition_arena, out_result);
-      }
+          context->condition_scope, &residual_derivation, &residual_scope);
+      status = loom_symbolic_expr_prove_le_in_condition_scope(
+          context, left_expression, right_expression, &residual_scope,
+          &condition_arena, out_result);
       if (*out_result == LOOM_SYMBOLIC_PROOF_FALSE) {
         *out_result = LOOM_SYMBOLIC_PROOF_UNKNOWN;
       }
-      context->condition_scope = previous_scope;
-      loom_symbolic_expr_context_reset(context);
     }
   }
   iree_arena_deinitialize(&condition_arena);

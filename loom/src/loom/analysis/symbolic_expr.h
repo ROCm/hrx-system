@@ -152,6 +152,8 @@ typedef struct loom_symbolic_expr_condition_fact_memo_entry_t {
   loom_value_facts_t facts;
 } loom_symbolic_expr_condition_fact_memo_entry_t;
 
+typedef struct loom_symbolic_scope_t loom_symbolic_scope_t;
+
 // Per-analysis state for symbolic expression queries.
 typedef struct loom_symbolic_expr_context_t {
   // Module containing SSA value definitions queried by the context.
@@ -159,6 +161,10 @@ typedef struct loom_symbolic_expr_context_t {
 
   // Optional active domain mapping module value IDs to compact local ordinals.
   loom_local_value_domain_t* value_domain;
+
+  // Private compact indexing for a hypothetical proof, or NULL for the
+  // canonical context's ordinary module/local-domain indexing.
+  loom_symbolic_scope_t* scoped_storage;
 
   // Dense facts used to seed ranges, exact constants, and divisibility.
   const loom_value_fact_table_t* fact_table;
@@ -291,7 +297,9 @@ void loom_symbolic_expr_context_initialize(
     loom_symbolic_expr_context_t* out_context);
 
 // Clears memoized expressions and condition-refined facts while retaining
-// scratch and memo capacity.
+// scratch and memo capacity. Invalidates every summary and borrowed record
+// from this context. The owner resets after changing source facts or scope;
+// speculative proofs preserve the owner's epoch.
 void loom_symbolic_expr_context_reset(loom_symbolic_expr_context_t* context);
 
 // Copies a previously computed value summary without expanding |value_id| or

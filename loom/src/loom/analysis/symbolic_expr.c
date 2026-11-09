@@ -15,6 +15,7 @@
 #include "loom/analysis/symbolic_integer_cast.h"
 #include "loom/analysis/symbolic_product.h"
 #include "loom/analysis/symbolic_projection.h"
+#include "loom/analysis/symbolic_scope.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/context.h"
 #include "loom/ops/index/carrier.h"
@@ -71,24 +72,6 @@ struct loom_symbolic_expr_memo_chunk_t {
   loom_symbolic_expr_memo_entry_t
       entries[LOOM_SYMBOLIC_EXPR_MEMO_ENTRIES_PER_CHUNK];
 };
-
-static loom_value_ordinal_t loom_symbolic_expr_try_value_ordinal(
-    const loom_symbolic_expr_context_t* context, loom_value_id_t value_id) {
-  return context->value_domain != NULL ? loom_local_value_domain_try_ordinal(
-                                             context->value_domain, value_id)
-                                       : (loom_value_ordinal_t)value_id;
-}
-
-static iree_status_t loom_symbolic_expr_resolve_value_ordinal(
-    loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
-    loom_value_ordinal_t* out_value_ordinal) {
-  if (context->value_domain != NULL) {
-    return loom_local_value_domain_register_value(context->value_domain,
-                                                  value_id, out_value_ordinal);
-  }
-  *out_value_ordinal = (loom_value_ordinal_t)value_id;
-  return iree_ok_status();
-}
 
 static const loom_symbolic_expr_memo_entry_t*
 loom_symbolic_expr_ready_memo_entry(const loom_symbolic_expr_context_t* context,
@@ -380,7 +363,7 @@ iree_status_t loom_symbolic_expr_context_lookup_facts_and_selected_value(
         break;
       }
       IREE_RETURN_IF_ERROR(loom_condition_fact_scope_proves_condition(
-          &context->condition_query, context->fact_table,
+          loom_symbolic_expr_condition_query(context), context->fact_table,
           context->condition_scope, loom_scf_select_condition(defining_op),
           &condition, &proven));
       if (!proven) {
