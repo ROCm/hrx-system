@@ -25,12 +25,14 @@ typedef struct loom_pipeline_control_callback_t {
   // construction. A serial boundary executes on every engine participating in
   // scope, including engines with no work in this particular child. A NULL
   // child orders a nested serial scope against its enclosing scope. The after
-  // boundary establishes complete retirement before control advances.
+  // boundary establishes complete retirement before control advances. state
+  // contains the additional runtime operands in options.state_types order,
+  // as passed to the surrounding projected invocation.
   iree_status_t (*boundary)(void* user_data, loom_builder_t* builder,
                             iree_host_size_t engine,
                             const loom_pipeline_invocation_schedule_t* scope,
                             const loom_pipeline_invocation_t* child,
-                            bool before);
+                            bool before, const loom_value_id_t* state);
   // Acquires one logical record on the selected reader. A valid payload view
   // places the retained read body on this engine; INVALID selects a receiver.
   // State values are this projected call's invocation-private arguments, in

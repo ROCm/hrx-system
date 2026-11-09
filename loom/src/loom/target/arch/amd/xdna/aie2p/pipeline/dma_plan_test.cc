@@ -307,6 +307,7 @@ class Aie2pDmaSequenceTest
       }
     }
     EXPECT_EQ(records, repetitions);
+    EXPECT_EQ(sequence.terminal_slot, records % capacity);
     EXPECT_EQ(sequence.rewind_iteration, memory && iterations[0] != 0);
   }
 

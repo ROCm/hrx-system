@@ -459,6 +459,30 @@ func.def public @wide() -> (index) {
   EXPECT_FALSE(Run(module.get(), &specialization.function_versions));
   EXPECT_EQ(specialization.function_versions.list.count, 7u);
   EXPECT_EQ(module->symbols.count, source_symbol_count + 2);
+
+  // Execution inlining can move a retained call into a different caller's
+  // context. Reprojection must rebind the entire reachable helper chain.
+  const loom_call_like_t moved_call = loom_call_like_cast(
+      module.get(),
+      loom_region_entry_block(loom_func_like_body(right))->first_op);
+  loom_call_like_set_callee(module.get(), moved_call, middle64_ref);
+  EXPECT_TRUE(Run(module.get(), &specialization.function_versions));
+  const loom_symbol_ref_t rebound_middle =
+      OnlySemanticCallee(module.get(), right);
+  const loom_symbol_ref_t rebound_leaf =
+      OnlySemanticCallee(module.get(), Function(module.get(), rebound_middle));
+  for (const loom_symbol_ref_t ref : {rebound_middle, rebound_leaf}) {
+    const auto* version =
+        Version(module.get(), specialization.function_versions, ref);
+    ASSERT_NE(version, nullptr);
+    EXPECT_EQ(version->target_context_ordinal,
+              right_version->target_context_ordinal);
+    EXPECT_EQ(version->resolved_target.facts->storage.snapshot.subgroup_size,
+              32u);
+  }
+  EXPECT_EQ(OnlySemanticCallee(module.get(), wide).symbol_id,
+            middle64_ref.symbol_id);
+  EXPECT_FALSE(Run(module.get(), &specialization.function_versions));
 }
 
 TEST_F(TargetCallgraphSpecializationTest,

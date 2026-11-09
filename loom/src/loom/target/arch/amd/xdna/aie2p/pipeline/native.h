@@ -35,7 +35,8 @@ typedef struct loom_aie2p_native_cursor_t {
   // engine with disjoint lifetimes; single-owner completion proofs do not
   // apply.
   bool shared;
-  // Multiple admissions can select different physical slots.
+  // Admissions within the channel's lifetime can select different slots,
+  // including admissions from prior invocations of an importing worker.
   bool advances;
 } loom_aie2p_native_cursor_t;
 
@@ -344,6 +345,9 @@ typedef struct loom_aie2p_native_distribution_endpoint_t {
   loom_aie2p_native_tile_t* tile;
   // Direction-specific DMA engine.
   uint8_t engine;
+  // Physical controller selected during child admission, independent of cursor
+  // ownership. Used for non-root construction-entry initialization.
+  iree_host_size_t controller_engine;
   // Descriptor images, finite queued tasks, and invocation rewind state.
   loom_aie2p_native_dma_sequence_t sequence;
   // Invocation retirement must explicitly observe this DMA channel idle.
@@ -365,6 +369,8 @@ typedef struct loom_aie2p_native_distribution_t {
   struct loom_aie2p_native_distribution_t* next;
   // First geometry owning this physical engine/route path; self when unshared.
   const struct loom_aie2p_native_distribution_t* path;
+  // First invocation selecting this geometry; later uses retain its identity.
+  const loom_pipeline_invocation_t* invocation;
   // Canonical ownership and copy schedule used to intern geometry variants.
   const loom_pipeline_transport_batch_t* source;
   // Loop table owning source; shared geometries may come from different calls.
@@ -404,8 +410,8 @@ typedef struct loom_aie2p_native_distribution_phase_t {
   const struct loom_aie2p_native_distribution_phase_t* previous;
   // Canonical source batch retaining its admission and replay contract.
   const loom_pipeline_transport_batch_t* source;
-  // Shared immutable sender/receiver geometry for this phase.
-  const loom_aie2p_native_distribution_t* distribution;
+  // Shared sender/receiver geometry; controller admission completes its state.
+  loom_aie2p_native_distribution_t* distribution;
 } loom_aie2p_native_distribution_phase_t;
 
 // Repeated retirement observations of one physical DMA channel by one core.
@@ -438,6 +444,15 @@ typedef struct loom_aie2p_native_distribution_command_t {
   loom_aie2p_native_retirement_t* retirement;
 } loom_aie2p_native_distribution_command_t;
 
+// Descriptor state restored at the channel's construction boundary,
+// independently of the child visits that submit work using that descriptor.
+typedef struct loom_aie2p_native_endpoint_initialization_t {
+  // Next distinct endpoint initialized by this construction on this engine.
+  const struct loom_aie2p_native_endpoint_initialization_t* next;
+  // Selected partial-ring iterator, already retired before owner reentry.
+  const loom_aie2p_native_distribution_endpoint_t* endpoint;
+} loom_aie2p_native_endpoint_initialization_t;
+
 typedef enum loom_aie2p_native_execution_e {
   LOOM_AIE2P_NATIVE_EXECUTION_CORE,
   LOOM_AIE2P_NATIVE_EXECUTION_CONFIGURATION,
@@ -466,8 +481,8 @@ typedef struct loom_aie2p_native_worker_t {
   loom_aie2p_native_tile_t* tile;
   // Engine implementing the strand; only CORE occupies instruction memory.
   loom_aie2p_native_execution_t execution;
-  // Generated private cursor-frame formal, or invalid if the worker has no
-  // advancing endpoint. The physical entry initializes this state once.
+  // Generated private cursor-frame formal, or invalid when all cursors are
+  // worker-local SSA state. Each channel construction initializes its cells.
   loom_value_id_t cursor_state_argument;
   // Configuration channel turns indexed by the source channel action table.
   loom_aie2p_native_configuration_action_t* configuration_actions;
@@ -614,6 +629,9 @@ typedef struct loom_aie2p_native_context_t {
   // NULL when there are no ordered distributions. Each row retains the
   // invocation's complete transitive execution participants.
   iree_host_size_t* distribution_controllers;
+  // Invocation-major per-engine descriptor initialization. NULL when every
+  // endpoint finishes a complete ring turn or belongs to root configuration.
+  const loom_aie2p_native_endpoint_initialization_t** endpoint_initializers;
   // Physical join selected for each canonical execution schedule row.
   loom_aie2p_native_join_t** joins;
   // Distinct join trees; equal participant sets share one initialized instance.
@@ -693,15 +711,6 @@ iree_status_t loom_aie2p_native_select_joins(
 iree_status_t loom_aie2p_native_join_boundary(
     loom_aie2p_native_context_t* context, loom_builder_t* builder,
     iree_host_size_t engine, const loom_pipeline_invocation_schedule_t* scope);
-
-// Forms one scalar cursor cell in an invocation-private frame. Channel ordinal
-// and direction give a stable identity across child calls. Ordinary private
-// storage promotion carries these cells through the resulting control graph.
-iree_status_t loom_aie2p_native_cursor_view(loom_builder_t* builder,
-                                            loom_value_id_t frame,
-                                            iree_host_size_t channel,
-                                            bool writer,
-                                            loom_value_id_t* out_view);
 
 // Advances an admitted FIFO byte offset by one record, wrapping at capacity.
 // Retains the ring's range and alignment on the returned current record.

@@ -4,12 +4,11 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
-
 #include "loom/error/parameter.h"
 #include "loom/ops/channel/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/pipeline/ops.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
 #include "loom/target/arch/amd/xdna/error_catalog.h"
 #include "loom/target/function_version.h"
@@ -754,21 +753,12 @@ static iree_status_t loom_aie2p_native_select(
             action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE
                 ? &channel->cursor.reader
                 : &channel->cursor.writer;
-        const bool shared = cursor->shared || (cursor->worker != UINT32_MAX &&
-                                               cursor->worker != i);
-        const uint32_t maximum_admissions =
-            cursor->worker == i
-                ? iree_max(cursor->maximum_admissions,
-                           source->completion.actions[j].maximum_admissions)
-                : source->completion.actions[j].maximum_admissions;
-        *cursor = (loom_aie2p_native_cursor_t){
-            .worker = (uint32_t)i,
-            .maximum_admissions = maximum_admissions,
-            .shared = shared,
-            .advances =
-                channel->source->capacity > 1 &&
-                (maximum_admissions > 1 || shared ||
-                 realization->invocations.workers[i].invocation->ordinal != 0)};
+        const bool imported =
+            realization->invocations.channels[channel - context->channels]
+                .invocation != realization->invocations.workers[i].invocation;
+        loom_aie2p_native_cursor_bind(
+            cursor, channel->source->capacity, (uint32_t)i,
+            source->completion.actions[j].maximum_admissions, imported);
       }
     }
   }
@@ -991,6 +981,11 @@ static iree_status_t loom_aie2p_native_select(
           context, realization->workers[i].source->declaration,
           IREE_SV("resident child transport start and retirement"));
     }
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_native_select_initializers(context, realization, out_valid));
+  if (!*out_valid) {
+    return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_aie2p_native_select_joins(context, out_valid));
   if (!*out_valid) {

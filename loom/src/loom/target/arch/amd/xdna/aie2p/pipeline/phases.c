@@ -159,16 +159,6 @@ static iree_status_t loom_aie2p_native_endpoint_start(
   const loom_aie2p_native_memory_layout_t* layout =
       endpoint->tile->memory_layout;
   const loom_aie2p_native_dma_sequence_t* sequence = &endpoint->sequence;
-  if (sequence->rewind_iteration) {
-    const uint32_t address = loom_aie2p_native_endpoint_register(
-        context, endpoint, layout->iteration.current, sequence->descriptor);
-    loom_value_id_t word;
-    IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
-        &context->code, builder, sequence->words[0][layout->iteration_word],
-        &word));
-    IREE_RETURN_IF_ERROR(loom_aie2p_worker_control_write(
-        &context->code, builder, packet, address, &word, 1));
-  }
   const uint32_t address = loom_aie2p_native_endpoint_register(
       context, endpoint, layout->directions[command->direction - 1].start,
       endpoint->engine);

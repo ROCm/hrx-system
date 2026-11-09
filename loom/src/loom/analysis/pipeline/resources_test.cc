@@ -529,6 +529,14 @@ TEST_F(PipelineConstructionTest, CapturesKeepProtocolAndStorageSeparate) {
   ASSERT_TRUE(valid);
   ASSERT_EQ(invocations.count, 3u);
   ASSERT_EQ(invocations.worker_count, 4u);
+  // Each construction retains its own contiguous channel range. Imported
+  // channels remain in their parent's range, including empty child ranges.
+  ASSERT_EQ(invocations.channel_count, 2u);
+  EXPECT_EQ(invocations.entries[0]->first_channel, 0u);
+  EXPECT_EQ(invocations.entries[1]->first_channel, 2u);
+  EXPECT_EQ(invocations.entries[2]->first_channel, 2u);
+  EXPECT_EQ(invocations.channels[0].invocation, invocations.entries[0]);
+  EXPECT_EQ(invocations.channels[1].invocation, invocations.entries[0]);
   const char* instance_names[] = {"root_first", "root_second", "child_first",
                                   "child_second"};
   loom_func_like_t instances[4];

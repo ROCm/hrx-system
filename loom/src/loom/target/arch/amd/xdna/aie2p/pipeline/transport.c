@@ -6,6 +6,7 @@
 
 #include "loom/analysis/storage_geometry.h"
 #include "loom/ops/channel/ops.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_resources.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
@@ -495,9 +496,15 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
           payload_channel
               ? loom_aie2p_native_channel(context, realization, payload_channel)
               : NULL;
-      const bool record_dynamic = !configuration && local_channel &&
-                                  local_channel->source->capacity > 1 &&
-                                  payload_record.maximum_admissions > 1;
+      // Imported and shared endpoints can advance across worker invocations.
+      // The borrowed capability selects the cursor, independently of whether
+      // DMA reads or writes its payload.
+      const bool record_dynamic =
+          !configuration && local_channel &&
+          loom_aie2p_native_record_cursor(
+              local_channel, loom_module_value_type(context->code.module,
+                                                    payload_record.value_id))
+              ->advances;
       const loom_value_t* root =
           loom_module_value(module, external->root_value_id);
       if (!local_channel || !loom_value_is_block_arg(root) ||

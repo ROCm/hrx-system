@@ -425,6 +425,7 @@ iree_status_t loom_pipeline_invocations_build(
       return iree_ok_status();
     }
     invocation->first_worker = out_invocations->worker_count;
+    invocation->first_channel = out_invocations->channel_count;
     invocation->ordinal = out_invocations->count++;
     out_invocations->worker_count += resources->strand_count;
     out_invocations->channel_count += resources->channel_count;

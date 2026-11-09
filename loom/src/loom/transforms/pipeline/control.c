@@ -537,7 +537,8 @@ static iree_status_t loom_pipeline_control_project(
                                         engine] != IREE_HOST_SIZE_MAX) {
             IREE_RETURN_IF_ERROR(options->emit.boundary(
                 options->emit.user_data, &rewriter->builder, engine, NULL,
-                site->child, projection == LOOM_PIPELINE_CONTROL_START));
+                site->child, projection == LOOM_PIPELINE_CONTROL_START,
+                state_arguments));
           }
           IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, site->target));
           break;
@@ -555,7 +556,7 @@ static iree_status_t loom_pipeline_control_project(
         if (options->emit.boundary) {
           IREE_RETURN_IF_ERROR(options->emit.boundary(
               options->emit.user_data, &rewriter->builder, engine, site->scope,
-              site->child, true));
+              site->child, true, state_arguments));
         }
         const loom_pipeline_control_function_t* child =
             &functions[site->child->ordinal * execution->engine_count + engine];
@@ -566,7 +567,7 @@ static iree_status_t loom_pipeline_control_project(
         if (options->emit.boundary) {
           IREE_RETURN_IF_ERROR(options->emit.boundary(
               options->emit.user_data, &rewriter->builder, engine, site->scope,
-              site->child, false));
+              site->child, false, state_arguments));
         }
         IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, site->target));
         break;
@@ -590,11 +591,11 @@ static iree_status_t loom_pipeline_control_project(
                     ->workers[engine] != IREE_HOST_SIZE_MAX) {
           IREE_RETURN_IF_ERROR(options->emit.boundary(
               options->emit.user_data, &rewriter->builder, engine,
-              site->enclosing_scope, NULL, true));
+              site->enclosing_scope, NULL, true, state_arguments));
           loom_builder_set_before(&rewriter->builder, site->target->next_op);
           IREE_RETURN_IF_ERROR(options->emit.boundary(
               options->emit.user_data, &rewriter->builder, engine,
-              site->enclosing_scope, NULL, false));
+              site->enclosing_scope, NULL, false, state_arguments));
         }
         if (loom_pipeline_execution_schedule(execution, site->scope)
                 ->workers[engine] == IREE_HOST_SIZE_MAX) {

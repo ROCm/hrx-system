@@ -113,6 +113,7 @@ loom_cc_test(
 loom_cc_library(
     name = "native",
     srcs = [
+        "channel_state.c",
         "channels.c",
         "collective.c",
         "configuration.c",
@@ -129,6 +130,7 @@ loom_cc_library(
         "transport.c",
     ],
     hdrs = [
+        "channel_state.h",
         "dma_resources.h",
         "dma_submission.h",
         "native.h",
@@ -261,6 +263,36 @@ loom_cc_test(
         ":native",
         "//loom/src/loom/pass:types",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "channel_state_test",
+    srcs = ["channel_state_test.cc"],
+    deps = [
+        ":native",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/view",
+        "//loom/src/loom/pass:types",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "phases_test",
+    srcs = ["phases_test.cc"],
+    deps = [
+        ":native",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:type_registry",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

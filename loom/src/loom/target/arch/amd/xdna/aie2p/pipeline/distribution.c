@@ -309,8 +309,9 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
     }
     const uint32_t ordinal = ordinals[i];
     const loom_aie2p_native_channel_t* receiver_channel = &context->channels[i];
-    if ((path || transport->batch_count > 1) &&
-        totals[i] % receiver_channel->source->capacity) {
+    if (((path || transport->batch_count > 1) &&
+         totals[i] % receiver_channel->source->capacity) ||
+        (path && path->receivers[ordinal].sequence.terminal_slot)) {
       return loom_aie2p_native_reject(
           context, first->admission->op,
           IREE_SV("complete destination-ring turns on the same packet path"));
@@ -612,6 +613,7 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
           context->pass->arena, sizeof(*distribution), (void**)&distribution));
       *distribution = (loom_aie2p_native_distribution_t){
           .path = path ? path : distribution,
+          .invocation = invocation,
           .source = batch,
           .transport = &source->transport,
           .receiver_count = packet_program ? 0 : cohort->destination_count,
@@ -765,10 +767,10 @@ iree_status_t loom_aie2p_native_bind_distribution_phases(
           context, phase->source->records->admission->op,
           IREE_SV("one complete retained distribution lifetime per child"));
     }
-    const loom_aie2p_native_distribution_t* distribution = phase->distribution;
+    loom_aie2p_native_distribution_t* distribution = phase->distribution;
     for (iree_host_size_t j = 0; j <= distribution->receiver_count; ++j) {
       const bool sender = j == 0;
-      const loom_aie2p_native_distribution_endpoint_t* endpoint =
+      loom_aie2p_native_distribution_endpoint_t* endpoint =
           sender ? &distribution->sender : &distribution->receivers[j - 1];
       const uint32_t cursor = sender ? endpoint->channel->cursor.writer.worker
                                      : endpoint->channel->cursor.reader.worker;
@@ -807,6 +809,7 @@ iree_status_t loom_aie2p_native_bind_distribution_phases(
             IREE_SV("a producer and each receiver controlled by the complete "
                     "child or its concurrent parent invocation"));
       }
+      endpoint->controller_engine = engine;
       context->distribution_controllers[invocation->ordinal *
                                             context->execution.engine_count +
                                         engine] = controller;

@@ -445,7 +445,7 @@ jobs:
 
       - name: Build and run tests
         id: core_tests
-        shell: pwsh
+        shell: powershell
         run: |
           $testArgs = @()
           if ($env:HRX_PACKAGE -eq 'true') {
@@ -460,7 +460,7 @@ jobs:
       - name: Relocate and test package
         id: relocated_tests
         if: ${{ matrix.package }}
-        shell: pwsh
+        shell: powershell
         run: |
           $toolchainRoot = Split-Path -Parent $env:HRX_ROCM_ROOT
           $relocated = Join-Path $toolchainRoot 'relocated'

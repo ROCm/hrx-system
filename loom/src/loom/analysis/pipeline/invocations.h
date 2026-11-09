@@ -76,6 +76,8 @@ struct loom_pipeline_invocation_t {
   loom_pipeline_arguments_t arguments;
   // First worker ordinal in the complete resident inventory.
   iree_host_size_t first_worker;
+  // First locally constructed protocol in the complete channel inventory.
+  iree_host_size_t first_channel;
   // Concurrent children, indexed like resources->compositions.
   const loom_pipeline_invocation_t* const* compositions;
   // Bound schedules, indexed like resources->schedules.

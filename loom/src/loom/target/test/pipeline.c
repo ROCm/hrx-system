@@ -86,8 +86,10 @@ static iree_status_t loom_test_pipeline_worker(
 static iree_status_t loom_test_pipeline_boundary(
     void* user_data, loom_builder_t* builder, iree_host_size_t engine,
     const loom_pipeline_invocation_schedule_t* scope,
-    const loom_pipeline_invocation_t* child, bool before) {
+    const loom_pipeline_invocation_t* child, bool before,
+    const loom_value_id_t* state_arguments) {
   (void)child;
+  (void)state_arguments;
   if (!scope) {
     return iree_ok_status();
   }
@@ -194,7 +196,7 @@ static iree_status_t loom_test_pipeline_collective_end(
     memcpy(values, loom_op_results(call), count * sizeof(*values));
   }
   IREE_RETURN_IF_ERROR(loom_test_pipeline_boundary(user_data, builder, engine,
-                                                   scope, NULL, false));
+                                                   scope, NULL, false, NULL));
   if (reader) {
     IREE_RETURN_IF_ERROR(loom_test_pipeline_collective_call(
         state, builder, "release", NULL, 0, NULL, 0, &call));

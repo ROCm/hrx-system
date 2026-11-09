@@ -394,6 +394,7 @@ static iree_status_t loom_aie2p_native_build_lifetime(
       .descriptor = first_descriptor,
       .descriptor_count = (uint16_t)(2 * capacity + parts[1].descriptor_count),
       .task_count = (uint8_t)(2 + parts[1].task_count),
+      .terminal_slot = repetitions % capacity,
   };
   IREE_RETURN_IF_ERROR(iree_arena_allocate(
       arena,
@@ -523,6 +524,7 @@ iree_status_t loom_aie2p_native_build_sequence(
       .descriptor = first_descriptor,
       .descriptor_count = (uint16_t)required_descriptors,
       .task_count = (uint8_t)task_count,
+      .terminal_slot = repetitions % capacity,
       .rewind_iteration = layout && chain_length == 1 && repetitions % capacity,
   };
   IREE_RETURN_IF_ERROR(
