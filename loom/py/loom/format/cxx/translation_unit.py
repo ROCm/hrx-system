@@ -200,7 +200,9 @@ def render_preamble(
         headers.add("loomcxx/encoding.h")
     if uses_numeric_conversion:
         headers.add("loomcxx/numeric.h")
-    uses_vector_header = bool(
+    uses_vector_header = any(
+        element == "i1" or len(dims) != 1 for element, dims, _signed in vector_aliases
+    ) or bool(
         operation_names
         & {
             "kernel.subgroup.reduce",

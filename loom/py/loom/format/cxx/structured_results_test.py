@@ -44,6 +44,20 @@ from loom.format.cxx.renderer import render_module
             "{}",
             "\nusing UInt32x4 = unsigned __attribute__((ext_vector_type(4)));\n\n",
         ),
+        (
+            "vector<4xi1>",
+            "Boolx4",
+            "",
+            "#include <loomcxx/vector.h>\n\n"
+            "using Boolx4 = loom::type::vector<loom::type::shape<4>, bool>;\n\n",
+        ),
+        (
+            "vector<2x2xi32>",
+            "UInt32x2x2",
+            "",
+            "#include <loomcxx/vector.h>\n\n"
+            "using UInt32x2x2 = loom::type::vector<loom::type::shape<2, 2>, unsigned>;\n\n",
+        ),
     ],
 )
 def test_declares_numeric_results_before_assigning_each_branch(
@@ -112,7 +126,6 @@ kernel.def @widened_view() {
         result
         == """\
 #include <loomcxx/kernel.h>
-#include <loomcxx/numeric.h>
 
 [[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
 void widened_view(const unsigned* input, unsigned* output) {
@@ -123,7 +136,7 @@ void widened_view(const unsigned* input, unsigned* output) {
   bool loop_continues = true;
   do {
     unsigned active = loom::view::load(before, 0);
-    bool flag = loom::convert<bool>(active);
+    bool flag = (active & static_cast<unsigned>(1)) != static_cast<unsigned>(0);
     loop_continues = flag;
     result = large;
     if (loop_continues) {

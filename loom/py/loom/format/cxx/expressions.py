@@ -19,6 +19,8 @@ from loom.format.cxx.context import (
 from loom.format.cxx.errors import CxxRenderError
 from loom.format.cxx.types import KERNEL_COORDINATE_CPP_TYPE
 from loom.ir import (
+    I1,
+    I32,
     BufferType,
     EncodingInstance,
     Operation,
@@ -503,14 +505,108 @@ class CxxExpressionRenderer(CxxRenderContext):
                 return self._address_cast_target(result)
         return None
 
+    def _predicate_conversion(
+        self, operation: Operation, source_expression: str, result_type: str
+    ) -> str | None:
+        """Preserves one-bit arithmetic rather than C++ Boolean conversion."""
+
+        source = self.module.values[operation.operands[0]].type
+        result = self.module.values[operation.results[0]].type
+        source_element = (
+            source.element_type if isinstance(source, ShapedType) else source
+        )
+        result_element = (
+            result.element_type if isinstance(result, ShapedType) else result
+        )
+        if source_element != I1 and result_element != I1:
+            return None
+
+        member = operation.name.split(".")[-1]
+
+        def constant(
+            value_type: ScalarType | ShapedType, signed: bool, value: int
+        ) -> str:
+            element = (
+                value_type.element_type
+                if isinstance(value_type, ShapedType)
+                else value_type
+            )
+            scalar = f"static_cast<{self.types.scalar(element, signed)}>({value})"
+            if isinstance(value_type, ShapedType):
+                vector = self.types.vector(value_type, signed)
+                if value_type.rank == 1 and element != I1:
+                    return f"({vector}{{}} + {scalar})"
+                return f"loom::vector::splat<{vector}>({{}}, {scalar})"
+            return scalar
+
+        if source_element == I1:
+            # Signed i1 has values {0, -1}; C++ bool has values {0, 1}.
+            signed = member in {"extsi", "sitofp"}
+            true_value = constant(result, signed, -1 if signed else 1)
+            false_value = constant(result, signed, 0)
+            if isinstance(source, ShapedType):
+                return (
+                    f"loom::vector::select({source_expression}, "
+                    f"{true_value}, {false_value})"
+                )
+            return f"({source_expression} ? {true_value} : {false_value})"
+
+        # Integer truncation retains bit zero, not the source's nonzero test.
+        # Float-to-i1 first rounds toward zero in a wider integer carrier; all
+        # inputs representable by signed/unsigned i1 fit that carrier exactly.
+        signed = (
+            member == "fptosi"
+            if member != "trunci"
+            else (operation.operands[0] in self.signed_values)
+        )
+        carrier = source
+        if member in {"fptosi", "fptoui"}:
+            carrier = (
+                ShapedType(source.type_kind, I32, source.dims)
+                if isinstance(source, ShapedType)
+                else I32
+            )
+            carrier_type = (
+                self.types.vector(carrier, signed)
+                if isinstance(carrier, ShapedType)
+                else self.types.scalar(carrier, signed)
+            )
+            self.uses_numeric_conversion = True
+            source_expression = f"loom::convert<{carrier_type}>({source_expression})"
+        masked = f"({source_expression} & {constant(carrier, signed, 1)})"
+        zero = constant(carrier, signed, 0)
+        if isinstance(result, ShapedType):
+            return f"loom::vector::cmpi::ne<{result_type}>({masked}, {zero})"
+        return f"({masked} != {zero})"
+
     def _numeric_conversion(self, operation: Operation) -> tuple[str, ...]:
         """Projects one exact scalar or native-vector numeric conversion."""
 
-        self.uses_numeric_conversion = True
         member = operation.name.split(".")[-1]
         source = operation.operands[0]
         result = operation.results[0]
         source_expression = self.expression(source)
+        result_signedness = {
+            "extsi": True,
+            "fptosi": True,
+            "extui": False,
+            "fptoui": False,
+        }.get(member)
+        result_type = self.cpp_type(result, signed=result_signedness)
+        predicate = self._predicate_conversion(
+            operation, source_expression, result_type
+        )
+        if predicate is not None:
+            self._declare(
+                result,
+                predicate,
+                declaration_type=result_type,
+                expression_type=result_type,
+                inlineable=True,
+            )
+            return ()
+
+        self.uses_numeric_conversion = True
         source_signedness = {
             "extsi": True,
             "sitofp": True,
@@ -522,13 +618,6 @@ class CxxExpressionRenderer(CxxRenderContext):
             if self.expression_type(source) != source_type:
                 source_expression = f"loom::convert<{source_type}>({source_expression})"
 
-        result_signedness = {
-            "extsi": True,
-            "fptosi": True,
-            "extui": False,
-            "fptoui": False,
-        }.get(member)
-        result_type = self.cpp_type(result, signed=result_signedness)
         subnormal = operation.attributes.get("subnormal")
         policy = ""
         if subnormal is not None:

@@ -40,7 +40,6 @@ void cleanup_expressions(bool choose) {
 }
 
 // ----
-#include <loomcxx/numeric.h>
 #include <loomcxx/predicate.h>
 #include <loomcxx/view.h>
 
@@ -107,14 +106,14 @@ void cleanup_expressions(bool choose) {
   auto v30 = loom::buffer::view<4>(reinterpret_cast<const unsigned char*>(v28), {});
   auto* v32 = loom::buffer::alloca<loom::memory_space::private_, 1>(loom::type::offset{1});
   auto v34 = loom::buffer::view<1>(v32, {});
-  loom::view::store(loom::convert<unsigned char>(0), v34, 0);
+  loom::view::store((0 ? static_cast<unsigned char>(1) : static_cast<unsigned char>(0)), v34, 0);
   unsigned v37{};
   if (choose) {
     loom::type::offset v41 = loom::type::offset{0} + loom::type::offset{0};
     loom::assume(loom::predicate::range(v41, 0, 0));
     auto v43 = loom::buffer::view<1>(reinterpret_cast<unsigned*>(reinterpret_cast<unsigned char*>(v28) + static_cast<unsigned long long>(v41)), {});
     loom::view::store(8u, v43, 0);
-    loom::view::store(loom::convert<unsigned char>(1), v34, 0);
+    loom::view::store((1 ? static_cast<unsigned char>(1) : static_cast<unsigned char>(0)), v34, 0);
     v37 = 9u;
   } else {
     v37 = 10u;
