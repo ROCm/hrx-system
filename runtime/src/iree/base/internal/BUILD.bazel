@@ -149,6 +149,7 @@ iree_runtime_cc_test(
 iree_runtime_cc_test(
     name = "arena_msan_test",
     srcs = ["arena_msan_test.c"],
+    tags = ["msan"],
     target_compatible_with = select({
         "//build_tools/bazel:memory_sanitizer_target": [],
         "//conditions:default": ["@platforms//:incompatible"],

@@ -91,6 +91,14 @@ jobs:
             platform_coverage: true
             runner: azure-linux-scale-rocm
             host_toolchain: rocm
+          - name: Clang / MSAN
+            kind: cpu
+            command: iree-bazel-cpu-msan
+            runner: azure-linux-scale-rocm
+            host_ar: ar
+            host_cc: clang
+            host_cxx: clang++
+            install_compiler_rt: true
           - name: Clang / TSAN
             kind: cpu
             command: iree-bazel-cpu-tsan

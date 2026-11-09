@@ -326,7 +326,7 @@ def cmake_tests_enabled(sanitizer: str | None) -> bool:
         return True
     if sanitizer in ci_config.SANITIZER_TEST_CONFIGS:
         return True
-    if sanitizer in ci_config.SANITIZER_BUILD_CONFIGS:
+    if sanitizer in ci_config.CMAKE_SANITIZER_BUILD_CONFIGS:
         return False
     raise ValueError(f"unknown CMake sanitizer config: {sanitizer}")
 
@@ -794,14 +794,21 @@ def shared_tool_bazel_step(
 
 def cpu_sanitizer_steps(targets: tuple[str, ...]) -> list[CiStep]:
     steps = [bazel_configure_step()]
-    for config in ci_config.SANITIZER_TEST_CONFIGS:
+    for config in ci_config.BAZEL_CPU_SANITIZER_TEST_TAG_FILTERS:
         steps.extend(cpu_config_steps(targets, config))
     return steps
 
 
 def cpu_config_steps(targets: tuple[str, ...], config: str) -> list[CiStep]:
+    if config not in ci_config.BAZEL_CPU_SANITIZER_TEST_TAG_FILTERS:
+        raise ValueError(f"unknown Bazel sanitizer config: {config}")
+    test_tag_filters = ci_config.BAZEL_CPU_SANITIZER_TEST_TAG_FILTERS[config]
     scoped_targets = targets + ci_config.CPU_BAZEL_TARGET_EXCLUDES
-    if config in ci_config.SANITIZER_TEST_CONFIGS:
+    steps = []
+    # Focused categories can use Python harnesses to launch instrumented native
+    # subjects. Their tags own admission independently of the harness language.
+    test_language_filters = ()
+    if not test_tag_filters:
         steps = platform_coverage_build_steps(
             bazel_build_step(
                 f"Build IREE with {config.upper()}",
@@ -811,25 +818,18 @@ def cpu_config_steps(targets: tuple[str, ...], config: str) -> list[CiStep]:
         )
         if config == "asan":
             steps.extend(platform_coverage_build_steps(bazel_fuzz_build_step()))
-        steps.append(
-            bazel_test_step(
-                f"Test IREE with {config.upper()}",
-                scoped_targets + ci_config.CPU_SANITIZERS_XFAIL_TARGETS,
-                config=config,
-                test_tag_filters=ci_config.CPU_RESOURCE_TAG_EXCLUDES,
-                test_language_filters=ci_config.PYTHON_TEST_BAZEL_LANGUAGE_EXCLUSIONS,
-            )
+        scoped_targets += ci_config.CPU_SANITIZERS_XFAIL_TARGETS
+        test_language_filters = ci_config.PYTHON_TEST_BAZEL_LANGUAGE_EXCLUSIONS
+    steps.append(
+        bazel_test_step(
+            f"Test IREE with {config.upper()}",
+            scoped_targets,
+            config=config,
+            test_tag_filters=test_tag_filters + ci_config.CPU_RESOURCE_TAG_EXCLUDES,
+            test_language_filters=test_language_filters,
         )
-        return steps
-    if config in ci_config.SANITIZER_BUILD_CONFIGS:
-        return [
-            bazel_build_step(
-                f"Build IREE with {config.upper()}",
-                scoped_targets,
-                config=config,
-            )
-        ]
-    raise ValueError(f"unknown Bazel sanitizer config: {config}")
+    )
+    return steps
 
 
 def xdna_steps(targets: tuple[str, ...], config: str | None) -> list[CiStep]:
