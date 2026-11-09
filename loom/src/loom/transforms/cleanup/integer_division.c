@@ -425,8 +425,9 @@ static iree_status_t loom_integer_division_observe_candidate(
       .role = role,
   };
   const uint32_t hash = loom_integer_division_hash(function_planner, op);
-  loom_expression_entry_t* existing_entry =
-      loom_expression_scope_find(cursor, hash, 0);
+  const loom_expression_probe_t probe =
+      loom_expression_scope_probe(cursor, hash, 0);
+  loom_expression_entry_t* existing_entry = probe.entry;
   loom_integer_division_candidate_t* existing =
       existing_entry ? &function_planner->candidates[existing_entry->metadata]
                      : NULL;
@@ -436,7 +437,7 @@ static iree_status_t loom_integer_division_observe_candidate(
       .metadata = candidate_index,
   };
   if (!existing) {
-    loom_expression_scope_insert(cursor, entry);
+    loom_expression_scope_insert(cursor, probe, entry);
     return iree_ok_status();
   }
   if (existing->plan) {
@@ -445,12 +446,12 @@ static iree_status_t loom_integer_division_observe_candidate(
             existing->plan->anchor, op)) {
       loom_integer_division_plan_append(existing->plan, candidate);
     }
-    loom_expression_scope_insert(cursor, entry);
+    loom_expression_scope_insert(cursor, probe, entry);
     return iree_ok_status();
   }
   if (existing->role == role) {
     candidate->previous_same_role = existing;
-    loom_expression_scope_insert(cursor, entry);
+    loom_expression_scope_insert(cursor, probe, entry);
     return iree_ok_status();
   }
 
@@ -469,7 +470,7 @@ static iree_status_t loom_integer_division_observe_candidate(
       // The quotient's stricter overflow domain cannot move above an earlier
       // signed remainder. Shadow those remainders with the quotient so a later
       // remainder can still combine at the quotient's original position.
-      loom_expression_scope_insert(cursor, entry);
+      loom_expression_scope_insert(cursor, probe, entry);
       return iree_ok_status();
     }
   } else {
@@ -477,7 +478,7 @@ static iree_status_t loom_integer_division_observe_candidate(
   }
   loom_integer_division_create_plan(planner, family, quotient, remainder,
                                     anchor);
-  loom_expression_scope_insert(cursor, entry);
+  loom_expression_scope_insert(cursor, probe, entry);
   return iree_ok_status();
 }
 

@@ -2080,6 +2080,8 @@ typedef struct loom_block_t {
   uint16_t arg_capacity;
   // Number of live operations linked into this block.
   uint32_t op_count;
+  // Number of live operations that produce at least one result.
+  uint32_t result_operation_count;
   // Per-block instance flags.
   loom_block_flags_t flags;
   // Position in parent_region->blocks, or LOOM_BLOCK_REGION_INDEX_INVALID.
@@ -2095,7 +2097,7 @@ typedef struct loom_block_t {
   loom_region_t* parent_region;
 } loom_block_t;
 
-static_assert(sizeof(loom_block_t) == (IREE_PTR_SIZE == 8 ? 48 : 32),
+static_assert(sizeof(loom_block_t) == (IREE_PTR_SIZE == 8 ? 56 : 36),
               "loom_block_t must retain its pointer-width layout");
 
 // Returns the |arg_index|-th block argument value ID.
@@ -2220,7 +2222,7 @@ typedef struct loom_region_t {
   loom_block_t* inline_blocks[1];
 } loom_region_t;
 
-static_assert(sizeof(loom_region_t) == (IREE_PTR_SIZE == 8 ? 136 : 108),
+static_assert(sizeof(loom_region_t) == (IREE_PTR_SIZE == 8 ? 144 : 112),
               "loom_region_t must retain its pointer-width layout");
 
 // Returns the retained union of write-like memory effects in this region.

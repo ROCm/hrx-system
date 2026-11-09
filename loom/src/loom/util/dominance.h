@@ -203,7 +203,8 @@ enum loom_dominance_walk_scope_flag_bits_e {
 typedef uint8_t loom_dominance_walk_scope_flags_t;
 
 typedef iree_status_t (*loom_dominance_walk_enter_scope_fn_t)(
-    void* user_data, loom_dominance_walk_scope_flags_t flags);
+    void* user_data, uint32_t result_operation_count,
+    loom_dominance_walk_scope_flags_t flags);
 
 typedef void (*loom_dominance_walk_leave_scope_fn_t)(void* user_data);
 
@@ -215,6 +216,8 @@ typedef struct loom_dominance_walk_callbacks_t {
   // Opaque value forwarded to both callbacks.
   void* user_data;
   // Optional callback invoked before the first operation in a dominance scope.
+  // |result_operation_count| bounds direct value-producing operations captured
+  // when the scope was queued; nested scopes report their own bound.
   loom_dominance_walk_enter_scope_fn_t enter_scope;
   // Optional callback invoked after the last dominated operation in a scope.
   loom_dominance_walk_leave_scope_fn_t leave_scope;

@@ -86,14 +86,14 @@ typedef struct loom_expression_barriers_t {
   uint32_t memory;
 } loom_expression_barriers_t;
 
-// Allocates a root-region walk and its dominance scopes in |arena|. A zero
-// |maximum_entry_count| bounds the shared index by value-producing operations;
-// a nonzero bound lets a sparse semantic consumer avoid that storage.
-// |identity_policy| may be NULL to select exact structural identity. A
-// stackless inventory counts the dominance scopes.
-// Index storage is allocated once; traversal links are allocated once per
-// block. Erasing regionless operations preserves the walk. Changing block
-// structure, successor edges or nested regions invalidates it.
+// Allocates a root-region walk and its dominance scopes in |arena|. A nonzero
+// |maximum_entry_count| is a caller-proven bound on live entries and fixes the
+// index capacity. Zero selects adaptive capacity planned from each entered
+// block's value-producing operation count. |identity_policy| may be NULL to
+// select exact structural identity. Index and scope storage use stable
+// arena-backed pages without another IR walk. Erasing regionless operations
+// preserves the walk. Changing block structure, successor edges or nested
+// regions invalidates it.
 iree_status_t loom_expression_walk_allocate(
     loom_module_t* module, loom_region_t* region,
     const loom_expression_identity_policy_t* identity_policy,
@@ -132,17 +132,28 @@ bool loom_expression_equal_with_value_identity(
     const loom_module_t* module, const loom_op_t* a, const loom_op_t* b,
     loom_expression_value_identity_fn_t value_identity, void* user_data);
 
-// Finds the nearest equivalent producer visible from |cursor| in the shared
-// index, without walking enclosing scopes. The caller-supplied hash must match
-// the walk's identity policy.
-loom_expression_entry_t* loom_expression_scope_find(
+// One completed structural probe. The entry is the nearest visible equivalent
+// producer, or NULL. The remaining fields retain the exact insertion position
+// so a miss can be committed without repeating equality and collision probes.
+typedef struct loom_expression_probe_t {
+  loom_expression_entry_t* entry;
+  iree_host_size_t slot;
+  uint32_t binding_index;
+} loom_expression_probe_t;
+
+// Probes for the nearest equivalent producer visible from |cursor| without
+// walking enclosing scopes. The caller-supplied hash must match the walk's
+// identity policy. A returned probe remains valid until the next index update.
+loom_expression_probe_t loom_expression_scope_probe(
     const loom_expression_cursor_t* cursor, uint32_t hash,
     loom_expression_lookup_flags_t flags);
 
 // Inserts at most one entry for the current value-producing operation,
 // replacing an older equivalent entry in this block. Scope exit restores the
-// prior bindings; no table clearing or allocation occurs during lookup/update.
+// prior bindings. |probe| must be the unchanged result of probing |entry.hash|
+// at this cursor, avoiding a second structural lookup on the common miss path.
 void loom_expression_scope_insert(const loom_expression_cursor_t* cursor,
+                                  loom_expression_probe_t probe,
                                   loom_expression_entry_t entry);
 
 // Records the current FactIdentity operation as the preferred representative

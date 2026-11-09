@@ -4911,6 +4911,7 @@ static iree_status_t loom_block_link_op_between(loom_module_t* module,
     block->last_op = op;
   }
   ++block->op_count;
+  block->result_operation_count += op->result_count != 0;
   return iree_ok_status();
 }
 
@@ -4969,9 +4970,10 @@ void loom_block_unlink_op(loom_module_t* module, loom_op_t* op) {
   op->prev_op = NULL;
   op->next_op = NULL;
   op->block_ordinal = 0;
-  if (block->op_count > 0) {
-    --block->op_count;
-  }
+  IREE_ASSERT(block->op_count > 0);
+  --block->op_count;
+  IREE_ASSERT(op->result_count == 0 || block->result_operation_count > 0);
+  block->result_operation_count -= op->result_count != 0;
 }
 
 iree_host_size_t loom_block_find_op(const loom_block_t* block,
