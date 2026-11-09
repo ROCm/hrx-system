@@ -154,3 +154,191 @@ void loom_value_facts_xori(const loom_value_facts_t* lhs,
   *out = loom_value_facts_make(lo, hi & -divisor, divisor);
   loom_value_facts_propagate_bitwise_flags(&lhs_facts, &rhs_facts, out);
 }
+
+//===----------------------------------------------------------------------===//
+// Transfer functions: shifts
+//===----------------------------------------------------------------------===//
+
+// Performs a 64-bit arithmetic right shift without relying on the host C
+// implementation's handling of signed negative operands. The shift must be in
+// [0, 63].
+static int64_t loom_value_facts_arithmetic_shift_right_i64(int64_t value,
+                                                           uint32_t shift) {
+  if (value >= 0) {
+    return (int64_t)((uint64_t)value >> shift);
+  }
+  const uint64_t complement_magnitude = (uint64_t)(-(value + INT64_C(1)));
+  return -INT64_C(1) - (int64_t)(complement_magnitude >> shift);
+}
+
+// The largest amount is at most 62, so both powers of two fit the signed
+// fact carrier. Multiplication is monotonic within each sign half.
+static loom_value_facts_t loom_value_facts_shift_left_range(
+    loom_value_facts_t source, uint32_t minimum_shift, uint32_t maximum_shift) {
+  const int64_t minimum_factor = INT64_C(1) << minimum_shift;
+  const int64_t maximum_factor = INT64_C(1) << maximum_shift;
+  int64_t divisor = 0;
+  if (!iree_checked_mul_i64(source.known_divisor, minimum_factor, &divisor)) {
+    divisor = source.known_divisor;
+  }
+  int64_t lo = 0, hi = 0;
+  if (!iree_checked_mul_i64(
+          source.range_lo,
+          source.range_lo < 0 ? maximum_factor : minimum_factor, &lo) ||
+      !iree_checked_mul_i64(
+          source.range_hi,
+          source.range_hi < 0 ? minimum_factor : maximum_factor, &hi)) {
+    return loom_value_facts_make(INT64_MIN, INT64_MAX, divisor);
+  }
+  return loom_value_facts_make(lo, hi, divisor);
+}
+
+void loom_value_facts_shli(const loom_value_facts_t* lhs,
+                           const loom_value_facts_t* rhs,
+                           loom_value_facts_t* out) {
+  const loom_value_facts_t lhs_facts = *lhs;
+  const loom_value_facts_t rhs_facts = *rhs;
+  if (rhs_facts.range_lo < 0 || rhs_facts.range_hi > 63) {
+    *out = loom_value_facts_unknown();
+  } else if (rhs_facts.range_hi < 63) {
+    *out = loom_value_facts_shift_left_range(
+        lhs_facts, (uint32_t)rhs_facts.range_lo, (uint32_t)rhs_facts.range_hi);
+  } else {
+    // Only the low source bit survives a shift by 63. Join that raw-bit
+    // result with the ordinary range when other amounts are also possible.
+    uint64_t lhs_bits = 0;
+    if (loom_value_facts_as_exact_raw_bits(lhs_facts, 64, &lhs_bits)) {
+      *out = loom_value_facts_make_signed_raw_bits(lhs_bits << 63, 64);
+    } else if (lhs_facts.known_divisor % 2 == 0) {
+      *out = loom_value_facts_exact_i64(0);
+    } else {
+      *out = loom_value_facts_make(INT64_MIN, 0, 1);
+    }
+    if (rhs_facts.range_lo < 63) {
+      const loom_value_facts_t ordinary = loom_value_facts_shift_left_range(
+          lhs_facts, (uint32_t)rhs_facts.range_lo, 62);
+      const loom_value_facts_t sign_bit = *out;
+      loom_value_facts_meet(&ordinary, &sign_bit, out);
+    }
+  }
+  loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
+}
+
+void loom_value_facts_shrui(const loom_value_facts_t* lhs,
+                            const loom_value_facts_t* rhs, int32_t bit_count,
+                            loom_value_facts_t* out) {
+  const loom_value_facts_t lhs_facts =
+      bit_count == 64 ? *lhs : loom_value_facts_wrap_integer(*lhs, bit_count);
+  const loom_value_facts_t rhs_facts = *rhs;
+  const int64_t minimum_shift = rhs_facts.range_lo;
+  const int64_t maximum_shift = rhs_facts.range_hi;
+  if (minimum_shift < 0 || maximum_shift >= bit_count) {
+    *out = loom_value_facts_unknown();
+  } else if (maximum_shift == 0) {
+    // Identity retains the signed fact domain, including the source sign bit.
+    *out = lhs_facts;
+  } else {
+    const uint64_t mask = UINT64_MAX >> (64 - bit_count);
+    const int64_t positive_shift = iree_max(minimum_shift, INT64_C(1));
+    int64_t lo = 0;
+    int64_t hi = (int64_t)(mask >> positive_shift);
+    if (lhs_facts.range_lo >= 0 || lhs_facts.range_hi < 0) {
+      // Within either half of the signed domain, raw bits are monotonic.
+      // A range crossing zero spans both ends of the unsigned domain.
+      lo = (int64_t)(((uint64_t)lhs_facts.range_lo & mask) >> maximum_shift);
+      hi = (int64_t)(((uint64_t)lhs_facts.range_hi & mask) >> positive_shift);
+    }
+    if (minimum_shift == 0) {
+      // A zero shift preserves signed values; every positive shift clears
+      // the sign bit. Both interpretations must remain represented.
+      lo = iree_min(lo, lhs_facts.range_lo);
+      hi = iree_max(hi, lhs_facts.range_hi);
+    }
+    int64_t divisor = lhs_facts.known_divisor;
+    if (lhs_facts.range_lo < 0) {
+      // Reinterpreting a signed value adds 2^bit_count. Only the power-of-two
+      // factor of its divisor necessarily survives that addition.
+      divisor &= -divisor;
+    }
+    const uint64_t factor = UINT64_C(1) << maximum_shift;
+    divisor = (uint64_t)divisor % factor == 0
+                  ? (int64_t)((uint64_t)divisor / factor)
+                  : 1;
+    *out = loom_value_facts_make(lo, hi, divisor);
+  }
+  loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
+}
+
+void loom_value_facts_shrsi(const loom_value_facts_t* lhs,
+                            const loom_value_facts_t* rhs,
+                            loom_value_facts_t* out) {
+  const loom_value_facts_t lhs_facts = *lhs;
+  const loom_value_facts_t rhs_facts = *rhs;
+  if (rhs_facts.range_lo < 0 || rhs_facts.range_hi > 63) {
+    *out = loom_value_facts_unknown();
+  } else {
+    const uint32_t minimum_shift = (uint32_t)rhs_facts.range_lo;
+    const uint32_t maximum_shift = (uint32_t)rhs_facts.range_hi;
+    const int64_t lo = loom_value_facts_arithmetic_shift_right_i64(
+        lhs_facts.range_lo,
+        lhs_facts.range_lo < 0 ? minimum_shift : maximum_shift);
+    const int64_t hi = loom_value_facts_arithmetic_shift_right_i64(
+        lhs_facts.range_hi,
+        lhs_facts.range_hi < 0 ? maximum_shift : minimum_shift);
+    const uint64_t factor = UINT64_C(1) << maximum_shift;
+    const int64_t divisor =
+        (uint64_t)lhs_facts.known_divisor % factor == 0
+            ? (int64_t)((uint64_t)lhs_facts.known_divisor / factor)
+            : 1;
+    *out = loom_value_facts_make(lo, hi, divisor);
+  }
+  loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
+}
+
+static void loom_value_facts_rotate(const loom_value_facts_t* lhs,
+                                    const loom_value_facts_t* rhs,
+                                    int32_t bit_count, bool rotate_left,
+                                    loom_value_facts_t* out) {
+  const loom_value_facts_t lhs_facts = *lhs;
+  const loom_value_facts_t rhs_facts = *rhs;
+  int64_t value = 0;
+  int64_t amount = 0;
+  if (bit_count <= 0 || bit_count > 64 ||
+      !loom_value_facts_as_exact_i64(lhs_facts, &value) ||
+      !loom_value_facts_as_exact_i64(rhs_facts, &amount)) {
+    *out = loom_value_facts_unknown();
+    loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
+    return;
+  }
+
+  int64_t normalized_amount = amount % bit_count;
+  if (normalized_amount < 0) {
+    normalized_amount += bit_count;
+  }
+  uint32_t shift = (uint32_t)normalized_amount;
+  uint64_t mask =
+      bit_count == 64 ? UINT64_MAX : (UINT64_C(1) << (uint32_t)bit_count) - 1;
+  uint64_t raw_value = (uint64_t)value & mask;
+  uint64_t rotated = raw_value;
+  if (shift != 0) {
+    uint32_t complement = (uint32_t)bit_count - shift;
+    rotated = rotate_left ? (raw_value << shift) | (raw_value >> complement)
+                          : (raw_value >> shift) | (raw_value << complement);
+  }
+  *out = bit_count == 1
+             ? loom_value_facts_exact_i64((int64_t)(rotated & 1))
+             : loom_value_facts_make_signed_raw_bits(rotated & mask, bit_count);
+  loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
+}
+
+void loom_value_facts_rotli(const loom_value_facts_t* lhs,
+                            const loom_value_facts_t* rhs, int32_t bit_count,
+                            loom_value_facts_t* out) {
+  loom_value_facts_rotate(lhs, rhs, bit_count, /*rotate_left=*/true, out);
+}
+
+void loom_value_facts_rotri(const loom_value_facts_t* lhs,
+                            const loom_value_facts_t* rhs, int32_t bit_count,
+                            loom_value_facts_t* out) {
+  loom_value_facts_rotate(lhs, rhs, bit_count, /*rotate_left=*/false, out);
+}

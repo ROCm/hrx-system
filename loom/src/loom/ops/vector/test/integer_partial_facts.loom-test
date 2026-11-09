@@ -180,8 +180,11 @@ func.def @unknown_results(%lhs: vector<4xi8>, %rhs: vector<4xi8>) -> (i64, i64, 
 // ====
 
 // Logical shifts clear the element sign bit even without source lane facts.
-func.def @uniform_logical_shift(%input: vector<32xi8>) -> (i64, i64, i1) {
-  %amount = vector.splati 4 : vector<32xi8>
+func.def @uniform_logical_shift(%input: vector<32xi8>, %raw_amount: vector<32xi8>) -> (i64, i64, i1) {
+  %mask = vector.splati 3 : vector<32xi8>
+  %base = vector.splati 4 : vector<32xi8>
+  %low = vector.andi %raw_amount, %mask : vector<32xi8>
+  %amount = vector.ori %low, %base : vector<32xi8>
   %shifted = vector.shrui %input, %amount : vector<32xi8>
   %lo = test.fact_all_equal_range_lo %shifted : vector<32xi8> -> i64
   %hi = test.fact_all_equal_range_hi %shifted : vector<32xi8> -> i64
@@ -189,7 +192,7 @@ func.def @uniform_logical_shift(%input: vector<32xi8>) -> (i64, i64, i1) {
   func.return %lo, %hi, %uniform : i64, i64, i1
 }
 // ----
-func.def @uniform_logical_shift(%input: vector<32xi8>) -> (i64, i64, i1) {
+func.def @uniform_logical_shift(%input: vector<32xi8>, %raw_amount: vector<32xi8>) -> (i64, i64, i1) {
   %lo = scalar.constant 0 : i64
   %hi = scalar.constant 15 : i64
   %uniform = scalar.constant false : i1
@@ -199,8 +202,11 @@ func.def @uniform_logical_shift(%input: vector<32xi8>) -> (i64, i64, i1) {
 // ====
 
 // Each lane retains its own width-derived bound.
-func.def @independent_logical_shifts(%input: vector<4xi8>) -> (i64, i64, i64, i64) {
-  %amounts = vector.constanti [0, 1, 4, 7] : vector<4xi8>
+func.def @independent_logical_shifts(%input: vector<4xi8>, %raw_amount: vector<4xi8>) -> (i64, i64, i64, i64) {
+  %mask = vector.constanti [0, 0, 3, 0] : vector<4xi8>
+  %base = vector.constanti [0, 1, 4, 7] : vector<4xi8>
+  %low = vector.andi %raw_amount, %mask : vector<4xi8>
+  %amounts = vector.ori %low, %base : vector<4xi8>
   %shifted = vector.shrui %input, %amounts : vector<4xi8>
   %lane0 = vector.extract %shifted[0] : vector<4xi8> -> i8
   %lane1 = vector.extract %shifted[1] : vector<4xi8> -> i8
@@ -213,7 +219,7 @@ func.def @independent_logical_shifts(%input: vector<4xi8>) -> (i64, i64, i64, i6
   func.return %lo0, %hi1, %hi2, %hi3 : i64, i64, i64, i64
 }
 // ----
-func.def @independent_logical_shifts(%input: vector<4xi8>) -> (i64, i64, i64, i64) {
+func.def @independent_logical_shifts(%input: vector<4xi8>, %raw_amount: vector<4xi8>) -> (i64, i64, i64, i64) {
   %lo0 = scalar.constant -128 : i64
   %hi1 = scalar.constant 127 : i64
   %hi2 = scalar.constant 15 : i64
@@ -224,17 +230,19 @@ func.def @independent_logical_shifts(%input: vector<4xi8>) -> (i64, i64, i64, i6
 // ====
 
 // Wrapping left shifts can set the sign bit in each narrow element.
-func.def @left_shift_sign(%input: vector<4xi8>) -> (i1) {
+func.def @left_shift_sign(%input: vector<4xi8>, %raw_amount: vector<4xi8>) -> (i1) {
   %mask = vector.splati 1 : vector<4xi8>
   %bits = vector.andi %input, %mask : vector<4xi8>
-  %amount = vector.splati 7 : vector<4xi8>
+  %base = vector.splati 6 : vector<4xi8>
+  %low = vector.andi %raw_amount, %mask : vector<4xi8>
+  %amount = vector.ori %low, %base : vector<4xi8>
   %shifted = vector.shli %bits, %amount : vector<4xi8>
   %element = vector.extract %shifted[0] : vector<4xi8> -> i8
   %nonnegative = test.fact_non_negative %element : i8 -> i1
   func.return %nonnegative : i1
 }
 // ----
-func.def @left_shift_sign(%input: vector<4xi8>) -> (i1) {
+func.def @left_shift_sign(%input: vector<4xi8>, %raw_amount: vector<4xi8>) -> (i1) {
   %nonnegative = scalar.constant false : i1
   func.return %nonnegative : i1
 }
@@ -242,17 +250,19 @@ func.def @left_shift_sign(%input: vector<4xi8>) -> (i1) {
 // ====
 
 // Explicit signed-overflow semantics retain the mathematical result facts.
-func.def @left_shift_nsw_sign(%input: vector<4xi8>) -> (i1) {
+func.def @left_shift_nsw_sign(%input: vector<4xi8>, %raw_amount: vector<4xi8>) -> (i1) {
   %mask = vector.splati 1 : vector<4xi8>
   %bits = vector.andi %input, %mask : vector<4xi8>
-  %amount = vector.splati 7 : vector<4xi8>
+  %base = vector.splati 6 : vector<4xi8>
+  %low = vector.andi %raw_amount, %mask : vector<4xi8>
+  %amount = vector.ori %low, %base : vector<4xi8>
   %shifted = vector.shli<nsw> %bits, %amount : vector<4xi8>
   %element = vector.extract %shifted[0] : vector<4xi8> -> i8
   %nonnegative = test.fact_non_negative %element : i8 -> i1
   func.return %nonnegative : i1
 }
 // ----
-func.def @left_shift_nsw_sign(%input: vector<4xi8>) -> (i1) {
+func.def @left_shift_nsw_sign(%input: vector<4xi8>, %raw_amount: vector<4xi8>) -> (i1) {
   %nonnegative = scalar.constant true : i1
   func.return %nonnegative : i1
 }
@@ -279,4 +289,32 @@ func.def @bitwise_common_divisor(%lhs: vector<32xi16>, %rhs: vector<32xi16>) -> 
   %or_divisor = scalar.constant 4 : i64
   %xor_divisor = scalar.constant 4 : i64
   func.return %or_divisor, %xor_divisor : i64, i64
+}
+
+// ====
+
+// Signed shifts preserve each lane's sign and endpoints for dynamic amounts.
+func.def @bounded_signed_lanes(%raw_amount: vector<4xi16>) -> (i64, i64, i64, i64) {
+  %mask = vector.splati 3 : vector<4xi16>
+  %amounts = vector.andi %raw_amount, %mask : vector<4xi16>
+  %values = vector.constanti [-32768, -64, 64, 32767] : vector<4xi16>
+  %shifted = vector.shrsi %values, %amounts : vector<4xi16>
+  %first = vector.extract %shifted[0] : vector<4xi16> -> i16
+  %second = vector.extract %shifted[1] : vector<4xi16> -> i16
+  %third = vector.extract %shifted[2] : vector<4xi16> -> i16
+  %last = vector.extract %shifted[3] : vector<4xi16> -> i16
+  %lo = test.fact_range_lo %first : i16 -> i64
+  %negative_hi = test.fact_range_hi %second : i16 -> i64
+  %positive_lo = test.fact_range_lo %third : i16 -> i64
+  %hi = test.fact_range_hi %last : i16 -> i64
+  func.return %lo, %negative_hi, %positive_lo, %hi : i64, i64, i64, i64
+}
+
+// ----
+func.def @bounded_signed_lanes(%raw_amount: vector<4xi16>) -> (i64, i64, i64, i64) {
+  %lo = scalar.constant -32768 : i64
+  %negative_hi = scalar.constant -8 : i64
+  %positive_lo = scalar.constant 8 : i64
+  %hi = scalar.constant 32767 : i64
+  func.return %lo, %negative_hi, %positive_lo, %hi : i64, i64, i64, i64
 }

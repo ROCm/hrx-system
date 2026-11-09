@@ -366,3 +366,35 @@ func.def @nested_arithmetic_replay(%outer_count: index, %requested_inner_count: 
   }
   func.return %quotient_high, %remainder_high : i64, i64
 }
+
+// ====
+
+// A bit-by-bit integer square root, as used by image geometry, carries a
+// selected candidate through a loop. Bounded shifted bits keep the entire
+// recurrence in [0,255] without unrolling or assumptions on its result.
+func.def @square_root_bounds(%value: i32) -> (i64, i64) {
+  %begin = index.constant 0 : index
+  %step_size = index.constant 1 : index
+  %end = index.constant 8 : index
+  %seed = scalar.constant 0 : i32
+  %high_bit = scalar.constant 128 : i32
+  %root = scf.for %step = [%begin to %end step %step_size](%root = %seed : i32) -> (i32) {
+    %shift = index.cast %step : index to i32
+    %bit = scalar.shrui %high_bit, %shift : i32
+    %candidate = scalar.ori %root, %bit : i32
+    %square = scalar.muli %candidate, %candidate : i32
+    %fits = scalar.cmpi ule, %square, %value : i32
+    %next = scf.select %fits, %candidate, %root : i32
+    scf.yield %next : i32
+  }
+  %lo = test.fact_range_lo %root : i32 -> i64
+  %hi = test.fact_range_hi %root : i32 -> i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ----
+func.def @square_root_bounds(%value: i32) -> (i64, i64) {
+  %lo = scalar.constant 0 : i64
+  %hi = scalar.constant 255 : i64
+  func.return %lo, %hi : i64, i64
+}

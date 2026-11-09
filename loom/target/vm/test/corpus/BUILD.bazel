@@ -162,6 +162,7 @@ loom_corpus_test(
             "control/loop/scalar_state.loom",
             "function/call/calls.loom",
             "function/call/direct.loom",
+            "memory/address/logical_shift_loop.loom",
             "memory/buffer/packing.loom",
             "memory/buffer/selection.loom",
             "memory/view/bitcast.loom",

@@ -39,7 +39,7 @@ func.def target(@target) @wide_products(%left: index, %right: index) -> (i1, i1,
 // preserves the selected interval and common divisor.
 test.target<low_core> @target {index_bitwidth = 32}
 
-func.def target(@target) @wide_intervals(%left: index, %right: index) -> (i64, i64, i64, i64, i64, i64, i64, i64) {
+func.def target(@target) @wide_intervals(%left: index, %right: index, %raw_amount: index) -> (i64, i64, i64, i64, i64, i64, i64, i64) {
   %left_count = index.assume %left [range(%left, 536870912, 536870914)] : index
   %right_count = index.assume %right [range(%right, 1073741825, 1073741830)] : index
   %c8 = index.constant 8 : index
@@ -53,8 +53,8 @@ func.def target(@target) @wide_intervals(%left: index, %right: index) -> (i64, i
   %small_divisor = test.fact_divisor %small : index -> i64
   %large_lo = test.fact_range_lo %large : index -> i64
   %large_hi = test.fact_range_hi %large : index -> i64
-  %c1 = index.constant 1 : index
-  %shifted = index.shrui %a, %c1 : index
+  %amount = index.assume %raw_amount [range(%raw_amount, 1, 3)] : index
+  %shifted = index.shrui %a, %amount : index
   %shift_lo = test.fact_range_lo %shifted : index -> i64
   %shift_hi = test.fact_range_hi %shifted : index -> i64
   %shift_divisor = test.fact_divisor %shifted : index -> i64
@@ -64,15 +64,15 @@ func.def target(@target) @wide_intervals(%left: index, %right: index) -> (i64, i
 // ----
 test.target<low_core> @target {index_bitwidth = 32}
 
-func.def target(@target) @wide_intervals(%left: index, %right: index) -> (i64, i64, i64, i64, i64, i64, i64, i64) {
+func.def target(@target) @wide_intervals(%left: index, %right: index, %raw_amount: index) -> (i64, i64, i64, i64, i64, i64, i64, i64) {
   %small_lo = scalar.constant 4294967296 : i64
   %small_hi = scalar.constant 4294967312 : i64
   %small_divisor = scalar.constant 4 : i64
   %large_lo = scalar.constant 4294967300 : i64
   %large_hi = scalar.constant 4294967320 : i64
-  %shift_lo = scalar.constant 2147483648 : i64
+  %shift_lo = scalar.constant 536870912 : i64
   %shift_hi = scalar.constant 2147483656 : i64
-  %shift_divisor = scalar.constant 4 : i64
+  %shift_divisor = scalar.constant 1 : i64
   func.return %small_lo, %small_hi, %small_divisor, %large_lo, %large_hi, %shift_lo, %shift_hi, %shift_divisor : i64, i64, i64, i64, i64, i64, i64, i64
 }
 

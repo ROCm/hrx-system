@@ -972,13 +972,16 @@ loom_value_facts_t loom_value_facts_quotient_preimage(
     loom_value_facts_quotient_kind_t kind, int32_t bit_count,
     loom_value_facts_t quotient, loom_value_facts_t scale);
 
-// Shifts.
+// Shifts retain interval and divisibility facts for bounded amounts in [0, 63].
+// Left-shift ranges widen when the mathematical product may overflow; the
+// modular wrapper then applies the destination carrier. Amounts outside the
+// fact carrier yield unknown facts without assuming unreachable execution.
 void loom_value_facts_shli(const loom_value_facts_t* lhs,
                            const loom_value_facts_t* rhs,
                            loom_value_facts_t* out);
 // Logical right shift in a verified integer width in [1, 64]. Interprets
 // source facts as raw bits at that width; a nonzero shift clears the sign bit.
-// Non-exact or out-of-domain shift amounts produce unknown facts.
+// Bounded amounts use endpoint ranges; out-of-domain amounts yield unknown.
 void loom_value_facts_shrui(const loom_value_facts_t* lhs,
                             const loom_value_facts_t* rhs, int32_t bit_count,
                             loom_value_facts_t* out);
