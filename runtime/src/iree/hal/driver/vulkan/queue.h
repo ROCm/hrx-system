@@ -191,6 +191,10 @@ typedef struct iree_hal_vulkan_queue_t {
   // Recording different command buffers from one pool also requires this lock.
   iree_slim_mutex_t submission_mutex;
 
+  // Protects dependency lists and completion wake publication independently
+  // of native recording and submission. Never nests with submission_mutex.
+  iree_slim_mutex_t dependency_mutex;
+
   // Protects only linkage of logical memory operations during admission/return.
   iree_slim_mutex_t memory_mutex;
 
@@ -210,7 +214,7 @@ typedef struct iree_hal_vulkan_queue_t {
   // Sticky failure status for this queue. Owned by the queue.
   iree_atomic_intptr_t failure_status;
 
-  // Set to non-zero when queue teardown should stop the completion thread.
+  // Set to non-zero when queue teardown should stop both workers.
   iree_atomic_int32_t stop_requested;
 
   // Queue axis assigned by the logical device topology.
@@ -240,7 +244,7 @@ typedef struct iree_hal_vulkan_queue_t {
   // Host-signaled timeline semaphore used to wake the completion thread.
   VkSemaphore wakeup_semaphore;
 
-  // Monotonic host-side wakeup timeline value.
+  // Monotonic host-side wakeup timeline value, advanced under dependency_mutex.
   iree_atomic_int64_t wakeup_value;
 
   // Next queue epoch value to assign to an accepted submission.
@@ -259,14 +263,32 @@ typedef struct iree_hal_vulkan_queue_t {
   // Tail of pending submissions ordered by epoch.
   iree_hal_vulkan_queue_pending_submission_t* pending_tail;
 
-  // Head of submissions waiting for software-resolved semaphore dependencies.
+  // Unsubmitted or native-completed captures waiting for software dependencies.
+  // Protected by dependency_mutex.
   iree_hal_vulkan_queue_pending_submission_t* deferred_head;
 
-  // Head of deferred submissions whose software waits have resolved.
+  // Unsubmitted captures whose software waits resolved, under dependency_mutex.
   iree_hal_vulkan_queue_pending_submission_t* ready_head;
 
-  // Tail of deferred submissions whose software waits have resolved.
+  // Tail of ready_head, protected by dependency_mutex.
   iree_hal_vulkan_queue_pending_submission_t* ready_tail;
+
+  // Native-completed or rejected submissions awaiting terminal effects on the
+  // completion worker or helper, protected by dependency_mutex.
+  iree_hal_vulkan_queue_pending_submission_t* retirement_ready_head;
+
+  // Tail of retirement_ready_head, protected by dependency_mutex.
+  iree_hal_vulkan_queue_pending_submission_t* retirement_ready_tail;
+
+  // Publishes dependency-ready work without waiting for host retirement code.
+  iree_thread_t* submission_thread;
+
+  // Keeps completion teardown alive through publisher-owned captures that are
+  // temporarily outside queue lists. Cleared by the publisher at its last use.
+  iree_atomic_int32_t submission_thread_running;
+
+  // Wakes the publisher after an empty-to-nonempty ready-list transition.
+  iree_notification_t submission_notification;
 
   // Queue-owned descriptor cache for built-in command packets.
   struct {
@@ -641,7 +663,8 @@ iree_status_t iree_hal_vulkan_queue_submit_host_call(
     iree_hal_host_call_t call, const uint64_t args[4],
     iree_hal_host_call_flags_t flags);
 
-// Drains any completed epochs without blocking for future GPU progress.
+// Drains completed native epochs and ready terminal effects without waiting for
+// future GPU progress. Completion callbacks may run inline.
 iree_host_size_t iree_hal_vulkan_queue_drain_completions(
     iree_hal_vulkan_queue_t* queue);
 

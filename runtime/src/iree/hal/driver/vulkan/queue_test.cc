@@ -7,6 +7,7 @@
 #include "iree/hal/driver/vulkan/queue.h"
 
 #include <atomic>
+#include <semaphore>
 #include <thread>
 
 #include "iree/base/internal/atomics.h"
@@ -61,6 +62,168 @@ static iree_hal_vulkan_queue_completion_action_t MakeCompletionAction(
 }
 
 class VulkanQueueTest : public CtsTestBase<> {};
+
+TEST_P(VulkanQueueTest, NativeConsumerRunsBeforeProducerRetirement) {
+  for (iree_status_code_t dependency_status :
+       {IREE_STATUS_OK, IREE_STATUS_ABORTED}) {
+    SCOPED_TRACE(dependency_status);
+    SemaphoreList gate(device_, {0}, {1});
+    SemaphoreList producer_signals(device_, {0, 0}, {1, 1});
+    SemaphoreList consumer_signals(device_, {0}, {1});
+    struct State {
+      // Expected outcome of the producer's second signal callback.
+      iree_status_code_t terminal_status;
+      // Announces that GPU completion reached caller-resource retirement.
+      std::binary_semaphore entered{0};
+      // Holds that retirement while the consumer demonstrates native progress.
+      std::binary_semaphore resume{0};
+      // Holds the completion worker after it has retired the dependency edge.
+      std::binary_semaphore terminal_entered{0};
+      // Allows the worker to return after another helper retires the consumer.
+      std::binary_semaphore terminal_resume{0};
+      // Joins the final public callback's access to this state.
+      std::binary_semaphore terminal_finished{0};
+    } state{dependency_status};
+    struct Resource {
+      // Resource retained by the producer until its native work completes.
+      iree_hal_resource_t base;
+      // Borrowed handshake state outliving both terminal signals.
+      State* state;
+    };
+    static const iree_hal_resource_vtable_t vtable = {
+        .destroy =
+            [](iree_hal_resource_t* base) {
+              auto* resource = reinterpret_cast<Resource*>(base);
+              resource->state->entered.release();
+              resource->state->resume.acquire();
+              delete resource;
+            },
+    };
+    auto* resource = new Resource;
+    iree_hal_resource_initialize(&vtable, &resource->base);
+    resource->state = &state;
+    auto* queue = reinterpret_cast<iree_hal_vulkan_queue_t*>(transfer_queue_);
+    const iree_hal_vulkan_queue_completion_action_t action = {
+        .resource = &resource->base,
+    };
+    Status producer_status(iree_hal_vulkan_queue_submit_barrier_with_action(
+        queue, gate, producer_signals, nullptr, action));
+    // The unresolved gate ensures the worker owns the final resource reference.
+    if (!producer_status.ok()) {
+      state.resume.release();
+    }
+    iree_hal_resource_release(&resource->base);
+    IREE_ASSERT_OK(producer_status.release());
+    IREE_ASSERT_OK(iree_hal_semaphore_list_signal(gate, nullptr));
+    state.entered.acquire();
+
+    iree_slim_mutex_lock(&queue->submission_mutex);
+    const uint64_t consumer_epoch = queue->next_epoch_value;
+    iree_slim_mutex_unlock(&queue->submission_mutex);
+    const iree_hal_semaphore_list_t consumer_waits = {
+        1, producer_signals.semaphores.data(),
+        producer_signals.payload_values.data()};
+    Status consumer_status(iree_hal_vulkan_queue_submit_barrier(
+        queue, consumer_waits, consumer_signals, nullptr));
+    Status availability_status;
+    if (consumer_status.ok()) {
+      iree_async_semaphore_t* availability = nullptr;
+      availability_status = iree_hal_vulkan_semaphore_submission_timeline(
+          consumer_signals.semaphores[0], &availability);
+      if (availability_status.ok()) {
+        availability_status = iree_async_semaphore_multi_wait(
+            IREE_ASYNC_WAIT_MODE_ALL, &availability,
+            consumer_signals.payload_values.data(), 1, iree_infinite_timeout(),
+            IREE_ASYNC_WAIT_FLAG_NONE, iree_allocator_system());
+      }
+    }
+    iree_slim_mutex_lock(&queue->submission_mutex);
+    const bool admitted = queue->next_epoch_value == consumer_epoch + 1;
+    iree_slim_mutex_unlock(&queue->submission_mutex);
+    EXPECT_TRUE(admitted);
+    if (consumer_status.ok() && admitted) {
+      const VkSemaphoreWaitInfo wait = {
+          .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+          .semaphoreCount = 1,
+          .pSemaphores = &queue->epoch_semaphore,
+          .pValues = &consumer_epoch,
+      };
+      IREE_EXPECT_OK(iree_status_from_vk_result(
+          __FILE__, __LINE__,
+          iree_vkWaitSemaphores_raw(&queue->syms, queue->logical_device, &wait,
+                                    UINT64_MAX),
+          "vkWaitSemaphores"));
+      // A second completion helper observes the consumer's finished GPU work,
+      // but cannot publish success before the producer releases its resources.
+      iree_hal_vulkan_queue_drain_completions(queue);
+      uint64_t value = 0;
+      IREE_EXPECT_OK(
+          iree_hal_semaphore_query(consumer_signals.semaphores[0], &value));
+      EXPECT_EQ(value, 0u);
+    }
+    if (dependency_status != IREE_STATUS_OK) {
+      iree_hal_semaphore_fail(producer_signals.semaphores[0],
+                              iree_status_from_code(dependency_status));
+    }
+    // Signal-list order retires the consumer's prerequisite before this second
+    // signal observer holds the completion worker. The consumer is now on the
+    // retirement-ready list, and an independent completion helper must drain
+    // it.
+    iree_async_semaphore_timepoint_t terminal = {
+        .callback =
+            [](void* user_data, iree_async_semaphore_timepoint_t*,
+               iree_status_t status) {
+              auto* state = static_cast<State*>(user_data);
+              IREE_EXPECT_STATUS_IS(state->terminal_status, status);
+              state->terminal_entered.release();
+              state->terminal_resume.acquire();
+              state->terminal_finished.release();
+            },
+        .user_data = &state,
+    };
+    Status terminal_registration(iree_async_semaphore_acquire_timepoint(
+        reinterpret_cast<iree_async_semaphore_t*>(
+            producer_signals.semaphores[1]),
+        1, &terminal));
+    state.resume.release();
+    if (terminal_registration.ok()) {
+      state.terminal_entered.acquire();
+      if (dependency_status == IREE_STATUS_OK) {
+        // The consumer already consumed success. A later failure of that public
+        // timeline must not rewrite its captured dependency outcome.
+        iree_hal_semaphore_fail(producer_signals.semaphores[0],
+                                iree_status_from_code(IREE_STATUS_ABORTED));
+      }
+      iree_hal_vulkan_queue_drain_completions(queue);
+      if (consumer_status.ok() && admitted) {
+        uint64_t value = 0;
+        IREE_EXPECT_STATUS_IS(
+            dependency_status,
+            iree_hal_semaphore_query(consumer_signals.semaphores[0], &value));
+        if (dependency_status == IREE_STATUS_OK) {
+          EXPECT_EQ(value, 1u);
+        } else {
+          EXPECT_GE(value, IREE_HAL_SEMAPHORE_FAILURE_VALUE);
+        }
+      }
+      state.terminal_resume.release();
+      state.terminal_finished.acquire();
+    }
+    IREE_EXPECT_OK(terminal_registration.release());
+    IREE_EXPECT_OK(availability_status.release());
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_ABORTED,
+        iree_hal_semaphore_list_wait(producer_signals, iree_infinite_timeout(),
+                                     IREE_ASYNC_WAIT_FLAG_NONE));
+    if (consumer_status.ok()) {
+      IREE_EXPECT_STATUS_IS(dependency_status,
+                            iree_hal_semaphore_list_wait(
+                                consumer_signals, iree_infinite_timeout(),
+                                IREE_ASYNC_WAIT_FLAG_NONE));
+    }
+    IREE_EXPECT_OK(consumer_status.release());
+  }
+}
 
 TEST_P(VulkanQueueTest, RejectedSubmissionDoesNotInvokeCompletion) {
   SemaphoreList waits(device_, {0}, {1});
