@@ -395,7 +395,7 @@ iree_status_t loom_type_propagator_prepare_region(
   if (!region) {
     return iree_ok_status();
   }
-  iree_status_t status = loom_local_value_domain_acquire_for_region(
+  iree_status_t status = loom_local_value_domain_acquire_for_region_tree(
       propagator->module, region, propagator->arena, &propagator->value_domain);
   if (iree_status_is_ok(status)) {
     status = loom_type_propagator_ensure_ordinal_capacity(

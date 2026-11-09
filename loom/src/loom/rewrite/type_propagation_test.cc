@@ -161,6 +161,43 @@ class TypePropagationTest : public ::testing::Test {
   loom_builder_t builder_;
 };
 
+TEST_F(TypePropagationTest, PrepareFunctionCoversNestedRegionTree) {
+  loom_op_t* condition_op = NULL;
+  IREE_ASSERT_OK(BuildConstant(
+      loom_attr_i64(1), loom_type_scalar(LOOM_SCALAR_TYPE_I1), &condition_op));
+  loom_op_t* region_op = NULL;
+  IREE_ASSERT_OK(loom_test_optional_region_build(
+      &builder_, 0, loom_test_constant_result(condition_op),
+      LOOM_LOCATION_UNKNOWN, &region_op));
+  loom_builder_ip_t previous = loom_builder_enter_region(
+      &builder_, region_op, loom_test_optional_region_body(region_op));
+  loom_op_t* nested_op = NULL;
+  IREE_ASSERT_OK(BuildConstant(
+      loom_attr_i64(42), loom_type_scalar(LOOM_SCALAR_TYPE_I32), &nested_op));
+  loom_op_t* yield_op = NULL;
+  IREE_ASSERT_OK(loom_test_yield_build(&builder_, NULL, 0,
+                                       LOOM_LOCATION_UNKNOWN, &yield_op));
+  loom_builder_restore(&builder_, previous);
+
+  iree_arena_allocator_t pass_arena;
+  iree_arena_initialize(&block_pool_, &pass_arena);
+  loom_type_propagator_t* propagator = NULL;
+  IREE_ASSERT_OK(loom_type_propagator_allocate(
+      module_, {}, LOOM_TYPE_PROPAGATOR_SCOPE_ALL, &pass_arena, &propagator));
+  IREE_ASSERT_OK(loom_type_propagator_prepare_function(propagator, function_));
+
+  const loom_local_value_domain_t* domain =
+      loom_type_propagator_value_domain(propagator);
+  EXPECT_TRUE(iree_all_bits_set(domain->flags,
+                                LOOM_LOCAL_VALUE_DOMAIN_FLAG_REGION_TREE));
+  const loom_value_ordinal_t nested_ordinal = loom_local_value_domain_ordinal(
+      domain, loom_test_constant_result(nested_op));
+  EXPECT_LT(nested_ordinal, domain->definition_count);
+
+  loom_type_propagator_deinitialize(propagator);
+  iree_arena_deinitialize(&pass_arena);
+}
+
 TEST_F(TypePropagationTest, MayApplySkipsScalarOnlyConstraints) {
   loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
   loom_op_t* lhs_op = NULL;

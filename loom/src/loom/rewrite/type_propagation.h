@@ -80,7 +80,8 @@ iree_status_t loom_type_propagator_allocate(
 void loom_type_propagator_deinitialize(loom_type_propagator_t* propagator);
 
 // Refreshes region-local block-argument ownership metadata. Call once before
-// processing an explicit region tree. |parent_op| owns the root entry block
+// processing an explicit region tree. The local value domain covers the
+// complete region tree when this returns. |parent_op| owns the root entry block
 // arguments when provided. New values created by rewrites are admitted to the
 // same region-local domain on demand; new region-owner ops are recorded when
 // their constraints are processed.
