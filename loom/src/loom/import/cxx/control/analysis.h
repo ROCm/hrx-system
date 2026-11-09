@@ -24,6 +24,7 @@
 #include "loom/import/cxx/control/construction.h"
 #include "loom/import/cxx/lifetime/destruction.h"
 #include "loom/import/cxx/source/expressions.h"
+#include "loom/import/cxx/value/bindings.h"
 #include "loom/import/cxx/value/types.h"
 
 namespace loom::cxx_import {
@@ -40,19 +41,6 @@ struct SubobjectDestruction {
   Destruction destruction;
 };
 
-// Retained ownership of a source assignment destination. A field or vector-lane
-// write replaces a slice of its owning automatic binding; it is not a
-// storage-backed store. Dynamic lane selection remains on the source expression
-// and is evaluated once by translation.
-struct Destination {
-  // Owning local or parameter identity, borrowed from the source function.
-  cxx::Symbol* binding;
-  // First component of a nested member in the complete owning binding.
-  size_t component_offset;
-  // Member structure, or null when the destination is the entire binding.
-  const Partition* member;
-};
-
 // Exact flattened component interval owned by one automatic source object.
 // Intervals make alias relationships directly queryable without revisiting the
 // expression tree that established them.
@@ -67,6 +55,29 @@ struct ObjectInterval {
   size_t begin;
   // Exclusive end of the flattened component interval, or kWholeObjectEnd.
   size_t end;
+  // Position of this interval within the complete referenced value. A current
+  // receiver can span several independently bound fields.
+  size_t reference_offset = 0;
+};
+
+// A source subobject's component range relative to a referenced value.
+struct ReferenceProjection {
+  // First component within the referenced value.
+  size_t component_offset = 0;
+  // Number of components, or SIZE_MAX for the complete remaining value.
+  size_t component_count = SIZE_MAX;
+
+  bool operator==(const ReferenceProjection&) const = default;
+};
+
+// Retained correspondence between a reference result and a source subobject.
+struct ReferenceCall {
+  // Call expression indexing the producer's resolved result origins.
+  cxx::AST* call;
+  // Requested subobject within that call's complete reference result.
+  ReferenceProjection projection;
+
+  bool operator==(const ReferenceCall&) const = default;
 };
 
 // One source lvalue's retained identity and write provenance at a call edge.
@@ -91,7 +102,7 @@ struct CallArgument {
   // Reference-returning calls whose results supply this lvalue identity.
   // Identity demand is resolved through their retained call edges after every
   // reachable callee has been analyzed.
-  std::vector<cxx::AST*> reference_calls;
+  std::vector<ReferenceCall> reference_calls;
 };
 
 // One directly selected source call retained during the owning function walk.
@@ -284,8 +295,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   }
   // Frontend-completed array-member copy, retained before call propagation.
   const ArrayCopyInitialization* array_copy(cxx::AST* initializer) const;
-  // Whether a reference parameter must carry durable storage identity.
-  bool reference_requires_storage(cxx::Symbol* parameter) const;
+  // Whether a reference binding must carry durable storage identity.
+  bool reference_requires_storage(cxx::Symbol* binding) const;
   // Whether execution may modify the object named by a reference parameter.
   bool reference_written(cxx::Symbol* parameter) const;
   // Whether the implicit object itself must be addressable.
@@ -369,6 +380,14 @@ class ControlFlow final : private cxx::ASTVisitor {
     Storage,
   };
 
+  enum class WriteEffect {
+    // A call may update this binding; structured joins must carry it until
+    // the callee's actual write effects have been established.
+    Scoped,
+    // Source execution replaces the binding, including through a callee.
+    Callable,
+  };
+
   enum Path : unsigned {
     Fallthrough = 1,
     Return = 2,
@@ -413,23 +432,27 @@ class ControlFlow final : private cxx::ASTVisitor {
                                    cxx::FunctionSymbol* constructor,
                                    cxx::AST* owner);
   std::optional<Destination> retain_destination(cxx::ExpressionAST* expression);
-  bool record(cxx::ExpressionAST* expression);
+  bool record(cxx::ExpressionAST* expression,
+              WriteEffect effect = WriteEffect::Scoped);
   void record(cxx::Symbol* binding);
   void record_implicit_object_call(cxx::CallExpressionAST* call,
                                    cxx::FunctionSymbol* callee);
   bool require_identity(cxx::ExpressionAST* expression);
   bool require_identity(const CallArgument& argument);
   bool argument_requires_storage(const CallArgument& argument) const;
-  bool record_callable_write(cxx::ExpressionAST* expression);
   bool record_callable_write(cxx::Symbol* binding);
   bool record_scoped_write(cxx::Symbol* binding,
                            std::span<cxx::AST* const> owners);
   bool record_argument_write(const CallArgument& argument,
                              std::span<cxx::AST* const> owners,
                              std::span<cxx::Symbol* const> receiver_fields);
-  bool record_reference_result_write(
-      cxx::AST* call, std::span<cxx::AST* const> owners,
-      std::span<cxx::Symbol* const> receiver_fields);
+  bool record_projected_write(const CallArgument& argument,
+                              std::span<cxx::AST* const> owners,
+                              ReferenceProjection projection,
+                              WriteEffect effect);
+  bool record_reference_result_write(ReferenceCall reference,
+                                     std::span<cxx::AST* const> owners,
+                                     WriteEffect effect);
   bool require_reference_storage(cxx::Symbol* parameter);
   bool require_address(cxx::Symbol* binding);
   void retain_automatic_storage(cxx::VariableSymbol* variable,
@@ -444,8 +467,14 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Reference operands retain their source destinations and write effects
   // regardless of whether call syntax is ordinary, operator, or constructor.
   void retain_reference_arguments(const DirectCall& call);
-  void collect_identity(cxx::ExpressionAST* expression, CallArgument& argument);
+  void collect_identity(cxx::ExpressionAST* expression, CallArgument& argument,
+                        ReferenceProjection projection = {});
+  void append_identity(const CallArgument& source, CallArgument& argument,
+                       ReferenceProjection projection = {});
   void append_identity(Destination destination, CallArgument& argument);
+  void append_identity(ObjectInterval interval, CallArgument& argument);
+  void append_receiver_identity(CallArgument& argument,
+                                ReferenceProjection projection);
   void retain_call(cxx::CallExpressionAST* call, cxx::FunctionSymbol* function);
   void retain_call(cxx::SubscriptExpressionAST* call,
                    cxx::FunctionSymbol* function);
@@ -471,6 +500,9 @@ class ControlFlow final : private cxx::ASTVisitor {
                                      cxx::AST* owner);
   static bool append_interval(std::vector<ObjectInterval>& intervals,
                               ObjectInterval interval);
+  template <typename Visitor>
+  void visit_intervals(const CallArgument& argument,
+                       ReferenceProjection projection, Visitor&& visitor) const;
   void append_intervals(const CallArgument& argument,
                         std::vector<ObjectInterval>& intervals) const;
   bool identities_overlap(const CallArgument& left,
@@ -520,9 +552,15 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::unordered_map<cxx::AST*, std::vector<cxx::Symbol*>> writes_;
   // Sparse physical-representation facts indexed by source binding identity.
   std::unordered_map<cxx::Symbol*, BindingStorageFacts> binding_storage_;
-  // Reference locals retain their once-evaluated source destination shape for
-  // effect and identity classification during this same walk.
-  std::unordered_map<cxx::Symbol*, cxx::ExpressionAST*> reference_aliases_;
+  struct ReferenceAlias {
+    // Static source slice, absent when evaluation chooses between objects.
+    std::optional<Destination> destination;
+    // Canonical possible origins and reference-call edges of the initializer.
+    CallArgument identity;
+  };
+  // Reference locals retain their initializer facts once. Later identity and
+  // effect queries consume these facts without following initializer ASTs.
+  std::unordered_map<cxx::Symbol*, ReferenceAlias> reference_aliases_;
   // Reference parameters requiring buffer-plus-offset transport.
   std::unordered_set<cxx::Symbol*> storage_references_;
   // Reference parameters whose referents may be modified.

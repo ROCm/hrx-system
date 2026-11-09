@@ -1,0 +1,126 @@
+// RUN: roundtrip
+// A selected automatic reference carries identity through a single ordinary
+// call and restores the updated result to the selected source binding.
+[[loom::noinline]] static void replace(unsigned& value, unsigned next) {
+  value = next;
+}
+unsigned selected(bool choice, unsigned first, unsigned second, unsigned next) {
+  unsigned& value = choice ? first : second;
+  replace(value, next);
+  return first + second;
+}
+
+// ----
+func.def public @selected(%choice: i1, %first$1: i32, %second$2: i32, %next: i32) -> (i32) {
+  %7 = scf.if %choice -> (i32) {
+    %5 = scalar.constant 0 : i32
+    scf.yield %5 : i32
+  } else {
+    %6 = scalar.constant 1 : i32
+    scf.yield %6 : i32
+  }
+  %8 = scalar.constant 0 : i32
+  %9 = scalar.cmpi eq, %7, %8 : i32
+  %first$10, %second$11 = scf.if %9 -> (i32, i32) {
+    scf.yield %first$1, %second$2 : i32, i32
+  } else {
+    scf.yield %second$2, %first$1 : i32, i32
+  }
+  %first$12 = func.call pure @replace(%first$10, %next) : (i32, i32) -> (i32)
+  %13 = scalar.constant 0 : i32
+  %14 = scalar.cmpi eq, %7, %13 : i32
+  %first$15, %second$16 = scf.if %14 -> (i32, i32) {
+    scf.yield %first$12, %second$11 : i32, i32
+  } else {
+    scf.yield %second$11, %first$12 : i32, i32
+  }
+  %17 = scalar.addi %first$15, %second$16 : i32
+  func.return %17 : i32
+}
+
+func.def noinline @replace(%value: i32, %next: i32) -> (i32) {
+  func.return %next : i32
+}
+
+// ====
+// Mutable reference syntax alone is not a callable write effect. Exact
+// receiver aliases remain values when both observations are read-only.
+struct Cell;
+static unsigned inspect(Cell& value);
+struct Cell {
+  // Value observed through two aliases of the current receiver.
+  unsigned payload;
+  Cell& self() { return *this; }
+  unsigned observe() { return inspect(self()) + inspect(*this); }
+};
+static unsigned inspect(Cell& value) { return value.payload; }
+unsigned observed(unsigned input) {
+  Cell value{input};
+  return value.observe();
+}
+
+// ----
+func.def public @observed(%input: i32) -> (i32) {
+  %2 = func.call pure @Cell__observe_value(%input) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def @Cell__observe_value(%this_payload: i32) -> (i32) {
+  func.call pure @Cell__self_value(%this_payload) : (i32)
+  %5 = func.call pure @inspect(%this_payload) : (i32) -> (i32)
+  %6 = func.call pure @inspect(%this_payload) : (i32) -> (i32)
+  %7 = scalar.addi %5, %6 : i32
+  func.return %7 : i32
+}
+
+func.def @inspect(%value_payload: i32) -> (i32) {
+  func.return %value_payload : i32
+}
+
+func.def @Cell__self_value(%this_payload: i32) {
+  func.return
+}
+
+// ====
+// A nested assignment through a returned receiver updates only its owning
+// field in the callable signature; neighboring fields stay unchanged.
+struct Pair {
+  // Neighbor retained unchanged by the nested assignment.
+  unsigned first;
+  // Subobject replaced through the returned receiver.
+  unsigned second;
+};
+struct Envelope {
+  // Leading field outside the written range.
+  unsigned prefix;
+  // Direct field carrying the nested writeback.
+  Pair pair;
+  // Trailing field outside the written range.
+  unsigned suffix;
+  Envelope& self() { return *this; }
+  void update(unsigned next) { self().pair.second = next; }
+};
+unsigned projected(unsigned input, unsigned next) {
+  Envelope value{1u, {2u, input}, 3u};
+  value.update(next);
+  return value.pair.second + value.suffix;
+}
+
+// ----
+func.def public @projected(%input: i32, %next: i32) -> (i32) {
+  %value_prefix = scalar.constant 1 : i32
+  %value_pair_first$4 = scalar.constant 2 : i32
+  %value_suffix = scalar.constant 3 : i32
+  %value_pair_first$6, %value_pair_second = func.call pure @Envelope__update_value(%value_prefix, %value_pair_first$4, %input, %value_suffix, %next) : (i32, i32, i32, i32, i32) -> (i32, i32)
+  %8 = scalar.addi %value_pair_second, %value_suffix : i32
+  func.return %8 : i32
+}
+
+func.def @Envelope__update_value(%this_prefix: i32, %this_pair_first: i32, %this_pair_second: i32, %this_suffix: i32, %next: i32) -> (i32, i32) {
+  func.call pure @Envelope__self_value(%this_prefix, %this_pair_first, %this_pair_second, %this_suffix) : (i32, i32, i32, i32)
+  func.return %this_pair_first, %next : i32, i32
+}
+
+func.def @Envelope__self_value(%this_prefix: i32, %this_pair_first: i32, %this_pair_second: i32, %this_suffix: i32) {
+  func.return
+}

@@ -18,6 +18,19 @@
 
 namespace loom::cxx_import {
 
+// Retained ownership of a source assignment destination. A field or vector-lane
+// write replaces a slice of its owning automatic binding; it is not a
+// storage-backed store. Dynamic lane selection remains on the source expression
+// and is evaluated once by translation.
+struct Destination {
+  // Owning local or parameter identity, borrowed from the source function.
+  cxx::Symbol* binding;
+  // First component of a nested member in the complete owning binding.
+  size_t component_offset;
+  // Member structure, or null when the destination is the entire binding.
+  const Partition* member;
+};
+
 // Current immutable High values, copied at structured-control forks.
 class ValueBindings {
  public:

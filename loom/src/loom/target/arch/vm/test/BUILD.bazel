@@ -134,6 +134,37 @@ iree_py_test(
 )
 
 iree_py_test(
+    name = "reference_selection_test",
+    size = "small",
+    srcs = ["source_roundtrip_test.py"],
+    args = [
+        "--importer=$(rootpath //loom/src/loom/tools/loom-import-cxx)",
+        "--runner=$(rootpath //loom/src/loom/tools/loom-test)",
+        "--assertions",
+        "$(rootpath reference_selection.cxx)",
+        "$(rootpath reference_selection_checks.cxx)",
+        "--assertions",
+        "$(rootpath reference_lanes.cxx)",
+        "$(rootpath reference_lanes_checks.cxx)",
+    ],
+    data = [
+        "reference_lanes.cxx",
+        "reference_lanes_checks.cxx",
+        "reference_selection.cxx",
+        "reference_selection_checks.cxx",
+        "//loom/src/loom/tools/loom-import-cxx",
+        "//loom/src/loom/tools/loom-test",
+    ],
+    main = "source_roundtrip_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/emit:vm_binary",
+    ]),
+    deps = ["//loom/py/loom/tools:export_cxx"],
+)
+
+iree_py_test(
     name = "view_transport_test",
     size = "small",
     srcs = ["source_roundtrip_test.py"],

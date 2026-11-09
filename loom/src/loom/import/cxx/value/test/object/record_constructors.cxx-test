@@ -335,17 +335,17 @@ func.def public @move_sources(%choose: i1, %first: i32, %second: i32) -> (i32) {
   %conditional_value = scf.select %choose, %second, %first : i32
   %6 = index.constant 8 : offset
   %values_storage = buffer.alloca<private> align(4) %6 : buffer
-  %124 = index.constant 0 : offset
-  %13 = buffer.view %values_storage[%124] : buffer -> view<1xi32>
+  %126 = index.constant 0 : offset
+  %13 = buffer.view %values_storage[%126] : buffer -> view<1xi32>
   view.store %first, %13[0] : i32, view<1xi32>
-  %123 = index.constant 4 : offset
-  %19 = buffer.view %values_storage[%123] : buffer -> view<1xi32>
+  %125 = index.constant 4 : offset
+  %19 = buffer.view %values_storage[%125] : buffer -> view<1xi32>
   view.store %second, %19[0] : i32, view<1xi32>
   %20 = scalar.extui %choose : i1 to i32
   %21 = scalar.extsi %20 : i32 to i64
-  %125 = scalar.constant 2 : i64
-  %126 = scalar.shli %21, %125 : i64
-  %26 = scalar.assume %126 [range(%126, 0, 9223372036854775807)] : i64
+  %127 = scalar.constant 2 : i64
+  %128 = scalar.shli %21, %127 : i64
+  %26 = scalar.assume %128 [range(%128, 0, 9223372036854775807)] : i64
   %27 = index.cast %26 : i64 to offset
   %30 = index.assume %27 [range(%27, 0, 4)] : offset
   %31 = buffer.view %values_storage[%30] : buffer -> view<1xi32>
@@ -363,9 +363,9 @@ func.def public @read_xvalue_array(%first: i32, %second: i32) -> (i32) {
 }
 
 func.def public @mutate_xvalue(%choose: i1, %value$53: i32) -> (i32) {
-  %112 = scalar.constant 1 : i32
-  %value$113 = scalar.addi %value$53, %112 : i32
-  %source_value = scf.select %choose, %value$113, %value$53 : i32
+  %114 = scalar.constant 1 : i32
+  %value$115 = scalar.addi %value$53, %114 : i32
+  %source_value = scf.select %choose, %value$115, %value$53 : i32
   func.return %source_value : i32
 }
 
@@ -390,9 +390,9 @@ func.def public @move_helper_scalar(%value: i32) -> (i32) {
 }
 
 func.def public @move_helper_pointer(%value: buffer, %value_byte_offset: offset) -> (i32) {
-  %90 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
-  %91 = view.load %90[0] : view<1xi32> -> i32
-  func.return %91 : i32
+  %92 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
+  %93 = view.load %92[0] : view<1xi32> -> i32
+  func.return %93 : i32
 }
 
 func.def public @move_helper_vector(%value: vector<4xi32>) -> (vector<4xi32>) {

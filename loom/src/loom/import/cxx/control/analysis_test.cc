@@ -862,8 +862,8 @@ TEST(ControlFlowTest, VectorLaneWritesRetainTheOwningVectorSlice) {
   ControlFlow analysis(source.unit(), source.diagnostics(), types, body);
   auto writes = analysis.written(branch);
   ASSERT_EQ(writes.size(), 2u);
-  EXPECT_EQ(writes[0], function->symbol->parameters()[0]);
-  EXPECT_EQ(writes[1], function->symbol->parameters()[2]);
+  EXPECT_EQ(writes[0], function->symbol->parameters()[2]);
+  EXPECT_EQ(writes[1], function->symbol->parameters()[0]);
   auto lane = analysis.destination(automatic->targetExpression);
   ASSERT_TRUE(lane.has_value());
   EXPECT_EQ(lane->binding, function->symbol->parameters()[0]);
@@ -911,6 +911,43 @@ TEST(ControlFlowTest, MemoryMembersRetainStorageIdentityAndAddressSideEffects) {
         cxx::ast_cast<cxx::MemberExpressionAST>(member->baseExpression);
     ASSERT_NE(nested, nullptr);
     EXPECT_TRUE(analysis.storage_backed(nested));
+  }
+}
+
+TEST(ControlFlowTest, ReferenceResultsRetainNestedMemberCorrespondence) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct Pair { unsigned first; unsigned second; };
+    struct Packet { unsigned prefix; Pair pair; unsigned suffix; };
+    Packet& identity(Packet&);
+    void consume(unsigned&, const unsigned&);
+    void entry(Packet& packet) {
+      Pair& pair = identity(packet).pair;
+      consume(pair.first, pair.second);
+    }
+  )"),
+                IREE_SV("projected_reference.cxx"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body,
+                       function->symbol);
+  auto calls = analysis.calls();
+  ASSERT_EQ(calls.size(), 2u);
+  const auto& invocation = calls[1];
+  ASSERT_EQ(invocation.arguments.size(), 2u);
+  for (size_t ordinal = 0; ordinal < invocation.arguments.size(); ++ordinal) {
+    const auto& argument = invocation.arguments[ordinal];
+    ASSERT_EQ(argument.reference_calls.size(), 1u);
+    const auto& result = argument.reference_calls.front();
+    EXPECT_EQ(result.call, calls[0].source);
+    EXPECT_EQ(result.projection.component_offset, 1u + ordinal);
+    EXPECT_EQ(result.projection.component_count, 1u);
+    EXPECT_FALSE(argument.inherent_storage);
   }
 }
 

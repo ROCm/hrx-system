@@ -108,32 +108,40 @@ func.def public @update_memory(%packets: buffer, %packets_byte_offset: offset, %
   %14 = index.cast %13 : i64 to offset
   %15 = index.constant 16 : offset
   %16 = index.add %14, %15 : offset
-  %17 = buffer.view %packets[%16] : buffer -> view<4xi32>
-  %18 = scalar.constant 1 : i32
-  %lane_index$19 = scalar.addi %lane_index$3, %18 : i32
-  %20 = vector.load %17[0] : view<4xi32> -> vector<4xi32>
-  %21 = index.cast %lane_index$3 : i32 to index
-  %22 = vector.insert %replacement into %20[%21] : i32, vector<4xi32>
-  vector.store %22, %17[0] : vector<4xi32>, view<4xi32>
-  %23 = scalar.extui %packet_index$7 : i32 to i64
-  %24 = scalar.constant 32 : i64
-  %25 = scalar.muli %23, %24 : i64
-  %26 = index.cast %packets_byte_offset : offset to i64
-  %27 = scalar.addi %26, %25 : i64
-  %28 = scalar.assume %27 [range(%27, 0, 9223372036854775807)] : i64
-  %29 = index.cast %28 : i64 to offset
-  %30 = index.constant 16 : offset
-  %31 = index.add %29, %30 : offset
-  %32 = buffer.view %packets[%31] : buffer -> view<4xi32>
-  %33 = vector.load %32[0] : view<4xi32> -> vector<4xi32>
-  %34 = index.cast %lane_index$19 : i32 to index
-  %35 = vector.extract %33[%34] : vector<4xi32> -> i32
-  %36 = scalar.xori %35, %replacement : i32
-  %37 = index.cast %lane_index$19 : i32 to index
-  %38 = vector.insert %36 into %33[%37] : i32, vector<4xi32>
-  vector.store %38, %32[0] : vector<4xi32>, view<4xi32>
-  %39 = scalar.addi %packet_index$7, %lane_index$19 : i32
-  func.return %39 : i32
+  %17 = scalar.constant 1 : i32
+  %lane_index$18 = scalar.addi %lane_index$3, %17 : i32
+  %19 = scalar.extui %lane_index$3 : i32 to i64
+  %20 = scalar.constant 4 : i64
+  %21 = scalar.muli %19, %20 : i64
+  %22 = index.cast %16 : offset to i64
+  %23 = scalar.addi %22, %21 : i64
+  %24 = scalar.assume %23 [range(%23, 0, 9223372036854775807)] : i64
+  %25 = index.cast %24 : i64 to offset
+  %26 = buffer.view %packets[%25] : buffer -> view<1xi32>
+  view.store %replacement, %26[0] : i32, view<1xi32>
+  %27 = scalar.extui %packet_index$7 : i32 to i64
+  %28 = scalar.constant 32 : i64
+  %29 = scalar.muli %27, %28 : i64
+  %30 = index.cast %packets_byte_offset : offset to i64
+  %31 = scalar.addi %30, %29 : i64
+  %32 = scalar.assume %31 [range(%31, 0, 9223372036854775807)] : i64
+  %33 = index.cast %32 : i64 to offset
+  %34 = index.constant 16 : offset
+  %35 = index.add %33, %34 : offset
+  %36 = scalar.extui %lane_index$18 : i32 to i64
+  %37 = scalar.constant 4 : i64
+  %38 = scalar.muli %36, %37 : i64
+  %39 = index.cast %35 : offset to i64
+  %40 = scalar.addi %39, %38 : i64
+  %41 = scalar.assume %40 [range(%40, 0, 9223372036854775807)] : i64
+  %42 = index.cast %41 : i64 to offset
+  %43 = buffer.view %packets[%42] : buffer -> view<1xi32>
+  %44 = view.load %43[0] : view<1xi32> -> i32
+  %45 = scalar.xori %44, %replacement : i32
+  %46 = buffer.view %packets[%42] : buffer -> view<1xi32>
+  view.store %45, %46[0] : i32, view<1xi32>
+  %47 = scalar.addi %packet_index$7, %lane_index$18 : i32
+  func.return %47 : i32
 }
 
 // ====
