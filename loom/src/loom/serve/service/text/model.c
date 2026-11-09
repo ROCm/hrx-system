@@ -8,6 +8,7 @@
 
 #include "loom/serve/service/text/model.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -16,6 +17,7 @@
 #include "iree/vm/buffer.h"
 #include "iree/vm/sync.h"
 #include "loom/serve/runtime/device/device.h"
+#include "loom/serve/runtime/device/pool.h"
 #include "loom/serve/runtime/execution/execution.h"
 #include "loom/serve/runtime/execution/workspace.h"
 #include "loom/serve/runtime/host/host.h"
@@ -744,6 +746,10 @@ void loom_serve_text_model_retire(loom_serve_text_model_t* model,
       iree_hal_buffer_release(model->stages[i].fixed_buffers[j]);
       model->stages[i].fixed_buffers[j] = NULL;
     }
+  }
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(model->bank); ++i) {
+    iree_hal_buffer_release(model->bank[i]);
+    model->bank[i] = NULL;
   }
   loom_serve_text_state_retire(&model->state, wake, user_data);
 }
@@ -1561,6 +1567,108 @@ iree_status_t loom_serve_text_model_submit_epoch(
   return status;
 }
 
+static iree_status_t loom_serve_text_model_ensure_bank(
+    loom_serve_text_model_t* model) {
+  if (model->bank[0]) {
+    return iree_ok_status();
+  }
+  iree_hal_buffer_t* sources[IREE_ARRAYSIZE(model->bank)] = {
+      model->state.residual, model->state.epoch.buffers[1],
+      model->state.epoch.buffers[4], model->state.epoch.buffers[5]};
+  iree_hal_pool_reservation_request_t requests[IREE_ARRAYSIZE(model->bank)];
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(model->bank); ++i) {
+    if (!sources[i]) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "two-bank prefill requires packed epoch roots");
+    }
+    requests[i] = iree_hal_make_pool_reservation_request(
+        iree_hal_buffer_byte_length(sources[i]), 256);
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_execution_alloca_from_pool(
+      model->execution, loom_serve_pool_storage(model->state.pool),
+      IREE_ARRAYSIZE(model->bank), requests, model->bank));
+  const uint32_t zero = 0;
+  iree_hal_transfer_operation_t fills[IREE_ARRAYSIZE(model->bank)];
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(model->bank); ++i) {
+    fills[i] = (iree_hal_transfer_operation_t){
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+        .fill = {.target_buffer = model->bank[i],
+                 .length = iree_hal_buffer_byte_length(model->bank[i]),
+                 .pattern = &zero,
+                 .pattern_length = sizeof(zero)},
+    };
+  }
+  uint64_t completion = 0;
+  IREE_RETURN_IF_ERROR(loom_serve_execution_transfer(
+      model->execution, IREE_ARRAYSIZE(fills), fills, &completion));
+  return loom_serve_execution_wait(model->execution, completion);
+}
+
+static void loom_serve_text_model_swap_bank(loom_serve_text_model_t* model) {
+  iree_hal_buffer_t** slots[IREE_ARRAYSIZE(model->bank)] = {
+      &model->state.residual, &model->state.epoch.buffers[1],
+      &model->state.epoch.buffers[4], &model->state.epoch.buffers[5]};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(model->bank); ++i) {
+    iree_hal_buffer_t* buffer = *slots[i];
+    *slots[i] = model->bank[i];
+    model->bank[i] = buffer;
+  }
+  model->state.epoch.buffers[0] = model->state.residual;
+}
+
+iree_status_t loom_serve_text_model_submit_epoch_pair(
+    loom_serve_text_model_t* model, iree_host_size_t first_shape,
+    const loom_serve_text_span_t* first, iree_host_size_t second_shape,
+    const loom_serve_text_span_t* second,
+    loom_serve_execution_frontier_t* out_frontier) {
+  *out_frontier = (loom_serve_execution_frontier_t){0};
+  if (first->row_index != second->row_index || first->media || second->media ||
+      iree_any_bit_set(first->flags, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT |
+                                         LOOM_SERVICE_TEXT_SPAN_FLAG_PROPOSE) ||
+      iree_any_bit_set(second->flags, LOOM_SERVICE_TEXT_SPAN_FLAG_PROPOSE)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid two-bank prefill pair");
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_ensure_bank(model));
+  // Holds parameters between the first bank's host publication and the
+  // second bank's own acquisition.
+  IREE_RETURN_IF_ERROR(loom_serve_residency_acquire(model->residency));
+  loom_serve_execution_begin_group(model->execution);
+  loom_serve_execution_frontier_t frontier;
+  iree_status_t status = loom_serve_text_model_submit_epoch(
+      model, first_shape, 1, first, NULL, NULL, NULL, &frontier);
+  // The first bank's uploads borrow host staging that the second bank's
+  // encode reuses; its stage execution itself is still deferred.
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_execution_wait(model->execution, frontier.values[0]);
+  }
+  loom_serve_text_result_t first_result = {0};
+  if (iree_status_is_ok(status)) {
+    // An unselected known-input span publishes from its host plan alone.
+    status = loom_serve_text_model_complete_epoch(model, &first_result);
+  }
+  if (iree_status_is_ok(status)) {
+    loom_serve_text_model_swap_bank(model);
+    status = loom_serve_text_model_submit_epoch(model, second_shape, 1, second,
+                                                NULL, NULL, NULL, &frontier);
+    loom_serve_text_model_swap_bank(model);
+  }
+  status = iree_status_join(status,
+                            loom_serve_execution_end_group(model->execution));
+  loom_serve_residency_release(model->residency);
+  if (iree_status_is_ok(status)) {
+    if (getenv("LOOM_SERVE_TWO_BANK_LOG")) {
+      fprintf(
+          stderr, "TWO_BANK_PAIR first=%zu second=%zu select=%d\n",
+          first->token_count, second->token_count,
+          iree_any_bit_set(second->flags, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT));
+    }
+    model->invocation.paired_known = first_result.known_count;
+    *out_frontier = loom_serve_execution_frontier(model->execution);
+  }
+  return status;
+}
+
 iree_status_t loom_serve_text_model_complete_epoch(
     loom_serve_text_model_t* model, loom_serve_text_result_t* out_results) {
   const loom_serve_text_media_epoch_t* media = &model->invocation.media;
@@ -1619,6 +1727,11 @@ iree_status_t loom_serve_text_model_complete_epoch(
           row->transfer.token == model->source.eos_token;
     }
   }
+  if (out_results && model->invocation.paired_known) {
+    out_results[0].known_count += (uint32_t)model->invocation.paired_known;
+    out_results[0].consumed_count += (uint32_t)model->invocation.paired_known;
+  }
+  model->invocation.paired_known = 0;
   model->invocation.span_count = 0;
   loom_serve_text_media_epoch_deinitialize(&model->invocation.media);
   loom_serve_residency_release(model->residency);

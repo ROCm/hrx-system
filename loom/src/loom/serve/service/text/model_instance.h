@@ -105,7 +105,11 @@ struct loom_serve_text_model_t {
     loom_serve_text_epoch_flags_t flags;
     // Exact mixed-input host plan and packet records; empty for text-only.
     loom_serve_text_media_epoch_t media;
+    // Known tokens already published by the first bank of a two-bank pair.
+    iree_host_size_t paired_known;
   } invocation;
+  // Experimental second prefill bank: residual, metadata, tokens, outputs.
+  iree_hal_buffer_t* bank[4];
 };
 
 struct loom_serve_text_row_t {

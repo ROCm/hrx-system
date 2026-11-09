@@ -606,6 +606,18 @@ iree_status_t loom_serve_text_model_submit_epoch(
     loom_serve_text_capture_t** out_capture,
     loom_serve_execution_frontier_t* out_frontier);
 
+// Experimental two-bank prefill (LOOM_SERVE_TWO_BANK). Submits two consecutive
+// single-row known-input prefill spans of one row as one grouped execution:
+// the first span must be unselected. The second runs on a private bank of
+// residual, metadata, token and output buffers; KV/recurrent state and origins
+// are shared. The first span is published on the host before the second is
+// encoded, so completion is ordinary and reports both spans' known tokens.
+iree_status_t loom_serve_text_model_submit_epoch_pair(
+    loom_serve_text_model_t* model, iree_host_size_t first_shape,
+    const loom_serve_text_span_t* first, iree_host_size_t second_shape,
+    const loom_serve_text_span_t* second,
+    loom_serve_execution_frontier_t* out_frontier);
+
 // Consumes one successfully completed epoch after both submitted frontiers
 // signal success. Source VM publication commits row positions, returns rejected
 // state, and releases the invocation's parameter pin. Optional out_results has
