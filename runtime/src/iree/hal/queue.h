@@ -853,6 +853,9 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_map(
 // reached, and every |signal_semaphore_list| timepoint is published only after
 // the command buffer reaches terminal completion. Queue submissions are not
 // implicitly FIFO; callers use semaphore dependencies to order operations.
+// Recorded barriers define payload memory visibility, including any system
+// release required before a host read. Terminal completion joins execution
+// and resource lifetimes but adds no implicit payload visibility boundary.
 //
 // An optional |binding_table| supplies indirect bindings recorded by the
 // command buffer. Its entries are captured before the call returns. By default

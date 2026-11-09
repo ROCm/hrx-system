@@ -16,8 +16,13 @@
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/api.h"
+#include "iree/base/tooling/flags.h"
 #include "iree/hal/api.h"
-#include "iree/hal/driver/vulkan/registration/driver_module.h"
+#include "iree/tooling/device_util.h"
+
+IREE_FLAG(int64_t, queue_family, -1,
+          "Provisioned transfer queue family ordinal; -1 selects the first "
+          "available family.");
 
 namespace {
 
@@ -31,43 +36,42 @@ class QueueDevice {
     iree_hal_pool_release(memory_pool_);
     iree_hal_device_group_release(group_);
     iree_hal_device_release(device_);
-    iree_hal_driver_release(driver_);
     iree_async_proactor_pool_release(proactors_);
   }
 
   iree_status_t Initialize() {
     const iree_allocator_t allocator = {this, Allocate};
-    iree_status_t status = iree_hal_vulkan_driver_module_register(
-        iree_hal_driver_registry_default());
-    if (iree_status_is_already_exists(status)) {
-      iree_status_free(status);
-      status = iree_ok_status();
-    }
-    IREE_RETURN_IF_ERROR(status);
-    IREE_RETURN_IF_ERROR(iree_hal_driver_registry_acquire_driver(
-        iree_hal_driver_registry_default(), IREE_SV("vulkan"), &driver_));
     IREE_RETURN_IF_ERROR(iree_async_proactor_pool_create(
         1, nullptr, iree_async_proactor_pool_options_default(), allocator,
         &proactors_));
     auto params = iree_hal_device_create_params_default();
     params.proactor_pool = proactors_;
     params.event_sink = iree_hal_device_event_sink_stderr();
-    IREE_RETURN_IF_ERROR(iree_hal_driver_create_default_device(
-        driver_, &params, allocator, &device_));
+    IREE_RETURN_IF_ERROR(iree_hal_create_device_from_flags(
+        iree_hal_available_driver_registry(), IREE_SV("task"), &params,
+        allocator, &device_));
     iree_async_frontier_tracker_t* tracker = nullptr;
     IREE_RETURN_IF_ERROR(iree_async_frontier_tracker_create(
         iree_async_frontier_tracker_options_default(), allocator, &tracker));
-    status = iree_hal_device_group_create_from_device(device_, tracker,
-                                                      allocator, &group_);
+    iree_status_t status = iree_hal_device_group_create_from_device(
+        device_, tracker, allocator, &group_);
     iree_async_frontier_tracker_release(tracker);
     IREE_RETURN_IF_ERROR(status);
 
     const auto* spec =
         iree_hal_device_spec_queues(iree_hal_device_spec(device_));
+    if (FLAG_queue_family < -1 ||
+        (FLAG_queue_family >= 0 &&
+         (uint64_t)FLAG_queue_family >= spec->family_count)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "queue_family must be -1 or less than %" PRIhsz,
+                              spec->family_count);
+    }
     std::vector<iree_hal_pool_family_access_t> families;
     for (iree_host_size_t i = 0; i < spec->family_count; ++i) {
       const auto& family = spec->families[i];
-      if (family.provisioned_queue_count &&
+      if ((FLAG_queue_family < 0 || (uint64_t)FLAG_queue_family == i) &&
+          family.provisioned_queue_count &&
           iree_all_bits_set(family.role_flags,
                             IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER)) {
         families.push_back({iree_hal_device_queue_family(device_, i),
@@ -75,11 +79,15 @@ class QueueDevice {
         for (uint32_t j = 0; j < family.provisioned_queue_count; ++j) {
           queues_.push_back(iree_hal_device_queue(device_, i, j));
         }
+        const auto id = iree_hal_device_id(device_);
+        label_ = std::string(id.data, id.size) + "/family:" + std::to_string(i);
+        break;
       }
     }
     if (queues_.empty()) {
-      return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                              "no Vulkan transfer queue");
+      return iree_make_status(
+          IREE_STATUS_UNAVAILABLE,
+          "no provisioned transfer queue in the selected families");
     }
     const iree_hal_pool_scope_t scope = {
         .family_count = families.size(),
@@ -101,6 +109,7 @@ class QueueDevice {
   iree_hal_pool_t* pool() const { return memory_pool_; }
   iree_hal_queue_t* queue(size_t index) const { return queues_[index]; }
   size_t queue_count() const { return queues_.size(); }
+  const std::string& label() const { return label_; }
   uint64_t allocation_count() const { return allocation_count_.load(); }
 
  private:
@@ -122,14 +131,14 @@ class QueueDevice {
 
   // Device creation and asynchronous host notification owners.
   iree_async_proactor_pool_t* proactors_ = nullptr;
-  // Native Vulkan driver retained through device destruction.
-  iree_hal_driver_t* driver_ = nullptr;
   // Device owning the queues and their native resources.
   iree_hal_device_t* device_ = nullptr;
   // Sealed topology and completion frontier owner.
   iree_hal_device_group_t* group_ = nullptr;
   // Pool outliving every chain buffer and terminal operation.
   iree_hal_pool_t* memory_pool_ = nullptr;
+  // Device and selected family identity included with every result.
+  std::string label_;
   // Borrowed transfer-capable queues in advertised inventory order.
   std::vector<iree_hal_queue_t*> queues_;
   // Successful HAL host allocations, including all device worker threads.
@@ -191,6 +200,15 @@ class TransferChain {
         IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0, out_command_buffer));
     auto* command_buffer = *out_command_buffer;
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_begin(command_buffer));
+    // Recorded execution owns payload visibility. Match the conservative
+    // boundaries of direct queue_copy, including the final host read.
+    const iree_hal_barrier_t acquire = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
+    };
+    IREE_RETURN_IF_ERROR(
+        iree_hal_command_buffer_barrier(command_buffer, &acquire));
     const iree_hal_memory_barrier_t memory_barrier = {
         .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
         .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_READ,
@@ -218,6 +236,13 @@ class TransferChain {
       }
     }
     IREE_RETURN_IF_ERROR(status);
+    const iree_hal_barrier_t release = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+        .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+    };
+    IREE_RETURN_IF_ERROR(
+        iree_hal_command_buffer_barrier(command_buffer, &release));
     return iree_hal_command_buffer_end(command_buffer);
   }
 
@@ -340,6 +365,7 @@ void BM_TransferChain(benchmark::State& state) {
     state.SkipWithError(status.ToString().c_str());
     return;
   }
+  state.SetLabel(device.label());
   if (kSubmission == Submission::kCrossQueue && device.queue_count() < 2) {
     state.SkipWithMessage("two transfer queues are required");
     return;
@@ -395,7 +421,7 @@ void BM_TransferChain(benchmark::State& state) {
 }
 
 BENCHMARK_TEMPLATE(BM_TransferChain, Submission::kCopy, false)
-    ->Name("VulkanTransferChain/CopyCompletion")
+    ->Name("TransferChain/CopyCompletion")
     ->Arg(1)
     ->Arg(8)
     ->Arg(32)
@@ -403,7 +429,7 @@ BENCHMARK_TEMPLATE(BM_TransferChain, Submission::kCopy, false)
     ->MeasureProcessCPUTime()
     ->UseRealTime();
 BENCHMARK_TEMPLATE(BM_TransferChain, Submission::kExecute, false)
-    ->Name("VulkanTransferChain/ExecuteCompletion")
+    ->Name("TransferChain/ExecuteCompletion")
     ->Arg(1)
     ->Arg(8)
     ->Arg(32)
@@ -411,7 +437,7 @@ BENCHMARK_TEMPLATE(BM_TransferChain, Submission::kExecute, false)
     ->MeasureProcessCPUTime()
     ->UseRealTime();
 BENCHMARK_TEMPLATE(BM_TransferChain, Submission::kExecute, true)
-    ->Name("VulkanTransferChain/ExecuteSubmit")
+    ->Name("TransferChain/ExecuteSubmit")
     ->Arg(1)
     ->Arg(8)
     ->Arg(32)
@@ -419,14 +445,14 @@ BENCHMARK_TEMPLATE(BM_TransferChain, Submission::kExecute, true)
     ->MeasureProcessCPUTime()
     ->UseRealTime();
 BENCHMARK_TEMPLATE(BM_TransferChain, Submission::kExecute, false, true)
-    ->Name("VulkanTransferChain/ExecuteAfterStaging")
+    ->Name("TransferChain/ExecuteAfterStaging")
     ->Arg(1)
     ->Arg(32)
     ->Arg(512)
     ->MeasureProcessCPUTime()
     ->UseRealTime();
 BENCHMARK_TEMPLATE(BM_TransferChain, Submission::kRecorded, false)
-    ->Name("VulkanTransferChain/RecordedCompletion")
+    ->Name("TransferChain/RecordedCompletion")
     ->Arg(1)
     ->Arg(8)
     ->Arg(32)
@@ -435,14 +461,14 @@ BENCHMARK_TEMPLATE(BM_TransferChain, Submission::kRecorded, false)
     ->UseRealTime();
 
 BENCHMARK_TEMPLATE(BM_TransferChain, Submission::kMixed, false)
-    ->Name("VulkanTransferChain/MixedCompletion")
+    ->Name("TransferChain/MixedCompletion")
     ->Arg(2)
     ->Arg(33)
     ->Arg(513)
     ->MeasureProcessCPUTime()
     ->UseRealTime();
 BENCHMARK_TEMPLATE(BM_TransferChain, Submission::kCrossQueue, false)
-    ->Name("VulkanTransferChain/CrossQueueCompletion")
+    ->Name("TransferChain/CrossQueueCompletion")
     ->Arg(2)
     ->Arg(32)
     ->Arg(512)
@@ -472,6 +498,7 @@ static void BM_Concurrent(benchmark::State& state, Queues placement,
     state.SkipWithError(status.ToString().c_str());
     return;
   }
+  state.SetLabel(device.label());
   const size_t caller_count = state.range(0);
   if (placement == Queues::kSeparate && device.queue_count() < caller_count) {
     state.SkipWithMessage("not enough provisioned transfer queues");
