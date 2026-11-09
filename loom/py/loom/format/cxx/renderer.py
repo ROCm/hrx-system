@@ -834,6 +834,8 @@ class CxxRenderer(CxxFunctionRenderer):
         elif (
             isinstance(value_type, ShapedType)
             and value_type.type_kind == TypeKind.VECTOR
+            and value_type.rank == 1
+            and repr(value_type.element_type) != "i1"
         ):
             initializer = "{}"
         name = self.names[result]
@@ -849,7 +851,7 @@ class CxxRenderer(CxxFunctionRenderer):
                 self.expression(target),
                 self._buffer_argument(source, self._buffer_element(target))
                 if isinstance(self.module.values[target].type, BufferType)
-                else self.expression(source),
+                else self.numeric_argument(source, self.expression_type(target)),
             )
             for target, source in zip(targets, sources, strict=True)
             if target is not None and self.expression(target) != self.expression(source)

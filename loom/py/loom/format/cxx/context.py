@@ -1276,6 +1276,22 @@ class CxxRenderContext:
             expression_type if expression_type is not None else self.cpp_type(value_id)
         )
 
+    def numeric_argument(self, value_id: int, expected_type: str) -> str:
+        """Adapts C++ vector signedness without changing the signless IR value."""
+
+        expression = self.expression(value_id)
+        value_type = self.module.values[value_id].type
+        if (
+            isinstance(value_type, ShapedType)
+            and value_type.type_kind == TypeKind.VECTOR
+            and self.expression_type(value_id) != expected_type
+        ):
+            # Native and semantic C++ vectors do not implicitly convert across
+            # signedness. The numeric facade preserves bits at the same width.
+            self.uses_numeric_conversion = True
+            return f"loom::convert<{expected_type}>({expression})"
+        return expression
+
     def dynamic_view_encoding_expression(
         self, operation: Operation, value_type: ShapedType
     ) -> str:

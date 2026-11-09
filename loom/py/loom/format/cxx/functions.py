@@ -137,6 +137,13 @@ class CxxFunctionRenderer(CxxConfigRenderer):
         source_operands = self._flat_source_parameters(
             operation, list(operation.operands)
         )
+        function = projection.function
+        formal_ids = (
+            function.regions[0].blocks[0].arg_ids
+            if function.name == "func.def"
+            else function.operands
+        )
+        formals = self._flat_source_parameters(function, list(formal_ids))
         arguments_list: list[str] = []
         for index, parameter in enumerate(source_operands):
             operand = parameter.value_id
@@ -152,6 +159,10 @@ class CxxFunctionRenderer(CxxConfigRenderer):
                         "external declaration",
                     )
                 expression = self._buffer_argument(operand, expected_element)
+            else:
+                expression = self.numeric_argument(
+                    operand, self.cpp_type(formals[index].value_id)
+                )
             arguments_list.append(expression)
         arguments = ", ".join(arguments_list)
         call = f"{callee}({arguments})"
@@ -319,7 +330,7 @@ class CxxFunctionRenderer(CxxConfigRenderer):
                 result.value_id, self._buffer_element(formal.value_id)
             )
             if isinstance(self.module.values[result.value_id].type, BufferType)
-            else self.expression(result.value_id)
+            else self.numeric_argument(result.value_id, self.cpp_type(formal.value_id))
             for result, formal in zip(results, signature, strict=True)
         ]
         if not results:

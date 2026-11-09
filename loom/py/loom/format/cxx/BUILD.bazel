@@ -110,3 +110,23 @@ iree_py_test(
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
     deps = [":cxx"],
 )
+
+iree_py_test(
+    name = "predicate_conversions_test",
+    size = "small",
+    srcs = ["predicate_conversions_test.py"],
+    args = [
+        "$(rootpath //loom/src/loom/tools/loom-import-cxx)",
+        "$(rootpath //loom/src/loom/tools/loom-test)",
+    ],
+    data = [
+        "//loom/src/loom/tools/loom-import-cxx",
+        "//loom/src/loom/tools/loom-test",
+    ],
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/execute:vm_iree_vm",
+    ]),
+    deps = [":cxx"],
+)
