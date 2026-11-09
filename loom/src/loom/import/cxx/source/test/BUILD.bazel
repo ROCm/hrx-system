@@ -33,6 +33,8 @@ loom_check_test_suite(
         "local_names.cxx-test",
         "locations.cxx-test",
         "macro_operators.cxx-test",
+        "qualified_names.cxx-test",
+        "qualified_names_invalid.cxx-test",
         "standards.cxx-test",
         "static_assert.cxx-test",
     ],

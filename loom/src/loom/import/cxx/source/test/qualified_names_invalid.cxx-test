@@ -1,0 +1,67 @@
+// RUN: verify
+// A declaration must diagnose a missing namespace even without a call.
+template <unsigned N>
+// ERROR@+1: PARSE/036 "nested name specifier must be a class or namespace"
+auto entry() -> missing::type<N>;
+
+// ====
+// RUN: verify
+// Dependent arguments do not make a missing template name dependent.
+namespace known {}
+template <unsigned N>
+// ERROR@+1: PARSE/036 "'missing <>' is not a type"
+auto entry() -> known::missing<N>;
+
+// ====
+// RUN: verify
+template <unsigned N>
+// ERROR@+1: PARSE/036 "'Missing <>' is not a type"
+auto entry() -> Missing<N>;
+
+// ====
+// RUN: verify
+// Neither typename nor template supplies the missing declaration.
+namespace known {}
+template <unsigned N>
+// ERROR@+1: PARSE/036 "no type named 'missing' in '::known'"
+using Result = typename known::template missing<N>;
+
+// ====
+// RUN: verify
+namespace known {
+struct Type {};
+}
+template <unsigned N>
+// ERROR@+1: PARSE/036 "no type named 'Type' in '::known'"
+using Result = typename known::template Type<N>;
+
+// ====
+// RUN: verify
+// A missing intermediate qualifier cannot escape to lexical lookup.
+namespace known {}
+template <unsigned N>
+// ERROR@+1: PARSE/036 "nested name specifier must be a class or namespace"
+auto entry() -> known::missing::type<N>;
+
+// ====
+// RUN: verify
+// A scalar alias does not acquire members inside a template declaration.
+using Scalar = int;
+template <unsigned N>
+// ERROR@+1: PARSE/036 "nested name specifier must be a class or namespace"
+using Result = typename Scalar::type;
+
+// ====
+// RUN: verify
+template <unsigned N>
+// ERROR@+1: PARSE/036 "nested name specifier must be a class or namespace"
+using Result = typename decltype(0)::type;
+
+// ====
+// RUN: verify
+// Missing value qualifiers diagnose in the template body before instantiation.
+template <unsigned N>
+unsigned entry() {
+  // ERROR@+1: PARSE/036 "nested name specifier must be a class or namespace"
+  return missing::value + N;
+}
