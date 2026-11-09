@@ -125,8 +125,7 @@ python build_tools/devtools/ci.py iree-cmake-xdna-asan
 The client configurations compile RDNA and XDNA together, including both Loom
 emitters for authored fixtures. Linux selects host and XDNA execution; Windows
 also admits native GPU, Vulkan and D3D12 resources. The jobs cover
-`//libamdf/...` and `//runtime/src/iree/hal/driver/amd/...` without enabling the
-legacy AMDGPU HAL:
+`//libamdf/...` and `//runtime/src/iree/hal/driver/amd/...`:
 
 ```sh
 # Linux client configuration.

@@ -743,8 +743,7 @@ independently control libamdf's native implementations, including those used by
 clients other than the HAL. Portable image and target utilities remain available
 to compiler clients independently of HAL engine selection.
 
-libamdf can also be built independently of the legacy AMDGPU HAL and ROCm
-dependency stack:
+libamdf can also be built without HAL consumers or a ROCm installation:
 
 ```bash
 python dev.py bazel configure -DIREE_HAL_DRIVER_AMD=OFF -DAMDF_BUILD=ON
