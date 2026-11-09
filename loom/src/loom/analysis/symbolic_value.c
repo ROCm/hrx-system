@@ -11,6 +11,7 @@
 #include "loom/analysis/condition_facts.h"
 #include "loom/analysis/symbolic_integer_cast.h"
 #include "loom/analysis/symbolic_quotient.h"
+#include "loom/analysis/symbolic_scope.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/context.h"
 #include "loom/ops/index/ops.h"
@@ -51,17 +52,6 @@ static iree_status_t loom_symbolic_value_ensure_condition_fact_memo_capacity(
   memset(context->condition_fact_memo_entries + old_capacity, 0,
          (context->condition_fact_memo_capacity - old_capacity) *
              sizeof(*context->condition_fact_memo_entries));
-  return iree_ok_status();
-}
-
-static iree_status_t loom_symbolic_value_resolve_value_ordinal(
-    loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
-    loom_value_ordinal_t* out_value_ordinal) {
-  if (context->value_domain != NULL) {
-    return loom_local_value_domain_register_value(context->value_domain,
-                                                  value_id, out_value_ordinal);
-  }
-  *out_value_ordinal = (loom_value_ordinal_t)value_id;
   return iree_ok_status();
 }
 
@@ -168,7 +158,7 @@ static iree_status_t loom_symbolic_expr_condition_fact_frame_begin(
   }
 
   loom_value_ordinal_t value_ordinal = LOOM_VALUE_ORDINAL_INVALID;
-  IREE_RETURN_IF_ERROR(loom_symbolic_value_resolve_value_ordinal(
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_resolve_value_ordinal(
       context, value_id, &value_ordinal));
   IREE_RETURN_IF_ERROR(loom_symbolic_value_ensure_condition_fact_memo_capacity(
       context, (iree_host_size_t)value_ordinal + 1));
