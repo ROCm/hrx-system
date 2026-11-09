@@ -314,11 +314,21 @@ static iree_status_t loom_symbolic_quotient_divisibility_scale(
   *out_scale = 0;
   *out_available = false;
   if (quotient->scale_kind == LOOM_SYMBOLIC_QUOTIENT_SCALE_DIVISOR) {
-    int64_t scale_value = 0;
-    IREE_RETURN_IF_ERROR(loom_symbolic_quotient_value_is_exact_i64(
-        context, quotient->scale_value, &scale_value, out_available));
-    *out_available = *out_available && scale_value > 0;
-    *out_scale = (uint64_t)scale_value;
+    loom_value_facts_t divisor_facts = {0};
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_context_lookup_facts(
+        context, quotient->scale_value, &divisor_facts));
+    if (loom_value_facts_is_exact(divisor_facts)) {
+      *out_scale = (uint64_t)divisor_facts.range_lo;
+      *out_available = true;
+    } else if (loom_value_facts_is_power_of_two(divisor_facts)) {
+      // Supported quotients have a positive divisor. Every possible power
+      // of two divides the largest one admitted by its interval, even when
+      // the interval's upper endpoint is not itself a power of two.
+      *out_scale = UINT64_C(1)
+                   << (63u - (uint32_t)iree_math_count_leading_zeros_u64(
+                                 (uint64_t)divisor_facts.range_hi));
+      *out_available = true;
+    }
     return iree_ok_status();
   }
 
