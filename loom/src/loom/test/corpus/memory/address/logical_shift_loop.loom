@@ -72,3 +72,51 @@ check.scenario @logical_shift_row_values {
   }
   check.return
 }
+
+// Both shift directions derive table addresses from the counted loop. The
+// table is exactly large enough for the greatest shifted width, and the
+// scenario preserves a trailing output guard. No authored range is needed.
+func.def @lookup_shifted_widths(%table: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  %widest = index.constant 8 : index
+  %values = buffer.view %table[%base] : buffer -> view<9xi32>
+  %results = buffer.view %output[%base] : buffer -> view<4x2xi32>
+  scf.for %kind = [%begin to %end step %step] {
+    %ascending = index.shli %step, %kind : index
+    %descending = index.shrui %widest, %kind : index
+    %a = view.load %values[%ascending] : view<9xi32> -> i32
+    %b = view.load %values[%descending] : view<9xi32> -> i32
+    view.store %a, %results[%kind, 0] : i32, view<4x2xi32>
+    view.store %b, %results[%kind, 1] : i32, view<4x2xi32>
+  }
+  func.return
+}
+
+// The oracle uses direct addresses, independently of shift or loop facts.
+func.def @lookup_shifted_widths_oracle(%table: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %values = buffer.view %table[%base] : buffer -> view<9xi32>
+  %results = buffer.view %output[%base] : buffer -> view<8xi32>
+  %width1 = view.load %values[1] : view<9xi32> -> i32
+  %width2 = view.load %values[2] : view<9xi32> -> i32
+  %width4 = view.load %values[4] : view<9xi32> -> i32
+  %width8 = view.load %values[8] : view<9xi32> -> i32
+  %pairs = vector.from_elements %width1, %width8, %width2, %width4, %width4, %width2, %width8, %width1 : vector<8xi32>
+  vector.store %pairs, %results[0] : vector<8xi32>, view<8xi32>
+  func.return
+}
+
+check.scenario @shifted_width_lookup_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %table = check.generate.iota offset(31) step(17) : tensor<9xi32>
+    %output = check.generate.fill value(-27) : tensor<9xi32>
+    check.compare<@lookup_shifted_widths, @lookup_shifted_widths_oracle>(%table, %output) : (tensor<9xi32>, tensor<9xi32>) -> () {
+      check.expect.bitwise actual(%table) expected(%table) : tensor<9xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<9xi32>
+    }
+  }
+  check.return
+}

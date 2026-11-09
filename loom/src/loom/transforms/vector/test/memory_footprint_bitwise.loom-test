@@ -74,3 +74,67 @@ func.def @or_unaligned_operand_root(%raw: index, %bits: index) {
   test.use %loaded : vector<4xi32>
   func.return
 }
+
+// ====
+
+// RUN: pass vector-memory-footprint,canonicalize
+
+// The induction range proves that 1 << kind lies in [1,8]. The load needs both
+// endpoints; no assumption on the shifted value supplies the memory proof.
+func.def @lookup_element_widths(%table: buffer, %output: buffer) {
+  %begin = index.constant 0 : index
+  %base = index.constant 0 : offset
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  %values = buffer.view %table[%base] : buffer -> view<9xi32>
+  %results = buffer.view %output[%base] : buffer -> view<4xi32>
+  scf.for %kind = [%begin to %end step %step] {
+    %width = index.shli %step, %kind : index
+    %lower = test.fact_range_lo %width : index -> i64
+    %upper = test.fact_range_hi %width : index -> i64
+    test.use %lower, %upper : i64, i64
+    %value = view.load %values[%width] : view<9xi32> -> i32
+    view.store %value, %results[%kind] : i32, view<4xi32>
+  }
+  func.return
+}
+
+// ----
+func.def @lookup_element_widths(%table: buffer, %output: buffer) {
+  %begin = index.constant 0 : index
+  %base = index.constant 0 : offset
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  %values = buffer.view %table[%base] : buffer -> view<9xi32>
+  %results = buffer.view %output[%base] : buffer -> view<4xi32>
+  scf.for %kind = [%begin to %end step %step] {
+    %width = index.shli %step, %kind : index
+    %lower = scalar.constant 1 : i64
+    %upper = scalar.constant 8 : i64
+    test.use %lower, %upper : i64, i64
+    %value = view.load %values[%width] : view<9xi32> -> i32
+    view.store %value, %results[%kind] : i32, view<4xi32>
+  }
+  func.return
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// The last shift addresses element eight, so eight elements are insufficient.
+func.def @lookup_element_widths_short_table(%table: buffer, %output: buffer) {
+  %begin = index.constant 0 : index
+  %base = index.constant 0 : offset
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  %values = buffer.view %table[%base] : buffer -> view<8xi32>
+  %results = buffer.view %output[%base] : buffer -> view<4xi32>
+  scf.for %kind = [%begin to %end step %step] {
+    %width = index.shli %step, %kind : index
+    // ERROR@+1: SUBRANGE/024 {op_name="view.load", view_axis="0"}
+    %value = view.load %values[%width] : view<8xi32> -> i32
+    view.store %value, %results[%kind] : i32, view<4xi32>
+  }
+  func.return
+}
