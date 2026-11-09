@@ -741,16 +741,6 @@ iree_status_t loom_aie2p_native_select_transfers(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization, bool* out_valid);
 
-// Selects on-chip copy programs and binds controller publications to their
-// retained ownership intervals before transfer and configuration emission.
-iree_status_t loom_aie2p_native_select_worker_distributions(
-    loom_aie2p_native_context_t* context,
-    const loom_pipeline_realization_t* realization,
-    iree_host_size_t worker_index, uint32_t* next_source, bool* out_valid);
-iree_status_t loom_aie2p_native_bind_distribution_phases(
-    loom_aie2p_native_context_t* context,
-    const loom_pipeline_realization_t* realization, bool* out_valid);
-
 iree_status_t loom_aie2p_native_select_control_route(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization,

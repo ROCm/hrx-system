@@ -7,6 +7,7 @@
 #include "loom/analysis/storage_geometry.h"
 #include "loom/ops/channel/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/distribution.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_resources.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
