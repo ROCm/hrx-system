@@ -220,6 +220,11 @@ iree_status_t loom_op_remove_results(loom_module_t* module, loom_op_t* op,
         loom_value_def_make_op(op, new_index);
   }
 
+  if (kept_count == 0 && op->block_ordinal != 0) {
+    IREE_ASSERT(op->parent_block != NULL);
+    IREE_ASSERT(op->parent_block->result_operation_count > 0);
+    --op->parent_block->result_operation_count;
+  }
   op->result_count = kept_count;
   op->tied_result_count = kept_tied_count;
 

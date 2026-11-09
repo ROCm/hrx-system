@@ -572,8 +572,9 @@ static iree_status_t loom_low_cse_region(
           !iree_any_bit_set(cursor.traits, LOOM_TRAIT_PURE)) {
         flags = LOOM_EXPRESSION_LOOKUP_FLAG_STATEFUL;
       }
-      loom_expression_entry_t* existing =
-          loom_expression_scope_find(&cursor, candidate.hash, flags);
+      const loom_expression_probe_t probe =
+          loom_expression_scope_probe(&cursor, candidate.hash, flags);
+      loom_expression_entry_t* existing = probe.entry;
       if (existing && existing->metadata >= minimum_epoch) {
         status = loom_expression_replace(&cursor, cursor.op, existing->op);
         if (iree_status_is_ok(status)) {
@@ -582,7 +583,7 @@ static iree_status_t loom_low_cse_region(
           ++statistics->expressions_eliminated;
         }
       } else {
-        loom_expression_scope_insert(&cursor, candidate);
+        loom_expression_scope_insert(&cursor, probe, candidate);
       }
     }
     if (eliminated || !iree_status_is_ok(status)) {

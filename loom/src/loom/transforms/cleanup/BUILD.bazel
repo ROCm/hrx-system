@@ -266,6 +266,7 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/util:dominance",
+        "//loom/src/loom/util:segmented_storage",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],

@@ -415,6 +415,8 @@ typedef struct loom_dominance_walk_scope_t {
   struct loom_dominance_walk_scope_t* previous_frame;
   // Next operation in this block; saved before the caller can erase an op.
   loom_op_t* next_op;
+  // Direct value-producing operations owned when this scope was queued.
+  uint32_t result_operation_count;
   // Scope properties reported to the client when first entered.
   loom_dominance_walk_scope_flags_t flags;
   // True after the enter callback has completed successfully.
@@ -473,8 +475,8 @@ static iree_status_t loom_dominance_walk_activate(
   }
 
   if (walk->callbacks.enter_scope) {
-    iree_status_t status =
-        walk->callbacks.enter_scope(walk->callbacks.user_data, scope->flags);
+    iree_status_t status = walk->callbacks.enter_scope(
+        walk->callbacks.user_data, scope->result_operation_count, scope->flags);
     if (!iree_status_is_ok(status)) {
       loom_dominance_walk_leave_all_scopes(walk);
       return status;
@@ -539,6 +541,7 @@ static iree_status_t loom_dominance_walk_push_region(
     *scope = (loom_dominance_walk_scope_t){
         .parent = parent,
         .next_op = block->first_op,
+        .result_operation_count = block->result_operation_count,
         .flags = flags,
     };
     if (!has_cfg) {

@@ -74,8 +74,9 @@ iree_status_t loom_cse_run(loom_pass_t* pass, loom_module_t* module,
             iree_any_bit_set(cursor.traits, LOOM_TRAIT_PURE)
                 ? 0
                 : LOOM_EXPRESSION_LOOKUP_FLAG_STATEFUL;
-        loom_expression_entry_t* existing =
-            loom_expression_scope_find(&cursor, hash, flags);
+        const loom_expression_probe_t probe =
+            loom_expression_scope_probe(&cursor, hash, flags);
+        loom_expression_entry_t* existing = probe.entry;
         if (existing && existing->metadata >= minimum_epoch) {
           status = loom_expression_replace(&cursor, cursor.op, existing->op);
           if (iree_status_is_ok(status)) {
@@ -84,11 +85,12 @@ iree_status_t loom_cse_run(loom_pass_t* pass, loom_module_t* module,
             ++statistics->expressions_eliminated;
           }
         } else {
-          loom_expression_scope_insert(&cursor, (loom_expression_entry_t){
-                                                    .op = cursor.op,
-                                                    .hash = hash,
-                                                    .metadata = cursor.epoch,
-                                                });
+          loom_expression_scope_insert(&cursor, probe,
+                                       (loom_expression_entry_t){
+                                           .op = cursor.op,
+                                           .hash = hash,
+                                           .metadata = cursor.epoch,
+                                       });
         }
       }
       if (!eliminated && iree_status_is_ok(status) &&
