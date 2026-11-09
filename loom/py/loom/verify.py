@@ -1130,11 +1130,8 @@ class ModuleVerifier:
         *,
         parent_stack: tuple[Operation, ...],
     ) -> None:
-        function_body_index = (
-            self.registry.layout(op_decl).func_body_region_index
-            if op_decl is not None
-            else None
-        )
+        layout = self.registry.layout(op_decl) if op_decl is not None else None
+        function_body_index = layout.func_body_region_index if layout else None
         for region_index, region in enumerate(operation.regions):
             region_path = f"{path}.regions[{region_index}]"
             region_decl = (
@@ -1142,6 +1139,8 @@ class ModuleVerifier:
                 if op_decl is not None and region_index < len(op_decl.regions)
                 else None
             )
+            if region_decl is None and layout is not None and layout.variadic_region:
+                region_decl = op_decl.regions[-1]
             if (
                 region_decl is not None
                 and region_decl.single_block
@@ -1166,6 +1165,12 @@ class ModuleVerifier:
                     region_terminator=region_decl.terminator
                     if region_decl is not None
                     else None,
+                    region_unreachable=layout.func_unreachable
+                    if layout is not None and region_index == function_body_index
+                    else None,
+                    single_block=region_decl.single_block
+                    if region_decl is not None
+                    else False,
                     parent_stack=parent_stack,
                 )
 
@@ -1177,6 +1182,8 @@ class ModuleVerifier:
         region_blocks: set[int],
         function_entry: Block | None,
         region_terminator: str | None,
+        region_unreachable: str | None,
+        single_block: bool,
         parent_stack: tuple[Operation, ...],
     ) -> None:
         self._verify_value_ids(block.arg_ids, f"{path} args")
@@ -1216,12 +1223,12 @@ class ModuleVerifier:
             return
         terminator = block.ops[-1]
         terminator_decl = self.registry.op(terminator.name)
-        if terminator.name == region_terminator:
+        if terminator.name in (region_terminator, region_unreachable):
             return
         if terminator_decl is not None and terminator_decl.is_terminator:
             # A CFG branch continues within the region; the declared terminator
             # constrains operations that exit the region.
-            if terminator.successors:
+            if terminator.successors and not single_block:
                 return
             self.diagnostics.error(
                 "region terminated by wrong op",
