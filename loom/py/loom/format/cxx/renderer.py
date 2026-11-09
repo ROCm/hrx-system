@@ -675,6 +675,8 @@ class CxxRenderer(CxxFunctionRenderer):
                     self.expression(value) for value in operation.operands
                 )
                 self.writer.line(f"return {{{values}}};")
+            elif self.parent_operations[id(operation)].name == "func.exit":
+                self.writer.line("return;")
             return ()
         return None
 
@@ -1014,10 +1016,8 @@ class CxxRenderer(CxxFunctionRenderer):
         self.writer.close()
         self.writer.close(f" while ({continuation});")
 
-    def _render_if(self, operation: Operation) -> None:
-        resolved = self._resolved(operation)
-        results = resolved.value_ids("results")
-        for result in results:
+    def _declare_selection_results(self, operation: Operation) -> None:
+        for result in operation.results:
             if result in self.suppressed_forwarding_values:
                 continue
             assignment_target_id = self.assignment_targets.get(result)
@@ -1031,6 +1031,11 @@ class CxxRenderer(CxxFunctionRenderer):
                 )
             else:
                 self._declare_structured_result(result)
+
+    def _render_if(self, operation: Operation) -> None:
+        resolved = self._resolved(operation)
+        results = resolved.value_ids("results")
+        self._declare_selection_results(operation)
         then_region = resolved.region("then_region")
         else_region = resolved.region("else_region")
         if then_region is None or len(then_region.blocks) != 1:
@@ -1060,6 +1065,31 @@ class CxxRenderer(CxxFunctionRenderer):
                 return
         self.writer.continue_block("else")
         self._render_block(else_block, yield_targets=yield_targets)
+        self.writer.close()
+
+    def _render_switch(self, operation: Operation) -> None:
+        resolved = self._resolved(operation)
+        self._declare_selection_results(operation)
+        selector = self.expression(resolved.value_id("selector"))
+        yield_targets = self._transport_targets(operation.results)
+        self.writer.open(f"switch (static_cast<long long>({selector}))")
+        for key, region in zip(
+            resolved.attr("case_keys"), resolved.regions("case_regions"), strict=True
+        ):
+            # Spell the signed minimum without a positive literal outside i64.
+            literal = (
+                "(-9223372036854775807ll - 1ll)" if key == -(1 << 63) else f"{key}ll"
+            )
+            self.writer.open(f"case {literal}:")
+            self._render_block(region.blocks[0], yield_targets=yield_targets)
+            self.writer.line("break;")
+            self.writer.close()
+        self.writer.open("default:")
+        self._render_block(
+            resolved.region("default_region").blocks[0], yield_targets=yield_targets
+        )
+        self.writer.line("break;")
+        self.writer.close()
         self.writer.close()
 
     def _direct_terminator_assignments(
@@ -1138,6 +1168,10 @@ class CxxRenderer(CxxFunctionRenderer):
                     self._validate_projected_attributes(operation, ())
                     self._render_function_return(operation)
                     continue
+                if operation.name == "func.unreachable":
+                    self._validate_projected_attributes(operation, ())
+                    self.writer.line("__builtin_unreachable();")
+                    continue
                 if operation.name == "func.exit":
                     self._validate_projected_attributes(operation, ())
                     self._render_function_exit(operation)
@@ -1187,6 +1221,10 @@ class CxxRenderer(CxxFunctionRenderer):
                 if operation.name == "scf.if":
                     self._validate_projected_attributes(operation, ())
                     self._render_if(operation)
+                    continue
+                if operation.name == "scf.switch":
+                    self._validate_projected_attributes(operation, ("case_keys",))
+                    self._render_switch(operation)
                     continue
                 if operation.name == "scf.while":
                     self._validate_projected_attributes(operation, ())

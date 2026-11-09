@@ -19,7 +19,7 @@ In this chapter, you will learn:
 ## Define a typed callable
 
 A [`func.def`](../reference/dialects/func/ops/def.md) owns a symbol, signature,
-and body. Every exit uses [`func.return`](../reference/dialects/func/ops/return.md)
+and body. Each returning path uses [`func.return`](../reference/dialects/func/ops/return.md)
 with the declared result types:
 
 ```loom
@@ -41,6 +41,19 @@ caller, and argument predicates describe those same inputs. Structured loops
 bind separate carried values. When authoring CFG directly, a separate loop
 header owns the changing block arguments; branches cannot target the function
 entry block. This contract also applies to template, kernel, and Low bodies.
+
+An early return from inside a structured loop or selection uses
+[`func.exit`](../reference/dialects/func/ops/exit.md). Its condition selects a
+region ending in the enclosing callable's return operation: `func.return` for
+an ordinary function or `kernel.return` for a kernel. The exit leaves the
+callable, including every intervening loop and selection.
+
+If a direct function or kernel body has no defined continuation, it can end in
+[`func.unreachable`](../reference/dialects/func/ops/unreachable.md) without a
+result tuple. This is useful after a selection whose arms all return or after
+a loop that cannot finish. Reaching it is undefined behavior; it is not a
+runtime trap or assertion. C++ export spells it `__builtin_unreachable()` and
+preserves early returns as C++ `return` statements.
 
 Functions may return several values. Results remain ordinary SSA values at the
 call site:

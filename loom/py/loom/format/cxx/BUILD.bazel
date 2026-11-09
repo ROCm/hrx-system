@@ -91,6 +91,17 @@ iree_py_library(
 )
 
 loom_check_test(
+    name = "control_flow_test",
+    src = "control_flow.loom-test",
+    data = ["//loom/py/loom/tools:loom-export-cxx"],
+    env = {
+        "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
+    },
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_check_test(
     name = "value_observations_test",
     src = "value_observations.loom-test",
     data = ["//loom/py/loom/tools:loom-export-cxx"],
@@ -120,6 +131,30 @@ iree_py_test(
         "$(rootpath //loom/src/loom/tools/loom-test)",
     ],
     data = [
+        "//loom/src/loom/tools/loom-import-cxx",
+        "//loom/src/loom/tools/loom-test",
+    ],
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/execute:vm_iree_vm",
+    ]),
+    deps = [":cxx"],
+)
+
+iree_py_test(
+    name = "control_flow_execution_test",
+    size = "small",
+    srcs = ["control_flow_execution_test.py"],
+    args = [
+        "$(rootpath //loom/src/loom/tools/loom-import-cxx)",
+        "$(rootpath //loom/src/loom/tools/loom-test)",
+        "$(rootpath control_flow.cxx)",
+        "$(rootpath control_flow_checks.cxx)",
+    ],
+    data = [
+        "control_flow.cxx",
+        "control_flow_checks.cxx",
         "//loom/src/loom/tools/loom-import-cxx",
         "//loom/src/loom/tools/loom-test",
     ],

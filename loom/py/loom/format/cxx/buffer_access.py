@@ -158,6 +158,7 @@ class BufferAccessPlan:
             "buffer.assume.noalias": forward,
             "scf.select": select,
             "scf.if": branch,
+            "scf.switch": branch,
             "scf.for": counted_loop,
             "scf.while": conditional_loop,
             "func.return": return_values,
