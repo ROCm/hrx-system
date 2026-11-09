@@ -1,0 +1,109 @@
+// Dense, strided, and subword captures alias their original tile allocations.
+// One core writes both its own memory and its neighbor's aperture; all accesses
+// are sequenced in that worker, and channels own the ingress/egress lifetimes.
+aie2p.target<array> @device
+
+pipeline.def<kernel> public retain target(@device) @captured_views() run(%input_arg: buffer, %output_arg: buffer) {
+  %input_unique, %output_unique = buffer.assume.noalias %input_arg, %output_arg : buffer, buffer
+  %input, %output = buffer.assume.alignment %input_unique, %output_unique {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %matrix_offset = index.constant 20 : offset
+  %halfword_offset = index.constant 6 : offset
+  %record_bytes = index.constant 64 : offset
+  %output_bytes = index.constant 128 : offset
+  %c1 = index.constant 1 : index
+  %begin = index.constant 0 : index
+  %words = index.constant 16 : index
+  %local_memory = pipeline.memory<workgroup>[0, 3] : pool
+  %neighbor_memory = pipeline.memory<workgroup>[0, 2] : pool
+  %local_storage = buffer.alloca<workgroup> pool(%local_memory) align(64) %record_bytes : buffer
+  %neighbor_storage = buffer.alloca<workgroup> pool(%neighbor_memory) align(64) %record_bytes : buffer
+  %local = buffer.view %local_storage[%origin] : buffer -> view<16xi32>
+  %matrix = buffer.view %local_storage[%matrix_offset] : buffer -> view<2x2xi32, #encoding.layout.strided<strides=[4, 1]>>
+  %neighbor = buffer.view %neighbor_storage[%origin] : buffer -> view<16xi32>
+  %halfword = buffer.view %neighbor_storage[%halfword_offset] : buffer -> view<1xi16>
+  %input_storage = buffer.alloca<workgroup> pool(%local_memory) align(64) %record_bytes : buffer
+  %input_slots = buffer.view %input_storage[%origin] : buffer -> view<1x16xi32>
+  %source = channel.bind<fifo> %input_slots, %c1 : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %output_storage = buffer.alloca<workgroup> pool(%local_memory) align(64) %output_bytes : buffer
+  %output_slots = buffer.view %output_storage[%origin] : buffer -> view<1x32xi32>
+  %destination = channel.bind<fifo> %output_slots, %c1 : view<1x32xi32>, index -> channel<tile<32xi32>>
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %external = buffer.view %input[%origin] : buffer -> view<16xi32>
+    %write, %payload = channel.reserve %source : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+    %copy = kernel.async.copy %external to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.publish %write : write<tile<16xi32>>
+  }
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %read, %input_record = channel.acquire %source : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+    %values = vector.load %input_record[0] : view<16xi32> -> vector<16xi32>
+    vector.store %values, %local[0] : vector<16xi32>, view<16xi32>
+    vector.store %values, %neighbor[0] : vector<16xi32>, view<16xi32>
+    channel.release %read : read<tile<16xi32>>
+    %raw_alias = buffer.view %local_storage[%origin] : buffer -> view<16xi32>
+    %first = scalar.constant 42 : i32
+    %last = scalar.constant 19 : i32
+    %upper_half = scalar.constant 35 : i16
+    view.store %first, %raw_alias[0] : i32, view<16xi32>
+    view.store %last, %matrix[1, 1] : i32, view<2x2xi32, #encoding.layout.strided<strides=[4, 1]>>
+    view.store %upper_half, %halfword[0] : i16, view<1xi16>
+    %write, %output_record = channel.reserve %destination : channel<tile<32xi32>> -> (write<tile<32xi32>>, view<32xi32>)
+    scf.for %word = [%begin to %words step %c1] {
+      %local_value = view.load %local[%word] : view<16xi32> -> i32
+      %neighbor_value = view.load %neighbor[%word] : view<16xi32> -> i32
+      %next = index.add %word, %words : index
+      view.store %local_value, %output_record[%word] : i32, view<32xi32>
+      view.store %neighbor_value, %output_record[%next] : i32, view<32xi32>
+    }
+    channel.publish %write : write<tile<32xi32>>
+    %egress_read, %payload = channel.acquire %destination : channel<tile<32xi32>> -> (read<tile<32xi32>>, view<32xi32>)
+    %external = buffer.view %output[%origin] : buffer -> view<32xi32>
+    %copy = kernel.async.copy %payload to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<32xi32> to view<32xi32> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.release %egress_read : read<tile<32xi32>>
+  }
+}
+
+// The oracle uses only dense external indexing, independently of local memory
+// placement, view byte displacements, or the strided layout under test.
+func.def @reference(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %words = index.constant 16 : index
+  %source = buffer.view %input[%origin] : buffer -> view<16xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<32xi32>
+  scf.for %word = [%begin to %words step %step] {
+    %value = view.load %source[%word] : view<16xi32> -> i32
+    %next = index.add %word, %words : index
+    view.store %value, %destination[%word] : i32, view<32xi32>
+    view.store %value, %destination[%next] : i32, view<32xi32>
+  }
+  %first = scalar.constant 42 : i32
+  %last = scalar.constant 19 : i32
+  %upper_half = scalar.constant 2293760 : i32
+  %lower_half = view.load %source[1] : view<16xi32> -> i32
+  %combined = scalar.addi %lower_half, %upper_half : i32
+  view.store %first, %destination[0] : i32, view<32xi32>
+  view.store %last, %destination[10] : i32, view<32xi32>
+  view.store %combined, %destination[17] : i32, view<32xi32>
+  func.return
+}
+
+check.scenario public @local_and_neighbor_aliases {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(0 to 65535) : tensor<48xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<48xi32> -> tensor<16xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<64xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<64xi32> -> tensor<32xi32>
+    check.compare<@captured_views, @reference>(%input, %output) : (tensor<16xi32>, tensor<32xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<48xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<64xi32>
+    }
+  }
+  check.return
+}

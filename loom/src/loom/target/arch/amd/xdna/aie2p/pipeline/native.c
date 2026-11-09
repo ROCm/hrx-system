@@ -10,6 +10,7 @@
 #include "loom/ops/pipeline/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/storage.h"
 #include "loom/target/arch/amd/xdna/error_catalog.h"
 #include "loom/target/function_version.h"
 #include "loom/util/fact_extensions.h"
@@ -235,74 +236,6 @@ static iree_status_t loom_aie2p_native_select_channel_accesses(
           IREE_SV("one complete SRAM publication without slot reuse inside "
                   "its producer invocation"));
     }
-  }
-  *out_valid = true;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_aie2p_native_select_buffer_accesses(
-    loom_aie2p_native_context_t* context,
-    const loom_pipeline_invocation_t* invocation,
-    const loom_pipeline_worker_t* source, loom_aie2p_native_worker_t* worker,
-    bool* out_valid) {
-  *out_valid = false;
-  uint16_t argument_count = 0;
-  const loom_value_id_t* arguments =
-      loom_func_like_arg_ids(source->function, &argument_count);
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      context->pass->arena, argument_count, sizeof(*worker->buffers.accesses),
-      (void**)&worker->buffers.accesses));
-  for (uint16_t i = 0; i < argument_count; ++i) {
-    const loom_value_id_t argument = arguments[i];
-    if (!loom_type_is_buffer(
-            loom_module_value_type(context->code.module, argument)) ||
-        !loom_module_value_has_uses(context->code.module, argument)) {
-      continue;
-    }
-    loom_value_fact_buffer_reference_t reference;
-    if (!loom_value_facts_query_buffer_reference(
-            &source->facts.context,
-            loom_value_fact_table_lookup(&source->facts, argument),
-            &reference)) {
-      return loom_aie2p_native_reject(
-          context, source->source->call,
-          IREE_SV("a resolved storage root for each core buffer capture"));
-    }
-    const loom_value_id_t root =
-        loom_value_fact_buffer_reference_resolve_root_value(reference,
-                                                            argument);
-    if (reference.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
-      continue;
-    }
-    const loom_pipeline_storage_allocation_t* allocation =
-        loom_pipeline_invocation_lookup_allocation(invocation, root);
-    if (!allocation || allocation->source->byte_length == 0 ||
-        allocation->byte_offset > UINT32_MAX ||
-        allocation->source->byte_length > UINT32_MAX) {
-      return loom_aie2p_native_reject(
-          context, source->source->call,
-          IREE_SV("an invocation-owned finite local allocation for each core "
-                  "buffer capture"));
-    }
-    const loom_aie2p_native_tile_t* owner =
-        context->pool_tiles[allocation->source->pool_index];
-    if (owner->facts->kind == LOOM_XDNA_TILE_KIND_MEMORY) {
-      return loom_aie2p_native_reject(
-          context, source->source->call,
-          IREE_SV("DMA-owned SRAM storage with compute-memory handoffs"));
-    }
-    const loom_xdna_address_window_t* window = loom_xdna_array_load_window(
-        context->family, worker->tile->coordinate, owner->coordinate);
-    if (!window) {
-      return loom_aie2p_native_reject(
-          context, source->source->call,
-          IREE_SV("captured storage directly visible from its consuming core"));
-    }
-    loom_aie2p_native_buffer_access_t* access =
-        &worker->buffers.accesses[worker->buffers.count++];
-    access->argument = argument;
-    access->alignment = allocation->source->byte_alignment;
-    access->address = window->base + (uint32_t)allocation->byte_offset;
   }
   *out_valid = true;
   return iree_ok_status();
@@ -934,7 +867,7 @@ static iree_status_t loom_aie2p_native_select(
     if (!valid) {
       return iree_ok_status();
     }
-    IREE_RETURN_IF_ERROR(loom_aie2p_native_select_buffer_accesses(
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_select_storage_accesses(
         context, realization->invocations.workers[i].invocation, source, worker,
         &valid));
     if (!valid) {
