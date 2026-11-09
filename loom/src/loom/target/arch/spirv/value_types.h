@@ -49,10 +49,10 @@ typedef enum loom_spirv_value_class_e {
 
 typedef struct loom_spirv_value_type_t {
   // Target-local value class consumed by lowering and emission.
-  loom_spirv_value_class_t value_class;
+  uint8_t value_class;
   // Scalar component type for scalar, numeric vector, pointer, and cooperative
   // matrix classes.
-  loom_spirv_scalar_type_t scalar_type;
+  uint8_t scalar_type;
   union {
     // Ordinary-vector shape metadata.
     struct {
@@ -66,14 +66,23 @@ typedef struct loom_spirv_value_type_t {
       // Cooperative matrix column count.
       uint16_t columns;
       // Cooperative matrix scope operand.
-      loom_spirv_scope_t scope;
+      uint8_t scope;
       // Cooperative matrix use operand.
-      loom_spirv_cooperative_matrix_use_t use;
+      uint8_t use;
     } cooperative_matrix;
   };
 } loom_spirv_value_type_t;
 
-static_assert(sizeof(loom_spirv_value_type_t) == 20,
+static_assert(LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR <= UINT8_MAX,
+              "SPIR-V value classes must fit the compact value type");
+static_assert(LOOM_SPIRV_SCALAR_TYPE_U64 <= UINT8_MAX,
+              "SPIR-V scalar types must fit the compact value type");
+static_assert(LOOM_SPIRV_SCOPE_SHADER_CALL_KHR <= UINT8_MAX,
+              "SPIR-V scopes must fit the compact value type");
+static_assert(LOOM_SPIRV_COOPERATIVE_MATRIX_USE_MATRIX_ACCUMULATOR_KHR <=
+                  UINT8_MAX,
+              "SPIR-V cooperative matrix uses must fit the compact value type");
+static_assert(sizeof(loom_spirv_value_type_t) == 8,
               "SPIR-V value types must remain compact");
 
 // Maps a public Loom scalar, native ordinary-vector, or SPIR-V aggregate type

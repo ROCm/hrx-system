@@ -132,19 +132,23 @@ bool loom_spirv_matrix_fragment_type(const loom_module_t* module,
 
   loom_contract_operand_role_t contract_role =
       LOOM_CONTRACT_OPERAND_ROLE_UNKNOWN;
-  if (!loom_spirv_fragment_role(fragment, &contract_role,
-                                &out_type->cooperative_matrix.use)) {
+  loom_spirv_cooperative_matrix_use_t matrix_use =
+      LOOM_SPIRV_COOPERATIVE_MATRIX_USE_MAX;
+  if (!loom_spirv_fragment_role(fragment, &contract_role, &matrix_use)) {
     return false;
   }
   loom_contract_operand_t contract_operand = {0};
   loom_contract_rejection_bits_t rejection_bits = LOOM_CONTRACT_REJECTION_NONE;
+  loom_spirv_scalar_type_t scalar_type = LOOM_SPIRV_SCALAR_TYPE_UNKNOWN;
   if (!loom_contract_vector_operand_from_fragment(
           module, source_value_id, fragment, contract_role, &contract_operand,
           &rejection_bits) ||
       !loom_spirv_matrix_component_type(contract_operand.numeric_type,
-                                        &out_type->scalar_type)) {
+                                        &scalar_type)) {
     return false;
   }
+  out_type->cooperative_matrix.use = (uint8_t)matrix_use;
+  out_type->scalar_type = (uint8_t)scalar_type;
   return true;
 }
 
