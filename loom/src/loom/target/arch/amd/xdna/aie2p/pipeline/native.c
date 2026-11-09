@@ -293,6 +293,7 @@ static iree_status_t loom_aie2p_native_claim_transport_cursor(
   cursor->worker = worker_index;
   cursor->transport_batch = batch_index;
   cursor->maximum_admissions += (uint32_t)admissions;
+  cursor->exact_admissions = true;
   cursor->advances = channel->source->capacity > 1 &&
                      (cursor->shared || cursor->maximum_admissions > 1);
   *out_valid = true;
@@ -487,11 +488,9 @@ static bool loom_aie2p_native_can_repeat(
   // external read and local write, before the invocation can retire storage.
   // Egress must instead observe global-write completion before releasing its
   // source slot: a subsequent reservation can observe the external output.
-  if (channel->cursor.reader.worker == UINT32_MAX ||
-      channel->cursor.reader.shared || channel->cursor.writer.shared ||
-      channel->cursor.reader.maximum_admissions != transport->repetitions ||
-      !realization->workers[channel->cursor.reader.worker]
-           .block_execution_counts) {
+  if (channel->cursor.writer.shared ||
+      !loom_aie2p_native_cursor_has_exact_admissions(&channel->cursor.reader,
+                                                     transport->repetitions)) {
     return false;
   }
   const int64_t begin = input->source_byte_offset;
@@ -695,7 +694,10 @@ static iree_status_t loom_aie2p_native_select(
                 .invocation != realization->invocations.workers[i].invocation;
         loom_aie2p_native_cursor_bind(
             cursor, channel->source->capacity, (uint32_t)i,
-            source->completion.actions[j].maximum_admissions, imported);
+            source->completion.actions[j].maximum_admissions,
+            loom_cfg_execution_count_is_exact(&source->execution_counts,
+                                              op->parent_block->region_index),
+            imported);
       }
     }
   }

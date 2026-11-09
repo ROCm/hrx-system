@@ -15,9 +15,18 @@ extern "C" {
 
 // Accumulates core admission bounds and ownership for one read/write cursor.
 // Imported channels preserve their position beyond the current worker call.
+// site_exact describes this admission site's execution count; every site must
+// be exact before the endpoint's unsaturated bound can prove completion.
 void loom_aie2p_native_cursor_bind(loom_aie2p_native_cursor_t* cursor,
                                    uint64_t capacity, uint32_t worker,
-                                   uint32_t maximum_admissions, bool imported);
+                                   uint32_t maximum_admissions, bool site_exact,
+                                   bool imported);
+
+// Whether one worker admits exactly count records through this cursor.
+// Shared cursors retain only a representative worker's bound, so that bound
+// cannot prove completion of the whole endpoint.
+bool loom_aie2p_native_cursor_has_exact_admissions(
+    const loom_aie2p_native_cursor_t* cursor, uint64_t count);
 
 // Whether an advancing cursor requires construction-owned frame storage instead
 // of worker-local SSA state. The representative worker has already been

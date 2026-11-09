@@ -14,20 +14,29 @@
 
 void loom_aie2p_native_cursor_bind(loom_aie2p_native_cursor_t* cursor,
                                    uint64_t capacity, uint32_t worker,
-                                   uint32_t maximum_admissions, bool imported) {
+                                   uint32_t maximum_admissions, bool site_exact,
+                                   bool imported) {
   const bool shared = cursor->shared || (cursor->worker != UINT32_MAX &&
                                          cursor->worker != worker);
   if (cursor->worker == worker) {
     maximum_admissions =
         iree_max(cursor->maximum_admissions, maximum_admissions);
+    site_exact &= cursor->exact_admissions;
   }
   *cursor = (loom_aie2p_native_cursor_t){
       .worker = worker,
       .maximum_admissions = maximum_admissions,
+      .exact_admissions = site_exact && maximum_admissions != UINT32_MAX,
       .shared = shared,
       .advances =
           capacity > 1 && (maximum_admissions > 1 || shared || imported),
   };
+}
+
+bool loom_aie2p_native_cursor_has_exact_admissions(
+    const loom_aie2p_native_cursor_t* cursor, uint64_t count) {
+  return !cursor->shared && cursor->exact_admissions &&
+         cursor->maximum_admissions == count;
 }
 
 bool loom_aie2p_native_cursor_persistent(

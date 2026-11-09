@@ -1,0 +1,265 @@
+aie2p.target<array> @device
+
+// Conditional arithmetic does not change the exact input admission count.
+// DMA supplies all 64 records while one arithmetic core consumes them and
+// emits output after the branch reconverges.
+pipeline.def<kernel> public retain target(@device) @conditional_ingress() run(%input_arg: buffer, %output_arg: buffer) {
+  %input_unique, %output_unique = buffer.assume.noalias %input_arg, %output_arg : buffer, buffer
+  %input, %output = buffer.assume.alignment %input_unique, %output_unique {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %local_bytes = index.constant 128 : offset
+  %local_capacity = index.constant 2 : index
+  %records = index.constant 64 : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %record_bytes = index.constant 64 : offset
+  %local_memory = pipeline.memory<workgroup>[0, 2] : pool
+  %local_storage = buffer.alloca<workgroup> pool(%local_memory) align(64) %local_bytes : buffer
+  %local_slots = buffer.view %local_storage[%origin] : buffer -> view<2x16xi32>
+  %local = channel.bind<fifo> %local_slots, %local_capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %records step %step] {
+      %offset = index.scale %record, %record_bytes : index, offset -> offset
+      %external = buffer.view %input[%offset] : buffer -> view<16xi32>
+      %write, %payload = channel.reserve %local : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      %copy = kernel.async.copy %external to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+      %arrival = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %arrival {newer_groups = 0} : kernel.async.group
+      channel.publish %write : write<tile<16xi32>>
+    }
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %bias = vector.splati 17 : vector<16xi32>
+    scf.for %record = [%begin to %records step %step] {
+      %read, %payload = channel.acquire<mutable> %local : channel<tile<16xi32>> -> (read<tile<16xi32>, mutable>, view<16xi32>)
+      %values = vector.load %payload[0] : view<16xi32> -> vector<16xi32>
+      %first = index.cmp eq, %record, %begin : index
+      scf.if %first {
+        %result = vector.addi %values, %bias : vector<16xi32>
+        vector.store %result, %payload[0] : vector<16xi32>, view<16xi32>
+      }
+      %offset = index.scale %record, %record_bytes : index, offset -> offset
+      %external = buffer.view %output[%offset] : buffer -> view<16xi32>
+      %copy = kernel.async.copy %payload to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+      %departure = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %departure {newer_groups = 0} : kernel.async.group
+      channel.release %read : read<tile<16xi32>, mutable>
+    }
+  }
+}
+
+// Each local acquisition observes a distribution arrival. Conditional
+// arithmetic does not require separate DMA queue retirement after the final
+// consuming core completes all 64 records.
+pipeline.def<kernel> public retain target(@device) @conditional_distribution() run(%input_arg: buffer, %output_arg: buffer) {
+  %input_unique, %output_unique = buffer.assume.noalias %input_arg, %output_arg : buffer, buffer
+  %input, %output = buffer.assume.alignment %input_unique, %output_unique {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %sram_bytes = index.constant 256 : offset
+  %local_bytes = index.constant 128 : offset
+  %sram_capacity = index.constant 4 : index
+  %local_capacity = index.constant 2 : index
+  %records = index.constant 64 : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %record_bytes = index.constant 64 : offset
+  %sram_memory = pipeline.memory<workgroup>[0, 1] : pool
+  %local_memory = pipeline.memory<workgroup>[0, 2] : pool
+  %sram_storage = buffer.alloca<workgroup> pool(%sram_memory) align(64) %sram_bytes : buffer
+  %sram_slots = buffer.view %sram_storage[%origin] : buffer -> view<4x16xi32>
+  %sram = channel.bind<fifo> %sram_slots, %sram_capacity : view<4x16xi32>, index -> channel<tile<16xi32>>
+  %local_storage = buffer.alloca<workgroup> pool(%local_memory) align(64) %local_bytes : buffer
+  %local_slots = buffer.view %local_storage[%origin] : buffer -> view<2x16xi32>
+  %local = channel.bind<fifo> %local_slots, %local_capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %records step %step] {
+      %offset = index.scale %record, %record_bytes : index, offset -> offset
+      %external = buffer.view %input[%offset] : buffer -> view<16xi32>
+      %write, %payload = channel.reserve %sram : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      %copy = kernel.async.copy %external to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+      %arrival = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %arrival {newer_groups = 0} : kernel.async.group
+      channel.publish %write : write<tile<16xi32>>
+    }
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %records step %step] {
+      %read, %source = channel.acquire %sram : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+      %write, %destination = channel.reserve %local : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      channel.copy %read -> %write : read<tile<16xi32>>, write<tile<16xi32>>
+    }
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %bias = vector.splati 17 : vector<16xi32>
+    scf.for %record = [%begin to %records step %step] {
+      %read, %payload = channel.acquire<mutable> %local : channel<tile<16xi32>> -> (read<tile<16xi32>, mutable>, view<16xi32>)
+      %values = vector.load %payload[0] : view<16xi32> -> vector<16xi32>
+      %first = index.cmp eq, %record, %begin : index
+      scf.if %first {
+        %result = vector.addi %values, %bias : vector<16xi32>
+        vector.store %result, %payload[0] : vector<16xi32>, view<16xi32>
+      }
+      %offset = index.scale %record, %record_bytes : index, offset -> offset
+      %external = buffer.view %output[%offset] : buffer -> view<16xi32>
+      %copy = kernel.async.copy %payload to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+      %departure = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %departure {newer_groups = 0} : kernel.async.group
+      channel.release %read : read<tile<16xi32>, mutable>
+    }
+  }
+}
+
+// Conditional admission consumes seven of eight records. The final record
+// fits in the ring, but consumer exit does not prove producer completion.
+pipeline.def<kernel> public retain target(@device) @conditional_consumer() run(%input_arg: buffer, %output_arg: buffer) {
+  %input_unique, %output_unique = buffer.assume.noalias %input_arg, %output_arg : buffer, buffer
+  %input, %output = buffer.assume.alignment %input_unique, %output_unique {minimum_alignment = 4} : buffer, buffer
+  %memory = pipeline.memory<workgroup>[0, 3] : pool
+  %origin = index.constant 0 : offset
+  %storage_bytes = index.constant 32 : offset
+  %capacity = index.constant 2 : index
+  %storage = buffer.alloca<workgroup> pool(%memory) align(4) %storage_bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x2x2xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<2x2x2xi32>, index -> channel<tile<2x2xi32>>
+  %begin = index.constant 0 : index
+  %count = index.constant 8 : index
+  %consume_count = index.constant 8 : index
+  %last_record = index.constant 7 : index
+  %step = index.constant 1 : index
+  %record_bytes = index.constant 32 : index
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %count step %step] {
+      %byte_index = index.mul %record, %record_bytes : index
+      %offset = index.cast %byte_index : index to offset
+      %external = buffer.view %input[%offset] : buffer -> view<2x2xi32, #encoding.layout.strided<strides=[4, 1]>>
+      %write, %destination = channel.reserve %records : channel<tile<2x2xi32>> -> (write<tile<2x2xi32>>, view<2x2xi32>)
+      %copy = kernel.async.copy %external to %destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<2x2xi32, #encoding.layout.strided<strides=[4, 1]>> to view<2x2xi32> -> kernel.async.token
+      %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+      channel.publish %write : write<tile<2x2xi32>>
+    }
+  }
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %width = index.constant 2 : index
+    %factor = scalar.constant 2 : i32
+    scf.for %record = [%begin to %consume_count step %step] {
+      %consume = index.cmp ne, %record, %last_record : index
+      scf.if %consume {
+        %read, %payload = channel.acquire<mutable> %records : channel<tile<2x2xi32>> -> (read<tile<2x2xi32>, mutable>, view<2x2xi32>)
+        scf.for %row = [%begin to %width step %step] {
+          scf.for %column = [%begin to %width step %step] {
+            %value = view.load %payload[%row, %column] : view<2x2xi32> -> i32
+            %scaled = scalar.muli %value, %factor : i32
+            view.store %scaled, %payload[%row, %column] : i32, view<2x2xi32>
+          }
+        }
+        %output_record = index.add %record, %begin : index
+        %byte_index = index.mul %output_record, %record_bytes : index
+        %offset = index.cast %byte_index : index to offset
+        %external = buffer.view %output[%offset] : buffer -> view<2x2xi32, #encoding.layout.strided<strides=[4, 1]>>
+        %copy = kernel.async.copy %payload to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<2x2xi32> to view<2x2xi32, #encoding.layout.strided<strides=[4, 1]>> -> kernel.async.token
+        %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+        kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+        channel.release %read : read<tile<2x2xi32>, mutable>
+      }
+    }
+  }
+}
+
+// Dense external indexing supplies an independent oracle for both transports.
+func.def @conditional_reference(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %word_count = index.constant 1024 : index
+  %record_words = index.constant 16 : index
+  %source = buffer.view %input[%origin] : buffer -> view<1024xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<1024xi32>
+  scf.for %word = [%begin to %word_count step %step] {
+    %value = view.load %source[%word] : view<1024xi32> -> i32
+    view.store %value, %destination[%word] : i32, view<1024xi32>
+  }
+  %bias = scalar.constant 17 : i32
+  scf.for %word = [%begin to %record_words step %step] {
+    %value = view.load %source[%word] : view<1024xi32> -> i32
+    %updated = scalar.addi %value, %bias : i32
+    view.store %updated, %destination[%word] : i32, view<1024xi32>
+  }
+  func.return
+}
+
+// The seven consumed records contain four words each. Dense indexing computes
+// their external locations without FIFO, DMA, or strided-view semantics. The
+// remaining record and all padding retain the output sentinel.
+func.def @partial_reference(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %word_count = index.constant 28 : index
+  %record_words = index.constant 4 : index
+  %row_words = index.constant 2 : index
+  %record_stride = index.constant 8 : index
+  %row_stride = index.constant 4 : index
+  %source = buffer.view %input[%origin] : buffer -> view<64xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<64xi32>
+  %factor = scalar.constant 2 : i32
+  scf.for %word = [%begin to %word_count step %step] {
+    %record = index.div %word, %record_words : index
+    %within_record = index.rem %word, %record_words : index
+    %row = index.div %within_record, %row_words : index
+    %column = index.rem %within_record, %row_words : index
+    %record_offset = index.mul %record, %record_stride : index
+    %row_offset = index.mul %row, %row_stride : index
+    %row_begin = index.add %record_offset, %row_offset : index
+    %position = index.add %row_begin, %column : index
+    %value = view.load %source[%position] : view<64xi32> -> i32
+    %updated = scalar.muli %value, %factor : i32
+    view.store %updated, %destination[%position] : i32, view<64xi32>
+  }
+  func.return
+}
+
+check.scenario public @conditional_ingress_output {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-200000 to 200000) : tensor<1056xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<1056xi32> -> tensor<1024xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<1056xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<1056xi32> -> tensor<1024xi32>
+    check.compare<@conditional_ingress, @conditional_reference>(%input, %output) : (tensor<1024xi32>, tensor<1024xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<1056xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<1056xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @conditional_distribution_output {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-200000 to 200000) : tensor<1056xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<1056xi32> -> tensor<1024xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<1056xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<1056xi32> -> tensor<1024xi32>
+    check.compare<@conditional_distribution, @conditional_reference>(%input, %output) : (tensor<1024xi32>, tensor<1024xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<1056xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<1056xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @conditional_consumer_output {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-200000 to 200000) : tensor<96xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<96xi32> -> tensor<64xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<96xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<96xi32> -> tensor<64xi32>
+    check.compare<@conditional_consumer, @partial_reference>(%input, %output) : (tensor<64xi32>, tensor<64xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<96xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<96xi32>
+    }
+  }
+  check.return
+}

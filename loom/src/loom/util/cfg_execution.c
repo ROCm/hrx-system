@@ -116,6 +116,7 @@ iree_status_t loom_cfg_execution_counts_calculate(
   const bool bounded = loom_cfg_loop_nest_calculate_bounds(
       loops, trip_counts, storage, &single_path);
   if (bounded && single_path) {
+    out_counts->single_path = true;
     out_counts->values = storage;
     return iree_ok_status();
   }

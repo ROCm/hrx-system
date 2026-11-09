@@ -203,6 +203,7 @@ loom_cc_library(
         "//loom/src/loom/ops/kernel:op_defs",
         "//loom/src/loom/ops/pipeline:op_defs",
         "//loom/src/loom/util:adaptive_sort",
+        "//loom/src/loom/util:cfg_execution",
         "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
