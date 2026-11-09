@@ -238,3 +238,78 @@ LOOM_CHECK_CASE(forwarded_receiver_retains_effects) {
   loom::check::expect_equal(unchanged, 22u);
   loom::check::expect_equal(updated, 66u);
 }
+
+LOOM_CHECK_CASE(independent_selections_first_and_third) {
+  const auto first = independent_selections(true, true, 0u);
+  const auto second = independent_selections(true, true, 1u);
+  const auto third = independent_selections(true, true, 2u);
+  const auto fourth = independent_selections(true, true, 3u);
+  const auto returned = independent_selections(true, true, 4u);
+  const auto snapshot = independent_selections(true, true, 5u);
+  loom::check::expect_equal(first, 22u);
+  loom::check::expect_equal(second, 12u);
+  loom::check::expect_equal(third, 11u);
+  loom::check::expect_equal(fourth, 33u);
+  loom::check::expect_equal(returned, 11u);
+  loom::check::expect_equal(snapshot, 22u);
+}
+
+LOOM_CHECK_CASE(independent_selections_first_and_fourth) {
+  const auto first = independent_selections(true, false, 0u);
+  const auto second = independent_selections(true, false, 1u);
+  const auto third = independent_selections(true, false, 2u);
+  const auto fourth = independent_selections(true, false, 3u);
+  const auto returned = independent_selections(true, false, 4u);
+  const auto snapshot = independent_selections(true, false, 5u);
+  loom::check::expect_equal(first, 22u);
+  loom::check::expect_equal(second, 12u);
+  loom::check::expect_equal(third, 22u);
+  loom::check::expect_equal(fourth, 11u);
+  loom::check::expect_equal(returned, 11u);
+  loom::check::expect_equal(snapshot, 33u);
+}
+
+LOOM_CHECK_CASE(independent_selections_second_and_third) {
+  const auto first = independent_selections(false, true, 0u);
+  const auto second = independent_selections(false, true, 1u);
+  const auto third = independent_selections(false, true, 2u);
+  const auto fourth = independent_selections(false, true, 3u);
+  const auto returned = independent_selections(false, true, 4u);
+  const auto snapshot = independent_selections(false, true, 5u);
+  loom::check::expect_equal(first, 11u);
+  loom::check::expect_equal(second, 22u);
+  loom::check::expect_equal(third, 11u);
+  loom::check::expect_equal(fourth, 33u);
+  loom::check::expect_equal(returned, 11u);
+  loom::check::expect_equal(snapshot, 22u);
+}
+
+LOOM_CHECK_CASE(independent_selections_second_and_fourth) {
+  const auto first = independent_selections(false, false, 0u);
+  const auto second = independent_selections(false, false, 1u);
+  const auto third = independent_selections(false, false, 2u);
+  const auto fourth = independent_selections(false, false, 3u);
+  const auto returned = independent_selections(false, false, 4u);
+  const auto snapshot = independent_selections(false, false, 5u);
+  loom::check::expect_equal(first, 11u);
+  loom::check::expect_equal(second, 22u);
+  loom::check::expect_equal(third, 22u);
+  loom::check::expect_equal(fourth, 11u);
+  loom::check::expect_equal(returned, 11u);
+  loom::check::expect_equal(snapshot, 33u);
+}
+
+LOOM_CHECK_CASE(selected_objects_keep_distinct_lifetimes) {
+  const auto first_total = selected_destruction(true, 0u);
+  const auto second_total = selected_destruction(false, 0u);
+  const auto first_snapshot = selected_destruction(true, 1u);
+  const auto second_snapshot = selected_destruction(false, 1u);
+  const auto first_before_cleanup = selected_destruction(true, 2u);
+  const auto second_before_cleanup = selected_destruction(false, 2u);
+  loom::check::expect_equal(first_total, 44u);
+  loom::check::expect_equal(second_total, 44u);
+  loom::check::expect_equal(first_snapshot, 11u);
+  loom::check::expect_equal(second_snapshot, 11u);
+  loom::check::expect_equal(first_before_cleanup, 0u);
+  loom::check::expect_equal(second_before_cleanup, 0u);
+}

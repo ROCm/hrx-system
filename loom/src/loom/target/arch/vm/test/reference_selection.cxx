@@ -259,3 +259,67 @@ unsigned forwarded_receiver(bool mutate) {
   }
   return value.observe();
 }
+
+[[loom::noinline]] static Cell& replace_pair(Cell& first, Cell& second) {
+  first.payload = make(22u);
+  second.payload = make(33u);
+  return second;
+}
+
+// Independent selections share one ordinary call. Its reference result still
+// names the second selected object after both caller bindings are restored.
+unsigned independent_selections(bool choose_first, bool choose_second,
+                                unsigned observation) {
+  Cell first{make(11u)}, second{make(12u)};
+  Cell third{make(22u)}, fourth{make(33u)};
+  Cell& left = choose_first ? first : second;
+  Cell& right = choose_second ? third : fourth;
+  const auto snapshot = right.payload;
+  Cell& returned = replace_pair(left, right);
+  replace(returned, make(11u));
+  if (observation == 0u) {
+    return read(first.payload);
+  }
+  if (observation == 1u) {
+    return read(second.payload);
+  }
+  if (observation == 2u) {
+    return read(third.payload);
+  }
+  if (observation == 3u) {
+    return read(fourth.payload);
+  }
+  if (observation == 4u) {
+    return read(returned.payload);
+  }
+  return read(snapshot);
+}
+
+struct Observed {
+  // Payload shared initially by distinct source objects.
+  Payload payload;
+  // Sum observed when each source object's lexical lifetime ends.
+  unsigned* total;
+
+  ~Observed() { *total += read(payload); }
+};
+
+// Equal component values do not merge two source identities or their cleanup.
+unsigned selected_destruction(bool choose, unsigned observation) {
+  unsigned total = 0u;
+  unsigned snapshot = 0u;
+  unsigned during_lifetime = 0u;
+  {
+    auto shared = make(11u);
+    Observed first{shared, &total}, second{shared, &total};
+    Observed& selected = choose ? first : second;
+    const auto saved = selected.payload;
+    assign(selected.payload, make(33u));
+    snapshot = read(saved);
+    during_lifetime = total;
+  }
+  if (observation == 0u) {
+    return total;
+  }
+  return observation == 1u ? snapshot : during_lifetime;
+}

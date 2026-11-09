@@ -1,45 +1,75 @@
 // RUN: roundtrip
-// A selected automatic reference carries identity through a single ordinary
-// call and restores the updated result to the selected source binding.
-[[loom::noinline]] static void replace(unsigned& value, unsigned next) {
-  value = next;
+// Independent automatic references use one ordinary call. Each selected
+// source binding receives its own updated result.
+[[loom::noinline]] static void replace(unsigned& left, unsigned& right,
+                                      unsigned next) {
+  left = next;
+  right = next + 1u;
 }
-unsigned selected(bool choice, unsigned first, unsigned second, unsigned next) {
-  unsigned& value = choice ? first : second;
-  replace(value, next);
-  return first + second;
+unsigned selected(bool choose_left, bool choose_right, unsigned first,
+                  unsigned second, unsigned third, unsigned fourth,
+                  unsigned next) {
+  unsigned& left = choose_left ? first : second;
+  unsigned& right = choose_right ? third : fourth;
+  replace(left, right, next);
+  return first + second + third + fourth;
 }
 
 // ----
-func.def public @selected(%choice: i1, %first$1: i32, %second$2: i32, %next: i32) -> (i32) {
-  %7 = scf.if %choice -> (i32) {
-    %5 = scalar.constant 0 : i32
-    scf.yield %5 : i32
+func.def public @selected(%choose_left: i1, %choose_right: i1, %first$2: i32, %second$3: i32, %third$4: i32, %fourth$5: i32, %next: i32) -> (i32) {
+  %10 = scf.if %choose_left -> (i32) {
+    %8 = scalar.constant 0 : i32
+    scf.yield %8 : i32
   } else {
-    %6 = scalar.constant 1 : i32
-    scf.yield %6 : i32
+    %9 = scalar.constant 1 : i32
+    scf.yield %9 : i32
   }
-  %8 = scalar.constant 0 : i32
-  %9 = scalar.cmpi eq, %7, %8 : i32
-  %first$10, %second$11 = scf.if %9 -> (i32, i32) {
-    scf.yield %first$1, %second$2 : i32, i32
+  %13 = scf.if %choose_right -> (i32) {
+    %11 = scalar.constant 0 : i32
+    scf.yield %11 : i32
   } else {
-    scf.yield %second$2, %first$1 : i32, i32
+    %12 = scalar.constant 1 : i32
+    scf.yield %12 : i32
   }
-  %first$12 = func.call pure @replace(%first$10, %next) : (i32, i32) -> (i32)
-  %13 = scalar.constant 0 : i32
-  %14 = scalar.cmpi eq, %7, %13 : i32
-  %first$15, %second$16 = scf.if %14 -> (i32, i32) {
-    scf.yield %first$12, %second$11 : i32, i32
+  %14 = scalar.constant 0 : i32
+  %15 = scalar.cmpi eq, %10, %14 : i32
+  %first$16, %second$17 = scf.if %15 -> (i32, i32) {
+    scf.yield %first$2, %second$3 : i32, i32
   } else {
-    scf.yield %second$11, %first$12 : i32, i32
+    scf.yield %second$3, %first$2 : i32, i32
   }
-  %17 = scalar.addi %first$15, %second$16 : i32
-  func.return %17 : i32
+  %18 = scalar.constant 0 : i32
+  %19 = scalar.cmpi eq, %13, %18 : i32
+  %third$20, %fourth$21 = scf.if %19 -> (i32, i32) {
+    scf.yield %third$4, %fourth$5 : i32, i32
+  } else {
+    scf.yield %fourth$5, %third$4 : i32, i32
+  }
+  %first$22, %third$23 = func.call pure @replace(%first$16, %third$20, %next) : (i32, i32, i32) -> (i32, i32)
+  %24 = scalar.constant 0 : i32
+  %25 = scalar.cmpi eq, %13, %24 : i32
+  %third$26, %fourth$27 = scf.if %25 -> (i32, i32) {
+    scf.yield %third$23, %fourth$21 : i32, i32
+  } else {
+    scf.yield %fourth$21, %third$23 : i32, i32
+  }
+  %28 = scalar.constant 0 : i32
+  %29 = scalar.cmpi eq, %10, %28 : i32
+  %first$30, %second$31 = scf.if %29 -> (i32, i32) {
+    scf.yield %first$22, %second$17 : i32, i32
+  } else {
+    scf.yield %second$17, %first$22 : i32, i32
+  }
+  %32 = scalar.addi %first$30, %second$31 : i32
+  %33 = scalar.addi %32, %third$26 : i32
+  %34 = scalar.addi %33, %fourth$27 : i32
+  func.return %34 : i32
 }
 
-func.def noinline @replace(%value: i32, %next: i32) -> (i32) {
-  func.return %next : i32
+func.def noinline @replace(%left: i32, %right$36: i32, %next: i32) -> (i32, i32) {
+  %40 = scalar.constant 1 : i32
+  %right$41 = scalar.addi %next, %40 : i32
+  func.return %next, %right$41 : i32, i32
 }
 
 // ====

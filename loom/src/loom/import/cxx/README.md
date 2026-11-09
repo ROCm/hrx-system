@@ -2328,6 +2328,56 @@ records remain partitioned SSA values. Aggregate copies preserve value semantics
 in either representation, and shared private-storage promotion can remove the
 allocation after inlining.
 
+### Selected references
+
+A local reference can select an automatic object, a field, or a base subobject
+at runtime. The selection is evaluated once. Later reads observe that object's
+current contents, while an earlier value copy keeps its snapshot:
+
+```cpp
+struct Cell { unsigned payload; };
+
+[[loom::noinline]] static void replace(Cell& cell, unsigned next) {
+  cell.payload = next;
+}
+
+unsigned selected(bool choose_first) {
+  Cell first{11u}, second{12u};
+  Cell& cell = choose_first ? first : second;
+  const unsigned& watched = cell.payload;
+  unsigned snapshot = cell.payload;
+  replace(cell, 33u);
+  choose_first = !choose_first;
+  return watched * 100u + snapshot;
+}
+```
+
+`selected(true)` returns `3311`; `selected(false)` returns `3312`. Changing
+the predicate afterward does not redirect `cell` or `watched`. The same
+identity rules apply to records containing semantic Loom values such as
+buffers and views. Those values keep their native component representation.
+
+Nested conditionals execute only the selected arms. Member calls and overloaded
+operators use the same reference handling as ordinary helpers. A helper that
+returns its receiver or one exact reference argument preserves that evaluated
+destination, including a later field projection. For example, an assignment
+through `object.self().pair.second` updates the caller's `pair` field while
+preserving the neighboring fields. A mutable reference parameter contributes
+updated results only when its callable body can write through it.
+
+Independent selections remain one ordinary helper call. The caller arranges
+the selected current values into the helper's argument positions and restores
+the updated values to their original bindings afterward. Source objects retain
+their own lifetimes throughout; selection does not create another C++ object.
+Exported C++ expresses these updates with ordinary values and results, preserving
+the behavior when reimported.
+
+Selection preserves the existing call admission rules. Potentially overlapping
+reference arguments, escaping identities, and pointer access require an
+addressable object representation; semantic Loom payloads cannot be stored as
+raw C++ object bytes. Reference results that cannot be related to an admitted
+source destination receive a diagnostic.
+
 ### Copy, move, and destruction
 
 Copying and moving execute the constructor or assignment operator selected by
@@ -2681,12 +2731,15 @@ u32x4 fill(u32x4 values, unsigned begin) {
 }
 ```
 
-A lane of a vector stored in memory uses one vector load and one vector store
-around the functional insertion. Nested record fields update only their vector
-component. The vector object and lane selector are each evaluated once, so
-side effects retain the source evaluation order for plain and compound updates.
-Native vectors are the register-resident spelling for dynamically selected
-fixed lanes; C++ arrays retain their object-storage and aliasing contract.
+An indexed lane of a vector stored in memory uses a scalar element access.
+Nested record fields update only their vector component. The vector object and
+lane selector are each evaluated once, so side effects retain the source
+evaluation order for plain and compound updates. A saved lane reference retains
+both its selected vector and its evaluated index, including a conditional
+between different vector widths. Later changes to the index variable do not
+redirect that reference. Native vectors are the register-resident spelling for
+dynamically selected fixed lanes; C++ arrays retain their object-storage and
+aliasing contract.
 
 `loom::vector::slice<Result>(source, offsets)` extracts a register subvector
 while preserving rank and element type. Native vectors and semantic
@@ -3244,7 +3297,7 @@ header APIs, and direct API tests that do not link the aggregate importer.
 | --- | --- |
 | `source/` | One configured frontend invocation, provider and diagnostic handling, immutable facade lookup, and source locations copied into the output module. |
 | `value/` | Source type/layout projection, scalar/vector SSA and buffer/origin representations, arithmetic, and memory access construction from already evaluated operands. |
-| `control/` | An immutable analysis of ordered source writes, function/iteration exits and fallthrough, and nonwrapping counted-loop eligibility. This package has no IR dependency. |
+| `control/` | Source-owned reference origins, projected write effects, function/iteration exits, and counted-loop eligibility. The analysis consumes source facts; the separate region builder constructs conditional arms before their result signatures are known. |
 | `binding/` | Admission and construction for generated operation bindings, runtime imports, named scalar configs, kernel launch contracts, and explicit loop schedules. |
 | `symbol/` | Root selection, reachable function identities, deterministic linkage names, and native function declarations or definitions with explicit contracts. |
 | `lifetime/` | Cleanup scopes, temporary lifetimes, and destructor obligations across source control flow. |
