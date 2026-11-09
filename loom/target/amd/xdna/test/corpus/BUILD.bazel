@@ -37,6 +37,7 @@ loom_corpus_test(
             "numeric/vector/constants.loom",
             "numeric/vector/f32.loom",
             "numeric/vector/floating.loom",
+            "numeric/vector/float_comparison.loom",
             "numeric/vector/float_partial_load_reductions.loom",
             "numeric/vector/integer_arithmetic.loom",
             "numeric/vector/integer_comparison.loom",

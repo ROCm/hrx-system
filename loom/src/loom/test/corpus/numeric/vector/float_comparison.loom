@@ -2,15 +2,9 @@
 // lanes. Integer bit patterns preserve signed zeros, subnormals,
 // infinities, and NaNs across the callable boundary.
 
-func.def @vector_compare_f8e4m3(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
+func.def inline @compare_lanes_f8e4m3(%lhs: vector<4xf8E4M3>, %rhs: vector<4xf8E4M3>, %output: buffer) {
   %base = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<4xi8>
-  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<4xi8>
   %results = buffer.view %output[%base] : buffer -> view<56xi32>
-  %lhs_bits = vector.load %lhs_view[0] : view<4xi8> -> vector<4xi8>
-  %rhs_bits = vector.load %rhs_view[0] : view<4xi8> -> vector<4xi8>
-  %lhs = vector.bitcast %lhs_bits : vector<4xi8> to vector<4xf8E4M3>
-  %rhs = vector.bitcast %rhs_bits : vector<4xi8> to vector<4xf8E4M3>
   %oeq = vector.cmpf oeq, %lhs, %rhs : vector<4xf8E4M3> -> vector<4xi1>
   %oeq_words = vector.extui %oeq : vector<4xi1> to vector<4xi32>
   vector.store %oeq_words, %results[0] : vector<4xi32>, view<56xi32>
@@ -56,15 +50,21 @@ func.def @vector_compare_f8e4m3(%lhs_buffer: buffer, %rhs_buffer: buffer, %outpu
   func.return
 }
 
-func.def @vector_compare_f8e5m2(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
+func.def @vector_compare_f8e4m3(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<4xi8>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<4xi8>
-  %results = buffer.view %output[%base] : buffer -> view<56xi32>
   %lhs_bits = vector.load %lhs_view[0] : view<4xi8> -> vector<4xi8>
   %rhs_bits = vector.load %rhs_view[0] : view<4xi8> -> vector<4xi8>
-  %lhs = vector.bitcast %lhs_bits : vector<4xi8> to vector<4xf8E5M2>
-  %rhs = vector.bitcast %rhs_bits : vector<4xi8> to vector<4xf8E5M2>
+  %lhs = vector.bitcast %lhs_bits : vector<4xi8> to vector<4xf8E4M3>
+  %rhs = vector.bitcast %rhs_bits : vector<4xi8> to vector<4xf8E4M3>
+  func.call @compare_lanes_f8e4m3(%lhs, %rhs, %output) : (vector<4xf8E4M3>, vector<4xf8E4M3>, buffer)
+  func.return
+}
+
+func.def inline @compare_lanes_f8e5m2(%lhs: vector<4xf8E5M2>, %rhs: vector<4xf8E5M2>, %output: buffer) {
+  %base = index.constant 0 : offset
+  %results = buffer.view %output[%base] : buffer -> view<56xi32>
   %oeq = vector.cmpf oeq, %lhs, %rhs : vector<4xf8E5M2> -> vector<4xi1>
   %oeq_words = vector.extui %oeq : vector<4xi1> to vector<4xi32>
   vector.store %oeq_words, %results[0] : vector<4xi32>, view<56xi32>
@@ -110,15 +110,21 @@ func.def @vector_compare_f8e5m2(%lhs_buffer: buffer, %rhs_buffer: buffer, %outpu
   func.return
 }
 
-func.def @vector_compare_f16(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
+func.def @vector_compare_f8e5m2(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<4xi16>
-  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<4xi16>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<4xi8>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<4xi8>
+  %lhs_bits = vector.load %lhs_view[0] : view<4xi8> -> vector<4xi8>
+  %rhs_bits = vector.load %rhs_view[0] : view<4xi8> -> vector<4xi8>
+  %lhs = vector.bitcast %lhs_bits : vector<4xi8> to vector<4xf8E5M2>
+  %rhs = vector.bitcast %rhs_bits : vector<4xi8> to vector<4xf8E5M2>
+  func.call @compare_lanes_f8e5m2(%lhs, %rhs, %output) : (vector<4xf8E5M2>, vector<4xf8E5M2>, buffer)
+  func.return
+}
+
+func.def inline @compare_lanes_f16(%lhs: vector<4xf16>, %rhs: vector<4xf16>, %output: buffer) {
+  %base = index.constant 0 : offset
   %results = buffer.view %output[%base] : buffer -> view<56xi32>
-  %lhs_bits = vector.load %lhs_view[0] : view<4xi16> -> vector<4xi16>
-  %rhs_bits = vector.load %rhs_view[0] : view<4xi16> -> vector<4xi16>
-  %lhs = vector.bitcast %lhs_bits : vector<4xi16> to vector<4xf16>
-  %rhs = vector.bitcast %rhs_bits : vector<4xi16> to vector<4xf16>
   %oeq = vector.cmpf oeq, %lhs, %rhs : vector<4xf16> -> vector<4xi1>
   %oeq_words = vector.extui %oeq : vector<4xi1> to vector<4xi32>
   vector.store %oeq_words, %results[0] : vector<4xi32>, view<56xi32>
@@ -164,15 +170,21 @@ func.def @vector_compare_f16(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: 
   func.return
 }
 
-func.def @vector_compare_bf16(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
+func.def @vector_compare_f16(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<4xi16>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<4xi16>
-  %results = buffer.view %output[%base] : buffer -> view<56xi32>
   %lhs_bits = vector.load %lhs_view[0] : view<4xi16> -> vector<4xi16>
   %rhs_bits = vector.load %rhs_view[0] : view<4xi16> -> vector<4xi16>
-  %lhs = vector.bitcast %lhs_bits : vector<4xi16> to vector<4xbf16>
-  %rhs = vector.bitcast %rhs_bits : vector<4xi16> to vector<4xbf16>
+  %lhs = vector.bitcast %lhs_bits : vector<4xi16> to vector<4xf16>
+  %rhs = vector.bitcast %rhs_bits : vector<4xi16> to vector<4xf16>
+  func.call @compare_lanes_f16(%lhs, %rhs, %output) : (vector<4xf16>, vector<4xf16>, buffer)
+  func.return
+}
+
+func.def inline @compare_lanes_bf16(%lhs: vector<4xbf16>, %rhs: vector<4xbf16>, %output: buffer) {
+  %base = index.constant 0 : offset
+  %results = buffer.view %output[%base] : buffer -> view<56xi32>
   %oeq = vector.cmpf oeq, %lhs, %rhs : vector<4xbf16> -> vector<4xi1>
   %oeq_words = vector.extui %oeq : vector<4xi1> to vector<4xi32>
   vector.store %oeq_words, %results[0] : vector<4xi32>, view<56xi32>
@@ -218,13 +230,21 @@ func.def @vector_compare_bf16(%lhs_buffer: buffer, %rhs_buffer: buffer, %output:
   func.return
 }
 
-func.def inline @vector_compare_f32(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
+func.def @vector_compare_bf16(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<4xf32>
-  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<4xf32>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<4xi16>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<4xi16>
+  %lhs_bits = vector.load %lhs_view[0] : view<4xi16> -> vector<4xi16>
+  %rhs_bits = vector.load %rhs_view[0] : view<4xi16> -> vector<4xi16>
+  %lhs = vector.bitcast %lhs_bits : vector<4xi16> to vector<4xbf16>
+  %rhs = vector.bitcast %rhs_bits : vector<4xi16> to vector<4xbf16>
+  func.call @compare_lanes_bf16(%lhs, %rhs, %output) : (vector<4xbf16>, vector<4xbf16>, buffer)
+  func.return
+}
+
+func.def inline @compare_lanes_f32(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %output: buffer) {
+  %base = index.constant 0 : offset
   %results = buffer.view %output[%base] : buffer -> view<56xi32>
-  %lhs = vector.load %lhs_view[0] : view<4xf32> -> vector<4xf32>
-  %rhs = vector.load %rhs_view[0] : view<4xf32> -> vector<4xf32>
   %oeq = vector.cmpf oeq, %lhs, %rhs : vector<4xf32> -> vector<4xi1>
   %oeq_words = vector.extui %oeq : vector<4xi1> to vector<4xi32>
   vector.store %oeq_words, %results[0] : vector<4xi32>, view<56xi32>
@@ -270,15 +290,19 @@ func.def inline @vector_compare_f32(%lhs_buffer: buffer, %rhs_buffer: buffer, %o
   func.return
 }
 
-func.def @vector_compare_f64(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
+func.def inline @vector_compare_f32(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<4xi64>
-  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<4xi64>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<4xf32>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<4xf32>
+  %lhs = vector.load %lhs_view[0] : view<4xf32> -> vector<4xf32>
+  %rhs = vector.load %rhs_view[0] : view<4xf32> -> vector<4xf32>
+  func.call @compare_lanes_f32(%lhs, %rhs, %output) : (vector<4xf32>, vector<4xf32>, buffer)
+  func.return
+}
+
+func.def inline @compare_lanes_f64(%lhs: vector<4xf64>, %rhs: vector<4xf64>, %output: buffer) {
+  %base = index.constant 0 : offset
   %results = buffer.view %output[%base] : buffer -> view<56xi32>
-  %lhs_bits = vector.load %lhs_view[0] : view<4xi64> -> vector<4xi64>
-  %rhs_bits = vector.load %rhs_view[0] : view<4xi64> -> vector<4xi64>
-  %lhs = vector.bitcast %lhs_bits : vector<4xi64> to vector<4xf64>
-  %rhs = vector.bitcast %rhs_bits : vector<4xi64> to vector<4xf64>
   %oeq = vector.cmpf oeq, %lhs, %rhs : vector<4xf64> -> vector<4xi1>
   %oeq_words = vector.extui %oeq : vector<4xi1> to vector<4xi32>
   vector.store %oeq_words, %results[0] : vector<4xi32>, view<56xi32>
@@ -321,6 +345,18 @@ func.def @vector_compare_f64(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: 
   %uno = vector.cmpf uno, %lhs, %rhs : vector<4xf64> -> vector<4xi1>
   %uno_words = vector.extui %uno : vector<4xi1> to vector<4xi32>
   vector.store %uno_words, %results[52] : vector<4xi32>, view<56xi32>
+  func.return
+}
+
+func.def @vector_compare_f64(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<4xi64>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<4xi64>
+  %lhs_bits = vector.load %lhs_view[0] : view<4xi64> -> vector<4xi64>
+  %rhs_bits = vector.load %rhs_view[0] : view<4xi64> -> vector<4xi64>
+  %lhs = vector.bitcast %lhs_bits : vector<4xi64> to vector<4xf64>
+  %rhs = vector.bitcast %rhs_bits : vector<4xi64> to vector<4xf64>
+  func.call @compare_lanes_f64(%lhs, %rhs, %output) : (vector<4xf64>, vector<4xf64>, buffer)
   func.return
 }
 
@@ -397,6 +433,90 @@ func.def @mixed_source_compare_f32(%lhs: buffer, %rhs: buffer, %forward: buffer,
   func.call @vector_compare_f32(%constant_lhs, %rhs, %forward) : (buffer, buffer, buffer)
   func.call @vector_compare_f32(%rhs, %constant_lhs, %reverse) : (buffer, buffer, buffer)
   func.call @vector_compare_f32(%constant_lhs, %constant_rhs, %uniform) : (buffer, buffer, buffer)
+  func.return
+}
+
+// The two callsites specialize the same predicate family with either signed
+// zero on opposite sides; the observed values remain runtime inputs.
+func.def @vector_compare_zero_f8e4m3(%input: buffer, %forward: buffer, %reverse: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<4xi8>
+  %input_bits = vector.load %input_view[0] : view<4xi8> -> vector<4xi8>
+  %value = vector.bitcast %input_bits : vector<4xi8> to vector<4xf8E4M3>
+  %comparison_rhs = vector.splatf 0.0 : vector<4xf8E4M3>
+  %comparison_lhs = vector.splatf -0.0 : vector<4xf8E4M3>
+  func.call @compare_lanes_f8e4m3(%value, %comparison_rhs, %forward) : (vector<4xf8E4M3>, vector<4xf8E4M3>, buffer)
+  func.call @compare_lanes_f8e4m3(%comparison_lhs, %value, %reverse) : (vector<4xf8E4M3>, vector<4xf8E4M3>, buffer)
+  func.return
+}
+
+// The two callsites specialize the same predicate family with either signed
+// zero on opposite sides; the observed values remain runtime inputs.
+func.def @vector_compare_zero_f8e5m2(%input: buffer, %forward: buffer, %reverse: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<4xi8>
+  %input_bits = vector.load %input_view[0] : view<4xi8> -> vector<4xi8>
+  %value = vector.bitcast %input_bits : vector<4xi8> to vector<4xf8E5M2>
+  %comparison_rhs = vector.splatf 0.0 : vector<4xf8E5M2>
+  %comparison_lhs = vector.splatf -0.0 : vector<4xf8E5M2>
+  func.call @compare_lanes_f8e5m2(%value, %comparison_rhs, %forward) : (vector<4xf8E5M2>, vector<4xf8E5M2>, buffer)
+  func.call @compare_lanes_f8e5m2(%comparison_lhs, %value, %reverse) : (vector<4xf8E5M2>, vector<4xf8E5M2>, buffer)
+  func.return
+}
+
+// The two callsites specialize the same predicate family with either signed
+// zero on opposite sides; the observed values remain runtime inputs.
+func.def @vector_compare_zero_f16(%input: buffer, %forward: buffer, %reverse: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<4xi16>
+  %input_bits = vector.load %input_view[0] : view<4xi16> -> vector<4xi16>
+  %value = vector.bitcast %input_bits : vector<4xi16> to vector<4xf16>
+  %comparison_rhs = vector.splatf 0.0 : vector<4xf16>
+  %comparison_lhs = vector.splatf -0.0 : vector<4xf16>
+  func.call @compare_lanes_f16(%value, %comparison_rhs, %forward) : (vector<4xf16>, vector<4xf16>, buffer)
+  func.call @compare_lanes_f16(%comparison_lhs, %value, %reverse) : (vector<4xf16>, vector<4xf16>, buffer)
+  func.return
+}
+
+// The two callsites specialize the same predicate family with either signed
+// zero on opposite sides; the observed values remain runtime inputs.
+func.def @vector_compare_zero_bf16(%input: buffer, %forward: buffer, %reverse: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<4xi16>
+  %input_bits = vector.load %input_view[0] : view<4xi16> -> vector<4xi16>
+  %value = vector.bitcast %input_bits : vector<4xi16> to vector<4xbf16>
+  %comparison_rhs = vector.splatf 0.0 : vector<4xbf16>
+  %comparison_lhs = vector.splatf -0.0 : vector<4xbf16>
+  func.call @compare_lanes_bf16(%value, %comparison_rhs, %forward) : (vector<4xbf16>, vector<4xbf16>, buffer)
+  func.call @compare_lanes_bf16(%comparison_lhs, %value, %reverse) : (vector<4xbf16>, vector<4xbf16>, buffer)
+  func.return
+}
+
+// The two callsites specialize the same predicate family with either signed
+// zero on opposite sides; the observed values remain runtime inputs.
+func.def @vector_compare_zero_f32(%input: buffer, %forward: buffer, %reverse: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<4xi32>
+  %input_bits = vector.load %input_view[0] : view<4xi32> -> vector<4xi32>
+  %value = vector.bitcast %input_bits : vector<4xi32> to vector<4xf32>
+  %comparison_rhs = vector.splatf 0.0 : vector<4xf32>
+  %comparison_lhs = vector.splatf -0.0 : vector<4xf32>
+  func.call @compare_lanes_f32(%value, %comparison_rhs, %forward) : (vector<4xf32>, vector<4xf32>, buffer)
+  func.call @compare_lanes_f32(%comparison_lhs, %value, %reverse) : (vector<4xf32>, vector<4xf32>, buffer)
+  func.return
+}
+
+// The two callsites specialize the same predicate family with either signed
+// zero on opposite sides; the observed values remain runtime inputs.
+func.def @vector_compare_zero_f64(%input: buffer, %forward: buffer, %reverse: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<4xi64>
+  %input_bits = vector.load %input_view[0] : view<4xi64> -> vector<4xi64>
+  %value = vector.bitcast %input_bits : vector<4xi64> to vector<4xf64>
+  %comparison_rhs = vector.splatf 0.0 : vector<4xf64>
+  %comparison_lhs = vector.splatf -0.0 : vector<4xf64>
+  func.call @compare_lanes_f64(%value, %comparison_rhs, %forward) : (vector<4xf64>, vector<4xf64>, buffer)
+  func.call @compare_lanes_f64(%comparison_lhs, %value, %reverse) : (vector<4xf64>, vector<4xf64>, buffer)
   func.return
 }
 
@@ -622,6 +742,354 @@ check.scenario @vector_float_comparison_constant_sources {
       check.expect.bitwise actual(%output) expected(%output) : tensor<56xi32>
       check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
       check.expect.bitwise actual(%uniform) expected(%uniform) : tensor<56xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @vector_float_zero_comparison_f8e4m3_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(0) step(1) : tensor<4xi8>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f8e4m3>(%input, %forward, %reverse) : (tensor<4xi8>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-128) step(1) : tensor<4xi8>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f8e4m3>(%input, %forward, %reverse) : (tensor<4xi8>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(124) step(1) : tensor<4xi8>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f8e4m3>(%input, %forward, %reverse) : (tensor<4xi8>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-4) step(1) : tensor<4xi8>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f8e4m3>(%input, %forward, %reverse) : (tensor<4xi8>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(56) step(1) : tensor<4xi8>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f8e4m3>(%input, %forward, %reverse) : (tensor<4xi8>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-72) step(1) : tensor<4xi8>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f8e4m3>(%input, %forward, %reverse) : (tensor<4xi8>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @vector_float_zero_comparison_f8e5m2_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(0) step(1) : tensor<4xi8>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f8e5m2>(%input, %forward, %reverse) : (tensor<4xi8>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-128) step(1) : tensor<4xi8>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f8e5m2>(%input, %forward, %reverse) : (tensor<4xi8>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(123) step(1) : tensor<4xi8>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f8e5m2>(%input, %forward, %reverse) : (tensor<4xi8>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-5) step(1) : tensor<4xi8>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f8e5m2>(%input, %forward, %reverse) : (tensor<4xi8>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(60) step(1) : tensor<4xi8>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f8e5m2>(%input, %forward, %reverse) : (tensor<4xi8>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-68) step(1) : tensor<4xi8>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f8e5m2>(%input, %forward, %reverse) : (tensor<4xi8>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @vector_float_zero_comparison_f16_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(0) step(1) : tensor<4xi16>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f16>(%input, %forward, %reverse) : (tensor<4xi16>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-32768) step(1) : tensor<4xi16>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f16>(%input, %forward, %reverse) : (tensor<4xi16>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(31743) step(1) : tensor<4xi16>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f16>(%input, %forward, %reverse) : (tensor<4xi16>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-1025) step(1) : tensor<4xi16>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f16>(%input, %forward, %reverse) : (tensor<4xi16>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(15360) step(1) : tensor<4xi16>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f16>(%input, %forward, %reverse) : (tensor<4xi16>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-17408) step(1) : tensor<4xi16>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f16>(%input, %forward, %reverse) : (tensor<4xi16>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @vector_float_zero_comparison_bf16_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(0) step(1) : tensor<4xi16>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_bf16>(%input, %forward, %reverse) : (tensor<4xi16>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-32768) step(1) : tensor<4xi16>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_bf16>(%input, %forward, %reverse) : (tensor<4xi16>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(32639) step(1) : tensor<4xi16>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_bf16>(%input, %forward, %reverse) : (tensor<4xi16>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-129) step(1) : tensor<4xi16>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_bf16>(%input, %forward, %reverse) : (tensor<4xi16>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(16256) step(1) : tensor<4xi16>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_bf16>(%input, %forward, %reverse) : (tensor<4xi16>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-16512) step(1) : tensor<4xi16>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_bf16>(%input, %forward, %reverse) : (tensor<4xi16>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @vector_float_zero_comparison_f32_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(0) step(1) : tensor<4xi32>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f32>(%input, %forward, %reverse) : (tensor<4xi32>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-2147483648) step(1) : tensor<4xi32>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f32>(%input, %forward, %reverse) : (tensor<4xi32>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(2139095039) step(1) : tensor<4xi32>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f32>(%input, %forward, %reverse) : (tensor<4xi32>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-8388609) step(1) : tensor<4xi32>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f32>(%input, %forward, %reverse) : (tensor<4xi32>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1065353216) step(1) : tensor<4xi32>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f32>(%input, %forward, %reverse) : (tensor<4xi32>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-1082130432) step(1) : tensor<4xi32>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f32>(%input, %forward, %reverse) : (tensor<4xi32>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @vector_float_zero_comparison_f64_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(0) step(1) : tensor<4xi64>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f64>(%input, %forward, %reverse) : (tensor<4xi64>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-9223372036854775808) step(1) : tensor<4xi64>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f64>(%input, %forward, %reverse) : (tensor<4xi64>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(9218868437227405311) step(1) : tensor<4xi64>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f64>(%input, %forward, %reverse) : (tensor<4xi64>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-4503599627370497) step(1) : tensor<4xi64>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f64>(%input, %forward, %reverse) : (tensor<4xi64>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(4607182418800017408) step(1) : tensor<4xi64>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f64>(%input, %forward, %reverse) : (tensor<4xi64>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-4616189618054758400) step(1) : tensor<4xi64>
+    %forward = check.generate.fill value(1515870810) : tensor<56xi32>
+    %reverse = check.generate.fill value(1515870810) : tensor<56xi32>
+    check.compare<@vector_compare_zero_f64>(%input, %forward, %reverse) : (tensor<4xi64>, tensor<56xi32>, tensor<56xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<56xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
     }
   }
   check.return

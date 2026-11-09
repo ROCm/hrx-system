@@ -556,12 +556,32 @@ def test_f32_compare_programs_match_ieee_oracle() -> None:
     rules_by_predicate = {}
     for rule in AIE2P_F32_COMPARE_RULES:
         predicate = rule.guards[0].enum_keyword
-        no_nan = rule.report_key == "exact_binary32_compare_nnan"
-        key = (predicate, no_nan)
+        no_nan = rule.report_key.endswith("_nnan")
+        zero_operand = next(
+            (
+                guard.field
+                for guard in rule.guards
+                if guard.kind.name == "VALUE_FLOAT_EQUALS"
+            ),
+            None,
+        )
+        zero_bits = next(
+            (
+                _float_bits(guard.f64_value)
+                for guard in rule.guards
+                if guard.kind.name == "VALUE_FLOAT_EQUALS"
+            ),
+            None,
+        )
+        key = (predicate, no_nan, zero_operand, zero_bits)
         assert key not in rules_by_predicate
         rules_by_predicate[key] = rule
     assert set(rules_by_predicate) == {
-        (predicate, no_nan) for predicate in predicates for no_nan in (False, True)
+        (predicate, no_nan, zero_operand, zero_bits)
+        for predicate in predicates
+        for no_nan in (False, True)
+        for zero_operand in (None, "lhs", "rhs")
+        for zero_bits in ((None,) if zero_operand is None else (0, 0x80000000))
     }
     pairs = [(lhs, rhs) for lhs in _EDGE_VALUES for rhs in _EDGE_VALUES]
     random_source = random.Random(0xA1E2C32)
@@ -569,13 +589,34 @@ def test_f32_compare_programs_match_ieee_oracle() -> None:
         (random_source.getrandbits(32), random_source.getrandbits(32))
         for _ in range(1024)
     )
-    for (predicate, no_nan), rule in rules_by_predicate.items():
+    for (
+        predicate,
+        no_nan,
+        zero_operand,
+        zero_bits,
+    ), rule in rules_by_predicate.items():
         rule.validate(AIE2P_CORE_DESCRIPTOR_SET)
         assert any(
             result.kind is SourceValueKind.RESULT
             for result in rule.emit[-1].results.values()
         )
-        for lhs, rhs in pairs:
+        rule_pairs = pairs
+        if zero_operand is not None:
+            rule_pairs = [
+                (zero, value) if zero_operand == "lhs" else (value, zero)
+                for zero in (zero_bits,)
+                for value in (
+                    *_EDGE_VALUES,
+                    *(random_source.getrandbits(32) for _ in range(1024)),
+                )
+            ]
+            # No order-key construction belongs in the known-zero path.
+            assert not any(
+                "key" in ref.field
+                for emit in rule.emit
+                for ref in emit.results.values()
+            )
+        for lhs, rhs in rule_pairs:
             if no_nan and (_is_f32_nan(lhs) or _is_f32_nan(rhs)):
                 continue
             actual = _evaluate_rule(rule, {"lhs": lhs, "rhs": rhs})
