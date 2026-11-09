@@ -747,7 +747,7 @@ check.scenario @vector_float_comparison_constant_sources {
   check.return
 }
 
-check.scenario @vector_float_zero_comparison_f8e4m3_values {
+check.scenario @vector_float_zero_comparison_f8e4m3_subnormal_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(0) step(1) : tensor<4xi8>
     %forward = check.generate.fill value(1515870810) : tensor<56xi32>
@@ -766,6 +766,10 @@ check.scenario @vector_float_zero_comparison_f8e4m3_values {
       check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
     }
   }
+  check.return
+}
+
+check.scenario @vector_float_zero_comparison_f8e4m3_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(124) step(1) : tensor<4xi8>
     %forward = check.generate.fill value(1515870810) : tensor<56xi32>
@@ -805,7 +809,7 @@ check.scenario @vector_float_zero_comparison_f8e4m3_values {
   check.return
 }
 
-check.scenario @vector_float_zero_comparison_f8e5m2_values {
+check.scenario @vector_float_zero_comparison_f8e5m2_subnormal_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(0) step(1) : tensor<4xi8>
     %forward = check.generate.fill value(1515870810) : tensor<56xi32>
@@ -824,6 +828,10 @@ check.scenario @vector_float_zero_comparison_f8e5m2_values {
       check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
     }
   }
+  check.return
+}
+
+check.scenario @vector_float_zero_comparison_f8e5m2_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(123) step(1) : tensor<4xi8>
     %forward = check.generate.fill value(1515870810) : tensor<56xi32>
@@ -863,7 +871,7 @@ check.scenario @vector_float_zero_comparison_f8e5m2_values {
   check.return
 }
 
-check.scenario @vector_float_zero_comparison_f16_values {
+check.scenario @vector_float_zero_comparison_f16_subnormal_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(0) step(1) : tensor<4xi16>
     %forward = check.generate.fill value(1515870810) : tensor<56xi32>
@@ -882,6 +890,10 @@ check.scenario @vector_float_zero_comparison_f16_values {
       check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
     }
   }
+  check.return
+}
+
+check.scenario @vector_float_zero_comparison_f16_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(31743) step(1) : tensor<4xi16>
     %forward = check.generate.fill value(1515870810) : tensor<56xi32>
@@ -921,7 +933,7 @@ check.scenario @vector_float_zero_comparison_f16_values {
   check.return
 }
 
-check.scenario @vector_float_zero_comparison_bf16_values {
+check.scenario @vector_float_zero_comparison_bf16_subnormal_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(0) step(1) : tensor<4xi16>
     %forward = check.generate.fill value(1515870810) : tensor<56xi32>
@@ -940,6 +952,10 @@ check.scenario @vector_float_zero_comparison_bf16_values {
       check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
     }
   }
+  check.return
+}
+
+check.scenario @vector_float_zero_comparison_bf16_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(32639) step(1) : tensor<4xi16>
     %forward = check.generate.fill value(1515870810) : tensor<56xi32>
@@ -979,7 +995,7 @@ check.scenario @vector_float_zero_comparison_bf16_values {
   check.return
 }
 
-check.scenario @vector_float_zero_comparison_f32_values {
+check.scenario @vector_float_zero_comparison_f32_subnormal_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(0) step(1) : tensor<4xi32>
     %forward = check.generate.fill value(1515870810) : tensor<56xi32>
@@ -998,6 +1014,10 @@ check.scenario @vector_float_zero_comparison_f32_values {
       check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
     }
   }
+  check.return
+}
+
+check.scenario @vector_float_zero_comparison_f32_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(2139095039) step(1) : tensor<4xi32>
     %forward = check.generate.fill value(1515870810) : tensor<56xi32>
@@ -1037,7 +1057,7 @@ check.scenario @vector_float_zero_comparison_f32_values {
   check.return
 }
 
-check.scenario @vector_float_zero_comparison_f64_values {
+check.scenario @vector_float_zero_comparison_f64_subnormal_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(0) step(1) : tensor<4xi64>
     %forward = check.generate.fill value(1515870810) : tensor<56xi32>
@@ -1056,6 +1076,10 @@ check.scenario @vector_float_zero_comparison_f64_values {
       check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<56xi32>
     }
   }
+  check.return
+}
+
+check.scenario @vector_float_zero_comparison_f64_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(9218868437227405311) step(1) : tensor<4xi64>
     %forward = check.generate.fill value(1515870810) : tensor<56xi32>
