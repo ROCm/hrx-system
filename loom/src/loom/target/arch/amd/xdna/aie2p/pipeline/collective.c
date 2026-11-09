@@ -9,7 +9,7 @@
 #include "loom/ops/index/ops.h"
 #include "loom/ops/view/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/call_abi.h"
-#include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
 #include "loom/util/adaptive_sort.h"
 
 static bool loom_aie2p_native_collective_less(

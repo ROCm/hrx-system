@@ -4,12 +4,11 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
-
 #include "loom/error/parameter.h"
 #include "loom/ops/channel/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/pipeline/ops.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
 #include "loom/target/arch/amd/xdna/error_catalog.h"
 #include "loom/target/function_version.h"
@@ -754,22 +753,12 @@ static iree_status_t loom_aie2p_native_select(
             action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE
                 ? &channel->cursor.reader
                 : &channel->cursor.writer;
-        const bool shared = cursor->shared || (cursor->worker != UINT32_MAX &&
-                                               cursor->worker != i);
-        const uint32_t maximum_admissions =
-            cursor->worker == i
-                ? iree_max(cursor->maximum_admissions,
-                           source->completion.actions[j].maximum_admissions)
-                : source->completion.actions[j].maximum_admissions;
         const bool imported =
             realization->invocations.channels[channel - context->channels]
                 .invocation != realization->invocations.workers[i].invocation;
-        *cursor = (loom_aie2p_native_cursor_t){
-            .worker = (uint32_t)i,
-            .maximum_admissions = maximum_admissions,
-            .shared = shared,
-            .advances = channel->source->capacity > 1 &&
-                        (maximum_admissions > 1 || shared || imported)};
+        loom_aie2p_native_cursor_bind(
+            cursor, channel->source->capacity, (uint32_t)i,
+            source->completion.actions[j].maximum_admissions, imported);
       }
     }
   }

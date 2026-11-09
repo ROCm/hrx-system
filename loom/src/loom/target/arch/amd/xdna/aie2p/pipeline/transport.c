@@ -6,7 +6,7 @@
 
 #include "loom/analysis/storage_geometry.h"
 #include "loom/ops/channel/ops.h"
-#include "loom/ops/type_registry.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_resources.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
@@ -501,10 +501,10 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
       // DMA reads or writes its payload.
       const bool record_dynamic =
           !configuration && local_channel &&
-          (loom_read_type_isa(loom_module_value_type(context->code.module,
-                                                     payload_record.value_id))
-               ? local_channel->cursor.reader.advances
-               : local_channel->cursor.writer.advances);
+          loom_aie2p_native_record_cursor(
+              local_channel, loom_module_value_type(context->code.module,
+                                                    payload_record.value_id))
+              ->advances;
       const loom_value_t* root =
           loom_module_value(module, external->root_value_id);
       if (!local_channel || !loom_value_is_block_arg(root) ||

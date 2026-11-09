@@ -7,30 +7,8 @@
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/index/ops.h"
-#include "loom/ops/scalar/ops.h"
-#include "loom/ops/view/ops.h"
-#include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
 #include "loom/transforms/pipeline/control.h"
-
-iree_status_t loom_aie2p_native_cursor_view(loom_builder_t* builder,
-                                            loom_value_id_t frame,
-                                            iree_host_size_t channel,
-                                            bool writer,
-                                            loom_value_id_t* out_view) {
-  loom_op_t* offset = NULL;
-  IREE_RETURN_IF_ERROR(loom_index_constant_build(
-      builder, loom_attr_i64((channel * 2 + writer) * sizeof(uint32_t)),
-      loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET), LOOM_LOCATION_UNKNOWN,
-      &offset));
-  loom_op_t* view = NULL;
-  IREE_RETURN_IF_ERROR(loom_buffer_view_build(
-      builder, frame, loom_index_constant_result(offset),
-      loom_type_shaped_1d(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_I32,
-                          loom_dim_pack_static(1), 0),
-      LOOM_LOCATION_UNKNOWN, &view));
-  *out_view = loom_buffer_view_result(view);
-  return iree_ok_status();
-}
 
 static iree_status_t loom_aie2p_native_program_register(
     void* user_data, iree_host_size_t engine, loom_func_like_t function) {
@@ -41,50 +19,6 @@ static iree_status_t loom_aie2p_native_program_register(
       context->pass->diagnostic_emitter);
 }
 
-// Frame cells live with their channel construction, even when nested calls
-// share them. Each cell has one physical engine owner; resetting it at that
-// construction's entry needs no inter-engine synchronization.
-static iree_status_t loom_aie2p_native_initialize_cursors(
-    loom_aie2p_native_context_t* context, loom_builder_t* builder,
-    loom_value_id_t frame, iree_host_size_t engine, iree_host_size_t begin,
-    iree_host_size_t end) {
-  const loom_pipeline_invocations_t* invocations =
-      &context->code.realization->invocations;
-  loom_op_t* zero = NULL;
-  for (iree_host_size_t i = begin; i < end; ++i) {
-    const loom_aie2p_native_channel_t* channel = &context->channels[i];
-    for (uint32_t direction = 0; direction < 2; ++direction) {
-      const loom_aie2p_native_cursor_t* cursor =
-          direction ? &channel->cursor.writer : &channel->cursor.reader;
-      if (cursor->worker == UINT32_MAX) {
-        continue;
-      }
-      const bool persistent =
-          cursor->advances &&
-          (cursor->shared ||
-           invocations->channels[i].invocation !=
-               invocations->workers[cursor->worker].invocation);
-      if (!persistent || context->core_engines[cursor->worker] != engine) {
-        continue;
-      }
-      if (!zero) {
-        IREE_RETURN_IF_ERROR(loom_scalar_constant_build(
-            builder, loom_attr_i64(0), loom_type_scalar(LOOM_SCALAR_TYPE_I32),
-            LOOM_LOCATION_UNKNOWN, &zero));
-      }
-      loom_value_id_t view = LOOM_VALUE_ID_INVALID;
-      IREE_RETURN_IF_ERROR(loom_aie2p_native_cursor_view(
-          builder, frame, i, direction != 0, &view));
-      const int64_t index = 0;
-      loom_op_t* store = NULL;
-      IREE_RETURN_IF_ERROR(loom_view_store_build(
-          builder, 0, 0, loom_scalar_constant_result(zero), view, NULL, 0,
-          &index, 1, 0, 0, LOOM_LOCATION_UNKNOWN, &store));
-    }
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_aie2p_native_program_boundary(
     void* user_data, loom_builder_t* builder, iree_host_size_t engine,
     const loom_pipeline_invocation_schedule_t* scope,
@@ -93,8 +27,7 @@ static iree_status_t loom_aie2p_native_program_boundary(
   loom_aie2p_native_context_t* context = user_data;
   if (child && before && child->resources->channel_count) {
     IREE_RETURN_IF_ERROR(loom_aie2p_native_initialize_cursors(
-        context, builder, state_arguments[0], engine, child->first_channel,
-        child->first_channel + child->resources->channel_count));
+        context, builder, state_arguments[0], engine, child));
     IREE_RETURN_IF_ERROR(loom_aie2p_native_initialize_endpoints(
         context, builder, engine, child));
   }
@@ -158,8 +91,9 @@ static iree_status_t loom_aie2p_native_program_frame(
       sizeof(uint32_t), loom_index_constant_result(size), loom_type_buffer(),
       LOOM_LOCATION_UNKNOWN, &allocation));
   *out_frame = loom_buffer_alloca_result(allocation);
-  return loom_aie2p_native_initialize_cursors(context, builder, *out_frame,
-                                              engine, 0, channel_count);
+  return loom_aie2p_native_initialize_cursors(
+      context, builder, *out_frame, engine,
+      realization->invocations.entries[0]);
 }
 
 iree_status_t loom_aie2p_native_emit_programs(

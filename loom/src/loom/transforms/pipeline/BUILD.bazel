@@ -230,3 +230,26 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
+
+loom_cc_test(
+    name = "control_test",
+    srcs = ["control_test.cc"],
+    deps = [
+        ":control",
+        ":worker_materialization",
+        "//loom/src/loom/analysis/pipeline:execution",
+        "//loom/src/loom/analysis/pipeline:invocations",
+        "//loom/src/loom/analysis/pipeline:resources",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/pipeline",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

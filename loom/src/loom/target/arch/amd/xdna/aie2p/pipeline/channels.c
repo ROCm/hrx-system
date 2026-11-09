@@ -11,7 +11,7 @@
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/type_registry.h"
 #include "loom/ops/view/ops.h"
-#include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
 #include "loom/transforms/pipeline/channel_materialization.h"
 
@@ -600,9 +600,8 @@ iree_status_t loom_aie2p_native_emit_worker(
         endpoint->cursor.reader = state_count;
       }
       const iree_host_size_t channel_index = channel - context->channels;
-      if (!cursor->shared &&
-          emitter.invocations->channels[channel_index].invocation ==
-              emitter.invocations->workers[worker_index].invocation) {
+      if (!loom_aie2p_native_cursor_persistent(emitter.invocations,
+                                               channel_index, cursor)) {
         state_views[state_count] = LOOM_VALUE_ID_INVALID;
         state[state_count++] = emitter.origin;
         continue;
