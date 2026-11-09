@@ -486,7 +486,23 @@ hrx_runtime_set_device_event_sink(hrx_device_event_sink_t sink);
 // GPU accelerator lifecycle
 //===----------------------------------------------------------------------===//
 
+// Initializes GPU execution resources. Initialization and shutdown are
+// externally serialized with other accelerator lifecycle operations. A failed
+// initialization releases its execution resources and may be retried.
+//
+// Native driver connections have process lifetime. HRX_GPU_DRIVER is read for
+// each initialization; HAL visibility settings are captured when the selected
+// driver is first created. Device selection and execution options are applied
+// to each new execution lifetime. The HRX shared library remains loaded after
+// GPU initialization; static embedders must keep the implementation available
+// for the process lifetime.
 HRX_API hrx_status_t hrx_gpu_initialize(uint32_t flags);
+
+// Releases GPU devices, queues, and their host workers. The application
+// releases device resources and joins threads using HRX before calling
+// shutdown. Native connections remain owned by HRX so subsequent initialization
+// can reuse the operating system's process binding. CPU execution remains
+// available if active.
 HRX_API hrx_status_t hrx_gpu_shutdown(void);
 HRX_API hrx_status_t hrx_gpu_device_count(int* count);
 HRX_API hrx_status_t hrx_gpu_device_get(int index, hrx_device_t* device);

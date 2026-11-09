@@ -1,11 +1,9 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 //
-// Global runtime state management. Shared infrastructure is created on first
-// accelerator initialization and destroyed when the last shuts down.
-// Device creation follows the proven pattern from PyTorch's hrx backend:
-// driver-based creation via iree_hal_task_driver_create +
-// iree_hal_driver_create_default_device.
+// Global runtime state management. Execution infrastructure is created on first
+// accelerator initialization and destroyed when the last shuts down. Native GPU
+// driver connections remain available across those execution lifetimes.
 
 #include <stddef.h>
 #include <stdio.h>
@@ -15,6 +13,7 @@
 #include "hrx_internal.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
+#include "iree/base/internal/dynamic_library.h"
 #include "iree/hal/driver/task/driver.h"
 #include "iree/hal/utils/profile_file.h"
 #include "iree/io/file_handle.h"
@@ -35,6 +34,12 @@ static hrx_shared_state_t g_shared = {0};
 static hrx_gpu_state_t g_gpu = {0};
 static hrx_cpu_state_t g_cpu = {0};
 static hrx_device_event_sink_t g_device_event_sink = {0};
+
+// Process-lifetime native connections, independent of execution generations.
+// KFD's primary VM binding retains its original render-file identity after the
+// last execution device is released. Reopening the path cannot reacquire it.
+// Uses the system allocator and never captures a caller's execution options.
+static iree_hal_driver_registry_t* g_gpu_driver_registry = NULL;
 
 static_assert(HRX_DEVICE_EVENT_ABI_VERSION_0 ==
                   IREE_HAL_DEVICE_EVENT_ABI_VERSION_0,
@@ -717,9 +722,54 @@ static void hrx_debug_print_iree_status(const char* label,
   }
 }
 
-static hrx_status_t hrx_create_gpu_driver(const char* driver_name,
-                                          iree_allocator_t alloc,
-                                          iree_hal_driver_t** out_driver) {
+static iree_status_t hrx_initialize_gpu_driver_registry(void) {
+  if (g_gpu_driver_registry) {
+    return iree_ok_status();
+  }
+  const iree_allocator_t allocator = iree_allocator_system();
+  iree_hal_driver_registry_t* registry = NULL;
+  iree_status_t status =
+      iree_hal_driver_registry_allocate(allocator, &registry);
+#ifdef HRX_HAS_IREE_AMD_GPU_DRIVER
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_driver_module_register(registry);
+  }
+#endif
+#ifdef HRX_HAS_IREE_AMDGPU_DRIVER
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdgpu_driver_module_register(registry);
+  }
+#endif
+#if defined(HRX_BUILDING_SHARED)
+  // Keep the owner and its implementation available for the native connection's
+  // lifetime. Static embedders provide this lifetime themselves; the HIP
+  // binding retains its containing module before initializing its embedded HRX
+  // runtime.
+  if (iree_status_is_ok(status)) {
+    iree_string_builder_t path;
+    iree_string_builder_initialize(allocator, &path);
+    status = iree_dynamic_library_append_symbol_path_to_builder(
+        (void*)&hrx_initialize_gpu_driver_registry, &path);
+    iree_dynamic_library_t* library = NULL;
+    if (iree_status_is_ok(status)) {
+      status = iree_dynamic_library_load_from_file(
+          iree_string_builder_buffer(&path), IREE_DYNAMIC_LIBRARY_FLAG_NODELETE,
+          allocator, &library);
+    }
+    iree_dynamic_library_release(library);
+    iree_string_builder_deinitialize(&path);
+  }
+#endif
+  if (!iree_status_is_ok(status)) {
+    iree_hal_driver_registry_free(registry);
+    return status;
+  }
+  g_gpu_driver_registry = registry;
+  return iree_ok_status();
+}
+
+static hrx_status_t hrx_acquire_gpu_driver(const char* driver_name,
+                                           iree_hal_driver_t** out_driver) {
   *out_driver = NULL;
   if (strcmp(driver_name, "amdgpu") != 0 && strcmp(driver_name, "rdna") != 0 &&
       strcmp(driver_name, "cdna") != 0 &&
@@ -731,23 +781,11 @@ static hrx_status_t hrx_create_gpu_driver(const char* driver_name,
              driver_name);
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, message);
   }
-  iree_hal_driver_registry_t* registry = NULL;
-  iree_status_t status = iree_hal_driver_registry_allocate(alloc, &registry);
-#ifdef HRX_HAS_IREE_AMD_GPU_DRIVER
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_amd_driver_module_register(registry);
-  }
-#endif
-#ifdef HRX_HAS_IREE_AMDGPU_DRIVER
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_amdgpu_driver_module_register(registry);
-  }
-#endif
+  iree_status_t status = hrx_initialize_gpu_driver_registry();
   if (iree_status_is_ok(status)) {
     status = iree_hal_driver_registry_acquire_driver(
-        registry, iree_make_cstring_view(driver_name), out_driver);
+        g_gpu_driver_registry, iree_make_cstring_view(driver_name), out_driver);
   }
-  iree_hal_driver_registry_free(registry);
   hrx_debug_print_iree_status("GPU driver create", status);
   if (!iree_status_is_ok(status)) {
     return hrx_status_from_iree(status);
@@ -919,7 +957,7 @@ hrx_status_t hrx_gpu_initialize_with_options(
   const iree_string_view_t scheme = iree_make_cstring_view(driver_name);
   const bool legacy = strcmp(driver_name, "legacy-amdgpu") == 0;
   iree_hal_driver_t* driver = NULL;
-  status = hrx_create_gpu_driver(driver_name, alloc, &driver);
+  status = hrx_acquire_gpu_driver(driver_name, &driver);
   if (!hrx_status_is_ok(status)) {
     hrx_release_shared_state();
     return status;

@@ -650,7 +650,7 @@ TEST_F(ContextMemoryTest, AsyncBatchesUseSharedNativeDomain) {
   IREE_ASSERT_OK(iree_hal_amd_fabric_acquire_allocation_queue(
       fabric_, &context_->endpoint_info.id, UINT32_MAX, &shared));
   EXPECT_EQ(context_->memory.queue, shared);
-  iree_hal_amd_fabric_allocation_queue_release(shared);
+  iree_hal_amd_fabric_release_allocation_queue(fabric_, shared);
 
   const iree_hal_amd_fabric_memory_request_t requests[] = {
       {&options_, 65, 16}, {&options_, 130, 16}, {&options_, 195, 16}};
@@ -772,8 +772,6 @@ TEST_F(ContextMemoryTest, NativeTeardownJoinsReleaseOnItsOwnThread) {
       &capture->operation);
   entered.get_future().get();
   std::promise<void> teardown_started;
-  const auto* allocation_queue = context_->memory.queue;
-  const auto endpoint_id = context_->endpoint_info.id;
   std::thread teardown([&, context = std::exchange(context_, nullptr)] {
     teardown_started.set_value();
     iree_hal_amd_gpu_context_free(context);
@@ -785,11 +783,6 @@ TEST_F(ContextMemoryTest, NativeTeardownJoinsReleaseOnItsOwnThread) {
   EXPECT_EQ(native_backing_.free_count, 1u);
   EXPECT_EQ(native_.destruction_thread, teardown_thread);
   EXPECT_NE(native_.destruction_thread, native_backing_.threads.front());
-  iree_hal_amd_fabric_allocation_queue_t* shared = nullptr;
-  IREE_ASSERT_OK(iree_hal_amd_fabric_acquire_allocation_queue(
-      fabric_, &endpoint_id, UINT32_MAX, &shared));
-  EXPECT_EQ(shared, allocation_queue);
-  iree_hal_amd_fabric_allocation_queue_release(shared);
 }
 
 TEST_F(ContextMemoryTest, ConcurrentCallersRetainAsyncBatchesUntilCompletion) {
@@ -814,12 +807,10 @@ TEST_F(ContextMemoryTest, ConcurrentCallersRetainAsyncBatchesUntilCompletion) {
 }
 
 TEST_F(ContextMemoryTest, ConstructionRollbackCanReattachSharedDomain) {
-  auto* shared = context_->memory.queue;
   iree_hal_amd_gpu_context_deinitialize_memory(context_);
   EXPECT_EQ(context_->memory.queue, nullptr);
   iree_hal_amd_gpu_context_deinitialize_memory(context_);
   IREE_ASSERT_OK(iree_hal_amd_gpu_context_prepare_memory(context_, UINT32_MAX));
-  EXPECT_EQ(context_->memory.queue, shared);
   const iree_hal_amd_fabric_memory_request_t request = {&options_, 64, 64};
   iree_hal_amd_fabric_memory_t memory = {};
   IREE_ASSERT_OK(Acquire(1, &request, &memory));

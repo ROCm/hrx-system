@@ -7,7 +7,10 @@
 #include "iree/hal/driver/amd/fabric/fabric.h"
 
 #include <atomic>
+#include <barrier>
 #include <cstring>
+#include <thread>
+#include <vector>
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -176,11 +179,99 @@ TEST(AmdFabricTest, LogicalContextsShareOnlyTheirEndpointAndNodeQueue) {
   IREE_ASSERT_OK(iree_hal_amd_fabric_acquire_allocation_queue(
       fabric, &fabric->endpoints[0].id, 0, &local));
   EXPECT_NE(first, local);
-  iree_hal_amd_fabric_allocation_queue_release(peer);
-  iree_hal_amd_fabric_allocation_queue_release(local);
-  iree_hal_amd_fabric_allocation_queue_release(first);
+  iree_hal_amd_fabric_release_allocation_queue(fabric, peer);
+  iree_hal_amd_fabric_release_allocation_queue(fabric, local);
+  iree_hal_amd_fabric_release_allocation_queue(fabric, first);
+  // Independent provider/request references remain valid after the last device
+  // acquisition retires the cache entry and releases its native owner.
+  iree_hal_amd_fabric_allocation_queue_retain(second);
+  iree_hal_amd_fabric_release_allocation_queue(fabric, second);
   iree_hal_amd_fabric_release(fabric);
   iree_hal_amd_fabric_allocation_queue_release(second);
+}
+
+class AmdFabricAllocationLifetimeTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    api_ = NativeApi();
+    IREE_ASSERT_OK(iree_hal_amd_fabric_create(
+        &api_, AMDF_NATIVE_LIFETIME_PROCESS, {this, Control}, &fabric_));
+    dormant_allocations_ = live_allocations_.load();
+  }
+
+  void TearDown() override {
+    iree_hal_amd_fabric_release(fabric_);
+    EXPECT_EQ(live_allocations_.load(), 0u);
+  }
+
+  static iree_status_t Control(void* user_data,
+                               iree_allocator_command_t command,
+                               const void* params, void** inout_pointer) {
+    auto* self = static_cast<AmdFabricAllocationLifetimeTest*>(user_data);
+    const bool had_pointer = *inout_pointer != nullptr;
+    const auto system = iree_allocator_system();
+    iree_status_t status =
+        system.ctl(system.self, command, params, inout_pointer);
+    if (iree_status_is_ok(status)) {
+      if (command == IREE_ALLOCATOR_COMMAND_FREE && had_pointer) {
+        --self->live_allocations_;
+      } else if (command != IREE_ALLOCATOR_COMMAND_FREE && !had_pointer) {
+        ++self->live_allocations_;
+      }
+    }
+    return status;
+  }
+
+  // Native dependency stays live through all device generations.
+  amdf_api_t api_ = {};
+  // Shared native owner retained while its allocation consumers come and go.
+  iree_hal_amd_fabric_t* fabric_ = nullptr;
+  // Outstanding host allocations, including the real worker and thread handle.
+  std::atomic<size_t> live_allocations_{0};
+  // Discovery's allocation footprint before any device acquires a worker.
+  size_t dormant_allocations_ = 0;
+};
+
+TEST_F(AmdFabricAllocationLifetimeTest, LastConsumerRetiresWorkerBeforeFabric) {
+  for (int generation = 0; generation < 3; ++generation) {
+    iree_hal_amd_fabric_allocation_queue_t* first = nullptr;
+    iree_hal_amd_fabric_allocation_queue_t* second = nullptr;
+    IREE_ASSERT_OK(iree_hal_amd_fabric_acquire_allocation_queue(
+        fabric_, &fabric_->endpoints[0].id, UINT32_MAX, &first));
+    IREE_ASSERT_OK(iree_hal_amd_fabric_acquire_allocation_queue(
+        fabric_, &fabric_->endpoints[0].id, UINT32_MAX, &second));
+    EXPECT_EQ(first, second);
+    iree_hal_amd_fabric_release_allocation_queue(fabric_, first);
+    EXPECT_GT(live_allocations_.load(), dormant_allocations_);
+    iree_hal_amd_fabric_release_allocation_queue(fabric_, second);
+    EXPECT_EQ(live_allocations_.load(), dormant_allocations_);
+  }
+}
+
+TEST_F(AmdFabricAllocationLifetimeTest,
+       ConcurrentConsumersShareAndRetireWorker) {
+  constexpr size_t kConsumerCount = 4;
+  std::barrier<> acquired(kConsumerCount);
+  std::barrier<> released(kConsumerCount);
+  std::vector<std::thread> consumers;
+  iree_hal_amd_fabric_allocation_queue_t* queues[kConsumerCount] = {};
+  for (size_t i = 0; i < kConsumerCount; ++i) {
+    consumers.emplace_back([&, i] {
+      for (int generation = 0; generation < 4; ++generation) {
+        IREE_EXPECT_OK(iree_hal_amd_fabric_acquire_allocation_queue(
+            fabric_, &fabric_->endpoints[0].id, UINT32_MAX, &queues[i]));
+        acquired.arrive_and_wait();
+        EXPECT_EQ(queues[i], queues[0]);
+        iree_hal_amd_fabric_release_allocation_queue(fabric_, queues[i]);
+        released.arrive_and_wait();
+        EXPECT_EQ(live_allocations_.load(), dormant_allocations_);
+        released.arrive_and_wait();
+      }
+    });
+  }
+  for (auto& consumer : consumers) {
+    consumer.join();
+  }
 }
 
 amdf_status_t AMDF_CALL FailEnumeration(amdf_instance_t* instance,
