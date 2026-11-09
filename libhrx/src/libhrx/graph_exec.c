@@ -268,8 +268,10 @@ static iree_status_t hrx_graph_record_partition(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_command_buffer_begin(command_buffer));
 
-  // Queue execution orders work but does not import or publish payload writes.
+  // Queue waits order external producers; this partition has no local work
+  // to drain at entry. Payload acquisition remains an explicit dependency.
   const iree_hal_barrier_t acquire_barrier = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
       .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
       .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
   };

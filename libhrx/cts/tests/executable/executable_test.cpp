@@ -311,6 +311,30 @@ TEST_CASE_METHOD(GraphVisibilityTest,
 }
 
 TEST_CASE_METHOD(GraphVisibilityTest,
+                 "graph_replays_chain_coherent_data_without_host_waits") {
+  Initialize();
+  AddTransform(0, 0);
+  REQUIRE_OK(hrx().graph_instantiate(graph_, 0, &exec_));
+  for (uint32_t batch = 0; batch < 8; ++batch) {
+    CAPTURE(batch);
+    const uint32_t sentinel = 0x12345678u + batch;
+    std::fill_n(words_, kWordCount, sentinel);
+    uint32_t expected = 0x100u + batch;
+    words_[0] = expected;
+    for (uint32_t replay = 0; replay < 16; ++replay) {
+      REQUIRE_OK(hrx().graph_exec_launch(exec_, stream_));
+      expected = expected * 3 + 7;
+    }
+    REQUIRE_OK(hrx().stream_synchronize(stream_));
+    REQUIRE(words_[0] == expected);
+    for (size_t i = 1; i < kWordCount; ++i) {
+      CAPTURE(i);
+      REQUIRE(words_[i] == sentinel);
+    }
+  }
+}
+
+TEST_CASE_METHOD(GraphVisibilityTest,
                  "graph_host_callback_exchanges_coherent_data") {
   Initialize();
   // Reuse the same input address before and after the callback so the consumer
