@@ -10,6 +10,7 @@ diagnostics, maintained by the shared `--update` workflow.
 | Source widths and pointer arithmetic | `data_models` |
 | Macro expansion and source locations | `macro_operators`, `locations` |
 | Lexical names and initialization dependencies | `local_names`, `initializer_dependencies` |
+| Qualified types, dependent scopes, and missing-name diagnostics | `qualified_names`, `qualified_names_invalid` |
 | Enum representation, promotions, and memory values | `enum_semantics`, `enums`, `enum_storage` |
 | Constant aggregates and references | `aggregate_constants`, `constexpr_aggregate_loads`, `constexpr_references` |
 | Constant storage identity and lifetime | `constexpr_storage`, `constexpr_destruction` |
