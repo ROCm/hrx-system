@@ -47,6 +47,28 @@ loom_aie2p_native_dma_completion_t* loom_aie2p_native_reusable_completion(
     const loom_aie2p_native_tile_t* tile,
     const loom_aie2p_native_transfer_t* next);
 
+// Admits the required task geometry before any optional address variants.
+// Physical inventory tails belong to resource_owner, which may cover several
+// serialized worker occurrences. Runtime addressing never changes this order.
+iree_status_t loom_aie2p_native_select_task_descriptors(
+    loom_aie2p_native_context_t* context, loom_aie2p_native_worker_t* worker,
+    loom_aie2p_native_worker_t* resource_owner,
+    loom_aie2p_native_transfer_task_t* task, bool autonomous,
+    loom_aie2p_native_dma_descriptor_t*** descriptor_tail,
+    loom_aie2p_native_dma_completion_t*** completion_tail, bool* out_valid);
+
+// Refines admitted core tasks with fixed-address variants using only spare
+// descriptors. Variants inherit routes and completion credits; dynamic tasks
+// and exhausted banks retain their original patchable descriptors.
+iree_status_t loom_aie2p_native_refine_transfer_addresses(
+    loom_aie2p_native_context_t* context, iree_host_size_t worker_count);
+
+// Groups final descriptor policies into submission bodies that fit the native
+// call ABI. Fixed local variants pass a queue word; dynamic local patching has
+// a separate body with a fixed patch destination. No body is emitted here.
+iree_status_t loom_aie2p_native_group_submissions(
+    loom_aie2p_native_context_t* context, iree_host_size_t worker_count);
+
 #ifdef __cplusplus
 }
 #endif
