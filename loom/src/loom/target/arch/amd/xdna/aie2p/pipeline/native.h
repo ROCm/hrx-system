@@ -95,8 +95,11 @@ typedef struct loom_aie2p_native_channel_access_t {
   // Protocol instance whose storage is addressed through this access window.
   const loom_aie2p_native_channel_t* channel;
   // Admitted owner aperture shared by payload addresses and lock selectors.
-  // NULL for a finite SRAM producer whose payload is consumed only by DMA.
+  // NULL for SRAM borrows whose payload is consumed only by DMA.
   const loom_xdna_address_window_t* window;
+  // Complete finite SRAM publication uses one batch credit; ordinary remote
+  // borrows acquire and return individual credits through control requests.
+  bool batch_publication;
   // First record's load address as seen by this worker.
   uint32_t address;
   // Minimum alignment of every record address.
@@ -524,6 +527,8 @@ typedef struct loom_aie2p_native_worker_t {
     loom_aie2p_native_channel_access_t* accesses;
     // Number of distinct channel accesses.
     iree_host_size_t count;
+    // SRAM endpoints whose ownership actions consume control replies.
+    iree_host_size_t remote_count;
     // Access index by construction channel index, UINT32_MAX when not used.
     uint32_t* indices;
   } channels;

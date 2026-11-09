@@ -647,6 +647,20 @@ _FIXED_REGISTER_PATTERNS = (
     _lock_pattern("compute_memory", RegisterModule.COMPUTE_MEMORY, 0x1F000, 16),
     _lock_pattern("memory_tile", RegisterModule.MEMORY_TILE, 0xC0000, 64),
     _lock_pattern("shim_noc", RegisterModule.SHIM_NOC, 0x14000, 16),
+    # Reads request an atomic semaphore operation; the result reports success.
+    # Delta is the seven-bit two's-complement address encoding. Negative
+    # acquisitions subtract credits when enough are available.
+    *(
+        _pattern(
+            f"memory_tile.lock.{operation}",
+            RegisterModule.MEMORY_TILE,
+            base,
+            (_field("success", 0, access=RegisterAccess.READ_ONLY),),
+            RegisterDimension("lock", 64, 0x400),
+            RegisterDimension("delta", 128, 4),
+        )
+        for operation, base in (("release", 0xD0000), ("acquire", 0xD0200))
+    ),
     _pattern(
         "core.control",
         RegisterModule.CORE,

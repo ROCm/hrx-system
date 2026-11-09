@@ -702,3 +702,65 @@ pipeline.def<kernel> public retain target(@array_target) @test() run(%input_arg:
     func.call @egress(%left, %output, %origin, %left_count) : (channel<tile<16xi32>>, buffer, offset, index)
   }
 }
+
+// ====
+
+// Both SRAM records are produced before output begins. Acquiring the second
+// while the first write is pending would mix a register reply with its DMA
+// completion token. Acquiring both before issuing either copy avoids that
+// conflict; the compiler cannot silently add a wait to this authored schedule.
+aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
+
+pipeline.def<kernel> public retain target(@device) @pending_sram_reply() run(%input_arg: buffer, %output_arg: buffer) {
+  %input, %output = buffer.assume.alignment %input_arg, %output_arg {minimum_alignment = 4} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %storage_bytes = index.constant 128 : offset
+  %record_bytes = index.constant 64 : offset
+  %begin = index.constant 0 : index
+  %capacity = index.constant 2 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %sram = pipeline.memory<workgroup>[0, 1] : pool
+  %local_storage = buffer.alloca<workgroup> pool(%memory) align(4) %storage_bytes : buffer
+  %local_slots = buffer.view %local_storage[%origin] : buffer -> view<2x16xi32>
+  %local = channel.bind<fifo> %local_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %result_storage = buffer.alloca<workgroup> pool(%sram) align(4) %storage_bytes : buffer
+  %result_slots = buffer.view %result_storage[%origin] : buffer -> view<2x16xi32>
+  %result = channel.bind<fifo> %result_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %end step %step] {
+      %offset = index.scale %record, %record_bytes : index, offset -> offset
+      %external_input = buffer.view %input[%offset] : buffer -> view<16xi32>
+      %write, %payload = channel.reserve %local : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      %ingress = kernel.async.copy %external_input to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+      %arrival = kernel.async.group %ingress : kernel.async.token -> kernel.async.group
+      kernel.async.wait %arrival {newer_groups = 0} : kernel.async.group
+      %value = view.load %payload[0] : view<16xi32> -> i32
+      %increment = scalar.constant 37 : i32
+      %updated = scalar.addi %value, %increment : i32
+      view.store %updated, %payload[0] : i32, view<16xi32>
+      channel.publish %write : write<tile<16xi32>>
+    }
+    %first_output = buffer.view %output[%origin] : buffer -> view<16xi32>
+    %second_output = buffer.view %output[%record_bytes] : buffer -> view<16xi32>
+    %first_read, %first_payload = channel.acquire %result : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+    %first_copy = kernel.async.copy %first_payload to %first_output {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+    %first_group = kernel.async.group %first_copy : kernel.async.token -> kernel.async.group
+    // ERROR@+1: XDNA/051 {requirement="DMA completion before an SRAM credit request uses the same core reply stream"}
+    %second_read, %second_payload = channel.acquire %result : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+    %second_copy = kernel.async.copy %second_payload to %second_output {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+    %second_group = kernel.async.group %second_copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %first_group {newer_groups = 1} : kernel.async.group
+    kernel.async.wait %second_group {newer_groups = 0} : kernel.async.group
+    channel.release %first_read : read<tile<16xi32>>
+    channel.release %second_read : read<tile<16xi32>>
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %end step %step] {
+      %read, %source = channel.acquire %local : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+      %write, %destination = channel.reserve %result : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      channel.copy %read -> %write : read<tile<16xi32>>, write<tile<16xi32>>
+    }
+  }
+}

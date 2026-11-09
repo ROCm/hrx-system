@@ -126,6 +126,7 @@ loom_cc_library(
         "programs.c",
         "refill.c",
         "sharing.c",
+        "sram.c",
         "storage.c",
         "switch.c",
         "transport.c",
@@ -137,6 +138,7 @@ loom_cc_library(
         "native.h",
         "refill.h",
         "sharing.h",
+        "sram.h",
         "storage.h",
         "switch.h",
     ],
@@ -291,6 +293,18 @@ loom_cc_test(
 loom_cc_test(
     name = "phases_test",
     srcs = ["phases_test.cc"],
+    deps = [
+        ":native",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:type_registry",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "sram_test",
+    srcs = ["sram_test.cc"],
     deps = [
         ":native",
         "//loom/src/loom/ir",

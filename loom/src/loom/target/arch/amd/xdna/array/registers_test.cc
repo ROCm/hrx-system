@@ -10,6 +10,32 @@
 
 namespace {
 
+TEST(XdnaRegisterFactsTest, AddressesAtomicSramCreditRequests) {
+  // AM025 and the NPU2 driver encode lock, operation, and signed delta in
+  // address bits 15:10, 9, and 8:2. The read result is the success bit.
+  const loom_xdna_register_field_id_t fields[] = {
+      LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_LOCK_RELEASE_SUCCESS,
+      LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_LOCK_ACQUIRE_SUCCESS,
+  };
+  for (uint16_t operation = 0; operation < IREE_ARRAYSIZE(fields);
+       ++operation) {
+    const auto info = loom_xdna_register_field_info(fields[operation]);
+    EXPECT_EQ(info.access, LOOM_XDNA_REGISTER_ACCESS_READ_ONLY);
+    EXPECT_EQ(info.least_significant_bit, 0u);
+    EXPECT_EQ(info.bit_width, 1u);
+    for (uint16_t lock = 0; lock < 64; ++lock) {
+      for (uint16_t delta = 0; delta < 128; ++delta) {
+        const uint16_t indices[] = {lock, delta};
+        EXPECT_EQ(loom_xdna_register_field_address(
+                      loom_xdna_npu2_array_family(), fields[operation], {7, 1},
+                      indices),
+                  UINT64_C(0xE1D0000) | (lock << 10) | (operation << 9) |
+                      (delta << 2));
+      }
+    }
+  }
+}
+
 TEST(XdnaRegisterFactsTest, ExposesCrossVerifiedSemanticCorpus) {
   const loom_xdna_register_field_id_t field_id =
       LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_BD_WORD5_LOCK_ACQUIRE_VALUE;

@@ -13,6 +13,7 @@
 #include "loom/ops/view/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/sram.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/storage.h"
 #include "loom/transforms/pipeline/channel_materialization.h"
 
@@ -138,36 +139,6 @@ static iree_status_t loom_aie2p_native_endpoint(
                         : iree_ok_status();
 }
 
-static iree_status_t loom_aie2p_native_sram_publish_helper(
-    loom_aie2p_native_context_t* context,
-    const loom_aie2p_native_channel_t* channel, uint8_t packet,
-    loom_symbol_ref_t* out_symbol) {
-  loom_aie2p_worker_builder_t* code = &context->code;
-  loom_builder_t builder;
-  loom_op_t* function;
-  IREE_RETURN_IF_ERROR(loom_aie2p_worker_helper(
-      code, NULL, 0, NULL, 0, &builder, out_symbol, &function));
-  const loom_aie2p_native_tile_t* tile =
-      context->pool_tiles[channel->pool_index];
-  const uint64_t origin =
-      (uint64_t)tile->coordinate.column << context->family->column_shift |
-      (uint64_t)tile->coordinate.row << context->family->row_shift;
-  const uint16_t locks[] = {channel->free_lock, channel->ready_lock};
-  // Complete producer and consumer lifetimes alternate. Clearing the free
-  // credit and publishing the full batch therefore cannot race a partial
-  // consumer release; these are ownership transitions, not atomic additions.
-  for (uint32_t i = 0; i < IREE_ARRAYSIZE(locks); ++i) {
-    loom_value_id_t value;
-    IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(code, &builder, i, &value));
-    const uint64_t address = loom_xdna_register_field_address(
-        context->family, tile->memory_layout->lock_value, tile->coordinate,
-        &locks[i]);
-    IREE_RETURN_IF_ERROR(loom_aie2p_worker_control_write(
-        code, &builder, packet, (uint32_t)(address - origin), &value, 1));
-  }
-  return loom_aie2p_worker_return(&builder, NULL, 0);
-}
-
 iree_status_t loom_aie2p_native_cursor_advance(
     loom_builder_t* builder, const loom_aie2p_native_channel_t* channel,
     loom_value_id_t origin, loom_value_id_t cursor, loom_location_id_t location,
@@ -247,6 +218,16 @@ static iree_status_t loom_aie2p_native_channel_action(
       if (endpoint->access->window) {
         IREE_RETURN_IF_ERROR(loom_aie2p_native_invoke(
             builder, *acquire, &emitter->acquire_delta, 1, NULL, NULL));
+      } else if (!endpoint->access->batch_publication) {
+        if (!loom_symbol_ref_is_valid(*acquire)) {
+          IREE_RETURN_IF_ERROR(loom_aie2p_native_sram_lock_helper(
+              emitter->context, endpoint->access->channel,
+              write ? endpoint->access->channel->free_lock
+                    : endpoint->access->channel->ready_lock,
+              true, 1, acquire));
+        }
+        IREE_RETURN_IF_ERROR(
+            loom_aie2p_native_invoke(builder, *acquire, NULL, 0, NULL, NULL));
       }
       if (!write) {
         for (const loom_aie2p_native_refill_t* refill = endpoint->refills;
@@ -297,7 +278,7 @@ static iree_status_t loom_aie2p_native_channel_action(
   if (!credits) {
     return iree_ok_status();
   }
-  if (!endpoint->access->window) {
+  if (endpoint->access->batch_publication) {
     const loom_type_t offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
     loom_op_t *delta, *prefix, *capacity, *complete, *publish;
     IREE_RETURN_IF_ERROR(
@@ -335,6 +316,16 @@ static iree_status_t loom_aie2p_native_channel_action(
       publish ? &endpoint->publish : &endpoint->release;
   if (credits != 1) {
     completion = &additional;
+  }
+  if (!endpoint->access->window) {
+    if (!loom_symbol_ref_is_valid(*completion)) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_native_sram_lock_helper(
+          emitter->context, endpoint->access->channel,
+          publish ? endpoint->access->channel->ready_lock
+                  : endpoint->access->channel->free_lock,
+          false, credits, completion));
+    }
+    return loom_aie2p_native_invoke(builder, *completion, NULL, 0, NULL, NULL);
   }
   if (!loom_symbol_ref_is_valid(*completion)) {
     IREE_RETURN_IF_ERROR(loom_aie2p_native_lock_helper(
@@ -442,7 +433,8 @@ iree_status_t loom_aie2p_native_emit_worker(
     memset(erased_values, 0, channels->plan.value_count);
     for (iree_host_size_t i = 0; i < channels->plan.action_count; ++i) {
       const loom_channel_plan_action_t* action = &channels->plan.actions[i];
-      if (action->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE) {
+      if (action->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE &&
+          action->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE) {
         continue;
       }
       const iree_host_size_t channel_index =
@@ -522,7 +514,7 @@ iree_status_t loom_aie2p_native_emit_worker(
                                    &buffer_type, &endpoint->buffer));
     }
     const loom_aie2p_native_channel_t* channel = endpoint->access->channel;
-    if (!endpoint->access->window) {
+    if (endpoint->access->batch_publication) {
       endpoint->publication = state_count;
       state_views[state_count] = LOOM_VALUE_ID_INVALID;
       state[state_count++] = emitter.origin;
