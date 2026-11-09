@@ -27,6 +27,22 @@
 // Utilities
 //===----------------------------------------------------------------------===//
 
+// Region yields transfer managed lifetimes along the chosen control-flow edge.
+// Select and lookup instead choose among already available values; replacing a
+// yield with either would leave the source owners' obligations behind. Keep
+// ref/ptr results on control-flow edges until lifetime-aware lowering owns
+// them.
+static bool loom_scf_results_can_selectify(const loom_module_t* module,
+                                           const loom_op_t* op) {
+  const loom_value_id_t* results = loom_op_const_results(op);
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    if (loom_type_is_reference(loom_module_value_type(module, results[i]))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static bool loom_scf_value_facts_are_exact_i64(loom_rewriter_t* rewriter,
                                                loom_value_id_t value,
                                                int64_t* out_value) {
@@ -784,6 +800,13 @@ static bool loom_scf_region_branch_tail_ops_match(
     }
     loom_type_t reference_type =
         loom_module_value_type(rewriter->module, reference_operands[i]);
+    // Factoring would yield this operand through a new region result. A
+    // managed operand may only be borrowed by the original tail (ref.borrow,
+    // for example); introducing that result would consume its source owner.
+    // Operand equality does not establish a lifetime-preserving transfer.
+    if (loom_type_is_reference(reference_type)) {
+      return false;
+    }
     if (!loom_type_equal(
             reference_type,
             loom_module_value_type(rewriter->module, candidate_operands[i]))) {
@@ -1066,7 +1089,8 @@ static bool loom_scf_switch_yielded_value_types_match_results(
 
 static iree_status_t loom_scf_switch_selectify_yield_only(
     loom_op_t* op, loom_rewriter_t* rewriter) {
-  if (op->result_count == 0 || op->tied_result_count != 0) {
+  if (op->result_count == 0 || op->tied_result_count != 0 ||
+      !loom_scf_results_can_selectify(rewriter->module, op)) {
     return iree_ok_status();
   }
   loom_region_branch_t branch = loom_region_branch_cast(rewriter->module, op);
@@ -1844,6 +1868,9 @@ iree_status_t loom_scf_if_canonicalize(loom_op_t* op,
     IREE_RETURN_IF_ERROR(loom_scf_if_fold_exact_boolean_yields(
         op, rewriter, &exact_boolean_folded));
     if (exact_boolean_folded) {
+      return iree_ok_status();
+    }
+    if (!loom_scf_results_can_selectify(rewriter->module, op)) {
       return iree_ok_status();
     }
     IREE_RETURN_IF_ERROR(loom_scf_if_selectify_yield_only(op, rewriter));
