@@ -1,0 +1,64 @@
+// RUN: emit cxx roundtrip
+// REQUIRES: loom-export-cxx
+#include <loomcxx/command.h>
+#include <loomcxx/kernel.h>
+
+using View = loom::type::view<loom::type::shape<loom::type::dynamic, 4>,
+                              float,
+                              loom::type::encoding<loom::encoding::role::layout, 2>>;
+
+[[loom::command_program]]
+void consume(loom::type::index count, [[loom::launch]] View first, View second);
+
+[[loom::command_program]]
+void repeat(loom::type::index count, [[loom::launch]] View input) {
+  loom::command::launch<consume>(count, input, input);
+}
+
+// ----
+#include <loomcxx/command.h>
+#include <loomcxx/view.h>
+
+[[loom::command_program, loom::symbol("repeat")]]
+void repeat(loom::type::index count, [[loom::launch]] loom::type::view<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>> input);
+
+[[loom::command_program, loom::symbol("consume")]]
+void consume(loom::type::index v4, [[loom::launch]] loom::type::view<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>> v9, loom::type::view<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>> v10);
+
+[[loom::command_program, loom::symbol("repeat")]]
+void repeat(loom::type::index count, [[loom::launch]] loom::type::view<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>> input) {
+  loom::command::launch<consume>(count, input, input);
+}
+
+// ====
+// RUN: emit cxx roundtrip
+// REQUIRES: loom-export-cxx
+#include <loomcxx/command.h>
+#include <loomcxx/kernel.h>
+
+using View = loom::type::view<loom::type::shape<loom::type::dynamic, 4>,
+                              float,
+                              loom::type::encoding<loom::encoding::role::layout, 2>>;
+
+[[loom::command_program]]
+void consume(View first, View second, loom::type::index count);
+
+[[loom::command_program]]
+void repeat(View input, loom::type::index count) {
+  loom::command::launch<consume>(input, input, count);
+}
+
+// ----
+#include <loomcxx/command.h>
+#include <loomcxx/view.h>
+
+[[loom::command_program, loom::symbol("repeat")]]
+void repeat(loom::type::view<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>> input, loom::type::index count);
+
+[[loom::command_program, loom::symbol("consume")]]
+void consume(loom::type::view<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>> v6, loom::type::view<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>> v9, loom::type::index v10);
+
+[[loom::command_program, loom::symbol("repeat")]]
+void repeat(loom::type::view<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>> input, loom::type::index count) {
+  loom::command::launch<consume>(input, input, count);
+}

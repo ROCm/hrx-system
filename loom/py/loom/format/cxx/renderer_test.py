@@ -439,6 +439,32 @@ command.def public @misordered(%dimension: index, %token: i32) launch(%output: v
         render_module(load_module(source.encode()))
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "func.def public @shared(%size: index, %first: view<[%size]xf32>, "
+        "%second: view<[%size]xf32>) { func.return }",
+        "command.def public @shared(%size: index) "
+        "launch(%first: view<[%size]xf32>, %second: view<[%size]xf32>) "
+        "{ command.return }",
+        "kernel.def @shared(%size: index, %first: view<[%size]xf32>, "
+        "%second: view<[%size]xf32>) { "
+        "%one = index.constant 1 : index\n"
+        "kernel.launch.config workgroups(%one, %one, %one) "
+        "workgroup_size(%one, %one, %one) : index\n"
+        "} launch() { kernel.return }",
+    ],
+)
+def test_rejects_shared_formal_dimensions_without_weakening_equality(
+    source: str,
+) -> None:
+    with pytest.raises(
+        CxxRenderError,
+        match="dependencies do not form a C\\+\\+ source-order projection",
+    ):
+        render_module(load_module(source.encode()))
+
+
 def test_preserves_scalar_kernel_arguments() -> None:
     source = SOURCE_MODULE.replace(
         "} launch(%input: buffer, %output: buffer) {",

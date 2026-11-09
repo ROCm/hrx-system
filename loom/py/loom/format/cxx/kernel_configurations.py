@@ -27,7 +27,9 @@ from loom.ir import (
 class _ConfigurationParameter:
     """One source parameter reconstructed from native config-region arguments."""
 
+    # Payload identity represented by one C++ configuration parameter.
     value_id: int
+    # Number of flat dimensions, layout, and payload components consumed.
     component_count: int
 
 
@@ -225,52 +227,12 @@ class CxxKernelConfigurationRenderer(CxxPipelineRenderer):
     def _configuration_parameters(
         self, kernel: Operation, arguments: list[int]
     ) -> list[_ConfigurationParameter]:
-        grouped: dict[int, _ConfigurationParameter] = {}
-        covered: set[int] = set()
-        for ordinal, value_id in enumerate(arguments):
-            value_type = self.module.values[value_id].type
-            if not (
-                isinstance(value_type, ShapedType)
-                and value_type.type_kind == TypeKind.VIEW
-            ):
-                continue
-            dependencies = self._source_type_dependencies(value_id)
-            start = ordinal - len(dependencies)
-            if start < 0 or tuple(arguments[start:ordinal]) != dependencies:
-                raise CxxRenderError(
-                    kernel,
-                    "kernel configuration view dependencies do not form a "
-                    "flattened C++ source parameter",
-                )
-            component_ordinals = set(range(start, ordinal + 1))
-            if component_ordinals & covered or start in grouped:
-                raise CxxRenderError(
-                    kernel,
-                    "kernel configuration view parameters have overlapping "
-                    "type dependencies",
-                )
-            covered.update(component_ordinals)
-            grouped[start] = _ConfigurationParameter(
-                value_id=value_id, component_count=len(dependencies) + 1
+        return [
+            _ConfigurationParameter(parameter.value_id, len(parameter.dependencies) + 1)
+            for parameter in self._flat_source_parameters(
+                kernel, arguments, signature="kernel configuration"
             )
-
-        parameters: list[_ConfigurationParameter] = []
-        ordinal = 0
-        while ordinal < len(arguments):
-            grouped_parameter = grouped.get(ordinal)
-            if grouped_parameter is not None:
-                parameters.append(grouped_parameter)
-                ordinal += grouped_parameter.component_count
-                continue
-            if ordinal in covered:
-                raise CxxRenderError(
-                    kernel,
-                    "kernel configuration type dependency is not owned by its "
-                    "source view parameter",
-                )
-            parameters.append(_ConfigurationParameter(arguments[ordinal], 1))
-            ordinal += 1
-        return parameters
+        ]
 
     def _configuration_parameter_type(self, value_id: int) -> str:
         value_type = self.module.values[value_id].type

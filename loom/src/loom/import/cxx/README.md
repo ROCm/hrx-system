@@ -2463,6 +2463,14 @@ without reconstructing the original mutable reference signature. Authored
 destructive function ties have no equivalent C++ reference spelling and produce
 an export diagnostic instead of silently losing their contract.
 
+Each returned or passed shaped value includes its ordered dimensions and layout.
+An independently returned size remains a separate record field even when its
+value is also a view's dimension. Reusing a view in several call arguments
+preserves each argument position. Function parameters still represent complete
+source values: an authored IR signature that shares one dimension between two
+formal views cannot be exported as two independent C++ parameters, because that
+would discard the equality required by the IR signature.
+
 `[[loom::op]]` declarations continue to bind facade operations directly to a
 specific High operation and take precedence over an ordinary function body.
 Reachable private operators receive readable module-local names. A

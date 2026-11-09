@@ -34,6 +34,17 @@ loom_check_test_suite(
 )
 
 loom_check_test(
+    name = "dependent_groups_export_test",
+    src = "dependent_groups_export.cxx-test",
+    data = ["//loom/py/loom/tools:loom-export-cxx"],
+    env = {
+        "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
+    },
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_check_test(
     name = "dependent_view_loops_roundtrip_test",
     src = "dependent_view_loops_roundtrip.cxx-test",
     data = ["//loom/py/loom/tools:loom-export-cxx"],

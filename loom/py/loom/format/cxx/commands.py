@@ -29,8 +29,11 @@ from loom.ir import (
 class SourceParameter:
     """One reconstructed C++ parameter and its flattened type dependencies."""
 
+    # Payload identity represented by one complete C++ value.
     value_id: int
+    # Ordered dimensions and layout preceding this payload in the flat ABI.
     dependencies: tuple[int, ...]
+    # Whether the value belongs to a staged callable's launch bindings.
     binding: bool
 
 
@@ -113,10 +116,8 @@ class CxxCommandRenderer(CxxExpressionRenderer):
             )
         specializations = arguments[:specialization_count]
         bindings = arguments[specialization_count:]
-        specialization_set = set(specializations)
-
         binding_parameters: list[SourceParameter] = []
-        binding_dependencies: set[int] = set()
+        binding_dependencies: list[int] = []
         for binding in bindings:
             value_type = self.module.values[binding].type
             is_storage = isinstance(value_type, BufferType) or (
@@ -129,105 +130,50 @@ class CxxCommandRenderer(CxxExpressionRenderer):
                     "launch binding is neither a buffer nor a typed view",
                 )
             dependencies = self._source_type_dependencies(binding)
-            for dependency in dependencies:
-                if dependency not in specialization_set:
-                    raise CxxRenderError(
-                        operation,
-                        "view binding references a value outside its "
-                        "specialization prefix",
-                    )
-                if dependency in binding_dependencies:
-                    raise CxxRenderError(
-                        operation,
-                        "view bindings share a dependent signature value",
-                    )
-                binding_dependencies.add(dependency)
+            binding_dependencies.extend(dependencies)
             binding_parameters.append(
                 SourceParameter(binding, dependencies, binding=True)
             )
 
-        remaining = [
-            value for value in specializations if value not in binding_dependencies
-        ]
-        remaining_set = set(remaining)
-        specialization_dependencies: set[int] = set()
-        specialization_views: dict[int, tuple[int, ...]] = {}
-        for value in remaining:
-            dependencies = self._source_type_dependencies(value)
-            if not dependencies:
-                continue
-            for dependency in dependencies:
-                if dependency not in remaining_set:
-                    raise CxxRenderError(
-                        operation,
-                        "specialization view references a value outside "
-                        "its flattened source parameter",
-                    )
-                if dependency in specialization_dependencies:
-                    raise CxxRenderError(
-                        operation,
-                        "specialization views share a dependent signature value",
-                    )
-                specialization_dependencies.add(dependency)
-            specialization_views[value] = dependencies
-
-        specialization_parameters = [
-            SourceParameter(
-                value,
-                specialization_views.get(value, ()),
-                binding=False,
-            )
-            for value in remaining
-            if value not in specialization_dependencies
-        ]
-        expected_specializations = [
-            component
-            for parameter in specialization_parameters
-            for component in (*parameter.dependencies, parameter.value_id)
-        ]
-        expected_specializations.extend(
-            component
-            for parameter in binding_parameters
-            for component in parameter.dependencies
-        )
-        if expected_specializations != specializations:
+        # Binding metadata occupies an ordered suffix of the specialization
+        # prefix. Reusing an actual View repeats its metadata at each position;
+        # it does not make those positions one source parameter.
+        boundary = len(specializations) - len(binding_dependencies)
+        if boundary < 0 or specializations[boundary:] != binding_dependencies:
             raise CxxRenderError(
                 operation,
                 "staged signature dependencies do not form a C++ source-order "
                 "projection",
             )
+        specialization_parameters = self._flat_source_parameters(
+            operation, specializations[:boundary], signature="staged signature"
+        )
         return specialization_parameters, binding_parameters
 
     def _flat_source_parameters(
-        self, operation: Operation, values: list[int]
+        self,
+        operation: Operation,
+        values: list[int],
+        *,
+        signature: str = "flattened signature",
     ) -> list[SourceParameter]:
-        """Reconstructs ordinary source values from flattened components."""
+        """Reconstructs source values from complete positional component groups."""
 
-        dependencies = {
-            dependency
-            for value in values
-            for dependency in self._source_type_dependencies(value)
-        }
-        parameters = [
-            SourceParameter(
-                value,
-                self._source_type_dependencies(value),
-                binding=False,
-            )
-            for value in values
-            if value not in dependencies
-        ]
-        flattened = [
-            component
-            for parameter in parameters
-            for component in (*parameter.dependencies, parameter.value_id)
-        ]
-        if flattened != values:
-            raise CxxRenderError(
-                operation,
-                "flattened signature dependencies do not form a C++ source-order "
-                "projection",
-            )
+        parameters: list[SourceParameter] = []
+        end = len(values)
+        while end:
+            value = values[end - 1]
+            dependencies = self._source_type_dependencies(value)
+            start = end - 1 - len(dependencies)
+            if start < 0 or tuple(values[start : end - 1]) != dependencies:
+                raise CxxRenderError(
+                    operation,
+                    f"{signature} dependencies do not form a C++ source-order "
+                    "projection",
+                )
+            parameters.append(SourceParameter(value, dependencies, binding=False))
+            end = start
+        parameters.reverse()
         return parameters
 
     def _staged_parameter_type(self, operation: Operation, value_id: int) -> str:
