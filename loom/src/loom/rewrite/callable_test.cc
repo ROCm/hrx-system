@@ -1026,6 +1026,13 @@ TEST_F(CallableInlineTest, CloneDefinitionRemapsOnlySelfReferences) {
       &retained_remap, loom_attr_symbol(source_ref), &projected_symbol));
   EXPECT_EQ(loom_attr_as_symbol(projected_symbol).symbol_id,
             target_ref.symbol_id);
+  // Retained correspondence outlives invocation-local observers and selected
+  // operation arrays. It keeps the symbol transform, but neither callback.
+  EXPECT_EQ(retained_remap.clone_observer.fn, nullptr);
+  EXPECT_EQ(retained_remap.clone_observer.finish_fn, nullptr);
+  EXPECT_EQ(retained_remap.clone_observer.user_data, nullptr);
+  EXPECT_EQ(retained_remap.op_projection.entries, nullptr);
+  EXPECT_EQ(retained_remap.op_projection.count, 0u);
   ASSERT_TRUE(loom_func_call_isa(cloned_self_call));
   ASSERT_TRUE(loom_func_call_isa(cloned_helper_call));
   EXPECT_EQ(loom_func_call_callee(cloned_self_call).symbol_id,

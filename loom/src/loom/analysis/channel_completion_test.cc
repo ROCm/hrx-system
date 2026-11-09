@@ -481,5 +481,39 @@ TEST_F(ChannelCompletionTest, DeferredPrefixPreservesTotalAdmissions) {
   ExpectActions({{0, 2}, {0, 2}, {0, 2}, {2, 2}});
 }
 
+TEST_F(ChannelCompletionTest, LaterReadCannotReturnTheEarlierRecordsCredit) {
+  const auto earlier = Acquire(first_);
+  const auto later = Acquire(first_);
+  Release(later);
+  Release(earlier);
+  Return();
+  ExpectActions({{0, 2}, {0, 2}, {0, 2}, {2, 2}});
+}
+
+TEST_F(ChannelCompletionTest, BranchesCompleteTheirOwnPublicationPrefixes) {
+  auto* forward = Block();
+  auto* reverse = Block();
+  auto* finish = Block();
+  Choose(forward, reverse);
+  At(forward);
+  const auto first_forward = Reserve(first_);
+  const auto second_forward = Reserve(first_);
+  Publish(first_forward);
+  Publish(second_forward);
+  Branch(finish);
+  At(reverse);
+  const auto first_reverse = Reserve(first_);
+  const auto second_reverse = Reserve(first_);
+  Publish(second_reverse);
+  Publish(first_reverse);
+  Branch(finish);
+  At(finish);
+  Return();
+  // With no execution-count proof, the admission bound sums all four static
+  // sites. Credit deltas still follow each branch's own publication order.
+  ExpectActions(
+      {{0, 4}, {0, 4}, {1, 4}, {1, 4}, {0, 4}, {0, 4}, {0, 4}, {2, 4}});
+}
+
 }  // namespace
 }  // namespace loom

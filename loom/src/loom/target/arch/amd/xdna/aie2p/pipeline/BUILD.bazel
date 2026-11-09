@@ -118,6 +118,7 @@ loom_cc_library(
         "configuration.c",
         "distribution.c",
         "dma.c",
+        "dma_resources.c",
         "native.c",
         "phases.c",
         "programs.c",
@@ -127,6 +128,7 @@ loom_cc_library(
         "transport.c",
     ],
     hdrs = [
+        "dma_resources.h",
         "native.h",
         "refill.h",
         "sharing.h",
@@ -178,6 +180,16 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "dma_resources_test",
+    srcs = ["dma_resources_test.cc"],
+    deps = [
+        ":native",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

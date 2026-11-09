@@ -59,8 +59,9 @@ class PipelineRealizationTest : public ::testing::Test {
                                 loom_pipeline_def_body(definition));
       loom_op_t* strand;
       IREE_ASSERT_OK(loom_pipeline_strand_build(
-          &builder_, 0, loom_symbol_ref_null(), nullptr, 0, &origin, 1, nullptr,
-          0, &count, 1, nullptr, 0, &count, 1, LOOM_LOCATION_UNKNOWN, &strand));
+          &builder_, 0, 0, loom_symbol_ref_null(), nullptr, 0, &origin, 1,
+          nullptr, 0, &count, 1, nullptr, 0, &count, 1, LOOM_LOCATION_UNKNOWN,
+          &strand));
       loom_builder_enter_region(&builder_, strand,
                                 loom_pipeline_strand_body(strand));
       loom_op_t* call;
