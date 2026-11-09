@@ -559,7 +559,7 @@ hrx_status_t hrx_graph_add_host_call_node(
   }
 
   hrx_graph_host_call_node_attrs_internal_t* h = &node->attrs.host;
-  h->fn = (void (*)(void*))attrs->fn;
+  h->fn = attrs->fn;
   h->user_data = attrs->user_data;
 
   iree_status_t status = hrx_graph_add_node_internal(graph, node);

@@ -189,6 +189,7 @@ void HrxLoader::load(const std::string& path) {
   LOAD(graph_create);
   LOAD(graph_release);
   LOAD(graph_add_kernel_node);
+  LOAD(graph_add_host_call_node);
   LOAD(graph_instantiate);
   LOAD(graph_exec_release);
   LOAD(graph_exec_launch);

@@ -151,6 +151,7 @@ class HrxLoader {
   decltype(&hrx_graph_create) graph_create;
   decltype(&hrx_graph_release) graph_release;
   decltype(&hrx_graph_add_kernel_node) graph_add_kernel_node;
+  decltype(&hrx_graph_add_host_call_node) graph_add_host_call_node;
   decltype(&hrx_graph_instantiate) graph_instantiate;
   decltype(&hrx_graph_exec_release) graph_exec_release;
   decltype(&hrx_graph_exec_launch) graph_exec_launch;

@@ -23,8 +23,6 @@ typedef enum hrx_graph_block_type_e {
   HRX_GRAPH_BLOCK_TYPE_QUEUE_EXECUTE,
 } hrx_graph_block_type_t;
 
-typedef void (*hrx_graph_host_callback_fn_t)(void* user_data);
-
 typedef struct hrx_graph_barrier_block_attrs_t {
   iree_hal_queue_barrier_flags_t flags;
 } hrx_graph_barrier_block_attrs_t;
@@ -48,8 +46,11 @@ typedef struct hrx_graph_copy_block_attrs_t {
 } hrx_graph_copy_block_attrs_t;
 
 typedef struct hrx_graph_host_call_block_attrs_t {
-  hrx_graph_host_callback_fn_t fn;
+  // Application callback returning the status published to dependent work.
+  hrx_host_call_fn_t fn;
+  // Borrowed application state, retained through graph completion.
   void* user_data;
+  // HAL execution policy for this host node.
   iree_hal_host_call_flags_t flags;
 } hrx_graph_host_call_block_attrs_t;
 
@@ -618,11 +619,11 @@ static iree_status_t hrx_graph_host_callback(
     void* user_data, const uint64_t args[4],
     iree_hal_host_call_context_t* context) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  hrx_graph_host_callback_fn_t call_fn = (hrx_graph_host_callback_fn_t)args[0];
+  hrx_host_call_fn_t call_fn = (hrx_host_call_fn_t)args[0];
   void* call_user_data = (void*)args[1];
-  call_fn(call_user_data);
+  iree_status_t status = hrx_status_to_iree(call_fn(call_user_data));
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  return status;
 }
 
 hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec, hrx_stream_t stream) {
