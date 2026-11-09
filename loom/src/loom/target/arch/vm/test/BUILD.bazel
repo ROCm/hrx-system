@@ -93,6 +93,15 @@ loom_check_test(
 )
 
 loom_check_test(
+    name = "view_transport_cxx_test",
+    src = "view_transport.cxx-test",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/emit:vm_binary",
+    ]),
+)
+
+loom_check_test(
     name = "special_members_test",
     src = "special_members.cxx-test",
     target_compatible_with = loom_config_compatible_with([
@@ -110,6 +119,7 @@ iree_py_test(
         "--checker=$(rootpath //loom/src/loom/tools/loom-check:loom-check-test)",
         "--source=$(rootpath special_members.cxx-test)",
         "--source=$(rootpath value_evaluation.cxx-test)",
+        "--source=$(rootpath view_transport.cxx-test)",
         "--source=$(rootpath structured_results.cxx-test)",
         "--source=$(rootpath structured_results.loom-test)",
         "--source=$(rootpath buffer_projection.loom-test)",
@@ -120,6 +130,7 @@ iree_py_test(
         "structured_results.cxx-test",
         "structured_results.loom-test",
         "value_evaluation.cxx-test",
+        "view_transport.cxx-test",
         "//loom/src/loom/tools/loom-check:loom-check-test",
         "//loom/src/loom/tools/loom-import-cxx",
     ],

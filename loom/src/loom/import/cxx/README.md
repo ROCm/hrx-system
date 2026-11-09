@@ -3099,6 +3099,17 @@ selection imports as an ordinary SSA region result. The same rule applies to
 pointers, views, encodings, pipeline handles, and records containing them. A
 view's dynamic dimensions and encoding stay with its payload at every join.
 
+C++ export preserves that complete value through branches, loops, returns, and
+staged calls. Selecting between views of different lengths or layouts copies
+the selected view as a whole. Dimensions and layouts used separately in
+arithmetic, predicates, or new view construction retain their own expressions.
+Transporting a complete view requires no separate C++ assignments for its
+otherwise unobserved metadata.
+Authored IR that independently observes a dependency hidden inside a source
+parameter needs a corresponding source expression. If none exists, export
+identifies the dependency and its containing value instead of adding a parameter
+or changing the function's contract.
+
 Record members can be initialized independently. Reading an initialized member
 does not require the other members, and a loop can carry an initialized counter
 while first constructing a buffer member in its body. A `do` loop executes that

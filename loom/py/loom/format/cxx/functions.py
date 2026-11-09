@@ -158,6 +158,8 @@ class CxxFunctionRenderer(CxxConfigRenderer):
         source_results = self._flat_source_parameters(
             operation, list(operation.results)
         )
+        for result in source_results:
+            self._hide_source_dependencies(result)
         if not source_results:
             self.writer.line(f"{call};")
         elif len(source_results) == 1:
@@ -266,6 +268,7 @@ class CxxFunctionRenderer(CxxConfigRenderer):
             name = self.names[argument]
             parameters.append(f"{type_name} {name}")
             if bind_parameters:
+                self._hide_source_dependencies(parameter)
                 self.expressions[argument] = name
                 self.expression_types[argument] = type_name
 

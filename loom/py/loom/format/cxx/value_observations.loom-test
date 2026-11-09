@@ -1,0 +1,31 @@
+// Predicate bounds observe values absent from the ordinary operand list.
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx roundtrip
+func.def public @bounded(%condition: i1, %value: index, %first: index, %second: index) -> (index) {
+  %limit = scf.if %condition -> (index) {
+    scf.yield %first : index
+  } else {
+    scf.yield %second : index
+  }
+  %bounded = index.assume %value [range(%value, 0, %limit)] : index
+  func.return %bounded : index
+}
+
+// ----
+#include <loomcxx/index.h>
+#include <loomcxx/predicate.h>
+
+[[loom::symbol("bounded")]]
+loom::type::index bounded(bool condition, loom::type::index value, loom::type::index first, loom::type::index second);
+
+[[loom::symbol("bounded")]]
+loom::type::index bounded(bool condition, loom::type::index value, loom::type::index first, loom::type::index second) {
+  loom::type::index limit{0};
+  if (condition) {
+    limit = first;
+  } else {
+    limit = second;
+  }
+  loom::assume(loom::predicate::range(value, 0, limit));
+  return value;
+}

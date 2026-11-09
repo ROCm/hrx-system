@@ -26,6 +26,7 @@ from loom.format.cxx.functions import CxxFunctionRenderer
 from loom.format.cxx.naming import clean_identifier, loop_carrier_stem
 from loom.format.cxx.translation_unit import render_preamble
 from loom.format.cxx.types import KERNEL_COORDINATE_CPP_TYPE
+from loom.format.cxx.value_transport import plan_value_transport
 from loom.format.cxx.view_access import plan_view_access
 from loom.ir import (
     Block,
@@ -684,6 +685,8 @@ class CxxRenderer(CxxFunctionRenderer):
         if len(initial) != len(results):
             raise CxxRenderError(operation, "loop-carried result arity is inconsistent")
         for result, source in zip(results, initial, strict=True):
+            if result in self.suppressed_forwarding_values:
+                continue
             source_expression = self.expression(source)
             source_users = self.users[source]
             preferred_name = loop_carrier_stem(self.names[result])
@@ -807,13 +810,15 @@ class CxxRenderer(CxxFunctionRenderer):
         self.expressions[induction] = induction_name
         self.expression_types[induction] = loop_type
         for block_arg, result in zip(block.arg_ids[1:], results, strict=True):
+            if result in self.suppressed_forwarding_values:
+                continue
             self.expressions[block_arg] = self.expression(result)
             self.expression_types[block_arg] = self.expression_type(result)
         self.writer.open(
             f"for ({loop_type} {induction_name} = {lower}; "
             f"{induction_name} < {upper}; {increment})"
         )
-        self._render_block(block, yield_targets=results)
+        self._render_block(block, yield_targets=self._transport_targets(results))
         self.writer.close()
 
     def _declare_structured_result(self, result: int) -> None:
@@ -863,46 +868,11 @@ class CxxRenderer(CxxFunctionRenderer):
         for target, temporary in temporaries:
             self.writer.line(f"{target} = {temporary};")
 
-    def _while_forward_only_carriers(
-        self, before: Block, after: Block, results: Sequence[int]
-    ) -> set[int]:
-        """Finds loop columns represented only by structured forwarding."""
-
-        if not before.ops or not after.ops:
-            return set()
-        condition = before.ops[-1]
-        yield_operation = after.ops[-1]
-        if condition.name != "scf.condition" or yield_operation.name != "scf.yield":
-            return set()
-        if len(self._resolved(condition).value_ids("forwarded")) != len(results) or len(
-            yield_operation.operands
-        ) != len(results):
-            return set()
-        forward_only: set[int] = set()
-        carriers = zip(before.arg_ids, after.arg_ids, results, strict=True)
-        for index, (before_argument, after_argument, result) in enumerate(carriers):
-            if (
-                self.use_counts[result] != 0
-                or self.view_construction_type_users[result]
-            ):
-                continue
-            allowed_uses = {
-                (id(condition), index + 1),
-                (id(yield_operation), index),
-            }
-            before_closure = self._forwarding_closure(
-                before_argument, allowed_uses, set()
-            )
-            after_closure = self._forwarding_closure(
-                after_argument, allowed_uses, set()
-            )
-            if before_closure is None or after_closure is None:
-                continue
-            self.suppressed_forwarding_values.update(before_closure)
-            self.suppressed_forwarding_values.update(after_closure)
-            self.suppressed_forwarding_values.add(result)
-            forward_only.add(index)
-        return forward_only
+    def _transport_targets(self, values: Sequence[int]) -> list[int | None]:
+        return [
+            None if value in self.suppressed_forwarding_values else value
+            for value in values
+        ]
 
     def _while_condition_expression(self, before: Block) -> str | None:
         """Projects a pure identity-forwarding header into one C++ expression."""
@@ -951,37 +921,6 @@ class CxxRenderer(CxxFunctionRenderer):
         self.temporary_names = temporary_names
         return None
 
-    def _forwarding_closure(
-        self,
-        value_id: int,
-        allowed_uses: set[tuple[int, int]],
-        active: set[int],
-    ) -> set[int] | None:
-        """Returns values that only forward into the selected loop edge."""
-
-        if self.view_construction_type_users[value_id] or value_id in active:
-            return None
-        nested_active = {*active, value_id}
-        closure = {value_id}
-        for user, operand_index in self.uses[value_id]:
-            if (id(user), operand_index) in allowed_uses:
-                continue
-            parent = self.parent_operations.get(id(user))
-            if (
-                user.name != "scf.yield"
-                or parent is None
-                or parent.name != "scf.if"
-                or operand_index >= len(parent.results)
-            ):
-                return None
-            forwarded = self._forwarding_closure(
-                parent.results[operand_index], allowed_uses, nested_active
-            )
-            if forwarded is None:
-                return None
-            closure.update(forwarded)
-        return closure
-
     def _render_while(self, operation: Operation) -> None:
         resolved = self._resolved(operation)
         initial = resolved.value_ids("iter_args")
@@ -1017,46 +956,36 @@ class CxxRenderer(CxxFunctionRenderer):
                 self.names[result] = preferred_name
             claimed_names.add(self.names[result])
 
-        forward_only = self._while_forward_only_carriers(before, after, results)
         shared_carriers = len(initial) == len(results) and all(
-            index in forward_only or self._compatible_cxx_carrier(argument, result)
-            for index, (argument, result) in enumerate(
-                zip(before.arg_ids, results, strict=True)
+            (argument in self.suppressed_forwarding_values)
+            == (result in self.suppressed_forwarding_values)
+            and (
+                result in self.suppressed_forwarding_values
+                or self._compatible_cxx_carrier(argument, result)
             )
+            for argument, result in zip(before.arg_ids, results, strict=True)
         )
         if shared_carriers:
-            for index, (argument, result, source) in enumerate(
-                zip(before.arg_ids, results, initial, strict=True)
+            for argument, result, source in zip(
+                before.arg_ids, results, initial, strict=True
             ):
-                if index in forward_only:
+                if result in self.suppressed_forwarding_values:
                     continue
                 self._declare_loop_carrier(result, source)
                 self.expressions[argument] = self.expression(result)
                 self.expression_types[argument] = self.expression_type(result)
-            header_targets: list[int | None] = [
-                None if index in forward_only else result
-                for index, result in enumerate(results)
-            ]
+            header_targets = self._transport_targets(results)
         else:
-            for index, (argument, source) in enumerate(
-                zip(before.arg_ids, initial, strict=True)
-            ):
-                if index in forward_only:
-                    continue
-                self._declare_loop_carrier(argument, source)
-            for index, result in enumerate(results):
-                if index in forward_only:
-                    continue
-                self._declare_structured_result(result)
-            header_targets = [
-                None if index in forward_only else argument
-                for index, argument in enumerate(before.arg_ids)
-            ]
+            for argument, source in zip(before.arg_ids, initial, strict=True):
+                if argument not in self.suppressed_forwarding_values:
+                    self._declare_loop_carrier(argument, source)
+            for result in results:
+                if result not in self.suppressed_forwarding_values:
+                    self._declare_structured_result(result)
+            header_targets = self._transport_targets(before.arg_ids)
 
-        for index, (argument, result) in enumerate(
-            zip(after.arg_ids, results, strict=True)
-        ):
-            if index in forward_only:
+        for argument, result in zip(after.arg_ids, results, strict=True):
+            if result in self.suppressed_forwarding_values:
                 continue
             self.expressions[argument] = self.expression(result)
             self.expression_types[argument] = self.expression_type(result)
@@ -1076,10 +1005,7 @@ class CxxRenderer(CxxFunctionRenderer):
         self._render_block(
             before,
             condition_target=continuation,
-            condition_forward_targets=[
-                None if index in forward_only else result
-                for index, result in enumerate(results)
-            ],
+            condition_forward_targets=self._transport_targets(results),
         )
         self.writer.open(f"if ({continuation})")
         self._render_block(after, yield_targets=header_targets)
@@ -1110,10 +1036,7 @@ class CxxRenderer(CxxFunctionRenderer):
         condition = _strip_outer_parentheses(
             self.expression(resolved.value_id("condition"))
         )
-        yield_targets: list[int | None] = [
-            None if result in self.suppressed_forwarding_values else result
-            for result in results
-        ]
+        yield_targets = self._transport_targets(results)
         self.writer.open(f"if ({condition})")
         self._render_block(then_region.blocks[0], yield_targets=yield_targets)
         if else_region is None:
@@ -1537,12 +1460,18 @@ class CxxRenderer(CxxFunctionRenderer):
                 "a top-level definition would be omitted from the C++ projection",
             )
         self._plan_callable_names(kernels, functions, commands, pipelines)
+        self._plan_kernel_configurations(kernels)
+        self.suppressed_forwarding_values = plan_value_transport(
+            self.module,
+            self._resolved,
+            self.parent_operations,
+            self._source_value_operands,
+        )
         self.buffer_access = BufferAccessPlan(self.module, self._resolved)
         self._plan_function_projections()
         self.view_access = plan_view_access(
             self.module, self._resolved, self._flat_source_parameters
         )
-        self._plan_kernel_configurations(kernels)
         self._plan_config_names()
         if self._render_configs():
             self.writer.line()
