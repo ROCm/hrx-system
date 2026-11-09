@@ -97,3 +97,45 @@ func.def @byte_axis_reduction_identity(%init: vector<3xi8>) -> (vector<3xi8>) {
 func.def @byte_axis_reduction_identity(%init: vector<3xi8>) -> (vector<3xi8>) {
   func.return %init : vector<3xi8>
 }
+
+// ====
+
+// Per-lane and uniform summaries feed the same extrema and reduction facts.
+func.def @ranged_lane_powers(%choose: i1) -> (i1, i1, i1, i1, i1, i1) {
+  %c2 = scalar.constant 2 : i32
+  %c16 = scalar.constant 16 : i32
+  %c8 = scalar.constant 8 : i32
+  %c3 = scalar.constant 3 : i32
+  %power = scf.select %choose, %c2, %c16 : i32
+  %uniform = vector.splat %power : vector<2xi32>
+  %lanes = vector.from_elements %power, %c3 : vector<2xi32>
+  %bounds = vector.splati 8 : vector<2xi32>
+  %smin = vector.minsi %lanes, %bounds : vector<2xi32>
+  %smax = vector.maxsi %uniform, %bounds : vector<2xi32>
+  %umin = vector.minui %uniform, %bounds : vector<2xi32>
+  %umax = vector.maxui %uniform, %bounds : vector<2xi32>
+  %a = vector.extract %smin[0] : vector<2xi32> -> i32
+  %b = vector.extract %smin[1] : vector<2xi32> -> i32
+  %c = vector.extract %smax[1] : vector<2xi32> -> i32
+  %d = vector.extract %umin[0] : vector<2xi32> -> i32
+  %e = vector.extract %umax[1] : vector<2xi32> -> i32
+  %reduced = vector.reduce<minsi> %uniform, %c8 : vector<2xi32>, i32
+  %ap = test.fact_power_of_two %a : i32 -> i1
+  %bp = test.fact_power_of_two %b : i32 -> i1
+  %cp = test.fact_power_of_two %c : i32 -> i1
+  %dp = test.fact_power_of_two %d : i32 -> i1
+  %ep = test.fact_power_of_two %e : i32 -> i1
+  %rp = test.fact_power_of_two %reduced : i32 -> i1
+  func.return %ap, %bp, %cp, %dp, %ep, %rp : i1, i1, i1, i1, i1, i1
+}
+
+// ----
+func.def @ranged_lane_powers(%choose: i1) -> (i1, i1, i1, i1, i1, i1) {
+  %ap = scalar.constant true : i1
+  %bp = scalar.constant false : i1
+  %cp = scalar.constant true : i1
+  %dp = scalar.constant true : i1
+  %ep = scalar.constant true : i1
+  %rp = scalar.constant true : i1
+  func.return %ap, %bp, %cp, %dp, %ep, %rp : i1, i1, i1, i1, i1, i1
+}

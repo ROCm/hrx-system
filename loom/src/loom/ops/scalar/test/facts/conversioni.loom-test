@@ -260,3 +260,35 @@ func.def @fptosi_nan_is_unknown() -> (i64, i64) {
   %hi = scalar.constant 127 : i64
   func.return %lo, %hi : i64, i64
 }
+
+// ====
+
+// Unsigned extension and address widening are the same bit-preserving map.
+// A later truncation can produce zero and must discard the guarantee.
+func.def @nonzero_widening(%input: i8, %wide_input: i16) -> (i1, i1, i1, i1, i64, i64) {
+  %nonzero = scalar.assume %input [range(%input, -8, 8), ne(%input, 0), multiple_of(%input, 2)] : i8
+  %unsigned = scalar.extui %nonzero : i8 to i16
+  %signed = scalar.extsi %nonzero : i8 to i32
+  %offset = index.cast %nonzero : i8 to offset
+  %index = index.cast %offset : offset to index
+  %wide = scalar.assume %wide_input [range(%wide_input, 1, 256)] : i16
+  %truncated = scalar.trunci %wide : i16 to i8
+  %unsigned_nonzero = test.fact_non_zero %unsigned : i16 -> i1
+  %signed_nonzero = test.fact_non_zero %signed : i32 -> i1
+  %index_nonzero = test.fact_non_zero %index : index -> i1
+  %truncated_nonzero = test.fact_non_zero %truncated : i8 -> i1
+  %minimum = test.fact_range_lo %index : index -> i64
+  %divisor = test.fact_divisor %index : index -> i64
+  func.return %unsigned_nonzero, %signed_nonzero, %index_nonzero, %truncated_nonzero, %minimum, %divisor : i1, i1, i1, i1, i64, i64
+}
+
+// ----
+func.def @nonzero_widening(%input: i8, %wide_input: i16) -> (i1, i1, i1, i1, i64, i64) {
+  %unsigned_nonzero = scalar.constant true : i1
+  %signed_nonzero = scalar.constant true : i1
+  %index_nonzero = scalar.constant true : i1
+  %truncated_nonzero = scalar.constant false : i1
+  %minimum = scalar.constant 1 : i64
+  %divisor = scalar.constant 2 : i64
+  func.return %unsigned_nonzero, %signed_nonzero, %index_nonzero, %truncated_nonzero, %minimum, %divisor : i1, i1, i1, i1, i64, i64
+}

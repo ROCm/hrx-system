@@ -64,6 +64,10 @@ void loom_value_facts_addi_modular(const loom_value_facts_t* lhs,
 void loom_value_facts_subi_modular(const loom_value_facts_t* lhs,
                                    const loom_value_facts_t* rhs,
                                    int32_t bit_count, loom_value_facts_t* out) {
+  if (loom_value_facts_is_zero(*lhs)) {
+    loom_value_facts_negi_modular(rhs, bit_count, out);
+    return;
+  }
   const loom_value_facts_t lhs_facts = *lhs;
   const loom_value_facts_t rhs_facts = *rhs;
   if (loom_value_facts_try_modular_binary_exact(
@@ -173,6 +177,8 @@ void loom_value_facts_negi_modular(const loom_value_facts_t* input,
   }
   loom_value_facts_negi(&input_facts, out);
   *out = loom_value_facts_wrap_integer(*out, bit_count);
+  // These operations map only zero to zero, even when signed minimum wraps.
+  out->flags |= input_facts.flags & LOOM_VALUE_FACT_NON_ZERO;
 }
 
 void loom_value_facts_absi_modular(const loom_value_facts_t* input,
@@ -189,6 +195,8 @@ void loom_value_facts_absi_modular(const loom_value_facts_t* input,
   }
   loom_value_facts_absi(&input_facts, out);
   *out = loom_value_facts_wrap_integer(*out, bit_count);
+  // These operations map only zero to zero, even when signed minimum wraps.
+  out->flags |= input_facts.flags & LOOM_VALUE_FACT_NON_ZERO;
 }
 
 void loom_value_facts_fmai_modular(const loom_value_facts_t* a,

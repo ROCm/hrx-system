@@ -1831,13 +1831,8 @@ static void loom_vector_signf_transfer(loom_scalar_type_t scalar_type,
 static void loom_vector_signi_transfer(const loom_value_facts_t* input,
                                        int32_t bit_count,
                                        loom_value_facts_t* out) {
-  if (!loom_value_facts_is_exact(*input)) {
-    *out = loom_value_facts_wrap_integer(loom_value_facts_unknown(), bit_count);
-    return;
-  }
-  int64_t value = input->range_lo;
-  *out = loom_value_facts_exact_i64((value > 0) ? 1 : (value < 0) ? -1 : 0);
-  *out = loom_value_facts_wrap_integer(*out, bit_count);
+  (void)bit_count;
+  loom_value_facts_signi(input, out);
 }
 
 static void loom_vector_passthrough_transfer(const loom_value_facts_t* input,

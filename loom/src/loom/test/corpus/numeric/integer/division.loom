@@ -532,11 +532,15 @@ func.def @runtime_coordinate_lookup_oracle(%input: buffer, %output: buffer, %row
 }
 
 // Runtime group widths exercise common-divisor ordering through the complete
-// pipeline, including a runtime choice of grouping policy. The channel extent
-// consists of complete groups; two extra outputs test the end and inactive tail.
+// pipeline, including runtime selection, extrema, products, and positive quotients.
+// Width input enumerates four channel extents for each policy; every width
+// remains a runtime value. Two extra outputs test the end and inactive tail.
 func.def @runtime_group_lookup(%input: buffer, %output: buffer, %kind_input: index, %width_input: index, %use_runtime_width: i1) {
   %kind = index.assume %kind_input [range(%kind_input, 0, 4)] : index
-  %width_zero_based = index.assume %width_input [range(%width_input, 0, 3)] : index
+  %selection = index.assume %width_input [range(%width_input, 0, 23)] : index
+  %extent_count = index.constant 4 : index
+  %width_zero_based = index.rem %selection, %extent_count : index
+  %policy = index.div %selection, %extent_count : index
   %begin = index.constant 0 : index
   %unit = index.constant 1 : index
   %end = index.constant 66 : index
@@ -546,7 +550,28 @@ func.def @runtime_group_lookup(%input: buffer, %output: buffer, %kind_input: ind
   %width = index.mul %width_units, %granularity : index
   %runtime_width = index.shli %unit, %kind : index
   %fallback_width = index.constant 8 : index
-  %group_width = scf.select %use_runtime_width, %runtime_width, %fallback_width : index
+  %selected_width = scf.select %use_runtime_width, %runtime_width, %fallback_width : index
+  %lower_bound = index.constant 2 : index
+  %capped = index.min %selected_width, %fallback_width : index
+  %floored = index.max %selected_width, %fallback_width : index
+  %clamped = index.max %capped, %lower_bound : index
+  %floor_policy = index.constant 2 : index
+  %clamp_policy = index.constant 3 : index
+  %is_cap = index.cmp eq, %policy, %unit : index
+  %is_floor = index.cmp eq, %policy, %floor_policy : index
+  %is_clamp = index.cmp eq, %policy, %clamp_policy : index
+  %width0 = scf.select %is_cap, %capped, %selected_width : index
+  %width1 = scf.select %is_floor, %floored, %width0 : index
+  %width2 = scf.select %is_clamp, %clamped, %width1 : index
+  %other_kind = index.rem %kind, %lower_bound : index
+  %other_width = index.shli %unit, %other_kind : index
+  %product_width = index.mul %capped, %other_width : index
+  %quotient_width = index.div %granularity, %selected_width : index
+  %quotient_policy = index.constant 5 : index
+  %is_product = index.cmp eq, %policy, %extent_count : index
+  %is_quotient = index.cmp eq, %policy, %quotient_policy : index
+  %width3 = scf.select %is_product, %product_width, %width2 : index
+  %group_width = scf.select %is_quotient, %quotient_width, %width3 : index
   %groups = index.div %width, %group_width : index
   %source = buffer.view %input[%base] : buffer -> view<[%groups]xi32>
   %destination = buffer.view %output[%base] : buffer -> view<66xi32>
@@ -569,7 +594,10 @@ func.def @runtime_group_lookup(%input: buffer, %output: buffer, %kind_input: ind
 // the subject's dynamic quotient extent. Both receive the same runtime inputs.
 func.def @runtime_group_lookup_oracle(%input: buffer, %output: buffer, %kind_input: index, %width_input: index, %use_runtime_width: i1) {
   %kind = index.assume %kind_input [range(%kind_input, 0, 4)] : index
-  %width_zero_based = index.assume %width_input [range(%width_input, 0, 3)] : index
+  %selection = index.assume %width_input [range(%width_input, 0, 23)] : index
+  %extent_count = index.constant 4 : index
+  %width_zero_based = index.rem %selection, %extent_count : index
+  %policy = index.div %selection, %extent_count : index
   %begin = index.constant 0 : index
   %unit = index.constant 1 : index
   %end = index.constant 66 : index
@@ -577,19 +605,34 @@ func.def @runtime_group_lookup_oracle(%input: buffer, %output: buffer, %kind_inp
   %granularity = index.constant 16 : index
   %width_units = index.add %width_zero_based, %unit : index
   %width = index.mul %width_units, %granularity : index
+  %fallback_shift = index.constant 3 : index
+  %selected_shift = scf.select %use_runtime_width, %kind, %fallback_shift : index
+  %above = index.cmp ugt, %selected_shift, %fallback_shift : index
+  %below = index.cmp ult, %selected_shift, %unit : index
+  %capped_shift = scf.select %above, %fallback_shift, %selected_shift : index
+  %floored_shift = scf.select %above, %selected_shift, %fallback_shift : index
+  %clamped_shift = scf.select %below, %unit, %capped_shift : index
+  %floor_policy = index.constant 2 : index
+  %is_cap = index.cmp eq, %policy, %unit : index
+  %is_floor = index.cmp eq, %policy, %floor_policy : index
+  %is_clamp = index.cmp eq, %policy, %fallback_shift : index
+  %shift0 = scf.select %is_cap, %capped_shift, %selected_shift : index
+  %shift1 = scf.select %is_floor, %floored_shift, %shift0 : index
+  %shift2 = scf.select %is_clamp, %clamped_shift, %shift1 : index
+  %other_kind = index.rem %kind, %floor_policy : index
+  %product_shift = index.add %capped_shift, %other_kind : index
+  %quotient_shift = index.sub %extent_count, %selected_shift : index
+  %quotient_policy = index.constant 5 : index
+  %is_product = index.cmp eq, %policy, %extent_count : index
+  %is_quotient = index.cmp eq, %policy, %quotient_policy : index
+  %shift3 = scf.select %is_product, %product_shift, %shift2 : index
+  %shift = scf.select %is_quotient, %quotient_shift, %shift3 : index
   %source = buffer.view %input[%base] : buffer -> view<64xi32>
   %destination = buffer.view %output[%base] : buffer -> view<66xi32>
   scf.for %channel = [%begin to %end step %unit] {
     %active = index.cmp ult, %channel, %width : index
     %result = scf.if %active -> (i32) {
-      %group = scf.if %use_runtime_width -> (index) {
-        %runtime_group = index.shrui %channel, %kind : index
-        scf.yield %runtime_group : index
-      } else {
-        %fallback_shift = index.constant 3 : index
-        %fallback_group = index.shrui %channel, %fallback_shift : index
-        scf.yield %fallback_group : index
-      }
+      %group = index.shrui %channel, %shift : index
       %value = view.load %source[%group] : view<64xi32> -> i32
       scf.yield %value : i32
     } else {
@@ -597,6 +640,72 @@ func.def @runtime_group_lookup_oracle(%input: buffer, %output: buffer, %kind_inp
       scf.yield %inactive : i32
     }
     view.store %result, %destination[%channel] : i32, view<66xi32>
+  }
+  func.return
+}
+
+// Nonzero signed metadata supplies a sign magnitude or an unsigned size.
+// The same runtime shape controls remainder addressing across wrap boundaries.
+func.def @runtime_remainder_lookup(%input: buffer, %output: buffer, %sample_input: index, %negative_input: index) {
+  %selection = index.assume %sample_input [range(%sample_input, 0, 23)] : index
+  %begin = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %offset_policy = index.constant 2 : index
+  %magnitudes = index.constant 8 : index
+  %sample_zero_based = index.rem %selection, %magnitudes : index
+  %sample = index.add %sample_zero_based, %unit : index
+  %policy = index.div %selection, %magnitudes : index
+  %negative_case = index.cmp ne, %negative_input, %begin : index
+  %positive = index.cast %sample : index to i8
+  %negative = scalar.negi %positive : i8
+  %raw = scf.select %negative_case, %negative, %positive : i8
+  %sign = scalar.signi %raw : i8
+  %sign_absolute = scalar.absi %sign : i8
+  %widened = scalar.extui %raw : i8 to i16
+  %offset = index.cast %raw : i8 to offset
+  %sign_width = index.cast %sign_absolute : i8 to index
+  %unsigned_width = index.cast %widened : i16 to index
+  %offset_width = index.cast %offset : offset to index
+  %is_unsigned = index.cmp eq, %policy, %unit : index
+  %is_offset = index.cmp eq, %policy, %offset_policy : index
+  %width0 = scf.select %is_unsigned, %unsigned_width, %sign_width : index
+  %width = scf.select %is_offset, %offset_width, %width0 : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<[%width]xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<258xi32>
+  %end = index.constant 258 : index
+  scf.for %position = [%begin to %end step %unit] {
+    %coordinate = index.rem %position, %width : index
+    %value = view.load %source[%coordinate] : view<[%width]xi32> -> i32
+    view.store %value, %destination[%position] : i32, view<258xi32>
+  }
+  func.return
+}
+
+// The oracle derives each positive size from the sample ordinal. It uses no
+// signed payload operations or casts and reads a fixed source view.
+func.def @runtime_remainder_lookup_oracle(%input: buffer, %output: buffer, %sample_input: index, %negative_input: index) {
+  %selection = index.assume %sample_input [range(%sample_input, 0, 23)] : index
+  %begin = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %magnitudes = index.constant 8 : index
+  %sample_zero_based = index.rem %selection, %magnitudes : index
+  %sample = index.add %sample_zero_based, %unit : index
+  %policy = index.div %selection, %magnitudes : index
+  %negative_case = index.cmp ne, %negative_input, %begin : index
+  %byte_extent = index.constant 256 : index
+  %negative_unsigned = index.sub %byte_extent, %sample : index
+  %unsigned_width = scf.select %negative_case, %negative_unsigned, %sample : index
+  %is_sign = index.cmp eq, %policy, %begin : index
+  %width = scf.select %is_sign, %unit, %unsigned_width : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<256xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<258xi32>
+  %end = index.constant 258 : index
+  scf.for %position = [%begin to %end step %unit] {
+    %coordinate = index.rem %position, %width : index
+    %value = view.load %source[%coordinate] : view<256xi32> -> i32
+    view.store %value, %destination[%position] : i32, view<258xi32>
   }
   func.return
 }
@@ -859,7 +968,7 @@ check.scenario @runtime_coordinate_lookup_values configure[8](%rows: index, %con
 }
 
 check.scenario @runtime_group_lookup_values configure[5](%kind: index, %configuration_entropy: check.entropy) {
-  check.trial[4](%width: index, %entropy: check.entropy) {
+  check.trial[24](%width: index, %entropy: check.entropy) {
     %use_runtime_width = check.literal value(true) : i1
     %input_storage = check.generate.iota offset(-311) step(7) : tensor<72xi32>
     %output_storage = check.generate.fill value(-889275714) : tensor<74xi32>
@@ -870,7 +979,7 @@ check.scenario @runtime_group_lookup_values configure[5](%kind: index, %configur
       check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<74xi32>
     }
   }
-  check.trial[4](%width: index, %entropy: check.entropy) {
+  check.trial[24](%width: index, %entropy: check.entropy) {
     %use_runtime_width = check.literal value(false) : i1
     %input_storage = check.generate.iota offset(-311) step(7) : tensor<72xi32>
     %output_storage = check.generate.fill value(-889275714) : tensor<74xi32>
@@ -879,6 +988,20 @@ check.scenario @runtime_group_lookup_values configure[5](%kind: index, %configur
     check.compare<@runtime_group_lookup, @runtime_group_lookup_oracle>(%input, %output, %kind, %width, %use_runtime_width) : (tensor<64xi32>, tensor<66xi32>, index, index, i1) -> () {
       check.expect.bitwise actual(%input_storage) expected(%input_storage) : tensor<72xi32>
       check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<74xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @runtime_remainder_lookup_values configure[2](%negative: index, %configuration_entropy: check.entropy) {
+  check.trial[24](%sample: index, %entropy: check.entropy) {
+    %input_storage = check.generate.iota offset(-311) step(7) : tensor<264xi32>
+    %output_storage = check.generate.fill value(-889275714) : tensor<266xi32>
+    %input = check.tensor.view %input_storage offset(16) : tensor<264xi32> -> tensor<256xi32>
+    %output = check.tensor.view %output_storage offset(16) : tensor<266xi32> -> tensor<258xi32>
+    check.compare<@runtime_remainder_lookup, @runtime_remainder_lookup_oracle>(%input, %output, %sample, %negative) : (tensor<256xi32>, tensor<258xi32>, index, index) -> () {
+      check.expect.bitwise actual(%input_storage) expected(%input_storage) : tensor<264xi32>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<266xi32>
     }
   }
   check.return

@@ -934,12 +934,7 @@ iree_status_t loom_scalar_signi_facts(loom_fact_context_t* context,
                                       const loom_op_t* op,
                                       const loom_value_facts_t* operand_facts,
                                       loom_value_facts_t* result_facts) {
-  if (!loom_value_facts_is_exact(operand_facts[0])) {
-    result_facts[0] = loom_value_facts_unknown();
-    return iree_ok_status();
-  }
-  int64_t v = operand_facts[0].range_lo;
-  result_facts[0] = loom_value_facts_exact_i64((v > 0) ? 1 : (v < 0) ? -1 : 0);
+  loom_value_facts_signi(&operand_facts[0], &result_facts[0]);
   return iree_ok_status();
 }
 

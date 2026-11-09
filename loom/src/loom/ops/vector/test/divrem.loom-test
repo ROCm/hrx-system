@@ -47,3 +47,40 @@ func.def @dead_remainder(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2x
   %quotient = vector.divsi %lhs, %rhs : vector<2xi64>
   func.return %quotient : vector<2xi64>
 }
+
+// ====
+
+// Paired quotients and vector lane summaries retain dynamic size predicates.
+func.def @paired_powers(%choose: i1) -> (i1, i1, i1, i1, i1) {
+  %c2 = scalar.constant 2 : i16
+  %c4 = scalar.constant 4 : i16
+  %c0 = scalar.constant 0 : i16
+  %divisor = scf.select %choose, %c2, %c4 : i16
+  %divisors = vector.splat %divisor : vector<2xi16>
+  %numerators = vector.splati 16 : vector<2xi16>
+  %factors = vector.from_elements %divisor, %c0 : vector<2xi16>
+  %product = vector.muli %factors, %divisors : vector<2xi16>
+  %signed, %signed_remainder = vector.divremsi %numerators, %divisors : vector<2xi16>
+  %unsigned, %unsigned_remainder = vector.divremui %numerators, %divisors : vector<2xi16>
+  %product_lane = vector.extract %product[0] : vector<2xi16> -> i16
+  %zero_lane = vector.extract %product[1] : vector<2xi16> -> i16
+  %signed_lane = vector.extract %signed[0] : vector<2xi16> -> i16
+  %unsigned_lane = vector.extract %unsigned[1] : vector<2xi16> -> i16
+  %remainder_lane = vector.extract %unsigned_remainder[1] : vector<2xi16> -> i16
+  %pp = test.fact_power_of_two %product_lane : i16 -> i1
+  %zp = test.fact_power_of_two %zero_lane : i16 -> i1
+  %sp = test.fact_power_of_two %signed_lane : i16 -> i1
+  %up = test.fact_power_of_two %unsigned_lane : i16 -> i1
+  %rp = test.fact_power_of_two %remainder_lane : i16 -> i1
+  func.return %pp, %zp, %sp, %up, %rp : i1, i1, i1, i1, i1
+}
+
+// ----
+func.def @paired_powers(%choose: i1) -> (i1, i1, i1, i1, i1) {
+  %pp = scalar.constant true : i1
+  %zp = scalar.constant false : i1
+  %sp = scalar.constant true : i1
+  %up = scalar.constant true : i1
+  %rp = scalar.constant false : i1
+  func.return %pp, %zp, %sp, %up, %rp : i1, i1, i1, i1, i1
+}

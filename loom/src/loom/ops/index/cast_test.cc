@@ -59,5 +59,29 @@ TEST(IndexCastTest, IdentifiesValuePreservingIntegerAddressCasts) {
   }
 }
 
+TEST(IndexCastTest, UnsignedWideningRetainsNonzeroAndDistribution) {
+  for (auto type :
+       {LOOM_SCALAR_TYPE_I8, LOOM_SCALAR_TYPE_I16, LOOM_SCALAR_TYPE_I32}) {
+    for (auto input :
+         {loom_value_facts_make(-8, 8, 2), loom_value_facts_make(-8, -2, 2),
+          loom_value_facts_make(2, 8, 2)}) {
+      input.flags |= LOOM_VALUE_FACT_NON_ZERO;
+      loom_value_facts_mark_workgroup_uniform(&input);
+      auto result =
+          loom_index_cast_transfer_facts(type, LOOM_SCALAR_TYPE_OFFSET, input);
+      EXPECT_TRUE(loom_value_facts_is_positive(result));
+      EXPECT_TRUE(loom_value_facts_is_workgroup_uniform(result));
+      EXPECT_EQ(result.known_divisor, 2);
+      result = loom_index_cast_transfer_facts(LOOM_SCALAR_TYPE_OFFSET,
+                                              LOOM_SCALAR_TYPE_INDEX, result);
+      EXPECT_TRUE(loom_value_facts_is_positive(result));
+    }
+  }
+  const auto wide = loom_value_facts_make(1, 256, 1);
+  const auto narrowed = loom_index_cast_transfer_facts(
+      LOOM_SCALAR_TYPE_INDEX, LOOM_SCALAR_TYPE_I8, wide);
+  EXPECT_FALSE(loom_value_facts_is_non_zero(narrowed));
+}
+
 }  // namespace
 }  // namespace loom

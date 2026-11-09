@@ -38,6 +38,41 @@ uniformity domains.
 This analysis is always on. Authors add facts at boundaries where the compiler
 cannot derive them; they do not manually annotate every intermediate result.
 
+## Compose runtime sizes from facts
+
+Runtime sizes can retain useful guarantees through arithmetic without becoming
+constants. For example, this group width remains a power of two after capping
+and scaling, and divides an extent whose caller promises a multiple of sixteen:
+
+```loom
+%extent = index.assume %extent_input [range(%extent_input, 16, 4096), multiple_of(%extent_input, 16)] : index
+%shift = index.assume %shift_input [range(%shift_input, 0, 4)] : index
+%unit = index.constant 1 : index
+%cap = index.constant 8 : index
+%scale = index.constant 2 : index
+%requested_width = index.shli %unit, %shift : index
+%capped_width = index.min %requested_width, %cap : index
+%group_width = index.mul %capped_width, %scale : index
+%group_count = index.div %extent, %group_width : index
+```
+
+The caller contracts belong on `%extent_input` and `%shift_input`. The derived
+width needs no repeated `power_of_two` assumption. The same guarantees survive
+`index.max`, selection between qualifying alternatives, and positive quotients
+of powers of two. These facts let bounds analysis relate a channel's group
+coordinate to a dynamically sized group view.
+
+Carrier semantics still matter. Unsigned widening preserves a nonzero bit
+pattern; truncation may turn it into zero. A wrapping multiplication may lose
+its power-of-two guarantee, and a quotient that can be zero is not a positive
+power of two. Casts remain explicit. `index.cast` maps Booleans to 0 or 1;
+other narrow integer payloads enter `index` as signed values and `offset` as
+unsigned bit patterns.
+
+The executable [integer lookup examples](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/test/corpus/numeric/integer/division.loom)
+show grouped and remainder-addressed views with runtime policy choices, an
+independent oracle, and guarded input/output storage.
+
 ## Declare compile-time configuration
 
 [`config.decl`](../reference/dialects/config/ops/decl.md) names a value that a

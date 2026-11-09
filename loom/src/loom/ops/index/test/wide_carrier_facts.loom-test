@@ -142,3 +142,37 @@ func.def target(@target) @unsupported_wide_intervals(%left: index, %right: index
   %shift_hi = scalar.constant 9223372036854775807 : i64
   func.return %small_lo, %large_hi, %shift_lo, %shift_hi : i64, i64, i64, i64
 }
+
+// ====
+
+// Wide dynamic sizes retain power-of-two predicates through a clamp even on
+// targets preferring a 32-bit carrier. Offset callers explicitly cast to index.
+test.target<low_core> @target {index_bitwidth = 32}
+
+func.def target(@target) @wide_clamped_powers(%choose: i1) -> (i1, i1) {
+  %small = index.constant 2147483648 : index
+  %middle = index.constant 4294967296 : index
+  %large = index.constant 8589934592 : index
+  %selected = scf.select %choose, %small, %large : index
+  %capped = index.min %selected, %middle : index
+  %clamped = index.max %capped, %small : index
+  %power = test.fact_power_of_two %clamped : index -> i1
+  %offset_small = index.constant 4 : offset
+  %offset_large = index.constant 16 : offset
+  %offset_middle = index.constant 8 : index
+  %offset_selected = scf.select %choose, %offset_small, %offset_large : offset
+  %offset_index = index.cast %offset_selected : offset to index
+  %offset_capped_index = index.min %offset_index, %offset_middle : index
+  %offset_capped = index.cast %offset_capped_index : index to offset
+  %offset_power = test.fact_power_of_two %offset_capped : offset -> i1
+  func.return %power, %offset_power : i1, i1
+}
+
+// ----
+test.target<low_core> @target {index_bitwidth = 32}
+
+func.def target(@target) @wide_clamped_powers(%choose: i1) -> (i1, i1) {
+  %power = scalar.constant true : i1
+  %offset_power = scalar.constant true : i1
+  func.return %power, %offset_power : i1, i1
+}

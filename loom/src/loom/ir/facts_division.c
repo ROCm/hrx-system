@@ -147,6 +147,10 @@ static void loom_value_facts_unsigned_division(
       *out = loom_value_facts_make_unsigned_result_range(
           lhs_range.minimum / rhs_range.maximum,
           lhs_range.maximum / rhs_minimum, bit_count, divisor);
+      if (out->range_lo > 0) {
+        out->flags |=
+            lhs_facts.flags & rhs_facts.flags & LOOM_VALUE_FACT_POWER_OF_TWO;
+      }
     }
   }
   loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
@@ -196,6 +200,11 @@ void loom_value_facts_divsi(const loom_value_facts_t* lhs,
     int64_t lo = lhs_lo / rhs_hi;
     int64_t hi = lhs_hi / rhs_lo;
     *out = loom_value_facts_make(lo, hi, divisor);
+    // A nonzero quotient of positive powers of two is another power of two.
+    if (lo > 0) {
+      out->flags |=
+          lhs_facts.flags & rhs_facts.flags & LOOM_VALUE_FACT_POWER_OF_TWO;
+    }
     loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
     return;
   }

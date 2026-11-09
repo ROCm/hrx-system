@@ -774,6 +774,35 @@ void loom_value_facts_meet_float(const loom_value_facts_t* a,
                                  const loom_value_facts_t* b,
                                  loom_value_facts_t* out);
 
+// Predicates retained when an integer result is one of two input values. These
+// can describe noncontiguous alternatives that their interval hull cannot.
+// Zero is also a valid subgroup mask, independently of the active lane count.
+static inline loom_value_fact_flags_t
+loom_value_facts_common_integer_predicates(const loom_value_facts_t* a,
+                                           const loom_value_facts_t* b) {
+  loom_value_fact_flags_t flags =
+      a->flags & b->flags &
+      (LOOM_VALUE_FACT_NON_ZERO | LOOM_VALUE_FACT_POWER_OF_TWO |
+       LOOM_VALUE_FACT_SUBGROUP_LANE_MASK);
+  if ((loom_value_facts_is_subgroup_lane_mask(*a) &&
+       loom_value_facts_is_zero(*b)) ||
+      (loom_value_facts_is_zero(*a) &&
+       loom_value_facts_is_subgroup_lane_mask(*b))) {
+    flags |= LOOM_VALUE_FACT_SUBGROUP_LANE_MASK;
+  }
+  return flags;
+}
+
+// Exact zero is divisible by every positive divisor. Its stored divisor is one
+// because the fact representation requires a positive value.
+static inline int64_t loom_value_facts_common_divisor(
+    const loom_value_facts_t* a, const loom_value_facts_t* b) {
+  return loom_value_facts_is_zero(*a) ? b->known_divisor
+         : loom_value_facts_is_zero(*b)
+             ? a->known_divisor
+             : iree_math_gcd_i64(a->known_divisor, b->known_divisor);
+}
+
 // Conservative join: widens range to the outer bounds, weakens divisor to the
 // GCD, and retains predicates true for both inputs. Used at join points
 // (scf.if yields, block arguments). The output may alias either input.
@@ -785,27 +814,11 @@ static inline void loom_value_facts_meet(const loom_value_facts_t* a,
     return;
   }
 
-  const bool preserves_subgroup_lane_mask =
-      (loom_value_facts_is_subgroup_lane_mask(*a) &&
-       loom_value_facts_is_subgroup_lane_mask(*b)) ||
-      (loom_value_facts_is_subgroup_lane_mask(*a) &&
-       loom_value_facts_is_zero(*b)) ||
-      (loom_value_facts_is_zero(*a) &&
-       loom_value_facts_is_subgroup_lane_mask(*b));
   loom_value_facts_t result = loom_value_facts_make(
       a->range_lo < b->range_lo ? a->range_lo : b->range_lo,
       a->range_hi > b->range_hi ? a->range_hi : b->range_hi,
-      // Exact zero is divisible by every positive divisor. Its stored divisor
-      // is one because the fact representation requires a positive value.
-      loom_value_facts_is_zero(*a) ? b->known_divisor
-      : loom_value_facts_is_zero(*b)
-          ? a->known_divisor
-          : iree_math_gcd_i64(a->known_divisor, b->known_divisor));
-  result.flags |= a->flags & b->flags &
-                  (LOOM_VALUE_FACT_NON_ZERO | LOOM_VALUE_FACT_POWER_OF_TWO);
-  if (preserves_subgroup_lane_mask) {
-    loom_value_facts_mark_subgroup_lane_mask(&result);
-  }
+      loom_value_facts_common_divisor(a, b));
+  result.flags |= loom_value_facts_common_integer_predicates(a, b);
   if (loom_value_facts_is_lane_predicate(*a) ||
       loom_value_facts_is_lane_predicate(*b)) {
     loom_value_facts_mark_lane_predicate(&result);
@@ -1052,6 +1065,9 @@ void loom_value_facts_negi(const loom_value_facts_t* input,
                            loom_value_facts_t* out);
 void loom_value_facts_absi(const loom_value_facts_t* input,
                            loom_value_facts_t* out);
+// Sign maps integer inputs to -1, 0, or 1 (Boolean inputs remain [0,1]).
+void loom_value_facts_signi(const loom_value_facts_t* input,
+                            loom_value_facts_t* out);
 
 // Ternary: fused multiply-add (a*b + c).
 void loom_value_facts_fmai(const loom_value_facts_t* a,
