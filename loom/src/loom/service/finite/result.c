@@ -23,6 +23,11 @@ struct loom_service_finite_result_t {
   loom_runtime_execution_t* execution;
   // Exact output view, including storage ownership but not producer tracking.
   iree_hal_buffer_t* buffer;
+  // Owned row references for a logical result spanning several cohort buffers.
+  // NULL denotes the ordinary single-output source result.
+  iree_hal_buffer_ref_t* gathered_rows;
+  // Number of owned references in gathered_rows.
+  iree_host_size_t gathered_row_count;
   // Accepted producer frontier, whose semaphores are owned by execution.
   loom_runtime_execution_frontier_t ready;
   // Checked request and row metadata, independent of source buffer aliases.
@@ -74,8 +79,7 @@ iree_status_t loom_service_finite_result_create(
     const uint8_t* record = bytes.data + 32 + i * 24;
     const uint64_t row_count = iree_unaligned_load_le_u64(record + 8);
     if (iree_unaligned_load_le_u64(record) != first_row ||
-        (row_count && row_count != expected_rows[i]) ||
-        row_count > rows - first_row) {
+        row_count > expected_rows[i] || row_count > rows - first_row) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "source result rows differ from request %zu", i);
     }
@@ -98,6 +102,9 @@ iree_status_t loom_service_finite_result_create(
   loom_service_finite_result_t* result = NULL;
   iree_host_size_t allocation_size = 0;
   if (!iree_host_size_checked_add(sizeof(*result), bytes.data_length - 32,
+                                  &allocation_size) ||
+      !iree_host_size_checked_add(allocation_size,
+                                  request_count * sizeof(uint64_t),
                                   &allocation_size)) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "result metadata exceeds host address space");
@@ -112,6 +119,71 @@ iree_status_t loom_service_finite_result_create(
   result->length = (iree_host_size_t)length;
   result->request_count = request_count;
   result->records_length = bytes.data_length - 32;
+  for (iree_host_size_t i = 0; i < request_count; ++i) {
+    iree_unaligned_store_le_u64(
+        result->records + result->records_length + i * sizeof(uint64_t),
+        expected_rows[i]);
+  }
+  *out_result = result;
+  return iree_ok_status();
+}
+
+iree_status_t loom_service_finite_result_create_rows(
+    const loom_service_finite_result_t* frontier, iree_host_size_t row_count,
+    const iree_hal_buffer_ref_t* rows, uint64_t input_tokens,
+    iree_allocator_t host_allocator,
+    loom_service_finite_result_t** out_result) {
+  *out_result = NULL;
+  iree_host_size_t row_storage = 0;
+  iree_host_size_t allocation_size = 0;
+  if (!iree_host_size_checked_mul(row_count, 16 + sizeof(iree_hal_buffer_ref_t),
+                                  &row_storage) ||
+      !iree_host_size_checked_add(sizeof(loom_service_finite_result_t) + 32,
+                                  row_storage, &allocation_size)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "logical result metadata exceeds address space");
+  }
+  iree_host_size_t length = 0;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < row_count && iree_status_is_ok(status);
+       ++i) {
+    if (!iree_host_size_checked_add(length, rows[i].length, &length)) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "logical result bytes exceed address space");
+    }
+  }
+  IREE_RETURN_IF_ERROR(status);
+  loom_service_finite_result_t* result = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_uninitialized(
+      host_allocator, allocation_size, (void**)&result));
+  memset(result, 0, sizeof(*result));
+  iree_atomic_ref_count_init(&result->ref_count);
+  result->host_allocator = host_allocator;
+  result->request_count = 1;
+  result->records_length = 24 + row_count * 16;
+  result->output_length = length;
+  result->length = length;
+  result->execution = frontier->execution;
+  loom_runtime_execution_retain(result->execution);
+  result->ready = frontier->ready;
+  result->gathered_row_count = row_count;
+  result->gathered_rows =
+      (iree_hal_buffer_ref_t*)(result->records + result->records_length +
+                               sizeof(uint64_t));
+  iree_unaligned_store_le_u64(result->records, 0);
+  iree_unaligned_store_le_u64(result->records + 8, row_count);
+  iree_unaligned_store_le_u64(result->records + 16, input_tokens);
+  iree_unaligned_store_le_u64(result->records + result->records_length,
+                              row_count);
+  iree_host_size_t offset = 0;
+  for (iree_host_size_t i = 0; i < row_count; ++i) {
+    result->gathered_rows[i] = rows[i];
+    iree_hal_buffer_retain(rows[i].buffer);
+    iree_unaligned_store_le_u64(result->records + 24 + i * 16, offset);
+    iree_unaligned_store_le_u64(result->records + 24 + i * 16 + 8,
+                                rows[i].length / sizeof(float));
+    offset += rows[i].length;
+  }
   *out_result = result;
   return iree_ok_status();
 }
@@ -134,6 +206,9 @@ void loom_service_finite_result_retain(loom_service_finite_result_t* result) {
 
 void loom_service_finite_result_release(loom_service_finite_result_t* result) {
   if (result && iree_atomic_ref_count_dec(&result->ref_count) == 1) {
+    for (iree_host_size_t i = 0; i < result->gathered_row_count; ++i) {
+      iree_hal_buffer_release(result->gathered_rows[i].buffer);
+    }
     iree_hal_buffer_release(result->buffer);
     loom_runtime_execution_release(result->execution);
     iree_allocator_free(result->host_allocator, result);
@@ -161,6 +236,13 @@ iree_host_size_t loom_service_finite_result_row_count(
                                                       request * 24 + 8);
 }
 
+bool loom_service_finite_result_completes_request(
+    const loom_service_finite_result_t* result, iree_host_size_t request) {
+  const uint64_t remaining = iree_unaligned_load_le_u64(
+      result->records + result->records_length + request * sizeof(uint64_t));
+  return loom_service_finite_result_row_count(result, request) == remaining;
+}
+
 uint64_t loom_service_finite_result_input_tokens(
     const loom_service_finite_result_t* result, iree_host_size_t request) {
   return iree_unaligned_load_le_u64(result->records + request * 24 + 16);
@@ -171,6 +253,9 @@ iree_hal_buffer_ref_t loom_service_finite_result_row(
     iree_host_size_t row) {
   const uint8_t* records = result->records;
   const uint64_t first = iree_unaligned_load_le_u64(records + request * 24);
+  if (result->gathered_rows) {
+    return result->gathered_rows[first + row];
+  }
   const uint8_t* vector =
       records + result->request_count * 24 + (first + row) * 16;
   return (iree_hal_buffer_ref_t){
@@ -178,6 +263,13 @@ iree_hal_buffer_ref_t loom_service_finite_result_row(
       .offset = iree_unaligned_load_le_u64(vector),
       .length = iree_unaligned_load_le_u64(vector + 8) * 4,
   };
+}
+
+void loom_service_finite_snapshot_retain(
+    loom_service_finite_snapshot_t* snapshot) {
+  if (snapshot) {
+    iree_atomic_ref_count_inc(&snapshot->ref_count);
+  }
 }
 
 void loom_service_finite_snapshot_release(
@@ -217,25 +309,53 @@ iree_status_t loom_service_finite_result_download(
   snapshot->request_count = result->request_count;
   snapshot->records_length = result->records_length;
   memcpy(snapshot->storage, result->records, result->records_length);
-  iree_hal_buffer_t* source = NULL;
-  iree_status_t status = iree_hal_subspan_buffer_create_with_callback(
-      result->buffer, iree_hal_buffer_byte_offset(result->buffer),
-      result->length,
-      (iree_hal_buffer_release_callback_t){loom_service_finite_snapshot_retired,
-                                           snapshot},
-      result->host_allocator, &source);
-  if (iree_status_is_ok(status)) {
-    iree_atomic_ref_count_inc(&snapshot->ref_count);
-    const iree_hal_transfer_operation_t download = {
-        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
-        .download = {.source_buffer = source,
-                     .target = snapshot->storage + snapshot->records_length,
-                     .length = result->length}};
-    uint64_t value = 0;
-    status = loom_runtime_execution_feedback(result->execution, 1, &download,
-                                             &value);
+  const iree_host_size_t count =
+      result->gathered_rows ? result->gathered_row_count : 1;
+  iree_hal_transfer_operation_t inline_operation;
+  iree_hal_transfer_operation_t* operations = &inline_operation;
+  iree_hal_transfer_operation_t* allocated_operations = NULL;
+  iree_status_t status = iree_ok_status();
+  if (count > 1) {
+    status = iree_allocator_malloc_array(result->host_allocator, count,
+                                         sizeof(*operations),
+                                         (void**)&allocated_operations);
+    operations = allocated_operations;
   }
-  iree_hal_buffer_release(source);
+  iree_host_size_t initialized = 0;
+  iree_host_size_t target_offset = 0;
+  for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+    const iree_hal_buffer_ref_t row =
+        result->gathered_rows
+            ? result->gathered_rows[i]
+            : (iree_hal_buffer_ref_t){.buffer = result->buffer,
+                                      .length = result->length};
+    iree_hal_buffer_t* source = NULL;
+    status = iree_hal_subspan_buffer_create_with_callback(
+        row.buffer, iree_hal_buffer_byte_offset(row.buffer) + row.offset,
+        row.length,
+        (iree_hal_buffer_release_callback_t){
+            loom_service_finite_snapshot_retired, snapshot},
+        result->host_allocator, &source);
+    if (iree_status_is_ok(status)) {
+      loom_service_finite_snapshot_retain(snapshot);
+      operations[initialized++] = (iree_hal_transfer_operation_t){
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+          .download = {.source_buffer = source,
+                       .target = snapshot->storage + snapshot->records_length +
+                                 target_offset,
+                       .length = row.length}};
+      target_offset += row.length;
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    uint64_t value = 0;
+    status = loom_runtime_execution_feedback(result->execution, count,
+                                             operations, &value);
+  }
+  for (iree_host_size_t i = 0; i < initialized; ++i) {
+    iree_hal_buffer_release(operations[i].download.source_buffer);
+  }
+  iree_allocator_free(result->host_allocator, allocated_operations);
   if (iree_status_is_ok(status)) {
     *out_snapshot = snapshot;
     *out_frontier = loom_runtime_execution_frontier(result->execution);

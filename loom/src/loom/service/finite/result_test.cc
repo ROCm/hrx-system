@@ -74,6 +74,8 @@ TEST_F(ResultTest, SourceBufferReuseCannotMutateCheckedRows) {
   EXPECT_EQ(second.length, 8u);
   EXPECT_EQ(third.offset, 16u);
   EXPECT_EQ(third.length, 4u);
+  EXPECT_TRUE(loom_service_finite_result_completes_request(result_, 0));
+  EXPECT_TRUE(loom_service_finite_result_completes_request(result_, 1));
 }
 
 TEST_F(ResultTest, UnpublishedEpochHasNoResultPayload) {
@@ -85,6 +87,18 @@ TEST_F(ResultTest, UnpublishedEpochHasNoResultPayload) {
   EXPECT_EQ(loom_service_finite_result_row_count(result_, 1), 0u);
   EXPECT_EQ(loom_service_finite_result_input_tokens(result_, 0), 7u);
   EXPECT_EQ(loom_service_finite_result_input_tokens(result_, 1), 11u);
+  EXPECT_FALSE(loom_service_finite_result_completes_request(result_, 0));
+  EXPECT_FALSE(loom_service_finite_result_completes_request(result_, 1));
+}
+
+TEST_F(ResultTest, PartialPrefixRetainsRemainingRowFact) {
+  words_ = {32, 8, 2, 2, 0, 1, 7, 1, 1, 11, 0, 1, 4, 1};
+  IREE_ASSERT_OK(CreatePlan(14));
+  IREE_ASSERT_OK(CreateResult(iree_allocator_system()));
+  EXPECT_EQ(loom_service_finite_result_row_count(result_, 0), 1u);
+  EXPECT_FALSE(loom_service_finite_result_completes_request(result_, 0));
+  EXPECT_EQ(loom_service_finite_result_row_count(result_, 1), 1u);
+  EXPECT_TRUE(loom_service_finite_result_completes_request(result_, 1));
 }
 
 TEST_F(ResultTest, PublishedPeerKeepsOriginalOrdinal) {
@@ -295,6 +309,38 @@ TEST_P(SnapshotLifetimeTest, EarlyReleasePreservesAcceptedDownloadStorage) {
   EXPECT_EQ(allocator_.live(), 0u);
 }
 
+TEST_P(SnapshotLifetimeTest, GatheredRowsKeepEveryAcceptedDownloadAlive) {
+  const iree_hal_buffer_ref_t rows[] = {
+      loom_service_finite_result_row(result_, 0, 0),
+      loom_service_finite_result_row(result_, 1, 0),
+      loom_service_finite_result_row(result_, 0, 1)};
+  loom_service_finite_result_t* gathered = nullptr;
+  IREE_ASSERT_OK(loom_service_finite_result_create_rows(
+      result_, IREE_ARRAYSIZE(rows), rows, 18, allocator_.allocator(),
+      &gathered));
+  loom_service_finite_result_release(std::exchange(result_, gathered));
+  loom_runtime_execution_frontier_t frontier;
+  IREE_ASSERT_OK(
+      loom_service_finite_result_download(result_, &snapshot_, &frontier));
+  if (GetParam()) {
+    iree_hal_semaphore_fail(frontier.semaphores[1],
+                            iree_status_from_code(IREE_STATUS_CANCELLED));
+    failed_ = true;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_CANCELLED,
+        iree_hal_semaphore_wait(frontier.semaphores[1], frontier.values[1],
+                                iree_infinite_timeout(),
+                                IREE_ASYNC_WAIT_FLAG_NONE));
+  }
+  loom_service_finite_snapshot_release(std::exchange(snapshot_, nullptr));
+  loom_service_finite_result_release(std::exchange(result_, nullptr));
+  iree_hal_buffer_release(std::exchange(source_, nullptr));
+  // Every row transfer retains the shared destination until actual retirement.
+  EXPECT_EQ(allocator_.live(), 4u);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, 1, nullptr));
+  allocator_.AwaitEmpty();
+}
+
 INSTANTIATE_TEST_SUITE_P(FailedReadiness, SnapshotLifetimeTest,
                          ::testing::Bool());
 
@@ -417,6 +463,73 @@ TEST_F(SuballocationLifetimeTest, RetainsLogicalStorageAfterProducerRetires) {
   EXPECT_EQ(iree_unaligned_load_le_f32(second.data), 11);
   EXPECT_EQ(iree_unaligned_load_le_f32(second.data + 4), 12);
   EXPECT_EQ(iree_unaligned_load_le_f32(third.data), 31);
+}
+
+TEST_F(SuballocationLifetimeTest, LogicalRowsRetainDistinctBackingAndOffsets) {
+  IREE_ASSERT_OK(CreatePlan());
+  IREE_ASSERT_OK(CreateResult(iree_allocator_system()));
+  const iree_hal_transfer_operation_t uploads[] = {
+      {
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+          .upload =
+              {
+                  .source = values_.data(),
+                  .target_buffer = output_,
+                  .length = sizeof(values_),
+              },
+      },
+      {
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+          .upload =
+              {
+                  .source = values_.data(),
+                  .target_buffer = prefix_,
+                  .target_offset = 12,
+                  .length = sizeof(values_),
+              },
+      },
+  };
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(loom_runtime_execution_transfer(
+      execution_, IREE_ARRAYSIZE(uploads), uploads, &completion));
+  loom_service_finite_result_bind(result_, execution_, output_);
+  const iree_hal_buffer_ref_t rows[] = {
+      loom_service_finite_result_row(result_, 0, 0),
+      {.buffer = prefix_, .offset = 12, .length = 8},
+      loom_service_finite_result_row(result_, 1, 0)};
+  loom_service_finite_result_t* gathered = nullptr;
+  IREE_ASSERT_OK(loom_service_finite_result_create_rows(
+      result_, IREE_ARRAYSIZE(rows), rows, 18, iree_allocator_system(),
+      &gathered));
+  loom_service_finite_result_release(std::exchange(result_, gathered));
+  for (size_t i = 0; i < IREE_ARRAYSIZE(rows); ++i) {
+    const auto actual = loom_service_finite_result_row(result_, 0, i);
+    EXPECT_EQ(actual.buffer, rows[i].buffer);
+    EXPECT_EQ(actual.offset, rows[i].offset);
+    EXPECT_EQ(actual.length, rows[i].length);
+  }
+  iree_hal_buffer_release(std::exchange(output_, nullptr));
+  iree_hal_buffer_release(std::exchange(prefix_, nullptr));
+  EXPECT_TRUE(loom_service_finite_result_completes_request(result_, 0));
+  EXPECT_EQ(loom_service_finite_result_input_tokens(result_, 0), 18u);
+  loom_runtime_execution_frontier_t ready;
+  IREE_ASSERT_OK(
+      loom_service_finite_result_download(result_, &snapshot_, &ready));
+  loom_service_finite_result_release(std::exchange(result_, nullptr));
+  IREE_ASSERT_OK(
+      loom_runtime_execution_feedback_wait(execution_, ready.values[1]));
+  const auto first = loom_service_finite_snapshot_row(snapshot_, 0, 0);
+  const auto second = loom_service_finite_snapshot_row(snapshot_, 0, 1);
+  const auto third = loom_service_finite_snapshot_row(snapshot_, 0, 2);
+  EXPECT_EQ(first.data_length, 2 * sizeof(float));
+  EXPECT_EQ(second.data_length, 2 * sizeof(float));
+  EXPECT_EQ(third.data_length, sizeof(float));
+  EXPECT_EQ(iree_unaligned_load_le_f32(first.data), 21);
+  EXPECT_EQ(iree_unaligned_load_le_f32(first.data + 4), 22);
+  EXPECT_EQ(iree_unaligned_load_le_f32(second.data), 11);
+  EXPECT_EQ(iree_unaligned_load_le_f32(second.data + 4), 12);
+  EXPECT_EQ(iree_unaligned_load_le_f32(third.data), 31);
+  EXPECT_EQ(loom_service_finite_snapshot_input_tokens(snapshot_, 0), 18u);
 }
 
 }  // namespace

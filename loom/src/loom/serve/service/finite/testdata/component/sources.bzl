@@ -15,6 +15,9 @@ SOURCE_FILES = [
     "kernels.loom",
     "policy.loom",
     "prepare.loom",
+    "retained_control.loom",
+    "retained_kernels.loom",
+    "retained_prepare.loom",
 ]
 
 SOURCES = ["//loom/src/loom/serve/service/finite/testdata/component:" + path for path in SOURCE_FILES]

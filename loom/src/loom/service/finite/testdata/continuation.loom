@@ -8,31 +8,29 @@ func.decl import("finite", "batch_offer") @finite_batch_offer(%batch: ptr<@Finit
 
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
-// Request state owns its cursor and input. The native producer only assigns a
-// storage slot; the source chooses work, completion, and compatibility.
+// Request state owns its cursor and input. One row publishes only its final
+// sum; multiple two-token rows publish a cumulative sum at each row boundary.
+// Both use the same producer, bounded epochs, and source collection policy.
 func.def public @prepare_request(%input: buffer, %slot: i32) -> (buffer, i64, i64) {
   %origin = index.constant 0 : offset
-  %header = buffer.view %input[%origin] : buffer -> view<5xi64>
-  %rows = view.load %header[1] : view<5xi64> -> i64
-  %kind = view.load %header[2] : view<5xi64> -> i64
-  %offset64 = view.load %header[3] : view<5xi64> -> i64
-  %bytes64 = view.load %header[4] : view<5xi64> -> i64
+  %header = buffer.view %input[%origin] : buffer -> view<2xi64>
+  %rows64 = view.load %header[1] : view<2xi64> -> i64
   %c0_i64 = scalar.constant 0 : i64
   %c1_i64 = scalar.constant 1 : i64
   %epoch_units_i64 = scalar.constant 2 : i64
   %c4_i64 = scalar.constant 4 : i64
+  %c8_i64 = scalar.constant 8 : i64
   %capacity_i64 = scalar.constant 8 : i64
-  %length = scalar.divui %bytes64, %c4_i64 : i64
-  %one_row = scalar.cmpi eq, %rows, %c1_i64 : i64
-  %tokens = scalar.cmpi eq, %kind, %c1_i64 : i64
-  %nonempty = scalar.cmpi ugt, %length, %c0_i64 : i64
-  %fits = scalar.cmpi ule, %length, %capacity_i64 : i64
-  %shape = scalar.andi %one_row, %tokens : i1
-  %extent = scalar.andi %nonempty, %fits : i1
-  %valid = scalar.andi %shape, %extent : i1
-  %valid32 = scalar.extui %valid : i1 to i32
-  %error = buffer.constant utf8("one sequence of 1-8 token IDs required") : buffer
-  func.call @require(%valid32, %error) : (i32, buffer)
+  %nonempty = scalar.cmpi ugt, %rows64, %c0_i64 : i64
+  %fits = scalar.cmpi ule, %rows64, %c4_i64 : i64
+  %shape = scalar.andi %nonempty, %fits : i1
+  %shape32 = scalar.extui %shape : i1 to i32
+  %error = buffer.constant utf8("one 1-8 token row or 2-4 two-token rows required") : buffer
+  func.call @require(%shape32, %error) : (i32, buffer)
+  %bounded_rows = scalar.assume %rows64 [range(%rows64, 1, 4)] : i64
+  %rows = index.cast %bounded_rows : i64 to index
+  %directory_offset = index.constant 16 : offset
+  %directory = buffer.view %input[%directory_offset] : buffer -> view<[%rows]x3xi64>
   %storage_bytes = index.constant 56 : offset
   %state = buffer.alloca<private> align(8) %storage_bytes : buffer
   %metadata = buffer.view %state[%origin] : buffer -> view<14xi32>
@@ -43,15 +41,41 @@ func.def public @prepare_request(%input: buffer, %slot: i32) -> (buffer, i64, i6
   scf.for %i = [%begin to %end step %step] {
     view.store %c0, %metadata[%i] : i32, view<14xi32>
   }
+  %one_row = scalar.cmpi eq, %rows64, %c1_i64 : i64
+  %length = scf.for %i = [%begin to %rows step %step](%total = %c0_i64 : i64) -> (i64) {
+    %kind = view.load %directory[%i, 0] : view<[%rows]x3xi64> -> i64
+    %offset64 = view.load %directory[%i, 1] : view<[%rows]x3xi64> -> i64
+    %bytes64 = view.load %directory[%i, 2] : view<[%rows]x3xi64> -> i64
+    %tokens = scalar.cmpi eq, %kind, %c1_i64 : i64
+    %count = scalar.divui %bytes64, %c4_i64 : i64
+    %nonempty_row = scalar.cmpi ugt, %count, %c0_i64 : i64
+    %fits_row = scalar.cmpi ule, %count, %capacity_i64 : i64
+    %pair = scalar.cmpi eq, %bytes64, %c8_i64 : i64
+    %row_shape = scalar.ori %one_row, %pair : i1
+    %row_extent = scalar.andi %nonempty_row, %fits_row : i1
+    %token_extent = scalar.andi %row_extent, %tokens : i1
+    %valid = scalar.andi %row_shape, %token_extent : i1
+    %valid32 = scalar.extui %valid : i1 to i32
+    func.call @require(%valid32, %error) : (i32, buffer)
+    %bounded_offset = scalar.assume %offset64 [range(%offset64, 0, 9223372036854775807)] : i64
+    %bounded_bytes = scalar.assume %bytes64 [range(%bytes64, 4, 32)] : i64
+    %bounded_total = scalar.assume %total [range(%total, 0, 6)] : i64
+    %offset = index.cast %bounded_offset : i64 to offset
+    %bytes = index.cast %bounded_bytes : i64 to offset
+    %position = index.cast %bounded_total : i64 to index
+    %element_bytes = index.constant 4 : offset
+    %prefix_bytes = index.scale %position, %element_bytes : index, offset -> offset
+    %destination = index.add %directory_offset, %prefix_bytes : offset
+    buffer.copy %input[%offset], %state[%destination], %bytes
+    %next = scalar.addi %total, %count : i64
+    scf.yield %next : i64
+  }
   %length32 = scalar.trunci %length : i64 to i32
+  %multiple = scalar.cmpi ugt, %rows64, %c1_i64 : i64
+  %publish_each = scalar.extui %multiple : i1 to i32
   view.store %slot, %metadata[0] : i32, view<14xi32>
   view.store %length32, %metadata[1] : i32, view<14xi32>
-  %bounded_offset = scalar.assume %offset64 [range(%offset64, 0, 9223372036854775807)] : i64
-  %bounded_bytes = scalar.assume %bytes64 [range(%bytes64, 4, 32)] : i64
-  %offset = index.cast %bounded_offset : i64 to offset
-  %bytes = index.cast %bounded_bytes : i64 to offset
-  %payload = index.constant 16 : offset
-  buffer.copy %input[%offset], %state[%payload], %bytes
+  view.store %publish_each, %metadata[3] : i32, view<14xi32>
   %units = scalar.minui %length, %epoch_units_i64 : i64
   func.return %state, %units, %c0_i64 : buffer, i64, i64
 }
@@ -62,11 +86,13 @@ func.def @prepare_work(%state: buffer, %packet: buffer, %ordinal32: i32) -> (i64
   %slot = view.load %metadata[0] : view<14xi32> -> i32
   %length = view.load %metadata[1] : view<14xi32> -> i32
   %position = view.load %metadata[2] : view<14xi32> -> i32
+  %publish_each = view.load %metadata[3] : view<14xi32> -> i32
   %epoch_units = scalar.constant 2 : i32
   %proposed = scalar.addi %position, %epoch_units : i32
   %end = scalar.minui %proposed, %length : i32
   %complete = scalar.cmpi eq, %end, %length : i32
   %complete32 = scalar.extui %complete : i1 to i32
+  %publish32 = scalar.ori %complete32, %publish_each : i32
   %bounded_ordinal = scalar.assume %ordinal32 [range(%ordinal32, 0, 3)] : i32
   %ordinal = index.cast %bounded_ordinal : i32 to index
   %header_bytes = index.constant 4 : offset
@@ -74,10 +100,10 @@ func.def @prepare_work(%state: buffer, %packet: buffer, %ordinal32: i32) -> (i64
   view.store %slot, %rows[%ordinal, 0] : i32, view<4x4xi32>
   view.store %position, %rows[%ordinal, 1] : i32, view<4x4xi32>
   view.store %end, %rows[%ordinal, 2] : i32, view<4x4xi32>
-  view.store %complete32, %rows[%ordinal, 3] : i32, view<4x4xi32>
+  view.store %publish32, %rows[%ordinal, 3] : i32, view<4x4xi32>
   %consumed32 = scalar.subi %end, %position : i32
   %consumed = scalar.extui %consumed32 : i32 to i64
-  %final = scalar.extui %complete : i1 to i64
+  %final = scalar.extui %publish32 : i32 to i64
   func.return %final, %consumed : i64, i64
 }
 

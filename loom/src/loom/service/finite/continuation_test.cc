@@ -65,8 +65,12 @@ class ContinuingSource {
         environment_, nullptr, iree_allocator_system(), &input_module_));
     IREE_RETURN_IF_ERROR(
         loom_service_finite_batch_register_types(environment_));
+    const iree_vm_ref_type_table_t* hal_table = nullptr;
+    IREE_RETURN_IF_ERROR(iree_hal_vm_register_types(environment_, &hal_table));
+    iree_hal_vm_types_t hal_types;
+    IREE_RETURN_IF_ERROR(iree_hal_vm_types_resolve(hal_table, &hal_types));
     IREE_RETURN_IF_ERROR(loom_service_finite_batch_module_create(
-        environment_, 6, iree_allocator_system(), &batch_module_));
+        environment_, &hal_types, 6, iree_allocator_system(), &batch_module_));
     iree_vm_module_t* modules[] = {input_module_, batch_module_};
     const iree_string_view_t roots[] = {IREE_SV("prepare_request"),
                                         IREE_SV("prepare_batch"),
@@ -140,7 +144,10 @@ class ContinuingSource {
             },
         .execution_update =
             [](void*) { return loom_service_execution_update_t{}; },
-        .set_observer = [](void*, loom_runtime_wake_callback_t) {},
+        .set_observer =
+            [](void* p, loom_runtime_wake_callback_t observer) {
+              static_cast<ContinuingSource*>(p)->observer_ = observer;
+            },
         .is_pending = [](void*) { return false; },
         .query_status = [](void*) { return iree_ok_status(); },
         .prepare_request =
@@ -155,6 +162,41 @@ class ContinuingSource {
               auto* request = static_cast<Request*>(work->bytes);
               source->ReleaseRequest(request);
               *work = {};
+            },
+        .try_admit_request =
+            [](void* p, loom_service_prepared_request_t* work, bool* acquired) {
+              auto* source = static_cast<ContinuingSource*>(p);
+              ++source->admission_probes;
+              const auto slot = iree_unaligned_load_le_u32(
+                  iree_vm_buffer_const_data(work->bytes));
+              const uint32_t bit = 1u << slot;
+              uint32_t occupied = source->admitted_.load();
+              for (;;) {
+                if (occupied & bit) {
+                  *acquired = true;
+                  break;
+                }
+                if (iree_math_count_ones_u32(occupied) >=
+                    source->resident_capacity) {
+                  *acquired = false;
+                  if (source->release_capacity_during_probe) {
+                    source->release_capacity_during_probe = false;
+                    source->SetCapacity(1);
+                  }
+                  break;
+                }
+                if (source->admitted_.compare_exchange_weak(occupied,
+                                                            occupied | bit)) {
+                  *acquired = true;
+                  break;
+                }
+              }
+              return iree_ok_status();
+            },
+        .capacity_generation =
+            [](void* p) {
+              return static_cast<ContinuingSource*>(p)
+                  ->capacity_generation_.load();
             },
         .prepare_batch =
             [](void* p, size_t count, loom_service_prepared_request_t* work,
@@ -179,8 +221,9 @@ class ContinuingSource {
                const loom_service_finite_result_t* result) {
               auto* source = static_cast<ContinuingSource*>(p);
               iree_vm_variant_t arguments[] = {
-                  loom_service_finite_batch_begin(source->batch_module_, count,
-                                                  work, result),
+                  loom_service_finite_batch_begin(
+                      source->batch_module_, LOOM_SERVICE_FINITE_BATCH_COLLECT,
+                      count, work, result),
                   iree_vm_buffer_variant_from_ptr_borrowed(
                       &source->vm_types_, source->packet_buffer_)};
               iree_status_t status = iree_vm_invoke(
@@ -277,7 +320,9 @@ class ContinuingSource {
     }
     cohorts.push_back(std::move(ids));
     iree_vm_variant_t arguments[] = {
-        loom_service_finite_batch_begin(batch_module_, count, work, nullptr),
+        loom_service_finite_batch_begin(batch_module_,
+                                        LOOM_SERVICE_FINITE_BATCH_PREPARE,
+                                        count, work, nullptr),
         iree_vm_buffer_variant_from_ptr_borrowed(&vm_types_, packet_buffer_)};
     iree_vm_variant_t plan = {};
     iree_status_t status =
@@ -402,6 +447,22 @@ class ContinuingSource {
   // Stable original-member identities for each numerical epoch.
   std::vector<std::vector<uint32_t>> cohorts;
 
+  // Dependency capacity is distinct from numerical epoch width and native
+  // slots.
+  std::atomic<uint32_t> resident_capacity = 4;
+  // Selection probes observed after the CPU borrower publishes its result.
+  size_t admission_probes = 0;
+  // Publishes an external capacity change between a denied probe and parking.
+  bool release_capacity_during_probe = false;
+
+  void SetCapacity(uint32_t count) {
+    resident_capacity = count;
+    ++capacity_generation_;
+    if (observer_.wake) {
+      observer_.wake(observer_.user_data);
+    }
+  }
+
   uint32_t AcceptedPosition(size_t ordinal) {
     iree_const_byte_span_t bytes;
     IREE_CHECK_OK(iree_vm_buffer_map_read(batch_[ordinal], 8, 4, &bytes));
@@ -417,6 +478,12 @@ class ContinuingSource {
     IREE_CHECK_OK(iree_vm_buffer_map_read(request, 0, 4, &bytes));
     const auto slot = iree_unaligned_load_le_u32(bytes.data);
     used_.fetch_and(~(1u << slot));
+    if (admitted_.fetch_and(~(1u << slot)) & (1u << slot)) {
+      ++capacity_generation_;
+      if (observer_.wake) {
+        observer_.wake(observer_.user_data);
+      }
+    }
     ++released;
     iree_vm_buffer_release(request);
   }
@@ -445,6 +512,12 @@ class ContinuingSource {
   std::string directory_;
   // Slot ownership shared by CPU preparation and owner-side release.
   std::atomic<uint32_t> used_ = 0;
+  // Admission dependency ownership, separate from source request preparation.
+  std::atomic<uint32_t> admitted_ = 0;
+  // Capacity-return generation shared by CPU probes and owner-side release.
+  std::atomic<uint64_t> capacity_generation_ = 0;
+  // Owner wake registration enclosing every accepted CPU borrower.
+  loom_runtime_wake_callback_t observer_ = {};
   // Accepted source captures retained independently of caller cancellation.
   std::array<Request*, 4> batch_ = {};
   // Source-authored control packet, reused only after accepted work retires.
@@ -572,30 +645,36 @@ class FiniteContinuation : public ::testing::Test {
     iree_string_builder_deinitialize(&body);
     ASSERT_NE(calls_[index], nullptr);
   }
-  float Read(size_t index) {
-    loom_service_finite_result_t* result = nullptr;
-    size_t ordinal = 0, rows = 0;
+  std::vector<float> ReadRows(size_t index) {
     const auto* output = loom_service_finite_call_output(calls_[index]);
     EXPECT_NE(output, nullptr);
     if (!output) {
-      return 0;
+      return {};
     }
-    result = output->result;
-    ordinal = output->request_index;
-    rows = output->row_count;
-    EXPECT_EQ(rows, 1u);
     loom_service_finite_snapshot_t* snapshot = nullptr;
     loom_runtime_execution_frontier_t frontier = {};
-    IREE_EXPECT_OK(
-        loom_service_finite_result_download(result, &snapshot, &frontier));
+    IREE_EXPECT_OK(loom_service_finite_result_download(output->result,
+                                                       &snapshot, &frontier));
+    if (!snapshot) {
+      return {};
+    }
     IREE_EXPECT_OK(iree_hal_semaphore_list_wait(
         {2, frontier.semaphores, frontier.values}, iree_infinite_timeout(),
         IREE_ASYNC_WAIT_FLAG_NONE));
-    const auto bytes = loom_service_finite_snapshot_row(snapshot, ordinal, 0);
-    float value = 0;
-    std::memcpy(&value, bytes.data, 4);
+    std::vector<float> values;
+    for (size_t i = 0; i < output->row_count; ++i) {
+      const auto bytes =
+          loom_service_finite_snapshot_row(snapshot, output->request_index, i);
+      EXPECT_EQ(bytes.data_length, sizeof(float));
+      values.push_back(iree_unaligned_load_le_f32(bytes.data));
+    }
     loom_service_finite_snapshot_release(snapshot);
-    return value;
+    return values;
+  }
+  float Read(size_t index) {
+    const auto values = ReadRows(index);
+    EXPECT_EQ(values.size(), 1u);
+    return values.empty() ? 0 : values[0];
   }
   // Wake publication for the fixture owner, without polling sleeps.
   iree_notification_t notification_ = {};
@@ -648,6 +727,60 @@ TEST_F(FiniteContinuation, LatePeerCancellationAndHeldOutput) {
   EXPECT_FLOAT_EQ(Read(1), 41.0f);
 }
 
+TEST_F(FiniteContinuation, CapacityBlockedArrivalCannotBlockContinuingOwner) {
+  source_.SetCapacity(1);
+  Open(0, R"({"model":"sum","input":[1,2,3,4,5,6,7,8]})");
+  ASSERT_NO_FATAL_FAILURE(Drain([&] { return source_.submissions == 1; }));
+  Open(1, R"({"model":"sum","input":[20,21]})");
+  ASSERT_NO_FATAL_FAILURE(Drain([&] { return source_.submissions == 2; }));
+  EXPECT_EQ(source_.cohorts[1], (std::vector<uint32_t>{1}));
+  ASSERT_NO_FATAL_FAILURE(ReleaseGate());
+  ASSERT_NO_FATAL_FAILURE(Drain([&] {
+    return loom_service_finite_call_is_complete(calls_[0]) &&
+           loom_service_finite_call_is_complete(calls_[1]);
+  }));
+  EXPECT_FLOAT_EQ(Read(0), 36.0f);
+  EXPECT_FLOAT_EQ(Read(1), 41.0f);
+  EXPECT_EQ(source_.submissions, 5u);
+  EXPECT_EQ(source_.prepared, 2u);
+}
+
+TEST_F(FiniteContinuation, EmptyCapacitySelectionParksUntilChange) {
+  source_.SetCapacity(0);
+  ASSERT_NO_FATAL_FAILURE(ReleaseGate());
+  Open(0, R"({"model":"sum","input":[20,21]})");
+  ASSERT_NO_FATAL_FAILURE(Drain([&] {
+    return strcmp(interface_.snapshot(interface_.runtime.self).phase, "idle") ==
+               0 &&
+           source_.prepared == 1;
+  }));
+  EXPECT_EQ(source_.admission_probes, 1u);
+  for (size_t i = 0; i < 16; ++i) {
+    bool progress = false;
+    IREE_ASSERT_OK(interface_.runtime.vtable->advance(interface_.runtime.self,
+                                                      0, &progress));
+    EXPECT_FALSE(progress);
+  }
+  EXPECT_EQ(source_.admission_probes, 1u);
+  EXPECT_EQ(source_.submissions, 0u);
+  source_.SetCapacity(1);
+  ASSERT_NO_FATAL_FAILURE(
+      Drain([&] { return loom_service_finite_call_is_complete(calls_[0]); }));
+  EXPECT_FLOAT_EQ(Read(0), 41.0f);
+}
+
+TEST_F(FiniteContinuation, CapacityReleaseDuringDeniedProbeIsNotLost) {
+  source_.SetCapacity(0);
+  source_.release_capacity_during_probe = true;
+  ASSERT_NO_FATAL_FAILURE(ReleaseGate());
+  Open(0, R"({"model":"sum","input":[20,21]})");
+  ASSERT_NO_FATAL_FAILURE(
+      Drain([&] { return loom_service_finite_call_is_complete(calls_[0]); }));
+  EXPECT_EQ(source_.admission_probes, 2u);
+  EXPECT_EQ(source_.submissions, 1u);
+  EXPECT_FLOAT_EQ(Read(0), 41.0f);
+}
+
 TEST_F(FiniteContinuation, MixedJsonAndDeviceWithSourceRejection) {
   ASSERT_NO_FATAL_FAILURE(ReleaseGate());
   Open(0, R"({"model":"sum","input":[1,2,3,4,5,6,7,8]})");
@@ -675,8 +808,74 @@ TEST_F(FiniteContinuation, MixedJsonAndDeviceWithSourceRejection) {
   EXPECT_EQ(source_.released, 2u);
 }
 
+TEST_F(FiniteContinuation, LogicalRowsSurviveCohortsCancellationAndRemoval) {
+  Open(0, R"({"model":"sum","input":[[1,2],[3,4],[5,6],[7,8]]})");
+  ASSERT_NO_FATAL_FAILURE(Drain([&] { return source_.submissions == 1; }));
+  EXPECT_EQ(loom_service_finite_call_output(calls_[0]), nullptr);
+  Open(2, R"({"model":"sum","input":[[40,41],[42,43],[44,45]]})",
+       LOOM_SERVICE_FINITE_OUTPUT_JSON);
+  Open(1, R"({"model":"sum","input":[[20,21],[22,23]]})");
+  ASSERT_NO_FATAL_FAILURE(Drain([&] { return source_.submissions == 2; }));
+  EXPECT_EQ(source_.cohorts[1], (std::vector<uint32_t>{40, 20, 1}));
+  EXPECT_EQ(loom_service_finite_call_output(calls_[0]), nullptr);
+  EXPECT_EQ(loom_service_finite_call_output(calls_[1]), nullptr);
+  loom_service_finite_call_close(std::exchange(calls_[2], nullptr));
+  ASSERT_NO_FATAL_FAILURE(ReleaseGate());
+  ASSERT_NO_FATAL_FAILURE(
+      Drain([&] { return loom_service_finite_call_is_complete(calls_[1]); }));
+  EXPECT_FALSE(loom_service_finite_call_is_complete(calls_[0]));
+  ASSERT_NO_FATAL_FAILURE(
+      Drain([&] { return loom_service_finite_call_is_complete(calls_[0]); }));
+  IREE_ASSERT_OK(loom_service_finite_call_status(calls_[0]));
+  IREE_ASSERT_OK(loom_service_finite_call_status(calls_[1]));
+  EXPECT_EQ(source_.prepared, 3u);
+  EXPECT_EQ(source_.released, 3u);
+  const auto* long_output = loom_service_finite_call_output(calls_[0]);
+  ASSERT_NE(long_output, nullptr);
+  EXPECT_EQ(loom_service_finite_result_input_tokens(long_output->result,
+                                                    long_output->request_index),
+            8u);
+  const auto* short_output = loom_service_finite_call_output(calls_[1]);
+  ASSERT_NE(short_output, nullptr);
+  EXPECT_EQ(loom_service_finite_result_input_tokens(
+                short_output->result, short_output->request_index),
+            4u);
+  ASSERT_NO_FATAL_FAILURE(RemoveService());
+  IREE_ASSERT_OK(source_.Retire());
+  EXPECT_EQ(ReadRows(0), (std::vector<float>{3, 10, 21, 36}));
+  EXPECT_EQ(ReadRows(1), (std::vector<float>{41, 86}));
+}
+
+TEST_F(FiniteContinuation, LogicalRowsEncodeInOrderWithTotalUsage) {
+  ASSERT_NO_FATAL_FAILURE(ReleaseGate());
+  Open(0, R"({"model":"sum","input":[[1,2],[3,4],[5,6],[7,8]]})");
+  Open(1, R"({"model":"sum","input":[[20,21],[22,23],[24,25]],"dimensions":1})",
+       LOOM_SERVICE_FINITE_OUTPUT_JSON);
+  Open(2, R"({"model":"sum","input":[[1,2,3],[4,5]]})");
+  ASSERT_NO_FATAL_FAILURE(Drain([&] {
+    return loom_service_finite_call_is_complete(calls_[0]) &&
+           loom_service_finite_call_is_complete(calls_[1]) &&
+           loom_service_finite_call_is_complete(calls_[2]);
+  }));
+  IREE_ASSERT_OK(loom_service_finite_call_status(calls_[0]));
+  IREE_ASSERT_OK(loom_service_finite_call_status(calls_[1]));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_service_finite_call_status(calls_[2]));
+  EXPECT_EQ(ReadRows(0), (std::vector<float>{3, 10, 21, 36}));
+  const auto response = loom_service_finite_call_response(calls_[1]);
+  EXPECT_EQ(std::string(response.data, response.size),
+            R"({"object":"list","model":"sum","data":[)"
+            R"({"object":"embedding","index":0,"embedding":[41]},)"
+            R"({"object":"embedding","index":1,"embedding":[86]},)"
+            R"({"object":"embedding","index":2,"embedding":[135]}],)"
+            R"("usage":{"prompt_tokens":6,"total_tokens":6}})");
+  EXPECT_EQ(interface_.telemetry.counters->input_tokens, 14u);
+  EXPECT_EQ(interface_.telemetry.counters->completed, 2u);
+  EXPECT_EQ(interface_.telemetry.counters->rejected, 1u);
+}
+
 TEST_F(FiniteContinuation, FailedReadinessDoesNotCommitPlannedProgress) {
-  Open(0, R"({"model":"sum","input":[1,2,3,4,5,6,7,8]})");
+  Open(0, R"({"model":"sum","input":[[1,2],[3,4],[5,6],[7,8]]})");
   ASSERT_NO_FATAL_FAILURE(Drain([&] { return source_.submissions == 1; }));
   Open(1, R"({"model":"sum","input":[20,21]})");
   ASSERT_NO_FATAL_FAILURE(Drain([&] { return source_.submissions == 2; }));

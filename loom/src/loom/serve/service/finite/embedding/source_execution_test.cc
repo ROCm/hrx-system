@@ -432,7 +432,7 @@ class DeviceResultTest : public SourceEmbeddingServiceTest {
 
   void ReleaseInputs() {
     for (auto& prepared : prepared_) {
-      iree_vm_buffer_release(prepared.bytes);
+      loom_service_prepared_request_release(&prepared);
     }
     prepared_.clear();
     for (auto& request : requests_) {

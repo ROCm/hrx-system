@@ -44,10 +44,10 @@ func.def public @text_image_prepare_batch_v1(%state: buffer, %tags: buffer, %bat
   func.return %stage, %input, %plan : i32, buffer, buffer
 }
 
-func.decl @run(%stage: i32, %input: hal.buffer, %output: hal.buffer)
+func.decl @run(%state: buffer, %stage: i32, %input: hal.buffer, %output: hal.buffer, %batch: ptr<@FiniteBatch>)
 
-func.def public @text_image_run_v1(%stage: i32, %input: hal.buffer, %output: hal.buffer) {
-  func.call @run(%stage, %input, %output) : (i32, hal.buffer, hal.buffer)
+func.def public @text_image_run_v1(%state: buffer, %stage: i32, %input: hal.buffer, %output: hal.buffer, %batch: ptr<@FiniteBatch>) {
+  func.call @run(%state, %stage, %input, %output, %batch) : (buffer, i32, hal.buffer, hal.buffer, ptr<@FiniteBatch>)
   func.return
 }
 

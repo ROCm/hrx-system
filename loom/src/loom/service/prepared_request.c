@@ -8,6 +8,13 @@
 
 #include <string.h>
 
+void loom_service_prepared_request_release(
+    loom_service_prepared_request_t* request) {
+  iree_vm_buffer_release(request->bytes);
+  iree_vm_ref_reset(&request->resource);
+  memset(request, 0, sizeof(*request));
+}
+
 iree_status_t loom_service_prepared_requests_pack(
     iree_host_size_t count, const loom_service_prepared_request_t* requests,
     iree_allocator_t host_allocator, iree_vm_buffer_t** out_ranges,

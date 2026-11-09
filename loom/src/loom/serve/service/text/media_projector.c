@@ -394,7 +394,7 @@ static iree_status_t loom_serve_text_media_request_forecast(
   iree_vm_buffer_release(ranges);
   iree_vm_buffer_release(packed);
   for (iree_host_size_t i = 0; i < count; ++i) {
-    iree_vm_buffer_release(descriptions[i].bytes);
+    loom_service_prepared_request_release(&descriptions[i]);
   }
   iree_allocator_free(request->host_allocator, descriptions);
   if (iree_status_is_ok(status)) {
@@ -567,7 +567,7 @@ static void loom_serve_text_media_job_release(
     job->request->results[job->projection_index].selected = false;
     job->request->status = iree_status_join(job->request->status, job->status);
   }
-  iree_vm_buffer_release(job->prepared.bytes);
+  loom_service_prepared_request_release(&job->prepared);
   iree_vm_buffer_release(job->packet);
   memset(job, 0, sizeof(*job));
 }

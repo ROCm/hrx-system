@@ -19,14 +19,17 @@ typedef struct loom_service_finite_consumer_vtable_t {
   // invalidating input borrowed by a CPU task. end still follows retirement.
   // Device-only consumers need no peer action and may leave this null.
   void (*cancel)(void* self);
-  // Optional owner publication immediately after device submission. The result
-  // is borrowed for this call; retaining it permits dependency-based device
-  // composition without a host wait. Publication does not imply retirement.
+  // Optional owner publication after the final output-producing submission.
+  // Results spanning epochs preserve the original logical request row order.
+  // The result is borrowed for this call; retaining it permits dependency-based
+  // device composition without a host wait. Publication does not imply
+  // retirement.
   void (*publish)(void* self, loom_service_finite_result_t* result,
                   iree_host_size_t request_index, iree_host_size_t row_count);
-  // Optional host output on a finite CPU loan. Its presence requests one shared
-  // cohort download; device-only consumers leave it null. No row borrow escapes
-  // this call. Input and output storage stay live until end.
+  // Optional host output on a finite CPU loan. Its presence requests shared
+  // cohort downloads, retained until all logical rows are available;
+  // device-only consumers leave it null. No row borrow escapes this call.
+  // Input and output storage stay live until end.
   iree_status_t (*encode)(void* self,
                           const loom_service_finite_protocol_t* protocol,
                           const loom_service_finite_request_t* request,

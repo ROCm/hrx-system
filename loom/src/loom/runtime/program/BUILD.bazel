@@ -76,6 +76,20 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "storage",
+    srcs = ["storage.c"],
+    hdrs = ["storage.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime/execution",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/vm:types",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
     name = "transfer_plan",
     srcs = ["transfer_plan.c"],
     hdrs = ["transfer_plan.h"],
