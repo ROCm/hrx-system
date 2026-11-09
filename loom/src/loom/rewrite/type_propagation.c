@@ -82,6 +82,9 @@ struct loom_type_propagator_t {
   // Region-local domain mapping module value IDs to compact ordinals.
   loom_local_value_domain_t value_domain;
 
+  // Logical owner of the root, including its prospective owner while detached.
+  loom_op_t* root_parent_op;
+
   // Number of local value ordinals addressable by the dense arrays below.
   iree_host_size_t ordinal_capacity;
 
@@ -94,9 +97,6 @@ struct loom_type_propagator_t {
   // Worklist occupancy indexed by value ordinal. A forwarding group's first
   // destination value owns its forwarding flag.
   loom_type_propagator_queue_flags_t* queue_flags;
-
-  // Parent op owning the region that defines each block argument, when known.
-  loom_op_t** owner_ops;
 
   // Local value ordinal worklist used to expand the candidate closure.
   loom_value_ordinal_t* value_worklist;
@@ -206,7 +206,6 @@ static iree_status_t loom_type_propagator_ensure_ordinal_capacity(
   uint32_t* candidate_indices = NULL;
   uint32_t* rejection_indices = NULL;
   loom_type_propagator_queue_flags_t* queue_flags = NULL;
-  loom_op_t** owner_ops = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       propagator->arena, new_capacity, sizeof(*candidate_indices),
       (void**)&candidate_indices));
@@ -216,12 +215,9 @@ static iree_status_t loom_type_propagator_ensure_ordinal_capacity(
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(propagator->arena, new_capacity,
                                 sizeof(*queue_flags), (void**)&queue_flags));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      propagator->arena, new_capacity, sizeof(*owner_ops), (void**)&owner_ops));
   memset(candidate_indices, 0xFF, new_capacity * sizeof(*candidate_indices));
   memset(rejection_indices, 0xFF, new_capacity * sizeof(*rejection_indices));
   memset(queue_flags, 0, new_capacity * sizeof(*queue_flags));
-  memset(owner_ops, 0, new_capacity * sizeof(*owner_ops));
 
   if (old_capacity > 0) {
     memcpy(candidate_indices, propagator->candidates.indices,
@@ -230,13 +226,11 @@ static iree_status_t loom_type_propagator_ensure_ordinal_capacity(
            old_capacity * sizeof(*rejection_indices));
     memcpy(queue_flags, propagator->queue_flags,
            old_capacity * sizeof(*queue_flags));
-    memcpy(owner_ops, propagator->owner_ops, old_capacity * sizeof(*owner_ops));
   }
 
   propagator->candidates.indices = candidate_indices;
   propagator->rejections.indices = rejection_indices;
   propagator->queue_flags = queue_flags;
-  propagator->owner_ops = owner_ops;
   propagator->ordinal_capacity = new_capacity;
   return iree_ok_status();
 }
@@ -323,99 +317,39 @@ static void loom_type_propagator_next_transaction(
   propagator->conflict = false;
 }
 
-static iree_status_t loom_type_propagator_note_owner(
-    loom_type_propagator_t* propagator, loom_value_id_t value_id,
-    loom_op_t* owner_op) {
-  loom_value_ordinal_t value_ordinal = LOOM_VALUE_ORDINAL_INVALID;
-  IREE_RETURN_IF_ERROR(loom_type_propagator_register_value(propagator, value_id,
-                                                           &value_ordinal));
-  if (value_ordinal == LOOM_VALUE_ORDINAL_INVALID) {
-    return iree_ok_status();
+static loom_op_t* loom_type_propagator_block_arg_owner(
+    const loom_type_propagator_t* propagator, const loom_value_t* value) {
+  IREE_ASSERT(loom_value_is_block_arg(value));
+  const loom_block_t* block = loom_value_def_block(value);
+  if (block->region_index != 0) {
+    return NULL;
   }
-  propagator->owner_ops[value_ordinal] = owner_op;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_type_propagator_record_op_region_owners(
-    loom_type_propagator_t* propagator, loom_op_t* op) {
-  loom_region_t** regions = loom_op_regions(op);
-  for (uint8_t region_index = 0; region_index < op->region_count;
-       ++region_index) {
-    loom_region_t* region = regions[region_index];
-    if (!region || region->block_count == 0) {
-      continue;
-    }
-    loom_block_t* entry = loom_region_entry_block(region);
-    for (uint16_t arg_index = 0; arg_index < entry->arg_count; ++arg_index) {
-      IREE_RETURN_IF_ERROR(loom_type_propagator_note_owner(
-          propagator, loom_block_arg_id(entry, arg_index), op));
-    }
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_type_propagator_record_region_tree_owners(
-    loom_type_propagator_t* propagator, loom_region_t* region) {
-  if (!region) {
-    return iree_ok_status();
-  }
-  loom_block_t* block = NULL;
-  loom_region_for_each_block(region, block) {
-    loom_op_t* op = NULL;
-    loom_block_for_each_op(block, op) {
-      IREE_RETURN_IF_ERROR(
-          loom_type_propagator_record_op_region_owners(propagator, op));
-      loom_region_t** regions = loom_op_regions(op);
-      for (uint8_t region_index = 0; region_index < op->region_count;
-           ++region_index) {
-        IREE_RETURN_IF_ERROR(loom_type_propagator_record_region_tree_owners(
-            propagator, regions[region_index]));
-      }
-    }
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_type_propagator_record_root_entry_owner(
-    loom_type_propagator_t* propagator, loom_region_t* region,
-    loom_op_t* parent_op) {
-  if (!region || !parent_op || region->block_count == 0) {
-    return iree_ok_status();
-  }
-  loom_block_t* entry = loom_region_entry_block(region);
-  for (uint16_t arg_index = 0; arg_index < entry->arg_count; ++arg_index) {
-    IREE_RETURN_IF_ERROR(loom_type_propagator_note_owner(
-        propagator, loom_block_arg_id(entry, arg_index), parent_op));
-  }
-  return iree_ok_status();
+  loom_region_t* region = block->parent_region;
+  loom_op_t* owner = loom_region_parent_op(region);
+  return owner ? owner : propagator->root_parent_op;
 }
 
 iree_status_t loom_type_propagator_prepare_region(
     loom_type_propagator_t* propagator, loom_region_t* region,
     loom_op_t* parent_op) {
   loom_local_value_domain_release(&propagator->value_domain);
+  propagator->root_parent_op = NULL;
   if (!region) {
     return iree_ok_status();
   }
+  IREE_ASSERT(loom_region_parent_op(region) == NULL ||
+              loom_region_parent_op(region) == parent_op);
+  propagator->root_parent_op =
+      loom_region_parent_op(region) ? loom_region_parent_op(region) : parent_op;
   iree_status_t status = loom_local_value_domain_acquire_for_region_tree(
       propagator->module, region, propagator->arena, &propagator->value_domain);
   if (iree_status_is_ok(status)) {
     status = loom_type_propagator_ensure_ordinal_capacity(
         propagator, propagator->value_domain.value_count);
   }
-  if (iree_status_is_ok(status) && propagator->ordinal_capacity > 0) {
-    memset(propagator->owner_ops, 0,
-           propagator->ordinal_capacity * sizeof(*propagator->owner_ops));
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_type_propagator_record_root_entry_owner(propagator, region,
-                                                          parent_op);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_type_propagator_record_region_tree_owners(propagator, region);
-  }
   if (!iree_status_is_ok(status)) {
     loom_local_value_domain_release(&propagator->value_domain);
+    propagator->root_parent_op = NULL;
   }
   return status;
 }
@@ -1518,8 +1452,6 @@ static iree_status_t loom_type_propagator_schedule_region_forwarding(
     return iree_ok_status();
   }
   const loom_value_id_t key_value_id = condition_entry->arg_ids[0];
-  IREE_RETURN_IF_ERROR(
-      loom_type_propagator_note_owner(propagator, key_value_id, op));
   return loom_type_propagator_enqueue_forwarding(propagator, key_value_id);
 }
 
@@ -1555,8 +1487,6 @@ static iree_status_t loom_type_propagator_process_op_constraints(
   if (!op || iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(
-      loom_type_propagator_record_op_region_owners(propagator, op));
   IREE_RETURN_IF_ERROR(
       loom_type_propagator_seed_op_value_facts(propagator, rewriter, op));
   if (propagator->conflict) {
@@ -1668,17 +1598,12 @@ static iree_status_t loom_type_propagator_process_value_adjacency(
   if (loom_value_is_block_arg(value)) {
     IREE_RETURN_IF_ERROR(loom_type_propagator_schedule_cfg_forwarding(
         propagator, loom_value_def_block(value)));
-    const loom_value_ordinal_t value_ordinal =
-        loom_local_value_domain_try_ordinal(&propagator->value_domain,
-                                            value_id);
-    if (value_ordinal != LOOM_VALUE_ORDINAL_INVALID &&
-        (iree_host_size_t)value_ordinal < propagator->ordinal_capacity &&
-        propagator->owner_ops[value_ordinal]) {
-      const loom_op_vtable_t* owner_vtable = loom_op_vtable(
-          propagator->module, propagator->owner_ops[value_ordinal]);
+    loom_op_t* owner = loom_type_propagator_block_arg_owner(propagator, value);
+    if (owner) {
+      const loom_op_vtable_t* owner_vtable =
+          loom_op_vtable(propagator->module, owner);
       if (owner_vtable->func_like &&
-          loom_type_propagator_boundary_is_fixed(
-              propagator, propagator->owner_ops[value_ordinal])) {
+          loom_type_propagator_boundary_is_fixed(propagator, owner)) {
         // A local transaction cannot redeclare an externally owned signature.
         // Whole-module boundary specialization updates callers and callees
         // together; local facts remain usable without changing these types.
@@ -1686,8 +1611,7 @@ static iree_status_t loom_type_propagator_process_value_adjacency(
         return iree_ok_status();
       }
       IREE_RETURN_IF_ERROR(loom_type_propagator_process_op_constraints(
-          propagator, rewriter, propagator->owner_ops[value_ordinal],
-          owner_vtable));
+          propagator, rewriter, owner, owner_vtable));
       if (propagator->conflict) {
         return iree_ok_status();
       }
@@ -1751,14 +1675,9 @@ static iree_status_t loom_type_propagator_process_value_adjacency(
       loom_value_t* user_value =
           loom_module_value(propagator->module, user_value_id);
       if (loom_value_is_block_arg(user_value)) {
-        const loom_value_ordinal_t user_value_ordinal =
-            loom_local_value_domain_try_ordinal(&propagator->value_domain,
-                                                user_value_id);
-        if (user_value_ordinal != LOOM_VALUE_ORDINAL_INVALID &&
-            (iree_host_size_t)user_value_ordinal <
-                propagator->ordinal_capacity &&
-            propagator->owner_ops[user_value_ordinal]) {
-          loom_op_t* owner = propagator->owner_ops[user_value_ordinal];
+        loom_op_t* owner =
+            loom_type_propagator_block_arg_owner(propagator, user_value);
+        if (owner) {
           IREE_RETURN_IF_ERROR(loom_type_propagator_process_op_constraints(
               propagator, rewriter, owner,
               loom_op_vtable(propagator->module, owner)));
@@ -1859,7 +1778,8 @@ iree_status_t loom_type_propagator_apply_op(loom_type_propagator_t* propagator,
     loom_value_t* key_value =
         loom_module_value(propagator->module, key_value_id);
     if (loom_value_is_block_arg(key_value)) {
-      loom_op_t* owner = propagator->owner_ops[key_ordinal];
+      loom_op_t* owner =
+          loom_type_propagator_block_arg_owner(propagator, key_value);
       if (owner &&
           loom_loop_like_isa(loom_loop_like_cast(propagator->module, owner))) {
         IREE_RETURN_IF_ERROR(loom_type_propagator_process_region_forwarding(

@@ -79,18 +79,16 @@ iree_status_t loom_type_propagator_allocate(
 // object itself is arena-allocated and has no heap ownership.
 void loom_type_propagator_deinitialize(loom_type_propagator_t* propagator);
 
-// Refreshes region-local block-argument ownership metadata. Call once before
-// processing an explicit region tree. The local value domain covers the
-// complete region tree when this returns. |parent_op| owns the root entry block
-// arguments when provided. New values created by rewrites are admitted to the
-// same region-local domain on demand; new region-owner ops are recorded when
-// their constraints are processed.
+// Acquires the local value domain for an explicit region tree. |parent_op|
+// supplies the logical owner only when the root region is detached; attached
+// nested regions retain their owners directly. New values created by rewrites
+// are admitted to the same region-local domain on demand.
 iree_status_t loom_type_propagator_prepare_region(
     loom_type_propagator_t* propagator, loom_region_t* region,
     loom_op_t* parent_op);
 
-// Refreshes function-body block-argument ownership metadata. Convenience
-// wrapper around loom_type_propagator_prepare_region.
+// Acquires a function's body-local value domain. Convenience wrapper around
+// loom_type_propagator_prepare_region.
 iree_status_t loom_type_propagator_prepare_function(
     loom_type_propagator_t* propagator, loom_func_like_t function);
 
