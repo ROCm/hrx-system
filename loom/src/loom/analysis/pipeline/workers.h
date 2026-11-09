@@ -168,6 +168,10 @@ typedef struct loom_pipeline_transport_t {
   const loom_pipeline_transport_batch_t* batches;
   // Number of independently owned source sequences.
   iree_host_size_t batch_count;
+  // Exact cycles consisting of one record from each prefix batch followed by
+  // a complete run of the final batch. Every copy consumes one blocking read
+  // admission; zero when that ordered, non-retained shape is not established.
+  uint64_t prefix_cycles;
   // Exact copy spans indexed by natural loop, retained for nonuniform programs.
   const loom_pipeline_transport_loop_t* copy_loops;
   // Number of copy-loop spans; zero when uniform replay or straight-line.

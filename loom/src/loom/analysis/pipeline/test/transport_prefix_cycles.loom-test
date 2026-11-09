@@ -1,0 +1,178 @@
+// RUN: emit pipeline-transport @stream
+
+// The prefix blocks on ready input and free output before the inner bulk loop.
+// Its source and destination lifetimes are independent of the bulk records.
+func.def @distribute(%prefix: channel<tile<1xi32>>, %bulk: channel<tile<16xi32>>, %prefix_out: channel<tile<1xi32>>, %bulk_out: channel<tile<16xi32>>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %cycles = index.constant 3 : index
+  %records = index.constant 512 : index
+  cfg.br ^cycle_header(%begin: index)
+^cycle_header(%cycle: index):
+  %more_cycles = index.cmp ult, %cycle, %cycles : index
+  cfg.cond_br %more_cycles, ^prefix, ^done
+^prefix:
+  %prefix_read, %prefix_view = channel.acquire %prefix : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+  %prefix_write, %prefix_target = channel.reserve %prefix_out : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  channel.copy %prefix_read -> %prefix_write : read<tile<1xi32>>, write<tile<1xi32>>
+  cfg.br ^bulk_header(%begin: index)
+^bulk_header(%record: index):
+  %more_records = index.cmp ult, %record, %records : index
+  cfg.cond_br %more_records, ^bulk, ^next_cycle
+^bulk:
+  %bulk_read, %bulk_view = channel.acquire %bulk : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+  %bulk_write, %bulk_target = channel.reserve %bulk_out : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+  channel.copy %bulk_read -> %bulk_write : read<tile<16xi32>>, write<tile<16xi32>>
+  %next_record = index.add %record, %step : index
+  cfg.br ^bulk_header(%next_record: index)
+^next_cycle:
+  %next = index.add %cycle, %step : index
+  cfg.br ^cycle_header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def<kernel> public @stream() run(%prefix_storage: buffer, %bulk_storage: buffer, %prefix_output: buffer, %bulk_output: buffer) {
+  %origin = index.constant 0 : offset
+  %one_slot = index.constant 1 : index
+  %two_slots = index.constant 2 : index
+  %prefix_slots = buffer.view %prefix_storage[%origin] : buffer -> view<1x1xi32>
+  %bulk_slots = buffer.view %bulk_storage[%origin] : buffer -> view<2x16xi32>
+  %prefix_out_slots = buffer.view %prefix_output[%origin] : buffer -> view<1x1xi32>
+  %bulk_out_slots = buffer.view %bulk_output[%origin] : buffer -> view<2x16xi32>
+  %prefix = channel.bind<fifo> %prefix_slots, %one_slot : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %bulk = channel.bind<fifo> %bulk_slots, %two_slots : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %prefix_out = channel.bind<fifo> %prefix_out_slots, %one_slot : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %bulk_out = channel.bind<fifo> %bulk_out_slots, %two_slots : view<2x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @distribute(%prefix, %bulk, %prefix_out, %bulk_out) : (channel<tile<1xi32>>, channel<tile<16xi32>>, channel<tile<1xi32>>, channel<tile<16xi32>>)
+  }
+}
+
+// ----
+worker 0: transport=channel-copy execution_counts=exact batches=2 streams=0
+  prefix_cycles=3
+  batch 0: records=1 replays=1
+    record 0: admission=%prefix_read source=%prefix admissions=3 transfers=3 final_release=no destinations=%prefix_out
+  batch 1: records=1 replays=1
+    record 0: admission=%bulk_read source=%bulk admissions=1536 transfers=1536 final_release=no destinations=%bulk_out
+
+// ====
+// RUN: emit pipeline-transport @stream
+
+// Accept does not wait for ready input. Its asynchronous copy may depend on
+// a later bulk record, so the same loop shape cannot establish phase order.
+func.def @distribute(%prefix: channel<tile<1xi32>>, %bulk: channel<tile<16xi32>>, %prefix_out: channel<tile<1xi32>>, %bulk_out: channel<tile<16xi32>>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %cycles = index.constant 3 : index
+  %records = index.constant 512 : index
+  cfg.br ^cycle_header(%begin: index)
+^cycle_header(%cycle: index):
+  %more_cycles = index.cmp ult, %cycle, %cycles : index
+  cfg.cond_br %more_cycles, ^prefix, ^done
+^prefix:
+  %prefix_read = channel.accept %prefix : channel<tile<1xi32>> -> read<tile<1xi32>>
+  %prefix_write, %prefix_target = channel.reserve %prefix_out : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  channel.copy %prefix_read -> %prefix_write : read<tile<1xi32>>, write<tile<1xi32>>
+  cfg.br ^bulk_header(%begin: index)
+^bulk_header(%record: index):
+  %more_records = index.cmp ult, %record, %records : index
+  cfg.cond_br %more_records, ^bulk, ^next_cycle
+^bulk:
+  %bulk_read, %bulk_view = channel.acquire %bulk : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+  %bulk_write, %bulk_target = channel.reserve %bulk_out : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+  channel.copy %bulk_read -> %bulk_write : read<tile<16xi32>>, write<tile<16xi32>>
+  %next_record = index.add %record, %step : index
+  cfg.br ^bulk_header(%next_record: index)
+^next_cycle:
+  %next = index.add %cycle, %step : index
+  cfg.br ^cycle_header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def<kernel> public @stream() run(%prefix_storage: buffer, %bulk_storage: buffer, %prefix_output: buffer, %bulk_output: buffer) {
+  %origin = index.constant 0 : offset
+  %one_slot = index.constant 1 : index
+  %two_slots = index.constant 2 : index
+  %prefix_slots = buffer.view %prefix_storage[%origin] : buffer -> view<1x1xi32>
+  %bulk_slots = buffer.view %bulk_storage[%origin] : buffer -> view<2x16xi32>
+  %prefix_out_slots = buffer.view %prefix_output[%origin] : buffer -> view<1x1xi32>
+  %bulk_out_slots = buffer.view %bulk_output[%origin] : buffer -> view<2x16xi32>
+  %prefix = channel.bind<fifo> %prefix_slots, %one_slot : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %bulk = channel.bind<fifo> %bulk_slots, %two_slots : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %prefix_out = channel.bind<fifo> %prefix_out_slots, %one_slot : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %bulk_out = channel.bind<fifo> %bulk_out_slots, %two_slots : view<2x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @distribute(%prefix, %bulk, %prefix_out, %bulk_out) : (channel<tile<1xi32>>, channel<tile<16xi32>>, channel<tile<1xi32>>, channel<tile<16xi32>>)
+  }
+}
+
+// ----
+worker 0: transport=channel-copy execution_counts=exact batches=2 streams=0
+  prefix_cycles=0
+  batch 0: records=1 replays=1
+    record 0: admission=%prefix_read source=%prefix admissions=3 transfers=3 final_release=no destinations=%prefix_out
+  batch 1: records=1 replays=1
+    record 0: admission=%bulk_read source=%bulk admissions=1536 transfers=1536 final_release=no destinations=%bulk_out
+
+// ====
+// RUN: emit pipeline-transport @stream
+
+// Sibling loops have divisible counts but do not alternate prefix and bulk.
+// Scope containment, rather than arithmetic on totals, determines the cycles.
+func.def @distribute(%prefix: channel<tile<1xi32>>, %bulk: channel<tile<16xi32>>, %prefix_out: channel<tile<1xi32>>, %bulk_out: channel<tile<16xi32>>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %cycles = index.constant 3 : index
+  %records = index.constant 1536 : index
+  cfg.br ^cycle_header(%begin: index)
+^cycle_header(%cycle: index):
+  %more_cycles = index.cmp ult, %cycle, %cycles : index
+  cfg.cond_br %more_cycles, ^prefix, ^bulk_entry
+^prefix:
+  %prefix_read, %prefix_view = channel.acquire %prefix : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+  %prefix_write, %prefix_target = channel.reserve %prefix_out : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  channel.copy %prefix_read -> %prefix_write : read<tile<1xi32>>, write<tile<1xi32>>
+  %next_cycle = index.add %cycle, %step : index
+  cfg.br ^cycle_header(%next_cycle: index)
+^bulk_entry:
+  cfg.br ^bulk_header(%begin: index)
+^bulk_header(%record: index):
+  %more_records = index.cmp ult, %record, %records : index
+  cfg.cond_br %more_records, ^bulk, ^done
+^bulk:
+  %bulk_read, %bulk_view = channel.acquire %bulk : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+  %bulk_write, %bulk_target = channel.reserve %bulk_out : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+  channel.copy %bulk_read -> %bulk_write : read<tile<16xi32>>, write<tile<16xi32>>
+  %next_record = index.add %record, %step : index
+  cfg.br ^bulk_header(%next_record: index)
+^done:
+  func.return
+}
+
+pipeline.def<kernel> public @stream() run(%prefix_storage: buffer, %bulk_storage: buffer, %prefix_output: buffer, %bulk_output: buffer) {
+  %origin = index.constant 0 : offset
+  %one_slot = index.constant 1 : index
+  %two_slots = index.constant 2 : index
+  %prefix_slots = buffer.view %prefix_storage[%origin] : buffer -> view<1x1xi32>
+  %bulk_slots = buffer.view %bulk_storage[%origin] : buffer -> view<2x16xi32>
+  %prefix_out_slots = buffer.view %prefix_output[%origin] : buffer -> view<1x1xi32>
+  %bulk_out_slots = buffer.view %bulk_output[%origin] : buffer -> view<2x16xi32>
+  %prefix = channel.bind<fifo> %prefix_slots, %one_slot : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %bulk = channel.bind<fifo> %bulk_slots, %two_slots : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %prefix_out = channel.bind<fifo> %prefix_out_slots, %one_slot : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %bulk_out = channel.bind<fifo> %bulk_out_slots, %two_slots : view<2x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @distribute(%prefix, %bulk, %prefix_out, %bulk_out) : (channel<tile<1xi32>>, channel<tile<16xi32>>, channel<tile<1xi32>>, channel<tile<16xi32>>)
+  }
+}
+
+// ----
+worker 0: transport=channel-copy execution_counts=exact batches=2 streams=0
+  prefix_cycles=0
+  batch 0: records=1 replays=1
+    record 0: admission=%prefix_read source=%prefix admissions=3 transfers=3 final_release=no destinations=%prefix_out
+  batch 1: records=1 replays=1
+    record 0: admission=%bulk_read source=%bulk admissions=1536 transfers=1536 final_release=no destinations=%bulk_out

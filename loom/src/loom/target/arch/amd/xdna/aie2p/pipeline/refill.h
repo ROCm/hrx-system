@@ -29,6 +29,13 @@ typedef struct loom_aie2p_native_refill_queue_t {
   uint32_t task;
   // Task word for the final, potentially partial window.
   uint32_t final_task;
+  // Immutable tasks preceding the first bulk window of a repeated cycle.
+  const uint32_t* prefixes;
+  // Number of prefix tasks; zero for an uninterrupted bulk stream.
+  uint32_t prefix_count;
+  // Complete bulk windows per cycle when prefix_count is nonzero. Every cycle
+  // is complete, so remaining windows modulo this count identifies its start.
+  uint32_t cycle_windows;
   // Selected route's packet class.
   uint8_t packet;
   // Ordinary Low helper accepting the chosen task word.
@@ -60,6 +67,14 @@ iree_status_t loom_aie2p_native_select_progress(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization);
 
+// Returns an admitted bulk window for an ordered prefix/bulk queue, or zero
+// when its progress, ring rotation, or task capacity requires separate queues.
+// The caller has established phase order and a common physical endpoint.
+uint32_t loom_aie2p_native_phased_window(
+    const loom_aie2p_native_context_t* context,
+    const loom_aie2p_native_channel_t* channel, iree_host_size_t prefix_count,
+    uint32_t cycles, uint32_t records);
+
 // Builds a fixed-size window after startup-only admission exhausted the bank.
 // Exact progress proves that every later publication has queue space. A false
 // result preserves the original capacity rejection when no such proof exists.
@@ -72,6 +87,16 @@ iree_status_t loom_aie2p_native_select_refill(
     uint16_t available_descriptors, const uint32_t words[8],
     loom_aie2p_native_dma_sequence_t* sequence, iree_string_view_t* reason,
     bool* out_valid);
+
+// Attaches an admitted immutable window to its exact downstream observer.
+// The caller owns descriptor selection and the queue-space proof, including
+// any prefixes it attaches before the next cycle. Repetitions exceed window.
+iree_status_t loom_aie2p_native_add_refill(
+    loom_aie2p_native_context_t* context, loom_aie2p_native_tile_t* tile,
+    uint8_t engine, loom_xdna_dma_direction_t direction,
+    const loom_aie2p_native_channel_t* channel, uint32_t repetitions,
+    uint32_t window, const loom_aie2p_native_dma_sequence_t* sequence,
+    loom_aie2p_native_refill_queue_t** out_queue);
 
 // Routes every selected refill before complete switch-bank admission.
 iree_status_t loom_aie2p_native_route_refills(
