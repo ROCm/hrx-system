@@ -36,8 +36,14 @@ typedef struct iree_hal_amd_gpu_pm4_command_buffer_t {
   iree_hal_amd_gpu_pm4_program_pool_t* pool;
   // Independently retained resident execution facts after end.
   iree_hal_amd_gpu_pm4_command_program_t* program;
-  // Temporary native bytes and fixups, released after sealing.
-  iree_hal_amd_gpu_pm4_recording_t recording;
+  // Sealing retires the recorder before retaining the bounded packet plan.
+  union {
+    // Temporary native bytes and fixups, released after sealing.
+    iree_hal_amd_gpu_pm4_recording_t recording;
+    // CPU-readable replacements when program->fixup_word_count is nonzero.
+    iree_hal_amd_gpu_fixup_t
+        packet_fixups[IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_CAPACITY];
+  };
   // Deduplicated external values and aggregate binding requirements.
   iree_hal_amd_gpu_command_inputs_t inputs;
   // Device-local LDS capacity for public dispatch admission.
@@ -105,7 +111,9 @@ static void iree_hal_amd_gpu_pm4_command_buffer_destroy(
   iree_status_free(buffer->recording_status);
   iree_hal_amd_gpu_timestamp_writes_deinitialize(host_allocator,
                                                  &buffer->timestamps);
-  iree_hal_amd_gpu_recording_deinitialize(&buffer->recording.storage);
+  if (!program || !program->fixup_word_count) {
+    iree_hal_amd_gpu_recording_deinitialize(&buffer->recording.storage);
+  }
   iree_hal_resource_set_free(buffer->resources);
   iree_arena_block_pool_deinitialize(&buffer->resource_blocks);
   iree_hal_amd_gpu_command_inputs_deinitialize(&buffer->inputs);
@@ -162,6 +170,7 @@ iree_status_t iree_hal_amd_gpu_pm4_command_buffer_create(
   if (iree_status_is_ok(status)) {
     *buffer->program = (iree_hal_amd_gpu_pm4_command_program_t){
         .host_allocator = host_allocator,
+        .invariant_fixups = true,
     };
     iree_atomic_ref_count_init(&buffer->program->ref_count);
   }
@@ -239,10 +248,45 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_seal(
       iree_hal_amd_gpu_recording_fixup_count(&buffer->recording.storage),
       program));
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_hal_amd_gpu_recording_write(
-      &buffer->recording.storage, program->contents.data,
-      (void*)(program->contents.data + program->fixup_offset));
+  const bool preserve_private_data = buffer->program->invariant_fixups;
+  buffer->program->invariant_fixups = false;
+  iree_hal_amd_gpu_fixup_t
+      packet_fixups[IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_CAPACITY];
+  const bool bounded =
+      program->fixup_count &&
+      program->fixup_count <= IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_CAPACITY &&
+      buffer->program->value_count <=
+          IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_VALUE_CAPACITY;
+  iree_hal_amd_gpu_fixup_t* device_fixups =
+      (void*)(program->contents.data + program->fixup_offset);
+  iree_hal_amd_gpu_recording_write(&buffer->recording.storage,
+                                   program->contents.data,
+                                   bounded ? packet_fixups : device_fixups);
+  uint32_t fixup_word_count = 0;
+  if (bounded) {
+    memcpy(device_fixups, packet_fixups,
+           program->fixup_count * sizeof(*packet_fixups));
+    fixup_word_count = iree_hal_amd_gpu_pm4_fixup_packet_word_count(
+        packet_fixups, program->fixup_count);
+  }
   iree_status_t status = iree_hal_amd_gpu_program_seal(program);
+  if (iree_status_is_ok(status) && fixup_word_count) {
+    iree_hal_amd_gpu_recording_deinitialize(&buffer->recording.storage);
+    memcpy(buffer->packet_fixups, packet_fixups,
+           program->fixup_count * sizeof(*packet_fixups));
+    buffer->program->fixup_word_count = (uint16_t)fixup_word_count;
+    bool invariant =
+        preserve_private_data &&
+        iree_hal_amd_gpu_command_inputs_are_fixed_addresses(&buffer->inputs);
+    const uint32_t first_input =
+        iree_hal_amd_gpu_pm4_command_first_input(buffer);
+    for (uint32_t i = 0; i < program->fixup_count && invariant; ++i) {
+      const uint32_t source = packet_fixups[i].source & 0xFFFFFFu;
+      invariant = source == IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE ||
+                  source >= first_input;
+    }
+    buffer->program->invariant_fixups = invariant;
+  }
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -320,7 +364,9 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_end(
     if (buffer->resources) {
       iree_hal_resource_set_freeze(buffer->resources);
     }
-    iree_hal_amd_gpu_recording_deinitialize(&buffer->recording.storage);
+    if (!buffer->program->fixup_word_count) {
+      iree_hal_amd_gpu_recording_deinitialize(&buffer->recording.storage);
+    }
     iree_hal_amd_gpu_timestamp_writes_deinitialize(buffer->host_allocator,
                                                    &buffer->timestamps);
   }
@@ -759,6 +805,11 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
   const uint16_t copy_count = indirect_parameters && !indirect
                                   ? function->base.kernarg->indirect_copy_count
                                   : 0;
+  if (prepare_packet || copy_count) {
+    // The body rewrites private geometry/arguments. Even fixed address repairs
+    // cannot remove the join protecting a prior invocation's shader readers.
+    buffer->program->invariant_fixups = false;
+  }
   const uint32_t dispatch_words =
       indirect_parameters
           ? iree_hal_amd_gpu_pm4_dispatch_indirect_word_count(copy_count)
@@ -1020,11 +1071,14 @@ void iree_hal_amd_gpu_pm4_command_invocation_deinitialize(
 iree_status_t iree_hal_amd_gpu_pm4_command_invocation_write(
     const iree_hal_amd_gpu_pm4_command_invocation_t* invocation,
     uint32_t queue_ordinal, uint64_t dispatch_id, uint64_t continuation,
-    uint64_t profile_address, void* upload) {
+    uint64_t profile_address, void* upload, uint32_t* out_fixup_words) {
   const iree_hal_amd_gpu_pm4_command_buffer_t* buffer =
       (const void*)invocation->command_buffer;
+  uint64_t local_values[IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_VALUE_CAPACITY];
+  const bool packets = buffer->program->fixup_word_count != 0;
   uint64_t* values =
-      (void*)((iree_hal_amd_gpu_pm4_program_arguments_t*)upload + 1);
+      packets ? local_values
+              : (void*)((iree_hal_amd_gpu_pm4_program_arguments_t*)upload + 1);
   values[IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE] = invocation->instance->address;
   values[IREE_HAL_AMD_GPU_PM4_VALUE_DISPATCH_ID] = dispatch_id;
   values[IREE_HAL_AMD_GPU_PM4_VALUE_CONTINUATION] = continuation;
@@ -1034,9 +1088,15 @@ iree_status_t iree_hal_amd_gpu_pm4_command_invocation_write(
     values[IREE_HAL_AMD_GPU_PM4_VALUE_PROFILE_HEADER] =
         profile_address ? UINT32_C(0xc0004600) : UINT32_C(0xc0061000);
   }
-  return iree_hal_amd_gpu_command_inputs_write(
+  iree_status_t status = iree_hal_amd_gpu_command_inputs_write(
       &buffer->inputs, invocation->bindings, queue_ordinal,
       values + iree_hal_amd_gpu_pm4_command_first_input(buffer));
+  if (iree_status_is_ok(status) && packets) {
+    iree_hal_amd_gpu_pm4_fixup_packets_emit(
+        buffer->packet_fixups, buffer->program->resident.fixup_count, values,
+        invocation->instance->address, out_fixup_words);
+  }
+  return status;
 }
 
 static const iree_hal_command_buffer_vtable_t

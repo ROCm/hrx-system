@@ -137,10 +137,49 @@ static uint64_t iree_hal_amd_gpu_pm4_program_copy_length(
                                            sizeof(iree_hal_amd_gpu_fixup_t);
 }
 
+uint32_t iree_hal_amd_gpu_pm4_fixup_packet_word_count(
+    const iree_hal_amd_gpu_fixup_t* entries, uint32_t entry_count) {
+  uint32_t word_count = entry_count;
+  for (uint32_t i = 0; i < entry_count; ++i) {
+    if (entries[i].target_offset & 3u) {
+      return 0;
+    }
+    if (!i || entries[i].target_offset != entries[i - 1].target_offset + 4) {
+      word_count += 4;
+    }
+  }
+  return word_count;
+}
+
+uint32_t* iree_hal_amd_gpu_pm4_fixup_packets_emit(
+    const iree_hal_amd_gpu_fixup_t* entries, uint32_t entry_count,
+    const uint64_t* values, uint64_t target_address, uint32_t* words) {
+  uint32_t payload[IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_CAPACITY];
+  for (uint32_t first = 0; first < entry_count;) {
+    uint32_t end = first + 1;
+    while (end < entry_count &&
+           entries[end].target_offset == entries[end - 1].target_offset + 4) {
+      ++end;
+    }
+    for (uint32_t i = first; i < end; ++i) {
+      const iree_hal_amd_gpu_fixup_t entry = entries[i];
+      payload[i - first] =
+          (uint32_t)((values[entry.source & 0xFFFFFFu] + entry.addend) >>
+                     ((entry.source >> 24) & 63));
+    }
+    words = iree_hal_amd_gpu_pm4_emit_write(
+        words, target_address + entries[first].target_offset, end - first,
+        payload);
+    first = end;
+  }
+  return words;
+}
+
 uint32_t iree_hal_amd_gpu_pm4_program_word_count(
     const iree_hal_amd_gpu_program_t* program,
     const iree_hal_amd_gpu_program_instance_t* instance,
-    const iree_hal_amd_gpu_pm4_barrier_profile_t* profile) {
+    const iree_hal_amd_gpu_pm4_barrier_profile_t* profile, uint32_t fixup_count,
+    uint32_t fixup_word_count) {
   uint32_t count = 8 + 4;  // Host input publication and resident IB entry.
   if (!instance->initialized) {
     if (iree_hal_amd_gpu_pm4_program_copy_length(program, instance) >
@@ -148,13 +187,14 @@ uint32_t iree_hal_amd_gpu_pm4_program_word_count(
       count += 31 + 2 + 8;  // Shader copy, execution join, and visibility.
     } else {
       count += 7 + 7;  // CP-DMA copy and execution join.
-      if (!program->fixup_count && profile->command_processor_bypasses_l2) {
+      if (!fixup_count && profile->command_processor_bypasses_l2) {
         count += 8;  // Publish copied commands to bypassing command fetch.
       }
     }
   }
-  if (program->fixup_count) {
-    count += (instance->join_previous ? 2 : 0) + 31 + 2 + 8;
+  if (fixup_count) {
+    count += (instance->join_previous ? 2 : 0) +
+             (fixup_word_count ? fixup_word_count : 31 + 2) + 8;
   }
   return count;
 }
@@ -165,21 +205,26 @@ uint32_t* iree_hal_amd_gpu_pm4_program_emit(
     iree_hal_amd_gpu_pm4_program_block_t entry,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     uint64_t argument_address,
-    iree_hal_amd_gpu_pm4_program_arguments_t* arguments, uint32_t padding,
+    iree_hal_amd_gpu_pm4_program_arguments_t* arguments, uint32_t fixup_count,
+    uint32_t fixup_word_count, const uint32_t* fixup_words, uint32_t padding,
     uint32_t* words) {
   const iree_hal_amd_gpu_pm4_program_pool_t* pool = iree_containerof(
       program->pool, iree_hal_amd_gpu_pm4_program_pool_t, storage);
-  const bool fixup = program->fixup_count != 0;
+  const bool fixup = fixup_count != 0;
   const uint32_t command_publication =
       profile->command_processor_bypasses_l2 ? profile->release : 0;
-  const iree_hal_amd_gpu_program_source_t source =
-      iree_hal_amd_gpu_program_source(program);
-  arguments->fixup = (iree_hal_amd_gpu_fixup_arguments_t){
-      .entries = source.fixups,
-      .values = argument_address + sizeof(*arguments),
-      .target = instance->address,
-      .entry_count = program->fixup_count,
-  };
+  iree_hal_amd_gpu_program_source_t source = {0};
+  if (!instance->initialized || (fixup && !fixup_word_count)) {
+    source = iree_hal_amd_gpu_program_source(program);
+  }
+  if (fixup && !fixup_word_count) {
+    arguments->fixup = (iree_hal_amd_gpu_fixup_arguments_t){
+        .entries = source.fixups,
+        .values = argument_address + sizeof(*arguments),
+        .target = instance->address,
+        .entry_count = fixup_count,
+    };
+  }
   if (instance->join_previous && fixup) {
     words = iree_hal_amd_gpu_pm4_emit_compute_flush(words);
   }
@@ -198,8 +243,11 @@ uint32_t* iree_hal_amd_gpu_pm4_program_emit(
           argument_address +
               offsetof(iree_hal_amd_gpu_pm4_program_arguments_t, copy));
       words = iree_hal_amd_gpu_pm4_emit_compute_flush(words);
+      // A shader-produced clone must reach bypassing CP clients before either
+      // packet fixups overwrite it or command fetch reads the unpatched body.
       words = iree_hal_amd_gpu_pm4_emit_acquire(
-          words, profile->shader | (fixup ? 0 : command_publication));
+          words, profile->shader |
+                     (!fixup || fixup_word_count ? command_publication : 0));
     } else {
       words = iree_hal_amd_gpu_pm4_emit_dma_copy(
           words, source.address, instance->address, (uint32_t)length);
@@ -211,9 +259,15 @@ uint32_t* iree_hal_amd_gpu_pm4_program_emit(
       }
     }
   }
-  if (fixup) {
-    words = iree_hal_amd_gpu_pm4_fixup_emit(
-        words, &pool->fixup, argument_address, program->fixup_count);
+  if (fixup_word_count) {
+    memcpy(words, fixup_words, fixup_word_count * sizeof(*words));
+    words += fixup_word_count;
+    words = iree_hal_amd_gpu_pm4_emit_acquire(
+        words, profile->command_processor_bypasses_l2 ? profile->acquire
+                                                      : profile->shader);
+  } else if (fixup) {
+    words = iree_hal_amd_gpu_pm4_fixup_emit(words, &pool->fixup,
+                                            argument_address, fixup_count);
     words = iree_hal_amd_gpu_pm4_emit_compute_flush(words);
     words = iree_hal_amd_gpu_pm4_emit_acquire(
         words, profile->shader | command_publication);

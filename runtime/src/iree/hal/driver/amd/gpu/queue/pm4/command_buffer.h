@@ -44,10 +44,15 @@ typedef struct iree_hal_amd_gpu_pm4_command_program_t {
   iree_hal_amd_gpu_program_t resident;
   // Entry block; native successors and exits are encoded in resident commands.
   iree_hal_amd_gpu_pm4_program_block_t entry;
-  // Dense uint64_t inputs uploaded once per invocation.
+  // Dense uint64_t inputs resolved once per invocation.
   uint32_t value_count;
   // Complete invocation upload: copy/fixup kernargs followed by input values.
   uint32_t argument_length;
+  // Bounded confirmed-write extent, or zero for the shader fixup path.
+  uint16_t fixup_word_count;
+  // Recording clears this for invocation-private writes; sealing also requires
+  // a small address-only repair plan that remains valid after first use.
+  bool invariant_fixups;
   // Number of public dispatch IDs consumed by one complete execution.
   uint32_t dispatch_count;
   // Maximum admitted private bytes per hardware wave across all dispatches.
@@ -102,14 +107,14 @@ iree_status_t iree_hal_amd_gpu_pm4_command_invocation_initialize(
 void iree_hal_amd_gpu_pm4_command_invocation_deinitialize(
     iree_hal_amd_gpu_pm4_command_invocation_t* invocation);
 
-// Writes the dense input vector following program_arguments_t after
-// dependencies have made backing addresses available. Cost is proportional to
-// unique inputs, never to commands or fixups. Program emission fills the
-// header.
+// Resolves the dense input vector after dependencies commit backing addresses.
+// The shader path writes following program_arguments_t. A bounded packet plan
+// instead keeps values on the CPU and fills out_fixup_words; it never reads
+// the upload mapping. Program emission fills the upload header.
 iree_status_t iree_hal_amd_gpu_pm4_command_invocation_write(
     const iree_hal_amd_gpu_pm4_command_invocation_t* invocation,
     uint32_t queue_ordinal, uint64_t dispatch_id, uint64_t continuation,
-    uint64_t profile_address, void* upload);
+    uint64_t profile_address, void* upload, uint32_t* out_fixup_words);
 
 #ifdef __cplusplus
 }  // extern "C"

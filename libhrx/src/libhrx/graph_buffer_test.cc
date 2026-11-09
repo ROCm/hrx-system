@@ -226,4 +226,27 @@ TEST_F(GraphBufferTest, RejectsInvalidHandleRangesAndPatterns) {
   hrx_graph_release(graph);
 }
 
+TEST_F(GraphBufferTest, HostCallbackFailureReachesStreamCompletion) {
+  hrx_graph_t graph = nullptr;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_create(device_, 0, &graph)));
+  const hrx_graph_host_call_node_attrs_t attrs = {
+      .fn = [](void*) -> hrx_status_t {
+        return hrx_make_status(HRX_STATUS_ABORTED,
+                               "application callback failed");
+      },
+      .user_data = nullptr,
+  };
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_add_host_call_node(graph, nullptr, 0, &attrs, nullptr)));
+  hrx_graph_exec_t executable = nullptr;
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_graph_instantiate(graph, 0, &executable)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_graph_exec_launch(executable, stream_)));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
+                        hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  hrx_graph_exec_release(executable);
+  hrx_graph_release(graph);
+}
+
 }  // namespace

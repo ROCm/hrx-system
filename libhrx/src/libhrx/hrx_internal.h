@@ -337,7 +337,9 @@ typedef struct hrx_graph_memset_node_attrs_internal_t {
 } hrx_graph_memset_node_attrs_internal_t;
 
 typedef struct hrx_graph_host_call_node_attrs_internal_t {
-  void (*fn)(void* user_data);
+  // Application callback retaining the public HRX status contract.
+  hrx_host_call_fn_t fn;
+  // Borrowed callback state kept alive by the application through completion.
   void* user_data;
 } hrx_graph_host_call_node_attrs_internal_t;
 

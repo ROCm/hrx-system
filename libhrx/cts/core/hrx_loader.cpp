@@ -186,6 +186,14 @@ void HrxLoader::load(const std::string& path) {
   LOAD(queue_dispatch);
   LOAD(queue_host_call);
 
+  LOAD(graph_create);
+  LOAD(graph_release);
+  LOAD(graph_add_kernel_node);
+  LOAD(graph_add_host_call_node);
+  LOAD(graph_instantiate);
+  LOAD(graph_exec_release);
+  LOAD(graph_exec_launch);
+
   LOAD(fence_create);
   LOAD(fence_create_at);
   LOAD(fence_retain);

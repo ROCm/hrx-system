@@ -584,8 +584,16 @@ iree_hal_amd_gpu_pm4_publish_execute(
     }
   }
   iree_hal_amd_gpu_program_instance_t* instance = invocation->instance;
+  // Acceptance installs a nonzero epoch only after this instance's initial
+  // repairs. Exclusive acquisition has already proved every prior use ordered
+  // or retired; fixed addresses need neither rewriting nor a reader join.
+  const uint32_t fixup_count = command->invariant_fixups && instance->last_epoch
+                                   ? 0
+                                   : program->fixup_count;
+  const uint32_t fixup_word_count = fixup_count ? command->fixup_word_count : 0;
   const uint32_t program_words = iree_hal_amd_gpu_pm4_program_word_count(
-      program, instance, &queue->options.barriers);
+      program, instance, &queue->options.barriers, fixup_count,
+      fixup_word_count);
   const uint32_t scratch_words = iree_hal_amd_gpu_pm4_scratch_word_count(
       &queue->producer.scratch, command->scratch_wave_byte_length,
       queue->kernel != NULL);
@@ -643,12 +651,15 @@ iree_hal_amd_gpu_pm4_publish_execute(
   if (sample_length) {
     profile->completion.samples = (void*)(upload + command->argument_length);
   }
-  iree_status_t status = iree_hal_amd_gpu_pm4_command_invocation_write(
-      invocation, queue->options.queue_ordinal, dispatch_id, continuation,
-      sample_address, upload);
-  if (!iree_status_is_ok(status)) {
-    iree_hal_amd_gpu_pm4_abandon(queue, submission, status);
-    return IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;
+  uint32_t fixup_words[IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_WORD_CAPACITY];
+  if (fixup_count) {
+    iree_status_t status = iree_hal_amd_gpu_pm4_command_invocation_write(
+        invocation, queue->options.queue_ordinal, dispatch_id, continuation,
+        sample_address, upload, fixup_words);
+    if (!iree_status_is_ok(status)) {
+      iree_hal_amd_gpu_pm4_abandon(queue, submission, status);
+      return IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;
+    }
   }
   arguments->end = start + argument_length;
   queue->producer.ring.reserved_words = candidate.reserved_words;
@@ -665,7 +676,8 @@ iree_hal_amd_gpu_pm4_publish_execute(
                                             scratch_words);
   words = iree_hal_amd_gpu_pm4_program_emit(
       program, instance, command->entry, &queue->options.barriers,
-      arguments->address + offset, (void*)upload, root_padding, words);
+      arguments->address + offset, (void*)upload, fixup_count, fixup_word_count,
+      fixup_words, root_padding, words);
   return iree_hal_amd_gpu_pm4_publish_commit(
       queue, submission, position, &reservation, body_words, entry_words, words,
       after, arguments->end, (iree_hal_amd_gpu_download_t){0}, true);

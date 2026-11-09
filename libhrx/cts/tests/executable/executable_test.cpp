@@ -1,9 +1,12 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#include <algorithm>
 #include <array>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <cstdint>
+#include <cstring>
 #include <iterator>
 #include <string>
 
@@ -32,6 +35,117 @@ std::string gpu_architecture(hrx_device_t device) {
                                        arch.data(), arch.size()));
   return std::string(arch.data());
 }
+
+class GraphVisibilityTest : public HrxTestFixture {
+ protected:
+  void Initialize() {
+    if (!is_gpu()) {
+      SKIP("Native executable dispatch is GPU-only");
+    }
+    const auto hsaco =
+        hrx_cts::FindAmdgpuExecutableTestImage(gpu_architecture(device_));
+    if (!hsaco.file) {
+      SKIP("No build-time HSACO test asset for this GPU");
+    }
+    REQUIRE_OK(hrx().executable_load_data(
+        device_, hsaco.file->data, hsaco.file->size, "amdgpu",
+        hsaco.target_key.c_str(), &executable_));
+    REQUIRE_OK(hrx().executable_lookup_export_by_name(
+        executable_, "hrx_transform_padded_parameters", &ordinal_));
+    REQUIRE_OK(hrx().executable_export_info(executable_, ordinal_, &info_));
+    REQUIRE_OK(hrx().stream_create(device_, 0, &stream_));
+    const hrx_buffer_params_t params = {
+        HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_HOST_COHERENT |
+            HRX_MEMORY_TYPE_DEVICE_VISIBLE,
+        HRX_MEMORY_ACCESS_ALL,
+        HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_PERSISTENT,
+        0,
+    };
+    REQUIRE_OK(hrx().allocator_allocate_buffer(
+        hrx().device_allocator(device_), params, kWordCount * sizeof(uint32_t),
+        &buffer_));
+    void* mapped = nullptr;
+    REQUIRE_OK(hrx().buffer_map(buffer_, HRX_MAP_READ | HRX_MAP_WRITE, 0,
+                                kWordCount * sizeof(uint32_t), &mapped));
+    words_ = static_cast<uint32_t*>(mapped);
+    callback_.words = words_;
+    REQUIRE_OK(hrx().graph_create(device_, 0, &graph_));
+  }
+
+  ~GraphVisibilityTest() {
+    if (stream_) {
+      ReportHrxTestFailure("Graph completion",
+                           hrx().stream_synchronize(stream_));
+    }
+    hrx().graph_exec_release(exec_);
+    hrx().graph_release(graph_);
+    if (words_) {
+      ReportHrxTestFailure("Buffer unmap", hrx().buffer_unmap(buffer_));
+    }
+    hrx().buffer_release(buffer_);
+    hrx().stream_release(stream_);
+    hrx().executable_release(executable_);
+  }
+
+  hrx_graph_node_t AddTransform(size_t input_word, size_t output_word,
+                                hrx_graph_node_t dependency = nullptr) {
+    // HAL constants are densely packed independently of native ABI padding.
+    const uint16_t bias = 7;
+    const uint32_t scale = 3;
+    std::array<uint8_t, sizeof(bias) + sizeof(scale)> constants;
+    std::memcpy(constants.data(), &bias, sizeof(bias));
+    std::memcpy(constants.data() + sizeof(bias), &scale, sizeof(scale));
+    const hrx_buffer_ref_t bindings[] = {
+        {buffer_, input_word * sizeof(uint32_t), sizeof(uint32_t)},
+        {buffer_, output_word * sizeof(uint32_t), sizeof(uint32_t)},
+    };
+    const hrx_graph_kernel_node_attrs_t attrs = {
+        executable_,
+        ordinal_,
+        {{1, 1, 1},
+         {info_.workgroup_size[0], info_.workgroup_size[1],
+          info_.workgroup_size[2]},
+         0},
+        constants.data(),
+        constants.size(),
+        bindings,
+        std::size(bindings),
+        HRX_DISPATCH_FLAG_NONE,
+    };
+    hrx_graph_node_t node = nullptr;
+    REQUIRE_OK(hrx().graph_add_kernel_node(graph_,
+                                           dependency ? &dependency : nullptr,
+                                           dependency ? 1 : 0, &attrs, &node));
+    return node;
+  }
+
+  static constexpr size_t kWordCount = 256;
+  // Code object shared by every node in this fixture's graph.
+  hrx_executable_t executable_ = nullptr;
+  // Export computing output = input * 3 + 7.
+  uint32_t ordinal_ = 0;
+  // Reflected workgroup dimensions for the loaded export.
+  hrx_executable_export_info_t info_ = {};
+  // Timeline joined before inspecting or releasing mapped storage.
+  hrx_stream_t stream_ = nullptr;
+  // Coherent host allocation retained through all replays.
+  hrx_buffer_t buffer_ = nullptr;
+  // Persistent mapping, kept live until after the last host observation.
+  uint32_t* words_ = nullptr;
+  // Recorded graph owning its captured arguments.
+  hrx_graph_t graph_ = nullptr;
+  // Reusable executable released before the graph and its buffers.
+  hrx_graph_exec_t exec_ = nullptr;
+  // Callback state outliving submitted work even when an assertion fails.
+  struct {
+    // Persistent input/output mapping, owned by the test fixture.
+    uint32_t* words = nullptr;
+    // Value read before any subsequent GPU work can publish it.
+    uint32_t observed = 0;
+    // Number of callback invocations, checked after stream completion.
+    uint32_t calls = 0;
+  } callback_;
+};
 
 }  // namespace
 
@@ -166,6 +280,187 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch") {
       hrx().synchronous_d2h(device_, output, 0, &actual, sizeof(actual)));
   REQUIRE(actual == expected);
 
+  hrx().buffer_release(output);
+  hrx().stream_release(stream);
+  hrx().executable_release(executable);
+}
+
+TEST_CASE_METHOD(GraphVisibilityTest,
+                 "graph_kernel_acquires_coherent_host_input") {
+  Initialize();
+  const size_t input_word = GENERATE(size_t{0}, size_t{64});
+  const size_t output_word = input_word + 128;
+  AddTransform(input_word, output_word);
+  REQUIRE_OK(hrx().graph_instantiate(graph_, 0, &exec_));
+  for (uint32_t replay = 0; replay < 16; ++replay) {
+    CAPTURE(input_word, replay);
+    const uint32_t sentinel = 0x12345678u + replay;
+    const uint32_t input = 0x100u + replay;
+    std::fill_n(words_, kWordCount, sentinel);
+    words_[input_word] = input;
+    REQUIRE_OK(hrx().graph_exec_launch(exec_, stream_));
+    REQUIRE_OK(hrx().stream_synchronize(stream_));
+    for (size_t i = 0; i < kWordCount; ++i) {
+      CAPTURE(i);
+      const uint32_t expected = i == input_word    ? input
+                                : i == output_word ? input * 3 + 7
+                                                   : sentinel;
+      REQUIRE(words_[i] == expected);
+    }
+  }
+}
+
+TEST_CASE_METHOD(GraphVisibilityTest,
+                 "graph_replays_chain_coherent_data_without_host_waits") {
+  Initialize();
+  AddTransform(0, 0);
+  REQUIRE_OK(hrx().graph_instantiate(graph_, 0, &exec_));
+  for (uint32_t batch = 0; batch < 8; ++batch) {
+    CAPTURE(batch);
+    const uint32_t sentinel = 0x12345678u + batch;
+    std::fill_n(words_, kWordCount, sentinel);
+    uint32_t expected = 0x100u + batch;
+    words_[0] = expected;
+    for (uint32_t replay = 0; replay < 16; ++replay) {
+      REQUIRE_OK(hrx().graph_exec_launch(exec_, stream_));
+      expected = expected * 3 + 7;
+    }
+    REQUIRE_OK(hrx().stream_synchronize(stream_));
+    REQUIRE(words_[0] == expected);
+    for (size_t i = 1; i < kWordCount; ++i) {
+      CAPTURE(i);
+      REQUIRE(words_[i] == sentinel);
+    }
+  }
+}
+
+TEST_CASE_METHOD(GraphVisibilityTest,
+                 "graph_host_callback_exchanges_coherent_data") {
+  Initialize();
+  // Reuse the same input address before and after the callback so the consumer
+  // must discard the first dispatch's cached copy of the host-written input.
+  const hrx_graph_node_t producer = AddTransform(0, 64);
+  const hrx_graph_host_call_node_attrs_t host_attrs = {
+      [](void* user_data) -> hrx_status_t {
+        auto& state = *static_cast<decltype(callback_)*>(user_data);
+        state.observed = state.words[64];
+        state.words[0] = state.observed + 11;
+        ++state.calls;
+        return hrx_ok_status();
+      },
+      &callback_,
+  };
+  hrx_graph_node_t host_node = nullptr;
+  REQUIRE_OK(hrx().graph_add_host_call_node(graph_, &producer, 1, &host_attrs,
+                                            &host_node));
+  AddTransform(0, 128, host_node);
+  REQUIRE_OK(hrx().graph_instantiate(graph_, 0, &exec_));
+  for (uint32_t replay = 0; replay < 16; ++replay) {
+    CAPTURE(replay);
+    const uint32_t sentinel = 0x12345678u + replay;
+    const uint32_t input = 0x100u + replay;
+    std::fill_n(words_, kWordCount, sentinel);
+    words_[0] = input;
+    REQUIRE_OK(hrx().graph_exec_launch(exec_, stream_));
+    REQUIRE_OK(hrx().stream_synchronize(stream_));
+    const uint32_t produced = input * 3 + 7;
+    const uint32_t consumed = produced + 11;
+    REQUIRE(callback_.observed == produced);
+    REQUIRE(callback_.calls == replay + 1);
+    for (size_t i = 0; i < kWordCount; ++i) {
+      CAPTURE(i);
+      const uint32_t expected = i == 0     ? consumed
+                                : i == 64  ? produced
+                                : i == 128 ? consumed * 3 + 7
+                                           : sentinel;
+      REQUIRE(words_[i] == expected);
+    }
+  }
+}
+
+TEST_CASE_METHOD(HrxTestFixture,
+                 "graph_kernel_publishes_coherent_host_output") {
+  if (!is_gpu()) {
+    SKIP("Native executable dispatch is GPU-only");
+  }
+  const auto hsaco =
+      hrx_cts::FindAmdgpuExecutableTestImage(gpu_architecture(device_));
+  if (!hsaco.file) {
+    SKIP("No build-time HSACO test asset for this GPU");
+  }
+
+  hrx_executable_t executable = nullptr;
+  REQUIRE_OK(hrx().executable_load_data(device_, hsaco.file->data,
+                                        hsaco.file->size, "amdgpu",
+                                        hsaco.target_key.c_str(), &executable));
+  uint32_t ordinal = 0;
+  REQUIRE_OK(hrx().executable_lookup_export_by_name(
+      executable, "hrx_store_output", &ordinal));
+  hrx_executable_export_info_t info = {};
+  REQUIRE_OK(hrx().executable_export_info(executable, ordinal, &info));
+  hrx_stream_t stream = nullptr;
+  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
+
+  constexpr size_t kWordCount = 256;
+  const hrx_buffer_params_t params = {
+      HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_HOST_COHERENT |
+          HRX_MEMORY_TYPE_DEVICE_VISIBLE,
+      HRX_MEMORY_ACCESS_ALL,
+      HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED |
+          HRX_BUFFER_USAGE_MAPPING_PERSISTENT,
+      0,
+  };
+  hrx_buffer_t output = nullptr;
+  REQUIRE_OK(
+      hrx().allocator_allocate_buffer(hrx().device_allocator(device_), params,
+                                      kWordCount * sizeof(uint32_t), &output));
+  void* mapped = nullptr;
+  REQUIRE_OK(hrx().buffer_map(output, HRX_MAP_READ | HRX_MAP_WRITE, 0,
+                              kWordCount * sizeof(uint32_t), &mapped));
+  auto* words = static_cast<uint32_t*>(mapped);
+
+  for (size_t word_offset : {size_t{0}, size_t{64}}) {
+    CAPTURE(word_offset);
+    const uint32_t expected = 0xFEED1234u;
+    const hrx_buffer_ref_t binding = {output, word_offset * sizeof(uint32_t),
+                                      sizeof(uint32_t)};
+    const hrx_graph_kernel_node_attrs_t attrs = {
+        executable,
+        ordinal,
+        {{1, 1, 1},
+         {info.workgroup_size[0], info.workgroup_size[1],
+          info.workgroup_size[2]},
+         0},
+        &expected,
+        sizeof(expected),
+        &binding,
+        1,
+        HRX_DISPATCH_FLAG_NONE,
+    };
+    hrx_graph_t graph = nullptr;
+    REQUIRE_OK(hrx().graph_create(device_, 0, &graph));
+    hrx_graph_node_t node = nullptr;
+    REQUIRE_OK(hrx().graph_add_kernel_node(graph, nullptr, 0, &attrs, &node));
+    hrx_graph_exec_t exec = nullptr;
+    REQUIRE_OK(hrx().graph_instantiate(graph, 0, &exec));
+
+    for (uint32_t replay = 0; replay < 16; ++replay) {
+      CAPTURE(replay);
+      const uint32_t sentinel = 0x12345678u + replay;
+      std::fill_n(words, kWordCount, sentinel);
+      REQUIRE_OK(hrx().graph_exec_launch(exec, stream));
+      REQUIRE_OK(hrx().stream_synchronize(stream));
+      // Read before any transfer or graph teardown can publish cached writes.
+      for (size_t i = 0; i < kWordCount; ++i) {
+        CAPTURE(i);
+        REQUIRE(words[i] == (i == word_offset ? expected : sentinel));
+      }
+    }
+    hrx().graph_exec_release(exec);
+    hrx().graph_release(graph);
+  }
+
+  REQUIRE_OK(hrx().buffer_unmap(output));
   hrx().buffer_release(output);
   hrx().stream_release(stream);
   hrx().executable_release(executable);

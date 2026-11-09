@@ -511,7 +511,7 @@ TEST_P(GpuNativeRecordingSizeTest,
 }
 
 INSTANTIATE_TEST_SUITE_P(ProgramSize, GpuNativeRecordingSizeTest,
-                         ::testing::Values(1u, 1000u, 8000u, 65536u));
+                         ::testing::Values(1u, 2u, 3u, 1000u, 8000u, 65536u));
 
 TEST_F(GpuNativeRecordingTest, TransferBarriersJoinOnlyPendingCopies) {
   for (bool copy_at_exit : {false, true}) {
