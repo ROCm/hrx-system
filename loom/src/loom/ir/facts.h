@@ -774,8 +774,9 @@ void loom_value_facts_meet_float(const loom_value_facts_t* a,
                                  const loom_value_facts_t* b,
                                  loom_value_facts_t* out);
 
-// Conservative join: widens range to the outer bounds, weakens divisor
-// to the GCD. Used at join points (scf.if yields, block arguments).
+// Conservative join: widens range to the outer bounds, weakens divisor to the
+// GCD, and retains predicates true for both inputs. Used at join points
+// (scf.if yields, block arguments). The output may alias either input.
 static inline void loom_value_facts_meet(const loom_value_facts_t* a,
                                          const loom_value_facts_t* b,
                                          loom_value_facts_t* out) {
@@ -791,7 +792,7 @@ static inline void loom_value_facts_meet(const loom_value_facts_t* a,
        loom_value_facts_is_zero(*b)) ||
       (loom_value_facts_is_zero(*a) &&
        loom_value_facts_is_subgroup_lane_mask(*b));
-  *out = loom_value_facts_make(
+  loom_value_facts_t result = loom_value_facts_make(
       a->range_lo < b->range_lo ? a->range_lo : b->range_lo,
       a->range_hi > b->range_hi ? a->range_hi : b->range_hi,
       // Exact zero is divisible by every positive divisor. Its stored divisor
@@ -800,20 +801,23 @@ static inline void loom_value_facts_meet(const loom_value_facts_t* a,
       : loom_value_facts_is_zero(*b)
           ? a->known_divisor
           : iree_math_gcd_i64(a->known_divisor, b->known_divisor));
+  result.flags |= a->flags & b->flags &
+                  (LOOM_VALUE_FACT_NON_ZERO | LOOM_VALUE_FACT_POWER_OF_TWO);
   if (preserves_subgroup_lane_mask) {
-    loom_value_facts_mark_subgroup_lane_mask(out);
+    loom_value_facts_mark_subgroup_lane_mask(&result);
   }
   if (loom_value_facts_is_lane_predicate(*a) ||
       loom_value_facts_is_lane_predicate(*b)) {
-    loom_value_facts_mark_lane_predicate(out);
+    loom_value_facts_mark_lane_predicate(&result);
   } else if (loom_value_facts_is_lane_varying(*a) ||
              loom_value_facts_is_lane_varying(*b)) {
-    loom_value_facts_mark_lane_varying(out);
+    loom_value_facts_mark_lane_varying(&result);
   } else {
     const loom_value_fact_uniform_scope_t uniform_scope = iree_min(
         loom_value_facts_uniform_scope(*a), loom_value_facts_uniform_scope(*b));
-    loom_value_facts_mark_uniform_at_scope(out, uniform_scope);
+    loom_value_facts_mark_uniform_at_scope(&result, uniform_scope);
   }
+  *out = result;
 }
 
 //===----------------------------------------------------------------------===//
