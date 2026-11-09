@@ -33,14 +33,14 @@ func.def target(@target) @positive_high_bit(%input: index) -> (i64, i64, i64, i6
 
 // ====
 
-// A nonconstant shift may lose its interval without narrowing the value. Until
-// its carrier is known, later shifts and selections cannot publish native-width
-// bounds, and comparison against all native bits set is not universally true.
+// A bounded shift can overflow the fact carrier without narrowing the value.
+// Later shifts and selections cannot publish native-width bounds, and
+// comparison against all native bits set is not universally true.
 test.target<low_core> @target {index_bitwidth = 32}
 
 func.def target(@target) @unresolved(%input: index, %amount_input: index) -> (i64, i64, i64, i64, i64, i64, i1) {
   %coordinate = index.assume %input [range(%input, 0, 2147483646)] : index
-  %amount = index.assume %amount_input [range(%amount_input, 0, 8)] : index
+  %amount = index.assume %amount_input [range(%amount_input, 0, 40)] : index
   %factor = index.constant 10 : index
   %c1 = index.constant 1 : index
   %native_bits = index.constant 4294967295 : index
@@ -64,7 +64,7 @@ test.target<low_core> @target {index_bitwidth = 32}
 
 func.def target(@target) @unresolved(%input: index, %amount_input: index) -> (i64, i64, i64, i64, i64, i64, i1) {
   %coordinate = index.assume %input [range(%input, 0, 2147483646)] : index
-  %amount = index.assume %amount_input [range(%amount_input, 0, 8)] : index
+  %amount = index.assume %amount_input [range(%amount_input, 0, 40)] : index
   %factor = index.constant 10 : index
   %native_bits = index.constant 4294967295 : index
   %wide = index.mul %coordinate, %factor : index

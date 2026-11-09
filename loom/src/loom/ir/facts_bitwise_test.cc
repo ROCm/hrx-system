@@ -139,13 +139,14 @@ TEST(ShliTransfer, DivisorMultiplied) {
   EXPECT_EQ(out.known_divisor, 32);  // 2 * 16 = 32.
 }
 
-TEST(ShliTransfer, NonExactShiftAmount) {
-  // Non-exact shift amount → unknown.
+TEST(ShliTransfer, BoundedShiftAmount) {
   loom_value_facts_t a = loom_value_facts_exact_i64(5);
   loom_value_facts_t b = loom_value_facts_make(1, 3, 1);
   loom_value_facts_t out;
   loom_value_facts_shli(&a, &b, &out);
-  EXPECT_TRUE(loom_value_facts_is_unknown(out));
+  EXPECT_EQ(out.range_lo, 10);
+  EXPECT_EQ(out.range_hi, 40);
+  EXPECT_EQ(out.known_divisor, 10);
 }
 
 TEST(ShliTransfer, SignBitShift) {
@@ -252,8 +253,15 @@ TEST(ShruiTransfer, DistributionAndUnknownAmounts) {
   EXPECT_TRUE(loom_value_facts_is_lane_varying(result));
   EXPECT_FALSE(loom_value_facts_is_subgroup_uniform(result));
 
+  const auto bounded = loom_value_facts_make(1, 7, 1);
+  loom_value_facts_shrui(&source, &bounded, 8, &result);
+  EXPECT_EQ(result.range_lo, 0);
+  EXPECT_EQ(result.range_hi, 127);
+  EXPECT_EQ(result.known_divisor, 1);
+  EXPECT_TRUE(loom_value_facts_is_lane_varying(result));
+
   for (loom_value_facts_t amount :
-       {loom_value_facts_unknown(), loom_value_facts_make(1, 7, 1),
+       {loom_value_facts_unknown(), loom_value_facts_make(1, 8, 1),
         loom_value_facts_exact_i64(8), loom_value_facts_exact_i64(-1)}) {
     loom_value_facts_shrui(&source, &amount, 8, &result);
     EXPECT_EQ(result.range_lo, INT64_MIN);
@@ -300,6 +308,190 @@ TEST(ShrsiTransfer, NegativeValuesUseArithmeticSemantics) {
   loom_value_facts_shrsi(&range, &shift, &out);
   EXPECT_EQ(out.range_lo, -5);
   EXPECT_EQ(out.range_hi, -3);
+}
+
+TEST(ShiftTransfer, BoundedByteIntervalsContainEveryConcreteResult) {
+  const std::pair<int64_t, int64_t> intervals[] = {
+      {-128, -1}, {-7, -2}, {-7, 9},  {0, 0},
+      {0, 127},   {1, 9},   {16, 96}, {64, 127},
+  };
+  for (const auto& [minimum, maximum] : intervals) {
+    for (int64_t divisor : {1, 2, 3, 8}) {
+      const auto source = loom_value_facts_make(minimum, maximum, divisor);
+      for (int64_t first_shift = 0; first_shift < 8; ++first_shift) {
+        for (int64_t last_shift = first_shift; last_shift < 8; ++last_shift) {
+          SCOPED_TRACE(::testing::Message()
+                       << minimum << ":" << maximum << " / " << divisor
+                       << " shift " << first_shift << ":" << last_shift);
+          const auto amount = loom_value_facts_make(first_shift, last_shift, 1);
+          loom_value_facts_t left, wrapped_left, logical_right, signed_right;
+          loom_value_facts_shli(&source, &amount, &left);
+          loom_value_facts_shli_modular(&source, &amount, 8, &wrapped_left);
+          loom_value_facts_shrui(&source, &amount, 8, &logical_right);
+          loom_value_facts_shrsi(&source, &amount, &signed_right);
+          for (int64_t value = minimum; value <= maximum; ++value) {
+            if (value % source.known_divisor != 0) {
+              continue;
+            }
+            for (int64_t shift = first_shift; shift <= last_shift; ++shift) {
+              const int64_t factor = INT64_C(1) << shift;
+              const int64_t raw_left = ((value + 256) * factor) % 256;
+              const int64_t expected[] = {
+                  value * factor,
+                  raw_left >= 128 ? raw_left - 256 : raw_left,
+                  shift == 0 ? value : ((value + 256) % 256) / factor,
+                  value >= 0 ? value / factor : -1 - (-(value + 1) / factor),
+              };
+              const loom_value_facts_t results[] = {
+                  left, wrapped_left, logical_right, signed_right};
+              for (int i = 0; i < 4; ++i) {
+                EXPECT_LE(results[i].range_lo, expected[i]);
+                EXPECT_GE(results[i].range_hi, expected[i]);
+                EXPECT_EQ(expected[i] % results[i].known_divisor, 0);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(ShiftTransfer, BoundedAmountsAtTheSignBit) {
+  const auto amount = loom_value_facts_make(62, 63, 1);
+  const auto one = loom_value_facts_exact_i64(1);
+  loom_value_facts_t result;
+  loom_value_facts_shli(&one, &amount, &result);
+  EXPECT_EQ(result.range_lo, INT64_MIN);
+  EXPECT_EQ(result.range_hi, INT64_C(1) << 62);
+
+  const auto high_bits = loom_value_facts_make(INT64_MIN, -1, 1);
+  loom_value_facts_shrui(&high_bits, &amount, 64, &result);
+  EXPECT_EQ(result.range_lo, 1);
+  EXPECT_EQ(result.range_hi, 3);
+  loom_value_facts_shrsi(&high_bits, &amount, &result);
+  EXPECT_EQ(result.range_lo, -2);
+  EXPECT_EQ(result.range_hi, -1);
+
+  auto zero = loom_value_facts_exact_i64(0);
+  loom_value_facts_mark_lane_varying(&zero);
+  const auto all_amounts = loom_value_facts_make(0, 63, 1);
+  loom_value_facts_shli(&zero, &all_amounts, &result);
+  EXPECT_TRUE(loom_value_facts_is_zero(result));
+  EXPECT_TRUE(loom_value_facts_is_cluster_uniform(result));
+}
+
+TEST(ShiftTransfer, CarrierBoundariesContainConcreteResults) {
+  for (int32_t bit_count : {1, 2, 4, 8, 16, 32, 64}) {
+    SCOPED_TRACE(bit_count);
+    const uint64_t mask = UINT64_MAX >> (64 - bit_count);
+    const auto signed_value = [bit_count, mask](uint64_t bits) -> int64_t {
+      bits &= mask;
+      if (bit_count == 1 || bits <= (mask >> 1)) {
+        return (int64_t)bits;
+      }
+      return -1 - (int64_t)(mask - bits);
+    };
+    const int64_t minimum = bit_count == 1 ? 0 : signed_value(mask / 2 + 1);
+    const int64_t maximum = bit_count == 1 ? 1 : (int64_t)(mask / 2);
+    const int64_t values[] = {minimum, minimum + 1, -1,     0,
+                              1,       maximum - 1, maximum};
+    for (int64_t first : {INT64_C(0), (int64_t)bit_count / 2}) {
+      const auto amount = loom_value_facts_make(first, bit_count - 1, 1);
+      for (int64_t lower : values) {
+        for (int64_t upper : values) {
+          if (lower < minimum || upper > maximum || lower > upper) {
+            continue;
+          }
+          const auto source = loom_value_facts_make(lower, upper, 1);
+          loom_value_facts_t left, logical_right, signed_right;
+          loom_value_facts_shli_modular(&source, &amount, bit_count, &left);
+          loom_value_facts_shrui(&source, &amount, bit_count, &logical_right);
+          loom_value_facts_shrsi(&source, &amount, &signed_right);
+          for (int64_t value : values) {
+            if (value < lower || value > upper) {
+              continue;
+            }
+            for (int64_t shift = first; shift < bit_count; ++shift) {
+              const uint64_t bits = (uint64_t)value & mask;
+              const int64_t expected[] = {
+                  signed_value(bits << shift),
+                  signed_value(bits >> shift),
+                  value >= 0
+                      ? (int64_t)((uint64_t)value >> shift)
+                      : -1 - (int64_t)((uint64_t)(-(value + 1)) >> shift),
+              };
+              const loom_value_facts_t results[] = {left, logical_right,
+                                                    signed_right};
+              for (int i = 0; i < 3; ++i) {
+                EXPECT_LE(results[i].range_lo, expected[i]);
+                EXPECT_GE(results[i].range_hi, expected[i]);
+                EXPECT_EQ(expected[i] % results[i].known_divisor, 0);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(ShiftTransfer, OutOfDomainAmountsDiscardNumericFacts) {
+  auto source = loom_value_facts_exact_i64(1);
+  loom_value_facts_t result;
+  for (int32_t bit_count : {1, 2, 4, 8, 16, 32, 64}) {
+    for (const auto amount : {loom_value_facts_make(-1, 0, 1),
+                              loom_value_facts_make(0, bit_count, 1)}) {
+      const auto full =
+          loom_value_facts_wrap_integer(loom_value_facts_unknown(), bit_count);
+      loom_value_facts_shli_modular(&source, &amount, bit_count, &result);
+      EXPECT_EQ(result.range_lo, full.range_lo);
+      EXPECT_EQ(result.range_hi, full.range_hi);
+      loom_value_facts_shrui(&source, &amount, bit_count, &result);
+      EXPECT_TRUE(loom_value_facts_is_unknown(result));
+      if (bit_count == 64) {
+        loom_value_facts_shli(&source, &amount, &result);
+        EXPECT_TRUE(loom_value_facts_is_unknown(result));
+        loom_value_facts_shrsi(&source, &amount, &result);
+        EXPECT_TRUE(loom_value_facts_is_unknown(result));
+      }
+    }
+  }
+}
+
+TEST(ShiftTransfer, OutputMayAliasEitherOperand) {
+  const auto source = loom_value_facts_make(-32, 24, 8);
+  const auto amount = loom_value_facts_make(1, 3, 1);
+  const auto check = [](loom_value_facts_t actual,
+                        loom_value_facts_t expected) {
+    EXPECT_EQ(actual.range_lo, expected.range_lo);
+    EXPECT_EQ(actual.range_hi, expected.range_hi);
+    EXPECT_EQ(actual.known_divisor, expected.known_divisor);
+    EXPECT_EQ(actual.flags, expected.flags);
+  };
+  loom_value_facts_t expected;
+  for (bool alias_source : {false, true}) {
+    auto left = source, right = amount;
+    loom_value_facts_t* output = alias_source ? &left : &right;
+    loom_value_facts_shli(&source, &amount, &expected);
+    loom_value_facts_shli(&left, &right, output);
+    check(*output, expected);
+    left = source;
+    right = amount;
+    loom_value_facts_shrui(&source, &amount, 8, &expected);
+    loom_value_facts_shrui(&left, &right, 8, output);
+    check(*output, expected);
+    left = source;
+    right = amount;
+    loom_value_facts_shrsi(&source, &amount, &expected);
+    loom_value_facts_shrsi(&left, &right, output);
+    check(*output, expected);
+    left = source;
+    right = amount;
+    loom_value_facts_shli_modular(&source, &amount, 8, &expected);
+    loom_value_facts_shli_modular(&left, &right, 8, output);
+    check(*output, expected);
+  }
 }
 
 //===----------------------------------------------------------------------===//

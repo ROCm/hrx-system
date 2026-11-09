@@ -147,6 +147,16 @@ func.def target(@target) @index_multiply_wide_result(%lhs: index, %rhs: index) -
 
 wasm.target<simd128> @target
 
+func.def target(@target) @index_shift_wide_result(%value: index, %amount: index) -> (index) where [range(%value, 0, 65535), range(%amount, 0, 31)] {
+  // ERROR@+1: TARGET/005 {op_name="index.shli", subject_role="result", subject_name="shifted", constraint_key="index.maximum_carrier", minimum="-2147483648", maximum="4294967295"}
+  %shifted = index.shli %value, %amount : index
+  func.return %shifted : index
+}
+
+// ====
+
+wasm.target<simd128> @target
+
 func.def target(@target) @offset_outside_signed_index(%input: offset) -> (index) {
   %wide = index.assume %input [range(%input, 2147483648, 4294967295)] : offset
   // ERROR@+1: TARGET/005 {op_name="index.cast", subject_name="input", minimum="0", maximum="2147483647"}

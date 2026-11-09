@@ -237,6 +237,7 @@ check.scenario @portable_index_arithmetic_values {
 func.def @portable_index_bitwise_observations(%ordinal: index, %lhs_bits: i64, %rhs_bits: i64, %output: buffer) {
   %c65535_i32 = scalar.constant 65535 : i32
   %c1_index = index.constant 1 : index
+  %c15_index = index.constant 15 : index
   %c31_index = index.constant 31 : index
   %c32_index = index.constant 32 : index
   %base = index.constant 0 : offset
@@ -261,7 +262,10 @@ func.def @portable_index_bitwise_observations(%ordinal: index, %lhs_bits: i64, %
   %and = index.andi %lhs, %rhs : index
   %or = index.ori %lhs, %rhs : index
   %xor = index.xori %lhs, %rhs : index
-  %left = index.shli %lhs, %amount : index
+  // The 16-bit payload's mathematical left shift must fit a 32-bit index.
+  // Fixed-width wrapping belongs to scalar shifts, not logical coordinates.
+  %left_amount = index.andi %amount, %c15_index : index
+  %left = index.shli %lhs, %left_amount : index
   %signed_right = index.shrsi %lhs, %amount : index
   %unsigned_right = index.shrui %lhs, %amount : index
   %rotated_left = index.rotli %c1_index, %large_amount : index

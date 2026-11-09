@@ -325,15 +325,15 @@ func.def @guarded_first_set_bit(%mask: i32) -> (i32, i1) {
 
 // ====
 
-func.def @logical_shift_i8_bounds(%input: i8) -> (i64, i64) {
-  %amount = scalar.constant 4 : i8
+func.def @logical_shift_i8_bounds(%input: i8, %raw_amount: i8) -> (i64, i64) {
+  %amount = scalar.assume %raw_amount [range(%raw_amount, 4, 7)] : i8
   %shifted = scalar.shrui %input, %amount : i8
   %lo = test.fact_range_lo %shifted : i8 -> i64
   %hi = test.fact_range_hi %shifted : i8 -> i64
   func.return %lo, %hi : i64, i64
 }
 // ----
-func.def @logical_shift_i8_bounds(%input: i8) -> (i64, i64) {
+func.def @logical_shift_i8_bounds(%input: i8, %raw_amount: i8) -> (i64, i64) {
   %lo = scalar.constant 0 : i64
   %hi = scalar.constant 15 : i64
   func.return %lo, %hi : i64, i64
@@ -341,15 +341,15 @@ func.def @logical_shift_i8_bounds(%input: i8) -> (i64, i64) {
 
 // ====
 
-func.def @logical_shift_i16_bounds(%input: i16) -> (i64, i64) {
-  %amount = scalar.constant 12 : i16
+func.def @logical_shift_i16_bounds(%input: i16, %raw_amount: i16) -> (i64, i64) {
+  %amount = scalar.assume %raw_amount [range(%raw_amount, 12, 15)] : i16
   %shifted = scalar.shrui %input, %amount : i16
   %lo = test.fact_range_lo %shifted : i16 -> i64
   %hi = test.fact_range_hi %shifted : i16 -> i64
   func.return %lo, %hi : i64, i64
 }
 // ----
-func.def @logical_shift_i16_bounds(%input: i16) -> (i64, i64) {
+func.def @logical_shift_i16_bounds(%input: i16, %raw_amount: i16) -> (i64, i64) {
   %lo = scalar.constant 0 : i64
   %hi = scalar.constant 15 : i64
   func.return %lo, %hi : i64, i64
@@ -357,15 +357,15 @@ func.def @logical_shift_i16_bounds(%input: i16) -> (i64, i64) {
 
 // ====
 
-func.def @logical_shift_i32_bounds(%input: i32) -> (i64, i64) {
-  %amount = scalar.constant 28 : i32
+func.def @logical_shift_i32_bounds(%input: i32, %raw_amount: i32) -> (i64, i64) {
+  %amount = scalar.assume %raw_amount [range(%raw_amount, 28, 31)] : i32
   %shifted = scalar.shrui %input, %amount : i32
   %lo = test.fact_range_lo %shifted : i32 -> i64
   %hi = test.fact_range_hi %shifted : i32 -> i64
   func.return %lo, %hi : i64, i64
 }
 // ----
-func.def @logical_shift_i32_bounds(%input: i32) -> (i64, i64) {
+func.def @logical_shift_i32_bounds(%input: i32, %raw_amount: i32) -> (i64, i64) {
   %lo = scalar.constant 0 : i64
   %hi = scalar.constant 15 : i64
   func.return %lo, %hi : i64, i64
@@ -373,15 +373,15 @@ func.def @logical_shift_i32_bounds(%input: i32) -> (i64, i64) {
 
 // ====
 
-func.def @logical_shift_i64_bounds(%input: i64) -> (i64, i64) {
-  %amount = scalar.constant 60 : i64
+func.def @logical_shift_i64_bounds(%input: i64, %raw_amount: i64) -> (i64, i64) {
+  %amount = scalar.assume %raw_amount [range(%raw_amount, 60, 63)] : i64
   %shifted = scalar.shrui %input, %amount : i64
   %lo = test.fact_range_lo %shifted : i64 -> i64
   %hi = test.fact_range_hi %shifted : i64 -> i64
   func.return %lo, %hi : i64, i64
 }
 // ----
-func.def @logical_shift_i64_bounds(%input: i64) -> (i64, i64) {
+func.def @logical_shift_i64_bounds(%input: i64, %raw_amount: i64) -> (i64, i64) {
   %lo = scalar.constant 0 : i64
   %hi = scalar.constant 15 : i64
   func.return %lo, %hi : i64, i64
@@ -488,4 +488,34 @@ func.def @unsigned_fields_fill_result(%input: i64) -> (i64, i64, i64, i64, i64, 
   %lo64 = scalar.constant -9223372036854775808 : i64
   %hi64 = scalar.constant 9223372036854775807 : i64
   func.return %lo8, %hi8, %lo16, %hi16, %lo32, %hi32, %lo64, %hi64 : i64, i64, i64, i64, i64, i64, i64, i64
+}
+
+// ====
+
+// A bounded amount retains scaling and signed division facts without folding
+// either operand. Signed right shifts must include the unchanged value at zero.
+func.def @bounded_left_and_signed_shifts(%raw: i32, %raw_amount: i32) -> (i64, i64, i64, i64, i64) {
+  %value = scalar.assume %raw [range(%raw, -32, 24)] : i32
+  %amount = scalar.assume %raw_amount [range(%raw_amount, 0, 3)] : i32
+  %left = scalar.shli<nsw> %value, %amount : i32
+  %right = scalar.shrsi %value, %amount : i32
+  %left_lo = test.fact_range_lo %left : i32 -> i64
+  %left_hi = test.fact_range_hi %left : i32 -> i64
+  %right_lo = test.fact_range_lo %right : i32 -> i64
+  %right_hi = test.fact_range_hi %right : i32 -> i64
+  %c1 = scalar.constant 1 : i32
+  %positive_amount = scalar.ori %amount, %c1 : i32
+  %scaled = scalar.shli %value, %positive_amount : i32
+  %divisor = test.fact_divisor %scaled : i32 -> i64
+  func.return %left_lo, %left_hi, %right_lo, %right_hi, %divisor : i64, i64, i64, i64, i64
+}
+
+// ----
+func.def @bounded_left_and_signed_shifts(%raw: i32, %raw_amount: i32) -> (i64, i64, i64, i64, i64) {
+  %left_lo = scalar.constant -256 : i64
+  %left_hi = scalar.constant 192 : i64
+  %right_lo = scalar.constant -32 : i64
+  %right_hi = scalar.constant 24 : i64
+  %divisor = scalar.constant 2 : i64
+  func.return %left_lo, %left_hi, %right_lo, %right_hi, %divisor : i64, i64, i64, i64, i64
 }

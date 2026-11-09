@@ -147,7 +147,7 @@ void loom_value_facts_shli_modular(const loom_value_facts_t* lhs,
   uint64_t lhs_bits = 0;
   int64_t shift = 0;
   const bool shift_is_exact = loom_value_facts_as_exact_i64(rhs_facts, &shift);
-  if (shift_is_exact && (shift < 0 || shift >= bit_count)) {
+  if (rhs_facts.range_lo < 0 || rhs_facts.range_hi >= bit_count) {
     *out = loom_value_facts_wrap_integer(loom_value_facts_unknown(), bit_count);
     loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
     return;
