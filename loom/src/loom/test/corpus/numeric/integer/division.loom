@@ -532,11 +532,15 @@ func.def @runtime_coordinate_lookup_oracle(%input: buffer, %output: buffer, %row
 }
 
 // Runtime group widths exercise common-divisor ordering through the complete
-// pipeline, including a runtime choice of grouping policy. The channel extent
-// consists of complete groups; two extra outputs test the end and inactive tail.
+// pipeline, including runtime selection, capping, flooring, and clamping.
+// Width input enumerates four channel extents for each policy; every width
+// remains a runtime value. Two extra outputs test the end and inactive tail.
 func.def @runtime_group_lookup(%input: buffer, %output: buffer, %kind_input: index, %width_input: index, %use_runtime_width: i1) {
   %kind = index.assume %kind_input [range(%kind_input, 0, 4)] : index
-  %width_zero_based = index.assume %width_input [range(%width_input, 0, 3)] : index
+  %selection = index.assume %width_input [range(%width_input, 0, 15)] : index
+  %extent_count = index.constant 4 : index
+  %width_zero_based = index.rem %selection, %extent_count : index
+  %policy = index.div %selection, %extent_count : index
   %begin = index.constant 0 : index
   %unit = index.constant 1 : index
   %end = index.constant 66 : index
@@ -546,7 +550,19 @@ func.def @runtime_group_lookup(%input: buffer, %output: buffer, %kind_input: ind
   %width = index.mul %width_units, %granularity : index
   %runtime_width = index.shli %unit, %kind : index
   %fallback_width = index.constant 8 : index
-  %group_width = scf.select %use_runtime_width, %runtime_width, %fallback_width : index
+  %selected_width = scf.select %use_runtime_width, %runtime_width, %fallback_width : index
+  %lower_bound = index.constant 2 : index
+  %capped = index.min %selected_width, %fallback_width : index
+  %floored = index.max %selected_width, %fallback_width : index
+  %clamped = index.max %capped, %lower_bound : index
+  %floor_policy = index.constant 2 : index
+  %clamp_policy = index.constant 3 : index
+  %is_cap = index.cmp eq, %policy, %unit : index
+  %is_floor = index.cmp eq, %policy, %floor_policy : index
+  %is_clamp = index.cmp eq, %policy, %clamp_policy : index
+  %width0 = scf.select %is_cap, %capped, %selected_width : index
+  %width1 = scf.select %is_floor, %floored, %width0 : index
+  %group_width = scf.select %is_clamp, %clamped, %width1 : index
   %groups = index.div %width, %group_width : index
   %source = buffer.view %input[%base] : buffer -> view<[%groups]xi32>
   %destination = buffer.view %output[%base] : buffer -> view<66xi32>
@@ -569,7 +585,10 @@ func.def @runtime_group_lookup(%input: buffer, %output: buffer, %kind_input: ind
 // the subject's dynamic quotient extent. Both receive the same runtime inputs.
 func.def @runtime_group_lookup_oracle(%input: buffer, %output: buffer, %kind_input: index, %width_input: index, %use_runtime_width: i1) {
   %kind = index.assume %kind_input [range(%kind_input, 0, 4)] : index
-  %width_zero_based = index.assume %width_input [range(%width_input, 0, 3)] : index
+  %selection = index.assume %width_input [range(%width_input, 0, 15)] : index
+  %extent_count = index.constant 4 : index
+  %width_zero_based = index.rem %selection, %extent_count : index
+  %policy = index.div %selection, %extent_count : index
   %begin = index.constant 0 : index
   %unit = index.constant 1 : index
   %end = index.constant 66 : index
@@ -577,19 +596,26 @@ func.def @runtime_group_lookup_oracle(%input: buffer, %output: buffer, %kind_inp
   %granularity = index.constant 16 : index
   %width_units = index.add %width_zero_based, %unit : index
   %width = index.mul %width_units, %granularity : index
+  %fallback_shift = index.constant 3 : index
+  %selected_shift = scf.select %use_runtime_width, %kind, %fallback_shift : index
+  %above = index.cmp ugt, %selected_shift, %fallback_shift : index
+  %below = index.cmp ult, %selected_shift, %unit : index
+  %capped_shift = scf.select %above, %fallback_shift, %selected_shift : index
+  %floored_shift = scf.select %above, %selected_shift, %fallback_shift : index
+  %clamped_shift = scf.select %below, %unit, %capped_shift : index
+  %floor_policy = index.constant 2 : index
+  %is_cap = index.cmp eq, %policy, %unit : index
+  %is_floor = index.cmp eq, %policy, %floor_policy : index
+  %is_clamp = index.cmp eq, %policy, %fallback_shift : index
+  %shift0 = scf.select %is_cap, %capped_shift, %selected_shift : index
+  %shift1 = scf.select %is_floor, %floored_shift, %shift0 : index
+  %shift = scf.select %is_clamp, %clamped_shift, %shift1 : index
   %source = buffer.view %input[%base] : buffer -> view<64xi32>
   %destination = buffer.view %output[%base] : buffer -> view<66xi32>
   scf.for %channel = [%begin to %end step %unit] {
     %active = index.cmp ult, %channel, %width : index
     %result = scf.if %active -> (i32) {
-      %group = scf.if %use_runtime_width -> (index) {
-        %runtime_group = index.shrui %channel, %kind : index
-        scf.yield %runtime_group : index
-      } else {
-        %fallback_shift = index.constant 3 : index
-        %fallback_group = index.shrui %channel, %fallback_shift : index
-        scf.yield %fallback_group : index
-      }
+      %group = index.shrui %channel, %shift : index
       %value = view.load %source[%group] : view<64xi32> -> i32
       scf.yield %value : i32
     } else {
@@ -859,7 +885,7 @@ check.scenario @runtime_coordinate_lookup_values configure[8](%rows: index, %con
 }
 
 check.scenario @runtime_group_lookup_values configure[5](%kind: index, %configuration_entropy: check.entropy) {
-  check.trial[4](%width: index, %entropy: check.entropy) {
+  check.trial[16](%width: index, %entropy: check.entropy) {
     %use_runtime_width = check.literal value(true) : i1
     %input_storage = check.generate.iota offset(-311) step(7) : tensor<72xi32>
     %output_storage = check.generate.fill value(-889275714) : tensor<74xi32>
@@ -870,7 +896,7 @@ check.scenario @runtime_group_lookup_values configure[5](%kind: index, %configur
       check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<74xi32>
     }
   }
-  check.trial[4](%width: index, %entropy: check.entropy) {
+  check.trial[16](%width: index, %entropy: check.entropy) {
     %use_runtime_width = check.literal value(false) : i1
     %input_storage = check.generate.iota offset(-311) step(7) : tensor<72xi32>
     %output_storage = check.generate.fill value(-889275714) : tensor<74xi32>
