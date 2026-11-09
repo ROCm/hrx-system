@@ -48,7 +48,8 @@ class Construction {
   // Isolates escaping break/continue paths of one structured source owner.
   void enter(bool declaration_scope = true);
   void leave(cxx::AST* owner, std::span<cxx::Symbol* const> written);
-  void return_from_function();
+  // Ends a path that returns or has no defined continuation.
+  void end_path();
   void break_from_region();
   void continue_iteration();
   // Consumes iteration exits at their source target. The caller evaluates

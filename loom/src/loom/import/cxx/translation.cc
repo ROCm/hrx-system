@@ -4329,6 +4329,14 @@ class Translator final : private Initialization::Evaluation {
   }
 
   std::optional<IntrinsicCallResult> builtin(cxx::CallExpressionAST* call) {
+    if (cxx::resolveBuiltinFunctionKind(
+            cxx::ast_cast<cxx::IdExpressionAST>(call->baseExpression)) ==
+        cxx::BuiltinFunctionKind::T___BUILTIN_UNREACHABLE) {
+      // This path has no defined continuation or runtime effect. The retained
+      // source exit summary stops the sequence and supplies func.unreachable
+      // when the enclosing callable cannot reach an ordinary return.
+      return IntrinsicCallResult{std::nullopt};
+    }
     if (auto atomic =
             AtomicBuiltin::resolve(unit_, diagnostics_, types_, call)) {
       std::array<Value, 4> arguments;

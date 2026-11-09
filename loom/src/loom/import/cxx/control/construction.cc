@@ -106,7 +106,7 @@ void Construction::leave(cxx::AST* owner,
   continues_ = join(std::move(frame.continues), continues_);
 }
 
-void Construction::return_from_function() { current_ = {false, {}}; }
+void Construction::end_path() { current_ = {false, {}}; }
 
 void Construction::break_from_region() {
   breaks_ = join(std::move(breaks_), current_);

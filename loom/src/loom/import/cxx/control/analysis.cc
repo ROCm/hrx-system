@@ -454,6 +454,9 @@ bool ControlFlow::preVisit(cxx::AST* ast) {
     case cxx::ASTKind::SizeofExpression:
     case cxx::ASTKind::SizeofTypeExpression:
     case cxx::ASTKind::AlignofTypeExpression:
+    case cxx::ASTKind::NoexceptExpression:
+    case cxx::ASTKind::DecltypeSpecifier:
+    case cxx::ASTKind::RequiresExpression:
       return false;
     default:
       break;
@@ -564,7 +567,7 @@ void ControlFlow::postVisit(cxx::AST* ast) {
   }
   switch (ast->kind()) {
     case cxx::ASTKind::ReturnStatement:
-      construction_.return_from_function();
+      construction_.end_path();
       break;
     case cxx::ASTKind::BreakStatement:
       construction_.break_from_region();
@@ -578,6 +581,12 @@ void ControlFlow::postVisit(cxx::AST* ast) {
 }
 
 unsigned ControlFlow::classify_paths(cxx::StatementAST* statement) const {
+  if (cxx::ast_cast<cxx::ExpressionStatementAST>(statement)) {
+    // The evaluated-expression walk already joins conditional and
+    // short-circuit paths. Consume its continuation fact without walking the
+    // expression again to find a nested non-returning call.
+    return construction_.state().reachable ? Fallthrough : Diverge;
+  }
   if (cxx::ast_cast<cxx::ReturnStatementAST>(statement)) {
     return Return;
   }
@@ -662,7 +671,7 @@ bool ControlFlow::classify_callable_exit(cxx::StatementAST* statement) {
       cxx::ast_cast<cxx::WhileStatementAST>(statement) ||
       cxx::ast_cast<cxx::DoStatementAST>(statement) ||
       cxx::ast_cast<cxx::SwitchStatementAST>(statement)) {
-    return returns(statement) != ExitFlow::None;
+    return returns(statement) != ExitFlow::None || (paths(statement) & Diverge);
   }
   if (auto* compound = cxx::ast_cast<cxx::CompoundStatementAST>(statement)) {
     size_t count = std::ranges::count_if(cxx::ListView{compound->statementList},
@@ -679,10 +688,11 @@ bool ControlFlow::classify_callable_exit(cxx::StatementAST* statement) {
       return requires_callable_exit(
           *branch->constexprValue ? branch->statement : branch->elseStatement);
     }
-    return requires_callable_exit(branch->statement) ||
+    return (paths(branch) & Diverge) ||
+           requires_callable_exit(branch->statement) ||
            requires_callable_exit(branch->elseStatement);
   }
-  return false;
+  return paths(statement) & Diverge;
 }
 
 void ControlFlow::visit(cxx::CaseStatementAST* ast) {
@@ -1020,6 +1030,12 @@ void ControlFlow::visit(cxx::ReturnStatementAST* ast) {
 
 void ControlFlow::visit(cxx::CallExpressionAST* ast) {
   cxx::ASTVisitor::visit(ast);
+  if (cxx::resolveBuiltinFunctionKind(
+          cxx::ast_cast<cxx::IdExpressionAST>(ast->baseExpression)) ==
+      cxx::BuiltinFunctionKind::T___BUILTIN_UNREACHABLE) {
+    construction_.end_path();
+    return;
+  }
   auto* function = direct_callee(ast);
   if (!function) {
     return;

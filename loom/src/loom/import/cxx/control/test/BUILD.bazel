@@ -35,6 +35,7 @@ loom_check_test_suite(
         "loops.cxx-test",
         "structured_returns.cxx-test",
         "switches.cxx-test",
+        "unreachable.cxx-test",
     ],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
