@@ -58,9 +58,20 @@ typedef struct loom_aie2p_native_channel_t {
   uint32_t record_byte_length;
   // Logical payload elements occupy one contiguous byte range in order.
   bool record_dense;
-  // All cursor owners preceding the current representative independently
-  // balanced exact reads and writes. Retained before replacing an owner.
-  bool balanced_predecessors;
+  // Credit balance accumulated as construction-grouped workers are selected.
+  struct {
+    // Last worker whose cursor counts have not yet been accumulated.
+    uint32_t worker;
+    // Read admissions from finished workers in the current construction.
+    uint64_t reads;
+    // Write admissions from finished workers in the current construction.
+    uint64_t writes;
+    // Every current-construction endpoint has an exact admission count.
+    bool exact;
+    // Every completed construction restores its own credit balance. Final
+    // after all cursor owners finish; independent of runtime multiplicity.
+    bool balanced;
+  } balance;
   // Semaphore containing reusable slot credits.
   uint16_t free_lock;
   // Semaphore containing published record credits.

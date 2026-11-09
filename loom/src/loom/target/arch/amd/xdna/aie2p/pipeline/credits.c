@@ -49,26 +49,6 @@ uint32_t loom_aie2p_native_initial_credits(
          reserve_initial;
 }
 
-// Exact endpoints in one invocation share their enclosing multiplicity.
-// Several independently balanced workers also have zero net credit change;
-// selection retains that proof before replacing their representative counts.
-static bool loom_aie2p_native_credit_balance(
-    const loom_pipeline_invocations_t* invocations,
-    const loom_aie2p_native_channel_t* channel) {
-  const loom_aie2p_native_cursor_t* writer = &channel->cursor.writer;
-  const loom_aie2p_native_cursor_t* reader = &channel->cursor.reader;
-  if (writer->worker == UINT32_MAX) {
-    return true;
-  }
-  return reader->worker != UINT32_MAX && writer->exact_admissions &&
-         reader->exact_admissions &&
-         writer->maximum_admissions == reader->maximum_admissions &&
-         ((!writer->shared && !reader->shared &&
-           invocations->workers[writer->worker].invocation ==
-               invocations->workers[reader->worker].invocation) ||
-          (channel->balanced_predecessors && reader->worker == writer->worker));
-}
-
 static bool loom_aie2p_native_credit_residual(
     const loom_aie2p_native_context_t* context,
     const loom_pipeline_invocations_t* invocations, iree_host_size_t index,
@@ -125,8 +105,7 @@ iree_status_t loom_aie2p_native_select_credits(
     const loom_aie2p_native_channel_t* channel = &context->channels[i];
     const iree_host_size_t boundary =
         boundaries[invocations->channels[i].invocation->ordinal];
-    if (boundary == IREE_HOST_SIZE_MAX ||
-        loom_aie2p_native_credit_balance(invocations, channel)) {
+    if (boundary == IREE_HOST_SIZE_MAX || channel->balance.balanced) {
       continue;
     }
     uint32_t residual = 0;

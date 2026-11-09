@@ -24,31 +24,102 @@ namespace {
 TEST(ChannelCursorTest, RetainsEveryPreviousWorkersBalance) {
   for (bool first_exact : {false, true}) {
     for (uint32_t reads : {0u, 1u}) {
-      loom_aie2p_native_channel_t channel = {
-          .balanced_predecessors = true,
-          .cursor = {.reader = {.worker = UINT32_MAX},
-                     .writer = {.worker = UINT32_MAX}},
+      loom_pipeline_invocation_t owners[3] = {};
+      loom_pipeline_invocation_worker_t workers[] = {
+          {.invocation = &owners[0]},
+          {.invocation = &owners[1]},
+          {.invocation = &owners[2]},
       };
-      loom_aie2p_native_begin_cursor_owner(&channel, 0);
+      loom_pipeline_invocations_t invocations = {
+          .workers = workers,
+          .worker_count = 3,
+      };
+      loom_aie2p_native_channel_t channel = {
+          .balance = {.worker = UINT32_MAX, .exact = true, .balanced = true},
+          .cursor =
+              {
+                  .reader = {.worker = UINT32_MAX},
+                  .writer = {.worker = UINT32_MAX},
+              },
+      };
+      loom_aie2p_native_begin_cursor_owner(&channel, &invocations, 0);
       loom_aie2p_native_cursor_bind(&channel.cursor.writer, 2, 0, 1,
                                     first_exact, false);
       if (reads) {
-        loom_aie2p_native_begin_cursor_owner(&channel, 0);
+        loom_aie2p_native_begin_cursor_owner(&channel, &invocations, 0);
         loom_aie2p_native_cursor_bind(&channel.cursor.reader, 2, 0, reads,
                                       first_exact, false);
       }
       // Each later worker is balanced. Replacing the representative must
       // retain any uncertainty or unread tail from the first worker.
       for (uint32_t worker : {1u, 2u}) {
-        loom_aie2p_native_begin_cursor_owner(&channel, worker);
+        loom_aie2p_native_begin_cursor_owner(&channel, &invocations, worker);
         loom_aie2p_native_cursor_bind(&channel.cursor.reader, 2, worker, 2,
                                       true, true);
-        loom_aie2p_native_begin_cursor_owner(&channel, worker);
+        loom_aie2p_native_begin_cursor_owner(&channel, &invocations, worker);
         loom_aie2p_native_cursor_bind(&channel.cursor.writer, 2, worker, 2,
                                       true, true);
-        EXPECT_EQ(channel.balanced_predecessors, first_exact && reads == 1);
       }
+      loom_aie2p_native_finish_cursor_owners(&channel);
+      EXPECT_EQ(channel.balance.balanced, first_exact && reads == 1);
     }
+  }
+}
+
+TEST(ChannelCursorTest, ConstructionBalanceIncludesIndependentWorkers) {
+  struct Case {
+    // Read count for the first construction, whose writer publishes two.
+    uint32_t first_reads;
+    // Whether that read count is exact on all paths.
+    bool first_exact;
+    // Whether the first reader belongs to the same construction as its writer.
+    bool same_construction;
+    // Final proof after an independently balanced second construction.
+    bool balanced;
+  };
+  const Case cases[] = {{2, true, true, true},
+                        {1, true, true, false},
+                        {2, false, true, false},
+                        {2, true, false, false}};
+  for (const Case& test : cases) {
+    SCOPED_TRACE(test.first_reads);
+    SCOPED_TRACE(test.first_exact);
+    SCOPED_TRACE(test.same_construction);
+    loom_pipeline_invocation_t owners[3] = {};
+    loom_pipeline_invocation_worker_t workers[] = {
+        {.invocation = &owners[0]},
+        {.invocation = &owners[test.same_construction ? 0 : 1]},
+        {.invocation = &owners[2]},
+        {.invocation = &owners[2]},
+    };
+    loom_pipeline_invocations_t invocations = {
+        .workers = workers,
+        .worker_count = 4,
+    };
+    loom_aie2p_native_channel_t channel = {
+        .balance = {.worker = UINT32_MAX, .exact = true, .balanced = true},
+        .cursor =
+            {
+                .reader = {.worker = UINT32_MAX},
+                .writer = {.worker = UINT32_MAX},
+            },
+    };
+    for (uint32_t worker = 0; worker < 4; ++worker) {
+      loom_aie2p_native_begin_cursor_owner(&channel, &invocations, worker);
+      auto* cursor =
+          worker % 2 ? &channel.cursor.reader : &channel.cursor.writer;
+      const uint32_t count = worker == 1  ? test.first_reads
+                             : worker < 2 ? 2
+                                          : 7;
+      loom_aie2p_native_cursor_bind(cursor, 2, worker, count,
+                                    worker != 1 || test.first_exact, true);
+      // Visiting another admission site retains the producer's aggregate.
+      // It must not contribute the worker's total a second time.
+      loom_aie2p_native_begin_cursor_owner(&channel, &invocations, worker);
+      loom_aie2p_native_cursor_bind(cursor, 2, worker, count, true, true);
+    }
+    loom_aie2p_native_finish_cursor_owners(&channel);
+    EXPECT_EQ(channel.balance.balanced, test.balanced);
   }
 }
 

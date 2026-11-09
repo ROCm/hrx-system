@@ -127,7 +127,7 @@ static iree_status_t loom_aie2p_native_select_channels(
         .byte_stride = (uint32_t)(geometry->slot_bit_stride / 8),
         .record_byte_length = (uint32_t)(geometry->record_bit_span / 8),
         .record_dense = geometry->record_dense,
-        .balanced_predecessors = true,
+        .balance = {.worker = UINT32_MAX, .exact = true, .balanced = true},
         .cursor = {.reader = {.worker = UINT32_MAX},
                    .writer = {.worker = UINT32_MAX}}};
   }
@@ -246,7 +246,8 @@ static iree_status_t loom_aie2p_native_claim_transport_cursor(
   *out_valid = false;
   loom_aie2p_native_channel_t* channel =
       loom_aie2p_native_channel(context, realization, identity);
-  loom_aie2p_native_begin_cursor_owner(channel, worker_index);
+  loom_aie2p_native_begin_cursor_owner(channel, &realization->invocations,
+                                       worker_index);
   loom_aie2p_native_cursor_t* cursor =
       reader ? &channel->cursor.reader : &channel->cursor.writer;
   if (!admissions || admissions > UINT32_MAX) {
@@ -679,7 +680,8 @@ static iree_status_t loom_aie2p_native_select(
           action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE) {
         loom_aie2p_native_channel_t* channel =
             loom_aie2p_native_channel(context, realization, action->channel);
-        loom_aie2p_native_begin_cursor_owner(channel, (uint32_t)i);
+        loom_aie2p_native_begin_cursor_owner(channel, &realization->invocations,
+                                             (uint32_t)i);
         loom_aie2p_native_cursor_t* cursor =
             action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE
                 ? &channel->cursor.reader
@@ -700,7 +702,8 @@ static iree_status_t loom_aie2p_native_select(
   // slot. All distribution facts are available before credit admission.
   for (iree_host_size_t i = 0; i < realization->invocations.channel_count;
        ++i) {
-    const loom_aie2p_native_channel_t* channel = &context->channels[i];
+    loom_aie2p_native_channel_t* channel = &context->channels[i];
+    loom_aie2p_native_finish_cursor_owners(channel);
     const loom_aie2p_native_tile_t* owner =
         context->pool_tiles[channel->pool_index];
     if (!channel->replay.record_count &&

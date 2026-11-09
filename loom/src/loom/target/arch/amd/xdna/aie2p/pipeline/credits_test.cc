@@ -40,17 +40,24 @@ class NativeCreditsTest : public ::testing::Test {
     protocol_.invocation = &invocations_[1];
     protocol_.source = &source_;
     channel_.source = &source_;
-    channel_.balanced_predecessors = true;
     channel_.cursor.writer = {
-        .worker = 0, .maximum_admissions = 2, .exact_admissions = true};
+        .worker = 0,
+        .maximum_admissions = 2,
+        .exact_admissions = true,
+    };
     channel_.cursor.reader = {
-        .worker = 1, .maximum_admissions = 1, .exact_admissions = true};
-    realization_.invocations = {.entries = entries_,
-                                .count = 3,
-                                .workers = occurrences_,
-                                .worker_count = 2,
-                                .channels = &protocol_,
-                                .channel_count = 1};
+        .worker = 1,
+        .maximum_admissions = 1,
+        .exact_admissions = true,
+    };
+    realization_.invocations = {
+        .entries = entries_,
+        .count = 3,
+        .workers = occurrences_,
+        .worker_count = 2,
+        .channels = &protocol_,
+        .channel_count = 1,
+    };
   }
   void TearDown() override {
     iree_arena_deinitialize(&arena_);
@@ -110,6 +117,7 @@ TEST_F(NativeCreditsTest, ParentChannelSurvivesChildCompletion) {
 
 TEST_F(NativeCreditsTest, ExactBalancedEndpointsNeedNoRestoration) {
   channel_.cursor.reader.maximum_admissions = 2;
+  channel_.balance.balanced = true;
   Select(false, false);
 }
 
@@ -143,13 +151,14 @@ TEST_F(NativeCreditsTest, ConcurrentOwnerUsesItsEnclosingSerialBoundary) {
 TEST_F(NativeCreditsTest, BalancedSharedWorkersNeedNoRestoration) {
   channel_.cursor.reader = channel_.cursor.writer;
   channel_.cursor.reader.shared = channel_.cursor.writer.shared = true;
+  channel_.balance.balanced = true;
   Select(false, false);
 }
 
 TEST_F(NativeCreditsTest, EarlierUnbalancedWorkerRequiresQuiescence) {
   channel_.cursor.reader = channel_.cursor.writer;
   channel_.cursor.reader.shared = channel_.cursor.writer.shared = true;
-  channel_.balanced_predecessors = false;
+  channel_.balance.balanced = false;
   Select(true, true);
 }
 

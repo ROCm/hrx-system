@@ -13,10 +13,17 @@
 extern "C" {
 #endif
 
-// Preserves the previous worker's balanced read/write proof before replacing
-// either representative cursor. Called once for each new admission owner.
-void loom_aie2p_native_begin_cursor_owner(loom_aie2p_native_channel_t* channel,
-                                          uint32_t worker);
+// Accumulates the previous worker's exact read/write counts before either
+// representative cursor is replaced. Inventory order groups all workers of a
+// construction, whose equal totals prove balance at any runtime multiplicity.
+// Multiple admission sites within one worker contribute its total only once.
+void loom_aie2p_native_begin_cursor_owner(
+    loom_aie2p_native_channel_t* channel,
+    const loom_pipeline_invocations_t* invocations, uint32_t worker);
+
+// Finalizes the last construction's credit balance after all workers are bound.
+void loom_aie2p_native_finish_cursor_owners(
+    loom_aie2p_native_channel_t* channel);
 
 // Accumulates core admission bounds and ownership for one read/write cursor.
 // Imported channels preserve their position beyond the current worker call.
