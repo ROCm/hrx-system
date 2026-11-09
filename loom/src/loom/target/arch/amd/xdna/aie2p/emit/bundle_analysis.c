@@ -578,10 +578,24 @@ iree_status_t loom_aie2p_bundle_plan_analyze(
         }
         break;
       }
-      case LOOM_AIE2P_BLOCK_TERMINATOR_RETURN:
+      case LOOM_AIE2P_BLOCK_TERMINATOR_RETURN: {
+        const loom_low_allocation_exit_moves_t* exit_moves =
+            loom_low_allocation_find_exit_moves_by_source_ordinal(
+                &frame->allocation, terminator_packet.node_index);
+        if (exit_moves != NULL) {
+          block_analysis->return_moves = exit_moves->results.moves;
+          accepted = false;
+          IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_analyze_move_range(
+              frame, block_analysis->return_moves, terminator_packet.node->op,
+              diagnostic_emitter, out_analysis, &accepted));
+          if (!accepted) {
+            return iree_ok_status();
+          }
+        }
         control_bundle_count = loom_aie2p_bundle_plan_control_bundle_count(
             descriptor_set, AIE2P_CORE_DESCRIPTOR_REF_RETURN_);
         break;
+      }
       case LOOM_AIE2P_BLOCK_TERMINATOR_NONE:
         IREE_ASSERT(false && "analyzed AIE2P block must have a terminator");
         break;

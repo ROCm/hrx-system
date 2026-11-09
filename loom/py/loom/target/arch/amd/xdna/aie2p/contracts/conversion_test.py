@@ -1350,7 +1350,7 @@ def test_native_integer_conversion_preserves_scale_and_status_state() -> None:
     ]
 
 
-def test_native_bfloat16_packet_conversions_publish_subnormal_policy() -> None:
+def test_native_bfloat16_packet_conversions_publish_subnormal_and_nan_policy() -> None:
     for lane_range, minimum_lanes, maximum_lanes in (
         ("1-15", 1, 15),
         ("16", 16, 16),
@@ -1380,6 +1380,7 @@ def test_native_bfloat16_packet_conversions_publish_subnormal_policy() -> None:
         narrow_base_guards = (
             Guard.value_type("input", f32_type),
             Guard.value_type("result", bf16_type),
+            Guard.value_not_nan("input"),
             Guard.value_not_subnormal_or_instance_flags_has_all(
                 "input", "subnormal", "daz"
             ),
@@ -1422,6 +1423,20 @@ def test_native_bfloat16_packet_conversions_publish_subnormal_policy() -> None:
         else:
             assert [rule.guards for rule in narrow_rules] == [narrow_base_guards]
             assert [rule.guards for rule in widen_rules] == [widen_base_guards]
+
+        preserving_rules = [
+            rule
+            for rule in AIE2P_CONVERSION_RULES
+            if isinstance(rule, DescriptorRule)
+            and rule.report_key == "native_binary32_to_bfloat16_packet_preserve_nan"
+            and Guard.value_type("input", f32_type) in rule.guards
+        ]
+        assert {rule.guards for rule in preserving_rules} == {
+            tuple(
+                guard for guard in rule.guards if guard != Guard.value_not_nan("input")
+            )
+            for rule in narrow_rules
+        }
 
     narrow = _rule("native_binary32x32_to_bfloat16x32")
     assert [emit.descriptor.key for emit in narrow.emit] == [

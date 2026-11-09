@@ -1534,6 +1534,11 @@ static iree_status_t loom_aie2p_bundle_plan_append_terminator(
     const loom_aie2p_block_analysis_t* block_analysis,
     iree_host_size_t block_bundle_start) {
   if (block_analysis->terminator == LOOM_AIE2P_BLOCK_TERMINATOR_RETURN) {
+    IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_move_range(
+        builder, block_analysis->return_moves,
+        block_analysis->terminator_issue_cycle));
+    IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_flush_pending(
+        builder, builder->pending.end_cycle));
     if (builder->options->stack.byte_length != 0) {
       IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_stack_instruction(
           builder, /*entering=*/false, block_analysis->terminator_issue_cycle));

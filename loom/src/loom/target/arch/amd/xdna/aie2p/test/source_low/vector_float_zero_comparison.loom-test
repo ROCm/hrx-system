@@ -1,0 +1,323 @@
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+func.def @zero_oeq_f32(%value: vector<16xf32>) -> (vector<16xi1>) {
+  %comparison_zero = vector.splatf 0.0 : vector<16xf32>
+  %result = vector.cmpf oeq, %value, %comparison_zero : vector<16xf32> -> vector<16xi1>
+  func.return %result : vector<16xi1>
+}
+
+// ----
+func.def @zero_oeq_f32(%value: vector<16xf32>) -> (vector<16xi1>) {
+  %4 = vector.splati 0 : vector<16xi32>
+  %5 = vector.splati 2147483647 : vector<16xi32>
+  %6 = vector.bitcast %value : vector<16xf32> to vector<16xi32>
+  %7 = vector.andi %6, %5 : vector<16xi32>
+  %result = vector.cmpi eq, %7, %4 : vector<16xi32> -> vector<16xi1>
+  func.return %result : vector<16xi1>
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+func.def @zero_ueq_f8E4M3(%value: vector<4xf8E4M3>) -> (vector<4xi1>) {
+  %comparison_zero = vector.splatf -0.0 : vector<4xf8E4M3>
+  %result = vector.cmpf ueq, %comparison_zero, %value : vector<4xf8E4M3> -> vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ----
+func.def @zero_ueq_f8E4M3(%value: vector<4xf8E4M3>) -> (vector<4xi1>) {
+  %4 = vector.splati 0 : vector<4xi8>
+  %5 = vector.splati 127 : vector<4xi8>
+  %6 = vector.bitcast %value : vector<4xf8E4M3> to vector<4xi8>
+  %7 = vector.andi %6, %5 : vector<4xi8>
+  %8 = vector.cmpi eq, %7, %4 : vector<4xi8> -> vector<4xi1>
+  %9 = vector.splati 127 : vector<4xi8>
+  %10 = vector.cmpi eq, %7, %9 : vector<4xi8> -> vector<4xi1>
+  %result = vector.ori %8, %10 : vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+func.def @zero_one_f8E5M2(%value: vector<8xf8E5M2>) -> (vector<8xi1>) {
+  %comparison_zero = vector.splatf 0.0 : vector<8xf8E5M2>
+  %result = vector.cmpf one, %value, %comparison_zero : vector<8xf8E5M2> -> vector<8xi1>
+  func.return %result : vector<8xi1>
+}
+
+// ----
+func.def @zero_one_f8E5M2(%value: vector<8xf8E5M2>) -> (vector<8xi1>) {
+  %4 = vector.splati 0 : vector<8xi8>
+  %5 = vector.splati 127 : vector<8xi8>
+  %6 = vector.bitcast %value : vector<8xf8E5M2> to vector<8xi8>
+  %7 = vector.andi %6, %5 : vector<8xi8>
+  %8 = vector.cmpi ne, %7, %4 : vector<8xi8> -> vector<8xi1>
+  %9 = vector.splati 124 : vector<8xi8>
+  %10 = vector.cmpi ugt, %7, %9 : vector<8xi8> -> vector<8xi1>
+  %11 = vector.andi %8, %10 : vector<8xi1>
+  %result = vector.xori %8, %11 : vector<8xi1>
+  func.return %result : vector<8xi1>
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+func.def @zero_une_f64(%value: vector<3x3xf64>) -> (vector<3x3xi1>) {
+  %comparison_zero = vector.splatf -0.0 : vector<3x3xf64>
+  %result = vector.cmpf une, %comparison_zero, %value : vector<3x3xf64> -> vector<3x3xi1>
+  func.return %result : vector<3x3xi1>
+}
+
+// ----
+func.def @zero_une_f64(%value: vector<3x3xf64>) -> (vector<3x3xi1>) {
+  %4 = vector.bitcast %value : vector<3x3xf64> to vector<9xf64>
+  %5 = vector.slice %4[0] : vector<9xf64> -> vector<8xf64>
+  %6 = vector.splati 0 : vector<8xi64>
+  %7 = vector.splati 9223372036854775807 : vector<8xi64>
+  %8 = vector.bitcast %5 : vector<8xf64> to vector<8xi64>
+  %9 = vector.andi %8, %7 : vector<8xi64>
+  %10 = vector.cmpi ne, %9, %6 : vector<8xi64> -> vector<8xi1>
+  %11 = vector.slice %4[8] : vector<9xf64> -> vector<1xf64>
+  %12 = vector.splati 0 : vector<1xi64>
+  %13 = vector.splati 9223372036854775807 : vector<1xi64>
+  %14 = vector.bitcast %11 : vector<1xf64> to vector<1xi64>
+  %15 = vector.andi %14, %13 : vector<1xi64>
+  %16 = vector.cmpi ne, %15, %12 : vector<1xi64> -> vector<1xi1>
+  %17 = vector.concat<0> %10, %16 : vector<8xi1>, vector<1xi1> -> vector<9xi1>
+  %result = vector.bitcast %17 : vector<9xi1> to vector<3x3xi1>
+  func.return %result : vector<3x3xi1>
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+func.def @zero_ogt_f16(%value: vector<5xf16>) -> (vector<5xi1>) {
+  %comparison_zero = vector.splatf 0.0 : vector<5xf16>
+  %result = vector.cmpf ogt, %value, %comparison_zero : vector<5xf16> -> vector<5xi1>
+  func.return %result : vector<5xi1>
+}
+
+// ----
+func.def @zero_ogt_f16(%value: vector<5xf16>) -> (vector<5xi1>) {
+  %4 = vector.splati 0 : vector<5xi16>
+  %5 = vector.splati 32767 : vector<5xi16>
+  %6 = vector.bitcast %value : vector<5xf16> to vector<5xi16>
+  %7 = vector.andi %6, %5 : vector<5xi16>
+  %8 = vector.cmpi sgt, %6, %4 : vector<5xi16> -> vector<5xi1>
+  %9 = vector.splati 31744 : vector<5xi16>
+  %10 = vector.cmpi ugt, %7, %9 : vector<5xi16> -> vector<5xi1>
+  %11 = vector.andi %8, %10 : vector<5xi1>
+  %result = vector.xori %8, %11 : vector<5xi1>
+  func.return %result : vector<5xi1>
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+func.def @zero_oge_f32(%value: vector<4xf32>) -> (vector<4xi1>) {
+  %comparison_zero = vector.splatf -0.0 : vector<4xf32>
+  %result = vector.cmpf oge, %comparison_zero, %value : vector<4xf32> -> vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ----
+func.def @zero_oge_f32(%value: vector<4xf32>) -> (vector<4xi1>) {
+  %4 = vector.splati 0 : vector<4xi32>
+  %5 = vector.splati 2147483647 : vector<4xi32>
+  %6 = vector.bitcast %value : vector<4xf32> to vector<4xi32>
+  %7 = vector.andi %6, %5 : vector<4xi32>
+  %8 = vector.cmpi sle, %6, %4 : vector<4xi32> -> vector<4xi1>
+  %9 = vector.splati 2139095040 : vector<4xi32>
+  %10 = vector.cmpi ugt, %7, %9 : vector<4xi32> -> vector<4xi1>
+  %11 = vector.andi %8, %10 : vector<4xi1>
+  %result = vector.xori %8, %11 : vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+func.def @zero_olt_f32(%value: vector<4xf32>) -> (vector<4xi1>) {
+  %comparison_zero = vector.splatf 0.0 : vector<4xf32>
+  %result = vector.cmpf olt, %value, %comparison_zero : vector<4xf32> -> vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ----
+func.def @zero_olt_f32(%value: vector<4xf32>) -> (vector<4xi1>) {
+  %4 = vector.splati 0 : vector<4xi32>
+  %5 = vector.splati 2147483647 : vector<4xi32>
+  %6 = vector.bitcast %value : vector<4xf32> to vector<4xi32>
+  %7 = vector.andi %6, %5 : vector<4xi32>
+  %8 = vector.cmpi slt, %6, %4 : vector<4xi32> -> vector<4xi1>
+  %9 = vector.cmpi ne, %7, %4 : vector<4xi32> -> vector<4xi1>
+  %10 = vector.andi %8, %9 : vector<4xi1>
+  %11 = vector.splati 2139095040 : vector<4xi32>
+  %12 = vector.cmpi ugt, %7, %11 : vector<4xi32> -> vector<4xi1>
+  %13 = vector.andi %10, %12 : vector<4xi1>
+  %result = vector.xori %10, %13 : vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+func.def @zero_ole_f32(%value: vector<4xf32>) -> (vector<4xi1>) {
+  %comparison_zero = vector.splatf 0.0 : vector<4xf32>
+  %result = vector.cmpf ole, %comparison_zero, %value : vector<4xf32> -> vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ----
+func.def @zero_ole_f32(%value: vector<4xf32>) -> (vector<4xi1>) {
+  %4 = vector.splati 0 : vector<4xi32>
+  %5 = vector.splati 2147483647 : vector<4xi32>
+  %6 = vector.bitcast %value : vector<4xf32> to vector<4xi32>
+  %7 = vector.andi %6, %5 : vector<4xi32>
+  %8 = vector.cmpi sge, %6, %4 : vector<4xi32> -> vector<4xi1>
+  %9 = vector.cmpi eq, %7, %4 : vector<4xi32> -> vector<4xi1>
+  %10 = vector.ori %8, %9 : vector<4xi1>
+  %11 = vector.splati 2139095040 : vector<4xi32>
+  %12 = vector.cmpi ugt, %7, %11 : vector<4xi32> -> vector<4xi1>
+  %13 = vector.andi %10, %12 : vector<4xi1>
+  %result = vector.xori %10, %13 : vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+func.def @zero_ord_f16(%value: vector<4xf16>) -> (vector<4xi1>) {
+  %comparison_zero = vector.splatf 0.0 : vector<4xf16>
+  %result = vector.cmpf ord, %value, %comparison_zero : vector<4xf16> -> vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ----
+func.def @zero_ord_f16(%value: vector<4xf16>) -> (vector<4xi1>) {
+  %5 = vector.splati 32767 : vector<4xi16>
+  %6 = vector.bitcast %value : vector<4xf16> to vector<4xi16>
+  %7 = vector.andi %6, %5 : vector<4xi16>
+  %8 = vector.splati 31744 : vector<4xi16>
+  %result = vector.cmpi ule, %7, %8 : vector<4xi16> -> vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+func.def @zero_uno_f8E4M3(%value: vector<4xf8E4M3>) -> (vector<4xi1>) {
+  %comparison_zero = vector.splatf 0.0 : vector<4xf8E4M3>
+  %result = vector.cmpf uno, %comparison_zero, %value : vector<4xf8E4M3> -> vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ----
+func.def @zero_uno_f8E4M3(%value: vector<4xf8E4M3>) -> (vector<4xi1>) {
+  %5 = vector.splati 127 : vector<4xi8>
+  %6 = vector.bitcast %value : vector<4xf8E4M3> to vector<4xi8>
+  %7 = vector.andi %6, %5 : vector<4xi8>
+  %8 = vector.splati 127 : vector<4xi8>
+  %result = vector.cmpi eq, %7, %8 : vector<4xi8> -> vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+func.def @zero_ugt_f32(%value: vector<4xf32>) -> (vector<4xi1>) {
+  %comparison_zero = vector.splatf 0.0 : vector<4xf32>
+  %result = vector.cmpf<nnan> ugt, %value, %comparison_zero : vector<4xf32> -> vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ----
+func.def @zero_ugt_f32(%value: vector<4xf32>) -> (vector<4xi1>) {
+  %4 = vector.splati 0 : vector<4xi32>
+  %6 = vector.bitcast %value : vector<4xf32> to vector<4xi32>
+  %result = vector.cmpi sgt, %6, %4 : vector<4xi32> -> vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+func.def @zero_uge_f32(%value: vector<4xf32>) -> (vector<4xi1>) {
+  %comparison_zero = vector.splatf 0.0 : vector<4xf32>
+  %result = vector.cmpf uge, %value, %comparison_zero : vector<4xf32> -> vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ----
+func.def @zero_uge_f32(%value: vector<4xf32>) -> (vector<4xi1>) {
+  %4 = vector.splati 0 : vector<4xi32>
+  %5 = vector.splati 2147483647 : vector<4xi32>
+  %6 = vector.bitcast %value : vector<4xf32> to vector<4xi32>
+  %7 = vector.andi %6, %5 : vector<4xi32>
+  %8 = vector.cmpi sge, %6, %4 : vector<4xi32> -> vector<4xi1>
+  %9 = vector.cmpi eq, %7, %4 : vector<4xi32> -> vector<4xi1>
+  %10 = vector.ori %8, %9 : vector<4xi1>
+  %11 = vector.splati 2139095040 : vector<4xi32>
+  %12 = vector.cmpi ugt, %7, %11 : vector<4xi32> -> vector<4xi1>
+  %result = vector.ori %10, %12 : vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+func.def @zero_ult_f32(%value: vector<4xf32>) -> (vector<4xi1>) {
+  %comparison_zero = vector.splatf 0.0 : vector<4xf32>
+  %result = vector.cmpf ult, %comparison_zero, %value : vector<4xf32> -> vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ----
+func.def @zero_ult_f32(%value: vector<4xf32>) -> (vector<4xi1>) {
+  %4 = vector.splati 0 : vector<4xi32>
+  %5 = vector.splati 2147483647 : vector<4xi32>
+  %6 = vector.bitcast %value : vector<4xf32> to vector<4xi32>
+  %7 = vector.andi %6, %5 : vector<4xi32>
+  %8 = vector.cmpi sgt, %6, %4 : vector<4xi32> -> vector<4xi1>
+  %9 = vector.splati 2139095040 : vector<4xi32>
+  %10 = vector.cmpi ugt, %7, %9 : vector<4xi32> -> vector<4xi1>
+  %result = vector.ori %8, %10 : vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+func.def @zero_ule_f32(%value: vector<4xf32>) -> (vector<4xi1>) {
+  %comparison_zero = vector.splatf 0.0 : vector<4xf32>
+  %result = vector.cmpf ule, %value, %comparison_zero : vector<4xf32> -> vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ----
+func.def @zero_ule_f32(%value: vector<4xf32>) -> (vector<4xi1>) {
+  %4 = vector.splati 0 : vector<4xi32>
+  %5 = vector.splati 2147483647 : vector<4xi32>
+  %6 = vector.bitcast %value : vector<4xf32> to vector<4xi32>
+  %7 = vector.andi %6, %5 : vector<4xi32>
+  %8 = vector.cmpi sle, %6, %4 : vector<4xi32> -> vector<4xi1>
+  %9 = vector.splati 2139095040 : vector<4xi32>
+  %10 = vector.cmpi ugt, %7, %9 : vector<4xi32> -> vector<4xi1>
+  %result = vector.ori %8, %10 : vector<4xi1>
+  func.return %result : vector<4xi1>
+}

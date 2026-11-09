@@ -407,9 +407,27 @@ iree_status_t loom_aie2p_native_switches_build(
                                           edge->source_port)
             ->ordinal +
         edge->source_channel;
-    if (selected->packet == UINT8_MAX) {
+    bool private_control = false;
+    if (selected->control_source != UINT32_MAX) {
+      const loom_aie2p_native_control_source_t* source =
+          &context->control_sources[selected->control_source];
+      private_control =
+          source->destination != UINT32_MAX &&
+          context->control_destination_sources[source->destination] ==
+              selected->control_source;
+    }
+    if (selected->packet == UINT8_MAX || private_control) {
       // A circuit source may fan out, but each destination master has exactly
-      // one source. Packet filtering and circuit mode cannot share a port.
+      // one source. Private control streams retain their complete header and
+      // body; neither endpoint needs switch filtering or header removal.
+      // Repeated control identities can retain the same physical prefix.
+      const uint32_t word = UINT32_C(1) << 31 | slave;
+      if (state->masters[master] == UINT8_MAX - 1 &&
+          state->desired->banks[LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS]
+                  .words[master] == word) {
+        continue;
+      }
+      // Packet filtering and circuit mode cannot share a port.
       if (state->masters[master] != UINT8_MAX ||
           (state->slaves[slave] != 0 && state->slaves[slave] != UINT8_MAX)) {
         return loom_aie2p_native_reject(
@@ -420,7 +438,7 @@ iree_status_t loom_aie2p_native_switches_build(
       state->masters[master] = UINT8_MAX - 1;
       state->slaves[slave] = UINT8_MAX;
       state->desired->banks[LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS]
-          .words[master] = UINT32_C(1) << 31 | slave;
+          .words[master] = word;
       state->desired->banks[LOOM_AIE2P_NATIVE_SWITCH_BANK_SLAVES].words[slave] =
           UINT32_C(1) << 31;
       continue;

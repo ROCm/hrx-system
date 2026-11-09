@@ -167,3 +167,34 @@ low.func.def target<test.low.core>(@target) @derived_value_plateau(%base: reg<te
 // ----
 spills: 0
 materialized traffic: stores=0 reloads=0
+
+// ====
+
+// The loop reload can be replaced by the single recreatable packet. The
+// source value stays in its original bank instead of storing the derived value.
+// RUN: emit low-allocation-query @single_packet_loop_reconstruction strategy=source spill-free spill-count
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @single_packet_loop_reconstruction(%repeat: reg<test.i32>, %block0: reg<test.explicit32>, %block1: reg<test.explicit32>, %block2: reg<test.explicit32>, %runtime: reg<test.i32>) -> (reg<test.i32>) asm {
+  %recipe = test.rematerialize.spillable.explicit32 %runtime
+  %late = copy %runtime : reg<test.i32> -> reg<test.explicit32>
+  %value0 = copy %block0 : reg<test.explicit32> -> reg<test.i32>
+  %value1 = copy %block1 : reg<test.explicit32> -> reg<test.i32>
+  %value2 = copy %block2 : reg<test.explicit32> -> reg<test.i32>
+  %value3 = copy %late : reg<test.explicit32> -> reg<test.i32>
+  %pair0 = test.add.i32 %value0, %value1
+  %pair1 = test.add.i32 %value2, %value3
+  %seed = test.add.i32 %pair0, %pair1
+  low.br ^loop
+^loop:
+  %value = copy %recipe : reg<test.spillable.explicit32> -> reg<test.i32>
+  %sum = test.add.i32 %seed, %value
+  low.cond_br %repeat, ^loop, ^exit : reg<test.i32>
+^exit:
+  return %sum
+}
+
+// ----
+spills: 0
+materialized traffic: stores=0 reloads=0

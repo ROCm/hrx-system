@@ -32,6 +32,82 @@ low.func.def target<test.low.core>(@target) @stable_copy(%input: reg<test.i32>, 
 
 // ====
 
+// A detached copy keeps the external input's lifetime before the work block.
+// Replaying it at the final user would undo the storage separation.
+// RUN: with-low-asm pass low-materialize-allocation{budgets=test.f32=1}
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @detached_copy(%input: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %captured = copy %input {detached = true} : reg<test.i32> -> reg<test.f32>
+  low.br ^work
+^work:
+  %temporary = copy %other : reg<test.i32> -> reg<test.f32>
+  %output = copy %temporary : reg<test.f32> -> reg<test.i32>
+  low.br ^consume
+^consume:
+  %result = copy %captured : reg<test.f32> -> reg<test.i32>
+  return %output, %result
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @detached_copy(%input: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %detached_copy_spill_storage_0 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %captured = copy %input {detached = true} : reg<test.i32> -> reg<test.f32>
+  low.spill %captured, %detached_copy_spill_storage_0 : reg<test.f32>, low.storage<private>
+  low.br ^work
+^work:
+  %temporary = copy %other : reg<test.i32> -> reg<test.f32>
+  %output = copy %temporary : reg<test.f32> -> reg<test.i32>
+  low.br ^consume
+^consume:
+  %9 = low.reload %detached_copy_spill_storage_0 : low.storage<private> -> reg<test.f32>
+  %result = copy %9 : reg<test.f32> -> reg<test.i32>
+  return %output, %result
+}
+
+// ====
+
+// A detached move keeps the external input's lifetime before the work block.
+// Replaying it at the final user would undo the storage separation.
+// RUN: with-low-asm pass low-materialize-allocation{budgets=test.f32=1}
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @detached_move(%input: reg<test.f32>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %captured = move %input {detached = true} : reg<test.f32> -> reg<test.f32>
+  low.br ^work
+^work:
+  %temporary = copy %other : reg<test.i32> -> reg<test.f32>
+  %output = copy %temporary : reg<test.f32> -> reg<test.i32>
+  low.br ^consume
+^consume:
+  %result = copy %captured : reg<test.f32> -> reg<test.i32>
+  return %output, %result
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @detached_move(%input: reg<test.f32>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %detached_move_spill_storage_0 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %captured = move %input {detached = true} : reg<test.f32> -> reg<test.f32>
+  low.spill %captured, %detached_move_spill_storage_0 : reg<test.f32>, low.storage<private>
+  low.br ^work
+^work:
+  %temporary = copy %other : reg<test.i32> -> reg<test.f32>
+  %output = copy %temporary : reg<test.f32> -> reg<test.i32>
+  low.br ^consume
+^consume:
+  %9 = low.reload %detached_move_spill_storage_0 : low.storage<private> -> reg<test.f32>
+  %result = copy %9 : reg<test.f32> -> reg<test.i32>
+  return %output, %result
+}
+
+// ====
+
 // A destructive update cannot be moved ahead of the saved snapshot.
 // RUN: with-low-asm pass low-materialize-allocation{budgets=test.f32=1}
 

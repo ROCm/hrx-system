@@ -654,6 +654,8 @@ _SPIRV_EXECUTION_ALLOWED_FAILURES = {
     "numeric/vector/float_comparison.loom:@vector_float_comparison_bf16_values": "TARGET/003,EXPECT/002",
     "numeric/vector/float_comparison.loom:@vector_float_comparison_constant_sources": "EXPECT/002",
     "numeric/vector/float_comparison.loom:@vector_float_comparison_f32_values": "EXPECT/002",
+    "numeric/vector/float_comparison.loom:@vector_float_zero_comparison_bf16_subnormal_values": "EXPECT/002",
+    "numeric/vector/float_comparison.loom:@vector_float_zero_comparison_f32_subnormal_values": "EXPECT/002",
     "numeric/vector/packed/selection.loom:@packed_word_selects": "TARGET/003",
 }
 

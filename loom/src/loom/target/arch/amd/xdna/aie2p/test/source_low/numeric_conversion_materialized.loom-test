@@ -295,3 +295,88 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @narrow_unknown_fl
   %result = sel.nez %21, %12, %22
   return %result
 }
+
+// ====
+
+// DAZ admits the native converter's treatment of binary32 subnormal inputs.
+func.def @narrow_daz_float_to_bfloat(%input: f32) -> (bf16) {
+  %result = scalar.fptrunc<daz> %input : f32 to bf16
+  func.return %result : bf16
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @narrow_daz_float_to_bfloat(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %5 = vbcst.32 %input
+  %6 = vmov.vector512.to.accumulator512 %5
+  set.rounding 12
+  %7 = vconv.bf16.fp32x16 %6
+  %8 = slice %5[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %9 = concat(%7, %8) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %10 = vextract.16.imm %9, 0
+  %11 = mov.i32 2147483647
+  %12 = mov.i32 2139095040
+  %13 = and %input, %11
+  %14 = ltu %12, %13
+  %15 = mov.i32 32704
+  %16 = copy %14 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %result = sel.nez %15, %10, %16
+  return %result
+}
+
+// ====
+
+// Integer conversion cannot produce a binary32 subnormal, but its result
+// still needs BF16 rounding. The exactly representable byte case above keeps
+// its cheaper shift-only narrowing.
+func.def @narrow_integer_float_to_bfloat(%input: i32) -> (bf16) {
+  %wide = scalar.sitofp %input : i32 to f32
+  %result = scalar.fptrunc %wide : f32 to bf16
+  func.return %result : bf16
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @narrow_integer_float_to_bfloat(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %6 = mov.fx2flt-scale 0
+  %wide = convert.signed.i32.to.f32 %input, %6
+  %8 = vbcst.32 %wide
+  %9 = vmov.vector512.to.accumulator512 %8
+  set.rounding 12
+  %10 = vconv.bf16.fp32x16 %9
+  %11 = slice %8[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %12 = concat(%10, %11) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %result = vextract.16.imm %12, 0
+  return %result
+}
+
+// ====
+
+// FTZ applies to the destination format; it does not license treating a
+// binary32 subnormal input as zero before rounding to a normal BF16 value.
+func.def @narrow_ftz_float_to_bfloat(%input: f32) -> (bf16) {
+  %result = scalar.fptrunc<ftz> %input : f32 to bf16
+  func.return %result : bf16
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @narrow_ftz_float_to_bfloat(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %5 = mov.short -16
+  %6 = lshl %input, %5
+  %7 = mov.short 1
+  %8 = and %6, %7
+  %9 = mov.i32 32767
+  %10 = add.nc %9, %8
+  %11 = add.nc %input, %10
+  %12 = lshl %11, %5
+  %13 = mov.i32 2139095040
+  %14 = and %input, %13
+  %15 = eq %14, %13
+  %16 = mov.i32 8388607
+  %17 = and %input, %16
+  %18 = nez %17
+  %19 = and %15, %18
+  %20 = mov.short 64
+  %21 = or %6, %20
+  %22 = copy %19 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %result = sel.nez %21, %12, %22
+  return %result
+}

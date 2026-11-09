@@ -15,12 +15,24 @@ extern "C" {
 
 struct loom_aie2p_native_context_t;
 
+// Complete endpoint ownership for one compiler-generated control stream.
+// Commands, replies, and collective words retain their framing on circuits.
+typedef struct loom_aie2p_native_control_source_t {
+  // Canonical physical source tree, or UINT32_MAX before its first route.
+  uint32_t route;
+  // Sole owned endpoint, or UINT32_MAX for multiple/external destinations
+  // or any route borrowing payload lanes.
+  uint32_t destination;
+} loom_aie2p_native_control_source_t;
+
 // One physical route edge carrying the packet identity used during admission.
 typedef struct loom_aie2p_native_route_t {
   // Corresponding edge in the canonical route builder.
   const loom_aie2p_array_route_plan_t* edge;
-  // Packet ID, or UINT8_MAX for an unframed circuit.
+  // Packet ID, or UINT8_MAX for a circuit without packet filtering.
   uint8_t packet;
+  // Retained control source, or UINT32_MAX for ordinary payload transport.
+  uint32_t control_source;
 } loom_aie2p_native_route_t;
 
 typedef enum loom_aie2p_native_switch_bank_e {

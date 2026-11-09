@@ -6,10 +6,12 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/legalization_float.h"
 
+#include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/vector/combining.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
+#include "loom/util/fact_table.h"
 #include "loom/util/numeric_format.h"
 
 typedef enum loom_aie2p_float_compare_relation_e {
@@ -466,6 +468,140 @@ static iree_status_t loom_aie2p_float_ordering_bitcast_result(
   return iree_ok_status();
 }
 
+// A zero operand needs only the other operand's sign and magnitude. In
+// particular, ordered equality and unordered inequality already classify NaNs
+// correctly without a separate NaN test.
+static iree_status_t loom_aie2p_float_compare_zero_build_packet(
+    loom_builder_t* builder, loom_location_id_t location,
+    loom_numeric_float_encoding_t encoding,
+    const loom_aie2p_float_compare_plan_t* plan, bool no_nan,
+    loom_value_id_t operand, loom_type_t float_type,
+    loom_value_id_t* out_result) {
+  loom_aie2p_float_ordering_context_t ordering = {0};
+  loom_aie2p_float_ordering_initialize(builder, float_type, encoding, location,
+                                       &ordering);
+  loom_value_id_t zero = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_float_ordering_build_constant(&ordering, 0, &zero));
+  loom_value_id_t magnitude_mask = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_constant(
+      &ordering, (int64_t)encoding.magnitude_mask, &magnitude_mask));
+  loom_aie2p_float_ordering_value_t value = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_float_ordering_build_value(&ordering, operand, &value));
+  IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_magnitude(
+      &ordering, magnitude_mask, &value));
+
+  if (plan->relation == LOOM_AIE2P_FLOAT_COMPARE_RELATION_ORDERED ||
+      plan->relation == LOOM_AIE2P_FLOAT_COMPARE_RELATION_UNORDERED) {
+    const bool ordered =
+        plan->relation == LOOM_AIE2P_FLOAT_COMPARE_RELATION_ORDERED;
+    if (no_nan) {
+      return loom_aie2p_float_ordering_build_compare(
+          &ordering,
+          ordered ? LOOM_VECTOR_CMPI_PREDICATE_EQ
+                  : LOOM_VECTOR_CMPI_PREDICATE_NE,
+          zero, zero, out_result);
+    }
+    loom_value_id_t special = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_constant(
+        &ordering, (int64_t)encoding.special_magnitude, &special));
+    const bool ieee =
+        encoding.special_layout == LOOM_NUMERIC_FLOAT_SPECIAL_LAYOUT_IEEE;
+    return loom_aie2p_float_ordering_build_compare(
+        &ordering,
+        ieee ? (ordered ? LOOM_VECTOR_CMPI_PREDICATE_ULE
+                        : LOOM_VECTOR_CMPI_PREDICATE_UGT)
+             : (ordered ? LOOM_VECTOR_CMPI_PREDICATE_NE
+                        : LOOM_VECTOR_CMPI_PREDICATE_EQ),
+        value.magnitude, special, out_result);
+  }
+
+  static const uint8_t kZeroPredicates[] = {
+      [LOOM_AIE2P_FLOAT_COMPARE_RELATION_EQ] = LOOM_VECTOR_CMPI_PREDICATE_EQ,
+      [LOOM_AIE2P_FLOAT_COMPARE_RELATION_GT] = LOOM_VECTOR_CMPI_PREDICATE_SGT,
+      [LOOM_AIE2P_FLOAT_COMPARE_RELATION_GE] = LOOM_VECTOR_CMPI_PREDICATE_SGE,
+      [LOOM_AIE2P_FLOAT_COMPARE_RELATION_LT] = LOOM_VECTOR_CMPI_PREDICATE_SLT,
+      [LOOM_AIE2P_FLOAT_COMPARE_RELATION_LE] = LOOM_VECTOR_CMPI_PREDICATE_SLE,
+      [LOOM_AIE2P_FLOAT_COMPARE_RELATION_NE] = LOOM_VECTOR_CMPI_PREDICATE_NE,
+  };
+  const bool equality =
+      plan->relation == LOOM_AIE2P_FLOAT_COMPARE_RELATION_EQ ||
+      plan->relation == LOOM_AIE2P_FLOAT_COMPARE_RELATION_NE;
+  loom_value_id_t result = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_compare(
+      &ordering, kZeroPredicates[plan->relation],
+      equality ? value.magnitude : value.bits, zero, &result));
+  if (plan->relation == LOOM_AIE2P_FLOAT_COMPARE_RELATION_GE ||
+      plan->relation == LOOM_AIE2P_FLOAT_COMPARE_RELATION_LT) {
+    // Integer signed ordering places -0 below +0. Include it in >= and
+    // exclude it from <; > and <= already give the numeric zero result.
+    const bool include_zero =
+        plan->relation == LOOM_AIE2P_FLOAT_COMPARE_RELATION_GE;
+    loom_value_id_t zero_test = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_compare(
+        &ordering,
+        include_zero ? LOOM_VECTOR_CMPI_PREDICATE_EQ
+                     : LOOM_VECTOR_CMPI_PREDICATE_NE,
+        value.magnitude, zero, &zero_test));
+    loom_op_t* combine_op = NULL;
+    if (include_zero) {
+      IREE_RETURN_IF_ERROR(loom_vector_ori_build(builder, result, zero_test,
+                                                 ordering.predicate_type,
+                                                 location, &combine_op));
+      result = loom_vector_ori_result(combine_op);
+    } else {
+      IREE_RETURN_IF_ERROR(loom_vector_andi_build(builder, result, zero_test,
+                                                  ordering.predicate_type,
+                                                  location, &combine_op));
+      result = loom_vector_andi_result(combine_op);
+    }
+  }
+  const bool natural_nan_result =
+      (plan->relation == LOOM_AIE2P_FLOAT_COMPARE_RELATION_EQ &&
+       plan->nan_policy == LOOM_AIE2P_FLOAT_COMPARE_NAN_POLICY_CLEAR) ||
+      (plan->relation == LOOM_AIE2P_FLOAT_COMPARE_RELATION_NE &&
+       plan->nan_policy == LOOM_AIE2P_FLOAT_COMPARE_NAN_POLICY_SET);
+  if (!no_nan && !natural_nan_result) {
+    loom_value_id_t special = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_constant(
+        &ordering, (int64_t)encoding.special_magnitude, &special));
+    IREE_RETURN_IF_ERROR(
+        loom_aie2p_float_ordering_build_nan(&ordering, special, &value));
+    loom_op_t* combine_op = NULL;
+    if (plan->nan_policy == LOOM_AIE2P_FLOAT_COMPARE_NAN_POLICY_SET) {
+      IREE_RETURN_IF_ERROR(loom_vector_ori_build(builder, result, value.is_nan,
+                                                 ordering.predicate_type,
+                                                 location, &combine_op));
+      result = loom_vector_ori_result(combine_op);
+    } else {
+      IREE_RETURN_IF_ERROR(loom_vector_andi_build(builder, result, value.is_nan,
+                                                  ordering.predicate_type,
+                                                  location, &combine_op));
+      IREE_RETURN_IF_ERROR(loom_vector_xori_build(
+          builder, result, loom_vector_andi_result(combine_op),
+          ordering.predicate_type, location, &combine_op));
+      result = loom_vector_xori_result(combine_op);
+    }
+  }
+  *out_result = result;
+  return iree_ok_status();
+}
+
+static bool loom_aie2p_float_compare_is_zero(
+    const loom_value_fact_table_t* fact_table, loom_value_id_t value,
+    loom_scalar_type_t element_type) {
+  const loom_value_facts_t facts =
+      loom_value_fact_table_lookup(fact_table, value);
+  loom_value_fact_uniform_element_t uniform = {0};
+  double element = 0.0;
+  return loom_value_facts_query_uniform_element(&fact_table->context, facts,
+                                                &uniform) &&
+         loom_value_facts_as_exact_float(element_type, uniform.element,
+                                         &element) &&
+         element == 0.0;
+}
+
 static iree_status_t loom_aie2p_float_compare_build_packet(
     loom_builder_t* builder, loom_location_id_t location,
     loom_numeric_float_encoding_t encoding,
@@ -687,7 +823,8 @@ iree_status_t loom_aie2p_legalize_vector_cmpf(
     return iree_ok_status();
   }
 
-  const loom_value_id_t lhs = loom_vector_cmpf_lhs(op);
+  loom_value_id_t lhs = loom_vector_cmpf_lhs(op);
+  loom_value_id_t rhs = loom_vector_cmpf_rhs(op);
   const loom_type_t float_type = loom_module_value_type(context->module, lhs);
   loom_numeric_float_encoding_t encoding = {0};
   const bool has_encoding = loom_numeric_float_encoding(
@@ -714,16 +851,41 @@ iree_status_t loom_aie2p_legalize_vector_cmpf(
   loom_builder_set_before(&rewriter->builder, op);
   const loom_value_id_t value_checkpoint =
       loom_rewriter_value_checkpoint(rewriter);
-  const loom_aie2p_float_compare_plan_t plan =
+  loom_aie2p_float_compare_plan_t plan =
       kAie2pFloatComparePlans[loom_vector_cmpf_predicate(op)];
+  const loom_scalar_type_t element_type = loom_type_element_type(float_type);
+  bool compare_zero =
+      loom_aie2p_float_compare_is_zero(context->fact_table, rhs, element_type);
+  if (!compare_zero && loom_aie2p_float_compare_is_zero(context->fact_table,
+                                                        lhs, element_type)) {
+    static const uint8_t kReversedRelations[] = {
+        LOOM_AIE2P_FLOAT_COMPARE_RELATION_EQ,
+        LOOM_AIE2P_FLOAT_COMPARE_RELATION_LT,
+        LOOM_AIE2P_FLOAT_COMPARE_RELATION_LE,
+        LOOM_AIE2P_FLOAT_COMPARE_RELATION_GT,
+        LOOM_AIE2P_FLOAT_COMPARE_RELATION_GE,
+        LOOM_AIE2P_FLOAT_COMPARE_RELATION_NE,
+        LOOM_AIE2P_FLOAT_COMPARE_RELATION_ORDERED,
+        LOOM_AIE2P_FLOAT_COMPARE_RELATION_UNORDERED,
+    };
+    plan.relation = kReversedRelations[plan.relation];
+    const loom_value_id_t original_lhs = lhs;
+    lhs = rhs;
+    rhs = original_lhs;
+    compare_zero = true;
+  }
+  const bool no_nan =
+      (loom_vector_cmpf_fastmath(op) & LOOM_VECTOR_FASTMATHFLAGS_NNAN) != 0;
   loom_value_id_t linear_lhs = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_linearize_value(
       &rewriter->builder, lhs, float_type, lane_count, op->location,
       &linear_lhs));
   loom_value_id_t linear_rhs = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_linearize_value(
-      &rewriter->builder, loom_vector_cmpf_rhs(op), float_type, lane_count,
-      op->location, &linear_rhs));
+  if (!compare_zero) {
+    IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_linearize_value(
+        &rewriter->builder, rhs, float_type, lane_count, op->location,
+        &linear_rhs));
+  }
 
   loom_value_id_t* packets = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -738,15 +900,23 @@ iree_status_t loom_aie2p_legalize_vector_cmpf(
       IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_slice_value(
           &rewriter->builder, linear_lhs, float_type, lane_offset,
           current_lane_count, op->location, &packet_lhs));
-      IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_slice_value(
-          &rewriter->builder, linear_rhs, float_type, lane_offset,
-          current_lane_count, op->location, &packet_rhs));
+      if (!compare_zero) {
+        IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_slice_value(
+            &rewriter->builder, linear_rhs, float_type, lane_offset,
+            current_lane_count, op->location, &packet_rhs));
+      }
     }
     const loom_type_t packet_type =
         loom_aie2p_linear_vector_type(float_type, current_lane_count);
-    IREE_RETURN_IF_ERROR(loom_aie2p_float_compare_build_packet(
-        &rewriter->builder, op->location, encoding, &plan, packet_lhs,
-        packet_rhs, packet_type, &packets[packet_index]));
+    if (compare_zero) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_float_compare_zero_build_packet(
+          &rewriter->builder, op->location, encoding, &plan, no_nan, packet_lhs,
+          packet_type, &packets[packet_index]));
+    } else {
+      IREE_RETURN_IF_ERROR(loom_aie2p_float_compare_build_packet(
+          &rewriter->builder, op->location, encoding, &plan, packet_lhs,
+          packet_rhs, packet_type, &packets[packet_index]));
+    }
   }
 
   const loom_type_t result_type =

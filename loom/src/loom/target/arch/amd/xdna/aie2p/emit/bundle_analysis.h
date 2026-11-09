@@ -61,6 +61,8 @@ typedef struct loom_aie2p_block_analysis_t {
   uint32_t terminator_issue_cycle;
   // Structural control kind selected for this block.
   loom_aie2p_block_terminator_t terminator;
+  // Allocation-owned parallel result transport before a native return.
+  loom_low_move_range_t return_moves;
   // Selected physical branches, shared by destination alignment and emission.
   struct {
     // Native branches in emission order; fallthrough contributes no entry.
