@@ -1492,6 +1492,10 @@ void loom_value_facts_muli(const loom_value_facts_t* lhs,
   }
 
   *out = loom_value_facts_make(lo, hi, divisor);
+  // The mathematical product did not overflow. Narrow modular consumers
+  // discard these predicates if wrapping can change the result.
+  out->flags |= lhs_facts.flags & rhs_facts.flags &
+                (LOOM_VALUE_FACT_NON_ZERO | LOOM_VALUE_FACT_POWER_OF_TWO);
   loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
 }
 

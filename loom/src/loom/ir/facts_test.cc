@@ -1361,6 +1361,35 @@ TEST(MuliTransfer, InPlaceAccumulation) {
   EXPECT_EQ(accumulator.known_divisor, 64);
 }
 
+TEST(MuliTransfer, RetainsCommonPredicatesWithoutOverflow) {
+  auto powers = loom_value_facts_make(2, 8, 2);
+  powers.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+  auto nonzero = loom_value_facts_make(-8, 8, 2);
+  nonzero.flags |= LOOM_VALUE_FACT_NON_ZERO;
+  const auto ordinary = loom_value_facts_make(-8, 8, 2);
+  for (const auto input : {powers, nonzero, ordinary}) {
+    for (int output_index = 0; output_index < 3; ++output_index) {
+      loom_value_facts_t operands[] = {input, input,
+                                       loom_value_facts_unknown()};
+      loom_value_facts_muli(&operands[0], &operands[1],
+                            &operands[output_index]);
+      EXPECT_EQ(loom_value_facts_is_power_of_two(operands[output_index]),
+                loom_value_facts_is_power_of_two(input));
+      EXPECT_EQ(loom_value_facts_is_non_zero(operands[output_index]),
+                loom_value_facts_is_non_zero(input));
+    }
+  }
+  const auto zero = loom_value_facts_exact_i64(0);
+  loom_value_facts_t output;
+  loom_value_facts_fmai(&powers, &powers, &zero, &output);
+  EXPECT_TRUE(loom_value_facts_is_power_of_two(output));
+  const auto unproven = loom_value_facts_make(2, 8, 2);
+  loom_value_facts_muli(&powers, &unproven, &output);
+  EXPECT_FALSE(loom_value_facts_is_power_of_two(output));
+  loom_value_facts_muli(&nonzero, &ordinary, &output);
+  EXPECT_FALSE(loom_value_facts_is_non_zero(output));
+}
+
 //===----------------------------------------------------------------------===//
 // Transfer functions: fmai
 //===----------------------------------------------------------------------===//

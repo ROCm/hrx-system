@@ -532,12 +532,12 @@ func.def @runtime_coordinate_lookup_oracle(%input: buffer, %output: buffer, %row
 }
 
 // Runtime group widths exercise common-divisor ordering through the complete
-// pipeline, including runtime selection, capping, flooring, and clamping.
+// pipeline, including runtime selection, extrema, products, and positive quotients.
 // Width input enumerates four channel extents for each policy; every width
 // remains a runtime value. Two extra outputs test the end and inactive tail.
 func.def @runtime_group_lookup(%input: buffer, %output: buffer, %kind_input: index, %width_input: index, %use_runtime_width: i1) {
   %kind = index.assume %kind_input [range(%kind_input, 0, 4)] : index
-  %selection = index.assume %width_input [range(%width_input, 0, 15)] : index
+  %selection = index.assume %width_input [range(%width_input, 0, 23)] : index
   %extent_count = index.constant 4 : index
   %width_zero_based = index.rem %selection, %extent_count : index
   %policy = index.div %selection, %extent_count : index
@@ -562,7 +562,16 @@ func.def @runtime_group_lookup(%input: buffer, %output: buffer, %kind_input: ind
   %is_clamp = index.cmp eq, %policy, %clamp_policy : index
   %width0 = scf.select %is_cap, %capped, %selected_width : index
   %width1 = scf.select %is_floor, %floored, %width0 : index
-  %group_width = scf.select %is_clamp, %clamped, %width1 : index
+  %width2 = scf.select %is_clamp, %clamped, %width1 : index
+  %other_kind = index.rem %kind, %lower_bound : index
+  %other_width = index.shli %unit, %other_kind : index
+  %product_width = index.mul %capped, %other_width : index
+  %quotient_width = index.div %granularity, %selected_width : index
+  %quotient_policy = index.constant 5 : index
+  %is_product = index.cmp eq, %policy, %extent_count : index
+  %is_quotient = index.cmp eq, %policy, %quotient_policy : index
+  %width3 = scf.select %is_product, %product_width, %width2 : index
+  %group_width = scf.select %is_quotient, %quotient_width, %width3 : index
   %groups = index.div %width, %group_width : index
   %source = buffer.view %input[%base] : buffer -> view<[%groups]xi32>
   %destination = buffer.view %output[%base] : buffer -> view<66xi32>
@@ -585,7 +594,7 @@ func.def @runtime_group_lookup(%input: buffer, %output: buffer, %kind_input: ind
 // the subject's dynamic quotient extent. Both receive the same runtime inputs.
 func.def @runtime_group_lookup_oracle(%input: buffer, %output: buffer, %kind_input: index, %width_input: index, %use_runtime_width: i1) {
   %kind = index.assume %kind_input [range(%kind_input, 0, 4)] : index
-  %selection = index.assume %width_input [range(%width_input, 0, 15)] : index
+  %selection = index.assume %width_input [range(%width_input, 0, 23)] : index
   %extent_count = index.constant 4 : index
   %width_zero_based = index.rem %selection, %extent_count : index
   %policy = index.div %selection, %extent_count : index
@@ -609,7 +618,15 @@ func.def @runtime_group_lookup_oracle(%input: buffer, %output: buffer, %kind_inp
   %is_clamp = index.cmp eq, %policy, %fallback_shift : index
   %shift0 = scf.select %is_cap, %capped_shift, %selected_shift : index
   %shift1 = scf.select %is_floor, %floored_shift, %shift0 : index
-  %shift = scf.select %is_clamp, %clamped_shift, %shift1 : index
+  %shift2 = scf.select %is_clamp, %clamped_shift, %shift1 : index
+  %other_kind = index.rem %kind, %floor_policy : index
+  %product_shift = index.add %capped_shift, %other_kind : index
+  %quotient_shift = index.sub %extent_count, %selected_shift : index
+  %quotient_policy = index.constant 5 : index
+  %is_product = index.cmp eq, %policy, %extent_count : index
+  %is_quotient = index.cmp eq, %policy, %quotient_policy : index
+  %shift3 = scf.select %is_product, %product_shift, %shift2 : index
+  %shift = scf.select %is_quotient, %quotient_shift, %shift3 : index
   %source = buffer.view %input[%base] : buffer -> view<64xi32>
   %destination = buffer.view %output[%base] : buffer -> view<66xi32>
   scf.for %channel = [%begin to %end step %unit] {
@@ -885,7 +902,7 @@ check.scenario @runtime_coordinate_lookup_values configure[8](%rows: index, %con
 }
 
 check.scenario @runtime_group_lookup_values configure[5](%kind: index, %configuration_entropy: check.entropy) {
-  check.trial[16](%width: index, %entropy: check.entropy) {
+  check.trial[24](%width: index, %entropy: check.entropy) {
     %use_runtime_width = check.literal value(true) : i1
     %input_storage = check.generate.iota offset(-311) step(7) : tensor<72xi32>
     %output_storage = check.generate.fill value(-889275714) : tensor<74xi32>
@@ -896,7 +913,7 @@ check.scenario @runtime_group_lookup_values configure[5](%kind: index, %configur
       check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<74xi32>
     }
   }
-  check.trial[16](%width: index, %entropy: check.entropy) {
+  check.trial[24](%width: index, %entropy: check.entropy) {
     %use_runtime_width = check.literal value(false) : i1
     %input_storage = check.generate.iota offset(-311) step(7) : tensor<72xi32>
     %output_storage = check.generate.fill value(-889275714) : tensor<74xi32>

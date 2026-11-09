@@ -191,5 +191,27 @@ TEST(ModularIntegerFacts, OutputMayAliasInputs) {
   ExpectExact(rhs, INT64_MAX);
 }
 
+TEST(ModularIntegerFacts, ProductPredicatesRespectCarrierOverflow) {
+  for (int32_t bit_count : {8, 16, 32, 64}) {
+    SCOPED_TRACE(bit_count);
+    auto small = loom_value_facts_make(2, 4, 2);
+    small.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+    loom_value_facts_t result;
+    loom_value_facts_muli_modular(&small, &small, bit_count, &result);
+    EXPECT_TRUE(loom_value_facts_is_power_of_two(result));
+    const auto factor = loom_value_facts_exact_i64(4);
+    auto large = loom_value_facts_make(INT64_C(1) << (bit_count - 3),
+                                       INT64_C(1) << (bit_count - 2), 1);
+    large.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+    loom_value_facts_muli_modular(&large, &factor, bit_count, &result);
+    EXPECT_FALSE(loom_value_facts_is_power_of_two(result));
+    EXPECT_FALSE(loom_value_facts_is_non_zero(result));
+    const auto zero = loom_value_facts_exact_i64(0);
+    loom_value_facts_fmai_modular(&large, &factor, &zero, bit_count, &result);
+    EXPECT_FALSE(loom_value_facts_is_power_of_two(result));
+    EXPECT_FALSE(loom_value_facts_is_non_zero(result));
+  }
+}
+
 }  // namespace
 }  // namespace loom

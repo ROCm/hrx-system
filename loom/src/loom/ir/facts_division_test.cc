@@ -18,6 +18,14 @@ static void ExpectContains(loom_value_facts_t facts, int64_t value) {
   EXPECT_LE(facts.range_lo, value);
   EXPECT_GE(facts.range_hi, value);
   EXPECT_EQ(value % facts.known_divisor, 0);
+  if (loom_value_facts_is_non_zero(facts)) {
+    EXPECT_NE(value, 0);
+  }
+  if (loom_value_facts_is_power_of_two(facts)) {
+    EXPECT_GT(value, 0);
+    EXPECT_EQ(static_cast<uint64_t>(value) & (static_cast<uint64_t>(value) - 1),
+              0);
+  }
 }
 
 TEST(UnsignedDivisionTransfer, RepresentativeIntervalsContainEveryResult) {
@@ -430,6 +438,57 @@ TEST(QuotientPreimage, RetainsRoundingResiduesAndWideEndpoints) {
     EXPECT_EQ(actual.range_lo, test.lower);
     EXPECT_EQ(actual.range_hi, test.upper);
   }
+}
+
+TEST(DivisionTransfer, PositivePowersAcrossCarriersAndAliases) {
+  for (int32_t bit_count : {8, 16, 32, 64}) {
+    const int32_t exponents[] = {0, 1, 2, bit_count - 3, bit_count - 2};
+    for (int32_t a : exponents) {
+      for (int32_t b : exponents) {
+        auto numerator = loom_value_facts_make(
+            INT64_C(1) << a, INT64_C(1) << (bit_count - 2), 1);
+        auto denominator = loom_value_facts_make(1, INT64_C(1) << b, 1);
+        numerator.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+        denominator.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+        for (bool unsigned_quotient : {false, true}) {
+          for (int output_index = 0; output_index < 3; ++output_index) {
+            loom_value_facts_t operands[] = {numerator, denominator,
+                                             loom_value_facts_unknown()};
+            if (unsigned_quotient) {
+              loom_value_facts_divui(&operands[0], &operands[1], bit_count,
+                                     &operands[output_index]);
+            } else {
+              loom_value_facts_divsi(&operands[0], &operands[1],
+                                     &operands[output_index]);
+            }
+            EXPECT_EQ(loom_value_facts_is_power_of_two(operands[output_index]),
+                      a >= b);
+            for (int32_t lhs_exponent : exponents) {
+              if (lhs_exponent < a) {
+                continue;
+              }
+              for (int32_t rhs_exponent : exponents) {
+                if (rhs_exponent > b) {
+                  continue;
+                }
+                ExpectContains(operands[output_index],
+                               (INT64_C(1) << lhs_exponent) /
+                                   (INT64_C(1) << rhs_exponent));
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  const auto unknown_power = loom_value_facts_make(1, 4, 1);
+  auto powers = loom_value_facts_make(4, 16, 1);
+  powers.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+  loom_value_facts_t result;
+  loom_value_facts_divsi(&powers, &unknown_power, &result);
+  EXPECT_FALSE(loom_value_facts_is_power_of_two(result));
+  loom_value_facts_divui(&powers, &unknown_power, 8, &result);
+  EXPECT_FALSE(loom_value_facts_is_power_of_two(result));
 }
 
 }  // namespace
