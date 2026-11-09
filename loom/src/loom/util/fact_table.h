@@ -4,20 +4,22 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Per-value fact table: dense range of loom_value_facts_t keyed by
-// loom_value_id_t. Arena-allocated. A zero-initialized table is valid (empty).
+// Per-value fact table: direct-addressed pooled segments of loom_value_facts_t
+// keyed by loom_value_id_t. Arena-allocated. A zero-initialized table is valid
+// (empty).
 //
 // Lookup always succeeds: returns unknown facts for undefined entries
 // or out-of-range value IDs. Undefined entries are detected by
 // known_divisor == 0 (valid facts always have known_divisor >= 1), so newly
 // allocated slots need only zero initialization.
 //
-// Define stores facts for a value ID, growing the dense value-entry range as
-// needed. Lazy tables start at their first definition instead of allocating an
-// empty prefix for unrelated module values. Explicit capacity reservations
-// cover the zero-based domain. Compute runs a forward pass over a region tree,
-// calling each op's fact inference function to seed initial facts from
-// constants and op semantics.
+// Define stores facts for a value ID, growing the covered segment range as
+// needed. Stable segments keep growth linear and let the arena block pool
+// recycle all payload storage without copying facts. Lazy tables start at their
+// first definition instead of allocating an empty prefix for unrelated module
+// values. Explicit capacity reservations cover the zero-based domain. Compute
+// runs a forward pass over a region tree, calling each op's fact inference
+// function to seed initial facts from constants and op semantics.
 //
 // The table is a reusable component: borrowed by the rewriter for
 // canonicalization, owned by pass-scoped storage, and usable standalone for IPO
@@ -75,9 +77,25 @@ typedef struct loom_target_facts_t loom_target_facts_t;
 typedef struct loom_value_fact_loop_replay_t loom_value_fact_loop_replay_t;
 typedef struct loom_value_fact_loop_reads_t loom_value_fact_loop_reads_t;
 
+enum {
+  LOOM_VALUE_FACT_SEGMENT_SHIFT = 6,
+  LOOM_VALUE_FACT_SEGMENT_CAPACITY = 1 << LOOM_VALUE_FACT_SEGMENT_SHIFT,
+  LOOM_VALUE_FACT_SEGMENT_MASK = LOOM_VALUE_FACT_SEGMENT_CAPACITY - 1,
+};
+
+// Stable pooled payload for one directly addressed span of value facts.
+typedef struct loom_value_fact_segment_t {
+  // Numeric facts indexed by the low bits of a value ID.
+  loom_value_facts_t entries[LOOM_VALUE_FACT_SEGMENT_CAPACITY];
+  // Scope membership for entries in this segment.
+  uint64_t touched_bits;
+  // Transient publication generations while iterative replay is active.
+  uint32_t* replay_generations;
+} loom_value_fact_segment_t;
+
 // Per-analysis context passed to op fact inference callbacks.
 struct loom_fact_context_t {
-  // Table that owns the dense facts and any extension payloads allocated by
+  // Table that owns the value facts and any extension payloads allocated by
   // inference helpers.
   loom_value_fact_table_t* table;
 
@@ -146,24 +164,26 @@ struct loom_fact_context_t {
 };
 
 struct loom_value_fact_table_t {
-  // Arena for reusable direct-address, touched-value, and oversized extension
-  // storage.
+  // Arena for reusable fact segments, their pointer directory, touched-value,
+  // and oversized extension storage.
   iree_arena_allocator_t* arena;
   // Arena for pooled extension entries, payloads, hash buckets, and scratch.
   iree_arena_allocator_t* transient_arena;
 
-  // Dense fact entries indexed by value ID minus first_value_id.
-  loom_value_facts_t* entries;
-  // First value ID covered by entries, aligned to a touched-membership word.
+  // Active slice of stable segment pointers, directly indexed after the range
+  // check. Segment payloads never move while the table remains initialized.
+  loom_value_fact_segment_t** segments;
+  // Base of the geometrically grown pointer directory containing |segments|.
+  loom_value_fact_segment_t** segment_directory;
+  // Allocated pointer slots in segment_directory, including growth headroom.
+  iree_host_size_t segment_directory_capacity;
+  // First value ID covered by segments, aligned to a segment boundary.
   // Lazy scopes omit the empty prefix preceding their first definition.
   loom_value_id_t first_value_id;
   // Highest defined value ID plus one.
   iree_host_size_t count;
-  // Allocated entry count.
+  // Allocated entry count across the active segments.
   iree_host_size_t capacity;
-  // Scope membership bits indexed relative to first_value_id, retained while
-  // a cyclic solve undefines entries.
-  uint64_t* touched_bits;
   // Values with numeric facts or direct-origin storage in the scope,
   // including temporarily undefined entries.
   loom_value_id_t* touched_values;
@@ -442,11 +462,6 @@ struct loom_value_fact_table_t {
     loom_value_fact_loop_replay_t* loop;
     // Active dependency collector; NULL for flat loops and snapshot comparison.
     loom_value_fact_loop_reads_t* reads;
-    // One transient-arena generation per dense row. Zero is unevaluated; the
-    // low bit marks a publication not yet established by its defining op.
-    // Completed equations record the scope generation at evaluation, allowing
-    // consumers to see changes even after a nested equation has converged.
-    uint32_t* generations;
     // Even publication serial, or zero when tracking is inactive. Wraparound
     // expires every evaluation before the serial restarts.
     uint32_t generation;
@@ -462,42 +477,43 @@ struct loom_value_fact_table_t {
 #endif
 };
 
-// Initializes the table with the given arena and pre-allocates
-// |initial_capacity| value entries. All entries are zero-initialized
+// Initializes the table with the given arena and pre-allocates enough pooled
+// segments for |initial_capacity| values. All entries are zero-initialized
 // (known_divisor == 0 means undefined). The arena is stored and used for
-// subsequent reusable entry growth, extension payloads, and scratch buffers.
+// subsequent reusable segment growth, extension payloads, and scratch buffers.
 iree_status_t loom_value_fact_table_initialize(
     loom_value_fact_table_t* table, iree_arena_allocator_t* arena,
     iree_host_size_t initial_capacity);
 
 // Initializes the table using separate arenas for persistent direct-address
-// entries and transient scope-local payloads. Use this when reusing one table
+// segments and transient scope-local payloads. Use this when reusing one table
 // across multiple populated scopes: clear touched entries, reset the transient
-// arena, and keep the direct entry array live.
+// arena, and keep the fact segments live.
 iree_status_t loom_value_fact_table_initialize_with_arenas(
     loom_value_fact_table_t* table, iree_arena_allocator_t* arena,
     iree_arena_allocator_t* transient_arena, iree_host_size_t initial_capacity);
 
 // Reserves entries for |range|, preserving defined facts and touched
-// membership. Empty ranges allocate nothing. Existing storage grows
-// geometrically when it cannot cover the range; an empty table allocates only
-// the requested range and omits preceding module values. Does not populate
-// entries.
+// membership. Empty ranges allocate nothing. Missing segment payloads are
+// allocated exactly once, while their pointer directory grows geometrically.
+// An empty table rounds the requested range to segment boundaries and omits
+// preceding module values. Does not populate entries.
 iree_status_t loom_value_fact_table_reserve_range(
     loom_value_fact_table_t* table, loom_value_fact_range_t range);
 
 // Reserves entries for [0, |minimum_capacity|), preserving defined facts and
 // touched membership. An existing capacity doubles until it covers the
-// minimum, but only the final array is allocated. This retains growth headroom
-// without leaving intermediate arrays in the arena during batch population.
-// An empty table starts at the requested minimum. Does not populate entries.
+// minimum. Only missing stable segments are allocated; existing payloads are
+// never copied. An empty table starts at the requested minimum rounded to a
+// segment boundary. Does not populate entries.
 iree_status_t loom_value_fact_table_reserve(loom_value_fact_table_t* table,
                                             iree_host_size_t minimum_capacity);
 
 // Clears facts populated in the current scope and forgets transient extension
 // payload, hash, and scratch state. Callers that provided a separate transient
-// arena should reset that arena after this call. Direct-address, touched-value,
-// and oversized extension-entry storage remain allocated for reuse.
+// arena should reset that arena after this call. Direct-address segments,
+// touched-value storage, and oversized extension entries remain allocated for
+// reuse.
 void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table);
 
 // Retains unique scope membership without defining numeric facts. Direct-origin
@@ -519,13 +535,51 @@ static inline void loom_value_fact_table_record_read(
   }
 }
 
+// Returns the stable entry covering |value_id|, or NULL outside the allocated
+// range. This does not record a dependency read.
+static inline const loom_value_facts_t* loom_value_fact_table_find_entry(
+    const loom_value_fact_table_t* table, loom_value_id_t value_id) {
+  const iree_host_size_t index =
+      (iree_host_size_t)value_id - table->first_value_id;
+  if (index >= table->capacity) {
+    return NULL;
+  }
+  return &table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT]
+              ->entries[index & LOOM_VALUE_FACT_SEGMENT_MASK];
+}
+
+// Returns a replay generation for |value_id|, or zero outside the allocated
+// range. Callers only use this while replay tracking is active.
+static inline uint32_t loom_value_fact_table_replay_generation(
+    const loom_value_fact_table_t* table, loom_value_id_t value_id) {
+  const iree_host_size_t index =
+      (iree_host_size_t)value_id - table->first_value_id;
+  if (index >= table->capacity) {
+    return 0;
+  }
+  const loom_value_fact_segment_t* segment =
+      table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT];
+  return segment->replay_generations[index & LOOM_VALUE_FACT_SEGMENT_MASK];
+}
+
+// Sets a replay generation for an entry in the allocated range. Replay
+// tracking must be active, which guarantees transient generation storage.
+static inline void loom_value_fact_table_set_replay_generation(
+    loom_value_fact_table_t* table, loom_value_id_t value_id,
+    uint32_t generation) {
+  const iree_host_size_t index =
+      (iree_host_size_t)value_id - table->first_value_id;
+  table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT]
+      ->replay_generations[index & LOOM_VALUE_FACT_SEGMENT_MASK] = generation;
+}
+
 // Returns true when |value_id| has explicitly defined facts in |table|.
 static inline bool loom_value_fact_table_has_entry(
     const loom_value_fact_table_t* table, loom_value_id_t value_id) {
   loom_value_fact_table_record_read(table, value_id);
-  const iree_host_size_t index =
-      (iree_host_size_t)value_id - table->first_value_id;
-  return index < table->capacity && table->entries[index].known_divisor != 0;
+  const loom_value_facts_t* entry =
+      loom_value_fact_table_find_entry(table, value_id);
+  return entry && entry->known_divisor != 0;
 }
 
 // Looks up defined facts for a value in O(1). Returns false for undefined or
@@ -533,10 +587,13 @@ static inline bool loom_value_fact_table_has_entry(
 static inline bool loom_value_fact_table_try_lookup(
     const loom_value_fact_table_t* table, loom_value_id_t value_id,
     loom_value_facts_t* out_facts) {
-  if (!loom_value_fact_table_has_entry(table, value_id)) {
+  loom_value_fact_table_record_read(table, value_id);
+  const loom_value_facts_t* entry =
+      loom_value_fact_table_find_entry(table, value_id);
+  if (!entry || entry->known_divisor == 0) {
     return false;
   }
-  *out_facts = table->entries[value_id - table->first_value_id];
+  *out_facts = *entry;
   return true;
 }
 
@@ -544,10 +601,13 @@ static inline bool loom_value_fact_table_try_lookup(
 // range or the entry is undefined.
 static inline loom_value_facts_t loom_value_fact_table_lookup(
     const loom_value_fact_table_t* table, loom_value_id_t value_id) {
-  if (!loom_value_fact_table_has_entry(table, value_id)) {
+  loom_value_fact_table_record_read(table, value_id);
+  const loom_value_facts_t* entry =
+      loom_value_fact_table_find_entry(table, value_id);
+  if (!entry || entry->known_divisor == 0) {
     return loom_value_facts_unknown();
   }
-  return table->entries[value_id - table->first_value_id];
+  return *entry;
 }
 
 // Returns a shaped type's maximum element count from its static dimensions and

@@ -1370,12 +1370,12 @@ static bool loom_value_fact_table_operands_unchanged(
   uint32_t evaluated = UINT32_MAX;
   const loom_value_id_t* results = loom_op_const_results(op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
-    const iree_host_size_t index =
-        (iree_host_size_t)results[i] - table->first_value_id;
-    if (index >= table->capacity) {
+    if ((iree_host_size_t)results[i] - table->first_value_id >=
+        table->capacity) {
       return false;
     }
-    const uint32_t generation = table->replay.generations[index];
+    const uint32_t generation =
+        loom_value_fact_table_replay_generation(table, results[i]);
     if (!generation || (generation & UINT32_C(1))) {
       return false;
     }
@@ -1383,13 +1383,11 @@ static bool loom_value_fact_table_operands_unchanged(
   }
   const loom_value_id_t* operands = loom_op_const_operands(op);
   for (uint16_t i = 0; i < op->operand_count; ++i) {
-    const iree_host_size_t index =
-        (iree_host_size_t)operands[i] - table->first_value_id;
     // A reused equation still depends on every operand. The enclosing loop
     // must retain those reads even when inference itself is skipped.
     loom_value_fact_table_record_read(table, operands[i]);
-    if (index < table->capacity &&
-        (table->replay.generations[index] & ~UINT32_C(1)) > evaluated) {
+    if ((loom_value_fact_table_replay_generation(table, operands[i]) &
+         ~UINT32_C(1)) > evaluated) {
       return false;
     }
   }
@@ -1454,8 +1452,8 @@ static iree_status_t loom_value_fact_table_compute_scoped_op(
     // including unchanged siblings of a multi-result equation.
     const loom_value_id_t* results = loom_op_const_results(op);
     for (uint16_t i = 0; i < op->result_count; ++i) {
-      table->replay.generations[results[i] - table->first_value_id] =
-          table->replay.generation;
+      loom_value_fact_table_set_replay_generation(table, results[i],
+                                                  table->replay.generation);
     }
   }
   return status;
