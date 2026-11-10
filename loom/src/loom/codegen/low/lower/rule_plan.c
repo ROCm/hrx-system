@@ -1520,16 +1520,18 @@ iree_status_t loom_low_lower_rule_plan_finalize(
     loom_low_lower_context_t* context,
     loom_low_lower_rule_source_memory_plan_builder_t* source_memory_builder,
     loom_low_lower_selected_plan_t* selected_plan) {
-  const loom_low_lower_rule_set_t* rule_set = selected_plan->rule_set;
-  const loom_low_lower_rule_t* rule = selected_plan->rule;
+  const loom_low_lower_rule_set_t* rule_set =
+      loom_low_lower_selected_plan_rule_set(selected_plan);
+  const loom_low_lower_rule_t* rule =
+      loom_low_lower_selected_plan_rule(selected_plan);
   const loom_op_t* source_op = selected_plan->source_op;
+  const loom_low_lower_selected_source_memory_t* source_memory =
+      loom_low_lower_selected_plan_source_memory(selected_plan);
   const loom_low_source_memory_access_plan_t* source_memory_access =
-      selected_plan->source_memory != NULL
-          ? &selected_plan->source_memory->access
-          : NULL;
+      source_memory != NULL ? &source_memory->access : NULL;
   const bool elided = iree_any_bit_set(selected_plan->flags,
                                        LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED);
-  selected_plan->resolved_emits = NULL;
+  selected_plan->data.rule.resolved_emits = NULL;
   if (rule->emit_count == 0) {
     return elided ? iree_ok_status()
                   : loom_low_lower_rule_plan_alias_types(context, rule_set,
@@ -1565,15 +1567,15 @@ iree_status_t loom_low_lower_rule_plan_finalize(
   uint8_t* data = (uint8_t*)resolved_emits + rows_size;
   const loom_low_lower_rule_source_t source = {
       .source_op = source_op,
-      .source_nodes = selected_plan->data.source_nodes,
-      .source_node_count = selected_plan->source_node_count,
+      .source_nodes = loom_low_lower_selected_plan_source_nodes(selected_plan),
+      .source_node_count = selected_plan->selection.rule.source_node_count,
   };
   loom_low_lower_rule_match_context_t match_context;
   loom_low_lower_rule_match_context_initialize_from_lowering(
       context, /*view_regions=*/NULL, /*source_memory_state=*/NULL,
       &match_context);
   match_context.policy_rule_set_ordinal =
-      (uint16_t)(selected_plan->rule_set_index + 1u);
+      (uint16_t)(selected_plan->selection.rule.rule_set_index + 1u);
   uint32_t sequence_lane_count = 0;
   for (uint16_t i = 0; i < rule->emit_count; ++i) {
     const loom_low_lower_emit_ref_t emit_ref =
@@ -1701,6 +1703,6 @@ iree_status_t loom_low_lower_rule_plan_finalize(
     }
     data += data_size;
   }
-  selected_plan->resolved_emits = resolved_emits;
+  selected_plan->data.rule.resolved_emits = resolved_emits;
   return iree_ok_status();
 }

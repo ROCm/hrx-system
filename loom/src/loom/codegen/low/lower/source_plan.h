@@ -69,7 +69,7 @@ enum loom_low_lower_selected_plan_flag_bits_e {
 };
 typedef uint8_t loom_low_lower_selected_plan_flags_t;
 
-typedef enum loom_low_lower_selected_plan_kind_e {
+enum loom_low_lower_selected_plan_kind_e {
   // Selection came from a table-driven source-to-Low rule.
   LOOM_LOW_LOWER_SELECTED_PLAN_RULE = 0,
   // Selection came from a shared descriptor-matrix contract row.
@@ -89,7 +89,8 @@ typedef enum loom_low_lower_selected_plan_kind_e {
   LOOM_LOW_LOWER_SELECTED_PLAN_UNAVAILABLE = 7,
   // Direct semantic call with prepared receiving-carrier conversions.
   LOOM_LOW_LOWER_SELECTED_PLAN_CALL = 8,
-} loom_low_lower_selected_plan_kind_t;
+};
+typedef uint8_t loom_low_lower_selected_plan_kind_t;
 
 // Canonical source-memory data retained with a selected table rule.
 typedef struct loom_low_lower_selected_source_memory_t {
@@ -99,38 +100,39 @@ typedef struct loom_low_lower_selected_source_memory_t {
   const loom_low_lower_source_memory_record_t* record;
 } loom_low_lower_selected_source_memory_t;
 
+// Sparse retained source graph for a multi-node table rule.
+typedef struct loom_low_lower_selected_rule_source_graph_t {
+  // Canonical source-memory selection, or NULL when unused.
+  const loom_low_lower_selected_source_memory_t* source_memory;
+  // Function-arena-owned source operations in root-first order.
+  const loom_op_t* source_nodes[];
+} loom_low_lower_selected_rule_source_graph_t;
+
 // One source operation's lowering decision retained between planning and
 // emission.
 typedef struct loom_low_lower_selected_plan_t {
   // Source op this selected plan lowers.
   const loom_op_t* source_op;
-  // Selected plan representation.
-  loom_low_lower_selected_plan_kind_t kind;
-  // Selection lifecycle flags.
-  loom_low_lower_selected_plan_flags_t flags;
-  // Number of source nodes owned by a table rule, including the root. Zero for
-  // non-rule plans and claimed placeholders.
-  uint8_t source_node_count;
-  // Source-node ordinal that triggers emission. Zero emits at |source_op|.
-  uint8_t emission_source_node_index;
-  // Policy rule-set ordinal for table-driven selections.
-  uint16_t rule_set_index;
-  // Rule-table ordinal for table-driven selections.
-  uint16_t rule_index;
-  // Rule set owning |rule|, or NULL for non-rule plans and claimed
-  // placeholders.
-  const loom_low_lower_rule_set_t* rule_set;
-  // Table rule selected during planning, or NULL for non-rule plans and claimed
-  // placeholders. An earlier selection claimed by a later rule retains its
-  // original recipe for reporting.
-  const loom_low_lower_rule_t* rule;
-  // Resolved emit rows for |rule|, or NULL for non-rule plans.
-  const loom_low_lower_resolved_emit_t* resolved_emits;
-  // Canonical source-memory selection retained from rule matching, or NULL
-  // when the selected rule does not consume source memory.
-  const loom_low_lower_selected_source_memory_t* source_memory;
   // Selected-plan-specific retained payload.
   union {
+    struct {
+      // Immutable policy rule set owning the selected rule ordinal.
+      const loom_low_lower_rule_set_t* rule_set;
+      // Resolved emit rows, or NULL before rule finalization.
+      const loom_low_lower_resolved_emit_t* resolved_emits;
+      union {
+        // Canonical memory for a root-only rule, or NULL when unused.
+        const loom_low_lower_selected_source_memory_t* source_memory;
+        // Sparse retained graph for a multi-node rule.
+        const loom_low_lower_selected_rule_source_graph_t* source_graph;
+      } source;
+    } rule;
+    struct {
+      // Target-owned dense plan ID selected during planning.
+      loom_low_lower_plan_id_t id;
+      // Arena-owned target plan payload, or NULL when |id| is sufficient.
+      const void* target_data;
+    } target;
     // Direct callee signature and operand conversions finalized before
     // emission.
     loom_low_lower_source_call_plan_t* call;
@@ -140,13 +142,88 @@ typedef struct loom_low_lower_selected_plan_t {
     const loom_low_lower_projected_call_plan_t* projected_call;
     // Shared bounded-allocation plan owned by the function lowering arena.
     const loom_low_lower_function_storage_plan_t* function_storage;
-    // Target-owned plan selected during planning.
-    loom_low_lower_plan_t target_plan;
-    // Function-arena-owned source graph for a multi-node table rule. Entry
-    // zero is |source_op|. NULL for root-only rules.
-    const loom_op_t* const* source_nodes;
   } data;
+  // Selected plan representation.
+  loom_low_lower_selected_plan_kind_t kind;
+  // Selection lifecycle flags.
+  loom_low_lower_selected_plan_flags_t flags;
+  union {
+    struct {
+      // Number of source nodes owned by the rule, including the root. Zero for
+      // claimed placeholders.
+      uint8_t source_node_count;
+      // Source-node ordinal that triggers emission. Zero emits at |source_op|.
+      uint8_t emission_source_node_index;
+      // Policy rule-set ordinal.
+      uint16_t rule_set_index;
+      // Rule-table ordinal.
+      uint16_t rule_index;
+    } rule;
+    struct {
+      // Source memory semantics preserved by a target-owned callback plan.
+      loom_memory_access_flags_t access_flags;
+    } target;
+  } selection;
 } loom_low_lower_selected_plan_t;
+
+static_assert(sizeof(loom_low_lower_selected_plan_t) <= 40u,
+              "dense selected plans must remain compact");
+
+// Returns the immutable rule set selected by |selected_plan|, or NULL for a
+// non-rule plan or claimed placeholder.
+static inline const loom_low_lower_rule_set_t*
+loom_low_lower_selected_plan_rule_set(
+    const loom_low_lower_selected_plan_t* selected_plan) {
+  return selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_RULE
+             ? selected_plan->data.rule.rule_set
+             : NULL;
+}
+
+// Returns the immutable table rule selected by |selected_plan|, or NULL for a
+// non-rule plan or claimed placeholder.
+static inline const loom_low_lower_rule_t* loom_low_lower_selected_plan_rule(
+    const loom_low_lower_selected_plan_t* selected_plan) {
+  const loom_low_lower_rule_set_t* rule_set =
+      loom_low_lower_selected_plan_rule_set(selected_plan);
+  if (rule_set == NULL) {
+    return NULL;
+  }
+  IREE_ASSERT_LT(selected_plan->selection.rule.rule_index,
+                 rule_set->rule_count);
+  return &rule_set->rules[selected_plan->selection.rule.rule_index];
+}
+
+// Returns the canonical memory selection retained by a table rule, or NULL.
+static inline const loom_low_lower_selected_source_memory_t*
+loom_low_lower_selected_plan_source_memory(
+    const loom_low_lower_selected_plan_t* selected_plan) {
+  if (selected_plan->kind != LOOM_LOW_LOWER_SELECTED_PLAN_RULE) {
+    return NULL;
+  } else if (selected_plan->selection.rule.source_node_count > 1) {
+    return selected_plan->data.rule.source.source_graph->source_memory;
+  }
+  return selected_plan->data.rule.source.source_memory;
+}
+
+// Returns the root-first source graph retained by a multi-node rule, or NULL.
+static inline const loom_op_t* const* loom_low_lower_selected_plan_source_nodes(
+    const loom_low_lower_selected_plan_t* selected_plan) {
+  if (selected_plan->kind != LOOM_LOW_LOWER_SELECTED_PLAN_RULE ||
+      selected_plan->selection.rule.source_node_count <= 1) {
+    return NULL;
+  }
+  return selected_plan->data.rule.source.source_graph->source_nodes;
+}
+
+// Returns a selected target-owned plan in the public callback representation.
+static inline loom_low_lower_plan_t loom_low_lower_selected_plan_target(
+    const loom_low_lower_selected_plan_t* selected_plan) {
+  return (loom_low_lower_plan_t){
+      .id = selected_plan->data.target.id,
+      .target_data = selected_plan->data.target.target_data,
+      .access_flags = selected_plan->selection.target.access_flags,
+  };
+}
 
 // Shared descriptor-matrix plan retained between contract selection and
 // emission.

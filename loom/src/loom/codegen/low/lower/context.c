@@ -476,7 +476,7 @@ loom_low_lower_selected_plan_view_t loom_low_lower_context_selected_plan_view(
       .plan = selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_CALLBACK ||
                       selected_plan->kind ==
                           LOOM_LOW_LOWER_SELECTED_PLAN_DESCRIPTOR_MATRIX
-                  ? selected_plan->data.target_plan
+                  ? loom_low_lower_selected_plan_target(selected_plan)
                   : loom_low_lower_plan_empty(),
       .elided = iree_any_bit_set(selected_plan->flags,
                                  LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED |
