@@ -35,6 +35,10 @@ static hrx_gpu_state_t g_gpu = {0};
 static hrx_cpu_state_t g_cpu = {0};
 static hrx_device_event_sink_t g_device_event_sink = {0};
 
+// All profiled devices share one file sink. Only explicit profile drains take
+// this mutex; submission, completion, and device waits never acquire it.
+static iree_slim_mutex_t g_profile_mutex;
+
 // Process-lifetime native connections, independent of execution generations.
 // KFD's primary VM binding retains its original render-file identity after the
 // last execution device is released. Reopening the path cannot reacquire it.
@@ -666,6 +670,16 @@ static iree_status_t hrx_device_profile_begin(hrx_device_s* device,
   if (iree_status_is_ok(status)) {
     device->profiling_active = true;
   }
+  return status;
+}
+
+iree_status_t hrx_runtime_profile_flush(hrx_device_t device) {
+  if (!device || !device->profiling_active) {
+    return iree_ok_status();
+  }
+  iree_slim_mutex_lock(&g_profile_mutex);
+  iree_status_t status = iree_hal_device_profiling_flush(device->hal_device);
+  iree_slim_mutex_unlock(&g_profile_mutex);
   return status;
 }
 

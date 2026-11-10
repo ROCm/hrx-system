@@ -7,10 +7,12 @@
 #include "common/event.h"
 
 #include "common/context.h"
+#include "common/device.h"
 #include "common/graph.h"
 #include "common/stream.h"
 #include "common/stream_queue.h"
 #include "iree/base/internal/math.h"
+#include "libhrx/src/libhrx/runtime.h"
 
 //===----------------------------------------------------------------------===//
 // Event management
@@ -584,10 +586,12 @@ iree_status_t iree_hal_streaming_event_synchronize(
             : IREE_ASYNC_WAIT_FLAG_ACTIVE);
   }
   iree_hal_streaming_event_release_recorded_point(&recorded_point);
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
+  status = iree_status_join(
+      status,
+      hrx_runtime_profile_flush(event->context->device_entry->hrx_device));
 
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  return status;
 }
 
 float iree_hal_streaming_timestamp_domain_elapsed_ms(
