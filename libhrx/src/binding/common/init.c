@@ -13,6 +13,7 @@
 #include "common/device.h"
 #include "common/graph_memory.h"
 #include "common/hrx_bridge.h"
+#include "common/mem_pool.h"
 #include "libhrx/src/libhrx/device.h"
 #include "libhrx/src/libhrx/runtime.h"
 
@@ -335,9 +336,9 @@ static void iree_hal_streaming_deinitialize_device(
   device->info.name = iree_string_view_empty();
 
   // Release memory pools.
-  hrx_mem_pool_release(device->current_mem_pool);
+  iree_hal_streaming_mem_pool_release(device->current_mem_pool);
   device->current_mem_pool = NULL;
-  hrx_mem_pool_release(device->default_mem_pool);
+  iree_hal_streaming_mem_pool_release(device->default_mem_pool);
   device->default_mem_pool = NULL;
 
   // Release primary context (may not exist if never accessed).

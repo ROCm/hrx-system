@@ -232,15 +232,6 @@ class HrxLoader {
       allocator_query_mapping_requirements;
   decltype(&hrx_queue_map) queue_map;
 
-  // Memory pools.
-  decltype(&hrx_mem_pool_create) mem_pool_create;
-  decltype(&hrx_mem_pool_retain) mem_pool_retain;
-  decltype(&hrx_mem_pool_release) mem_pool_release;
-  decltype(&hrx_mem_pool_get_attribute) mem_pool_get_attribute;
-  decltype(&hrx_mem_pool_set_attribute) mem_pool_set_attribute;
-  decltype(&hrx_mem_pool_trim) mem_pool_trim;
-  decltype(&hrx_mem_pool_allocate_buffer) mem_pool_allocate_buffer;
-
  private:
   HrxLoader();
   ~HrxLoader();

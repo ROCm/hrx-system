@@ -8,6 +8,7 @@
 #define IREE_EXPERIMENTAL_STREAMING_MEMORY_H_
 
 #include "common/allocation_preparation.h"
+#include "common/mem_pool.h"
 #include "hrx_runtime.h"
 #include "iree/base/api.h"
 #include "iree/base/threading/mutex.h"
@@ -115,8 +116,8 @@ typedef struct iree_hal_streaming_buffer_t {
   // Whether this wrapper owns a reference to |context|.
   iree_hal_streaming_buffer_context_ownership_t context_ownership;
 
-  // HRX memory pool retained while |buffer| may borrow its HAL pool.
-  hrx_mem_pool_t allocation_pool;
+  // Compatibility pool retained while |buffer| may borrow its HAL pool.
+  iree_hal_streaming_mem_pool_t* allocation_pool;
 
   // True while this pool-backed buffer contributes to logical pool usage.
   bool is_pool_allocation_live;
@@ -311,14 +312,14 @@ iree_status_t iree_hal_streaming_memory_allocate_device(
 
 // Synchronization: none (allocates memory from a pool).
 iree_status_t iree_hal_streaming_memory_allocate_device_from_pool(
-    iree_hal_streaming_context_t* context, hrx_mem_pool_t pool,
+    iree_hal_streaming_context_t* context, iree_hal_streaming_mem_pool_t* pool,
     iree_device_size_t size, iree_hal_streaming_memory_flags_t flags,
     iree_hal_streaming_buffer_t** out_buffer);
 
 // Synchronization: stream-ordered. Reuses a pending same-stream free when
 // possible and otherwise allocates memory from |pool|.
 iree_status_t iree_hal_streaming_memory_allocate_device_from_pool_async(
-    iree_hal_streaming_context_t* context, hrx_mem_pool_t pool,
+    iree_hal_streaming_context_t* context, iree_hal_streaming_mem_pool_t* pool,
     iree_device_size_t size, iree_hal_streaming_memory_flags_t flags,
     iree_hal_streaming_stream_t* stream,
     iree_hal_streaming_buffer_t** out_buffer);
@@ -360,7 +361,7 @@ iree_status_t iree_hal_streaming_memory_release_terminal_async_frees(
 // Releases completed stream-ordered frees retained by |pool|.
 // Synchronization: none (each free has reached its queued host callback).
 iree_status_t iree_hal_streaming_memory_release_completed_async_frees_from_pool(
-    hrx_mem_pool_t pool);
+    iree_hal_streaming_mem_pool_t* pool);
 
 // Synchronization: none (allocates host memory). |fine_grained| additionally
 // requires concurrent host/program system visibility from the native source.

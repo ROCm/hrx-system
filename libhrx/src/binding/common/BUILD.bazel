@@ -159,6 +159,7 @@ hrx_cc_library(
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/base/threading",
@@ -371,6 +372,53 @@ hrx_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/memory:heap_pool",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "mem_pool_test",
+    srcs = ["mem_pool_test.cc"],
+    deps = [
+        ":common",
+        "//libhrx/src/libhrx:hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "mem_pool_backing_test",
+    srcs = ["mem_pool_backing_test.cc"],
+    deps = [
+        ":common",
+        "//libhrx/src/libhrx:hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/memory:slab_cache",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "mem_pool_backing_gpu_test",
+    srcs = ["mem_pool_backing_test.cc"],
+    copts = ["-DHRX_TEST_GPU=1"],
+    resource_group = "iree-hal-drivers-amdgpu-tests",
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    deps = [
+        ":common",
+        "//libhrx/src/libhrx:hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/memory:slab_cache",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

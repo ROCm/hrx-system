@@ -24,7 +24,6 @@ typedef struct hrx_buffer_view_s* hrx_buffer_view_t;
 typedef struct hrx_executable_s* hrx_executable_t;
 typedef struct hrx_physical_memory_s* hrx_physical_memory_t;
 typedef struct hrx_event_s* hrx_event_t;
-typedef struct hrx_mem_pool_s* hrx_mem_pool_t;
 typedef struct hrx_graph_s* hrx_graph_t;
 typedef struct hrx_graph_exec_s* hrx_graph_exec_t;
 typedef struct hrx_graph_node_s* hrx_graph_node_t;
@@ -1033,81 +1032,6 @@ HRX_API hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream,
 HRX_API hrx_status_t hrx_stream_copy_d2h(hrx_stream_t stream, hrx_buffer_t src,
                                          size_t src_offset, void* host_dst,
                                          size_t size);
-
-//===----------------------------------------------------------------------===//
-// Memory pools (stream-ordered memory management)
-//===----------------------------------------------------------------------===//
-
-typedef enum hrx_mem_pool_attr_t {
-  HRX_MEM_POOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES = 0,
-  HRX_MEM_POOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES = 1,
-  HRX_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC = 2,
-  // Retained-byte floor contributed to the device's shared backing cache.
-  // Compatible pools share storage, so their floors combine by maximum.
-  HRX_MEM_POOL_ATTR_RELEASE_THRESHOLD = 3,
-  // Bytes borrowed by this pool, including padding and fragmentation. Empty
-  // slabs return to the device cache and cease to be charged to this pool;
-  // shared idle storage is not counted again for every potential borrower.
-  HRX_MEM_POOL_ATTR_RESERVED_MEM_CURRENT = 4,
-  // Peak bytes borrowed by this pool. Writing zero resets the watermark.
-  HRX_MEM_POOL_ATTR_RESERVED_MEM_HIGH = 5,
-  HRX_MEM_POOL_ATTR_USED_MEM_CURRENT = 6,
-  HRX_MEM_POOL_ATTR_USED_MEM_HIGH = 7,
-} hrx_mem_pool_attr_t;
-
-typedef struct hrx_mem_pool_props_t {
-  // Platform allocation-handle types requested when the pool was created.
-  uint32_t alloc_handle_type;
-  // Platform location type for the pool's backing storage.
-  uint32_t location_type;
-  // Platform device ordinal for the pool's backing storage.
-  int location_id;
-  // Maximum live reservation bytes, or zero when the pool is unbounded.
-  size_t max_size;
-} hrx_mem_pool_props_t;
-
-HRX_API hrx_status_t hrx_mem_pool_create(hrx_device_t device,
-                                         const hrx_mem_pool_props_t* props,
-                                         hrx_mem_pool_t* out_pool);
-HRX_API void hrx_mem_pool_retain(hrx_mem_pool_t pool);
-HRX_API void hrx_mem_pool_release(hrx_mem_pool_t pool);
-HRX_API hrx_status_t hrx_mem_pool_get_attribute(hrx_mem_pool_t pool,
-                                                hrx_mem_pool_attr_t attr,
-                                                uint64_t* out_value);
-HRX_API hrx_status_t hrx_mem_pool_set_attribute(hrx_mem_pool_t pool,
-                                                hrx_mem_pool_attr_t attr,
-                                                uint64_t value);
-// Returns unused child backing and trims the shared device cache, preserving
-// |min_bytes_to_keep| and every other pool's current retention request. This
-// replaces this pool's floor until an attribute update or automatic release
-// applies its configured threshold again. It does not allocate missing bytes.
-HRX_API hrx_status_t hrx_mem_pool_trim(hrx_mem_pool_t pool,
-                                       size_t min_bytes_to_keep);
-
-// Returns unused child backing and applies the configured release threshold to
-// the device's shared cache, preserving other pools' retention requests. This
-// is intended for stream-ordered free completion paths. Reclamation runs on
-// the memory owner without waiting here; statistics converge after queued
-// whole-slab returns and the ordered cache sweep complete.
-HRX_API hrx_status_t hrx_mem_pool_release_unused(hrx_mem_pool_t pool);
-
-// Records a logical allocation backed by |pool|. Logical usage is distinct
-// from physical TLSF reservations, which can remain retained for later
-// stream-ordered reuse.
-HRX_API void hrx_mem_pool_record_logical_allocation(hrx_mem_pool_t pool,
-                                                    size_t size);
-
-// Records retirement of a logical allocation backed by |pool|. The physical
-// reservation remains owned by its buffer until that buffer is released or
-// reused.
-HRX_API void hrx_mem_pool_record_logical_free(hrx_mem_pool_t pool, size_t size);
-
-// Allocates a buffer with at least 256-byte alignment and the device access
-// permissions captured by |pool|. The returned buffer owns the allocation and
-// remains valid independently of the public |pool| handle.
-HRX_API hrx_status_t hrx_mem_pool_allocate_buffer(hrx_mem_pool_t pool,
-                                                  size_t size,
-                                                  hrx_buffer_t* buffer);
 
 //===----------------------------------------------------------------------===//
 // Graphs (CUDA/HIP-style execution graphs)

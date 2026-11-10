@@ -14,8 +14,9 @@
 extern "C" {
 #endif
 
-// A public pool's request to retain shared storage. The backing owner guards
-// all fields; the public pool embeds this record and detaches it before dying.
+// A compatibility pool's request to retain shared storage. The backing owner
+// guards all fields; the compatibility pool embeds this record and detaches it
+// before dying.
 typedef struct hrx_mem_pool_retention_t {
   // Previous request attached to the device's backing owner, or NULL.
   struct hrx_mem_pool_retention_t* previous;
@@ -33,8 +34,9 @@ typedef struct hrx_mem_pool_sources_t {
   iree_hal_pool_t* mapping;
 } hrx_mem_pool_sources_t;
 
-// Device-owned backing shared by the device's public memory pools. The device
-// outlives its pools and buffers; the cache survives individual pool teardown.
+// Implicit backing for convenience allocations and compatibility pools. The
+// device outlives its pools and buffers; the cache survives individual pool
+// teardown.
 typedef struct hrx_mem_pool_backing_t {
   // Guards lazy construction and retention requests, never payload allocation.
   iree_slim_mutex_t mutex;
@@ -60,7 +62,7 @@ typedef struct hrx_mem_pool_backing_t {
   iree_hal_pool_t* device_import_source;
   // Immutable child policy geometry selected with the cache's slab class.
   iree_hal_tlsf_pool_options_t pool_options;
-  // Borrowed list of requests embedded in live public pools.
+  // Borrowed list of requests embedded in live compatibility pools.
   hrx_mem_pool_retention_t* retention_head;
   // Maximum requested floor; all clients can reuse the same retained bytes.
   uint64_t min_bytes_to_keep;
@@ -68,7 +70,7 @@ typedef struct hrx_mem_pool_backing_t {
 
 void hrx_mem_pool_backing_initialize(hrx_mem_pool_backing_t* backing);
 
-// Releases shared storage before native device teardown. All public pools,
+// Releases shared storage before native device teardown. All dependent pools,
 // buffers, and reservations must have retired.
 void hrx_mem_pool_backing_deinitialize(hrx_mem_pool_backing_t* backing);
 
@@ -78,8 +80,9 @@ void hrx_mem_pool_backing_deinitialize(hrx_mem_pool_backing_t* backing);
 iree_hal_buffer_usage_t hrx_mem_pool_family_usage(
     const iree_hal_queue_family_t* family);
 
-// Creates one independent allocation policy over the device's shared cache.
-// The caller retains the device; construction acquires no native payload.
+// Creates one independent compatibility allocation policy over the device's
+// shared cache. The caller retains the device; construction acquires no native
+// payload.
 iree_status_t hrx_mem_pool_backing_create_pool(hrx_device_t device,
                                                iree_hal_pool_t** out_pool);
 

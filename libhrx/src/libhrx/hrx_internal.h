@@ -459,60 +459,6 @@ iree_status_t hrx_graph_exec_instantiate_locked(
     hrx_graph_exec_t exec, hrx_graph_node_block_t* node_blocks,
     iree_host_size_t node_count);
 
-// Memory pool (stream-ordered memory management).
-typedef struct hrx_mem_pool_s {
-  // References held by public handles and bounded allocations.
-  iree_atomic_ref_count_t ref_count;
-
-  // Retained device owning the cache shared by compatible public pools.
-  hrx_device_t device;
-
-  // HIP/CUDA-style creation properties used for attribute queries.
-  hrx_mem_pool_props_t props;
-
-  // TLSF HAL pool serving suballocated and dedicated ordinary backing.
-  iree_hal_pool_t* hal_pool;
-
-  // Embedded request linked into the device's shared retention policy.
-  hrx_mem_pool_retention_t retention;
-
-  // Bytes charged to the immutable |props.max_size| allocation limit.
-  size_t allocation_budget_current;
-
-  // HIP/CUDA release threshold attribute in bytes.
-  uint64_t release_threshold;
-
-  // Allocations that have retained the HAL pool but have not reserved from it.
-  uint32_t inflight_allocation_count;
-
-  // True when internal dependency insertion is allowed for reuse.
-  bool reuse_allow_internal_dependencies;
-
-  // True when event dependencies are honored for reuse.
-  bool reuse_follow_event_dependencies;
-
-  // True when opportunistic reuse is allowed.
-  bool reuse_allow_opportunistic;
-
-  // Current backing borrowed by this child, excluding shared idle storage.
-  uint64_t reserved_mem_current;
-
-  // Peak backing borrowed by this child, including padding and fragmentation.
-  uint64_t reserved_mem_high;
-
-  // Current backing bytes charged to live allocations.
-  uint64_t used_mem_current;
-
-  // Peak backing bytes charged to live allocations.
-  uint64_t used_mem_high;
-
-  // Platform-native pool handle, if one is imported or exported.
-  void* platform_handle;
-
-  // Guards mutable pool attributes and lazy HAL pool creation.
-  iree_slim_mutex_t mutex;
-} hrx_mem_pool_s;
-
 // Timeline fence wrapper.
 typedef struct hrx_fence_s {
   // References to the wrapper, which owns its dependencies once.

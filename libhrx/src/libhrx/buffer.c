@@ -9,7 +9,6 @@
 #include <string.h>
 
 #include "hrx_internal.h"
-#include "mem_pool.h"
 
 iree_status_t hrx_buffer_create_from_hal(iree_hal_buffer_t* hal_buffer,
                                          hrx_device_t device,
@@ -141,9 +140,9 @@ void hrx_buffer_release(hrx_buffer_t buffer) {
   }
   iree_hal_buffer_release(buffer->hal_buffer);
   iree_hal_pool_release(buffer->hal_pool);
-  hrx_mem_pool_release_allocation_budget(buffer->allocation_budget_pool,
-                                         buffer->allocation_budget_size);
-  hrx_mem_pool_release(buffer->allocation_budget_pool);
+  if (buffer->release_callback) {
+    buffer->release_callback(buffer->release_user_data, buffer->size);
+  }
   hrx_device_release(buffer->device);
   iree_allocator_free(iree_allocator_system(), buffer);
   HRX_TRACE_ZONE_END(z0);

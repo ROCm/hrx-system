@@ -14,6 +14,7 @@
 #include "common/graph.h"
 #include "common/graph_memory.h"
 #include "common/hrx_bridge.h"
+#include "common/mem_pool.h"
 #include "common/peer.h"
 #include "common/stream.h"
 #include "iree/base/internal/atomics.h"
@@ -282,8 +283,8 @@ static void iree_hal_streaming_buffer_activate_pool_allocation(
   if (!buffer || !buffer->allocation_pool || buffer->is_pool_allocation_live) {
     return;
   }
-  hrx_mem_pool_record_logical_allocation(buffer->allocation_pool,
-                                         (size_t)buffer->size);
+  iree_hal_streaming_mem_pool_record_logical_allocation(buffer->allocation_pool,
+                                                        (size_t)buffer->size);
   buffer->is_pool_allocation_live = true;
 }
 
@@ -292,8 +293,8 @@ static void iree_hal_streaming_buffer_release_pool_allocation(
   if (!buffer || !buffer->allocation_pool || !buffer->is_pool_allocation_live) {
     return;
   }
-  hrx_mem_pool_record_logical_free(buffer->allocation_pool,
-                                   (size_t)buffer->size);
+  iree_hal_streaming_mem_pool_record_logical_free(buffer->allocation_pool,
+                                                  (size_t)buffer->size);
   buffer->is_pool_allocation_live = false;
 }
 
@@ -364,7 +365,7 @@ static iree_status_t iree_hal_streaming_buffer_wrap_hrx_buffer(
     iree_hal_streaming_context_t* context, hrx_buffer_t hrx_buf,
     iree_device_size_t logical_size, int memory_type,
     iree_hal_streaming_memory_kind_t memory_kind, void* imported_host_ptr,
-    hrx_mem_pool_t allocation_pool,
+    iree_hal_streaming_mem_pool_t* allocation_pool,
     iree_hal_streaming_buffer_context_ownership_t context_ownership,
     iree_hal_streaming_buffer_t** out_wrapper) {
   IREE_ASSERT_ARGUMENT(context);
@@ -386,7 +387,7 @@ static iree_status_t iree_hal_streaming_buffer_wrap_hrx_buffer(
   iree_hal_streaming_buffer_set_context(wrapper, context, context_ownership);
   wrapper->allocation_pool = allocation_pool;
   if (wrapper->allocation_pool) {
-    hrx_mem_pool_retain(wrapper->allocation_pool);
+    iree_hal_streaming_mem_pool_retain(wrapper->allocation_pool);
   }
   wrapper->is_pool_allocation_live = false;
   wrapper->memory_type = wrapper->buffer
@@ -467,7 +468,7 @@ static iree_status_t iree_hal_streaming_buffer_wrap_hrx_buffer(
 static iree_status_t iree_hal_streaming_buffer_wrap(
     iree_hal_streaming_context_t* context, iree_hal_buffer_t* buffer,
     int memory_type, iree_hal_streaming_memory_kind_t memory_kind,
-    void* imported_host_ptr, hrx_mem_pool_t allocation_pool,
+    void* imported_host_ptr, iree_hal_streaming_mem_pool_t* allocation_pool,
     iree_hal_streaming_buffer_context_ownership_t context_ownership,
     iree_hal_streaming_buffer_t** out_wrapper) {
   IREE_ASSERT_ARGUMENT(context);
@@ -543,7 +544,7 @@ static void iree_hal_streaming_buffer_free(
     buffer->hrx_buf = NULL;
     buffer->buffer = NULL;
   }
-  hrx_mem_pool_release(buffer->allocation_pool);
+  iree_hal_streaming_mem_pool_release(buffer->allocation_pool);
   buffer->allocation_pool = NULL;
   iree_hal_streaming_buffer_release_context(buffer);
   iree_allocator_free(host_allocator, buffer);
@@ -1314,7 +1315,7 @@ iree_status_t iree_hal_streaming_memory_allocate_device(
 }
 
 iree_status_t iree_hal_streaming_memory_allocate_device_from_pool(
-    iree_hal_streaming_context_t* context, hrx_mem_pool_t pool,
+    iree_hal_streaming_context_t* context, iree_hal_streaming_mem_pool_t* pool,
     iree_device_size_t size, iree_hal_streaming_memory_flags_t flags,
     iree_hal_streaming_buffer_t** out_buffer) {
   IREE_ASSERT_ARGUMENT(context);
@@ -1330,7 +1331,7 @@ iree_status_t iree_hal_streaming_memory_allocate_device_from_pool(
   }
   hrx_buffer_t hrx_buffer = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, HRX_CALL(hrx_mem_pool_allocate_buffer(pool, size, &hrx_buffer)));
+      z0, iree_hal_streaming_mem_pool_allocate_buffer(pool, size, &hrx_buffer));
 
   iree_hal_streaming_buffer_t* wrapper = NULL;
   iree_status_t status = iree_hal_streaming_buffer_wrap_hrx_buffer(
@@ -1397,17 +1398,17 @@ static iree_status_t iree_hal_streaming_buffer_free_and_trim_pool(
     iree_hal_streaming_buffer_t* buffer, bool trim_to_release_threshold) {
   // Pool-backed buffers retain their pool. Preserve it across buffer
   // destruction so that any now-unused backing storage can be released.
-  hrx_mem_pool_t allocation_pool = buffer->allocation_pool;
+  iree_hal_streaming_mem_pool_t* allocation_pool = buffer->allocation_pool;
   if (allocation_pool) {
-    hrx_mem_pool_retain(allocation_pool);
+    iree_hal_streaming_mem_pool_retain(allocation_pool);
   }
   iree_hal_streaming_buffer_free(buffer);
 
   iree_status_t status = iree_ok_status();
   if (allocation_pool && trim_to_release_threshold) {
-    status = HRX_CALL(hrx_mem_pool_release_unused(allocation_pool));
+    status = iree_hal_streaming_mem_pool_release_unused(allocation_pool);
   }
-  hrx_mem_pool_release(allocation_pool);
+  iree_hal_streaming_mem_pool_release(allocation_pool);
   return status;
 }
 
@@ -1483,7 +1484,7 @@ static void iree_hal_streaming_pending_free_register(
 }
 
 static iree_status_t iree_hal_streaming_memory_try_reuse_pending_free(
-    iree_hal_streaming_context_t* context, hrx_mem_pool_t pool,
+    iree_hal_streaming_context_t* context, iree_hal_streaming_mem_pool_t* pool,
     iree_device_size_t size, iree_hal_streaming_stream_t* stream,
     iree_hal_streaming_buffer_t** out_buffer) {
   *out_buffer = NULL;
@@ -1497,22 +1498,13 @@ static iree_status_t iree_hal_streaming_memory_try_reuse_pending_free(
     iree_hal_streaming_buffer_t* buffer = free_op->buffer;
     bool can_reuse = buffer->allocation_pool == pool && buffer->size == size;
     if (can_reuse && free_op->source_stream_id != stream->stream_id) {
-      uint64_t follow_event_dependencies = 0;
-      uint64_t allow_opportunistic = 0;
-      const bool has_reuse_policy =
-          hrx_status_is_ok(hrx_mem_pool_get_attribute(
-              pool, HRX_MEM_POOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES,
-              &follow_event_dependencies)) &&
-          hrx_status_is_ok(hrx_mem_pool_get_attribute(
-              pool, HRX_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC,
-              &allow_opportunistic));
+      const iree_hal_streaming_mem_pool_reuse_t reuse =
+          iree_hal_streaming_mem_pool_query_reuse(pool);
       can_reuse =
-          has_reuse_policy &&
-          ((follow_event_dependencies != 0 && free_op->completion_value != 0 &&
-            iree_hal_streaming_stream_has_memory_reuse_dependency(
-                stream, free_op->source_stream_id,
-                free_op->completion_value)) ||
-           (allow_opportunistic != 0 && free_op->is_ready));
+          (reuse.follow_event_dependencies && free_op->completion_value != 0 &&
+           iree_hal_streaming_stream_has_memory_reuse_dependency(
+               stream, free_op->source_stream_id, free_op->completion_value)) ||
+          (reuse.allow_opportunistic && free_op->is_ready);
     }
     if (can_reuse) {
       iree_hal_streaming_allocation_preparation_reopen(&buffer->preparation);
@@ -1548,7 +1540,7 @@ static iree_status_t iree_hal_streaming_memory_try_reuse_pending_free(
 }
 
 iree_status_t iree_hal_streaming_memory_allocate_device_from_pool_async(
-    iree_hal_streaming_context_t* context, hrx_mem_pool_t pool,
+    iree_hal_streaming_context_t* context, iree_hal_streaming_mem_pool_t* pool,
     iree_device_size_t size, iree_hal_streaming_memory_flags_t flags,
     iree_hal_streaming_stream_t* stream,
     iree_hal_streaming_buffer_t** out_buffer) {
@@ -1981,7 +1973,7 @@ iree_status_t iree_hal_streaming_memory_release_terminal_async_frees(
 }
 
 iree_status_t iree_hal_streaming_memory_release_completed_async_frees_from_pool(
-    hrx_mem_pool_t pool) {
+    iree_hal_streaming_mem_pool_t* pool) {
   if (!pool) {
     return iree_ok_status();
   }
@@ -2068,20 +2060,10 @@ iree_status_t iree_hal_streaming_memory_free_device_async(
   // the stream reaches the free. Pool policy is sampled when the operation is
   // enqueued so terminal cleanup never needs to query a possibly reused
   // wrapper.
-  uint64_t allow_opportunistic = wrapper->allocation_pool ? 0 : 1;
-  if (wrapper->allocation_pool) {
-    status = HRX_CALL(hrx_mem_pool_get_attribute(
-        wrapper->allocation_pool, HRX_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC,
-        &allow_opportunistic));
-    if (!iree_status_is_ok(status)) {
-      status = iree_status_join(
-          status, iree_hal_streaming_memory_restore_taken_allocation(
-                      owner_context, wrapper));
-      iree_hal_streaming_context_release(owner_context);
-      IREE_TRACE_ZONE_END(z0);
-      return status;
-    }
-  }
+  const bool allow_opportunistic =
+      !wrapper->allocation_pool ||
+      iree_hal_streaming_mem_pool_query_reuse(wrapper->allocation_pool)
+          .allow_opportunistic;
 
   iree_hal_streaming_deferred_device_free_t* free_op = NULL;
   status = iree_allocator_malloc(iree_allocator_system(), sizeof(*free_op),
@@ -2105,7 +2087,7 @@ iree_status_t iree_hal_streaming_memory_free_device_async(
   free_op->is_ready = false;
   free_op->is_terminal = false;
   free_op->is_reused = false;
-  free_op->allow_opportunistic = allow_opportunistic != 0;
+  free_op->allow_opportunistic = allow_opportunistic;
 
   iree_hal_streaming_pending_free_terminal_t* terminal = NULL;
   status = iree_allocator_malloc(iree_allocator_system(), sizeof(*terminal),

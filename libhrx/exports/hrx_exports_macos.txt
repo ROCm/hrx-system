@@ -141,13 +141,6 @@ _hrx_host_memory_unregister
 _hrx_buffer_lookup
 _hrx_stream_copy_h2d
 _hrx_stream_copy_d2h
-_hrx_mem_pool_create
-_hrx_mem_pool_retain
-_hrx_mem_pool_release
-_hrx_mem_pool_get_attribute
-_hrx_mem_pool_set_attribute
-_hrx_mem_pool_trim
-_hrx_mem_pool_allocate_buffer
 _hrx_graph_create
 _hrx_graph_retain
 _hrx_graph_release

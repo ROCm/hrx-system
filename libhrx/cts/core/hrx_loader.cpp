@@ -253,14 +253,6 @@ void HrxLoader::load(const std::string& path) {
   LOAD(allocator_query_mapping_requirements);
   LOAD(queue_map);
 
-  LOAD(mem_pool_create);
-  LOAD(mem_pool_retain);
-  LOAD(mem_pool_release);
-  LOAD(mem_pool_get_attribute);
-  LOAD(mem_pool_set_attribute);
-  LOAD(mem_pool_trim);
-  LOAD(mem_pool_allocate_buffer);
-
 #undef LOAD
 #undef LOAD_FULL
 }

@@ -35,11 +35,12 @@ typedef struct hrx_buffer_s {
   // User-visible allocation length in bytes.
   size_t size;
 
-  // Optional bounded pool that charged |allocation_budget_size|.
-  hrx_mem_pool_t allocation_budget_pool;
+  // Optional in-tree owner's state, valid until |release_callback| returns.
+  void* release_user_data;
 
-  // Bytes charged against |allocation_budget_pool|.
-  size_t allocation_budget_size;
+  // Synchronous final-release hook after native backing is released. Receives
+  // |release_user_data| and the immutable logical |size|; never queued as work.
+  void (*release_callback)(void* user_data, size_t byte_length);
 
   // Active scoped mapping, valid only while |is_mapped| is true.
   iree_hal_buffer_mapping_t mapping;

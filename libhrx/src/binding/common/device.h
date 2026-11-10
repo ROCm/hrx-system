@@ -10,6 +10,7 @@
 #include "common/context.h"
 #include "common/execution_resource.h"
 #include "common/host_callback.h"
+#include "common/mem_pool.h"
 #include "common/tls.h"
 #include "hrx_runtime.h"
 #include "iree/base/internal/arena.h"
@@ -100,9 +101,9 @@ typedef struct iree_hal_streaming_device_t {
   int32_t primary_context_ref_count;
 
   // Default device allocation pool, protected by primary_context_mutex.
-  hrx_mem_pool_t default_mem_pool;
+  iree_hal_streaming_mem_pool_t* default_mem_pool;
   // Current device allocation pool, protected by primary_context_mutex.
-  hrx_mem_pool_t current_mem_pool;
+  iree_hal_streaming_mem_pool_t* current_mem_pool;
 
   // Guards graph-memory accounting and cached physical blocks.
   iree_slim_mutex_t graph_memory_mutex;
