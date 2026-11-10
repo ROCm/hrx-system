@@ -87,18 +87,18 @@ hrx_status_t hrx_buffer_allocate(hrx_stream_t stream, size_t size,
   };
 
   iree_status_t status = hrx_mem_pool_backing_retain_allocation_source(
-      stream->device, mem_type, usage, &buf->hal_pool);
+      stream->queue->device, mem_type, usage, &buf->hal_pool);
   if (iree_status_is_ok(status)) {
     const iree_hal_pool_reservation_request_t request =
         iree_hal_make_pool_reservation_request((iree_device_size_t)size,
                                                /*min_alignment=*/0);
     status = iree_hal_queue_alloca(
-        stream->device->transfer_queue, wait_list, signal_list, buf->hal_pool,
+        stream->hal_queue, wait_list, signal_list, buf->hal_pool,
         /*request_count=*/1, &request, &buf->hal_buffer);
   }
   if (iree_status_is_ok(status)) {
-    // The AMDGPU transient allocator resolves committed backing while recording
-    // later command buffer operations, so make the queued alloca visible now.
+    // The returned buffer is immediately available for mapping and native
+    // address queries, which require the queued backing to be committed.
     status = iree_hal_semaphore_wait(sem, signal_value, iree_infinite_timeout(),
                                      /*flags=*/0);
   }
@@ -110,7 +110,7 @@ hrx_status_t hrx_buffer_allocate(hrx_stream_t stream, size_t size,
   }
 
   iree_atomic_ref_count_init(&buf->ref_count);
-  buf->device = stream->device;
+  buf->device = stream->queue->device;
   hrx_device_retain(buf->device);
   buf->mem_type = mem_type;
   buf->size = size;

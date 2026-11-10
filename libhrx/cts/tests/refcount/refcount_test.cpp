@@ -21,7 +21,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Semaphore retain and release",
 TEST_CASE_METHOD(HrxTestFixture, "Stream retain and release",
                  "[refcount][stream]") {
   hrx_stream_t stream = nullptr;
-  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
+  REQUIRE_OK(hrx().stream_create(transfer_queue_, 0, &stream));
 
   hrx().stream_retain(stream);
   hrx().stream_release(stream);
@@ -31,7 +31,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Stream retain and release",
 TEST_CASE_METHOD(HrxTestFixture, "Buffer retain and release",
                  "[refcount][memory]") {
   hrx_stream_t stream = nullptr;
-  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
+  REQUIRE_OK(hrx().stream_create(transfer_queue_, 0, &stream));
 
   hrx_buffer_t buf = nullptr;
   REQUIRE_OK(hrx().buffer_allocate(

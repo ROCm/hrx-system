@@ -150,6 +150,7 @@ void HrxLoader::load(const std::string& path) {
   LOAD(stream_create);
   LOAD(stream_retain);
   LOAD(stream_release);
+  LOAD(stream_get_queue);
   LOAD(stream_synchronize);
   LOAD(stream_wait);
   LOAD(stream_query);
@@ -201,6 +202,8 @@ void HrxLoader::load(const std::string& path) {
   LOAD(graph_create);
   LOAD(graph_release);
   LOAD(graph_add_kernel_node);
+  LOAD(graph_add_copy_buffer_node);
+  LOAD(graph_add_fill_buffer_node);
   LOAD(graph_add_host_call_node);
   LOAD(graph_instantiate);
   LOAD(graph_exec_release);

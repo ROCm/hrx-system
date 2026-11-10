@@ -36,7 +36,19 @@ class RuntimeProfileGpuTest : public testing::Test {
     initialized_ = true;
     hrx_device_t device = nullptr;
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_gpu_device_get(0, &device)));
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_create(device, 0, &stream_)));
+    hrx_queue_t queue = nullptr;
+    for (uint32_t i = 0; !queue && i < hrx_device_queue_family_count(device);
+         ++i) {
+      hrx_queue_family_info_t family;
+      IREE_ASSERT_OK(hrx_status_to_iree(
+          hrx_device_query_queue_family(device, i, &family)));
+      if ((family.roles & HRX_QUEUE_ROLE_TRANSFER) &&
+          family.provisioned_queue_count) {
+        queue = hrx_device_get_queue(device, i, 0);
+      }
+    }
+    ASSERT_NE(queue, nullptr);
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_create(queue, 0, &stream_)));
     IREE_ASSERT_OK(hrx_status_to_iree(
         hrx_event_create(device, HRX_EVENT_FLAG_DISABLE_TIMING, &event_)));
     IREE_ASSERT_OK(hrx_status_to_iree(

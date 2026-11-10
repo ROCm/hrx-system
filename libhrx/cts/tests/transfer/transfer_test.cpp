@@ -125,7 +125,8 @@ TEST_CASE_METHOD(HrxTestFixture,
   }
 
   StreamTransferResources resources;
-  REQUIRE_OK(hrx().stream_create(device_, /*flags=*/0, &resources.stream));
+  REQUIRE_OK(
+      hrx().stream_create(transfer_queue_, /*flags=*/0, &resources.stream));
   REQUIRE_OK(hrx().buffer_allocate(
       resources.stream, kBufferSize, HRX_MEMORY_TYPE_DEVICE_LOCAL,
       HRX_BUFFER_USAGE_DEFAULT, &resources.source_buffer));

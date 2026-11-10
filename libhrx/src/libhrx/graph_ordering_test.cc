@@ -127,8 +127,8 @@ class GraphOrderingTest : public ::testing::Test {
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_cpu_initialize(0)));
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_cpu_device_get(0, &device_)));
     for (auto& stream : streams_) {
-      IREE_ASSERT_OK(
-          hrx_status_to_iree(hrx_stream_create(device_, 0, &stream)));
+      IREE_ASSERT_OK(hrx_status_to_iree(
+          hrx_stream_create(hrx_device_get_queue(device_, 0, 0), 0, &stream)));
     }
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_allocate(
         streams_[0], sizeof(uint32_t) * kWordCount,
@@ -191,8 +191,8 @@ class GraphOrderingTest : public ::testing::Test {
   }
 
   void Instantiate() {
-    IREE_ASSERT_OK(
-        hrx_status_to_iree(hrx_graph_instantiate(graph_, 0, &exec_)));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_instantiate(
+        graph_, hrx_stream_get_queue(streams_[0]), 0, &exec_)));
   }
 
   void SubmitReverse() {

@@ -158,7 +158,21 @@ static int run_device_smoke_test(hrx_device_t device, const char* label) {
   bool buffer_mapped = false;
   int result = 0;
 
-  if (report_status_error(hrx_stream_create(device, 0, &stream))) {
+  hrx_queue_t queue = NULL;
+  for (uint32_t i = 0;
+       result == 0 && !queue && i < hrx_device_queue_family_count(device);
+       ++i) {
+    hrx_queue_family_info_t family;
+    if (report_status_error(
+            hrx_device_query_queue_family(device, i, &family))) {
+      result = 1;
+    } else if ((family.roles & HRX_QUEUE_ROLE_TRANSFER) &&
+               family.provisioned_queue_count) {
+      queue = hrx_device_get_queue(device, i, 0);
+    }
+  }
+  if (result == 0 &&
+      report_status_error(hrx_stream_create(queue, 0, &stream))) {
     result = 1;
   }
 

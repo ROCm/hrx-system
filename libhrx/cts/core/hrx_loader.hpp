@@ -107,6 +107,7 @@ class HrxLoader {
   decltype(&hrx_stream_create) stream_create;
   decltype(&hrx_stream_retain) stream_retain;
   decltype(&hrx_stream_release) stream_release;
+  decltype(&hrx_stream_get_queue) stream_get_queue;
   decltype(&hrx_stream_synchronize) stream_synchronize;
   decltype(&hrx_stream_wait) stream_wait;
   decltype(&hrx_stream_query) stream_query;
@@ -166,6 +167,8 @@ class HrxLoader {
   decltype(&hrx_graph_create) graph_create;
   decltype(&hrx_graph_release) graph_release;
   decltype(&hrx_graph_add_kernel_node) graph_add_kernel_node;
+  decltype(&hrx_graph_add_copy_buffer_node) graph_add_copy_buffer_node;
+  decltype(&hrx_graph_add_fill_buffer_node) graph_add_fill_buffer_node;
   decltype(&hrx_graph_add_host_call_node) graph_add_host_call_node;
   decltype(&hrx_graph_instantiate) graph_instantiate;
   decltype(&hrx_graph_exec_release) graph_exec_release;

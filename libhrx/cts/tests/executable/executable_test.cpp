@@ -53,7 +53,10 @@ class GraphVisibilityTest : public HrxTestFixture {
     REQUIRE_OK(hrx().executable_lookup_export_by_name(
         executable_, "hrx_transform_padded_parameters", &ordinal_));
     REQUIRE_OK(hrx().executable_export_info(executable_, ordinal_, &info_));
-    REQUIRE_OK(hrx().stream_create(device_, 0, &stream_));
+    REQUIRE_OK(hrx().stream_create(
+        FindProvisionedQueue(device_,
+                             HRX_QUEUE_ROLE_DISPATCH | HRX_QUEUE_ROLE_TRANSFER),
+        0, &stream_));
     const hrx_buffer_params_t params = {
         .type = HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_HOST_COHERENT |
                 HRX_MEMORY_TYPE_DEVICE_VISIBLE,
@@ -235,7 +238,10 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch") {
   REQUIRE(store_info.workgroup_size[2] >= 1);
 
   hrx_stream_t stream = nullptr;
-  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
+  REQUIRE_OK(hrx().stream_create(
+      FindProvisionedQueue(device_,
+                           HRX_QUEUE_ROLE_DISPATCH | HRX_QUEUE_ROLE_TRANSFER),
+      0, &stream));
   REQUIRE(stream != nullptr);
 
   hrx_dispatch_config_t noop_config = {
@@ -315,7 +321,8 @@ TEST_CASE_METHOD(GraphVisibilityTest,
   const size_t input_word = GENERATE(size_t{0}, size_t{64});
   const size_t output_word = input_word + 128;
   AddTransform(input_word, output_word);
-  REQUIRE_OK(hrx().graph_instantiate(graph_, 0, &exec_));
+  REQUIRE_OK(hrx().graph_instantiate(graph_, hrx().stream_get_queue(stream_), 0,
+                                     &exec_));
   for (uint32_t replay = 0; replay < 16; ++replay) {
     CAPTURE(input_word, replay);
     const uint32_t sentinel = 0x12345678u + replay;
@@ -338,7 +345,8 @@ TEST_CASE_METHOD(GraphVisibilityTest,
                  "graph_replays_chain_coherent_data_without_host_waits") {
   Initialize();
   AddTransform(0, 0);
-  REQUIRE_OK(hrx().graph_instantiate(graph_, 0, &exec_));
+  REQUIRE_OK(hrx().graph_instantiate(graph_, hrx().stream_get_queue(stream_), 0,
+                                     &exec_));
   for (uint32_t batch = 0; batch < 8; ++batch) {
     CAPTURE(batch);
     const uint32_t sentinel = 0x12345678u + batch;
@@ -363,7 +371,21 @@ TEST_CASE_METHOD(GraphVisibilityTest,
   Initialize();
   const size_t width = GENERATE(size_t{17}, size_t{64});
   const bool cross_stream = GENERATE(false, true);
-  REQUIRE_OK(hrx().stream_create(device_, 0, &other_stream_));
+  if (cross_stream) {
+    const uint32_t family_ordinal =
+        hrx().queue_get_family_ordinal(hrx().stream_get_queue(stream_));
+    hrx_queue_family_info_t family;
+    REQUIRE_OK(
+        hrx().device_query_queue_family(device_, family_ordinal, &family));
+    if (!family.supports_acquisition) {
+      SKIP("compute queue family does not support acquiring another queue");
+    }
+    hrx_queue_t queue = nullptr;
+    REQUIRE_OK(hrx().queue_acquire(device_, family_ordinal, nullptr, &queue));
+    hrx_status_t status = hrx().stream_create(queue, 0, &other_stream_);
+    hrx().queue_release(queue);
+    REQUIRE_OK(status);
+  }
   std::array<uint32_t, kWordCount> expected;
   for (size_t i = 0; i < kWordCount; ++i) {
     words_[i] = expected[i] = static_cast<uint32_t>(i + 1);
@@ -371,7 +393,8 @@ TEST_CASE_METHOD(GraphVisibilityTest,
   for (size_t i = 0; i < width; ++i) {
     AddTransform(i, i);
   }
-  REQUIRE_OK(hrx().graph_instantiate(graph_, 0, &exec_));
+  REQUIRE_OK(hrx().graph_instantiate(graph_, hrx().stream_get_queue(stream_), 0,
+                                     &exec_));
   for (size_t replay = 0; replay < 8; ++replay) {
     auto stream = cross_stream && (replay & 1) ? other_stream_ : stream_;
     REQUIRE_OK(hrx().graph_exec_launch(exec_, stream));
@@ -408,7 +431,8 @@ TEST_CASE_METHOD(GraphVisibilityTest,
   REQUIRE_OK(hrx().graph_add_host_call_node(graph_, &producer, 1, &host_attrs,
                                             &host_node));
   AddTransform(0, 128, host_node);
-  REQUIRE_OK(hrx().graph_instantiate(graph_, 0, &exec_));
+  REQUIRE_OK(hrx().graph_instantiate(graph_, hrx().stream_get_queue(stream_), 0,
+                                     &exec_));
   for (uint32_t replay = 0; replay < 16; ++replay) {
     CAPTURE(replay);
     const uint32_t sentinel = 0x12345678u + replay;
@@ -453,7 +477,10 @@ TEST_CASE_METHOD(HrxTestFixture,
   hrx_executable_export_info_t info = {};
   REQUIRE_OK(hrx().executable_export_info(executable, ordinal, &info));
   hrx_stream_t stream = nullptr;
-  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
+  REQUIRE_OK(hrx().stream_create(
+      FindProvisionedQueue(device_,
+                           HRX_QUEUE_ROLE_DISPATCH | HRX_QUEUE_ROLE_TRANSFER),
+      0, &stream));
 
   constexpr size_t kWordCount = 256;
   const hrx_buffer_params_t params = {
@@ -495,7 +522,8 @@ TEST_CASE_METHOD(HrxTestFixture,
     hrx_graph_node_t node = nullptr;
     REQUIRE_OK(hrx().graph_add_kernel_node(graph, nullptr, 0, &attrs, &node));
     hrx_graph_exec_t exec = nullptr;
-    REQUIRE_OK(hrx().graph_instantiate(graph, 0, &exec));
+    REQUIRE_OK(hrx().graph_instantiate(graph, hrx().stream_get_queue(stream), 0,
+                                       &exec));
 
     for (uint32_t replay = 0; replay < 16; ++replay) {
       CAPTURE(replay);

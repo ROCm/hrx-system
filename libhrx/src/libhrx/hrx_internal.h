@@ -20,6 +20,7 @@
 #include "mem_pool_backing.h"
 #include "queue.h"
 #include "runtime.h"
+#include "stream.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -246,11 +247,8 @@ typedef struct hrx_device_s {
   iree_hal_device_t* hal_device;
   // Device-owned HRX handles in family-major provisioned queue order.
   hrx_queue_s* queues;
-  // Provisioned queue used for direct host and device transfers. Borrowed from
-  // |hal_device|, which must outlive every use.
-  iree_hal_queue_t* transfer_queue;
-  // Provisioned queue used for stream command buffers. Borrowed from
-  // |hal_device|, which must outlive every use.
+  // Provisioned compute queue used by device-scoped memory and executable
+  // compatibility APIs. Borrowed from |hal_device|.
   iree_hal_queue_t* dispatch_queue;
   iree_hal_device_group_t* hal_device_group;
   // Shared native backing and retention coordination for public memory pools.
@@ -280,19 +278,6 @@ typedef struct hrx_event_s {
   hrx_device_t device;
   int64_t record_time_ns;  // Host-side timestamp at record time.
 } hrx_event_s;
-
-// Stream with pending command buffer.
-typedef struct hrx_stream_s {
-  iree_atomic_ref_count_t ref_count;
-  hrx_device_t device;
-  // Exact HAL queue used by this stream. Borrowed from |device|.
-  iree_hal_queue_t* hal_queue;
-  hrx_semaphore_t semaphore;
-  uint64_t timepoint;
-  iree_hal_command_buffer_t* pending_cb;
-  bool has_pending_work;
-  uint32_t flags;
-} hrx_stream_s;
 
 //===----------------------------------------------------------------------===//
 // Graph internals
@@ -448,8 +433,8 @@ typedef struct hrx_graph_barrier_state_t {
 typedef struct hrx_graph_exec_s {
   // References to this executable and its recorded resources.
   iree_atomic_ref_count_t ref_count;
-  // Borrowed device retained by |graph|.
-  hrx_device_t device;
+  // Recording family borrowed from the device retained by |graph|.
+  const iree_hal_queue_family_t* queue_family;
   // Retained graph containing captured node data.
   hrx_graph_t graph;
   // Storage for immutable blocks and their semaphore indices.

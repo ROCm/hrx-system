@@ -51,6 +51,7 @@ _hrx_semaphore_signal
 _hrx_stream_create
 _hrx_stream_retain
 _hrx_stream_release
+_hrx_stream_get_queue
 _hrx_stream_synchronize
 _hrx_stream_wait
 _hrx_stream_query

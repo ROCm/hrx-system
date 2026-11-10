@@ -610,11 +610,17 @@ hrx_status_t hrx_graph_add_dependencies(hrx_graph_t graph,
 // Instantiation
 //===----------------------------------------------------------------------===//
 
-hrx_status_t hrx_graph_instantiate(hrx_graph_t graph, uint32_t flags,
-                                   hrx_graph_exec_t* out_exec) {
-  IREE_ASSERT_ARGUMENT(graph);
-  IREE_ASSERT_ARGUMENT(out_exec);
+hrx_status_t hrx_graph_instantiate(hrx_graph_t graph, hrx_queue_t queue,
+                                   uint32_t flags, hrx_graph_exec_t* out_exec) {
+  if (!out_exec) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "graph executable output is NULL");
+  }
   *out_exec = NULL;
+  if (!graph || !queue || graph->device != queue->device) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "graph and queue must belong to the same device");
+  }
   IREE_TRACE_ZONE_BEGIN(z0);
 
   hrx_graph_exec_s* exec = NULL;
@@ -623,7 +629,7 @@ hrx_status_t hrx_graph_instantiate(hrx_graph_t graph, uint32_t flags,
                                 (void**)&exec));
 
   iree_atomic_ref_count_init(&exec->ref_count);
-  exec->device = graph->device;
+  exec->queue_family = iree_hal_queue_family(queue->hal_queue);
   exec->graph = graph;
   hrx_graph_retain(graph);
   iree_arena_initialize(&graph->device->block_pool, &exec->arena_allocator);

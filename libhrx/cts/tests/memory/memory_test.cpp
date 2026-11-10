@@ -9,7 +9,7 @@
 TEST_CASE_METHOD(HrxTestFixture, "Buffer allocate and release",
                  "[memory][alloc]") {
   hrx_stream_t stream = nullptr;
-  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
+  REQUIRE_OK(hrx().stream_create(transfer_queue_, 0, &stream));
 
   hrx_buffer_t buf = nullptr;
   REQUIRE_OK(hrx().buffer_allocate(
@@ -23,7 +23,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Buffer allocate and release",
 
 TEST_CASE_METHOD(HrxTestFixture, "Buffer map and unmap", "[memory][map]") {
   hrx_stream_t stream = nullptr;
-  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
+  REQUIRE_OK(hrx().stream_create(transfer_queue_, 0, &stream));
 
   hrx_buffer_t buf = nullptr;
   REQUIRE_OK(hrx().buffer_allocate(
@@ -45,7 +45,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Buffer map and unmap", "[memory][map]") {
 TEST_CASE_METHOD(HrxTestFixture, "Buffer map read back written data",
                  "[memory][map]") {
   hrx_stream_t stream = nullptr;
-  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
+  REQUIRE_OK(hrx().stream_create(transfer_queue_, 0, &stream));
 
   hrx_buffer_t buf = nullptr;
   REQUIRE_OK(hrx().buffer_allocate(
@@ -74,7 +74,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Buffer map read back written data",
 TEST_CASE_METHOD(HrxTestFixture, "Zero-size buffer allocation fails",
                  "[memory][alloc]") {
   hrx_stream_t stream = nullptr;
-  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
+  REQUIRE_OK(hrx().stream_create(transfer_queue_, 0, &stream));
 
   hrx_buffer_t buf = nullptr;
   hrx_status_t status = hrx().buffer_allocate(
@@ -89,7 +89,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Zero-size buffer allocation fails",
 TEST_CASE_METHOD(HrxTestFixture, "Buffer get_size returns correct size",
                  "[memory][size]") {
   hrx_stream_t stream = nullptr;
-  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
+  REQUIRE_OK(hrx().stream_create(transfer_queue_, 0, &stream));
 
   hrx_buffer_t buf = nullptr;
   REQUIRE_OK(hrx().buffer_allocate(

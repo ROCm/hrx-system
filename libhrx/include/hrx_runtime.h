@@ -713,19 +713,28 @@ HRX_API hrx_status_t hrx_semaphore_signal(hrx_semaphore_t semaphore,
                                           uint64_t value);
 
 //===----------------------------------------------------------------------===//
-// Streams (high-level execution contexts)
+// Streams (ordered batching on an explicit queue)
 //
-// hrx_stream_t is the canonical owner of a stream timeline/semaphore inside
-// libhrx. Frontend stream objects should retain a hrx_stream_t and query the
-// owning device or timeline via accessors instead of creating a second backend
-// timeline universe.
+// Each stream owns a timeline and a pending recording. Streams may share a
+// queue deliberately; dependencies between streams remain explicit, and queue
+// sharing does not promise concurrent execution. Stream mutation requires
+// external synchronization. Direct queue calls participate in a stream's
+// ordering only when they explicitly use its timeline points.
 //===----------------------------------------------------------------------===//
 
-HRX_API hrx_status_t hrx_stream_create(hrx_device_t device, uint32_t flags,
-                                       hrx_stream_t* stream);
+// Retains |queue| and its parent device for the stream's lifetime. No native
+// queue is acquired. Operations use this exact queue and must be supported by
+// its family; no other execution or transfer queue is selected implicitly.
+HRX_API hrx_status_t hrx_stream_create(hrx_queue_t queue, uint32_t flags,
+                                       hrx_stream_t* out_stream);
 
 HRX_API void hrx_stream_retain(hrx_stream_t stream);
+// Final release flushes and joins this stream's work before releasing its
+// queue. Failures are reported through the configured device event sink.
 HRX_API void hrx_stream_release(hrx_stream_t stream);
+
+// Borrows the stream's immutable queue, or returns NULL for a NULL stream.
+HRX_API hrx_queue_t hrx_stream_get_queue(hrx_stream_t stream);
 
 // Flushes pending command buffer work and waits for the stream to complete.
 // When HRX_PROFILE_FILE is enabled, also drains completed device profile
@@ -766,7 +775,8 @@ HRX_API hrx_status_t hrx_stream_wait_on(hrx_stream_t stream,
 // Buffer
 //===----------------------------------------------------------------------===//
 
-// Stream-ordered allocation (convenience over allocator).
+// Allocates on the stream's queue after its preceding work. This convenience
+// call waits for backing to become available before returning the buffer.
 HRX_API hrx_status_t hrx_buffer_allocate(hrx_stream_t stream, size_t size,
                                          hrx_memory_type_t mem_type,
                                          hrx_buffer_usage_t usage,
@@ -1548,13 +1558,19 @@ HRX_API hrx_status_t hrx_graph_size(hrx_graph_t graph, size_t* out_count);
 HRX_API hrx_status_t hrx_graph_get_nodes(hrx_graph_t graph,
                                          hrx_graph_node_t* nodes,
                                          size_t* inout_count);
-HRX_API hrx_status_t hrx_graph_instantiate(hrx_graph_t graph, uint32_t flags,
+// Instantiates recordings for |queue|'s family on the graph's device. The queue
+// is borrowed only during this call; the executable may launch on any stream
+// from that exact family. Instantiation never acquires an execution queue.
+HRX_API hrx_status_t hrx_graph_instantiate(hrx_graph_t graph, hrx_queue_t queue,
+                                           uint32_t flags,
                                            hrx_graph_exec_t* out_exec);
 HRX_API void hrx_graph_exec_retain(hrx_graph_exec_t exec);
 HRX_API void hrx_graph_exec_release(hrx_graph_exec_t exec);
 // Enqueues the graph after prior work on |stream|. Stream completion includes
 // every graph workstream. Replays of the same executable are ordered, including
 // launches on different streams; distinct executables may run concurrently.
+// Every block uses the stream's exact queue. A stream from a different family
+// is rejected before flushing pending work or submitting any graph block.
 // Calls targeting one stream require external serialization. Failure submitting
 // graph blocks permanently fails the internal and stream timelines; neither may
 // be reused. Failure does not establish device retirement.
