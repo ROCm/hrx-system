@@ -28,3 +28,35 @@ hrx_cts_test(
     tags = AMD_GPU_CTS_TAGS,
     target_compatible_with = select(AMDGPU_CTS_COMPATIBILITY_CONDITIONS),
 )
+
+hrx_cts_test(
+    name = "heterogeneous",
+    srcs = ["heterogeneous_test.cpp"],
+    args = ["--hrx-device=none"],
+    resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
+    tags = [
+        "iree-build-requirement=libamdf.gpu",
+        "iree-build-requirement=libamdf.xdna",
+        "iree-run-requirement=libamdf.resource.amd_gpu",
+        "iree-run-requirement=libamdf.resource.xdna",
+        "runtime-resource=amd-gpu",
+        "runtime-resource=amd-xdna",
+    ],
+    target_compatible_with = select(AMDGPU_CTS_COMPATIBILITY_CONDITIONS) + select({
+        "//runtime/config/hal:driver_task": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }) + select({
+        "//runtime/config/hal:driver_amd_xdna": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }) + select({
+        "//libamdf/config/family:gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }) + select({
+        "//libamdf/config/family:xdna": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//runtime/src/iree/hal/driver/amd/xdna/image/testdata:mul_i32",
+        "//runtime/src/iree/hal/driver/amd/xdna/image/testdata:mul_i32_npu4",
+    ],
+)

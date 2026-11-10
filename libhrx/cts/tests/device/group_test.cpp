@@ -61,7 +61,10 @@ TEST_CASE("Explicit CPU GPU pools share backing across queue timelines",
   constexpr size_t kRegionCount = 8;
   constexpr size_t kLength = kRegionLength * kRegionCount;
   GroupResources resources;
-  REQUIRE_OK(hrx().runtime_create(nullptr, hrx().host_allocator_system(),
+  const hrx_runtime_options_t options = {
+      .event_sink = {.fn = ReportHrxDeviceEvent},
+  };
+  REQUIRE_OK(hrx().runtime_create(&options, hrx().host_allocator_system(),
                                   &resources.runtime));
   const char* driver = std::getenv("HRX_GPU_DRIVER");
   size_t cpu_count = 0;

@@ -18,6 +18,11 @@ extern std::string g_test_hip_library_path;
 // when no Catch assertion can run. Safe during fixture destruction.
 void ReportHrxTestFailure(const char* context, hrx_status_t status) noexcept;
 
+// Runtime event sink for both harness-owned and explicitly constructed groups.
+// Error events remain process failures even during final device destruction.
+void ReportHrxDeviceEvent(void* user_data,
+                          const hrx_device_event_t* event) noexcept;
+
 // Selects a provisioned queue with the operations required by a CTS scenario.
 // Selection belongs to the caller; the runtime never substitutes another queue.
 inline hrx_queue_t FindProvisionedQueue(hrx_device_t device,

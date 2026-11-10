@@ -10,6 +10,7 @@ the AMD GPU targets enabled in the build and selected against the actual device.
 | Surface | Tests | Behavior exercised |
 |---------|-------|--------------------|
 | Runtime and devices | `lifecycle`, `status`, `device`, `group` | Explicit runtime/group ownership, passive discovery, shared CPU/GPU pools, device properties, and synchronization |
+| Heterogeneous execution | `heterogeneous` | Shared CPU/GPU/NPU storage, NPU arithmetic, cross-device queue dependencies, deferred allocation, backing reuse, and trim |
 | Allocation and ownership | `allocator`, `host_allocator`, `memory`, `refcount` | Borrowed allocators, host imports, stream-ordered allocation, mapping, and retain/release |
 | Queues and streams | `queue_ops`, `stream`, `stream_ops`, `semaphore` | Host calls, fills, copies, updates, execution barriers, timeline signals, and completion |
 | Transfers | `transfer` | Host/device copies, stream ordering, numerical output, and range rejection |
@@ -50,6 +51,22 @@ Native applications discover URI/name metadata with
 `hrx_device_group_create`. Discovery does not create HAL devices or task workers.
 Groups retain their runtime, and runtime events remain observable through final
 synchronous group destruction. There is no global CPU or GPU initialization API.
+
+The `heterogeneous` target constructs one task CPU, AMD GPU, and XDNA NPU group.
+CPU fills feed an NPU multiply, GPU copies move the result, and a CPU copy makes
+the final output available for inspection. All operations use public HRX entry
+points, with semaphore edges between devices and no intervening host waits.
+A host gate holds the first allocation pending until its consumers are queued.
+The test releases its application runtime/group references while dependent
+resources remain live, returns storage after its last use, reuses it through a
+sibling pool, and trims the shared source. Runtime errors during final teardown
+fail the process as well as errors during execution.
+
+This target requires both GPU and NPU hardware and uses the committed NPU
+arithmetic fixtures for the supported execution profiles. It qualifies output,
+ownership, and ordering through HAL's conservative visibility defaults.
+Cross-device waits may require host admission; passing this test does not imply
+that the devices exchange every dependency entirely through firmware.
 
 HIP tests select GPUs through the frontend and do not use `HRX_CTS_DEVICE`.
 `HRX_GPU_DRIVER` selects the frontend implementation and the harness's `gpu:N`
@@ -122,6 +139,10 @@ iree-bazel-test --config=asan --test_env=HRX_GPU_DRIVER=amdgpu \
   //libhrx/cts/tests/hip:hip_module_execution_test \
   //libhrx/cts/tests/hip:hip_stream_progress_test \
   //libhrx/cts/tests/hip:hip_profile_test
+
+# Public HRX execution through one shared CPU/GPU/NPU group.
+iree-bazel-test --config=asan \
+  //libhrx/cts/tests/device:hrx_cts_heterogeneous
 ```
 
 GPU targets declare their hardware requirements and need a compatible runner.

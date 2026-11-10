@@ -41,28 +41,13 @@ void printStatusAndConsume(HrxLoader& loader, const char* context,
   loader.status_ignore(status);
 }
 
-// Driver failures reported while releasing devices must affect process exit,
-// including events delivered after the Catch session has finished.
-void recordDeviceEvent(void*, const hrx_device_event_t* event) {
-  if (event->severity < HRX_DEVICE_EVENT_SEVERITY_ERROR) {
-    return;
-  }
-  fprintf(stderr,
-          "Device event: type %u, severity %u, device %.*s, sequence %llu\n",
-          event->type, event->severity,
-          static_cast<int>(event->source.device_id.size),
-          event->source.device_id.size ? event->source.device_id.data : "",
-          static_cast<unsigned long long>(event->sequence));
-  g_test_failure.store(true, std::memory_order_relaxed);
-}
-
 hrx_status_t createTestGroup(HrxLoader& loader, const std::string& spec,
                              hrx_device_group_t* out_group) {
   *out_group = nullptr;
   const hrx_runtime_options_t options = {
       .event_sink =
           {
-              .fn = recordDeviceEvent,
+              .fn = ReportHrxDeviceEvent,
           },
   };
   hrx_runtime_t runtime = nullptr;
@@ -121,6 +106,21 @@ hrx_status_t createTestGroup(HrxLoader& loader, const std::string& spec,
 }
 
 }  // namespace
+
+// Driver failures reported while releasing devices must affect process exit,
+// including events delivered after the Catch session has finished.
+void ReportHrxDeviceEvent(void*, const hrx_device_event_t* event) noexcept {
+  if (event->severity < HRX_DEVICE_EVENT_SEVERITY_ERROR) {
+    return;
+  }
+  fprintf(stderr,
+          "Device event: type %u, severity %u, device %.*s, sequence %llu\n",
+          event->type, event->severity,
+          static_cast<int>(event->source.device_id.size),
+          event->source.device_id.size ? event->source.device_id.data : "",
+          static_cast<unsigned long long>(event->sequence));
+  g_test_failure.store(true, std::memory_order_relaxed);
+}
 
 void ReportHrxTestFailure(const char* context, hrx_status_t status) noexcept {
   if (hrx_status_is_ok(status)) {
