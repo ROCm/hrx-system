@@ -1,0 +1,41 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# Bazel invocation tests have no CMake target surface.
+# bazel-to-cmake: skip
+
+load("//build_tools/bazel:cc.bzl", "iree_cc_binary")
+load("//build_tools/bazel:python.bzl", "iree_py_test")
+load(":invocation_test.bzl", "rocjitsu_invocation_test_suite")
+
+package(default_visibility = ["//visibility:private"])
+
+rocjitsu_invocation_test_suite(name = "invocation_tests")
+
+iree_cc_binary(
+    name = "launcher_fixture",
+    testonly = True,
+    srcs = ["launcher_fixture.c"],
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:linux"],
+)
+
+iree_py_test(
+    name = "launcher_test",
+    srcs = ["launcher_test.py"],
+    args = [
+        "$(rootpath //build_tools/third_party/rocjitsu:launcher)",
+        "$(rootpath :launcher_fixture)",
+    ],
+    data = [
+        ":launcher_fixture",
+        "//build_tools/third_party/rocjitsu:launcher",
+    ],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+)

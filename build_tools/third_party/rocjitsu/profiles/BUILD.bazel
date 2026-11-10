@@ -1,0 +1,19 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# Runtime-only simulator configurations have no CMake target surface.
+# bazel-to-cmake: skip
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "gfx942_two_gpu.json",
+    "gfx950_two_gpu.json",
+    "gfx1100_four_gpu.json",
+    "gfx1151_four_gpu.json",
+    "gfx1201_four_gpu.json",
+    "gfx1250_two_gpu.json",
+])

@@ -60,7 +60,7 @@ _WASI_CONFIGURATION = {
 def _launcher_transition_impl(_settings, _attr):
     return _LAUNCHER_CONFIGURATION
 
-_launcher_transition = transition(
+executable_launcher_transition = transition(
     implementation = _launcher_transition_impl,
     inputs = [],
     outputs = _LAUNCHER_CONFIGURATION.keys(),
@@ -415,7 +415,7 @@ _SHARED_ATTRS = {
         doc = "Explicit JavaScript entry point used when wrapping a wasm executable.",
     ),
     "windows_launcher": attr.label(
-        cfg = _launcher_transition,
+        cfg = executable_launcher_transition,
         executable = True,
     ),
     "_allowlist_function_transition": attr.label(

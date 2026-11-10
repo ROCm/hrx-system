@@ -58,6 +58,25 @@ The runtime repository checks the pin, payload checksums, helper executability,
 and complete non-glibc ELF closure, then preserves the layout in runfiles. It
 rejects missing dependencies and dependencies resolved outside the package.
 
+`rocjitsu_executable` in `invocation.bzl` binds this runtime and an ordered list
+of topology configurations to an ordinary executable's existing library and
+configuration options. The executable retains the caller's compilation
+configuration; the simulator is added only as execution data. The rule checks
+that an ASan runtime has an ASan consumer. An ordinary runtime supports ordinary
+and ASan consumers.
+
+The configurations under `profiles/` describe complete multi-GPU topologies.
+They have no simulator tick limit: the consumer owns shutdown, and the outer
+test harness detects hangs.
+
+The invocation sets its loader search path to the package's library directory,
+checks the package's host CPU requirement, and prepares a descriptor soft limit
+of at least 8,192 before exec. This prevents the simulator from adjusting that
+process limit during initialization. It preserves arguments and inherited signal
+dispositions, and rejects overrides of fixed bootstrap options. Consumers with
+flag files or aliases can also receive a flag-lock option for their own parser
+to enforce. Library ownership and VM creation remain in the consumer.
+
 The manual `//build_tools/third_party/rocjitsu:runtime_test` executes passive
 discovery and two complete VM lifecycles through the declared runtime. It checks
 that discovery does not activate the helper, activation does, teardown releases
