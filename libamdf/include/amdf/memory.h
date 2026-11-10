@@ -92,6 +92,11 @@ enum amdf_memory_flag_bits_e {
   /// Placement, host cacheability, atomic operations and observer reach remain
   /// independent. Ordering and visibility still follow memory pair queries.
   AMDF_MEMORY_FLAG_DEVICE_UNCACHED = UINT64_C(1) << 9,
+  /// The native device address for each byte equals the corresponding pointer
+  /// in the explicit host mapping. This is an attachment property: other
+  /// address kinds and independently registered or imported storage may use
+  /// aliases.
+  AMDF_MEMORY_FLAG_HOST_ADDRESS_IDENTITY = UINT64_C(1) << 10,
 };
 
 /// Exact page-table access granted to one memory attachment or projection.
@@ -507,7 +512,7 @@ typedef struct amdf_memory_access_requirements_t {
   /// Reserved for compatible growth; must be zero.
   uint32_t reserved;
   /// Required access properties: QUEUE_STORAGE, HOST_COHERENT, DEVICE_ADDRESS,
-  /// MAPPING_SOURCE, DEVICE_UNCACHED.
+  /// MAPPING_SOURCE, DEVICE_UNCACHED, HOST_ADDRESS_IDENTITY.
   amdf_memory_flags_t flags;
   /// Interfaces whose complete logical-range addresses must be established.
   amdf_memory_address_kinds_t address_kinds;
@@ -824,8 +829,8 @@ typedef struct amdf_memory_access_info_t {
   /// Identity of the required live consumer, not an allocation owner.
   amdf_device_id_t device_id;
   /// Established access properties: QUEUE_STORAGE, HOST_COHERENT,
-  /// DEVICE_ADDRESS, MAPPING_SOURCE and DEVICE_UNCACHED. Backing properties
-  /// belong to amdf_memory_info_t.
+  /// DEVICE_ADDRESS, MAPPING_SOURCE, DEVICE_UNCACHED and
+  /// HOST_ADDRESS_IDENTITY. Backing properties belong to amdf_memory_info_t.
   amdf_memory_flags_t flags;
   /// Supported atomic operations on naturally aligned 32-bit words.
   amdf_atomic_operations_t atomic_operations_32;

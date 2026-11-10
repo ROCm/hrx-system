@@ -348,16 +348,18 @@ static iree_status_t iree_hal_amdgpu_slab_pool_query_memory(
       iree_hal_amdgpu_slab_provider_query_memory_pool_properties(
           backend->libhsa, memory_pool, &properties));
   const bool owned_host_visible =
-      !requires_uncached &&
-      iree_any_bit_set(global_flags,
-                       HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED) &&
+      iree_any_bit_set(
+          global_flags,
+          HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED |
+              HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED) &&
       (location == HSA_AMD_MEMORY_POOL_LOCATION_CPU ||
        physical_device->memory_system.svm.direct_host_access);
   iree_hal_memory_type_t memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   if (location == HSA_AMD_MEMORY_POOL_LOCATION_CPU) {
     memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
     if (owned_host_visible) {
-      memory_type |= IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
+      memory_type |=
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_CACHED;
     }
   }
   if (owned_host_visible) {
@@ -365,14 +367,15 @@ static iree_status_t iree_hal_amdgpu_slab_pool_query_memory(
         IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_HOST_COHERENT;
   }
   if (requires_uncached) {
-    memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
-                  IREE_HAL_MEMORY_TYPE_DEVICE_UNCACHED;
-    properties.supported_usage &=
-        ~(IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |
-          IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT |
-          IREE_HAL_BUFFER_USAGE_MAPPING_OPTIONAL |
-          IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_RANDOM |
-          IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_SEQUENTIAL_WRITE);
+    memory_type |= IREE_HAL_MEMORY_TYPE_DEVICE_UNCACHED;
+    if (!owned_host_visible) {
+      properties.supported_usage &=
+          ~(IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |
+            IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT |
+            IREE_HAL_BUFFER_USAGE_MAPPING_OPTIONAL |
+            IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_RANDOM |
+            IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_SEQUENTIAL_WRITE);
+    }
   }
   iree_hal_memory_type_t exposed_memory_type = IREE_HAL_MEMORY_TYPE_NONE;
   iree_hal_buffer_usage_t exposed_supported_usage = IREE_HAL_BUFFER_USAGE_NONE;
@@ -708,6 +711,7 @@ static iree_status_t iree_hal_amdgpu_slab_pool_query(
   }
   bool has_native_family = false;
   bool requires_uncached = false;
+  bool requires_host_address_identity = false;
   for (iree_host_size_t i = 0; i < scope.family_count; ++i) {
     const iree_hal_pool_family_access_t* access = &scope.families[i];
     const iree_hal_memory_backend_t* backend = iree_hal_device_memory_backend(
@@ -719,11 +723,24 @@ static iree_status_t iree_hal_amdgpu_slab_pool_query(
     has_native_family |= backend->type == IREE_HAL_MEMORY_BACKEND_ROCR;
     requires_uncached |= iree_any_bit_set(
         access->requirements, IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED);
+    if (backend->type == IREE_HAL_MEMORY_BACKEND_ROCR) {
+      requires_host_address_identity |=
+          iree_any_bit_set(access->requirements,
+                           IREE_HAL_POOL_ACCESS_REQUIRE_HOST_ADDRESS_IDENTITY);
+    }
   }
   if (scope.family_count && !has_native_family) {
     return iree_ok_status();
   }
   if (requires_uncached &&
+      (options->owned.mode != IREE_HAL_SLAB_POOL_OWNED_ENABLED ||
+       options->imports.class_count != 0)) {
+    return iree_ok_status();
+  }
+  // Owned HSA pool allocations publish their allocation pointer as both the
+  // host and agent binding. Imported storage can expose an independent agent
+  // alias and cannot satisfy this stronger address contract.
+  if (requires_host_address_identity &&
       (options->owned.mode != IREE_HAL_SLAB_POOL_OWNED_ENABLED ||
        options->imports.class_count != 0)) {
     return iree_ok_status();
@@ -745,11 +762,16 @@ static iree_status_t iree_hal_amdgpu_slab_pool_query(
       iree_hal_amdgpu_physical_device_t* physical_device =
           backend->physical_devices[j];
       if (requires_uncached) {
-        hsa_amd_memory_pool_t memory_pool = {0};
-        uint32_t allocation_flags = 0;
-        if (iree_hal_amdgpu_allocator_query_uncached_memory_pool(
+        hsa_amd_memory_pool_t memory_pool =
+            scope.host.access ? physical_device->host_memory_pools.uncached_pool
+                              : (hsa_amd_memory_pool_t){0};
+        uint32_t allocation_flags = HSA_AMD_MEMORY_POOL_STANDARD_FLAG;
+        const bool available =
+            memory_pool.handle ||
+            iree_hal_amdgpu_allocator_query_uncached_memory_pool(
                 backend->allocator, (uint32_t)physical_device->device_ordinal,
-                &memory_pool, &allocation_flags)) {
+                &memory_pool, &allocation_flags);
+        if (available) {
           status = iree_hal_amdgpu_slab_pool_query_memory(
               backend, group, (uint32_t)i, physical_device, memory_pool,
               allocation_flags, /*requires_uncached=*/true, scope, options,

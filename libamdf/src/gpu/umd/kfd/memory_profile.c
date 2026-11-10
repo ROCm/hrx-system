@@ -299,7 +299,8 @@ amdf_status_t amdf_gpu_kfd_query_memory_profile(
                     AMDF_MEMORY_PROFILE_ROLE_HOST_MAP;
     profile.guaranteed_flags =
         AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_SHAREABLE |
-        AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS;
+        AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+        AMDF_MEMORY_FLAG_HOST_ADDRESS_IDENTITY;
     if (uncached_system) {
       profile.guaranteed_flags |= AMDF_MEMORY_FLAG_DEVICE_UNCACHED;
     }
@@ -377,7 +378,8 @@ amdf_status_t amdf_gpu_kfd_query_memory_profile(
     if ((topology->memory_features &
          AMDF_GPU_DEVICE_FEATURE_HOST_VISIBLE_LOCAL_MEMORY) != 0) {
       profile.roles |= AMDF_MEMORY_PROFILE_ROLE_HOST_MAP;
-      profile.supported_flags |= AMDF_MEMORY_FLAG_HOST_VISIBLE;
+      profile.supported_flags |= AMDF_MEMORY_FLAG_HOST_VISIBLE |
+                                 AMDF_MEMORY_FLAG_HOST_ADDRESS_IDENTITY;
     }
     profile.guaranteed_device_access = AMDF_MEMORY_ACCESS_READ;
     profile.supported_device_access = AMDF_MEMORY_ACCESS_READ |

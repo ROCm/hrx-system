@@ -720,6 +720,7 @@ struct FakeNative {
     output->reservation_granularity = 4096;
     output->maximum_alignment = UINT64_C(1) << 30;
     output->mapping_granularity = 4096;
+    output->supported_flags = self->host_reservation_flags;
     output->required_source_flags = AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE;
     return AMDF_STATUS_OK;
   }
@@ -818,6 +819,8 @@ struct FakeNative {
   bool mapping_enabled = false;
   // Native host address-space support, independent of source eligibility.
   bool host_reservation_enabled = false;
+  // Construction flags supported by the host reservation projection.
+  amdf_memory_reservation_flags_t host_reservation_flags = 0;
   // Whether owned backing supports independently replaceable CPU aliases.
   bool host_source_enabled = false;
   // Independent host aliases can have a different cache protocol than owners.

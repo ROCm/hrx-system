@@ -35,6 +35,10 @@ typedef struct iree_hal_amdgpu_host_memory_pools_t {
   // share access with the host. For resources we expect to only be accessed on
   // a particular agent we instead allocate from there.
   hsa_amd_memory_pool_t fine_pool;
+  // Optional extended fine-grained system pool with an uncached device mapping.
+  // This is the native backing for concurrent host/device control data when
+  // ordinary fine-grained memory does not bypass the device cache hierarchy.
+  hsa_amd_memory_pool_t uncached_pool;
   // Memory region used for various system-level resources.
   // Allocations from this pool must be accessible to all agents.
   // The more modern memory pool API and `fine_pool` should be used
@@ -43,8 +47,9 @@ typedef struct iree_hal_amdgpu_host_memory_pools_t {
 } iree_hal_amdgpu_host_memory_pools_t;
 
 // Selects allocatable host pools and a legacy fine-grained region for an agent.
-// Pool selection requires global, accessible-by-all memory and prefers a
-// non-kernarg fine pool. Region enumeration may include every CPU NUMA node.
+// Pool selection requires global, accessible-by-all memory, prefers a
+// non-kernarg ordinary fine pool, and records an extended fine-grained pool
+// when present. Region enumeration may include every CPU NUMA node.
 // Handles are borrowed from libhsa and remain valid for that runtime's
 // lifetime. On failure out_pools is zeroed and the native or missing-capability
 // error is propagated.

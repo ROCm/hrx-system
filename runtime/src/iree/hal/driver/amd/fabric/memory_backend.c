@@ -259,6 +259,8 @@ typedef struct iree_hal_amd_fabric_slab_pool_query_t {
   amdf_memory_map_flags_t private_host_access;
   // Backing flags required by the complete consumer set.
   amdf_memory_flags_t required_flags;
+  // Whether a native consumer must share its address with the public host map.
+  bool requires_host_address_identity;
   // Number of prepared bindings, including the reserved host slot.
   uint16_t binding_count;
   // Native address requests in binding order.
@@ -433,6 +435,13 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_emit_plan(
   if (query->options->placement.mode == IREE_HAL_POOL_PLACEMENT_REQUIRED &&
       (placement.mode != IREE_HAL_POOL_PLACEMENT_REQUIRED ||
        placement.node != query->options->placement.node)) {
+    return iree_ok_status();
+  }
+  // LOCAL ASAN storage is deliberately projected into a distinct application
+  // GPU address range. The underlying native allocation may have an identical
+  // host/GPU address, but that hidden address is not the binding programs use.
+  if (query->requires_host_address_identity && query->asan && profile &&
+      profile->memory_class == AMDF_MEMORY_CLASS_LOCAL) {
     return iree_ok_status();
   }
   uint16_t binding_count = query->binding_count;
@@ -1288,6 +1297,7 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
   amdf_memory_map_flags_t private_host_access = 0;
   bool requires_host_export =
       iree_hal_amd_fabric_memory_exports_host_pointer(options->owned.exports);
+  bool requires_host_address_identity = false;
   for (iree_host_size_t i = 0; i < options->imports.class_count; ++i) {
     requires_host_export |= iree_hal_amd_fabric_memory_exports_host_pointer(
         options->imports.classes[i].exports);
@@ -1437,6 +1447,12 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
       if (iree_any_bit_set(requested->requirements,
                            IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED)) {
         requirements->flags |= AMDF_MEMORY_FLAG_DEVICE_UNCACHED;
+      }
+      if (iree_any_bit_set(
+              requested->requirements,
+              IREE_HAL_POOL_ACCESS_REQUIRE_HOST_ADDRESS_IDENTITY)) {
+        requirements->flags |= AMDF_MEMORY_FLAG_HOST_ADDRESS_IDENTITY;
+        requires_host_address_identity = true;
       }
       // Native SYSTEM atomic recipes participate in the shared host
       // serialization domain. Qualify that mapping policy before querying
@@ -1625,6 +1641,7 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
       .family_bindings = family_bindings,
       .private_host_access = private_host_access,
       .required_flags = required_flags,
+      .requires_host_address_identity = requires_host_address_identity,
       .binding_count = (uint16_t)binding_count,
       .requests = requests,
       .transition_sites = transition_sites,

@@ -216,9 +216,11 @@ TEST_F(MemoryBackendTest, UncachedAccessRemainsAnExplicitDeviceRequirement) {
   native_.AwaitEmpty();
 }
 
-TEST_F(MemoryBackendTest, HostCoherentUncachedAccessPreservesBothRequirements) {
-  native_.access_flags[0] =
-      AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_UNCACHED;
+TEST_F(MemoryBackendTest,
+       HostAccessPreservesCoherenceUncachedAndAddressIdentity) {
+  native_.access_flags[0] = AMDF_MEMORY_FLAG_HOST_COHERENT |
+                            AMDF_MEMORY_FLAG_DEVICE_UNCACHED |
+                            AMDF_MEMORY_FLAG_HOST_ADDRESS_IDENTITY;
   native_.host_coherent = true;
   iree_hal_pool_family_access_t families[2] = {};
   for (uint32_t i = 0; i < 2; ++i) {
@@ -228,7 +230,8 @@ TEST_F(MemoryBackendTest, HostCoherentUncachedAccessPreservesBothRequirements) {
                              << IREE_HAL_BUFFER_INTERFACE_XDNA_SHIM_DMA;
   }
   families[0].requirements = IREE_HAL_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST |
-                             IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED;
+                             IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED |
+                             IREE_HAL_POOL_ACCESS_REQUIRE_HOST_ADDRESS_IDENTITY;
   const iree_hal_pool_scope_t scope = {
       .family_count = 2,
       .families = families,
@@ -248,7 +251,8 @@ TEST_F(MemoryBackendTest, HostCoherentUncachedAccessPreservesBothRequirements) {
   ASSERT_EQ(native_.created_accesses.size(), 2u);
   EXPECT_EQ(native_.created_accesses[0].requirements.flags,
             AMDF_MEMORY_FLAG_DEVICE_ADDRESS | AMDF_MEMORY_FLAG_HOST_COHERENT |
-                AMDF_MEMORY_FLAG_DEVICE_UNCACHED);
+                AMDF_MEMORY_FLAG_DEVICE_UNCACHED |
+                AMDF_MEMORY_FLAG_HOST_ADDRESS_IDENTITY);
   EXPECT_EQ(native_.created_accesses[1].requirements.flags,
             AMDF_MEMORY_FLAG_DEVICE_ADDRESS);
   iree_hal_buffer_release(buffer);

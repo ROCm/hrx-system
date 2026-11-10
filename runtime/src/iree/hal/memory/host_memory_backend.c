@@ -153,6 +153,8 @@ static iree_status_t iree_hal_host_slab_pool_query(
                                 << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE);
     const iree_hal_memory_backend_t* backend = iree_hal_device_memory_backend(
         iree_hal_queue_family_device(access->family));
+    // Host execution uses the public mapping address directly, so host
+    // coherence and address identity are inherent properties of this route.
     if (!backend || backend->type != IREE_HAL_MEMORY_BACKEND_HOST ||
         (access->interfaces &
          ~((UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_HOST) |
