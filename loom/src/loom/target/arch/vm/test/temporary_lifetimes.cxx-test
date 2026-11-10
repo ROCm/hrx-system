@@ -144,3 +144,106 @@ event 486
 event 8
 OK 0
 retired 0
+
+// ====
+// Converted reference temporaries execute the selected constructor and retain
+// their complete-expression or extended lexical lifetime, including mutations.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Input {
+  // Aggregate argument whose cleanup follows the converted temporary.
+  unsigned value;
+  ~Input() { observe(50u + value); }
+};
+struct Doubled {
+  // The selected constructor computes this payload before the reference binds.
+  unsigned value;
+  Doubled(const unsigned& source) : value(source * 2u) { observe(10u + source); }
+  Doubled(const Input& source) : value(source.value * 3u) { observe(40u + source.value); }
+  ~Doubled() { observe(20u + value); }
+};
+static void consume(const Doubled& value) { const Doubled* pointer = &value; observe(pointer->value); }
+static void modify(Doubled&& value) { Doubled* pointer = &value; ++pointer->value; observe(pointer->value); }
+void run() {
+  consume(3u);
+  observe(1);
+  { const Doubled& held = 5u; observe(held.value); observe(2); }
+  modify(7u);
+  observe(3);
+  { Doubled&& held = 9u; ++held.value; observe(held.value); }
+  consume(Input{4});
+  {
+    const Doubled& parenthesized(11u);
+    const Doubled& braced{13u};
+    observe(parenthesized.value);
+    observe(braced.value);
+  }
+}
+// ----
+event 13
+event 6
+event 26
+event 1
+event 15
+event 10
+event 2
+event 30
+event 17
+event 15
+event 35
+event 3
+event 19
+event 19
+event 39
+event 44
+event 12
+event 32
+event 54
+event 21
+event 23
+event 22
+event 26
+event 46
+event 42
+OK 0
+retired 0
+
+// ====
+// Conversion, indexing, and ordinary operator results all materialize the
+// returned object once and retire it after the addressed consumer finishes.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Result {
+  // Distinguishes the returned object from the operator's input.
+  unsigned value;
+  ~Result() { observe(80u + value); }
+};
+struct Source {
+  // Shared source for the four independent value-producing operators.
+  unsigned value;
+  operator Result() const { observe(1); return Result{value * 2u}; }
+  Result operator[](unsigned index) const { observe(2); return Result{value + index}; }
+  Result operator+() const { observe(3); return Result{value + 3u}; }
+  Result operator+(unsigned amount) const { observe(4); return Result{value + amount}; }
+};
+static void consume(const Result& result) { const Result* pointer = &result; observe(pointer->value); }
+void run() {
+  Source source{4};
+  consume(source);
+  consume(source[2]);
+  consume(+source);
+  consume(source + 5u);
+}
+// ----
+event 1
+event 8
+event 88
+event 2
+event 6
+event 86
+event 3
+event 7
+event 87
+event 4
+event 9
+event 89
+OK 0
+retired 0

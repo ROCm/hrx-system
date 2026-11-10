@@ -1175,8 +1175,8 @@ void ControlFlow::visit(cxx::LambdaExpressionAST* ast) {
                               /*storage_receiver=*/true, capture);
     }
     if (unit_.typeTraits().is_lvalue_reference(field->type())) {
-      cxx::Initializer reference(initializer);
-      auto* referent = reference.singleExpression();
+      auto* referent =
+          cxx::Initializer(initializer).referenceExpression(unit_.typeTraits());
       if (!referent) {
         diagnostics_.reject(unit_, capture,
                             "lambda reference capture requires one "
@@ -1252,8 +1252,8 @@ void ControlFlow::analyze_default_constructor(const cxx::Type* type,
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(initializer->symbol);
     if (field && unit_.typeTraits().is_lvalue_reference(field->type())) {
       auto* source = cxx::memInitializerClause(unit_.arena(), initializer);
-      cxx::Initializer reference(source);
-      auto* referent = reference.singleExpression();
+      auto* referent =
+          cxx::Initializer(source).referenceExpression(unit_.typeTraits());
       if (!referent) {
         diagnostics_.reject(unit_, source,
                             "reference members require one initializer "
@@ -2816,8 +2816,8 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
       }
     }
     if (unit_.typeTraits().is_reference(variable->type()) && ast->initializer) {
-      cxx::Initializer source(ast->initializer);
-      auto* referent = source.singleExpression();
+      auto* referent = cxx::Initializer(ast->initializer)
+                           .referenceExpression(unit_.typeTraits());
       if (!referent) {
         diagnostics_.reject(unit_, ast->initializer,
                             "reference locals require one initializer "
@@ -2894,17 +2894,7 @@ void ControlFlow::visit(cxx::ImplicitCastExpressionAST* ast) {
       implicit_object_type(unit_, ast->conversionFunction);
   if (ast->conversionFunction && !ast->conversionFunction->isConstructor() &&
       types_.record(conversion_object, ast)) {
-    retain_call(
-        DirectOperatorCall{
-            .function = ast->conversionFunction,
-            .receiver = ast->expression,
-            .arguments = {},
-            .argument_count = 0,
-            .evaluation_order = OperatorEvaluationOrder::Forward,
-            .has_postfix_dummy = false,
-            .is_virtual_dispatch = ast->isVirtualDispatch,
-        },
-        ast);
+    retain_call(*direct_operator_call(ast), ast);
     return;
   }
   if (bound_constructor_conversions_.contains(ast) ||

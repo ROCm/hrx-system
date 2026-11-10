@@ -105,28 +105,27 @@ cxx::ExpressionAST* explicit_reference_operand(cxx::TranslationUnit& unit,
 
 cxx::ExpressionAST* unwrap_object_identity(cxx::TranslationUnit& unit,
                                            cxx::ExpressionAST* expression) {
-  expression = unwrap_expression(expression);
-  while (auto* operand = explicit_reference_operand(unit, expression)) {
-    expression = operand;
-    for (;;) {
-      if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(expression)) {
-        expression = nested->expression;
-        continue;
-      }
-      if (auto* initializer =
-              cxx::ast_cast<cxx::DefaultInitializerExpressionAST>(expression)) {
-        expression = initializer->expression;
-        continue;
-      }
-      auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression);
-      if (!cast || is_class_adjustment(cast) ||
-          cast->valueCategory == cxx::ValueCategory::kPrValue) {
-        break;
-      }
-      expression = cast->expression;
+  for (;;) {
+    if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(expression)) {
+      expression = nested->expression;
+      continue;
     }
+    if (auto* initializer =
+            cxx::ast_cast<cxx::DefaultInitializerExpressionAST>(expression)) {
+      expression = initializer->expression;
+      continue;
+    }
+    if (auto* operand = explicit_reference_operand(unit, expression)) {
+      expression = operand;
+      continue;
+    }
+    auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression);
+    if (!cast || cast->conversionFunction || is_class_adjustment(cast) ||
+        cast->valueCategory == cxx::ValueCategory::kPrValue) {
+      return expression;
+    }
+    expression = cast->expression;
   }
-  return expression;
 }
 
 cxx::ImplicitCastExpressionAST* constructor_conversion(
@@ -260,6 +259,14 @@ std::optional<DirectOperatorCall> direct_operator_call(
     };
   };
   switch (expression->kind()) {
+    case cxx::ASTKind::ImplicitCastExpression: {
+      auto* ast = static_cast<cxx::ImplicitCastExpressionAST*>(expression);
+      auto* function = ast->conversionFunction;
+      return function && !function->isConstructor()
+                 ? unary(function, ast->expression, false,
+                         ast->isVirtualDispatch)
+                 : std::nullopt;
+    }
     case cxx::ASTKind::BinaryExpression: {
       auto* ast = static_cast<cxx::BinaryExpressionAST*>(expression);
       return binary(ast->symbol, ast->leftExpression, ast->rightExpression,
