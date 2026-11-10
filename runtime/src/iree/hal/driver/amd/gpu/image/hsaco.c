@@ -378,10 +378,12 @@ static iree_status_t iree_hal_amd_gpu_hsaco_read_dynamic(
         symbol_stride = value;
         break;
       case 14:  // DT_SONAME is descriptive; dependencies use explicit bindings.
+      case 15:  // DT_RPATH is inert without a path-based dependency loader.
       case 16:  // DT_SYMBOLIC; definitions already resolve within this image.
       case 21:  // DT_DEBUG is populated by a host loader, never by GPU code.
       case 22:  // DT_TEXTREL; all segments are writable during loading.
       case 24:  // DT_BIND_NOW; all imports are resolved before publication.
+      case 29:  // DT_RUNPATH is inert without a path-based dependency loader.
       case 0x6ffffff9:  // DT_RELACOUNT is an optional traversal optimization.
         break;
       case 30:  // DT_FLAGS: SYMBOLIC, TEXTREL, BIND_NOW need no extra service.
