@@ -847,7 +847,9 @@ static iree_status_t iree_hal_amd_gpu_hsaco_decode_symbols(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "HSACO dynamic symbol zero is not null");
   }
-  reader->symbol_addresses[0].kind = IREE_HAL_AMD_GPU_IMAGE_ADDRESS_ABSOLUTE;
+  reader->symbol_addresses[0] = (iree_hal_amd_gpu_image_address_t){
+      .kind = IREE_HAL_AMD_GPU_IMAGE_ADDRESS_ABSOLUTE,
+  };
   for (uint32_t i = 1; i < reader->symbol_count; ++i) {
     const uint8_t* data =
         reader->symbols.data + (uint64_t)i * IREE_HAL_AMD_GPU_HSACO_SYMBOL_SIZE;
@@ -878,14 +880,15 @@ static iree_status_t iree_hal_amd_gpu_hsaco_decode_symbols(
     iree_hal_amd_gpu_image_address_t address = {0};
     iree_hal_amd_gpu_image_access_t access = 0;
     if (!section) {
-      if (!binding || !name.size) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "HSACO import has no external name/binding");
+      if (!binding || !name.size || type > 2) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "HSACO undefined symbol requires a name, external binding, and "
+            "importable type");
       }
       address.kind = IREE_HAL_AMD_GPU_IMAGE_ADDRESS_IMPORT;
-      address.import_ordinal = (uint32_t)image->import_count;
-      image->imports[image->import_count++] = (iree_hal_amd_gpu_image_import_t){
-          .name = name, .kind = kind, .weak = binding == 2};
+      // Undefined symbols only become imports if a relocation references them.
+      address.import_ordinal = UINT32_MAX;
     } else if (section == 0xfff1) {  // SHN_ABS.
       address.kind = IREE_HAL_AMD_GPU_IMAGE_ADDRESS_ABSOLUTE;
       address.offset = value;
@@ -909,7 +912,7 @@ static iree_status_t iree_hal_amd_gpu_hsaco_decode_symbols(
       access = image->segments[segment_ordinal].access;
     }
     reader->symbol_addresses[i] = address;
-    if (name.size && binding && type <= 2) {
+    if (section && name.size && binding && type <= 2) {
       image->symbols[image->symbol_count++] = (iree_hal_amd_gpu_image_symbol_t){
           .name = name,
           .address = address,
@@ -920,16 +923,6 @@ static iree_status_t iree_hal_amd_gpu_hsaco_decode_symbols(
           .access = access,
           .weak = binding == 2,
       };
-    }
-  }
-  qsort(image->symbols, image->symbol_count, sizeof(*image->symbols),
-        iree_hal_amd_gpu_hsaco_compare_symbols);
-  for (iree_host_size_t i = 1; i < image->symbol_count; ++i) {
-    if (iree_string_view_equal(image->symbols[i - 1].name,
-                               image->symbols[i].name)) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT, "HSACO symbol `%.*s` is ambiguous",
-          (int)image->symbols[i].name.size, image->symbols[i].name.data);
     }
   }
   for (iree_host_size_t offset = 0;
@@ -954,6 +947,59 @@ static iree_status_t iree_hal_amd_gpu_hsaco_decode_symbols(
   return iree_ok_status();
 }
 
+// Materializes one previously validated undefined symbol when its first
+// dynamic relocation proves that the loaded image actually requires it.
+static void iree_hal_amd_gpu_hsaco_materialize_import(
+    iree_hal_amd_gpu_hsaco_reader_t* reader, iree_hal_amd_gpu_image_t* image,
+    uint32_t symbol_ordinal) {
+  const uint8_t* data =
+      reader->symbols.data +
+      (uint64_t)symbol_ordinal * IREE_HAL_AMD_GPU_HSACO_SYMBOL_SIZE;
+  const uint32_t name_offset = iree_unaligned_load_le_u32(data);
+  // The symbol pass already validated this indexed string reference and its
+  // terminating NUL. Revisit only the relocation-selected record; no table
+  // scan or second admission path is involved.
+  iree_string_view_t name =
+      iree_make_cstring_view((const char*)reader->strings.data + name_offset);
+  const uint32_t type = data[4] & 0xf;
+  const bool weak = (data[4] >> 4) == 2;
+  iree_hal_amd_gpu_image_address_t* address =
+      &reader->symbol_addresses[symbol_ordinal];
+  address->import_ordinal = (uint32_t)image->import_count;
+  const iree_hal_amd_gpu_image_symbol_kind_t kind =
+      type == 1   ? IREE_HAL_AMD_GPU_IMAGE_SYMBOL_DATA
+      : type == 2 ? IREE_HAL_AMD_GPU_IMAGE_SYMBOL_FUNCTION
+                  : IREE_HAL_AMD_GPU_IMAGE_SYMBOL_UNSPECIFIED;
+  image->imports[image->import_count++] = (iree_hal_amd_gpu_image_import_t){
+      .name = name,
+      .kind = kind,
+      .weak = weak,
+  };
+  image->symbols[image->symbol_count++] = (iree_hal_amd_gpu_image_symbol_t){
+      .name = name,
+      .address = *address,
+      .length = iree_unaligned_load_le_u64(data + 16),
+      .kind = kind,
+      .visibility = (iree_hal_amd_gpu_image_symbol_visibility_t)(data[5] & 3),
+      .weak = weak,
+  };
+}
+
+static iree_status_t iree_hal_amd_gpu_hsaco_finalize_symbols(
+    iree_hal_amd_gpu_image_t* image) {
+  qsort(image->symbols, image->symbol_count, sizeof(*image->symbols),
+        iree_hal_amd_gpu_hsaco_compare_symbols);
+  for (iree_host_size_t i = 1; i < image->symbol_count; ++i) {
+    if (iree_string_view_equal(image->symbols[i - 1].name,
+                               image->symbols[i].name)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT, "HSACO symbol `%.*s` is ambiguous",
+          (int)image->symbols[i].name.size, image->symbols[i].name.data);
+    }
+  }
+  return iree_ok_status();
+}
+
 static int iree_hal_amd_gpu_hsaco_compare_relocations(const void* lhs,
                                                       const void* rhs) {
   const iree_hal_amd_gpu_image_relocation_t* a = lhs;
@@ -971,8 +1017,7 @@ static uint64_t iree_hal_amd_gpu_hsaco_relocation_width(
 }
 
 static iree_status_t iree_hal_amd_gpu_hsaco_decode_relocations(
-    const iree_hal_amd_gpu_hsaco_reader_t* reader,
-    iree_hal_amd_gpu_image_t* image) {
+    iree_hal_amd_gpu_hsaco_reader_t* reader, iree_hal_amd_gpu_image_t* image) {
   for (iree_host_size_t offset = 0; offset < reader->relocations.data_length;
        offset += IREE_HAL_AMD_GPU_HSACO_RELOCATION_SIZE) {
     const uint8_t* data = reader->relocations.data + offset;
@@ -1028,7 +1073,13 @@ static iree_status_t iree_hal_amd_gpu_hsaco_decode_relocations(
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "HSACO relocation symbol exceeds its table");
       }
-      relocation.value = reader->symbol_addresses[symbol];
+      iree_hal_amd_gpu_image_address_t* symbol_address =
+          &reader->symbol_addresses[symbol];
+      if (symbol_address->kind == IREE_HAL_AMD_GPU_IMAGE_ADDRESS_IMPORT &&
+          symbol_address->import_ordinal == UINT32_MAX) {
+        iree_hal_amd_gpu_hsaco_materialize_import(reader, image, symbol);
+      }
+      relocation.value = *symbol_address;
       relocation.value.offset += addend;
     }
     image->relocations[image->relocation_count++] = relocation;
@@ -1406,6 +1457,9 @@ iree_status_t iree_hal_amd_gpu_hsaco_image_initialize(
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_gpu_hsaco_decode_relocations(&reader, &image);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_gpu_hsaco_finalize_symbols(&image);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_gpu_hsaco_decode_kernels(&reader, &image);

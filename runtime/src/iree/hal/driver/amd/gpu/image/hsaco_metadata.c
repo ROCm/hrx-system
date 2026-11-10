@@ -1153,11 +1153,6 @@ static iree_status_t iree_hal_amd_gpu_metadata_parse_payload(
         IREE_STATUS_INVALID_ARGUMENT,
         "AMDGPU metadata requires `amdhsa.version` and `amdhsa.kernels`");
   }
-  if (version[1] >= 1 && !(seen & (UINT64_C(1) << 1))) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDHSA metadata version 1.%u requires `amdhsa.target`", version[1]);
-  }
   return iree_ok_status();
 }
 
