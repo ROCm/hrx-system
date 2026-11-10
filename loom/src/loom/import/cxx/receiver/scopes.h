@@ -76,8 +76,8 @@ class ReceiverScopes {
     cxx::Symbol* subobject;
     // Enclosing receiver for the same declaration, when recursively active.
     std::optional<Owner> previous_owner;
-    // Enclosing value binding hidden while this receiver is current.
-    std::optional<Value> previous_value;
+    // Complete or pending enclosing binding hidden by the current receiver.
+    ValueBindings::Binding previous_binding;
   };
 
   struct Frame {
@@ -90,8 +90,8 @@ class ReceiverScopes {
   struct SuspendedBinding {
     // Construction ownership hidden during an explicit aggregate clause.
     Owner owner;
-    // Construction value hidden independently of lexical receiver mutations.
-    std::optional<Value> value;
+    // Construction binding hidden independently of lexical receiver mutations.
+    ValueBindings::Binding binding;
   };
 
   struct SuspendedFrame {

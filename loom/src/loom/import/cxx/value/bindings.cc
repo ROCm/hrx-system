@@ -10,6 +10,24 @@
 
 namespace loom::cxx_import {
 
+ValueBindings::Binding ValueBindings::take(cxx::Symbol* binding) {
+  auto value = values_.extract(binding);
+  if (!value.empty()) {
+    return Binding(std::move(value));
+  }
+  return Binding(uninitialized_.extract(binding));
+}
+
+void ValueBindings::restore(cxx::Symbol* binding, Binding state) {
+  erase(binding);
+  if (auto* value = std::get_if<Map::node_type>(&state.state_)) {
+    values_.insert(std::move(*value));
+  } else {
+    uninitialized_.insert(
+        std::get<PendingMap::node_type>(std::move(state.state_)));
+  }
+}
+
 const Partition& ValueBindings::partition(cxx::Symbol* binding) const {
   auto found = values_.find(binding);
   return found == values_.end() ? *uninitialized_.at(binding).partition

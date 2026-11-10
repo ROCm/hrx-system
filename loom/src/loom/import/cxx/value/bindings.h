@@ -12,6 +12,8 @@
 #include <cstddef>
 #include <optional>
 #include <unordered_map>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include "loom/import/cxx/value/representation.h"
@@ -36,6 +38,41 @@ class ValueBindings {
  public:
   using Map = std::unordered_map<cxx::Symbol*, Value>;
   using const_iterator = Map::const_iterator;
+
+ private:
+  struct Pending {
+    // Complete source structure admitted before any field value exists.
+    const Partition* partition;
+    // Availability is frontend state; absent entries never become IR values.
+    std::vector<std::optional<loom_value_id_t>> components;
+    // Unassigned component count, avoiding a complete-record scan on every
+    // member assignment while a large aggregate is being constructed.
+    size_t remaining;
+  };
+  using PendingMap = std::unordered_map<cxx::Symbol*, Pending>;
+
+ public:
+  // Move-owned binding hidden by a nested source scope. Retaining the map node
+  // preserves partial construction without copying its components or allocating
+  // a replacement node when the enclosing scope resumes. An empty node denotes
+  // an absent binding.
+  class Binding {
+   public:
+    Binding() = default;
+
+   private:
+    friend class ValueBindings;
+    explicit Binding(Map::node_type value) : state_(std::move(value)) {}
+    explicit Binding(PendingMap::node_type pending)
+        : state_(std::move(pending)) {}
+    // Exactly one complete or pending binding, owned until restored or dropped.
+    std::variant<Map::node_type, PendingMap::node_type> state_;
+  };
+
+  // Removes the current binding until a source scope restores it.
+  Binding take(cxx::Symbol* binding);
+  // Replaces the current binding with state previously taken for this symbol.
+  void restore(cxx::Symbol* binding, Binding state);
 
   const_iterator find(cxx::Symbol* binding) const {
     return values_.find(binding);
@@ -80,17 +117,8 @@ class ValueBindings {
  private:
   // Canonical current source bindings copied at structured-control forks.
   Map values_;
-  struct Pending {
-    // Complete source structure admitted before any field value exists.
-    const Partition* partition;
-    // Availability is frontend state; absent entries never become IR values.
-    std::vector<std::optional<loom_value_id_t>> components;
-    // Unassigned component count, avoiding a complete-record scan on every
-    // member assignment while a large aggregate is being constructed.
-    size_t remaining;
-  };
   // Declared source objects with no complete payload yet.
-  std::unordered_map<cxx::Symbol*, Pending> uninitialized_;
+  PendingMap uninitialized_;
 };
 
 }  // namespace loom::cxx_import
