@@ -37,6 +37,12 @@ py_library(
 )
 
 py_library(
+    name = "github_sbom",
+    srcs = ["github_sbom.py"],
+    deps = [":inventory"],
+)
+
+py_library(
     name = "github_alerts",
     srcs = ["github_alerts.py"],
 )
@@ -53,6 +59,13 @@ py_binary(
     srcs = ["github_snapshot_main.py"],
     main = "github_snapshot_main.py",
     deps = [":github_snapshot"],
+)
+
+py_binary(
+    name = "github_sbom_verify",
+    srcs = ["github_sbom_main.py"],
+    main = "github_sbom_main.py",
+    deps = [":github_sbom"],
 )
 
 py_test(
@@ -79,10 +92,20 @@ py_test(
     ],
 )
 
+py_test(
+    name = "github_sbom_test",
+    srcs = ["github_sbom_test.py"],
+    deps = [
+        ":github_sbom",
+        ":inventory",
+    ],
+)
+
 test_suite(
     name = "dependencies_tests",
     tests = [
         ":github_alerts_test",
+        ":github_sbom_test",
         ":github_snapshot_test",
         ":inventory_test",
     ],

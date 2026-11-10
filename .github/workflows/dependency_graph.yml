@@ -1,0 +1,76 @@
+# Copyright 2026 The HRX Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+name: Security / Dependency graph
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".bazelversion"
+      - ".github/workflows/dependency_graph.yml"
+      - "MODULE.bazel"
+      - "MODULE.bazel.lock"
+      - "**/*.MODULE.bazel"
+      - "build_tools/bazel_to_cmake/deps.py"
+      - "build_tools/dependencies/**"
+
+concurrency:
+  group: dependency-graph-main
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  publish:
+    name: Publish
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Bazel launcher
+        run: |
+          mkdir -p "$RUNNER_TEMP/hrx-host-tools"
+          python3 build_tools/devtools/install.py bazelisk \
+            --bin-dir "$RUNNER_TEMP/hrx-host-tools"
+          echo "$RUNNER_TEMP/hrx-host-tools" >> "$GITHUB_PATH"
+
+      - name: Derive dependency snapshot
+        run: |
+          bazelisk mod deps '<root>' --depth=1 --output=json \
+            > "$RUNNER_TEMP/direct-deps.json"
+          python3 -B -m build_tools.dependencies.inventory_main \
+            --bazel-deps="$RUNNER_TEMP/direct-deps.json" \
+            > "$RUNNER_TEMP/inventory.json"
+          python3 -B -m build_tools.dependencies.github_snapshot_main \
+            --inventory="$RUNNER_TEMP/inventory.json" \
+            --sha="$GITHUB_SHA" --ref="$GITHUB_REF" \
+            --job-id="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            > "$RUNNER_TEMP/snapshot.json"
+
+      - name: Publish and verify dependency graph
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/dependency-graph/snapshots" \
+            --input "$RUNNER_TEMP/snapshot.json" \
+            > "$RUNNER_TEMP/submission.json"
+          jq --exit-status '.result == "SUCCESS"' \
+            "$RUNNER_TEMP/submission.json"
+          gh api "repos/$GITHUB_REPOSITORY/dependency-graph/sbom" \
+            > "$RUNNER_TEMP/sbom.json"
+          python3 -B -m build_tools.dependencies.github_sbom_main \
+            --inventory="$RUNNER_TEMP/inventory.json" \
+            --sbom="$RUNNER_TEMP/sbom.json"

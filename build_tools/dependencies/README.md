@@ -37,12 +37,23 @@ iree-bazel-run //build_tools/dependencies:github_snapshot_json -- \
 gh api --method POST \
   "repos/ROCm/hrx-system/dependency-graph/snapshots" \
   --input "${dependency_tmp}/snapshot.json"
+gh api "repos/ROCm/hrx-system/dependency-graph/sbom" \
+  > "${dependency_tmp}/sbom.json"
+iree-bazel-run //build_tools/dependencies:github_sbom_verify -- \
+  --inventory="${dependency_tmp}/inventory.json" \
+  --sbom="${dependency_tmp}/sbom.json"
 ```
 
 GitHub currently rejects the registered `pkg:bazel` package type in dependency
 submissions. The projection uses `pkg:generic/bazel/...` until that API accepts
 the registered identity. GitHub is therefore a visibility projection, not the
 source of update policy or proof that an unreported dependency is safe.
+
+`github_sbom_verify` treats the exported SPDX document as the completion
+boundary. It requires every derived package exactly once while ignoring
+packages discovered by GitHub's independent Python and Actions analyzers. This
+is necessary because the submission endpoint can report success while omitting
+dependencies that GitHub assigned to the wrong manifest ecosystem.
 
 `github_alerts_jsonl` turns a saved Dependabot API response into stable,
 action-oriented JSONL without contacting GitHub. Multiple alert instances for
