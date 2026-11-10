@@ -55,7 +55,6 @@ from loom.target.arch.amdgpu.names import (  # noqa: E402
 from loom.target.low_descriptors import (  # noqa: E402
     Descriptor,
     DescriptorSet,
-    descriptor_stable_id,
 )
 
 AMDGPU_DESCRIPTOR_IDENTITY_PUBLIC_HEADER = "loom/target/arch/amdgpu/descriptors/descriptor_identities.h"
@@ -65,9 +64,9 @@ AMDGPU_DESCRIPTOR_IDENTITY_TABLE_SYMBOL = "loom_amdgpu_descriptor_identities"
 def amdgpu_descriptor_identity_domain(
     descriptors: Sequence[Descriptor] = (),
 ) -> DescriptorIdentityDomain:
-    """Returns the complete AMDGPU descriptor identity domain."""
+    """Returns the complete AMDGPU identity domain in target-ref order."""
 
-    keys = tuple(sorted(amdgpu_descriptor_ref_keys(), key=lambda key: descriptor_stable_id(key)))
+    keys = amdgpu_descriptor_ref_keys()
     return descriptor_identity_domain(
         descriptors,
         keys=keys,

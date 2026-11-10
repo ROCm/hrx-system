@@ -361,7 +361,6 @@ def test_target_ref_source_shares_exact_tables() -> None:
     )
     table_name_functions = (
         amdgpu_target_refs._descriptor_set_table_name,
-        amdgpu_target_refs._descriptor_ref_table_name,
         amdgpu_target_refs._descriptor_set_trait_table_name,
         amdgpu_target_refs._descriptor_set_memory_property_table_name,
         amdgpu_target_refs._descriptor_set_immediate_slot_ref_table_name,
@@ -380,6 +379,8 @@ def test_target_ref_source_shares_exact_tables() -> None:
     first_ordinal_table_name = amdgpu_target_refs._descriptor_set_table_name(first_info.key)
     assert f"static const uint16_t {first_ordinal_table_name}[] = {{" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_ORDINAL_NONE" in source
+    assert "DescriptorRefsByOrdinal" not in source
+    assert "kLoomAmdgpuDescriptorRefByOrdinalTables" not in source
     first_immediate_slot_ref_table_name = amdgpu_target_refs._descriptor_set_immediate_slot_ref_table_name(first_info.key)
     assert f"static const uint8_t {first_immediate_slot_ref_table_name}[] = {{" in source
     assert "const loom_amdgpu_descriptor_immediate_slots_t kLoomAmdgpuDescriptorImmediateSlotValues[] = {" in source
