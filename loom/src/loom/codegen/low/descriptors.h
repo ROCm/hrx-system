@@ -357,7 +357,8 @@ typedef enum loom_low_constraint_kind_e {
   LOOM_LOW_CONSTRAINT_KIND_UNKNOWN = 0,
   // Two descriptor operands must use the same assigned register.
   LOOM_LOW_CONSTRAINT_KIND_TIED = 1,
-  // The descriptor may commute two operands.
+  // Exchanging the two raw operand values preserves results and effects with
+  // all attributes unchanged. Receiving register constraints still apply.
   LOOM_LOW_CONSTRAINT_KIND_COMMUTABLE = 2,
   // Operand is destructively updated.
   LOOM_LOW_CONSTRAINT_KIND_DESTRUCTIVE = 3,
@@ -394,6 +395,10 @@ typedef enum loom_low_operand_form_match_kind_e {
   // Operand facts prove every scalar element/register unit is the same exact
   // i64 value. The selected value is carried into the replacement form.
   LOOM_LOW_OPERAND_FORM_MATCH_ALL_EQUAL_EXACT_I64 = 2,
+  // The source register class is accepted by the replacement operand whose
+  // descriptor-local index is match_i64. Generated only when static operand
+  // compatibility cannot prove the remap accepts every source class.
+  LOOM_LOW_OPERAND_FORM_MATCH_ACCEPTED_REGISTER_CLASS = 3,
 } loom_low_operand_form_match_kind_t;
 
 typedef enum loom_low_operand_form_immediate_action_e {
@@ -1365,13 +1370,15 @@ static_assert(sizeof(loom_low_descriptor_view_t) == 8,
               "loom_low_descriptor_view_t must be 8 bytes");
 
 typedef struct loom_low_operand_form_match_t {
-  // Descriptor-local operand index whose value facts select this form.
+  // Descriptor-local operand index whose value or register class selects this
+  // form.
   uint16_t source_operand_index;
   // Packet operand position corresponding to source_operand_index.
   uint16_t source_packet_operand_index;
-  // Predicate kind used to test the source operand facts.
+  // Predicate kind used to test the source operand facts or register class.
   loom_low_operand_form_match_kind_t match_kind;
-  // Predicate integer payload. ALL_EQUAL_I64 compares against this value.
+  // Exact value for ALL_EQUAL_I64, or replacement descriptor-local operand
+  // index for ACCEPTED_REGISTER_CLASS. Unused by ALL_EQUAL_EXACT_I64.
   int64_t match_i64;
 } loom_low_operand_form_match_t;
 

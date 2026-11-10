@@ -137,6 +137,7 @@ loom_cc_library(
         "//loom/src/loom/rewrite:remap",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:registers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",

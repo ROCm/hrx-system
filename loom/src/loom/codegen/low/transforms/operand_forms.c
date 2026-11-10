@@ -35,6 +35,7 @@
 #include "loom/rewrite/remap.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/target/function_version.h"
+#include "loom/target/registers.h"
 
 #define LOOM_LOW_SELECT_OPERAND_FORMS_STATISTICS(V, statistics_type)      \
   V(statistics_type, forms_selected, "forms-selected",                    \
@@ -214,8 +215,22 @@ typedef struct loom_low_operand_form_plan_bounds_t {
 } loom_low_operand_form_plan_bounds_t;
 
 static bool loom_low_select_operand_form_matches(
+    const loom_module_t* module,
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_operand_form_t* form,
     const loom_value_fact_table_t* value_facts, loom_value_id_t value_id,
     const loom_low_operand_form_match_t* match, int64_t* out_matched_value) {
+  if (match->match_kind ==
+      LOOM_LOW_OPERAND_FORM_MATCH_ACCEPTED_REGISTER_CLASS) {
+    const loom_low_descriptor_t* replacement =
+        &descriptor_set->descriptors[form->replacement_descriptor_ordinal];
+    const loom_low_operand_t* receiving_operand = loom_low_descriptor_operand(
+        descriptor_set, replacement, (uint16_t)match->match_i64);
+    const loom_type_t type = loom_module_value_type(module, value_id);
+    return loom_low_operand_reg_class_alt(
+               descriptor_set, receiving_operand,
+               loom_low_register_type_class_id(type)) != NULL;
+  }
   const loom_value_facts_t facts =
       loom_value_fact_table_lookup(value_facts, value_id);
   switch (match->match_kind) {
@@ -443,7 +458,8 @@ static iree_status_t loom_low_select_operand_forms_plan_initialize(
 }
 
 static void loom_low_select_operand_forms_build_plan(
-    loom_func_like_t function, const loom_low_resolved_target_t* target,
+    const loom_module_t* module, loom_func_like_t function,
+    const loom_low_resolved_target_t* target,
     const loom_value_fact_table_t* value_facts,
     loom_low_operand_form_plan_t* plan) {
   if (!value_facts) {
@@ -483,7 +499,8 @@ static void loom_low_select_operand_forms_build_plan(
           const loom_value_id_t value_id =
               loom_op_operands(op)[match->source_packet_operand_index];
           int64_t candidate_value = 0;
-          if (!loom_low_select_operand_form_matches(value_facts, value_id,
+          if (!loom_low_select_operand_form_matches(module, descriptor_set,
+                                                    form, value_facts, value_id,
                                                     match, &candidate_value)) {
             matched = false;
             break;
@@ -1484,8 +1501,8 @@ static iree_status_t loom_low_select_operand_forms_function(
   loom_low_operand_form_plan_t plan;
   IREE_RETURN_IF_ERROR(
       loom_low_select_operand_forms_plan_initialize(pass, plan_bounds, &plan));
-  loom_low_select_operand_forms_build_plan(function, &target, value_facts,
-                                           &plan);
+  loom_low_select_operand_forms_build_plan(module, function, &target,
+                                           value_facts, &plan);
 
   loom_rewriter_t rewriter;
   loom_rewriter_initialize(&rewriter, module, pass->arena);

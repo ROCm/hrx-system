@@ -2120,7 +2120,7 @@ def _v_or_b32_overlay() -> AmdgpuDescriptorOverlay:
         semantic_tag="integer.or.u32",
         src0_inline_descriptor_key="amdgpu.v_or_b32.src0_inline",
         literal_descriptor_key="amdgpu.v_or_b32.lit",
-        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
+        constraints=_REMATERIALIZABLE_COMMUTABLE_BINARY_CONSTRAINTS,
     )
 
 
@@ -2154,7 +2154,7 @@ def _v_xor_b32_overlay() -> AmdgpuDescriptorOverlay:
         semantic_tag="integer.xor.u32",
         src0_inline_descriptor_key="amdgpu.v_xor_b32.src0_inline",
         literal_descriptor_key="amdgpu.v_xor_b32.lit",
-        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
+        constraints=_REMATERIALIZABLE_COMMUTABLE_BINARY_CONSTRAINTS,
     )
 
 

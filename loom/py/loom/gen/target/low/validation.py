@@ -49,6 +49,23 @@ from loom.target.low_descriptors import (
 )
 
 
+def index_descriptor_fields(
+    descriptor: Descriptor,
+) -> tuple[dict[str, int], dict[str, int]]:
+    operand_indices: dict[str, int] = {}
+    for i, operand in enumerate(descriptor.operands):
+        if operand.field_name in operand_indices:
+            raise ValueError(f"descriptor '{descriptor.key}' operand field '{operand.field_name}' is duplicated and cannot be used by descriptor forms")
+        operand_indices[operand.field_name] = i
+
+    immediate_indices: dict[str, int] = {}
+    for i, immediate in enumerate(descriptor.immediates):
+        if immediate.field_name in immediate_indices:
+            raise ValueError(f"descriptor '{descriptor.key}' immediate field '{immediate.field_name}' is duplicated and cannot be used by descriptor forms")
+        immediate_indices[immediate.field_name] = i
+    return operand_indices, immediate_indices
+
+
 @dataclass(frozen=True, slots=True)
 class _PhysicalDescriptorLimits:
     """Reserved representation and exact-solver admission envelope."""
@@ -1394,6 +1411,11 @@ def validate_descriptor_layout_counts(
     operand_layout: DescriptorOperandLayout,
 ) -> None:
     """Checks descriptor-local arities stored in compact layout rows."""
+
+    if descriptor.encoding_byte_count is not None:
+        validate_u32(descriptor.encoding_byte_count, f"descriptor '{descriptor.key}' encoding byte count")
+        if descriptor.encoding_byte_count == 0:
+            raise ValueError(f"descriptor '{descriptor.key}' encoding byte count must be positive")
 
     counts = (
         ("minimum packet operand", operand_layout.minimum_packet_operand_count),

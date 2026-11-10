@@ -13,11 +13,54 @@ from loom.target.arch.amdgpu.descriptors.api import (
     _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS,
 )
 from loom.target.low_descriptors import (
+    ConstraintKind,
     EffectKind,
     OperandAddressMapKind,
     OperandRole,
     RegClassAlt,
 )
+
+
+@pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "add_u32",
+        "add_f32",
+        "mul_f32",
+        "min_f32",
+        "max_f32",
+        "min_i32",
+        "max_i32",
+        "min_u32",
+        "max_u32",
+        "and_b32",
+        "or_b32",
+        "xor_b32",
+    ],
+)
+def test_commutative_immediate_family_declares_asymmetric_receiving_classes(
+    target: str, operation: str
+) -> None:
+    overlays = {
+        overlay.descriptor_key: overlay
+        for overlay in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[target].overlay_rows()
+    }
+    descriptor = overlays[f"amdgpu.v_{operation}"]
+    assert [
+        (item.lhs_operand_index, item.rhs_operand_index)
+        for item in descriptor.constraints
+        if item.kind is ConstraintKind.COMMUTABLE
+    ] == [(1, 2)]
+    left, right = (row.descriptor_operand for row in descriptor.operands[1:])
+    assert {alt.reg_class for alt in left.reg_alts} == {_REG_SGPR, _REG_VGPR}
+    assert {alt.reg_class for alt in right.reg_alts} == {_REG_VGPR}
+    assert descriptor.immediates == ()
+    assert len(descriptor.operand_forms) == 2
+    for form in descriptor.operand_forms:
+        assert form.immediate_source_operand == left.field_name
+        replacement = overlays[form.replacement_descriptor]
+        assert replacement.operands[1].descriptor_operand.reg_alts == right.reg_alts
 
 
 @pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)

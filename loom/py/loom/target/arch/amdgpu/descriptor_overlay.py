@@ -223,6 +223,12 @@ def materialize_amdgpu_descriptor_overlay(
     operands = tuple(
         operand for operand in operands if operand.role is OperandRole.RESULT
     ) + tuple(operand for operand in operands if operand.role is not OperandRole.RESULT)
+    # The final format may append a literal to the instruction's XML format.
+    # Supplemental formats without XML facts leave the fixed size unspecified.
+    encoding_format_id = _encoding_format_id(overlay)
+    native_format = spec.encoding_map().get(
+        AMDGPU_ENCODING_FORMAT_XML_NAMES_BY_ID[encoding_format_id]
+    )
     return Descriptor(
         key=overlay.descriptor_key,
         mnemonic=overlay.mnemonic or overlay.instruction_name.lower(),
@@ -244,7 +250,10 @@ def materialize_amdgpu_descriptor_overlay(
         ),
         operand_forms=overlay.operand_forms,
         feature_mask_words=overlay.feature_mask_words,
-        encoding_format_id=_encoding_format_id(overlay),
+        encoding_format_id=encoding_format_id,
+        encoding_byte_count=((native_format.bit_count + 31) // 32) * 4
+        if native_format is not None
+        else None,
         encoding_id=encoding.opcode
         if overlay.encoding_id is None
         else overlay.encoding_id,
