@@ -53,7 +53,7 @@ iree_assert_dependency_boundary(
 )
 
 iree_cli_test(
-    name = "execution_test",
+    name = "cli_test",
     data = [
         "//loom/src/loom/tools/loom-link/testdata:dependency_component.loom",
         "//loom/src/loom/tools/loom-link/testdata:dependency_direct.loom",

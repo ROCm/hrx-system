@@ -130,7 +130,7 @@ iree_cli_test(
 )
 
 iree_cli_test(
-    name = "loom_link_execution_test",
+    name = "loom_link_cli_test",
     data = ["//loom/src/loom/tooling/target/amdgpu/testdata:loom_link_low.loom"],
     manifests = ["loom-link-amdgpu.test.json"],
     tags = ["hostonly"],
