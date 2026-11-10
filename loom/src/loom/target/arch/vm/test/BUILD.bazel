@@ -113,6 +113,15 @@ loom_check_test(
 )
 
 loom_check_test(
+    name = "aggregate_lifetimes_test",
+    src = "aggregate_lifetimes.cxx-test",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/emit:vm_binary",
+    ]),
+)
+
+loom_check_test(
     name = "array_lifetimes_test",
     src = "array_lifetimes.cxx-test",
     target_compatible_with = loom_config_compatible_with([
@@ -130,6 +139,7 @@ iree_py_test(
         "--checker=$(rootpath //loom/src/loom/tools/loom-check:loom-check-test)",
         "--source=$(rootpath special_members.cxx-test)",
         "--source=$(rootpath temporary_lifetimes.cxx-test)",
+        "--source=$(rootpath aggregate_lifetimes.cxx-test)",
         "--source=$(rootpath array_lifetimes.cxx-test)",
         "--source=$(rootpath value_evaluation.cxx-test)",
         "--source=$(rootpath structured_results.cxx-test)",
@@ -137,6 +147,7 @@ iree_py_test(
         "--source=$(rootpath buffer_projection.loom-test)",
     ],
     data = [
+        "aggregate_lifetimes.cxx-test",
         "array_lifetimes.cxx-test",
         "buffer_projection.loom-test",
         "special_members.cxx-test",

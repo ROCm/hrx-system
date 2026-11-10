@@ -272,7 +272,7 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
       diagnostics_(diagnostics),
       types_(types),
       function_(function),
-      temporary_origins_(unit) {
+      temporary_origins_(unit, types) {
   if (function_) {
     auto* closure = cxx::symbol_cast<cxx::ClassSymbol>(function_->parent());
     if (closure && closure->isClosureType()) {
@@ -293,6 +293,7 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
     }
   }
   accept(body);
+  temporary_origins_.finish();
   if (function_ && function_->isDestructor()) {
     retain_subobject_destructions();
   }
@@ -2481,6 +2482,8 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
       reference_aliases_.emplace(
           variable, ReferenceAlias{destination, std::move(identity)});
       temporary_origins_.extend(referent);
+    } else {
+      temporary_origins_.extend_members(ast->initializer);
     }
     retain_reference_initializers(variable, ast->initializer, ast);
     const bool record_constructor_call =
@@ -2650,6 +2653,7 @@ void ControlFlow::visit(cxx::BracedMemInitializerAST* ast) {
 void ControlFlow::visit(cxx::ConditionExpressionAST* ast) {
   cxx::ASTVisitor::visit(ast);
   if (ast->symbol) {
+    temporary_origins_.extend_members(ast->initializer);
     retain_reference_initializers(ast->symbol, ast->initializer, ast);
     const bool record_constructor_call =
         retain_constructor(ast->symbol, ast->initializer, ast);

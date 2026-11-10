@@ -2721,7 +2721,9 @@ class Translator final : private Initialization::Evaluation {
   Value reference_value(cxx::ExpressionAST* expression, cxx::AST* owner) {
     auto* projected = unwrap_object_identity(unit_, expression);
     if (auto* conditional =
-            cxx::ast_cast<cxx::ConditionalExpressionAST>(projected)) {
+            cxx::ast_cast<cxx::ConditionalExpressionAST>(projected);
+        conditional &&
+        projected->valueCategory != cxx::ValueCategory::kPrValue) {
       auto condition = this->expression(conditional->condition).ssa();
       return conditional_reference(conditional, condition);
     }

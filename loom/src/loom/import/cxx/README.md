@@ -2451,6 +2451,36 @@ A function returning a reference to that object does not extend its lifetime.
 An immediately invoked lambda destroys its owned captures when the temporary
 closure's full expression ends, after the invocation returns.
 
+Braced aggregate initialization also extends temporaries bound to reference
+members. That lifetime follows the containing object through nested records,
+bases, and array fields, even when the containing type has a trivial destructor:
+
+```cpp
+struct BorrowedSample {
+  // The aggregate initialization determines this referent's lifetime.
+  const Sample& sample;
+};
+
+void consume(unsigned value);
+
+void submit(bool first) {
+  BorrowedSample selected{first ? Sample{1} : Sample{2}};
+  consume(selected.sample.value);
+}  // The selected Sample retires here, after consume.
+```
+
+A conditional prvalue constructs one selected result object; a conditional
+glvalue selects an existing object's identity. Both preserve the source
+destruction boundary. Copies of reference members remain aliases and do not
+create another referent or transfer its cleanup. Side temporaries and temporary
+arguments to a helper still end at their enclosing full expression.
+
+Parenthesized aggregate initialization has C++'s shorter lifetime rule:
+`BorrowedSample expired(Sample{9});` destroys the sample at the semicolon, so
+its reference member cannot be used afterward. The frontend retains the
+initialization form through normalization and template instantiation, allowing
+cleanup analysis to preserve this distinction without inspecting source text.
+
 Array initialization preserves the distinction between explicit element clauses
 and omitted elements. A default argument used to construct an omitted element
 is destroyed before the next element starts construction. The same rule applies

@@ -11,6 +11,8 @@
 #include <cxx/translation_unit.h>
 #include <cxx/type_traits.h>
 
+#include "loom/import/cxx/value/types.h"
+
 namespace loom::cxx_import {
 
 TemporaryOrigins::Facts TemporaryOrigins::facts(
@@ -30,19 +32,19 @@ cxx::ExpressionAST* TemporaryOrigins::materialization(
 }
 
 bool TemporaryOrigins::extended(cxx::ExpressionAST* origin) const {
-  return std::get<Construction>(lifetimes_[facts(origin).lifetime - 1])
-      .extended;
+  return lifetimes_[facts(origin).lifetime - 1].extended;
 }
 
 const Destruction& TemporaryOrigins::destruction(
     cxx::ExpressionAST* origin) const {
-  return std::get<Construction>(lifetimes_[facts(origin).lifetime - 1])
+  return std::get<Construction>(lifetimes_[facts(origin).lifetime - 1].value)
       .destruction;
 }
 
 void TemporaryOrigins::retain(cxx::ExpressionAST* expression) {
   auto retained = classify(expression);
-  if (retained.result || retained.materialization || retained.lifetime) {
+  if (retained.result || retained.materialization || retained.lifetime ||
+      retained.members) {
     expressions_.insert_or_assign(expression, retained);
   }
 }
@@ -50,6 +52,7 @@ void TemporaryOrigins::retain(cxx::ExpressionAST* expression) {
 TemporaryOrigins::Facts TemporaryOrigins::classify(
     cxx::ExpressionAST* expression) {
   auto traits = unit_.typeTraits();
+  size_t members = 0;
   switch (expression->kind()) {
     case cxx::ASTKind::NestedExpression:
       return facts(
@@ -76,6 +79,7 @@ TemporaryOrigins::Facts TemporaryOrigins::classify(
       }
       if (cast->valueCategory != cxx::ValueCategory::kPrValue) {
         child.result = nullptr;
+        child.members = 0;
         return child;
       }
       if (traits.is_class(cast->type) && child.result) {
@@ -119,26 +123,45 @@ TemporaryOrigins::Facts TemporaryOrigins::classify(
       if (cast->valueCategory != cxx::ValueCategory::kPrValue) {
         auto child = facts(cast->expression);
         child.result = nullptr;
+        child.members = 0;
         return child;
       }
       break;
     }
     case cxx::ASTKind::ConditionalExpression: {
-      if (expression->valueCategory == cxx::ValueCategory::kPrValue) {
-        break;
-      }
       auto* conditional =
           static_cast<cxx::ConditionalExpressionAST*>(expression);
-      auto first = facts(conditional->iftrueExpression).lifetime;
-      auto second = facts(conditional->iffalseExpression).lifetime;
-      if (!first) {
-        return {.lifetime = second};
+      auto first = facts(conditional->iftrueExpression);
+      auto second = facts(conditional->iffalseExpression);
+      if (expression->valueCategory == cxx::ValueCategory::kPrValue) {
+        members = combine(first.members, second.members);
+        break;
       }
-      if (!second || first == second) {
-        return {.lifetime = first};
+      return {.lifetime = combine(first.lifetime, second.lifetime)};
+    }
+    case cxx::ASTKind::BracedInitList: {
+      auto* list = static_cast<cxx::BracedInitListAST*>(expression);
+      members =
+          aggregate_members(list, list->expressionList, list->implicitElement,
+                            !list->isParenthesized);
+      break;
+    }
+    case cxx::ASTKind::BracedTypeConstruction: {
+      auto* construction =
+          static_cast<cxx::BracedTypeConstructionAST*>(expression);
+      if (!construction->constructorSymbol) {
+        members = facts(construction->bracedInitList).members;
       }
-      lifetimes_.push_back(Selection{first, second});
-      return {.lifetime = lifetimes_.size()};
+      break;
+    }
+    case cxx::ASTKind::TypeConstruction: {
+      auto* construction = static_cast<cxx::TypeConstructionAST*>(expression);
+      if (!construction->constructorSymbol) {
+        members = aggregate_members(construction, construction->expressionList,
+                                    nullptr,
+                                    /*extend_references=*/false);
+      }
+      break;
     }
     default:
       break;
@@ -151,28 +174,93 @@ TemporaryOrigins::Facts TemporaryOrigins::classify(
   }
   auto destruction = destruction_for(unit_, expression->type);
   if (!destruction) {
-    return {};
+    return {.lifetime = members, .members = members};
   }
-  lifetimes_.push_back(Construction{*destruction});
-  return {expression, expression, lifetimes_.size()};
+  lifetimes_.push_back({Construction{*destruction, members}});
+  return {expression, expression, lifetimes_.size(), members};
+}
+
+size_t TemporaryOrigins::aggregate_members(
+    cxx::ExpressionAST* initializer, cxx::List<cxx::ExpressionAST*>* elements,
+    cxx::VariableSymbol* implicit_element, bool extend_references) {
+  auto traits = unit_.typeTraits();
+  size_t members = 0;
+  if (traits.is_array(initializer->type)) {
+    for (auto* element : cxx::ListView{elements}) {
+      members = combine(members, facts(element).members);
+    }
+    if (implicit_element) {
+      members =
+          combine(members, facts(implicit_element->initializer()).members);
+    }
+    return members;
+  }
+  auto* record = types_.record(initializer->type, initializer);
+  if (!record || !record->is_aggregate) {
+    return 0;
+  }
+  // Copy-list initialization forwards an existing object; copying a reference
+  // member does not establish another temporary lifetime.
+  if (elements && !elements->next &&
+      types_.unqualified(elements->value->type) ==
+          types_.unqualified(initializer->type)) {
+    return facts(elements->value).members;
+  }
+  for (const auto& member : record->members) {
+    if (!elements) {
+      break;
+    }
+    auto child = facts(elements->value);
+    members = combine(members, traits.is_reference(member.type())
+                                   ? (extend_references ? child.lifetime : 0)
+                                   : child.members);
+    elements = elements->next;
+  }
+  return members;
+}
+
+size_t TemporaryOrigins::combine(size_t first, size_t second) {
+  if (!first) {
+    return second;
+  }
+  if (!second || first == second) {
+    return first;
+  }
+  lifetimes_.push_back({Dependencies{first, second}});
+  return lifetimes_.size();
 }
 
 void TemporaryOrigins::extend(cxx::ExpressionAST* initializer) {
   extend(facts(initializer).lifetime);
 }
 
+void TemporaryOrigins::extend_members(cxx::ExpressionAST* initializer) {
+  extend(facts(initializer).members);
+}
+
 void TemporaryOrigins::extend(size_t index) {
-  if (!index) {
-    return;
+  if (index) {
+    lifetimes_[index - 1].extended = true;
   }
-  auto& lifetime = lifetimes_[index - 1];
-  if (auto* construction = std::get_if<Construction>(&lifetime)) {
-    construction->extended = true;
-    return;
+}
+
+void TemporaryOrigins::finish() {
+  // Every edge points backward in source postorder. One reverse pass reaches
+  // shared dependencies once, without recursive walks or per-root worklists.
+  for (auto lifetime = lifetimes_.rbegin(); lifetime != lifetimes_.rend();
+       ++lifetime) {
+    if (!lifetime->extended) {
+      continue;
+    }
+    if (const auto* construction =
+            std::get_if<Construction>(&lifetime->value)) {
+      extend(construction->members);
+    } else {
+      const auto& dependencies = std::get<Dependencies>(lifetime->value);
+      extend(dependencies.first);
+      extend(dependencies.second);
+    }
   }
-  const auto& selection = std::get<Selection>(lifetime);
-  extend(selection.first);
-  extend(selection.second);
 }
 
 }  // namespace loom::cxx_import

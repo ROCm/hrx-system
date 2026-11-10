@@ -9,6 +9,7 @@
 
 #include <cxx/ast_fwd.h>
 #include <cxx/cxx_fwd.h>
+#include <cxx/symbols_fwd.h>
 
 #include <cstddef>
 #include <unordered_map>
@@ -19,13 +20,16 @@
 
 namespace loom::cxx_import {
 
+class Types;
+
 // Nontrivial result-object and reference lifetime facts from the owning source
 // walk. Construction syntax and its implicit conversion can describe the same
 // object; equal payloads from separate constructions never establish identity.
 // Source nodes identify construction sites, not dynamic evaluation instances.
 class TemporaryOrigins {
  public:
-  explicit TemporaryOrigins(cxx::TranslationUnit& unit) : unit_(unit) {}
+  TemporaryOrigins(cxx::TranslationUnit& unit, Types& types)
+      : unit_(unit), types_(types) {}
 
   // Visits one expression after its evaluated children. Forwarding consumes
   // their retained facts rather than walking the source expression again.
@@ -33,6 +37,12 @@ class TemporaryOrigins {
   // Extends the materializations selected by one reference initializer. This
   // consumes the retained lifetime graph, including both conditional arms.
   void extend(cxx::ExpressionAST* initializer);
+  // A named aggregate owns the temporaries bound to its reference members,
+  // independently of whether the aggregate itself has a destructor.
+  void extend_members(cxx::ExpressionAST* initializer);
+  // Propagates marked roots over the completed postorder dependency graph.
+  // Runs once after the owning source walk and before cleanup queries.
+  void finish();
 
   // Nontrivial result supplied by a class/array prvalue or initializer wrapper.
   // A glvalue or subobject access does not supply an owning result.
@@ -49,16 +59,21 @@ class TemporaryOrigins {
   struct Construction {
     // Selected complete-object destruction, including any array extent.
     Destruction destruction;
-    // Whether a lexical reference scope owns this construction's cleanup.
-    bool extended = false;
+    // Lifetime dependencies of references initialized inside this result.
+    size_t members = 0;
   };
-  struct Selection {
-    // First conditional alternative's one-based lifetime node.
+  struct Dependencies {
+    // First member or conditional alternative's one-based lifetime node.
     size_t first;
-    // Second conditional alternative's one-based lifetime node.
+    // Second member or conditional alternative's one-based lifetime node.
     size_t second;
   };
-  using Lifetime = std::variant<Construction, Selection>;
+  struct Lifetime {
+    // Construction or joined dependencies, each pointing to earlier nodes.
+    std::variant<Construction, Dependencies> value;
+    // Whether a lexical scope owns this node and its dependent cleanups.
+    bool extended = false;
+  };
   struct Facts {
     // Complete owning result, absent on a glvalue or scalar expression.
     cxx::ExpressionAST* result = nullptr;
@@ -66,14 +81,24 @@ class TemporaryOrigins {
     cxx::ExpressionAST* materialization = nullptr;
     // Shared lifetime-extension path; forwarding introduces no additional node.
     size_t lifetime = 0;
+    // New reference bindings in the result's aggregate initialization. Copies
+    // and glvalues carry no new member lifetimes.
+    size_t members = 0;
   };
 
   Facts facts(cxx::ExpressionAST* expression) const;
   Facts classify(cxx::ExpressionAST* expression);
+  size_t aggregate_members(cxx::ExpressionAST* initializer,
+                           cxx::List<cxx::ExpressionAST*>* elements,
+                           cxx::VariableSymbol* implicit_element,
+                           bool extend_references);
+  size_t combine(size_t first, size_t second);
   void extend(size_t lifetime);
 
   // Verified source type/category facts; source storage outlives this analysis.
   cxx::TranslationUnit& unit_;
+  // Canonical admitted type partitions, shared with control and value lowering.
+  Types& types_;
   // Sparse facts; ordinary scalar expressions allocate no entries.
   std::unordered_map<cxx::ExpressionAST*, Facts> expressions_;
   // One-based nodes for constructions and joins; zero denotes no extension.
