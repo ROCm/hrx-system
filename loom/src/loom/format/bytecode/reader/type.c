@@ -109,6 +109,92 @@ iree_status_t loom_bytecode_type_read_register_carrier(
   return iree_ok_status();
 }
 
+static iree_status_t loom_bytecode_type_invalid_scoped_shape(
+    loom_bytecode_reader_decoder_t* decoder,
+    loom_bytecode_reader_cursor_t* cursor, iree_string_view_t reason) {
+  return loom_bytecode_reader_emit_invalid_field(
+      decoder, cursor->range_name, IREE_SV("scoped_type"), 0, IREE_SV("record"),
+      loom_bytecode_reader_cursor_absolute_position(cursor), reason);
+}
+
+iree_status_t loom_bytecode_type_read_scoped_shape(
+    loom_bytecode_reader_decoder_t* decoder,
+    loom_bytecode_reader_cursor_t* cursor, loom_type_kind_t kind,
+    uint64_t value_count, iree_host_size_t encoding_count,
+    loom_bytecode_scoped_shape_t* out_shape) {
+  uint64_t element = 0, rank = 0, attachment = 0, encoding = 0, alignment = 0;
+  if (kind != LOOM_TYPE_GROUP) {
+    IREE_RETURN_IF_ERROR(
+        loom_bytecode_reader_read_uvarint(decoder, cursor, &element));
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_bytecode_reader_read_uvarint(decoder, cursor, &rank));
+  if (kind == LOOM_TYPE_GROUP) {
+    if (rank == 0 || rank > LOOM_TYPE_MAX_RANK) {
+      return loom_bytecode_type_invalid_scoped_shape(decoder, cursor,
+                                                     IREE_SV("group_rank"));
+    }
+  } else {
+    IREE_RETURN_IF_ERROR(
+        loom_bytecode_reader_read_uvarint(decoder, cursor, &attachment));
+    IREE_RETURN_IF_ERROR(
+        loom_bytecode_reader_read_uvarint(decoder, cursor, &encoding));
+    if (kind == LOOM_TYPE_VIEW) {
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_reader_read_uvarint(decoder, cursor, &alignment));
+    }
+    if (element >= LOOM_SCALAR_TYPE_COUNT_ ||
+        !loom_scalar_type_is_valid(element) || rank > LOOM_TYPE_MAX_RANK ||
+        attachment > LOOM_BYTECODE_ENCODING_ATTACHMENT_SSA ||
+        (kind == LOOM_TYPE_VECTOR && (rank == 0 || attachment != 0))) {
+      return loom_bytecode_type_invalid_scoped_shape(decoder, cursor,
+                                                     IREE_SV("shape"));
+    }
+    if (alignment && !loom_type_view_alignment_is_valid(element, alignment)) {
+      return loom_bytecode_type_invalid_scoped_shape(
+          decoder, cursor, IREE_SV("access_alignment"));
+    }
+    if (attachment == LOOM_BYTECODE_ENCODING_ATTACHMENT_STATIC) {
+      if (!encoding || encoding > encoding_count) {
+        return loom_bytecode_type_invalid_scoped_shape(decoder, cursor,
+                                                       IREE_SV("encoding"));
+      }
+    } else if (attachment == LOOM_BYTECODE_ENCODING_ATTACHMENT_SSA) {
+      if (encoding >= value_count) {
+        return loom_bytecode_type_invalid_scoped_shape(
+            decoder, cursor, IREE_SV("encoding_value"));
+      }
+    } else if (encoding) {
+      return loom_bytecode_type_invalid_scoped_shape(
+          decoder, cursor, IREE_SV("unexpected_encoding"));
+    }
+  }
+  uint16_t dynamic_axes = 0;
+  for (uint64_t i = 0; i < rank; ++i) {
+    uint64_t dynamic = 0, payload = 0;
+    IREE_RETURN_IF_ERROR(
+        loom_bytecode_reader_read_uvarint(decoder, cursor, &dynamic));
+    IREE_RETURN_IF_ERROR(
+        loom_bytecode_reader_read_uvarint(decoder, cursor, &payload));
+    if (dynamic > 1 || (dynamic && payload > value_count) ||
+        (!dynamic && loom_dim_is_dynamic(payload))) {
+      return loom_bytecode_type_invalid_scoped_shape(
+          decoder, cursor,
+          kind == LOOM_TYPE_GROUP ? IREE_SV("group_dimension")
+                                  : IREE_SV("dimension"));
+    }
+    out_shape->dimensions[i] = payload;
+    dynamic_axes |= (uint16_t)(dynamic << i);
+  }
+  out_shape->encoding_ordinal = encoding;
+  out_shape->dynamic_axes = dynamic_axes;
+  out_shape->rank = (uint8_t)rank;
+  out_shape->element_type = (uint8_t)element;
+  out_shape->attachment = (uint8_t)attachment;
+  out_shape->access_alignment = (uint8_t)alignment;
+  return iree_ok_status();
+}
+
 static loom_bytecode_attribute_materializer_t
 loom_bytecode_type_attribute_materializer(
     loom_bytecode_type_materializer_t* materializer) {

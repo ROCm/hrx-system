@@ -462,6 +462,97 @@ TEST_F(BytecodeAttributeTest, ScopedRegisterRetainsCarrierAndBoundValueType) {
   EXPECT_EQ(error_count_, 0u);
 }
 
+TEST_F(BytecodeAttributeTest, ScopedShapesBindDimensionsAndEncodingByRole) {
+  // Force native value IDs away from the small wire coordinates. The decoder
+  // must distinguish one-based dimension references, zero-based encoding
+  // references, unbound dimensions, and literal sizes.
+  for (int i = 0; i < 8; ++i) {
+    loom_value_id_t unused;
+    IREE_ASSERT_OK(loom_module_define_value(
+        module_, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &unused));
+  }
+  loom_value_id_t values[3];
+  for (size_t i = 0; i < 3; ++i) {
+    IREE_ASSERT_OK(loom_module_define_value(
+        module_,
+        i == 2 ? loom_type_encoding_with_role(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT)
+               : loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+        &values[i]));
+  }
+  struct Carrier {
+    // Serialized kind byte in the complete scoped record.
+    uint8_t wire_kind;
+    // Corresponding native type kind after projection.
+    loom_type_kind_t kind;
+  };
+  const Carrier carriers[] = {
+      {LOOM_BYTECODE_TYPE_GROUP, LOOM_TYPE_GROUP},
+      {LOOM_BYTECODE_TYPE_TENSOR, LOOM_TYPE_TENSOR},
+      {LOOM_BYTECODE_TYPE_TILE, LOOM_TYPE_TILE},
+      {LOOM_BYTECODE_TYPE_VECTOR, LOOM_TYPE_VECTOR},
+      {LOOM_BYTECODE_TYPE_VIEW, LOOM_TYPE_VIEW},
+  };
+  for (const auto& carrier : carriers) {
+    for (uint8_t rank = 1; rank <= LOOM_TYPE_MAX_RANK; ++rank) {
+      SCOPED_TRACE(::testing::Message()
+                   << "kind=" << carrier.kind << " rank=" << +rank);
+      const bool has_encoding =
+          carrier.kind != LOOM_TYPE_GROUP && carrier.kind != LOOM_TYPE_VECTOR;
+      std::vector<uint8_t> data = {1, 0, 1, carrier.wire_kind};
+      if (carrier.kind != LOOM_TYPE_GROUP) {
+        data.push_back(LOOM_SCALAR_TYPE_F32);
+      }
+      data.push_back(rank);
+      if (carrier.kind != LOOM_TYPE_GROUP) {
+        data.insert(data.end(), {uint8_t(has_encoding ? 2 : 0),
+                                 uint8_t(has_encoding ? 2 : 0)});
+      }
+      if (carrier.kind == LOOM_TYPE_VIEW) {
+        data.push_back(1);
+      }
+      for (uint8_t axis = 0; axis < rank; ++axis) {
+        data.push_back((axis % 3) != 1);
+        data.push_back(axis % 3 == 0 ? 0 : axis % 3 == 1 ? 31 : 2);
+      }
+      data.push_back(1);  // Root is the first completed node.
+      data[1] = uint8_t(data.size() - 2);
+      iree_arena_allocator_t scope_arena;
+      iree_arena_initialize(&block_pool_, &scope_arena);
+      loom_bytecode_type_bindings_t bindings = {.arena = &scope_arena};
+      const loom_bytecode_attribute_ssa_materialization_scope_t scope = {
+          .symbol_name = IREE_SV("function"),
+          .values = values,
+          .value_count = IREE_ARRAYSIZE(values),
+          .bindings = &bindings,
+      };
+      auto materializer = MakeMaterializer();
+      auto cursor = MakeCursor(data.data(), data.size());
+      loom_attribute_t attr = loom_attr_absent();
+      IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
+          &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0, &scope,
+          &attr));
+      iree_arena_deinitialize(&scope_arena);
+      iree_arena_reset(&scratch_arena_);
+      iree_arena_block_pool_trim(&block_pool_);
+      const auto type = loom_type_table_get(&module_->types, attr.type_id);
+      ASSERT_EQ(loom_type_kind(type), carrier.kind);
+      ASSERT_EQ(loom_type_rank(type), rank);
+      EXPECT_EQ(loom_type_has_ssa_encoding(type), has_encoding);
+      EXPECT_EQ(type.encoding_id, has_encoding ? values[2] : 0);
+      for (uint8_t axis = 0; axis < rank; ++axis) {
+        if (axis % 3 == 1) {
+          EXPECT_EQ(loom_type_dim(type, axis), loom_dim_pack_static(31));
+        } else {
+          EXPECT_EQ(loom_type_dim(type, axis),
+                    loom_dim_pack_dynamic(axis % 3 == 0 ? LOOM_VALUE_ID_INVALID
+                                                        : values[1]));
+        }
+      }
+    }
+  }
+  EXPECT_EQ(error_count_, 0u);
+}
+
 TEST_F(BytecodeAttributeTest, ScopedViewAlignmentValidatesBeforeNarrowing) {
   loom_value_id_t width = LOOM_VALUE_ID_INVALID;
   IREE_ASSERT_OK(loom_module_define_value(

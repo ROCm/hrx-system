@@ -24,6 +24,26 @@ extern "C" {
 typedef struct loom_bytecode_reader_module_view_t
     loom_bytecode_reader_module_view_t;
 
+// Validated scoped shape before projecting source references into native IR.
+// One stack record is consumed at a time; no field owns allocated storage.
+typedef struct loom_bytecode_scoped_shape_t {
+  // Literal sizes or one-based source value numbers selected by dynamic_axes.
+  // A dynamic zero denotes an unbound dimension.
+  uint64_t dimensions[LOOM_TYPE_MAX_RANK];
+  // Static encoding index or zero-based source value number, per attachment.
+  uint64_t encoding_ordinal;
+  // Bit i selects a source value number in dimensions[i].
+  uint16_t dynamic_axes;
+  // Number of initialized dimensions.
+  uint8_t rank;
+  // Scalar element type, or NONE for a group.
+  uint8_t element_type;
+  // Wire encoding attachment kind: none, static, or SSA.
+  uint8_t attachment;
+  // Explicit view access alignment in bytes, or zero for natural alignment.
+  uint8_t access_alignment;
+} loom_bytecode_scoped_shape_t;
+
 // State required to materialize a validated type plan into a module.
 typedef struct loom_bytecode_type_materializer_t {
   // Bounded decoder and structured diagnostic state.
@@ -55,6 +75,14 @@ iree_status_t loom_bytecode_type_read_register_carrier(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint64_t type_index,
     uint64_t out_payload[2]);
+
+// Decodes a group, tensor, tile, vector, or view after its wire kind. Validates
+// source references against their owning scope/table without constructing IR.
+iree_status_t loom_bytecode_type_read_scoped_shape(
+    loom_bytecode_reader_decoder_t* decoder,
+    loom_bytecode_reader_cursor_t* cursor, loom_type_kind_t kind,
+    uint64_t value_count, iree_host_size_t encoding_count,
+    loom_bytecode_scoped_shape_t* out_shape);
 
 // Interns a structural type from validated parent metadata and canonical child
 // IDs. No temporary child payload is assembled. Selected readers project the
