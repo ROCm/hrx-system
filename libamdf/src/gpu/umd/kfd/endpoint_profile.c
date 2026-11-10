@@ -50,8 +50,9 @@ static amdf_status_t amdf_gpu_kfd_qualify_endpoint_profile(
 }
 
 amdf_status_t amdf_gpu_umd_create_endpoint_profile(
-    amdf_platform_endpoint_t* endpoint, amdf_allocator_t host_allocator,
+    void* endpoint_context, amdf_allocator_t host_allocator,
     amdf_gpu_endpoint_profile_t** out_profile) {
+  amdf_platform_endpoint_t* endpoint = endpoint_context;
   amdf_gpu_kfd_topology_t topology = {0};
   amdf_status_t status =
       amdf_gpu_kfd_topology_initialize(endpoint, host_allocator, &topology);
@@ -75,8 +76,9 @@ amdf_status_t amdf_gpu_umd_create_endpoint_profile(
 }
 
 amdf_status_t amdf_gpu_umd_sample_memory_scope(
-    const amdf_platform_endpoint_t* endpoint, amdf_memory_scope_flags_t flags,
+    const void* endpoint_context, amdf_memory_scope_flags_t flags,
     amdf_memory_scope_observation_t* out_observation) {
+  const amdf_platform_endpoint_t* endpoint = endpoint_context;
   if (flags & AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED) {
     return amdf_host_memory_sample_observation(out_observation);
   }

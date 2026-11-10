@@ -32,10 +32,11 @@ amdf_status_t amdf_gpu_umd_device_destroy(amdf_gpu_umd_device_t* device) {
 }
 
 amdf_status_t amdf_gpu_umd_device_create(
-    amdf_gpu_umd_instance_t* instance, amdf_platform_endpoint_t* endpoint,
+    amdf_gpu_umd_instance_t* instance, void* endpoint_context,
     amdf_allocator_t host_allocator, amdf_native_lifetime_t native_lifetime,
     amdf_gpu_umd_device_t** out_device,
     amdf_gpu_umd_device_result_t* out_result) {
+  amdf_platform_endpoint_t* endpoint = endpoint_context;
   amdf_gpu_umd_device_t* device = NULL;
   amdf_status_t status =
       amdf_calloc(host_allocator, sizeof(*device),

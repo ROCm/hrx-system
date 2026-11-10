@@ -23,6 +23,13 @@ struct amdf_endpoint_t {
   amdf_platform_endpoint_t* platform;
   // Immutable properties cached while opening the platform endpoint.
   amdf_endpoint_info_t info;
+  // Implementation selected before engine profile qualification.
+  struct {
+    // Immutable engine operations borrowed for this endpoint's lifetime.
+    const void* operations;
+    // Implementation-owned endpoint context borrowed for the same lifetime.
+    void* context;
+  } engine_binding;
   // Complete immutable metadata allocation owned after provider qualification.
   void* engine_profile;
   // Cached result of the engine-profile qualification attempt.
@@ -121,6 +128,20 @@ void amdf_endpoint_publish_local_memory_scope(
 amdf_platform_endpoint_t* amdf_endpoint_get_platform(
     amdf_endpoint_t* endpoint) {
   return endpoint->platform;
+}
+
+void amdf_endpoint_set_engine_binding(amdf_endpoint_t* endpoint,
+                                      const void* binding, void* context) {
+  endpoint->engine_binding.operations = binding;
+  endpoint->engine_binding.context = context;
+}
+
+const void* amdf_endpoint_get_engine_binding(const amdf_endpoint_t* endpoint) {
+  return endpoint->engine_binding.operations;
+}
+
+void* amdf_endpoint_get_engine_context(const amdf_endpoint_t* endpoint) {
+  return endpoint->engine_binding.context;
 }
 
 amdf_allocator_t amdf_endpoint_host_allocator(const amdf_endpoint_t* endpoint) {

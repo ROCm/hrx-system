@@ -50,7 +50,6 @@ amdf_cc_library(
         "//libamdf/src/gpu/umd:kernel_queue",
         "//libamdf/src/gpu/umd:memory",
         "//libamdf/src/gpu/umd:memory_reservation",
-        "//libamdf/src/gpu/umd:native",
         "//libamdf/src/platform",
     ],
 )
@@ -132,8 +131,8 @@ amdf_cc_library(
         ":user_queue",
         "//libamdf/src:endpoint",
         "//libamdf/src:structure",
+        "//libamdf/src/gpu/umd:api",
         "//libamdf/src/gpu/umd:endpoint_profile",
-        "//libamdf/src/gpu/umd:native",
     ],
 )
 

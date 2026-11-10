@@ -16,7 +16,6 @@
 #include "libamdf/src/gpu/memory_reservation.h"
 #include "libamdf/src/gpu/umd/device.h"
 #include "libamdf/src/gpu/umd/instance.h"
-#include "libamdf/src/gpu/umd/native.h"
 #include "libamdf/src/instance.h"
 #include "libamdf/src/memory_scope.h"
 #include "libamdf/src/platform/instance.h"
@@ -59,10 +58,11 @@ amdf_gpu_device_query_queue_family_placement(const amdf_device_t* base_device,
 static amdf_status_t amdf_gpu_scope_sample_observation(
     const amdf_memory_scope_t* scope,
     amdf_memory_scope_observation_t* out_observation) {
-  amdf_platform_endpoint_t* platform =
-      amdf_endpoint_get_platform(scope->owner.endpoint);
-  return amdf_gpu_umd_api_for_endpoint(platform)->sample_memory_scope(
-      platform, scope->flags, out_observation);
+  const amdf_gpu_umd_api_t* api =
+      amdf_endpoint_get_engine_binding(scope->owner.endpoint);
+  return api->sample_memory_scope(
+      amdf_endpoint_get_engine_context(scope->owner.endpoint), scope->flags,
+      out_observation);
 }
 
 static const amdf_device_vtable_t amdf_gpu_device_vtable = {
@@ -114,8 +114,7 @@ amdf_status_t AMDF_CALL amdf_gpu_device_create(
   }
   status = amdf_device_initialize(&device->base, &amdf_gpu_device_vtable,
                                   endpoint, AMDF_ENGINE_KIND_GPU);
-  device->umd_api =
-      amdf_gpu_umd_api_for_endpoint(amdf_endpoint_get_platform(endpoint));
+  device->umd_api = amdf_endpoint_get_engine_binding(endpoint);
   amdf_gpu_umd_device_result_t result = {0};
   if (amdf_status_is_ok(status)) {
     amdf_platform_instance_lock_native(instance->platform);
@@ -128,8 +127,8 @@ amdf_status_t AMDF_CALL amdf_gpu_device_create(
                                                host_allocator);
     if (amdf_status_is_ok(status)) {
       status = device->umd_api->device_create(
-          instance->gpu, amdf_endpoint_get_platform(endpoint), host_allocator,
-          native_lifetime, &device->umd, &result);
+          instance->gpu, amdf_endpoint_get_engine_context(endpoint),
+          host_allocator, native_lifetime, &device->umd, &result);
     }
     if (amdf_status_is_ok(status)) {
       const amdf_memory_scope_t scope = {

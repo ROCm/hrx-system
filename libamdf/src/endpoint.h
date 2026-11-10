@@ -57,6 +57,17 @@ const amdf_endpoint_info_t* amdf_endpoint_get_cached_info(
 // Returns the borrowed platform endpoint.
 amdf_platform_endpoint_t* amdf_endpoint_get_platform(amdf_endpoint_t* endpoint);
 
+// Binds immutable engine operations and their borrowed endpoint context before
+// profile qualification. Both remain live through endpoint close.
+void amdf_endpoint_set_engine_binding(amdf_endpoint_t* endpoint,
+                                      const void* binding, void* context);
+
+// Returns the engine operations selected by provider composition.
+const void* amdf_endpoint_get_engine_binding(const amdf_endpoint_t* endpoint);
+
+// Returns the context consumed by the selected engine's endpoint operations.
+void* amdf_endpoint_get_engine_context(const amdf_endpoint_t* endpoint);
+
 // Returns the host allocator owned by the endpoint's provider instance.
 amdf_allocator_t amdf_endpoint_host_allocator(const amdf_endpoint_t* endpoint);
 

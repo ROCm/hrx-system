@@ -19,19 +19,19 @@ AMDF_GPU_UMD_DXG_SHARED_OPERATION(amdf_status_t, instance_destroy,
 
 // Creates immutable endpoint metadata.
 AMDF_GPU_UMD_PLATFORM_OPERATION(amdf_status_t, create_endpoint_profile,
-                                (amdf_platform_endpoint_t * endpoint,
+                                (void* endpoint_context,
                                  amdf_allocator_t host_allocator,
                                  amdf_gpu_endpoint_profile_t** out_profile))
 // Samples endpoint-local physical storage.
 AMDF_GPU_UMD_PLATFORM_OPERATION(
     amdf_status_t, sample_memory_scope,
-    (const amdf_platform_endpoint_t* endpoint, amdf_memory_scope_flags_t flags,
+    (const void* endpoint_context, amdf_memory_scope_flags_t flags,
      amdf_memory_scope_observation_t* out_observation))
 
 // Creates one native execution device.
 AMDF_GPU_UMD_PLATFORM_OPERATION(amdf_status_t, device_create,
                                 (amdf_gpu_umd_instance_t * instance,
-                                 amdf_platform_endpoint_t* endpoint,
+                                 void* endpoint_context,
                                  amdf_allocator_t host_allocator,
                                  amdf_native_lifetime_t native_lifetime,
                                  amdf_gpu_umd_device_t** out_device,

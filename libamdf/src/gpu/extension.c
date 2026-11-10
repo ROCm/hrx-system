@@ -15,8 +15,8 @@
 #include "libamdf/src/gpu/endpoint_profile.h"
 #include "libamdf/src/gpu/event.h"
 #include "libamdf/src/gpu/kernel_queue.h"
+#include "libamdf/src/gpu/umd/api.h"
 #include "libamdf/src/gpu/umd/endpoint_profile.h"
-#include "libamdf/src/gpu/umd/native.h"
 #include "libamdf/src/gpu/user_queue.h"
 #include "libamdf/src/structure.h"
 
@@ -174,11 +174,11 @@ void amdf_gpu_extension_initialize_endpoint(amdf_endpoint_t* endpoint) {
     return;
   }
 
-  amdf_platform_endpoint_t* platform = amdf_endpoint_get_platform(endpoint);
+  const amdf_gpu_umd_api_t* api = amdf_endpoint_get_engine_binding(endpoint);
   amdf_gpu_endpoint_profile_t* profile = NULL;
-  const amdf_status_t status =
-      amdf_gpu_umd_api_for_endpoint(platform)->create_endpoint_profile(
-          platform, amdf_endpoint_host_allocator(endpoint), &profile);
+  const amdf_status_t status = api->create_endpoint_profile(
+      amdf_endpoint_get_engine_context(endpoint),
+      amdf_endpoint_host_allocator(endpoint), &profile);
   if (!amdf_status_is_ok(status)) {
     amdf_endpoint_store_engine_profile_error(endpoint, status);
   } else {

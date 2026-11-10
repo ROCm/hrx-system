@@ -10,7 +10,6 @@
 #include "amdf/gpu.h"
 #include "libamdf/src/gpu/endpoint_profile.h"
 #include "libamdf/src/gpu/umd/instance.h"
-#include "libamdf/src/platform/endpoint.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,10 +39,11 @@ typedef struct amdf_gpu_umd_device_result_t {
 } amdf_gpu_umd_device_result_t;
 
 // Creates program-independent execution state borrowing the prepared instance
-// connections. The caller holds the instance's native-state lock. Failure
-// preserves both outputs; any failed rollback remains owned by the endpoint.
+// connections. The context belongs to the implementation bound to the endpoint.
+// The caller holds the instance's native-state lock. Failure preserves both
+// outputs; any failed rollback remains owned by the endpoint.
 amdf_status_t amdf_gpu_umd_device_create(
-    amdf_gpu_umd_instance_t* instance, amdf_platform_endpoint_t* endpoint,
+    amdf_gpu_umd_instance_t* instance, void* endpoint_context,
     amdf_allocator_t host_allocator, amdf_native_lifetime_t native_lifetime,
     amdf_gpu_umd_device_t** out_device,
     amdf_gpu_umd_device_result_t* out_result);

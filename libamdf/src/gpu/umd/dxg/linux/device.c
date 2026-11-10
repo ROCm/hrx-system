@@ -24,10 +24,11 @@ static amdf_status_t amdf_gpu_linux_dxg_device_release_native(
 }
 
 amdf_status_t amdf_gpu_linux_dxg_device_create(
-    amdf_gpu_umd_instance_t* instance, amdf_platform_endpoint_t* endpoint,
+    amdf_gpu_umd_instance_t* instance, void* endpoint_context,
     amdf_allocator_t host_allocator, amdf_native_lifetime_t native_lifetime,
     amdf_gpu_umd_device_t** out_device,
     amdf_gpu_umd_device_result_t* out_result) {
+  amdf_platform_endpoint_t* endpoint = endpoint_context;
   // The platform instance owns the DXG connection. Every execution and paging
   // object created here has an explicit inverse under either lifetime policy.
   (void)instance;

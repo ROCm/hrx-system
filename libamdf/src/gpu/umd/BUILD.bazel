@@ -44,7 +44,6 @@ amdf_cc_library(
     deps = [
         ":instance",
         "//libamdf/src/gpu:endpoint_profile",
-        "//libamdf/src/platform",
     ],
 )
 
@@ -61,7 +60,6 @@ amdf_cc_library(
     visibility = ["//libamdf/src/gpu:__subpackages__"],
     deps = [
         "//libamdf/src/gpu:endpoint_profile",
-        "//libamdf/src/platform",
     ],
 )
 
@@ -159,8 +157,11 @@ amdf_cc_library(
         "@platforms//os:windows": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
-    visibility = ["//libamdf/src/gpu:__subpackages__"],
-    deps = [":api"] + select({
+    visibility = ["//libamdf/src/provider:__pkg__"],
+    deps = [
+        ":api",
+        "//libamdf/src/platform",
+    ] + select({
         "@platforms//os:linux": [
             "//libamdf/src/gpu/umd/dxg/linux:api",
             "//libamdf/src/gpu/umd/dxg/linux:api_contract",

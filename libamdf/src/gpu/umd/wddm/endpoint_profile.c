@@ -17,9 +17,9 @@
 #include "libamdf/src/platform/windows/endpoint_properties.h"
 
 amdf_status_t amdf_gpu_umd_create_endpoint_profile(
-    amdf_platform_endpoint_t* platform_endpoint,
-    amdf_allocator_t host_allocator,
+    void* endpoint_context, amdf_allocator_t host_allocator,
     amdf_gpu_endpoint_profile_t** out_profile) {
+  amdf_platform_endpoint_t* platform_endpoint = endpoint_context;
   amdf_gpu_dxg_adapter_t adapter = {0};
   bool profile_available = false;
   amdf_gpu_endpoint_profile_t profile = {0};
@@ -103,8 +103,9 @@ amdf_status_t amdf_gpu_umd_create_endpoint_profile(
 }
 
 amdf_status_t amdf_gpu_umd_sample_memory_scope(
-    const amdf_platform_endpoint_t* endpoint, amdf_memory_scope_flags_t flags,
+    const void* endpoint_context, amdf_memory_scope_flags_t flags,
     amdf_memory_scope_observation_t* out_observation) {
+  const amdf_platform_endpoint_t* endpoint = endpoint_context;
   const amdf_kmt_api_t* kmt = &endpoint->instance->kmt;
   D3DKMT_QUERYVIDEOMEMORYINFO query = {
       .hProcess = GetCurrentProcess(),

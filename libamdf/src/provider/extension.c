@@ -13,6 +13,7 @@
 
 #if defined(AMDF_HAVE_GPU)
 #include "libamdf/src/gpu/extension.h"
+#include "libamdf/src/gpu/umd/native.h"
 #endif  // AMDF_HAVE_GPU
 
 #if defined(AMDF_HAVE_XDNA)
@@ -27,6 +28,16 @@ amdf_status_t AMDF_CALL amdf_provider_endpoint_open(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
+
+#if defined(AMDF_HAVE_GPU)
+  if (amdf_endpoint_get_cached_info(*out_endpoint)->engine_kind ==
+      AMDF_ENGINE_KIND_GPU) {
+    amdf_platform_endpoint_t* platform =
+        amdf_endpoint_get_platform(*out_endpoint);
+    amdf_endpoint_set_engine_binding(
+        *out_endpoint, amdf_gpu_umd_api_for_endpoint(platform), platform);
+  }
+#endif  // AMDF_HAVE_GPU
 
   amdf_extension_initialize_endpoint(*out_endpoint);
 
