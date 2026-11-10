@@ -406,16 +406,34 @@ static iree_status_t loom_canonicalize_apply_fact_identity(
       rewriter, op, loom_op_const_operands(op), op->operand_count);
 }
 
+typedef struct loom_canonicalize_preparation_t {
+  // Fact-independent actions selected before fallback folding and identities.
+  const loom_rewrite_pattern_registry_t* fact_independent;
+  // Ordinary pre-fold rules retaining priority over fallback preparation.
+  const loom_rewrite_pattern_registry_t* pre_fold;
+} loom_canonicalize_preparation_t;
+
 static iree_status_t loom_canonicalize_prepare_op(
     void* user_data, const loom_rewriter_t* rewriter, const loom_op_t* op,
     iree_arena_allocator_t* arena, loom_rewrite_action_t** out_action) {
-  // A composition's pre-fold rules retain priority over universal folding.
-  // Their roots stay on the ordinary worklist, where each rule observes fresh
-  // facts before the fallback fold or identity elimination.
-  const loom_rewrite_pattern_registry_t* pre_fold = user_data;
+  const loom_canonicalize_preparation_t* preparation =
+      (const loom_canonicalize_preparation_t*)user_data;
   *out_action = NULL;
-  if (pre_fold &&
-      loom_rewrite_pattern_registry_lookup_kind(pre_fold, op->kind).count) {
+  if (preparation->fact_independent) {
+    IREE_RETURN_IF_ERROR(loom_rewrite_pattern_registry_prepare_op(
+        preparation->fact_independent, rewriter->module, rewriter->fact_table,
+        op, arena, out_action));
+    if (*out_action) {
+      return iree_ok_status();
+    }
+  }
+
+  // A composition's ordinary pre-fold rules retain priority over universal
+  // folding. Their roots stay on the worklist, where each rule observes fresh
+  // facts before the fallback fold or identity elimination.
+  if (preparation->pre_fold &&
+      loom_rewrite_pattern_registry_lookup_kind(preparation->pre_fold, op->kind)
+          .count) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(
@@ -685,12 +703,15 @@ static iree_status_t loom_canonicalize_begin_iteration(
        !driver->rewriter.fact_table->regions.has_structured_summaries)) {
     return iree_ok_status();
   }
+  loom_canonicalize_preparation_t preparation = {
+      .fact_independent = state->patterns.fact_independent,
+      .pre_fold = state->patterns.pre_fold,
+  };
   const int64_t previous_modified = result->ops_modified;
   IREE_RETURN_IF_ERROR(loom_greedy_rewrite_apply_prepared(
       driver, region,
-      (loom_rewrite_prepare_callback_t){
-          .user_data = (void*)state->patterns.pre_fold,
-          .fn = loom_canonicalize_prepare_op},
+      (loom_rewrite_prepare_callback_t){.user_data = &preparation,
+                                        .fn = loom_canonicalize_prepare_op},
       /*callbacks=*/NULL, result));
   *out_changed |= result->ops_modified != previous_modified;
   return iree_ok_status();

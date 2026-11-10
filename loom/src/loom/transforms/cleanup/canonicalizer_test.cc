@@ -231,6 +231,26 @@ typedef struct CanonicalizerPhasePatternData {
   CanonicalizerPhasePatternState* state;
 } CanonicalizerPhasePatternData;
 
+typedef struct CanonicalizerPreparedPatternState {
+  // Root whose preparation eligibility changes during region initialization.
+  loom_op_t* root;
+  // Exact zero installed as the root's right operand during initialization.
+  loom_value_id_t zero;
+  // Number of region-initialization mutations applied to root.
+  uint32_t initialization_count;
+  // Number of actions prepared from the initialized root.
+  uint32_t preparation_count;
+  // Number of prepared actions applied to root.
+  uint32_t application_count;
+} CanonicalizerPreparedPatternState;
+
+typedef struct CanonicalizerPreparedPatternAction {
+  // Action header owned by the coherent prepared batch.
+  loom_rewrite_action_t action;
+  // Test state receiving application accounting.
+  CanonicalizerPreparedPatternState* state;
+} CanonicalizerPreparedPatternAction;
+
 static iree_status_t CountRegionInitializationPattern(
     const loom_rewrite_pattern_t* pattern, void*, loom_op_t*, loom_rewriter_t*,
     bool* out_changed) {
@@ -262,6 +282,59 @@ static iree_status_t InsertAndObserveFixedPointRootPattern(
       &rewriter->builder, loom_op_operands(op), op->operand_count, op->location,
       &state->inserted_op));
   *out_changed = true;
+  return iree_ok_status();
+}
+
+static iree_status_t SelectZeroDuringRegionInitialization(
+    const loom_rewrite_pattern_t* pattern, void*, loom_op_t* op,
+    loom_rewriter_t* rewriter, bool* out_changed) {
+  CanonicalizerPreparedPatternState* state =
+      (CanonicalizerPreparedPatternState*)pattern->user_data;
+  *out_changed = false;
+  if (op != state->root) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_rewriter_set_operand(rewriter, op, 1, state->zero));
+  ++state->initialization_count;
+  *out_changed = true;
+  return iree_ok_status();
+}
+
+static iree_status_t ApplyInitializedPreparedPattern(
+    const loom_rewrite_action_t* base_action, loom_rewriter_t* rewriter) {
+  const CanonicalizerPreparedPatternAction* action =
+      (const CanonicalizerPreparedPatternAction*)base_action;
+  const loom_value_id_t replacement =
+      loom_op_const_operands(base_action->root)[0];
+  IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
+      rewriter, base_action->root, &replacement, 1));
+  ++action->state->application_count;
+  return iree_ok_status();
+}
+
+static iree_status_t PrepareInitializedPattern(
+    const loom_rewrite_pattern_t* pattern, const loom_module_t*,
+    const loom_value_fact_table_t* facts, const loom_op_t* op,
+    iree_arena_allocator_t* arena, loom_rewrite_action_t** out_action) {
+  CanonicalizerPreparedPatternState* state =
+      (CanonicalizerPreparedPatternState*)pattern->user_data;
+  *out_action = nullptr;
+  int64_t right = 0;
+  if (op != state->root || !facts ||
+      !loom_value_facts_as_exact_i64(
+          loom_value_fact_table_lookup(facts, loom_op_const_operands(op)[1]),
+          &right) ||
+      right != 0) {
+    return iree_ok_status();
+  }
+
+  CanonicalizerPreparedPatternAction* action = nullptr;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(arena, sizeof(*action), (void**)&action));
+  action->action.apply = ApplyInitializedPreparedPattern;
+  action->state = state;
+  *out_action = &action->action;
+  ++state->preparation_count;
   return iree_ok_status();
 }
 
@@ -356,6 +429,66 @@ TEST_F(CanonicalizerTest, PreFoldPatternsKeepPriority) {
   EXPECT_EQ(state.initialization_visit_count, 1u);
   EXPECT_EQ(constant_value(loom_op_const_operands(use)[0]), 14);
   loom_rewrite_pattern_registry_storage_deinitialize(&storage);
+}
+
+TEST_F(CanonicalizerTest, PreparedPatternsObserveRegionInitialization) {
+  body_->flags |= LOOM_REGION_INSTANCE_FLAG_CFG;
+  const loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_op_t* seven = nullptr;
+  loom_op_t* one = nullptr;
+  loom_op_t* zero = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(7), i32,
+                                          LOOM_LOCATION_UNKNOWN, &seven));
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(1), i32,
+                                          LOOM_LOCATION_UNKNOWN, &one));
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(0), i32,
+                                          LOOM_LOCATION_UNKNOWN, &zero));
+  loom_op_t* add = nullptr;
+  IREE_ASSERT_OK(loom_test_addi_build(
+      &builder_, loom_test_constant_result(seven),
+      loom_test_constant_result(one), i32, LOOM_LOCATION_UNKNOWN, &add));
+  const loom_value_id_t result = loom_test_addi_result(add);
+  loom_op_t* use = nullptr;
+  IREE_ASSERT_OK(
+      loom_test_use_build(&builder_, &result, 1, LOOM_LOCATION_UNKNOWN, &use));
+
+  CanonicalizerPreparedPatternState state = {
+      .root = add,
+      .zero = loom_test_constant_result(zero),
+  };
+  const loom_rewrite_pattern_t initialization_pattern = {
+      LOOM_OP_TEST_ADDI, SelectZeroDuringRegionInitialization, &state};
+  loom_rewrite_pattern_registry_storage_t initialization_storage = {};
+  InitializeSinglePatternRegistry(&initialization_pattern,
+                                  &initialization_storage);
+  const loom_rewrite_pattern_t prepared_pattern = {
+      .root_kind = LOOM_OP_TEST_ADDI,
+      .user_data = &state,
+      .prepare = PrepareInitializedPattern,
+  };
+  loom_rewrite_pattern_registry_storage_t prepared_storage = {};
+  InitializeSinglePatternRegistry(&prepared_pattern, &prepared_storage);
+  const loom_canonicalizer_options_t options = {
+      .patterns =
+          {
+              .fact_independent =
+                  loom_rewrite_pattern_registry_storage_registry(
+                      &prepared_storage),
+              .region_initialization =
+                  loom_rewrite_pattern_registry_storage_registry(
+                      &initialization_storage),
+          },
+  };
+  IREE_ASSERT_OK(run_canonicalize(func_like_, &options));
+
+  EXPECT_EQ(state.initialization_count, 1u);
+  EXPECT_EQ(state.preparation_count, 1u);
+  EXPECT_EQ(state.application_count, 1u);
+  EXPECT_TRUE(iree_any_bit_set(add->flags, LOOM_OP_FLAG_DEAD));
+  EXPECT_EQ(loom_op_const_operands(use)[0], loom_test_constant_result(seven));
+
+  loom_rewrite_pattern_registry_storage_deinitialize(&prepared_storage);
+  loom_rewrite_pattern_registry_storage_deinitialize(&initialization_storage);
 }
 
 TEST_F(CanonicalizerTest, AddiZeroRight) {
