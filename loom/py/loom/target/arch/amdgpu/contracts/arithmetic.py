@@ -667,7 +667,9 @@ def _constant_vector_shift_rule(
         emit=(
             EmitDescriptorOp(
                 descriptor=descriptor,
-                operands={"value": ValueRef.operand("lhs")},
+                operands={
+                    "value": _materialized_operand("lhs", REGISTERS_VGPR_MATERIALIZER)
+                },
                 results={"dst": ValueRef.result("result")},
                 immediates={"imm32": ValueProject.exact_i64("rhs")},
                 form=_emit_form(type_pattern),
@@ -696,7 +698,7 @@ def _i64_vector_shift_rule(
                     "shift": ValueRef.operand(
                         "rhs", materializer=I64_LOW_WORDS_MATERIALIZER.name
                     ),
-                    "value": ValueRef.operand("lhs"),
+                    "value": _materialized_operand("lhs", REGISTERS_VGPR_MATERIALIZER),
                 },
                 results={"dst": ValueRef.result("result")},
                 form=DescriptorEmitForm.PER_LANE,

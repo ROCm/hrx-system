@@ -586,8 +586,15 @@ iree_status_t loom_amdgpu_lower_vector_concat(
   loom_value_id_t* low_sources = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, sources.count, sizeof(*low_sources), (void**)&low_sources));
+  const loom_type_t result_type =
+      loom_low_lower_value_binding_type(context, plan->result);
   for (uint16_t i = 0; i < sources.count; ++i) {
     low_sources[i] = loom_low_lower_lookup_value(context, sources.values[i]);
+    if (loom_amdgpu_low_type_is_register_class(context, result_type,
+                                               LOOM_AMDGPU_REG_CLASS_ID_VGPR)) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_vgpr_b32_registers(
+          context, source_op, low_sources[i], &low_sources[i]));
+    }
   }
 
   return loom_amdgpu_bind_low_register_range(context, source_op, plan->result,
@@ -627,8 +634,9 @@ iree_status_t loom_amdgpu_lower_vector_register_map(
     low_sources[i] = loom_low_lower_lookup_value(context, plan->sources[i]);
   }
 
-  loom_type_t register_type = loom_type_none();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &register_type));
+  const loom_type_t register_type =
+      loom_low_register_carrier_type_with_unit_count(
+          loom_low_lower_value_binding_type(context, plan->result), 1);
   loom_value_id_t low_registers[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES];
   for (uint32_t i = 0; i < plan->result_register_count; ++i) {
     const uint32_t source_index = plan->result_source_indices[i];
@@ -1049,8 +1057,13 @@ iree_status_t loom_amdgpu_finalize_vector_structural_plan(
       if (sources.count != 1) {
         uint32_t unit_count = loom_low_register_type_unit_count(result_type);
         for (uint16_t i = 1; i < sources.count; ++i) {
-          unit_count += loom_low_register_type_unit_count(
-              loom_low_lower_value_binding_type(context, sources.values[i]));
+          const loom_type_t source_type =
+              loom_low_lower_value_binding_type(context, sources.values[i]);
+          unit_count += loom_low_register_type_unit_count(source_type);
+          if (loom_low_register_type_class_id(source_type) ==
+              LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
+            result_type = source_type;
+          }
         }
         result_type = loom_low_register_carrier_type_with_unit_count(
             result_type, unit_count);
@@ -1061,22 +1074,9 @@ iree_status_t loom_amdgpu_finalize_vector_structural_plan(
       const loom_amdgpu_vector_register_map_plan_t* plan =
           selected_plan.target_data;
       result = plan->result;
-      if (loom_amdgpu_vector_register_map_is_source_alias(plan)) {
-        result_type =
-            loom_low_lower_value_binding_type(context, plan->sources[0]);
-      } else {
-        const uint32_t source_index = plan->result_source_indices[0];
-        result_type =
-            plan->source_register_counts[source_index] == 1
-                ? loom_low_lower_value_binding_type(context,
-                                                    plan->sources[source_index])
-                : loom_low_register_type(descriptor_set_id,
-                                         LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1);
-        if (plan->result_register_count != 1) {
-          result_type = loom_low_register_carrier_type_with_unit_count(
-              result_type, plan->result_register_count);
-        }
-      }
+      result_type = loom_low_register_carrier_type_with_unit_count(
+          loom_low_lower_value_binding_type(context, plan->sources[0]),
+          plan->result_register_count);
       break;
     }
     case LOOM_OP_VECTOR_SLICE: {

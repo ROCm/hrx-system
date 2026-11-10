@@ -443,18 +443,19 @@ check.scenario @constructed_packet_boundaries {
 // a 64-word register tuple. The four cases cover packed bytes, packed halves,
 // single-word elements, and register pairs without doing floating arithmetic.
 func.def @wide_lane_transposes(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.noalias %input, %output : buffer, buffer
   %base = index.constant 0 : offset
   %half_base = index.constant 264 : offset
   %word_base = index.constant 528 : offset
   %pair_base = index.constant 792 : offset
-  %bytes = buffer.view %input[%base] : buffer -> view<3x88xi8>
-  %halves = buffer.view %input[%base] : buffer -> view<3x44xbf16>
-  %words = buffer.view %input[%base] : buffer -> view<3x22xf32>
-  %pairs = buffer.view %input[%base] : buffer -> view<3x11xi64>
-  %byte_output = buffer.view %output[%base] : buffer -> view<88x3xi8>
-  %half_output = buffer.view %output[%half_base] : buffer -> view<44x3xbf16>
-  %word_output = buffer.view %output[%word_base] : buffer -> view<22x3xf32>
-  %pair_output = buffer.view %output[%pair_base] : buffer -> view<11x3xi64>
+  %bytes = buffer.view %source[%base] : buffer -> view<3x88xi8>
+  %halves = buffer.view %source[%base] : buffer -> view<3x44xbf16>
+  %words = buffer.view %source[%base] : buffer -> view<3x22xf32>
+  %pairs = buffer.view %source[%base] : buffer -> view<3x11xi64>
+  %byte_output = buffer.view %destination[%base] : buffer -> view<88x3xi8>
+  %half_output = buffer.view %destination[%half_base] : buffer -> view<44x3xbf16>
+  %word_output = buffer.view %destination[%word_base] : buffer -> view<22x3xf32>
+  %pair_output = buffer.view %destination[%pair_base] : buffer -> view<11x3xi64>
   %byte_packet = vector.load %bytes[0, 0] : view<3x88xi8> -> vector<3x88xi8>
   %half_packet = vector.load %halves[0, 0] : view<3x44xbf16> -> vector<3x44xbf16>
   %word_packet = vector.load %words[0, 0] : view<3x22xf32> -> vector<3x22xf32>
