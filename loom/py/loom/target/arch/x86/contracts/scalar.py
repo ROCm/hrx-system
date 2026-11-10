@@ -69,6 +69,7 @@ from loom.target.contracts import (
     descriptor_by_key,
     unary_descriptor_rules,
 )
+from loom.target.contracts.templates import integer_absolute_descriptor_rule
 from loom.target.low_descriptors import Descriptor
 
 _I1 = Scalar("i1")
@@ -1269,6 +1270,24 @@ def _cases() -> Sequence[ContractCase]:
                 for type_pattern, register_width in ((_I32, 32), (_I64, 64))
             ),
             form=DescriptorEmitForm.OP,
+        ),
+        *(
+            integer_absolute_descriptor_rule(
+                scalar_arithmetic.scalar_absi,
+                value_type,
+                (
+                    _op_emit(
+                        descriptor=descriptor_lookup(f"x86.scalar.sar.imm.gpr{width}"),
+                        operands={"lhs": ValueRef.operand("input")},
+                        results={"dst": ValueRef.temporary("sign")},
+                        result_types={"dst": value_type},
+                        immediates={"shift": width - 1},
+                    ),
+                ),
+                descriptor_lookup(f"x86.scalar.xor.gpr{width}"),
+                descriptor_lookup(f"x86.scalar.sub.gpr{width}"),
+            )
+            for value_type, width in ((_I32, 32), (_I64, 64))
         ),
         *(
             rule

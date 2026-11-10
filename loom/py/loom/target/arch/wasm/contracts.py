@@ -84,6 +84,7 @@ from loom.target.contracts import (
 )
 from loom.target.contracts.templates import (
     ReductionDescriptorCase,
+    integer_absolute_descriptor_rule,
     reduction_descriptor_rules,
 )
 from loom.target.low_descriptors import Descriptor
@@ -518,59 +519,50 @@ def _integer_sign_rules(
     value_type: TypePattern, type_name: str, sign_shift: int
 ) -> Iterable[DescriptorRule]:
     subtract = _descriptor(f"wasm.{type_name}.sub")
+    constant = _descriptor(f"wasm.{type_name}.const")
     input_value = ValueRef.operand("input")
-    for source_op, constant, intermediate_emits, lhs, rhs in (
-        (
-            scalar_arithmetic.scalar_negi,
-            0,
-            (),
-            ValueRef.temporary("constant"),
-            input_value,
-        ),
-        (
-            scalar_arithmetic.scalar_absi,
-            sign_shift,
-            (
-                EmitDescriptorOp(
-                    descriptor=_descriptor(f"wasm.{type_name}.shr_s"),
-                    operands={
-                        "lhs": input_value,
-                        "rhs": ValueRef.temporary("constant"),
-                    },
-                    results={"dst": ValueRef.temporary("sign")},
-                    result_types={"dst": value_type},
-                ),
-                EmitDescriptorOp(
-                    descriptor=_descriptor(f"wasm.{type_name}.xor"),
-                    operands={"lhs": input_value, "rhs": ValueRef.temporary("sign")},
-                    results={"dst": ValueRef.temporary("magnitude")},
-                    result_types={"dst": value_type},
-                ),
+    yield DescriptorRule(
+        source_op=scalar_arithmetic.scalar_negi,
+        descriptor=subtract,
+        guards=_typed_guards(("input", "result"), value_type),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=constant,
+                results={"dst": ValueRef.temporary("constant")},
+                result_types={"dst": value_type},
+                immediates={f"{type_name}_value": 0},
+                form=DescriptorEmitForm.CONST,
             ),
-            ValueRef.temporary("magnitude"),
-            ValueRef.temporary("sign"),
-        ),
-    ):
-        yield DescriptorRule(
-            source_op=source_op,
-            descriptor=subtract,
-            guards=_typed_guards(("input", "result"), value_type),
-            emit=(
-                EmitDescriptorOp(
-                    descriptor=_descriptor(f"wasm.{type_name}.const"),
-                    results={"dst": ValueRef.temporary("constant")},
-                    result_types={"dst": value_type},
-                    immediates={f"{type_name}_value": constant},
-                    form=DescriptorEmitForm.CONST,
-                ),
-                *intermediate_emits,
-                EmitDescriptorOp(
-                    descriptor=subtract,
-                    operands={"lhs": lhs, "rhs": rhs},
-                    results={"dst": ValueRef.result("result")},
-                ),
+            EmitDescriptorOp(
+                descriptor=subtract,
+                operands={"lhs": ValueRef.temporary("constant"), "rhs": input_value},
+                results={"dst": ValueRef.result("result")},
+                form=DescriptorEmitForm.OP,
             ),
-        )
+        ),
+    )
+    yield integer_absolute_descriptor_rule(
+        scalar_arithmetic.scalar_absi,
+        value_type,
+        (
+            EmitDescriptorOp(
+                descriptor=constant,
+                results={"dst": ValueRef.temporary("constant")},
+                result_types={"dst": value_type},
+                immediates={f"{type_name}_value": sign_shift},
+                form=DescriptorEmitForm.CONST,
+            ),
+            EmitDescriptorOp(
+                descriptor=_descriptor(f"wasm.{type_name}.shr_s"),
+                operands={"lhs": input_value, "rhs": ValueRef.temporary("constant")},
+                results={"dst": ValueRef.temporary("sign")},
+                result_types={"dst": value_type},
+                form=DescriptorEmitForm.OP,
+            ),
+        ),
+        _descriptor(f"wasm.{type_name}.xor"),
+        subtract,
+    )
 
 
 def _index_madd_rule() -> DescriptorRule:
