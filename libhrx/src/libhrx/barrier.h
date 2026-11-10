@@ -8,6 +8,10 @@
 #include "iree/hal/command_buffer.h"
 #include "iree/hal/queue.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Call-local translation storage. Ordinary before/after records and short range
 // lists stay on the stack; native enqueue/recording captures them before
 // return. Callers bypass this storage completely when retaining NULL defaults.
@@ -34,4 +38,7 @@ iree_status_t hrx_barrier_storage_initialize(
 
 void hrx_barrier_storage_deinitialize(hrx_barrier_storage_t* storage);
 
+#ifdef __cplusplus
+}
+#endif
 #endif  // LIBHRX_SRC_LIBHRX_BARRIER_H_

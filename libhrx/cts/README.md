@@ -158,6 +158,21 @@ in the configured build, and CTest discovers its tests.
 
 ## Submission measurements
 
+`//libhrx/cts/tests/executable:queue_benchmark` compares public HRX queue calls
+with direct HAL calls using the same group, queue, executable, buffers, pool,
+and semaphore. `Fill` and `Dispatch` retain default visibility; `PreparedFill`
+and `PreparedDispatch` use the same prepared acquire/release effects and concrete
+ranges on both paths. Native descriptors are prepared once, so the difference
+includes HRX's per-call translation. `TransitionQuery` measures the cached
+scope-pair lookup separately. Static linkage is identified in the output.
+
+`Submit` excludes final completion, and `Complete` includes it. Burst rows
+report time per batch; divide by the batch size to compare per-operation costs.
+Allocation rows include both acquire and return submissions, with final
+completion and handle release excluded from `Submit`. Source acquisition/byte
+counters and provisioned queue counts expose backing growth and queue inventory.
+Every queue row verifies changing kernel/fill output outside timing.
+
 `//libhrx/cts/tests/hip:hip_dispatch_benchmark` measures public HIP direct launches
 and captured graphs with a reused runtime, module, and stream. Its output labels
 identify the selected driver, architecture, PCI device, and wait policy.

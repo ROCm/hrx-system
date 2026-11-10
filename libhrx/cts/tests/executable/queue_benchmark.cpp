@@ -10,6 +10,7 @@
 #include "hrx_runtime_cxx.h"
 #include "iree/base/tooling/flags.h"
 #include "libhrx/cts/core/amdgpu_executable_test_data.hpp"
+#include "libhrx/src/libhrx/barrier.h"
 #include "libhrx/src/libhrx/hrx_internal.h"
 #include "libhrx/src/libhrx/mem_pool.h"
 
@@ -102,6 +103,7 @@ class Environment {
     Wait();
     Check(hrx_device_query_queue_family_memory_scope(
         device_, family.family_ordinal, HRX_MEMORY_SITE_PROGRAM, &program_));
+    PrepareBarriers(family.family_ordinal);
     label_ = std::string(FLAG_hrx_benchmark_device) +
              (FLAG_hrx_benchmark_active ? " wait=active" : " wait=blocking") +
              " linkage=static";
@@ -126,9 +128,12 @@ class Environment {
     }
   }
 
-  ~Environment() { Wait(); }
+  ~Environment() {
+    Wait();
+    hrx_barrier_storage_deinitialize(&native_barriers_);
+  }
 
-  template <bool Native, Operation Op>
+  template <bool Native, Operation Op, bool Prepared = false>
   void Submit() {
     uint64_t next = tail_ + 1;
     expected_ = 0xA0000000u | static_cast<uint32_t>(next);
@@ -137,10 +142,11 @@ class Environment {
       const iree_hal_semaphore_list_t waits = {1, &semaphore, &tail_};
       const iree_hal_semaphore_list_t signals = {1, &semaphore, &next};
       if constexpr (Op == Operation::kFill) {
-        CheckNative(iree_hal_queue_fill(queue_->hal_queue, waits, signals,
-                                        output_.get()->hal_buffer, 0, 4096,
-                                        &expected_, sizeof(expected_), nullptr,
-                                        IREE_HAL_FILL_FLAG_NONE));
+        CheckNative(iree_hal_queue_fill(
+            queue_->hal_queue, waits, signals, output_.get()->hal_buffer, 0,
+            4096, &expected_, sizeof(expected_),
+            Prepared ? &native_barriers_.barriers : nullptr,
+            IREE_HAL_FILL_FLAG_NONE));
       } else {
         const auto binding = iree_hal_make_buffer_ref(output_.get()->hal_buffer,
                                                       0, sizeof(expected_));
@@ -155,7 +161,8 @@ class Environment {
             executable_.get()->hal_executable,
             iree_hal_executable_function_from_index(ordinal_), config,
             iree_make_const_byte_span(&expected_, sizeof(expected_)),
-            {1, &binding}, nullptr, IREE_HAL_DISPATCH_FLAG_NONE));
+            {1, &binding}, Prepared ? &native_barriers_.barriers : nullptr,
+            IREE_HAL_DISPATCH_FLAG_NONE));
       }
     } else {
       hrx_semaphore_t semaphore = completion_;
@@ -163,13 +170,14 @@ class Environment {
       const hrx_semaphore_list_t signals = {&semaphore, &next, 1};
       if constexpr (Op == Operation::kFill) {
         Check(hrx_queue_fill(queue_, &waits, &signals, output_, 0, 4096,
-                             &expected_, sizeof(expected_), nullptr));
+                             &expected_, sizeof(expected_),
+                             Prepared ? &barriers_ : nullptr));
       } else {
         const hrx_buffer_ref_t binding = {output_, 0, sizeof(expected_)};
-        Check(hrx_queue_dispatch(queue_, &waits, &signals, executable_,
-                                 ordinal_, &config_, &expected_,
-                                 sizeof(expected_), &binding, 1, nullptr,
-                                 HRX_DISPATCH_FLAG_NONE));
+        Check(hrx_queue_dispatch(
+            queue_, &waits, &signals, executable_, ordinal_, &config_,
+            &expected_, sizeof(expected_), &binding, 1,
+            Prepared ? &barriers_ : nullptr, HRX_DISPATCH_FLAG_NONE));
       }
     }
     tail_ = next;
@@ -232,6 +240,17 @@ class Environment {
     }
   }
 
+  template <bool Native>
+  auto QueryTransition() {
+    if constexpr (Native) {
+      return iree_hal_memory_transition_query(
+          {static_cast<const iree_hal_memory_contract_t*>(table_.contract)},
+          {pair_.cell_index});
+    } else {
+      return hrx_memory_transition_query(table_, pair_);
+    }
+  }
+
   void Wait() { Check(hrx_semaphore_wait(completion_, tail_, UINT64_MAX)); }
   void Verify() {
     void* data = nullptr;
@@ -251,6 +270,51 @@ class Environment {
   }
 
  private:
+  // Both benchmark paths consume the same prepared descriptors. Translation
+  // happens once for the native oracle and on each public HRX enqueue.
+  void PrepareBarriers(uint32_t family_ordinal) {
+    hrx_memory_scope_t scope;
+    Check(hrx_device_query_queue_family_memory_scope(
+        device_, family_ordinal, HRX_MEMORY_SITE_QUEUE, &scope));
+    table_ = hrx_buffer_transition_table(output_);
+    Check(hrx_memory_transition_prepare_pair(
+        table_, scope, program_, HRX_MEMORY_TRANSITION_RELEASE, &pair_));
+    const auto any = hrx_memory_scope_any(scope);
+    for (size_t side = 0; side < boundaries_.size(); ++side) {
+      const auto action = side == 0 ? HRX_MEMORY_TRANSITION_ACQUIRE
+                                    : HRX_MEMORY_TRANSITION_RELEASE;
+      hrx_memory_transition_pair_t pair;
+      Check(hrx_memory_transition_prepare_pair(table_, side == 0 ? any : scope,
+                                               side == 0 ? scope : any, action,
+                                               &pair));
+      const auto transition = hrx_memory_transition_query(table_, pair);
+      const auto effects = side == 0 ? transition.acquire : transition.release;
+      Require(hrx_memory_effects_is_supported(effects) &&
+                  !hrx_memory_effects_requires_program(effects),
+              "prepared boundary requires an executable queue action");
+      ranges_[side] = {
+          .source_scope = access_.source_scope,
+          .target_scope = access_.target_scope,
+          .buffer_ref = {output_, 0, 4096},
+          .recipe = hrx_memory_transition_recipe(table_, pair, action),
+      };
+      boundaries_[side] = {
+          .source_stage_mask =
+              side == 1 ? HRX_EXECUTION_STAGE_COMMAND_RETIRE : 0,
+          .target_stage_mask =
+              side == 0 ? HRX_EXECUTION_STAGE_COMMAND_ISSUE : 0,
+          .effects = effects,
+          .memory_barrier_count = 1,
+          .memory_barriers = &access_,
+          .buffer_barrier_count = 1,
+          .buffer_barriers = &ranges_[side],
+      };
+      boundary_lists_[side] = {1, &boundaries_[side]};
+    }
+    barriers_ = {&boundary_lists_[0], &boundary_lists_[1]};
+    CheckNative(hrx_barrier_storage_initialize(&barriers_, &native_barriers_));
+  }
+
   // Service owner, released after the group and every dependent handle.
   hrx::runtime::runtime_ptr runtime_;
   // Single sealed execution domain shared by both measured paths.
@@ -279,6 +343,26 @@ class Environment {
   hrx_dispatch_config_t config_ = {};
   // Exact prepared program scope for constant-cost capability queries.
   hrx_memory_scope_t program_ = {};
+  // Captured public table for the persistent output allocation.
+  hrx_memory_transition_table_t table_ = {};
+  // Exact queue-to-program pair prepared outside query timing.
+  hrx_memory_transition_pair_t pair_ = {};
+  // Shared access dependency for the read/write output at either boundary.
+  const hrx_memory_barrier_t access_ = {
+      .source_scope = HRX_ACCESS_SCOPE_MEMORY_WRITE,
+      .target_scope =
+          HRX_ACCESS_SCOPE_MEMORY_READ | HRX_ACCESS_SCOPE_MEMORY_WRITE,
+  };
+  // Concrete input/output ranges with their prepared resource recipes.
+  std::array<hrx_buffer_barrier_t, 2> ranges_ = {};
+  // Prepared acquire and release, respectively.
+  std::array<hrx_barrier_t, 2> boundaries_ = {};
+  // Borrowed boundary records retained for the process lifetime.
+  std::array<hrx_barrier_list_t, 2> boundary_lists_ = {};
+  // Public wrapper translated inside each measured explicit enqueue.
+  hrx_queue_barriers_t barriers_ = {};
+  // Equivalent native descriptors prepared before measurement.
+  hrx_barrier_storage_t native_barriers_ = {};
   // Last accepted signal; final retirement is outside submit-only timing.
   uint64_t tail_ = 0;
   // Changing expected output checks actual execution and argument capture.
@@ -298,7 +382,7 @@ Environment& GetEnvironment() {
   return environment;
 }
 
-template <bool Native, Operation Op, bool Complete>
+template <bool Native, Operation Op, bool Complete, bool Prepared = false>
 void Queue(benchmark::State& state) {
   auto& environment = GetEnvironment();
   if constexpr (Op == Operation::kDispatch) {
@@ -308,14 +392,14 @@ void Queue(benchmark::State& state) {
     }
   }
   for (int i = 0; i < 16; ++i) {
-    environment.Submit<Native, Op>();
+    environment.Submit<Native, Op, Prepared>();
   }
   environment.Wait();
   environment.Verify();
   const size_t batch = state.range(0);
   for (auto _ : state) {
     for (size_t i = 0; i < batch; ++i) {
-      environment.Submit<Native, Op>();
+      environment.Submit<Native, Op, Prepared>();
     }
     if constexpr (!Complete) {
       state.PauseTiming();
@@ -361,6 +445,16 @@ void Atomics(benchmark::State& state) {
   environment.Describe(state);
 }
 
+template <bool Native>
+void Transition(benchmark::State& state) {
+  auto& environment = GetEnvironment();
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(environment.QueryTransition<Native>());
+  }
+  environment.Describe(state);
+  state.SetItemsProcessed(state.iterations());
+}
+
 #define QUEUE_BENCHMARK(native, operation, complete, name)          \
   BENCHMARK_TEMPLATE(Queue, native, Operation::operation, complete) \
       ->Name(name)                                                  \
@@ -377,6 +471,18 @@ QUEUE_BENCHMARK(false, kDispatch, false, "HRX/Dispatch/Submit");
 QUEUE_BENCHMARK(true, kDispatch, true, "HAL/Dispatch/Complete");
 QUEUE_BENCHMARK(false, kDispatch, true, "HRX/Dispatch/Complete");
 #undef QUEUE_BENCHMARK
+#define PREPARED_BENCHMARK(native, operation, name)                    \
+  BENCHMARK_TEMPLATE(Queue, native, Operation::operation, false, true) \
+      ->Name(name)                                                     \
+      ->Arg(1)                                                         \
+      ->Arg(64)                                                        \
+      ->UseRealTime()                                                  \
+      ->Unit(benchmark::kNanosecond)
+PREPARED_BENCHMARK(true, kFill, "HAL/PreparedFill/Submit");
+PREPARED_BENCHMARK(false, kFill, "HRX/PreparedFill/Submit");
+PREPARED_BENCHMARK(true, kDispatch, "HAL/PreparedDispatch/Submit");
+PREPARED_BENCHMARK(false, kDispatch, "HRX/PreparedDispatch/Submit");
+#undef PREPARED_BENCHMARK
 #define ALLOCATION_BENCHMARK(native, complete, name) \
   BENCHMARK_TEMPLATE(Allocation, native, complete)   \
       ->Name(name)                                   \
@@ -392,5 +498,7 @@ ALLOCATION_BENCHMARK(false, true, "HRX/Allocation/Complete");
 #undef ALLOCATION_BENCHMARK
 BENCHMARK_TEMPLATE(Atomics, true)->Name("HAL/AtomicQuery");
 BENCHMARK_TEMPLATE(Atomics, false)->Name("HRX/AtomicQuery");
+BENCHMARK_TEMPLATE(Transition, true)->Name("HAL/TransitionQuery");
+BENCHMARK_TEMPLATE(Transition, false)->Name("HRX/TransitionQuery");
 
 }  // namespace
