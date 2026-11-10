@@ -164,6 +164,7 @@ class DxgEndpointTest : public ::testing::Test {
     fake_dxg = &native_;
     instance_.host_allocator = amdf_allocator_system();
     instance_.kind = AMDF_LINUX_PLATFORM_KIND_DXG;
+    ASSERT_EQ(pthread_mutex_init(&instance_.native_mutex, nullptr), 0);
     instance_.connection.descriptor = 17;
     instance_.kmt.connection = &instance_.connection;
     instance_.kmt.host_allocator = &instance_.host_allocator;
@@ -174,6 +175,7 @@ class DxgEndpointTest : public ::testing::Test {
     if (endpoint_ != nullptr) {
       EXPECT_EQ(amdf_platform_endpoint_close(endpoint_), AMDF_STATUS_OK);
     }
+    EXPECT_EQ(pthread_mutex_destroy(&instance_.native_mutex), 0);
     expected_connection = nullptr;
     fake_dxg = nullptr;
   }

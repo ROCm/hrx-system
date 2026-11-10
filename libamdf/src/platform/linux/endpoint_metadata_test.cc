@@ -61,6 +61,8 @@ class LinuxEndpointMetadataTest
     directory_ = directory;
     AddEndpoint(987654321, 63, "0000:00:00.0");
     instance_.host_allocator = amdf_allocator_system();
+    instance_.kind = AMDF_LINUX_PLATFORM_KIND_NATIVE_DEVICE;
+    ASSERT_EQ(pthread_mutex_init(&instance_.native_mutex, nullptr), 0);
     instance_.sysfs_descriptor =
         open(directory_.c_str(), O_PATH | O_DIRECTORY | O_CLOEXEC);
     ASSERT_GE(instance_.sysfs_descriptor, 0);
@@ -98,6 +100,7 @@ class LinuxEndpointMetadataTest
     }
     EXPECT_EQ(amdf_linux_file_close(&instance_.sysfs_descriptor),
               AMDF_STATUS_OK);
+    EXPECT_EQ(pthread_mutex_destroy(&instance_.native_mutex), 0);
     if (!directory_.empty()) {
       std::filesystem::remove_all(directory_);
     }

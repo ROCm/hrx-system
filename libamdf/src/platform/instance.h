@@ -18,7 +18,9 @@ extern "C" {
 
 typedef struct amdf_platform_instance_t amdf_platform_instance_t;
 
-// Creates one platform instance and binds its available native service.
+// Creates one platform instance. Native accelerator services may be prepared
+// lazily by discovery or endpoint creation; host services are available at
+// once.
 amdf_status_t amdf_platform_instance_create(
     amdf_allocator_t host_allocator, amdf_platform_instance_t** out_instance);
 

@@ -37,25 +37,32 @@ amdf_status_t amdf_platform_instance_create(
     amdf_free(host_allocator, instance);
     return amdf_linux_error(mutex_error);
   }
-  status = amdf_linux_dxg_connection_initialize(&instance->connection);
-  if (amdf_status_is_ok(status)) {
-    instance->kind = AMDF_LINUX_PLATFORM_KIND_DXG;
-  } else if (status == amdf_linux_error(ENOENT)) {
-    instance->kind = AMDF_LINUX_PLATFORM_KIND_NATIVE_DEVICE;
-    instance->sysfs_descriptor = open("/sys", O_PATH | O_DIRECTORY | O_CLOEXEC);
-    status = instance->sysfs_descriptor < 0 ? amdf_linux_error(errno)
-                                            : AMDF_STATUS_OK;
-  }
-  if (!amdf_status_is_ok(status)) {
-    const int mutex_error = pthread_mutex_destroy(&instance->native_mutex);
-    amdf_assert(mutex_error == 0);
-    (void)mutex_error;
-    amdf_free(host_allocator, instance);
-    return status;
-  }
   amdf_platform_host_export_initialize(&instance->host_export);
   *out_instance = instance;
   return AMDF_STATUS_OK;
+}
+
+amdf_status_t amdf_linux_instance_prepare_native(
+    amdf_platform_instance_t* instance) {
+  amdf_platform_instance_lock_native(instance);
+  if (instance->kind != AMDF_LINUX_PLATFORM_KIND_UNPREPARED) {
+    amdf_platform_instance_unlock_native(instance);
+    return AMDF_STATUS_OK;
+  }
+  amdf_status_t status =
+      amdf_linux_dxg_connection_initialize(&instance->connection);
+  if (amdf_status_is_ok(status)) {
+    instance->kind = AMDF_LINUX_PLATFORM_KIND_DXG;
+  } else if (status == amdf_linux_error(ENOENT)) {
+    instance->sysfs_descriptor = open("/sys", O_PATH | O_DIRECTORY | O_CLOEXEC);
+    status = instance->sysfs_descriptor < 0 ? amdf_linux_error(errno)
+                                            : AMDF_STATUS_OK;
+    if (amdf_status_is_ok(status)) {
+      instance->kind = AMDF_LINUX_PLATFORM_KIND_NATIVE_DEVICE;
+    }
+  }
+  amdf_platform_instance_unlock_native(instance);
+  return status;
 }
 
 amdf_status_t amdf_platform_instance_destroy(

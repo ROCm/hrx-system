@@ -187,6 +187,10 @@ static amdf_status_t amdf_linux_query_endpoint(
 amdf_status_t amdf_platform_endpoint_enumerate(
     amdf_platform_instance_t* instance, uint32_t capacity,
     amdf_endpoint_summary_t* summaries, uint32_t* out_count) {
+  amdf_status_t status = amdf_linux_instance_prepare_native(instance);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
   if (instance->kind == AMDF_LINUX_PLATFORM_KIND_DXG) {
     return amdf_linux_dxg_endpoint_enumerate(instance, capacity, summaries,
                                              out_count);
@@ -208,7 +212,6 @@ amdf_status_t amdf_platform_endpoint_enumerate(
   const char* prefixes[] = {"renderD", "accel"};
   const char* device_directories[] = {"/dev/dri", "/dev/accel"};
   uint32_t count = 0;
-  amdf_status_t status = AMDF_STATUS_OK;
   for (size_t class_index = 0; amdf_status_is_ok(status) && class_index < 2;
        ++class_index) {
     int descriptor = openat(instance->sysfs_descriptor, classes[class_index],
@@ -483,11 +486,15 @@ static amdf_status_t amdf_linux_open_device_file(
 amdf_status_t amdf_platform_endpoint_open(
     amdf_platform_instance_t* instance, const amdf_endpoint_id_t* id,
     amdf_platform_endpoint_t** out_endpoint, amdf_endpoint_info_t* out_info) {
+  amdf_status_t status = amdf_linux_instance_prepare_native(instance);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
   if (instance->kind == AMDF_LINUX_PLATFORM_KIND_DXG) {
     return amdf_linux_dxg_endpoint_open(instance, id, out_endpoint, out_info);
   }
   amdf_platform_endpoint_t* endpoint = NULL;
-  amdf_status_t status =
+  status =
       amdf_calloc(instance->host_allocator, sizeof(*endpoint),
                   amdf_alignof(amdf_platform_endpoint_t), (void**)&endpoint);
   if (!amdf_status_is_ok(status)) {
