@@ -65,11 +65,11 @@ static iree_status_t loom_cmd_program_plan_produce_kernel_requests(
     const loom_kernel_class_site_t* sites, iree_host_size_t site_count,
     const loom_kernel_class_collection_options_t* collection_options,
     loom_kernel_request_sink_t sink, iree_arena_allocator_t* scratch_arena,
-    loom_kernel_class_collection_t* out_collection) {
+    const loom_decision_class_ordinal_t** out_site_classes) {
   return loom_kernel_request_producer_publish(
       (loom_kernel_request_producer_t*)user_data, environment,
       source_symbol_ordinal, site_module, sites, site_count, collection_options,
-      sink, scratch_arena, out_collection);
+      sink, scratch_arena, out_site_classes);
 }
 
 static bool loom_cmd_program_plan_has_source_kernels(

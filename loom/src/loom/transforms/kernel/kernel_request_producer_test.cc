@@ -22,6 +22,7 @@
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_registry.h"
 #include "loom/ops/scalar/ops.h"
+#include "loom/ops/template/ops.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/verify/verify.h"
 
@@ -372,7 +373,7 @@ TEST_P(KernelRequestProducerTest, BindsScalarAndVectorLiteralFamilies) {
       RequestCapture capture = {.block_pool = &block_pool_};
       const auto environment = MaterializationEnvironment();
       auto options = loom_kernel_class_collection_options_default();
-      loom_kernel_class_collection_t collection = {};
+      const loom_decision_class_ordinal_t* site_classes = nullptr;
       if (!empty) {
         options.class_limit = 1;
         IREE_EXPECT_STATUS_IS(
@@ -381,21 +382,22 @@ TEST_P(KernelRequestProducerTest, BindsScalarAndVectorLiteralFamilies) {
                 producer.get(), &environment, source_symbol_ordinal,
                 source_module.get(), sites, std::size(sites), &options,
                 {.publish = CaptureRequest, .user_data = &capture},
-                &scratch_arena, &collection));
+                &scratch_arena, &site_classes));
         EXPECT_TRUE(capture.requests.empty());
+        EXPECT_EQ(site_classes, nullptr);
         options = loom_kernel_class_collection_options_default();
       }
       IREE_ASSERT_OK(loom_kernel_request_producer_publish(
           producer.get(), &environment, source_symbol_ordinal,
           source_module.get(), sites, std::size(sites), &options,
           {.publish = CaptureRequest, .user_data = &capture}, &scratch_arena,
-          &collection));
-      EXPECT_EQ(collection.class_count, empty ? 1u : 2u);
-      EXPECT_EQ(collection.site_classes[0], collection.site_classes[2]);
+          &site_classes));
+      EXPECT_EQ(capture.requests.size(), empty ? 1u : 2u);
       producer.reset();
       index.reset();
       source_module.reset();
       bytecode.clear();
+      EXPECT_EQ(site_classes[0], site_classes[2]);
       iree_arena_deinitialize(&scratch_arena);
       for (CapturedRequest& request : capture.requests) {
         Verify(request.product.module);
@@ -502,20 +504,16 @@ template.def<@schedule> priority(1) @small(%size: index) {
     const auto environment = MaterializationEnvironment();
     auto options = loom_kernel_class_collection_options_default();
     options.class_limit = 2;
-    loom_kernel_class_collection_t collection = {};
+    const loom_decision_class_ordinal_t* site_classes = nullptr;
     IREE_ASSERT_OK(loom_kernel_request_producer_publish(
         producer.get(), &environment, source_symbol_ordinal,
         source_module.get(), sites, std::size(sites), &options,
         {.publish = CaptureRequest, .user_data = &capture}, &scratch_arena,
-        &collection));
-    EXPECT_EQ(collection.class_count, 2u);
-    EXPECT_EQ(collection.accepted_decision_count, 0u);
-    EXPECT_EQ(collection.skipped_decision_count, 1u);
-    EXPECT_EQ(collection.decision_results[0].state,
-              LOOM_KERNEL_CLASS_DECISION_SKIPPED_CLASS_LIMIT);
-    EXPECT_EQ(collection.site_classes[0], collection.site_classes[1]);
-    EXPECT_EQ(collection.site_classes[2], collection.site_classes[3]);
-    EXPECT_NE(collection.site_classes[0], collection.site_classes[2]);
+        &site_classes));
+    EXPECT_EQ(capture.requests.size(), 2u);
+    EXPECT_EQ(site_classes[0], site_classes[1]);
+    EXPECT_EQ(site_classes[2], site_classes[3]);
+    EXPECT_NE(site_classes[0], site_classes[2]);
     producer.reset();
     index.reset();
     source_module.reset();
@@ -544,6 +542,15 @@ template.def<@schedule> priority(1) @small(%size: index) {
       IREE_ASSERT_OK(loom_value_fact_table_compute(
           &retained, request.product.module, function));
       const auto* body = loom_region_entry_block(loom_func_like_body(function));
+      size_t residual_count = 0;
+      for (const auto* op = body->first_op; op; op = op->next_op) {
+        if (loom_template_apply_isa(op)) {
+          ++residual_count;
+          ASSERT_EQ(op->operand_count, 1u);
+          EXPECT_EQ(loom_op_const_operands(op)[0], body->arg_ids[0]);
+        }
+      }
+      EXPECT_EQ(residual_count, 1u);
       const auto size_facts =
           loom_value_fact_table_lookup(&retained, body->arg_ids[0]);
       EXPECT_EQ(size_facts.range_lo, 256);
@@ -646,7 +653,7 @@ template.def<@schedule> priority(1) @variable(%rows: index, %fixed: index, %offs
     RequestCapture capture = {.block_pool = &block_pool_};
     const auto environment = MaterializationEnvironment();
     auto options = loom_kernel_class_collection_options_default();
-    loom_kernel_class_collection_t collection = {};
+    const loom_decision_class_ordinal_t* site_classes = nullptr;
     options.class_limit = 2;
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -654,17 +661,18 @@ template.def<@schedule> priority(1) @variable(%rows: index, %fixed: index, %offs
             producer.get(), &environment, source_ordinal, source.get(),
             sites.data(), sites.size(), &options,
             {.publish = CaptureRequest, .user_data = &capture}, &arena,
-            &collection));
+            &site_classes));
     EXPECT_TRUE(capture.requests.empty());
+    EXPECT_EQ(site_classes, nullptr);
     options = loom_kernel_class_collection_options_default();
     IREE_ASSERT_OK(loom_kernel_request_producer_publish(
         producer.get(), &environment, source_ordinal, source.get(),
         sites.data(), sites.size(), &options,
         {.publish = CaptureRequest, .user_data = &capture}, &arena,
-        &collection));
+        &site_classes));
     ASSERT_EQ(capture.requests.size(), 3u);
     for (size_t i = 3; i < kSites; ++i) {
-      EXPECT_EQ(collection.site_classes[i], collection.site_classes[i % 3]);
+      EXPECT_EQ(site_classes[i], site_classes[i % 3]);
     }
     producer.reset();
     index.reset();
@@ -749,7 +757,7 @@ TEST_P(KernelRequestProducerTest,
   };
   const loom_kernel_class_collection_options_t collection_options =
       loom_kernel_class_collection_options_default();
-  loom_kernel_class_collection_t collection = {};
+  const loom_decision_class_ordinal_t* site_classes = nullptr;
   const loom_link_plan_materialization_environment_t environment =
       MaterializationEnvironment();
   IREE_ASSERT_OK(loom_kernel_request_producer_publish(
@@ -759,9 +767,9 @@ TEST_P(KernelRequestProducerTest,
           .publish = CaptureRequest,
           .user_data = &capture,
       },
-      &scratch_arena, &collection));
-  ASSERT_EQ(collection.class_count, 2u);
-  EXPECT_NE(collection.site_classes[0], collection.site_classes[1]);
+      &scratch_arena, &site_classes));
+  ASSERT_EQ(capture.requests.size(), 2u);
+  EXPECT_NE(site_classes[0], site_classes[1]);
 
   producer.reset();
   index.reset();
@@ -818,7 +826,8 @@ TEST_P(KernelRequestProducerTest, StopsAfterSinkFailureBeforeMaterialization) {
   RejectRequestState state = {};
   const loom_kernel_class_collection_options_t collection_options =
       loom_kernel_class_collection_options_default();
-  loom_kernel_class_collection_t collection = {};
+  const loom_decision_class_ordinal_t previous_classes[] = {0, 1};
+  const loom_decision_class_ordinal_t* site_classes = previous_classes;
   const loom_link_plan_materialization_environment_t environment =
       MaterializationEnvironment();
   IREE_EXPECT_STATUS_IS(
@@ -830,9 +839,9 @@ TEST_P(KernelRequestProducerTest, StopsAfterSinkFailureBeforeMaterialization) {
               .publish = RejectRequest,
               .user_data = &state,
           },
-          &scratch_arena, &collection));
+          &scratch_arena, &site_classes));
   EXPECT_EQ(state.call_count, 1u);
-  EXPECT_EQ(collection.class_count, 0u);
+  EXPECT_EQ(site_classes, nullptr);
 
   iree_arena_deinitialize(&scratch_arena);
 }
@@ -922,12 +931,12 @@ TEST_P(KernelRequestProducerTest, CapturesClosedEncodingConstructors) {
       RequestCapture capture = {.block_pool = &block_pool_};
       const auto environment = MaterializationEnvironment();
       const auto options = loom_kernel_class_collection_options_default();
-      loom_kernel_class_collection_t collection = {};
+      const loom_decision_class_ordinal_t* site_classes = nullptr;
       iree_status_t status = loom_kernel_request_producer_publish(
           producer.get(), &environment, source_ordinal, source_module.get(),
           sites, IREE_ARRAYSIZE(sites), &options,
           {.publish = CaptureRequest, .user_data = &capture}, &arena,
-          &collection);
+          &site_classes);
       if (!iree_status_is_ok(status)) {
         for (auto& request : capture.requests) {
           loom_kernel_class_product_deinitialize(&request.product);
@@ -936,9 +945,9 @@ TEST_P(KernelRequestProducerTest, CapturesClosedEncodingConstructors) {
       }
       IREE_ASSERT_OK(status);
       const bool distinct = std::strcmp(test.first, test.second) != 0;
-      ASSERT_EQ(collection.class_count, distinct ? 2u : 1u);
-      EXPECT_EQ(collection.site_classes[0], collection.site_classes[2]);
-      const auto first_class = collection.site_classes[0];
+      ASSERT_EQ(capture.requests.size(), distinct ? 2u : 1u);
+      EXPECT_EQ(site_classes[0], site_classes[2]);
+      const auto first_class = site_classes[0];
       producer.reset();
       index.reset();
       source_module.reset();
@@ -1020,15 +1029,16 @@ TEST_P(KernelRequestProducerTest, RejectsDynamicEncodingCaptures) {
     const auto options = loom_kernel_class_collection_options_default();
     const auto environment = MaterializationEnvironment();
     RequestCapture capture = {.block_pool = &block_pool_};
-    loom_kernel_class_collection_t collection = {};
+    const loom_decision_class_ordinal_t* site_classes = nullptr;
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
         loom_kernel_request_producer_publish(
             producer.get(), &environment, source_ordinal, source_module.get(),
             &site, 1, &options,
             {.publish = CaptureRequest, .user_data = &capture}, &arena,
-            &collection));
+            &site_classes));
     EXPECT_TRUE(capture.requests.empty());
+    EXPECT_EQ(site_classes, nullptr);
     iree_arena_deinitialize(&arena);
   }
 }

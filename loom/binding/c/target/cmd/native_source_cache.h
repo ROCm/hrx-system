@@ -31,6 +31,6 @@ iree_status_t loomc_cmd_native_source_cache_publish(
     const loom_kernel_class_site_t* sites, iree_host_size_t site_count,
     const loom_kernel_class_collection_options_t* collection_options,
     loom_kernel_request_sink_t sink, iree_arena_allocator_t* scratch_arena,
-    loom_kernel_class_collection_t* out_collection);
+    const loom_decision_class_ordinal_t** out_site_classes);
 
 #endif  // LOOMC_TARGET_CMD_NATIVE_SOURCE_CACHE_H_
