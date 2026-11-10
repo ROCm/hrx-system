@@ -1130,8 +1130,14 @@ class CiTest(unittest.TestCase):
         build_step = steps[1]
         self.assertEqual(build_step.argv[-2:], ("build", "--parallel"))
         smoke_step = steps[2]
-        for regex in ci_config.CMAKE_REPOSITORY_SMOKE_CTEST_REGEXES:
-            self.assertTrue(any(regex in arg for arg in smoke_step.argv))
+        smoke_regex = smoke_step.argv[smoke_step.argv.index("-R") + 1]
+        for test_name in (
+            "loom/tools/loom-run/execution_test",
+            "libamdf/cts/core/query_dynamic",
+            "build_tools/cmake/cmake_spirv_tools_test",
+            "build_tools/cmake/cmake_generated_packages_test",
+        ):
+            self.assertRegex(test_name, smoke_regex)
         self.assertTrue(
             any(
                 ci_config.CTEST_RESOURCE_LABEL_EXCLUDE_REGEX in arg

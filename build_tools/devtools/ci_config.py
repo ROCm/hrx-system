@@ -53,11 +53,13 @@ CMAKE_SANITIZER_SMOKE_CTEST_REGEXES = (
 # Full repository builds execute one smoke at each shipping product boundary:
 # Loom source compilation and execution through the runtime, and LibAMDF public
 # API negotiation through a dynamically loaded provider. The external-tool
-# configuration check keeps compiler instrumentation out of helper processes.
+# configuration check keeps compiler instrumentation out of helper processes;
+# generated-package checks cover build-time tools and their dependency inputs.
 CMAKE_REPOSITORY_SMOKE_CTEST_REGEXES = (
     "^loom/tools/loom-run/execution_test$",
     "^libamdf/cts/core/query_dynamic$",
     "^build_tools/cmake/cmake_spirv_tools_test$",
+    "^build_tools/cmake/cmake_generated_packages_test$",
 )
 BAZEL_REPOSITORY_DEVICE_TARGETS = (
     "//runtime/src/iree/hal/driver/amdgpu/util:pm4_dispatch_test_kernels",
