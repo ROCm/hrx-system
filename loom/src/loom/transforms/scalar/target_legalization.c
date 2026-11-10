@@ -1030,8 +1030,8 @@ static iree_status_t loom_scalar_legalize_narrow_binary(
   return iree_ok_status();
 }
 
-// Arithmetic reconstruction and narrow truncation need not infer the original
-// remainder's range or its strict bound against a runtime positive divisor.
+// Arithmetic reconstruction need not infer the original remainder's range or
+// its strict bound against a runtime positive divisor.
 static iree_status_t loom_scalar_preserve_remainder_facts(
     loom_target_legalization_context_t* context,
     loom_value_id_t original_result, loom_value_id_t reconstructed_result,
@@ -1145,10 +1145,10 @@ static iree_status_t loom_scalar_legalize_divrem(
         result_type, op->location, &remainder));
     replacements[0] = loom_op_results(quotient)[0];
     replacements[1] = loom_scalar_subi_result(remainder);
+    IREE_RETURN_IF_ERROR(loom_scalar_preserve_remainder_facts(
+        context, old_results[1], replacements[1], rhs, result_type,
+        op->location, &replacements[1]));
   }
-  IREE_RETURN_IF_ERROR(loom_scalar_preserve_remainder_facts(
-      context, old_results[1], replacements[1], loom_op_const_operands(op)[1],
-      result_type, op->location, &replacements[1]));
 
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, replacements, IREE_ARRAYSIZE(replacements), checkpoint));
