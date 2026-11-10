@@ -189,11 +189,13 @@ hrx_status_t hrx_stream_wait(hrx_stream_t stream) {
         z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "stream is NULL"));
   }
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, stream->timepoint);
-  if (stream->timepoint == 0) {
-    HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
+  iree_status_t status = iree_ok_status();
+  if (stream->timepoint != 0) {
+    status = hrx_status_to_iree(
+        hrx_semaphore_wait(stream->semaphore, stream->timepoint, UINT64_MAX));
   }
-  HRX_RETURN_AND_END_ZONE(
-      z0, hrx_semaphore_wait(stream->semaphore, stream->timepoint, UINT64_MAX));
+  status = iree_status_join(status, hrx_runtime_profile_flush(stream->device));
+  HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
 }
 
 hrx_status_t hrx_stream_query(hrx_stream_t stream, bool* complete) {

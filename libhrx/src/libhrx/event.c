@@ -154,7 +154,10 @@ hrx_status_t hrx_event_synchronize(hrx_event_t event) {
   if (!event) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "event is NULL");
   }
-  return hrx_semaphore_wait(event->semaphore, event->signal_value, UINT64_MAX);
+  iree_status_t status = hrx_status_to_iree(
+      hrx_semaphore_wait(event->semaphore, event->signal_value, UINT64_MAX));
+  return hrx_status_from_iree(
+      iree_status_join(status, hrx_runtime_profile_flush(event->device)));
 }
 
 //===----------------------------------------------------------------------===//

@@ -592,10 +592,14 @@ HRX_API hrx_status_t hrx_stream_create(hrx_device_t device, uint32_t flags,
 HRX_API void hrx_stream_retain(hrx_stream_t stream);
 HRX_API void hrx_stream_release(hrx_stream_t stream);
 
+// Flushes pending command buffer work and waits for the stream to complete.
+// When HRX_PROFILE_FILE is enabled, also drains completed device profile
+// records to the capture file. This does not wait for unrelated streams.
 HRX_API hrx_status_t hrx_stream_synchronize(hrx_stream_t stream);
 
 // Waits for the stream's current timeline position without flushing pending
 // command buffer work. Use hrx_stream_synchronize() to flush and then wait.
+// Also drains completed profile records when HRX_PROFILE_FILE is enabled.
 HRX_API hrx_status_t hrx_stream_wait(hrx_stream_t stream);
 
 HRX_API hrx_status_t hrx_stream_query(hrx_stream_t stream, bool* complete);
@@ -1171,6 +1175,8 @@ HRX_API void hrx_event_retain(hrx_event_t event);
 HRX_API void hrx_event_release(hrx_event_t event);
 HRX_API hrx_status_t hrx_event_record(hrx_event_t event, hrx_stream_t stream);
 HRX_API hrx_status_t hrx_event_query(hrx_event_t event, bool* complete);
+// Waits for the recorded event and drains completed device profile records when
+// HRX_PROFILE_FILE is enabled, without waiting for unrelated streams.
 HRX_API hrx_status_t hrx_event_synchronize(hrx_event_t event);
 HRX_API hrx_status_t hrx_event_elapsed_time(hrx_event_t start, hrx_event_t stop,
                                             float* ms);

@@ -15,6 +15,7 @@
 #include "common/stream.h"
 #include "common/stream_queue.h"
 #include "libhrx/src/libhrx/mem_pool_backing.h"
+#include "libhrx/src/libhrx/runtime.h"
 
 //===----------------------------------------------------------------------===//
 // Global state
@@ -1365,16 +1366,20 @@ iree_status_t iree_hal_streaming_context_synchronize_event_records(
 
 iree_status_t iree_hal_streaming_context_synchronize(
     iree_hal_streaming_context_t* context) {
-  return iree_hal_streaming_context_synchronize_streams(
+  iree_status_t status = iree_hal_streaming_context_synchronize_streams(
       context, /*include_non_blocking_streams=*/true,
       /*flush_before_wait=*/true);
+  return iree_status_join(
+      status, hrx_runtime_profile_flush(context->device_entry->hrx_device));
 }
 
 iree_status_t iree_hal_streaming_context_synchronize_legacy_default(
     iree_hal_streaming_context_t* context) {
-  return iree_hal_streaming_context_synchronize_streams(
+  iree_status_t status = iree_hal_streaming_context_synchronize_streams(
       context, /*include_non_blocking_streams=*/false,
       /*flush_before_wait=*/true);
+  return iree_status_join(
+      status, hrx_runtime_profile_flush(context->device_entry->hrx_device));
 }
 
 iree_status_t iree_hal_streaming_context_synchronize_all(void) {
@@ -1427,9 +1432,7 @@ iree_status_t iree_hal_streaming_context_synchronize_all(void) {
   // boundary for unretained resources.
   for (iree_host_size_t i = 0; i < context_count; ++i) {
     status = iree_status_join(
-        status, iree_hal_streaming_context_synchronize_streams(
-                    contexts[i], /*include_non_blocking_streams=*/true,
-                    /*flush_before_wait=*/true));
+        status, iree_hal_streaming_context_synchronize(contexts[i]));
   }
 
   for (iree_host_size_t i = 0; i < context_count; ++i) {

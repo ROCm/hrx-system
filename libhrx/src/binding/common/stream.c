@@ -17,6 +17,7 @@
 #include "common/memory.h"
 #include "common/stream_queue.h"
 #include "libhrx/src/libhrx/device.h"
+#include "libhrx/src/libhrx/runtime.h"
 
 //===----------------------------------------------------------------------===//
 // Stream management
@@ -1008,8 +1009,11 @@ static iree_status_t iree_hal_streaming_stream_synchronize_impl(
 
 iree_status_t iree_hal_streaming_stream_synchronize(
     iree_hal_streaming_stream_t* stream) {
-  return iree_hal_streaming_stream_synchronize_impl(stream,
-                                                    /*flush_context=*/true);
+  iree_status_t status = iree_hal_streaming_stream_synchronize_impl(
+      stream, /*flush_context=*/true);
+  return iree_status_join(
+      status,
+      hrx_runtime_profile_flush(stream->context->device_entry->hrx_device));
 }
 
 iree_status_t iree_hal_streaming_stream_synchronize_flushed(

@@ -45,6 +45,13 @@ typedef struct hrx_gpu_initialize_options_t {
 hrx_status_t hrx_gpu_initialize_with_options(
     const hrx_gpu_initialize_options_t* options);
 
+// Drains completed profile records after a host synchronization boundary.
+// Inactive or absent devices are a no-op. Serializes producer flushes and
+// writes to the runtime's shared profile file, without holding execution locks
+// or waiting for other queues. File errors are returned to the synchronizing
+// caller.
+iree_status_t hrx_runtime_profile_flush(hrx_device_t device);
+
 // Returns the process-wide borrowed proactor pool, or NULL before runtime
 // initialization and after shutdown.
 iree_async_proactor_pool_t* hrx_runtime_proactor_pool(void);
