@@ -122,6 +122,7 @@ void HrxLoader::load(const std::string& path) {
   LOAD(device_group_release);
   LOAD(device_group_device_count);
   LOAD(device_group_get_device);
+  LOAD(device_get_device_group);
 
   LOAD(slab_pool_create);
   LOAD(slab_cache_create);
@@ -274,7 +275,7 @@ void HrxLoader::load(const std::string& path) {
   LOAD(virtual_buffer_query_info);
   LOAD(virtual_buffer_resolve_projection);
   LOAD(virtual_buffer_detach);
-  LOAD(allocator_query_mapping_requirements);
+  LOAD(mem_pool_query_mapping_requirements);
   LOAD(queue_map);
 
 #undef LOAD

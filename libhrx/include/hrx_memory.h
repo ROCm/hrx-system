@@ -540,6 +540,160 @@ typedef struct hrx_pool_stats_t {
 HRX_API void hrx_mem_pool_query_stats(hrx_mem_pool_t pool,
                                       hrx_pool_stats_t* out_stats);
 
+//===----------------------------------------------------------------------===//
+// Virtual buffers and mapping
+//===----------------------------------------------------------------------===//
+
+// Accepted source contracts, borrowed only during query or construction. The
+// reservation captures immutable visibility and atomic guarantees from these
+// pools. Later mappings must preserve those guarantees at every affected site;
+// no per-page HRX compatibility table or implicit source pool is created.
+typedef struct hrx_virtual_buffer_sources_t {
+  // Nonzero number of accepted pools, all in the reservation's sealed group.
+  size_t source_count;
+  // Explicit source pools; construction captures contracts, not handles.
+  const hrx_mem_pool_t* sources;
+} hrx_virtual_buffer_sources_t;
+
+// Caller-declared prior state. No installed-source table is maintained by HRX.
+typedef enum hrx_memory_mapping_operation_t {
+  // Replaces one homogeneous prior-source interval, including a hole.
+  // A NULL source clears it; previous_source identifies the old backing.
+  HRX_MEMORY_MAPPING_OPERATION_REPLACE = 0,
+  // Binds a non-NULL source into an interval the caller knows is unbound.
+  HRX_MEMORY_MAPPING_OPERATION_BIND = 1,
+  // Removes a binding; requires previous_source, NULL source, and NONE access.
+  HRX_MEMORY_MAPPING_OPERATION_UNBIND = 2,
+  // Changes permissions, supplying the currently installed source and offset.
+  HRX_MEMORY_MAPPING_OPERATION_PROTECT = 3,
+} hrx_memory_mapping_operation_t;
+
+// Explicit address constraints; zero leaves native address equality
+// unconstrained.
+typedef uint32_t hrx_virtual_buffer_flags_t;
+#define HRX_VIRTUAL_BUFFER_FLAG_NONE 0u
+// Every admitted host and program binding uses the same numeric base address.
+// Host access still requires an explicit scope.host access.
+#define HRX_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS (1u << 0)
+
+typedef struct hrx_virtual_buffer_capabilities_t {
+  // Largest address interval in bytes; zero means the scope is unsupported.
+  size_t max_byte_length;
+  // Required reservation length multiple and minimum base alignment.
+  size_t reservation_granularity;
+  // Smallest independently replaceable destination offset/length unit.
+  size_t mapping_granularity;
+  // Largest supported power-of-two minimum base alignment.
+  size_t max_alignment;
+  // Supported operations, with bit N corresponding to mapping operation N.
+  uint32_t operations;
+  // Address constraints supported across the complete simultaneous scope.
+  hrx_virtual_buffer_flags_t supported_flags;
+} hrx_virtual_buffer_capabilities_t;
+
+// Queries already prepared sources without acquiring addresses or physical
+// payload. Unsupported address geometry returns OK with zero capabilities;
+// invalid scope and native query failures propagate.
+HRX_API hrx_status_t hrx_virtual_buffer_query_capabilities(
+    hrx_device_group_t group, hrx_pool_scope_t scope,
+    hrx_virtual_buffer_sources_t sources,
+    hrx_virtual_buffer_capabilities_t* out_capabilities);
+
+typedef struct hrx_virtual_buffer_options_t {
+  // Nonzero virtual buffer length in bytes.
+  size_t byte_length;
+  // Minimum power-of-two base alignment; zero selects the native minimum.
+  size_t min_alignment;
+  // Minimum power-of-two mapping unit; zero selects the native minimum.
+  size_t mapping_granularity;
+  // Required address constraints; zero preserves independent native policy.
+  hrx_virtual_buffer_flags_t flags;
+} hrx_virtual_buffer_options_t;
+
+// Reserves addresses without physical payload and returns one owned ordinary
+// buffer reference. On failure the output is NULL. Buffer references and views
+// keep addresses live; installed backing remains independently caller-owned.
+HRX_API hrx_status_t hrx_virtual_buffer_create(
+    hrx_device_group_t group, hrx_pool_scope_t scope,
+    hrx_virtual_buffer_sources_t sources,
+    const hrx_virtual_buffer_options_t* options, hrx_buffer_t* out_buffer);
+
+typedef struct hrx_virtual_buffer_info_t {
+  // Visible byte zero in the native target's mapping coordinates, in bytes.
+  size_t mapping_byte_offset;
+  // Achieved independently replaceable mapping unit, in bytes.
+  size_t mapping_granularity;
+  // Supported operations, with bit N corresponding to mapping operation N.
+  uint32_t operations;
+  // Number of native page-table projections owned by the root buffer.
+  uint32_t projection_count;
+} hrx_virtual_buffer_info_t;
+
+// Queries achieved geometry after any asynchronous allocation has committed.
+HRX_API hrx_status_t hrx_virtual_buffer_query_info(
+    hrx_buffer_t buffer, hrx_virtual_buffer_info_t* out_info);
+
+// Resolves one concrete scope to a native page-table projection. Equal IDs on
+// the same native root share mapping state. An all-sites scope is not concrete.
+HRX_API hrx_status_t hrx_virtual_buffer_resolve_projection(
+    hrx_buffer_t buffer, hrx_memory_scope_t scope, uint32_t* out_projection);
+
+// Removes all mappings at the selected scope without releasing addresses. The
+// buffer must cover the complete native target. The caller has completed all
+// affected execution and accepted mapping work and serializes mutation. This
+// cold call may wait for native removal, including after partial mapping
+// failure. It preserves any earlier failure; only success certifies backing
+// reuse, subject to other aliases and users. A zero scope selects all admitted
+// sites.
+HRX_API hrx_status_t hrx_virtual_buffer_detach(hrx_buffer_t buffer,
+                                               hrx_memory_scope_t scope);
+
+typedef uint32_t hrx_memory_mapping_source_flags_t;
+// Each binding must cover the entire native allocation at source offset zero.
+// Suballocating such storage does not make its pieces independently mappable.
+#define HRX_MEMORY_MAPPING_SOURCE_FLAG_WHOLE_ALLOCATION (1u << 0)
+
+typedef struct hrx_memory_mapping_requirements_t {
+  // Required native source offset/length granule; zero means no prepared
+  // source.
+  size_t minimum_granularity;
+  // Preferred physical allocation multiple, at least the minimum granularity.
+  size_t recommended_granularity;
+  // Additional native restrictions, including whole-allocation-only mappings.
+  hrx_memory_mapping_source_flags_t flags;
+} hrx_memory_mapping_requirements_t;
+
+// Returns the exact pool's prepared source geometry. Zero minimum granularity
+// means it cannot supply remappable backing. NULL returns zero requirements.
+// No source discovery or allocation is performed.
+HRX_API hrx_memory_mapping_requirements_t
+hrx_mem_pool_query_mapping_requirements(hrx_mem_pool_t pool);
+
+typedef struct hrx_memory_mapping_t {
+  // Borrowed virtual target buffer or view.
+  hrx_buffer_t target;
+  // Prepared scope token; zero selects all admitted projections.
+  hrx_memory_scope_t scope;
+  // Byte offset within the stable reservation view.
+  size_t target_offset;
+  // Nonzero mapping length satisfying both source and destination granularity.
+  size_t byte_length;
+  // Ordinary prepared backing, or NULL for removal.
+  hrx_buffer_t source;
+  // Byte offset within source; zero when source is NULL.
+  size_t source_offset;
+  // Required permissions, including NONE for revocation or an inaccessible
+  // bind.
+  hrx_memory_access_t access;
+  // Caller-declared operation and prior binding state.
+  hrx_memory_mapping_operation_t operation;
+  // Borrowed prior backing for REPLACE or UNBIND, or NULL for a hole.
+  // BIND and PROTECT require NULL; PROTECT uses source as the prior backing.
+  hrx_buffer_t previous_source;
+  // Byte offset within previous_source; zero when previous_source is NULL.
+  size_t previous_source_offset;
+} hrx_memory_mapping_t;
+
 #ifdef __cplusplus
 }
 #endif

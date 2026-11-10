@@ -264,6 +264,10 @@ HRX_API size_t hrx_device_group_device_count(hrx_device_group_t group);
 HRX_API hrx_device_t hrx_device_group_get_device(hrx_device_group_t group,
                                                  size_t index);
 
+// Returns the borrowed sealed owner, or NULL for NULL. The device or any
+// resource retaining it keeps the returned group alive.
+HRX_API hrx_device_group_t hrx_device_get_device_group(hrx_device_t device);
+
 // Immutable normalized topology. Node ordinals are stable for the group
 // lifetime; UINT32_MAX denotes an absent parent/device, not an uncertain
 // capability.

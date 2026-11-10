@@ -269,6 +269,10 @@ hrx_status_t hrx_device_get_type(hrx_device_t device,
   return hrx_ok_status();
 }
 
+hrx_device_group_t hrx_device_get_device_group(hrx_device_t device) {
+  return device ? device->group : NULL;
+}
+
 void hrx_device_retain(hrx_device_t device) {
   if (!device) {
     return;

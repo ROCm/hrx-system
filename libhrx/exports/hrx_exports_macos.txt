@@ -8,6 +8,7 @@ _hrx_device_group_retain
 _hrx_device_group_release
 _hrx_device_group_device_count
 _hrx_device_group_get_device
+_hrx_device_get_device_group
 _hrx_make_status
 _hrx_status_code
 _hrx_status_to_string
@@ -116,7 +117,7 @@ _hrx_virtual_buffer_create
 _hrx_virtual_buffer_query_info
 _hrx_virtual_buffer_resolve_projection
 _hrx_virtual_buffer_detach
-_hrx_allocator_query_mapping_requirements
+_hrx_mem_pool_query_mapping_requirements
 _hrx_queue_map
 _hrx_allocator_virtual_memory_reserve
 _hrx_allocator_virtual_memory_release

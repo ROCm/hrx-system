@@ -5,6 +5,7 @@
 
 #include "buffer.h"
 #include "hrx_internal.h"
+#include "hrx_runtime_cxx.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "mem_pool_backing.h"
@@ -13,23 +14,25 @@ namespace {
 
 class MemPoolBackingUncachedGpuTest : public ::testing::Test {
  protected:
-  void SetUp() override {
+  static void SetUpTestSuite() {
     hrx_status_t status = hrx_gpu_initialize(0);
     initialized_ = hrx_status_is_ok(status);
     IREE_ASSERT_OK(hrx_status_to_iree(status));
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_gpu_device_get(0, &device_)));
   }
 
-  void TearDown() override {
+  static void TearDownTestSuite() {
     if (initialized_) {
       IREE_EXPECT_OK(hrx_status_to_iree(hrx_gpu_shutdown()));
+      device_ = nullptr;
+      initialized_ = false;
     }
   }
 
-  // Whether this test owns the process-global GPU runtime.
-  bool initialized_ = false;
+  // One GPU lifetime shared across every case in this suite.
+  inline static bool initialized_ = false;
   // Borrowed first GPU device, valid while the runtime is initialized.
-  hrx_device_t device_ = nullptr;
+  inline static hrx_device_t device_ = nullptr;
 };
 
 void ExpectCommonAddressAllocation(hrx_device_t device, iree_hal_pool_t* pool) {
@@ -41,21 +44,30 @@ void ExpectCommonAddressAllocation(hrx_device_t device, iree_hal_pool_t* pool) {
       pool, iree_hal_make_pool_reservation_request(8, 4096),
       iree_infinite_timeout(), &buffer));
 
-  hrx_buffer_t wrapped_buffer = nullptr;
+  hrx::runtime::buffer_ptr wrapped_buffer;
   IREE_ASSERT_OK(hrx_buffer_create_from_hal(
-      buffer, device, (hrx_memory_type_t)iree_hal_buffer_memory_type(buffer),
-      (size_t)iree_hal_buffer_byte_length(buffer), nullptr, &wrapped_buffer));
-  void* device_pointer = nullptr;
-  IREE_ASSERT_OK(hrx_status_to_iree(
-      hrx_buffer_get_device_ptr(wrapped_buffer, &device_pointer)));
+      buffer, hrx_device_get_device_group(device),
+      (hrx_memory_type_t)iree_hal_buffer_memory_type(buffer),
+      (size_t)iree_hal_buffer_byte_length(buffer), nullptr,
+      wrapped_buffer.for_output()));
+  hrx_memory_scope_t program_scope;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_device_query_queue_family_memory_scope(
+      device,
+      iree_hal_queue_family_ordinal(
+          iree_hal_queue_family(device->dispatch_queue)),
+      HRX_MEMORY_SITE_PROGRAM, &program_scope)));
+  uint64_t device_pointer = 0;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_query_address(
+      wrapped_buffer, program_scope, HRX_BUFFER_INTERFACE_DEVICE_ADDRESS,
+      &device_pointer)));
   iree_hal_buffer_mapping_t mapping;
   IREE_ASSERT_OK(iree_hal_buffer_map_range(
       buffer, IREE_HAL_MAPPING_MODE_PERSISTENT,
       iree_hal_buffer_allowed_access(buffer),
       IREE_HAL_BUFFER_MAP_FLAG_MAY_ALIAS, 0, IREE_HAL_WHOLE_BUFFER, &mapping));
-  EXPECT_EQ(mapping.contents.data, device_pointer);
+  EXPECT_EQ(reinterpret_cast<uintptr_t>(mapping.contents.data), device_pointer);
   IREE_EXPECT_OK(iree_hal_buffer_unmap_range(&mapping));
-  hrx_buffer_release(wrapped_buffer);
+  wrapped_buffer.reset();
   iree_hal_buffer_release(buffer);
 }
 

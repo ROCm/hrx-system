@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <algorithm>
+#include <array>
 
 #include "hrx_runtime_cxx.h"
 #include "iree/testing/gtest.h"
@@ -36,6 +37,8 @@ TEST(DeviceGroupTest, RetainedDeviceKeepsGroupAndServicesUsable) {
   auto second =
       hrx::runtime::device_ptr::borrow(hrx_device_group_get_device(group, 1));
   ASSERT_NE(first.get(), second.get());
+  EXPECT_EQ(hrx_device_get_device_group(first), group.get());
+  EXPECT_EQ(hrx_device_get_device_group(second), group.get());
   runtime.reset();
   group.reset();
 
@@ -164,18 +167,44 @@ TEST(DeviceGroupTest, SharedReservationHasPerDeviceAddressesAndGraphAccess) {
       Check(hrx_device_group_create(runtime, 2, params, group.for_output())));
   hrx_device_t devices[] = {hrx_device_group_get_device(group, 0),
                             hrx_device_group_get_device(group, 1)};
-  const hrx_virtual_buffer_scope_t scope = {2, devices, HRX_MEMORY_ACCESS_ALL};
-  const hrx_virtual_buffer_source_t source_class = {
-      .device = devices[0],
-      .memory_type = HRX_MEMORY_TYPE_HOST_LOCAL,
+  const hrx_pool_family_access_t families[] = {
+      {
+          .device = devices[0],
+          .family_ordinal = 0,
+          .usage = HRX_BUFFER_USAGE_TRANSFER | HRX_BUFFER_USAGE_DISPATCH,
+          .interfaces = HRX_BUFFER_INTERFACE_BIT(HRX_BUFFER_INTERFACE_HOST),
+      },
+      {
+          .device = devices[1],
+          .family_ordinal = 0,
+          .usage = HRX_BUFFER_USAGE_TRANSFER | HRX_BUFFER_USAGE_DISPATCH,
+          .interfaces = HRX_BUFFER_INTERFACE_BIT(HRX_BUFFER_INTERFACE_HOST),
+      },
   };
+  const hrx_pool_scope_t scope = {
+      .family_count = 2,
+      .families = families,
+      .host =
+          {
+              .access = HRX_MEMORY_ACCESS_ALL,
+              .modes = HRX_MAPPING_MODE_SCOPED | HRX_MAPPING_MODE_PERSISTENT,
+          },
+  };
+  auto source_families = std::array{families[0], families[1]};
+  for (auto& family : source_families) {
+    family.interfaces |=
+        HRX_BUFFER_INTERFACE_BIT(HRX_BUFFER_INTERFACE_MAPPING_SOURCE);
+  }
+  auto source_scope = scope;
+  source_scope.families = source_families.data();
+  hrx::runtime::mem_pool_ptr pool;
+  ASSERT_TRUE(Check(
+      hrx_slab_pool_create(group, source_scope, nullptr, pool.for_output())));
+  const hrx_mem_pool_t source_pool = pool;
   hrx_virtual_buffer_capabilities_t capabilities;
   ASSERT_TRUE(Check(hrx_virtual_buffer_query_capabilities(
-      scope, {1, &source_class}, &capabilities)));
-  hrx_memory_mapping_requirements_t requirements;
-  ASSERT_TRUE(Check(hrx_allocator_query_mapping_requirements(
-      hrx_device_allocator(devices[0]), HRX_MEMORY_TYPE_HOST_LOCAL,
-      &requirements)));
+      group, scope, {1, &source_pool}, &capabilities)));
+  const auto requirements = hrx_mem_pool_query_mapping_requirements(pool);
   const size_t size = std::max({capabilities.reservation_granularity,
                                 capabilities.mapping_granularity,
                                 requirements.recommended_granularity});
@@ -185,18 +214,19 @@ TEST(DeviceGroupTest, SharedReservationHasPerDeviceAddressesAndGraphAccess) {
   };
   hrx::runtime::buffer_ptr backing;
   hrx::runtime::buffer_ptr buffer;
-  ASSERT_TRUE(Check(hrx_virtual_buffer_create(scope, {1, &source_class},
+  ASSERT_TRUE(Check(hrx_virtual_buffer_create(group, scope, {1, &source_pool},
                                               &options, buffer.for_output())));
-  hrx_buffer_params_t backing_params = kHostBufferParams;
-  backing_params.usage |= HRX_BUFFER_USAGE_MAPPING_SOURCE;
-  ASSERT_TRUE(Check(hrx_allocator_allocate_buffer(
-      hrx_device_allocator(devices[0]), backing_params, size,
-      backing.for_output())));
   hrx::runtime::semaphore_ptr ready;
   ASSERT_TRUE(Check(hrx_semaphore_create(devices[0], 0, ready.for_output())));
   uint64_t value = 1;
   hrx_semaphore_t semaphore = ready;
   const hrx_semaphore_list_t signal = {&semaphore, &value, 1};
+  const hrx_pool_reservation_request_t request = {size, 0};
+  ASSERT_TRUE(Check(hrx_queue_alloca(hrx_device_get_queue(devices[0], 0, 0),
+                                     nullptr, &signal, pool, 1, &request,
+                                     backing.for_output())));
+  uint64_t allocation_value = value++;
+  const hrx_semaphore_list_t allocated = {&semaphore, &allocation_value, 1};
   const hrx_memory_mapping_t mapping = {
       .target = buffer,
       .byte_length = size,
@@ -205,7 +235,7 @@ TEST(DeviceGroupTest, SharedReservationHasPerDeviceAddressesAndGraphAccess) {
       .operation = HRX_MEMORY_MAPPING_OPERATION_BIND,
   };
   ASSERT_TRUE(
-      Check(hrx_queue_map(hrx_device_get_queue(devices[0], 0, 0), nullptr,
+      Check(hrx_queue_map(hrx_device_get_queue(devices[0], 0, 0), &allocated,
                           &signal, 1, &mapping, HRX_QUEUE_MAP_FLAG_NONE)));
   ASSERT_TRUE(Check(hrx_semaphore_wait(ready, value, UINT64_MAX)));
   ready.reset();
@@ -214,6 +244,8 @@ TEST(DeviceGroupTest, SharedReservationHasPerDeviceAddressesAndGraphAccess) {
     ASSERT_TRUE(Check(hrx_device_query_queue_family_memory_scope(
         devices[i], 0, HRX_MEMORY_SITE_PROGRAM, &program_scopes[i])));
   }
+
+  pool.reset();
 
   // A buffer keeps every participant and its address contract alive. Neither
   // the first participant nor a caller-held group reference owns its identity.

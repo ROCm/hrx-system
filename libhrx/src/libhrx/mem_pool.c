@@ -239,6 +239,46 @@ static iree_hal_pool_export_classes_t hrx_pool_copy_exports(
   return result;
 }
 
+iree_status_t hrx_mem_pool_prepare_scope(
+    hrx_device_group_t group, hrx_pool_scope_t scope,
+    iree_hal_pool_family_access_t* out_families,
+    iree_hal_pool_scope_t* out_scope) {
+  *out_scope = (iree_hal_pool_scope_t){0};
+  iree_status_t status = iree_ok_status();
+  for (size_t i = 0; i < scope.family_count && iree_status_is_ok(status); ++i) {
+    const hrx_pool_family_access_t* access = &scope.families[i];
+    const iree_hal_queue_family_t* family =
+        access->device && access->device->group == group
+            ? iree_hal_device_queue_family(access->device->hal_device,
+                                           access->family_ordinal)
+            : NULL;
+    if (!family) {
+      status =
+          iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                           "pool family %zu is not in the sealed group", i);
+    } else {
+      out_families[i] = (iree_hal_pool_family_access_t){
+          .family = family,
+          .usage = access->usage,
+          .interfaces = access->interfaces,
+          .requirements = access->requirements,
+          .atomics = {.queue = hrx_atomic_to_hal(access->atomics.queue),
+                      .queue_zero_compute =
+                          hrx_atomic_to_hal(access->atomics.queue_zero_compute),
+                      .program = hrx_atomic_to_hal(access->atomics.program)},
+      };
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    *out_scope = (iree_hal_pool_scope_t){
+        .family_count = scope.family_count,
+        .families = out_families,
+        .host = hrx_pool_host_access_to_hal(scope.host),
+    };
+  }
+  return status;
+}
+
 hrx_status_t hrx_slab_pool_create(hrx_device_group_t group,
                                   hrx_pool_scope_t scope,
                                   const hrx_slab_pool_options_t* options,
@@ -288,29 +328,9 @@ hrx_status_t hrx_slab_pool_create(hrx_device_group_t group,
     status = iree_allocator_malloc_array(allocator, export_count,
                                          sizeof(*exports), (void**)&exports);
   }
-  for (size_t i = 0; i < scope.family_count && iree_status_is_ok(status); ++i) {
-    const hrx_pool_family_access_t* access = &scope.families[i];
-    const iree_hal_queue_family_t* family =
-        access->device && access->device->group == group
-            ? iree_hal_device_queue_family(access->device->hal_device,
-                                           access->family_ordinal)
-            : NULL;
-    if (!family) {
-      status =
-          iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                           "pool family %zu is not in the sealed group", i);
-    } else {
-      families[i] = (iree_hal_pool_family_access_t){
-          .family = family,
-          .usage = access->usage,
-          .interfaces = access->interfaces,
-          .requirements = access->requirements,
-          .atomics = {.queue = hrx_atomic_to_hal(access->atomics.queue),
-                      .queue_zero_compute =
-                          hrx_atomic_to_hal(access->atomics.queue_zero_compute),
-                      .program = hrx_atomic_to_hal(access->atomics.program)},
-      };
-    }
+  iree_hal_pool_scope_t hal_scope;
+  if (iree_status_is_ok(status)) {
+    status = hrx_mem_pool_prepare_scope(group, scope, families, &hal_scope);
   }
   if (iree_status_is_ok(status)) {
     iree_hal_external_storage_class_t* cursor = exports;
@@ -333,11 +353,6 @@ hrx_status_t hrx_slab_pool_create(hrx_device_group_t group,
                                            &cursor),
       };
     }
-    const iree_hal_pool_scope_t hal_scope = {
-        .family_count = scope.family_count,
-        .families = families,
-        .host = hrx_pool_host_access_to_hal(scope.host),
-    };
     iree_hal_pool_t* hal_pool = NULL;
     status = iree_hal_slab_pool_create(group->hal_group, hal_scope,
                                        &hal_options, allocator, &hal_pool);
@@ -635,5 +650,19 @@ void hrx_mem_pool_query_stats(hrx_mem_pool_t pool,
       .over_budget_count = value.over_budget_count,
       .wait_count = value.wait_count,
       .quarantine_eviction_count = value.quarantine_eviction_count,
+  };
+}
+
+hrx_memory_mapping_requirements_t hrx_mem_pool_query_mapping_requirements(
+    hrx_mem_pool_t pool) {
+  if (!pool) {
+    return (hrx_memory_mapping_requirements_t){0};
+  }
+  const iree_hal_pool_mapping_requirements_t requirements =
+      iree_hal_pool_query_mapping_requirements(pool->hal_pool);
+  return (hrx_memory_mapping_requirements_t){
+      .minimum_granularity = (size_t)requirements.minimum_granularity,
+      .recommended_granularity = (size_t)requirements.recommended_granularity,
+      .flags = requirements.flags,
   };
 }

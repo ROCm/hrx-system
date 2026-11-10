@@ -115,6 +115,7 @@ hrx_cc_library(
         "stream_queue.c",
         "stream_value.c",
         "tls.c",
+        "virtual_buffer.c",
     ],
     hdrs = [
         "completion.h",
@@ -140,6 +141,7 @@ hrx_cc_library(
         "stream_queue.h",
         "stream_value.h",
         "tls.h",
+        "virtual_buffer.h",
     ],
     includes = [
         "..",

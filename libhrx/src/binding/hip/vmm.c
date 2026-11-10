@@ -14,6 +14,7 @@
 #include "common/context.h"
 #include "common/device.h"
 #include "common/memory.h"
+#include "common/virtual_buffer.h"
 #include "hrx_runtime.h"
 #include "iree/base/api.h"
 #include "iree/base/threading/call_once.h"
@@ -521,8 +522,9 @@ static hipError_t iree_hip_vmm_get_device_for_properties(
 
 static hipError_t iree_hip_vmm_prepare_scope(
     hrx_device_t device, hrx_device_t* devices,
-    hrx_virtual_buffer_source_t* sources, hrx_virtual_buffer_scope_t* out_scope,
-    hrx_virtual_buffer_sources_t* out_sources) {
+    iree_hal_streaming_virtual_buffer_source_t* sources,
+    iree_hal_streaming_virtual_buffer_scope_t* out_scope,
+    iree_hal_streaming_virtual_buffer_sources_t* out_sources) {
   int count = 0;
   hipError_t result =
       iree_hip_vmm_from_hrx_status(hrx_gpu_device_count(&count));
@@ -535,7 +537,7 @@ static hipError_t iree_hip_vmm_prepare_scope(
       devices[index++] = participant;
     }
   }
-  *out_scope = (hrx_virtual_buffer_scope_t){
+  *out_scope = (iree_hal_streaming_virtual_buffer_scope_t){
       .device_count = index,
       .devices = devices,
       .host_access = HRX_MEMORY_ACCESS_ALL,
@@ -545,16 +547,16 @@ static hipError_t iree_hip_vmm_prepare_scope(
   // for CPU/GPU aliases, independently of the permissions later granted by
   // hipMemSetAccess. Device backing does not imply remappable CPU access.
   for (size_t i = 0; i < index; ++i) {
-    sources[2 * i] = (hrx_virtual_buffer_source_t){
+    sources[2 * i] = (iree_hal_streaming_virtual_buffer_source_t){
         .device = devices[i],
         .memory_type = HRX_MEMORY_TYPE_DEVICE_LOCAL,
     };
-    sources[2 * i + 1] = (hrx_virtual_buffer_source_t){
+    sources[2 * i + 1] = (iree_hal_streaming_virtual_buffer_source_t){
         .device = devices[i],
         .memory_type = HRX_MEMORY_TYPE_HOST_LOCAL,
     };
   }
-  *out_sources = (hrx_virtual_buffer_sources_t){
+  *out_sources = (iree_hal_streaming_virtual_buffer_sources_t){
       .source_count = 2 * index,
       .sources = sources,
   };
@@ -568,15 +570,17 @@ static hipError_t iree_hip_vmm_query_granularity(hrx_device_t device,
                                                  bool* out_modern) {
   *out_modern = false;
   hrx_device_t devices[IREE_HAL_STREAMING_MAX_DEVICES];
-  hrx_virtual_buffer_source_t sources[2 * IREE_HAL_STREAMING_MAX_DEVICES];
-  hrx_virtual_buffer_scope_t scope;
-  hrx_virtual_buffer_sources_t accepted_sources;
+  iree_hal_streaming_virtual_buffer_source_t
+      sources[2 * IREE_HAL_STREAMING_MAX_DEVICES];
+  iree_hal_streaming_virtual_buffer_scope_t scope;
+  iree_hal_streaming_virtual_buffer_sources_t accepted_sources;
   hipError_t result = iree_hip_vmm_prepare_scope(device, devices, sources,
                                                  &scope, &accepted_sources);
   hrx_virtual_buffer_capabilities_t capabilities = {0};
   if (result == hipSuccess) {
-    result = iree_hip_vmm_from_hrx_status(hrx_virtual_buffer_query_capabilities(
-        scope, accepted_sources, &capabilities));
+    result = iree_hip_vmm_from_iree_status(
+        iree_hal_streaming_virtual_buffer_query_capabilities(
+            scope, accepted_sources, &capabilities));
   }
   if (result != hipSuccess) {
     return result;
@@ -593,9 +597,9 @@ static hipError_t iree_hip_vmm_query_granularity(hrx_device_t device,
       return hipErrorNotSupported;
     }
     hrx_memory_mapping_requirements_t requirements;
-    result =
-        iree_hip_vmm_from_hrx_status(hrx_allocator_query_mapping_requirements(
-            hrx_device_allocator(device), memory_type, &requirements));
+    result = iree_hip_vmm_from_iree_status(
+        iree_hal_streaming_virtual_buffer_query_source_requirements(
+            device, memory_type, &requirements));
     if (result == hipSuccess) {
       *out_modern = true;
       *out_minimum = iree_max(requirements.minimum_granularity,
@@ -1069,9 +1073,10 @@ hipError_t iree_hip_vmm_address_reserve(void** ptr, size_t size,
   hrx_buffer_t virtual_buffer = NULL;
   if (modern) {
     hrx_device_t devices[IREE_HAL_STREAMING_MAX_DEVICES];
-    hrx_virtual_buffer_source_t sources[2 * IREE_HAL_STREAMING_MAX_DEVICES];
-    hrx_virtual_buffer_scope_t scope;
-    hrx_virtual_buffer_sources_t accepted_sources;
+    iree_hal_streaming_virtual_buffer_source_t
+        sources[2 * IREE_HAL_STREAMING_MAX_DEVICES];
+    iree_hal_streaming_virtual_buffer_scope_t scope;
+    iree_hal_streaming_virtual_buffer_sources_t accepted_sources;
     result = iree_hip_vmm_prepare_scope(device, devices, sources, &scope,
                                         &accepted_sources);
     const hrx_virtual_buffer_options_t options = {
@@ -1081,8 +1086,9 @@ hipError_t iree_hip_vmm_address_reserve(void** ptr, size_t size,
         .flags = HRX_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
     };
     if (result == hipSuccess) {
-      result = iree_hip_vmm_from_hrx_status(hrx_virtual_buffer_create(
-          scope, accepted_sources, &options, &virtual_buffer));
+      result = iree_hip_vmm_from_iree_status(
+          iree_hal_streaming_virtual_buffer_create(scope, accepted_sources,
+                                                   &options, &virtual_buffer));
     }
   } else {
     result = iree_hip_vmm_from_hrx_status(

@@ -71,6 +71,7 @@ class HrxLoader {
   decltype(&hrx_device_group_release) device_group_release;
   decltype(&hrx_device_group_device_count) device_group_device_count;
   decltype(&hrx_device_group_get_device) device_group_get_device;
+  decltype(&hrx_device_get_device_group) device_get_device_group;
 
   decltype(&hrx_slab_pool_create) slab_pool_create;
   decltype(&hrx_slab_cache_create) slab_cache_create;
@@ -260,8 +261,8 @@ class HrxLoader {
   decltype(&hrx_virtual_buffer_resolve_projection)
       virtual_buffer_resolve_projection;
   decltype(&hrx_virtual_buffer_detach) virtual_buffer_detach;
-  decltype(&hrx_allocator_query_mapping_requirements)
-      allocator_query_mapping_requirements;
+  decltype(&hrx_mem_pool_query_mapping_requirements)
+      mem_pool_query_mapping_requirements;
   decltype(&hrx_queue_map) queue_map;
 
  private:

@@ -23,4 +23,21 @@ typedef struct hrx_mem_pool_s {
   hrx_buffer_t backing_buffer;
 } hrx_mem_pool_s;
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Translates a validated public array into caller-owned construction scratch.
+// Each device/family must belong to group. out_families has family_count
+// entries and remains live for every native use of out_scope. This acquires no
+// owners.
+iree_status_t hrx_mem_pool_prepare_scope(
+    hrx_device_group_t group, hrx_pool_scope_t scope,
+    iree_hal_pool_family_access_t* out_families,
+    iree_hal_pool_scope_t* out_scope);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
+
 #endif  // LIBHRX_SRC_LIBHRX_MEM_POOL_H_
