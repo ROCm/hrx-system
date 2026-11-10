@@ -67,6 +67,12 @@ iree_status_t loom_aie2p_native_initialize_cursors(
     loom_value_id_t frame, iree_host_size_t engine,
     const loom_pipeline_invocation_t* owner);
 
+// Finalizes descriptor activation after all sequence/framing selection.
+// Consumes retained physical ranges and their variants, without revisiting
+// source IR.
+iree_status_t loom_aie2p_native_finalize_endpoints(
+    loom_aie2p_native_context_t* context);
+
 // Binds unique native endpoint state to its channel's constructing owner.
 // Existing distribution controller selection and retirement precede this
 // step. It consumes retained geometry and ownership, without source traversal.

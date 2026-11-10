@@ -104,6 +104,18 @@ loom_test(
     benchmark_smoke = False,
     execution_profiles = [_XDNA_ONE_COLUMN_PROFILE],
     target_compatible_with = loom_config_compatible_with(["//loom/config/execute:vm_iree_vm"]),
+    variants = {
+        "finite_child": {"case": "finite_child_completion"},
+        "serial_geometry": {"case": "serial_geometry_reentry"},
+    },
+)
+
+loom_test(
+    name = "child_result_sharing_test",
+    srcs = ["child_result_sharing.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [_XDNA_ONE_COLUMN_PROFILE],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/execute:vm_iree_vm"]),
 )
 
 loom_test(

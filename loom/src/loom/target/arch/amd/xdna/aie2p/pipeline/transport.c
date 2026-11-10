@@ -1215,22 +1215,25 @@ iree_status_t loom_aie2p_native_select_transfers(
        i < context->family->column_count * context->family->row_count;
        ++i) {
     loom_aie2p_native_delivery_t* delivery = context->deliveries[i];
-    if (!delivery || !delivery->sharing.used ||
-        delivery->reader_worker == UINT32_MAX ||
-        delivery->distribution->repetitions == 1) {
+    if (!delivery || !delivery->sharing.used) {
       continue;
     }
-    const loom_aie2p_native_tile_t* sender =
-        delivery->distribution->sender.tile;
-    status = loom_aie2p_native_select_control_route(
-        context, realization, delivery->reader_worker, sender, false,
-        &next_source, next_controller, &valid);
-    if (iree_status_is_ok(status) && valid) {
-      const loom_aie2p_native_worker_t* owner =
-          &context
-               ->workers[context->execution.workers
-                             [context->core_engines[delivery->reader_worker]]];
-      delivery->packet = owner->control_packets[sender - context->tiles];
+    for (loom_aie2p_native_grant_t* grant = delivery->grants;
+         iree_status_is_ok(status) && valid && grant; grant = grant->next) {
+      const uint32_t reader = grant->distribution->grant_reader;
+      if (reader == UINT32_MAX || grant->distribution->repetitions == 1) {
+        continue;
+      }
+      const loom_aie2p_native_tile_t* sender = grant->distribution->sender.tile;
+      status = loom_aie2p_native_select_control_route(
+          context, realization, reader, sender, false, &next_source,
+          next_controller, &valid);
+      if (iree_status_is_ok(status) && valid) {
+        const loom_aie2p_native_worker_t* owner =
+            &context->workers[context->execution
+                                  .workers[context->core_engines[reader]]];
+        grant->packet = owner->control_packets[sender - context->tiles];
+      }
     }
   }
   if (iree_status_is_ok(status) && valid) {
