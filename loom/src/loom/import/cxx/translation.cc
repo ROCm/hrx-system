@@ -1623,8 +1623,8 @@ class Translator final : private Initialization::Evaluation {
       if (!initializer) {
         fail(owner, "reference locals require an initializer");
       }
-      cxx::Initializer source(initializer);
-      auto* referent_expression = source.singleExpression();
+      auto* referent_expression =
+          cxx::Initializer(initializer).referenceExpression(unit_.typeTraits());
       if (!referent_expression) {
         fail(initializer,
              "reference locals require one initializer expression");
@@ -2119,6 +2119,21 @@ class Translator final : private Initialization::Evaluation {
       }
       return storage_.subobject(base, byte_offset, ast);
     }
+    // Value-producing operators and conversions materialize their result just
+    // like ordinary calls. Only glvalues below follow an existing identity.
+    if (ast->valueCategory == cxx::ValueCategory::kPrValue) {
+      auto value = expression(ast);
+      if (unit_.typeTraits().is_class(ast->type) ||
+          unit_.typeTraits().is_array(ast->type)) {
+        return materialize_temporary(ast, value);
+      }
+      auto allocation = storage_.allocate(
+          ast->type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, ast);
+      auto object = storage_.project(allocation.pointer, ast->type, ast);
+      storage_.store(storage_.dereference(object, ast->type, ast), value.ssa(),
+                     ast->type, ast);
+      return object;
+    }
     if (auto call = direct_operator_call(ast)) {
       auto* signature =
           cxx::type_cast<cxx::FunctionType>(call->function->type());
@@ -2174,19 +2189,6 @@ class Translator final : private Initialization::Evaluation {
             called.value->pointer(),
             unit_.typeTraits().remove_reference(signature->returnType()), ast);
       }
-    }
-    if (ast->valueCategory == cxx::ValueCategory::kPrValue) {
-      auto value = expression(ast);
-      if (unit_.typeTraits().is_class(ast->type) ||
-          unit_.typeTraits().is_array(ast->type)) {
-        return materialize_temporary(ast, value);
-      }
-      auto allocation = storage_.allocate(
-          ast->type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, ast);
-      auto object = storage_.project(allocation.pointer, ast->type, ast);
-      storage_.store(storage_.dereference(object, ast->type, ast), value.ssa(),
-                     ast->type, ast);
-      return object;
     }
     fail(ast, "address-of requires an existing storage-backed element");
   }
@@ -4937,16 +4939,7 @@ class Translator final : private Initialization::Evaluation {
           !cast->conversionFunction->isConstructor() &&
           types_.record(implicit_object_type(unit_, cast->conversionFunction),
                         cast)) {
-        auto called = ordinary_operator_call(
-            ast, DirectOperatorCall{
-                     .function = cast->conversionFunction,
-                     .receiver = cast->expression,
-                     .arguments = {},
-                     .argument_count = 0,
-                     .evaluation_order = OperatorEvaluationOrder::Forward,
-                     .has_postfix_dummy = false,
-                     .is_virtual_dispatch = cast->isVirtualDispatch,
-                 });
+        auto called = ordinary_operator_call(ast, *direct_operator_call(ast));
         if (!called.value) {
           fail(ast, "conversion function must return a value");
         }

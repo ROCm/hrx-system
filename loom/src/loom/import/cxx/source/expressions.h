@@ -33,8 +33,8 @@ cxx::ExpressionAST* explicit_reference_operand(cxx::TranslationUnit& unit,
                                                cxx::ExpressionAST* expression);
 
 // Returns the object beneath transparent source wrappers and any explicit
-// reference category projections. Subobject adjustments remain visible;
-// a prvalue conversion remains as the producer of its temporary object.
+// reference category projections. Subobject adjustments and conversion calls
+// remain visible; a prvalue conversion remains the producer of its temporary.
 // Callers retain the original expression for cv and category rules selected by
 // the frontend.
 cxx::ExpressionAST* unwrap_object_identity(cxx::TranslationUnit& unit,
@@ -134,8 +134,8 @@ struct DirectOperatorCall {
 };
 
 // Returns the directly selected ordinary function and source operand contract
-// for unary, binary, compound-assignment, and postfix operator syntax. Builtin
-// operators and call/subscript syntax return no value.
+// for unary, binary, compound-assignment, postfix, and implicit conversion
+// operator syntax. Builtin operators and call/subscript syntax return no value.
 std::optional<DirectOperatorCall> direct_operator_call(
     cxx::ExpressionAST* expression);
 

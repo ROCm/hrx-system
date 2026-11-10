@@ -749,3 +749,91 @@ func.def public @vector_observation(%seed: i32) -> (i32) {
 }
 
 global.rodata.def @kPointerValue = align(4) bytes("1f000000")
+
+// ====
+// Binding the converted object to an addressed reference preserves its selected
+// constructor, just as named construction and value-reference passing do.
+struct Doubled {
+  // The constructor transforms its argument before publishing this field.
+  double value;
+  Doubled(const double& source) : value(source * 2.0) {}
+};
+static double addressed(const Doubled& value) { const Doubled* pointer = &value; return pointer->value; }
+static double projected(const Doubled& value) { return value.value; }
+double implicit(double value) { return addressed(value); }
+double named(double value) { Doubled converted(value); return addressed(converted); }
+double unaddressed(double value) { return projected(value); }
+// ----
+func.def public @implicit(%value: f64) -> (f64) {
+  %67 = scalar.constant 2.0 : f64
+  %68 = scalar.mulf %value, %67 : f64
+  func.return %68 : f64
+}
+
+func.def public @named(%value: f64) -> (f64) {
+  %58 = scalar.constant 2.0 : f64
+  %59 = scalar.mulf %value, %58 : f64
+  func.return %59 : f64
+}
+
+func.def public @unaddressed(%value: f64) -> (f64) {
+  %51 = scalar.constant 2.0 : f64
+  %52 = scalar.mulf %value, %51 : f64
+  func.return %52 : f64
+}
+
+// ====
+// Numeric conversion creates the reference's temporary in its destination type.
+// It must not reinterpret the original argument's storage.
+static double read_double(const double& value) { const double* pointer = &value; return *pointer; }
+static unsigned read_byte(const unsigned char& value) { const unsigned char* pointer = &value; return *pointer; }
+double widen(float value) { return read_double(value); }
+unsigned narrow(unsigned value) { return read_byte(value); }
+// ----
+func.def public @widen(%value: f32) -> (f64) {
+  %2 = scalar.extf %value : f32 to f64
+  func.return %2 : f64
+}
+
+func.def public @narrow(%value: i32) -> (i32) {
+  %12 = scalar.trunci %value : i32 to i8
+  %30 = scalar.extui %12 : i8 to i32
+  func.return %30 : i32
+}
+
+// ====
+// Value-returning operators create a new referent, while reference-returning
+// conversions retain the original member identity for subsequent mutation.
+struct Number {
+  // Payload shared by the value and reference conversion controls.
+  unsigned value;
+  operator unsigned() const { return value * 3u; }
+  unsigned operator[](unsigned index) const { return value + index; }
+};
+struct Alias {
+  // The conversion returns this field by reference.
+  unsigned value;
+  operator unsigned&() { return value; }
+};
+static unsigned read(const unsigned& value) { const unsigned* pointer = &value; return *pointer; }
+static void increment(unsigned& value) { ++value; }
+unsigned converted(Number value) { return read(value); }
+unsigned indexed(Number value, unsigned index) { return read(value[index]); }
+unsigned mutate(unsigned seed) { Alias alias{seed}; increment(alias); return alias.value; }
+// ----
+func.def public @converted(%value_value: i32) -> (i32) {
+  %45 = scalar.constant 3 : i32
+  %46 = scalar.muli %value_value, %45 : i32
+  func.return %46 : i32
+}
+
+func.def public @indexed(%value_value: i32, %index: i32) -> (i32) {
+  %50 = scalar.addi %value_value, %index : i32
+  func.return %50 : i32
+}
+
+func.def public @mutate(%seed: i32) -> (i32) {
+  %55 = scalar.constant 1 : i32
+  %56 = scalar.addi %seed, %55 : i32
+  func.return %56 : i32
+}

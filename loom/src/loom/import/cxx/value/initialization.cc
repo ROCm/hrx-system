@@ -245,8 +245,8 @@ Value Initialization::closure(cxx::LambdaExpressionAST* expression) {
         is_reference && types_.pointer_reference_is_snapshot(field);
     cxx::ExpressionAST* referent = nullptr;
     if (is_reference) {
-      cxx::Initializer reference(initializer);
-      referent = reference.singleExpression();
+      referent =
+          cxx::Initializer(initializer).referenceExpression(unit_.typeTraits());
       if (!referent) {
         diagnostics_.reject(unit_, capture,
                             "lambda reference capture requires one "
@@ -653,8 +653,8 @@ Value Initialization::default_record(const RecordPartition& record,
         }
         cxx::ExpressionAST* referent = nullptr;
         if (is_reference) {
-          cxx::Initializer reference(source);
-          referent = reference.singleExpression();
+          referent =
+              cxx::Initializer(source).referenceExpression(unit_.typeTraits());
           if (!referent) {
             diagnostics_.reject(unit_, source,
                                 "reference members require one initializer "

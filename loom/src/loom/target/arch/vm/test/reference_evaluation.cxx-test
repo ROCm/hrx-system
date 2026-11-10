@@ -417,3 +417,54 @@ event 3
 event 2
 OK 0
 retired 0
+
+// ====
+// Converted references hold their converted value independently of the source;
+// same-type references and reference-returning conversions preserve aliases.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+static double widen(const double& value) { const double* pointer = &value; return *pointer; }
+struct Alias {
+  // A conversion to a reference must keep this exact field as its destination.
+  unsigned value;
+  operator unsigned&() { event(4); return value; }
+};
+static void increment(unsigned& value) { ++value; }
+void run() {
+  float source = 1.5f;
+  event(static_cast<unsigned>(widen(source) * 10.0));
+  const double& parenthesized(source);
+  const double& braced{source};
+  source = 2.0f;
+  event(static_cast<unsigned>(parenthesized * 10.0));
+  event(static_cast<unsigned>(braced * 10.0));
+  unsigned number = 259;
+  const unsigned char& narrowed = number;
+  number = 7;
+  event(narrowed);
+  const float& converted = static_cast<const float&>(number);
+  number = 8;
+  event(static_cast<unsigned>(converted * 10.0f));
+  const unsigned& original = number;
+  const unsigned& braced_alias{number};
+  number = 9;
+  event(original);
+  event(braced_alias);
+  const unsigned& zero{};
+  event(zero);
+  Alias alias{11};
+  increment(alias);
+  event(alias.value);
+}
+// ----
+event 15
+event 15
+event 15
+event 3
+event 70
+event 9
+event 9
+event 0
+event 4
+event 12
+OK 0
+retired 0
