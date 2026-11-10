@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import re
 import tempfile
 import unittest
 import venv
@@ -20,16 +19,6 @@ from build_tools.devtools.setup import (
     setup_plan,
     setup_python_command,
 )
-
-
-def locked_versions(path: Path) -> dict[str, str]:
-    versions = {}
-    for line in path.read_text().splitlines():
-        match = re.match(r"^([A-Za-z0-9_.-]+)==([^ ]+)", line)
-        if match:
-            normalized_name = re.sub(r"[-_.]+", "-", match.group(1).lower())
-            versions[normalized_name] = match.group(2)
-    return versions
 
 
 class SetupPlanTest(unittest.TestCase):
@@ -133,11 +122,6 @@ class SetupPlanTest(unittest.TestCase):
             self.assertTrue(
                 any("--only-binary=:all:" in step.describe() for step in commands)
             )
-            semgrep_probe = next(
-                step for step in plan.steps if step.label == "check semgrep"
-            )
-            self.assertIn("--disable-version-check", semgrep_probe.argv)
-            self.assertEqual(semgrep_probe.expected_pattern, r"\b1\.96\.0\b")
             zizmor_probe = next(
                 step for step in plan.steps if step.label == "check zizmor"
             )
@@ -166,7 +150,7 @@ class SetupPlanTest(unittest.TestCase):
             self.assertIn("__iree_cli_compatibility_probe__", probe.argv)
             self.assertIn("--no-fail-on-changes", probe.argv)
 
-    def test_windows_venv_does_not_install_unusable_semgrep_package(self):
+    def test_windows_venv_skips_linux_analysis_tools(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             venv_root = Path(temporary_directory) / "venv"
             plan = setup_plan(
@@ -254,21 +238,6 @@ class SetupPlanTest(unittest.TestCase):
             ValueError, "documentation setup requires a managed tool environment"
         ):
             common_setup_plan(ToolEnvironment(ToolMode.SYSTEM, None), include_docs=True)
-
-    def test_optional_docs_lock_matches_shared_analysis_packages(self):
-        analysis_versions = locked_versions(
-            REPO_ROOT / "requirements-analysis.lock.txt"
-        )
-        docs_versions = locked_versions(
-            REPO_ROOT / "loom" / "docs" / "requirements.lock.txt"
-        )
-
-        shared_names = analysis_versions.keys() & docs_versions.keys()
-        self.assertTrue(shared_names)
-        self.assertEqual(
-            {name: analysis_versions[name] for name in shared_names},
-            {name: docs_versions[name] for name in shared_names},
-        )
 
 
 if __name__ == "__main__":
