@@ -1413,7 +1413,7 @@ CUDAAPI CUresult cuMemAllocHost(void** pp, size_t bytesize) {
   iree_hal_streaming_buffer_t* buffer = NULL;
   iree_status_t status = iree_hal_streaming_memory_allocate_host(
       context, bytesize, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
-      &buffer);
+      /*fine_grained=*/false, &buffer);
 
   if (iree_status_is_ok(status)) {
     *pp = buffer->host_ptr;
@@ -1455,7 +1455,8 @@ CUDAAPI CUresult cuMemHostAlloc(void** pp, size_t bytesize,
 
   iree_hal_streaming_buffer_t* buffer = NULL;
   iree_status_t status = iree_hal_streaming_memory_allocate_host(
-      context, bytesize, iree_cuda_memory_flags_to_internal(Flags), &buffer);
+      context, bytesize, iree_cuda_memory_flags_to_internal(Flags),
+      /*fine_grained=*/false, &buffer);
 
   if (iree_status_is_ok(status)) {
     *pp = buffer->host_ptr;

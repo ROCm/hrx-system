@@ -362,10 +362,11 @@ iree_status_t iree_hal_streaming_memory_release_terminal_async_frees(
 iree_status_t iree_hal_streaming_memory_release_completed_async_frees_from_pool(
     hrx_mem_pool_t pool);
 
-// Synchronization: none (allocates host memory).
+// Synchronization: none (allocates host memory). |fine_grained| additionally
+// requires concurrent host/program system visibility from the native source.
 iree_status_t iree_hal_streaming_memory_allocate_host(
     iree_hal_streaming_context_t* context, iree_host_size_t size,
-    iree_hal_streaming_host_register_flags_t flags,
+    iree_hal_streaming_host_register_flags_t flags, bool fine_grained,
     iree_hal_streaming_buffer_t** out_buffer);
 
 // Synchronization: none (allocates host-visible device memory).

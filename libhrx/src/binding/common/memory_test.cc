@@ -349,7 +349,9 @@ TEST_F(CpuStreamingMemoryTest,
   device_pointer_ = iree_hal_streaming_buffer_device_pointer(buffer_);
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host(
       context_, 16, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
-      &host_buffer_));
+      /*fine_grained=*/false, &host_buffer_));
+  EXPECT_EQ(reinterpret_cast<uintptr_t>(host_buffer_->host_ptr),
+            host_buffer_->device_ptr);
   const iree_hal_memory_type_t shared_memory =
       IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   EXPECT_TRUE(iree_all_bits_set(buffer_->memory_type, shared_memory));
@@ -379,6 +381,8 @@ TEST_F(CpuStreamingMemoryTest,
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_managed(
       context_, 16, /*allocation_flags=*/0, &buffer_));
   EXPECT_EQ(buffer_->memory_kind, IREE_HAL_STREAMING_MEMORY_KIND_MANAGED);
+  EXPECT_EQ(reinterpret_cast<uintptr_t>(buffer_->host_ptr),
+            buffer_->device_ptr);
   IREE_ASSERT_OK(iree_hal_streaming_memory_register_host(
       context_, registered_storage_.data(), registered_storage_.size(),
       IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT, &host_buffer_));
@@ -400,7 +404,7 @@ TEST_F(CpuStreamingMemoryTest,
   device_pointer_ = iree_hal_streaming_buffer_device_pointer(buffer_);
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host(
       context_, kSize, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
-      &host_buffer_));
+      /*fine_grained=*/false, &host_buffer_));
   const std::array<uint8_t, kSize> source = {1, 2,  3,  4,  5,  6,  7,  8,
                                              9, 10, 11, 12, 13, 14, 15, 16};
   std::memset(host_buffer_->host_ptr, 0xcd, kSize);
@@ -519,7 +523,7 @@ TEST_F(CpuStreamingMemoryTest,
   device_pointer_ = iree_hal_streaming_buffer_device_pointer(buffer_);
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host(
       context_, 8, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
-      &host_buffer_));
+      /*fine_grained=*/false, &host_buffer_));
   const uint64_t pending_value = stream_->pending_value;
   std::array<uint8_t, 16> pageable_destination = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
@@ -968,7 +972,7 @@ TEST_F(CpuStreamingMemoryTest,
   std::memcpy(buffer_->host_ptr, source.data(), source.size());
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host(
       context_, kDestinationSize, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
-      &host_buffer_));
+      /*fine_grained=*/false, &host_buffer_));
   std::array<uint8_t, kDestinationSize> registered_storage;
   iree_hal_streaming_buffer_t* registered_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_streaming_memory_register_host(
@@ -1046,7 +1050,7 @@ TEST_F(CpuStreamingMemoryTest,
   iree_hal_streaming_buffer_t* input_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host(
       context_, kSize, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
-      &input_buffer));
+      /*fine_grained=*/false, &input_buffer));
   const auto release_input = [&](iree_hal_streaming_buffer_t* buffer) {
     IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize(stream_));
     iree_hal_streaming_memory_release_wrapped_buffer(buffer);
@@ -1231,7 +1235,7 @@ TEST_F(CpuStreamingMemoryTest, RegisteredPitchedCopiesSubmitOneBatchPerCall) {
   device_pointer_ = iree_hal_streaming_buffer_device_pointer(buffer_);
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host(
       context_, 64, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
-      &host_buffer_));
+      /*fine_grained=*/false, &host_buffer_));
   auto* host = static_cast<uint8_t*>(host_buffer_->host_ptr);
   std::memset(host, 0xCD, 64);
   for (size_t row = 0; row < kHeight; ++row) {
@@ -1488,7 +1492,7 @@ TEST_F(CpuStreamingMemoryTest, PostAcceptFlushFailureDrainsD2HBeforeReturning) {
   std::memcpy(buffer_->host_ptr, expected.data(), expected.size());
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host(
       context_, kAllocationSize, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
-      &host_buffer_));
+      /*fine_grained=*/false, &host_buffer_));
   void* destination = host_buffer_->host_ptr;
 
   InjectedFlushQueue fault_queue = {};
@@ -1542,7 +1546,7 @@ TEST_F(CpuStreamingMemoryTest, RejectedDownloadPreservesStreamAndDestination) {
   device_pointer_ = iree_hal_streaming_buffer_device_pointer(buffer_);
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host(
       context_, kSize, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
-      &host_buffer_));
+      /*fine_grained=*/false, &host_buffer_));
   std::memset(buffer_->host_ptr, 0x42, kSize);
   std::memset(host_buffer_->host_ptr, 0xCD, kSize);
 

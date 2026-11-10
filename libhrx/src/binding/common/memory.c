@@ -83,23 +83,6 @@ typedef struct iree_hal_streaming_host_memcpy_callback_data_t {
   iree_device_size_t count;
 } iree_hal_streaming_host_memcpy_callback_data_t;
 
-typedef struct iree_hal_streaming_owned_host_allocation_t {
-  iree_allocator_t allocator;
-  void* ptr;
-} iree_hal_streaming_owned_host_allocation_t;
-
-static void iree_hal_streaming_owned_host_allocation_release(
-    void* user_data, iree_hal_external_storage_class_t storage_class,
-    iree_hal_external_storage_payload_t payload) {
-  (void)storage_class;
-  (void)payload;
-  iree_hal_streaming_owned_host_allocation_t* allocation =
-      (iree_hal_streaming_owned_host_allocation_t*)user_data;
-  const iree_allocator_t allocator = allocation->allocator;
-  iree_allocator_free_aligned(allocator, allocation->ptr);
-  iree_allocator_free(allocator, allocation);
-}
-
 static void iree_hal_streaming_host_memcpy_callback(void* user_data) {
   iree_hal_streaming_host_memcpy_callback_data_t* callback_data =
       (iree_hal_streaming_host_memcpy_callback_data_t*)user_data;
@@ -2172,11 +2155,19 @@ iree_status_t iree_hal_streaming_memory_free_device_async(
   return status;
 }
 
+typedef enum iree_hal_streaming_host_allocation_mode_e {
+  IREE_HAL_STREAMING_HOST_ALLOCATION_MODE_STAGING = 0,
+  IREE_HAL_STREAMING_HOST_ALLOCATION_MODE_COMMON_ADDRESS = 1,
+  IREE_HAL_STREAMING_HOST_ALLOCATION_MODE_FINE_GRAINED = 2,
+} iree_hal_streaming_host_allocation_mode_t;
+
 static iree_status_t iree_hal_streaming_memory_allocate_host_with_context_mode(
     iree_hal_streaming_context_t* context, iree_host_size_t size,
     iree_hal_streaming_host_register_flags_t flags,
-    iree_hal_buffer_usage_t usage, iree_device_size_t min_alignment,
+    iree_hal_streaming_host_allocation_mode_t mode,
+    iree_device_size_t min_alignment,
     iree_hal_streaming_buffer_context_ownership_t context_ownership,
+    iree_hal_streaming_memory_kind_t memory_kind,
     iree_hal_streaming_buffer_t** out_buffer) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(out_buffer);
@@ -2185,23 +2176,30 @@ static iree_status_t iree_hal_streaming_memory_allocate_host_with_context_mode(
 
   const bool signal_memory = iree_any_bit_set(
       flags, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_HIP_SIGNAL_MEMORY);
+  const bool fine_grained =
+      mode == IREE_HAL_STREAMING_HOST_ALLOCATION_MODE_FINE_GRAINED;
   const iree_host_size_t allocation_size = iree_max(size, (iree_host_size_t)8);
   const iree_host_size_t host_alignment =
       iree_max((iree_host_size_t)min_alignment,
                (iree_host_size_t)(signal_memory ? sizeof(uint64_t) : 4096));
-  (void)usage;
   const iree_hal_memory_type_t memory_type =
       IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
 
   iree_hal_pool_t* pool = NULL;
   iree_hal_buffer_t* buffer = NULL;
-  iree_status_t status = signal_memory
-                             ? hrx_mem_pool_backing_retain_signal_pool(
-                                   context->device_entry->hrx_device, &pool)
-                             : hrx_mem_pool_backing_retain_allocation_source(
-                                   context->device_entry->hrx_device,
-                                   (hrx_memory_type_t)memory_type,
-                                   HRX_BUFFER_USAGE_DEFAULT, &pool);
+  iree_status_t status = iree_ok_status();
+  if (signal_memory) {
+    status = hrx_mem_pool_backing_retain_signal_pool(
+        context->device_entry->hrx_device, &pool);
+  } else if (mode != IREE_HAL_STREAMING_HOST_ALLOCATION_MODE_STAGING) {
+    status = hrx_mem_pool_backing_retain_common_host_source(
+        context->device_entry->hrx_device, fine_grained,
+        HRX_BUFFER_USAGE_DEFAULT, &pool);
+  } else {
+    status = hrx_mem_pool_backing_retain_allocation_source(
+        context->device_entry->hrx_device, (hrx_memory_type_t)memory_type,
+        HRX_BUFFER_USAGE_DEFAULT, &pool);
+  }
   if (iree_status_is_ok(status)) {
     const iree_hal_pool_reservation_request_t request =
         iree_hal_make_pool_reservation_request(allocation_size, host_alignment);
@@ -2212,7 +2210,7 @@ static iree_status_t iree_hal_streaming_memory_allocate_host_with_context_mode(
   iree_hal_streaming_buffer_t* wrapper = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_buffer_wrap(
-        context, buffer, (int)memory_type, IREE_HAL_STREAMING_MEMORY_KIND_HOST,
+        context, buffer, (int)memory_type, memory_kind,
         /*imported_host_ptr=*/NULL,
         /*allocation_pool=*/NULL, context_ownership, &wrapper);
   }
@@ -2242,113 +2240,19 @@ static iree_status_t iree_hal_streaming_memory_allocate_host_with_context_mode(
   return status;
 }
 
-static iree_status_t
-iree_hal_streaming_memory_allocate_owned_host_import_with_context_mode(
-    iree_hal_streaming_context_t* context, iree_host_size_t size,
-    iree_hal_streaming_host_register_flags_t flags,
-    iree_hal_buffer_usage_t usage, iree_device_size_t min_alignment,
-    iree_hal_streaming_buffer_context_ownership_t context_ownership,
-    iree_hal_streaming_memory_kind_t memory_kind,
-    iree_hal_streaming_buffer_t** out_buffer) {
-  IREE_ASSERT_ARGUMENT(context);
-  IREE_ASSERT_ARGUMENT(out_buffer);
-  IREE_TRACE_ZONE_BEGIN(z0);
-  *out_buffer = NULL;
-
-  const iree_host_size_t allocation_size = iree_max(size, (iree_host_size_t)8);
-  const iree_host_size_t host_alignment =
-      iree_max((iree_host_size_t)min_alignment, (iree_host_size_t)4096);
-  (void)usage;
-  void* host_ptr = NULL;
-  iree_status_t status = iree_allocator_malloc_aligned(
-      context->host_allocator, allocation_size, host_alignment,
-      /*offset=*/0, &host_ptr);
-
-  iree_hal_streaming_owned_host_allocation_t* owned_allocation = NULL;
-  bool host_allocation_transferred = false;
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc(context->host_allocator,
-                                   sizeof(*owned_allocation),
-                                   (void**)&owned_allocation);
-  }
-  if (iree_status_is_ok(status)) {
-    owned_allocation->allocator = context->host_allocator;
-    owned_allocation->ptr = host_ptr;
-  }
-
-  iree_hal_buffer_t* buffer = NULL;
-  if (iree_status_is_ok(status)) {
-    iree_hal_external_storage_t external_buffer = {
-        .storage_class = iree_hal_make_external_storage_class(
-            IREE_HAL_EXTERNAL_STORAGE_TYPE_HOST_POINTER),
-        .payload.host_pointer = host_ptr,
-        .byte_length = allocation_size,
-        .host_properties = (IREE_HAL_HOST_MEMORY_PROPERTY_READ_CACHED |
-                            IREE_HAL_HOST_MEMORY_PROPERTY_WRITE_BACK),
-        .maintenance_range = iree_hal_make_buffer_range(0, allocation_size),
-        .release = iree_hal_streaming_owned_host_allocation_release,
-        .release_user_data = owned_allocation,
-    };
-    iree_hal_pool_t* import_pool = NULL;
-    status = hrx_mem_pool_backing_retain_import_source(
-        context->device_entry->hrx_device, external_buffer.storage_class,
-        &import_pool);
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_pool_import_buffer(
-          import_pool, &external_buffer,
-          iree_hal_make_buffer_range(0, IREE_HAL_WHOLE_BUFFER), &buffer);
-    }
-    iree_hal_pool_release(import_pool);
-    if (iree_status_is_ok(status)) {
-      owned_allocation = NULL;
-      host_allocation_transferred = true;
-    }
-  }
-
-  iree_hal_streaming_buffer_t* wrapper = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_streaming_buffer_wrap(
-        context, buffer,
-        (int)(IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-              IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE),
-        memory_kind, host_ptr, /*allocation_pool=*/NULL, context_ownership,
-        &wrapper);
-  }
-  iree_hal_buffer_release(buffer);
-
-  if (iree_status_is_ok(status)) {
-    wrapper->imported_host_allocation = false;
-    wrapper->host_register_flags = flags;
-    *out_buffer = wrapper;
-  } else {
-    if (wrapper) {
-      hrx_buffer_table_remove(&context->buffer_table, wrapper->device_ptr);
-      iree_hal_streaming_buffer_free(wrapper);
-    }
-  }
-  if (!host_allocation_transferred) {
-    iree_allocator_free_aligned(context->host_allocator, host_ptr);
-  }
-  iree_allocator_free(context->host_allocator, owned_allocation);
-
-  IREE_TRACE_ZONE_END(z0);
-  return status;
-}
-
 iree_status_t iree_hal_streaming_memory_allocate_host(
     iree_hal_streaming_context_t* context, iree_host_size_t size,
-    iree_hal_streaming_host_register_flags_t flags,
+    iree_hal_streaming_host_register_flags_t flags, bool fine_grained,
     iree_hal_streaming_buffer_t** out_buffer) {
-  if (iree_any_bit_set(
-          flags, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_HIP_SIGNAL_MEMORY)) {
-    return iree_hal_streaming_memory_allocate_host_with_context_mode(
-        context, size, flags, IREE_HAL_BUFFER_USAGE_DEFAULT,
-        /*min_alignment=*/sizeof(uint64_t),
-        IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED, out_buffer);
-  }
-  return iree_hal_streaming_memory_allocate_owned_host_import_with_context_mode(
-      context, size, flags, IREE_HAL_BUFFER_USAGE_DEFAULT,
-      /*min_alignment=*/64, IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED,
+  const bool signal_memory = iree_any_bit_set(
+      flags, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_HIP_SIGNAL_MEMORY);
+  const iree_device_size_t min_alignment =
+      signal_memory ? sizeof(uint64_t) : 64;
+  return iree_hal_streaming_memory_allocate_host_with_context_mode(
+      context, size, flags,
+      fine_grained ? IREE_HAL_STREAMING_HOST_ALLOCATION_MODE_FINE_GRAINED
+                   : IREE_HAL_STREAMING_HOST_ALLOCATION_MODE_COMMON_ADDRESS,
+      min_alignment, IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED,
       IREE_HAL_STREAMING_MEMORY_KIND_HOST, out_buffer);
 }
 
@@ -2357,9 +2261,9 @@ iree_status_t iree_hal_streaming_memory_allocate_host_staging(
     iree_hal_streaming_buffer_t** out_buffer) {
   return iree_hal_streaming_memory_allocate_host_with_context_mode(
       context, size, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
-      IREE_HAL_BUFFER_USAGE_DEFAULT,
-      /*min_alignment=*/64, IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED,
-      out_buffer);
+      IREE_HAL_STREAMING_HOST_ALLOCATION_MODE_STAGING, /*min_alignment=*/64,
+      IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED,
+      IREE_HAL_STREAMING_MEMORY_KIND_HOST, out_buffer);
 }
 
 static iree_status_t iree_hal_streaming_managed_metadata_allocate(
@@ -2440,10 +2344,10 @@ iree_status_t iree_hal_streaming_memory_allocate_managed(
   iree_hal_streaming_buffer_t* buffer = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
-      iree_hal_streaming_memory_allocate_owned_host_import_with_context_mode(
+      iree_hal_streaming_memory_allocate_host_with_context_mode(
           context, allocation_size,
-          (iree_hal_streaming_host_register_flags_t)allocation_flags,
-          IREE_HAL_BUFFER_USAGE_DEFAULT,
+          IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
+          IREE_HAL_STREAMING_HOST_ALLOCATION_MODE_FINE_GRAINED,
           /*min_alignment=*/4096, IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED,
           IREE_HAL_STREAMING_MEMORY_KIND_MANAGED, &buffer));
   iree_status_t status = iree_ok_status();

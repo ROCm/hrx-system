@@ -46,6 +46,10 @@ typedef struct hrx_mem_pool_backing_t {
   hrx_mem_pool_sources_t uncached_device;
   // Retained sources with required coherent public host access.
   hrx_mem_pool_sources_t host;
+  // Retained sources whose host and device execution addresses are identical.
+  hrx_mem_pool_sources_t common_host;
+  // Retained common-address sources with fine-grained host/program visibility.
+  hrx_mem_pool_sources_t fine_grained_host;
   // Retained sources with coherent host access and uncached device access.
   hrx_mem_pool_sources_t uncached_host;
   // Retained fixed-block pool for coherent eight-byte native queue signals.
@@ -91,6 +95,14 @@ iree_status_t hrx_mem_pool_backing_create_pool(hrx_device_t device,
 iree_status_t hrx_mem_pool_backing_retain_allocation_source(
     hrx_device_t device, hrx_memory_type_t memory_type,
     hrx_buffer_usage_t usage, iree_hal_pool_t** out_pool);
+
+// Retains owned host storage whose public host pointer is also its native
+// execution address. Fine-grained sources additionally support concurrent host
+// and dispatch-program load/store visibility. Wider and read-modify-write
+// atomic capabilities remain allocation-independent device properties.
+iree_status_t hrx_mem_pool_backing_retain_common_host_source(
+    hrx_device_t device, bool fine_grained, hrx_buffer_usage_t usage,
+    iree_hal_pool_t** out_pool);
 
 // Retains the device-owned eight-byte signal pool. Signals have coherent host
 // access and native 32/64-bit waits and stores on the dispatch family. Small
