@@ -174,8 +174,11 @@ void loom_value_fact_table_clear_identities(loom_value_fact_table_t* table) {
   if (!table->identities.range.capacity) {
     return;
   }
-  for (iree_host_size_t i = 0; i < table->touched_count; ++i) {
-    const loom_value_id_t value_id = table->touched_values[i];
+  loom_value_fact_scope_iterator_t iterator;
+  loom_value_fact_table_scope_begin(table, &iterator);
+  for (loom_value_id_t value_id = loom_value_fact_scope_next(&iterator);
+       value_id != LOOM_VALUE_ID_INVALID;
+       value_id = loom_value_fact_scope_next(&iterator)) {
     if (loom_value_fact_range_contains(table->identities.range, value_id)) {
       table->identities.entries[loom_value_fact_range_offset(
           table->identities.range, value_id)] = NULL;

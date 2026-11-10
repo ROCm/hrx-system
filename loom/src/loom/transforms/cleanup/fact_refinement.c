@@ -654,13 +654,13 @@ static void loom_fact_refinement_append_observation(
   }
   IREE_ASSERT(*inout_observation_count < observation_capacity,
               "observation capacity must cover every predicate argument");
-  observations[(*inout_observation_count)++] =
-      (loom_fact_refinement_observation_t){
-          .anchor = anchor,
-          .source = source,
-          .kind = LOOM_FACT_REFINEMENT_OBSERVATION_PREDICATE,
-          .payload.predicate = normalized,
-      };
+  const iree_host_size_t observation_index = (*inout_observation_count)++;
+  observations[observation_index] = (loom_fact_refinement_observation_t){
+      .anchor = anchor,
+      .source = source,
+      .kind = LOOM_FACT_REFINEMENT_OBSERVATION_PREDICATE,
+      .payload.predicate = normalized,
+  };
 }
 
 static void loom_fact_refinement_append_exact_alias_observation(
@@ -682,13 +682,13 @@ static void loom_fact_refinement_append_exact_alias_observation(
   }
   IREE_ASSERT(*inout_observation_count < observation_capacity,
               "observation capacity must cover every identity pair");
-  observations[(*inout_observation_count)++] =
-      (loom_fact_refinement_observation_t){
-          .anchor = anchor,
-          .source = source,
-          .kind = LOOM_FACT_REFINEMENT_OBSERVATION_EXACT_ALIAS,
-          .payload.exact_alias = alias,
-      };
+  const iree_host_size_t observation_index = (*inout_observation_count)++;
+  observations[observation_index] = (loom_fact_refinement_observation_t){
+      .anchor = anchor,
+      .source = source,
+      .kind = LOOM_FACT_REFINEMENT_OBSERVATION_EXACT_ALIAS,
+      .payload.exact_alias = alias,
+  };
 }
 
 static bool loom_fact_refinement_candidate_is_still_exact(
@@ -992,23 +992,6 @@ static iree_host_size_t loom_fact_refinement_find_local_node(
   return low > block_start ? low - 1 : LOOM_FACT_REFINEMENT_NO_NODE;
 }
 
-static const loom_op_t* loom_fact_refinement_region_parent_op(
-    const loom_block_t* block) {
-  if (!block || !block->parent_region) {
-    return NULL;
-  }
-  if (block->first_op) {
-    return block->first_op->parent_op;
-  }
-  const loom_block_t* sibling = NULL;
-  loom_region_for_each_block(block->parent_region, sibling) {
-    if (sibling->first_op) {
-      return sibling->first_op->parent_op;
-    }
-  }
-  return NULL;
-}
-
 static iree_status_t loom_fact_refinement_resolve_block_entry(
     loom_fact_refinement_source_t* source, const loom_block_t* block,
     iree_host_size_t* out_node) {
@@ -1048,7 +1031,7 @@ static iree_status_t loom_fact_refinement_resolve_block_entry(
     if (!region || region->block_count == 0 || region->blocks[0] != current) {
       break;
     }
-    const loom_op_t* parent_op = loom_fact_refinement_region_parent_op(current);
+    const loom_op_t* parent_op = loom_region_parent_op(current->parent_region);
     if (!parent_op || loom_traits_is_isolated(parent_op->traits)) {
       break;
     }

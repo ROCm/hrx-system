@@ -85,11 +85,15 @@ bool loom_low_lower_rule_source_memory_plan_requires_producer(
       selected_plan->kind != LOOM_LOW_LOWER_SELECTED_PLAN_RULE ||
       iree_any_bit_set(selected_plan->flags,
                        LOOM_LOW_LOWER_SELECTED_PLAN_CLAIMED) ||
-      selected_plan->source_node_count != 1 || selected_plan->rule == NULL ||
-      selected_plan->rule->emit_count == 0 ||
+      selected_plan->selection.rule.source_node_count != 1 ||
       loom_low_lower_source_value_storage_op_requires_emission(
           selected_plan->source_op, selected_plan->source_op->traits) ||
       !loom_traits_are_safe_to_speculate(selected_plan->source_op->traits)) {
+    return false;
+  }
+  const loom_low_lower_rule_t* rule =
+      loom_low_lower_selected_plan_rule(selected_plan);
+  if (rule == NULL || rule->emit_count == 0) {
     return false;
   }
   const loom_value_id_t result =
@@ -455,7 +459,8 @@ static iree_status_t loom_low_lower_rule_source_memory_apply(
   loom_low_lower_rule_source_memory_recurrence_t* recurrence =
       (loom_low_lower_rule_source_memory_recurrence_t*)data;
   IREE_ASSERT(realization != NULL);
-  IREE_ASSERT_EQ(recurrence->producer_plan->source_node_count, 1u);
+  IREE_ASSERT_EQ(recurrence->producer_plan->selection.rule.source_node_count,
+                 1u);
   const loom_value_id_t producer_result =
       loom_op_const_results(recurrence->producer_plan->source_op)[0];
   loom_low_lower_require_source_value_storage(context, producer_result);
@@ -672,8 +677,12 @@ loom_low_lower_rule_source_memory_consider_term_recurrence(
       materializer->increment_immediate_ordinal == LOOM_LOW_ID_NONE) {
     return iree_ok_status();
   }
+  const loom_low_lower_rule_set_t* rule_set =
+      loom_low_lower_selected_plan_rule_set(selected_plan);
+  const loom_low_lower_selected_source_memory_t* selected_source_memory =
+      loom_low_lower_selected_plan_source_memory(selected_plan);
   const loom_low_source_memory_access_plan_t* access =
-      &selected_plan->source_memory->access;
+      &selected_source_memory->access;
   if (source_recurrence->term_ordinal >= access->dynamic_term_count ||
       loom_low_lower_rule_source_memory_reuses_view_base(source_memory,
                                                          access) ||
@@ -737,16 +746,15 @@ loom_low_lower_rule_source_memory_consider_term_recurrence(
   }
   loom_low_lower_rule_source_memory_recurrence_resolution_t resolution;
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_resolve_recurrence(
-      context, selected_plan->rule_set, materializer,
-      source_recurrence->term_identity,
+      context, rule_set, materializer, source_recurrence->term_identity,
       has_constant_stride ? constant_stride : 0, LOOM_VALUE_ID_INVALID,
       /*can_materialize_stride=*/true, &resolution));
 
   loom_low_lower_resolved_descriptor_t multiply_descriptor = {0};
   IREE_RETURN_IF_ERROR(
       loom_low_lower_rule_source_memory_resolve_materializer_descriptor(
-          context, selected_plan->rule_set,
-          materializer->multiply_descriptor_ref, &multiply_descriptor));
+          context, rule_set, materializer->multiply_descriptor_ref,
+          &multiply_descriptor));
   loom_low_lower_resolved_descriptor_t shift_descriptor = {0};
   if ((can_carry_complete_offset ||
        term->byte_shift != LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE ||
@@ -755,14 +763,14 @@ loom_low_lower_rule_source_memory_consider_term_recurrence(
           LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
     IREE_RETURN_IF_ERROR(
         loom_low_lower_rule_source_memory_resolve_materializer_descriptor(
-            context, selected_plan->rule_set,
-            materializer->shift_left_descriptor_ref, &shift_descriptor));
+            context, rule_set, materializer->shift_left_descriptor_ref,
+            &shift_descriptor));
   }
   loom_low_lower_resolved_descriptor_t add_descriptor = {0};
   if (can_carry_complete_offset) {
     IREE_RETURN_IF_ERROR(
         loom_low_lower_rule_source_memory_resolve_materializer_descriptor(
-            context, selected_plan->rule_set, materializer->add_descriptor_ref,
+            context, rule_set, materializer->add_descriptor_ref,
             &add_descriptor));
   }
   const uint32_t multiply_cost =
@@ -819,7 +827,7 @@ loom_low_lower_rule_source_memory_consider_term_recurrence(
   *term_recurrence = (loom_low_lower_rule_source_memory_term_recurrence_t){
       .loop = loop,
       .binding = binding,
-      .rule_set = selected_plan->rule_set,
+      .rule_set = rule_set,
       .materializer = materializer,
       .term = term,
       .update_byte_stride = update_byte_stride,
@@ -1049,12 +1057,15 @@ loom_low_lower_rule_source_memory_consider_recurrence(
   }
 
   uint32_t direct_cost = 0;
-  for (uint16_t i = 0; i < producer_plan->rule->emit_count; ++i) {
+  const loom_low_lower_rule_t* producer_rule =
+      loom_low_lower_selected_plan_rule(producer_plan);
+  for (uint16_t i = 0; i < producer_rule->emit_count; ++i) {
     direct_cost +=
         loom_low_lower_rule_source_memory_descriptor_cost(
-            context, producer_plan->resolved_emits[i].descriptor.descriptor) +
+            context,
+            producer_plan->data.rule.resolved_emits[i].descriptor.descriptor) +
         iree_math_count_ones_u32(
-            producer_plan->resolved_emits[i].emit->copy_operand_mask);
+            producer_plan->data.rule.resolved_emits[i].emit->copy_operand_mask);
   }
   loom_low_lower_rule_source_memory_recurrence_t* recurrence = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
@@ -1145,12 +1156,15 @@ iree_status_t loom_low_lower_rule_source_memory_plan_byte_offset(
     const loom_low_lower_selected_plan_t* selected_plan,
     const loom_low_lower_resolved_emit_t* resolved_emit, uint16_t emit_ordinal,
     uint16_t operand_ordinal, const void** out_binding) {
-  const loom_low_lower_rule_set_t* rule_set = selected_plan->rule_set;
+  const loom_low_lower_rule_set_t* rule_set =
+      loom_low_lower_selected_plan_rule_set(selected_plan);
+  const loom_low_lower_selected_source_memory_t* selected_source_memory =
+      loom_low_lower_selected_plan_source_memory(selected_plan);
   const loom_low_lower_source_memory_t* source_memory =
       &rule_set
            ->source_memories[resolved_emit->emit->source_memory_ordinal - 1];
   const loom_low_source_memory_access_plan_t* access =
-      &selected_plan->source_memory->access;
+      &selected_source_memory->access;
   const loom_low_lower_source_memory_byte_offset_materializer_t* materializer =
       loom_low_lower_rule_set_source_memory_byte_offset_materializer(
           rule_set, source_memory);
@@ -1168,12 +1182,13 @@ iree_status_t loom_low_lower_rule_source_memory_plan_byte_offset(
                  ? access->dynamic_view_base_value_static_byte_offset
                  : 0);
   const loom_low_lower_source_memory_record_t* memory_record =
-      selected_plan->source_memory->record;
+      selected_source_memory->record;
   const iree_host_size_t identity = memory_record->dynamic_byte_offset_identity;
   const loom_op_t* emission_op =
-      selected_plan->emission_source_node_index
-          ? selected_plan->data
-                .source_nodes[selected_plan->emission_source_node_index]
+      selected_plan->selection.rule.emission_source_node_index
+          ? loom_low_lower_selected_plan_source_nodes(
+                selected_plan)[selected_plan->selection.rule
+                                   .emission_source_node_index]
           : selected_plan->source_op;
   const loom_low_lower_source_memory_recurrence_set_t* recurrences =
       memory_record->recurrences;

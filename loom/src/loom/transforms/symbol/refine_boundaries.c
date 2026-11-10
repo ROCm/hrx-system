@@ -660,8 +660,11 @@ static bool loom_refine_boundaries_fact_tables_equal(
   const loom_value_fact_table_t* tables[] = {lhs, rhs};
   for (iree_host_size_t source = 0; source < IREE_ARRAYSIZE(tables); ++source) {
     const loom_value_fact_table_t* table = tables[source];
-    for (iree_host_size_t i = 0; i < table->touched_count; ++i) {
-      const loom_value_id_t value = table->touched_values[i];
+    loom_value_fact_scope_iterator_t iterator;
+    loom_value_fact_table_scope_begin(table, &iterator);
+    for (loom_value_id_t value = loom_value_fact_scope_next(&iterator);
+         value != LOOM_VALUE_ID_INVALID;
+         value = loom_value_fact_scope_next(&iterator)) {
       if (source != 0 && loom_value_fact_table_has_entry(lhs, value)) {
         continue;
       }
@@ -683,8 +686,11 @@ static iree_status_t loom_refine_boundaries_narrow_scalar_facts(
   // can form feedback even without recursion in the function call graph.
   // Numeric proofs survive semantic rewrites; reference identities instead
   // follow the current graph and are not retained across IR mutation here.
-  for (iree_host_size_t i = 0; i < next->touched_count; ++i) {
-    const loom_value_id_t value = next->touched_values[i];
+  loom_value_fact_scope_iterator_t iterator;
+  loom_value_fact_table_scope_begin(next, &iterator);
+  for (loom_value_id_t value = loom_value_fact_scope_next(&iterator);
+       value != LOOM_VALUE_ID_INVALID;
+       value = loom_value_fact_scope_next(&iterator)) {
     const loom_type_t type = loom_module_value_type(module, value);
     if (!loom_type_is_scalar(type)) {
       continue;

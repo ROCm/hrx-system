@@ -35,7 +35,7 @@ loom_op_t* ConditionalRegions::build(loom_value_id_t condition,
   check(loom_builder_define_results(&builder_, result_types.data(),
                                     result_types.size(), loom_op_results(op)));
   for (size_t arm = 0; arm < regions_.size(); ++arm) {
-    loom_op_regions(op)[arm] = regions_[arm];
+    loom_op_set_region(op, arm, regions_[arm]);
     loom_op_t* child;
     loom_block_for_each_op(loom_region_entry_block(regions_[arm]), child) {
       child->parent_op = op;

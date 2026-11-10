@@ -2220,10 +2220,43 @@ typedef struct loom_region_t {
   loom_block_t** blocks;
   // Inline block pointer table for the common single-block case.
   loom_block_t* inline_blocks[1];
+  // Operation whose trailing region table owns this region. NULL for the
+  // module body and detached regions that have not yet been attached.
+  loom_op_t* parent_op;
 } loom_region_t;
 
-static_assert(sizeof(loom_region_t) == (IREE_PTR_SIZE == 8 ? 144 : 112),
+static_assert(sizeof(loom_region_t) == (IREE_PTR_SIZE == 8 ? 152 : 116),
               "loom_region_t must retain its pointer-width layout");
+
+// Returns the operation that owns |region|, or NULL for the module body and
+// detached regions.
+static inline loom_op_t* loom_region_parent_op(const loom_region_t* region) {
+  return region ? region->parent_op : NULL;
+}
+
+// Attaches |region| at |region_index| and releases the previous region's owner
+// link when present. Attached regions have exactly one owning operation;
+// |region| must be detached before it is supplied here.
+static inline void loom_op_set_region(loom_op_t* op, uint8_t region_index,
+                                      loom_region_t* region) {
+  IREE_ASSERT(op != NULL);
+  IREE_ASSERT(region_index < op->region_count);
+  loom_region_t** regions = loom_op_regions(op);
+  loom_region_t* previous_region = regions[region_index];
+  if (previous_region == region) {
+    IREE_ASSERT(region == NULL || region->parent_op == op);
+    return;
+  }
+  IREE_ASSERT(previous_region == NULL || previous_region->parent_op == op);
+  IREE_ASSERT(region == NULL || region->parent_op == NULL);
+  if (previous_region) {
+    previous_region->parent_op = NULL;
+  }
+  regions[region_index] = region;
+  if (region) {
+    region->parent_op = op;
+  }
+}
 
 // Returns the retained union of write-like memory effects in this region.
 static inline loom_memory_space_mask_t loom_region_written_memory_spaces(

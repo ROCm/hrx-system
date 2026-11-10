@@ -39,7 +39,7 @@ static iree_status_t loom_local_value_domain_append_value_id(
   const iree_host_size_t minimum_capacity =
       (iree_host_size_t)domain->value_count + 1;
   if (minimum_capacity > domain->value_capacity) {
-    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array_block_fit(
         domain->arena, domain->value_count, minimum_capacity,
         sizeof(*domain->value_ids), &domain->value_capacity,
         (void**)&domain->value_ids));

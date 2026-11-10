@@ -132,6 +132,23 @@ TEST_F(UseListTest, InlineOverflowAndRemovalPreserveOwnership) {
   ExpectUses(source, 7, 0);
 }
 
+TEST_F(UseListTest, RebuildRestoresRegionOwnership) {
+  loom_op_t* condition_op = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(
+      &builder_, loom_attr_i64(1), loom_type_scalar(LOOM_SCALAR_TYPE_I1),
+      LOOM_LOCATION_UNKNOWN, &condition_op));
+  loom_op_t* owner = nullptr;
+  IREE_ASSERT_OK(loom_test_optional_region_build(
+      &builder_, /*build_flags=*/0, loom_test_constant_result(condition_op),
+      LOOM_LOCATION_UNKNOWN, &owner));
+  loom_region_t* body = loom_test_optional_region_body(owner);
+  ASSERT_EQ(loom_region_parent_op(body), owner);
+
+  body->parent_op = nullptr;
+  IREE_ASSERT_OK(loom_module_compute_uses(module_));
+  EXPECT_EQ(loom_region_parent_op(body), owner);
+}
+
 TEST_F(UseListTest, OperandReplacementCarriesClassification) {
   const loom_value_id_t source = Allocate();
   const loom_value_id_t replacement = Allocate();

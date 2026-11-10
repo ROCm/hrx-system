@@ -41,9 +41,12 @@ void loom_builder_set_block(loom_builder_t* builder, loom_block_t* block) {
 loom_builder_ip_t loom_builder_enter_region(loom_builder_t* builder,
                                             loom_op_t* parent_op,
                                             loom_region_t* region) {
+  IREE_ASSERT(region != NULL);
+  IREE_ASSERT(region->parent_op == NULL || parent_op == NULL ||
+              region->parent_op == parent_op);
   loom_builder_ip_t saved = builder->ip;
   builder->ip.block = loom_region_entry_block(region);
-  builder->ip.parent_op = parent_op;
+  builder->ip.parent_op = region->parent_op ? region->parent_op : parent_op;
   builder->ip.before_op = NULL;
   return saved;
 }
@@ -135,7 +138,7 @@ iree_status_t loom_builder_create_region(loom_builder_t* builder, loom_op_t* op,
   loom_region_t* region = NULL;
   IREE_RETURN_IF_ERROR(
       loom_module_allocate_region(builder->module, 1, &region));
-  loom_op_regions(op)[region_index] = region;
+  loom_op_set_region(op, region_index, region);
   if (out_entry_block) {
     *out_entry_block = loom_region_entry_block(region);
   }

@@ -135,11 +135,8 @@ typedef struct loom_value_fact_view_reference_t {
   // unknown beyond byte alignment.
   uint64_t root_minimum_alignment;
 
-  // Static addressed element byte count, or -1 for sub-byte/unknown elements.
-  int32_t static_element_byte_count;
-
-  // Target-independent memory space for the underlying storage root.
-  loom_value_fact_memory_space_t memory_space;
+  // Intrinsic storage origin relative to a projected function entry.
+  loom_value_fact_reference_origin_t origin;
 
   // SSA value that represents the root storage identity. INVALID means the
   // value carrying these facts is its own dynamic root with base offset zero.
@@ -153,12 +150,18 @@ typedef struct loom_value_fact_view_reference_t {
   // Comparable alias scope for disjointness proofs, or NONE.
   loom_value_fact_alias_scope_id_t alias_scope_id;
 
-  // Known nullability for the underlying storage root.
-  loom_value_fact_reference_nullability_t nullability;
+  // Static addressed element byte count, or -1 for sub-byte/unknown elements.
+  int16_t static_element_byte_count;
 
-  // Intrinsic storage origin relative to a projected function entry.
-  loom_value_fact_reference_origin_t origin;
+  // Target-independent memory space for the underlying storage root.
+  uint8_t memory_space;
+
+  // Known nullability for the underlying storage root.
+  uint8_t nullability;
 } loom_value_fact_view_reference_t;
+
+static_assert(sizeof(loom_value_fact_view_reference_t) == 104,
+              "view reference facts must remain compact");
 
 // Resolves the storage root of a view, including joins of distinct roots.
 static inline loom_value_id_t loom_value_fact_view_reference_resolve_root_value(

@@ -6,6 +6,8 @@
 
 #include "loom/util/fact_origin.h"
 
+#include <vector>
+
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -23,6 +25,20 @@
 
 namespace loom {
 namespace {
+
+static iree_status_t CloneScopeValues(loom_value_fact_table_t* target,
+                                      const loom_value_fact_table_t* source) {
+  std::vector<loom_value_id_t> values;
+  loom_value_fact_scope_iterator_t iterator;
+  loom_value_fact_table_scope_begin(source, &iterator);
+  for (loom_value_id_t value_id = loom_value_fact_scope_next(&iterator);
+       value_id != LOOM_VALUE_ID_INVALID;
+       value_id = loom_value_fact_scope_next(&iterator)) {
+    values.push_back(value_id);
+  }
+  return loom_value_fact_table_clone_values(
+      target, {source, values.data(), values.size()}, nullptr);
+}
 
 class FactOriginStorageTest : public ::testing::Test {
  protected:
@@ -102,11 +118,9 @@ TEST_F(FactOriginStorageTest, UniformElementOriginsClearOnlyTouchedEntries) {
 
   loom_value_fact_uniform_element_origin_t* const entries =
       table.uniform_element_origins.entries;
-  loom_value_id_t* const touched_values = table.touched_values;
   loom_value_fact_table_clear_scope(&table);
 
   EXPECT_EQ(table.uniform_element_origins.entries, entries);
-  EXPECT_EQ(table.touched_values, touched_values);
   EXPECT_EQ(table.touched_count, 0u);
   EXPECT_EQ(OriginEntry(table.uniform_element_origins, 5).scalar_value_id,
             LOOM_VALUE_ID_INVALID);
@@ -152,11 +166,9 @@ TEST_F(FactOriginStorageTest, UniformScaleOriginsClearOnlyTouchedEntries) {
 
   loom_value_fact_uniform_scale_origin_t* const entries =
       table.uniform_scale_origins.entries;
-  loom_value_id_t* const touched_values = table.touched_values;
   loom_value_fact_table_clear_scope(&table);
 
   EXPECT_EQ(table.uniform_scale_origins.entries, entries);
-  EXPECT_EQ(table.touched_values, touched_values);
   EXPECT_EQ(table.touched_count, 0u);
   EXPECT_EQ(OriginEntry(table.uniform_scale_origins, 5).source_value_id,
             LOOM_VALUE_ID_INVALID);
@@ -398,9 +410,7 @@ TEST_F(FactOriginStorageTest, CloneValuesCopiesUniformElementOrigins) {
   iree_arena_initialize(&block_pool_, &target_arena);
   loom_value_fact_table_t target = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&target, &target_arena, 8));
-  IREE_ASSERT_OK(loom_value_fact_table_clone_values(
-      &target, {&source, source.touched_values, source.touched_count},
-      nullptr));
+  IREE_ASSERT_OK(CloneScopeValues(&target, &source));
 
   EXPECT_TRUE(loom_value_facts_query_uniform_element(
       &target.context, loom_value_fact_table_lookup(&target, 7), nullptr));
@@ -411,9 +421,7 @@ TEST_F(FactOriginStorageTest, CloneValuesCopiesUniformElementOrigins) {
       OriginEntry(target.uniform_element_origins, 7).exact_scalar_value_id, 1u);
 
   loom_value_fact_table_clear_origins(&source, 7);
-  IREE_ASSERT_OK(loom_value_fact_table_clone_values(
-      &target, {&source, source.touched_values, source.touched_count},
-      nullptr));
+  IREE_ASSERT_OK(CloneScopeValues(&target, &source));
   EXPECT_EQ(OriginEntry(target.uniform_element_origins, 7).scalar_value_id,
             LOOM_VALUE_ID_INVALID);
 
@@ -435,9 +443,7 @@ TEST_F(FactOriginStorageTest, CloneValuesCopiesUniformScaleOrigins) {
   iree_arena_initialize(&block_pool_, &target_arena);
   loom_value_fact_table_t target = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&target, &target_arena, 8));
-  IREE_ASSERT_OK(loom_value_fact_table_clone_values(
-      &target, {&source, source.touched_values, source.touched_count},
-      nullptr));
+  IREE_ASSERT_OK(CloneScopeValues(&target, &source));
 
   ASSERT_TRUE(
       loom_value_fact_range_contains(target.uniform_scale_origins.range, 7));
@@ -445,9 +451,7 @@ TEST_F(FactOriginStorageTest, CloneValuesCopiesUniformScaleOrigins) {
   EXPECT_EQ(OriginEntry(target.uniform_scale_origins, 7).scale_value_id, 3u);
 
   loom_value_fact_table_clear_origins(&source, 7);
-  IREE_ASSERT_OK(loom_value_fact_table_clone_values(
-      &target, {&source, source.touched_values, source.touched_count},
-      nullptr));
+  IREE_ASSERT_OK(CloneScopeValues(&target, &source));
   EXPECT_EQ(OriginEntry(target.uniform_scale_origins, 7).source_value_id,
             LOOM_VALUE_ID_INVALID);
 
@@ -470,9 +474,7 @@ TEST_F(FactOriginStorageTest, CloneValuesCopiesExactLaneOrigins) {
   iree_arena_initialize(&block_pool_, &target_arena);
   loom_value_fact_table_t target = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&target, &target_arena, 8));
-  IREE_ASSERT_OK(loom_value_fact_table_clone_values(
-      &target, {&source, source.touched_values, source.touched_count},
-      nullptr));
+  IREE_ASSERT_OK(CloneScopeValues(&target, &source));
 
   EXPECT_EQ(target.exact_lane_origins.count, 1u);
   EXPECT_LT(target.exact_lane_origins.capacity, (iree_host_size_t)8);
@@ -493,9 +495,7 @@ TEST_F(FactOriginStorageTest, CloneValuesCopiesExactScalarOrigins) {
   iree_arena_initialize(&block_pool_, &target_arena);
   loom_value_fact_table_t target = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&target, &target_arena, 8));
-  IREE_ASSERT_OK(loom_value_fact_table_clone_values(
-      &target, {&source, source.touched_values, source.touched_count},
-      nullptr));
+  IREE_ASSERT_OK(CloneScopeValues(&target, &source));
 
   ASSERT_TRUE(
       loom_value_fact_range_contains(target.exact_scalar_origins.range, 7));
@@ -521,9 +521,7 @@ TEST_F(FactOriginStorageTest, CloneValuesCopiesContextualQueryOrigins) {
   iree_arena_initialize(&block_pool_, &target_arena);
   loom_value_fact_table_t target = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&target, &target_arena, 8));
-  IREE_ASSERT_OK(loom_value_fact_table_clone_values(
-      &target, {&source, source.touched_values, source.touched_count},
-      nullptr));
+  IREE_ASSERT_OK(CloneScopeValues(&target, &source));
 
   ASSERT_TRUE(
       loom_value_fact_range_contains(target.contextual_query_origins.range, 7));
@@ -537,14 +535,10 @@ TEST_F(FactOriginStorageTest, CloneValuesCopiesContextualQueryOrigins) {
   const auto bytes = target_arena.used_allocation_size;
   IREE_ASSERT_OK(loom_value_fact_table_define_contextual_query_origin(
       &source, 7, ContextualQueryOrigin(family_kind, loom_attr_i64(64))));
-  IREE_ASSERT_OK(loom_value_fact_table_clone_values(
-      &target, {&source, source.touched_values, source.touched_count},
-      nullptr));
+  IREE_ASSERT_OK(CloneScopeValues(&target, &source));
   EXPECT_EQ(loom_attr_as_i64(origin.key), 64);
   loom_value_fact_table_clear_origins(&source, 7);
-  IREE_ASSERT_OK(loom_value_fact_table_clone_values(
-      &target, {&source, source.touched_values, source.touched_count},
-      nullptr));
+  IREE_ASSERT_OK(CloneScopeValues(&target, &source));
   EXPECT_EQ(origin.family_kind, LOOM_PARAMETERIZED_ATTR_KIND_ANY);
   EXPECT_EQ(target.contextual_query_origins.touched_count, 1u);
   EXPECT_EQ(target_arena.used_allocation_size, bytes);

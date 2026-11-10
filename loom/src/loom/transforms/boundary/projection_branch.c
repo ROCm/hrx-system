@@ -283,8 +283,10 @@ static iree_status_t loom_boundary_projection_apply_branch(
            branch->result_count * sizeof(loom_value_id_t));
   }
   for (uint8_t region = 0; region < source->region_count; ++region) {
-    IREE_RETURN_IF_ERROR(loom_module_allocate_region(
-        plan->module, 1, &loom_op_regions(replacement)[region]));
+    loom_region_t* replacement_region = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_module_allocate_region(plan->module, 1, &replacement_region));
+    loom_op_set_region(replacement, region, replacement_region);
   }
   IREE_RETURN_IF_ERROR(loom_builder_finalize_op(builder, replacement));
   IREE_RETURN_IF_ERROR(loom_boundary_projection_branch_copy_comments(

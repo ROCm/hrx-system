@@ -306,6 +306,18 @@ iree_status_t iree_arena_grow_array(iree_arena_allocator_t* arena,
                                     iree_host_size_t* inout_capacity,
                                     void** inout_ptr);
 
+// Grows an array while using the largest whole-element capacity that fits in a
+// fixed arena block before crossing into oversized storage. This otherwise has
+// the same contract as iree_arena_grow_array. The returned capacity may not be
+// a power of two. Once the requested minimum exceeds the block capacity,
+// geometric growth resumes from the full-block capacity.
+iree_status_t iree_arena_grow_array_block_fit(iree_arena_allocator_t* arena,
+                                              iree_host_size_t existing_count,
+                                              iree_host_size_t minimum_capacity,
+                                              iree_host_size_t element_size,
+                                              iree_host_size_t* inout_capacity,
+                                              void** inout_ptr);
+
 // Returns an iree_allocator_t that allocates from the given |arena|.
 // Frees are ignored as arenas can only be reset as a whole.
 iree_allocator_t iree_arena_allocator(iree_arena_allocator_t* arena);

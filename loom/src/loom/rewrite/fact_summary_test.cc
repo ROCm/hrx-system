@@ -256,8 +256,11 @@ TEST_P(NestedSummaryTest, ResultDependencies) {
     loom_value_fact_table_t* fresh = nullptr;
     IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(&fresh_owner, module_,
                                                       scope, &fresh));
-    for (iree_host_size_t i = 0; i < fresh->touched_count; ++i) {
-      const auto value = fresh->touched_values[i];
+    loom_value_fact_scope_iterator_t iterator;
+    loom_value_fact_table_scope_begin(fresh, &iterator);
+    for (loom_value_id_t value = loom_value_fact_scope_next(&iterator);
+         value != LOOM_VALUE_ID_INVALID;
+         value = loom_value_fact_scope_next(&iterator)) {
       EXPECT_TRUE(loom_value_fact_table_facts_equal_for_type(
           module_, loom_module_value_type(module_, value), facts,
           loom_value_fact_table_lookup(facts, value), fresh,
@@ -363,8 +366,11 @@ TEST_P(SummaryChainTest, PublishesSemanticClosureOnce) {
     loom_value_fact_table_t* fresh = nullptr;
     IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(&fresh_owner, module_,
                                                       scope, &fresh));
-    for (iree_host_size_t i = 0; i < fresh->touched_count; ++i) {
-      const auto checked_value = fresh->touched_values[i];
+    loom_value_fact_scope_iterator_t iterator;
+    loom_value_fact_table_scope_begin(fresh, &iterator);
+    for (loom_value_id_t checked_value = loom_value_fact_scope_next(&iterator);
+         checked_value != LOOM_VALUE_ID_INVALID;
+         checked_value = loom_value_fact_scope_next(&iterator)) {
       EXPECT_TRUE(loom_value_fact_table_facts_equal_for_type(
           module_, loom_module_value_type(module_, checked_value), facts,
           loom_value_fact_table_lookup(facts, checked_value), fresh,

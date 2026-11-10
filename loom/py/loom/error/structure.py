@@ -1099,6 +1099,20 @@ ERR_STRUCTURE_066 = ErrorDef(
     ),
 )
 
+# ERR_STRUCTURE_067: Region owner does not match its containing operation.
+ERR_STRUCTURE_067 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=67,
+    severity=Severity.ERROR,
+    summary="Region owner does not match its containing operation.",
+    message="'{op_name}' region {region_index} records a different owner",
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("region_index", ParamKind.U32),
+    ),
+    fix_hint="Attach the region through its containing operation",
+)
+
 ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_001,
     ERR_STRUCTURE_002,
@@ -1164,4 +1178,5 @@ ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_064,
     ERR_STRUCTURE_065,
     ERR_STRUCTURE_066,
+    ERR_STRUCTURE_067,
 )

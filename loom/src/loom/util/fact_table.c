@@ -79,6 +79,7 @@ static iree_status_t loom_value_fact_table_allocate_segment(
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate(table->arena, sizeof(*segment), (void**)&segment));
   memset(segment, 0, sizeof(*segment));
+  segment->next_touched_segment_id = LOOM_VALUE_ID_INVALID;
   if (table->replay.generation) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         table->transient_arena, LOOM_VALUE_FACT_SEGMENT_CAPACITY,
@@ -194,18 +195,6 @@ static iree_status_t loom_value_fact_table_allocate_initial_capacity(
   return loom_value_fact_table_ensure_range(table, 0, capacity);
 }
 
-static iree_status_t loom_value_fact_table_append_touched_value(
-    loom_value_fact_table_t* table, loom_value_id_t value_id) {
-  if (table->touched_count >= table->touched_capacity) {
-    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        table->arena, table->touched_count, table->touched_count + 1,
-        sizeof(*table->touched_values), &table->touched_capacity,
-        (void**)&table->touched_values));
-  }
-  table->touched_values[table->touched_count++] = value_id;
-  return iree_ok_status();
-}
-
 //===----------------------------------------------------------------------===//
 // Scratch buffers
 //===----------------------------------------------------------------------===//
@@ -262,6 +251,7 @@ iree_status_t loom_value_fact_table_initialize_with_arenas(
   memset(table, 0, sizeof(*table));
   table->arena = arena;
   table->transient_arena = transient_arena;
+  table->first_touched_segment_id = LOOM_VALUE_ID_INVALID;
   table->context.table = table;
   return loom_value_fact_table_allocate_initial_capacity(table,
                                                          initial_capacity);
@@ -312,17 +302,24 @@ void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table) {
   table->condition_integer_projection_count = 0;
   table->result_type_kind_bits = 0;
   loom_value_fact_table_clear_identities(table);
-  for (iree_host_size_t i = 0; i < table->touched_count; ++i) {
-    loom_value_id_t value_id = table->touched_values[i];
-    const iree_host_size_t index = value_id - table->first_value_id;
+  loom_value_fact_table_clear_origin_scope(table);
+  loom_value_id_t segment_value_id = table->first_touched_segment_id;
+  while (segment_value_id != LOOM_VALUE_ID_INVALID) {
+    const iree_host_size_t index = segment_value_id - table->first_value_id;
     loom_value_fact_segment_t* segment =
         table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT];
-    segment->entries[index & LOOM_VALUE_FACT_SEGMENT_MASK] =
-        (loom_value_facts_t){0};
-    segment->touched_bits &=
-        ~(UINT64_C(1) << (index & LOOM_VALUE_FACT_SEGMENT_MASK));
+    uint64_t touched_bits = segment->touched_bits;
+    while (touched_bits) {
+      const uint32_t segment_offset =
+          iree_math_count_trailing_zeros_u64(touched_bits);
+      segment->entries[segment_offset] = (loom_value_facts_t){0};
+      touched_bits &= touched_bits - 1;
+    }
+    segment_value_id = segment->next_touched_segment_id;
+    segment->touched_bits = 0;
+    segment->next_touched_segment_id = LOOM_VALUE_ID_INVALID;
   }
-  loom_value_fact_table_clear_origin_scope(table);
+  table->first_touched_segment_id = LOOM_VALUE_ID_INVALID;
   table->touched_count = 0;
   table->replay.generation = 0;
   table->replay.loop = NULL;
@@ -832,11 +829,59 @@ iree_status_t loom_value_fact_table_touch(loom_value_fact_table_t* table,
   const uint64_t touched_bit = UINT64_C(1)
                                << (index & LOOM_VALUE_FACT_SEGMENT_MASK);
   if (!(segment->touched_bits & touched_bit)) {
-    IREE_RETURN_IF_ERROR(
-        loom_value_fact_table_append_touched_value(table, value_id));
+    if (!segment->touched_bits) {
+      segment->next_touched_segment_id = table->first_touched_segment_id;
+      table->first_touched_segment_id =
+          value_id & ~(loom_value_id_t)LOOM_VALUE_FACT_SEGMENT_MASK;
+    }
     segment->touched_bits |= touched_bit;
+    ++table->touched_count;
   }
   return iree_ok_status();
+}
+
+void loom_value_fact_table_scope_begin(
+    const loom_value_fact_table_t* table,
+    loom_value_fact_scope_iterator_t* out_iterator) {
+  *out_iterator = (loom_value_fact_scope_iterator_t){
+      .table = table,
+      .segment_value_id = LOOM_VALUE_ID_INVALID,
+  };
+  if (!table || table->touched_count == 0) {
+    return;
+  }
+  const loom_value_id_t segment_value_id = table->first_touched_segment_id;
+  const iree_host_size_t index = segment_value_id - table->first_value_id;
+  out_iterator->segment_value_id = segment_value_id;
+  out_iterator->remaining_bits =
+      table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT]->touched_bits;
+}
+
+loom_value_id_t loom_value_fact_scope_next(
+    loom_value_fact_scope_iterator_t* iterator) {
+  while (iterator->segment_value_id != LOOM_VALUE_ID_INVALID) {
+    if (iterator->remaining_bits) {
+      const loom_value_id_t value_id =
+          iterator->segment_value_id +
+          iree_math_count_trailing_zeros_u64(iterator->remaining_bits);
+      iterator->remaining_bits &= iterator->remaining_bits - 1;
+      return value_id;
+    }
+    const loom_value_fact_table_t* table = iterator->table;
+    const iree_host_size_t index =
+        iterator->segment_value_id - table->first_value_id;
+    const loom_value_fact_segment_t* segment =
+        table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT];
+    iterator->segment_value_id = segment->next_touched_segment_id;
+    if (iterator->segment_value_id != LOOM_VALUE_ID_INVALID) {
+      const iree_host_size_t next_index =
+          iterator->segment_value_id - table->first_value_id;
+      iterator->remaining_bits =
+          table->segments[next_index >> LOOM_VALUE_FACT_SEGMENT_SHIFT]
+              ->touched_bits;
+    }
+  }
+  return LOOM_VALUE_ID_INVALID;
 }
 
 iree_status_t loom_value_fact_table_enable_replay_generations(
@@ -1032,18 +1077,6 @@ static iree_status_t loom_value_fact_table_record_exact_relation(
   }
   table->exact_relations.ops[table->exact_relations.count++] = (loom_op_t*)op;
   return iree_ok_status();
-}
-
-void loom_value_fact_table_scope_values(const loom_value_fact_table_t* table,
-                                        const loom_value_id_t** out_value_ids,
-                                        iree_host_size_t* out_value_count) {
-  if (table == NULL) {
-    *out_value_ids = NULL;
-    *out_value_count = 0;
-    return;
-  }
-  *out_value_ids = table->touched_values;
-  *out_value_count = table->touched_count;
 }
 
 iree_status_t loom_value_fact_table_clone_values(

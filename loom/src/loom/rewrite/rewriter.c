@@ -1140,13 +1140,7 @@ static bool loom_rewriter_parent_owns_block(const loom_module_t* module,
   if (!loom_rewriter_op_belongs_to_module(module, parent_op)) {
     return false;
   }
-  loom_region_t* const* regions = loom_op_regions(parent_op);
-  for (uint8_t i = 0; i < parent_op->region_count; ++i) {
-    if (regions[i] == block->parent_region) {
-      return true;
-    }
-  }
-  return false;
+  return loom_region_parent_op(block->parent_region) == parent_op;
 }
 
 iree_status_t loom_rewriter_move_region_blocks(

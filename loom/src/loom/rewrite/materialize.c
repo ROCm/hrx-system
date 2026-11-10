@@ -509,17 +509,8 @@ static iree_status_t loom_ir_clone_op_impl(
         (iree_host_size_t)source_op->successor_count * sizeof(loom_block_t*));
   }
   if (source_op->region_count > 0) {
-    memcpy(loom_op_regions(target_op), target_regions,
-           (iree_host_size_t)source_op->region_count * sizeof(loom_region_t*));
     for (uint8_t i = 0; i < source_op->region_count; ++i) {
-      if (!target_regions[i]) {
-        continue;
-      }
-      for (uint16_t block_index = 0;
-           block_index < target_regions[i]->block_count; ++block_index) {
-        target_regions[i]->blocks[block_index]->parent_region =
-            target_regions[i];
-      }
+      loom_op_set_region(target_op, i, target_regions[i]);
     }
   }
   if (source_op->result_count > 0) {

@@ -1087,14 +1087,15 @@ static iree_status_t loom_low_lower_emit_descriptor_matrix_plan(
 
 static const loom_op_t* loom_low_lower_selected_plan_emission_op(
     const loom_low_lower_selected_plan_t* selected_plan) {
-  if (selected_plan->emission_source_node_index == 0) {
+  if (selected_plan->selection.rule.emission_source_node_index == 0) {
     return selected_plan->source_op;
   }
-  IREE_ASSERT(selected_plan->data.source_nodes != NULL);
-  IREE_ASSERT_LT(selected_plan->emission_source_node_index,
-                 selected_plan->source_node_count);
-  return selected_plan->data
-      .source_nodes[selected_plan->emission_source_node_index];
+  const loom_op_t* const* source_nodes =
+      loom_low_lower_selected_plan_source_nodes(selected_plan);
+  IREE_ASSERT(source_nodes != NULL);
+  IREE_ASSERT_LT(selected_plan->selection.rule.emission_source_node_index,
+                 selected_plan->selection.rule.source_node_count);
+  return source_nodes[selected_plan->selection.rule.emission_source_node_index];
 }
 
 static iree_status_t loom_low_lower_emit_selected_plan(
@@ -1119,21 +1120,27 @@ static iree_status_t loom_low_lower_emit_selected_plan(
       !iree_allocator_is_null(context->options->report_allocator);
   const uint64_t before_op_count = context->report.emitted_op_count;
   if (selected_plan.kind == LOOM_LOW_LOWER_SELECTED_PLAN_RULE) {
-    IREE_ASSERT(selected_plan.rule_set != NULL);
-    IREE_ASSERT(selected_plan.rule != NULL);
+    const loom_low_lower_rule_set_t* rule_set =
+        loom_low_lower_selected_plan_rule_set(&selected_plan);
+    const loom_low_lower_rule_t* rule =
+        loom_low_lower_selected_plan_rule(&selected_plan);
+    IREE_ASSERT(rule_set != NULL);
+    IREE_ASSERT(rule != NULL);
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_set_emit_rule(
-        context, selected_plan.rule_set, selected_plan.source_op,
-        selected_plan.rule, selected_plan.resolved_emits,
-        selected_plan.source_memory, selected_plan.data.source_nodes,
-        selected_plan.source_node_count));
+        context, rule_set, selected_plan.source_op, rule,
+        selected_plan.data.rule.resolved_emits,
+        loom_low_lower_selected_plan_source_memory(&selected_plan),
+        loom_low_lower_selected_plan_source_nodes(&selected_plan),
+        selected_plan.selection.rule.source_node_count));
   } else if (selected_plan.kind ==
              LOOM_LOW_LOWER_SELECTED_PLAN_DESCRIPTOR_MATRIX) {
-    IREE_ASSERT_FALSE(
-        loom_low_lower_plan_is_empty(selected_plan.data.target_plan));
+    const loom_low_lower_plan_t target_plan =
+        loom_low_lower_selected_plan_target(&selected_plan);
+    IREE_ASSERT_FALSE(loom_low_lower_plan_is_empty(target_plan));
     IREE_RETURN_IF_ERROR(loom_low_lower_emit_descriptor_matrix_plan(
         context, selected_plan.source_op,
         (const loom_low_lower_descriptor_matrix_plan_t*)
-            selected_plan.data.target_plan.target_data));
+            target_plan.target_data));
   } else if (selected_plan.kind ==
              LOOM_LOW_LOWER_SELECTED_PLAN_FUNCTION_STORAGE) {
     IREE_RETURN_IF_ERROR(loom_low_lower_function_storage_emit(
@@ -1154,12 +1161,13 @@ static iree_status_t loom_low_lower_emit_selected_plan(
         context, selected_plan.source_op, &handled));
     IREE_ASSERT(handled);
   } else {
-    IREE_ASSERT_FALSE(
-        loom_low_lower_plan_is_empty(selected_plan.data.target_plan));
+    const loom_low_lower_plan_t target_plan =
+        loom_low_lower_selected_plan_target(&selected_plan);
+    IREE_ASSERT_FALSE(loom_low_lower_plan_is_empty(target_plan));
     IREE_ASSERT(context->policy->emit_op.fn != NULL);
-    IREE_RETURN_IF_ERROR(context->policy->emit_op.fn(
-        context->policy->emit_op.user_data, context, selected_plan.source_op,
-        selected_plan.data.target_plan));
+    IREE_RETURN_IF_ERROR(
+        context->policy->emit_op.fn(context->policy->emit_op.user_data, context,
+                                    selected_plan.source_op, target_plan));
   }
   if (report_allocator_provided) {
     const uint64_t emitted_op_count =
