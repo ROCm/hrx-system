@@ -18,6 +18,7 @@
 #include "iree/hal/utils/resource_set.h"
 #include "iree_hal_compat.h"
 #include "mem_pool_backing.h"
+#include "queue.h"
 #include "runtime.h"
 
 #ifdef __cplusplus
@@ -243,6 +244,8 @@ typedef struct hrx_device_s {
   hrx_accelerator_type_t type;
   int ordinal;
   iree_hal_device_t* hal_device;
+  // Device-owned HRX handles in family-major provisioned queue order.
+  hrx_queue_s* queues;
   // Provisioned queue used for direct host and device transfers. Borrowed from
   // |hal_device|, which must outlive every use.
   iree_hal_queue_t* transfer_queue;

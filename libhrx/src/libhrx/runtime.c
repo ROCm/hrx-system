@@ -888,6 +888,16 @@ hrx_status_t hrx_cpu_initialize(uint32_t flags) {
   snprintf(dev->name, sizeof(dev->name), "CPU 0 (task)");
   snprintf(dev->architecture, sizeof(dev->architecture), "host");
 
+  iree_status = hrx_device_initialize_queues(dev);
+  if (!iree_status_is_ok(iree_status)) {
+    hrx_buffer_table_deinitialize(&dev->buffer_table);
+    iree_arena_block_pool_deinitialize(&dev->block_pool);
+    hrx_device_release(dev);
+    iree_hal_driver_release(driver);
+    hrx_release_shared_state();
+    return hrx_status_from_iree(iree_status);
+  }
+
   g_cpu.driver = driver;
   g_cpu.device_count = 1;
   g_cpu.initialized = true;
@@ -1145,7 +1155,10 @@ hrx_status_t hrx_gpu_initialize_with_options(
     memcpy(dev->name, device_infos[device_index].name.data, name_len);
     dev->name[name_len] = '\0';
 
-    iree_status = hrx_set_gpu_architecture_from_hal(dev);
+    iree_status = hrx_device_initialize_queues(dev);
+    if (iree_status_is_ok(iree_status)) {
+      iree_status = hrx_set_gpu_architecture_from_hal(dev);
+    }
     if (iree_status_is_ok(iree_status)) {
       iree_status = hrx_device_profile_begin(dev, profile_sink);
       hrx_debug_print_iree_status("begin device profiling", iree_status);

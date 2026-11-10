@@ -151,6 +151,7 @@ HRX_API void hrx_host_allocator_free_aligned(hrx_host_allocator_t allocator,
 //===----------------------------------------------------------------------===//
 
 typedef struct hrx_device_s* hrx_device_t;
+typedef struct hrx_queue_s* hrx_queue_t;
 typedef struct hrx_allocator_s* hrx_allocator_t;
 typedef struct hrx_semaphore_s* hrx_semaphore_t;
 typedef struct hrx_stream_s* hrx_stream_t;
@@ -529,6 +530,140 @@ HRX_API hrx_status_t hrx_device_get_type(hrx_device_t device,
 
 HRX_API void hrx_device_retain(hrx_device_t device);
 HRX_API void hrx_device_release(hrx_device_t device);
+
+//===----------------------------------------------------------------------===//
+// Exact queues
+//
+// A queue identifies one execution queue within a device, not a selection mask
+// or a virtual stream. Queue references do not retain their parent device.
+// Release acquired/retained queue references before releasing the device or
+// shutting down its accelerator. Completion is established with semaphores;
+// releasing a queue is not a submission wait.
+//===----------------------------------------------------------------------===//
+
+typedef uint32_t hrx_queue_role_flags_t;
+#define HRX_QUEUE_ROLE_DISPATCH (1u << 0)
+#define HRX_QUEUE_ROLE_TRANSFER (1u << 1)
+#define HRX_QUEUE_ROLE_HOST_CALL (1u << 2)
+#define HRX_QUEUE_ROLE_PROFILING (1u << 4)
+#define HRX_QUEUE_ROLE_ATOMIC (1u << 5)
+
+typedef enum hrx_queue_placement_t {
+  // Implementation-selected command storage, with no required locality.
+  HRX_QUEUE_PLACEMENT_DEFAULT = 0,
+  // Command storage local to the host.
+  HRX_QUEUE_PLACEMENT_HOST_LOCAL = 1,
+  // Command storage local to the execution device.
+  HRX_QUEUE_PLACEMENT_DEVICE_LOCAL = 2,
+} hrx_queue_placement_t;
+
+typedef uint32_t hrx_queue_placement_capabilities_t;
+#define HRX_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL \
+  (1u << HRX_QUEUE_PLACEMENT_HOST_LOCAL)
+#define HRX_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL \
+  (1u << HRX_QUEUE_PLACEMENT_DEVICE_LOCAL)
+
+typedef uint64_t hrx_queue_feature_flags_t;
+#define HRX_QUEUE_FEATURE_NONE UINT64_C(0)
+#define HRX_QUEUE_FEATURE_COOPERATIVE_DISPATCH (UINT64_C(1) << 0)
+
+typedef struct hrx_queue_execution_resource_list_t {
+  // Number of ordinals. Zero selects all resources in the family.
+  size_t count;
+  // Sorted, unique family-local resource ordinals; borrowed during acquisition.
+  const uint32_t* ordinals;
+} hrx_queue_execution_resource_list_t;
+
+// Exact immutable queue properties. Zero initialization requests normal
+// priority, implementation-selected placement, no features, and all resources.
+// Placement affects queue command storage, not buffers or executables. An
+// unsupported explicit request fails; acquisition never silently changes it.
+typedef struct hrx_queue_params_t {
+  // Exact scheduling priority; zero is normal, larger values are higher.
+  int32_t priority;
+  // Required command-storage locality, or DEFAULT for implementation policy.
+  hrx_queue_placement_t placement;
+  // Required specialized execution features.
+  hrx_queue_feature_flags_t features;
+  // Exact execution-resource selection. Storage is captured during acquisition.
+  hrx_queue_execution_resource_list_t execution_resources;
+} hrx_queue_params_t;
+
+typedef struct hrx_queue_family_info_t {
+  // Number of device-owned queues available through hrx_device_get_queue.
+  uint32_t provisioned_queue_count;
+  // Whether this family permits acquiring additional distinct queues.
+  bool supports_acquisition;
+  // Operations supported by queues in this family.
+  hrx_queue_role_flags_t roles;
+  // Supported explicit command-storage localities. DEFAULT is always valid.
+  hrx_queue_placement_capabilities_t placements;
+  // Specialized execution features available during acquisition.
+  hrx_queue_feature_flags_t features;
+  // Number of entries in priorities.
+  size_t priority_count;
+  // Sorted accepted priorities, borrowed for the device lifetime.
+  const int32_t* priorities;
+  // Number of family-local raw execution units.
+  uint32_t execution_unit_count;
+  // Number of independently selectable resources, addressed by ordinal.
+  size_t execution_resource_count;
+  // Number of resource constraint groups, addressed by ordinal.
+  size_t execution_resource_group_count;
+} hrx_queue_family_info_t;
+
+typedef struct hrx_queue_execution_resource_info_t {
+  // Constraint group containing this resource.
+  uint32_t group_ordinal;
+  // First family-local raw execution unit covered by this resource.
+  uint32_t first_execution_unit_ordinal;
+  // Number of raw execution units covered by this resource.
+  uint32_t execution_unit_count;
+} hrx_queue_execution_resource_info_t;
+
+typedef struct hrx_queue_execution_resource_group_info_t {
+  // Minimum number selected from this group in any nonempty resource list.
+  uint32_t minimum_selected_resource_count;
+} hrx_queue_execution_resource_group_info_t;
+
+// Returns the immutable family count, or zero for NULL. Family and provisioned
+// queue ordinals are stable for the lifetime of the device.
+HRX_API size_t hrx_device_queue_family_count(hrx_device_t device);
+HRX_API hrx_status_t
+hrx_device_query_queue_family(hrx_device_t device, uint32_t family_ordinal,
+                              hrx_queue_family_info_t* out_info);
+HRX_API hrx_status_t hrx_device_query_queue_execution_resource(
+    hrx_device_t device, uint32_t family_ordinal, uint32_t resource_ordinal,
+    hrx_queue_execution_resource_info_t* out_info);
+HRX_API hrx_status_t hrx_device_query_queue_execution_resource_group(
+    hrx_device_t device, uint32_t family_ordinal, uint32_t group_ordinal,
+    hrx_queue_execution_resource_group_info_t* out_info);
+
+// Returns a borrowed provisioned queue, or NULL for invalid coordinates. The
+// device owns this reference; retain it before passing it to an owning handle.
+// Dynamically acquired queues are not added to the provisioned inventory.
+HRX_API hrx_queue_t hrx_device_get_queue(hrx_device_t device,
+                                         uint32_t family_ordinal,
+                                         uint32_t queue_ordinal);
+
+// Acquires one distinct queue with exactly the requested properties. NULL
+// params is equivalent to zero initialization. There is no implicit sharing
+// when native resources are exhausted. Release the returned owning reference.
+HRX_API hrx_status_t hrx_queue_acquire(hrx_device_t device,
+                                       uint32_t family_ordinal,
+                                       const hrx_queue_params_t* params,
+                                       hrx_queue_t* out_queue);
+HRX_API void hrx_queue_retain(hrx_queue_t queue);
+HRX_API void hrx_queue_release(hrx_queue_t queue);
+
+// Returns the borrowed parent device, or NULL for NULL.
+HRX_API hrx_device_t hrx_queue_get_device(hrx_queue_t queue);
+// Returns the family ordinal, or UINT32_MAX for NULL.
+HRX_API uint32_t hrx_queue_get_family_ordinal(hrx_queue_t queue);
+// Returns achieved properties. Resource ordinals are borrowed from the queue
+// and remain valid while the caller holds a queue reference and its device.
+HRX_API hrx_status_t hrx_queue_query_params(hrx_queue_t queue,
+                                            hrx_queue_params_t* out_params);
 
 //===----------------------------------------------------------------------===//
 // Allocator

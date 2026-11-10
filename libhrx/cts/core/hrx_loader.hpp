@@ -80,6 +80,21 @@ class HrxLoader {
   decltype(&hrx_device_retain) device_retain;
   decltype(&hrx_device_release) device_release;
 
+  // Exact queues.
+  decltype(&hrx_device_queue_family_count) device_queue_family_count;
+  decltype(&hrx_device_query_queue_family) device_query_queue_family;
+  decltype(&hrx_device_query_queue_execution_resource)
+      device_query_queue_execution_resource;
+  decltype(&hrx_device_query_queue_execution_resource_group)
+      device_query_queue_execution_resource_group;
+  decltype(&hrx_device_get_queue) device_get_queue;
+  decltype(&hrx_queue_acquire) queue_acquire;
+  decltype(&hrx_queue_retain) queue_retain;
+  decltype(&hrx_queue_release) queue_release;
+  decltype(&hrx_queue_get_device) queue_get_device;
+  decltype(&hrx_queue_get_family_ordinal) queue_get_family_ordinal;
+  decltype(&hrx_queue_query_params) queue_query_params;
+
   // Semaphores.
   decltype(&hrx_semaphore_create) semaphore_create;
   decltype(&hrx_semaphore_retain) semaphore_retain;
