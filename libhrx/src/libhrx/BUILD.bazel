@@ -34,6 +34,7 @@ HRX_SRCS = [
     "host_allocator.c",
     "mem_pool.c",
     "mem_pool_backing.c",
+    "memory_transition.c",
     "queue.c",
     "queue_ops.c",
     "runtime.c",
@@ -195,6 +196,16 @@ hrx_cc_test(
         ":hrx_static",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "memory_transition_test",
+    srcs = ["memory_transition_test.cc"],
+    deps = [
+        ":hrx_static",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

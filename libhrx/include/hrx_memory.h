@@ -100,6 +100,15 @@ typedef struct hrx_memory_scope_t {
   uint32_t id;
 } hrx_memory_scope_t;
 
+// Selects all admitted sites in the exact scope's sealed group. Transition
+// queries retain this namespace; a zero-initialized token is not a wildcard
+// in an arbitrary group.
+static inline hrx_memory_scope_t hrx_memory_scope_any(
+    hrx_memory_scope_t scope) {
+  scope.id = 0;
+  return scope;
+}
+
 // Resolves the public host scope in the device's sealed group for reuse in
 // memory queries and mapping descriptors. No queue is required.
 HRX_API hrx_status_t hrx_device_query_host_memory_scope(
@@ -693,6 +702,132 @@ typedef struct hrx_memory_mapping_t {
   // Byte offset within previous_source; zero when previous_source is NULL.
   size_t previous_source_offset;
 } hrx_memory_mapping_t;
+
+//===----------------------------------------------------------------------===//
+// Prepared visibility transitions
+//===----------------------------------------------------------------------===//
+
+// Qualified visibility actions from a pool or buffer contract. Callers combine
+// returned values at one local execution boundary; they do not manufacture
+// bits. An empty action needs no extra cache work, but still requires execution
+// dependencies and the access policy of the selected queue/program.
+typedef struct hrx_memory_effects_t {
+  // Opaque combinable action and qualification bits.
+  uint32_t bits;
+} hrx_memory_effects_t;
+
+static inline hrx_memory_effects_t hrx_memory_effects_combine(
+    hrx_memory_effects_t lhs, hrx_memory_effects_t rhs) {
+  hrx_memory_effects_t result = {lhs.bits | rhs.bits};
+  return result;
+}
+
+static inline bool hrx_memory_effects_is_supported(
+    hrx_memory_effects_t effects) {
+  return (effects.bits & (UINT32_C(1) << 31)) == 0;
+}
+
+static inline bool hrx_memory_effects_is_empty(hrx_memory_effects_t effects) {
+  return effects.bits == 0;
+}
+
+// True when corresponding buffer ranges and their prepared recipes must be
+// supplied to the barrier. Combining effects preserves this requirement.
+static inline bool hrx_memory_effects_requires_resources(
+    hrx_memory_effects_t effects) {
+  return (effects.bits & UINT32_C(0x3C)) != 0;
+}
+
+// Program actions must be emitted inside an executable, not a queue barrier.
+static inline bool hrx_memory_effects_requires_program(
+    hrx_memory_effects_t effects) {
+  return (effects.bits & (UINT32_C(1) << 29)) != 0;
+}
+
+typedef struct hrx_memory_transition_t {
+  // Producer-local action before signaling its dependency.
+  hrx_memory_effects_t release;
+  // Consumer-local action after waiting and before reading payload.
+  hrx_memory_effects_t acquire;
+} hrx_memory_transition_t;
+
+typedef enum hrx_memory_transition_action_t {
+  HRX_MEMORY_TRANSITION_RELEASE = 0,
+  HRX_MEMORY_TRANSITION_ACQUIRE = 1,
+} hrx_memory_transition_action_t;
+
+// Borrowed immutable pool/buffer contract. Its owner must outlive every query
+// and borrowed recipe. No descriptor or table allocation occurs at query time.
+typedef struct hrx_memory_transition_table_t {
+  // Native contract identity used only by preparation and recipe lookup.
+  const void* contract;
+  // Captured packed cells for inline queries; never modified by callers.
+  const uint64_t* cells;
+} hrx_memory_transition_table_t;
+
+// Trusted flattened key reusable across contracts in the same sealed group.
+// Each table reports its own qualification, even when sharing a prepared key.
+typedef struct hrx_memory_transition_pair_t {
+  // Opaque index prepared from a producer, consumer, and local action.
+  uint32_t cell_index;
+} hrx_memory_transition_pair_t;
+
+HRX_API hrx_memory_transition_table_t
+hrx_mem_pool_transition_table(hrx_mem_pool_t pool);
+HRX_API hrx_memory_transition_table_t
+hrx_buffer_transition_table(hrx_buffer_t buffer);
+
+// Validates namespaces, admitted write/read roles, and the local action once.
+// ANY->B permits ACQUIRE; A->ANY permits RELEASE; ANY->ANY is invalid.
+// An unqualified native relation is an unsupported effect value, not an error.
+// An empty table from unscoped storage cannot prepare a pair.
+HRX_API hrx_status_t hrx_memory_transition_prepare_pair(
+    hrx_memory_transition_table_t table, hrx_memory_scope_t producer,
+    hrx_memory_scope_t consumer, hrx_memory_transition_action_t action,
+    hrx_memory_transition_pair_t* out_pair);
+
+// One indexed eight-byte load with no driver call, status, or topology walk.
+// The key must have been prepared for this table's sealed group.
+static inline hrx_memory_transition_t hrx_memory_transition_query(
+    hrx_memory_transition_table_t table, hrx_memory_transition_pair_t pair) {
+  const uint64_t cell = table.cells[pair.cell_index];
+  hrx_memory_transition_t result = {{(uint32_t)cell}, {(uint32_t)(cell >> 32)}};
+  return result;
+}
+
+// Borrowed resource actions captured by the table's owner. This is not a
+// resource handle and has no retain/release; barriers capture its native
+// actions.
+typedef struct hrx_memory_transition_recipe_s hrx_memory_transition_recipe_t;
+
+// Fixed-index lookup for one prepared local action. NULL means no resource
+// recipe: the queried effects distinguish global/no-op from unsupported.
+// The action must match a valid side of the prepared pair.
+HRX_API const hrx_memory_transition_recipe_t* hrx_memory_transition_recipe(
+    hrx_memory_transition_table_t table, hrx_memory_transition_pair_t pair,
+    hrx_memory_transition_action_t action);
+
+typedef struct hrx_buffer_mapping_transition_t {
+  // Buffer with an active mapping created by hrx_buffer_map; borrowed.
+  hrx_buffer_t buffer;
+  // First byte relative to that mapping, not to the whole buffer.
+  size_t offset;
+  // Requested byte length within the mapping.
+  size_t length;
+  // Prepared host action borrowed from the retained pool/buffer contract.
+  const hrx_memory_transition_recipe_t* recipe;
+} hrx_buffer_mapping_transition_t;
+
+// Executes explicit host maintenance on existing mappings on the calling
+// thread. It does not wait for a device, create a mapping, or retain resources.
+// Callers establish execution dependencies and own every covered cache line,
+// including bytes outside the logical range when native granularity requires
+// them. Validation precedes execution. A later native failure may follow
+// earlier successful actions; only success permits publishing the next
+// dependency.
+HRX_API hrx_status_t hrx_buffer_mapping_memory_barrier(
+    hrx_memory_effects_t effects, size_t mapping_count,
+    const hrx_buffer_mapping_transition_t* mappings);
 
 #ifdef __cplusplus
 }

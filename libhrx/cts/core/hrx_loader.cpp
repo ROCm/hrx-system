@@ -144,6 +144,11 @@ void HrxLoader::load(const std::string& path) {
   LOAD(buffer_query_atomic_operations);
   LOAD(buffer_query_zero_compute_atomic_operations);
   LOAD(mem_pool_query_stats);
+  LOAD(mem_pool_transition_table);
+  LOAD(buffer_transition_table);
+  LOAD(memory_transition_prepare_pair);
+  LOAD(memory_transition_recipe);
+  LOAD(buffer_mapping_memory_barrier);
   LOAD(device_group_topology_node_count);
   LOAD(device_group_query_topology_node);
   LOAD(queue_alloca);

@@ -155,6 +155,20 @@ TEST_CASE("Explicit CPU GPU pools share backing across queue timelines",
       cpu, families[0].family_ordinal, HRX_MEMORY_SITE_PROGRAM, &cpu_scope));
   REQUIRE_OK(hrx().device_query_queue_family_memory_scope(
       gpu, program_family, HRX_MEMORY_SITE_PROGRAM, &gpu_scope));
+  hrx_memory_scope_t host_scope, gpu_queue_scope;
+  REQUIRE_OK(hrx().device_query_host_memory_scope(cpu, &host_scope));
+  REQUIRE_OK(hrx().device_query_queue_family_memory_scope(
+      gpu, families[1].family_ordinal, HRX_MEMORY_SITE_QUEUE,
+      &gpu_queue_scope));
+  const auto transition_table =
+      hrx().mem_pool_transition_table(resources.pools[0]);
+  hrx_memory_transition_pair_t upload_pair, download_pair;
+  REQUIRE_OK(hrx().memory_transition_prepare_pair(
+      transition_table, host_scope, gpu_queue_scope,
+      HRX_MEMORY_TRANSITION_RELEASE, &upload_pair));
+  REQUIRE_OK(hrx().memory_transition_prepare_pair(
+      transition_table, gpu_queue_scope, host_scope,
+      HRX_MEMORY_TRANSITION_ACQUIRE, &download_pair));
   hrx().device_group_release(resources.group);
   resources.group = nullptr;
   hrx().runtime_release(resources.runtime);
@@ -242,11 +256,57 @@ TEST_CASE("Explicit CPU GPU pools share backing across queue timelines",
                                    0x01010101u)));
     }
     REQUIRE_OK(hrx().buffer_unmap(buffers[2]));
+    // Keep both mappings active across the GPU copy. Explicit maintenance,
+    // rather than unmap/remap side effects, publishes and acquires these bytes.
+    const auto table = hrx().buffer_transition_table(buffers[0]);
+    const auto upload = hrx_memory_transition_query(table, upload_pair);
+    const auto download = hrx_memory_transition_query(table, download_pair);
+    REQUIRE(hrx_memory_effects_is_supported(upload.release));
+    REQUIRE(hrx_memory_effects_is_supported(download.acquire));
+    void* input = nullptr;
+    REQUIRE_OK(hrx().buffer_map(buffers[0], HRX_MAP_WRITE | HRX_MAP_MAY_ALIAS,
+                                64, 256, &input));
+    REQUIRE_OK(hrx().buffer_map(buffers[2], HRX_MAP_READ | HRX_MAP_MAY_ALIAS,
+                                128, 256, &output));
+    const uint32_t host_pattern =
+        0x76543210u + static_cast<uint32_t>(generation);
+    for (size_t i = 0; i < 256 / sizeof(uint32_t); ++i) {
+      static_cast<uint32_t*>(input)[i] = host_pattern;
+    }
+    const hrx_buffer_mapping_transition_t upload_mapping = {
+        .buffer = buffers[0],
+        .length = 256,
+        .recipe = hrx().memory_transition_recipe(table, upload_pair,
+                                                 HRX_MEMORY_TRANSITION_RELEASE),
+    };
+    REQUIRE_OK(hrx().buffer_mapping_memory_barrier(
+        upload.release, upload_mapping.recipe ? 1 : 0, &upload_mapping));
+    uint64_t uploaded = resources.tails[1] + 1;
+    const hrx_semaphore_list_t upload_signal = {&resources.semaphores[1],
+                                                &uploaded, 1};
+    REQUIRE_OK(hrx().queue_copy(gpu_queue, &cpu_signal, &upload_signal,
+                                buffers[0], 64, buffers[2], 128, 256));
+    resources.tails[1] = uploaded;
+    REQUIRE_OK(
+        hrx().semaphore_wait(resources.semaphores[1], uploaded, UINT64_MAX));
+    const hrx_buffer_mapping_transition_t download_mapping = {
+        .buffer = buffers[2],
+        .length = 256,
+        .recipe = hrx().memory_transition_recipe(table, download_pair,
+                                                 HRX_MEMORY_TRANSITION_ACQUIRE),
+    };
+    REQUIRE_OK(hrx().buffer_mapping_memory_barrier(
+        download.acquire, download_mapping.recipe ? 1 : 0, &download_mapping));
+    for (size_t i = 0; i < 256 / sizeof(uint32_t); ++i) {
+      CHECK(static_cast<const uint32_t*>(output)[i] == host_pattern);
+    }
+    REQUIRE_OK(hrx().buffer_unmap(buffers[2]));
+    REQUIRE_OK(hrx().buffer_unmap(buffers[0]));
     uint64_t released = consumed + 1;
     const hrx_semaphore_list_t release_signal = {&resources.semaphores[0],
                                                  &released, 1};
-    REQUIRE_OK(hrx().queue_dealloca(cpu_queue, &cpu_signal, &release_signal, 3,
-                                    buffers));
+    REQUIRE_OK(hrx().queue_dealloca(cpu_queue, &upload_signal, &release_signal,
+                                    3, buffers));
     resources.tails[0] = released;
     // The next sibling allocation consumes this frontier without a host join.
   }

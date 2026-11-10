@@ -12,6 +12,7 @@ the AMD GPU targets enabled in the build and selected against the actual device.
 | Runtime and devices | `lifecycle`, `status`, `device`, `group` | Explicit runtime/group ownership, passive discovery, shared CPU/GPU pools, device properties, and synchronization |
 | Heterogeneous execution | `heterogeneous` | Shared CPU/GPU/NPU storage, NPU arithmetic, cross-device queue dependencies, deferred allocation, backing reuse, and trim |
 | Allocation and ownership | `allocator`, `host_allocator`, `memory`, `refcount` | Borrowed allocators, host imports, stream-ordered allocation, mapping, and retain/release |
+| Prepared transitions | `group`, `memory_transition_test` | Borrowed pool/buffer contracts, scope-pair qualification, and explicit host maintenance across a GPU copy with mappings held open |
 | Queues and streams | `queue_ops`, `stream`, `stream_ops`, `semaphore` | Host calls, fills, copies, updates, execution barriers, timeline signals, and completion |
 | Transfers | `transfer` | Host/device copies, stream ordering, numerical output, and range rejection |
 | Executables | `executable` | Loading configured HSACO, function lookup, dispatch, and exact output |

@@ -100,6 +100,11 @@ class HrxLoader {
   decltype(&hrx_buffer_query_zero_compute_atomic_operations)
       buffer_query_zero_compute_atomic_operations;
   decltype(&hrx_mem_pool_query_stats) mem_pool_query_stats;
+  decltype(&hrx_mem_pool_transition_table) mem_pool_transition_table;
+  decltype(&hrx_buffer_transition_table) buffer_transition_table;
+  decltype(&hrx_memory_transition_prepare_pair) memory_transition_prepare_pair;
+  decltype(&hrx_memory_transition_recipe) memory_transition_recipe;
+  decltype(&hrx_buffer_mapping_memory_barrier) buffer_mapping_memory_barrier;
   decltype(&hrx_device_group_topology_node_count)
       device_group_topology_node_count;
   decltype(&hrx_device_group_query_topology_node)
