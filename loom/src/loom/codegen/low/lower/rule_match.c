@@ -1277,6 +1277,22 @@ static iree_status_t loom_low_lower_rule_guard_matches(
           match_context, rule_set, source_op,
           guard->selector.value.value_ref_index);
       return iree_ok_status();
+    case LOOM_LOW_LOWER_GUARD_VALUE_EXACT_FLOAT_TYPE: {
+      if (!match_context->fact_table) {
+        *out_matches = false;
+        return iree_ok_status();
+      }
+      const loom_value_id_t value_id = loom_low_lower_rule_source_value(
+          match_context->module, rule_set, source_op,
+          guard->selector.value.value_ref_index);
+      const loom_value_facts_t facts =
+          loom_value_fact_table_lookup(match_context->fact_table, value_id);
+      *out_matches = loom_value_facts_is_exact_float_type(
+          facts, (loom_scalar_type_t)loom_low_lower_rule_set_guard_payload(
+                     rule_set, guard)
+                     ->u64);
+      return iree_ok_status();
+    }
     case LOOM_LOW_LOWER_GUARD_VALUE_FLOAT_EXACTLY_REPRESENTABLE_AS: {
       if (!match_context->fact_table) {
         *out_matches = false;

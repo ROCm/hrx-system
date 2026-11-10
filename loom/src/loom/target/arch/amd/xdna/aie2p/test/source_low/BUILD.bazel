@@ -35,6 +35,7 @@ loom_check_test_suite(
         "f32_representation.loom-test",
         "f32_wide_arithmetic.loom-test",
         "f32_wide_nonlinear.loom-test",
+        "floating_fma.loom-test",
         "function_storage.loom-test",
         "fused_packet_memory.loom-test",
         "immutable_gather.loom-test",

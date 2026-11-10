@@ -1524,7 +1524,62 @@ def _i64_truncate_rule(result_type: Scalar) -> DescriptorRule:
     )
 
 
+def _wide_bf16_narrow_rule() -> DescriptorRule:
+    convert = _descriptor("amd.xdna.aie2p.convert.f32x32.to.bf16x32")
+    emits: list[ContractEmit] = [
+        EmitDescriptorOp(
+            descriptor=_descriptor("amd.xdna.aie2p.state.rounding.immediate"),
+            immediates={"i": BF16_CONVERSION_ROUNDING},
+            form=DescriptorEmitForm.OP,
+        )
+    ]
+    chunks = []
+    for half in range(2):
+        source = ValueRef.temporary(f"source_{half}")
+        result = ValueRef.temporary(f"bf16_{half}")
+        emits.append(
+            EmitRegisterSlice(
+                source=ValueRef.operand("input"),
+                result=source,
+                unit_offset=half * 2,
+                unit_count=2,
+            )
+        )
+        emits.append(
+            EmitDescriptorOp(
+                descriptor=convert,
+                operands={"src": source},
+                results={"dst": result},
+                result_types={"dst": DescriptorResultType()},
+                form=DescriptorEmitForm.OP,
+            )
+        )
+        chunks.append(result)
+    emits.append(EmitRegisterConcat(sources=chunks, result=ValueRef.result("result")))
+    return DescriptorRule(
+        source_op=vector.vector_fptrunc,
+        descriptor=convert,
+        guards=(
+            Guard.value_type(
+                "input",
+                Vector("f32", minimum_static_elements=33, maximum_static_elements=64),
+            ),
+            Guard.value_type(
+                "result",
+                Vector("bf16", minimum_static_elements=33, maximum_static_elements=64),
+            ),
+            Guard.value_not_nan("input"),
+            Guard.value_not_subnormal_or_instance_flags_has_all(
+                "input", "subnormal", "daz"
+            ),
+        ),
+        emit=tuple(emits),
+        report_key="native_binary32x33_64_to_bfloat16x33_64",
+    )
+
+
 AIE2P_CONVERSION_RULES = (
+    _wide_bf16_narrow_rule(),
     *AIE2P_PACKET_CONVERSION_RULES,
     *(
         _integer_extend_rule(source_op, input_type, result_type, operation)

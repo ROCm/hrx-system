@@ -85,6 +85,17 @@ class VectorLaneOriginTest : public ::testing::Test {
       IREE_ASSERT_OK(
           loom_value_fact_table_compute_op(&facts, module_, operation));
     }
+    if (conversion_flags == 0) {
+      for (uint32_t index = 0; index < 2; ++index) {
+        loom_value_fact_exact_lane_origin_t packet_origin = {};
+        ASSERT_TRUE(loom_value_fact_table_query_exact_lane_origin(
+            &facts, module_, packets[index], &packet_origin));
+        EXPECT_EQ(packet_origin.source_value_id,
+                  loom_vector_slice_result(operations[index * 2]));
+        EXPECT_EQ(packet_origin.source_lane_offset, 0);
+        EXPECT_EQ(packet_origin.source_lane_stride, 1);
+      }
+    }
     loom_value_fact_exact_lane_origin_t origin = {};
     ASSERT_EQ(loom_value_fact_table_query_exact_lane_origin(&facts, module_,
                                                             result, &origin),

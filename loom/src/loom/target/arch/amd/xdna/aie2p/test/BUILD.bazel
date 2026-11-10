@@ -219,6 +219,13 @@ loom_check_test_suite(
 )
 
 loom_test(
+    name = "floating_fma_test",
+    srcs = ["floating_fma.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [XDNA_HARDWARE_PROFILE],
+)
+
+loom_test(
     name = "bfp_memory_test",
     srcs = ["bfp_memory.loom"],
     benchmark_smoke = False,

@@ -1,0 +1,239 @@
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @widened_product_chain(%left: vector<64xbf16>, %right: vector<64xbf16>, %other: vector<64xbf16>) -> (vector<64xf32>) {
+  %left_wide = vector.extf %left : vector<64xbf16> to vector<64xf32>
+  %right_wide = vector.extf %right : vector<64xbf16> to vector<64xf32>
+  %other_wide = vector.extf %other : vector<64xbf16> to vector<64xf32>
+  %origin = vector.splatf 0.0 : vector<64xf32>
+  %product = vector.fmaf<nnan|ninf|nsz|afn> %left_wide, %right_wide, %origin : vector<64xf32>
+  %result = vector.fmaf<nnan|ninf|nsz|afn> %left_wide, %other_wide, %product : vector<64xf32>
+  func.return %result : vector<64xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @widened_product_chain(%left: reg<aie2p.vec256 x4>, %right: reg<aie2p.vec256 x4>, %other: reg<aie2p.vec256 x4>) -> (reg<aie2p.mbms x4>) asm {
+  %29 = mova.i32 60
+  %product = vmul.bf16x64 %left, %right, %29
+  %result = vmac.bf16x64 %product, %left, %other, %29
+  return %result
+}
+
+// ====
+
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @widened_product_chain_1(%left: vector<1xbf16>, %right: vector<1xbf16>, %other: vector<1xbf16>) -> (vector<1xf32>) {
+  %left_wide = vector.extf %left : vector<1xbf16> to vector<1xf32>
+  %right_wide = vector.extf %right : vector<1xbf16> to vector<1xf32>
+  %other_wide = vector.extf %other : vector<1xbf16> to vector<1xf32>
+  %origin = vector.splatf 0.0 : vector<1xf32>
+  %product = vector.fmaf<nnan|ninf|nsz|afn> %left_wide, %right_wide, %origin : vector<1xf32>
+  %result = vector.fmaf<nnan|ninf|nsz|afn> %left_wide, %other_wide, %product : vector<1xf32>
+  func.return %result : vector<1xf32>
+}
+
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @widened_product_chain_1(%left: reg<aie2p.vec256 x2>, %right: reg<aie2p.vec256 x2>, %other: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %14 = mova.i32 60
+  %15 = vmul.bf16x32 %left, %right, %14
+  %16 = slice %15[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %17 = vmov.accumulator512.to.vector512 %16
+  %product = concat(%17) : (reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x2>
+  %19 = vmov.vector512.to.accumulator512 %product
+  %20 = concat(%19, %19, %19, %19) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %22 = vmac.bf16x32 %20, %left, %other, %14
+  %23 = slice %22[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %24 = vmov.accumulator512.to.vector512 %23
+  %result = concat(%24) : (reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x2>
+  return %result
+}
+
+// ====
+
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @widened_product_chain_17(%left: vector<17xbf16>, %right: vector<17xbf16>, %other: vector<17xbf16>) -> (vector<17xf32>) {
+  %left_wide = vector.extf %left : vector<17xbf16> to vector<17xf32>
+  %right_wide = vector.extf %right : vector<17xbf16> to vector<17xf32>
+  %other_wide = vector.extf %other : vector<17xbf16> to vector<17xf32>
+  %origin = vector.splatf 0.0 : vector<17xf32>
+  %product = vector.fmaf<nnan|ninf|nsz|afn> %left_wide, %right_wide, %origin : vector<17xf32>
+  %result = vector.fmaf<nnan|ninf|nsz|afn> %left_wide, %other_wide, %product : vector<17xf32>
+  func.return %result : vector<17xf32>
+}
+
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @widened_product_chain_17(%left: reg<aie2p.vec256 x2>, %right: reg<aie2p.vec256 x2>, %other: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x4>) asm {
+  %14 = mova.i32 60
+  %15 = vmul.bf16x32 %left, %right, %14
+  %16 = slice %15[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %17 = vmov.accumulator512.to.vector512 %16
+  %18 = slice %15[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %19 = vmov.accumulator512.to.vector512 %18
+  %22 = vmov.vector512.to.accumulator512 %17
+  %24 = vmov.vector512.to.accumulator512 %19
+  %25 = concat(%22, %24, %22, %24) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %27 = vmac.bf16x32 %25, %left, %other, %14
+  %28 = slice %27[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %29 = vmov.accumulator512.to.vector512 %28
+  %30 = slice %27[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %31 = vmov.accumulator512.to.vector512 %30
+  %result = concat(%29, %31) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  return %result
+}
+
+// ====
+
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @widened_product_chain_32(%left: vector<32xbf16>, %right: vector<32xbf16>, %other: vector<32xbf16>) -> (vector<32xf32>) {
+  %left_wide = vector.extf %left : vector<32xbf16> to vector<32xf32>
+  %right_wide = vector.extf %right : vector<32xbf16> to vector<32xf32>
+  %other_wide = vector.extf %other : vector<32xbf16> to vector<32xf32>
+  %origin = vector.splatf 0.0 : vector<32xf32>
+  %product = vector.fmaf<nnan|ninf|nsz|afn> %left_wide, %right_wide, %origin : vector<32xf32>
+  %result = vector.fmaf<nnan|ninf|nsz|afn> %left_wide, %other_wide, %product : vector<32xf32>
+  func.return %result : vector<32xf32>
+}
+
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @widened_product_chain_32(%left: reg<aie2p.vec256 x2>, %right: reg<aie2p.vec256 x2>, %other: reg<aie2p.vec256 x2>) -> (reg<aie2p.mbms x2>) asm {
+  %14 = mova.i32 60
+  %15 = vmul.bf16x32 %left, %right, %14
+  %16 = slice %15[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms x2>
+  %product = copy %16 : reg<aie2p.mbms x2> -> reg<aie2p.mbms x2>
+  %18 = concat(%product, %product) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  %20 = vmac.bf16x32 %18, %left, %other, %14
+  %21 = slice %20[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms x2>
+  %result = copy %21 : reg<aie2p.mbms x2> -> reg<aie2p.mbms x2>
+  return %result
+}
+
+// ====
+
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+aie2p.target<core> @wide_target
+
+func.def target(@wide_target) @packetized_product_chain(%input_buffer: buffer, %output_buffer: buffer) {
+  %base_offset = index.constant 0 : offset
+  %input_aligned = buffer.assume.alignment %input_buffer {minimum_alignment = 64} : buffer
+  %output_aligned = buffer.assume.alignment %output_buffer {minimum_alignment = 64} : buffer
+  %input = buffer.view %input_aligned[%base_offset] : buffer -> view<3x128xbf16>
+  %output = buffer.view %output_aligned[%base_offset] : buffer -> view<128xf32>
+  %left = vector.load %input[0, 0] : view<3x128xbf16> -> vector<65xbf16>
+  %right = vector.load %input[1, 0] : view<3x128xbf16> -> vector<65xbf16>
+  %other = vector.load %input[2, 0] : view<3x128xbf16> -> vector<65xbf16>
+  %left_wide = vector.extf %left : vector<65xbf16> to vector<65xf32>
+  %right_wide = vector.extf %right : vector<65xbf16> to vector<65xf32>
+  %other_wide = vector.extf %other : vector<65xbf16> to vector<65xf32>
+  %origin = vector.splatf 0.0 : vector<65xf32>
+  %product = vector.fmaf<nnan|ninf|nsz|afn> %left_wide, %right_wide, %origin : vector<65xf32>
+  %result = vector.fmaf<nnan|ninf|nsz|afn> %left_wide, %other_wide, %product : vector<65xf32>
+  vector.store %result, %output[0] : vector<65xf32>, view<128xf32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@wide_target) abi(object_function) @packetized_product_chain() asm {
+  %input_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %100 = mov.static-address-index 128
+  %101 = lda.i16.index %input_aligned, %100
+  %102 = vbcst.16 %101
+  %103 = mov.static-address-index 384
+  %104 = lda.i16.index %input_aligned, %103
+  %105 = vbcst.16 %104
+  %106 = mov.static-address-index 640
+  %107 = lda.i16.index %input_aligned, %106
+  %108 = vbcst.16 %107
+  %109 = vlda.512.bf16x32 %input_aligned, 0
+  %110 = vlda.512.bf16x32 %input_aligned, 256
+  %111 = mov.static-address-index 512
+  %112 = vlda.512.bf16x32.index %input_aligned, %111
+  %113 = mova.i32 60
+  %114 = vmul.bf16x32 %109, %110, %113
+  %115 = slice %114[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms x2>
+  %116 = copy %115 : reg<aie2p.mbms x2> -> reg<aie2p.mbms x2>
+  %117 = concat(%116, %116) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  %119 = vmac.bf16x32 %117, %109, %112, %113
+  %120 = slice %119[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms x2>
+  %121 = copy %120 : reg<aie2p.mbms x2> -> reg<aie2p.mbms x2>
+  %122 = vlda.512.bf16x32 %input_aligned, 64
+  %123 = vlda.512.bf16x32 %input_aligned, 320
+  %124 = mov.static-address-index 576
+  %125 = vlda.512.bf16x32.index %input_aligned, %124
+  %127 = vmul.bf16x32 %122, %123, %113
+  %128 = slice %127[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms x2>
+  %129 = copy %128 : reg<aie2p.mbms x2> -> reg<aie2p.mbms x2>
+  %130 = concat(%129, %129) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  %132 = vmac.bf16x32 %130, %122, %125, %113
+  %133 = slice %132[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms x2>
+  %134 = copy %133 : reg<aie2p.mbms x2> -> reg<aie2p.mbms x2>
+  %136 = vmul.bf16x32 %102, %105, %113
+  %137 = slice %136[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %138 = vmov.accumulator512.to.vector512 %137
+  %139 = concat(%138) : (reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x2>
+  %140 = vmov.vector512.to.accumulator512 %139
+  %141 = concat(%140, %140, %140, %140) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %143 = vmac.bf16x32 %141, %102, %108, %113
+  %144 = slice %143[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %145 = vmov.accumulator512.to.vector512 %144
+  %146 = concat(%145) : (reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x2>
+  %147 = slice %121[0] : reg<aie2p.mbms x2> -> reg<aie2p.mbms>
+  %148 = vmov.accumulator512.to.vector512 %147
+  vst.512.f32x16 %148, %output_aligned, 0
+  %149 = slice %121[1] : reg<aie2p.mbms x2> -> reg<aie2p.mbms>
+  %150 = vmov.accumulator512.to.vector512 %149
+  vst.512.f32x16 %150, %output_aligned, 64
+  %151 = slice %134[0] : reg<aie2p.mbms x2> -> reg<aie2p.mbms>
+  %152 = vmov.accumulator512.to.vector512 %151
+  vst.512.f32x16 %152, %output_aligned, 128
+  %153 = slice %134[1] : reg<aie2p.mbms x2> -> reg<aie2p.mbms>
+  %154 = vmov.accumulator512.to.vector512 %153
+  vst.512.f32x16 %154, %output_aligned, 192
+  %155 = vextract.32.imm %146, 0
+  %156 = mov.static-address-index 256
+  st.i32.index %155, %output_aligned, %156
+  return
+}
+
+// ====
+
+func.def @rounded_product(%left: vector<64xbf16>, %right: vector<64xbf16>) -> (vector<64xf32>) {
+  %a = vector.extf %left : vector<64xbf16> to vector<64xf32>
+  %b = vector.extf %right : vector<64xbf16> to vector<64xf32>
+  %identity = vector.splatf 0.0 : vector<64xf32>
+  %first = vector.fmaf<nnan|ninf|nsz|afn> %a, %b, %identity : vector<64xf32>
+  %narrow = vector.fptrunc<daz> %first : vector<64xf32> to vector<64xbf16>
+  %wide = vector.extf %narrow : vector<64xbf16> to vector<64xf32>
+  %half = vector.splatf 0.5 : vector<64xf32>
+  %result = vector.fmaf<nnan|ninf|nsz|afn> %wide, %half, %first : vector<64xf32>
+  func.return %result : vector<64xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @rounded_product(%left: reg<aie2p.vec256 x4>, %right: reg<aie2p.vec256 x4>) -> (reg<aie2p.mbms x4>) asm {
+  %29 = mova.i32 60
+  %first = vmul.bf16x64 %left, %right, %29
+  set.rounding 12
+  %31 = slice %first[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms x2>
+  %32 = vconv.bf16.fp32 %31
+  %33 = slice %first[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms x2>
+  %34 = vconv.bf16.fp32 %33
+  %narrow = concat(%32, %34) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %36 = mov.i32 1056964608
+  %37 = vbcst.32 %36
+  %38 = vmov.vector512.to.accumulator512 %37
+  %half = concat(%38, %38, %38, %38) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %40 = slice %half[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms x2>
+  %41 = vconv.bf16.fp32 %40
+  %42 = slice %half[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms x2>
+  %43 = vconv.bf16.fp32 %42
+  %44 = concat(%41, %43) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %result = vmac.bf16x64 %first, %narrow, %44, %29
+  return %result
+}

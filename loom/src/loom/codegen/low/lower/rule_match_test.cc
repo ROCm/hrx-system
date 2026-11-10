@@ -1113,6 +1113,8 @@ TEST_F(LowLowerRuleMatchTest, SeparatesExactFiniteValuesFromNanExclusion) {
   guards[1].kind = LOOM_LOW_LOWER_GUARD_VALUE_NOT_NAN;
   guards[1].diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
   const loom_low_lower_guard_ref_t guard_refs[] = {0, 1};
+  loom_low_lower_guard_payload_t payload = {};
+  payload.u64 = LOOM_SCALAR_TYPE_BF16;
   const loom_low_lower_value_ref_t value_refs[] = {
       {.kind = LOOM_LOW_LOWER_VALUE_REF_OPERAND},
       {.kind = LOOM_LOW_LOWER_VALUE_REF_RESULT},
@@ -1130,6 +1132,8 @@ TEST_F(LowLowerRuleMatchTest, SeparatesExactFiniteValuesFromNanExclusion) {
       .rule_count = 1,
       .value_refs = value_refs,
       .value_ref_count = IREE_ARRAYSIZE(value_refs),
+      .guard_payloads = &payload,
+      .guard_payload_count = 1,
       .guards = guards,
       .guard_count = IREE_ARRAYSIZE(guards),
       .guard_refs = guard_refs,
@@ -1179,14 +1183,21 @@ TEST_F(LowLowerRuleMatchTest, SeparatesExactFiniteValuesFromNanExclusion) {
         .module = module_,
         .fact_table = &facts,
     };
-    for (bool require_not_nan : {false, true}) {
-      rule.guard_count = require_not_nan ? 2 : 1;
-      loom_low_lower_rule_selection_t selection = {};
-      IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
-          &match_context, &rule_set, source_op, &selection));
-      EXPECT_EQ(selection.rule != nullptr,
-                test_case.exact_finite_values &&
-                    (!require_not_nan || test_case.not_nan));
+    for (bool literal_type : {false, true}) {
+      guards[0].kind =
+          literal_type
+              ? LOOM_LOW_LOWER_GUARD_VALUE_EXACT_FLOAT_TYPE
+              : LOOM_LOW_LOWER_GUARD_VALUE_FLOAT_EXACTLY_REPRESENTABLE_AS;
+      guards[0].payload_ordinal = literal_type ? 1 : 0;
+      for (bool require_not_nan : {false, true}) {
+        rule.guard_count = require_not_nan ? 2 : 1;
+        loom_low_lower_rule_selection_t selection = {};
+        IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
+            &match_context, &rule_set, source_op, &selection));
+        EXPECT_EQ(selection.rule != nullptr,
+                  test_case.exact_finite_values &&
+                      (!require_not_nan || test_case.not_nan));
+      }
     }
     match_context.fact_table = nullptr;
     loom_low_lower_rule_selection_t selection = {};

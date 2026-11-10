@@ -1084,6 +1084,24 @@ _BASE_DESCRIPTOR_SPECS = (
         storage_overrides=(("dst", "mBMs"), ("acc1", "mBMs")),
         asm_mnemonic="vmac.bf16x32",
     ),
+    *(
+        _DescriptorSpec(
+            f"{mnemonic}_f_{form}_vmul_bf_core_Y_Y",
+            f"{_TARGET_KEY}.{operation}.bf16x64.configured",
+            f"floating.{operation}.bf16x64.configured",
+            f"II_{mnemonic}_f_{form}_vmul_bf_core_Y_Y",
+            storage_overrides=(
+                (("dst", "mBMs"), ("acc1", "mBMs"))
+                if operation == "accumulate"
+                else (("dst", "mBMs"),)
+            ),
+            asm_mnemonic=f"{mnemonic.lower()}.bf16x64",
+        )
+        for operation, mnemonic, form in (
+            ("multiply", "VMUL", "vmul_bf"),
+            ("accumulate", "VMAC", "vmac_bf"),
+        )
+    ),
     # Packet dot products observe the low sixteen accumulator lanes. The
     # instruction still clobbers every destination quarter.
     _DescriptorSpec(

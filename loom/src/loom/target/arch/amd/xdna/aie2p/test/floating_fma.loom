@@ -1,0 +1,110 @@
+// The hardware path and VM oracle consume identical source arithmetic. Normal,
+// bounded BF16 operands keep subnormal permissions outside this comparison.
+aie2p.target<array> @device {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+func.def noinline @products(%input: view<4x64xbf16>, %output: view<5x64xf32>) {
+  %left = vector.load %input[0, 0] : view<4x64xbf16> -> vector<64xbf16>
+  %right = vector.load %input[1, 0] : view<4x64xbf16> -> vector<64xbf16>
+  %seed = vector.load %input[2, 0] : view<4x64xbf16> -> vector<64xbf16>
+  %other = vector.load %input[3, 0] : view<4x64xbf16> -> vector<64xbf16>
+  %a = vector.extf %left : vector<64xbf16> to vector<64xf32>
+  %b = vector.extf %right : vector<64xbf16> to vector<64xf32>
+  %c = vector.extf %seed : vector<64xbf16> to vector<64xf32>
+  %d = vector.extf %other : vector<64xbf16> to vector<64xf32>
+  %identity = vector.splatf 0.0 : vector<64xf32>
+  %product = vector.fmaf<nnan|ninf|nsz|afn> %a, %b, %identity : vector<64xf32>
+  %seeded = vector.fmaf<nnan|ninf|nsz|afn> %a, %d, %c : vector<64xf32>
+  %rounded = vector.fptrunc<daz> %product : vector<64xf32> to vector<64xbf16>
+  %wide = vector.extf %rounded : vector<64xbf16> to vector<64xf32>
+  %chained = vector.fmaf<nnan|ninf|nsz|afn> %wide, %d, %seeded : vector<64xf32>
+  vector.store %product, %output[0, 0] : vector<64xf32>, view<5x64xf32>
+  vector.store %seeded, %output[1, 0] : vector<64xf32>, view<5x64xf32>
+  vector.store %chained, %output[2, 0] : vector<64xf32>, view<5x64xf32>
+  // Exercise every distinct partial-result carrier without observing padding.
+  vector.store %identity, %output[3, 0] : vector<64xf32>, view<5x64xf32>
+  vector.store %identity, %output[4, 0] : vector<64xf32>, view<5x64xf32>
+  %left1 = vector.slice %left[0] : vector<64xbf16> -> vector<1xbf16>
+  %right1 = vector.slice %right[0] : vector<64xbf16> -> vector<1xbf16>
+  %a1 = vector.extf %left1 : vector<1xbf16> to vector<1xf32>
+  %b1 = vector.extf %right1 : vector<1xbf16> to vector<1xf32>
+  %identity1 = vector.splatf 0.0 : vector<1xf32>
+  %product1 = vector.fmaf<nnan|ninf|nsz|afn> %a1, %b1, %identity1 : vector<1xf32>
+  %chain1 = vector.fmaf<nnan|ninf|nsz|afn> %a1, %a1, %product1 : vector<1xf32>
+  vector.store %chain1, %output[3, 16] : vector<1xf32>, view<5x64xf32>
+  %left16 = vector.slice %left[0] : vector<64xbf16> -> vector<16xbf16>
+  %right16 = vector.slice %right[0] : vector<64xbf16> -> vector<16xbf16>
+  %a16 = vector.extf %left16 : vector<16xbf16> to vector<16xf32>
+  %b16 = vector.extf %right16 : vector<16xbf16> to vector<16xf32>
+  %identity16 = vector.splatf 0.0 : vector<16xf32>
+  %product16 = vector.fmaf<nnan|ninf|nsz|afn> %a16, %b16, %identity16 : vector<16xf32>
+  %chain16 = vector.fmaf<nnan|ninf|nsz|afn> %a16, %a16, %product16 : vector<16xf32>
+  vector.store %chain16, %output[3, 0] : vector<16xf32>, view<5x64xf32>
+  %left17 = vector.slice %left[0] : vector<64xbf16> -> vector<17xbf16>
+  %right17 = vector.slice %right[0] : vector<64xbf16> -> vector<17xbf16>
+  %a17 = vector.extf %left17 : vector<17xbf16> to vector<17xf32>
+  %b17 = vector.extf %right17 : vector<17xbf16> to vector<17xf32>
+  %identity17 = vector.splatf 0.0 : vector<17xf32>
+  %product17 = vector.fmaf<nnan|ninf|nsz|afn> %a17, %b17, %identity17 : vector<17xf32>
+  %chain17 = vector.fmaf<nnan|ninf|nsz|afn> %a17, %a17, %product17 : vector<17xf32>
+  vector.store %chain17, %output[3, 32] : vector<17xf32>, view<5x64xf32>
+  %left32 = vector.slice %left[0] : vector<64xbf16> -> vector<32xbf16>
+  %right32 = vector.slice %right[0] : vector<64xbf16> -> vector<32xbf16>
+  %a32 = vector.extf %left32 : vector<32xbf16> to vector<32xf32>
+  %b32 = vector.extf %right32 : vector<32xbf16> to vector<32xf32>
+  %identity32 = vector.splatf 0.0 : vector<32xf32>
+  %product32 = vector.fmaf<nnan|ninf|nsz|afn> %a32, %b32, %identity32 : vector<32xf32>
+  %chain32 = vector.fmaf<nnan|ninf|nsz|afn> %a32, %a32, %product32 : vector<32xf32>
+  vector.store %chain32, %output[4, 0] : vector<32xf32>, view<5x64xf32>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@device) @native_products() run(%input_arg: buffer, %output_arg: buffer) {
+  %input, %output = buffer.assume.alignment %input_arg, %output_arg {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %size = index.constant 1792 : offset
+  %capacity = index.constant 1 : index
+  %pool = pipeline.memory<workgroup>[0, 2] : pool
+  %storage = buffer.alloca<workgroup> pool(%pool) align(64) %size : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x1792xi8>
+  %channel = channel.bind<fifo> %slots, %capacity : view<1x1792xi8>, index -> channel<tile<1792xi8>>
+  %source = buffer.view %input[%origin] : buffer -> view<512xi8>
+  %destination = buffer.view %output[%origin] : buffer -> view<1280xi8>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %write, %local = channel.reserve %channel : channel<tile<1792xi8>> -> (write<tile<1792xi8>>, view<1792xi8>)
+    %input_bytes = view.subview %local[0] : view<1792xi8> -> view<512xi8>
+    %output_bytes = view.subview %local[512] : view<1792xi8> -> view<1280xi8>
+    %load = kernel.async.copy %source to %input_bytes {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<512xi8> to view<512xi8> -> kernel.async.token
+    %arrival = kernel.async.group %load : kernel.async.token -> kernel.async.group
+    kernel.async.wait %arrival {newer_groups = 0} : kernel.async.group
+    %values = view.bitcast %input_bytes : view<512xi8> -> view<4x64xbf16>
+    %results = view.bitcast %output_bytes : view<1280xi8> -> view<5x64xf32>
+    func.call @products(%values, %results) : (view<4x64xbf16>, view<5x64xf32>)
+    channel.publish %write : write<tile<1792xi8>>
+    %read, %ready = channel.acquire %channel : channel<tile<1792xi8>> -> (read<tile<1792xi8>>, view<1792xi8>)
+    %completed = view.subview %ready[512] : view<1792xi8> -> view<1280xi8>
+    %store = kernel.async.copy %completed to %destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<1280xi8> to view<1280xi8> -> kernel.async.token
+    %departure = kernel.async.group %store : kernel.async.token -> kernel.async.group
+    kernel.async.wait %departure {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<1792xi8>>
+  }
+}
+
+func.def @reference(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %values = buffer.view %input[%origin] : buffer -> view<4x64xbf16>
+  %results = buffer.view %output[%origin] : buffer -> view<5x64xf32>
+  func.call @products(%values, %results) : (view<4x64xbf16>, view<5x64xf32>)
+  func.return
+}
+
+check.scenario public @native_widening_fma {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(0.5 to 4.0) : tensor<4x64xbf16>
+    %output = check.generate.fill value(-1.0) : tensor<5x64xf32>
+    check.compare<@native_products, @reference>(%input, %output) : (tensor<4x64xbf16>, tensor<5x64xf32>) -> () {
+      check.expect.equal actual(%output) expected(%output) : tensor<5x64xf32>
+    }
+  }
+  check.return
+}

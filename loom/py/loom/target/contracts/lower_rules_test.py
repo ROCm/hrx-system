@@ -23,6 +23,7 @@ from loom.dialect.scalar import conversion as scalar_conversion
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
 from loom.dsl import ANY, PURE, EncodingOperandSummaryDef, Op, Operand
+from loom.scalar_type import ScalarTypeKind
 from loom.target.contracts import (
     LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS,
     LOWER_EMIT_FLAG_RECORD_SOURCE_MEMORY,
@@ -4540,6 +4541,35 @@ def test_compile_lower_rule_set_compiles_exact_float_type_guard() -> None:
         )
         == "finite_exactly_representable_as_result"
     )
+
+
+@pytest.mark.parametrize("element", tuple(ScalarTypeKind))
+def test_compile_literal_exact_float_type_guard(element: ScalarTypeKind) -> None:
+    guard = Guard.value_exact_float_type("a", element)
+    if element < ScalarTypeKind.F8E4M3:
+        with pytest.raises(ValueError, match="requires a float scalar type"):
+            guard.validate(vector.vector_fmaf)
+        return
+    table = ContractFragment(
+        name="test.literal-exact-float-type",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            RecipeRule(
+                source_op=vector.vector_fmaf,
+                guards=(guard,),
+            )
+        ],
+    )
+    compiled = compile_lower_rule_set(table, dialect_ops={"vector": ALL_VECTOR_OPS})
+    guard = compiled.guards[0]
+    assert guard.kind == GuardKind.VALUE_EXACT_FLOAT_TYPE
+    assert guard.value_ref_index == 0
+    assert guard.u64_c_expression == f"LOOM_SCALAR_TYPE_{element.name}"
+
+
+def test_scalar_type_payload_requires_exact_float_guard() -> None:
+    with pytest.raises(ValueError, match="cannot carry a scalar type"):
+        replace(Guard.value_exact_float("a"), scalar_type=ScalarTypeKind.BF16)
 
 
 def test_compile_lower_rule_set_compiles_static_element_count_relation_guard() -> None:

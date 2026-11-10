@@ -1230,6 +1230,7 @@ class _LowerRuleSetCompiler:
             GuardKind.VALUE_I32_DIVISOR_MAGIC_KIND,
             GuardKind.VALUE_EXACT_FLOAT,
             GuardKind.VALUE_FLOAT_EXACTLY_REPRESENTABLE_AS,
+            GuardKind.VALUE_EXACT_FLOAT_TYPE,
             GuardKind.VALUE_EXACT_POWER_OF_TWO_FLOAT,
             GuardKind.VALUE_NOT_NAN,
             GuardKind.VALUE_NOT_SUBNORMAL_OR_INSTANCE_FLAGS_HAS_ALL,
@@ -1500,11 +1501,27 @@ class _LowerRuleSetCompiler:
                 LowerGuard(kind=guard.kind, value_ref_index=value_ref_index)
             )
             return
-        if guard.kind == GuardKind.VALUE_FLOAT_EXACTLY_REPRESENTABLE_AS:
-            if guard.other_field is None:
-                raise ValueError(
-                    f"{source_op.name}: exact float-type guard needs a type value"
+        if guard.kind == GuardKind.VALUE_EXACT_FLOAT_TYPE:
+            self._guards.append(
+                LowerGuard(
+                    kind=guard.kind,
+                    value_ref_index=value_ref_index,
+                    u64_c_expression=f"LOOM_SCALAR_TYPE_{guard.scalar_type.name}",
+                    diagnostic_index=self._append_diagnostic_ref(
+                        source_op,
+                        _guard_diagnostic(
+                            guard,
+                            _named_constraint_diagnostic(
+                                "field",
+                                guard.field,
+                                f"exact_float_type.{guard.scalar_type.name.lower()}",
+                            ),
+                        ),
+                    ),
                 )
+            )
+            return
+        if guard.kind == GuardKind.VALUE_FLOAT_EXACTLY_REPRESENTABLE_AS:
             self._guards.append(
                 LowerGuard(
                     kind=guard.kind,

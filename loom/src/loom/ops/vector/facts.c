@@ -2750,6 +2750,26 @@ static iree_status_t loom_vector_concat_define_partition_fact(
       loom_value_fact_exact_lane_origin_t input_origin = {0};
       has_exact_origin = loom_value_fact_table_query_exact_lane_origin(
           context->table, module, input, &input_origin);
+      // Widening retains its whole materialized source. Its indexed origin
+      // supplies the canonical span needed to join neighboring packets here.
+      loom_value_fact_exact_lane_origin_t source_origin = {0};
+      if (has_exact_origin &&
+          loom_value_fact_table_query_exact_lane_origin(
+              context->table, module, input_origin.source_value_id,
+              &source_origin)) {
+        const uint64_t offset = (uint64_t)source_origin.source_lane_offset +
+                                (uint64_t)input_origin.source_lane_offset *
+                                    source_origin.source_lane_stride;
+        const uint64_t stride = (uint64_t)input_origin.source_lane_stride *
+                                source_origin.source_lane_stride;
+        if (offset <= UINT32_MAX && stride <= UINT32_MAX) {
+          input_origin = (loom_value_fact_exact_lane_origin_t){
+              .source_value_id = source_origin.source_value_id,
+              .source_lane_offset = (uint32_t)offset,
+              .source_lane_stride = (uint32_t)stride,
+          };
+        }
+      }
       if (has_exact_origin && i == 0) {
         exact_origin = input_origin;
       } else if (has_exact_origin) {
@@ -3856,10 +3876,21 @@ static iree_status_t loom_vector_try_define_exact_same_lane_origin(
       .source_lane_offset = 0,
       .source_lane_stride = 1,
   };
+  // Preserve a complete materialized operand for lowering. A canonical span
+  // into a larger value cannot replace this operand without a new slice.
   loom_value_fact_exact_lane_origin_t existing_origin = {0};
   if (loom_value_fact_table_query_exact_lane_origin(context->table, module,
-                                                    source, &existing_origin)) {
-    source_origin = existing_origin;
+                                                    source, &existing_origin) &&
+      existing_origin.source_lane_offset == 0 &&
+      existing_origin.source_lane_stride == 1) {
+    iree_host_size_t existing_source_lane_count = 0;
+    const loom_type_t existing_source_type =
+        loom_module_value_type(module, existing_origin.source_value_id);
+    if (loom_vector_type_static_lane_count(existing_source_type,
+                                           &existing_source_lane_count) &&
+        existing_source_lane_count == source_lane_count) {
+      source_origin = existing_origin;
+    }
   }
   return loom_value_fact_table_define_exact_lane_origin(context->table, result,
                                                         source_origin);
