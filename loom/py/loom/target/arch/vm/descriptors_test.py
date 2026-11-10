@@ -42,7 +42,7 @@ from iree.vm.bytecode.spec.isa.core.rules import (
 from iree.vm.bytecode.spec.isa.core.stack import MEMORY_FORMAT_SELECTOR
 from iree.vm.bytecode.spec.specification import SPECIFICATION
 
-from loom.dialect.scalar import conversion, math
+from loom.dialect.scalar import arithmetic, bitwise, conversion, math
 from loom.ir import ScalarType, ScalarTypeKind
 from loom.target.arch.vm.contracts import (
     VM_CORE_CONTRACT_DIALECT_OPS,
@@ -53,6 +53,8 @@ from loom.target.contracts import (
     LOWER_EMIT_FLAG_RECORD_SOURCE_MEMORY,
     AttrProject,
     DescriptorRule,
+    GuardKind,
+    ValueRef,
     compile_lower_rule_set,
 )
 from loom.target.low_descriptors import (
@@ -64,6 +66,52 @@ from loom.target.low_descriptors import (
     OperandRole,
     OwnershipEffect,
 )
+
+
+def test_modular_binary_carriers_cover_all_logical_integer_widths():
+    instructions = {
+        instruction.opcode: instruction for instruction in SPECIFICATION.instructions
+    }
+    operations = {
+        arithmetic.scalar_addi,
+        arithmetic.scalar_subi,
+        arithmetic.scalar_muli,
+        bitwise.scalar_andi,
+        bitwise.scalar_ori,
+        bitwise.scalar_xori,
+        bitwise.scalar_shli,
+    }
+    cells = set()
+    for rule in VM_CORE_CONTRACT_FRAGMENT.cases:
+        if not isinstance(rule, DescriptorRule) or rule.source_op not in operations:
+            continue
+        types = {
+            guard.field: guard.type_pattern
+            for guard in rule.guards
+            if guard.kind is GuardKind.VALUE_TYPE
+        }
+        assert types["lhs"] == types["rhs"] == types["result"]
+        assert len(rule.emit) == 1
+        emit = rule.emit[0]
+        assert emit.operands == {
+            "left_v8": ValueRef.operand("lhs"),
+            "right_v8": ValueRef.operand("rhs"),
+        }
+        semantics = instructions[emit.descriptor.encoding_id].semantics
+        assert isinstance(semantics, IntegerBinarySemantics)
+        for element in types["result"].elements:
+            width = int(element[1:])
+            assert semantics.bit_width == max(32, width)
+            cell = (rule.source_op, width)
+            assert cell not in cells
+            cells.add(cell)
+    assert cells == {
+        *((op, width) for op in operations for width in (8, 16, 32, 64)),
+        *(
+            (op, 1)
+            for op in (bitwise.scalar_andi, bitwise.scalar_ori, bitwise.scalar_xori)
+        ),
+    }
 
 
 def test_scalar_packets_preserve_spec_encoding_and_semantic_types():

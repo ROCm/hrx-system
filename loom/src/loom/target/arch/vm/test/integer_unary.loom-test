@@ -137,3 +137,34 @@ func.def target(@target) @reference_carrier(%value: i8) -> (i8) {
   %absolute = scalar.trunci %9 : i32 to i8
   func.return %absolute : i8
 }
+
+// ====
+
+// Legalization must retain the narrow subtraction's bounded magnitude. The
+// resulting positivity is consumed after legalization invalidates its facts.
+// RUN: pass target-legalize{mode=final},canonicalize,dce
+
+vm.target<core> @target
+
+func.def target(@target) @bounded_magnitudes(%byte_input: i8, %halfword_input: i16) -> (i1, i1) {
+  %byte = scalar.assume %byte_input [range(%byte_input, -8, 8), ne(%byte_input, 0)] : i8
+  %halfword = scalar.assume %halfword_input [range(%halfword_input, -256, 256), ne(%halfword_input, 0)] : i16
+  %byte_origin = scalar.constant 0 : i8
+  %halfword_origin = scalar.constant 0 : i16
+  %byte_negative = scalar.subi %byte_origin, %byte : i8
+  %halfword_negative = scalar.subi %halfword_origin, %halfword : i16
+  %byte_magnitude = scalar.absi %byte_negative : i8
+  %halfword_magnitude = scalar.absi %halfword_negative : i16
+  %byte_positive = scalar.cmpi sgt, %byte_magnitude, %byte_origin : i8
+  %halfword_positive = scalar.cmpi sgt, %halfword_magnitude, %halfword_origin : i16
+  func.return %byte_positive, %halfword_positive : i1, i1
+}
+
+// ----
+vm.target<core> @target
+
+func.def target(@target) @bounded_magnitudes(%byte_input: i8, %halfword_input: i16) -> (i1, i1) {
+  %byte_positive = scalar.constant true : i1
+  %halfword_positive = scalar.constant true : i1
+  func.return %byte_positive, %halfword_positive : i1, i1
+}
