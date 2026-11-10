@@ -6,7 +6,9 @@
 
 #include <stdlib.h>
 
+#include "device_group.h"
 #include "hrx_internal.h"
+#include "mem_pool.h"
 
 // Number of semaphore wrappers converted without a transient allocation.
 #define HRX_INLINE_QUEUE_SEMAPHORES 16
@@ -104,6 +106,145 @@ static iree_status_t hrx_hal_semaphore_lists_initialize(
     hrx_hal_semaphore_lists_deinitialize(out_lists);
   }
   return status;
+}
+
+// Finite-pool allocations preserve the HRX backing owner in the existing
+// final-release attachment. Ordinary growing pools need no extra attachment.
+static void hrx_pool_buffer_release_backing(void* user_data,
+                                            size_t byte_length) {
+  (void)byte_length;
+  hrx_buffer_release((hrx_buffer_t)user_data);
+}
+
+hrx_status_t hrx_queue_alloca(hrx_queue_t queue,
+                              const hrx_semaphore_list_t* waits,
+                              const hrx_semaphore_list_t* signals,
+                              hrx_mem_pool_t pool, size_t request_count,
+                              const hrx_pool_reservation_request_t* requests,
+                              hrx_buffer_t* out_buffers) {
+  if (!request_count || !out_buffers) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "invalid allocation outputs");
+  }
+  size_t scratch_size = 0;
+  if (!iree_host_size_checked_mul(request_count,
+                                  sizeof(iree_hal_pool_reservation_request_t) +
+                                      sizeof(iree_hal_buffer_t*),
+                                  &scratch_size)) {
+    return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                           "allocation batch is too large");
+  }
+  memset(out_buffers, 0, request_count * sizeof(*out_buffers));
+  if (!queue || !pool || !requests || queue->device->group != pool->group) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "invalid allocation group, pool, or batch");
+  }
+  hrx_hal_semaphore_lists_t lists;
+  iree_status_t status =
+      hrx_hal_semaphore_lists_initialize(waits, signals, &lists);
+  if (!iree_status_is_ok(status)) {
+    return hrx_status_from_iree(status);
+  }
+  iree_hal_pool_reservation_request_t inline_requests[8];
+  iree_hal_buffer_t* inline_buffers[8];
+  iree_hal_pool_reservation_request_t* hal_requests = inline_requests;
+  iree_hal_buffer_t** hal_buffers = inline_buffers;
+  void* scratch = NULL;
+  if (request_count > IREE_ARRAYSIZE(inline_requests)) {
+    status =
+        iree_allocator_malloc(iree_allocator_system(), scratch_size, &scratch);
+    if (iree_status_is_ok(status)) {
+      hal_requests = scratch;
+      hal_buffers = (iree_hal_buffer_t**)(hal_requests + request_count);
+    }
+  }
+  size_t prepared_count = 0;
+  for (size_t i = 0; i < request_count && iree_status_is_ok(status); ++i) {
+    if (!requests[i].allocation_size ||
+        requests[i].allocation_size > SIZE_MAX) {
+      status =
+          iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                           "allocation size must fit a nonempty HRX buffer");
+    } else {
+      hal_requests[i] = (iree_hal_pool_reservation_request_t){
+          requests[i].allocation_size, requests[i].min_alignment};
+      // All fallible HRX ownership preparation happens before native
+      // acceptance.
+      status = hrx_buffer_create_from_hal(NULL, pool->group, pool->memory_type,
+                                          (size_t)requests[i].allocation_size,
+                                          NULL, &out_buffers[i]);
+      if (iree_status_is_ok(status)) {
+        hrx_buffer_t buffer = out_buffers[i];
+        buffer->hal_pool = pool->hal_pool;
+        iree_hal_pool_retain(pool->hal_pool);
+        if (pool->backing_buffer) {
+          hrx_buffer_retain(pool->backing_buffer);
+          buffer->release_user_data = pool->backing_buffer;
+          buffer->release_callback = hrx_pool_buffer_release_backing;
+        }
+        ++prepared_count;
+      }
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_queue_alloca(queue->hal_queue, lists.wait.list,
+                                   lists.signal.list, pool->hal_pool,
+                                   request_count, hal_requests, hal_buffers);
+  }
+  for (size_t i = 0; i < prepared_count; ++i) {
+    if (iree_status_is_ok(status)) {
+      out_buffers[i]->hal_buffer = hal_buffers[i];
+    } else {
+      hrx_buffer_release(out_buffers[i]);
+      out_buffers[i] = NULL;
+    }
+  }
+  iree_allocator_free(iree_allocator_system(), scratch);
+  hrx_hal_semaphore_lists_deinitialize(&lists);
+  return hrx_status_from_iree(status);
+}
+
+hrx_status_t hrx_queue_dealloca(hrx_queue_t queue,
+                                const hrx_semaphore_list_t* waits,
+                                const hrx_semaphore_list_t* signals,
+                                size_t buffer_count,
+                                const hrx_buffer_t* buffers) {
+  if (!queue || !buffer_count || !buffers) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "invalid deallocation batch");
+  }
+  hrx_hal_semaphore_lists_t lists;
+  iree_status_t status =
+      hrx_hal_semaphore_lists_initialize(waits, signals, &lists);
+  if (!iree_status_is_ok(status)) {
+    return hrx_status_from_iree(status);
+  }
+  iree_hal_buffer_t* inline_buffers[8];
+  iree_hal_buffer_t** hal_buffers = inline_buffers;
+  if (buffer_count > IREE_ARRAYSIZE(inline_buffers)) {
+    status =
+        iree_allocator_malloc_array(iree_allocator_system(), buffer_count,
+                                    sizeof(*hal_buffers), (void**)&hal_buffers);
+  }
+  for (size_t i = 0; i < buffer_count && iree_status_is_ok(status); ++i) {
+    if (!buffers[i] || buffers[i]->group != queue->device->group ||
+        !buffers[i]->hal_buffer || !buffers[i]->hal_pool) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "buffer %zu is not a group allocation root", i);
+    } else {
+      hal_buffers[i] = buffers[i]->hal_buffer;
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_queue_dealloca(queue->hal_queue, lists.wait.list,
+                                lists.signal.list, buffer_count, hal_buffers);
+  }
+  if (hal_buffers != inline_buffers) {
+    iree_allocator_free(iree_allocator_system(), hal_buffers);
+  }
+  hrx_hal_semaphore_lists_deinitialize(&lists);
+  return hrx_status_from_iree(status);
 }
 
 hrx_status_t hrx_queue_map(hrx_queue_t queue,

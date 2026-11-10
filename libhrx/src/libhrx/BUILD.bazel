@@ -32,6 +32,7 @@ HRX_SRCS = [
     "graph_analysis.c",
     "graph_exec.c",
     "host_allocator.c",
+    "mem_pool.c",
     "mem_pool_backing.c",
     "queue.c",
     "queue_ops.c",
@@ -49,6 +50,7 @@ HRX_HDRS = [
     "device.h",
     "device_group.h",
     "hrx_internal.h",
+    "mem_pool.h",
     "mem_pool_backing.h",
     "queue.h",
     "runtime.h",
@@ -194,6 +196,16 @@ hrx_cc_test(
         ":hrx_static",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "mem_pool_test",
+    srcs = ["mem_pool_test.cc"],
+    deps = [
+        ":hrx_static",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

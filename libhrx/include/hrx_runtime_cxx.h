@@ -119,6 +119,8 @@ using allocator_ptr =
 using semaphore_ptr =
     hrx_ptr<hrx_semaphore_t, hrx_semaphore_retain, hrx_semaphore_release>;
 using stream_ptr = hrx_ptr<hrx_stream_t, hrx_stream_retain, hrx_stream_release>;
+using mem_pool_ptr =
+    hrx_ptr<hrx_mem_pool_t, hrx_mem_pool_retain, hrx_mem_pool_release>;
 using buffer_ptr = hrx_ptr<hrx_buffer_t, hrx_buffer_retain, hrx_buffer_release>;
 using fence_ptr = hrx_ptr<hrx_fence_t, hrx_fence_retain, hrx_fence_release>;
 using buffer_view_ptr =

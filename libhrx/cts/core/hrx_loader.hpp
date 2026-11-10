@@ -72,6 +72,38 @@ class HrxLoader {
   decltype(&hrx_device_group_device_count) device_group_device_count;
   decltype(&hrx_device_group_get_device) device_group_get_device;
 
+  decltype(&hrx_slab_pool_create) slab_pool_create;
+  decltype(&hrx_slab_cache_create) slab_cache_create;
+  decltype(&hrx_tlsf_pool_query_backing_request)
+      tlsf_pool_query_backing_request;
+  decltype(&hrx_fixed_block_pool_query_backing_request)
+      fixed_block_pool_query_backing_request;
+  decltype(&hrx_tlsf_pool_create) tlsf_pool_create;
+  decltype(&hrx_fixed_block_pool_create) fixed_block_pool_create;
+  decltype(&hrx_tlsf_pool_create_from_buffer) tlsf_pool_create_from_buffer;
+  decltype(&hrx_fixed_block_pool_create_from_buffer)
+      fixed_block_pool_create_from_buffer;
+  decltype(&hrx_mem_pool_retain) mem_pool_retain;
+  decltype(&hrx_mem_pool_release) mem_pool_release;
+  decltype(&hrx_mem_pool_get_device_group) mem_pool_get_device_group;
+  decltype(&hrx_mem_pool_trim) mem_pool_trim;
+  decltype(&hrx_mem_pool_query_capabilities) mem_pool_query_capabilities;
+  decltype(&hrx_mem_pool_query_host_access) mem_pool_query_host_access;
+  decltype(&hrx_mem_pool_query_atomic_operations)
+      mem_pool_query_atomic_operations;
+  decltype(&hrx_mem_pool_query_zero_compute_atomic_operations)
+      mem_pool_query_zero_compute_atomic_operations;
+  decltype(&hrx_buffer_query_atomic_operations) buffer_query_atomic_operations;
+  decltype(&hrx_buffer_query_zero_compute_atomic_operations)
+      buffer_query_zero_compute_atomic_operations;
+  decltype(&hrx_mem_pool_query_stats) mem_pool_query_stats;
+  decltype(&hrx_device_group_topology_node_count)
+      device_group_topology_node_count;
+  decltype(&hrx_device_group_query_topology_node)
+      device_group_query_topology_node;
+  decltype(&hrx_queue_alloca) queue_alloca;
+  decltype(&hrx_queue_dealloca) queue_dealloca;
+
   // GPU lifecycle.
   decltype(&hrx_gpu_initialize) gpu_initialize;
   decltype(&hrx_gpu_shutdown) gpu_shutdown;

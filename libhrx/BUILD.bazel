@@ -24,6 +24,7 @@ iree_cc_library(
     hdrs = [
         "include/hrx_base.h",
         "include/hrx_device.h",
+        "include/hrx_memory.h",
         "include/hrx_runtime.h",
         "include/hrx_runtime_cxx.h",
     ],

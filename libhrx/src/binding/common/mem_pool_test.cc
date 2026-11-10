@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "common/hrx_bridge.h"
+#include "hrx_runtime_cxx.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "libhrx/src/libhrx/buffer.h"
@@ -158,6 +159,66 @@ TEST_F(CpuPoolTest, MemoryPoolAllocationRequiresPool) {
       IREE_STATUS_INVALID_ARGUMENT,
       iree_hal_streaming_mem_pool_allocate_buffer(nullptr, 1024, &buffer));
   EXPECT_EQ(buffer, nullptr);
+}
+
+TEST_F(CpuPoolTest, FiniteDescendantsPreserveCompatibilityAllocationCharge) {
+  const iree_hal_streaming_mem_pool_props_t properties = {.max_size = 65536};
+  hrx::runtime::hrx_ptr<iree_hal_streaming_mem_pool_t*,
+                        iree_hal_streaming_mem_pool_retain,
+                        iree_hal_streaming_mem_pool_release>
+      compatibility_pool;
+  IREE_ASSERT_OK(iree_hal_streaming_mem_pool_create(
+      device_, &properties, compatibility_pool.for_output()));
+  hrx::runtime::buffer_ptr backing;
+  IREE_ASSERT_OK(iree_hal_streaming_mem_pool_allocate_buffer(
+      compatibility_pool, 65536, backing.for_output()));
+  hrx::runtime::mem_pool_ptr finite, child;
+  const hrx_tlsf_pool_options_t finite_options = {};
+  IREE_ASSERT_OK(HRX_CALL(hrx_tlsf_pool_create_from_buffer(
+      backing, 0, UINT64_MAX, &finite_options, finite.for_output())));
+  const hrx_fixed_block_pool_options_t child_options = {
+      .block_size = 256,
+      .blocks_per_slab = 16,
+  };
+  IREE_ASSERT_OK(HRX_CALL(
+      hrx_fixed_block_pool_create(finite, &child_options, child.for_output())));
+  backing.reset();
+  finite.reset();
+  hrx_buffer_t denied = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        iree_hal_streaming_mem_pool_allocate_buffer(
+                            compatibility_pool, 1, &denied));
+  EXPECT_EQ(denied, nullptr);
+  hrx::runtime::semaphore_ptr completion;
+  IREE_ASSERT_OK(
+      HRX_CALL(hrx_semaphore_create(device_, 0, completion.for_output())));
+  hrx_semaphore_t semaphore = completion;
+  uint64_t allocated = 1;
+  const hrx_semaphore_list_t allocation_signal = {&semaphore, &allocated, 1};
+  const hrx_pool_reservation_request_t request = {256, 16};
+  hrx::runtime::buffer_ptr buffer;
+  hrx_queue_t queue = hrx_device_get_queue(device_, 0, 0);
+  IREE_ASSERT_OK(
+      HRX_CALL(hrx_queue_alloca(queue, nullptr, &allocation_signal, child, 1,
+                                &request, buffer.for_output())));
+  IREE_ASSERT_OK(
+      HRX_CALL(hrx_semaphore_wait(completion, allocated, UINT64_MAX)));
+  child.reset();
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        iree_hal_streaming_mem_pool_allocate_buffer(
+                            compatibility_pool, 1, &denied));
+  EXPECT_EQ(denied, nullptr);
+  uint64_t released = 2;
+  const hrx_semaphore_list_t release_signal = {&semaphore, &released, 1};
+  hrx_buffer_t root = buffer;
+  IREE_ASSERT_OK(HRX_CALL(hrx_queue_dealloca(queue, &allocation_signal,
+                                             &release_signal, 1, &root)));
+  IREE_ASSERT_OK(
+      HRX_CALL(hrx_semaphore_wait(completion, released, UINT64_MAX)));
+  buffer.reset();
+  IREE_ASSERT_OK(iree_hal_streaming_mem_pool_allocate_buffer(
+      compatibility_pool, 65536, backing.for_output()));
+  compatibility_pool.reset();
 }
 
 }  // namespace

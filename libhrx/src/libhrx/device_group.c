@@ -13,6 +13,25 @@ static_assert((uint32_t)HRX_WAIT_FLAG_YIELD == IREE_ASYNC_WAIT_FLAG_YIELD,
 static_assert((uint32_t)HRX_WAIT_FLAG_ACTIVE == IREE_ASYNC_WAIT_FLAG_ACTIVE,
               "wait flag mismatch");
 
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_TOPOLOGY_NODE_KIND_HOST_NUMA,
+                           IREE_HAL_TOPOLOGY_NODE_KIND_HOST_NUMA,
+                           "topology kinds must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_TOPOLOGY_NODE_KIND_PHYSICAL_DEVICE,
+                           IREE_HAL_TOPOLOGY_NODE_KIND_PHYSICAL_DEVICE,
+                           "topology kinds must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_TOPOLOGY_NODE_KIND_LOGICAL_DEVICE,
+                           IREE_HAL_TOPOLOGY_NODE_KIND_LOGICAL_DEVICE,
+                           "topology kinds must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_TOPOLOGY_NODE_KIND_MEMORY_DOMAIN,
+                           IREE_HAL_TOPOLOGY_NODE_KIND_MEMORY_DOMAIN,
+                           "topology kinds must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_TOPOLOGY_NODE_KIND_QUEUE_FAMILY,
+                           IREE_HAL_TOPOLOGY_NODE_KIND_QUEUE_FAMILY,
+                           "topology kinds must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_TOPOLOGY_NODE_KIND_FABRIC_ENDPOINT,
+                           IREE_HAL_TOPOLOGY_NODE_KIND_FABRIC_ENDPOINT,
+                           "topology kinds must match HAL");
+
 iree_status_t hrx_device_group_create_with_extensions(
     hrx_runtime_t runtime, size_t device_count,
     const hrx_device_create_params_t* devices,
@@ -153,4 +172,32 @@ size_t hrx_device_group_device_count(hrx_device_group_t group) {
 hrx_device_t hrx_device_group_get_device(hrx_device_group_t group,
                                          size_t index) {
   return group && index < group->device_count ? &group->devices[index] : NULL;
+}
+
+size_t hrx_device_group_topology_node_count(hrx_device_group_t group) {
+  return group ? iree_hal_topology_node_count(
+                     iree_hal_device_group_topology(group->hal_group))
+               : 0;
+}
+
+hrx_status_t hrx_device_group_query_topology_node(
+    hrx_device_group_t group, size_t ordinal, hrx_topology_node_t* out_node) {
+  if (!out_node) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "output is NULL");
+  }
+  *out_node = (hrx_topology_node_t){0};
+  if (!group || ordinal >= hrx_device_group_topology_node_count(group)) {
+    return hrx_make_status(HRX_STATUS_OUT_OF_RANGE, "invalid topology node");
+  }
+  const iree_hal_topology_node_t* node = iree_hal_topology_node_at(
+      iree_hal_device_group_topology(group->hal_group), ordinal);
+  *out_node = (hrx_topology_node_t){
+      .ordinal = node->ordinal,
+      .parent_ordinal = node->parent_ordinal,
+      .device_ordinal = node->device_ordinal,
+      .kind = (hrx_topology_node_kind_t)node->kind,
+      .local_ordinal = node->local_ordinal,
+      .physical_device_affinity = node->physical_device_affinity,
+  };
+  return hrx_ok_status();
 }

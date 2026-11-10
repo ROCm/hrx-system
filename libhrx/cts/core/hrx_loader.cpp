@@ -123,6 +123,30 @@ void HrxLoader::load(const std::string& path) {
   LOAD(device_group_device_count);
   LOAD(device_group_get_device);
 
+  LOAD(slab_pool_create);
+  LOAD(slab_cache_create);
+  LOAD(tlsf_pool_query_backing_request);
+  LOAD(fixed_block_pool_query_backing_request);
+  LOAD(tlsf_pool_create);
+  LOAD(fixed_block_pool_create);
+  LOAD(tlsf_pool_create_from_buffer);
+  LOAD(fixed_block_pool_create_from_buffer);
+  LOAD(mem_pool_retain);
+  LOAD(mem_pool_release);
+  LOAD(mem_pool_get_device_group);
+  LOAD(mem_pool_trim);
+  LOAD(mem_pool_query_capabilities);
+  LOAD(mem_pool_query_host_access);
+  LOAD(mem_pool_query_atomic_operations);
+  LOAD(mem_pool_query_zero_compute_atomic_operations);
+  LOAD(buffer_query_atomic_operations);
+  LOAD(buffer_query_zero_compute_atomic_operations);
+  LOAD(mem_pool_query_stats);
+  LOAD(device_group_topology_node_count);
+  LOAD(device_group_query_topology_node);
+  LOAD(queue_alloca);
+  LOAD(queue_dealloca);
+
   LOAD(gpu_initialize);
   LOAD(gpu_shutdown);
   LOAD(gpu_device_count);

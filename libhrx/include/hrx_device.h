@@ -264,6 +264,39 @@ HRX_API size_t hrx_device_group_device_count(hrx_device_group_t group);
 HRX_API hrx_device_t hrx_device_group_get_device(hrx_device_group_t group,
                                                  size_t index);
 
+// Immutable normalized topology. Node ordinals are stable for the group
+// lifetime; UINT32_MAX denotes an absent parent/device, not an uncertain
+// capability.
+typedef enum hrx_topology_node_kind_t {
+  HRX_TOPOLOGY_NODE_KIND_HOST_NUMA = 1,
+  HRX_TOPOLOGY_NODE_KIND_PHYSICAL_DEVICE = 2,
+  HRX_TOPOLOGY_NODE_KIND_LOGICAL_DEVICE = 3,
+  HRX_TOPOLOGY_NODE_KIND_MEMORY_DOMAIN = 4,
+  HRX_TOPOLOGY_NODE_KIND_QUEUE_FAMILY = 5,
+  HRX_TOPOLOGY_NODE_KIND_FABRIC_ENDPOINT = 6,
+} hrx_topology_node_kind_t;
+
+typedef struct hrx_topology_node_t {
+  // Stable ordinal within this group's topology.
+  uint32_t ordinal;
+  // Parent node, or UINT32_MAX for a root.
+  uint32_t parent_ordinal;
+  // Group device index, or UINT32_MAX when not tied to a logical device.
+  uint32_t device_ordinal;
+  // Concrete object represented by this node.
+  hrx_topology_node_kind_t kind;
+  // Kind-specific coordinate: OS NUMA node, physical device, memory domain,
+  // or queue family ordinal.
+  uint32_t local_ordinal;
+  // Physical-device subset within the associated logical device; zero when
+  // not applicable. This is topology identity, not queue selection policy.
+  uint64_t physical_device_affinity;
+} hrx_topology_node_t;
+
+HRX_API size_t hrx_device_group_topology_node_count(hrx_device_group_t group);
+HRX_API hrx_status_t hrx_device_group_query_topology_node(
+    hrx_device_group_t group, size_t ordinal, hrx_topology_node_t* out_node);
+
 //===----------------------------------------------------------------------===//
 // Device operations (generic, works for any accelerator type)
 //===----------------------------------------------------------------------===//
