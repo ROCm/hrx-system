@@ -546,6 +546,7 @@ typedef enum loom_aie2p_native_execution_e {
   LOOM_AIE2P_NATIVE_EXECUTION_CONFIGURATION,
   LOOM_AIE2P_NATIVE_EXECUTION_DMA,
   LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION,
+  LOOM_AIE2P_NATIVE_EXECUTION_INPUT,
 } loom_aie2p_native_execution_t;
 
 // One configuration-owned channel turn. Whole-record ownership makes a lock
@@ -649,6 +650,10 @@ typedef struct loom_aie2p_native_worker_t {
   uint8_t control_packet_count;
   // An external-write path already owns the core's completion stream.
   bool has_egress;
+  // Phased source selected for this communication-only worker.
+  struct loom_aie2p_native_input_t* input;
+  // Phased sources whose admission runs in this arithmetic worker.
+  struct loom_aie2p_native_input_t* inputs;
   // Reader-driven continuation groups sharing one window counter pair.
   struct loom_aie2p_native_refill_t* refills;
 } loom_aie2p_native_worker_t;
@@ -745,6 +750,8 @@ typedef struct loom_aie2p_native_context_t {
   iree_host_size_t distribution_sharing_capacity;
   // Complete entry program per physical core, initialized and joined once.
   loom_func_like_t* programs;
+  // Source descriptor relocations for stable caller-buffer input phases.
+  struct loom_aie2p_native_input_descriptor_t* input_descriptors;
   // Caller buffer contracts in source argument order.
   loom_aie2p_native_binding_t* bindings;
   // Number of caller buffer contracts.

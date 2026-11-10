@@ -112,6 +112,8 @@ bool loom_aie2p_array_route_workers(
 // allocator is used for DMA payload, core control packets, and task completion
 // streams. The caller owns packet filtering where endpoints multiplex traffic.
 // Packet routes include reused prefixes so each class can install its filters.
+// Shim DMA endpoints include the physical shim mux connection; their channels
+// name DMA engines, while other endpoints name stream-switch channels.
 bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
                                    uint32_t channel_index,
                                    uint32_t source_channel_index,

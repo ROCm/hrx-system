@@ -427,36 +427,66 @@ bool loom_cfg_loop_nest_calculate_block_execution_bounds(
   return bounded && exact;
 }
 
-void loom_cfg_loop_nest_order_blocks(const loom_cfg_loop_nest_t* nest,
-                                     uint16_t* out_blocks) {
+static void loom_cfg_loop_nest_order_blocks_impl(
+    const loom_cfg_loop_nest_t* nest, uint16_t* next, uint16_t* out_blocks) {
   const loom_cfg_graph_t* graph = nest->graph;
-  uint16_t block = 0;
+  uint16_t* heads = next + graph->block_count;
+  memset(heads, 0xFF, (nest->loop_count + 1) * sizeof(*heads));
+  // Each header occupies its parent's list. Prepending reverse postorder in
+  // reverse preserves every branch and reconvergence within each scope.
+  for (iree_host_size_t i = graph->reverse_postorder.count; i > 0; --i) {
+    const uint16_t block = graph->reverse_postorder.values[i - 1];
+    uint16_t scope = nest->innermost_loop_indices[block];
+    if (scope != LOOM_CFG_LOOP_NEST_NONE &&
+        nest->loops[scope].header_index == block) {
+      scope = nest->loops[scope].parent_loop_index;
+    }
+    const iree_host_size_t bucket =
+        scope == LOOM_CFG_LOOP_NEST_NONE ? nest->loop_count : scope;
+    next[block] = heads[bucket];
+    heads[bucket] = block;
+  }
+  uint16_t block = heads[nest->loop_count];
   for (iree_host_size_t i = 0; i < graph->reverse_postorder.count; ++i) {
     out_blocks[i] = block;
-    const loom_cfg_edge_index_span_t successors =
-        loom_cfg_graph_successor_edges(graph, block);
-    if (!successors.count) {
-      break;
-    }
-    const uint16_t loop_index = loom_cfg_loop_nest_innermost(nest, block);
-    const loom_cfg_natural_loop_t* loop =
-        loop_index == LOOM_CFG_LOOP_NEST_NONE ? NULL : &nest->loops[loop_index];
-    loom_cfg_edge_index_t edge =
-        loop && loop->header_index == block
-            ? successors
-                  .values[successors.values[0] == loop->exits.unique_index]
-            : successors.values[0];
-    // A backedge closes this one structural visit, including a loop whose
-    // header is also its latch. An inner exit may itself be an outer backedge;
-    // each closed loop contributes its retained exit edge exactly once.
-    for (;;) {
-      block = graph->edges[edge].target_block_index;
-      const uint16_t target_loop = loom_cfg_loop_nest_innermost(nest, block);
-      if (target_loop == LOOM_CFG_LOOP_NEST_NONE ||
-          edge != nest->loops[target_loop].backedges.unique_index) {
-        break;
+    uint16_t scope = nest->innermost_loop_indices[block];
+    if (scope != LOOM_CFG_LOOP_NEST_NONE &&
+        nest->loops[scope].header_index == block) {
+      if (heads[scope] != UINT16_MAX) {
+        block = heads[scope];
+        continue;
       }
-      edge = nest->loops[target_loop].exits.unique_index;
+      scope = nest->loops[scope].parent_loop_index;
+    }
+    block = next[block];
+    // Completed scope lists resume immediately after their header. Each loop
+    // closes once, including arbitrarily deep nests sharing the same latch.
+    while (block == UINT16_MAX && scope != LOOM_CFG_LOOP_NEST_NONE) {
+      block = next[nest->loops[scope].header_index];
+      scope = nest->loops[scope].parent_loop_index;
     }
   }
+}
+
+iree_status_t loom_cfg_loop_nest_order_blocks(const loom_cfg_loop_nest_t* nest,
+                                              iree_arena_allocator_t* arena,
+                                              uint16_t* out_blocks) {
+  const loom_cfg_graph_t* graph = nest->graph;
+  if (!nest->loop_count) {
+    if (graph->reverse_postorder.count) {
+      memcpy(out_blocks, graph->reverse_postorder.values,
+             graph->reverse_postorder.count * sizeof(*out_blocks));
+    }
+    return iree_ok_status();
+  }
+  const iree_arena_checkpoint_t checkpoint = iree_arena_checkpoint_save(arena);
+  uint16_t* scratch = NULL;
+  iree_status_t status = iree_arena_allocate_array(
+      arena, graph->block_count + nest->loop_count + 1, sizeof(*scratch),
+      (void**)&scratch);
+  if (iree_status_is_ok(status)) {
+    loom_cfg_loop_nest_order_blocks_impl(nest, scratch, out_blocks);
+  }
+  iree_arena_checkpoint_restore(&checkpoint);
+  return status;
 }

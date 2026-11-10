@@ -177,6 +177,7 @@ AMDF_CTEST_REGEX = r"^libamdf/"
 XDNA_BAZEL_TARGETS = AMDF_BAZEL_TARGETS + (
     "//runtime/src/iree/hal/driver/amd/...",
     "//loom/target/amd/xdna/...",
+    "//loom/src/loom/target/arch/amd/xdna/...",
     "//loom/src/loom/tooling/target/amd/xdna/...",
 )
 XDNA_BAZEL_TEST_TAG_FILTERS = (AMDF_BUILD_REQUIREMENT_TAG, XDNA_RUN_REQUIREMENT_TAG)
@@ -184,10 +185,11 @@ XDNA_CMAKE_BUILD_TARGETS = (
     "libamdf/all",
     "runtime/src/iree/hal/driver/amd/all",
     "loom/target/amd/xdna/all",
+    "loom/src/loom/target/arch/amd/xdna/all",
     "loom/src/loom/tooling/target/amd/xdna/all",
 )
 XDNA_CTEST_PACKAGE_REGEX = (
-    r"^(iree/hal/driver/amd|loom/(target|tooling/target)/amd/xdna)/"
+    r"^(iree/hal/driver/amd|loom/(target|target/arch|tooling/target)/amd/xdna)/"
 )
 # Compile both client families; Linux admits only XDNA hardware execution.
 # Common runtime components enter through the ELF consumers' dependencies.
@@ -200,12 +202,7 @@ AMD_CLIENT_BAZEL_OPTIONS = (
     "--//loom/config/import:enable=",
     "--//loom/config/emit:enable=elf,vm",
 )
-AMD_CLIENT_BAZEL_TARGETS = (
-    *AMDF_BAZEL_TARGETS,
-    "//runtime/src/iree/hal/driver/amd/...",
-    "//loom/target/amd/xdna/...",
-    "//loom/src/loom/tooling/target/amd/xdna/...",
-)
+AMD_CLIENT_BAZEL_TARGETS = XDNA_BAZEL_TARGETS
 AMD_CLIENT_WINDOWS_BAZEL_OPTIONS = AMD_CLIENT_BAZEL_OPTIONS + (
     "--//build_tools/vulkan/config:enabled=true",
     "--//build_tools/d3d12/config:enabled=true",

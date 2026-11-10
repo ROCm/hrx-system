@@ -9,8 +9,10 @@
 #include <stdlib.h>
 
 #include "loom/analysis/pipeline/progress.h"
+#include "loom/ops/channel/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/input.h"
 
 static uint64_t loom_aie2p_native_progress_distance(void* user_data,
                                                     uint32_t source,
@@ -25,12 +27,29 @@ static uint64_t loom_aie2p_native_progress_distance(void* user_data,
          (uint32_t)abs((int)origin.row - (int)target.row);
 }
 
+static uint64_t loom_aie2p_native_input_distance(void* user_data,
+                                                 uint32_t source,
+                                                 uint32_t reader) {
+  const loom_aie2p_native_context_t* context = user_data;
+  const loom_xdna_tile_coordinate_t origin =
+      context->workers[source].tile->coordinate;
+  const loom_xdna_tile_coordinate_t target =
+      context->workers[reader].tile->coordinate;
+  return (uint32_t)abs((int)origin.column - (int)target.column) + target.row;
+}
+
 iree_status_t loom_aie2p_native_select_progress(
     loom_aie2p_native_context_t* context,
-    const loom_pipeline_realization_t* realization) {
+    const loom_pipeline_realization_t* realization, bool* out_valid) {
+  *out_valid = false;
   const iree_host_size_t count = realization->invocations.channel_count;
   bool needs_progress = false;
+  iree_host_size_t input_count = 0, phase_count = 0;
   for (iree_host_size_t i = 0; i < realization->invocations.worker_count; ++i) {
+    if (context->workers[i].input) {
+      ++input_count;
+      phase_count += context->workers[i].input->source->phase_count;
+    }
     needs_progress |= realization->workers[i].transport.prefix_cycles != 0;
   }
   for (iree_host_size_t i = 0; i < count; ++i) {
@@ -41,7 +60,8 @@ iree_status_t loom_aie2p_native_select_progress(
         channel->cursor.reader.maximum_admissions >
         (uint32_t)dma->maximum_task_repeat_count * dma->task_queue_depth;
   }
-  if (!needs_progress) {
+  if (!needs_progress && !input_count) {
+    *out_valid = true;
     return iree_ok_status();
   }
   loom_pipeline_progress_endpoint_t* endpoints;
@@ -59,23 +79,90 @@ iree_status_t loom_aie2p_native_select_progress(
         .writes = channel->cursor.writer.shared
                       ? 0
                       : channel->cursor.writer.maximum_admissions,
-        .observer =
-            !channel->replay.record_count && !channel->cursor.reader.shared &&
-            !channel->cursor.writer.shared && reader != UINT32_MAX &&
-            context->workers[reader].execution ==
-                LOOM_AIE2P_NATIVE_EXECUTION_CORE &&
-            realization->workers[reader].block_execution_counts != NULL};
+        .observer = !channel->replay.record_count &&
+                    !channel->cursor.reader.shared &&
+                    !channel->cursor.writer.shared && reader != UINT32_MAX &&
+                    context->workers[reader].execution ==
+                        LOOM_AIE2P_NATIVE_EXECUTION_CORE &&
+                    channel->cursor.reader.exact_admissions};
+  }
+  loom_pipeline_progress_site_t* sites;
+  uint32_t *inputs, *phases;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(context->pass->arena, input_count ? count : 0,
+                                sizeof(*sites), (void**)&sites));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      context->pass->arena, input_count, sizeof(*inputs), (void**)&inputs));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      context->pass->arena, phase_count, sizeof(*phases), (void**)&phases));
+  if (input_count) {
+    memset(sites, 0xff, count * sizeof(*sites));
+    iree_host_size_t input_index = 0, phase_index = 0;
+    for (iree_host_size_t i = 0; i < realization->invocations.worker_count;
+         ++i) {
+      const loom_pipeline_worker_t* worker = &realization->workers[i];
+      if (context->workers[i].input) {
+        inputs[input_index++] = i;
+        for (iree_host_size_t j = 0; j < worker->transport.input->phase_count;
+             ++j) {
+          phases[phase_index++] = loom_pipeline_invocations_channel_index(
+              &realization->invocations,
+              worker->transport.input->phases[j].reservation->channel);
+        }
+      }
+      for (iree_host_size_t j = 0; j < worker->channels.action_count; ++j) {
+        const loom_channel_plan_action_t* action = &worker->channels.actions[j];
+        if (!loom_channel_acquire_isa(action->op)) {
+          continue;
+        }
+        const iree_host_size_t channel =
+            loom_pipeline_invocations_channel_index(&realization->invocations,
+                                                    action->channel);
+        if (!endpoints[channel].observer) {
+          continue;
+        }
+        if (sites[channel].worker != UINT32_MAX) {
+          endpoints[channel].observer = false;
+        } else {
+          sites[channel] =
+              (loom_pipeline_progress_site_t){(uint32_t)i, (uint32_t)j};
+        }
+      }
+    }
   }
   const loom_pipeline_progress_callback_t callback = {
       .cost = loom_aie2p_native_progress_distance, .user_data = context};
   uint32_t* readers;
+  loom_pipeline_progress_observations_t* observations;
   IREE_RETURN_IF_ERROR(loom_pipeline_progress_select(
       &realization->invocations, realization->workers, endpoints, callback,
-      context->pass->arena, &readers));
+      phases, phase_count, context->pass->arena, &readers, &observations));
   for (iree_host_size_t i = 0; i < count; ++i) {
     context->channels[i].progress =
         readers[i] != UINT32_MAX ? &context->channels[readers[i]] : NULL;
   }
+  const loom_pipeline_progress_callback_t continuation_cost = {
+      .cost = loom_aie2p_native_input_distance, .user_data = context};
+  loom_pipeline_continuation_t* continuations;
+  IREE_RETURN_IF_ERROR(loom_pipeline_continuations_select(
+      &realization->invocations, realization->workers, observations, sites,
+      inputs, input_count, continuation_cost, context->pass->arena,
+      &continuations));
+  for (iree_host_size_t i = 0; i < input_count; ++i) {
+    loom_aie2p_native_input_t* input = context->workers[inputs[i]].input;
+    if (continuations[i].worker == UINT32_MAX) {
+      return loom_aie2p_native_reject(
+          context, realization->workers[inputs[i]].source->declaration,
+          IREE_SV("an existing reader observing every stable input phase in "
+                  "one lifetime"));
+    }
+    input->continuation = continuations[i];
+    loom_aie2p_native_worker_t* owner =
+        &context->workers[continuations[i].worker];
+    input->next = owner->inputs;
+    owner->inputs = input;
+  }
+  *out_valid = true;
   return iree_ok_status();
 }
 

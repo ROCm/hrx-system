@@ -1,0 +1,364 @@
+// RUN: emit pipeline-transport @stream phases
+
+// One full-projection input stream, with scales published before the panels.
+// One lease owns 96 F32 scales followed by a packed 96x16384 I8 tile.
+// Scales enter once; the tile makes eight complete 256-panel passes.
+func.def @ingress(%input: channel<tile<1573248xi8>>, %scales: channel<tile<96xf32>>, %panels: channel<tile<6144xi8>>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %row_groups = index.constant 11 : index
+  %column_groups = index.constant 8 : index
+  %panel_count = index.constant 256 : index
+  %panel_bytes = index.constant 6144 : index
+  %prefix_bytes = index.constant 384 : index
+  cfg.br ^record_header(%begin: index)
+^record_header(%record: index):
+  %more_records = index.cmp ult, %record, %row_groups : index
+  cfg.cond_br %more_records, ^admit, ^done
+^admit:
+  %read, %payload = channel.acquire %input : channel<tile<1573248xi8>> -> (read<tile<1573248xi8>>, view<1573248xi8>)
+  %prefix = view.subview %payload[0] : view<1573248xi8> -> view<384xi8>
+  %source_scales = view.bitcast %prefix : view<384xi8> -> view<96xf32>
+  %scale_write, %destination_scales = channel.reserve %scales : channel<tile<96xf32>> -> (write<tile<96xf32>>, view<96xf32>)
+  %scale_copy = kernel.async.copy %source_scales to %destination_scales {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<96xf32> to view<96xf32> -> kernel.async.token
+  %scale_group = kernel.async.group %scale_copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %scale_group {newer_groups = 0} : kernel.async.group
+  channel.publish %scale_write : write<tile<96xf32>>
+  cfg.br ^column_header(%begin: index)
+^column_header(%column: index):
+  %more_columns = index.cmp ult, %column, %column_groups : index
+  cfg.cond_br %more_columns, ^panel_entry, ^release
+^panel_entry:
+  cfg.br ^panel_header(%begin: index)
+^panel_header(%panel: index):
+  %more_panels = index.cmp ult, %panel, %panel_count : index
+  cfg.cond_br %more_panels, ^transfer, ^next_column
+^transfer:
+  %panel_offset = index.madd %panel, %panel_bytes, %prefix_bytes : index
+  %source_panel = view.subview %payload[%panel_offset] : view<1573248xi8> -> view<6144xi8>
+  %write, %destination = channel.reserve %panels : channel<tile<6144xi8>> -> (write<tile<6144xi8>>, view<6144xi8>)
+  %copy = kernel.async.copy %source_panel to %destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<6144xi8> to view<6144xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.publish %write : write<tile<6144xi8>>
+  %next_panel = index.add %panel, %step : index
+  cfg.br ^panel_header(%next_panel: index)
+^next_column:
+  %next = index.add %column, %step : index
+  cfg.br ^column_header(%next: index)
+^release:
+  channel.release %read : read<tile<1573248xi8>>
+  %next_record = index.add %record, %step : index
+  cfg.br ^record_header(%next_record: index)
+^done:
+  func.return
+}
+
+pipeline.def<kernel> public @stream() run(%external_arg: buffer, %local_scales_arg: buffer, %local_panels_arg: buffer) {
+  %external_unique, %scales_unique, %panels_unique = buffer.assume.noalias %external_arg, %local_scales_arg, %local_panels_arg : buffer, buffer, buffer
+  %external = buffer.assume.memory_space<global> %external_unique : buffer
+  %scale_storage = buffer.assume.memory_space<workgroup> %scales_unique : buffer
+  %panel_storage = buffer.assume.memory_space<workgroup> %panels_unique : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %scale_capacity = index.constant 1 : index
+  %input_slots = buffer.view %external[%origin] : buffer -> view<2x1573248xi8>
+  %input = channel.bind<fifo> %input_slots, %capacity : view<2x1573248xi8>, index -> channel<tile<1573248xi8>>
+  %scale_slots = buffer.view %scale_storage[%origin] : buffer -> view<1x96xf32>
+  %scales = channel.bind<fifo> %scale_slots, %scale_capacity : view<1x96xf32>, index -> channel<tile<96xf32>>
+  %panel_slots = buffer.view %panel_storage[%origin] : buffer -> view<2x6144xi8>
+  %panels = channel.bind<fifo> %panel_slots, %capacity : view<2x6144xi8>, index -> channel<tile<6144xi8>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @ingress(%input, %scales, %panels) : (channel<tile<1573248xi8>>, channel<tile<96xf32>>, channel<tile<6144xi8>>)
+  }
+}
+
+// ----
+worker 0: transport=borrowed-movement execution_counts=exact batches=0 streams=2
+  repetitions=0 sources_stable=yes
+  sequence: sites=10 repetitions=0
+  input: source=record admissions=11 phases=2
+    phase 0: scope=2 transfers=1 period=1 source_offset=0 source_stride=0 destination_offset=0
+    phase 1: scope=0 transfers=2048 period=256 source_offset=384 source_stride=6144 destination_offset=0
+    loop 0: iterations=256 parent=1
+    loop 1: iterations=8 parent=2
+    loop 2: iterations=11 parent=none
+    channel.acquire: executions=11 scope=2
+    channel.reserve: executions=11 scope=2
+    kernel.async.copy: executions=11 scope=2
+    kernel.async.wait: executions=11 scope=2
+    channel.publish: executions=11 scope=2
+    channel.reserve: executions=22528 scope=0
+    kernel.async.copy: executions=22528 scope=0
+    kernel.async.wait: executions=22528 scope=0
+    channel.publish: executions=22528 scope=0
+    channel.release: executions=11 scope=2
+
+// ====
+
+// RUN: emit pipeline-transport @stream phases
+
+// Both phases repeat together; equal counts alone must not turn this into
+// two consecutive replay loops. Each publication follows its own copy wait.
+func.def @worker(%source: channel<tile<8xi32>>, %panels: channel<tile<4xi32>>, %storage: buffer) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  %read, %payload = channel.acquire %source : channel<tile<8xi32>> -> (read<tile<8xi32>>, view<8xi32>)
+  %head = view.subview %payload[0] : view<8xi32> -> view<4xi32>
+  %tail = view.subview %payload[4] : view<8xi32> -> view<4xi32>
+  cfg.br ^header(%begin: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %end : index
+  cfg.cond_br %more, ^transfer, ^done
+^transfer:
+  %first, %first_view = channel.reserve %panels : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %head_copy = kernel.async.copy %head to %first_view {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %head_group = kernel.async.group %head_copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %head_group {newer_groups = 0} : kernel.async.group
+  channel.publish %first : write<tile<4xi32>>
+  %second, %second_view = channel.reserve %panels : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %tail_copy = kernel.async.copy %tail to %second_view {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %tail_group = kernel.async.group %tail_copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %tail_group {newer_groups = 0} : kernel.async.group
+  channel.publish %second : write<tile<4xi32>>
+  %next = index.add %iteration, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  channel.release %read : read<tile<8xi32>>
+  func.return
+}
+
+pipeline.def<kernel> public @stream() run(%external_arg: buffer, %local_arg: buffer) {
+  %external_unique, %local_unique = buffer.assume.noalias %external_arg, %local_arg : buffer, buffer
+  %external = buffer.assume.memory_space<global> %external_unique : buffer
+  %local = buffer.assume.memory_space<workgroup> %local_unique : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %source_slots = buffer.view %external[%origin] : buffer -> view<2x8xi32>
+  %source = channel.bind<fifo> %source_slots, %capacity : view<2x8xi32>, index -> channel<tile<8xi32>>
+  %panel_slots = buffer.view %local[%origin] : buffer -> view<2x4xi32>
+  %panels = channel.bind<fifo> %panel_slots, %capacity : view<2x4xi32>, index -> channel<tile<4xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @worker(%source, %panels, %external) : (channel<tile<8xi32>>, channel<tile<4xi32>>, buffer)
+  }
+}
+
+// ----
+worker 0: transport=borrowed-movement execution_counts=exact batches=0 streams=1
+  repetitions=0 sources_stable=yes
+  sequence: sites=10 repetitions=0
+  input: source=record admissions=1 phases=2
+    phase 0: scope=0 transfers=4 period=4 source_offset=0 source_stride=0 destination_offset=0
+    phase 1: scope=0 transfers=4 period=4 source_offset=16 source_stride=0 destination_offset=0
+    loop 0: iterations=4 parent=none
+    channel.acquire: executions=1 scope=none
+    channel.reserve: executions=4 scope=0
+    kernel.async.copy: executions=4 scope=0
+    kernel.async.wait: executions=4 scope=0
+    channel.publish: executions=4 scope=0
+    channel.reserve: executions=4 scope=0
+    kernel.async.copy: executions=4 scope=0
+    kernel.async.wait: executions=4 scope=0
+    channel.publish: executions=4 scope=0
+    channel.release: executions=1 scope=none
+
+// ====
+
+// RUN: emit pipeline-transport @stream phases
+
+// Enclosing storage lifetime can feed several independently completed phases.
+// Source ownership is not inferred from a shared buffer address.
+func.def @worker(%source: channel<tile<8xi32>>, %panels: channel<tile<4xi32>>, %storage: buffer) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  %origin = index.constant 0 : offset
+  %payload = buffer.view %storage[%origin] : buffer -> view<8xi32>
+  %head = view.subview %payload[0] : view<8xi32> -> view<4xi32>
+  %tail = view.subview %payload[4] : view<8xi32> -> view<4xi32>
+  cfg.br ^header(%begin: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %end : index
+  cfg.cond_br %more, ^transfer, ^done
+^transfer:
+  %first, %first_view = channel.reserve %panels : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %head_copy = kernel.async.copy %head to %first_view {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %head_group = kernel.async.group %head_copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %head_group {newer_groups = 0} : kernel.async.group
+  channel.publish %first : write<tile<4xi32>>
+  %second, %second_view = channel.reserve %panels : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %tail_copy = kernel.async.copy %tail to %second_view {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %tail_group = kernel.async.group %tail_copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %tail_group {newer_groups = 0} : kernel.async.group
+  channel.publish %second : write<tile<4xi32>>
+  %next = index.add %iteration, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def<kernel> public @stream() run(%external_arg: buffer, %local_arg: buffer) {
+  %external_unique, %local_unique = buffer.assume.noalias %external_arg, %local_arg : buffer, buffer
+  %external = buffer.assume.memory_space<global> %external_unique : buffer
+  %local = buffer.assume.memory_space<workgroup> %local_unique : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %source_slots = buffer.view %external[%origin] : buffer -> view<2x8xi32>
+  %source = channel.bind<fifo> %source_slots, %capacity : view<2x8xi32>, index -> channel<tile<8xi32>>
+  %panel_slots = buffer.view %local[%origin] : buffer -> view<2x4xi32>
+  %panels = channel.bind<fifo> %panel_slots, %capacity : view<2x4xi32>, index -> channel<tile<4xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @worker(%source, %panels, %external) : (channel<tile<8xi32>>, channel<tile<4xi32>>, buffer)
+  }
+}
+
+// ----
+worker 0: transport=borrowed-movement execution_counts=exact batches=0 streams=1
+  repetitions=4 sources_stable=yes
+  sequence: sites=8 repetitions=4
+  input: source=storage admissions=1 phases=2
+    phase 0: scope=0 transfers=4 period=4 source_offset=0 source_stride=0 destination_offset=0
+    phase 1: scope=0 transfers=4 period=4 source_offset=16 source_stride=0 destination_offset=0
+    loop 0: iterations=4 parent=none
+    channel.reserve: executions=4 scope=0
+    kernel.async.copy: executions=4 scope=0
+    kernel.async.wait: executions=4 scope=0
+    channel.publish: executions=4 scope=0
+    channel.reserve: executions=4 scope=0
+    kernel.async.copy: executions=4 scope=0
+    kernel.async.wait: executions=4 scope=0
+    channel.publish: executions=4 scope=0
+
+// ====
+
+// RUN: emit pipeline-transport @stream phases
+
+// One phase reads outside the acquired view. Sharing its backing address does
+// not make this a proof that every copy belongs to that acquired lifetime.
+func.def @worker(%source: channel<tile<8xi32>>, %panels: channel<tile<4xi32>>, %storage: buffer) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  %read, %payload = channel.acquire %source : channel<tile<8xi32>> -> (read<tile<8xi32>>, view<8xi32>)
+  %head = view.subview %payload[0] : view<8xi32> -> view<4xi32>
+  %tail_origin = index.constant 16 : offset
+  %tail = buffer.view %storage[%tail_origin] : buffer -> view<4xi32>
+  cfg.br ^header(%begin: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %end : index
+  cfg.cond_br %more, ^transfer, ^done
+^transfer:
+  %first, %first_view = channel.reserve %panels : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %head_copy = kernel.async.copy %head to %first_view {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %head_group = kernel.async.group %head_copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %head_group {newer_groups = 0} : kernel.async.group
+  channel.publish %first : write<tile<4xi32>>
+  %second, %second_view = channel.reserve %panels : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %tail_copy = kernel.async.copy %tail to %second_view {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %tail_group = kernel.async.group %tail_copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %tail_group {newer_groups = 0} : kernel.async.group
+  channel.publish %second : write<tile<4xi32>>
+  %next = index.add %iteration, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  channel.release %read : read<tile<8xi32>>
+  func.return
+}
+
+pipeline.def<kernel> public @stream() run(%external_arg: buffer, %local_arg: buffer) {
+  %external_unique, %local_unique = buffer.assume.noalias %external_arg, %local_arg : buffer, buffer
+  %external = buffer.assume.memory_space<global> %external_unique : buffer
+  %local = buffer.assume.memory_space<workgroup> %local_unique : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %source_slots = buffer.view %external[%origin] : buffer -> view<2x8xi32>
+  %source = channel.bind<fifo> %source_slots, %capacity : view<2x8xi32>, index -> channel<tile<8xi32>>
+  %panel_slots = buffer.view %local[%origin] : buffer -> view<2x4xi32>
+  %panels = channel.bind<fifo> %panel_slots, %capacity : view<2x4xi32>, index -> channel<tile<4xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @worker(%source, %panels, %external) : (channel<tile<8xi32>>, channel<tile<4xi32>>, buffer)
+  }
+}
+
+// ----
+worker 0: transport=borrowed-movement execution_counts=exact batches=0 streams=1
+  repetitions=0 sources_stable=yes
+  sequence: sites=10 repetitions=0
+    loop 0: iterations=4 parent=none
+    channel.acquire: executions=1 scope=none
+    channel.reserve: executions=4 scope=0
+    kernel.async.copy: executions=4 scope=0
+    kernel.async.wait: executions=4 scope=0
+    channel.publish: executions=4 scope=0
+    channel.reserve: executions=4 scope=0
+    kernel.async.copy: executions=4 scope=0
+    kernel.async.wait: executions=4 scope=0
+    channel.publish: executions=4 scope=0
+    channel.release: executions=1 scope=none
+
+// ====
+
+// RUN: emit pipeline-transport @stream phases
+
+// Two reservations and copies complete together. The ordered transport remains
+// represented, but there are no independently completed input phases.
+func.def @worker(%source: channel<tile<8xi32>>, %panels: channel<tile<4xi32>>, %second_panels: channel<tile<4xi32>>, %storage: buffer) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  %read, %payload = channel.acquire %source : channel<tile<8xi32>> -> (read<tile<8xi32>>, view<8xi32>)
+  %head = view.subview %payload[0] : view<8xi32> -> view<4xi32>
+  %tail = view.subview %payload[4] : view<8xi32> -> view<4xi32>
+  cfg.br ^header(%begin: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %end : index
+  cfg.cond_br %more, ^transfer, ^done
+^transfer:
+  %first, %first_view = channel.reserve %panels : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %head_copy = kernel.async.copy %head to %first_view {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %second, %second_view = channel.reserve %second_panels : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %tail_copy = kernel.async.copy %tail to %second_view {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %tail_group = kernel.async.group %head_copy, %tail_copy : kernel.async.token, kernel.async.token -> kernel.async.group
+  kernel.async.wait %tail_group {newer_groups = 0} : kernel.async.group
+  channel.publish %first : write<tile<4xi32>>
+  channel.publish %second : write<tile<4xi32>>
+  %next = index.add %iteration, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  channel.release %read : read<tile<8xi32>>
+  func.return
+}
+
+pipeline.def<kernel> public @stream() run(%external_arg: buffer, %local_arg: buffer, %second_arg: buffer) {
+  %external_unique, %local_unique, %second_unique = buffer.assume.noalias %external_arg, %local_arg, %second_arg : buffer, buffer, buffer
+  %external = buffer.assume.memory_space<global> %external_unique : buffer
+  %local = buffer.assume.memory_space<workgroup> %local_unique : buffer
+  %second_storage = buffer.assume.memory_space<workgroup> %second_unique : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %source_slots = buffer.view %external[%origin] : buffer -> view<2x8xi32>
+  %source = channel.bind<fifo> %source_slots, %capacity : view<2x8xi32>, index -> channel<tile<8xi32>>
+  %panel_slots = buffer.view %local[%origin] : buffer -> view<2x4xi32>
+  %panels = channel.bind<fifo> %panel_slots, %capacity : view<2x4xi32>, index -> channel<tile<4xi32>>
+  %second_slots = buffer.view %second_storage[%origin] : buffer -> view<2x4xi32>
+  %second_panels = channel.bind<fifo> %second_slots, %capacity : view<2x4xi32>, index -> channel<tile<4xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @worker(%source, %panels, %second_panels, %external) : (channel<tile<8xi32>>, channel<tile<4xi32>>, channel<tile<4xi32>>, buffer)
+  }
+}
+
+// ----
+worker 0: transport=borrowed-movement execution_counts=exact batches=0 streams=1
+  repetitions=0 sources_stable=yes
+  sequence: sites=9 repetitions=0
+    loop 0: iterations=4 parent=none
+    channel.acquire: executions=1 scope=none
+    channel.reserve: executions=4 scope=0
+    kernel.async.copy: executions=4 scope=0
+    channel.reserve: executions=4 scope=0
+    kernel.async.copy: executions=4 scope=0
+    kernel.async.wait: executions=4 scope=0
+    channel.publish: executions=4 scope=0
+    channel.publish: executions=4 scope=0
+    channel.release: executions=1 scope=none

@@ -6,6 +6,10 @@
 
 #include "loom/analysis/pipeline/progress.h"
 
+#include <string.h>
+
+#include "loom/util/adaptive_sort.h"
+
 typedef struct loom_pipeline_progress_edge_t {
   // Next source depending on the same destination's progress.
   uint32_t next;
@@ -20,13 +24,95 @@ typedef struct loom_pipeline_progress_node_t {
   uint32_t pending;
 } loom_pipeline_progress_node_t;
 
+// Optional forward links share the exact edges built by the progress owner.
+// They are only needed when retaining complete observation populations.
+typedef struct loom_pipeline_progress_downstream_t {
+  // Next edge leaving the same source channel, or UINT32_MAX.
+  uint32_t next;
+  // Destination of this admitted equal-record copy edge.
+  uint32_t destination;
+} loom_pipeline_progress_downstream_t;
+
+typedef struct loom_pipeline_progress_population_t {
+  // First outgoing edge for each channel, or UINT32_MAX.
+  uint32_t* first;
+  // Forward links parallel to the existing reverse graph's edge table.
+  loom_pipeline_progress_downstream_t* edges;
+  // Retained channel-indexed observation sets.
+  loom_pipeline_progress_observations_t* rows;
+  // Visited-channel tags for each requested source population.
+  uint32_t* marks;
+  // Reusable unique observation output; at most one entry per channel.
+  uint32_t* merged;
+} loom_pipeline_progress_population_t;
+
+static bool loom_pipeline_progress_channel_less(const uint32_t* lhs,
+                                                const uint32_t* rhs) {
+  return *lhs < *rhs;
+}
+LOOM_DEFINE_ADAPTIVE_SORT(loom_pipeline_progress_sort_channels, uint32_t,
+                          loom_pipeline_progress_channel_less)
+
+static iree_status_t loom_pipeline_progress_retain_observations(
+    uint32_t source, iree_host_size_t channel_count,
+    const loom_pipeline_progress_endpoint_t* endpoints, const uint32_t* readers,
+    uint32_t* worklist, loom_pipeline_progress_population_t* population,
+    iree_arena_allocator_t* arena) {
+  if (population->rows[source].channels || readers[source] == UINT32_MAX) {
+    return iree_ok_status();
+  }
+  if (!population->marks) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, channel_count,
+                                                   sizeof(*population->marks),
+                                                   (void**)&population->marks));
+    memset(population->marks, 0xFF, channel_count * sizeof(*population->marks));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, channel_count, sizeof(*population->merged),
+        (void**)&population->merged));
+  }
+  iree_host_size_t head = 0, tail = 0, count = 0;
+  population->marks[source] = source;
+  worklist[tail++] = source;
+  while (head < tail) {
+    const uint32_t channel = worklist[head++];
+    if (endpoints[channel].observer) {
+      population->merged[count++] = channel;
+    }
+    for (uint32_t edge = population->first[channel]; edge != UINT32_MAX;
+         edge = population->edges[edge].next) {
+      const uint32_t destination = population->edges[edge].destination;
+      if (population->marks[destination] == source ||
+          readers[destination] == UINT32_MAX ||
+          endpoints[destination].reads != endpoints[source].reads) {
+        continue;
+      }
+      population->marks[destination] = source;
+      worklist[tail++] = destination;
+    }
+  }
+  loom_pipeline_progress_sort_channels(population->merged, count);
+  uint32_t* channels;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, count, sizeof(*channels), (void**)&channels));
+  memcpy(channels, population->merged, count * sizeof(*channels));
+  population->rows[source] = (loom_pipeline_progress_observations_t){
+      .channels = channels, .count = count};
+  return iree_ok_status();
+}
+
 iree_status_t loom_pipeline_progress_select(
     const loom_pipeline_invocations_t* invocations,
     const loom_pipeline_worker_t* workers,
     const loom_pipeline_progress_endpoint_t* endpoints,
-    loom_pipeline_progress_callback_t callback, iree_arena_allocator_t* arena,
-    uint32_t** out_readers) {
+    loom_pipeline_progress_callback_t callback,
+    const uint32_t* observation_sources,
+    iree_host_size_t observation_source_count, iree_arena_allocator_t* arena,
+    uint32_t** out_readers,
+    loom_pipeline_progress_observations_t** out_observations) {
   *out_readers = NULL;
+  if (out_observations) {
+    *out_observations = NULL;
+  }
   const iree_host_size_t count = invocations->channel_count;
   if (!count) {
     return iree_ok_status();
@@ -54,6 +140,18 @@ iree_status_t loom_pipeline_progress_select(
   loom_pipeline_progress_edge_t* edges;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, edge_capacity, sizeof(*edges), (void**)&edges));
+  loom_pipeline_progress_population_t population = {0};
+  if (observation_source_count) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, count, sizeof(*population.first), (void**)&population.first));
+    memset(population.first, 0xFF, count * sizeof(*population.first));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, edge_capacity,
+                                                   sizeof(*population.edges),
+                                                   (void**)&population.edges));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, count, sizeof(*population.rows), (void**)&population.rows));
+    memset(population.rows, 0, count * sizeof(*population.rows));
+  }
   for (iree_host_size_t i = 0; i < count; ++i) {
     nodes[i] = (loom_pipeline_progress_node_t){.upstream = UINT32_MAX};
     readers[i] =
@@ -83,6 +181,11 @@ iree_status_t loom_pipeline_progress_select(
         }
         edges[edge_count] = (loom_pipeline_progress_edge_t){
             .next = nodes[destination].upstream, .source = source};
+        if (observation_source_count) {
+          population.edges[edge_count] = (loom_pipeline_progress_downstream_t){
+              .next = population.first[source], .destination = destination};
+          population.first[source] = edge_count;
+        }
         nodes[destination].upstream = edge_count++;
         ++nodes[source].pending;
       }
@@ -128,6 +231,18 @@ iree_status_t loom_pipeline_progress_select(
       readers[i] = UINT32_MAX;
     }
   }
+  // Complete only the requested transitive populations. Retaining one set at
+  // every intermediate observer would make a chain quadratic even when its
+  // caller needs just one phase. Reuse the completed topological worklist;
+  // repeated requests for a source share its already retained result.
+  for (iree_host_size_t i = 0; i < observation_source_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_pipeline_progress_retain_observations(
+        observation_sources[i], count, endpoints, readers, ready, &population,
+        arena));
+  }
   *out_readers = readers;
+  if (out_observations) {
+    *out_observations = population.rows;
+  }
   return iree_ok_status();
 }

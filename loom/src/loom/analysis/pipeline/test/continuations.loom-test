@@ -1,0 +1,158 @@
+// RUN: emit pipeline-continuations @stream
+
+// Reverse demand order selects the first actual read, not source phase zero.
+func.def @ingress(%source: buffer, %prefix: channel<tile<4xi32>>, %bulk: channel<tile<4xi32>>) {
+  %origin = index.constant 0 : offset
+  %input = buffer.view %source[%origin] : buffer -> view<4xi32>
+  %prefix_write, %prefix_view = channel.reserve %prefix : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %prefix_copy = kernel.async.copy %input to %prefix_view {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %prefix_group = kernel.async.group %prefix_copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %prefix_group {newer_groups = 0} : kernel.async.group
+  channel.publish %prefix_write : write<tile<4xi32>>
+  %bulk_write, %bulk_view = channel.reserve %bulk : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %bulk_copy = kernel.async.copy %input to %bulk_view {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %bulk_group = kernel.async.group %bulk_copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %bulk_group {newer_groups = 0} : kernel.async.group
+  channel.publish %bulk_write : write<tile<4xi32>>
+  func.return
+}
+
+func.def @reader_1(%prefix: channel<tile<4xi32>>, %bulk: channel<tile<4xi32>>, %condition: i1) {
+  %bulk_read, %bulk_view = channel.acquire %bulk : channel<tile<4xi32>> -> (read<tile<4xi32>>, view<4xi32>)
+  channel.release %bulk_read : read<tile<4xi32>>
+  %prefix_read, %prefix_view = channel.acquire %prefix : channel<tile<4xi32>> -> (read<tile<4xi32>>, view<4xi32>)
+  channel.release %prefix_read : read<tile<4xi32>>
+  func.return
+}
+
+pipeline.def<kernel> public @stream() run(%source: buffer, %memory: pool, %condition: i1) {
+  %bytes = index.constant 128 : offset
+  %origin = index.constant 0 : offset
+  %second_slot = index.constant 64 : offset
+  %capacity = index.constant 1 : index
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %bytes : buffer
+  %prefix_slots = buffer.view %storage[%origin] : buffer -> view<1x4xi32>
+  %bulk_slots = buffer.view %storage[%second_slot] : buffer -> view<1x4xi32>
+  %prefix = channel.bind<fifo> %prefix_slots, %capacity : view<1x4xi32>, index -> channel<tile<4xi32>>
+  %bulk = channel.bind<fifo> %bulk_slots, %capacity : view<1x4xi32>, index -> channel<tile<4xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @ingress(%source, %prefix, %bulk) : (buffer, channel<tile<4xi32>>, channel<tile<4xi32>>)
+  }
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @reader_1(%prefix, %bulk, %condition) : (channel<tile<4xi32>>, channel<tile<4xi32>>, i1)
+  }
+}
+
+// ----
+source 0: reader=1 first_phase=1 actions=2,0
+
+// ====
+
+// RUN: emit pipeline-continuations @stream
+
+// Separate readers do not provide one continuation observing both phases.
+func.def @ingress(%source: buffer, %prefix: channel<tile<4xi32>>, %bulk: channel<tile<4xi32>>) {
+  %origin = index.constant 0 : offset
+  %input = buffer.view %source[%origin] : buffer -> view<4xi32>
+  %prefix_write, %prefix_view = channel.reserve %prefix : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %prefix_copy = kernel.async.copy %input to %prefix_view {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %prefix_group = kernel.async.group %prefix_copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %prefix_group {newer_groups = 0} : kernel.async.group
+  channel.publish %prefix_write : write<tile<4xi32>>
+  %bulk_write, %bulk_view = channel.reserve %bulk : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %bulk_copy = kernel.async.copy %input to %bulk_view {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %bulk_group = kernel.async.group %bulk_copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %bulk_group {newer_groups = 0} : kernel.async.group
+  channel.publish %bulk_write : write<tile<4xi32>>
+  func.return
+}
+
+func.def @reader_1(%prefix: channel<tile<4xi32>>, %bulk: channel<tile<4xi32>>, %condition: i1) {
+  %prefix_read, %prefix_view = channel.acquire %prefix : channel<tile<4xi32>> -> (read<tile<4xi32>>, view<4xi32>)
+  channel.release %prefix_read : read<tile<4xi32>>
+  func.return
+}
+
+func.def @reader_2(%prefix: channel<tile<4xi32>>, %bulk: channel<tile<4xi32>>, %condition: i1) {
+  %bulk_read, %bulk_view = channel.acquire %bulk : channel<tile<4xi32>> -> (read<tile<4xi32>>, view<4xi32>)
+  channel.release %bulk_read : read<tile<4xi32>>
+  func.return
+}
+
+pipeline.def<kernel> public @stream() run(%source: buffer, %memory: pool, %condition: i1) {
+  %bytes = index.constant 128 : offset
+  %origin = index.constant 0 : offset
+  %second_slot = index.constant 64 : offset
+  %capacity = index.constant 1 : index
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %bytes : buffer
+  %prefix_slots = buffer.view %storage[%origin] : buffer -> view<1x4xi32>
+  %bulk_slots = buffer.view %storage[%second_slot] : buffer -> view<1x4xi32>
+  %prefix = channel.bind<fifo> %prefix_slots, %capacity : view<1x4xi32>, index -> channel<tile<4xi32>>
+  %bulk = channel.bind<fifo> %bulk_slots, %capacity : view<1x4xi32>, index -> channel<tile<4xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @ingress(%source, %prefix, %bulk) : (buffer, channel<tile<4xi32>>, channel<tile<4xi32>>)
+  }
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @reader_1(%prefix, %bulk, %condition) : (channel<tile<4xi32>>, channel<tile<4xi32>>, i1)
+  }
+  pipeline.strand workers([1], [1], [1]) {
+    func.call @reader_2(%prefix, %bulk, %condition) : (channel<tile<4xi32>>, channel<tile<4xi32>>, i1)
+  }
+}
+
+// ----
+source 0: no common reader
+
+// ====
+
+// RUN: emit pipeline-continuations @stream
+
+// A conditional read cannot certify one exact complete input lifetime.
+func.def @ingress(%source: buffer, %prefix: channel<tile<4xi32>>, %bulk: channel<tile<4xi32>>) {
+  %origin = index.constant 0 : offset
+  %input = buffer.view %source[%origin] : buffer -> view<4xi32>
+  %prefix_write, %prefix_view = channel.reserve %prefix : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %prefix_copy = kernel.async.copy %input to %prefix_view {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %prefix_group = kernel.async.group %prefix_copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %prefix_group {newer_groups = 0} : kernel.async.group
+  channel.publish %prefix_write : write<tile<4xi32>>
+  %bulk_write, %bulk_view = channel.reserve %bulk : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %bulk_copy = kernel.async.copy %input to %bulk_view {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %bulk_group = kernel.async.group %bulk_copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %bulk_group {newer_groups = 0} : kernel.async.group
+  channel.publish %bulk_write : write<tile<4xi32>>
+  func.return
+}
+
+func.def @reader_1(%prefix: channel<tile<4xi32>>, %bulk: channel<tile<4xi32>>, %condition: i1) {
+  %prefix_read, %prefix_view = channel.acquire %prefix : channel<tile<4xi32>> -> (read<tile<4xi32>>, view<4xi32>)
+  channel.release %prefix_read : read<tile<4xi32>>
+  cfg.cond_br %condition, ^consume, ^done
+^consume:
+  %bulk_read, %bulk_view = channel.acquire %bulk : channel<tile<4xi32>> -> (read<tile<4xi32>>, view<4xi32>)
+  channel.release %bulk_read : read<tile<4xi32>>
+  cfg.br ^done
+^done:
+  func.return
+}
+
+pipeline.def<kernel> public @stream() run(%source: buffer, %memory: pool, %condition: i1) {
+  %bytes = index.constant 128 : offset
+  %origin = index.constant 0 : offset
+  %second_slot = index.constant 64 : offset
+  %capacity = index.constant 1 : index
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %bytes : buffer
+  %prefix_slots = buffer.view %storage[%origin] : buffer -> view<1x4xi32>
+  %bulk_slots = buffer.view %storage[%second_slot] : buffer -> view<1x4xi32>
+  %prefix = channel.bind<fifo> %prefix_slots, %capacity : view<1x4xi32>, index -> channel<tile<4xi32>>
+  %bulk = channel.bind<fifo> %bulk_slots, %capacity : view<1x4xi32>, index -> channel<tile<4xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @ingress(%source, %prefix, %bulk) : (buffer, channel<tile<4xi32>>, channel<tile<4xi32>>)
+  }
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @reader_1(%prefix, %bulk, %condition) : (channel<tile<4xi32>>, channel<tile<4xi32>>, i1)
+  }
+}
+
+// ----
+source 0: no common reader
