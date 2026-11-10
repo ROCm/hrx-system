@@ -6,6 +6,7 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/sharing.h"
 
+#include <algorithm>
 #include <vector>
 
 #include "iree/base/internal/arena.h"
@@ -29,6 +30,10 @@ class Aie2pSharingTest
     tiles_.resize(context_.family->column_count * context_.family->row_count);
     tiles_[1].coordinate = {0, 1};
     tiles_[3].coordinate = {0, 3};
+    tiles_[1].facts =
+        loom_xdna_array_tile_facts(context_.family, tiles_[1].coordinate);
+    tiles_[3].facts =
+        loom_xdna_array_tile_facts(context_.family, tiles_[3].coordinate);
     tiles_[1].memory_layout = &loom_aie2p_sram_memory;
     tiles_[3].memory_layout = &loom_aie2p_compute_memory;
     const bool sram_sender = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY;
@@ -180,7 +185,7 @@ TEST_P(Aie2pSharingTest, ResidentReceiverRequiresExactSameInvocationReturns) {
   Prepare(true);
 }
 
-TEST_P(Aie2pSharingTest, MultiSlotAndRetainedPayloadsKeepTheirOwnProtocol) {
+TEST_P(Aie2pSharingTest, ConfigurationRingsKeepTheirOwnCreditProtocol) {
   for (auto& resource : resources_) {
     resource.capacity = 2;
     Prepare(false);
@@ -193,6 +198,64 @@ TEST_P(Aie2pSharingTest, MultiSlotAndRetainedPayloadsKeepTheirOwnProtocol) {
     channel.replay = {};
   }
   Prepare(true);
+}
+
+TEST_P(Aie2pSharingTest, ResidentWindowsGrantOnlyAvailableReceiverSlots) {
+  loom_pipeline_invocation_t invocation = {};
+  distribution_.invocation = &invocation;
+  loom_pipeline_invocation_worker_t invocations[] = {
+      {.invocation = &invocation}, {.invocation = &invocation}};
+  loom_aie2p_native_worker_t workers[] = {
+      worker_, {.execution = LOOM_AIE2P_NATIVE_EXECUTION_CORE}};
+  context_.workers = workers;
+  realization_.invocations.worker_count = IREE_ARRAYSIZE(workers);
+  realization_.invocations.workers = invocations;
+  channels_[1].configuration_returns.count = 0;
+  const auto& layout = *distribution_.sender.tile->memory_layout;
+  // Signed semaphore credits admit receiver capacities through 63. Short
+  // streams, full windows, and partial tails preserve the same credit rule.
+  for (uint32_t capacity = 1; capacity <= 63; ++capacity) {
+    for (uint32_t count : {1u, 2u, 3u, 63u, 64u, 65u, 256u, 257u}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "capacity=" << capacity << " count=" << count);
+      resources_[1].capacity = capacity;
+      records_.admissions = records_.transfers = count;
+      distribution_.repetitions = count;
+      auto& reader = channels_[1].cursor.reader;
+      reader = {.worker = UINT32_MAX};
+      loom_aie2p_native_cursor_bind(&reader, 1, 1, count, true, false);
+      ASSERT_NO_FATAL_FAILURE(Prepare(true));
+      auto* delivery = context_.deliveries[receiver_index_];
+      ASSERT_NE(delivery, nullptr);
+      delivery->sharing.used = true;
+      uint32_t words[2][8] = {};
+      words[0][layout.chain.word] =
+          loom_xdna_register_field_encode(layout.chain.enable, 1) |
+          loom_xdna_register_field_encode(layout.chain.next, 3);
+      uint32_t tasks[] = {0};
+      auto& sender = distribution_.sender;
+      sender.sequence.descriptor = 2;
+      sender.sequence.descriptor_count = 2;
+      sender.sequence.words = words;
+      sender.sequence.task_count = 1;
+      sender.sequence.tasks = tasks;
+      loom_aie2p_native_commit_sharing(&context_);
+      const uint32_t initial_count = std::min(
+          {capacity, count,
+           static_cast<uint32_t>(sender.tile->facts->dma.task_queue_depth)});
+      EXPECT_EQ(tasks[0],
+                loom_xdna_register_field_encode(layout.directions[0].start, 2) |
+                    loom_xdna_register_field_encode(layout.directions[0].repeat,
+                                                    initial_count - 1));
+      EXPECT_EQ(delivery->grants->task,
+                loom_xdna_register_field_encode(layout.directions[0].start, 2));
+      EXPECT_EQ(sender.sequence.descriptor_count, 1u);
+      EXPECT_EQ(sender.sequence.task_count, 1u);
+      EXPECT_EQ(words[0][layout.chain.word] &
+                    loom_xdna_register_field_encode(layout.chain.enable, 1),
+                0u);
+    }
+  }
 }
 
 TEST_P(Aie2pSharingTest, UnusedCandidateDoesNotChangePacketOrQueuePolicy) {

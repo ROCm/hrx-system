@@ -1,8 +1,10 @@
 // Four compute rows fill every southbound payload lane. The first two rows
 // also drain two SRAM results each to caller memory. Their control packets
 // share a receiver-granted result path and its continuation to the shim. Each
-// DMA wait precedes credit return; only the first 63 returns grant another
-// result task. All four cores keep doing arithmetic for the whole invocation.
+// DMA wait precedes credit return. Capacities 1, 2, 3, and 63 cover singleton
+// continuation, rotating windows, partial tails, and the largest credit window.
+// Two peer records are acquired before either is returned, requiring real
+// lookahead rather than a one-record protocol over larger storage.
 aie2p.target<array> @device
 
 func.def inline @fifo(%memory: pool, %capacity: index) -> (channel<tile<16xi32>>) {
@@ -37,6 +39,24 @@ func.def inline @write_output(%input: channel<tile<16xi32>>, %output: buffer, %o
   func.return
 }
 
+func.def inline @write_pair(%input: channel<tile<16xi32>>, %output: buffer, %offset: offset) {
+  %stride = index.constant 256 : offset
+  %second_offset = index.add %offset, %stride : offset
+  %first_external = buffer.view %output[%offset] : buffer -> view<16xi32>
+  %second_external = buffer.view %output[%second_offset] : buffer -> view<16xi32>
+  %first_read, %first = channel.acquire %input : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+  %second_read, %second = channel.acquire %input : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+  %first_copy = kernel.async.copy %first to %first_external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+  %first_group = kernel.async.group %first_copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %first_group {newer_groups = 0} : kernel.async.group
+  %second_copy = kernel.async.copy %second to %second_external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+  %second_group = kernel.async.group %second_copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %second_group {newer_groups = 0} : kernel.async.group
+  channel.release %first_read : read<tile<16xi32>>
+  channel.release %second_read : read<tile<16xi32>>
+  func.return
+}
+
 pipeline.def<kernel> public retain target(@device) @sram_column() run(%input_arg: buffer, %output_arg: buffer) {
   %input_unique, %output_unique = buffer.assume.noalias %input_arg, %output_arg : buffer, buffer
   %input, %output = buffer.assume.alignment %input_unique, %output_unique {minimum_alignment = 64} : buffer, buffer
@@ -45,6 +65,8 @@ pipeline.def<kernel> public retain target(@device) @sram_column() run(%input_arg
   %records = index.constant 64 : index
   %one_slot = index.constant 1 : index
   %two_slots = index.constant 2 : index
+  %three_slots = index.constant 3 : index
+  %largest_window = index.constant 63 : index
   %record_bytes = index.constant 64 : offset
   %cohort_bytes = index.constant 256 : offset
   %memory = pipeline.memory<workgroup>[0, 1] : pool
@@ -52,7 +74,7 @@ pipeline.def<kernel> public retain target(@device) @sram_column() run(%input_arg
   %tile0 = pipeline.memory<workgroup>[0, 2] : pool
   %local0 = func.call @fifo(%tile0, %two_slots) : (pool, index) -> (channel<tile<16xi32>>)
   %result0 = func.call @fifo(%tile0, %one_slot) : (pool, index) -> (channel<tile<16xi32>>)
-  %egress0 = func.call @fifo(%memory, %one_slot) : (pool, index) -> (channel<tile<16xi32>>)
+  %egress0 = func.call @fifo(%memory, %three_slots) : (pool, index) -> (channel<tile<16xi32>>)
   %increment0 = scalar.constant 37 : i32
   %row_bytes0 = index.constant 0 : offset
   %tile1 = pipeline.memory<workgroup>[0, 3] : pool
@@ -64,13 +86,13 @@ pipeline.def<kernel> public retain target(@device) @sram_column() run(%input_arg
   %tile2 = pipeline.memory<workgroup>[0, 4] : pool
   %local2 = func.call @fifo(%tile2, %two_slots) : (pool, index) -> (channel<tile<16xi32>>)
   %result2 = func.call @fifo(%tile2, %one_slot) : (pool, index) -> (channel<tile<16xi32>>)
-  %egress2 = func.call @fifo(%memory, %one_slot) : (pool, index) -> (channel<tile<16xi32>>)
+  %egress2 = func.call @fifo(%memory, %two_slots) : (pool, index) -> (channel<tile<16xi32>>)
   %increment2 = scalar.constant 39 : i32
   %row_bytes2 = index.constant 128 : offset
   %tile3 = pipeline.memory<workgroup>[0, 5] : pool
   %local3 = func.call @fifo(%tile3, %two_slots) : (pool, index) -> (channel<tile<16xi32>>)
   %result3 = func.call @fifo(%tile3, %one_slot) : (pool, index) -> (channel<tile<16xi32>>)
-  %egress3 = func.call @fifo(%memory, %one_slot) : (pool, index) -> (channel<tile<16xi32>>)
+  %egress3 = func.call @fifo(%memory, %largest_window) : (pool, index) -> (channel<tile<16xi32>>)
   %increment3 = scalar.constant 40 : i32
   %row_bytes3 = index.constant 192 : offset
   pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
@@ -102,8 +124,8 @@ pipeline.def<kernel> public retain target(@device) @sram_column() run(%input_arg
     scf.for %record = [%begin to %records step %step] {
       func.call @compute(%local0, %result0, %increment0) : (channel<tile<16xi32>>, channel<tile<16xi32>>, i32)
       %cohort_offset = index.scale %record, %cohort_bytes : index, offset -> offset
-      %offset0 = index.add %cohort_offset, %row_bytes0 : offset
-      func.call @write_output(%egress0, %output, %offset0) : (channel<tile<16xi32>>, buffer, offset)
+      %offset1 = index.add %cohort_offset, %row_bytes1 : offset
+      func.call @write_output(%egress1, %output, %offset1) : (channel<tile<16xi32>>, buffer, offset)
       %offset2 = index.add %cohort_offset, %row_bytes2 : offset
       func.call @write_output(%egress2, %output, %offset2) : (channel<tile<16xi32>>, buffer, offset)
     }
@@ -116,13 +138,14 @@ pipeline.def<kernel> public retain target(@device) @sram_column() run(%input_arg
     }
   }
   pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
-    scf.for %record = [%begin to %records step %step] {
+    scf.for %record = [%begin to %records step %two_slots] {
       func.call @compute(%local1, %result1, %increment1) : (channel<tile<16xi32>>, channel<tile<16xi32>>, i32)
       %cohort_offset = index.scale %record, %cohort_bytes : index, offset -> offset
-      %offset1 = index.add %cohort_offset, %row_bytes1 : offset
-      func.call @write_output(%egress1, %output, %offset1) : (channel<tile<16xi32>>, buffer, offset)
+      %offset0 = index.add %cohort_offset, %row_bytes0 : offset
+      func.call @write_pair(%egress0, %output, %offset0) : (channel<tile<16xi32>>, buffer, offset)
+      func.call @compute(%local1, %result1, %increment1) : (channel<tile<16xi32>>, channel<tile<16xi32>>, i32)
       %offset3 = index.add %cohort_offset, %row_bytes3 : offset
-      func.call @write_output(%egress3, %output, %offset3) : (channel<tile<16xi32>>, buffer, offset)
+      func.call @write_pair(%egress3, %output, %offset3) : (channel<tile<16xi32>>, buffer, offset)
     }
   }
   pipeline.strand workers([0, 3], [1, 1], [1, 1]) {

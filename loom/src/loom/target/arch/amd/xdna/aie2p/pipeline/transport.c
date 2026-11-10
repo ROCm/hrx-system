@@ -1235,7 +1235,8 @@ iree_status_t loom_aie2p_native_select_transfers(
     for (loom_aie2p_native_grant_t* grant = delivery->grants;
          iree_status_is_ok(status) && valid && grant; grant = grant->next) {
       const uint32_t reader = grant->distribution->grant_reader;
-      if (reader == UINT32_MAX || grant->distribution->repetitions == 1) {
+      if (reader == UINT32_MAX ||
+          grant->distribution->repetitions <= grant->window_capacity) {
         continue;
       }
       const loom_aie2p_native_tile_t* sender = grant->distribution->sender.tile;

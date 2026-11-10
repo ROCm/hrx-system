@@ -47,6 +47,9 @@ typedef struct loom_aie2p_native_grant_t {
   uint32_t address;
   // One complete record task with no repeat, used for every receiver grant.
   uint32_t task;
+  // Maximum granted/unreturned records, bounded by receiver slots and sender
+  // task capacity so returns cannot fill the queue behind the startup burst.
+  uint32_t window_capacity;
   // Compute receiver's control packet to the sender task register.
   uint8_t packet;
 } loom_aie2p_native_grant_t;

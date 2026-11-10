@@ -72,9 +72,10 @@ static bool loom_aie2p_native_select_grant_reader(
           distribution->invocation &&
       context->workers[reader->worker].execution ==
           LOOM_AIE2P_NATIVE_EXECUTION_CORE;
-  if (channel->source->capacity != 1 || channel->replay.record_count ||
+  if (channel->replay.record_count ||
       (distribution->repetitions > 1 && !core_receiver &&
-       channel->configuration_returns.count != distribution->repetitions) ||
+       (channel->source->capacity != 1 ||
+        channel->configuration_returns.count != distribution->repetitions)) ||
       distribution->sender.tile == receiver->tile) {
     return false;
   }
@@ -148,8 +149,12 @@ iree_status_t loom_aie2p_native_prepare_sharing(
       loom_aie2p_native_grant_t* grant;
       IREE_RETURN_IF_ERROR(
           iree_arena_allocate(arena, sizeof(*grant), (void**)&grant));
-      *grant = (loom_aie2p_native_grant_t){.next = delivery->grants,
-                                           .distribution = geometry};
+      *grant = (loom_aie2p_native_grant_t){
+          .next = delivery->grants,
+          .distribution = geometry,
+          .window_capacity =
+              iree_min(geometry->receivers[0].channel->source->capacity,
+                       geometry->sender.tile->facts->dma.task_queue_depth)};
       delivery->grants = grant;
     }
   }
@@ -183,13 +188,18 @@ void loom_aie2p_native_commit_sharing(loom_aie2p_native_context_t* context) {
           sender->tile->coordinate, &engine);
       grant->task = loom_xdna_register_field_encode(
           layout->directions[0].start, sender->sequence.descriptor);
-      // A finite startup chain may unroll identical records. A receiver grant
-      // admits exactly one record from this geometry, without its successor.
+      // Each startup record owns an initially free receiver slot. Subsequent
+      // returns grant one successor each; the receiver suppresses grants for
+      // the final window. The singleton sender always uses this descriptor.
       sender->sequence.descriptor_count = 1;
       sender->sequence.words[0][layout->chain.word] &=
           ~loom_xdna_register_field_encode(layout->chain.enable, 1);
       sender->sequence.task_count = 1;
-      sender->sequence.tasks[0] = grant->task;
+      const uint32_t initial_records =
+          iree_min(distribution->repetitions, grant->window_capacity);
+      sender->sequence.tasks[0] =
+          grant->task | loom_xdna_register_field_encode(
+                            layout->directions[0].repeat, initial_records - 1);
       sender->sequence.words[0][layout->packet.word] |=
           loom_xdna_register_field_encode(layout->packet.enable, 1) |
           loom_xdna_register_field_encode(layout->packet.id, payload_packet);
