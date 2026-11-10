@@ -2328,6 +2328,62 @@ records remain partitioned SSA values. Aggregate copies preserve value semantics
 in either representation, and shared private-storage promotion can remove the
 allocation after inlining.
 
+### Private reference helpers and methods
+
+Private helpers transport the fields they read and return the fields they
+update. Other fields can remain uninitialized, including fields whose values
+cannot be stored as raw bytes:
+
+```cpp
+struct Slice { float* data; unsigned length; };
+[[loom::noinline]] static void initialize(Slice& slice, unsigned length) {
+  slice.length = length;
+}
+[[loom::noinline]] static unsigned length(const Slice& slice) {
+  return slice.length;
+}
+unsigned measured(unsigned count) {
+  Slice slice;
+  initialize(slice, count);
+  return length(slice);
+}
+```
+
+The private `initialize` takes one `i32` and returns the initialized `i32`;
+`length` also takes and returns one `i32`. Neither reads `slice.data`, allocates
+storage for `slice`, or requires inlining. Forwarding calls and control-flow
+joins use the same field contracts. A conditional update takes the previous
+field value when an untaken path must preserve it. Pointer buffer/offset pairs
+and views with their dimensions and encodings remain complete value groups.
+Public signatures, source predicates, and reference-returning helpers preserve
+their complete source contracts. Observable addresses and overlapping
+arguments retain the shared storage needed to preserve object identity.
+
+Methods and destructors use the same field contracts:
+
+```cpp
+struct Cursor {
+  const float* data;
+  unsigned position;
+  unsigned* output;
+  void reset() { position = 0; }
+  ~Cursor() { *output = position; }
+};
+void initialize(unsigned* output) {
+  Cursor cursor;
+  cursor.output = output;
+  cursor.reset();
+}
+```
+
+`reset()` needs no receiver inputs and returns the new position. The destructor
+takes that position and the output pointer's buffer/offset pair. The unused
+`data` field stays uninitialized, and `cursor` needs no allocation. Cleanup
+reads the current fields at scope exit, including early returns, `break`, and
+`continue`; nested members and bases retain their destruction order. Reading
+an uninitialized field still produces a source diagnostic. Exported C++ uses
+explicit helper calls and results to preserve this behavior.
+
 ### Selected references
 
 A local reference can select an automatic object, a field, or a base subobject
@@ -2365,10 +2421,11 @@ through `object.self().pair.second` updates the caller's `pair` field while
 preserving the neighboring fields. A mutable reference parameter contributes
 updated results only when its callable body can write through it.
 
-Independent selections remain one ordinary helper call. The caller arranges
-the selected current values into the helper's argument positions and restores
-the updated values to their original bindings afterward. Source objects retain
-their own lifetimes throughout; selection does not create another C++ object.
+Independent selections remain one ordinary helper call. The caller reads the
+selected inputs and writes each returned field to its selected destination.
+Untouched fields need no initialized value, and other aliases continue to name
+their original objects. Source objects retain their own lifetimes throughout;
+selection does not create another C++ object.
 Exported C++ expresses these updates with ordinary values and results, preserving
 the behavior when reimported.
 

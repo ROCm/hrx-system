@@ -363,6 +363,23 @@ class MaterializablePredicateExpression {
             cxx::ast_cast<cxx::EqualInitializerAST>(expression)) {
       return admit(initializer->expression);
     }
+    if (address_source_type(unit_, expression->type)) {
+      cxx::List<cxx::ExpressionAST*>* arguments = nullptr;
+      if (auto* construction =
+              cxx::ast_cast<cxx::TypeConstructionAST>(expression)) {
+        arguments = construction->expressionList;
+      } else if (auto* construction =
+                     cxx::ast_cast<cxx::BracedTypeConstructionAST>(
+                         expression)) {
+        arguments = construction->bracedInitList->expressionList;
+      }
+      if (arguments && !arguments->next) {
+        // Semantic index/offset construction is an integer conversion, not
+        // an arbitrary source constructor. Its operand must still be total.
+        return unit_.typeTraits().is_integral_or_enum(arguments->value->type) &&
+               admit(arguments->value);
+      }
+    }
     if (auto* constant = cxx::ast_cast<cxx::ConstExpressionAST>(expression)) {
       return constant->constValue &&
              is_numeric_source_type(unit_, constant->type);

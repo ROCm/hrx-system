@@ -12,7 +12,7 @@ void run(Buffer owner, Buffer next) { inspect(owner, replace(owner, next)); }
 
 // ----
 func.def public @run(%owner$0: buffer, %next: buffer) {
-  %2, %owner$3 = func.call pure @replace(%owner$0, %next) : (buffer, buffer) -> (i32, buffer)
+  %2, %owner$3 = func.call pure @replace(%next) : (buffer) -> (i32, buffer)
   func.call @inspect(%owner$3, %2) : (buffer, i32)
   func.return
 }
@@ -22,9 +22,9 @@ func.def @inspect(%owner: buffer, %5: i32) {
   func.return
 }
 
-func.def @replace(%owner: buffer, %next: buffer) -> (i32, buffer) {
-  %10 = scalar.constant 0 : i32
-  func.return %10, %next : i32, buffer
+func.def @replace(%next: buffer) -> (i32, buffer) {
+  %9 = scalar.constant 0 : i32
+  func.return %9, %next : i32, buffer
 }
 
-func.decl import("example", "observe") @observe(%11: buffer)
+func.decl import("example", "observe") @observe(%10: buffer)

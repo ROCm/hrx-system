@@ -236,7 +236,7 @@ func.def @Pair__operator_add_assign_value(%this_x: i32, %this_y: i32, %other_x: 
 // ----
 func.def public @member_order() -> (i32) {
   %value_value$1 = scalar.constant 1 : i32
-  %2, %value_value$3 = func.call pure @mutate(%value_value$1) : (i32) -> (i32, i32)
+  %2, %value_value$3 = func.call pure @mutate() : () -> (i32, i32)
   %value_value$4 = func.call pure @MemberOrder__operator_add_assign_value(%value_value$3, %2) : (i32, i32) -> (i32)
   func.return %value_value$4 : i32
 }
@@ -267,10 +267,10 @@ func.def public @temporary_reference() -> (i32) {
   func.return %23 : i32
 }
 
-func.def @mutate(%value_value$26: i32) -> (i32, i32) {
-  %value_value$29 = scalar.constant 7 : i32
-  %30 = scalar.constant 3 : i32
-  func.return %30, %value_value$29 : i32, i32
+func.def @mutate() -> (i32, i32) {
+  %value_value = scalar.constant 7 : i32
+  %29 = scalar.constant 3 : i32
+  func.return %29, %value_value : i32, i32
 }
 
 func.def @MemberOrder__operator_add_assign_value(%this_value: i32, %amount: i32) -> (i32) {
@@ -287,20 +287,20 @@ func.def @MemberOrder__operator_add_assign_value(%this_value: i32, %amount: i32)
 // ----
 func.def public @free_order() -> (i32) {
   %value_value$1 = scalar.constant 2 : i32
-  %2, %value_value$3 = func.call pure @mutate_free(%value_value$1) : (i32) -> (i32, i32)
+  %2, %value_value$3 = func.call pure @mutate_free() : () -> (i32, i32)
   %4, %value_value$5 = func.call pure @operator_add_assign(%value_value$3, %2) : (i32, i32) -> (i32, i32)
   func.return %value_value$5 : i32
 }
 
-func.def @mutate_free(%value_value$6: i32) -> (i32, i32) {
-  %value_value$9 = scalar.constant 11 : i32
-  %10 = scalar.constant 4 : i32
-  func.return %10, %value_value$9 : i32, i32
+func.def @mutate_free() -> (i32, i32) {
+  %value_value = scalar.constant 11 : i32
+  %9 = scalar.constant 4 : i32
+  func.return %9, %value_value : i32, i32
 }
 
-func.def @operator_add_assign(%left_value$11: i32, %right: i32) -> (i32, i32) {
-  %left_value$15 = scalar.addi %left_value$11, %right : i32
-  func.return %left_value$15, %left_value$15 : i32, i32
+func.def @operator_add_assign(%left_value$10: i32, %right: i32) -> (i32, i32) {
+  %left_value$14 = scalar.addi %left_value$10, %right : i32
+  func.return %left_value$14, %left_value$14 : i32, i32
 }
 
 // ====

@@ -39,6 +39,7 @@ TEST_F(TypesWithModuleTest, ConstructionGroupsKeepDependentHandlesWhole) {
     struct Pair { Field first; Field second; };
     struct Native { unsigned value; unsigned other; };
     struct NativeStorage { unsigned bits : 3; };
+    struct Binding { unsigned& value; const float* pointer; unsigned count; };
   )"),
                 IREE_SV("construction_groups.cxx"), options());
   Types types(source.unit(), source.diagnostics());
@@ -60,6 +61,14 @@ TEST_F(TypesWithModuleTest, ConstructionGroupsKeepDependentHandlesWhole) {
   EXPECT_EQ(groups[3].component_offset, 5u);
   EXPECT_EQ(groups.data(),
             types.projections(source_type("Pair"), source.unit().ast()).data());
+  auto bindings =
+      types.projections(source_type("Binding"), source.unit().ast());
+  ASSERT_EQ(bindings.size(), 3u);
+  EXPECT_EQ(bindings[0].partition, &kPointerPartition);
+  EXPECT_EQ(&types.partition(bindings[0].type, source.unit().ast()),
+            &kPointerPartition);
+  EXPECT_EQ(bindings[1].component_offset, 2u);
+  EXPECT_EQ(bindings[2].component_offset, 4u);
 }
 
 TEST_F(TypesWithModuleTest, ProjectsSpecialAndRegisteredOpaqueHandles) {

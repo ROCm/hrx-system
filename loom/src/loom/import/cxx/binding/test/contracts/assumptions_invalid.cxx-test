@@ -239,3 +239,12 @@ loom::type::index mixed_address_domains(loom::type::index logical, loom::type::o
   loom::assume(loom::predicate::eq(logical, physical));
   return logical;
 }
+
+// ====
+#include <loomcxx/index.h>
+#include <loomcxx/predicate.h>
+unsigned next();
+void effectful_address() {
+  // ERROR@+1: LOWERING/059 "predicate operands must be retained scalar values, compile-time constants, or scalar expressions safe to evaluate unconditionally"
+  loom::assume(loom::predicate::range(loom::type::offset{next()}, 0, 32));
+}

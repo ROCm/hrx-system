@@ -393,39 +393,38 @@ func.def public @automatic_outputs(%seed: i32) -> (i32) {
   func.call @initialize_pair(%seed, %pair_storage, %pair_storage_byte_offset) : (i32, buffer, offset)
   %13 = buffer.view %pair_storage[%6] : buffer -> view<1xi32>
   %second = view.load %13[0] : view<1xi32> -> i32
-  func.call @initialize_scalar(%second, %scalar_storage, %pair_storage_byte_offset) : (i32, buffer, offset)
-  %18 = buffer.view %pair_storage[%pair_storage_byte_offset] : buffer -> view<1xi32>
-  %first = view.load %18[0] : view<1xi32> -> i32
+  %15 = func.call pure @initialize_scalar(%second) : (i32) -> (i32)
+  view.store %15, %scalar_view[0] : i32, view<1xi32>
+  %19 = buffer.view %pair_storage[%pair_storage_byte_offset] : buffer -> view<1xi32>
+  %first = view.load %19[0] : view<1xi32> -> i32
   %scalar = view.load %scalar_view[0] : view<1xi32> -> i32
-  %21 = scalar.addi %first, %scalar : i32
-  func.return %21 : i32
+  %22 = scalar.addi %first, %scalar : i32
+  func.return %22 : i32
 }
 
 func.def public @initialized_value(%seed: i32) -> (i32) {
-  %24 = scalar.constant 1 : i32
-  %46 = scalar.addi %seed, %seed : i32
-  %47 = scalar.addi %46, %24 : i32
-  func.return %47 : i32
+  %25 = scalar.constant 1 : i32
+  %45 = scalar.addi %seed, %seed : i32
+  %46 = scalar.addi %45, %25 : i32
+  func.return %46 : i32
 }
 
 func.def @initialize_pair(%seed: i32, %output: buffer, %output_byte_offset: offset) {
-  %32 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
-  view.store %seed, %32[0] : i32, view<1xi32>
-  %33 = scalar.constant 1 : i32
-  %34 = scalar.addi %seed, %33 : i32
-  %35 = index.constant 4 : offset
-  %36 = index.add %output_byte_offset, %35 : offset
-  %37 = buffer.view %output[%36] : buffer -> view<1xi32>
-  view.store %34, %37[0] : i32, view<1xi32>
+  %33 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
+  view.store %seed, %33[0] : i32, view<1xi32>
+  %34 = scalar.constant 1 : i32
+  %35 = scalar.addi %seed, %34 : i32
+  %36 = index.constant 4 : offset
+  %37 = index.add %output_byte_offset, %36 : offset
+  %38 = buffer.view %output[%37] : buffer -> view<1xi32>
+  view.store %35, %38[0] : i32, view<1xi32>
   func.return
 }
 
-func.def @initialize_scalar(%seed: i32, %output: buffer, %output_byte_offset: offset) {
-  %48 = scalar.constant 1 : i32
-  %49 = scalar.shli %seed, %48 : i32
-  %43 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
-  view.store %49, %43[0] : i32, view<1xi32>
-  func.return
+func.def @initialize_scalar(%seed: i32) -> (i32) {
+  %47 = scalar.constant 1 : i32
+  %output = scalar.shli %seed, %47 : i32
+  func.return %output : i32
 }
 
 // ====

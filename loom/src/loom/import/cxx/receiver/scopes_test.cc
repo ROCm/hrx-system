@@ -24,7 +24,8 @@ class ReceiverScopesTest : public ::testing::Test {
   }
 
   ReceiverScopesTest()
-      : source_(IREE_SV("struct Record { unsigned first, second; };"),
+      : source_(IREE_SV("struct Record { unsigned first, second; };"
+                        "struct Nested { Record state; };"),
                 IREE_SV("receivers.cxx"), options()),
         types_(source_.unit(), source_.diagnostics()),
         scopes_(values_) {}
@@ -143,6 +144,42 @@ TEST_F(ReceiverScopesTest, StorageReceiversRetainIdentityWithoutValueBindings) {
   scopes_.clear();
   EXPECT_EQ(scopes_.current(), nullptr);
   EXPECT_EQ(scopes_.find(first_), nullptr);
+}
+
+TEST_F(ReceiverScopesTest, PartialNestedFieldsSurviveSuspensionAndCompletion) {
+  auto* nested = types_.record(
+      (*source_.unit().globalScope()->find("Nested").begin())->type(), nullptr);
+  ASSERT_NE(nested, nullptr);
+  auto* state = nested->members[0].source;
+  ValueArena arena;
+
+  scopes_.enter(*nested, std::nullopt, nested->source->type());
+  values_.declare(state, *record_);
+  values_.replace(state, 0, Value(11), arena);
+  scopes_.enter(*nested, std::nullopt, nested->source->type());
+  EXPECT_FALSE(values_.contains(state));
+  values_.declare(state, *record_);
+  values_.replace(state, 1, Value(22), arena);
+
+  ASSERT_TRUE(scopes_.suspend());
+  EXPECT_EQ(values_.project(state, kSSAPartition, 0, arena)->ssa(), 11u);
+  EXPECT_FALSE(values_.project(state, kSSAPartition, 1, arena));
+  values_.replace(state, 0, Value(33), arena);
+  scopes_.resume();
+  EXPECT_FALSE(values_.project(state, kSSAPartition, 0, arena));
+  EXPECT_EQ(values_.project(state, kSSAPartition, 1, arena)->ssa(), 22u);
+  EXPECT_FALSE(scopes_.is_complete(state));
+  values_.replace(state, 0, Value(44), arena);
+  scopes_.publish(state, values_.at(state));
+  EXPECT_TRUE(scopes_.is_complete(state));
+
+  scopes_.leave();
+  EXPECT_FALSE(scopes_.is_complete(state));
+  EXPECT_FALSE(values_.initialized(state));
+  EXPECT_EQ(values_.project(state, kSSAPartition, 0, arena)->ssa(), 33u);
+  EXPECT_FALSE(values_.project(state, kSSAPartition, 1, arena));
+  scopes_.leave();
+  EXPECT_FALSE(values_.contains(state));
 }
 
 }  // namespace

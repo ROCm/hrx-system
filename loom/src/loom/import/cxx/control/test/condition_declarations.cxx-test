@@ -205,20 +205,20 @@ func.def public @for_values(%count: i32) -> (i32) {
   %total$3 = scalar.constant 0 : i32
   %4 = scalar.constant 1 : i32
   %checks$5 = scalar.addi %checks$2, %4 : i32
-  %checks$14, %remaining, %total$16, %value = scf.while(%checks = %checks$5 : i32, %remaining = %count : i32, %total = %total$3 : i32, %value = %count : i32) -> (i32, i32, i32, i32) {
+  %checks$14, %total$15, %remaining, %value = scf.while(%checks = %checks$5 : i32, %total = %total$3 : i32, %remaining = %count : i32, %value = %count : i32) -> (i32, i32, i32, i32) {
     %18 = scalar.constant 0 : i32
     %19 = scalar.cmpi ne, %value, %18 : i32
-    scf.condition %19, %checks, %remaining, %total, %value : i1, i32, i32, i32, i32
-  } do(%checks$10: i32, %remaining$11: i32, %total$12: i32, %value$13: i32) {
+    scf.condition %19, %checks, %total, %remaining, %value : i1, i32, i32, i32, i32
+  } do(%checks$10: i32, %total$11: i32, %remaining$12: i32, %value$13: i32) {
     %20 = scalar.constant 2 : i32
     %21 = scalar.cmpi ugt, %value$13, %20 : i32
     %22, %value$23, %total$24 = scf.if %21 -> (i1, i32, i32) {
       %25 = scalar.constant 1 : i32
       %value = scalar.subi %value$13, %25 : i32
       %27 = scalar.constant 0 : i1
-      scf.yield %27, %value, %total$12 : i1, i32, i32
+      scf.yield %27, %value, %total$11 : i1, i32, i32
     } else {
-      %total = scalar.addi %total$12, %value$13 : i32
+      %total = scalar.addi %total$11, %value$13 : i32
       %29 = scalar.constant 1 : i1
       scf.yield %29, %value$13, %total : i1, i32, i32
     }
@@ -226,11 +226,11 @@ func.def public @for_values(%count: i32) -> (i32) {
     %remaining$31 = scalar.subi %value$23, %30 : i32
     %32 = scalar.constant 1 : i32
     %checks$33 = scalar.addi %checks$10, %32 : i32
-    scf.yield %checks$33, %remaining$31, %total$24, %remaining$31 : i32, i32, i32, i32
+    scf.yield %checks$33, %total$24, %remaining$31, %remaining$31 : i32, i32, i32, i32
   }
   %34 = scalar.constant 100 : i32
   %35 = scalar.muli %34, %checks$14 : i32
-  %36 = scalar.addi %total$16, %35 : i32
+  %36 = scalar.addi %total$15, %35 : i32
   func.return %36 : i32
 }
 

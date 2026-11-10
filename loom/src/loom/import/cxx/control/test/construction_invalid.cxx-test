@@ -50,19 +50,30 @@ Buffer entry(Buffer input, bool stop) {
   return result;
 }
 // ====
-// A value-receiver call transports the complete semantic record. Native
-// storage-backed partial destruction is covered separately.
+// A destructor requires the fields it reads, even when other members are
+// absent from its projected receiver contract.
 #include <loomcxx/buffer.h>
 void observe(unsigned value);
 struct Partial {
   // Has no payload when the destructor receiver would be passed.
   loom::type::buffer<const unsigned char> data;
-  // This field alone is initialized before scope exit.
+  // This field is consumed by the destructor and must be initialized.
   unsigned position;
   ~Partial() { observe(position); }
 };
 void entry() {
-  // ERROR@+1: LOWERING/059 "all receiver subobjects to be initialized"
+  // ERROR@+1: LOWERING/059 "destructor reads an uninitialized source subobject"
   Partial result;
-  result.position = 7;
+}
+// ====
+// Projected methods still require every field they actually consume.
+struct Cursor {
+  const float* data;
+  unsigned position;
+  unsigned current() const { return position; }
+};
+unsigned entry() {
+  Cursor cursor;
+  // ERROR@+1: LOWERING/059 "source subobject is read before initialization"
+  return cursor.current();
 }

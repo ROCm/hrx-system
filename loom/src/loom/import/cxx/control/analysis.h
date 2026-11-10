@@ -305,6 +305,41 @@ class ControlFlow final : private cxx::ASTVisitor {
   bool reference_requires_storage(cxx::Symbol* binding) const;
   // Whether execution may modify the object named by a reference parameter.
   bool reference_written(cxx::Symbol* parameter) const;
+  // Complete-group requirements produced after call effects and source
+  // initialization have reached their fixed points.
+  bool parameter_input(cxx::Symbol* parameter,
+                       const ValueProjection& projection) const {
+    const auto* effects = construction_.parameter(parameter);
+    return !effects || effects->inputs.intersects(
+                           {projection.component_offset,
+                            projection.component_offset +
+                                projection.partition->component_count});
+  }
+  bool parameter_output(cxx::Symbol* parameter,
+                        const ValueProjection& projection) const {
+    const auto* effects = construction_.parameter(parameter);
+    return !effects || effects->outputs.intersects(
+                           {projection.component_offset,
+                            projection.component_offset +
+                                projection.partition->component_count});
+  }
+  void configure_parameter(cxx::Symbol* parameter,
+                           Construction::ParameterMode mode) {
+    construction_.configure_parameter(parameter, mode,
+                                      reference_written(parameter));
+  }
+  // Direct receiver fields share the reference-parameter effect solver.
+  const RecordPartition* receiver_partition() const {
+    return receiver_partition_;
+  }
+  void configure_receiver(Construction::ParameterMode mode);
+  void bind_field_calls(
+      const std::unordered_map<cxx::FunctionSymbol*,
+                               std::unique_ptr<ControlFlow>>& functions);
+  bool has_field_effects() const { return construction_.has_effects(); }
+  bool propagate_field_outputs();
+  void resolve_field_flow() { construction_.resolve(writes_); }
+  bool propagate_field_inputs();
   // Whether the implicit object itself must be addressable.
   bool receiver_requires_storage() const { return receiver_requires_storage_; }
   // Whether every reference return aliases the current object. A value
@@ -445,7 +480,14 @@ class ControlFlow final : private cxx::ASTVisitor {
                                    cxx::FunctionSymbol* callee);
   bool require_identity(cxx::ExpressionAST* expression);
   bool require_identity(const CallArgument& argument);
-  bool argument_requires_storage(const CallArgument& argument) const;
+  enum class StorageDemand { Representation, Identity };
+  bool argument_requires_storage(
+      const CallArgument& argument,
+      StorageDemand demand = StorageDemand::Representation) const;
+  void record_parameter_read(cxx::ExpressionAST* expression);
+  void record_parameter_assignment(cxx::ExpressionAST* expression);
+  void record_member_binding_read(cxx::ExpressionAST* expression);
+  bool normalize_field_groups(bool inputs);
   bool record_callable_write(cxx::Symbol* binding);
   bool record_scoped_write(cxx::Symbol* binding,
                            std::span<cxx::AST* const> owners);
@@ -556,6 +598,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::vector<cxx::AST*> owners_;
   // Sparse source-construction facts propagated during this same traversal.
   Construction construction_;
+  // Direct member/base bindings used by implicit-object field contracts.
+  const RecordPartition* receiver_partition_ = nullptr;
   // Stable encounter order determines region argument/result order.
   std::unordered_map<cxx::AST*, std::vector<cxx::Symbol*>> writes_;
   // Sparse physical-representation facts indexed by source binding identity.
@@ -583,6 +627,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   cxx::ExpressionAST* pointer_value_read_ = nullptr;
   // Calls retained once for sparse fixed-point propagation.
   std::vector<DirectCall> calls_;
+  // Lvalue identities for assignments resolved after direct call propagation.
+  std::vector<CallArgument> field_assignments_;
   // Array copy plans own normalized default arguments and source identity.
   std::unordered_map<cxx::AST*, ArrayCopyInitialization> array_copies_;
   // Automatic variable identities mapped to their nontrivial cleanup action.

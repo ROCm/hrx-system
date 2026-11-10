@@ -30,6 +30,7 @@
 #include "loom/import/cxx/binding/target_definitions.h"
 #include "loom/import/cxx/binding/template_definitions.h"
 #include "loom/import/cxx/control/analysis.h"
+#include "loom/import/cxx/control/call_fields.h"
 #include "loom/import/cxx/source/locations.h"
 #include "loom/import/cxx/symbol/names.h"
 #include "loom/import/cxx/value/signature.h"
@@ -71,6 +72,8 @@ struct FunctionInstance {
   ImplicitObjectABI receiver_abi;
 };
 
+struct ParameterProjection;
+
 // Admitted implicit object bound ahead of every explicit source parameter.
 struct ImplicitObjectParameter {
   // Native transport selected by the call site's owned representation.
@@ -79,6 +82,8 @@ struct ImplicitObjectParameter {
   const cxx::Type* object_type;
   // Exact top-level fields replaced by a value receiver, in declaration order.
   std::span<cxx::Symbol* const> written_fields;
+  // Sparse receiver contract, absent for complete-value and storage transport.
+  const ParameterProjection* projection = nullptr;
 };
 
 enum class ReferenceABI {
@@ -86,6 +91,16 @@ enum class ReferenceABI {
   Value,
   // Durable identity transported as the existing buffer-plus-offset pointer.
   Storage,
+};
+
+// One callable's independently projected input and output source groups.
+struct ParameterProjection {
+  // Complete source groups required on entry, in source component order.
+  std::vector<ValueProjection> inputs;
+  // Complete source groups replaced on return, in source component order.
+  std::vector<ValueProjection> outputs;
+  // Flattened input extent retained for call argument/result correspondence.
+  size_t input_component_count = 0;
 };
 
 // One source reference parameter projected through its selected ABI. Parameters
@@ -98,6 +113,8 @@ struct ReferenceParameter {
   ReferenceABI abi;
   // Whether a value ABI callee returns and the caller writes back the result.
   bool mutable_access;
+  // Sparse source contract, absent when the complete existing ABI is needed.
+  std::unique_ptr<const ParameterProjection> projection;
 };
 
 // Admitted definition ready for recursive body construction. The source owns
@@ -221,6 +238,9 @@ class Functions {
   // Exact top-level implicit-object fields replaced by the definition.
   std::span<cxx::Symbol* const> receiver_writes(
       cxx::FunctionSymbol* symbol) const;
+  // Value receiver groups established before any body is translated.
+  const ParameterProjection* receiver_projection(
+      cxx::FunctionSymbol* symbol) const;
 
  private:
   enum class DeclarationScope { Namespace, Nested };
@@ -234,11 +254,6 @@ class Functions {
   loom_symbol_ref_t retain(FunctionInstance instance, cxx::AST* owner);
   void admit_reference_parameters(cxx::FunctionSymbol* symbol,
                                   cxx::AST* source);
-  struct AnalyzedCall {
-    ControlFlow* caller;
-    const DirectCall* call;
-    ControlFlow* callee;
-  };
   using AnalyzedFunction = std::pair<cxx::FunctionSymbol*, ControlFlow*>;
   void prepare_analysis(cxx::FunctionSymbol* symbol, Types& types,
                         std::vector<AnalyzedFunction>& functions,
@@ -352,6 +367,9 @@ class Functions {
   // Nonempty value-reference ABIs indexed by canonical declaration identity.
   std::unordered_map<cxx::FunctionSymbol*, std::vector<ReferenceParameter>>
       reference_parameters_;
+  // Sparse implicit-object contracts indexed by canonical source identity.
+  std::unordered_map<cxx::FunctionSymbol*, ParameterProjection>
+      receiver_projections_;
   // Whole-function analyses retained by canonical semantic identity. Each body
   // is walked once; signature construction and translation query these facts.
   std::unordered_map<cxx::FunctionSymbol*, std::unique_ptr<ControlFlow>>

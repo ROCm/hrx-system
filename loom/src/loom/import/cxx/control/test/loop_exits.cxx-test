@@ -181,18 +181,18 @@ func.def public @entry(%count: i32, %stop: i32) -> (i32) {
   %total$3 = scalar.constant 0 : i32
   %index$4 = scalar.constant 0 : i32
   %5 = scalar.constant 1 : i1
-  %index$11, %total$12 = scf.while(%index$6 = %index$4 : i32, %total$7 = %total$3 : i32, %8 = %5 : i1) -> (i32, i32) {
-    %13, %index$14, %total$15 = scf.if %8 -> (i1, i32, i32) {
-      %16 = scalar.cmpi ult, %index$6, %count : i32
-      scf.yield %16, %index$6, %total$7 : i1, i32, i32
+  %total$11, %index$12 = scf.while(%total$6 = %total$3 : i32, %index$7 = %index$4 : i32, %8 = %5 : i1) -> (i32, i32) {
+    %13, %total$14, %index$15 = scf.if %8 -> (i1, i32, i32) {
+      %16 = scalar.cmpi ult, %index$7, %count : i32
+      scf.yield %16, %total$6, %index$7 : i1, i32, i32
     } else {
       %17 = scalar.constant 0 : i1
-      scf.yield %17, %index$6, %total$7 : i1, i32, i32
+      scf.yield %17, %total$6, %index$7 : i1, i32, i32
     }
-    scf.condition %13, %index$14, %total$15 : i1, i32, i32
-  } do(%index$9: i32, %total$10: i32) {
-    %total$18 = scalar.addi %total$10, %index$9 : i32
-    %19 = scalar.cmpi eq, %index$9, %stop : i32
+    scf.condition %13, %total$14, %index$15 : i1, i32, i32
+  } do(%total$9: i32, %index$10: i32) {
+    %total$18 = scalar.addi %total$9, %index$10 : i32
+    %19 = scalar.cmpi eq, %index$10, %stop : i32
     %20, %21 = scf.if %19 -> (i1, i1) {
       %22 = scalar.constant 0 : i1
       scf.yield %22, %22 : i1, i1
@@ -200,17 +200,18 @@ func.def public @entry(%count: i32, %stop: i32) -> (i32) {
       %23 = scalar.constant 1 : i1
       scf.yield %23, %23 : i1, i1
     }
-    %index$24, %total$25 = scf.if %21 -> (i32, i32) {
+    %total$24, %index$25 = scf.if %21 -> (i32, i32) {
       %26 = scalar.constant 1 : i32
-      %index = scalar.addi %index$9, %26 : i32
-      scf.yield %index, %total$18 : i32, i32
+      %index = scalar.addi %index$10, %26 : i32
+      scf.yield %total$18, %index : i32, i32
     } else {
-      scf.yield %index$9, %total$18 : i32, i32
+      scf.yield %total$18, %index$10 : i32, i32
     }
-    scf.yield %index$24, %total$25, %21 : i32, i32, i1
+    scf.yield %total$24, %index$25, %21 : i32, i32, i1
   }
-  func.return %total$12 : i32
+  func.return %total$11 : i32
 }
+
 // ====
 // RUN: roundtrip
 // An omitted for condition is true. Continue still executes the source step,
@@ -236,38 +237,38 @@ func.def public @staged(%tail: i32) -> (i32) {
   %total$2 = scalar.constant 0 : i32
   %stage$3 = scalar.constant 0 : i32
   %4 = scalar.constant 1 : i1
-  %stage$10, %total$11 = scf.while(%stage$5 = %stage$3 : i32, %total$6 = %total$2 : i32, %7 = %4 : i1) -> (i32, i32) {
-    %12, %stage$13, %total$14 = scf.if %7 -> (i1, i32, i32) {
+  %total$10, %stage$11 = scf.while(%total$5 = %total$2 : i32, %stage$6 = %stage$3 : i32, %7 = %4 : i1) -> (i32, i32) {
+    %12, %total$13, %stage$14 = scf.if %7 -> (i1, i32, i32) {
       %15 = scalar.constant 1 : i1
-      scf.yield %15, %stage$5, %total$6 : i1, i32, i32
+      scf.yield %15, %total$5, %stage$6 : i1, i32, i32
     } else {
       %16 = scalar.constant 0 : i1
-      scf.yield %16, %stage$5, %total$6 : i1, i32, i32
+      scf.yield %16, %total$5, %stage$6 : i1, i32, i32
     }
-    scf.condition %12, %stage$13, %total$14 : i1, i32, i32
-  } do(%stage$8: i32, %total$9: i32) {
+    scf.condition %12, %total$13, %stage$14 : i1, i32, i32
+  } do(%total$8: i32, %stage$9: i32) {
     %17 = scalar.constant 2 : i32
-    %18 = scalar.cmpi ult, %stage$8, %17 : i32
+    %18 = scalar.cmpi ult, %stage$9, %17 : i32
     %19, %20, %total$21 = scf.if %18 -> (i1, i1, i32) {
-      %total = scalar.addi %total$9, %stage$8 : i32
+      %total = scalar.addi %total$8, %stage$9 : i32
       %23 = scalar.constant 0 : i1
       %24 = scalar.constant 1 : i1
       scf.yield %23, %24, %total : i1, i1, i32
     } else {
-      %total = scalar.addi %total$9, %tail : i32
+      %total = scalar.addi %total$8, %tail : i32
       %26 = scalar.constant 0 : i1
       scf.yield %26, %26, %total : i1, i1, i32
     }
-    %stage$27, %total$28 = scf.if %20 -> (i32, i32) {
+    %total$27, %stage$28 = scf.if %20 -> (i32, i32) {
       %29 = scalar.constant 1 : i32
-      %stage = scalar.addi %stage$8, %29 : i32
-      scf.yield %stage, %total$21 : i32, i32
+      %stage = scalar.addi %stage$9, %29 : i32
+      scf.yield %total$21, %stage : i32, i32
     } else {
-      scf.yield %stage$8, %total$21 : i32, i32
+      scf.yield %total$21, %stage$9 : i32, i32
     }
-    scf.yield %stage$27, %total$28, %20 : i32, i32, i1
+    scf.yield %total$27, %stage$28, %20 : i32, i32, i1
   }
-  func.return %total$11 : i32
+  func.return %total$10 : i32
 }
 
 func.def public @spin(%value: buffer, %value_byte_offset: offset) {
@@ -284,6 +285,7 @@ func.def public @spin(%value: buffer, %value_byte_offset: offset) {
   }
   func.unreachable
 }
+
 // ====
 // RUN: roundtrip
 // A do break suppresses its trailing condition while continue evaluates it.
@@ -517,30 +519,30 @@ func.def public @continue_for_step(%count: i32, %choose: i32) -> (i32) {
   %index$3 = scalar.constant 0 : i32
   %steps$4 = scalar.constant 0 : i32
   %total$5 = scalar.constant 0 : i32
-  %index$12, %steps$13, %total$14 = scf.while(%index$6 = %index$3 : i32, %steps = %steps$4 : i32, %total = %total$5 : i32) -> (i32, i32, i32) {
+  %index$12, %total$13, %steps$14 = scf.while(%index$6 = %index$3 : i32, %total = %total$5 : i32, %steps = %steps$4 : i32) -> (i32, i32, i32) {
     %15 = scalar.constant 1 : i32
     %index$16 = scalar.addi %index$6, %15 : i32
     %17 = scalar.cmpi ult, %index$6, %count : i32
-    scf.condition %17, %index$16, %steps, %total : i1, i32, i32, i32
-  } do(%index: i32, %steps$10: i32, %total$11: i32) {
+    scf.condition %17, %index$16, %total, %steps : i1, i32, i32, i32
+  } do(%index: i32, %total$10: i32, %steps$11: i32) {
     %18 = scalar.andi %index, %choose : i32
     %19 = scalar.constant 0 : i32
     %20 = scalar.cmpi ne, %18, %19 : i32
     %21, %total$22 = scf.if %20 -> (i1, i32) {
       %23 = scalar.constant 0 : i1
-      scf.yield %23, %total$11 : i1, i32
+      scf.yield %23, %total$10 : i1, i32
     } else {
-      %total = scalar.addi %total$11, %index : i32
+      %total = scalar.addi %total$10, %index : i32
       %25 = scalar.constant 1 : i1
       scf.yield %25, %total : i1, i32
     }
     %26 = scalar.constant 1 : i32
-    %steps$27 = scalar.addi %steps$10, %26 : i32
-    scf.yield %index, %steps$27, %total$22 : i32, i32, i32
+    %steps$27 = scalar.addi %steps$11, %26 : i32
+    scf.yield %index, %total$22, %steps$27 : i32, i32, i32
   }
   %28 = scalar.constant 257 : i32
-  %29 = scalar.muli %steps$13, %28 : i32
-  %30 = scalar.addi %total$14, %29 : i32
+  %29 = scalar.muli %steps$14, %28 : i32
+  %30 = scalar.addi %total$13, %29 : i32
   %31 = scalar.constant 65537 : i32
   %32 = scalar.muli %index$12, %31 : i32
   %33 = scalar.addi %30, %32 : i32
@@ -905,22 +907,22 @@ func.def public @break_for(%count: i32, %stop: i32) -> (i32) {
   %visits$4 = scalar.constant 0 : i32
   %total$5 = scalar.constant 0 : i32
   %6 = scalar.constant 1 : i1
-  %index$14, %visits$15, %total$16 = scf.while(%index$7 = %index$3 : i32, %visits$8 = %visits$4 : i32, %total$9 = %total$5 : i32, %10 = %6 : i1) -> (i32, i32, i32) {
-    %17, %index$18, %visits$19, %total$20 = scf.if %10 -> (i1, i32, i32, i32) {
-      %21 = scalar.cmpi ult, %index$7, %count : i32
-      scf.yield %21, %index$7, %visits$8, %total$9 : i1, i32, i32, i32
+  %visits$14, %total$15, %index$16 = scf.while(%visits$7 = %visits$4 : i32, %total$8 = %total$5 : i32, %index$9 = %index$3 : i32, %10 = %6 : i1) -> (i32, i32, i32) {
+    %17, %visits$18, %total$19, %index$20 = scf.if %10 -> (i1, i32, i32, i32) {
+      %21 = scalar.cmpi ult, %index$9, %count : i32
+      scf.yield %21, %visits$7, %total$8, %index$9 : i1, i32, i32, i32
     } else {
       %22 = scalar.constant 0 : i1
-      scf.yield %22, %index$7, %visits$8, %total$9 : i1, i32, i32, i32
+      scf.yield %22, %visits$7, %total$8, %index$9 : i1, i32, i32, i32
     }
-    scf.condition %17, %index$18, %visits$19, %total$20 : i1, i32, i32, i32
-  } do(%index$11: i32, %visits$12: i32, %total$13: i32) {
+    scf.condition %17, %visits$18, %total$19, %index$20 : i1, i32, i32, i32
+  } do(%visits$11: i32, %total$12: i32, %index$13: i32) {
     %23 = scalar.constant 1 : i32
-    %visits$24 = scalar.addi %visits$12, %23 : i32
+    %visits$24 = scalar.addi %visits$11, %23 : i32
     %25 = scalar.constant 1 : i32
-    %26 = scalar.addi %index$11, %25 : i32
-    %total$27 = scalar.addi %total$13, %26 : i32
-    %28 = scalar.cmpi eq, %index$11, %stop : i32
+    %26 = scalar.addi %index$13, %25 : i32
+    %total$27 = scalar.addi %total$12, %26 : i32
+    %28 = scalar.cmpi eq, %index$13, %stop : i32
     %29, %30, %visits$31, %total$32 = scf.if %28 -> (i1, i1, i32, i32) {
       %33 = scalar.constant 1 : i32
       %34 = scalar.andi %stop, %33 : i32
@@ -941,20 +943,20 @@ func.def public @break_for(%count: i32, %stop: i32) -> (i32) {
       %44 = scalar.constant 1 : i1
       scf.yield %44, %44, %visits$24, %total : i1, i1, i32, i32
     }
-    %index$45, %visits$46, %total$47 = scf.if %30 -> (i32, i32, i32) {
+    %visits$45, %total$46, %index$47 = scf.if %30 -> (i32, i32, i32) {
       %48 = scalar.constant 1 : i32
-      %index = scalar.addi %index$11, %48 : i32
-      scf.yield %index, %visits$31, %total$32 : i32, i32, i32
+      %index = scalar.addi %index$13, %48 : i32
+      scf.yield %visits$31, %total$32, %index : i32, i32, i32
     } else {
-      scf.yield %index$11, %visits$31, %total$32 : i32, i32, i32
+      scf.yield %visits$31, %total$32, %index$13 : i32, i32, i32
     }
-    scf.yield %index$45, %visits$46, %total$47, %30 : i32, i32, i32, i1
+    scf.yield %visits$45, %total$46, %index$47, %30 : i32, i32, i32, i1
   }
   %50 = scalar.constant 257 : i32
-  %51 = scalar.muli %index$14, %50 : i32
-  %52 = scalar.addi %total$16, %51 : i32
+  %51 = scalar.muli %index$16, %50 : i32
+  %52 = scalar.addi %total$15, %51 : i32
   %53 = scalar.constant 65537 : i32
-  %54 = scalar.muli %visits$15, %53 : i32
+  %54 = scalar.muli %visits$14, %53 : i32
   %55 = scalar.addi %52, %54 : i32
   func.return %55 : i32
 }

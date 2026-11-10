@@ -25,7 +25,7 @@ unsigned update(unsigned input);
 static unsigned Base__add_value(unsigned this_value, unsigned delta);
 
 [[loom::symbol("Both___Both_value"), loom::inline]]
-static void Both___Both_value(unsigned this_Left_Base_value, unsigned this_Right_Base_value, unsigned this_extra);
+static void Both___Both_value(unsigned this_Left_Base_value, unsigned this_Right_Base_value);
 
 [[loom::symbol("Right___Right_value"), loom::inline]]
 static void Right___Right_value(unsigned this_Base_value);
@@ -37,12 +37,12 @@ static void Left___Left_value(unsigned this_Base_value);
 static void Base___Base_value(unsigned this_value);
 
 [[loom::symbol("observe")]]
-void observe(unsigned v20);
+void observe(unsigned v19);
 
 [[loom::symbol("update")]]
 unsigned update(unsigned input) {
   unsigned value_Right_Base_value_1 = Base__add_value(7u, 3u);
-  Both___Both_value(input, value_Right_Base_value_1, 11u);
+  Both___Both_value(input, value_Right_Base_value_1);
   return ((input + (value_Right_Base_value_1 * 5u)) + 11u);
 }
 
@@ -53,7 +53,7 @@ static unsigned Base__add_value(unsigned this_value, unsigned delta) {
 }
 
 [[loom::symbol("Both___Both_value"), loom::inline]]
-static void Both___Both_value(unsigned this_Left_Base_value, unsigned this_Right_Base_value, unsigned this_extra) {
+static void Both___Both_value(unsigned this_Left_Base_value, unsigned this_Right_Base_value) {
   Right___Right_value(this_Right_Base_value);
   Left___Left_value(this_Left_Base_value);
   return;

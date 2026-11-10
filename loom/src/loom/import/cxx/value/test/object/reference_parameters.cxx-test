@@ -348,34 +348,34 @@ Cursor cursor_reference(Cursor cursor, Cursor limit, unsigned lane) {
 
 // ----
 func.def public @cursor_reference(%cursor_bit_offset$0: i32, %cursor_syntax_count$1: i32, %cursor_dc$2: vector<4xi32>, %cursor_cached_word$3: i32, %limit_bit_offset: i32, %limit_syntax_count: i32, %limit_dc: vector<4xi32>, %limit_cached_word: i32, %lane: i32) -> (i32, i32, vector<4xi32>, i32) {
-  %cursor_cached_word$13, %cursor_bit_offset$14, %cursor_syntax_count$15, %cursor_dc$16, %cursor_cached_word$17 = func.call pure @consume(%cursor_bit_offset$0, %cursor_syntax_count$1, %cursor_dc$2, %cursor_cached_word$3, %limit_bit_offset, %limit_syntax_count, %limit_dc, %limit_cached_word, %lane) : (i32, i32, vector<4xi32>, i32, i32, i32, vector<4xi32>, i32, i32) -> (i32, i32, i32, vector<4xi32>, i32)
+  %cursor_cached_word$13, %cursor_bit_offset$14, %cursor_syntax_count$15, %cursor_dc$16 = func.call pure @consume(%cursor_bit_offset$0, %cursor_syntax_count$1, %cursor_dc$2, %cursor_cached_word$3, %limit_syntax_count, %limit_cached_word, %lane) : (i32, i32, vector<4xi32>, i32, i32, i32, i32) -> (i32, i32, i32, vector<4xi32>)
   func.return %cursor_bit_offset$14, %cursor_syntax_count$15, %cursor_dc$16, %cursor_cached_word$13 : i32, i32, vector<4xi32>, i32
 }
 
-func.def @consume(%cursor_bit_offset$18: i32, %cursor_syntax_count$19: i32, %cursor_dc$20: vector<4xi32>, %cursor_cached_word$21: i32, %limit_bit_offset: i32, %limit_syntax_count: i32, %limit_dc: vector<4xi32>, %limit_cached_word: i32, %lane: i32) -> (i32, i32, i32, vector<4xi32>, i32) {
-  %32 = scalar.constant 3 : i32
-  %cursor_bit_offset$33 = scalar.addi %cursor_bit_offset$18, %32 : i32
-  %34 = scalar.cmpi ult, %cursor_syntax_count$19, %limit_syntax_count : i32
-  %cursor_bit_offset$35, %cursor_syntax_count$36, %cursor_dc$37, %cursor_cached_word$38 = scf.if %34 -> (i32, i32, vector<4xi32>, i32) {
-    %39 = scalar.constant 1 : i32
-    %cursor_syntax_count = scalar.addi %cursor_syntax_count$19, %39 : i32
-    scf.yield %cursor_bit_offset$33, %cursor_syntax_count, %cursor_dc$20, %cursor_cached_word$21 : i32, i32, vector<4xi32>, i32
+func.def @consume(%cursor_bit_offset$17: i32, %cursor_syntax_count$18: i32, %cursor_dc$19: vector<4xi32>, %cursor_cached_word$20: i32, %limit_syntax_count: i32, %limit_cached_word: i32, %lane: i32) -> (i32, i32, i32, vector<4xi32>) {
+  %28 = scalar.constant 3 : i32
+  %cursor_bit_offset$29 = scalar.addi %cursor_bit_offset$17, %28 : i32
+  %30 = scalar.cmpi ult, %cursor_syntax_count$18, %limit_syntax_count : i32
+  %cursor_bit_offset$31, %cursor_syntax_count$32, %cursor_dc$33, %cursor_cached_word$34 = scf.if %30 -> (i32, i32, vector<4xi32>, i32) {
+    %35 = scalar.constant 1 : i32
+    %cursor_syntax_count = scalar.addi %cursor_syntax_count$18, %35 : i32
+    scf.yield %cursor_bit_offset$29, %cursor_syntax_count, %cursor_dc$19, %cursor_cached_word$20 : i32, i32, vector<4xi32>, i32
   } else {
-    scf.yield %cursor_bit_offset$33, %cursor_syntax_count$19, %cursor_dc$20, %cursor_cached_word$21 : i32, i32, vector<4xi32>, i32
+    scf.yield %cursor_bit_offset$29, %cursor_syntax_count$18, %cursor_dc$19, %cursor_cached_word$20 : i32, i32, vector<4xi32>, i32
   }
-  %41 = scalar.constant 3 : i32
-  %42 = scalar.andi %lane, %41 : i32
-  %43 = index.cast %42 : i32 to index
-  %44 = vector.extract %cursor_dc$37[%43] : vector<4xi32> -> i32
-  %45 = scalar.addi %44, %cursor_cached_word$38 : i32
-  %46 = index.cast %42 : i32 to index
-  %cursor_dc$47 = vector.insert %45 into %cursor_dc$37[%46] : i32, vector<4xi32>
-  %48 = scalar.constant 3 : i32
-  %49 = scalar.andi %lane, %48 : i32
-  %50 = index.cast %49 : i32 to index
-  %51 = vector.extract %cursor_dc$47[%50] : vector<4xi32> -> i32
-  %52 = scalar.addi %51, %limit_cached_word : i32
-  func.return %52, %cursor_bit_offset$35, %cursor_syntax_count$36, %cursor_dc$47, %cursor_cached_word$38 : i32, i32, i32, vector<4xi32>, i32
+  %37 = scalar.constant 3 : i32
+  %38 = scalar.andi %lane, %37 : i32
+  %39 = index.cast %38 : i32 to index
+  %40 = vector.extract %cursor_dc$33[%39] : vector<4xi32> -> i32
+  %41 = scalar.addi %40, %cursor_cached_word$34 : i32
+  %42 = index.cast %38 : i32 to index
+  %cursor_dc$43 = vector.insert %41 into %cursor_dc$33[%42] : i32, vector<4xi32>
+  %44 = scalar.constant 3 : i32
+  %45 = scalar.andi %lane, %44 : i32
+  %46 = index.cast %45 : i32 to index
+  %47 = vector.extract %cursor_dc$43[%46] : vector<4xi32> -> i32
+  %48 = scalar.addi %47, %limit_cached_word : i32
+  func.return %48, %cursor_bit_offset$31, %cursor_syntax_count$32, %cursor_dc$43 : i32, i32, i32, vector<4xi32>
 }
 
 // ====
@@ -1295,39 +1295,39 @@ func.def public @mutate_conditional_xvalue(%choose: i1, %left_value$31: i32, %ri
   }
   %37 = scalar.constant 0 : i32
   %38 = scalar.cmpi eq, %36, %37 : i32
-  %left_value$39, %right_value$40 = scf.if %38 -> (i32, i32) {
-    scf.yield %left_value$31, %right_value$32 : i32, i32
+  %39 = scf.if %38 -> (i32) {
+    scf.yield %left_value$31 : i32
   } else {
-    scf.yield %right_value$32, %left_value$31 : i32, i32
+    scf.yield %right_value$32 : i32
   }
-  %left_value$41 = func.call pure @increment_conditional_rvalue(%left_value$39) : (i32) -> (i32)
-  %42 = scalar.constant 0 : i32
-  %43 = scalar.cmpi eq, %36, %42 : i32
-  %left_value$44, %right_value$45 = scf.if %43 -> (i32, i32) {
-    scf.yield %left_value$41, %right_value$40 : i32, i32
+  %left_value$40 = func.call pure @increment_conditional_rvalue(%39) : (i32) -> (i32)
+  %41 = scalar.constant 0 : i32
+  %42 = scalar.cmpi eq, %36, %41 : i32
+  %left_value$43, %right_value$44 = scf.if %42 -> (i32, i32) {
+    scf.yield %left_value$40, %right_value$32 : i32, i32
   } else {
-    scf.yield %right_value$40, %left_value$41 : i32, i32
+    scf.yield %left_value$31, %left_value$40 : i32, i32
   }
-  %46 = scalar.addi %left_value$44, %right_value$45 : i32
-  func.return %46 : i32
+  %45 = scalar.addi %left_value$43, %right_value$44 : i32
+  func.return %45 : i32
 }
 
-func.def @increment_rvalue(%state_value$47: i32) -> (i32) {
-  %49 = scalar.constant 1 : i32
-  %state_value$50 = scalar.addi %state_value$47, %49 : i32
-  func.return %state_value$50 : i32
+func.def @increment_rvalue(%state_value$46: i32) -> (i32) {
+  %48 = scalar.constant 1 : i32
+  %state_value$49 = scalar.addi %state_value$46, %48 : i32
+  func.return %state_value$49 : i32
 }
 
-func.def @invoke_rvalue__lambda_int____(%function_value$51: i32) -> (i32, i32) {
-  %54, %function_value$55 = func.call pure @operator_call_value(%function_value$51) : (i32) -> (i32, i32)
-  func.return %54, %function_value$55 : i32, i32
+func.def @invoke_rvalue__lambda_int____(%function_value$50: i32) -> (i32, i32) {
+  %53, %function_value$54 = func.call pure @operator_call_value(%function_value$50) : (i32) -> (i32, i32)
+  func.return %53, %function_value$54 : i32, i32
 }
 
 func.def @address_rvalue(%state: buffer, %state_byte_offset: offset) -> (i32) {
-  %59 = index.constant 0 : offset
-  %60 = index.add %state_byte_offset, %59 : offset
-  %61 = buffer.view %state[%60] : buffer -> view<1xi32>
-  %value = view.load %61[0] : view<1xi32> -> i32
+  %58 = index.constant 0 : offset
+  %59 = index.add %state_byte_offset, %58 : offset
+  %60 = buffer.view %state[%59] : buffer -> view<1xi32>
+  %value = view.load %60[0] : view<1xi32> -> i32
   func.return %value : i32
 }
 
@@ -1343,21 +1343,21 @@ func.def @identity_value_rvalue(%state_value: i32) {
   func.return
 }
 
-func.def @increment_chained_rvalue(%state_value$67: i32) -> (i32) {
-  %69 = scalar.constant 2 : i32
-  %state_value$70 = scalar.addi %state_value$67, %69 : i32
-  func.return %state_value$70 : i32
+func.def @increment_chained_rvalue(%state_value$66: i32) -> (i32) {
+  %68 = scalar.constant 2 : i32
+  %state_value$69 = scalar.addi %state_value$66, %68 : i32
+  func.return %state_value$69 : i32
 }
 
-func.def @increment_conditional_rvalue(%state_value$71: i32) -> (i32) {
-  %73 = scalar.constant 3 : i32
-  %state_value$74 = scalar.addi %state_value$71, %73 : i32
-  func.return %state_value$74 : i32
+func.def @increment_conditional_rvalue(%state_value$70: i32) -> (i32) {
+  %72 = scalar.constant 3 : i32
+  %state_value$73 = scalar.addi %state_value$70, %72 : i32
+  func.return %state_value$73 : i32
 }
 
 func.def @operator_call_value(%this_value: i32) -> (i32, i32) {
-  %78 = scalar.constant 1 : i32
-  %value = scalar.addi %this_value, %78 : i32
+  %77 = scalar.constant 1 : i32
+  %value = scalar.addi %this_value, %77 : i32
   func.return %value, %value : i32, i32
 }
 

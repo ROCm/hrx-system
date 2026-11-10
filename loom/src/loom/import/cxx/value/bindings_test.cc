@@ -60,6 +60,24 @@ TEST(ValueBindingsTest, PartialSnapshotsRemainIndependentThroughCompletion) {
   values.replace(left, 1, Value(33), arena);
   EXPECT_EQ(values.at(left).components()[1], 33u);
   EXPECT_EQ(values.at(right).components()[1], 22u);
+
+  // Source scope transfers keep pending payloads and absence independent of
+  // the replacements made while those bindings are hidden.
+  auto pending = original.take(left);
+  EXPECT_FALSE(original.contains(left));
+  original.set(left, values.at(left));
+  original.restore(left, std::move(pending));
+  EXPECT_FALSE(original.initialized(left));
+  EXPECT_EQ(original.project(left, kSSAPartition, 1, arena)->ssa(), 11u);
+  EXPECT_FALSE(original.project(left, kSSAPartition, 0, arena));
+  auto complete = values.take(right);
+  values.declare(right, partition);
+  values.restore(right, std::move(complete));
+  EXPECT_EQ(values.at(right).components()[1], 22u);
+  auto absent = original.take(right);
+  original.declare(right, partition);
+  original.restore(right, std::move(absent));
+  EXPECT_FALSE(original.contains(right));
   original.erase(left);
   EXPECT_FALSE(original.contains(left));
   values.clear();
