@@ -12,6 +12,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/pass/types.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
 
 namespace {
@@ -130,6 +131,47 @@ TEST_P(Aie2pSharingTest, RepeatedDeliveryRequiresExactReceiverReturns) {
 TEST_P(Aie2pSharingTest, OneDeliveryUsesTheInitiallyFreeSlot) {
   records_.admissions = records_.transfers = distribution_.repetitions = 1;
   channels_[1].configuration_returns.count = 0;
+  Prepare(true);
+}
+
+TEST_P(Aie2pSharingTest, ResidentReceiverRequiresExactSameInvocationReturns) {
+  loom_pipeline_invocation_t parent = {};
+  loom_pipeline_invocation_t child = {.parent = &parent};
+  loom_pipeline_invocation_worker_t invocations[] = {{.invocation = &parent},
+                                                     {.invocation = &parent}};
+  loom_aie2p_native_worker_t workers[] = {
+      worker_, {.execution = LOOM_AIE2P_NATIVE_EXECUTION_CORE}};
+  context_.workers = workers;
+  realization_.invocations.worker_count = IREE_ARRAYSIZE(workers);
+  realization_.invocations.workers = invocations;
+  channels_[1].configuration_returns.count = 0;
+  auto& reader = channels_[1].cursor.reader;
+  reader.worker = UINT32_MAX;
+  loom_aie2p_native_cursor_bind(&reader, 1, 1, 2, true, false);
+  ASSERT_NO_FATAL_FAILURE(Prepare(true));
+  ASSERT_NE(context_.deliveries[receiver_index_], nullptr);
+  EXPECT_EQ(context_.deliveries[receiver_index_]->reader_worker, 1u);
+
+  // A representative worker's count does not cover other readers, nor does
+  // an upper bound prove that every read actually returns its credit.
+  reader.shared = true;
+  Prepare(false);
+  reader.shared = false;
+  reader.exact_admissions = false;
+  Prepare(false);
+  reader.exact_admissions = true;
+  reader.maximum_admissions = 1;
+  Prepare(false);
+  reader.maximum_admissions = 2;
+
+  // A child may execute a different number of times from this distribution.
+  // Only the distribution's own finite receiver can issue its continuation.
+  invocations[1].invocation = &child;
+  Prepare(false);
+  invocations[1].invocation = &parent;
+  workers[1].execution = LOOM_AIE2P_NATIVE_EXECUTION_DMA;
+  Prepare(false);
+  workers[1].execution = LOOM_AIE2P_NATIVE_EXECUTION_CORE;
   Prepare(true);
 }
 
@@ -329,6 +371,5 @@ TEST(Aie2pSharingTest, ControlSelectionPreservesCollectiveIdentities) {
                                         LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0),
       UINT8_MAX);
 }
-
 
 }  // namespace

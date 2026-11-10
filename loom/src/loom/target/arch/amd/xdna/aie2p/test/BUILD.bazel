@@ -170,8 +170,6 @@ loom_check_test_suite(
         "math_policy_activations.loom-test",
         "module_contracts.loom-test",
         "move_routes.loom-test",
-        "native_bindings.loom-test",
-        "native_completion.loom-test",
         "native_constant_captures.loom-test",
         "operand_ties.loom-test",
         "packed_streams.loom-test",

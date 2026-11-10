@@ -799,19 +799,11 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
               &distribution->sender;
           loom_aie2p_native_distribution_endpoint_t* receiver =
               &distribution->receivers[j];
-          // Existing core/configuration/egress completion retires a receiver
-          // only when that direct reader consumes every published record.
-          // Distribution readers have no independent completion anchor; observe
-          // their input DMA directly instead of reconstructing a transitive
-          // dependency graph.
-          const loom_aie2p_native_cursor_t* reader =
-              &destination_channel->cursor.reader;
           receiver->wait_for_idle =
               ordered || windows ||
-              !loom_aie2p_native_cursor_has_exact_admissions(
-                  reader, distribution->repetitions) ||
-              context->workers[reader->worker].execution ==
-                  LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION;
+              !loom_aie2p_native_cursor_has_read_completion(
+                  context, &destination_channel->cursor.reader,
+                  distribution->repetitions);
           distribution->sender.wait_for_idle |= receiver->wait_for_idle;
           if (sender->tile == receiver->tile &&
               (sender->engine >=

@@ -7,6 +7,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/sharing.h"
 
 #include "iree/base/internal/math.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
 
 uint8_t loom_aie2p_native_delivery_packet(
     loom_aie2p_native_delivery_t* delivery, uint32_t occupied,
@@ -85,9 +86,9 @@ iree_status_t loom_aie2p_native_prepare_sharing(
       const loom_aie2p_native_channel_t* channel = receiver->channel;
       const loom_aie2p_native_cursor_t* reader = &channel->cursor.reader;
       const bool core_receiver =
-          reader->worker != UINT32_MAX && !reader->shared &&
-          reader->exact_admissions &&
-          reader->maximum_admissions == distribution->repetitions &&
+          reader->worker != UINT32_MAX &&
+          loom_aie2p_native_cursor_has_exact_admissions(
+              reader, distribution->repetitions) &&
           realization->invocations.workers[reader->worker].invocation ==
               realization->invocations.workers[i].invocation &&
           context->workers[reader->worker].execution ==

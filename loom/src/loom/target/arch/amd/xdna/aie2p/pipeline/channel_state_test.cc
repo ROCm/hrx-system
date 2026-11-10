@@ -185,6 +185,34 @@ TEST(ChannelCursorTest, SaturatedAndSharedBoundsCannotProveCompletion) {
   }
 }
 
+TEST(ChannelCursorTest, CompletionRequiresAnExactIndependentDirectReader) {
+  loom_aie2p_native_worker_t worker = {};
+  loom_aie2p_native_context_t context = {.workers = &worker};
+  loom_aie2p_native_cursor_t cursor = {.worker = UINT32_MAX};
+  EXPECT_FALSE(
+      loom_aie2p_native_cursor_has_read_completion(&context, &cursor, 2));
+  for (auto execution : {LOOM_AIE2P_NATIVE_EXECUTION_CORE,
+                         LOOM_AIE2P_NATIVE_EXECUTION_CONFIGURATION,
+                         LOOM_AIE2P_NATIVE_EXECUTION_DMA,
+                         LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION}) {
+    SCOPED_TRACE(execution);
+    worker.execution = execution;
+    for (bool exact : {false, true}) {
+      for (bool shared : {false, true}) {
+        for (uint32_t count : {1, 2, 3}) {
+          cursor = {.worker = UINT32_MAX};
+          loom_aie2p_native_cursor_bind(&cursor, 1, 0, count, exact, false);
+          cursor.shared = shared;
+          EXPECT_EQ(loom_aie2p_native_cursor_has_read_completion(&context,
+                                                                 &cursor, 2),
+                    exact && !shared && count == 2 &&
+                        execution != LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION);
+        }
+      }
+    }
+  }
+}
+
 class ChannelStateTest : public ::testing::Test {
  protected:
   void SetUp() override {

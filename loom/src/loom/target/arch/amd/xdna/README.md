@@ -137,8 +137,12 @@ reusable storage, rather than this aggregate-prefix ring. Likewise, control
 joins requiring runtime completion state need a record-aware realization.
 The native selector diagnoses those requirements before emitting the program;
 they are not invalid generic channel semantics. The
-[completion fixtures](aie2p/test/native_completion.loom-test) exercise reordered
-publication, reclamation, loop rotation and branch-local completion.
+[channel completion tests](../../../../analysis/channel_completion_test.cc)
+exercise reordered publication, reclamation, loop rotation, and branch-local
+completion. The [native cursor tests](aie2p/pipeline/channel_state_test.cc)
+check when direct reader completion can retire a DMA endpoint; the
+[conditional admission programs](aie2p/pipeline/test/conditional_admission.loom)
+check complete and partial consumption against independent output oracles.
 
 For directly authored physical array programs, the
 [array plan](aie2p/array/plan.h) owns worker placement, endpoint storage,

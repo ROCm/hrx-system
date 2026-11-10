@@ -83,6 +83,14 @@ bool loom_aie2p_native_cursor_has_exact_admissions(
          cursor->maximum_admissions == count;
 }
 
+bool loom_aie2p_native_cursor_has_read_completion(
+    const loom_aie2p_native_context_t* context,
+    const loom_aie2p_native_cursor_t* cursor, uint64_t count) {
+  return loom_aie2p_native_cursor_has_exact_admissions(cursor, count) &&
+         context->workers[cursor->worker].execution !=
+             LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION;
+}
+
 bool loom_aie2p_native_cursor_persistent(
     const loom_pipeline_invocations_t* invocations, iree_host_size_t channel,
     const loom_aie2p_native_cursor_t* cursor) {
