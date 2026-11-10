@@ -1,6 +1,7 @@
 // Immutable input starts once per child. Distinct SRAM prefixes or one two-slot
 // prefix FIFO share a core slot across two bulk phases. The cyclic form refills
-// bounded DMA windows; three child entries reuse its descriptor iteration state.
+// bounded DMA windows; three child entries advance the source origin while
+// reusing descriptor geometry, local storage, and immutable caller bindings.
 aie2p.target<array> @device
 
 func.def inline @stage_prefix(%input: buffer, %offset: offset, %destination: channel<tile<16xi32>>) {
@@ -54,19 +55,23 @@ pipeline.def @cohort(%prefix_fifo: i1) run(%input: buffer, %output: buffer, %epo
   %local_bulk_slots = buffer.view %local_storage[%record_bytes] : buffer -> view<2x16xi32>
   %local_prefix = channel.bind<fifo> %local_prefix_slots, %step : view<1x16xi32>, index -> channel<tile<16xi32>>
   %local_bulk = channel.bind<fifo> %local_bulk_slots, %phases : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %epoch_offset = index.scale %epoch, %record_bytes : index, offset -> offset
+  %second_offset = index.add %epoch_offset, %record_bytes : offset
+  %bulk_origin = index.add %epoch_offset, %bulk_offset : offset
   pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
     scf.if %prefix_fifo {
       scf.for %phase = [%begin to %phases step %step] {
-        %offset = index.scale %phase, %record_bytes : index, offset -> offset
+        %phase_offset = index.scale %phase, %record_bytes : index, offset -> offset
+        %offset = index.add %epoch_offset, %phase_offset : offset
         func.call @stage_prefix(%input, %offset, %first) : (buffer, offset, channel<tile<16xi32>>)
       }
     } else {
-      func.call @stage_prefix(%input, %origin, %first) : (buffer, offset, channel<tile<16xi32>>)
-      func.call @stage_prefix(%input, %record_bytes, %second) : (buffer, offset, channel<tile<16xi32>>)
+      func.call @stage_prefix(%input, %epoch_offset, %first) : (buffer, offset, channel<tile<16xi32>>)
+      func.call @stage_prefix(%input, %second_offset, %second) : (buffer, offset, channel<tile<16xi32>>)
     }
     scf.for %record = [%begin to %bulk_records step %step] {
       %record_offset = index.scale %record, %record_bytes : index, offset -> offset
-      %offset = index.add %record_offset, %bulk_offset : offset
+      %offset = index.add %record_offset, %bulk_origin : offset
       %source = buffer.view %input[%offset] : buffer -> view<16xi32>
       %write, %payload = channel.reserve %bulk : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
       %copy = kernel.async.copy %source to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
@@ -140,16 +145,18 @@ func.def @reference(%input: buffer, %output: buffer) {
   %epochs = index.constant 3 : index
   %phase_records = index.constant 3072 : index
   %records = index.constant 6144 : index
-  %source = buffer.view %input[%origin] : buffer -> view<6146x16xi32>
+  %source = buffer.view %input[%origin] : buffer -> view<6148x16xi32>
   %destination = buffer.view %output[%origin] : buffer -> view<3x6144x16xi32>
   scf.for %epoch = [%begin to %epochs step %step] {
     %epoch_value = index.cast %epoch : index to i32
     scf.for %record = [%begin to %records step %step] {
-      %prefix_record = index.div %record, %phase_records : index
-      %source_record = index.add %record, %prefix_records : index
+      %phase = index.div %record, %phase_records : index
+      %prefix_record = index.add %phase, %epoch : index
+      %source_base = index.add %record, %prefix_records : index
+      %source_record = index.add %source_base, %epoch : index
       scf.for %word = [%begin to %words step %step] {
-        %bias = view.load %source[%prefix_record, %word] : view<6146x16xi32> -> i32
-        %value = view.load %source[%source_record, %word] : view<6146x16xi32> -> i32
+        %bias = view.load %source[%prefix_record, %word] : view<6148x16xi32> -> i32
+        %value = view.load %source[%source_record, %word] : view<6148x16xi32> -> i32
         %biased = scalar.addi %value, %bias : i32
         %result = scalar.addi %biased, %epoch_value : i32
         view.store %result, %destination[%epoch, %record, %word] : i32, view<3x6144x16xi32>
@@ -162,12 +169,12 @@ func.def @reference(%input: buffer, %output: buffer) {
 check.scenario public @finite_phased_input_reentry {
   check.trial[2](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
-    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<98368xi32>
-    %input = check.tensor.view %input_storage offset(64) : tensor<98368xi32> -> tensor<98336xi32>
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<98400xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<98400xi32> -> tensor<98368xi32>
     %output_storage = check.generate.fill value(-9999) : tensor<294944xi32>
     %output = check.tensor.view %output_storage offset(64) : tensor<294944xi32> -> tensor<294912xi32>
-    check.compare<@finite_input_phases, @reference>(%input, %output) : (tensor<98336xi32>, tensor<294912xi32>) -> () {
-      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<98368xi32>
+    check.compare<@finite_input_phases, @reference>(%input, %output) : (tensor<98368xi32>, tensor<294912xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<98400xi32>
       check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<294944xi32>
     }
   }
@@ -182,12 +189,12 @@ pipeline.def<kernel> public retain target(@device) @finite_input_cycles() run(%i
 check.scenario public @finite_prefix_cycle_reentry {
   check.trial[2](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
-    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<98368xi32>
-    %input = check.tensor.view %input_storage offset(64) : tensor<98368xi32> -> tensor<98336xi32>
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<98400xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<98400xi32> -> tensor<98368xi32>
     %output_storage = check.generate.fill value(-9999) : tensor<294944xi32>
     %output = check.tensor.view %output_storage offset(64) : tensor<294944xi32> -> tensor<294912xi32>
-    check.compare<@finite_input_cycles, @reference>(%input, %output) : (tensor<98336xi32>, tensor<294912xi32>) -> () {
-      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<98368xi32>
+    check.compare<@finite_input_cycles, @reference>(%input, %output) : (tensor<98368xi32>, tensor<294912xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<98400xi32>
       check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<294944xi32>
     }
   }

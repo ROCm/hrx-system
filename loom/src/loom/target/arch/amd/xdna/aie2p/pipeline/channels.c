@@ -372,20 +372,23 @@ static iree_status_t loom_aie2p_native_channel_action(
         loom_aie2p_native_invoke(builder, *completion, &delta, 1, NULL, NULL));
   }
   if (!publish && loom_symbol_ref_is_valid(endpoint->grant)) {
-    // A granted singleton returns exactly one credit. Its exact finite reader
-    // count suppresses the final task, so queue retirement cannot wait for an
-    // unproduced record. The completion above makes storage available first.
+    // Startup grants a bounded window of free receiver slots. Each return
+    // admits one successor until the final window, so no payload waits on a
+    // credit whose return needs its shared wire. Completion makes storage free
+    // first.
     const loom_type_t type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
-    loom_op_t *next, *zero, *pending, *grant;
+    loom_op_t *next, *capacity, *pending, *grant;
     IREE_RETURN_IF_ERROR(loom_scalar_subi_build(
         builder, 0, state[endpoint->remaining], emitter->release_delta, type,
         action->op->location, &next));
     state[endpoint->remaining] = loom_scalar_subi_result(next);
     IREE_RETURN_IF_ERROR(loom_scalar_constant_build(
-        builder, loom_attr_i64(0), type, action->op->location, &zero));
+        builder,
+        loom_attr_i64(endpoint->access->channel->grant->window_capacity), type,
+        action->op->location, &capacity));
     IREE_RETURN_IF_ERROR(loom_scalar_cmpi_build(
-        builder, LOOM_SCALAR_CMPI_PREDICATE_NE, state[endpoint->remaining],
-        loom_scalar_constant_result(zero), action->op->location, &pending));
+        builder, LOOM_SCALAR_CMPI_PREDICATE_UGE, state[endpoint->remaining],
+        loom_scalar_constant_result(capacity), action->op->location, &pending));
     IREE_RETURN_IF_ERROR(
         loom_scf_if_build(builder, 0, loom_scalar_cmpi_result(pending), NULL, 0,
                           NULL, 0, action->op->location, &grant));
@@ -590,7 +593,7 @@ iree_status_t loom_aie2p_native_emit_worker(
     const loom_aie2p_native_channel_t* channel = endpoint->access->channel;
     const loom_aie2p_native_grant_t* grant = channel->grant;
     if (grant && grant->distribution->grant_reader == worker_index &&
-        grant->distribution->repetitions > 1) {
+        grant->distribution->repetitions > grant->window_capacity) {
       endpoint->remaining = state_count;
       state_views[state_count] = LOOM_VALUE_ID_INVALID;
       loom_op_t* remaining;

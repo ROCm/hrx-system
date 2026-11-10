@@ -21,8 +21,9 @@ extern "C" {
 // Admits a DMA transfer for retained endpoint storage geometry and tile facts.
 // Logical topology validation has proved the trailing record rank and sequence
 // count. This consumes exact coordinates; it does not resolve source IR or
-// facts. Returns false with a static reason when native DMA cannot express the
-// layout.
+// facts. Singleton axes consume no address dimension; their strides have no
+// effect on the transfer. Returns false with a static reason when native DMA
+// cannot express the layout.
 bool loom_aie2p_array_resolve_binding_transfer(
     const loom_storage_geometry_t* geometry, uint8_t record_rank,
     const loom_xdna_array_family_t* family, uint64_t binding_view_byte_offset,

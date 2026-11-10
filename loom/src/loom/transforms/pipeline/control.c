@@ -62,6 +62,9 @@ typedef struct loom_pipeline_control_sites_t {
   iree_host_size_t visit_count;
   // At least one independently progressing scope needs boundary projections.
   bool has_deferred;
+  // Engines that prepare autonomous worker captures before instruction work.
+  // NULL when no worker in the invocation requires entry preparation.
+  bool* preparation_engines;
 } loom_pipeline_control_sites_t;
 
 typedef enum loom_pipeline_control_projection_e {
@@ -135,6 +138,20 @@ static iree_status_t loom_pipeline_control_collect(
                                        .kind = LOOM_PIPELINE_CONTROL_EMPTY}));
   }
   for (iree_host_size_t i = 0; i < resources->strand_count; ++i) {
+    if (options->preparation_engines) {
+      const iree_host_size_t engine =
+          options->preparation_engines[invocation->first_worker + i];
+      if (engine != IREE_HOST_SIZE_MAX) {
+        if (!sites->preparation_engines) {
+          IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+              arena, execution->engine_count, sizeof(bool),
+              (void**)&sites->preparation_engines));
+          memset(sites->preparation_engines, 0,
+                 execution->engine_count * sizeof(bool));
+        }
+        sites->preparation_engines[engine] = true;
+      }
+    }
     IREE_RETURN_IF_ERROR(loom_pipeline_control_add_site(
         arena, sites,
         (loom_pipeline_control_site_t){
@@ -496,7 +513,9 @@ static iree_status_t loom_pipeline_control_project(
   }
   loom_builder_set_block(&rewriter->builder, entry);
   rewriter->builder.ip.parent_op = function;
-  if (projection == LOOM_PIPELINE_CONTROL_COMPLETE && sites->has_deferred) {
+  if (projection == LOOM_PIPELINE_CONTROL_COMPLETE &&
+      (sites->has_deferred ||
+       (sites->preparation_engines && sites->preparation_engines[engine]))) {
     IREE_RETURN_IF_ERROR(loom_pipeline_control_call_projection(
         rewriter, &boundaries[0], arguments));
   }
@@ -508,6 +527,16 @@ static iree_status_t loom_pipeline_control_project(
     loom_builder_set_before(&rewriter->builder, site->target);
     switch (site->kind) {
       case LOOM_PIPELINE_CONTROL_STRAND:
+        if (projection == LOOM_PIPELINE_CONTROL_START &&
+            options->preparation_engines &&
+            options->preparation_engines[site->worker] == engine) {
+          const loom_op_t* call =
+              loom_region_entry_block(loom_pipeline_strand_body(site->target))
+                  ->first_op;
+          IREE_RETURN_IF_ERROR(options->emit.prepare_worker(
+              options->emit.user_data, &rewriter->builder, site->worker,
+              loom_func_call_operands(call)));
+        }
         if (projection == LOOM_PIPELINE_CONTROL_COMPLETE &&
             options->worker_engines[site->worker] == engine) {
           IREE_RETURN_IF_ERROR(loom_pipeline_control_call_worker(
@@ -691,7 +720,13 @@ iree_status_t loom_pipeline_control_materialize(
         continue;
       }
       loom_pipeline_control_function_t boundaries[2] = {0};
-      for (int phase = sites.has_deferred ? 0 : 2; phase < 3; ++phase) {
+      const bool prepares =
+          sites.preparation_engines && sites.preparation_engines[engine];
+      for (int phase = sites.has_deferred || prepares ? 0 : 2; phase < 3;
+           ++phase) {
+        if (phase == 1 && !sites.has_deferred) {
+          continue;
+        }
         loom_string_id_t name = LOOM_STRING_ID_INVALID;
         do {
           char text[48];

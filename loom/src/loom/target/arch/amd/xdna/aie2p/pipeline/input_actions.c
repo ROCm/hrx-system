@@ -4,9 +4,11 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/input.h"
+#include "loom/transforms/view/offset_expression.h"
 
 static iree_status_t loom_aie2p_native_input_begin(
     loom_aie2p_native_context_t* context, loom_aie2p_native_input_t* input) {
@@ -70,8 +72,113 @@ static iree_status_t loom_aie2p_native_input_begin(
   return loom_aie2p_worker_return(&builder, NULL, 0);
 }
 
+static iree_status_t loom_aie2p_native_input_prepare_origins(
+    loom_aie2p_native_context_t* context, loom_aie2p_native_input_t* input) {
+  if (!input->address_count) {
+    return iree_ok_status();
+  }
+  loom_aie2p_worker_builder_t* code = &context->code;
+  loom_type_t* types = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(context->pass->arena, input->address_count,
+                                sizeof(*types), (void**)&types));
+  for (iree_host_size_t i = 0; i < input->address_count; ++i) {
+    types[i] = code->scalar_type;
+  }
+  loom_builder_t builder;
+  loom_op_t* function;
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_worker_helper(code, types, input->address_count, NULL, 0,
+                               &builder, &input->prepare, &function));
+  const loom_value_id_t* arguments =
+      loom_region_entry_block(loom_low_func_def_body(function))->arg_ids;
+  for (iree_host_size_t i = 0, argument = 0; i < input->source->phase_count;
+       ++i) {
+    const loom_aie2p_native_input_phase_t* phase = &input->phases[i];
+    if (!phase->relocation) {
+      continue;
+    }
+    const loom_named_attr_t address = {
+        .name_id = code->integer_name,
+        .value = loom_attr_i64(phase->relocation->load_address)};
+    loom_value_id_t base, words[2];
+    IREE_RETURN_IF_ERROR(loom_aie2p_worker_op(
+        code, &builder, AIE2P_CORE_DESCRIPTOR_REF_MATERIALIZE_LOCAL_ADDRESS_I32,
+        NULL, 0, loom_make_named_attr_slice(&address, 1), &code->address_type,
+        &base));
+    IREE_RETURN_IF_ERROR(loom_aie2p_worker_external_address(
+        code, &builder, base, arguments[argument++], &words[0], &words[1]));
+    if (phase->words[2]) {
+      // Packet fields occupy bits above the physical address's high portion.
+      loom_value_id_t packet;
+      IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
+          code, &builder, (int32_t)phase->words[2], &packet));
+      IREE_RETURN_IF_ERROR(loom_aie2p_worker_binary(
+          code, &builder, AIE2P_CORE_DESCRIPTOR_REF_ADD_I32, words[1], packet,
+          &words[1]));
+    }
+    IREE_RETURN_IF_ERROR(loom_aie2p_worker_control_write(
+        code, &builder, input->path->control_packet, phase->address_register,
+        words, 2));
+  }
+  return loom_aie2p_worker_return(&builder, NULL, 0);
+}
+
+iree_status_t loom_aie2p_native_emit_input_origins(
+    loom_builder_t* builder, const loom_aie2p_native_input_t* input,
+    loom_value_slice_t captures) {
+  loom_value_id_t* arguments = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(builder->arena, input->address_count,
+                                sizeof(*arguments), (void**)&arguments));
+  for (iree_host_size_t i = 0, argument = 0; i < input->source->phase_count;
+       ++i) {
+    const loom_pipeline_transport_input_phase_t* phase =
+        &input->source->phases[i];
+    if (!phase->source_capture_count) {
+      continue;
+    }
+    loom_symbolic_term_t* terms = NULL;
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(builder->arena, phase->source_capture_count,
+                                  sizeof(*terms), (void**)&terms));
+    for (iree_host_size_t j = 0; j < phase->source_capture_count; ++j) {
+      const loom_pipeline_transport_input_capture_t* capture =
+          &phase->source_captures[j];
+      terms[j] = (loom_symbolic_term_t){
+          .coefficient = capture->coefficient,
+          .value_id = captures.values[capture->argument],
+          .relation_value_id = captures.values[capture->argument]};
+    }
+    loom_symbolic_expr_t expression;
+    loom_symbolic_expr_constant(phase->source_byte_offset, &expression);
+    expression.terms = terms;
+    expression.term_count = phase->source_capture_count;
+    loom_value_id_t offset;
+    IREE_RETURN_IF_ERROR(loom_view_emit_offset_expression(
+        builder, &expression, LOOM_VALUE_ID_INVALID, LOOM_LOCATION_UNKNOWN,
+        &offset));
+    loom_op_t *integer, *narrowed;
+    IREE_RETURN_IF_ERROR(loom_index_cast_build(
+        builder, offset, loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
+        loom_type_scalar(LOOM_SCALAR_TYPE_I64), LOOM_LOCATION_UNKNOWN,
+        &integer));
+    IREE_RETURN_IF_ERROR(
+        loom_scalar_trunci_build(builder, loom_op_results(integer)[0],
+                                 loom_type_scalar(LOOM_SCALAR_TYPE_I64),
+                                 loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+                                 LOOM_LOCATION_UNKNOWN, &narrowed));
+    arguments[argument++] = loom_op_results(narrowed)[0];
+  }
+  loom_op_t* invoke;
+  return loom_low_invoke_build(builder, 0, 0, 0, 0, input->prepare, arguments,
+                               input->address_count, NULL, 0, NULL, 0,
+                               LOOM_LOCATION_UNKNOWN, &invoke);
+}
+
 iree_status_t loom_aie2p_native_prepare_input(
     loom_aie2p_native_context_t* context, loom_aie2p_native_input_t* input) {
+  IREE_RETURN_IF_ERROR(loom_aie2p_native_input_prepare_origins(context, input));
   const loom_aie2p_native_worker_t* owner =
       &context->workers[context->execution
                             .workers[context->core_engines[input->controller]]];

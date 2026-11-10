@@ -291,13 +291,12 @@ typedef struct loom_aie2p_native_transfer_task_t
     loom_aie2p_native_transfer_task_t;
 
 typedef struct loom_aie2p_native_relocation_t {
-  // First dynamic copy using this physical core's caller binding. It owns the
-  // invocation-time address initialization shared by all later copies.
-  const struct loom_aie2p_native_transfer_t* first_transfer;
   // Immutable caller base address pair in the core's local memory module.
   uint64_t storage_offset;
   // Core-relative load address of that pair.
   uint32_t load_address;
+  // Storage has been reserved for this controller and binding.
+  bool reserved;
 } loom_aie2p_native_relocation_t;
 
 typedef struct loom_aie2p_native_transfer_t {
@@ -831,6 +830,11 @@ iree_status_t loom_aie2p_native_cursor_advance(
 iree_status_t loom_aie2p_native_select_transfers(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization, bool* out_valid);
+
+// Reserves one immutable caller base shared by all dynamic copies on a core.
+iree_status_t loom_aie2p_native_reserve_binding(
+    loom_aie2p_native_context_t* context, loom_aie2p_native_worker_t* owner,
+    uint32_t binding, const loom_aie2p_native_relocation_t** out_relocation);
 
 iree_status_t loom_aie2p_native_select_control_route(
     loom_aie2p_native_context_t* context,

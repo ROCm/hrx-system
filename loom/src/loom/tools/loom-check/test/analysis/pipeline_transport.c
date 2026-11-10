@@ -101,6 +101,19 @@ static iree_status_t loom_check_test_pipeline_schedule_print(
   return iree_ok_status();
 }
 
+static iree_status_t loom_check_test_pipeline_input_captures(
+    const loom_pipeline_transport_input_phase_t* phase,
+    iree_string_builder_t* output) {
+  for (iree_host_size_t i = 0; i < phase->source_capture_count; ++i) {
+    const loom_pipeline_transport_input_capture_t* capture =
+        &phase->source_captures[i];
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        output, "  capture: argument=%u coefficient=%" PRId64 "\n",
+        capture->argument, capture->coefficient));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_check_test_pipeline_transport_print(
     const loom_module_t* module, const loom_pipeline_worker_t* worker,
     iree_host_size_t worker_index, bool input_addresses, bool phase_details,
@@ -112,7 +125,7 @@ static iree_status_t loom_check_test_pipeline_transport_print(
       return iree_string_builder_append_format(
           output, "worker %" PRIhsz ": input=unproven\n", worker_index);
     }
-    return iree_string_builder_append_format(
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         output,
         "worker %" PRIhsz ": repetitions=%" PRIu64 " period=%" PRIu64
         " source_offset=%" PRId64 " source_stride=%" PRId64
@@ -120,7 +133,8 @@ static iree_status_t loom_check_test_pipeline_transport_print(
         worker_index, transport->repetitions, input->phases[0].period,
         input->phases[0].source_byte_offset,
         input->phases[0].source_byte_stride,
-        input->phases[0].destination_byte_offset);
+        input->phases[0].destination_byte_offset));
+    return loom_check_test_pipeline_input_captures(&input->phases[0], output);
   }
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output,
@@ -171,6 +185,8 @@ static iree_status_t loom_check_test_pipeline_transport_print(
             " source_stride=%" PRId64 " destination_offset=%" PRId64 "\n",
             phase->transfers, phase->period, phase->source_byte_offset,
             phase->source_byte_stride, phase->destination_byte_offset));
+        IREE_RETURN_IF_ERROR(
+            loom_check_test_pipeline_input_captures(phase, output));
       }
     }
     const loom_value_fact_cfg_region_t* structure =

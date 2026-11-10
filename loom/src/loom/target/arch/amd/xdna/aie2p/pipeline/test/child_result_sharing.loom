@@ -41,11 +41,12 @@ pipeline.def @column() run(%output: buffer, %epoch: index) {
   %records = index.constant 64 : index
   %words = index.constant 16 : index
   %one_slot = index.constant 1 : index
+  %two_slots = index.constant 2 : index
   %cohort_bytes = index.constant 256 : offset
   %memory = pipeline.memory<workgroup>[0, 1] : pool
   %tile0 = pipeline.memory<workgroup>[0, 2] : pool
   %result0 = func.call @fifo(%tile0, %one_slot) : (pool, index) -> (channel<tile<16xi32>>)
-  %egress0 = func.call @fifo(%memory, %one_slot) : (pool, index) -> (channel<tile<16xi32>>)
+  %egress0 = func.call @fifo(%memory, %two_slots) : (pool, index) -> (channel<tile<16xi32>>)
   %row_bias0 = scalar.constant 0 : i32
   %row_bytes0 = index.constant 0 : offset
   %tile1 = pipeline.memory<workgroup>[0, 3] : pool

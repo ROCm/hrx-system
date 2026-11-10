@@ -9,6 +9,7 @@
 #include "loom/ops/index/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/credits.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/input.h"
 #include "loom/transforms/pipeline/control.h"
 
 static iree_status_t loom_aie2p_native_program_register(
@@ -18,6 +19,14 @@ static iree_status_t loom_aie2p_native_program_register(
       context->code.module, context->code.realization,
       context->execution.workers[engine], function,
       context->pass->diagnostic_emitter);
+}
+
+static iree_status_t loom_aie2p_native_program_prepare(
+    void* user_data, loom_builder_t* builder, iree_host_size_t worker,
+    loom_value_slice_t captures) {
+  loom_aie2p_native_context_t* context = user_data;
+  return loom_aie2p_native_emit_input_origins(
+      builder, context->workers[worker].input, captures);
 }
 
 static iree_status_t loom_aie2p_native_program_boundary(
@@ -112,21 +121,37 @@ iree_status_t loom_aie2p_native_emit_programs(
     const loom_pipeline_realization_t* realization, bool* out_valid) {
   *out_valid = false;
   const loom_value_id_t** state_arguments = NULL;
+  iree_host_size_t* preparation_engines = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       context->pass->arena, realization->invocations.worker_count,
       sizeof(*state_arguments), (void**)&state_arguments));
   for (iree_host_size_t i = 0; i < realization->invocations.worker_count; ++i) {
     state_arguments[i] = &context->workers[i].cursor_state_argument;
+    const loom_aie2p_native_input_t* input = context->workers[i].input;
+    if (input && input->address_count) {
+      if (!preparation_engines) {
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            rewriter->arena, realization->invocations.worker_count,
+            sizeof(*preparation_engines), (void**)&preparation_engines));
+        for (iree_host_size_t j = 0; j < realization->invocations.worker_count;
+             ++j) {
+          preparation_engines[j] = IREE_HOST_SIZE_MAX;
+        }
+      }
+      preparation_engines[i] = context->core_engines[input->controller];
+    }
   }
   context->code.realization = realization;
   const loom_type_t frame_type = loom_type_buffer();
   const loom_pipeline_control_options_t options = {
       .worker_engines = context->core_engines,
+      .preparation_engines = preparation_engines,
       .boundary_workers = context->distribution_controllers,
       .state_types = &frame_type,
       .state_count = 1,
       .worker_state_arguments = state_arguments,
       .emit = {.function = loom_aie2p_native_program_register,
+               .prepare_worker = loom_aie2p_native_program_prepare,
                .boundary = loom_aie2p_native_program_boundary,
                .collective_begin = loom_aie2p_native_collective_begin,
                .collective_end = loom_aie2p_native_collective_end,

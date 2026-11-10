@@ -118,10 +118,23 @@ iree_status_t loom_view_materialize_offset_expression(
     loom_builder_set_after(builder, anchor);
   }
   const loom_location_id_t location = anchor->location;
+  return loom_view_emit_offset_expression(builder, expression, base_value_id,
+                                          location, out_value);
+}
+
+iree_status_t loom_view_emit_offset_expression(
+    loom_builder_t* builder, const loom_symbolic_expr_t* expression,
+    loom_value_id_t base_value_id, loom_location_id_t location,
+    loom_value_id_t* out_value) {
+  if (base_value_id != LOOM_VALUE_ID_INVALID && expression->constant == 0 &&
+      expression->term_count == 0) {
+    *out_value = base_value_id;
+    return iree_ok_status();
+  }
   // Reuse the complete producer spelling. Its SSA identity carries facts
   // established for the aggregate expression that a term-by-term
   // reconstruction cannot attach to any one operand. The caller-owned
-  // dominance contract guarantees that this value is available at the anchor.
+  // dominance contract guarantees availability at the insertion point.
   if (base_value_id == LOOM_VALUE_ID_INVALID &&
       loom_symbolic_expr_has_relation_value(expression)) {
     const loom_value_id_t value = expression->relation_value_id;

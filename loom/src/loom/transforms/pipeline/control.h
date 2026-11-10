@@ -21,6 +21,13 @@ typedef struct loom_pipeline_control_callback_t {
   // Registers an ordinary helper in this engine's admitted execution context.
   iree_status_t (*function)(void* user_data, iree_host_size_t engine,
                             loom_func_like_t function);
+  // Prepares an autonomous worker before this invocation's instruction work.
+  // Captures are the actual source operands in the original worker formal
+  // order, projected into this engine. Preparation cannot await its consumers.
+  // The selected instruction owner starts and retires the resulting work.
+  iree_status_t (*prepare_worker)(void* user_data, loom_builder_t* builder,
+                                  iree_host_size_t worker,
+                                  loom_value_slice_t captures);
   // Emits before or after a child's local call. scope is NULL for concurrent
   // construction. A serial boundary executes on every engine participating in
   // scope, including engines with no work in this particular child. A NULL
@@ -57,6 +64,10 @@ typedef struct loom_pipeline_control_callback_t {
 typedef struct loom_pipeline_control_options_t {
   // Selected engine per worker; IREE_HOST_SIZE_MAX excludes autonomous work.
   const iree_host_size_t* worker_engines;
+  // Optional engine per autonomous worker needing captured entry operands.
+  // SIZE_MAX needs no preparation. An admitted instruction participant owns
+  // each selected engine; preparation adds no independent execution context.
+  const iree_host_size_t* preparation_engines;
   // Optional invocation-major physical boundary controllers. An autonomous
   // child has no instruction worker, but its selected controller starts and
   // retires it around concurrent parent work. Absent entries are SIZE_MAX.

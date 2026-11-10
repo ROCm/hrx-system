@@ -244,6 +244,7 @@ loom_cc_test(
         "//loom/src/loom/ops:op_registry",
         "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/pipeline",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/util:fact_table",

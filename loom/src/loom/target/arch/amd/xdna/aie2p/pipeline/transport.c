@@ -948,9 +948,9 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
   return iree_ok_status();
 }
 
-static iree_status_t loom_aie2p_native_reserve_binding(
+iree_status_t loom_aie2p_native_reserve_binding(
     loom_aie2p_native_context_t* context, loom_aie2p_native_worker_t* owner,
-    loom_aie2p_native_transfer_t* transfer) {
+    uint32_t binding, const loom_aie2p_native_relocation_t** out_relocation) {
   if (!owner->relocations) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         context->pass->arena, context->binding_count,
@@ -958,17 +958,16 @@ static iree_status_t loom_aie2p_native_reserve_binding(
     memset(owner->relocations, 0,
            context->binding_count * sizeof(*owner->relocations));
   }
-  loom_aie2p_native_relocation_t* relocation =
-      &owner->relocations[transfer->binding];
-  if (!relocation->first_transfer) {
+  loom_aie2p_native_relocation_t* relocation = &owner->relocations[binding];
+  if (!relocation->reserved) {
     IREE_RETURN_IF_ERROR(loom_source_storage_packing_reserve(
         context->inventory.pools[owner->tile->pool_index].packing, 8, 8, NULL,
         0, &relocation->storage_offset));
     relocation->load_address = owner->tile->facts->memory.local_load_base +
                                (uint32_t)relocation->storage_offset;
-    relocation->first_transfer = transfer;
+    relocation->reserved = true;
   }
-  transfer->relocation = relocation;
+  *out_relocation = relocation;
   return iree_ok_status();
 }
 
@@ -993,7 +992,8 @@ static iree_status_t loom_aie2p_native_reserve_transfer_bindings(
       if (!transfer->shim_descriptor->address_dynamic) {
         continue;
       }
-      status = loom_aie2p_native_reserve_binding(context, owner, transfer);
+      status = loom_aie2p_native_reserve_binding(
+          context, owner, transfer->binding, &transfer->relocation);
     }
   }
   return status;
@@ -1235,7 +1235,8 @@ iree_status_t loom_aie2p_native_select_transfers(
     for (loom_aie2p_native_grant_t* grant = delivery->grants;
          iree_status_is_ok(status) && valid && grant; grant = grant->next) {
       const uint32_t reader = grant->distribution->grant_reader;
-      if (reader == UINT32_MAX || grant->distribution->repetitions == 1) {
+      if (reader == UINT32_MAX ||
+          grant->distribution->repetitions <= grant->window_capacity) {
         continue;
       }
       const loom_aie2p_native_tile_t* sender = grant->distribution->sender.tile;

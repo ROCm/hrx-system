@@ -132,6 +132,30 @@ iree_status_t loom_aie2p_worker_binary(loom_aie2p_worker_builder_t* context,
                               &context->scalar_type, out_value);
 }
 
+iree_status_t loom_aie2p_worker_external_address(
+    loom_aie2p_worker_builder_t* code, loom_builder_t* builder,
+    loom_value_id_t base, loom_value_id_t offset, loom_value_id_t* out_low,
+    loom_value_id_t* out_high) {
+  loom_value_id_t low, high;
+  for (unsigned i = 0; i < 2; ++i) {
+    const loom_named_attr_t displacement = {.name_id = code->displacement_name,
+                                            .value = loom_attr_i64(i * 4)};
+    IREE_RETURN_IF_ERROR(loom_aie2p_worker_op(
+        code, builder,
+        AIE2P_CORE_DESCRIPTOR_REF_LOAD_SCALAR_I32_INDEXED_IMMEDIATE, &base, 1,
+        loom_make_named_attr_slice(&displacement, 1), &code->scalar_type,
+        i ? &high : &low));
+  }
+  loom_value_id_t carry;
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_binary(
+      code, builder, AIE2P_CORE_DESCRIPTOR_REF_ADD_I32, low, offset, out_low));
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_binary(
+      code, builder, AIE2P_CORE_DESCRIPTOR_REF_CMP_ULT_I32, *out_low, low,
+      &carry));
+  return loom_aie2p_worker_binary(
+      code, builder, AIE2P_CORE_DESCRIPTOR_REF_ADD_I32, high, carry, out_high);
+}
+
 iree_status_t loom_aie2p_worker_return(loom_builder_t* builder,
                                        const loom_value_id_t* values,
                                        iree_host_size_t count) {

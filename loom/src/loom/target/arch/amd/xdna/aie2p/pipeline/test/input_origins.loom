@@ -1,0 +1,105 @@
+// One core consumes a single repeated stream whose origin changes at each
+// child entry. Declaring the consumer first must not delay address preparation
+// until after its first read. Reverse cohorts expose stale descriptor origins.
+aie2p.target<array> @device
+
+pipeline.def @cohort() run(%input: buffer, %output: buffer, %epoch: index) {
+  %origin = index.constant 0 : offset
+  %record_bytes = index.constant 64 : offset
+  %cohort_bytes = index.constant 128 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %capacity = index.constant 2 : index
+  %last = index.constant 2 : index
+  %records = index.constant 6 : index
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %cohort_bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x16xi32>
+  %stream = channel.bind<fifo> %slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %source_cohort = index.sub %last, %epoch : index
+  %base = index.scale %source_cohort, %cohort_bytes : index, offset -> offset
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %epoch_value = index.cast %epoch : index to i32
+    %bias = vector.splat %epoch_value : vector<16xi32>
+    %first = index.mul %epoch, %records : index
+    scf.for %record = [%begin to %records step %step] {
+      %read, %payload = channel.acquire<mutable> %stream : channel<tile<16xi32>> -> (read<tile<16xi32>, mutable>, view<16xi32>)
+      %value = vector.load %payload[0] : view<16xi32> -> vector<16xi32>
+      %result = vector.addi %value, %bias : vector<16xi32>
+      vector.store %result, %payload[0] : vector<16xi32>, view<16xi32>
+      %position = index.add %first, %record : index
+      %offset = index.scale %position, %record_bytes : index, offset -> offset
+      %destination = buffer.view %output[%offset] : buffer -> view<16xi32>
+      %copy = kernel.async.copy %payload to %destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+      %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+      channel.release %read : read<tile<16xi32>, mutable>
+    }
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %records step %step] {
+      %slot = index.rem %record, %capacity : index
+      %displacement = index.scale %slot, %record_bytes : index, offset -> offset
+      %offset = index.add %base, %displacement : offset
+      %source = buffer.view %input[%offset] : buffer -> view<16xi32>
+      %write, %payload = channel.reserve %stream : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      %copy = kernel.async.copy %source to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+      %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+      channel.publish %write : write<tile<16xi32>>
+    }
+  }
+}
+
+pipeline.def<kernel> public retain target(@device) @input_origins() run(%input_arg: buffer, %output_arg: buffer) {
+  %input_unique, %output_unique = buffer.assume.noalias %input_arg, %output_arg : buffer, buffer
+  %input, %output = buffer.assume.alignment %input_unique, %output_unique {minimum_alignment = 64} : buffer, buffer
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %epochs = index.constant 3 : index
+  pipeline.serial {
+    scf.for %epoch = [%begin to %epochs step %step] {
+      pipeline.compose @cohort(%input, %output, %epoch) : (buffer, buffer, index)
+    }
+  }
+}
+
+func.def @reference(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %epochs = index.constant 3 : index
+  %last = index.constant 2 : index
+  %records = index.constant 6 : index
+  %words = index.constant 16 : index
+  %source = buffer.view %input[%origin] : buffer -> view<3x2x16xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<3x6x16xi32>
+  scf.for %epoch = [%begin to %epochs step %step] {
+    %source_cohort = index.sub %last, %epoch : index
+    %bias = index.cast %epoch : index to i32
+    scf.for %record = [%begin to %records step %step] {
+      %slot = index.rem %record, %last : index
+      scf.for %word = [%begin to %words step %step] {
+        %value = view.load %source[%source_cohort, %slot, %word] : view<3x2x16xi32> -> i32
+        %result = scalar.addi %value, %bias : i32
+        view.store %result, %destination[%epoch, %record, %word] : i32, view<3x6x16xi32>
+      }
+    }
+  }
+  func.return
+}
+
+check.scenario public @reverse_cohort_origins {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000 to 1000) : tensor<128xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<128xi32> -> tensor<96xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<320xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<320xi32> -> tensor<288xi32>
+    check.compare<@input_origins, @reference>(%input, %output) : (tensor<96xi32>, tensor<288xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<128xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<320xi32>
+    }
+  }
+  check.return
+}
