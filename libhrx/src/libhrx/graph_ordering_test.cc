@@ -123,9 +123,18 @@ struct RecordingQueue {
 
 class GraphOrderingTest : public ::testing::Test {
  protected:
+  // Owns the task device and its runtime through fixture cleanup.
+  hrx_device_group_t group_ = nullptr;
+
   void SetUp() override {
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_cpu_initialize(0)));
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_cpu_device_get(0, &device_)));
+    hrx_runtime_t runtime = nullptr;
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_runtime_create(nullptr, hrx_host_allocator_system(), &runtime)));
+    const hrx_device_create_params_t params = {.uri = "task://"};
+    hrx_status_t status = hrx_device_group_create(runtime, 1, &params, &group_);
+    hrx_runtime_release(runtime);
+    IREE_ASSERT_OK(hrx_status_to_iree(status));
+    device_ = hrx_device_group_get_device(group_, 0);
     for (auto& stream : streams_) {
       IREE_ASSERT_OK(hrx_status_to_iree(
           hrx_stream_create(hrx_device_get_queue(device_, 0, 0), 0, &stream)));
@@ -174,7 +183,8 @@ class GraphOrderingTest : public ::testing::Test {
       hrx_stream_release(stream);
     }
     iree_hal_queue_release(&queue_.base);
-    IREE_EXPECT_OK(hrx_status_to_iree(hrx_cpu_shutdown()));
+    hrx_device_group_release(group_);
+    group_ = nullptr;
   }
 
   void AddFills(size_t count, hrx_graph_node_t dependency = nullptr) {
@@ -214,7 +224,7 @@ class GraphOrderingTest : public ::testing::Test {
   }
 
   static constexpr size_t kWordCount = 64;
-  // Borrowed CPU device, live until shutdown after all resource releases.
+  // Borrowed CPU device, live through all resource releases.
   hrx_device_t device_ = nullptr;
   // Independently serialized submission timelines sharing one Task device.
   std::array<hrx_stream_t, 2> streams_ = {};

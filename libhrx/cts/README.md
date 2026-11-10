@@ -9,7 +9,7 @@ the AMD GPU targets enabled in the build and selected against the actual device.
 
 | Surface | Tests | Behavior exercised |
 |---------|-------|--------------------|
-| Runtime and devices | `lifecycle`, `status`, `device` | Initialization, shutdown, status ownership, device properties, and synchronization |
+| Runtime and devices | `lifecycle`, `status`, `device`, `group` | Explicit runtime/group ownership, passive discovery, shared CPU/GPU pools, device properties, and synchronization |
 | Allocation and ownership | `allocator`, `host_allocator`, `memory`, `refcount` | Borrowed allocators, host imports, stream-ordered allocation, mapping, and retain/release |
 | Queues and streams | `queue_ops`, `stream`, `stream_ops`, `semaphore` | Host calls, fills, copies, updates, execution barriers, timeline signals, and completion |
 | Transfers | `transfer` | Host/device copies, stream ordering, numerical output, and range rejection |
@@ -38,11 +38,22 @@ separate from ordinary dispatch qualification.
 
 ## Selecting the runtime and device
 
-HRX tests default to `cpu:0`. `HRX_CTS_DEVICE=gpu:0` selects a GPU for the shared
-HRX harness; `--hrx-device` overrides it. HIP tests select GPUs through the HIP
-frontend and do not use `HRX_CTS_DEVICE`.
+The shared HRX harness owns one explicit runtime and device group for its test
+process. `--hrx-device` accepts a HAL URI, such as `task://`, `rdna://0`, or
+`xdna://0`. `HRX_CTS_DEVICE` supplies the same selection when the argument is
+absent. The harness also accepts `cpu:N` and `gpu:N` as ordinal-selection
+shorthands and defaults to `cpu:0`. Tests that own their complete group lifecycle,
+such as the mixed CPU/GPU pool test, use `none` for the harness device.
 
-`HRX_GPU_DRIVER` selects the GPU implementation for either API:
+Native applications discover URI/name metadata with
+`hrx_runtime_query_available_devices`, then select their devices through
+`hrx_device_group_create`. Discovery does not create HAL devices or task workers.
+Groups retain their runtime, and runtime events remain observable through final
+synchronous group destruction. There is no global CPU or GPU initialization API.
+
+HIP tests select GPUs through the frontend and do not use `HRX_CTS_DEVICE`.
+`HRX_GPU_DRIVER` selects the frontend implementation and the harness's `gpu:N`
+namespace; exact native HRX URIs select their driver directly:
 
 | Value | Implementation |
 |-------|----------------|
@@ -70,9 +81,11 @@ to describe the HIP error enum, so `hipErrorNotInitialized` still maps to
 Successful initialization and queries with all devices explicitly hidden remain
 quiet.
 
-Initialization creates execution resources for every selected GPU, even when the
-caller only requests a device count. On the native AMD GPU backend this includes
-an SDMA transfer queue where the device exposes that queue family. These queues
+HIP initialization creates execution resources for every selected GPU, even when
+the caller only requests a device count. Native HRX discovery is passive and
+creates execution resources only when the caller constructs a group. On the
+native AMD GPU backend this includes an SDMA transfer queue where the device
+exposes that queue family. These queues
 come from a finite pool shared with other processes, with some slots reserved by
 the kernel. Consequently there is no portable fixed process-concurrency limit:
 the selected devices, driver, and other users determine available capacity.

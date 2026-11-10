@@ -149,15 +149,6 @@ void HrxLoader::load(const std::string& path) {
   LOAD(queue_alloca);
   LOAD(queue_dealloca);
 
-  LOAD(gpu_initialize);
-  LOAD(gpu_shutdown);
-  LOAD(gpu_device_count);
-  LOAD(gpu_device_get);
-  LOAD(cpu_initialize);
-  LOAD(cpu_shutdown);
-  LOAD(cpu_device_count);
-  LOAD(cpu_device_get);
-
   LOAD(device_get_property);
   LOAD(device_get_type);
   LOAD(device_retain);

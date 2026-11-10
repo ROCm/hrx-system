@@ -18,6 +18,9 @@ using EventPtr =
 
 class StreamTest : public ::testing::Test {
  protected:
+  // Owns the task device and its runtime through fixture cleanup.
+  inline static hrx_device_group_t group_ = nullptr;
+
   static void SetUpTestSuite() {
     const hrx_device_event_sink_t sink = {
         .fn =
@@ -27,13 +30,20 @@ class StreamTest : public ::testing::Test {
               }
             },
     };
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_runtime_set_device_event_sink(sink)));
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_cpu_initialize(0)));
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_cpu_device_get(0, &device_)));
+    const hrx_runtime_options_t options = {.event_sink = sink};
+    hrx_runtime_t runtime = nullptr;
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_runtime_create(&options, hrx_host_allocator_system(), &runtime)));
+    const hrx_device_create_params_t params = {.uri = "task://"};
+    hrx_status_t status = hrx_device_group_create(runtime, 1, &params, &group_);
+    hrx_runtime_release(runtime);
+    IREE_ASSERT_OK(hrx_status_to_iree(status));
+    device_ = hrx_device_group_get_device(group_, 0);
   }
 
   static void TearDownTestSuite() {
-    IREE_EXPECT_OK(hrx_status_to_iree(hrx_cpu_shutdown()));
+    hrx_device_group_release(group_);
+    group_ = nullptr;
     device_ = nullptr;
   }
 

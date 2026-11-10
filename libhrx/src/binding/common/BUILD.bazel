@@ -166,9 +166,35 @@ hrx_cc_library(
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:profile_file",
         "//runtime/src/iree/hal/utils:resource_set",
         "//runtime/src/iree/io:file_handle",
         "//third_party:zstd",
+    ],
+)
+
+hrx_cc_test(
+    name = "init_profile_gpu_test",
+    srcs = ["init_profile_gpu_test.cc"],
+    env = {"HRX_GPU_DRIVER": "amdgpu"},
+    resource_group = "iree-hal-drivers-amdgpu-tests",
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = ["@platforms//os:linux"] + select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":common",
+        "//libhrx/src/libhrx:hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:profile_file",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
     ],
 )
 
@@ -409,7 +435,7 @@ hrx_cc_test(
 hrx_cc_test(
     name = "mem_pool_backing_gpu_test",
     srcs = ["mem_pool_backing_test.cc"],
-    copts = ["-DHRX_TEST_GPU=1"],
+    env = {"HRX_TEST_DEVICE_URI": "amdgpu://0"},
     resource_group = "iree-hal-drivers-amdgpu-tests",
     tags = [
         "iree-run-requirement=runtime.resource.amd_gpu",

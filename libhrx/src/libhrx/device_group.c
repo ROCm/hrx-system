@@ -67,6 +67,7 @@ iree_status_t hrx_device_group_create_with_extensions(
       sizeof(*group) + device_count * sizeof(group->devices[0]),
       (void**)&group));
   iree_atomic_ref_count_init(&group->ref_count);
+  iree_slim_mutex_initialize(&group->profile_mutex);
   group->runtime = runtime;
   hrx_runtime_retain(runtime);
 
@@ -161,6 +162,7 @@ void hrx_device_group_release(hrx_device_group_t group) {
     hrx_device_deinitialize(&group->devices[i]);
   }
   iree_hal_device_group_release(group->hal_group);
+  iree_slim_mutex_deinitialize(&group->profile_mutex);
   iree_allocator_free(runtime->host_allocator, group);
   hrx_runtime_release(runtime);
 }

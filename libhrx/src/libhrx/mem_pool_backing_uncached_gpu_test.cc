@@ -15,23 +15,25 @@ namespace {
 class MemPoolBackingUncachedGpuTest : public ::testing::Test {
  protected:
   static void SetUpTestSuite() {
-    hrx_status_t status = hrx_gpu_initialize(0);
-    initialized_ = hrx_status_is_ok(status);
+    hrx_runtime_t runtime = nullptr;
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_runtime_create(nullptr, hrx_host_allocator_system(), &runtime)));
+    const hrx_device_create_params_t params = {.uri = "amdgpu://0"};
+    hrx_status_t status = hrx_device_group_create(runtime, 1, &params, &group_);
+    hrx_runtime_release(runtime);
     IREE_ASSERT_OK(hrx_status_to_iree(status));
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_gpu_device_get(0, &device_)));
+    device_ = hrx_device_group_get_device(group_, 0);
   }
 
   static void TearDownTestSuite() {
-    if (initialized_) {
-      IREE_EXPECT_OK(hrx_status_to_iree(hrx_gpu_shutdown()));
-      device_ = nullptr;
-      initialized_ = false;
-    }
+    hrx_device_group_release(group_);
+    group_ = nullptr;
+    device_ = nullptr;
   }
 
   // One GPU lifetime shared across every case in this suite.
-  inline static bool initialized_ = false;
-  // Borrowed first GPU device, valid while the runtime is initialized.
+  inline static hrx_device_group_t group_ = nullptr;
+  // Borrowed first GPU device, valid while the group is retained.
   inline static hrx_device_t device_ = nullptr;
 };
 

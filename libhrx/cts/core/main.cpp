@@ -1,13 +1,15 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 //
-// Custom Catch2 main for hrx CTS. Initializes hrx and selects a device.
+// Custom Catch2 main for HRX CTS. Owns one explicitly selected device group.
 
 #include <atomic>
 #include <catch2/catch_session.hpp>
+#include <charconv>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <string_view>
 
 #include "hrx_loader.hpp"
 #include "hrx_test_fixture.hpp"
@@ -39,6 +41,85 @@ void printStatusAndConsume(HrxLoader& loader, const char* context,
   loader.status_ignore(status);
 }
 
+// Driver failures reported while releasing devices must affect process exit,
+// including events delivered after the Catch session has finished.
+void recordDeviceEvent(void*, const hrx_device_event_t* event) {
+  if (event->severity < HRX_DEVICE_EVENT_SEVERITY_ERROR) {
+    return;
+  }
+  fprintf(stderr,
+          "Device event: type %u, severity %u, device %.*s, sequence %llu\n",
+          event->type, event->severity,
+          static_cast<int>(event->source.device_id.size),
+          event->source.device_id.size ? event->source.device_id.data : "",
+          static_cast<unsigned long long>(event->sequence));
+  g_test_failure.store(true, std::memory_order_relaxed);
+}
+
+hrx_status_t createTestGroup(HrxLoader& loader, const std::string& spec,
+                             hrx_device_group_t* out_group) {
+  *out_group = nullptr;
+  const hrx_runtime_options_t options = {
+      .event_sink =
+          {
+              .fn = recordDeviceEvent,
+          },
+  };
+  hrx_runtime_t runtime = nullptr;
+  hrx_status_t status =
+      loader.runtime_create(&options, loader.host_allocator_system(), &runtime);
+  hrx_device_info_t* infos = nullptr;
+  const char* uri = spec.c_str();
+  // These are CTS selection shorthands, not native HRX device inventories.
+  if (hrx_status_is_ok(status) &&
+      (spec.starts_with("gpu:") || spec.starts_with("cpu:"))) {
+    size_t ordinal = 0;
+    const auto parsed =
+        std::from_chars(spec.data() + 4, spec.data() + spec.size(), ordinal);
+    if (parsed.ec != std::errc{} || parsed.ptr != spec.data() + spec.size()) {
+      status = loader.make_status(HRX_STATUS_INVALID_ARGUMENT,
+                                  "invalid device ordinal");
+    } else {
+      const char* gpu_driver = std::getenv("HRX_GPU_DRIVER");
+      const char* scheme =
+          spec.starts_with("cpu:")
+              ? "task"
+              : (gpu_driver && gpu_driver[0] ? gpu_driver : "amdgpu");
+      size_t count = 0;
+      status = loader.runtime_query_available_devices(
+          runtime, scheme, loader.host_allocator_system(), &count, &infos);
+      if (hrx_status_is_ok(status)) {
+        // The legacy driver's aggregate entry is not a physical GPU ordinal.
+        if (std::string_view(scheme) == "legacy-amdgpu") {
+          size_t physical_count = 0;
+          for (size_t i = 0; i < count; ++i) {
+            if (std::string_view(infos[i].uri) != "legacy-amdgpu://") {
+              infos[physical_count++] = infos[i];
+            }
+          }
+          count = physical_count;
+        }
+        if (ordinal >= count) {
+          status = loader.make_status(HRX_STATUS_OUT_OF_RANGE,
+                                      "device ordinal is not available");
+        } else {
+          uri = infos[ordinal].uri;
+        }
+      }
+    }
+  }
+  if (hrx_status_is_ok(status)) {
+    const hrx_device_create_params_t params = {
+        .uri = uri,
+        .completion_wait_flags = HRX_WAIT_FLAG_YIELD,
+    };
+    status = loader.device_group_create(runtime, 1, &params, out_group);
+  }
+  loader.host_allocator_free(loader.host_allocator_system(), infos);
+  loader.runtime_release(runtime);
+  return status;
+}
+
 }  // namespace
 
 void ReportHrxTestFailure(const char* context, hrx_status_t status) noexcept {
@@ -65,7 +146,7 @@ int main(int argc, char* argv[]) {
              Catch::Clara::Opt(hip_library, "path")["--hip-library"](
                  "Path to libamdhip64.so") |
              Catch::Clara::Opt(hrx_device_spec, "spec")["--hrx-device"](
-                 "Device spec (gpu:N, cpu:N, or none)");
+                 "HAL URI, gpu:N, cpu:N, or none");
   session.cli(cli);
 
   int ret = session.applyCommandLine(argc, argv);
@@ -79,6 +160,7 @@ int main(int argc, char* argv[]) {
     HrxLoader::setLibraryPath(hrx_library);
   }
 
+  hrx_device_group_t group = nullptr;
   try {
     auto& loader = HrxLoader::instance();
 
@@ -92,45 +174,16 @@ int main(int argc, char* argv[]) {
       return ret ? ret : static_cast<int>(g_test_failure.load());
     }
 
-    // Parse device spec.
-    hrx_accelerator_type_t type = HRX_ACCELERATOR_CPU;
-    int index = 0;
-    if (hrx_device_spec.substr(0, 4) == "gpu:") {
-      type = HRX_ACCELERATOR_GPU;
-      index = std::atoi(hrx_device_spec.c_str() + 4);
-    } else if (hrx_device_spec.substr(0, 4) == "cpu:") {
-      type = HRX_ACCELERATOR_CPU;
-      index = std::atoi(hrx_device_spec.c_str() + 4);
-    }
-
-    // Initialize accelerator.
-    hrx_status_t status;
-    if (type == HRX_ACCELERATOR_GPU) {
-      status = loader.gpu_initialize(0);
-      if (!hrx_status_is_ok(status)) {
-        printStatusAndConsume(loader, "Failed to initialize GPU accelerator",
-                              status);
-        return 1;
-      }
-      status = loader.gpu_device_get(index, &g_test_device);
-    } else {
-      status = loader.cpu_initialize(0);
-      if (!hrx_status_is_ok(status)) {
-        printStatusAndConsume(loader, "Failed to initialize CPU accelerator",
-                              status);
-        return 1;
-      }
-      status = loader.cpu_device_get(index, &g_test_device);
-    }
+    hrx_status_t status = createTestGroup(loader, hrx_device_spec, &group);
     if (!hrx_status_is_ok(status)) {
-      std::string context = "Failed to get device " + hrx_device_spec;
-      printStatusAndConsume(loader, context.c_str(), status);
-      ReportHrxTestFailure("Accelerator shutdown", type == HRX_ACCELERATOR_GPU
-                                                       ? loader.gpu_shutdown()
-                                                       : loader.cpu_shutdown());
+      printStatusAndConsume(loader, "Failed to create test device group",
+                            status);
       return 1;
     }
-    g_test_device_type = type;
+    g_test_device = loader.device_group_get_device(group, 0);
+    ReportHrxTestFailure(
+        "Device type query",
+        loader.device_get_type(g_test_device, &g_test_device_type));
 
     char name[128] = {0};
     ReportHrxTestFailure(
@@ -146,14 +199,10 @@ int main(int argc, char* argv[]) {
 
   ret = session.run();
 
-  // Shutdown.
-  if (g_test_device) {
-    ReportHrxTestFailure("Accelerator shutdown",
-                         g_test_device_type == HRX_ACCELERATOR_GPU
-                             ? hrx().gpu_shutdown()
-                             : hrx().cpu_shutdown());
-    g_test_device = nullptr;
-  }
+  // Release execution resources before reporting the final result. Runtime
+  // events and fixture cleanup failures remain observable after session.run().
+  g_test_device = nullptr;
+  hrx().device_group_release(group);
 
   return ret ? ret : static_cast<int>(g_test_failure.load());
 }

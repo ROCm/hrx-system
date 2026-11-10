@@ -4,7 +4,6 @@
 #include "runtime.h"
 
 #include <stddef.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "device_group.h"
@@ -14,8 +13,6 @@
 #include "iree/base/threading/call_once.h"
 #include "iree/base/threading/numa.h"
 #include "iree/hal/driver/task/driver.h"
-#include "iree/hal/utils/profile_file.h"
-#include "iree/io/file_handle.h"
 #include "iree/task/api.h"
 
 #ifdef HRX_HAS_IREE_AMD_DRIVER
@@ -24,16 +21,6 @@
 #ifdef HRX_HAS_IREE_AMDGPU_DRIVER
 #include "iree/hal/driver/amdgpu/registration/driver_module.h"
 #endif
-
-// Compatibility entry points own ordinary runtime/group references. Native
-// callers create these owners explicitly and never consult this inventory.
-static hrx_runtime_t g_default_runtime;
-static hrx_device_group_t g_cpu_group;
-static hrx_device_group_t g_gpu_group;
-static hrx_device_event_sink_t g_device_event_sink;
-
-// Only explicit profile drains serialize access to their shared output file.
-static iree_slim_mutex_t g_profile_mutex;
 
 // KFD retains its original render-file identity across device generations.
 // Native connections and their code remain process-owned; execution services
@@ -362,103 +349,10 @@ static iree_status_t hrx_create_task_driver(hrx_runtime_t runtime,
   return status;
 }
 
-static const char* hrx_get_gpu_driver_name(void) {
-  const char* value = getenv("HRX_GPU_DRIVER");
-  return (value && value[0]) ? value : "amdgpu";
-}
-
-static const char* hrx_get_profile_file_path(void) {
-  const char* value = getenv("HRX_PROFILE_FILE");
-  return (value && value[0]) ? value : NULL;
-}
-
-static iree_status_t hrx_hal_runtime_features_from_environment(
-    iree_hal_device_runtime_feature_flags_t* out_runtime_features) {
-  *out_runtime_features = IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_NONE;
-  const char* sanitizer = getenv("HRX_HAL_SANITIZER");
-  if (!sanitizer || !sanitizer[0]) {
-    return iree_ok_status();
-  }
-
-  iree_hal_device_runtime_feature_flags_t runtime_features =
-      IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_FEEDBACK;
-  if (strcmp(sanitizer, "asan") == 0) {
-    runtime_features |= IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_ASAN;
-  } else if (strcmp(sanitizer, "tsan") == 0) {
-    runtime_features |= IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_TSAN;
-  } else if (strcmp(sanitizer, "asan,tsan") == 0 ||
-             strcmp(sanitizer, "tsan,asan") == 0) {
-    runtime_features |= IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_ASAN |
-                        IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_TSAN;
-  } else {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unsupported HRX_HAL_SANITIZER '%s'", sanitizer);
-  }
-  *out_runtime_features = runtime_features;
-  return iree_ok_status();
-}
-
-static iree_status_t hrx_profile_file_sink_create(
-    const char* file_path, iree_allocator_t host_allocator,
-    iree_hal_profile_sink_t** out_sink) {
-  IREE_ASSERT_ARGUMENT(out_sink);
-  *out_sink = NULL;
-  if (!file_path || !file_path[0]) {
-    return iree_ok_status();
-  }
-
-  iree_io_file_handle_t* file_handle = NULL;
-  iree_status_t status = iree_io_file_handle_create(
-      IREE_IO_FILE_MODE_WRITE | IREE_IO_FILE_MODE_SEQUENTIAL_SCAN |
-          IREE_IO_FILE_MODE_SHARE_READ,
-      iree_make_cstring_view(file_path), /*initial_size=*/0, host_allocator,
-      &file_handle);
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_profile_file_sink_create(file_handle, host_allocator,
-                                               out_sink);
-  }
-  iree_io_file_handle_release(file_handle);
-  return status;
-}
-
-static iree_status_t hrx_get_profile_data_families(
-    iree_hal_device_profiling_data_families_t* out_data_families) {
-  IREE_ASSERT_ARGUMENT(out_data_families);
-
-  const char* value = getenv("HRX_PROFILE_MODE");
-  if (!value || !value[0] || strcmp(value, "queue") == 0) {
-    *out_data_families = IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS;
-  } else if (strcmp(value, "dispatch") == 0) {
-    *out_data_families = IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA |
-                         IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS;
-  } else if (strcmp(value, "executable") == 0) {
-    *out_data_families = IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA |
-                         IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_TRACES;
-  } else if (strcmp(value, "all") == 0) {
-    *out_data_families = IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS |
-                         IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA |
-                         IREE_HAL_DEVICE_PROFILING_DATA_DEVICE_QUEUE_EVENTS |
-                         IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS |
-                         IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_TRACES;
-  } else {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unsupported HRX_PROFILE_MODE '%s'", value);
-  }
-
-  return iree_ok_status();
-}
-
-static iree_status_t hrx_device_profile_begin(hrx_device_s* device,
-                                              iree_hal_profile_sink_t* sink) {
-  if (!device || !sink) {
-    return iree_ok_status();
-  }
-
-  iree_hal_device_profiling_options_t options = {0};
-  IREE_RETURN_IF_ERROR(hrx_get_profile_data_families(&options.data_families));
-  options.sink = sink;
+iree_status_t hrx_device_profile_begin(
+    hrx_device_t device, const iree_hal_device_profiling_options_t* options) {
   iree_status_t status =
-      iree_hal_device_profiling_begin(device->hal_device, &options);
+      iree_hal_device_profiling_begin(device->hal_device, options);
   if (iree_status_is_ok(status)) {
     device->profiling_active = true;
   }
@@ -469,9 +363,9 @@ iree_status_t hrx_runtime_profile_flush(hrx_device_t device) {
   if (!device || !device->profiling_active) {
     return iree_ok_status();
   }
-  iree_slim_mutex_lock(&g_profile_mutex);
+  iree_slim_mutex_lock(&device->group->profile_mutex);
   iree_status_t status = iree_hal_device_profiling_flush(device->hal_device);
-  iree_slim_mutex_unlock(&g_profile_mutex);
+  iree_slim_mutex_unlock(&device->group->profile_mutex);
   return status;
 }
 
@@ -656,241 +550,5 @@ hrx_status_t hrx_runtime_query_available_devices(
     *out_count = info_count;
     *out_infos = result;
   }
-  return hrx_status_from_iree(status);
-}
-
-// Compatibility lifetime used only by the legacy public initialization API.
-static hrx_status_t hrx_ensure_default_runtime(void) {
-  if (g_default_runtime) {
-    return hrx_ok_status();
-  }
-  const hrx_runtime_options_t options = {.event_sink = g_device_event_sink};
-  return hrx_runtime_create(&options, hrx_host_allocator_system(),
-                            &g_default_runtime);
-}
-
-static void hrx_release_default_runtime_if_unused(void) {
-  if (g_cpu_group || g_gpu_group) {
-    return;
-  }
-  hrx_runtime_t runtime = g_default_runtime;
-  g_default_runtime = NULL;
-  hrx_runtime_release(runtime);
-}
-
-hrx_status_t hrx_runtime_set_device_event_sink(hrx_device_event_sink_t sink) {
-  if (!sink.fn) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "device event sink callback is NULL");
-  }
-  if (g_default_runtime) {
-    return hrx_make_status(
-        HRX_STATUS_FAILED_PRECONDITION,
-        "device event sink must be set before accelerator initialization");
-  }
-  g_device_event_sink = sink;
-  return hrx_ok_status();
-}
-
-hrx_status_t hrx_cpu_initialize(uint32_t flags) {
-  (void)flags;
-  if (g_cpu_group) {
-    return hrx_make_status(HRX_STATUS_ALREADY_EXISTS,
-                           "CPU accelerator already initialized");
-  }
-  hrx_status_t status = hrx_ensure_default_runtime();
-  if (hrx_status_is_ok(status)) {
-    const hrx_device_create_params_t params = {
-        .uri = "task://", .completion_wait_flags = HRX_WAIT_FLAG_YIELD};
-    status =
-        hrx_device_group_create(g_default_runtime, 1, &params, &g_cpu_group);
-  }
-  if (!hrx_status_is_ok(status)) {
-    hrx_release_default_runtime_if_unused();
-  }
-  return status;
-}
-
-hrx_status_t hrx_cpu_shutdown(void) {
-  if (!g_cpu_group) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "CPU accelerator not initialized");
-  }
-  hrx_device_group_t group = g_cpu_group;
-  g_cpu_group = NULL;
-  hrx_device_group_release(group);
-  hrx_release_default_runtime_if_unused();
-  return hrx_ok_status();
-}
-
-static hrx_status_t hrx_default_device_count(hrx_device_group_t group,
-                                             int* out_count) {
-  if (!out_count) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "count is NULL");
-  }
-  if (!group) {
-    return hrx_make_status(HRX_STATUS_UNAVAILABLE,
-                           "accelerator not initialized");
-  }
-  *out_count = (int)hrx_device_group_device_count(group);
-  return hrx_ok_status();
-}
-
-static hrx_status_t hrx_default_device_get(hrx_device_group_t group, int index,
-                                           hrx_device_t* out_device) {
-  if (!out_device) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "device is NULL");
-  }
-  if (!group) {
-    return hrx_make_status(HRX_STATUS_UNAVAILABLE,
-                           "accelerator not initialized");
-  }
-  *out_device =
-      index >= 0 ? hrx_device_group_get_device(group, (size_t)index) : NULL;
-  return *out_device ? hrx_ok_status()
-                     : hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
-                                       "device index out of range");
-}
-
-hrx_status_t hrx_cpu_device_count(int* count) {
-  return hrx_default_device_count(g_cpu_group, count);
-}
-hrx_status_t hrx_cpu_device_get(int index, hrx_device_t* device) {
-  return hrx_default_device_get(g_cpu_group, index, device);
-}
-hrx_status_t hrx_gpu_device_count(int* count) {
-  return hrx_default_device_count(g_gpu_group, count);
-}
-hrx_status_t hrx_gpu_device_get(int index, hrx_device_t* device) {
-  return hrx_default_device_get(g_gpu_group, index, device);
-}
-
-iree_status_t hrx_gpu_device_group_create(
-    hrx_runtime_t runtime, const hrx_gpu_device_group_options_t* options,
-    hrx_device_group_t* out_group) {
-  *out_group = NULL;
-  hrx_device_group_t group = NULL;
-  const char* driver_name = hrx_get_gpu_driver_name();
-  if (strcmp(driver_name, "amdgpu") != 0 && strcmp(driver_name, "rdna") != 0 &&
-      strcmp(driver_name, "cdna") != 0 &&
-      strcmp(driver_name, "legacy-amdgpu") != 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "unknown HRX_GPU_DRIVER '%s' (expected amdgpu, rdna, cdna, or "
-        "legacy-amdgpu)",
-        driver_name);
-  }
-  const iree_allocator_t allocator = runtime->host_allocator;
-  const iree_string_view_t scheme = iree_make_cstring_view(driver_name);
-  iree_hal_driver_t* driver = NULL;
-  iree_status_t status = hrx_runtime_acquire_driver(runtime, scheme, &driver);
-  iree_host_size_t info_count = 0;
-  iree_hal_device_info_t* infos = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_driver_query_available_devices(driver, scheme, allocator,
-                                                     &info_count, &infos);
-  }
-  iree_host_size_t selected_count = 0;
-  if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < info_count; ++i) {
-      if (strcmp(driver_name, "legacy-amdgpu") == 0 && !infos[i].path.size) {
-        continue;
-      }
-      infos[selected_count++] = infos[i];
-    }
-    if (options->device_selector.select) {
-      status =
-          options->device_selector.select(options->device_selector.self, scheme,
-                                          allocator, &selected_count, infos);
-    }
-  }
-  if (iree_status_is_ok(status) && !selected_count) {
-    status = iree_make_status(IREE_STATUS_NOT_FOUND,
-                              "no physical GPU devices selected");
-  }
-  if (iree_status_is_ok(status) &&
-      selected_count > IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT) {
-    status =
-        iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                         "selected device count exceeds topology capacity");
-  }
-  iree_hal_device_runtime_feature_flags_t features = 0;
-  if (iree_status_is_ok(status)) {
-    status = hrx_hal_runtime_features_from_environment(&features);
-  }
-
-  hrx_device_create_params_t params[IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT] = {0};
-  iree_string_builder_t uris[IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT];
-  size_t uri_count = 0;
-  for (size_t i = 0; i < selected_count && iree_status_is_ok(status); ++i) {
-    iree_string_builder_initialize(allocator, &uris[i]);
-    ++uri_count;
-    status = iree_string_builder_append_format(
-        &uris[i], "%s://%.*s", driver_name, (int)infos[i].path.size,
-        infos[i].path.data);
-    params[i].uri = iree_string_builder_buffer(&uris[i]);
-    params[i].completion_wait_flags = HRX_WAIT_FLAG_YIELD;
-  }
-  if (iree_status_is_ok(status)) {
-    status = hrx_device_group_create_with_extensions(
-        runtime, selected_count, params, options->device_extensions, features,
-        &group);
-  }
-  for (size_t i = 0; i < uri_count; ++i) {
-    iree_string_builder_deinitialize(&uris[i]);
-  }
-  iree_allocator_free(allocator, infos);
-  iree_hal_driver_release(driver);
-
-  iree_hal_profile_sink_t* profile_sink = NULL;
-  if (iree_status_is_ok(status)) {
-    status = hrx_profile_file_sink_create(hrx_get_profile_file_path(),
-                                          allocator, &profile_sink);
-  }
-  for (size_t i = 0;
-       group && i < group->device_count && iree_status_is_ok(status); ++i) {
-    status = hrx_device_profile_begin(&group->devices[i], profile_sink);
-  }
-  iree_hal_profile_sink_release(profile_sink);
-  if (!iree_status_is_ok(status)) {
-    hrx_device_group_release(group);
-  } else {
-    *out_group = group;
-  }
-  return status;
-}
-
-hrx_status_t hrx_gpu_initialize(uint32_t flags) {
-  (void)flags;
-  if (g_gpu_group) {
-    return hrx_make_status(HRX_STATUS_ALREADY_EXISTS,
-                           "GPU accelerator already initialized");
-  }
-  hrx_status_t status = hrx_ensure_default_runtime();
-  if (hrx_status_is_ok(status)) {
-    const hrx_gpu_device_group_options_t options = {0};
-    status = hrx_status_from_iree(
-        hrx_gpu_device_group_create(g_default_runtime, &options, &g_gpu_group));
-  }
-  if (!hrx_status_is_ok(status)) {
-    hrx_release_default_runtime_if_unused();
-  }
-  return status;
-}
-
-hrx_status_t hrx_gpu_shutdown(void) {
-  if (!g_gpu_group) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "GPU accelerator not initialized");
-  }
-  iree_status_t status = iree_ok_status();
-  for (size_t i = 0; i < g_gpu_group->device_count; ++i) {
-    status = iree_status_join(status,
-                              hrx_device_profile_end(&g_gpu_group->devices[i]));
-  }
-  hrx_device_group_t group = g_gpu_group;
-  g_gpu_group = NULL;
-  hrx_device_group_release(group);
-  hrx_release_default_runtime_if_unused();
   return hrx_status_from_iree(status);
 }

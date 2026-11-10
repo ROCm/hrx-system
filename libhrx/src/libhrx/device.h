@@ -43,7 +43,7 @@ typedef struct hrx_device_s {
   iree_hal_device_group_t* hal_device_group;
   // Lazy compatibility backing; explicitly constructed pools select their own.
   hrx_mem_pool_backing_t mem_pool_backing;
-  // Whether this device participates in the runtime's profile session.
+  // Whether this device participates in the group's profile session.
   bool profiling_active;
   // Inline compatibility allocator view.
   hrx_allocator_s allocator;

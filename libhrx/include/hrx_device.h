@@ -183,7 +183,10 @@ typedef struct hrx_device_asan_report_t {
 typedef void (*hrx_device_event_sink_fn_t)(void* user_data,
                                            const hrx_device_event_t* event);
 
-// Value-type event sink copied into HRX devices at creation time.
+// Value-type event sink copied into HRX runtimes at creation time. Callbacks
+// may run on driver service, callback, or completion threads and cannot reenter
+// the originating device to submit, wait, or destroy work. Slow processing
+// copies the event into application-owned storage and returns.
 typedef struct hrx_device_event_sink_t {
   // Callback receiving one complete event.
   hrx_device_event_sink_fn_t fn;
@@ -224,6 +227,11 @@ typedef struct hrx_runtime_options_t {
   } task;
 } hrx_runtime_options_t;
 
+// Creates an independent owner for execution services. Hardware discovery
+// connections have process lifetime and may capture driver visibility settings
+// on first use; groups and their execution services have explicit lifetimes.
+// The shared library retains its code while native connections remain live.
+// Static embedders keep that code available for the process lifetime.
 HRX_API hrx_status_t hrx_runtime_create(const hrx_runtime_options_t* options,
                                         hrx_host_allocator_t host_allocator,
                                         hrx_runtime_t* out_runtime);

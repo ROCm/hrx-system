@@ -14,9 +14,9 @@ def main():
         ("Runtime version is valid", 0, ""),
         ("Assertion unwinding releases scoped resources", 0, ""),
         (
-            "Accelerator cleanup error reaches process exit",
+            "Device group cleanup error reaches process exit",
             1,
-            "accelerator cleanup error witness",
+            "device group cleanup error witness",
         ),
     ]
     for name, expected_exit, diagnostic in cases:

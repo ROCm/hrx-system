@@ -14,12 +14,36 @@ extern "C" {
 #endif
 
 typedef struct iree_hal_streaming_context_t iree_hal_streaming_context_t;
+
+// Selects and orders physical devices before any device is activated. Entries
+// may be reordered or removed in place; their opaque IDs and borrowed strings
+// remain unchanged. An empty result is a valid selection. The callback and its
+// context are borrowed only for initialization and are never retained.
+typedef struct iree_hal_streaming_device_selector_t {
+  // Caller-owned selection policy, or NULL when no context is required.
+  void* self;
+  // Optional cold-path selector. The input excludes aggregate pseudo-devices.
+  iree_status_t (*select)(void* self, iree_string_view_t driver_name,
+                          iree_allocator_t host_allocator,
+                          iree_host_size_t* device_count,
+                          iree_hal_device_info_t* device_infos);
+} iree_hal_streaming_device_selector_t;
+
+// GPU selection inputs consumed before publishing a sealed device group.
+typedef struct iree_hal_streaming_device_group_options_t {
+  // Immutable creation extension chain and provider data borrowed until the
+  // group and its dependent resources have been released.
+  const iree_hal_device_create_params_extension_t* device_extensions;
+  // Frontend-owned device selection; zero preserves the driver's order.
+  iree_hal_streaming_device_selector_t device_selector;
+} iree_hal_streaming_device_group_options_t;
+
 // Construction policy supplied by the compatibility frontend.
 typedef struct iree_hal_streaming_init_options_t {
   // Runtime service configuration, including this frontend's event sink.
   hrx_runtime_options_t runtime;
   // Selected GPU devices and borrowed creation extensions.
-  hrx_gpu_device_group_options_t devices;
+  iree_hal_streaming_device_group_options_t devices;
 } iree_hal_streaming_init_options_t;
 
 // Initializes global state.

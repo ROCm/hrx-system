@@ -82,10 +82,18 @@ struct LaunchBoundaryQueue {
 
 class StreamTest : public ::testing::Test {
  protected:
+  // Owns the task device and its runtime through fixture cleanup.
+  hrx_device_group_t group_ = nullptr;
+
   void SetUp() override {
-    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_initialize(0)));
-    hrx_device_t device = nullptr;
-    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_device_get(0, &device)));
+    hrx_runtime_t runtime = nullptr;
+    IREE_ASSERT_OK(HRX_CALL(
+        hrx_runtime_create(nullptr, hrx_host_allocator_system(), &runtime)));
+    const hrx_device_create_params_t params = {.uri = "task://"};
+    hrx_status_t status = hrx_device_group_create(runtime, 1, &params, &group_);
+    hrx_runtime_release(runtime);
+    IREE_ASSERT_OK(HRX_CALL(status));
+    hrx_device_t device = hrx_device_group_get_device(group_, 0);
     device_entry_.hrx_device = device;
     device_entry_.hal_device = hrx_device_hal(device);
     iree_slim_mutex_initialize(&device_entry_.primary_context_mutex);
@@ -103,7 +111,8 @@ class StreamTest : public ::testing::Test {
     iree_arena_block_pool_deinitialize(&device_entry_.block_pool);
     iree_slim_mutex_deinitialize(&device_entry_.graph_memory_mutex);
     iree_slim_mutex_deinitialize(&device_entry_.primary_context_mutex);
-    IREE_EXPECT_OK(HRX_CALL(hrx_cpu_shutdown()));
+    hrx_device_group_release(group_);
+    group_ = nullptr;
   }
 
   // CPU registry entry borrowed by the context until synchronous teardown.

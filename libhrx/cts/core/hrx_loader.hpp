@@ -107,18 +107,6 @@ class HrxLoader {
   decltype(&hrx_queue_alloca) queue_alloca;
   decltype(&hrx_queue_dealloca) queue_dealloca;
 
-  // GPU lifecycle.
-  decltype(&hrx_gpu_initialize) gpu_initialize;
-  decltype(&hrx_gpu_shutdown) gpu_shutdown;
-  decltype(&hrx_gpu_device_count) gpu_device_count;
-  decltype(&hrx_gpu_device_get) gpu_device_get;
-
-  // CPU lifecycle.
-  decltype(&hrx_cpu_initialize) cpu_initialize;
-  decltype(&hrx_cpu_shutdown) cpu_shutdown;
-  decltype(&hrx_cpu_device_count) cpu_device_count;
-  decltype(&hrx_cpu_device_get) cpu_device_get;
-
   // Device ops.
   decltype(&hrx_device_get_property) device_get_property;
   decltype(&hrx_device_get_type) device_get_type;

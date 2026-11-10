@@ -18,7 +18,7 @@ T Resolve(iree_dynamic_library_t* library, const char* name) {
   return reinterpret_cast<T>(symbol);
 }
 
-TEST(HrxRuntimeLifecycleTest, ReopensSharedRuntimeAfterGpuShutdown) {
+TEST(HrxRuntimeLifecycleTest, ReopensSharedRuntimeAfterGroupRelease) {
   const char* path = std::getenv("HRX_TEST_RUNTIME_LIBRARY");
   ASSERT_NE(path, nullptr);
   for (int generation = 0; generation < 3; ++generation) {
@@ -30,18 +30,27 @@ TEST(HrxRuntimeLifecycleTest, ReopensSharedRuntimeAfterGpuShutdown) {
     std::unique_ptr<iree_dynamic_library_t,
                     decltype(&iree_dynamic_library_release)>
         library(raw_library, iree_dynamic_library_release);
-    const auto initialize = Resolve<decltype(&hrx_gpu_initialize)>(
-        library.get(), "hrx_gpu_initialize");
-    const auto shutdown =
-        Resolve<decltype(&hrx_gpu_shutdown)>(library.get(), "hrx_gpu_shutdown");
-    const auto device_count = Resolve<decltype(&hrx_gpu_device_count)>(
-        library.get(), "hrx_gpu_device_count");
+    const auto runtime_create = Resolve<decltype(&hrx_runtime_create)>(
+        library.get(), "hrx_runtime_create");
+    const auto runtime_release = Resolve<decltype(&hrx_runtime_release)>(
+        library.get(), "hrx_runtime_release");
+    const auto allocator = Resolve<decltype(&hrx_host_allocator_system)>(
+        library.get(), "hrx_host_allocator_system");
+    const auto group_create = Resolve<decltype(&hrx_device_group_create)>(
+        library.get(), "hrx_device_group_create");
+    const auto group_release = Resolve<decltype(&hrx_device_group_release)>(
+        library.get(), "hrx_device_group_release");
+    const auto device_count = Resolve<decltype(&hrx_device_group_device_count)>(
+        library.get(), "hrx_device_group_device_count");
     const auto status_code =
         Resolve<decltype(&hrx_status_code)>(library.get(), "hrx_status_code");
     const auto status_ignore = Resolve<decltype(&hrx_status_ignore)>(
         library.get(), "hrx_status_ignore");
-    ASSERT_NE(initialize, nullptr);
-    ASSERT_NE(shutdown, nullptr);
+    ASSERT_NE(runtime_create, nullptr);
+    ASSERT_NE(runtime_release, nullptr);
+    ASSERT_NE(allocator, nullptr);
+    ASSERT_NE(group_create, nullptr);
+    ASSERT_NE(group_release, nullptr);
     ASSERT_NE(device_count, nullptr);
     ASSERT_NE(status_code, nullptr);
     ASSERT_NE(status_ignore, nullptr);
@@ -50,12 +59,16 @@ TEST(HrxRuntimeLifecycleTest, ReopensSharedRuntimeAfterGpuShutdown) {
       status_ignore(status);
       return code;
     };
-    ASSERT_EQ(HRX_STATUS_OK, consume_status(initialize(0)));
-    int count = 0;
-    EXPECT_EQ(HRX_STATUS_OK, consume_status(device_count(&count)));
-    EXPECT_GT(count, 0);
-    ASSERT_EQ(HRX_STATUS_OK, consume_status(shutdown()));
-    EXPECT_EQ(HRX_STATUS_UNAVAILABLE, consume_status(device_count(&count)));
+    hrx_runtime_t runtime = nullptr;
+    ASSERT_EQ(HRX_STATUS_OK,
+              consume_status(runtime_create(nullptr, allocator(), &runtime)));
+    hrx_device_group_t group = nullptr;
+    const hrx_device_create_params_t params = {.uri = "amdgpu://0"};
+    const hrx_status_t status = group_create(runtime, 1, &params, &group);
+    runtime_release(runtime);
+    ASSERT_EQ(HRX_STATUS_OK, consume_status(status));
+    EXPECT_EQ(device_count(group), 1u);
+    group_release(group);
     // Drop the application's loader reference before reopening. HRX owns the
     // module reference required by its retained native connection.
     library.reset();

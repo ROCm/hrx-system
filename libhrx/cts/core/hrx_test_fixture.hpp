@@ -39,7 +39,7 @@ inline hrx_queue_t FindProvisionedQueue(hrx_device_t device,
 
 class HrxTestFixture {
  protected:
-  // Borrowed device owned by the CTS process until accelerator shutdown.
+  // Borrowed device owned by the CTS process until group release.
   hrx_device_t device_ = g_test_device;
   // Explicit execution queue used for uploads, readbacks, and transfer tests.
   hrx_queue_t transfer_queue_ =

@@ -55,37 +55,14 @@ void hrx_runtime_report_failure(hrx_runtime_t runtime,
 iree_async_proactor_pool_t* hrx_device_proactor_pool(hrx_device_t device);
 iree_hal_device_event_sink_t hrx_device_hal_event_sink(hrx_device_t device);
 
-// Selects and orders physical devices before any device is activated. Entries
-// may be reordered or removed in place; their opaque IDs and borrowed strings
-// remain unchanged. An empty result is a valid selection. The callback and its
-// context are borrowed only for initialization and are never retained.
-typedef struct hrx_gpu_device_selector_t {
-  // Caller-owned selection policy, or NULL when no context is required.
-  void* self;
-  // Optional cold-path selector. The input excludes aggregate pseudo-devices.
-  iree_status_t (*select)(void* self, iree_string_view_t driver_name,
-                          iree_allocator_t host_allocator,
-                          iree_host_size_t* device_count,
-                          iree_hal_device_info_t* device_infos);
-} hrx_gpu_device_selector_t;
-
-// GPU selection inputs consumed before publishing a sealed device group.
-typedef struct hrx_gpu_device_group_options_t {
-  // Immutable creation extension chain and provider data borrowed until the
-  // group and its dependent resources have been released.
-  const iree_hal_device_create_params_extension_t* device_extensions;
-  // Frontend-owned device selection; zero preserves the driver's order.
-  hrx_gpu_device_selector_t device_selector;
-} hrx_gpu_device_group_options_t;
-
-// Creates a selected GPU group owned by the caller's runtime.
-iree_status_t hrx_gpu_device_group_create(
-    hrx_runtime_t runtime, const hrx_gpu_device_group_options_t* options,
-    hrx_device_group_t* out_group);
+// Starts one explicit capture before publishing the device to callers. Devices
+// in a group may share an output sink; different groups own independent sinks.
+iree_status_t hrx_device_profile_begin(
+    hrx_device_t device, const iree_hal_device_profiling_options_t* options);
 
 // Drains completed profile records after a host synchronization boundary.
 // Inactive or absent devices are a no-op. Serializes producer flushes and
-// writes to the runtime's shared profile file, without holding execution locks
+// writes to the group's shared profile file, without holding execution locks
 // or waiting for other queues. File errors are returned to the synchronizing
 // caller.
 iree_status_t hrx_runtime_profile_flush(hrx_device_t device);

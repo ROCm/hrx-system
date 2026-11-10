@@ -79,59 +79,14 @@ typedef struct hrx_executable_export_info_t {
   uint32_t workgroup_size[3];
 } hrx_executable_export_info_t;
 
-// Sets the sink used by the CPU/GPU initialization entry points below.
-// Explicit runtimes receive their sink through hrx_runtime_options_t.
-//
-// The sink must be set before any accelerator is initialized. Device-event
-// callbacks may run on driver-owned service, callback, or completion threads.
-// Sink implementations must not call back into the originating device or
-// submit/wait/destroy work from the callback; slow processing should copy the
-// event into application-owned storage and return.
-HRX_API hrx_status_t
-hrx_runtime_set_device_event_sink(hrx_device_event_sink_t sink);
-
-//===----------------------------------------------------------------------===//
-// GPU accelerator lifecycle
-//===----------------------------------------------------------------------===//
-
-// Initializes GPU execution resources. Initialization and shutdown are
-// externally serialized with other accelerator lifecycle operations. A failed
-// initialization releases its execution resources and may be retried.
-//
-// Native driver connections have process lifetime. HRX_GPU_DRIVER is read for
-// each initialization; HAL visibility settings are captured when the selected
-// driver is first created. Device selection and execution options are applied
-// to each new execution lifetime. The HRX shared library remains loaded after
-// GPU initialization; static embedders must keep the implementation available
-// for the process lifetime.
-HRX_API hrx_status_t hrx_gpu_initialize(uint32_t flags);
-
-// Releases GPU devices, queues, and their host workers. The application
-// releases device resources and joins threads using HRX before calling
-// shutdown. Native connections remain owned by HRX so subsequent initialization
-// can reuse the operating system's process binding. CPU execution remains
-// available if active.
-HRX_API hrx_status_t hrx_gpu_shutdown(void);
-HRX_API hrx_status_t hrx_gpu_device_count(int* count);
-HRX_API hrx_status_t hrx_gpu_device_get(int index, hrx_device_t* device);
-
-//===----------------------------------------------------------------------===//
-// CPU accelerator lifecycle
-//===----------------------------------------------------------------------===//
-
-HRX_API hrx_status_t hrx_cpu_initialize(uint32_t flags);
-HRX_API hrx_status_t hrx_cpu_shutdown(void);
-HRX_API hrx_status_t hrx_cpu_device_count(int* count);
-HRX_API hrx_status_t hrx_cpu_device_get(int index, hrx_device_t* device);
-
 //===----------------------------------------------------------------------===//
 // Exact queues
 //
 // A queue identifies one execution queue within a device, not a selection mask
 // or a virtual stream. Queue references do not retain their parent device.
-// Release acquired/retained queue references before releasing the device or
-// shutting down its accelerator. Completion is established with semaphores;
-// releasing a queue is not a submission wait.
+// Release acquired/retained queue references before releasing the device or its
+// containing group. Completion is established with semaphores; releasing a
+// queue is not a submission wait.
 //===----------------------------------------------------------------------===//
 
 typedef uint32_t hrx_queue_role_flags_t;

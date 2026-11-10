@@ -90,9 +90,16 @@ static iree_status_t RunRemovalBenchmark(
   }
 
   hrx_device_t device = nullptr;
+  hrx_device_group_t group = nullptr;
   if (host_registration) {
-    IREE_CHECK_OK(hrx_status_to_iree(hrx_cpu_initialize(/*flags=*/0)));
-    IREE_CHECK_OK(hrx_status_to_iree(hrx_cpu_device_get(0, &device)));
+    hrx_runtime_t runtime = nullptr;
+    IREE_CHECK_OK(hrx_status_to_iree(
+        hrx_runtime_create(nullptr, hrx_host_allocator_system(), &runtime)));
+    const hrx_device_create_params_t params = {.uri = "task://"};
+    hrx_status_t status = hrx_device_group_create(runtime, 1, &params, &group);
+    hrx_runtime_release(runtime);
+    IREE_CHECK_OK(hrx_status_to_iree(status));
+    device = hrx_device_group_get_device(group, 0);
   }
   hrx_buffer_table_t table;
   hrx_buffer_table_initialize(&table);
@@ -129,9 +136,7 @@ static iree_status_t RunRemovalBenchmark(
   for (hrx_buffer_t buffer : buffers) {
     hrx_buffer_release(buffer);
   }
-  if (host_registration) {
-    IREE_CHECK_OK(hrx_status_to_iree(hrx_cpu_shutdown()));
-  }
+  hrx_device_group_release(group);
   return iree_ok_status();
 }
 

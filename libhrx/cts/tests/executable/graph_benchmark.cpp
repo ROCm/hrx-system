@@ -54,8 +54,20 @@ void Check(hipError_t status) {
 class HrxRuntime {
  public:
   HrxRuntime() : api_(HrxLoader::instance()) {
-    Check(api_.gpu_initialize(0));
-    Check(api_.gpu_device_get(0, &device_));
+    hrx_runtime_t runtime = nullptr;
+    Check(api_.runtime_create(nullptr, api_.host_allocator_system(), &runtime));
+    const char* driver = std::getenv("HRX_GPU_DRIVER");
+    const std::string uri =
+        std::string(driver && driver[0] ? driver : "amdgpu") + "://0";
+    const hrx_device_create_params_t params = {
+        .uri = uri.c_str(),
+        .completion_wait_flags = HRX_WAIT_FLAG_YIELD,
+    };
+    hrx_status_t status =
+        api_.device_group_create(runtime, 1, &params, &group_);
+    api_.runtime_release(runtime);
+    Check(status);
+    device_ = api_.device_group_get_device(group_, 0);
     for (uint32_t i = 0; i < api_.device_queue_family_count(device_); ++i) {
       hrx_queue_family_info_t family;
       Check(api_.device_query_queue_family(device_, i, &family));
@@ -90,7 +102,7 @@ class HrxRuntime {
     Wait();
     api_.stream_release(stream_);
     api_.executable_release(module_);
-    Check(api_.gpu_shutdown());
+    api_.device_group_release(group_);
   }
 
   void Prepare(size_t count, bool host) {
@@ -177,7 +189,9 @@ class HrxRuntime {
  private:
   // Public entry points from the exact HRX DSO being measured.
   HrxLoader& api_;
-  // Runtime-owned device borrowed through shutdown.
+  // Explicit runtime and native-device owner shared across all rows.
+  hrx_device_group_t group_ = nullptr;
+  // Group-owned device borrowed through benchmark teardown.
   hrx_device_t device_ = nullptr;
   // Borrowed provisioned queue for setup uploads and verification readbacks.
   hrx_queue_t transfer_queue_ = nullptr;

@@ -4,6 +4,7 @@
 #include "libhrx/src/libhrx/mem_pool_backing.h"
 
 #include <array>
+#include <cstdlib>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -24,23 +25,33 @@ using Buffer = std::unique_ptr<hrx_buffer_s, decltype(&hrx_buffer_release)>;
 
 class MemPoolBackingTest : public ::testing::Test {
  protected:
-  void SetUp() override {
-#if defined(HRX_TEST_GPU)
-    IREE_ASSERT_OK(HRX_CALL(hrx_gpu_initialize(0)));
-    IREE_ASSERT_OK(HRX_CALL(hrx_gpu_device_get(0, &device_)));
-#else
-    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_initialize(0)));
-    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_device_get(0, &device_)));
-#endif
+  static void SetUpTestSuite() {
+    hrx_runtime_t runtime = nullptr;
+    IREE_ASSERT_OK(HRX_CALL(
+        hrx_runtime_create(nullptr, hrx_host_allocator_system(), &runtime)));
+    const char* uri = std::getenv("HRX_TEST_DEVICE_URI");
+    const hrx_device_create_params_t params = {.uri = uri ? uri : "task://"};
+    hrx_status_t status = hrx_device_group_create(runtime, 1, &params, &group_);
+    hrx_runtime_release(runtime);
+    IREE_ASSERT_OK(HRX_CALL(status));
+    device_ = hrx_device_group_get_device(group_, 0);
+  }
+
+  static void TearDownTestSuite() {
+    hrx_device_group_release(group_);
+    group_ = nullptr;
+    device_ = nullptr;
   }
 
   void TearDown() override {
-#if defined(HRX_TEST_GPU)
-    IREE_EXPECT_OK(HRX_CALL(hrx_gpu_shutdown()));
-#else
-    IREE_EXPECT_OK(HRX_CALL(hrx_cpu_shutdown()));
-#endif
+    // Each case owns a fresh compatibility cache; native execution devices stay
+    // alive across the suite. All case-local pools and buffers have retired.
+    hrx_mem_pool_backing_deinitialize(&device_->mem_pool_backing);
+    hrx_mem_pool_backing_initialize(&device_->mem_pool_backing);
   }
+
+  // One selected device lifetime shared by all cache-isolation cases.
+  inline static hrx_device_group_t group_ = nullptr;
 
   MemPool CreatePool(size_t max_size = 0) {
     iree_hal_streaming_mem_pool_props_t properties = {.max_size = max_size};
@@ -105,8 +116,8 @@ class MemPoolBackingTest : public ::testing::Test {
     IREE_ASSERT_OK(iree_hal_streaming_mem_pool_trim(pool, bytes));
   }
 
-  // Initialized runtime device owning all pools in each test.
-  hrx_device_t device_ = nullptr;
+  // Borrowed execution device; each case separately owns its pool state.
+  inline static hrx_device_t device_ = nullptr;
 };
 
 TEST_F(MemPoolBackingTest, LivePoolsReuseBackingAndKeepIndependentAccounting) {
@@ -138,15 +149,16 @@ TEST_F(MemPoolBackingTest, LivePoolsReuseBackingAndKeepIndependentAccounting) {
                   ? IREE_HAL_BUFFER_USAGE_DISPATCH
                   : IREE_HAL_BUFFER_USAGE_NONE);
   }
-#if defined(HRX_TEST_GPU)
-  EXPECT_TRUE(iree_all_bits_set(iree_hal_buffer_memory_type(buffer->hal_buffer),
-                                IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL));
-#else
-  const auto host = iree_hal_pool_query_host_access(first->hal_pool);
-  EXPECT_EQ(host.access, IREE_HAL_MEMORY_ACCESS_ALL);
-  EXPECT_EQ(host.modes,
-            IREE_HAL_MAPPING_MODE_SCOPED | IREE_HAL_MAPPING_MODE_PERSISTENT);
-#endif
+  if (device_->type == HRX_ACCELERATOR_GPU) {
+    EXPECT_TRUE(
+        iree_all_bits_set(iree_hal_buffer_memory_type(buffer->hal_buffer),
+                          IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL));
+  } else {
+    const auto host = iree_hal_pool_query_host_access(first->hal_pool);
+    EXPECT_EQ(host.access, IREE_HAL_MEMORY_ACCESS_ALL);
+    EXPECT_EQ(host.modes,
+              IREE_HAL_MAPPING_MODE_SCOPED | IREE_HAL_MAPPING_MODE_PERSISTENT);
+  }
   WriteAndCheck(buffer.get(), 0x37);
   const auto* identity =
       iree_hal_buffer_memory_view(buffer->hal_buffer).backing;

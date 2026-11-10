@@ -13,9 +13,18 @@ namespace {
 
 class CpuBufferTest : public ::testing::Test {
  protected:
+  // Owns the task device and its runtime through fixture cleanup.
+  hrx_device_group_t group_ = nullptr;
+
   void SetUp() override {
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_cpu_initialize(/*flags=*/0)));
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_cpu_device_get(0, &device_)));
+    hrx_runtime_t runtime = nullptr;
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_runtime_create(nullptr, hrx_host_allocator_system(), &runtime)));
+    const hrx_device_create_params_t params = {.uri = "task://"};
+    hrx_status_t status = hrx_device_group_create(runtime, 1, &params, &group_);
+    hrx_runtime_release(runtime);
+    IREE_ASSERT_OK(hrx_status_to_iree(status));
+    device_ = hrx_device_group_get_device(group_, 0);
     IREE_ASSERT_OK(hrx_status_to_iree(
         hrx_stream_create(hrx_device_get_queue(device_, 0, 0), 0, &stream_)));
     IREE_ASSERT_OK(
@@ -27,12 +36,13 @@ class CpuBufferTest : public ::testing::Test {
 
   void TearDown() override {
     hrx_stream_release(stream_);
-    IREE_EXPECT_OK(hrx_status_to_iree(hrx_cpu_shutdown()));
+    hrx_device_group_release(group_);
+    group_ = nullptr;
   }
 
   // Exact prepared program scope, independent of any allocation owner.
   hrx_memory_scope_t program_scope_ = {};
-  // CPU device borrowed from the initialized runtime.
+  // CPU device borrowed from the fixture group.
   hrx_device_t device_ = nullptr;
   // Stream providing real allocation and transfer ordering.
   hrx_stream_t stream_ = nullptr;

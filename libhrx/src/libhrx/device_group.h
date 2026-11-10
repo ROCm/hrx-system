@@ -17,6 +17,9 @@ typedef struct hrx_device_group_s {
   hrx_runtime_t runtime;
   // Retained native devices and their immutable topology.
   iree_hal_device_group_t* hal_group;
+  // Serializes profile drains into the shared capture sink for this group.
+  // Ordinary queue execution never takes this lock.
+  iree_slim_mutex_t profile_mutex;
   // Number of initialized inline device views.
   size_t device_count;
   // Inline views, allocated with the group and never independently freed.

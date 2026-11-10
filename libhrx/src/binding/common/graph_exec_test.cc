@@ -488,12 +488,20 @@ void InitializeGraphBoundaryQueue(iree_hal_queue_t* target,
 // domain for the records to write into.
 class GraphExecTest : public ::testing::Test {
  protected:
+  // Owns the task device and its runtime through fixture cleanup.
+  hrx_device_group_t group_ = nullptr;
+
   void SetUp() override {
     iree_hal_streaming_host_callback_queue_initialize(iree_allocator_system(),
                                                       &host_callbacks_);
-    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_initialize(/*flags=*/0)));
-    hrx_device_t hrx_device = nullptr;
-    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_device_get(/*index=*/0, &hrx_device)));
+    hrx_runtime_t runtime = nullptr;
+    IREE_ASSERT_OK(HRX_CALL(
+        hrx_runtime_create(nullptr, hrx_host_allocator_system(), &runtime)));
+    const hrx_device_create_params_t params = {.uri = "task://"};
+    hrx_status_t status = hrx_device_group_create(runtime, 1, &params, &group_);
+    hrx_runtime_release(runtime);
+    IREE_ASSERT_OK(HRX_CALL(status));
+    hrx_device_t hrx_device = hrx_device_group_get_device(group_, 0);
 
     // Stands in for the registry entry global initialization builds around an
     // enumerated accelerator: contexts take their HAL device from the entry and
@@ -529,7 +537,8 @@ class GraphExecTest : public ::testing::Test {
     iree_arena_block_pool_deinitialize(&device_entry_.block_pool);
     iree_slim_mutex_deinitialize(&device_entry_.graph_memory_mutex);
     iree_slim_mutex_deinitialize(&device_entry_.primary_context_mutex);
-    IREE_EXPECT_OK(HRX_CALL(hrx_cpu_shutdown()));
+    hrx_device_group_release(group_);
+    group_ = nullptr;
     iree_hal_streaming_host_callback_queue_deinitialize(&host_callbacks_);
   }
 
@@ -563,8 +572,8 @@ class GraphExecTest : public ::testing::Test {
   iree_status_code_t expected_synchronization_status_ = IREE_STATUS_OK;
   // Set by the host-call node a graph carries. A fixture member rather than a
   // local because no semaphore edge a test can name joins a block an aborted
-  // launch left in flight; hrx_cpu_shutdown() above is what drains the workers,
-  // so the flag has to outlive the test body it is read in.
+  // launch left in flight; releasing the group above is what drains the
+  // workers, so the flag has to outlive the test body it is read in.
   std::atomic<bool> graph_host_node_ran_{false};
   // Set by the host call a test enqueues behind an aborted launch to give the
   // blocks that launch may have left in flight their chance to run. A fixture

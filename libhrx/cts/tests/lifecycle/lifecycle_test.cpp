@@ -14,50 +14,28 @@ TEST_CASE("Runtime version is valid", "[lifecycle]") {
   REQUIRE(patch >= 0);
 }
 
-TEST_CASE("Selected accelerator device_count works", "[lifecycle]") {
-  int count = 0;
-  if (g_test_device_type == HRX_ACCELERATOR_GPU) {
-    REQUIRE_OK(hrx().gpu_device_count(&count));
-  } else {
-    REQUIRE_OK(hrx().cpu_device_count(&count));
-  }
-  REQUIRE(count > 0);
+TEST_CASE("Selected device belongs to its sealed group", "[lifecycle]") {
+  hrx_device_group_t group = hrx().device_get_device_group(g_test_device);
+  REQUIRE(group != nullptr);
+  REQUIRE(hrx().device_group_device_count(group) == 1);
+  REQUIRE(hrx().device_group_get_device(group, 0) == g_test_device);
+  REQUIRE(hrx().device_group_get_device(group, 1) == nullptr);
+  hrx().device_group_retain(group);
+  hrx().device_group_release(group);
+  REQUIRE(hrx().device_group_get_device(group, 0) == g_test_device);
 }
 
-TEST_CASE("GPU init and shutdown", "[lifecycle][gpu]") {
-  // GPU may already be initialized by main.cpp.
-  int count = 0;
-  hrx_status_t status = hrx().gpu_device_count(&count);
-  if (hrx_status_is_ok(status)) {
-    REQUIRE(count > 0);
-  } else {
-    // GPU not initialized — that's OK for CPU-only test runs.
-    hrx().status_ignore(status);
-  }
-}
-
-TEST_CASE("Double init returns ALREADY_EXISTS", "[lifecycle]") {
-  hrx_status_t status = g_test_device_type == HRX_ACCELERATOR_GPU
-                            ? hrx().gpu_initialize(0)
-                            : hrx().cpu_initialize(0);
-  REQUIRE(!hrx_status_is_ok(status));
-  REQUIRE(hrx().status_code(status) == HRX_STATUS_ALREADY_EXISTS);
-  hrx().status_ignore(status);
-}
-
-// This hidden case is launched by cleanup_test.py, which checks the real
-// harness exit status. The CPU runtime shuts down normally before the injected
-// terminal error is reported.
-TEST_CASE("Accelerator cleanup error reaches process exit", "[.cleanup]") {
+// This hidden case is launched by cleanup_test.py. The real group is destroyed
+// before the dependency wrapper reports a diagnostic outside Catch assertions.
+TEST_CASE("Device group cleanup error reaches process exit", "[.cleanup]") {
   REQUIRE(g_test_device_type == HRX_ACCELERATOR_CPU);
-  static auto shutdown = hrx().cpu_shutdown;
-  hrx().cpu_shutdown = []() {
-    hrx_status_t status = shutdown();
-    if (!hrx_status_is_ok(status)) {
-      return status;
-    }
-    return hrx().make_status(HRX_STATUS_ABORTED,
-                             "accelerator cleanup error witness");
+  static auto release = hrx().device_group_release;
+  hrx().device_group_release = [](hrx_device_group_t group) {
+    release(group);
+    ReportHrxTestFailure(
+        "Device group cleanup",
+        hrx().make_status(HRX_STATUS_ABORTED,
+                          "device group cleanup error witness"));
   };
 }
 

@@ -3,6 +3,7 @@
 
 #include "mem_pool_backing.h"
 
+#include <cstdlib>
 #include <memory>
 #include <vector>
 
@@ -15,22 +16,21 @@ namespace {
 class MemPoolBackingTest : public ::testing::Test {
  protected:
   void SetUp() override {
-#if defined(HRX_TEST_GPU)
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_gpu_initialize(0)));
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_gpu_device_get(0, &device_)));
-#else
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_cpu_initialize(0)));
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_cpu_device_get(0, &device_)));
-#endif
+    hrx_runtime_t runtime = nullptr;
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_runtime_create(nullptr, hrx_host_allocator_system(), &runtime)));
+    const char* uri = std::getenv("HRX_TEST_DEVICE_URI");
+    const hrx_device_create_params_t params = {.uri = uri ? uri : "task://"};
+    hrx_status_t status = hrx_device_group_create(runtime, 1, &params, &group_);
+    hrx_runtime_release(runtime);
+    IREE_ASSERT_OK(hrx_status_to_iree(status));
+    device_ = hrx_device_group_get_device(group_, 0);
   }
 
-  void TearDown() override {
-#if defined(HRX_TEST_GPU)
-    IREE_EXPECT_OK(hrx_status_to_iree(hrx_gpu_shutdown()));
-#else
-    IREE_EXPECT_OK(hrx_status_to_iree(hrx_cpu_shutdown()));
-#endif
-  }
+  void TearDown() override { hrx_device_group_release(group_); }
+
+  // Owns the selected device and its runtime through pool cleanup.
+  hrx_device_group_t group_ = nullptr;
 
   // Initialized runtime device owning all pools in each test.
   hrx_device_t device_ = nullptr;

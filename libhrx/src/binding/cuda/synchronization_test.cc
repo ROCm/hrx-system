@@ -24,6 +24,9 @@ namespace {
 
 class CudaSynchronizationTest : public ::testing::Test {
  protected:
+  // Owns the task device and its runtime through fixture cleanup.
+  hrx_device_group_t group_ = nullptr;
+
   using DeviceSynchronizeFn = cudaError_t (*)();
   using EventQueryFn = CUresult (*)(CUevent);
   using GetLastErrorFn = cudaError_t (*)();
@@ -51,10 +54,14 @@ class CudaSynchronizationTest : public ::testing::Test {
         reinterpret_cast<StreamQueryFn>(dlsym(library_, "cuStreamQuery"));
     ASSERT_NE(nullptr, stream_query_) << dlerror();
 
-    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_initialize(/*flags=*/0)));
-    runtime_initialized_ = true;
-    hrx_device_t device = nullptr;
-    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_device_get(/*index=*/0, &device)));
+    hrx_runtime_t runtime = nullptr;
+    IREE_ASSERT_OK(HRX_CALL(
+        hrx_runtime_create(nullptr, hrx_host_allocator_system(), &runtime)));
+    const hrx_device_create_params_t params = {.uri = "task://"};
+    hrx_status_t status = hrx_device_group_create(runtime, 1, &params, &group_);
+    hrx_runtime_release(runtime);
+    IREE_ASSERT_OK(HRX_CALL(status));
+    hrx_device_t device = hrx_device_group_get_device(group_, 0);
     device_entry_.hrx_device = device;
     device_entry_.hal_device = hrx_device_hal(device);
     iree_slim_mutex_initialize(&device_entry_.primary_context_mutex);
@@ -101,9 +108,8 @@ class CudaSynchronizationTest : public ::testing::Test {
       iree_slim_mutex_deinitialize(&device_entry_.graph_memory_mutex);
       iree_slim_mutex_deinitialize(&device_entry_.primary_context_mutex);
     }
-    if (runtime_initialized_) {
-      IREE_EXPECT_OK(HRX_CALL(hrx_cpu_shutdown()));
-    }
+    hrx_device_group_release(group_);
+    group_ = nullptr;
     if (library_) {
       EXPECT_EQ(0, dlclose(library_));
     }
@@ -126,8 +132,6 @@ class CudaSynchronizationTest : public ::testing::Test {
   PeekAtLastErrorFn peek_at_last_error_ = nullptr;
   // Public CUDA stream query entry point resolved from |library_|.
   StreamQueryFn stream_query_ = nullptr;
-  // True after the CPU runtime has accepted initialization.
-  bool runtime_initialized_ = false;
   // True after the registry entry's synchronization and pool are initialized.
   bool device_entry_initialized_ = false;
   // Registry entry backing the real task-device context.
