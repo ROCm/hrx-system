@@ -36,6 +36,18 @@ py_library(
     deps = [":inventory"],
 )
 
+py_library(
+    name = "github_alerts",
+    srcs = ["github_alerts.py"],
+)
+
+py_binary(
+    name = "github_alerts_jsonl",
+    srcs = ["github_alerts_main.py"],
+    main = "github_alerts_main.py",
+    deps = [":github_alerts"],
+)
+
 py_binary(
     name = "github_snapshot_json",
     srcs = ["github_snapshot_main.py"],
@@ -53,6 +65,12 @@ py_test(
 )
 
 py_test(
+    name = "github_alerts_test",
+    srcs = ["github_alerts_test.py"],
+    deps = [":github_alerts"],
+)
+
+py_test(
     name = "github_snapshot_test",
     srcs = ["github_snapshot_test.py"],
     deps = [
@@ -64,6 +82,7 @@ py_test(
 test_suite(
     name = "dependencies_tests",
     tests = [
+        ":github_alerts_test",
         ":github_snapshot_test",
         ":inventory_test",
     ],

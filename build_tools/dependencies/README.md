@@ -43,3 +43,24 @@ GitHub currently rejects the registered `pkg:bazel` package type in dependency
 submissions. The projection uses `pkg:generic/bazel/...` until that API accepts
 the registered identity. GitHub is therefore a visibility projection, not the
 source of update policy or proof that an unreported dependency is safe.
+
+`github_alerts_jsonl` turns a saved Dependabot API response into stable,
+action-oriented JSONL without contacting GitHub. Multiple alert instances for
+one package and GHSA become one event carrying all manifests, requirements,
+links, vulnerable ranges, and fixed versions. Its fingerprint changes when
+that evidence changes, allowing an append-only local consumer to suppress
+unchanged observations:
+
+```bash
+dependency_tmp="$(mktemp -d)"
+gh api --paginate --slurp \
+  "repos/ROCm/hrx-system/dependabot/alerts?state=open&per_page=100" \
+  > "${dependency_tmp}/dependabot-alerts.json"
+iree-bazel-run //build_tools/dependencies:github_alerts_jsonl -- \
+  --alerts="${dependency_tmp}/dependabot-alerts.json" \
+  > "${dependency_tmp}/advisories.jsonl"
+```
+
+Fetching alerts and retaining or acting on events remain caller-owned steps.
+The formatter has no repository credentials and does not open issues, branches,
+or pull requests.
