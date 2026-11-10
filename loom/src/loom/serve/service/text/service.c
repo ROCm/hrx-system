@@ -366,8 +366,7 @@ static iree_status_t loom_serve_text_enqueue(
   }
   loom_serve_text_consumer_t consumer;
   status = loom_serve_text_http_consumer_allocate(
-      connection, &service->telemetry, receipt, encodes,
-      service->host_allocator, &consumer);
+      connection, encodes, service->host_allocator, &consumer);
   if (!iree_status_is_ok(status)) {
     return loom_serve_text_http_reject(&service->telemetry, connection, receipt,
                                        503, "Service Unavailable", status,

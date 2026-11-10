@@ -9,7 +9,7 @@
 
 #include "iree/async/proactor.h"
 #include "iree/task/executor.h"
-#include "loom/serve/service/service.h"
+#include "loom/runtime/service.h"
 #include "loom/serve/service/text/input.h"
 #include "loom/serve/service/text/media_input.h"
 #include "loom/service/finite/model.h"
@@ -94,14 +94,14 @@ bool loom_serve_text_media_projector_start(
 bool loom_serve_text_media_projector_is_collecting(
     const loom_serve_text_media_projector_t* projector);
 
-// False only while the codec CPU job borrows this request's HTTP-backed chat.
+// False only while the codec CPU job borrows this request's immutable chat.
 // Otherwise detaches the request immediately; selected cohort ordinals stay
 // stable and already submitted device work is retired normally.
 bool loom_serve_text_media_projector_cancel(
     loom_serve_text_media_projector_t* projector,
     loom_serve_text_media_request_t* request);
 
-// Whether a codec job still borrows the request's immutable HTTP-backed chat.
+// Whether a codec job still borrows the request's immutable chat.
 bool loom_serve_text_media_projector_borrows(
     const loom_serve_text_media_projector_t* projector,
     const loom_serve_text_media_request_t* request);

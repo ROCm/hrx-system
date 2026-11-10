@@ -47,8 +47,7 @@ class TextHttpFixture : public ::testing::Test {
 
   void AllocateConsumer() {
     auto status = loom_serve_text_http_consumer_allocate(
-        connection_, &telemetry_, receipt_, false, iree_allocator_system(),
-        &consumer_);
+        connection_, false, iree_allocator_system(), &consumer_);
     IREE_ASSERT_OK(status);
     connection_ = nullptr;
   }
@@ -296,7 +295,8 @@ TEST_P(TextHttpRejectionTest, PreservesFailureCodeAndAvailability) {
   auto consumer = consumer_;
   consumer_ = {};
   IREE_ASSERT_OK(consumer.vtable->reject(consumer.self,
-                                         iree_status_from_code(test.status)));
+                                         iree_status_from_code(test.status),
+                                         &telemetry_, &receipt_));
   std::string response;
   IREE_ASSERT_OK(http_.Read(client_.release(), false, &response));
   EXPECT_EQ(response.find(test.http), 0u) << response;

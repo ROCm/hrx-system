@@ -94,10 +94,6 @@ typedef struct loom_serve_text_http_consumer_t {
   iree_allocator_t host_allocator;
   // Claimed immutable input and owner-only delivery state.
   loom_serve_http_connection_t* connection;
-  // Borrowed owner accounting, used only for rejected-response send errors.
-  loom_serve_text_telemetry_t* telemetry;
-  // Stable protocol identity for rejected-response diagnostics.
-  loom_serve_text_receipt_t receipt;
   // CPU-written stage, published only after its finite borrower retires.
   iree_string_builder_t packet;
 } loom_serve_text_http_consumer_t;
@@ -258,7 +254,8 @@ static void loom_serve_text_http_release(
 }
 
 static iree_status_t loom_serve_text_http_reject_consumer(
-    void* self, iree_status_t failure) {
+    void* self, iree_status_t failure, loom_serve_text_telemetry_t* telemetry,
+    const loom_serve_text_receipt_t* receipt) {
   loom_serve_text_http_consumer_t* consumer = self;
   int code = 500;
   const char* reason = "Internal Server Error";
@@ -284,8 +281,8 @@ static iree_status_t loom_serve_text_http_reject_consumer(
     reason = "Service Unavailable";
   }
   const iree_status_t status = loom_serve_text_http_reply_failure(
-      consumer->telemetry, consumer->connection, consumer->receipt, code,
-      reason, failure, consumer->host_allocator);
+      telemetry, consumer->connection, *receipt, code, reason, failure,
+      consumer->host_allocator);
   loom_serve_text_http_release(consumer);
   return status;
 }
@@ -325,18 +322,14 @@ static const loom_serve_text_consumer_vtable_t
 };
 
 iree_status_t loom_serve_text_http_consumer_allocate(
-    loom_serve_http_connection_t* connection,
-    loom_serve_text_telemetry_t* telemetry, loom_serve_text_receipt_t receipt,
-    bool sequence, iree_allocator_t host_allocator,
-    loom_serve_text_consumer_t* out_consumer) {
+    loom_serve_http_connection_t* connection, bool sequence,
+    iree_allocator_t host_allocator, loom_serve_text_consumer_t* out_consumer) {
   *out_consumer = (loom_serve_text_consumer_t){0};
   loom_serve_text_http_consumer_t* consumer = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*consumer),
                                              (void**)&consumer));
   consumer->host_allocator = host_allocator;
   consumer->connection = connection;
-  consumer->telemetry = telemetry;
-  consumer->receipt = receipt;
   iree_string_builder_initialize(host_allocator, &consumer->packet);
   *out_consumer = (loom_serve_text_consumer_t){
       .self = consumer,

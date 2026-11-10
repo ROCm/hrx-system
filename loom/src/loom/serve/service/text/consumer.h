@@ -13,6 +13,9 @@
 extern "C" {
 #endif
 
+struct loom_serve_text_receipt_t;
+struct loom_serve_text_telemetry_t;
+
 // Operations for one request's input lifetime and bounded output delivery.
 // CPU encoding may overlap owner interest queries and therefore never reads
 // interest or delivery-slot fields. No operation waits or submits model work.
@@ -65,7 +68,11 @@ typedef struct loom_serve_text_consumer_vtable_t {
   iree_status_t (*publish)(void* self, bool* out_ready, bool* out_progress);
   // Consumes a rejected receipt and its failure after preparation borrowers
   // retire. Error-response allocation may fail; ownership is always consumed.
-  iree_status_t (*reject)(void* self, iree_status_t failure);
+  // Accounting stays with the service; delivery may diagnose send failure
+  // using the borrowed owner context only during this call.
+  iree_status_t (*reject)(void* self, iree_status_t failure,
+                          struct loom_serve_text_telemetry_t* telemetry,
+                          const struct loom_serve_text_receipt_t* receipt);
   // Consumes the receipt after request storage and every borrower retire.
   // complete means final output was delivered, including a translated error;
   // false discards undelivered output. code preserves failure/cancellation.

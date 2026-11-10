@@ -93,5 +93,6 @@ iree_status_t loom_serve_text_pending_request_reject(
                                           request, host_allocator));
   loom_serve_text_telemetry_end(telemetry, request->receipt,
                                 LOOM_SERVICE_TELEMETRY_REJECTED, 0, failure);
-  return request->consumer.vtable->reject(request->consumer.self, failure);
+  return request->consumer.vtable->reject(request->consumer.self, failure,
+                                          telemetry, &request->receipt);
 }

@@ -171,8 +171,10 @@ static iree_status_t loom_serve_text_stream_publish(void* self, bool* out_ready,
   return iree_ok_status();
 }
 
-static iree_status_t loom_serve_text_stream_reject(void* self,
-                                                   iree_status_t failure) {
+static iree_status_t loom_serve_text_stream_reject(
+    void* self, iree_status_t failure,
+    struct loom_serve_text_telemetry_t* telemetry,
+    const struct loom_serve_text_receipt_t* receipt) {
   loom_serve_text_stream_t* stream = self;
   stream->status = failure;
   stream->service_open = false;

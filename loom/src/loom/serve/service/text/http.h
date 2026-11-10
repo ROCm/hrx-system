@@ -17,12 +17,9 @@ extern "C" {
 
 // Takes the connection claim only on success. The receipt preserves input
 // storage while queued, then allocates a staging packet on row admission.
-// Telemetry outlives the receipt and is touched only by owner-side rejection.
 iree_status_t loom_serve_text_http_consumer_allocate(
-    loom_serve_http_connection_t* connection,
-    loom_serve_text_telemetry_t* telemetry, loom_serve_text_receipt_t receipt,
-    bool sequence, iree_allocator_t host_allocator,
-    loom_serve_text_consumer_t* out_consumer);
+    loom_serve_http_connection_t* connection, bool sequence,
+    iree_allocator_t host_allocator, loom_serve_text_consumer_t* out_consumer);
 
 // Ends a rejected protocol receipt, consumes failure and relinquishes its
 // connection claim. Independent scratch permits rejection during CPU output.
