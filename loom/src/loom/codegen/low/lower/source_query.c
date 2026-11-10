@@ -628,6 +628,7 @@ static void loom_low_lower_source_query_scope_initialize(
       .result = &scope->result,
       .storage_access = &scope->storage_access,
   };
+  loom_low_lower_context_scope_diagnostics(&scope->context);
   scope->context.fact_table = options->fact_table;
   const loom_region_descriptor_t* source_body_descriptor =
       loom_func_like_body_region_descriptor(module, source_function);

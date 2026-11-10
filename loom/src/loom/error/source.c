@@ -67,6 +67,7 @@ void loom_source_resolve_diagnostic(
       .params = emission->params,
       .param_count = emission->param_count,
       .emitter = emitter,
+      .export_name = emission->export_name,
       .module = emission->module ? emission->module : module,
       .origin = {.provenance = LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE},
       .source_location = {.provenance =

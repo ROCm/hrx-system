@@ -217,14 +217,16 @@ static inline bool loom_test_source_range_is_empty(
 // allocation per annotation.
 #define LOOM_TEST_MAX_ANNOTATION_SUBSTRINGS 4
 
-// Maximum number of structured diagnostic parameter matchers declared by one
-// annotation. Param matchers compare against generated error parameter names
-// instead of the rendered diagnostic prose.
+// Maximum number of structured diagnostic field matchers declared by one
+// annotation. The reserved "export" field matches diagnostic export context;
+// other fields compare against generated error parameter names instead of the
+// rendered diagnostic prose.
 #define LOOM_TEST_MAX_ANNOTATION_PARAM_MATCHES 8
 
-// One structured diagnostic parameter expectation from an annotation.
+// One structured diagnostic field expectation from an annotation.
 typedef struct loom_test_annotation_param_match_t {
-  // Generated diagnostic parameter name, such as "op_name".
+  // Reserved context field "export" or a generated diagnostic parameter name
+  // such as "op_name".
   iree_string_view_t name;
   // Expected rendered parameter value.
   iree_string_view_t value;

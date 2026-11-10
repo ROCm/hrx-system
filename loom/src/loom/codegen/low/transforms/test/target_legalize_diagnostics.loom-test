@@ -132,7 +132,7 @@ func.def target(@test_target) @rejects_target_shaped_mma_without_layout_fallback
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<16xf16>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<16xf16>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
-  // ERROR@+1: TARGET/039 {source_contract="target.reference", matrix_constraint="reference.lhs_fragment_ownership"}
+  // ERROR@+1: TARGET/039 {export="rejects_target_shaped_mma_without_layout_fallback", source_contract="target.reference", matrix_constraint="reference.lhs_fragment_ownership"}
   %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>
   func.return %result : vector<8xf32>
 }

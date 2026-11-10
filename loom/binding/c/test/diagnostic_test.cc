@@ -207,6 +207,7 @@ TEST(DiagnosticTest, RetainsCanonicalFormatting) {
   range.end_column = 10;
   range.end = contents.data_length;
   loom_diagnostic_param_t param = loom_param_string(IREE_SV("value"));
+  std::string export_name = "kernel.main";
   loom_diagnostic_t diagnostic = {
       .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 2),
   };
@@ -214,6 +215,8 @@ TEST(DiagnosticTest, RetainsCanonicalFormatting) {
   diagnostic.emitter = LOOM_EMITTER_PARSER;
   diagnostic.params = &param;
   diagnostic.param_count = 1;
+  diagnostic.export_name =
+      iree_make_string_view(export_name.data(), export_name.size());
   diagnostic.origin = range;
   diagnostic.source_location = range;
 
@@ -235,9 +238,12 @@ TEST(DiagnosticTest, RetainsCanonicalFormatting) {
   LOOMC_ASSERT_OK(loomc_result_add_loom_diagnostic(
       result.get(), source.get(), &diagnostic, /*text_print_options=*/nullptr));
   source.reset();
+  export_name.assign("released");
 
   const auto* stored = loomc_result_diagnostic_at(result.get(), 0);
   ASSERT_NE(stored, nullptr);
+  EXPECT_EQ(std::string(stored->export_name.data, stored->export_name.size),
+            "kernel.main");
   ASSERT_EQ(stored->parameter_count, 1u);
   EXPECT_EQ(std::string(stored->parameters[0].name.data,
                         stored->parameters[0].name.size),
@@ -247,7 +253,8 @@ TEST(DiagnosticTest, RetainsCanonicalFormatting) {
             "value");
   EXPECT_EQ(
       std::string(stored->formatted_text.data, stored->formatted_text.size),
-      "source.loom:1:1: error [PARSE/002]: SSA value '%value' is already "
+      "source.loom:1:1: error [PARSE/002] in export 'kernel.main': SSA value "
+      "'%value' is already "
       "defined\n"
       " 1 | duplicate\n"
       "   | ^^^^^^^^^\n"

@@ -78,6 +78,7 @@ TEST(JsonSink, SimpleStructuredError) {
       .params = params,
       .param_count = IREE_ARRAYSIZE(params),
       .emitter = LOOM_EMITTER_PARSER,
+      .export_name = IREE_SV("kernel.main"),
   };
 
   std::string json = EmitJson(&diagnostic);
@@ -88,6 +89,7 @@ TEST(JsonSink, SimpleStructuredError) {
   EXPECT_NE(json.find("\"summary\":\"Undefined SSA value.\""),
             std::string::npos);
   EXPECT_NE(json.find("\"emitter\":\"parser\""), std::string::npos);
+  EXPECT_NE(json.find("\"export_name\":\"kernel.main\""), std::string::npos);
   EXPECT_NE(json.find("\"message\":\"undefined SSA value '%x'\""),
             std::string::npos);
   // PARSE_001 has no fix hint.

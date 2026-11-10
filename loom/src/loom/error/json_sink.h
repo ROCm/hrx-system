@@ -16,6 +16,7 @@
 //
 //   {"severity":"error","error_id":"ERR_TYPE_001","domain":"TYPE","code":1,
 //    "summary":"SameType constraint violated.","emitter":"verifier",
+//    "export_name":"kernel.main",
 //    "origin":{"provenance":"exact_source","filename":"model.loom",
 //              "start_line":42,"start_column":15,
 //              "end_line":42,"end_column":17,"start_byte":128,

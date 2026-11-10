@@ -397,6 +397,14 @@ iree_status_t loom_diagnostic_json_write_object(
       &object, IREE_SV("emitter"),
       iree_make_cstring_view(loom_emitter_name(diagnostic->emitter))));
 
+  // Export context is present only for diagnostics emitted while compiling a
+  // concrete export. It remains separate from error-definition parameters so
+  // every diagnostic family exposes the same machine-readable attribution.
+  if (!iree_string_view_is_empty(diagnostic->export_name)) {
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &object, IREE_SV("export_name"), diagnostic->export_name));
+  }
+
   // Source locations and highlight byte ranges when present.
   IREE_RETURN_IF_ERROR(loom_json_render_source_range(&object, IREE_SV("origin"),
                                                      &diagnostic->origin));

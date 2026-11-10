@@ -107,6 +107,11 @@ iree_status_t loom_tooling_cli_write_loomc_diagnostic_json(
         &object, IREE_SV("diagnostic_code"),
         iree_string_view_from_loomc(diagnostic->code)));
   }
+  if (!loomc_string_view_is_empty(diagnostic->export_name)) {
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &object, IREE_SV("export_name"),
+        iree_string_view_from_loomc(diagnostic->export_name)));
+  }
   IREE_RETURN_IF_ERROR(loom_tooling_cli_write_loomc_source_range_json(
       &object, IREE_SV("origin"), &diagnostic->range));
   IREE_RETURN_IF_ERROR(loom_tooling_cli_write_loomc_source_range_json(

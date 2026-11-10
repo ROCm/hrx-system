@@ -10,6 +10,7 @@
 
 #include "loom/error/renderer.h"
 #include "loom/error/source.h"
+#include "loom/util/json.h"
 #include "loom/util/stream.h"
 
 //===----------------------------------------------------------------------===//
@@ -227,6 +228,15 @@ static iree_status_t loom_check_append_diagnostic_annotation_line(
       loom_check_annotation_severity_name(diagnostic->severity), line_offset));
   IREE_RETURN_IF_ERROR(loom_check_append_collected_diagnostic_code(
       diagnostic, /*include_zero_generated_code=*/false, builder));
+  if (!iree_string_view_is_empty(diagnostic->export_name)) {
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(builder, " {export="));
+    loom_output_stream_t stream;
+    loom_output_stream_for_builder(builder, &stream);
+    IREE_RETURN_IF_ERROR(
+        loom_json_write_escaped_string(&stream, diagnostic->export_name));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
+  }
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
   return iree_ok_status();
 }

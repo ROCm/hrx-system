@@ -159,6 +159,11 @@ typedef struct loom_diagnostic_t {
   // Which subsystem emitted this diagnostic.
   loom_emitter_t emitter;
 
+  // Stable name of the export whose compilation emitted this diagnostic, or
+  // empty when the diagnostic is not scoped to an export. Borrowed for the
+  // sink call.
+  iree_string_view_t export_name;
+
   // Module owning type and symbol identities in the parameters, or NULL for
   // diagnostics without module-backed parameters. Borrowed for the sink call.
   const loom_module_t* module;

@@ -1476,7 +1476,7 @@ static iree_status_t loom_low_lower_function_plan_build(
         .value_domain = &context->lowering->value_domain,
         .value_identities = &context->function_analysis.value_identities,
         .participants = context->function_analysis.participant_zeros,
-        .emitter = options->emitter,
+        .emitter = context->diagnostic_emitter,
         .max_errors = options->max_errors,
     };
     status = loom_vector_memory_footprint_verify_function(
@@ -1495,7 +1495,7 @@ static iree_status_t loom_low_lower_function_plan_build(
         .storage_access = context->storage_access,
         .fact_table = context->fact_table,
         .value_domain = &context->lowering->value_domain,
-        .emitter = options->emitter,
+        .emitter = context->diagnostic_emitter,
         .phase_name = IREE_SV("source-low"),
     };
     status = loom_kernel_synchronization_legality_analyze_function(
@@ -1514,7 +1514,7 @@ static iree_status_t loom_low_lower_function_plan_build(
     const loom_kernel_barrier_lifetime_options_t barrier_lifetime_options = {
         .value_domain = &context->lowering->value_domain,
         .fact_table = context->fact_table,
-        .emitter = options->emitter,
+        .emitter = context->diagnostic_emitter,
         .phase_name = IREE_SV("source-low"),
     };
     status = loom_kernel_barrier_lifetime_verify_function(
@@ -1565,7 +1565,7 @@ static iree_status_t loom_low_lower_function_plan_build(
                 ? LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_SCF
                 : 0,
         .diagnostic_flags = options->legality_diagnostic_flags,
-        .emitter = options->emitter,
+        .emitter = context->diagnostic_emitter,
         .max_errors = options->max_errors,
     };
     status = loom_target_low_verify_function_legality(
@@ -1654,6 +1654,7 @@ iree_status_t loom_low_lower_plan_function(
       .module_state = options->module_state,
       .lowering = &plan->frame,
   };
+  loom_low_lower_context_scope_diagnostics(&context);
   iree_arena_initialize(module->arena.block_pool, &context.analysis_arena);
   loom_storage_access_scope_t storage_access;
   loom_storage_access_scope_initialize(module, &context.analysis_arena,
@@ -1762,6 +1763,7 @@ iree_status_t loom_low_lower_emit_function(loom_low_lower_function_plan_t* plan,
       .module_state = options.module_state,
       .lowering = &plan->frame,
   };
+  loom_low_lower_context_scope_diagnostics(&context);
   loom_local_value_domain_restore(&plan->frame.value_domain);
   iree_status_t status = loom_low_lower_function_plan_execute(&context);
   loom_local_value_domain_release(&plan->frame.value_domain);
