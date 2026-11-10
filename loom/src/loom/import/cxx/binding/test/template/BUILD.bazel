@@ -19,6 +19,8 @@ loom_check_test_suite(
         "template_apply_invalid.cxx-test",
         "template_definitions.cxx-test",
         "template_definitions_invalid.cxx-test",
+        "template_explicit_apply.cxx-test",
+        "template_explicit_apply_invalid.cxx-test",
     ],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )

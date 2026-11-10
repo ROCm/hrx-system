@@ -1766,6 +1766,26 @@ them even when an explicit root list does not reach their implementation
 symbols, while unselected providers and their transitive helpers disappear
 during linking.
 
+`loom::template_apply<target_value>()` names the same family explicitly. This
+allows a generic C++ helper to receive a family as a template argument without
+forming a runtime function pointer:
+
+```cpp
+#include <loomcxx/template.h>
+
+template <auto Family, class Value>
+auto apply_family(Value value) {
+  return loom::template_apply<Family>(value);
+}
+```
+
+The family declaration determines the result type, including record components
+and dependent view extents or encodings. Arguments retain their deduced source
+types and must match the family; the explicit helper does not perform ordinary
+C++ argument conversions. Arguments are evaluated once. The template header
+also supplies `LOOM_TEMPLATE_DECL` and `LOOM_TEMPLATE_DEF` independently of the
+kernel facade.
+
 The provider signature must exactly match its family after C++ type resolution.
 The family also owns the calling convention: a `LOOM_DEVICE LOOM_TEMPLATE_DECL`
 declaration makes every provider device code without repeating `LOOM_DEVICE`.

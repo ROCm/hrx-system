@@ -1,0 +1,66 @@
+// RUN: verify
+#include <loomcxx/template.h>
+
+unsigned ordinary(unsigned value) { return value; }
+
+unsigned entry(unsigned value) {
+  // ERROR@+1: LOWERING/059 "template.apply family requires a LOOM_TEMPLATE_DECL declaration"
+  return loom::template_apply<ordinary>(value);
+}
+
+// ====
+#include <loomcxx/template.h>
+
+LOOM_TEMPLATE_DECL("test.value") unsigned family(unsigned value);
+
+unsigned entry() {
+  // ERROR@+1: LOWERING/059 "template.apply arguments must match the family arity"
+  return loom::template_apply<family>();
+}
+
+// ====
+#include <loomcxx/template.h>
+
+LOOM_TEMPLATE_DECL("test.value") unsigned family(unsigned value);
+
+unsigned entry(int value) {
+  // ERROR@+1: LOWERING/059 "template.apply argument type must match its family"
+  return loom::template_apply<family>(value);
+}
+
+// ====
+#include <loomcxx/template.h>
+
+LOOM_TEMPLATE_DECL("test.value") unsigned family(unsigned value);
+
+template <auto Family, class... Args>
+[[loom::op("template.apply")]] float wrong_result(Args... args);
+
+float entry(unsigned value) {
+  // ERROR@+1: LOWERING/059 "template.apply result type must match its family"
+  return wrong_result<family>(value);
+}
+
+// ====
+template <int Family, class... Args>
+[[loom::op("template.apply")]] unsigned non_function(Args... args);
+
+unsigned entry(unsigned value) {
+  // ERROR@+1: LOWERING/059 "template.apply requires a family function as its first template argument"
+  return non_function<0>(value);
+}
+
+// ====
+// ERROR@+1: LOWERING/059 "template.apply requires a family function as its first template argument"
+[[loom::op("template.apply")]] unsigned missing_family(unsigned value);
+
+// ====
+#include <loomcxx/template.h>
+
+LOOM_TEMPLATE_DECL("test.value") unsigned family(unsigned value);
+
+unsigned entry(unsigned value) {
+  unsigned selected = loom::template_apply<family>(value);
+  // ERROR@+1: LOWERING/059 "template.apply family requires a LOOM_TEMPLATE_DECL declaration"
+  return loom::template_apply<loom::template_apply<family, unsigned>>(selected);
+}

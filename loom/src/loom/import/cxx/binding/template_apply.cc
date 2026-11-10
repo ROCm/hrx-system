@@ -6,12 +6,14 @@
 
 #include "loom/import/cxx/binding/template_apply.h"
 
+#include <cxx/const_value.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
 #include <cxx/types.h>
 
 #include <array>
-#include <utility>
+#include <memory>
+#include <variant>
 #include <vector>
 
 #include "loom/import/cxx/binding/function_contracts.h"
@@ -24,6 +26,33 @@
 #include "loom/ops/template/ops.h"
 
 namespace loom::cxx_import {
+
+bool TemplateApplyIntrinsic::is_explicit(const cxx::Attribute& attribute) {
+  return attribute.arguments.size() == 1 &&
+         supports(attribute.arguments[0]->name());
+}
+
+cxx::FunctionSymbol* TemplateApplyIntrinsic::resolve_family_argument(
+    cxx::TranslationUnit& unit, Diagnostics& diagnostics,
+    cxx::FunctionSymbol* function, cxx::AST* owner) {
+  auto arguments = function->templateArguments();
+  auto selected = arguments.empty()
+                      ? std::nullopt
+                      : cxx::template_argument_value(arguments[0]);
+  auto* address =
+      selected ? std::get_if<std::shared_ptr<cxx::ConstAddress>>(&*selected)
+               : nullptr;
+  auto* family =
+      address && *address
+          ? cxx::symbol_cast<cxx::FunctionSymbol>((*address)->symbol())
+          : nullptr;
+  if (!family) {
+    diagnostics.reject(unit, owner,
+                       "template.apply requires a family function as its first "
+                       "template argument");
+  }
+  return family;
+}
 
 std::optional<std::string_view> TemplateApplyIntrinsic::admit(
     cxx::TranslationUnit& unit, Diagnostics& diagnostics,
@@ -53,21 +82,50 @@ TemplateApplyIntrinsic TemplateApplyIntrinsic::resolve(
     diagnostics.reject(unit, owner,
                        "template family cannot name multiple C++ functions");
   }
+  if (family->function) {
+    return TemplateApplyIntrinsic(family, contracts);
+  }
   family->function = canonical;
-  std::vector<const cxx::Type*> parameters;
-  parameters.reserve(signature->parameterTypes().size());
-  for (const auto* parameter : signature->parameterTypes()) {
-    types.partition(parameter, owner);
-    parameters.push_back(parameter);
+  family->declaration_location = declaration_location;
+  family->parameter_types = signature->parameterTypes();
+  for (const auto* parameter : family->parameter_types) {
+    family->argument_component_count +=
+        types.partition(parameter, owner).component_count;
+  }
+  const auto* result = types.unqualified(signature->returnType());
+  if (result->kind() != cxx::TypeKind::kVoid) {
+    types.partition(result, owner);
+    family->result_type = result;
+  }
+  return TemplateApplyIntrinsic(family, contracts);
+}
+
+TemplateApplyIntrinsic TemplateApplyIntrinsic::bind_application(
+    cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
+    cxx::FunctionSymbol* function, cxx::AST* owner) const {
+  auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
+  const auto& parameters = signature->parameterTypes();
+  if (signature->isVariadic() ||
+      parameters.size() != family_->parameter_types.size()) {
+    diagnostics.reject(unit, owner,
+                       "template.apply arguments must match the family arity");
   }
   const auto* result = types.unqualified(signature->returnType());
   if (result->kind() == cxx::TypeKind::kVoid) {
-    return TemplateApplyIntrinsic(family, contracts, std::move(parameters),
-                                  nullptr, declaration_location);
+    result = nullptr;
   }
-  types.partition(result, owner);
-  return TemplateApplyIntrinsic(family, contracts, std::move(parameters),
-                                result, declaration_location);
+  if (result != family_->result_type) {
+    diagnostics.reject(unit, owner,
+                       "template.apply result type must match its family");
+  }
+  for (size_t i = 0; i < parameters.size(); ++i) {
+    if (types.unqualified(parameters[i]) !=
+        types.unqualified(family_->parameter_types[i])) {
+      diagnostics.reject(unit, owner,
+                         "template.apply argument type must match its family");
+    }
+  }
+  return *this;
 }
 
 loom_symbol_ref_t TemplateApplyIntrinsic::materialize(
@@ -77,20 +135,17 @@ loom_symbol_ref_t TemplateApplyIntrinsic::materialize(
     loom_builder_initialize(builder->module, &builder->module->arena,
                             loom_module_block(builder->module),
                             &declaration_builder);
-    std::vector<const cxx::Type*> sources(parameter_types_.begin(),
-                                          parameter_types_.end());
-    if (result_type_) {
-      sources.push_back(result_type_);
+    std::vector<const cxx::Type*> sources(family_->parameter_types.begin(),
+                                          family_->parameter_types.end());
+    if (family_->result_type) {
+      sources.push_back(family_->result_type);
     }
     const bool has_predicates = contracts_->has_predicates(family_->function);
     auto signature = bind_signature(
         types, sources, owner, &declaration_builder,
         has_predicates ? SignatureIdentityRequirement::Required
                        : SignatureIdentityRequirement::DependentTypes);
-    size_t argument_count = 0;
-    for (const auto* parameter : parameter_types_) {
-      argument_count += types.partition(parameter, owner).component_count;
-    }
+    const size_t argument_count = family_->argument_component_count;
     const loom_type_t* argument_types =
         argument_count ? signature.types.data() : nullptr;
     const size_t result_count = signature.types.size() - argument_count;
@@ -123,7 +178,7 @@ loom_symbol_ref_t TemplateApplyIntrinsic::materialize(
         reference, argument_types, argument_count, result_types, result_count,
         /*tied_results=*/nullptr,
         /*tied_result_count=*/0, predicates.data(), predicates.size(),
-        declaration_location_, &family_->declaration));
+        family_->declaration_location, &family_->declaration));
   }
   return loom_template_decl_family(family_->declaration);
 }
@@ -135,14 +190,14 @@ std::optional<Value> TemplateApplyIntrinsic::call(
   auto family = materialize(types, owner, builder);
 
   std::vector<loom_value_id_t> operands;
-  operands.reserve(parameter_types_.size());
+  operands.reserve(family_->argument_component_count);
   for (const auto argument : arguments) {
     argument.append_to(operands);
   }
 
   BoundSignature results;
-  if (result_type_) {
-    std::array<const cxx::Type*, 1> sources = {result_type_};
+  if (family_->result_type) {
+    std::array<const cxx::Type*, 1> sources = {family_->result_type};
     results = bind_signature(types, sources, owner, builder);
   }
   loom_op_t* op;
@@ -151,10 +206,10 @@ std::optional<Value> TemplateApplyIntrinsic::call(
       /*effect_contract=*/0, /*temperature=*/0, results.types.data(),
       results.types.size(), /*tied_results=*/nullptr, /*tied_result_count=*/0,
       location, &op));
-  if (!result_type_) {
+  if (!family_->result_type) {
     return std::nullopt;
   }
-  return arena.capture(types.partition(result_type_, owner),
+  return arena.capture(types.partition(family_->result_type, owner),
                        {loom_op_results(op), results.types.size()});
 }
 

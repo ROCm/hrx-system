@@ -1,0 +1,111 @@
+// RUN: format bytecode
+#include <loomcxx/template.h>
+
+LOOM_TEMPLATE_DECL("test.tick") unsigned tick() noexcept;
+LOOM_TEMPLATE_DECL("test.consume") void consume(unsigned value);
+LOOM_TEMPLATE_DECL("test.transform") unsigned transform(unsigned value);
+
+unsigned linked_pipeline(unsigned value) {
+  unsigned before = loom::template_apply<tick>();
+  loom::template_apply<consume>(value++);
+  return before + loom::template_apply<transform>(value) + transform(value);
+}
+
+// ----
+func.def public @linked_pipeline(%value$0: i32) -> (i32) {
+  %before = template.apply<@test.tick>() : () -> (i32)
+  %3 = scalar.constant 1 : i32
+  %value$4 = scalar.addi %value$0, %3 : i32
+  template.apply<@test.consume>(%value$0) : (i32)
+  %5 = template.apply<@test.transform>(%value$4) : (i32) -> (i32)
+  %6 = scalar.addi %before, %5 : i32
+  %7 = template.apply<@test.transform>(%value$4) : (i32) -> (i32)
+  %8 = scalar.addi %6, %7 : i32
+  func.return %8 : i32
+}
+
+template.decl @test.tick() -> (i32)
+
+template.decl @test.consume(%10: i32)
+
+template.decl @test.transform(%11: i32) -> (i32)
+
+// ====
+#include <loomcxx/template.h>
+
+struct Pair {
+  // Integer component transported through the family boundary.
+  unsigned count;
+  // Floating-point component transported through the family boundary.
+  float scale;
+};
+
+LOOM_TEMPLATE_DECL("test.pair") Pair transform_pair(Pair value);
+
+template <auto Family, class Value>
+auto apply_family(Value value) {
+  return loom::template_apply<Family>(value);
+}
+
+Pair linked_record(Pair value) { return apply_family<transform_pair>(value); }
+
+// ----
+func.def public @linked_record(%value_count: i32, %value_scale: f32) -> (i32, f32) {
+  %4, %5 = func.call @apply_family__transform_pair___Pair(%value_count, %value_scale) : (i32, f32) -> (i32, f32)
+  func.return %4, %5 : i32, f32
+}
+
+func.def @apply_family__transform_pair___Pair(%value_count: i32, %value_scale: f32) -> (i32, f32) {
+  %10, %11 = template.apply<@test.pair>(%value_count, %value_scale) : (i32, f32) -> (i32, f32)
+  func.return %10, %11 : i32, f32
+}
+
+template.decl @test.pair(%12: i32, %13: f32) -> (i32, f32)
+
+// ====
+#include <loomcxx/template.h>
+#include <loomcxx/view.h>
+
+namespace t = loom::type;
+using Layout = t::encoding<loom::encoding::role::layout, 3>;
+using Input = t::view<t::shape<t::dynamic, 4, t::dynamic>, const float, Layout>;
+LOOM_TEMPLATE_DECL("test.view") Input forward_view(Input value);
+
+Input linked_view(Input value) {
+  return loom::template_apply<forward_view>(value);
+}
+
+// ----
+func.def public @linked_view(%value_dim0: index, %value_dim2: index, %value_layout: encoding<layout>, %value: view<[%value_dim0]x4x[%value_dim2]xf32, %value_layout>) -> (%4: index, %5: index, %6: encoding<layout>, view<[%4]x4x[%5]xf32, %6>) {
+  %8, %9, %10, %11 = template.apply<@test.view>(%value_dim0, %value_dim2, %value_layout, %value) : (index, index, encoding<layout>, view<[%value_dim0]x4x[%value_dim2]xf32, %value_layout>) -> (index, index, encoding<layout>, view<[%8]x4x[%9]xf32, %10>)
+  func.return %8, %9, %10, %11 : index, index, encoding<layout>, view<[%8]x4x[%9]xf32, %10>
+}
+
+template.decl @test.view(%12: index, %13: index, %14: encoding<layout>, %15: view<[%12]x4x[%13]xf32, %14>) -> (%16: index, %17: index, %18: encoding<layout>, view<[%16]x4x[%17]xf32, %18>)
+
+// ====
+// RUN: pass select-templates{mode=final,rewrite=inline},canonicalize,symbol-dce
+#include <loomcxx/template.h>
+#include <loomcxx/predicate.h>
+
+LOOM_TEMPLATE_DECL("test.increment") unsigned increment(unsigned value);
+
+LOOM_TEMPLATE_DEF(increment)
+unsigned increment_generic(unsigned value) { return value + 1u; }
+
+LOOM_TEMPLATE_DEF(increment)
+[[loom::priority(10)]] unsigned increment_four(unsigned value)
+    [[loom::where(value == 4u)]] {
+  return value + 7u;
+}
+
+unsigned selected() {
+  return loom::template_apply<increment>(4u) + increment(4u) +
+         loom::template_apply<increment>(2u);
+}
+
+// ----
+func.def public @selected() -> (i32) {
+  %24 = scalar.constant 25 : i32
+  func.return %24 : i32
+}

@@ -153,7 +153,8 @@ void Intrinsics::declaration(cxx::FunctionSymbol* function,
                    unit_, diagnostics_, module_->context, function, *selected,
                    owner)) {
       binding.operation = *encoding;
-    } else if (TemplateApplyIntrinsic::admit(unit_, diagnostics_, *selected,
+    } else if (!TemplateApplyIntrinsic::is_explicit(*selected) &&
+               TemplateApplyIntrinsic::admit(unit_, diagnostics_, *selected,
                                              owner)) {
       diagnostics_.reject(unit_, owner,
                           "template.apply requires an ordinary function");
@@ -222,6 +223,22 @@ Intrinsics::Binding Intrinsics::resolve(cxx::FunctionSymbol* function,
                                         const cxx::Attribute& attribute,
                                         cxx::AST* owner) {
   auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
+  if (TemplateApplyIntrinsic::is_explicit(attribute)) {
+    auto* family = TemplateApplyIntrinsic::resolve_family_argument(
+        unit_, diagnostics_, function, owner);
+    auto entry = bindings_.find(family->canonical());
+    auto* application =
+        entry != bindings_.end()
+            ? std::get_if<TemplateApplyIntrinsic>(&entry->second)
+            : nullptr;
+    if (!application || application->source_function() != family->canonical()) {
+      diagnostics_.reject(
+          unit_, owner,
+          "template.apply family requires a LOOM_TEMPLATE_DECL declaration");
+    }
+    return application->bind_application(unit_, diagnostics_, types_, function,
+                                         owner);
+  }
   if (auto family = TemplateApplyIntrinsic::admit(unit_, diagnostics_,
                                                   attribute, owner)) {
     return TemplateApplyIntrinsic::resolve(
