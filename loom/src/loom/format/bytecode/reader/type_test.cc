@@ -617,6 +617,28 @@ TEST_F(BytecodeTypeTest, RejectsNonTopologicalTypeReference) {
   EXPECT_EQ(error_count_, 1u);
 }
 
+TEST_F(BytecodeTypeTest, ParameterKindsAreCheckedWithValidReferences) {
+  iree_string_view_t strings[] = {IREE_SV("wire.parameters"), IREE_SV("first"),
+                                  IREE_SV("last")};
+  module_view_.strings = {strings, IREE_ARRAYSIZE(strings)};
+  const uint8_t data[] = {
+      2,
+      LOOM_BYTECODE_TYPE_SCALAR,
+      LOOM_SCALAR_TYPE_I32,
+      LOOM_BYTECODE_TYPE_PARAMETERIZED,
+      0,
+      2,
+      1,
+      LOOM_BYTECODE_ATTR_TYPE,
+      0,
+      2,
+      LOOM_BYTECODE_ATTR_I64,
+      2,
+  };
+  ASSERT_NO_FATAL_FAILURE(
+      CheckValidationModes(data, sizeof(data), IREE_STATUS_DEFERRED));
+}
+
 TEST_F(BytecodeTypeTest, MaterializesEmptyFunctionPayload) {
   const uint8_t data[] = {0x01, LOOM_BYTECODE_TYPE_FUNCTION, 0x00, 0x00};
   IREE_ASSERT_OK(BuildPlan(data, sizeof(data)));
