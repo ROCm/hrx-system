@@ -569,6 +569,11 @@ loom_check_test(
     src = "fact_loop_test.loom-test",
 )
 
+loom_check_test(
+    name = "fact_remainder_test",
+    src = "fact_remainder_test.loom-test",
+)
+
 loom_cc_library(
     name = "predicate_facts",
     srcs = ["predicate_facts.c"],

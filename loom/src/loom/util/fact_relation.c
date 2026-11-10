@@ -619,6 +619,27 @@ iree_status_t loom_value_fact_integer_relations_define_counted_range(
                                                        &changed);
 }
 
+iree_status_t loom_value_fact_integer_relations_define_strict_upper_bound(
+    loom_value_fact_table_t* table, loom_value_id_t value,
+    loom_value_id_t upper_bound, const loom_value_facts_t* value_facts,
+    const loom_value_facts_t* upper_facts, bool* inout_changed) {
+  loom_value_fact_relation_roots_t roots = {0};
+  if (upper_bound != LOOM_VALUE_ID_INVALID &&
+      (value_facts->range_hi >= upper_facts->range_lo ||
+       !loom_value_fact_relation_roots_empty(
+           loom_value_fact_integer_relations_snapshot(table, upper_bound)))) {
+    IREE_RETURN_IF_ERROR(loom_value_fact_relation_add_bound(
+        table, &roots, upper_bound, LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS));
+  }
+  bool changed = false;
+  IREE_RETURN_IF_ERROR(loom_value_fact_integer_relations_publish_one(
+      table, value, roots, &changed));
+  if (changed && inout_changed) {
+    *inout_changed = true;
+  }
+  return iree_ok_status();
+}
+
 static bool loom_value_fact_integer_facts_exclude(loom_value_facts_t facts,
                                                   int64_t value) {
   if (value < facts.range_lo || value > facts.range_hi) {

@@ -140,63 +140,60 @@ func.def target(@target) @fill_f8(%pattern: f8E4M3, %target: buffer, %target_off
 
 // ----
 low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @fill_f8(%pattern: reg<wasm.i32>, %target: reg<wasm.i32>, %target_offset: reg<wasm.i32>, %byte_length: reg<wasm.i32>) asm {
-  %88 = i32.const 0
-  %89 = i32.const 255
-  %90 = i32.and %pattern, %89
-  %91 = i32.const -16
-  %92 = i32.and %byte_length, %91
-  %93 = i32.const 8
-  %94 = i32.shl %90, %93
-  %95 = i32.or %90, %94
-  %96 = i32.const 16
-  %97 = i32.shl %95, %96
-  %98 = i32.or %95, %97
-  %99 = i32x4.splat %98
-  low.scf.for unsigned [%88 to %92 step %96] do(%101: reg<wasm.i32>) {
-    %102 = i32.add %target_offset, %101
-    %103 = i32.add %target, %102
-    v128.store %103, %99
+  %82 = i32.const 0
+  %83 = i32.const 255
+  %84 = i32.and %pattern, %83
+  %85 = i32.const -16
+  %86 = i32.and %byte_length, %85
+  %87 = i32.const 8
+  %88 = i32.shl %84, %87
+  %89 = i32.or %84, %88
+  %90 = i32.const 16
+  %91 = i32.shl %89, %90
+  %92 = i32.or %89, %91
+  %93 = i32x4.splat %92
+  low.scf.for unsigned [%82 to %86 step %90] do(%95: reg<wasm.i32>) {
+    %96 = i32.add %target_offset, %95
+    %97 = i32.add %target, %96
+    v128.store %97, %93
   }
-  %104 = i32.const -8
-  %105 = i32.and %byte_length, %104
-  %106 = i64.extend_i32_u %98
-  %107 = i64.const 32
-  %108 = i64.shl %106, %107
-  %109 = i64.or %106, %108
-  %110 = i32.lt_u %92, %105
-  low.scf.if %110 {
-    %111 = i32.add %target_offset, %92
-    %112 = i32.add %target, %111
-    i64.store %112, %109
+  %98 = i32.const -8
+  %99 = i32.and %byte_length, %98
+  %100 = i64.extend_i32_u %92
+  %101 = i64.const 32
+  %102 = i64.shl %100, %101
+  %103 = i64.or %100, %102
+  %104 = i32.lt_u %86, %99
+  low.scf.if %104 {
+    %105 = i32.add %target_offset, %86
+    %106 = i32.add %target, %105
+    i64.store %106, %103
   }
-  %113 = i32.const -4
-  %114 = i32.and %byte_length, %113
-  %115 = i32.lt_u %105, %114
-  low.scf.if %115 {
-    %116 = i32.add %target_offset, %105
-    %117 = i32.add %target, %116
-    i32.store %117, %98
+  %107 = i32.const -4
+  %108 = i32.and %byte_length, %107
+  %109 = i32.lt_u %99, %108
+  low.scf.if %109 {
+    %110 = i32.add %target_offset, %99
+    %111 = i32.add %target, %110
+    i32.store %111, %92
   }
-  %118 = i32.const -2
-  %119 = i32.and %byte_length, %118
-  %120 = i32.shl %90, %96
-  %121 = i32.shr_u %120, %96
-  %122 = i32.shl %121, %93
-  %123 = i32.const 65535
-  %124 = i32.and %90, %123
-  %126 = i32.and %122, %123
-  %127 = i32.or %124, %126
-  %128 = i32.lt_u %114, %119
-  low.scf.if %128 {
-    %129 = i32.add %target_offset, %114
-    %130 = i32.add %target, %129
-    i32.store16 %130, %127
+  %112 = i32.const -2
+  %113 = i32.and %byte_length, %112
+  %114 = i32.const 65535
+  %115 = i32.and %84, %114
+  %117 = i32.and %88, %114
+  %118 = i32.or %115, %117
+  %119 = i32.lt_u %108, %113
+  low.scf.if %119 {
+    %120 = i32.add %target_offset, %108
+    %121 = i32.add %target, %120
+    i32.store16 %121, %118
   }
-  %131 = i32.lt_u %119, %byte_length
-  low.scf.if %131 {
-    %132 = i32.add %target_offset, %119
-    %133 = i32.add %target, %132
-    i32.store8 %133, %90
+  %122 = i32.lt_u %113, %byte_length
+  low.scf.if %122 {
+    %123 = i32.add %target_offset, %113
+    %124 = i32.add %target, %123
+    i32.store8 %124, %84
   }
   return
 }

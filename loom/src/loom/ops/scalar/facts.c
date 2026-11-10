@@ -30,6 +30,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/compare.h"
 #include "loom/ops/scalar/ops.h"
+#include "loom/util/fact_relation.h"
 #include "loom/util/fact_table.h"
 #include "loom/util/predicate_facts.h"
 
@@ -199,8 +200,48 @@ MODULAR_BINARY_FACTS(loom_scalar_muli_facts, loom_value_facts_muli,
                      loom_value_facts_muli_modular)
 BINARY_FACTS(loom_scalar_divsi_facts, loom_value_facts_divsi)
 WIDTH_BINARY_FACTS(loom_scalar_divui_facts, loom_value_facts_divui)
-BINARY_FACTS(loom_scalar_remsi_facts, loom_value_facts_remsi)
-WIDTH_BINARY_FACTS(loom_scalar_remui_facts, loom_value_facts_remui)
+
+static iree_status_t loom_scalar_publish_remainder_bound(
+    loom_fact_context_t* context, const loom_op_t* op, uint16_t result_index,
+    const loom_value_facts_t* operand_facts,
+    const loom_value_facts_t* result_facts) {
+  if (!context->publication) {
+    return iree_ok_status();
+  }
+  // Both signed and unsigned remainders are below a positive divisor for
+  // every dividend. The bound belongs to this result's defining scope.
+  const loom_value_id_t divisor = loom_value_facts_is_positive(operand_facts[1])
+                                      ? loom_op_const_operands(op)[1]
+                                      : LOOM_VALUE_ID_INVALID;
+  return loom_value_fact_integer_relations_define_strict_upper_bound(
+      context->table, loom_op_const_results(op)[result_index], divisor,
+      &result_facts[result_index], &operand_facts[1],
+      context->publication->changed);
+}
+
+iree_status_t loom_scalar_remsi_facts(loom_fact_context_t* context,
+                                      const loom_module_t* module,
+                                      const loom_op_t* op,
+                                      const loom_value_facts_t* operand_facts,
+                                      loom_value_facts_t* result_facts) {
+  loom_value_facts_remsi(&operand_facts[0], &operand_facts[1],
+                         &result_facts[0]);
+  return loom_scalar_publish_remainder_bound(context, op, 0, operand_facts,
+                                             result_facts);
+}
+
+iree_status_t loom_scalar_remui_facts(loom_fact_context_t* context,
+                                      const loom_module_t* module,
+                                      const loom_op_t* op,
+                                      const loom_value_facts_t* operand_facts,
+                                      loom_value_facts_t* result_facts) {
+  const int32_t bit_count =
+      loom_scalar_type_bitwidth(loom_scalar_result_element_type(module, op));
+  loom_value_facts_remui(&operand_facts[0], &operand_facts[1], bit_count,
+                         &result_facts[0]);
+  return loom_scalar_publish_remainder_bound(context, op, 0, operand_facts,
+                                             result_facts);
+}
 
 iree_status_t loom_scalar_divremsi_facts(
     loom_fact_context_t* context, const loom_module_t* module,
@@ -210,7 +251,8 @@ iree_status_t loom_scalar_divremsi_facts(
                          &result_facts[0]);
   loom_value_facts_remsi(&operand_facts[0], &operand_facts[1],
                          &result_facts[1]);
-  return iree_ok_status();
+  return loom_scalar_publish_remainder_bound(context, op, 1, operand_facts,
+                                             result_facts);
 }
 
 iree_status_t loom_scalar_divremui_facts(
@@ -223,7 +265,8 @@ iree_status_t loom_scalar_divremui_facts(
                          &result_facts[0]);
   loom_value_facts_remui(&operand_facts[0], &operand_facts[1], bit_count,
                          &result_facts[1]);
-  return iree_ok_status();
+  return loom_scalar_publish_remainder_bound(context, op, 1, operand_facts,
+                                             result_facts);
 }
 
 MODULAR_UNARY_FACTS(loom_scalar_negi_facts, loom_value_facts_negi_modular)

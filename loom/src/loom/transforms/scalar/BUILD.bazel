@@ -24,6 +24,7 @@ loom_cc_library(
         "//loom/src/loom/rewrite:pattern_registry",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/transforms/conversion:chain",
+        "//loom/src/loom/util:fact_table_api",
         "//runtime/src/iree/base",
     ],
 )

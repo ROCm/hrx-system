@@ -771,6 +771,63 @@ func.def @guarded_narrow_lookup(%input: buffer, %parameters: buffer, %output: bu
   func.return
 }
 
+// Standalone remainders cross the same carrier boundary without a paired
+// quotient reconstruction or its retained result refinements.
+func.def @guarded_byte_remainder_lookup(%input: buffer, %dividend_bits: i64, %divisor_bits: i64) -> (i32) {
+  %dividend = scalar.trunci %dividend_bits : i64 to i8
+  %divisor = scalar.trunci %divisor_bits : i64 to i8
+  %divisor_threshold = scalar.constant 0 : i8
+  %positive = scalar.cmpi sgt, %divisor, %divisor_threshold : i8
+  %result = scf.if %positive -> (i32) {
+    %remainder = scalar.remui %dividend, %divisor : i8
+    %extent = index.cast %divisor : i8 to index
+    %coordinate = index.cast %remainder : i8 to index
+    %base = index.constant 0 : offset
+    %view = buffer.view %input[%base] : buffer -> view<[%extent]xi32>
+    %value = view.load %view[%coordinate] : view<[%extent]xi32> -> i32
+    scf.yield %value : i32
+  } else {
+    %inactive = scalar.constant -1 : i32
+    scf.yield %inactive : i32
+  }
+  func.return %result : i32
+}
+
+func.def @guarded_halfword_remainder_lookup(%input: buffer, %dividend_bits: i64, %divisor_bits: i64) -> (i32) {
+  %dividend = scalar.trunci %dividend_bits : i64 to i16
+  %divisor = scalar.trunci %divisor_bits : i64 to i16
+  %divisor_threshold = scalar.constant 0 : i16
+  %positive = scalar.cmpi sgt, %divisor, %divisor_threshold : i16
+  %result = scf.if %positive -> (i32) {
+    %remainder = scalar.remui %dividend, %divisor : i16
+    %extent = index.cast %divisor : i16 to index
+    %coordinate = index.cast %remainder : i16 to index
+    %base = index.constant 0 : offset
+    %view = buffer.view %input[%base] : buffer -> view<[%extent]xi32>
+    %value = view.load %view[%coordinate] : view<[%extent]xi32> -> i32
+    scf.yield %value : i32
+  } else {
+    %inactive = scalar.constant -1 : i32
+    scf.yield %inactive : i32
+  }
+  func.return %result : i32
+}
+
+func.def @guarded_narrow_remainder_lookup(%input: buffer, %parameters: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %dividend_slot = index.constant 0 : index
+  %divisor_slot = index.constant 1 : index
+  %parameter_view = buffer.view %parameters[%base] : buffer -> view<2xi64>
+  %output_view = buffer.view %output[%base] : buffer -> view<2xi32>
+  %dividend = view.load %parameter_view[%dividend_slot] : view<2xi64> -> i64
+  %divisor = view.load %parameter_view[%divisor_slot] : view<2xi64> -> i64
+  %byte = func.call @guarded_byte_remainder_lookup(%input, %dividend, %divisor) : (buffer, i64, i64) -> (i32)
+  %halfword = func.call @guarded_halfword_remainder_lookup(%input, %dividend, %divisor) : (buffer, i64, i64) -> (i32)
+  view.store %byte, %output_view[%dividend_slot] : i32, view<2xi32>
+  view.store %halfword, %output_view[%divisor_slot] : i32, view<2xi32>
+  func.return
+}
+
 check.scenario @guarded_narrow_lookup_values {
   check.trial[16](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(-311) step(7) : tensor<32768xi32>
@@ -786,6 +843,23 @@ check.scenario @guarded_narrow_lookup_values {
     %parameters = check.generate.iota offset(-1) step(1) : tensor<2xi64>
     %output = check.generate.fill value(-123) : tensor<2xi32>
     check.compare<@guarded_narrow_lookup>(%input, %parameters, %output) : (tensor<1xi32>, tensor<2xi64>, tensor<2xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<2xi32>
+    }
+  }
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-311) step(7) : tensor<32768xi32>
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %parameters = check.generate.random.uniform seed(%seed) range(-9223372036854775808 to 9223372036854775807) : tensor<2xi64>
+    %output = check.generate.fill value(-123) : tensor<2xi32>
+    check.compare<@guarded_narrow_remainder_lookup>(%input, %parameters, %output) : (tensor<32768xi32>, tensor<2xi64>, tensor<2xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<2xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(-311) : tensor<1xi32>
+    %parameters = check.generate.iota offset(-1) step(1) : tensor<2xi64>
+    %output = check.generate.fill value(-123) : tensor<2xi32>
+    check.compare<@guarded_narrow_remainder_lookup>(%input, %parameters, %output) : (tensor<1xi32>, tensor<2xi64>, tensor<2xi32>) -> () {
       check.expect.bitwise actual(%output) expected(%output) : tensor<2xi32>
     }
   }

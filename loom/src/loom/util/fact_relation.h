@@ -92,6 +92,17 @@ iree_status_t loom_value_fact_integer_relations_define_counted_range(
     loom_value_fact_table_t* table, loom_value_id_t value,
     loom_value_id_t lower_bound, loom_value_id_t upper_bound);
 
+// Replaces a result's relations with value < upper_bound and its transitive
+// consequences. The producer supplies the current definition-scope facts;
+// result facts need not have been published yet. Disjoint intervals need no
+// retained relation unless the endpoint carries further dynamic constraints.
+// INVALID upper_bound withdraws prior relations. The caller owns publication
+// and includes auxiliary changes in its ordinary inference change accumulator.
+iree_status_t loom_value_fact_integer_relations_define_strict_upper_bound(
+    loom_value_fact_table_t* table, loom_value_id_t value,
+    loom_value_id_t upper_bound, const loom_value_facts_t* value_facts,
+    const loom_value_facts_t* upper_facts, bool* inout_changed);
+
 // Propagates inherited alias relations and retains signed predicates declared
 // by a value-identity operation. All result plans are completed before any
 // result relation is published.

@@ -236,13 +236,32 @@ static void loom_index_rem_result_facts(const loom_value_facts_t* operand_facts,
                          result_facts);
 }
 
+static iree_status_t loom_index_publish_remainder_bound(
+    loom_fact_context_t* context, const loom_op_t* op, uint16_t result_index,
+    const loom_value_facts_t* operand_facts,
+    const loom_value_facts_t* result_facts) {
+  if (!context->publication) {
+    return iree_ok_status();
+  }
+  const loom_value_id_t divisor =
+      loom_value_facts_is_non_negative(operand_facts[0]) &&
+              loom_value_facts_is_positive(operand_facts[1])
+          ? loom_op_const_operands(op)[1]
+          : LOOM_VALUE_ID_INVALID;
+  return loom_value_fact_integer_relations_define_strict_upper_bound(
+      context->table, loom_op_const_results(op)[result_index], divisor,
+      &result_facts[result_index], &operand_facts[1],
+      context->publication->changed);
+}
+
 iree_status_t loom_index_rem_facts(loom_fact_context_t* context,
                                    const loom_module_t* module,
                                    const loom_op_t* op,
                                    const loom_value_facts_t* operand_facts,
                                    loom_value_facts_t* result_facts) {
   loom_index_rem_result_facts(operand_facts, &result_facts[0]);
-  return iree_ok_status();
+  return loom_index_publish_remainder_bound(context, op, 0, operand_facts,
+                                            result_facts);
 }
 
 iree_status_t loom_index_divrem_facts(loom_fact_context_t* context,
@@ -252,7 +271,8 @@ iree_status_t loom_index_divrem_facts(loom_fact_context_t* context,
                                       loom_value_facts_t* result_facts) {
   loom_index_div_result_facts(operand_facts, &result_facts[0]);
   loom_index_rem_result_facts(operand_facts, &result_facts[1]);
-  return iree_ok_status();
+  return loom_index_publish_remainder_bound(context, op, 1, operand_facts,
+                                            result_facts);
 }
 
 typedef void (*loom_index_minmax_transfer_fn_t)(const loom_value_facts_t* lhs,

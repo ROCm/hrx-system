@@ -53,3 +53,36 @@ func.def @unsigned_remainder_rejects_short_view(%input: buffer, %selection: i32)
   %value = view.load<volatile> %words[%selected] : view<8xi32> -> i32
   func.return %value : i32
 }
+
+// ====
+
+// The divisor lies inside a larger runtime extent. Its retained bound must
+// compose once at the remainder producer and survive address conversion.
+func.def @bounded_lookup(%input: buffer, %selection: i32, %divisor_input: i32, %limit_input: i32) -> (i32) {
+  %limit = scalar.assume %limit_input [range(%limit_input, 1, 127)] : i32
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 127), le(%divisor_input, %limit)] : i32
+  %remainder = scalar.remui %selection, %divisor : i32
+  %coordinate = index.cast %remainder : i32 to index
+  %extent = index.cast %limit : i32 to index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<[%extent]xi32>
+  %value = view.load %view[%coordinate] : view<[%extent]xi32> -> i32
+  func.return %value : i32
+}
+
+// ====
+
+// An independent extent with the same range is not the containing extent.
+func.def @independent_limit(%input: buffer, %selection: i32, %divisor_input: i32, %limit_input: i32, %other_input: i32) -> (i32) {
+  %limit = scalar.assume %limit_input [range(%limit_input, 1, 127)] : i32
+  %other = scalar.assume %other_input [range(%other_input, 1, 127)] : i32
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 127), le(%divisor_input, %limit)] : i32
+  %remainder = scalar.remui %selection, %divisor : i32
+  %coordinate = index.cast %remainder : i32 to index
+  %extent = index.cast %other : i32 to index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<[%extent]xi32>
+  // ERROR@+1: SUBRANGE/024 {op_name="view.load", view_axis="0"}
+  %value = view.load %view[%coordinate] : view<[%extent]xi32> -> i32
+  func.return %value : i32
+}

@@ -12,6 +12,7 @@
 #include "loom/rewrite/rewriter.h"
 #include "loom/transforms/conversion/chain.h"
 #include "loom/transforms/scalar/narrowing.h"
+#include "loom/util/fact_table.h"
 
 static loom_conversion_kind_t loom_scalar_combine_conversion_kind(
     const loom_op_t* op) {
@@ -156,10 +157,21 @@ iree_status_t loom_scalar_combine_conversion(loom_op_t* op,
 
   const loom_conversion_chain_match_t match =
       loom_conversion_chain_match(outer_kind, inner_kind);
-  if (!allow_bitfield &&
-      (match.candidate == LOOM_CONVERSION_EXTRACT_SIGNED ||
-       match.candidate == LOOM_CONVERSION_EXTRACT_UNSIGNED)) {
-    return iree_ok_status();
+  if (match.candidate == LOOM_CONVERSION_EXTRACT_SIGNED ||
+      match.candidate == LOOM_CONVERSION_EXTRACT_UNSIGNED) {
+    const loom_value_id_t source = loom_op_const_operands(defining_op)[0];
+    // A proved lossless round trip keeps the original numeric value. Lowering
+    // it to bit extraction would discard that identity and its retained bounds.
+    if (loom_value_fact_table_query_numeric_identity(
+            rewriter->fact_table, loom_op_const_results(op)[0]) ==
+        loom_value_fact_table_query_numeric_identity(rewriter->fact_table,
+                                                     source)) {
+      return loom_scalar_combine_replace_with_conversion(
+          rewriter, op, outer_kind, source, out_changed);
+    }
+    if (!allow_bitfield) {
+      return iree_ok_status();
+    }
   }
   if (match.candidate == LOOM_CONVERSION_NONE) {
     if (outer_kind == LOOM_CONVERSION_TRUNCI) {
