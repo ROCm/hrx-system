@@ -2701,30 +2701,15 @@ class Translator final : private Initialization::Evaluation {
     std::optional<loom_value_id_t> coordinate;
     if (has_lane) {
       coordinate = results[1];
-      for (size_t ordinal = 0; ordinal < alternatives.size(); ++ordinal) {
-        auto* lane =
-            std::get_if<VectorLaneLvalue>(&alternatives[ordinal].projection);
+      // A destination is read or written only in its selected arm, using the
+      // coordinate evaluated by that same arm.
+      for (auto& alternative : alternatives) {
+        auto* lane = std::get_if<VectorLaneLvalue>(&alternative.projection);
         if (!lane) {
           continue;
         }
         lane->index = *coordinate;
         lane->index_type = lane_type;
-        if (ordinal == 0) {
-          // Calls use the first alternative as their fixed SSA position. On
-          // other arms its original index never executes: lane zero provides
-          // a valid position for the reversible scalar permutation even when
-          // the two vectors have different lengths.
-          auto zero = scalars_.integer(0, LOOM_SCALAR_TYPE_I32, source);
-          auto first = scalars_.binary(cxx::TokenKind::T_EQUAL_EQUAL,
-                                       results[0], zero, ordinal_type,
-                                       unit_.control()->getBoolType(), owner);
-          zero = scalars_.integer(0, LOOM_SCALAR_TYPE_I64, source);
-          loom_op_t* position;
-          check(loom_scf_select_build(&builder_, first, *coordinate, zero,
-                                      types_.get(lane_type, owner), source,
-                                      &position));
-          lane->index = loom_scf_select_result(position);
-        }
       }
     }
     return {std::make_shared<const SelectedLvalue>(
@@ -2977,6 +2962,16 @@ class Translator final : private Initialization::Evaluation {
 
   Lvalue project_call_target(const Lvalue& target, const ValueProjection& group,
                              cxx::AST* owner) {
+    if (const auto* selected = target.selection()) {
+      std::vector<Lvalue> alternatives;
+      alternatives.reserve(selected->alternatives.size());
+      for (const auto& alternative : selected->alternatives) {
+        alternatives.push_back(project_call_target(alternative, group, owner));
+      }
+      return {std::make_shared<const SelectedLvalue>(
+          selected->selector, group.type, std::move(alternatives),
+          selected->lane)};
+    }
     const auto* object = std::get_if<ObjectLvalue>(&target.projection);
     if (!object) {
       return target;
@@ -4094,20 +4089,6 @@ class Translator final : private Initialization::Evaluation {
                                std::move(variadic_arguments), source);
   }
 
-  void permute_selection(const SelectedLvalue& selected, cxx::AST* owner) {
-    dispatch_selection(
-        selected, nullptr, selected.bindings, owner,
-        [&](size_t ordinal) -> std::optional<Value> {
-          if (ordinal != 0) {
-            auto first = read(selected.alternatives.front(), owner);
-            auto chosen = read(selected.alternatives[ordinal], owner);
-            write(selected.alternatives.front(), chosen, owner);
-            write(selected.alternatives[ordinal], first, owner);
-          }
-          return std::nullopt;
-        });
-  }
-
   EvaluatedCallResult emit_projected_call(
       cxx::AST* call, cxx::FunctionSymbol* function, loom_symbol_ref_t callee,
       std::optional<ReceiverArgument> receiver,
@@ -4119,31 +4100,6 @@ class Translator final : private Initialization::Evaluation {
         unit_.typeTraits().is_reference(signature->returnType())
             ? functions_.reference_return_parameter(function)
             : std::nullopt;
-    std::optional<Lvalue> result_target;
-    if (return_parameter) {
-      result_target = evaluated_arguments[*return_parameter].target;
-    }
-    if (receiver && receiver->target &&
-        functions_.returns_current_receiver_reference(function)) {
-      result_target = receiver->target;
-    }
-    std::vector<Lvalue> permutations;
-    auto prepare_target = [&](std::optional<Lvalue>& target) {
-      if (!target) {
-        return;
-      }
-      if (const auto* selected = target->selection()) {
-        permutations.push_back(*target);
-        permute_selection(*selected, call);
-        target = selected->alternatives.front();
-      }
-    };
-    if (receiver) {
-      prepare_target(receiver->target);
-    }
-    for (auto& evaluated : evaluated_arguments) {
-      prepare_target(evaluated.target);
-    }
     const size_t receiver_argument_count =
         !receiver ? 0
         : receiver->abi == ImplicitObjectABI::Value
@@ -4165,18 +4121,9 @@ class Translator final : private Initialization::Evaluation {
     }
     arguments.insert(arguments.end(), variadic_arguments.begin(),
                      variadic_arguments.end());
-    auto called = emit_evaluated_call(
-        call, function, callee, std::move(receiver), std::move(arguments),
-        std::move(writebacks), std::move(reference_result_alias), source);
-    for (auto iterator = permutations.rbegin(); iterator != permutations.rend();
-         ++iterator) {
-      permute_selection(*iterator->selection(), call);
-    }
-    if (result_target && !permutations.empty()) {
-      called.reference_target = result_target;
-      called.value = read(*result_target, call);
-    }
-    return called;
+    return emit_evaluated_call(call, function, callee, std::move(receiver),
+                               std::move(arguments), std::move(writebacks),
+                               std::move(reference_result_alias), source);
   }
 
   EvaluatedCallResult ordinary_operator_call(cxx::ExpressionAST* expression,

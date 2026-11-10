@@ -2396,10 +2396,11 @@ through `object.self().pair.second` updates the caller's `pair` field while
 preserving the neighboring fields. A mutable reference parameter contributes
 updated results only when its callable body can write through it.
 
-Independent selections remain one ordinary helper call. The caller arranges
-the selected current values into the helper's argument positions and restores
-the updated values to their original bindings afterward. Source objects retain
-their own lifetimes throughout; selection does not create another C++ object.
+Independent selections remain one ordinary helper call. The caller reads the
+selected inputs and writes each returned field to its selected destination.
+Untouched fields need no initialized value, and other aliases continue to name
+their original objects. Source objects retain their own lifetimes throughout;
+selection does not create another C++ object.
 Exported C++ expresses these updates with ordinary values and results, preserving
 the behavior when reimported.
 

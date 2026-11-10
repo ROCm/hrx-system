@@ -2517,9 +2517,6 @@ void ControlFlow::bind_field_calls(
                     const Construction::Parameter* parameter, bool writable) {
       const size_t first = invocation.arguments.size();
       visit_intervals(argument, {}, [&](ObjectInterval interval) {
-        if (!construction_.declared(interval.binding)) {
-          return;
-        }
         const size_t total =
             types_.partition(types_.unqualified_value(type), call.source)
                 .component_count;
@@ -2547,6 +2544,16 @@ void ControlFlow::bind_field_calls(
           }
         }
       }
+      // A choice between a tracked object and an already initialized value is
+      // still conditional. Remove nonparticipating identities only after they
+      // have constrained definite assignment of the tracked alternatives.
+      auto start = invocation.arguments.begin() + first;
+      invocation.arguments.erase(
+          std::remove_if(start, invocation.arguments.end(),
+                         [&](const Construction::Argument& actual) {
+                           return !construction_.declared(actual.binding);
+                         }),
+          invocation.arguments.end());
     };
     auto parameters = call.function->parameters();
     for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {

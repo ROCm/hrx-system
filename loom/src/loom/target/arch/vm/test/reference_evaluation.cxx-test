@@ -38,6 +38,47 @@ OK 0
 retired 0
 
 // ====
+// Source selections transport only required groups and preserve read-only
+// aliases of a selected receiver while evaluating exactly one helper call.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Slice { unsigned* data; unsigned length; };
+[[loom::noinline]] static unsigned advance(Slice& slice, unsigned step) {
+  event(1);
+  slice.length += step;
+  return slice.length;
+}
+struct Cell {
+  unsigned value;
+  [[loom::noinline]] unsigned compare(const Cell& other) const { return value * 10 + other.value; }
+};
+void run() {
+  for (unsigned choice = 0; choice < 2; ++choice) {
+    Slice left, right;
+    left.length = 5;
+    right.length = 7;
+    auto& chosen = choice ? left : right;
+    event(advance(chosen, 3));
+    event(left.length);
+    event(right.length);
+    Cell first{2}, second{3};
+    event((choice ? first : second).compare(first));
+  }
+}
+// ----
+event 1
+event 10
+event 5
+event 10
+event 32
+event 1
+event 8
+event 8
+event 7
+event 22
+OK 0
+retired 0
+
+// ====
 // Direct and reference-returning receivers both read the completed argument
 // updates. Receiver evaluation is sequenced before the explicit argument.
 [[loom::import("lifetime", "event")]] void event(unsigned value);
@@ -230,5 +271,40 @@ event 11
 event 101
 event 31
 event 31
+OK 0
+retired 0
+
+// ====
+// Conditional outputs preserve the unselected object, including a reference
+// selected against a by-value formal and a pointer's two-component payload.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+static void initialize(unsigned& value) { value = 17; }
+[[loom::noinline]] static void maybe_initialize(unsigned& output, unsigned other, bool choose) {
+  initialize(choose ? output : other);
+}
+struct Slice { const unsigned* data; unsigned unused; };
+[[loom::noinline]] static void advance(Slice& slice) { ++slice.data; }
+void run() {
+  unsigned first[2]{5, 7};
+  unsigned second[2]{11, 13};
+  for (unsigned choice = 0; choice < 2; ++choice) {
+    unsigned value = 3;
+    maybe_initialize(value, 19, choice != 0);
+    event(value);
+    Slice left, right;
+    left.data = first;
+    right.data = second;
+    advance(choice ? left : right);
+    event(*left.data);
+    event(*right.data);
+  }
+}
+// ----
+event 3
+event 5
+event 13
+event 17
+event 7
+event 11
 OK 0
 retired 0
