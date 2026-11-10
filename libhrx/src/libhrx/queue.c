@@ -19,13 +19,15 @@ static_assert(HRX_QUEUE_ROLE_PROFILING ==
               "queue role mismatch");
 static_assert(HRX_QUEUE_ROLE_ATOMIC == IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC,
               "queue role mismatch");
-static_assert((int)HRX_QUEUE_PLACEMENT_DEFAULT ==
-                      (int)IREE_HAL_QUEUE_PLACEMENT_DEFAULT &&
-                  (int)HRX_QUEUE_PLACEMENT_HOST_LOCAL ==
-                      (int)IREE_HAL_QUEUE_PLACEMENT_HOST_LOCAL &&
-                  (int)HRX_QUEUE_PLACEMENT_DEVICE_LOCAL ==
-                      (int)IREE_HAL_QUEUE_PLACEMENT_DEVICE_LOCAL,
-              "queue placement mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_QUEUE_PLACEMENT_DEFAULT,
+                           IREE_HAL_QUEUE_PLACEMENT_DEFAULT,
+                           "default queue placement mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_QUEUE_PLACEMENT_HOST_LOCAL,
+                           IREE_HAL_QUEUE_PLACEMENT_HOST_LOCAL,
+                           "host-local queue placement mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_QUEUE_PLACEMENT_DEVICE_LOCAL,
+                           IREE_HAL_QUEUE_PLACEMENT_DEVICE_LOCAL,
+                           "device-local queue placement mismatch");
 static_assert(HRX_QUEUE_FEATURE_COOPERATIVE_DISPATCH ==
                   IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH,
               "queue feature mismatch");
