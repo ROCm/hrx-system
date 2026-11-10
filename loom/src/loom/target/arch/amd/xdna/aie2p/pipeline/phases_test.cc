@@ -52,6 +52,7 @@ class PhaseRetirementTest
                              ? LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM
                              : LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY;
     command_.retirement = &retirement_;
+    command_.retire = true;
     retirement_.source = &command_;
     retirement_.function = loom_symbol_ref_null();
     worker_.distribution_commands = &command_;
@@ -158,6 +159,16 @@ TEST_P(PhaseRetirementTest, AnotherChildDoesNotRetireThisEndpoint) {
   ASSERT_EQ(body->blocks[0]->op_count, 1u);
   EXPECT_TRUE(loom_low_return_isa(body->blocks[0]->first_op));
   EXPECT_FALSE(loom_symbol_ref_is_valid(retirement_.function));
+}
+
+TEST_P(PhaseRetirementTest, PrefixPublicationDoesNotRetireTheSharedQueue) {
+  command_.retire = false;
+  command_.retirement = nullptr;
+  auto* boundary = Boundary(&invocation_);
+  auto* body = loom_low_func_def_body(boundary);
+  ASSERT_EQ(body->block_count, 1u);
+  ASSERT_EQ(body->blocks[0]->op_count, 1u);
+  EXPECT_TRUE(loom_low_return_isa(body->blocks[0]->first_op));
 }
 
 INSTANTIATE_TEST_SUITE_P(MemoryAndDirection, PhaseRetirementTest,

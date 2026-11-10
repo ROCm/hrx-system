@@ -300,7 +300,7 @@ iree_status_t loom_aie2p_native_select_task_descriptors(
         IREE_RETURN_IF_ERROR(loom_aie2p_native_select_sequence(
             context, tile, task->path->shim_engine,
             LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM, NULL,
-            worker->repetition.shim_repetitions, 1, 0, 0, 1,
+            worker->repetition.shim_repetitions, 1, 0, 0, 1, 0,
             transfer->shim_words, &descriptor->sequence, &reason, &valid));
       } else {
         IREE_RETURN_IF_ERROR(loom_aie2p_native_select_sequence(
@@ -312,7 +312,7 @@ iree_status_t loom_aie2p_native_select_task_descriptors(
                 : transfer->local_channel->source->capacity,
             transfer->local_channel->byte_offset +
                 (uint32_t)transfer->local_view->projection_byte_offset.constant,
-            transfer->local_channel->byte_stride, 1, transfer->local_words,
+            transfer->local_channel->byte_stride, 1, 0, transfer->local_words,
             &descriptor->sequence, &reason, &valid));
       }
       if (!valid) {

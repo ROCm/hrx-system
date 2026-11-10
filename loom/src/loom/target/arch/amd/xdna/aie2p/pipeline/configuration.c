@@ -1104,7 +1104,7 @@ iree_status_t loom_aie2p_native_emit_configuration(
       IREE_RETURN_IF_ERROR(loom_aie2p_native_config_submit_ingress(
           &config, worker->transfer_tasks));
     }
-    if (worker->input) {
+    if (worker->input && !worker->input->invocation->ordinal) {
       for (iree_host_size_t j = 0; j < worker->input->source->phase_count;
            ++j) {
         IREE_RETURN_IF_ERROR(

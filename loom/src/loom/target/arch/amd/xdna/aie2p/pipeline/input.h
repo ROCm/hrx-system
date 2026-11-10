@@ -50,12 +50,19 @@ typedef struct loom_aie2p_native_input_phase_t {
 typedef struct loom_aie2p_native_input_t {
   // Communication-only source worker.
   uint32_t worker;
+  // Resident invocation owning receiver startup and terminal queue retirement.
+  const loom_pipeline_invocation_t* invocation;
   // Complete phase counts from common transport analysis.
   const loom_pipeline_transport_input_t* source;
-  // Exact observation sites in an existing arithmetic worker.
-  loom_pipeline_continuation_t continuation;
+  // Existing instruction worker controlling this input.
+  uint32_t controller;
+  // Exact demand observations, or NULL when the complete immutable source is
+  // admitted once at its controller's invocation entry.
+  const loom_pipeline_continuation_t* continuation;
   // Native receiver and source descriptor selection per phase.
   loom_aie2p_native_input_phase_t* phases;
+  // All phase receivers share one ordered physical queue and payload route.
+  bool shared_receiver;
   // Physical shim serving the stable caller buffers.
   loom_aie2p_native_tile_t* shim;
   // Memory-to-stream engine shared by all source phases.
@@ -68,6 +75,10 @@ typedef struct loom_aie2p_native_input_t {
   iree_host_size_t state_index;
   // Generated source-admission helper in the observing worker's context.
   loom_symbol_ref_t begin;
+  // Child-entry receiver publication; root receivers start in configuration.
+  loom_symbol_ref_t start;
+  // Child-exit retirement of source and receiver queues.
+  loom_symbol_ref_t retire;
   // Next input controlled by the same existing arithmetic worker.
   struct loom_aie2p_native_input_t* next;
 } loom_aie2p_native_input_t;
@@ -79,7 +90,8 @@ iree_status_t loom_aie2p_native_select_input(
     const loom_pipeline_realization_t* realization, iree_host_size_t worker,
     bool* out_eligible);
 
-// Allocates descriptors and routes from the selected common continuation.
+// Allocates descriptors and routes from the retained source geometry and its
+// invocation controller.
 iree_status_t loom_aie2p_native_route_input(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization,
@@ -89,6 +101,11 @@ iree_status_t loom_aie2p_native_route_input(
 // Emits the ordinary helper and read-site actions for one selected input.
 iree_status_t loom_aie2p_native_prepare_input(
     loom_aie2p_native_context_t* context, loom_aie2p_native_input_t* input);
+// Starts child receivers and either admits the complete source or initializes
+// its one demand-position value. No state is required without a continuation.
+iree_status_t loom_aie2p_native_initialize_input(
+    loom_builder_t* builder, const loom_aie2p_native_input_t* input,
+    loom_value_id_t* state);
 iree_status_t loom_aie2p_native_emit_input(
     loom_builder_t* builder, const loom_aie2p_native_input_t* input,
     iree_host_size_t action, bool after, loom_value_id_t* state);

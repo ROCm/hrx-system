@@ -11,6 +11,7 @@
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/type_registry.h"
 #include "loom/ops/view/ops.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/input.h"
 
 static void loom_aie2p_native_accumulate_cursor_owner(
     loom_aie2p_native_channel_t* channel) {
@@ -288,6 +289,17 @@ iree_status_t loom_aie2p_native_select_initializers(
                                i < realization->invocations.worker_count;
        ++i) {
     const loom_aie2p_native_worker_t* worker = &context->workers[i];
+    if (worker->input) {
+      const loom_aie2p_native_input_t* input = worker->input;
+      for (iree_host_size_t phase = 0;
+           iree_status_is_ok(status) && *out_valid &&
+           phase < input->source->phase_count;
+           ++phase) {
+        status = loom_aie2p_native_bind_endpoint_initializer(
+            context, realization, &input->phases[phase].receiver,
+            input->invocation, out_valid);
+      }
+    }
     // Physical owners retain each interned geometry once, even when multiple
     // child sites submit it. Initialization therefore does not grow per use.
     for (const loom_aie2p_native_distribution_t* distribution =

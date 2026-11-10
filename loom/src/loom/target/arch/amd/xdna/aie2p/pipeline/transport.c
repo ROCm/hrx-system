@@ -263,19 +263,26 @@ iree_status_t loom_aie2p_native_select_sequence(
     uint8_t engine, loom_xdna_dma_direction_t direction,
     const loom_aie2p_native_channel_t* progress_channel, uint32_t repetitions,
     uint32_t capacity, uint32_t byte_offset, uint32_t byte_stride,
-    uint32_t credit_interval, const uint32_t template_words[8],
+    uint32_t credit_interval, uint32_t reserved_tasks,
+    const uint32_t template_words[8],
     loom_aie2p_native_dma_sequence_t* out_sequence,
     iree_string_view_t* out_reason, bool* out_valid) {
   uint16_t descriptor_base, descriptor_count;
   uint16_t* next_descriptor = loom_aie2p_native_descriptor_bank(
       tile, engine, &descriptor_base, &descriptor_count);
+  if (reserved_tasks >= tile->facts->dma.task_queue_depth) {
+    *out_reason = IREE_SV("available DMA task slots for the ordered phases");
+    *out_valid = false;
+    return iree_ok_status();
+  }
+  loom_xdna_dma_facts_t dma = tile->facts->dma;
+  dma.task_queue_depth -= reserved_tasks;
   IREE_RETURN_IF_ERROR(loom_aie2p_native_build_sequence(
-      &tile->facts->dma, tile->memory_layout,
-      descriptor_base + *next_descriptor, descriptor_count - *next_descriptor,
-      direction, repetitions, capacity, byte_offset, byte_stride,
-      credit_interval, template_words, context->pass->arena, out_sequence,
-      out_reason, out_valid));
-  if (!*out_valid) {
+      &dma, tile->memory_layout, descriptor_base + *next_descriptor,
+      descriptor_count - *next_descriptor, direction, repetitions, capacity,
+      byte_offset, byte_stride, credit_interval, template_words,
+      context->pass->arena, out_sequence, out_reason, out_valid));
+  if (!*out_valid && !reserved_tasks) {
     IREE_RETURN_IF_ERROR(loom_aie2p_native_select_refill(
         context, tile, engine, direction, progress_channel, repetitions,
         capacity, byte_offset, byte_stride, credit_interval,
@@ -1153,7 +1160,7 @@ iree_status_t loom_aie2p_native_select_transfers(
       status = loom_aie2p_native_select_control_route(
           context, realization, i, command->endpoint->tile, true, &next_source,
           next_controller, &valid);
-      if (iree_status_is_ok(status) && valid) {
+      if (iree_status_is_ok(status) && valid && command->retire) {
         loom_aie2p_native_retirement_t* group = owner->retirements;
         for (; group; group = group->next) {
           const loom_aie2p_native_distribution_command_t* source =

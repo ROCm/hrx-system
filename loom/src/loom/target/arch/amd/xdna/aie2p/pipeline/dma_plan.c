@@ -352,6 +352,11 @@ static iree_status_t loom_aie2p_native_build_lifetime(
     loom_aie2p_native_dma_sequence_t* out_sequence,
     iree_string_view_t* out_reason, bool* out_valid) {
   const uint32_t middle_repetitions = repetitions - 2 * capacity;
+  if (dma->task_queue_depth < 2 + (middle_repetitions != 0)) {
+    *out_reason =
+        IREE_SV("task space for the first and last retained ring turns");
+    return iree_ok_status();
+  }
   if (available_descriptors < 2 * capacity + (middle_repetitions != 0)) {
     *out_reason =
         IREE_SV("descriptor space for the first and last retained ring turns");

@@ -409,6 +409,13 @@ static iree_status_t loom_aie2p_native_channel_exit(
     const loom_value_id_t* state, iree_host_size_t state_count) {
   (void)terminator;
   loom_aie2p_native_channel_emitter_t* emitter = user_data;
+  for (const loom_aie2p_native_input_t* input = emitter->inputs; input;
+       input = input->next) {
+    if (loom_symbol_ref_is_valid(input->retire)) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_native_invoke(
+          &rewriter->builder, input->retire, NULL, 0, NULL, NULL));
+    }
+  }
   const int64_t zero = 0;
   for (iree_host_size_t i = 0; i < state_count; ++i) {
     if (emitter->state_views[i] == LOOM_VALUE_ID_INVALID) {
@@ -464,7 +471,7 @@ iree_status_t loom_aie2p_native_emit_worker(
   for (loom_aie2p_native_input_t* input = worker->inputs; input;
        input = input->next) {
     IREE_RETURN_IF_ERROR(loom_aie2p_native_prepare_input(context, input));
-    ++input_count;
+    input_count += input->continuation != NULL;
   }
   iree_host_size_t refill_count = 0;
   for (loom_aie2p_native_refill_t* refill = worker->refills; refill;
@@ -666,12 +673,12 @@ iree_status_t loom_aie2p_native_emit_worker(
   for (loom_aie2p_native_input_t* input = worker->inputs; input;
        input = input->next) {
     input->state_index = state_count;
-    loom_op_t* value;
-    IREE_RETURN_IF_ERROR(
-        loom_scalar_constant_build(&rewriter->builder, loom_attr_i64(0),
-                                   delta_type, LOOM_LOCATION_UNKNOWN, &value));
-    state_views[state_count] = LOOM_VALUE_ID_INVALID;
-    state[state_count++] = loom_scalar_constant_result(value);
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_initialize_input(
+        &rewriter->builder, input,
+        input->continuation ? state + state_count : NULL));
+    if (input->continuation) {
+      state_views[state_count++] = LOOM_VALUE_ID_INVALID;
+    }
   }
   loom_type_t* carriers = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(

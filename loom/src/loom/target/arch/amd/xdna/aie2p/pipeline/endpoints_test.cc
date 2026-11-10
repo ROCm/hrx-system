@@ -78,7 +78,8 @@ class EndpointStorageTest
   }
 
   bool Select(size_t endpoint, size_t child, size_t channel_owner,
-              uint32_t repetitions, bool share_queue = true) {
+              uint32_t repetitions, bool share_queue = true,
+              uint32_t reserved_tasks = 0) {
     auto& channel = channels_[endpoint];
     channel.cursor.reader.worker = channel.cursor.writer.worker = child;
     ownership_[endpoint].invocation = &children_[channel_owner];
@@ -86,7 +87,7 @@ class EndpointStorageTest
     bool valid = false;
     IREE_EXPECT_OK(loom_aie2p_native_select_channel_endpoint(
         &context_, &invocations_, &children_[child], &channel,
-        std::get<2>(GetParam()), repetitions, 1,
+        std::get<2>(GetParam()), repetitions, 1, reserved_tasks,
         endpoint && share_queue ? &endpoints_[0] : nullptr,
         &endpoints_[endpoint], &reason, &valid));
     EXPECT_TRUE(valid) << std::string(reason.data, reason.size);
@@ -183,6 +184,27 @@ TEST_P(EndpointStorageTest, IterationAndChangedGeometryRestoreOnEveryVisit) {
 TEST_P(EndpointStorageTest, FiniteChainsReuseTheirPhysicalDescriptorIds) {
   ExpectReentryRestoresGeometry(tile_->facts->dma.maximum_task_repeat_count *
                                 tile_->facts->dma.task_queue_depth * 2);
+}
+
+TEST_P(EndpointStorageTest, ReusedGeometryRespectsReservedPhaseTasks) {
+  const uint32_t queue_depth = tile_->facts->dma.task_queue_depth;
+  const uint32_t repetitions =
+      tile_->facts->dma.maximum_task_repeat_count * queue_depth;
+  ASSERT_TRUE(Select(0, 1, 1, repetitions));
+  ASSERT_EQ(endpoints_[0].sequence.task_count, queue_depth);
+  ASSERT_EQ(endpoints_[0].sequence.descriptor_count, 1u);
+
+  // Reserving one slot for a prefix forces a longer chain. Reusing the first
+  // child's single descriptor would consume the prefix's task slot.
+  ASSERT_TRUE(Select(1, 2, 2, repetitions, true, 1));
+  EXPECT_LE(endpoints_[1].sequence.task_count, queue_depth - 1);
+  EXPECT_GT(endpoints_[1].sequence.descriptor_count, 1u);
+  EXPECT_NE(endpoints_[1].storage, endpoints_[0].storage);
+
+  // The larger geometry can serve another child with the same queue budget.
+  ASSERT_TRUE(Select(2, 3, 3, repetitions, true, 1));
+  EXPECT_EQ(endpoints_[2].storage, endpoints_[1].storage);
+  EXPECT_LE(endpoints_[2].sequence.task_count, queue_depth - 1);
 }
 
 TEST_P(EndpointStorageTest, SameChildAndEarlierSelectionSweepsCannotAlias) {
