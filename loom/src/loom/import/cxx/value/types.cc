@@ -1220,6 +1220,7 @@ const RecordPartition* Types::record(const cxx::Type* input, cxx::AST* owner) {
   result->kind = ValueKind::Record;
   result->component_count = 0;
   result->source = source;
+  result->is_aggregate = traits.is_aggregate(input);
   auto append = [&](cxx::Symbol* symbol) {
     auto* type = source_object_type(symbol);
     const auto& member_partition = traits.is_lvalue_reference(type)

@@ -63,6 +63,8 @@ struct RecordPartition final : Partition {
   std::vector<SubobjectPartition> members;
   // Retained member paths used to name newly bound High components.
   std::vector<std::string> component_names;
+  // Whether source initialization may bind members without a constructor call.
+  bool is_aggregate = false;
   // Whether any component needs destination identities to bind its High type.
   bool requires_binding = false;
   // Whether a const receiver may write a mutable field, including subobjects.

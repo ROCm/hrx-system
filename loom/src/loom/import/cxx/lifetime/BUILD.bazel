@@ -21,6 +21,7 @@ loom_cc_library(
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [
         ":destruction",
+        "//loom/src/loom/import/cxx/value:types",
         "//third_party:cxx_parser",
     ],
 )
@@ -61,6 +62,7 @@ loom_cc_test(
         ":origins",
         "//loom/src/loom/import/cxx/source",
         "//loom/src/loom/import/cxx/source:options",
+        "//loom/src/loom/import/cxx/value:types",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//third_party:cxx_parser",

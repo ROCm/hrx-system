@@ -1,0 +1,148 @@
+// RUN: emit vm-object-lifetime
+// INPUT: cxx root=run
+// Braces keep the referenced temporary through the holder's destructor.
+// Parentheses end that temporary at the declaration; its expired member is
+// never read. The holder still has its own independent lexical destruction.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+
+struct Guard {
+  // Identifies the actual temporary at destruction.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+
+struct Holder {
+  // Braced initialization gives this referent the holder's lifetime.
+  const Guard& member;
+  ~Holder() { observe(9); }
+};
+
+void run() {
+  {
+    Holder braced{Guard{1}};
+    observe(braced.member.value + 10);
+  }
+  {
+    Holder parenthesized(Guard{2});
+    observe(12);
+  }
+}
+
+// ----
+event 11
+event 9
+event 1
+event 2
+event 12
+event 9
+OK 0
+retired 0
+
+// ====
+// Bases and array fields carry reference lifetimes through trivial nested
+// holders. The complete packet retires before its referenced temporaries,
+// which retire in reverse construction order.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+
+struct Guard {
+  // Identifies one of three independently constructed temporaries.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+
+struct Base {
+  // Reference initialized by the base's aggregate clause.
+  const Guard& member;
+};
+
+struct Holder {
+  // Each array element carries an independent reference lifetime.
+  const Guard& member;
+};
+
+struct Packet : Base {
+  // These trivial holders have no destructor of their own.
+  Holder entries[2];
+  ~Packet() { observe(9); }
+};
+
+void run() {
+  Packet packet{{Guard{1}}, {{Guard{2}}, {Guard{3}}}};
+  observe(packet.member.value + 10);
+}
+
+// ----
+event 11
+event 9
+event 3
+event 2
+event 1
+OK 0
+retired 0
+
+// ====
+// The comma's discarded temporary ends at the full expression. Copying the
+// reference creates no new referent and does not transfer its cleanup to the
+// shorter-lived copy.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+
+struct Guard {
+  // Distinguishes the discarded temporary from the retained referent.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+
+struct Holder {
+  // Copied as an alias, with no new lifetime extension.
+  const Guard& member;
+};
+
+void run() {
+  Holder owner{(Guard{1}, Guard{2})};
+  {
+    Holder copy = owner;
+    observe(copy.member.value + 10);
+  }
+  observe(20);
+}
+
+// ----
+event 1
+event 12
+event 20
+event 2
+OK 0
+retired 0
+
+// ====
+// A default member initializer is evaluated independently for each owner.
+// Ending the inner owner must leave the outer owner's temporary alive.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+
+struct Guard {
+  // Both objects have equal values but distinct construction identities.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+
+struct Holder {
+  // Aggregate initialization extends this newly evaluated default temporary.
+  const Guard& member = Guard{7};
+};
+
+void run() {
+  Holder outer{};
+  {
+    Holder inner{};
+    observe(inner.member.value + 10);
+  }
+  observe(outer.member.value + 20);
+}
+
+// ----
+event 17
+event 7
+event 27
+event 7
+OK 0
+retired 0
