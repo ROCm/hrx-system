@@ -172,6 +172,117 @@ TEST_F(FactRelationTest, RelationFreeIdentityAllocatesNoRelationState) {
   EXPECT_EQ(table_.integer_relations, nullptr);
 }
 
+TEST_F(FactRelationTest, CountedBoundsComposeEveryEndpointOrder) {
+  const auto other_endpoint = DefineValue(type_);
+  const auto induction = DefineValue(type_);
+  for (int relation = LOOM_SYMBOLIC_INTEGER_RELATION_EQ;
+       relation <= LOOM_SYMBOLIC_INTEGER_RELATION_GE; ++relation) {
+    const auto order = static_cast<loom_symbolic_integer_relation_t>(relation);
+    const auto predicate = RelationPredicate(
+        loom_symbolic_integer_relation_to_predicate_kind(order), inputs_[0],
+        inputs_[1]);
+    loom_op_t* assume = nullptr;
+    IREE_ASSERT_OK(BuildAssume({inputs_[0]}, {predicate}, &assume));
+    IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, assume));
+    const auto endpoint = loom_op_results(assume)[0];
+    for (bool upper : {false, true}) {
+      SCOPED_TRACE(relation);
+      SCOPED_TRACE(upper);
+      IREE_ASSERT_OK(loom_value_fact_integer_relations_define_counted_range(
+          &table_, induction, upper ? other_endpoint : endpoint,
+          upper ? endpoint : other_endpoint));
+      const auto range_order = upper
+                                   ? LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS
+                                   : LOOM_INTEGER_ORDER_OUTCOME_BIT_EQUAL |
+                                         LOOM_INTEGER_ORDER_OUTCOME_BIT_GREATER;
+      EXPECT_EQ(
+          loom_value_fact_table_query_signed_integer_order(&table_, induction,
+                                                           inputs_[1]),
+          loom_integer_order_outcomes_compose(
+              range_order, loom_symbolic_integer_relation_outcomes(order)));
+    }
+  }
+}
+
+TEST_F(FactRelationTest, ContradictoryEndpointsDoNotProveTransitiveOrder) {
+  loom_op_t* assume = nullptr;
+  IREE_ASSERT_OK(BuildAssume(
+      {inputs_[0]},
+      {RelationPredicate(LOOM_PREDICATE_LT, inputs_[0], inputs_[1]),
+       RelationPredicate(LOOM_PREDICATE_GE, inputs_[0], inputs_[1])},
+      &assume));
+  IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, assume));
+  const auto endpoint = loom_op_results(assume)[0];
+  const auto other_endpoint = DefineValue(type_);
+  const auto induction = DefineValue(type_);
+  for (bool upper : {false, true}) {
+    IREE_ASSERT_OK(loom_value_fact_integer_relations_define_counted_range(
+        &table_, induction, upper ? other_endpoint : endpoint,
+        upper ? endpoint : other_endpoint));
+    EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(
+                  &table_, induction, inputs_[1]),
+              LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL);
+  }
+  // Reinference replaces the entire relation publication, including the
+  // contradictory entry. An ordinary upper bound must become usable again.
+  IREE_ASSERT_OK(loom_value_fact_integer_relations_define_counted_range(
+      &table_, induction, other_endpoint, inputs_[1]));
+  EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(&table_, induction,
+                                                             inputs_[1]),
+            LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS);
+}
+
+TEST_F(FactRelationTest, BoundCompositionKeepsCounterpartOwnedOrder) {
+  const auto zero = BuildConstant(0);
+  const auto child = DefineValue(type_);
+  IREE_ASSERT_OK(loom_value_fact_integer_relations_define_counted_range(
+      &table_, child, zero, inputs_[0]));
+  // The child publishes child < limit. A weaker predicate on the limit must
+  // retain that established ordering before another counted range consumes it.
+  loom_op_t* assume = nullptr;
+  IREE_ASSERT_OK(BuildAssume(
+      {inputs_[0]}, {RelationPredicate(LOOM_PREDICATE_NE, inputs_[0], child)},
+      &assume));
+  IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, assume));
+  const auto limit = loom_op_results(assume)[0];
+  const auto induction = DefineValue(type_);
+  IREE_ASSERT_OK(loom_value_fact_integer_relations_define_counted_range(
+      &table_, induction, limit, inputs_[1]));
+  EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(&table_, induction,
+                                                             child),
+            LOOM_INTEGER_ORDER_OUTCOME_BIT_GREATER);
+}
+
+TEST_F(FactRelationTest, NestedCountedBoundsShareTransitiveStorage) {
+  const auto lower = BuildConstant(0);
+  const auto upper = inputs_[0];
+  IREE_ASSERT_OK(loom_value_fact_table_define(
+      &table_, upper, loom_value_facts_make(1, INT64_MAX, 1)));
+  loom_value_id_t endpoint = upper;
+  iree_host_size_t midpoint_bytes = 0;
+  for (int i = 0; i < 1024; ++i) {
+    const auto induction = DefineValue(type_);
+    IREE_ASSERT_OK(loom_value_fact_table_define(
+        &table_, induction, loom_value_facts_make(0, INT64_MAX - i - 1, 1)));
+    IREE_ASSERT_OK(loom_value_fact_integer_relations_define_counted_range(
+        &table_, induction, lower, endpoint));
+    EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(
+                  &table_, induction, upper),
+              LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS);
+    endpoint = induction;
+    if (i == 511) {
+      midpoint_bytes = arena_.used_allocation_size;
+    }
+  }
+  std::vector<VisitedRelation> relations;
+  loom_value_fact_table_for_each_signed_integer_relation_while(
+      &table_, endpoint, CollectRelation, &relations);
+  EXPECT_EQ(relations.size(), 1025u);
+  // Doubling a chain may grow radix depth and slab capacity, but must not
+  // retain the quadratic intermediate sets from rebuilding every ancestor.
+  EXPECT_LT(arena_.used_allocation_size, midpoint_bytes * 3);
+}
+
 TEST_F(FactRelationTest, IntegerConversionFamilyKeepsOnlyNumericIdentities) {
   const loom_scalar_type_t types[] = {
       LOOM_SCALAR_TYPE_I1,  LOOM_SCALAR_TYPE_I8,  LOOM_SCALAR_TYPE_I16,

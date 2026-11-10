@@ -417,6 +417,39 @@ static bool loom_value_fact_relation_root_contains(
                                        (loom_value_id_t)atom_id);
 }
 
+static IREE_ATTRIBUTE_NOINLINE iree_status_t
+loom_value_fact_relation_root_intersection(
+    loom_value_fact_table_t* table, loom_value_fact_relation_root_t lhs,
+    loom_value_fact_relation_root_t rhs,
+    loom_value_fact_relation_root_t* out_root) {
+  if (!lhs || !rhs || lhs == rhs) {
+    *out_root = lhs && rhs ? lhs : 0;
+    return iree_ok_status();
+  }
+  if (loom_value_fact_relation_root_is_singleton(lhs)) {
+    *out_root = loom_value_fact_relation_root_contains(
+                    table->integer_relations, rhs,
+                    loom_value_fact_relation_singleton_id(lhs))
+                    ? lhs
+                    : 0;
+    return iree_ok_status();
+  }
+  if (loom_value_fact_relation_root_is_singleton(rhs)) {
+    return loom_value_fact_relation_root_intersection(table, rhs, lhs,
+                                                      out_root);
+  }
+  loom_value_set_index_t* index = table->integer_relations->index;
+  loom_value_set_id_t result = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_value_set_index_intersection(index, lhs, rhs, &result));
+  const loom_value_id_t singleton =
+      loom_value_set_index_singleton(index, result);
+  *out_root = singleton == LOOM_VALUE_ID_INVALID
+                  ? result
+                  : loom_value_fact_relation_singleton(singleton);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_value_fact_integer_relations_reserve_entries(
     loom_value_fact_table_t* table, iree_host_size_t required_capacity) {
   loom_value_fact_integer_relations_t* relations = NULL;
@@ -530,45 +563,45 @@ static iree_status_t loom_value_fact_relation_union_roots(
       source.excluded_literal_equal, &inout_target->excluded_literal_equal);
 }
 
-typedef struct loom_value_fact_bound_composition_t {
-  // Fact owner retaining the endpoint relations and completed induction facts.
-  loom_value_fact_table_t* table;
-  // Induction relations being constructed before publication.
-  loom_value_fact_relation_roots_t* roots;
-  // Possible outcomes for the induction value relative to this endpoint.
-  loom_integer_order_outcome_bits_t value_bound_outcomes;
-  // Allocation failure stops endpoint enumeration.
-  iree_status_t status;
-} loom_value_fact_bound_composition_t;
-
-static bool loom_value_fact_relation_compose_bound(
-    void* user_data, loom_value_id_t counterpart,
-    loom_integer_order_outcome_bits_t bound_counterpart_outcomes) {
-  loom_value_fact_bound_composition_t* composition =
-      (loom_value_fact_bound_composition_t*)user_data;
-  composition->status = loom_value_fact_relation_add_exclusions(
-      composition->table, composition->roots,
-      loom_integer_order_outcomes_compose(composition->value_bound_outcomes,
-                                          bound_counterpart_outcomes),
-      counterpart);
-  return iree_status_is_ok(composition->status);
-}
-
+// Composes either value < upper or value >= lower by sharing the endpoint's
+// exclusion sets. Rebuilding each counterpart independently would retain a
+// quadratic number of intermediate sets for a chain of nested bounds.
 static iree_status_t loom_value_fact_relation_add_bound(
     loom_value_fact_table_t* table, loom_value_fact_relation_roots_t* roots,
     loom_value_id_t bound, loom_integer_order_outcome_bits_t outcomes) {
+  const loom_value_fact_relation_roots_t endpoint =
+      loom_value_fact_integer_relations_snapshot(table, bound);
+  if (loom_value_fact_relation_roots_empty(endpoint)) {
+    return loom_value_fact_relation_add_exclusions(
+        table, roots, outcomes,
+        loom_value_fact_table_query_numeric_identity(table, bound));
+  }
+  loom_value_fact_relation_root_t strictly_greater = 0;
+  IREE_RETURN_IF_ERROR(loom_value_fact_relation_root_intersection(
+      table, endpoint.excluded[LOOM_INTEGER_ORDER_OUTCOME_LESS],
+      endpoint.excluded[LOOM_INTEGER_ORDER_OUTCOME_EQUAL], &strictly_greater));
+  loom_value_fact_relation_root_t contradictory = 0;
+  IREE_RETURN_IF_ERROR(loom_value_fact_relation_root_intersection(
+      table, strictly_greater,
+      endpoint.excluded[LOOM_INTEGER_ORDER_OUTCOME_GREATER], &contradictory));
+  const loom_value_fact_relation_root_t not_greater =
+      endpoint.excluded[LOOM_INTEGER_ORDER_OUTCOME_GREATER];
+  const loom_value_fact_relation_root_t not_less =
+      endpoint.excluded[LOOM_INTEGER_ORDER_OUTCOME_LESS];
+  const loom_value_fact_relation_roots_t composed =
+      outcomes == LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS
+          ? (loom_value_fact_relation_roots_t){
+                .excluded = {contradictory, not_greater, not_greater},
+            }
+          : (loom_value_fact_relation_roots_t){
+                .excluded = {not_less, strictly_greater, contradictory},
+            };
+  IREE_RETURN_IF_ERROR(
+      loom_value_fact_relation_union_roots(table, composed, roots));
   IREE_RETURN_IF_ERROR(loom_value_fact_relation_add_exclusions(
       table, roots, outcomes,
       loom_value_fact_table_query_numeric_identity(table, bound)));
-  loom_value_fact_bound_composition_t composition = {
-      .table = table,
-      .roots = roots,
-      .value_bound_outcomes = outcomes,
-      .status = iree_ok_status(),
-  };
-  (void)loom_value_fact_table_for_each_signed_integer_relation_while(
-      table, bound, loom_value_fact_relation_compose_bound, &composition);
-  return composition.status;
+  return iree_ok_status();
 }
 
 iree_status_t loom_value_fact_integer_relations_define_counted_range(
@@ -1061,20 +1094,23 @@ static iree_status_t loom_value_fact_relation_plan_add(
       loom_value_fact_table_query_numeric_identity(table, lhs);
   const loom_value_id_t rhs_identity =
       loom_value_fact_table_query_numeric_identity(table, rhs);
+  // Complete the declared pair at its producer. A counterpart can own a
+  // stronger reverse relation; consumers of these immutable sets must not
+  // rediscover it by enumerating and re-querying every retained atom.
+  const loom_integer_order_outcome_bits_t outcomes =
+      loom_symbolic_integer_relation_outcomes(relation) &
+      loom_value_fact_table_query_signed_integer_order(table, lhs, rhs);
   uint16_t ordinal = 0;
   if (loom_value_fact_ordinal_map_find(&plan->identity_map, lhs_identity,
                                        &ordinal)) {
     IREE_RETURN_IF_ERROR(loom_value_fact_relation_add_exclusions(
-        table, &plan->locals[ordinal],
-        loom_symbolic_integer_relation_outcomes(relation), rhs_identity));
+        table, &plan->locals[ordinal], outcomes, rhs_identity));
   }
   if (loom_value_fact_ordinal_map_find(&plan->identity_map, rhs_identity,
                                        &ordinal)) {
     IREE_RETURN_IF_ERROR(loom_value_fact_relation_add_exclusions(
         table, &plan->locals[ordinal],
-        loom_symbolic_integer_relation_outcomes(
-            loom_symbolic_integer_relation_swap(relation)),
-        lhs_identity));
+        loom_integer_order_outcomes_swap(outcomes), lhs_identity));
   }
   return iree_ok_status();
 }
