@@ -118,7 +118,6 @@ def render_tables(devices: dict[int, str], subsystems: dict[int, str]) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, required=True)
-    parser.add_argument("--template", type=Path, required=True)
     parser.add_argument("--license", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
@@ -127,14 +126,13 @@ def main() -> None:
         tables = render_tables(devices, subsystems)
     except ValueError as error:
         parser.error(f"{args.input}: {error}")
-    template = args.template.read_text(encoding="utf-8")
-    assert template.count("@TABLES@") == 1
     license_text = args.license.read_text(encoding="utf-8")
     notice = "// Product-name data derived from libdrm (MIT license):\n"
     notice += "\n".join("// " + line for line in license_text.splitlines()) + "\n\n"
-    output = "// Generated from amdgpu.ids; edit the generator or its template.\n"
-    output += notice + template.replace("@TABLES@", tables)
+    output = "// Generated from amdgpu.ids; edit the generator or its input.\n"
+    output += notice + tables
     if not args.output.exists() or args.output.read_text(encoding="utf-8") != output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(output, encoding="utf-8")
 
 

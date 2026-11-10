@@ -6,13 +6,17 @@
 
 #include "libamdf/src/pci_product_name.h"
 
-@TABLES@
+#include <assert.h>
 
-_Static_assert(AMDF_PCI_PRODUCT_MAX_NAME_LENGTH < AMDF_ENDPOINT_NAME_CAPACITY,
-               "product names must fit endpoint name storage");
+#include "pci_product_name.inl"
+
+static_assert(AMDF_PCI_PRODUCT_MAX_NAME_LENGTH < AMDF_ENDPOINT_NAME_CAPACITY,
+              "product names must fit endpoint name storage");
 
 const char* amdf_pci_product_name(const amdf_pci_info_t* pci) {
-  if (pci->vendor_id != 0x1002u) return NULL;
+  if (pci->vendor_id != 0x1002u) {
+    return NULL;
+  }
   const uint32_t key = (pci->device_id << 8) | pci->revision_id;
   size_t low = 0, high = AMDF_PCI_PRODUCT_DEVICE_COUNT;
   while (low < high) {

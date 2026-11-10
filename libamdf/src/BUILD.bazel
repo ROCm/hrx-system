@@ -83,24 +83,22 @@ _PRODUCT_NAME_POLICY = apply_amdf_target_policy({})
         testonly = name.endswith("_fixture"),
         srcs = [
             database,
-            "pci_product_name.c.in",
             "@libdrm_headers//:LICENSES/MIT.txt",
         ],
-        outs = [name + ".c"],
+        outs = [output],
         args = [
             "--input=$(location " + database + ")",
-            "--template=$(location pci_product_name.c.in)",
             "--license=$(location @libdrm_headers//:LICENSES/MIT.txt)",
         ],
-        output_args = {name + ".c": "--output"},
+        output_args = {output: "--output"},
         tags = _PRODUCT_NAME_POLICY["tags"],
         target_compatible_with = _PRODUCT_NAME_POLICY["target_compatible_with"],
         tool = "//libamdf/build_tools:generate_product_names",
     )
-    for name, database in {
-        "pci_product_name": "@libdrm_headers//:data/amdgpu.ids",
-        "pci_product_name_fixture": "pci_product_names_test.ids",
-    }.items()
+    for name, database, output in [
+        ("pci_product_name", "@libdrm_headers//:data/amdgpu.ids", "pci_product_name.inl"),
+        ("pci_product_name_fixture", "pci_product_names_test.ids", "pci_product_name_fixture/pci_product_name.inl"),
+    ]
 ]
 
 amdf_cc_library(
@@ -112,7 +110,9 @@ amdf_cc_library(
     hdrs = [
         "pci.h",
         "pci_product_name.h",
+        "pci_product_name.inl",
     ],
+    includes = ["."],
     visibility = ["//libamdf/src:__subpackages__"],
 )
 
@@ -129,10 +129,12 @@ amdf_cc_test(
 amdf_cc_test(
     name = "pci_product_name_fixture_test",
     srcs = [
+        "pci_product_name.c",
         "pci_product_name.h",
-        "pci_product_name_fixture.c",
+        "pci_product_name_fixture/pci_product_name.inl",
         "pci_product_name_fixture_test.cc",
     ],
+    includes = ["pci_product_name_fixture"],
     deps = [
         "//third_party:google_test",
         "//third_party:google_test_main",
