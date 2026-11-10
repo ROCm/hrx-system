@@ -118,8 +118,8 @@ func.def public @escaped_member_reference(%input: i32) -> (i32) {
 // ====
 // A reference result that always aliases one parameter reuses the evaluated
 // argument. Mutable value-reference writeback becomes the same result value;
-// multiple return statements may retain one common origin. Mixed origins keep
-// durable pointer transport.
+// multiple return statements may retain one common origin. Finite mixed
+// parameter origins use a selector result unless a caller observes the address.
 static unsigned& value_alias(unsigned& value) { return value; }
 static unsigned& increment_alias(unsigned& value) { ++value; return value; }
 static unsigned& branch_alias(bool condition, unsigned& value) {
@@ -162,20 +162,15 @@ func.def public @mutable_reference_result(%value$8: i32) -> (i32) {
 }
 
 func.def public @mixed_reference_result(%condition: i1, %first: i32, %second: i32) -> (i32) {
-  %15 = index.constant 4 : offset
-  %first_storage = buffer.alloca<private> align(4) %15 : buffer
-  %first_storage_byte_offset = index.constant 0 : offset
-  %first_view = buffer.view %first_storage[%first_storage_byte_offset] : buffer -> view<1xi32>
-  view.store %first, %first_view[0] : i32, view<1xi32>
-  %19 = index.constant 4 : offset
-  %second_storage = buffer.alloca<private> align(4) %19 : buffer
-  %second_storage_byte_offset = index.constant 0 : offset
-  %second_view = buffer.view %second_storage[%second_storage_byte_offset] : buffer -> view<1xi32>
-  view.store %second, %second_view[0] : i32, view<1xi32>
-  %23, %24 = func.call pure @choose_alias(%condition, %first_storage, %first_storage_byte_offset, %second_storage, %second_storage_byte_offset) : (i1, buffer, offset, buffer, offset) -> (buffer, offset)
-  %25 = buffer.view %23[%24] : buffer -> view<1xi32>
-  %26 = view.load %25[0] : view<1xi32> -> i32
-  func.return %26 : i32
+  %15 = func.call pure @choose_alias(%condition, %first, %second) : (i1, i32, i32) -> (i32)
+  %16 = scalar.constant 0 : i32
+  %17 = scalar.cmpi eq, %15, %16 : i32
+  %18 = scf.if %17 -> (i32) {
+    scf.yield %first : i32
+  } else {
+    scf.yield %second : i32
+  }
+  func.return %18 : i32
 }
 
 func.def @value_alias(%value: i32) {
@@ -189,19 +184,21 @@ func.def @branch_alias(%condition: i1, %value: i32) {
   func.return
 }
 
-func.def @increment_alias(%value$30: i32) -> (i32) {
-  %32 = scalar.constant 1 : i32
-  %value$33 = scalar.addi %value$30, %32 : i32
-  func.return %value$33 : i32
+func.def @increment_alias(%value$22: i32) -> (i32) {
+  %24 = scalar.constant 1 : i32
+  %value$25 = scalar.addi %value$22, %24 : i32
+  func.return %value$25 : i32
 }
 
-func.def @choose_alias(%condition: i1, %first: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset) -> (buffer, offset) {
-  %41, %42 = scf.if %condition -> (buffer, offset) {
-    scf.yield %first, %first_byte_offset : buffer, offset
+func.def @choose_alias(%condition: i1, %first: i32, %second: i32) -> (i32) {
+  %32 = scf.if %condition -> (i32) {
+    %30 = scalar.constant 0 : i32
+    scf.yield %30 : i32
   } else {
-    scf.yield %second, %second_byte_offset : buffer, offset
+    %31 = scalar.constant 1 : i32
+    scf.yield %31 : i32
   }
-  func.return %41, %42 : buffer, offset
+  func.return %32 : i32
 }
 
 // ====
@@ -945,4 +942,225 @@ func.def public @local_alias_value(%value$0: i32) -> (i32) {
   %value$9 = scalar.addi %11, %7 : i32
   %6 = scalar.addi %value$9, %value$9 : i32
   func.return %6 : i32
+}
+
+// ====
+// A finite set of returned parameter origins uses one ordinal result. Separate
+// returns and a nested conditional map into the same callable contract, and a
+// write through the result updates exactly the selected caller destination.
+static unsigned& choose_written_origin(unsigned choice, unsigned& first,
+                                       unsigned& second, unsigned& third) {
+  if (choice == 0u) return second;
+  return choice == 1u ? first : third;
+}
+
+unsigned write_selected_result(unsigned choice, unsigned first,
+                               unsigned second, unsigned third,
+                               unsigned replacement) {
+  choose_written_origin(choice, first, second, third) = replacement;
+  return first + 10u * second + 100u * third;
+}
+
+// ----
+func.def public @write_selected_result(%choice: i32, %first$1: i32, %second$2: i32, %third$3: i32, %replacement: i32) -> (i32) {
+  %6 = func.call pure @choose_written_origin(%choice, %first$1, %second$2, %third$3) : (i32, i32, i32, i32) -> (i32)
+  %7 = scalar.constant 0 : i32
+  %8 = scalar.cmpi eq, %6, %7 : i32
+  %second$9 = scf.if %8 -> (i32) {
+    scf.yield %replacement : i32
+  } else {
+    scf.yield %second$2 : i32
+  }
+  %10 = scalar.constant 1 : i32
+  %11 = scalar.cmpi eq, %6, %10 : i32
+  %first$12 = scf.if %11 -> (i32) {
+    scf.yield %replacement : i32
+  } else {
+    scf.yield %first$1 : i32
+  }
+  %13 = scalar.constant 2 : i32
+  %14 = scalar.cmpi eq, %6, %13 : i32
+  %third$15 = scf.if %14 -> (i32) {
+    scf.yield %replacement : i32
+  } else {
+    scf.yield %third$3 : i32
+  }
+  %16 = scalar.constant 10 : i32
+  %17 = scalar.muli %16, %second$9 : i32
+  %18 = scalar.addi %first$12, %17 : i32
+  %19 = scalar.constant 100 : i32
+  %20 = scalar.muli %19, %third$15 : i32
+  %21 = scalar.addi %18, %20 : i32
+  func.return %21 : i32
+}
+
+func.def @choose_written_origin(%choice: i32, %first: i32, %second: i32, %third: i32) -> (i32) {
+  %27 = scalar.constant 0 : i32
+  %28 = scalar.cmpi eq, %choice, %27 : i32
+  %29 = scf.if %28 -> (i32) {
+    %30 = scalar.constant 0 : i32
+    scf.yield %30 : i32
+  } else {
+    %31 = scalar.constant 1 : i32
+    %32 = scalar.cmpi eq, %choice, %31 : i32
+    %35 = scf.if %32 -> (i32) {
+      %33 = scalar.constant 0 : i32
+      scf.yield %33 : i32
+    } else {
+      %34 = scalar.constant 1 : i32
+      scf.yield %34 : i32
+    }
+    %36 = scalar.constant 2 : i32
+    %37 = scalar.constant 0 : i32
+    %38 = scalar.cmpi eq, %35, %37 : i32
+    %39 = scalar.constant 1 : i32
+    %40 = scf.select %38, %39, %36 : i32
+    scf.yield %40 : i32
+  }
+  func.return %29 : i32
+}
+
+// ====
+// Caller reconstruction keeps automatic and pointer-backed origins separate;
+// no common pointer carrier crosses the callable boundary.
+static unsigned& choose_mixed_origin(bool automatic, unsigned& local,
+                                     unsigned& memory) {
+  return automatic ? local : memory;
+}
+
+unsigned write_mixed_result(bool automatic, unsigned local,
+                            unsigned* memory) {
+  choose_mixed_origin(automatic, local, *memory) += 3u;
+  return local + *memory;
+}
+
+// ----
+func.def public @write_mixed_result(%automatic: i1, %local$1: i32, %memory: buffer, %memory_byte_offset: offset) -> (i32) {
+  %5 = scalar.constant 3 : i32
+  %6 = buffer.view %memory[%memory_byte_offset] : buffer -> view<1xi32>
+  %7 = func.call pure @choose_mixed_origin(%automatic, %local$1, %memory, %memory_byte_offset) : (i1, i32, buffer, offset) -> (i32)
+  %8 = scalar.constant 0 : i32
+  %9 = scalar.cmpi eq, %7, %8 : i32
+  %10 = scf.if %9 -> (i32) {
+    scf.yield %local$1 : i32
+  } else {
+    %11 = view.load %6[0] : view<1xi32> -> i32
+    scf.yield %11 : i32
+  }
+  %12 = scalar.addi %10, %5 : i32
+  %13 = scalar.constant 0 : i32
+  %14 = scalar.cmpi eq, %7, %13 : i32
+  %local$15 = scf.if %14 -> (i32) {
+    scf.yield %12 : i32
+  } else {
+    scf.yield %local$1 : i32
+  }
+  %16 = scalar.constant 1 : i32
+  %17 = scalar.cmpi eq, %7, %16 : i32
+  scf.if %17 {
+    view.store %12, %6[0] : i32, view<1xi32>
+  }
+  %18 = buffer.view %memory[%memory_byte_offset] : buffer -> view<1xi32>
+  %19 = view.load %18[0] : view<1xi32> -> i32
+  %20 = scalar.addi %local$15, %19 : i32
+  func.return %20 : i32
+}
+
+func.def @choose_mixed_origin(%automatic: i1, %local: i32, %memory: buffer, %memory_byte_offset: offset) -> (i32) {
+  %28 = scf.if %automatic -> (i32) {
+    %26 = scalar.constant 0 : i32
+    scf.yield %26 : i32
+  } else {
+    %27 = scalar.constant 1 : i32
+    scf.yield %27 : i32
+  }
+  func.return %28 : i32
+}
+
+// ====
+// Volatile origins retain one access in each selector arm; runtime execution
+// performs only the chosen load and never snapshots both referents eagerly.
+static const volatile unsigned& choose_volatile(
+    bool first, const volatile unsigned& left,
+    const volatile unsigned& right) {
+  return first ? left : right;
+}
+
+unsigned read_selected_volatile(bool first, const volatile unsigned* left,
+                                const volatile unsigned* right) {
+  return choose_volatile(first, *left, *right);
+}
+
+// ----
+func.def public @read_selected_volatile(%first: i1, %left: buffer, %left_byte_offset: offset, %right: buffer, %right_byte_offset: offset) -> (i32) {
+  %6 = buffer.view %left[%left_byte_offset] : buffer -> view<1xi32>
+  %7 = buffer.view %right[%right_byte_offset] : buffer -> view<1xi32>
+  %8 = func.call pure @choose_volatile(%first, %left, %left_byte_offset, %right, %right_byte_offset) : (i1, buffer, offset, buffer, offset) -> (i32)
+  %9 = scalar.constant 0 : i32
+  %10 = scalar.cmpi eq, %8, %9 : i32
+  %11 = scf.if %10 -> (i32) {
+    %12 = view.load<volatile> %6[0] : view<1xi32> -> i32
+    scf.yield %12 : i32
+  } else {
+    %13 = view.load<volatile> %7[0] : view<1xi32> -> i32
+    scf.yield %13 : i32
+  }
+  func.return %11 : i32
+}
+
+func.def @choose_volatile(%first: i1, %left: buffer, %left_byte_offset: offset, %right: buffer, %right_byte_offset: offset) -> (i32) {
+  %22 = scf.if %first -> (i32) {
+    %20 = scalar.constant 0 : i32
+    scf.yield %20 : i32
+  } else {
+    %21 = scalar.constant 1 : i32
+    scf.yield %21 : i32
+  }
+  func.return %22 : i32
+}
+
+// ====
+// Observing the returned address deliberately selects the durable pointer ABI;
+// an ordinal result is used only while source identity remains abstract.
+static unsigned& choose_address(bool first, unsigned& left, unsigned& right) {
+  return first ? left : right;
+}
+
+unsigned address_selected_result(bool first, unsigned left, unsigned right) {
+  unsigned* selected = &choose_address(first, left, right);
+  ++*selected;
+  return left + right;
+}
+
+// ----
+func.def public @address_selected_result(%first: i1, %left$1: i32, %right$2: i32) -> (i32) {
+  %4 = index.constant 4 : offset
+  %left_storage = buffer.alloca<private> align(4) %4 : buffer
+  %left_storage_byte_offset = index.constant 0 : offset
+  %left_view = buffer.view %left_storage[%left_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %left$1, %left_view[0] : i32, view<1xi32>
+  %8 = index.constant 4 : offset
+  %right_storage = buffer.alloca<private> align(4) %8 : buffer
+  %right_storage_byte_offset = index.constant 0 : offset
+  %right_view = buffer.view %right_storage[%right_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %right$2, %right_view[0] : i32, view<1xi32>
+  %selected, %selected_byte_offset = func.call pure @choose_address(%first, %left_storage, %left_storage_byte_offset, %right_storage, %right_storage_byte_offset) : (i1, buffer, offset, buffer, offset) -> (buffer, offset)
+  %14 = buffer.view %selected[%selected_byte_offset] : buffer -> view<1xi32>
+  %15 = view.load %14[0] : view<1xi32> -> i32
+  %16 = scalar.constant 1 : i32
+  %17 = scalar.addi %15, %16 : i32
+  view.store %17, %14[0] : i32, view<1xi32>
+  %left$18 = view.load %left_view[0] : view<1xi32> -> i32
+  %right$19 = view.load %right_view[0] : view<1xi32> -> i32
+  %20 = scalar.addi %left$18, %right$19 : i32
+  func.return %20 : i32
+}
+
+func.def @choose_address(%first: i1, %left: buffer, %left_byte_offset: offset, %right: buffer, %right_byte_offset: offset) -> (buffer, offset) {
+  %28, %29 = scf.if %first -> (buffer, offset) {
+    scf.yield %left, %left_byte_offset : buffer, offset
+  } else {
+    scf.yield %right, %right_byte_offset : buffer, offset
+  }
+  func.return %28, %29 : buffer, offset
 }

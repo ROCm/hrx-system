@@ -115,7 +115,10 @@ loom_check_test_suite(
 
 loom_check_test_suite(
     name = "cxx_test",
-    srcs = ["atomic_indexing.cxx-test"],
+    srcs = [
+        "atomic_indexing.cxx-test",
+        "selected_reference_results.cxx-test",
+    ],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/import:cxx",
         "//loom/config/arch:amdgpu",
