@@ -19,7 +19,10 @@ from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
 from loom.dsl import Op
 from loom.target.arch.amdgpu.contracts.index_bitwise import index_bitwise_rules
-from loom.target.arch.amdgpu.contracts.integer64 import integer64_rules
+from loom.target.arch.amdgpu.contracts.integer64 import (
+    integer64_bitwise_rules,
+    integer64_rules,
+)
 from loom.target.arch.amdgpu.contracts.integer_division import integer_division_rules
 from loom.target.arch.amdgpu.contracts.materializers import (
     ADDRESS_SGPR_MATERIALIZER,
@@ -557,37 +560,6 @@ def _narrow_address_vgpr_binary_rule(
                     "rhs": _materialized_operand(source_rhs, ADDRESS_VGPR_MATERIALIZER),
                 },
                 results={"dst": _RESULT},
-            ),
-        ),
-    )
-
-
-def _i64_vgpr_per_lane_binary_rule(
-    source_op: Op,
-    descriptor_key: str,
-) -> DescriptorRule:
-    descriptor = _descriptor(descriptor_key)
-    return DescriptorRule(
-        source_op=source_op,
-        descriptor=descriptor,
-        guards=(
-            *_typed_binary_guards(_I64),
-            Guard.low_value_register_class("result", "amdgpu.vgpr"),
-            Guard.low_value_register_unit_count("result", 2),
-            Guard.value_materializable("lhs", I64_VGPR_MATERIALIZER.name),
-            Guard.value_materializable("rhs", I64_VGPR_MATERIALIZER.name),
-            Guard.descriptor_available(descriptor),
-        ),
-        emit=(
-            EmitDescriptorOp(
-                descriptor=descriptor,
-                operands={
-                    "lhs": _materialized_operand("lhs", I64_VGPR_MATERIALIZER),
-                    "rhs": _materialized_operand("rhs", I64_VGPR_MATERIALIZER),
-                },
-                results={"dst": _RESULT},
-                result_types={"dst": _RESULT},
-                form=DescriptorEmitForm.PER_LANE,
             ),
         ),
     )
@@ -2133,20 +2105,10 @@ def _rules() -> tuple[DescriptorRule, ...]:
             "amdgpu.s_and_b64",
         )
     )
-    rules.append(
-        _sgpr_binary_rule(
-            scalar_bitwise.scalar_andi,
-            _I64,
-            _descriptor("amdgpu.s_and_b64"),
-        )
-    )
-    rules.append(
-        _i64_vgpr_per_lane_binary_rule(
-            scalar_bitwise.scalar_andi,
-            "amdgpu.v_and_b32",
-        )
-    )
     rules.extend(_i32_encoded_binary_rules(scalar_bitwise.scalar_andi, "and_b32"))
+    rules.extend(
+        integer64_bitwise_rules(_DESCRIPTOR_SET, scalar_bitwise.scalar_andi, "and")
+    )
     rules.extend(
         _i1_scalar_bool_bitwise_rules(
             scalar_bitwise.scalar_ori,
@@ -2165,20 +2127,10 @@ def _rules() -> tuple[DescriptorRule, ...]:
             "amdgpu.s_or_b64",
         )
     )
-    rules.append(
-        _sgpr_binary_rule(
-            scalar_bitwise.scalar_ori,
-            _I64,
-            _descriptor("amdgpu.s_or_b64"),
-        )
-    )
-    rules.append(
-        _i64_vgpr_per_lane_binary_rule(
-            scalar_bitwise.scalar_ori,
-            "amdgpu.v_or_b32",
-        )
-    )
     rules.extend(_i32_encoded_binary_rules(scalar_bitwise.scalar_ori, "or_b32"))
+    rules.extend(
+        integer64_bitwise_rules(_DESCRIPTOR_SET, scalar_bitwise.scalar_ori, "or")
+    )
     rules.extend(
         _i1_scalar_bool_bitwise_rules(
             scalar_bitwise.scalar_xori,
@@ -2197,20 +2149,10 @@ def _rules() -> tuple[DescriptorRule, ...]:
             "amdgpu.s_xor_b64",
         )
     )
-    rules.append(
-        _sgpr_binary_rule(
-            scalar_bitwise.scalar_xori,
-            _I64,
-            _descriptor("amdgpu.s_xor_b64"),
-        )
-    )
-    rules.append(
-        _i64_vgpr_per_lane_binary_rule(
-            scalar_bitwise.scalar_xori,
-            "amdgpu.v_xor_b32",
-        )
-    )
     rules.extend(_i32_encoded_binary_rules(scalar_bitwise.scalar_xori, "xor_b32"))
+    rules.extend(
+        integer64_bitwise_rules(_DESCRIPTOR_SET, scalar_bitwise.scalar_xori, "xor")
+    )
     rules.extend(
         _i32_shift_rules(
             scalar_bitwise.scalar_shli,

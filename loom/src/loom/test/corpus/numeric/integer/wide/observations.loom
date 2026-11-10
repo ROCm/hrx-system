@@ -352,7 +352,7 @@ check.scenario @wide_dynamic_lane_values {
 // original overlapping inputs. The interpreter independently evaluates bits.
 func.def inline @observe_word_joins(%lhs: i64, %rhs: i64, %output: buffer, %row: index) {
   %base = index.constant 0 : offset
-  %results = buffer.view %output[%base] : buffer -> view<4x6xi64>
+  %results = buffer.view %output[%base] : buffer -> view<4x7xi64>
   %low_mask = scalar.constant 4294967295 : i64
   %high_mask = scalar.constant -4294967296 : i64
   %low = scalar.andi %lhs, %low_mask : i64
@@ -363,12 +363,14 @@ func.def inline @observe_word_joins(%lhs: i64, %rhs: i64, %output: buffer, %row:
   %reversed_xor = scalar.xori %high, %low : i64
   %overlapping_or = scalar.ori %lhs, %rhs : i64
   %overlapping_xor = scalar.xori %lhs, %rhs : i64
-  view.store %joined_or, %results[%row, 0] : i64, view<4x6xi64>
-  view.store %reversed_or, %results[%row, 1] : i64, view<4x6xi64>
-  view.store %joined_xor, %results[%row, 2] : i64, view<4x6xi64>
-  view.store %reversed_xor, %results[%row, 3] : i64, view<4x6xi64>
-  view.store %overlapping_or, %results[%row, 4] : i64, view<4x6xi64>
-  view.store %overlapping_xor, %results[%row, 5] : i64, view<4x6xi64>
+  %overlapping_and = scalar.andi %lhs, %rhs : i64
+  view.store %joined_or, %results[%row, 0] : i64, view<4x7xi64>
+  view.store %reversed_or, %results[%row, 1] : i64, view<4x7xi64>
+  view.store %joined_xor, %results[%row, 2] : i64, view<4x7xi64>
+  view.store %reversed_xor, %results[%row, 3] : i64, view<4x7xi64>
+  view.store %overlapping_or, %results[%row, 4] : i64, view<4x7xi64>
+  view.store %overlapping_xor, %results[%row, 5] : i64, view<4x7xi64>
+  view.store %overlapping_and, %results[%row, 6] : i64, view<4x7xi64>
   func.return
 }
 
@@ -393,9 +395,9 @@ check.scenario @wide_word_values {
     %lhs = check.literal value(-1) : i64
     %rhs = check.literal value(-9223372036854775808) : i64
     %input = check.generate.iota offset(0) step(-1) : tensor<2xi64>
-    %output = check.generate.fill value(-7777) : tensor<24xi64>
-    check.compare<@wide_word_observations>(%lhs, %rhs, %input, %output) : (i64, i64, tensor<2xi64>, tensor<24xi64>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<24xi64>
+    %output = check.generate.fill value(-7777) : tensor<28xi64>
+    check.compare<@wide_word_observations>(%lhs, %rhs, %input, %output) : (i64, i64, tensor<2xi64>, tensor<28xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<28xi64>
     }
   }
   check.trial[16](%trial: index, %entropy: check.entropy) {
@@ -405,9 +407,9 @@ check.scenario @wide_word_values {
     %rhs = check.entropy.read %rhs_entropy[%trial] : check.entropy -> i64
     %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
     %input = check.generate.random.uniform seed(%seed) range(-9223372036854775808 to 9223372036854775807) : tensor<2xi64>
-    %output = check.generate.fill value(-7777) : tensor<24xi64>
-    check.compare<@wide_word_observations>(%lhs, %rhs, %input, %output) : (i64, i64, tensor<2xi64>, tensor<24xi64>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<24xi64>
+    %output = check.generate.fill value(-7777) : tensor<28xi64>
+    check.compare<@wide_word_observations>(%lhs, %rhs, %input, %output) : (i64, i64, tensor<2xi64>, tensor<28xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<28xi64>
     }
   }
   check.return
