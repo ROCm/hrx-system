@@ -320,11 +320,10 @@ set(IREE_DEP_LIBDRM_HEADERS_VERSION "")
 set(IREE_DEP_LIBDRM_HEADERS_DEV_DEPENDENCY "FALSE")
 set(IREE_DEP_LIBDRM_HEADERS_SOURCE_URL "")
 set(IREE_DEP_LIBDRM_HEADERS_URLS
-  "https://mirrors.edge.kernel.org/gentoo/distfiles/13/libdrm-2.4.134.tar.xz"
-  "https://dri.freedesktop.org/libdrm/libdrm-2.4.134.tar.xz"
+  "https://gitlab.freedesktop.org/mesa/libdrm/-/archive/33fab8cbca7f7581e955a675597d14412702edc4/libdrm-33fab8cbca7f7581e955a675597d14412702edc4.tar.bz2"
 )
-set(IREE_DEP_LIBDRM_HEADERS_SHA256 "ac5e74d157830eb8bee44c6a6bf3ad49774ef0dd2a72bdad74a8f20308b52a95")
-set(IREE_DEP_LIBDRM_HEADERS_STRIP_PREFIX "libdrm-2.4.134")
+set(IREE_DEP_LIBDRM_HEADERS_SHA256 "86732374758d8aabf64e92c9a34ab0dbf2b363c1860b3bdf98f7aad79193de90")
+set(IREE_DEP_LIBDRM_HEADERS_STRIP_PREFIX "libdrm-33fab8cbca7f7581e955a675597d14412702edc4")
 set(IREE_DEP_LIBDRM_HEADERS_BUILD_FILE "//build_tools/third_party/linux_uapi:libdrm_headers.BUILD.bazel")
 set(IREE_DEP_LIBDRM_HEADERS_PATCHES "")
 set(IREE_DEP_LIBDRM_HEADERS_PATCH_ARGS "")

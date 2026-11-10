@@ -130,12 +130,9 @@ http_archive(
 http_archive(
     name = "libdrm_headers",
     build_file = "//build_tools/third_party/linux_uapi:libdrm_headers.BUILD.bazel",
-    sha256 = "ac5e74d157830eb8bee44c6a6bf3ad49774ef0dd2a72bdad74a8f20308b52a95",
-    strip_prefix = "libdrm-2.4.134",
-    urls = [
-        "https://mirrors.edge.kernel.org/gentoo/distfiles/13/libdrm-2.4.134.tar.xz",
-        "https://dri.freedesktop.org/libdrm/libdrm-2.4.134.tar.xz",
-    ],
+    sha256 = "86732374758d8aabf64e92c9a34ab0dbf2b363c1860b3bdf98f7aad79193de90",
+    strip_prefix = "libdrm-33fab8cbca7f7581e955a675597d14412702edc4",
+    url = "https://gitlab.freedesktop.org/mesa/libdrm/-/archive/33fab8cbca7f7581e955a675597d14412702edc4/libdrm-33fab8cbca7f7581e955a675597d14412702edc4.tar.bz2",
 )
 
 # Linux 7.3-rc6 public protocol headers share one source revision.
