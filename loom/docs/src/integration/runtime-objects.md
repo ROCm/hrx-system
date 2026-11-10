@@ -191,6 +191,50 @@ transport, without acquiring extra owners. A pointer that already carries
 protection duplicates that protection instead. Returning either kind of pointer
 acquires or transfers an owner so the result can outlive the invocation.
 
+## Carry request state between invocations
+
+A host can retain an object between calls into a compiled program. Each call
+receives that request's state, borrows it for native operations, and returns
+the owner for the next turn. For example, a provider implementing an incremental
+decoder could expose this contract:
+
+```loom
+type.decl import("decode", "state") @Decoder
+
+func.decl import("decode", "append") @append(%decoder: ptr<@Decoder>, %input: buffer) -> (buffer)
+
+func.def public @decode_chunk(%state: ref<@Decoder>, %input: buffer) -> (ref<@Decoder>, buffer) {
+  %decoder = ref.borrow %state : ref<@Decoder> -> ptr<@Decoder>
+  %text = func.call @append(%decoder, %input) : (ptr<@Decoder>, buffer) -> (buffer)
+  func.return %state, %text : ref<@Decoder>, buffer
+}
+```
+
+The provider supplies the state payload and `append` implementation. The source
+program needs no knowledge of their layout. Its owning SSA value remains live
+through `append`, and the return transfers that owner back to the host.
+The host can interleave calls for independent decoders using the same compiled
+code. Each request keeps its own returned handle; neither compiled-code
+ownership nor invocation reuse establishes shared mutable request state.
+Reference counting protects lifetime; the host and provider still coordinate
+concurrent access to a payload.
+
+A source turn can instead release its input owner and return a replacement.
+Previously saved `ptr` values continue to name the old payload, with protection
+through their final use. An escaped pointer result keeps that protection until
+the host releases its result carrier. Replacing one request's state does not
+change another request's state or a reader's saved payload.
+
+An accepted owning argument transfers into the invocation even if a native
+call later fails. Terminal cleanup releases the invocation's owners, and a
+failed host invocation leaves its result cells unchanged. A caller that needs
+to retain the input independently keeps another owner before calling; this
+preserves the payload's lifetime, without rolling back native mutations.
+
+Returned owners and protected pointer results can outlive the compiled
+program. Their provider's type descriptors and finalizer code must remain live
+until the final result is released.
+
 ## Eliminate unused lifetimes
 
 A pure factory can allocate an object without making that allocation observable.
@@ -248,6 +292,21 @@ The [VM embedding guide](https://github.com/ROCm/hrx-system/blob/main/runtime/sr
 describes carrier ownership, type-table resolution, suspension, and synchronous
 host calls. The compiler does not need those native tables to understand a
 source declaration; the runtime needs them to execute its imports.
+
+### Source calls and asynchronous native work
+
+The current Loom VM compiler emits synchronous callable contracts. A compiled
+import cannot bind to a native export declared `MAY_YIELD`; linking rejects
+that mismatch before invoking the provider. The VM runtime's resumable
+invocation API does not by itself make a compiled source function resumable.
+
+A synchronous native operation can submit asynchronous device work and return
+a completion object or updated request state. The native submission owns every
+resource that the accepted work still needs. Source return, handle replacement,
+and compiled-program destruction do not establish device completion. The host
+retires that work before releasing any provider or host storage it borrows.
+This allows bounded source turns to participate in an asynchronous service
+while their own calls remain synchronous.
 
 ## Normal exit, failure, and artifact admission
 
