@@ -29,9 +29,11 @@ void copy([[loom::noalias]] const unsigned* input, unsigned* output) {
 low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @copy() asm {
   %input = resource<hal_binding> {extent = 24, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {extent = 12, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %36 = v_mov_b32 0
-  %37 = global_load_b32_saddr %36, %input {offset = 20}
-  global_store_b32_saddr %36, %37, %output {offset = 8}
+  %36 = s_mov_b32 0
+  %37 = s_load_dword %input, %36 {offset = 20}
+  %38 = v_mov_b32_copy %37
+  %39 = v_mov_b32 0
+  global_store_b32_saddr %39, %38, %output {offset = 8}
   return
 }
 
@@ -50,13 +52,15 @@ void copy([[loom::noalias]] unsigned* input,
 low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @copy() asm {
   %input = resource<hal_binding> {extent = 8, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {extent = 12, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %71 = v_mov_b32 0
-  %before = global_load_b32_saddr %71, %input {offset = 4}
-  %74 = v_mov_b32 1
-  %75 = v_add_u32 %before, %74
-  global_store_b32_saddr %71, %75, %input {offset = 4}
-  %78 = global_load_b32_saddr %71, %input {offset = 4}
-  global_store_b32_saddr %71, %78, %output {offset = 8}
+  %71 = s_mov_b32 0
+  %before = s_load_dword %input, %71 {offset = 4}
+  %73 = s_mov_b32 1
+  %74 = s_add_u32 %before, %73
+  %75 = v_mov_b32_copy %74
+  %76 = v_mov_b32 0
+  global_store_b32_saddr %76, %75, %input {offset = 4}
+  %78 = global_load_b32_saddr %76, %input {offset = 4}
+  global_store_b32_saddr %76, %78, %output {offset = 8}
   return
 }
 
@@ -75,13 +79,15 @@ void copy([[loom::noalias]] const unsigned* input,
 low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @copy() asm {
   %output = resource<hal_binding> {extent = 12, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %replacement = resource<hal_binding> {extent = 4, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %65 = v_mov_b32 0
-  %before = global_load_b32_saddr %65, %replacement
-  %68 = v_mov_b32 1
-  %69 = v_add_u32 %before, %68
-  global_store_b32_saddr %65, %69, %output
-  %72 = global_load_b32_saddr %65, %replacement
-  global_store_b32_saddr %65, %72, %output {offset = 8}
+  %65 = s_mov_b32 0
+  %before = s_load_dword %replacement, %65
+  %67 = s_mov_b32 1
+  %68 = s_add_u32 %before, %67
+  %69 = v_mov_b32_copy %68
+  %70 = v_mov_b32 0
+  global_store_b32_saddr %70, %69, %output
+  %72 = global_load_b32_saddr %70, %replacement
+  global_store_b32_saddr %70, %72, %output {offset = 8}
   return
 }
 

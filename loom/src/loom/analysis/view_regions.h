@@ -187,7 +187,7 @@ typedef struct loom_view_region_table_t {
   // Per-local-value construction state for recursion guards.
   uint8_t* states_by_value_ordinal;
 
-  // Aggregate root accesses and value invariance, indexed by local ordinal.
+  // Root accesses, value invariance, and entry reads, indexed by local ordinal.
   // Populated by analyze, including raw buffers and nested execution scopes.
   uint8_t* storage_flags_by_value_ordinal;
 
@@ -293,6 +293,15 @@ bool loom_view_region_table_root_is_stable(
     const loom_view_region_table_t* table, loom_value_id_t root_value_id,
     loom_value_fact_alias_scope_id_t alias_scope_id,
     loom_value_fact_memory_space_t memory_space);
+
+// Proves that an ordinary load observes contents unchanged since the analyzed
+// region's entry. Later writes do not invalidate this per-access fact. Earlier
+// writes, acquisition, and unknown effects exclude overlapping memory spaces;
+// repeated execution ends the forward prefix proof. This does not establish
+// stability before entry, address uniformity, or permission to ignore volatile
+// access. Requires completed analysis; performs no IR traversal.
+bool loom_view_region_table_reads_entry_contents(
+    const loom_view_region_table_t* table, const loom_op_t* op);
 
 // Returns true when two concrete memory spaces cannot name the same storage.
 // Unknown and generic spaces remain conservative, as do distinct global-like

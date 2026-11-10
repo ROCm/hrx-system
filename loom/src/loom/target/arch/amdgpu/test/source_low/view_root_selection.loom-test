@@ -34,21 +34,14 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %condition = s_cmp_eq_i32 %select_second, %c1
   low.cond_br %condition, ^_bb1, ^_bb2 : reg<amdgpu.scc>
 ^_bb1:
-  %47 = slice %second_aligned[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %48 = slice %second_aligned[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  low.br ^_bb3(%47: reg<amdgpu.sgpr>, %48: reg<amdgpu.sgpr>, %second_offset: reg<amdgpu.sgpr>)
+  low.br ^_bb3(%second_aligned: reg<amdgpu.sgpr x2>, %second_offset: reg<amdgpu.sgpr>)
 ^_bb2:
-  %49 = slice %first_aligned[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %50 = slice %first_aligned[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  low.br ^_bb3(%49: reg<amdgpu.sgpr>, %50: reg<amdgpu.sgpr>, %first_offset: reg<amdgpu.sgpr>)
-^_bb3(%45: reg<amdgpu.sgpr>, %46: reg<amdgpu.sgpr>, %selected_offset: reg<amdgpu.sgpr>):
-  %34 = v_mov_b32 0
-  %37 = s_mov_b32 0
-  %38, %39 = s_add_co_u32 %45, %selected_offset
-  %40, %41 = s_addc_u32 %46, %37, %39
-  %42 = concat(%38, %40) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %value = global_load_b32_saddr %34, %42
-  global_store_b32_saddr %34, %value, %output_view
+  low.br ^_bb3(%first_aligned: reg<amdgpu.sgpr x2>, %first_offset: reg<amdgpu.sgpr>)
+^_bb3(%selected: reg<amdgpu.sgpr x2>, %selected_offset: reg<amdgpu.sgpr>):
+  %value = s_load_dword %selected, %selected_offset
+  %35 = v_mov_b32_copy %value
+  %36 = v_mov_b32 0
+  global_store_b32_saddr %36, %35, %output_view
   return
 }
 

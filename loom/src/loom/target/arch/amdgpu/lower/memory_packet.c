@@ -1392,6 +1392,8 @@ static bool loom_amdgpu_memory_access_try_select_global_smem(
   // Scalar memory discards the address's two low bits. Packed element types
   // may require less alignment than the register-sized packets carrying them.
   if (kind != LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD ||
+      iree_any_bit_set(candidate.source->access_flags,
+                       LOOM_MEMORY_ACCESS_FLAG_VOLATILE) ||
       candidate.source->minimum_alignment < 4 ||
       (candidate.source->memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL &&
        candidate.source->memory_space !=
@@ -1403,9 +1405,11 @@ static bool loom_amdgpu_memory_access_try_select_global_smem(
           selection_context->materialization_plan, &candidate) ||
       !loom_amdgpu_memory_access_uses_only_scalar_address_terms(&candidate) ||
       !selection_context->view_regions ||
-      !loom_view_region_table_root_is_stable(
-          selection_context->view_regions, candidate.source->root_value_id,
-          candidate.source->alias_scope_id, candidate.source->memory_space)) {
+      !(loom_view_region_table_root_is_stable(
+            selection_context->view_regions, candidate.source->root_value_id,
+            candidate.source->alias_scope_id, candidate.source->memory_space) ||
+        (candidate.source->reads_entry_contents &&
+         loom_kernel_def_isa(selection_context->source_function.op)))) {
     return false;
   }
 
