@@ -35,5 +35,8 @@ iree_c_embed_data(
     flatten = True,
     h_file_output = "template_selection_testdata.h",
     identifier = "loom_link_template_selection_testdata",
-    visibility = ["//loom/binding/c/test:__pkg__"],
+    visibility = [
+        "//loom/binding/c/test:__pkg__",
+        "//loom/src/loom/link:__pkg__",
+    ],
 )

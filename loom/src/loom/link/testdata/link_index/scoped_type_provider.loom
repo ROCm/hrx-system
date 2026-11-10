@@ -1,0 +1,8 @@
+low.func.def public target<test.low.core> @register_type_binding(%width: reg<test.i32 : index>, %value: reg<test.i32 : vector<[%width]xf32>>) asm {
+  return
+}
+
+low.func.def public target<test.low.core> @resource_type_binding(%width: reg<test.i32 : index>) asm {
+  %resource = resource<native_pointer> {index = 0, source_type = vector<[%width]xf32>} : reg<test.ptr>
+  return
+}
