@@ -562,15 +562,6 @@ iree_status_t iree_hal_vulkan_queue_submit_sparse_bind_sync(
     iree_hal_vulkan_queue_t* queue, iree_host_size_t buffer_count,
     const VkSparseBufferMemoryBindInfo* buffer_binds);
 
-// Submits a buffer fill ordered by queue semaphores.
-iree_status_t iree_hal_vulkan_queue_submit_fill(
-    iree_hal_vulkan_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, const void* pattern,
-    iree_host_size_t pattern_length, iree_hal_fill_flags_t flags);
-
 // Submits a buffer update ordered by queue semaphores.
 iree_status_t iree_hal_vulkan_queue_submit_update(
     iree_hal_vulkan_queue_t* queue,
