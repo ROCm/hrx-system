@@ -128,6 +128,32 @@ Each materialized device retains the fabric independently. Releasing the
 registry and driver leaves those devices operational. The fabric owns the native
 instance and its discovery snapshot; engine contexts own their native children.
 
+## Simulated GPU topology
+
+An explicit rocjitsu topology uses the same driver and GPU execution engines.
+Ordinary tools accept `--amd_rocjitsu_config=topology.json`; this topology defines
+the complete AMD device inventory, including every GPU in that configuration.
+Device URIs and visibility masks select from that inventory. Native AMD devices
+are absent from the configured fabric.
+
+`--amd_rocjitsu_library=/path/to/librocjitsu.so` selects the simulator explicitly.
+Without it, libamdf uses `LIBAMDF_ROCJITSU_PATH`, then the system loader's
+`librocjitsu.so` search, including `LD_LIBRARY_PATH`. The optional library flag
+requires a topology; supplying only a library does not change native discovery.
+The [runtime package guide](../../../../../../build_tools/third_party/rocjitsu/README.md)
+describes the qualified library, memory helper, dependencies, and host limits.
+
+Embedded clients pass borrowed machine descriptors through
+`iree_hal_amd_driver_options_t`. Fabric creation adds those descriptions to its
+owned libamdf instance before passive discovery; libamdf copies the inputs and
+owns simulator execution through fabric teardown. The ordinary device lifetime
+retains that owner after the driver is released. A bootstrap failure releases
+previously added configurations and never falls back to native discovery.
+
+Simulation uses explicit C API loading with host-owned signal handlers. It does
+not require a different compiler or tool binary. Queue protocols and memory
+services are selected from the configured devices' advertised capabilities.
+
 ## Native GPU execution
 
 PM4, AQL, and SDMA own their packet encodings and publication rules under

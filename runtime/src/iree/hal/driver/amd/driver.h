@@ -7,24 +7,42 @@
 #ifndef IREE_HAL_DRIVER_AMD_DRIVER_H_
 #define IREE_HAL_DRIVER_AMD_DRIVER_H_
 
-#include "amdf/base.h"
+#include "amdf/rocjitsu.h"
 #include "iree/hal/api.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Creates an independent AMD driver and native libamdf fabric. Devices retain
+// Cold fabric configuration, borrowed only during driver creation.
+typedef struct iree_hal_amd_driver_options_t {
+  // Native provider lifetime policy; defaults to PROCESS.
+  amdf_native_lifetime_t native_lifetime;
+  // Number of explicitly configured simulator machines, zero for native only.
+  uint32_t rocjitsu_machine_count;
+  // Borrowed machine descriptions and strings, copied by libamdf at bootstrap.
+  const amdf_rocjitsu_machine_create_info_t* rocjitsu_machines;
+} iree_hal_amd_driver_options_t;
+
+void iree_hal_amd_driver_options_initialize(
+    iree_hal_amd_driver_options_t* out_options);
+
+// Creates an independent AMD driver and libamdf fabric. Devices retain
 // that fabric independently of the driver and registry. Discovery creates no
 // schedulable device state. GPU scheme filtering uses query-only endpoint
 // identity and queue-family descriptors; activation occurs only when the
 // selected device is created.
-// |native_lifetime| is passed unchanged to libamdf. PROCESS supports Linux KFD
-// host registration and requires coordination with foreign KFD VM mutations.
-// Its primary VM can survive fabric destruction and prevent fresh acquisition;
-// retain one driver/fabric for all GPU devices using that process context.
-// INSTANCE bounds acquired native state to this fabric's lifetime; unsupported
-// native services fail explicitly. It does not promise isolated GPU addresses.
+// |options| and its referenced inputs are borrowed only during this call.
+// Explicit simulator machines are added before passive discovery. Each may
+// contain multiple devices. Configured machines define the complete fabric;
+// native endpoints are excluded from discovery and device creation.
+// |options.native_lifetime| is passed unchanged to libamdf. PROCESS supports
+// Linux KFD host registration and requires coordination with foreign KFD VM
+// mutations. Its primary VM can survive fabric destruction and prevent fresh
+// acquisition; retain one driver/fabric for all GPU devices using that process
+// context. INSTANCE bounds acquired native state to this fabric's lifetime;
+// unsupported native services fail explicitly. It does not promise isolated GPU
+// addresses.
 //
 // The XDNA engine exposes `xdna`; the GPU engine exposes `rdna`, `cdna`, and
 // `amdgpu`. Only engines selected at build time are available. Each scheme has
@@ -59,9 +77,9 @@ extern "C" {
 // exact native family ordinal; otherwise prefer AQL on CDNA and PM4 on RDNA),
 // and `host_numa_node` (an explicit CPU NUMA node; otherwise placement is
 // unspecified).
-iree_status_t iree_hal_amd_driver_create(amdf_native_lifetime_t native_lifetime,
-                                         iree_allocator_t host_allocator,
-                                         iree_hal_driver_t** out_driver);
+iree_status_t iree_hal_amd_driver_create(
+    const iree_hal_amd_driver_options_t* options,
+    iree_allocator_t host_allocator, iree_hal_driver_t** out_driver);
 
 #ifdef __cplusplus
 }  // extern "C"

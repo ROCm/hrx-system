@@ -78,8 +78,8 @@ class FabricVirtualBufferTest
         amdf_query_api(AMDF_ABI_VERSION_LATEST, AMDF_ABI_VERSION_LATEST, &api),
         AMDF_STATUS_OK);
     for (uint32_t i = 0; i < fabrics_.size(); ++i) {
-      IREE_ASSERT_OK(iree_hal_amd_fabric_create(api, i, iree_allocator_system(),
-                                                &fabrics_[i]));
+      IREE_ASSERT_OK(iree_hal_amd_fabric_create(
+          api, i, 0, nullptr, iree_allocator_system(), &fabrics_[i]));
     }
   }
 

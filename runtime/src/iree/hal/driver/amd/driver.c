@@ -80,10 +80,21 @@ static void iree_hal_amd_driver_destroy(iree_hal_driver_t* base) {
   iree_allocator_free(driver->host_allocator, driver);
 }
 
-iree_status_t iree_hal_amd_driver_create(amdf_native_lifetime_t native_lifetime,
-                                         iree_allocator_t host_allocator,
-                                         iree_hal_driver_t** out_driver) {
+void iree_hal_amd_driver_options_initialize(
+    iree_hal_amd_driver_options_t* out_options) {
+  *out_options = (iree_hal_amd_driver_options_t){
+      .native_lifetime = AMDF_NATIVE_LIFETIME_PROCESS,
+  };
+}
+
+iree_status_t iree_hal_amd_driver_create(
+    const iree_hal_amd_driver_options_t* options,
+    iree_allocator_t host_allocator, iree_hal_driver_t** out_driver) {
   *out_driver = NULL;
+  if (options->rocjitsu_machine_count != 0 && !options->rocjitsu_machines) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "rocjitsu machine descriptions are required");
+  }
   const amdf_api_t* api = NULL;
   IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
       amdf_query_api(AMDF_ABI_VERSION_LATEST, AMDF_ABI_VERSION_LATEST, &api),
@@ -94,7 +105,8 @@ iree_status_t iree_hal_amd_driver_create(amdf_native_lifetime_t native_lifetime,
   iree_hal_resource_initialize(&iree_hal_amd_driver_vtable, &driver->resource);
   driver->host_allocator = host_allocator;
   iree_status_t status = iree_hal_amd_fabric_create(
-      api, native_lifetime, host_allocator, &driver->fabric);
+      api, options->native_lifetime, options->rocjitsu_machine_count,
+      options->rocjitsu_machines, host_allocator, &driver->fabric);
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_driver_initialize_views(driver);
   }

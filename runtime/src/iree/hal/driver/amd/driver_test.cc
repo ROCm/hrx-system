@@ -312,8 +312,10 @@ class DriverTest : public ::testing::Test {
   }
 
   iree_status_t CreateDriver() {
-    return iree_hal_amd_driver_create(AMDF_NATIVE_LIFETIME_PROCESS,
-                                      iree_allocator_system(), &driver_);
+    iree_hal_amd_driver_options_t options;
+    iree_hal_amd_driver_options_initialize(&options);
+    return iree_hal_amd_driver_create(&options, iree_allocator_system(),
+                                      &driver_);
   }
 
   std::vector<iree_hal_device_id_t> Enumerate(iree_string_view_t scheme) {
@@ -364,6 +366,18 @@ class DriverTest : public ::testing::Test {
   // Real caller-owned service satisfying the public device creation contract.
   iree_async_proactor_pool_t* proactors_ = nullptr;
 };
+
+TEST_F(DriverTest, NonzeroSimulatorCountRequiresDescriptions) {
+  iree_hal_amd_driver_options_t options;
+  iree_hal_amd_driver_options_initialize(&options);
+  options.rocjitsu_machine_count = 1;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_amd_driver_create(&options, iree_allocator_system(), &driver_));
+  EXPECT_EQ(driver_, nullptr);
+  EXPECT_EQ(native_.query_count, 0u);
+  EXPECT_EQ(native_.activation_count, 0u);
+}
 
 #if IREE_HAL_AMD_GPU_ENABLED
 

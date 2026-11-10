@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "library requires configurations",
+      "run": {
+        "tool": "iree-run-replay",
+        "args": [
+          "--amd_rocjitsu_library=explicit.so",
+          "--list_devices=rdna"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "--amd_rocjitsu_library requires --amd_rocjitsu_config"
+        ]
+      }
+    },
+    {
+      "name": "configuration without explicit library reaches file loading",
+      "run": {
+        "tool": "iree-run-replay",
+        "args": [
+          "--amd_rocjitsu_config={tmp}/missing.json",
+          "--list_devices=rdna"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "NOT_FOUND",
+          "missing.json"
+        ]
+      }
+    },
+    {
+      "name": "unreadable configuration fails before discovery",
+      "run": {
+        "tool": "iree-run-replay",
+        "args": [
+          "--amd_rocjitsu_library=explicit.so",
+          "--amd_rocjitsu_config={tmp}/missing.json",
+          "--list_devices=rdna"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "NOT_FOUND"
+        ]
+      }
+    },
+    {
+      "name": "embedded NUL is rejected before bootstrap",
+      "run": {
+        "tool": "iree-run-replay",
+        "args": [
+          "--amd_rocjitsu_config={srcdir}/embedded_nul.bin",
+          "--list_devices=amdgpu"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "rocjitsu JSON configuration contains NUL bytes"
+        ]
+      }
+    }
+  ]
+}

@@ -144,7 +144,7 @@ iree_status_t NativeMemoryGate::CreateFabric(
   if (lifetime == AMDF_NATIVE_LIFETIME_PROCESS) {
     return AcquireProcessFabric(out_fabric);
   }
-  return iree_hal_amd_fabric_create(&forwarding_api_, lifetime,
+  return iree_hal_amd_fabric_create(&forwarding_api_, lifetime, 0, nullptr,
                                     iree_allocator_system(), out_fabric);
 }
 
@@ -182,7 +182,8 @@ iree_status_t NativeMemoryGate::AcquireProcessFabric(
         api.memory_create = CreateMemory;
         api.memory_destroy = DestroyMemory;
         status = iree_hal_amd_fabric_create(&api, AMDF_NATIVE_LIFETIME_PROCESS,
-                                            iree_allocator_system(), &fabric);
+                                            0, nullptr, iree_allocator_system(),
+                                            &fabric);
       }
     }
     ~ProcessFabric() {
@@ -422,8 +423,9 @@ void GpuNativeTest::SetUp() {
     if (native_lifetime() == AMDF_NATIVE_LIFETIME_PROCESS) {
       IREE_ASSERT_OK(NativeMemoryGate::AcquireProcessFabric(&fabric_));
     } else {
-      IREE_ASSERT_OK(iree_hal_amd_fabric_create(
-          api, native_lifetime(), iree_allocator_system(), &fabric_));
+      IREE_ASSERT_OK(
+          iree_hal_amd_fabric_create(api, native_lifetime(), 0, nullptr,
+                                     iree_allocator_system(), &fabric_));
     }
   }
   bool selected_endpoint_found = false;

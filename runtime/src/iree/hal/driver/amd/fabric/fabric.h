@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVER_AMD_FABRIC_FABRIC_H_
 
 #include "amdf/amdf.h"
+#include "amdf/rocjitsu.h"
 #include "iree/base/api.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/device_spec.h"
@@ -47,19 +48,24 @@ typedef struct iree_hal_amd_fabric_t {
   iree_hal_amd_fabric_allocation_entry_t* allocations;
 } iree_hal_amd_fabric_t;
 
-// Creates an independent native instance and snapshots passive discovery.
-// Engine extension negotiation and activation happen in engine constructors.
-// The providing library and |api| must outlive the returned fabric. Failure
-// publishes no output. The caller releases the returned reference.
-// |native_lifetime| selects libamdf's native state lifetime bound,
+// Creates an independent instance and snapshots passive discovery. Explicit
+// simulator configurations are copied into the instance before discovery;
+// |rocjitsu_machines| is borrowed only during this call. A nonzero count
+// replaces native endpoints with the complete configured topology. A zero count
+// leaves native discovery unchanged and does not negotiate the simulator
+// extension. Engine extension negotiation and activation happen in engine
+// constructors. The providing library and |api| must outlive the returned
+// fabric. Failure publishes no output. The caller releases the returned
+// reference. |native_lifetime| selects libamdf's native state lifetime bound,
 // independently from HAL group identity and handle ownership. PROCESS may share
 // Linux KFD state with foreign clients; the application must order their VM
 // mutations against reservation updates and removal. INSTANCE supports only
 // services that the native provider can reclaim at instance destruction.
-iree_status_t iree_hal_amd_fabric_create(const amdf_api_t* api,
-                                         amdf_native_lifetime_t native_lifetime,
-                                         iree_allocator_t host_allocator,
-                                         iree_hal_amd_fabric_t** out_fabric);
+iree_status_t iree_hal_amd_fabric_create(
+    const amdf_api_t* api, amdf_native_lifetime_t native_lifetime,
+    uint32_t rocjitsu_machine_count,
+    const amdf_rocjitsu_machine_create_info_t* rocjitsu_machines,
+    iree_allocator_t host_allocator, iree_hal_amd_fabric_t** out_fabric);
 
 // Retains the shared owner. NULL is ignored.
 void iree_hal_amd_fabric_retain(iree_hal_amd_fabric_t* fabric);

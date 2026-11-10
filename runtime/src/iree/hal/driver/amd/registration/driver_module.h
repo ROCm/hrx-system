@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-// Registers the native AMD driver under each implemented execution scheme.
+// Registers AMD execution schemes over the configured libamdf fabric.
 // All advertised entries share one registry-owned driver and libamdf fabric.
 IREE_API_EXPORT iree_status_t
 iree_hal_amd_driver_module_register(iree_hal_driver_registry_t* registry);

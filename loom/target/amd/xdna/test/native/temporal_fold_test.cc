@@ -34,8 +34,10 @@ iree_status_t CreateDevice(const iree_hal_device_create_params_t* params,
                            iree_hal_driver_t** out_driver,
                            iree_hal_device_t** out_device) {
   iree_hal_driver_t* driver = nullptr;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_driver_create(
-      AMDF_NATIVE_LIFETIME_PROCESS, iree_allocator_system(), &driver));
+  iree_hal_amd_driver_options_t options;
+  iree_hal_amd_driver_options_initialize(&options);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amd_driver_create(&options, iree_allocator_system(), &driver));
   iree_status_t status = iree_hal_driver_create_device_by_uri(
       driver, IREE_SV("xdna://0?columns=1"), params, iree_allocator_system(),
       out_device);

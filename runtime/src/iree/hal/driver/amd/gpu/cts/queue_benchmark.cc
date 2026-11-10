@@ -47,8 +47,9 @@ struct ProcessFabric {
         amdf_query_api(AMDF_ABI_VERSION_LATEST, AMDF_ABI_VERSION_LATEST, &api),
         "amdf_query_api");
     if (iree_status_is_ok(status)) {
-      status = iree_hal_amd_fabric_create(api, AMDF_NATIVE_LIFETIME_PROCESS,
-                                          iree_allocator_system(), &fabric);
+      status =
+          iree_hal_amd_fabric_create(api, AMDF_NATIVE_LIFETIME_PROCESS, 0,
+                                     nullptr, iree_allocator_system(), &fabric);
     }
   }
   ~ProcessFabric() {

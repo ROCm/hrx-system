@@ -9,6 +9,7 @@
 #include <atomic>
 #include <barrier>
 #include <cstring>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -22,10 +23,17 @@ struct NativeInstance {
   int system_scope = 0;
   // Native policy captured at the public construction boundary.
   amdf_native_lifetime_t native_lifetime = AMDF_NATIVE_LIFETIME_PROCESS;
+  // Machine configurations copied before the discovery snapshot.
+  std::vector<std::string> machines;
+  // Whether any passive discovery operation has begun.
+  bool discovery_started = false;
   // Number of instances destroyed by the dependency mock.
   static std::atomic<int> destroy_count;
+  // Configured machines released by the most recent instance destruction.
+  static std::atomic<size_t> destroyed_machine_count;
 };
 std::atomic<int> NativeInstance::destroy_count = 0;
+std::atomic<size_t> NativeInstance::destroyed_machine_count = 0;
 
 amdf_status_t AMDF_CALL CreateInstance(const amdf_instance_create_info_t* info,
                                        amdf_instance_t** out_instance) {
@@ -36,6 +44,8 @@ amdf_status_t AMDF_CALL CreateInstance(const amdf_instance_create_info_t* info,
 }
 
 amdf_status_t AMDF_CALL DestroyInstance(amdf_instance_t* instance) {
+  NativeInstance::destroyed_machine_count =
+      reinterpret_cast<NativeInstance*>(instance)->machines.size();
   delete reinterpret_cast<NativeInstance*>(instance);
   ++NativeInstance::destroy_count;
   return AMDF_STATUS_OK;
@@ -45,6 +55,7 @@ amdf_status_t AMDF_CALL EnumerateScopes(amdf_instance_t* instance,
                                         uint32_t capacity,
                                         amdf_memory_scope_t** scopes,
                                         uint32_t* out_count) {
+  reinterpret_cast<NativeInstance*>(instance)->discovery_started = true;
   *out_count = 1;
   if (!capacity) {
     return amdf_make_api_status(AMDF_STATUS_CODE_BUFFER_TOO_SMALL);
@@ -64,19 +75,25 @@ amdf_status_t AMDF_CALL EnumerateEndpoints(amdf_instance_t* instance,
                                            uint32_t capacity,
                                            amdf_endpoint_summary_t* summaries,
                                            uint32_t* out_count) {
-  *out_count = 3;
+  auto* native = reinterpret_cast<NativeInstance*>(instance);
+  native->discovery_started = true;
+  const bool configured = !native->machines.empty();
+  const uint32_t count =
+      configured ? 2 * static_cast<uint32_t>(native->machines.size()) : 3;
+  *out_count = count;
   if (!capacity) {
     return AMDF_STATUS_OK;
   }
-  if (capacity < 3) {
+  if (capacity < count) {
     return amdf_make_api_status(AMDF_STATUS_CODE_BUFFER_TOO_SMALL);
   }
-  for (uint32_t i = 0; i < 3; ++i) {
+  for (uint32_t i = 0; i < count; ++i) {
     summaries[i] = {};
     summaries[i].id.words[0] = i + 1;
+    const bool npu = !configured && i == 1;
     summaries[i].engine_kind =
-        i == 1 ? AMDF_ENGINE_KIND_XDNA : AMDF_ENGINE_KIND_GPU;
-    std::strcpy(summaries[i].name, i == 1 ? "NPU" : "GPU");
+        npu ? AMDF_ENGINE_KIND_XDNA : AMDF_ENGINE_KIND_GPU;
+    std::strcpy(summaries[i].name, npu ? "NPU" : "GPU");
   }
   return AMDF_STATUS_OK;
 }
@@ -99,7 +116,8 @@ TEST(AmdFabricTest, PreservesAllEngineIdentitiesWithoutActivation) {
   iree_hal_amd_fabric_t* fabric = nullptr;
   const int before = NativeInstance::destroy_count;
   IREE_ASSERT_OK(iree_hal_amd_fabric_create(&api, AMDF_NATIVE_LIFETIME_PROCESS,
-                                            iree_allocator_system(), &fabric));
+                                            0, nullptr, iree_allocator_system(),
+                                            &fabric));
   EXPECT_EQ(fabric->api, &api);
   EXPECT_NE(fabric->system_scope, nullptr);
   ASSERT_EQ(fabric->endpoint_count, 3u);
@@ -119,9 +137,11 @@ TEST(AmdFabricTest, ExplicitCreationIsolatesNativeInstancesAndScopes) {
   auto api = NativeApi();
   iree_hal_amd_fabric_t *first = nullptr, *second = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_fabric_create(&api, AMDF_NATIVE_LIFETIME_PROCESS,
-                                            iree_allocator_system(), &first));
+                                            0, nullptr, iree_allocator_system(),
+                                            &first));
   IREE_ASSERT_OK(iree_hal_amd_fabric_create(&api, AMDF_NATIVE_LIFETIME_PROCESS,
-                                            iree_allocator_system(), &second));
+                                            0, nullptr, iree_allocator_system(),
+                                            &second));
   EXPECT_NE(first->instance, second->instance);
   EXPECT_NE(first->system_scope, second->system_scope);
   iree_hal_amd_fabric_release(first);
@@ -135,7 +155,7 @@ TEST(AmdFabricTest, ForwardsExplicitNativeLifetimePolicy) {
        {AMDF_NATIVE_LIFETIME_PROCESS, AMDF_NATIVE_LIFETIME_INSTANCE}) {
     iree_hal_amd_fabric_t* fabric = nullptr;
     IREE_ASSERT_OK(iree_hal_amd_fabric_create(
-        &api, lifetime, iree_allocator_system(), &fabric));
+        &api, lifetime, 0, nullptr, iree_allocator_system(), &fabric));
     EXPECT_EQ(
         reinterpret_cast<NativeInstance*>(fabric->instance)->native_lifetime,
         lifetime);
@@ -152,7 +172,8 @@ TEST(AmdFabricTest, EmptyDiscoveryRetainsTheNativeInstance) {
   };
   iree_hal_amd_fabric_t* fabric = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_fabric_create(&api, AMDF_NATIVE_LIFETIME_PROCESS,
-                                            iree_allocator_system(), &fabric));
+                                            0, nullptr, iree_allocator_system(),
+                                            &fabric));
   EXPECT_EQ(fabric->endpoint_count, 0u);
   EXPECT_EQ(fabric->endpoints, nullptr);
   EXPECT_NE(fabric->system_scope, nullptr);
@@ -163,7 +184,8 @@ TEST(AmdFabricTest, LogicalContextsShareOnlyTheirEndpointAndNodeQueue) {
   auto api = NativeApi();
   iree_hal_amd_fabric_t* fabric = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_fabric_create(&api, AMDF_NATIVE_LIFETIME_PROCESS,
-                                            iree_allocator_system(), &fabric));
+                                            0, nullptr, iree_allocator_system(),
+                                            &fabric));
   iree_hal_amd_fabric_allocation_queue_t* first = nullptr;
   iree_hal_amd_fabric_allocation_queue_t* second = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_fabric_acquire_allocation_queue(
@@ -194,8 +216,9 @@ class AmdFabricAllocationLifetimeTest : public ::testing::Test {
  protected:
   void SetUp() override {
     api_ = NativeApi();
-    IREE_ASSERT_OK(iree_hal_amd_fabric_create(
-        &api_, AMDF_NATIVE_LIFETIME_PROCESS, {this, Control}, &fabric_));
+    IREE_ASSERT_OK(
+        iree_hal_amd_fabric_create(&api_, AMDF_NATIVE_LIFETIME_PROCESS, 0,
+                                   nullptr, {this, Control}, &fabric_));
     dormant_allocations_ = live_allocations_.load();
   }
 
@@ -288,10 +311,110 @@ TEST(AmdFabricTest, FailedDiscoveryReleasesTheUnpublishedOwner) {
   const int before = NativeInstance::destroy_count;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_PERMISSION_DENIED,
-      iree_hal_amd_fabric_create(&api, AMDF_NATIVE_LIFETIME_PROCESS,
+      iree_hal_amd_fabric_create(&api, AMDF_NATIVE_LIFETIME_PROCESS, 0, nullptr,
                                  iree_allocator_system(), &fabric));
   EXPECT_EQ(fabric, nullptr);
   EXPECT_EQ(NativeInstance::destroy_count, before + 1);
+}
+
+amdf_status_t AMDF_CALL
+AddMachine(amdf_instance_t* instance,
+           const amdf_rocjitsu_machine_create_info_t* info) {
+  EXPECT_FALSE(reinterpret_cast<NativeInstance*>(instance)->discovery_started);
+  EXPECT_EQ(info->type, AMDF_STRUCTURE_TYPE_ROCJITSU_MACHINE_CREATE_INFO);
+  EXPECT_EQ(info->structure_size, sizeof(*info));
+  EXPECT_STREQ(info->library_path, "explicit-simulator-library");
+  if (std::strcmp(info->configuration_json, "fail") == 0) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  reinterpret_cast<NativeInstance*>(instance)->machines.emplace_back(
+      info->configuration_json);
+  return AMDF_STATUS_OK;
+}
+
+amdf_status_t AMDF_CALL QueryRocjitsuExtension(amdf_extension_id_t id,
+                                               uint32_t minimum_version,
+                                               uint32_t maximum_version,
+                                               const void** out_extension) {
+  EXPECT_EQ(id, AMDF_EXTENSION_ROCJITSU);
+  EXPECT_EQ(minimum_version, AMDF_ROCJITSU_EXTENSION_VERSION_1);
+  EXPECT_EQ(maximum_version, AMDF_ROCJITSU_EXTENSION_VERSION_LATEST);
+  static const amdf_rocjitsu_api_t extension = {
+      .structure_size = sizeof(amdf_rocjitsu_api_t),
+      .extension_version = AMDF_ROCJITSU_EXTENSION_VERSION_1,
+      .instance_add_machine = AddMachine,
+  };
+  *out_extension = &extension;
+  return AMDF_STATUS_OK;
+}
+
+amdf_rocjitsu_machine_create_info_t MachineInfo(const char* json) {
+  return {
+      .type = AMDF_STRUCTURE_TYPE_ROCJITSU_MACHINE_CREATE_INFO,
+      .structure_size = sizeof(amdf_rocjitsu_machine_create_info_t),
+      .library_path = "explicit-simulator-library",
+      .configuration_json = json,
+  };
+}
+
+TEST(AmdFabricTest, ConfiguresEveryMachineBeforePassiveDiscovery) {
+  auto api = NativeApi();
+  api.query_extension = QueryRocjitsuExtension;
+  const auto machines = {MachineInfo("first"), MachineInfo("second")};
+  iree_hal_amd_fabric_t* fabric = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_fabric_create(&api, AMDF_NATIVE_LIFETIME_INSTANCE,
+                                            machines.size(), machines.begin(),
+                                            iree_allocator_system(), &fabric));
+  EXPECT_EQ(fabric->endpoint_count, 4u);
+  for (uint32_t i = 0; i < fabric->endpoint_count; ++i) {
+    EXPECT_EQ(fabric->endpoints[i].engine_kind, AMDF_ENGINE_KIND_GPU);
+  }
+  const auto& configured =
+      reinterpret_cast<NativeInstance*>(fabric->instance)->machines;
+  EXPECT_EQ(configured, (std::vector<std::string>{"first", "second"}));
+  iree_hal_amd_fabric_release(fabric);
+  EXPECT_EQ(NativeInstance::destroyed_machine_count, 2u);
+}
+
+TEST(AmdFabricTest, LaterMachineFailureReleasesEarlierConfiguration) {
+  auto api = NativeApi();
+  api.query_extension = QueryRocjitsuExtension;
+  const auto machines = {MachineInfo("first"), MachineInfo("fail"),
+                         MachineInfo("third")};
+  iree_hal_amd_fabric_t* fabric = nullptr;
+  const int before = NativeInstance::destroy_count;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_amd_fabric_create(&api, AMDF_NATIVE_LIFETIME_INSTANCE,
+                                 machines.size(), machines.begin(),
+                                 iree_allocator_system(), &fabric));
+  EXPECT_EQ(fabric, nullptr);
+  EXPECT_EQ(NativeInstance::destroy_count, before + 1);
+  EXPECT_EQ(NativeInstance::destroyed_machine_count, 1u);
+}
+
+TEST(AmdFabricTest, UnavailableSimulatorDoesNotFallBackToNativeDiscovery) {
+  auto api = NativeApi();
+  api.query_extension =
+      +[](amdf_extension_id_t id, uint32_t, uint32_t, const void**) {
+        EXPECT_EQ(id, AMDF_EXTENSION_ROCJITSU);
+        return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+      };
+  api.instance_enumerate_memory_scopes =
+      +[](amdf_instance_t*, uint32_t, amdf_memory_scope_t**, uint32_t*) {
+        ADD_FAILURE() << "Failed bootstrap must not begin discovery";
+        return AMDF_STATUS_OK;
+      };
+  const auto machine = MachineInfo("unavailable");
+  iree_hal_amd_fabric_t* fabric = nullptr;
+  const int before = NativeInstance::destroy_count;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNIMPLEMENTED,
+      iree_hal_amd_fabric_create(&api, AMDF_NATIVE_LIFETIME_INSTANCE, 1,
+                                 &machine, iree_allocator_system(), &fabric));
+  EXPECT_EQ(fabric, nullptr);
+  EXPECT_EQ(NativeInstance::destroy_count, before + 1);
+  EXPECT_EQ(NativeInstance::destroyed_machine_count, 0u);
 }
 
 struct NativeEndpoint {

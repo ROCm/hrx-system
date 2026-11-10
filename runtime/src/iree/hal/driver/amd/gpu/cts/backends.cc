@@ -14,9 +14,12 @@ namespace iree::hal::cts {
 // releases its devices and retained driver references before this owner dies.
 class ProcessDriver {
  public:
-  ProcessDriver()
-      : status_(iree_hal_amd_driver_create(
-            AMDF_NATIVE_LIFETIME_PROCESS, iree_allocator_system(), &driver_)) {}
+  ProcessDriver() {
+    iree_hal_amd_driver_options_t options;
+    iree_hal_amd_driver_options_initialize(&options);
+    status_ =
+        iree_hal_amd_driver_create(&options, iree_allocator_system(), &driver_);
+  }
   ~ProcessDriver() {
     iree_hal_driver_release(driver_);
     iree_status_free(status_);

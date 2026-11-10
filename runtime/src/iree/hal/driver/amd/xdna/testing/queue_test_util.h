@@ -899,8 +899,8 @@ class QueueHarness {
     context->host_allocator = host_allocator;
     NativeProvider::construction_instance = &native;
     iree_status_t fabric_status =
-        iree_hal_amd_fabric_create(&native.api, AMDF_NATIVE_LIFETIME_PROCESS,
-                                   host_allocator, &context->fabric);
+        iree_hal_amd_fabric_create(&native.api, AMDF_NATIVE_LIFETIME_PROCESS, 0,
+                                   nullptr, host_allocator, &context->fabric);
     NativeProvider::construction_instance = nullptr;
     IREE_ASSERT_OK(fabric_status);
     context->api = &native.api;

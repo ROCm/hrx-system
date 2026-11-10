@@ -204,10 +204,11 @@ static iree_status_t iree_hal_amd_fabric_discover(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_amd_fabric_create(const amdf_api_t* api,
-                                         amdf_native_lifetime_t native_lifetime,
-                                         iree_allocator_t host_allocator,
-                                         iree_hal_amd_fabric_t** out_fabric) {
+iree_status_t iree_hal_amd_fabric_create(
+    const amdf_api_t* api, amdf_native_lifetime_t native_lifetime,
+    uint32_t rocjitsu_machine_count,
+    const amdf_rocjitsu_machine_create_info_t* rocjitsu_machines,
+    iree_allocator_t host_allocator, iree_hal_amd_fabric_t** out_fabric) {
   *out_fabric = NULL;
   iree_hal_amd_fabric_t* fabric = NULL;
   IREE_RETURN_IF_ERROR(
@@ -223,6 +224,22 @@ iree_status_t iree_hal_amd_fabric_create(const amdf_api_t* api,
   };
   iree_status_t status = IREE_HAL_AMD_STATUS_FROM_AMDF(
       api->instance_create(&create_info, &fabric->instance), "instance_create");
+  if (iree_status_is_ok(status) && rocjitsu_machine_count != 0) {
+    const void* extension = NULL;
+    status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+        api->query_extension(
+            AMDF_EXTENSION_ROCJITSU, AMDF_ROCJITSU_EXTENSION_VERSION_1,
+            AMDF_ROCJITSU_EXTENSION_VERSION_LATEST, &extension),
+        "query_extension(ROCJITSU)");
+    const amdf_rocjitsu_api_t* rocjitsu = extension;
+    for (uint32_t i = 0;
+         iree_status_is_ok(status) && i < rocjitsu_machine_count; ++i) {
+      status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+          rocjitsu->instance_add_machine(fabric->instance,
+                                         &rocjitsu_machines[i]),
+          "rocjitsu.instance_add_machine");
+    }
+  }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_fabric_discover(fabric);
   }

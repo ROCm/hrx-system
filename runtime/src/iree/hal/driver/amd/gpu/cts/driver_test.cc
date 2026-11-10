@@ -92,9 +92,9 @@ class DriverTest : public ::testing::Test {
     IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
         amdf_query_api(AMDF_ABI_VERSION_LATEST, AMDF_ABI_VERSION_LATEST, &api),
         "amdf_query_api"));
-    IREE_ASSERT_OK(
-        iree_hal_amd_fabric_create(api, AMDF_NATIVE_LIFETIME_INSTANCE,
-                                   iree_allocator_system(), &discovery_));
+    IREE_ASSERT_OK(iree_hal_amd_fabric_create(
+        api, AMDF_NATIVE_LIFETIME_INSTANCE, 0, nullptr, iree_allocator_system(),
+        &discovery_));
     const void* extension = nullptr;
     IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
         api->query_extension(AMDF_EXTENSION_GPU, AMDF_GPU_EXTENSION_VERSION_1,
