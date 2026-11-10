@@ -1680,7 +1680,9 @@ iree_status_t loom_low_lower_rule_plan_finalize(
                   sequence_lane_count == lanes->lane_count);
       sequence_lane_count = iree_max(sequence_lane_count, lanes->lane_count);
       if (i + 1 == rule->emit_count) {
-        IREE_ASSERT_EQ(sequence_lane_count, lanes->lane_count);
+        // A store sequence can end with a scalar cursor/state update rather
+        // than a vector collector. Retain its complete sequence extent here.
+        lanes->lane_count = sequence_lane_count;
       }
     }
     const loom_low_lower_source_memory_address_materializer_t* materializer =

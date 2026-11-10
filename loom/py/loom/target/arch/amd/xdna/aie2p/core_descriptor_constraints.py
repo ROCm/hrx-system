@@ -64,6 +64,7 @@ def descriptor_constraints(
             operand_indices[tie.use],
         )
         for tie in form.ties
+        if tie.use not in spec.overwritten_inputs
     ]
     for result_name, input_name in spec.tied_updates:
         if result_name not in operand_indices or input_name not in operand_indices:
@@ -143,6 +144,7 @@ def descriptor_register_outputs(
         for operand in form.inputs
         if operand.kind is not MachineOperandKind.IMMEDIATE
         and operand.name not in spec.implicit_inputs
+        and operand.name not in spec.overwritten_inputs
     }
     storage_overrides = dict(spec.storage_overrides)
     grouped = set()

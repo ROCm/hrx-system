@@ -26,6 +26,7 @@ from loom.target.arch.amd.xdna.aie2p.core_descriptor_specs import (
 )
 from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
     AIE2P_CORE_DESCRIPTOR_SET,
+    _descriptor,
     _low_register_class_name,
     _register_packing_members,
 )
@@ -646,6 +647,24 @@ def test_low_register_classes_retain_machine_candidate_order() -> None:
         ("aie2p.mstfifo.low512", "aie2p.mstfifo", 0x1),
         ("aie2p.mstfifo.high512", "aie2p.mstfifo", 0x2),
     } <= parts
+
+
+@pytest.mark.parametrize(
+    ("inputs", "message"),
+    [
+        (("fifo_reg", "fifo_reg"), "overwritten input names must be unique"),
+        (("missing",), "must be an unencoded explicit tied register input"),
+        (("src",), "must be an unencoded explicit tied register input"),
+    ],
+)
+def test_overwritten_inputs_require_fixed_tied_storage(inputs, message) -> None:
+    spec = next(
+        spec
+        for spec in _DESCRIPTOR_SPECS
+        if spec.key == "amd.xdna.aie2p.store.bfp16ebs8.fifo.push"
+    )
+    with pytest.raises(ValueError, match=message):
+        _descriptor(replace(spec, overwritten_inputs=inputs))
 
 
 def test_aggregate_updates_require_coindexed_unencoded_components() -> None:

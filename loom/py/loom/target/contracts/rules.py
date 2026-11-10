@@ -666,7 +666,7 @@ class DescriptorRule:
                         f"{self.source_op.name}: "
                         "skipped sequence results must update carried temporaries"
                     )
-            if final:
+            if final and self.source_op.results:
                 if len(result_refs) != 1:
                     raise ValueError(
                         f"{self.source_op.name}: "
@@ -680,7 +680,7 @@ class DescriptorRule:
             elif any(ref.kind is not SourceValueKind.TEMPORARY for ref in result_refs):
                 raise ValueError(
                     f"{self.source_op.name}: "
-                    "per-lane-sequence intermediate emit must bind a temporary"
+                    "per-lane-sequence non-collecting emit must bind a temporary"
                 )
             updated.update(
                 ref.field

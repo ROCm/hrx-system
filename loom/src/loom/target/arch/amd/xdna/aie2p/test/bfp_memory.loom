@@ -1,0 +1,93 @@
+// Packed stores preserve arbitrary operand bits and the bytes surrounding each
+// destination. The 776-byte row stride exercises alignments 0, 8, ..., 56.
+aie2p.target<array> @device
+
+func.def noinline @store_records(%local: view<8192xi8>, %row: index) where [range(%row, 0, 7)] {
+  %extent = index.constant 8 : index
+  %destination_bytes = view.subview %local[1024] : view<8192xi8> -> view<6208xi8>
+  %destination = view.bitcast %destination_bytes : view<6208xi8> -> view<8x776xi8>
+  %schema = encoding.define #encoding.operand<element_format=bfp16ebs8, payload_elements=64, payload_packing=target_fragment, payload_registers=18, rounding=flush_subnormal> : encoding<schema>
+  %bytes = vector.load %local[0] : view<8192xi8> -> vector<576xi8>
+  %group = vector.fragment<lhs> %bytes shape [blocks(%extent), %extent, %extent] using {schema = %schema : encoding<schema>} : vector<576xi8>
+  vector.store %group, %destination[%row, 0] : vector<576xi8>, view<8x776xi8>
+  %record_bytes = vector.load %local[0] : view<8192xi8> -> vector<72xi8>
+  %record = vector.fragment<lhs> %record_bytes shape [%extent, %extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  vector.store<volatile> %record, %destination[%row, 640] : vector<72xi8>, view<8x776xi8>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@device) @packed_store() run(%input_arg: buffer, %output_arg: buffer) {
+  %input, %output = buffer.assume.alignment %input_arg, %output_arg {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %size = index.constant 8192 : offset
+  %capacity = index.constant 1 : index
+  %pool = pipeline.memory<workgroup>[0, 2] : pool
+  %storage = buffer.alloca<workgroup> pool(%pool) align(64) %size : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x8192xi8>
+  %channel = channel.bind<fifo> %slots, %capacity : view<1x8192xi8>, index -> channel<tile<8192xi8>>
+  %source = buffer.view %input[%origin] : buffer -> view<8192xi8>
+  %destination = buffer.view %output[%origin] : buffer -> view<8192xi8>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %write, %local = channel.reserve %channel : channel<tile<8192xi8>> -> (write<tile<8192xi8>>, view<8192xi8>)
+    %load = kernel.async.copy %source to %local {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<8192xi8> to view<8192xi8> -> kernel.async.token
+    %arrival = kernel.async.group %load : kernel.async.token -> kernel.async.group
+    kernel.async.wait %arrival {newer_groups = 0} : kernel.async.group
+    %begin = index.constant 0 : index
+    %end = index.constant 8 : index
+    %step = index.constant 1 : index
+    scf.for %row = [%begin to %end step %step] {
+      func.call @store_records(%local, %row) : (view<8192xi8>, index)
+    }
+    channel.publish %write : write<tile<8192xi8>>
+    %read, %ready = channel.acquire %channel : channel<tile<8192xi8>> -> (read<tile<8192xi8>>, view<8192xi8>)
+    %store = kernel.async.copy %ready to %destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<8192xi8> to view<8192xi8> -> kernel.async.token
+    %departure = kernel.async.group %store : kernel.async.token -> kernel.async.group
+    kernel.async.wait %departure {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<8192xi8>>
+  }
+}
+
+// Storage interpretation is independent of floating-point rounding. A byte
+// copy is the oracle for both isolated records and consecutive native records.
+func.def @reference(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %destination_offset = index.constant 1024 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %size = index.constant 8192 : index
+  %rows = index.constant 8 : index
+  %group_bytes = index.constant 576 : index
+  %record_bytes = index.constant 72 : index
+  %record_offset = index.constant 640 : index
+  %source = buffer.view %input[%origin] : buffer -> view<8192xi8>
+  %backing = buffer.view %output[%origin] : buffer -> view<8192xi8>
+  %destination = buffer.view %output[%destination_offset] : buffer -> view<8x776xi8>
+  scf.for %byte = [%begin to %size step %step] {
+    %value = view.load %source[%byte] : view<8192xi8> -> i8
+    view.store %value, %backing[%byte] : i8, view<8192xi8>
+  }
+  scf.for %row = [%begin to %rows step %step] {
+    scf.for %byte = [%begin to %group_bytes step %step] {
+      %value = view.load %source[%byte] : view<8192xi8> -> i8
+      view.store %value, %destination[%row, %byte] : i8, view<8x776xi8>
+    }
+    scf.for %byte = [%begin to %record_bytes step %step] {
+      %value = view.load %source[%byte] : view<8192xi8> -> i8
+      %position = index.add %record_offset, %byte : index
+      view.store %value, %destination[%row, %position] : i8, view<8x776xi8>
+    }
+  }
+  func.return
+}
+
+check.scenario public @packed_store_guards {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<8192xi8>
+    %output = check.generate.fill value(-1) : tensor<8192xi8>
+    check.compare<@packed_store, @reference>(%input, %output) : (tensor<8192xi8>, tensor<8192xi8>) -> () {
+      check.expect.equal actual(%output) expected(%output) : tensor<8192xi8>
+    }
+  }
+  check.return
+}

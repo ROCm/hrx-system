@@ -477,6 +477,8 @@ def test_fifo_stores_preserve_the_fixed_tuple_and_overflow_state() -> None:
         assert descriptor.asm_forms[0].operands == (
             ("fifo_reg", "ptr", "avail")
             if descriptor in flushes
+            else ("src", "ptr", "avail")
+            if descriptor.key.endswith(".empty")
             else ("fifo_reg", "src", "ptr", "avail")
         )
         assert descriptor.effects[0].kind is EffectKind.WRITE
@@ -489,16 +491,30 @@ def test_fifo_stores_preserve_the_fixed_tuple_and_overflow_state() -> None:
             for constraint in descriptor.constraints
             if constraint.kind is ConstraintKind.TIED
         } == {
-            ("fifo_reg_out", "fifo_reg"),
             ("ptr_out", "ptr"),
             ("avail_out", "avail"),
-        }
+        } | (
+            set()
+            if descriptor.key.endswith(".empty")
+            else {("fifo_reg_out", "fifo_reg")}
+        )
         overflow = next(
             operand
             for operand in descriptor.operands
             if operand.field_name == "implicit_def_srfifo_of"
         )
         assert OperandFlag.STATE_WRITE in overflow.flags
+
+    ordinary = [
+        descriptor for descriptor in pushes if not descriptor.key.endswith(".empty")
+    ]
+    assert len(pushes) == 2 * len(ordinary)
+    for descriptor in ordinary:
+        empty = descriptors[descriptor.key + ".empty"]
+        assert empty.encoding_id == descriptor.encoding_id
+        assert empty.schedule_class == descriptor.schedule_class
+        assert empty.effects == descriptor.effects
+        assert not any(operand.field_name == "fifo_reg" for operand in empty.operands)
 
 
 def test_fused_vector_memory_descriptors_preserve_conversion_and_memory_contracts() -> (

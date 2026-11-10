@@ -1,0 +1,113 @@
+// RUN: emit source-low output=low
+
+// Encoded values retain their native register representation until the store.
+// A 72-byte record requires no padding or destination read. Eight-byte
+// alignment lets one push and flush cover its exact logical extent.
+aie2p.target<core> @target
+
+func.def target(@target) @store_bf16(%input: vector<64xbf16>, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %aligned = buffer.assume.alignment %output {minimum_alignment = 8} : buffer
+  %bytes = buffer.view %aligned[%origin] : buffer -> view<80xi8>
+  %schema = encoding.define #encoding.operand<element_format=bfp16ebs8, payload_elements=64, payload_packing=target_fragment, payload_registers=18, rounding=flush_subnormal> : encoding<schema>
+  %encoded = vector.encode %input using %schema : vector<64xbf16>, encoding<schema> -> vector<72xi8>
+  vector.store %encoded, %bytes[8] : vector<72xi8>, view<80xi8>
+  func.return
+}
+
+func.def target(@target) @store_f32(%input: vector<64xf32>, %output: buffer, %index: index) where [range(%index, 0, 15)] {
+  %origin = index.constant 0 : offset
+  %aligned = buffer.assume.alignment %output {minimum_alignment = 8} : buffer
+  %bytes = buffer.view %aligned[%origin] : buffer -> view<16x72xi8>
+  %schema = encoding.define #encoding.operand<element_format=bfp16ebs8, payload_elements=64, payload_packing=target_fragment, payload_registers=18, rounding=flush_subnormal> : encoding<schema>
+  %encoded = vector.encode %input using %schema : vector<64xf32>, encoding<schema> -> vector<72xi8>
+  vector.store<volatile> %encoded, %bytes[%index, 0] : vector<72xi8>, view<16x72xi8>
+  func.return
+}
+
+// The store must consume every native record even though it has no source
+// result from which to derive its repeated emission count.
+func.def target(@target) @store_group(%input: buffer, %output: buffer) {
+  %aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 8} : buffer
+  %origin = index.constant 0 : offset
+  %source = buffer.view %aligned[%origin] : buffer -> view<576xi8>
+  %destination = buffer.view %output_aligned[%origin] : buffer -> view<576xi8>
+  %extent = index.constant 8 : index
+  %schema = encoding.define #encoding.operand<element_format=bfp16ebs8, payload_elements=64, payload_packing=target_fragment, payload_registers=18, rounding=flush_subnormal> : encoding<schema>
+  %bytes = vector.load %source[0] : view<576xi8> -> vector<576xi8>
+  %group = vector.fragment<lhs> %bytes shape [blocks(%extent), %extent, %extent] using {schema = %schema : encoding<schema>} : vector<576xi8>
+  vector.store %group, %destination[0] : vector<576xi8>, view<576xi8>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @store_bf16(%input: reg<aie2p.vec256 x4>) asm {
+  %aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %31 = slice %input[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %32 = vconv.fp32.bf16 %31
+  %33 = slice %input[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %34 = vconv.fp32.bf16 %33
+  %35 = concat(%32, %34) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  set.rounding 12
+  %encoded = vconv.bfp16ebs8.fp32 %35
+  %37 = copy %aligned : reg<aie2p.ep> -> reg<aie2p.ep>
+  %38 = mova.modifier 8
+  %39 = paddb.modifier %37, %38
+  %40 = mov.store-fifo.pointer %39
+  %41 = mova.fifo.store.position 0
+  %42, %43, %44 = vst.push.bfp16ebs8.empty %encoded, %40, %41
+  %45, %46, %47 = vst.flush.512 %42, %43, %44
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @store_f32(%input: reg<aie2p.mbms x4>, %index: reg<aie2p.er>) where [range(%index, 0, 15)] asm {
+  %aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  set.rounding 12
+  %encoded = vconv.bfp16ebs8.fp32 %input
+  %52 = copy %aligned : reg<aie2p.ep> -> reg<aie2p.ep>
+  %53 = mov.i32 72
+  %54 = mul %index, %53
+  %55 = mov.modifier %54
+  %56 = paddb.modifier %52, %55
+  %57 = mov.store-fifo.pointer %56
+  %58 = mova.fifo.store.position 0
+  %59, %60, %61 = vst.push.bfp16ebs8.empty.volatile<volatile> %encoded, %57, %58
+  %62, %63, %64 = vst.flush.512.volatile<volatile> %59, %60, %61
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @store_group() asm {
+  %aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %67 = mov.load-fifo.pointer %aligned
+  %68 = vlda.load-fifo.low512 %67, 0
+  %69 = mova.fifo.position 64
+  %70, %71, %72, %73 = vlda.pop.bfp16ebs8.buffered64 %67, %68, %69
+  %74, %75, %76, %77 = vlda.pop.bfp16ebs8 %71, %72, %73
+  %78, %79, %80, %81 = vlda.pop.bfp16ebs8 %75, %76, %77
+  %82, %83, %84, %85 = vlda.pop.bfp16ebs8 %79, %80, %81
+  %86, %87, %88, %89 = vlda.pop.bfp16ebs8 %83, %84, %85
+  %90, %91, %92, %93 = vlda.pop.bfp16ebs8 %87, %88, %89
+  %94, %95, %96, %97 = vlda.pop.bfp16ebs8 %91, %92, %93
+  %98, %99, %100, %101 = vlda.pop.bfp16ebs8 %95, %96, %97
+  %103 = mov.store-fifo.pointer %output_aligned
+  %104 = mova.fifo.store.position 0
+  %106, %107, %108 = vst.push.bfp16ebs8.empty %70, %103, %104
+  %109, %110, %111 = vst.flush.512 %106, %107, %108
+  %113, %114, %115 = vst.push.bfp16ebs8.empty %74, %110, %111
+  %116, %117, %118 = vst.flush.512 %113, %114, %115
+  %120, %121, %122 = vst.push.bfp16ebs8.empty %78, %117, %118
+  %123, %124, %125 = vst.flush.512 %120, %121, %122
+  %127, %128, %129 = vst.push.bfp16ebs8.empty %82, %124, %125
+  %130, %131, %132 = vst.flush.512 %127, %128, %129
+  %134, %135, %136 = vst.push.bfp16ebs8.empty %86, %131, %132
+  %137, %138, %139 = vst.flush.512 %134, %135, %136
+  %141, %142, %143 = vst.push.bfp16ebs8.empty %90, %138, %139
+  %144, %145, %146 = vst.flush.512 %141, %142, %143
+  %148, %149, %150 = vst.push.bfp16ebs8.empty %94, %145, %146
+  %151, %152, %153 = vst.flush.512 %148, %149, %150
+  %155, %156, %157 = vst.push.bfp16ebs8.empty %98, %152, %153
+  %158, %159, %160 = vst.flush.512 %155, %156, %157
+  return
+}

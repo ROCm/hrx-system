@@ -26,7 +26,7 @@ from loom.dialect.view import ALL_VIEW_OPS
 from loom.dialect.view import defs as view
 from loom.target.arch.amd.xdna.aie2p.contracts import core as core_rules
 from loom.target.arch.amd.xdna.aie2p.contracts.bfp import (
-    AIE2P_BFP_ENCODE_RULE,
+    AIE2P_BFP_ENCODE_RULES,
     AIE2P_BFP_FRAGMENT_RULES,
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.conversion import (
@@ -131,7 +131,7 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             source_op=vector.vector_mma,
             source="vector_mma",
         ),
-        AIE2P_BFP_ENCODE_RULE,
+        *AIE2P_BFP_ENCODE_RULES,
         *AIE2P_BFP_FRAGMENT_RULES,
         *AIE2P_PACKED_DOT_RULES,
         *AIE2P_INTEGER_COUNT_RULES,

@@ -21,6 +21,7 @@ loom_check_test_suite(
     name = "loom_check_test",
     srcs = [
         "bf16_vectors.loom-test",
+        "bfp_memory.loom-test",
         "buffer_bulk.loom-test",
         "buffer_selection.loom-test",
         "callable_memory.loom-test",

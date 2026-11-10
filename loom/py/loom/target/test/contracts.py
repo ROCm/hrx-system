@@ -364,6 +364,56 @@ def _streaming_vector_load_rule(*, volatile: bool) -> DescriptorRule:
     )
 
 
+def _streaming_vector_store_rule() -> DescriptorRule:
+    index = ValueRef.temporary("index")
+    advance = ValueRef.temporary("advance")
+    return DescriptorRule(
+        source_op=vector.vector_store,
+        descriptor=TEST_LOW_STORE_INDEX_V4I32_DESCRIPTOR,
+        guards=(
+            Guard.value_type(
+                "value", Vector("i32", minimum_lanes=8, maximum_lanes=65535)
+            ),
+            Guard.value_static_dim0_multiple("value", 4),
+        ),
+        emit=(
+            *(
+                EmitDescriptorOp(
+                    descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                    results={"dst": result},
+                    result_types={"dst": _I32},
+                    immediates={"i32_value": value},
+                    form=DescriptorEmitForm.CONST,
+                )
+                for result, value in ((index, 0), (advance, 16))
+            ),
+            EmitDescriptorOp(
+                descriptor=TEST_LOW_STORE_INDEX_V4I32_DESCRIPTOR,
+                operands={
+                    "address": ValueRef.operand("view"),
+                    "index": index,
+                    "value": ValueRef.operand("value"),
+                },
+                source_memory=replace(
+                    _source_memory_constraint(
+                        SourceMemoryOperation.STORE, dynamic=False
+                    ),
+                    vector_lane_count=None,
+                ),
+                form=DescriptorEmitForm.PER_LANE_SEQUENCE,
+            ),
+            EmitDescriptorOp(
+                descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+                operands={"lhs": index, "rhs": advance},
+                results={"dst": index},
+                result_types={"dst": index},
+                form=DescriptorEmitForm.PER_LANE_SEQUENCE,
+            ),
+        ),
+        sequence_carried=("index",),
+    )
+
+
 def _vector_store_rule(
     descriptor: Descriptor,
     value_type: TypePattern,
@@ -780,6 +830,7 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
             _V4F32,
             dynamic=True,
         ),
+        _streaming_vector_store_rule(),
         _vector_store_rule(
             TEST_LOW_STORE_V4I32_DESCRIPTOR,
             _V4I32,

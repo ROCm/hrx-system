@@ -33,6 +33,9 @@ class _DescriptorSpec:
     implicit_outputs: tuple[str, ...] = ()
     # Machine inputs fixed to architectural state instead of SSA operands.
     implicit_inputs: tuple[str, ...] = ()
+    # Tied fixed-register inputs not read by this semantic specialization.
+    # Their output state is independent of the incoming register contents.
+    overwritten_inputs: tuple[str, ...] = ()
     # Authored Low spelling when the physical mnemonic is ambiguous.
     asm_mnemonic: str | None = None
     # Named partial-register views accessed by individual machine operands.
