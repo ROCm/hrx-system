@@ -109,6 +109,7 @@ class hrx_ptr {
 };
 
 using device_ptr = hrx_ptr<hrx_device_t, hrx_device_retain, hrx_device_release>;
+using queue_ptr = hrx_ptr<hrx_queue_t, hrx_queue_retain, hrx_queue_release>;
 using allocator_ptr =
     hrx_ptr<hrx_allocator_t, hrx_allocator_retain, hrx_allocator_release>;
 using semaphore_ptr =

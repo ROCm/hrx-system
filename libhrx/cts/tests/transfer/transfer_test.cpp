@@ -44,7 +44,7 @@ TEST_CASE_METHOD(HrxTestFixture, "synchronous_h2d basic", "[transfer][h2d]") {
   uint8_t src[256];
   memset(src, 0x42, sizeof(src));
 
-  REQUIRE_OK(hrx().synchronous_h2d(device_, src, buf, 0, 256));
+  REQUIRE_OK(hrx().synchronous_h2d(transfer_queue_, src, buf, 0, 256));
 
   // Verify via map.
   void* mapped = nullptr;
@@ -74,7 +74,7 @@ TEST_CASE_METHOD(HrxTestFixture, "synchronous_d2h basic", "[transfer][d2h]") {
 
   // Read back via synchronous_d2h.
   uint8_t dst[256] = {};
-  REQUIRE_OK(hrx().synchronous_d2h(device_, buf, 0, dst, 256));
+  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, buf, 0, dst, 256));
 
   for (int i = 0; i < 256; i++) {
     REQUIRE(dst[i] == 0x99);
@@ -101,12 +101,13 @@ TEST_CASE_METHOD(HrxTestFixture, "synchronous h2d then d2h roundtrip",
     pattern[i] = (uint32_t)i * 0x01010101;
   }
 
-  REQUIRE_OK(hrx().synchronous_h2d(device_, pattern, buf, 0, sizeof(pattern)));
+  REQUIRE_OK(
+      hrx().synchronous_h2d(transfer_queue_, pattern, buf, 0, sizeof(pattern)));
 
   // Read back.
   uint32_t readback[256] = {};
-  REQUIRE_OK(
-      hrx().synchronous_d2h(device_, buf, 0, readback, sizeof(readback)));
+  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, buf, 0, readback,
+                                   sizeof(readback)));
 
   REQUIRE(memcmp(pattern, readback, sizeof(pattern)) == 0);
 
@@ -157,8 +158,22 @@ TEST_CASE_METHOD(HrxTestFixture, "synchronous_h2d out of range fails",
 
   uint8_t src[128];
   // Try to write 128 bytes into a 64-byte buffer.
-  hrx_status_t s = hrx().synchronous_h2d(device_, src, buf, 0, 128);
+  hrx_status_t s = hrx().synchronous_h2d(transfer_queue_, src, buf, 0, 128);
   REQUIRE(!hrx_status_is_ok(s));
+  hrx().status_ignore(s);
+
+  // Neither API selects a hidden device queue when execution is unspecified.
+  s = hrx().synchronous_h2d(nullptr, src, buf, 0, 4);
+  CHECK(hrx().status_code(s) == HRX_STATUS_INVALID_ARGUMENT);
+  hrx().status_ignore(s);
+  s = hrx().synchronous_d2h(nullptr, buf, 0, src, 4);
+  CHECK(hrx().status_code(s) == HRX_STATUS_INVALID_ARGUMENT);
+  hrx().status_ignore(s);
+  s = hrx().stream_copy_h2d(nullptr, src, buf, 0, 4);
+  CHECK(hrx().status_code(s) == HRX_STATUS_INVALID_ARGUMENT);
+  hrx().status_ignore(s);
+  s = hrx().stream_copy_d2h(nullptr, buf, 0, src, 4);
+  CHECK(hrx().status_code(s) == HRX_STATUS_INVALID_ARGUMENT);
   hrx().status_ignore(s);
 
   hrx().buffer_release(buf);

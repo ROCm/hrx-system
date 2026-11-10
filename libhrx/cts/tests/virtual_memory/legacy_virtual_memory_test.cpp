@@ -83,7 +83,7 @@ TEST_CASE_METHOD(HrxTestFixture, "legacy virtual memory lifecycle",
   if (!supported) {
     hrx_buffer_t virtual_buffer = nullptr;
     hrx_status_t status = hrx().allocator_virtual_memory_reserve(
-        allocator, /*affinity=*/0, 65536, &virtual_buffer);
+        allocator, 65536, &virtual_buffer);
     CHECK(!hrx_status_is_ok(status));
     CHECK(virtual_buffer == nullptr);
     hrx().status_ignore(status);
@@ -94,8 +94,8 @@ TEST_CASE_METHOD(HrxTestFixture, "legacy virtual memory lifecycle",
   REQUIRE(recommended_page_size >= minimum_page_size);
   LegacyVirtualMemoryResources resources(allocator);
   resources.size = recommended_page_size;
-  REQUIRE_OK(hrx().allocator_virtual_memory_reserve(
-      allocator, /*affinity=*/0, resources.size, &resources.virtual_buffer));
+  REQUIRE_OK(hrx().allocator_virtual_memory_reserve(allocator, resources.size,
+                                                    &resources.virtual_buffer));
   REQUIRE_OK(hrx().allocator_physical_memory_allocate(
       allocator, HRX_MEMORY_TYPE_DEVICE_LOCAL, resources.size,
       &resources.physical_memory));
@@ -107,13 +107,14 @@ TEST_CASE_METHOD(HrxTestFixture, "legacy virtual memory lifecycle",
       allocator, resources.virtual_buffer, /*virtual_offset=*/0, resources.size,
       HRX_MEMORY_PROTECTION_READ_WRITE));
   const std::array<uint32_t, 4> expected = {7, 13, 19, 23};
-  REQUIRE_OK(hrx().synchronous_h2d(
-      device_, expected.data(), resources.virtual_buffer, 0, sizeof(expected)));
+  REQUIRE_OK(hrx().synchronous_h2d(transfer_queue_, expected.data(),
+                                   resources.virtual_buffer, 0,
+                                   sizeof(expected)));
   REQUIRE_OK(hrx().allocator_virtual_memory_protect_scoped(
       allocator, resources.virtual_buffer, /*virtual_offset=*/0, resources.size,
       HRX_VIRTUAL_MEMORY_ACCESS_SCOPE_ALL, HRX_MEMORY_PROTECTION_READ_WRITE));
   std::array<uint32_t, 4> observed = {};
-  REQUIRE_OK(hrx().synchronous_d2h(device_, resources.virtual_buffer, 0,
+  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, resources.virtual_buffer, 0,
                                    observed.data(), sizeof(observed)));
   CHECK(observed == expected);
 

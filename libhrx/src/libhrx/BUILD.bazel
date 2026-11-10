@@ -33,6 +33,7 @@ HRX_SRCS = [
     "host_allocator.c",
     "mem_pool.c",
     "mem_pool_backing.c",
+    "queue.c",
     "queue_ops.c",
     "runtime.c",
     "semaphore.c",
@@ -49,6 +50,7 @@ HRX_HDRS = [
     "hrx_internal.h",
     "mem_pool.h",
     "mem_pool_backing.h",
+    "queue.h",
     "runtime.h",
     "transfer.h",
     "//libhrx/src:iree_hal_compat.h",
@@ -145,6 +147,18 @@ hrx_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/testing:mock_device",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "queue_test",
+    srcs = ["queue_test.cc"],
+    deps = [
+        ":hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

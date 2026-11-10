@@ -35,18 +35,9 @@ hrx_status_t hrx_allocator_allocate_buffer(hrx_allocator_t allocator,
                                                 "allocator or buffer is NULL"));
   }
 
-  iree_hal_queue_family_affinity_t queue_family_affinity = 0;
-  iree_status_t status = hrx_hal_queue_affinity_to_family_affinity(
-      allocator->device->hal_device, params.queue_affinity,
-      &queue_family_affinity);
-  if (!iree_status_is_ok(status)) {
-    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
-  }
-  (void)queue_family_affinity;
-
   iree_hal_pool_t* pool = NULL;
   iree_hal_buffer_t* hal_buffer = NULL;
-  status = hrx_mem_pool_backing_retain_allocation_source(
+  iree_status_t status = hrx_mem_pool_backing_retain_allocation_source(
       allocator->device, params.type, params.usage, &pool);
   if (iree_status_is_ok(status)) {
     const iree_hal_pool_reservation_request_t request =
@@ -85,15 +76,6 @@ hrx_status_t hrx_allocator_import_buffer(hrx_allocator_t allocator,
                         "host registration cannot provide remappable backing"));
   }
 
-  iree_hal_queue_family_affinity_t queue_family_affinity = 0;
-  iree_status_t status = hrx_hal_queue_affinity_to_family_affinity(
-      allocator->device->hal_device, params.queue_affinity,
-      &queue_family_affinity);
-  if (!iree_status_is_ok(status)) {
-    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
-  }
-  (void)queue_family_affinity;
-
   iree_hal_external_storage_t ext = {
       .storage_class.type = IREE_HAL_EXTERNAL_STORAGE_TYPE_HOST_POINTER,
       .byte_length = (iree_device_size_t)size,
@@ -106,8 +88,8 @@ hrx_status_t hrx_allocator_import_buffer(hrx_allocator_t allocator,
 
   iree_hal_pool_t* pool = NULL;
   iree_hal_buffer_t* hal_buffer = NULL;
-  status = hrx_mem_pool_backing_retain_import_source(allocator->device,
-                                                     ext.storage_class, &pool);
+  iree_status_t status = hrx_mem_pool_backing_retain_import_source(
+      allocator->device, ext.storage_class, &pool);
   if (iree_status_is_ok(status)) {
     status = iree_hal_pool_import_buffer(
         pool, &ext, iree_hal_make_buffer_range(0, IREE_HAL_WHOLE_BUFFER),
@@ -186,8 +168,7 @@ hrx_status_t hrx_allocator_query_virtual_memory(hrx_allocator_t allocator,
 }
 
 hrx_status_t hrx_allocator_virtual_memory_reserve(
-    hrx_allocator_t allocator, hrx_queue_affinity_t affinity, size_t size,
-    hrx_buffer_t* virtual_buffer) {
+    hrx_allocator_t allocator, size_t size, hrx_buffer_t* virtual_buffer) {
   HRX_TRACE_ZONE_BEGIN(z0, "hrx_allocator_virtual_memory_reserve");
   HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
   if (!allocator || !virtual_buffer) {
@@ -197,16 +178,10 @@ hrx_status_t hrx_allocator_virtual_memory_reserve(
   HRX_RETURN_AND_END_ZONE_IF_IREE_ERROR(
       z0, hrx_allocator_require_legacy_virtual_memory(allocator));
 
-  iree_hal_queue_family_affinity_t queue_family_affinity = 0;
-  iree_status_t status = hrx_hal_queue_affinity_to_family_affinity(
-      allocator->device->hal_device, affinity, &queue_family_affinity);
-  if (!iree_status_is_ok(status)) {
-    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
-  }
   iree_hal_buffer_t* hal_buffer = NULL;
-  status = iree_hal_allocator_virtual_memory_reserve(
-      allocator->hal_allocator, queue_family_affinity, (iree_device_size_t)size,
-      &hal_buffer);
+  iree_status_t status = iree_hal_allocator_virtual_memory_reserve(
+      allocator->hal_allocator, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+      (iree_device_size_t)size, &hal_buffer);
   if (!iree_status_is_ok(status)) {
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }

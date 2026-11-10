@@ -128,6 +128,18 @@ void HrxLoader::load(const std::string& path) {
   LOAD(device_retain);
   LOAD(device_release);
 
+  LOAD(device_queue_family_count);
+  LOAD(device_query_queue_family);
+  LOAD(device_query_queue_execution_resource);
+  LOAD(device_query_queue_execution_resource_group);
+  LOAD(device_get_queue);
+  LOAD(queue_acquire);
+  LOAD(queue_retain);
+  LOAD(queue_release);
+  LOAD(queue_get_device);
+  LOAD(queue_get_family_ordinal);
+  LOAD(queue_query_params);
+
   LOAD(semaphore_create);
   LOAD(semaphore_retain);
   LOAD(semaphore_release);
@@ -219,7 +231,8 @@ void HrxLoader::load(const std::string& path) {
   LOAD(allocator_virtual_memory_protect);
   LOAD(allocator_virtual_memory_protect_scoped);
 
-  LOAD(device_query_memory_scope);
+  LOAD(device_query_host_memory_scope);
+  LOAD(device_query_queue_family_memory_scope);
   LOAD(virtual_buffer_query_capabilities);
   LOAD(virtual_buffer_create);
   LOAD(virtual_buffer_query_info);

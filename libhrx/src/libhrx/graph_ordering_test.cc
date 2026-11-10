@@ -205,8 +205,9 @@ class GraphOrderingTest : public ::testing::Test {
 
   void VerifyContents(size_t count) {
     std::array<uint32_t, kWordCount> contents;
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h(
-        device_, buffer_, 0, contents.data(), sizeof(contents))));
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), buffer_, 0,
+                            contents.data(), sizeof(contents))));
     for (size_t i = 0; i < contents.size(); ++i) {
       EXPECT_EQ(contents[i], i < count ? i + 1 : 0) << i;
     }
@@ -480,7 +481,8 @@ TEST_P(GraphStreamWaitTest, CompletedExternalWaitPreservesPendingStreamWork) {
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(streams_[0])));
   uint32_t contents[2] = {};
   IREE_ASSERT_OK(hrx_status_to_iree(
-      hrx_synchronous_d2h(device_, buffer_, 0, contents, sizeof(contents))));
+      hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), buffer_, 0,
+                          contents, sizeof(contents))));
   EXPECT_EQ(contents[0], pattern);
   EXPECT_EQ(contents[1], pattern);
 }

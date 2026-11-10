@@ -106,8 +106,9 @@ TEST_F(GraphBufferTest, DependentFillThenCopyProducesExpectedContents) {
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
 
   uint8_t contents[64] = {};
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h(
-      device_, destination_, 0, contents, sizeof(contents))));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), destination_, 0,
+                          contents, sizeof(contents))));
   for (uint8_t value : contents) {
     EXPECT_EQ(value, 0xA5u);
   }
@@ -138,8 +139,9 @@ TEST_F(GraphBufferTest, LaunchFlushesPendingStreamWorkBeforeGraphCommands) {
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
 
   uint8_t contents[64] = {};
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h(
-      device_, destination_, 0, contents, sizeof(contents))));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), destination_, 0,
+                          contents, sizeof(contents))));
   for (uint8_t value : contents) {
     EXPECT_EQ(value, pattern);
   }
@@ -179,8 +181,9 @@ TEST_F(GraphBufferTest, AddedDependencyOrdersFillBeforeCopy) {
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
 
   uint8_t contents[64] = {};
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h(
-      device_, destination_, 0, contents, sizeof(contents))));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), destination_, 0,
+                          contents, sizeof(contents))));
   for (uint8_t value : contents) {
     EXPECT_EQ(value, 0x3Cu);
   }

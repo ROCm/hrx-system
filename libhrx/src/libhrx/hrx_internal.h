@@ -18,6 +18,7 @@
 #include "iree/hal/utils/resource_set.h"
 #include "iree_hal_compat.h"
 #include "mem_pool_backing.h"
+#include "queue.h"
 #include "runtime.h"
 
 #ifdef __cplusplus
@@ -243,6 +244,8 @@ typedef struct hrx_device_s {
   hrx_accelerator_type_t type;
   int ordinal;
   iree_hal_device_t* hal_device;
+  // Device-owned HRX handles in family-major provisioned queue order.
+  hrx_queue_s* queues;
   // Provisioned queue used for direct host and device transfers. Borrowed from
   // |hal_device|, which must outlive every use.
   iree_hal_queue_t* transfer_queue;
@@ -632,21 +635,6 @@ static inline bool hrx_topology_edge_supports_peer_access(
              capabilities,
              IREE_HAL_TOPOLOGY_CAPABILITY_PEER_ACCESS_REQUIRES_GRANT);
 }
-
-// Collapses an HRX flattened queue-affinity mask into the corresponding HAL
-// queue-family affinity for resource placement. Zero selects every family.
-iree_status_t hrx_hal_queue_affinity_to_family_affinity(
-    iree_hal_device_t* device, hrx_queue_affinity_t affinity,
-    iree_hal_queue_family_affinity_t* out_family_affinity);
-
-// Selects a provisioned queue matching an HRX flattened queue-affinity mask,
-// all required HAL queue-family roles, and optional exact |required_family|.
-// An affinity of zero selects any queue.
-iree_status_t hrx_hal_device_select_queue(
-    iree_hal_device_t* device, hrx_queue_affinity_t affinity,
-    iree_hal_queue_family_role_flags_t required_roles,
-    const iree_hal_queue_family_t* required_family,
-    iree_hal_queue_t** out_queue);
 
 // Convert iree_status_t to hrx_status_t.
 hrx_status_t hrx_status_from_iree(iree_status_t iree_status);

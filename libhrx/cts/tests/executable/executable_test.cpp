@@ -55,11 +55,10 @@ class GraphVisibilityTest : public HrxTestFixture {
     REQUIRE_OK(hrx().executable_export_info(executable_, ordinal_, &info_));
     REQUIRE_OK(hrx().stream_create(device_, 0, &stream_));
     const hrx_buffer_params_t params = {
-        HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_HOST_COHERENT |
-            HRX_MEMORY_TYPE_DEVICE_VISIBLE,
-        HRX_MEMORY_ACCESS_ALL,
-        HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_PERSISTENT,
-        0,
+        .type = HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_HOST_COHERENT |
+                HRX_MEMORY_TYPE_DEVICE_VISIBLE,
+        .access = HRX_MEMORY_ACCESS_ALL,
+        .usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_PERSISTENT,
     };
     REQUIRE_OK(hrx().allocator_allocate_buffer(
         hrx().device_allocator(device_), params, kWordCount * sizeof(uint32_t),
@@ -283,9 +282,27 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch") {
   REQUIRE_OK(hrx().stream_synchronize(stream));
 
   uint32_t actual = 0;
-  REQUIRE_OK(
-      hrx().synchronous_d2h(device_, output, 0, &actual, sizeof(actual)));
+  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, output, 0, &actual,
+                                   sizeof(actual)));
   REQUIRE(actual == expected);
+
+  // The direct API targets an exact queue without joining the stream timeline.
+  // The completed stream work above supplies the initial dependency boundary.
+  hrx_queue_t queue = FindProvisionedQueue(device_, HRX_QUEUE_ROLE_DISPATCH);
+  hrx_semaphore_t completion = nullptr;
+  REQUIRE_OK(hrx().semaphore_create(device_, 0, &completion));
+  uint64_t completion_value = 1;
+  const hrx_semaphore_list_t signals = {&completion, &completion_value, 1};
+  const uint32_t direct_expected = 0xABCD4321u;
+  REQUIRE_OK(hrx().queue_dispatch(
+      queue, nullptr, &signals, executable, store_ordinal, &store_config,
+      &direct_expected, sizeof(direct_expected), bindings, std::size(bindings),
+      HRX_DISPATCH_FLAG_NONE));
+  REQUIRE_OK(hrx().semaphore_wait(completion, completion_value, UINT64_MAX));
+  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, output, 0, &actual,
+                                   sizeof(actual)));
+  REQUIRE(actual == direct_expected);
+  hrx().semaphore_release(completion);
 
   hrx().buffer_release(output);
   hrx().stream_release(stream);
@@ -440,12 +457,11 @@ TEST_CASE_METHOD(HrxTestFixture,
 
   constexpr size_t kWordCount = 256;
   const hrx_buffer_params_t params = {
-      HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_HOST_COHERENT |
-          HRX_MEMORY_TYPE_DEVICE_VISIBLE,
-      HRX_MEMORY_ACCESS_ALL,
-      HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED |
-          HRX_BUFFER_USAGE_MAPPING_PERSISTENT,
-      0,
+      .type = HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_HOST_COHERENT |
+              HRX_MEMORY_TYPE_DEVICE_VISIBLE,
+      .access = HRX_MEMORY_ACCESS_ALL,
+      .usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED |
+               HRX_BUFFER_USAGE_MAPPING_PERSISTENT,
   };
   hrx_buffer_t output = nullptr;
   REQUIRE_OK(

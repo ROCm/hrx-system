@@ -56,6 +56,16 @@ class HrxRuntime {
   HrxRuntime() : api_(HrxLoader::instance()) {
     Check(api_.gpu_initialize(0));
     Check(api_.gpu_device_get(0, &device_));
+    for (uint32_t i = 0;
+         i < api_.device_queue_family_count(device_) && !transfer_queue_; ++i) {
+      hrx_queue_family_info_t family;
+      Check(api_.device_query_queue_family(device_, i, &family));
+      if ((family.roles & HRX_QUEUE_ROLE_TRANSFER) &&
+          family.provisioned_queue_count) {
+        transfer_queue_ = api_.device_get_queue(device_, i, 0);
+      }
+    }
+    Require(transfer_queue_ != nullptr, "no provisioned transfer queue");
     Check(api_.stream_create(device_, 0, &stream_));
     char architecture[64] = {};
     Check(api_.device_get_property(device_, HRX_DEVICE_PROPERTY_ARCHITECTURE,
@@ -81,13 +91,13 @@ class HrxRuntime {
   void Prepare(size_t count, bool host) {
     values_.assign(count, 0);
     hrx_buffer_params_t params = {
-        host ? HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_HOST_COHERENT |
-                   HRX_MEMORY_TYPE_DEVICE_VISIBLE
-             : HRX_MEMORY_TYPE_DEVICE_LOCAL,
-        HRX_MEMORY_ACCESS_ALL,
-        HRX_BUFFER_USAGE_DEFAULT |
-            (host ? HRX_BUFFER_USAGE_MAPPING_PERSISTENT : 0u),
-        0,
+        .type = host ? HRX_MEMORY_TYPE_HOST_LOCAL |
+                           HRX_MEMORY_TYPE_HOST_COHERENT |
+                           HRX_MEMORY_TYPE_DEVICE_VISIBLE
+                     : HRX_MEMORY_TYPE_DEVICE_LOCAL,
+        .access = HRX_MEMORY_ACCESS_ALL,
+        .usage = HRX_BUFFER_USAGE_DEFAULT |
+                 (host ? HRX_BUFFER_USAGE_MAPPING_PERSISTENT : 0u),
     };
     Check(api_.allocator_allocate_buffer(api_.device_allocator(device_), params,
                                          count * sizeof(uint32_t), &buffer_));
@@ -98,7 +108,7 @@ class HrxRuntime {
       mapped_ = static_cast<uint32_t*>(mapped);
       std::fill_n(mapped_, count, 0);
     } else {
-      Check(api_.synchronous_h2d(device_, values_.data(), buffer_, 0,
+      Check(api_.synchronous_h2d(transfer_queue_, values_.data(), buffer_, 0,
                                  count * sizeof(uint32_t)));
     }
     Check(api_.graph_create(device_, 0, &graph_));
@@ -135,7 +145,7 @@ class HrxRuntime {
     if (mapped_) {
       std::copy_n(mapped_, values_.size(), values_.begin());
     } else {
-      Check(api_.synchronous_d2h(device_, buffer_, 0, values_.data(),
+      Check(api_.synchronous_d2h(transfer_queue_, buffer_, 0, values_.data(),
                                  values_.size() * sizeof(uint32_t)));
     }
     for (size_t i = 0; i < values_.size(); ++i) {
@@ -164,6 +174,8 @@ class HrxRuntime {
   HrxLoader& api_;
   // Runtime-owned device borrowed through shutdown.
   hrx_device_t device_ = nullptr;
+  // Borrowed provisioned queue for setup uploads and verification readbacks.
+  hrx_queue_t transfer_queue_ = nullptr;
   // Ordered timeline shared by all rows.
   hrx_stream_t stream_ = nullptr;
   // Persistent code object containing the finite store kernel.

@@ -151,6 +151,7 @@ HRX_API void hrx_host_allocator_free_aligned(hrx_host_allocator_t allocator,
 //===----------------------------------------------------------------------===//
 
 typedef struct hrx_device_s* hrx_device_t;
+typedef struct hrx_queue_s* hrx_queue_t;
 typedef struct hrx_allocator_s* hrx_allocator_t;
 typedef struct hrx_semaphore_s* hrx_semaphore_t;
 typedef struct hrx_stream_s* hrx_stream_t;
@@ -259,8 +260,6 @@ typedef struct hrx_semaphore_list_t {
   size_t count;
 } hrx_semaphore_list_t;
 
-typedef uint64_t hrx_queue_affinity_t;
-
 // Borrowed string storage valid only for the duration documented by the
 // containing API.
 typedef struct hrx_string_view_t {
@@ -281,10 +280,12 @@ typedef struct hrx_const_byte_span_t {
 
 // Buffer parameters for allocator operations.
 typedef struct hrx_buffer_params_t {
+  // Required memory properties used to select the allocation source.
   hrx_memory_type_t type;
+  // Declared read/write access; does not restrict the source pool's access.
   hrx_memory_access_t access;
+  // Operations for which the allocation source must prepare the buffer.
   hrx_buffer_usage_t usage;
-  hrx_queue_affinity_t queue_affinity;
 } hrx_buffer_params_t;
 
 // Export metadata for direct executable dispatch. |name| is owned by the
@@ -531,6 +532,140 @@ HRX_API void hrx_device_retain(hrx_device_t device);
 HRX_API void hrx_device_release(hrx_device_t device);
 
 //===----------------------------------------------------------------------===//
+// Exact queues
+//
+// A queue identifies one execution queue within a device, not a selection mask
+// or a virtual stream. Queue references do not retain their parent device.
+// Release acquired/retained queue references before releasing the device or
+// shutting down its accelerator. Completion is established with semaphores;
+// releasing a queue is not a submission wait.
+//===----------------------------------------------------------------------===//
+
+typedef uint32_t hrx_queue_role_flags_t;
+#define HRX_QUEUE_ROLE_DISPATCH (1u << 0)
+#define HRX_QUEUE_ROLE_TRANSFER (1u << 1)
+#define HRX_QUEUE_ROLE_HOST_CALL (1u << 2)
+#define HRX_QUEUE_ROLE_PROFILING (1u << 4)
+#define HRX_QUEUE_ROLE_ATOMIC (1u << 5)
+
+typedef enum hrx_queue_placement_t {
+  // Implementation-selected command storage, with no required locality.
+  HRX_QUEUE_PLACEMENT_DEFAULT = 0,
+  // Command storage local to the host.
+  HRX_QUEUE_PLACEMENT_HOST_LOCAL = 1,
+  // Command storage local to the execution device.
+  HRX_QUEUE_PLACEMENT_DEVICE_LOCAL = 2,
+} hrx_queue_placement_t;
+
+typedef uint32_t hrx_queue_placement_capabilities_t;
+#define HRX_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL \
+  (1u << HRX_QUEUE_PLACEMENT_HOST_LOCAL)
+#define HRX_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL \
+  (1u << HRX_QUEUE_PLACEMENT_DEVICE_LOCAL)
+
+typedef uint64_t hrx_queue_feature_flags_t;
+#define HRX_QUEUE_FEATURE_NONE UINT64_C(0)
+#define HRX_QUEUE_FEATURE_COOPERATIVE_DISPATCH (UINT64_C(1) << 0)
+
+typedef struct hrx_queue_execution_resource_list_t {
+  // Number of ordinals. Zero selects all resources in the family.
+  size_t count;
+  // Sorted, unique family-local resource ordinals; borrowed during acquisition.
+  const uint32_t* ordinals;
+} hrx_queue_execution_resource_list_t;
+
+// Exact immutable queue properties. Zero initialization requests normal
+// priority, implementation-selected placement, no features, and all resources.
+// Placement affects queue command storage, not buffers or executables. An
+// unsupported explicit request fails; acquisition never silently changes it.
+typedef struct hrx_queue_params_t {
+  // Exact scheduling priority; zero is normal, larger values are higher.
+  int32_t priority;
+  // Required command-storage locality, or DEFAULT for implementation policy.
+  hrx_queue_placement_t placement;
+  // Required specialized execution features.
+  hrx_queue_feature_flags_t features;
+  // Exact execution-resource selection. Storage is captured during acquisition.
+  hrx_queue_execution_resource_list_t execution_resources;
+} hrx_queue_params_t;
+
+typedef struct hrx_queue_family_info_t {
+  // Number of device-owned queues available through hrx_device_get_queue.
+  uint32_t provisioned_queue_count;
+  // Whether this family permits acquiring additional distinct queues.
+  bool supports_acquisition;
+  // Operations supported by queues in this family.
+  hrx_queue_role_flags_t roles;
+  // Supported explicit command-storage localities. DEFAULT is always valid.
+  hrx_queue_placement_capabilities_t placements;
+  // Specialized execution features available during acquisition.
+  hrx_queue_feature_flags_t features;
+  // Number of entries in priorities.
+  size_t priority_count;
+  // Sorted accepted priorities, borrowed for the device lifetime.
+  const int32_t* priorities;
+  // Number of family-local raw execution units.
+  uint32_t execution_unit_count;
+  // Number of independently selectable resources, addressed by ordinal.
+  size_t execution_resource_count;
+  // Number of resource constraint groups, addressed by ordinal.
+  size_t execution_resource_group_count;
+} hrx_queue_family_info_t;
+
+typedef struct hrx_queue_execution_resource_info_t {
+  // Constraint group containing this resource.
+  uint32_t group_ordinal;
+  // First family-local raw execution unit covered by this resource.
+  uint32_t first_execution_unit_ordinal;
+  // Number of raw execution units covered by this resource.
+  uint32_t execution_unit_count;
+} hrx_queue_execution_resource_info_t;
+
+typedef struct hrx_queue_execution_resource_group_info_t {
+  // Minimum number selected from this group in any nonempty resource list.
+  uint32_t minimum_selected_resource_count;
+} hrx_queue_execution_resource_group_info_t;
+
+// Returns the immutable family count, or zero for NULL. Family and provisioned
+// queue ordinals are stable for the lifetime of the device.
+HRX_API size_t hrx_device_queue_family_count(hrx_device_t device);
+HRX_API hrx_status_t
+hrx_device_query_queue_family(hrx_device_t device, uint32_t family_ordinal,
+                              hrx_queue_family_info_t* out_info);
+HRX_API hrx_status_t hrx_device_query_queue_execution_resource(
+    hrx_device_t device, uint32_t family_ordinal, uint32_t resource_ordinal,
+    hrx_queue_execution_resource_info_t* out_info);
+HRX_API hrx_status_t hrx_device_query_queue_execution_resource_group(
+    hrx_device_t device, uint32_t family_ordinal, uint32_t group_ordinal,
+    hrx_queue_execution_resource_group_info_t* out_info);
+
+// Returns a borrowed provisioned queue, or NULL for invalid coordinates. The
+// device owns this reference; retain it before passing it to an owning handle.
+// Dynamically acquired queues are not added to the provisioned inventory.
+HRX_API hrx_queue_t hrx_device_get_queue(hrx_device_t device,
+                                         uint32_t family_ordinal,
+                                         uint32_t queue_ordinal);
+
+// Acquires one distinct queue with exactly the requested properties. NULL
+// params is equivalent to zero initialization. There is no implicit sharing
+// when native resources are exhausted. Release the returned owning reference.
+HRX_API hrx_status_t hrx_queue_acquire(hrx_device_t device,
+                                       uint32_t family_ordinal,
+                                       const hrx_queue_params_t* params,
+                                       hrx_queue_t* out_queue);
+HRX_API void hrx_queue_retain(hrx_queue_t queue);
+HRX_API void hrx_queue_release(hrx_queue_t queue);
+
+// Returns the borrowed parent device, or NULL for NULL.
+HRX_API hrx_device_t hrx_queue_get_device(hrx_queue_t queue);
+// Returns the family ordinal, or UINT32_MAX for NULL.
+HRX_API uint32_t hrx_queue_get_family_ordinal(hrx_queue_t queue);
+// Returns achieved properties. Resource ordinals are borrowed from the queue
+// and remain valid while the caller holds a queue reference and its device.
+HRX_API hrx_status_t hrx_queue_query_params(hrx_queue_t queue,
+                                            hrx_queue_params_t* out_params);
+
+//===----------------------------------------------------------------------===//
 // Allocator
 //
 // Each device owns an allocator. hrx_device_allocator() returns a
@@ -660,15 +795,16 @@ HRX_API hrx_status_t hrx_buffer_get_size(hrx_buffer_t buffer, size_t* size);
 //===----------------------------------------------------------------------===//
 // Synchronous data transfer
 //
-// These block until the transfer completes. For async transfers, use
-// stream operations (hrx_stream_copy_buffer, etc).
+// These execute on the supplied transfer-capable queue and block until that
+// transfer completes. They do not join any stream's timeline. For async
+// transfers, use stream operations (hrx_stream_copy_buffer, etc).
 //===----------------------------------------------------------------------===//
 
-HRX_API hrx_status_t hrx_synchronous_h2d(hrx_device_t device,
+HRX_API hrx_status_t hrx_synchronous_h2d(hrx_queue_t queue,
                                          const void* host_src, hrx_buffer_t dst,
                                          size_t dst_offset, size_t size);
 
-HRX_API hrx_status_t hrx_synchronous_d2h(hrx_device_t device, hrx_buffer_t src,
+HRX_API hrx_status_t hrx_synchronous_d2h(hrx_queue_t queue, hrx_buffer_t src,
                                          size_t src_offset, void* host_dst,
                                          size_t size);
 
@@ -694,24 +830,25 @@ HRX_API hrx_status_t hrx_stream_update_buffer(hrx_stream_t stream,
 
 //===----------------------------------------------------------------------===//
 // Direct queue operations (single-op, no command buffer)
+//
+// Every operation executes on the exact supplied queue. Wait/signal lists
+// establish dependencies; submission order alone does not. These calls do not
+// join any stream timeline, select another queue, or implicitly flush a stream.
 //===----------------------------------------------------------------------===//
 
 HRX_API hrx_status_t hrx_queue_fill(
-    hrx_device_t device, hrx_queue_affinity_t affinity,
-    const hrx_semaphore_list_t* wait_semaphores,
+    hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
     const hrx_semaphore_list_t* signal_semaphores, hrx_buffer_t buffer,
     size_t offset, size_t size, const void* pattern, size_t pattern_size);
 
 HRX_API hrx_status_t hrx_queue_copy(
-    hrx_device_t device, hrx_queue_affinity_t affinity,
-    const hrx_semaphore_list_t* wait_semaphores,
+    hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
     const hrx_semaphore_list_t* signal_semaphores, hrx_buffer_t src,
     size_t src_offset, hrx_buffer_t dst, size_t dst_offset, size_t size);
 
-HRX_API hrx_status_t
-hrx_queue_barrier(hrx_device_t device, hrx_queue_affinity_t affinity,
-                  const hrx_semaphore_list_t* wait_semaphores,
-                  const hrx_semaphore_list_t* signal_semaphores);
+HRX_API hrx_status_t hrx_queue_barrier(
+    hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
+    const hrx_semaphore_list_t* signal_semaphores);
 
 // Dispatch config for kernel launch.
 typedef struct hrx_dispatch_config_t {
@@ -728,8 +865,7 @@ typedef struct hrx_buffer_ref_t {
 } hrx_buffer_ref_t;
 
 HRX_API hrx_status_t hrx_queue_dispatch(
-    hrx_device_t device, hrx_queue_affinity_t affinity,
-    const hrx_semaphore_list_t* wait_semaphores,
+    hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
     const hrx_semaphore_list_t* signal_semaphores, hrx_executable_t executable,
     uint32_t export_ordinal, const hrx_dispatch_config_t* config,
     const void* constants, size_t constants_size,
@@ -744,11 +880,10 @@ HRX_API hrx_status_t hrx_stream_dispatch(
 // Host callback in queue execution order.
 typedef hrx_status_t (*hrx_host_call_fn_t)(void* user_data);
 
-HRX_API hrx_status_t
-hrx_queue_host_call(hrx_device_t device, hrx_queue_affinity_t affinity,
-                    const hrx_semaphore_list_t* wait_semaphores,
-                    const hrx_semaphore_list_t* signal_semaphores,
-                    hrx_host_call_fn_t callback, void* user_data);
+HRX_API hrx_status_t hrx_queue_host_call(
+    hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
+    const hrx_semaphore_list_t* signal_semaphores, hrx_host_call_fn_t callback,
+    void* user_data);
 
 HRX_API hrx_status_t hrx_stream_execution_barrier(hrx_stream_t stream);
 
@@ -873,11 +1008,18 @@ typedef struct hrx_memory_scope_t {
   uint32_t id;
 } hrx_memory_scope_t;
 
-// Resolves a scope once for reuse in mapping descriptors. QUEUE and PROGRAM
-// select a provisioned transfer or dispatch queue using |affinity|. HOST
-// ignores affinity and selects the group's public host site.
-HRX_API hrx_status_t hrx_device_query_memory_scope(
-    hrx_device_t device, hrx_queue_affinity_t affinity, hrx_memory_site_t site,
+// Resolves the public host scope in the device's sealed group for reuse in
+// mapping descriptors. No queue is required.
+HRX_API hrx_status_t hrx_device_query_host_memory_scope(
+    hrx_device_t device, hrx_memory_scope_t* out_scope);
+
+// Resolves the QUEUE or PROGRAM site of the exact family for reuse in mapping
+// descriptors. Family ordinals come from device queue-family discovery; an
+// existing queue supplies its ordinal through hrx_queue_get_family_ordinal.
+// This query neither requires a provisioned queue nor acquires one. HOST uses
+// hrx_device_query_host_memory_scope instead.
+HRX_API hrx_status_t hrx_device_query_queue_family_memory_scope(
+    hrx_device_t device, uint32_t family_ordinal, hrx_memory_site_t site,
     hrx_memory_scope_t* out_scope);
 
 // Complete simultaneous access to one address reservation. All families of
@@ -1070,8 +1212,7 @@ typedef uint64_t hrx_queue_map_flags_t;
 // completion. Captured target references keep their address range live; neither
 // mode retains backing after completion or extends an ended allocation epoch.
 HRX_API hrx_status_t hrx_queue_map(
-    hrx_device_t device, hrx_queue_affinity_t affinity,
-    const hrx_semaphore_list_t* wait_semaphores,
+    hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
     const hrx_semaphore_list_t* signal_semaphores, size_t mapping_count,
     const hrx_memory_mapping_t* mappings, hrx_queue_map_flags_t flags);
 
@@ -1092,12 +1233,11 @@ HRX_API hrx_status_t hrx_allocator_query_virtual_memory(
     hrx_allocator_t allocator, hrx_memory_type_t mem_type, bool* supported,
     size_t* min_page_size, size_t* recommended_page_size);
 
-// Reserves addresses without physical backing. The caller owns the returned
-// buffer and must release it through virtual_memory_release, not
-// buffer_release.
+// Reserves addresses without physical backing for all families of the
+// allocator's device. The caller owns the returned buffer and must release it
+// through virtual_memory_release, not buffer_release.
 HRX_API hrx_status_t hrx_allocator_virtual_memory_reserve(
-    hrx_allocator_t allocator, hrx_queue_affinity_t affinity, size_t size,
-    hrx_buffer_t* virtual_buffer);
+    hrx_allocator_t allocator, size_t size, hrx_buffer_t* virtual_buffer);
 
 // Consumes the reservation only on success. Failure leaves it owned by the
 // caller so mappings can be removed and release retried. All uses must complete
@@ -1216,14 +1356,16 @@ HRX_API hrx_status_t hrx_buffer_lookup(hrx_device_t device,
 
 // Enqueues a host-to-device transfer after prior work in |stream|. |host_src|
 // remains live and unmodified until the stream reaches the transfer's timeline
-// point. A NULL |stream| performs the transfer synchronously.
+// point. The stream must be non-NULL. For a blocking transfer on an explicit
+// queue, use hrx_synchronous_h2d.
 HRX_API hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream,
                                          const void* host_src, hrx_buffer_t dst,
                                          size_t dst_offset, size_t size);
 
 // Enqueues a device-to-host transfer after prior work in |stream|. |host_dst|
 // remains live and inaccessible until the stream reaches the transfer's
-// timeline point. A NULL |stream| performs the transfer synchronously.
+// timeline point. The stream must be non-NULL. For a blocking transfer on an
+// explicit queue, use hrx_synchronous_d2h.
 HRX_API hrx_status_t hrx_stream_copy_d2h(hrx_stream_t stream, hrx_buffer_t src,
                                          size_t src_offset, void* host_dst,
                                          size_t size);
