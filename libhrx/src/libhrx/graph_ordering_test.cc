@@ -167,6 +167,7 @@ class GraphOrderingTest : public ::testing::Test {
     queue_.submissions.clear();
     hrx_graph_exec_release(exec_);
     hrx_graph_release(graph_);
+    hrx_event_release(event_);
     hrx_semaphore_release(gate_);
     hrx_buffer_release(buffer_);
     for (auto stream : streams_) {
@@ -196,7 +197,9 @@ class GraphOrderingTest : public ::testing::Test {
 
   void SubmitReverse() {
     for (size_t i = queue_.submissions.size(); i > 0; --i) {
-      IREE_ASSERT_OK(queue_.Submit(i - 1));
+      if (!queue_.submissions[i - 1]->submitted) {
+        IREE_ASSERT_OK(queue_.Submit(i - 1));
+      }
     }
   }
 
@@ -218,6 +221,8 @@ class GraphOrderingTest : public ::testing::Test {
   hrx_buffer_t buffer_ = nullptr;
   // External dependency released even after a test assertion fails.
   hrx_semaphore_t gate_ = nullptr;
+  // Optional recorded event kept live through its stream wait.
+  hrx_event_t event_ = nullptr;
   // Public graph constructed by each test.
   hrx_graph_t graph_ = nullptr;
   // Public executable owning all graph resources through completion.
@@ -427,6 +432,76 @@ TEST_F(GraphOrderingTest, RejectedSuffixFailsReservedCompletion) {
   // The dependency rejected this launch before any captured operation was
   // forwarded. No device retirement claim is made from the failed semaphore.
   queue_.submissions.clear();
+}
+
+class GraphStreamWaitTest : public GraphOrderingTest,
+                            public ::testing::WithParamInterface<bool> {};
+
+TEST_P(GraphStreamWaitTest, CompletedExternalWaitPreservesPendingStreamWork) {
+  if (GetParam()) {
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_event_create(device_, HRX_EVENT_FLAG_DISABLE_TIMING, &event_)));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_record(event_, streams_[1])));
+    IREE_ASSERT_OK(queue_.Submit(0));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(event_)));
+  } else {
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_semaphore_signal(gate_, 1)));
+  }
+
+  const size_t first = queue_.submissions.size();
+  const uint32_t pattern = 0x12345678;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer(
+      streams_[0], buffer_, 0, sizeof(pattern), &pattern, sizeof(pattern))));
+  if (GetParam()) {
+    IREE_ASSERT_OK(
+        hrx_status_to_iree(hrx_stream_wait_event(streams_[0], event_)));
+  } else {
+    IREE_ASSERT_OK(
+        hrx_status_to_iree(hrx_stream_wait_on(streams_[0], {gate_, 1})));
+  }
+  ASSERT_EQ(queue_.submissions.size(), first + 2);
+  const auto& wait = *queue_.submissions[first + 1];
+  ASSERT_EQ(wait.waits.count, 2u);
+  EXPECT_EQ(wait.waits.semaphores[0],
+            (GetParam() ? event_->semaphore : gate_)->hal_semaphore);
+  EXPECT_EQ(wait.waits.payload_values[0], 1u);
+  EXPECT_EQ(wait.waits.semaphores[1], streams_[0]->semaphore->hal_semaphore);
+  EXPECT_EQ(wait.waits.payload_values[1], streams_[0]->timepoint - 1);
+
+  const hrx_graph_copy_buffer_node_attrs_t copy = {
+      .src = {buffer_, 0, sizeof(pattern)},
+      .dst = {buffer_, sizeof(pattern), sizeof(pattern)},
+  };
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_add_copy_buffer_node(graph_, nullptr, 0, &copy, nullptr)));
+  Instantiate();
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, streams_[0])));
+  SubmitReverse();
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(streams_[0])));
+  uint32_t contents[2] = {};
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_synchronous_d2h(device_, buffer_, 0, contents, sizeof(contents))));
+  EXPECT_EQ(contents[0], pattern);
+  EXPECT_EQ(contents[1], pattern);
+}
+
+INSTANTIATE_TEST_SUITE_P(TimelineAndEvent, GraphStreamWaitTest,
+                         ::testing::Bool());
+
+TEST_F(GraphOrderingTest, SelfTimelineWaitCoalescesWithPendingStreamWork) {
+  const uint32_t pattern = 1;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer(
+      streams_[0], buffer_, 0, sizeof(pattern), &pattern, sizeof(pattern))));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_stream_wait_on(streams_[0], {streams_[0]->semaphore, 0})));
+  ASSERT_EQ(queue_.submissions.size(), 2u);
+  const auto& waits = queue_.submissions[1]->waits;
+  ASSERT_EQ(waits.count, 1u);
+  EXPECT_EQ(waits.semaphores[0], streams_[0]->semaphore->hal_semaphore);
+  EXPECT_EQ(waits.payload_values[0], streams_[0]->timepoint - 1);
+  SubmitReverse();
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(streams_[0])));
+  VerifyContents(1);
 }
 
 }  // namespace

@@ -215,38 +215,9 @@ hrx_status_t hrx_stream_wait_event(hrx_stream_t stream, hrx_event_t event) {
                            "stream or event is NULL");
   }
 
-  // Flush pending work before inserting the wait barrier.
-  hrx_status_t status = hrx_stream_flush(stream);
-  if (!hrx_status_is_ok(status)) {
-    return status;
-  }
-
-  // Insert a queue barrier that waits on the event's semaphore and signals
-  // the stream's next timepoint.
-  uint64_t signal_value = stream->timepoint + 1;
-
-  iree_hal_semaphore_t* wait_sem = event->semaphore->hal_semaphore;
-  uint64_t wait_val = event->signal_value;
-  iree_hal_semaphore_list_t wait_list = {
-      .count = 1,
-      .semaphores = &wait_sem,
-      .payload_values = &wait_val,
+  const hrx_timeline_point_t position = {
+      .semaphore = event->semaphore,
+      .value = event->signal_value,
   };
-
-  iree_hal_semaphore_t* sig_sem = stream->semaphore->hal_semaphore;
-  iree_hal_semaphore_list_t signal_list = {
-      .count = 1,
-      .semaphores = &sig_sem,
-      .payload_values = &signal_value,
-  };
-
-  iree_status_t iree_status = iree_hal_queue_barrier(
-      stream->hal_queue, wait_list, signal_list, /*barriers=*/NULL,
-      IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
-  if (!iree_status_is_ok(iree_status)) {
-    return hrx_status_from_iree(iree_status);
-  }
-
-  stream->timepoint = signal_value;
-  return hrx_ok_status();
+  return hrx_stream_wait_on(stream, position);
 }

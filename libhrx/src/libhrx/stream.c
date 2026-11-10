@@ -272,17 +272,24 @@ hrx_status_t hrx_stream_wait_on(hrx_stream_t stream,
     HRX_RETURN_AND_END_ZONE(z0, status);
   }
 
-  // Insert a queue barrier that waits on the external semaphore
-  // and signals our next timepoint.
+  // HAL queues are out of order: adding an external dependency must also
+  // preserve the stream's prior tail before publishing its next point.
   uint64_t signal_value = stream->timepoint + 1;
-  iree_hal_semaphore_t* wait_sem = position.semaphore->hal_semaphore;
-  uint64_t wait_val = position.value;
   iree_hal_semaphore_t* sig_sem = stream->semaphore->hal_semaphore;
+  iree_hal_semaphore_t* wait_semaphores[2] = {position.semaphore->hal_semaphore,
+                                              sig_sem};
+  uint64_t wait_values[2] = {position.value, stream->timepoint};
+  iree_host_size_t wait_count = 1;
+  if (wait_semaphores[0] == sig_sem) {
+    wait_values[0] = iree_max(wait_values[0], stream->timepoint);
+  } else if (stream->timepoint > 0) {
+    wait_count = 2;
+  }
 
   iree_hal_semaphore_list_t wait_list = {
-      .count = 1,
-      .semaphores = &wait_sem,
-      .payload_values = &wait_val,
+      .count = wait_count,
+      .semaphores = wait_semaphores,
+      .payload_values = wait_values,
   };
   iree_hal_semaphore_list_t signal_list = {
       .count = 1,
