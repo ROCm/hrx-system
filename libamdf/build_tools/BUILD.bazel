@@ -23,6 +23,7 @@ iree_py_test(
         "generate_product_names.py",
         "generate_product_names_test.py",
     ],
+    main = "generate_product_names_test.py",
 )
 
 py_test(
@@ -32,7 +33,10 @@ py_test(
         "presubmit.py",
         "presubmit_test.py",
     ],
-    tags = ["manual"],
+    tags = [
+        "manual",
+        "skip-bazel_to_cmake",
+    ],
     deps = ["//build_tools/devtools"],
 )
 
