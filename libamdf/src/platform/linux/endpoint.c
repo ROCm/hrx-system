@@ -21,6 +21,7 @@
 
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/pci.h"
+#include "libamdf/src/pci_product_name.h"
 #include "libamdf/src/platform/linux/dxg/endpoint.h"
 #include "libamdf/src/platform/linux/file.h"
 
@@ -165,6 +166,13 @@ static amdf_status_t amdf_linux_query_endpoint(
   info->type_flags = info->engine_kind == AMDF_ENGINE_KIND_XDNA
                          ? AMDF_ENDPOINT_TYPE_FLAG_COMPUTE_ONLY
                          : AMDF_ENDPOINT_TYPE_FLAG_RENDER_SUPPORTED;
+  const char* product_name = info->engine_kind == AMDF_ENGINE_KIND_GPU
+                                 ? amdf_pci_product_name(&info->pci)
+                                 : NULL;
+  if (product_name) {
+    memcpy(info->name, product_name, strlen(product_name) + 1);
+    return AMDF_STATUS_OK;
+  }
   const int name_length =
       snprintf(info->name, sizeof(info->name), "AMD %s %04x:%04x:%02x (%s)",
                info->engine_kind == AMDF_ENGINE_KIND_XDNA ? "XDNA" : "GPU",

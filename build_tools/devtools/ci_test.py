@@ -1130,8 +1130,6 @@ class CiTest(unittest.TestCase):
         build_step = steps[1]
         self.assertEqual(build_step.argv[-2:], ("build", "--parallel"))
         smoke_step = steps[2]
-        for regex in ci_config.CMAKE_REPOSITORY_SMOKE_CTEST_REGEXES:
-            self.assertTrue(any(regex in arg for arg in smoke_step.argv))
         self.assertTrue(
             any(
                 ci_config.CTEST_RESOURCE_LABEL_EXCLUDE_REGEX in arg

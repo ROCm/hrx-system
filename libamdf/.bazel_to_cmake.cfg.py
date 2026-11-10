@@ -69,10 +69,10 @@ class AmdfBuildFileFunctions(
         return os.path.relpath(self._build_dir, self._repo_root).replace("\\", "/")
 
     def _should_emit_python_target(self):
-        return (
-            self._package_name() == "libamdf/cts/gpu/kernels"
-            or self._package_name().startswith("libamdf/tool/")
-        )
+        return self._package_name() in (
+            "libamdf/build_tools",
+            "libamdf/cts/gpu/kernels",
+        ) or self._package_name().startswith("libamdf/tool/")
 
     def _python_package_dirs(self):
         return ["${PROJECT_SOURCE_DIR}"]

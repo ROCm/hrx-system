@@ -90,6 +90,19 @@ passive discovery. It identifies an actual native device when multiple
 endpoints have identical PCI product IDs. The opaque `id` continues to select
 libamdf endpoints; the diagnostic name is intended for display.
 
+Linux GPU names come from a compiled snapshot of libdrm's `amdgpu.ids`, using
+the PCI device and revision and any board-specific subsystem entry. For
+example, `1002:1586:C1` reports `AMD Radeon 8060S Graphics`; other revisions
+can name different products. Linux endpoints without a registry name,
+including XDNA, retain their numeric diagnostic names. Native Windows retains
+the driver description. Names are neither unique identifiers nor capability
+selectors.
+
+The build generates a compact, deduplicated registry from the checksummed
+libdrm source dependency. Lookup performs no allocation, file access, or
+runtime parsing. Updating the dependency refreshes the names for both native
+Linux and Linux DXG; installed `amdgpu.ids` files do not affect this snapshot.
+
 For a Linux GPU, the identity contains its DRM render-node major and minor
 numbers. A Vulkan consumer can compare these with
 `VkPhysicalDeviceDrmPropertiesEXT.renderMajor` and `renderMinor` when `hasRender`

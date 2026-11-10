@@ -5,10 +5,25 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("@rules_python//python:defs.bzl", "py_test")
+load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_test")
 
 package(
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],
+)
+
+iree_py_binary(
+    name = "generate_product_names",
+    srcs = ["generate_product_names.py"],
+)
+
+iree_py_test(
+    name = "generate_product_names_test",
+    srcs = [
+        "generate_product_names.py",
+        "generate_product_names_test.py",
+    ],
+    main = "generate_product_names_test.py",
 )
 
 py_test(
@@ -18,7 +33,10 @@ py_test(
         "presubmit.py",
         "presubmit_test.py",
     ],
-    tags = ["manual"],
+    tags = [
+        "manual",
+        "skip-bazel_to_cmake",
+    ],
     deps = ["//build_tools/devtools"],
 )
 

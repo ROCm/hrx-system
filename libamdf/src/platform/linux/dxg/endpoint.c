@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "libamdf/src/allocator.h"
+#include "libamdf/src/pci_product_name.h"
 #include "libamdf/src/platform/dxg/endpoint_identity.h"
 
 static uint64_t amdf_linux_dxg_luid_encode(LUID luid) {
@@ -110,15 +111,22 @@ static amdf_status_t amdf_linux_dxg_query_endpoint_info(
     } else if (info.pci.vendor_id == 0x1022u && adapter_type.ComputeOnly) {
       info.engine_kind = AMDF_ENGINE_KIND_XDNA;
     }
-    const int name_length =
-        snprintf(info.name, sizeof(info.name),
-                 "AMD %s %04" PRIx32 ":%04" PRIx32 ":%02" PRIx32
-                 " (DXG %016" PRIx64 "/%" PRIu32 ")",
-                 info.engine_kind == AMDF_ENGINE_KIND_XDNA ? "XDNA" : "GPU",
-                 info.pci.vendor_id, info.pci.device_id, info.pci.revision_id,
-                 encoded_luid, physical_adapter_index);
-    if (name_length < 0 || (size_t)name_length >= sizeof(info.name)) {
-      status = amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
+    const char* product_name = info.engine_kind == AMDF_ENGINE_KIND_GPU
+                                   ? amdf_pci_product_name(&info.pci)
+                                   : NULL;
+    if (product_name) {
+      memcpy(info.name, product_name, strlen(product_name) + 1);
+    } else {
+      const int name_length =
+          snprintf(info.name, sizeof(info.name),
+                   "AMD %s %04" PRIx32 ":%04" PRIx32 ":%02" PRIx32
+                   " (DXG %016" PRIx64 "/%" PRIu32 ")",
+                   info.engine_kind == AMDF_ENGINE_KIND_XDNA ? "XDNA" : "GPU",
+                   info.pci.vendor_id, info.pci.device_id, info.pci.revision_id,
+                   encoded_luid, physical_adapter_index);
+      if (name_length < 0 || (size_t)name_length >= sizeof(info.name)) {
+        status = amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
+      }
     }
   }
   if (amdf_status_is_ok(status)) {

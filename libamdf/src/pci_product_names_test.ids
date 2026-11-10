@@ -1,0 +1,12 @@
+# Representative libdrm parent/child records, deliberately out of key order.
+1.0.0
+1586, C1, Shared GPU name
+	1028, 0002, Board "two" μ
+	1028, 0001, Shared GPU name
+	1028, 0002, Shadowed board name
+1586, C2, Second revision
+	1028, 0002, Other board
+1586, C1, Shadowed device name
+	1028, 0003, Child of shadowed device
+0000, 00, First device
+FFFF, FF, Last device
