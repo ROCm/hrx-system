@@ -308,6 +308,31 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch") {
   REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, output, 0, &actual,
                                    sizeof(actual)));
   REQUIRE(actual == direct_expected);
+
+  // Invalid public bindings must unwind both inline and overflow translation
+  // storage before native acceptance, without advancing the caller's timeline.
+  ++completion_value;
+  for (size_t binding_count : {size_t{1}, size_t{16}, size_t{17}}) {
+    CAPTURE(binding_count);
+    std::array<hrx_buffer_ref_t, 17> invalid_bindings;
+    invalid_bindings.fill(bindings[0]);
+    invalid_bindings[binding_count - 1].buffer = nullptr;
+    hrx_status_t status = hrx().queue_dispatch(
+        queue, nullptr, &signals, executable, store_ordinal, &store_config,
+        &direct_expected, sizeof(direct_expected), invalid_bindings.data(),
+        binding_count, HRX_DISPATCH_FLAG_NONE);
+    const hrx_status_code_t code = hrx().status_code(status);
+    hrx().status_ignore(status);
+    if (code == HRX_STATUS_OK) {
+      // Retire unexpectedly accepted work before reporting the failure.
+      REQUIRE_OK(
+          hrx().semaphore_wait(completion, completion_value, UINT64_MAX));
+    }
+    CHECK(code == HRX_STATUS_INVALID_ARGUMENT);
+    uint64_t current_value = 0;
+    REQUIRE_OK(hrx().semaphore_query(completion, &current_value));
+    CHECK(current_value == 1);
+  }
   hrx().semaphore_release(completion);
 
   hrx().buffer_release(output);

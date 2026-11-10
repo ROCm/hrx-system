@@ -475,21 +475,28 @@ hrx_status_t hrx_queue_dispatch(
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
-  iree_hal_buffer_ref_t* hal_bindings = NULL;
-  if (binding_count > 0) {
-    hal_bindings = (iree_hal_buffer_ref_t*)calloc(
-        binding_count, sizeof(iree_hal_buffer_ref_t));
-    if (!hal_bindings) {
+  // Binding translation lives only through native acceptance. Ordinary
+  // dispatches need no temporary allocation; larger public lists remain valid.
+  iree_hal_buffer_ref_t inline_bindings[16];
+  iree_hal_buffer_ref_t* hal_bindings = inline_bindings;
+  void* binding_storage = NULL;
+  if (binding_count > IREE_ARRAYSIZE(inline_bindings)) {
+    iree_host_size_t storage_size = 0;
+    if (!iree_host_size_checked_mul(binding_count, sizeof(*hal_bindings),
+                                    &storage_size)) {
       HRX_RETURN_AND_END_ZONE(
-          z0, hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
-                              "failed to allocate dispatch bindings"));
+          z0, hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                              "dispatch binding storage overflows"));
     }
-    for (size_t i = 0; i < binding_count; ++i) {
-      if (!bindings[i].buffer) {
-        free(hal_bindings);
-        HRX_RETURN_AND_END_ZONE(z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                                                    "binding buffer is NULL"));
-      }
+    status = iree_allocator_malloc_uninitialized(
+        iree_allocator_system(), storage_size, &binding_storage);
+    hal_bindings = binding_storage;
+  }
+  for (size_t i = 0; i < binding_count && iree_status_is_ok(status); ++i) {
+    if (!bindings[i].buffer) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "binding buffer is NULL");
+    } else {
       hal_bindings[i] =
           iree_hal_make_buffer_ref(bindings[i].buffer->hal_buffer,
                                    (iree_device_size_t)bindings[i].offset,
@@ -498,41 +505,42 @@ hrx_status_t hrx_queue_dispatch(
   }
 
   hrx_hal_semaphore_lists_t semaphore_lists;
-  status = hrx_hal_semaphore_lists_initialize(
-      wait_semaphores, signal_semaphores, &semaphore_lists);
-  if (!iree_status_is_ok(status)) {
-    free(hal_bindings);
-    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
+  if (iree_status_is_ok(status)) {
+    status = hrx_hal_semaphore_lists_initialize(
+        wait_semaphores, signal_semaphores, &semaphore_lists);
   }
+  if (iree_status_is_ok(status)) {
+    iree_hal_dispatch_config_t hal_config = {
+        .workgroup_size =
+            {
+                config->workgroup_size[0],
+                config->workgroup_size[1],
+                config->workgroup_size[2],
+            },
+        .workgroup_count =
+            {
+                config->workgroup_count[0],
+                config->workgroup_count[1],
+                config->workgroup_count[2],
+            },
+    };
+    iree_const_byte_span_t hal_constants =
+        iree_make_const_byte_span((const uint8_t*)constants, constants_size);
+    iree_hal_buffer_ref_list_t hal_binding_list = {
+        .count = (iree_host_size_t)binding_count,
+        .values = hal_bindings,
+    };
 
-  iree_hal_dispatch_config_t hal_config = {
-      .workgroup_size =
-          {
-              config->workgroup_size[0],
-              config->workgroup_size[1],
-              config->workgroup_size[2],
-          },
-      .workgroup_count =
-          {
-              config->workgroup_count[0],
-              config->workgroup_count[1],
-              config->workgroup_count[2],
-          },
-  };
-  iree_const_byte_span_t hal_constants =
-      iree_make_const_byte_span((const uint8_t*)constants, constants_size);
-  iree_hal_buffer_ref_list_t hal_binding_list = {
-      .count = (iree_host_size_t)binding_count,
-      .values = hal_bindings,
-  };
-
-  status = iree_hal_queue_dispatch(
-      queue->hal_queue, semaphore_lists.wait.list, semaphore_lists.signal.list,
-      executable->hal_executable,
-      iree_hal_executable_function_from_index(export_ordinal), hal_config,
-      hal_constants, hal_binding_list, /*barriers=*/NULL, hal_flags);
-  free(hal_bindings);
-  hrx_hal_semaphore_lists_deinitialize(&semaphore_lists);
+    status = iree_hal_queue_dispatch(
+        queue->hal_queue, semaphore_lists.wait.list,
+        semaphore_lists.signal.list, executable->hal_executable,
+        iree_hal_executable_function_from_index(export_ordinal), hal_config,
+        hal_constants, hal_binding_list, /*barriers=*/NULL, hal_flags);
+    hrx_hal_semaphore_lists_deinitialize(&semaphore_lists);
+  }
+  if (binding_storage) {
+    iree_allocator_free(iree_allocator_system(), binding_storage);
+  }
   HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
 }
 
