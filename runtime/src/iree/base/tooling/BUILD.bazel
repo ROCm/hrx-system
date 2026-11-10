@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_binary", "iree_runtime_cc_library")
 
 package(
@@ -31,4 +32,16 @@ iree_runtime_cc_binary(
         ":flags",
         "//runtime/src/iree/base",
     ],
+)
+
+iree_cli_test(
+    name = "flags_lock_test",
+    data = [
+        "flags_lock_override.flags",
+        "flags_lock_override_outer.flags",
+        "flags_lock_workload.flags",
+        "flags_lock_workload_outer.flags",
+    ],
+    manifests = ["flags_lock.test.json"],
+    tools = {"flags_demo": ":flags_demo"},
 )

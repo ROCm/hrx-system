@@ -185,6 +185,9 @@ int iree_flag_register(const char* file, int line, iree_flag_type_t type,
 // Registered '-' and '_' characters match each other on command lines and in
 // flagfiles so callers can choose the canonical public spelling independently
 // from the C storage identifier.
+// An invocation may fix a flag's value with --flag-lock=my-flag after setting
+// it. Further assignments fail, including aliases and entries in flagfiles.
+// This also applies to repeatable flags: all values precede the lock.
 //
 // See iree_flag_type_t for the types supported and how they are parsed.
 #define IREE_FLAG_NAMED(type, name, flag_name, default_value, description) \

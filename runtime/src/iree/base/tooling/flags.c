@@ -67,6 +67,8 @@ typedef struct iree_flag_t {
   iree_string_view_t name;
   // Short description string.
   iree_string_view_t description;
+  // Whether the invocation has prohibited further assignments to this flag.
+  bool locked;
 } iree_flag_t;
 
 // State used for flag registration and reflection.
@@ -118,6 +120,7 @@ int iree_flag_register(const char* file, int line, iree_flag_type_t type,
   flag->storage = storage;
   flag->name = name;
   flag->description = description;
+  flag->locked = false;
   return flag_ordinal;
 }
 
@@ -259,6 +262,11 @@ void iree_flags_set_help_filter(iree_flag_help_filter_fn_t filter,
 // Parses a flag value from the given string and stores it.
 static iree_status_t iree_flag_parse(iree_flag_t* flag,
                                      iree_string_view_t value) {
+  if (flag->locked) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "flag '%.*s' is locked by the invocation",
+                            (int)flag->name.size, flag->name.data);
+  }
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_TEXT(z0, flag->name.data, flag->name.size);
   IREE_TRACE_ZONE_APPEND_TEXT(z0, value.data, value.size);
@@ -562,6 +570,35 @@ void iree_flags_parse_checked(iree_flags_parse_mode_t mode, int* argc,
 
   exit(EXIT_FAILURE);
 }
+
+//===----------------------------------------------------------------------===//
+// --flag-lock= support
+//===----------------------------------------------------------------------===//
+
+static iree_status_t iree_flags_parse_lock(iree_string_view_t flag_name,
+                                           void* storage,
+                                           iree_string_view_t value) {
+  iree_flag_t* flag = iree_flag_lookup(value);
+  if (!flag) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "cannot lock unrecognized flag '%.*s'",
+                            (int)value.size, value.data);
+  }
+  flag->locked = true;
+  return iree_ok_status();
+}
+
+static void iree_flags_print_lock(iree_string_view_t flag_name, void* storage,
+                                  FILE* file) {
+  fprintf(file, "# --flag-lock=[name]\n");
+}
+
+IREE_FLAG_CALLBACK(
+    iree_flags_parse_lock, iree_flags_print_lock, NULL, flag_lock,
+    "Locks a previously configured flag against further assignments.\n"
+    "The value is the flag name without --. Repeat to lock several flags.\n"
+    "Command-line aliases and nested flagfiles obey the same lock. Locks\n"
+    "persist for the process lifetime; there is no unlock operation.");
 
 //===----------------------------------------------------------------------===//
 // --flagfile= support

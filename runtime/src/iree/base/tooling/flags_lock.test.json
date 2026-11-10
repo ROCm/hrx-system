@@ -1,0 +1,334 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "locked test_bool",
+      "run": {
+        "tool": "flags_demo",
+        "args": [
+          "--test_bool=true",
+          "--flag-lock=test_bool",
+          "--test_bool=true"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "flag 'test_bool' is locked by the invocation"
+        ]
+      }
+    },
+    {
+      "name": "locked test_int32",
+      "run": {
+        "tool": "flags_demo",
+        "args": [
+          "--test_int32=27",
+          "--flag-lock=test_int32",
+          "--test_int32=27"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "flag 'test_int32' is locked by the invocation"
+        ]
+      }
+    },
+    {
+      "name": "locked test_int64",
+      "run": {
+        "tool": "flags_demo",
+        "args": [
+          "--test_int64=9876543210",
+          "--flag-lock=test_int64",
+          "--test_int64=9876543210"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "flag 'test_int64' is locked by the invocation"
+        ]
+      }
+    },
+    {
+      "name": "locked test_float",
+      "run": {
+        "tool": "flags_demo",
+        "args": [
+          "--test_float=2.5",
+          "--flag-lock=test_float",
+          "--test_float=2.5"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "flag 'test_float' is locked by the invocation"
+        ]
+      }
+    },
+    {
+      "name": "locked test_string",
+      "run": {
+        "tool": "flags_demo",
+        "args": [
+          "--test_string=fixed",
+          "--flag-lock=test_string",
+          "--test_string=fixed"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "flag 'test_string' is locked by the invocation"
+        ]
+      }
+    },
+    {
+      "name": "locked test_callback",
+      "run": {
+        "tool": "flags_demo",
+        "args": [
+          "--test_callback=4",
+          "--flag-lock=test_callback",
+          "--test_callback=4"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "flag 'test_callback' is locked by the invocation"
+        ]
+      }
+    },
+    {
+      "name": "locked test_strings",
+      "run": {
+        "tool": "flags_demo",
+        "args": [
+          "--test_strings=first",
+          "--flag-lock=test_strings",
+          "--test_strings=first"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "flag 'test_strings' is locked by the invocation"
+        ]
+      }
+    },
+    {
+      "name": "alias or whitespace '--test-string=changed'",
+      "run": {
+        "tool": "flags_demo",
+        "args": [
+          "--flag-lock=test-string",
+          "--test-string=changed"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "flag 'test_string' is locked"
+        ]
+      }
+    },
+    {
+      "name": "alias or whitespace ' --test_string = changed '",
+      "run": {
+        "tool": "flags_demo",
+        "args": [
+          "--flag-lock=test-string",
+          " --test_string = changed "
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "flag 'test_string' is locked"
+        ]
+      }
+    },
+    {
+      "name": "alias or whitespace '--test_string'",
+      "run": {
+        "tool": "flags_demo",
+        "args": [
+          "--flag-lock=test-string",
+          "--test_string"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "flag 'test_string' is locked"
+        ]
+      }
+    },
+    {
+      "name": "unrecognized lock",
+      "run": {
+        "tool": "flags_demo",
+        "args": [
+          "--flag-lock=unknown"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "cannot lock unrecognized flag"
+        ]
+      }
+    },
+    {
+      "name": "empty lock",
+      "run": {
+        "tool": "flags_demo",
+        "args": [
+          "--flag-lock="
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "cannot lock unrecognized flag"
+        ]
+      }
+    },
+    {
+      "name": "repeatable values precede lock and workload stays mutable",
+      "run": {
+        "tool": "flags_demo",
+        "args": [
+          "--test_strings=first",
+          "--test_strings=second",
+          "--flag-lock=test_strings",
+          "--test_int32=7",
+          "--test_int32=8",
+          "--flag_lock=test-strings"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "FLAG[test_strings] = 2: first, second",
+            "FLAG[test_int32] = 8"
+          ]
+        }
+      },
+      "stderr": {
+        "empty": true
+      }
+    },
+    {
+      "name": "nested flagfile can configure workload",
+      "run": {
+        "tool": "flags_demo",
+        "args": [
+          "--test_string=fixed",
+          "--flag-lock=test_string",
+          "--flagfile=flags_lock_workload_outer.flags"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "FLAG[test_string] = fixed",
+            "FLAG[test_int32] = 17"
+          ]
+        }
+      },
+      "stderr": {
+        "empty": true
+      },
+      "cwd": "{srcdir}"
+    },
+    {
+      "name": "nested flagfile cannot override lock",
+      "run": {
+        "tool": "flags_demo",
+        "args": [
+          "--test_string=fixed",
+          "--flag-lock=test_string",
+          "--flagfile=flags_lock_override_outer.flags"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "flag 'test_string' is locked",
+          "flags_lock_override.flags"
+        ]
+      },
+      "cwd": "{srcdir}"
+    }
+  ]
+}
