@@ -1,9 +1,0 @@
-kernel.decl @entry() launch()
-
-kernel.decl @renamed_entry() launch()
-
-check.case public @launch_entries {
-  kernel.launch @entry() : ()
-  kernel.launch @renamed_entry() : ()
-  check.return
-}

@@ -26,7 +26,6 @@
 #include "loom/link/module_index.h"
 #include "loom/link/testdata/config_providers/config_providers_testdata.h"
 #include "loom/link/testdata/link_index/link_index_testdata.h"
-#include "loom/link/testdata/template_selection/template_selection_testdata.h"
 #include "loom/ops/config/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/op_registry.h"
@@ -70,17 +69,6 @@ static iree_string_view_t LinkIndexFixture(iree_string_view_t name) {
     }
   }
   ADD_FAILURE() << "link index fixture not embedded";
-  return iree_string_view_empty();
-}
-
-static iree_string_view_t TemplateSelectionFixture(iree_string_view_t name) {
-  const auto* files = loom_link_template_selection_testdata_create();
-  for (size_t i = 0; i < loom_link_template_selection_testdata_size(); ++i) {
-    if (iree_string_view_equal(iree_make_cstring_view(files[i].name), name)) {
-      return iree_make_string_view(files[i].data, files[i].size);
-    }
-  }
-  ADD_FAILURE() << "template selection fixture not embedded";
   return iree_string_view_empty();
 }
 
@@ -468,9 +456,9 @@ template.def<@demo.choose> priority(1) @slow(%x: i32) -> (i32) {
 TEST_F(LinkIndexMaterializerTest,
        PreservesTargetDependentCandidatesAcrossProviderForms) {
   const iree_string_view_t root_source =
-      TemplateSelectionFixture(IREE_SV("target_roots.loom"));
+      LinkIndexFixture(IREE_SV("target_roots.loom"));
   const iree_string_view_t provider_source =
-      TemplateSelectionFixture(IREE_SV("target_providers.loom"));
+      LinkIndexFixture(IREE_SV("target_providers.loom"));
   ASSERT_FALSE(iree_string_view_is_empty(root_source));
   ASSERT_FALSE(iree_string_view_is_empty(provider_source));
   loom_module_t* root = Parse(root_source, IREE_SV("target_roots.loom"));

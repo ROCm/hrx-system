@@ -131,16 +131,11 @@ iree_cli_test(
 
 iree_cli_test(
     name = "loom_link_execution_test",
-    data = [
-        "//loom/src/loom/tooling/target/amdgpu/testdata:loom_link_low.loom",
-        "//loom/src/loom/tooling/target/amdgpu/testdata:loom_link_type_binding_declaration.loom",
-        "//loom/src/loom/tooling/target/amdgpu/testdata:loom_link_type_bindings.loom",
-    ],
+    data = ["//loom/src/loom/tooling/target/amdgpu/testdata:loom_link_low.loom"],
     manifests = ["loom-link-amdgpu.test.json"],
     tags = ["hostonly"],
     target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH,
     tools = {
-        "loom-format": "//loom/src/loom/tools/loom-format",
         "loom-link": "//loom/src/loom/tools/loom-link",
     },
 )

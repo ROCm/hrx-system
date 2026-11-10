@@ -12,21 +12,6 @@ package(
     licenses = ["notice"],
 )
 
-exports_files(
-    [
-        "target_providers.loom",
-        "target_roots.loom",
-    ],
-)
-
-exports_files(
-    [
-        "missing_provider.loom",
-        "root.loom",
-    ],
-    visibility = ["//loom/src/loom/tools/loom-link:__pkg__"],
-)
-
 iree_c_embed_data(
     name = "template_selection",
     testonly = True,
@@ -35,8 +20,5 @@ iree_c_embed_data(
     flatten = True,
     h_file_output = "template_selection_testdata.h",
     identifier = "loom_link_template_selection_testdata",
-    visibility = [
-        "//loom/binding/c/test:__pkg__",
-        "//loom/src/loom/link:__pkg__",
-    ],
+    visibility = ["//loom/binding/c/test:__pkg__"],
 )

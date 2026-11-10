@@ -4,28 +4,12 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_benchmark", "loom_cc_library", "loom_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
-)
-
-iree_cli_test(
-    name = "template_candidates_test",
-    data = [
-        "//loom/src/loom/link/testdata/template_selection:target_providers.loom",
-        "//loom/src/loom/link/testdata/template_selection:target_roots.loom",
-    ],
-    manifests = ["template_candidates.test.json"],
-    tags = ["hostonly"],
-    tools = {
-        "loom-format": "//loom/src/loom/tools/loom-format",
-        "loom-link": "//loom/src/loom/tools/loom-link",
-        "loom-opt": "//loom/src/loom/tools/loom-opt",
-    },
 )
 
 loom_cc_library(
@@ -444,7 +428,6 @@ loom_cc_test(
         "//loom/src/loom/ir",
         "//loom/src/loom/link/testdata/config_providers",
         "//loom/src/loom/link/testdata/link_index",
-        "//loom/src/loom/link/testdata/template_selection",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:op_registry",
         "//loom/src/loom/ops/config",
