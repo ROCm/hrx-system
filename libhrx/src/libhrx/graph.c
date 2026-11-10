@@ -144,6 +144,7 @@ hrx_status_t hrx_graph_create(hrx_device_t device, uint32_t flags,
 
   iree_atomic_ref_count_init(&graph->ref_count);
   graph->device = device;
+  hrx_device_retain(device);
 
   iree_arena_initialize(&device->block_pool, &graph->arena);
   graph->arena_allocator = iree_arena_allocator(&graph->arena);
@@ -184,6 +185,7 @@ static void hrx_graph_destroy(hrx_graph_s* graph) {
   iree_hal_resource_set_free(graph->allocation_pool_set);
   iree_arena_deinitialize(&graph->arena);
   iree_slim_mutex_deinitialize(&graph->mutex);
+  hrx_device_release(graph->device);
   iree_allocator_free(iree_allocator_system(), graph);
 
   IREE_TRACE_ZONE_END(z0);

@@ -232,8 +232,11 @@ typedef struct hrx_status_s {
 
 // Timeline semaphore.
 typedef struct hrx_semaphore_s {
+  // References to the wrapper, which owns its dependencies once.
   iree_atomic_ref_count_t ref_count;
+  // Retained native timeline.
   iree_hal_semaphore_t* hal_semaphore;
+  // Retained device keeping the timeline's group and services alive.
   hrx_device_t device;
 } hrx_semaphore_s;
 
@@ -335,7 +338,9 @@ typedef struct hrx_graph_edge_t {
 } hrx_graph_edge_t;
 
 typedef struct hrx_graph_s {
+  // References to this template, including instantiated executables.
   iree_atomic_ref_count_t ref_count;
+  // Retained device providing the graph arena and captured native resources.
   hrx_device_t device;
 
   iree_arena_allocator_t arena;
@@ -510,14 +515,22 @@ typedef struct hrx_mem_pool_s {
 
 // Timeline fence wrapper.
 typedef struct hrx_fence_s {
+  // References to the wrapper, which owns its dependencies once.
   iree_atomic_ref_count_t ref_count;
+  // Retained native fence owning the timepoint values and native semaphores.
   iree_hal_fence_t* hal_fence;
+  // The allocation continues with hrx_semaphore_t owners[hal_fence->capacity],
+  // in native timepoint order. These keep each device group and runtime alive.
 } hrx_fence_s;
 
 // Buffer view wrapper.
 typedef struct hrx_buffer_view_s {
+  // References to the view, which owns its dependencies once.
   iree_atomic_ref_count_t ref_count;
+  // Retained native shape and encoding metadata.
   iree_hal_buffer_view_t* hal_buffer_view;
+  // Retained allocation owner, including its pool and device group.
+  hrx_buffer_t buffer;
 } hrx_buffer_view_s;
 
 // HAL executable wrapper for direct queue/stream dispatch.

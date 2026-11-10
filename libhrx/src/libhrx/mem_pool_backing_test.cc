@@ -297,7 +297,15 @@ TEST_F(MemPoolBackingTest, LogicalLimitsRemainIndependentOfSharedBacking) {
     EXPECT_EQ(rejected, nullptr);
   }
   EXPECT_EQ(BackingStats().bytes_committed, backing_bytes);
+  Buffer retained(first_buffer.get(), hrx_buffer_release);
+  hrx_buffer_retain(retained.get());
   first_buffer.reset();
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        hrx_status_to_iree(hrx_mem_pool_allocate_buffer(
+                            first.get(), 1, &rejected)));
+  EXPECT_EQ(rejected, nullptr);
+  WriteAndCheck(retained.get(), 0x2B);
+  retained.reset();
   first_buffer = Allocate(first.get());
   ASSERT_NE(first_buffer, nullptr);
   WriteAndCheck(first_buffer.get(), 0x58);

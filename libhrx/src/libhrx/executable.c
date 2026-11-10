@@ -265,8 +265,6 @@ void hrx_executable_retain(hrx_executable_t executable) {
   if (!executable) {
     return;
   }
-  iree_hal_executable_retain(executable->hal_executable);
-  hrx_device_retain(executable->device);
   iree_atomic_ref_count_inc(&executable->ref_count);
 }
 
@@ -274,14 +272,13 @@ void hrx_executable_release(hrx_executable_t executable) {
   if (!executable) {
     return;
   }
-  iree_hal_executable_t* hal_executable = executable->hal_executable;
-  hrx_device_t device = executable->device;
-  if (iree_atomic_ref_count_dec(&executable->ref_count) == 1) {
-    iree_allocator_free(iree_allocator_system(), executable->export_names);
-    iree_allocator_free(iree_allocator_system(), executable);
+  if (iree_atomic_ref_count_dec(&executable->ref_count) != 1) {
+    return;
   }
-  iree_hal_executable_release(hal_executable);
-  hrx_device_release(device);
+  iree_hal_executable_release(executable->hal_executable);
+  hrx_device_release(executable->device);
+  iree_allocator_free(iree_allocator_system(), executable->export_names);
+  iree_allocator_free(iree_allocator_system(), executable);
 }
 
 hrx_status_t hrx_executable_export_count(hrx_executable_t executable,

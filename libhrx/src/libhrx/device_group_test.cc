@@ -116,4 +116,217 @@ TEST(DeviceGroupTest, RejectsInvalidInputsBeforeActivation) {
   EXPECT_EQ(group, nullptr);
 }
 
+// Dependent resources keep the explicit group alive after construction owners
+// disappear. These cases use public borrowed handles only while such an owner
+// remains, then exercise native work and final cleanup under that ownership.
+class DeviceGroupLifetimeTest : public testing::Test {
+ protected:
+  void SetUp() override {
+    ASSERT_TRUE(Check(hrx_runtime_create(nullptr, hrx_host_allocator_system(),
+                                         runtime_.for_output())));
+    ASSERT_TRUE(runtime_);
+    const hrx_device_create_params_t task = {.uri = "task://"};
+    ASSERT_TRUE(Check(
+        hrx_device_group_create(runtime_, 1, &task, group_.for_output())));
+    ASSERT_TRUE(group_);
+    device_ = hrx_device_group_get_device(group_, 0);
+  }
+
+  void ReleaseConstructionOwners() {
+    group_.reset();
+    runtime_.reset();
+  }
+
+  // Construction reference to the services shared by the test's groups.
+  hrx::runtime::runtime_ptr runtime_;
+  // Construction reference, released before testing dependent ownership.
+  hrx::runtime::device_group_ptr group_;
+  // Borrowed view, valid while any test resource keeps its group alive.
+  hrx_device_t device_ = nullptr;
+};
+
+constexpr hrx_buffer_params_t kHostBufferParams = {
+    .type = HRX_MEMORY_TYPE_HOST_LOCAL,
+    .access = HRX_MEMORY_ACCESS_ALL,
+    .usage = HRX_BUFFER_USAGE_DEFAULT,
+};
+
+TEST_F(DeviceGroupLifetimeTest, ViewKeepsAllocationAndServicesAlive) {
+  hrx::runtime::buffer_ptr buffer;
+  ASSERT_TRUE(Check(hrx_allocator_allocate_buffer(hrx_device_allocator(device_),
+                                                  kHostBufferParams, 256,
+                                                  buffer.for_output())));
+  ASSERT_TRUE(buffer);
+  hrx_buffer_t borrowed_buffer = buffer;
+  const int64_t shape[] = {8, 8};
+  hrx::runtime::buffer_view_ptr view;
+  ASSERT_TRUE(Check(hrx_buffer_view_create(
+      buffer, 2, shape, HRX_ELEMENT_TYPE_INT_32,
+      HRX_ENCODING_TYPE_DENSE_ROW_MAJOR, view.for_output())));
+  ASSERT_TRUE(view);
+  auto retained_view = view;
+  view.reset();
+  buffer.reset();
+  ReleaseConstructionOwners();
+
+  hrx::runtime::semaphore_ptr done;
+  ASSERT_TRUE(Check(hrx_semaphore_create(device_, 0, done.for_output())));
+  ASSERT_TRUE(done);
+  uint64_t value = 1;
+  hrx_semaphore_t signal = done;
+  const hrx_semaphore_list_t signals = {&signal, &value, 1};
+  const uint32_t pattern = 0x87654321u;
+  ASSERT_TRUE(Check(hrx_queue_fill(hrx_device_get_queue(device_, 0, 0), nullptr,
+                                   &signals, borrowed_buffer, 0, 256, &pattern,
+                                   sizeof(pattern))));
+  ASSERT_TRUE(Check(hrx_semaphore_wait(done, value, UINT64_MAX)));
+  done.reset();
+
+  void* data = nullptr;
+  ASSERT_TRUE(
+      Check(hrx_buffer_map(borrowed_buffer, HRX_MAP_READ, 0, 256, &data)));
+  for (size_t i = 0; i < 64; ++i) {
+    EXPECT_EQ(static_cast<const uint32_t*>(data)[i], pattern);
+  }
+  ASSERT_TRUE(Check(hrx_buffer_unmap(borrowed_buffer)));
+  size_t rank = 0;
+  ASSERT_TRUE(Check(hrx_buffer_view_rank(retained_view, &rank)));
+  EXPECT_EQ(rank, 2u);
+  int64_t dimension = 0;
+  ASSERT_TRUE(Check(hrx_buffer_view_dim(retained_view, 1, &dimension)));
+  EXPECT_EQ(dimension, 8);
+}
+
+TEST_F(DeviceGroupLifetimeTest, ExtendedFenceRetainsDistinctGroups) {
+  hrx::runtime::device_group_ptr second_group;
+  const hrx_device_create_params_t task = {.uri = "task://"};
+  ASSERT_TRUE(Check(
+      hrx_device_group_create(runtime_, 1, &task, second_group.for_output())));
+  ASSERT_TRUE(second_group);
+  hrx::runtime::semaphore_ptr first;
+  hrx::runtime::semaphore_ptr second;
+  ASSERT_TRUE(Check(hrx_semaphore_create(device_, 0, first.for_output())));
+  ASSERT_TRUE(Check(hrx_semaphore_create(
+      hrx_device_group_get_device(second_group, 0), 0, second.for_output())));
+  ASSERT_TRUE(first);
+  ASSERT_TRUE(second);
+  hrx_semaphore_t borrowed_first = first;
+  hrx_semaphore_t borrowed_second = second;
+  hrx::runtime::fence_ptr source;
+  ASSERT_TRUE(Check(hrx_fence_create(2, source.for_output())));
+  ASSERT_TRUE(source);
+  ASSERT_TRUE(Check(hrx_fence_insert(source, first, 3)));
+  ASSERT_TRUE(Check(hrx_fence_insert(source, second, 5)));
+  hrx::runtime::fence_ptr target;
+  ASSERT_TRUE(Check(hrx_fence_create(2, target.for_output())));
+  ASSERT_TRUE(target);
+  ASSERT_TRUE(Check(hrx_fence_insert(target, first, 4)));
+  ASSERT_TRUE(Check(hrx_fence_extend(target, source)));
+  ASSERT_TRUE(Check(hrx_fence_extend(target, target)));
+  auto retained = target;
+  target.reset();
+  source.reset();
+  first.reset();
+  second.reset();
+  second_group.reset();
+  ReleaseConstructionOwners();
+
+  ASSERT_TRUE(Check(hrx_semaphore_signal(borrowed_first, 3)));
+  ASSERT_TRUE(Check(hrx_semaphore_signal(borrowed_second, 5)));
+  hrx_status_t status = hrx_fence_wait(retained, 0);
+  EXPECT_EQ(hrx_status_code(status), HRX_STATUS_DEADLINE_EXCEEDED);
+  hrx_status_ignore(status);
+  ASSERT_TRUE(Check(hrx_semaphore_signal(borrowed_first, 4)));
+  ASSERT_TRUE(Check(hrx_fence_wait(retained, 0)));
+}
+
+TEST_F(DeviceGroupLifetimeTest, PartialFenceExtensionKeepsInsertedOwners) {
+  hrx::runtime::semaphore_ptr timelines[3];
+  for (auto& timeline : timelines) {
+    ASSERT_TRUE(Check(hrx_semaphore_create(device_, 0, timeline.for_output())));
+    ASSERT_TRUE(timeline);
+  }
+  hrx::runtime::fence_ptr source;
+  ASSERT_TRUE(Check(hrx_fence_create(2, source.for_output())));
+  ASSERT_TRUE(source);
+  ASSERT_TRUE(Check(hrx_fence_insert(source, timelines[1], 7)));
+  ASSERT_TRUE(Check(hrx_fence_insert(source, timelines[2], 9)));
+  hrx::runtime::fence_ptr target;
+  ASSERT_TRUE(Check(hrx_fence_create(2, target.for_output())));
+  ASSERT_TRUE(target);
+  ASSERT_TRUE(Check(hrx_fence_insert(target, timelines[0], 3)));
+  hrx_status_t status = hrx_fence_extend(target, source);
+  EXPECT_EQ(hrx_status_code(status), HRX_STATUS_OUT_OF_MEMORY);
+  hrx_status_ignore(status);
+  // A repeated insertion still succeeds at capacity and takes the maximum.
+  ASSERT_TRUE(Check(hrx_fence_insert(target, timelines[1], 8)));
+  hrx_semaphore_t borrowed = timelines[1];
+  source.reset();
+  for (auto& timeline : timelines) {
+    timeline.reset();
+  }
+  ReleaseConstructionOwners();
+
+  ASSERT_TRUE(Check(hrx_fence_signal(target)));
+  uint64_t value = 0;
+  ASSERT_TRUE(Check(hrx_semaphore_query(borrowed, &value)));
+  EXPECT_EQ(value, 8u);
+  ASSERT_TRUE(Check(hrx_fence_wait(target, 0)));
+}
+
+TEST_F(DeviceGroupLifetimeTest, SingleTimepointFenceRetainsTimeline) {
+  hrx::runtime::semaphore_ptr timeline;
+  ASSERT_TRUE(Check(hrx_semaphore_create(device_, 0, timeline.for_output())));
+  ASSERT_TRUE(timeline);
+  hrx::runtime::fence_ptr fence;
+  ASSERT_TRUE(Check(hrx_fence_create_at(timeline, 19, fence.for_output())));
+  ASSERT_TRUE(fence);
+  timeline.reset();
+  ReleaseConstructionOwners();
+  ASSERT_TRUE(Check(hrx_fence_signal(fence)));
+  ASSERT_TRUE(Check(hrx_fence_wait(fence, 0)));
+}
+
+TEST_F(DeviceGroupLifetimeTest, GraphKeepsRecordingAndExecutionOwnersAlive) {
+  alignas(64) uint32_t values[16] = {};
+  hrx::runtime::buffer_ptr buffer;
+  ASSERT_TRUE(Check(hrx_allocator_import_buffer(
+      hrx_device_allocator(device_), kHostBufferParams, values, sizeof(values),
+      buffer.for_output())));
+  ASSERT_TRUE(buffer);
+  hrx::runtime::hrx_ptr<hrx_graph_t, hrx_graph_retain, hrx_graph_release> graph;
+  ASSERT_TRUE(Check(hrx_graph_create(device_, 0, graph.for_output())));
+  ASSERT_TRUE(graph);
+  const hrx_graph_fill_buffer_node_attrs_t fill = {
+      .dst = {buffer, 0, sizeof(values)},
+      .pattern = 0xA5A5A5A5u,
+      .pattern_size = 4,
+  };
+  hrx_graph_node_t node = nullptr;
+  ASSERT_TRUE(
+      Check(hrx_graph_add_fill_buffer_node(graph, nullptr, 0, &fill, &node)));
+  buffer.reset();
+  ReleaseConstructionOwners();
+
+  // The template is now the sole owner of the device arena. Instantiation
+  // transfers that ownership through the executable's retained template.
+  hrx::runtime::hrx_ptr<hrx_graph_exec_t, hrx_graph_exec_retain,
+                        hrx_graph_exec_release>
+      executable;
+  ASSERT_TRUE(Check(hrx_graph_instantiate(
+      graph, hrx_device_get_queue(device_, 0, 0), 0, executable.for_output())));
+  ASSERT_TRUE(executable);
+  graph.reset();
+  hrx::runtime::stream_ptr stream;
+  ASSERT_TRUE(Check(hrx_stream_create(hrx_device_get_queue(device_, 0, 0), 0,
+                                      stream.for_output())));
+  ASSERT_TRUE(stream);
+  ASSERT_TRUE(Check(hrx_graph_exec_launch(executable, stream)));
+  ASSERT_TRUE(Check(hrx_stream_synchronize(stream)));
+  stream.reset();
+  for (uint32_t value : values) {
+    EXPECT_EQ(value, 0xA5A5A5A5u);
+  }
+}
+
 }  // namespace

@@ -580,6 +580,9 @@ HRX_API hrx_status_t hrx_executable_lookup_export_by_name(
 // Fences
 //===----------------------------------------------------------------------===//
 
+// Creates a fence holding up to |capacity| unique timeline semaphores. Inserted
+// semaphores and their device groups remain alive until the fence is released.
+// Mutation requires exclusive access and no outstanding use of the fence.
 HRX_API hrx_status_t hrx_fence_create(size_t capacity, hrx_fence_t* fence);
 
 HRX_API hrx_status_t hrx_fence_create_at(hrx_semaphore_t semaphore,
@@ -592,6 +595,8 @@ HRX_API hrx_status_t hrx_fence_insert(hrx_fence_t fence,
                                       hrx_semaphore_t semaphore,
                                       uint64_t value);
 
+// Inserts each timepoint from |from_fence|, retaining its owner independently.
+// If capacity is exceeded, timepoints inserted before the failure remain.
 HRX_API hrx_status_t hrx_fence_extend(hrx_fence_t into_fence,
                                       hrx_fence_t from_fence);
 
@@ -624,6 +629,8 @@ typedef uint32_t hrx_encoding_type_t;
 #define HRX_ENCODING_TYPE_OPAQUE 0u
 #define HRX_ENCODING_TYPE_DENSE_ROW_MAJOR 1u
 
+// Creates shape and encoding metadata retaining |buffer| and its allocation
+// owners. The caller may release its buffer reference after creating the view.
 HRX_API hrx_status_t hrx_buffer_view_create(hrx_buffer_t buffer,
                                             size_t shape_rank,
                                             const int64_t* shape,
