@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstdint>
+#include <initializer_list>
 #include <string_view>
 #include <vector>
 
@@ -77,6 +78,55 @@ const iree_file_toc_t* MultiplyImage(std::string_view architecture) {
   }
   return nullptr;
 }
+
+// A recorder combines visibility for the concrete ranges crossing one boundary.
+// The prepared pair stays reusable across buffers in the same sealed group.
+struct PreparedBoundary {
+  PreparedBoundary(hrx_memory_transition_pair_t pair,
+                   hrx_memory_transition_action_t action,
+                   hrx_execution_stage_t stage,
+                   std::initializer_list<hrx_buffer_ref_t> buffers) {
+    memory.source_scope = HRX_ACCESS_SCOPE_MEMORY_WRITE;
+    memory.target_scope =
+        HRX_ACCESS_SCOPE_MEMORY_READ | HRX_ACCESS_SCOPE_MEMORY_WRITE;
+    barrier.source_stage_mask =
+        action == HRX_MEMORY_TRANSITION_RELEASE ? stage : 0;
+    barrier.target_stage_mask =
+        action == HRX_MEMORY_TRANSITION_ACQUIRE ? stage : 0;
+    barrier.memory_barrier_count = 1;
+    barrier.memory_barriers = &memory;
+    barrier.buffer_barriers = ranges.data();
+    for (const auto& buffer : buffers) {
+      const auto table = hrx().buffer_transition_table(buffer.buffer);
+      const auto transition = hrx_memory_transition_query(table, pair);
+      const auto effects = action == HRX_MEMORY_TRANSITION_RELEASE
+                               ? transition.release
+                               : transition.acquire;
+      REQUIRE(hrx_memory_effects_is_supported(effects));
+      REQUIRE_FALSE(hrx_memory_effects_requires_program(effects));
+      barrier.effects = hrx_memory_effects_combine(barrier.effects, effects);
+      const auto* recipe = hrx().memory_transition_recipe(table, pair, action);
+      if (recipe) {
+        REQUIRE(barrier.buffer_barrier_count < ranges.size());
+        ranges[barrier.buffer_barrier_count++] = {
+            .source_scope = memory.source_scope,
+            .target_scope = memory.target_scope,
+            .buffer_ref = buffer,
+            .recipe = recipe,
+        };
+      }
+    }
+  }
+
+  // Global local-access dependency for the operation boundary.
+  hrx_memory_barrier_t memory = {};
+  // At most the three concrete bindings of the NPU arithmetic program.
+  std::array<hrx_buffer_barrier_t, 3> ranges = {};
+  // Combined actions and associated ranges, captured during enqueue.
+  hrx_barrier_t barrier = {};
+  // Borrowed single-record view used by queue descriptors below.
+  hrx_barrier_list_t list = {1, &barrier};
+};
 
 }  // namespace
 
@@ -162,6 +212,15 @@ TEST_CASE("CPU NPU GPU work shares storage and explicit queue dependencies",
     REQUIRE_OK(
         hrx().tlsf_pool_create(resources.pools[1], &tlsf, &resources.pools[i]));
   }
+  std::array<hrx_memory_transition_pair_t, 3> acquires, releases;
+  const auto table = hrx().mem_pool_transition_table(resources.pools[0]);
+  for (size_t i = 0; i < scopes.size(); ++i) {
+    const auto any = hrx_memory_scope_any(scopes[i]);
+    REQUIRE_OK(hrx().memory_transition_prepare_pair(
+        table, any, scopes[i], HRX_MEMORY_TRANSITION_ACQUIRE, &acquires[i]));
+    REQUIRE_OK(hrx().memory_transition_prepare_pair(
+        table, scopes[i], any, HRX_MEMORY_TRANSITION_RELEASE, &releases[i]));
+  }
   // Dependent resources retain the complete group and its execution services.
   hrx().device_group_release(resources.group);
   resources.group = nullptr;
@@ -185,6 +244,9 @@ TEST_CASE("CPU NPU GPU work shares storage and explicit queue dependencies",
                                   resources.pools[2 + generation],
                                   requests.size(), requests.data(), buffers));
     resources.tails[0] = cpu_value;
+    // The first generation retains conservative defaults; the second supplies
+    // the recorder's captured requirements, including explicitly empty sides.
+    const hrx_barrier_list_t empty = {};
     const uint32_t input_values[] = {
         11u + static_cast<uint32_t>(generation) * 17u,
         7u + static_cast<uint32_t>(generation) * 23u,
@@ -194,15 +256,25 @@ TEST_CASE("CPU NPU GPU work shares storage and explicit queue dependencies",
       const hrx_semaphore_list_t waits = {&resources.semaphores[0],
                                           &resources.tails[0], 1};
       ++cpu_value;
+      PreparedBoundary release(releases[0], HRX_MEMORY_TRANSITION_RELEASE,
+                               HRX_EXECUTION_STAGE_TRANSFER,
+                               {{buffers[i], 0, kBufferLength}});
+      const hrx_queue_barriers_t barriers = {&empty, &release.list};
       REQUIRE_OK(hrx().queue_fill(queues[0], &waits, &cpu_signal, buffers[i], 0,
                                   kBufferLength, &input_values[i],
-                                  sizeof(input_values[i])));
+                                  sizeof(input_values[i]),
+                                  generation ? &barriers : nullptr));
       resources.tails[0] = cpu_value;
     }
     uint64_t gpu_value = resources.tails[1] + 1;
     hrx_semaphore_list_t gpu_signal = {&resources.semaphores[1], &gpu_value, 1};
+    PreparedBoundary guard_release(releases[1], HRX_MEMORY_TRANSITION_RELEASE,
+                                   HRX_EXECUTION_STAGE_TRANSFER,
+                                   {{buffers[3], 0, kBufferLength}});
+    const hrx_queue_barriers_t guard_barriers = {&empty, &guard_release.list};
     REQUIRE_OK(hrx().queue_fill(queues[1], &cpu_signal, &gpu_signal, buffers[3],
-                                0, kBufferLength, &kGuard, sizeof(kGuard)));
+                                0, kBufferLength, &kGuard, sizeof(kGuard),
+                                generation ? &guard_barriers : nullptr));
     resources.tails[1] = gpu_value;
     const hrx_dispatch_config_t dispatch = {
         .workgroup_count = {1, 1, 1},
@@ -216,17 +288,42 @@ TEST_CASE("CPU NPU GPU work shares storage and explicit queue dependencies",
     uint64_t npu_value = resources.tails[2] + 1;
     const hrx_semaphore_list_t npu_signal = {&resources.semaphores[2],
                                              &npu_value, 1};
+    PreparedBoundary npu_acquire(acquires[2], HRX_MEMORY_TRANSITION_ACQUIRE,
+                                 HRX_EXECUTION_STAGE_DISPATCH,
+                                 {bindings[0], bindings[1], bindings[2]});
+    PreparedBoundary npu_release(releases[2], HRX_MEMORY_TRANSITION_RELEASE,
+                                 HRX_EXECUTION_STAGE_DISPATCH, {bindings[2]});
+    const hrx_queue_barriers_t npu_barriers = {&npu_acquire.list,
+                                               &npu_release.list};
     REQUIRE_OK(hrx().queue_dispatch(queues[2], &gpu_signal, &npu_signal,
                                     resources.executable, export_ordinal,
-                                    &dispatch, nullptr, 0, bindings, 3, 0));
+                                    &dispatch, nullptr, 0, bindings, 3,
+                                    generation ? &npu_barriers : nullptr, 0));
     resources.tails[2] = npu_value;
     ++gpu_value;
+    PreparedBoundary gpu_acquire(acquires[1], HRX_MEMORY_TRANSITION_ACQUIRE,
+                                 HRX_EXECUTION_STAGE_TRANSFER, {bindings[2]});
+    PreparedBoundary gpu_release(releases[1], HRX_MEMORY_TRANSITION_RELEASE,
+                                 HRX_EXECUTION_STAGE_TRANSFER,
+                                 {{buffers[3], 0, kBufferLength}});
+    const hrx_queue_barriers_t gpu_barriers = {&gpu_acquire.list,
+                                               &gpu_release.list};
     REQUIRE_OK(hrx().queue_copy(queues[1], &npu_signal, &gpu_signal, buffers[2],
-                                0, buffers[3], kOutputOffset, kPayloadLength));
+                                0, buffers[3], kOutputOffset, kPayloadLength,
+                                generation ? &gpu_barriers : nullptr));
     resources.tails[1] = gpu_value;
     ++cpu_value;
+    PreparedBoundary cpu_acquire(acquires[0], HRX_MEMORY_TRANSITION_ACQUIRE,
+                                 HRX_EXECUTION_STAGE_TRANSFER,
+                                 {{buffers[3], 0, kBufferLength}});
+    PreparedBoundary cpu_release(releases[0], HRX_MEMORY_TRANSITION_RELEASE,
+                                 HRX_EXECUTION_STAGE_TRANSFER,
+                                 {{buffers[4], 0, kBufferLength}});
+    const hrx_queue_barriers_t cpu_barriers = {&cpu_acquire.list,
+                                               &cpu_release.list};
     REQUIRE_OK(hrx().queue_copy(queues[0], &gpu_signal, &cpu_signal, buffers[3],
-                                0, buffers[4], 0, kBufferLength));
+                                0, buffers[4], 0, kBufferLength,
+                                generation ? &cpu_barriers : nullptr));
     resources.tails[0] = cpu_value;
     if (!generation) {
       // All buffers and dependent operations were accepted before allocation

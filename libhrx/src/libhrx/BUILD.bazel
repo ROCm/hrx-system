@@ -20,6 +20,7 @@ package(
 
 HRX_SRCS = [
     "allocator.c",
+    "barrier.c",
     "buffer.c",
     "buffer_table.c",
     "buffer_view.c",
@@ -46,6 +47,7 @@ HRX_SRCS = [
 ]
 
 HRX_HDRS = [
+    "barrier.h",
     "buffer.h",
     "buffer_table.h",
     "device.h",

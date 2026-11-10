@@ -58,7 +58,7 @@ TEST(RuntimeTest, DiscoveryOwnsMetadataWithoutActivatingExecutionServices) {
   uint64_t value = 1;
   const hrx_semaphore_list_t signals = {&signal, &value, 1};
   ASSERT_TRUE(Check(hrx_queue_barrier(hrx_device_get_queue(device, 0, 0),
-                                      nullptr, &signals)));
+                                      nullptr, &signals, nullptr)));
   ASSERT_TRUE(Check(hrx_semaphore_wait(completed, value, UINT64_MAX)));
 }
 

@@ -347,6 +347,110 @@ HRX_API hrx_status_t hrx_synchronous_d2h(hrx_queue_t queue, hrx_buffer_t src,
                                          size_t size);
 
 //===----------------------------------------------------------------------===//
+// Execution and memory barriers
+//===----------------------------------------------------------------------===//
+
+// Concrete logical buffer range; the buffer owner remains live through use.
+typedef struct hrx_buffer_ref_t {
+  // Borrowed buffer handle.
+  hrx_buffer_t buffer;
+  // First byte relative to the buffer.
+  size_t offset;
+  // Number of bytes accessed.
+  size_t length;
+} hrx_buffer_ref_t;
+
+typedef uint32_t hrx_execution_stage_t;
+#define HRX_EXECUTION_STAGE_COMMAND_ISSUE (1u << 0)
+#define HRX_EXECUTION_STAGE_COMMAND_PROCESS (1u << 1)
+#define HRX_EXECUTION_STAGE_DISPATCH (1u << 2)
+#define HRX_EXECUTION_STAGE_TRANSFER (1u << 3)
+#define HRX_EXECUTION_STAGE_COMMAND_RETIRE (1u << 4)
+#define HRX_EXECUTION_STAGE_HOST (1u << 5)
+#define HRX_EXECUTION_STAGE_ATOMIC (1u << 6)
+
+typedef uint32_t hrx_access_scope_t;
+#define HRX_ACCESS_SCOPE_INDIRECT_COMMAND_READ (1u << 0)
+#define HRX_ACCESS_SCOPE_CONSTANT_READ (1u << 1)
+#define HRX_ACCESS_SCOPE_DISPATCH_READ (1u << 2)
+#define HRX_ACCESS_SCOPE_DISPATCH_WRITE (1u << 3)
+#define HRX_ACCESS_SCOPE_TRANSFER_READ (1u << 4)
+#define HRX_ACCESS_SCOPE_TRANSFER_WRITE (1u << 5)
+#define HRX_ACCESS_SCOPE_HOST_READ (1u << 6)
+#define HRX_ACCESS_SCOPE_HOST_WRITE (1u << 7)
+#define HRX_ACCESS_SCOPE_MEMORY_READ (1u << 8)
+#define HRX_ACCESS_SCOPE_MEMORY_WRITE (1u << 9)
+#define HRX_ACCESS_SCOPE_ATOMIC_READ (1u << 10)
+#define HRX_ACCESS_SCOPE_ATOMIC_WRITE (1u << 11)
+
+// Explicit minimum system visibility, independent of prepared pool queries.
+typedef uint64_t hrx_barrier_flags_t;
+#define HRX_BARRIER_FLAG_NONE UINT64_C(0)
+#define HRX_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE (UINT64_C(1) << 0)
+#define HRX_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE (UINT64_C(1) << 1)
+
+typedef struct hrx_memory_barrier_t {
+  // Earlier accesses included in the dependency.
+  hrx_access_scope_t source_scope;
+  // Later accesses included in the dependency.
+  hrx_access_scope_t target_scope;
+} hrx_memory_barrier_t;
+
+typedef struct hrx_buffer_barrier_t {
+  // Earlier accesses to the logical range.
+  hrx_access_scope_t source_scope;
+  // Later accesses to the logical range.
+  hrx_access_scope_t target_scope;
+  // Concrete range retained under the enclosing operation's resource policy.
+  hrx_buffer_ref_t buffer_ref;
+  // Borrowed prepared resource actions, or NULL for a local access dependency.
+  const hrx_memory_transition_recipe_t* recipe;
+} hrx_buffer_barrier_t;
+
+// One local dependency. Prepared effects can be combined across buffers at
+// this boundary; required resource recipes accompany their concrete ranges.
+// An empty effect does not remove stage/access ordering. Program-only effects
+// cannot execute on a queue, and host actions require a family supporting them.
+typedef struct hrx_barrier_t {
+  // Earlier local stages; zero contributes no source execution dependency.
+  hrx_execution_stage_t source_stage_mask;
+  // Later local stages; zero contributes no target execution dependency.
+  hrx_execution_stage_t target_stage_mask;
+  // Explicit minimum global cache semantics.
+  hrx_barrier_flags_t flags;
+  // Combined prepared local visibility actions.
+  hrx_memory_effects_t effects;
+  // Number of global access dependencies.
+  size_t memory_barrier_count;
+  // Borrowed global access dependencies, captured during the call.
+  const hrx_memory_barrier_t* memory_barriers;
+  // Number of ranged access dependencies.
+  size_t buffer_barrier_count;
+  // Borrowed ranges and recipes, captured during the call.
+  const hrx_buffer_barrier_t* buffer_barriers;
+} hrx_barrier_t;
+
+typedef struct hrx_barrier_list_t {
+  // Number of records. Zero explicitly requests no extra payload barriers.
+  size_t count;
+  // Borrowed records; may be NULL when count is zero.
+  const hrx_barrier_t* values;
+} hrx_barrier_list_t;
+
+// Waits -> before barriers -> operation -> after barriers -> signals.
+// A NULL wrapper or boundary retains conservative system visibility. A supplied
+// list replaces that boundary's defaults; an empty list requests no extra
+// payload barriers. Mandatory native control publication stays intact.
+// Barriers do not establish dependencies between submissions, publish unrelated
+// host mappings, or make an unsupported topology relationship usable.
+typedef struct hrx_queue_barriers_t {
+  // After waits and before the operation; NULL retains safe defaults.
+  const hrx_barrier_list_t* before;
+  // After the complete operation and before signals; NULL retains defaults.
+  const hrx_barrier_list_t* after;
+} hrx_queue_barriers_t;
+
+//===----------------------------------------------------------------------===//
 // Stream operations (batched via pending command buffer)
 //===----------------------------------------------------------------------===//
 
@@ -399,16 +503,19 @@ HRX_API hrx_status_t hrx_queue_dealloca(hrx_queue_t queue,
 HRX_API hrx_status_t hrx_queue_fill(
     hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
     const hrx_semaphore_list_t* signal_semaphores, hrx_buffer_t buffer,
-    size_t offset, size_t size, const void* pattern, size_t pattern_size);
+    size_t offset, size_t size, const void* pattern, size_t pattern_size,
+    const hrx_queue_barriers_t* barriers);
 
-HRX_API hrx_status_t hrx_queue_copy(
-    hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
-    const hrx_semaphore_list_t* signal_semaphores, hrx_buffer_t src,
-    size_t src_offset, hrx_buffer_t dst, size_t dst_offset, size_t size);
+HRX_API hrx_status_t
+hrx_queue_copy(hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
+               const hrx_semaphore_list_t* signal_semaphores, hrx_buffer_t src,
+               size_t src_offset, hrx_buffer_t dst, size_t dst_offset,
+               size_t size, const hrx_queue_barriers_t* barriers);
 
 HRX_API hrx_status_t hrx_queue_barrier(
     hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
-    const hrx_semaphore_list_t* signal_semaphores);
+    const hrx_semaphore_list_t* signal_semaphores,
+    const hrx_queue_barriers_t* barriers);
 
 // Dispatch config for kernel launch.
 typedef struct hrx_dispatch_config_t {
@@ -417,19 +524,13 @@ typedef struct hrx_dispatch_config_t {
   uint32_t subgroup_size;
 } hrx_dispatch_config_t;
 
-// Buffer binding reference for dispatch.
-typedef struct hrx_buffer_ref_t {
-  hrx_buffer_t buffer;
-  size_t offset;
-  size_t length;
-} hrx_buffer_ref_t;
-
 HRX_API hrx_status_t hrx_queue_dispatch(
     hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
     const hrx_semaphore_list_t* signal_semaphores, hrx_executable_t executable,
     uint32_t export_ordinal, const hrx_dispatch_config_t* config,
     const void* constants, size_t constants_size,
-    const hrx_buffer_ref_t* bindings, size_t binding_count, uint32_t flags);
+    const hrx_buffer_ref_t* bindings, size_t binding_count,
+    const hrx_queue_barriers_t* barriers, uint32_t flags);
 
 HRX_API hrx_status_t hrx_stream_dispatch(
     hrx_stream_t stream, hrx_executable_t executable, uint32_t export_ordinal,
@@ -445,7 +546,12 @@ HRX_API hrx_status_t hrx_queue_host_call(
     const hrx_semaphore_list_t* signal_semaphores, hrx_host_call_fn_t callback,
     void* user_data);
 
-HRX_API hrx_status_t hrx_stream_execution_barrier(hrx_stream_t stream);
+// Records one local barrier in the stream's pending command buffer. NULL keeps
+// the convenience of a full local read/write dependency. Explicit descriptors
+// carry prepared visibility and ranged recipes without a submission or host
+// wait.
+HRX_API hrx_status_t hrx_stream_barrier(hrx_stream_t stream,
+                                        const hrx_barrier_t* barrier);
 
 //===----------------------------------------------------------------------===//
 // Direct executables

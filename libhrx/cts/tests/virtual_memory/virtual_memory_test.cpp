@@ -412,9 +412,9 @@ TEST_CASE_METHOD(HrxTestFixture,
       .values = &copy_value,
       .count = 1,
   };
-  REQUIRE_OK(hrx().queue_copy(transfer_queue_, nullptr, &signals,
-                              resources.reservation, 2 * unit,
-                              resources.reservation, 0, sizeof(expected)));
+  REQUIRE_OK(hrx().queue_copy(
+      transfer_queue_, nullptr, &signals, resources.reservation, 2 * unit,
+      resources.reservation, 0, sizeof(expected), nullptr));
   resources.completion_value = copy_value;
   REQUIRE_OK(hrx().semaphore_wait(resources.completion,
                                   resources.completion_value, UINT64_MAX));

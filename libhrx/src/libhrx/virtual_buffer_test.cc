@@ -251,11 +251,11 @@ TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
         .values = &predecessor,
         .count = 1,
     };
-    IREE_ASSERT_OK(
-        batch.Record(hrx_queue_fill(hrx_device_get_queue(device_, 0, 0),
-                                    &wait_list, &signal_list, first, unit,
-                                    sizeof(pattern), &pattern, sizeof(pattern)),
-                     completed));
+    IREE_ASSERT_OK(batch.Record(
+        hrx_queue_fill(hrx_device_get_queue(device_, 0, 0), &wait_list,
+                       &signal_list, first, unit, sizeof(pattern), &pattern,
+                       sizeof(pattern), nullptr),
+        completed));
     IREE_ASSERT_OK(hrx_status_to_iree(
         hrx_semaphore_wait(completion, completed, UINT64_MAX)));
     uint32_t result = 0;

@@ -300,10 +300,23 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch") {
   uint64_t completion_value = 1;
   const hrx_semaphore_list_t signals = {&completion, &completion_value, 1};
   const uint32_t direct_expected = 0xABCD4321u;
+  const hrx_barrier_list_t no_payload_acquire = {};
+  const hrx_memory_barrier_t store_access = {
+      .source_scope = HRX_ACCESS_SCOPE_DISPATCH_WRITE,
+      .target_scope = HRX_ACCESS_SCOPE_MEMORY_READ,
+  };
+  const hrx_barrier_t release = {
+      .source_stage_mask = HRX_EXECUTION_STAGE_DISPATCH,
+      .flags = HRX_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+      .memory_barrier_count = 1,
+      .memory_barriers = &store_access,
+  };
+  const hrx_barrier_list_t after = {1, &release};
+  const hrx_queue_barriers_t barriers = {&no_payload_acquire, &after};
   REQUIRE_OK(hrx().queue_dispatch(
       queue, nullptr, &signals, executable, store_ordinal, &store_config,
       &direct_expected, sizeof(direct_expected), bindings, std::size(bindings),
-      HRX_DISPATCH_FLAG_NONE));
+      &barriers, HRX_DISPATCH_FLAG_NONE));
   REQUIRE_OK(hrx().semaphore_wait(completion, completion_value, UINT64_MAX));
   REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, output, 0, &actual,
                                    sizeof(actual)));
@@ -320,7 +333,7 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch") {
     hrx_status_t status = hrx().queue_dispatch(
         queue, nullptr, &signals, executable, store_ordinal, &store_config,
         &direct_expected, sizeof(direct_expected), invalid_bindings.data(),
-        binding_count, HRX_DISPATCH_FLAG_NONE);
+        binding_count, nullptr, HRX_DISPATCH_FLAG_NONE);
     const hrx_status_code_t code = hrx().status_code(status);
     hrx().status_ignore(status);
     if (code == HRX_STATUS_OK) {

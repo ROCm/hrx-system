@@ -155,7 +155,7 @@ class HrxLoader {
   decltype(&hrx_stream_get_timeline_position) stream_get_timeline_position;
   decltype(&hrx_stream_wait_on) stream_wait_on;
   decltype(&hrx_stream_dispatch) stream_dispatch;
-  decltype(&hrx_stream_execution_barrier) stream_execution_barrier;
+  decltype(&hrx_stream_barrier) stream_barrier;
 
   // Allocator.
   decltype(&hrx_device_allocator) device_allocator;

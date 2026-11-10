@@ -203,7 +203,7 @@ TEST_CASE("Explicit CPU GPU pools share backing across queue timelines",
                                                &produced, 1};
       REQUIRE_OK(hrx().queue_fill(cpu_queue, &cpu_wait, &cpu_signal, buffers[0],
                                   offset, kRegionLength, &pattern,
-                                  sizeof(pattern)));
+                                  sizeof(pattern), nullptr));
       resources.tails[0] = produced;
       uint64_t copied = resources.tails[1] + 1;
       uint64_t gpu_wait_values[] = {produced, resources.tails[1]};
@@ -212,7 +212,8 @@ TEST_CASE("Explicit CPU GPU pools share backing across queue timelines",
       const hrx_semaphore_list_t gpu_signal = {&resources.semaphores[1],
                                                &copied, 1};
       REQUIRE_OK(hrx().queue_copy(gpu_queue, &gpu_wait, &gpu_signal, buffers[0],
-                                  offset, buffers[1], offset, kRegionLength));
+                                  offset, buffers[1], offset, kRegionLength,
+                                  nullptr));
       resources.tails[1] = copied;
     }
     const hrx_semaphore_list_t gpu_complete = {&resources.semaphores[1],
@@ -221,7 +222,8 @@ TEST_CASE("Explicit CPU GPU pools share backing across queue timelines",
     const hrx_semaphore_list_t cpu_signal = {&resources.semaphores[0],
                                              &consumed, 1};
     REQUIRE_OK(hrx().queue_copy(cpu_queue, &gpu_complete, &cpu_signal,
-                                buffers[1], 0, buffers[2], 0, kLength));
+                                buffers[1], 0, buffers[2], 0, kLength,
+                                nullptr));
     resources.tails[0] = consumed;
     REQUIRE_OK(
         hrx().semaphore_wait(resources.semaphores[0], consumed, UINT64_MAX));
@@ -285,7 +287,7 @@ TEST_CASE("Explicit CPU GPU pools share backing across queue timelines",
     const hrx_semaphore_list_t upload_signal = {&resources.semaphores[1],
                                                 &uploaded, 1};
     REQUIRE_OK(hrx().queue_copy(gpu_queue, &cpu_signal, &upload_signal,
-                                buffers[0], 64, buffers[2], 128, 256));
+                                buffers[0], 64, buffers[2], 128, 256, nullptr));
     resources.tails[1] = uploaded;
     REQUIRE_OK(
         hrx().semaphore_wait(resources.semaphores[1], uploaded, UINT64_MAX));

@@ -161,7 +161,7 @@ TEST_F(MemPoolTest, DeferredBatchesCarryDataAcrossDevices) {
     const hrx_semaphore_list_t signals = {&timelines_[1], &next, 1};
     ASSERT_TRUE(
         Check(hrx_queue_fill(queues_[1], &dependencies, &signals, buffers_[i],
-                             0, 256, &pattern, sizeof(pattern))));
+                             0, 256, &pattern, sizeof(pattern), nullptr)));
     tails_[1] = next;
   }
   ASSERT_TRUE(Check(hrx_semaphore_signal(gate_, 1)));

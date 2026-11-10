@@ -12,8 +12,8 @@ the AMD GPU targets enabled in the build and selected against the actual device.
 | Runtime and devices | `lifecycle`, `status`, `device`, `group` | Explicit runtime/group ownership, passive discovery, shared CPU/GPU pools, device properties, and synchronization |
 | Heterogeneous execution | `heterogeneous` | Shared CPU/GPU/NPU storage, NPU arithmetic, cross-device queue dependencies, deferred allocation, backing reuse, and trim |
 | Allocation and ownership | `allocator`, `host_allocator`, `memory`, `refcount` | Borrowed allocators, host imports, stream-ordered allocation, mapping, and retain/release |
-| Prepared transitions | `group`, `memory_transition_test` | Borrowed pool/buffer contracts, scope-pair qualification, and explicit host maintenance across a GPU copy with mappings held open |
-| Queues and streams | `queue_ops`, `stream`, `stream_ops`, `semaphore` | Host calls, fills, copies, updates, execution barriers, timeline signals, and completion |
+| Prepared transitions | `group`, `heterogeneous`, `memory_transition_test` | Borrowed pool/buffer contracts, scope-pair qualification, prepared queue barriers, and explicit host maintenance across a GPU copy with mappings held open |
+| Queues and streams | `queue_ops`, `stream`, `stream_ops`, `semaphore` | Host calls, fills, copies, updates, execution and visibility barriers, timeline signals, and completion |
 | Transfers | `transfer` | Host/device copies, stream ordering, numerical output, and range rejection |
 | Executables | `executable` | Loading configured HSACO, function lookup, dispatch, and exact output |
 | Virtual memory | `virtual_memory`, `virtual_memory_gpu` | Scope-qualified capabilities, batched mapping, aliases, permissions, and backing ownership |
@@ -65,7 +65,12 @@ fail the process as well as errors during execution.
 
 This target requires both GPU and NPU hardware and uses the committed NPU
 arithmetic fixtures for the supported execution profiles. It qualifies output,
-ownership, and ordering through HAL's conservative visibility defaults.
+ownership, and ordering with both HAL's conservative visibility defaults and
+explicit prepared barriers. The recorder prepares scope pairs once, combines
+effects from the participating buffers, and supplies any required resource
+recipes with their concrete ranges. NULL queue boundaries retain default
+visibility; supplied empty lists request no optional payload barriers. Neither
+changes semaphore dependencies or mandatory native control publication.
 Cross-device waits may require host admission; passing this test does not imply
 that the devices exchange every dependency entirely through firmware.
 

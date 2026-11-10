@@ -191,7 +191,7 @@ void HrxLoader::load(const std::string& path) {
   LOAD(stream_get_timeline_position);
   LOAD(stream_wait_on);
   LOAD(stream_dispatch);
-  LOAD(stream_execution_barrier);
+  LOAD(stream_barrier);
 
   LOAD(device_allocator);
   LOAD(allocator_retain);

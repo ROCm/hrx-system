@@ -9,6 +9,7 @@
 
 #include <stdlib.h>
 
+#include "barrier.h"
 #include "hrx_internal.h"
 
 // Create a fresh one-shot command buffer for recording.
@@ -531,8 +532,9 @@ hrx_status_t hrx_stream_dispatch(hrx_stream_t stream,
   HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
 }
 
-hrx_status_t hrx_stream_execution_barrier(hrx_stream_t stream) {
-  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_execution_barrier");
+hrx_status_t hrx_stream_barrier(hrx_stream_t stream,
+                                const hrx_barrier_t* barrier) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_barrier");
   if (!stream) {
     HRX_RETURN_AND_END_ZONE(
         z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "stream is NULL"));
@@ -543,20 +545,20 @@ hrx_status_t hrx_stream_execution_barrier(hrx_stream_t stream) {
     HRX_RETURN_AND_END_ZONE(z0, status);
   }
 
-  iree_hal_memory_barrier_t memory_barrier = {
-      .source_scope = IREE_HAL_ACCESS_SCOPE_MEMORY_READ |
-                      IREE_HAL_ACCESS_SCOPE_MEMORY_WRITE,
-      .target_scope = IREE_HAL_ACCESS_SCOPE_MEMORY_READ |
-                      IREE_HAL_ACCESS_SCOPE_MEMORY_WRITE,
-  };
-  const iree_hal_barrier_t execution_barrier = {
-      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
-      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
-      .memory_barrier_count = 1,
-      .memory_barriers = &memory_barrier,
-  };
-  iree_status_t iree_status =
-      iree_hal_command_buffer_barrier(stream->pending_cb, &execution_barrier);
+  iree_status_t iree_status = iree_ok_status();
+  if (barrier) {
+    const hrx_barrier_list_t list = {.count = 1, .values = barrier};
+    const hrx_queue_barriers_t barriers = {.before = &list};
+    hrx_barrier_storage_t storage;
+    iree_status = hrx_barrier_storage_initialize(&barriers, &storage);
+    if (iree_status_is_ok(iree_status)) {
+      iree_status = iree_hal_command_buffer_barrier(
+          stream->pending_cb, storage.barriers.before->values);
+    }
+    hrx_barrier_storage_deinitialize(&storage);
+  } else {
+    iree_status = hrx_stream_record_ordering_barrier(stream);
+  }
   if (!iree_status_is_ok(iree_status)) {
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(iree_status));
   }

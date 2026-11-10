@@ -60,7 +60,7 @@ TEST(DeviceGroupTest, RetainedDeviceKeepsGroupAndServicesUsable) {
   const uint32_t pattern = 0x12345678;
   ASSERT_TRUE(Check(hrx_queue_fill(hrx_device_get_queue(second, 0, 0), nullptr,
                                    &signals, buffer, 0, 256, &pattern,
-                                   sizeof(pattern))));
+                                   sizeof(pattern), nullptr)));
   ASSERT_TRUE(Check(hrx_semaphore_wait(semaphore, value, UINT64_MAX)));
   second.reset();
   first.reset();
@@ -320,7 +320,7 @@ TEST_F(DeviceGroupLifetimeTest, ViewKeepsAllocationAndServicesAlive) {
   const uint32_t pattern = 0x87654321u;
   ASSERT_TRUE(Check(hrx_queue_fill(hrx_device_get_queue(device_, 0, 0), nullptr,
                                    &signals, borrowed_buffer, 0, 256, &pattern,
-                                   sizeof(pattern))));
+                                   sizeof(pattern), nullptr)));
   ASSERT_TRUE(Check(hrx_semaphore_wait(done, value, UINT64_MAX)));
   done.reset();
 

@@ -163,12 +163,12 @@ class Environment {
       const hrx_semaphore_list_t signals = {&semaphore, &next, 1};
       if constexpr (Op == Operation::kFill) {
         Check(hrx_queue_fill(queue_, &waits, &signals, output_, 0, 4096,
-                             &expected_, sizeof(expected_)));
+                             &expected_, sizeof(expected_), nullptr));
       } else {
         const hrx_buffer_ref_t binding = {output_, 0, sizeof(expected_)};
         Check(hrx_queue_dispatch(queue_, &waits, &signals, executable_,
                                  ordinal_, &config_, &expected_,
-                                 sizeof(expected_), &binding, 1,
+                                 sizeof(expected_), &binding, 1, nullptr,
                                  HRX_DISPATCH_FLAG_NONE));
       }
     }
