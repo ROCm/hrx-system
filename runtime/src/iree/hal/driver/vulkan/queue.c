@@ -358,7 +358,7 @@ struct iree_hal_vulkan_queue_pending_submission_t {
     // Host timestamp when the queue operation was captured.
     iree_time_t submit_host_time_ns;
 
-    // Host timestamp when the operation was accepted for native/deferred work.
+    // Observed native admission time, or zero for failure before readiness.
     iree_time_t ready_host_time_ns;
 
     // Profile submission id assigned to this queue operation.
@@ -3279,7 +3279,7 @@ static void iree_hal_vulkan_queue_profile_populate_submission_metrics(
 }
 
 static void iree_hal_vulkan_queue_profile_record_submission(
-    iree_hal_vulkan_queue_pending_submission_t* submission) {
+    iree_hal_vulkan_queue_pending_submission_t* submission, bool ready) {
   if (!submission->profile.recorder ||
       submission->profile.queue_event_recorded) {
     return;
@@ -3290,7 +3290,7 @@ static void iree_hal_vulkan_queue_profile_record_submission(
     return;
   }
   submission->profile.queue_event_recorded = true;
-  submission->profile.ready_host_time_ns = iree_time_now();
+  submission->profile.ready_host_time_ns = ready ? iree_time_now() : 0;
   iree_hal_vulkan_queue_profile_populate_submission_metrics(submission);
 
   iree_hal_vulkan_profile_queue_event_info_t event_info =
@@ -4658,6 +4658,11 @@ static void iree_hal_vulkan_queue_complete_submission(
       terminal_status =
           iree_hal_vulkan_queue_profile_record_queue_device_event(submission);
     }
+  } else {
+    // A failed deferred operation never reached native admission. Preserve its
+    // capture metadata without inventing a readiness timestamp.
+    iree_hal_vulkan_queue_profile_record_submission(submission,
+                                                    /*ready=*/false);
   }
 
   switch (submission->kind) {
@@ -4728,6 +4733,7 @@ static void iree_hal_vulkan_queue_fail_quiescent_submission(
     iree_status_t status) {
   IREE_ASSERT(!iree_status_is_ok(status),
               "quiescent queue failure status must be non-OK");
+  iree_hal_vulkan_queue_profile_record_submission(submission, /*ready=*/false);
   iree_status_t completion_status = iree_status_clone(status);
   iree_hal_vulkan_queue_release_native_replay(queue, submission);
   iree_hal_vulkan_queue_release_operation_resources(queue, submission);
@@ -4967,6 +4973,9 @@ static iree_status_t iree_hal_vulkan_queue_submit_native_under_lock(
   if (iree_status_is_ok(status)) {
     iree_hal_vulkan_queue_profile_set_dependency_resolution(submission,
                                                             resolution);
+    // Dependencies are now resolvable to completed public values or accepted
+    // native producers. Recording and driver submission follow this boundary.
+    iree_hal_vulkan_queue_profile_record_submission(submission, /*ready=*/true);
   }
 
   if (iree_status_is_ok(status) && submission->record_native_submission &&
@@ -5026,7 +5035,6 @@ static iree_status_t iree_hal_vulkan_queue_submit_native_under_lock(
       iree_slim_mutex_unlock(&queue->queue_handle_mutex);
     }
     if (iree_status_is_ok(status)) {
-      iree_hal_vulkan_queue_profile_record_submission(submission);
       iree_hal_vulkan_queue_publish_signals(queue, submission);
       queue->frontier = submission->frontier;
       queue->next_epoch_value = queue->next_epoch_value + 1;
@@ -5489,7 +5497,7 @@ static iree_status_t iree_hal_vulkan_queue_defer_submission(
   }
   if (iree_status_is_ok(status)) {
     iree_hal_vulkan_queue_append_deferred_submission(queue, submission);
-    iree_hal_vulkan_queue_profile_record_submission(submission);
+    iree_hal_vulkan_queue_profile_force_software_defer(submission);
   }
   iree_slim_mutex_unlock(&queue->dependency_mutex);
   return status;

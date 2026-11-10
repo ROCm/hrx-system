@@ -81,6 +81,77 @@ TEST_P(VulkanProfilingTest, QueueEventsRecordNativeTransferSubmissions) {
   EXPECT_GE(copy_it->ready_host_time_ns, copy_it->host_time_ns);
 }
 
+TEST_P(VulkanProfilingTest, DeferredQueueEventRecordsObservedReadiness) {
+  SemaphoreList gate(device_, {0}, {1});
+  SemaphoreList done(device_, {0}, {1});
+  TestProfileSink sink = {};
+  TestProfileSinkInitialize(&sink);
+  DeviceProfilingScope profiling(device_);
+  IREE_ASSERT_OK(profiling.Begin(IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS,
+                                 TestProfileSinkAsBase(&sink)));
+
+  IREE_ASSERT_OK(iree_hal_queue_barrier(transfer_queue_, gate, done, nullptr,
+                                        IREE_HAL_QUEUE_BARRIER_FLAG_NONE));
+  IREE_EXPECT_OK(iree_hal_device_profiling_flush(device_));
+  EXPECT_TRUE(sink.queue_events.empty());
+  const iree_time_t release_time = iree_time_now();
+  IREE_ASSERT_OK(iree_hal_semaphore_list_signal(gate, /*frontier=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(done, iree_infinite_timeout(),
+                                              IREE_ASYNC_WAIT_FLAG_NONE));
+  IREE_ASSERT_OK(profiling.End());
+
+  ASSERT_EQ(sink.queue_events.size(), 1u);
+  const auto& event = sink.queue_events[0];
+  EXPECT_EQ(event.type, IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_BARRIER);
+  EXPECT_EQ(event.wait_count, 1u);
+  EXPECT_EQ(event.signal_count, 1u);
+  EXPECT_EQ(event.dependency_strategy,
+            IREE_HAL_PROFILE_QUEUE_DEPENDENCY_STRATEGY_SOFTWARE_DEFER);
+  EXPECT_TRUE(iree_any_bit_set(
+      event.flags, IREE_HAL_PROFILE_QUEUE_EVENT_FLAG_SOFTWARE_DEFERRED));
+  EXPECT_LE(event.host_time_ns, release_time);
+  EXPECT_GE(event.ready_host_time_ns, release_time);
+}
+
+TEST_P(VulkanProfilingTest, FailedDependencyRecordsNoReadiness) {
+  for (bool fail_before_submit : {false, true}) {
+    SCOPED_TRACE(fail_before_submit);
+    SemaphoreList gate(device_, {0}, {1});
+    SemaphoreList done(device_, {0}, {1});
+    TestProfileSink sink = {};
+    TestProfileSinkInitialize(&sink);
+    DeviceProfilingScope profiling(device_);
+    IREE_ASSERT_OK(profiling.Begin(IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS,
+                                   TestProfileSinkAsBase(&sink)));
+
+    if (fail_before_submit) {
+      iree_hal_semaphore_fail(gate.semaphores[0],
+                              iree_status_from_code(IREE_STATUS_CANCELLED));
+    }
+    iree_status_t status = iree_hal_queue_barrier(
+        transfer_queue_, gate, done, nullptr, IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+    if (fail_before_submit) {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, status);
+    } else {
+      IREE_EXPECT_OK(status);
+      iree_hal_semaphore_fail(gate.semaphores[0],
+                              iree_status_from_code(IREE_STATUS_CANCELLED));
+    }
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_CANCELLED,
+        iree_hal_semaphore_list_wait(done, iree_infinite_timeout(),
+                                     IREE_ASYNC_WAIT_FLAG_NONE));
+    IREE_ASSERT_OK(profiling.End());
+
+    ASSERT_EQ(sink.queue_events.size(), 1u);
+    EXPECT_EQ(sink.queue_events[0].ready_host_time_ns, 0);
+    EXPECT_EQ(
+        iree_any_bit_set(sink.queue_events[0].flags,
+                         IREE_HAL_PROFILE_QUEUE_EVENT_FLAG_SOFTWARE_DEFERRED),
+        !fail_before_submit);
+  }
+}
+
 TEST_P(VulkanProfilingTest,
        LightweightStatisticsRecordQueueAllocaMemoryEvents) {
   constexpr iree_device_size_t kBufferSize = 1024;
