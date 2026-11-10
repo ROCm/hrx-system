@@ -398,6 +398,42 @@ TEST_P(HsacoTest, SupportsGnuHashWithoutSystemVHash) {
   EXPECT_EQ(image.value.metadata.kernel_count, 6u);
 }
 
+TEST_P(HsacoTest, AdmitsInertDependencySearchPaths) {
+  const auto original = bytes_;
+  const size_t hash = FindDynamic(original, 4);
+  ASSERT_NE(hash, 0u);
+  ASSERT_NE(FindDynamic(original, 0x6ffffef5), 0u);
+  const size_t symbol = FindSymbol(original, "image_value");
+  ASSERT_NE(symbol, 0u);
+  // Reuse a nonempty dynamic string. Search paths have no consumer unless an
+  // executable owner supplies a path-based dependency loader.
+  const uint64_t path = Read32(original, symbol);
+  ASSERT_NE(path, 0u);
+  Image baseline;
+  IREE_ASSERT_OK(Initialize(original, &baseline));
+  for (uint64_t tag : {15u, 29u}) {
+    for (size_t segment_length : {size_t{0}, size_t{7}}) {
+      SCOPED_TRACE(tag);
+      SCOPED_TRACE(segment_length);
+      auto bytes = original;
+      Write64(bytes, hash, tag);
+      Write64(bytes, hash + 8, path);
+      Image image;
+      IREE_ASSERT_OK(Initialize(std::move(bytes), &image, segment_length));
+      EXPECT_EQ(image.value.segment_count, baseline.value.segment_count);
+      EXPECT_EQ(image.value.symbol_count, baseline.value.symbol_count);
+      EXPECT_EQ(image.value.import_count, baseline.value.import_count);
+      EXPECT_EQ(image.value.relocation_count, baseline.value.relocation_count);
+      EXPECT_EQ(image.value.dependency_count, baseline.value.dependency_count);
+      EXPECT_EQ(image.value.metadata.kernel_count,
+                baseline.value.metadata.kernel_count);
+      EXPECT_NE(iree_hal_amd_gpu_image_find_symbol(&image.value,
+                                                   IREE_SV("image_pointer")),
+                nullptr);
+    }
+  }
+}
+
 TEST_P(HsacoTest, ValidatesMappingsBeforeWriting) {
   Image image;
   IREE_ASSERT_OK(Initialize(bytes_, &image));
