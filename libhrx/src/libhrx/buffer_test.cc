@@ -16,7 +16,8 @@ class CpuBufferTest : public ::testing::Test {
   void SetUp() override {
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_cpu_initialize(/*flags=*/0)));
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_cpu_device_get(0, &device_)));
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_create(device_, 0, &stream_)));
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_stream_create(hrx_device_get_queue(device_, 0, 0), 0, &stream_)));
   }
 
   void TearDown() override {
@@ -304,7 +305,7 @@ TEST_F(CpuBufferTest, PreparedBackingAliasesRemainOrdinaryStreamBuffers) {
       IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
 
       const iree_hal_pool_family_access_t family = {
-          .family = iree_hal_queue_family(device_->transfer_queue),
+          .family = iree_hal_queue_family(stream_->hal_queue),
           .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
       };
       const iree_hal_pool_scope_t scope = {
@@ -341,7 +342,7 @@ TEST_F(CpuBufferTest, PreparedBackingAliasesRemainOrdinaryStreamBuffers) {
       uint64_t value = 1;
       const iree_hal_semaphore_list_t signals = {1, &semaphore, &value};
       IREE_ASSERT_OK(iree_hal_queue_map(
-          device_->transfer_queue, iree_hal_semaphore_list_empty(), signals, 1,
+          stream_->hal_queue, iree_hal_semaphore_list_empty(), signals, 1,
           &mapping, IREE_HAL_QUEUE_MAP_FLAG_NONE));
       IREE_ASSERT_OK(iree_hal_semaphore_wait(
           semaphore, value, iree_infinite_timeout(), /*flags=*/0));
@@ -370,7 +371,7 @@ TEST_F(CpuBufferTest, PreparedBackingAliasesRemainOrdinaryStreamBuffers) {
       mapping.operation = IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND;
       ++value;
       IREE_ASSERT_OK(iree_hal_queue_map(
-          device_->transfer_queue, iree_hal_semaphore_list_empty(), signals, 1,
+          stream_->hal_queue, iree_hal_semaphore_list_empty(), signals, 1,
           &mapping, IREE_HAL_QUEUE_MAP_FLAG_NONE));
       IREE_ASSERT_OK(iree_hal_semaphore_wait(
           semaphore, value, iree_infinite_timeout(), /*flags=*/0));

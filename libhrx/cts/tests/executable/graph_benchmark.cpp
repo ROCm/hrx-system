@@ -56,17 +56,22 @@ class HrxRuntime {
   HrxRuntime() : api_(HrxLoader::instance()) {
     Check(api_.gpu_initialize(0));
     Check(api_.gpu_device_get(0, &device_));
-    for (uint32_t i = 0;
-         i < api_.device_queue_family_count(device_) && !transfer_queue_; ++i) {
+    for (uint32_t i = 0; i < api_.device_queue_family_count(device_); ++i) {
       hrx_queue_family_info_t family;
       Check(api_.device_query_queue_family(device_, i, &family));
-      if ((family.roles & HRX_QUEUE_ROLE_TRANSFER) &&
+      if (!transfer_queue_ && (family.roles & HRX_QUEUE_ROLE_TRANSFER) &&
           family.provisioned_queue_count) {
         transfer_queue_ = api_.device_get_queue(device_, i, 0);
       }
+      if (!dispatch_queue_ && (family.roles & HRX_QUEUE_ROLE_DISPATCH) &&
+          (family.roles & HRX_QUEUE_ROLE_TRANSFER) &&
+          family.provisioned_queue_count) {
+        dispatch_queue_ = api_.device_get_queue(device_, i, 0);
+      }
     }
     Require(transfer_queue_ != nullptr, "no provisioned transfer queue");
-    Check(api_.stream_create(device_, 0, &stream_));
+    Require(dispatch_queue_ != nullptr, "no provisioned compute queue");
+    Check(api_.stream_create(dispatch_queue_, 0, &stream_));
     char architecture[64] = {};
     Check(api_.device_get_property(device_, HRX_DEVICE_PROPERTY_ARCHITECTURE,
                                    architecture, sizeof(architecture)));
@@ -135,7 +140,7 @@ class HrxRuntime {
                                        previous ? 1 : 0, &attrs, &node));
       previous = node;
     }
-    Check(api_.graph_instantiate(graph_, 0, &executable_));
+    Check(api_.graph_instantiate(graph_, dispatch_queue_, 0, &executable_));
   }
 
   void Launch() { Check(api_.graph_exec_launch(executable_, stream_)); }
@@ -176,6 +181,8 @@ class HrxRuntime {
   hrx_device_t device_ = nullptr;
   // Borrowed provisioned queue for setup uploads and verification readbacks.
   hrx_queue_t transfer_queue_ = nullptr;
+  // Borrowed compute queue selecting graph recording and execution.
+  hrx_queue_t dispatch_queue_ = nullptr;
   // Ordered timeline shared by all rows.
   hrx_stream_t stream_ = nullptr;
   // Persistent code object containing the finite store kernel.

@@ -415,7 +415,7 @@ iree_status_t hrx_graph_exec_instantiate_locked(
     // this array borrows those references, including on partial construction.
     memset(exec->semaphores, 0, semaphore_count * sizeof(*exec->semaphores));
 
-    iree_hal_device_t* hal_device = exec->device->hal_device;
+    iree_hal_device_t* hal_device = exec->graph->device->hal_device;
     iree_status_t status = iree_ok_status();
     for (uint32_t i = 0; iree_status_is_ok(status) && i < semaphore_count;
          i++) {
@@ -442,6 +442,8 @@ iree_status_t hrx_graph_exec_instantiate_locked(
 
   uint32_t block_index = 0;
   uint32_t semaphore_index = 0;
+  const iree_hal_command_category_t command_categories =
+      hrx_queue_family_command_categories(exec->queue_family);
   for (iree_host_size_t p = 0; p < schedule.partition_count; p++) {
     const hrx_graph_partition_t* partition = &schedule.partitions[p];
 
@@ -492,13 +494,10 @@ iree_status_t hrx_graph_exec_instantiate_locked(
         iree_hal_command_buffer_t* command_buffer = NULL;
         iree_hal_command_buffer_mode_t command_buffer_mode =
             IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED |
-            hrx_device_profile_command_buffer_mode(exec->device);
+            hrx_device_profile_command_buffer_mode(exec->graph->device);
         IREE_RETURN_AND_END_ZONE_IF_ERROR(
             z0, iree_hal_command_buffer_create(
-                    iree_hal_queue_family(exec->device->dispatch_queue),
-                    command_buffer_mode,
-                    IREE_HAL_COMMAND_CATEGORY_TRANSFER |
-                        IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                    exec->queue_family, command_buffer_mode, command_categories,
                     /*binding_capacity=*/0, &command_buffer));
         iree_status_t status = iree_hal_resource_set_insert(exec->resource_set,
                                                             1, &command_buffer);
@@ -615,8 +614,14 @@ static iree_status_t hrx_graph_host_callback(
 }
 
 hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec, hrx_stream_t stream) {
-  IREE_ASSERT_ARGUMENT(exec);
-  IREE_ASSERT_ARGUMENT(stream);
+  if (!exec || !stream) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "graph executable or stream is NULL");
+  }
+  if (iree_hal_queue_family(stream->hal_queue) != exec->queue_family) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "stream queue family differs from graph recording");
+  }
   IREE_TRACE_ZONE_BEGIN(z0);
 
   if (exec->block_count == 0) {
@@ -707,7 +712,7 @@ hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec, hrx_stream_t stream) {
       }
       case HRX_GRAPH_BLOCK_TYPE_QUEUE_FILL:
         status = iree_hal_queue_fill(
-            exec->device->transfer_queue, wait_semaphores, signal_semaphores,
+            stream->hal_queue, wait_semaphores, signal_semaphores,
             ptrs.attrs->fill.target_buffer, ptrs.attrs->fill.target_offset,
             ptrs.attrs->fill.length, &ptrs.attrs->fill.pattern,
             ptrs.attrs->fill.pattern_length, /*barriers=*/NULL,
@@ -715,7 +720,7 @@ hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec, hrx_stream_t stream) {
         break;
       case HRX_GRAPH_BLOCK_TYPE_QUEUE_COPY:
         status = iree_hal_queue_copy(
-            exec->device->transfer_queue, wait_semaphores, signal_semaphores,
+            stream->hal_queue, wait_semaphores, signal_semaphores,
             ptrs.attrs->copy.source_buffer, ptrs.attrs->copy.source_offset,
             ptrs.attrs->copy.target_buffer, ptrs.attrs->copy.target_offset,
             ptrs.attrs->copy.length, /*barriers=*/NULL, ptrs.attrs->copy.flags);

@@ -13,8 +13,8 @@ class GraphBufferTest : public ::testing::Test {
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_cpu_initialize(/*flags=*/0)));
     IREE_ASSERT_OK(
         hrx_status_to_iree(hrx_cpu_device_get(/*index=*/0, &device_)));
-    IREE_ASSERT_OK(
-        hrx_status_to_iree(hrx_stream_create(device_, /*flags=*/0, &stream_)));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_create(
+        hrx_device_get_queue(device_, 0, 0), /*flags=*/0, &stream_)));
     IREE_ASSERT_OK(hrx_status_to_iree(
         hrx_buffer_allocate(stream_, 64, HRX_MEMORY_TYPE_DEVICE_LOCAL,
                             HRX_BUFFER_USAGE_DEFAULT, &source_)));
@@ -62,8 +62,8 @@ TEST_F(GraphBufferTest, RecordsAndInstantiatesHandleBasedCopyAndFill) {
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_size(graph, &node_count)));
   EXPECT_EQ(node_count, 2u);
   hrx_graph_exec_t executable = nullptr;
-  IREE_ASSERT_OK(
-      hrx_status_to_iree(hrx_graph_instantiate(graph, 0, &executable)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_instantiate(
+      graph, hrx_stream_get_queue(stream_), 0, &executable)));
 
   // The executable retains the graph and its captured buffer allocations.
   hrx_buffer_release(destination_);
@@ -99,8 +99,8 @@ TEST_F(GraphBufferTest, DependentFillThenCopyProducesExpectedContents) {
       graph, &fill_node, 1, &copy_attrs, &copy_node)));
 
   hrx_graph_exec_t executable = nullptr;
-  IREE_ASSERT_OK(
-      hrx_status_to_iree(hrx_graph_instantiate(graph, 0, &executable)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_instantiate(
+      graph, hrx_stream_get_queue(stream_), 0, &executable)));
   IREE_ASSERT_OK(
       hrx_status_to_iree(hrx_graph_exec_launch(executable, stream_)));
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
@@ -132,8 +132,8 @@ TEST_F(GraphBufferTest, LaunchFlushesPendingStreamWorkBeforeGraphCommands) {
       hrx_graph_add_copy_buffer_node(graph, nullptr, 0, &copy_attrs, nullptr)));
 
   hrx_graph_exec_t executable = nullptr;
-  IREE_ASSERT_OK(
-      hrx_status_to_iree(hrx_graph_instantiate(graph, 0, &executable)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_instantiate(
+      graph, hrx_stream_get_queue(stream_), 0, &executable)));
   IREE_ASSERT_OK(
       hrx_status_to_iree(hrx_graph_exec_launch(executable, stream_)));
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
@@ -174,8 +174,8 @@ TEST_F(GraphBufferTest, AddedDependencyOrdersFillBeforeCopy) {
       hrx_graph_add_dependencies(graph, &fill_node, &copy_node, /*count=*/1)));
 
   hrx_graph_exec_t executable = nullptr;
-  IREE_ASSERT_OK(
-      hrx_status_to_iree(hrx_graph_instantiate(graph, 0, &executable)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_instantiate(
+      graph, hrx_stream_get_queue(stream_), 0, &executable)));
   IREE_ASSERT_OK(
       hrx_status_to_iree(hrx_graph_exec_launch(executable, stream_)));
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
@@ -242,8 +242,8 @@ TEST_F(GraphBufferTest, HostCallbackFailureReachesStreamCompletion) {
   IREE_ASSERT_OK(hrx_status_to_iree(
       hrx_graph_add_host_call_node(graph, nullptr, 0, &attrs, nullptr)));
   hrx_graph_exec_t executable = nullptr;
-  IREE_ASSERT_OK(
-      hrx_status_to_iree(hrx_graph_instantiate(graph, 0, &executable)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_instantiate(
+      graph, hrx_stream_get_queue(stream_), 0, &executable)));
   IREE_ASSERT_OK(
       hrx_status_to_iree(hrx_graph_exec_launch(executable, stream_)));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,

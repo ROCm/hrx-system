@@ -6,6 +6,7 @@
 
 #include "hrx_runtime.h"
 #include "iree/base/api.h"
+#include "iree/hal/command_buffer.h"
 #include "iree/hal/queue.h"
 
 #ifdef __cplusplus
@@ -36,6 +37,11 @@ void hrx_device_deinitialize_queues(hrx_device_t device);
 // already established that the supplied queue is non-NULL.
 iree_status_t hrx_queue_validate_roles(hrx_queue_t queue,
                                        hrx_queue_role_flags_t required_roles);
+
+// Returns the transfer/dispatch recording categories supported by |family|.
+// Used when preparing a stream or graph, before recording any operations.
+iree_hal_command_category_t hrx_queue_family_command_categories(
+    const iree_hal_queue_family_t* family);
 
 #ifdef __cplusplus
 }  // extern "C"

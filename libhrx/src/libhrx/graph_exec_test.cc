@@ -328,7 +328,8 @@ TEST_F(GraphExecSemaphoreTest,
   }
 
   hrx_graph_exec_t exec = nullptr;
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_instantiate(graph, 0, &exec)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_instantiate(
+      graph, hrx_device_get_queue(device_, 0, 0), 0, &exec)));
   ASSERT_EQ(exec->semaphore_count, 2u);
 
   // Take an independent reference on each semaphore so the reference counts

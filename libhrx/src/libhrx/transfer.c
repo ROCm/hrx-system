@@ -41,6 +41,11 @@ iree_status_t hrx_hal_queue_transfer_and_wait(
 
 static hrx_status_t hrx_stream_transfer(
     hrx_stream_t stream, const iree_hal_transfer_operation_t* operation) {
+  if (!iree_any_bit_set(stream->command_categories,
+                        IREE_HAL_COMMAND_CATEGORY_TRANSFER)) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "stream queue does not support transfers");
+  }
   hrx_status_t status = hrx_stream_flush(stream);
   if (!hrx_status_is_ok(status)) {
     return status;
@@ -64,7 +69,7 @@ static hrx_status_t hrx_stream_transfer(
       .payload_values = &signal_value,
   };
   iree_status_t iree_status = iree_hal_queue_transfer(
-      stream->device->transfer_queue, wait_semaphores, signal_semaphores,
+      stream->hal_queue, wait_semaphores, signal_semaphores,
       /*operation_count=*/1, operation, /*barriers=*/NULL);
   if (iree_status_is_ok(iree_status)) {
     stream->timepoint = signal_value;
@@ -168,7 +173,7 @@ hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream, const void* host_src,
   if (!stream || !host_src || !dst) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
   }
-  if (dst->device != stream->device) {
+  if (dst->device != stream->queue->device) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                            "destination buffer belongs to another device");
   }
@@ -196,7 +201,7 @@ hrx_status_t hrx_stream_copy_d2h(hrx_stream_t stream, hrx_buffer_t src,
   if (!stream || !src || !host_dst) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
   }
-  if (src->device != stream->device) {
+  if (src->device != stream->queue->device) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                            "source buffer belongs to another device");
   }

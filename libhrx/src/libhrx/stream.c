@@ -5,12 +5,19 @@
 // command buffer. Operations accumulate in the CB and flush on explicit call.
 // Adapted from iree-hal-streaming's stream.c timeline semaphore pattern.
 
+#include "stream.h"
+
 #include <stdlib.h>
 
 #include "hrx_internal.h"
 
 // Create a fresh one-shot command buffer for recording.
-static hrx_status_t hrx_stream_begin_cb(hrx_stream_t stream) {
+static hrx_status_t hrx_stream_begin_cb(
+    hrx_stream_t stream, iree_hal_command_category_t required_categories) {
+  if (!iree_all_bits_set(stream->command_categories, required_categories)) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "stream queue does not support this operation");
+  }
   if (stream->pending_cb) {
     return hrx_ok_status();
   }
@@ -19,8 +26,8 @@ static hrx_status_t hrx_stream_begin_cb(hrx_stream_t stream) {
   iree_status_t status = iree_hal_command_buffer_create(
       iree_hal_queue_family(stream->hal_queue),
       IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
-          hrx_device_profile_command_buffer_mode(stream->device),
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER | IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+          hrx_device_profile_command_buffer_mode(stream->queue->device),
+      stream->command_categories,
       /*binding_capacity=*/0, &command_buffer);
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_begin(command_buffer);
@@ -50,11 +57,15 @@ static iree_status_t hrx_stream_record_ordering_barrier(hrx_stream_t stream) {
                                          &execution_barrier);
 }
 
-hrx_status_t hrx_stream_create(hrx_device_t device, uint32_t flags,
-                               hrx_stream_t* stream) {
-  if (!device || !stream) {
+hrx_status_t hrx_stream_create(hrx_queue_t queue, uint32_t flags,
+                               hrx_stream_t* out_stream) {
+  if (!out_stream) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "device or stream is NULL");
+                           "stream output is NULL");
+  }
+  *out_stream = NULL;
+  if (!queue) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "queue is NULL");
   }
 
   hrx_stream_s* s = (hrx_stream_s*)calloc(1, sizeof(hrx_stream_s));
@@ -64,9 +75,11 @@ hrx_status_t hrx_stream_create(hrx_device_t device, uint32_t flags,
   }
 
   iree_atomic_ref_count_init(&s->ref_count);
-  s->device = device;
-  hrx_device_retain(s->device);
-  s->hal_queue = device->dispatch_queue;
+  s->queue = queue;
+  hrx_queue_retain(queue);
+  s->hal_queue = queue->hal_queue;
+  s->command_categories =
+      hrx_queue_family_command_categories(iree_hal_queue_family(s->hal_queue));
   s->flags = flags;
   s->timepoint = 0;
   s->has_pending_work = false;
@@ -74,14 +87,14 @@ hrx_status_t hrx_stream_create(hrx_device_t device, uint32_t flags,
 
   // Create the stream's timeline semaphore.
   hrx_status_t status =
-      hrx_semaphore_create(device, /*initial_value=*/0, &s->semaphore);
+      hrx_semaphore_create(queue->device, /*initial_value=*/0, &s->semaphore);
   if (!hrx_status_is_ok(status)) {
-    hrx_device_release(s->device);
+    hrx_queue_release(s->queue);
     free(s);
     return status;
   }
 
-  *stream = s;
+  *out_stream = s;
   return hrx_ok_status();
 }
 
@@ -89,8 +102,6 @@ void hrx_stream_retain(hrx_stream_t stream) {
   if (!stream) {
     return;
   }
-  hrx_device_retain(stream->device);
-  hrx_semaphore_retain(stream->semaphore);
   iree_atomic_ref_count_inc(&stream->ref_count);
 }
 
@@ -98,21 +109,47 @@ void hrx_stream_release(hrx_stream_t stream) {
   if (!stream) {
     return;
   }
-  hrx_device_t device = stream->device;
-  hrx_semaphore_t semaphore = stream->semaphore;
   if (iree_atomic_ref_count_dec(&stream->ref_count) == 1) {
+    iree_status_t status = iree_ok_status();
     if (stream->has_pending_work) {
-      hrx_status_ignore(hrx_stream_flush(stream));
+      status = hrx_status_to_iree(hrx_stream_flush(stream));
     }
     if (stream->timepoint > 0) {
-      hrx_status_ignore(
-          hrx_semaphore_wait(stream->semaphore, stream->timepoint, UINT64_MAX));
+      status = iree_status_join(
+          status, hrx_status_to_iree(hrx_semaphore_wait(
+                      stream->semaphore, stream->timepoint, UINT64_MAX)));
+    }
+    if (!iree_status_is_ok(status)) {
+      // Final release cannot return a failure. Preserve it through the
+      // application's configured device-event channel before dropping state.
+      iree_hal_device_event_sink_t sink;
+      if (!hrx_runtime_try_get_hal_device_event_sink(&sink)) {
+        sink = iree_hal_device_event_sink_discard();
+      }
+      const iree_hal_device_driver_failure_event_t payload = {
+          .record_length = sizeof(payload),
+          .abi_version = IREE_HAL_DEVICE_DRIVER_FAILURE_EVENT_ABI_VERSION_0,
+          .status_code = iree_status_code(status),
+          .message = iree_status_message(status),
+      };
+      iree_hal_device_event_t event = iree_hal_device_event_default();
+      event.type = IREE_HAL_DEVICE_EVENT_TYPE_DRIVER_FAILURE;
+      event.severity = IREE_HAL_DEVICE_EVENT_SEVERITY_ERROR;
+      event.source.device = hrx_device_hal(stream->queue->device);
+      event.source.device_id = iree_hal_device_id(event.source.device);
+      event.payload = iree_make_const_byte_span(&payload, sizeof(payload));
+      iree_hal_device_event_sink_publish(sink, &event);
+      iree_status_free(status);
     }
     iree_hal_command_buffer_release(stream->pending_cb);
+    hrx_queue_release(stream->queue);
+    hrx_semaphore_release(stream->semaphore);
     free(stream);
   }
-  hrx_semaphore_release(semaphore);
-  hrx_device_release(device);
+}
+
+hrx_queue_t hrx_stream_get_queue(hrx_stream_t stream) {
+  return stream ? stream->queue : NULL;
 }
 
 hrx_status_t hrx_stream_flush(hrx_stream_t stream) {
@@ -194,7 +231,8 @@ hrx_status_t hrx_stream_wait(hrx_stream_t stream) {
     status = hrx_status_to_iree(
         hrx_semaphore_wait(stream->semaphore, stream->timepoint, UINT64_MAX));
   }
-  status = iree_status_join(status, hrx_runtime_profile_flush(stream->device));
+  status = iree_status_join(status,
+                            hrx_runtime_profile_flush(stream->queue->device));
   HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
 }
 
@@ -231,7 +269,7 @@ hrx_status_t hrx_stream_get_device(hrx_stream_t stream, hrx_device_t* device) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                            "stream or device is NULL");
   }
-  *device = stream->device;
+  *device = stream->queue->device;
   return hrx_ok_status();
 }
 
@@ -325,7 +363,8 @@ hrx_status_t hrx_stream_fill_buffer(hrx_stream_t stream, hrx_buffer_t buffer,
                             "stream, buffer, or pattern is NULL"));
   }
 
-  hrx_status_t status = hrx_stream_begin_cb(stream);
+  hrx_status_t status =
+      hrx_stream_begin_cb(stream, IREE_HAL_COMMAND_CATEGORY_TRANSFER);
   if (!hrx_status_is_ok(status)) {
     HRX_RETURN_AND_END_ZONE(z0, status);
   }
@@ -358,7 +397,8 @@ hrx_status_t hrx_stream_copy_buffer(hrx_stream_t stream, hrx_buffer_t src,
                                                 "stream, src, or dst is NULL"));
   }
 
-  hrx_status_t status = hrx_stream_begin_cb(stream);
+  hrx_status_t status =
+      hrx_stream_begin_cb(stream, IREE_HAL_COMMAND_CATEGORY_TRANSFER);
   if (!hrx_status_is_ok(status)) {
     HRX_RETURN_AND_END_ZONE(z0, status);
   }
@@ -396,7 +436,8 @@ hrx_status_t hrx_stream_update_buffer(hrx_stream_t stream,
                             "stream, host_data, or dst is NULL"));
   }
 
-  hrx_status_t status = hrx_stream_begin_cb(stream);
+  hrx_status_t status =
+      hrx_stream_begin_cb(stream, IREE_HAL_COMMAND_CATEGORY_TRANSFER);
   if (!hrx_status_is_ok(status)) {
     HRX_RETURN_AND_END_ZONE(z0, status);
   }
@@ -445,7 +486,7 @@ hrx_status_t hrx_stream_dispatch(hrx_stream_t stream,
     HRX_RETURN_AND_END_ZONE(z0, status);
   }
 
-  status = hrx_stream_begin_cb(stream);
+  status = hrx_stream_begin_cb(stream, IREE_HAL_COMMAND_CATEGORY_DISPATCH);
   if (!hrx_status_is_ok(status)) {
     HRX_RETURN_AND_END_ZONE(z0, status);
   }
@@ -518,7 +559,7 @@ hrx_status_t hrx_stream_execution_barrier(hrx_stream_t stream) {
         z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "stream is NULL"));
   }
 
-  hrx_status_t status = hrx_stream_begin_cb(stream);
+  hrx_status_t status = hrx_stream_begin_cb(stream, /*required_categories=*/0);
   if (!hrx_status_is_ok(status)) {
     HRX_RETURN_AND_END_ZONE(z0, status);
   }

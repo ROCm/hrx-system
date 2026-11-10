@@ -217,6 +217,20 @@ hrx_device_t hrx_queue_get_device(hrx_queue_t queue) {
   return queue ? queue->device : NULL;
 }
 
+iree_hal_command_category_t hrx_queue_family_command_categories(
+    const iree_hal_queue_family_t* family) {
+  const iree_hal_queue_family_role_flags_t roles =
+      iree_hal_queue_family_spec(family)->role_flags;
+  iree_hal_command_category_t categories = 0;
+  if (iree_any_bit_set(roles, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER)) {
+    categories |= IREE_HAL_COMMAND_CATEGORY_TRANSFER;
+  }
+  if (iree_any_bit_set(roles, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH)) {
+    categories |= IREE_HAL_COMMAND_CATEGORY_DISPATCH;
+  }
+  return categories;
+}
+
 iree_status_t hrx_queue_validate_roles(hrx_queue_t queue,
                                        hrx_queue_role_flags_t required_roles) {
   const iree_hal_queue_family_spec_t* spec =
