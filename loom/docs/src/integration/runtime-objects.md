@@ -216,8 +216,21 @@ through `append`, and the return transfers that owner back to the host.
 The host can interleave calls for independent decoders using the same compiled
 code. Each request keeps its own returned handle; neither compiled-code
 ownership nor invocation reuse establishes shared mutable request state.
-Reference counting protects lifetime; the host and provider still coordinate
-concurrent access to a payload.
+
+The VM separates shared immutable code from each process's mutable state. The
+host serializes execution of one process, including access to its globals, and
+can run independent processes concurrently. A handle shared between processes
+can still name the same native payload. Reference counting protects that
+payload's lifetime; it does not synchronize its state. The host and provider
+coordinate access when several processes or native asynchronous work use the
+same object.
+
+Neither `ref` nor `ptr` grants exclusive access or permission to use an object
+in a particular phase of its protocol. Transferring an owner leaves other
+handles valid, and saving a pointer preserves lifetime without freezing the
+payload. A provider that restricts operations after submission, completion, or
+cancellation enforces those rules through its object operations. Accepted
+asynchronous work remains part of that access protocol until actual retirement.
 
 A source turn can instead release its input owner and return a replacement.
 Previously saved `ptr` values continue to name the old payload, with protection
@@ -287,6 +300,8 @@ null or live at the handoff. A ref count protects payload lifetime; it does not
 synchronize mutable payload state or independently keep provider code loaded.
 The embedding retains the provider and its descriptor storage for the full
 period in which those handles can be used or finalized.
+The native finalizer runs on the thread performing the final release; a
+provider with thread-affine resources arranges their destruction accordingly.
 
 The [VM embedding guide](https://github.com/ROCm/hrx-system/blob/main/runtime/src/iree/vm/README.md#values-and-ownership)
 describes carrier ownership, type-table resolution, suspension, and synchronous
