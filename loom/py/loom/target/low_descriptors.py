@@ -375,6 +375,8 @@ class DescriptorAsmSurface(Enum):
 class OperandFormMatchKind(CEnum):
     ALL_EQUAL_I64 = "LOOM_LOW_OPERAND_FORM_MATCH_ALL_EQUAL_I64"
     ALL_EQUAL_EXACT_I64 = "LOOM_LOW_OPERAND_FORM_MATCH_ALL_EQUAL_EXACT_I64"
+    # Generated receiving-class guard; the payload is a replacement operand index.
+    ACCEPTED_REGISTER_CLASS = "LOOM_LOW_OPERAND_FORM_MATCH_ACCEPTED_REGISTER_CLASS"
 
 
 class OperandFormImmediateAction(CEnum):
@@ -820,6 +822,9 @@ class Descriptor:
     feature_mask_words: tuple[int, ...] = ()
     encoding_format_id: int = 0
     encoding_id: int = 0
+    # Fixed native instruction size, when known. Used only during generation
+    # to admit size-preserving operand alternatives; not emitted into C rows.
+    encoding_byte_count: int | None = None
     flags: tuple[DescriptorFlag, ...] = ()
     instruction_classes: tuple[InstructionClass, ...] = ()
     operand_forms: tuple[OperandForm, ...] = ()

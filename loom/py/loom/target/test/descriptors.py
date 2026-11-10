@@ -44,6 +44,7 @@ from loom.target.low_descriptors import (
     OperandAddressMapKind,
     OperandFlag,
     OperandForm,
+    OperandFormImmediateAction,
     OperandFormMatch,
     OperandFormMatchKind,
     OperandRole,
@@ -788,6 +789,40 @@ TEST_LOW_INCREMENT_I32_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
+TEST_LOW_COMMUTATIVE_ADD_I32_DESCRIPTOR = replace(
+    TEST_LOW_ADD_I32_DESCRIPTOR,
+    key="test.commutative.add.i32",
+    mnemonic="test.commutative.add.i32",
+    encoding_byte_count=4,
+    operands=(
+        _i32_result(),
+        replace(_i32_operand("lhs"), reg_alts=(*_I32_ALT, *_F32_ALT)),
+        _i32_operand("rhs"),
+    ),
+    constraints=(Constraint(ConstraintKind.COMMUTABLE, 1, 2),),
+    operand_forms=(
+        OperandForm(
+            replacement_descriptor="test.commutative.add.inline.i32",
+            matches=(
+                OperandFormMatch("lhs", OperandFormMatchKind.ALL_EQUAL_EXACT_I64),
+            ),
+            immediate_action=OperandFormImmediateAction.SET_MATCHED_I64,
+            immediate_field="i32_value",
+            immediate_source_operand="lhs",
+        ),
+    ),
+)
+
+TEST_LOW_COMMUTATIVE_ADD_INLINE_I32_DESCRIPTOR = replace(
+    TEST_LOW_INCREMENT_I32_DESCRIPTOR,
+    key="test.commutative.add.inline.i32",
+    mnemonic="test.commutative.add.inline.i32",
+    encoding_byte_count=4,
+    operands=(_i32_result(), _i32_operand("rhs")),
+    immediates=(replace(_I32_VALUE_IMMEDIATE, signed_min=-4, unsigned_max=4),),
+    asm_forms=_asm(results=("dst",), operands=("rhs",), immediates=("i32_value",)),
+)
+
 # Produces two adjacent coordinates without consuming the following pair.
 TEST_LOW_IOTA_PAIR_I32_DESCRIPTOR = Descriptor(
     key="test.iota.pair.i32",
@@ -1155,7 +1190,11 @@ TEST_LOW_PREFERRED_ADD_I32_DESCRIPTOR = replace(
     TEST_LOW_ADD_I32_DESCRIPTOR,
     key="test.preferred.add.i32",
     mnemonic="test.preferred.add.i32",
-    constraints=(Constraint(ConstraintKind.PREFER_TIED, 0, 2),),
+    encoding_byte_count=4,
+    constraints=(
+        Constraint(ConstraintKind.PREFER_TIED, 0, 2),
+        Constraint(ConstraintKind.COMMUTABLE, 1, 2),
+    ),
     operand_forms=(
         OperandForm(
             replacement_descriptor="test.preferred.identity.i32",
@@ -3304,6 +3343,8 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_REMATERIALIZE_PAIR_EXPLICIT32_DESCRIPTOR,
         TEST_LOW_ADD_I32_DESCRIPTOR,
         TEST_LOW_INCREMENT_I32_DESCRIPTOR,
+        TEST_LOW_COMMUTATIVE_ADD_I32_DESCRIPTOR,
+        TEST_LOW_COMMUTATIVE_ADD_INLINE_I32_DESCRIPTOR,
         TEST_LOW_ADD_LOW4_I32_DESCRIPTOR,
         TEST_LOW_TOTAL_ADD_I32_DESCRIPTOR,
         TEST_LOW_MASKED_ADD_I32_DESCRIPTOR,

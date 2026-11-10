@@ -1424,6 +1424,7 @@ static bool loom_low_operand_form_match_kind_is_valid(
   switch (kind) {
     case LOOM_LOW_OPERAND_FORM_MATCH_ALL_EQUAL_I64:
     case LOOM_LOW_OPERAND_FORM_MATCH_ALL_EQUAL_EXACT_I64:
+    case LOOM_LOW_OPERAND_FORM_MATCH_ACCEPTED_REGISTER_CLASS:
       return true;
     default:
       return false;
@@ -1534,6 +1535,24 @@ static iree_status_t loom_low_verify_descriptor_operand_forms(
             "low descriptor %" PRIu32 " operand form %" PRIu32 " match %" PRIu16
             " has unknown match kind %u",
             descriptor_index, form_index, match_index, match->match_kind);
+      }
+      if (match->match_kind ==
+          LOOM_LOW_OPERAND_FORM_MATCH_ACCEPTED_REGISTER_CLASS) {
+        const loom_low_descriptor_t* replacement =
+            &descriptor_set->descriptors[form->replacement_descriptor_ordinal];
+        if (match->match_i64 < 0 ||
+            match->match_i64 >= replacement->operand_count ||
+            !loom_low_operand_role_is_packet_operand(
+                loom_low_descriptor_operand(descriptor_set, replacement,
+                                            (uint16_t)match->match_i64)
+                    ->role) ||
+            match_index == form->immediate_match_index) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "low descriptor %" PRIu32 " operand form %" PRIu32
+              " has an invalid receiving register-class predicate",
+              descriptor_index, form_index);
+        }
       }
     }
     if (!loom_low_operand_form_immediate_action_is_valid(
