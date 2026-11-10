@@ -703,6 +703,75 @@ TEST(FloatFacts, AppliesIndependentConversionSubnormalPermissions) {
   ExpectFloatRange(LOOM_SCALAR_TYPE_F32, result, -0x1p-23, -0.0);
 }
 
+TEST(FloatFacts, ConversionFlushingPreservesRepresentableFormats) {
+  const loom_float_conversion_policy_t strict = {0};
+  for (loom_scalar_type_t source_type = LOOM_SCALAR_TYPE_F8E4M3;
+       source_type <= LOOM_SCALAR_TYPE_F64; ++source_type) {
+    SCOPED_TRACE(loom_scalar_type_name(source_type));
+    const loom_value_facts_t unknown = loom_value_facts_unknown();
+    loom_value_facts_t wide = loom_value_facts_unknown();
+    loom_value_facts_eval_float_conversion(source_type, LOOM_SCALAR_TYPE_F64,
+                                           strict, &unknown, &wide);
+    for (loom_scalar_type_t result_type = LOOM_SCALAR_TYPE_F8E4M3;
+         result_type <= LOOM_SCALAR_TYPE_F64; ++result_type) {
+      SCOPED_TRACE(loom_scalar_type_name(result_type));
+      for (bool widened_input : {false, true}) {
+        SCOPED_TRACE(widened_input);
+        const loom_scalar_type_t input_type =
+            widened_input ? LOOM_SCALAR_TYPE_F64 : source_type;
+        const loom_value_facts_t input = widened_input ? wide : unknown;
+        loom_value_facts_t exact = loom_value_facts_unknown();
+        loom_value_facts_eval_float_conversion(input_type, result_type, strict,
+                                               &input, &exact);
+        for (bool flush_input : {false, true}) {
+          for (bool flush_result : {false, true}) {
+            SCOPED_TRACE(flush_input);
+            SCOPED_TRACE(flush_result);
+            const loom_float_conversion_policy_t policy = {
+                .may_flush_input_subnormal = flush_input,
+                .may_flush_result_subnormal = flush_result,
+            };
+            loom_value_facts_t result = loom_value_facts_unknown();
+            loom_value_facts_eval_float_conversion(input_type, result_type,
+                                                   policy, &input, &result);
+            ExpectExactFloatTypes(result,
+                                  loom_value_facts_exact_float_types(exact));
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(FloatFacts, FlushedSubnormalAlternativesRetainFormatsButNotExactValues) {
+  const loom_float_conversion_policy_t flush_both = {
+      .may_flush_input_subnormal = true,
+      .may_flush_result_subnormal = true,
+  };
+  for (double sign : {-1.0, 1.0}) {
+    SCOPED_TRACE(sign);
+    const loom_value_facts_t input =
+        loom_value_facts_exact_float(LOOM_SCALAR_TYPE_BF16, sign * 0x1p-133);
+    loom_value_facts_t wide = loom_value_facts_unknown();
+    loom_value_facts_eval_float_conversion(
+        LOOM_SCALAR_TYPE_BF16, LOOM_SCALAR_TYPE_F32, flush_both, &input, &wide);
+    EXPECT_FALSE(loom_value_facts_is_exact(wide));
+    EXPECT_TRUE(
+        loom_value_facts_is_exact_float_type(wide, LOOM_SCALAR_TYPE_BF16));
+    loom_value_facts_t narrow = loom_value_facts_unknown();
+    loom_value_facts_eval_float_conversion(LOOM_SCALAR_TYPE_F32,
+                                           LOOM_SCALAR_TYPE_BF16, flush_both,
+                                           &wide, &narrow);
+    EXPECT_FALSE(loom_value_facts_is_exact(narrow));
+    double range_lo = 0.0;
+    double range_hi = 0.0;
+    ASSERT_TRUE(loom_value_facts_as_float_range(LOOM_SCALAR_TYPE_BF16, narrow,
+                                                &range_lo, &range_hi));
+    EXPECT_DOUBLE_EQ(range_lo, sign < 0.0 ? -0x1p-133 : 0.0);
+    EXPECT_DOUBLE_EQ(range_hi, sign < 0.0 ? -0.0 : 0x1p-133);
+  }
+}
+
 TEST(FloatFacts, JoinsFiniteIntervalsAndSupportsAliasedOutput) {
   loom_value_facts_t lhs =
       loom_value_facts_make_float_range(LOOM_SCALAR_TYPE_F32, -2.0, 1.0);

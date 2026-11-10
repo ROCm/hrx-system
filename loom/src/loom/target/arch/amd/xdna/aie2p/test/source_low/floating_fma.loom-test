@@ -237,3 +237,36 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @rounded_product(%
   %result = vmac.bf16x64 %first, %narrow, %44, %29
   return %result
 }
+
+// ====
+
+// Numeric format facts permit native FMA after flushing, without substituting
+// the unconverted source operands as exact lane origins.
+func.def @flushed_widening_product(%left: vector<64xbf16>, %right: vector<64xbf16>, %seed: vector<64xf32>) -> (vector<64xf32>) {
+  %a = vector.extf<daz> %left : vector<64xbf16> to vector<64xf32>
+  %b = vector.extf<daz|ftz> %right : vector<64xbf16> to vector<64xf32>
+  %result = vector.fmaf<nnan|ninf|nsz|afn> %a, %b, %seed : vector<64xf32>
+  func.return %result : vector<64xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @flushed_widening_product(%left: reg<aie2p.vec256 x4>, %right: reg<aie2p.vec256 x4>, %seed: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x4>) asm {
+  %21 = slice %left[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %22 = vconv.fp32.bf16 %21
+  %23 = slice %left[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %24 = vconv.fp32.bf16 %23
+  %26 = slice %right[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %27 = vconv.fp32.bf16 %26
+  %28 = slice %right[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %29 = vconv.fp32.bf16 %28
+  set.rounding 12
+  %32 = vconv.bf16.fp32 %22
+  %34 = vconv.bf16.fp32 %24
+  %35 = concat(%32, %34) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %37 = vconv.bf16.fp32 %27
+  %39 = vconv.bf16.fp32 %29
+  %40 = concat(%37, %39) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %41 = mova.i32 60
+  %result = vmac.bf16x64 %seed, %35, %40, %41
+  return %result
+}
