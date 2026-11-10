@@ -338,7 +338,7 @@ iree_status_t loom_link_template_candidate_loader_load(
                       : UINT32_MAX);
           IREE_RETURN_IF_ERROR(loom_template_provider_summary_bind_family(
               source_summary, materialization->module, target_family,
-              target_symbol, provider->ordinal, arena,
+              target_symbol, provider->ordinal,
               &candidates[candidate_count++]));
         } else {
           const loom_link_bytecode_template_contract_t* contract = NULL;
@@ -351,7 +351,7 @@ iree_status_t loom_link_template_candidate_loader_load(
                   contract->target_symbol_ordinal);
           IREE_RETURN_IF_ERROR(loom_template_provider_contract_bind_family(
               &contract->provider, materialization->module, target_family,
-              target_symbol, provider->ordinal, arena,
+              target_symbol, provider->ordinal,
               &candidates[candidate_count++]));
         }
       }

@@ -298,7 +298,7 @@ template.def<@demo.contract> priority(1) @fallback(%arg0: i32) -> (i32) {
 }
 
 TEST_F(TemplateProviderCatalogTest,
-       BindsProviderMetadataToExistingFamilySignature) {
+       BindsProviderWithoutCopyingSourcePredicates) {
   ModulePtr source = ParseModule(R"(
 test.target<low_core> @source.gfx11
 template.decl @source.family(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>)
@@ -331,7 +331,7 @@ template.decl @target.family(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]x
   loom_template_provider_summary_t bound = {};
   IREE_ASSERT_OK(loom_template_provider_summary_bind_family(
       &source_provider, target.get(), target_family, target_target,
-      /*origin_ordinal=*/123, &analysis_arena_, &bound));
+      /*origin_ordinal=*/123, &bound));
 
   EXPECT_EQ(target->values.count, target_value_count_before);
   EXPECT_EQ(bound.module, target.get());
@@ -347,21 +347,10 @@ template.decl @target.family(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]x
 
   ASSERT_EQ(bound.argument_count, 2u);
   ASSERT_EQ(bound.result_count, 1u);
-  EXPECT_LT(bound.argument_ids[0], target_value_count_before);
-  EXPECT_NE(bound.argument_ids[0], source_provider.argument_ids[0]);
-  const loom_type_t bound_argument_type =
-      loom_module_value_type(bound.module, bound.argument_ids[1]);
-  const loom_type_t bound_result_type =
-      loom_module_value_type(bound.module, bound.result_ids[0]);
-  ASSERT_TRUE(loom_type_is_tensor(bound_argument_type));
-  EXPECT_EQ(loom_type_dim_value_id_at(bound_argument_type, 0),
-            bound.argument_ids[0]);
-  ASSERT_TRUE(loom_type_is_tensor(bound_result_type));
-  EXPECT_EQ(loom_type_dim_value_id_at(bound_result_type, 0),
-            bound.argument_ids[0]);
-  EXPECT_TRUE(loom_type_equal(
-      loom_module_value_type(target.get(), bound.argument_ids[1]),
-      bound_argument_type));
+  EXPECT_FALSE(bound.predicates_use_ordinals);
+  EXPECT_EQ(bound.argument_ids, source_provider.argument_ids);
+  EXPECT_EQ(bound.result_ids, source_provider.result_ids);
+  EXPECT_EQ(bound.predicates, source_provider.predicates);
 
   ASSERT_EQ(bound.predicate_count, 1u);
   ASSERT_NE(bound.predicates, nullptr);
