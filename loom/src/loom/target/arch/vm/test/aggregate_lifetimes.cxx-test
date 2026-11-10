@@ -146,3 +146,183 @@ event 27
 event 7
 OK 0
 retired 0
+
+// ====
+// RUN: emit vm-object-lifetime
+// INPUT: cxx root=run
+// A conditional prvalue initializes one result object. Both paths keep that
+// object's lifetime through the aggregate reference, then destroy it once.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+
+struct Guard {
+  // Identifies the selected result object.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+
+struct Holder {
+  // Refers to the conditional's complete result object.
+  const Guard& member;
+};
+
+[[loom::noinline]] static void select(bool first) {
+  Holder holder{first ? Guard{1} : Guard{2}};
+  observe(holder.member.value + 10);
+}
+
+void run() {
+  select(true);
+  select(false);
+}
+
+// ----
+event 11
+event 1
+event 12
+event 2
+OK 0
+retired 0
+
+// ====
+// A glvalue conditional selects an existing referent. It creates no result
+// object and neither duplicates nor transfers the selected object's cleanup.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+
+struct Guard {
+  // Independently owned by the local declaration.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+
+struct Holder {
+  // Selects one existing source identity.
+  const Guard& member;
+};
+
+[[loom::noinline]] static void select(bool first) {
+  Guard left{3};
+  Guard right{4};
+  Holder holder{first ? left : right};
+  observe(holder.member.value + 10);
+}
+
+void run() {
+  select(true);
+  select(false);
+}
+
+// ----
+event 13
+event 4
+event 3
+event 14
+event 4
+event 3
+OK 0
+retired 0
+
+// ====
+// Passing a temporary aggregate to a helper keeps its referent only through
+// the call's full expression. Naming its reference member also creates no new
+// lifetime extension; the resulting expired reference is never read.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+
+struct Guard {
+  // Identifies the independently evaluated temporary.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+
+struct Holder {
+  // Has the lifetime of the containing aggregate expression.
+  const Guard& member;
+};
+
+[[loom::noinline]] static void use(const Holder& holder) {
+  observe(holder.member.value + 10);
+}
+
+void run() {
+  use(Holder{Guard{1}});
+  observe(2);
+  const Guard& expired = Holder{Guard{3}}.member;
+  observe(4);
+}
+
+// ----
+event 11
+event 1
+event 2
+event 3
+event 4
+OK 0
+retired 0
+
+// ====
+// Guaranteed copy elision initializes the named aggregate directly. A
+// structured binding's hidden by-value object follows the same lifetime rule.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+
+struct Guard {
+  // Identifies the referent owned by the enclosing aggregate's lifetime.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+
+struct Holder {
+  // Bound during direct construction of the result object.
+  const Guard& member;
+};
+
+void run() {
+  {
+    Holder result = Holder{Guard{1}};
+    observe(result.member.value + 10);
+  }
+  {
+    auto [member] = Holder{Guard{2}};
+    observe(member.value + 10);
+  }
+}
+
+// ----
+event 11
+event 1
+event 12
+event 2
+OK 0
+retired 0
+
+// ====
+// Each continue and break exits the holder's scope. Its temporary must retire
+// at that exit, before another iteration or the statement after the loop.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+
+struct Guard {
+  // Identifies the current iteration's object.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+
+struct Holder {
+  // The loop-body scope owns this reference's temporary.
+  const Guard& member;
+};
+
+void run() {
+  for (unsigned index = 1; index < 4; ++index) {
+    Holder holder{Guard{index}};
+    if (index == 1) continue;
+    observe(holder.member.value + 10);
+    break;
+  }
+  observe(20);
+}
+
+// ----
+event 1
+event 12
+event 2
+event 20
+OK 0
+retired 0
