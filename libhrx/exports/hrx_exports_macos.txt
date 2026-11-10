@@ -1,5 +1,13 @@
 _hrx_host_allocator_system
 _hrx_runtime_version
+_hrx_runtime_create
+_hrx_runtime_retain
+_hrx_runtime_release
+_hrx_device_group_create
+_hrx_device_group_retain
+_hrx_device_group_release
+_hrx_device_group_device_count
+_hrx_device_group_get_device
 _hrx_make_status
 _hrx_status_code
 _hrx_status_to_string

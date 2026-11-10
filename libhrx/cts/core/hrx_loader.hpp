@@ -62,6 +62,16 @@ class HrxLoader {
   decltype(&hrx_status_free_message) status_free_message;
   decltype(&hrx_status_ignore) status_ignore;
 
+  // Explicit runtime and immutable groups.
+  decltype(&hrx_runtime_create) runtime_create;
+  decltype(&hrx_runtime_retain) runtime_retain;
+  decltype(&hrx_runtime_release) runtime_release;
+  decltype(&hrx_device_group_create) device_group_create;
+  decltype(&hrx_device_group_retain) device_group_retain;
+  decltype(&hrx_device_group_release) device_group_release;
+  decltype(&hrx_device_group_device_count) device_group_device_count;
+  decltype(&hrx_device_group_get_device) device_group_get_device;
+
   // GPU lifecycle.
   decltype(&hrx_gpu_initialize) gpu_initialize;
   decltype(&hrx_gpu_shutdown) gpu_shutdown;

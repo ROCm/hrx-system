@@ -88,6 +88,8 @@ install(TARGETS libhrx_src_libhrx_hrx EXPORT hrx-targets
     COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
   INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hrx")
 install(FILES
+  "${LIBHRX_SOURCE_DIR}/include/hrx_base.h"
+  "${LIBHRX_SOURCE_DIR}/include/hrx_device.h"
   "${LIBHRX_SOURCE_DIR}/include/hrx_runtime.h"
   "${LIBHRX_SOURCE_DIR}/include/hrx_runtime_cxx.h"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hrx"

@@ -8,6 +8,7 @@
 #define LIBHRX_SRC_LIBHRX_RUNTIME_H_
 
 #include "hrx_runtime.h"
+#include "iree/base/threading/mutex.h"
 #include "iree/hal/api.h"
 
 #ifdef __cplusplus
@@ -15,6 +16,34 @@ extern "C" {
 #endif
 
 typedef struct iree_async_proactor_pool_t iree_async_proactor_pool_t;
+
+// Construction-time service ownership. Queue submission uses device-local
+// state and never acquires the driver construction mutex.
+typedef struct hrx_runtime_s {
+  // References held by callers and complete device groups.
+  iree_atomic_ref_count_t ref_count;
+  // Allocator for the runtime, group metadata, and native device construction.
+  iree_allocator_t host_allocator;
+  // Lazy NUMA-aware I/O services shared by this runtime's devices.
+  iree_async_proactor_pool_t* proactor_pool;
+  // Guards only task-driver creation and publication.
+  iree_slim_mutex_t task_mutex;
+  // Retained task driver sharing its executor across all task devices.
+  iree_hal_driver_t* task_driver;
+  // Immutable construction options; any CPU IDs refer to trailing owned
+  // storage.
+  hrx_runtime_options_t options;
+} hrx_runtime_s;
+
+// Acquires a driver from the appropriate execution/native connection owner.
+iree_status_t hrx_runtime_acquire_driver(hrx_runtime_t runtime,
+                                         iree_string_view_t scheme,
+                                         iree_hal_driver_t** out_driver);
+iree_hal_device_event_sink_t hrx_runtime_hal_event_sink(hrx_runtime_t runtime);
+
+// Parent-scoped services for frontend operations that already retain a device.
+iree_async_proactor_pool_t* hrx_device_proactor_pool(hrx_device_t device);
+iree_hal_device_event_sink_t hrx_device_hal_event_sink(hrx_device_t device);
 
 // Selects and orders physical devices before any device is activated. Entries
 // may be reordered or removed in place; their opaque IDs and borrowed strings
@@ -51,6 +80,7 @@ hrx_status_t hrx_gpu_initialize_with_options(
 // or waiting for other queues. File errors are returned to the synchronizing
 // caller.
 iree_status_t hrx_runtime_profile_flush(hrx_device_t device);
+iree_status_t hrx_device_profile_end(hrx_device_t device);
 
 // Returns the process-wide borrowed proactor pool, or NULL before runtime
 // initialization and after shutdown.

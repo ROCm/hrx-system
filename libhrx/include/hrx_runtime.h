@@ -4,153 +4,16 @@
 #ifndef HRX_RUNTIME_H_
 #define HRX_RUNTIME_H_
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include "hrx_device.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 //===----------------------------------------------------------------------===//
-// Export macros
-//===----------------------------------------------------------------------===//
-
-#if defined(_WIN32) && defined(HRX_BUILDING_SHARED)
-#define HRX_API __declspec(dllexport)
-#elif defined(_WIN32) && !defined(HRX_STATIC)
-#define HRX_API __declspec(dllimport)
-#elif defined(HRX_BUILDING_SHARED)
-#define HRX_API __attribute__((visibility("default")))
-#elif defined(HRX_STATIC)
-#define HRX_API
-#else
-#define HRX_API
-#endif
-
-//===----------------------------------------------------------------------===//
-// Host allocator (type + system getter only — functions after Status)
-//
-// Two-word value type, layout-compatible with iree_allocator_t.
-// Used for host-side memory allocation (not device memory).
-// hrx_host_allocator_system() returns the process-wide system allocator,
-// backed by mimalloc when available.
-//===----------------------------------------------------------------------===//
-
-typedef struct hrx_host_allocator_t {
-  void* self;
-  void* ctl;
-} hrx_host_allocator_t;
-
-// Returns the process-wide system allocator. Valid as soon as libhrx is loaded
-// (no hrx_*_initialize() required).
-HRX_API hrx_host_allocator_t hrx_host_allocator_system(void);
-
-//===----------------------------------------------------------------------===//
-// Version
-//===----------------------------------------------------------------------===//
-
-#define HRX_VERSION_MAJOR 0
-#define HRX_VERSION_MINOR 1
-#define HRX_VERSION_PATCH 0
-
-HRX_API void hrx_runtime_version(int* major, int* minor, int* patch);
-
-//===----------------------------------------------------------------------===//
-// Status
-//
-// Values match iree_status_code_t. Verified by static_assert in
-// implementation.
-//===----------------------------------------------------------------------===//
-
-typedef enum hrx_status_code_t {
-  HRX_STATUS_OK = 0,
-  HRX_STATUS_CANCELLED = 1,
-  HRX_STATUS_UNKNOWN = 2,
-  HRX_STATUS_INVALID_ARGUMENT = 3,
-  HRX_STATUS_DEADLINE_EXCEEDED = 4,
-  HRX_STATUS_NOT_FOUND = 5,
-  HRX_STATUS_ALREADY_EXISTS = 6,
-  HRX_STATUS_PERMISSION_DENIED = 7,
-  HRX_STATUS_OUT_OF_MEMORY = 8,  // IREE: RESOURCE_EXHAUSTED
-  HRX_STATUS_FAILED_PRECONDITION = 9,
-  HRX_STATUS_ABORTED = 10,
-  HRX_STATUS_OUT_OF_RANGE = 11,
-  HRX_STATUS_UNIMPLEMENTED = 12,
-  HRX_STATUS_INTERNAL = 13,
-  HRX_STATUS_UNAVAILABLE = 14,
-  HRX_STATUS_DATA_LOSS = 15,
-} hrx_status_code_t;
-
-// Status is an opaque pointer. NULL = OK, non-NULL = error with payload.
-typedef struct hrx_status_s* hrx_status_t;
-
-static inline bool hrx_status_is_ok(hrx_status_t status) {
-  return status == NULL;
-}
-
-static inline hrx_status_t hrx_ok_status(void) { return NULL; }
-
-HRX_API hrx_status_t hrx_make_status(hrx_status_code_t code,
-                                     const char* message);
-
-HRX_API hrx_status_code_t hrx_status_code(hrx_status_t status);
-
-HRX_API hrx_status_t hrx_status_to_string(hrx_status_t status,
-                                          char** out_message,
-                                          size_t* out_length);
-
-HRX_API void hrx_status_free_message(char* message);
-
-HRX_API void hrx_status_ignore(hrx_status_t status);
-
-//===----------------------------------------------------------------------===//
-// Host allocator functions
-//===----------------------------------------------------------------------===//
-
-// Allocates zeroed memory.
-HRX_API hrx_status_t hrx_host_allocator_malloc(hrx_host_allocator_t allocator,
-                                               size_t byte_length,
-                                               void** out_ptr);
-
-// Allocates uninitialized memory. Only use when immediately overwriting.
-HRX_API hrx_status_t hrx_host_allocator_malloc_uninitialized(
-    hrx_host_allocator_t allocator, size_t byte_length, void** out_ptr);
-
-// Reallocates to |byte_length|. Extended bytes are undefined.
-HRX_API hrx_status_t hrx_host_allocator_realloc(hrx_host_allocator_t allocator,
-                                                size_t byte_length,
-                                                void** inout_ptr);
-
-// Duplicates a byte block.
-HRX_API hrx_status_t hrx_host_allocator_clone(hrx_host_allocator_t allocator,
-                                              const void* src,
-                                              size_t byte_length,
-                                              void** out_ptr);
-
-// Frees memory. NULL is a no-op.
-HRX_API void hrx_host_allocator_free(hrx_host_allocator_t allocator, void* ptr);
-
-// Allocates zeroed, aligned memory. The byte at |offset| within the
-// allocation will be aligned to at least |min_alignment|.
-HRX_API hrx_status_t hrx_host_allocator_malloc_aligned(
-    hrx_host_allocator_t allocator, size_t byte_length, size_t min_alignment,
-    size_t offset, void** out_ptr);
-
-// Reallocates aligned memory.
-HRX_API hrx_status_t hrx_host_allocator_realloc_aligned(
-    hrx_host_allocator_t allocator, size_t byte_length, size_t min_alignment,
-    size_t offset, void** inout_ptr);
-
-// Frees memory from hrx_host_allocator_malloc_aligned. NULL is a no-op.
-HRX_API void hrx_host_allocator_free_aligned(hrx_host_allocator_t allocator,
-                                             void* ptr);
-
-//===----------------------------------------------------------------------===//
 // Opaque handle types
 //===----------------------------------------------------------------------===//
 
-typedef struct hrx_device_s* hrx_device_t;
 typedef struct hrx_queue_s* hrx_queue_t;
 typedef struct hrx_allocator_s* hrx_allocator_t;
 typedef struct hrx_semaphore_s* hrx_semaphore_t;
@@ -172,23 +35,6 @@ typedef struct hrx_graph_node_s* hrx_graph_node_t;
 // All values match their IREE counterparts. Verified by static_assert
 // in the implementation. Bitfield types use typedef + #define.
 //===----------------------------------------------------------------------===//
-
-typedef enum hrx_accelerator_type_t {
-  HRX_ACCELERATOR_GPU = 0,
-  HRX_ACCELERATOR_CPU = 1,
-} hrx_accelerator_type_t;
-
-typedef enum hrx_device_property_t {
-  HRX_DEVICE_PROPERTY_NAME = 0,
-  HRX_DEVICE_PROPERTY_ARCHITECTURE,
-  HRX_DEVICE_PROPERTY_TOTAL_MEMORY,
-  HRX_DEVICE_PROPERTY_COMPUTE_UNITS,
-  HRX_DEVICE_PROPERTY_MAX_WORKGROUP_SIZE,
-  HRX_DEVICE_PROPERTY_WARP_SIZE,
-  HRX_DEVICE_PROPERTY_MAX_SHARED_MEMORY,
-  HRX_DEVICE_PROPERTY_CLOCK_RATE,
-  HRX_DEVICE_PROPERTY_PCI_BUS_ID,
-} hrx_device_property_t;
 
 // Memory type bitfield. Values match iree_hal_memory_type_t.
 typedef uint32_t hrx_memory_type_t;
@@ -260,24 +106,6 @@ typedef struct hrx_semaphore_list_t {
   size_t count;
 } hrx_semaphore_list_t;
 
-// Borrowed string storage valid only for the duration documented by the
-// containing API.
-typedef struct hrx_string_view_t {
-  // Borrowed string data; not necessarily NUL terminated.
-  const char* data;
-  // String length in bytes.
-  size_t size;
-} hrx_string_view_t;
-
-// Borrowed byte storage valid only for the duration documented by the
-// containing API.
-typedef struct hrx_const_byte_span_t {
-  // Borrowed byte data, or NULL when |data_length| is zero.
-  const void* data;
-  // Byte length of |data|.
-  size_t data_length;
-} hrx_const_byte_span_t;
-
 // Buffer parameters for allocator operations.
 typedef struct hrx_buffer_params_t {
   // Required memory properties used to select the allocation source.
@@ -301,179 +129,8 @@ typedef struct hrx_executable_export_info_t {
   uint32_t workgroup_size[3];
 } hrx_executable_export_info_t;
 
-//===----------------------------------------------------------------------===//
-// Device events
-//===----------------------------------------------------------------------===//
-
-#define HRX_DEVICE_EVENT_ABI_VERSION_0 0u
-#define HRX_DEVICE_ASAN_REPORT_ABI_VERSION_0 0u
-#define HRX_DEVICE_PRINTF_EVENT_ABI_VERSION_0 0u
-
-typedef uint32_t hrx_device_event_type_t;
-enum hrx_device_event_type_bits_t {
-  HRX_DEVICE_EVENT_TYPE_NONE = 0u,
-  HRX_DEVICE_EVENT_TYPE_DRIVER_FAILURE = 1u,
-  HRX_DEVICE_EVENT_TYPE_ASAN_REPORT = 2u,
-  HRX_DEVICE_EVENT_TYPE_UBSAN_REPORT = 3u,
-  HRX_DEVICE_EVENT_TYPE_PRINTF = 4u,
-  HRX_DEVICE_EVENT_TYPE_HOST_CALL = 5u,
-  HRX_DEVICE_EVENT_TYPE_USER = 0x8000u,
-};
-
-typedef uint32_t hrx_device_event_severity_t;
-enum hrx_device_event_severity_bits_t {
-  HRX_DEVICE_EVENT_SEVERITY_TRACE = 0u,
-  HRX_DEVICE_EVENT_SEVERITY_INFO = 1u,
-  HRX_DEVICE_EVENT_SEVERITY_WARNING = 2u,
-  HRX_DEVICE_EVENT_SEVERITY_ERROR = 3u,
-  HRX_DEVICE_EVENT_SEVERITY_FATAL = 4u,
-};
-
-typedef uint64_t hrx_device_event_flags_t;
-enum hrx_device_event_flag_bits_t {
-  HRX_DEVICE_EVENT_FLAG_NONE = 0u,
-};
-
-// Source attribution for a device event.
-typedef struct hrx_device_event_source_t {
-  // Stable device identifier string when available.
-  hrx_string_view_t device_id;
-  // Driver name such as "amd", "task", "vulkan", or "webgpu".
-  hrx_string_view_t driver_id;
-  // Physical device ordinal, or UINT32_MAX when not applicable.
-  uint32_t physical_device_ordinal;
-  // Queue ordinal, or UINT32_MAX when not applicable.
-  uint32_t queue_ordinal;
-  // Backend-assigned executable identifier, or 0 when not applicable.
-  uint64_t executable_id;
-  // Executable export ordinal, or UINT32_MAX when not applicable.
-  uint32_t export_ordinal;
-} hrx_device_event_source_t;
-
-// Device event envelope passed to hrx_device_event_sink_t callbacks.
-//
-// Events and referenced payload storage are borrowed and valid only for the
-// duration of the sink callback. Sinks retaining event data must copy it.
-typedef struct hrx_device_event_t {
-  // Size of this record in bytes.
-  uint32_t record_length;
-  // ABI version of this event envelope.
-  uint32_t abi_version;
-  // Concrete event family.
-  hrx_device_event_type_t type;
-  // Producer-assigned severity.
-  hrx_device_event_severity_t severity;
-  // Event-family flags.
-  hrx_device_event_flags_t flags;
-  // Monotonic producer sequence when available, or 0.
-  uint64_t sequence;
-  // Host timestamp in nanoseconds when available, or 0.
-  uint64_t host_time_ns;
-  // Source attribution for the event producer.
-  hrx_device_event_source_t source;
-  // Event-family payload selected by |type|.
-  hrx_const_byte_span_t payload;
-  // Optional backend-native payload for advanced tools.
-  hrx_const_byte_span_t implementation_payload;
-} hrx_device_event_t;
-
-// Device printf stream classification.
-typedef uint32_t hrx_device_printf_stream_t;
-enum hrx_device_printf_stream_bits_t {
-  HRX_DEVICE_PRINTF_STREAM_DEFAULT = 0u,
-  HRX_DEVICE_PRINTF_STREAM_STDOUT = 1u,
-  HRX_DEVICE_PRINTF_STREAM_STDERR = 2u,
-};
-
-typedef uint32_t hrx_device_printf_flags_t;
-enum hrx_device_printf_flag_bits_t {
-  HRX_DEVICE_PRINTF_FLAG_NONE = 0u,
-};
-
-// Device printf payload.
-typedef struct hrx_device_printf_event_t {
-  // Size of this record in bytes.
-  uint32_t record_length;
-  // ABI version of this printf payload.
-  uint32_t abi_version;
-  // Stream hint for the output.
-  hrx_device_printf_stream_t stream;
-  // Printf event flags.
-  hrx_device_printf_flags_t flags;
-  // Format string identifier, or 0 when |text| is already formatted.
-  uint64_t format_id;
-  // Borrowed already-formatted text when available.
-  hrx_string_view_t text;
-  // Borrowed encoded arguments when available.
-  hrx_const_byte_span_t arguments;
-} hrx_device_printf_event_t;
-
-typedef uint32_t hrx_device_asan_access_kind_t;
-enum hrx_device_asan_access_kind_bits_t {
-  HRX_DEVICE_ASAN_ACCESS_KIND_UNKNOWN = 0u,
-  HRX_DEVICE_ASAN_ACCESS_KIND_READ = 1u,
-  HRX_DEVICE_ASAN_ACCESS_KIND_WRITE = 2u,
-  HRX_DEVICE_ASAN_ACCESS_KIND_ATOMIC = 3u,
-};
-
-typedef uint32_t hrx_device_asan_report_flags_t;
-enum hrx_device_asan_report_flag_bits_t {
-  HRX_DEVICE_ASAN_REPORT_FLAG_NONE = 0u,
-};
-
-// Address-sanitizer report payload.
-typedef struct hrx_device_asan_report_t {
-  // Size of this record in bytes.
-  uint32_t record_length;
-  // ABI version of this report payload.
-  uint32_t abi_version;
-  // Instrumented access kind that triggered the report.
-  hrx_device_asan_access_kind_t access_kind;
-  // ASAN report flags.
-  hrx_device_asan_report_flags_t flags;
-  // Application address that failed the ASAN check.
-  uint64_t fault_address;
-  // Access size in bytes.
-  uint64_t access_length;
-  // Compiler-assigned instrumentation site identifier.
-  uint64_t site_id;
-  // Shadow address consulted by the check, or 0 when unavailable.
-  uint64_t shadow_address;
-  // Shadow value observed by the check, or 0 when unavailable.
-  uint64_t shadow_value;
-  // Workgroup id that produced the report.
-  uint32_t workgroup_id[3];
-  // Workitem id that produced the report.
-  uint32_t workitem_id[3];
-  // Device-visible dispatch packet pointer, or 0 when unavailable.
-  uint64_t source_dispatch_ptr;
-} hrx_device_asan_report_t;
-
-typedef void (*hrx_device_event_sink_fn_t)(void* user_data,
-                                           const hrx_device_event_t* event);
-
-// Value-type event sink copied into HRX devices at creation time.
-typedef struct hrx_device_event_sink_t {
-  // Callback receiving one complete event.
-  hrx_device_event_sink_fn_t fn;
-  // Opaque application-owned callback data.
-  void* user_data;
-} hrx_device_event_sink_t;
-
-static inline void hrx_device_event_sink_discard_callback(
-    void* user_data, const hrx_device_event_t* event) {
-  (void)user_data;
-  (void)event;
-}
-
-static inline hrx_device_event_sink_t hrx_device_event_sink_discard(void) {
-  hrx_device_event_sink_t sink;
-  sink.fn = hrx_device_event_sink_discard_callback;
-  sink.user_data = NULL;
-  return sink;
-}
-
-// Sets the process-wide sink used by subsequently created HRX devices.
+// Sets the sink used by the CPU/GPU initialization entry points below.
+// Explicit runtimes receive their sink through hrx_runtime_options_t.
 //
 // The sink must be set before any accelerator is initialized. Device-event
 // callbacks may run on driver-owned service, callback, or completion threads.
@@ -516,20 +173,6 @@ HRX_API hrx_status_t hrx_cpu_initialize(uint32_t flags);
 HRX_API hrx_status_t hrx_cpu_shutdown(void);
 HRX_API hrx_status_t hrx_cpu_device_count(int* count);
 HRX_API hrx_status_t hrx_cpu_device_get(int index, hrx_device_t* device);
-
-//===----------------------------------------------------------------------===//
-// Device operations (generic, works for any accelerator type)
-//===----------------------------------------------------------------------===//
-
-HRX_API hrx_status_t hrx_device_get_property(hrx_device_t device,
-                                             hrx_device_property_t prop,
-                                             void* value, size_t value_size);
-
-HRX_API hrx_status_t hrx_device_get_type(hrx_device_t device,
-                                         hrx_accelerator_type_t* type);
-
-HRX_API void hrx_device_retain(hrx_device_t device);
-HRX_API void hrx_device_release(hrx_device_t device);
 
 //===----------------------------------------------------------------------===//
 // Exact queues

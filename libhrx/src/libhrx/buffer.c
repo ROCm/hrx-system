@@ -6,7 +6,6 @@
 
 #include "buffer.h"
 
-#include <stdio.h>
 #include <string.h>
 
 #include "hrx_internal.h"
@@ -146,12 +145,7 @@ void hrx_buffer_release(hrx_buffer_t buffer) {
       iree_atomic_ref_count_dec(&buffer->ref_count) == 1;
   if (is_final_reference) {
     if (buffer->is_mapped) {
-      iree_status_t status = hrx_buffer_unmap_internal(buffer);
-      if (!iree_status_is_ok(status)) {
-        // Final release has no error channel. Report the terminal unmap error.
-        iree_status_fprint(stderr, status);
-        iree_status_free(status);
-      }
+      hrx_device_report_failure(device, hrx_buffer_unmap_internal(buffer));
     }
     iree_allocator_free(iree_allocator_system(), buffer);
   }

@@ -108,6 +108,10 @@ class hrx_ptr {
   T ptr_ = nullptr;
 };
 
+using runtime_ptr =
+    hrx_ptr<hrx_runtime_t, hrx_runtime_retain, hrx_runtime_release>;
+using device_group_ptr = hrx_ptr<hrx_device_group_t, hrx_device_group_retain,
+                                 hrx_device_group_release>;
 using device_ptr = hrx_ptr<hrx_device_t, hrx_device_retain, hrx_device_release>;
 using queue_ptr = hrx_ptr<hrx_queue_t, hrx_queue_retain, hrx_queue_release>;
 using allocator_ptr =

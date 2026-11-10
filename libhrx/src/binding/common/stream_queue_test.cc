@@ -90,6 +90,8 @@ class StreamValueWaitObserverTest : public ::testing::Test {
     primary_queue_ = iree_hal_device_queue(device_, /*family_ordinal=*/0,
                                            /*queue_ordinal=*/0);
     ASSERT_NE(nullptr, primary_queue_);
+    device_entry_.hrx_device = hrx_device;
+    context_.device_entry = &device_entry_;
     context_.device = device_;
     context_.host_allocator = iree_allocator_system();
     iree_hal_streaming_value_wait_lanes_initialize(&context_);
@@ -178,6 +180,8 @@ class StreamValueWaitObserverTest : public ::testing::Test {
         &condition, iree_infinite_timeout()));
   }
 
+  // Frontend device owner, borrowed by the context for runtime services.
+  iree_hal_streaming_device_t device_entry_ = {};
   iree_hal_streaming_context_t context_ = {};
   iree_hal_device_t* device_ = nullptr;
   iree_hal_queue_t* primary_queue_ = nullptr;

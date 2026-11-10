@@ -22,6 +22,8 @@ iree_package_boundary(
 iree_cc_library(
     name = "defines",
     hdrs = [
+        "include/hrx_base.h",
+        "include/hrx_device.h",
         "include/hrx_runtime.h",
         "include/hrx_runtime_cxx.h",
     ],

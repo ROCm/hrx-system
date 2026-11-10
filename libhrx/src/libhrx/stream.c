@@ -119,28 +119,7 @@ void hrx_stream_release(hrx_stream_t stream) {
           status, hrx_status_to_iree(hrx_semaphore_wait(
                       stream->semaphore, stream->timepoint, UINT64_MAX)));
     }
-    if (!iree_status_is_ok(status)) {
-      // Final release cannot return a failure. Preserve it through the
-      // application's configured device-event channel before dropping state.
-      iree_hal_device_event_sink_t sink;
-      if (!hrx_runtime_try_get_hal_device_event_sink(&sink)) {
-        sink = iree_hal_device_event_sink_discard();
-      }
-      const iree_hal_device_driver_failure_event_t payload = {
-          .record_length = sizeof(payload),
-          .abi_version = IREE_HAL_DEVICE_DRIVER_FAILURE_EVENT_ABI_VERSION_0,
-          .status_code = iree_status_code(status),
-          .message = iree_status_message(status),
-      };
-      iree_hal_device_event_t event = iree_hal_device_event_default();
-      event.type = IREE_HAL_DEVICE_EVENT_TYPE_DRIVER_FAILURE;
-      event.severity = IREE_HAL_DEVICE_EVENT_SEVERITY_ERROR;
-      event.source.device = hrx_device_hal(stream->queue->device);
-      event.source.device_id = iree_hal_device_id(event.source.device);
-      event.payload = iree_make_const_byte_span(&payload, sizeof(payload));
-      iree_hal_device_event_sink_publish(sink, &event);
-      iree_status_free(status);
-    }
+    hrx_device_report_failure(stream->queue->device, status);
     iree_hal_command_buffer_release(stream->pending_cb);
     hrx_queue_release(stream->queue);
     hrx_semaphore_release(stream->semaphore);

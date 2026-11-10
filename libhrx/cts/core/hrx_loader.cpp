@@ -114,6 +114,15 @@ void HrxLoader::load(const std::string& path) {
   LOAD_FULL(status_free_message, hrx_status_free_message);
   LOAD_FULL(status_ignore, hrx_status_ignore);
 
+  LOAD(runtime_create);
+  LOAD(runtime_retain);
+  LOAD(runtime_release);
+  LOAD(device_group_create);
+  LOAD(device_group_retain);
+  LOAD(device_group_release);
+  LOAD(device_group_device_count);
+  LOAD(device_group_get_device);
+
   LOAD(gpu_initialize);
   LOAD(gpu_shutdown);
   LOAD(gpu_device_count);
