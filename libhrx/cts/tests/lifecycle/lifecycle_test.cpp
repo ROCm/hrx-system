@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/internal/catch_test_failure_exception.hpp>
 
 #include "hrx_test_fixture.hpp"
 
@@ -58,4 +59,19 @@ TEST_CASE("Accelerator cleanup error reaches process exit", "[.cleanup]") {
     return hrx().make_status(HRX_STATUS_ABORTED,
                              "accelerator cleanup error witness");
   };
+}
+
+TEST_CASE("Assertion unwinding releases scoped resources", "[lifecycle]") {
+  bool released = false;
+  struct ScopedResource {
+    ~ScopedResource() { released = true; }
+    // Observable owner cleanup, required even when Catch exits an assertion.
+    bool& released;
+  };
+  try {
+    ScopedResource resource{released};
+    Catch::throw_test_failure_exception();
+  } catch (const Catch::TestFailureException&) {
+  }
+  REQUIRE(released);
 }
