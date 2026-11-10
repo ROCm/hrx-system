@@ -281,6 +281,15 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
           name && name->op() == cxx::TokenKind::T_LPAREN;
     }
     for (auto* parameter : function_->parameters()) {
+      const auto traits = unit_.typeTraits();
+      const auto* type = traits.remove_reference(parameter->type());
+      if (traits.is_reference(parameter->type()) && !traits.is_array(type) &&
+          !traits.is_volatile(type)) {
+        construction_.declare_parameter(
+            parameter,
+            types_.partition(types_.unqualified(type), function_->declaration())
+                .component_count);
+      }
       retain_automatic_destruction(parameter, function_->declaration());
     }
   }
@@ -298,6 +307,7 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
     retain_subobject_destructions();
   }
   retain_temporary_destructions();
+  construction_.finish_function();
 }
 
 const Destruction* ControlFlow::automatic_destruction(
@@ -359,8 +369,8 @@ bool ControlFlow::reference_written(cxx::Symbol* parameter) const {
   return written_references_.contains(parameter);
 }
 
-bool ControlFlow::argument_requires_storage(
-    const CallArgument& argument) const {
+bool ControlFlow::argument_requires_storage(const CallArgument& argument,
+                                            StorageDemand demand) const {
   if (argument.inherent_storage ||
       (argument.current_receiver && receiver_requires_storage_)) {
     return true;
@@ -379,8 +389,16 @@ bool ControlFlow::argument_requires_storage(
       return cxx::symbol_cast<cxx::FieldSymbol>(binding) ||
              storage_references_.contains(binding);
     }
-    return is_direct_subobject(binding) ? receiver_requires_storage_
-                                        : storage_backed(binding);
+    if (is_direct_subobject(binding)) {
+      return receiver_requires_storage_;
+    }
+    if (demand == StorageDemand::Identity && !addressed(binding)) {
+      auto* type = types_.unqualified_value(source_object_type(binding));
+      if (traits.is_scalar(type) || types_.native_vector(type)) {
+        return false;
+      }
+    }
+    return storage_backed(binding);
   };
   if (std::ranges::any_of(argument.identity_bindings, requires_storage)) {
     return true;
@@ -566,6 +584,13 @@ void ControlFlow::postVisit(cxx::AST* ast) {
         construction_.tracked(owner)) {
       if (auto destination = classify_destination(expression)) {
         destinations_.insert_or_assign(expression, *destination);
+        if (reference_member) {
+          // Evaluating a reference member consumes its stored binding, even
+          // when the following expression only writes through that reference.
+          construction_.read(destination->binding,
+                             destination->component_offset,
+                             destination->member->component_count);
+        }
       }
     }
     retain_temporary_destruction(expression);
@@ -609,11 +634,12 @@ void ControlFlow::postVisit(cxx::AST* ast) {
     }
   }
   if (!owners_.empty() && owners_.back() == ast) {
-    construction_.leave(ast, written(ast));
+    construction_.leave(ast);
     owners_.pop_back();
   }
   switch (ast->kind()) {
     case cxx::ASTKind::ReturnStatement:
+      construction_.return_from_function();
       construction_.end_path();
       break;
     case cxx::ASTKind::BreakStatement:
@@ -787,7 +813,7 @@ void ControlFlow::visit(cxx::CompoundStatementAST* ast) {
     auto outcomes = sequence_paths(clause.statements);
     clause.falls_through = outcomes & Fallthrough;
     facts.clause_paths.push_back(outcomes);
-    construction_.leave(owner, clause.writes);
+    construction_.leave(owner);
     owners_.pop_back();
     clause_owner_active = false;
   };
@@ -801,7 +827,7 @@ void ControlFlow::visit(cxx::CompoundStatementAST* ast) {
       if (starts_clause) {
         finish_clause();
         construction_.restore(
-            Construction::join(construction_.state(), incoming));
+            construction_.join(construction_.state(), incoming));
         facts.layout.clauses.push_back({});
       }
       active_switch_label_ = child;
@@ -859,7 +885,7 @@ void ControlFlow::visit(cxx::IfStatementAST* ast) {
     construction_.restore(std::move(incoming));
     accept(ast->elseStatement);
     construction_.restore(
-        Construction::join(std::move(then_state), construction_.state()));
+        construction_.join(std::move(then_state), construction_.state()));
   }
 }
 
@@ -890,11 +916,9 @@ void ControlFlow::visit(cxx::ForStatementAST* ast) {
   accept(ast->initializer);
   accept(ast->condition);
   auto condition_exit = construction_.state();
-  // Retain the frontend's lexical write order while keeping latch-only
-  // assignments out of both the first body entry and the zero-trip exit.
-  accept(ast->expression);
-  construction_.restore(condition_exit);
   accept(ast->statement);
+  construction_.reach_latch();
+  accept(ast->expression);
   construction_.finish_loop(std::move(condition_exit));
 }
 
@@ -906,7 +930,7 @@ void ControlFlow::visit(cxx::ConditionalExpressionAST* ast) {
   construction_.restore(std::move(incoming));
   accept(ast->iffalseExpression);
   construction_.restore(
-      Construction::join(std::move(then_state), construction_.state()));
+      construction_.join(std::move(then_state), construction_.state()));
 }
 
 void ControlFlow::visit(cxx::SwitchStatementAST* ast) {
@@ -932,7 +956,20 @@ void ControlFlow::visit(cxx::SwitchStatementAST* ast) {
 void ControlFlow::visit(cxx::AssignmentExpressionAST* ast) {
   const bool ordinary_call =
       ast->symbol && !types_.is_trivial_value_operation(ast->symbol);
-  cxx::ASTVisitor::visit(ast);
+  // Assignment evaluates its right operand before the destination, including
+  // overloaded operator syntax. Field initialization depends on that order.
+  accept(ast->rightExpression);
+  if (!ordinary_call) {
+    record_parameter_read(ast->rightExpression);
+  }
+  accept(ast->leftExpression);
+  if (!ordinary_call &&
+      (cxx::ast_cast<cxx::SubscriptExpressionAST>(ast->leftExpression) ||
+       (cxx::ast_cast<cxx::MemberExpressionAST>(ast->leftExpression) &&
+        cxx::ast_cast<cxx::MemberExpressionAST>(ast->leftExpression)
+                ->vectorComponentKind != cxx::VectorComponentKind::kNone))) {
+    record_parameter_read(ast->leftExpression);
+  }
   if (!ordinary_call) {
     if (!record(ast->leftExpression, WriteEffect::Callable)) {
       require_identity(ast->leftExpression);
@@ -954,7 +991,7 @@ void ControlFlow::visit(cxx::BinaryExpressionAST* ast) {
     auto skipped = construction_.state();
     accept(ast->rightExpression);
     construction_.restore(
-        Construction::join(std::move(skipped), construction_.state()));
+        construction_.join(std::move(skipped), construction_.state()));
   } else {
     cxx::ASTVisitor::visit(ast);
   }
@@ -964,8 +1001,13 @@ void ControlFlow::visit(cxx::BinaryExpressionAST* ast) {
 }
 
 void ControlFlow::visit(cxx::CompoundAssignmentExpressionAST* ast) {
-  cxx::ASTVisitor::visit(ast);
+  accept(ast->rightExpression);
+  accept(ast->targetExpression);
+  accept(ast->leftExpression);
+  accept(ast->adjustExpression);
   if (!ast->symbol) {
+    record_parameter_read(ast->targetExpression);
+    record_parameter_assignment(ast->targetExpression);
     if (!record(ast->targetExpression, WriteEffect::Callable)) {
       require_identity(ast->targetExpression);
     }
@@ -978,6 +1020,8 @@ void ControlFlow::visit(cxx::CompoundAssignmentExpressionAST* ast) {
 void ControlFlow::visit(cxx::PostIncrExpressionAST* ast) {
   cxx::ASTVisitor::visit(ast);
   if (!ast->symbol) {
+    record_parameter_read(ast->baseExpression);
+    record_parameter_assignment(ast->baseExpression);
     if (!record(ast->baseExpression, WriteEffect::Callable)) {
       require_identity(ast->baseExpression);
     }
@@ -998,6 +1042,8 @@ void ControlFlow::visit(cxx::UnaryExpressionAST* ast) {
   }
   if (ast->op == cxx::TokenKind::T_PLUS_PLUS ||
       ast->op == cxx::TokenKind::T_MINUS_MINUS) {
+    record_parameter_read(ast->expression);
+    record_parameter_assignment(ast->expression);
     if (!record(ast->expression, WriteEffect::Callable)) {
       require_identity(ast->expression);
     }
@@ -1009,6 +1055,10 @@ void ControlFlow::visit(cxx::ReturnStatementAST* ast) {
   auto* signature = function_
                         ? cxx::type_cast<cxx::FunctionType>(function_->type())
                         : nullptr;
+  if (signature && !unit_.typeTraits().is_reference(signature->returnType()) &&
+      ast->expression) {
+    record_parameter_read(ast->expression);
+  }
   if (!signature || !unit_.typeTraits().is_reference(signature->returnType()) ||
       !ast->expression) {
     return;
@@ -1342,6 +1392,9 @@ void ControlFlow::retain_reference_arguments(const DirectCall& call) {
   for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
     auto* argument = call.arguments[ordinal].source;
     auto* parameter_type = parameters[ordinal]->type();
+    if (!traits.is_reference(parameter_type) && argument) {
+      record_parameter_read(argument);
+    }
     if (!traits.is_reference(parameter_type) || !argument ||
         argument->valueCategory == cxx::ValueCategory::kPrValue) {
       continue;
@@ -1351,6 +1404,34 @@ void ControlFlow::retain_reference_arguments(const DirectCall& call) {
     } else {
       record(argument);
     }
+  }
+  construction_.call(calls_.size());
+}
+
+void ControlFlow::record_parameter_read(cxx::ExpressionAST* expression) {
+  if (!construction_.has_parameters()) {
+    return;
+  }
+  // Materializing a by-value parameter can retain a parenthesized source
+  // initializer beneath its frontend conversion (including semantic handles).
+  cxx::Initializer initializer(expression);
+  auto* value = initializer.singleExpression();
+  if (auto selected = value ? retain_destination(value) : std::nullopt) {
+    construction_.read(
+        selected->binding, selected->component_offset,
+        selected->member ? selected->member->component_count : SIZE_MAX);
+  }
+}
+
+void ControlFlow::record_parameter_assignment(cxx::ExpressionAST* expression) {
+  if (!construction_.has_parameters()) {
+    return;
+  }
+  if (auto selected =
+          retain_destination(unwrap_object_identity(unit_, expression))) {
+    construction_.assign(
+        selected->binding, selected->component_offset,
+        selected->member ? selected->member->component_count : SIZE_MAX);
   }
 }
 
@@ -2306,7 +2387,7 @@ CallPropagation ControlFlow::propagate_call(const DirectCall& call,
       continue;
     }
     const auto& argument = call.arguments[ordinal];
-    if (argument_requires_storage(argument)) {
+    if (argument_requires_storage(argument, StorageDemand::Identity)) {
       callee_changed =
           callee.require_reference_storage(parameter) || callee_changed;
     }
@@ -2425,6 +2506,112 @@ CallPropagation ControlFlow::propagate_call(const DirectCall& call,
   return {caller_changed, callee_changed};
 }
 
+void ControlFlow::bind_field_calls(
+    const std::unordered_map<cxx::FunctionSymbol*,
+                             std::unique_ptr<ControlFlow>>& functions) {
+  for (auto& invocation : construction_.calls()) {
+    const auto& call = calls_[invocation.source_index];
+    auto found = functions.find(call.function->canonical());
+    auto* callee = found == functions.end() ? nullptr : found->second.get();
+    auto bind = [&](const CallArgument& argument, const cxx::Type* type,
+                    const Construction::Parameter* parameter, bool writable) {
+      const size_t first = invocation.arguments.size();
+      visit_intervals(argument, {}, [&](ObjectInterval interval) {
+        if (!construction_.declared(interval.binding)) {
+          return;
+        }
+        const size_t total =
+            types_.partition(types_.unqualified_value(type), call.source)
+                .component_count;
+        const size_t count = interval.end == ObjectInterval::kWholeObjectEnd
+                                 ? total - interval.reference_offset
+                                 : interval.end - interval.begin;
+        invocation.arguments.push_back(
+            {interval.binding,
+             interval.begin,
+             {interval.reference_offset, interval.reference_offset + count},
+             parameter,
+             true,
+             writable});
+      });
+      // A selected reference may name several objects. A returned field is
+      // definite only for intervals with one source identity on every path.
+      for (size_t i = first; i < invocation.arguments.size(); ++i) {
+        for (size_t j = first; j < i; ++j) {
+          auto& left = invocation.arguments[i];
+          auto& right = invocation.arguments[j];
+          if (left.formal.begin < right.formal.end &&
+              right.formal.begin < left.formal.end &&
+              (left.binding != right.binding || left.offset != right.offset)) {
+            left.definite = right.definite = false;
+          }
+        }
+      }
+    };
+    auto parameters = call.function->parameters();
+    for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
+      auto* parameter = parameters[ordinal];
+      if (!unit_.typeTraits().is_reference(parameter->type())) {
+        continue;
+      }
+      bind(call.arguments[ordinal], parameter->type(),
+           callee ? callee->construction_.parameter(
+                        callee->function_->parameters()[ordinal])
+                  : nullptr,
+           !unit_.typeTraits().is_const(
+               unit_.typeTraits().remove_reference(parameter->type())));
+    }
+    if (call.receiver) {
+      bind(*call.receiver, implicit_object_type(unit_, call.function), nullptr,
+           types_.implicit_object_may_mutate(call.function, call.source));
+    }
+  }
+}
+
+bool ControlFlow::propagate_field_outputs() {
+  bool changed = construction_.propagate_outputs();
+  for (auto* parameter : function_->parameters()) {
+    auto* effects = construction_.parameter(parameter);
+    if (!effects || effects->mode != Construction::ParameterMode::Projected ||
+        effects->outputs.empty()) {
+      continue;
+    }
+    for (const auto& group :
+         types_.projections(types_.unqualified_value(parameter->type()),
+                            function_->declaration())) {
+      const ComponentRange range{
+          group.component_offset,
+          group.component_offset + group.partition->component_count};
+      if (effects->outputs.intersects(range)) {
+        changed = effects->outputs.add(range) || changed;
+      }
+    }
+  }
+  return changed;
+}
+
+bool ControlFlow::propagate_field_inputs() {
+  bool changed = construction_.propagate_inputs();
+  for (auto* parameter : function_->parameters()) {
+    auto* effects = construction_.parameter(parameter);
+    if (!effects || effects->mode != Construction::ParameterMode::Projected ||
+        effects->inputs.empty()) {
+      continue;
+    }
+    for (const auto& group :
+         types_.projections(types_.unqualified_value(parameter->type()),
+                            function_->declaration())) {
+      const ComponentRange range{
+          group.component_offset,
+          group.component_offset + group.partition->component_count};
+      if (effects->inputs.intersects(range)) {
+        changed = effects->inputs.add(range) || changed;
+      }
+    }
+  }
+  return changed;
+}
+
 void ControlFlow::finalize_callable_effects() {
   auto* record = function_
                      ? cxx::symbol_cast<cxx::ClassSymbol>(function_->parent())
@@ -2466,6 +2653,13 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
   }
   cxx::ASTVisitor::visit(ast);
   if (variable) {
+    if (!unit_.typeTraits().is_reference(variable->type()) &&
+        ast->initializer) {
+      cxx::Initializer initializer(ast->initializer);
+      if (auto* expression = initializer.singleExpression()) {
+        record_parameter_read(expression);
+      }
+    }
     if (unit_.typeTraits().is_reference(variable->type()) && ast->initializer) {
       cxx::Initializer source(ast->initializer);
       auto* referent = source.singleExpression();
@@ -2522,6 +2716,10 @@ void ControlFlow::visit(cxx::ImplicitCastExpressionAST* ast) {
     pointer_value_read_ = saved_read;
   } else {
     cxx::ASTVisitor::visit(ast);
+  }
+  if (!ast->conversionFunction &&
+      ast->castKind == cxx::ImplicitCastKind::kLValueToRValueConversion) {
+    record_parameter_read(ast->expression);
   }
   if (is_class_adjustment(ast)) {
     if (unit_.typeTraits().is_pointer(ast->type)) {
@@ -2884,6 +3082,12 @@ std::optional<Destination> ControlFlow::classify_destination(
   // Establish the automatic owner before requesting any SSA partition: a dot
   // member can also project a record reached through a pointer or subscript.
   auto target = classify_destination(member->baseExpression);
+  if (target && target->member && target->member->kind == ValueKind::Pointer) {
+    // A reference member's binding is part of the enclosing value, but the
+    // referenced object's fields are in separate storage. Flattening through
+    // that boundary would mistake its buffer identity for the first field.
+    return std::nullopt;
+  }
   if (target) {
     auto slice = types_.selection(field, member->subobjectPath, member);
     target->component_offset += slice.component_offset;

@@ -1,0 +1,260 @@
+// RUN: roundtrip
+// Private helpers transport only the initialized fields they actually use.
+struct Slice { float* data; unsigned length; };
+static unsigned length(const Slice&);
+static unsigned forwarded(const Slice& slice) { return length(slice); }
+static unsigned length(const Slice& slice) { return slice.length; }
+static void initialize(unsigned& output, unsigned input) { output = input; }
+unsigned partial_length(unsigned input, bool choose) {
+  Slice slice;
+  if (choose) initialize(slice.length, input);
+  else initialize(slice.length, input + 1);
+  return forwarded(slice);
+}
+// ----
+func.def public @partial_length(%input: i32, %choose: i1) -> (i32) {
+  %slice = scf.if %choose -> (i32) {
+    %4 = func.call pure @initialize(%input) : (i32) -> (i32)
+    scf.yield %4 : i32
+  } else {
+    %5 = scalar.constant 1 : i32
+    %6 = scalar.addi %input, %5 : i32
+    %7 = func.call pure @initialize(%6) : (i32) -> (i32)
+    scf.yield %7 : i32
+  }
+  %8 = func.call pure @forwarded(%slice) : (i32) -> (i32)
+  func.return %8 : i32
+}
+
+func.def @initialize(%input: i32) -> (i32) {
+  func.return %input : i32
+}
+
+func.def @forwarded(%slice_length: i32) -> (i32) {
+  %13 = func.call pure @length(%slice_length) : (i32) -> (i32)
+  func.return %13 : i32
+}
+
+func.def @length(%slice_length: i32) -> (i32) {
+  func.return %slice_length : i32
+}
+
+// ====
+// A pointer is one semantic group: its buffer identity and byte offset travel
+// together, without reading or returning the untouched length field.
+struct Slice { float* data; unsigned length; };
+static void advance(Slice& slice) { slice.data += 2; }
+float read_advanced(float* data) {
+  Slice slice;
+  slice.data = data;
+  advance(slice);
+  return *slice.data;
+}
+// ----
+func.def public @read_advanced(%data: buffer, %data_byte_offset: offset) -> (f32) {
+  %3, %4 = func.call pure @advance(%data, %data_byte_offset) : (buffer, offset) -> (buffer, offset)
+  %5 = buffer.view %3[%4] : buffer -> view<1xf32>
+  %6 = view.load %5[0] : view<1xf32> -> f32
+  func.return %6 : f32
+}
+
+func.def @advance(%slice_data: buffer, %slice_data_byte_offset: offset) -> (buffer, offset) {
+  %11 = scalar.constant 2 : i32
+  %12 = scalar.extsi %11 : i32 to i64
+  %13 = scalar.constant 4 : i64
+  %14 = scalar.muli %12, %13 : i64
+  %15 = index.cast %slice_data_byte_offset : offset to i64
+  %16 = scalar.addi %15, %14 : i64
+  %17 = scalar.assume %16 [range(%16, 0, 9223372036854775807)] : i64
+  %18 = index.cast %17 : i64 to offset
+  func.return %slice_data, %18 : buffer, offset
+}
+
+// ====
+// Recursive helper contracts converge across forward declarations. A path
+// without a write preserves the original value as an input.
+struct Pair { unsigned first; unsigned second; };
+static void odd(Pair&, unsigned);
+static void even(Pair& pair, unsigned count) {
+  if (count) odd(pair, count - 1);
+  else pair.first = 7;
+}
+static void odd(Pair& pair, unsigned count) {
+  if (count) even(pair, count - 1);
+}
+unsigned recursive(unsigned count) {
+  Pair pair;
+  pair.first = 3;
+  even(pair, count);
+  return pair.first;
+}
+// ----
+func.def public @recursive(%count: i32) -> (i32) {
+  %2 = index.constant 8 : offset
+  %pair_storage = buffer.alloca<private> align(4) %2 : buffer
+  %pair_storage_byte_offset = index.constant 0 : offset
+  %pair_view = buffer.view %pair_storage[%pair_storage_byte_offset] : buffer -> view<8xi8>
+  %6 = scalar.constant 3 : i32
+  %7 = index.constant 0 : offset
+  %8 = index.add %pair_storage_byte_offset, %7 : offset
+  %9 = index.assume %8 [range(%8, 0, 4)] : offset
+  %10 = buffer.view %pair_storage[%9] : buffer -> view<1xi32>
+  view.store %6, %10[0] : i32, view<1xi32>
+  func.call @even(%pair_storage, %pair_storage_byte_offset, %count) : (buffer, offset, i32)
+  %11 = index.constant 0 : offset
+  %12 = index.add %pair_storage_byte_offset, %11 : offset
+  %13 = index.assume %12 [range(%12, 0, 4)] : offset
+  %14 = buffer.view %pair_storage[%13] : buffer -> view<1xi32>
+  %first = view.load %14[0] : view<1xi32> -> i32
+  func.return %first : i32
+}
+
+func.def @even(%pair: buffer, %pair_byte_offset: offset, %count: i32) {
+  %19 = scalar.constant 0 : i32
+  %20 = scalar.cmpi ne, %count, %19 : i32
+  scf.if %20 {
+    %21 = scalar.constant 1 : i32
+    %22 = scalar.subi %count, %21 : i32
+    func.call @odd(%pair, %pair_byte_offset, %22) : (buffer, offset, i32)
+  } else {
+    %23 = scalar.constant 7 : i32
+    %24 = index.constant 0 : offset
+    %25 = index.add %pair_byte_offset, %24 : offset
+    %26 = buffer.view %pair[%25] : buffer -> view<1xi32>
+    view.store %23, %26[0] : i32, view<1xi32>
+  }
+  func.return
+}
+
+func.def @odd(%pair: buffer, %pair_byte_offset: offset, %count: i32) {
+  %30 = scalar.constant 0 : i32
+  %31 = scalar.cmpi ne, %count, %30 : i32
+  scf.if %31 {
+    %32 = scalar.constant 1 : i32
+    %33 = scalar.subi %count, %32 : i32
+    func.call @even(%pair, %pair_byte_offset, %33) : (buffer, offset, i32)
+  }
+  func.return
+}
+
+// ====
+// The assignment RHS reads length before the destination expression changes it.
+struct State { unsigned length; };
+static void store(unsigned* output, State& state) {
+  output[state.length = 1] = state.length;
+}
+unsigned ordered(unsigned* output, unsigned input) {
+  State state{input};
+  store(output, state);
+  return state.length;
+}
+// ----
+func.def public @ordered(%output: buffer, %output_byte_offset: offset, %input: i32) -> (i32) {
+  %state_length = func.call @store(%output, %output_byte_offset, %input) : (buffer, offset, i32) -> (i32)
+  func.return %state_length : i32
+}
+
+func.def @store(%output: buffer, %output_byte_offset: offset, %state_length$7: i32) -> (i32) {
+  %state_length$9 = scalar.constant 1 : i32
+  %10 = scalar.extui %state_length$9 : i32 to i64
+  %11 = scalar.constant 4 : i64
+  %12 = scalar.muli %10, %11 : i64
+  %13 = index.cast %output_byte_offset : offset to i64
+  %14 = scalar.addi %13, %12 : i64
+  %15 = scalar.assume %14 [range(%14, 0, 9223372036854775807)] : i64
+  %16 = index.cast %15 : i64 to offset
+  %17 = buffer.view %output[%16] : buffer -> view<1xi32>
+  view.store %state_length$7, %17[0] : i32, view<1xi32>
+  func.return %state_length$9 : i32
+}
+
+// ====
+// The loop body defines length before the increment expression consumes it.
+// A break skips that increment. A zero-trip loop still preserves its input.
+struct State { unsigned length; };
+static void run(State& state, unsigned count) {
+  for (unsigned index = 0; index < count; index += state.length) {
+    state.length = 1;
+    if (count == 9) break;
+  }
+}
+unsigned loop(unsigned count) {
+  State state{4};
+  run(state, count);
+  return state.length;
+}
+// ----
+func.def public @loop(%count: i32) -> (i32) {
+  %state_length$2 = scalar.constant 4 : i32
+  %state_length$3 = func.call pure @run(%state_length$2, %count) : (i32, i32) -> (i32)
+  func.return %state_length$3 : i32
+}
+
+func.def @run(%state_length$4: i32, %count: i32) -> (i32) {
+  %index$7 = scalar.constant 0 : i32
+  %8 = scalar.constant 1 : i1
+  %state_length$14, %index$15 = scf.while(%state_length$9 = %state_length$4 : i32, %index$10 = %index$7 : i32, %11 = %8 : i1) -> (i32, i32) {
+    %16, %state_length$17, %index$18 = scf.if %11 -> (i1, i32, i32) {
+      %19 = scalar.cmpi ult, %index$10, %count : i32
+      scf.yield %19, %state_length$9, %index$10 : i1, i32, i32
+    } else {
+      %20 = scalar.constant 0 : i1
+      scf.yield %20, %state_length$9, %index$10 : i1, i32, i32
+    }
+    scf.condition %16, %state_length$17, %index$18 : i1, i32, i32
+  } do(%state_length$12: i32, %index$13: i32) {
+    %state_length$21 = scalar.constant 1 : i32
+    %22 = scalar.constant 9 : i32
+    %23 = scalar.cmpi eq, %count, %22 : i32
+    %24, %25 = scf.if %23 -> (i1, i1) {
+      %26 = scalar.constant 0 : i1
+      scf.yield %26, %26 : i1, i1
+    } else {
+      %27 = scalar.constant 1 : i1
+      scf.yield %27, %27 : i1, i1
+    }
+    %state_length$28, %index$29 = scf.if %25 -> (i32, i32) {
+      %index = scalar.addi %index$13, %state_length$21 : i32
+      scf.yield %state_length$21, %index : i32, i32
+    } else {
+      scf.yield %state_length$21, %index$13 : i32, i32
+    }
+    scf.yield %state_length$28, %index$29, %25 : i32, i32, i1
+  }
+  func.return %state_length$14 : i32
+}
+
+// ====
+// A dynamic view remains a complete dependent group while the unrelated
+// pointer field stays uninitialized.
+#include <loomcxx/view.h>
+namespace loomt = loom::type;
+using Rows = loomt::view<loomt::shape<loomt::dynamic, 4>, const float, loomt::encoding<loom::encoding::role::layout, 2>>;
+struct Window { Rows rows; const float* unused; };
+static void trim(Window& window, unsigned remaining) {
+  window.rows = loom::view::subview(window.rows, {1, 0}, {remaining});
+}
+Rows cropped(Rows rows, unsigned remaining) {
+  Window window;
+  window.rows = rows;
+  trim(window, remaining);
+  return window.rows;
+}
+// ----
+func.def public @cropped(%rows_dim0: index, %rows_layout: encoding<layout>, %rows: view<[%rows_dim0]x4xf32, %rows_layout>, %remaining: i32) -> (%4: index, %5: encoding<layout>, view<[%4]x4xf32, %5>) {
+  %7, %8, %9 = func.call pure @trim(%rows_dim0, %rows_layout, %rows, %remaining) : (index, encoding<layout>, view<[%rows_dim0]x4xf32, %rows_layout>, i32) -> (index, encoding<layout>, view<[%7]x4xf32, %8>)
+  func.return %7, %8, %9 : index, encoding<layout>, view<[%7]x4xf32, %8>
+}
+
+func.def @trim(%window_rows_dim0: index, %window_rows_layout: encoding<layout>, %window_rows: view<[%window_rows_dim0]x4xf32, %window_rows_layout>, %remaining: i32) -> (%14: index, %15: encoding<layout>, view<[%14]x4xf32, %15>) {
+  %17 = scalar.constant 1 : i32
+  %18 = scalar.extsi %17 : i32 to i64
+  %19 = scalar.constant 0 : i32
+  %20 = scalar.extsi %19 : i32 to i64
+  %21 = scalar.extui %remaining : i32 to i64
+  %22 = index.cast %21 : i64 to index
+  %23 = index.cast %18 : i64 to index
+  %24 = index.cast %20 : i64 to index
+  %25 = view.subview %window_rows[%23, %24] : view<[%window_rows_dim0]x4xf32, %window_rows_layout> -> view<[%22]x4xf32, %window_rows_layout>
+  func.return %22, %window_rows_layout, %25 : index, encoding<layout>, view<[%22]x4xf32, %window_rows_layout>
+}

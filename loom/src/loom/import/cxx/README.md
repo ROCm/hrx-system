@@ -2328,6 +2328,37 @@ records remain partitioned SSA values. Aggregate copies preserve value semantics
 in either representation, and shared private-storage promotion can remove the
 allocation after inlining.
 
+### Private reference helpers
+
+Private helpers transport the fields they read and return the fields they
+update. Other fields can remain uninitialized, including fields whose values
+cannot be stored as raw bytes:
+
+```cpp
+struct Slice { float* data; unsigned length; };
+[[loom::noinline]] static void initialize(Slice& slice, unsigned length) {
+  slice.length = length;
+}
+[[loom::noinline]] static unsigned length(const Slice& slice) {
+  return slice.length;
+}
+unsigned measured(unsigned count) {
+  Slice slice;
+  initialize(slice, count);
+  return length(slice);
+}
+```
+
+The private `initialize` takes one `i32` and returns the initialized `i32`;
+`length` also takes and returns one `i32`. Neither reads `slice.data`, allocates
+storage for `slice`, or requires inlining. Forwarding calls and control-flow
+joins use the same field contracts. A conditional update takes the previous
+field value when an untaken path must preserve it. Pointer buffer/offset pairs
+and views with their dimensions and encodings remain complete value groups.
+Public signatures, source predicates, and reference-returning helpers preserve
+their complete source contracts. Observable addresses and overlapping
+arguments retain the shared storage needed to preserve object identity.
+
 ### Selected references
 
 A local reference can select an automatic object, a field, or a base subobject

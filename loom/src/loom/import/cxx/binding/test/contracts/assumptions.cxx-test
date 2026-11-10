@@ -349,3 +349,28 @@ func.def public @bounded_pair(%value$7: index, %limit$8: index) -> (index) {
   %value$10, %limit$11 = index.assume %value$7, %limit$8 [le(%value$7, %limit$8)] : index, index
   func.return %value$10 : index
 }
+
+// ====
+// Exported index facts can name constructed address values directly. Their
+// integer operands remain subject to the same side-effect-free admission.
+#include <loomcxx/index.h>
+#include <loomcxx/predicate.h>
+void constructed_addresses(unsigned count) {
+  loom::assume(loom::predicate::range(loom::type::offset{0}, 0, 0));
+  loom::assume(loom::predicate::range(loom::type::index(count), 0, 32));
+  loom::assume(loom::predicate::range(loom::type::offset{count}, 0, 32));
+}
+// ----
+func.def public @constructed_addresses(%count: i32) {
+  %1 = scalar.constant 0 : i32
+  %2 = scalar.extsi %1 : i32 to i64
+  %3 = index.cast %2 : i64 to offset
+  %4 = index.assume %3 [range(%3, 0, 0)] : offset
+  %5 = scalar.extui %count : i32 to i64
+  %6 = index.cast %5 : i64 to index
+  %7 = index.assume %6 [range(%6, 0, 32)] : index
+  %8 = scalar.extui %count : i32 to i64
+  %9 = index.cast %8 : i64 to offset
+  %10 = index.assume %9 [range(%9, 0, 32)] : offset
+  func.return
+}

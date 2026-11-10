@@ -50,15 +50,15 @@ unsigned snapshot(unsigned value) { return value << replace(value); }
 
 // ----
 func.def public @snapshot(%value$0: i32) -> (i32) {
-  %2, %value$3 = func.call pure @replace(%value$0) : (i32) -> (i32, i32)
+  %2, %value$3 = func.call pure @replace() : () -> (i32, i32)
   %4 = scalar.shli %value$0, %2 : i32
   func.return %4 : i32
 }
 
-func.def @replace(%value$5: i32) -> (i32, i32) {
-  %value$8 = scalar.constant 22 : i32
-  %9 = scalar.constant 0 : i32
-  func.return %9, %value$8 : i32, i32
+func.def @replace() -> (i32, i32) {
+  %value = scalar.constant 22 : i32
+  %8 = scalar.constant 0 : i32
+  func.return %8, %value : i32, i32
 }
 
 // ====
@@ -118,11 +118,11 @@ Entropy opaque_copy(Entropy value, Entropy replacement) {
 
 // ----
 func.def public @opaque_copy(%value$0: check.entropy, %replacement: check.entropy) -> (check.entropy) {
-  %value$3 = func.call pure @replace_entropy(%value$0, %replacement) : (check.entropy, check.entropy) -> (check.entropy)
+  %value$3 = func.call pure @replace_entropy(%replacement) : (check.entropy) -> (check.entropy)
   func.return %value$0 : check.entropy
 }
 
-func.def @replace_entropy(%value: check.entropy, %replacement: check.entropy) -> (check.entropy) {
+func.def @replace_entropy(%replacement: check.entropy) -> (check.entropy) {
   func.return %replacement : check.entropy
 }
 
@@ -142,10 +142,10 @@ Stream channel_copy(Stream stream, Stream replacement) {
 
 // ----
 func.def public @channel_copy(%stream$0: channel<tile<4xi32>>, %replacement: channel<tile<4xi32>>) -> (channel<tile<4xi32>>) {
-  %stream$3 = func.call pure @replace_stream(%stream$0, %replacement) : (channel<tile<4xi32>>, channel<tile<4xi32>>) -> (channel<tile<4xi32>>)
+  %stream$3 = func.call pure @replace_stream(%replacement) : (channel<tile<4xi32>>) -> (channel<tile<4xi32>>)
   func.return %stream$0 : channel<tile<4xi32>>
 }
 
-func.def @replace_stream(%stream: channel<tile<4xi32>>, %replacement: channel<tile<4xi32>>) -> (channel<tile<4xi32>>) {
+func.def @replace_stream(%replacement: channel<tile<4xi32>>) -> (channel<tile<4xi32>>) {
   func.return %replacement : channel<tile<4xi32>>
 }

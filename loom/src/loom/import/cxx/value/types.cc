@@ -411,7 +411,16 @@ std::span<const ValueProjection> Types::projections(const cxx::Type* input,
   if (admitted.kind == ValueKind::Record && admitted.component_count) {
     for (const auto& member :
          static_cast<const RecordPartition&>(admitted).members) {
-      append(member.type(), member.component_offset);
+      // Reference members retain their binding as a pointer group. The
+      // referent's value is not a subobject of this record's partition.
+      auto traits = unit_.typeTraits();
+      if (traits.is_reference(member.type())) {
+        result.push_back(
+            {traits.add_pointer(traits.remove_reference(member.type())),
+             member.partition, member.component_offset});
+      } else {
+        append(member.type(), member.component_offset);
+      }
     }
   } else if (admitted.kind == ValueKind::Array) {
     const auto& array = static_cast<const ArrayPartition&>(admitted);

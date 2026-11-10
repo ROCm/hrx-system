@@ -30,6 +30,7 @@
 #include "loom/import/cxx/binding/target_definitions.h"
 #include "loom/import/cxx/binding/template_definitions.h"
 #include "loom/import/cxx/control/analysis.h"
+#include "loom/import/cxx/control/call_fields.h"
 #include "loom/import/cxx/source/locations.h"
 #include "loom/import/cxx/symbol/names.h"
 #include "loom/import/cxx/value/signature.h"
@@ -88,6 +89,14 @@ enum class ReferenceABI {
   Storage,
 };
 
+// One callable's independently projected input and output source groups.
+struct ParameterProjection {
+  // Complete source groups required on entry, in source component order.
+  std::vector<ValueProjection> inputs;
+  // Complete source groups replaced on return, in source component order.
+  std::vector<ValueProjection> outputs;
+};
+
 // One source reference parameter projected through its selected ABI. Parameters
 // remain in source order and are indexed by semantic ordinal so redeclarations
 // need not share parameter symbol identities.
@@ -98,6 +107,8 @@ struct ReferenceParameter {
   ReferenceABI abi;
   // Whether a value ABI callee returns and the caller writes back the result.
   bool mutable_access;
+  // Sparse source contract, absent when the complete existing ABI is needed.
+  std::unique_ptr<const ParameterProjection> projection;
 };
 
 // Admitted definition ready for recursive body construction. The source owns
@@ -234,11 +245,6 @@ class Functions {
   loom_symbol_ref_t retain(FunctionInstance instance, cxx::AST* owner);
   void admit_reference_parameters(cxx::FunctionSymbol* symbol,
                                   cxx::AST* source);
-  struct AnalyzedCall {
-    ControlFlow* caller;
-    const DirectCall* call;
-    ControlFlow* callee;
-  };
   using AnalyzedFunction = std::pair<cxx::FunctionSymbol*, ControlFlow*>;
   void prepare_analysis(cxx::FunctionSymbol* symbol, Types& types,
                         std::vector<AnalyzedFunction>& functions,

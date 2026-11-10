@@ -45,7 +45,7 @@ func.def public @selected(%choose_left: i1, %choose_right: i1, %first$2: i32, %s
   } else {
     scf.yield %fourth$5, %third$4 : i32, i32
   }
-  %first$22, %third$23 = func.call pure @replace(%first$16, %third$20, %next) : (i32, i32, i32) -> (i32, i32)
+  %first$22, %third$23 = func.call pure @replace(%next) : (i32) -> (i32, i32)
   %24 = scalar.constant 0 : i32
   %25 = scalar.cmpi eq, %13, %24 : i32
   %third$26, %fourth$27 = scf.if %25 -> (i32, i32) {
@@ -66,10 +66,10 @@ func.def public @selected(%choose_left: i1, %choose_right: i1, %first$2: i32, %s
   func.return %34 : i32
 }
 
-func.def noinline @replace(%left: i32, %right$36: i32, %next: i32) -> (i32, i32) {
-  %40 = scalar.constant 1 : i32
-  %right$41 = scalar.addi %next, %40 : i32
-  func.return %next, %right$41 : i32, i32
+func.def noinline @replace(%next: i32) -> (i32, i32) {
+  %38 = scalar.constant 1 : i32
+  %right = scalar.addi %next, %38 : i32
+  func.return %next, %right : i32, i32
 }
 
 // ====

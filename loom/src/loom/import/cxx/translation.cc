@@ -1070,8 +1070,14 @@ class Translator final : private Initialization::Evaluation {
     auto parameters = current_function_.source->symbol->parameters();
     for (const auto& reference : current_function_.reference_parameters) {
       if (reference.abi == ReferenceABI::Value && reference.mutable_access) {
-        sources.push_back(
-            types_.unqualified_value(parameters[reference.ordinal]->type()));
+        if (reference.projection) {
+          for (const auto& group : reference.projection->outputs) {
+            sources.push_back(group.type);
+          }
+        } else {
+          sources.push_back(
+              types_.unqualified_value(parameters[reference.ordinal]->type()));
+        }
       }
     }
     return sources;
@@ -1087,7 +1093,20 @@ class Translator final : private Initialization::Evaluation {
     auto parameters = current_function_.source->symbol->parameters();
     for (const auto& reference : current_function_.reference_parameters) {
       if (reference.abi == ReferenceABI::Value && reference.mutable_access) {
-        values_.at(parameters[reference.ordinal]).append_to(returned.values);
+        if (reference.projection) {
+          for (const auto& group : reference.projection->outputs) {
+            auto value =
+                values_.project(parameters[reference.ordinal], *group.partition,
+                                group.component_offset, value_arena_);
+            if (!value) {
+              fail(returned.source,
+                   "output field is not initialized on this return path");
+            }
+            value->append_to(returned.values);
+          }
+        } else {
+          values_.at(parameters[reference.ordinal]).append_to(returned.values);
+        }
       }
     }
     return returned;
@@ -1268,6 +1287,29 @@ class Translator final : private Initialization::Evaluation {
                     unit_.typeTraits().remove_reference(parameter->type()))
               : types_.unqualified_value(parameter->type());
       const auto& partition = types_.partition(value_type, defined.source);
+      if (reference && reference->projection) {
+        values_.declare(parameter, partition);
+        for (const auto& group : reference->projection->inputs) {
+          auto value = region_value(region, argument_index, *group.partition);
+          auto parameter_name = cxx::to_string(parameter->name());
+          if (partition.kind == ValueKind::Record) {
+            const auto& record = static_cast<const RecordPartition&>(partition);
+            auto components = value.components();
+            for (size_t index = 0; index < components.size(); ++index) {
+              name(components[index],
+                   parameter_name + "_" +
+                       record.component_names[group.component_offset + index]);
+            }
+          } else {
+            name(value, parameter_name);
+          }
+          values_.replace(parameter, group.component_offset, value,
+                          value_arena_);
+        }
+        activate_automatic_destruction(parameter, defined.source);
+        ++parameter_index;
+        continue;
+      }
       bool kernel_pointer = defined.kind == FunctionKind::Kernel &&
                             partition.kind == ValueKind::Pointer;
       // Only pointers change representation at kernel entry: the ABI supplies
@@ -2846,6 +2888,10 @@ class Translator final : private Initialization::Evaluation {
     size_t argument_offset;
     // Exact evaluated temporary receiving this writeback, if nontrivial.
     std::optional<TemporaryReference> temporary;
+    // Sparse output groups, or null for whole-value writeback.
+    const ParameterProjection* projection = nullptr;
+    // Complete temporary payload retained when only some groups are returned.
+    std::optional<Value> source_value;
   };
 
   // One reference result proven to alias an already evaluated source argument.
@@ -2879,6 +2925,8 @@ class Translator final : private Initialization::Evaluation {
     const cxx::Type* writeback_type = nullptr;
     // Exact temporary construction evaluated for this argument.
     std::optional<TemporaryReference> temporary;
+    // Retained source input/output selection for this parameter.
+    const ParameterProjection* projection = nullptr;
   };
 
   EvaluatedCallArgument evaluate_call_argument(
@@ -2923,11 +2971,51 @@ class Translator final : private Initialization::Evaluation {
         .reference_partition = &expected_partition,
         .writeback_type = reference->mutable_access ? expected_type : nullptr,
         .temporary = temporary,
+        .projection = reference->projection.get(),
     };
+  }
+
+  Lvalue project_call_target(const Lvalue& target, const ValueProjection& group,
+                             cxx::AST* owner) {
+    const auto* object = std::get_if<ObjectLvalue>(&target.projection);
+    if (!object) {
+      return target;
+    }
+    if (auto* destination = std::get_if<Destination>(&object->location)) {
+      return {ObjectLvalue{
+          group.type,
+          Destination{destination->binding,
+                      destination->component_offset + group.component_offset,
+                      group.partition}}};
+    }
+    if (auto* receiver = std::get_if<CurrentReceiver>(&object->location)) {
+      const auto& members = receiver->record->members;
+      auto member = std::upper_bound(
+          members.begin(), members.end(), group.component_offset,
+          [](size_t offset, const SubobjectPartition& value) {
+            return offset < value.component_offset;
+          });
+      --member;
+      return {ObjectLvalue{group.type, Destination{member->source,
+                                                   group.component_offset -
+                                                       member->component_offset,
+                                                   group.partition}}};
+    }
+    if (group.component_offset == 0 &&
+        group.partition ==
+            &types_.partition(types_.unqualified_value(object->type), owner)) {
+      return target;
+    }
+    fail(owner,
+         "projected reference call requires a source value or complete scalar "
+         "storage");
   }
 
   void materialize_call_argument(EvaluatedCallArgument& argument,
                                  cxx::AST* owner) {
+    if (argument.projection) {
+      return;
+    }
     if (!argument.value) {
       argument.value = read(*argument.target, owner);
     }
@@ -2942,9 +3030,22 @@ class Translator final : private Initialization::Evaluation {
   void append_call_argument(EvaluatedCallArgument argument,
                             size_t receiver_argument_count,
                             std::vector<loom_value_id_t>& arguments,
-                            std::vector<ReferenceWriteback>& writebacks) {
+                            std::vector<ReferenceWriteback>& writebacks,
+                            cxx::AST* owner) {
     const size_t argument_offset = receiver_argument_count + arguments.size();
-    argument.value->append_to(arguments);
+    if (argument.projection) {
+      for (const auto& group : argument.projection->inputs) {
+        auto input =
+            argument.value
+                ? argument.value->project(*group.partition,
+                                          group.component_offset)
+                : read(project_call_target(*argument.target, group, owner),
+                       owner);
+        input.append_to(arguments);
+      }
+    } else {
+      argument.value->append_to(arguments);
+    }
     if (argument.writeback_type) {
       writebacks.push_back({
           .target = std::move(argument.target),
@@ -2952,6 +3053,8 @@ class Translator final : private Initialization::Evaluation {
           .value_type = argument.writeback_type,
           .argument_offset = argument_offset,
           .temporary = argument.temporary,
+          .projection = argument.projection,
+          .source_value = argument.value,
       });
     }
   }
@@ -3825,7 +3928,13 @@ class Translator final : private Initialization::Evaluation {
       }
     }
     for (const auto& writeback : writebacks) {
-      result_sources.push_back(writeback.value_type);
+      if (writeback.projection) {
+        for (const auto& group : writeback.projection->outputs) {
+          result_sources.push_back(group.type);
+        }
+      } else {
+        result_sources.push_back(writeback.value_type);
+      }
     }
     BoundSignature results;
     if (!result_sources.empty()) {
@@ -3854,6 +3963,27 @@ class Translator final : private Initialization::Evaluation {
       receiver_result = updated;
     }
     for (const auto& writeback : writebacks) {
+      if (writeback.projection) {
+        auto temporary_value = writeback.source_value;
+        for (const auto& group : writeback.projection->outputs) {
+          const size_t count = group.partition->component_count;
+          auto updated = value_arena_.capture(
+              *group.partition, {loom_op_results(op) + result_offset, count});
+          if (writeback.target) {
+            write(project_call_target(*writeback.target, group, call), updated,
+                  call);
+          } else {
+            temporary_value = value_arena_.replace(
+                *temporary_value, group.component_offset, updated);
+          }
+          result_offset += count;
+        }
+        if (!writeback.target) {
+          update_temporary(writeback.temporary, *temporary_value,
+                           writeback.value_type, call);
+        }
+        continue;
+      }
       const size_t component_count = writeback.partition->component_count;
       auto updated = value_arena_.capture(
           *writeback.partition,
@@ -4031,7 +4161,7 @@ class Translator final : private Initialization::Evaluation {
                                   evaluated.temporary};
       }
       append_call_argument(std::move(evaluated), receiver_argument_count,
-                           arguments, writebacks);
+                           arguments, writebacks, call);
     }
     arguments.insert(arguments.end(), variadic_arguments.begin(),
                      variadic_arguments.end());
@@ -4153,7 +4283,7 @@ class Translator final : private Initialization::Evaluation {
                                   receiver_argument_count + arguments.size()};
       }
       append_call_argument(std::move(evaluated), receiver_argument_count,
-                           arguments, writebacks);
+                           arguments, writebacks, expression);
     }
     return emit_evaluated_call(
         expression, function, callee, std::move(receiver), std::move(arguments),

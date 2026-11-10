@@ -14,12 +14,49 @@ package(
 )
 
 loom_cc_library(
+    name = "call_fields",
+    srcs = ["call_fields.cc"],
+    hdrs = ["call_fields.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        ":analysis",
+        "//loom/src/loom/analysis:scc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "components",
+    srcs = ["components.cc"],
+    hdrs = ["components.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+)
+
+loom_cc_library(
     name = "construction",
     srcs = ["construction.cc"],
     hdrs = ["construction.h"],
     cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
-    deps = ["//third_party:cxx_parser"],
+    deps = [
+        ":components",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_test(
+    name = "components_test",
+    srcs = ["components_test.cc"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        ":components",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )
 
 loom_cc_test(

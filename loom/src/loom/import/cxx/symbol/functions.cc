@@ -429,6 +429,31 @@ void Functions::analyze(Types& types) {
     }
     propagate_calls();
   }
+  for (const auto& [canonical, analysis] : analyzed_functions) {
+    auto* function = definition(canonical);
+    auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
+    const bool whole = exported_.contains(function) ||
+                       function_contracts_.has_predicates(function) ||
+                       template_definitions_.lookup(function) ||
+                       unit_.typeTraits().is_reference(signature->returnType());
+    for (auto* parameter : function->parameters()) {
+      if (!unit_.typeTraits().is_reference(parameter->type())) {
+        continue;
+      }
+      const bool storage =
+          analysis->reference_requires_storage(parameter) ||
+          unit_.typeTraits().is_volatile(
+              unit_.typeTraits().remove_reference(parameter->type())) ||
+          unit_.typeTraits().is_array(
+              unit_.typeTraits().remove_reference(parameter->type()));
+      analysis->configure_parameter(
+          parameter, storage ? Construction::ParameterMode::Storage
+                     : whole ? Construction::ParameterMode::Value
+                             : Construction::ParameterMode::Projected);
+    }
+  }
+  check(resolve_call_fields(control_flows_, analyzed_calls,
+                            module_->arena.block_pool));
   reference_parameters_.clear();
   for (const auto& [canonical, analysis] : analyzed_functions) {
     analysis->publish_pointer_reference_snapshots(types);
@@ -454,6 +479,36 @@ void Functions::analyze(Types& types) {
                ? ReferenceABI::Storage
                : ReferenceABI::Value,
            analysis->reference_written(parameter)});
+      auto& reference = references.back();
+      auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
+      if (reference.abi != ReferenceABI::Value ||
+          exported_.contains(function) ||
+          function_contracts_.has_predicates(function) ||
+          template_definitions_.lookup(function) ||
+          unit_.typeTraits().is_reference(signature->returnType())) {
+        continue;
+      }
+      const auto groups = types.projections(
+          types.unqualified_value(parameter->type()), function->declaration());
+      const bool complete = std::ranges::all_of(groups, [&](const auto& group) {
+        return analysis->parameter_input(parameter, group) &&
+               (!reference.mutable_access ||
+                analysis->parameter_output(parameter, group));
+      });
+      if (complete) {
+        continue;
+      }
+      auto projection = std::make_unique<ParameterProjection>();
+      for (const auto& group : groups) {
+        if (analysis->parameter_input(parameter, group)) {
+          projection->inputs.push_back(group);
+        }
+        if (reference.mutable_access &&
+            analysis->parameter_output(parameter, group)) {
+          projection->outputs.push_back(group);
+        }
+      }
+      reference.projection = std::move(projection);
     }
     if (!references.empty()) {
       reference_parameters_.emplace(canonical, std::move(references));
@@ -1356,8 +1411,15 @@ BoundSignature Functions::bind_callable_signature(
             ? unit_.typeTraits().add_pointer(
                   unit_.typeTraits().remove_reference(parameter->type()))
             : types.unqualified_value(parameter->type());
-    sources.push_back(value_type);
-    argument_count += types.partition(value_type, source).component_count;
+    if (is_reference && references[reference_index].projection) {
+      for (const auto& group : references[reference_index].projection->inputs) {
+        sources.push_back(group.type);
+        argument_count += group.partition->component_count;
+      }
+    } else {
+      sources.push_back(value_type);
+      argument_count += types.partition(value_type, source).component_count;
+    }
     reference_index += is_reference;
   }
   size_t ordinary_result_count = 0;
@@ -1378,8 +1440,14 @@ BoundSignature Functions::bind_callable_signature(
   }
   for (const auto& reference : references) {
     if (reference.abi == ReferenceABI::Value && reference.mutable_access) {
-      sources.push_back(
-          types.unqualified_value(parameters[reference.ordinal]->type()));
+      if (reference.projection) {
+        for (const auto& group : reference.projection->outputs) {
+          sources.push_back(group.type);
+        }
+      } else {
+        sources.push_back(
+            types.unqualified_value(parameters[reference.ordinal]->type()));
+      }
     }
   }
   const bool has_predicates = function_contracts_.has_predicates(symbol);

@@ -123,3 +123,112 @@ event 11
 event 22
 OK 0
 retired 0
+
+// ====
+// A forwarding call and both arms of the caller initialize only length. No
+// pointer value is invented for the untouched field.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Slice { unsigned* data; unsigned length; };
+[[loom::noinline]] static void initialize(unsigned& value, unsigned input) { value = input; }
+[[loom::noinline]] static unsigned length(const Slice& slice) { return slice.length; }
+[[loom::noinline]] static unsigned forwarded(const Slice& slice) { return length(slice); }
+[[loom::noinline]] static void conditional(Slice& slice, bool choose) {
+  if (choose) { slice.length = 19; return; }
+}
+void run() {
+  for (unsigned choice = 0; choice < 2; ++choice) {
+    Slice slice;
+    if (choice) initialize(slice.length, 11);
+    else initialize(slice.length, 13);
+    event(forwarded(slice));
+    conditional(slice, choice != 0);
+    event(forwarded(slice));
+  }
+  unsigned value;
+  initialize(value, 23);
+  event(value);
+}
+// ----
+event 13
+event 13
+event 11
+event 19
+event 23
+OK 0
+retired 0
+
+// ====
+// Every source read precedes or follows definitions according to C++ sequencing,
+// including assignment destinations, loop increments, and short-circuit paths.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct State { unsigned length; unsigned unused; };
+[[loom::noinline]] static void store(unsigned* output, State& state) {
+  output[state.length = 1] = state.length;
+}
+[[loom::noinline]] static unsigned define(State& state) { state.length = 3; return 1; }
+[[loom::noinline]] static void loop(State& state, unsigned count) {
+  for (unsigned index = 0; index < count; index += state.length) {
+    state.length = 1;
+    if (count == 9) break;
+  }
+}
+[[loom::noinline]] static void ordered(State& state, unsigned* output) {
+  store(output, state);
+  event(state.length);
+  event(state.length && define(state));
+  event(state.length);
+}
+void run() {
+  unsigned output[2]{0, 0};
+  State state;
+  state.length = 17;
+  ordered(state, output);
+  event(output[1]);
+  loop(state, 0);
+  event(state.length);
+  loop(state, 2);
+  event(state.length);
+  state.length = 5;
+  loop(state, 9);
+  event(state.length);
+}
+// ----
+event 1
+event 1
+event 3
+event 17
+event 3
+event 1
+event 1
+OK 0
+retired 0
+
+// ====
+// A sparse result updates the temporary's destructor payload and preserves the
+// fields which the helper never touched.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Owner {
+  unsigned value;
+  unsigned preserved;
+  ~Owner() { event(value); event(preserved); }
+};
+[[loom::noinline]] static void update(Owner&& owner) { owner.value = 29; }
+[[loom::noinline]] static void initialize(unsigned& updated, const unsigned& observed) {
+  updated = 31;
+  event(observed);
+}
+void run() {
+  update(Owner{7, 11});
+  event(101);
+  unsigned shared;
+  initialize(shared, shared);
+  event(shared);
+}
+// ----
+event 29
+event 11
+event 101
+event 31
+event 31
+OK 0
+retired 0
