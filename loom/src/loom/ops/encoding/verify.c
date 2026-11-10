@@ -14,6 +14,17 @@
 #include "loom/ops/encoding/roles.h"
 #include "loom/ops/encoding/storage.h"
 
+loom_trait_flags_t loom_encoding_constructor_effective_traits(
+    const loom_module_t* module, const loom_op_t* op) {
+  (void)module;
+  // These constructors carry all dynamic parameters as operands. With none,
+  // their attributes completely describe one independently owned literal.
+  const loom_trait_flags_t literal_traits =
+      LOOM_TRAIT_CONSTANT_LIKE | LOOM_TRAIT_SAFE_TO_SPECULATE;
+  const loom_trait_flags_t traits = op->traits & ~literal_traits;
+  return op->operand_count == 0 ? traits | literal_traits : traits;
+}
+
 static iree_status_t loom_encoding_emit(iree_diagnostic_emitter_t emitter,
                                         const loom_op_t* op,
                                         const loom_error_def_t* error,

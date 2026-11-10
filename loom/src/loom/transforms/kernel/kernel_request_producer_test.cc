@@ -16,6 +16,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/format/bytecode/writer.h"
 #include "loom/format/text/parser.h"
+#include "loom/format/text/printer.h"
 #include "loom/ir/context.h"
 #include "loom/link/module_index.h"
 #include "loom/ops/kernel/ops.h"
@@ -28,6 +29,19 @@ namespace loom {
 namespace {
 
 using ModulePtr = ::loom::testing::ModulePtr;
+
+static std::string PrintLiteral(const loom_module_t* module,
+                                const loom_op_t* op) {
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  IREE_CHECK_OK(loom_text_print_operation_to_builder(module, op, &builder,
+                                                     LOOM_TEXT_PRINT_DEFAULT));
+  std::string text(iree_string_builder_buffer(&builder),
+                   iree_string_builder_size(&builder));
+  iree_string_builder_deinitialize(&builder);
+  // The literal payload is independent of its module-local SSA result name.
+  return text.substr(text.find(" = ") + 3);
+}
 
 struct IndexDeleter {
   void operator()(loom_link_module_index_t* index) const {
@@ -821,6 +835,202 @@ TEST_P(KernelRequestProducerTest, StopsAfterSinkFailureBeforeMaterialization) {
   EXPECT_EQ(collection.class_count, 0u);
 
   iree_arena_deinitialize(&scratch_arena);
+}
+
+TEST_P(KernelRequestProducerTest, CapturesClosedEncodingConstructors) {
+  struct Case {
+    // Semantic role shared by the two literals.
+    const char* role;
+    // First authored constructor, repeated at the third launch.
+    const char* first;
+    // Second constructor, with a distinct payload unless equal to first.
+    const char* second;
+  };
+  const Case cases[] = {
+      {"layout", "encoding.layout.dense", "encoding.layout.dense"},
+      {"layout", "encoding.layout.strided []", "encoding.layout.strided []"},
+      {"layout", "encoding.layout.strided [8, 1]",
+       "encoding.layout.strided [9, 1]"},
+      {"layout", "encoding.define #encoding.layout.dense",
+       "encoding.define #encoding.layout.strided<strides=[8, 1]>"},
+      {"schema", "encoding.define #ggml.q4_0", "encoding.define #ggml.q8_0"},
+      {"schema",
+       "encoding.define #encoding.u4<payload_elements=32, payload_registers=4>",
+       "encoding.define #encoding.u4<payload_elements=64, "
+       "payload_registers=8>"},
+      {"storage",
+       "encoding.define #encoding.storage<layout=#encoding.layout.dense, "
+       "schema=#ggml.q4_0>",
+       "encoding.define #encoding.storage<layout=#encoding.layout.dense, "
+       "schema=#ggml.q8_0>"},
+      {"transform",
+       "encoding.define #transform.hadamard<normalization=orthonormal>",
+       "encoding.define #transform.hadamard<normalization=none>"},
+  };
+  for (const Case& test : cases) {
+    for (bool use_bytecode : {false, true}) {
+      SCOPED_TRACE(test.first);
+      SCOPED_TRACE(use_bytecode);
+      const std::string type = "encoding<" + std::string(test.role) + ">";
+      const std::string source =
+          "func.decl @observe(%value: " + type + ")\n" +
+          (GetParam()
+               ? "target.decl @device\npipeline.def<kernel> target(@device) "
+               : "pipeline.def<kernel> ") +
+          "@classified(%value: " + type +
+          ") run(%output: buffer) {\n"
+          "func.call @observe(%value) : (" +
+          type +
+          ")\npipeline.finish\n}\n"
+          "func.def @sites(%output: buffer) {\n%first = " +
+          test.first + " : " + type + "\n%second = " + test.second + " : " +
+          type + "\n%equal = " + test.first + " : " + type +
+          "\nfunc.return\n}\n";
+      auto source_module = ParseText(source);
+      ASSERT_NE(source_module, nullptr);
+      auto bytes = WriteModule(source_module.get());
+      auto index = CreateIndex();
+      const auto source_ordinal =
+          use_bytecode
+              ? AddBytecodeSource(index.get(), bytes, source_module.get())
+              : AddMaterializedSource(index.get(), source_module.get());
+      auto producer = CreateProducer(index.get());
+      iree_arena_allocator_t arena;
+      iree_arena_initialize(&block_pool_, &arena);
+      const auto function = loom_func_like_cast(
+          source_module.get(),
+          source_module->symbols
+              .entries[FindSymbol(source_module.get(), IREE_SV("sites"))]
+              .defining_op);
+      auto* block = loom_region_entry_block(loom_func_like_body(function));
+      loom_value_fact_table_t facts = {};
+      IREE_ASSERT_OK(loom_value_fact_table_initialize(&facts, &arena, 0));
+      IREE_ASSERT_OK(
+          loom_value_fact_table_compute(&facts, source_module.get(), function));
+      loom_value_id_t arguments[3][2] = {};
+      loom_kernel_class_site_t sites[3] = {};
+      std::string expected[2];
+      auto* literal = block->first_op;
+      for (unsigned i = 0; i < 3; ++i, literal = literal->next_op) {
+        arguments[i][0] = loom_op_results(literal)[0];
+        arguments[i][1] = block->arg_ids[0];
+        sites[i] = {.facts = &facts, .argument_values = arguments[i]};
+        if (i < 2) {
+          expected[i] = PrintLiteral(source_module.get(), literal);
+        }
+      }
+      RequestCapture capture = {.block_pool = &block_pool_};
+      const auto environment = MaterializationEnvironment();
+      const auto options = loom_kernel_class_collection_options_default();
+      loom_kernel_class_collection_t collection = {};
+      iree_status_t status = loom_kernel_request_producer_publish(
+          producer.get(), &environment, source_ordinal, source_module.get(),
+          sites, IREE_ARRAYSIZE(sites), &options,
+          {.publish = CaptureRequest, .user_data = &capture}, &arena,
+          &collection);
+      if (!iree_status_is_ok(status)) {
+        for (auto& request : capture.requests) {
+          loom_kernel_class_product_deinitialize(&request.product);
+        }
+        iree_arena_deinitialize(&arena);
+      }
+      IREE_ASSERT_OK(status);
+      const bool distinct = std::strcmp(test.first, test.second) != 0;
+      ASSERT_EQ(collection.class_count, distinct ? 2u : 1u);
+      EXPECT_EQ(collection.site_classes[0], collection.site_classes[2]);
+      const auto first_class = collection.site_classes[0];
+      producer.reset();
+      index.reset();
+      source_module.reset();
+      bytes.clear();
+      iree_arena_deinitialize(&arena);
+      ASSERT_EQ(capture.requests.size(), distinct ? 2u : 1u);
+      for (auto& request : capture.requests) {
+        Verify(request.product.module);
+        const auto product_function =
+            loom_func_like_cast(request.product.module,
+                                request.product.module->symbols
+                                    .entries[request.product.kernel.symbol_id]
+                                    .defining_op);
+        uint16_t argument_count = 0;
+        loom_func_like_arg_ids(product_function, &argument_count);
+        EXPECT_EQ(argument_count, 1u);
+        EXPECT_EQ(loom_func_like_specialization_count(product_function), 0);
+        const auto* bound =
+            loom_region_entry_block(loom_func_like_body(product_function))
+                ->first_op;
+        EXPECT_TRUE(iree_all_bits_set(
+            bound->traits,
+            LOOM_TRAIT_CONSTANT_LIKE | LOOM_TRAIT_SAFE_TO_SPECULATE));
+        EXPECT_EQ(PrintLiteral(request.product.module, bound),
+                  expected[request.class_ordinal == first_class ? 0 : 1]);
+        loom_kernel_class_product_deinitialize(&request.product);
+      }
+    }
+  }
+}
+
+TEST_P(KernelRequestProducerTest, RejectsDynamicEncodingCaptures) {
+  for (bool storage : {false, true}) {
+    const std::string type = storage ? "encoding<storage>" : "encoding<layout>";
+    const std::string constructor =
+        storage ? "encoding.define #encoding.storage {layout = %layout : "
+                  "encoding<layout>, schema = %schema : encoding<schema>}"
+                : "encoding.layout.strided [%stride, 1]";
+    const std::string source =
+        "func.decl @observe(%value: " + type + ")\n" +
+        (GetParam()
+             ? "target.decl @device\npipeline.def<kernel> target(@device) "
+             : "pipeline.def<kernel> ") +
+        "@classified(%value: " + type +
+        ") run(%output: buffer) {\n"
+        "func.call @observe(%value) : (" +
+        type +
+        ")\npipeline.finish\n}\n"
+        "func.def @sites(%stride: index, %layout: encoding<layout>, %schema: "
+        "encoding<schema>, %output: buffer) {\n"
+        "%value = " +
+        constructor + " : " + type + "\nfunc.return\n}\n";
+    auto source_module = ParseText(source);
+    ASSERT_NE(source_module, nullptr);
+    auto index = CreateIndex();
+    const auto source_ordinal =
+        AddMaterializedSource(index.get(), source_module.get());
+    auto producer = CreateProducer(index.get());
+    iree_arena_allocator_t arena;
+    iree_arena_initialize(&block_pool_, &arena);
+    const auto function = loom_func_like_cast(
+        source_module.get(),
+        source_module->symbols
+            .entries[FindSymbol(source_module.get(), IREE_SV("sites"))]
+            .defining_op);
+    auto* block = loom_region_entry_block(loom_func_like_body(function));
+    loom_value_fact_table_t facts = {};
+    IREE_ASSERT_OK(loom_value_fact_table_initialize(&facts, &arena, 0));
+    IREE_ASSERT_OK(
+        loom_value_fact_table_compute(&facts, source_module.get(), function));
+    const auto* literal = block->first_op;
+    EXPECT_FALSE(iree_any_bit_set(literal->traits, LOOM_TRAIT_CONSTANT_LIKE));
+    const loom_value_id_t arguments[] = {loom_op_const_results(literal)[0],
+                                         block->arg_ids[3]};
+    const loom_kernel_class_site_t site = {
+        .facts = &facts,
+        .argument_values = arguments,
+    };
+    const auto options = loom_kernel_class_collection_options_default();
+    const auto environment = MaterializationEnvironment();
+    RequestCapture capture = {.block_pool = &block_pool_};
+    loom_kernel_class_collection_t collection = {};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        loom_kernel_request_producer_publish(
+            producer.get(), &environment, source_ordinal, source_module.get(),
+            &site, 1, &options,
+            {.publish = CaptureRequest, .user_data = &capture}, &arena,
+            &collection));
+    EXPECT_TRUE(capture.requests.empty());
+    iree_arena_deinitialize(&arena);
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(TargetDeclaration, KernelRequestProducerTest,

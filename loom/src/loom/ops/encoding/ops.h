@@ -349,6 +349,8 @@ iree_status_t loom_encoding_layout_strided_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
+loom_trait_flags_t loom_encoding_constructor_effective_traits(
+    const loom_module_t* module, const loom_op_t* op);
 iree_status_t loom_encoding_layout_strided_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
@@ -373,6 +375,8 @@ iree_status_t loom_encoding_define_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
+loom_trait_flags_t loom_encoding_constructor_effective_traits(
+    const loom_module_t* module, const loom_op_t* op);
 iree_status_t loom_encoding_define_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
