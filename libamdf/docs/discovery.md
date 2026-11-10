@@ -117,6 +117,14 @@ qualifies the native interface and obtains actual memory limits before VM
 initialization. GPU address ranges and integrated-versus-discrete placement come
 from the native device query, without PCI or GFX memory tables.
 
+Linux enumeration omits endpoints whose device nodes deny read/write access
+to the process, including device-cgroup restrictions imposed by job schedulers
+and containers. The kernel permission query opens no execution file. KFD
+topology queries likewise omit cgroup-hidden GPUs and peer destinations; a
+hidden GPU never becomes a CPU memory route. Other native failures retain
+their diagnostics. Missing device nodes do not hide available sysfs metadata,
+and permissions can change after enumeration, so activation remains fallible.
+
 Windows opens KMT adapters for metadata queries. Those handles and the graphics
 kernel's process bookkeeping are distinct from the driver process context and
 GPU address domain acquired by device creation. GPU qualification uses a private

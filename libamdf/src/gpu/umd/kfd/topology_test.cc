@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sys/utsname.h>
 
 #include <cstdarg>
@@ -61,12 +62,40 @@ struct NativeDeviceInfo {
 
 thread_local NativeDeviceInfo* native_device_info = nullptr;
 
+struct AttributeReadFailure {
+  // Filesystem device containing the selected sysfs fixture attribute.
+  dev_t device = 0;
+  // Inode of the selected attribute, independent of its temporary descriptor.
+  ino_t inode = 0;
+  // Native read error returned for that attribute.
+  int error = 0;
+  // Reads of the selected attribute attempted by the production reader.
+  uint32_t attempts = 0;
+};
+
+thread_local AttributeReadFailure* attribute_read_failure = nullptr;
+
 }  // namespace
 
 extern "C" amdf_status_t __real_amdf_linux_endpoint_open_file(
     const amdf_platform_endpoint_t*, int*);
 extern "C" int __real_ioctl(int, unsigned long, ...);
 extern "C" int __real_uname(struct utsname*);
+extern "C" ssize_t __real_read(int, void*, size_t);
+
+extern "C" ssize_t __wrap_read(int descriptor, void* buffer, size_t length) {
+  if (attribute_read_failure != nullptr) {
+    struct stat info = {};
+    if (fstat(descriptor, &info) == 0 &&
+        info.st_dev == attribute_read_failure->device &&
+        info.st_ino == attribute_read_failure->inode) {
+      ++attribute_read_failure->attempts;
+      errno = attribute_read_failure->error;
+      return -1;
+    }
+  }
+  return __real_read(descriptor, buffer, length);
+}
 
 extern "C" int __wrap_uname(struct utsname* out_kernel) {
   if (native_device_info == nullptr) {
@@ -215,6 +244,7 @@ class KfdTopologyTest : public ::testing::Test {
 
   void TearDown() override {
     native_device_info = nullptr;
+    attribute_read_failure = nullptr;
     if (native_.descriptor >= 0) {
       EXPECT_EQ(fcntl(native_.descriptor, F_GETFD), -1);
       EXPECT_EQ(errno, EBADF);
@@ -257,6 +287,17 @@ class KfdTopologyTest : public ::testing::Test {
             optional_properties);
   }
 
+  void FailAttributeReads(const std::filesystem::path& path, int error) {
+    struct stat info = {};
+    ASSERT_EQ(stat(path.c_str(), &info), 0);
+    read_failure_ = {
+        .device = info.st_dev,
+        .inode = info.st_ino,
+        .error = error,
+    };
+    attribute_read_failure = &read_failure_;
+  }
+
   void WritePeer(uint32_t ordinal, uint32_t backing_node, uint32_t gpu_id,
                  uint32_t flags) {
     const auto nodes = directory_ / "class/kfd/kfd/topology/nodes";
@@ -293,6 +334,8 @@ class KfdTopologyTest : public ::testing::Test {
 
   // Read-only native query dependency; descriptor release remains real.
   NativeDeviceInfo native_;
+  // Optional failure injected at the native attribute-read dependency.
+  AttributeReadFailure read_failure_;
   // Temporary native metadata directory owned by this case.
   std::filesystem::path directory_;
   // Instance whose discovery root names only the test-owned directory.
@@ -743,6 +786,64 @@ TEST_F(KfdTopologyTest, KeepsOnlyAdmittedGpuBackingsInThePublishedDirection) {
   amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
 }
 
+TEST_F(KfdTopologyTest, DeviceCgroupDenialSkipsGpuBeforeSelectedEndpoint) {
+  WriteProperties("");
+  const auto nodes = directory_ / "class/kfd/kfd/topology/nodes";
+  std::filesystem::create_directories(nodes / "8");
+  // Choose the denied node in actual directory order. Populating files within
+  // these two directories leaves that order intact and tests scan continuation.
+  const auto denied = std::filesystem::directory_iterator(nodes)->path();
+  const auto allowed = nodes / (denied.filename() == "6" ? "8" : "6");
+  if (allowed.filename() != "6") {
+    std::filesystem::copy_file(nodes / "6/properties", allowed / "properties");
+  }
+  WriteAttribute(allowed / "gpu_id", "53458\n");
+  WriteAttribute(denied / "gpu_id", "12345\n");
+  FailAttributeReads(denied / "gpu_id", EPERM);
+  amdf_gpu_kfd_topology_t topology = {};
+  ASSERT_EQ(amdf_gpu_kfd_topology_initialize(
+                &endpoint_, amdf_allocator_system(), &topology),
+            AMDF_STATUS_OK);
+  EXPECT_GT(read_failure_.attempts, 0u);
+  EXPECT_EQ(topology.gpu_id, 53458u);
+  amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
+}
+
+TEST_F(KfdTopologyTest, DeviceCgroupDenialOmitsPeerBacking) {
+  WriteProperties("", 2);
+  WritePeer(0, 2, 12345, 1);
+  WritePeer(1, 8, 54321, 1);
+  FailAttributeReads(directory_ / "class/kfd/kfd/topology/nodes/2/gpu_id",
+                     EPERM);
+  amdf_gpu_kfd_topology_t topology = {};
+  ASSERT_EQ(amdf_gpu_kfd_topology_initialize(
+                &endpoint_, amdf_allocator_system(), &topology),
+            AMDF_STATUS_OK);
+  EXPECT_GT(read_failure_.attempts, 0u);
+  ASSERT_EQ(topology.memory_peers.count, 1u);
+  EXPECT_EQ(topology.memory_peers.gpu_ids[0], 54321u);
+  amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
+}
+
+TEST_F(KfdTopologyTest, DeniedEndpointAndNativeReadFailuresPreserveOutput) {
+  WriteProperties("");
+  for (const int error : {EPERM, EACCES, EIO}) {
+    SCOPED_TRACE(error);
+    FailAttributeReads(directory_ / "class/kfd/kfd/topology/nodes/6/gpu_id",
+                       error);
+    amdf_gpu_kfd_topology_t topology;
+    std::memset(&topology, 0xA5, sizeof(topology));
+    const auto original = topology;
+    EXPECT_EQ(amdf_gpu_kfd_topology_initialize(
+                  &endpoint_, amdf_allocator_system(), &topology),
+              error == EPERM
+                  ? amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)
+                  : amdf_linux_error(error));
+    EXPECT_GT(read_failure_.attempts, 0u);
+    EXPECT_EQ(std::memcmp(&topology, &original, sizeof(topology)), 0);
+  }
+}
+
 TEST_F(KfdTopologyTest, MalformedPeerRecordsNeverPublishPartialTopology) {
   WriteProperties("", 1);
   WritePeer(0, 2, 12345, 1);
@@ -989,6 +1090,28 @@ TEST_F(KfdTopologyTest, MissingCpuRouteDoesNotImplyAtomicSupport) {
               AMDF_STATUS_OK);
     EXPECT_FALSE(topology.host_atomics.supports_32);
     EXPECT_FALSE(topology.host_atomics.supports_64);
+    amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
+  }
+}
+
+TEST_F(KfdTopologyTest, DeviceCgroupDeniedGpuIsNotACpuRoute) {
+  // An enabled XGMI GPU edge cannot provide CPU atomics or cached VRAM, even
+  // when the destination's gpu_id is unreadable under the job's device cgroup.
+  WriteIoLink(0, 8, 42, 1, 11);
+  WriteIoLink(1, 0, 0, 1);
+  FailAttributeReads(directory_ / "class/kfd/kfd/topology/nodes/8/gpu_id",
+                     EPERM);
+  for (const bool cpu_route : {false, true}) {
+    SCOPED_TRACE(cpu_route);
+    WriteProperties(cpu_route ? "io_links_count 2\n" : "io_links_count 1\n");
+    amdf_gpu_kfd_topology_t topology = {};
+    ASSERT_EQ(amdf_gpu_kfd_topology_initialize(
+                  &endpoint_, amdf_allocator_system(), &topology),
+              AMDF_STATUS_OK);
+    EXPECT_GT(read_failure_.attempts, 0u);
+    EXPECT_EQ(topology.host_atomics.supports_32, cpu_route);
+    EXPECT_EQ(topology.host_atomics.supports_64, cpu_route);
+    EXPECT_FALSE(topology.vram.host_cached);
     amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
   }
 }

@@ -6,6 +6,7 @@
 
 #include <fcntl.h>
 #include <stdlib.h>
+#include <sys/syscall.h>
 
 #include <cstdarg>
 #include <cstring>
@@ -34,6 +35,20 @@ struct DeviceOpenState {
 // Borrowed only during the synchronous endpoint activation under test.
 DeviceOpenState* device_open = nullptr;
 
+struct DeviceAccessState {
+  // Synthetic device node whose native permission query is intercepted.
+  const char* path = nullptr;
+  // Interrupted attempts remaining before the terminal dependency result.
+  uint32_t interruptions = 0;
+  // Number of permission queries for this node.
+  uint32_t attempts = 0;
+  // Native permission-query error, or zero for allowed access.
+  int error = 0;
+};
+
+// Borrowed only during synchronous enumeration under test.
+DeviceAccessState* device_access = nullptr;
+
 // Sysfs is the dependency fixture; endpoint enumeration/open are the production
 // implementation. There is deliberately no corresponding execution device
 // node, so accidental native activation cannot satisfy these tests.
@@ -44,31 +59,37 @@ class LinuxEndpointMetadataTest
     std::string directory = ::testing::TempDir() + "/amdf-sysfs-XXXXXX";
     ASSERT_NE(mkdtemp(directory.data()), nullptr);
     directory_ = directory;
+    AddEndpoint(987654321, 63, "0000:00:00.0");
+    instance_.host_allocator = amdf_allocator_system();
+    instance_.sysfs_descriptor =
+        open(directory_.c_str(), O_PATH | O_DIRECTORY | O_CLOEXEC);
+    ASSERT_GE(instance_.sysfs_descriptor, 0);
+  }
+
+  void AddEndpoint(uint32_t ordinal, uint32_t minor, const char* pci_address) {
     const bool xdna = GetParam() == AMDF_ENGINE_KIND_XDNA;
     const std::string node_path =
-        xdna ? "class/accel/accel987654321" : "class/drm/renderD987654321";
+        std::string(xdna ? "class/accel/accel" : "class/drm/renderD") +
+        std::to_string(ordinal);
     const auto node = directory_ / node_path;
-    const auto device = directory_ / "devices/0000:00:00.0";
+    const auto device = directory_ / "devices" / pci_address;
     std::filesystem::create_directories(node);
     std::filesystem::create_directories(device);
     std::filesystem::create_directories(directory_ / "dev/char");
-    std::filesystem::create_directory_symlink("../../../devices/0000:00:00.0",
-                                              node / "device");
+    std::filesystem::create_directory_symlink(
+        std::string("../../../devices/") + pci_address, node / "device");
     std::filesystem::create_directory_symlink(
         xdna ? "../../bus/pci/drivers/amdxdna" : "../../bus/pci/drivers/amdgpu",
         device / "driver");
-    std::filesystem::create_directory_symlink("../../" + node_path,
-                                              directory_ / "dev/char/511:63");
-    WriteAttribute(node / "dev", "511:63\n");
+    std::filesystem::create_directory_symlink(
+        "../../" + node_path,
+        directory_ / "dev/char" / ("511:" + std::to_string(minor)));
+    WriteAttribute(node / "dev", "511:" + std::to_string(minor) + "\n");
     WriteAttribute(device / "vendor", xdna ? "0x1022\n" : "0x1002\n");
     WriteAttribute(device / "device", "0xffff\n");
     WriteAttribute(device / "subsystem_vendor", "0x1022\n");
     WriteAttribute(device / "subsystem_device", "0xffff\n");
     WriteAttribute(device / "revision", "0x01\n");
-    instance_.host_allocator = amdf_allocator_system();
-    instance_.sysfs_descriptor =
-        open(directory_.c_str(), O_PATH | O_DIRECTORY | O_CLOEXEC);
-    ASSERT_GE(instance_.sysfs_descriptor, 0);
   }
 
   void TearDown() override {
@@ -82,7 +103,8 @@ class LinuxEndpointMetadataTest
     }
   }
 
-  void WriteAttribute(const std::filesystem::path& path, const char* value) {
+  void WriteAttribute(const std::filesystem::path& path,
+                      const std::string& value) {
     std::ofstream stream(path);
     stream << value;
     stream.close();
@@ -152,6 +174,78 @@ TEST_P(LinuxEndpointMetadataTest, StaleIdentityDoesNotPublishMetadata) {
       amdf_make_api_status(AMDF_STATUS_CODE_NOT_FOUND));
   EXPECT_EQ(endpoint_, nullptr);
   EXPECT_EQ(std::memcmp(&info, &original, sizeof(info)), 0);
+}
+
+TEST_P(LinuxEndpointMetadataTest, CountsOnlyAccessibleEndpointsWithoutOpening) {
+  AddEndpoint(987654322, 64, "0000:00:00.1");
+  AddEndpoint(987654323, 65, "0000:00:00.2");
+  const char* path = GetParam() == AMDF_ENGINE_KIND_XDNA
+                         ? "/dev/accel/accel987654321"
+                         : "/dev/dri/renderD987654321";
+  for (const int error : {EPERM, EACCES}) {
+    SCOPED_TRACE(error);
+    DeviceAccessState access = {.path = path, .error = error};
+    DeviceOpenState opened = {.path = path, .error = error};
+    device_access = &access;
+    device_open = &opened;
+    uint32_t count = 0;
+    const auto count_status =
+        amdf_platform_endpoint_enumerate(&instance_, 0, nullptr, &count);
+    amdf_endpoint_summary_t summaries[2] = {};
+    uint32_t short_count = 0;
+    const auto short_status = amdf_platform_endpoint_enumerate(
+        &instance_, 1, summaries, &short_count);
+    uint32_t full_count = 0;
+    const auto full_status =
+        amdf_platform_endpoint_enumerate(&instance_, 2, summaries, &full_count);
+    device_access = nullptr;
+    device_open = nullptr;
+    EXPECT_EQ(count_status, AMDF_STATUS_OK);
+    EXPECT_EQ(count, 2u);
+    EXPECT_EQ(short_status,
+              amdf_make_api_status(AMDF_STATUS_CODE_BUFFER_TOO_SMALL));
+    EXPECT_EQ(short_count, 2u);
+    ASSERT_EQ(full_status, AMDF_STATUS_OK);
+    ASSERT_EQ(full_count, 2u);
+    EXPECT_NE(summaries[0].id.words[0], summaries[1].id.words[0]);
+    for (const auto& summary : summaries) {
+      EXPECT_NE(static_cast<uint32_t>(summary.id.words[0]), 63u);
+      EXPECT_EQ(summary.engine_kind, GetParam());
+    }
+    EXPECT_GT(access.attempts, 0u);
+    EXPECT_EQ(opened.attempts, 0u);
+  }
+}
+
+TEST_P(LinuxEndpointMetadataTest,
+       PermissionQueriesDistinguishDenialFromErrors) {
+  const char* path = GetParam() == AMDF_ENGINE_KIND_XDNA
+                         ? "/dev/accel/accel987654321"
+                         : "/dev/dri/renderD987654321";
+  for (const int error : {0, EPERM, EACCES, ENOENT, EIO}) {
+    SCOPED_TRACE(error);
+    DeviceAccessState access = {
+        .path = path,
+        .interruptions = 1,
+        .error = error,
+    };
+    device_access = &access;
+    amdf_endpoint_summary_t summary;
+    std::memset(&summary, 0xA5, sizeof(summary));
+    const auto original = summary;
+    uint32_t count = UINT32_MAX;
+    const auto status =
+        amdf_platform_endpoint_enumerate(&instance_, 1, &summary, &count);
+    device_access = nullptr;
+    ASSERT_EQ(status, AMDF_STATUS_OK);
+    const bool denied = error == EPERM || error == EACCES;
+    EXPECT_EQ(count, denied ? 0u : 1u);
+    if (denied) {
+      EXPECT_EQ(std::memcmp(&summary, &original, sizeof(summary)), 0);
+    }
+    EXPECT_EQ(access.interruptions, 0u);
+    EXPECT_GT(access.attempts, 1u);
+  }
 }
 
 TEST_P(LinuxEndpointMetadataTest, InterruptedOpenPreservesTerminalFailure) {
@@ -317,6 +411,38 @@ INSTANTIATE_TEST_SUITE_P(EngineKinds, LinuxEndpointMetadataTest,
 }  // namespace
 
 extern "C" int __real_open(const char* path, int flags, ...);
+extern "C" long __real_syscall(long number, ...);
+
+extern "C" long __wrap_syscall(long number, ...) {
+  // Only this native syscall is used by endpoint enumeration. Do not forward
+  // an unknown variadic signature by guessing its argument count or types.
+  if (number != SYS_faccessat2) {
+    ADD_FAILURE() << "unexpected syscall " << number;
+    errno = ENOSYS;
+    return -1;
+  }
+  va_list arguments;
+  va_start(arguments, number);
+  const int directory = va_arg(arguments, int);
+  const char* path = va_arg(arguments, const char*);
+  const int mode = va_arg(arguments, int);
+  const int flags = va_arg(arguments, int);
+  va_end(arguments);
+  if (device_access && std::strcmp(path, device_access->path) == 0) {
+    EXPECT_EQ(directory, AT_FDCWD);
+    EXPECT_EQ(mode, R_OK | W_OK);
+    EXPECT_EQ(flags, AT_EACCESS);
+    ++device_access->attempts;
+    if (device_access->interruptions != 0) {
+      --device_access->interruptions;
+      errno = EINTR;
+      return -1;
+    }
+    errno = device_access->error;
+    return device_access->error ? -1 : 0;
+  }
+  return __real_syscall(number, directory, path, mode, flags);
+}
 
 extern "C" int __wrap_open(const char* path, int flags, ...) {
   if (device_open && std::strcmp(path, device_open->path) == 0) {
