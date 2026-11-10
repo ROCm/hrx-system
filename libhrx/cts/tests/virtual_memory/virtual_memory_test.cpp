@@ -321,8 +321,11 @@ TEST_CASE_METHOD(HrxTestFixture,
   }
   REQUIRE_OK(hrx().semaphore_create(device_, 0, &resources.completion));
   hrx_memory_scope_t device_scope;
-  REQUIRE_OK(hrx().device_query_memory_scope(
-      device_, 0, HRX_MEMORY_SITE_PROGRAM, &device_scope));
+  const hrx_queue_t dispatch_queue =
+      FindProvisionedQueue(device_, HRX_QUEUE_ROLE_DISPATCH);
+  REQUIRE_OK(hrx().device_query_queue_family_memory_scope(
+      device_, hrx().queue_get_family_ordinal(dispatch_queue),
+      HRX_MEMORY_SITE_PROGRAM, &device_scope));
   std::array<hrx_memory_mapping_t, 3> mappings;
   for (size_t i = 0; i < mappings.size(); ++i) {
     mappings[i] = {

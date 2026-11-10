@@ -26,6 +26,25 @@ class CpuVirtualBufferTest : public ::testing::Test {
   hrx_device_t device_ = nullptr;
 };
 
+TEST_F(CpuVirtualBufferTest, MemoryScopeRequiresAnExplicitValidSite) {
+  hrx_memory_scope_t scope;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      hrx_status_to_iree(hrx_device_query_queue_family_memory_scope(
+          device_, UINT32_MAX, HRX_MEMORY_SITE_PROGRAM, &scope)));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      hrx_status_to_iree(hrx_device_query_queue_family_memory_scope(
+          device_, 0, HRX_MEMORY_SITE_HOST, &scope)));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      hrx_status_to_iree(hrx_device_query_queue_family_memory_scope(
+          device_, 0, static_cast<hrx_memory_site_t>(UINT32_MAX), &scope)));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      hrx_status_to_iree(hrx_device_query_host_memory_scope(nullptr, &scope)));
+}
+
 TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
   // Exercise inline and overflow translation through the same native lifecycle.
   for (size_t count : {2, 9}) {
@@ -154,12 +173,14 @@ TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
     EXPECT_EQ(pattern, result);
 
     hrx_memory_scope_t queue_scope, program_scope, host_scope;
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_device_query_memory_scope(
-        device_, 0, HRX_MEMORY_SITE_QUEUE, &queue_scope)));
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_device_query_memory_scope(
-        device_, 0, HRX_MEMORY_SITE_PROGRAM, &program_scope)));
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_device_query_memory_scope(
-        device_, 0, HRX_MEMORY_SITE_HOST, &host_scope)));
+    IREE_ASSERT_OK(
+        hrx_status_to_iree(hrx_device_query_queue_family_memory_scope(
+            device_, 0, HRX_MEMORY_SITE_QUEUE, &queue_scope)));
+    IREE_ASSERT_OK(
+        hrx_status_to_iree(hrx_device_query_queue_family_memory_scope(
+            device_, 0, HRX_MEMORY_SITE_PROGRAM, &program_scope)));
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_device_query_host_memory_scope(device_, &host_scope)));
     uint32_t queue_projection, program_projection, host_projection;
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_virtual_buffer_resolve_projection(
         reservations.front(), queue_scope, &queue_projection)));

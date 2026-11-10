@@ -616,22 +616,45 @@ static hipError_t iree_hip_vmm_query_granularity(hrx_device_t device,
   return supported && *out_minimum != 0 ? hipSuccess : hipErrorNotSupported;
 }
 
-static hipError_t iree_hip_vmm_select_mapping_queue(hrx_device_t device,
-                                                    hrx_queue_t* out_queue) {
-  *out_queue = NULL;
+// HIP chooses one provisioned family for each compatibility operation. HRX
+// memory-scope queries consume that exact family instead of selecting one.
+static hipError_t iree_hip_vmm_select_queue_family(
+    hrx_device_t device, hrx_queue_role_flags_t roles,
+    uint32_t* out_family_ordinal) {
+  *out_family_ordinal = UINT32_MAX;
   hipError_t result = hipSuccess;
-  for (uint32_t i = 0; i < hrx_device_queue_family_count(device) &&
-                       result == hipSuccess && !*out_queue;
+  for (uint32_t i = 0;
+       i < hrx_device_queue_family_count(device) && result == hipSuccess &&
+       *out_family_ordinal == UINT32_MAX;
        ++i) {
     hrx_queue_family_info_t info;
     result = iree_hip_vmm_from_hrx_status(
         hrx_device_query_queue_family(device, i, &info));
     if (result == hipSuccess && info.provisioned_queue_count &&
-        (info.roles & HRX_QUEUE_ROLE_TRANSFER)) {
-      *out_queue = hrx_device_get_queue(device, i, 0);
+        (info.roles & roles) == roles) {
+      *out_family_ordinal = i;
     }
   }
-  return result == hipSuccess && !*out_queue ? hipErrorNotSupported : result;
+  return result == hipSuccess && *out_family_ordinal == UINT32_MAX
+             ? hipErrorNotSupported
+             : result;
+}
+
+static hipError_t iree_hip_vmm_query_memory_scope(
+    hrx_device_t device, bool host, hrx_memory_scope_t* out_scope) {
+  if (host) {
+    return iree_hip_vmm_from_hrx_status(
+        hrx_device_query_host_memory_scope(device, out_scope));
+  }
+  uint32_t family_ordinal = 0;
+  hipError_t result = iree_hip_vmm_select_queue_family(
+      device, HRX_QUEUE_ROLE_DISPATCH, &family_ordinal);
+  if (result == hipSuccess) {
+    result =
+        iree_hip_vmm_from_hrx_status(hrx_device_query_queue_family_memory_scope(
+            device, family_ordinal, HRX_MEMORY_SITE_PROGRAM, out_scope));
+  }
+  return result;
 }
 
 static hipError_t iree_hip_vmm_update_mappings(
@@ -1062,8 +1085,8 @@ hipError_t iree_hip_vmm_address_reserve(void** ptr, size_t size,
           scope, accepted_sources, &options, &virtual_buffer));
     }
   } else {
-    result = iree_hip_vmm_from_hrx_status(hrx_allocator_virtual_memory_reserve(
-        allocator, /*affinity=*/0, size, &virtual_buffer));
+    result = iree_hip_vmm_from_hrx_status(
+        hrx_allocator_virtual_memory_reserve(allocator, size, &virtual_buffer));
   }
   if (result != hipSuccess) {
     return result;
@@ -1113,9 +1136,12 @@ hipError_t iree_hip_vmm_address_reserve(void** ptr, size_t size,
     reservation->granularity = granularity;
     reservation->device_ordinal = device_ordinal;
     if (modern) {
-      result = iree_hip_vmm_select_mapping_queue(device,
-                                                 &reservation->mapping_queue);
+      uint32_t family_ordinal = 0;
+      result = iree_hip_vmm_select_queue_family(device, HRX_QUEUE_ROLE_TRANSFER,
+                                                &family_ordinal);
       if (result == hipSuccess) {
+        reservation->mapping_queue =
+            hrx_device_get_queue(device, family_ordinal, 0);
         result = iree_hip_vmm_from_hrx_status(
             hrx_semaphore_create(device, 0, &reservation->mapping_completion));
       }
@@ -1531,9 +1557,7 @@ static hipError_t iree_hip_vmm_remove_mappings(
     hrx_memory_scope_t scope = {0};
     uint32_t projection = 0;
     if (result == hipSuccess) {
-      result = iree_hip_vmm_from_hrx_status(hrx_device_query_memory_scope(
-          device, 0, host ? HRX_MEMORY_SITE_HOST : HRX_MEMORY_SITE_PROGRAM,
-          &scope));
+      result = iree_hip_vmm_query_memory_scope(device, host, &scope);
     }
     if (result == hipSuccess) {
       result =
@@ -1769,9 +1793,7 @@ static hipError_t iree_hip_vmm_set_access_modern(
     }
     hrx_memory_scope_t scope = {0};
     if (result == hipSuccess) {
-      result = iree_hip_vmm_from_hrx_status(hrx_device_query_memory_scope(
-          device, 0, host ? HRX_MEMORY_SITE_HOST : HRX_MEMORY_SITE_PROGRAM,
-          &scope));
+      result = iree_hip_vmm_query_memory_scope(device, host, &scope);
     }
     uint32_t projection = 0;
     if (result == hipSuccess) {

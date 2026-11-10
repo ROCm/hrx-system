@@ -231,7 +231,8 @@ void HrxLoader::load(const std::string& path) {
   LOAD(allocator_virtual_memory_protect);
   LOAD(allocator_virtual_memory_protect_scoped);
 
-  LOAD(device_query_memory_scope);
+  LOAD(device_query_host_memory_scope);
+  LOAD(device_query_queue_family_memory_scope);
   LOAD(virtual_buffer_query_capabilities);
   LOAD(virtual_buffer_create);
   LOAD(virtual_buffer_query_info);

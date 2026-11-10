@@ -91,13 +91,13 @@ class HrxRuntime {
   void Prepare(size_t count, bool host) {
     values_.assign(count, 0);
     hrx_buffer_params_t params = {
-        host ? HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_HOST_COHERENT |
-                   HRX_MEMORY_TYPE_DEVICE_VISIBLE
-             : HRX_MEMORY_TYPE_DEVICE_LOCAL,
-        HRX_MEMORY_ACCESS_ALL,
-        HRX_BUFFER_USAGE_DEFAULT |
-            (host ? HRX_BUFFER_USAGE_MAPPING_PERSISTENT : 0u),
-        0,
+        .type = host ? HRX_MEMORY_TYPE_HOST_LOCAL |
+                           HRX_MEMORY_TYPE_HOST_COHERENT |
+                           HRX_MEMORY_TYPE_DEVICE_VISIBLE
+                     : HRX_MEMORY_TYPE_DEVICE_LOCAL,
+        .access = HRX_MEMORY_ACCESS_ALL,
+        .usage = HRX_BUFFER_USAGE_DEFAULT |
+                 (host ? HRX_BUFFER_USAGE_MAPPING_PERSISTENT : 0u),
     };
     Check(api_.allocator_allocate_buffer(api_.device_allocator(device_), params,
                                          count * sizeof(uint32_t), &buffer_));

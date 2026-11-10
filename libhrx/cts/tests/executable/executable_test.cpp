@@ -55,11 +55,10 @@ class GraphVisibilityTest : public HrxTestFixture {
     REQUIRE_OK(hrx().executable_export_info(executable_, ordinal_, &info_));
     REQUIRE_OK(hrx().stream_create(device_, 0, &stream_));
     const hrx_buffer_params_t params = {
-        HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_HOST_COHERENT |
-            HRX_MEMORY_TYPE_DEVICE_VISIBLE,
-        HRX_MEMORY_ACCESS_ALL,
-        HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_PERSISTENT,
-        0,
+        .type = HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_HOST_COHERENT |
+                HRX_MEMORY_TYPE_DEVICE_VISIBLE,
+        .access = HRX_MEMORY_ACCESS_ALL,
+        .usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_PERSISTENT,
     };
     REQUIRE_OK(hrx().allocator_allocate_buffer(
         hrx().device_allocator(device_), params, kWordCount * sizeof(uint32_t),
@@ -458,12 +457,11 @@ TEST_CASE_METHOD(HrxTestFixture,
 
   constexpr size_t kWordCount = 256;
   const hrx_buffer_params_t params = {
-      HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_HOST_COHERENT |
-          HRX_MEMORY_TYPE_DEVICE_VISIBLE,
-      HRX_MEMORY_ACCESS_ALL,
-      HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED |
-          HRX_BUFFER_USAGE_MAPPING_PERSISTENT,
-      0,
+      .type = HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_HOST_COHERENT |
+              HRX_MEMORY_TYPE_DEVICE_VISIBLE,
+      .access = HRX_MEMORY_ACCESS_ALL,
+      .usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED |
+               HRX_BUFFER_USAGE_MAPPING_PERSISTENT,
   };
   hrx_buffer_t output = nullptr;
   REQUIRE_OK(

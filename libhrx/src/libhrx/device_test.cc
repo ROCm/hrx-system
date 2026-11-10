@@ -86,7 +86,7 @@ TEST(DeviceMemoryCapacityTest, OrdinaryBackendDoesNotExposeLegacyAllocatorVmm) {
   hrx_buffer_t reservation = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
                         hrx_status_to_iree(hrx_allocator_virtual_memory_reserve(
-                            &allocator, 0, 65536, &reservation)));
+                            &allocator, 65536, &reservation)));
   EXPECT_EQ(reservation, nullptr);
 }
 

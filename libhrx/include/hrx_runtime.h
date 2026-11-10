@@ -260,8 +260,6 @@ typedef struct hrx_semaphore_list_t {
   size_t count;
 } hrx_semaphore_list_t;
 
-typedef uint64_t hrx_queue_affinity_t;
-
 // Borrowed string storage valid only for the duration documented by the
 // containing API.
 typedef struct hrx_string_view_t {
@@ -282,10 +280,12 @@ typedef struct hrx_const_byte_span_t {
 
 // Buffer parameters for allocator operations.
 typedef struct hrx_buffer_params_t {
+  // Required memory properties used to select the allocation source.
   hrx_memory_type_t type;
+  // Declared read/write access; does not restrict the source pool's access.
   hrx_memory_access_t access;
+  // Operations for which the allocation source must prepare the buffer.
   hrx_buffer_usage_t usage;
-  hrx_queue_affinity_t queue_affinity;
 } hrx_buffer_params_t;
 
 // Export metadata for direct executable dispatch. |name| is owned by the
@@ -1008,11 +1008,18 @@ typedef struct hrx_memory_scope_t {
   uint32_t id;
 } hrx_memory_scope_t;
 
-// Resolves a scope once for reuse in mapping descriptors. QUEUE and PROGRAM
-// select a provisioned transfer or dispatch queue using |affinity|. HOST
-// ignores affinity and selects the group's public host site.
-HRX_API hrx_status_t hrx_device_query_memory_scope(
-    hrx_device_t device, hrx_queue_affinity_t affinity, hrx_memory_site_t site,
+// Resolves the public host scope in the device's sealed group for reuse in
+// mapping descriptors. No queue is required.
+HRX_API hrx_status_t hrx_device_query_host_memory_scope(
+    hrx_device_t device, hrx_memory_scope_t* out_scope);
+
+// Resolves the QUEUE or PROGRAM site of the exact family for reuse in mapping
+// descriptors. Family ordinals come from device queue-family discovery; an
+// existing queue supplies its ordinal through hrx_queue_get_family_ordinal.
+// This query neither requires a provisioned queue nor acquires one. HOST uses
+// hrx_device_query_host_memory_scope instead.
+HRX_API hrx_status_t hrx_device_query_queue_family_memory_scope(
+    hrx_device_t device, uint32_t family_ordinal, hrx_memory_site_t site,
     hrx_memory_scope_t* out_scope);
 
 // Complete simultaneous access to one address reservation. All families of
@@ -1226,12 +1233,11 @@ HRX_API hrx_status_t hrx_allocator_query_virtual_memory(
     hrx_allocator_t allocator, hrx_memory_type_t mem_type, bool* supported,
     size_t* min_page_size, size_t* recommended_page_size);
 
-// Reserves addresses without physical backing. The caller owns the returned
-// buffer and must release it through virtual_memory_release, not
-// buffer_release.
+// Reserves addresses without physical backing for all families of the
+// allocator's device. The caller owns the returned buffer and must release it
+// through virtual_memory_release, not buffer_release.
 HRX_API hrx_status_t hrx_allocator_virtual_memory_reserve(
-    hrx_allocator_t allocator, hrx_queue_affinity_t affinity, size_t size,
-    hrx_buffer_t* virtual_buffer);
+    hrx_allocator_t allocator, size_t size, hrx_buffer_t* virtual_buffer);
 
 // Consumes the reservation only on success. Failure leaves it owned by the
 // caller so mappings can be removed and release retried. All uses must complete

@@ -95,30 +95,42 @@ static iree_status_t hrx_virtual_buffer_prepare_scope(
   return iree_ok_status();
 }
 
-hrx_status_t hrx_device_query_memory_scope(hrx_device_t device,
-                                           hrx_queue_affinity_t affinity,
-                                           hrx_memory_site_t site,
-                                           hrx_memory_scope_t* out_scope) {
-  if (!device || !out_scope || site < HRX_MEMORY_SITE_HOST ||
-      site > HRX_MEMORY_SITE_PROGRAM) {
+hrx_status_t hrx_device_query_host_memory_scope(hrx_device_t device,
+                                                hrx_memory_scope_t* out_scope) {
+  if (!device || !out_scope) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "memory scope device or output is NULL");
+  }
+  *out_scope = (hrx_memory_scope_t){0};
+  iree_hal_memory_scope_t hal_scope;
+  iree_status_t status = iree_hal_device_group_resolve_memory_scope(
+      device->hal_device_group,
+      (iree_hal_memory_site_t){.kind = IREE_HAL_MEMORY_SITE_HOST}, &hal_scope);
+  if (iree_status_is_ok(status)) {
+    *out_scope = (hrx_memory_scope_t){hal_scope.domain, hal_scope.id};
+  }
+  return hrx_status_from_iree(status);
+}
+
+hrx_status_t hrx_device_query_queue_family_memory_scope(
+    hrx_device_t device, uint32_t family_ordinal, hrx_memory_site_t site,
+    hrx_memory_scope_t* out_scope) {
+  if (!device || !out_scope ||
+      (site != HRX_MEMORY_SITE_QUEUE && site != HRX_MEMORY_SITE_PROGRAM)) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                            "invalid memory scope device, site or output");
   }
   *out_scope = (hrx_memory_scope_t){0};
-  iree_hal_memory_site_t hal_site = {.kind = (iree_hal_memory_site_kind_t)site};
-  if (site != HRX_MEMORY_SITE_HOST) {
-    iree_hal_queue_t* queue = NULL;
-    const iree_hal_queue_family_role_flags_t roles =
-        site == HRX_MEMORY_SITE_PROGRAM
-            ? IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH
-            : IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER;
-    iree_status_t status = hrx_hal_device_select_queue(
-        device->hal_device, affinity, roles, NULL, &queue);
-    if (!iree_status_is_ok(status)) {
-      return hrx_status_from_iree(status);
-    }
-    hal_site.family = iree_hal_queue_family(queue);
+  const iree_hal_queue_family_t* family =
+      iree_hal_device_queue_family(device->hal_device, family_ordinal);
+  if (!family) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "invalid memory scope queue family");
   }
+  const iree_hal_memory_site_t hal_site = {
+      .kind = (iree_hal_memory_site_kind_t)site,
+      .family = family,
+  };
   iree_hal_memory_scope_t hal_scope;
   iree_status_t status = iree_hal_device_group_resolve_memory_scope(
       device->hal_device_group, hal_site, &hal_scope);

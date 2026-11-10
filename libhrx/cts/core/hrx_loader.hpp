@@ -205,7 +205,9 @@ class HrxLoader {
       allocator_virtual_memory_protect_scoped;
 
   // Address owners and batched mappings.
-  decltype(&hrx_device_query_memory_scope) device_query_memory_scope;
+  decltype(&hrx_device_query_host_memory_scope) device_query_host_memory_scope;
+  decltype(&hrx_device_query_queue_family_memory_scope)
+      device_query_queue_family_memory_scope;
   decltype(&hrx_virtual_buffer_query_capabilities)
       virtual_buffer_query_capabilities;
   decltype(&hrx_virtual_buffer_create) virtual_buffer_create;
