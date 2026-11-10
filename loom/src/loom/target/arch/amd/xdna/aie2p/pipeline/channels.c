@@ -13,9 +13,9 @@
 #include "loom/ops/view/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/sharing.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/sram.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/storage.h"
-#include "loom/target/arch/amd/xdna/aie2p/pipeline/sharing.h"
 #include "loom/transforms/pipeline/channel_materialization.h"
 
 typedef struct loom_aie2p_native_endpoint_t {
