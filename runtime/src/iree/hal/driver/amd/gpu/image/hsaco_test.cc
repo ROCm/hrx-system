@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <string>
 #include <vector>
 
 #include "iree/base/alignment.h"
@@ -122,6 +123,23 @@ void Write64(std::vector<uint8_t>& bytes, size_t offset, uint64_t value) {
   iree_unaligned_store_le_u64(bytes.data() + offset, value);
 }
 
+size_t ReplaceAll(std::vector<uint8_t>& bytes, const char* source,
+                  const char* replacement) {
+  const size_t length = std::strlen(source);
+  if (std::strlen(replacement) != length) {
+    return 0;
+  }
+  size_t count = 0;
+  auto cursor = bytes.begin();
+  while ((cursor = std::search(cursor, bytes.end(), source, source + length)) !=
+         bytes.end()) {
+    std::copy(replacement, replacement + length, cursor);
+    cursor += length;
+    ++count;
+  }
+  return count;
+}
+
 size_t FindProgram(const std::vector<uint8_t>& bytes, uint32_t type) {
   size_t offset = Read64(bytes, 32);
   for (uint16_t i = 0; i < Read16(bytes, 56); ++i, offset += 56) {
@@ -165,6 +183,23 @@ size_t FindSymbol(const std::vector<uint8_t>& bytes, const char* name) {
     if (std::strcmp(reinterpret_cast<const char*>(bytes.data() + strings +
                                                   Read32(bytes, offset)),
                     name) == 0) {
+      return offset;
+    }
+  }
+  return 0;
+}
+
+size_t FindSymbolStartingWith(const std::vector<uint8_t>& bytes,
+                              const char* prefix) {
+  size_t strings = FileOffset(bytes, Read64(bytes, FindDynamic(bytes, 5) + 8));
+  size_t symbols = FileOffset(bytes, Read64(bytes, FindDynamic(bytes, 6) + 8));
+  size_t hash = FileOffset(bytes, Read64(bytes, FindDynamic(bytes, 4) + 8));
+  const size_t prefix_length = std::strlen(prefix);
+  for (uint32_t i = 1; i < Read32(bytes, hash + 4); ++i) {
+    size_t offset = symbols + i * 24;
+    const char* symbol_name = reinterpret_cast<const char*>(
+        bytes.data() + strings + Read32(bytes, offset));
+    if (std::strncmp(symbol_name, prefix, prefix_length) == 0) {
       return offset;
     }
   }
@@ -381,6 +416,21 @@ TEST_P(HsacoTest, DoesNotRequireSectionHeaders) {
   IREE_ASSERT_OK(Initialize(bytes_, &image, 11));
   EXPECT_EQ(image.value.metadata.kernel_count, 6u);
   EXPECT_GT(image.value.relocation_count, 0u);
+}
+
+TEST_P(HsacoTest, UsesElfTargetWhenMetadataOmitsDuplicate) {
+  Image baseline;
+  IREE_ASSERT_OK(Initialize(bytes_, &baseline));
+  // Preserve the MessagePack field shape while making every target key unknown
+  // to the metadata parser. The ELF e_flags identity remains untouched.
+  ASSERT_GT(ReplaceAll(bytes_, "amdhsa.target", "ignore.target"), 0u);
+  Image image;
+  IREE_ASSERT_OK(Initialize(bytes_, &image, 7));
+  EXPECT_TRUE(iree_hal_amd_gpu_target_identity_equal(&image.value.target,
+                                                     &baseline.value.target));
+  EXPECT_TRUE(iree_string_view_is_empty(image.value.metadata.target));
+  EXPECT_EQ(image.value.metadata.kernel_count,
+            baseline.value.metadata.kernel_count);
 }
 
 TEST_P(HsacoTest, SupportsGnuHashWithoutSystemVHash) {
@@ -650,6 +700,11 @@ TEST_P(HsacoTest, ResolvesExplicitStrongAndWeakImports) {
     EXPECT_TRUE(iree_string_view_equal(image.value.imports[0].name,
                                        IREE_SV("image_value")));
     EXPECT_EQ(image.value.imports[0].weak, weak);
+    const auto* value = iree_hal_amd_gpu_image_find_symbol(
+        &image.value, IREE_SV("image_value"));
+    ASSERT_NE(value, nullptr);
+    EXPECT_EQ(value->address.kind, IREE_HAL_AMD_GPU_IMAGE_ADDRESS_IMPORT);
+    EXPECT_EQ(value->address.import_ordinal, 0u);
     const auto* pointer = iree_hal_amd_gpu_image_find_symbol(
         &image.value, IREE_SV("image_pointer"));
     ASSERT_NE(pointer, nullptr);
@@ -676,6 +731,28 @@ TEST_P(HsacoTest, ResolvesExplicitStrongAndWeakImports) {
     IREE_ASSERT_OK(load());
     EXPECT_EQ(Read64(storage, pointer->address.offset), 0u);
   }
+}
+
+TEST_P(HsacoTest, DoesNotImportUnreferencedUndefinedSymbols) {
+  Image baseline;
+  IREE_ASSERT_OK(Initialize(bytes_, &baseline));
+  const size_t symbol = FindSymbolStartingWith(bytes_, "__hip_cuid_");
+  ASSERT_NE(symbol, 0u);
+  const size_t strings =
+      FileOffset(bytes_, Read64(bytes_, FindDynamic(bytes_, 5) + 8));
+  const std::string symbol_name(reinterpret_cast<const char*>(
+      bytes_.data() + strings + Read32(bytes_, symbol)));
+  Write16(bytes_, symbol + 6, 0);  // SHN_UNDEF.
+  Write64(bytes_, symbol + 8, 0);
+  Write64(bytes_, symbol + 16, 0);
+  Image image;
+  IREE_ASSERT_OK(Initialize(bytes_, &image, 7));
+  EXPECT_EQ(image.value.import_count, 0u);
+  EXPECT_EQ(image.value.symbol_count + 1, baseline.value.symbol_count);
+  EXPECT_EQ(iree_hal_amd_gpu_image_find_symbol(
+                &image.value, iree_make_cstring_view(symbol_name.c_str())),
+            nullptr);
+  EXPECT_EQ(image.value.metadata.kernel_count, 6u);
 }
 
 TEST_P(HsacoTest, RejectsUnsupportedLoaderServices) {

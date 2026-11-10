@@ -16,7 +16,9 @@ extern "C" {
 // Decodes one or more AMDHSA MessagePack metadata notes into native kernel ABI
 // and reflection records. Payloads contain the descriptor bytes only, excluding
 // ELF note headers/names/padding. Their immutable storage is borrowed for the
-// lifetime of the metadata. Multiple notes must agree on version and target.
+// lifetime of the metadata. Multiple notes must agree on version and on any
+// supplied target. Linked code objects may omit the redundant metadata target;
+// the HSACO reader derives the authoritative target from the ELF header.
 //
 // Allocation and external-input validation occur here. Successful consumers use
 // indexed records without parsing strings or revisiting source containers.

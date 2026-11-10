@@ -70,6 +70,13 @@ void Set(Fields& fields, const std::string& name, Bytes value) {
   }
 }
 
+void Erase(Fields& fields, const std::string& name) {
+  fields.erase(
+      std::remove_if(fields.begin(), fields.end(),
+                     [&](const auto& field) { return field.first == name; }),
+      fields.end());
+}
+
 Fields Kernel() {
   return {{".name", String("transform")},
           {".symbol", String("transform.kd")},
@@ -362,6 +369,23 @@ TEST_F(HsacoMetadataTest, MergesNotesAndRejectsConflictingModuleDeclarations) {
                         ParsePayloads({Map(first), Map(first)}));
 }
 
+TEST_F(HsacoMetadataTest, MergesLinkedMetadataWithOptionalTarget) {
+  auto first = Module();
+  Erase(first, "amdhsa.target");
+  auto second_kernel = Kernel();
+  Set(second_kernel, ".name", String("second"));
+  Set(second_kernel, ".symbol", String("second.kd"));
+  auto second = Module(second_kernel);
+  IREE_ASSERT_OK(ParsePayloads({Map(first), Map(second)}));
+  EXPECT_EQ(ToString(metadata_.target), "amdgcn-amd-amdhsa--gfx942");
+  EXPECT_EQ(metadata_.kernel_count, 2u);
+
+  Erase(second, "amdhsa.target");
+  IREE_ASSERT_OK(ParsePayloads({Map(first), Map(second)}));
+  EXPECT_TRUE(iree_string_view_is_empty(metadata_.target));
+  EXPECT_EQ(metadata_.kernel_count, 2u);
+}
+
 TEST_F(HsacoMetadataTest, RejectsMalformedPrintfLayout) {
   for (const char* value : {"", "1:", "1:-1:text", "1:1:0:text", "1:2:4:text",
                             "4294967296:0:text", "1:1:4294967296:text"}) {
@@ -373,15 +397,12 @@ TEST_F(HsacoMetadataTest, RejectsMalformedPrintfLayout) {
   }
 }
 
-TEST_F(HsacoMetadataTest, RequiresCurrentVersionAndVersionedTarget) {
+TEST_F(HsacoMetadataTest, RejectsUnsupportedVersions) {
   auto module = Module();
   Set(module, "amdhsa.version", Array({Integer(2), Integer(0)}));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED, Parse(Map(module)));
   Set(module, "amdhsa.version", Array({Integer(1), Integer(3)}));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED, Parse(Map(module)));
-  module = Module(Kernel(), 0);
-  Set(module, "amdhsa.version", Array({Integer(1), Integer(2)}));
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Parse(Map(module)));
 }
 
 TEST_F(HsacoMetadataTest, ChecksRequiredFieldsIndependently) {
