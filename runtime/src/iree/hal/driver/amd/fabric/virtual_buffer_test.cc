@@ -191,6 +191,42 @@ TEST_F(VirtualBufferContractTest, PartialSourceMapsOnlyItsNativeProjection) {
   iree_hal_pool_release(shared_source);
 }
 
+TEST_F(VirtualBufferContractTest,
+       HostAddressIdentityRequiresCommonReservation) {
+  iree_hal_pool_t* source = nullptr;
+  IREE_ASSERT_OK(CreateSource(&source));
+  accesses_[0].requirements =
+      IREE_HAL_POOL_ACCESS_REQUIRE_HOST_ADDRESS_IDENTITY;
+  const iree_hal_pool_scope_t scope = Scope();
+  iree_hal_virtual_buffer_capabilities_t capabilities;
+
+  native_.host_reservation_flags =
+      AMDF_MEMORY_RESERVATION_FLAG_REQUIRE_COMMON_ADDRESS;
+  native_.reservation_flags[0] =
+      AMDF_MEMORY_RESERVATION_FLAG_REQUIRE_COMMON_ADDRESS;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
+      group_, scope, {1, &source}, allocator_, &capabilities));
+  EXPECT_EQ(capabilities.max_byte_length, 0u);
+
+  native_.reservation_flags[1] =
+      AMDF_MEMORY_RESERVATION_FLAG_REQUIRE_COMMON_ADDRESS;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
+      group_, scope, {1, &source}, allocator_, &capabilities));
+  ASSERT_NE(capabilities.max_byte_length, 0u);
+  EXPECT_NE(capabilities.supported_flags &
+                IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
+            0u);
+
+  const iree_hal_virtual_buffer_options_t options = {.byte_length = 4096};
+  iree_hal_buffer_t* target = nullptr;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_create(group_, scope, {1, &source},
+                                                &options, allocator_, &target));
+  EXPECT_EQ(native_.last_reservation_flags,
+            AMDF_MEMORY_RESERVATION_FLAG_REQUIRE_COMMON_ADDRESS);
+  iree_hal_buffer_release(target);
+  iree_hal_pool_release(source);
+}
+
 TEST_F(VirtualBufferContractTest, QueueShaderContractCoversEveryReplacement) {
   native_families_[0].program_site_kind = AMDF_MEMORY_SITE_KIND_PROGRAM;
   native_families_[0].program_atomics = true;

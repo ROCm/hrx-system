@@ -68,6 +68,9 @@ static hsa_status_t iree_hal_amdgpu_host_memory_query_pool(
       global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT;
   const bool is_fine =
       global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED;
+  const bool is_uncached =
+      global_flags &
+      HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED;
   if ((global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED) &&
       !query->pools.coarse_pool.handle) {
     query->pools.coarse_pool = pool;
@@ -79,6 +82,9 @@ static hsa_status_t iree_hal_amdgpu_host_memory_query_pool(
                   (query->fine_pool_is_kernarg && !is_kernarg))) {
     query->pools.fine_pool = pool;
     query->fine_pool_is_kernarg = is_kernarg;
+  }
+  if (is_uncached && !query->pools.uncached_pool.handle) {
+    query->pools.uncached_pool = pool;
   }
   return HSA_STATUS_SUCCESS;
 }

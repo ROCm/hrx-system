@@ -115,7 +115,7 @@ class HipMemoryInteropApiTest : public testing::Test {
     fixture->callback_.returned.store(true, std::memory_order_release);
   }
 
-  void CheckHostRange(void* host_pointer) {
+  void CheckHostRange(void* host_pointer, bool expect_common_address) {
     constexpr size_t kOffset = 13;
     constexpr size_t kLength = 257;
     auto* host_bytes = static_cast<uint8_t*>(host_pointer);
@@ -128,6 +128,9 @@ class HipMemoryInteropApiTest : public testing::Test {
     hipDeviceptr_t base = nullptr;
     ASSERT_EQ(hipSuccess, host_device_pointer_(&base, host_pointer, 0));
     ASSERT_NE(base, nullptr);
+    if (expect_common_address) {
+      ASSERT_EQ(host_pointer, base);
+    }
     hipDeviceptr_t interior = nullptr;
     ASSERT_EQ(hipSuccess,
               host_device_pointer_(&interior, host_bytes + kOffset, 0));
@@ -295,7 +298,8 @@ TEST_F(HipMemoryInteropApiTest, RegisteredHostRangePreservesBytesAndOwnership) {
   ASSERT_EQ(hipSuccess, register_host_(storage_.data(), storage_.size(),
                                        hipHostRegisterMapped));
   registered_ = true;
-  ASSERT_NO_FATAL_FAILURE(CheckHostRange(storage_.data()));
+  ASSERT_NO_FATAL_FAILURE(
+      CheckHostRange(storage_.data(), /*expect_common_address=*/false));
   const auto expected = storage_;
   ASSERT_EQ(hipSuccess, unregister_host_(storage_.data()));
   registered_ = false;
@@ -307,7 +311,8 @@ TEST_F(HipMemoryInteropApiTest, RegisteredHostRangePreservesBytesAndOwnership) {
 TEST_F(HipMemoryInteropApiTest, OwnedHostRangeExportsUsableInteriorAddress) {
   ASSERT_EQ(hipSuccess, allocate_host_(&host_memory_, storage_.size(),
                                        hipHostMallocMapped));
-  ASSERT_NO_FATAL_FAILURE(CheckHostRange(host_memory_));
+  ASSERT_NO_FATAL_FAILURE(
+      CheckHostRange(host_memory_, /*expect_common_address=*/true));
 }
 
 TEST_F(HipMemoryInteropApiTest, PoolAllocationExportsLogicalRangeAndBytes) {

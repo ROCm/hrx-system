@@ -1035,8 +1035,10 @@ TEST_P(VulkanSlabPoolTest, RejectsUnpreparedInterfacesAndNativeProperties) {
     EXPECT_FALSE(source);
   }
   families_[0].interfaces = 0;
-  for (auto requirement : {IREE_HAL_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST,
-                           IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED}) {
+  for (auto requirement :
+       {IREE_HAL_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST,
+        IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED,
+        IREE_HAL_POOL_ACCESS_REQUIRE_HOST_ADDRESS_IDENTITY}) {
     families_[0].requirements = requirement;
     auto scope = Scope();
     scope.host.access = IREE_HAL_MEMORY_ACCESS_ALL;

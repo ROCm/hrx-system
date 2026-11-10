@@ -30,6 +30,17 @@ static iree_status_t iree_hal_virtual_buffer_validate_sources(
   return iree_ok_status();
 }
 
+static bool iree_hal_virtual_buffer_scope_requires_common_address(
+    iree_hal_pool_scope_t scope) {
+  for (iree_host_size_t i = 0; i < scope.family_count; ++i) {
+    if (iree_any_bit_set(scope.families[i].requirements,
+                         IREE_HAL_POOL_ACCESS_REQUIRE_HOST_ADDRESS_IDENTITY)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 IREE_API_EXPORT iree_status_t iree_hal_virtual_buffer_query_capabilities(
     iree_hal_device_group_t* group, iree_hal_pool_scope_t scope,
     iree_hal_virtual_buffer_sources_t sources, iree_allocator_t host_allocator,
@@ -53,6 +64,12 @@ IREE_API_EXPORT iree_status_t iree_hal_virtual_buffer_query_capabilities(
       status = backend->query_virtual_buffer(backend, group, scope, sources,
                                              host_allocator, out_capabilities);
     }
+  }
+  if (iree_status_is_ok(status) && out_capabilities->max_byte_length &&
+      iree_hal_virtual_buffer_scope_requires_common_address(scope) &&
+      !iree_all_bits_set(out_capabilities->supported_flags,
+                         IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS)) {
+    memset(out_capabilities, 0, sizeof(*out_capabilities));
   }
   if (!iree_status_is_ok(status)) {
     memset(out_capabilities, 0, sizeof(*out_capabilities));
@@ -102,11 +119,17 @@ IREE_API_EXPORT iree_status_t iree_hal_virtual_buffer_create(
   IREE_RETURN_IF_ERROR(iree_hal_pool_scope_validate(group, scope));
   IREE_RETURN_IF_ERROR(
       iree_hal_virtual_buffer_validate_sources(group, sources));
+  iree_hal_virtual_buffer_options_t required_options = *options;
+  if (iree_hal_virtual_buffer_scope_requires_common_address(scope)) {
+    required_options.flags |=
+        IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS;
+  }
   const iree_hal_virtual_buffer_create_callback_t leaf = {
       .fn = iree_hal_virtual_buffer_create_native,
   };
   return iree_hal_device_group_create_virtual_buffer(
-      group, &scope, &sources, options, leaf, host_allocator, out_buffer);
+      group, &scope, &sources, &required_options, leaf, host_allocator,
+      out_buffer);
 }
 
 //===----------------------------------------------------------------------===//

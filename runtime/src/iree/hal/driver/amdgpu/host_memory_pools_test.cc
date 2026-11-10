@@ -36,11 +36,13 @@ class HostMemoryPoolsTest : public ::testing::Test {
     libhsa_.hsa_amd_memory_pool_get_info = QueryPool;
     libhsa_.hsa_agent_iterate_regions = IterateRegions;
     libhsa_.hsa_region_get_info = QueryRegion;
-    pools_.resize(3);
+    pools_.resize(4);
     pools_[0].flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
     pools_[1].flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED |
                       HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT;
     pools_[2].flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED;
+    pools_[3].flags =
+        HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED;
     regions_.resize(1);
     regions_[0].flags = HSA_REGION_GLOBAL_FLAG_FINE_GRAINED;
   }
@@ -162,6 +164,7 @@ TEST_F(HostMemoryPoolsTest, PrefersSeparateFinePool) {
   EXPECT_EQ(result.coarse_pool.handle, PoolHandle(0));
   EXPECT_EQ(result.kernarg_pool.handle, PoolHandle(1));
   EXPECT_EQ(result.fine_pool.handle, PoolHandle(2));
+  EXPECT_EQ(result.uncached_pool.handle, PoolHandle(3));
   EXPECT_EQ(result.fine_region.handle, RegionHandle(0));
 }
 
@@ -171,6 +174,7 @@ TEST_F(HostMemoryPoolsTest, KernargFinePoolCanServeBothRoles) {
   IREE_ASSERT_OK(Query(&result));
   EXPECT_EQ(result.fine_pool.handle, PoolHandle(1));
   EXPECT_EQ(result.kernarg_pool.handle, PoolHandle(1));
+  EXPECT_EQ(result.uncached_pool.handle, 0u);
 }
 
 TEST_F(HostMemoryPoolsTest, RegionsAcrossSixteenNumaNodes) {
@@ -187,15 +191,17 @@ TEST_F(HostMemoryPoolsTest, PoolCountIsNotBoundedByCollectorStorage) {
   IREE_ASSERT_OK(Query(&result));
   EXPECT_EQ(result.fine_pool.handle, PoolHandle(2));
   EXPECT_EQ(result.kernarg_pool.handle, PoolHandle(1));
+  EXPECT_EQ(result.uncached_pool.handle, PoolHandle(3));
   EXPECT_EQ(visited_pools_, 64u);
 }
 
 TEST_F(HostMemoryPoolsTest, FiltersUnsupportedMemoryBeforeSelecting) {
   auto valid_pools = pools_;
-  pools_.assign(3, valid_pools[1]);
+  pools_.assign(4, valid_pools[1]);
   pools_[0].segment = HSA_REGION_SEGMENT_GROUP;
   pools_[1].accessible = false;
   pools_[2].allocatable = false;
+  pools_[3].accessible = false;
   pools_.insert(pools_.end(), valid_pools.begin(), valid_pools.end());
   regions_.resize(4, regions_[0]);
   regions_[0].segment = HSA_REGION_SEGMENT_GROUP;
@@ -203,9 +209,10 @@ TEST_F(HostMemoryPoolsTest, FiltersUnsupportedMemoryBeforeSelecting) {
   regions_[2].flags = HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED;
   iree_hal_amdgpu_host_memory_pools_t result;
   IREE_ASSERT_OK(Query(&result));
-  EXPECT_EQ(result.coarse_pool.handle, PoolHandle(3));
-  EXPECT_EQ(result.kernarg_pool.handle, PoolHandle(4));
-  EXPECT_EQ(result.fine_pool.handle, PoolHandle(5));
+  EXPECT_EQ(result.coarse_pool.handle, PoolHandle(4));
+  EXPECT_EQ(result.kernarg_pool.handle, PoolHandle(5));
+  EXPECT_EQ(result.fine_pool.handle, PoolHandle(6));
+  EXPECT_EQ(result.uncached_pool.handle, PoolHandle(7));
   EXPECT_EQ(result.fine_region.handle, RegionHandle(3));
 }
 
@@ -213,15 +220,16 @@ TEST_F(HostMemoryPoolsTest, SelectsEligibleMemoryBeyondFirstThirtyTwoEntries) {
   const auto valid_pools = pools_;
   pools_.assign(64, Memory{});
   for (size_t i = 0; i < valid_pools.size(); ++i) {
-    pools_[61 + i] = valid_pools[i];
+    pools_[60 + i] = valid_pools[i];
   }
   regions_.assign(64, Memory{});
   regions_[63].flags = HSA_REGION_GLOBAL_FLAG_FINE_GRAINED;
   iree_hal_amdgpu_host_memory_pools_t result;
   IREE_ASSERT_OK(Query(&result));
-  EXPECT_EQ(result.coarse_pool.handle, PoolHandle(61));
-  EXPECT_EQ(result.kernarg_pool.handle, PoolHandle(62));
-  EXPECT_EQ(result.fine_pool.handle, PoolHandle(63));
+  EXPECT_EQ(result.coarse_pool.handle, PoolHandle(60));
+  EXPECT_EQ(result.kernarg_pool.handle, PoolHandle(61));
+  EXPECT_EQ(result.fine_pool.handle, PoolHandle(62));
+  EXPECT_EQ(result.uncached_pool.handle, PoolHandle(63));
   EXPECT_EQ(result.fine_region.handle, RegionHandle(63));
 }
 
@@ -233,6 +241,7 @@ TEST_F(HostMemoryPoolsTest, KeepsFirstEquivalentPool) {
   EXPECT_EQ(result.coarse_pool.handle, PoolHandle(0));
   EXPECT_EQ(result.kernarg_pool.handle, PoolHandle(1));
   EXPECT_EQ(result.fine_pool.handle, PoolHandle(2));
+  EXPECT_EQ(result.uncached_pool.handle, PoolHandle(3));
 }
 
 TEST_F(HostMemoryPoolsTest, MissingEachRequiredMemoryRoleFails) {
@@ -255,11 +264,12 @@ TEST_F(HostMemoryPoolsTest, MissingEachRequiredMemoryRoleFails) {
     if (role == 3) {
       regions_.clear();
     }
-    iree_hal_amdgpu_host_memory_pools_t result = {{1}, {1}, {1}, {1}};
+    iree_hal_amdgpu_host_memory_pools_t result = {{1}, {1}, {1}, {1}, {1}};
     IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND, Query(&result));
     EXPECT_EQ(result.coarse_pool.handle, 0u);
     EXPECT_EQ(result.kernarg_pool.handle, 0u);
     EXPECT_EQ(result.fine_pool.handle, 0u);
+    EXPECT_EQ(result.uncached_pool.handle, 0u);
     EXPECT_EQ(result.fine_region.handle, 0u);
   }
 }

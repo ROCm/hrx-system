@@ -106,6 +106,8 @@ using HipLaunchHostFuncFn = hipError_t (*)(hipStream_t stream, hipHostFn_t fn,
                                            void* user_data);
 using HipHostMallocFn = hipError_t (*)(void** pointer, size_t size,
                                        unsigned int flags);
+using HipMallocManagedFn = hipError_t (*)(void** pointer, size_t size,
+                                          unsigned int flags);
 using HipHostFreeFn = hipError_t (*)(void* pointer);
 using HipHostGetDevicePointerFn = hipError_t (*)(hipDeviceptr_t* device_pointer,
                                                  void* host_pointer,
@@ -488,6 +490,133 @@ hipError_t AddPrintfGraphNode(HipGraphAddKernelNodeFn add_kernel_node,
   result = nullptr;
   std::fill(std::begin(arguments), std::end(arguments), nullptr);
   return add_result;
+}
+
+TEST_F(HipModuleExecutionTest, KernelUsesRawOwnedHostPointerOffsets) {
+  const auto get_device =
+      ResolveHipSymbol<HipGetDeviceFn>(library_, "hipGetDevice");
+  const auto get_device_properties =
+      ResolveHipSymbol<HipGetDevicePropertiesR0600Fn>(
+          library_, "hipGetDevicePropertiesR0600");
+  const auto load =
+      ResolveHipSymbol<HipModuleLoadDataFn>(library_, "hipModuleLoadData");
+  const auto unload =
+      ResolveHipSymbol<HipModuleUnloadFn>(library_, "hipModuleUnload");
+  const auto get_function = ResolveHipSymbol<HipModuleGetFunctionFn>(
+      library_, "hipModuleGetFunction");
+  const auto launch = ResolveHipSymbol<HipModuleLaunchKernelFn>(
+      library_, "hipModuleLaunchKernel");
+  const auto synchronize = ResolveHipSymbol<HipDeviceSynchronizeFn>(
+      library_, "hipDeviceSynchronize");
+  const auto allocate_host =
+      ResolveHipSymbol<HipHostMallocFn>(library_, "hipHostMalloc");
+  const auto allocate_managed =
+      ResolveHipSymbol<HipMallocManagedFn>(library_, "hipMallocManaged");
+  const auto free_host =
+      ResolveHipSymbol<HipHostFreeFn>(library_, "hipHostFree");
+  const auto free_memory = ResolveHipSymbol<HipFreeFn>(library_, "hipFree");
+  const auto get_device_pointer = ResolveHipSymbol<HipHostGetDevicePointerFn>(
+      library_, "hipHostGetDevicePointer");
+  ASSERT_NE(get_device, nullptr);
+  ASSERT_NE(get_device_properties, nullptr);
+  ASSERT_NE(load, nullptr);
+  ASSERT_NE(unload, nullptr);
+  ASSERT_NE(get_function, nullptr);
+  ASSERT_NE(launch, nullptr);
+  ASSERT_NE(synchronize, nullptr);
+  ASSERT_NE(allocate_host, nullptr);
+  ASSERT_NE(allocate_managed, nullptr);
+  ASSERT_NE(free_host, nullptr);
+  ASSERT_NE(free_memory, nullptr);
+  ASSERT_NE(get_device_pointer, nullptr);
+
+  int device = 0;
+  ASSERT_EQ(hipSuccess, get_device(&device));
+  hipDeviceProp_t properties = {};
+  ASSERT_EQ(hipSuccess, get_device_properties(&properties, device));
+  const auto image =
+      hrx_cts::FindAmdgpuExecutableTestImage(properties.gcnArchName);
+  ASSERT_NE(image.file, nullptr) << properties.gcnArchName;
+  ScopedModule module = {.unload = unload};
+  ASSERT_EQ(hipSuccess, load(&module.value, image.file->data));
+  hipFunction_t function = nullptr;
+  ASSERT_EQ(hipSuccess, get_function(&function, module.value,
+                                     "hrx_transform_nested_pointers"));
+
+  struct OwnedAllocationCase {
+    const char* name;
+    unsigned int flags;
+    bool managed;
+  };
+  const std::array<OwnedAllocationCase, 6> allocation_cases = {
+      OwnedAllocationCase{"host-default", hipHostMallocDefault, false},
+      OwnedAllocationCase{"host-uncached", hipHostMallocUncached, false},
+      OwnedAllocationCase{"host-numa-user", hipHostMallocNumaUser, false},
+      OwnedAllocationCase{"host-non-coherent", hipHostMallocNonCoherent, false},
+      OwnedAllocationCase{"host-write-combined",
+                          hipHostMallocPortable | hipHostMallocWriteCombined,
+                          false},
+      OwnedAllocationCase{"managed", hipMemAttachGlobal, true},
+  };
+  for (const OwnedAllocationCase& allocation_case : allocation_cases) {
+    SCOPED_TRACE(allocation_case.name);
+    const auto allocate = [&](void** pointer, size_t size) {
+      return allocation_case.managed
+                 ? allocate_managed(pointer, size, allocation_case.flags)
+                 : allocate_host(pointer, size, allocation_case.flags);
+    };
+    const auto release_owned = [&](void* pointer) {
+      EXPECT_EQ(hipSuccess, allocation_case.managed ? free_memory(pointer)
+                                                    : free_host(pointer));
+    };
+    void* input_storage = nullptr;
+    ASSERT_EQ(hipSuccess, allocate(&input_storage, 8 * sizeof(uint32_t)));
+    std::unique_ptr<void, decltype(release_owned)> input_owner(input_storage,
+                                                               release_owned);
+    void* output_storage = nullptr;
+    ASSERT_EQ(hipSuccess, allocate(&output_storage, 8 * sizeof(uint32_t)));
+    std::unique_ptr<void, decltype(release_owned)> output_owner(output_storage,
+                                                                release_owned);
+
+    auto* input_base = static_cast<uint32_t*>(input_storage);
+    auto* output_base = static_cast<uint32_t*>(output_storage);
+    std::fill_n(input_base, 8, UINT32_C(0xCCCCCCCC));
+    std::fill_n(output_base, 8, UINT32_C(0xDDDDDDDD));
+    auto* input = input_base + 1;
+    auto* output = output_base + 2;
+    const std::array<uint32_t, 4> values = {2, 4, 6, 8};
+    std::copy(values.begin(), values.end(), input);
+
+    hipDeviceptr_t input_device_pointer = nullptr;
+    hipDeviceptr_t output_device_pointer = nullptr;
+    ASSERT_EQ(hipSuccess,
+              get_device_pointer(&input_device_pointer, input, /*flags=*/0));
+    ASSERT_EQ(hipSuccess,
+              get_device_pointer(&output_device_pointer, output, /*flags=*/0));
+    // Stop before dispatch if either raw pointer would fault. Registered
+    // caller-owned storage is allowed to have a distinct device projection;
+    // frontend-owned host allocations are not.
+    ASSERT_EQ(static_cast<void*>(input), input_device_pointer);
+    ASSERT_EQ(static_cast<void*>(output), output_device_pointer);
+
+    PointerArguments pointers = {
+        .input = input,
+        .output = output,
+    };
+    uint32_t scale = 3;
+    uint32_t offset = 5;
+    void* arguments[] = {&pointers, &scale, &offset};
+    ASSERT_EQ(hipSuccess, launch(function, 1, 1, 1, 1, 1, 1,
+                                 /*shared_memory_bytes=*/0,
+                                 /*stream=*/nullptr, arguments,
+                                 /*extra=*/nullptr));
+    ASSERT_EQ(hipSuccess, synchronize());
+    EXPECT_EQ(
+        (std::array<uint32_t, 4>{11, 17, 23, 29}),
+        (std::array<uint32_t, 4>{output[0], output[1], output[2], output[3]}));
+    EXPECT_EQ(UINT32_C(0xDDDDDDDD), output_base[1]);
+    EXPECT_EQ(UINT32_C(0xDDDDDDDD), output_base[6]);
+  }
 }
 
 TEST_F(HipModuleExecutionTest, OwnsLoadAndGraphInputsAcrossReloads) {

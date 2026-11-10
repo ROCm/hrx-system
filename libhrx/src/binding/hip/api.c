@@ -802,6 +802,21 @@ static iree_hal_streaming_host_register_flags_t iree_hip_host_flags_to_internal(
   return flags;
 }
 
+// Resolves the allocation's fine-grained visibility policy. HIP's default,
+// mapped, uncached, coherent, and NUMA-user allocations permit host/device
+// synchronization while a kernel is running; an explicit non-coherent
+// allocation instead permits device caching.
+static bool iree_hip_host_malloc_is_fine_grained(unsigned int hip_flags) {
+  if (hip_flags == hipHostMallocDefault) {
+    return true;
+  }
+  if (hip_flags & hipHostMallocNonCoherent) {
+    return false;
+  }
+  return (hip_flags & (hipHostMallocMapped | hipHostMallocUncached |
+                       hipHostMallocNumaUser | hipHostMallocCoherent)) != 0;
+}
+
 static hipError_t iree_hip_validate_host_malloc_flags(unsigned int flags) {
   const unsigned int allowed_flags =
       hipHostMallocPortable | hipHostMallocMapped | hipHostMallocWriteCombined |
@@ -6044,7 +6059,8 @@ HIPAPI hipError_t hipExtMallocWithFlags(void** ptr, size_t sizeBytes,
       iree_hal_streaming_buffer_t* buffer = NULL;
       iree_status_t status = iree_hal_streaming_memory_allocate_host(
           context, sizeBytes,
-          IREE_HAL_STREAMING_HOST_REGISTER_FLAG_HIP_SIGNAL_MEMORY, &buffer);
+          IREE_HAL_STREAMING_HOST_REGISTER_FLAG_HIP_SIGNAL_MEMORY,
+          /*fine_grained=*/false, &buffer);
       if (iree_status_is_ok(status)) {
         *ptr = buffer->host_ptr;
       }
@@ -6335,7 +6351,8 @@ HIPAPI hipError_t hipMallocHost(void** ptr, size_t size) {
 
   iree_hal_streaming_buffer_t* buffer = NULL;
   iree_status_t status = iree_hal_streaming_memory_allocate_host(
-      context, size, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT, &buffer);
+      context, size, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
+      /*fine_grained=*/true, &buffer);
 
   if (iree_status_is_ok(status)) {
     *ptr = buffer->host_ptr;
@@ -6478,9 +6495,12 @@ HIPAPI hipError_t hipHostMalloc(void** ptr, size_t size, unsigned int flags) {
     HIP_RETURN_ERROR(hipErrorStreamCaptureUnsupported);
   }
 
+  const iree_hal_streaming_host_register_flags_t internal_flags =
+      iree_hip_host_flags_to_internal(flags);
   iree_hal_streaming_buffer_t* buffer = NULL;
   iree_status_t status = iree_hal_streaming_memory_allocate_host(
-      context, size, iree_hip_host_flags_to_internal(flags), &buffer);
+      context, size, internal_flags,
+      iree_hip_host_malloc_is_fine_grained(flags), &buffer);
 
   if (iree_status_is_ok(status)) {
     *ptr = buffer->host_ptr;
@@ -6630,15 +6650,6 @@ HIPAPI hipError_t hipMallocManaged(void** dev_ptr, size_t size,
     hipError_t result = iree_status_to_hip_result(status);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(result);
-  }
-
-  if (!buffer->host_ptr ||
-      (iree_hal_streaming_deviceptr_t)(uintptr_t)buffer->host_ptr !=
-          buffer->device_ptr) {
-    iree_status_ignore(
-        iree_hal_streaming_memory_free_device(context, buffer->device_ptr));
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorNotSupported);
   }
 
   *dev_ptr = buffer->host_ptr;
