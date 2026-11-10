@@ -131,7 +131,7 @@ set(IREE_HAL_AMD_GPU_TARGETS
 include(binary)
 include(selectors)
 include(cts)
-include(iree_execution_test_suite)
+include(iree_cli_test)
 include(iree_external_hal_driver)
 include(iree_runtime_amdgpu_toolchain)
 include(iree_runtime_amdgpu_device_binaries)

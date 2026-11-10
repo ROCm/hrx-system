@@ -7,7 +7,7 @@
 # Testing utilities for IREE.
 
 load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
-load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_binary", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_benchmark_library")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
@@ -79,7 +79,7 @@ iree_runtime_cc_binary(
     ],
 )
 
-iree_execution_test_suite(
+iree_cli_test(
     name = "benchmark_result_test",
     manifests = ["benchmark_result.test.json"],
     tools = {"benchmark": ":benchmark_result_fixture"},

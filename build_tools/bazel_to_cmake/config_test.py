@@ -1405,7 +1405,7 @@ cc_library(
             converter.body,
         )
 
-    def test_execution_test_suite_converts_location_args_to_source_paths(self):
+    def test_cli_test_converts_location_args_to_source_paths(self):
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
@@ -1414,7 +1414,7 @@ cc_library(
             repo_root="/repo",
         )
 
-        functions.iree_execution_test_suite(
+        functions.iree_cli_test(
             name="execution_test",
             manifests=["test.json"],
             tools={"runner": "//tools:runner"},
@@ -1430,7 +1430,7 @@ cc_library(
             converter.body,
         )
 
-    def test_execution_test_suite_preserves_file_and_target_data(self):
+    def test_cli_test_preserves_file_and_target_data(self):
         repo_root = Path(__file__).resolve().parents[2]
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
@@ -1440,7 +1440,7 @@ cc_library(
             repo_root=str(repo_root),
         )
 
-        functions.iree_execution_test_suite(
+        functions.iree_cli_test(
             name="execution_test",
             manifests=["smoke.test.json"],
             tools={"runner": "//tools:runner"},
@@ -1456,7 +1456,7 @@ cc_library(
         )
         self.assertIn('"iree::third_party::spirv_dis"', converter.body)
 
-    def test_execution_test_suite_maps_size_to_timeout(self):
+    def test_cli_test_maps_size_to_timeout(self):
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
@@ -1465,7 +1465,7 @@ cc_library(
             repo_root="/repo",
         )
 
-        functions.iree_execution_test_suite(
+        functions.iree_cli_test(
             name="execution_test",
             manifests=["test.json"],
             tools={"runner": "//tools:runner"},
@@ -1474,15 +1474,15 @@ cc_library(
 
         self.assertIn("  TIMEOUT\n    60\n", converter.body)
 
-    def test_execution_test_suite_preserves_glob_data(self):
+    def test_cli_test_preserves_glob_data(self):
         repo_root = Path(__file__).resolve().parents[2]
         repo_cfg = SimpleNamespace(PROJECTS=[], REPO_MAP={"@hrx": ""})
 
         cmake = bazel_to_cmake_converter.convert_build_file(
             """
-load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
 
-iree_execution_test_suite(
+iree_cli_test(
     name = "execution_test",
     manifests = ["smoke.test.json"],
     tools = {"runner": "//tools:runner"},
@@ -1601,7 +1601,7 @@ iree_execution_test_suite(
         self.assertIn("    lsan", converter.body)
         self.assertIn("    vulkan", converter.body)
 
-    def test_execution_test_suite_emits_target_compatible_guard(self):
+    def test_cli_test_emits_target_compatible_guard(self):
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
@@ -1610,7 +1610,7 @@ iree_execution_test_suite(
             repo_root="/repo",
         )
 
-        functions.iree_execution_test_suite(
+        functions.iree_cli_test(
             name="execution_test",
             manifests=["test.json"],
             tools={"runner": "//tools:runner"},
@@ -1623,10 +1623,10 @@ iree_execution_test_suite(
         )
 
         self.assertIn('if(IREE_ARCH STREQUAL "wasm_32")', converter.body)
-        self.assertIn("iree_execution_test_suite(", converter.body)
+        self.assertIn("iree_cli_test(", converter.body)
         self.assertIn("endif()", converter.body)
 
-    def test_execution_test_suite_emits_resource_group(self):
+    def test_cli_test_emits_resource_group(self):
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
@@ -1635,7 +1635,7 @@ iree_execution_test_suite(
             repo_root="/repo",
         )
 
-        functions.iree_execution_test_suite(
+        functions.iree_cli_test(
             name="execution_test",
             manifests=["test.json"],
             tools={"runner": "//tools:runner"},

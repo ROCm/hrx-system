@@ -8,7 +8,7 @@
 # CMake execution surface.
 # bazel-to-cmake: skip
 
-load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 
 package(
@@ -16,7 +16,7 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-iree_execution_test_suite(
+iree_cli_test(
     name = "hosted_diagnostics_test",
     data = ["//loom/src/loom/tooling/target/wasm/testdata:unresolved_function.loom"],
     env_inherit = [

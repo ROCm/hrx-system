@@ -6,7 +6,7 @@
 
 load("//build_tools/bazel:executable.bzl", "iree_executable_test")
 load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
-load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
@@ -40,7 +40,7 @@ _AMDGPU_EXECUTION_TAGS = [
     "iree-run-requirement=libamdf.resource.amd_gpu",
 ]
 
-iree_execution_test_suite(
+iree_cli_test(
     name = "compile_diagnostics_test",
     data = ["//loom/src/loom/tooling/execution/hal/testdata:unresolved_kernel.loom"],
     manifests = ["compile_diagnostics.test.json"],
