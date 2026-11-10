@@ -13,35 +13,33 @@
 bool loom_symbolic_integer_cast_from_op(
     const loom_module_t* module, const loom_op_t* op,
     loom_symbolic_integer_cast_t* out_cast) {
-  const loom_value_id_t input = loom_op_const_operands(op)[0];
-  const loom_value_id_t result = loom_op_const_results(op)[0];
-  const loom_scalar_type_t input_type =
-      loom_type_element_type(loom_module_value_type(module, input));
-  const loom_scalar_type_t result_type =
-      loom_type_element_type(loom_module_value_type(module, result));
-  const bool input_is_fixed =
-      loom_scalar_type_set_contains(LOOM_SCALAR_TYPE_SET_INTEGER, input_type);
-  const bool result_is_fixed =
-      loom_scalar_type_set_contains(LOOM_SCALAR_TYPE_SET_INTEGER, result_type);
-
   loom_scalar_type_t payload_type = LOOM_SCALAR_TYPE_NONE;
   loom_symbolic_integer_cast_kind_t kind = LOOM_SYMBOLIC_INTEGER_CAST_SIGNED;
   switch (op->kind) {
     case LOOM_OP_SCALAR_EXTSI:
-      payload_type = input_type;
-      kind = LOOM_SYMBOLIC_INTEGER_CAST_SIGNED;
-      break;
     case LOOM_OP_SCALAR_EXTUI:
-      payload_type = input_type;
-      kind = LOOM_SYMBOLIC_INTEGER_CAST_UNSIGNED;
+      payload_type = loom_type_element_type(
+          loom_module_value_type(module, loom_op_const_operands(op)[0]));
+      kind = op->kind == LOOM_OP_SCALAR_EXTSI
+                 ? LOOM_SYMBOLIC_INTEGER_CAST_SIGNED
+                 : LOOM_SYMBOLIC_INTEGER_CAST_UNSIGNED;
       break;
     case LOOM_OP_SCALAR_TRUNCI:
-      payload_type = result_type;
-      kind = result_type == LOOM_SCALAR_TYPE_I1
+      payload_type = loom_type_element_type(
+          loom_module_value_type(module, loom_op_const_results(op)[0]));
+      kind = payload_type == LOOM_SCALAR_TYPE_I1
                  ? LOOM_SYMBOLIC_INTEGER_CAST_UNSIGNED
                  : LOOM_SYMBOLIC_INTEGER_CAST_SIGNED;
       break;
-    case LOOM_OP_INDEX_CAST:
+    case LOOM_OP_INDEX_CAST: {
+      const loom_scalar_type_t input_type = loom_type_element_type(
+          loom_module_value_type(module, loom_op_const_operands(op)[0]));
+      const loom_scalar_type_t result_type = loom_type_element_type(
+          loom_module_value_type(module, loom_op_const_results(op)[0]));
+      const bool input_is_fixed = loom_scalar_type_set_contains(
+          LOOM_SCALAR_TYPE_SET_INTEGER, input_type);
+      const bool result_is_fixed = loom_scalar_type_set_contains(
+          LOOM_SCALAR_TYPE_SET_INTEGER, result_type);
       if (input_is_fixed && result_type == LOOM_SCALAR_TYPE_OFFSET &&
           input_type != LOOM_SCALAR_TYPE_I64) {
         payload_type = input_type;
@@ -62,6 +60,7 @@ bool loom_symbolic_integer_cast_from_op(
         return false;
       }
       break;
+    }
     default:
       return false;
   }
@@ -71,17 +70,60 @@ bool loom_symbolic_integer_cast_from_op(
     return false;
   }
   *out_cast = (loom_symbolic_integer_cast_t){
-      .source_value_id = input,
+      .source_value_id = loom_op_const_operands(op)[0],
       .bit_count = (uint8_t)bit_count,
       .kind = kind,
   };
   return true;
 }
 
+loom_symbolic_integer_cast_t loom_symbolic_integer_cast_compose(
+    loom_symbolic_integer_cast_t input, loom_symbolic_integer_cast_kind_t kind,
+    uint8_t bit_count) {
+  if (bit_count <= input.bit_count) {
+    input.bit_count = bit_count;
+    input.kind = kind;
+    input.unsigned_bit_count = 0;
+  } else if (input.kind != LOOM_SYMBOLIC_INTEGER_CAST_UNSIGNED &&
+             (input.kind == LOOM_SYMBOLIC_INTEGER_CAST_SIGNED ||
+              bit_count <= input.unsigned_bit_count)) {
+    // The outer interpretation either preserves the signed low payload or
+    // treats its sign-extension bits as an unsigned part of the wider value.
+    input.kind = kind == LOOM_SYMBOLIC_INTEGER_CAST_SIGNED
+                     ? LOOM_SYMBOLIC_INTEGER_CAST_SIGNED
+                     : LOOM_SYMBOLIC_INTEGER_CAST_SIGNED_THEN_UNSIGNED;
+    input.unsigned_bit_count =
+        kind == LOOM_SYMBOLIC_INTEGER_CAST_UNSIGNED ? bit_count : 0;
+  }
+  return input;
+}
+
+loom_value_facts_t loom_symbolic_integer_cast_apply(
+    const loom_symbolic_integer_cast_t* cast, loom_value_facts_t source_facts) {
+  if (cast->kind == LOOM_SYMBOLIC_INTEGER_CAST_UNSIGNED) {
+    return loom_value_facts_wrap_unsigned_integer(source_facts,
+                                                  cast->bit_count);
+  }
+  loom_value_facts_t result =
+      loom_value_facts_wrap_integer(source_facts, cast->bit_count);
+  if (cast->bit_count == 1) {
+    result = loom_value_facts_sign_extend(result, 1);
+  }
+  if (cast->kind == LOOM_SYMBOLIC_INTEGER_CAST_SIGNED_THEN_UNSIGNED) {
+    result = loom_value_facts_wrap_unsigned_integer(result,
+                                                    cast->unsigned_bit_count);
+  }
+  return result;
+}
+
 bool loom_symbolic_integer_cast_is_identity(
     const loom_symbolic_integer_cast_t* cast, loom_value_facts_t source_facts) {
   if (cast->bit_count == 0 || cast->bit_count > 64 ||
       loom_value_facts_is_float(source_facts)) {
+    return false;
+  }
+  if (cast->kind == LOOM_SYMBOLIC_INTEGER_CAST_SIGNED_THEN_UNSIGNED &&
+      source_facts.range_lo < 0) {
     return false;
   }
   return cast->kind == LOOM_SYMBOLIC_INTEGER_CAST_UNSIGNED
@@ -94,5 +136,6 @@ bool loom_symbolic_integer_cast_is_identity(
 bool loom_symbolic_integer_cast_same_interpretation(
     const loom_symbolic_integer_cast_t* left,
     const loom_symbolic_integer_cast_t* right) {
-  return left->bit_count == right->bit_count && left->kind == right->kind;
+  return left->bit_count == right->bit_count && left->kind == right->kind &&
+         left->unsigned_bit_count == right->unsigned_bit_count;
 }

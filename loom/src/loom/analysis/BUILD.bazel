@@ -1510,12 +1510,35 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "symbolic_integer_cast",
+    srcs = ["symbolic_integer_cast.c"],
+    hdrs = ["symbolic_integer_cast.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "symbolic_integer_cast_test",
+    srcs = ["symbolic_integer_cast_test.cc"],
+    deps = [
+        ":symbolic_integer_cast",
+        "//loom/src/loom/ir:facts",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "symbolic_expr",
     srcs = [
         "symbolic_congruence.c",
         "symbolic_expr.c",
         "symbolic_expr_proof.c",
-        "symbolic_integer_cast.c",
         "symbolic_product.c",
         "symbolic_projection.c",
         "symbolic_quotient.c",
@@ -1529,7 +1552,6 @@ loom_cc_library(
         "symbolic_congruence.h",
         "symbolic_expr.h",
         "symbolic_expr_proof.h",
-        "symbolic_integer_cast.h",
         "symbolic_product.h",
         "symbolic_projection.h",
     ],
@@ -1538,6 +1560,7 @@ loom_cc_library(
         ":condition_fact_scope",
         ":condition_facts",
         ":integer_relation",
+        ":symbolic_integer_cast",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops/index",
@@ -1674,6 +1697,7 @@ loom_cc_test(
         ":condition_facts",
         ":symbolic_expr",
         ":symbolic_expr_test_fixture",
+        ":symbolic_integer_cast",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/index",
@@ -1693,6 +1717,7 @@ loom_cc_test(
         ":condition_facts",
         ":symbolic_expr",
         ":symbolic_expr_test_fixture",
+        ":symbolic_integer_cast",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/index",
@@ -1713,6 +1738,7 @@ loom_cc_test(
     deps = [
         ":symbolic_expr",
         ":symbolic_expr_test_fixture",
+        ":symbolic_integer_cast",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/scf",
         "//runtime/src/iree/testing:gtest",

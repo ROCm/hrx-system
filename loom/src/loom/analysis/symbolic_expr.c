@@ -1534,11 +1534,10 @@ static iree_status_t loom_symbolic_expr_apply_integer_cast(
   };
   const loom_symbolic_integer_cast_t* input_cast =
       loom_symbolic_expr_lookup_integer_cast(context, input_value);
-  // A second interpretation of an equal or narrower low-bit payload replaces
-  // the first interpretation. Wider interpretations must retain the
-  // intermediate value because its sign or zero extension supplies new bits.
-  if (input_cast && cast.bit_count <= input_cast->bit_count) {
-    cast.source_value_id = input_cast->source_value_id;
+  if (input_cast) {
+    cast = loom_symbolic_integer_cast_compose(
+        *input_cast, (loom_symbolic_integer_cast_kind_t)cast.kind,
+        cast.bit_count);
   }
 
   loom_value_facts_t source_facts = {0};
