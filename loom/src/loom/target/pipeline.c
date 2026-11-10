@@ -248,6 +248,18 @@ static iree_status_t loom_target_pipeline_build_combine_body(
   return loom_target_pipeline_build_run(builder, IREE_SV("combine"));
 }
 
+static iree_status_t loom_target_pipeline_build_expanded_source_cleanup_body(
+    loom_builder_t* builder, void* user_data) {
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_combine_body(builder, user_data));
+  // Expansion exposes private storage that previously escaped into a callee.
+  // Combine first to remove unused call results before promotion classifies
+  // their reads. Subsequent cleanup can then erase dead calculations and loops
+  // retained by unobserved writes.
+  return loom_target_pipeline_build_run(builder,
+                                        IREE_SV("promote-private-fragments"));
+}
+
 static iree_status_t loom_target_pipeline_build_cse_body(
     loom_builder_t* builder, void* user_data) {
   (void)user_data;
@@ -269,8 +281,8 @@ loom_target_pipeline_build_cleanup_expanded_target_functions(
   (void)user_data;
   loom_op_t* for_op = NULL;
   return loom_target_pipeline_build_for_target_functions(
-      builder, IREE_SV("source"), loom_target_pipeline_build_combine_body, NULL,
-      &for_op);
+      builder, IREE_SV("source"),
+      loom_target_pipeline_build_expanded_source_cleanup_body, NULL, &for_op);
 }
 
 static iree_status_t loom_target_pipeline_build_source_to_low(
@@ -576,7 +588,8 @@ static iree_status_t loom_target_pipeline_build_inlined_source_cleanup_body(
     IREE_RETURN_IF_ERROR(
         loom_target_pipeline_build_run(builder, IREE_SV("cfg-simplify")));
   }
-  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_combine_body(builder, NULL));
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_expanded_source_cleanup_body(builder, NULL));
   return loom_target_pipeline_build_run(builder, IREE_SV("cse"));
 }
 
