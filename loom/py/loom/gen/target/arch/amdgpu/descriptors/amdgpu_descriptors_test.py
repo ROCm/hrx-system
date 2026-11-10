@@ -18,6 +18,7 @@ from loom.gen.target.arch.amdgpu.amdgpu_target_table_family import (
 )
 from loom.gen.target.arch.amdgpu.descriptors import amdgpu_descriptors
 from loom.gen.target.low.compiled import DescriptorIdentityDomain
+from loom.target.arch.amdgpu.descriptors.api import amdgpu_descriptor_ref_keys
 from loom.target.arch.amdgpu.target_info import (
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
     AMDGPU_SOPP_OPCODE_INFO_RDNA,
@@ -77,6 +78,10 @@ def _descriptor_set_info(
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
         storage_generator_target=storage_target,
     )
+
+
+def test_descriptor_identity_ordinals_are_target_refs() -> None:
+    assert amdgpu_descriptors.amdgpu_descriptor_identity_domain().keys == amdgpu_descriptor_ref_keys()
 
 
 def test_exact_storage_families_include_portable_source_views() -> None:
