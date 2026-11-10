@@ -177,6 +177,15 @@ class CxxRenderer(CxxFunctionRenderer):
         arguments = [self.expression(resolved.value_id("view")), *indices]
         return ", ".join(arguments)
 
+    @staticmethod
+    def _append_memory_access_contract(
+        operation: Operation, selectors: list[str]
+    ) -> tuple[str, ...]:
+        if operation.attributes.get("memory_flags") == "root_in_bounds":
+            selectors.append("loom::memory_access::root_in_bounds")
+            return ("memory_flags",)
+        return ()
+
     def _emit_atomic_result(self, result: int, expression: str) -> None:
         if self.use_counts[result] == 0 and result not in self.assignment_targets:
             self.writer.line(f"(void){expression};")
@@ -193,11 +202,15 @@ class CxxRenderer(CxxFunctionRenderer):
         if name == "view.atomic.cmpxchg":
             success = resolved.attr("success_ordering")
             failure = resolved.attr("failure_ordering")
+            selectors = [
+                f"loom::atomic::ordering::{success}",
+                f"loom::atomic::ordering::{failure}",
+                f"loom::atomic::scope::{scope}",
+            ]
+            projected_flags = self._append_memory_access_contract(operation, selectors)
+            template = ", ".join(selectors)
             expression = (
-                "loom::view::atomic::cmpxchg<"
-                f"loom::atomic::ordering::{success}, "
-                f"loom::atomic::ordering::{failure}, "
-                f"loom::atomic::scope::{scope}>("
+                f"loom::view::atomic::cmpxchg<{template}>("
                 f"{self.expression(resolved.value_id('expected'))}, "
                 f"{self.expression(resolved.value_id('replacement'))}, "
                 f"{access})"
@@ -208,39 +221,67 @@ class CxxRenderer(CxxFunctionRenderer):
                 "failure_ordering",
                 "scope",
                 "static_indices",
+                *projected_flags,
             )
 
         ordering = resolved.attr("ordering")
         if name == "view.atomic.load":
-            expression = (
-                "loom::view::atomic::load<"
-                f"loom::atomic::ordering::{ordering}, "
-                f"loom::atomic::scope::{scope}>({access})"
-            )
+            selectors = [
+                f"loom::atomic::ordering::{ordering}",
+                f"loom::atomic::scope::{scope}",
+            ]
+            projected_flags = self._append_memory_access_contract(operation, selectors)
+            template = ", ".join(selectors)
+            expression = f"loom::view::atomic::load<{template}>({access})"
             self._emit_atomic_result(resolved.value_id("result"), expression)
-            return ("ordering", "scope", "static_indices")
+            return (
+                "ordering",
+                "scope",
+                "static_indices",
+                *projected_flags,
+            )
         if name == "view.atomic.store":
+            selectors = [
+                f"loom::atomic::ordering::{ordering}",
+                f"loom::atomic::scope::{scope}",
+            ]
+            projected_flags = self._append_memory_access_contract(operation, selectors)
+            template = ", ".join(selectors)
             self.writer.line(
-                "loom::view::atomic::store<"
-                f"loom::atomic::ordering::{ordering}, "
-                f"loom::atomic::scope::{scope}>("
+                f"loom::view::atomic::store<{template}>("
                 f"{self.expression(resolved.value_id('value'))}, {access});"
             )
-            return ("ordering", "scope", "static_indices")
+            return (
+                "ordering",
+                "scope",
+                "static_indices",
+                *projected_flags,
+            )
 
         kind = resolved.attr("kind")
         member = "rmw" if name == "view.atomic.rmw" else "reduce"
+        selectors = [
+            f"loom::atomic::kind::{kind}",
+            f"loom::atomic::ordering::{ordering}",
+            f"loom::atomic::scope::{scope}",
+        ]
+        projected_flags = self._append_memory_access_contract(operation, selectors)
+        template = ", ".join(selectors)
         expression = (
-            f"loom::view::atomic::{member}<loom::atomic::kind::{kind}, "
-            f"loom::atomic::ordering::{ordering}, "
-            f"loom::atomic::scope::{scope}>("
+            f"loom::view::atomic::{member}<{template}>("
             f"{self.expression(resolved.value_id('value'))}, {access})"
         )
         if name == "view.atomic.rmw":
             self._emit_atomic_result(resolved.value_id("result"), expression)
         else:
             self.writer.line(f"{expression};")
-        return ("kind", "ordering", "scope", "static_indices")
+        return (
+            "kind",
+            "ordering",
+            "scope",
+            "static_indices",
+            *projected_flags,
+        )
 
     def _render_memory(self, operation: Operation) -> tuple[str, ...] | None:
         name = operation.name
@@ -436,11 +477,17 @@ class CxxRenderer(CxxFunctionRenderer):
                 )
             )
             suffix = f", {indices}" if indices else ""
+            selectors: list[str] = []
+            projected_flags = self._append_memory_access_contract(operation, selectors)
+            template = f"<{selectors[0]}>" if selectors else ""
             self._declare(
                 operation.results[0],
-                f"loom::view::load({self.expression(view_id)}{suffix})",
+                f"loom::view::load{template}({self.expression(view_id)}{suffix})",
             )
-            return ("static_indices",)
+            return (
+                "static_indices",
+                *projected_flags,
+            )
         if name == "view.store":
             resolved = self._resolved(operation)
             indices = ", ".join(
@@ -453,8 +500,14 @@ class CxxRenderer(CxxFunctionRenderer):
             suffix = f", {indices}" if indices else ""
             value = self.expression(resolved.value_id("value"))
             view = self.expression(resolved.value_id("view"))
-            self.writer.line(f"loom::view::store({value}, {view}{suffix});")
-            return ("static_indices",)
+            selectors = []
+            projected_flags = self._append_memory_access_contract(operation, selectors)
+            template = f"<{selectors[0]}>" if selectors else ""
+            self.writer.line(f"loom::view::store{template}({value}, {view}{suffix});")
+            return (
+                "static_indices",
+                *projected_flags,
+            )
         if name == "vector.load":
             resolved = self._resolved(operation)
             result = resolved.value_id("result")
@@ -464,11 +517,16 @@ class CxxRenderer(CxxFunctionRenderer):
                 static_field="static_indices",
             )
             view = self.expression(resolved.value_id("view"))
+            selectors = [self.cpp_type(result)]
+            projected_flags = self._append_memory_access_contract(operation, selectors)
             self._declare(
                 result,
-                f"loom::vector::load<{self.cpp_type(result)}>({view}, {origin})",
+                "loom::vector::load<" + ", ".join(selectors) + f">({view}, {origin})",
             )
-            return ("static_indices",)
+            return (
+                "static_indices",
+                *projected_flags,
+            )
         if name == "vector.store":
             resolved = self._resolved(operation)
             origin = self._mixed_index_record(
@@ -478,8 +536,16 @@ class CxxRenderer(CxxFunctionRenderer):
             )
             value = self.expression(resolved.value_id("value"))
             view = self.expression(resolved.value_id("view"))
-            self.writer.line(f"loom::vector::store({value}, {view}, {origin});")
-            return ("static_indices",)
+            selectors = []
+            projected_flags = self._append_memory_access_contract(operation, selectors)
+            template = f"<{selectors[0]}>" if selectors else ""
+            self.writer.line(
+                f"loom::vector::store{template}({value}, {view}, {origin});"
+            )
+            return (
+                "static_indices",
+                *projected_flags,
+            )
         if name == "vector.fragment.store":
             resolved = self._resolved(operation)
             role = resolved.attr("role")

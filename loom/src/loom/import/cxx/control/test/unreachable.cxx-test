@@ -75,7 +75,7 @@ func.def public @stop(%output: buffer, %output_byte_offset: offset) {
   %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
   %10 = index.cast %9 : i64 to offset
   %11 = buffer.view %output[%10] : buffer -> view<1xi32>
-  view.store %2, %11[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %2, %11[0] : i32, view<1xi32>
   func.unreachable
 }
 
@@ -113,7 +113,7 @@ kernel.def @kernel_exit() {
     %16 = scalar.assume %15 [range(%15, 0, 9223372036854775807)] : i64
     %17 = index.cast %16 : i64 to offset
     %18 = buffer.view %output[%17] : buffer -> view<1xi32>
-    view.store %9, %18[0] : i32, view<1xi32>
+    view.store<root_in_bounds> %9, %18[0] : i32, view<1xi32>
     %19 = scalar.constant 1 : i1
     func.exit %19 : i1 {
       kernel.return

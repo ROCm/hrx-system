@@ -1602,10 +1602,11 @@ static iree_status_t loom_vector_to_scalar_build_view_atomic_cmpxchg_lane(
   loom_vector_memory_cache_policy_t cache_policy =
       loom_vector_to_scalar_memory_cache_policy(state);
   IREE_RETURN_IF_ERROR(loom_view_atomic_cmpxchg_build(
-      &state->rewriter->builder, cache_policy.build_flags, expected_lane,
-      replacement_lane, loom_vector_to_scalar_memory_view(state),
-      view_indices.dynamic_indices, view_indices.dynamic_index_count,
-      view_indices.static_indices, view_indices.static_index_count,
+      &state->rewriter->builder, cache_policy.build_flags,
+      loom_memory_access_flags(access), expected_lane, replacement_lane,
+      loom_vector_to_scalar_memory_view(state), view_indices.dynamic_indices,
+      view_indices.dynamic_index_count, view_indices.static_indices,
+      view_indices.static_index_count,
       loom_vector_to_scalar_enum_attr_value(
           loom_memory_access_atomic_success_ordering(access)),
       loom_vector_to_scalar_enum_attr_value(

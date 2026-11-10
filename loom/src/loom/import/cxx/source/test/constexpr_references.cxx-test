@@ -17,7 +17,7 @@ func.def public @k(%out: buffer, %out_byte_offset: offset) {
   %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
   %10 = index.cast %9 : i64 to offset
   %11 = buffer.view %out[%10] : buffer -> view<1xi32>
-  view.store %2, %11[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %2, %11[0] : i32, view<1xi32>
   func.return
 }
 
@@ -67,6 +67,6 @@ func.def public @entry(%output: buffer, %output_byte_offset: offset) {
   %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
   %10 = index.cast %9 : i64 to offset
   %11 = buffer.view %output[%10] : buffer -> view<1xi32>
-  view.store %2, %11[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %2, %11[0] : i32, view<1xi32>
   func.return
 }

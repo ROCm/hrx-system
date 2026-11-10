@@ -52,7 +52,7 @@ func.def public @entry(%input: buffer, %input_byte_offset: offset, %count: i32, 
       %29 = scalar.assume %28 [range(%28, 0, 9223372036854775807)] : i64
       %30 = index.cast %29 : i64 to offset
       %31 = buffer.view %input[%30] : buffer -> view<1xi32>
-      %32 = view.load %31[0] : view<1xi32> -> i32
+      %32 = view.load<root_in_bounds> %31[0] : view<1xi32> -> i32
       %total = scalar.addi %total$15, %32 : i32
       %34 = scalar.constant 1 : i1
       scf.yield %34, %total : i1, i32
@@ -277,10 +277,10 @@ func.def public @spin(%value: buffer, %value_byte_offset: offset) {
     scf.condition %33 : i1
   } do {
     %34 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
-    %35 = view.load<volatile> %34[0] : view<1xi32> -> i32
+    %35 = view.load<volatile|root_in_bounds> %34[0] : view<1xi32> -> i32
     %36 = scalar.constant 1 : i32
     %37 = scalar.addi %35, %36 : i32
-    view.store<volatile> %37, %34[0] : i32, view<1xi32>
+    view.store<volatile|root_in_bounds> %37, %34[0] : i32, view<1xi32>
     scf.yield
   }
   func.unreachable
@@ -863,7 +863,7 @@ func.def public @copy_odd(%input: buffer, %input_byte_offset: offset, %output: b
       %22 = scalar.assume %21 [range(%21, 0, 9223372036854775807)] : i64
       %23 = index.cast %22 : i64 to offset
       %24 = buffer.view %input[%23] : buffer -> view<1xi32>
-      %25 = view.load %24[0] : view<1xi32> -> i32
+      %25 = view.load<root_in_bounds> %24[0] : view<1xi32> -> i32
       %26 = scalar.extui %10 : i32 to i64
       %27 = scalar.constant 4 : i64
       %28 = scalar.muli %26, %27 : i64
@@ -872,7 +872,7 @@ func.def public @copy_odd(%input: buffer, %input_byte_offset: offset, %output: b
       %31 = scalar.assume %30 [range(%30, 0, 9223372036854775807)] : i64
       %32 = index.cast %31 : i64 to offset
       %33 = buffer.view %output[%32] : buffer -> view<1xi32>
-      view.store %25, %33[0] : i32, view<1xi32>
+      view.store<root_in_bounds> %25, %33[0] : i32, view<1xi32>
       %34 = scalar.constant 1 : i1
       scf.yield %34 : i1
     }
@@ -1094,7 +1094,7 @@ func.def public @select_values(%input: buffer, %input_byte_offset: offset, %outp
       %39 = scalar.assume %38 [range(%38, 0, 9223372036854775807)] : i64
       %cursor_byte_offset$40 = index.cast %39 : i64 to offset
       %41 = buffer.view %cursor$14[%cursor_byte_offset$15] : buffer -> view<1xi32>
-      %value = view.load %41[0] : view<1xi32> -> i32
+      %value = view.load<root_in_bounds> %41[0] : view<1xi32> -> i32
       %43 = scalar.andi %value, %choose : i32
       %44 = scalar.constant 0 : i32
       %45 = scalar.cmpi eq, %43, %44 : i32
@@ -1111,7 +1111,7 @@ func.def public @select_values(%input: buffer, %input_byte_offset: offset, %outp
         %59 = scalar.assume %58 [range(%58, 0, 9223372036854775807)] : i64
         %result_byte_offset = index.cast %59 : i64 to offset
         %61 = buffer.view %result$16[%result_byte_offset$17] : buffer -> view<1xi32>
-        view.store %value, %61[0] : i32, view<1xi32>
+        view.store<root_in_bounds> %value, %61[0] : i32, view<1xi32>
         %62 = scalar.constant 1 : i32
         %stored = scalar.addi %stored$18, %62 : i32
         %64 = scalar.constant 1 : i1
@@ -1221,7 +1221,7 @@ func.def public @lookback(%group: i32, %states: buffer, %states_byte_offset: off
     %37 = scalar.assume %36 [range(%36, 0, 9223372036854775807)] : i64
     %38 = index.cast %37 : i64 to offset
     %39 = buffer.view %states[%38] : buffer -> view<1xi32>
-    %state = view.load %39[0] : view<1xi32> -> i32
+    %state = view.load<root_in_bounds> %39[0] : view<1xi32> -> i32
     %value$41 = scalar.constant 0 : i32
     %42 = scalar.constant 1 : i32
     %43 = scalar.cmpi eq, %state, %42 : i32
@@ -1234,7 +1234,7 @@ func.def public @lookback(%group: i32, %states: buffer, %states_byte_offset: off
       %50 = scalar.assume %49 [range(%49, 0, 9223372036854775807)] : i64
       %51 = index.cast %50 : i64 to offset
       %52 = buffer.view %aggregates[%51] : buffer -> view<1xi32>
-      %value = view.load %52[0] : view<1xi32> -> i32
+      %value = view.load<root_in_bounds> %52[0] : view<1xi32> -> i32
       scf.yield %value : i32
     } else {
       scf.yield %value$41 : i32
@@ -1250,7 +1250,7 @@ func.def public @lookback(%group: i32, %states: buffer, %states_byte_offset: off
       %62 = scalar.assume %61 [range(%61, 0, 9223372036854775807)] : i64
       %63 = index.cast %62 : i64 to offset
       %64 = buffer.view %prefixes[%63] : buffer -> view<1xi32>
-      %value = view.load %64[0] : view<1xi32> -> i32
+      %value = view.load<root_in_bounds> %64[0] : view<1xi32> -> i32
       scf.yield %value : i32
     } else {
       scf.yield %value$44 : i32

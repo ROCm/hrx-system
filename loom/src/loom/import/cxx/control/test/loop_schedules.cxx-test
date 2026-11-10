@@ -118,7 +118,7 @@ func.def @continue_schedule_3_2(%input: buffer, %input_byte_offset: offset, %cou
     %31 = scalar.assume %30 [range(%30, 0, 9223372036854775807)] : i64
     %32 = index.cast %31 : i64 to offset
     %33 = buffer.view %input[%32] : buffer -> view<1xi32>
-    %value = view.load %33[0] : view<1xi32> -> i32
+    %value = view.load<root_in_bounds> %33[0] : view<1xi32> -> i32
     %35 = scalar.andi %25, %choose : i32
     %36 = scalar.constant 0 : i32
     %37 = scalar.cmpi ne, %35, %36 : i32

@@ -30,7 +30,7 @@ kernel.def @call_lifetimes_kernel() {
   %index$13 = scf.while(%index = %index$10 : i32) -> (i32) {
     %99 = index.constant 0 : offset
     %22 = buffer.view %parameters[%99] : buffer -> view<1xi32>
-    %23 = view.load %22[0] : view<1xi32> -> i32
+    %23 = view.load<root_in_bounds> %22[0] : view<1xi32> -> i32
     %24 = scalar.cmpi ult, %index, %23 : i32
     scf.condition %24, %index : i1, i32
   } do(%index$12: i32) {
@@ -51,7 +51,7 @@ kernel.def @call_lifetimes_kernel() {
     %39 = index.cast %38 : i64 to offset
     %97 = index.constant 4 : offset
     %48 = buffer.view %parameters[%97] : buffer -> view<1xi32>
-    %49 = view.load %48[0] : view<1xi32> -> i32
+    %49 = view.load<root_in_bounds> %48[0] : view<1xi32> -> i32
     %50 = scalar.constant 1 : i32
     %51 = scalar.andi %49, %50 : i32
     %52 = scalar.extui %51 : i32 to i64
@@ -66,14 +66,14 @@ kernel.def @call_lifetimes_kernel() {
     %counter = view.load %counter_view[0] : view<1xi32> -> i32
     %62 = scalar.addi %updated, %counter : i32
     %71 = buffer.view %parameters[%values_storage_byte_offset] : buffer -> view<1xi32>
-    %72 = view.load %71[0] : view<1xi32> -> i32
+    %72 = view.load<root_in_bounds> %71[0] : view<1xi32> -> i32
     %73 = scalar.addi %72, %index$12 : i32
     %74 = scalar.extui %73 : i32 to i64
     %101 = scalar.shli %74, %102 : i64
     %79 = scalar.assume %101 [range(%101, 0, 9223372036854775807)] : i64
     %80 = index.cast %79 : i64 to offset
     %81 = buffer.view %output[%80] : buffer -> view<1xi32>
-    view.store %62, %81[0] : i32, view<1xi32>
+    view.store<root_in_bounds> %62, %81[0] : i32, view<1xi32>
     %index$83 = scalar.addi %index$12, %50 : i32
     scf.yield %index$83 : i32
   }
@@ -82,15 +82,15 @@ kernel.def @call_lifetimes_kernel() {
 
 func.def noinline @publish(%output: buffer, %output_byte_offset: offset, %value: i32) {
   %87 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
-  view.store %value, %87[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %value, %87[0] : i32, view<1xi32>
   func.return
 }
 
 func.def noinline @increment(%value: buffer, %value_byte_offset: offset) -> (i32) {
   %91 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
-  %92 = view.load %91[0] : view<1xi32> -> i32
+  %92 = view.load<root_in_bounds> %91[0] : view<1xi32> -> i32
   %93 = scalar.constant 1 : i32
   %94 = scalar.addi %92, %93 : i32
-  view.store %94, %91[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %94, %91[0] : i32, view<1xi32>
   func.return %94 : i32
 }

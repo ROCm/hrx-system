@@ -610,6 +610,12 @@ static iree_status_t loom_vector_memory_footprint_check_root_element_end(
   if (memory_access->static_element_byte_count <= 0) {
     return iree_ok_status();
   }
+  const loom_memory_access_t source_access =
+      loom_memory_access_cast(state->module, access->op);
+  if (iree_any_bit_set(loom_memory_access_flags(source_access),
+                       LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS)) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(loom_memory_root_bounds_verify_exact_root(
       state->module, state->fact_table, state->options->emitter, access->op,
       access->view, memory_access->static_element_byte_count, element_end_facts,

@@ -23,7 +23,7 @@ func.def public @find(%values: buffer, %values_byte_offset: offset, %count: i32)
     %15 = scalar.assume %14 [range(%14, 0, 9223372036854775807)] : i64
     %16 = index.cast %15 : i64 to offset
     %17 = buffer.view %values[%16] : buffer -> view<1xf64>
-    %18 = view.load %17[0] : view<1xf64> -> f64
+    %18 = view.load<root_in_bounds> %17[0] : view<1xf64> -> f64
     %19 = scalar.constant 0.0 : f64
     %20 = scalar.cmpf olt, %18, %19 : f64
     scf.if %20 {
@@ -150,7 +150,7 @@ func.def public @integrate(%values: buffer, %values_byte_offset: offset, %step$2
     %24 = scalar.assume %23 [range(%23, 0, 9223372036854775807)] : i64
     %25 = index.cast %24 : i64 to offset
     %26 = buffer.view %values[%25] : buffer -> view<1xf64>
-    %error = view.load %26[0] : view<1xf64> -> f64
+    %error = view.load<root_in_bounds> %26[0] : view<1xf64> -> f64
     %28 = scalar.constant 1.0 : f64
     %29 = scalar.cmpf ogt, %error, %28 : f64
     %30, %step$31, %iteration$32 = scf.if %29 -> (i1, f64, i32) {
@@ -170,9 +170,9 @@ func.def public @integrate(%values: buffer, %values_byte_offset: offset, %step$2
       %44 = scalar.assume %43 [range(%43, 0, 9223372036854775807)] : i64
       %45 = index.cast %44 : i64 to offset
       %46 = buffer.view %values[%45] : buffer -> view<1xf64>
-      %47 = view.load %46[0] : view<1xf64> -> f64
+      %47 = view.load<root_in_bounds> %46[0] : view<1xf64> -> f64
       %48 = scalar.addf %47, %step$7 : f64
-      view.store %48, %46[0] : f64, view<1xf64>
+      view.store<root_in_bounds> %48, %46[0] : f64, view<1xf64>
       %49 = scalar.constant 1 : i32
       %iteration = scalar.addi %iteration$8, %49 : i32
       %51 = scalar.constant 0 : i32
@@ -184,7 +184,7 @@ func.def public @integrate(%values: buffer, %values_byte_offset: offset, %step$2
       %57 = scalar.assume %56 [range(%56, 0, 9223372036854775807)] : i64
       %58 = index.cast %57 : i64 to offset
       %59 = buffer.view %values[%58] : buffer -> view<1xf64>
-      %60 = view.load %59[0] : view<1xf64> -> f64
+      %60 = view.load<root_in_bounds> %59[0] : view<1xf64> -> f64
       %61 = scalar.constant 10.0 : f64
       %62 = scalar.cmpf ogt, %60, %61 : f64
       scf.if %62 {
@@ -310,7 +310,7 @@ func.def public @find_result(%values: buffer, %values_byte_offset: offset, %coun
     %16 = scalar.assume %15 [range(%15, 0, 9223372036854775807)] : i64
     %17 = index.cast %16 : i64 to offset
     %18 = buffer.view %values[%17] : buffer -> view<1xf32>
-    %19 = view.load %18[0] : view<1xf32> -> f32
+    %19 = view.load<root_in_bounds> %18[0] : view<1xf32> -> f32
     %20 = scalar.constant 0.0 : f32
     %21 = scalar.cmpf une, %19, %20 : f32
     scf.if %21 {
@@ -322,7 +322,7 @@ func.def public @find_result(%values: buffer, %values_byte_offset: offset, %coun
       %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
       %28 = index.cast %27 : i64 to offset
       %29 = buffer.view %values[%28] : buffer -> view<1xf32>
-      %30 = view.load %29[0] : view<1xf32> -> f32
+      %30 = view.load<root_in_bounds> %29[0] : view<1xf32> -> f32
       %31 = scalar.constant 1 : i1
       func.exit %31 : i1 {
         func.return %10, %30 : i32, f32
@@ -428,7 +428,7 @@ kernel.def @first_nonzero() {
     %22 = scalar.assume %21 [range(%21, 0, 9223372036854775807)] : i64
     %23 = index.cast %22 : i64 to offset
     %24 = buffer.view %input[%23] : buffer -> view<1xi32>
-    %25 = view.load %24[0] : view<1xi32> -> i32
+    %25 = view.load<root_in_bounds> %24[0] : view<1xi32> -> i32
     %26 = scalar.constant 0 : i32
     %27 = scalar.cmpi ne, %25, %26 : i32
     scf.if %27 {
@@ -441,7 +441,7 @@ kernel.def @first_nonzero() {
       %34 = scalar.assume %33 [range(%33, 0, 9223372036854775807)] : i64
       %35 = index.cast %34 : i64 to offset
       %36 = buffer.view %output[%35] : buffer -> view<1xi32>
-      view.store %16, %36[0] : i32, view<1xi32>
+      view.store<root_in_bounds> %16, %36[0] : i32, view<1xi32>
       %37 = scalar.constant 1 : i1
       func.exit %37 : i1 {
         kernel.return
@@ -460,7 +460,7 @@ kernel.def @first_nonzero() {
   %47 = scalar.assume %46 [range(%46, 0, 9223372036854775807)] : i64
   %48 = index.cast %47 : i64 to offset
   %49 = buffer.view %output[%48] : buffer -> view<1xi32>
-  view.store %40, %49[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %40, %49[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -485,7 +485,7 @@ func.def public @early_then_counted(%values: buffer, %values_byte_offset: offset
   %10 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
   %11 = index.cast %10 : i64 to offset
   %12 = buffer.view %values[%11] : buffer -> view<1xi32>
-  %13 = view.load %12[0] : view<1xi32> -> i32
+  %13 = view.load<root_in_bounds> %12[0] : view<1xi32> -> i32
   %14 = scalar.constant 9 : i32
   %15 = scalar.cmpi sgt, %13, %14 : i32
   scf.if %15 {
@@ -511,7 +511,7 @@ func.def public @early_then_counted(%values: buffer, %values_byte_offset: offset
     %31 = scalar.assume %30 [range(%30, 0, 9223372036854775807)] : i64
     %32 = index.cast %31 : i64 to offset
     %33 = buffer.view %values[%32] : buffer -> view<1xi32>
-    %34 = view.load %33[0] : view<1xi32> -> i32
+    %34 = view.load<root_in_bounds> %33[0] : view<1xi32> -> i32
     %35 = scalar.constant 0 : i32
     %36 = scalar.cmpi slt, %34, %35 : i32
     scf.if %36 {
@@ -550,7 +550,7 @@ func.def public @early_then_forever(%values: buffer, %values_byte_offset: offset
   %10 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
   %11 = index.cast %10 : i64 to offset
   %12 = buffer.view %values[%11] : buffer -> view<1xi32>
-  %13 = view.load %12[0] : view<1xi32> -> i32
+  %13 = view.load<root_in_bounds> %12[0] : view<1xi32> -> i32
   %14 = scalar.constant 9 : i32
   %15 = scalar.cmpi sgt, %13, %14 : i32
   scf.if %15 {
@@ -575,7 +575,7 @@ func.def public @early_then_forever(%values: buffer, %values_byte_offset: offset
     %30 = scalar.assume %29 [range(%29, 0, 9223372036854775807)] : i64
     %31 = index.cast %30 : i64 to offset
     %32 = buffer.view %values[%31] : buffer -> view<1xi32>
-    %33 = view.load %32[0] : view<1xi32> -> i32
+    %33 = view.load<root_in_bounds> %32[0] : view<1xi32> -> i32
     %34 = scalar.constant 0 : i32
     %35 = scalar.cmpi slt, %33, %34 : i32
     scf.if %35 {
@@ -702,7 +702,7 @@ func.def public @nested_matrix_finite(%values: buffer, %values_byte_offset: offs
       %25 = scalar.assume %24 [range(%24, 0, 9223372036854775807)] : i64
       %26 = index.cast %25 : i64 to offset
       %27 = buffer.view %values[%26] : buffer -> view<1xf64>
-      %value = view.load %27[0] : view<1xf64> -> f64
+      %value = view.load<root_in_bounds> %27[0] : view<1xf64> -> f64
       %29 = scalar.cmpf une, %value, %value : f64
       scf.if %29 {
         %30 = scalar.constant 0 : i1
@@ -814,7 +814,7 @@ func.def public @classify(%input: buffer, %input_byte_offset: offset, %index: i3
     %16 = scalar.assume %15 [range(%15, 0, 9223372036854775807)] : i64
     %17 = index.cast %16 : i64 to offset
     %18 = buffer.view %trace[%17] : buffer -> view<1xi32>
-    view.store %10, %18[0] : i32, view<1xi32>
+    view.store<root_in_bounds> %10, %18[0] : i32, view<1xi32>
     %19 = scalar.constant 7 : i32
     %20 = scalar.constant 0 : i32
     %21 = scalar.subi %20, %19 : i32
@@ -828,7 +828,7 @@ func.def public @classify(%input: buffer, %input_byte_offset: offset, %index: i3
     %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
     %28 = index.cast %27 : i64 to offset
     %29 = buffer.view %input[%28] : buffer -> view<1xi32>
-    %value = view.load %29[0] : view<1xi32> -> i32
+    %value = view.load<root_in_bounds> %29[0] : view<1xi32> -> i32
     %31 = scalar.constant 2 : i32
     %32 = scalar.extui %position : i32 to i64
     %33 = scalar.constant 4 : i64
@@ -838,7 +838,7 @@ func.def public @classify(%input: buffer, %input_byte_offset: offset, %index: i3
     %37 = scalar.assume %36 [range(%36, 0, 9223372036854775807)] : i64
     %38 = index.cast %37 : i64 to offset
     %39 = buffer.view %trace[%38] : buffer -> view<1xi32>
-    view.store %31, %39[0] : i32, view<1xi32>
+    view.store<root_in_bounds> %31, %39[0] : i32, view<1xi32>
     %40 = scalar.constant 0 : i32
     %41 = scalar.cmpi slt, %value, %40 : i32
     %42 = scf.if %41 -> (i32) {
@@ -858,7 +858,7 @@ func.def public @classify(%input: buffer, %input_byte_offset: offset, %index: i3
         %54 = scalar.assume %53 [range(%53, 0, 9223372036854775807)] : i64
         %55 = index.cast %54 : i64 to offset
         %56 = buffer.view %trace[%55] : buffer -> view<1xi32>
-        view.store %48, %56[0] : i32, view<1xi32>
+        view.store<root_in_bounds> %48, %56[0] : i32, view<1xi32>
         %57 = scalar.constant 3 : i32
         scf.yield %57 : i32
       } else {

@@ -18,19 +18,19 @@ func.def public @step(%particles: buffer, %particles_byte_offset: offset, %index
   %11 = index.constant 4 : offset
   %12 = index.add %10, %11 : offset
   %13 = buffer.view %particles[%12] : buffer -> view<1xf32>
-  %velocity = view.load %13[0] : view<1xf32> -> f32
+  %velocity = view.load<root_in_bounds> %13[0] : view<1xf32> -> f32
   %15 = scalar.mulf %velocity, %dt : f32
   %25 = buffer.view %particles[%10] : buffer -> view<1xf32>
-  %26 = view.load %25[0] : view<1xf32> -> f32
+  %26 = view.load<root_in_bounds> %25[0] : view<1xf32> -> f32
   %27 = scalar.addf %26, %15 : f32
-  view.store %27, %25[0] : f32, view<1xf32>
+  view.store<root_in_bounds> %27, %25[0] : f32, view<1xf32>
   %28 = scalar.constant 1 : i32
   %36 = index.constant 8 : offset
   %37 = index.add %10, %36 : offset
   %38 = buffer.view %particles[%37] : buffer -> view<1xi32>
-  %39 = view.load %38[0] : view<1xi32> -> i32
+  %39 = view.load<root_in_bounds> %38[0] : view<1xi32> -> i32
   %40 = scalar.ori %39, %28 : i32
-  view.store %40, %38[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %40, %38[0] : i32, view<1xi32>
   func.return
 }
 
@@ -61,16 +61,16 @@ func.def public @nested(%records: buffer, %records_byte_offset: offset, %index: 
   %count_byte_offset = index.add %value_byte_offset, %11 : offset
   %15 = scalar.constant 7 : i32
   %16 = buffer.view %records[%count_byte_offset] : buffer -> view<1xi32>
-  %17 = view.load %16[0] : view<1xi32> -> i32
+  %17 = view.load<root_in_bounds> %16[0] : view<1xi32> -> i32
   %18 = scalar.addi %17, %15 : i32
-  view.store %18, %16[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %18, %16[0] : i32, view<1xi32>
   %19 = index.constant 8 : offset
   %20 = index.add %value_byte_offset, %19 : offset
   %21 = buffer.view %records[%20] : buffer -> view<1xi16>
-  %last = view.load %21[0] : view<1xi16> -> i16
+  %last = view.load<root_in_bounds> %21[0] : view<1xi16> -> i16
   %23 = scalar.extui %last : i16 to i32
   %24 = scalar.constant 1 : i32
-  %27 = view.load %16[0] : view<1xi32> -> i32
+  %27 = view.load<root_in_bounds> %16[0] : view<1xi32> -> i32
   %43 = scalar.addi %23, %27 : i32
   %44 = scalar.addi %43, %24 : i32
   func.return %44 : i32
@@ -87,7 +87,7 @@ func.def public @aligned(%records: buffer, %records_byte_offset: offset, %index:
   %40 = index.constant 16 : offset
   %41 = index.add %39, %40 : offset
   %42 = buffer.view %records[%41] : buffer -> view<1xi32>
-  view.store %value, %42[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %value, %42[0] : i32, view<1xi32>
   func.return
 }
 
@@ -110,15 +110,15 @@ func.def public @observed(%packets: buffer, %packets_byte_offset$1: offset) -> (
   %11 = index.constant 4 : offset
   %12 = index.add %packets_byte_offset$1, %11 : offset
   %15 = buffer.view %packets[%12] : buffer -> view<1xi32>
-  %previous = view.load<volatile> %15[0] : view<1xi32> -> i32
+  %previous = view.load<volatile|root_in_bounds> %15[0] : view<1xi32> -> i32
   %17 = scalar.constant 1 : i32
   %18 = scalar.addi %previous, %17 : i32
-  view.store<volatile> %18, %15[0] : i32, view<1xi32>
+  view.store<volatile|root_in_bounds> %18, %15[0] : i32, view<1xi32>
   %20 = index.add %packets_byte_offset$10, %11 : offset
   %23 = buffer.view %packets[%20] : buffer -> view<1xi32>
-  %24 = view.load<volatile> %23[0] : view<1xi32> -> i32
+  %24 = view.load<volatile|root_in_bounds> %23[0] : view<1xi32> -> i32
   %26 = scalar.addi %24, %17 : i32
-  view.store<volatile> %26, %23[0] : i32, view<1xi32>
+  view.store<volatile|root_in_bounds> %26, %23[0] : i32, view<1xi32>
   %27 = scalar.addi %previous, %26 : i32
   func.return %27 : i32
 }
@@ -131,10 +131,10 @@ unsigned update(const volatile Observed* record) { return ++record->value; }
 // ----
 func.def public @update(%record: buffer, %record_byte_offset: offset) -> (i32) {
   %5 = buffer.view %record[%record_byte_offset] : buffer -> view<1xi32>
-  %6 = view.load<volatile> %5[0] : view<1xi32> -> i32
+  %6 = view.load<volatile|root_in_bounds> %5[0] : view<1xi32> -> i32
   %7 = scalar.constant 1 : i32
   %8 = scalar.addi %6, %7 : i32
-  view.store<volatile> %8, %5[0] : i32, view<1xi32>
+  view.store<volatile|root_in_bounds> %8, %5[0] : i32, view<1xi32>
   func.return %8 : i32
 }
 
@@ -148,14 +148,14 @@ float convert(const Counters* values) {
 // ----
 func.def public @convert(%values: buffer, %values_byte_offset: offset) -> (f32) {
   %5 = buffer.view %values[%values_byte_offset] : buffer -> view<1xi32>
-  %high = view.load %5[0] : view<1xi32> -> i32
+  %high = view.load<root_in_bounds> %5[0] : view<1xi32> -> i32
   %7 = scalar.constant 3 : i32
   %8 = scalar.divui %high, %7 : i32
   %9 = scalar.uitofp %8 : i32 to f32
   %10 = index.constant 4 : offset
   %11 = index.add %values_byte_offset, %10 : offset
   %12 = buffer.view %values[%11] : buffer -> view<1xi32>
-  %low = view.load %12[0] : view<1xi32> -> i32
+  %low = view.load<root_in_bounds> %12[0] : view<1xi32> -> i32
   %15 = scalar.divsi %low, %7 : i32
   %16 = scalar.sitofp %15 : i32 to f32
   %17 = scalar.addf %9, %16 : f32
@@ -181,7 +181,7 @@ func.def public @read(%boxes: buffer, %boxes_byte_offset: offset, %index: i32) -
   %11 = index.constant 4 : offset
   %12 = index.add %10, %11 : offset
   %13 = buffer.view %boxes[%12] : buffer -> view<1xf32>
-  %value = view.load %13[0] : view<1xf32> -> f32
+  %value = view.load<root_in_bounds> %13[0] : view<1xf32> -> f32
   func.return %value : f32
 }
 
@@ -205,9 +205,9 @@ func.def public @update(%records: buffer, %records_byte_offset: offset, %index: 
   %12 = index.constant 16 : offset
   %13 = index.add %11, %12 : offset
   %14 = buffer.view %records[%13] : buffer -> view<4xf32>
-  %15 = vector.load %14[0] : view<4xf32> -> vector<4xf32>
+  %15 = vector.load<root_in_bounds> %14[0] : view<4xf32> -> vector<4xf32>
   %16 = vector.addf %15, %delta : vector<4xf32>
-  vector.store %16, %14[0] : vector<4xf32>, view<4xf32>
+  vector.store<root_in_bounds> %16, %14[0] : vector<4xf32>, view<4xf32>
   func.return %16 : vector<4xf32>
 }
 
@@ -231,7 +231,7 @@ func.def public source_signature(#func.abi.c.signature<arguments = [0, 1], resul
   %11 = index.constant 4 : offset
   %12 = index.add %10, %11 : offset
   %13 = buffer.view %records[%12] : buffer -> view<1xi32>
-  %value = view.load %13[0] : view<1xi32> -> i32
+  %value = view.load<root_in_bounds> %13[0] : view<1xi32> -> i32
   func.return %value : i32
 }
 
@@ -250,7 +250,7 @@ func.def public @observe(%device: buffer, %device_byte_offset: offset) {
   %6 = index.constant 4 : offset
   %7 = index.add %device_byte_offset, %6 : offset
   %8 = buffer.view %device[%7] : buffer -> view<1xi32>
-  %status$9 = view.load<volatile> %8[0] : view<1xi32> -> i32
+  %status$9 = view.load<volatile|root_in_bounds> %8[0] : view<1xi32> -> i32
   %22 = scalar.constant 8 : i64
   %14 = index.cast %device_byte_offset : offset to i64
   %15 = scalar.addi %14, %22 : i64
@@ -258,7 +258,7 @@ func.def public @observe(%device: buffer, %device_byte_offset: offset) {
   %17 = index.cast %16 : i64 to offset
   %19 = index.add %17, %6 : offset
   %20 = buffer.view %device[%19] : buffer -> view<1xi32>
-  %status$21 = view.load<volatile> %20[0] : view<1xi32> -> i32
+  %status$21 = view.load<volatile|root_in_bounds> %20[0] : view<1xi32> -> i32
   func.return
 }
 
@@ -327,7 +327,7 @@ kernel.def @record_update_kernel() {
   %20 = func.call @record_update(%records, %records_byte_offset, %input, %records_byte_offset, %19) : (buffer, offset, buffer, offset, i32) -> (i32)
   %141 = index.constant 4 : offset
   %29 = buffer.view %output[%141] : buffer -> view<1xi32>
-  view.store %20, %29[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %20, %29[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -342,65 +342,65 @@ func.def @update_sample___Sample(%records: buffer, %records_byte_offset: offset,
   %43 = index.constant 4 : offset
   %44 = index.add %input_byte_offset, %43 : offset
   %45 = buffer.view %input[%44] : buffer -> view<1xf32>
-  %position$46 = view.load %45[0] : view<1xf32> -> f32
+  %position$46 = view.load<root_in_bounds> %45[0] : view<1xf32> -> f32
   %151 = scalar.constant -2.0 : f32
   %49 = scalar.mulf %position$46, %151 : f32
   %51 = index.add %sample_byte_offset, %43 : offset
   %52 = buffer.view %records[%51] : buffer -> view<1xf32>
-  view.store %49, %52[0] : f32, view<1xf32>
+  view.store<root_in_bounds> %49, %52[0] : f32, view<1xf32>
   %53 = index.constant 8 : offset
   %54 = index.add %input_byte_offset, %53 : offset
   %55 = buffer.view %input[%54] : buffer -> view<1xi32>
-  %flags = view.load %55[0] : view<1xi32> -> i32
+  %flags = view.load<root_in_bounds> %55[0] : view<1xi32> -> i32
   %149 = scalar.constant 1 : i32
   %150 = scalar.shrui %flags, %149 : i32
   %60 = index.add %sample_byte_offset, %53 : offset
   %61 = buffer.view %records[%60] : buffer -> view<1xi32>
-  view.store %150, %61[0] : i32, view<1xi32>
-  %66 = view.load %61[0] : view<1xi32> -> i32
+  view.store<root_in_bounds> %150, %61[0] : i32, view<1xi32>
+  %66 = view.load<root_in_bounds> %61[0] : view<1xi32> -> i32
   %67 = scalar.ori %66, %149 : i32
-  view.store %67, %61[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %67, %61[0] : i32, view<1xi32>
   %148 = scalar.constant -1 : i16
   %70 = index.constant 12 : offset
   %71 = index.add %sample_byte_offset, %70 : offset
   %72 = buffer.view %records[%71] : buffer -> view<1xi16>
-  view.store %148, %72[0] : i16, view<1xi16>
+  view.store<root_in_bounds> %148, %72[0] : i16, view<1xi16>
   %73 = scalar.constant 2 : i32
-  %77 = view.load %72[0] : view<1xi16> -> i16
+  %77 = view.load<root_in_bounds> %72[0] : view<1xi16> -> i16
   %78 = scalar.extui %77 : i16 to i32
   %79 = scalar.addi %78, %73 : i32
   %80 = scalar.trunci %79 : i32 to i16
-  view.store %80, %72[0] : i16, view<1xi16>
+  view.store<root_in_bounds> %80, %72[0] : i16, view<1xi16>
   %147 = scalar.constant -127 : i8
   %85 = index.constant 14 : offset
   %86 = index.add %sample_byte_offset, %85 : offset
   %87 = buffer.view %records[%86] : buffer -> view<1xi8>
-  view.store %147, %87[0] : i8, view<1xi8>
-  %92 = view.load %87[0] : view<1xi8> -> i8
+  view.store<root_in_bounds> %147, %87[0] : i8, view<1xi8>
+  %92 = view.load<root_in_bounds> %87[0] : view<1xi8> -> i8
   %93 = scalar.extsi %92 : i8 to i32
   %145 = scalar.constant -2 : i32
   %146 = scalar.addi %93, %145 : i32
   %95 = scalar.trunci %146 : i32 to i8
-  view.store %95, %87[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %95, %87[0] : i8, view<1xi8>
   %144 = scalar.constant -1 : i8
   %100 = buffer.view %records[%sample_byte_offset] : buffer -> view<1xi8>
-  view.store %144, %100[0] : i8, view<1xi8>
-  %111 = view.load %100[0] : view<1xi8> -> i8
+  view.store<root_in_bounds> %144, %100[0] : i8, view<1xi8>
+  %111 = view.load<root_in_bounds> %100[0] : view<1xi8> -> i8
   %112 = scalar.extui %111 : i8 to i32
   %114 = scalar.addi %112, %149 : i32
   %115 = scalar.trunci %114 : i32 to i8
-  view.store %115, %100[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %115, %100[0] : i8, view<1xi8>
   %119 = scalar.constant 0.5 : f32
-  %121 = view.load %52[0] : view<1xf32> -> f32
+  %121 = view.load<root_in_bounds> %52[0] : view<1xf32> -> f32
   %122 = scalar.addf %121, %119 : f32
-  view.store %122, %52[0] : f32, view<1xf32>
-  %position$126 = view.load %52[0] : view<1xf32> -> f32
+  view.store<root_in_bounds> %122, %52[0] : f32, view<1xf32>
+  %position$126 = view.load<root_in_bounds> %52[0] : view<1xf32> -> f32
   %127 = scalar.fptoui %position$126 : f32 to i32
   %128 = scalar.addi %127, %112 : i32
-  %count = view.load %72[0] : view<1xi16> -> i16
+  %count = view.load<root_in_bounds> %72[0] : view<1xi16> -> i16
   %133 = scalar.extui %count : i16 to i32
   %134 = scalar.addi %128, %133 : i32
-  %delta = view.load %87[0] : view<1xi8> -> i8
+  %delta = view.load<root_in_bounds> %87[0] : view<1xi8> -> i8
   %139 = scalar.extsi %delta : i8 to i32
   %140 = scalar.addi %134, %139 : i32
   func.return %140 : i32
@@ -462,7 +462,7 @@ kernel.def @record_volatile_kernel() {
   %13 = func.call @update_sample_volatile___Sample(%records, %records_byte_offset, %input, %records_byte_offset, %12) : (buffer, offset, buffer, offset, i32) -> (i32)
   %134 = index.constant 4 : offset
   %22 = buffer.view %output[%134] : buffer -> view<1xi32>
-  view.store %13, %22[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %13, %22[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -477,65 +477,65 @@ func.def @update_sample_volatile___Sample(%records: buffer, %records_byte_offset
   %36 = index.constant 4 : offset
   %37 = index.add %input_byte_offset, %36 : offset
   %38 = buffer.view %input[%37] : buffer -> view<1xf32>
-  %position$39 = view.load %38[0] : view<1xf32> -> f32
+  %position$39 = view.load<root_in_bounds> %38[0] : view<1xf32> -> f32
   %144 = scalar.constant -2.0 : f32
   %42 = scalar.mulf %position$39, %144 : f32
   %44 = index.add %sample_byte_offset, %36 : offset
   %45 = buffer.view %records[%44] : buffer -> view<1xf32>
-  view.store<volatile> %42, %45[0] : f32, view<1xf32>
+  view.store<volatile|root_in_bounds> %42, %45[0] : f32, view<1xf32>
   %46 = index.constant 8 : offset
   %47 = index.add %input_byte_offset, %46 : offset
   %48 = buffer.view %input[%47] : buffer -> view<1xi32>
-  %flags = view.load %48[0] : view<1xi32> -> i32
+  %flags = view.load<root_in_bounds> %48[0] : view<1xi32> -> i32
   %142 = scalar.constant 1 : i32
   %143 = scalar.shrui %flags, %142 : i32
   %53 = index.add %sample_byte_offset, %46 : offset
   %54 = buffer.view %records[%53] : buffer -> view<1xi32>
-  view.store<volatile> %143, %54[0] : i32, view<1xi32>
-  %59 = view.load<volatile> %54[0] : view<1xi32> -> i32
+  view.store<volatile|root_in_bounds> %143, %54[0] : i32, view<1xi32>
+  %59 = view.load<volatile|root_in_bounds> %54[0] : view<1xi32> -> i32
   %60 = scalar.ori %59, %142 : i32
-  view.store<volatile> %60, %54[0] : i32, view<1xi32>
+  view.store<volatile|root_in_bounds> %60, %54[0] : i32, view<1xi32>
   %141 = scalar.constant -1 : i16
   %63 = index.constant 12 : offset
   %64 = index.add %sample_byte_offset, %63 : offset
   %65 = buffer.view %records[%64] : buffer -> view<1xi16>
-  view.store<volatile> %141, %65[0] : i16, view<1xi16>
+  view.store<volatile|root_in_bounds> %141, %65[0] : i16, view<1xi16>
   %66 = scalar.constant 2 : i32
-  %70 = view.load<volatile> %65[0] : view<1xi16> -> i16
+  %70 = view.load<volatile|root_in_bounds> %65[0] : view<1xi16> -> i16
   %71 = scalar.extui %70 : i16 to i32
   %72 = scalar.addi %71, %66 : i32
   %73 = scalar.trunci %72 : i32 to i16
-  view.store<volatile> %73, %65[0] : i16, view<1xi16>
+  view.store<volatile|root_in_bounds> %73, %65[0] : i16, view<1xi16>
   %140 = scalar.constant -127 : i8
   %78 = index.constant 14 : offset
   %79 = index.add %sample_byte_offset, %78 : offset
   %80 = buffer.view %records[%79] : buffer -> view<1xi8>
-  view.store<volatile> %140, %80[0] : i8, view<1xi8>
-  %85 = view.load<volatile> %80[0] : view<1xi8> -> i8
+  view.store<volatile|root_in_bounds> %140, %80[0] : i8, view<1xi8>
+  %85 = view.load<volatile|root_in_bounds> %80[0] : view<1xi8> -> i8
   %86 = scalar.extsi %85 : i8 to i32
   %138 = scalar.constant -2 : i32
   %139 = scalar.addi %86, %138 : i32
   %88 = scalar.trunci %139 : i32 to i8
-  view.store<volatile> %88, %80[0] : i8, view<1xi8>
+  view.store<volatile|root_in_bounds> %88, %80[0] : i8, view<1xi8>
   %137 = scalar.constant -1 : i8
   %93 = buffer.view %records[%sample_byte_offset] : buffer -> view<1xi8>
-  view.store<volatile> %137, %93[0] : i8, view<1xi8>
-  %104 = view.load<volatile> %93[0] : view<1xi8> -> i8
+  view.store<volatile|root_in_bounds> %137, %93[0] : i8, view<1xi8>
+  %104 = view.load<volatile|root_in_bounds> %93[0] : view<1xi8> -> i8
   %105 = scalar.extui %104 : i8 to i32
   %107 = scalar.addi %105, %142 : i32
   %108 = scalar.trunci %107 : i32 to i8
-  view.store<volatile> %108, %93[0] : i8, view<1xi8>
+  view.store<volatile|root_in_bounds> %108, %93[0] : i8, view<1xi8>
   %112 = scalar.constant 0.5 : f32
-  %114 = view.load<volatile> %45[0] : view<1xf32> -> f32
+  %114 = view.load<volatile|root_in_bounds> %45[0] : view<1xf32> -> f32
   %115 = scalar.addf %114, %112 : f32
-  view.store<volatile> %115, %45[0] : f32, view<1xf32>
-  %position$119 = view.load<volatile> %45[0] : view<1xf32> -> f32
+  view.store<volatile|root_in_bounds> %115, %45[0] : f32, view<1xf32>
+  %position$119 = view.load<volatile|root_in_bounds> %45[0] : view<1xf32> -> f32
   %120 = scalar.fptoui %position$119 : f32 to i32
   %121 = scalar.addi %120, %105 : i32
-  %count = view.load<volatile> %65[0] : view<1xi16> -> i16
+  %count = view.load<volatile|root_in_bounds> %65[0] : view<1xi16> -> i16
   %126 = scalar.extui %count : i16 to i32
   %127 = scalar.addi %121, %126 : i32
-  %delta = view.load<volatile> %80[0] : view<1xi8> -> i8
+  %delta = view.load<volatile|root_in_bounds> %80[0] : view<1xi8> -> i8
   %132 = scalar.extsi %delta : i8 to i32
   %133 = scalar.addi %127, %132 : i32
   func.return %133 : i32
@@ -582,9 +582,9 @@ kernel.def @record_vector_kernel() {
   %vector_byte_offset = index.constant 144 : offset
   %29 = index.constant 16 : offset
   %25 = buffer.view %input[%29] : buffer -> view<4xf32>
-  %value = vector.load %25[0] : view<4xf32> -> vector<4xf32>
+  %value = vector.load<root_in_bounds> %25[0] : view<4xf32> -> vector<4xf32>
   %27 = vector.addf %value, %delta : vector<4xf32>
   %28 = buffer.view %envelopes[%vector_byte_offset] : buffer -> view<4xf32>
-  vector.store %27, %28[0] : vector<4xf32>, view<4xf32>
+  vector.store<root_in_bounds> %27, %28[0] : vector<4xf32>, view<4xf32>
   kernel.return
 }

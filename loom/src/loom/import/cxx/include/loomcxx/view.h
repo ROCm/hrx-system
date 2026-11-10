@@ -223,25 +223,29 @@ template <class Result, class Shape, class T, class Encoding>
     loom::type::view<Shape, T, Encoding> source);
 
 // Loads one scalar at a logical coordinate.
-template <class Shape, class T, class Encoding, class... Indices>
+template <loom::memory_access Access = loom::memory_access::none, class Shape,
+          class T, class Encoding, class... Indices>
 [[loom::op("view.load")]]
 T load(loom::type::view<Shape, T, Encoding> source, Indices... indices);
 
 // Observes one volatile element and returns its ordinary scalar value.
-template <class Shape, class T, class Encoding, class... Indices>
+template <loom::memory_access Access = loom::memory_access::none, class Shape,
+          class T, class Encoding, class... Indices>
 [[loom::op("view.load")]]
 T load(loom::type::view<Shape, volatile T, Encoding> source,
        Indices... indices);
 
 // Stores one scalar at a logical coordinate. Template deduction
 // rejects destinations whose element type is const.
-template <class Shape, class T, class Encoding, class... Indices>
+template <loom::memory_access Access = loom::memory_access::none, class Shape,
+          class T, class Encoding, class... Indices>
 [[loom::op("view.store")]]
 void store(T value, loom::type::view<Shape, T, Encoding> destination,
            Indices... indices);
 
 // Observes a store through a volatile view without qualifying the scalar value.
-template <class Shape, class T, class Encoding, class... Indices>
+template <loom::memory_access Access = loom::memory_access::none, class Shape,
+          class T, class Encoding, class... Indices>
 [[loom::op("view.store")]]
 void store(T value, loom::type::view<Shape, volatile T, Encoding> destination,
            Indices... indices);

@@ -25,7 +25,7 @@ kernel.def @atomic_tickets() {
   %10 = scalar.constant 1 : i32
   %40 = index.constant 4 : offset
   %19 = buffer.view %counter[%40] : buffer -> view<1xi32>
-  %20 = view.atomic.rmw<addi> %10, %19[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %20 = view.atomic.rmw<addi, root_in_bounds> %10, %19[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
   %38 = scalar.constant -36 : i32
   %39 = scalar.addi %20, %38 : i32
   %26 = scalar.extui %39 : i32 to i64
@@ -34,7 +34,7 @@ kernel.def @atomic_tickets() {
   %31 = scalar.assume %35 [range(%35, 0, 9223372036854775807)] : i64
   %32 = index.cast %31 : i64 to offset
   %33 = buffer.view %slots[%32] : buffer -> view<1xi32>
-  view.store %10, %33[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %10, %33[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -70,23 +70,23 @@ kernel.def @atomic_unsigned() {
   %destination_byte_offset = index.constant 4 : offset
   %18 = scalar.constant -2147483647 : i32
   %19 = buffer.view %storage[%destination_byte_offset] : buffer -> view<1xi32>
-  %20 = view.atomic.rmw<minui> %18, %19[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %20 = view.atomic.rmw<minui, root_in_bounds> %18, %19[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
   %29 = buffer.view %output[%destination_byte_offset] : buffer -> view<1xi32>
-  view.store %20, %29[0] : i32, view<1xi32>
-  %32 = view.atomic.rmw<maxui> %18, %19[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  view.store<root_in_bounds> %20, %29[0] : i32, view<1xi32>
+  %32 = view.atomic.rmw<maxui, root_in_bounds> %18, %19[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
   %70 = index.constant 8 : offset
   %41 = buffer.view %output[%70] : buffer -> view<1xi32>
-  view.store %32, %41[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %32, %41[0] : i32, view<1xi32>
   %43 = scalar.constant 13 : i32
-  %45 = view.atomic.cmpxchg %18, %43, %19[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i32, view<1xi32> -> i32
+  %45 = view.atomic.cmpxchg<root_in_bounds> %18, %43, %19[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i32, view<1xi32> -> i32
   %69 = index.constant 12 : offset
   %54 = buffer.view %output[%69] : buffer -> view<1xi32>
-  view.store %45, %54[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %45, %54[0] : i32, view<1xi32>
   %56 = scalar.constant 19 : i32
-  %58 = view.atomic.cmpxchg %18, %56, %19[0] {failure_ordering = relaxed, scope = device, success_ordering = acquire} : i32, view<1xi32> -> i32
+  %58 = view.atomic.cmpxchg<root_in_bounds> %18, %56, %19[0] {failure_ordering = relaxed, scope = device, success_ordering = acquire} : i32, view<1xi32> -> i32
   %68 = index.constant 16 : offset
   %67 = buffer.view %output[%68] : buffer -> view<1xi32>
-  view.store %58, %67[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %58, %67[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -143,7 +143,7 @@ kernel.def @atomic_workgroup_tickets() {
   kernel.barrier<global> scope(workgroup) ordering(acq_rel)
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %25 = scalar.constant 1 : i32
-  %ticket = view.atomic.rmw<addi> %25, %counter_view[0] {ordering = relaxed, scope = workgroup} : i32, view<1xi32> -> i32
+  %ticket = view.atomic.rmw<addi, root_in_bounds> %25, %counter_view[0] {ordering = relaxed, scope = workgroup} : i32, view<1xi32> -> i32
   %77 = scalar.constant 5 : i32
   %78 = scalar.shli %group, %77 : i32
   %40 = scalar.addi %78, %ticket : i32
@@ -154,7 +154,7 @@ kernel.def @atomic_workgroup_tickets() {
   %48 = scalar.assume %76 [range(%76, 0, 9223372036854775807)] : i64
   %49 = index.cast %48 : i64 to offset
   %50 = buffer.view %slots[%49] : buffer -> view<1xi32>
-  view.store %25, %50[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %25, %50[0] : i32, view<1xi32>
   kernel.barrier<global> scope(workgroup) ordering(acq_rel)
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   scf.if %19 {
@@ -166,7 +166,7 @@ kernel.def @atomic_workgroup_tickets() {
     %65 = scalar.assume %74 [range(%74, 0, 9223372036854775807)] : i64
     %66 = index.cast %65 : i64 to offset
     %67 = buffer.view %counts[%66] : buffer -> view<1xi32>
-    view.store %57, %67[0] : i32, view<1xi32>
+    view.store<root_in_bounds> %57, %67[0] : i32, view<1xi32>
   }
   kernel.return
 }
@@ -194,20 +194,20 @@ kernel.def @builtin_updates() {
   %storage_byte_offset = index.constant 0 : offset
   %14 = func.call @builtin_fetch_values(%storage, %storage_byte_offset) : (buffer, offset) -> (i32)
   %23 = buffer.view %output[%storage_byte_offset] : buffer -> view<1xi32>
-  view.store %14, %23[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %14, %23[0] : i32, view<1xi32>
   %88 = index.constant 12 : offset
   %32 = func.call @builtin_signed_wrap(%storage, %88) : (buffer, offset) -> (i32)
   %87 = index.constant 4 : offset
   %41 = buffer.view %output[%87] : buffer -> view<1xi32>
-  view.store %32, %41[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %32, %41[0] : i32, view<1xi32>
   %86 = index.constant 24 : offset
   %50 = func.call @builtin_compare_values(%storage, %86, %evaluations, %storage_byte_offset) : (buffer, offset, buffer, offset) -> (i32)
   %85 = index.constant 8 : offset
   %59 = buffer.view %output[%85] : buffer -> view<1xi32>
-  view.store %50, %59[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %50, %59[0] : i32, view<1xi32>
   %60 = func.call @builtin_wide_values(%wide, %storage_byte_offset) : (buffer, offset) -> (i32)
   %69 = buffer.view %output[%88] : buffer -> view<1xi32>
-  view.store %60, %69[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %60, %69[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -241,15 +241,15 @@ kernel.def @atomic_sequences() {
   %14 = func.call @atomic_i32(%signed_words, %signed_words_byte_offset) : (buffer, offset) -> (i32)
   %55 = index.constant 4 : offset
   %23 = buffer.view %output[%55] : buffer -> view<1xi32>
-  view.store %14, %23[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %14, %23[0] : i32, view<1xi32>
   %24 = func.call @atomic_i64(%signed_wide, %signed_words_byte_offset) : (buffer, offset) -> (i32)
   %54 = index.constant 8 : offset
   %33 = buffer.view %output[%54] : buffer -> view<1xi32>
-  view.store %24, %33[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %24, %33[0] : i32, view<1xi32>
   %34 = func.call @atomic_u64(%unsigned_wide, %signed_words_byte_offset) : (buffer, offset) -> (i32)
   %53 = index.constant 12 : offset
   %43 = buffer.view %output[%53] : buffer -> view<1xi32>
-  view.store %34, %43[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %34, %43[0] : i32, view<1xi32>
   kernel.return
 }
 

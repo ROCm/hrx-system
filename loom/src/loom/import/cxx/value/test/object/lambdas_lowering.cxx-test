@@ -26,10 +26,10 @@ func.def public @dependent_operations(%input: buffer, %input_byte_offset: offset
   %24 = scalar.assume %23 [range(%23, 0, 9223372036854775807)] : i64
   %previous_byte_offset = index.cast %24 : i64 to offset
   %33 = buffer.view %input[%next_byte_offset] : buffer -> view<1xi32>
-  %34 = view.load %33[0] : view<1xi32> -> i32
+  %34 = view.load<root_in_bounds> %33[0] : view<1xi32> -> i32
   %37 = scalar.addi %34, %34 : i32
   %38 = buffer.view %input[%previous_byte_offset] : buffer -> view<1xi32>
-  %39 = view.load %38[0] : view<1xi32> -> i32
+  %39 = view.load<root_in_bounds> %38[0] : view<1xi32> -> i32
   %40 = scalar.addi %37, %39 : i32
   %42 = scalar.addi %40, %34 : i32
   %7 = scalar.addi %42, %42 : i32
@@ -64,7 +64,7 @@ func.def public @discarded_mutation(%input: buffer, %input_byte_offset: offset, 
   %24 = scalar.assume %23 [range(%23, 0, 9223372036854775807)] : i64
   %25 = index.cast %24 : i64 to offset
   %26 = buffer.view %input[%25] : buffer -> view<1xi32>
-  %27 = view.load %26[0] : view<1xi32> -> i32
+  %27 = view.load<root_in_bounds> %26[0] : view<1xi32> -> i32
   %11 = scalar.addi %27, %27 : i32
   func.return %11 : i32
 }

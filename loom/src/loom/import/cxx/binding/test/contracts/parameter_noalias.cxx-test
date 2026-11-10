@@ -18,9 +18,9 @@ kernel.def @copy() {
   %output = buffer.assume.noalias %1 : buffer
   %13, %14 = func.call pure @advance(%input, %input_byte_offset) : (buffer, offset) -> (buffer, offset)
   %15 = buffer.view %13[%14] : buffer -> view<1xi32>
-  %16 = view.load %15[0] : view<1xi32> -> i32
+  %16 = view.load<root_in_bounds> %15[0] : view<1xi32> -> i32
   %25 = buffer.view %output[%input_byte_offset] : buffer -> view<1xi32>
-  view.store %16, %25[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %16, %25[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -58,10 +58,10 @@ kernel.def @renamed() {
   %19 = scalar.assume %34 [range(%34, 0, 9223372036854775807)] : i64
   %20 = index.cast %19 : i64 to offset
   %21 = buffer.view %input[%20] : buffer -> view<1xi32>
-  %22 = view.load %21[0] : view<1xi32> -> i32
+  %22 = view.load<root_in_bounds> %21[0] : view<1xi32> -> i32
   %32 = index.constant 0 : offset
   %31 = buffer.view %output[%32] : buffer -> view<1xi32>
-  view.store %22, %31[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %22, %31[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -80,9 +80,9 @@ kernel.def @mixed() {
   %input = buffer.assume.noalias %0 : buffer
   %31 = index.constant 0 : offset
   %19 = buffer.view %input[%31] : buffer -> view<1xi32>
-  %20 = view.load %19[0] : view<1xi32> -> i32
+  %20 = view.load<root_in_bounds> %19[0] : view<1xi32> -> i32
   %29 = buffer.view %output[%31] : buffer -> view<1xi32>
-  view.store %20, %29[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %20, %29[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -104,9 +104,9 @@ kernel.def @reassigned() {
   %output = buffer.assume.noalias %1 : buffer
   %34 = index.constant 0 : offset
   %22 = buffer.view %replacement[%34] : buffer -> view<1xi32>
-  %23 = view.load %22[0] : view<1xi32> -> i32
+  %23 = view.load<root_in_bounds> %22[0] : view<1xi32> -> i32
   %32 = buffer.view %output[%34] : buffer -> view<1xi32>
-  view.store %23, %32[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %23, %32[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -130,14 +130,14 @@ kernel.def @forms() {
   %opaque = buffer.assume.noalias %2 : buffer
   %47 = index.constant 4 : offset
   %23 = buffer.view %input[%47] : buffer -> view<1xi32>
-  %24 = view.load %23[0] : view<1xi32> -> i32
+  %24 = view.load<root_in_bounds> %23[0] : view<1xi32> -> i32
   %46 = index.constant 8 : offset
   %33 = buffer.view %opaque[%46] : buffer -> view<1xi32>
-  %34 = view.load %33[0] : view<1xi32> -> i32
+  %34 = view.load<root_in_bounds> %33[0] : view<1xi32> -> i32
   %35 = scalar.addi %24, %34 : i32
   %45 = index.constant 0 : offset
   %44 = buffer.view %output[%45] : buffer -> view<1xi32>
-  view.store %35, %44[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %35, %44[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -174,9 +174,9 @@ kernel.def @instantiated_unsigned_int() {
   %output = buffer.assume.noalias %3 : buffer
   %34 = index.constant 0 : offset
   %22 = buffer.view %input[%34] : buffer -> view<1xi32>
-  %23 = view.load %22[0] : view<1xi32> -> i32
+  %23 = view.load<root_in_bounds> %22[0] : view<1xi32> -> i32
   %32 = buffer.view %output[%34] : buffer -> view<1xi32>
-  view.store %23, %32[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %23, %32[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -210,13 +210,13 @@ func.def public @scoped(%input: buffer, %input_byte_offset: offset, %output: buf
   %29 = scalar.assume %27 [range(%27, 0, 9223372036854775807)] : i64
   %30 = index.cast %29 : i64 to offset
   %31 = buffer.view %unique_input[%30] : buffer -> view<1xi32>
-  %32 = view.load %31[0] : view<1xi32> -> i32
+  %32 = view.load<root_in_bounds> %31[0] : view<1xi32> -> i32
   %37 = index.cast %unique_output_byte_offset : offset to i64
   %39 = scalar.assume %37 [range(%37, 0, 9223372036854775807)] : i64
   %40 = index.cast %39 : i64 to offset
   %41 = buffer.view %unique_output[%40] : buffer -> view<1xi32>
-  view.store %32, %41[0] : i32, view<1xi32>
-  %51 = view.load %41[0] : view<1xi32> -> i32
+  view.store<root_in_bounds> %32, %41[0] : i32, view<1xi32>
+  %51 = view.load<root_in_bounds> %41[0] : view<1xi32> -> i32
   func.return %51 : i32
 }
 
@@ -241,9 +241,9 @@ kernel.def @scoped_alignment() {
     %aligned = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
     %32 = index.constant 0 : offset
     %20 = buffer.view %aligned[%32] : buffer -> view<1xi32>
-    %21 = view.load %20[0] : view<1xi32> -> i32
+    %21 = view.load<root_in_bounds> %20[0] : view<1xi32> -> i32
     %30 = buffer.view %output[%32] : buffer -> view<1xi32>
-    view.store %21, %30[0] : i32, view<1xi32>
+    view.store<root_in_bounds> %21, %30[0] : i32, view<1xi32>
   }
   kernel.return
 }
@@ -298,7 +298,7 @@ kernel.def @gather_rows() {
   %31 = scalar.assume %65 [range(%65, 0, 9223372036854775807)] : i64
   %32 = index.cast %31 : i64 to offset
   %33 = buffer.view %row_ids[%32] : buffer -> view<1xi32>
-  %source_row$34 = view.load %33[0] : view<1xi32> -> i32
+  %source_row$34 = view.load<root_in_bounds> %33[0] : view<1xi32> -> i32
   %source_row$35 = scalar.assume %source_row$34 [range(%source_row$34, 0, 1)] : i32
   %36 = scalar.constant 768 : i32
   %37 = scalar.muli %source_row$35, %36 : i32
@@ -309,7 +309,7 @@ kernel.def @gather_rows() {
   %44 = scalar.assume %63 [range(%63, 0, 9223372036854775807)] : i64
   %45 = index.cast %44 : i64 to offset
   %46 = buffer.view %weights[%45] : buffer -> view<4xf16>
-  %47 = vector.load %46[0] : view<4xf16> -> vector<4xf16>
+  %47 = vector.load<root_in_bounds> %46[0] : view<4xf16> -> vector<4xf16>
   %48 = vector.extf %47 : vector<4xf16> to vector<4xf32>
   %50 = scalar.muli %row, %36 : i32
   %51 = scalar.addi %50, %column : i32
@@ -319,7 +319,7 @@ kernel.def @gather_rows() {
   %57 = scalar.assume %61 [range(%61, 0, 9223372036854775807)] : i64
   %58 = index.cast %57 : i64 to offset
   %59 = buffer.view %output[%58] : buffer -> view<4xf32>
-  vector.store %48, %59[0] : vector<4xf32>, view<4xf32>
+  vector.store<root_in_bounds> %48, %59[0] : vector<4xf32>, view<4xf32>
   kernel.return
 }
 
@@ -343,14 +343,14 @@ kernel.def @unmarked_alias() {
   %output = buffer.assume.noalias %2 : buffer
   %57 = index.constant 0 : offset
   %22 = buffer.view %input[%57] : buffer -> view<1xi32>
-  %before = view.load %22[0] : view<1xi32> -> i32
+  %before = view.load<root_in_bounds> %22[0] : view<1xi32> -> i32
   %24 = scalar.constant 5 : i32
   %25 = scalar.addi %before, %24 : i32
   %34 = buffer.view %alias[%57] : buffer -> view<1xi32>
-  view.store %25, %34[0] : i32, view<1xi32>
-  %44 = view.load %22[0] : view<1xi32> -> i32
+  view.store<root_in_bounds> %25, %34[0] : i32, view<1xi32>
+  %44 = view.load<root_in_bounds> %22[0] : view<1xi32> -> i32
   %53 = buffer.view %output[%57] : buffer -> view<1xi32>
-  view.store %44, %53[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %44, %53[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -375,14 +375,14 @@ kernel.def @reassigned() {
   %output = buffer.assume.noalias %1 : buffer
   %57 = index.constant 0 : offset
   %22 = buffer.view %replacement[%57] : buffer -> view<1xi32>
-  %before = view.load %22[0] : view<1xi32> -> i32
+  %before = view.load<root_in_bounds> %22[0] : view<1xi32> -> i32
   %24 = scalar.constant 7 : i32
   %25 = scalar.addi %before, %24 : i32
   %34 = buffer.view %output[%57] : buffer -> view<1xi32>
-  view.store %25, %34[0] : i32, view<1xi32>
-  %44 = view.load %22[0] : view<1xi32> -> i32
+  view.store<root_in_bounds> %25, %34[0] : i32, view<1xi32>
+  %44 = view.load<root_in_bounds> %22[0] : view<1xi32> -> i32
   %54 = index.constant 4 : offset
   %53 = buffer.view %output[%54] : buffer -> view<1xi32>
-  view.store %44, %53[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %44, %53[0] : i32, view<1xi32>
   kernel.return
 }

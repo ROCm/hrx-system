@@ -8,14 +8,14 @@ bool exchange(bool* output, const bool* input) {
 // ----
 func.def public @exchange(%output: buffer, %output_byte_offset: offset, %input: buffer, %input_byte_offset: offset) -> (i1) {
   %5 = buffer.view %input[%input_byte_offset] : buffer -> view<1xi8>
-  %6 = view.load %5[0] : view<1xi8> -> i8
+  %6 = view.load<root_in_bounds> %5[0] : view<1xi8> -> i8
   %7 = scalar.constant 0 : i8
   %value = scalar.cmpi ne, %6, %7 : i8
   %9 = scalar.constant 1 : i1
   %10 = scalar.xori %value, %9 : i1
   %11 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi8>
   %12 = scalar.extui %10 : i1 to i8
-  view.store %12, %11[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %12, %11[0] : i8, view<1xi8>
   func.return %value : i1
 }
 
@@ -27,7 +27,7 @@ bool load(const void* storage) {
 // ----
 func.def public @load(%storage: buffer, %storage_byte_offset: offset) -> (i1) {
   %3 = buffer.view %storage[%storage_byte_offset] : buffer -> view<1xi8>
-  %4 = view.load %3[0] : view<1xi8> -> i8
+  %4 = view.load<root_in_bounds> %3[0] : view<1xi8> -> i8
   %5 = scalar.constant 0 : i8
   %6 = scalar.cmpi ne, %4, %5 : i8
   func.return %6 : i1
@@ -43,7 +43,7 @@ func.def public source_signature(#func.abi.c.signature<arguments = [0, 1], resul
   %4 = scalar.cmpi ne, %value, %3 : i32
   %5 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi8>
   %6 = scalar.extui %4 : i1 to i8
-  view.store %6, %5[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %6, %5[0] : i8, view<1xi8>
   func.return
 }
 
@@ -58,12 +58,12 @@ Flag exchange(Flag* output, const Flag* input) {
 // ----
 func.def public @exchange(%output: buffer, %output_byte_offset: offset, %input: buffer, %input_byte_offset: offset) -> (i1) {
   %5 = buffer.view %input[%input_byte_offset] : buffer -> view<1xi8>
-  %6 = view.load %5[0] : view<1xi8> -> i8
+  %6 = view.load<root_in_bounds> %5[0] : view<1xi8> -> i8
   %7 = scalar.constant 0 : i8
   %value = scalar.cmpi ne, %6, %7 : i8
   %9 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi8>
   %10 = scalar.extui %value : i1 to i8
-  view.store %10, %9[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %10, %9[0] : i8, view<1xi8>
   func.return %value : i1
 }
 
@@ -121,7 +121,7 @@ func.def public @read(%record: buffer, %record_byte_offset: offset, %index: i32)
   %4 = index.constant 1 : offset
   %5 = index.add %record_byte_offset, %4 : offset
   %6 = buffer.view %record[%5] : buffer -> view<1xi8>
-  %7 = view.load %6[0] : view<1xi8> -> i8
+  %7 = view.load<root_in_bounds> %6[0] : view<1xi8> -> i8
   %8 = scalar.constant 0 : i8
   %value = scalar.cmpi ne, %7, %8 : i8
   %10 = scalar.extui %value : i1 to i32
@@ -135,7 +135,7 @@ func.def public @read(%record: buffer, %record_byte_offset: offset, %index: i32)
   %18 = scalar.assume %17 [range(%17, 0, 9223372036854775807)] : i64
   %19 = index.cast %18 : i64 to offset
   %20 = buffer.view %record[%19] : buffer -> view<1xi8>
-  %21 = view.load %20[0] : view<1xi8> -> i8
+  %21 = view.load<root_in_bounds> %20[0] : view<1xi8> -> i8
   %22 = scalar.constant 0 : i8
   %23 = scalar.cmpi ne, %21, %22 : i8
   %24 = scalar.extui %23 : i1 to i32
@@ -173,7 +173,7 @@ kernel.def @shared() {
   %slot = scalar.cmpi ne, %20, %21 : i8
   %23 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi8>
   %24 = scalar.extui %slot : i1 to i8
-  view.store %24, %23[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %24, %23[0] : i8, view<1xi8>
   kernel.return
 }
 
@@ -300,12 +300,12 @@ void boolean_objects(const volatile bool* input, volatile bool* output,
 // ----
 func.def public @boolean_transfer(%destination: buffer, %destination_byte_offset: offset, %source: buffer, %source_byte_offset: offset) -> (i1) {
   %5 = buffer.view %source[%source_byte_offset] : buffer -> view<1xi8>
-  %6 = view.load<volatile> %5[0] : view<1xi8> -> i8
+  %6 = view.load<volatile|root_in_bounds> %5[0] : view<1xi8> -> i8
   %7 = scalar.constant 0 : i8
   %value = scalar.cmpi ne, %6, %7 : i8
   %9 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi8>
   %10 = scalar.extui %value : i1 to i8
-  view.store<volatile> %10, %9[0] : i8, view<1xi8>
+  view.store<volatile|root_in_bounds> %10, %9[0] : i8, view<1xi8>
   func.return %value : i1
 }
 
@@ -316,27 +316,27 @@ kernel.def @boolean_objects() {
   %input_byte_offset = index.constant 0 : offset
   %22 = index.constant 1 : offset
   %141 = buffer.view %input[%input_byte_offset] : buffer -> view<1xi8>
-  %142 = view.load<volatile> %141[0] : view<1xi8> -> i8
+  %142 = view.load<volatile|root_in_bounds> %141[0] : view<1xi8> -> i8
   %143 = scalar.constant 0 : i8
   %value = scalar.cmpi ne, %142, %143 : i8
   %145 = buffer.view %output[%22] : buffer -> view<1xi8>
   %146 = scalar.extui %value : i1 to i8
-  view.store<volatile> %146, %145[0] : i8, view<1xi8>
+  view.store<volatile|root_in_bounds> %146, %145[0] : i8, view<1xi8>
   %84 = scalar.constant 1 : i1
   %85 = scalar.xori %value, %84 : i1
   %155 = index.constant 2 : offset
   %47 = buffer.view %output[%155] : buffer -> view<1xi8>
   %48 = scalar.extui %85 : i1 to i8
-  view.store<volatile> %48, %47[0] : i8, view<1xi8>
+  view.store<volatile|root_in_bounds> %48, %47[0] : i8, view<1xi8>
   %91 = index.constant 4 : offset
   %95 = scalar.constant 0 : i32
   %96 = scalar.cmpi ne, %number, %95 : i32
   %148 = index.constant 3 : offset
   %59 = buffer.view %output[%148] : buffer -> view<1xi8>
-  view.store<volatile> %143, %59[0] : i8, view<1xi8>
+  view.store<volatile|root_in_bounds> %143, %59[0] : i8, view<1xi8>
   %76 = buffer.view %output[%91] : buffer -> view<1xi8>
   %77 = scalar.extui %96 : i1 to i8
-  view.store<volatile> %77, %76[0] : i8, view<1xi8>
+  view.store<volatile|root_in_bounds> %77, %76[0] : i8, view<1xi8>
   kernel.return
 }
 
@@ -375,41 +375,41 @@ kernel.def @boolean_records() {
 } launch(%input: buffer, %output: buffer) {
   %180 = index.constant 8 : offset
   %20 = buffer.view %input[%180] : buffer -> view<1xi8>
-  %21 = view.load %20[0] : view<1xi8> -> i8
+  %21 = view.load<root_in_bounds> %20[0] : view<1xi8> -> i8
   %22 = scalar.constant 0 : i8
   %enabled = scalar.cmpi ne, %21, %22 : i8
   %24 = scalar.constant 1 : i1
   %25 = scalar.xori %enabled, %24 : i1
   %36 = buffer.view %output[%180] : buffer -> view<1xi8>
   %37 = scalar.extui %25 : i1 to i8
-  view.store %37, %36[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %37, %36[0] : i8, view<1xi8>
   %178 = index.constant 9 : offset
   %48 = buffer.view %input[%178] : buffer -> view<1xi8>
-  %49 = view.load %48[0] : view<1xi8> -> i8
+  %49 = view.load<root_in_bounds> %48[0] : view<1xi8> -> i8
   %selected = scalar.cmpi ne, %49, %22 : i8
   %62 = buffer.view %output[%178] : buffer -> view<1xi8>
   %63 = scalar.extui %selected : i1 to i8
-  view.store %63, %62[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %63, %62[0] : i8, view<1xi8>
   %176 = index.constant 5 : offset
   %82 = buffer.view %input[%176] : buffer -> view<1xi8>
-  %83 = view.load %82[0] : view<1xi8> -> i8
+  %83 = view.load<root_in_bounds> %82[0] : view<1xi8> -> i8
   %85 = scalar.cmpi ne, %83, %22 : i8
   %175 = index.constant 10 : offset
   %104 = buffer.view %output[%175] : buffer -> view<1xi8>
   %105 = scalar.extui %85 : i1 to i8
-  view.store %105, %104[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %105, %104[0] : i8, view<1xi8>
   %124 = buffer.view %input[%175] : buffer -> view<1xi8>
-  %125 = view.load %124[0] : view<1xi8> -> i8
+  %125 = view.load<root_in_bounds> %124[0] : view<1xi8> -> i8
   %127 = scalar.cmpi ne, %125, %22 : i8
   %129 = scalar.xori %127, %24 : i1
   %173 = index.constant 11 : offset
   %148 = buffer.view %output[%173] : buffer -> view<1xi8>
   %149 = scalar.extui %129 : i1 to i8
-  view.store %149, %148[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %149, %148[0] : i8, view<1xi8>
   %172 = index.constant 12 : offset
   %169 = buffer.view %output[%172] : buffer -> view<1xi8>
   %171 = scalar.constant 1 : i8
-  view.store %171, %169[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %171, %169[0] : i8, view<1xi8>
   kernel.return
 }
 
@@ -436,7 +436,7 @@ kernel.def @boolean_shared() {
   %slots_byte_offset = index.constant 0 : offset
   %slots_view = buffer.view %slots[%slots_byte_offset] : buffer -> view<2xi8>
   %22 = buffer.view %input[%slots_byte_offset] : buffer -> view<1xi8>
-  %23 = view.load %22[0] : view<1xi8> -> i8
+  %23 = view.load<root_in_bounds> %22[0] : view<1xi8> -> i8
   %24 = scalar.constant 0 : i8
   %25 = scalar.cmpi ne, %23, %24 : i8
   %85 = index.constant 0 : index
@@ -454,11 +454,11 @@ kernel.def @boolean_shared() {
   %81 = index.constant 1 : offset
   %60 = buffer.view %output[%81] : buffer -> view<1xi8>
   %61 = scalar.extui %51 : i1 to i8
-  view.store %61, %60[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %61, %60[0] : i8, view<1xi8>
   %66 = view.load %slots_view[%83] : view<2xi8> -> i8
   %68 = scalar.cmpi ne, %66, %24 : i8
   %77 = buffer.view %output[%10] : buffer -> view<1xi8>
   %78 = scalar.extui %68 : i1 to i8
-  view.store %78, %77[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %78, %77[0] : i8, view<1xi8>
   kernel.return
 }

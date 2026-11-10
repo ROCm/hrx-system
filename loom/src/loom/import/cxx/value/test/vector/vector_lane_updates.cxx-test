@@ -118,7 +118,7 @@ func.def public @update_memory(%packets: buffer, %packets_byte_offset: offset, %
   %24 = scalar.assume %23 [range(%23, 0, 9223372036854775807)] : i64
   %25 = index.cast %24 : i64 to offset
   %26 = buffer.view %packets[%25] : buffer -> view<1xi32>
-  view.store %replacement, %26[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %replacement, %26[0] : i32, view<1xi32>
   %27 = scalar.extui %packet_index$7 : i32 to i64
   %28 = scalar.constant 32 : i64
   %29 = scalar.muli %27, %28 : i64
@@ -136,10 +136,10 @@ func.def public @update_memory(%packets: buffer, %packets_byte_offset: offset, %
   %41 = scalar.assume %40 [range(%40, 0, 9223372036854775807)] : i64
   %42 = index.cast %41 : i64 to offset
   %43 = buffer.view %packets[%42] : buffer -> view<1xi32>
-  %44 = view.load %43[0] : view<1xi32> -> i32
+  %44 = view.load<root_in_bounds> %43[0] : view<1xi32> -> i32
   %45 = scalar.xori %44, %replacement : i32
   %46 = buffer.view %packets[%42] : buffer -> view<1xi32>
-  view.store %45, %46[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %45, %46[0] : i32, view<1xi32>
   %47 = scalar.addi %packet_index$7, %lane_index$18 : i32
   func.return %47 : i32
 }
@@ -256,9 +256,9 @@ func.def public @update_named_memory(%values: buffer, %values_byte_offset: offse
   %12 = scalar.assume %11 [range(%11, 0, 9223372036854775807)] : i64
   %13 = index.cast %12 : i64 to offset
   %14 = buffer.view %values[%13] : buffer -> view<4xi32>
-  %15 = vector.load %14[0] : view<4xi32> -> vector<4xi32>
+  %15 = vector.load<root_in_bounds> %14[0] : view<4xi32> -> vector<4xi32>
   %16 = vector.insert %replacement into %15[0] : i32, vector<4xi32>
-  vector.store %16, %14[0] : vector<4xi32>, view<4xi32>
+  vector.store<root_in_bounds> %16, %14[0] : vector<4xi32>, view<4xi32>
   %17 = scalar.extui %index$6 : i32 to i64
   %18 = scalar.constant 16 : i64
   %19 = scalar.muli %17, %18 : i64
@@ -267,11 +267,11 @@ func.def public @update_named_memory(%values: buffer, %values_byte_offset: offse
   %22 = scalar.assume %21 [range(%21, 0, 9223372036854775807)] : i64
   %23 = index.cast %22 : i64 to offset
   %24 = buffer.view %values[%23] : buffer -> view<4xi32>
-  %25 = vector.load %24[0] : view<4xi32> -> vector<4xi32>
+  %25 = vector.load<root_in_bounds> %24[0] : view<4xi32> -> vector<4xi32>
   %26 = vector.extract %25[1] : vector<4xi32> -> i32
   %27 = scalar.xori %26, %replacement : i32
   %28 = vector.insert %27 into %25[1] : i32, vector<4xi32>
-  vector.store %28, %24[0] : vector<4xi32>, view<4xi32>
+  vector.store<root_in_bounds> %28, %24[0] : vector<4xi32>, view<4xi32>
   %29 = scalar.extui %index$6 : i32 to i64
   %30 = scalar.constant 16 : i64
   %31 = scalar.muli %29, %30 : i64
@@ -280,7 +280,7 @@ func.def public @update_named_memory(%values: buffer, %values_byte_offset: offse
   %34 = scalar.assume %33 [range(%33, 0, 9223372036854775807)] : i64
   %35 = index.cast %34 : i64 to offset
   %36 = buffer.view %values[%35] : buffer -> view<4xi32>
-  %37 = vector.load %36[0] : view<4xi32> -> vector<4xi32>
+  %37 = vector.load<root_in_bounds> %36[0] : view<4xi32> -> vector<4xi32>
   %38 = vector.extract %37[2] : vector<4xi32> -> i32
   %39 = scalar.addi %38, %index$6 : i32
   func.return %39 : i32
@@ -288,14 +288,14 @@ func.def public @update_named_memory(%values: buffer, %values_byte_offset: offse
 
 func.def public @update_named_pointer(%value: buffer, %value_byte_offset: offset, %replacement: i32) -> (i32) {
   %44 = buffer.view %value[%value_byte_offset] : buffer -> view<4xi32>
-  %45 = vector.load %44[0] : view<4xi32> -> vector<4xi32>
+  %45 = vector.load<root_in_bounds> %44[0] : view<4xi32> -> vector<4xi32>
   %46 = vector.extract %45[3] : vector<4xi32> -> i32
   %47 = scalar.addi %46, %replacement : i32
   %48 = vector.insert %47 into %45[3] : i32, vector<4xi32>
   %49 = buffer.view %value[%value_byte_offset] : buffer -> view<4xi32>
-  vector.store %48, %49[0] : vector<4xi32>, view<4xi32>
+  vector.store<root_in_bounds> %48, %49[0] : vector<4xi32>, view<4xi32>
   %50 = buffer.view %value[%value_byte_offset] : buffer -> view<4xi32>
-  %51 = vector.load %50[0] : view<4xi32> -> vector<4xi32>
+  %51 = vector.load<root_in_bounds> %50[0] : view<4xi32> -> vector<4xi32>
   %52 = vector.extract %51[3] : vector<4xi32> -> i32
   func.return %52 : i32
 }

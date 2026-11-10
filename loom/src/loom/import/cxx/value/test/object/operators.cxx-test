@@ -408,7 +408,7 @@ kernel.def @accumulate_pairs() {
   %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
   %20 = index.cast %19 : i64 to offset
   %21 = buffer.view %input[%20] : buffer -> view<1xi32>
-  %value_x = view.load %21[0] : view<1xi32> -> i32
+  %value_x = view.load<root_in_bounds> %21[0] : view<1xi32> -> i32
   %23 = scalar.constant 1 : i32
   %24 = scalar.addi %base, %23 : i32
   %25 = scalar.extui %24 : i32 to i64
@@ -419,7 +419,7 @@ kernel.def @accumulate_pairs() {
   %30 = scalar.assume %29 [range(%29, 0, 9223372036854775807)] : i64
   %31 = index.cast %30 : i64 to offset
   %32 = buffer.view %input[%31] : buffer -> view<1xi32>
-  %value_y = view.load %32[0] : view<1xi32> -> i32
+  %value_y = view.load<root_in_bounds> %32[0] : view<1xi32> -> i32
   %bias_x = scalar.constant 1 : i32
   %bias_y = scalar.constant 2 : i32
   %36 = scalar.constant 3 : i32
@@ -433,7 +433,7 @@ kernel.def @accumulate_pairs() {
   %46 = scalar.assume %45 [range(%45, 0, 9223372036854775807)] : i64
   %47 = index.cast %46 : i64 to offset
   %48 = buffer.view %output[%47] : buffer -> view<1xi32>
-  view.store %result_x, %48[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %result_x, %48[0] : i32, view<1xi32>
   %49 = scalar.constant 1 : i32
   %50 = scalar.addi %base, %49 : i32
   %51 = scalar.extui %50 : i32 to i64
@@ -444,7 +444,7 @@ kernel.def @accumulate_pairs() {
   %56 = scalar.assume %55 [range(%55, 0, 9223372036854775807)] : i64
   %57 = index.cast %56 : i64 to offset
   %58 = buffer.view %output[%57] : buffer -> view<1xi32>
-  view.store %result_y, %58[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %result_y, %58[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -491,7 +491,7 @@ func.def @TemporaryObserved__bump_value(%this_value: i32, %this_observed: buffer
 
 func.def inline @TemporaryObserved___TemporaryObserved_value(%this_value: i32, %this_observed: buffer, %this_observed_byte_offset: offset) {
   %18 = buffer.view %this_observed[%this_observed_byte_offset] : buffer -> view<1xi32>
-  view.store %this_value, %18[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %this_value, %18[0] : i32, view<1xi32>
   func.return
 }
 

@@ -5,8 +5,8 @@ func.def @adjacent_packed_f16_view_loads_to_vector_load(%input: buffer, %base: i
   %element_stride = index.constant 1 : index
   %view = buffer.view %input[%byte_base] : buffer -> view<32xf16, align(1)>
   %next = index.add %base, %element_stride : index
-  %a = view.load %view[%base] : view<32xf16, align(1)> -> f16
-  %b = view.load %view[%next] : view<32xf16, align(1)> -> f16
+  %a = view.load<root_in_bounds> %view[%base] : view<32xf16, align(1)> -> f16
+  %b = view.load<root_in_bounds> %view[%next] : view<32xf16, align(1)> -> f16
   func.return %a, %b : f16, f16
 }
 
@@ -14,7 +14,7 @@ func.def @adjacent_packed_f16_view_loads_to_vector_load(%input: buffer, %base: i
 func.def @adjacent_packed_f16_view_loads_to_vector_load(%input: buffer, %base: index) -> (f16, f16) {
   %byte_base = index.constant 1 : offset
   %view = buffer.view %input[%byte_base] : buffer -> view<32xf16, align(1)>
-  %10 = vector.load %view[%base] : view<32xf16, align(1)> -> vector<2xf16>
+  %10 = vector.load<root_in_bounds> %view[%base] : view<32xf16, align(1)> -> vector<2xf16>
   %a = vector.extract %10[0] : vector<2xf16> -> f16
   %b = vector.extract %10[1] : vector<2xf16> -> f16
   func.return %a, %b : f16, f16

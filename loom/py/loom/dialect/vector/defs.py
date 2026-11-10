@@ -37,7 +37,7 @@ from loom.assembly import (
     TypesOf,
     kw,
 )
-from loom.dialect.atomic import AtomicKind, AtomicMemoryFlags, AtomicOrdering, AtomicScope
+from loom.dialect.atomic import AtomicAccessFlags, AtomicKind, AtomicMemoryFlags, AtomicOrdering, AtomicScope
 from loom.dialect.cache import CacheScope, CacheTemporal
 from loom.dialect.combining import CombiningKind
 from loom.dialect.memory import MemoryAccessFlags
@@ -2308,6 +2308,7 @@ def _atomic_memory_attrs() -> list[AttrDef]:
 
 def _atomic_cmpxchg_memory_attrs() -> list[AttrDef]:
     return [
+        AttrDef("memory_flags", ATTR_TYPE_FLAGS, optional=True, enum_def=AtomicAccessFlags),
         AttrDef(
             "success_ordering",
             ATTR_TYPE_ENUM,
@@ -2580,6 +2581,7 @@ vector_atomic_cmpxchg = Op(
     ],
     verify="loom_vector_atomic_cmpxchg_verify",
     format=[
+        Flags("memory_flags"),
         Ref("expected"),
         COMMA,
         Ref("replacement"),

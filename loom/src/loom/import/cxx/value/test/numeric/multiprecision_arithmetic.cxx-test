@@ -82,7 +82,7 @@ func.def public @add_byte(%lhs: i8, %rhs: i8, %carry_in: i8, %carry_out: buffer,
   %10 = scalar.ori %7, %9 : i1
   %11 = scalar.extui %10 : i1 to i8
   %12 = buffer.view %carry_out[%carry_out_byte_offset] : buffer -> view<1xi8>
-  view.store %11, %12[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %11, %12[0] : i8, view<1xi8>
   func.return %8 : i8
 }
 
@@ -92,7 +92,7 @@ func.def public @add_short(%lhs: i16, %rhs: i16, %carry_in: i16, %carry_out: buf
   %23 = scalar.ori %20, %22 : i1
   %24 = scalar.extui %23 : i1 to i16
   %25 = buffer.view %carry_out[%carry_out_byte_offset] : buffer -> view<1xi16>
-  view.store %24, %25[0] : i16, view<1xi16>
+  view.store<root_in_bounds> %24, %25[0] : i16, view<1xi16>
   func.return %21 : i16
 }
 
@@ -102,7 +102,7 @@ func.def public @add_int(%lhs: i32, %rhs: i32, %carry_in: i32, %carry_out: buffe
   %36 = scalar.ori %33, %35 : i1
   %37 = scalar.extui %36 : i1 to i32
   %38 = buffer.view %carry_out[%carry_out_byte_offset] : buffer -> view<1xi32>
-  view.store %37, %38[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %37, %38[0] : i32, view<1xi32>
   func.return %34 : i32
 }
 
@@ -112,7 +112,7 @@ func.def public @add_long(%lhs: i64, %rhs: i64, %carry_in: i64, %carry_out: buff
   %49 = scalar.ori %46, %48 : i1
   %50 = scalar.extui %49 : i1 to i64
   %51 = buffer.view %carry_out[%carry_out_byte_offset] : buffer -> view<1xi64>
-  view.store %50, %51[0] : i64, view<1xi64>
+  view.store<root_in_bounds> %50, %51[0] : i64, view<1xi64>
   func.return %47 : i64
 }
 
@@ -122,7 +122,7 @@ func.def public @add_long_long(%lhs: i64, %rhs: i64, %carry_in: i64, %carry_out:
   %62 = scalar.ori %59, %61 : i1
   %63 = scalar.extui %62 : i1 to i64
   %64 = buffer.view %carry_out[%carry_out_byte_offset] : buffer -> view<1xi64>
-  view.store %63, %64[0] : i64, view<1xi64>
+  view.store<root_in_bounds> %63, %64[0] : i64, view<1xi64>
   func.return %60 : i64
 }
 
@@ -132,7 +132,7 @@ func.def public @subtract_byte(%lhs: i8, %rhs: i8, %borrow_in: i8, %borrow_out: 
   %75 = scalar.ori %72, %74 : i1
   %76 = scalar.extui %75 : i1 to i8
   %77 = buffer.view %borrow_out[%borrow_out_byte_offset] : buffer -> view<1xi8>
-  view.store %76, %77[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %76, %77[0] : i8, view<1xi8>
   func.return %73 : i8
 }
 
@@ -142,7 +142,7 @@ func.def public @subtract_short(%lhs: i16, %rhs: i16, %borrow_in: i16, %borrow_o
   %88 = scalar.ori %85, %87 : i1
   %89 = scalar.extui %88 : i1 to i16
   %90 = buffer.view %borrow_out[%borrow_out_byte_offset] : buffer -> view<1xi16>
-  view.store %89, %90[0] : i16, view<1xi16>
+  view.store<root_in_bounds> %89, %90[0] : i16, view<1xi16>
   func.return %86 : i16
 }
 
@@ -152,7 +152,7 @@ func.def public @subtract_int(%lhs: i32, %rhs: i32, %borrow_in: i32, %borrow_out
   %101 = scalar.ori %98, %100 : i1
   %102 = scalar.extui %101 : i1 to i32
   %103 = buffer.view %borrow_out[%borrow_out_byte_offset] : buffer -> view<1xi32>
-  view.store %102, %103[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %102, %103[0] : i32, view<1xi32>
   func.return %99 : i32
 }
 
@@ -162,7 +162,7 @@ func.def public @subtract_long(%lhs: i64, %rhs: i64, %borrow_in: i64, %borrow_ou
   %114 = scalar.ori %111, %113 : i1
   %115 = scalar.extui %114 : i1 to i64
   %116 = buffer.view %borrow_out[%borrow_out_byte_offset] : buffer -> view<1xi64>
-  view.store %115, %116[0] : i64, view<1xi64>
+  view.store<root_in_bounds> %115, %116[0] : i64, view<1xi64>
   func.return %112 : i64
 }
 
@@ -172,25 +172,25 @@ func.def public @subtract_long_long(%lhs: i64, %rhs: i64, %borrow_in: i64, %borr
   %127 = scalar.ori %124, %126 : i1
   %128 = scalar.extui %127 : i1 to i64
   %129 = buffer.view %borrow_out[%borrow_out_byte_offset] : buffer -> view<1xi64>
-  view.store %128, %129[0] : i64, view<1xi64>
+  view.store<root_in_bounds> %128, %129[0] : i64, view<1xi64>
   func.return %125 : i64
 }
 
 func.def public @observe(%value: i32, %count: buffer, %count_byte_offset: offset) -> (i32) {
   %134 = buffer.view %count[%count_byte_offset] : buffer -> view<1xi32>
-  %135 = view.load %134[0] : view<1xi32> -> i32
+  %135 = view.load<root_in_bounds> %134[0] : view<1xi32> -> i32
   %136 = scalar.constant 1 : i32
   %137 = scalar.addi %135, %136 : i32
-  view.store %137, %134[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %137, %134[0] : i32, view<1xi32>
   func.return %value : i32
 }
 
 func.def public @observe_output(%output: buffer, %output_byte_offset: offset, %count: buffer, %count_byte_offset: offset) -> (buffer, offset) {
   %144 = buffer.view %count[%count_byte_offset] : buffer -> view<1xi32>
-  %145 = view.load %144[0] : view<1xi32> -> i32
+  %145 = view.load<root_in_bounds> %144[0] : view<1xi32> -> i32
   %146 = scalar.constant 1 : i32
   %147 = scalar.addi %145, %146 : i32
-  view.store %147, %144[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %147, %144[0] : i32, view<1xi32>
   func.return %output, %output_byte_offset : buffer, offset
 }
 
@@ -204,7 +204,7 @@ func.def public @add_observed(%lhs: i32, %rhs: i32, %carry_in: i32, %count: buff
   %165 = scalar.ori %162, %164 : i1
   %166 = scalar.extui %165 : i1 to i32
   %167 = buffer.view %159[%160] : buffer -> view<1xi32>
-  view.store %166, %167[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %166, %167[0] : i32, view<1xi32>
   func.return %163 : i32
 }
 
@@ -230,7 +230,7 @@ func.def public @add_long(%lhs: i32, %rhs: i32, %carry_in: i32, %carry_out: buff
   %10 = scalar.ori %7, %9 : i1
   %11 = scalar.extui %10 : i1 to i32
   %12 = buffer.view %carry_out[%carry_out_byte_offset] : buffer -> view<1xi32>
-  view.store %11, %12[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %11, %12[0] : i32, view<1xi32>
   func.return %8 : i32
 }
 
@@ -240,6 +240,6 @@ func.def public @subtract_long(%lhs: i32, %rhs: i32, %borrow_in: i32, %borrow_ou
   %23 = scalar.ori %20, %22 : i1
   %24 = scalar.extui %23 : i1 to i32
   %25 = buffer.view %borrow_out[%borrow_out_byte_offset] : buffer -> view<1xi32>
-  view.store %24, %25[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %24, %25[0] : i32, view<1xi32>
   func.return %21 : i32
 }

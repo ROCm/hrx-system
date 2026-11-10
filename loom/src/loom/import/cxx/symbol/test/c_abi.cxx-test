@@ -52,7 +52,7 @@ func.def public source_signature(#func.abi.c.signature<arguments = [0], results 
   %3 = index.constant 0 : offset
   %4 = index.add %input_byte_offset, %3 : offset
   %5 = buffer.view %input[%4] : buffer -> view<1xi32>
-  %value = view.load %5[0] : view<1xi32> -> i32
+  %value = view.load<root_in_bounds> %5[0] : view<1xi32> -> i32
   func.return %value : i32
 }
 

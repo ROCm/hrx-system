@@ -70,9 +70,10 @@ static iree_status_t loom_view_atomic_private_load(loom_builder_t* builder,
                 LOOM_VIEW_LOAD_BUILD_FLAG_HAS_CACHE_TEMPORAL;
   loom_op_t* load = NULL;
   IREE_RETURN_IF_ERROR(loom_view_load_build(
-      builder, flags, /*instance_flags=*/0, loom_memory_access_view(access),
-      indices.values, indices.count, static_indices.i64_array,
-      static_indices.count, loom_attr_as_enum(scope),
+      builder, flags,
+      loom_memory_access_flags(access) & LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS,
+      loom_memory_access_view(access), indices.values, indices.count,
+      static_indices.i64_array, static_indices.count, loom_attr_as_enum(scope),
       loom_attr_as_enum(temporal), type, access.op->location, &load));
   *out_value = loom_view_load_result(load);
   return iree_ok_status();
@@ -95,8 +96,9 @@ static iree_status_t loom_view_atomic_private_store(loom_builder_t* builder,
                 LOOM_VIEW_STORE_BUILD_FLAG_HAS_CACHE_TEMPORAL;
   loom_op_t* store = NULL;
   return loom_view_store_build(
-      builder, flags, /*instance_flags=*/0, value,
-      loom_memory_access_view(access), indices.values, indices.count,
+      builder, flags,
+      loom_memory_access_flags(access) & LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS,
+      value, loom_memory_access_view(access), indices.values, indices.count,
       static_indices.i64_array, static_indices.count, loom_attr_as_enum(scope),
       loom_attr_as_enum(temporal), access.op->location, &store);
 }
@@ -239,10 +241,11 @@ static iree_status_t loom_view_atomic_build_cmpxchg_before_region(
           loom_memory_access_atomic_ordering(access));
   loom_op_t* cmpxchg_op = NULL;
   IREE_RETURN_IF_ERROR(loom_view_atomic_cmpxchg_build(
-      builder, build_flags, expected, combined, loom_memory_access_view(access),
-      indices.values, indices.count, static_indices.i64_array,
-      static_indices.count, success_ordering,
-      kAtomicRmwFailureOrderings[success_ordering],
+      builder, build_flags,
+      loom_memory_access_flags(access) & LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS,
+      expected, combined, loom_memory_access_view(access), indices.values,
+      indices.count, static_indices.i64_array, static_indices.count,
+      success_ordering, kAtomicRmwFailureOrderings[success_ordering],
       (loom_atomic_scope_t)loom_attr_as_enum(
           loom_memory_access_atomic_scope(access)),
       cache_scope, cache_temporal, value_type, location, &cmpxchg_op));

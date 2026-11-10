@@ -69,12 +69,13 @@ Pointer Storage::constrain_origin(Pointer pointer, cxx::AST* owner) {
   return {pointer.root, byte_offset};
 }
 
-Pointer Storage::constrain_access(Pointer pointer, int64_t access_bytes,
-                                  cxx::AST* owner) {
+std::optional<Pointer> Storage::constrain_known_access(Pointer pointer,
+                                                       int64_t access_bytes,
+                                                       cxx::AST* owner) {
   auto root = roots_.find(pointer.root);
   if (root == roots_.end() || !root->second.allocation ||
       access_bytes > root->second.allocation->byte_length) {
-    return pointer;
+    return std::nullopt;
   }
   auto source = locations_.get(owner);
   auto offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
@@ -93,7 +94,7 @@ Pointer Storage::constrain_access(Pointer pointer, int64_t access_bytes,
   if (zero_origin_offsets_.contains(pointer.byte_offset)) {
     zero_origin_offsets_.insert(byte_offset);
   }
-  return {pointer.root, byte_offset};
+  return Pointer{pointer.root, byte_offset};
 }
 
 StorageProjection Storage::project(Pointer pointer,
@@ -213,8 +214,12 @@ StorageAccess Storage::dereference(StorageProjection base,
     base.pointer = constrain_origin(base.pointer, owner);
   }
   auto element = object_storage_type(types_.get(element_type, owner));
-  base.pointer = constrain_access(
+  const auto constrained = constrain_known_access(
       base.pointer, types_.storage_size(element_type, owner), owner);
+  const bool root_bounds_promised = !constrained.has_value();
+  if (constrained) {
+    base.pointer = *constrained;
+  }
   auto* vector = types_.native_vector(element_type);
   auto view_type =
       loom_type_shaped_1d(LOOM_TYPE_VIEW, loom_type_element_type(element),
@@ -227,7 +232,7 @@ StorageAccess Storage::dereference(StorageProjection base,
   check(loom_buffer_view_build(&builder_, base.pointer.root,
                                base.pointer.byte_offset, view_type,
                                locations_.get(owner), &view));
-  return {loom_op_results(view)[0], std::nullopt};
+  return {loom_op_results(view)[0], std::nullopt, root_bounds_promised};
 }
 
 loom_value_id_t Storage::load(const StorageAccess& access,
@@ -236,11 +241,15 @@ loom_value_id_t Storage::load(const StorageAccess& access,
   int64_t selector = access.index ? INT64_MIN : 0;
   auto build = types_.native_vector(element_type) ? loom_vector_load_build
                                                   : loom_view_load_build;
+  const loom_memory_access_flags_t access_flags =
+      types_.memory_access_flags(element_type) |
+      (access.root_bounds_promised ? LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS
+                                   : 0);
   loom_op_t* op;
-  check(build(&builder_, 0, types_.memory_access_flags(element_type),
-              access.view, access.index ? &*access.index : nullptr,
-              access.index ? 1 : 0, &selector, 1, 0, 0,
-              object_storage_type(value_type), locations_.get(owner), &op));
+  check(build(&builder_, 0, access_flags, access.view,
+              access.index ? &*access.index : nullptr, access.index ? 1 : 0,
+              &selector, 1, 0, 0, object_storage_type(value_type),
+              locations_.get(owner), &op));
   auto value = loom_op_results(op)[0];
   return loom_type_element_type(value_type) == LOOM_SCALAR_TYPE_I1
              ? scalars_.convert(value, unit_.control()->getUnsignedCharType(),
@@ -258,11 +267,14 @@ void Storage::store(const StorageAccess& access, loom_value_id_t value,
   int64_t selector = access.index ? INT64_MIN : 0;
   auto build = types_.native_vector(element_type) ? loom_vector_store_build
                                                   : loom_view_store_build;
+  const loom_memory_access_flags_t access_flags =
+      types_.memory_access_flags(element_type) |
+      (access.root_bounds_promised ? LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS
+                                   : 0);
   loom_op_t* op;
-  check(build(&builder_, 0, types_.memory_access_flags(element_type), value,
-              access.view, access.index ? &*access.index : nullptr,
-              access.index ? 1 : 0, &selector, 1, 0, 0, locations_.get(owner),
-              &op));
+  check(build(&builder_, 0, access_flags, value, access.view,
+              access.index ? &*access.index : nullptr, access.index ? 1 : 0,
+              &selector, 1, 0, 0, locations_.get(owner), &op));
 }
 
 StorageAccess Storage::subscript(StorageProjection base, loom_value_id_t index,

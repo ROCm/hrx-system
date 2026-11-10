@@ -123,7 +123,7 @@ kernel.def @entry() {
   %97 = scalar.assume %96 [range(%96, 0, 9223372036854775807)] : i64
   %98 = index.cast %97 : i64 to offset
   %99 = buffer.view %selected$77[%98] : buffer -> view<1xi32>
-  %100 = view.load %99[0] : view<1xi32> -> i32
+  %100 = view.load<root_in_bounds> %99[0] : view<1xi32> -> i32
   %101 = scalar.constant 0 : i32
   %102 = scalar.extsi %101 : i32 to i64
   %103 = scalar.constant 4 : i64
@@ -133,7 +133,7 @@ kernel.def @entry() {
   %107 = scalar.assume %106 [range(%106, 0, 9223372036854775807)] : i64
   %108 = index.cast %107 : i64 to offset
   %109 = buffer.view %output[%108] : buffer -> view<1xi32>
-  view.store %100, %109[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %100, %109[0] : i32, view<1xi32>
   %110 = scalar.constant 2 : i32
   %111 = scalar.extsi %110 : i32 to i64
   %112 = scalar.constant 4 : i64
@@ -148,9 +148,9 @@ kernel.def @entry() {
   %121 = scalar.extsi %120 : i32 to i64
   %122, %123 = func.call pure @advance(%row, %117, %121) : (buffer, offset, i64) -> (buffer, offset)
   %124 = buffer.view %122[%123] : buffer -> view<1xi32>
-  %125 = view.load %124[0] : view<1xi32> -> i32
+  %125 = view.load<root_in_bounds> %124[0] : view<1xi32> -> i32
   %126 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
-  view.store %125, %126[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %125, %126[0] : i32, view<1xi32>
   kernel.return
 }
 

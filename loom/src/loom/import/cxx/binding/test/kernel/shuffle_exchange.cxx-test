@@ -101,9 +101,9 @@ func.def inline @exchange_values_unsigned_long_long(%input: buffer, %input_byte_
   %39 = scalar.assume %279 [range(%279, 0, 9223372036854775807)] : i64
   %40 = index.cast %39 : i64 to offset
   %41 = buffer.view %lanes[%40] : buffer -> view<1xi32>
-  view.store %lane, %41[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %lane, %41[0] : i32, view<1xi32>
   %49 = buffer.view %subgroups[%40] : buffer -> view<1xi32>
-  view.store %subgroup, %49[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %subgroup, %49[0] : i32, view<1xi32>
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %274 = scalar.constant 3 : i32
   %275 = scalar.andi %item, %274 : i32
@@ -126,7 +126,7 @@ func.def inline @exchange_values_unsigned_long_long(%input: buffer, %input_byte_
     %67 = scalar.assume %66 [range(%66, 0, 9223372036854775807)] : i64
     %68 = index.cast %67 : i64 to offset
     %69 = buffer.view %input[%68] : buffer -> view<1xi64>
-    %70 = view.load %69[0] : view<1xi64> -> i64
+    %70 = view.load<root_in_bounds> %69[0] : view<1xi64> -> i64
     %value = func.call pure @payload_unsigned_long_long(%70) : (i64) -> (i64)
     %241 = index.constant 18 : offset
     %76 = index.constant 1 : offset
@@ -150,7 +150,7 @@ func.def inline @exchange_values_unsigned_long_long(%input: buffer, %input_byte_
       %98 = scalar.assume %97 [range(%97, 0, 9223372036854775807)] : i64
       %99 = index.cast %98 : i64 to offset
       %100 = buffer.view %output[%99] : buffer -> view<1xi32>
-      view.store %92, %100[0] : i32, view<1xi32>
+      view.store<root_in_bounds> %92, %100[0] : i32, view<1xi32>
       %102, %103 = kernel.subgroup.shuffle<xor> %value, %78, %86 : i64, i32, i32
       %104 = scalar.xori %relative, %78 : i32
       %105 = scalar.addi %base, %104 : i32
@@ -163,7 +163,7 @@ func.def inline @exchange_values_unsigned_long_long(%input: buffer, %input_byte_
       %117 = scalar.assume %116 [range(%116, 0, 9223372036854775807)] : i64
       %118 = index.cast %117 : i64 to offset
       %119 = buffer.view %output[%118] : buffer -> view<1xi32>
-      view.store %109, %119[0] : i32, view<1xi32>
+      view.store<root_in_bounds> %109, %119[0] : i32, view<1xi32>
       %121, %122 = kernel.subgroup.shuffle<up> %value, %78, %86 : i64, i32, i32
       %123 = scalar.subi %lane, %78 : i32
       %124 = scalar.cmpi ule, %78, %relative : i32
@@ -175,7 +175,7 @@ func.def inline @exchange_values_unsigned_long_long(%input: buffer, %input_byte_
       %133 = scalar.assume %132 [range(%132, 0, 9223372036854775807)] : i64
       %134 = index.cast %133 : i64 to offset
       %135 = buffer.view %output[%134] : buffer -> view<1xi32>
-      view.store %125, %135[0] : i32, view<1xi32>
+      view.store<root_in_bounds> %125, %135[0] : i32, view<1xi32>
       %137, %138 = kernel.subgroup.shuffle<down> %value, %78, %86 : i64, i32, i32
       %139 = scalar.addi %lane, %78 : i32
       %140 = scalar.addi %relative, %78 : i32
@@ -188,7 +188,7 @@ func.def inline @exchange_values_unsigned_long_long(%input: buffer, %input_byte_
       %151 = scalar.assume %150 [range(%150, 0, 9223372036854775807)] : i64
       %152 = index.cast %151 : i64 to offset
       %153 = buffer.view %output[%152] : buffer -> view<1xi32>
-      view.store %143, %153[0] : i32, view<1xi32>
+      view.store<root_in_bounds> %143, %153[0] : i32, view<1xi32>
     }
   }
   func.return
@@ -221,7 +221,7 @@ func.def inline @mismatch_unsigned_long_long(%actual_value: i64, %actual_valid: 
       %194 = scalar.assume %193 [range(%193, 0, 9223372036854775807)] : i64
       %195 = index.cast %194 : i64 to offset
       %196 = buffer.view %lanes[%195] : buffer -> view<1xi32>
-      %197 = view.load %196[0] : view<1xi32> -> i32
+      %197 = view.load<root_in_bounds> %196[0] : view<1xi32> -> i32
       %198 = scalar.cmpi eq, %197, %source_lane : i32
       scf.yield %198 : i1
     } else {
@@ -236,7 +236,7 @@ func.def inline @mismatch_unsigned_long_long(%actual_value: i64, %actual_valid: 
       %205 = scalar.assume %204 [range(%204, 0, 9223372036854775807)] : i64
       %206 = index.cast %205 : i64 to offset
       %207 = buffer.view %subgroups[%206] : buffer -> view<1xi32>
-      %208 = view.load %207[0] : view<1xi32> -> i32
+      %208 = view.load<root_in_bounds> %207[0] : view<1xi32> -> i32
       %209 = scalar.cmpi eq, %208, %subgroup : i32
       scf.yield %209 : i1
     } else {
@@ -254,7 +254,7 @@ func.def inline @mismatch_unsigned_long_long(%actual_value: i64, %actual_valid: 
       %220 = scalar.assume %219 [range(%219, 0, 9223372036854775807)] : i64
       %221 = index.cast %220 : i64 to offset
       %222 = buffer.view %input[%221] : buffer -> view<1xi64>
-      %223 = view.load %222[0] : view<1xi64> -> i64
+      %223 = view.load<root_in_bounds> %222[0] : view<1xi64> -> i64
       %expected = func.call pure @payload_unsigned_long_long(%223) : (i64) -> (i64)
       scf.yield %found, %expected : i1, i64
     } else {

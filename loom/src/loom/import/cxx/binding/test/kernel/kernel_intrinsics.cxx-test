@@ -37,11 +37,11 @@ kernel.def @entry() {
     %31 = scalar.assume %53 [range(%53, 0, 9223372036854775807)] : i64
     %32 = index.cast %31 : i64 to offset
     %33 = buffer.view %coordinates[%32] : buffer -> view<1xi32>
-    view.store %54, %33[0] : i32, view<1xi32>
+    view.store<root_in_bounds> %54, %33[0] : i32, view<1xi32>
     %34 = scalar.constant 1 : i32
     %36, %37 = kernel.subgroup.shuffle<xor> %value, %34, %13 : f32, i32, i32
     %45 = buffer.view %output[%32] : buffer -> view<1xf32>
-    view.store %36, %45[0] : f32, view<1xf32>
+    view.store<root_in_bounds> %36, %45[0] : f32, view<1xf32>
   }
   func.call @synchronize() : ()
   kernel.return
@@ -73,7 +73,7 @@ func.def public linkonce inline @header_enables_barrier(%header: buffer, %header
   %9 = scalar.assume %7 [range(%7, 0, 9223372036854775807)] : i64
   %10 = index.cast %9 : i64 to offset
   %11 = buffer.view %header[%10] : buffer -> view<1xi32>
-  %12 = view.load %11[0] : view<1xi32> -> i32
+  %12 = view.load<root_in_bounds> %11[0] : view<1xi32> -> i32
   %13 = scalar.constant 0 : i32
   %14 = scalar.cmpi ne, %12, %13 : i32
   func.return %14 : i1
@@ -125,10 +125,10 @@ kernel.def @entry() {
   %19 = scalar.assume %55 [range(%55, 0, 9223372036854775807)] : i64
   %20 = index.cast %19 : i64 to offset
   %21 = buffer.view %coordinates[%20] : buffer -> view<1xi32>
-  view.store %13, %21[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %13, %21[0] : i32, view<1xi32>
   %22 = func.call @exchange(%value) : (f32) -> (f32)
   %30 = buffer.view %output[%20] : buffer -> view<1xf32>
-  view.store %22, %30[0] : f32, view<1xf32>
+  view.store<root_in_bounds> %22, %30[0] : f32, view<1xf32>
   kernel.return
 }
 
@@ -215,7 +215,7 @@ kernel.def @topology_identity() {
   %41 = scalar.assume %54 [range(%54, 0, 9223372036854775807)] : i64
   %42 = index.cast %41 : i64 to offset
   %43 = buffer.view %output[%42] : buffer -> view<1xi32>
-  view.store %55, %43[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %55, %43[0] : i32, view<1xi32>
   %output_view = buffer.view %output[%output_byte_offset] : buffer -> view<4xi32>
   view.store %lane, %output_view[%coordinate] : i32, view<4xi32>
   %50 = index.add %subgroup, %subgroup_count : index

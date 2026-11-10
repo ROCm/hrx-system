@@ -28,7 +28,7 @@ func.def public @entry(%input: buffer, %input_byte_offset: offset, %output: buff
   %13 = scalar.assume %12 [range(%12, 0, 9223372036854775807)] : i64
   %14 = index.cast %13 : i64 to offset
   %15 = buffer.view %input[%14] : buffer -> view<16xi32>
-  %value$16 = vector.load %15[0] : view<16xi32> -> vector<16xi32>
+  %value$16 = vector.load<root_in_bounds> %15[0] : view<16xi32> -> vector<16xi32>
   %i = scalar.constant 0 : i32
   %18 = index.cast %i : i32 to offset
   %19 = index.cast %count : i32 to offset
@@ -43,7 +43,7 @@ func.def public @entry(%input: buffer, %input_byte_offset: offset, %output: buff
     %30 = scalar.assume %29 [range(%29, 0, 9223372036854775807)] : i64
     %31 = index.cast %30 : i64 to offset
     %32 = buffer.view %input[%31] : buffer -> view<16xi32>
-    %33 = vector.load %32[0] : view<16xi32> -> vector<16xi32>
+    %33 = vector.load<root_in_bounds> %32[0] : view<16xi32> -> vector<16xi32>
     %value$34 = func.call pure @update(%value$22, %33) : (vector<16xi32>, vector<16xi32>) -> (vector<16xi32>)
     scf.yield %value$34 : vector<16xi32>
   }
@@ -66,7 +66,7 @@ func.def public @entry(%input: buffer, %input_byte_offset: offset, %output: buff
   %47 = scalar.assume %46 [range(%46, 0, 9223372036854775807)] : i64
   %48 = index.cast %47 : i64 to offset
   %49 = buffer.view %output[%48] : buffer -> view<16xi32>
-  vector.store %value$37, %49[0] : vector<16xi32>, view<16xi32>
+  vector.store<root_in_bounds> %value$37, %49[0] : vector<16xi32>, view<16xi32>
   %50 = scalar.constant 0 : i32
   %51 = scalar.extsi %50 : i32 to i64
   %52 = scalar.constant 64 : i64
@@ -76,7 +76,7 @@ func.def public @entry(%input: buffer, %input_byte_offset: offset, %output: buff
   %56 = scalar.assume %55 [range(%55, 0, 9223372036854775807)] : i64
   %57 = index.cast %56 : i64 to offset
   %58 = buffer.view %input[%57] : buffer -> view<16xi32>
-  %59 = vector.load %58[0] : view<16xi32> -> vector<16xi32>
+  %59 = vector.load<root_in_bounds> %58[0] : view<16xi32> -> vector<16xi32>
   %60 = vector.cmpi ugt, %value$37, %59 : vector<16xi32> -> vector<16xi1>
   %61 = vector.extsi %60 : vector<16xi1> to vector<16xi32>
   %62 = scalar.constant 0 : i32
@@ -88,7 +88,7 @@ func.def public @entry(%input: buffer, %input_byte_offset: offset, %output: buff
   %68 = scalar.assume %67 [range(%67, 0, 9223372036854775807)] : i64
   %69 = index.cast %68 : i64 to offset
   %70 = buffer.view %masks[%69] : buffer -> view<16xi32>
-  vector.store %61, %70[0] : vector<16xi32>, view<16xi32>
+  vector.store<root_in_bounds> %61, %70[0] : vector<16xi32>, view<16xi32>
   %71 = vector.splati 0 : vector<16xi32>
   %72 = vector.cmpi eq, %value$37, %71 : vector<16xi32> -> vector<16xi1>
   %73 = vector.extsi %72 : vector<16xi1> to vector<16xi32>
@@ -101,7 +101,7 @@ func.def public @entry(%input: buffer, %input_byte_offset: offset, %output: buff
   %80 = scalar.assume %79 [range(%79, 0, 9223372036854775807)] : i64
   %81 = index.cast %80 : i64 to offset
   %82 = buffer.view %masks[%81] : buffer -> view<16xi32>
-  vector.store %73, %82[0] : vector<16xi32>, view<16xi32>
+  vector.store<root_in_bounds> %73, %82[0] : vector<16xi32>, view<16xi32>
   func.return
 }
 
@@ -133,7 +133,7 @@ unsigned lane(unsigned* input, unsigned index) {
 func.def public @lane(%input: buffer, %input_byte_offset: offset, %index: i32) -> (i32) {
   %lanes = vector.constanti [1, 2, 0, 0] : vector<4xi32>
   %5 = buffer.view %input[%input_byte_offset] : buffer -> view<4xi32>
-  %6 = vector.load %5[0] : view<4xi32> -> vector<4xi32>
+  %6 = vector.load<root_in_bounds> %5[0] : view<4xi32> -> vector<4xi32>
   %value = vector.addi %6, %lanes : vector<4xi32>
   %bits = vector.bitcast %value : vector<4xi32> to vector<4xf32>
   %recovered = vector.bitcast %bits : vector<4xf32> to vector<4xi32>

@@ -194,15 +194,15 @@ func.def public @tuple_protocol_binding(%value_first$0: i32, %value_second$1: i3
   %16, %17 = func.call pure @Tuple__get_0_storage(%value_storage, %value_storage_byte_offset) : (buffer, offset) -> (buffer, offset)
   %18, %19 = func.call pure @Tuple__get_1_storage(%value_storage, %value_storage_byte_offset) : (buffer, offset) -> (buffer, offset)
   %20 = buffer.view %18[%19] : buffer -> view<1xi32>
-  %right = view.load %20[0] : view<1xi32> -> i32
+  %right = view.load<root_in_bounds> %20[0] : view<1xi32> -> i32
   %22 = buffer.view %16[%17] : buffer -> view<1xi32>
-  %23 = view.load %22[0] : view<1xi32> -> i32
+  %23 = view.load<root_in_bounds> %22[0] : view<1xi32> -> i32
   %24 = scalar.addi %23, %right : i32
-  view.store %24, %22[0] : i32, view<1xi32>
-  %28 = view.load %20[0] : view<1xi32> -> i32
+  view.store<root_in_bounds> %24, %22[0] : i32, view<1xi32>
+  %28 = view.load<root_in_bounds> %20[0] : view<1xi32> -> i32
   %97 = scalar.constant 1 : i32
   %98 = scalar.shli %28, %97 : i32
-  view.store %98, %20[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %98, %20[0] : i32, view<1xi32>
   %value_first$35 = view.load %11[0] : view<1xi32> -> i32
   %value_second$40 = view.load %15[0] : view<1xi32> -> i32
   func.return %value_first$35, %value_second$40 : i32, i32
@@ -220,13 +220,13 @@ func.def public @tuple_protocol_value_binding(%value_first: i32, %value_second: 
   %57, %58 = func.call pure @Tuple__get_0_storage_1(%$e_storage, %$e_storage_byte_offset) : (buffer, offset) -> (buffer, offset)
   %59, %60 = func.call pure @Tuple__get_1_storage_1(%$e_storage, %$e_storage_byte_offset) : (buffer, offset) -> (buffer, offset)
   %61 = buffer.view %59[%60] : buffer -> view<1xi32>
-  %right$62 = view.load %61[0] : view<1xi32> -> i32
+  %right$62 = view.load<root_in_bounds> %61[0] : view<1xi32> -> i32
   %63 = buffer.view %57[%58] : buffer -> view<1xi32>
-  %64 = view.load %63[0] : view<1xi32> -> i32
+  %64 = view.load<root_in_bounds> %63[0] : view<1xi32> -> i32
   %65 = scalar.addi %64, %right$62 : i32
-  view.store %65, %63[0] : i32, view<1xi32>
-  %left = view.load %63[0] : view<1xi32> -> i32
-  %right$70 = view.load %61[0] : view<1xi32> -> i32
+  view.store<root_in_bounds> %65, %63[0] : i32, view<1xi32>
+  %left = view.load<root_in_bounds> %63[0] : view<1xi32> -> i32
+  %right$70 = view.load<root_in_bounds> %61[0] : view<1xi32> -> i32
   func.return %left, %right$70 : i32, i32
 }
 

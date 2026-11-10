@@ -339,7 +339,7 @@ func.def public @local_scopes(%first: i1, %index: i32) -> (i32) {
   %23 = scalar.assume %22 [range(%22, 0, 9223372036854775807)] : i64
   %24 = index.cast %23 : i64 to offset
   %25 = buffer.view %14[%24] : buffer -> view<1xi32>
-  %26 = view.load %25[0] : view<1xi32> -> i32
+  %26 = view.load<root_in_bounds> %25[0] : view<1xi32> -> i32
   func.return %26 : i32
 }
 
@@ -374,14 +374,14 @@ func.def public @local_templates(%index: i32) -> (i32) {
   %11 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
   %12 = index.cast %11 : i64 to offset
   %13 = buffer.view %2[%12] : buffer -> view<1xi32>
-  %14 = view.load %13[0] : view<1xi32> -> i32
+  %14 = view.load<root_in_bounds> %13[0] : view<1xi32> -> i32
   %15, %16 = func.call readonly @specialized_table_7() : () -> (buffer, offset)
   %22 = index.cast %16 : offset to i64
   %23 = scalar.addi %22, %60 : i64
   %24 = scalar.assume %23 [range(%23, 0, 9223372036854775807)] : i64
   %25 = index.cast %24 : i64 to offset
   %26 = buffer.view %15[%25] : buffer -> view<1xi32>
-  %27 = view.load %26[0] : view<1xi32> -> i32
+  %27 = view.load<root_in_bounds> %26[0] : view<1xi32> -> i32
   %28 = scalar.addi %14, %27 : i32
   %32 = scalar.addi %index, %4 : i32
   %34 = scalar.andi %32, %4 : i32
@@ -391,7 +391,7 @@ func.def public @local_templates(%index: i32) -> (i32) {
   %40 = scalar.assume %39 [range(%39, 0, 9223372036854775807)] : i64
   %41 = index.cast %40 : i64 to offset
   %42 = buffer.view %2[%41] : buffer -> view<1xi32>
-  %43 = view.load %42[0] : view<1xi32> -> i32
+  %43 = view.load<root_in_bounds> %42[0] : view<1xi32> -> i32
   %44 = scalar.addi %28, %43 : i32
   func.return %44 : i32
 }

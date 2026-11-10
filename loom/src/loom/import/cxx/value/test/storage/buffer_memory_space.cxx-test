@@ -130,7 +130,7 @@ func.def public @observe_pointer(%source: buffer, %source_byte_offset: offset) -
   %18 = scalar.assume %17 [range(%17, 0, 9223372036854775807)] : i64
   %19 = index.cast %18 : i64 to offset
   %20 = buffer.view %refined[%19] : buffer -> view<1xi32>
-  %21 = view.load<volatile> %20[0] : view<1xi32> -> i32
+  %21 = view.load<volatile|root_in_bounds> %20[0] : view<1xi32> -> i32
   func.return %21 : i32
 }
 
@@ -239,7 +239,7 @@ kernel.def @borrowed_storage() {
   %36 = scalar.assume %77 [range(%77, 0, 9223372036854775807)] : i64
   %37 = index.cast %36 : i64 to offset
   %38 = buffer.view %interior[%37] : buffer -> view<1xi32>
-  %39 = view.load %38[0] : view<1xi32> -> i32
+  %39 = view.load<root_in_bounds> %38[0] : view<1xi32> -> i32
   %75 = scalar.constant 1 : i32
   %76 = scalar.shli %item, %75 : i32
   %43 = scalar.addi %76, %75 : i32
@@ -248,7 +248,7 @@ kernel.def @borrowed_storage() {
   %49 = scalar.assume %74 [range(%74, 0, 9223372036854775807)] : i64
   %50 = index.cast %49 : i64 to offset
   %51 = buffer.view %output[%50] : buffer -> view<1xi32>
-  view.store %39, %51[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %39, %51[0] : i32, view<1xi32>
   %52 = scalar.constant 3 : i32
   %53 = scalar.addi %item, %52 : i32
   %54 = scalar.extui %53 : i32 to i64
@@ -261,6 +261,6 @@ kernel.def @borrowed_storage() {
   %66 = scalar.assume %70 [range(%70, 0, 9223372036854775807)] : i64
   %67 = index.cast %66 : i64 to offset
   %68 = buffer.view %output[%67] : buffer -> view<1xi32>
-  view.store %56, %68[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %56, %68[0] : i32, view<1xi32>
   kernel.return
 }

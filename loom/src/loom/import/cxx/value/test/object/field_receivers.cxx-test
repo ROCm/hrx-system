@@ -27,7 +27,7 @@ func.def @Cursor__reset_value() -> (i32) {
 
 func.def inline @Cursor___Cursor_value(%this_position: i32, %this_output: buffer, %this_output_byte_offset: offset) {
   %8 = buffer.view %this_output[%this_output_byte_offset] : buffer -> view<1xi32>
-  view.store %this_position, %8[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %this_position, %8[0] : i32, view<1xi32>
   func.return
 }
 

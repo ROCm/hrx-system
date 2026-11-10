@@ -85,7 +85,7 @@ func.def inline @initialize(%value: buffer, %value_byte_offset: offset) {
   %9 = scalar.constant 7 : i32
   %10 = scalar.trunci %9 : i32 to i16
   %11 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi16>
-  view.store %10, %11[0] : i16, view<1xi16>
+  view.store<root_in_bounds> %10, %11[0] : i16, view<1xi16>
   func.return
 }
 
@@ -357,12 +357,12 @@ func.def public @atomic_local(%input: i32) -> (i32) {
   %10 = scalar.constant 1 : i32
   %11 = scalar.addi %input, %10 : i32
   %12 = scalar.constant 41 : i32
-  %19 = view.atomic.cmpxchg %11, %12, %value_view[0] {failure_ordering = seq_cst, scope = system, success_ordering = seq_cst} : i32, view<1xi32> -> i32
+  %19 = view.atomic.cmpxchg<root_in_bounds> %11, %12, %value_view[0] {failure_ordering = seq_cst, scope = system, success_ordering = seq_cst} : i32, view<1xi32> -> i32
   %failed = scalar.cmpi eq, %19, %11 : i32
   %21 = scalar.constant 1 : i1
   %22 = scalar.xori %failed, %21 : i1
   %58 = scf.select %22, %19, %11 : i32
-  %30 = view.atomic.cmpxchg %58, %12, %value_view[0] {failure_ordering = seq_cst, scope = system, success_ordering = seq_cst} : i32, view<1xi32> -> i32
+  %30 = view.atomic.cmpxchg<root_in_bounds> %58, %12, %value_view[0] {failure_ordering = seq_cst, scope = system, success_ordering = seq_cst} : i32, view<1xi32> -> i32
   %succeeded = scalar.cmpi eq, %30, %58 : i32
   %33 = scalar.xori %succeeded, %21 : i1
   %57 = scf.select %33, %30, %58 : i32
@@ -399,9 +399,9 @@ func.def public @vector_local(%input: i32) -> (i32) {
   %40 = vector.splat %input : vector<4xi32>
   vector.store %40, %value_view[0] : vector<4xi32>, view<4xi32>
   %28 = vector.constanti [1, 2, 3, 4] : vector<4xi32>
-  %30 = vector.load %value_view[0] : view<4xi32> -> vector<4xi32>
+  %30 = vector.load<root_in_bounds> %value_view[0] : view<4xi32> -> vector<4xi32>
   %31 = vector.addi %30, %28 : vector<4xi32>
-  vector.store %31, %value_view[0] : vector<4xi32>, view<4xi32>
+  vector.store<root_in_bounds> %31, %value_view[0] : vector<4xi32>, view<4xi32>
   %39 = view.load %value_view[0] : view<4xi32> -> i32
   %38 = view.load %value_view[1] : view<4xi32> -> i32
   %15 = scalar.addi %39, %38 : i32

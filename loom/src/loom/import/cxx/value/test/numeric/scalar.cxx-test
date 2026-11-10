@@ -134,11 +134,11 @@ _Float16 pre_decrement(_Float16 value) { return --value; }
 // ----
 func.def public @post_increment(%value: buffer, %value_byte_offset: offset) -> (f64) {
   %3 = buffer.view %value[%value_byte_offset] : buffer -> view<1xf64>
-  %4 = view.load %3[0] : view<1xf64> -> f64
+  %4 = view.load<root_in_bounds> %3[0] : view<1xf64> -> f64
   %5 = scalar.constant 1 : i32
   %6 = scalar.sitofp %5 : i32 to f64
   %7 = scalar.addf %4, %6 : f64
-  view.store %7, %3[0] : f64, view<1xf64>
+  view.store<root_in_bounds> %7, %3[0] : f64, view<1xf64>
   func.return %4 : f64
 }
 

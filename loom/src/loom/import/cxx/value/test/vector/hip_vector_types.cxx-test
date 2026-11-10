@@ -71,14 +71,14 @@ unsigned construct(unsigned input) {
 // ----
 func.def public @transport(%source: buffer, %source_byte_offset: offset, %destination: buffer, %destination_byte_offset: offset, %replacement: i32) -> (i32) {
   %6 = buffer.view %source[%source_byte_offset] : buffer -> view<4xi32>
-  %value$7 = vector.load %6[0] : view<4xi32> -> vector<4xi32>
+  %value$7 = vector.load<root_in_bounds> %6[0] : view<4xi32> -> vector<4xi32>
   %value$8 = vector.insert %replacement into %value$7[0] : i32, vector<4xi32>
   %9 = vector.extract %value$8[1] : vector<4xi32> -> i32
   %10 = vector.extract %value$8[3] : vector<4xi32> -> i32
   %11 = scalar.addi %10, %9 : i32
   %value$12 = vector.insert %11 into %value$8[3] : i32, vector<4xi32>
   %13 = buffer.view %destination[%destination_byte_offset] : buffer -> view<4xi32>
-  vector.store %value$12, %13[0] : vector<4xi32>, view<4xi32>
+  vector.store<root_in_bounds> %value$12, %13[0] : vector<4xi32>, view<4xi32>
   %14 = vector.extract %value$12[2] : vector<4xi32> -> i32
   func.return %14 : i32
 }
@@ -109,14 +109,14 @@ kernel.def @hip_vector_values() {
 } launch(%input: buffer, %output: buffer) {
   %input_byte_offset = index.constant 0 : offset
   %10 = buffer.view %input[%input_byte_offset] : buffer -> view<4xi32>
-  %words$11 = vector.load %10[0] : view<4xi32> -> vector<4xi32>
+  %words$11 = vector.load<root_in_bounds> %10[0] : view<4xi32> -> vector<4xi32>
   %12 = vector.extract %words$11[3] : vector<4xi32> -> i32
   %13 = vector.extract %words$11[1] : vector<4xi32> -> i32
   %14 = scalar.addi %12, %13 : i32
   %words$15 = vector.insert %14 into %words$11[0] : i32, vector<4xi32>
   %592 = index.constant 16 : offset
   %24 = buffer.view %input[%592] : buffer -> view<1xi32>
-  %25 = view.load %24[0] : view<1xi32> -> i32
+  %25 = view.load<root_in_bounds> %24[0] : view<1xi32> -> i32
   %27 = scalar.xori %13, %25 : i32
   %words$28 = vector.insert %27 into %words$15[1] : i32, vector<4xi32>
   %544 = vector.extract %words$11[2] : vector<4xi32> -> i32
@@ -125,11 +125,11 @@ kernel.def @hip_vector_values() {
   %35 = scalar.subi %12, %14 : i32
   %words$36 = vector.insert %35 into %words$32[3] : i32, vector<4xi32>
   %37 = buffer.view %output[%input_byte_offset] : buffer -> view<4xi32>
-  vector.store %words$36, %37[0] : vector<4xi32>, view<4xi32>
-  %47 = view.load %24[0] : view<1xi32> -> i32
+  vector.store<root_in_bounds> %words$36, %37[0] : vector<4xi32>, view<4xi32>
+  %47 = view.load<root_in_bounds> %24[0] : view<1xi32> -> i32
   %590 = index.constant 8 : offset
   %56 = buffer.view %input[%590] : buffer -> view<1xi32>
-  %57 = view.load %56[0] : view<1xi32> -> i32
+  %57 = view.load<root_in_bounds> %56[0] : view<1xi32> -> i32
   %pair$58 = func.call pure @make_uint2(%47, %57) : (i32, i32) -> (vector<2xi32>)
   %59 = vector.extract %pair$58[1] : vector<2xi32> -> i32
   %60 = vector.extract %pair$58[0] : vector<2xi32> -> i32
@@ -137,16 +137,16 @@ kernel.def @hip_vector_values() {
   %pair$62 = vector.insert %61 into %pair$58[0] : i32, vector<2xi32>
   %589 = index.constant 4 : offset
   %71 = buffer.view %input[%589] : buffer -> view<1xi32>
-  %72 = view.load %71[0] : view<1xi32> -> i32
+  %72 = view.load<root_in_bounds> %71[0] : view<1xi32> -> i32
   %74 = scalar.addi %59, %72 : i32
   %pair$75 = vector.insert %74 into %pair$62[1] : i32, vector<2xi32>
   %84 = buffer.view %output[%592] : buffer -> view<2xi32>
-  vector.store %pair$75, %84[0] : vector<2xi32>, view<2xi32>
-  %94 = view.load %71[0] : view<1xi32> -> i32
-  %104 = view.load %56[0] : view<1xi32> -> i32
+  vector.store<root_in_bounds> %pair$75, %84[0] : vector<2xi32>, view<2xi32>
+  %94 = view.load<root_in_bounds> %71[0] : view<1xi32> -> i32
+  %104 = view.load<root_in_bounds> %56[0] : view<1xi32> -> i32
   %585 = index.constant 12 : offset
   %113 = buffer.view %input[%585] : buffer -> view<1xi32>
-  %114 = view.load %113[0] : view<1xi32> -> i32
+  %114 = view.load<root_in_bounds> %113[0] : view<1xi32> -> i32
   %triple_x$115, %triple_y$116, %triple_z$117 = func.call pure @make_uint3(%94, %104, %114) : (i32, i32, i32) -> (i32, i32, i32)
   %118 = scalar.constant 6 : i32
   %triple_x$119 = scalar.addi %triple_x$115, %118 : i32
@@ -154,14 +154,14 @@ kernel.def @hip_vector_values() {
   %triple_z$121 = scalar.xori %triple_z$117, %triple_y$120 : i32
   %584 = index.constant 24 : offset
   %130 = buffer.view %output[%584] : buffer -> view<1xi32>
-  view.store %triple_x$119, %130[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %triple_x$119, %130[0] : i32, view<1xi32>
   %583 = index.constant 28 : offset
   %139 = buffer.view %output[%583] : buffer -> view<1xi32>
-  view.store %triple_y$120, %139[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %triple_y$120, %139[0] : i32, view<1xi32>
   %582 = index.constant 32 : offset
   %148 = buffer.view %output[%582] : buffer -> view<1xi32>
-  view.store %triple_z$121, %148[0] : i32, view<1xi32>
-  %158 = view.load %113[0] : view<1xi32> -> i32
+  view.store<root_in_bounds> %triple_z$121, %148[0] : i32, view<1xi32>
+  %158 = view.load<root_in_bounds> %113[0] : view<1xi32> -> i32
   %159 = scalar.trunci %158 : i32 to i8
   %byte_x$160 = func.call pure @make_uchar1(%159) : (i8) -> (i8)
   %161 = scalar.constant 2 : i32
@@ -171,7 +171,7 @@ kernel.def @hip_vector_values() {
   %165 = scalar.extui %byte_x$164 : i8 to i32
   %580 = index.constant 36 : offset
   %174 = buffer.view %output[%580] : buffer -> view<1xi32>
-  view.store %165, %174[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %165, %174[0] : i32, view<1xi32>
   %579 = scalar.constant -32768 : i16
   %578 = scalar.constant -1 : i16
   %577 = scalar.constant 32767 : i16
@@ -186,26 +186,26 @@ kernel.def @hip_vector_values() {
   %196 = scalar.extsi %signed_values_x : i16 to i32
   %576 = index.constant 40 : offset
   %205 = buffer.view %output[%576] : buffer -> view<1xi32>
-  view.store %196, %205[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %196, %205[0] : i32, view<1xi32>
   %206 = scalar.extsi %signed_values_y$191 : i16 to i32
   %575 = index.constant 44 : offset
   %215 = buffer.view %output[%575] : buffer -> view<1xi32>
-  view.store %206, %215[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %206, %215[0] : i32, view<1xi32>
   %216 = scalar.extsi %signed_values_z$195 : i16 to i32
   %574 = index.constant 48 : offset
   %225 = buffer.view %output[%574] : buffer -> view<1xi32>
-  view.store %216, %225[0] : i32, view<1xi32>
-  %235 = view.load %56[0] : view<1xi32> -> i32
+  view.store<root_in_bounds> %216, %225[0] : i32, view<1xi32>
+  %235 = view.load<root_in_bounds> %56[0] : view<1xi32> -> i32
   %236 = scalar.extui %235 : i32 to i64
   %572 = scalar.constant 32 : i64
   %239 = scalar.shli %236, %572 : i64
-  %249 = view.load %113[0] : view<1xi32> -> i32
+  %249 = view.load<root_in_bounds> %113[0] : view<1xi32> -> i32
   %250 = scalar.extui %249 : i32 to i64
   %251 = scalar.ori %239, %250 : i64
-  %261 = view.load %24[0] : view<1xi32> -> i32
+  %261 = view.load<root_in_bounds> %24[0] : view<1xi32> -> i32
   %262 = scalar.extui %261 : i32 to i64
   %265 = scalar.shli %262, %572 : i64
-  %275 = view.load %71[0] : view<1xi32> -> i32
+  %275 = view.load<root_in_bounds> %71[0] : view<1xi32> -> i32
   %276 = scalar.extui %275 : i32 to i64
   %277 = scalar.ori %265, %276 : i64
   %wide = func.call pure @make_ulonglong2(%251, %277) : (i64, i64) -> (vector<2xi64>)
@@ -217,22 +217,22 @@ kernel.def @hip_vector_values() {
   %288 = scalar.trunci %281 : i64 to i32
   %567 = index.constant 52 : offset
   %297 = buffer.view %output[%567] : buffer -> view<1xi32>
-  view.store %288, %297[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %288, %297[0] : i32, view<1xi32>
   %301 = scalar.shrui %281, %572 : i64
   %302 = scalar.trunci %301 : i64 to i32
   %565 = index.constant 56 : offset
   %311 = buffer.view %output[%565] : buffer -> view<1xi32>
-  view.store %302, %311[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %302, %311[0] : i32, view<1xi32>
   %313 = scalar.trunci %285 : i64 to i32
   %564 = index.constant 60 : offset
   %322 = buffer.view %output[%564] : buffer -> view<1xi32>
-  view.store %313, %322[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %313, %322[0] : i32, view<1xi32>
   %326 = scalar.shrui %285, %572 : i64
   %327 = scalar.trunci %326 : i64 to i32
   %562 = index.constant 64 : offset
   %336 = buffer.view %output[%562] : buffer -> view<1xi32>
-  view.store %327, %336[0] : i32, view<1xi32>
-  %346 = view.load %71[0] : view<1xi32> -> i32
+  view.store<root_in_bounds> %327, %336[0] : i32, view<1xi32>
+  %346 = view.load<root_in_bounds> %71[0] : view<1xi32> -> i32
   %347 = scalar.sitofp %346 : i32 to f32
   %348 = scalar.constant 2.0 : f32
   %560 = scalar.constant -3.5 : f32
@@ -246,12 +246,12 @@ kernel.def @hip_vector_values() {
   %361 = scalar.bitcast %354 : f32 to i32
   %559 = index.constant 68 : offset
   %370 = buffer.view %output[%559] : buffer -> view<1xi32>
-  view.store %361, %370[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %361, %370[0] : i32, view<1xi32>
   %372 = scalar.bitcast %358 : f32 to i32
   %558 = index.constant 72 : offset
   %381 = buffer.view %output[%558] : buffer -> view<1xi32>
-  view.store %372, %381[0] : i32, view<1xi32>
-  %391 = view.load %71[0] : view<1xi32> -> i32
+  view.store<root_in_bounds> %372, %381[0] : i32, view<1xi32>
+  %391 = view.load<root_in_bounds> %71[0] : view<1xi32> -> i32
   %392 = scalar.uitofp %391 : i32 to f64
   %556 = scalar.constant -0.0 : f64
   %doubles = func.call pure @make_double2(%392, %556) : (f64, f64) -> (vector<2xf64>)
@@ -265,16 +265,16 @@ kernel.def @hip_vector_values() {
   %405 = scalar.fptoui %404 : f64 to i32
   %555 = index.constant 76 : offset
   %414 = buffer.view %output[%555] : buffer -> view<1xi32>
-  view.store %405, %414[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %405, %414[0] : i32, view<1xi32>
   %415 = scalar.trunci %double_bits : i64 to i32
   %554 = index.constant 80 : offset
   %424 = buffer.view %output[%554] : buffer -> view<1xi32>
-  view.store %415, %424[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %415, %424[0] : i32, view<1xi32>
   %427 = scalar.shrui %double_bits, %572 : i64
   %428 = scalar.trunci %427 : i64 to i32
   %552 = index.constant 84 : offset
   %437 = buffer.view %output[%552] : buffer -> view<1xi32>
-  view.store %428, %437[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %428, %437[0] : i32, view<1xi32>
   %551 = scalar.constant -9223372036854775807 : i64
   %signed_wide_x$441 = func.call pure @make_longlong1(%551) : (i64) -> (i64)
   %550 = scalar.constant 7 : i64
@@ -286,8 +286,8 @@ kernel.def @hip_vector_values() {
   %593 = scf.select %447, %449, %450 : i32
   %548 = index.constant 88 : offset
   %459 = buffer.view %output[%548] : buffer -> view<1xi32>
-  view.store %593, %459[0] : i32, view<1xi32>
-  %469 = view.load %71[0] : view<1xi32> -> i32
+  view.store<root_in_bounds> %593, %459[0] : i32, view<1xi32>
+  %469 = view.load<root_in_bounds> %71[0] : view<1xi32> -> i32
   %470 = scalar.extui %469 : i32 to i64
   %472 = scalar.constant 4294967296 : i64
   %473 = scalar.constant -1 : i64
@@ -298,7 +298,7 @@ kernel.def @hip_vector_values() {
   %480 = scalar.trunci %477 : i64 to i32
   %546 = index.constant 92 : offset
   %489 = buffer.view %output[%546] : buffer -> view<1xi32>
-  view.store %480, %489[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %480, %489[0] : i32, view<1xi32>
   kernel.return
 }
 

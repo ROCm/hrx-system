@@ -63,7 +63,7 @@ kernel.def @assumption_kernel() {
   %26 = scalar.assume %239 [range(%239, 0, 9223372036854775807)] : i64
   %27 = index.cast %26 : i64 to offset
   %28 = buffer.view %output[%27] : buffer -> view<1xi32>
-  view.store %20, %28[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %20, %28[0] : i32, view<1xi32>
   %31 = scalar.constant 1 : i32
   %32 = scalar.constant 2 : i32
   %33 = scalar.constant 3 : i32
@@ -77,7 +77,7 @@ kernel.def @assumption_kernel() {
   %45 = scalar.assume %237 [range(%237, 0, 9223372036854775807)] : i64
   %46 = index.cast %45 : i64 to offset
   %47 = buffer.view %output[%46] : buffer -> view<1xi32>
-  view.store %37, %47[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %37, %47[0] : i32, view<1xi32>
   %48 = scalar.constant 31 : i32
   %49 = scalar.andi %value, %48 : i32
   %50 = func.call @bound_repeated(%49) : (i32) -> (i32)
@@ -87,7 +87,7 @@ kernel.def @assumption_kernel() {
   %58 = scalar.assume %235 [range(%235, 0, 9223372036854775807)] : i64
   %59 = index.cast %58 : i64 to offset
   %60 = buffer.view %output[%59] : buffer -> view<1xi32>
-  view.store %50, %60[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %50, %60[0] : i32, view<1xi32>
   %61 = scalar.constant 428 : i32
   %62 = scalar.remui %value, %61 : i32
   %63 = func.call @bound_capacity(%62) : (i32) -> (i32)
@@ -97,7 +97,7 @@ kernel.def @assumption_kernel() {
   %71 = scalar.assume %233 [range(%233, 0, 9223372036854775807)] : i64
   %72 = index.cast %71 : i64 to offset
   %73 = buffer.view %output[%72] : buffer -> view<1xi32>
-  view.store %63, %73[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %63, %73[0] : i32, view<1xi32>
   %74 = scalar.constant 15 : i32
   %75 = scalar.andi %value, %74 : i32
   %76 = func.call @bound_cast(%75) : (i32) -> (i32)
@@ -108,7 +108,7 @@ kernel.def @assumption_kernel() {
   %84 = scalar.assume %231 [range(%231, 0, 9223372036854775807)] : i64
   %85 = index.cast %84 : i64 to offset
   %86 = buffer.view %output[%85] : buffer -> view<1xi32>
-  view.store %76, %86[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %76, %86[0] : i32, view<1xi32>
   %87 = scalar.trunci %value : i32 to i8
   %88 = func.call @bound_byte(%87) : (i8) -> (i32)
   %90 = scalar.addi %output_offset, %34 : i32
@@ -117,7 +117,7 @@ kernel.def @assumption_kernel() {
   %96 = scalar.assume %229 [range(%229, 0, 9223372036854775807)] : i64
   %97 = index.cast %96 : i64 to offset
   %98 = buffer.view %output[%97] : buffer -> view<1xi32>
-  view.store %88, %98[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %88, %98[0] : i32, view<1xi32>
   %101 = scalar.extui %15 : i32 to i64
   %102 = func.call @bound_wide(%101) : (i64) -> (i32)
   %103 = scalar.constant 6 : i32
@@ -127,7 +127,7 @@ kernel.def @assumption_kernel() {
   %110 = scalar.assume %227 [range(%227, 0, 9223372036854775807)] : i64
   %111 = index.cast %110 : i64 to offset
   %112 = buffer.view %output[%111] : buffer -> view<1xi32>
-  view.store %102, %112[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %102, %112[0] : i32, view<1xi32>
   %115 = func.call @bound_size(%75) : (i32) -> (i32)
   %117 = scalar.addi %output_offset, %35 : i32
   %118 = scalar.extui %117 : i32 to i64
@@ -135,7 +135,7 @@ kernel.def @assumption_kernel() {
   %123 = scalar.assume %225 [range(%225, 0, 9223372036854775807)] : i64
   %124 = index.cast %123 : i64 to offset
   %125 = buffer.view %output[%124] : buffer -> view<1xi32>
-  view.store %115, %125[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %115, %125[0] : i32, view<1xi32>
   %126 = func.call @bound_scoped(%value) : (i32) -> (i32)
   %128 = scalar.addi %output_offset, %16 : i32
   %129 = scalar.extui %128 : i32 to i64
@@ -143,7 +143,7 @@ kernel.def @assumption_kernel() {
   %134 = scalar.assume %223 [range(%223, 0, 9223372036854775807)] : i64
   %135 = index.cast %134 : i64 to offset
   %136 = buffer.view %output[%135] : buffer -> view<1xi32>
-  view.store %126, %136[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %126, %136[0] : i32, view<1xi32>
   %139 = func.call @bound_inclusive(%62) : (i32) -> (i32)
   %140 = scalar.constant 9 : i32
   %141 = scalar.addi %output_offset, %140 : i32
@@ -152,7 +152,7 @@ kernel.def @assumption_kernel() {
   %147 = scalar.assume %221 [range(%221, 0, 9223372036854775807)] : i64
   %148 = index.cast %147 : i64 to offset
   %149 = buffer.view %output[%148] : buffer -> view<1xi32>
-  view.store %139, %149[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %139, %149[0] : i32, view<1xi32>
   %150 = scalar.constant 63 : i32
   %151 = scalar.remui %value, %150 : i32
   %hidden = scalar.addi %151, %31 : i32
@@ -166,7 +166,7 @@ kernel.def @assumption_kernel() {
   %165 = scalar.assume %219 [range(%219, 0, 9223372036854775807)] : i64
   %166 = index.cast %165 : i64 to offset
   %167 = buffer.view %output[%166] : buffer -> view<1xi32>
-  view.store %157, %167[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %157, %167[0] : i32, view<1xi32>
   %168 = scalar.constant 2147483647 : i32
   %tokens = scalar.andi %value, %168 : i32
   %170 = scalar.constant -2147483648 : i32
@@ -178,7 +178,7 @@ kernel.def @assumption_kernel() {
   %180 = scalar.assume %217 [range(%217, 0, 9223372036854775807)] : i64
   %181 = index.cast %180 : i64 to offset
   %182 = buffer.view %output[%181] : buffer -> view<1xi32>
-  view.store %172, %182[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %172, %182[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -253,10 +253,10 @@ kernel.def @retained_calls() {
   %26 = scalar.assume %58 [range(%58, 0, 9223372036854775807)] : i64
   %27 = index.cast %26 : i64 to offset
   %28 = buffer.view %sums[%27] : buffer -> view<1xi32>
-  view.store %20, %28[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %20, %28[0] : i32, view<1xi32>
   %29 = scalar.addi %first_mixed, %second_mixed : i32
   %37 = buffer.view %mixed[%27] : buffer -> view<1xi32>
-  view.store %29, %37[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %29, %37[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -269,7 +269,7 @@ func.def noinline @update(%input: buffer, %input_byte_offset: offset, %index: i3
   %49 = scalar.assume %48 [range(%48, 0, 9223372036854775807)] : i64
   %50 = index.cast %49 : i64 to offset
   %51 = buffer.view %input[%50] : buffer -> view<1xi32>
-  %value = view.load %51[0] : view<1xi32> -> i32
+  %value = view.load<root_in_bounds> %51[0] : view<1xi32> -> i32
   %53 = scalar.addi %value, %bias : i32
   %54 = scalar.xori %value, %bias : i32
   func.return %53, %54 : i32, i32
@@ -308,7 +308,7 @@ kernel.def @enum_storage_u8() {
   %26 = scalar.assume %25 [range(%25, 0, 9223372036854775807)] : i64
   %cursor_byte_offset = index.cast %26 : i64 to offset
   %37 = buffer.view %input[%19] : buffer -> view<1xi8>
-  %38 = view.load %37[0] : view<1xi8> -> i8
+  %38 = view.load<root_in_bounds> %37[0] : view<1xi8> -> i8
   %39 = func.call pure @add___Byte(%38, %delta) : (i8, i8) -> (i8)
   %58 = scalar.constant -1 : i64
   %46 = index.cast %cursor_byte_offset : offset to i64
@@ -316,7 +316,7 @@ kernel.def @enum_storage_u8() {
   %48 = scalar.assume %47 [range(%47, 0, 9223372036854775807)] : i64
   %49 = index.cast %48 : i64 to offset
   %50 = buffer.view %output[%49] : buffer -> view<1xi8>
-  view.store %39, %50[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %39, %50[0] : i8, view<1xi8>
   kernel.return
 }
 
@@ -363,7 +363,7 @@ kernel.def @enum_storage_u16() {
   %26 = scalar.assume %25 [range(%25, 0, 9223372036854775807)] : i64
   %cursor_byte_offset = index.cast %26 : i64 to offset
   %37 = buffer.view %input[%19] : buffer -> view<1xi16>
-  %38 = view.load %37[0] : view<1xi16> -> i16
+  %38 = view.load<root_in_bounds> %37[0] : view<1xi16> -> i16
   %39 = func.call pure @add___Short(%38, %delta) : (i16, i16) -> (i16)
   %58 = scalar.constant -2 : i64
   %46 = index.cast %cursor_byte_offset : offset to i64
@@ -371,7 +371,7 @@ kernel.def @enum_storage_u16() {
   %48 = scalar.assume %47 [range(%47, 0, 9223372036854775807)] : i64
   %49 = index.cast %48 : i64 to offset
   %50 = buffer.view %output[%49] : buffer -> view<1xi16>
-  view.store %39, %50[0] : i16, view<1xi16>
+  view.store<root_in_bounds> %39, %50[0] : i16, view<1xi16>
   kernel.return
 }
 
@@ -418,7 +418,7 @@ kernel.def @enum_storage_u32() {
   %26 = scalar.assume %25 [range(%25, 0, 9223372036854775807)] : i64
   %cursor_byte_offset = index.cast %26 : i64 to offset
   %37 = buffer.view %input[%19] : buffer -> view<1xi32>
-  %38 = view.load %37[0] : view<1xi32> -> i32
+  %38 = view.load<root_in_bounds> %37[0] : view<1xi32> -> i32
   %39 = func.call pure @add___Word(%38, %delta) : (i32, i32) -> (i32)
   %58 = scalar.constant -4 : i64
   %46 = index.cast %cursor_byte_offset : offset to i64
@@ -426,7 +426,7 @@ kernel.def @enum_storage_u32() {
   %48 = scalar.assume %47 [range(%47, 0, 9223372036854775807)] : i64
   %49 = index.cast %48 : i64 to offset
   %50 = buffer.view %output[%49] : buffer -> view<1xi32>
-  view.store %39, %50[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %39, %50[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -473,7 +473,7 @@ kernel.def @enum_storage_u64() {
   %26 = scalar.assume %25 [range(%25, 0, 9223372036854775807)] : i64
   %cursor_byte_offset = index.cast %26 : i64 to offset
   %37 = buffer.view %input[%19] : buffer -> view<1xi64>
-  %38 = view.load %37[0] : view<1xi64> -> i64
+  %38 = view.load<root_in_bounds> %37[0] : view<1xi64> -> i64
   %39 = func.call pure @add___Long(%38, %delta) : (i64, i64) -> (i64)
   %55 = scalar.constant -8 : i64
   %46 = index.cast %cursor_byte_offset : offset to i64
@@ -481,7 +481,7 @@ kernel.def @enum_storage_u64() {
   %48 = scalar.assume %47 [range(%47, 0, 9223372036854775807)] : i64
   %49 = index.cast %48 : i64 to offset
   %50 = buffer.view %output[%49] : buffer -> view<1xi64>
-  view.store %39, %50[0] : i64, view<1xi64>
+  view.store<root_in_bounds> %39, %50[0] : i64, view<1xi64>
   kernel.return
 }
 

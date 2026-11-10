@@ -821,11 +821,12 @@ TEST_F(SourceMemoryPlanTest, ViewMemoryOperationKindUsesInterfaceShape) {
       LOOM_LOCATION_UNKNOWN, &atomic_rmw_op));
   loom_op_t* atomic_cmpxchg_op = nullptr;
   IREE_ASSERT_OK(loom_view_atomic_cmpxchg_build(
-      &builder_, 0, value, replacement, loom_buffer_view_result(view_op),
-      nullptr, 0, static_indices, IREE_ARRAYSIZE(static_indices),
-      LOOM_ATOMIC_ORDERING_ACQ_REL, LOOM_ATOMIC_ORDERING_ACQUIRE,
-      LOOM_ATOMIC_SCOPE_WORKGROUP, 0, 0, loom_type_scalar(LOOM_SCALAR_TYPE_I32),
-      LOOM_LOCATION_UNKNOWN, &atomic_cmpxchg_op));
+      &builder_, 0, /*instance_flags=*/0, value, replacement,
+      loom_buffer_view_result(view_op), nullptr, 0, static_indices,
+      IREE_ARRAYSIZE(static_indices), LOOM_ATOMIC_ORDERING_ACQ_REL,
+      LOOM_ATOMIC_ORDERING_ACQUIRE, LOOM_ATOMIC_SCOPE_WORKGROUP, 0, 0,
+      loom_type_scalar(LOOM_SCALAR_TYPE_I32), LOOM_LOCATION_UNKNOWN,
+      &atomic_cmpxchg_op));
   loom_op_t* prefetch_op = nullptr;
   IREE_ASSERT_OK(loom_view_prefetch_build(
       &builder_, loom_buffer_view_result(view_op), nullptr, 0, static_indices,
@@ -1067,6 +1068,54 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadFactorsScaledViewBase) {
   EXPECT_EQ(plan.dynamic_view_base_byte_facts.range_lo, 0);
   EXPECT_EQ(plan.dynamic_view_base_byte_facts.range_hi, 4092);
   EXPECT_EQ(plan.dynamic_view_base_byte_facts.known_divisor, 4);
+}
+
+TEST_F(SourceMemoryPlanTest, RootBoundsPromiseConstrainsDynamicViewBase) {
+  const loom_value_id_t byte_length =
+      loom_index_constant_result(BuildOffsetConstant(64));
+  loom_op_t* alloca_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_alloca_build(
+      &builder_, /*build_flags=*/0, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE,
+      LOOM_VALUE_ID_INVALID, /*minimum_alignment=*/4, byte_length,
+      loom_type_buffer(), LOOM_LOCATION_UNKNOWN, &alloca_op));
+  const loom_value_id_t raw_element = DefineIndexArg();
+  const loom_value_id_t element =
+      BuildIndexAssumeRange(raw_element, 0, INT32_MAX);
+  const loom_value_id_t layout = BuildDenseLayout();
+  const loom_value_id_t byte_stride =
+      loom_index_constant_result(BuildOffsetConstant(4));
+  loom_op_t* byte_offset_op = nullptr;
+  IREE_ASSERT_OK(
+      loom_index_scale_build(&builder_, element, byte_stride,
+                             loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
+                             LOOM_LOCATION_UNKNOWN, &byte_offset_op));
+
+  loom_op_t* view_op = nullptr;
+  IREE_ASSERT_OK(
+      loom_buffer_view_build(&builder_, loom_buffer_alloca_result(alloca_op),
+                             loom_index_scale_result(byte_offset_op),
+                             ViewType1D(LOOM_SCALAR_TYPE_I32, 1, layout),
+                             LOOM_LOCATION_UNKNOWN, &view_op));
+  const int64_t static_indices[] = {0};
+  loom_op_t* load_op = nullptr;
+  IREE_ASSERT_OK(loom_view_load_build(
+      &builder_, 0, LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS,
+      loom_buffer_view_result(view_op), nullptr, 0, static_indices,
+      IREE_ARRAYSIZE(static_indices), 0, 0,
+      loom_type_scalar(LOOM_SCALAR_TYPE_I32), LOOM_LOCATION_UNKNOWN, &load_op));
+
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  loom_low_source_memory_access_plan_t plan = {};
+  loom_low_source_memory_access_diagnostic_t diagnostic = {0};
+  ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
+  ASSERT_EQ(plan.dynamic_term_count, 1u);
+  EXPECT_EQ(plan.dynamic_view_base_term_count, 1u);
+  EXPECT_EQ(plan.dynamic_view_base_byte_facts.range_lo, 0);
+  EXPECT_EQ(plan.dynamic_view_base_byte_facts.range_hi, 63);
+  EXPECT_TRUE(loom_low_source_memory_dynamic_offset_fits_unsigned_bit_count(
+      &plan, plan.static_byte_offset, 32));
+  EXPECT_EQ(plan.access_flags, 0u);
 }
 
 TEST_F(SourceMemoryPlanTest, DynamicDenseLoadPreservesWidePowerOfTwoStride) {

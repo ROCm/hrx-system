@@ -1447,7 +1447,7 @@ iree_status_t loom_region_branch_build_region_terminator(
 // MemoryAccess interface
 //===----------------------------------------------------------------------===//
 
-// Per-instance execution-semantics modifiers for memory-access operations.
+// Per-instance semantic modifiers for memory-access operations.
 enum loom_memory_access_flag_bits_e {
   // Requires every dynamic access to execute as an independently observable
   // operation and preserves its order relative to other volatile accesses. A
@@ -1465,6 +1465,10 @@ enum loom_memory_access_flag_bits_e {
   // explicit fences/cache controls supply synchronization and visibility.
   // Unlike volatile, independent addresses do not require ordered completion.
   LOOM_MEMORY_ACCESS_FLAG_ATOMIC = 1u << 2,
+  // Promises that the complete physical access lies within its allocation
+  // root. Logical view indices remain subject to ordinary footprint proof.
+  // This is a source contract and has no target execution semantics.
+  LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS = 1u << 3,
 };
 typedef uint8_t loom_memory_access_flags_t;
 
@@ -1492,8 +1496,8 @@ loom_memory_access_t loom_memory_access_cast(const loom_module_t* module,
 loom_memory_access_operation_kind_t loom_memory_access_operation_kind(
     loom_memory_access_t access);
 
-// Returns the per-access execution semantics. MemoryAccess operations use the
-// shared memory-access vocabulary for their instance flags; the op generator
+// Returns the per-access semantics. MemoryAccess operations use the shared
+// memory-access vocabulary for their instance flags; the op generator
 // enforces that contract even for operations without optional flags.
 loom_memory_access_flags_t loom_memory_access_flags(
     loom_memory_access_t access);

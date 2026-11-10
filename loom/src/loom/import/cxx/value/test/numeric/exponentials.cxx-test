@@ -157,7 +157,7 @@ func.def public @poisson(%lambda: f64, %uniforms: buffer, %uniforms_byte_offset:
     %21 = scalar.assume %20 [range(%20, 0, 9223372036854775807)] : i64
     %22 = index.cast %21 : i64 to offset
     %23 = buffer.view %uniforms[%22] : buffer -> view<1xf64>
-    %24 = view.load %23[0] : view<1xf64> -> f64
+    %24 = view.load<root_in_bounds> %23[0] : view<1xf64> -> f64
     %product$25 = scalar.mulf %product$9, %24 : f64
     %26 = scalar.cmpf ogt, %product$25, %limit : f64
     scf.condition %26, %count$15, %product$25 : i1, i32, f64

@@ -195,7 +195,7 @@ func.def public @immutable_local_values(%index$0: i32, %output: buffer) {
   %15 = scalar.assume %14 [range(%14, 0, 9223372036854775807)] : i64
   %16 = index.cast %15 : i64 to offset
   %17 = buffer.view %8[%16] : buffer -> view<1xi32>
-  %18 = view.load %17[0] : view<1xi32> -> i32
+  %18 = view.load<root_in_bounds> %17[0] : view<1xi32> -> i32
   %231 = index.constant 0 : index
   view.store %18, %values[%231] : i32, view<12xi32>
   %21 = scalar.constant 0 : i1
@@ -205,7 +205,7 @@ func.def public @immutable_local_values(%index$0: i32, %output: buffer) {
   %29 = scalar.assume %28 [range(%28, 0, 9223372036854775807)] : i64
   %30 = index.cast %29 : i64 to offset
   %31 = buffer.view %22[%30] : buffer -> view<1xi32>
-  %32 = view.load %31[0] : view<1xi32> -> i32
+  %32 = view.load<root_in_bounds> %31[0] : view<1xi32> -> i32
   %228 = index.constant 1 : index
   view.store %32, %values[%228] : i32, view<12xi32>
   %36, %37 = func.call @immutable_right_inline(%7) : (i1) -> (buffer, offset)
@@ -214,7 +214,7 @@ func.def public @immutable_local_values(%index$0: i32, %output: buffer) {
   %43 = scalar.assume %42 [range(%42, 0, 9223372036854775807)] : i64
   %44 = index.cast %43 : i64 to offset
   %45 = buffer.view %36[%44] : buffer -> view<1xi32>
-  %46 = view.load %45[0] : view<1xi32> -> i32
+  %46 = view.load<root_in_bounds> %45[0] : view<1xi32> -> i32
   %225 = index.constant 2 : index
   view.store %46, %values[%225] : i32, view<12xi32>
   %50, %51 = func.call @immutable_right_inline(%21) : (i1) -> (buffer, offset)
@@ -223,7 +223,7 @@ func.def public @immutable_local_values(%index$0: i32, %output: buffer) {
   %57 = scalar.assume %56 [range(%56, 0, 9223372036854775807)] : i64
   %58 = index.cast %57 : i64 to offset
   %59 = buffer.view %50[%58] : buffer -> view<1xi32>
-  %60 = view.load %59[0] : view<1xi32> -> i32
+  %60 = view.load<root_in_bounds> %59[0] : view<1xi32> -> i32
   %222 = index.constant 3 : index
   view.store %60, %values[%222] : i32, view<12xi32>
   %63, %64 = func.call readonly @immutable_link__template_table_3() : () -> (buffer, offset)
@@ -232,7 +232,7 @@ func.def public @immutable_local_values(%index$0: i32, %output: buffer) {
   %70 = scalar.assume %69 [range(%69, 0, 9223372036854775807)] : i64
   %71 = index.cast %70 : i64 to offset
   %72 = buffer.view %63[%71] : buffer -> view<1xi32>
-  %73 = view.load %72[0] : view<1xi32> -> i32
+  %73 = view.load<root_in_bounds> %72[0] : view<1xi32> -> i32
   %219 = index.constant 4 : index
   view.store %73, %values[%219] : i32, view<12xi32>
   %76 = scalar.constant 3 : i32
@@ -242,7 +242,7 @@ func.def public @immutable_local_values(%index$0: i32, %output: buffer) {
   %84 = scalar.assume %83 [range(%83, 0, 9223372036854775807)] : i64
   %85 = index.cast %84 : i64 to offset
   %86 = buffer.view %77[%85] : buffer -> view<1xi32>
-  %87 = view.load %86[0] : view<1xi32> -> i32
+  %87 = view.load<root_in_bounds> %86[0] : view<1xi32> -> i32
   %216 = index.constant 5 : index
   view.store %87, %values[%216] : i32, view<12xi32>
   %90, %91 = func.call readonly @immutable_link__template_table_7() : () -> (buffer, offset)
@@ -251,7 +251,7 @@ func.def public @immutable_local_values(%index$0: i32, %output: buffer) {
   %97 = scalar.assume %96 [range(%96, 0, 9223372036854775807)] : i64
   %98 = index.cast %97 : i64 to offset
   %99 = buffer.view %90[%98] : buffer -> view<1xi32>
-  %100 = view.load %99[0] : view<1xi32> -> i32
+  %100 = view.load<root_in_bounds> %99[0] : view<1xi32> -> i32
   %213 = index.constant 6 : index
   view.store %100, %values[%213] : i32, view<12xi32>
   %103 = scalar.constant 7 : i32
@@ -261,7 +261,7 @@ func.def public @immutable_local_values(%index$0: i32, %output: buffer) {
   %111 = scalar.assume %110 [range(%110, 0, 9223372036854775807)] : i64
   %112 = index.cast %111 : i64 to offset
   %113 = buffer.view %104[%112] : buffer -> view<1xi32>
-  %114 = view.load %113[0] : view<1xi32> -> i32
+  %114 = view.load<root_in_bounds> %113[0] : view<1xi32> -> i32
   %210 = index.constant 7 : index
   view.store %114, %values[%210] : i32, view<12xi32>
   %117, %118 = func.call readonly @immutable_link__private_table() : () -> (buffer, offset)
@@ -270,7 +270,7 @@ func.def public @immutable_local_values(%index$0: i32, %output: buffer) {
   %124 = scalar.assume %123 [range(%123, 0, 9223372036854775807)] : i64
   %125 = index.cast %124 : i64 to offset
   %126 = buffer.view %117[%125] : buffer -> view<1xi32>
-  %127 = view.load %126[0] : view<1xi32> -> i32
+  %127 = view.load<root_in_bounds> %126[0] : view<1xi32> -> i32
   %207 = index.constant 8 : index
   view.store %127, %values[%207] : i32, view<12xi32>
   %130, %131 = func.call @immutable_right_private() : () -> (buffer, offset)
@@ -279,7 +279,7 @@ func.def public @immutable_local_values(%index$0: i32, %output: buffer) {
   %137 = scalar.assume %136 [range(%136, 0, 9223372036854775807)] : i64
   %138 = index.cast %137 : i64 to offset
   %139 = buffer.view %130[%138] : buffer -> view<1xi32>
-  %140 = view.load %139[0] : view<1xi32> -> i32
+  %140 = view.load<root_in_bounds> %139[0] : view<1xi32> -> i32
   %204 = index.constant 9 : index
   view.store %140, %values[%204] : i32, view<12xi32>
   %143, %144 = func.call readonly @immutable_link__address_table__local_table_0_() : () -> (buffer, offset)
@@ -288,7 +288,7 @@ func.def public @immutable_local_values(%index$0: i32, %output: buffer) {
   %150 = scalar.assume %149 [range(%149, 0, 9223372036854775807)] : i64
   %151 = index.cast %150 : i64 to offset
   %152 = buffer.view %143[%151] : buffer -> view<1xi32>
-  %153 = view.load %152[0] : view<1xi32> -> i32
+  %153 = view.load<root_in_bounds> %152[0] : view<1xi32> -> i32
   %201 = index.constant 10 : index
   view.store %153, %values[%201] : i32, view<12xi32>
   %156 = func.call @immutable_right_address(%index$3) : (i32) -> (i32)
@@ -521,7 +521,7 @@ func.def public @immutable_right_address(%index: i32) -> (i32) {
   %11 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
   %12 = index.cast %11 : i64 to offset
   %13 = buffer.view %2[%12] : buffer -> view<1xi32>
-  %14 = view.load %13[0] : view<1xi32> -> i32
+  %14 = view.load<root_in_bounds> %13[0] : view<1xi32> -> i32
   func.return %14 : i32
 }
 

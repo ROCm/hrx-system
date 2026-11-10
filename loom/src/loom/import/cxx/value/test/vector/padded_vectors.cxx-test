@@ -59,7 +59,7 @@ func.def public @record_value(%records: buffer, %records_byte_offset: offset) ->
   %18 = index.constant 8 : offset
   %19 = index.add %17, %18 : offset
   %20 = buffer.view %records[%19] : buffer -> view<3xbf16>
-  %value = vector.load %20[0] : view<3xbf16> -> vector<3xbf16>
+  %value = vector.load<root_in_bounds> %20[0] : view<3xbf16> -> vector<3xbf16>
   func.return %value : vector<3xbf16>
 }
 
@@ -73,7 +73,7 @@ func.def public @update(%values: buffer, %values_byte_offset: offset) -> (vector
   %31 = scalar.assume %30 [range(%30, 0, 9223372036854775807)] : i64
   %32 = index.cast %31 : i64 to offset
   %33 = buffer.view %values[%32] : buffer -> view<3xf16>
-  %34 = vector.load %33[0] : view<3xf16> -> vector<3xf16>
+  %34 = vector.load<root_in_bounds> %33[0] : view<3xf16> -> vector<3xf16>
   %result = func.call pure @adjust(%34) : (vector<3xf16>) -> (vector<3xf16>)
   %36 = scalar.constant 1 : i32
   %37 = scalar.extsi %36 : i32 to i64
@@ -84,7 +84,7 @@ func.def public @update(%values: buffer, %values_byte_offset: offset) -> (vector
   %42 = scalar.assume %41 [range(%41, 0, 9223372036854775807)] : i64
   %43 = index.cast %42 : i64 to offset
   %44 = buffer.view %values[%43] : buffer -> view<3xf16>
-  vector.store %result, %44[0] : vector<3xf16>, view<3xf16>
+  vector.store<root_in_bounds> %result, %44[0] : vector<3xf16>, view<3xf16>
   %45 = scalar.constant 1 : i32
   %46 = scalar.extsi %45 : i32 to i64
   %47 = scalar.constant 8 : i64
@@ -94,7 +94,7 @@ func.def public @update(%values: buffer, %values_byte_offset: offset) -> (vector
   %51 = scalar.assume %50 [range(%50, 0, 9223372036854775807)] : i64
   %52 = index.cast %51 : i64 to offset
   %53 = buffer.view %values[%52] : buffer -> view<3xf16>
-  %54 = vector.load %53[0] : view<3xf16> -> vector<3xf16>
+  %54 = vector.load<root_in_bounds> %53[0] : view<3xf16> -> vector<3xf16>
   func.return %54 : vector<3xf16>
 }
 
@@ -202,12 +202,12 @@ func.def public @update(%records: buffer, %records_byte_offset: offset) -> (i32)
   %10 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
   %11 = index.cast %10 : i64 to offset
   %14 = buffer.view %records[%11] : buffer -> view<1xi32>
-  view.store %3, %14[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %3, %14[0] : i32, view<1xi32>
   %15 = scalar.constant 13 : i32
   %24 = index.constant 16 : offset
   %25 = index.add %11, %24 : offset
   %26 = buffer.view %records[%25] : buffer -> view<1xi32>
-  view.store %15, %26[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %15, %26[0] : i32, view<1xi32>
   %35 = index.constant 8 : offset
   %padding_byte_offset = index.add %11, %35 : offset
   %141 = scalar.constant 60 : i8
@@ -217,34 +217,34 @@ func.def public @update(%records: buffer, %records_byte_offset: offset) -> (i32)
   %45 = scalar.assume %44 [range(%44, 0, 9223372036854775807)] : i64
   %46 = index.cast %45 : i64 to offset
   %47 = buffer.view %records[%46] : buffer -> view<1xi8>
-  view.store %141, %47[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %141, %47[0] : i8, view<1xi8>
   %139 = scalar.constant -61 : i8
   %138 = scalar.constant 7 : i64
   %55 = scalar.addi %43, %138 : i64
   %56 = scalar.assume %55 [range(%55, 0, 9223372036854775807)] : i64
   %57 = index.cast %56 : i64 to offset
   %58 = buffer.view %records[%57] : buffer -> view<1xi8>
-  view.store %139, %58[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %139, %58[0] : i8, view<1xi8>
   %137 = scalar.constant 24 : i64
   %64 = scalar.addi %10, %137 : i64
   %65 = scalar.assume %64 [range(%64, 0, 9223372036854775807)] : i64
   %66 = index.cast %65 : i64 to offset
   %68 = index.add %66, %35 : offset
   %69 = buffer.view %records[%68] : buffer -> view<3xbf16>
-  %value = vector.load %69[0] : view<3xbf16> -> vector<3xbf16>
+  %value = vector.load<root_in_bounds> %69[0] : view<3xbf16> -> vector<3xbf16>
   %wide = vector.extf %value : vector<3xbf16> to vector<3xf32>
   %72 = vector.constantf [1.0, 2.0, 3.0] : vector<3xf32>
   %73 = vector.addf %wide, %72 : vector<3xf32>
   %74 = vector.fptrunc %73 : vector<3xf32> to vector<3xbf16>
   %85 = buffer.view %records[%padding_byte_offset] : buffer -> view<3xbf16>
-  vector.store %74, %85[0] : vector<3xbf16>, view<3xbf16>
-  %before = view.load %14[0] : view<1xi32> -> i32
-  %after = view.load %26[0] : view<1xi32> -> i32
+  vector.store<root_in_bounds> %74, %85[0] : vector<3xbf16>, view<3xbf16>
+  %before = view.load<root_in_bounds> %14[0] : view<1xi32> -> i32
+  %after = view.load<root_in_bounds> %26[0] : view<1xi32> -> i32
   %110 = scalar.addi %before, %after : i32
-  %120 = view.load %47[0] : view<1xi8> -> i8
+  %120 = view.load<root_in_bounds> %47[0] : view<1xi8> -> i8
   %121 = scalar.extui %120 : i8 to i32
   %122 = scalar.addi %110, %121 : i32
-  %132 = view.load %58[0] : view<1xi8> -> i8
+  %132 = view.load<root_in_bounds> %58[0] : view<1xi8> -> i8
   %133 = scalar.extui %132 : i8 to i32
   %134 = scalar.addi %122, %133 : i32
   func.return %134 : i32

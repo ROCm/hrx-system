@@ -59,7 +59,7 @@ func.def @fill(%values: buffer, %values_byte_offset: offset) {
   %21 = scalar.assume %20 [range(%20, 0, 9223372036854775807)] : i64
   %22 = index.cast %21 : i64 to offset
   %23 = buffer.view %values[%22] : buffer -> view<1xi16>
-  view.store %14, %23[0] : i16, view<1xi16>
+  view.store<root_in_bounds> %14, %23[0] : i16, view<1xi16>
   func.return
 }
 
@@ -190,7 +190,7 @@ func.def public @output_parameter(%index: i32) -> (i32) {
     %27 = scalar.assume %34 [range(%34, 0, 9223372036854775807)] : i64
     %28 = index.cast %27 : i64 to offset
     %29 = buffer.view %values_storage[%28] : buffer -> view<1xi32>
-    view.store %21, %29[0] : i32, view<1xi32>
+    view.store<root_in_bounds> %21, %29[0] : i32, view<1xi32>
   }
   %7 = scalar.extui %index : i32 to i64
   %8 = scalar.assume %7 [range(%7, 0, 3)] : i64

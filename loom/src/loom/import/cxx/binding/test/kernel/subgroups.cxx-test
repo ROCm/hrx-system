@@ -46,7 +46,7 @@ kernel.def @entry() {
   %28 = scalar.assume %134 [range(%134, 0, 9223372036854775807)] : i64
   %29 = index.cast %28 : i64 to offset
   %30 = buffer.view %output[%29] : buffer -> view<1xi32>
-  view.store %22, %30[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %22, %30[0] : i32, view<1xi32>
   %31 = scalar.constant 3 : i32
   %32 = scalar.cmpi ugt, %lane, %31 : i32
   %33 = kernel.subgroup.vote.ballot %32 : i1 -> i64
@@ -55,7 +55,7 @@ kernel.def @entry() {
   %39 = scalar.assume %132 [range(%132, 0, 9223372036854775807)] : i64
   %40 = index.cast %39 : i64 to offset
   %41 = buffer.view %masks[%40] : buffer -> view<1xi64>
-  view.store %33, %41[0] : i64, view<1xi64>
+  view.store<root_in_bounds> %33, %41[0] : i64, view<1xi64>
   %42 = kernel.subgroup.active.mask : i64
   %43 = scalar.constant 32 : i32
   %44 = scalar.addi %lane, %43 : i32
@@ -64,14 +64,14 @@ kernel.def @entry() {
   %50 = scalar.assume %130 [range(%130, 0, 9223372036854775807)] : i64
   %51 = index.cast %50 : i64 to offset
   %52 = buffer.view %masks[%51] : buffer -> view<1xi64>
-  view.store %42, %52[0] : i64, view<1xi64>
+  view.store<root_in_bounds> %42, %52[0] : i64, view<1xi64>
   %54 = scalar.cmpi ult, %lane, %31 : i32
   %55 = kernel.subgroup.vote.ballot %54 : i1 -> i32
   %128 = scalar.shli %45, %133 : i64
   %63 = scalar.assume %128 [range(%128, 0, 9223372036854775807)] : i64
   %64 = index.cast %63 : i64 to offset
   %65 = buffer.view %output[%64] : buffer -> view<1xi32>
-  view.store %55, %65[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %55, %65[0] : i32, view<1xi32>
   %66 = kernel.subgroup.active.mask : i32
   %67 = scalar.constant 64 : i32
   %68 = scalar.addi %lane, %67 : i32
@@ -80,7 +80,7 @@ kernel.def @entry() {
   %74 = scalar.assume %126 [range(%126, 0, 9223372036854775807)] : i64
   %75 = index.cast %74 : i64 to offset
   %76 = buffer.view %output[%75] : buffer -> view<1xi32>
-  view.store %66, %76[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %66, %76[0] : i32, view<1xi32>
   %77 = scalar.constant 7 : i32
   %78 = scalar.cmpi eq, %lane, %77 : i32
   %79 = kernel.subgroup.vote.any %78 : i1
@@ -92,7 +92,7 @@ kernel.def @entry() {
   %88 = scalar.assume %124 [range(%124, 0, 9223372036854775807)] : i64
   %89 = index.cast %88 : i64 to offset
   %90 = buffer.view %output[%89] : buffer -> view<1xi32>
-  view.store %80, %90[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %80, %90[0] : i32, view<1xi32>
   %91 = scalar.constant 31 : i32
   %92 = scalar.cmpi ult, %lane, %91 : i32
   %93 = kernel.subgroup.vote.all %92 : i1
@@ -104,7 +104,7 @@ kernel.def @entry() {
   %102 = scalar.assume %122 [range(%122, 0, 9223372036854775807)] : i64
   %103 = index.cast %102 : i64 to offset
   %104 = buffer.view %output[%103] : buffer -> view<1xi32>
-  view.store %94, %104[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %94, %104[0] : i32, view<1xi32>
   %106 = kernel.subgroup.broadcast %value from %77 : vector<4xf32>, i32
   %107 = func.call @first(%106) : (vector<4xf32>) -> (vector<4xf32>)
   %119 = scalar.constant 4 : i64
@@ -112,7 +112,7 @@ kernel.def @entry() {
   %113 = scalar.assume %120 [range(%120, 0, 9223372036854775807)] : i64
   %114 = index.cast %113 : i64 to offset
   %115 = buffer.view %vectors[%114] : buffer -> view<4xf32>
-  vector.store %107, %115[0] : vector<4xf32>, view<4xf32>
+  vector.store<root_in_bounds> %107, %115[0] : vector<4xf32>, view<4xf32>
   kernel.barrier<global> scope(subgroup) ordering(acq_rel)
   kernel.return
 }
@@ -152,12 +152,12 @@ kernel.def @entry() {
   %15 = kernel.subgroup.vote.ballot %ready : i1 -> i32
   %37 = index.constant 0 : offset
   %24 = buffer.view %output[%37] : buffer -> view<1xi32>
-  view.store %15, %24[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %15, %24[0] : i32, view<1xi32>
   %25 = kernel.subgroup.lane.id : index
   %26 = index.cast %25 : index to i32
   %36 = index.constant 4 : offset
   %35 = buffer.view %output[%36] : buffer -> view<1xi32>
-  view.store %26, %35[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %26, %35[0] : i32, view<1xi32>
   func.call @workgroup_memory() : ()
   kernel.return
 }

@@ -85,7 +85,7 @@ kernel.def @configured_workgroup_storage() {
   %48 = scalar.assume %71 [range(%71, 0, 9223372036854775807)] : i64
   %49 = index.cast %48 : i64 to offset
   %50 = buffer.view %output[%49] : buffer -> view<1xi32>
-  view.store %42, %50[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %42, %50[0] : i32, view<1xi32>
   kernel.return
 }
 

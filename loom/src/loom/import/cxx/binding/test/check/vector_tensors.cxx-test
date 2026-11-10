@@ -77,7 +77,7 @@ kernel.def @copy_vectors() {
   %24 = scalar.assume %23 [range(%23, 0, 9223372036854775807)] : i64
   %25 = index.cast %24 : i64 to offset
   %26 = buffer.view %input[%25] : buffer -> view<4xi32>
-  %27 = vector.load %26[0] : view<4xi32> -> vector<4xi32>
+  %27 = vector.load<root_in_bounds> %26[0] : view<4xi32> -> vector<4xi32>
   %28 = scalar.constant 0 : i32
   %29 = scalar.extsi %28 : i32 to i64
   %30 = scalar.constant 16 : i64
@@ -87,7 +87,7 @@ kernel.def @copy_vectors() {
   %34 = scalar.assume %33 [range(%33, 0, 9223372036854775807)] : i64
   %35 = index.cast %34 : i64 to offset
   %36 = buffer.view %output[%35] : buffer -> view<4xi32>
-  vector.store %27, %36[0] : vector<4xi32>, view<4xi32>
+  vector.store<root_in_bounds> %27, %36[0] : vector<4xi32>, view<4xi32>
   %37 = scalar.constant 1 : i32
   %38 = scalar.extsi %37 : i32 to i64
   %39 = scalar.constant 16 : i64
@@ -97,7 +97,7 @@ kernel.def @copy_vectors() {
   %43 = scalar.assume %42 [range(%42, 0, 9223372036854775807)] : i64
   %44 = index.cast %43 : i64 to offset
   %45 = buffer.view %input[%44] : buffer -> view<4xi32>
-  %46 = vector.load %45[0] : view<4xi32> -> vector<4xi32>
+  %46 = vector.load<root_in_bounds> %45[0] : view<4xi32> -> vector<4xi32>
   %47 = scalar.constant 1 : i32
   %48 = scalar.extsi %47 : i32 to i64
   %49 = scalar.constant 16 : i64
@@ -107,7 +107,7 @@ kernel.def @copy_vectors() {
   %53 = scalar.assume %52 [range(%52, 0, 9223372036854775807)] : i64
   %54 = index.cast %53 : i64 to offset
   %55 = buffer.view %output[%54] : buffer -> view<4xi32>
-  vector.store %46, %55[0] : vector<4xi32>, view<4xi32>
+  vector.store<root_in_bounds> %46, %55[0] : vector<4xi32>, view<4xi32>
   kernel.return
 }
 

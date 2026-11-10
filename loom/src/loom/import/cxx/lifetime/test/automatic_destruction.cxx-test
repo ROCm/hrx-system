@@ -87,7 +87,7 @@ func.def inline @Pair___Pair_value(%this_first_digit: i32, %this_second_digit: i
 
 func.def inline @Guard___Guard_storage(%this: buffer, %this_byte_offset: offset) {
   %26 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
-  %digit = view.load %26[0] : view<1xi32> -> i32
+  %digit = view.load<root_in_bounds> %26[0] : view<1xi32> -> i32
   func.call @observe(%digit) : (i32)
   func.return
 }
@@ -381,7 +381,7 @@ func.def @consume_value(%guard_digit: i32) {
 
 func.def inline @Guard___Guard_storage(%this: buffer, %this_byte_offset: offset) {
   %108 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
-  %digit = view.load %108[0] : view<1xi32> -> i32
+  %digit = view.load<root_in_bounds> %108[0] : view<1xi32> -> i32
   func.call @observe(%digit) : (i32)
   func.return
 }

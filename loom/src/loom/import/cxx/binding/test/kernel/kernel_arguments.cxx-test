@@ -90,7 +90,7 @@ kernel.def @addresses() {
   %25 = scalar.assume %24 [range(%24, 0, 9223372036854775807)] : i64
   %26 = index.cast %25 : i64 to offset
   %27 = buffer.view %output[%26] : buffer -> view<1xi64>
-  view.store %18, %27[0] : i64, view<1xi64>
+  view.store<root_in_bounds> %18, %27[0] : i64, view<1xi64>
   %28 = index.cast %bytes : offset to i64
   %29 = scalar.constant 1 : i32
   %30 = scalar.extsi %29 : i32 to i64
@@ -101,7 +101,7 @@ kernel.def @addresses() {
   %35 = scalar.assume %34 [range(%34, 0, 9223372036854775807)] : i64
   %36 = index.cast %35 : i64 to offset
   %37 = buffer.view %output[%36] : buffer -> view<1xi64>
-  view.store %28, %37[0] : i64, view<1xi64>
+  view.store<root_in_bounds> %28, %37[0] : i64, view<1xi64>
   kernel.return
 }
 
@@ -144,7 +144,7 @@ kernel.def @vectors() {
   %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
   %20 = index.cast %19 : i64 to offset
   %21 = buffer.view %output[%20] : buffer -> view<1xi32>
-  view.store %12, %21[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %12, %21[0] : i32, view<1xi32>
   %22 = vector.reduce<addi> %native, %seed : vector<4xi32>, i32
   %23 = scalar.constant 1 : i32
   %24 = scalar.extsi %23 : i32 to i64
@@ -155,7 +155,7 @@ kernel.def @vectors() {
   %29 = scalar.assume %28 [range(%28, 0, 9223372036854775807)] : i64
   %30 = index.cast %29 : i64 to offset
   %31 = buffer.view %output[%30] : buffer -> view<1xi32>
-  view.store %22, %31[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %22, %31[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -244,7 +244,7 @@ kernel.def @pointers() {
   %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
   %28 = index.cast %27 : i64 to offset
   %29 = buffer.view %output[%28] : buffer -> view<1xi32>
-  view.store %20, %29[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %20, %29[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -258,6 +258,6 @@ func.def @read(%pointer: buffer, %pointer_byte_offset: offset) -> (i32) {
   %39 = scalar.assume %38 [range(%38, 0, 9223372036854775807)] : i64
   %40 = index.cast %39 : i64 to offset
   %41 = buffer.view %pointer[%40] : buffer -> view<1xi32>
-  %42 = view.load %41[0] : view<1xi32> -> i32
+  %42 = view.load<root_in_bounds> %41[0] : view<1xi32> -> i32
   func.return %42 : i32
 }

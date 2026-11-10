@@ -26,7 +26,7 @@ func.def public linkonce inline @read_active_workgroups(%header: buffer, %header
   %9 = scalar.assume %7 [range(%7, 0, 9223372036854775807)] : i64
   %10 = index.cast %9 : i64 to offset
   %11 = buffer.view %header[%10] : buffer -> view<1xi32>
-  %12 = view.load %11[0] : view<1xi32> -> i32
+  %12 = view.load<root_in_bounds> %11[0] : view<1xi32> -> i32
   func.return %12 : i32
 }
 
@@ -56,6 +56,6 @@ kernel.def @uniform_helper_barrier() {
   %37 = scalar.assume %42 [range(%42, 0, 9223372036854775807)] : i64
   %38 = index.cast %37 : i64 to offset
   %39 = buffer.view %output[%38] : buffer -> view<1xi32>
-  view.store %item, %39[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %item, %39[0] : i32, view<1xi32>
   kernel.return
 }

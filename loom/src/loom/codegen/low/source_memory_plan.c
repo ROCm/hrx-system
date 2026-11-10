@@ -1799,7 +1799,38 @@ static bool loom_low_source_memory_access_plan_build_byte_offset_impl(
 static void loom_low_source_memory_access_retain_semantics(
     const loom_view_region_table_t* view_regions, loom_memory_access_t access,
     loom_low_source_memory_access_plan_t* plan) {
-  plan->access_flags = loom_memory_access_flags(access);
+  const loom_memory_access_flags_t source_access_flags =
+      loom_memory_access_flags(access);
+  plan->access_flags =
+      source_access_flags & ~LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS;
+  if (iree_any_bit_set(source_access_flags,
+                       LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS) &&
+      plan->dynamic_view_base_term_count != 0 &&
+      plan->dynamic_view_base_term_count == plan->dynamic_term_count) {
+    const loom_value_fact_table_t* fact_table =
+        view_regions->expression_context->fact_table;
+    loom_value_fact_buffer_reference_t root_reference = {0};
+    int64_t root_byte_extent = 0;
+    int64_t promised_lower_bound = 0;
+    int64_t promised_upper_bound = 0;
+    if (loom_value_facts_query_buffer_reference(
+            &fact_table->context,
+            loom_value_fact_table_lookup(fact_table, plan->root_value_id),
+            &root_reference) &&
+        loom_value_facts_as_exact_i64(root_reference.maximum_byte_extent,
+                                      &root_byte_extent) &&
+        root_byte_extent > 0 &&
+        iree_checked_sub_i64(0, plan->static_byte_offset,
+                             &promised_lower_bound) &&
+        iree_checked_sub_i64(root_byte_extent - 1, plan->static_byte_offset,
+                             &promised_upper_bound)) {
+      const loom_value_facts_t promised_facts =
+          loom_value_facts_make(promised_lower_bound, promised_upper_bound, 1);
+      plan->dynamic_view_base_byte_facts =
+          loom_low_source_memory_access_intersect_index_facts(
+              plan->dynamic_view_base_byte_facts, promised_facts);
+    }
+  }
   plan->reads_entry_contents =
       loom_view_region_table_reads_entry_contents(view_regions, access.op);
   const loom_memory_access_operation_kind_t operation_kind =

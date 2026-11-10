@@ -29,3 +29,74 @@ loom::type::index bounded(bool condition, loom::type::index value, loom::type::i
   loom::assume(loom::predicate::range(value, 0, limit));
   return value;
 }
+
+// ====
+// Source-only physical-root proofs retain exact C++ spellings across scalar,
+// vector, and atomic memory families.
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx roundtrip
+func.def public @scalar_access(%storage: buffer, %byte_offset: offset, %replacement: i32) -> (i32) {
+  %view = buffer.view %storage[%byte_offset] : buffer -> view<1xi32>
+  %old = view.load<root_in_bounds> %view[0] : view<1xi32> -> i32
+  view.store<root_in_bounds> %replacement, %view[0] : i32, view<1xi32>
+  func.return %old : i32
+}
+
+func.def public @vector_access(%storage: buffer, %byte_offset: offset, %replacement: vector<4xi32>) -> (vector<4xi32>) {
+  %view = buffer.view %storage[%byte_offset] : buffer -> view<4xi32>
+  %old = vector.load<root_in_bounds> %view[0] : view<4xi32> -> vector<4xi32>
+  vector.store<root_in_bounds> %replacement, %view[0] : vector<4xi32>, view<4xi32>
+  func.return %old : vector<4xi32>
+}
+
+func.def public @atomic_access(%storage: buffer, %byte_offset: offset, %expected: i32, %replacement: i32) -> (i32) {
+  %view = buffer.view %storage[%byte_offset] : buffer -> view<1xi32>
+  %loaded = view.atomic.load<root_in_bounds> %view[0] {ordering = acquire, scope = device} : view<1xi32> -> i32
+  view.atomic.store<root_in_bounds> %loaded, %view[0] {ordering = release, scope = device} : i32, view<1xi32>
+  %old = view.atomic.rmw<addi, root_in_bounds> %replacement, %view[0] {ordering = acq_rel, scope = device} : i32, view<1xi32> -> i32
+  view.atomic.reduce<maxui, root_in_bounds> %old, %view[0] {ordering = relaxed, scope = device} : i32, view<1xi32>
+  %observed = view.atomic.cmpxchg<root_in_bounds> %expected, %replacement, %view[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i32, view<1xi32> -> i32
+  func.return %observed : i32
+}
+
+// ----
+#include <loomcxx/atomic.h>
+#include <loomcxx/vector.h>
+
+using UInt32x4 = unsigned __attribute__((ext_vector_type(4)));
+
+[[loom::symbol("scalar_access")]]
+unsigned scalar_access(loom::type::buffer<unsigned> storage, loom::type::offset byte_offset, unsigned replacement);
+
+[[loom::symbol("vector_access")]]
+UInt32x4 vector_access(loom::type::buffer<unsigned> storage, loom::type::offset byte_offset, UInt32x4 replacement);
+
+[[loom::symbol("atomic_access")]]
+unsigned atomic_access(loom::type::buffer<unsigned> storage, loom::type::offset byte_offset, unsigned expected, unsigned replacement);
+
+[[loom::symbol("scalar_access")]]
+unsigned scalar_access(loom::type::buffer<unsigned> storage, loom::type::offset byte_offset, unsigned replacement) {
+  auto view = loom::buffer::view<1>(storage, byte_offset, {});
+  unsigned old = loom::view::load<loom::memory_access::root_in_bounds>(view, 0);
+  loom::view::store<loom::memory_access::root_in_bounds>(replacement, view, 0);
+  return old;
+}
+
+[[loom::symbol("vector_access")]]
+UInt32x4 vector_access(loom::type::buffer<unsigned> storage, loom::type::offset byte_offset, UInt32x4 replacement) {
+  auto view = loom::buffer::view<4>(storage, byte_offset, {});
+  UInt32x4 old = loom::vector::load<UInt32x4, loom::memory_access::root_in_bounds>(view, {0});
+  loom::vector::store<loom::memory_access::root_in_bounds>(replacement, view, {0});
+  return old;
+}
+
+[[loom::symbol("atomic_access")]]
+unsigned atomic_access(loom::type::buffer<unsigned> storage, loom::type::offset byte_offset, unsigned expected, unsigned replacement) {
+  auto view = loom::buffer::view<1>(storage, byte_offset, {});
+  unsigned loaded = loom::view::atomic::load<loom::atomic::ordering::acquire, loom::atomic::scope::device, loom::memory_access::root_in_bounds>(view, 0);
+  loom::view::atomic::store<loom::atomic::ordering::release, loom::atomic::scope::device, loom::memory_access::root_in_bounds>(loaded, view, 0);
+  unsigned old = loom::view::atomic::rmw<loom::atomic::kind::addi, loom::atomic::ordering::acq_rel, loom::atomic::scope::device, loom::memory_access::root_in_bounds>(replacement, view, 0);
+  loom::view::atomic::reduce<loom::atomic::kind::maxui, loom::atomic::ordering::relaxed, loom::atomic::scope::device, loom::memory_access::root_in_bounds>(old, view, 0);
+  unsigned observed = loom::view::atomic::cmpxchg<loom::atomic::ordering::acq_rel, loom::atomic::ordering::acquire, loom::atomic::scope::device, loom::memory_access::root_in_bounds>(expected, replacement, view, 0);
+  return observed;
+}

@@ -91,6 +91,6 @@ kernel.def @aligned_array() {
   %28 = scalar.assume %27 [range(%27, 0, 9223372036854775807)] : i64
   %29 = index.cast %28 : i64 to offset
   %30 = buffer.view %output[%29] : buffer -> view<1xi32>
-  view.store %21, %30[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %21, %30[0] : i32, view<1xi32>
   kernel.return
 }
