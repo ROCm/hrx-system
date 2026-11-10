@@ -118,6 +118,9 @@ loom_generated_source_family(
         "--descriptor-strings-layout",
         "--descriptor-identities-header",
         "--descriptor-identities-source",
+        "--native-asm-values-header",
+        "--native-asm-values-source",
+        "--native-asm-values-layout",
     ],
     outputs = [
         "lower_capabilities.h",
@@ -131,6 +134,9 @@ loom_generated_source_family(
         "descriptor_strings.json",
         "descriptor_identities.h",
         "descriptor_identities.c",
+        "native_asm_values.h",
+        "native_asm_values.c",
+        "native_asm_values.json",
     ],
     visibility = _AMDGPU_DESCRIPTOR_TABLE_VISIBILITY,
 )
@@ -152,10 +158,18 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "native_asm_values",
+    srcs = ["native_asm_values.c"],
+    hdrs = ["native_asm_values.h"],
+    deps = ["//loom/src/loom/codegen/low:descriptors"],
+)
+
 loom_generated_source_family(
     name = "cdna_gen",
     args = [
         "--primary-strings=$(rootpath :descriptor_strings.json)",
+        "--native-asm-values=$(rootpath :native_asm_values.json)",
         "--shared-strings=$(rootpath //loom/src/loom/target/arch/amdgpu/contracts:instruction_strings.json)",
         "--target=cdna2",
         "--isa-xml=cdna2:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_cdna2.xml)",
@@ -168,6 +182,7 @@ loom_generated_source_family(
     generator = _AMDGPU_TARGET_TABLE_GENERATOR,
     inputs = [
         ":descriptor_strings.json",
+        ":native_asm_values.json",
         "//loom/src/loom/target/arch/amdgpu/contracts:instruction_strings.json",
         "@amdgpu_isa_xml//:amdgpu_isa_cdna2.xml",
         "@amdgpu_isa_xml//:amdgpu_isa_cdna3.xml",
@@ -196,6 +211,7 @@ loom_generated_source_family(
     name = "rdna3_gen",
     args = [
         "--primary-strings=$(rootpath :descriptor_strings.json)",
+        "--native-asm-values=$(rootpath :native_asm_values.json)",
         "--shared-strings=$(rootpath //loom/src/loom/target/arch/amdgpu/contracts:instruction_strings.json)",
         "--target=rdna3",
         "--target=rdna3_5",
@@ -207,6 +223,7 @@ loom_generated_source_family(
     generator = _AMDGPU_TARGET_TABLE_GENERATOR,
     inputs = [
         ":descriptor_strings.json",
+        ":native_asm_values.json",
         "//loom/src/loom/target/arch/amdgpu/contracts:instruction_strings.json",
         "@amdgpu_isa_xml//:amdgpu_isa_rdna3.xml",
         "@amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml",
@@ -234,6 +251,7 @@ loom_generated_source_family(
     name = "rdna4_gen",
     args = [
         "--primary-strings=$(rootpath :descriptor_strings.json)",
+        "--native-asm-values=$(rootpath :native_asm_values.json)",
         "--shared-strings=$(rootpath //loom/src/loom/target/arch/amdgpu/contracts:instruction_strings.json)",
         "--target=rdna4",
         "--target=rdna4_gfx125x",
@@ -243,6 +261,7 @@ loom_generated_source_family(
     generator = _AMDGPU_TARGET_TABLE_GENERATOR,
     inputs = [
         ":descriptor_strings.json",
+        ":native_asm_values.json",
         "//loom/src/loom/target/arch/amdgpu/contracts:instruction_strings.json",
         "@amdgpu_isa_xml//:amdgpu_isa_rdna4.xml",
     ],
@@ -268,6 +287,7 @@ loom_cc_library(
     deps = [
         ":descriptor_identities",
         ":descriptor_strings",
+        ":native_asm_values",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/target/arch/amdgpu/contracts:instruction_strings",
     ],
@@ -280,6 +300,7 @@ loom_cc_library(
     deps = [
         ":descriptor_identities",
         ":descriptor_strings",
+        ":native_asm_values",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/target/arch/amdgpu/contracts:instruction_strings",
     ],
@@ -337,6 +358,7 @@ loom_cc_library(
     deps = [
         ":descriptor_identities",
         ":descriptor_strings",
+        ":native_asm_values",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/target/arch/amdgpu/contracts:instruction_strings",
     ],
@@ -349,6 +371,7 @@ loom_cc_library(
     deps = [
         ":descriptor_identities",
         ":descriptor_strings",
+        ":native_asm_values",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/target/arch/amdgpu/contracts:instruction_strings",
     ],
@@ -361,6 +384,7 @@ loom_cc_library(
     deps = [
         ":descriptor_identities",
         ":descriptor_strings",
+        ":native_asm_values",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/target/arch/amdgpu/contracts:instruction_strings",
     ],
@@ -373,6 +397,7 @@ loom_cc_library(
     deps = [
         ":descriptor_identities",
         ":descriptor_strings",
+        ":native_asm_values",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/target/arch/amdgpu/contracts:instruction_strings",
     ],
@@ -385,6 +410,7 @@ loom_cc_library(
     deps = [
         ":descriptor_identities",
         ":descriptor_strings",
+        ":native_asm_values",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/target/arch/amdgpu/contracts:instruction_strings",
     ],
@@ -406,6 +432,7 @@ loom_cc_library(
     deps = [
         ":descriptor_identities",
         ":descriptor_strings",
+        ":native_asm_values",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/target/arch/amdgpu/contracts:instruction_strings",
     ],

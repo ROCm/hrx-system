@@ -20,7 +20,6 @@ from loom.gen.target.low.compiled import (
     CompiledAsmOperandType,
     CompiledAsmResultType,
     CompiledDescriptorSet,
-    CompiledNativeAsmValue,
     CompiledOperandForm,
     CompiledScheduleClassTable,
     CompiledScheduleModel,
@@ -28,6 +27,7 @@ from loom.gen.target.low.compiled import (
     DescriptorSetView,
     append_interned_sequence,
 )
+from loom.gen.target.low.native_assembly import NativeAsmValuePool, native_asm_value_row_lines
 from loom.gen.target.low.views import descriptor_set_view_metadata_string_label
 from loom.target.low_descriptors import (
     LOW_DESCRIPTOR_SET_ORDINAL_NONE,
@@ -424,23 +424,6 @@ def _asm_result_type_row_lines(
     return rows
 
 
-def _native_asm_value_row_lines(
-    compiled: CompiledDescriptorSet,
-    values: Sequence[CompiledNativeAsmValue],
-) -> list[list[str]]:
-    pool = compiled.string_pool
-    return [
-        [
-            f".kind = {value.kind.c_name},",
-            f".index = {value.index},",
-            f".bit_width = {value.bit_width},",
-            f".target_format_id = {value.target_format_id},",
-            f".literal_string_ref = {c_spelling.optional_string_expr(pool, value.literal_label)},",
-        ]
-        for value in values
-    ]
-
-
 def _register_class_row_lines(
     compiled: CompiledDescriptorSet,
     reg_classes: Sequence[RegClass | None],
@@ -629,6 +612,7 @@ def emit_source_for_views(
     views: Sequence[DescriptorSetView],
     primary_strings: CStringBank | None = None,
     shared_strings: CStringBank | None = None,
+    native_asm_values: NativeAsmValuePool | None = None,
     identity_domain: DescriptorIdentityDomain,
 ) -> str:
     spec = compiled.spec
@@ -655,6 +639,10 @@ def emit_source_for_views(
                 "",
             ]
         )
+    if native_asm_values is not None:
+        if primary_strings is None:
+            raise ValueError("shared native assembly values require shared primary strings")
+        lines.extend([f'#include "{native_asm_values.header}"', ""])
     for view in views:
         if view.spec is spec:
             continue
@@ -1372,15 +1360,16 @@ def emit_source_for_views(
         "loom_low_asm_layout_t",
         spec.c_table_prefix,
         "AsmLayouts",
-        _asm_layout_row_lines(asm_table_storage.layouts),
+        _asm_layout_row_lines(native_asm_values.layouts_for(asm_table_storage) if native_asm_values is not None else asm_table_storage.layouts),
     )
-    _emit_array(
-        lines,
-        "loom_low_native_asm_value_t",
-        spec.c_table_prefix,
-        "NativeAsmValues",
-        _native_asm_value_row_lines(compiled, asm_table_storage.native_values),
-    )
+    if native_asm_values is None:
+        _emit_array(
+            lines,
+            "loom_low_native_asm_value_t",
+            spec.c_table_prefix,
+            "NativeAsmValues",
+            native_asm_value_row_lines(pool, asm_table_storage.native_values),
+        )
     asm_form_table_symbols: dict[str, str] = {}
     for view in views:
         if view.uses_storage_asm_form_tables:
@@ -1636,12 +1625,16 @@ def emit_source_for_views(
                 asm_table_storage.immediates,
                 view_lines,
             )
-            append_optional_table(
-                "native_asm_values",
-                "NativeAsmValues",
-                asm_table_storage.native_values,
-                view_lines,
-            )
+            if native_asm_values is not None and asm_table_storage.native_values:
+                view_lines.append(f"    .native_asm_values = {native_asm_values.symbol},")
+                view_lines.append(f"    .native_asm_value_count = {len(native_asm_values.values)},")
+            else:
+                append_optional_table(
+                    "native_asm_values",
+                    "NativeAsmValues",
+                    asm_table_storage.native_values,
+                    view_lines,
+                )
         append_optional_table(
             "encoding_field_values",
             "EncodingFieldValues",

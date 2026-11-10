@@ -24,7 +24,8 @@ from loom.target.arch.amdgpu.target_info import (
     AmdgpuDescriptorSetInfo,
     AmdgpuDescriptorSetIsaInfo,
 )
-from loom.target.low_descriptors import Descriptor, DescriptorSet
+from loom.target.low_descriptors import Descriptor, DescriptorSet, NativeAsmValue, NativeAsmValueKind
+from loom.target.test.descriptors import TEST_LOW_ADD_I32_DESCRIPTOR, TEST_LOW_CORE_DESCRIPTOR_SET
 
 
 def _descriptor(index: int) -> Descriptor:
@@ -93,6 +94,23 @@ def test_exact_storage_families_include_portable_source_views() -> None:
     assert cdna3_family.representation_infos == ()
     assert cdna4_family.view_infos == ()
     assert [info.generator_target for info in cdna4_family.representation_infos] == ["gfx9_4_generic"]
+
+
+def test_native_recipe_selection_includes_representation_views_only_for_selected_storage() -> None:
+    def descriptor_set(literal: str) -> DescriptorSet:
+        descriptor = TEST_LOW_ADD_I32_DESCRIPTOR
+        form = replace(descriptor.asm_forms[0], native_assembly_values=(NativeAsmValue(NativeAsmValueKind.LITERAL, literal=literal),))
+        return replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(replace(descriptor, asm_forms=(form,)),))
+
+    spans = amdgpu_descriptors.amdgpu_descriptor_table_family_native_spans(
+        amdgpu_target_table_family("cdna4"),
+        {
+            "cdna4": descriptor_set("storage"),
+            "gfx9_4_generic": descriptor_set("representation"),
+            "rdna4": descriptor_set("unselected"),
+        },
+    )
+    assert {value.literal for span in spans for value in span} == {"storage", "representation"}
 
 
 def test_alternate_portable_view_uses_storage_qualified_provider() -> None:
@@ -170,10 +188,12 @@ def test_storage_generation_reuses_parsed_isa_for_declared_views() -> None:
         *,
         primary_strings=None,
         shared_strings=None,
+        native_asm_values=None,
         identity_domain=None,
     ) -> SimpleNamespace:
         assert primary_strings is None
         assert shared_strings is None
+        assert native_asm_values is None
         assert identity_domain is expected_identity_domain
         return SimpleNamespace(
             source="// shared\n",

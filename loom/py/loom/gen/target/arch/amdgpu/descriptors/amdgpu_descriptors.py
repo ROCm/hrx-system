@@ -31,15 +31,18 @@ from loom.gen.target.arch.amdgpu.amdgpu_target_table_family import (  # noqa: E4
     amdgpu_target_table_family,
 )
 from loom.gen.target.low.compiled import (  # noqa: E402
+    CompiledNativeAsmValue,
     DescriptorIdentityDomain,
     GeneratedDescriptorSetFamily,
 )
 from loom.gen.target.low.low_descriptors import (  # noqa: E402
+    compile_descriptor_set_family,
     descriptor_identity_domain,
     descriptor_set_family_string_values,
     generate_descriptor_set_family,
     write_descriptor_set_to_paths,
 )
+from loom.gen.target.low.native_assembly import NativeAsmValuePool  # noqa: E402
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS,
     amdgpu_core_descriptor_set_instruction_names_by_isa_key,
@@ -180,6 +183,17 @@ def amdgpu_descriptor_table_family_string_values(
     return descriptor_set_family_string_values(storage_spec, view_specs)
 
 
+def amdgpu_descriptor_table_family_native_spans(
+    family: AmdgpuTargetTableFamily,
+    descriptor_sets: Mapping[str, DescriptorSet],
+) -> tuple[tuple[CompiledNativeAsmValue, ...], ...]:
+    """Returns the native recipes used by storage and every representation view."""
+    storage_spec, view_specs = _amdgpu_descriptor_table_family_specs(family, descriptor_sets, source_public_header=descriptor_sets[family.storage_info.generator_target].public_header)
+    compiled, _ = compile_descriptor_set_family(storage_spec, view_specs)
+    storage = compiled.asm_table_storage
+    return tuple(tuple(storage.native_values[layout.native_assembly_value_start : layout.native_assembly_value_start + layout.native_assembly_value_count]) for layout in storage.layouts)
+
+
 def generate_amdgpu_descriptor_table_family(
     family: AmdgpuTargetTableFamily,
     descriptor_sets: Mapping[str, DescriptorSet],
@@ -187,6 +201,7 @@ def generate_amdgpu_descriptor_table_family(
     source_public_header: str,
     primary_strings: CStringBank | None = None,
     shared_strings: CStringBank | None = None,
+    native_asm_values: NativeAsmValuePool | None = None,
 ) -> GeneratedDescriptorSetFamily:
     """Generates descriptor storage and views from a materialized corpus."""
 
@@ -200,6 +215,7 @@ def generate_amdgpu_descriptor_table_family(
         view_specs,
         primary_strings=primary_strings,
         shared_strings=shared_strings,
+        native_asm_values=native_asm_values,
         identity_domain=amdgpu_descriptor_identity_domain(tuple(storage_spec.descriptors) + tuple(descriptor for view_spec in view_specs for descriptor in view_spec.descriptors)),
     )
 
