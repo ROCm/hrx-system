@@ -7,6 +7,9 @@
 #include "libamdf/src/gpu/umd/aql_descriptor.h"
 
 #include <stddef.h>
+#include <string.h>
+
+#include "libamdf/src/atomics.h"
 
 _Static_assert(sizeof(amdf_gpu_aql_descriptor_t) == 256,
                "AMD queue descriptor prefix size");
@@ -133,6 +136,63 @@ amdf_status_t amdf_gpu_aql_descriptor_initialize(
   }
   *out_descriptor = descriptor;
   return AMDF_STATUS_OK;
+}
+
+amdf_status_t amdf_gpu_aql_scratch_query(
+    const amdf_gpu_aql_descriptor_profile_t* profile,
+    const amdf_gpu_aql_descriptor_t* descriptor, const void* ring,
+    amdf_gpu_aql_scratch_request_t* out_request) {
+  const uint64_t inactive_value = amdf_atomic_uint64_load_acquire(
+      (const amdf_atomic_uint64_t*)((const uint8_t*)descriptor +
+                                    profile->inactive_signal_byte_offset +
+                                    offsetof(amdf_gpu_aql_signal_t, value)));
+  if (inactive_value == 0) {
+    *out_request = (amdf_gpu_aql_scratch_request_t){0};
+    return AMDF_STATUS_OK;
+  }
+  if ((inactive_value & ~UINT64_C(0x401)) != 0) {
+    return inactive_value > UINT32_MAX
+               ? amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL)
+               : amdf_make_status(AMDF_STATUS_DOMAIN_FIRMWARE,
+                                  (uint32_t)inactive_value);
+  }
+
+  // EOP handling may leave consumption before the requesting dispatch. Only
+  // this paused service path reads packet bodies; publication uses stores.
+  const uint64_t read_index = amdf_atomic_uint64_load_acquire(
+      (const amdf_atomic_uint64_t*)&descriptor->read_dispatch_id);
+  const uint64_t write_index = amdf_atomic_uint64_load_acquire(
+      (const amdf_atomic_uint64_t*)&descriptor->write_dispatch_id);
+  const uint64_t packet_count = descriptor->packet_count;
+  uint64_t count = write_index - read_index;
+  if (count > packet_count) {
+    count = packet_count;
+  }
+  for (uint64_t i = 0; i < count; ++i) {
+    const uint8_t* packet =
+        (const uint8_t*)ring + ((read_index + i) & (packet_count - 1)) * 64;
+    const uint32_t header =
+        __atomic_load_n((const uint32_t*)packet, __ATOMIC_ACQUIRE);
+    if ((header & 0xff) != 2) {
+      continue;  // KERNEL_DISPATCH.
+    }
+    uint32_t private_byte_length;
+    memcpy(&private_byte_length, packet + 24, sizeof(private_byte_length));
+    if (private_byte_length == 0) {
+      continue;
+    }
+    amdf_gpu_aql_scratch_request_t request;
+    const amdf_status_t status = amdf_gpu_aql_scratch_requirements(
+        profile, private_byte_length, (inactive_value & 0x400) != 0 ? 32 : 64,
+        &request);
+    if (!amdf_status_is_ok(status)) {
+      return status;
+    }
+    request.dispatch_index = read_index + i;
+    *out_request = request;
+    return AMDF_STATUS_OK;
+  }
+  return amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
 }
 
 amdf_status_t amdf_gpu_aql_scratch_requirements(

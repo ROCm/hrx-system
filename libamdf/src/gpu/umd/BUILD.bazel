@@ -121,6 +121,7 @@ amdf_cc_library(
     visibility = ["//libamdf/src/gpu:__subpackages__"],
     deps = [
         ":user_queue",
+        "//libamdf/src:atomics",
         "//libamdf/src/gpu:endpoint_profile",
     ],
 )

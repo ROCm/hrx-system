@@ -145,6 +145,14 @@ amdf_status_t amdf_gpu_aql_descriptor_initialize(
     const amdf_gpu_umd_user_queue_create_info_t* create_info,
     amdf_gpu_aql_descriptor_t* out_descriptor);
 
+// Samples the firmware's inactive signal and paused packet range. Ring points
+// to the host view of the primary ring. A zero request means no scratch fault;
+// other firmware errors remain errors. The caller serializes scratch service.
+amdf_status_t amdf_gpu_aql_scratch_query(
+    const amdf_gpu_aql_descriptor_profile_t* profile,
+    const amdf_gpu_aql_descriptor_t* descriptor, const void* ring,
+    amdf_gpu_aql_scratch_request_t* out_request);
+
 // Resolves the target's complete physical scratch requirement for a firmware
 // request. Input private bytes originate in the caller-published dispatch.
 amdf_status_t amdf_gpu_aql_scratch_requirements(
