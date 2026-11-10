@@ -23,6 +23,7 @@ iree_status_t loom_aie2p_native_select_channel_endpoint(
     loom_xdna_dma_direction_t direction, uint32_t repetitions,
     uint32_t credit_interval, uint32_t reserved_tasks,
     const loom_aie2p_native_distribution_endpoint_t* shared,
+    const loom_aie2p_native_channel_t* progress_channel,
     loom_aie2p_native_distribution_endpoint_t* out_endpoint,
     iree_string_view_t* out_reason, bool* out_valid) {
   *out_valid = false;
@@ -144,7 +145,7 @@ iree_status_t loom_aie2p_native_select_channel_endpoint(
   }
   IREE_RETURN_IF_ERROR(loom_aie2p_native_select_sequence(
       context, tile, out_endpoint->engine, direction,
-      shared || batch_records ? NULL : channel,
+      batch_records ? NULL : progress_channel,
       batch_records ? repetitions / batch_records : repetitions, capacity,
       channel->byte_offset, byte_stride, credit_interval, reserved_tasks, words,
       &out_endpoint->sequence, out_reason, out_valid));
@@ -478,7 +479,8 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
         context, &realization->invocations, distribution->invocation,
         receiver_channel, LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY, totals[i],
         1, 0, path ? &path->receivers[ordinal] : NULL,
-        &distribution->receivers[ordinal], &reason, &valid));
+        path ? NULL : receiver_channel, &distribution->receivers[ordinal],
+        &reason, &valid));
     if (!valid) {
       return loom_aie2p_native_reject(context, first->admission->op, reason);
     }
@@ -987,8 +989,8 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
             windows ? (bulk ? windows[0] : 1) : distribution->repetitions,
             (uint32_t)(cohort->admissions == 1 ? batch->replays : 1),
             child ? queued_tasks[0] + source->transport.batch_count - i - 1 : 0,
-            path ? &path->sender : NULL, &distribution->sender, &reason,
-            &valid));
+            path ? &path->sender : NULL, path ? NULL : source_channel,
+            &distribution->sender, &reason, &valid));
         if (!valid) {
           return loom_aie2p_native_reject(context, cohort->admission->op,
                                           reason);
@@ -1022,7 +1024,8 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
               child
                   ? queued_tasks[j + 1] + source->transport.batch_count - i - 1
                   : 0,
-              path ? &path->receivers[j] : NULL, &distribution->receivers[j],
+              path ? &path->receivers[j] : NULL,
+              path ? NULL : destination_channel, &distribution->receivers[j],
               &reason, &valid));
           if (!valid) {
             return loom_aie2p_native_reject(context, destination->copy, reason);

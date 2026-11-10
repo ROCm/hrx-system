@@ -657,6 +657,8 @@ typedef struct loom_aie2p_native_worker_t {
   struct loom_aie2p_native_input_t* input;
   // Phased sources whose admission runs in this arithmetic worker.
   struct loom_aie2p_native_input_t* inputs;
+  // Phased input queues and routes owned by this physical instruction engine.
+  struct loom_aie2p_native_input_path_t* input_paths;
   // Reader-driven continuation groups sharing one window counter pair.
   struct loom_aie2p_native_refill_t* refills;
 } loom_aie2p_native_worker_t;
