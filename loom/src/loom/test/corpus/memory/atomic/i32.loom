@@ -1,13 +1,12 @@
 // Each cell isolates one integer atomic operation. Reductions run before their
 // returning forms so both packet shapes contribute to the observed result.
-func.def inline @integer_atomic_i32_cells(%initial: i32, %value: i32, %storage: buffer, %output: buffer, %output_base: offset) {
-  %base = index.constant 0 : offset
+func.def inline @integer_atomic_i32_cells(%initial: i32, %value: i32, %storage: buffer, %output: buffer, %output_base: offset, %storage_base: offset) {
   %begin = index.constant 1 : index
   %end = index.constant 13 : index
   %step = index.constant 1 : index
   %final_bias = index.constant 12 : index
   %inversion_mask = scalar.constant -1 : i32
-  %state = buffer.view %storage[%base] : buffer -> view<14xi32>
+  %state = buffer.view %storage[%storage_base] : buffer -> view<14xi32>
   %results = buffer.view %output[%output_base] : buffer -> view<26xi32>
   scf.for %cell = [%begin to %end step %step] {
     view.store %initial, %state[%cell] : i32, view<14xi32>
@@ -75,17 +74,37 @@ kernel.def @integer_atomic_i32() {
   %workgroup_view = buffer.view %workgroup[%global_base] : buffer -> view<14xi32>
   view.store %guard, %workgroup_view[0] : i32, view<14xi32>
   view.store %guard, %workgroup_view[13] : i32, view<14xi32>
-  func.call @integer_atomic_i32_cells(%initial, %value, %global, %output, %global_base) : (i32, i32, buffer, buffer, offset)
-  func.call @integer_atomic_i32_cells(%initial, %value, %generic, %output, %generic_base) : (i32, i32, buffer, buffer, offset)
-  func.call @integer_atomic_i32_cells(%initial, %value, %workgroup, %output, %workgroup_base) : (i32, i32, buffer, buffer, offset)
+  func.call @integer_atomic_i32_cells(%initial, %value, %global, %output, %global_base, %global_base) : (i32, i32, buffer, buffer, offset, offset)
+  func.call @integer_atomic_i32_cells(%initial, %value, %generic, %output, %generic_base, %global_base) : (i32, i32, buffer, buffer, offset, offset)
+  func.call @integer_atomic_i32_cells(%initial, %value, %workgroup, %output, %workgroup_base, %global_base) : (i32, i32, buffer, buffer, offset, offset)
+  kernel.return
+}
+
+// Runtime-loaded byte origins exercise the same complete operation family
+// without a static address-range proof. Guard cells surround every update.
+kernel.def @indirect_integer_atomic_i32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%initial_bits: i64, %value_bits: i64, %offsets: buffer, %global_storage: buffer, %generic_storage: buffer, %output: buffer) {
+  %c0 = index.constant 0 : offset
+  %generic_base = index.constant 104 : offset
+  %indices = buffer.view %offsets[%c0] : buffer -> view<1xi64>
+  %byte_offset = view.load %indices[0] : view<1xi64> -> i64
+  %nonnegative = scalar.assume %byte_offset [range(%byte_offset, 0, 9223372036854775807)] : i64
+  %storage_base = index.cast %nonnegative : i64 to offset
+  %initial = scalar.trunci %initial_bits : i64 to i32
+  %value = scalar.trunci %value_bits : i64 to i32
+  %global = buffer.assume.memory_space<global> %global_storage : buffer
+  %generic = buffer.assume.memory_space<generic> %generic_storage : buffer
+  func.call @integer_atomic_i32_cells(%initial, %value, %global, %output, %c0, %storage_base) : (i32, i32, buffer, buffer, offset, offset)
+  func.call @integer_atomic_i32_cells(%initial, %value, %generic, %output, %generic_base, %storage_base) : (i32, i32, buffer, buffer, offset, offset)
   kernel.return
 }
 
 // The oracle computes ordinary scalar expressions. It neither executes atomic
 // operations nor shares storage with the device invocation.
-func.def inline @integer_atomic_i32_cells_oracle(%initial: i32, %value: i32, %storage: buffer, %output: buffer, %output_base: offset) {
-  %base = index.constant 0 : offset
-  %state = buffer.view %storage[%base] : buffer -> view<14xi32>
+func.def inline @integer_atomic_i32_cells_oracle(%initial: i32, %value: i32, %storage: buffer, %output: buffer, %output_base: offset, %storage_base: offset) {
+  %state = buffer.view %storage[%storage_base] : buffer -> view<14xi32>
   %results = buffer.view %output[%output_base] : buffer -> view<26xi32>
   %guard = scalar.constant 1515870810 : i32
   view.store %guard, %state[0] : i32, view<14xi32>
@@ -151,9 +170,23 @@ func.def @integer_atomic_i32_oracle(%initial_bits: i64, %value_bits: i64, %globa
   %initial = scalar.trunci %initial_bits : i64 to i32
   %value = scalar.trunci %value_bits : i64 to i32
   %workgroup = buffer.alloca<private> align(4) %workgroup_bytes : buffer
-  func.call @integer_atomic_i32_cells_oracle(%initial, %value, %global_storage, %output, %global_base) : (i32, i32, buffer, buffer, offset)
-  func.call @integer_atomic_i32_cells_oracle(%initial, %value, %generic_storage, %output, %generic_base) : (i32, i32, buffer, buffer, offset)
-  func.call @integer_atomic_i32_cells_oracle(%initial, %value, %workgroup, %output, %workgroup_base) : (i32, i32, buffer, buffer, offset)
+  func.call @integer_atomic_i32_cells_oracle(%initial, %value, %global_storage, %output, %global_base, %global_base) : (i32, i32, buffer, buffer, offset, offset)
+  func.call @integer_atomic_i32_cells_oracle(%initial, %value, %generic_storage, %output, %generic_base, %global_base) : (i32, i32, buffer, buffer, offset, offset)
+  func.call @integer_atomic_i32_cells_oracle(%initial, %value, %workgroup, %output, %workgroup_base, %global_base) : (i32, i32, buffer, buffer, offset, offset)
+  func.return
+}
+
+func.def @indirect_integer_atomic_i32_oracle(%initial_bits: i64, %value_bits: i64, %offsets: buffer, %global_storage: buffer, %generic_storage: buffer, %output: buffer) {
+  %c0 = index.constant 0 : offset
+  %generic_base = index.constant 104 : offset
+  %indices = buffer.view %offsets[%c0] : buffer -> view<1xi64>
+  %byte_offset = view.load %indices[0] : view<1xi64> -> i64
+  %nonnegative = scalar.assume %byte_offset [range(%byte_offset, 0, 9223372036854775807)] : i64
+  %storage_base = index.cast %nonnegative : i64 to offset
+  %initial = scalar.trunci %initial_bits : i64 to i32
+  %value = scalar.trunci %value_bits : i64 to i32
+  func.call @integer_atomic_i32_cells_oracle(%initial, %value, %global_storage, %output, %c0, %storage_base) : (i32, i32, buffer, buffer, offset, offset)
+  func.call @integer_atomic_i32_cells_oracle(%initial, %value, %generic_storage, %output, %generic_base, %storage_base) : (i32, i32, buffer, buffer, offset, offset)
   func.return
 }
 
@@ -170,6 +203,25 @@ check.scenario @integer_atomic_i32_values {
       check.expect.bitwise actual(%global) expected(%global) : tensor<14xi32>
       check.expect.bitwise actual(%generic) expected(%generic) : tensor<14xi32>
       check.expect.bitwise actual(%output) expected(%output) : tensor<78xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @indirect_integer_atomic_i32_values {
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %initial_entropy = check.entropy.fork %entropy name("initial") : check.entropy
+    %value_entropy = check.entropy.fork %entropy name("value") : check.entropy
+    %initial_bits = check.entropy.read %initial_entropy[%trial] : check.entropy -> i64
+    %value_bits = check.entropy.read %value_entropy[%trial] : check.entropy -> i64
+    %offsets = check.generate.fill value(8) : tensor<1xi64>
+    %global = check.generate.fill value(1515870810) : tensor<18xi32>
+    %generic = check.generate.fill value(1515870810) : tensor<18xi32>
+    %output = check.generate.fill value(-1) : tensor<52xi32>
+    check.compare<@indirect_integer_atomic_i32, @indirect_integer_atomic_i32_oracle>(%initial_bits, %value_bits, %offsets, %global, %generic, %output) : (i64, i64, tensor<1xi64>, tensor<18xi32>, tensor<18xi32>, tensor<52xi32>) -> () {
+      check.expect.bitwise actual(%global) expected(%global) : tensor<18xi32>
+      check.expect.bitwise actual(%generic) expected(%generic) : tensor<18xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<52xi32>
     }
   }
   check.return

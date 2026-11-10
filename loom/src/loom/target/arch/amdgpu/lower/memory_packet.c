@@ -821,7 +821,7 @@ static bool loom_amdgpu_memory_access_split_lds_default_static_offset(
   return true;
 }
 
-static bool loom_amdgpu_memory_access_split_global_saddr_static_offset(
+bool loom_amdgpu_memory_access_split_global_saddr_static_offset(
     loom_amdgpu_memory_access_t* access,
     const loom_amdgpu_descriptor_offset_immediate_info_t* offset_info,
     loom_amdgpu_memory_access_diagnostic_t* diagnostic) {
