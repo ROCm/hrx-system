@@ -1499,8 +1499,12 @@ TEST_F(FactTableTest, CrossTableClonesReuseOwnedArrayAndRawPayloads) {
     elements[0].extension_id = LOOM_VALUE_FACT_EXTENSION_ID_NONE;
     loom_value_fact_encoding_summary_t summary = {
         .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
-        .address_layout = {LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
-                           LOOM_TYPE_MAX_RANK, elements},
+        .address_layout =
+            {
+                .kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
+                .rank = LOOM_TYPE_MAX_RANK,
+                .strides = elements,
+            },
     };
     IREE_ASSERT_OK(loom_value_facts_make_encoding_summary(
         &source.context, summary, &original[1]));

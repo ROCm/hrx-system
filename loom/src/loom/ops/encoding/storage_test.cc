@@ -749,8 +749,12 @@ TEST(EncodingStorageQueryTest, ValueLayoutKeepsNumericAndSsaAxesSeparate) {
       loom_value_facts_make(4, 4096, 4), loom_value_facts_exact_i64(1)};
   loom_value_fact_encoding_summary_t summary = {
       .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
-      .address_layout = {LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
-                         IREE_ARRAYSIZE(numeric_strides), numeric_strides},
+      .address_layout =
+          {
+              .kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
+              .rank = IREE_ARRAYSIZE(numeric_strides),
+              .strides = numeric_strides,
+          },
   };
   loom_value_facts_t facts;
   IREE_ASSERT_OK(

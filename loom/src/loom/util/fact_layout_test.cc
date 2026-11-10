@@ -227,8 +227,12 @@ TEST_F(FactLayoutTest, NumericTransferDoesNotTransferScopedRecipes) {
   const loom_value_facts_t numeric_strides[] = {loom_value_facts_make(8, 12, 1),
                                                 loom_value_facts_exact_i64(1)};
   loom_value_fact_encoding_summary_t summary = {
-      .address_layout = {LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED, 2,
-                         numeric_strides},
+      .address_layout =
+          {
+              .kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
+              .rank = 2,
+              .strides = numeric_strides,
+          },
   };
   loom_value_facts_t facts;
   IREE_ASSERT_OK(

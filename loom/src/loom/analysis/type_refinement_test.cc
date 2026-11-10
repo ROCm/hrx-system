@@ -183,8 +183,9 @@ TEST_F(AnalysisTypeSpecializationTest, CanonicalizesExactEncodingCandidates) {
         .static_spec_encoding_id = 0,
         .address_layout =
             {
-                .kind = dense ? LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE
-                              : LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
+                .kind = static_cast<loom_value_fact_address_layout_kind_t>(
+                    dense ? LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE
+                          : LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED),
                 .rank = static_cast<uint8_t>(dense ? 0 : 1),
                 .strides = dense ? nullptr : &stride,
             },
