@@ -1323,6 +1323,10 @@ HRX_API hrx_status_t hrx_event_create(hrx_device_t device,
                                       hrx_event_t* out_event);
 HRX_API void hrx_event_retain(hrx_event_t event);
 HRX_API void hrx_event_release(hrx_event_t event);
+// Records a new event generation after the stream's prior work and the event's
+// previous generation. Records may use different streams. The event retains
+// its own timeline, not the recording stream; mutation requires external
+// serialization. A rejected recording leaves the prior event generation intact.
 HRX_API hrx_status_t hrx_event_record(hrx_event_t event, hrx_stream_t stream);
 HRX_API hrx_status_t hrx_event_query(hrx_event_t event, bool* complete);
 // Waits for the recorded event and drains completed device profile records when

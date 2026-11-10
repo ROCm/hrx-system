@@ -30,7 +30,6 @@ hrx_status_t hrx_event_create(hrx_device_t device, hrx_event_flags_t flags,
   iree_atomic_ref_count_init(&event->ref_count);
   event->flags = flags;
   event->signal_value = 0;
-  event->recording_stream = NULL;
   event->device = device;
   event->record_time_ns = 0;
 
@@ -58,7 +57,6 @@ void hrx_event_release(hrx_event_t event) {
   }
   if (iree_atomic_ref_count_dec(&event->ref_count) == 1) {
     hrx_semaphore_release(event->semaphore);
-    hrx_stream_release(event->recording_stream);
     free(event);
   }
 }
@@ -73,42 +71,44 @@ hrx_status_t hrx_event_record(hrx_event_t event, hrx_stream_t stream) {
                            "event or stream is NULL");
   }
 
-  event->record_time_ns = (int64_t)iree_time_now();
-
-  // Track recording stream (retain new, release old).
-  if (event->recording_stream != stream) {
-    hrx_stream_release(event->recording_stream);
-    event->recording_stream = stream;
-    hrx_stream_retain(stream);
-  }
-
   // Flush pending work so it's submitted before the barrier.
   hrx_status_t status = hrx_stream_flush(stream);
   if (!hrx_status_is_ok(status)) {
     return status;
   }
 
-  // Wait on stream's current timepoint, signal the next value on both the
-  // stream's timeline and the event's dedicated semaphore.
-  uint64_t wait_value = stream->timepoint;
-  uint64_t signal_value = wait_value + 1;
-  event->signal_value = signal_value;
-  stream->timepoint = signal_value;
+  if (IREE_UNLIKELY(stream->timepoint >= IREE_HAL_SEMAPHORE_MAX_VALUE ||
+                    event->signal_value >= IREE_HAL_SEMAPHORE_MAX_VALUE)) {
+    return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                           "stream or event timeline value exhausted");
+  }
 
-  iree_hal_semaphore_t* wait_sem = stream->semaphore->hal_semaphore;
-  iree_hal_semaphore_list_t wait_list = {
-      .count = (wait_value > 0) ? 1 : 0,
-      .semaphores = &wait_sem,
-      .payload_values = &wait_value,
+  // Each timeline has its own next value. Successive event producers must
+  // remain ordered even when they come from independent stream queues.
+  iree_hal_semaphore_t* wait_semaphores[2];
+  uint64_t wait_values[2];
+  iree_host_size_t wait_count = 0;
+  if (stream->timepoint) {
+    wait_semaphores[wait_count] = stream->semaphore->hal_semaphore;
+    wait_values[wait_count++] = stream->timepoint;
+  }
+  if (event->signal_value) {
+    wait_semaphores[wait_count] = event->semaphore->hal_semaphore;
+    wait_values[wait_count++] = event->signal_value;
+  }
+  const iree_hal_semaphore_list_t wait_list = {
+      .count = wait_count,
+      .semaphores = wait_semaphores,
+      .payload_values = wait_values,
   };
 
-  iree_hal_semaphore_t* sig_sems[] = {stream->semaphore->hal_semaphore,
-                                      event->semaphore->hal_semaphore};
-  uint64_t sig_vals[] = {signal_value, signal_value};
-  iree_hal_semaphore_list_t signal_list = {
+  iree_hal_semaphore_t* signal_semaphores[] = {stream->semaphore->hal_semaphore,
+                                               event->semaphore->hal_semaphore};
+  uint64_t signal_values[] = {stream->timepoint + 1, event->signal_value + 1};
+  const iree_hal_semaphore_list_t signal_list = {
       .count = 2,
-      .semaphores = sig_sems,
-      .payload_values = sig_vals,
+      .semaphores = signal_semaphores,
+      .payload_values = signal_values,
   };
 
   // Event recording publishes only semaphore timepoints. Explicitly empty
@@ -127,6 +127,9 @@ hrx_status_t hrx_event_record(hrx_event_t event, hrx_stream_t stream) {
     return hrx_status_from_iree(iree_status);
   }
 
+  stream->timepoint = signal_values[0];
+  event->signal_value = signal_values[1];
+  event->record_time_ns = (int64_t)iree_time_now();
   return hrx_ok_status();
 }
 

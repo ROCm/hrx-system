@@ -270,13 +270,18 @@ typedef struct hrx_semaphore_s {
 
 // Event: marks a point in a stream's timeline for cross-stream sync.
 typedef struct hrx_event_s {
+  // Public references to this event and its owned timeline.
   iree_atomic_ref_count_t ref_count;
+  // Creation options, including whether host timing is enabled.
   hrx_event_flags_t flags;
-  hrx_semaphore_t semaphore;  // Dedicated semaphore for this event.
-  uint64_t signal_value;      // Timeline value the semaphore must reach.
-  hrx_stream_t recording_stream;
+  // Owned semaphore whose generations order successive accepted records.
+  hrx_semaphore_t semaphore;
+  // Last accepted event generation, independent of any stream's position.
+  uint64_t signal_value;
+  // Borrowed parent retained by |semaphore|.
   hrx_device_t device;
-  int64_t record_time_ns;  // Host-side timestamp at record time.
+  // Host timestamp of the last accepted record, in nanoseconds.
+  int64_t record_time_ns;
 } hrx_event_s;
 
 //===----------------------------------------------------------------------===//
