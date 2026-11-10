@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:executable.bzl", "iree_wasi_executable_alias")
-load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
 load("//loom/binding/c:shared.bzl", "loomc_cc_binary")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
@@ -220,7 +220,7 @@ loom_cc_binary(
     ],
 )
 
-iree_execution_test_suite(
+iree_cli_test(
     name = "execution_test",
     data = [
         "//loom/src/loom/tooling/input/testdata:duplicate_symbols.loom-test",
@@ -240,7 +240,7 @@ iree_execution_test_suite(
     },
 )
 
-iree_execution_test_suite(
+iree_cli_test(
     name = "scenario_execution_test",
     data = ["//loom/src/loom/tools/loom-test/testdata:scenario_cases.loom"],
     manifests = ["scenario_execution.test.json"],
@@ -254,7 +254,7 @@ iree_execution_test_suite(
     },
 )
 
-iree_execution_test_suite(
+iree_cli_test(
     name = "scenario_failure_test",
     data = [
         "//loom/src/loom/tools/loom-test/testdata:scenario_failures.loom",

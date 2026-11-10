@@ -23,7 +23,7 @@ include("${IREE_REPO_ROOT}/build_tools/cmake/iree_install_support.cmake")
 include("${IREE_REPO_ROOT}/build_tools/cmake/iree_native_test.cmake")
 include("${IREE_REPO_ROOT}/build_tools/cmake/iree_cc_test.cmake")
 include("${IREE_REPO_ROOT}/build_tools/cmake/iree_python.cmake")
-include("${IREE_REPO_ROOT}/build_tools/cmake/iree_execution_test_suite.cmake")
+include("${IREE_REPO_ROOT}/build_tools/cmake/iree_cli_test.cmake")
 include("${IREE_REPO_ROOT}/build_tools/sanitizer/iree_sanitizer_suppressions.cmake")
 set(IREE_SANITIZER_SUPPRESSION_FIXTURE_LSAN "${CMAKE_CURRENT_SOURCE_DIR}/suppression.txt")
 if(DEFINED IREE_TEST_INVALID_ARGUMENT)
@@ -33,7 +33,7 @@ endif()
 add_executable(reader reader.cc)
 add_executable(iree::tools::runner ALIAS reader)
 iree_target_sanitizer_suppressions(reader SUPPRESSIONS lsan fixture)
-iree_execution_test_suite(NAME execution_reader
+iree_cli_test(NAME execution_reader
   MANIFESTS suppression.test.json TOOLS reader=reader)
 iree_py_test(NAME python_reader MAIN reader.py SRCS reader.py reader_helper.py
   PACKAGE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}"

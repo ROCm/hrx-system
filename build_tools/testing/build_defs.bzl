@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Bazel rules for JSON execution tests."""
+"""Bazel rules for public command-line interface tests."""
 
 load("@rules_python//python:defs.bzl", "py_test")
 load("//build_tools/bazel:cc_attrs.bzl", "cc_attrs")
@@ -30,7 +30,7 @@ _tool_environment = rule(
     },
 )
 
-def iree_execution_test_suite(
+def iree_cli_test(
         name,
         manifests,
         tools,
@@ -38,7 +38,19 @@ def iree_execution_test_suite(
         args = None,
         resource_group = None,
         **kwargs):
-    """Declares a JSON execution test suite.
+    """Declares a test of a public command-line interface.
+
+    Use this rule only for behavior introduced by process entry: critical
+    public flag combinations and conflicts, process exit, process-owned output,
+    output publication, and a minimal successful invocation of a materially
+    distinct configured executable. Compiler, linker, transform, target,
+    testbench, runtime, and structured-format semantics belong to their API or
+    component owners. Expected results here should change only with the public
+    CLI contract.
+
+    Prefer iree_executable_test when successful process loading is the complete
+    contract. CLI manifest cases should invoke one declared tool once against
+    checked-in inputs.
 
     Args:
       name: Bazel target name.

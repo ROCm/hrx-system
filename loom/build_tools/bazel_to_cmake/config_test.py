@@ -473,7 +473,7 @@ loom_generated_cc_library(name="catalog", generator=":generate", instance_owned=
         self.assertIn("  RUNTIME_DEPS\n    iree::base", output)
         self.assertEqual(output.count("  LINKABLE_MORE_THAN_ONCE\n"), 2)
 
-    def test_loom_artifact_condition_reaches_external_execution_rule(self):
+    def test_loom_artifact_condition_reaches_external_cli_test(self):
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
@@ -489,7 +489,7 @@ loom_generated_cc_library(name="catalog", generator=":generate", instance_owned=
             condition_mappings=self.project.condition_mappings,
         )
 
-        functions.iree_execution_test_suite(
+        functions.iree_cli_test(
             name="integer_shifts_test",
             manifests=["integer_shifts.test.json"],
             tools={"loom-compile": "//loom/src/loom/tools/loom-compile"},

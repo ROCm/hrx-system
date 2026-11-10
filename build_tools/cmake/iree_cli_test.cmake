@@ -6,10 +6,20 @@
 
 include("${CMAKE_CURRENT_LIST_DIR}/iree_test_arguments.cmake")
 
-# iree_execution_test_suite()
+# iree_cli_test()
 #
-# Creates a CTest test that runs JSON execution manifests for command-line
-# tools. Mirrors the Bazel rule in build_tools/testing/build_defs.bzl.
+# Creates a CTest test for behavior introduced by a public command-line
+# interface: critical flag combinations and conflicts, process exit,
+# process-owned output, output publication, and a minimal successful invocation
+# of a materially distinct configured executable. Compiler, linker, transform,
+# target, testbench, runtime, and structured-format semantics belong to their
+# API or component owners. Expected results here should change only with the
+# public CLI contract.
+#
+# Prefer a direct executable test when successful process loading is the
+# complete contract. CLI manifest cases should invoke one declared tool once
+# against checked-in inputs. This mirrors the Bazel rule in
+# build_tools/testing/build_defs.bzl.
 #
 # Parameters:
 # NAME: name of the test.
@@ -23,14 +33,14 @@ include("${CMAKE_CURRENT_LIST_DIR}/iree_test_arguments.cmake")
 #     run concurrently.
 # TIMEOUT: test timeout in seconds.
 
-function(iree_execution_test_suite)
+function(iree_cli_test)
   iree_package_source_dir(_IREE_PACKAGE_SOURCE_DIR)
   if(NOT IREE_BUILD_TESTS)
     return()
   endif()
 
   if(NOT Python3_EXECUTABLE)
-    message(FATAL_ERROR "iree_execution_test_suite requires Python3")
+    message(FATAL_ERROR "iree_cli_test requires Python3")
   endif()
   cmake_parse_arguments(
     _RULE
@@ -41,13 +51,13 @@ function(iree_execution_test_suite)
   )
 
   if(NOT _RULE_NAME)
-    message(FATAL_ERROR "iree_execution_test_suite requires NAME")
+    message(FATAL_ERROR "iree_cli_test requires NAME")
   endif()
   if(NOT _RULE_MANIFESTS)
-    message(FATAL_ERROR "iree_execution_test_suite requires MANIFESTS")
+    message(FATAL_ERROR "iree_cli_test requires MANIFESTS")
   endif()
   if(NOT _RULE_TOOLS)
-    message(FATAL_ERROR "iree_execution_test_suite requires TOOLS")
+    message(FATAL_ERROR "iree_cli_test requires TOOLS")
   endif()
 
   iree_package_ns(_PACKAGE_NS)
@@ -77,7 +87,7 @@ function(iree_execution_test_suite)
   foreach(_TOOL IN LISTS _RULE_TOOLS)
     if(NOT _TOOL MATCHES "^([^=]+)=(.+)$")
       message(FATAL_ERROR
-        "iree_execution_test_suite TOOLS entries must be tool_name=cmake_target: '${_TOOL}'")
+        "iree_cli_test TOOLS entries must be tool_name=cmake_target: '${_TOOL}'")
     endif()
     set(_TOOL_NAME "${CMAKE_MATCH_1}")
     set(_TOOL_TARGET "${CMAKE_MATCH_2}")

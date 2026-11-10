@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
-load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
 load("//loom/binding/c:shared.bzl", "loomc_cc_binary")
 
 package(
@@ -46,7 +46,7 @@ iree_assert_dependency_boundary(
     target = ":loom-compile",
 )
 
-iree_execution_test_suite(
+iree_cli_test(
     name = "execution_test",
     manifests = ["loom-compile.test.json"],
     tags = ["hostonly"],

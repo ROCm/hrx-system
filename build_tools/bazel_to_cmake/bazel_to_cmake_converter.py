@@ -2539,7 +2539,7 @@ class BuildFileFunctions(
         )
         self._emit_platform_guard_end(target_compatible_with)
 
-    def iree_execution_test_suite(
+    def iree_cli_test(
         self,
         name,
         manifests,
@@ -2555,7 +2555,7 @@ class BuildFileFunctions(
     ):
         if self._should_skip_target(tags=tags, **kwargs):
             return
-        self._check_no_unhandled_kwargs("iree_execution_test_suite", kwargs)
+        self._check_no_unhandled_kwargs("iree_cli_test", kwargs)
 
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
         manifests_block = self._convert_srcs_block(manifests, block_name="MANIFESTS")
@@ -2578,7 +2578,7 @@ class BuildFileFunctions(
 
         self._emit_platform_guard_begin(target_compatible_with)
         self._converter.body += (
-            f"iree_execution_test_suite(\n"
+            f"iree_cli_test(\n"
             f"{name_block}"
             f"{manifests_block}"
             f"{tools_block}"

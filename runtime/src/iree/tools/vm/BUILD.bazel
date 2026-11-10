@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_binary")
 
 package(
@@ -39,7 +39,7 @@ iree_runtime_cc_binary(
     ],
 )
 
-iree_execution_test_suite(
+iree_cli_test(
     name = "execution_test",
     data = ["//runtime/src/iree/vm/bytecode/testdata:launch_config.vmasm"],
     manifests = ["vm-tools.test.json"],

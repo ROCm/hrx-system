@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
 load(
     "//build_tools/wasm:build_defs.bzl",
     "iree_wasm_cc_library",
@@ -33,7 +33,7 @@ _WASM_HOST_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/execute:wasm_host",
 ])
 
-iree_execution_test_suite(
+iree_cli_test(
     name = "loom_compile_execution_test",
     manifests = ["loom-compile.test.json"],
     tags = ["hostonly"],

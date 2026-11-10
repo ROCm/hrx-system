@@ -11,7 +11,7 @@
 # core/, etc.) while this directory provides the foundation.
 
 load("//build_tools/bazel:select.bzl", "iree_select")
-load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_binary", "iree_runtime_cc_library")
 
 package(
@@ -155,7 +155,7 @@ iree_runtime_cc_binary(
     ],
 )
 
-iree_execution_test_suite(
+iree_cli_test(
     name = "benchmark_setup_test",
     manifests = ["benchmark_setup.test.json"],
     tools = {"benchmark": ":benchmark_setup_fixture"},

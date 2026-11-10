@@ -1,5 +1,5 @@
 load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
-load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
 load("//loom/binding/c:shared.bzl", "loomc_cc_binary")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
@@ -398,7 +398,7 @@ loom_cc_test(
     ],
 )
 
-iree_execution_test_suite(
+iree_cli_test(
     name = "execution_test",
     manifests = ["loom-check.test.json"],
     tags = ["hostonly"],

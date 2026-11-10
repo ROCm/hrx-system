@@ -873,7 +873,7 @@ def _run_self_tests() -> int:
         "target tooling manifest passes",
         "loom/src/loom/tooling/target/amdgpu/test/BUILD.bazel",
         (
-            "iree_execution_test_suite(\n"
+            "iree_cli_test(\n"
             '    name = "compile",\n'
             '    data = ["//loom/src/loom/tooling/target/amdgpu/testdata:input.loom"],\n'
             ")\n"

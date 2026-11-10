@@ -1,21 +1,56 @@
-# Execution Tests
+# CLI Tests
 
-Execution tests run command-line tools from JSON manifests and check selected
-textual evidence from stdout, stderr, and generated files. The runner executes
-tools directly with `subprocess.run`; it does not use a shell.
+`iree_cli_test` verifies stable behavior introduced by a public command-line
+interface. An expected result here changes when the public CLI contract changes,
+not when an internal compiler, linker, transform, target, testbench, runtime, or
+representation changes.
+
+## Boundary
+
+CLI-owned behavior includes:
+
+- a minimal successful invocation proving that a materially distinct configured
+  executable loads and reaches its API;
+- critical public flag combinations and conflicts;
+- process exit behavior;
+- process-owned help, usage, and flag diagnostics; and
+- publication of an explicitly requested output file.
+
+Semantic results belong to the API or component that establishes them. This
+includes linked symbols, transformed IR, compiler diagnostics, target selection,
+scenario execution, benchmark policy, structured report fields, and serialized
+artifact contents. A CLI test may prove that the command published an output;
+the format owner proves what that output means.
+
+Success-only process coverage uses `iree_executable_test`. A thin wrapper that
+maps IREE flags into an API normally needs one successful CLI smoke, while its
+request construction and value matrix remain API tests. Common flag-library
+behavior is covered once by that library instead of repeated in every tool.
+
+Each CLI case has one declared executable, one invocation, checked-in inputs,
+and assertions limited to the process boundary. Cross-tool pipelines, inline
+source authoring, replay workflows, and substring checks over semantic output do
+not establish a CLI contract. The manifest runner still accepts broader legacy
+constructs while their ownership is being repaired; those constructs are not
+part of the `iree_cli_test` contract.
+
+## Manifest Shape
+
+A manifest contains one or more independent cases. Each case selects one tool
+and passes its public arguments directly; the runner does not use a shell.
 
 ```json
 {
   "version": 1,
   "cases": [
     {
-      "name": "help mentions important flags",
+      "name": "help describes the output flag",
       "run": {
         "tool": "fixture",
-        "args": ["--helpish"]
+        "args": ["--help"]
       },
       "stdout": {
-        "contains": ["Usage:", "--output="]
+        "contains": ["--output="]
       },
       "stderr": {
         "empty": true
@@ -25,30 +60,22 @@ tools directly with `subprocess.run`; it does not use a shell.
 }
 ```
 
-Each manifest contains one or more cases. A case can use a single `run` block or
-an explicit `steps` list:
+A run defaults to `exit: 0`. An intentional public rejection uses an explicit
+exit expectation and checks only the CLI-owned diagnostic:
 
 ```json
 {
-  "cases": [
-    {
-      "name": "write then run",
-      "steps": [
-        {
-          "write": {
-            "path": "{tmp}/input.txt",
-            "text": "hello\n"
-          }
-        },
-        {
-          "run": {
-            "tool": "fixture",
-            "args": ["--input={tmp}/input.txt"]
-          }
-        }
-      ]
-    }
-  ]
+  "name": "rejects conflicting output destinations",
+  "run": {
+    "tool": "fixture",
+    "args": ["--output=-", "--output_file=result.bin"]
+  },
+  "exit": {
+    "nonzero": true
+  },
+  "stderr": {
+    "contains": ["output destinations are mutually exclusive"]
+  }
 }
 ```
 
@@ -58,91 +85,17 @@ adapter binds the tool to a single executable path. Tools launched through an
 interpreter or another multi-argument command prefix can be selected by
 `run.tool`, but cannot be flattened into a string substitution.
 
-Run steps default to `exit: 0`. Assertions on stdout and stderr are optional:
+File expectations at this boundary establish publication, such as `exists` or
+`non_empty`. Exact bytes, structured fields, normalization, and semantic
+contents remain with the owning formatter or representation tests.
 
-```json
-{
-  "stdout": {
-    "contains": ["first literal", {"regex": "second .+ regex"}],
-    "not_contains": ["forbidden literal"]
-  }
-}
-```
+Assertion failures report the command arguments, exit status, stdout, and
+stderr. Passing commands remain quiet, including commands with an expected
+nonzero exit.
 
-Use `non_empty` for smoke coverage that only requires the tool to emit a stream:
+## Review Test
 
-```json
-{
-  "stdout": {
-    "non_empty": true
-  }
-}
-```
-
-`contains` lists are ordered by default. Use `unordered` when order is not part
-of the contract:
-
-```json
-{
-  "stdout": {
-    "contains": {
-      "unordered": ["alpha", "beta"]
-    }
-  }
-}
-```
-
-Expected failures and file checks are explicit:
-
-```json
-{
-  "exit": {
-    "nonzero": true
-  },
-  "stderr": {
-    "contains": ["expected diagnostic"]
-  },
-  "files": [
-    {
-      "path": "{tmp}/artifact.bin",
-      "non_empty": true
-    }
-  ]
-}
-```
-
-A failed exit, stream, or file assertion reports the command arguments, actual
-exit status, and both captured streams. Diagnostics retain the original output
-even when assertions normalize it. Passing commands remain quiet, including
-commands with an expected nonzero exit.
-
-Generated artifacts can be compared byte-for-byte against another file:
-
-```json
-"files": [
-  {
-    "path": "{tmp}/reassembled.bin",
-    "equals": "{tmp}/original.bin"
-  }
-]
-```
-
-File checks also support `empty`, `non_empty`, `contains`, `not_contains`, and
-`normalize` with the same semantics as stream checks. A report test can select
-the fields relevant to its contract without recording the complete output:
-
-```json
-"files": [
-  {
-    "path": "{tmp}/report.json",
-    "contains": ["\"execution_count\":5"],
-    "not_contains": ["\"unknown\":true"]
-  }
-]
-```
-
-Unrecognized file-check fields are schema errors so a misspelled assertion
-cannot silently pass.
-
-`"exists": false` checks that the command did not create a file. Content and
-equality assertions require a present file and cannot be combined with it.
+The decisive question is whether the expectation should change while the
+public command line remains unchanged. A yes identifies component behavior that
+happens to be visible through the executable and therefore belongs with that
+component. A no identifies a genuine CLI contract or smoke.
