@@ -86,7 +86,7 @@ class DmaSubmissionTest
         module_->symbols.entries[symbol.symbol_id].defining_op));
   }
 
-  uint32_t Integer(loom_value_id_t value) {
+  uint32_t Immediate(loom_value_id_t value, loom_string_id_t name) {
     const auto* op = loom_value_def_op(loom_module_value(module_, value));
     if (!op || (!loom_low_const_isa(op) && !loom_low_op_isa(op))) {
       ADD_FAILURE() << "expected a materialized integer";
@@ -95,12 +95,73 @@ class DmaSubmissionTest
     const auto attrs = loom_low_const_isa(op) ? loom_low_const_attrs(op)
                                               : loom_low_op_attrs(op);
     for (iree_host_size_t i = 0; i < attrs.count; ++i) {
-      if (attrs.entries[i].name_id == context_.code.integer_name) {
+      if (attrs.entries[i].name_id == name) {
         return static_cast<uint32_t>(attrs.entries[i].value.i64);
       }
     }
     ADD_FAILURE() << "missing integer attribute";
     return 0;
+  }
+
+  uint32_t Integer(loom_value_id_t value) {
+    return Immediate(value, context_.code.integer_name);
+  }
+
+  void CheckOperation(const loom_op_t* op, uint32_t descriptor,
+                      iree_host_size_t operand_count) {
+    ASSERT_NE(op, nullptr);
+    ASSERT_TRUE(loom_low_op_isa(op));
+    const auto* descriptors = context_.code.descriptors;
+    EXPECT_EQ(loom_low_op_descriptor(op),
+              loom_low_descriptor_set_descriptor_ordinal(
+                  descriptors, &descriptors->descriptors[descriptor]));
+    ASSERT_EQ(op->operand_count, operand_count);
+  }
+
+  // The shim receives base + offset as two words. The high word must include
+  // carry from the low word, including when one patch body serves many sites.
+  void CheckAddress(loom_value_id_t low, loom_value_id_t high,
+                    loom_value_id_t offset, loom_value_id_t base,
+                    uint32_t load_address) {
+    const auto definition = [&](loom_value_id_t value) {
+      return loom_value_def_op(loom_module_value(module_, value));
+    };
+    const auto* low_sum = definition(low);
+    const auto* high_sum = definition(high);
+    ASSERT_NO_FATAL_FAILURE(
+        CheckOperation(low_sum, AIE2P_CORE_DESCRIPTOR_REF_ADD_I32, 2));
+    ASSERT_NO_FATAL_FAILURE(
+        CheckOperation(high_sum, AIE2P_CORE_DESCRIPTOR_REF_ADD_I32, 2));
+    const auto original_low = loom_op_operands(low_sum)[0];
+    EXPECT_EQ(loom_op_operands(low_sum)[1], offset);
+    const auto* carry = definition(loom_op_operands(high_sum)[1]);
+    ASSERT_NO_FATAL_FAILURE(
+        CheckOperation(carry, AIE2P_CORE_DESCRIPTOR_REF_CMP_ULT_I32, 2));
+    EXPECT_EQ(loom_op_operands(carry)[0], low);
+    EXPECT_EQ(loom_op_operands(carry)[1], original_low);
+    const loom_value_id_t words[] = {original_low,
+                                     loom_op_operands(high_sum)[0]};
+    loom_value_id_t loaded_base = LOOM_VALUE_ID_INVALID;
+    for (unsigned i = 0; i < 2; ++i) {
+      const auto* load = definition(words[i]);
+      ASSERT_NO_FATAL_FAILURE(CheckOperation(
+          load, AIE2P_CORE_DESCRIPTOR_REF_LOAD_SCALAR_I32_INDEXED_IMMEDIATE,
+          1));
+      EXPECT_EQ(Immediate(words[i], context_.code.displacement_name), i * 4);
+      if (i == 0) {
+        loaded_base = loom_op_operands(load)[0];
+      } else {
+        EXPECT_EQ(loom_op_operands(load)[0], loaded_base);
+      }
+    }
+    if (base != LOOM_VALUE_ID_INVALID) {
+      EXPECT_EQ(loaded_base, base);
+    } else {
+      ASSERT_NO_FATAL_FAILURE(CheckOperation(
+          definition(loaded_base),
+          AIE2P_CORE_DESCRIPTOR_REF_MATERIALIZE_LOCAL_ADDRESS_I32, 0));
+      EXPECT_EQ(Integer(loaded_base), load_address);
+    }
   }
 
   struct Word {
@@ -252,6 +313,8 @@ class DmaSubmissionTest
       EXPECT_FALSE(words[position + 1].last);
       EXPECT_FALSE(words[position + 2].last);
       EXPECT_TRUE(words[position + 3].last);
+      CheckAddress(words[position + 2].value, words[position + 3].value,
+                   shared->arg_ids[argument], shared->arg_ids[argument + 1], 0);
     }
     CheckQueues(words,
                 local_dynamic ? LOOM_VALUE_ID_INVALID : shared->arg_ids[7],
@@ -308,6 +371,32 @@ TEST_P(DmaSubmissionTest, FixedAddressesOnlyEnqueueReceiverThenSender) {
   EXPECT_EQ(body->arg_count, 0u);
   const auto words = Writes(body);
   ASSERT_EQ(words.size(), 6u);
+  CheckQueues(words, LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID);
+}
+
+TEST_P(DmaSubmissionTest, DynamicExternalAddressesPatchBothWordsBeforeEnqueue) {
+  shim_descriptor_.address_dynamic = true;
+  IREE_ASSERT_OK(loom_aie2p_native_emit_submission(&context_, &task_));
+  auto* body = Body(task_.submit);
+  ASSERT_EQ(body->arg_count, 2u);
+  const auto words = Writes(body);
+  ASSERT_EQ(words.size(), 14u);
+  for (unsigned i = 0; i < 2; ++i) {
+    const unsigned position = i * 4;
+    EXPECT_EQ(Integer(words[position].value), 2u);
+    EXPECT_EQ(
+        Integer(words[position + 1].value),
+        Command(true,
+                LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD1_BASE_ADDRESS_LOW,
+                shim_descriptor_.sequence.descriptor + i, 2));
+    CheckAddress(words[position + 2].value, words[position + 3].value,
+                 body->arg_ids[i], LOOM_VALUE_ID_INVALID,
+                 relocations_[i].load_address);
+    EXPECT_FALSE(words[position].last);
+    EXPECT_FALSE(words[position + 1].last);
+    EXPECT_FALSE(words[position + 2].last);
+    EXPECT_TRUE(words[position + 3].last);
+  }
   CheckQueues(words, LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID);
 }
 

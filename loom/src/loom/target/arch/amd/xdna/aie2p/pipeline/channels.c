@@ -13,6 +13,7 @@
 #include "loom/ops/view/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/sharing.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/sram.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/storage.h"
 #include "loom/transforms/pipeline/channel_materialization.h"
@@ -37,6 +38,11 @@ typedef struct loom_aie2p_native_endpoint_t {
   // Local publication prefix of a finite SRAM batch; not persisted across
   // invocations because admission excludes producer-side slot reuse.
   iree_host_size_t publication;
+  // Remaining receiver-granted records, including the currently borrowed one.
+  // Singleton delivery uses no state and leaves grant invalid.
+  iree_host_size_t remaining;
+  // Queues one next record after its free credit has been returned.
+  loom_symbol_ref_t grant;
   // DMA task windows advanced by this endpoint's read admissions.
   const loom_aie2p_native_refill_t* refills;
   // Native consuming-credit acquire helper, created on first use.
@@ -133,6 +139,7 @@ static iree_status_t loom_aie2p_native_endpoint(
                                              .reserve = loom_symbol_ref_null(),
                                              .publish = loom_symbol_ref_null(),
                                              .release = loom_symbol_ref_null(),
+                                             .grant = loom_symbol_ref_null(),
                                              .alignment = access->alignment};
   return access->window ? loom_aie2p_native_address_helper(
                               context, access->address, &endpoint->base)
@@ -325,25 +332,60 @@ static iree_status_t loom_aie2p_native_channel_action(
                   : endpoint->access->channel->free_lock,
           false, credits, completion));
     }
-    return loom_aie2p_native_invoke(builder, *completion, NULL, 0, NULL, NULL);
-  }
-  if (!loom_symbol_ref_is_valid(*completion)) {
-    IREE_RETURN_IF_ERROR(loom_aie2p_native_lock_helper(
-        &emitter->context->code,
-        AIE2P_CORE_DESCRIPTOR_REF_LOCK_RELEASE_IMMEDIATE,
-        publish ? endpoint->access->locks.ready : endpoint->access->locks.free,
-        completion));
-  }
-  loom_value_id_t delta = emitter->release_delta;
-  if (credits != 1) {
-    loom_op_t* constant;
     IREE_RETURN_IF_ERROR(
-        loom_scalar_constant_build(builder, loom_attr_i64((int32_t)credits),
-                                   loom_type_scalar(LOOM_SCALAR_TYPE_I32),
-                                   action->op->location, &constant));
-    delta = loom_scalar_constant_result(constant);
+        loom_aie2p_native_invoke(builder, *completion, NULL, 0, NULL, NULL));
+  } else {
+    if (!loom_symbol_ref_is_valid(*completion)) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_native_lock_helper(
+          &emitter->context->code,
+          AIE2P_CORE_DESCRIPTOR_REF_LOCK_RELEASE_IMMEDIATE,
+          publish ? endpoint->access->locks.ready
+                  : endpoint->access->locks.free,
+          completion));
+    }
+    loom_value_id_t delta = emitter->release_delta;
+    if (credits != 1) {
+      loom_op_t* constant;
+      IREE_RETURN_IF_ERROR(
+          loom_scalar_constant_build(builder, loom_attr_i64((int32_t)credits),
+                                     loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+                                     action->op->location, &constant));
+      delta = loom_scalar_constant_result(constant);
+    }
+    IREE_RETURN_IF_ERROR(
+        loom_aie2p_native_invoke(builder, *completion, &delta, 1, NULL, NULL));
   }
-  return loom_aie2p_native_invoke(builder, *completion, &delta, 1, NULL, NULL);
+  if (!publish && loom_symbol_ref_is_valid(endpoint->grant)) {
+    // A granted singleton returns exactly one credit. Its exact finite reader
+    // count suppresses the final task, so queue retirement cannot wait for an
+    // unproduced record. The completion above makes storage available first.
+    const loom_type_t type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+    loom_op_t *next, *zero, *pending, *grant;
+    IREE_RETURN_IF_ERROR(loom_scalar_subi_build(
+        builder, 0, state[endpoint->remaining], emitter->release_delta, type,
+        action->op->location, &next));
+    state[endpoint->remaining] = loom_scalar_subi_result(next);
+    IREE_RETURN_IF_ERROR(loom_scalar_constant_build(
+        builder, loom_attr_i64(0), type, action->op->location, &zero));
+    IREE_RETURN_IF_ERROR(loom_scalar_cmpi_build(
+        builder, LOOM_SCALAR_CMPI_PREDICATE_NE, state[endpoint->remaining],
+        loom_scalar_constant_result(zero), action->op->location, &pending));
+    IREE_RETURN_IF_ERROR(
+        loom_scf_if_build(builder, 0, loom_scalar_cmpi_result(pending), NULL, 0,
+                          NULL, 0, action->op->location, &grant));
+    const loom_builder_ip_t saved = loom_builder_enter_region(
+        builder, grant, loom_scf_if_then_region(grant));
+    iree_status_t status =
+        loom_aie2p_native_invoke(builder, endpoint->grant, NULL, 0, NULL, NULL);
+    if (iree_status_is_ok(status)) {
+      loom_op_t* yield;
+      status =
+          loom_scf_yield_build(builder, NULL, 0, action->op->location, &yield);
+    }
+    loom_builder_restore(builder, saved);
+    return status;
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_aie2p_native_channel_exit(
@@ -486,6 +528,8 @@ iree_status_t loom_aie2p_native_emit_worker(
                                 LOOM_LOCATION_UNKNOWN, &origin));
   emitter.origin = loom_index_constant_result(origin);
   loom_value_id_t* state = NULL;
+  // A granted singleton uses one counter instead of advancing cursors;
+  // batch publication and cursor state remain disjoint from that counter.
   const iree_host_size_t state_capacity =
       endpoint_count * (has_sram ? 3 : 2) + refill_count * 2;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -514,6 +558,20 @@ iree_status_t loom_aie2p_native_emit_worker(
                                    &buffer_type, &endpoint->buffer));
     }
     const loom_aie2p_native_channel_t* channel = endpoint->access->channel;
+    const loom_aie2p_native_delivery_t* delivery = channel->delivery;
+    if (delivery && delivery->reader_worker == worker_index &&
+        delivery->distribution->repetitions > 1) {
+      endpoint->remaining = state_count;
+      state_views[state_count] = LOOM_VALUE_ID_INVALID;
+      loom_op_t* remaining;
+      IREE_RETURN_IF_ERROR(loom_scalar_constant_build(
+          &rewriter->builder,
+          loom_attr_i64((int32_t)delivery->distribution->repetitions),
+          delta_type, LOOM_LOCATION_UNKNOWN, &remaining));
+      state[state_count++] = loom_scalar_constant_result(remaining);
+      IREE_RETURN_IF_ERROR(
+          loom_aie2p_native_prepare_grant(context, delivery, &endpoint->grant));
+    }
     if (endpoint->access->batch_publication) {
       endpoint->publication = state_count;
       state_views[state_count] = LOOM_VALUE_ID_INVALID;

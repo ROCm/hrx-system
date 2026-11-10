@@ -368,40 +368,6 @@ pipeline.def<kernel> public retain target(@device) @wide_rotating_stride() run()
 
 aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
 
-// Ingress owns S2MM0; a local copy cannot connect MM2S0 to S2MM1.
-pipeline.def<kernel> public retain target(@device) @mismatched_distribution_loopback() run(%input_arg: buffer) {
-  %input = buffer.assume.alignment %input_arg {minimum_alignment = 64} : buffer
-  %source_memory = pipeline.memory<workgroup>[0, 2] : pool
-  %destination_memory = pipeline.memory<workgroup>[0, 2] : pool
-  %bytes = index.constant 64 : offset
-  %origin = index.constant 0 : offset
-  %capacity = index.constant 1 : index
-  %source_storage = buffer.alloca<workgroup> pool(%source_memory) align(64) %bytes : buffer
-  %source_slots = buffer.view %source_storage[%origin] : buffer -> view<1x16xi32>
-  %source = channel.bind<fifo> %source_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
-  %destination_storage = buffer.alloca<workgroup> pool(%destination_memory) align(64) %bytes : buffer
-  %destination_slots = buffer.view %destination_storage[%origin] : buffer -> view<1x16xi32>
-  %destination = channel.bind<fifo> %destination_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
-  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
-    %external = buffer.view %input[%origin] : buffer -> view<16xi32>
-    %write, %payload = channel.reserve %source : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
-    %copy = kernel.async.copy %external to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
-    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
-    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
-    channel.publish %write : write<tile<16xi32>>
-  }
-  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
-    %read, %payload = channel.acquire %source : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
-    %write, %destination_payload = channel.reserve %destination : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
-    // ERROR@+1: XDNA/051 {requirement="matching DMA channel indices for same-tile channel copy"}
-    channel.copy %read -> %write : read<tile<16xi32>>, write<tile<16xi32>>
-  }
-}
-
-// ====
-
-aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
-
 // SRAM storage belongs to DMA, not a compute tile's direct load/store windows.
 pipeline.def<kernel> public retain target(@device) @captured_sram_buffer() run() {
   %memory = pipeline.memory<workgroup>[0, 1] : pool

@@ -40,6 +40,14 @@ void loom_aie2p_native_cursor_bind(loom_aie2p_native_cursor_t* cursor,
 bool loom_aie2p_native_cursor_has_exact_admissions(
     const loom_aie2p_native_cursor_t* cursor, uint64_t count);
 
+// Whether the direct reader's completion retires every delivered record.
+// Autonomous distribution has no independent completion anchor; its input DMA
+// must be observed instead. Terminal, partial, and shared readers cannot prove
+// completion of the whole endpoint.
+bool loom_aie2p_native_cursor_has_read_completion(
+    const loom_aie2p_native_context_t* context,
+    const loom_aie2p_native_cursor_t* cursor, uint64_t count);
+
 // Whether an advancing cursor requires construction-owned frame storage instead
 // of worker-local SSA state. The representative worker has already been
 // admitted.

@@ -91,6 +91,22 @@ loom_test(
 )
 
 loom_test(
+    name = "granted_results_test",
+    srcs = ["granted_results.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [_XDNA_ONE_COLUMN_PROFILE],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/execute:vm_iree_vm"]),
+)
+
+loom_test(
+    name = "distribution_lifetimes_test",
+    srcs = ["distribution_lifetimes.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [_XDNA_ONE_COLUMN_PROFILE],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/execute:vm_iree_vm"]),
+)
+
+loom_test(
     name = "private_credit_lifetimes_test",
     srcs = ["private_credit_lifetimes.loom"],
     benchmark_smoke = False,

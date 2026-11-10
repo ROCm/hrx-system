@@ -586,7 +586,9 @@ typedef struct loom_aie2p_native_worker_t {
   // Tile-control reply identity by source tile, or UINT8_MAX when unassigned.
   // Existing DMA-token routes can also carry explicitly requested status reads.
   uint8_t* control_replies;
-  // Number of tile-control destinations selected for the physical core.
+  // IDs assigned on this core's outgoing stream, including shared payloads.
+  uint32_t packet_mask;
+  // Number of outgoing control packet classes selected for the physical core.
   uint8_t control_packet_count;
   // An external-write path already owns the core's completion stream.
   bool has_egress;
@@ -811,13 +813,12 @@ void loom_aie2p_native_route_label(loom_aie2p_native_context_t* context,
                                    uint32_t control_source);
 
 // Adds a packet route between admitted endpoints and labels its new edges.
-bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
-                                    uint32_t* next_source,
-                                    loom_xdna_tile_coordinate_t source,
-                                    loom_xdna_stream_port_t source_port,
-                                    loom_xdna_tile_coordinate_t destination,
-                                    loom_xdna_stream_port_t destination_port,
-                                    uint8_t packet);
+bool loom_aie2p_native_packet_route(
+    loom_aie2p_native_context_t* context, uint32_t* next_source,
+    loom_xdna_tile_coordinate_t source, loom_xdna_stream_port_t source_port,
+    loom_xdna_tile_coordinate_t destination,
+    loom_xdna_stream_port_t destination_port, uint8_t packet,
+    struct loom_aie2p_native_delivery_t* delivery);
 
 // Selects and retains a regular ingress stream's external descriptor geometry.
 // Stable-source and exact consumer-completion admission precede this query.
