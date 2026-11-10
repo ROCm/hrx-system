@@ -18,6 +18,8 @@
 #include "iree/base/api.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/hal/api.h"
+#include "iree/io/file_handle.h"
+#include "iree/testing/temp_file.h"
 #include "iree/tooling/device_util.h"
 
 IREE_FLAG(int64_t, queue_family, -1,
@@ -27,6 +29,7 @@ IREE_FLAG(int64_t, queue_family, -1,
 namespace {
 
 enum class Submission { kCopy, kExecute, kRecorded, kMixed, kCrossQueue };
+enum class TransferPrimer { kNone, kHost, kFile };
 
 // All callers share the production device, queue inventory, and pool. Each
 // chain owns its own data and timeline; host enqueue order supplies no edges.
@@ -190,6 +193,7 @@ class TransferChain {
       peer_ = device.queue((queue_index + 1) % device.queue_count());
     }
     values_.resize(depth + 1);
+    received_.resize(values_.size());
     IREE_RETURN_IF_ERROR(iree_hal_pool_allocate_buffer(
         device.pool(),
         iree_hal_make_pool_reservation_request(
@@ -278,9 +282,10 @@ class TransferChain {
                                      values_.size() * sizeof(uint32_t));
   }
 
-  // Exercise both host transfer directions before measuring a resident chain.
-  // Retained staging resources must not silently change steady-state costs.
-  iree_status_t PrimeStaging() {
+  // Changes every host word before a round trip without updating the device.
+  void ResetHost() { std::fill(values_.begin(), values_.end(), ++input_); }
+
+  iree_status_t Stage() {
     const auto length = values_.size() * sizeof(uint32_t);
     uint64_t next_value = submitted_value_ + 1;
     iree_hal_semaphore_list_t signals = {1, &timeline_, &next_value};
@@ -289,18 +294,82 @@ class TransferChain {
                               values_.data(), buffer_, 0, length, nullptr));
     submitted_value_ = next_value;
     IREE_RETURN_IF_ERROR(Wait());
-    std::vector<uint32_t> received(values_.size());
     ++next_value;
     IREE_RETURN_IF_ERROR(iree_hal_queue_download(
         queue_, iree_hal_semaphore_list_empty(), signals, buffer_, 0,
-        received.data(), length, nullptr));
+        received_.data(), length, nullptr));
     submitted_value_ = next_value;
-    IREE_RETURN_IF_ERROR(Wait());
-    if (received != values_) {
+    return Wait();
+  }
+
+  iree_status_t VerifyStaging() const {
+    if (received_ != values_) {
       return iree_make_status(IREE_STATUS_DATA_LOSS,
                               "staged round trip did not preserve input");
     }
     return iree_ok_status();
+  }
+
+  // Exercise both native file directions before resident work. Closing the
+  // file leaves only backend-owned staging state that later requests inherit.
+  iree_status_t PrimeFile(iree_hal_device_t* device) {
+    const auto length = values_.size() * sizeof(uint32_t);
+    iree::testing::TempFilePath path("iree_queue_benchmark");
+    iree_io_file_handle_t* handle = nullptr;
+    iree_hal_file_t* file = nullptr;
+    iree_status_t status = iree_io_file_handle_create(
+        IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_WRITE |
+            IREE_IO_FILE_MODE_ASYNC,
+        path.path_view(), length, iree_allocator_system(), &handle);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_file_import(
+          device, nullptr, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+          IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE, handle,
+          IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &file);
+    }
+    uint64_t next_value = submitted_value_ + 1;
+    const iree_hal_semaphore_list_t waits = {1, &timeline_, &submitted_value_};
+    const iree_hal_semaphore_list_t signals = {1, &timeline_, &next_value};
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_queue_write(queue_, waits, signals, buffer_, 0, file, 0,
+                                    length, nullptr, IREE_HAL_WRITE_FLAG_NONE);
+      if (iree_status_is_ok(status)) {
+        submitted_value_ = next_value++;
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      // Erase the source so a skipped file read cannot pass the oracle.
+      const uint32_t zero = 0;
+      status =
+          iree_hal_queue_fill(queue_, waits, signals, buffer_, 0, length, &zero,
+                              sizeof(zero), nullptr, IREE_HAL_FILL_FLAG_NONE);
+      if (iree_status_is_ok(status)) {
+        submitted_value_ = next_value++;
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_queue_read(queue_, waits, signals, file, 0, buffer_, 0,
+                                   length, nullptr, IREE_HAL_READ_FLAG_NONE);
+      if (iree_status_is_ok(status)) {
+        submitted_value_ = next_value;
+      }
+    }
+    status = iree_status_join(status, Wait());
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_buffer_map_read(buffer_, 0, received_.data(), length);
+    }
+    if (iree_status_is_ok(status)) {
+      status = VerifyStaging();
+    }
+    iree_hal_file_release(file);
+    iree_io_file_handle_release(handle);
+    if (path.Exists() && !path.Remove()) {
+      status = iree_status_join(
+          status,
+          iree_make_status(IREE_STATUS_UNKNOWN,
+                           "failed to remove temporary benchmark file"));
+    }
+    return status;
   }
 
   iree_status_t Submit(Submission submission) {
@@ -378,9 +447,12 @@ class TransferChain {
   uint32_t input_ = 0;
   // Host input/reset and result storage, reused outside the timed region.
   std::vector<uint32_t> values_;
+  // Reused download and native-file verification storage, outside timing.
+  std::vector<uint32_t> received_;
 };
 
-template <Submission kSubmission, bool kSubmitOnly, bool kUsedStaging = false>
+template <Submission kSubmission, bool kSubmitOnly,
+          TransferPrimer kPrimer = TransferPrimer::kNone>
 void BM_TransferChain(benchmark::State& state) {
   QueueDevice device;
   iree::Status status =
@@ -401,8 +473,14 @@ void BM_TransferChain(benchmark::State& state) {
   if (status.ok()) {
     status = chain.Reset();
   }
-  if (status.ok() && kUsedStaging) {
-    status = chain.PrimeStaging();
+  if (status.ok() && kPrimer == TransferPrimer::kHost) {
+    status = chain.Stage();
+    if (status.ok()) {
+      status = chain.VerifyStaging();
+    }
+  }
+  if (status.ok() && kPrimer == TransferPrimer::kFile) {
+    status = chain.PrimeFile(device.device());
   }
   if (status.ok()) {
     status = chain.Submit(kSubmission);
@@ -468,13 +546,69 @@ BENCHMARK_TEMPLATE(BM_TransferChain, Submission::kExecute, true)
     ->Arg(512)
     ->MeasureProcessCPUTime()
     ->UseRealTime();
-BENCHMARK_TEMPLATE(BM_TransferChain, Submission::kExecute, false, true)
+BENCHMARK_TEMPLATE(BM_TransferChain, Submission::kExecute, false,
+                   TransferPrimer::kHost)
     ->Name("TransferChain/ExecuteAfterStaging")
     ->Arg(1)
     ->Arg(32)
     ->Arg(512)
     ->MeasureProcessCPUTime()
     ->UseRealTime();
+BENCHMARK_TEMPLATE(BM_TransferChain, Submission::kExecute, false,
+                   TransferPrimer::kFile)
+    ->Name("TransferChain/ExecuteAfterFile")
+    ->Arg(1)
+    ->Arg(32)
+    ->Arg(512)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+
+// Measure the complete host upload/download path with changing payloads and
+// reused host/device storage. Reset and exact verification stay outside timing.
+static void BM_HostRoundTrip(benchmark::State& state) {
+  QueueDevice device;
+  iree::Status status = device.Initialize(1);
+  TransferChain transfer;
+  if (status.ok()) {
+    status = transfer.Initialize(
+        device, 0, state.range(0) / sizeof(uint32_t) - 1, Submission::kCopy);
+  }
+  if (status.ok()) {
+    transfer.ResetHost();
+    status = transfer.Stage();
+  }
+  if (status.ok()) {
+    status = transfer.VerifyStaging();
+  }
+  if (!status.ok()) {
+    state.SkipWithError(status.ToString().c_str());
+    return;
+  }
+  state.SetLabel(device.label());
+  for (auto _ : state) {
+    state.PauseTiming();
+    transfer.ResetHost();
+    state.ResumeTiming();
+    status = transfer.Stage();
+    state.PauseTiming();
+    if (status.ok()) {
+      status = transfer.VerifyStaging();
+    }
+    state.ResumeTiming();
+    if (!status.ok()) {
+      state.SkipWithError(status.ToString().c_str());
+      break;
+    }
+  }
+  state.SetBytesProcessed(state.iterations() * state.range(0) * 2);
+}
+BENCHMARK(BM_HostRoundTrip)
+    ->Name("Transfer/HostRoundTrip")
+    ->Arg(65536)
+    ->Arg(16 * 1024 * 1024)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+
 BENCHMARK_TEMPLATE(BM_TransferChain, Submission::kRecorded, false)
     ->Name("TransferChain/RecordedCompletion")
     ->Arg(1)
