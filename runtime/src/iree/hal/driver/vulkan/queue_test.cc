@@ -226,24 +226,140 @@ TEST_P(VulkanQueueTest, NativeConsumerRunsBeforeProducerRetirement) {
 }
 
 TEST_P(VulkanQueueTest, RejectedSubmissionDoesNotInvokeCompletion) {
-  SemaphoreList waits(device_, {0}, {1});
-  SemaphoreList signals(device_, {0}, {1});
-  iree_hal_semaphore_fail(waits.semaphores[0],
-                          iree_status_from_code(IREE_STATUS_ABORTED));
-  CompletionState state;
-  auto action = MakeCompletionAction(&state);
-  Status status(iree_hal_vulkan_queue_submit_barrier_with_action(
-      reinterpret_cast<iree_hal_vulkan_queue_t*>(transfer_queue_), waits,
-      signals, /*barriers=*/nullptr, action));
-  iree_hal_resource_release(action.resource);
+  for (size_t failed_index : {0u, 1u}) {
+    SCOPED_TRACE(failed_index);
+    SemaphoreList waits(device_, {0, 0}, {1, 1});
+    SemaphoreList signals(device_, {0}, {1});
+    iree_hal_semaphore_fail(waits.semaphores[failed_index],
+                            iree_status_from_code(IREE_STATUS_ABORTED));
+    CompletionState state;
+    auto action = MakeCompletionAction(&state);
+    Status status(iree_hal_vulkan_queue_submit_barrier_with_action(
+        reinterpret_cast<iree_hal_vulkan_queue_t*>(transfer_queue_), waits,
+        signals, /*barriers=*/nullptr, action));
+    iree_hal_resource_release(action.resource);
 
-  EXPECT_EQ(status.code(), StatusCode::kAborted);
-  EXPECT_EQ(state.callback_count.load(), 0);
-  EXPECT_EQ(state.destroy_count.load(), 1);
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_ABORTED,
-      iree_hal_semaphore_list_wait(signals, iree_infinite_timeout(),
-                                   IREE_ASYNC_WAIT_FLAG_NONE));
+    EXPECT_EQ(status.code(), StatusCode::kAborted);
+    EXPECT_EQ(state.callback_count.load(), 0);
+    EXPECT_EQ(state.destroy_count.load(), 1);
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_ABORTED,
+        iree_hal_semaphore_list_wait(signals, iree_infinite_timeout(),
+                                     IREE_ASYNC_WAIT_FLAG_NONE));
+  }
+}
+
+TEST_P(VulkanQueueTest, DeferredWaitPreservesConsumedSuccess) {
+  // Either position may already be complete when an independent prerequisite
+  // defers admission. Failure after that success cannot rewrite the edge.
+  for (size_t completed_index : {0u, 1u}) {
+    SCOPED_TRACE(completed_index);
+    const size_t gate_index = 1 - completed_index;
+    SemaphoreList waits(device_, {0, 0}, {1, 1});
+    SemaphoreList signals(device_, {0}, {1});
+    IREE_ASSERT_OK(iree_hal_semaphore_signal(waits.semaphores[completed_index],
+                                             1, nullptr));
+    IREE_ASSERT_OK(iree_hal_vulkan_queue_submit_barrier(
+        reinterpret_cast<iree_hal_vulkan_queue_t*>(transfer_queue_), waits,
+        signals, nullptr));
+    iree_hal_semaphore_fail(waits.semaphores[completed_index],
+                            iree_status_from_code(IREE_STATUS_ABORTED));
+    IREE_ASSERT_OK(
+        iree_hal_semaphore_signal(waits.semaphores[gate_index], 1, nullptr));
+    IREE_EXPECT_OK(iree_hal_semaphore_list_wait(
+        signals, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+  }
+}
+
+TEST_P(VulkanQueueTest, DeferredPublicCallbackPreservesConsumedSuccess) {
+  for (size_t completed_index : {0u, 1u}) {
+    SCOPED_TRACE(completed_index);
+    SemaphoreList gate(device_, {0}, {1});
+    SemaphoreList already_complete(device_, {1}, {1});
+    SemaphoreList producer_signals(device_, {0, 0}, {2, 1});
+    SemaphoreList consumer_signals(device_, {0}, {1});
+    struct State {
+      // Native work has completed; public signals remain unpublished.
+      std::binary_semaphore entered{0};
+      // Permits public completion after the consumer registers its wait.
+      std::binary_semaphore resume{0};
+    } state;
+    struct Resource {
+      // Caller resource retained through native completion.
+      iree_hal_resource_t base;
+      // Borrowed handshakes outliving resource retirement.
+      State* state;
+    };
+    static const iree_hal_resource_vtable_t vtable = {
+        .destroy =
+            [](iree_hal_resource_t* base) {
+              auto* resource = reinterpret_cast<Resource*>(base);
+              resource->state->entered.release();
+              resource->state->resume.acquire();
+              delete resource;
+            },
+    };
+    auto* resource = new Resource;
+    iree_hal_resource_initialize(&vtable, &resource->base);
+    resource->state = &state;
+    auto* queue = reinterpret_cast<iree_hal_vulkan_queue_t*>(transfer_queue_);
+    const iree_hal_vulkan_queue_completion_action_t action = {
+        .resource = &resource->base,
+    };
+    Status producer_status(iree_hal_vulkan_queue_submit_barrier_with_action(
+        queue, gate, producer_signals, nullptr, action));
+    if (!producer_status.ok()) {
+      state.resume.release();
+    }
+    iree_hal_resource_release(&resource->base);
+    IREE_ASSERT_OK(producer_status.release());
+    Status gate_status(iree_hal_semaphore_list_signal(gate, nullptr));
+    if (!gate_status.ok()) {
+      state.resume.release();
+    }
+    IREE_ASSERT_OK(gate_status.release());
+    state.entered.acquire();
+
+    // The producer publishes 2, but the consumer waits for 1. The exact native
+    // producer cache cannot supply that point, so admission awaits its public
+    // completion. The other wait exercises callback compaction in both orders.
+    iree_hal_semaphore_t* wait_semaphores[2];
+    wait_semaphores[completed_index] = already_complete.semaphores[0];
+    wait_semaphores[1 - completed_index] = producer_signals.semaphores[0];
+    uint64_t wait_values[] = {1, 1};
+    const iree_hal_semaphore_list_t consumer_waits = {2, wait_semaphores,
+                                                      wait_values};
+    Status consumer_status(iree_hal_vulkan_queue_submit_barrier(
+        queue, consumer_waits, consumer_signals, nullptr));
+    if (consumer_status.ok()) {
+      auto* semaphore = reinterpret_cast<iree_async_semaphore_t*>(
+          producer_signals.semaphores[0]);
+      while (true) {
+        iree_slim_mutex_lock(&semaphore->mutex);
+        const bool registered = semaphore->timepoints.count != 0;
+        iree_slim_mutex_unlock(&semaphore->mutex);
+        if (registered) {
+          break;
+        }
+        std::this_thread::yield();
+      }
+    }
+
+    // Hold the admission retry while the producer publishes both signals.
+    // The second signal proves the first signal's public callback has returned.
+    iree_slim_mutex_lock(&queue->submission_mutex);
+    state.resume.release();
+    Status terminal_status(iree_hal_semaphore_wait(
+        producer_signals.semaphores[1], 1, iree_infinite_timeout(),
+        IREE_ASYNC_WAIT_FLAG_NONE));
+    iree_hal_semaphore_fail(producer_signals.semaphores[0],
+                            iree_status_from_code(IREE_STATUS_ABORTED));
+    iree_slim_mutex_unlock(&queue->submission_mutex);
+    IREE_ASSERT_OK(consumer_status.release());
+    IREE_ASSERT_OK(terminal_status.release());
+    IREE_EXPECT_OK(iree_hal_semaphore_list_wait(
+        consumer_signals, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+  }
 }
 
 TEST_P(VulkanQueueTest, AcceptedSubmissionCompletesOnceAndReleasesAction) {
