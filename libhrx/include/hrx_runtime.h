@@ -795,15 +795,16 @@ HRX_API hrx_status_t hrx_buffer_get_size(hrx_buffer_t buffer, size_t* size);
 //===----------------------------------------------------------------------===//
 // Synchronous data transfer
 //
-// These block until the transfer completes. For async transfers, use
-// stream operations (hrx_stream_copy_buffer, etc).
+// These execute on the supplied transfer-capable queue and block until that
+// transfer completes. They do not join any stream's timeline. For async
+// transfers, use stream operations (hrx_stream_copy_buffer, etc).
 //===----------------------------------------------------------------------===//
 
-HRX_API hrx_status_t hrx_synchronous_h2d(hrx_device_t device,
+HRX_API hrx_status_t hrx_synchronous_h2d(hrx_queue_t queue,
                                          const void* host_src, hrx_buffer_t dst,
                                          size_t dst_offset, size_t size);
 
-HRX_API hrx_status_t hrx_synchronous_d2h(hrx_device_t device, hrx_buffer_t src,
+HRX_API hrx_status_t hrx_synchronous_d2h(hrx_queue_t queue, hrx_buffer_t src,
                                          size_t src_offset, void* host_dst,
                                          size_t size);
 
@@ -829,24 +830,25 @@ HRX_API hrx_status_t hrx_stream_update_buffer(hrx_stream_t stream,
 
 //===----------------------------------------------------------------------===//
 // Direct queue operations (single-op, no command buffer)
+//
+// Every operation executes on the exact supplied queue. Wait/signal lists
+// establish dependencies; submission order alone does not. These calls do not
+// join any stream timeline, select another queue, or implicitly flush a stream.
 //===----------------------------------------------------------------------===//
 
 HRX_API hrx_status_t hrx_queue_fill(
-    hrx_device_t device, hrx_queue_affinity_t affinity,
-    const hrx_semaphore_list_t* wait_semaphores,
+    hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
     const hrx_semaphore_list_t* signal_semaphores, hrx_buffer_t buffer,
     size_t offset, size_t size, const void* pattern, size_t pattern_size);
 
 HRX_API hrx_status_t hrx_queue_copy(
-    hrx_device_t device, hrx_queue_affinity_t affinity,
-    const hrx_semaphore_list_t* wait_semaphores,
+    hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
     const hrx_semaphore_list_t* signal_semaphores, hrx_buffer_t src,
     size_t src_offset, hrx_buffer_t dst, size_t dst_offset, size_t size);
 
-HRX_API hrx_status_t
-hrx_queue_barrier(hrx_device_t device, hrx_queue_affinity_t affinity,
-                  const hrx_semaphore_list_t* wait_semaphores,
-                  const hrx_semaphore_list_t* signal_semaphores);
+HRX_API hrx_status_t hrx_queue_barrier(
+    hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
+    const hrx_semaphore_list_t* signal_semaphores);
 
 // Dispatch config for kernel launch.
 typedef struct hrx_dispatch_config_t {
@@ -863,8 +865,7 @@ typedef struct hrx_buffer_ref_t {
 } hrx_buffer_ref_t;
 
 HRX_API hrx_status_t hrx_queue_dispatch(
-    hrx_device_t device, hrx_queue_affinity_t affinity,
-    const hrx_semaphore_list_t* wait_semaphores,
+    hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
     const hrx_semaphore_list_t* signal_semaphores, hrx_executable_t executable,
     uint32_t export_ordinal, const hrx_dispatch_config_t* config,
     const void* constants, size_t constants_size,
@@ -879,11 +880,10 @@ HRX_API hrx_status_t hrx_stream_dispatch(
 // Host callback in queue execution order.
 typedef hrx_status_t (*hrx_host_call_fn_t)(void* user_data);
 
-HRX_API hrx_status_t
-hrx_queue_host_call(hrx_device_t device, hrx_queue_affinity_t affinity,
-                    const hrx_semaphore_list_t* wait_semaphores,
-                    const hrx_semaphore_list_t* signal_semaphores,
-                    hrx_host_call_fn_t callback, void* user_data);
+HRX_API hrx_status_t hrx_queue_host_call(
+    hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
+    const hrx_semaphore_list_t* signal_semaphores, hrx_host_call_fn_t callback,
+    void* user_data);
 
 HRX_API hrx_status_t hrx_stream_execution_barrier(hrx_stream_t stream);
 
@@ -1205,8 +1205,7 @@ typedef uint64_t hrx_queue_map_flags_t;
 // completion. Captured target references keep their address range live; neither
 // mode retains backing after completion or extends an ended allocation epoch.
 HRX_API hrx_status_t hrx_queue_map(
-    hrx_device_t device, hrx_queue_affinity_t affinity,
-    const hrx_semaphore_list_t* wait_semaphores,
+    hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
     const hrx_semaphore_list_t* signal_semaphores, size_t mapping_count,
     const hrx_memory_mapping_t* mappings, hrx_queue_map_flags_t flags);
 
@@ -1351,14 +1350,16 @@ HRX_API hrx_status_t hrx_buffer_lookup(hrx_device_t device,
 
 // Enqueues a host-to-device transfer after prior work in |stream|. |host_src|
 // remains live and unmodified until the stream reaches the transfer's timeline
-// point. A NULL |stream| performs the transfer synchronously.
+// point. The stream must be non-NULL. For a blocking transfer on an explicit
+// queue, use hrx_synchronous_h2d.
 HRX_API hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream,
                                          const void* host_src, hrx_buffer_t dst,
                                          size_t dst_offset, size_t size);
 
 // Enqueues a device-to-host transfer after prior work in |stream|. |host_dst|
 // remains live and inaccessible until the stream reaches the transfer's
-// timeline point. A NULL |stream| performs the transfer synchronously.
+// timeline point. The stream must be non-NULL. For a blocking transfer on an
+// explicit queue, use hrx_synchronous_d2h.
 HRX_API hrx_status_t hrx_stream_copy_d2h(hrx_stream_t stream, hrx_buffer_t src,
                                          size_t src_offset, void* host_dst,
                                          size_t size);

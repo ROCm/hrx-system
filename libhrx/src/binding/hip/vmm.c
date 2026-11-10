@@ -55,6 +55,8 @@ typedef struct iree_hip_vmm_reservation_t {
   iree_slim_mutex_t mutex;
   // Device retained while allocator-owned reservation state is live.
   hrx_device_t device;
+  // Borrowed provisioned transfer queue, selected once for this reservation.
+  hrx_queue_t mapping_queue;
   // Borrowed allocator owned by |device|.
   hrx_allocator_t allocator;
   // HRX virtual address reservation.
@@ -614,6 +616,24 @@ static hipError_t iree_hip_vmm_query_granularity(hrx_device_t device,
   return supported && *out_minimum != 0 ? hipSuccess : hipErrorNotSupported;
 }
 
+static hipError_t iree_hip_vmm_select_mapping_queue(hrx_device_t device,
+                                                    hrx_queue_t* out_queue) {
+  *out_queue = NULL;
+  hipError_t result = hipSuccess;
+  for (uint32_t i = 0; i < hrx_device_queue_family_count(device) &&
+                       result == hipSuccess && !*out_queue;
+       ++i) {
+    hrx_queue_family_info_t info;
+    result = iree_hip_vmm_from_hrx_status(
+        hrx_device_query_queue_family(device, i, &info));
+    if (result == hipSuccess && info.provisioned_queue_count &&
+        (info.roles & HRX_QUEUE_ROLE_TRANSFER)) {
+      *out_queue = hrx_device_get_queue(device, i, 0);
+    }
+  }
+  return result == hipSuccess && !*out_queue ? hipErrorNotSupported : result;
+}
+
 static hipError_t iree_hip_vmm_update_mappings(
     iree_hip_vmm_reservation_t* reservation, size_t count,
     const hrx_memory_mapping_t* mappings) {
@@ -624,7 +644,7 @@ static hipError_t iree_hip_vmm_update_mappings(
       .count = 1,
   };
   hipError_t result = iree_hip_vmm_from_hrx_status(
-      hrx_queue_map(reservation->device, 0, NULL, &signals, count, mappings,
+      hrx_queue_map(reservation->mapping_queue, NULL, &signals, count, mappings,
                     HRX_QUEUE_MAP_FLAG_NONE));
   if (result == hipSuccess) {
     result = iree_hip_vmm_from_hrx_status(
@@ -1093,8 +1113,12 @@ hipError_t iree_hip_vmm_address_reserve(void** ptr, size_t size,
     reservation->granularity = granularity;
     reservation->device_ordinal = device_ordinal;
     if (modern) {
-      result = iree_hip_vmm_from_hrx_status(
-          hrx_semaphore_create(device, 0, &reservation->mapping_completion));
+      result = iree_hip_vmm_select_mapping_queue(device,
+                                                 &reservation->mapping_queue);
+      if (result == hipSuccess) {
+        result = iree_hip_vmm_from_hrx_status(
+            hrx_semaphore_create(device, 0, &reservation->mapping_completion));
+      }
     }
   }
   if (result == hipSuccess) {

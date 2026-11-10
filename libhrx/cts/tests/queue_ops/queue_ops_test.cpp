@@ -15,7 +15,130 @@ hrx_status_t hostCallIncrement(void* user_data) {
   return hrx_ok_status();
 }
 
+struct QueueTransferResources {
+  ~QueueTransferResources() {
+    if (completion_value) {
+      ReportHrxTestFailure(
+          "queue transfer completion",
+          hrx().semaphore_wait(completion, completion_value, UINT64_MAX));
+    }
+    hrx().buffer_release(target);
+    hrx().buffer_release(source);
+    hrx().semaphore_release(completion);
+    hrx().queue_release(queue);
+  }
+
+  // Acquired queue retained until all submitted operations complete.
+  hrx_queue_t queue = nullptr;
+  // Transfer source retained through the final completion.
+  hrx_buffer_t source = nullptr;
+  // Transfer destination retained through the final completion.
+  hrx_buffer_t target = nullptr;
+  // Timeline joining operations across both exact queues.
+  hrx_semaphore_t completion = nullptr;
+  // Latest accepted submission's completion, including assertion cleanup.
+  uint64_t completion_value = 0;
+};
+
 }  // namespace
+
+TEST_CASE_METHOD(HrxTestFixture,
+                 "Queue acquisition preserves explicit properties",
+                 "[queue_ops][acquire]") {
+  const uint32_t family = hrx().queue_get_family_ordinal(transfer_queue_);
+  hrx_queue_family_info_t info;
+  REQUIRE_OK(hrx().device_query_queue_family(device_, family, &info));
+  if (!info.supports_acquisition) {
+    SKIP("Queue family does not support dynamic acquisition");
+  }
+  REQUIRE(info.priority_count > 0);
+  std::vector<uint32_t> ordinals(info.execution_resource_count);
+  for (uint32_t i = 0; i < ordinals.size(); ++i) {
+    hrx_queue_execution_resource_info_t resource;
+    REQUIRE_OK(hrx().device_query_queue_execution_resource(device_, family, i,
+                                                           &resource));
+    REQUIRE(resource.execution_unit_count > 0);
+    REQUIRE(resource.first_execution_unit_ordinal < info.execution_unit_count);
+    hrx_queue_execution_resource_group_info_t group;
+    REQUIRE_OK(hrx().device_query_queue_execution_resource_group(
+        device_, family, resource.group_ordinal, &group));
+    REQUIRE(group.minimum_selected_resource_count <=
+            info.execution_resource_count);
+    ordinals[i] = i;
+  }
+  const hrx_queue_params_t params = {
+      .priority = 0,
+      .placement = (info.placements & HRX_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL)
+                       ? HRX_QUEUE_PLACEMENT_HOST_LOCAL
+                       : HRX_QUEUE_PLACEMENT_DEFAULT,
+      .execution_resources = {ordinals.size(), ordinals.data()},
+  };
+  QueueTransferResources resources;
+  REQUIRE_OK(hrx().queue_acquire(device_, family, &params, &resources.queue));
+  hrx_queue_params_t achieved;
+  REQUIRE_OK(hrx().queue_query_params(resources.queue, &achieved));
+  REQUIRE(achieved.priority == params.priority);
+  if (params.placement != HRX_QUEUE_PLACEMENT_DEFAULT) {
+    REQUIRE(achieved.placement == params.placement);
+  }
+  REQUIRE(achieved.features == HRX_QUEUE_FEATURE_NONE);
+  // An explicit complete set canonicalizes to the all-resources representation.
+  REQUIRE(achieved.execution_resources.count == 0);
+}
+
+TEST_CASE_METHOD(HrxTestFixture,
+                 "Explicit queues exchange semaphore dependencies",
+                 "[queue_ops][acquire][sync]") {
+  const uint32_t family = hrx().queue_get_family_ordinal(transfer_queue_);
+  hrx_queue_family_info_t info;
+  REQUIRE_OK(hrx().device_query_queue_family(device_, family, &info));
+  if (!info.supports_acquisition) {
+    SKIP("Queue family does not support dynamic acquisition");
+  }
+  QueueTransferResources resources;
+  REQUIRE_OK(hrx().queue_acquire(device_, family, nullptr, &resources.queue));
+  REQUIRE(resources.queue != transfer_queue_);
+  REQUIRE(hrx().queue_get_device(resources.queue) == device_);
+  REQUIRE(hrx().queue_get_family_ordinal(resources.queue) == family);
+  REQUIRE_OK(hrx().semaphore_create(device_, 0, &resources.completion));
+  const hrx_buffer_params_t params = {
+      .type = HRX_MEMORY_TYPE_DEVICE_LOCAL,
+      .access = HRX_MEMORY_ACCESS_ALL,
+      .usage = HRX_BUFFER_USAGE_TRANSFER,
+  };
+  constexpr size_t kWordCount = 256;
+  constexpr size_t kByteLength = kWordCount * sizeof(uint32_t);
+  REQUIRE_OK(hrx().allocator_allocate_buffer(
+      hrx().device_allocator(device_), params, kByteLength, &resources.source));
+  REQUIRE_OK(hrx().allocator_allocate_buffer(
+      hrx().device_allocator(device_), params, kByteLength, &resources.target));
+  const uint32_t pattern = 0x1234ABCD;
+  uint64_t wait_value = 0;
+  uint64_t signal_value = 1;
+  const hrx_semaphore_list_t waits = {&resources.completion, &wait_value, 1};
+  const hrx_semaphore_list_t signals = {&resources.completion, &signal_value,
+                                        1};
+  REQUIRE_OK(hrx().queue_fill(resources.queue, nullptr, &signals,
+                              resources.source, 0, kByteLength, &pattern,
+                              sizeof(pattern)));
+  resources.completion_value = signal_value;
+  wait_value = signal_value++;
+  REQUIRE_OK(hrx().queue_copy(transfer_queue_, &waits, &signals,
+                              resources.source, 0, resources.target, 0,
+                              kByteLength));
+  resources.completion_value = signal_value;
+  wait_value = signal_value++;
+  REQUIRE_OK(hrx().queue_barrier(resources.queue, &waits, &signals));
+  resources.completion_value = signal_value;
+  REQUIRE_OK(
+      hrx().semaphore_wait(resources.completion, signal_value, UINT64_MAX));
+  std::vector<uint32_t> result(kWordCount);
+  REQUIRE_OK(hrx().synchronous_d2h(resources.queue, resources.target, 0,
+                                   result.data(), kByteLength));
+  for (uint32_t value : result) {
+    REQUIRE(value == pattern);
+  }
+}
 
 TEST_CASE_METHOD(HrxTestFixture, "Queue host call", "[queue_ops][host_call]") {
   hrx_semaphore_t done = nullptr;
@@ -30,8 +153,9 @@ TEST_CASE_METHOD(HrxTestFixture, "Queue host call", "[queue_ops][host_call]") {
   };
 
   int callback_count = 0;
-  REQUIRE_OK(hrx().queue_host_call(device_, 0, nullptr, &signal_list,
-                                   hostCallIncrement, &callback_count));
+  REQUIRE_OK(hrx().queue_host_call(
+      FindProvisionedQueue(device_, HRX_QUEUE_ROLE_HOST_CALL), nullptr,
+      &signal_list, hostCallIncrement, &callback_count));
   REQUIRE_OK(hrx().semaphore_wait(done, 1, UINT64_MAX));
   REQUIRE(callback_count == 1);
 
@@ -64,13 +188,13 @@ TEST_CASE_METHOD(HrxTestFixture, "Queue fill signals completion semaphore",
       1,
   };
 
-  REQUIRE_OK(hrx().queue_fill(device_, 0, nullptr, &signal_list, buf, 0,
+  REQUIRE_OK(hrx().queue_fill(transfer_queue_, nullptr, &signal_list, buf, 0,
                               kWordCount * sizeof(uint32_t), &kPattern,
                               sizeof(kPattern)));
   REQUIRE_OK(hrx().semaphore_wait(done, 1, UINT64_MAX));
 
   std::vector<uint32_t> readback(kWordCount);
-  REQUIRE_OK(hrx().synchronous_d2h(device_, buf, 0, readback.data(),
+  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, buf, 0, readback.data(),
                                    readback.size() * sizeof(uint32_t)));
   for (uint32_t value : readback) {
     REQUIRE(value == kPattern);
@@ -100,8 +224,8 @@ TEST_CASE_METHOD(HrxTestFixture, "Queue copy signals completion semaphore",
   for (size_t i = 0; i < expected.size(); ++i) {
     expected[i] = static_cast<uint8_t>((i * 13u + 7u) & 0xFFu);
   }
-  REQUIRE_OK(
-      hrx().synchronous_h2d(device_, expected.data(), src, 0, expected.size()));
+  REQUIRE_OK(hrx().synchronous_h2d(transfer_queue_, expected.data(), src, 0,
+                                   expected.size()));
 
   hrx_semaphore_t done = nullptr;
   REQUIRE_OK(hrx().semaphore_create(device_, 0, &done));
@@ -113,13 +237,13 @@ TEST_CASE_METHOD(HrxTestFixture, "Queue copy signals completion semaphore",
       1,
   };
 
-  REQUIRE_OK(hrx().queue_copy(device_, 0, nullptr, &signal_list, src, 0, dst, 0,
-                              kByteCount));
+  REQUIRE_OK(hrx().queue_copy(transfer_queue_, nullptr, &signal_list, src, 0,
+                              dst, 0, kByteCount));
   REQUIRE_OK(hrx().semaphore_wait(done, 1, UINT64_MAX));
 
   std::vector<uint8_t> readback(kByteCount);
-  REQUIRE_OK(
-      hrx().synchronous_d2h(device_, dst, 0, readback.data(), readback.size()));
+  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, dst, 0, readback.data(),
+                                   readback.size()));
   REQUIRE(std::memcmp(readback.data(), expected.data(), expected.size()) == 0);
 
   hrx().semaphore_release(done);

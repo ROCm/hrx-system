@@ -215,6 +215,17 @@ hrx_device_t hrx_queue_get_device(hrx_queue_t queue) {
   return queue ? queue->device : NULL;
 }
 
+iree_status_t hrx_queue_validate_roles(hrx_queue_t queue,
+                                       hrx_queue_role_flags_t required_roles) {
+  const iree_hal_queue_family_spec_t* spec =
+      iree_hal_queue_family_spec(iree_hal_queue_family(queue->hal_queue));
+  if (!iree_all_bits_set(spec->role_flags, required_roles)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "selected queue does not support this operation");
+  }
+  return iree_ok_status();
+}
+
 uint32_t hrx_queue_get_family_ordinal(hrx_queue_t queue) {
   return queue ? iree_hal_queue_family_ordinal(
                      iree_hal_queue_family(queue->hal_queue))

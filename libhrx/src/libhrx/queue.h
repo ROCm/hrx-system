@@ -32,6 +32,11 @@ iree_status_t hrx_device_initialize_queues(hrx_device_t device);
 // separately acquired handles use hrx_queue_release's final destruction path.
 void hrx_device_deinitialize_queues(hrx_device_t device);
 
+// Validates operation roles at an HRX submission boundary. The caller has
+// already established that the supplied queue is non-NULL.
+iree_status_t hrx_queue_validate_roles(hrx_queue_t queue,
+                                       hrx_queue_role_flags_t required_roles);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

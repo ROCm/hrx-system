@@ -58,14 +58,16 @@ class MemPoolBackingTest : public ::testing::Test {
     std::array<uint8_t, 1024> input;
     input.fill(pattern);
     IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_synchronous_h2d(device_, input.data(), buffer, 0, input.size())));
+        hrx_synchronous_h2d(hrx_device_get_queue(device_, 0, 0), input.data(),
+                            buffer, 0, input.size())));
     Check(buffer, pattern);
   }
 
   void Check(hrx_buffer_t buffer, uint8_t pattern) {
     std::array<uint8_t, 1024> output = {};
     IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_synchronous_d2h(device_, buffer, 0, output.data(), output.size())));
+        hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), buffer, 0,
+                            output.data(), output.size())));
     std::array<uint8_t, 1024> expected;
     expected.fill(pattern);
     size_t mismatch_count = 0;

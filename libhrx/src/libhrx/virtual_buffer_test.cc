@@ -81,7 +81,8 @@ TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
     std::vector<uint32_t> contents(2 * unit / sizeof(uint32_t), 0xAABBCCDD);
     std::fill_n(contents.begin(), unit / sizeof(uint32_t), 0x10203040);
     IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_synchronous_h2d(device_, contents.data(), source, 0, 2 * unit)));
+        hrx_synchronous_h2d(hrx_device_get_queue(device_, 0, 0),
+                            contents.data(), source, 0, 2 * unit)));
 
     hrx_semaphore_t gate = nullptr;
     hrx_semaphore_t completion = nullptr;
@@ -112,9 +113,9 @@ TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
           .operation = HRX_MEMORY_MAPPING_OPERATION_BIND,
       };
     }
-    IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_queue_map(device_, 0, &gate_list, &signal_list, count,
-                      mappings.data(), HRX_QUEUE_MAP_FLAG_NONE)));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_queue_map(
+        hrx_device_get_queue(device_, 0, 0), &gate_list, &signal_list, count,
+        mappings.data(), HRX_QUEUE_MAP_FLAG_NONE)));
     std::fill(mappings.begin(), mappings.end(), hrx_memory_mapping_t{});
     uint64_t observed = UINT64_MAX;
     IREE_ASSERT_OK(
@@ -137,17 +138,19 @@ TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
         .values = &predecessor,
         .count = 1,
     };
-    IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_queue_fill(device_, 0, &wait_list, &signal_list, first, unit,
-                       sizeof(pattern), &pattern, sizeof(pattern))));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_queue_fill(
+        hrx_device_get_queue(device_, 0, 0), &wait_list, &signal_list, first,
+        unit, sizeof(pattern), &pattern, sizeof(pattern))));
     IREE_ASSERT_OK(hrx_status_to_iree(
         hrx_semaphore_wait(completion, completed, UINT64_MAX)));
     uint32_t result = 0;
     IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_synchronous_d2h(device_, last, unit, &result, sizeof(result))));
+        hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), last, unit,
+                            &result, sizeof(result))));
     EXPECT_EQ(pattern, result);
     IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_synchronous_d2h(device_, source, unit, &result, sizeof(result))));
+        hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), source, unit,
+                            &result, sizeof(result))));
     EXPECT_EQ(pattern, result);
 
     hrx_memory_scope_t queue_scope, program_scope, host_scope;
@@ -179,24 +182,26 @@ TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
         .previous_source_offset = unit,
     };
     predecessor = completed++;
-    IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_queue_map(device_, 0, &wait_list, &signal_list, 1, &replacement,
-                      HRX_QUEUE_MAP_FLAG_BORROW_BUFFERS)));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_queue_map(
+        hrx_device_get_queue(device_, 0, 0), &wait_list, &signal_list, 1,
+        &replacement, HRX_QUEUE_MAP_FLAG_BORROW_BUFFERS)));
     replacement.operation = HRX_MEMORY_MAPPING_OPERATION_PROTECT;
     replacement.previous_source = nullptr;
     replacement.previous_source_offset = 0;
     replacement.access = HRX_MEMORY_ACCESS_READ;
     predecessor = completed++;
     IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_queue_map(device_, 0, &wait_list, &signal_list, 1, &replacement,
-                      HRX_QUEUE_MAP_FLAG_NONE)));
+        hrx_queue_map(hrx_device_get_queue(device_, 0, 0), &wait_list,
+                      &signal_list, 1, &replacement, HRX_QUEUE_MAP_FLAG_NONE)));
     IREE_ASSERT_OK(hrx_status_to_iree(
         hrx_semaphore_wait(completion, completed, UINT64_MAX)));
     IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_synchronous_d2h(device_, first, unit, &result, sizeof(result))));
+        hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), first, unit,
+                            &result, sizeof(result))));
     EXPECT_EQ(0x10203040u, result);
     IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_synchronous_d2h(device_, last, unit, &result, sizeof(result))));
+        hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), last, unit,
+                            &result, sizeof(result))));
     EXPECT_EQ(pattern, result);
 
     for (size_t i = 0; i < count; ++i) {
@@ -210,13 +215,13 @@ TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
       };
     }
     predecessor = completed++;
-    IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_queue_map(device_, 0, &wait_list, &signal_list, count,
-                      mappings.data(), HRX_QUEUE_MAP_FLAG_NONE)));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_queue_map(
+        hrx_device_get_queue(device_, 0, 0), &wait_list, &signal_list, count,
+        mappings.data(), HRX_QUEUE_MAP_FLAG_NONE)));
     predecessor = completed++;
-    IREE_ASSERT_OK(
-        hrx_status_to_iree(hrx_queue_map(device_, 0, &wait_list, &signal_list,
-                                         0, nullptr, HRX_QUEUE_MAP_FLAG_NONE)));
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_queue_map(hrx_device_get_queue(device_, 0, 0), &wait_list,
+                      &signal_list, 0, nullptr, HRX_QUEUE_MAP_FLAG_NONE)));
     IREE_ASSERT_OK(hrx_status_to_iree(
         hrx_semaphore_wait(completion, completed, UINT64_MAX)));
     hrx_buffer_retain(first);
@@ -323,10 +328,10 @@ TEST_F(CpuVirtualBufferTest, HostRegistrationCannotBecomeADetach) {
       .access = HRX_MEMORY_ACCESS_NONE,
       .operation = HRX_MEMORY_MAPPING_OPERATION_REPLACE,
   };
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_UNAVAILABLE,
-      hrx_status_to_iree(hrx_queue_map(device_, 0, nullptr, nullptr, 1,
-                                       &mapping, HRX_QUEUE_MAP_FLAG_NONE)));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                        hrx_status_to_iree(hrx_queue_map(
+                            hrx_device_get_queue(device_, 0, 0), nullptr,
+                            nullptr, 1, &mapping, HRX_QUEUE_MAP_FLAG_NONE)));
   IREE_ASSERT_OK(
       hrx_status_to_iree(hrx_host_memory_unregister(device_, storage.data())));
   hrx_buffer_release(reservation);

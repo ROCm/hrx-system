@@ -12,7 +12,8 @@ namespace {
 
 class VirtualMemoryResources {
  public:
-  explicit VirtualMemoryResources(hrx_device_t device) : device(device) {}
+  explicit VirtualMemoryResources(hrx_device_t device)
+      : queue(FindProvisionedQueue(device, HRX_QUEUE_ROLE_TRANSFER)) {}
 
   ~VirtualMemoryResources() {
     if (host_mapped) {
@@ -44,13 +45,13 @@ class VirtualMemoryResources {
         .values = &completion_value,
         .count = 1,
     };
-    REQUIRE_OK(hrx().queue_map(device, 0, nullptr, &signals, count, mappings,
+    REQUIRE_OK(hrx().queue_map(queue, nullptr, &signals, count, mappings,
                                HRX_QUEUE_MAP_FLAG_NONE));
     REQUIRE_OK(hrx().semaphore_wait(completion, completion_value, UINT64_MAX));
   }
 
-  // Borrowed execution device that outlives these resources.
-  hrx_device_t device;
+  // Borrowed execution queue whose device outlives these resources.
+  hrx_queue_t queue;
   // Ordinary virtual buffer retaining the address interval.
   hrx_buffer_t reservation = nullptr;
   // Ordinary prepared backing retained until checked removal succeeds.
@@ -153,13 +154,13 @@ TEST_CASE_METHOD(HrxTestFixture,
   resources.Map(mappings.size(), mappings.data());
   hrx_buffer_t view = resources.reservation;
   const std::array<uint32_t, 4> expected = {7, 13, 19, 23};
-  REQUIRE_OK(hrx().synchronous_h2d(device_, expected.data(), view, 0,
+  REQUIRE_OK(hrx().synchronous_h2d(transfer_queue_, expected.data(), view, 0,
                                    sizeof(expected)));
   std::array<uint32_t, 4> observed = {};
-  REQUIRE_OK(hrx().synchronous_d2h(device_, view, unit, observed.data(),
+  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, view, unit, observed.data(),
                                    sizeof(observed)));
   CHECK(observed == expected);
-  REQUIRE_OK(hrx().synchronous_d2h(device_, resources.sources[0], 0,
+  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, resources.sources[0], 0,
                                    observed.data(), sizeof(observed)));
   CHECK(observed == expected);
   if (capabilities.operations & (1u << HRX_MEMORY_MAPPING_OPERATION_PROTECT)) {
@@ -168,8 +169,8 @@ TEST_CASE_METHOD(HrxTestFixture,
       mapping.access = HRX_MEMORY_ACCESS_READ;
     }
     resources.Map(mappings.size(), mappings.data());
-    REQUIRE_OK(hrx().synchronous_d2h(device_, view, unit, observed.data(),
-                                     sizeof(observed)));
+    REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, view, unit,
+                                     observed.data(), sizeof(observed)));
     CHECK(observed == expected);
   }
   for (auto& mapping : mappings) {
@@ -253,12 +254,13 @@ TEST_CASE_METHOD(HrxTestFixture,
   const std::array<uint32_t, 4> expected = {11, 17, 29, 47};
   std::memcpy(host_address, expected.data(), sizeof(expected));
   std::array<uint32_t, 4> observed = {};
-  REQUIRE_OK(hrx().synchronous_d2h(device_, resources.reservation, unit,
+  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, resources.reservation, unit,
                                    observed.data(), sizeof(observed)));
   CHECK(observed == expected);
   const std::array<uint32_t, 4> update = {53, 71, 89, 97};
-  REQUIRE_OK(hrx().synchronous_h2d(
-      device_, update.data(), resources.reservation, unit, sizeof(update)));
+  REQUIRE_OK(hrx().synchronous_h2d(transfer_queue_, update.data(),
+                                   resources.reservation, unit,
+                                   sizeof(update)));
   std::memcpy(observed.data(), host_address, sizeof(observed));
   CHECK(observed == update);
 }
@@ -347,18 +349,19 @@ TEST_CASE_METHOD(HrxTestFixture,
       .values = &resources.completion_value,
       .count = 1,
   };
-  REQUIRE_OK(hrx().queue_copy(device_, 0, nullptr, &signals,
+  REQUIRE_OK(hrx().queue_copy(transfer_queue_, nullptr, &signals,
                               resources.reservation, 2 * unit,
                               resources.reservation, 0, sizeof(expected)));
   REQUIRE_OK(hrx().semaphore_wait(resources.completion,
                                   resources.completion_value, UINT64_MAX));
   std::array<uint32_t, 4> observed = {};
-  REQUIRE_OK(hrx().synchronous_d2h(device_, resources.reservation, 0,
+  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, resources.reservation, 0,
                                    observed.data(), sizeof(observed)));
   CHECK(observed == expected);
   const std::array<uint32_t, 4> update = {59, 61, 67, 71};
-  REQUIRE_OK(hrx().synchronous_h2d(
-      device_, update.data(), resources.reservation, 2 * unit, sizeof(update)));
+  REQUIRE_OK(hrx().synchronous_h2d(transfer_queue_, update.data(),
+                                   resources.reservation, 2 * unit,
+                                   sizeof(update)));
   std::memcpy(observed.data(), host_address, sizeof(observed));
   CHECK(observed == update);
 }
