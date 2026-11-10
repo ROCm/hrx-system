@@ -4,7 +4,6 @@
 #include <array>
 #include <cstdint>
 #include <cstdlib>
-#include <string>
 #include <vector>
 
 #include "hrx_test_fixture.hpp"
@@ -33,9 +32,14 @@ struct GroupResources {
     }
     hrx().device_group_release(group);
     hrx().runtime_release(runtime);
+    for (auto infos : device_infos) {
+      hrx().host_allocator_free(hrx().host_allocator_system(), infos);
+    }
   }
   // Explicit execution-service owner.
   hrx_runtime_t runtime = nullptr;
+  // Caller-owned CPU and GPU discovery results, independent of the group.
+  std::array<hrx_device_info_t*, 2> device_infos = {};
   // One sealed CPU+GPU group, created once for this test process.
   hrx_device_group_t group = nullptr;
   // Source, GPU-written intermediate, and CPU output in each reuse generation.
@@ -60,14 +64,26 @@ TEST_CASE("Explicit CPU GPU pools share backing across queue timelines",
   REQUIRE_OK(hrx().runtime_create(nullptr, hrx().host_allocator_system(),
                                   &resources.runtime));
   const char* driver = std::getenv("HRX_GPU_DRIVER");
-  const std::string gpu_uri =
-      std::string(driver && driver[0] ? driver : "amdgpu") + "://0";
+  size_t cpu_count = 0;
+  size_t gpu_count = 0;
+  REQUIRE_OK(hrx().runtime_query_available_devices(
+      resources.runtime, "task", hrx().host_allocator_system(), &cpu_count,
+      &resources.device_infos[0]));
+  REQUIRE_OK(hrx().runtime_query_available_devices(
+      resources.runtime, driver && driver[0] ? driver : "amdgpu",
+      hrx().host_allocator_system(), &gpu_count, &resources.device_infos[1]));
+  REQUIRE(cpu_count == 1);
+  REQUIRE(gpu_count > 0);
   const hrx_device_create_params_t devices[] = {
-      {.uri = "task://"},
-      {.uri = gpu_uri.c_str()},
+      {.uri = resources.device_infos[0][0].uri},
+      {.uri = resources.device_infos[1][0].uri},
   };
   REQUIRE_OK(hrx().device_group_create(resources.runtime, 2, devices,
                                        &resources.group));
+  for (auto& infos : resources.device_infos) {
+    hrx().host_allocator_free(hrx().host_allocator_system(), infos);
+    infos = nullptr;
+  }
   REQUIRE(hrx().device_group_device_count(resources.group) == 2);
   hrx_device_t cpu = hrx().device_group_get_device(resources.group, 0);
   hrx_device_t gpu = hrx().device_group_get_device(resources.group, 1);

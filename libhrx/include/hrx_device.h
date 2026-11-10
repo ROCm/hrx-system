@@ -231,6 +231,27 @@ HRX_API void hrx_runtime_retain(hrx_runtime_t runtime);
 // Final release synchronously destroys remaining runtime-owned services.
 HRX_API void hrx_runtime_release(hrx_runtime_t runtime);
 
+// One passively discovered device in a HAL URI scheme. Strings are copied into
+// the same allocation as the containing info array.
+typedef struct hrx_device_info_t {
+  // NUL-terminated URI accepted by hrx_device_group_create.
+  const char* uri;
+  // NUL-terminated display name for selection interfaces.
+  const char* name;
+} hrx_device_info_t;
+
+// Lists devices in |driver_name| (such as "task", "amdgpu", or "xdna") without
+// creating HAL devices or task executors. Native discovery connections may be
+// retained by the process. An empty inventory succeeds with zero entries.
+//
+// The returned array and its strings occupy one allocation, independent of the
+// runtime lifetime. Free it with hrx_host_allocator_free(host_allocator,
+// infos). Failure leaves |out_count| zero and |out_infos| NULL.
+HRX_API hrx_status_t hrx_runtime_query_available_devices(
+    hrx_runtime_t runtime, const char* driver_name,
+    hrx_host_allocator_t host_allocator, size_t* out_count,
+    hrx_device_info_t** out_infos);
+
 // Completion observation policy for device-owned workers. Explicit host waits
 // retain their own behavior. Backends choose the observation mechanism.
 typedef uint32_t hrx_wait_flags_t;

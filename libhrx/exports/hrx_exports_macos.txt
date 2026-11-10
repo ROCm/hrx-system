@@ -3,6 +3,7 @@ _hrx_runtime_version
 _hrx_runtime_create
 _hrx_runtime_retain
 _hrx_runtime_release
+_hrx_runtime_query_available_devices
 _hrx_device_group_create
 _hrx_device_group_retain
 _hrx_device_group_release

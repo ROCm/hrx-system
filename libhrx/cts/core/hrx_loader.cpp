@@ -117,6 +117,7 @@ void HrxLoader::load(const std::string& path) {
   LOAD(runtime_create);
   LOAD(runtime_retain);
   LOAD(runtime_release);
+  LOAD(runtime_query_available_devices);
   LOAD(device_group_create);
   LOAD(device_group_retain);
   LOAD(device_group_release);

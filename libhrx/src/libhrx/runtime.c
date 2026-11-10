@@ -565,6 +565,100 @@ iree_status_t hrx_runtime_acquire_driver(hrx_runtime_t runtime,
   return status;
 }
 
+hrx_status_t hrx_runtime_query_available_devices(
+    hrx_runtime_t runtime, const char* driver_name,
+    hrx_host_allocator_t host_allocator, size_t* out_count,
+    hrx_device_info_t** out_infos) {
+  if (!out_count || !out_infos) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "output is NULL");
+  }
+  *out_count = 0;
+  *out_infos = NULL;
+  iree_allocator_t allocator;
+  memcpy(&allocator, &host_allocator, sizeof(allocator));
+  if (!runtime || !driver_name || !driver_name[0] || !allocator.ctl) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "runtime, driver name, and allocator are required");
+  }
+  const iree_string_view_t scheme = iree_make_cstring_view(driver_name);
+  const bool is_task = iree_string_view_equal(scheme, IREE_SV("task"));
+  // Task exposes one default device configured by its runtime. Describing it
+  // must not construct the executor that task-driver creation would require.
+  iree_hal_device_info_t task_info = {
+      .name = iree_string_view_literal("default"),
+  };
+  iree_host_size_t info_count = is_task ? 1 : 0;
+  iree_hal_device_info_t* infos = is_task ? &task_info : NULL;
+  iree_hal_driver_t* driver = NULL;
+  iree_status_t status = iree_ok_status();
+  if (!is_task) {
+    status = hrx_runtime_acquire_driver(runtime, scheme, &driver);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_driver_query_available_devices(
+          driver, scheme, runtime->host_allocator, &info_count, &infos);
+    }
+  }
+
+  iree_host_size_t info_bytes = 0;
+  iree_host_size_t allocation_size = 0;
+  if (iree_status_is_ok(status) &&
+      !iree_host_size_checked_mul(info_count, sizeof(hrx_device_info_t),
+                                  &info_bytes)) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "device inventory size overflows");
+  }
+  allocation_size = info_bytes;
+  for (iree_host_size_t i = 0; i < info_count && iree_status_is_ok(status);
+       ++i) {
+    // Each URI contains the scheme, ://, native path, and NUL; the name has
+    // its own NUL. Neither string borrows native discovery storage.
+    if (!iree_host_size_checked_add(allocation_size, scheme.size,
+                                    &allocation_size) ||
+        !iree_host_size_checked_add(allocation_size, infos[i].path.size,
+                                    &allocation_size) ||
+        !iree_host_size_checked_add(allocation_size, infos[i].name.size,
+                                    &allocation_size) ||
+        !iree_host_size_checked_add(allocation_size, 5, &allocation_size)) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "device inventory strings overflow");
+    }
+  }
+  hrx_device_info_t* result = NULL;
+  if (iree_status_is_ok(status) && info_count) {
+    status = iree_allocator_malloc(allocator, allocation_size, (void**)&result);
+  }
+  if (iree_status_is_ok(status) && info_count) {
+    char* cursor = (char*)result + info_bytes;
+    for (iree_host_size_t i = 0; i < info_count; ++i) {
+      result[i].uri = cursor;
+      memcpy(cursor, scheme.data, scheme.size);
+      cursor += scheme.size;
+      memcpy(cursor, "://", 3);
+      cursor += 3;
+      if (infos[i].path.size) {
+        memcpy(cursor, infos[i].path.data, infos[i].path.size);
+        cursor += infos[i].path.size;
+      }
+      *cursor++ = 0;
+      result[i].name = cursor;
+      if (infos[i].name.size) {
+        memcpy(cursor, infos[i].name.data, infos[i].name.size);
+        cursor += infos[i].name.size;
+      }
+      *cursor++ = 0;
+    }
+  }
+  if (!is_task) {
+    iree_allocator_free(runtime->host_allocator, infos);
+  }
+  iree_hal_driver_release(driver);
+  if (iree_status_is_ok(status)) {
+    *out_count = info_count;
+    *out_infos = result;
+  }
+  return hrx_status_from_iree(status);
+}
+
 // Compatibility lifetime used only by the legacy public initialization API.
 static hrx_status_t hrx_ensure_default_runtime(void) {
   if (g_default_runtime) {

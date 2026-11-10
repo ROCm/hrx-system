@@ -66,6 +66,8 @@ class HrxLoader {
   decltype(&hrx_runtime_create) runtime_create;
   decltype(&hrx_runtime_retain) runtime_retain;
   decltype(&hrx_runtime_release) runtime_release;
+  decltype(&hrx_runtime_query_available_devices)
+      runtime_query_available_devices;
   decltype(&hrx_device_group_create) device_group_create;
   decltype(&hrx_device_group_retain) device_group_retain;
   decltype(&hrx_device_group_release) device_group_release;
