@@ -501,3 +501,37 @@ func.def target(@target) @reconstructed_signed_lower_bound(%input: buffer, %bits
   %value = view.load %view[%coordinate] : view<[%extent]xi32> -> i32
   func.return %quotient, %value : i16, i32
 }
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// Both the original converted divisor and the guard's source remain valid
+// endpoints. The three dynamic accesses require the retained remainder and
+// mask relations, not just the independently bounded numeric intervals.
+func.def @scoped_conversion_bounds(%input: i16, %bits: i32, %selector: i1, %table: buffer) {
+  %unsigned = scalar.extui %input : i16 to i32
+  %c0 = scalar.constant 0 : i16
+  %positive = scalar.cmpi sgt, %input, %c0 : i16
+  scf.if %positive {
+    scf.if %selector {
+      %remainder = scalar.remui %bits, %unsigned : i32
+      %masked = scalar.andi %bits, %unsigned : i32
+      %coordinate = index.cast %remainder : i32 to index
+      %masked_coordinate = index.cast %masked : i32 to index
+      %original_extent = index.cast %input : i16 to index
+      %converted_extent = index.cast %unsigned : i32 to index
+      %c1 = index.constant 1 : index
+      %mask_extent = index.add %original_extent, %c1 : index
+      %base = index.constant 0 : offset
+      %original = buffer.view %table[%base] : buffer -> view<[%original_extent]xi32>
+      %converted = buffer.view %table[%base] : buffer -> view<[%converted_extent]xi32>
+      %mask = buffer.view %table[%base] : buffer -> view<[%mask_extent]xi32>
+      %first = view.load %original[%coordinate] : view<[%original_extent]xi32> -> i32
+      %second = view.load %converted[%coordinate] : view<[%converted_extent]xi32> -> i32
+      %third = view.load %mask[%masked_coordinate] : view<[%mask_extent]xi32> -> i32
+      test.use %first, %second, %third : i32, i32, i32
+    }
+  }
+  func.return
+}

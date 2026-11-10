@@ -629,8 +629,9 @@ iree_status_t loom_value_fact_integer_relations_define_counted_range(
 
 iree_status_t loom_value_fact_integer_relations_define_upper_bounds(
     loom_value_fact_table_t* table, loom_value_id_t value,
-    const loom_value_id_t* upper_bounds, const loom_value_facts_t* upper_facts,
-    iree_host_size_t bound_count, loom_symbolic_integer_relation_t relation,
+    const loom_value_id_t* upper_bounds, const loom_value_id_t* equivalents,
+    const loom_value_facts_t* upper_facts, iree_host_size_t bound_count,
+    loom_symbolic_integer_relation_t relation,
     const loom_value_facts_t* value_facts, bool* inout_changed) {
   loom_value_fact_relation_roots_t roots = {0};
   iree_status_t status = iree_ok_status();
@@ -647,6 +648,15 @@ iree_status_t loom_value_fact_integer_relations_define_upper_bounds(
                             table, upper_bounds[i]))) {
       status = loom_value_fact_relation_add_bound(
           table, &roots, upper_bounds[i],
+          loom_symbolic_integer_relation_outcomes(relation));
+    }
+    if (iree_status_is_ok(status) && equivalents &&
+        equivalents[i] != upper_bounds[i] &&
+        (overlaps || !loom_value_fact_relation_roots_empty(
+                         loom_value_fact_integer_relations_snapshot(
+                             table, equivalents[i])))) {
+      status = loom_value_fact_relation_add_bound(
+          table, &roots, equivalents[i],
           loom_symbolic_integer_relation_outcomes(relation));
     }
   }

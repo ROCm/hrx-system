@@ -182,7 +182,7 @@ TEST_F(FactRelationTest, DisjointUpperBoundIntervalsAllocateNoRelationState) {
         relation == LOOM_SYMBOLIC_INTEGER_RELATION_LT ? 5 : 4);
     bool changed = false;
     IREE_ASSERT_OK(loom_value_fact_integer_relations_define_upper_bounds(
-        &table_, inputs_[0], &inputs_[1], &bound_facts, 1, relation,
+        &table_, inputs_[0], &inputs_[1], nullptr, &bound_facts, 1, relation,
         &value_facts, &changed));
     EXPECT_FALSE(changed);
     EXPECT_EQ(table_.integer_relations, nullptr);
@@ -201,7 +201,7 @@ TEST_F(FactRelationTest, ExactUpperBoundRetainsDynamicEndpointRelations) {
       &table_, bound, lower, inputs_[1]));
   bool changed = false;
   IREE_ASSERT_OK(loom_value_fact_integer_relations_define_upper_bounds(
-      &table_, value, &bound, &bound_facts, 1,
+      &table_, value, &bound, nullptr, &bound_facts, 1,
       LOOM_SYMBOLIC_INTEGER_RELATION_LT, &value_facts, &changed));
   EXPECT_TRUE(changed);
   EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(&table_, value,
@@ -211,7 +211,7 @@ TEST_F(FactRelationTest, ExactUpperBoundRetainsDynamicEndpointRelations) {
   const auto bytes = arena_.used_allocation_size;
   changed = false;
   IREE_ASSERT_OK(loom_value_fact_integer_relations_define_upper_bounds(
-      &table_, value, &bound, &bound_facts, 1,
+      &table_, value, &bound, nullptr, &bound_facts, 1,
       LOOM_SYMBOLIC_INTEGER_RELATION_LT, &value_facts, &changed));
   EXPECT_FALSE(changed);
   EXPECT_EQ(arena_.used_allocation_size, bytes);
@@ -219,12 +219,62 @@ TEST_F(FactRelationTest, ExactUpperBoundRetainsDynamicEndpointRelations) {
   EXPECT_TRUE(loom_value_fact_auxiliary_snapshot_equal(&before, &repeated));
 
   IREE_ASSERT_OK(loom_value_fact_integer_relations_define_upper_bounds(
-      &table_, value, nullptr, nullptr, 0, LOOM_SYMBOLIC_INTEGER_RELATION_LT,
-      &value_facts, &changed));
+      &table_, value, nullptr, nullptr, nullptr, 0,
+      LOOM_SYMBOLIC_INTEGER_RELATION_LT, &value_facts, &changed));
   EXPECT_TRUE(changed);
   EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(&table_, value,
                                                              inputs_[1]),
             LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL);
+}
+
+TEST_F(FactRelationTest, ScopedEquivalentBoundsPreserveBothEndpoints) {
+  const auto result = DefineValue(type_);
+  const auto original = DefineValue(type_);
+  const auto equivalent = DefineValue(loom_type_scalar(LOOM_SCALAR_TYPE_I32));
+  const auto facts = loom_value_facts_unknown();
+  IREE_ASSERT_OK(loom_value_fact_integer_relations_define_upper_bounds(
+      &table_, original, &inputs_[0], nullptr, &facts, 1,
+      LOOM_SYMBOLIC_INTEGER_RELATION_LE, &facts, nullptr));
+  IREE_ASSERT_OK(loom_value_fact_integer_relations_define_upper_bounds(
+      &table_, equivalent, &inputs_[1], nullptr, &facts, 1,
+      LOOM_SYMBOLIC_INTEGER_RELATION_LE, &facts, nullptr));
+  bool changed = false;
+  IREE_ASSERT_OK(loom_value_fact_integer_relations_define_upper_bounds(
+      &table_, result, &original, &equivalent, &facts, 1,
+      LOOM_SYMBOLIC_INTEGER_RELATION_LT, &facts, &changed));
+  EXPECT_TRUE(changed);
+  for (const auto bound : {original, equivalent, inputs_[0], inputs_[1]}) {
+    EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(&table_, result,
+                                                               bound),
+              LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS);
+  }
+  // Equality holds only where the result was defined. Earlier values retain
+  // their independent identities and relations everywhere else.
+  EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(&table_, original,
+                                                             equivalent),
+            LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL);
+  const auto bytes = arena_.used_allocation_size;
+  changed = false;
+  IREE_ASSERT_OK(loom_value_fact_integer_relations_define_upper_bounds(
+      &table_, result, &original, &equivalent, &facts, 1,
+      LOOM_SYMBOLIC_INTEGER_RELATION_LT, &facts, &changed));
+  EXPECT_FALSE(changed);
+  EXPECT_EQ(arena_.used_allocation_size, bytes);
+
+  IREE_ASSERT_OK(loom_value_fact_integer_relations_define_upper_bounds(
+      &table_, result, &original, nullptr, &facts, 1,
+      LOOM_SYMBOLIC_INTEGER_RELATION_LT, &facts, &changed));
+  EXPECT_TRUE(changed);
+  for (const auto bound : {original, inputs_[0]}) {
+    EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(&table_, result,
+                                                               bound),
+              LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS);
+  }
+  for (const auto bound : {equivalent, inputs_[1]}) {
+    EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(&table_, result,
+                                                               bound),
+              LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL);
+  }
 }
 
 TEST_F(FactRelationTest, RemainderPublicationHonorsQueryScopeAndWithdrawal) {
@@ -367,7 +417,7 @@ TEST_F(FactRelationTest, InclusiveUpperBoundsComposeEveryEndpointOrder) {
     const auto endpoint = loom_op_results(assume)[0];
     bool changed = false;
     IREE_ASSERT_OK(loom_value_fact_integer_relations_define_upper_bounds(
-        &table_, result, &endpoint, &unknown, 1,
+        &table_, result, &endpoint, nullptr, &unknown, 1,
         LOOM_SYMBOLIC_INTEGER_RELATION_LE, &unknown, &changed));
     EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(&table_, result,
                                                                inputs_[1]),
@@ -471,7 +521,7 @@ TEST_F(FactRelationTest, InclusiveBoundsShareTransitiveStorage) {
   for (int i = 0; i < 1024; ++i) {
     const auto result = DefineValue(type_);
     IREE_ASSERT_OK(loom_value_fact_integer_relations_define_upper_bounds(
-        &table_, result, &endpoint, &facts, 1,
+        &table_, result, &endpoint, nullptr, &facts, 1,
         LOOM_SYMBOLIC_INTEGER_RELATION_LE, &facts, nullptr));
     EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(&table_, result,
                                                                inputs_[0]),
@@ -506,7 +556,7 @@ TEST_F(FactRelationTest, ContradictoryEndpointsDoNotProveTransitiveOrder) {
   }
   const auto facts = loom_value_facts_unknown();
   IREE_ASSERT_OK(loom_value_fact_integer_relations_define_upper_bounds(
-      &table_, induction, &endpoint, &facts, 1,
+      &table_, induction, &endpoint, nullptr, &facts, 1,
       LOOM_SYMBOLIC_INTEGER_RELATION_LE, &facts, nullptr));
   EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(&table_, induction,
                                                              inputs_[1]),

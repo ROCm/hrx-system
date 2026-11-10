@@ -265,6 +265,7 @@ TEST_P(FactLoopProjectionTest, NestedSolveRefreshesPredicatePreimages) {
           } else if (op == state->refined) {
             operands[0] = state->cached_bound;
           }
+          return loom_op_const_operands(op);
         };
   }
   table_.summary_computed.user_data = &observation;

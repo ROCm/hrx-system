@@ -1871,8 +1871,9 @@ static bool loom_condition_operand_matches_value(
     const loom_value_fact_table_t* fact_table,
     loom_condition_integer_operand_t operand, loom_value_id_t value_id) {
   return operand.kind == LOOM_CONDITION_INTEGER_OPERAND_VALUE &&
-         loom_value_fact_table_query_identity(fact_table, operand.value_id) ==
-             loom_value_fact_table_query_identity(fact_table, value_id);
+         loom_value_fact_table_query_numeric_identity(fact_table,
+                                                      operand.value_id) ==
+             loom_value_fact_table_query_numeric_identity(fact_table, value_id);
 }
 
 bool loom_condition_integer_relation_make_predicate_for_value(
@@ -1980,8 +1981,9 @@ static bool loom_condition_integer_operands_equivalent_with_facts(
   }
   if (left.kind == LOOM_CONDITION_INTEGER_OPERAND_VALUE &&
       right.kind == LOOM_CONDITION_INTEGER_OPERAND_VALUE &&
-      loom_value_fact_table_query_identity(fact_table, left.value_id) ==
-          loom_value_fact_table_query_identity(fact_table, right.value_id)) {
+      loom_value_fact_table_query_numeric_identity(fact_table, left.value_id) ==
+          loom_value_fact_table_query_numeric_identity(fact_table,
+                                                       right.value_id)) {
     return true;
   }
   int64_t left_value = 0;

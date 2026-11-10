@@ -40,6 +40,10 @@ typedef struct loom_value_fact_origin_publication_t {
   const loom_module_t* module;
   // Operation whose results are being inferred.
   const loom_op_t* op;
+  // Numeric equivalents of the operation's operands at this definition.
+  // Borrowed from IR or scoped scratch for the duration of inference. These
+  // may have different storage types and cannot replace IR operands.
+  const loom_value_id_t* numeric_operands;
   // Reusable family-bit scratch indexed by result ordinal.
   uint8_t* published;
   // Optional shared accumulator for numeric and auxiliary changes.

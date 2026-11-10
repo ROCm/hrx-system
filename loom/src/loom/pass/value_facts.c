@@ -279,11 +279,22 @@ iree_status_t loom_pass_value_fact_owner_acquire_range(
   IREE_RETURN_IF_ERROR(loom_pass_value_fact_scope_validate(scope));
   IREE_RETURN_IF_ERROR(
       loom_pass_value_fact_owner_ensure_table(owner, module, reserved_values));
+  // A conditioned request can finish without adding any scope-local facts.
+  // Its ordinary baseline then remains suitable for a mutable consumer. Record
+  // the downgrade so a later conditioned request reruns refinement instead of
+  // reusing assumptions about the consumer's potentially changed IR.
+  loom_pass_value_fact_scope_t cached_scope = owner->active_scope;
+  if (scope.kind == LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION &&
+      cached_scope.kind == LOOM_PASS_VALUE_FACT_SCOPE_CONDITIONED_FUNCTION &&
+      !owner->table.has_conditioned_results) {
+    cached_scope.kind = LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION;
+  }
   if (owner->module == module &&
-      loom_pass_value_fact_scope_equal(owner->active_scope, scope)) {
+      loom_pass_value_fact_scope_equal(cached_scope, scope)) {
     if (owner->lifecycle_counts) {
       ++owner->lifecycle_counts->cache_hit_count;
     }
+    owner->active_scope = scope;
     *out_table = &owner->table;
     return iree_ok_status();
   }

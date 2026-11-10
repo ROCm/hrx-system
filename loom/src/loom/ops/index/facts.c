@@ -246,12 +246,13 @@ static iree_status_t loom_index_publish_remainder_bound(
   const loom_value_id_t divisor =
       loom_value_facts_is_non_negative(operand_facts[0]) &&
               loom_value_facts_is_positive(operand_facts[1])
-          ? loom_op_const_operands(op)[1]
+          ? loom_index_andi_rhs(op)
           : LOOM_VALUE_ID_INVALID;
   return loom_value_fact_integer_relations_define_upper_bounds(
       context->table, loom_op_const_results(op)[result_index], &divisor,
-      &operand_facts[1], 1, LOOM_SYMBOLIC_INTEGER_RELATION_LT,
-      &result_facts[result_index], context->publication->changed);
+      &context->publication->numeric_operands[1], &operand_facts[1], 1,
+      LOOM_SYMBOLIC_INTEGER_RELATION_LT, &result_facts[result_index],
+      context->publication->changed);
 }
 
 iree_status_t loom_index_rem_facts(loom_fact_context_t* context,
@@ -347,7 +348,8 @@ iree_status_t loom_index_andi_facts(loom_fact_context_t* context,
           : LOOM_VALUE_ID_INVALID,
   };
   return loom_value_fact_integer_relations_define_upper_bounds(
-      context->table, loom_index_andi_result(op), upper_bounds, operand_facts,
+      context->table, loom_index_andi_result(op), upper_bounds,
+      context->publication->numeric_operands, operand_facts,
       IREE_ARRAYSIZE(upper_bounds), LOOM_SYMBOLIC_INTEGER_RELATION_LE,
       result_facts, context->publication->changed);
 }

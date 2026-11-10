@@ -154,9 +154,12 @@ struct loom_fact_context_t {
   struct {
     // Borrowed state that outlives the solve.
     void* user_data;
-    // Applies retained scope constraints to op->operand_count scratch facts.
-    void (*fn)(void* user_data, const loom_value_fact_table_t* table,
-               const loom_op_t* op, loom_value_facts_t* operand_facts);
+    // Applies scope constraints to operand facts and returns the corresponding
+    // numeric representatives, borrowed until the inference callback returns.
+    const loom_value_id_t* (*fn)(void* user_data,
+                                 const loom_value_fact_table_t* table,
+                                 const loom_op_t* op,
+                                 loom_value_facts_t* operand_facts);
   } refine_operands;
 
   // Stack-owned result publication during a complete inference callback.

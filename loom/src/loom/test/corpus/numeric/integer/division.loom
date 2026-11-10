@@ -1260,6 +1260,137 @@ check.scenario @runtime_remainder_lookup_values configure[2](%negative: index, %
   check.return
 }
 
+// Conversions precede their guard and remain observable after the join. The
+// guard constrains only the lookup, not the converted values globally.
+func.def device inline @guarded_conversion_lookup(%table: vector<4xi32>, %dividend: i32, %divisor: i64) -> (i32, i32, i32, i32) {
+  %word = scalar.trunci %divisor : i64 to i32
+  %halfword = scalar.trunci %word : i32 to i16
+  %byte = scalar.trunci %halfword : i16 to i8
+  %unsigned = scalar.extui %byte : i8 to i32
+  %signed_halfword = scalar.extsi %byte : i8 to i16
+  %mixed = scalar.extui %signed_halfword : i16 to i32
+  %c0 = scalar.constant 0 : i64
+  %limit = scalar.constant 4 : i64
+  %positive = scalar.cmpi sgt, %divisor, %c0 : i64
+  %small = scalar.cmpi sle, %divisor, %limit : i64
+  %valid = scalar.andi %positive, %small : i1
+  %first, %second = scf.if %valid -> (i32, i32) {
+    %first_remainder = scalar.remui %dividend, %unsigned : i32
+    %second_remainder = scalar.remui %dividend, %mixed : i32
+    %first_coordinate = index.cast %first_remainder : i32 to index
+    %second_coordinate = index.cast %second_remainder : i32 to index
+    %first_value = vector.extract %table[%first_coordinate] : vector<4xi32> -> i32
+    %second_value = vector.extract %table[%second_coordinate] : vector<4xi32> -> i32
+    scf.yield %first_value, %second_value : i32, i32
+  } else {
+    %inactive = scalar.constant -12345 : i32
+    scf.yield %inactive, %inactive : i32, i32
+  }
+  %c1 = scalar.constant 1 : i32
+  %unsigned_observation = scalar.addi %unsigned, %c1 : i32
+  %mixed_observation = scalar.addi %mixed, %c1 : i32
+  func.return %first, %second, %unsigned_observation, %mixed_observation : i32, i32, i32, i32
+}
+
+// Load the table once and reuse it for runtime-selected entries.
+func.def device inline @guarded_conversion_lookups(%table: buffer, %dividends: buffer, %divisors: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %table_view = buffer.view %table[%base] : buffer -> view<4xi32>
+  %payload = vector.load %table_view[0] : view<4xi32> -> vector<4xi32>
+  %dividend_view = buffer.view %dividends[%base] : buffer -> view<32xi32>
+  %divisor_view = buffer.view %divisors[%base] : buffer -> view<32xi64>
+  %destination = buffer.view %output[%base] : buffer -> view<32x4xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 32 : index
+  %step = index.constant 1 : index
+  scf.for %position = [%begin to %end step %step] {
+    %dividend = view.load %dividend_view[%position] : view<32xi32> -> i32
+    %divisor = view.load %divisor_view[%position] : view<32xi64> -> i64
+    %first, %second, %unsigned, %mixed = func.call @guarded_conversion_lookup(%payload, %dividend, %divisor) : (vector<4xi32>, i32, i64) -> (i32, i32, i32, i32)
+    view.store %first, %destination[%position, 0] : i32, view<32x4xi32>
+    view.store %second, %destination[%position, 1] : i32, view<32x4xi32>
+    view.store %unsigned, %destination[%position, 2] : i32, view<32x4xi32>
+    view.store %mixed, %destination[%position, 3] : i32, view<32x4xi32>
+  }
+  func.return
+}
+
+// The oracle uses word masks for the payload interpretations and a fixed table
+// extent. It does not depend on scoped cast equality to prove a memory access.
+func.def @guarded_conversion_lookups_oracle(%table: buffer, %dividends: buffer, %divisors: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %table[%base] : buffer -> view<4xi32>
+  %dividend_view = buffer.view %dividends[%base] : buffer -> view<32xi32>
+  %divisor_view = buffer.view %divisors[%base] : buffer -> view<32xi64>
+  %destination = buffer.view %output[%base] : buffer -> view<32x4xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 32 : index
+  %step = index.constant 1 : index
+  %c0 = scalar.constant 0 : i64
+  %limit = scalar.constant 4 : i64
+  %byte_mask = scalar.constant 255 : i32
+  %sign = scalar.constant 128 : i32
+  %halfword_mask = scalar.constant 65535 : i32
+  %table_mask = scalar.constant 3 : i32
+  %c1 = scalar.constant 1 : i32
+  scf.for %position = [%begin to %end step %step] {
+    %dividend = view.load %dividend_view[%position] : view<32xi32> -> i32
+    %divisor = view.load %divisor_view[%position] : view<32xi64> -> i64
+    %word = scalar.trunci %divisor : i64 to i32
+    %unsigned = scalar.andi %word, %byte_mask : i32
+    %biased = scalar.xori %unsigned, %sign : i32
+    %signed_byte = scalar.subi %biased, %sign : i32
+    %mixed = scalar.andi %signed_byte, %halfword_mask : i32
+    %unsigned_observation = scalar.addi %unsigned, %c1 : i32
+    %mixed_observation = scalar.addi %mixed, %c1 : i32
+    %positive = scalar.cmpi sgt, %divisor, %c0 : i64
+    %small = scalar.cmpi sle, %divisor, %limit : i64
+    %valid = scalar.andi %positive, %small : i1
+    %value = scf.if %valid -> (i32) {
+      %remainder = scalar.remui %dividend, %word : i32
+      %bounded = scalar.andi %remainder, %table_mask : i32
+      %coordinate = index.cast %bounded : i32 to index
+      %loaded = view.load %source[%coordinate] : view<4xi32> -> i32
+      scf.yield %loaded : i32
+    } else {
+      %inactive = scalar.constant -12345 : i32
+      scf.yield %inactive : i32
+    }
+    view.store %value, %destination[%position, 0] : i32, view<32x4xi32>
+    view.store %value, %destination[%position, 1] : i32, view<32x4xi32>
+    view.store %unsigned_observation, %destination[%position, 2] : i32, view<32x4xi32>
+    view.store %mixed_observation, %destination[%position, 3] : i32, view<32x4xi32>
+  }
+  func.return
+}
+
+check.scenario @guarded_conversion_lookup_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %table = check.generate.iota offset(-701) step(17) : tensor<4xi32>
+    %dividends = check.generate.fill value(-1) : tensor<32xi32>
+    %divisors = check.generate.iota offset(-8) step(1) : tensor<32xi64>
+    %storage = check.generate.fill value(-99) : tensor<136xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<136xi32> -> tensor<32x4xi32>
+    check.compare<@guarded_conversion_lookups, @guarded_conversion_lookups_oracle>(%table, %dividends, %divisors, %output) : (tensor<4xi32>, tensor<32xi32>, tensor<32xi64>, tensor<32x4xi32>) -> () {
+      check.expect.bitwise actual(%table) expected(%table) : tensor<4xi32>
+      check.expect.bitwise actual(%divisors) expected(%divisors) : tensor<32xi64>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<136xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %table = check.generate.iota offset(-701) step(17) : tensor<4xi32>
+    %dividends = check.generate.iota offset(-17) step(11111111) : tensor<32xi32>
+    %divisors = check.generate.iota offset(240) step(1) : tensor<32xi64>
+    %storage = check.generate.fill value(-99) : tensor<136xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<136xi32> -> tensor<32x4xi32>
+    check.compare<@guarded_conversion_lookups, @guarded_conversion_lookups_oracle>(%table, %dividends, %divisors, %output) : (tensor<4xi32>, tensor<32xi32>, tensor<32xi64>, tensor<32x4xi32>) -> () {
+      check.expect.bitwise actual(%dividends) expected(%dividends) : tensor<32xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<136xi32>
+    }
+  }
+  check.return
+}
+
 check.scenario @bounded_wide_division_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(-1) step(1) : tensor<8xi64>

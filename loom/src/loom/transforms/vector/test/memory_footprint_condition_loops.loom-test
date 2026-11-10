@@ -211,7 +211,7 @@ func.def @condition_bound_must_be_invariant(%output: buffer) {
     scf.condition %more, %before : i1, index
   } do(%position: index) {
     %value = index.cast %position : index to i32
-    // ERROR@+1: SUBRANGE/023
+    // ERROR@+1: SUBRANGE/024
     view.store %value, %view[%position] : i32, view<4xi32>
     %next = index.add %step, %position : index
     scf.yield %next : index
