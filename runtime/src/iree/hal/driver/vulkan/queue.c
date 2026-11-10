@@ -7832,7 +7832,13 @@ static iree_status_t iree_hal_vulkan_transfer_select_strategy(
       return iree_ok_status();
     }
     case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY: {
-      *out_strategy = IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE;
+      *out_strategy =
+          iree_hal_vulkan_queue_buffer_has_recordable_backing(
+              operation->copy.source_buffer) &&
+                  iree_hal_vulkan_queue_buffer_has_recordable_backing(
+                      operation->copy.target_buffer)
+              ? IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE
+              : IREE_HAL_VULKAN_TRANSFER_STRATEGY_PENDING;
       return iree_ok_status();
     }
     case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD: {
@@ -7897,8 +7903,25 @@ static iree_status_t iree_hal_vulkan_transfer_create_staged_operation(
   return status;
 }
 
+static void iree_hal_vulkan_queue_prepare_native_transfer(
+    iree_hal_vulkan_queue_pending_submission_t* submission,
+    const iree_hal_transfer_operation_t* operations,
+    iree_host_size_t operation_count) {
+  submission->transfer.operations = operations;
+  submission->transfer.operation_count = operation_count;
+  if (submission->profile.recorder) {
+    submission->profile.type = iree_hal_vulkan_queue_profile_type(submission);
+    if (submission->profile.type == IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_NONE) {
+      submission->profile.recorder = NULL;
+    }
+  }
+  submission->record_native_submission =
+      iree_hal_vulkan_queue_record_transfer_native;
+}
+
 static iree_status_t iree_hal_vulkan_transfer_transaction_create(
     iree_hal_vulkan_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_host_size_t operation_count,
     const iree_hal_transfer_operation_t* source_operations,
@@ -8024,11 +8047,15 @@ static iree_status_t iree_hal_vulkan_transfer_transaction_create(
     }
   }
 
+  bool requires_host_progress = false;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < operation_count && iree_status_is_ok(status);
        ++i) {
     status = iree_hal_vulkan_transfer_select_strategy(
         &transaction->operations[i], &transaction->strategies[i]);
+    requires_host_progress |=
+        transaction->strategies[i] != IREE_HAL_VULKAN_TRANSFER_STRATEGY_NONE &&
+        transaction->strategies[i] != IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE;
     if (iree_status_is_ok(status) &&
         transaction->strategies[i] ==
             IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE) {
@@ -8046,13 +8073,23 @@ static iree_status_t iree_hal_vulkan_transfer_transaction_create(
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_vulkan_queue_pending_submission_allocate(
-        queue, iree_hal_semaphore_list_empty(), signal_semaphore_list,
-        IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_BARRIER,
+        queue,
+        requires_host_progress ? iree_hal_semaphore_list_empty()
+                               : wait_semaphore_list,
+        signal_semaphore_list,
+        requires_host_progress ? IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_BARRIER
+                               : IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_TRANSFER,
         (iree_hal_host_call_t){0}, /*args=*/NULL, IREE_HAL_HOST_CALL_FLAG_NONE,
         /*payload_storage_length=*/0,
         /*out_payload_storage=*/NULL, &transaction->completion_submission);
   }
-  if (iree_status_is_ok(status) && barriers) {
+  if (iree_status_is_ok(status) && !requires_host_progress) {
+    iree_hal_vulkan_queue_prepare_native_transfer(
+        transaction->completion_submission, transaction->native_operations,
+        transaction->native_operation_count);
+    iree_hal_vulkan_queue_capture_barriers(transaction->completion_submission,
+                                           barriers);
+  } else if (iree_status_is_ok(status) && barriers) {
     const iree_hal_vulkan_queue_barriers_t after_barriers = {
         .after = barriers->after,
     };
@@ -8131,16 +8168,9 @@ static iree_status_t iree_hal_vulkan_transfer_submit_native_batch(
       IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_TRANSFER, (iree_hal_host_call_t){0},
       /*args=*/NULL, IREE_HAL_HOST_CALL_FLAG_NONE, /*payload_storage_length=*/0,
       /*out_payload_storage=*/NULL, &submission));
-  submission->transfer.operations = transaction->native_operations;
-  submission->transfer.operation_count = transaction->native_operation_count;
-  if (submission->profile.recorder) {
-    submission->profile.type = iree_hal_vulkan_queue_profile_type(submission);
-    if (submission->profile.type == IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_NONE) {
-      submission->profile.recorder = NULL;
-    }
-  }
-  submission->record_native_submission =
-      iree_hal_vulkan_queue_record_transfer_native;
+  iree_hal_vulkan_queue_prepare_native_transfer(
+      submission, transaction->native_operations,
+      transaction->native_operation_count);
   iree_hal_vulkan_queue_set_completion_action(
       submission,
       iree_hal_vulkan_transfer_transaction_child_action(transaction));
@@ -8284,8 +8314,23 @@ static iree_status_t iree_hal_vulkan_queue_submit_transfer(
 
   iree_hal_vulkan_transfer_transaction_t* transaction = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_transfer_transaction_create(
-      queue, signal_semaphore_list, operation_count, operations, barriers,
-      &transaction));
+      queue, wait_semaphore_list, signal_semaphore_list, operation_count,
+      operations, barriers, &transaction));
+  if (transaction->completion_submission->kind ==
+      IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_TRANSFER) {
+    iree_hal_vulkan_queue_pending_submission_t* submission =
+        transaction->completion_submission;
+    transaction->completion_submission = NULL;
+    iree_hal_vulkan_queue_set_completion_action(
+        submission, (iree_hal_vulkan_queue_completion_action_t){
+                        .resource = &transaction->resource,
+                    });
+    // The capture becomes the sole owner before publication. Its retirement
+    // releases all transfer buffers before publishing the public signals, even
+    // when native completion races the submitting caller's return.
+    iree_hal_resource_release(&transaction->resource);
+    return iree_hal_vulkan_queue_submit_captured_submission(queue, submission);
+  }
   iree_hal_vulkan_queue_barriers_t before_barriers = {0};
   if (barriers) {
     before_barriers.before = barriers->before;
