@@ -92,7 +92,7 @@ jobs:
     concurrency:
       group: libhrx-cmake-linux-${{ matrix.sanitizer }}-${{ (github.event_name == 'push' && !matrix.package && github.ref) || github.run_id }}
       cancel-in-progress: true
-    runs-on: azure-linux-scale-rocm
+    runs-on: az-linux-scale-rocm-default-prod
     timeout-minutes: 30
     container:
       image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
@@ -539,7 +539,7 @@ jobs:
     concurrency:
       group: libhrx-bazel-linux-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true
-    runs-on: azure-linux-scale-rocm
+    runs-on: az-linux-scale-rocm-default-prod
     timeout-minutes: 45
     container:
       image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421

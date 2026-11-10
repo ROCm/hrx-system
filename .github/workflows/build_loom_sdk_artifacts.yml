@@ -21,7 +21,7 @@ permissions:
 jobs:
   build:
     name: Linux + Windows x86-64 / Clang
-    runs-on: azure-linux-scale-rocm
+    runs-on: az-linux-scale-rocm-default-prod
     outputs:
       documentation: ${{ inputs.profile == 'Release' && steps.scope.outputs.loom_docs || 'false' }}
     # Two complete SDK builds normally take 5-9 minutes on this pool. Retain a

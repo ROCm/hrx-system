@@ -75,7 +75,7 @@ jobs:
           - name: Clang / Fastbuild
             kind: cpu
             command: iree-bazel-cpu
-            runner: azure-linux-scale-rocm
+            runner: az-linux-scale-rocm-default-prod
             host_ar: ar
             host_cc: clang
             host_cxx: clang++
@@ -83,18 +83,18 @@ jobs:
             kind: cpu
             command: iree-bazel-cpu-asan
             platform_coverage: true
-            runner: azure-linux-scale-rocm
+            runner: az-linux-scale-rocm-default-prod
             host_toolchain: rocm
           - name: Clang / ASAN / Shared Tools
             kind: cpu
             command: iree-bazel-cpu-shared-tools-asan
             platform_coverage: true
-            runner: azure-linux-scale-rocm
+            runner: az-linux-scale-rocm-default-prod
             host_toolchain: rocm
           - name: Clang / MSAN
             kind: cpu
             command: iree-bazel-cpu-msan
-            runner: azure-linux-scale-rocm
+            runner: az-linux-scale-rocm-default-prod
             host_ar: ar
             host_cc: clang
             host_cxx: clang++
@@ -102,7 +102,7 @@ jobs:
           - name: Clang / TSAN
             kind: cpu
             command: iree-bazel-cpu-tsan
-            runner: azure-linux-scale-rocm
+            runner: az-linux-scale-rocm-default-prod
             host_ar: ar
             host_cc: clang
             host_cxx: clang++
@@ -110,7 +110,7 @@ jobs:
           - name: Clang / UBSAN
             kind: cpu
             command: iree-bazel-cpu-ubsan
-            runner: azure-linux-scale-rocm
+            runner: az-linux-scale-rocm-default-prod
             host_ar: ar
             host_cc: clang
             host_cxx: clang++
@@ -121,7 +121,7 @@ jobs:
             compilation_mode: opt
             gcc_toolset: 15
             platform_coverage: true
-            runner: azure-linux-scale-rocm
+            runner: az-linux-scale-rocm-default-prod
             host_ar: ar
             host_cc: gcc
             host_cxx: g++
@@ -880,7 +880,7 @@ jobs:
     concurrency:
       group: iree-cmake-linux-repository-build-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true
-    runs-on: azure-linux-scale-rocm
+    runs-on: az-linux-scale-rocm-default-prod
     timeout-minutes: 45
     defaults:
       run:
