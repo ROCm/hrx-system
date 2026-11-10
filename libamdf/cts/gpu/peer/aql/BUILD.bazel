@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/third_party/rocjitsu:profiles.bzl", "ROCJITSU_PROFILES")
 load("//libamdf/build_tools/bazel:cts.bzl", "amdf_cts_test_suite")
 
 package(
@@ -15,6 +16,14 @@ package(
 amdf_cts_test_suite(
     name = "aql",
     srcs = ["local_memory_test.cc"],
+    rocjitsu_profiles = ROCJITSU_PROFILES.keys(),
+    rocjitsu_required_tests = [
+        "PeerAqlMemoryTest.NativeSignalsAcrossBothDevices",
+        "Placement/PeerAqlLocalMemoryTest.TransformAcrossPhysicalDevices/Owner0Producer0",
+        "Placement/PeerAqlLocalMemoryTest.TransformAcrossPhysicalDevices/Owner0Producer1",
+        "Placement/PeerAqlLocalMemoryTest.TransformAcrossPhysicalDevices/Owner1Producer0",
+        "Placement/PeerAqlLocalMemoryTest.TransformAcrossPhysicalDevices/Owner1Producer1",
+    ],
     target_compatible_with = ["@platforms//cpu:x86_64"] + select({
         "@platforms//os:linux": [],
         "@platforms//os:windows": [],

@@ -7,6 +7,8 @@
 # Runtime-only simulator configurations have no CMake target surface.
 # bazel-to-cmake: skip
 
+load("//build_tools/third_party/rocjitsu:profiles.bzl", "ROCJITSU_PROFILES")
+
 package(default_visibility = ["//visibility:public"])
 
 exports_files([
@@ -17,3 +19,14 @@ exports_files([
     "gfx1201_four_gpu.json",
     "gfx1250_two_gpu.json",
 ])
+
+[
+    config_setting(
+        name = profile + "_selected",
+        flag_values = {
+            "//build_tools/bazel:gpu_execution": "rocjitsu",
+            "//build_tools/bazel:rocjitsu_profiles": profile,
+        },
+    )
+    for profile in ROCJITSU_PROFILES
+]

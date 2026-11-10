@@ -109,6 +109,12 @@ build:loom-sdk --//loom/config/serve:audio_codecs=wav,mp3,flac
 build:loom-sdk --//loom/config/serve:image_input=true
 build:loom-sdk --//loom/config/serve:image_codecs=png,jpeg,gif,webp
 
+# Select simulated GPU test leaves. Topology rows are explicit; physical
+# resource requirements remain independent on each execution leaf.
+build:rocjitsu --//build_tools/bazel:gpu_execution=rocjitsu
+build:rocjitsu --//libamdf/config:enabled=true
+build:rocjitsu --//libamdf/config:rocjitsu=true
+
 # Restore native CPython symbols without changing project optimization or ASAN.
 build:python-runtime-debug --//build_tools/bazel:python_runtime_debug=true
 

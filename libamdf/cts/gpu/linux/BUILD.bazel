@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/third_party/rocjitsu:profiles.bzl", "ROCJITSU_PROFILES")
 load("//libamdf/build_tools/bazel:cts.bzl", "amdf_cts_test_suite")
 
 package(
@@ -43,6 +44,13 @@ amdf_cts_test_suite(
 amdf_cts_test_suite(
     name = "memory",
     srcs = ["memory_test.cc"],
+    rocjitsu_profiles = ROCJITSU_PROFILES.keys(),
+    rocjitsu_required_tests = [
+        "GpuLinuxMemoryTest.OwnsAlignedSystemMemoryAndBorrowedHostViews",
+        "GpuLinuxMemoryTest.BufferedFileIoUsesOwnedSystemMemory",
+        "GpuLinuxMemoryTest.HonorsExactSystemDeviceAccess",
+        "GpuLinuxMemoryTest.HonorsLocalPlacementCapabilities",
+    ],
     target_compatible_with = [
         "@platforms//os:linux",
         "@platforms//cpu:x86_64",

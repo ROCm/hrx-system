@@ -7,72 +7,17 @@
 # Bazel execution inputs wrap the ordinary CMake-compatible CTS binaries.
 # bazel-to-cmake: skip
 
+load("//build_tools/third_party/rocjitsu:profiles.bzl", "ROCJITSU_PROFILES")
 load("//libamdf/build_tools/bazel:rocjitsu.bzl", "amdf_rocjitsu_cts_invocation")
 load("//libamdf/requirements:defs.bzl", "AMDGPU_RESOURCE")
 
 package(default_visibility = ["//visibility:public"])
 
-_PROFILES = {
-    "gfx1100": "gfx1100_four_gpu.json",
-    "gfx1151": "gfx1151_four_gpu.json",
-    "gfx1201": "gfx1201_four_gpu.json",
-    "gfx1250": "gfx1250_two_gpu.json",
-    "gfx942": "gfx942_two_gpu.json",
-    "gfx950": "gfx950_two_gpu.json",
-}
-
-[
-    amdf_rocjitsu_cts_invocation(
-        name = corpus + "_" + target,
-        src = src,
-        configurations = ["//build_tools/third_party/rocjitsu/profiles:" + configuration],
-        gpu_target = target,
-        required_tests = required_tests,
-        tags = ["manual"],
-    )
-    for corpus, (src, required_tests) in {
-        "gpu": (
-            "//libamdf/cts/gpu:gpu_extension_dynamic_bin",
-            [
-                "GpuEndpointTest.CreatesReclaimableDevicesFromOneEndpoint",
-                "GpuEventTest.HostSignalRacesNativeWaitEntry",
-            ],
-        ),
-        "memory": (
-            "//libamdf/cts/gpu/linux:memory_dynamic_bin",
-            [
-                "GpuLinuxMemoryTest.OwnsAlignedSystemMemoryAndBorrowedHostViews",
-                "GpuLinuxMemoryTest.BufferedFileIoUsesOwnedSystemMemory",
-                "GpuLinuxMemoryTest.HonorsExactSystemDeviceAccess",
-                "GpuLinuxMemoryTest.HonorsLocalPlacementCapabilities",
-            ],
-        ),
-        "peer": (
-            "//libamdf/cts/gpu/peer:peer_dynamic_bin",
-            [
-                "Acquisition/GpuMemoryGroupTest.OneBackingForTwoPhysicalConsumers/SystemCreate",
-                "Acquisition/GpuMemoryGroupTest.OneBackingForTwoPhysicalConsumers/LocalCreate",
-            ],
-        ),
-        "peer_aql": (
-            "//libamdf/cts/gpu/peer/aql:aql_dynamic_bin",
-            [
-                "PeerAqlMemoryTest.NativeSignalsAcrossBothDevices",
-                "Placement/PeerAqlLocalMemoryTest.TransformAcrossPhysicalDevices/Owner0Producer0",
-                "Placement/PeerAqlLocalMemoryTest.TransformAcrossPhysicalDevices/Owner0Producer1",
-                "Placement/PeerAqlLocalMemoryTest.TransformAcrossPhysicalDevices/Owner1Producer0",
-                "Placement/PeerAqlLocalMemoryTest.TransformAcrossPhysicalDevices/Owner1Producer1",
-            ],
-        ),
-    }.items()
-    for target, configuration in _PROFILES.items()
-]
-
 [
     amdf_rocjitsu_cts_invocation(
         name = "lifecycle_" + target,
         src = "//libamdf/cts/gpu/rocjitsu:rocjitsu_dynamic_bin",
-        configurations = ["//build_tools/third_party/rocjitsu/profiles:" + configuration],
+        configurations = profile.configurations,
         gpu_target = target,
         required_tests = [
             "RocjitsuTest.LeavesDescriptorBudgetUnderHostControl",
@@ -82,7 +27,7 @@ _PROFILES = {
         ],
         tags = ["manual"],
     )
-    for target, configuration in _PROFILES.items()
+    for target, profile in ROCJITSU_PROFILES.items()
 ]
 
 amdf_rocjitsu_cts_invocation(
@@ -100,28 +45,9 @@ amdf_rocjitsu_cts_invocation(
 
 [
     amdf_rocjitsu_cts_invocation(
-        name = "aql_" + target,
-        src = "//libamdf/cts/gpu/aql:aql_dynamic_bin",
-        configurations = ["//build_tools/third_party/rocjitsu/profiles:" + configuration],
-        gpu_target = target,
-        required_tests = [
-            "AqlDispatchTest.CoherentSystemPayloadChangesAcrossEpochs",
-            "AqlQueueTest.MultipleProducersReserveAndPublishIndependently",
-            "Publication/AqlDevicePublicationTest.DevicePublishesIndirectDispatchAcrossRingWrap/ReservedSuccessor",
-            "Publication/AqlDevicePublicationTest.DevicePublishesIndirectDispatchAcrossRingWrap/DeviceDoorbell",
-            "InitialBacking/AqlScratchServiceTest.FirmwareRequestsBackingAndReleasesPreviousRange/Empty",
-            "InitialBacking/AqlScratchServiceTest.FirmwareRequestsBackingAndReleasesPreviousRange/Smaller",
-        ],
-        tags = ["manual"],
-    )
-    for target, configuration in _PROFILES.items()
-]
-
-[
-    amdf_rocjitsu_cts_invocation(
         name = "pm4_" + target,
         src = "//libamdf/cts/gpu/pm4:pm4_dynamic_bin",
-        configurations = ["//build_tools/third_party/rocjitsu/profiles:" + _PROFILES[target]],
+        configurations = ROCJITSU_PROFILES[target].configurations,
         gpu_target = target,
         required_tests = ["Pm4DispatchTest.PrivateStorageReplacementAndReuseAcrossQueues"],
         tags = ["manual"],

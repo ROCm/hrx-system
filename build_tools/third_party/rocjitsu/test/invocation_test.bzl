@@ -95,6 +95,8 @@ def _test_invocation_inherits_configuration(name, **kwargs):
         target = name + "_wrapper",
         config_settings = {
             "//command_line_option:cc_output_directory_tag": "asan",
+            str(Label("//build_tools/bazel:gpu_execution")): ["native", "rocjitsu"],
+            str(Label("//build_tools/bazel:rocjitsu_profiles")): ["gfx942", "gfx1151"],
         },
         impl = _test_invocation_inherits_configuration_impl,
         **kwargs

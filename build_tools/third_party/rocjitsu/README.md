@@ -69,6 +69,33 @@ The configurations under `profiles/` describe complete multi-GPU topologies.
 They have no simulator tick limit: the consumer owns shutdown, and the outer
 test harness detects hangs.
 
+CTS corpora with simulator coverage expose native and simulated execution leaves
+over the same compiled binary. The default `gpu_execution=native` selects the
+native leaves. Select simulated leaves and their topology rows explicitly:
+
+```sh
+iree-bazel-test --config=asan --config=rocjitsu \
+  --//build_tools/bazel:rocjitsu_profiles=gfx942,gfx1151 \
+  --repo_env=IREE_ROCJITSU_RUNTIME_PATH=/absolute/path/to/package \
+  //libamdf/cts/gpu:gpu_extension \
+  //libamdf/cts/gpu/linux:memory \
+  //libamdf/cts/gpu/peer //libamdf/cts/gpu/peer/aql //libamdf/cts/gpu/aql
+```
+
+The catalog contains `gfx942`, `gfx950`, `gfx1100`, `gfx1151`, `gfx1201`, and
+`gfx1250`. Each row creates one VM with multiple GPUs. To include native leaves
+in the same command, add `--//build_tools/bazel:gpu_execution=native,rocjitsu`.
+Physical resource requirements belong to each leaf independently: selecting a
+simulator does not request a physical GPU, and native leaves retain their
+hardware requirements. Corpora without simulator coverage retain their ordinary
+execution requirements.
+
+These settings select execution, not compilation. Changing the row list keeps
+the ordinary corpus binaries and their dependencies in the caller's build
+configuration. Concrete invocation targets such as
+`//libamdf/cts/gpu/aql:aql_dynamic_rocjitsu_gfx942` can also be run directly,
+without selecting a test matrix.
+
 The invocation sets its loader search path to the package's library directory,
 checks the package's host CPU requirement, and prepares a descriptor soft limit
 of at least 8,192 before exec. This prevents the simulator from adjusting that

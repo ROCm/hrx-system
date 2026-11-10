@@ -8,8 +8,11 @@
 
 load("//build_tools/bazel:cc_attrs.bzl", "cc_attrs")
 load("//build_tools/bazel:executable.bzl", "iree_executable_test")
+load("//build_tools/bazel:execution_profiles.bzl", "native_gpu_test_compatibility")
+load("//build_tools/third_party/rocjitsu:profiles.bzl", "ROCJITSU_PROFILES", "rocjitsu_test_compatibility")
 load("//libamdf/requirements:package_policy.bzl", "apply_amdf_test_policy")
 load(":cc.bzl", "amdf_cc_binary", "amdf_cc_library")
+load(":rocjitsu.bzl", "amdf_rocjitsu_cts_invocation")
 
 def amdf_cts_test_suite(
         name,
@@ -19,6 +22,8 @@ def amdf_cts_test_suite(
         linkage_modes = ["dynamic"],
         linkopts = None,
         native_lifetimes = ["process"],
+        rocjitsu_profiles = [],
+        rocjitsu_required_tests = [],
         tags = None,
         resource_group = None,
         target_compatible_with = None,
@@ -36,6 +41,8 @@ def amdf_cts_test_suite(
       native_lifetimes: Native ownership policies to exercise. Ordinary
         corpora use process lifetime; focused lifetime tests may also select
         instance lifetime.
+      rocjitsu_profiles: Admitted functional topology keys for the dynamic corpus.
+      rocjitsu_required_tests: Cases that must execute in every simulator invocation.
       tags: Additional tags applied to every generated test target.
       resource_group: Shared native resource used by the test invocations.
       target_compatible_with: Constraints required by every test mode.
@@ -66,6 +73,11 @@ def amdf_cts_test_suite(
     common_deps = [":" + corpus_name, "//libamdf/cts/util:test_main"]
     runtime_data = ["//libamdf:amdf_runtime"]
     tests = []
+    native_compatibility = policy["target_compatible_with"]
+    if rocjitsu_profiles:
+        if "dynamic" not in linkage_modes or native_lifetimes != ["process"]:
+            fail("rocjitsu CTS matrices require dynamic linkage and process lifetime")
+        native_compatibility = native_compatibility + native_gpu_test_compatibility()
     for mode in linkage_modes:
         binary_name = name + "_" + mode + "_bin"
         data = runtime_data
@@ -97,13 +109,28 @@ def amdf_cts_test_suite(
                 args = ["--amdf_native_lifetime=" + lifetime] + provider_args,
                 data = data,
                 tags = test_tags,
-                target_compatible_with = policy["target_compatible_with"],
+                target_compatible_with = native_compatibility,
                 visibility = visibility,
             )
             tests.append(":" + test_name)
+        if mode == "dynamic":
+            for profile_name in rocjitsu_profiles:
+                profile = ROCJITSU_PROFILES[profile_name]
+                invocation_name = name + "_dynamic_rocjitsu_" + profile_name
+                amdf_rocjitsu_cts_invocation(
+                    name = invocation_name,
+                    src = ":" + binary_name,
+                    configurations = profile.configurations,
+                    gpu_target = profile.gpu_target,
+                    required_tests = rocjitsu_required_tests,
+                    test_compatible_with = rocjitsu_test_compatibility(profile_name),
+                    tags = corpus_tags,
+                    visibility = visibility,
+                )
+                tests.append(":" + invocation_name + "_test")
     native.test_suite(
         name = name,
-        tags = test_tags,
+        tags = corpus_tags if rocjitsu_profiles else test_tags,
         tests = tests,
         visibility = visibility,
     )

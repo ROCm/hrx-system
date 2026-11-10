@@ -31,6 +31,7 @@ load(
     "elf_dynamic_library_closure_test_suite",
 )
 load(":executable_rules_test.bzl", "executable_rules_test_suite")
+load(":execution_profiles_test.bzl", "execution_profiles_test_suite")
 load(":generate_rules_test.bzl", "generate_rules_test_suite")
 load(":glob_rules_test.bzl", "glob_rules_test_suite")
 load(":package_policy_test.bzl", "package_policy_test_suite")
@@ -40,6 +41,8 @@ load(":query_rules_test.bzl", "query_rules_test_suite")
 package(default_visibility = ["//visibility:public"])
 
 exports_files(["empty_suppressions.txt"])
+
+execution_profiles_test_suite(name = "execution_profiles_tests")
 
 # This extra target constraint is absent from every registered host platform.
 # Analysis tests register its platform explicitly when compatible execution is
