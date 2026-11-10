@@ -228,7 +228,7 @@ static CUresult iree_event_record_status_to_cu_result(iree_status_t status) {
 
 CUDAAPI CUresult cuInit(unsigned int Flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  const hrx_gpu_initialize_options_t options = {0};
+  const iree_hal_streaming_init_options_t options = {0};
   iree_status_t status =
       iree_hal_streaming_init_global(&options, iree_allocator_system());
   CUresult result = iree_status_to_cu_result(status);

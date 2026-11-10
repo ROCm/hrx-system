@@ -39,6 +39,10 @@ typedef struct hrx_runtime_s {
 iree_status_t hrx_runtime_acquire_driver(hrx_runtime_t runtime,
                                          iree_string_view_t scheme,
                                          iree_hal_driver_t** out_driver);
+// Translates a borrowed immutable HRX sink. The sink and its callback state
+// remain live until all users of the returned HAL sink have completed.
+iree_hal_device_event_sink_t hrx_device_event_sink_to_hal(
+    const hrx_device_event_sink_t* sink);
 iree_hal_device_event_sink_t hrx_runtime_hal_event_sink(hrx_runtime_t runtime);
 
 // Consumes a teardown failure through the runtime's configured event sink.
@@ -65,20 +69,19 @@ typedef struct hrx_gpu_device_selector_t {
                           iree_hal_device_info_t* device_infos);
 } hrx_gpu_device_selector_t;
 
-// Internal initialization inputs consumed before publishing the device group.
-typedef struct hrx_gpu_initialize_options_t {
-  // Public HRX initialization flags.
-  uint32_t flags;
-  // Immutable creation extension chain and provider data borrowed until
-  // hrx_gpu_shutdown().
+// GPU selection inputs consumed before publishing a sealed device group.
+typedef struct hrx_gpu_device_group_options_t {
+  // Immutable creation extension chain and provider data borrowed until the
+  // group and its dependent resources have been released.
   const iree_hal_device_create_params_extension_t* device_extensions;
   // Frontend-owned device selection; zero preserves the driver's order.
   hrx_gpu_device_selector_t device_selector;
-} hrx_gpu_initialize_options_t;
+} hrx_gpu_device_group_options_t;
 
-// Initializes only the selected GPUs, then seals their shared device group.
-hrx_status_t hrx_gpu_initialize_with_options(
-    const hrx_gpu_initialize_options_t* options);
+// Creates a selected GPU group owned by the caller's runtime.
+iree_status_t hrx_gpu_device_group_create(
+    hrx_runtime_t runtime, const hrx_gpu_device_group_options_t* options,
+    hrx_device_group_t* out_group);
 
 // Drains completed profile records after a host synchronization boundary.
 // Inactive or absent devices are a no-op. Serializes producer flushes and
@@ -87,15 +90,6 @@ hrx_status_t hrx_gpu_initialize_with_options(
 // caller.
 iree_status_t hrx_runtime_profile_flush(hrx_device_t device);
 iree_status_t hrx_device_profile_end(hrx_device_t device);
-
-// Returns the process-wide borrowed proactor pool, or NULL before runtime
-// initialization and after shutdown.
-iree_async_proactor_pool_t* hrx_runtime_proactor_pool(void);
-
-// Returns the configured application event sink translated to the HAL event
-// ABI. Returns false when HRX would otherwise discard device events.
-bool hrx_runtime_try_get_hal_device_event_sink(
-    iree_hal_device_event_sink_t* out_sink);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -7,19 +7,25 @@
 #ifndef LIBHRX_SRC_BINDING_COMMON_INIT_H_
 #define LIBHRX_SRC_BINDING_COMMON_INIT_H_
 
-#include "iree/hal/api.h"
+#include "libhrx/src/libhrx/runtime.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef struct iree_hal_streaming_context_t iree_hal_streaming_context_t;
-typedef struct hrx_gpu_initialize_options_t hrx_gpu_initialize_options_t;
+// Construction policy supplied by the compatibility frontend.
+typedef struct iree_hal_streaming_init_options_t {
+  // Runtime service configuration, including this frontend's event sink.
+  hrx_runtime_options_t runtime;
+  // Selected GPU devices and borrowed creation extensions.
+  hrx_gpu_device_group_options_t devices;
+} iree_hal_streaming_init_options_t;
 
 // Initializes global state.
 // Synchronization: none (one-time initialization).
 iree_status_t iree_hal_streaming_init_global(
-    const hrx_gpu_initialize_options_t* options,
+    const iree_hal_streaming_init_options_t* options,
     iree_allocator_t host_allocator);
 
 // Cleans up global state and releases all resources.

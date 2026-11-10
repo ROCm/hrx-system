@@ -34,7 +34,7 @@ typedef struct iree_hal_streaming_device_t {
   // Device ordinal in the global registry.
   iree_host_size_t ordinal;
 
-  // HRX device handle (owns the HAL device and driver).
+  // Borrowed HRX device view owned by the registry's sealed group.
   hrx_device_t hrx_device;
 
   // HAL device extracted from hrx_device for direct HAL calls.
@@ -125,6 +125,12 @@ typedef struct iree_hal_streaming_device_registry_t {
   // Host allocator for internal allocations.
   iree_allocator_t host_allocator;
 
+  // Retained execution services owned by this compatibility frontend.
+  hrx_runtime_t runtime;
+
+  // Retained sealed group owning every borrowed device view in the registry.
+  hrx_device_group_t group;
+
   // Immutable HAL device-creation extension chain selected at initialization.
   const iree_hal_device_create_params_extension_t* device_extensions;
 
@@ -137,10 +143,9 @@ typedef struct iree_hal_streaming_device_registry_t {
   // Ready compatibility callouts, with one lazily created frontend worker.
   iree_hal_streaming_host_callback_queue_t host_callbacks;
 
-  iree_slim_mutex_t mutex;
-
   // Fixed-size array of registered devices.
   iree_hal_streaming_device_t devices[IREE_HAL_STREAMING_MAX_DEVICES];
+  // Initialized prefix of the device array.
   iree_host_size_t device_count;
 
   // Global context tracking for cleanup.

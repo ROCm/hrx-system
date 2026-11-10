@@ -509,31 +509,23 @@ static hipError_t iree_hip_vmm_get_device_for_properties(
       return result;
     }
   }
-  hrx_device_t device = NULL;
-  hipError_t result =
-      iree_hip_vmm_from_hrx_status(hrx_gpu_device_get(device_ordinal, &device));
-  if (result != hipSuccess) {
-    return result;
-  }
   *out_device_ordinal = device_ordinal;
-  *out_device = device;
+  *out_device = iree_hal_streaming_device_entry(device_ordinal)->hrx_device;
   return hipSuccess;
 }
 
-static hipError_t iree_hip_vmm_prepare_scope(
+static void iree_hip_vmm_prepare_scope(
     hrx_device_t device, hrx_device_t* devices,
     iree_hal_streaming_virtual_buffer_source_t* sources,
     iree_hal_streaming_virtual_buffer_scope_t* out_scope,
     iree_hal_streaming_virtual_buffer_sources_t* out_sources) {
-  int count = 0;
-  hipError_t result =
-      iree_hip_vmm_from_hrx_status(hrx_gpu_device_count(&count));
+  iree_hal_streaming_device_registry_t* registry =
+      iree_hal_streaming_device_registry();
   size_t index = 1;
   devices[0] = device;
-  for (int i = 0; i < count && result == hipSuccess; ++i) {
-    hrx_device_t participant = NULL;
-    result = iree_hip_vmm_from_hrx_status(hrx_gpu_device_get(i, &participant));
-    if (result == hipSuccess && participant != device) {
+  for (size_t i = 0; i < registry->device_count; ++i) {
+    hrx_device_t participant = registry->devices[i].hrx_device;
+    if (participant != device) {
       devices[index++] = participant;
     }
   }
@@ -560,7 +552,6 @@ static hipError_t iree_hip_vmm_prepare_scope(
       .source_count = 2 * index,
       .sources = sources,
   };
-  return result;
 }
 
 static hipError_t iree_hip_vmm_query_granularity(hrx_device_t device,
@@ -574,14 +565,12 @@ static hipError_t iree_hip_vmm_query_granularity(hrx_device_t device,
       sources[2 * IREE_HAL_STREAMING_MAX_DEVICES];
   iree_hal_streaming_virtual_buffer_scope_t scope;
   iree_hal_streaming_virtual_buffer_sources_t accepted_sources;
-  hipError_t result = iree_hip_vmm_prepare_scope(device, devices, sources,
-                                                 &scope, &accepted_sources);
+  iree_hip_vmm_prepare_scope(device, devices, sources, &scope,
+                             &accepted_sources);
   hrx_virtual_buffer_capabilities_t capabilities = {0};
-  if (result == hipSuccess) {
-    result = iree_hip_vmm_from_iree_status(
-        iree_hal_streaming_virtual_buffer_query_capabilities(
-            scope, accepted_sources, &capabilities));
-  }
+  hipError_t result = iree_hip_vmm_from_iree_status(
+      iree_hal_streaming_virtual_buffer_query_capabilities(
+          scope, accepted_sources, &capabilities));
   if (result != hipSuccess) {
     return result;
   }
@@ -1019,17 +1008,17 @@ hipError_t iree_hip_vmm_is_supported(int device_ordinal, bool* out_supported) {
     return hipErrorInvalidValue;
   }
   *out_supported = false;
-  hrx_device_t device = NULL;
-  hipError_t result =
-      iree_hip_vmm_from_hrx_status(hrx_gpu_device_get(device_ordinal, &device));
-  if (result != hipSuccess) {
-    return result;
+  iree_hal_streaming_device_t* entry =
+      iree_hal_streaming_device_entry(device_ordinal);
+  if (!entry) {
+    return hipErrorInvalidDevice;
   }
+  hrx_device_t device = entry->hrx_device;
   size_t minimum = 0;
   size_t recommended = 0;
   bool modern = false;
-  result = iree_hip_vmm_query_granularity(device, HRX_MEMORY_TYPE_DEVICE_LOCAL,
-                                          &minimum, &recommended, &modern);
+  hipError_t result = iree_hip_vmm_query_granularity(
+      device, HRX_MEMORY_TYPE_DEVICE_LOCAL, &minimum, &recommended, &modern);
   if (result == hipErrorNotSupported) {
     return hipSuccess;
   }
@@ -1053,12 +1042,8 @@ hipError_t iree_hip_vmm_address_reserve(void** ptr, size_t size,
   if (result != hipSuccess) {
     return result;
   }
-  hrx_device_t device = NULL;
-  result =
-      iree_hip_vmm_from_hrx_status(hrx_gpu_device_get(device_ordinal, &device));
-  if (result != hipSuccess) {
-    return result;
-  }
+  hrx_device_t device =
+      iree_hal_streaming_device_entry(device_ordinal)->hrx_device;
   size_t granularity = 0;
   size_t recommended = 0;
   bool modern = false;
@@ -1077,19 +1062,17 @@ hipError_t iree_hip_vmm_address_reserve(void** ptr, size_t size,
         sources[2 * IREE_HAL_STREAMING_MAX_DEVICES];
     iree_hal_streaming_virtual_buffer_scope_t scope;
     iree_hal_streaming_virtual_buffer_sources_t accepted_sources;
-    result = iree_hip_vmm_prepare_scope(device, devices, sources, &scope,
-                                        &accepted_sources);
+    iree_hip_vmm_prepare_scope(device, devices, sources, &scope,
+                               &accepted_sources);
     const hrx_virtual_buffer_options_t options = {
         .byte_length = size,
         .min_alignment = alignment,
         .mapping_granularity = granularity,
         .flags = HRX_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
     };
-    if (result == hipSuccess) {
-      result = iree_hip_vmm_from_iree_status(
-          iree_hal_streaming_virtual_buffer_create(scope, accepted_sources,
-                                                   &options, &virtual_buffer));
-    }
+    result =
+        iree_hip_vmm_from_iree_status(iree_hal_streaming_virtual_buffer_create(
+            scope, accepted_sources, &options, &virtual_buffer));
   } else {
     result = iree_hip_vmm_from_hrx_status(
         hrx_allocator_virtual_memory_reserve(allocator, size, &virtual_buffer));
@@ -1558,8 +1541,7 @@ static hipError_t iree_hip_vmm_remove_mappings(
     hrx_device_t device = reservation->device;
     const bool host = access->location_type == hipMemLocationTypeHost;
     if (!host) {
-      result = iree_hip_vmm_from_hrx_status(
-          hrx_gpu_device_get(access->location_id, &device));
+      device = iree_hal_streaming_device_entry(access->location_id)->hrx_device;
     }
     hrx_memory_scope_t scope = {0};
     uint32_t projection = 0;
@@ -1795,8 +1777,8 @@ static hipError_t iree_hip_vmm_set_access_modern(
     hrx_device_t device = reservation->device;
     const bool host = descriptor->location.type == hipMemLocationTypeHost;
     if (result == hipSuccess && !host) {
-      result = iree_hip_vmm_from_hrx_status(
-          hrx_gpu_device_get(descriptor->location.id, &device));
+      device =
+          iree_hal_streaming_device_entry(descriptor->location.id)->hrx_device;
     }
     hrx_memory_scope_t scope = {0};
     if (result == hipSuccess) {
@@ -1967,12 +1949,9 @@ hipError_t iree_hip_vmm_set_access(void* ptr, size_t size,
             : HRX_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE;
     hrx_device_t access_device = reservation->device;
     if (scope == HRX_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE) {
-      result = iree_hip_vmm_from_hrx_status(
-          hrx_gpu_device_get(descriptors[i].location.id, &access_device));
-      if (result != hipSuccess) {
-        iree_allocator_free(iree_allocator_system(), updated_ranges);
-        break;
-      }
+      access_device =
+          iree_hal_streaming_device_entry(descriptors[i].location.id)
+              ->hrx_device;
     }
     result = iree_hip_vmm_from_hrx_status(
         hrx_allocator_virtual_memory_protect_scoped(

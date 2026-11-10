@@ -1040,6 +1040,8 @@ static iree_once_flag iree_hip_global_init_mutex_once = IREE_ONCE_FLAG_INIT;
 // explicit teardown. Repeated no-device queries never recreate native drivers.
 static iree_atomic_int32_t iree_hip_runtime_init_result =
     IREE_ATOMIC_VAR_INIT(hipErrorNotInitialized);
+// Selected before initialization and retained across frontend generations.
+static hrx_device_event_sink_t iree_hip_device_event_sink;
 static iree_hip_blocking_printf_provider_t iree_hip_blocking_printf_provider;
 
 typedef struct iree_hip_per_thread_stream_state_t {
@@ -1677,18 +1679,27 @@ static hipError_t iree_hip_ensure_initialized(void) {
     return hipErrorNoDevice;
   }
   if (!iree_hal_streaming_device_registry()) {
-    iree_hal_device_event_sink_t event_sink = {0};
-    hrx_runtime_try_get_hal_device_event_sink(&event_sink);
     iree_hip_blocking_printf_provider_initialize(
-        event_sink, iree_allocator_system(),
-        &iree_hip_blocking_printf_provider);
+        hrx_device_event_sink_to_hal(&iree_hip_device_event_sink),
+        iree_allocator_system(), &iree_hip_blocking_printf_provider);
   }
 
-  const hrx_gpu_initialize_options_t options = {
-      .device_extensions = iree_hip_blocking_printf_provider_device_extension(
-          &iree_hip_blocking_printf_provider),
-      .device_selector = {.self = &selection,
-                          .select = iree_hip_device_selection_apply},
+  const iree_hal_streaming_init_options_t options = {
+      .runtime =
+          {
+              .event_sink = iree_hip_device_event_sink,
+          },
+      .devices =
+          {
+              .device_extensions =
+                  iree_hip_blocking_printf_provider_device_extension(
+                      &iree_hip_blocking_printf_provider),
+              .device_selector =
+                  {
+                      .self = &selection,
+                      .select = iree_hip_device_selection_apply,
+                  },
+          },
   };
   // Native driver connections survive execution teardown. Keep the embedded
   // owner and its code available even when callers close their loader handles.
@@ -2017,10 +2028,14 @@ HIPAPI hipError_t hipHRXSetDeviceEventSink(hrx_device_event_sink_t sink) {
   iree_call_once(&iree_hip_global_init_mutex_once,
                  iree_hip_initialize_global_init_mutex);
   iree_slim_mutex_lock(&iree_hip_global_init_mutex);
-  const hipError_t result =
-      iree_hal_streaming_device_registry()
-          ? hipErrorSetOnActiveProcess
-          : hrx_status_to_hip_result(hrx_runtime_set_device_event_sink(sink));
+  hipError_t result = hipSuccess;
+  if (iree_hal_streaming_device_registry()) {
+    result = hipErrorSetOnActiveProcess;
+  } else if (!sink.fn) {
+    result = hipErrorInvalidValue;
+  } else {
+    iree_hip_device_event_sink = sink;
+  }
   iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
   HIP_RETURN_ERROR(result);
 }
@@ -22621,19 +22636,14 @@ HIPAPI hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode,
 
   hrx_device_t devices[IREE_HAL_STREAMING_MAX_DEVICES];
   iree_hal_memory_access_t accesses[IREE_HAL_STREAMING_MAX_DEVICES];
-  iree_status_t allocation_status =
-      HRX_CALL(hrx_gpu_device_get(params->poolProps.location.id, &devices[0]));
+  devices[0] = iree_hal_streaming_device_entry(params->poolProps.location.id)
+                   ->hrx_device;
   accesses[0] = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE;
   iree_host_size_t participant_count = 1;
-  for (size_t i = 0;
-       i < params->accessDescCount && iree_status_is_ok(allocation_status);
-       ++i) {
-    hrx_device_t device = NULL;
-    allocation_status = HRX_CALL(
-        hrx_gpu_device_get(params->accessDescs[i].location.id, &device));
-    if (!iree_status_is_ok(allocation_status)) {
-      break;
-    }
+  for (size_t i = 0; i < params->accessDescCount; ++i) {
+    hrx_device_t device =
+        iree_hal_streaming_device_entry(params->accessDescs[i].location.id)
+            ->hrx_device;
     iree_host_size_t ordinal = 0;
     for (; ordinal < participant_count && devices[ordinal] != device;
          ++ordinal) {
@@ -22644,11 +22654,9 @@ HIPAPI hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode,
     accesses[ordinal] = (iree_hal_memory_access_t)params->accessDescs[i].flags;
   }
   iree_hal_streaming_graph_allocation_t* allocation = NULL;
-  if (iree_status_is_ok(allocation_status)) {
-    allocation_status = iree_hal_streaming_graph_allocation_create(
-        stream_graph->context, params->bytesize, participant_count, devices,
-        accesses, &allocation, &params->dptr);
-  }
+  iree_status_t allocation_status = iree_hal_streaming_graph_allocation_create(
+      stream_graph->context, params->bytesize, participant_count, devices,
+      accesses, &allocation, &params->dptr);
   if (!iree_status_is_ok(allocation_status)) {
     iree_status_ignore(iree_hal_streaming_graph_destroy_node(node));
     HIP_RETURN_STATUS(allocation_status, hipErrorOutOfMemory);

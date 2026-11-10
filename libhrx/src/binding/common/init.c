@@ -199,7 +199,7 @@ static iree_status_t iree_hal_streaming_query_device_info(
   return iree_ok_status();
 }
 
-// Initializes a single device from a pyre device handle.
+// Initializes a single device from a HRX device handle.
 static iree_status_t iree_hal_streaming_initialize_device(
     iree_hal_streaming_device_registry_t* registry, hrx_device_t hrx_dev,
     iree_hal_streaming_device_ordinal_t ordinal,
@@ -216,11 +216,11 @@ static iree_status_t iree_hal_streaming_initialize_device(
   out_device->ordinal = ordinal;
   out_device->host_callbacks = &registry->host_callbacks;
 
-  // Store pyre device and extract HAL device for direct HAL usage.
+  // Store HRX device and extract HAL device for direct HAL usage.
   out_device->hrx_device = hrx_dev;
   out_device->hal_device = hrx_device_hal(hrx_dev);
 
-  // Get device name from pyre.
+  // Get device name from HRX.
   char name_buf[128] = {0};
   iree_status_t status = HRX_CALL(hrx_device_get_property(
       hrx_dev, HRX_DEVICE_PROPERTY_NAME, name_buf, sizeof(name_buf)));
@@ -357,8 +357,7 @@ static void iree_hal_streaming_deinitialize_device(
   // Deinitialize the arena block pool.
   iree_arena_block_pool_deinitialize(&device->block_pool);
 
-  // HAL device and driver are owned by pyre — don't release here.
-  // hrx_gpu_shutdown() handles cleanup.
+  // The registry releases its sealed group after every borrowed device view.
   device->hal_device = NULL;
   device->hrx_device = NULL;
 
@@ -463,17 +462,17 @@ void iree_hal_streaming_unregister_context(
 }
 
 //===----------------------------------------------------------------------===//
-// Global initialization via pyre
+// Global initialization via HRX
 //===----------------------------------------------------------------------===//
 
 iree_status_t iree_hal_streaming_init_global(
-    const hrx_gpu_initialize_options_t* options,
+    const iree_hal_streaming_init_options_t* options,
     iree_allocator_t host_allocator) {
   IREE_TRACE_ZONE_BEGIN(z0);
   if (iree_hal_streaming_global_registry &&
       iree_hal_streaming_global_registry->initialized) {
     if (IREE_UNLIKELY(iree_hal_streaming_global_registry->device_extensions !=
-                      options->device_extensions)) {
+                      options->devices.device_extensions)) {
       IREE_TRACE_ZONE_END(z0);
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
@@ -484,27 +483,18 @@ iree_status_t iree_hal_streaming_init_global(
     return iree_ok_status();
   }
 
-  // Initialize HRX driver registration and device enumeration.
+  // Frontend storage is acquired before activating native devices.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, HRX_CALL(hrx_gpu_initialize_with_options(options)));
-
-  // Create global registry.
-  iree_status_t status = iree_allocator_malloc(
-      host_allocator, sizeof(iree_hal_streaming_device_registry_t),
-      (void**)&iree_hal_streaming_global_registry);
-  if (!iree_status_is_ok(status)) {
-    status = iree_status_join(status, HRX_CALL(hrx_gpu_shutdown()));
-    IREE_TRACE_ZONE_END(z0);
-    return status;
-  }
+      z0, iree_allocator_malloc(host_allocator,
+                                sizeof(iree_hal_streaming_device_registry_t),
+                                (void**)&iree_hal_streaming_global_registry));
 
   iree_hal_streaming_device_registry_t* device_registry =
       iree_hal_streaming_device_registry();
   memset(device_registry, 0, sizeof(*device_registry));
   device_registry->host_allocator = host_allocator;
-  device_registry->device_extensions = options->device_extensions;
+  device_registry->device_extensions = options->devices.device_extensions;
   device_registry->context_key = IREE_HAL_STREAMING_TLS_KEY_INVALID;
-  iree_slim_mutex_initialize(&device_registry->mutex);
   iree_hal_streaming_host_callback_queue_initialize(
       host_allocator, &device_registry->host_callbacks);
 
@@ -513,33 +503,34 @@ iree_status_t iree_hal_streaming_init_global(
   device_registry->context_list.head = NULL;
   device_registry->context_list.tail = NULL;
 
-  // Enumerate the sealed HRX device inventory. Initialization is transactional:
-  // a device failure preserves its cause and releases the initialized prefix.
-  int gpu_count = 0;
-  status = iree_hal_streaming_tls_key_create(
-      iree_hal_streaming_context_cleanup_thread, &device_registry->context_key);
+  // Each frontend owns its runtime and sealed group. Native HRX callers may
+  // independently create and release their own groups in the same process.
+  hrx_host_allocator_t runtime_allocator;
+  memcpy(&runtime_allocator, &host_allocator, sizeof(runtime_allocator));
+  iree_status_t status = HRX_CALL(hrx_runtime_create(
+      &options->runtime, runtime_allocator, &device_registry->runtime));
   if (iree_status_is_ok(status)) {
-    status = HRX_CALL(hrx_gpu_device_count(&gpu_count));
+    status = iree_hal_streaming_tls_key_create(
+        iree_hal_streaming_context_cleanup_thread,
+        &device_registry->context_key);
   }
-
   if (iree_status_is_ok(status)) {
-    memset(device_registry->devices, 0, sizeof(device_registry->devices));
-    device_registry->device_count = 0;
-
-    for (int i = 0; i < gpu_count && i < IREE_HAL_STREAMING_MAX_DEVICES &&
-                    iree_status_is_ok(status);
-         ++i) {
-      hrx_device_t hrx_dev = NULL;
-      status = HRX_CALL(hrx_gpu_device_get(i, &hrx_dev));
-      if (iree_status_is_ok(status)) {
-        iree_hal_streaming_device_t* device =
-            &device_registry->devices[device_registry->device_count];
-        status = iree_hal_streaming_initialize_device(
-            device_registry, hrx_dev, device_registry->device_count, device);
-        if (iree_status_is_ok(status)) {
-          ++device_registry->device_count;
-        }
-      }
+    status = hrx_gpu_device_group_create(
+        device_registry->runtime, &options->devices, &device_registry->group);
+  }
+  const size_t gpu_count =
+      hrx_device_group_device_count(device_registry->group);
+  if (iree_status_is_ok(status) && gpu_count > IREE_HAL_STREAMING_MAX_DEVICES) {
+    status =
+        iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                         "selected device count exceeds registry capacity");
+  }
+  for (size_t i = 0; i < gpu_count && iree_status_is_ok(status); ++i) {
+    status = iree_hal_streaming_initialize_device(
+        device_registry, hrx_device_group_get_device(device_registry->group, i),
+        i, &device_registry->devices[i]);
+    if (iree_status_is_ok(status)) {
+      ++device_registry->device_count;
     }
   }
 
@@ -595,7 +586,6 @@ void iree_hal_streaming_cleanup_global(void) {
     iree_hal_streaming_context_release(context);
   }
 
-  iree_slim_mutex_lock(&device_registry->mutex);
   iree_slim_mutex_deinitialize(&device_registry->context_list.mutex);
 
   // Release all device resources.
@@ -603,15 +593,14 @@ void iree_hal_streaming_cleanup_global(void) {
     iree_hal_streaming_deinitialize_device(&device_registry->devices[i]);
   }
 
-  // Shutdown pyre GPU subsystem.
-  hrx_status_ignore(hrx_gpu_shutdown());
+  // Release only this frontend's execution services, after its contexts and
+  // compatibility metadata have finished using the group's device views.
+  hrx_device_group_release(device_registry->group);
+  hrx_runtime_release(device_registry->runtime);
   iree_hal_streaming_host_callback_queue_deinitialize(
       &device_registry->host_callbacks);
 
   iree_hal_streaming_tls_key_delete(device_registry->context_key);
-
-  iree_slim_mutex_unlock(&device_registry->mutex);
-  iree_slim_mutex_deinitialize(&device_registry->mutex);
 
   iree_allocator_free(device_registry->host_allocator, device_registry);
   iree_hal_streaming_global_registry = NULL;
