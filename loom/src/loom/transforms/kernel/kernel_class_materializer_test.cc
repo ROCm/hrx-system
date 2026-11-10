@@ -146,7 +146,7 @@ class KernelClassMaterializerTest : public ::testing::Test {
 };
 
 TEST_F(KernelClassMaterializerTest,
-       PublishesIndependentAffineClassesAsOrdinaryKernelIR) {
+       PublishesRequiredAndOptionalDecisionsInSourceOrder) {
   constexpr iree_host_size_t kSiteCount = 1000;
   const iree_string_view_t source = IREE_SV(R"(
 template.decl @boundary.family(%effective_n: index, %duplicate: index) -> (index)
@@ -167,7 +167,7 @@ template.def<@sign.family> priority(10) @nonnegative(%value: i32) where [ge(%val
   template.return
 }
 
-template.def<@sign.family> priority(1) @negative(%value: i32) {
+template.def<@sign.family> priority(1) @negative(%value: i32) where [lt(%value, 0)] {
   template.return
 }
 
@@ -234,6 +234,10 @@ kernel.def @classified() {
       &kernel_facts, &expression_context, &kernel_target, &analysis_arena,
       &classifier));
   ASSERT_EQ(classifier.decision_count, 4u);
+  EXPECT_EQ(classifier.decisions[0].generic_result.kind,
+            LOOM_DECISION_PROGRAM_RESULT_SELECTED);
+  EXPECT_EQ(classifier.decisions[1].generic_result.kind,
+            LOOM_DECISION_PROGRAM_RESULT_UNRESOLVED);
   ASSERT_EQ(classifier.projection_count, 2u);
   EXPECT_EQ(classifier.projections[0].kind,
             LOOM_KERNEL_CLASS_PROJECTION_AFFINE);

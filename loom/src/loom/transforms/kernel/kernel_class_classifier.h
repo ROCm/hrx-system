@@ -277,7 +277,9 @@ typedef struct loom_kernel_class_decision_result_t {
 
 // One accepted decision outcome in a class trace.
 typedef struct loom_kernel_class_trace_t {
-  // Previous trace node, or LOOM_KERNEL_CLASS_TRACE_ID_INVALID.
+  // Previous collected decision, or LOOM_KERNEL_CLASS_TRACE_ID_INVALID.
+  // Collection reserves required decisions first, independently of source
+  // order.
   loom_kernel_class_trace_id_t parent_trace_id;
 
   // Classifier decision ordinal.
@@ -371,11 +373,13 @@ iree_status_t loom_kernel_class_classifier_build(
 
 // Collects the finite live quotient of |sites| under |classifier|.
 //
-// Mandatory staged values are interned from |site_module| before optional
-// decision refinement. |site_module| is required when the source has staged
-// arguments. Optional decision evaluation performs no allocation, IR traversal,
-// string work, hashing, or fact-table cloning. A decision can remain generic
-// only when its kernel-source facts select a valid residual provider.
+// Mandatory staged values, source structure, and decisions without generic
+// residuals reserve their classes before optional refinement. |site_module| is
+// required when the source has staged arguments. Provider evaluation consumes
+// retained projections without allocation, IR traversal, or fact-table cloning.
+// Admission includes the selected providers' structural variants and the
+// remaining generic requirements. A decision can remain generic only when its
+// kernel-source facts select a valid residual provider.
 iree_status_t loom_kernel_class_classifier_collect(
     const loom_kernel_class_classifier_t* classifier,
     const loom_module_t* site_module, const loom_kernel_class_site_t* sites,
