@@ -213,9 +213,11 @@ static iree_status_t loom_scalar_publish_remainder_bound(
   const loom_value_id_t divisor = loom_value_facts_is_positive(operand_facts[1])
                                       ? loom_scalar_andi_rhs(op)
                                       : LOOM_VALUE_ID_INVALID;
+  const loom_value_id_t* numeric_operands =
+      context->publication->numeric_operands;
   return loom_value_fact_integer_relations_define_upper_bounds(
       context->table, loom_op_const_results(op)[result_index], &divisor,
-      &context->publication->numeric_operands[1], &operand_facts[1], 1,
+      numeric_operands ? &numeric_operands[1] : NULL, &operand_facts[1], 1,
       LOOM_SYMBOLIC_INTEGER_RELATION_LT, &result_facts[result_index],
       context->publication->changed);
 }

@@ -1088,7 +1088,6 @@ iree_status_t loom_value_fact_table_begin_origins(
   *publication = (loom_value_fact_origin_publication_t){
       .module = module,
       .op = op,
-      .numeric_operands = loom_op_const_operands(op),
       .published = table->scratch.origins.values,
       .changed = changed,
   };
