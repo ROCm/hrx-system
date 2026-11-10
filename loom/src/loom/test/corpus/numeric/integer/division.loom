@@ -62,6 +62,55 @@ func.def @varying_dynamic_wide_remainders(%input: buffer, %output: buffer) {
   func.return
 }
 
+// A word-sized dividend can still have an unrestricted wide divisor. Runtime
+// inputs exercise both signs, zero low words, and unrestricted divisor bits.
+func.def @bounded_wide_division(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %inputs = buffer.view %input[%base] : buffer -> view<8xi64>
+  %outputs = buffer.view %output[%base] : buffer -> view<4x4x6xi64>
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %raw_kind = index.constant 1 : index
+  %high_kind = index.constant 2 : index
+  %unit_kind = index.constant 3 : index
+  %c0 = scalar.constant 0 : i64
+  %c1 = scalar.constant 1 : i64
+  %word_mask = scalar.constant 4294967295 : i64
+  %word_shift = scalar.constant 32 : i64
+  scf.for %lane = [%begin to %end step %step] {
+    %bits = view.load %inputs[%lane] : view<8xi64> -> i64
+    %dividend = scalar.andi %bits, %word_mask : i64
+    %negative = scalar.subi %c0, %dividend : i64
+    %divisor_position = index.add %lane, %end : index
+    %divisor_bits = view.load %inputs[%divisor_position] : view<8xi64> -> i64
+    %raw_zero = scalar.cmpi eq, %divisor_bits, %c0 : i64
+    %raw = scf.select %raw_zero, %c1, %divisor_bits : i64
+    %word_bits = scalar.andi %raw, %word_mask : i64
+    %word_zero = scalar.cmpi eq, %word_bits, %c0 : i64
+    %word = scf.select %word_zero, %c1, %word_bits : i64
+    %high = scalar.shli %word, %word_shift : i64
+    scf.for %kind = [%begin to %end step %step] {
+      %is_raw = index.cmp eq, %kind, %raw_kind : index
+      %is_high = index.cmp eq, %kind, %high_kind : index
+      %is_unit = index.cmp eq, %kind, %unit_kind : index
+      %word_or_raw = scf.select %is_raw, %raw, %word : i64
+      %nonunit = scf.select %is_high, %high, %word_or_raw : i64
+      %divisor = scf.select %is_unit, %c1, %nonunit : i64
+      %unsigned_quotient, %unsigned_remainder = scalar.divremui %dividend, %divisor : i64
+      %positive_quotient, %positive_remainder = scalar.divremsi %dividend, %divisor : i64
+      %negative_quotient, %negative_remainder = scalar.divremsi %negative, %divisor : i64
+      view.store %unsigned_quotient, %outputs[%lane, %kind, 0] : i64, view<4x4x6xi64>
+      view.store %unsigned_remainder, %outputs[%lane, %kind, 1] : i64, view<4x4x6xi64>
+      view.store %positive_quotient, %outputs[%lane, %kind, 2] : i64, view<4x4x6xi64>
+      view.store %positive_remainder, %outputs[%lane, %kind, 3] : i64, view<4x4x6xi64>
+      view.store %negative_quotient, %outputs[%lane, %kind, 4] : i64, view<4x4x6xi64>
+      view.store %negative_remainder, %outputs[%lane, %kind, 5] : i64, view<4x4x6xi64>
+    }
+  }
+  func.return
+}
+
 // Independent source expression for the prior model workaround. It reduces
 // the high word and then consumes the low word byte by byte, using only u32
 // remainder operations whose inputs cannot overflow for the divisor bound.
@@ -405,6 +454,20 @@ func.def @varying_wide_vector_division(%input: buffer, %output: buffer) {
   vector.store %unsigned_quotients, %outputs[12] : vector<2xi64>, view<48xi64>
   %unsigned_remainders = vector.remui %dividends, %divisors : vector<2xi64>
   vector.store %unsigned_remainders, %outputs[14] : vector<2xi64>, view<48xi64>
+  %word_mask = scalar.constant 4294967295 : i64
+  %word_masks = vector.splat %word_mask : vector<2xi64>
+  %bounded = vector.andi %dividends, %word_masks : vector<2xi64>
+  %bounded_quotients = vector.divui %bounded, %divisors : vector<2xi64>
+  %bounded_remainders = vector.remui %bounded, %divisors : vector<2xi64>
+  vector.store %bounded_quotients, %outputs[16] : vector<2xi64>, view<48xi64>
+  vector.store %bounded_remainders, %outputs[18] : vector<2xi64>, view<48xi64>
+  %c0 = scalar.constant 0 : i64
+  %zeros = vector.splat %c0 : vector<2xi64>
+  %negative = vector.subi %zeros, %bounded : vector<2xi64>
+  %negative_quotients = vector.divsi %negative, %divisors : vector<2xi64>
+  %negative_remainders = vector.remsi %negative, %divisors : vector<2xi64>
+  vector.store %negative_quotients, %outputs[20] : vector<2xi64>, view<48xi64>
+  vector.store %negative_remainders, %outputs[22] : vector<2xi64>, view<48xi64>
   func.return
 }
 
@@ -1106,6 +1169,14 @@ check.scenario @wide_division_buffer_values {
 }
 
 check.scenario @wide_vector_division_buffer_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-1) step(1) : tensor<16xi64>
+    %output = check.generate.fill value(-123) : tensor<48xi64>
+    check.compare<@varying_wide_vector_division>(%input, %output) : (tensor<16xi64>, tensor<48xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<48xi64>
+    }
+  }
+
   check.trial[16](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
     %input = check.generate.random.uniform seed(%seed) range(-9223372036854775808 to 9223372036854775807) : tensor<16xi64>
@@ -1183,6 +1254,33 @@ check.scenario @runtime_remainder_lookup_values configure[2](%negative: index, %
     check.compare<@runtime_remainder_lookup, @runtime_remainder_lookup_oracle>(%input, %output, %sample, %negative) : (tensor<256xi32>, tensor<258xi32>, index, index) -> () {
       check.expect.bitwise actual(%input_storage) expected(%input_storage) : tensor<264xi32>
       check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<266xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @bounded_wide_division_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-1) step(1) : tensor<8xi64>
+    %output = check.generate.fill value(-123) : tensor<4x4x6xi64>
+    check.compare<@bounded_wide_division>(%input, %output) : (tensor<8xi64>, tensor<4x4x6xi64>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8xi64>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<4x4x6xi64>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-4294967296) step(4294967295) : tensor<8xi64>
+    %output = check.generate.fill value(-123) : tensor<4x4x6xi64>
+    check.compare<@bounded_wide_division>(%input, %output) : (tensor<8xi64>, tensor<4x4x6xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<4x4x6xi64>
+    }
+  }
+  check.trial[32](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-9223372036854775808 to 9223372036854775807) : tensor<8xi64>
+    %output = check.generate.fill value(-123) : tensor<4x4x6xi64>
+    check.compare<@bounded_wide_division>(%input, %output) : (tensor<8xi64>, tensor<4x4x6xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<4x4x6xi64>
     }
   }
   check.return

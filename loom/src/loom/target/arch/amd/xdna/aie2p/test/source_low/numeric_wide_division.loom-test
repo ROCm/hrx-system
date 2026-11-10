@@ -333,3 +333,240 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @unsigned_pair(%di
   %remainder = concat(%576, %578) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
   return %quotient, %remainder
 }
+
+// ====
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final},canonicalize,cse,dce
+func.def @bounded_chain(%word: i32, %first: i64, %second: i64) -> (i64, i64, i64) {
+  %dividend = scalar.extui %word : i32 to i64
+  %quotient, %remainder = scalar.divremui %dividend, %first : i64
+  %next = scalar.divui %quotient, %second : i64
+  func.return %next, %quotient, %remainder : i64, i64, i64
+}
+
+// ----
+func.def @bounded_chain(%word: i32, %first: i64, %second: i64) -> (i64, i64, i64) {
+  %52 = scalar.constant 4294967295 : i64
+  %53 = scalar.andi %first, %52 : i64
+  %54 = scalar.trunci %53 : i64 to i32
+  %49 = scalar.constant 32 : i64
+  %50 = scalar.shrui %first, %49 : i64
+  %51 = scalar.trunci %50 : i64 to i32
+  %13 = scalar.constant 0 : i32
+  %14 = scalar.constant 1 : i32
+  %15 = scalar.cmpi ne, %51, %13 : i32
+  %16 = scf.select %15, %14, %54 : i32
+  %46 = scalar.divui %word, %16 : i32
+  %47 = scalar.muli %46, %16 : i32
+  %48 = scalar.subi %word, %47 : i32
+  %19 = scf.select %15, %13, %46 : i32
+  %quotient = scalar.extui %19 : i32 to i64
+  %21 = scf.select %15, %word, %48 : i32
+  %remainder = scalar.extui %21 : i32 to i64
+  %41 = scalar.andi %second, %52 : i64
+  %42 = scalar.trunci %41 : i64 to i32
+  %38 = scalar.shrui %second, %49 : i64
+  %39 = scalar.trunci %38 : i64 to i32
+  %28 = scalar.cmpi ne, %39, %13 : i32
+  %29 = scf.select %28, %14, %42 : i32
+  %34 = scalar.divui %19, %29 : i32
+  %32 = scf.select %28, %13, %34 : i32
+  %next = scalar.extui %32 : i32 to i64
+  func.return %next, %quotient, %remainder : i64, i64, i64
+}
+
+// ====
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final},canonicalize,cse,dce
+func.def @bounded_signed(%input: i64, %divisor: i64) -> (i64, i64) {
+  %dividend = scalar.assume %input [range(%input, -4294967295, 4294967295)] : i64
+  %quotient = scalar.divsi %dividend, %divisor : i64
+  %remainder = scalar.remsi %dividend, %divisor : i64
+  func.return %quotient, %remainder : i64, i64
+}
+
+// ----
+func.def @bounded_signed(%input: i64, %divisor: i64) -> (i64, i64) {
+  %dividend = scalar.assume %input [range(%input, -4294967295, 4294967295)] : i64
+  %40 = scalar.constant 63 : i64
+  %41 = scalar.shrsi %dividend, %40 : i64
+  %42 = scalar.xori %dividend, %41 : i64
+  %43 = scalar.subi %42, %41 : i64
+  %45 = scalar.shrsi %divisor, %40 : i64
+  %46 = scalar.xori %divisor, %45 : i64
+  %47 = scalar.subi %46, %45 : i64
+  %71 = scalar.constant 4294967295 : i64
+  %72 = scalar.andi %43, %71 : i64
+  %73 = scalar.trunci %72 : i64 to i32
+  %69 = scalar.andi %47, %71 : i64
+  %70 = scalar.trunci %69 : i64 to i32
+  %65 = scalar.constant 32 : i64
+  %66 = scalar.shrui %47, %65 : i64
+  %67 = scalar.trunci %66 : i64 to i32
+  %51 = scalar.constant 0 : i32
+  %52 = scalar.constant 1 : i32
+  %53 = scalar.cmpi ne, %67, %51 : i32
+  %54 = scf.select %53, %52, %70 : i32
+  %62 = scalar.divui %73, %54 : i32
+  %57 = scf.select %53, %51, %62 : i32
+  %58 = scalar.extui %57 : i32 to i64
+  %59 = scalar.xori %41, %45 : i64
+  %60 = scalar.xori %58, %59 : i64
+  %quotient = scalar.subi %60, %59 : i64
+  %29 = scalar.muli %62, %54 : i32
+  %30 = scalar.subi %73, %29 : i32
+  %24 = scf.select %53, %73, %30 : i32
+  %25 = scalar.extui %24 : i32 to i64
+  %26 = scalar.xori %25, %41 : i64
+  %remainder = scalar.subi %26, %41 : i64
+  func.return %quotient, %remainder : i64, i64
+}
+
+// ====
+// RUN: emit source-low @unrolled_division target=amd.xdna.aie2p:core output=low
+func.def @unrolled_division(%word: i32, %divisor: i64) -> (i64) {
+  %begin = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  %initial = scalar.extui %word : i32 to i64
+  %result = scf.for %position = [%begin to %end step %step](%value = %initial : i64) -> (i64) unroll(%end) {
+    %next = scalar.divui %value, %divisor : i64
+    scf.yield %next : i64
+  }
+  func.return %result : i64
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @unrolled_division(%word: reg<aie2p.er>, %divisor: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
+  %86 = mov.i32 -1
+  %89 = slice %divisor[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %93 = and %89, %86
+  %97 = slice %divisor[1] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %101 = mov.short 0
+  %102 = mov.short 1
+  %103 = nez %97
+  %104 = copy %103 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %105 = sel.nez %102, %93, %104
+  %106 = mov.dividend %word
+  %108, %109 = divs %106, %101, %105
+  %110, %111 = divs %109, %108, %105
+  %112, %113 = divs %111, %110, %105
+  %114, %115 = divs %113, %112, %105
+  %116, %117 = divs %115, %114, %105
+  %118, %119 = divs %117, %116, %105
+  %120, %121 = divs %119, %118, %105
+  %122, %123 = divs %121, %120, %105
+  %124, %125 = divs %123, %122, %105
+  %126, %127 = divs %125, %124, %105
+  %128, %129 = divs %127, %126, %105
+  %130, %131 = divs %129, %128, %105
+  %132, %133 = divs %131, %130, %105
+  %134, %135 = divs %133, %132, %105
+  %136, %137 = divs %135, %134, %105
+  %138, %139 = divs %137, %136, %105
+  %140, %141 = divs %139, %138, %105
+  %142, %143 = divs %141, %140, %105
+  %144, %145 = divs %143, %142, %105
+  %146, %147 = divs %145, %144, %105
+  %148, %149 = divs %147, %146, %105
+  %150, %151 = divs %149, %148, %105
+  %152, %153 = divs %151, %150, %105
+  %154, %155 = divs %153, %152, %105
+  %156, %157 = divs %155, %154, %105
+  %158, %159 = divs %157, %156, %105
+  %160, %161 = divs %159, %158, %105
+  %162, %163 = divs %161, %160, %105
+  %164, %165 = divs %163, %162, %105
+  %166, %167 = divs %165, %164, %105
+  %168, %169 = divs %167, %166, %105
+  %170, %171 = divs %169, %168, %105
+  %172 = mov.quotient %171
+  %173 = copy %103 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %174 = sel.nez %101, %172, %173
+  %175 = mov.dividend %174
+  %177, %178 = divs %175, %101, %105
+  %179, %180 = divs %178, %177, %105
+  %181, %182 = divs %180, %179, %105
+  %183, %184 = divs %182, %181, %105
+  %185, %186 = divs %184, %183, %105
+  %187, %188 = divs %186, %185, %105
+  %189, %190 = divs %188, %187, %105
+  %191, %192 = divs %190, %189, %105
+  %193, %194 = divs %192, %191, %105
+  %195, %196 = divs %194, %193, %105
+  %197, %198 = divs %196, %195, %105
+  %199, %200 = divs %198, %197, %105
+  %201, %202 = divs %200, %199, %105
+  %203, %204 = divs %202, %201, %105
+  %205, %206 = divs %204, %203, %105
+  %207, %208 = divs %206, %205, %105
+  %209, %210 = divs %208, %207, %105
+  %211, %212 = divs %210, %209, %105
+  %213, %214 = divs %212, %211, %105
+  %215, %216 = divs %214, %213, %105
+  %217, %218 = divs %216, %215, %105
+  %219, %220 = divs %218, %217, %105
+  %221, %222 = divs %220, %219, %105
+  %223, %224 = divs %222, %221, %105
+  %225, %226 = divs %224, %223, %105
+  %227, %228 = divs %226, %225, %105
+  %229, %230 = divs %228, %227, %105
+  %231, %232 = divs %230, %229, %105
+  %233, %234 = divs %232, %231, %105
+  %235, %236 = divs %234, %233, %105
+  %237, %238 = divs %236, %235, %105
+  %239, %240 = divs %238, %237, %105
+  %241 = mov.quotient %240
+  %242 = copy %103 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %243 = sel.nez %101, %241, %242
+  %244 = mov.dividend %243
+  %246, %247 = divs %244, %101, %105
+  %248, %249 = divs %247, %246, %105
+  %250, %251 = divs %249, %248, %105
+  %252, %253 = divs %251, %250, %105
+  %254, %255 = divs %253, %252, %105
+  %256, %257 = divs %255, %254, %105
+  %258, %259 = divs %257, %256, %105
+  %260, %261 = divs %259, %258, %105
+  %262, %263 = divs %261, %260, %105
+  %264, %265 = divs %263, %262, %105
+  %266, %267 = divs %265, %264, %105
+  %268, %269 = divs %267, %266, %105
+  %270, %271 = divs %269, %268, %105
+  %272, %273 = divs %271, %270, %105
+  %274, %275 = divs %273, %272, %105
+  %276, %277 = divs %275, %274, %105
+  %278, %279 = divs %277, %276, %105
+  %280, %281 = divs %279, %278, %105
+  %282, %283 = divs %281, %280, %105
+  %284, %285 = divs %283, %282, %105
+  %286, %287 = divs %285, %284, %105
+  %288, %289 = divs %287, %286, %105
+  %290, %291 = divs %289, %288, %105
+  %292, %293 = divs %291, %290, %105
+  %294, %295 = divs %293, %292, %105
+  %296, %297 = divs %295, %294, %105
+  %298, %299 = divs %297, %296, %105
+  %300, %301 = divs %299, %298, %105
+  %302, %303 = divs %301, %300, %105
+  %304, %305 = divs %303, %302, %105
+  %306, %307 = divs %305, %304, %105
+  %308, %309 = divs %307, %306, %105
+  %310 = mov.quotient %309
+  %311 = copy %103 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %312 = sel.nez %101, %310, %311
+  %next_2 = concat(%312, %101) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  return %next_2
+}
+
+// ====
+// RUN: compile-report target=amd.xdna.aie2p:core target-legalize{mode=final}
+func.def @word_divisor_predecessor(%input: i64, %word_input: i64, %divisor: i64) -> (i64) {
+  %word = scalar.assume %word_input [range(%word_input, 1, 4294967295)] : i64
+  %first = scalar.divui %input, %word : i64
+  %result = scalar.divui %first, %divisor : i64
+  func.return %result : i64
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: target_legalization legal=0 rewritten=1 scalarized=0 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1 maximum_created_ops=48
+COMPILE-REPORT: target_legalization[0] function=word_divisor_predecessor source_op=scalar.divui mode=final policy=prefer-native action=rewritten outcome=reference-fallback contract=unsupported legalizer=wide-integer-division strategy=reference bundle=aie2p-core config=amd.xdna.aie2p.core scalarized=false source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=48 erased_ops=8
