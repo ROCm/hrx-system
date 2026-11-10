@@ -293,7 +293,7 @@ func.def @selected_value_7(%input: i32) -> (i32) {
 }
 
 func.def @selected_value_0(%input: i32) -> (i32) {
-  %28 = scalar.constant 20 : i32
-  %29 = scalar.addi %input, %28 : i32
-  func.return %29 : i32
+  %26 = scalar.constant 20 : i32
+  %27 = scalar.addi %input, %26 : i32
+  func.return %27 : i32
 }

@@ -88,7 +88,7 @@ typedef struct loom_rewrite_preparation_t {
   const loom_rewriter_t* rewriter;
   // Short-lived storage for successful matches.
   iree_arena_allocator_t* arena;
-  // Collected actions, each owning a distinct root.
+  // Collected actions in reverse preorder so descendants apply before owners.
   loom_rewrite_action_t* actions;
 } loom_rewrite_preparation_t;
 

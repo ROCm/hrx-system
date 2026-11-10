@@ -19,6 +19,7 @@
 #include "loom/ops/test/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/pass/value_facts.h"
+#include "loom/rewrite/greedy.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/target/facts.h"
 #include "loom/target/facts_builder.h"
@@ -135,6 +136,41 @@ class CanonicalizerTest : public ::testing::Test {
     iree_status_t status =
         run_canonicalize(function, &options, registry->special_value_policy,
                          registry->fact_refinement_policy);
+    loom_cleanup_pattern_registry_storage_deinitialize(&registry_storage);
+    return status;
+  }
+
+  iree_status_t run_configured_prepared_patterns(
+      loom_func_like_t function, loom_greedy_rewrite_result_t* out_result) {
+    loom_cleanup_pattern_registry_storage_t registry_storage = {};
+    IREE_RETURN_IF_ERROR(loom_cleanup_pattern_registry_storage_initialize(
+        loom_cleanup_configured_pattern_provider_set(), iree_allocator_system(),
+        &registry_storage));
+    const loom_cleanup_pattern_registry_t* registry =
+        loom_cleanup_pattern_registry_storage_registry(&registry_storage);
+
+    iree_arena_allocator_t pass_arena;
+    iree_arena_initialize(&block_pool_, &pass_arena);
+    loom_pass_value_fact_owner_t value_facts = {};
+    loom_pass_value_fact_owner_initialize(&block_pool_, &value_facts);
+    loom_value_fact_table_t* fact_table = nullptr;
+    iree_status_t status = loom_pass_value_fact_owner_acquire(
+        &value_facts, module_, loom_pass_value_fact_scope_function(function),
+        &fact_table);
+    loom_greedy_rewrite_driver_t driver;
+    loom_greedy_rewrite_driver_initialize(module_, &pass_arena, fact_table,
+                                          &driver);
+    const loom_greedy_rewrite_options_t options = {
+        .prepared_patterns = registry->fact_independent,
+    };
+    if (iree_status_is_ok(status)) {
+      status = loom_greedy_rewrite_run_region(
+          &driver, function, loom_func_like_body(function), function.op,
+          &options, /*callbacks=*/nullptr, out_result);
+    }
+    loom_greedy_rewrite_driver_deinitialize(&driver);
+    loom_pass_value_fact_owner_deinitialize(&value_facts);
+    iree_arena_deinitialize(&pass_arena);
     loom_cleanup_pattern_registry_storage_deinitialize(&registry_storage);
     return status;
   }
@@ -619,6 +655,116 @@ TEST_F(CanonicalizerTest, ConfiguredPreparedPatternsBatchRegionlessRewrites) {
   EXPECT_TRUE(loom_index_constant_isa(mask));
   EXPECT_EQ(loom_attr_as_i64(loom_index_constant_value(mask)), 7);
   EXPECT_EQ(loom_op_const_operands(use)[3], true_value);
+}
+
+TEST_F(CanonicalizerTest, PreparedExactBranchesApplyInsideOut) {
+  const loom_type_t i1 = loom_type_scalar(LOOM_SCALAR_TYPE_I1);
+  const loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_value_id_t discarded_true = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t discarded_false = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t selected_true = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t selected_false = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_region_entry_block(body_), i32, &discarded_true));
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_region_entry_block(body_), i32, &discarded_false));
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_region_entry_block(body_), i32, &selected_true));
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_region_entry_block(body_), i32, &selected_false));
+
+  loom_op_t* true_condition = nullptr;
+  loom_op_t* false_condition = nullptr;
+  IREE_ASSERT_OK(loom_scalar_constant_build(&builder_, loom_attr_bool(true), i1,
+                                            LOOM_LOCATION_UNKNOWN,
+                                            &true_condition));
+  IREE_ASSERT_OK(loom_scalar_constant_build(&builder_, loom_attr_bool(false),
+                                            i1, LOOM_LOCATION_UNKNOWN,
+                                            &false_condition));
+
+  loom_op_t* outer = nullptr;
+  IREE_ASSERT_OK(
+      loom_scf_if_build(&builder_, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION,
+                        loom_scalar_constant_result(false_condition), &i32, 1,
+                        /*tied_results=*/nullptr, /*tied_result_count=*/0,
+                        LOOM_LOCATION_UNKNOWN, &outer));
+
+  loom_builder_ip_t saved = loom_builder_enter_region(
+      &builder_, outer, loom_scf_if_then_region(outer));
+  loom_op_t* discarded_inner = nullptr;
+  IREE_ASSERT_OK(
+      loom_scf_if_build(&builder_, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION,
+                        loom_scalar_constant_result(true_condition), &i32, 1,
+                        /*tied_results=*/nullptr, /*tied_result_count=*/0,
+                        LOOM_LOCATION_UNKNOWN, &discarded_inner));
+  loom_builder_ip_t inner_saved = loom_builder_enter_region(
+      &builder_, discarded_inner, loom_scf_if_then_region(discarded_inner));
+  loom_op_t* yield = nullptr;
+  IREE_ASSERT_OK(loom_scf_yield_build(&builder_, &discarded_true, 1,
+                                      LOOM_LOCATION_UNKNOWN, &yield));
+  loom_builder_restore(&builder_, inner_saved);
+  inner_saved = loom_builder_enter_region(
+      &builder_, discarded_inner, loom_scf_if_else_region(discarded_inner));
+  IREE_ASSERT_OK(loom_scf_yield_build(&builder_, &discarded_false, 1,
+                                      LOOM_LOCATION_UNKNOWN, &yield));
+  loom_builder_restore(&builder_, inner_saved);
+  const loom_value_id_t discarded_result =
+      loom_scf_if_results(discarded_inner).values[0];
+  IREE_ASSERT_OK(loom_scf_yield_build(&builder_, &discarded_result, 1,
+                                      LOOM_LOCATION_UNKNOWN, &yield));
+  loom_builder_restore(&builder_, saved);
+
+  saved = loom_builder_enter_region(&builder_, outer,
+                                    loom_scf_if_else_region(outer));
+  loom_op_t* empty_inner = nullptr;
+  IREE_ASSERT_OK(loom_scf_if_build(
+      &builder_, /*build_flags=*/0,
+      loom_scalar_constant_result(false_condition), /*result_types=*/nullptr,
+      /*result_count=*/0, /*tied_results=*/nullptr, /*tied_result_count=*/0,
+      LOOM_LOCATION_UNKNOWN, &empty_inner));
+  inner_saved = loom_builder_enter_region(&builder_, empty_inner,
+                                          loom_scf_if_then_region(empty_inner));
+  IREE_ASSERT_OK(loom_scf_yield_build(&builder_, /*values=*/nullptr,
+                                      /*values_count=*/0, LOOM_LOCATION_UNKNOWN,
+                                      &yield));
+  loom_builder_restore(&builder_, inner_saved);
+
+  loom_op_t* selected_inner = nullptr;
+  IREE_ASSERT_OK(
+      loom_scf_if_build(&builder_, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION,
+                        loom_scalar_constant_result(false_condition), &i32, 1,
+                        /*tied_results=*/nullptr, /*tied_result_count=*/0,
+                        LOOM_LOCATION_UNKNOWN, &selected_inner));
+  inner_saved = loom_builder_enter_region(
+      &builder_, selected_inner, loom_scf_if_then_region(selected_inner));
+  IREE_ASSERT_OK(loom_scf_yield_build(&builder_, &selected_true, 1,
+                                      LOOM_LOCATION_UNKNOWN, &yield));
+  loom_builder_restore(&builder_, inner_saved);
+  inner_saved = loom_builder_enter_region(
+      &builder_, selected_inner, loom_scf_if_else_region(selected_inner));
+  IREE_ASSERT_OK(loom_scf_yield_build(&builder_, &selected_false, 1,
+                                      LOOM_LOCATION_UNKNOWN, &yield));
+  loom_builder_restore(&builder_, inner_saved);
+  const loom_value_id_t selected_result =
+      loom_scf_if_results(selected_inner).values[0];
+  IREE_ASSERT_OK(loom_scf_yield_build(&builder_, &selected_result, 1,
+                                      LOOM_LOCATION_UNKNOWN, &yield));
+  loom_builder_restore(&builder_, saved);
+
+  const loom_value_id_t outer_result = loom_scf_if_results(outer).values[0];
+  loom_op_t* use = nullptr;
+  IREE_ASSERT_OK(loom_test_use_build(&builder_, &outer_result, 1,
+                                     LOOM_LOCATION_UNKNOWN, &use));
+
+  loom_greedy_rewrite_result_t result = {};
+  IREE_ASSERT_OK(run_configured_prepared_patterns(func_like_, &result));
+  EXPECT_TRUE(result.changed);
+  EXPECT_EQ(result.ops_modified, 4);
+  EXPECT_TRUE(iree_any_bit_set(outer->flags, LOOM_OP_FLAG_DEAD));
+  EXPECT_TRUE(iree_any_bit_set(discarded_inner->flags, LOOM_OP_FLAG_DEAD));
+  EXPECT_TRUE(iree_any_bit_set(empty_inner->flags, LOOM_OP_FLAG_DEAD));
+  EXPECT_TRUE(iree_any_bit_set(selected_inner->flags, LOOM_OP_FLAG_DEAD));
+  EXPECT_EQ(loom_op_const_operands(use)[0], selected_false);
 }
 
 class CanonicalizerBatchTest : public CanonicalizerTest,

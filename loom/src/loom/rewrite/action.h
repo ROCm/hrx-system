@@ -20,12 +20,13 @@ extern "C" {
 typedef struct loom_rewrite_action_t loom_rewrite_action_t;
 
 // One prepared, meaning-preserving rewrite. Providers embed this header before
-// their payload. Apply may replace only its own regionless root and must
-// preserve result counts and types. It reads surviving operands from the live
-// root, never from captured value IDs, and does not query facts. Other planned
-// roots remain live until their own actions execute. Failure is limited to
-// allocation or another infrastructure failure; matching has already made every
-// decision.
+// their payload. Apply may replace only its own root and must preserve result
+// counts and types. Regionful roots apply after every planned descendant, so an
+// action may restructure its owned regions but never a sibling or ancestor. It
+// reads surviving operands from the live root, never from captured value IDs,
+// and does not query facts. Other planned roots remain live until their own
+// actions execute. Failure is limited to allocation or another infrastructure
+// failure; matching has already made every decision.
 struct loom_rewrite_action_t {
   // Next action in the temporary batch; assigned by the shared collector.
   loom_rewrite_action_t* next;

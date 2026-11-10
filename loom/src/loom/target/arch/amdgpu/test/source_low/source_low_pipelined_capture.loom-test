@@ -43,36 +43,36 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 0
   %destination = resource<hal_binding> {extent = 1024, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %panel_step = s_mov_b32 1
   %panel_count = s_mov_b32 4
-  %70 = v_mov_b32 0
-  %empty = concat(%70, %70, %70, %70) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  %75 = v_lshlrev_b32_src0_inline %lane, 2
-  %word$76 = global_load_dword_saddr %75, %source : reg<amdgpu.vgpr>
-  %106 = slice %empty[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
-  %107 = slice %empty[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
-  low.br ^_bb1(%panel_step: reg<amdgpu.sgpr>, %106: reg<amdgpu.vgpr x2>, %107: reg<amdgpu.vgpr x2>, %word$76: reg<amdgpu.vgpr>)
-^_bb1(%62: reg<amdgpu.sgpr>, %104: reg<amdgpu.vgpr x2>, %105: reg<amdgpu.vgpr x2>, %64: reg<amdgpu.vgpr>):
-  %77 = s_cmp_lt_i32 %62, %panel_count
-  low.cond_br %77, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+  %69 = v_mov_b32 0
+  %empty = concat(%69, %69, %69, %69) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %74 = v_lshlrev_b32_src0_inline %lane, 2
+  %word$75 = global_load_dword_saddr %74, %source : reg<amdgpu.vgpr>
+  %105 = slice %empty[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %106 = slice %empty[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  low.br ^_bb1(%panel_step: reg<amdgpu.sgpr>, %105: reg<amdgpu.vgpr x2>, %106: reg<amdgpu.vgpr x2>, %word$75: reg<amdgpu.vgpr>)
+^_bb1(%61: reg<amdgpu.sgpr>, %103: reg<amdgpu.vgpr x2>, %104: reg<amdgpu.vgpr x2>, %63: reg<amdgpu.vgpr>):
+  %76 = s_cmp_lt_i32 %61, %panel_count
+  low.cond_br %76, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
-  %78 = v_mov_b32_copy %62
-  %79 = v_lshl_add_u32_shift_imm %78, %lane, 6
-  %80 = v_lshlrev_b32_src0_inline %79, 2
-  %word$81 = global_load_dword_saddr %80, %source : reg<amdgpu.vgpr>
-  %low$100 = v_cvt_pk_f32_fp8 %64
-  %high_word$101 = v_lshrrev_b32_src0_inline %64, 16
-  %high$102 = v_cvt_pk_f32_fp8 %high_word$101
-  %85 = v_pk_add_f32 %104, %low$100
-  %88 = v_pk_add_f32 %105, %high$102
-  %90 = s_add_u32 %62, %panel_step
-  low.br ^_bb1(%90: reg<amdgpu.sgpr>, %85: reg<amdgpu.vgpr x2>, %88: reg<amdgpu.vgpr x2>, %word$81: reg<amdgpu.vgpr>)
+  %77 = v_mov_b32_copy %61
+  %78 = v_lshl_add_u32_shift_imm %77, %lane, 6
+  %79 = v_lshlrev_b32_src0_inline %78, 2
+  %word$80 = global_load_dword_saddr %79, %source : reg<amdgpu.vgpr>
+  %low$99 = v_cvt_pk_f32_fp8 %63
+  %high_word$100 = v_lshrrev_b32_src0_inline %63, 16
+  %high$101 = v_cvt_pk_f32_fp8 %high_word$100
+  %84 = v_pk_add_f32 %103, %low$99
+  %87 = v_pk_add_f32 %104, %high$101
+  %89 = s_add_u32 %61, %panel_step
+  low.br ^_bb1(%89: reg<amdgpu.sgpr>, %84: reg<amdgpu.vgpr x2>, %87: reg<amdgpu.vgpr x2>, %word$80: reg<amdgpu.vgpr>)
 ^_bb3:
-  %low$2 = v_cvt_pk_f32_fp8 %64
-  %high_word$3 = v_lshrrev_b32_src0_inline %64, 16
+  %low$2 = v_cvt_pk_f32_fp8 %63
+  %high_word$3 = v_lshrrev_b32_src0_inline %63, 16
   %high$4 = v_cvt_pk_f32_fp8 %high_word$3
-  %94 = v_pk_add_f32 %104, %low$2
-  %97 = v_pk_add_f32 %105, %high$4
-  %next = concat(%94, %97) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
-  %99 = v_lshlrev_b32_src0_inline %lane, 4
-  global_store_dwordx4_saddr %99, %next, %destination
+  %93 = v_pk_add_f32 %103, %low$2
+  %96 = v_pk_add_f32 %104, %high$4
+  %next = concat(%93, %96) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %98 = v_lshlrev_b32_src0_inline %lane, 4
+  global_store_dwordx4_saddr %98, %next, %destination
   return
 }

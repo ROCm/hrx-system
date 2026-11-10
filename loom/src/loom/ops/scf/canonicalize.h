@@ -37,6 +37,16 @@ iree_status_t loom_scf_replace_results_and_erase(
     loom_op_t* op, loom_rewriter_t* rewriter,
     const loom_value_id_t* replacements, uint16_t replacement_count);
 
+// Returns whether the branch selected by an exact condition is complete and
+// can replace the conditional's result tuple.
+bool loom_scf_if_can_apply_exact_condition(const loom_op_t* op, bool condition);
+
+// Replaces |op| using an exact condition previously proved applicable. Reads
+// the selected region and yielded values from the live root so nested rewrites
+// may update the branch before this operation applies.
+iree_status_t loom_scf_if_apply_exact_condition(loom_op_t* op, bool condition,
+                                                loom_rewriter_t* rewriter);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

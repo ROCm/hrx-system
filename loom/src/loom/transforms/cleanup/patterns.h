@@ -8,7 +8,8 @@
 //
 // Cleanup separates fact-independent rewrites from four observing phases.
 // Fact-independent patterns may prepare root-local actions from coherent facts
-// once, then run structural callbacks in the driver's non-observing batch.
+// once, apply nested roots inside-out, then run structural callbacks in the
+// driver's non-observing batch.
 // Region-initialization patterns run once in region preorder before the first
 // worklist is processed.
 // Universal pre-fold patterns run before constant folding, universal post-type

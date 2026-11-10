@@ -247,6 +247,16 @@ TEST(CleanupPatternsTest, ConfiguredProvidersCoverOwnedRoots) {
             provider_set->special_value_policy);
   EXPECT_EQ(registries->fact_refinement_policy,
             provider_set->fact_refinement_policy);
+  const loom_rewrite_pattern_registry_t* fact_independent =
+      registries->fact_independent;
+  EXPECT_EQ(loom_rewrite_pattern_registry_lookup_kind(fact_independent,
+                                                      LOOM_OP_SCF_IF)
+                .count,
+            1u);
+  EXPECT_EQ(loom_rewrite_pattern_registry_lookup_kind(fact_independent,
+                                                      LOOM_OP_SCF_SELECT)
+                .count,
+            1u);
   const loom_rewrite_pattern_registry_t* region_initialization =
       registries->region_initialization;
   EXPECT_EQ(loom_rewrite_pattern_registry_lookup_kind(region_initialization,

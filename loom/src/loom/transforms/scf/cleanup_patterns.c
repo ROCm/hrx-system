@@ -7,8 +7,56 @@
 #include "loom/transforms/scf/cleanup_patterns.h"
 
 #include "loom/ir/module.h"
+#include "loom/ops/scf/canonicalize.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/rewrite/rewriter.h"
+
+typedef struct loom_scf_prepared_exact_branch_t {
+  // Root-local application owned by the shared prepared batch.
+  loom_rewrite_action_t action;
+  // Exact condition selected from the coherent fact snapshot.
+  bool condition;
+} loom_scf_prepared_exact_branch_t;
+
+static iree_status_t loom_scf_apply_prepared_exact_branch(
+    const loom_rewrite_action_t* base_action, loom_rewriter_t* rewriter) {
+  loom_op_t* op = base_action->root;
+  if (loom_rewriter_is_trivially_dead(rewriter, op)) {
+    return loom_rewriter_erase(rewriter, op);
+  }
+  const loom_scf_prepared_exact_branch_t* action =
+      (const loom_scf_prepared_exact_branch_t*)base_action;
+  return loom_scf_if_apply_exact_condition(op, action->condition, rewriter);
+}
+
+static iree_status_t loom_scf_prepare_exact_branch_pattern(
+    const loom_rewrite_pattern_t* pattern, const loom_module_t* module,
+    const loom_value_fact_table_t* facts, const loom_op_t* op,
+    iree_arena_allocator_t* arena, loom_rewrite_action_t** out_action) {
+  (void)pattern;
+  (void)module;
+  *out_action = NULL;
+  if (!facts) {
+    return iree_ok_status();
+  }
+  bool condition = false;
+  if (!loom_value_facts_as_exact_bool(
+          loom_value_fact_table_lookup(facts, loom_scf_if_condition(op)),
+          &condition)) {
+    return iree_ok_status();
+  }
+  if (!loom_scf_if_can_apply_exact_condition(op, condition)) {
+    return iree_ok_status();
+  }
+
+  loom_scf_prepared_exact_branch_t* action = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(arena, sizeof(*action), (void**)&action));
+  action->action.apply = loom_scf_apply_prepared_exact_branch;
+  action->condition = condition;
+  *out_action = &action->action;
+  return iree_ok_status();
+}
 
 typedef struct loom_scf_prepared_operand_replacement_t {
   // Root-local application owned by the shared prepared batch.
@@ -68,6 +116,10 @@ static iree_status_t loom_scf_prepare_select_pattern(
 }
 
 static const loom_rewrite_pattern_t kScfPreparedCanonicalizationPatterns[] = {
+    {
+        .root_kind = LOOM_OP_SCF_IF,
+        .prepare = loom_scf_prepare_exact_branch_pattern,
+    },
     {
         .root_kind = LOOM_OP_SCF_SELECT,
         .prepare = loom_scf_prepare_select_pattern,

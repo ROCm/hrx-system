@@ -1842,6 +1842,37 @@ static iree_status_t loom_scf_if_normalize_empty_then(
   return loom_rewriter_erase(rewriter, op);
 }
 
+bool loom_scf_if_can_apply_exact_condition(const loom_op_t* op,
+                                           bool condition) {
+  loom_region_t* selected_region =
+      condition ? loom_scf_if_then_region(op) : loom_scf_if_else_region(op);
+  if (!selected_region) {
+    return op->result_count == 0;
+  }
+  loom_op_t* selected_yield = loom_scf_region_terminator(selected_region);
+  return selected_yield && selected_yield->operand_count == op->result_count;
+}
+
+iree_status_t loom_scf_if_apply_exact_condition(loom_op_t* op, bool condition,
+                                                loom_rewriter_t* rewriter) {
+  loom_region_t* selected_region =
+      condition ? loom_scf_if_then_region(op) : loom_scf_if_else_region(op);
+  if (!selected_region) {
+    return loom_rewriter_erase(rewriter, op);
+  }
+  loom_op_t* selected_yield = loom_scf_region_terminator(selected_region);
+  IREE_ASSERT(selected_yield);
+  IREE_ASSERT(selected_yield->operand_count == op->result_count);
+  loom_value_slice_t yielded_values = loom_scf_yield_values(selected_yield);
+  IREE_RETURN_IF_ERROR(loom_scf_move_region_body_before_op(
+      rewriter, selected_region, selected_yield, op));
+  if (op->result_count == 0) {
+    return loom_rewriter_erase(rewriter, op);
+  }
+  return loom_rewriter_replace_all_uses_and_erase(
+      rewriter, op, yielded_values.values, op->result_count);
+}
+
 iree_status_t loom_scf_if_canonicalize(loom_op_t* op,
                                        loom_rewriter_t* rewriter) {
   bool condition = false;
@@ -1884,27 +1915,8 @@ iree_status_t loom_scf_if_canonicalize(loom_op_t* op,
     return loom_scf_if_selectify_speculatable_values(op, rewriter);
   }
 
-  loom_region_t* selected_region =
-      condition ? loom_scf_if_then_region(op) : loom_scf_if_else_region(op);
-  if (!selected_region) {
-    if (op->result_count == 0) {
-      return loom_rewriter_erase(rewriter, op);
-    }
+  if (!loom_scf_if_can_apply_exact_condition(op, condition)) {
     return iree_ok_status();
   }
-  loom_op_t* yield = loom_scf_region_terminator(selected_region);
-  if (!yield) {
-    return iree_ok_status();
-  }
-
-  loom_value_slice_t yielded_values = loom_scf_yield_values(yield);
-  if (yielded_values.count != op->result_count) {
-    return iree_ok_status();
-  }
-
-  IREE_RETURN_IF_ERROR(loom_scf_move_region_body_before_op(
-      rewriter, selected_region, yield, op));
-
-  return loom_scf_replace_results_and_erase(op, rewriter, yielded_values.values,
-                                            yielded_values.count);
+  return loom_scf_if_apply_exact_condition(op, condition, rewriter);
 }

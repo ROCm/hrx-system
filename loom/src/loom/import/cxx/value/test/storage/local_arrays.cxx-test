@@ -273,18 +273,18 @@ unsigned repeated(unsigned count) {
 // ----
 func.def public @repeated(%count: i32) -> (i32) {
   %total$2 = scalar.constant 0 : i32
-  %58 = index.constant 0 : offset
+  %57 = index.constant 0 : offset
   %5 = index.cast %count : i32 to offset
   %6 = index.constant 1 : offset
-  %total$9 = scf.for %i = [%58 to %5 step %6](%total$8 = %total$2 : i32) -> (i32) {
+  %total$9 = scf.for %i = [%57 to %5 step %6](%total$8 = %total$2 : i32) -> (i32) {
     %10 = index.cast %i : offset to i32
     %18 = scalar.constant 1 : i32
     %19 = scalar.cmpi eq, %10, %18 : i32
     %50 = scalar.constant 4 : i32
-    %64 = scalar.addi %10, %total$8 : i32
-    %65 = scalar.addi %64, %50 : i32
-    %total$63 = scf.select %19, %total$8, %65 : i32
-    scf.yield %total$63 : i32
+    %63 = scalar.addi %10, %total$8 : i32
+    %64 = scalar.addi %63, %50 : i32
+    %total$62 = scf.select %19, %total$8, %64 : i32
+    scf.yield %total$62 : i32
   }
   func.return %total$9 : i32
 }
