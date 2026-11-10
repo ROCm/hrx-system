@@ -30,6 +30,9 @@ TEST_P(AqlTimestampTest, ConfirmedClockSamplesAreVisibleBeforeReuse) {
   amdf_observation_clock_info_t clock = {};
   const amdf_status_t clock_status =
       gpu_api_->device_query_queue_clock_info(device_, family_.ordinal, &clock);
+  if (clock_status == amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
+    GTEST_SKIP() << "native queue-clock metadata unavailable";
+  }
   ASSERT_EQ(clock_status, AMDF_STATUS_OK);
   ASSERT_GT(clock.frequency_hz, 0u);
   RecordProperty("aql_timestamp_frequency_hz",

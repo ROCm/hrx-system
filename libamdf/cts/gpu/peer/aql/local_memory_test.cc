@@ -296,7 +296,8 @@ class PeerAqlMemoryTest : public GpuPeerDeviceFixture {
                  AMDF_HOST_MEMORY_PROPERTY_WRITE_BACK));
       ASSERT_EQ(memory->host.byte_length, creation.byte_length);
     } else {
-      ASSERT_EQ(memory->info.flags & AMDF_MEMORY_FLAG_HOST_VISIBLE, 0u);
+      // Exercise LOCAL backing exclusively through the GPUs even when the
+      // placement also permits a host view.
       ASSERT_EQ(memory->mapping, nullptr);
     }
     for (uint32_t i = 0; i < 2; ++i) {

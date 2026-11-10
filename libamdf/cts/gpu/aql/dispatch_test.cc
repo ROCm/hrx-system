@@ -14,14 +14,21 @@
 
 namespace {
 
-void CheckDeviceLocalIngressPair(const amdf_memory_pair_info_t& pair) {
+void CheckDeviceLocalIngressPair(const amdf_memory_pair_info_t& pair,
+                                 bool host_coherent) {
   ASSERT_NE(pair.flags & AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE, 0u);
-  ASSERT_TRUE(pair.release.kind == AMDF_CACHE_TRANSITION_KIND_RANGE ||
-              pair.release.kind == AMDF_CACHE_TRANSITION_KIND_GLOBAL);
-  ASSERT_TRUE(
-      pair.release.executor == AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API ||
-      pair.release.executor == AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT);
-  ASSERT_EQ(pair.release.host_operation, AMDF_HOST_CACHE_OPERATION_FLUSH);
+  if (host_coherent) {
+    ASSERT_EQ(pair.release.kind, AMDF_CACHE_TRANSITION_KIND_NONE);
+    ASSERT_EQ(pair.release.executor, AMDF_CACHE_TRANSITION_EXECUTOR_NONE);
+    ASSERT_EQ(pair.release.host_operation, AMDF_HOST_CACHE_OPERATION_NONE);
+  } else {
+    ASSERT_TRUE(pair.release.kind == AMDF_CACHE_TRANSITION_KIND_RANGE ||
+                pair.release.kind == AMDF_CACHE_TRANSITION_KIND_GLOBAL);
+    ASSERT_TRUE(
+        pair.release.executor == AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API ||
+        pair.release.executor == AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT);
+    ASSERT_EQ(pair.release.host_operation, AMDF_HOST_CACHE_OPERATION_FLUSH);
+  }
   ASSERT_EQ(pair.acquire.kind, AMDF_CACHE_TRANSITION_KIND_GLOBAL);
   ASSERT_EQ(pair.acquire.executor, AMDF_CACHE_TRANSITION_EXECUTOR_QUEUE);
   ASSERT_EQ(pair.acquire.operation, AMDF_CACHE_OPERATION_ACQUIRE_FROM_SYSTEM);
@@ -169,6 +176,7 @@ TEST_F(AqlDispatchTest, HostPublishesDeviceLocalKernargsAcrossEpochs) {
             AMDF_STATUS_OK);
   uint32_t profile_ordinal = AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN;
   amdf_host_memory_properties_t host_properties = 0;
+  bool host_coherent = false;
   for (uint32_t ordinal = 0; ordinal < scope_info.memory_profile_count;
        ++ordinal) {
     amdf_memory_profile_t profile = {
@@ -193,6 +201,8 @@ TEST_F(AqlDispatchTest, HostPublishesDeviceLocalKernargsAcrossEpochs) {
         (required_flags & ~profile.supported_flags) == 0) {
       profile_ordinal = ordinal;
       host_properties = profile.host_mapping.properties;
+      host_coherent =
+          (capabilities.guaranteed_flags & AMDF_MEMORY_FLAG_HOST_COHERENT) != 0;
       break;
     }
   }
@@ -246,7 +256,8 @@ TEST_F(AqlDispatchTest, HostPublishesDeviceLocalKernargsAcrossEpochs) {
     GTEST_SKIP() << "GPU has no qualified host-to-local publication path";
   }
   ASSERT_EQ(prospective_status, AMDF_STATUS_OK);
-  ASSERT_NO_FATAL_FAILURE(CheckDeviceLocalIngressPair(prospective));
+  ASSERT_NO_FATAL_FAILURE(
+      CheckDeviceLocalIngressPair(prospective, host_coherent));
 
   GpuMemory* arguments = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateMemory(local_scope_, creation, &arguments));
@@ -262,7 +273,10 @@ TEST_F(AqlDispatchTest, HostPublishesDeviceLocalKernargsAcrossEpochs) {
   ASSERT_EQ(
       api_->memory_query_pair_info(&argument_host, &argument_device, &concrete),
       AMDF_STATUS_OK);
-  ASSERT_NO_FATAL_FAILURE(CheckDeviceLocalIngressPair(concrete));
+  ASSERT_EQ(
+      (arguments->access_info.flags & AMDF_MEMORY_FLAG_HOST_COHERENT) != 0,
+      host_coherent);
+  ASSERT_NO_FATAL_FAILURE(CheckDeviceLocalIngressPair(concrete, host_coherent));
 
   constexpr uint32_t kGridSize = 1024;
   constexpr uint32_t kWordCount = 2048;
@@ -320,10 +334,12 @@ TEST_F(AqlDispatchTest, HostPublishesDeviceLocalKernargsAcrossEpochs) {
     std::memset(arguments->host.pointer, 0, arguments->info.byte_length);
     std::memcpy(arguments->host.pointer, &payload,
                 kernel.arguments.byte_length);
-    ASSERT_EQ(api_->host_mapping_cache_control(arguments->mapping,
-                                               AMDF_HOST_CACHE_OPERATION_FLUSH,
-                                               0, kernel.arguments.byte_length),
-              AMDF_STATUS_OK);
+    if (!host_coherent) {
+      ASSERT_EQ(api_->host_mapping_cache_control(
+                    arguments->mapping, AMDF_HOST_CACHE_OPERATION_FLUSH, 0,
+                    kernel.arguments.byte_length),
+                AMDF_STATUS_OK);
+    }
     signal.value = 1;
     const auto packet =
         aql::Dispatch(aql::HeaderBarrier::kDisabled,

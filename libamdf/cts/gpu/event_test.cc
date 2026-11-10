@@ -249,6 +249,11 @@ TEST_F(GpuEventTest, IndependentInstanceContextsIsolateAndReclaimEvents) {
   };
   ASSERT_EQ(api_->endpoint_query_info(endpoint_, &endpoint_info),
             AMDF_STATUS_OK);
+  if ((endpoint_info.type_flags & AMDF_ENDPOINT_TYPE_FLAG_SOFTWARE_DEVICE) !=
+      0) {
+    GTEST_SKIP()
+        << "software endpoints belong to explicitly configured machines";
+  }
   // Repeatedly create two simultaneous contexts, then fully release each pair.
   // Neither native event identity nor backing is shared with the cached device.
   for (uint32_t epoch = 0; epoch < 3; ++epoch) {

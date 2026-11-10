@@ -86,9 +86,14 @@ TEST_P(Pm4HostMappingTest, ReplacesCpuAndGpuViewsBeforeImmediateUse) {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CAPABILITIES,
       .structure_size = sizeof(gpu_capabilities),
   };
-  ASSERT_EQ(api_->device_query_memory_reservation_capabilities(
-                device_, 0, &gpu_capabilities),
-            AMDF_STATUS_OK);
+  const amdf_status_t reservation_status =
+      api_->device_query_memory_reservation_capabilities(device_, 0,
+                                                         &gpu_capabilities);
+  if (reservation_status ==
+      amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
+    GTEST_SKIP() << "host-completed GPU mapping updates are unavailable";
+  }
+  ASSERT_EQ(reservation_status, AMDF_STATUS_OK);
   const amdf_memory_device_access_t consumer = {
       device_,
       {

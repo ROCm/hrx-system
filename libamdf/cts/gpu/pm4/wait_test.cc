@@ -18,6 +18,15 @@ namespace {
 constexpr size_t kMemoryByteLength = 4096;
 using MemoryWords = std::array<uint64_t, kMemoryByteLength / sizeof(uint64_t)>;
 
+bool SupportsWaitWidth(const amdf_queue_family_info_t& family,
+                       size_t byte_length) {
+  const auto operations =
+      byte_length == 4
+          ? family.atomic_capabilities.operations_without_dispatch_32
+          : family.atomic_capabilities.operations_without_dispatch_64;
+  return (operations & AMDF_ATOMIC_OPERATION_WAIT) != 0;
+}
+
 MemoryWords MakeGuardWords(uint64_t seed) {
   MemoryWords words;
   for (size_t i = 0; i < words.size(); ++i) {
@@ -121,6 +130,15 @@ class Pm4WaitTest : public Pm4CommandTest,
                     public ::testing::WithParamInterface<WaitCase> {
  protected:
   Pm4WaitTest() : Pm4CommandTest(AMDF_QUEUE_ROLE_ATOMIC) {}
+
+  amdf_status_t MatchGpuEndpoint(amdf_endpoint_t* endpoint,
+                                 bool* out_matches) override {
+    const auto status = Pm4CommandTest::MatchGpuEndpoint(endpoint, out_matches);
+    if (amdf_status_is_ok(status) && *out_matches) {
+      *out_matches = SupportsWaitWidth(family_, GetParam().byte_length);
+    }
+    return status;
+  }
 
   enum class Producer { kCopy, kAtomicStore, kHostStore };
   void RunHandoff(Producer producer_kind);
@@ -386,24 +404,28 @@ INSTANTIATE_TEST_SUITE_P(Comparison, Pm4WaitTest,
                            return info.param.name;
                          });
 
-class Pm4UnconditionalWaitTest : public Pm4CommandTest {};
+class Pm4UnconditionalWaitTest
+    : public Pm4CommandTest,
+      public ::testing::WithParamInterface<uint32_t> {
+ protected:
+  Pm4UnconditionalWaitTest() : Pm4CommandTest(AMDF_QUEUE_ROLE_ATOMIC) {}
 
-TEST_F(Pm4UnconditionalWaitTest, BothWidthsContinueForEveryOperandRelation) {
-  const struct {
-    // Memory operand width in bytes.
-    size_t byte_length;
-    // Backed operand below, equal to or above the reference.
-    uint64_t value;
-    // Full-width reference compared to the operand.
-    uint64_t reference;
-  } cases[] = {
-      {4, 0x003fffff, 0x00400000},
-      {4, 0x00400000, 0x00400000},
-      {4, 0x00400001, 0x00400000},
-      {8, UINT64_C(0x00000000ffffffff), UINT64_C(0x0000000100000000)},
-      {8, UINT64_C(0x0000000100000000), UINT64_C(0x0000000100000000)},
-      {8, UINT64_C(0x0000000100000001), UINT64_C(0x0000000100000000)},
-  };
+  amdf_status_t MatchGpuEndpoint(amdf_endpoint_t* endpoint,
+                                 bool* out_matches) override {
+    const auto status = Pm4CommandTest::MatchGpuEndpoint(endpoint, out_matches);
+    if (amdf_status_is_ok(status) && *out_matches) {
+      *out_matches = SupportsWaitWidth(family_, GetParam());
+    }
+    return status;
+  }
+};
+
+TEST_P(Pm4UnconditionalWaitTest, ContinuesForEveryOperandRelation) {
+  const uint32_t byte_length = GetParam();
+  const uint64_t reference =
+      byte_length == 4 ? UINT64_C(0x00400000) : UINT64_C(0x0000000100000000);
+  const std::array<uint64_t, 3> values_to_compare = {reference - 1, reference,
+                                                     reference + 1};
   GpuMemory* control = nullptr;
   ASSERT_NO_FATAL_FAILURE(
       CreateMemory(AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
@@ -419,26 +441,24 @@ TEST_F(Pm4UnconditionalWaitTest, BothWidthsContinueForEveryOperandRelation) {
 
   Pm4CommandWriter commands(queue->words().data(), *pm4_profile_);
   commands.SystemBarrier();
-  for (size_t i = 0; i < std::size(cases); ++i) {
-    const auto& test = cases[i];
+  for (size_t i = 0; i < values_to_compare.size(); ++i) {
+    const uint64_t value = values_to_compare[i];
     const size_t source_word = i * 8;
     const size_t target_word = 64 + source_word;
     expected[source_word] =
-        test.byte_length == 4
-            ? (expected[source_word] & UINT64_C(0xffffffff00000000)) |
-                  test.value
-            : test.value;
+        byte_length == 4
+            ? (expected[source_word] & UINT64_C(0xffffffff00000000)) | value
+            : value;
     expected[target_word] = expected[source_word];
     values[source_word] = expected[source_word];
     values[target_word] = ~expected[target_word];
     const uint64_t address =
         control->device_address + source_word * sizeof(uint64_t);
-    if (test.byte_length == 4) {
-      commands.WaitMemory32(address, static_cast<uint32_t>(test.reference),
+    if (byte_length == 4) {
+      commands.WaitMemory32(address, static_cast<uint32_t>(reference),
                             Pm4MemoryComparison::kAlways);
     } else {
-      commands.WaitMemory64(address, test.reference,
-                            Pm4MemoryComparison::kAlways);
+      commands.WaitMemory64(address, reference, Pm4MemoryComparison::kAlways);
     }
     commands.CopyData64(
         address, control->device_address + target_word * sizeof(uint64_t));
@@ -452,9 +472,16 @@ TEST_F(Pm4UnconditionalWaitTest, BothWidthsContinueForEveryOperandRelation) {
       GpuWaitEqual<uint32_t>(reinterpret_cast<uintptr_t>(values + 128), 1));
   EXPECT_EQ(ReadWords(*control), expected);
   RecordProperty("wait_comparison", 0);
-  RecordProperty("wait_count", std::size(cases));
+  RecordProperty("wait_operand_byte_length", byte_length);
+  RecordProperty("wait_count", values_to_compare.size());
   RecordProperty("memory_checked_bytes", kMemoryByteLength);
   EXPECT_NO_FATAL_FAILURE(queue->WaitRetired(api_));
 }
+
+INSTANTIATE_TEST_SUITE_P(Width, Pm4UnconditionalWaitTest,
+                         ::testing::Values(4u, 8u),
+                         [](const ::testing::TestParamInfo<uint32_t>& info) {
+                           return info.param == 4 ? "Dword" : "Qword";
+                         });
 
 }  // namespace

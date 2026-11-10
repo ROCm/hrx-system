@@ -154,6 +154,12 @@ class GpuLinuxMemoryTest : public GpuDeviceFixture {
           AMDF_MEMORY_PROFILE_ROLE_CREATE |
               (map_memory ? AMDF_MEMORY_PROFILE_ROLE_HOST_MAP : 0),
           create_info.required_flags, access.requirements);
+      ASSERT_FALSE(HasFailure());
+      if (create_info.memory_profile_ordinal ==
+          AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN) {
+        GTEST_SKIP()
+            << "requested placement and device-access profile unavailable";
+      }
       create_info.byte_length = 4097;
       create_info.minimum_alignment = 1024 * 1024;
 
@@ -229,19 +235,32 @@ class GpuLinuxMemoryTest : public GpuDeviceFixture {
         ASSERT_NE(mapping_infos_[0].pointer, nullptr);
         EXPECT_EQ(mapping_infos_[0].properties,
                   profile.host_mapping.properties);
-        EXPECT_NE(mapping_infos_[0].cache_line_size, 0u);
-        EXPECT_EQ(mapping_infos_[0].invalidate.kind,
-                  AMDF_CACHE_TRANSITION_KIND_RANGE);
-        EXPECT_EQ(mapping_infos_[0].invalidate.executor,
-                  AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT);
-        EXPECT_EQ(mapping_infos_[0].invalidate.host_operation,
-                  AMDF_HOST_CACHE_OPERATION_INVALIDATE);
-        EXPECT_EQ(mapping_infos_[0].invalidate.host_instruction,
-                  AMDF_HOST_CACHE_INSTRUCTION_X86_CLFLUSH);
-        EXPECT_EQ(mapping_infos_[0].invalidate.host_fence_after,
-                  AMDF_HOST_CACHE_FENCE_X86_MFENCE);
-        if ((profile.host_mapping.properties &
-             AMDF_HOST_MEMORY_PROPERTY_WRITE_BACK) != 0) {
+        if (mapping_infos_[0].invalidate.kind ==
+            AMDF_CACHE_TRANSITION_KIND_NONE) {
+          EXPECT_EQ(mapping_infos_[0].invalidate.executor,
+                    AMDF_CACHE_TRANSITION_EXECUTOR_NONE);
+          EXPECT_EQ(mapping_infos_[0].invalidate.host_operation,
+                    AMDF_HOST_CACHE_OPERATION_NONE);
+        } else {
+          EXPECT_NE(mapping_infos_[0].cache_line_size, 0u);
+          EXPECT_EQ(mapping_infos_[0].invalidate.kind,
+                    AMDF_CACHE_TRANSITION_KIND_RANGE);
+          EXPECT_EQ(mapping_infos_[0].invalidate.executor,
+                    AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT);
+          EXPECT_EQ(mapping_infos_[0].invalidate.host_operation,
+                    AMDF_HOST_CACHE_OPERATION_INVALIDATE);
+          EXPECT_EQ(mapping_infos_[0].invalidate.host_instruction,
+                    AMDF_HOST_CACHE_INSTRUCTION_X86_CLFLUSH);
+          EXPECT_EQ(mapping_infos_[0].invalidate.host_fence_after,
+                    AMDF_HOST_CACHE_FENCE_X86_MFENCE);
+        }
+        if (mapping_infos_[0].flush.kind == AMDF_CACHE_TRANSITION_KIND_NONE) {
+          EXPECT_EQ(mapping_infos_[0].flush.executor,
+                    AMDF_CACHE_TRANSITION_EXECUTOR_NONE);
+          EXPECT_EQ(mapping_infos_[0].flush.host_operation,
+                    AMDF_HOST_CACHE_OPERATION_NONE);
+        } else if ((profile.host_mapping.properties &
+                    AMDF_HOST_MEMORY_PROPERTY_WRITE_BACK) != 0) {
           EXPECT_EQ(mapping_infos_[0].flush.kind,
                     AMDF_CACHE_TRANSITION_KIND_RANGE);
           EXPECT_EQ(mapping_infos_[0].flush.executor,
@@ -277,7 +296,7 @@ class GpuLinuxMemoryTest : public GpuDeviceFixture {
                 : AMDF_STATUS_OK);
         ASSERT_EQ(api_->host_mapping_destroy(mappings_[0]), AMDF_STATUS_OK);
         mappings_[0] = nullptr;
-      } else {
+      } else if ((info.flags & AMDF_MEMORY_FLAG_HOST_VISIBLE) == 0) {
         amdf_memory_map_info_t map_info = {
             .type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO,
             .structure_size = sizeof(map_info),
@@ -384,10 +403,14 @@ class GpuLinuxMemoryTest : public GpuDeviceFixture {
     EXPECT_EQ(mapping_infos_[0].properties,
               (AMDF_HOST_MEMORY_PROPERTY_READ_CACHED |
                AMDF_HOST_MEMORY_PROPERTY_WRITE_BACK));
-    EXPECT_NE(mapping_infos_[0].cache_line_size, 0u);
-    EXPECT_EQ(mapping_infos_[0].flush.kind, AMDF_CACHE_TRANSITION_KIND_RANGE);
-    EXPECT_EQ(mapping_infos_[0].invalidate.kind,
-              AMDF_CACHE_TRANSITION_KIND_RANGE);
+    for (const auto* transition :
+         {&mapping_infos_[0].flush, &mapping_infos_[0].invalidate}) {
+      EXPECT_TRUE(transition->kind == AMDF_CACHE_TRANSITION_KIND_NONE ||
+                  transition->kind == AMDF_CACHE_TRANSITION_KIND_RANGE);
+      if (transition->kind == AMDF_CACHE_TRANSITION_KIND_RANGE) {
+        EXPECT_NE(mapping_infos_[0].cache_line_size, 0u);
+      }
+    }
     std::memset(mapping_infos_[0].pointer, 0xA5,
                 static_cast<size_t>(info.byte_length));
 
