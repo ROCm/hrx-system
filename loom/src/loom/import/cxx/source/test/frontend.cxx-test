@@ -251,3 +251,17 @@ static_assert((1u >> -1) == (1u >> -1));
 // WARNING@+2: PARSE/036 "invalid binary expression"
 // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert((1u << (1ULL << 32)) == (1u << (1ULL << 32)));
+
+// ====
+// RUN: verify
+// A template-template default names a template, not a value expression.
+template <class T>
+struct Box {};
+template <class T>
+struct Holder {
+  template <template <class> class Container = Box>
+  constexpr Holder(T value) : value(value) {}
+  T value;
+};
+constexpr Holder<unsigned> holder{7};
+static_assert(holder.value == 7);
