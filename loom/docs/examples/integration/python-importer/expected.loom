@@ -1,0 +1,17 @@
+target.generic<reference> @reference
+
+kernel.def target(@reference) export("copy_64_bytes") @copy_64_bytes() {
+  %wg_count_x = index.constant 1 : index
+  %wg_count_y = index.constant 1 : index
+  %wg_count_z = index.constant 1 : index
+  %wg_size_x = index.constant 64 : index
+  %wg_size_y = index.constant 1 : index
+  %wg_size_z = index.constant 1 : index
+  kernel.launch.config workgroups(%wg_count_x, %wg_count_y, %wg_count_z) workgroup_size(%wg_size_x, %wg_size_y, %wg_size_z) : index
+} launch(%source: buffer, %target: buffer) {
+  %workitem_index = kernel.workitem.dispatch.id<x> : index
+  %byte_offset = index.cast %workitem_index : index to offset
+  %value = buffer.load.i8.u %source[%byte_offset]
+  buffer.store.i8 %value, %target[%byte_offset]
+  kernel.return
+}
