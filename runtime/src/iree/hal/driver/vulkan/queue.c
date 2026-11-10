@@ -284,6 +284,15 @@ typedef struct iree_hal_vulkan_queue_wait_entry_t {
 
   // Callback publication and final notification-access retirement state.
   iree_atomic_int32_t callback_state;
+
+  // Original wait index consumed by this public callback, or UINT32_MAX for
+  // availability-only callbacks. Callback entries are compacted independently
+  // of the per-original-wait completion facts below.
+  uint32_t completion_index;
+
+  // Success consumed for this original wait index. The callback join publishes
+  // these facts before admission retries; compaction never moves them.
+  bool completed;
 } iree_hal_vulkan_queue_wait_entry_t;
 
 typedef struct iree_hal_vulkan_queue_wait_resolution_t {
@@ -4821,17 +4830,21 @@ static iree_status_t iree_hal_vulkan_queue_resolve_waits(
   resolution->wait_info_count = 0;
   resolution->needs_deferral = false;
   for (iree_host_size_t i = 0; i < wait_semaphore_list.count; ++i) {
+    if (submission->wait_entries[i].completed) {
+      continue;
+    }
     iree_hal_semaphore_t* semaphore = wait_semaphore_list.semaphores[i];
     const uint64_t minimum_value = wait_semaphore_list.payload_values[i];
 
     uint64_t current_value = 0;
     IREE_RETURN_IF_ERROR(iree_hal_semaphore_query(semaphore, &current_value));
     if (current_value >= minimum_value) {
+      submission->wait_entries[i].completed = true;
       continue;
     }
     if (defer_native_submission) {
       resolution->needs_deferral = true;
-      return iree_ok_status();
+      continue;
     }
 
     iree_hal_vulkan_semaphore_submission_t producer;
@@ -4871,6 +4884,7 @@ static iree_status_t iree_hal_vulkan_queue_resolve_waits(
         &submission->wait_entries[submission->wait_entry_count++];
     entry->timepoint.semaphore = (iree_async_semaphore_t*)semaphore;
     entry->timepoint.minimum_value = minimum_value;
+    entry->completion_index = (uint32_t)i;
   }
   return iree_ok_status();
 }
@@ -5228,6 +5242,9 @@ static void iree_hal_vulkan_queue_deferred_wait_resolved(
   iree_hal_vulkan_queue_wait_entry_t* entry =
       (iree_hal_vulkan_queue_wait_entry_t*)user_data;
   iree_hal_vulkan_queue_pending_submission_t* submission = entry->submission;
+  if (iree_status_is_ok(status) && entry->completion_index != UINT32_MAX) {
+    submission->wait_entries[entry->completion_index].completed = true;
+  }
   iree_hal_vulkan_queue_submission_record_wait_status(submission, status);
 
   const int32_t previous_count = iree_atomic_fetch_sub(
@@ -5248,19 +5265,24 @@ static void iree_hal_vulkan_queue_deferred_wait_resolved(
 static iree_status_t iree_hal_vulkan_queue_prepare_deferred_submission(
     iree_hal_vulkan_queue_pending_submission_t* submission, bool availability) {
   const iree_hal_semaphore_list_t waits = submission->wait_semaphore_list;
-  submission->wait_entry_count = waits.count;
+  submission->wait_entry_count = 0;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < waits.count && iree_status_is_ok(status);
        ++i) {
+    if (submission->wait_entries[i].completed) {
+      continue;
+    }
     iree_async_semaphore_t* semaphore =
         (iree_async_semaphore_t*)waits.semaphores[i];
     if (availability) {
       status = iree_hal_vulkan_semaphore_submission_timeline(
           waits.semaphores[i], &semaphore);
     }
-    submission->wait_entries[i].timepoint.semaphore = semaphore;
-    submission->wait_entries[i].timepoint.minimum_value =
-        waits.payload_values[i];
+    iree_hal_vulkan_queue_wait_entry_t* entry =
+        &submission->wait_entries[submission->wait_entry_count++];
+    entry->timepoint.semaphore = semaphore;
+    entry->timepoint.minimum_value = waits.payload_values[i];
+    entry->completion_index = availability ? UINT32_MAX : (uint32_t)i;
   }
   iree_hal_vulkan_queue_prepare_submission_waits(submission, /*native=*/false);
   return status;
