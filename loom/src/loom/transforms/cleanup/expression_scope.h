@@ -192,6 +192,11 @@ bool loom_expression_op_is_reusable(const loom_module_t* module,
 bool loom_expression_can_share_result_ownership(const loom_module_t* module,
                                                 const loom_op_t* op);
 
+// Returns whether all result uses borrow their values without requiring a
+// distinct storage identity. Operand ownership and effects are separate.
+bool loom_expression_results_are_shareable(const loom_module_t* module,
+                                           const loom_op_t* op);
+
 // Replaces corresponding result uses and erases the redundant operation.
 // Ordinary operand consumers use the strongest dominating same-typed fact
 // identity. FactIdentity consumers and embedded SSA references use the

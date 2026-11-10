@@ -43,7 +43,9 @@ const loom_pass_info_t* loom_low_cse_pass_info(void) {
 // Low structural operations create distinct virtual-register identities even
 // when they carry the same bits. The operations themselves must remain, but a
 // descriptor with no storage-sensitive ownership can use the indexed content
-// identity when proving that its computation is redundant.
+// identity when proving that its computation is redundant. Pure calculations
+// consuming private copies instead compare the directly copied values; no
+// transitive identity table is needed for those disposable input owners.
 typedef struct loom_low_cse_value_identity_slot_t {
   // SSA value whose content has a distinct canonical representative.
   loom_value_id_t value_id;
@@ -59,6 +61,8 @@ typedef struct loom_low_cse_constructor_slot_t {
 } loom_low_cse_constructor_slot_t;
 
 typedef struct loom_low_cse_value_identities_t {
+  // Module owning direct copy definitions and indexed ownership uses.
+  const loom_module_t* module;
   // Descriptor set used to identify the narrowly licensed expressions.
   const loom_low_descriptor_set_t* descriptor_set;
   // Scratch arena owning every table generation.
@@ -176,6 +180,59 @@ static bool loom_low_cse_op_is_idempotent_state_update(
                           LOOM_LOW_DESCRIPTOR_FLAG_IDEMPOTENT_STATE_UPDATE);
 }
 
+// A private, same-type copy transfers only disposable register storage into
+// its sole consumer. Managed copies retain observable ownership obligations.
+static loom_value_id_t loom_low_cse_private_copy_identity(
+    void* user_data, loom_value_id_t value_id) {
+  const loom_low_cse_value_identities_t* identities = user_data;
+  const loom_module_t* module = identities->module;
+  const loom_value_t* value = loom_module_value(module, value_id);
+  if (loom_value_is_block_arg(value) || value->use_count != 1 ||
+      loom_module_value_has_type_uses(module, value_id) ||
+      loom_value_has_attribute_uses(value)) {
+    return value_id;
+  }
+  const loom_op_t* definition = loom_value_def_op(value);
+  if (!definition || !loom_low_copy_isa(definition) ||
+      loom_traits_has_side_effects(
+          loom_op_effective_traits(module, definition))) {
+    return value_id;
+  }
+  const loom_value_id_t source = loom_low_copy_source(definition);
+  return loom_type_equal(value->type, loom_module_value_type(module, source))
+             ? source
+             : value_id;
+}
+
+static bool loom_low_cse_has_private_consumption(
+    const loom_low_cse_value_identities_t* identities, const loom_op_t* op,
+    loom_trait_flags_t traits) {
+  if (op->result_count == 0 || op->region_count != 0 ||
+      !iree_any_bit_set(traits, LOOM_TRAIT_PURE) ||
+      loom_traits_has_side_effects(traits) ||
+      loom_traits_has_unique_identity(traits) ||
+      !loom_expression_results_are_shareable(identities->module, op)) {
+    return false;
+  }
+  bool consumed = false;
+  const loom_value_id_t* operands = loom_op_const_operands(op);
+  const loom_use_index_t* indices = loom_op_operand_use_indices(op);
+  for (uint16_t i = 0; i < op->operand_count; ++i) {
+    const loom_value_t* value =
+        loom_module_value(identities->module, operands[i]);
+    if (!iree_any_bit_set(loom_use_flags(loom_value_uses(value)[indices[i]]),
+                          LOOM_USE_FLAG_CONSUMES)) {
+      continue;
+    }
+    consumed = true;
+    if (loom_low_cse_private_copy_identity((void*)identities, operands[i]) ==
+        operands[i]) {
+      return false;
+    }
+  }
+  return consumed;
+}
+
 static bool loom_low_cse_expression_equal(void* user_data,
                                           const loom_module_t* module,
                                           const loom_op_t* lhs,
@@ -185,6 +242,13 @@ static bool loom_low_cse_expression_equal(void* user_data,
   }
   const loom_low_cse_value_identities_t* identities =
       (const loom_low_cse_value_identities_t*)user_data;
+  if (loom_low_cse_has_private_consumption(
+          identities, lhs, loom_op_effective_traits(module, lhs)) &&
+      loom_low_cse_has_private_consumption(
+          identities, rhs, loom_op_effective_traits(module, rhs))) {
+    return loom_expression_equal_with_value_identity(
+        module, lhs, rhs, loom_low_cse_private_copy_identity, user_data);
+  }
   if (!loom_low_cse_op_is_idempotent_state_update(identities, lhs) ||
       !loom_low_cse_op_is_idempotent_state_update(identities, rhs)) {
     return false;
@@ -196,7 +260,11 @@ static bool loom_low_cse_expression_equal(void* user_data,
 static uint32_t loom_low_cse_expression_hash(
     const loom_module_t* module, const loom_op_t* op,
     loom_low_cse_value_identities_t* identities,
-    bool is_idempotent_state_update) {
+    bool is_idempotent_state_update, bool has_private_consumption) {
+  if (has_private_consumption) {
+    return loom_expression_hash_with_value_identity(
+        module, op, loom_low_cse_private_copy_identity, identities);
+  }
   if (!is_idempotent_state_update) {
     return loom_expression_hash(module, op);
   }
@@ -481,6 +549,7 @@ static iree_status_t loom_low_cse_region(
     const loom_low_descriptor_set_t* descriptor_set,
     iree_arena_allocator_t* arena) {
   loom_low_cse_value_identities_t value_identities = {
+      .module = module,
       .descriptor_set = descriptor_set,
       .arena = arena,
   };
@@ -492,9 +561,9 @@ static iree_status_t loom_low_cse_region(
       iree_any_bit_set(descriptor_set->flags,
                        LOOM_LOW_DESCRIPTOR_SET_FLAG_IDEMPOTENT_STATE_UPDATES);
   loom_expression_walk_t* walk = NULL;
-  IREE_RETURN_IF_ERROR(loom_expression_walk_allocate(
-      module, region, has_idempotent_state_updates ? &identity_policy : NULL,
-      /*maximum_entry_count=*/0, arena, &walk));
+  IREE_RETURN_IF_ERROR(
+      loom_expression_walk_allocate(module, region, &identity_policy,
+                                    /*maximum_entry_count=*/0, arena, &walk));
   loom_low_cse_state_class_t* state_classes = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, descriptor_set->reg_class_count, sizeof(*state_classes),
@@ -554,15 +623,21 @@ static iree_status_t loom_low_cse_region(
         identity.flags, LOOM_LOW_CSE_PACKET_FLAG_IDEMPOTENT_UPDATE);
     const bool writes_state =
         iree_any_bit_set(identity.flags, LOOM_LOW_CSE_PACKET_FLAG_WRITES_STATE);
-    const bool is_reusable =
+    bool is_reusable =
         (!writes_state || is_idempotent_update) &&
         loom_expression_op_is_reusable(module, cursor.op, cursor.traits);
+    const bool has_private_consumption =
+        !is_reusable && !writes_state && packet.descriptor &&
+        loom_low_cse_has_private_consumption(&value_identities, cursor.op,
+                                             cursor.traits);
+    is_reusable |= has_private_consumption;
     bool eliminated = false;
     if (is_reusable) {
       loom_expression_entry_t candidate = {
           .op = cursor.op,
           .hash = loom_low_cse_expression_hash(
-              module, cursor.op, &value_identities, is_idempotent_update),
+              module, cursor.op, &value_identities, is_idempotent_update,
+              has_private_consumption),
           .metadata = cursor.epoch,
       };
       loom_expression_lookup_flags_t flags = 0;

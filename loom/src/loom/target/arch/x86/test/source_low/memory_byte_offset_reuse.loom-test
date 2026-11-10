@@ -31,12 +31,8 @@ low.func.def target<x86.avx2.core> abi(object_function) @ranked_exchange(%input:
   %37 = copy %36 : reg<x86.gpr64> -> reg<x86.gpr64>
   %38 = add.gpr64 %37, %base
   %first = mov.load.indexed.gpr32<volatile> %input, %38 {disp32 = 0, scale = 1}
-  %41 = copy %33 : reg<x86.gpr64> -> reg<x86.gpr64>
-  %42 = imul.gpr64 %41, %34
-  %43 = copy %42 : reg<x86.gpr64> -> reg<x86.gpr64>
-  %44 = add.gpr64 %43, %base
-  %packet = vmovdqu32.load.indexed.xmm<volatile> %input, %44 {disp32 = 0, scale = 1}
-  vmovdqu32.store.indexed.xmm<volatile> %packet, %input, %44 {disp32 = 0, scale = 1}
+  %packet = vmovdqu32.load.indexed.xmm<volatile> %input, %38 {disp32 = 0, scale = 1}
+  vmovdqu32.store.indexed.xmm<volatile> %packet, %input, %38 {disp32 = 0, scale = 1}
   mov.store.indexed.gpr32<volatile> %replacement, %output, %38 {disp32 = 16, scale = 1}
   return %first
 }

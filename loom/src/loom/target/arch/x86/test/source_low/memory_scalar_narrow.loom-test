@@ -109,10 +109,8 @@ low.func.def target<x86.scalar.core> abi(object_function) @copy_narrow_stride(%i
   %23 = copy %22 : reg<x86.gpr64> -> reg<x86.gpr64>
   %24 = add.gpr64 %23, %column
   %byte = movzx.load.indexed.u8.gpr32 %input, %24 {disp32 = 1, scale = 1}
-  %26 = copy %row : reg<x86.gpr64> -> reg<x86.gpr64>
-  %27 = imul.gpr64 %26, %columns
   %28 = mov.imm64 2
-  %29 = copy %27 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %29 = copy %22 : reg<x86.gpr64> -> reg<x86.gpr64>
   %30 = imul.gpr64 %29, %28
   %32 = copy %column : reg<x86.gpr64> -> reg<x86.gpr64>
   %33 = imul.gpr64 %32, %28

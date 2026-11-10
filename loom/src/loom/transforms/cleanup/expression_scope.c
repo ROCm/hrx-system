@@ -963,8 +963,8 @@ static bool loom_expression_op_transfers_operand_ownership(
   return false;
 }
 
-static bool loom_expression_result_has_sensitive_ownership(
-    const loom_module_t* module, const loom_op_t* op) {
+bool loom_expression_results_are_shareable(const loom_module_t* module,
+                                           const loom_op_t* op) {
   const loom_value_id_t* results = loom_op_results((loom_op_t*)op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
     const loom_value_id_t result = results[i];
@@ -973,16 +973,16 @@ static bool loom_expression_result_has_sensitive_ownership(
     }
     const loom_value_t* value = loom_module_value(module, result);
     if (loom_value_ownership_use_count(value) != 0) {
-      return true;
+      return false;
     }
   }
-  return false;
+  return true;
 }
 
 bool loom_expression_can_share_result_ownership(const loom_module_t* module,
                                                 const loom_op_t* op) {
   return !loom_expression_op_transfers_operand_ownership(module, op) &&
-         !loom_expression_result_has_sensitive_ownership(module, op);
+         loom_expression_results_are_shareable(module, op);
 }
 
 bool loom_expression_op_is_reusable(const loom_module_t* module,
