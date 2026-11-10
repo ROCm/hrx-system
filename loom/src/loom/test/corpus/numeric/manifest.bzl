@@ -111,6 +111,7 @@ NUMERIC_CORPUS = loom_corpus_manifest(
         "vector/packed/narrowing.loom",
         "vector/packed/selection.loom",
         "vector/reductions.loom",
+        "vector/refinement.loom",
         "vector/selection.loom",
     ],
 )

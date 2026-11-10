@@ -1,0 +1,76 @@
+// Template boundaries carry explicit shape assertions without changing lane
+// values or when a vector load takes its snapshot.
+template.decl @forward(%width: index, %input: vector<[%width]xi32>) -> (%length: index, vector<[%length]xi32>)
+
+template.def<@forward> @four_lanes(%width: index, %input: vector<[%width]xi32>) -> (%length: index, vector<[%length]xi32>) where [eq(%width, 4)] {
+  %fixed = vector.refine %input : vector<[%width]xi32> -> vector<4xi32>
+  %returned = vector.refine %fixed : vector<4xi32> -> vector<[%width]xi32>
+  template.return %width, %returned : index, vector<[%width]xi32>
+}
+
+func.def @refined_lanes(%position0: index, %input: buffer, %output: buffer) {
+  %position = index.assume %position0 [range(%position0, 0, 3)] : index
+  %base = index.constant 0 : offset
+  %width = index.constant 4 : index
+  %axis_extent = index.constant 2 : index
+  %source = buffer.view %input[%base] : buffer -> view<4xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<3xi32>
+  %captured = vector.load %source[0] : view<4xi32> -> vector<4xi32>
+  %bound = vector.refine %captured : vector<4xi32> -> vector<[%width]xi32>
+  %length, %returned = template.apply<@forward>(%width, %bound) : (index, vector<[%width]xi32>) -> (index, vector<[%length]xi32>)
+  %replacement = scalar.constant -4096 : i32
+  view.store %replacement, %source[%position] : i32, view<4xi32>
+  %saved = vector.extract %returned[%position] : vector<[%length]xi32> -> i32
+  view.store %saved, %destination[0] : i32, view<3xi32>
+
+  %computed = vector.addi %captured, %captured : vector<4xi32>
+  %computed_bound = vector.refine %computed : vector<4xi32> -> vector<[%width]xi32>
+  %computed_length, %computed_returned = template.apply<@forward>(%width, %computed_bound) : (index, vector<[%width]xi32>) -> (index, vector<[%computed_length]xi32>)
+  %computed_fixed = vector.refine %computed_returned : vector<[%computed_length]xi32> -> vector<4xi32>
+  %doubled = vector.extract %computed_fixed[%position] : vector<4xi32> -> i32
+  view.store %doubled, %destination[1] : i32, view<3xi32>
+
+  %increment = scalar.constant 1 : i32
+  %next = scalar.addi %saved, %increment : i32
+  %third = scalar.addi %next, %increment : i32
+  %fourth = scalar.addi %third, %increment : i32
+  %matrix = vector.from_elements %saved, %next, %third, %fourth : vector<2x2xi32>
+  %matrix_bound = vector.refine %matrix : vector<2x2xi32> -> vector<[%axis_extent]x[%axis_extent]xi32>
+  %row = index.div %position, %axis_extent : index
+  %column = index.rem %position, %axis_extent : index
+  %selected = vector.extract %matrix_bound[%row, %column] : vector<[%axis_extent]x[%axis_extent]xi32> -> i32
+  view.store %selected, %destination[2] : i32, view<3xi32>
+  func.return
+}
+
+// Scalar reads and arithmetic are independent of vector identity lowering.
+func.def @refined_lanes_oracle(%position0: index, %input: buffer, %output: buffer) {
+  %position = index.assume %position0 [range(%position0, 0, 3)] : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<4xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<3xi32>
+  %saved = view.load %source[%position] : view<4xi32> -> i32
+  %replacement = scalar.constant -4096 : i32
+  view.store %replacement, %source[%position] : i32, view<4xi32>
+  view.store %saved, %destination[0] : i32, view<3xi32>
+  %ordinal = index.cast %position : index to i32
+  %doubled = scalar.addi %saved, %saved : i32
+  view.store %doubled, %destination[1] : i32, view<3xi32>
+  %selected = scalar.addi %saved, %ordinal : i32
+  view.store %selected, %destination[2] : i32, view<3xi32>
+  func.return
+}
+
+check.scenario @refined_lane_values {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-1024 to 1024) : tensor<4xi32>
+    %storage = check.generate.fill value(-2048) : tensor<5xi32>
+    %output = check.tensor.view %storage offset(4) : tensor<5xi32> -> tensor<3xi32>
+    check.compare<@refined_lanes, @refined_lanes_oracle>(%trial, %input, %output) : (index, tensor<4xi32>, tensor<3xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<4xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<5xi32>
+    }
+  }
+  check.return
+}

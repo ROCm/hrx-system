@@ -61,6 +61,7 @@ loom_corpus_test(
             "numeric/vector/conversion.loom",
             "numeric/vector/float_extrema.loom",
             "numeric/vector/integer_bitwise.loom",
+            "numeric/vector/refinement.loom",
         ],
     },
     target_compatible_with = ["@platforms//cpu:x86_64"],

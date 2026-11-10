@@ -137,6 +137,7 @@ _ADAPTER_ONLY_SCENARIOS = [
     "numeric/vector/packed/narrowing.loom",
     "numeric/vector/packed/selection.loom",
     "numeric/vector/reductions.loom",
+    "numeric/vector/refinement.loom",
     "numeric/vector/selection.loom",
 ]
 

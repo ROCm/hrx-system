@@ -1,0 +1,152 @@
+// RUN: pass vector-to-scalar,canonicalize
+
+// Refining the shape preserves nonuniform lanes and their logical coordinates.
+func.def @refined_matrix(%a: i32, %b: i32, %c: i32, %d: i32, %rows: index, %columns: index, %row: index, %column: index) -> (i32) {
+  %values = vector.from_elements %a, %b, %c, %d : vector<2x2xi32>
+  %dynamic = vector.refine %values : vector<2x2xi32> -> vector<[%rows]x[%columns]xi32>
+  %result = vector.extract %dynamic[%row, %column] : vector<[%rows]x[%columns]xi32> -> i32
+  func.return %result : i32
+}
+
+// ----
+func.def @refined_matrix(%a: i32, %b: i32, %c: i32, %d: i32, %rows: index, %columns: index, %row: index, %column: index) -> (i32) {
+  %12 = index.constant 2 : index
+  %24 = index.madd %row, %12, %column : index
+  %15 = index.constant 1 : index
+  %16 = index.cmp eq, %24, %15 : index
+  %17 = scf.select %16, %b, %a : i32
+  %18 = index.constant 2 : index
+  %19 = index.cmp eq, %24, %18 : index
+  %20 = scf.select %19, %c, %17 : i32
+  %21 = index.constant 3 : index
+  %22 = index.cmp eq, %24, %21 : index
+  %result = scf.select %22, %d, %20 : i32
+  func.return %result : i32
+}
+
+// ====
+
+// Literal lane selection also uses the producer's shape through an identity.
+func.def @refined_literal(%extent: index, %position: index) -> (i32) {
+  %values = vector.constanti [5, 13, 29] : vector<3xi32>
+  %dynamic = vector.refine %values : vector<3xi32> -> vector<[%extent]xi32>
+  %result = vector.extract %dynamic[%position] : vector<[%extent]xi32> -> i32
+  func.return %result : i32
+}
+
+// ----
+func.def @refined_literal(%extent: index, %position: index) -> (i32) {
+  %6 = scalar.constant 5 : i32
+  %7 = scalar.constant 13 : i32
+  %8 = index.constant 1 : index
+  %9 = index.cmp eq, %position, %8 : index
+  %10 = scf.select %9, %7, %6 : i32
+  %11 = scalar.constant 29 : i32
+  %12 = index.constant 2 : index
+  %13 = index.cmp eq, %position, %12 : index
+  %result = scf.select %13, %11, %10 : i32
+  func.return %result : i32
+}
+
+// ====
+
+// Expanding the resolved load at its definition retains the original snapshot.
+func.def @refined_snapshot(%input: view<4xi32>, %extent: index, %position: index, %replacement: i32) -> (i32) {
+  %captured = vector.load %input[0] : view<4xi32> -> vector<4xi32>
+  %dynamic = vector.refine %captured : vector<4xi32> -> vector<[%extent]xi32>
+  view.store %replacement, %input[1] : i32, view<4xi32>
+  %result = vector.extract %dynamic[%position] : vector<[%extent]xi32> -> i32
+  func.return %result : i32
+}
+
+// ----
+func.def @refined_snapshot(%input: view<4xi32>, %extent: index, %position: index, %replacement: i32) -> (i32) {
+  %8 = view.load %input[0] : view<4xi32> -> i32
+  %9 = view.load %input[1] : view<4xi32> -> i32
+  %10 = view.load %input[2] : view<4xi32> -> i32
+  %11 = view.load %input[3] : view<4xi32> -> i32
+  view.store %replacement, %input[1] : i32, view<4xi32>
+  %13 = index.constant 1 : index
+  %14 = index.cmp eq, %position, %13 : index
+  %15 = scf.select %14, %9, %8 : i32
+  %16 = index.constant 2 : index
+  %17 = index.cmp eq, %position, %16 : index
+  %18 = scf.select %17, %10, %15 : i32
+  %19 = index.constant 3 : index
+  %20 = index.cmp eq, %position, %19 : index
+  %result = scf.select %20, %11, %18 : i32
+  func.return %result : i32
+}
+
+// ====
+
+// Selecting an inserted subvector must retain its own earlier snapshot too.
+func.def @inserted_snapshot(%input: view<2xi32>, %extent: index, %replacement: i32) -> (i32) {
+  %captured = vector.load %input[0] : view<2xi32> -> vector<2xi32>
+  %dynamic = vector.refine %captured : vector<2xi32> -> vector<[%extent]xi32>
+  %restored = vector.refine %dynamic : vector<[%extent]xi32> -> vector<2xi32>
+  %initial = vector.splati 0 : vector<2x2xi32>
+  %matrix = vector.insert %restored into %initial[1] : vector<2xi32>, vector<2x2xi32>
+  view.store %replacement, %input[1] : i32, view<2xi32>
+  %result = vector.extract %matrix[1, 1] : vector<2x2xi32> -> i32
+  func.return %result : i32
+}
+
+// ----
+func.def @inserted_snapshot(%input: view<2xi32>, %extent: index, %replacement: i32) -> (i32) {
+  %result = view.load %input[1] : view<2xi32> -> i32
+  view.store %replacement, %input[1] : i32, view<2xi32>
+  func.return %result : i32
+}
+
+// ====
+
+// Fragment-store support and materialization agree through shape refinements.
+func.def @refined_fragment_splat(%output: view<2x2xf32>, %m: index, %n: index, %value: f32) {
+  %origin = index.constant 0 : index
+  %side = index.constant 2 : index
+  %fragment = vector.splat %value : vector<[%m]x[%n]xf32>
+  %fixed = vector.refine %fragment : vector<[%m]x[%n]xf32> -> vector<2x2xf32>
+  vector.fragment.store<result> %fixed, %output[%origin, %origin] shape [%side, %side] : vector<2x2xf32>, view<2x2xf32>
+  func.return
+}
+
+// ----
+func.def @refined_fragment_splat(%output: view<2x2xf32>, %m: index, %n: index, %value: f32) {
+  %8 = index.constant 0 : index
+  %9 = index.constant 2 : index
+  %10 = index.constant 1 : index
+  scf.for %11 = [%8 to %9 step %10] {
+    %12 = index.constant 0 : index
+    %13 = index.constant 2 : index
+    %14 = index.constant 1 : index
+    scf.for %15 = [%12 to %13 step %14] {
+      view.store %value, %output[%11, %15] : f32, view<2x2xf32>
+    }
+  }
+  func.return
+}
+
+// ====
+
+// An aliased fragment read still cannot move across a write to its source.
+func.def @refined_fragment_snapshot(%input: view<2x2xf32>, %output: view<2x2xf32>, %m: index, %n: index, %replacement: f32) {
+  %origin = index.constant 0 : index
+  %side = index.constant 2 : index
+  %captured = vector.fragment.load<result> %input[%origin, %origin] shape [%side, %side] : view<2x2xf32> -> vector<2x2xf32>
+  %dynamic = vector.refine %captured : vector<2x2xf32> -> vector<[%m]x[%n]xf32>
+  view.store %replacement, %input[0, 0] : f32, view<2x2xf32>
+  vector.fragment.store<result> %dynamic, %output[%origin, %origin] shape [%m, %n] : vector<[%m]x[%n]xf32>, view<2x2xf32>
+  func.return
+}
+
+// ----
+func.def @refined_fragment_snapshot(%input: view<2x2xf32>, %output: view<2x2xf32>, %m: index, %n: index, %replacement: f32) {
+  %origin = index.constant 0 : index
+  %side = index.constant 2 : index
+  %captured = vector.fragment.load<result> %input[%origin, %origin] shape [%side, %side] : view<2x2xf32> -> vector<2x2xf32>
+  %dynamic = vector.refine %captured : vector<2x2xf32> -> vector<2x2xf32>
+  view.store %replacement, %input[0, 0] : f32, view<2x2xf32>
+  vector.fragment.store<result> %dynamic, %output[%origin, %origin] shape [%m, %n] : vector<2x2xf32>, view<2x2xf32>
+  func.return
+}

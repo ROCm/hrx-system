@@ -124,6 +124,23 @@ static inline loom_op_t* loom_vector_to_scalar_value_def_op(
   return loom_value_def_op(value);
 }
 
+// Returns the exact source of one nonwriting identity result, or INVALID for
+// an ordinary producer. Fact identities pair operands/results by ordinal;
+// value aliases carry their value in operand zero.
+static inline loom_value_id_t loom_vector_to_scalar_identity_source(
+    const loom_module_t* module, loom_value_id_t value, const loom_op_t* op,
+    loom_trait_flags_t traits) {
+  if (!iree_any_bit_set(traits,
+                        LOOM_TRAIT_FACT_IDENTITY | LOOM_TRAIT_VALUE_ALIAS)) {
+    return LOOM_VALUE_ID_INVALID;
+  }
+  const uint16_t ordinal =
+      loom_traits_are_fact_identity(traits)
+          ? loom_value_def_index(loom_module_value(module, value))
+          : 0;
+  return loom_op_const_operands(op)[ordinal];
+}
+
 // Computes a static lane count representable by scalarized IR value slices.
 iree_status_t loom_vector_to_scalar_static_element_count(
     loom_vector_to_scalar_state_t* state, loom_type_t type,

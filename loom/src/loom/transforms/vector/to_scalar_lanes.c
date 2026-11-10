@@ -852,11 +852,10 @@ bool loom_vector_to_scalar_can_materialize_def_lane(
     }
 
     const loom_trait_flags_t traits = loom_op_effective_traits(module, def_op);
-    if (loom_traits_are_value_alias(traits)) {
-      if (def_op->operand_count == 0) {
-        return false;
-      }
-      value = loom_op_const_operands(def_op)[0];
+    const loom_value_id_t identity_source =
+        loom_vector_to_scalar_identity_source(module, value, def_op, traits);
+    if (identity_source != LOOM_VALUE_ID_INVALID) {
+      value = identity_source;
       continue;
     }
 
@@ -1182,10 +1181,11 @@ loom_vector_to_scalar_try_physical_result_fragment_load_lane(
 }
 
 iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
-    loom_vector_to_scalar_state_t* state, loom_value_id_t value,
-    loom_type_t vector_type, loom_vector_to_scalar_index_list_t indices,
-    bool* out_materialized, loom_value_id_t* out_lane) {
+    loom_vector_to_scalar_state_t* state, loom_value_id_t* inout_value,
+    loom_vector_to_scalar_index_list_t indices, bool* out_materialized,
+    loom_value_id_t* out_lane) {
   *out_materialized = false;
+  loom_value_id_t value = *inout_value;
   const loom_module_t* module = state->rewriter->module;
   loom_op_t* def_op = NULL;
   loom_trait_flags_t traits = 0;
@@ -1195,22 +1195,25 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
       return iree_ok_status();
     }
     traits = loom_op_effective_traits(module, def_op);
-    if (loom_traits_are_value_alias(traits)) {
-      IREE_ASSERT(def_op->operand_count >= 1);
-      IREE_ASSERT(def_op->result_count == 1);
-      value = loom_op_const_operands(def_op)[0];
+    const loom_value_id_t identity_source =
+        loom_vector_to_scalar_identity_source(module, value, def_op, traits);
+    if (identity_source != LOOM_VALUE_ID_INVALID) {
+      value = *inout_value = identity_source;
       continue;
     }
     if (!loom_vector_to_scalar_peel_static_insert(def_op, &value, &indices)) {
       break;
     }
-    vector_type = loom_module_value_type(module, value);
-    if (!loom_type_is_vector(vector_type)) {
+    *inout_value = value;
+    if (!loom_type_is_vector(loom_module_value_type(module, value))) {
       *out_lane = value;
       *out_materialized = true;
       return iree_ok_status();
     }
   }
+  // A refinement preserves the lane grid. Use its producer's shape when
+  // selecting lanes so a dynamic alias does not discard known static extents.
+  const loom_type_t vector_type = loom_module_value_type(module, value);
   IREE_RETURN_IF_ERROR(
       loom_vector_to_scalar_rematerialization_initialize(state));
   bool can_rematerialize = false;
@@ -1327,8 +1330,6 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
   loom_value_t* value_record =
       loom_module_value(state->rewriter->module, value);
   uint16_t result_ordinal = loom_value_def_index(value_record);
-  loom_type_t result_type = loom_module_value_type(
-      state->rewriter->module, loom_op_results(def_op)[result_ordinal]);
   loom_vector_to_scalar_state_t def_state = {
       .pass = state->pass,
       .statistics = state->statistics,
@@ -1337,8 +1338,8 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
       .descriptor = descriptor,
       .value_checkpoint = state->value_checkpoint,
       .result_ordinal = result_ordinal,
-      .vector_type = result_type,
-      .result_scalar_type = loom_vector_to_scalar_lane_type(result_type),
+      .vector_type = vector_type,
+      .result_scalar_type = loom_vector_to_scalar_lane_type(vector_type),
       .matrix_fragment_layout = state->matrix_fragment_layout,
       .rematerialization = state->rematerialization,
       .location = def_op->location,
@@ -1364,8 +1365,9 @@ iree_status_t loom_vector_to_scalar_materialize_lane(
     return iree_ok_status();
   }
   bool materialized = false;
+  loom_value_id_t source = value;
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_try_materialize_def_lane(
-      state, value, type, indices, &materialized, out_lane));
+      state, &source, indices, &materialized, out_lane));
   if (materialized) {
     return iree_ok_status();
   }
