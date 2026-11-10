@@ -231,15 +231,15 @@ static const loom_target_math_evaluation_t kAie2pMathEvaluations[] = {
   _(ADD_PROMOTE, LOOM_SCALAR_TYPE_SET_F32, ALL, RANK_ONE, 1, 32, NONE,         \
     UNKNOWN, NONE, OP_PROMOTE_VECTOR_F32X64, SHAPE_F32_ADD, SHAPE_F32_ADD,     \
     NONE)                                                                      \
-  _(ADD_NATIVE, LOOM_SCALAR_TYPE_SET_F32, VECTOR, RANK_ONE, 64, 64, NONE,      \
-    UNKNOWN, NONE, OP_NATIVE_VECTOR_F32X64, SHAPE_F32_ADD, SHAPE_F32_ADD,      \
-    NONE)                                                                      \
+  _(ADD_NATIVE, LOOM_SCALAR_TYPE_SET_F32, VECTOR, STATIC_ELEMENTS, 33, 64,     \
+    NONE, UNKNOWN, NONE, OP_NATIVE_VECTOR_F32X64, SHAPE_F32_ADD,               \
+    SHAPE_F32_ADD, NONE)                                                       \
   _(SUB_PROMOTE, LOOM_SCALAR_TYPE_SET_F32, ALL, RANK_ONE, 1, 32, NONE,         \
     UNKNOWN, NONE, OP_PROMOTE_VECTOR_F32X64, SHAPE_F32_SUB, SHAPE_F32_SUB,     \
     NONE)                                                                      \
-  _(SUB_NATIVE, LOOM_SCALAR_TYPE_SET_F32, VECTOR, RANK_ONE, 64, 64, NONE,      \
-    UNKNOWN, NONE, OP_NATIVE_VECTOR_F32X64, SHAPE_F32_SUB, SHAPE_F32_SUB,      \
-    NONE)
+  _(SUB_NATIVE, LOOM_SCALAR_TYPE_SET_F32, VECTOR, STATIC_ELEMENTS, 33, 64,     \
+    NONE, UNKNOWN, NONE, OP_NATIVE_VECTOR_F32X64, SHAPE_F32_SUB,               \
+    SHAPE_F32_SUB, NONE)
 
 enum loom_aie2p_math_rule_e {
 #define LOOM_AIE2P_MATH_RULE_ENUM(                                       \
