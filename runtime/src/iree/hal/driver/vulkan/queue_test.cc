@@ -6,9 +6,11 @@
 
 #include "iree/hal/driver/vulkan/queue.h"
 
+#include <algorithm>
 #include <atomic>
 #include <semaphore>
 #include <thread>
+#include <vector>
 
 #include "iree/base/internal/atomics.h"
 #include "iree/base/threading/mutex.h"
@@ -62,6 +64,120 @@ static iree_hal_vulkan_queue_completion_action_t MakeCompletionAction(
 }
 
 class VulkanQueueTest : public CtsTestBase<> {};
+
+TEST_P(VulkanQueueTest, RecordableTransferHasOneNativeCompletionPoint) {
+  Ref<iree_hal_buffer_t> source, target;
+  IREE_ASSERT_OK(
+      CreateFilledDeviceBuffer<uint32_t>(64, 0xABABABABu, source.out()));
+  IREE_ASSERT_OK(CreateZeroedDeviceBuffer(256, target.out()));
+  const uint32_t pattern = 0xCDCDCDCDu;
+  std::vector<uint8_t> update(64, 0xEF);
+  iree_hal_transfer_operation_t operations[3] = {};
+  operations[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
+  operations[0].fill.target_buffer = target;
+  operations[0].fill.length = 64;
+  operations[0].fill.pattern = &pattern;
+  operations[0].fill.pattern_length = sizeof(pattern);
+  operations[1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE;
+  operations[1].update.source_buffer = update.data();
+  operations[1].update.target_buffer = target;
+  operations[1].update.target_offset = 64;
+  operations[1].update.length = 64;
+  operations[2].type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
+  operations[2].copy.source_buffer = source;
+  operations[2].copy.target_buffer = target;
+  operations[2].copy.target_offset = 128;
+  operations[2].copy.length = 64;
+
+  auto* queue = reinterpret_cast<iree_hal_vulkan_queue_t*>(transfer_queue_);
+  iree_slim_mutex_lock(&queue->submission_mutex);
+  const uint64_t transfer_epoch = queue->next_epoch_value;
+  iree_slim_mutex_unlock(&queue->submission_mutex);
+  SemaphoreList signal(device_, {0}, {1});
+  IREE_ASSERT_OK(iree_hal_queue_transfer(
+      transfer_queue_, iree_hal_semaphore_list_empty(), signal,
+      IREE_ARRAYSIZE(operations), operations, /*barriers=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
+                                              IREE_ASYNC_WAIT_FLAG_NONE));
+  iree_hal_vulkan_semaphore_submission_t producer;
+  ASSERT_TRUE(iree_hal_vulkan_semaphore_query_submission(signal.semaphores[0],
+                                                         1, &producer));
+  EXPECT_EQ(producer.epoch, transfer_epoch);
+  iree_slim_mutex_lock(&queue->submission_mutex);
+  const uint64_t next_epoch = queue->next_epoch_value;
+  iree_slim_mutex_unlock(&queue->submission_mutex);
+  EXPECT_EQ(next_epoch, transfer_epoch + 1);
+
+  std::vector<uint8_t> expected(256, 0);
+  std::fill_n(expected.begin(), 64, 0xCD);
+  std::fill_n(expected.begin() + 64, 64, 0xEF);
+  std::fill_n(expected.begin() + 128, 64, 0xAB);
+  EXPECT_EQ(ReadBufferBytes(target, 0, 256), expected);
+}
+
+TEST_P(VulkanQueueTest, UnalignedFillBatchHasOneNativeCompletionPoint) {
+  const auto* queues =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device_));
+  for (iree_host_size_t family_ordinal = 0;
+       family_ordinal < queues->family_count; ++family_ordinal) {
+    const auto& family = queues->families[family_ordinal];
+    if (!family.provisioned_queue_count ||
+        !iree_any_bit_set(family.role_flags,
+                          IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER)) {
+      continue;
+    }
+    SCOPED_TRACE(family_ordinal);
+    auto* base_queue = iree_hal_device_queue(device_, family_ordinal, 0);
+    auto* queue = reinterpret_cast<iree_hal_vulkan_queue_t*>(base_queue);
+    // One fill reuses the two-set cache; three fills require a pool lease.
+    // Transfer-only families instead reuse the command buffer's scratch slot.
+    for (iree_host_size_t operation_count : {1u, 3u}) {
+      SCOPED_TRACE(operation_count);
+      std::vector<uint8_t> expected(128, 0xCD);
+      Ref<iree_hal_buffer_t> target, view;
+      IREE_ASSERT_OK(CreateDeviceBufferWithData(expected.data(),
+                                                expected.size(), target.out()));
+      IREE_ASSERT_OK(iree_hal_buffer_subspan(
+          target, 1, expected.size() - 1, iree_allocator_system(), view.out()));
+      const uint8_t patterns[3][4] = {
+          {0xA5}, {0x39, 0xC7}, {0x42, 0xD3, 0x81, 0x6E}};
+      iree_hal_transfer_operation_t operations[3] = {};
+      for (iree_host_size_t i = 0; i < operation_count; ++i) {
+        const iree_host_size_t pattern_length = iree_host_size_t{1} << i;
+        operations[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
+        operations[i].fill.target_buffer = view;
+        operations[i].fill.target_offset = i * 32;
+        operations[i].fill.length = pattern_length * 5;
+        operations[i].fill.pattern = patterns[i];
+        operations[i].fill.pattern_length = pattern_length;
+        for (iree_host_size_t j = 0; j < pattern_length * 5; ++j) {
+          expected[1 + i * 32 + j] = patterns[i][j % pattern_length];
+        }
+      }
+      iree_slim_mutex_lock(&queue->submission_mutex);
+      const uint64_t transfer_epoch = queue->next_epoch_value;
+      iree_slim_mutex_unlock(&queue->submission_mutex);
+      SemaphoreList gate(device_, {0}, {1});
+      SemaphoreList signal(device_, {0}, {1});
+      IREE_ASSERT_OK(iree_hal_queue_transfer(base_queue, gate, signal,
+                                             operation_count, operations,
+                                             /*barriers=*/nullptr));
+      view.reset();
+      IREE_ASSERT_OK(iree_hal_semaphore_list_signal(gate, nullptr));
+      IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+          signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+      iree_hal_vulkan_semaphore_submission_t producer;
+      ASSERT_TRUE(iree_hal_vulkan_semaphore_query_submission(
+          signal.semaphores[0], 1, &producer));
+      EXPECT_EQ(producer.epoch, transfer_epoch);
+      iree_slim_mutex_lock(&queue->submission_mutex);
+      const uint64_t next_epoch = queue->next_epoch_value;
+      iree_slim_mutex_unlock(&queue->submission_mutex);
+      EXPECT_EQ(next_epoch, transfer_epoch + 1);
+      EXPECT_EQ(ReadBufferBytes(target, 0, expected.size()), expected);
+    }
+  }
+}
 
 TEST_P(VulkanQueueTest, NativeConsumerRunsBeforeProducerRetirement) {
   for (iree_status_code_t dependency_status :

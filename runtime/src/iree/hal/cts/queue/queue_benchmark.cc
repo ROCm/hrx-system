@@ -499,6 +499,110 @@ BENCHMARK_TEMPLATE(BM_TransferChain, Submission::kCrossQueue, false)
     ->MeasureProcessCPUTime()
     ->UseRealTime();
 
+// A single public transaction initializes disjoint ranges. A one-byte subspan
+// exercises native edge handling without changing the public pattern alignment.
+// Host reset and full byte verification stay outside completion timing.
+static void BM_FillBatch(benchmark::State& state) {
+  QueueDevice device;
+  iree::Status status = device.Initialize(1);
+  if (!status.ok()) {
+    state.SkipWithError(status.ToString().c_str());
+    return;
+  }
+  state.SetLabel(device.label());
+  const iree_host_size_t operation_count = state.range(0);
+  const iree_host_size_t view_offset = state.range(1);
+  std::vector<uint8_t> expected(operation_count * 32 + 8);
+  std::vector<uint8_t> received(expected.size());
+  std::vector<uint32_t> patterns(operation_count);
+  std::vector<iree_hal_transfer_operation_t> operations(operation_count);
+  iree_hal_buffer_t* buffer = nullptr;
+  iree_hal_buffer_t* view = nullptr;
+  IREE_CHECK_OK(iree_hal_pool_allocate_buffer(
+      device.pool(), iree_hal_make_pool_reservation_request(expected.size(), 4),
+      iree_infinite_timeout(), &buffer));
+  IREE_CHECK_OK(iree_hal_buffer_subspan(buffer, view_offset,
+                                        expected.size() - view_offset,
+                                        iree_allocator_system(), &view));
+  for (iree_host_size_t i = 0; i < operation_count; ++i) {
+    auto& operation = operations[i];
+    operation.type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
+    operation.fill.target_buffer = view;
+    operation.fill.target_offset = i * 32;
+    operation.fill.pattern = &patterns[i];
+    operation.fill.pattern_length = iree_host_size_t{1} << (i % 3);
+    operation.fill.length =
+        view_offset ? operation.fill.pattern_length * 5 : 20;
+  }
+  iree_hal_semaphore_t* timeline = nullptr;
+  IREE_CHECK_OK(iree_hal_semaphore_create(
+      device.device(), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &timeline));
+  uint64_t value = 0;
+  auto prepare = [&] {
+    std::fill(expected.begin(), expected.end(), 0xCD);
+    IREE_CHECK_OK(
+        iree_hal_buffer_map_write(buffer, 0, expected.data(), expected.size()));
+    for (iree_host_size_t i = 0; i < operation_count; ++i) {
+      patterns[i] = 0xC37E4A00u + static_cast<uint8_t>(value + i);
+      const auto* pattern = reinterpret_cast<const uint8_t*>(&patterns[i]);
+      const auto& fill = operations[i].fill;
+      for (iree_device_size_t j = 0; j < fill.length; ++j) {
+        expected[view_offset + fill.target_offset + j] =
+            pattern[j % fill.pattern_length];
+      }
+    }
+  };
+  auto complete = [&] {
+    ++value;
+    const iree_hal_semaphore_list_t signals = {1, &timeline, &value};
+    IREE_CHECK_OK(iree_hal_queue_transfer(
+        device.queue(0), iree_hal_semaphore_list_empty(), signals,
+        operations.size(), operations.data(), nullptr));
+    IREE_CHECK_OK(iree_hal_semaphore_wait(
+        timeline, value, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+  };
+  auto verify = [&] {
+    IREE_CHECK_OK(
+        iree_hal_buffer_map_read(buffer, 0, received.data(), received.size()));
+    IREE_CHECK_OK(
+        received == expected
+            ? iree_ok_status()
+            : iree_make_status(IREE_STATUS_DATA_LOSS,
+                               "fill batch produced incorrect bytes"));
+  };
+  prepare();
+  complete();
+  verify();
+  const auto allocations_before = device.allocation_count();
+  for (auto _ : state) {
+    state.PauseTiming();
+    prepare();
+    state.ResumeTiming();
+    complete();
+    state.PauseTiming();
+    verify();
+    state.ResumeTiming();
+  }
+  state.SetItemsProcessed(state.iterations() * operation_count);
+  state.counters["host_allocations"] =
+      device.allocation_count() - allocations_before;
+  iree_hal_semaphore_release(timeline);
+  iree_hal_buffer_release(view);
+  iree_hal_buffer_release(buffer);
+}
+
+BENCHMARK(BM_FillBatch)
+    ->Name("TransferBatch/FillCompletion")
+    ->Args({1, 0})
+    ->Args({1, 1})
+    ->Args({3, 0})
+    ->Args({3, 1})
+    ->Args({32, 0})
+    ->Args({32, 1})
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+
 enum class Queues { kShared, kSeparate };
 enum class Workload { kChain, kMixed, kCompeting };
 

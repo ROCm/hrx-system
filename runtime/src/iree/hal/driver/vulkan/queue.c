@@ -235,7 +235,6 @@ typedef iree_status_t(
 typedef enum iree_hal_vulkan_queue_submission_kind_e {
   IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_BARRIER = 0,
   IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_HOST_CALL = 1,
-  IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_FILL = 2,
   IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_UPDATE = 3,
   IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_COPY = 4,
   IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_EXECUTE = 5,
@@ -484,27 +483,6 @@ struct iree_hal_vulkan_queue_pending_submission_t {
       iree_hal_host_call_flags_t flags;
     } host_call;
 
-    // Native buffer fill payload.
-    struct {
-      // Target buffer retained until the fill retires.
-      iree_hal_buffer_t* target_buffer;
-
-      // Target byte offset captured from queue_fill.
-      iree_device_size_t target_offset;
-
-      // Number of bytes to fill in the target buffer.
-      iree_device_size_t length;
-
-      // Fill pattern bytes captured from queue_fill.
-      uint8_t pattern[4];
-
-      // Number of bytes in pattern.
-      iree_host_size_t pattern_length;
-
-      // HAL fill flags captured from queue_fill.
-      iree_hal_fill_flags_t flags;
-    } fill;
-
     // Native buffer update payload.
     struct {
       // Source bytes copied from the queue_update caller.
@@ -530,6 +508,9 @@ struct iree_hal_vulkan_queue_pending_submission_t {
 
       // Number of entries in |operations|.
       iree_host_size_t operation_count;
+
+      // Storage-buffer descriptor sets required by all unaligned fill edges.
+      uint32_t descriptor_set_count;
     } transfer;
 
     // Host-mediated buffer copy payload.
@@ -3080,8 +3061,6 @@ static iree_hal_profile_queue_event_type_t iree_hal_vulkan_queue_profile_type(
       return IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_BARRIER;
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_HOST_CALL:
       return IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_HOST_CALL;
-    case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_FILL:
-      return IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_FILL;
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_UPDATE:
       return IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_UPDATE;
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_COPY:
@@ -3159,8 +3138,6 @@ static uint32_t iree_hal_vulkan_queue_profile_operation_count(
 static uint64_t iree_hal_vulkan_queue_profile_payload_length(
     const iree_hal_vulkan_queue_pending_submission_t* submission) {
   switch (submission->kind) {
-    case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_FILL:
-      return submission->fill.length;
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_UPDATE:
       return submission->update.length;
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_COPY:
@@ -3341,8 +3318,6 @@ static void iree_hal_vulkan_queue_profile_record_submission(
 static bool iree_hal_vulkan_queue_profile_submission_requires_native_timestamp(
     const iree_hal_vulkan_queue_pending_submission_t* submission) {
   switch (submission->kind) {
-    case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_FILL:
-      return submission->fill.length != 0;
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_UPDATE:
       return submission->update.length != 0;
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_COPY:
@@ -3871,10 +3846,6 @@ static void iree_hal_vulkan_queue_release_operation_resources(
           submission->sparse_bind.mapping_batch);
       submission->sparse_bind.mapping_batch = NULL;
       break;
-    case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_FILL:
-      iree_hal_buffer_release(submission->fill.target_buffer);
-      submission->fill.target_buffer = NULL;
-      break;
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_UPDATE:
       iree_allocator_free(queue->host_allocator,
                           submission->update.source_data);
@@ -4124,23 +4095,19 @@ static iree_status_t iree_hal_vulkan_queue_resolve_transfer_buffer(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_vulkan_queue_expand_fill_pattern(
+// Pattern widths are validated by the public transfer entry point.
+static uint32_t iree_hal_vulkan_queue_expand_fill_pattern(
     const uint8_t* pattern, iree_host_size_t pattern_length,
-    iree_device_size_t pattern_offset, uint32_t* out_expanded_pattern) {
-  if (pattern_length != 1 && pattern_length != 2 && pattern_length != 4) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Vulkan queue fill pattern length must be 1, 2, "
-                            "or 4 bytes (got %" PRIhsz ")",
-                            pattern_length);
-  }
-  uint8_t expanded_pattern[sizeof(*out_expanded_pattern)];
+    iree_device_size_t pattern_offset) {
+  uint8_t expanded_pattern[sizeof(uint32_t)];
   const iree_host_size_t pattern_phase =
       (iree_host_size_t)(pattern_offset % pattern_length);
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(expanded_pattern); ++i) {
     expanded_pattern[i] = pattern[(pattern_phase + i) % pattern_length];
   }
-  memcpy(out_expanded_pattern, expanded_pattern, sizeof(expanded_pattern));
-  return iree_ok_status();
+  uint32_t result = 0;
+  memcpy(&result, expanded_pattern, sizeof(result));
+  return result;
 }
 
 static void iree_hal_vulkan_queue_record_native_copy_region(
@@ -4157,16 +4124,33 @@ static void iree_hal_vulkan_queue_record_native_copy_region(
                        &copy_region);
 }
 
-static iree_status_t iree_hal_vulkan_queue_record_staged_fill_ranges(
+static void iree_hal_vulkan_queue_record_staged_fill_ranges(
     iree_hal_vulkan_queue_t* queue,
     iree_hal_vulkan_queue_pending_submission_t* submission,
     VkBuffer staging_handle, VkDeviceSize staging_offset,
     VkBuffer target_handle, VkDeviceSize target_offset,
-    VkDeviceSize target_length) {
-  uint32_t scratch_pattern = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_queue_expand_fill_pattern(
-      submission->fill.pattern, submission->fill.pattern_length,
-      /*pattern_offset=*/0, &scratch_pattern));
+    VkDeviceSize target_length, const uint8_t* pattern,
+    iree_host_size_t pattern_length, bool* inout_scratch_used) {
+  if (*inout_scratch_used) {
+    // All fills in the batch share this command buffer's scratch slot. Finish
+    // the previous edge reads before overwriting their pattern.
+    const VkMemoryBarrier2 reuse_barrier = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_CLEAR_BIT,
+    };
+    const VkDependencyInfo reuse_dependency = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .memoryBarrierCount = 1,
+        .pMemoryBarriers = &reuse_barrier,
+    };
+    iree_vkCmdPipelineBarrier2(IREE_VULKAN_DEVICE(&queue->syms),
+                               submission->native_command_buffer,
+                               &reuse_dependency);
+  }
+  *inout_scratch_used = true;
+  const uint32_t scratch_pattern = iree_hal_vulkan_queue_expand_fill_pattern(
+      pattern, pattern_length, /*pattern_offset=*/0);
   iree_vkCmdFillBuffer(IREE_VULKAN_DEVICE(&queue->syms),
                        submission->native_command_buffer, staging_handle,
                        staging_offset, IREE_HAL_VULKAN_QUEUE_FILL_SCRATCH_SIZE,
@@ -4201,7 +4185,7 @@ static iree_status_t iree_hal_vulkan_queue_record_staged_fill_ranges(
     iree_hal_vulkan_queue_record_native_copy_region(
         queue, submission->native_command_buffer, staging_handle,
         staging_offset, target_handle, target_offset, target_length);
-    return iree_ok_status();
+    return;
   }
 
   if (leading_length != 0) {
@@ -4210,10 +4194,8 @@ static iree_status_t iree_hal_vulkan_queue_record_staged_fill_ranges(
         staging_offset, target_handle, target_offset, leading_length);
   }
 
-  uint32_t expanded_pattern = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_queue_expand_fill_pattern(
-      submission->fill.pattern, submission->fill.pattern_length,
-      aligned_target_offset - target_offset, &expanded_pattern));
+  const uint32_t expanded_pattern = iree_hal_vulkan_queue_expand_fill_pattern(
+      pattern, pattern_length, aligned_target_offset - target_offset);
   iree_vkCmdFillBuffer(
       IREE_VULKAN_DEVICE(&queue->syms), submission->native_command_buffer,
       target_handle, aligned_target_offset,
@@ -4222,122 +4204,77 @@ static iree_status_t iree_hal_vulkan_queue_record_staged_fill_ranges(
   const VkDeviceSize trailing_length = target_end - aligned_target_end;
   if (trailing_length != 0) {
     const VkDeviceSize pattern_phase =
-        (aligned_target_end - target_offset) % submission->fill.pattern_length;
+        (aligned_target_end - target_offset) % pattern_length;
     iree_hal_vulkan_queue_record_native_copy_region(
         queue, submission->native_command_buffer, staging_handle,
         staging_offset + pattern_phase, target_handle, aligned_target_end,
         trailing_length);
   }
-  return iree_ok_status();
 }
 
-static iree_status_t iree_hal_vulkan_queue_record_fill_native(
+static iree_status_t iree_hal_vulkan_queue_record_transfer_fill(
     iree_hal_vulkan_queue_t* queue,
-    iree_hal_vulkan_queue_pending_submission_t* submission) {
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_usage(
-      iree_hal_buffer_allowed_usage(submission->fill.target_buffer),
-      IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET));
-
+    iree_hal_vulkan_queue_pending_submission_t* submission,
+    const iree_hal_transfer_operation_t* operation,
+    VkDescriptorPool descriptor_pool,
+    const VkDescriptorSet** inout_descriptor_sets, bool* inout_scratch_used) {
   iree_hal_vulkan_queue_resolved_transfer_buffer_t target = {0};
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_queue_resolve_transfer_buffer(
-      submission->fill.target_buffer, submission->fill.target_offset, &target));
-  const bool needs_unaligned_fill =
-      target.offset % sizeof(uint32_t) != 0 ||
-      submission->fill.length % sizeof(uint32_t) != 0;
-  const bool use_staged_edges =
-      needs_unaligned_fill &&
-      !iree_all_bits_set(queue->queue_flags, VK_QUEUE_COMPUTE_BIT);
-  if (needs_unaligned_fill && !use_staged_edges && !queue->builtins) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "Vulkan unaligned native queue fill requires built-in pipelines");
-  }
+      operation->fill.target_buffer, operation->fill.target_offset, &target));
+  VkDeviceSize fill_offset = target.offset;
+  VkDeviceSize fill_length = (VkDeviceSize)operation->fill.length;
+  const bool needs_unaligned_fill = fill_offset % sizeof(uint32_t) != 0 ||
+                                    fill_length % sizeof(uint32_t) != 0;
   if (needs_unaligned_fill &&
-      submission->fill.length >
-          IREE_DEVICE_SIZE_MAX - (iree_device_size_t)target.offset) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "Vulkan native queue fill range overflows");
-  }
-
-  iree_hal_vulkan_queue_resolved_transfer_buffer_t staging = {0};
-  if (use_staged_edges) {
+      !iree_all_bits_set(queue->queue_flags, VK_QUEUE_COMPUTE_BIT)) {
     const iree_hal_vulkan_queue_command_buffer_lease_t* lease =
         &submission->native_command_buffer_lease;
+    iree_hal_vulkan_queue_resolved_transfer_buffer_t staging = {0};
     IREE_RETURN_IF_ERROR(iree_hal_vulkan_queue_resolve_transfer_buffer(
         lease->block->fill_scratch,
         lease->slot * IREE_HAL_VULKAN_QUEUE_FILL_SCRATCH_SIZE, &staging));
-  }
-
-  VkDescriptorSet
-      descriptor_sets[IREE_HAL_VULKAN_QUEUE_BUILTIN_DESCRIPTOR_SET_COUNT_MAX] =
-          {
-              VK_NULL_HANDLE,
-              VK_NULL_HANDLE,
-          };
-  uint32_t descriptor_set_count = 0;
-  if (needs_unaligned_fill && !use_staged_edges) {
-    descriptor_set_count =
-        iree_hal_vulkan_builtins_fill_unaligned_descriptor_set_count(
-            target.offset, (VkDeviceSize)submission->fill.length);
-    IREE_RETURN_IF_ERROR(
-        iree_hal_vulkan_queue_acquire_descriptor_cache_sets_under_lock(
-            queue, submission, descriptor_set_count, descriptor_sets));
-  }
-
-  VkCommandBufferBeginInfo begin_info = {
-      .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-      .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-  };
-  IREE_RETURN_IF_ERROR(iree_vkBeginCommandBuffer(
-      IREE_VULKAN_DEVICE(&queue->syms), submission->native_command_buffer,
-      &begin_info));
-  iree_hal_vulkan_queue_profile_reset_native_timestamps(queue, submission);
-  iree_hal_vulkan_queue_profile_write_timestamp_begin(queue, submission);
-  iree_hal_vulkan_barrier_record(&queue->syms, queue->queue_flags,
-                                 submission->native_command_buffer,
-                                 &submission->barriers.before);
-  VkDeviceSize fill_offset = target.offset;
-  VkDeviceSize fill_length = (VkDeviceSize)submission->fill.length;
-  if (use_staged_edges) {
-    IREE_RETURN_IF_ERROR(iree_hal_vulkan_queue_record_staged_fill_ranges(
+    iree_hal_vulkan_queue_record_staged_fill_ranges(
         queue, submission, staging.handle, staging.offset, target.handle,
-        target.offset, fill_length));
-    fill_length = 0;
-  } else if (needs_unaligned_fill) {
-    IREE_RETURN_IF_ERROR(
-        iree_hal_vulkan_builtins_record_fill_unaligned_descriptor_sets(
-            queue->builtins, submission->native_command_buffer, descriptor_sets,
-            descriptor_set_count, target.handle, target.offset,
-            (VkDeviceSize)submission->fill.length, submission->fill.pattern,
-            submission->fill.pattern_length));
-    const VkDeviceSize target_end =
-        target.offset + (VkDeviceSize)submission->fill.length;
+        target.offset, fill_length, operation->fill.pattern,
+        operation->fill.pattern_length, inout_scratch_used);
+    return iree_ok_status();
+  }
+  if (needs_unaligned_fill) {
+    if (descriptor_pool) {
+      IREE_RETURN_IF_ERROR(iree_hal_vulkan_builtins_record_fill_unaligned(
+          queue->builtins, submission->native_command_buffer, descriptor_pool,
+          target.handle, target.offset, fill_length, operation->fill.pattern,
+          operation->fill.pattern_length));
+    } else {
+      const uint32_t descriptor_set_count =
+          iree_hal_vulkan_builtins_fill_unaligned_descriptor_set_count(
+              target.offset, fill_length);
+      IREE_RETURN_IF_ERROR(
+          iree_hal_vulkan_builtins_record_fill_unaligned_descriptor_sets(
+              queue->builtins, submission->native_command_buffer,
+              *inout_descriptor_sets, descriptor_set_count, target.handle,
+              target.offset, fill_length, operation->fill.pattern,
+              operation->fill.pattern_length));
+      *inout_descriptor_sets += descriptor_set_count;
+    }
+    const VkDeviceSize target_end = target.offset + fill_length;
     const VkDeviceSize aligned_target_offset =
         iree_device_align(target.offset, sizeof(uint32_t));
     const VkDeviceSize aligned_target_end =
         target_end & ~(VkDeviceSize)(sizeof(uint32_t) - 1);
     if (aligned_target_offset >= aligned_target_end) {
-      fill_length = 0;
-    } else {
-      fill_offset = aligned_target_offset;
-      fill_length = aligned_target_end - aligned_target_offset;
+      return iree_ok_status();
     }
+    fill_offset = aligned_target_offset;
+    fill_length = aligned_target_end - aligned_target_offset;
   }
-  if (fill_length != 0) {
-    uint32_t pattern = 0;
-    IREE_RETURN_IF_ERROR(iree_hal_vulkan_queue_expand_fill_pattern(
-        submission->fill.pattern, submission->fill.pattern_length,
-        fill_offset - target.offset, &pattern));
-    iree_vkCmdFillBuffer(IREE_VULKAN_DEVICE(&queue->syms),
-                         submission->native_command_buffer, target.handle,
-                         fill_offset, fill_length, pattern);
-  }
-  iree_hal_vulkan_barrier_record(&queue->syms, queue->queue_flags,
-                                 submission->native_command_buffer,
-                                 &submission->barriers.after);
-  iree_hal_vulkan_queue_profile_write_timestamp_end(queue, submission);
-  return iree_vkEndCommandBuffer(IREE_VULKAN_DEVICE(&queue->syms),
-                                 submission->native_command_buffer);
+  const uint32_t pattern = iree_hal_vulkan_queue_expand_fill_pattern(
+      operation->fill.pattern, operation->fill.pattern_length,
+      fill_offset - target.offset);
+  iree_vkCmdFillBuffer(IREE_VULKAN_DEVICE(&queue->syms),
+                       submission->native_command_buffer, target.handle,
+                       fill_offset, fill_length, pattern);
+  return iree_ok_status();
 }
 
 static void iree_hal_vulkan_queue_complete_operation(
@@ -4601,6 +4538,28 @@ static iree_status_t iree_hal_vulkan_queue_record_transfer_native(
   IREE_RETURN_IF_ERROR(
       iree_hal_vulkan_queue_profile_prepare_native_timestamps_under_lock(
           queue, submission));
+  VkDescriptorSet
+      descriptor_sets[IREE_HAL_VULKAN_QUEUE_BUILTIN_DESCRIPTOR_SET_COUNT_MAX];
+  const VkDescriptorSet* descriptor_set_cursor = descriptor_sets;
+  VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
+  const uint32_t descriptor_set_count =
+      submission->transfer.descriptor_set_count;
+  if (descriptor_set_count != 0) {
+    if (descriptor_set_count <= IREE_ARRAYSIZE(descriptor_sets)) {
+      IREE_RETURN_IF_ERROR(
+          iree_hal_vulkan_queue_acquire_descriptor_cache_sets_under_lock(
+              queue, submission, descriptor_set_count, descriptor_sets));
+    } else {
+      const iree_hal_vulkan_command_buffer_descriptor_requirements_t
+          requirements = {
+              .set_count = descriptor_set_count,
+              .storage_buffer_count = descriptor_set_count,
+          };
+      IREE_RETURN_IF_ERROR(
+          iree_hal_vulkan_queue_acquire_native_descriptor_pool_under_lock(
+              queue, submission, &requirements, &descriptor_pool));
+    }
+  }
   VkCommandBufferBeginInfo begin_info = {
       .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
       .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
@@ -4614,6 +4573,7 @@ static iree_status_t iree_hal_vulkan_queue_record_transfer_native(
                                  submission->native_command_buffer,
                                  &submission->barriers.before);
 
+  bool scratch_used = false;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < submission->transfer.operation_count && iree_status_is_ok(status);
@@ -4621,32 +4581,11 @@ static iree_status_t iree_hal_vulkan_queue_record_transfer_native(
     const iree_hal_transfer_operation_t* operation =
         &submission->transfer.operations[i];
     switch (operation->type) {
-      case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL: {
-        iree_hal_vulkan_queue_resolved_transfer_buffer_t target = {0};
-        status = iree_hal_vulkan_queue_resolve_transfer_buffer(
-            operation->fill.target_buffer, operation->fill.target_offset,
-            &target);
-        uint32_t pattern = 0;
-        if (iree_status_is_ok(status)) {
-          status = iree_hal_vulkan_queue_expand_fill_pattern(
-              operation->fill.pattern, operation->fill.pattern_length,
-              /*pattern_offset=*/0, &pattern);
-        }
-        if (iree_status_is_ok(status) &&
-            IREE_UNLIKELY((target.offset % sizeof(uint32_t)) != 0 ||
-                          (operation->fill.length % sizeof(uint32_t)) != 0)) {
-          status = iree_make_status(
-              IREE_STATUS_INTERNAL,
-              "captured native Vulkan fill is not 4-byte aligned");
-        }
-        if (iree_status_is_ok(status)) {
-          iree_vkCmdFillBuffer(IREE_VULKAN_DEVICE(&queue->syms),
-                               submission->native_command_buffer, target.handle,
-                               target.offset,
-                               (VkDeviceSize)operation->fill.length, pattern);
-        }
+      case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
+        status = iree_hal_vulkan_queue_record_transfer_fill(
+            queue, submission, operation, descriptor_pool,
+            &descriptor_set_cursor, &scratch_used);
         break;
-      }
       case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE: {
         iree_hal_vulkan_queue_resolved_transfer_buffer_t target = {0};
         status = iree_hal_vulkan_queue_resolve_transfer_buffer(
@@ -4723,7 +4662,6 @@ static void iree_hal_vulkan_queue_complete_submission(
 
   switch (submission->kind) {
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_SPARSE_BIND:
-    case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_FILL:
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_UPDATE:
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_COPY:
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_TRANSFER:
@@ -4758,7 +4696,6 @@ static void iree_hal_vulkan_queue_complete_submission(
       iree_hal_vulkan_queue_execute_host_call(queue, submission,
                                               terminal_status);
       break;
-    case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_FILL:
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_UPDATE:
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_COPY:
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_TRANSFER:
@@ -6488,121 +6425,6 @@ static iree_status_t iree_hal_vulkan_queue_map(
   return status;
 }
 
-static iree_status_t iree_hal_vulkan_queue_submit_fill_with_action(
-    iree_hal_vulkan_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, const void* pattern,
-    iree_host_size_t pattern_length, iree_hal_fill_flags_t flags,
-    iree_hal_vulkan_queue_completion_action_t completion_action) {
-  IREE_ASSERT_ARGUMENT(queue);
-  IREE_ASSERT_ARGUMENT(target_buffer);
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_status_t status = iree_ok_status();
-  if (flags != IREE_HAL_FILL_FLAG_NONE) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "unsupported Vulkan queue fill flags: 0x%" PRIx64,
-                              flags);
-  }
-  if (iree_status_is_ok(status) && !pattern) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "Vulkan queue fill pattern is NULL");
-  }
-  if (iree_status_is_ok(status) && pattern_length != 1 && pattern_length != 2 &&
-      pattern_length != 4) {
-    status = iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Vulkan queue fill pattern length must be 1, 2, or 4 bytes "
-        "(got %" PRIhsz ")",
-        pattern_length);
-  }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_buffer_validate_range(target_buffer, target_offset, length);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_buffer_validate_memory_type(
-        iree_hal_buffer_memory_type(target_buffer),
-        IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_vulkan_queue_validate_semaphore_list(
-        queue, wait_semaphore_list, IREE_SV("wait"));
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_vulkan_queue_validate_semaphore_list(
-        queue, signal_semaphore_list, IREE_SV("signal"));
-  }
-
-  iree_hal_vulkan_queue_pending_submission_t* submission = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_vulkan_queue_pending_submission_allocate(
-        queue, wait_semaphore_list, signal_semaphore_list,
-        IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_FILL, (iree_hal_host_call_t){0},
-        /*args=*/NULL, IREE_HAL_HOST_CALL_FLAG_NONE,
-        /*payload_storage_length=*/0, /*out_payload_storage=*/NULL,
-        &submission);
-  }
-  if (iree_status_is_ok(status)) {
-    submission->fill.target_buffer = target_buffer;
-    iree_hal_buffer_retain(target_buffer);
-    submission->fill.target_offset = target_offset;
-    submission->fill.length = length;
-    memset(submission->fill.pattern, 0, sizeof(submission->fill.pattern));
-    memcpy(submission->fill.pattern, pattern, pattern_length);
-    submission->fill.pattern_length = pattern_length;
-    submission->fill.flags = flags;
-    iree_hal_vulkan_queue_set_completion_action(submission, completion_action);
-  }
-  if (iree_status_is_ok(status) && length != 0) {
-    status = iree_hal_vulkan_queue_validate_recordable_backing(
-        target_buffer, IREE_SV("fill target"));
-  }
-  if (iree_status_is_ok(status) && length != 0) {
-    status =
-        iree_hal_vulkan_queue_allocate_native_command_buffer(queue, submission);
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_vulkan_queue_profile_prepare_native_timestamps(
-          queue, submission);
-    }
-    if (iree_status_is_ok(status)) {
-      iree_slim_mutex_lock(&queue->submission_mutex);
-      status = iree_hal_vulkan_queue_record_fill_native(queue, submission);
-      iree_slim_mutex_unlock(&queue->submission_mutex);
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_vulkan_queue_submit_captured_submission(queue, submission);
-    submission = NULL;
-  }
-  if (submission) {
-    if (!iree_status_is_ok(status)) {
-      iree_hal_vulkan_queue_fail_signal_list(submission->signal_semaphore_list,
-                                             iree_status_clone(status));
-    }
-    iree_hal_vulkan_queue_pending_submission_free(queue, submission);
-  }
-
-  IREE_TRACE_ZONE_END(z0);
-  return status;
-}
-
-iree_status_t iree_hal_vulkan_queue_submit_fill(
-    iree_hal_vulkan_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, const void* pattern,
-    iree_host_size_t pattern_length, iree_hal_fill_flags_t flags) {
-  return iree_hal_vulkan_queue_submit_fill_with_action(
-      queue, wait_semaphore_list, signal_semaphore_list, target_buffer,
-      target_offset, length, pattern, pattern_length, flags,
-      iree_hal_vulkan_queue_completion_action_null());
-}
-
 static iree_status_t iree_hal_vulkan_queue_submit_copy_with_action(
     iree_hal_vulkan_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -7607,12 +7429,11 @@ typedef enum iree_hal_vulkan_transfer_strategy_e {
   IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE = 1,
   IREE_HAL_VULKAN_TRANSFER_STRATEGY_STAGED_UPLOAD = 2,
   IREE_HAL_VULKAN_TRANSFER_STRATEGY_STAGED_DOWNLOAD = 3,
-  IREE_HAL_VULKAN_TRANSFER_STRATEGY_UNALIGNED_FILL = 4,
   IREE_HAL_VULKAN_TRANSFER_STRATEGY_PENDING = 5,
 } iree_hal_vulkan_transfer_strategy_t;
 
 typedef struct iree_hal_vulkan_transfer_transaction_t {
-  // Resource retained by the wait barrier and each submitted child.
+  // Captured operands owned by the native submission or host-progress children.
   iree_hal_resource_t resource;
 
   // Host allocator used for this transaction allocation and signal storage.
@@ -7620,6 +7441,9 @@ typedef struct iree_hal_vulkan_transfer_transaction_t {
 
   // Serializes child completion and terminal status ownership.
   iree_slim_mutex_t mutex;
+
+  // Storage-buffer descriptor sets required by the compact native batch.
+  uint32_t native_descriptor_set_count;
 
   // Queue executing all transaction children. Borrowed from the device.
   iree_hal_vulkan_queue_t* queue;
@@ -7648,7 +7472,7 @@ typedef struct iree_hal_vulkan_transfer_transaction_t {
   // Aggregate of asynchronous child failures. Owned by the transaction.
   iree_status_t failure_status;
 
-  // Captured barrier submitted or failed after every child completes.
+  // Terminal capture: the native batch or a barrier joining staged children.
   iree_hal_vulkan_queue_pending_submission_t* completion_submission;
 } iree_hal_vulkan_transfer_transaction_t;
 
@@ -7791,7 +7615,9 @@ static iree_status_t iree_hal_vulkan_transfer_validate_operation(
 }
 
 static iree_status_t iree_hal_vulkan_transfer_select_strategy(
+    iree_hal_vulkan_queue_t* queue,
     const iree_hal_transfer_operation_t* operation,
+    uint32_t* inout_descriptor_set_count,
     iree_hal_vulkan_transfer_strategy_t* out_strategy) {
   if (iree_hal_vulkan_transfer_operation_length(operation) == 0) {
     *out_strategy = IREE_HAL_VULKAN_TRANSFER_STRATEGY_NONE;
@@ -7808,12 +7634,17 @@ static iree_status_t iree_hal_vulkan_transfer_select_strategy(
       IREE_RETURN_IF_ERROR(iree_hal_vulkan_queue_resolve_transfer_buffer(
           operation->fill.target_buffer, operation->fill.target_offset,
           &target));
-      if ((target.offset % sizeof(uint32_t)) == 0 &&
-          (operation->fill.length % sizeof(uint32_t)) == 0) {
-        *out_strategy = IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE;
-      } else {
-        *out_strategy = IREE_HAL_VULKAN_TRANSFER_STRATEGY_UNALIGNED_FILL;
+      if (iree_all_bits_set(queue->queue_flags, VK_QUEUE_COMPUTE_BIT)) {
+        const uint32_t descriptor_set_count =
+            iree_hal_vulkan_builtins_fill_unaligned_descriptor_set_count(
+                target.offset, (VkDeviceSize)operation->fill.length);
+        if (descriptor_set_count > UINT32_MAX - *inout_descriptor_set_count) {
+          return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "Vulkan transfer descriptor count overflows");
+        }
+        *inout_descriptor_set_count += descriptor_set_count;
       }
+      *out_strategy = IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE;
       return iree_ok_status();
     }
     case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE: {
@@ -7832,7 +7663,13 @@ static iree_status_t iree_hal_vulkan_transfer_select_strategy(
       return iree_ok_status();
     }
     case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY: {
-      *out_strategy = IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE;
+      *out_strategy =
+          iree_hal_vulkan_queue_buffer_has_recordable_backing(
+              operation->copy.source_buffer) &&
+                  iree_hal_vulkan_queue_buffer_has_recordable_backing(
+                      operation->copy.target_buffer)
+              ? IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE
+              : IREE_HAL_VULKAN_TRANSFER_STRATEGY_PENDING;
       return iree_ok_status();
     }
     case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD: {
@@ -7897,8 +7734,26 @@ static iree_status_t iree_hal_vulkan_transfer_create_staged_operation(
   return status;
 }
 
+static void iree_hal_vulkan_queue_prepare_native_transfer(
+    iree_hal_vulkan_queue_pending_submission_t* submission,
+    const iree_hal_transfer_operation_t* operations,
+    iree_host_size_t operation_count, uint32_t descriptor_set_count) {
+  submission->transfer.operations = operations;
+  submission->transfer.operation_count = operation_count;
+  submission->transfer.descriptor_set_count = descriptor_set_count;
+  if (submission->profile.recorder) {
+    submission->profile.type = iree_hal_vulkan_queue_profile_type(submission);
+    if (submission->profile.type == IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_NONE) {
+      submission->profile.recorder = NULL;
+    }
+  }
+  submission->record_native_submission =
+      iree_hal_vulkan_queue_record_transfer_native;
+}
+
 static iree_status_t iree_hal_vulkan_transfer_transaction_create(
     iree_hal_vulkan_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_host_size_t operation_count,
     const iree_hal_transfer_operation_t* source_operations,
@@ -8024,11 +7879,16 @@ static iree_status_t iree_hal_vulkan_transfer_transaction_create(
     }
   }
 
+  bool requires_host_progress = false;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < operation_count && iree_status_is_ok(status);
        ++i) {
     status = iree_hal_vulkan_transfer_select_strategy(
-        &transaction->operations[i], &transaction->strategies[i]);
+        transaction->queue, &transaction->operations[i],
+        &transaction->native_descriptor_set_count, &transaction->strategies[i]);
+    requires_host_progress |=
+        transaction->strategies[i] != IREE_HAL_VULKAN_TRANSFER_STRATEGY_NONE &&
+        transaction->strategies[i] != IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE;
     if (iree_status_is_ok(status) &&
         transaction->strategies[i] ==
             IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE) {
@@ -8046,13 +7906,24 @@ static iree_status_t iree_hal_vulkan_transfer_transaction_create(
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_vulkan_queue_pending_submission_allocate(
-        queue, iree_hal_semaphore_list_empty(), signal_semaphore_list,
-        IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_BARRIER,
+        queue,
+        requires_host_progress ? iree_hal_semaphore_list_empty()
+                               : wait_semaphore_list,
+        signal_semaphore_list,
+        requires_host_progress ? IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_BARRIER
+                               : IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_TRANSFER,
         (iree_hal_host_call_t){0}, /*args=*/NULL, IREE_HAL_HOST_CALL_FLAG_NONE,
         /*payload_storage_length=*/0,
         /*out_payload_storage=*/NULL, &transaction->completion_submission);
   }
-  if (iree_status_is_ok(status) && barriers) {
+  if (iree_status_is_ok(status) && !requires_host_progress) {
+    iree_hal_vulkan_queue_prepare_native_transfer(
+        transaction->completion_submission, transaction->native_operations,
+        transaction->native_operation_count,
+        transaction->native_descriptor_set_count);
+    iree_hal_vulkan_queue_capture_barriers(transaction->completion_submission,
+                                           barriers);
+  } else if (iree_status_is_ok(status) && barriers) {
     const iree_hal_vulkan_queue_barriers_t after_barriers = {
         .after = barriers->after,
     };
@@ -8131,16 +8002,10 @@ static iree_status_t iree_hal_vulkan_transfer_submit_native_batch(
       IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_TRANSFER, (iree_hal_host_call_t){0},
       /*args=*/NULL, IREE_HAL_HOST_CALL_FLAG_NONE, /*payload_storage_length=*/0,
       /*out_payload_storage=*/NULL, &submission));
-  submission->transfer.operations = transaction->native_operations;
-  submission->transfer.operation_count = transaction->native_operation_count;
-  if (submission->profile.recorder) {
-    submission->profile.type = iree_hal_vulkan_queue_profile_type(submission);
-    if (submission->profile.type == IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_NONE) {
-      submission->profile.recorder = NULL;
-    }
-  }
-  submission->record_native_submission =
-      iree_hal_vulkan_queue_record_transfer_native;
+  iree_hal_vulkan_queue_prepare_native_transfer(
+      submission, transaction->native_operations,
+      transaction->native_operation_count,
+      transaction->native_descriptor_set_count);
   iree_hal_vulkan_queue_set_completion_action(
       submission,
       iree_hal_vulkan_transfer_transaction_child_action(transaction));
@@ -8172,7 +8037,8 @@ iree_hal_vulkan_transfer_transaction_resolve_pending_strategies(
       continue;
     }
     status = iree_hal_vulkan_transfer_select_strategy(
-        &transaction->operations[i], &transaction->strategies[i]);
+        transaction->queue, &transaction->operations[i],
+        &transaction->native_descriptor_set_count, &transaction->strategies[i]);
     if (iree_status_is_ok(status) &&
         transaction->strategies[i] ==
             IREE_HAL_VULKAN_TRANSFER_STRATEGY_PENDING) {
@@ -8243,29 +8109,11 @@ static void iree_hal_vulkan_transfer_transaction_start(
     }
   }
   for (iree_host_size_t i = 0; i < transaction->operation_count; ++i) {
-    const iree_hal_transfer_operation_t* operation =
-        &transaction->operations[i];
     const iree_hal_vulkan_transfer_strategy_t strategy =
         transaction->strategies[i];
-    iree_status_t status = iree_ok_status();
-    if (strategy == IREE_HAL_VULKAN_TRANSFER_STRATEGY_UNALIGNED_FILL) {
-      status = iree_hal_vulkan_queue_submit_fill_with_action(
-          transaction->queue, iree_hal_semaphore_list_empty(),
-          iree_hal_semaphore_list_empty(), operation->fill.target_buffer,
-          operation->fill.target_offset, operation->fill.length,
-          operation->fill.pattern, operation->fill.pattern_length,
-          operation->fill.flags,
-          iree_hal_vulkan_transfer_transaction_child_action(transaction));
-    } else if (strategy == IREE_HAL_VULKAN_TRANSFER_STRATEGY_STAGED_UPLOAD ||
-               strategy == IREE_HAL_VULKAN_TRANSFER_STRATEGY_STAGED_DOWNLOAD) {
+    if (strategy == IREE_HAL_VULKAN_TRANSFER_STRATEGY_STAGED_UPLOAD ||
+        strategy == IREE_HAL_VULKAN_TRANSFER_STRATEGY_STAGED_DOWNLOAD) {
       iree_hal_vulkan_transfer_start_staged_operation(transaction, i);
-      continue;
-    } else {
-      continue;
-    }
-    if (!iree_status_is_ok(status)) {
-      iree_hal_vulkan_transfer_transaction_child_complete(transaction, status);
-      iree_status_free(status);
     }
   }
 }
@@ -8284,8 +8132,23 @@ static iree_status_t iree_hal_vulkan_queue_submit_transfer(
 
   iree_hal_vulkan_transfer_transaction_t* transaction = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_transfer_transaction_create(
-      queue, signal_semaphore_list, operation_count, operations, barriers,
-      &transaction));
+      queue, wait_semaphore_list, signal_semaphore_list, operation_count,
+      operations, barriers, &transaction));
+  if (transaction->completion_submission->kind ==
+      IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_TRANSFER) {
+    iree_hal_vulkan_queue_pending_submission_t* submission =
+        transaction->completion_submission;
+    transaction->completion_submission = NULL;
+    iree_hal_vulkan_queue_set_completion_action(
+        submission, (iree_hal_vulkan_queue_completion_action_t){
+                        .resource = &transaction->resource,
+                    });
+    // The capture becomes the sole owner before publication. Its retirement
+    // releases all transfer buffers before publishing the public signals, even
+    // when native completion races the submitting caller's return.
+    iree_hal_resource_release(&transaction->resource);
+    return iree_hal_vulkan_queue_submit_captured_submission(queue, submission);
+  }
   iree_hal_vulkan_queue_barriers_t before_barriers = {0};
   if (barriers) {
     before_barriers.before = barriers->before;
