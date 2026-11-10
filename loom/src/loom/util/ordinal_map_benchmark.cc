@@ -6,7 +6,7 @@
 
 #include "benchmark/benchmark.h"
 #include "iree/base/internal/arena.h"
-#include "loom/format/bytecode/reader/selected_projection.h"
+#include "loom/util/ordinal_map.h"
 
 namespace {
 
@@ -28,13 +28,12 @@ static void InsertReachedFacts(benchmark::State& state, uint32_t stride) {
   for (auto _ : state) {
     iree_arena_allocator_t arena;
     iree_arena_initialize(&pool, &arena);
-    loom_bytecode_selected_projection_t projection;
-    loom_bytecode_selected_projection_initialize(&arena, &projection);
+    loom_ordinal_map_t projection;
+    loom_ordinal_map_initialize(&arena, &projection);
     for (uint32_t i = 0; i < count; ++i) {
-      const auto domain =
-          static_cast<loom_bytecode_selected_projection_domain_t>(i % 5u);
-      IREE_CHECK_OK(loom_bytecode_selected_projection_insert(
-          &projection, domain, i * stride, count - i));
+      const auto domain = static_cast<uint8_t>(i % 8u);
+      IREE_CHECK_OK(
+          loom_ordinal_map_insert(&projection, domain, i * stride, count - i));
     }
     benchmark::DoNotOptimize(projection.buckets.values);
     state.PauseTiming();
@@ -64,20 +63,17 @@ static void LookupReachedFacts(benchmark::State& state, uint32_t stride) {
   iree_arena_block_pool_initialize(32768, iree_allocator_system(), &pool);
   iree_arena_allocator_t arena;
   iree_arena_initialize(&pool, &arena);
-  loom_bytecode_selected_projection_t projection;
-  loom_bytecode_selected_projection_initialize(&arena, &projection);
+  loom_ordinal_map_t projection;
+  loom_ordinal_map_initialize(&arena, &projection);
   for (uint32_t i = 0; i < count; ++i) {
-    const auto domain =
-        static_cast<loom_bytecode_selected_projection_domain_t>(i % 5u);
-    IREE_CHECK_OK(loom_bytecode_selected_projection_insert(
-        &projection, domain, i * stride, count - i));
+    const auto domain = static_cast<uint8_t>(i % 8u);
+    IREE_CHECK_OK(
+        loom_ordinal_map_insert(&projection, domain, i * stride, count - i));
   }
   for (uint32_t i = 0; i < count; ++i) {
-    const auto domain =
-        static_cast<loom_bytecode_selected_projection_domain_t>(i % 5u);
+    const auto domain = static_cast<uint8_t>(i % 8u);
     uint32_t target_id = 0;
-    if (!loom_bytecode_selected_projection_lookup(&projection, domain,
-                                                  i * stride, &target_id) ||
+    if (!loom_ordinal_map_lookup(&projection, domain, i * stride, &target_id) ||
         target_id != count - i) {
       state.SkipWithError(
           "reached-fact lookup must return its inserted target");
@@ -90,11 +86,10 @@ static void LookupReachedFacts(benchmark::State& state, uint32_t stride) {
   uint32_t ordinal = 0;
   for (auto _ : state) {
     const uint32_t source_ordinal = ordinal++ % count;
-    const auto domain = static_cast<loom_bytecode_selected_projection_domain_t>(
-        source_ordinal % 5u);
+    const auto domain = static_cast<uint8_t>(source_ordinal % 8u);
     uint32_t target_id = 0;
-    bool found = loom_bytecode_selected_projection_lookup(
-        &projection, domain, source_ordinal * stride, &target_id);
+    bool found = loom_ordinal_map_lookup(&projection, domain,
+                                         source_ordinal * stride, &target_id);
     benchmark::DoNotOptimize(found);
     benchmark::DoNotOptimize(target_id);
   }

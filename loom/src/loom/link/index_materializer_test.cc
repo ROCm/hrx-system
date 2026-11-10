@@ -498,6 +498,65 @@ TEST_F(LinkIndexMaterializerTest,
 }
 
 TEST_F(LinkIndexMaterializerTest,
+       PreservesCachedContractsAcrossNestedProviderDiscovery) {
+  const iree_string_view_t root_source =
+      LinkIndexFixture(IREE_SV("nested_roots.loom"));
+  const iree_string_view_t outer_source =
+      LinkIndexFixture(IREE_SV("nested_outer.loom"));
+  const iree_string_view_t inner_source =
+      LinkIndexFixture(IREE_SV("nested_inner.loom"));
+  ASSERT_FALSE(iree_string_view_is_empty(root_source));
+  ASSERT_FALSE(iree_string_view_is_empty(outer_source));
+  ASSERT_FALSE(iree_string_view_is_empty(inner_source));
+  loom_module_t* root = Parse(root_source, IREE_SV("nested_roots.loom"));
+  loom_module_t* outer = Parse(outer_source, IREE_SV("nested_outer.loom"));
+  loom_module_t* inner = Parse(inner_source, IREE_SV("nested_inner.loom"));
+  ASSERT_NE(root, nullptr);
+  ASSERT_NE(outer, nullptr);
+  ASSERT_NE(inner, nullptr);
+  const std::vector<uint8_t> outer_bytecode = WriteModule(outer);
+  const std::vector<uint8_t> inner_bytecode = WriteModule(inner);
+
+  for (const ProviderForm outer_form : {ProviderForm::kMaterialized,
+                                        ProviderForm::kText,
+                                        ProviderForm::kBytecode}) {
+    SCOPED_TRACE(static_cast<int>(outer_form));
+    for (const ProviderForm inner_form : {ProviderForm::kMaterialized,
+                                          ProviderForm::kText,
+                                          ProviderForm::kBytecode}) {
+      SCOPED_TRACE(static_cast<int>(inner_form));
+      IndexPtr index = CreateIndex();
+      AddMaterialized(index.get(), root, IREE_SV("root"),
+                      LOOM_LINK_PROVIDER_ROLE_INPUT);
+      AddProvider(index.get(), outer_form, outer_source, outer, outer_bytecode,
+                  IREE_SV("outer"), LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+      AddProvider(index.get(), inner_form, inner_source, inner, inner_bytecode,
+                  IREE_SV("inner"), LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+
+      loom_link_index_materialization_t materialization =
+          Materialize(index.get(), IREE_SV("@entry"));
+      Verify(materialization.product.module);
+      EXPECT_NE(FindSymbol(materialization.product.module,
+                           IREE_SV("outer_selected")),
+                nullptr);
+      EXPECT_NE(FindSymbol(materialization.product.module,
+                           IREE_SV("inner_selected")),
+                nullptr);
+      EXPECT_NE(FindSymbol(materialization.product.module,
+                           IREE_SV("inner_rejected")),
+                nullptr);
+      EXPECT_EQ(FindSymbol(materialization.product.module,
+                           IREE_SV("outer_before")),
+                nullptr);
+      EXPECT_EQ(FindSymbol(materialization.product.module,
+                           IREE_SV("outer_after")),
+                nullptr);
+      loom_link_index_materialization_deinitialize(&materialization);
+    }
+  }
+}
+
+TEST_F(LinkIndexMaterializerTest,
        PreservesScopedTypesThroughSelectedBytecodeMaterialization) {
   const iree_string_view_t provider_source =
       LinkIndexFixture(IREE_SV("scoped_type_provider.loom"));

@@ -194,10 +194,9 @@ static iree_status_t loom_bytecode_selected_table_project_source(
     uint32_t source_ordinal, loom_source_id_t* out_target_source_id) {
   IREE_ASSERT(source_ordinal < materializer->metadata->sources.count);
   uint32_t target_id = 0;
-  if (loom_bytecode_selected_projection_lookup(
-          &materializer->projection,
-          LOOM_BYTECODE_SELECTED_PROJECTION_DOMAIN_SOURCE, source_ordinal,
-          &target_id)) {
+  if (loom_ordinal_map_lookup(&materializer->projection,
+                              LOOM_BYTECODE_SELECTED_PROJECTION_DOMAIN_SOURCE,
+                              source_ordinal, &target_id)) {
     *out_target_source_id = (loom_source_id_t)target_id;
     return iree_ok_status();
   }
@@ -212,10 +211,10 @@ static iree_status_t loom_bytecode_selected_table_project_source(
     IREE_RETURN_IF_ERROR(loom_module_register_source(
         materializer->output_module, source_name, &target_source_id));
   }
-  IREE_RETURN_IF_ERROR(loom_bytecode_selected_projection_insert(
-      &materializer->projection,
-      LOOM_BYTECODE_SELECTED_PROJECTION_DOMAIN_SOURCE, source_ordinal,
-      target_source_id));
+  IREE_RETURN_IF_ERROR(
+      loom_ordinal_map_insert(&materializer->projection,
+                              LOOM_BYTECODE_SELECTED_PROJECTION_DOMAIN_SOURCE,
+                              source_ordinal, target_source_id));
   ++materializer->projected_source_count;
   *out_target_source_id = target_source_id;
   return iree_ok_status();
@@ -238,8 +237,8 @@ void loom_bytecode_selected_table_materializer_initialize(
   };
   iree_arena_initialize(scratch_arena->block_pool,
                         &out_materializer->retained_arena);
-  loom_bytecode_selected_projection_initialize(
-      &out_materializer->retained_arena, &out_materializer->projection);
+  loom_ordinal_map_initialize(&out_materializer->retained_arena,
+                              &out_materializer->projection);
 }
 
 void loom_bytecode_selected_table_materializer_deinitialize(
@@ -252,7 +251,7 @@ iree_status_t loom_bytecode_selected_table_bind_symbol(
     loom_bytecode_selected_table_materializer_t* materializer,
     uint32_t source_name_ordinal, uint16_t target_symbol_id) {
   IREE_ASSERT(source_name_ordinal < materializer->metadata->strings.count);
-  return loom_bytecode_selected_projection_insert(
+  return loom_ordinal_map_insert(
       &materializer->projection,
       LOOM_BYTECODE_SELECTED_PROJECTION_DOMAIN_SYMBOL_NAME, source_name_ordinal,
       target_symbol_id);
@@ -272,7 +271,7 @@ bool loom_bytecode_selected_table_lookup_symbol(
     const loom_bytecode_selected_table_materializer_t* materializer,
     uint32_t source_name_ordinal, loom_symbol_ref_t* out_target_symbol_ref) {
   uint32_t target_symbol_id = 0;
-  if (!loom_bytecode_selected_projection_lookup(
+  if (!loom_ordinal_map_lookup(
           &materializer->projection,
           LOOM_BYTECODE_SELECTED_PROJECTION_DOMAIN_SYMBOL_NAME,
           source_name_ordinal, &target_symbol_id)) {
@@ -326,10 +325,9 @@ iree_status_t loom_bytecode_selected_table_project_encoding(
   const uint32_t source_ordinal = source_encoding_id - 1;
   IREE_ASSERT(source_ordinal < materializer->metadata->encodings.count);
   uint32_t target_id = 0;
-  if (loom_bytecode_selected_projection_lookup(
-          &materializer->projection,
-          LOOM_BYTECODE_SELECTED_PROJECTION_DOMAIN_ENCODING, source_ordinal,
-          &target_id)) {
+  if (loom_ordinal_map_lookup(&materializer->projection,
+                              LOOM_BYTECODE_SELECTED_PROJECTION_DOMAIN_ENCODING,
+                              source_ordinal, &target_id)) {
     *out_target_encoding_id = target_id;
     return iree_ok_status();
   }
@@ -344,10 +342,9 @@ iree_status_t loom_bytecode_selected_table_project_type(
     loom_type_id_t source_type_id, loom_type_id_t* out_target_type_id) {
   IREE_ASSERT(source_type_id < materializer->metadata->types.count);
   uint32_t target_id = 0;
-  if (loom_bytecode_selected_projection_lookup(
-          &materializer->projection,
-          LOOM_BYTECODE_SELECTED_PROJECTION_DOMAIN_TYPE, source_type_id,
-          &target_id)) {
+  if (loom_ordinal_map_lookup(&materializer->projection,
+                              LOOM_BYTECODE_SELECTED_PROJECTION_DOMAIN_TYPE,
+                              source_type_id, &target_id)) {
     *out_target_type_id = (loom_type_id_t)target_id;
     return iree_ok_status();
   }
@@ -367,10 +364,9 @@ iree_status_t loom_bytecode_selected_table_project_location(
     return iree_ok_status();
   }
   uint32_t target_id = 0;
-  if (loom_bytecode_selected_projection_lookup(
-          &materializer->projection,
-          LOOM_BYTECODE_SELECTED_PROJECTION_DOMAIN_LOCATION, source_location_id,
-          &target_id)) {
+  if (loom_ordinal_map_lookup(&materializer->projection,
+                              LOOM_BYTECODE_SELECTED_PROJECTION_DOMAIN_LOCATION,
+                              source_location_id, &target_id)) {
     *out_target_location_id = (loom_location_id_t)target_id;
     return iree_ok_status();
   }
@@ -978,7 +974,7 @@ static iree_status_t loom_bytecode_selected_table_finish_entry(
       break;
     }
   }
-  IREE_RETURN_IF_ERROR(loom_bytecode_selected_projection_insert(
+  IREE_RETURN_IF_ERROR(loom_ordinal_map_insert(
       &materializer->projection,
       loom_bytecode_selected_table_projection_domain(table_kind),
       source_ordinal, target_id));
@@ -1011,7 +1007,7 @@ loom_bytecode_selected_table_materialize_unresolved(
       // The caller already established that the root is missing. Children
       // may have duplicate queued references completed by an earlier sibling.
       if (frame_depth != 1 &&
-          loom_bytecode_selected_projection_lookup(
+          loom_ordinal_map_lookup(
               &materializer->projection,
               loom_bytecode_selected_table_projection_domain(frame->table_kind),
               frame->source_ordinal, frame->destination)) {
@@ -1063,7 +1059,7 @@ static iree_status_t loom_bytecode_selected_table_materialize_root(
     loom_bytecode_selected_table_materializer_t* materializer,
     loom_bytecode_selected_table_kind_t table_kind, uint32_t source_ordinal,
     uint32_t* out_target_id) {
-  if (loom_bytecode_selected_projection_lookup(
+  if (loom_ordinal_map_lookup(
           &materializer->projection,
           loom_bytecode_selected_table_projection_domain(table_kind),
           source_ordinal, out_target_id)) {

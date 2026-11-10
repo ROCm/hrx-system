@@ -27,6 +27,24 @@ typedef struct loom_link_bytecode_template_contract_t {
   uint32_t target_symbol_ordinal;
 } loom_link_bytecode_template_contract_t;
 
+typedef struct loom_link_bytecode_template_target_cache_t
+    loom_link_bytecode_template_target_cache_t;
+
+// Decoded fields not already retained in admitted symbol metadata. Each record
+// belongs to one source provider; zero initialization denotes an unread record.
+typedef struct loom_link_bytecode_template_provider_projection_t {
+  // Source SYMBOLS ordinal of the target witness, or UINT32_MAX.
+  uint32_t target_symbol_ordinal;
+  // Number of decoded conditions.
+  uint16_t condition_count;
+  // True only after all referenced data has been successfully projected.
+  bool initialized;
+  // Arena-owned resolved target conditions.
+  const loom_target_condition_t* conditions;
+  // Borrowed cached target projection, including NULL for declarations.
+  const loom_target_facts_t* target_facts;
+} loom_link_bytecode_template_provider_projection_t;
+
 // Per-bytecode-module lazy applicability cache.
 typedef struct loom_link_bytecode_template_contract_reader_t {
   // Borrowed complete bytecode file contents.
@@ -41,40 +59,31 @@ typedef struct loom_link_bytecode_template_contract_reader_t {
   // Persistent storage for projected contracts and target facts.
   iree_arena_allocator_t* arena;
 
-  // Provider contracts indexed by source SYMBOLS ordinal.
-  struct {
-    // Arena-owned contract pointers; entries are populated on first use.
-    const loom_link_bytecode_template_contract_t** values;
-
-    // Number of source symbol slots.
-    iree_host_size_t count;
-  } contracts;
-
-  // Target fact projections indexed by source SYMBOLS ordinal.
-  struct {
-    // Arena-owned fact pointers; NULL may be a projected target declaration.
-    const loom_target_facts_t** values;
-
-    // Arena-owned bits distinguishing unprojected entries from NULL results.
-    uint64_t* projected_words;
-  } targets;
+  // Arena-owned projections for reached target witnesses only.
+  // NULL before a contract requires a target identity.
+  loom_link_bytecode_template_target_cache_t* targets;
 } loom_link_bytecode_template_contract_reader_t;
 
 // Initializes an empty lazy reader over one validated bytecode module.
 //
 // The reader borrows every argument for its lifetime. It creates no IR and
 // never reads provider implementation bodies.
-iree_status_t loom_link_bytecode_template_contract_reader_initialize(
+void loom_link_bytecode_template_contract_reader_initialize(
     iree_const_byte_span_t bytecode, loom_context_t* context,
     const loom_bytecode_module_metadata_t* metadata,
     iree_arena_allocator_t* arena,
     loom_link_bytecode_template_contract_reader_t* out_reader);
 
-// Returns one cached provider applicability contract.
+// Returns a provider contract borrowing retained metadata and cached
+// projections. The value itself needs no persistent allocation. Its referenced
+// data remains valid for the reader lifetime, including across subsequent
+// projections. The caller provides one zero-initialized projection per reached
+// provider and reuses it only with the same source symbol and reader.
 iree_status_t loom_link_bytecode_template_contract_reader_load(
     loom_link_bytecode_template_contract_reader_t* reader,
     uint32_t source_symbol_ordinal,
-    const loom_link_bytecode_template_contract_t** out_contract);
+    loom_link_bytecode_template_provider_projection_t* projection,
+    loom_link_bytecode_template_contract_t* out_contract);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -1,0 +1,13 @@
+target.generic<reference> @inner_target
+
+template.decl @inner() -> (index)
+
+template.def<@inner> target(@inner_target) requires [#target.subgroup.size<64>] @inner_selected() -> (index) {
+  %result = index.constant 42 : index
+  template.return %result : index
+}
+
+template.def<@inner> requires [#target.subgroup.size<32>] priority(10) @inner_rejected() -> (index) {
+  %result = index.constant -3 : index
+  template.return %result : index
+}
