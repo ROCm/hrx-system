@@ -605,8 +605,9 @@ static bool loom_aie2p_float_compare_is_zero(
 static iree_status_t loom_aie2p_float_compare_build_packet(
     loom_builder_t* builder, loom_location_id_t location,
     loom_numeric_float_encoding_t encoding,
-    const loom_aie2p_float_compare_plan_t* plan, loom_value_id_t lhs,
-    loom_value_id_t rhs, loom_type_t float_type, loom_value_id_t* out_result) {
+    const loom_aie2p_float_compare_plan_t* plan, bool no_nan,
+    loom_value_id_t lhs, loom_value_id_t rhs, loom_type_t float_type,
+    loom_value_id_t* out_result) {
   loom_aie2p_float_ordering_context_t ordering = {0};
   loom_aie2p_float_ordering_initialize(builder, float_type, encoding, location,
                                        &ordering);
@@ -623,18 +624,32 @@ static iree_status_t loom_aie2p_float_compare_build_packet(
       loom_aie2p_float_ordering_build_value(&ordering, rhs, &rhs_value));
   IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_magnitude(
       &ordering, magnitude_mask, &rhs_value));
-  loom_value_id_t special_magnitude = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_constant(
-      &ordering, (int64_t)encoding.special_magnitude, &special_magnitude));
-  IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_nan(
-      &ordering, special_magnitude, &lhs_value));
-  IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_nan(
-      &ordering, special_magnitude, &rhs_value));
-  loom_op_t* unordered_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_ori_build(
-      ordering.builder, lhs_value.is_nan, rhs_value.is_nan,
-      ordering.predicate_type, ordering.location, &unordered_op));
-  const loom_value_id_t unordered = loom_vector_ori_result(unordered_op);
+  loom_value_id_t unordered = LOOM_VALUE_ID_INVALID;
+  if (!no_nan) {
+    loom_value_id_t special_magnitude = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_constant(
+        &ordering, (int64_t)encoding.special_magnitude, &special_magnitude));
+    IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_nan(
+        &ordering, special_magnitude, &lhs_value));
+    IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_nan(
+        &ordering, special_magnitude, &rhs_value));
+    loom_op_t* unordered_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_ori_build(
+        ordering.builder, lhs_value.is_nan, rhs_value.is_nan,
+        ordering.predicate_type, ordering.location, &unordered_op));
+    unordered = loom_vector_ori_result(unordered_op);
+  } else if (plan->relation == LOOM_AIE2P_FLOAT_COMPARE_RELATION_ORDERED ||
+             plan->relation == LOOM_AIE2P_FLOAT_COMPARE_RELATION_UNORDERED) {
+    loom_value_id_t zero = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(
+        loom_aie2p_float_ordering_build_constant(&ordering, 0, &zero));
+    return loom_aie2p_float_ordering_build_compare(
+        &ordering,
+        plan->relation == LOOM_AIE2P_FLOAT_COMPARE_RELATION_ORDERED
+            ? LOOM_VECTOR_CMPI_PREDICATE_EQ
+            : LOOM_VECTOR_CMPI_PREDICATE_NE,
+        zero, zero, out_result);
+  }
 
   loom_value_id_t result = unordered;
   if (plan->relation != LOOM_AIE2P_FLOAT_COMPARE_RELATION_UNORDERED) {
@@ -679,7 +694,9 @@ static iree_status_t loom_aie2p_float_compare_build_packet(
           lhs_value.key, rhs_value.key, &base));
 
       loom_op_t* combine_op = NULL;
-      if (plan->nan_policy == LOOM_AIE2P_FLOAT_COMPARE_NAN_POLICY_SET) {
+      if (no_nan) {
+        result = base;
+      } else if (plan->nan_policy == LOOM_AIE2P_FLOAT_COMPARE_NAN_POLICY_SET) {
         IREE_RETURN_IF_ERROR(loom_vector_ori_build(
             ordering.builder, base, unordered, ordering.predicate_type,
             ordering.location, &combine_op));
@@ -914,7 +931,7 @@ iree_status_t loom_aie2p_legalize_vector_cmpf(
           packet_type, &packets[packet_index]));
     } else {
       IREE_RETURN_IF_ERROR(loom_aie2p_float_compare_build_packet(
-          &rewriter->builder, op->location, encoding, &plan, packet_lhs,
+          &rewriter->builder, op->location, encoding, &plan, no_nan, packet_lhs,
           packet_rhs, packet_type, &packets[packet_index]));
     }
   }

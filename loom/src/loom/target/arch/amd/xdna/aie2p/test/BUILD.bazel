@@ -31,6 +31,16 @@ _XDNA_IMAGE_COMPATIBLE_WITH = _XDNA_ARTIFACT_COMPATIBLE_WITH + loom_config_compa
 ])
 
 iree_py_test(
+    name = "float_comparison_family_test",
+    size = "small",
+    srcs = ["float_comparison_family_test.py"],
+    args = ["$(location //loom/src/loom/tools/loom-check:loom-check-test)"],
+    data = ["//loom/src/loom/tools/loom-check:loom-check-test"],
+    main = "float_comparison_family_test.py",
+    target_compatible_with = _XDNA_TARGET_COMPATIBLE_WITH,
+)
+
+iree_py_test(
     name = "vector_construct_family_test",
     size = "small",
     srcs = ["vector_construct_family_test.py"],

@@ -154,3 +154,96 @@ func.def @wide_shaped_f64_olt(%lhs: vector<3x3xf64>, %rhs: vector<3x3xf64>) -> (
   %result = vector.bitcast %60 : vector<9xi1> to vector<3x3xi1>
   func.return %result : vector<3x3xi1>
 }
+
+// ====
+
+// nnan removes unordered classification without changing signed-zero equality.
+func.def @finite_bf16_inequality(%lhs: vector<4xbf16>, %rhs: vector<4xbf16>) -> (vector<4xi1>) {
+  %result = vector.cmpf<nnan> one, %lhs, %rhs : vector<4xbf16> -> vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ----
+func.def @finite_bf16_inequality(%lhs: vector<4xbf16>, %rhs: vector<4xbf16>) -> (vector<4xi1>) {
+  %4 = vector.splati 32767 : vector<4xi16>
+  %5 = vector.bitcast %lhs : vector<4xbf16> to vector<4xi16>
+  %6 = vector.andi %5, %4 : vector<4xi16>
+  %7 = vector.bitcast %rhs : vector<4xbf16> to vector<4xi16>
+  %8 = vector.andi %7, %4 : vector<4xi16>
+  %9 = vector.splati 0 : vector<4xi16>
+  %10 = vector.splati -32768 : vector<4xi16>
+  %11 = vector.splati -1 : vector<4xi16>
+  %12 = vector.cmpi eq, %6, %9 : vector<4xi16> -> vector<4xi1>
+  %13 = vector.select %12, %9, %5 : vector<4xi16>
+  %14 = vector.cmpi slt, %13, %9 : vector<4xi16> -> vector<4xi1>
+  %15 = vector.addi %13, %10 : vector<4xi16>
+  %16 = vector.subi %11, %13 : vector<4xi16>
+  %17 = vector.select %14, %16, %15 : vector<4xi16>
+  %18 = vector.cmpi eq, %8, %9 : vector<4xi16> -> vector<4xi1>
+  %19 = vector.select %18, %9, %7 : vector<4xi16>
+  %20 = vector.cmpi slt, %19, %9 : vector<4xi16> -> vector<4xi1>
+  %21 = vector.addi %19, %10 : vector<4xi16>
+  %22 = vector.subi %11, %19 : vector<4xi16>
+  %23 = vector.select %20, %22, %21 : vector<4xi16>
+  %result = vector.cmpi ne, %17, %23 : vector<4xi16> -> vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ====
+
+// The same permission survives shape linearization and a partial i64 packet.
+func.def @finite_shaped_f64_order(%lhs: vector<3x3xf64>, %rhs: vector<3x3xf64>) -> (vector<3x3xi1>) {
+  %result = vector.cmpf<nnan> olt, %lhs, %rhs : vector<3x3xf64> -> vector<3x3xi1>
+  func.return %result : vector<3x3xi1>
+}
+
+// ----
+func.def @finite_shaped_f64_order(%lhs: vector<3x3xf64>, %rhs: vector<3x3xf64>) -> (vector<3x3xi1>) {
+  %4 = vector.bitcast %lhs : vector<3x3xf64> to vector<9xf64>
+  %5 = vector.bitcast %rhs : vector<3x3xf64> to vector<9xf64>
+  %6 = vector.slice %4[0] : vector<9xf64> -> vector<8xf64>
+  %7 = vector.slice %5[0] : vector<9xf64> -> vector<8xf64>
+  %8 = vector.splati 9223372036854775807 : vector<8xi64>
+  %9 = vector.bitcast %6 : vector<8xf64> to vector<8xi64>
+  %10 = vector.andi %9, %8 : vector<8xi64>
+  %11 = vector.bitcast %7 : vector<8xf64> to vector<8xi64>
+  %12 = vector.andi %11, %8 : vector<8xi64>
+  %13 = vector.splati 0 : vector<8xi64>
+  %14 = vector.splati -9223372036854775808 : vector<8xi64>
+  %15 = vector.splati -1 : vector<8xi64>
+  %16 = vector.cmpi slt, %9, %13 : vector<8xi64> -> vector<8xi1>
+  %17 = vector.select %16, %15, %14 : vector<8xi64>
+  %18 = vector.xori %9, %17 : vector<8xi64>
+  %19 = vector.cmpi slt, %11, %13 : vector<8xi64> -> vector<8xi1>
+  %20 = vector.select %19, %15, %14 : vector<8xi64>
+  %21 = vector.xori %11, %20 : vector<8xi64>
+  %22 = vector.cmpi eq, %10, %13 : vector<8xi64> -> vector<8xi1>
+  %23 = vector.select %22, %14, %18 : vector<8xi64>
+  %24 = vector.cmpi eq, %12, %13 : vector<8xi64> -> vector<8xi1>
+  %25 = vector.select %24, %14, %21 : vector<8xi64>
+  %26 = vector.cmpi ult, %23, %25 : vector<8xi64> -> vector<8xi1>
+  %27 = vector.slice %4[8] : vector<9xf64> -> vector<1xf64>
+  %28 = vector.slice %5[8] : vector<9xf64> -> vector<1xf64>
+  %29 = vector.splati 9223372036854775807 : vector<1xi64>
+  %30 = vector.bitcast %27 : vector<1xf64> to vector<1xi64>
+  %31 = vector.andi %30, %29 : vector<1xi64>
+  %32 = vector.bitcast %28 : vector<1xf64> to vector<1xi64>
+  %33 = vector.andi %32, %29 : vector<1xi64>
+  %34 = vector.splati 0 : vector<1xi64>
+  %35 = vector.splati -9223372036854775808 : vector<1xi64>
+  %36 = vector.splati -1 : vector<1xi64>
+  %37 = vector.cmpi slt, %30, %34 : vector<1xi64> -> vector<1xi1>
+  %38 = vector.select %37, %36, %35 : vector<1xi64>
+  %39 = vector.xori %30, %38 : vector<1xi64>
+  %40 = vector.cmpi slt, %32, %34 : vector<1xi64> -> vector<1xi1>
+  %41 = vector.select %40, %36, %35 : vector<1xi64>
+  %42 = vector.xori %32, %41 : vector<1xi64>
+  %43 = vector.cmpi eq, %31, %34 : vector<1xi64> -> vector<1xi1>
+  %44 = vector.select %43, %35, %39 : vector<1xi64>
+  %45 = vector.cmpi eq, %33, %34 : vector<1xi64> -> vector<1xi1>
+  %46 = vector.select %45, %35, %42 : vector<1xi64>
+  %47 = vector.cmpi ult, %44, %46 : vector<1xi64> -> vector<1xi1>
+  %48 = vector.concat<0> %26, %47 : vector<8xi1>, vector<1xi1> -> vector<9xi1>
+  %result = vector.bitcast %48 : vector<9xi1> to vector<3x3xi1>
+  func.return %result : vector<3x3xi1>
+}
