@@ -75,10 +75,24 @@ iree_generated_files(NAME names GENERATOR generator
             )
             configure_project(source, build)
             build_project(build, "fixture_names")
-            self.assertEqual((build / "names.txt").read_text(), "firstlicense")
-            (build / "_deps/sample-src/data/name file.txt").write_text("second")
+            generated_output = build / "names.txt"
+            completion_stamp = build / "CMakeFiles/fixture_names.stamp"
+            self.assertEqual(generated_output.read_text(), "firstlicense")
+            changed_input = build / "_deps/sample-src/data/name file.txt"
+            changed_input.write_text("second")
+            # Ninja can retain a completed output time in its build log. Make
+            # the changed input unambiguously newer than every custom-command
+            # output so invalidation does not depend on one filesystem tick.
+            changed_time = (
+                max(
+                    generated_output.stat().st_mtime_ns,
+                    completion_stamp.stat().st_mtime_ns,
+                )
+                + 2_000_000_000
+            )
+            os.utime(changed_input, ns=(changed_time, changed_time))
             build_project(build, "fixture_names")
-            self.assertEqual((build / "names.txt").read_text(), "secondlicense")
+            self.assertEqual(generated_output.read_text(), "secondlicense")
             result = configure_project(
                 source, root / "missing", "-DINPUT_PATH=absent", expect_failure=True
             )
