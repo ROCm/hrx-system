@@ -228,8 +228,9 @@ TEST_F(GroupTextServiceTest,
   IREE_ASSERT_OK(loom_serve_text_model_prepare_resize(model_, 6, &resize));
   ASSERT_NE(resize, nullptr);
   loom_serve_execution_frontier_t frontier;
-  IREE_ASSERT_OK(
-      loom_serve_text_model_submit_resize(model_, resize, &frontier));
+  auto status = loom_serve_text_model_submit_resize(model_, resize, &frontier);
+  loom_serve_text_resize_free(resize);
+  IREE_ASSERT_OK(status);
   IREE_ASSERT_OK(
       loom_serve_execution_wait(model_->execution, frontier.values[0]));
   IREE_ASSERT_OK(loom_serve_execution_feedback_wait(model_->execution,
@@ -290,6 +291,146 @@ TEST_F(GroupTextServiceTest,
   loom_serve_text_model_retire(model_, nullptr, nullptr);
   EXPECT_FALSE(loom_serve_text_model_is_retired(model_));
   IREE_ASSERT_OK(iree_hal_semaphore_signal(gate.semaphore, 1, nullptr));
+  IREE_ASSERT_OK(loom_serve_text_model_free(model_));
+  model_ = nullptr;
+}
+
+TEST_F(GroupTextServiceTest,
+       RejectedGroupNodePoisonsModelAndRetiresAcceptedPrefix) {
+  struct Gate {
+    iree_hal_semaphore_t* semaphore = nullptr;
+    ~Gate() {
+      if (semaphore) {
+        iree_status_ignore(iree_hal_semaphore_signal(semaphore, 1, nullptr));
+        iree_hal_semaphore_release(semaphore);
+      }
+    }
+  } gate;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      loom_serve_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &gate.semaphore));
+  uint64_t one = 1;
+  IREE_ASSERT_OK(loom_serve_execution_barrier(model_->execution,
+                                              {1, &gate.semaphore, &one}));
+  // B's token root keeps its extent but cannot be a transfer target. The HAL
+  // rejects that upload after A's two packets and B's metadata were accepted.
+  iree_hal_buffer_t** tokens =
+      &model_->banks[1].roots[LOOM_SERVE_TEXT_BANK_TOKENS];
+  const iree_device_size_t length = iree_hal_buffer_byte_length(*tokens);
+  auto* storage = new uint8_t[length]();
+  iree_hal_buffer_t* rejected = nullptr;
+  IREE_ASSERT_OK(iree_hal_heap_buffer_wrap(
+      iree_hal_buffer_placement_undefined(),
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      IREE_HAL_MEMORY_ACCESS_ALL, IREE_HAL_BUFFER_USAGE_STORAGE, length,
+      iree_make_byte_span(storage, length),
+      {[](void* user_data, iree_hal_buffer_t*) {
+         delete[] static_cast<uint8_t*>(user_data);
+       },
+       storage},
+      iree_allocator_system(), &rejected));
+  iree_hal_buffer_release(*tokens);
+  *tokens = rejected;
+  // Test-held views are dropped before model free joins state retirement.
+  using Borrow =
+      std::unique_ptr<iree_hal_buffer_t, void (*)(iree_hal_buffer_t*)>;
+  auto borrow = [](iree_hal_buffer_t* buffer) {
+    iree_hal_buffer_retain(buffer);
+    return Borrow(buffer, iree_hal_buffer_release);
+  };
+  Borrow rejected_borrow = borrow(rejected);
+  Borrow metadata =
+      borrow(model_->banks[1].roots[LOOM_SERVE_TEXT_BANK_METADATA]);
+  const iree_byte_span_t outputs =
+      model_->banks[1].bytes[LOOM_SERVE_TEXT_BANK_HOST_OUTPUTS];
+  memset(outputs.data, 0xA5, outputs.data_length);
+
+  const auto before = loom_serve_execution_frontier(model_->execution);
+  const int32_t ids[] = {0, 1, 2, 0};
+  loom_serve_text_span_t a = {
+      .row_index = 0, .token_count = 2, .token_ids = ids};
+  loom_serve_text_span_t b = {.row_index = 0,
+                              .token_count = 2,
+                              .token_ids = ids + 2,
+                              .flags = LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT,
+                              .input_offset = 2};
+  loom_serve_execution_frontier_t frontier;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_PERMISSION_DENIED,
+      loom_serve_text_model_submit_epoch_pair(model_, 0, &a, 0, &b, &frontier));
+  // State growth precedes the group; A's packets and B's metadata follow.
+  EXPECT_EQ(frontier.semaphores[0], before.semaphores[0]);
+  EXPECT_GE(frontier.values[0], before.values[0] + 3);
+  EXPECT_EQ(frontier.values[1], before.values[1]);
+  const std::vector<uint8_t> packet(
+      model_->banks[1].bytes[LOOM_SERVE_TEXT_BANK_HOST_METADATA].data,
+      model_->banks[1].bytes[LOOM_SERVE_TEXT_BANK_HOST_METADATA].data +
+          model_->banks[1]
+              .bytes[LOOM_SERVE_TEXT_BANK_HOST_METADATA]
+              .data_length);
+  auto* row = loom_serve_text_model_row(model_, 0);
+  EXPECT_EQ(loom_serve_text_row_position(row), 0u);
+  EXPECT_EQ(row->state->source_position, 0u);
+
+  // Neither the group nor the ordinary execution path replays numerical work.
+  loom_serve_execution_frontier_t retry;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      loom_serve_text_model_submit_epoch_pair(model_, 0, &a, 0, &b, &retry));
+  const int32_t token = 1;
+  const iree_hal_transfer_operation_t upload = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+      .upload = {
+          .source = &token,
+          .target_buffer = model_->banks[0].roots[LOOM_SERVE_TEXT_BANK_TOKENS],
+          .length = sizeof(token)}};
+  uint64_t value = 0;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      loom_serve_execution_transfer(model_->execution, 1, &upload, &value));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_serve_execution_barrier(
+                            model_->execution, {1, &gate.semaphore, &one}));
+  const auto poisoned = loom_serve_execution_frontier(model_->execution);
+  EXPECT_EQ(poisoned.values[0], frontier.values[0]);
+  EXPECT_EQ(poisoned.values[1], frontier.values[1]);
+
+  // The accepted packets keep the model alive until their real retirement.
+  loom_serve_text_model_retire(model_, nullptr, nullptr);
+  EXPECT_FALSE(loom_serve_text_model_is_retired(model_));
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate.semaphore, 1, nullptr));
+  IREE_ASSERT_OK(loom_serve_execution_drain(model_->execution));
+  // The frontier was the actual accepted value, not a promised later signal:
+  // the last accepted node landed and nothing after the rejection ran.
+  uint64_t signaled = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(frontier.semaphores[0], &signaled));
+  EXPECT_EQ(signaled, frontier.values[0]);
+  std::vector<uint8_t> uploaded(packet.size());
+  const iree_hal_transfer_operation_t readback = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+      .download = {.source_buffer = metadata.get(),
+                   .target = uploaded.data(),
+                   .length = uploaded.size()}};
+  iree_hal_semaphore_t* done = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      loom_serve_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &done));
+  iree_status_t status = iree_hal_queue_transfer(
+      loom_serve_device_transfer_queue(device_),
+      iree_hal_semaphore_list_empty(), {1, &done, &one}, 1, &readback, nullptr);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_semaphore_wait(done, 1, iree_infinite_timeout(),
+                                     IREE_ASYNC_WAIT_FLAG_NONE);
+  }
+  iree_hal_semaphore_release(done);
+  IREE_ASSERT_OK(status);
+  EXPECT_EQ(uploaded, packet);
+  EXPECT_TRUE(std::all_of(storage, storage + length,
+                          [](uint8_t byte) { return byte == 0; }));
+  rejected_borrow.reset();
+  metadata.reset();
+  EXPECT_TRUE(std::all_of(outputs.data, outputs.data + outputs.data_length,
+                          [](uint8_t byte) { return byte == 0xA5; }));
   IREE_ASSERT_OK(loom_serve_text_model_free(model_));
   model_ = nullptr;
 }

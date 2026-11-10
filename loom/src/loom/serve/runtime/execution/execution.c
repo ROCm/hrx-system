@@ -456,6 +456,28 @@ iree_status_t loom_serve_execution_drain(loom_serve_execution_t* execution) {
                                                     &execution->consumers));
 }
 
+iree_status_t loom_serve_execution_advance_for_testing(
+    loom_serve_execution_t* execution, uint64_t value) {
+  iree_slim_mutex_lock(&execution->mutex);
+  uint64_t current = 0;
+  iree_status_t status =
+      iree_hal_semaphore_query(execution->work.semaphore, &current);
+  if (iree_status_is_ok(status) &&
+      (current != execution->work.submitted_value || value <= current ||
+       value > IREE_HAL_SEMAPHORE_MAX_VALUE)) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "timeline advance requires an idle timeline");
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_semaphore_signal(execution->work.semaphore, value, NULL);
+  }
+  if (iree_status_is_ok(status)) {
+    execution->work.submitted_value = value;
+  }
+  iree_slim_mutex_unlock(&execution->mutex);
+  return status;
+}
+
 iree_status_t loom_serve_execution_submit_group(
     loom_serve_execution_t* execution, iree_host_size_t count,
     const loom_serve_group_node_t* nodes,

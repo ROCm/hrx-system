@@ -98,17 +98,30 @@ uint16_t loom_serve_dispatch_binding_count(
   return dispatch->binding_count;
 }
 
-iree_status_t loom_serve_dispatch_issue(
-    const loom_serve_dispatch_t* dispatch, loom_serve_execution_t* execution,
-    iree_hal_buffer_binding_table_t bindings, iree_hal_buffer_ref_t* scratch,
-    uint64_t* out_value) {
+loom_serve_group_node_t loom_serve_dispatch_group_node(
+    const loom_serve_dispatch_t* dispatch,
+    iree_hal_buffer_binding_table_t bindings, iree_hal_buffer_ref_t* scratch) {
   for (uint16_t i = 0; i < dispatch->binding_count; ++i) {
     const iree_hal_buffer_binding_t* binding = &bindings.bindings[i];
     scratch[dispatch->bindings[i]] = iree_hal_make_buffer_ref(
         binding->buffer, binding->offset, binding->length);
   }
-  return loom_serve_execution_dispatch(
-      execution, dispatch->executable, dispatch->function, dispatch->config,
-      (iree_hal_buffer_ref_list_t){dispatch->binding_count, scratch},
-      out_value);
+  return (loom_serve_group_node_t){
+      .kind = LOOM_SERVE_GROUP_DISPATCH,
+      .executable = dispatch->executable,
+      .function = dispatch->function,
+      .config = dispatch->config,
+      .refs = {dispatch->binding_count, scratch},
+  };
+}
+
+iree_status_t loom_serve_dispatch_issue(
+    const loom_serve_dispatch_t* dispatch, loom_serve_execution_t* execution,
+    iree_hal_buffer_binding_table_t bindings, iree_hal_buffer_ref_t* scratch,
+    uint64_t* out_value) {
+  const loom_serve_group_node_t node =
+      loom_serve_dispatch_group_node(dispatch, bindings, scratch);
+  return loom_serve_execution_dispatch(execution, node.executable,
+                                       node.function, node.config, node.refs,
+                                       out_value);
 }

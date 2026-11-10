@@ -8,6 +8,7 @@
 #define LOOM_SERVE_RUNTIME_EXECUTION_DISPATCH_H_
 
 #include "loom/serve/runtime/execution/execution.h"
+#include "loom/serve/runtime/execution/group.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -44,6 +45,12 @@ iree_status_t loom_serve_dispatch_issue(
     const loom_serve_dispatch_t* dispatch, loom_serve_execution_t* execution,
     iree_hal_buffer_binding_table_t bindings, iree_hal_buffer_ref_t* scratch,
     uint64_t* out_value);
+
+// Describes the same launch as dispatch_issue for an execution group. scratch
+// receives the native binding order and is copied by group append.
+loom_serve_group_node_t loom_serve_dispatch_group_node(
+    const loom_serve_dispatch_t* dispatch,
+    iree_hal_buffer_binding_table_t bindings, iree_hal_buffer_ref_t* scratch);
 
 #ifdef __cplusplus
 }  // extern "C"
