@@ -380,8 +380,23 @@ Initial pairing covers two contiguous known-input spans of one row. Media,
 proposals, device-fed continuation and ready peer work use ordinary packing.
 Only B may select. Resource ABI 2 allows source-owned draft-cache warm stages;
 proposal/verification stages remain outside groups. The model source must
-include every warm/capture consumer before bank reuse. Native variant selection
-requires plan re-preparation and currently rejects for group models.
+include every warm/capture consumer before bank reuse.
+
+Native variant selection on a group model happens at a drained boundary: with
+no group or ordinary invocation in flight, the source plan export and provider
+preparation run again against the candidate's stages, outside the execution
+lock. Bank workspaces are replaced in one allocation transaction after the
+bank working-set check when the reflected requirement changes. The plan, leaf
+descriptors and workspaces are published only after the native rebinding
+succeeds; any earlier failure leaves the current selection usable. Resident
+growth re-exports the plan from the resized control state on its cold
+preparation path and publishes it with that state. Bank packet geometry is part
+of the compiled cohort, so a resize that would change it is rejected for every
+model by the source storage contract.
+
+Group nodes are checked against the lane's queues at append (usage, access,
+memory type, flags, fill alignment, copy overlap), so such faults reject the
+group before any node is accepted.
 
 This path uses one existing device and its queues. It changes scheduling and
 storage ownership without introducing approximate arithmetic or NPU transport.

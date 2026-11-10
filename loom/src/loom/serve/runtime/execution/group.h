@@ -63,6 +63,12 @@ void loom_serve_execution_group_retire(loom_serve_execution_group_t* group);
 // successful frontier. Failed semaphore readiness alone never permits free.
 void loom_serve_execution_group_free(loom_serve_execution_group_t* group);
 
+// Applies the checks the lane's HAL queues perform at enqueue (queue family,
+// buffer usage/access/memory type, flags, fill alignment, copy overlap), so a
+// faulty node is rejected at append before any node of its group is accepted.
+iree_status_t loom_serve_execution_validate_group_node(
+    loom_serve_execution_t* execution, const loom_serve_group_node_t* node);
+
 // Lane primitive used by the owned group after all nodes have been validated.
 // Checks capacity for the whole batch under the lock before its first enqueue.
 iree_status_t loom_serve_execution_submit_group(

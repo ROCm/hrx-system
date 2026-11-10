@@ -117,6 +117,11 @@ struct loom_serve_text_model_t {
     iree_vm_function_t describe;
     iree_vm_function_t encode;
     iree_vm_function_t publish;
+    // Retained descriptors of a selected native variant; NULL uses the
+    // original stage_bindings.
+    loom_serve_stage_t* stages;
+    // Allocation request backing each bank's private workspace.
+    iree_hal_pool_reservation_request_t workspace;
     loom_serve_execution_group_t* pending;
     iree_host_size_t row_index;
     uint32_t known_count;

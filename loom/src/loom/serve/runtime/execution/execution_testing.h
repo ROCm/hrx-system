@@ -18,6 +18,12 @@ extern "C" {
 iree_status_t loom_serve_execution_advance_for_testing(
     loom_serve_execution_t* execution, uint64_t value);
 
+// Test-only: makes the next group submission reject its node at |index| as a
+// driver would after HAL validation, after accepting every earlier node. The
+// injection is consumed by the submission that reaches |index|.
+iree_status_t loom_serve_execution_reject_group_node_for_testing(
+    loom_serve_execution_t* execution, iree_host_size_t index);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

@@ -769,6 +769,7 @@ void loom_serve_text_model_retire(loom_serve_text_model_t* model,
     }
   }
   loom_serve_execution_group_retire(model->prefill_group.pending);
+  loom_serve_text_prefill_group_retire(model);
   for (iree_host_size_t i = 0; i < 2; ++i) {
     loom_serve_text_bank_retire(&model->banks[i]);
   }
@@ -885,21 +886,34 @@ iree_status_t loom_serve_text_model_compile_variant_async(
 
 iree_status_t loom_serve_text_model_select_variant(
     loom_serve_text_model_t* model, const loom_serve_text_variant_t* variant) {
-  if (model->two_bank) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "group model variants require plan re-preparation");
-  }
+  // Group models re-prepare their plan, leaves and bank workspaces first; the
+  // candidate is published only after the native rebinding succeeds.
+  loom_serve_text_group_candidate_t candidate;
+  IREE_RETURN_IF_ERROR(loom_serve_text_prefill_group_prepare_variant(
+      model, variant, &candidate));
+  iree_status_t status = iree_ok_status();
   if (variant) {
-    return loom_serve_text_variant_bind(
+    status = loom_serve_text_variant_bind(
         variant, model, model->control.native_module, model->residency);
+  } else {
+    status = loom_serve_residency_check_private_peak(
+        model->residency, model->stage_workspace_bytes);
+    if (iree_status_is_ok(status)) {
+      status = loom_serve_module_bind_stages(model->control.native_module,
+                                             model->stage_count,
+                                             model->stage_bindings);
+    }
+    if (iree_status_is_ok(status)) {
+      loom_serve_residency_set_private_peak(model->residency,
+                                            model->stage_workspace_bytes);
+    }
   }
-  IREE_RETURN_IF_ERROR(loom_serve_residency_check_private_peak(
-      model->residency, model->stage_workspace_bytes));
-  IREE_RETURN_IF_ERROR(loom_serve_module_bind_stages(
-      model->control.native_module, model->stage_count, model->stage_bindings));
-  loom_serve_residency_set_private_peak(model->residency,
-                                        model->stage_workspace_bytes);
-  return iree_ok_status();
+  if (iree_status_is_ok(status)) {
+    loom_serve_text_prefill_group_commit(model, &candidate);
+  } else {
+    loom_serve_text_prefill_group_discard(&candidate);
+  }
+  return status;
 }
 
 loom_serve_text_row_t* loom_serve_text_model_row(loom_serve_text_model_t* model,

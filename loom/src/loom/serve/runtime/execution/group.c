@@ -238,6 +238,8 @@ iree_status_t loom_serve_execution_group_append(
                             "group capacity exhausted");
   }
   IREE_RETURN_IF_ERROR(loom_serve_group_validate_node(input));
+  IREE_RETURN_IF_ERROR(
+      loom_serve_execution_validate_group_node(group->execution, input));
   loom_serve_group_node_t node = *input;
   node.command_buffer = NULL;
   node.executable = NULL;

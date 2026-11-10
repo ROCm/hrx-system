@@ -8,6 +8,7 @@
 
 #include "iree/vm/sync.h"
 #include "loom/serve/service/text/model_instance.h"
+#include "loom/serve/service/text/prefill_group.h"
 
 struct loom_serve_text_resize_t {
   // Allocator for this prepared source result.
@@ -18,6 +19,8 @@ struct loom_serve_text_resize_t {
   iree_vm_buffer_t* control_state;
   // Validated source storage records; preparation acquires no device memory.
   loom_serve_text_storage_t storage;
+  // Group plan exported from control_state, published with it at submission.
+  loom_serve_execution_plan_t* group_plan;
 };
 
 void loom_serve_text_resize_free(loom_serve_text_resize_t* resize) {
@@ -26,6 +29,7 @@ void loom_serve_text_resize_free(loom_serve_text_resize_t* resize) {
   }
   iree_vm_buffer_release(resize->control_state);
   loom_serve_text_storage_deinitialize(&resize->storage);
+  loom_serve_execution_plan_release(resize->group_plan);
   iree_allocator_free(resize->host_allocator, resize);
 }
 
@@ -110,6 +114,11 @@ iree_status_t loom_serve_text_model_prepare_resize(
       }
     }
   }
+  if (iree_status_is_ok(status)) {
+    // The resized control state may describe different group leaves.
+    status = loom_serve_text_prefill_group_prepare_plan(
+        model, resize->control_state, &resize->group_plan);
+  }
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
   if (iree_status_is_ok(status)) {
@@ -132,6 +141,11 @@ iree_status_t loom_serve_text_model_submit_resize(
     iree_vm_buffer_release(model->source.control_state);
     model->source.control_state = resize->control_state;
     resize->control_state = NULL;
+    if (resize->group_plan) {
+      loom_serve_execution_plan_release(model->execution_plan);
+      model->execution_plan = resize->group_plan;
+      resize->group_plan = NULL;
+    }
     status = loom_serve_text_resize_host_buffer(
         model, TEXT_HOST_STATE_BINDINGS, row_count * 4 * sizeof(int64_t), NULL);
   }

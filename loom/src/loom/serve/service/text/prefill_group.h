@@ -5,6 +5,7 @@
 
 #ifndef LOOM_SERVE_SERVICE_TEXT_PREFILL_GROUP_H_
 #define LOOM_SERVE_SERVICE_TEXT_PREFILL_GROUP_H_
+#include "loom/serve/runtime/program/module.h"
 #include "loom/serve/service/text/model.h"
 
 #ifdef __cplusplus
@@ -42,6 +43,49 @@ iree_status_t loom_serve_text_prefill_group_initialize(
     loom_serve_text_model_t* model);
 iree_status_t loom_serve_text_prefill_group_complete(
     loom_serve_text_model_t* model, loom_serve_text_result_t* result);
+
+// Replacement group configuration built at a drained boundary. Preparation
+// re-runs the source plan export and provider preparation outside the
+// execution lock; commit swaps it into the model and cannot fail. A zeroed
+// candidate (single-mode models) commits and discards as a no-op.
+typedef struct loom_serve_text_group_candidate_t {
+  // Allocator and count of the owned descriptor array.
+  iree_allocator_t host_allocator;
+  iree_host_size_t stage_count;
+  // Owned replacement plan; NULL keeps the current plan.
+  loom_serve_execution_plan_t* plan;
+  // Whether stages replaces the model's leaf descriptors.
+  bool rebind;
+  // Owned retained descriptors; NULL with rebind selects stage_bindings.
+  loom_serve_stage_t* stages;
+  // Owned tracked bank workspaces; NULL keeps the current workspaces.
+  iree_hal_buffer_t* workspaces[2];
+  // Request backing the replacement workspaces.
+  iree_hal_pool_reservation_request_t workspace;
+} loom_serve_text_group_candidate_t;
+
+// Exports and prepares a plan for |control_state| against the active leaf
+// descriptors without touching device memory. Used by resident growth.
+iree_status_t loom_serve_text_prefill_group_prepare_plan(
+    loom_serve_text_model_t* model, iree_vm_buffer_t* control_state,
+    loom_serve_execution_plan_t** out_plan);
+
+// Prepares the plan, leaf descriptors and bank workspaces for selecting
+// |variant| (NULL restores the original stages). Requires a drained group.
+// Workspace replacement is one allocation transaction after the bank
+// working-set check. Failure leaves the model's configuration unchanged.
+iree_status_t loom_serve_text_prefill_group_prepare_variant(
+    loom_serve_text_model_t* model, const loom_serve_text_variant_t* variant,
+    loom_serve_text_group_candidate_t* out_candidate);
+void loom_serve_text_prefill_group_commit(
+    loom_serve_text_model_t* model,
+    loom_serve_text_group_candidate_t* candidate);
+void loom_serve_text_prefill_group_discard(
+    loom_serve_text_group_candidate_t* candidate);
+
+// Drops retained variant descriptors so model retirement can observe its
+// parameter and command references.
+void loom_serve_text_prefill_group_retire(loom_serve_text_model_t* model);
 #ifdef __cplusplus
 }  // extern "C"
 #endif

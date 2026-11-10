@@ -35,6 +35,13 @@ iree_status_t loom_serve_text_variant_bind(
     const loom_serve_text_variant_t* variant, loom_serve_text_model_t* owner,
     iree_vm_module_t* module, loom_serve_residency_t* residency);
 
+// Borrows a ready candidate's descriptors, one per model stage, for owner-side
+// validation before selection. Valid until the candidate is freed.
+iree_status_t loom_serve_text_variant_stages(
+    const loom_serve_text_variant_t* variant,
+    const loom_serve_text_model_t* owner,
+    const loom_serve_stage_t** out_stages);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

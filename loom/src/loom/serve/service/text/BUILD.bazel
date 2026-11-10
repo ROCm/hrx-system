@@ -310,6 +310,7 @@ loom_cc_library(
         ":stream",
         "//loom/src/loom/serve/runtime/device",
         "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/execution:execution_testing",
         "//loom/src/loom/serve/runtime/execution:plan",
         "//loom/src/loom/serve/runtime/execution:retirement",
         "//loom/src/loom/serve/testing:device",

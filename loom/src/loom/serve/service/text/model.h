@@ -72,7 +72,9 @@ iree_status_t loom_serve_text_model_compile_variant_async(
 // replacement peak fits beside accepted peers. Failure preserves current code
 // and its admission allowance. Selection does not wait or copy retained state.
 // The native module retains selected commands independently of variant
-// lifetime.
+// lifetime. A group model must have no invocation in flight; its source plan
+// and bank workspaces are prepared again for the candidate and published with
+// the native rebinding, or not at all.
 iree_status_t loom_serve_text_model_select_variant(
     loom_serve_text_model_t* model, const loom_serve_text_variant_t* variant);
 

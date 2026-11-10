@@ -33,6 +33,8 @@ struct loom_serve_execution_t {
   // Protects timeline reservation through queue acceptance, never device waits.
   iree_slim_mutex_t mutex;
   bool failed_group;
+  // Test-only one-shot rejection of a group node index plus one; zero is off.
+  iree_host_size_t rejected_group_node;
   // Transient allocation/pool captures governing workspace activity.
   loom_serve_workspace_scope_t* scope;
   // Persistent allocation/pool captures, independent of workspace activity.
@@ -478,6 +480,142 @@ iree_status_t loom_serve_execution_advance_for_testing(
   return status;
 }
 
+iree_status_t loom_serve_execution_reject_group_node_for_testing(
+    loom_serve_execution_t* execution, iree_host_size_t index) {
+  iree_slim_mutex_lock(&execution->mutex);
+  execution->rejected_group_node = index + 1;
+  iree_slim_mutex_unlock(&execution->mutex);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_serve_execution_validate_transfer_buffer(
+    const iree_hal_queue_family_t* family, iree_hal_buffer_t* buffer,
+    iree_device_size_t offset, iree_device_size_t length,
+    iree_hal_buffer_usage_t usage, iree_hal_memory_access_t access) {
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_range(buffer, offset, length));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_buffer_validate_family_usage(buffer, family, usage));
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_access(
+      iree_hal_buffer_allowed_access(buffer), access));
+  return iree_hal_buffer_validate_memory_type(
+      iree_hal_buffer_memory_type(buffer), IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE);
+}
+
+static iree_status_t loom_serve_execution_validate_transfer(
+    const iree_hal_queue_family_t* family,
+    const iree_hal_transfer_operation_t* op) {
+  switch (op->type) {
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
+      if (!op->fill.length) {
+        return iree_ok_status();
+      }
+      if (op->fill.flags != IREE_HAL_FILL_FLAG_NONE ||
+          op->fill.target_offset % op->fill.pattern_length ||
+          op->fill.length % op->fill.pattern_length) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "group fill has flags or is misaligned");
+      }
+      return loom_serve_execution_validate_transfer_buffer(
+          family, op->fill.target_buffer, op->fill.target_offset,
+          op->fill.length, IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
+          IREE_HAL_MEMORY_ACCESS_WRITE);
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
+      if (!op->update.length) {
+        return iree_ok_status();
+      }
+      if (op->update.flags != IREE_HAL_UPDATE_FLAG_NONE) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "group update has unsupported flags");
+      }
+      return loom_serve_execution_validate_transfer_buffer(
+          family, op->update.target_buffer, op->update.target_offset,
+          op->update.length, IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
+          IREE_HAL_MEMORY_ACCESS_WRITE);
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
+      if (!op->copy.length) {
+        return iree_ok_status();
+      }
+      if (op->copy.flags != IREE_HAL_COPY_FLAG_NONE) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "group copy has unsupported flags");
+      }
+      IREE_RETURN_IF_ERROR(loom_serve_execution_validate_transfer_buffer(
+          family, op->copy.source_buffer, op->copy.source_offset,
+          op->copy.length, IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
+          IREE_HAL_MEMORY_ACCESS_READ));
+      IREE_RETURN_IF_ERROR(loom_serve_execution_validate_transfer_buffer(
+          family, op->copy.target_buffer, op->copy.target_offset,
+          op->copy.length, IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
+          IREE_HAL_MEMORY_ACCESS_WRITE));
+      if (iree_hal_buffer_test_overlap(
+              op->copy.source_buffer, op->copy.source_offset, op->copy.length,
+              op->copy.target_buffer, op->copy.target_offset,
+              op->copy.length) != IREE_HAL_BUFFER_OVERLAP_DISJOINT) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "group copy ranges overlap");
+      }
+      return iree_ok_status();
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
+      if (!op->upload.length) {
+        return iree_ok_status();
+      }
+      return loom_serve_execution_validate_transfer_buffer(
+          family, op->upload.target_buffer, op->upload.target_offset,
+          op->upload.length, IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
+          IREE_HAL_MEMORY_ACCESS_WRITE);
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
+      if (!op->download.length) {
+        return iree_ok_status();
+      }
+      return loom_serve_execution_validate_transfer_buffer(
+          family, op->download.source_buffer, op->download.source_offset,
+          op->download.length, IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
+          IREE_HAL_MEMORY_ACCESS_READ);
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "invalid group transfer");
+  }
+}
+
+iree_status_t loom_serve_execution_validate_group_node(
+    loom_serve_execution_t* execution, const loom_serve_group_node_t* node) {
+  const iree_hal_queue_family_t* dispatch =
+      iree_hal_queue_family(execution->binding.dispatch);
+  switch (node->kind) {
+    case LOOM_SERVE_GROUP_EXECUTE:
+      if (iree_hal_command_buffer_queue_family(node->command_buffer) !=
+          dispatch) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "group command belongs to another queue family");
+      }
+      return iree_ok_status();
+    case LOOM_SERVE_GROUP_DISPATCH:
+      if (iree_hal_executable_queue_family(node->executable) != dispatch) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "group executable belongs to another queue family");
+      }
+      for (iree_host_size_t i = 0; i < node->refs.count; ++i) {
+        const iree_hal_buffer_ref_t* ref = &node->refs.values[i];
+        if (ref->buffer_slot) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "group dispatch requires direct bindings");
+        }
+        IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_usage_any(
+            iree_hal_buffer_family_usage(ref->buffer, dispatch),
+            IREE_HAL_BUFFER_USAGE_STORAGE));
+      }
+      return iree_ok_status();
+    case LOOM_SERVE_GROUP_TRANSFER:
+      return loom_serve_execution_validate_transfer(
+          iree_hal_queue_family(execution->binding.transfer), &node->transfer);
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "invalid group node");
+  }
+}
+
 iree_status_t loom_serve_execution_submit_group(
     loom_serve_execution_t* execution, iree_host_size_t count,
     const loom_serve_group_node_t* nodes,
@@ -512,6 +650,12 @@ iree_status_t loom_serve_execution_submit_group(
     iree_hal_semaphore_list_t waits = {2, semaphores, values};
     iree_hal_semaphore_list_t signals = {1, &execution->work.semaphore, &next};
     const loom_serve_group_node_t* node = &nodes[i];
+    if (execution->rejected_group_node == i + 1) {
+      execution->rejected_group_node = 0;
+      status = iree_make_status(IREE_STATUS_INTERNAL,
+                                "injected queue rejection for testing");
+      break;
+    }
     switch (node->kind) {
       case LOOM_SERVE_GROUP_EXECUTE:
         status = iree_hal_queue_execute(
