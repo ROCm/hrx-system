@@ -161,6 +161,7 @@ loom_cc_library(
     visibility = ["//visibility:private"],
     deps = [
         ":input_count",
+        ":input_count_http",
         ":sequence",
         ":source_service_fixture",
         ":stream",
@@ -1260,9 +1261,22 @@ loom_cc_library(
     visibility = ["//visibility:private"],
     deps = [
         ":chat",
-        ":http",
         ":telemetry",
         "//loom/src/loom/runtime/telemetry:stream",
+        "//loom/src/loom/service/telemetry:record",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "input_count_http",
+    srcs = ["input_count_http.c"],
+    hdrs = ["input_count_http.h"],
+    visibility = ["//visibility:private"],
+    deps = [
+        ":http",
+        ":input_count",
+        ":telemetry",
         "//loom/src/loom/serve/transport/http:request",
         "//loom/src/loom/serve/transport/http:server",
         "//loom/src/loom/service/telemetry:record",
@@ -1296,6 +1310,7 @@ loom_cc_library(
         ":http",
         ":input",
         ":input_count",
+        ":input_count_http",
         ":media_projector",
         ":model",
         ":packing",

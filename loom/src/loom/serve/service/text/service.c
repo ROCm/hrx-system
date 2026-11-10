@@ -28,6 +28,7 @@
 #include "loom/serve/service/text/http.h"
 #include "loom/serve/service/text/input.h"
 #include "loom/serve/service/text/input_count.h"
+#include "loom/serve/service/text/input_count_http.h"
 #include "loom/serve/service/text/media_projector.h"
 #include "loom/serve/service/text/packing.h"
 #include "loom/serve/service/text/pending_continuation.h"
@@ -213,6 +214,31 @@ iree_status_t loom_serve_text_service_try_open_checkpoint(
   return iree_ok_status();
 }
 
+iree_status_t loom_serve_text_service_try_open_input_count(
+    loom_serve_text_service_t* service, iree_string_builder_t* body,
+    loom_serve_text_input_count_call_t** out_call) {
+  *out_call = NULL;
+  if (service->stopping) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "text service is stopping");
+  }
+  if (service->scheduling.model_mode == LOOM_SERVE_TEXT_MODE_ENCODE) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "known-input sequences do not accept chat input");
+  }
+  if (service->input_counts.count == service->input_counts.capacity) {
+    return iree_ok_status();
+  }
+  loom_serve_text_input_count_consumer_t consumer;
+  IREE_RETURN_IF_ERROR(loom_serve_text_input_count_call_allocate(
+      body, service->host_allocator, out_call, &consumer));
+  loom_serve_text_input_count_enqueue(
+      &service->input_counts, loom_serve_text_input_count_call_body(*out_call),
+      consumer, loom_serve_text_telemetry_begin(&service->telemetry));
+  loom_serve_text_pending_observe(service);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_serve_text_enqueue(
     loom_serve_text_service_t* service,
     loom_serve_http_connection_t* connection,
@@ -275,7 +301,7 @@ static iree_status_t loom_serve_text_enqueue(
         service->host_allocator);
   }
   if (input_count) {
-    iree_status_t status = loom_serve_text_input_count_enqueue(
+    iree_status_t status = loom_serve_text_input_count_http_enqueue(
         &service->input_counts, connection, request, receipt,
         &service->telemetry);
     loom_serve_text_pending_observe(service);

@@ -9,6 +9,7 @@
 
 #include "loom/serve/service/service.h"
 #include "loom/serve/service/text/checkpoint_control.h"
+#include "loom/serve/service/text/input_count.h"
 #include "loom/serve/service/text/model.h"
 #include "loom/serve/service/text/schedule.h"
 #include "loom/serve/service/text/stream.h"
@@ -95,6 +96,15 @@ iree_status_t loom_serve_text_service_try_open_checkpoint(
     loom_serve_text_service_t* service,
     const loom_serve_text_checkpoint_request_t* request,
     loom_serve_text_checkpoint_control_t** out_control);
+
+// Accepts a stateless count using the model's ordinary input preparation. On
+// acceptance moves body into an independent caller/service receipt. OK/NULL
+// means queue pressure; failure or pressure leaves body untouched. Counting
+// reserves no execution row, KV state, or parameters. The caller drives the
+// same service owner as inference and closes the returned call when finished.
+iree_status_t loom_serve_text_service_try_open_input_count(
+    loom_serve_text_service_t* service, iree_string_builder_t* body,
+    loom_serve_text_input_count_call_t** out_call);
 
 // Returns borrowed callbacks for the shared owner loop. HTTP and native
 // admission preserve model-local sessions/checkpoints. Each epoch gathers

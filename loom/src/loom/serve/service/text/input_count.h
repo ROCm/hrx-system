@@ -14,12 +14,40 @@
 extern "C" {
 #endif
 
-// A stateless input query owns only its transport claim, never a session, KV
-// reservation, parameter pin, or projected media. The claim retains the body.
+// Owner-only delivery after the counting worker releases its input borrow.
+// No callback submits model work or waits for the consumer.
+typedef struct loom_serve_text_input_count_consumer_vtable_t {
+  // Monotonic caller interest; closing cannot revoke an accepted CPU borrow.
+  bool (*is_open)(void* self);
+  // Consumes a completed or locally rejected receipt. Status is borrowed; OK
+  // carries input_tokens. Scratch is available only for this call. Delivery
+  // owns final accounting, including a peer lost during send. Only response
+  // allocation may fail; receipt ownership is consumed on every return.
+  iree_status_t (*end)(void* self, iree_host_size_t input_tokens,
+                       const iree_status_t status,
+                       loom_serve_text_telemetry_t* telemetry,
+                       loom_serve_text_receipt_t receipt,
+                       iree_string_builder_t* scratch);
+  // Consumes cancelled or failed delivery without allocating a response.
+  void (*abort)(void* self, loom_service_telemetry_outcome_t outcome,
+                const iree_status_t status,
+                loom_serve_text_telemetry_t* telemetry,
+                loom_serve_text_receipt_t receipt);
+} loom_serve_text_input_count_consumer_vtable_t;
+
+typedef struct loom_serve_text_input_count_consumer_t {
+  // Owned receipt retaining the request body through end or abort.
+  void* self;
+  // Immutable process-lifetime operations shared by all receipts of this kind.
+  const loom_serve_text_input_count_consumer_vtable_t* vtable;
+} loom_serve_text_input_count_consumer_t;
+
+// A stateless input query owns only its delivery receipt, never a session, KV
+// reservation, parameter pin, or projected media. The receipt retains the body.
 typedef struct loom_serve_text_input_count_request_t {
-  // Claimed connection, relinquished once by completion or cancellation.
-  loom_serve_http_connection_t* connection;
-  // Immutable JSON borrowing the claimed request storage.
+  // Delivery relinquished once after all accepted input borrowers retire.
+  loom_serve_text_input_count_consumer_t consumer;
+  // Immutable JSON borrowing the receipt's request storage.
   iree_string_view_t body;
   // Original receipt retained across CPU queueing and completion.
   loom_serve_text_receipt_t receipt;
@@ -49,13 +77,12 @@ iree_status_t loom_serve_text_input_count_initialize(
 void loom_serve_text_input_count_deinitialize(
     loom_serve_text_input_count_t* queue);
 
-// The owner has validated the route and JSON content type. Takes the claim,
-// including immediate rejection of stateful headers or a full queue.
-iree_status_t loom_serve_text_input_count_enqueue(
-    loom_serve_text_input_count_t* queue,
-    loom_serve_http_connection_t* connection,
-    const loom_serve_http_request_t* request, loom_serve_text_receipt_t receipt,
-    loom_serve_text_telemetry_t* telemetry);
+// Transfers a receipt into an available queue slot. The owner has checked
+// capacity; input validation runs on the existing CPU loan after acceptance.
+void loom_serve_text_input_count_enqueue(
+    loom_serve_text_input_count_t* queue, iree_string_view_t body,
+    loom_serve_text_input_count_consumer_t consumer,
+    loom_serve_text_receipt_t receipt);
 
 // Finite CPU work with the model's exclusive source invocation loan. Counts
 // full fresh input, bounded by context_capacity but without output credit.
@@ -77,6 +104,38 @@ iree_status_t loom_serve_text_input_count_complete(
 bool loom_serve_text_input_count_cancel(loom_serve_text_input_count_t* queue,
                                         bool borrowed, bool stopping,
                                         loom_serve_text_telemetry_t* telemetry);
+
+// Independent caller/service ownership of one native count and its result.
+// All operations use the serialized service owner. Closing a pending call
+// cancels interest; accepted input borrowers retain the body until retirement.
+typedef struct loom_serve_text_input_count_call_t
+    loom_serve_text_input_count_call_t;
+
+// Allocates a delivery receipt and moves the owning body only on success.
+// The service has checked admission capacity before creating the call. Fixed
+// borrowed and sizing-only builders cannot transfer ownership.
+iree_status_t loom_serve_text_input_count_call_allocate(
+    iree_string_builder_t* body, iree_allocator_t host_allocator,
+    loom_serve_text_input_count_call_t** out_call,
+    loom_serve_text_input_count_consumer_t* out_consumer);
+
+// Immutable input borrowed until the accepted delivery ends or aborts.
+iree_string_view_t loom_serve_text_input_count_call_body(
+    const loom_serve_text_input_count_call_t* call);
+
+// Completion follows input retirement. Status returns an owned copy; OK while
+// pending does not imply success. Result is valid after successful completion
+// and survives service/model removal until the caller closes the call.
+bool loom_serve_text_input_count_call_is_complete(
+    const loom_serve_text_input_count_call_t* call);
+iree_status_t loom_serve_text_input_count_call_status(
+    const loom_serve_text_input_count_call_t* call);
+iree_host_size_t loom_serve_text_input_count_call_result(
+    const loom_serve_text_input_count_call_t* call);
+
+// Consumes caller ownership; accepted work keeps its independent input loan.
+void loom_serve_text_input_count_call_close(
+    loom_serve_text_input_count_call_t* call);
 
 #ifdef __cplusplus
 }  // extern "C"

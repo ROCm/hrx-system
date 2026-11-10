@@ -8,6 +8,7 @@
 
 #include <cstring>
 
+#include "loom/serve/service/text/input_count_http.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/service/telemetry/record.h"
 
@@ -63,6 +64,21 @@ class InputCountTest : public SourceTextServiceTest {
     return Read(client);
   }
 
+  void OpenCount(const std::string& text,
+                 loom_serve_text_input_count_call_t** out_call) {
+    iree_string_builder_t body;
+    iree_string_builder_initialize(host_allocator_, &body);
+    IREE_ASSERT_OK(iree_string_builder_append_string(
+        &body, iree_make_string_view(text.data(), text.size())));
+    const char* storage = iree_string_builder_buffer(&body);
+    auto status =
+        loom_serve_text_service_try_open_input_count(service_, &body, out_call);
+    iree_string_builder_deinitialize(&body);
+    IREE_ASSERT_OK(status);
+    ASSERT_NE(*out_call, nullptr);
+    EXPECT_EQ(loom_serve_text_input_count_call_body(*out_call).data, storage);
+  }
+
   void ExpectCold() {
     const auto weights = loom_serve_text_model_parameter_activity(model_);
     EXPECT_EQ(weights.activations, 0u);
@@ -99,6 +115,166 @@ TEST_F(InputCountTest, FreshChatCountsWithoutActivatingOrReserving) {
             std::string::npos);
   ExpectCold();
   EXPECT_EQ(interface_.telemetry.counters->completed, 3u);
+}
+
+TEST_F(InputCountTest, NativeResultOutlivesServiceAndModel) {
+  loom_serve_text_input_count_call_t* call = nullptr;
+  ASSERT_NO_FATAL_FAILURE(OpenCount(Request(Message("user", "abxa")), &call));
+  EXPECT_FALSE(loom_serve_text_input_count_call_is_complete(call));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
+    return loom_serve_text_input_count_call_is_complete(call);
+  }));
+  IREE_ASSERT_OK(loom_serve_text_input_count_call_status(call));
+  EXPECT_EQ(loom_serve_text_input_count_call_result(call), 4u);
+  ExpectCold();
+  EXPECT_EQ(interface_.telemetry.counters->completed, 1u);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      interface_, [&] { return Idle(); }, LOOM_RUNTIME_SERVICE_FLAG_STOPPING));
+  interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
+  loom_serve_text_service_free(service_, IREE_STATUS_OK);
+  service_ = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_model_free(model_));
+  model_ = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_input_count_call_status(call));
+  EXPECT_EQ(loom_serve_text_input_count_call_result(call), 4u);
+  loom_serve_text_input_count_call_close(call);
+}
+
+TEST_F(InputCountTest, NativePressurePreservesInputAndCloseReturnsCredit) {
+  loom_serve_text_input_count_call_t* first = nullptr;
+  loom_serve_text_input_count_call_t* second = nullptr;
+  ASSERT_NO_FATAL_FAILURE(OpenCount(Request(Message("user", "abxa")), &first));
+  ASSERT_NO_FATAL_FAILURE(OpenCount(Request(Message("user", "ba")), &second));
+  iree_string_builder_t body;
+  iree_string_builder_initialize(host_allocator_, &body);
+  IREE_ASSERT_OK(iree_string_builder_append_cstring(
+      &body, Request(Message("user", "bax")).c_str()));
+  const auto original = iree_string_builder_view(&body);
+  loom_serve_text_input_count_call_t* third = nullptr;
+  IREE_ASSERT_OK(
+      loom_serve_text_service_try_open_input_count(service_, &body, &third));
+  EXPECT_EQ(third, nullptr);
+  EXPECT_EQ(iree_string_builder_buffer(&body), original.data);
+  EXPECT_EQ(iree_string_builder_size(&body), original.size);
+  loom_serve_text_input_count_call_close(first);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
+    return loom_serve_text_input_count_call_is_complete(second);
+  }));
+  IREE_ASSERT_OK(loom_serve_text_input_count_call_status(second));
+  EXPECT_EQ(loom_serve_text_input_count_call_result(second), 2u);
+  loom_serve_text_input_count_call_close(second);
+  IREE_ASSERT_OK(
+      loom_serve_text_service_try_open_input_count(service_, &body, &third));
+  ASSERT_NE(third, nullptr);
+  EXPECT_EQ(loom_serve_text_input_count_call_body(third).data, original.data);
+  EXPECT_EQ(iree_string_builder_size(&body), 0u);
+  iree_string_builder_deinitialize(&body);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
+    return loom_serve_text_input_count_call_is_complete(third);
+  }));
+  IREE_ASSERT_OK(loom_serve_text_input_count_call_status(third));
+  EXPECT_EQ(loom_serve_text_input_count_call_result(third), 3u);
+  loom_serve_text_input_count_call_close(third);
+  EXPECT_EQ(interface_.telemetry.counters->cancelled, 1u);
+  EXPECT_EQ(interface_.telemetry.counters->completed, 2u);
+  EXPECT_EQ(interface_.telemetry.counters->rejected, 0u);
+  ExpectCold();
+}
+
+TEST_F(InputCountTest, NativeInputFailureIsLocalAndDoesNotActivate) {
+  loom_serve_text_input_count_call_t* invalid = nullptr;
+  loom_serve_text_input_count_call_t* valid = nullptr;
+  ASSERT_NO_FATAL_FAILURE(OpenCount(Request(Message("user", "?")), &invalid));
+  ASSERT_NO_FATAL_FAILURE(OpenCount(Request(Message("user", "abxa")), &valid));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
+    return loom_serve_text_input_count_call_is_complete(valid);
+  }));
+  EXPECT_TRUE(loom_serve_text_input_count_call_is_complete(invalid));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_text_input_count_call_status(invalid));
+  IREE_ASSERT_OK(loom_serve_text_input_count_call_status(valid));
+  EXPECT_EQ(loom_serve_text_input_count_call_result(valid), 4u);
+  loom_serve_text_input_count_call_close(invalid);
+  loom_serve_text_input_count_call_close(valid);
+  EXPECT_EQ(interface_.telemetry.counters->rejected, 1u);
+  EXPECT_EQ(interface_.telemetry.counters->completed, 1u);
+  ExpectCold();
+}
+
+TEST_F(InputCountTest, NativeStopRetiresBorrowedInputBeforeDetaching) {
+  loom_serve_text_input_count_call_t* first = nullptr;
+  loom_serve_text_input_count_call_t* second = nullptr;
+  ASSERT_NO_FATAL_FAILURE(OpenCount(Request(Message("user", "abxa")), &first));
+  ASSERT_NO_FATAL_FAILURE(OpenCount(Request(Message("user", "ba")), &second));
+  OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
+    bool progress = false;
+    IREE_ASSERT_OK(interface_.runtime.vtable->advance(interface_.runtime.self,
+                                                      0, &progress));
+    EXPECT_TRUE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
+    IREE_ASSERT_OK(interface_.runtime.vtable->advance(
+        interface_.runtime.self, LOOM_RUNTIME_SERVICE_FLAG_STOPPING,
+        &progress));
+    EXPECT_FALSE(loom_serve_text_input_count_call_is_complete(first));
+    EXPECT_TRUE(loom_serve_text_input_count_call_is_complete(second));
+  });
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      interface_, [&] { return Idle(); }, LOOM_RUNTIME_SERVICE_FLAG_STOPPING));
+  EXPECT_TRUE(loom_serve_text_input_count_call_is_complete(first));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                        loom_serve_text_input_count_call_status(first));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                        loom_serve_text_input_count_call_status(second));
+  loom_serve_text_input_count_call_close(first);
+  loom_serve_text_input_count_call_close(second);
+  EXPECT_EQ(interface_.telemetry.counters->cancelled, 2u);
+  EXPECT_EQ(interface_.telemetry.counters->completed, 0u);
+  ExpectCold();
+}
+
+TEST_F(InputCountTest, NativeClosePreservesAnAcceptedWorkerBorrow) {
+  loom_serve_text_input_count_call_t* first = nullptr;
+  loom_serve_text_input_count_call_t* second = nullptr;
+  ASSERT_NO_FATAL_FAILURE(OpenCount(Request(Message("user", "abxa")), &first));
+  ASSERT_NO_FATAL_FAILURE(OpenCount(Request(Message("user", "ba")), &second));
+  OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
+    bool progress = false;
+    IREE_ASSERT_OK(interface_.runtime.vtable->advance(interface_.runtime.self,
+                                                      0, &progress));
+    EXPECT_TRUE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
+    // This owner still occupies the worker: closing cannot free the body that
+    // the accepted counting task will read after this turn returns.
+    loom_serve_text_input_count_call_close(first);
+  });
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
+    return loom_serve_text_input_count_call_is_complete(second);
+  }));
+  IREE_ASSERT_OK(loom_serve_text_input_count_call_status(second));
+  EXPECT_EQ(loom_serve_text_input_count_call_result(second), 2u);
+  loom_serve_text_input_count_call_close(second);
+  EXPECT_EQ(interface_.telemetry.counters->cancelled, 1u);
+  EXPECT_EQ(interface_.telemetry.counters->completed, 1u);
+  ExpectCold();
+}
+
+TEST_F(InputCountTest, NativeBorrowedInputCannotTransferOwnership) {
+  char storage[8] = "{}";
+  iree_string_builder_t body;
+  iree_string_builder_initialize_with_storage(storage, sizeof(storage), &body);
+  loom_serve_text_input_count_call_t* call = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_serve_text_service_try_open_input_count(service_, &body, &call));
+  EXPECT_EQ(call, nullptr);
+  EXPECT_EQ(iree_string_builder_buffer(&body), storage);
+  iree_string_builder_deinitialize(&body);
+  iree_string_builder_initialize(iree_allocator_null(), &body);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_serve_text_service_try_open_input_count(service_, &body, &call));
+  EXPECT_EQ(call, nullptr);
+  iree_string_builder_deinitialize(&body);
+  EXPECT_EQ(interface_.telemetry.counters->rejected, 0u);
+  ExpectCold();
 }
 
 TEST_F(InputCountTest, SourceMediaRowsNeedNoProjectionOrComponent) {
@@ -322,7 +498,7 @@ class InputCountOutcomeTest : public SourceTextServiceTest {
     loom_serve_http_connection_t* connection = nullptr;
     const loom_serve_http_request_t* request = nullptr;
     IREE_ASSERT_OK(http_.TakeRequest(*out_client, &connection, &request));
-    IREE_ASSERT_OK(loom_serve_text_input_count_enqueue(
+    IREE_ASSERT_OK(loom_serve_text_input_count_http_enqueue(
         &queries_, connection, request,
         loom_serve_text_telemetry_begin(&telemetry_), &telemetry_));
   }
@@ -348,7 +524,7 @@ TEST_F(InputCountOutcomeTest, DisconnectCannotHideFatalSourceFailure) {
         return loom_serve_http_connection_failed(
             static_cast<loom_serve_http_connection_t*>(self));
       },
-      queries_.requests[0].connection, iree_infinite_timeout()));
+      queries_.requests[0].consumer.self, iree_infinite_timeout()));
   iree_status_t status = loom_serve_text_input_count_complete(
       &queries_, false, iree_make_status(IREE_STATUS_INTERNAL, "source failed"),
       &telemetry_, &scratch_);
@@ -368,6 +544,37 @@ TEST_F(InputCountOutcomeTest, StopCannotHideFatalSourceFailure) {
   EXPECT_EQ(iree_status_code(status), IREE_STATUS_INTERNAL);
   iree_status_free(status);
   EXPECT_TRUE(Read(client, true).empty());
+  EXPECT_EQ(telemetry_.counters.failed, 1u);
+  EXPECT_EQ(telemetry_.counters.cancelled, 0u);
+}
+
+TEST_F(InputCountOutcomeTest, NativeResultRetainsFatalSourceFailure) {
+  iree_string_builder_t body;
+  iree_string_builder_initialize(host_allocator_, &body);
+  IREE_ASSERT_OK(iree_string_builder_append_cstring(
+      &body, Request(Message("user", "a")).c_str()));
+  loom_serve_text_input_count_call_t* call = nullptr;
+  loom_serve_text_input_count_consumer_t consumer;
+  IREE_ASSERT_OK(loom_serve_text_input_count_call_allocate(
+      &body, host_allocator_, &call, &consumer));
+  iree_string_builder_deinitialize(&body);
+  loom_serve_text_input_count_enqueue(
+      &queries_, loom_serve_text_input_count_call_body(call), consumer,
+      loom_serve_text_telemetry_begin(&telemetry_));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INTERNAL,
+      loom_serve_text_input_count_complete(
+          &queries_, true,
+          iree_make_status(IREE_STATUS_INTERNAL, "source failed"), &telemetry_,
+          &scratch_));
+  EXPECT_TRUE(loom_serve_text_input_count_call_is_complete(call));
+  auto status = loom_serve_text_input_count_call_status(call);
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INTERNAL);
+  EXPECT_TRUE(iree_string_view_equal(iree_status_message(status),
+                                     IREE_SV("source failed")));
+  iree_status_free(status);
+  loom_serve_text_input_count_call_close(call);
+  EXPECT_EQ(queries_.count, 0u);
   EXPECT_EQ(telemetry_.counters.failed, 1u);
   EXPECT_EQ(telemetry_.counters.cancelled, 0u);
 }
