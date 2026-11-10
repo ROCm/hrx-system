@@ -42,6 +42,10 @@ typedef struct loom_test_diagnostic_t {
   // diagnostic represented directly by |domain| and |code|.
   iree_string_view_t public_code;
 
+  // Stable export context copied from the diagnostic, or empty when the
+  // diagnostic is not scoped to an export.
+  iree_string_view_t export_name;
+
   // Original diagnostic source, independent of its rendered message.
   struct {
     // Source identity copied into the diagnostic arena.

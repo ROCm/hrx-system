@@ -119,6 +119,8 @@ iree_status_t loom_test_diagnostic_materialize(
   out_diagnostic->domain = loom_error_def_domain(diagnostic->error);
   out_diagnostic->code = loom_error_def_code(diagnostic->error);
   IREE_RETURN_IF_ERROR(loom_test_diagnostic_copy_string(
+      arena, diagnostic->export_name, &out_diagnostic->export_name));
+  IREE_RETURN_IF_ERROR(loom_test_diagnostic_copy_string(
       arena, diagnostic->origin.filename, &out_diagnostic->origin.filename));
   out_diagnostic->origin.line = diagnostic->origin.start_line;
   return iree_ok_status();
@@ -168,6 +170,12 @@ bool loom_test_diagnostic_matches_annotation(
   for (uint8_t i = 0; i < annotation->param_match_count; ++i) {
     const loom_test_annotation_param_match_t* match =
         &annotation->param_matches[i];
+    if (iree_string_view_equal(match->name, IREE_SV("export"))) {
+      if (!iree_string_view_equal(diagnostic->export_name, match->value)) {
+        return false;
+      }
+      continue;
+    }
     const int param_index =
         loom_test_diagnostic_find_param_index(diagnostic, match->name);
     if (param_index < 0 ||

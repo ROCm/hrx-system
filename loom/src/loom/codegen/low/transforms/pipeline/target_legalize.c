@@ -105,6 +105,8 @@ typedef struct loom_low_target_legalize_function_state_t {
   loom_module_t* module;
   // Selected target-bound source function.
   const loom_low_source_selection_t* selection;
+  // Function-local export context forwarded through legalization diagnostics.
+  loom_diagnostic_export_scope_t diagnostic_scope;
   // Source-to-low query options shared by eager and final legality checks.
   loom_low_lower_options_t lower_options;
   // Complete Low binding selected once for this function legalization.
@@ -1636,7 +1638,7 @@ static iree_status_t loom_low_target_legalize_verify_final(
       .structural_legality_flags =
           LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_SCF |
           LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_CFG,
-      .emitter = state->pass->diagnostic_emitter,
+      .emitter = state->lower_options.emitter,
       .max_errors = pass_state->max_errors,
   };
   state->use_final_rejections = true;
@@ -1713,10 +1715,14 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_target_legalize_function(
   IREE_RETURN_IF_ERROR(loom_target_low_source_binding_select(
       descriptor_registry, loom_low_source_selection_target_bundle(selection),
       &state.source_binding));
+  const iree_diagnostic_emitter_t diagnostic_emitter =
+      loom_low_source_selection_scope_diagnostics(
+          selection, pass->diagnostic_emitter, &state.diagnostic_scope);
+  const loom_target_bundle_t* target_bundle =
+      loom_low_source_selection_target_bundle(selection);
   loom_low_target_legalize_preflight_initialize(
-      module, selection->func,
-      loom_low_source_selection_target_bundle(selection),
-      pass->diagnostic_emitter, pass_state->max_errors, &state.preflight);
+      module, selection->func, target_bundle, diagnostic_emitter,
+      pass_state->max_errors, &state.preflight);
 
   loom_pass_value_fact_scope_t fact_scope =
       loom_pass_value_fact_scope_function_for_target(selection->func,
@@ -1733,7 +1739,7 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_target_legalize_function(
       .legality_provider_list = legality_provider_list,
       .policy = selection->policy,
       .fact_table = fact_table,
-      .emitter = pass->diagnostic_emitter,
+      .emitter = diagnostic_emitter,
       .max_errors = pass_state->max_errors,
   };
 

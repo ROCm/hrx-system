@@ -198,6 +198,31 @@ static loom_type_formatter_t loom_diagnostic_format_type_formatter(
   return (loom_type_formatter_t){loom_type_format_minimal, NULL};
 }
 
+// Returns whether the rendered error message already carries the same export
+// identity as the diagnostic context. Target diagnostics conventionally carry
+// an export_name parameter in their message schema; adding another prefix
+// would make those diagnostics harder to read without adding information.
+static bool loom_diagnostic_message_carries_export_name(
+    const loom_diagnostic_t* diagnostic) {
+  if (iree_string_view_is_empty(diagnostic->export_name) ||
+      diagnostic->params == NULL) {
+    return false;
+  }
+  const iree_host_size_t param_count =
+      iree_min(diagnostic->param_count, diagnostic->error->param_count);
+  for (iree_host_size_t i = 0; i < param_count; ++i) {
+    if (loom_error_def_param_kind(diagnostic->error, i) == LOOM_PARAM_STRING &&
+        iree_string_view_equal(iree_make_cstring_view(loom_error_def_param_name(
+                                   diagnostic->error, i)),
+                               IREE_SV("export_name")) &&
+        iree_string_view_equal(diagnostic->params[i].string,
+                               diagnostic->export_name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 iree_status_t loom_diagnostic_format_with_options(
     const loom_diagnostic_t* diagnostic,
     const loom_diagnostic_format_options_t* options,
@@ -232,6 +257,13 @@ iree_status_t loom_diagnostic_format_with_options(
       stream, " [%s/%03u]",
       loom_error_domain_name(loom_error_def_domain(diagnostic->error)),
       loom_error_def_code(diagnostic->error)));
+
+  if (!iree_string_view_is_empty(diagnostic->export_name) &&
+      !loom_diagnostic_message_carries_export_name(diagnostic)) {
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
+        stream, " in export '%.*s'", (int)diagnostic->export_name.size,
+        diagnostic->export_name.data));
+  }
 
   // Render the message from the error def's template and params.
   IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ": "));

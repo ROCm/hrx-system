@@ -564,10 +564,14 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     if (selection->kind != LOOM_LOW_SOURCE_SELECTION_REPRESENTATION) {
       continue;
     }
+    loom_diagnostic_export_scope_t diagnostic_scope;
+    const iree_diagnostic_emitter_t diagnostic_emitter =
+        loom_low_source_selection_scope_diagnostics(
+            selection, pass->diagnostic_emitter, &diagnostic_scope);
     const loom_low_representation_projection_plan_t* projection_plan = NULL;
     status = loom_low_plan_function_representation(
         module, selection->func, selection->target_facts, descriptor_registry,
-        pass->diagnostic_emitter, &selection_arena, &projection_plan);
+        diagnostic_emitter, &selection_arena, &projection_plan);
     if (iree_status_is_ok(status) && projection_plan == NULL) {
       ++statistics->errors;
       emitted_error_diagnostics = true;

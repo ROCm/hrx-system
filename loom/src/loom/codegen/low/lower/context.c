@@ -63,6 +63,20 @@ static iree_string_view_t loom_low_lower_export_name(
   return loom_low_lower_nonempty(bundle->export_plan->name, IREE_SV("<empty>"));
 }
 
+void loom_low_lower_context_scope_diagnostics(
+    loom_low_lower_context_t* context) {
+  const loom_low_lower_options_t* options = context->options;
+  const loom_target_bundle_t* bundle =
+      loom_target_facts_bundle(options->target_facts);
+  const iree_string_view_t export_name =
+      bundle != NULL && bundle->export_plan != NULL ? bundle->export_plan->name
+                                                    : iree_string_view_empty();
+  loom_diagnostic_export_scope_initialize(export_name, options->emitter,
+                                          &context->diagnostic_scope);
+  context->diagnostic_emitter =
+      loom_diagnostic_export_scope_emitter(&context->diagnostic_scope);
+}
+
 iree_string_view_t loom_low_lower_context_export_name(
     const loom_low_lower_context_t* context) {
   return loom_low_lower_export_name(loom_low_lower_context_bundle(context));
@@ -105,7 +119,7 @@ static iree_status_t loom_low_lower_emit(loom_low_lower_context_t* context,
       .params = params,
       .param_count = param_count,
   };
-  return iree_diagnostic_emit(context->options->emitter, &emission);
+  return iree_diagnostic_emit(context->diagnostic_emitter, &emission);
 }
 
 IREE_ATTRIBUTE_COLD IREE_ATTRIBUTE_NOINLINE iree_status_t

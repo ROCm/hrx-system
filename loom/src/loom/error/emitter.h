@@ -109,6 +109,10 @@ typedef struct loom_diagnostic_emission_t {
   const loom_diagnostic_param_t* params;
   // Number of entries in |params|.
   iree_host_size_t param_count;
+  // Stable name of the export whose compilation emitted this diagnostic, or
+  // empty when the emission is not scoped to an export. Borrowed for the
+  // emission callback.
+  iree_string_view_t export_name;
   // Secondary operation locations associated with the diagnostic.
   const loom_diagnostic_related_op_t* related_ops;
   // Number of entries in |related_ops|.
@@ -135,6 +139,50 @@ static inline iree_status_t iree_diagnostic_emit(
     return emitter.fn(emitter.user_data, emission);
   }
   return iree_ok_status();
+}
+
+// Stack- or arena-owned context that supplies one export identity to every
+// otherwise-unscoped diagnostic forwarded through it. Producer-supplied export
+// identity takes precedence. The scope must outlive all calls to the emitter
+// returned by loom_diagnostic_export_scope_emitter.
+typedef struct loom_diagnostic_export_scope_t {
+  // Stable export identity borrowed for the scope lifetime.
+  iree_string_view_t export_name;
+  // Downstream emitter receiving contextualized emissions.
+  iree_diagnostic_emitter_t target;
+} loom_diagnostic_export_scope_t;
+
+// Private forwarding callback used by loom_diagnostic_export_scope_emitter.
+// Its address is behavior, not identity: callers never compare callbacks.
+static inline iree_status_t loom_diagnostic_export_scope_forward(
+    void* user_data, const loom_diagnostic_emission_t* emission) {
+  const loom_diagnostic_export_scope_t* scope =
+      (const loom_diagnostic_export_scope_t*)user_data;
+  if (!iree_string_view_is_empty(emission->export_name)) {
+    return iree_diagnostic_emit(scope->target, emission);
+  }
+  loom_diagnostic_emission_t contextual_emission = *emission;
+  contextual_emission.export_name = scope->export_name;
+  return iree_diagnostic_emit(scope->target, &contextual_emission);
+}
+
+// Initializes an export diagnostic scope forwarding to |target|.
+static inline void loom_diagnostic_export_scope_initialize(
+    iree_string_view_t export_name, iree_diagnostic_emitter_t target,
+    loom_diagnostic_export_scope_t* out_scope) {
+  *out_scope = (loom_diagnostic_export_scope_t){
+      .export_name = export_name,
+      .target = target,
+  };
+}
+
+// Returns an emitter borrowing |scope|.
+static inline iree_diagnostic_emitter_t loom_diagnostic_export_scope_emitter(
+    loom_diagnostic_export_scope_t* scope) {
+  return (iree_diagnostic_emitter_t){
+      .fn = loom_diagnostic_export_scope_forward,
+      .user_data = scope,
+  };
 }
 
 #ifdef __cplusplus

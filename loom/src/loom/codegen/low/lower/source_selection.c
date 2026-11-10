@@ -18,6 +18,16 @@
 #include "loom/target/facts_builder.h"
 #include "loom/target/function_contract.h"
 
+iree_diagnostic_emitter_t loom_low_source_selection_scope_diagnostics(
+    const loom_low_source_selection_t* selection,
+    iree_diagnostic_emitter_t target, loom_diagnostic_export_scope_t* scope) {
+  const loom_target_bundle_t* bundle =
+      loom_low_source_selection_target_bundle(selection);
+  loom_diagnostic_export_scope_initialize(bundle->export_plan->name, target,
+                                          scope);
+  return loom_diagnostic_export_scope_emitter(scope);
+}
+
 static iree_status_t loom_low_source_selection_lookup_func_facts(
     const loom_module_t* module, loom_symbol_fact_table_t* fact_table,
     loom_symbol_id_t symbol_id,

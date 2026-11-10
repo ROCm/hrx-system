@@ -197,6 +197,7 @@ iree_status_t loom_low_plan_source_signature_projection(
       .schedule_model = binding.schedule_model,
       .result = out_result,
   };
+  loom_low_lower_context_scope_diagnostics(&context);
   out_result->descriptor_set = binding.descriptor_set;
   iree_arena_initialize(module->arena.block_pool, &context.analysis_arena);
   loom_condition_query_initialize(module, /*value_domain=*/NULL,

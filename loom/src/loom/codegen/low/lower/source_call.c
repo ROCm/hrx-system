@@ -290,8 +290,9 @@ static iree_status_t loom_low_source_call_resolve_callee_target(
 
   bool target_valid = true;
   IREE_RETURN_IF_ERROR(loom_target_function_contract_resolve_facts(
-      context->module, &symbol_facts, function_facts, context->options->emitter,
-      &context->planning_arena, &target_valid, out_callee_target_facts));
+      context->module, &symbol_facts, function_facts,
+      context->diagnostic_emitter, &context->planning_arena, &target_valid,
+      out_callee_target_facts));
   if (!target_valid) {
     *out_callee_descriptor_set = NULL;
     if (!loom_low_lower_context_diagnostic_limit_reached(context)) {

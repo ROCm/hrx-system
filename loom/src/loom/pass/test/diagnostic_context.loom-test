@@ -1,0 +1,44 @@
+// RUN: pass specialize-target-callgraph,vector-memory-footprint
+
+// Function-pass diagnostics retain the authored export identity even when
+// several exports share one compilation request.
+test.target<low_core> @target
+
+func.def public target(@target) @probe.good() {
+  %byte_length = index.constant 64 : offset
+  %base = index.constant 0 : offset
+  %storage = buffer.alloca<workgroup> align(16) %byte_length : buffer
+  %view = buffer.view %storage[%base] : buffer -> view<16xf32>
+  %value = view.load %view[15] : view<16xf32> -> f32
+  test.use %value : f32
+  func.return
+}
+
+func.def public target(@target) @probe.bad() {
+  %byte_length = index.constant 64 : offset
+  %base = index.constant 4 : offset
+  %storage = buffer.alloca<workgroup> align(16) %byte_length : buffer
+  %view = buffer.view %storage[%base] : buffer -> view<16xf32>
+  // ERROR@+1: SUBRANGE/026 {export="probe.bad", op_name="view.load", maximum_access_byte_end="68", root_byte_extent="64"}
+  %value = view.load %view[15] : view<16xf32> -> f32
+  test.use %value : f32
+  func.return
+}
+
+// ====
+// RUN: pass source-to-low
+
+// Module passes that plan several functions scope nested analysis diagnostics
+// to the selected export rather than the module pass itself.
+test.target<low_core> @target
+
+func.def public target(@target) @source_to_low.bad() {
+  %byte_length = index.constant 64 : offset
+  %base = index.constant 4 : offset
+  %storage = buffer.alloca<workgroup> align(16) %byte_length : buffer
+  %view = buffer.view %storage[%base] : buffer -> view<16xf32>
+  // ERROR@+1: SUBRANGE/026 {export="source_to_low.bad", op_name="view.load", maximum_access_byte_end="68", root_byte_extent="64"}
+  %value = view.load %view[15] : view<16xf32> -> f32
+  test.use %value : f32
+  func.return
+}

@@ -59,6 +59,7 @@ TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
                                       loomc_allocator_system(), &result));
 
   char code[] = "PARSE/001";
+  char export_name[] = "kernel.main";
   char message[] = "expected a thing";
   char formatted[] = "bad.loom:1:1: error [PARSE/001]: expected a thing\n";
   char formatted_json[] = "{\"message\":\"expected a thing\"}";
@@ -67,6 +68,8 @@ TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
   loomc_diagnostic_t diagnostic = {
       .severity = LOOMC_DIAGNOSTIC_SEVERITY_ERROR,
       .code = loomc_make_string_view(code, sizeof(code) - 1),
+      .export_name =
+          loomc_make_string_view(export_name, sizeof(export_name) - 1),
       .message = loomc_make_string_view(message, sizeof(message) - 1),
       .formatted_text =
           loomc_make_string_view(formatted, sizeof(formatted) - 1),
@@ -124,6 +127,7 @@ TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
   contents_owner.reset();
 
   code[0] = 'X';
+  export_name[0] = 'X';
   message[0] = 'X';
   formatted[0] = 'X';
   formatted_json[0] = 'X';
@@ -145,6 +149,7 @@ TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
   ASSERT_NE(stored_diagnostic, nullptr);
   EXPECT_EQ(stored_diagnostic->severity, LOOMC_DIAGNOSTIC_SEVERITY_ERROR);
   EXPECT_EQ(ToString(stored_diagnostic->code), "PARSE/001");
+  EXPECT_EQ(ToString(stored_diagnostic->export_name), "kernel.main");
   EXPECT_EQ(ToString(stored_diagnostic->message), "expected a thing");
   EXPECT_EQ(ToString(stored_diagnostic->formatted_text),
             "bad.loom:1:1: error [PARSE/001]: expected a thing\n");
