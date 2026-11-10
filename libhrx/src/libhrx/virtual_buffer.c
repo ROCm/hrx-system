@@ -6,13 +6,6 @@
 IREE_STATIC_ASSERT_ENUM_EQ(HRX_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
                            IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
                            "virtual buffer address constraints must match HAL");
-IREE_STATIC_ASSERT_ENUM_EQ(HRX_MEMORY_SITE_HOST, IREE_HAL_MEMORY_SITE_HOST,
-                           "memory sites must match HAL");
-IREE_STATIC_ASSERT_ENUM_EQ(HRX_MEMORY_SITE_QUEUE, IREE_HAL_MEMORY_SITE_QUEUE,
-                           "memory sites must match HAL");
-IREE_STATIC_ASSERT_ENUM_EQ(HRX_MEMORY_SITE_PROGRAM,
-                           IREE_HAL_MEMORY_SITE_PROGRAM,
-                           "memory sites must match HAL");
 IREE_STATIC_ASSERT_ENUM_EQ(HRX_MEMORY_MAPPING_OPERATION_REPLACE,
                            IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE,
                            "mapping operations must match HAL");
@@ -93,51 +86,6 @@ static iree_status_t hrx_virtual_buffer_prepare_scope(
           },
   };
   return iree_ok_status();
-}
-
-hrx_status_t hrx_device_query_host_memory_scope(hrx_device_t device,
-                                                hrx_memory_scope_t* out_scope) {
-  if (!device || !out_scope) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "memory scope device or output is NULL");
-  }
-  *out_scope = (hrx_memory_scope_t){0};
-  iree_hal_memory_scope_t hal_scope;
-  iree_status_t status = iree_hal_device_group_resolve_memory_scope(
-      device->hal_device_group,
-      (iree_hal_memory_site_t){.kind = IREE_HAL_MEMORY_SITE_HOST}, &hal_scope);
-  if (iree_status_is_ok(status)) {
-    *out_scope = (hrx_memory_scope_t){hal_scope.domain, hal_scope.id};
-  }
-  return hrx_status_from_iree(status);
-}
-
-hrx_status_t hrx_device_query_queue_family_memory_scope(
-    hrx_device_t device, uint32_t family_ordinal, hrx_memory_site_t site,
-    hrx_memory_scope_t* out_scope) {
-  if (!device || !out_scope ||
-      (site != HRX_MEMORY_SITE_QUEUE && site != HRX_MEMORY_SITE_PROGRAM)) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "invalid memory scope device, site or output");
-  }
-  *out_scope = (hrx_memory_scope_t){0};
-  const iree_hal_queue_family_t* family =
-      iree_hal_device_queue_family(device->hal_device, family_ordinal);
-  if (!family) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "invalid memory scope queue family");
-  }
-  const iree_hal_memory_site_t hal_site = {
-      .kind = (iree_hal_memory_site_kind_t)site,
-      .family = family,
-  };
-  iree_hal_memory_scope_t hal_scope;
-  iree_status_t status = iree_hal_device_group_resolve_memory_scope(
-      device->hal_device_group, hal_site, &hal_scope);
-  if (iree_status_is_ok(status)) {
-    *out_scope = (hrx_memory_scope_t){hal_scope.domain, hal_scope.id};
-  }
-  return hrx_status_from_iree(status);
 }
 
 // Acquire metadata from the same owners as later MAPPING_SOURCE allocations.
@@ -270,29 +218,9 @@ hrx_status_t hrx_virtual_buffer_create(
         &hal_options, iree_allocator_system(), &buffer);
   }
   if (iree_status_is_ok(status)) {
-    hrx_device_t device = scope.devices[0];
-    // Construction required this interface for every family. The canonical
-    // program coordinate and prepared slot are immutable producer facts.
-    const iree_hal_queue_family_t* family =
-        iree_hal_queue_family(device->dispatch_queue);
-    const iree_hal_buffer_interface_t binding_type =
-        device->type == HRX_ACCELERATOR_CPU
-            ? IREE_HAL_BUFFER_INTERFACE_HOST
-            : IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS;
-    const iree_hal_buffer_native_binding_slot_t slot = {
-        .index =
-            buffer->memory.contract->scopes[family->memory.queue_scope_id + 1]
-                .bindings[binding_type],
-        .type = binding_type,
-    };
-    const iree_hal_buffer_native_binding_t binding =
-        iree_hal_buffer_native_binding(buffer, slot);
-    void* pointer = device->type == HRX_ACCELERATOR_CPU
-                        ? binding.host_pointer
-                        : (void*)(uintptr_t)binding.device_address;
-    status = hrx_buffer_create_from_hal(
-        buffer, device, HRX_MEMORY_TYPE_DEVICE_VISIBLE, options->byte_length,
-        pointer, out_buffer);
+    status = hrx_buffer_create_from_hal(buffer, scope.devices[0]->group,
+                                        HRX_MEMORY_TYPE_DEVICE_VISIBLE,
+                                        options->byte_length, NULL, out_buffer);
   }
   hrx_virtual_buffer_release_sources(sources.source_count, source_pools);
   iree_allocator_free(iree_allocator_system(), (void*)hal_scope.families);

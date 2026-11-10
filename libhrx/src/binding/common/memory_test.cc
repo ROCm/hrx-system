@@ -24,6 +24,7 @@
 #include "common/stream_queue.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "libhrx/src/libhrx/buffer.h"
 #include "libhrx/src/libhrx/device.h"
 
 namespace {
@@ -341,6 +342,100 @@ class CpuStreamingMemoryTest : public ::testing::Test {
   std::array<uint8_t, 16> registered_storage_ = {};
   iree_hal_streaming_deviceptr_t device_pointer_ = 0;
 };
+
+TEST_F(CpuStreamingMemoryTest, HostRegistrationAddressOutlivesRegistryEntry) {
+  uint8_t storage[64] = {};
+  IREE_ASSERT_OK(HRX_CALL(hrx_host_memory_register(
+      device_entry_.hrx_device, storage, sizeof(storage), 0)));
+  hrx_buffer_t buffer = nullptr;
+  size_t offset = 0;
+  IREE_ASSERT_OK(HRX_CALL(hrx_buffer_lookup(device_entry_.hrx_device,
+                                            storage + 13, &buffer, &offset)));
+  EXPECT_EQ(13u, offset);
+  hrx_buffer_retain(buffer);
+  IREE_ASSERT_OK(
+      HRX_CALL(hrx_host_memory_unregister(device_entry_.hrx_device, storage)));
+  void* device_pointer = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_buffer_query_device_pointer(
+      buffer, device_entry_.hrx_device, &device_pointer));
+  EXPECT_EQ(storage, device_pointer);
+  void* mapped_pointer = storage;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNAVAILABLE,
+      HRX_CALL(hrx_buffer_map(buffer, HRX_MAP_READ, 0, sizeof(storage),
+                              &mapped_pointer)));
+  EXPECT_EQ(nullptr, mapped_pointer);
+  IREE_ASSERT_OK(HRX_CALL(hrx_buffer_unmap(buffer)));
+  IREE_ASSERT_OK(iree_hal_streaming_buffer_query_device_pointer(
+      buffer, device_entry_.hrx_device, &device_pointer));
+  EXPECT_EQ(storage, device_pointer);
+  hrx_buffer_release(buffer);
+}
+
+TEST_F(CpuStreamingMemoryTest,
+       NativeAddressesPreserveScopedMappingsAndImportedContents) {
+  const iree_hal_buffer_usage_t usages[] = {
+      IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |
+          IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT,
+      IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
+  };
+  for (iree_hal_buffer_usage_t usage : usages) {
+    alignas(64) uint8_t storage[64];
+    for (size_t i = 0; i < sizeof(storage); ++i) {
+      storage[i] = i;
+    }
+    iree_hal_buffer_t* root = nullptr;
+    IREE_ASSERT_OK(iree_hal_heap_buffer_wrap(
+        iree_hal_buffer_placement_undefined(), IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+        IREE_HAL_MEMORY_ACCESS_ALL, usage, sizeof(storage),
+        iree_make_byte_span(storage, sizeof(storage)),
+        iree_hal_buffer_release_callback_null(), iree_allocator_system(),
+        &root));
+    iree_hal_buffer_t* view = nullptr;
+    IREE_ASSERT_OK(
+        iree_hal_buffer_subspan(root, 13, 23, iree_allocator_system(), &view));
+    hrx_buffer_t buffer = nullptr;
+    IREE_ASSERT_OK(hrx_buffer_create_from_hal(
+        view, device_entry_.hrx_device->group, HRX_MEMORY_TYPE_HOST_LOCAL, 23,
+        nullptr, &buffer));
+    iree_hal_buffer_release(view);
+    iree_hal_buffer_release(root);
+
+    // Cover no mapping, an interior read-only mapping, and a whole-buffer map.
+    // None of these states can change native export permissions or its base.
+    for (int mapping_case = 0; mapping_case < 3; ++mapping_case) {
+      const size_t map_offset = mapping_case == 1 ? 5 : 0;
+      const size_t map_length = mapping_case == 1 ? 7 : 23;
+      if (mapping_case != 0) {
+        void* mapped_pointer = nullptr;
+        IREE_ASSERT_OK(
+            HRX_CALL(hrx_buffer_map(buffer, HRX_MAP_READ | HRX_MAP_MAY_ALIAS,
+                                    map_offset, map_length, &mapped_pointer)));
+        EXPECT_EQ(storage + 13 + map_offset, mapped_pointer);
+      }
+      const iree_hal_buffer_mapping_t mapping = buffer->mapping;
+      for (int query = 0; query < 2; ++query) {
+        void* pointer = storage;
+        iree_status_t status = iree_hal_streaming_buffer_query_device_pointer(
+            buffer, device_entry_.hrx_device, &pointer);
+        if (usage & IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT) {
+          IREE_ASSERT_OK(status);
+          EXPECT_EQ(storage + 13, pointer);
+        } else {
+          IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED, status);
+          EXPECT_EQ(nullptr, pointer);
+        }
+        EXPECT_EQ(mapping_case != 0, buffer->is_mapped);
+        EXPECT_EQ(0, memcmp(&mapping, &buffer->mapping, sizeof(mapping)));
+      }
+      IREE_ASSERT_OK(HRX_CALL(hrx_buffer_unmap(buffer)));
+    }
+    hrx_buffer_release(buffer);
+    for (size_t i = 0; i < sizeof(storage); ++i) {
+      EXPECT_EQ(i, storage[i]);
+    }
+  }
+}
 
 TEST_F(CpuStreamingMemoryTest,
        AllocationIdentityDoesNotFollowUnifiedMemoryPlacement) {

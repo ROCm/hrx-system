@@ -194,6 +194,13 @@ typedef struct iree_hal_streaming_buffer_ref_t {
   iree_device_size_t offset;
 } iree_hal_streaming_buffer_ref_t;
 
+// Resolves the pointer convention used by HIP/CUDA arguments on |device|.
+// Scoped buffers select that device's default program family. In-tree imports
+// may supply a guaranteed address; unscoped buffers use native address export.
+// The caller completes allocation dependencies and retains the allocation.
+iree_status_t iree_hal_streaming_buffer_query_device_pointer(
+    hrx_buffer_t buffer, hrx_device_t device, void** out_pointer);
+
 // Immutable allocation metadata retained independently of the streaming
 // wrapper and buffer-table entry from which it was resolved.
 typedef struct iree_hal_streaming_retained_buffer_ref_t {

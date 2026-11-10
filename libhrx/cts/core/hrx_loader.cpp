@@ -182,7 +182,7 @@ void HrxLoader::load(const std::string& path) {
   LOAD(buffer_release);
   LOAD(buffer_map);
   LOAD(buffer_unmap);
-  LOAD(buffer_get_device_ptr);
+  LOAD(buffer_query_address);
   LOAD(buffer_get_size);
 
   LOAD(synchronous_h2d);

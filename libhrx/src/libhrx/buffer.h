@@ -26,8 +26,8 @@ typedef struct hrx_buffer_s {
   // HAL pool that materialized |hal_buffer|.
   iree_hal_pool_t* hal_pool;
 
-  // Device associated with the buffer's allocation.
-  hrx_device_t device;
+  // Retained sealed group defining the allocation's memory scopes.
+  hrx_device_group_t group;
 
   // Memory properties selected for the allocation.
   hrx_memory_type_t mem_type;
@@ -54,12 +54,12 @@ typedef struct hrx_buffer_s {
 } hrx_buffer_s;
 
 // Creates an HRX buffer wrapping |hal_buffer| for in-tree interop. The buffer
-// retains both |hal_buffer| and |device|; the caller owns the returned handle.
+// retains both |hal_buffer| and |group|; the caller owns the returned handle.
 // |hal_buffer| may be NULL for host-only allocations.
 // |device_ptr| is an optional whole-buffer device address whose validity the
 // caller guarantees for the lifetime of the wrapper. It is never a scoped map.
 iree_status_t hrx_buffer_create_from_hal(iree_hal_buffer_t* hal_buffer,
-                                         hrx_device_t device,
+                                         hrx_device_group_t group,
                                          hrx_memory_type_t mem_type,
                                          size_t size, void* device_ptr,
                                          hrx_buffer_t* out_buffer);

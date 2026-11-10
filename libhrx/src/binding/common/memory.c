@@ -21,12 +21,61 @@
 #include "iree/base/threading/call_once.h"
 #include "iree/base/threading/notification.h"
 #include "libhrx/src/libhrx/buffer.h"
+#include "libhrx/src/libhrx/device.h"
 #include "libhrx/src/libhrx/mem_pool_backing.h"
 #include "libhrx/src/libhrx/transfer.h"
 
 //===----------------------------------------------------------------------===//
 // Memory management
 //===----------------------------------------------------------------------===//
+
+iree_status_t iree_hal_streaming_buffer_query_device_pointer(
+    hrx_buffer_t buffer, hrx_device_t device, void** out_pointer) {
+  *out_pointer = NULL;
+  if (buffer->device_ptr) {
+    *out_pointer = buffer->device_ptr;
+    return iree_ok_status();
+  }
+  if (!buffer->hal_buffer) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "buffer has no device address");
+  }
+  const iree_hal_buffer_memory_view_t memory =
+      iree_hal_buffer_memory_view(buffer->hal_buffer);
+  if (memory.contract) {
+    const iree_hal_queue_family_t* family =
+        iree_hal_queue_family(device->dispatch_queue);
+    const hrx_memory_scope_t scope = {
+        .domain = family->memory.domain,
+        .id = family->memory.queue_scope_id + 1,
+    };
+    uint64_t address = 0;
+    IREE_RETURN_IF_ERROR(HRX_CALL(
+        hrx_buffer_query_address(buffer, scope,
+                                 device->type == HRX_ACCELERATOR_CPU
+                                     ? HRX_BUFFER_INTERFACE_HOST
+                                     : HRX_BUFFER_INTERFACE_DEVICE_ADDRESS,
+                                 &address)));
+    *out_pointer = (void*)(uintptr_t)address;
+    return iree_ok_status();
+  }
+
+  // A scoped mapping grants access only to its interval and cannot establish
+  // a whole-buffer address. Export leaves any active mapping untouched.
+  iree_hal_external_storage_t storage = {0};
+  iree_hal_buffer_range_t logical_range = {0};
+  iree_status_t status = iree_hal_buffer_export(
+      buffer->hal_buffer, iree_hal_make_buffer_range(0, IREE_HAL_WHOLE_BUFFER),
+      iree_hal_make_external_storage_class(
+          IREE_HAL_EXTERNAL_STORAGE_TYPE_DEVICE_ADDRESS),
+      &storage, &logical_range);
+  if (iree_status_is_ok(status)) {
+    *out_pointer = (void*)(uintptr_t)(storage.payload.device_address +
+                                      logical_range.byte_offset);
+  }
+  iree_hal_external_storage_release(&storage);
+  return status;
+}
 
 static iree_status_t iree_hal_streaming_command_buffer_barrier(
     iree_hal_command_buffer_t* command_buffer, iree_hal_barrier_flags_t flags) {
@@ -420,12 +469,12 @@ static iree_status_t iree_hal_streaming_buffer_wrap_hrx_buffer(
   wrapper->coherency_mode = 0;           // Fine-grain by default.
 
   // HIP pointers can occur inside by-value kernel arguments and must be real
-  // device addresses. The HRX query uses this device's prepared program
+  // device addresses. The binding selects this device's prepared program
   // binding; external-storage transport support is independent of address
   // access.
   void* device_pointer = NULL;
-  iree_status_t status =
-      HRX_CALL(hrx_buffer_get_device_ptr(hrx_buf, &device_pointer));
+  iree_status_t status = iree_hal_streaming_buffer_query_device_pointer(
+      hrx_buf, context->device_entry->hrx_device, &device_pointer);
   wrapper->device_ptr = (iree_hal_streaming_deviceptr_t)device_pointer;
 
   if (imported_host_ptr) {
@@ -482,7 +531,8 @@ static iree_status_t iree_hal_streaming_buffer_wrap(
       context->device_entry ? context->device_entry->hrx_device : NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, hrx_buffer_create_from_hal(
-              buffer, hrx_dev, (hrx_memory_type_t)memory_type,
+              buffer, hrx_dev ? hrx_dev->group : NULL,
+              (hrx_memory_type_t)memory_type,
               (size_t)iree_hal_buffer_byte_length(buffer), NULL, &hrx_buf));
 
   iree_status_t status = iree_hal_streaming_buffer_wrap_hrx_buffer(

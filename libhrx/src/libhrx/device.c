@@ -11,6 +11,14 @@
 #include "device_group.h"
 #include "hrx_internal.h"
 
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_MEMORY_SITE_HOST, IREE_HAL_MEMORY_SITE_HOST,
+                           "memory sites must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_MEMORY_SITE_QUEUE, IREE_HAL_MEMORY_SITE_QUEUE,
+                           "memory sites must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_MEMORY_SITE_PROGRAM,
+                           IREE_HAL_MEMORY_SITE_PROGRAM,
+                           "memory sites must match HAL");
+
 iree_status_t hrx_device_initialize(hrx_device_group_t group, size_t index,
                                     hrx_accelerator_type_t type,
                                     hrx_device_t device) {
@@ -91,23 +99,8 @@ void hrx_device_deinitialize(hrx_device_t device) {
 }
 
 void hrx_device_report_failure(hrx_device_t device, iree_status_t status) {
-  if (iree_status_is_ok(status)) {
-    return;
-  }
-  const iree_hal_device_driver_failure_event_t payload = {
-      .record_length = sizeof(payload),
-      .abi_version = IREE_HAL_DEVICE_DRIVER_FAILURE_EVENT_ABI_VERSION_0,
-      .status_code = iree_status_code(status),
-      .message = iree_status_message(status),
-  };
-  iree_hal_device_event_t event = iree_hal_device_event_default();
-  event.type = IREE_HAL_DEVICE_EVENT_TYPE_DRIVER_FAILURE;
-  event.severity = IREE_HAL_DEVICE_EVENT_SEVERITY_ERROR;
-  event.source.device = device->hal_device;
-  event.source.device_id = iree_hal_device_id(device->hal_device);
-  event.payload = iree_make_const_byte_span(&payload, sizeof(payload));
-  iree_hal_device_event_sink_publish(hrx_device_hal_event_sink(device), &event);
-  iree_status_free(status);
+  hrx_runtime_report_failure(device->group->runtime, device->hal_device,
+                             status);
 }
 
 iree_hal_device_t* hrx_device_hal(hrx_device_t device) {
@@ -340,4 +333,49 @@ hrx_status_t hrx_device_can_access_peer(hrx_device_t device_a,
       iree_hal_device_topology_query_edge(topology_info_a, topology_info_b);
   *can_access = hrx_topology_edge_supports_peer_access(edge);
   return hrx_ok_status();
+}
+
+hrx_status_t hrx_device_query_host_memory_scope(hrx_device_t device,
+                                                hrx_memory_scope_t* out_scope) {
+  if (!device || !out_scope) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "memory scope device or output is NULL");
+  }
+  *out_scope = (hrx_memory_scope_t){0};
+  iree_hal_memory_scope_t hal_scope;
+  iree_status_t status = iree_hal_device_group_resolve_memory_scope(
+      device->hal_device_group,
+      (iree_hal_memory_site_t){.kind = IREE_HAL_MEMORY_SITE_HOST}, &hal_scope);
+  if (iree_status_is_ok(status)) {
+    *out_scope = (hrx_memory_scope_t){hal_scope.domain, hal_scope.id};
+  }
+  return hrx_status_from_iree(status);
+}
+
+hrx_status_t hrx_device_query_queue_family_memory_scope(
+    hrx_device_t device, uint32_t family_ordinal, hrx_memory_site_t site,
+    hrx_memory_scope_t* out_scope) {
+  if (!device || !out_scope ||
+      (site != HRX_MEMORY_SITE_QUEUE && site != HRX_MEMORY_SITE_PROGRAM)) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "invalid memory scope device, site or output");
+  }
+  *out_scope = (hrx_memory_scope_t){0};
+  const iree_hal_queue_family_t* family =
+      iree_hal_device_queue_family(device->hal_device, family_ordinal);
+  if (!family) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "invalid memory scope queue family");
+  }
+  const iree_hal_memory_site_t hal_site = {
+      .kind = (iree_hal_memory_site_kind_t)site,
+      .family = family,
+  };
+  iree_hal_memory_scope_t hal_scope;
+  iree_status_t status = iree_hal_device_group_resolve_memory_scope(
+      device->hal_device_group, hal_site, &hal_scope);
+  if (iree_status_is_ok(status)) {
+    *out_scope = (hrx_memory_scope_t){hal_scope.domain, hal_scope.id};
+  }
+  return hrx_status_from_iree(status);
 }

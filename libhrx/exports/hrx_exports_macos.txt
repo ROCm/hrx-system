@@ -74,7 +74,7 @@ _hrx_buffer_retain
 _hrx_buffer_release
 _hrx_buffer_map
 _hrx_buffer_unmap
-_hrx_buffer_get_device_ptr
+_hrx_buffer_query_address
 _hrx_buffer_get_size
 _hrx_synchronous_h2d
 _hrx_synchronous_d2h

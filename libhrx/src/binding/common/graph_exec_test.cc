@@ -1169,7 +1169,7 @@ TEST_F(GraphExecTest, BatchMemoryNodePreservesResolvedWriteSemantics) {
   ASSERT_NE(mapping.contents.data, nullptr);
   *reinterpret_cast<uint64_t*>(mapping.contents.data) = 0;
   IREE_ASSERT_OK(hrx_buffer_create_from_hal(
-      buffer, device_entry_.hrx_device, memory_type, sizeof(uint64_t),
+      buffer, device_entry_.hrx_device->group, memory_type, sizeof(uint64_t),
       mapping.contents.data, &target.owner));
   target.buffer = buffer;
   iree_hal_buffer_retain(target.buffer);

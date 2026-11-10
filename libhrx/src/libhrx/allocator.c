@@ -51,7 +51,7 @@ hrx_status_t hrx_allocator_allocate_buffer(hrx_allocator_t allocator,
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
-  status = hrx_buffer_create_from_hal(hal_buffer, allocator->device,
+  status = hrx_buffer_create_from_hal(hal_buffer, allocator->device->group,
                                       params.type, size,
                                       /*device_ptr=*/NULL, buffer);
   iree_hal_buffer_release(hal_buffer);
@@ -100,8 +100,9 @@ hrx_status_t hrx_allocator_import_buffer(hrx_allocator_t allocator,
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
-  status = hrx_buffer_create_from_hal(hal_buffer, allocator->device,
-                                      params.type, size, host_ptr, buffer);
+  status = hrx_buffer_create_from_hal(hal_buffer, allocator->device->group,
+                                      params.type, size, /*device_ptr=*/NULL,
+                                      buffer);
   iree_hal_buffer_release(hal_buffer);
   HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
 }
@@ -199,8 +200,8 @@ hrx_status_t hrx_allocator_virtual_memory_reserve(
   memset(buf, 0, sizeof(*buf));
   iree_atomic_ref_count_init(&buf->ref_count);
   buf->hal_buffer = hal_buffer;
-  buf->device = allocator->device;
-  hrx_device_retain(buf->device);
+  buf->group = allocator->device->group;
+  hrx_device_group_retain(buf->group);
   buf->mem_type = HRX_MEMORY_TYPE_DEVICE_LOCAL;
   buf->size = size;
   *virtual_buffer = buf;
@@ -225,7 +226,7 @@ hrx_status_t hrx_allocator_virtual_memory_release(hrx_allocator_t allocator,
     // Release consumes the HAL buffer only on success. Keep the wrapper usable
     // when active mappings prevent release so the caller can unmap and retry.
     virtual_buffer->hal_buffer = NULL;
-    hrx_device_release(virtual_buffer->device);
+    hrx_device_group_release(virtual_buffer->group);
     iree_allocator_free(iree_allocator_system(), virtual_buffer);
   }
   HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));

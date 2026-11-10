@@ -83,9 +83,9 @@ static iree_status_t RunRemovalBenchmark(
     }
     if (!host_registration) {
       IREE_CHECK_OK(hrx_buffer_create_from_hal(
-          /*hal_buffer=*/nullptr, /*device=*/nullptr,
-          HRX_MEMORY_TYPE_HOST_LOCAL, kAllocationSize,
-          reinterpret_cast<void*>(device_addresses[index]), &buffers[index]));
+          /*hal_buffer=*/nullptr, /*group=*/nullptr, HRX_MEMORY_TYPE_HOST_LOCAL,
+          kAllocationSize, reinterpret_cast<void*>(device_addresses[index]),
+          &buffers[index]));
     }
   }
 

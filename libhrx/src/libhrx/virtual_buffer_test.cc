@@ -146,10 +146,14 @@ TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
 
     auto first = (reservations.front());
     auto last = (reservations.back());
-    void* device_pointer = nullptr;
+    hrx_memory_scope_t address_scope;
     IREE_ASSERT_OK(
-        hrx_status_to_iree(hrx_buffer_get_device_ptr(first, &device_pointer)));
-    EXPECT_EQ(0u, reinterpret_cast<uintptr_t>(device_pointer) % (2 * unit));
+        hrx_status_to_iree(hrx_device_query_queue_family_memory_scope(
+            device_, 0, HRX_MEMORY_SITE_PROGRAM, &address_scope)));
+    uint64_t device_pointer = 0;
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_query_address(
+        first, address_scope, HRX_BUFFER_INTERFACE_HOST, &device_pointer)));
+    EXPECT_EQ(0u, device_pointer % (2 * unit));
     const uint32_t pattern = 0x55667788;
     uint64_t predecessor = completed++;
     const hrx_semaphore_list_t wait_list = {

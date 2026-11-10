@@ -41,6 +41,12 @@ iree_status_t hrx_runtime_acquire_driver(hrx_runtime_t runtime,
                                          iree_hal_driver_t** out_driver);
 iree_hal_device_event_sink_t hrx_runtime_hal_event_sink(hrx_runtime_t runtime);
 
+// Consumes a teardown failure through the runtime's configured event sink.
+// |device| is NULL for group-owned resources without one execution device.
+void hrx_runtime_report_failure(hrx_runtime_t runtime,
+                                iree_hal_device_t* device,
+                                iree_status_t status);
+
 // Parent-scoped services for frontend operations that already retain a device.
 iree_async_proactor_pool_t* hrx_device_proactor_pool(hrx_device_t device);
 iree_hal_device_event_sink_t hrx_device_hal_event_sink(hrx_device_t device);

@@ -242,15 +242,25 @@ TEST_CASE_METHOD(HrxTestFixture,
     };
   }
   resources.Map(mappings.size(), mappings.data());
-  void* program_address = nullptr;
+  hrx_memory_scope_t program_scope;
+  REQUIRE_OK(hrx().device_query_queue_family_memory_scope(
+      device_, hrx().queue_get_family_ordinal(transfer_queue_),
+      HRX_MEMORY_SITE_PROGRAM, &program_scope));
+  hrx_accelerator_type_t accelerator_type;
+  REQUIRE_OK(hrx().device_get_type(device_, &accelerator_type));
+  uint64_t program_address = 0;
   REQUIRE_OK(
-      hrx().buffer_get_device_ptr(resources.reservation, &program_address));
+      hrx().buffer_query_address(resources.reservation, program_scope,
+                                 accelerator_type == HRX_ACCELERATOR_CPU
+                                     ? HRX_BUFFER_INTERFACE_HOST
+                                     : HRX_BUFFER_INTERFACE_DEVICE_ADDRESS,
+                                 &program_address));
   void* host_address = nullptr;
   REQUIRE_OK(hrx().buffer_map(resources.reservation,
                               HRX_MAP_READ | HRX_MAP_WRITE | HRX_MAP_MAY_ALIAS,
                               0, 2 * unit, &host_address));
   resources.host_mapped = true;
-  REQUIRE(host_address == program_address);
+  REQUIRE(reinterpret_cast<uintptr_t>(host_address) == program_address);
   const std::array<uint32_t, 4> expected = {11, 17, 29, 47};
   std::memcpy(host_address, expected.data(), sizeof(expected));
   std::array<uint32_t, 4> observed = {};

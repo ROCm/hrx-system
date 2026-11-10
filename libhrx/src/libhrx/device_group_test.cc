@@ -1,6 +1,8 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#include <algorithm>
+
 #include "hrx_runtime_cxx.h"
 #include "iree/testing/gtest.h"
 
@@ -150,6 +152,114 @@ constexpr hrx_buffer_params_t kHostBufferParams = {
     .access = HRX_MEMORY_ACCESS_ALL,
     .usage = HRX_BUFFER_USAGE_DEFAULT,
 };
+
+TEST(DeviceGroupTest, SharedReservationHasPerDeviceAddressesAndGraphAccess) {
+  hrx::runtime::runtime_ptr runtime;
+  ASSERT_TRUE(Check(hrx_runtime_create(nullptr, hrx_host_allocator_system(),
+                                       runtime.for_output())));
+  const hrx_device_create_params_t params[] = {{.uri = "task://"},
+                                               {.uri = "task://"}};
+  hrx::runtime::device_group_ptr group;
+  ASSERT_TRUE(
+      Check(hrx_device_group_create(runtime, 2, params, group.for_output())));
+  hrx_device_t devices[] = {hrx_device_group_get_device(group, 0),
+                            hrx_device_group_get_device(group, 1)};
+  const hrx_virtual_buffer_scope_t scope = {2, devices, HRX_MEMORY_ACCESS_ALL};
+  const hrx_virtual_buffer_source_t source_class = {
+      .device = devices[0],
+      .memory_type = HRX_MEMORY_TYPE_HOST_LOCAL,
+  };
+  hrx_virtual_buffer_capabilities_t capabilities;
+  ASSERT_TRUE(Check(hrx_virtual_buffer_query_capabilities(
+      scope, {1, &source_class}, &capabilities)));
+  hrx_memory_mapping_requirements_t requirements;
+  ASSERT_TRUE(Check(hrx_allocator_query_mapping_requirements(
+      hrx_device_allocator(devices[0]), HRX_MEMORY_TYPE_HOST_LOCAL,
+      &requirements)));
+  const size_t size = std::max({capabilities.reservation_granularity,
+                                capabilities.mapping_granularity,
+                                requirements.recommended_granularity});
+  const hrx_virtual_buffer_options_t options = {
+      .byte_length = size,
+      .mapping_granularity = size,
+  };
+  hrx::runtime::buffer_ptr backing;
+  hrx::runtime::buffer_ptr buffer;
+  ASSERT_TRUE(Check(hrx_virtual_buffer_create(scope, {1, &source_class},
+                                              &options, buffer.for_output())));
+  hrx_buffer_params_t backing_params = kHostBufferParams;
+  backing_params.usage |= HRX_BUFFER_USAGE_MAPPING_SOURCE;
+  ASSERT_TRUE(Check(hrx_allocator_allocate_buffer(
+      hrx_device_allocator(devices[0]), backing_params, size,
+      backing.for_output())));
+  hrx::runtime::semaphore_ptr ready;
+  ASSERT_TRUE(Check(hrx_semaphore_create(devices[0], 0, ready.for_output())));
+  uint64_t value = 1;
+  hrx_semaphore_t semaphore = ready;
+  const hrx_semaphore_list_t signal = {&semaphore, &value, 1};
+  const hrx_memory_mapping_t mapping = {
+      .target = buffer,
+      .byte_length = size,
+      .source = backing,
+      .access = HRX_MEMORY_ACCESS_ALL,
+      .operation = HRX_MEMORY_MAPPING_OPERATION_BIND,
+  };
+  ASSERT_TRUE(
+      Check(hrx_queue_map(hrx_device_get_queue(devices[0], 0, 0), nullptr,
+                          &signal, 1, &mapping, HRX_QUEUE_MAP_FLAG_NONE)));
+  ASSERT_TRUE(Check(hrx_semaphore_wait(ready, value, UINT64_MAX)));
+  ready.reset();
+  hrx_memory_scope_t program_scopes[2];
+  for (size_t i = 0; i < 2; ++i) {
+    ASSERT_TRUE(Check(hrx_device_query_queue_family_memory_scope(
+        devices[i], 0, HRX_MEMORY_SITE_PROGRAM, &program_scopes[i])));
+  }
+
+  // A buffer keeps every participant and its address contract alive. Neither
+  // the first participant nor a caller-held group reference owns its identity.
+  group.reset();
+  runtime.reset();
+  uint64_t addresses[2];
+  for (size_t i = 0; i < 2; ++i) {
+    ASSERT_TRUE(Check(hrx_buffer_query_address(
+        buffer, program_scopes[i], HRX_BUFFER_INTERFACE_HOST, &addresses[i])));
+    ASSERT_NE(addresses[i], 0u);
+  }
+  EXPECT_EQ(addresses[0], addresses[1]);  // These two task devices share a VM.
+
+  hrx::runtime::hrx_ptr<hrx_graph_t, hrx_graph_retain, hrx_graph_release> graph;
+  ASSERT_TRUE(Check(hrx_graph_create(devices[1], 0, graph.for_output())));
+  const hrx_graph_fill_buffer_node_attrs_t fill = {
+      .dst = {buffer, 0, 256},
+      .pattern = 0xA5A5A5A5u,
+      .pattern_size = 4,
+  };
+  hrx_graph_node_t node = nullptr;
+  ASSERT_TRUE(
+      Check(hrx_graph_add_fill_buffer_node(graph, nullptr, 0, &fill, &node)));
+  hrx::runtime::hrx_ptr<hrx_graph_exec_t, hrx_graph_exec_retain,
+                        hrx_graph_exec_release>
+      executable;
+  hrx_queue_t queue = hrx_device_get_queue(devices[1], 0, 0);
+  ASSERT_TRUE(
+      Check(hrx_graph_instantiate(graph, queue, 0, executable.for_output())));
+  hrx::runtime::stream_ptr stream;
+  ASSERT_TRUE(Check(hrx_stream_create(queue, 0, stream.for_output())));
+  ASSERT_TRUE(Check(hrx_graph_exec_launch(executable, stream)));
+  ASSERT_TRUE(Check(hrx_stream_synchronize(stream)));
+  uint32_t output[64] = {};
+  ASSERT_TRUE(Check(hrx_synchronous_d2h(hrx_device_get_queue(devices[0], 0, 0),
+                                        buffer, 0, output, sizeof(output))));
+  for (uint32_t element : output) {
+    EXPECT_EQ(0xA5A5A5A5u, element);
+  }
+  stream.reset();
+  executable.reset();
+  graph.reset();
+  ASSERT_TRUE(Check(hrx_virtual_buffer_detach(buffer, {})));
+  buffer.reset();
+  backing.reset();
+}
 
 TEST_F(DeviceGroupLifetimeTest, ViewKeepsAllocationAndServicesAlive) {
   hrx::runtime::buffer_ptr buffer;

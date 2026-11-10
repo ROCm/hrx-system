@@ -434,8 +434,8 @@ iree_status_t iree_hal_streaming_mem_pool_allocate_buffer(
   iree_atomic_ref_count_init(&new_buffer->ref_count);
   new_buffer->hal_buffer = hal_buffer;
   new_buffer->hal_pool = hal_pool;
-  new_buffer->device = pool->device;
-  hrx_device_retain(new_buffer->device);
+  new_buffer->group = pool->device->group;
+  hrx_device_group_retain(new_buffer->group);
   new_buffer->mem_type =
       (hrx_memory_type_t)iree_hal_buffer_memory_type(hal_buffer);
   new_buffer->size = size;

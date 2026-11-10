@@ -83,6 +83,53 @@ typedef uint16_t hrx_map_flags_t;
 // Mapped accesses may alias other concurrent accesses; supplies no ordering.
 #define HRX_MAP_MAY_ALIAS 0x08
 
+// Native representation admitted at one memory scope. Address queries accept
+// HOST, DEVICE_ADDRESS, XDNA_SHIM_DMA, and XDNA_FIRMWARE. Other interfaces
+// carry native resource identities instead of scalar addresses.
+typedef enum hrx_buffer_interface_t {
+  HRX_BUFFER_INTERFACE_HOST = 0,
+  HRX_BUFFER_INTERFACE_DEVICE_ADDRESS = 1,
+  HRX_BUFFER_INTERFACE_VULKAN_BUFFER = 2,
+  HRX_BUFFER_INTERFACE_XDNA_SHIM_DMA = 3,
+  HRX_BUFFER_INTERFACE_XDNA_FIRMWARE = 4,
+  HRX_BUFFER_INTERFACE_RDMA = 5,
+  HRX_BUFFER_INTERFACE_REGISTERED_IO = 6,
+  HRX_BUFFER_INTERFACE_REMOTE = 7,
+  HRX_BUFFER_INTERFACE_WEBGPU_BUFFER = 8,
+  HRX_BUFFER_INTERFACE_MAPPING_SOURCE = 9,
+} hrx_buffer_interface_t;
+
+// Access site selected within a device's sealed group.
+typedef enum hrx_memory_site_t {
+  HRX_MEMORY_SITE_HOST = 0,
+  HRX_MEMORY_SITE_QUEUE = 1,
+  HRX_MEMORY_SITE_PROGRAM = 2,
+} hrx_memory_site_t;
+
+// Borrowed process-local scope token. Its device group must remain live.
+// A zero-initialized token selects every admitted reservation projection in
+// mapping operations. Address queries require an exact nonzero scope.
+typedef struct hrx_memory_scope_t {
+  // Opaque group identity; never dereferenced by callers.
+  const void* domain;
+  // Opaque coordinate within the group.
+  uint32_t id;
+} hrx_memory_scope_t;
+
+// Resolves the public host scope in the device's sealed group for reuse in
+// memory queries and mapping descriptors. No queue is required.
+HRX_API hrx_status_t hrx_device_query_host_memory_scope(
+    hrx_device_t device, hrx_memory_scope_t* out_scope);
+
+// Resolves the QUEUE or PROGRAM site of the exact family for reuse in memory
+// queries and mapping descriptors. Family ordinals come from device
+// queue-family discovery; an existing queue supplies its ordinal through
+// hrx_queue_get_family_ordinal. This query neither requires a provisioned queue
+// nor acquires one. HOST uses hrx_device_query_host_memory_scope instead.
+HRX_API hrx_status_t hrx_device_query_queue_family_memory_scope(
+    hrx_device_t device, uint32_t family_ordinal, hrx_memory_site_t site,
+    hrx_memory_scope_t* out_scope);
+
 // Dispatch flags (hrx-specific, no IREE equivalent).
 typedef enum hrx_dispatch_flags_t {
   HRX_DISPATCH_FLAG_NONE = 0,
@@ -433,14 +480,19 @@ HRX_API hrx_status_t hrx_buffer_map(hrx_buffer_t buffer, hrx_map_flags_t flags,
 
 HRX_API hrx_status_t hrx_buffer_unmap(hrx_buffer_t buffer);
 
-// Returns the whole-buffer native address for its HRX device using the prepared
-// program binding. This does not map the buffer or alter an active scoped
-// mapping. Unscoped legacy buffers use native address export. The caller
-// completes allocation prerequisites and retains the buffer while using the
-// address. On failure the output is NULL and the address-access error is
-// returned.
-HRX_API hrx_status_t hrx_buffer_get_device_ptr(hrx_buffer_t buffer,
-                                               void** device_ptr);
+// Returns the address of the buffer's first byte at an exact prepared scope.
+// The caller completes allocation prerequisites and retains the allocation
+// epoch while using the borrowed address. This query neither synchronizes nor
+// maps, exports, or changes an active mapping. HOST selects a prepared host
+// execution pointer; application mapping permissions remain independent.
+// The interface must be HOST, DEVICE_ADDRESS, XDNA_SHIM_DMA, or XDNA_FIRMWARE
+// and must have been admitted at |scope|. Different scopes may have different
+// addresses. A wildcard or foreign scope is invalid. On failure the output
+// is zero; unprepared interfaces return PERMISSION_DENIED.
+HRX_API hrx_status_t hrx_buffer_query_address(hrx_buffer_t buffer,
+                                              hrx_memory_scope_t scope,
+                                              hrx_buffer_interface_t type,
+                                              uint64_t* out_address);
 
 HRX_API hrx_status_t hrx_buffer_get_size(hrx_buffer_t buffer, size_t* size);
 
@@ -651,36 +703,6 @@ HRX_API hrx_status_t hrx_buffer_view_dim(hrx_buffer_view_t buffer_view,
 // Virtual buffers and mapping
 //===----------------------------------------------------------------------===//
 
-// Access site selected within a device's sealed group.
-typedef enum hrx_memory_site_t {
-  HRX_MEMORY_SITE_HOST = 0,
-  HRX_MEMORY_SITE_QUEUE = 1,
-  HRX_MEMORY_SITE_PROGRAM = 2,
-} hrx_memory_site_t;
-
-// Borrowed process-local scope token. Its device group must remain live.
-// A zero-initialized token selects every admitted reservation projection.
-typedef struct hrx_memory_scope_t {
-  // Opaque group identity; never dereferenced by callers.
-  const void* domain;
-  // Opaque coordinate within the group.
-  uint32_t id;
-} hrx_memory_scope_t;
-
-// Resolves the public host scope in the device's sealed group for reuse in
-// mapping descriptors. No queue is required.
-HRX_API hrx_status_t hrx_device_query_host_memory_scope(
-    hrx_device_t device, hrx_memory_scope_t* out_scope);
-
-// Resolves the QUEUE or PROGRAM site of the exact family for reuse in mapping
-// descriptors. Family ordinals come from device queue-family discovery; an
-// existing queue supplies its ordinal through hrx_queue_get_family_ordinal.
-// This query neither requires a provisioned queue nor acquires one. HOST uses
-// hrx_device_query_host_memory_scope instead.
-HRX_API hrx_status_t hrx_device_query_queue_family_memory_scope(
-    hrx_device_t device, uint32_t family_ordinal, hrx_memory_site_t site,
-    hrx_memory_scope_t* out_scope);
-
 // Complete simultaneous access to one address reservation. All families of
 // every listed device participate. Devices must belong to the same sealed
 // group; the arrays are borrowed only for query/construction. Host access
@@ -688,7 +710,7 @@ HRX_API hrx_status_t hrx_device_query_queue_family_memory_scope(
 typedef struct hrx_virtual_buffer_scope_t {
   // Nonzero number of distinct participating devices.
   size_t device_count;
-  // Devices whose first entry supplies the stable buffer's device identity.
+  // Participating devices; the buffer retains their complete sealed group.
   const hrx_device_t* devices;
   // Required public host mapping access, or NONE for execution-only addresses.
   hrx_memory_access_t host_access;

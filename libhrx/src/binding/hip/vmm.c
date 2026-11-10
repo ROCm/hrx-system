@@ -1092,8 +1092,9 @@ hipError_t iree_hip_vmm_address_reserve(void** ptr, size_t size,
     return result;
   }
   void* device_ptr = NULL;
-  result = iree_hip_vmm_from_hrx_status(
-      hrx_buffer_get_device_ptr(virtual_buffer, &device_ptr));
+  result = iree_hip_vmm_from_iree_status(
+      iree_hal_streaming_buffer_query_device_pointer(virtual_buffer, device,
+                                                     &device_ptr));
   if (result == hipSuccess && alignment != 0 &&
       (uintptr_t)device_ptr % alignment != 0) {
     result = hipErrorNotSupported;

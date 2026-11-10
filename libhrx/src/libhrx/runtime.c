@@ -193,6 +193,33 @@ iree_hal_device_event_sink_t hrx_runtime_hal_event_sink(hrx_runtime_t runtime) {
   };
 }
 
+void hrx_runtime_report_failure(hrx_runtime_t runtime,
+                                iree_hal_device_t* device,
+                                iree_status_t status) {
+  if (iree_status_is_ok(status)) {
+    return;
+  }
+  const iree_hal_device_driver_failure_event_t payload = {
+      .record_length = sizeof(payload),
+      .abi_version = IREE_HAL_DEVICE_DRIVER_FAILURE_EVENT_ABI_VERSION_0,
+      .status_code = iree_status_code(status),
+      .message = iree_status_message(status),
+  };
+  iree_hal_device_event_t event = iree_hal_device_event_default();
+  event.type = IREE_HAL_DEVICE_EVENT_TYPE_DRIVER_FAILURE;
+  event.severity = IREE_HAL_DEVICE_EVENT_SEVERITY_ERROR;
+  event.source.device = device;
+  if (device) {
+    event.source.device_id = iree_hal_device_id(device);
+  }
+  event.payload = iree_make_const_byte_span(&payload, sizeof(payload));
+  iree_hal_device_event_sink_publish(runtime
+                                         ? hrx_runtime_hal_event_sink(runtime)
+                                         : iree_hal_device_event_sink_discard(),
+                                     &event);
+  iree_status_free(status);
+}
+
 iree_hal_device_event_sink_t hrx_device_hal_event_sink(hrx_device_t device) {
   return hrx_runtime_hal_event_sink(device->group->runtime);
 }

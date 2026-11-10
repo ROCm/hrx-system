@@ -343,9 +343,9 @@ static hrx_status_t hrx_graph_validate_buffer_ref(hrx_graph_t graph,
   if (!ref.buffer) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, name);
   }
-  if (ref.buffer->device != graph->device) {
+  if (ref.buffer->group != graph->device->group) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "graph buffer belongs to another device");
+                           "graph buffer belongs to another device group");
   }
   if (ref.length == 0 || ref.offset > ref.buffer->size ||
       ref.length > ref.buffer->size - ref.offset) {

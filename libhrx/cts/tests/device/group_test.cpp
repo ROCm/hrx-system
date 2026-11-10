@@ -107,12 +107,31 @@ TEST_CASE("Explicit CPU GPU group carries data across queue timelines",
                                              host_params, kLength,
                                              &resources.buffers[5]));
 
+  hrx_memory_scope_t cpu_scope, gpu_scope;
+  REQUIRE_OK(hrx().device_query_queue_family_memory_scope(
+      cpu, hrx().queue_get_family_ordinal(cpu_queue), HRX_MEMORY_SITE_PROGRAM,
+      &cpu_scope));
+  REQUIRE_OK(hrx().device_query_queue_family_memory_scope(
+      gpu,
+      hrx().queue_get_family_ordinal(
+          FindProvisionedQueue(gpu, HRX_QUEUE_ROLE_DISPATCH)),
+      HRX_MEMORY_SITE_PROGRAM, &gpu_scope));
+
   // Retaining resources keep the complete group alive after the caller drops
   // both construction owners. Queue handles remain borrowed from that group.
   hrx().device_group_release(resources.group);
   resources.group = nullptr;
   hrx().runtime_release(resources.runtime);
   resources.runtime = nullptr;
+
+  uint64_t address = 0;
+  REQUIRE_OK(hrx().buffer_query_address(resources.buffers[0], cpu_scope,
+                                        HRX_BUFFER_INTERFACE_HOST, &address));
+  REQUIRE(address == reinterpret_cast<uintptr_t>(host_bytes));
+  REQUIRE_OK(hrx().buffer_query_address(resources.buffers[1], gpu_scope,
+                                        HRX_BUFFER_INTERFACE_DEVICE_ADDRESS,
+                                        &address));
+  REQUIRE(address != 0);
 
   for (size_t i = 0; i < kRegionCount; ++i) {
     const size_t offset = i * kRegionLength;

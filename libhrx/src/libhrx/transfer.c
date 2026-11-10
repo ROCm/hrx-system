@@ -90,10 +90,11 @@ hrx_status_t hrx_synchronous_h2d(hrx_queue_t queue, const void* host_src,
     HRX_RETURN_AND_END_ZONE(
         z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument"));
   }
-  if (dst->device != queue->device) {
+  if (dst->group != queue->device->group) {
     HRX_RETURN_AND_END_ZONE(
-        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "destination buffer belongs to another device"));
+        z0,
+        hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                        "destination buffer belongs to another device group"));
   }
   if (dst_offset > dst->size || size > dst->size - dst_offset) {
     HRX_RETURN_AND_END_ZONE(z0,
@@ -131,10 +132,10 @@ hrx_status_t hrx_synchronous_d2h(hrx_queue_t queue, hrx_buffer_t src,
     HRX_RETURN_AND_END_ZONE(
         z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument"));
   }
-  if (src->device != queue->device) {
+  if (src->group != queue->device->group) {
     HRX_RETURN_AND_END_ZONE(
         z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "source buffer belongs to another device"));
+                            "source buffer belongs to another device group"));
   }
   if (src_offset > src->size || size > src->size - src_offset) {
     HRX_RETURN_AND_END_ZONE(z0,
@@ -173,9 +174,10 @@ hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream, const void* host_src,
   if (!stream || !host_src || !dst) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
   }
-  if (dst->device != stream->queue->device) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "destination buffer belongs to another device");
+  if (dst->group != stream->queue->device->group) {
+    return hrx_make_status(
+        HRX_STATUS_INVALID_ARGUMENT,
+        "destination buffer belongs to another device group");
   }
   if (dst_offset > dst->size || size > dst->size - dst_offset) {
     return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
@@ -201,9 +203,9 @@ hrx_status_t hrx_stream_copy_d2h(hrx_stream_t stream, hrx_buffer_t src,
   if (!stream || !src || !host_dst) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
   }
-  if (src->device != stream->queue->device) {
+  if (src->group != stream->queue->device->group) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "source buffer belongs to another device");
+                           "source buffer belongs to another device group");
   }
   if (src_offset > src->size || size > src->size - src_offset) {
     return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,

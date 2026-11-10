@@ -8,10 +8,42 @@
 
 #include <string.h>
 
+#include "device_group.h"
 #include "hrx_internal.h"
 
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_BUFFER_INTERFACE_HOST,
+                           IREE_HAL_BUFFER_INTERFACE_HOST,
+                           "buffer interfaces must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_BUFFER_INTERFACE_DEVICE_ADDRESS,
+                           IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+                           "buffer interfaces must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_BUFFER_INTERFACE_VULKAN_BUFFER,
+                           IREE_HAL_BUFFER_INTERFACE_VULKAN_BUFFER,
+                           "buffer interfaces must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_BUFFER_INTERFACE_XDNA_SHIM_DMA,
+                           IREE_HAL_BUFFER_INTERFACE_XDNA_SHIM_DMA,
+                           "buffer interfaces must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_BUFFER_INTERFACE_XDNA_FIRMWARE,
+                           IREE_HAL_BUFFER_INTERFACE_XDNA_FIRMWARE,
+                           "buffer interfaces must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_BUFFER_INTERFACE_RDMA,
+                           IREE_HAL_BUFFER_INTERFACE_RDMA,
+                           "buffer interfaces must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_BUFFER_INTERFACE_REGISTERED_IO,
+                           IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO,
+                           "buffer interfaces must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_BUFFER_INTERFACE_REMOTE,
+                           IREE_HAL_BUFFER_INTERFACE_REMOTE,
+                           "buffer interfaces must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_BUFFER_INTERFACE_WEBGPU_BUFFER,
+                           IREE_HAL_BUFFER_INTERFACE_WEBGPU_BUFFER,
+                           "buffer interfaces must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_BUFFER_INTERFACE_MAPPING_SOURCE,
+                           IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE,
+                           "buffer interfaces must match HAL");
+
 iree_status_t hrx_buffer_create_from_hal(iree_hal_buffer_t* hal_buffer,
-                                         hrx_device_t device,
+                                         hrx_device_group_t group,
                                          hrx_memory_type_t mem_type,
                                          size_t size, void* device_ptr,
                                          hrx_buffer_t* out_buffer) {
@@ -24,10 +56,8 @@ iree_status_t hrx_buffer_create_from_hal(iree_hal_buffer_t* hal_buffer,
   if (hal_buffer) {
     iree_hal_buffer_retain(hal_buffer);
   }
-  buffer->device = device;
-  if (device) {
-    hrx_device_retain(device);
-  }
+  buffer->group = group;
+  hrx_device_group_retain(group);
   buffer->mem_type = mem_type;
   buffer->size = size;
   buffer->device_ptr = device_ptr;
@@ -108,8 +138,8 @@ hrx_status_t hrx_buffer_allocate(hrx_stream_t stream, size_t size,
   }
 
   iree_atomic_ref_count_init(&buf->ref_count);
-  buf->device = stream->queue->device;
-  hrx_device_retain(buf->device);
+  buf->group = stream->queue->device->group;
+  hrx_device_group_retain(buf->group);
   buf->mem_type = mem_type;
   buf->size = size;
   stream->timepoint = signal_value;
@@ -135,15 +165,15 @@ void hrx_buffer_release(hrx_buffer_t buffer) {
   HRX_TRACE_ZONE_BEGIN(z0, "hrx_buffer_release");
   HRX_TRACE_ZONE_APPEND_BYTES(z0, buffer->size);
   if (buffer->is_mapped) {
-    hrx_device_report_failure(buffer->device,
-                              hrx_buffer_unmap_internal(buffer));
+    hrx_runtime_report_failure(buffer->group ? buffer->group->runtime : NULL,
+                               NULL, hrx_buffer_unmap_internal(buffer));
   }
   iree_hal_buffer_release(buffer->hal_buffer);
   iree_hal_pool_release(buffer->hal_pool);
   if (buffer->release_callback) {
     buffer->release_callback(buffer->release_user_data, buffer->size);
   }
-  hrx_device_release(buffer->device);
+  hrx_device_group_release(buffer->group);
   iree_allocator_free(iree_allocator_system(), buffer);
   HRX_TRACE_ZONE_END(z0);
 }
@@ -219,73 +249,49 @@ hrx_status_t hrx_buffer_unmap(hrx_buffer_t buffer) {
   HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
 }
 
-hrx_status_t hrx_buffer_get_device_ptr(hrx_buffer_t buffer, void** device_ptr) {
-  HRX_TRACE_ZONE_BEGIN(z0, "hrx_buffer_get_device_ptr");
-  if (buffer) {
-    HRX_TRACE_ZONE_APPEND_BYTES(z0, buffer->size);
+hrx_status_t hrx_buffer_query_address(hrx_buffer_t buffer,
+                                      hrx_memory_scope_t scope,
+                                      hrx_buffer_interface_t type,
+                                      uint64_t* out_address) {
+  if (!out_address) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "address output is NULL");
   }
-  if (!buffer || !device_ptr) {
-    HRX_RETURN_AND_END_ZONE(z0,
-                            hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                                            "buffer or device_ptr is NULL"));
+  *out_address = 0;
+  if (!buffer || !buffer->hal_buffer) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "buffer has no prepared memory contract");
   }
-  *device_ptr = NULL;
-  if (buffer->device_ptr) {
-    *device_ptr = buffer->device_ptr;
-    HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
+  if (type != HRX_BUFFER_INTERFACE_HOST &&
+      type != HRX_BUFFER_INTERFACE_DEVICE_ADDRESS &&
+      type != HRX_BUFFER_INTERFACE_XDNA_SHIM_DMA &&
+      type != HRX_BUFFER_INTERFACE_XDNA_FIRMWARE) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "native type is not a scalar address");
   }
-  if (!buffer->hal_buffer) {
-    HRX_RETURN_AND_END_ZONE(z0,
-                            hrx_make_status(HRX_STATUS_UNAVAILABLE,
-                                            "buffer has no device address"));
-  }
-
   const iree_hal_buffer_memory_view_t memory =
       iree_hal_buffer_memory_view(buffer->hal_buffer);
-  if (memory.contract && buffer->device) {
-    const iree_hal_queue_family_t* family =
-        iree_hal_queue_family(buffer->device->dispatch_queue);
-    const uint32_t scope_id = family->memory.queue_scope_id + 1;
-    const iree_hal_buffer_interface_t type =
-        buffer->device->type == HRX_ACCELERATOR_CPU
-            ? IREE_HAL_BUFFER_INTERFACE_HOST
-            : IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS;
-    if (memory.contract->domain != family->memory.domain ||
-        scope_id >= memory.contract->scope_count ||
-        !iree_any_bit_set(memory.contract->scopes[scope_id].interfaces,
-                          UINT32_C(1) << type)) {
-      HRX_RETURN_AND_END_ZONE(
-          z0, hrx_make_status(HRX_STATUS_UNAVAILABLE,
-                              "buffer has no address for its HRX device"));
-    }
-    const iree_hal_buffer_native_binding_slot_t slot = {
-        .index = memory.contract->scopes[scope_id].bindings[type],
-        .type = type,
-    };
-    const iree_hal_buffer_native_binding_t binding =
-        iree_hal_buffer_memory_native_binding(&memory, slot);
-    *device_ptr = type == IREE_HAL_BUFFER_INTERFACE_HOST
-                      ? binding.host_pointer
-                      : (void*)(uintptr_t)binding.device_address;
-    HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
+  if (!memory.contract || scope.domain != memory.contract->domain ||
+      scope.id == IREE_HAL_MEMORY_SCOPE_ANY ||
+      scope.id >= memory.contract->scope_count) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "address scope is outside the buffer memory domain");
   }
-
-  // Unscoped legacy allocator buffers expose their address through export.
-  // A scoped mapping grants access only to its interval and cannot provide a
-  // whole-buffer device address. Native export leaves any active map untouched.
-  iree_hal_external_storage_t external_buffer = {0};
-  iree_hal_buffer_range_t logical_range = {0};
-  iree_status_t status = iree_hal_buffer_export(
-      buffer->hal_buffer, iree_hal_make_buffer_range(0, IREE_HAL_WHOLE_BUFFER),
-      iree_hal_make_external_storage_class(
-          IREE_HAL_EXTERNAL_STORAGE_TYPE_DEVICE_ADDRESS),
-      &external_buffer, &logical_range);
-  if (iree_status_is_ok(status)) {
-    *device_ptr = (void*)(uintptr_t)(external_buffer.payload.device_address +
-                                     logical_range.byte_offset);
+  const uint16_t index = memory.contract->scopes[scope.id].bindings[type];
+  if (index == IREE_HAL_BUFFER_NATIVE_BINDING_INDEX_NONE) {
+    return hrx_make_status(HRX_STATUS_PERMISSION_DENIED,
+                           "address type is not prepared for this scope");
   }
-  iree_hal_external_storage_release(&external_buffer);
-  HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
+  const iree_hal_buffer_native_binding_slot_t slot = {
+      .index = index,
+      .type = (uint16_t)type,
+  };
+  const iree_hal_buffer_native_binding_t binding =
+      iree_hal_buffer_memory_native_binding(&memory, slot);
+  *out_address = type == HRX_BUFFER_INTERFACE_HOST
+                     ? (uint64_t)(uintptr_t)binding.host_pointer
+                     : binding.device_address;
+  return hrx_ok_status();
 }
 
 hrx_status_t hrx_buffer_get_size(hrx_buffer_t buffer, size_t* size) {
@@ -306,7 +312,7 @@ hrx_status_t hrx_host_memory_register(hrx_device_t device, void* host_ptr,
 
   hrx_buffer_t buffer = NULL;
   iree_status_t create_status = hrx_buffer_create_from_hal(
-      NULL, device, HRX_MEMORY_TYPE_HOST_LOCAL, size, host_ptr, &buffer);
+      NULL, device->group, HRX_MEMORY_TYPE_HOST_LOCAL, size, host_ptr, &buffer);
   if (!iree_status_is_ok(create_status)) {
     return hrx_status_from_iree(create_status);
   }

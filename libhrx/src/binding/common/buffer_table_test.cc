@@ -443,8 +443,8 @@ class BufferTableRemovalTest
     hrx_buffer_table_initialize(&table_);
     for (hrx_buffer_t& buffer : buffers_) {
       IREE_ASSERT_OK(hrx_buffer_create_from_hal(
-          /*hal_buffer=*/nullptr, /*device=*/nullptr,
-          HRX_MEMORY_TYPE_HOST_LOCAL, kAllocationSize,
+          /*hal_buffer=*/nullptr, /*group=*/nullptr, HRX_MEMORY_TYPE_HOST_LOCAL,
+          kAllocationSize,
           /*device_ptr=*/nullptr, &buffer));
     }
   }
