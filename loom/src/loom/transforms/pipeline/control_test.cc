@@ -10,6 +10,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/context.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/index/ops.h"
 #include "loom/ops/op_registry.h"
 #include "loom/ops/pipeline/ops.h"
 #include "loom/ops/type_registry.h"
@@ -19,6 +20,8 @@ namespace {
 
 class PipelineControlTest : public ::testing::Test {
  protected:
+  virtual bool HasAutonomousPreparation() const { return false; }
+
   void SetUp() override {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks_);
     iree_arena_initialize(&blocks_, &arena_);
@@ -33,6 +36,10 @@ class PipelineControlTest : public ::testing::Test {
                                     loom_type_buffer()};
     observer_ = Function("observe", observed, 2);
     const auto worker = Function("work", nullptr, 0);
+    const loom_type_t captured[] = {loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+                                    loom_type_scalar(LOOM_SCALAR_TYPE_INDEX)};
+    const auto autonomous = Function("autonomous", captured, 2);
+    capture_observer_ = Function("observe_captures", captured, 2);
     auto* leaf = Pipeline("leaf");
     loom_op_t* strand;
     const int64_t origin = 0, extent = 1;
@@ -48,6 +55,36 @@ class PipelineControlTest : public ::testing::Test {
                                         LOOM_LOCATION_UNKNOWN, &op));
     IREE_ASSERT_OK(loom_pipeline_end_build(&rewriter_.builder,
                                            LOOM_LOCATION_UNKNOWN, &op));
+    if (HasAutonomousPreparation()) {
+      // Declare autonomous input after the consuming instruction strand. Its
+      // captures must still prepare before that strand executes.
+      auto* builder = &rewriter_.builder;
+      loom_builder_enter_region(builder, leaf, loom_pipeline_def_body(leaf));
+      const auto value =
+          loom_region_entry_block(loom_pipeline_def_body(leaf))->arg_ids[0];
+      loom_op_t *constant, *sum;
+      IREE_ASSERT_OK(
+          loom_index_constant_build(builder, loom_attr_i64(7), captured[0],
+                                    LOOM_LOCATION_UNKNOWN, &constant));
+      IREE_ASSERT_OK(
+          loom_index_add_build(builder, value, loom_op_results(constant)[0],
+                               captured[0], LOOM_LOCATION_UNKNOWN, &sum));
+      const loom_value_id_t operands[] = {value, loom_op_results(sum)[0]};
+      IREE_ASSERT_OK(loom_pipeline_strand_build(
+          builder, 0, 0, loom_symbol_ref_null(), nullptr, 0, &origin, 1,
+          nullptr, 0, &extent, 1, nullptr, 0, &extent, 1, LOOM_LOCATION_UNKNOWN,
+          &strand));
+      loom_builder_enter_region(builder, strand,
+                                loom_pipeline_strand_body(strand));
+      IREE_ASSERT_OK(loom_func_call_build(builder, 0, 0, 0, 0, autonomous,
+                                          operands, 2, nullptr, 0, nullptr, 0,
+                                          LOOM_LOCATION_UNKNOWN, &op));
+      IREE_ASSERT_OK(
+          loom_pipeline_end_build(builder, LOOM_LOCATION_UNKNOWN, &op));
+      engines_[1] = IREE_HOST_SIZE_MAX;
+      engines_[2] = 0;
+      engines_[3] = IREE_HOST_SIZE_MAX;
+    }
     Finish(leaf);
     auto* middle = Pipeline("middle");
     Compose(middle, leaf, 1);
@@ -77,10 +114,14 @@ class PipelineControlTest : public ::testing::Test {
         module_, &realization_.invocations, nullptr, {}, &arena_,
         &realization_.workers, &valid));
     ASSERT_TRUE(valid);
-    ASSERT_EQ(realization_.invocations.worker_count, 2u);
+    const size_t worker_count = HasAutonomousPreparation() ? 4 : 2;
+    ASSERT_EQ(realization_.invocations.worker_count, worker_count);
     realization_.instances = instances_;
     loom_builder_enter_region(&rewriter_.builder, nullptr, module_->body);
-    for (size_t i = 0; i < 2; ++i) {
+    for (size_t i = 0; i < worker_count; ++i) {
+      if (engines_[i] == IREE_HOST_SIZE_MAX) {
+        continue;
+      }
       auto* source = &realization_.workers[i];
       loom_local_value_domain_restore(&source->value_domain);
       IREE_ASSERT_OK(loom_pipeline_worker_materialization_clone(
@@ -203,6 +244,20 @@ class PipelineControlTest : public ::testing::Test {
                                 LOOM_LOCATION_UNKNOWN, &call);
   }
 
+  static iree_status_t Prepare(void* user_data, loom_builder_t* builder,
+                               iree_host_size_t worker,
+                               loom_value_slice_t captures) {
+    auto* self = static_cast<PipelineControlTest*>(user_data);
+    EXPECT_TRUE(worker == 1 || worker == 3);
+    EXPECT_EQ(captures.count, 2u);
+    ++self->preparation_count_;
+    const loom_value_id_t operands[] = {captures.values[1], captures.values[0]};
+    loom_op_t* call;
+    return loom_func_call_build(builder, 0, 0, 0, 0, self->capture_observer_,
+                                operands, 2, nullptr, 0, nullptr, 0,
+                                LOOM_LOCATION_UNKNOWN, &call);
+  }
+
   // Common backing for source and retained plans.
   iree_arena_block_pool_t blocks_;
   // Analysis and cloning storage.
@@ -218,17 +273,21 @@ class PipelineControlTest : public ::testing::Test {
   // Real invocation inventory and analyzed workers.
   loom_pipeline_realization_t realization_ = {};
   // Independent cloned worker bodies.
-  loom_pipeline_worker_materialization_t instances_[2] = {};
+  loom_pipeline_worker_materialization_t instances_[4] = {};
   // Both serial roles run on one selected engine.
-  iree_host_size_t engines_[2] = {0, 0};
+  iree_host_size_t engines_[4] = {0, 0, 0, 0};
   // Retained engine participation and serial scopes.
   loom_pipeline_execution_t execution_ = {};
   // Ordinary operation used to make boundary operands observable in emitted IR.
   loom_symbol_ref_t observer_;
+  // Preparation observer makes the projected source capture order visible.
+  loom_symbol_ref_t capture_observer_;
   // Number of emitted before/after boundaries.
   size_t boundary_count_ = 0;
   // Number of construction-entry boundaries.
   size_t entry_count_ = 0;
+  // Each autonomous occurrence prepares once in its selected engine.
+  size_t preparation_count_ = 0;
 };
 
 TEST_F(PipelineControlTest, NestedBoundariesKeepTheirProjectedRuntimeState) {
@@ -268,6 +327,68 @@ TEST_F(PipelineControlTest, NestedBoundariesKeepTheirProjectedRuntimeState) {
       }
     }
     EXPECT_EQ(observations, owner == 0 ? 4u : 2u);
+  }
+  Verify();
+}
+
+class PipelinePreparationTest : public PipelineControlTest {
+ protected:
+  bool HasAutonomousPreparation() const override { return true; }
+};
+
+TEST_F(PipelinePreparationTest, CapturesPrepareBeforeConsumersAcrossReentry) {
+  const iree_host_size_t preparation[] = {IREE_HOST_SIZE_MAX, 0,
+                                          IREE_HOST_SIZE_MAX, 0};
+  const loom_pipeline_control_options_t options = {
+      .worker_engines = engines_,
+      .preparation_engines = preparation,
+      .emit = {.prepare_worker = Prepare, .user_data = this},
+  };
+  loom_pipeline_control_function_t* functions;
+  IREE_ASSERT_OK(loom_pipeline_control_materialize(
+      &rewriter_, &realization_, &execution_, &options, &functions));
+  EXPECT_EQ(preparation_count_, 2u);
+  ASSERT_EQ(functions[0].argument_count, 1u);
+  EXPECT_EQ(functions[0].arguments[0], 0u);
+  for (size_t leaf : {2u, 4u}) {
+    auto* body = loom_func_like_body(functions[leaf].function);
+    const auto* entry = loom_region_entry_block(body);
+    ASSERT_EQ(entry->arg_count, 1u);
+    const auto* preparation_call = entry->first_op;
+    ASSERT_TRUE(loom_func_call_isa(preparation_call));
+    const auto actuals = loom_func_call_operands(preparation_call);
+    ASSERT_EQ(actuals.count, 1u);
+    EXPECT_EQ(actuals.values[0], entry->arg_ids[0]);
+    const auto helper = loom_func_call_callee(preparation_call);
+    auto* helper_op = module_->symbols.entries[helper.symbol_id].defining_op;
+    auto* prepared = loom_func_def_body(helper_op);
+    const auto* prepared_entry = loom_region_entry_block(prepared);
+    size_t observed = 0;
+    for (size_t b = 0; b < prepared->block_count; ++b) {
+      for (auto* op = prepared->blocks[b]->first_op; op; op = op->next_op) {
+        if (!loom_func_call_isa(op)) {
+          continue;
+        }
+        EXPECT_EQ(loom_func_call_callee(op).symbol_id,
+                  capture_observer_.symbol_id);
+        const auto operands = loom_func_call_operands(op);
+        ASSERT_EQ(operands.count, 2u);
+        EXPECT_EQ(operands.values[1], prepared_entry->arg_ids[0]);
+        const auto* sum =
+            loom_value_def_op(loom_module_value(module_, operands.values[0]));
+        ASSERT_TRUE(loom_index_add_isa(sum));
+        EXPECT_EQ(loom_index_add_lhs(sum), prepared_entry->arg_ids[0]);
+        const auto* constant = loom_value_def_op(
+            loom_module_value(module_, loom_index_add_rhs(sum)));
+        ASSERT_TRUE(loom_index_constant_isa(constant));
+        EXPECT_EQ(loom_attr_as_i64(loom_index_constant_value(constant)), 7);
+        ++observed;
+      }
+    }
+    EXPECT_EQ(observed, 1u);
+    ASSERT_TRUE(loom_func_call_isa(body->blocks[1]->first_op));
+    EXPECT_NE(loom_func_call_callee(body->blocks[1]->first_op).symbol_id,
+              capture_observer_.symbol_id);
   }
   Verify();
 }

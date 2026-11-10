@@ -19,6 +19,7 @@ loom_check_test_suite(
         "schedule.loom-test",
         "transport.loom-test",
         "transport_call_spaces.loom-test",
+        "transport_captures.loom-test",
         "transport_control.loom-test",
         "transport_input.loom-test",
         "transport_phases.loom-test",

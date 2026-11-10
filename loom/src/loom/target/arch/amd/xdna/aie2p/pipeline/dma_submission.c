@@ -110,7 +110,7 @@ static iree_status_t loom_aie2p_native_dma_submit_helper(
     loom_value_id_t external_low = LOOM_VALUE_ID_INVALID;
     loom_value_id_t external_high = LOOM_VALUE_ID_INVALID;
     if (external_dynamic) {
-      loom_value_id_t base = relocation_address, low, high;
+      loom_value_id_t base = relocation_address;
       if (!shared) {
         const loom_named_attr_t address_attr = {
             .name_id = code->integer_name,
@@ -121,24 +121,8 @@ static iree_status_t loom_aie2p_native_dma_submit_helper(
             loom_make_named_attr_slice(&address_attr, 1), &code->address_type,
             &base));
       }
-      for (unsigned i = 0; i < 2; ++i) {
-        const loom_named_attr_t displacement = {
-            .name_id = code->displacement_name, .value = loom_attr_i64(i * 4)};
-        IREE_RETURN_IF_ERROR(loom_aie2p_worker_op(
-            code, &builder,
-            AIE2P_CORE_DESCRIPTOR_REF_LOAD_SCALAR_I32_INDEXED_IMMEDIATE, &base,
-            1, loom_make_named_attr_slice(&displacement, 1), &code->scalar_type,
-            i ? &high : &low));
-      }
-      loom_value_id_t carry;
-      IREE_RETURN_IF_ERROR(loom_aie2p_worker_binary(
-          code, &builder, AIE2P_CORE_DESCRIPTOR_REF_ADD_I32, low,
-          external_offset, &external_low));
-      IREE_RETURN_IF_ERROR(loom_aie2p_worker_binary(
-          code, &builder, AIE2P_CORE_DESCRIPTOR_REF_CMP_ULT_I32, external_low,
-          low, &carry));
-      IREE_RETURN_IF_ERROR(loom_aie2p_worker_binary(
-          code, &builder, AIE2P_CORE_DESCRIPTOR_REF_ADD_I32, high, carry,
+      IREE_RETURN_IF_ERROR(loom_aie2p_worker_external_address(
+          code, &builder, base, external_offset, &external_low,
           &external_high));
     }
     if (local_dynamic) {

@@ -43,6 +43,10 @@ typedef struct loom_aie2p_native_input_phase_t {
   uint16_t descriptor;
   // Shim executions for one complete source address period.
   uint32_t repetitions;
+  // Shim-relative address-pair register for captured-origin preparation.
+  uint32_t address_register;
+  // Immutable caller base for captured origins, or NULL for static addresses.
+  const loom_aie2p_native_relocation_t* relocation;
   // Physical source geometry before framing and relocation.
   uint32_t words[8];
 } loom_aie2p_native_input_phase_t;
@@ -81,6 +85,8 @@ typedef struct loom_aie2p_native_input_t {
   const loom_pipeline_continuation_t* continuation;
   // Native receiver and source descriptor selection per phase.
   loom_aie2p_native_input_phase_t* phases;
+  // Number of phase addresses patched from captured invocation operands.
+  iree_host_size_t address_count;
   // All phase receivers share one ordered physical queue and payload route.
   bool shared_receiver;
   // Physical queues and routes, independent of this occurrence's descriptors.
@@ -89,6 +95,8 @@ typedef struct loom_aie2p_native_input_t {
   iree_host_size_t state_index;
   // Generated source-admission helper in the observing worker's context.
   loom_symbol_ref_t begin;
+  // Entry preparation patches captured origins before source admission.
+  loom_symbol_ref_t prepare;
   // Child-entry receiver publication; root receivers start in configuration.
   loom_symbol_ref_t start;
   // Child-exit retirement of source and receiver queues.
@@ -115,6 +123,10 @@ iree_status_t loom_aie2p_native_route_input(
 // Emits the ordinary helper and read-site actions for one selected input.
 iree_status_t loom_aie2p_native_prepare_input(
     loom_aie2p_native_context_t* context, loom_aie2p_native_input_t* input);
+// Projects retained scalar captures into this controller's phase entry.
+iree_status_t loom_aie2p_native_emit_input_origins(
+    loom_builder_t* builder, const loom_aie2p_native_input_t* input,
+    loom_value_slice_t captures);
 // Starts child receivers and either admits the complete source or initializes
 // its one demand-position value. No state is required without a continuation.
 iree_status_t loom_aie2p_native_initialize_input(

@@ -31,6 +31,14 @@ iree_status_t loom_view_materialize_offset_expression(
     loom_value_id_t base_value_id, loom_value_id_t anchor_value_id,
     loom_value_id_t* out_value);
 
+// Emits the same retained recipe at the current insertion point. Callers that
+// project an invocation already own capture dominance and need no source
+// anchor.
+iree_status_t loom_view_emit_offset_expression(
+    loom_builder_t* builder, const loom_symbolic_expr_t* expression,
+    loom_value_id_t base_value_id, loom_location_id_t location,
+    loom_value_id_t* out_value);
+
 #ifdef __cplusplus
 }
 #endif

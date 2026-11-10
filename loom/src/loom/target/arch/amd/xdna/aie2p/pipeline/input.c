@@ -21,7 +21,7 @@ iree_status_t loom_aie2p_native_select_input(
     return iree_ok_status();
   }
   if (plan->acquisition || !source->transport.sources_stable ||
-      plan->phase_count == 1) {
+      (plan->phase_count == 1 && !plan->phases[0].source_capture_count)) {
     // One stable phase retains autonomous repetition. Phased input admission
     // belongs to an existing instruction worker.
     return iree_ok_status();
@@ -54,7 +54,13 @@ iree_status_t loom_aie2p_native_select_input(
          (phase->transfers > local->source->capacity ||
           phase->transfers != phase->period ||
           (!invocation_owned && phase->transfers != 1))) ||
-        phase->source_byte_offset < 0 || phase->source_byte_stride < 0 ||
+        (phase->source_capture_count
+             ? phase->transfer->request.source.begin_byte_offset.facts
+                           .range_lo < 0 ||
+                   phase->transfer->request.source.end_byte_offset.facts
+                           .range_hi > UINT32_MAX
+             : phase->source_byte_offset < 0) ||
+        phase->source_byte_stride < 0 ||
         phase->source_byte_stride > UINT32_MAX) {
       return iree_ok_status();
     }
@@ -67,6 +73,7 @@ iree_status_t loom_aie2p_native_select_input(
       .invocation = realization->invocations.workers[worker].invocation,
       .controller = UINT32_MAX,
       .begin = loom_symbol_ref_null(),
+      .prepare = loom_symbol_ref_null(),
       .start = loom_symbol_ref_null(),
       .retire = loom_symbol_ref_null(),
       .source = plan,
@@ -80,6 +87,7 @@ iree_status_t loom_aie2p_native_select_input(
         .destination = loom_aie2p_native_channel(
             context, realization, plan->phases[i].reservation->channel),
     };
+    input->address_count += plan->phases[i].source_capture_count != 0;
   }
   context->workers[worker].input = input;
   *out_eligible = true;
@@ -346,8 +354,11 @@ iree_status_t loom_aie2p_native_route_input(
     phase->descriptor = descriptor_base + *used;
     ++*used;
     const uint64_t span =
-        (uint64_t)plan->source_byte_stride * (plan->period - 1) +
-        plan->transfer->request.source.static_byte_length;
+        plan->source_capture_count
+            ? (uint64_t)
+                  plan->transfer->request.source.end_byte_offset.facts.range_hi
+            : (uint64_t)plan->source_byte_stride * (plan->period - 1) +
+                  plan->transfer->request.source.static_byte_length;
     const loom_value_t* root = loom_module_value(
         context->code.module, plan->transfer->request.source.root_value_id);
     const loom_block_t* entry =
@@ -358,13 +369,27 @@ iree_status_t loom_aie2p_native_route_input(
           IREE_SV("a caller-buffer root for stable phased input"));
     }
     const uint32_t binding = loom_value_def_index(root);
-    const uint64_t offset = plan->source_byte_offset;
+    const uint64_t offset =
+        plan->source_capture_count ? 0 : plan->source_byte_offset;
     context->bindings[binding].byte_length =
         iree_max(context->bindings[binding].byte_length, offset + span);
     context->bindings[binding].byte_alignment =
         iree_max(context->bindings[binding].byte_alignment,
                  plan->transfer->request.source.root_minimum_alignment);
     context->bindings[binding].access |= LOOM_AIE2P_ARRAY_BINDING_ACCESS_READ;
+    if (plan->source_capture_count) {
+      phase->address_register =
+          (uint32_t)(loom_xdna_register_field_address(
+                         context->family,
+                         LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD1_BASE_ADDRESS_LOW,
+                         shim->coordinate, &phase->descriptor) -
+                     origin);
+      loom_aie2p_native_worker_t* owner =
+          &context->workers[context->execution.workers
+                                [context->core_engines[input->controller]]];
+      IREE_RETURN_IF_ERROR(loom_aie2p_native_reserve_binding(
+          context, owner, binding, &phase->relocation));
+    }
     IREE_RETURN_IF_ERROR(loom_aie2p_native_input_descriptor(
         context, shim, phase->descriptor, binding, offset, span, phase->words));
     if (!shared_path && (!input->shared_receiver || !i) &&

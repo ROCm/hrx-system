@@ -470,6 +470,7 @@ static bool loom_aie2p_native_can_repeat(
     const loom_pipeline_worker_t* source, loom_aie2p_native_worker_t* worker) {
   const loom_pipeline_transport_t* transport = &source->transport;
   if (!transport->input || transport->input->phase_count != 1 ||
+      transport->input->phases[0].source_capture_count ||
       transport->input->acquisition || !transport->sources_stable ||
       transport->repetitions < 2) {
     return false;

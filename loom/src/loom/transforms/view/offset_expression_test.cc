@@ -114,7 +114,7 @@ TEST_F(SymbolicExprTest, ReusesCompleteCompoundRelation) {
   EXPECT_EQ(module_->values.count, value_count);
 }
 
-TEST_F(SymbolicExprTest, TranslatesAffineIndicesInOffsetDomain) {
+TEST_F(SymbolicExprTest, EmitsAffineIndicesAtCurrentInsertionPoint) {
   const loom_type_t offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
   loom_value_id_t base = LOOM_VALUE_ID_INVALID;
   IREE_ASSERT_OK(loom_builder_define_value(&builder_, offset_type, &base));
@@ -142,13 +142,14 @@ TEST_F(SymbolicExprTest, TranslatesAffineIndicesInOffsetDomain) {
       .flags = LOOM_SYMBOLIC_EXPR_FLAG_LINEAR,
   };
   loom_value_id_t materialized = LOOM_VALUE_ID_INVALID;
-  IREE_ASSERT_OK(loom_view_materialize_offset_expression(
-      &builder_, &expression, base, loom_index_constant_result(anchor_op),
-      &materialized));
+  loom_builder_set_before(&builder_, anchor_op);
+  IREE_ASSERT_OK(loom_view_emit_offset_expression(
+      &builder_, &expression, base, LOOM_LOCATION_UNKNOWN, &materialized));
 
   const loom_op_t* subtract_negative =
       loom_value_def_op(loom_module_value(module_, materialized));
   ASSERT_TRUE(loom_index_sub_isa(subtract_negative));
+  EXPECT_EQ(subtract_negative->next_op, anchor_op);
   const loom_op_t* negative_scale = loom_value_def_op(
       loom_module_value(module_, loom_index_sub_rhs(subtract_negative)));
   ASSERT_TRUE(loom_index_scale_isa(negative_scale));

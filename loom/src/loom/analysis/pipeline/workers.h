@@ -128,6 +128,14 @@ typedef struct loom_pipeline_transport_batch_t {
   uint64_t replays;
 } loom_pipeline_transport_batch_t;
 
+// An invocation-invariant contribution to a repeated input's byte address.
+typedef struct loom_pipeline_transport_input_capture_t {
+  // Position in the source worker's original formal argument tuple.
+  uint16_t argument;
+  // Byte displacement multiplied by that captured scalar value.
+  int64_t coefficient;
+} loom_pipeline_transport_input_capture_t;
+
 // One independently completed transfer pattern within a source lifetime.
 // Structural order and loop scopes retain repeated phase order without
 // expanding dynamic visits into a transfer list.
@@ -144,6 +152,10 @@ typedef struct loom_pipeline_transport_input_phase_t {
   uint64_t period;
   // First byte relative to the acquired payload or enclosing storage root.
   int64_t source_byte_offset;
+  // Invariant captured terms added to source_byte_offset at each invocation.
+  const loom_pipeline_transport_input_capture_t* source_captures;
+  // Number of captured terms; zero preserves a completely static origin.
+  iree_host_size_t source_capture_count;
   // Byte displacement per transfer within each source address period.
   int64_t source_byte_stride;
   // Constant byte displacement within every reserved destination record.

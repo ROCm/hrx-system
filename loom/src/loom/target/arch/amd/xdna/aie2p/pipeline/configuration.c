@@ -423,23 +423,14 @@ static iree_status_t loom_aie2p_native_config_bind_address(
     const loom_aie2p_native_worker_t* worker,
     const loom_aie2p_native_transfer_t* transfer) {
   const loom_aie2p_native_context_t* context = config->context;
-  const uint64_t tile_address = (uint64_t)worker->tile->coordinate.column
-                                    << context->family->column_shift |
-                                (uint64_t)worker->tile->coordinate.row
-                                    << context->family->row_shift;
-  const loom_symbolic_expr_t* offset =
-      &transfer->external_view->begin_byte_offset;
-  const bool external_dynamic = transfer->shim_descriptor->address_dynamic;
-  if (transfer->relocation &&
-      transfer->relocation->first_transfer != transfer) {
+  if (transfer->relocation) {
     return iree_ok_status();
   }
-  const bool relocated_storage =
-      external_dynamic && worker->execution == LOOM_AIE2P_NATIVE_EXECUTION_CORE;
+  const loom_symbolic_expr_t* offset =
+      &transfer->external_view->begin_byte_offset;
   const uint64_t begin = worker->repetition.count
                              ? worker->repetition.external_byte_offset
-                         : relocated_storage ? 0
-                                             : offset->constant;
+                             : offset->constant;
   loom_value_id_t range[] = {config->bindings[transfer->binding],
                              LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID};
   IREE_RETURN_IF_ERROR(
@@ -468,15 +459,10 @@ static iree_status_t loom_aie2p_native_config_bind_address(
        ++j) {
     const uint16_t descriptor =
         transfer->shim_descriptor->sequence.descriptor + j;
-    const uint64_t address =
-        relocated_storage
-            ? tile_address + worker->tile->facts->memory.local_base +
-                  transfer->relocation->storage_offset
-            : loom_xdna_register_field_address(
-                  context->family,
-                  LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD1_BASE_ADDRESS_LOW,
-                  transfer->shim_descriptor->path->shim->coordinate,
-                  &descriptor);
+    const uint64_t address = loom_xdna_register_field_address(
+        context->family,
+        LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD1_BASE_ADDRESS_LOW,
+        transfer->shim_descriptor->path->shim->coordinate, &descriptor);
     IREE_RETURN_IF_ERROR(
         loom_aie2p_native_config_constant(config, address, &operands[0]));
     IREE_RETURN_IF_ERROR(loom_low_build_resolved_descriptor_op(
@@ -592,6 +578,47 @@ static iree_status_t loom_aie2p_native_config_bindings(
   }
   for (iree_host_size_t i = 0; i < realization->invocations.worker_count; ++i) {
     const loom_aie2p_native_worker_t* worker = &context->workers[i];
+    if (worker->relocations) {
+      for (iree_host_size_t binding = 0; binding < context->binding_count;
+           ++binding) {
+        const loom_aie2p_native_relocation_t* relocation =
+            &worker->relocations[binding];
+        if (!relocation->reserved) {
+          continue;
+        }
+        loom_value_id_t range[] = {config->bindings[binding],
+                                   LOOM_VALUE_ID_INVALID,
+                                   LOOM_VALUE_ID_INVALID};
+        IREE_RETURN_IF_ERROR(
+            loom_aie2p_native_config_constant(config, 0, &range[1]));
+        IREE_RETURN_IF_ERROR(loom_aie2p_native_config_constant(
+            config, context->bindings[binding].byte_length, &range[2]));
+        loom_op_t* op;
+        IREE_RETURN_IF_ERROR(loom_low_build_resolved_descriptor_op(
+            &config->builder, config->descriptors,
+            &config->descriptors->descriptors
+                 [AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_RANGE],
+            0, range, 3, loom_named_attr_slice_empty(), &config->span_type, 1,
+            NULL, 0, LOOM_LOCATION_UNKNOWN, &op));
+        loom_value_id_t operands[] = {LOOM_VALUE_ID_INVALID,
+                                      loom_op_results(op)[0]};
+        const uint64_t tile_address = (uint64_t)worker->tile->coordinate.column
+                                          << context->family->column_shift |
+                                      (uint64_t)worker->tile->coordinate.row
+                                          << context->family->row_shift;
+        IREE_RETURN_IF_ERROR(loom_aie2p_native_config_constant(
+            config,
+            tile_address + worker->tile->facts->memory.local_base +
+                relocation->storage_offset,
+            &operands[0]));
+        IREE_RETURN_IF_ERROR(loom_low_build_resolved_descriptor_op(
+            &config->builder, config->descriptors,
+            &config->descriptors->descriptors
+                 [AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_WRITE_ADDRESS],
+            0, operands, 2, loom_named_attr_slice_empty(), NULL, 0, NULL, 0,
+            LOOM_LOCATION_UNKNOWN, &op));
+      }
+    }
     if (worker->input) {
       for (iree_host_size_t j = 0; j < worker->input->source->phase_count;
            ++j) {
