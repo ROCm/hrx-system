@@ -6,6 +6,8 @@ func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
 
 func.decl import("json") @unescape(%source: buffer, %offset: i64, %length: i64, %target: buffer, %target_offset: i64) -> (i64)
 
+func.decl import("runner") @execute_4(%stage: i32, %b0: hal.buffer, %b1: hal.buffer, %b2: hal.buffer, %b3: hal.buffer) -> (i64)
+
 func.decl import("runner") @execute_6(%stage: i32, %b0: hal.buffer, %b1: hal.buffer, %b2: hal.buffer, %b3: hal.buffer, %b4: hal.buffer, %b5: hal.buffer) -> (i64)
 
 func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
@@ -721,7 +723,23 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
   %c0 = scalar.constant 0 : i32
   %has_media = scalar.cmpi ne, %media_count, %c0 : i32
   %stage = scf.select %has_media, %media_stage, %text_stage : i32
-  %completion = func.call @execute_6(%stage, %residual, %metadata, %origins, %state, %tokens, %outputs) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+  %advanced = func.call @execute_6(%stage, %residual, %metadata, %origins, %state, %tokens, %outputs) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+  %draft_origin = index.constant 144 : offset
+  %draft_state = buffer.view %control_state[%draft_origin] : buffer -> view<4xi32>
+  %draft_flag = view.load %draft_state[0] : view<4xi32> -> i32
+  %drafts = scalar.cmpi ne, %draft_flag, %c0 : i32
+  %completion = scf.if %drafts -> (i64) {
+    %speculative = scalar.ori %proposes, %verifies : i32
+    %known = scalar.cmpi eq, %speculative, %c0 : i32
+    %known32 = scalar.extui %known : i1 to i32
+    %error = buffer.constant utf8("text fixture drafting only warms its draft cache") : buffer
+    func.call @require(%known32, %error) : (i32, buffer)
+    %warm = view.load %draft_state[1] : view<4xi32> -> i32
+    %warmed = func.call @execute_4(%warm, %residual, %metadata, %tokens, %draft_cache) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    scf.yield %warmed : i64
+  } else {
+    scf.yield %advanced : i64
+  }
   %c0_i64 = scalar.constant 0 : i64
   %c4_i64 = scalar.constant 4 : i64
   %count64 = scalar.extui %span_count : i32 to i64
@@ -730,7 +748,7 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
   func.return %completion : i64
 }
 
-func.decl @fixture_storage(%maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64) -> (buffer, buffer, buffer, buffer, buffer)
+func.decl @fixture_storage(%maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64, %draft: i64) -> (buffer, buffer, buffer, buffer, buffer)
 
 func.def public @resize_state(%state: buffer, %rows: i64) -> (buffer, buffer, buffer, buffer, buffer, buffer) {
   %layout_origin = index.constant 88 : offset
@@ -740,7 +758,11 @@ func.def public @resize_state(%state: buffer, %rows: i64) -> (buffer, buffer, bu
   %context = view.load %layout[2] : view<5xi64> -> i64
   %pool = view.load %layout[3] : view<5xi64> -> i64
   %pins = view.load %layout[4] : view<5xi64> -> i64
-  %allocations, %views, %origins, %draft, %geometry = func.call @fixture_storage(%maximum, %span_capacity, %context, %pool, %rows, %pins) : (i64, i64, i64, i64, i64, i64) -> (buffer, buffer, buffer, buffer, buffer)
+  %draft_origin = index.constant 144 : offset
+  %draft_state = buffer.view %state[%draft_origin] : buffer -> view<4xi32>
+  %draft_flag = view.load %draft_state[0] : view<4xi32> -> i32
+  %draft64 = scalar.extui %draft_flag : i32 to i64
+  %allocations, %views, %origins, %draft, %geometry = func.call @fixture_storage(%maximum, %span_capacity, %context, %pool, %rows, %pins, %draft64) : (i64, i64, i64, i64, i64, i64, i64) -> (buffer, buffer, buffer, buffer, buffer)
   func.return %state, %allocations, %views, %origins, %draft, %geometry : buffer, buffer, buffer, buffer, buffer, buffer
 }
 
@@ -752,7 +774,16 @@ func.def public @text_prefill_group_plan_v1(%state: buffer) -> (buffer) {
   %state_view = buffer.view %state[%state_origin] : buffer -> view<4xi32>
   %shapes32 = view.load %state_view[0] : view<4xi32> -> i32
   %prefix = view.load %state_view[1] : view<4xi32> -> i32
-  %residual = view.load %state_view[2] : view<4xi32> -> i32
+  %ordinary_residual = view.load %state_view[2] : view<4xi32> -> i32
+  // Draft models declare resource ABI 2 and warm their draft cache in the
+  // bank-local residual leaf.
+  %draft_origin = index.constant 144 : offset
+  %draft_state = buffer.view %state[%draft_origin] : buffer -> view<4xi32>
+  %draft_flag = view.load %draft_state[0] : view<4xi32> -> i32
+  %group_warm = view.load %draft_state[2] : view<4xi32> -> i32
+  %zero = scalar.constant 0 : i32
+  %drafts = scalar.cmpi ne, %draft_flag, %zero : i32
+  %residual = scf.select %drafts, %group_warm, %ordinary_residual : i32
   %shape_bound = scalar.assume %shapes32 [range(%shapes32, 1, 1024)] : i32
   %shapes = index.cast %shape_bound : i32 to index
   %c0 = index.constant 0 : index
@@ -765,10 +796,11 @@ func.def public @text_prefill_group_plan_v1(%state: buffer) -> (buffer) {
   %header = buffer.view %result[%origin] : buffer -> view<4xi32>
   %one = scalar.constant 1 : i32
   %none = scalar.constant -1 : i32
+  %abi = scalar.addi %draft_flag, %one : i32
   view.store %one, %header[0] : i32, view<4xi32>
   view.store %shapes32, %header[1] : i32, view<4xi32>
   view.store %one, %header[2] : i32, view<4xi32>
-  view.store %one, %header[3] : i32, view<4xi32>
+  view.store %abi, %header[3] : i32, view<4xi32>
   %table = buffer.view %result[%header_bytes] : buffer -> view<[%shapes]x3xi32>
   scf.for %i = [%c0 to %shapes step %c1] {
     view.store %prefix, %table[%i, 0] : i32, view<[%shapes]x3xi32>

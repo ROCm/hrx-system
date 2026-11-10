@@ -10,7 +10,10 @@ func.def @allocation(%records: buffer, %slot: index, %bytes: i64, %clear: i64) {
 }
 
 // KV is a stable prefix; private views and recurrent slots grow by appending.
-func.def public @fixture_storage(%maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64) -> (buffer, buffer, buffer, buffer, buffer) {
+// Drafting adds epoch-sized feedback, row-dense draft cache planes and a draft
+// page table shaped like the target table. Like real drafters without retained
+// hidden rows, it declares no carry.
+func.def public @fixture_storage(%maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64, %draft: i64) -> (buffer, buffer, buffer, buffer, buffer) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -69,6 +72,20 @@ func.def public @fixture_storage(%maximum: i64, %span_capacity: i64, %context: i
   func.call @allocation(%allocations, %c3, %table_bytes, %c0_i64) : (buffer, index, i64, i64)
   func.call @allocation(%allocations, %c4, %token_bytes, %c0_i64) : (buffer, index, i64, i64)
   func.call @allocation(%allocations, %c5, %residual_bytes, %c0_i64) : (buffer, index, i64, i64)
+  %drafting = scalar.cmpi ne, %draft, %c0_i64 : i64
+  scf.if %drafting {
+    %c7 = index.constant 7 : index
+    %c8 = index.constant 8 : index
+    %c9 = index.constant 9 : index
+    %c10 = index.constant 10 : index
+    %results_bytes = scalar.constant 8 : i64
+    %row_positions = scalar.muli %rows, %context : i64
+    %cache_bytes = scalar.muli %row_positions, %c4_i64 : i64
+    func.call @allocation(%allocations, %c7, %residual_bytes, %c0_i64) : (buffer, index, i64, i64)
+    func.call @allocation(%allocations, %c8, %results_bytes, %c0_i64) : (buffer, index, i64, i64)
+    func.call @allocation(%allocations, %c9, %cache_bytes, %cache_bytes) : (buffer, index, i64, i64)
+    func.call @allocation(%allocations, %c10, %table_bytes, %c0_i64) : (buffer, index, i64, i64)
+  }
 
   %view_stride = index.constant 64 : offset
   %view_bytes = index.scale %row_count, %view_stride : index, offset -> offset

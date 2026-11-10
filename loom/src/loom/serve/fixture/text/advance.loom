@@ -297,3 +297,80 @@ command.def public @group_residual() launch(%residual: buffer, %metadata: buffer
   kernel.launch @select(%temporary, %metadata, %origins, %arena, %outputs) : (buffer, buffer, buffer, buffer, buffer)
   command.return
 }
+
+// Draft-cache witness: each known input writes one word per position from the
+// bank's own hidden word and token packet. Rows own dense context-long planes.
+kernel.def target(@target) @warm_draft() {
+  %spans = config.get @fixture.spans : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%spans, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%residual: buffer, %metadata: buffer, %tokens: buffer, %cache: buffer) {
+  %spans = config.get @fixture.spans : index
+  %span = kernel.workgroup.id<x> : index
+  %origin = index.constant 0 : offset
+  %c16 = index.constant 16 : offset
+  %word = index.constant 4 : offset
+  %header = buffer.view %metadata[%origin] : buffer -> view<4xi32>
+  %count32 = view.load %header[0] : view<4xi32> -> i32
+  %count = index.cast %count32 : i32 to index
+  %live = index.cmp ult, %span, %count : index
+  scf.if %live {
+    %packets = buffer.view %metadata[%c16] : buffer -> view<[%spans]x9xi32>
+    %length32 = view.load %packets[%span, 0] : view<[%spans]x9xi32> -> i32
+    %position32 = view.load %packets[%span, 1] : view<[%spans]x9xi32> -> i32
+    %row32 = view.load %packets[%span, 3] : view<[%spans]x9xi32> -> i32
+    %input32 = view.load %packets[%span, 4] : view<[%spans]x9xi32> -> i32
+    %length_bound = scalar.assume %length32 [range(%length32, 1, 2147483647)] : i32
+    %position_bound = scalar.assume %position32 [range(%position32, 0, 2147483646)] : i32
+    %row_bound = scalar.assume %row32 [range(%row32, 0, 2147483646)] : i32
+    %input64 = scalar.extui %input32 : i32 to i64
+    %input_bound = scalar.assume %input64 [range(%input64, 0, 4294967293)] : i64
+    %length = index.cast %length_bound : i32 to index
+    %position = index.cast %position_bound : i32 to index
+    %row = index.cast %row_bound : i32 to index
+    %input = index.cast %input_bound : i64 to index
+    %context = config.get @fixture.context : index
+    %plane = index.mul %row, %context : index
+    %hidden = buffer.view %residual[%origin] : buffer -> view<[%spans]xi32>
+    %h = view.load %hidden[%span] : view<[%spans]xi32> -> i32
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c7_i32 = scalar.constant 7 : i32
+    %c131_i32 = scalar.constant 131 : i32
+    %anchor = scalar.muli %h, %c131_i32 : i32
+    scf.for %i = [%c0 to %length step %c1] {
+      %input_index = index.add %input, %i : index
+      %input_offset = index.scale %input_index, %word : index, offset -> offset
+      %ids = buffer.view %tokens[%input_offset] : buffer -> view<1xi32>
+      %token = view.load %ids[0] : view<1xi32> -> i32
+      %absolute = index.add %position, %i : index
+      %absolute32 = index.cast %absolute : index to i32
+      %scaled = scalar.muli %token, %c7_i32 : i32
+      %with_token = scalar.addi %anchor, %scaled : i32
+      %value = scalar.addi %with_token, %absolute32 : i32
+      %slot = index.add %plane, %absolute : index
+      %slot_offset = index.scale %slot, %word : index, offset -> offset
+      %entry = buffer.view %cache[%slot_offset] : buffer -> view<1xi32>
+      view.store %value, %entry[0] : i32, view<1xi32>
+    }
+  }
+  kernel.return
+}
+
+command.def public @draft_warm() launch(%residual: buffer, %metadata: buffer, %tokens: buffer, %cache: buffer) {
+  kernel.launch @warm_draft(%residual, %metadata, %tokens, %cache) : (buffer, buffer, buffer, buffer)
+  command.return
+}
+
+// Resource ABI 2 residual leaf: the bank's selection followed by its draft
+// warm, in the group's twelve-root order plus the reflected workspace.
+command.def public @group_warm() launch(%residual: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %outputs: buffer, %carry: buffer, %committed: buffer, %results: buffer, %cache: buffer, %row_table: buffer, %next_results: buffer) {
+  %spans = config.get @fixture.spans : index
+  %word = index.constant 4 : offset
+  %bytes = index.scale %spans, %word : index, offset -> offset
+  %temporary = buffer.alloca<global> align(16) %bytes : buffer
+  kernel.launch @copy_group_hidden(%residual, %temporary, %metadata) : (buffer, buffer, buffer)
+  kernel.launch @select(%temporary, %metadata, %origins, %arena, %outputs) : (buffer, buffer, buffer, buffer, buffer)
+  kernel.launch @warm_draft(%residual, %metadata, %tokens, %cache) : (buffer, buffer, buffer, buffer)
+  command.return
+}

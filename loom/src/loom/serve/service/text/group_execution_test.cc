@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <future>
+#include <vector>
 
 #include "loom/serve/runtime/execution/execution_testing.h"
 #include "loom/serve/service/text/model_instance.h"
@@ -866,6 +867,264 @@ TEST_F(GroupReconfigurationTest, ServiceSelectsGroupVariantAtDrainedBoundary) {
   IREE_ASSERT_OK(http_.Join());
   EXPECT_NE(model_->prefill_group.stages, nullptr);
   EXPECT_GE(WorkspaceLength(model_, 1), 65536u);
+}
+
+// Draft-enabled fixture: resource ABI 2 residual leaves warm the draft cache
+// from bank-private roots; single mode warms it with an ordinary runner stage.
+class DraftGroupTextServiceTest : public GroupTextServiceTest {
+ protected:
+  bool NeedsStandaloneModel() const override { return false; }
+
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(GroupTextServiceTest::SetUp());
+    prepare_ = iree::testing::MakeTempFilePath("draft_prepare", ".loom");
+    ASSERT_NO_FATAL_FAILURE(
+        EditNativeProvider(directory_ + "/prepare.loom", prepare_,
+                           "config.def @fixture.draft = false",
+                           "config.def @fixture.draft = true"));
+    auto options = ModelOptions();
+    IREE_ASSERT_OK(loom_serve_text_model_allocate(
+        device_, storage_owner_, &options, host_allocator_, &model_));
+  }
+
+  loom_serve_text_options_t ModelOptions() const override {
+    auto options = GroupTextServiceTest::ModelOptions();
+    options.sources.prepare = iree_make_cstring_view(prepare_.c_str());
+    options.draft_depth = 3;
+    return options;
+  }
+
+  // B's tokens differ from A's at the same packet offsets.
+  static constexpr int32_t kPrompt[] = {0, 1, 2, 2, 0};
+
+  // Consumes kPrompt on |row| as A (3) + selecting B (2), either as one group
+  // or as two ordinary epochs, then decodes |decodes| tokens.
+  static void Prefill(loom_serve_text_model_t* model, iree_host_size_t row,
+                      bool grouped, unsigned decodes) {
+    auto* text_row = loom_serve_text_model_row(model, row);
+    if (grouped) {
+      loom_serve_text_span_t a = {
+          .row_index = row, .token_count = 3, .token_ids = kPrompt};
+      loom_serve_text_span_t b = {.row_index = row,
+                                  .token_count = 2,
+                                  .token_ids = kPrompt + 3,
+                                  .flags = LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT,
+                                  .input_offset = 3};
+      loom_serve_execution_frontier_t frontier;
+      IREE_ASSERT_OK(loom_serve_text_model_submit_epoch_pair(model, 0, &a, 0,
+                                                             &b, &frontier));
+      IREE_ASSERT_OK(
+          loom_serve_execution_wait(model->execution, frontier.values[0]));
+      IREE_ASSERT_OK(loom_serve_text_model_complete_epoch(model, nullptr));
+    } else {
+      IREE_ASSERT_OK(loom_serve_text_row_prefill(text_row, 3, kPrompt));
+      IREE_ASSERT_OK(loom_serve_text_row_prefill(text_row, 2, kPrompt + 3));
+    }
+    for (unsigned i = 0; i < decodes; ++i) {
+      IREE_ASSERT_OK(loom_serve_text_row_decode(text_row));
+    }
+  }
+
+  static std::vector<int32_t> DraftCache(loom_serve_text_model_t* model) {
+    iree_hal_buffer_t* cache = model->state.draft.cache;
+    std::vector<int32_t> words(iree_hal_buffer_byte_length(cache) / 4);
+    iree_hal_transfer_operation_t download = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+        .download = {.source_buffer = cache,
+                     .target = words.data(),
+                     .length = words.size() * 4}};
+    uint64_t value = 0;
+    IREE_EXPECT_OK(
+        loom_serve_execution_transfer(model->execution, 1, &download, &value));
+    IREE_EXPECT_OK(loom_serve_execution_wait(model->execution, value));
+    return words;
+  }
+
+  // Independent warm oracle for one row plane: every position stores its
+  // span's final hidden word * |scale| + 7 * token + position.
+  static std::vector<int32_t> ExpectedPlane(int32_t scale, unsigned decodes) {
+    std::vector<std::vector<int32_t>> spans = {{kPrompt, kPrompt + 3},
+                                               {kPrompt + 3, kPrompt + 5}};
+    Oracle oracle;
+    for (int32_t token : kPrompt) {
+      oracle.Consume(token);
+    }
+    for (unsigned i = 0; i < decodes; ++i) {
+      spans.push_back({oracle.Predict()});
+      oracle.Consume(oracle.Predict());
+    }
+    std::vector<int32_t> plane;
+    int32_t hidden = 0;
+    for (const auto& span : spans) {
+      for (int32_t token : span) {
+        hidden = (5 * hidden + token + 2) % 97;
+      }
+      for (int32_t token : span) {
+        plane.push_back(hidden * scale + 7 * token +
+                        static_cast<int32_t>(plane.size()));
+      }
+    }
+    return plane;
+  }
+
+  static std::vector<int32_t> Plane(const std::vector<int32_t>& cache,
+                                    iree_host_size_t row, size_t length) {
+    const auto begin = cache.begin() + row * 96;
+    return std::vector<int32_t>(begin, begin + length);
+  }
+
+  // Temporary prepare program admitting draft depths.
+  std::string prepare_;
+};
+
+TEST_F(DraftGroupTextServiceTest, Abi2LeavesWarmDraftCacheLikeOrdinaryEpochs) {
+  // Draft stages follow advance, advance_media, group_prefix, group_residual.
+  ASSERT_EQ(model_->stage_count, 6u);
+  EXPECT_EQ(model_->stage_bindings[4].binding_count, 4u);
+  EXPECT_EQ(model_->stage_bindings[5].binding_count, TEXT_GROUP_DRAFT_ARITY);
+  EXPECT_NE(model_->stage_bindings[5].transient.required_byte_length, 0u);
+  ASSERT_NE(model_->state.draft.cache, nullptr);
+  ASSERT_NE(model_->state.draft.row_table, nullptr);
+  // The fixture drafter has no carry: the leaf's unused carry slot binds null.
+  EXPECT_EQ(model_->state.carry, nullptr);
+
+  ASSERT_NO_FATAL_FAILURE(Prefill(model_, 1, /*grouped=*/true, 2));
+  auto options = ModelOptions();
+  options.group_mode = LOOM_SERVE_GROUP_MODE_SINGLE;
+  loom_serve_text_model_t* single = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_model_allocate(
+      device_, storage_owner_, &options, host_allocator_, &single));
+  const auto release_model = [](loom_serve_text_model_t* model) {
+    IREE_EXPECT_OK(loom_serve_text_model_free(model));
+  };
+  std::unique_ptr<loom_serve_text_model_t, decltype(release_model)>
+      single_owner(single, release_model);
+  ASSERT_NO_FATAL_FAILURE(Prefill(single, 1, /*grouped=*/false, 2));
+  options.group_mode = LOOM_SERVE_GROUP_MODE_TWO_BANK;
+  options.plan_provider = IREE_SV("sequential_v1");
+  loom_serve_text_model_t* sequential = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_model_allocate(
+      device_, storage_owner_, &options, host_allocator_, &sequential));
+  std::unique_ptr<loom_serve_text_model_t, decltype(release_model)>
+      sequential_owner(sequential, release_model);
+  ASSERT_NO_FATAL_FAILURE(Prefill(sequential, 1, /*grouped=*/true, 2));
+
+  const auto grouped = DraftCache(model_);
+  EXPECT_EQ(grouped, DraftCache(single));
+  EXPECT_EQ(grouped, DraftCache(sequential));
+  EXPECT_EQ(Plane(grouped, 1, 7), ExpectedPlane(131, 2));
+  for (int32_t word : Plane(grouped, 0, 96)) {
+    EXPECT_EQ(word, 0);
+  }
+  Oracle oracle;
+  for (int32_t token : kPrompt) {
+    oracle.Consume(token);
+  }
+  for (unsigned i = 0; i < 2; ++i) {
+    oracle.Consume(oracle.Predict());
+  }
+  for (auto* model : {model_, single, sequential}) {
+    EXPECT_EQ(loom_serve_text_row_token(loom_serve_text_model_row(model, 1)),
+              oracle.Predict());
+  }
+}
+
+TEST_F(DraftGroupTextServiceTest, VariantSelectionRebindsAbi2Leaves) {
+  std::string path = iree::testing::MakeTempFilePath("draft_variant", ".loom");
+  ASSERT_NO_FATAL_FAILURE(
+      EditNativeProvider(directory_ + "/advance.loom", path,
+                         "%c131_i32 = scalar.constant 131 : i32",
+                         "%c131_i32 = scalar.constant 137 : i32"));
+  Variant variant(nullptr, loom_serve_text_variant_free);
+  ASSERT_NO_FATAL_FAILURE(CompileVariant(model_, path, &variant));
+  IREE_ASSERT_OK(loom_serve_text_model_select_variant(model_, variant.get()));
+  ASSERT_NE(model_->prefill_group.stages, nullptr);
+  EXPECT_EQ(model_->prefill_group.stages[5].binding_count,
+            TEXT_GROUP_DRAFT_ARITY);
+  ASSERT_NO_FATAL_FAILURE(Prefill(model_, 0, /*grouped=*/true, 1));
+  ASSERT_NO_FATAL_FAILURE(Prefill(model_, 2, /*grouped=*/false, 1));
+  const auto cache = DraftCache(model_);
+  EXPECT_EQ(Plane(cache, 0, 6), ExpectedPlane(137, 1));
+  EXPECT_EQ(Plane(cache, 2, 6), ExpectedPlane(137, 1));
+  IREE_ASSERT_OK(loom_serve_text_model_select_variant(model_, nullptr));
+  ASSERT_NO_FATAL_FAILURE(Prefill(model_, 3, /*grouped=*/true, 1));
+  EXPECT_EQ(Plane(DraftCache(model_), 3, 6), ExpectedPlane(131, 1));
+}
+
+TEST_F(DraftGroupTextServiceTest, LeafConsumingAbsentCarryIsACleanRejection) {
+  std::string path = iree::testing::MakeTempFilePath("carry_leaf", ".loom");
+  // Only group_warm warms right after its selection.
+  ASSERT_NO_FATAL_FAILURE(EditNativeProvider(
+      directory_ + "/advance.loom", path,
+      "(buffer, buffer, buffer, buffer, buffer)\n"
+      "  kernel.launch @warm_draft(%residual, %metadata, %tokens, %cache)",
+      "(buffer, buffer, buffer, buffer, buffer)\n"
+      "  kernel.launch @warm_draft(%residual, %metadata, %tokens, %carry)"));
+  Variant variant(nullptr, loom_serve_text_variant_free);
+  ASSERT_NO_FATAL_FAILURE(CompileVariant(model_, path, &variant));
+  IREE_ASSERT_OK(loom_serve_text_model_select_variant(model_, variant.get()));
+  // HAL submission validation refuses the null carry slot at append, before
+  // any group node is accepted; the model returns to its drained boundary.
+  loom_serve_text_span_t a = {
+      .row_index = 0, .token_count = 3, .token_ids = kPrompt};
+  loom_serve_text_span_t b = {.row_index = 0,
+                              .token_count = 2,
+                              .token_ids = kPrompt + 3,
+                              .flags = LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT,
+                              .input_offset = 3};
+  loom_serve_execution_frontier_t frontier;
+  iree::Status status(
+      loom_serve_text_model_submit_epoch_pair(model_, 0, &a, 0, &b, &frontier));
+  EXPECT_THAT(status, iree::testing::status::StatusIs(
+                          iree::StatusCode::kInvalidArgument));
+  EXPECT_THAT(status.ToString(),
+              ::testing::HasSubstr("slot requires a buffer"));
+  EXPECT_EQ(model_->prefill_group.pending, nullptr);
+  EXPECT_FALSE(model_->prefill_group.active);
+  EXPECT_EQ(loom_serve_text_row_position(loom_serve_text_model_row(model_, 0)),
+            0u);
+  IREE_ASSERT_OK(
+      loom_serve_execution_wait(model_->execution, frontier.values[0]));
+  IREE_ASSERT_OK(loom_serve_text_model_select_variant(model_, nullptr));
+  ASSERT_NO_FATAL_FAILURE(Prefill(model_, 0, /*grouped=*/true, 0));
+  EXPECT_EQ(Plane(DraftCache(model_), 0, 5), ExpectedPlane(131, 0));
+}
+
+TEST_F(DraftGroupTextServiceTest, DraftModelRejectsResourceAbi1) {
+  // A coherent ABI 1 plan (six-resource residual leaf) is still invalid for a
+  // draft model: its leaves would skip the bank-local draft warm.
+  std::string control = iree::testing::MakeTempFilePath("abi1", ".loom");
+  ASSERT_NO_FATAL_FAILURE(EditNativeProvider(
+      directory_ + "/control.loom", control,
+      "%residual = scf.select %drafts, %group_warm, %ordinary_residual : i32",
+      "%residual = scf.select %drafts, %ordinary_residual, %ordinary_residual "
+      ": i32"));
+  ASSERT_NO_FATAL_FAILURE(EditNativeProvider(
+      control, control, "%abi = scalar.addi %draft_flag, %one : i32",
+      "%abi = scalar.addi %zero, %one : i32"));
+  auto options = ModelOptions();
+  options.sources.control = iree_make_cstring_view(control.c_str());
+  loom_serve_text_model_t* rejected = nullptr;
+  iree::Status status(loom_serve_text_model_allocate(
+      device_, storage_owner_, &options, host_allocator_, &rejected));
+  EXPECT_THAT(status, iree::testing::status::StatusIs(
+                          iree::StatusCode::kInvalidArgument));
+  EXPECT_THAT(status.ToString(),
+              ::testing::HasSubstr("invalid text_prefill_group_v1 descriptor"));
+  EXPECT_EQ(rejected, nullptr);
+  if (rejected) {
+    IREE_EXPECT_OK(loom_serve_text_model_free(rejected));
+  }
+  // The same plan is valid without drafting and for a single-mode draft model.
+  for (const bool draft : {false, true}) {
+    options.draft_depth = draft ? 3 : 0;
+    options.group_mode =
+        draft ? LOOM_SERVE_GROUP_MODE_SINGLE : LOOM_SERVE_GROUP_MODE_TWO_BANK;
+    loom_serve_text_model_t* accepted = nullptr;
+    IREE_ASSERT_OK(loom_serve_text_model_allocate(
+        device_, storage_owner_, &options, host_allocator_, &accepted));
+    IREE_ASSERT_OK(loom_serve_text_model_free(accepted));
+  }
 }
 
 TEST_F(GroupTextServiceTest, ServiceGroupsLongInputAndHandlesOddTail) {

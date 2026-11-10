@@ -65,9 +65,12 @@ static iree_status_t loom_serve_text_check_layouts(
     const uint32_t binding_count =
         program->requirements.rebindable_binding_count;
     const uint32_t roots = program->requirements.fixed_buffer_count;
+    const bool has_workspace =
+        program->requirements.transient.required_byte_length != 0;
+    const uint32_t arity = binding_count - has_workspace;
     if (program->parameter_roots.count != roots ||
         declaration->parameter_count != roots || binding_count < 1 ||
-        binding_count > 8 ||
+        (arity > TEXT_STAGE_ARITY && arity != TEXT_GROUP_DRAFT_ARITY) ||
         (program->requirements.transient.binding_index != UINT32_MAX &&
          program->requirements.transient.binding_index != binding_count - 1) ||
         program->requirements.launch_counts.required_byte_length != 0) {
@@ -88,9 +91,7 @@ static iree_status_t loom_serve_text_check_layouts(
     if (i >= shared_count) {
       continue;
     }
-    const bool has_workspace =
-        program->requirements.transient.required_byte_length != 0;
-    if (roots != 1 || binding_count - has_workspace != TEXT_BINDING_COUNT) {
+    if (roots != 1 || arity != TEXT_BINDING_COUNT) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "shared stages must implement the target bindings");

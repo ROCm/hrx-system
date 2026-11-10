@@ -22,8 +22,10 @@ iree_status_t loom_serve_text_model_publish_state_bindings(
 //     followed by stage IDs [shape][layer][prefix,ffn,residual]. UINT32_MAX
 //     omits FFN/residual. Prefix publishes all shared state required by B.
 //     Resource ABI 1 supplies the six ordinary packed roots; ABI 2 additionally
-//     supplies the six draft roots in ordinary epoch order. Draft models must
-//     declare ABI 2 and include bank-local warm/capture work in their leaves.
+//     supplies the six draft roots in ordinary epoch order. Absent optional
+//     carry, draft cache and draft page table roots are bound as null and
+//     must not be consumed. Draft models must declare ABI 2 and include
+//     bank-local warm/capture work in their leaves.
 //   text_encode_prefill_group_v1(state, plan_a, input_a, plan_b, input_b,
 //                                metadata_a, tokens_a, metadata_b, tokens_b)
 //     Receives owned nine-u32 semantic plans and independent packet storage.

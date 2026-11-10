@@ -113,9 +113,10 @@ static iree_status_t loom_serve_text_group_describe(
           stages[i] = iree_unaligned_load_le_u32(bytes.data + 16 + i * 4);
           if (stages[i] != UINT32_MAX &&
               (stages[i] >= model->stage_count ||
-               (bindings[stages[i]].binding_count != 6 &&
+               (bindings[stages[i]].binding_count != TEXT_BINDING_COUNT &&
                 (iree_unaligned_load_le_u32(bytes.data + 12) != 2 ||
-                 bindings[stages[i]].binding_count != 12)) ||
+                 bindings[stages[i]].binding_count !=
+                     TEXT_GROUP_DRAFT_ARITY)) ||
                bindings[stages[i]].dispatch ||
                !bindings[stages[i]].command_buffer)) {
             status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -402,21 +403,27 @@ static iree_status_t loom_serve_text_group_emit(void* self, uint32_t bank_index,
                                 model->state.draft.cache,
                                 model->state.draft.row_table,
                                 model->state.draft.next_results};
-  iree_hal_buffer_binding_t bindings[13];
+  iree_hal_buffer_binding_t bindings[TEXT_GROUP_DRAFT_ARITY + 1];
   const bool scratch = stage->transient.required_byte_length != 0;
-  if (stage->binding_count != 6 && stage->binding_count != 12) {
+  if (stage->binding_count != TEXT_BINDING_COUNT &&
+      stage->binding_count != TEXT_GROUP_DRAFT_ARITY) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "provider emitted an incompatible leaf");
   }
+  // Carry, draft cache and draft page table are optional source state. Their
+  // absence binds null; HAL submission validation at append rejects a leaf
+  // that consumes one.
+  const bool optional[IREE_ARRAYSIZE(roots)] = {
+      [6] = true, [9] = true, [10] = true};
   for (iree_host_size_t i = 0; i < stage->binding_count; ++i) {
-    if (!roots[i]) {
+    if (!roots[i] && !optional[i]) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "group leaf uses an unavailable resource");
     }
     iree_host_size_t slot =
         i + (scratch && i >= stage->transient.binding_index);
     bindings[slot] = (iree_hal_buffer_binding_t){
-        roots[i], 0, iree_hal_buffer_byte_length(roots[i])};
+        roots[i], 0, roots[i] ? iree_hal_buffer_byte_length(roots[i]) : 0};
   }
   if (scratch) {
     bindings[stage->transient.binding_index] =
