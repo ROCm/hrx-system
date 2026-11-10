@@ -982,6 +982,9 @@ static iree_status_t loom_link_kernel_config_project_ir_module(
         loom_ir_remap_initialize(source_module, target_module, scratch_arena,
                                  &remap_options, &module_remap);
   }
+  if (iree_status_is_ok(status)) {
+    status = loom_ir_remap_sources(&module_remap);
+  }
   loom_builder_t builder;
   if (iree_status_is_ok(status)) {
     loom_builder_initialize(target_module, &target_module->arena,

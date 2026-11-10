@@ -105,6 +105,7 @@ iree_status_t loom_ir_module_projection_clone(
               },
       },
       &projection->remap));
+  IREE_RETURN_IF_ERROR(loom_ir_remap_sources(&projection->remap));
   loom_builder_t builder;
   loom_builder_initialize(
       projection->target_module, &projection->target_module->arena,

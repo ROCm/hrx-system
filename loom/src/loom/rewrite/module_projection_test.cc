@@ -68,6 +68,29 @@ class ModuleProjectionTest : public ::testing::Test {
   iree_arena_allocator_t scratch_arena_;
 };
 
+TEST_F(ModuleProjectionTest, PreservesSourceInventoryWithoutLocations) {
+  loom_module_t* source = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("source"),
+                                      &block_pool_, nullptr,
+                                      iree_allocator_system(), &source));
+  loom_source_id_t source_id = LOOM_SOURCE_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_register_source(source, IREE_SV("source.loom"), &source_id));
+  loom_ir_module_projection_t projection = {};
+  loom_module_t* target = nullptr;
+  IREE_ASSERT_OK(loom_ir_module_clone(source, nullptr, &block_pool_,
+                                      &scratch_arena_, iree_allocator_system(),
+                                      &projection, &target));
+  ASSERT_NE(projection.remap.target_sources, nullptr);
+  const auto target_source_id = projection.remap.target_sources[source_id];
+  loom_module_free(source);
+  ASSERT_EQ(target->sources.count, 1u);
+  ASSERT_LT(target_source_id, target->sources.count);
+  EXPECT_TRUE(iree_string_view_equal(target->sources.entries[target_source_id],
+                                     IREE_SV("source.loom")));
+  loom_module_free(target);
+}
+
 TEST_F(ModuleProjectionTest, ClonesThroughDirectSymbolAndValueCorrespondence) {
   loom_module_t* source = Parse(R"(
 func.def public @entry(%x: i32) -> (i32) {

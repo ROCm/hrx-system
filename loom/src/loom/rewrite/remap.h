@@ -146,8 +146,9 @@ typedef struct loom_ir_remap_t {
   // Caller-owned arena for correspondence tables and returned value-type
   // arrays.
   iree_arena_allocator_t* arena;
-  // Target source IDs indexed by source ID. Cross-module initialization
-  // projects the complete source table; same-module remaps leave this NULL.
+  // Complete target source IDs indexed by source ID, populated on the first
+  // location remap or explicit source-table remap. Same-module remaps leave
+  // this NULL.
   loom_source_id_t* target_sources;
   // Source-module value table count captured at remap initialization.
   iree_host_size_t source_value_snapshot_count;
@@ -188,12 +189,18 @@ typedef struct loom_ir_remap_t {
 // payload traversal borrows its block pool and releases temporary storage
 // before returning. Source values are snapshotted at initialization: values
 // created later in the source module are not part of this remap's source
-// domain.
+// domain. Type/attribute-only remapping does not import source filenames.
 iree_status_t loom_ir_remap_initialize(const loom_module_t* source_module,
                                        loom_module_t* target_module,
                                        iree_arena_allocator_t* arena,
                                        const loom_ir_remap_options_t* options,
                                        loom_ir_remap_t* out_remap);
+
+// Imports the complete source filename table and publishes |target_sources|.
+// Location remapping calls this lazily; complete module projections and source
+// snapshot publishers call it explicitly, including when no locations exist.
+// Repeated calls reuse the completed mapping. Same-module remaps need no table.
+iree_status_t loom_ir_remap_sources(loom_ir_remap_t* remap);
 
 // Adds or replaces one SSA value mapping.
 iree_status_t loom_ir_remap_map_value(loom_ir_remap_t* remap,

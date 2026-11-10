@@ -1126,6 +1126,49 @@ func.def @helper(%x: i32) -> (i32) {
   EXPECT_EQ(Print(linked_a), Print(linked_b));
 }
 
+TEST_F(LinkerTest, PublishesCompleteSourceMappingWithoutLocations) {
+  loom_module_t* source = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("source"),
+                                      &block_pool_, nullptr,
+                                      iree_allocator_system(), &source));
+  ModulePtr source_owner(source);
+  loom_source_id_t source_id = LOOM_SOURCE_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_register_source(source, IREE_SV("source.loom"), &source_id));
+  loom_source_id_t published_source_id = LOOM_SOURCE_ID_INVALID;
+  const loom_linker_options_t options = {
+      .source_callback =
+          {
+              .fn =
+                  [](void* user_data, const loom_module_t* source,
+                     const loom_module_t* target,
+                     const loom_source_id_t* target_sources) -> iree_status_t {
+                EXPECT_EQ(source->sources.count, 1u);
+                EXPECT_EQ(target->sources.count, 1u);
+                EXPECT_NE(target_sources, nullptr);
+                if (target_sources) {
+                  *static_cast<loom_source_id_t*>(user_data) =
+                      target_sources[0];
+                }
+                return iree_ok_status();
+              },
+              .user_data = &published_source_id,
+          },
+  };
+  loom_linker_t* linker = nullptr;
+  IREE_ASSERT_OK(loom_linker_allocate(&context_, &options, &block_pool_,
+                                      iree_allocator_system(), &linker));
+  IREE_ASSERT_OK(loom_linker_add_module(linker, source, nullptr));
+  source_owner.reset();
+  loom_module_t* linked = nullptr;
+  IREE_ASSERT_OK(loom_linker_finish(linker, &linked));
+  loom_linker_free(linker);
+  modules_.push_back(linked);
+  ASSERT_LT(published_source_id, linked->sources.count);
+  EXPECT_TRUE(iree_string_view_equal(
+      linked->sources.entries[published_source_id], IREE_SV("source.loom")));
+}
+
 TEST_F(LinkerTest, IncrementalLinkDoesNotReferenceReleasedSourceModules) {
   loom_linker_t* linker = nullptr;
   loom_linker_options_t linker_options = {

@@ -678,6 +678,7 @@ static iree_status_t loom_linker_capture_sources(loom_linker_source_t* source) {
   }
   loom_ir_remap_t* remap = NULL;
   IREE_RETURN_IF_ERROR(loom_linker_get_source_remap(source, &remap));
+  IREE_RETURN_IF_ERROR(loom_ir_remap_sources(remap));
   return callback.fn(callback.user_data, source->module,
                      source->linker->target_module, remap->target_sources);
 }
