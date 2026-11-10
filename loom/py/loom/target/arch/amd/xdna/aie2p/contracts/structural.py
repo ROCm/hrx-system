@@ -455,6 +455,27 @@ def _predicate_bitcast_alias_rule() -> ValueAliasRule:
     )
 
 
+def _index_shape_bitcast_alias_rules() -> tuple[ValueAliasRule, ...]:
+    # Index and offset have narrower target carriers than their semantic width.
+    # Same-element bitcasts preserve the verified element count and therefore
+    # the carrier, without admitting reinterpretation as numeric payload bits.
+    return tuple(
+        ValueAliasRule(
+            source_op=vector.vector_bitcast,
+            source=ValueRef.operand("input"),
+            result=ValueRef.result("result"),
+            guards=(
+                Guard.value_type("input", source_type),
+                Guard.value_type("result", source_type),
+            ),
+        )
+        for element_type in ("index", "offset")
+        for source_type in (
+            Vector(element_type, minimum_static_elements=1, maximum_static_elements=64),
+        )
+    )
+
+
 def _accumulator_bitcast_alias_rules() -> tuple[ValueAliasRule, ...]:
     # Equal-width accumulator forms retain the same ordered MBMS units. The
     # 2048-bit group includes the F32, I32, and I64 logical interpretations.
@@ -1274,4 +1295,5 @@ AIE2P_STRUCTURAL_RULES = (
     *_accumulator_bitcast_alias_rules(),
     *_wide_vector_bitcast_alias_rules(),
     _predicate_bitcast_alias_rule(),
+    *_index_shape_bitcast_alias_rules(),
 )

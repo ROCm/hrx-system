@@ -123,3 +123,32 @@ func.def @accumulator_shapes(%floats: vector<2x4x8xf32>, %words: vector<4x12xi32
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @accumulator_shapes(%flat_floats: reg<aie2p.mbms x4>, %flat_words: reg<aie2p.mbms x4>, %flat_double_words: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x4>, reg<aie2p.mbms x4>, reg<aie2p.mbms x4>) asm {
   return %flat_floats, %flat_words, %flat_double_words
 }
+
+// ====
+
+// Address types preserve lane identity across all three carrier extents.
+func.def @index_shapes(%small: vector<2x8xindex>, %wide: vector<1x4x8xindex>, %accumulator: vector<2x17xindex>) -> (vector<16xindex>, vector<32xindex>, vector<34xindex>) {
+  %flat_small = vector.bitcast %small : vector<2x8xindex> to vector<16xindex>
+  %flat_wide = vector.bitcast %wide : vector<1x4x8xindex> to vector<32xindex>
+  %flat_accumulator = vector.bitcast %accumulator : vector<2x17xindex> to vector<34xindex>
+  func.return %flat_small, %flat_wide, %flat_accumulator : vector<16xindex>, vector<32xindex>, vector<34xindex>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @index_shapes(%flat_small: reg<aie2p.vec256 x2>, %flat_wide: reg<aie2p.vec256 x4>, %flat_accumulator: reg<aie2p.mbms x4>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x4>, reg<aie2p.mbms x4>) asm {
+  return %flat_small, %flat_wide, %flat_accumulator
+}
+
+// ====
+
+func.def @offset_shapes(%small: vector<16xoffset>, %wide: vector<32xoffset>, %accumulator: vector<64xoffset>) -> (vector<2x8xoffset>, vector<1x4x8xoffset>, vector<2x4x8xoffset>) {
+  %shaped_small = vector.bitcast %small : vector<16xoffset> to vector<2x8xoffset>
+  %shaped_wide = vector.bitcast %wide : vector<32xoffset> to vector<1x4x8xoffset>
+  %shaped_accumulator = vector.bitcast %accumulator : vector<64xoffset> to vector<2x4x8xoffset>
+  func.return %shaped_small, %shaped_wide, %shaped_accumulator : vector<2x8xoffset>, vector<1x4x8xoffset>, vector<2x4x8xoffset>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @offset_shapes(%shaped_small: reg<aie2p.vec256 x2>, %shaped_wide: reg<aie2p.vec256 x4>, %shaped_accumulator: reg<aie2p.mbms x4>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x4>, reg<aie2p.mbms x4>) asm {
+  return %shaped_small, %shaped_wide, %shaped_accumulator
+}

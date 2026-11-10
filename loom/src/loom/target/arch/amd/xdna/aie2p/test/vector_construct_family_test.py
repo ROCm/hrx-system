@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # Maximum logical extent of the ordinary, predicate, and accumulator carriers.
-# Multidimensional vectors use ordinary carriers, except for predicates.
+# Logical rank does not change the maximum extent of a carrier family.
 _ELEMENT_FAMILIES = (
     ("i1", 1, 128),
     ("i8", 8, 128),
@@ -78,7 +78,7 @@ def _representative_lane_counts(element_bits: int, maximum_lanes: int) -> list[i
 def _cases(exhaustive: bool) -> list[ConstructorCase]:
     cases = []
     for element_type, element_bits, maximum_lanes in _ELEMENT_FAMILIES:
-        shaped_maximum = min(maximum_lanes, 1024 // element_bits)
+        shaped_maximum = maximum_lanes
         lane_counts = (
             range(1, maximum_lanes + 1)
             if exhaustive
@@ -167,7 +167,7 @@ class VectorConstructFamilyTest(unittest.TestCase):
         # distinct source-memory diagnostics.
         cases = []
         for element_type, element_bits, maximum_lanes in _ELEMENT_FAMILIES:
-            shaped_maximum = min(maximum_lanes, 1024 // element_bits)
+            shaped_maximum = maximum_lanes
             shapes = (
                 (maximum_lanes + 1,),
                 (2, shaped_maximum // 2 + 1),

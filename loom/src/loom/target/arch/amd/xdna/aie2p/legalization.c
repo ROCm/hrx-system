@@ -40,6 +40,15 @@ static bool loom_aie2p_defer_multidimensional_memory_reference(
          loom_type_rank(payload_type) > 1;
 }
 
+// Address carriers contain 32-bit values, while source index and offset memory
+// contains 64-bit elements. Packetization and scalar expansion cannot repair
+// that representation mismatch; retain it for the target diagnostic.
+static bool loom_aie2p_vector_memory_matches_carrier(loom_type_t payload_type) {
+  const loom_scalar_type_t element_type = loom_type_element_type(payload_type);
+  return loom_aie2p_scalar_type_physical_bit_count(element_type) ==
+         loom_scalar_type_bitwidth(element_type);
+}
+
 static bool loom_aie2p_match_scalar_multiply_add(
     const loom_target_legalizer_entry_t* entry,
     const loom_target_legalization_context_t* context, const loom_op_t* op) {
@@ -462,6 +471,10 @@ static iree_status_t loom_aie2p_legalize_vector_load(
 
   const loom_type_t result_type =
       loom_module_value_type(context->module, loom_vector_load_result(op));
+  if (!loom_aie2p_vector_memory_matches_carrier(result_type)) {
+    out_result->action = LOOM_TARGET_LEGALIZER_ACTION_DEFER;
+    return iree_ok_status();
+  }
   const bool can_rewrite_memory =
       !loom_aie2p_defer_multidimensional_memory_reference(context,
                                                           result_type) &&
@@ -526,6 +539,10 @@ static iree_status_t loom_aie2p_legalize_vector_store(
 
   const loom_type_t value_type =
       loom_module_value_type(context->module, loom_vector_store_value(op));
+  if (!loom_aie2p_vector_memory_matches_carrier(value_type)) {
+    out_result->action = LOOM_TARGET_LEGALIZER_ACTION_DEFER;
+    return iree_ok_status();
+  }
   const bool has_native_store = context->contract_query_result->outcome ==
                                 LOOM_TARGET_CONTRACT_QUERY_LEGAL;
   if (has_native_store) {

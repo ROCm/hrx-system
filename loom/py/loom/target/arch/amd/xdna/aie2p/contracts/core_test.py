@@ -1690,6 +1690,12 @@ def test_core_contract_closes_scalar_and_vector_families() -> None:
         for source_type in _WIDE_VECTOR_BITCAST_TYPES
         for result_type in _WIDE_VECTOR_BITCAST_TYPES
     ] + [(_PREDICATE_VECTOR, _PREDICATE_VECTOR)] + [
+        (source_type, source_type)
+        for element_type in ("index", "offset")
+        for source_type in (
+            Vector(element_type, minimum_static_elements=1, maximum_static_elements=64),
+        )
+    ] + [
         (source_type, result_type)
         for source_type in bitcast_types
         for result_type in bitcast_types
