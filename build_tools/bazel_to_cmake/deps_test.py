@@ -49,6 +49,33 @@ def _write_lock(root: Path, locked_deps: list[deps.Dependency]) -> Path:
 
 
 class DepsTest(unittest.TestCase):
+    def test_rocjitsu_runtime_does_not_enter_source_lock(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_module_files(
+                root,
+                """\
+                rocjitsu_repository = use_repo_rule(
+                    "//build_tools/third_party/rocjitsu:repository.bzl",
+                    "rocjitsu_repository",
+                )
+                rocjitsu_repository(name = "rocjitsu_runtime", revision = "abc")
+                http_file = use_repo_rule(
+                    "@bazel_tools//tools/build_defs/repo:http.bzl", "http_file",
+                )
+                http_file(
+                    name = "rocjitsu_header",
+                    downloaded_file_path = "rocjitsu/vm/rj_vm.h",
+                    url = "https://example.com/rj_vm.h",
+                    sha256 = "0000000000000000000000000000000000000000000000000000000000000000",
+                )
+                """,
+            )
+            parsed = deps.ModuleParser(root).parse(root / "MODULE.bazel")
+            self.assertEqual(
+                [dependency.name for dependency in parsed], ["rocjitsu_header"]
+            )
+
     def _run_deps(self, root: Path, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [

@@ -214,6 +214,10 @@ class ModuleParser:
             return lambda **kwargs: self._rocm_repository(
                 module_file, collect_source_deps, **kwargs
             )
+        if repo_rule_name == "rocjitsu_repository":
+            # This is an explicit local execution package. The separately
+            # declared public headers are the CMake source dependency.
+            return self._ignore
         if collect_source_deps:
             relpath = self._repo_relpath(module_file)
             raise ValueError(

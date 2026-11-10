@@ -103,6 +103,12 @@ alias(
 )
 
 alias(
+    name = "rocjitsu_headers",
+    actual = "//build_tools/third_party/rocjitsu:headers",
+    visibility = [":libamdf_users"],
+)
+
+alias(
     name = "amdf_dxg_headers",
     actual = "@libdxg_headers//:headers",
     visibility = [":libamdf_users"],

@@ -205,6 +205,52 @@ http_file(
     url = "https://raw.githubusercontent.com/amd/xdna-driver/025503bab93a2f347c07a878cf066c05d7662ae0/include/uapi/drm/amdxdna_accel.h",
 )
 
+# Explicit embedding C API; no simulator runtime is linked into consumers.
+_ROCJITSU_REVISION = "f2c83588e07572bf4882bb36a39311b93388ccb5"
+_ROCJITSU_HEADER_URL = "https://raw.githubusercontent.com/benvanik/rocm-systems/" + _ROCJITSU_REVISION + "/emulation/rocjitsu/lib/rocjitsu/include/"
+
+http_file(
+    name = "rocjitsu_rj_compiler_header",
+    downloaded_file_path = "rocjitsu/base/rj_compiler.h",
+    sha256 = "e60fc1f5d788cdc20db94acf25357a206ec92d5bf147d2f37f19637795c96051",
+    url = _ROCJITSU_HEADER_URL + "rocjitsu/base/rj_compiler.h",
+)
+
+http_file(
+    name = "rocjitsu_rj_status_header",
+    downloaded_file_path = "rocjitsu/base/rj_status.h",
+    sha256 = "a094a0ba806cbb61e0605efa32187dafd9aecfbcaae570904669c9272e4e0de4",
+    url = _ROCJITSU_HEADER_URL + "rocjitsu/base/rj_status.h",
+)
+
+http_file(
+    name = "rocjitsu_rj_version_header",
+    downloaded_file_path = "rocjitsu/base/rj_version.h",
+    sha256 = "321e557c336a707f2ca4ad59dd39d895b2c7ca983cbd39e2edbe9cb8de7ea558",
+    url = _ROCJITSU_HEADER_URL + "rocjitsu/base/rj_version.h",
+)
+
+http_file(
+    name = "rocjitsu_rj_vm_header",
+    downloaded_file_path = "rocjitsu/vm/rj_vm.h",
+    sha256 = "d5c0a06ee64b1d948cec8896f9926cdf04b110e626b9b58e4df0a261a1a01b11",
+    url = _ROCJITSU_HEADER_URL + "rocjitsu/vm/rj_vm.h",
+)
+
+http_file(
+    name = "rocjitsu_rj_vm_config_header",
+    downloaded_file_path = "rocjitsu/vm/rj_vm_config.h",
+    sha256 = "d184833c66dde41faf703f33cad0219d89cecdfb37b9ad1fd4aad139ebd9c3d8",
+    url = _ROCJITSU_HEADER_URL + "rocjitsu/vm/rj_vm_config.h",
+)
+
+rocjitsu_repository = use_repo_rule("//build_tools/third_party/rocjitsu:repository.bzl", "rocjitsu_repository")
+
+rocjitsu_repository(
+    name = "rocjitsu_runtime",
+    revision = _ROCJITSU_REVISION,
+)
+
 http_archive(
     name = "directx_headers",
     build_file = "//build_tools/third_party/dxg_headers:directx_headers.BUILD.bazel",
