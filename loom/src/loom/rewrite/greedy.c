@@ -189,33 +189,141 @@ iree_status_t loom_greedy_rewrite_run_region(
   bool prepare_region_called = false;
   if (iree_status_is_ok(status) && callbacks && callbacks->prepare_region) {
     prepare_region_called = true;
+    IREE_TRACE_ZONE_BEGIN_NAMED(z0, "loom_greedy_rewrite_prepare_region");
     status = callbacks->prepare_region(callbacks->user_data, driver, function,
                                        region, parent_op);
+    IREE_TRACE_ZONE_END(z0);
   }
   if (iree_status_is_ok(status) && options && options->prepared_patterns &&
       options->prepared_patterns->pattern_count) {
+    IREE_TRACE_ZONE_BEGIN_NAMED(z0, "loom_greedy_rewrite_prepared_patterns");
     status = loom_greedy_rewrite_apply_prepared(
         driver, region,
         (loom_rewrite_prepare_callback_t){
             .user_data = (void*)options->prepared_patterns,
             .fn = loom_greedy_rewrite_prepare_pattern},
         callbacks, &result);
+    IREE_TRACE_ZONE_END(z0);
   }
 
   for (uint32_t iteration = 0;
        iree_status_is_ok(status) && iteration < max_iterations; ++iteration) {
-    status = loom_rewriter_seed_region(&driver->rewriter, region);
+    {
+      IREE_TRACE_ZONE_BEGIN_NAMED(z0, "loom_greedy_rewrite_seed_region");
+      status = loom_rewriter_seed_region(&driver->rewriter, region);
+      IREE_TRACE_ZONE_END(z0);
+    }
     if (!iree_status_is_ok(status)) {
       break;
     }
 
     bool any_changed = false;
     if (callbacks && callbacks->rewrite_op_without_facts) {
+      {
+        IREE_TRACE_ZONE_BEGIN_NAMED(
+            z0, "loom_greedy_rewrite_fact_independent_worklist");
+        loom_op_t* op = NULL;
+        while ((op = loom_rewriter_pop(&driver->rewriter)) != NULL) {
+          bool changed = false;
+          status = callbacks->rewrite_op_without_facts(
+              callbacks->user_data, driver, op, &result, &changed);
+          if (!iree_status_is_ok(status)) {
+            break;
+          }
+          if (changed) {
+            any_changed = true;
+            if (callbacks->changed) {
+              callbacks->changed(callbacks->user_data, driver);
+            }
+          }
+        }
+        IREE_TRACE_ZONE_END(z0);
+      }
+      if (!iree_status_is_ok(status)) {
+        break;
+      }
+      {
+        IREE_TRACE_ZONE_BEGIN_NAMED(
+            z0, "loom_greedy_rewrite_fact_independent_publication");
+        status = loom_rewriter_propagate_value_facts(&driver->rewriter);
+        loom_greedy_rewrite_result_record_rewriter_flags(&result,
+                                                         &driver->rewriter);
+        IREE_TRACE_ZONE_END(z0);
+      }
+      if (!iree_status_is_ok(status)) {
+        break;
+      }
+      // Fact propagation schedules affected operations, but the complete
+      // region rescan below supersedes that incremental work. Drain it first
+      // so solver publication order cannot perturb the deterministic region
+      // order seen by fact-observing rewrites.
+      IREE_TRACE_ZONE_BEGIN_NAMED(z0, "loom_greedy_rewrite_reseed_region");
+      while (loom_rewriter_pop(&driver->rewriter) != NULL) {
+      }
+      status = loom_rewriter_seed_region(&driver->rewriter, region);
+      IREE_TRACE_ZONE_END(z0);
+      if (!iree_status_is_ok(status)) {
+        break;
+      }
+    }
+
+    if (callbacks && callbacks->before_worklist) {
+      IREE_TRACE_ZONE_BEGIN_NAMED(z0, "loom_greedy_rewrite_before_worklist");
+      bool changed = false;
+      status = loom_rewriter_propagate_value_facts(&driver->rewriter);
+      loom_greedy_rewrite_result_record_rewriter_flags(&result,
+                                                       &driver->rewriter);
+      if (iree_status_is_ok(status)) {
+        status = callbacks->before_worklist(callbacks->user_data, driver,
+                                            region, &result, &changed);
+      }
+      if (iree_status_is_ok(status) && changed) {
+        any_changed = true;
+        if (callbacks->changed) {
+          callbacks->changed(callbacks->user_data, driver);
+        }
+      }
+      IREE_TRACE_ZONE_END(z0);
+      if (!iree_status_is_ok(status)) {
+        break;
+      }
+    }
+
+    {
+      IREE_TRACE_ZONE_BEGIN_NAMED(z0,
+                                  "loom_greedy_rewrite_fact_aware_worklist");
       loom_op_t* op = NULL;
       while ((op = loom_rewriter_pop(&driver->rewriter)) != NULL) {
+        if (!callbacks || !callbacks->rewrite_op) {
+          continue;
+        }
+        status = loom_rewriter_propagate_value_facts(&driver->rewriter);
+        loom_greedy_rewrite_result_record_rewriter_flags(&result,
+                                                         &driver->rewriter);
+        if (!iree_status_is_ok(status)) {
+          break;
+        }
+        // Patterns and any operations they create use the current region's
+        // target. Optional math choices require that target's own policy.
+        driver->rewriter.math_policy = options ? options->math_policy : NULL;
+        const loom_target_facts_t* enclosing_target =
+            driver->fact_table ? driver->fact_table->context.target_facts
+                               : NULL;
+        if (driver->fact_table &&
+            driver->fact_table->regions.has_independent_targets) {
+          driver->fact_table->context.target_facts =
+              loom_value_fact_table_block_target_facts(driver->fact_table,
+                                                       op->parent_block);
+          if (driver->fact_table->context.target_facts != enclosing_target) {
+            driver->rewriter.math_policy = NULL;
+          }
+        }
         bool changed = false;
-        status = callbacks->rewrite_op_without_facts(
-            callbacks->user_data, driver, op, &result, &changed);
+        status = callbacks->rewrite_op(callbacks->user_data, driver, op,
+                                       &result, &changed);
+        if (driver->fact_table) {
+          driver->fact_table->context.target_facts = enclosing_target;
+        }
         if (!iree_status_is_ok(status)) {
           break;
         }
@@ -226,87 +334,7 @@ iree_status_t loom_greedy_rewrite_run_region(
           }
         }
       }
-      if (!iree_status_is_ok(status)) {
-        break;
-      }
-      status = loom_rewriter_propagate_value_facts(&driver->rewriter);
-      loom_greedy_rewrite_result_record_rewriter_flags(&result,
-                                                       &driver->rewriter);
-      if (!iree_status_is_ok(status)) {
-        break;
-      }
-      // Fact propagation schedules affected operations, but the complete
-      // region rescan below supersedes that incremental work. Drain it first
-      // so solver publication order cannot perturb the deterministic region
-      // order seen by fact-observing rewrites.
-      while (loom_rewriter_pop(&driver->rewriter) != NULL) {
-      }
-      status = loom_rewriter_seed_region(&driver->rewriter, region);
-      if (!iree_status_is_ok(status)) {
-        break;
-      }
-    }
-
-    if (callbacks && callbacks->before_worklist) {
-      bool changed = false;
-      status = loom_rewriter_propagate_value_facts(&driver->rewriter);
-      loom_greedy_rewrite_result_record_rewriter_flags(&result,
-                                                       &driver->rewriter);
-      if (iree_status_is_ok(status)) {
-        status = callbacks->before_worklist(callbacks->user_data, driver,
-                                            region, &result, &changed);
-      }
-      if (!iree_status_is_ok(status)) {
-        break;
-      }
-      if (changed) {
-        any_changed = true;
-        if (callbacks->changed) {
-          callbacks->changed(callbacks->user_data, driver);
-        }
-      }
-    }
-
-    loom_op_t* op = NULL;
-    while ((op = loom_rewriter_pop(&driver->rewriter)) != NULL) {
-      if (!callbacks || !callbacks->rewrite_op) {
-        continue;
-      }
-      status = loom_rewriter_propagate_value_facts(&driver->rewriter);
-      loom_greedy_rewrite_result_record_rewriter_flags(&result,
-                                                       &driver->rewriter);
-      if (!iree_status_is_ok(status)) {
-        break;
-      }
-      // Patterns and any operations they create use the current region's
-      // target. Optional math choices require that target's own policy.
-      driver->rewriter.math_policy = options ? options->math_policy : NULL;
-      const loom_target_facts_t* enclosing_target =
-          driver->fact_table ? driver->fact_table->context.target_facts : NULL;
-      if (driver->fact_table &&
-          driver->fact_table->regions.has_independent_targets) {
-        driver->fact_table->context.target_facts =
-            loom_value_fact_table_block_target_facts(driver->fact_table,
-                                                     op->parent_block);
-        if (driver->fact_table->context.target_facts != enclosing_target) {
-          driver->rewriter.math_policy = NULL;
-        }
-      }
-      bool changed = false;
-      status = callbacks->rewrite_op(callbacks->user_data, driver, op, &result,
-                                     &changed);
-      if (driver->fact_table) {
-        driver->fact_table->context.target_facts = enclosing_target;
-      }
-      if (!iree_status_is_ok(status)) {
-        break;
-      }
-      if (changed) {
-        any_changed = true;
-        if (callbacks->changed) {
-          callbacks->changed(callbacks->user_data, driver);
-        }
-      }
+      IREE_TRACE_ZONE_END(z0);
     }
     if (!iree_status_is_ok(status)) {
       break;
@@ -317,12 +345,16 @@ iree_status_t loom_greedy_rewrite_run_region(
   }
 
   if (iree_status_is_ok(status)) {
+    IREE_TRACE_ZONE_BEGIN_NAMED(z0, "loom_greedy_rewrite_final_publication");
     status = loom_rewriter_propagate_value_facts(&driver->rewriter);
     loom_greedy_rewrite_result_record_rewriter_flags(&result,
                                                      &driver->rewriter);
+    IREE_TRACE_ZONE_END(z0);
   }
   if (prepare_region_called && callbacks && callbacks->cleanup_region) {
+    IREE_TRACE_ZONE_BEGIN_NAMED(z0, "loom_greedy_rewrite_cleanup_region");
     callbacks->cleanup_region(callbacks->user_data, driver);
+    IREE_TRACE_ZONE_END(z0);
   }
   if (iree_status_is_ok(status)) {
     result.boundary_maybe_changed =

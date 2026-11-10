@@ -119,9 +119,9 @@ func.def @canonicalized_power_of_two_quotient_proves_dynamic_axis_bound(%payload
   %in_bounds = index.cmp ult, %linear, %element_count : index
   cfg.cond_br %in_bounds, ^_bb1, ^_bb2
 ^_bb1:
-  %12 = index.assume %linear [lt(%linear, %element_count)] : index
-  %13 = index.constant 2 : index
-  %row = index.shrui %12, %13 : index
+  %14 = index.assume %linear [lt(%linear, %element_count)] : index
+  %12 = index.constant 2 : index
+  %row = index.shrui %14, %12 : index
   %view = buffer.view %payload[%base] : buffer -> view<[%row_count]xi32>
   view.store %value, %view[%row] : i32, view<[%row_count]xi32>
   cfg.br ^_bb2

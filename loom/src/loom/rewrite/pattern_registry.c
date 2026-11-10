@@ -62,7 +62,7 @@ static iree_status_t loom_rewrite_pattern_registry_count_patterns(
             "rewrite pattern provider '%.*s' has an invalid root kind",
             (int)provider->name.size, provider->name.data);
       }
-      if (pattern->match_and_rewrite == NULL) {
+      if (pattern->match_and_rewrite == NULL && pattern->prepare == NULL) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "rewrite pattern provider '%.*s' has no callback",
@@ -270,6 +270,9 @@ iree_status_t loom_rewrite_pattern_registry_apply(
       loom_rewrite_pattern_registry_lookup_kind(registry, op->kind);
   for (uint16_t pattern_index = 0; pattern_index < span.count;
        ++pattern_index) {
+    if (!span.patterns[pattern_index]->match_and_rewrite) {
+      continue;
+    }
     bool changed = false;
     IREE_RETURN_IF_ERROR(span.patterns[pattern_index]->match_and_rewrite(
         span.patterns[pattern_index], context, op, rewriter, &changed));

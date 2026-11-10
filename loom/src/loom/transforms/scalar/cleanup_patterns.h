@@ -17,6 +17,10 @@ extern "C" {
 extern const loom_rewrite_pattern_provider_t
     loom_scalar_universal_post_type_pattern_provider;
 
+// Initial prepared canonicalizations contributed by the scalar dialect.
+extern const loom_rewrite_pattern_provider_t
+    loom_scalar_prepared_canonicalization_pattern_provider;
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

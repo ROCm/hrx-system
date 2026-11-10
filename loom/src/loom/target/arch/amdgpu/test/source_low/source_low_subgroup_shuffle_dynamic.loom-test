@@ -261,29 +261,29 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %item = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %61 = v_mov_b32 0
-  %offset = global_load_b32_saddr %61, %input_view
+  %55 = v_mov_b32 0
+  %offset = global_load_b32_saddr %55, %input_view
   %value = s_mov_b32 1
-  %65 = v_cmp_lt_u32_src1_inline %offset {rhs = 32}
-  %66 = v_cndmask_b32_src0_inline %offset, %65 {false_value = 0}
-  %67 = v_and_b32_src0_inline %item, 31
-  %68 = v_xor_b32 %67, %66
-  %69 = v_cndmask_b32 %67, %68, %65
-  %70 = v_mov_b32_copy %value
-  %71 = s_mov_b64_exec_read
-  %72 = slice %71[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %73 = v_mov_b32_copy %72
-  %74 = v_lshrrev_b32 %69, %73
-  %75 = v_and_b32_src0_inline %74, 1
-  %77 = v_cmp_ne_i32 %75, %61
-  %78 = v_lshlrev_b32_src0_inline %69, 2
-  %shuffle = ds_bpermute_b32 %78, %70
-  %valid = s_and_b64 %65, %77
+  %59 = v_cmp_lt_u32_src1_inline %offset {rhs = 32}
+  %60 = v_cndmask_b32_src0_inline %offset, %59 {false_value = 0}
+  %61 = v_and_b32_src0_inline %item, 31
+  %62 = v_xor_b32 %61, %60
+  %63 = v_cndmask_b32 %61, %62, %59
+  %64 = v_mov_b32_copy %value
+  %65 = s_mov_b64_exec_read
+  %66 = slice %65[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %67 = v_mov_b32_copy %66
+  %68 = v_lshrrev_b32 %63, %67
+  %69 = v_and_b32_src0_inline %68, 1
+  %71 = v_cmp_ne_i32 %69, %55
+  %72 = v_lshlrev_b32_src0_inline %63, 2
+  %shuffle = ds_bpermute_b32 %72, %64
+  %valid = s_and_b64 %59, %71
   %selected = v_cndmask_b32_src0_inline %shuffle, %valid {false_value = 0}
   %valid_bits = v_cndmask_b32_src0_lit_src1_inline %valid {imm32 = 0, true_value = 1}
-  %83 = v_lshlrev_b32_src0_inline %item, 3
-  global_store_b32_saddr %83, %selected, %output_view
-  global_store_b32_saddr %83, %valid_bits, %output_view {offset = 4}
+  %77 = v_lshlrev_b32_src0_inline %item, 3
+  global_store_b32_saddr %77, %selected, %output_view
+  global_store_b32_saddr %77, %valid_bits, %output_view {offset = 4}
   return
 }
 

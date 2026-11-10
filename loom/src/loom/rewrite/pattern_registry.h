@@ -46,7 +46,9 @@ struct loom_rewrite_pattern_t {
   // Operation kind this pattern can rewrite.
   loom_op_kind_t root_kind;
 
-  // Callback that matches and optionally rewrites the root operation.
+  // Optional callback that matches and rewrites the root operation. A pattern
+  // may instead provide only |prepare| when it exists solely to batch an
+  // action at a caller-selected coherent-fact boundary.
   loom_rewrite_pattern_fn_t match_and_rewrite;
 
   // Optional immutable pattern-specific data.
@@ -199,9 +201,9 @@ loom_rewrite_pattern_registry_lookup_kind(
   };
 }
 
-// Applies the patterns rooted at |op->kind| in registry order and stops after
-// the first successful rewrite. Patterns for other operation kinds are never
-// called.
+// Applies ordinary callbacks rooted at |op->kind| in registry order and stops
+// after the first successful rewrite. Preparation-only patterns and patterns
+// for other operation kinds are never called.
 iree_status_t loom_rewrite_pattern_registry_apply(
     const loom_rewrite_pattern_registry_t* registry, void* context,
     loom_op_t* op, loom_rewriter_t* rewriter, bool* out_changed);

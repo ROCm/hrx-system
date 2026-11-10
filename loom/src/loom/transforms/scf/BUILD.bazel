@@ -44,6 +44,19 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "cleanup_patterns",
+    srcs = ["cleanup_patterns.c"],
+    hdrs = ["cleanup_patterns.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/rewrite:pattern_registry",
+        "//loom/src/loom/rewrite:rewriter",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "scf_memory",
     srcs = ["scf_memory.c"],
     hdrs = ["scf_memory.h"],

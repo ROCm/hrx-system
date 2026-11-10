@@ -14,12 +14,15 @@
 #include "loom/ops/index/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/ops.h"
+#include "loom/ops/scf/ops.h"
 #include "loom/ops/special_values.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/pass/value_facts.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/target/facts.h"
+#include "loom/target/facts_builder.h"
+#include "loom/target/test/target_records.h"
 #include "loom/target/types.h"
 #include "loom/transforms/cleanup/configured.h"
 #include "loom/transforms/cleanup/fact_refinement.h"
@@ -54,6 +57,9 @@ class CanonicalizerTest : public ::testing::Test {
     vtables = loom_scalar_dialect_vtables(&vtable_count);
     IREE_ASSERT_OK(loom_context_register_dialect(
         &context_, LOOM_DIALECT_SCALAR, vtables, (uint16_t)vtable_count));
+    vtables = loom_scf_dialect_vtables(&vtable_count);
+    IREE_ASSERT_OK(loom_context_register_dialect(
+        &context_, LOOM_DIALECT_SCF, vtables, (uint16_t)vtable_count));
     vtables = loom_vector_dialect_vtables(&vtable_count);
     IREE_ASSERT_OK(loom_context_register_dialect(
         &context_, LOOM_DIALECT_VECTOR, vtables, (uint16_t)vtable_count));
@@ -109,6 +115,27 @@ class CanonicalizerTest : public ::testing::Test {
     loom_canonicalizer_deinitialize(&canonicalizer);
     loom_pass_value_fact_owner_deinitialize(&value_facts);
     iree_arena_deinitialize(&pass_arena);
+    return status;
+  }
+
+  iree_status_t run_configured_canonicalize(
+      loom_func_like_t function,
+      const loom_target_facts_t* target_facts = nullptr) {
+    loom_cleanup_pattern_registry_storage_t registry_storage = {};
+    IREE_RETURN_IF_ERROR(loom_cleanup_pattern_registry_storage_initialize(
+        loom_cleanup_configured_pattern_provider_set(), iree_allocator_system(),
+        &registry_storage));
+    const loom_cleanup_pattern_registry_t* registry =
+        loom_cleanup_pattern_registry_storage_registry(&registry_storage);
+    const loom_canonicalizer_options_t options = {
+        .patterns = loom_canonicalizer_pattern_registries_from_cleanup_registry(
+            registry),
+        .target_facts = target_facts,
+    };
+    iree_status_t status =
+        run_canonicalize(function, &options, registry->special_value_policy,
+                         registry->fact_refinement_policy);
+    loom_cleanup_pattern_registry_storage_deinitialize(&registry_storage);
     return status;
   }
 
@@ -492,6 +519,106 @@ TEST_F(CanonicalizerTest, NewOpsAddedToWorklist) {
   // neg has no fold or canonicalize. constant has fold but is already a
   // constant — nothing to fold to. Both survive.
   EXPECT_EQ(constant_value(loom_op_operands(use)[0]), 7);
+}
+
+TEST_F(CanonicalizerTest, ConfiguredPreparedPatternsBatchRegionlessRewrites) {
+  const loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_value_id_t input = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_region_entry_block(body_), index_type, &input));
+  const loom_predicate_t input_range = {
+      .kind = LOOM_PREDICATE_RANGE,
+      .arg_count = 3,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
+                   LOOM_PRED_ARG_CONST},
+      .reserved = {},
+      .args = {input, 0, 1024},
+  };
+  loom_op_t* bounded_input = nullptr;
+  IREE_ASSERT_OK(loom_index_assume_build(&builder_, &input, 1, &input_range, 1,
+                                         &index_type, 1, LOOM_LOCATION_UNKNOWN,
+                                         &bounded_input));
+  loom_op_t* divisor = nullptr;
+  IREE_ASSERT_OK(loom_index_constant_build(&builder_, loom_attr_i64(8),
+                                           index_type, LOOM_LOCATION_UNKNOWN,
+                                           &divisor));
+  loom_op_t* quotient = nullptr;
+  IREE_ASSERT_OK(loom_index_div_build(
+      &builder_, loom_op_const_results(bounded_input)[0],
+      loom_index_constant_result(divisor), LOOM_LOCATION_UNKNOWN, &quotient));
+  loom_op_t* product = nullptr;
+  IREE_ASSERT_OK(loom_index_mul_build(
+      &builder_, loom_op_const_results(bounded_input)[0],
+      loom_index_constant_result(divisor), LOOM_LOCATION_UNKNOWN, &product));
+  loom_op_t* remainder = nullptr;
+  IREE_ASSERT_OK(loom_index_rem_build(
+      &builder_, loom_op_const_results(bounded_input)[0],
+      loom_index_constant_result(divisor), LOOM_LOCATION_UNKNOWN, &remainder));
+
+  const loom_type_t i1 = loom_type_scalar(LOOM_SCALAR_TYPE_I1);
+  const loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_value_id_t true_value = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t false_value = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_region_entry_block(body_), i32, &true_value));
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_region_entry_block(body_), i32, &false_value));
+  loom_op_t* condition = nullptr;
+  IREE_ASSERT_OK(loom_scalar_constant_build(&builder_, loom_attr_bool(true), i1,
+                                            LOOM_LOCATION_UNKNOWN, &condition));
+  loom_op_t* select = nullptr;
+  IREE_ASSERT_OK(loom_scf_select_build(
+      &builder_, loom_scalar_constant_result(condition), true_value,
+      false_value, i32, LOOM_LOCATION_UNKNOWN, &select));
+
+  const loom_value_id_t results[] = {
+      loom_index_div_result(quotient),
+      loom_index_mul_result(product),
+      loom_index_rem_result(remainder),
+      loom_scf_select_result(select),
+  };
+  loom_op_t* use = nullptr;
+  IREE_ASSERT_OK(loom_test_use_build(&builder_, results,
+                                     IREE_ARRAYSIZE(results),
+                                     LOOM_LOCATION_UNKNOWN, &use));
+
+  loom_target_facts_t target_facts = {};
+  loom_target_facts_builder_initialize(
+      &loom_test_target_fact_type,
+      loom_target_bundle_table_lookup(&loom_test_target_bundles,
+                                      LOOM_TEST_TARGET_KIND_LOW_CORE),
+      &target_facts);
+  IREE_ASSERT_OK(run_configured_canonicalize(func_like_, &target_facts));
+  const loom_value_id_t shifted = loom_op_const_operands(use)[0];
+  const loom_op_t* shift =
+      loom_value_def_op(loom_module_value(module_, shifted));
+  ASSERT_NE(shift, nullptr);
+  ASSERT_TRUE(loom_index_shrui_isa(shift));
+  const loom_op_t* shift_amount = loom_value_def_op(
+      loom_module_value(module_, loom_index_shrui_rhs(shift)));
+  ASSERT_NE(shift_amount, nullptr);
+  EXPECT_TRUE(loom_index_constant_isa(shift_amount));
+  EXPECT_EQ(loom_attr_as_i64(loom_index_constant_value(shift_amount)), 3);
+  const loom_op_t* product_shift = loom_value_def_op(
+      loom_module_value(module_, loom_op_const_operands(use)[1]));
+  ASSERT_NE(product_shift, nullptr);
+  ASSERT_TRUE(loom_index_shli_isa(product_shift));
+  const loom_op_t* product_shift_amount = loom_value_def_op(
+      loom_module_value(module_, loom_index_shli_rhs(product_shift)));
+  ASSERT_NE(product_shift_amount, nullptr);
+  EXPECT_TRUE(loom_index_constant_isa(product_shift_amount));
+  EXPECT_EQ(loom_attr_as_i64(loom_index_constant_value(product_shift_amount)),
+            3);
+  const loom_op_t* masked = loom_value_def_op(
+      loom_module_value(module_, loom_op_const_operands(use)[2]));
+  ASSERT_NE(masked, nullptr);
+  ASSERT_TRUE(loom_index_andi_isa(masked));
+  const loom_op_t* mask = loom_value_def_op(
+      loom_module_value(module_, loom_index_andi_rhs(masked)));
+  ASSERT_NE(mask, nullptr);
+  EXPECT_TRUE(loom_index_constant_isa(mask));
+  EXPECT_EQ(loom_attr_as_i64(loom_index_constant_value(mask)), 7);
+  EXPECT_EQ(loom_op_const_operands(use)[3], true_value);
 }
 
 class CanonicalizerBatchTest : public CanonicalizerTest,

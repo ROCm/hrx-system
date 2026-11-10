@@ -794,8 +794,8 @@ func.def @sub_floor_multiple_is_remainder(%n: index) -> (index) {
 // ----
 func.def @sub_floor_multiple_is_remainder(%n: index) -> (index) {
   %bounded = index.assume %n [range(%n, 0, 32768)] : index
-  %8 = index.constant 63 : index
-  %tail = index.andi %bounded, %8 : index
+  %10 = index.constant 63 : index
+  %tail = index.andi %bounded, %10 : index
   func.return %tail : index
 }
 
@@ -1710,10 +1710,10 @@ func.def target(@target32) @target_width_32(%x: index) -> (index, index, index, 
   %rotate_wrapped = index.rotli %x, %49 : index
   %48 = index.constant 31 : index
   %rotate_negative = index.rotri %x, %48 : index
-  %46 = index.constant 3 : index
-  %multiply = index.shli %x, %46 : index
   %44 = index.constant 3 : index
-  %outer_shift = index.shli %x, %44 : index
+  %multiply = index.shli %x, %44 : index
+  %46 = index.constant 3 : index
+  %outer_shift = index.shli %x, %46 : index
   func.return %count, %rotate, %x, %rotate_wrapped, %rotate_negative, %multiply, %outer_shift : index, index, index, index, index, index, index
 }
 
@@ -1725,10 +1725,10 @@ func.def target(@target64) @target_width_64(%x: index) -> (index, index, index, 
   %rotate_wrapped = index.rotli %x, %56 : index
   %55 = index.constant 63 : index
   %rotate_negative = index.rotri %x, %55 : index
-  %53 = index.constant 3 : index
-  %multiply = index.shli %x, %53 : index
   %51 = index.constant 3 : index
-  %outer_shift = index.shli %x, %51 : index
+  %multiply = index.shli %x, %51 : index
+  %53 = index.constant 3 : index
+  %outer_shift = index.shli %x, %53 : index
   func.return %count, %rotate, %x, %rotate_wrapped, %rotate_negative, %multiply, %outer_shift : index, index, index, index, index, index, index
 }
 
@@ -1785,8 +1785,8 @@ func.def target(@target32) @target_carrier_range_proofs_32(%x: index, %y: index)
   %comparison = index.cmp slt, %high, %low : index
   %unsigned_comparison = scalar.constant true : i1
   %minimum = index.min %high, %low : index
-  %42 = index.constant 3 : index
-  %quotient = index.shrui %high, %42 : index
+  %40 = index.constant 3 : index
+  %quotient = index.shrui %high, %40 : index
   %shifted = index.shrsi %high, %c1 : index
   %minimum_lo = scalar.constant -2147483648 : i64
   %minimum_hi = scalar.constant 2147483647 : i64
@@ -1799,8 +1799,8 @@ func.def target(@target64) @target_carrier_range_proofs_64(%x: index, %y: index)
   %c1 = index.constant 1 : index
   %comparison = scalar.constant false : i1
   %unsigned_comparison = scalar.constant true : i1
-  %48 = index.constant 3 : index
-  %quotient = index.shrui %high, %48 : index
+  %45 = index.constant 3 : index
+  %quotient = index.shrui %high, %45 : index
   %shifted = index.shrui %high, %c1 : index
   %minimum_lo = scalar.constant 0 : i64
   %minimum_hi = scalar.constant 15 : i64

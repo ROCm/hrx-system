@@ -139,11 +139,11 @@ func.def @deep_index_identity(%value: index) -> (index) {
 func.def @deep_index_identity(%value: index) -> (index) {
   %bounded = index.assume %value [range(%value, 0, 4095)] : index
   %radix = index.constant 16 : index
-  %17 = index.constant 4 : index
-  %quotient = index.shrui %bounded, %17 : index
+  %16 = index.constant 4 : index
+  %quotient = index.shrui %bounded, %16 : index
   %a = index.assume %quotient [ne(%quotient, 0)] : index
-  %15 = index.constant 15 : index
-  %remainder = index.andi %bounded, %15 : index
+  %14 = index.constant 15 : index
+  %remainder = index.andi %bounded, %14 : index
   %result = index.madd %a, %radix, %remainder : index
   func.return %result : index
 }

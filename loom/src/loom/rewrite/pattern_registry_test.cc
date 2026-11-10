@@ -30,6 +30,31 @@ static iree_status_t RecordPattern(const loom_rewrite_pattern_t* pattern,
   return iree_ok_status();
 }
 
+struct PreparedAction {
+  loom_rewrite_action_t action;
+  int tag;
+};
+
+static iree_status_t ApplyPreparation(const loom_rewrite_action_t*,
+                                      loom_rewriter_t*) {
+  return iree_ok_status();
+}
+
+static iree_status_t RecordPreparation(const loom_rewrite_pattern_t* pattern,
+                                       const loom_module_t*,
+                                       const loom_value_fact_table_t*,
+                                       const loom_op_t*,
+                                       iree_arena_allocator_t* arena,
+                                       loom_rewrite_action_t** out_action) {
+  PreparedAction* action = nullptr;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(arena, sizeof(*action), (void**)&action));
+  action->action.apply = ApplyPreparation;
+  action->tag = *static_cast<const int*>(pattern->user_data);
+  *out_action = &action->action;
+  return iree_ok_status();
+}
+
 TEST(RewritePatternRegistryTest, IndexesSparseKindsAndPreservesProviderOrder) {
   static const int kTagOne = 1;
   static const int kTagTwo = 2;
@@ -153,6 +178,52 @@ TEST(RewritePatternRegistryTest, AppliesOnlyTheRootedSpanUntilARewrite) {
       registry, &context, &op, /*rewriter=*/nullptr, &changed));
   EXPECT_FALSE(changed);
   EXPECT_TRUE(context.calls.empty());
+
+  loom_rewrite_pattern_registry_storage_deinitialize(&storage);
+}
+
+TEST(RewritePatternRegistryTest, PreparationOnlyPatternsSkipOrdinaryApply) {
+  static const int kTag = 7;
+  const loom_op_kind_t scalar_kind = LOOM_OP_KIND(LOOM_DIALECT_SCALAR, 3);
+  const loom_rewrite_pattern_t patterns[] = {{
+      .root_kind = scalar_kind,
+      .user_data = &kTag,
+      .prepare = RecordPreparation,
+  }};
+  const loom_rewrite_pattern_provider_t provider = {
+      .name = IREE_SVL("preparation"),
+      .patterns = patterns,
+      .pattern_count = IREE_ARRAYSIZE(patterns),
+  };
+  const loom_rewrite_pattern_provider_t* provider_values[] = {&provider};
+  loom_rewrite_pattern_registry_storage_t storage = {};
+  IREE_ASSERT_OK(loom_rewrite_pattern_registry_storage_initialize(
+      loom_rewrite_pattern_provider_list_make(provider_values,
+                                              IREE_ARRAYSIZE(provider_values)),
+      iree_allocator_system(), &storage));
+  const loom_rewrite_pattern_registry_t* registry =
+      loom_rewrite_pattern_registry_storage_registry(&storage);
+
+  loom_op_t op = {.kind = scalar_kind};
+  ApplyContext context;
+  bool changed = false;
+  IREE_ASSERT_OK(loom_rewrite_pattern_registry_apply(
+      registry, &context, &op, /*rewriter=*/nullptr, &changed));
+  EXPECT_FALSE(changed);
+  EXPECT_TRUE(context.calls.empty());
+
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool, &arena);
+  loom_rewrite_action_t* action = nullptr;
+  IREE_ASSERT_OK(loom_rewrite_pattern_registry_prepare_op(
+      registry, /*module=*/nullptr, /*facts=*/nullptr, &op, &arena, &action));
+  ASSERT_NE(action, nullptr);
+  EXPECT_EQ(action->apply, ApplyPreparation);
+  EXPECT_EQ(reinterpret_cast<PreparedAction*>(action)->tag, kTag);
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&block_pool);
 
   loom_rewrite_pattern_registry_storage_deinitialize(&storage);
 }

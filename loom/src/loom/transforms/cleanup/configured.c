@@ -17,6 +17,7 @@
 #include "loom/transforms/scalar/cleanup_patterns.h"
 #include "loom/transforms/scalar/combine_patterns.h"
 #include "loom/transforms/scf/branch_fact_patterns.h"
+#include "loom/transforms/scf/cleanup_patterns.h"
 #include "loom/transforms/scf/combine_patterns.h"
 #include "loom/transforms/vector/cleanup_patterns.h"
 #include "loom/transforms/vector/combine_patterns.h"
@@ -163,6 +164,9 @@ static const loom_rewrite_pattern_provider_t* const
 
 static const loom_rewrite_pattern_provider_t* const
     kConfiguredFactIndependentPatternProviders[] = {
+        &loom_index_prepared_canonicalization_pattern_provider,
+        &loom_scalar_prepared_canonicalization_pattern_provider,
+        &loom_scf_prepared_canonicalization_pattern_provider,
         &loom_vector_fact_independent_pattern_provider,
 };
 

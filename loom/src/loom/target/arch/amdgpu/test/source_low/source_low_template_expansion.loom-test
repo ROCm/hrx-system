@@ -62,30 +62,30 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@gfx11) abi_layout({constant_co
   %element_count = s_mov_b32 2048
   low.br ^_bb1(%loop_begin: reg<amdgpu.sgpr>)
 ^_bb1(%stripe_base: reg<amdgpu.sgpr>):
-  %56 = s_cmp_lt_i32 %stripe_base, %element_count
-  low.cond_br %56, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+  %59 = s_cmp_lt_i32 %stripe_base, %element_count
+  low.cond_br %59, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
-  %57 = v_mov_b32_copy %stripe_base
-  %channel = v_lshl_add_u32_shift_imm %workitem, %57, 2
-  %59 = v_lshlrev_b32_src0_inline %channel, 2
-  %input_values = global_load_b128_saddr %59, %input_view
-  %weight_values = global_load_b128_saddr %59, %weight_view
-  %63 = slice %input_values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %64 = slice %weight_values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %65 = v_mul_f32 %63, %64
-  %66 = slice %input_values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %67 = slice %weight_values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %60 = v_mov_b32_copy %stripe_base
+  %channel = v_lshl_add_u32_shift_imm %workitem, %60, 2
+  %62 = v_lshlrev_b32_src0_inline %channel, 2
+  %input_values = global_load_b128_saddr %62, %input_view
+  %weight_values = global_load_b128_saddr %62, %weight_view
+  %66 = slice %input_values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %67 = slice %weight_values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %68 = v_mul_f32 %66, %67
-  %69 = slice %input_values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %70 = slice %weight_values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %69 = slice %input_values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %70 = slice %weight_values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %71 = v_mul_f32 %69, %70
-  %72 = slice %input_values[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %73 = slice %weight_values[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %72 = slice %input_values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %73 = slice %weight_values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %74 = v_mul_f32 %72, %73
-  %result = concat(%65, %68, %71, %74) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  global_store_b128_saddr %59, %result, %output_view
-  %77 = s_add_u32 %stripe_base, %stripe_step
-  low.br ^_bb1(%77: reg<amdgpu.sgpr>)
+  %75 = slice %input_values[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %76 = slice %weight_values[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %77 = v_mul_f32 %75, %76
+  %result = concat(%68, %71, %74, %77) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %62, %result, %output_view
+  %80 = s_add_u32 %stripe_base, %stripe_step
+  low.br ^_bb1(%80: reg<amdgpu.sgpr>)
 ^_bb3:
   return
 }

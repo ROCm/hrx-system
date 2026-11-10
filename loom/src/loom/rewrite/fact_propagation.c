@@ -1481,19 +1481,25 @@ static iree_status_t loom_rewriter_publish_fact_invalidations(
   return status;
 }
 
+static bool loom_rewriter_has_pending_fact_publication(
+    const loom_rewriter_pending_facts_t* pending) {
+  return pending->operation_head < pending->operations.count ||
+         pending->summaries.count > pending->summary_floor || pending->ready ||
+         pending->blocks.count ||
+         pending->invalidation_head < pending->invalidations.count;
+}
+
 iree_status_t loom_rewriter_propagate_value_facts(loom_rewriter_t* rewriter) {
   loom_rewriter_pending_facts_t* pending = rewriter->pending_facts;
-  if (!pending) {
+  if (!pending || !loom_rewriter_has_pending_fact_publication(pending)) {
     return iree_ok_status();
   }
+  IREE_TRACE_ZONE_BEGIN_NAMED(z0, "loom_rewriter_propagate_value_facts");
   const bool was_publishing = pending->publishing;
   pending->publishing = true;
   iree_status_t status = loom_rewriter_publish_fact_invalidations(rewriter);
   while (iree_status_is_ok(status) &&
-         (pending->operation_head < pending->operations.count ||
-          pending->summaries.count > pending->summary_floor || pending->ready ||
-          pending->blocks.count ||
-          pending->invalidation_head < pending->invalidations.count)) {
+         loom_rewriter_has_pending_fact_publication(pending)) {
     if (pending->invalidation_head < pending->invalidations.count) {
       // Publishing changed equations can expose another summary dependency.
       // Finish its semantic closure before evaluating the next queued owner.
@@ -1565,5 +1571,6 @@ iree_status_t loom_rewriter_propagate_value_facts(loom_rewriter_t* rewriter) {
   if (!was_publishing) {
     loom_rewriter_clear_fact_invalidations(rewriter);
   }
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
