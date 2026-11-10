@@ -132,7 +132,7 @@ TEST_P(Aie2pArrayBindingTest, VaryingAxesStillRequireAddressDimensions) {
       .rank = static_cast<uint8_t>(dma->address_dimension_count + 1),
   };
   for (uint8_t axis = 0; axis < geometry.rank; ++axis) {
-    geometry.axes[axis] = {2, 1u << (2 * (geometry.rank - axis - 1))};
+    geometry.axes[axis] = {2, UINT64_C(1) << (2 * (geometry.rank - axis - 1))};
   }
   loom_aie2p_array_binding_plan_t plan = {};
   iree_string_view_t reason;

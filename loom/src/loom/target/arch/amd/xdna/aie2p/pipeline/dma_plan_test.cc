@@ -150,11 +150,11 @@ TEST(Aie2pDmaPlanTest, EveryAddressWrapFieldRejectsTruncation) {
         .layout_kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
         .element_bit_count = 32,
         .rank = static_cast<uint8_t>(entry.dimension + 2),
-        .axes = {{2, 2064u << entry.dimension},
-                 {entry.maximum, 1u << entry.dimension}},
+        .axes = {{2, UINT64_C(2064) << entry.dimension},
+                 {entry.maximum, UINT64_C(1) << entry.dimension}},
     };
     for (uint8_t axis = 2; axis < geometry.rank; ++axis) {
-      geometry.axes[axis] = {2, 1u << (geometry.rank - axis - 1)};
+      geometry.axes[axis] = {2, UINT64_C(1) << (geometry.rank - axis - 1)};
     }
     const uint32_t bytes_per_wrap = (2u << entry.dimension) * sizeof(uint32_t);
     uint32_t words[8] = {};
