@@ -377,3 +377,162 @@ low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @signed_pair(%inputs: reg
   %remainder = concat(%508, %510) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %quotient, %remainder
 }
+
+// ====
+// RUN: pass target=amdgpu:gfx11-generic target-legalize{mode=final},canonicalize,cse,dce
+func.def @bounded_chain(%word: i32, %first: i64, %second: i64) -> (i64, i64, i64) {
+  %dividend = scalar.extui %word : i32 to i64
+  %quotient, %remainder = scalar.divremui %dividend, %first : i64
+  %next = scalar.divui %quotient, %second : i64
+  func.return %next, %quotient, %remainder : i64, i64, i64
+}
+
+// ----
+func.def @bounded_chain(%word: i32, %first: i64, %second: i64) -> (i64, i64, i64) {
+  %dividend = scalar.extui %word : i32 to i64
+  %10 = scalar.bitfield.extractu %dividend {offset = 0, width = 32} : i64 -> i32
+  %11 = scalar.bitfield.extractu %first {offset = 0, width = 32} : i64 -> i32
+  %12 = scalar.bitfield.extractu %first {offset = 32, width = 32} : i64 -> i32
+  %13 = scalar.constant 0 : i32
+  %14 = scalar.constant 1 : i32
+  %15 = scalar.cmpi ne, %12, %13 : i32
+  %16 = scf.select %15, %14, %11 : i32
+  %17, %18 = scalar.divremui %10, %16 : i32
+  %19 = scf.select %15, %13, %17 : i32
+  %quotient = scalar.extui %19 : i32 to i64
+  %21 = scf.select %15, %10, %18 : i32
+  %remainder = scalar.extui %21 : i32 to i64
+  %23 = scalar.bitfield.extractu %quotient {offset = 0, width = 32} : i64 -> i32
+  %24 = scalar.bitfield.extractu %second {offset = 0, width = 32} : i64 -> i32
+  %25 = scalar.bitfield.extractu %second {offset = 32, width = 32} : i64 -> i32
+  %28 = scalar.cmpi ne, %25, %13 : i32
+  %29 = scf.select %28, %14, %24 : i32
+  %34 = scalar.divui %23, %29 : i32
+  %32 = scf.select %28, %13, %34 : i32
+  %next = scalar.extui %32 : i32 to i64
+  func.return %next, %quotient, %remainder : i64, i64, i64
+}
+
+// ====
+// RUN: pass target=amdgpu:gfx11-generic target-legalize{mode=final},canonicalize,cse,dce
+func.def @bounded_signed(%input: i64, %divisor: i64) -> (i64, i64) {
+  %dividend = scalar.assume %input [range(%input, -4294967295, 4294967295)] : i64
+  %quotient = scalar.divsi %dividend, %divisor : i64
+  %remainder = scalar.remsi %dividend, %divisor : i64
+  func.return %quotient, %remainder : i64, i64
+}
+
+// ----
+func.def @bounded_signed(%input: i64, %divisor: i64) -> (i64, i64) {
+  %dividend = scalar.assume %input [range(%input, -4294967295, 4294967295)] : i64
+  %28 = scalar.constant 63 : i64
+  %29 = scalar.shrsi %dividend, %28 : i64
+  %30 = scalar.xori %dividend, %29 : i64
+  %31 = scalar.subi %30, %29 : i64
+  %33 = scalar.shrsi %divisor, %28 : i64
+  %34 = scalar.xori %divisor, %33 : i64
+  %35 = scalar.subi %34, %33 : i64
+  %36 = scalar.bitfield.extractu %31 {offset = 0, width = 32} : i64 -> i32
+  %37 = scalar.bitfield.extractu %35 {offset = 0, width = 32} : i64 -> i32
+  %38 = scalar.bitfield.extractu %35 {offset = 32, width = 32} : i64 -> i32
+  %39 = scalar.constant 0 : i32
+  %40 = scalar.constant 1 : i32
+  %41 = scalar.cmpi ne, %38, %39 : i32
+  %42 = scf.select %41, %40, %37 : i32
+  %51 = scalar.divui %36, %42 : i32
+  %45 = scf.select %41, %39, %51 : i32
+  %46 = scalar.extui %45 : i32 to i64
+  %47 = scalar.xori %29, %33 : i64
+  %48 = scalar.xori %46, %47 : i64
+  %quotient = scalar.subi %48, %47 : i64
+  %50 = scalar.remui %36, %42 : i32
+  %24 = scf.select %41, %36, %50 : i32
+  %25 = scalar.extui %24 : i32 to i64
+  %26 = scalar.xori %25, %29 : i64
+  %remainder = scalar.subi %26, %29 : i64
+  func.return %quotient, %remainder : i64, i64
+}
+
+// ====
+// RUN: emit source-low @unrolled_division target=amdgpu:gfx11-generic output=low
+func.def @unrolled_division(%word: i32, %divisor: i64) -> (i64) {
+  %begin = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  %initial = scalar.extui %word : i32 to i64
+  %result = scf.for %position = [%begin to %end step %step](%value = %initial : i64) -> (i64) unroll(%end) {
+    %next = scalar.divui %value, %divisor : i64
+    scf.yield %next : i64
+  }
+  func.return %result : i64
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @unrolled_division(%word: reg<amdgpu.sgpr>, %divisor: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+  %56 = slice %divisor[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %57 = slice %divisor[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %58 = s_mov_b32 0
+  %59 = s_mov_b32 1
+  %60 = s_cmp_lg_i32 %57, %58
+  %61 = s_cselect_b32 %59, %56, %60
+  %64 = v_cvt_f32_u32 %61
+  %65 = v_rcp_f32 %64
+  %66 = v_mul_f32_lit %65, 1333788670
+  %67 = v_cvt_u32_f32 %66
+  %68 = v_readfirstlane_b32 %67
+  %69 = s_mul_i32 %61, %68
+  %70 = s_sub_u32 %58, %69
+  %71 = s_mul_hi_u32 %68, %70
+  %72 = s_add_u32 %68, %71
+  %73 = s_mul_hi_u32 %word, %72
+  %74 = s_mul_i32 %73, %61
+  %75 = s_sub_u32 %word, %74
+  %76 = s_add_u32 %73, %59
+  %77, %78 = s_sub_co_u32 %75, %61
+  %79 = s_cselect_b32 %73, %76, %78
+  %80 = s_cselect_b32 %75, %77, %78
+  %81 = s_add_u32 %79, %59
+  %82, %83 = s_sub_co_u32 %80, %61
+  %84 = s_cselect_b32 %79, %81, %83
+  %86 = s_cselect_b32 %58, %84, %60
+  %90 = s_mul_hi_u32 %86, %72
+  %91 = s_mul_i32 %90, %61
+  %92 = s_sub_u32 %86, %91
+  %93 = s_add_u32 %90, %59
+  %94, %95 = s_sub_co_u32 %92, %61
+  %96 = s_cselect_b32 %90, %93, %95
+  %97 = s_cselect_b32 %92, %94, %95
+  %98 = s_add_u32 %96, %59
+  %99, %100 = s_sub_co_u32 %97, %61
+  %101 = s_cselect_b32 %96, %98, %100
+  %103 = s_cselect_b32 %58, %101, %60
+  %107 = s_mul_hi_u32 %103, %72
+  %108 = s_mul_i32 %107, %61
+  %109 = s_sub_u32 %103, %108
+  %110 = s_add_u32 %107, %59
+  %111, %112 = s_sub_co_u32 %109, %61
+  %113 = s_cselect_b32 %107, %110, %112
+  %114 = s_cselect_b32 %109, %111, %112
+  %115 = s_add_u32 %113, %59
+  %116, %117 = s_sub_co_u32 %114, %61
+  %118 = s_cselect_b32 %113, %115, %117
+  %120 = s_cselect_b32 %58, %118, %60
+  %121 = s_mov_b32 0
+  %next_2 = concat(%120, %121) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  return %next_2
+}
+
+// ====
+// RUN: compile-report target=amdgpu:gfx11-generic target-legalize{mode=final}
+func.def @word_divisor_predecessor(%input: i64, %word_input: i64, %divisor: i64) -> (i64) {
+  %word = scalar.assume %word_input [range(%word_input, 1, 4294967295)] : i64
+  %first = scalar.divui %input, %word : i64
+  %result = scalar.divui %first, %divisor : i64
+  func.return %result : i64
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: target_legalization legal=0 rewritten=2 scalarized=0 target_rewritten=0 reference_rewritten=2 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=2 maximum_created_ops=130
+COMPILE-REPORT: target_legalization[0] function=word_divisor_predecessor source_op=scalar.divui mode=final policy=prefer-native action=rewritten outcome=reference-fallback contract=unsupported legalizer=wide-integer-division strategy=reference bundle=amdgpu-gfx11-generic config=amdgpu.gfx11.generic.core scalarized=false source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=130 erased_ops=9
+COMPILE-REPORT: target_legalization[1] function=word_divisor_predecessor source_op=scalar.divui mode=final policy=prefer-native action=rewritten outcome=reference-fallback contract=unsupported legalizer=wide-integer-division strategy=reference bundle=amdgpu-gfx11-generic config=amdgpu.gfx11.generic.core scalarized=false source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=98 erased_ops=12

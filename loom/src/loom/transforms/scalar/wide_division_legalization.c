@@ -32,6 +32,8 @@ typedef struct loom_scalar_wide_division_match_t {
   loom_scalar_wide_division_result_t result;
   // Whether source operands use signed, truncation-toward-zero semantics.
   bool is_signed;
+  // Whether the dividend's unsigned magnitude fits a single i32 word.
+  bool word_dividend;
   // Positive word divisor bound, or zero for an unrestricted divisor.
   uint32_t divisor_maximum;
   // Largest safe remainder recurrence chunk derived from divisor_maximum.
@@ -74,19 +76,19 @@ static bool loom_scalar_match_wide_division(
       context->fact_table
           ? loom_value_fact_table_lookup(context->fact_table, operands[1])
           : loom_value_facts_unknown();
+  int64_t exact_divisor = 0;
+  if (loom_value_facts_as_exact_i64(divisor_facts, &exact_divisor)) {
+    return false;
+  }
+  const loom_value_facts_t dividend_facts =
+      context->fact_table
+          ? loom_value_fact_table_lookup(context->fact_table, operands[0])
+          : loom_value_facts_unknown();
   if (element_type == LOOM_SCALAR_TYPE_INDEX) {
-    const loom_value_facts_t dividend_facts =
-        context->fact_table
-            ? loom_value_fact_table_lookup(context->fact_table, operands[0])
-            : loom_value_facts_unknown();
     if (!loom_value_facts_is_non_negative(dividend_facts) ||
         !loom_value_facts_is_positive(divisor_facts)) {
       return false;
     }
-  }
-  int64_t exact_divisor = 0;
-  if (loom_value_facts_as_exact_i64(divisor_facts, &exact_divisor)) {
-    return false;
   }
   const bool is_signed = loom_scalar_divsi_isa(op) ||
                          loom_scalar_remsi_isa(op) ||
@@ -102,6 +104,11 @@ static bool loom_scalar_match_wide_division(
       .source_type = source_type,
       .result = result,
       .is_signed = is_signed,
+      .word_dividend =
+          is_signed
+              ? dividend_facts.range_lo >= -(int64_t)UINT32_MAX &&
+                    dividend_facts.range_hi <= UINT32_MAX
+              : loom_value_facts_fit_unsigned_bit_count(dividend_facts, 32),
       .divisor_maximum = divisor_maximum,
       .chunk_width = divisor_maximum <= 1
                          ? 0
@@ -325,6 +332,57 @@ static iree_status_t loom_scalar_wide_division_extend_word(
       builder, value, loom_type_scalar(LOOM_SCALAR_TYPE_I32),
       loom_type_scalar(LOOM_SCALAR_TYPE_I64), location, &extend_op));
   *out_value = loom_scalar_extui_result(extend_op);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_scalar_wide_division_build_word_dividend(
+    loom_builder_t* builder, loom_value_id_t dividend, loom_value_id_t divisor,
+    loom_location_id_t location, loom_value_id_t* out_quotient,
+    loom_value_id_t* out_remainder) {
+  const loom_type_t word_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_value_id_t numerator = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t low = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t high = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_extract_word(
+      builder, dividend, 0, location, &numerator));
+  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_extract_word(
+      builder, divisor, 0, location, &low));
+  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_extract_word(
+      builder, divisor, 32, location, &high));
+  loom_value_id_t zero = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t one = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_build_constant(
+      builder, 0, LOOM_SCALAR_TYPE_I32, location, &zero));
+  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_build_constant(
+      builder, 1, LOOM_SCALAR_TYPE_I32, location, &one));
+  loom_value_id_t wide_divisor = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_build_compare(
+      builder, LOOM_SCALAR_CMPI_PREDICATE_NE, high, zero, location,
+      &wide_divisor));
+  // A nonzero high word makes the divisor larger than the dividend. Its low
+  // word may be zero, so use a harmless word division for that discarded path.
+  // A zero source divisor still reaches division by zero, preserving its
+  // execution condition instead of silently making it a defined operation.
+  loom_value_id_t word_divisor = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_build_select(
+      builder, wide_divisor, one, low, word_type, location, &word_divisor));
+  loom_value_id_t quotient = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t remainder = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_build_divrem(
+      builder, numerator, word_divisor, location, &quotient, &remainder));
+  if (out_quotient) {
+    IREE_RETURN_IF_ERROR(loom_scalar_wide_division_build_select(
+        builder, wide_divisor, zero, quotient, word_type, location, &quotient));
+    IREE_RETURN_IF_ERROR(loom_scalar_wide_division_extend_word(
+        builder, quotient, location, out_quotient));
+  }
+  if (out_remainder) {
+    IREE_RETURN_IF_ERROR(loom_scalar_wide_division_build_select(
+        builder, wide_divisor, numerator, remainder, word_type, location,
+        &remainder));
+    IREE_RETURN_IF_ERROR(loom_scalar_wide_division_extend_word(
+        builder, remainder, location, out_remainder));
+  }
   return iree_ok_status();
 }
 
@@ -874,7 +932,11 @@ static iree_status_t loom_scalar_wide_division_build_results(
   }
   loom_value_id_t quotient = LOOM_VALUE_ID_INVALID;
   loom_value_id_t remainder = LOOM_VALUE_ID_INVALID;
-  if (match->divisor_maximum) {
+  if (match->word_dividend) {
+    IREE_RETURN_IF_ERROR(loom_scalar_wide_division_build_word_dividend(
+        builder, dividend, divisor, location, has_quotient ? &quotient : NULL,
+        has_remainder ? &remainder : NULL));
+  } else if (match->divisor_maximum) {
     loom_value_id_t low = LOOM_VALUE_ID_INVALID;
     loom_value_id_t high = LOOM_VALUE_ID_INVALID;
     loom_value_id_t divisor_word = LOOM_VALUE_ID_INVALID;
@@ -953,6 +1015,36 @@ static iree_status_t loom_scalar_legalize_wide_division(
   if (!loom_scalar_match_wide_division(context, op, &match)) {
     return iree_ok_status();
   }
+  // Authored loop expansion can expose a word-bounded initial value and carry
+  // that bound through successive quotients. Keep the wide operation intact
+  // until that boundary instead of cloning its full-width decomposition.
+  if (context->mode == LOOM_TARGET_LEGALIZATION_MODE_EAGER &&
+      !match.word_dividend) {
+    out_result->action = LOOM_TARGET_LEGALIZER_ACTION_DEFER;
+    return iree_ok_status();
+  }
+  if (!match.word_dividend) {
+    // A queued division can publish a word-extended result before this use is
+    // expanded. Let its rewrite requeue this consumer. Only wait for a source
+    // operation that still needs legalization: a native predecessor need not
+    // rewrite or notify its users at all.
+    const loom_op_t* producer =
+        loom_rewriter_value_defining_op(context->rewriter, match.dividend);
+    loom_scalar_wide_division_match_t producer_match;
+    if (producer &&
+        iree_any_bit_set(producer->flags, LOOM_OP_FLAG_ON_WORKLIST) &&
+        loom_scalar_match_wide_division(context, producer, &producer_match)) {
+      loom_target_contract_query_result_t producer_contract =
+          loom_target_contract_query_result_empty();
+      IREE_RETURN_IF_ERROR(loom_target_legalization_query_contract(
+          context, producer, &producer_contract));
+      if (producer_contract.outcome == LOOM_TARGET_CONTRACT_QUERY_UNHANDLED ||
+          producer_contract.outcome == LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED) {
+        out_result->action = LOOM_TARGET_LEGALIZER_ACTION_DEFER;
+        return iree_ok_status();
+      }
+    }
+  }
 
   loom_rewriter_t* rewriter = context->rewriter;
   loom_builder_set_before(&rewriter->builder, op);
@@ -964,7 +1056,7 @@ static iree_status_t loom_scalar_legalize_wide_division(
   const uint32_t result_count =
       match.result == LOOM_SCALAR_WIDE_DIVISION_PAIR ? 2 : 1;
   if (match.result == LOOM_SCALAR_WIDE_DIVISION_REMAINDER &&
-      match.divisor_maximum) {
+      match.divisor_maximum && !match.word_dividend) {
     loom_value_id_t remainder = LOOM_VALUE_ID_INVALID;
     if (match.chunk_width >= 4) {
       IREE_RETURN_IF_ERROR(loom_scalar_wide_division_build_bounded(
