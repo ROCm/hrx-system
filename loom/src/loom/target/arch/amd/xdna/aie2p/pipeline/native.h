@@ -58,10 +58,27 @@ typedef struct loom_aie2p_native_channel_t {
   uint32_t record_byte_length;
   // Logical payload elements occupy one contiguous byte range in order.
   bool record_dense;
+  // Credit balance accumulated as construction-grouped workers are selected.
+  struct {
+    // Last worker whose cursor counts have not yet been accumulated.
+    uint32_t worker;
+    // Read admissions from finished workers in the current construction.
+    uint64_t reads;
+    // Write admissions from finished workers in the current construction.
+    uint64_t writes;
+    // Every current-construction endpoint has an exact admission count.
+    bool exact;
+    // Every completed construction restores its own credit balance. Final
+    // after all cursor owners finish; independent of runtime multiplicity.
+    bool balanced;
+  } balance;
   // Semaphore containing reusable slot credits.
   uint16_t free_lock;
   // Semaphore containing published record credits.
   uint16_t ready_lock;
+  // First logical user of the physical pair, responsible for startup seeds.
+  // Compatible serial users reuse the restored pair without reseeding it.
+  bool initializes_locks;
   // Single cursor owner and slot movement in each direction.
   struct {
     // Strand advancing the read cursor.
@@ -648,6 +665,9 @@ typedef struct loom_aie2p_native_context_t {
   // Invocation-major per-engine descriptor initialization. NULL when every
   // endpoint finishes a complete ring turn or belongs to root configuration.
   const loom_aie2p_native_endpoint_initialization_t** endpoint_initializers;
+  // Private protocol restoration by construction boundary, allocated only when
+  // retained endpoint counts cannot prove that every credit returns naturally.
+  struct loom_aie2p_native_credit_scope_t* credit_scopes;
   // Physical join selected for each canonical execution schedule row.
   loom_aie2p_native_join_t** joins;
   // Distinct join trees; equal participant sets share one initialized instance.

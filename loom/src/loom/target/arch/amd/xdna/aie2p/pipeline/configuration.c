@@ -10,6 +10,7 @@
 #include "loom/ops/channel/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/configuration_descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/ops/target.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/credits.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/sharing.h"
@@ -957,22 +958,14 @@ iree_status_t loom_aie2p_native_emit_configuration(
   for (iree_host_size_t i = 0; i < realization->invocations.channel_count;
        ++i) {
     const loom_aie2p_native_channel_t* channel = &context->channels[i];
+    if (!channel->initializes_locks) {
+      continue;
+    }
     const loom_xdna_tile_coordinate_t tile =
         context->pool_tiles[channel->pool_index]->coordinate;
-    // A single admission to an ordinary ring debits its initial credit.
-    // Singleton and retained-batch writers instead consume complete turns in
-    // the ordered configuration program.
-    const bool reserve_initial =
-        channel->cursor.writer.worker != UINT32_MAX &&
-        context->workers[channel->cursor.writer.worker].execution ==
-            LOOM_AIE2P_NATIVE_EXECUTION_CONFIGURATION &&
-        channel->cursor.writer.maximum_admissions == 1 &&
-        !channel->replay.record_count;
     IREE_RETURN_IF_ERROR(loom_aie2p_native_config_set_lock(
         &config, tile, channel->free_lock,
-        (channel->replay.record_count ? channel->replay.credits
-                                      : channel->source->capacity) -
-            reserve_initial));
+        loom_aie2p_native_initial_credits(context, channel)));
     IREE_RETURN_IF_ERROR(loom_aie2p_native_config_set_lock(
         &config, tile, channel->ready_lock, 0));
   }

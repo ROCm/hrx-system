@@ -8,6 +8,7 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/credits.h"
 #include "loom/transforms/pipeline/control.h"
 
 static iree_status_t loom_aie2p_native_program_register(
@@ -39,6 +40,16 @@ static iree_status_t loom_aie2p_native_program_boundary(
     if (worker != IREE_HOST_SIZE_MAX) {
       IREE_RETURN_IF_ERROR(loom_aie2p_native_distribution_boundary(
           context, builder, worker, child, before));
+    }
+  }
+  if (child && !before) {
+    IREE_RETURN_IF_ERROR(
+        loom_aie2p_native_emit_credits(context, builder, engine, child, false));
+    if (loom_aie2p_native_credits_require_quiescence(context, child)) {
+      IREE_RETURN_IF_ERROR(
+          loom_aie2p_native_join_boundary(context, builder, engine, scope));
+      IREE_RETURN_IF_ERROR(loom_aie2p_native_emit_credits(context, builder,
+                                                          engine, child, true));
     }
   }
   // Every scope participant joins, including engines absent from this child.

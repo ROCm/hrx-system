@@ -117,6 +117,7 @@ loom_cc_library(
         "channels.c",
         "collective.c",
         "configuration.c",
+        "credits.c",
         "distribution.c",
         "dma.c",
         "dma_resources.c",
@@ -125,6 +126,7 @@ loom_cc_library(
         "phases.c",
         "programs.c",
         "refill.c",
+        "semaphores.c",
         "sharing.c",
         "sram.c",
         "storage.c",
@@ -133,11 +135,13 @@ loom_cc_library(
     ],
     hdrs = [
         "channel_state.h",
+        "credits.h",
         "distribution.h",
         "dma_resources.h",
         "dma_submission.h",
         "native.h",
         "refill.h",
+        "semaphores.h",
         "sharing.h",
         "sram.h",
         "storage.h",
@@ -150,6 +154,7 @@ loom_cc_library(
         "//loom/src/loom/analysis:source_storage_packing",
         "//loom/src/loom/analysis:storage_geometry",
         "//loom/src/loom/analysis/pipeline:execution",
+        "//loom/src/loom/analysis/pipeline:invocations",
         "//loom/src/loom/analysis/pipeline:progress",
         "//loom/src/loom/analysis/pipeline:schedule",
         "//loom/src/loom/codegen/low:builder",
@@ -189,6 +194,19 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "semaphores_test",
+    srcs = ["semaphores_test.cc"],
+    deps = [
+        ":native",
+        "//loom/src/loom/analysis/pipeline:invocations",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/target/arch/amd/xdna/array:facts",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -278,6 +296,17 @@ loom_cc_test(
         ":native",
         "//loom/src/loom/pass:types",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "credits_test",
+    srcs = ["credits_test.cc"],
+    deps = [
+        ":native",
+        "//loom/src/loom/pass:types",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

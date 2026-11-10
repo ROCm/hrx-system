@@ -38,10 +38,10 @@ iree_status_t loom_aie2p_native_sram_publish_helper(
   return loom_aie2p_worker_return(&builder, NULL, 0);
 }
 
-iree_status_t loom_aie2p_native_sram_lock_helper(
-    loom_aie2p_native_context_t* context,
-    const loom_aie2p_native_channel_t* channel, uint16_t lock, bool acquire,
-    uint32_t credits, loom_symbol_ref_t* out_symbol) {
+iree_status_t loom_aie2p_native_sram_lock(
+    loom_aie2p_native_context_t* context, loom_builder_t* builder,
+    loom_region_t* region, const loom_aie2p_native_channel_t* channel,
+    uint16_t lock, bool acquire, uint32_t credits) {
   loom_aie2p_worker_builder_t* code = &context->code;
   const loom_aie2p_native_worker_t* owner =
       &context
@@ -62,34 +62,43 @@ iree_status_t loom_aie2p_native_sram_lock_helper(
       (uint32_t)(loom_xdna_register_field_address(context->family, field,
                                                   tile->coordinate, indices) -
                  origin);
-  loom_builder_t builder;
-  loom_op_t* function;
-  IREE_RETURN_IF_ERROR(loom_aie2p_worker_helper(
-      code, NULL, 0, NULL, 0, &builder, out_symbol, &function));
   loom_value_id_t zero;
-  IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(code, &builder, 0, &zero));
-  loom_region_t* region = loom_low_func_def_body(function);
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(code, builder, 0, &zero));
   loom_block_t *request, *complete;
   IREE_RETURN_IF_ERROR(
       loom_region_append_block(code->module, region, &request));
   IREE_RETURN_IF_ERROR(
       loom_region_append_block(code->module, region, &complete));
   loom_op_t* branch;
-  IREE_RETURN_IF_ERROR(loom_low_br_build(&builder, request, NULL, 0,
+  IREE_RETURN_IF_ERROR(loom_low_br_build(builder, request, NULL, 0,
                                          LOOM_LOCATION_UNKNOWN, &branch));
-  loom_builder_set_block(&builder, request);
+  loom_builder_set_block(builder, request);
   loom_value_id_t success, pending;
   // These addresses have read side effects. Read exactly one word: rounding
   // the address or reading a prefix would execute different lock operations.
   IREE_RETURN_IF_ERROR(loom_aie2p_worker_control_read(
-      code, &builder, owner->control_packets[tile_index],
+      code, builder, owner->control_packets[tile_index],
       owner->control_replies[tile_index], address, 1, &success));
   IREE_RETURN_IF_ERROR(loom_aie2p_worker_binary(
-      code, &builder, AIE2P_CORE_DESCRIPTOR_REF_CMP_EQ_I32, success, zero,
+      code, builder, AIE2P_CORE_DESCRIPTOR_REF_CMP_EQ_I32, success, zero,
       &pending));
   IREE_RETURN_IF_ERROR(loom_low_cond_br_build(
-      &builder, pending, request, complete, LOOM_LOCATION_UNKNOWN, &branch));
-  loom_builder_set_block(&builder, complete);
+      builder, pending, request, complete, LOOM_LOCATION_UNKNOWN, &branch));
+  loom_builder_set_block(builder, complete);
+  return iree_ok_status();
+}
+
+iree_status_t loom_aie2p_native_sram_lock_helper(
+    loom_aie2p_native_context_t* context,
+    const loom_aie2p_native_channel_t* channel, uint16_t lock, bool acquire,
+    uint32_t credits, loom_symbol_ref_t* out_symbol) {
+  loom_builder_t builder;
+  loom_op_t* function;
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_helper(
+      &context->code, NULL, 0, NULL, 0, &builder, out_symbol, &function));
+  IREE_RETURN_IF_ERROR(loom_aie2p_native_sram_lock(
+      context, &builder, loom_low_func_def_body(function), channel, lock,
+      acquire, credits));
   return loom_aie2p_worker_return(&builder, NULL, 0);
 }
 

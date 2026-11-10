@@ -12,6 +12,50 @@
 #include "loom/ops/type_registry.h"
 #include "loom/ops/view/ops.h"
 
+static void loom_aie2p_native_accumulate_cursor_owner(
+    loom_aie2p_native_channel_t* channel) {
+  const loom_aie2p_native_cursor_t* reader = &channel->cursor.reader;
+  const loom_aie2p_native_cursor_t* writer = &channel->cursor.writer;
+  if (reader->worker == channel->balance.worker) {
+    channel->balance.reads += reader->maximum_admissions;
+    channel->balance.exact &= reader->exact_admissions;
+  }
+  if (writer->worker == channel->balance.worker) {
+    channel->balance.writes += writer->maximum_admissions;
+    channel->balance.exact &= writer->exact_admissions;
+  }
+}
+
+void loom_aie2p_native_begin_cursor_owner(
+    loom_aie2p_native_channel_t* channel,
+    const loom_pipeline_invocations_t* invocations, uint32_t worker) {
+  if (channel->balance.worker == worker) {
+    return;
+  }
+  if (channel->balance.worker != UINT32_MAX) {
+    loom_aie2p_native_accumulate_cursor_owner(channel);
+    if (invocations->workers[channel->balance.worker].invocation !=
+        invocations->workers[worker].invocation) {
+      channel->balance.balanced &=
+          channel->balance.exact &&
+          channel->balance.reads == channel->balance.writes;
+      channel->balance.reads = channel->balance.writes = 0;
+      channel->balance.exact = true;
+    }
+  }
+  channel->balance.worker = worker;
+}
+
+void loom_aie2p_native_finish_cursor_owners(
+    loom_aie2p_native_channel_t* channel) {
+  if (channel->balance.worker != UINT32_MAX) {
+    loom_aie2p_native_accumulate_cursor_owner(channel);
+    channel->balance.balanced &=
+        channel->balance.exact &&
+        channel->balance.reads == channel->balance.writes;
+  }
+}
+
 void loom_aie2p_native_cursor_bind(loom_aie2p_native_cursor_t* cursor,
                                    uint64_t capacity, uint32_t worker,
                                    uint32_t maximum_admissions, bool site_exact,

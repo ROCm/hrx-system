@@ -10,6 +10,7 @@
 #include "loom/ops/pipeline/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/semaphores.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/storage.h"
 #include "loom/target/arch/amd/xdna/error_catalog.h"
 #include "loom/target/function_version.h"
@@ -100,8 +101,6 @@ static iree_status_t loom_aie2p_native_select_channels(
           context, source->binding,
           IREE_SV("invocation-owned on-chip channel storage"));
     }
-    loom_aie2p_native_tile_t* owner =
-        context->pool_tiles[allocation->source->pool_index];
     const loom_pipeline_channel_geometry_t* geometry = source->geometry;
     int64_t offset = 0;
     uint64_t extent = 0;
@@ -121,11 +120,6 @@ static iree_status_t loom_aie2p_native_select_channels(
           context, source->binding,
           IREE_SV("specialized byte-addressable channel slot geometry"));
     }
-    if (owner->next_lock + 2 > owner->facts->lock_count) {
-      return loom_aie2p_native_reject(
-          context, source->binding,
-          IREE_SV("a hardware semaphore pair with enough slot credits"));
-    }
     context->channels[i] = (loom_aie2p_native_channel_t){
         .source = source,
         .pool_index = allocation->source->pool_index,
@@ -133,8 +127,7 @@ static iree_status_t loom_aie2p_native_select_channels(
         .byte_stride = (uint32_t)(geometry->slot_bit_stride / 8),
         .record_byte_length = (uint32_t)(geometry->record_bit_span / 8),
         .record_dense = geometry->record_dense,
-        .free_lock = owner->next_lock++,
-        .ready_lock = owner->next_lock++,
+        .balance = {.worker = UINT32_MAX, .exact = true, .balanced = true},
         .cursor = {.reader = {.worker = UINT32_MAX},
                    .writer = {.worker = UINT32_MAX}}};
   }
@@ -253,6 +246,8 @@ static iree_status_t loom_aie2p_native_claim_transport_cursor(
   *out_valid = false;
   loom_aie2p_native_channel_t* channel =
       loom_aie2p_native_channel(context, realization, identity);
+  loom_aie2p_native_begin_cursor_owner(channel, &realization->invocations,
+                                       worker_index);
   loom_aie2p_native_cursor_t* cursor =
       reader ? &channel->cursor.reader : &channel->cursor.writer;
   if (!admissions || admissions > UINT32_MAX) {
@@ -685,6 +680,8 @@ static iree_status_t loom_aie2p_native_select(
           action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE) {
         loom_aie2p_native_channel_t* channel =
             loom_aie2p_native_channel(context, realization, action->channel);
+        loom_aie2p_native_begin_cursor_owner(channel, &realization->invocations,
+                                             (uint32_t)i);
         loom_aie2p_native_cursor_t* cursor =
             action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE
                 ? &channel->cursor.reader
@@ -705,7 +702,8 @@ static iree_status_t loom_aie2p_native_select(
   // slot. All distribution facts are available before credit admission.
   for (iree_host_size_t i = 0; i < realization->invocations.channel_count;
        ++i) {
-    const loom_aie2p_native_channel_t* channel = &context->channels[i];
+    loom_aie2p_native_channel_t* channel = &context->channels[i];
+    loom_aie2p_native_finish_cursor_owners(channel);
     const loom_aie2p_native_tile_t* owner =
         context->pool_tiles[channel->pool_index];
     if (!channel->replay.record_count &&
@@ -716,6 +714,12 @@ static iree_status_t loom_aie2p_native_select(
           IREE_SV("a hardware semaphore pair with enough slot credits"));
     }
   }
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_native_assign_channel_locks(context, realization, out_valid));
+  if (!*out_valid) {
+    return iree_ok_status();
+  }
+  *out_valid = false;
   // The invocation command stream is one sequential engine. Selecting at most
   // one strand preserves concurrency between independently authored strands.
   // Every other strand retains its own execution engine.

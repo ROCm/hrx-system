@@ -91,6 +91,30 @@ loom_test(
 )
 
 loom_test(
+    name = "private_credit_lifetimes_test",
+    srcs = ["private_credit_lifetimes.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [_XDNA_ONE_COLUMN_PROFILE],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/execute:vm_iree_vm"]),
+    variants = {
+        "concurrent_owner": {"case": "concurrent_owner_credits"},
+        "conditional_owner": {"case": "conditional_owner_credits"},
+        "nested_writers": {"case": "nested_writers_credits"},
+        "partial_reader": {"case": "partial_reader_credits"},
+        "sram_archive": {"case": "sram_archive_credits"},
+        "unread_tail": {"case": "unread_tail_credits"},
+    },
+)
+
+loom_test(
+    name = "semaphore_lifetimes_test",
+    srcs = ["semaphore_lifetimes.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [_XDNA_ONE_COLUMN_PROFILE],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/execute:vm_iree_vm"]),
+)
+
+loom_test(
     name = "two_column_test",
     srcs = [
         "channel_fanout.loom",

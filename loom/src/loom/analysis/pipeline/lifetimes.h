@@ -43,6 +43,8 @@ typedef struct loom_pipeline_lifetimes_t {
   const loom_pipeline_lifetime_t* nodes;
   // Number of nodes, including the root at index zero.
   iree_host_size_t count;
+  // OWNER node indexed by the complete graph's construction ordinal.
+  const iree_host_size_t* owners;
   // Whether any serial scope can establish reusable construction lifetimes.
   bool has_serial;
 } loom_pipeline_lifetimes_t;
