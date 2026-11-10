@@ -420,7 +420,6 @@ static iree_status_t loom_bytecode_reader_skip_global_payload(
         IREE_SV("local_value_count"), local_value_count_offset,
         IREE_SV("global_local_value_count_must_cover_all_op_results"));
   }
-  symbol_metadata->local_value_count = local_value_count;
   for (uint64_t i = 0; i < local_value_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_value_def(reader, cursor));
   }
