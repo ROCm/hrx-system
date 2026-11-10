@@ -71,11 +71,12 @@ static inline bool loom_low_schedule_candidate_policy_uses_ready_progress_order(
                            LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_STORAGE);
 }
 
-// Classifies pressure progress from the completed live-unit, storage, and
-// descriptor-frontier facts in |score|.
+// Classifies pressure progress from the completed live-unit and storage facts
+// in |score| and the producer-owned descriptor |frontier_progress|.
 loom_low_schedule_pressure_progress_kind_t
 loom_low_schedule_classify_candidate_pressure_progress(
-    const loom_low_schedule_candidate_score_t* score);
+    const loom_low_schedule_candidate_score_t* score,
+    loom_low_schedule_pressure_progress_kind_t frontier_progress);
 
 // Classifies new debt or bounded downstream demand relative to current
 // persistent pressure. Existing debt alone does not make a candidate risky.

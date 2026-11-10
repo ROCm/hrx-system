@@ -274,3 +274,62 @@ low.func.def target<test.low.core>(@target) @bounded_frontier_keeps_shared_input
 // ----
 block 0 order: 0, 1, 3
 scheduled pressure test.explicit32: peak-live-units=4 peak-live-values=2
+
+// ====
+
+// One store retires one unit while the shared address adds one. Making that
+// neutral frontier ready has no retirement priority over another neutral move.
+// The store effects serialize, so only the first store is unlocked initially.
+// RUN: emit low-schedule-query @cross_bank_transfers_keep_neutral_frontier strategy=resource-stall order=0,1,4 scheduled-pressure=test.phys
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @cross_bank_transfers_keep_neutral_frontier(%held: reg<test.phys x27>, %tail0: reg<test.phys>, %tail1: reg<test.phys>, %tail2: reg<test.phys>, %seed0: reg<test.i32>, %seed1: reg<test.i32>, %seed2: reg<test.i32>) -> (reg<test.i32 x27>, reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %shared = test.const.ptr 0
+  %moved0 = test.move.to.phys %seed0
+  %moved1 = test.move.to.phys %seed1
+  %moved2 = test.move.to.phys %seed2
+  test.store.phys.x1 %shared, %tail0
+  test.store.phys.x1 %shared, %tail1
+  test.store.phys.x1 %shared, %tail2
+  low.schedule.fence
+  %held_result = copy %held : reg<test.phys x27> -> reg<test.i32 x27>
+  %result0 = copy %moved0 : reg<test.phys> -> reg<test.i32>
+  %result1 = copy %moved1 : reg<test.phys> -> reg<test.i32>
+  %result2 = copy %moved2 : reg<test.phys> -> reg<test.i32>
+  return %held_result, %result0, %result1, %result2
+}
+
+// ----
+block 0 order: 1, 0, 4
+scheduled pressure test.phys: peak-live-units=31 peak-live-values=5
+
+// ====
+
+// Cross-bank moves keep aggregate liveness unchanged while growing a nearly
+// full physical bank. The shared address exposes stores that retire that bank.
+// Each store retires two units, repaying the one-unit shared address. A fence
+// keeps unrelated payloads live until these consumers have completed.
+// RUN: emit low-schedule-query @cross_bank_transfers_wait_for_retirement strategy=resource-stall order=0,1,4 scheduled-pressure=test.phys
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @cross_bank_transfers_wait_for_retirement(%held: reg<test.phys x24>, %tail0: reg<test.phys>, %tail1: reg<test.phys>, %tail2: reg<test.phys>, %tail3: reg<test.phys>, %tail4: reg<test.phys>, %tail5: reg<test.phys>, %seed0: reg<test.i32>, %seed1: reg<test.i32>, %seed2: reg<test.i32>) -> (reg<test.i32 x24>, reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %shared = test.const.ptr 0
+  %moved0 = test.move.to.phys %seed0
+  %moved1 = test.move.to.phys %seed1
+  %moved2 = test.move.to.phys %seed2
+  test.store.phys.x2 %shared, %tail0, %tail1
+  test.store.phys.x2 %shared, %tail2, %tail3
+  test.store.phys.x2 %shared, %tail4, %tail5
+  low.schedule.fence
+  %held_result = copy %held : reg<test.phys x24> -> reg<test.i32 x24>
+  %result0 = copy %moved0 : reg<test.phys> -> reg<test.i32>
+  %result1 = copy %moved1 : reg<test.phys> -> reg<test.i32>
+  %result2 = copy %moved2 : reg<test.phys> -> reg<test.i32>
+  return %held_result, %result0, %result1, %result2
+}
+
+// ----
+block 0 order: 0, 4, 1
+scheduled pressure test.phys: peak-live-units=30 peak-live-values=7

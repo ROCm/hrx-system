@@ -248,10 +248,10 @@ static iree_status_t loom_index_publish_remainder_bound(
               loom_value_facts_is_positive(operand_facts[1])
           ? loom_op_const_operands(op)[1]
           : LOOM_VALUE_ID_INVALID;
-  return loom_value_fact_integer_relations_define_strict_upper_bound(
-      context->table, loom_op_const_results(op)[result_index], divisor,
-      &result_facts[result_index], &operand_facts[1],
-      context->publication->changed);
+  return loom_value_fact_integer_relations_define_upper_bounds(
+      context->table, loom_op_const_results(op)[result_index], &divisor,
+      &operand_facts[1], 1, LOOM_SYMBOLIC_INTEGER_RELATION_LT,
+      &result_facts[result_index], context->publication->changed);
 }
 
 iree_status_t loom_index_rem_facts(loom_fact_context_t* context,
@@ -329,7 +329,28 @@ iree_status_t loom_index_madd_facts(loom_fact_context_t* context,
   return iree_ok_status();
 }
 
-LOOM_INDEX_BINARY_FACTS(loom_index_andi_facts, loom_value_facts_andi)
+iree_status_t loom_index_andi_facts(loom_fact_context_t* context,
+                                    const loom_module_t* module,
+                                    const loom_op_t* op,
+                                    const loom_value_facts_t* operand_facts,
+                                    loom_value_facts_t* result_facts) {
+  loom_value_facts_andi(&operand_facts[0], &operand_facts[1], result_facts);
+  if (!context->publication) {
+    return iree_ok_status();
+  }
+  const loom_value_id_t upper_bounds[] = {
+      operand_facts[0].range_lo >= 0 || operand_facts[1].range_hi < 0
+          ? loom_index_andi_lhs(op)
+          : LOOM_VALUE_ID_INVALID,
+      operand_facts[1].range_lo >= 0 || operand_facts[0].range_hi < 0
+          ? loom_index_andi_rhs(op)
+          : LOOM_VALUE_ID_INVALID,
+  };
+  return loom_value_fact_integer_relations_define_upper_bounds(
+      context->table, loom_index_andi_result(op), upper_bounds, operand_facts,
+      IREE_ARRAYSIZE(upper_bounds), LOOM_SYMBOLIC_INTEGER_RELATION_LE,
+      result_facts, context->publication->changed);
+}
 LOOM_INDEX_BINARY_FACTS(loom_index_ori_facts, loom_value_facts_ori)
 LOOM_INDEX_BINARY_FACTS(loom_index_xori_facts, loom_value_facts_xori)
 LOOM_INDEX_BINARY_FACTS(loom_index_shli_facts, loom_value_facts_shli)

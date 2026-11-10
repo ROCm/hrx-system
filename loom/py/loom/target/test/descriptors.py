@@ -1946,6 +1946,16 @@ TEST_LOW_PACKING_RETIRE_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
+TEST_LOW_MOVE_TO_PHYS_DESCRIPTOR = Descriptor(
+    key="test.move.to.phys",
+    mnemonic="test.move.to.phys",
+    semantic_tag="test.move.to.phys",
+    operands=(_phys_result(), _i32_operand("src")),
+    asm_forms=_asm(results=("dst",), operands=("src",)),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
 TEST_LOW_MOVE_TO_PRESSURE_ALIAS32_DESCRIPTOR = Descriptor(
     key="test.move.to.pressure.alias32",
     mnemonic="test.move.to.pressure.alias32",
@@ -2335,6 +2345,34 @@ TEST_LOW_STORE_V4I32_DESCRIPTOR = Descriptor(
     effects=(_STORE_EFFECT,),
     schedule_class=_SCHEDULE_STORE,
     flags=(DescriptorFlag.SIDE_EFFECTING,),
+)
+
+TEST_LOW_STORE_PHYS_DESCRIPTORS = tuple(
+    Descriptor(
+        key=f"test.store.phys.x{unit_count}",
+        mnemonic=f"test.store.phys.x{unit_count}",
+        semantic_tag=f"memory.store.i{32 * unit_count}",
+        operands=(
+            _ptr_resource("address"),
+            *(_phys_operand(f"value{i}") for i in range(unit_count)),
+        ),
+        asm_forms=_asm(operands=("address", *(f"value{i}" for i in range(unit_count)))),
+        effects=(replace(_STORE_EFFECT, width_bits=32 * unit_count),),
+        schedule_class=_SCHEDULE_STORE,
+        flags=(DescriptorFlag.SIDE_EFFECTING,),
+    )
+    for unit_count in (1, 2)
+)
+
+TEST_LOW_STORE_V2PHYS_DESCRIPTOR = replace(
+    TEST_LOW_STORE_PHYS_DESCRIPTORS[1],
+    key="test.store.v2phys",
+    mnemonic="test.store.v2phys",
+    operands=(
+        _ptr_resource("address"),
+        replace(_phys_operand("value"), unit_count=2),
+    ),
+    asm_forms=_asm(operands=("address", "value")),
 )
 
 # Distinct storage spaces exercise the same write contract independently of a
@@ -3340,6 +3378,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_PACKING_EXPAND_DESCRIPTOR,
         TEST_LOW_PACKING_CONFIGURED_EXPAND_DESCRIPTOR,
         TEST_LOW_PACKING_RETIRE_DESCRIPTOR,
+        TEST_LOW_MOVE_TO_PHYS_DESCRIPTOR,
         TEST_LOW_MOVE_TO_PRESSURE_ALIAS32_DESCRIPTOR,
         TEST_LOW_MOVE_FROM_PRESSURE_ALIAS32_X5_DESCRIPTOR,
         TEST_LOW_COMPARE_SCHEDULE_STATE_DESCRIPTOR,
@@ -3367,6 +3406,8 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_LOAD_INDEX_ORDERED_V4I32_DESCRIPTOR,
         TEST_LOW_LOAD_INDEX_V4F32_DESCRIPTOR,
         TEST_LOW_STORE_V4I32_DESCRIPTOR,
+        *TEST_LOW_STORE_PHYS_DESCRIPTORS,
+        TEST_LOW_STORE_V2PHYS_DESCRIPTOR,
         *TEST_LOW_PRIVATE_TRAFFIC_DESCRIPTORS,
         TEST_LOW_CONST_PTR_DESCRIPTOR,
         TEST_LOW_LEASED_CONSUME_I32_DESCRIPTOR,

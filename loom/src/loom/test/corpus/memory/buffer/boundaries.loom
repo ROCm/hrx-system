@@ -392,6 +392,76 @@ func.def @compare_first_difference(%left_storage: buffer, %right_storage: buffer
   func.return
 }
 
+// Aligned roots admit word transfers; complete output comparisons retain the
+// surrounding canaries as well as the copied and filled payloads.
+func.def inline @observe_bulk_length(%input: buffer, %storage: buffer, %length: offset, %pattern: i32, %observations: buffer) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %target = buffer.assume.alignment %storage {minimum_alignment = 4} : buffer
+  %origin = index.constant 16 : offset
+  %fill_origin = index.constant 272 : offset
+  buffer.copy %source[%origin], %target[%origin], %length
+  %equal = buffer.compare %source[%origin], %target[%origin], %length
+  buffer.fill %pattern, %target[%fill_origin], %length : i32
+  %forward = buffer.compare %source[%origin], %target[%fill_origin], %length
+  %reverse = buffer.compare %target[%fill_origin], %source[%origin], %length
+  %observation_origin = index.constant 0 : offset
+  %result = buffer.view %observations[%observation_origin] : buffer -> view<3xi32>
+  view.store %equal, %result[0] : i32, view<3xi32>
+  view.store %forward, %result[1] : i32, view<3xi32>
+  view.store %reverse, %result[2] : i32, view<3xi32>
+  func.return
+}
+
+// Byte counts span the full unsigned word domain during compilation. Word
+// counts retain arithmetic divisibility without a separate alignment promise.
+func.def @unsigned_length_bulk(%input: buffer, %storage: buffer, %raw_length: i32, %pattern: i32, %observations: buffer) {
+  %length = index.cast %raw_length : i32 to offset
+  func.call @observe_bulk_length(%input, %storage, %length, %pattern, %observations) : (buffer, buffer, offset, i32, buffer)
+  func.return
+}
+
+func.def @word_length_bulk(%input: buffer, %storage: buffer, %word_count: i16, %pattern: i32, %observations: buffer) {
+  %wide_count = scalar.extui %word_count : i16 to i64
+  %byte_shift = scalar.constant 2 : i64
+  %wide_bytes = scalar.shli %wide_count, %byte_shift : i64
+  %length = index.cast %wide_bytes : i64 to offset
+  func.call @observe_bulk_length(%input, %storage, %length, %pattern, %observations) : (buffer, buffer, offset, i32, buffer)
+  func.return
+}
+
+func.def @bulk_length_inputs(%trial: index, %bits: i64) -> (i32, i16, i32) {
+  %length = index.cast %trial : index to i32
+  %count = scalar.trunci %length : i32 to i16
+  %pattern = scalar.trunci %bits : i64 to i32
+  func.return %length, %count, %pattern : i32, i16, i32
+}
+
+check.scenario @unsigned_length_bulk_values {
+  check.trial[130](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-128) step(1) : tensor<48xi32>
+    %output = check.generate.fill value(1431655765) : tensor<128xi32>
+    %observations = check.generate.fill value(99) : tensor<3xi32>
+    %bits = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %length, %count, %pattern = check.generate<@bulk_length_inputs>(%trial, %bits) : (index, i64) -> (i32, i16, i32)
+    check.compare<@unsigned_length_bulk>(%input, %output, %length, %pattern, %observations) : (tensor<48xi32>, tensor<128xi32>, i32, i32, tensor<3xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<128xi32>
+      check.expect.bitwise actual(%observations) expected(%observations) : tensor<3xi32>
+    }
+  }
+  check.trial[33](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-128) step(1) : tensor<48xi32>
+    %output = check.generate.fill value(1431655765) : tensor<128xi32>
+    %observations = check.generate.fill value(99) : tensor<3xi32>
+    %bits = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %length, %count, %pattern = check.generate<@bulk_length_inputs>(%trial, %bits) : (index, i64) -> (i32, i16, i32)
+    check.compare<@word_length_bulk>(%input, %output, %count, %pattern, %observations) : (tensor<48xi32>, tensor<128xi32>, i16, i32, tensor<3xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<128xi32>
+      check.expect.bitwise actual(%observations) expected(%observations) : tensor<3xi32>
+    }
+  }
+  check.return
+}
+
 check.scenario @compare_first_difference_values {
   check.trial[130](%trial: index, %entropy: check.entropy) {
     %left = check.generate.fill value(0) : tensor<33xi32>

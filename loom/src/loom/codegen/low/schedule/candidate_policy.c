@@ -344,12 +344,8 @@ static bool loom_low_schedule_candidate_has_ready_pair_affinity(
 
 loom_low_schedule_pressure_progress_kind_t
 loom_low_schedule_classify_candidate_pressure_progress(
-    const loom_low_schedule_candidate_score_t* score) {
-  const bool unlocks_descriptor = iree_any_bit_set(
-      score->flags, LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_DESCRIPTOR);
-  const bool unlocks_non_growing_descriptor = iree_any_bit_set(
-      score->flags,
-      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_NON_GROWING_DESCRIPTOR);
+    const loom_low_schedule_candidate_score_t* score,
+    loom_low_schedule_pressure_progress_kind_t frontier_progress) {
   const bool has_register_activity = score->killed_live_value_count != 0 ||
                                      score->produced_live_value_count != 0;
   if (iree_any_bit_set(
@@ -369,8 +365,8 @@ loom_low_schedule_classify_candidate_pressure_progress(
   if (score->storage_relation_count != 0 && is_non_growing) {
     return LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_STORAGE;
   }
-  if (unlocks_descriptor && unlocks_non_growing_descriptor) {
-    return LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_FRONTIER;
+  if (frontier_progress != LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE) {
+    return frontier_progress;
   }
   if (has_register_activity && is_non_growing) {
     return LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NON_GROWING;
@@ -695,6 +691,28 @@ bool loom_low_schedule_candidate_score_less(
       }
       if (lhs->pressure_cliff_penalty != rhs->pressure_cliff_penalty) {
         return lhs->pressure_cliff_penalty < rhs->pressure_cliff_penalty;
+      }
+      // A retiring consumer frontier can repay its last prerequisite's growth.
+      // Merely preserving pressure cannot: prioritizing a neutral frontier over
+      // ready neutral work can accumulate setup and force rematerialization.
+      // Keep all neutral progress in one tier so aliases cannot form a cycle
+      // through pairwise preferences.
+      const bool lhs_only_transfers_pressure =
+          lhs->pressure_progress_kind ==
+              LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_STORAGE ||
+          lhs->pressure_progress_kind ==
+              LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NON_GROWING ||
+          lhs->pressure_progress_kind ==
+              LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_FRONTIER;
+      const bool rhs_only_transfers_pressure =
+          rhs->pressure_progress_kind ==
+              LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_STORAGE ||
+          rhs->pressure_progress_kind ==
+              LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NON_GROWING ||
+          rhs->pressure_progress_kind ==
+              LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_FRONTIER;
+      if (lhs_only_transfers_pressure != rhs_only_transfers_pressure) {
+        return !lhs_only_transfers_pressure;
       }
       if (pressure_efficiency_order != 0) {
         return pressure_efficiency_order < 0;

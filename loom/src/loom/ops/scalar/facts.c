@@ -213,10 +213,10 @@ static iree_status_t loom_scalar_publish_remainder_bound(
   const loom_value_id_t divisor = loom_value_facts_is_positive(operand_facts[1])
                                       ? loom_op_const_operands(op)[1]
                                       : LOOM_VALUE_ID_INVALID;
-  return loom_value_fact_integer_relations_define_strict_upper_bound(
-      context->table, loom_op_const_results(op)[result_index], divisor,
-      &result_facts[result_index], &operand_facts[1],
-      context->publication->changed);
+  return loom_value_fact_integer_relations_define_upper_bounds(
+      context->table, loom_op_const_results(op)[result_index], &divisor,
+      &operand_facts[1], 1, LOOM_SYMBOLIC_INTEGER_RELATION_LT,
+      &result_facts[result_index], context->publication->changed);
 }
 
 iree_status_t loom_scalar_remsi_facts(loom_fact_context_t* context,
@@ -591,7 +591,23 @@ iree_status_t loom_scalar_andi_facts(loom_fact_context_t* context,
   loom_value_facts_andi(&operand_facts[0], &operand_facts[1], &result_facts[0]);
   loom_scalar_mark_i1_bitwise_distribution(module, loom_scalar_andi_result(op),
                                            &result_facts[0]);
-  return iree_ok_status();
+  if (!context->publication) {
+    return iree_ok_status();
+  }
+  // Clearing bits cannot increase a nonnegative operand. A negative mask
+  // preserves the other operand's sign, so that bound also holds across zero.
+  const loom_value_id_t upper_bounds[] = {
+      operand_facts[0].range_lo >= 0 || operand_facts[1].range_hi < 0
+          ? loom_scalar_andi_lhs(op)
+          : LOOM_VALUE_ID_INVALID,
+      operand_facts[1].range_lo >= 0 || operand_facts[0].range_hi < 0
+          ? loom_scalar_andi_rhs(op)
+          : LOOM_VALUE_ID_INVALID,
+  };
+  return loom_value_fact_integer_relations_define_upper_bounds(
+      context->table, loom_scalar_andi_result(op), upper_bounds, operand_facts,
+      IREE_ARRAYSIZE(upper_bounds), LOOM_SYMBOLIC_INTEGER_RELATION_LE,
+      result_facts, context->publication->changed);
 }
 
 iree_status_t loom_scalar_ori_facts(loom_fact_context_t* context,
