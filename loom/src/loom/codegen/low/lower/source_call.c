@@ -32,6 +32,8 @@ struct loom_low_lower_source_call_plan_t {
 struct loom_low_lower_source_invoke_plan_t {
   // Proved preconditions and their parameter correspondence, if present.
   const loom_low_call_argument_contract_t* argument_contract;
+  // Function-owned receiving conversions, indexed by operand; NULL when empty.
+  const void** operands;
 };
 
 struct loom_low_lower_projected_call_plan_t {
@@ -357,6 +359,27 @@ iree_status_t loom_low_lower_source_call_plan(
   return status;
 }
 
+static iree_status_t loom_low_source_call_prepare_operand(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_slice_t operands, uint16_t operand_index,
+    loom_type_t required_type, const void*** inout_recipes) {
+  const void* recipe = NULL;
+  IREE_RETURN_IF_ERROR(context->policy->control_operand.prepare(
+      context->policy->control_operand.user_data, context, source_op,
+      operands.values[operand_index], required_type, &recipe));
+  if (context->result->error_count != 0 || recipe == NULL) {
+    return iree_ok_status();
+  }
+  if (*inout_recipes == NULL) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
+        context, operands.count, sizeof(**inout_recipes),
+        (void**)inout_recipes));
+    memset(*inout_recipes, 0, operands.count * sizeof(**inout_recipes));
+  }
+  (*inout_recipes)[operand_index] = recipe;
+  return iree_ok_status();
+}
+
 iree_status_t loom_low_lower_source_call_finalize(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_source_call_plan_t* plan) {
@@ -376,25 +399,8 @@ iree_status_t loom_low_lower_source_call_finalize(
             required_type)) {
       continue;
     }
-    const void* recipe = NULL;
-    status = context->policy->control_operand.prepare(
-        context->policy->control_operand.user_data, context, source_op,
-        operands.values[i], required_type, &recipe);
-    if (!iree_status_is_ok(status) || context->result->error_count != 0 ||
-        recipe == NULL) {
-      continue;
-    }
-    if (plan->operands == NULL) {
-      status = loom_low_lower_allocate_function_array(context, operands.count,
-                                                      sizeof(*plan->operands),
-                                                      (void**)&plan->operands);
-      if (iree_status_is_ok(status)) {
-        memset(plan->operands, 0, operands.count * sizeof(*plan->operands));
-      }
-    }
-    if (iree_status_is_ok(status)) {
-      plan->operands[i] = recipe;
-    }
+    status = loom_low_source_call_prepare_operand(
+        context, source_op, operands, i, required_type, &plan->operands);
   }
   return status;
 }
@@ -597,7 +603,7 @@ iree_status_t loom_low_lower_projected_call(
 
 iree_status_t loom_low_lower_source_invoke_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_low_lower_source_invoke_plan_t** out_plan) {
+    loom_low_lower_source_invoke_plan_t** out_plan) {
   *out_plan = NULL;
   loom_module_t* module = loom_low_lower_context_module(context);
   const loom_symbol_ref_t callee_ref = loom_low_invoke_callee(source_op);
@@ -679,6 +685,7 @@ iree_status_t loom_low_lower_source_invoke_plan(
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_plan_data(
       context, sizeof(*plan) + callee_argument_count * sizeof(loom_type_id_t),
       (void**)&plan));
+  *plan = (loom_low_lower_source_invoke_plan_t){0};
   loom_type_id_t* type_ids = (loom_type_id_t*)(plan + 1);
   for (uint16_t i = 0; i < callee_argument_count; ++i) {
     const loom_type_t type =
@@ -722,23 +729,40 @@ iree_status_t loom_low_lower_source_invoke_plan(
 
 iree_status_t loom_low_lower_source_invoke_finalize(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_low_lower_source_invoke_plan_t* plan) {
+    loom_low_lower_source_invoke_plan_t* plan) {
   const loom_value_slice_t operands = loom_low_invoke_operands(source_op);
   const loom_type_id_t* type_ids = (const loom_type_id_t*)(plan + 1);
-  for (uint16_t i = 0; i < operands.count; ++i) {
+  iree_status_t status = iree_ok_status();
+  for (uint16_t i = 0; i < operands.count && iree_status_is_ok(status) &&
+                       context->result->error_count == 0;
+       ++i) {
     const loom_type_t actual_type =
         loom_low_lower_value_binding_type(context, operands.values[i]);
     const loom_type_t expected_type =
         loom_type_table_get(&context->module->types, type_ids[i]);
-    if (!loom_type_equal(actual_type, expected_type)) {
-      return loom_low_source_call_emit_type_error(
+    if (loom_type_equal(actual_type, expected_type)) {
+      continue;
+    }
+    const loom_type_t source_type =
+        loom_module_value_type(context->module, operands.values[i]);
+    const loom_type_t joined_type =
+        context->policy->join_result_type &&
+                context->policy->control_operand.prepare
+            ? context->policy->join_result_type(source_type, actual_type,
+                                                expected_type)
+            : loom_type_none();
+    if (!loom_type_equal(joined_type, expected_type)) {
+      status = loom_low_source_call_emit_type_error(
           context, source_op,
           loom_low_source_call_symbol_name(context->module,
                                            loom_low_invoke_callee(source_op)),
           IREE_SV("operand"), actual_type, expected_type);
+    } else {
+      status = loom_low_source_call_prepare_operand(
+          context, source_op, operands, i, expected_type, &plan->operands);
     }
   }
-  return iree_ok_status();
+  return status;
 }
 
 iree_status_t loom_low_lower_source_invoke(
@@ -759,6 +783,13 @@ iree_status_t loom_low_lower_source_invoke(
         loom_low_lower_lookup_value(context, source_operands.values[i]);
     const loom_type_t expected_type =
         loom_type_table_get(&module->types, type_ids[i]);
+    if (!loom_type_equal(loom_module_value_type(module, low_operands[i]),
+                         expected_type)) {
+      IREE_RETURN_IF_ERROR(context->policy->control_operand.emit(
+          context->policy->control_operand.user_data, context, source_op,
+          source_operands.values[i], low_operands[i], expected_type,
+          plan->operands ? plan->operands[i] : NULL, &low_operands[i]));
+    }
     IREE_RETURN_IF_ERROR(loom_low_lower_materialize_structural_operand(
         context, source_op, i, source_operands.values[i], expected_type,
         &low_operands[i]));

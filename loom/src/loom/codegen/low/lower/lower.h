@@ -1032,10 +1032,12 @@ typedef struct loom_low_lower_policy_t {
   // Joins unequal native return carriers for one semantic result type. The
   // operation is associative and commutative, and the selected carrier must
   // losslessly accept either input through structural operand materialization.
-  // Inputs are mapped register types; none means no supported common carrier.
-  // Missing requires exact equality. This query consumes types only and must
-  // not inspect source IR or alter producer representations. Targets retaining
-  // direct calls must use the same result convention at definitions and calls.
+  // Inputs are register types in the selected representation contract,
+  // including authored Low receivers; none means no supported lossless common
+  // carrier. Missing requires exact equality. This query consumes types only
+  // and must not inspect source IR or alter producer representations. Targets
+  // retaining direct calls must use the same result convention at definitions
+  // and calls.
   loom_type_t (*join_result_type)(loom_type_t source_type, loom_type_t lhs,
                                   loom_type_t rhs);
   // Optionally emits target live-ins or other structural preamble packets.

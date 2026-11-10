@@ -1706,7 +1706,7 @@ static iree_status_t loom_low_lower_plan_op(
   }
 
   if (loom_low_invoke_isa(source_op)) {
-    const loom_low_lower_source_invoke_plan_t* plan = NULL;
+    loom_low_lower_source_invoke_plan_t* plan = NULL;
     IREE_RETURN_IF_ERROR(
         loom_low_lower_source_invoke_plan(context, source_op, &plan));
     if (plan == NULL && candidate_plan == NULL) {
