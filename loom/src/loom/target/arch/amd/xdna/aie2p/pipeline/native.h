@@ -817,8 +817,8 @@ bool loom_aie2p_native_packet_route(
     loom_aie2p_native_context_t* context, uint32_t* next_source,
     loom_xdna_tile_coordinate_t source, loom_xdna_stream_port_t source_port,
     loom_xdna_tile_coordinate_t destination,
-    loom_xdna_stream_port_t destination_port, uint8_t destination_channel,
-    uint8_t packet, struct loom_aie2p_native_delivery_t* delivery);
+    loom_xdna_stream_port_t destination_port, uint8_t packet,
+    struct loom_aie2p_native_delivery_t* delivery);
 
 // Selects and retains a regular ingress stream's external descriptor geometry.
 // Stable-source and exact consumer-completion admission precede this query.

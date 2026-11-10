@@ -126,7 +126,7 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
                                     loom_xdna_stream_port_t source_port,
                                     loom_xdna_tile_coordinate_t destination,
                                     loom_xdna_stream_port_t destination_port,
-                                    uint8_t destination_channel, uint8_t packet,
+                                    uint8_t packet,
                                     loom_aie2p_native_delivery_t* delivery) {
   const iree_host_size_t first = context->routing.route_count;
   const uint32_t index = (*next_source)++;
@@ -159,13 +159,12 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
     }
   }
   const bool routed =
-      delivery
-          ? loom_aie2p_array_route_control(
-                &context->routing, index, control->route, source, destination,
-                destination_port, destination_channel, &delivery->sharing)
-          : loom_aie2p_array_route_stream(
-                &context->routing, index, control->route, source, source_port, 0,
-                destination, destination_port, destination_channel, true);
+      delivery ? loom_aie2p_array_route_control(&context->routing, index,
+                                                control->route, source,
+                                                destination, &delivery->sharing)
+               : loom_aie2p_array_route_stream(
+                     &context->routing, index, control->route, source,
+                     source_port, 0, destination, destination_port, 0, true);
   if (!routed) {
     return false;
   }
@@ -184,7 +183,7 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
 static bool loom_aie2p_native_select_packet_route(
     loom_aie2p_native_context_t* context, iree_host_size_t worker_index,
     const loom_aie2p_native_tile_t* tile, loom_xdna_stream_port_t port,
-    uint8_t channel, uint32_t* next_source, uint8_t* out_packet) {
+    uint32_t* next_source, uint8_t* out_packet) {
   loom_aie2p_native_worker_t* owner =
       &context->workers[context->execution
                             .workers[context->core_engines[worker_index]]];
@@ -194,11 +193,11 @@ static bool loom_aie2p_native_select_packet_route(
   loom_aie2p_native_delivery_t* delivery =
       loom_aie2p_native_route_delivery(context, tile->coordinate);
   const uint8_t packet = loom_aie2p_native_delivery_packet(
-      delivery, owner->packet_mask, tile, port, channel);
+      delivery, owner->packet_mask, tile, port, 0);
   if (packet == UINT8_MAX ||
       !loom_aie2p_native_packet_route(
           context, next_source, context->workers[worker_index].tile->coordinate,
-          LOOM_XDNA_STREAM_PORT_CORE, tile->coordinate, port, channel, packet,
+          LOOM_XDNA_STREAM_PORT_CORE, tile->coordinate, port, packet,
           delivery)) {
     return false;
   }
@@ -234,7 +233,7 @@ iree_status_t loom_aie2p_native_select_control_route(
   const iree_host_size_t index = tile - context->tiles;
   if (owner->control_packets[index] == UINT8_MAX) {
     if (!loom_aie2p_native_select_packet_route(
-            context, worker_index, tile, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0,
+            context, worker_index, tile, LOOM_XDNA_STREAM_PORT_TILE_CONTROL,
             next_source, &owner->control_packets[index])) {
       return loom_aie2p_native_reject(
           context, realization->workers[worker_index].source->declaration,
@@ -247,7 +246,7 @@ iree_status_t loom_aie2p_native_select_control_route(
         !loom_aie2p_native_packet_route(
             context, next_source, tile->coordinate,
             LOOM_XDNA_STREAM_PORT_TILE_CONTROL, worker->tile->coordinate,
-            LOOM_XDNA_STREAM_PORT_CORE, 0, *packet, NULL)) {
+            LOOM_XDNA_STREAM_PORT_CORE, *packet, NULL)) {
       return loom_aie2p_native_reject(
           context, realization->workers[worker_index].source->declaration,
           IREE_SV("a tile-control status reply route to its resident core"));
@@ -703,7 +702,7 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
                   configuration ? shim->coordinate : worker->tile->coordinate,
                   configuration ? LOOM_XDNA_STREAM_PORT_SOUTH
                                 : LOOM_XDNA_STREAM_PORT_CORE,
-                  0, queue->path->completion_packet, NULL)) {
+                  queue->path->completion_packet, NULL)) {
             return loom_aie2p_native_reject(
                 context, request->op,
                 IREE_SV("an independent external-completion return route"));
@@ -712,7 +711,7 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
               !loom_aie2p_native_packet_route(
                   context, next_source, local_tile->coordinate,
                   LOOM_XDNA_STREAM_PORT_TILE_CONTROL, worker->tile->coordinate,
-                  LOOM_XDNA_STREAM_PORT_CORE, 0, queue->path->completion_packet,
+                  LOOM_XDNA_STREAM_PORT_CORE, queue->path->completion_packet,
                   NULL)) {
             return loom_aie2p_native_reject(
                 context, request->op,

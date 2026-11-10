@@ -458,38 +458,6 @@ bool loom_aie2p_array_route_egress(
   return true;
 }
 
-static bool loom_aie2p_array_route_destination(
-    loom_aie2p_array_route_builder_t* builder, uint32_t channel_index,
-    iree_host_size_t root, loom_xdna_tile_coordinate_t destination,
-    loom_xdna_stream_port_t destination_port, uint8_t destination_channel,
-    uint16_t horizontal_row, bool packet,
-    loom_aie2p_array_route_sharing_t* sharing) {
-  const loom_xdna_tile_kind_t destination_kind =
-      loom_xdna_array_tile_facts(builder->family, destination)->kind;
-  const bool shim_dma = destination_kind == LOOM_XDNA_TILE_KIND_SHIM_NOC &&
-                        destination_port == LOOM_XDNA_STREAM_PORT_DMA;
-  const uint8_t shim_channel =
-      shim_dma
-          ? loom_aie2p_array_dma_stream_channel(
-                builder, destination, LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY,
-                destination_channel)
-          : 0;
-  if (!loom_aie2p_array_plan_route(
-          builder, channel_index, root, destination,
-          shim_dma ? LOOM_XDNA_STREAM_PORT_SOUTH : destination_port,
-          shim_dma ? shim_channel : destination_channel, horizontal_row, packet,
-          sharing)) {
-    return false;
-  }
-  if (shim_dma) {
-    loom_aie2p_array_append_route(
-        builder, channel_index, destination,
-        LOOM_AIE2P_ARRAY_SWITCH_KIND_SHIM_MUX, LOOM_XDNA_STREAM_PORT_NORTH,
-        shim_channel, LOOM_XDNA_STREAM_PORT_DMA, destination_channel);
-  }
-  return true;
-}
-
 bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
                                    uint32_t channel_index,
                                    uint32_t source_channel_index,
@@ -519,9 +487,9 @@ bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
                   ->first_row
             : destination.row;
   }
-  return loom_aie2p_array_route_destination(
-      builder, channel_index, *root, destination, destination_port,
-      destination_channel, horizontal_row, packet, NULL);
+  return loom_aie2p_array_plan_route(builder, channel_index, *root, destination,
+                                     destination_port, destination_channel,
+                                     horizontal_row, packet, NULL);
 }
 
 iree_status_t loom_aie2p_array_route_sharing_initialize(
@@ -578,17 +546,15 @@ bool loom_aie2p_array_route_control(loom_aie2p_array_route_builder_t* builder,
                                     uint32_t source_channel_index,
                                     loom_xdna_tile_coordinate_t source,
                                     loom_xdna_tile_coordinate_t destination,
-                                    loom_xdna_stream_port_t destination_port,
-                                    uint8_t destination_channel,
                                     loom_aie2p_array_route_sharing_t* sharing) {
   iree_host_size_t* root = &builder->prefixes.roots[source_channel_index];
   if (*root == IREE_HOST_SIZE_MAX) {
     *root = loom_aie2p_array_create_route_node(builder, source,
                                                LOOM_XDNA_STREAM_PORT_CORE, 0);
   }
-  return loom_aie2p_array_route_destination(
-      builder, channel_index, *root, destination, destination_port,
-      destination_channel, source.row, true, sharing);
+  return loom_aie2p_array_plan_route(builder, channel_index, *root, destination,
+                                     LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0,
+                                     source.row, true, sharing);
 }
 
 bool loom_aie2p_array_route_workers(

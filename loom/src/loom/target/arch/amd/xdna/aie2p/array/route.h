@@ -141,8 +141,6 @@ bool loom_aie2p_array_route_control(loom_aie2p_array_route_builder_t* builder,
                                     uint32_t source_channel_index,
                                     loom_xdna_tile_coordinate_t source,
                                     loom_xdna_tile_coordinate_t destination,
-                                    loom_xdna_stream_port_t destination_port,
-                                    uint8_t destination_channel,
                                     loom_aie2p_array_route_sharing_t* sharing);
 
 #ifdef __cplusplus

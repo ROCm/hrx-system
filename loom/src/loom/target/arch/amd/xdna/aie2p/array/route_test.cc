@@ -327,8 +327,7 @@ TEST(Aie2pRouteTest, ReceiverGrantSharesOnlyItsPayloadSuffix) {
     const uint32_t source = 4 + i;
     const size_t first = routing.route_count;
     ASSERT_TRUE(loom_aie2p_array_route_control(
-        &routing, source, source, control_sources[i], {0, 1},
-        LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, &sharing));
+        &routing, source, source, control_sources[i], {0, 1}, &sharing));
     EXPECT_TRUE(sharing.used);
     // Cross-column control enters the carrier column on its compute row,
     // preserving the path before it joins the granted payload suffix.
@@ -376,9 +375,8 @@ TEST(Aie2pRouteTest, AvailableControlLaneKeepsPayloadUnshared) {
   IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
       &routing, 0, routing.route_count, {0, 1}, &arena, &sharing));
   const size_t first = routing.route_count;
-  ASSERT_TRUE(loom_aie2p_array_route_control(&routing, 1, 1, {0, 2}, {0, 1},
-                                             LOOM_XDNA_STREAM_PORT_TILE_CONTROL,
-                                             0, &sharing));
+  ASSERT_TRUE(
+      loom_aie2p_array_route_control(&routing, 1, 1, {0, 2}, {0, 1}, &sharing));
   EXPECT_FALSE(sharing.used);
   EXPECT_EQ(routing.routes[first].destination_channel, 1);
   iree_arena_deinitialize(&arena);
@@ -411,9 +409,8 @@ TEST(Aie2pRouteTest, GrantedControlContinuesBeyondPayloadReceiver) {
     for (uint32_t i = 0; i < 2; ++i) {
       const uint16_t row = (i == 0) == shim_first ? 0 : 1;
       const size_t first = routing.route_count;
-      ASSERT_TRUE(loom_aie2p_array_route_control(
-          &routing, 4 + i, 4, {0, 2}, {0, row},
-          LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, &sharing));
+      ASSERT_TRUE(loom_aie2p_array_route_control(&routing, 4 + i, 4, {0, 2},
+                                                 {0, row}, &sharing));
       ASSERT_EQ(routing.route_count - first, 3u - row);
       const auto& shared = routing.routes[first];
       EXPECT_EQ(shared.coordinate.row, 2);
@@ -432,29 +429,11 @@ TEST(Aie2pRouteTest, GrantedControlContinuesBeyondPayloadReceiver) {
       EXPECT_EQ(terminal.coordinate.row, row);
       EXPECT_EQ(terminal.destination_port, LOOM_XDNA_STREAM_PORT_TILE_CONTROL);
     }
-    const size_t credit_first = routing.route_count;
-    ASSERT_TRUE(loom_aie2p_array_route_control(&routing, 6, 4, {0, 2}, {0, 0},
-                                               LOOM_XDNA_STREAM_PORT_DMA, 0,
-                                               &sharing));
-    ASSERT_EQ(routing.route_count - credit_first, 4u);
-    const auto& credit_switch = routing.routes[credit_first + 2];
-    EXPECT_EQ(credit_switch.coordinate.row, 0);
-    EXPECT_EQ(credit_switch.source_port, LOOM_XDNA_STREAM_PORT_NORTH);
-    EXPECT_EQ(credit_switch.source_channel, 0);
-    EXPECT_EQ(credit_switch.destination_port, LOOM_XDNA_STREAM_PORT_SOUTH);
-    EXPECT_EQ(credit_switch.destination_channel, 2);
-    const auto& credit_mux = routing.routes[credit_first + 3];
-    EXPECT_EQ(credit_mux.switch_kind, LOOM_AIE2P_ARRAY_SWITCH_KIND_SHIM_MUX);
-    EXPECT_EQ(credit_mux.source_port, LOOM_XDNA_STREAM_PORT_NORTH);
-    EXPECT_EQ(credit_mux.source_channel, 2);
-    EXPECT_EQ(credit_mux.destination_port, LOOM_XDNA_STREAM_PORT_DMA);
-    EXPECT_EQ(credit_mux.destination_channel, 0);
     const size_t other_first = routing.route_count;
     // A second arithmetic core shares the same packet namespace and must
     // retain the already reserved continuation after the payload receiver.
-    ASSERT_TRUE(loom_aie2p_array_route_control(
-        &routing, 7, 7, {0, 3}, {0, 0}, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0,
-        &sharing));
+    ASSERT_TRUE(loom_aie2p_array_route_control(&routing, 7, 7, {0, 3}, {0, 0},
+                                               &sharing));
     ASSERT_EQ(routing.route_count - other_first, 4u);
     for (size_t i = other_first + 1; i < other_first + 3; ++i) {
       EXPECT_EQ(routing.routes[i].destination_port,
@@ -500,9 +479,8 @@ TEST(Aie2pRouteTest, GrantedControlRequiresFreeContinuationBeyondReceiver) {
   const size_t first = routing.route_count;
   // SRAM north/south passthrough preserves the lane. The carrier's lane zero
   // cannot reach the shim now; another free SRAM-to-shim lane is insufficient.
-  EXPECT_FALSE(loom_aie2p_array_route_control(
-      &routing, 5, 5, {0, 2}, {0, 0}, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0,
-      &sharing));
+  EXPECT_FALSE(
+      loom_aie2p_array_route_control(&routing, 5, 5, {0, 2}, {0, 0}, &sharing));
   EXPECT_EQ(routing.route_count, first);
   EXPECT_FALSE(sharing.used);
   iree_arena_deinitialize(&arena);

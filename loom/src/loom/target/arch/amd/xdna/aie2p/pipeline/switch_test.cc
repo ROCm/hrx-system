@@ -172,10 +172,9 @@ class Aie2pControlSwitchTest : public Aie2pSwitchTest {
                   loom_xdna_tile_coordinate_t destination,
                   loom_xdna_stream_port_t destination_port, uint8_t packet,
                   loom_aie2p_native_delivery_t* delivery = nullptr) {
-    ASSERT_TRUE(loom_aie2p_native_packet_route(&context_, &next_source_, source,
-                                               source_port, destination,
-                                               destination_port, 0, packet,
-                                               delivery));
+    ASSERT_TRUE(loom_aie2p_native_packet_route(
+        &context_, &next_source_, source, source_port, destination,
+        destination_port, packet, delivery));
   }
 
   void AddPayloads(uint32_t count, loom_aie2p_native_delivery_t* delivery) {
