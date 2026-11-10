@@ -75,10 +75,24 @@ iree_generated_files(NAME names GENERATOR generator
             )
             configure_project(source, build)
             build_project(build, "fixture_names")
-            self.assertEqual((build / "names.txt").read_text(), "firstlicense")
-            (build / "_deps/sample-src/data/name file.txt").write_text("second")
+            generated_output = build / "names.txt"
+            completion_stamp = build / "CMakeFiles/fixture_names.stamp"
+            self.assertEqual(generated_output.read_text(), "firstlicense")
+            changed_input = build / "_deps/sample-src/data/name file.txt"
+            changed_input.write_text("second")
+            # Ninja can retain a completed output time in its build log. Make
+            # the changed input unambiguously newer than every custom-command
+            # output so invalidation does not depend on one filesystem tick.
+            changed_time = (
+                max(
+                    generated_output.stat().st_mtime_ns,
+                    completion_stamp.stat().st_mtime_ns,
+                )
+                + 2_000_000_000
+            )
+            os.utime(changed_input, ns=(changed_time, changed_time))
             build_project(build, "fixture_names")
-            self.assertEqual((build / "names.txt").read_text(), "secondlicense")
+            self.assertEqual(generated_output.read_text(), "secondlicense")
             result = configure_project(
                 source, root / "missing", "-DINPUT_PATH=absent", expect_failure=True
             )
@@ -253,9 +267,23 @@ iree_generated_files(NAME copy GENERATOR copy_tool
         ) as temporary:
             root = Path(temporary)
             source = root / "source"
-            # Stress Windows object paths while leaving room for the generator's
-            # configuration directory and a complete object-name digest.
-            build = root / "build directory for an embedded CI workspace"
+            # Hold the complete-digest object at a stable limit below legacy
+            # MSVC MAX_PATH. This preserves room for a multi-config generator's
+            # configuration directory without depending on the ambient
+            # temporary root length: `\\RelWithDebInfo` and the terminating NUL
+            # still fit beneath the 260-code-unit limit.
+            object_path_budget = 240
+            object_path_suffix = Path(
+                "owned/package/CMakeFiles/"
+                "fixture_package_library_with_generated_inputs_and_package_identity.dir"
+            ) / ("0" * 32 + ".obj")
+            build_name = "embedded workspace"
+            padding_length = object_path_budget - len(
+                str(root / build_name / object_path_suffix)
+            )
+            self.assertGreaterEqual(padding_length, 0)
+            build = root / (build_name + "x" * padding_length)
+            self.assertEqual(len(str(build / object_path_suffix)), object_path_budget)
             shutil.copytree(FIXTURE, source)
             for template in source.rglob("BUILD.bazel.in"):
                 template.rename(template.with_suffix(""))
