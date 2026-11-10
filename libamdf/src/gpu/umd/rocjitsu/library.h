@@ -13,7 +13,7 @@
 
 // The pinned headers have unversioned structures. This revision is qualified
 // as one ABI; loading another revision requires a matching header update.
-#define AMDF_ROCJITSU_REVISION "235bdb49c44ec34cb17c1abd87bf5dd9d84e3c47"
+#define AMDF_ROCJITSU_REVISION "664fdfad1115688d310594cf232e9b9ac10a3c42"
 
 #define AMDF_ROCJITSU_SYMBOLS(_)                                             \
   _(const char*, rj_get_version_string, (void))                              \

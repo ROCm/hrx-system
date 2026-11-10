@@ -206,7 +206,7 @@ http_file(
 )
 
 # Explicit embedding C API; no simulator runtime is linked into consumers.
-_ROCJITSU_REVISION = "235bdb49c44ec34cb17c1abd87bf5dd9d84e3c47"
+_ROCJITSU_REVISION = "664fdfad1115688d310594cf232e9b9ac10a3c42"
 _ROCJITSU_HEADER_URL = "https://raw.githubusercontent.com/benvanik/rocm-systems/" + _ROCJITSU_REVISION + "/emulation/rocjitsu/lib/rocjitsu/include/"
 
 http_file(
@@ -233,7 +233,7 @@ http_file(
 http_file(
     name = "rocjitsu_rj_vm_header",
     downloaded_file_path = "rocjitsu/vm/rj_vm.h",
-    sha256 = "d5c0a06ee64b1d948cec8896f9926cdf04b110e626b9b58e4df0a261a1a01b11",
+    sha256 = "0bac0110ec31e7ef52293b4814473af44de737cdf1444adb217c3d696d8f9d56",
     url = _ROCJITSU_HEADER_URL + "rocjitsu/vm/rj_vm.h",
 )
 
