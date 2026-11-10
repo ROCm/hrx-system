@@ -1,0 +1,208 @@
+// RUN: pass promote-private-fragments,dce
+
+// Neither dynamic allocation size, dynamic view origin, nor dynamic element
+// coordinates require a byte partition when nothing observes the storage.
+func.def @dynamic_coordinates(%bytes: offset, %origin: offset, %index: index, %value: i32) {
+  %storage = buffer.alloca<private> align(4) %bytes : buffer
+  %view = buffer.view %storage[%origin] : buffer -> view<4xi32>
+  view.store %value, %view[%index] : i32, view<4xi32>
+  func.return
+}
+
+// ----
+func.def @dynamic_coordinates(%bytes: offset, %origin: offset, %index: index, %value: i32) {
+  func.return
+}
+
+// ====
+
+// The MemoryAccess store family shares one admission rule, including masks,
+// scatter offsets, compressed lanes, raw bytes, and overlapping typed views.
+func.def @store_family(%index: index, %bytes: offset, %value: i32, %packet: vector<4xi32>, %mask: vector<4xi1>, %offsets: vector<4xindex>, %matrix: vector<2x2xf32>) {
+  %origin = index.constant 0 : offset
+  %size = index.constant 128 : offset
+  %storage = buffer.alloca<private> align(16) %size : buffer
+  %view = buffer.view %storage[%origin] : buffer -> view<32xi32>
+  view.store %value, %view[0] : i32, view<32xi32>
+  vector.store %packet, %view[%index] : vector<4xi32>, view<32xi32>
+  vector.store.mask %packet, %view[%index], %mask : vector<4xi32>, view<32xi32>, vector<4xi1>
+  vector.store.compress %packet, %view[%index], %mask : vector<4xi32>, view<32xi32>, vector<4xi1>
+  vector.scatter %packet, %view[%index][%offsets] : vector<4xi32>, view<32xi32>, vector<4xindex>
+  vector.scatter.mask %packet, %view[%index][%offsets], %mask : vector<4xi32>, view<32xi32>, vector<4xindex>, vector<4xi1>
+  buffer.store.i8 %value, %storage[%bytes]
+  %rows = buffer.view %storage[%origin] : buffer -> view<4x8xf32>
+  vector.store %matrix, %rows[0, %index] : vector<2x2xf32>, view<4x8xf32>
+  %extent = index.constant 2 : index
+  %tiles = buffer.view %storage[%origin] : buffer -> view<4x8xi32>
+  vector.fragment.store<result> %packet, %tiles[0, 0] shape [%extent, %extent] : vector<4xi32>, view<4x8xi32>
+  func.return
+}
+
+// ----
+func.def @store_family(%index: index, %bytes: offset, %value: i32, %packet: vector<4xi32>, %mask: vector<4xi1>, %offsets: vector<4xindex>, %matrix: vector<2x2xf32>) {
+  func.return
+}
+
+// ====
+
+// Erasing the destination cannot erase an observable producer, even when the
+// producer's SSA result becomes unused. Ordinary loop and branch structure
+// remains responsible for when that producer executes.
+func.def @observable_producer(%input: view<8xi32>, %limit: index, %enabled: i1) {
+  %origin = index.constant 0 : offset
+  %size = index.constant 32 : offset
+  %storage = buffer.alloca<private> align(4) %size : buffer
+  %view = buffer.view %storage[%origin] : buffer -> view<8xi32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%begin to %limit step %step] {
+    scf.if %enabled {
+      %value = view.load<volatile> %input[%i] : view<8xi32> -> i32
+      view.store %value, %view[%i] : i32, view<8xi32>
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @observable_producer(%input: view<8xi32>, %limit: index, %enabled: i1) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%begin to %limit step %step] {
+    scf.if %enabled {
+      %value = view.load<volatile> %input[%i] : view<8xi32> -> i32
+    }
+  }
+  func.return
+}
+
+// ====
+
+// Write-only control flow needs neither reaching-value transports nor a cell
+// partition, including overlapping scalar representations in separate blocks.
+func.def @branch_stores(%condition: i1, %index: index, %integer: i32, %real: f32) {
+  %origin = index.constant 0 : offset
+  %size = index.constant 16 : offset
+  %storage = buffer.alloca<private> align(4) %size : buffer
+  %integers = buffer.view %storage[%origin] : buffer -> view<4xi32>
+  %reals = buffer.view %storage[%origin] : buffer -> view<4xf32>
+  cfg.cond_br %condition, ^integer_path, ^real_path
+^integer_path:
+  view.store %integer, %integers[%index] : i32, view<4xi32>
+  cfg.br ^exit
+^real_path:
+  view.store %real, %reals[%index] : f32, view<4xf32>
+  cfg.br ^exit
+^exit:
+  func.return
+}
+
+// ----
+func.def @branch_stores(%condition: i1, %index: index, %integer: i32, %real: f32) {
+  cfg.cond_br %condition, ^integer_path, ^real_path
+^integer_path:
+  cfg.br ^exit
+^real_path:
+  cfg.br ^exit
+^exit:
+  func.return
+}
+
+// ====
+
+// Any read preserves the allocation-wide contents, regardless of its access
+// family. These dynamic coordinates intentionally prevent cell promotion.
+func.def @live_reads(%index: index, %byte: offset, %value: i32, %values: vector<4xi32>, %initial: vector<8xi32>) -> (i32, vector<4xi32>, i32) {
+  %origin = index.constant 0 : offset
+  %size = index.constant 32 : offset
+  %storage = buffer.alloca<private> align(4) %size : buffer
+  %view = buffer.view %storage[%origin] : buffer -> view<8xi32>
+  vector.store %initial, %view[0] : vector<8xi32>, view<8xi32>
+  view.store %value, %view[%index] : i32, view<8xi32>
+  %scalar = view.load %view[0] : view<8xi32> -> i32
+  %vector_storage = buffer.alloca<private> align(4) %size : buffer
+  %vector_view = buffer.view %vector_storage[%origin] : buffer -> view<8xi32>
+  vector.store %values, %vector_view[%index] : vector<4xi32>, view<8xi32>
+  %packet = vector.load %vector_view[%index] : view<8xi32> -> vector<4xi32>
+  %byte_storage = buffer.alloca<private> align(4) %size : buffer
+  buffer.store.i8 %value, %byte_storage[%byte]
+  %raw = buffer.load.i8.u %byte_storage[%byte]
+  func.return %scalar, %packet, %raw : i32, vector<4xi32>, i32
+}
+
+// ====
+
+// An atomic or volatile observation preserves all sibling stores as well.
+func.def @atomic_observation(%index: index, %value: i32) {
+  %origin = index.constant 0 : offset
+  %size = index.constant 16 : offset
+  %storage = buffer.alloca<private> align(4) %size : buffer
+  %view = buffer.view %storage[%origin] : buffer -> view<4xi32>
+  view.store %value, %view[%index] : i32, view<4xi32>
+  view.atomic.store %value, %view[0] {ordering = relaxed, scope = thread} : i32, view<4xi32>
+  func.return
+}
+
+func.def @volatile_observation(%index: index, %value: i32) {
+  %origin = index.constant 0 : offset
+  %size = index.constant 16 : offset
+  %storage = buffer.alloca<private> align(4) %size : buffer
+  %view = buffer.view %storage[%origin] : buffer -> view<4xi32>
+  view.store %value, %view[%index] : i32, view<4xi32>
+  view.store<volatile> %value, %view[0] : i32, view<4xi32>
+  func.return
+}
+
+// ====
+
+// A view can escape even when no raw-buffer consumer exists. A raw return and
+// an attribute use also preserve identity; neither is a MemoryAccess read.
+func.def @view_escape(%index: index, %value: i32) -> (view<4xi32>) {
+  %origin = index.constant 0 : offset
+  %size = index.constant 16 : offset
+  %storage = buffer.alloca<private> align(4) %size : buffer
+  %view = buffer.view %storage[%origin] : buffer -> view<4xi32>
+  view.store %value, %view[%index] : i32, view<4xi32>
+  func.return %view : view<4xi32>
+}
+
+func.def @buffer_escape(%index: index, %value: i32) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %size = index.constant 16 : offset
+  %storage = buffer.alloca<private> align(4) %size : buffer
+  %view = buffer.view %storage[%origin] : buffer -> view<4xi32>
+  view.store %value, %view[%index] : i32, view<4xi32>
+  func.return %storage : buffer
+}
+
+func.def @attribute_escape(%index: index, %value: i32) -> (i32) {
+  %origin = index.constant 0 : offset
+  %size = index.constant 16 : offset
+  %storage = buffer.alloca<private> align(4) %size : buffer
+  %view = buffer.view %storage[%origin] : buffer -> view<4xi32>
+  view.store %value, %view[%index] : i32, view<4xi32>
+  %result = test.attrs %value {storage = predicates[eq(%view, %view)]} : i32
+  func.return %result : i32
+}
+
+func.def @type_escape(%index: index, %value: i32) -> (i32) {
+  %origin = index.constant 0 : offset
+  %size = index.constant 16 : offset
+  %storage = buffer.alloca<private> align(4) %size : buffer
+  %view = buffer.view %storage[%origin] : buffer -> view<4xi32>
+  view.store %value, %view[%index] : i32, view<4xi32>
+  %result = test.attrs %value {storage = test.array<i32, metadata = {reference = predicates[eq(%view, %view)]}>} : i32
+  func.return %result : i32
+}
+
+// ====
+
+// Workgroup storage may be observed by other invocations.
+func.def @shared_storage(%index: index, %value: i32) {
+  %origin = index.constant 0 : offset
+  %size = index.constant 16 : offset
+  %storage = buffer.alloca<workgroup> align(4) %size : buffer
+  %view = buffer.view %storage[%origin] : buffer -> view<4xi32>
+  view.store %value, %view[%index] : i32, view<4xi32>
+  func.return
+}

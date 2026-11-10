@@ -91,7 +91,6 @@ func.def public @observed(%input: i32) -> (i32) {
 }
 
 // ====
-// RUN: pass inline-callables,canonicalize,cse,promote-private-fragments,canonicalize,cse,dce
 // The helper changes only the selected middle element; both neighboring
 // elements remain independent returned observations.
 struct Observation {
@@ -127,7 +126,6 @@ func.def public @guarded(%input: i32, %enabled: i32) -> (i32, i32, i32) {
 }
 
 // ====
-// RUN: pass inline-callables,canonicalize,cse,promote-private-fragments,canonicalize,cse,dce
 // Each initializer observes completed earlier elements and ordered side
 // effects; the omitted final element is zero-initialized.
 unsigned ordered() {
@@ -143,7 +141,6 @@ func.def public @ordered() -> (i32) {
 }
 
 // ====
-// RUN: pass inline-callables,canonicalize,cse,promote-private-fragments,canonicalize,cse,dce
 // Empty, deduced, parenthesized, converted, and nested-brace array
 // initialization retain their explicit values and zero-filled tails.
 unsigned value_initialized() {
@@ -164,7 +161,6 @@ func.def public @value_initialized() -> (i32) {
 }
 
 // ====
-// RUN: pass inline-callables,canonicalize,cse,promote-private-fragments,canonicalize,cse,dce
 // The output helper initializes the array before dynamic indexing.
 [[loom::inline]] static void fill(unsigned* values, unsigned count) {
   for (unsigned i = 0; i < count; ++i) {
@@ -204,7 +200,6 @@ func.def public @output_parameter(%index: i32) -> (i32) {
 }
 
 // ====
-// RUN: pass inline-callables,canonicalize,cse,promote-private-fragments,canonicalize,cse,dce
 // Signed and wide unsigned subscripts retain their distinct source widths.
 unsigned indexed(int first, unsigned long long second) {
   const unsigned values[4] = {3, 5, 7, 11};
@@ -242,7 +237,6 @@ func.def public @indexed(%first: i32, %second: i64) -> (i32) {
 }
 
 // ====
-// RUN: pass inline-callables,canonicalize,cse,promote-private-fragments,canonicalize,cse,dce
 // A pointer to the whole array aliases its direct element projections.
 unsigned whole_array() {
   unsigned values[3] = {3, 5, 7};
@@ -257,7 +251,6 @@ func.def public @whole_array() -> (i32) {
 }
 
 // ====
-// RUN: pass inline-callables,canonicalize,cse,promote-private-fragments,canonicalize,cse,dce
 // Loop-local arrays are initialized anew, including their omitted element,
 // while continue skips the helper and the observation for that iteration.
 [[loom::inline]] static void update(unsigned* value, unsigned enabled) {
@@ -297,7 +290,6 @@ func.def public @repeated(%count: i32) -> (i32) {
 }
 
 // ====
-// RUN: pass inline-callables,canonicalize,cse,promote-private-fragments,canonicalize,cse,dce
 // Volatile initialization includes the omitted zero elements, and every
 // source observation remains an ordered memory access.
 unsigned volatile_elements() {
@@ -329,4 +321,21 @@ func.def public @volatile_elements() -> (i32) {
   %37 = view.load<volatile> %values_view[%10] : view<3xi32> -> i32
   %38 = scalar.addi %32, %37 : i32
   func.return %38 : i32
+}
+
+// ====
+
+// Computing coordinates into an unread automatic array cannot retain the
+// loop, its input reads, or its division/remainder arithmetic.
+void unused_coordinates(const int* lower, const int* length, unsigned long linear) {
+  int coordinates[3];
+  for (int dimension = 0; dimension < 3; ++dimension) {
+    coordinates[dimension] = static_cast<int>(linear % static_cast<unsigned long>(length[dimension])) + lower[dimension];
+    linear /= static_cast<unsigned long>(length[dimension]);
+  }
+}
+
+// ----
+func.def public @unused_coordinates(%lower: buffer, %lower_byte_offset: offset, %length: buffer, %length_byte_offset: offset, %linear: i64) {
+  func.return
 }

@@ -120,8 +120,10 @@ static iree_status_t loom_private_storage_collect_allocation(
   loom_private_storage_allocation_t* allocation = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(plan->arena, sizeof(*allocation),
                                            (void**)&allocation));
-  *allocation = (loom_private_storage_allocation_t){
-      .op = op, .next = plan->allocations, .selected = true};
+  *allocation = (loom_private_storage_allocation_t){.op = op,
+                                                    .next = plan->allocations,
+                                                    .selected = true,
+                                                    .write_only = true};
   plan->allocations = allocation;
   return iree_ok_status();
 }
@@ -136,38 +138,60 @@ static loom_private_storage_allocation_t* loom_private_storage_allocation(
 
 static iree_status_t loom_private_storage_collect_access(
     loom_private_storage_builder_t* builder, loom_op_t* op,
-    loom_private_storage_allocation_t* allocation,
+    loom_memory_access_t memory, loom_private_storage_allocation_t* allocation,
     loom_private_storage_access_t** out_access) {
+  const loom_trait_flags_t traits =
+      loom_op_effective_traits(builder->plan->module, op);
+  // MemoryAccess describes a footprint, not the absence of other effects or
+  // results. Only an ordinary write with no other observable behavior can be
+  // deleted independently of scalar-cell promotion.
+  const bool erasable_store =
+      loom_memory_access_operation_kind(memory) ==
+          LOOM_MEMORY_ACCESS_OPERATION_STORE &&
+      !op->result_count && !op->region_count &&
+      !loom_traits_has_side_effects(traits & ~LOOM_TRAIT_WRITES_MEMORY);
+  allocation->write_only &= erasable_store;
   const bool load = loom_view_load_isa(op);
+  const bool scalar_access = load || loom_view_store_isa(op);
   loom_view_region_t region;
-  bool derived = false;
-  IREE_RETURN_IF_ERROR(loom_view_region_table_derive_element_region(
-      &builder->regions,
-      load ? loom_view_load_view(op) : loom_view_store_view(op),
-      load ? loom_view_load_static_indices(op)
-           : loom_view_store_static_indices(op),
-      load ? loom_view_load_indices(op) : loom_view_store_indices(op), &region,
-      &derived));
-  loom_type_t type = loom_module_value_type(
-      builder->plan->module,
-      load ? loom_view_load_result(op) : loom_view_store_value(op));
-  if (!derived || !loom_type_is_scalar(type) ||
-      !loom_symbolic_expr_is_constant(&region.begin_byte_offset) ||
-      !loom_symbolic_expr_is_constant(&region.end_byte_offset) ||
-      region.begin_byte_offset.constant < 0 ||
-      region.end_byte_offset.constant > allocation->byte_count ||
-      region.end_byte_offset.constant <= region.begin_byte_offset.constant ||
-      iree_any_bit_set(loom_op_effective_traits(builder->plan->module, op),
-                       LOOM_TRAIT_OBSERVABLE_EFFECT)) {
+  bool exact_cell = false;
+  loom_type_t type = {0};
+  if (scalar_access && !loom_traits_have_observable_effects(traits)) {
+    bool derived = false;
+    IREE_RETURN_IF_ERROR(loom_view_region_table_derive_element_region(
+        &builder->regions,
+        load ? loom_view_load_view(op) : loom_view_store_view(op),
+        load ? loom_view_load_static_indices(op)
+             : loom_view_store_static_indices(op),
+        load ? loom_view_load_indices(op) : loom_view_store_indices(op),
+        &region, &derived));
+    type = loom_module_value_type(
+        builder->plan->module,
+        load ? loom_view_load_result(op) : loom_view_store_value(op));
+    exact_cell =
+        derived && loom_type_is_scalar(type) &&
+        loom_symbolic_expr_is_constant(&region.begin_byte_offset) &&
+        loom_symbolic_expr_is_constant(&region.end_byte_offset) &&
+        region.begin_byte_offset.constant >= 0 &&
+        region.end_byte_offset.constant <= allocation->byte_count &&
+        region.end_byte_offset.constant > region.begin_byte_offset.constant;
+  }
+  if (!exact_cell) {
     allocation->selected = false;
-    return iree_ok_status();
+    if (!erasable_store) {
+      return iree_ok_status();
+    }
   }
   loom_private_storage_access_t* access = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(builder->plan->arena,
                                            sizeof(*access), (void**)&access));
-  *access = (loom_private_storage_access_t){.op = op,
-                                            .next = builder->plan->accesses};
+  *access = (loom_private_storage_access_t){
+      .op = op, .allocation = allocation, .next = builder->plan->accesses};
   builder->plan->accesses = access;
+  *out_access = access;
+  if (!exact_cell) {
+    return iree_ok_status();
+  }
   if (builder->interval_count == builder->interval_capacity) {
     IREE_RETURN_IF_ERROR(iree_arena_grow_array(
         builder->plan->arena, builder->interval_count,
@@ -181,7 +205,6 @@ static iree_status_t loom_private_storage_collect_access(
           .begin = region.begin_byte_offset.constant,
           .end = region.end_byte_offset.constant,
           .type = type};
-  *out_access = access;
   return iree_ok_status();
 }
 
@@ -222,6 +245,7 @@ static iree_status_t loom_private_storage_collect_region(
         }
         if (!supported) {
           allocation->selected = false;
+          allocation->write_only = false;
         }
         if (loom_buffer_view_isa(op) && i == 0) {
           if (plan->projection_count == builder->projection_capacity) {
@@ -231,13 +255,18 @@ static iree_status_t loom_private_storage_collect_region(
                 (void**)&plan->projections));
           }
           plan->projections[plan->projection_count++] = op;
-        } else if ((loom_view_load_isa(op) && i == 0) ||
-                   (loom_view_store_isa(op) && i == 1)) {
-          IREE_RETURN_IF_ERROR(loom_private_storage_collect_access(
-              builder, op, allocation, &access));
         } else {
-          // The entire allocation stays observable through an unmodeled use.
-          allocation->selected = false;
+          const loom_memory_access_t memory =
+              loom_memory_access_cast(plan->module, op);
+          if (loom_memory_access_isa(memory) &&
+              i == memory.op_vtable->memory_access->view_operand_index) {
+            IREE_RETURN_IF_ERROR(loom_private_storage_collect_access(
+                builder, op, memory, allocation, &access));
+          } else {
+            // The entire allocation stays observable through an unmodeled use.
+            allocation->selected = false;
+            allocation->write_only = false;
+          }
         }
       }
       loom_private_storage_allocation_t* allocation =
@@ -318,7 +347,7 @@ static iree_status_t loom_private_storage_partition(
   loom_private_storage_cell_t* previous = NULL;
   for (iree_host_size_t i = 0; i < builder->interval_count; ++i) {
     const loom_private_storage_interval_t* interval = &builder->intervals[i];
-    if (!interval->allocation->selected) {
+    if (!interval->allocation->selected || interval->allocation->write_only) {
       continue;
     }
     loom_private_storage_cell_t* cell = previous;
@@ -1069,6 +1098,7 @@ static iree_status_t loom_private_storage_analyze(
     if (loom_value_has_attribute_uses(loom_module_value(plan->module, value)) ||
         loom_module_value_has_type_uses(plan->module, value)) {
       allocation->selected = false;
+      allocation->write_only = false;
     }
   }
   loom_private_storage_region_t* region = NULL;

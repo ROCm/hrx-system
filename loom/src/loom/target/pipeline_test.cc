@@ -79,10 +79,8 @@ typedef struct PipelineRunCounts {
   int source_loop_unrolling_ordinal = 0;
   // Number of private-fragment promotion pass runs.
   int private_fragment_promotion = 0;
-  // Lexical pass-run ordinal of the first private-fragment promotion.
-  int first_private_fragment_promotion_ordinal = 0;
-  // Lexical pass-run ordinal of the last private-fragment promotion.
-  int last_private_fragment_promotion_ordinal = 0;
+  // Lexical positions of initial, expansion, inlining, and unroll promotion.
+  int private_fragment_promotion_ordinals[7] = {};
   // Number of vector-bank scalar replacement pass runs.
   int vector_bank_sroa = 0;
   // Lexical pass-run ordinal of vector-bank scalar replacement.
@@ -277,13 +275,12 @@ iree_status_t InspectPipelineRun(void* user_data, loom_op_t* op,
     counts->source_loop_unrolling_ordinal = count_context->current_run_ordinal;
   } else if (iree_string_view_equal(key,
                                     IREE_SV("promote-private-fragments"))) {
-    ++counts->private_fragment_promotion;
-    if (counts->first_private_fragment_promotion_ordinal == 0) {
-      counts->first_private_fragment_promotion_ordinal =
+    if (counts->private_fragment_promotion < 7) {
+      counts->private_fragment_promotion_ordinals
+          [counts->private_fragment_promotion] =
           count_context->current_run_ordinal;
     }
-    counts->last_private_fragment_promotion_ordinal =
-        count_context->current_run_ordinal;
+    ++counts->private_fragment_promotion;
   } else if (iree_string_view_equal(key, IREE_SV("sroa-vector-banks"))) {
     ++counts->vector_bank_sroa;
     counts->vector_bank_sroa_ordinal = count_context->current_run_ordinal;
@@ -451,18 +448,36 @@ TEST_F(TargetPipelineTest, ZeroChecksStillMaterializesAuthoredAssertions) {
   EXPECT_LT(counts.view_transport_decomposition_ordinal,
             counts.first_target_legalization_ordinal);
   EXPECT_EQ(counts.source_loop_unrolling, 1);
-  EXPECT_EQ(counts.private_fragment_promotion, 2);
+  EXPECT_EQ(counts.private_fragment_promotion, 7);
   EXPECT_EQ(counts.vector_bank_sroa, 1);
   EXPECT_EQ(counts.sink_single_use_reads, 1);
   EXPECT_GT(counts.scf_to_cfg, 0);
   EXPECT_LT(counts.source_loop_unrolling_ordinal,
             counts.vector_bank_sroa_ordinal);
-  EXPECT_LT(counts.first_private_fragment_promotion_ordinal,
+  EXPECT_LT(counts.private_fragment_promotion_ordinals[0],
             counts.source_loop_unrolling_ordinal);
+  EXPECT_LT(counts.private_fragment_promotion_ordinals[1],
+            counts.final_template_selection_ordinal);
+  EXPECT_LT(counts.final_template_selection_ordinal,
+            counts.private_fragment_promotion_ordinals[2]);
+  EXPECT_LT(counts.private_fragment_promotion_ordinals[2],
+            counts.preparatory_target_inlining_ordinal);
+  EXPECT_LT(counts.preparatory_target_inlining_ordinal,
+            counts.private_fragment_promotion_ordinals[3]);
+  EXPECT_LT(counts.private_fragment_promotion_ordinals[3],
+            counts.pipeline_preparation_ordinals[0]);
+  EXPECT_LT(counts.execution_target_inlining_ordinal,
+            counts.private_fragment_promotion_ordinals[4]);
+  EXPECT_LT(counts.private_fragment_promotion_ordinals[4],
+            counts.execution_cleanup_ordinal);
   EXPECT_LT(counts.vector_bank_sroa_ordinal,
-            counts.last_private_fragment_promotion_ordinal);
-  EXPECT_LT(counts.last_private_fragment_promotion_ordinal,
+            counts.private_fragment_promotion_ordinals[5]);
+  EXPECT_LT(counts.private_fragment_promotion_ordinals[5],
             counts.first_complete_target_legalization_ordinal);
+  EXPECT_LT(counts.resumed_target_inlining_ordinal,
+            counts.private_fragment_promotion_ordinals[6]);
+  EXPECT_LT(counts.private_fragment_promotion_ordinals[6],
+            counts.source_to_low_ordinal);
   EXPECT_LT(counts.vector_bank_sroa_ordinal,
             counts.sink_single_use_reads_ordinal);
   EXPECT_LT(counts.sink_single_use_reads_ordinal,
@@ -541,15 +556,15 @@ TEST_F(TargetPipelineTest, StructuredControlFlowExpandsSourceLoopPolicies) {
 
   const PipelineRunCounts counts = CountPipelineRuns(module.get(), pipeline_op);
   EXPECT_EQ(counts.source_loop_unrolling, 1);
-  EXPECT_EQ(counts.private_fragment_promotion, 2);
+  EXPECT_EQ(counts.private_fragment_promotion, 6);
   EXPECT_EQ(counts.vector_bank_sroa, 1);
-  EXPECT_LT(counts.first_private_fragment_promotion_ordinal,
+  EXPECT_LT(counts.private_fragment_promotion_ordinals[0],
             counts.source_loop_unrolling_ordinal);
   EXPECT_LT(counts.source_loop_unrolling_ordinal,
             counts.vector_bank_sroa_ordinal);
   EXPECT_LT(counts.vector_bank_sroa_ordinal,
-            counts.last_private_fragment_promotion_ordinal);
-  EXPECT_LT(counts.last_private_fragment_promotion_ordinal,
+            counts.private_fragment_promotion_ordinals[5]);
+  EXPECT_LT(counts.private_fragment_promotion_ordinals[5],
             counts.first_complete_target_legalization_ordinal);
   EXPECT_LT(counts.first_complete_target_legalization_ordinal,
             counts.boundary_projection_ordinal);

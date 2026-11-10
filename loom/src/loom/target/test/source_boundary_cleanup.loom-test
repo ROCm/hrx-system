@@ -188,3 +188,86 @@ low.func.def public target<test.low.core>(@target) abi(object_function) @combine
   %result$22 = test.add.i32 %result$20, %result$21
   return %result$22
 }
+
+// ====
+// RUN: emit source-low output=low
+
+// Before inlining, both private arrays escape into the helper. Once its
+// unobserved destination stores disappear, cleanup removes the loop, exposing
+// the source initialization as unobserved too.
+test.target<low_core> @target
+
+func.def inline @copy_coordinates(%source: buffer, %destination: buffer) {
+  %origin = index.constant 0 : offset
+  %input = buffer.view %source[%origin] : buffer -> view<3xi32>
+  %output = buffer.view %destination[%origin] : buffer -> view<3xi32>
+  %start = index.constant 0 : index
+  %count = index.constant 3 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%start to %count step %step] {
+    %value = view.load %input[%i] : view<3xi32> -> i32
+    view.store %value, %output[%i] : i32, view<3xi32>
+  }
+  func.return
+}
+
+func.def public target(@target) @unused_coordinates(%x: i32, %y: i32, %z: i32) {
+  %bytes = index.constant 12 : offset
+  %source = buffer.alloca<private> align(4) %bytes : buffer
+  %destination = buffer.alloca<private> align(4) %bytes : buffer
+  %origin = index.constant 0 : offset
+  %input = buffer.view %source[%origin] : buffer -> view<3xi32>
+  view.store %x, %input[0] : i32, view<3xi32>
+  view.store %y, %input[1] : i32, view<3xi32>
+  view.store %z, %input[2] : i32, view<3xi32>
+  func.call @copy_coordinates(%source, %destination) : (buffer, buffer)
+  func.return
+}
+
+// ----
+low.func.def public target<test.low.core>(@target) abi(object_function) @unused_coordinates(%x: reg<test.i32>, %y: reg<test.i32>, %z: reg<test.i32>) asm {
+  return
+}
+
+// ====
+// RUN: emit source-low output=low control-flow=structured-low
+
+// A helper returning scalarized coordinates has the same storage dependency
+// when the caller discards its results. Structured consumers need no storage.
+test.target<low_core> @target
+
+func.def @read_coordinates(%source: buffer) -> (i32, i32, i32) {
+  %bytes = index.constant 12 : offset
+  %destination = buffer.alloca<private> align(4) %bytes : buffer
+  %origin = index.constant 0 : offset
+  %input = buffer.view %source[%origin] : buffer -> view<3xi32>
+  %output = buffer.view %destination[%origin] : buffer -> view<3xi32>
+  %start = index.constant 0 : index
+  %count = index.constant 3 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%start to %count step %step] {
+    %value = view.load %input[%i] : view<3xi32> -> i32
+    view.store %value, %output[%i] : i32, view<3xi32>
+  }
+  %x = view.load %output[0] : view<3xi32> -> i32
+  %y = view.load %output[1] : view<3xi32> -> i32
+  %z = view.load %output[2] : view<3xi32> -> i32
+  func.return %x, %y, %z : i32, i32, i32
+}
+
+func.def public target(@target) @unused_result(%x: i32, %y: i32, %z: i32) {
+  %bytes = index.constant 12 : offset
+  %source = buffer.alloca<private> align(4) %bytes : buffer
+  %origin = index.constant 0 : offset
+  %input = buffer.view %source[%origin] : buffer -> view<3xi32>
+  view.store %x, %input[0] : i32, view<3xi32>
+  view.store %y, %input[1] : i32, view<3xi32>
+  view.store %z, %input[2] : i32, view<3xi32>
+  %first, %second, %third = func.call @read_coordinates(%source) : (buffer) -> (i32, i32, i32)
+  func.return
+}
+
+// ----
+low.func.def public target<test.low.core>(@target) abi(object_function) @unused_result(%x: reg<test.i32>, %y: reg<test.i32>, %z: reg<test.i32>) asm {
+  return
+}
