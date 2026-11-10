@@ -211,5 +211,82 @@ TEST_F(ConstructionTest, ReturningAlternativeDoesNotInventAnUninitializedPath) {
   EXPECT_FALSE(construction.join(returned, returned).reachable);
 }
 
+TEST_F(ConstructionTest, CleanupReadsFollowDefinitionsOnEveryScopeExit) {
+  Construction callee;
+  callee.declare_parameter(temporary_, 1, /*returned=*/false);
+  callee.read(temporary_, 0, 1);
+  callee.finish_function();
+  callee.resolve({});
+  for (unsigned exit = 0; exit < 4; ++exit) {
+    Construction caller;
+    caller.declare_parameter(result_, 2);
+    caller.enter();
+    caller.defer_call(0);
+    caller.calls()[0].arguments.push_back(
+        {result_, 1, {0, 1}, callee.parameter(temporary_), true, false});
+    caller.assign(result_, 1, 1);
+    switch (exit) {
+      case 0:
+        break;
+      case 1:
+        caller.return_from_function();
+        caller.end_path();
+        break;
+      case 2:
+        caller.break_from_region();
+        break;
+      case 3:
+        caller.continue_iteration();
+        break;
+    }
+    caller.leave(owner_);
+    caller.reach_latch();
+    caller.finish_loop(caller.state());
+    caller.finish_function();
+    caller.resolve({});
+    EXPECT_FALSE(caller.propagate_inputs());
+    EXPECT_TRUE(caller.parameter(result_)->inputs.empty());
+  }
+}
+
+TEST_F(ConstructionTest, ConsumedReceiverWritesDoNotBecomeCallerOutputs) {
+  Construction callee;
+  callee.declare_parameter(result_, 2, /*returned=*/false);
+  callee.assign(result_, 0, 1);
+  callee.read(result_, 0, 2);
+  callee.finish_function();
+  callee.resolve({});
+  EXPECT_TRUE(callee.parameter(result_)->outputs.empty());
+  EXPECT_FALSE(callee.parameter(result_)->inputs.contains({0, 1}));
+  EXPECT_TRUE(callee.parameter(result_)->inputs.contains({1, 2}));
+
+  Construction caller;
+  caller.declare_parameter(result_, 2);
+  caller.defer_call(0);
+  caller.calls()[0].arguments.push_back(
+      {result_, 0, {0, 2}, callee.parameter(result_), true, false});
+  caller.finish_function();
+  EXPECT_FALSE(caller.propagate_outputs());
+  caller.resolve({});
+  EXPECT_TRUE(caller.propagate_inputs());
+  EXPECT_TRUE(caller.parameter(result_)->outputs.empty());
+  EXPECT_FALSE(caller.parameter(result_)->inputs.contains({0, 1}));
+  EXPECT_TRUE(caller.parameter(result_)->inputs.contains({1, 2}));
+}
+
+TEST_F(ConstructionTest, ResolvedAssignmentsRetainTheirSourcePosition) {
+  Construction construction;
+  construction.declare_parameter(result_, 2);
+  construction.assign_indirect(0);
+  construction.read(result_, 1, 1);
+  construction.assignments()[0].destinations.push_back(
+      {result_, {1, 2}, 0, true});
+  construction.finish_function();
+  EXPECT_TRUE(construction.propagate_outputs());
+  construction.resolve({});
+  EXPECT_TRUE(construction.parameter(result_)->inputs.empty());
+  EXPECT_TRUE(construction.parameter(result_)->outputs.contains({1, 2}));
+}
+
 }  // namespace
 }  // namespace loom::cxx_import

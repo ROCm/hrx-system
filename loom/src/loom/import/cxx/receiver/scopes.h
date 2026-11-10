@@ -60,7 +60,8 @@ class ReceiverScopes {
   }
   // Publishes a completed value subobject into the common binding environment.
   void publish(cxx::Symbol* subobject, Value value);
-  // Completes an addressable subobject after its in-place initialization.
+  // Marks a subobject's source lifetime as begun. A value member can still
+  // have pending payload components after default initialization.
   void mark_complete(cxx::Symbol* subobject);
 
  private:

@@ -274,6 +274,15 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
       function_(function),
       temporary_origins_(unit, types) {
   if (function_) {
+    if (auto* object_type = implicit_object_type(unit_, function_)) {
+      receiver_partition_ = types_.record(types_.unqualified(object_type),
+                                          function_->declaration());
+      for (const auto& member : receiver_partition_->members) {
+        construction_.declare_parameter(member.source,
+                                        member.partition->component_count,
+                                        !function_->isDestructor());
+      }
+    }
     auto* closure = cxx::symbol_cast<cxx::ClassSymbol>(function_->parent());
     if (closure && closure->isClosureType()) {
       auto* name = cxx::name_cast<cxx::OperatorId>(function_->name());
@@ -292,6 +301,9 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
       }
       retain_automatic_destruction(parameter, function_->declaration());
     }
+    if (function_->isDestructor()) {
+      retain_subobject_destructions();
+    }
   }
   if (function_ && function_->isConstructor()) {
     auto* definition = function_->declaration();
@@ -303,9 +315,6 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
   }
   accept(body);
   temporary_origins_.finish();
-  if (function_ && function_->isDestructor()) {
-    retain_subobject_destructions();
-  }
   retain_temporary_destructions();
   construction_.finish_function();
 }
@@ -543,6 +552,7 @@ void ControlFlow::postVisit(cxx::AST* ast) {
     cxx::Symbol* owner = nullptr;
     bool reference_member = false;
     if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression)) {
+      record_member_binding_read(expression);
       if (observes_pointer_captures_ && expression != pointer_value_read_) {
         retain_pointer_capture_identity(member->symbol);
       }
@@ -553,6 +563,7 @@ void ControlFlow::postVisit(cxx::AST* ast) {
             field && unit_.typeTraits().is_reference(field->type());
       }
     } else if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
+      record_member_binding_read(expression);
       if (observes_pointer_captures_ && expression != pointer_value_read_) {
         retain_pointer_capture_identity(id->symbol);
       }
@@ -584,13 +595,6 @@ void ControlFlow::postVisit(cxx::AST* ast) {
         construction_.tracked(owner)) {
       if (auto destination = classify_destination(expression)) {
         destinations_.insert_or_assign(expression, *destination);
-        if (reference_member) {
-          // Evaluating a reference member consumes its stored binding, even
-          // when the following expression only writes through that reference.
-          construction_.read(destination->binding,
-                             destination->component_offset,
-                             destination->member->component_count);
-        }
       }
     }
     retain_temporary_destruction(expression);
@@ -977,10 +981,8 @@ void ControlFlow::visit(cxx::AssignmentExpressionAST* ast) {
   }
   if (ordinary_call) {
     retain_call(*direct_operator_call(ast), ast);
-  } else if (auto target = destination(ast->leftExpression)) {
-    construction_.assign(
-        target->binding, target->component_offset,
-        target->member ? target->member->component_count : SIZE_MAX);
+  } else {
+    record_parameter_assignment(ast->leftExpression);
   }
 }
 
@@ -1122,6 +1124,9 @@ void ControlFlow::visit(cxx::ReturnStatementAST* ast) {
 }
 
 void ControlFlow::visit(cxx::CallExpressionAST* ast) {
+  if (ast->isVirtualDispatch) {
+    diagnostics_.reject(unit_, ast, "virtual member dispatch is not admitted");
+  }
   cxx::ASTVisitor::visit(ast);
   if (cxx::resolveBuiltinFunctionKind(
           cxx::ast_cast<cxx::IdExpressionAST>(ast->baseExpression)) ==
@@ -1416,6 +1421,12 @@ void ControlFlow::record_parameter_read(cxx::ExpressionAST* expression) {
   // initializer beneath its frontend conversion (including semantic handles).
   cxx::Initializer initializer(expression);
   auto* value = initializer.singleExpression();
+  if (value && receiver_partition_ && is_current_object(unit_, value)) {
+    for (const auto& member : receiver_partition_->members) {
+      construction_.read(member.source, 0, member.partition->component_count);
+    }
+    return;
+  }
   if (auto selected = value ? retain_destination(value) : std::nullopt) {
     construction_.read(
         selected->binding, selected->component_offset,
@@ -1424,7 +1435,23 @@ void ControlFlow::record_parameter_read(cxx::ExpressionAST* expression) {
 }
 
 void ControlFlow::record_parameter_assignment(cxx::ExpressionAST* expression) {
-  if (!construction_.has_parameters()) {
+  if (!construction_.has_bindings()) {
+    return;
+  }
+  auto* identity = unwrap_object_identity(unit_, expression);
+  cxx::FieldSymbol* field = nullptr;
+  if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(identity)) {
+    field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
+  } else if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(identity)) {
+    field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
+  }
+  if (field && unit_.typeTraits().is_reference(field->type())) {
+    return;
+  }
+  if (receiver_partition_ && is_current_object(unit_, expression)) {
+    for (const auto& member : receiver_partition_->members) {
+      construction_.assign(member.source, 0, member.partition->component_count);
+    }
     return;
   }
   if (auto selected =
@@ -1432,6 +1459,44 @@ void ControlFlow::record_parameter_assignment(cxx::ExpressionAST* expression) {
     construction_.assign(
         selected->binding, selected->component_offset,
         selected->member ? selected->member->component_count : SIZE_MAX);
+  } else {
+    auto target = retain_call_argument(expression);
+    if (!target.inherent_storage &&
+        (!target.identity_bindings.empty() || target.identity_intervals ||
+         !target.reference_calls.empty())) {
+      construction_.assign_indirect(field_assignments_.size());
+      field_assignments_.push_back(std::move(target));
+    }
+  }
+}
+
+void ControlFlow::record_member_binding_read(cxx::ExpressionAST* expression) {
+  cxx::Symbol* field;
+  cxx::List<cxx::Symbol*>* path;
+  if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
+    field = id->symbol;
+    path = id->subobjectPath;
+  } else {
+    auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression);
+    field = member->symbol;
+    path = member->subobjectPath;
+  }
+  if (observes_pointer_captures_) {
+    if (auto captured = captured_object_member(
+            unit_, receiver_partition_->source, path ? path->value : field)) {
+      construction_.read(captured->pointer_field, 0, SIZE_MAX);
+      return;
+    }
+  }
+  if (cxx::symbol_cast<cxx::FieldSymbol>(field) &&
+      unit_.typeTraits().is_reference(field->type())) {
+    // A source access reads the stored binding even when it only writes the
+    // referent. That write never defines or replaces the binding itself.
+    if (auto target = retain_destination(expression)) {
+      construction_.read(
+          target->binding, target->component_offset,
+          target->member ? target->member->component_count : SIZE_MAX);
+    }
   }
 }
 
@@ -2091,13 +2156,15 @@ void ControlFlow::retain_automatic_destruction(cxx::Symbol* binding,
     return;
   }
   automatic_destructions_.emplace(binding, *selected);
-  CallArgument receiver = {
-      .source = nullptr,
-      .write_binding = binding,
-  };
-  append_identity({binding, 0, nullptr}, receiver);
-  retain_destructor_call(*selected, std::move(receiver),
-                         /*current_receiver=*/false, owner);
+  const auto* element = types_.record(selected->element_type, owner);
+  for (size_t index = 0; index < selected->element_count; ++index) {
+    CallArgument receiver = {.source = nullptr, .write_binding = binding};
+    append_identity({binding, index * element->component_count, element},
+                    receiver);
+    construction_.defer_call(calls_.size());
+    retain_destructor_call(*selected, std::move(receiver),
+                           /*current_receiver=*/false, owner);
+  }
 }
 
 void ControlFlow::retain_subobject_destructions() {
@@ -2116,8 +2183,30 @@ void ControlFlow::retain_subobject_destructions() {
       continue;
     }
     subobject_destructions_.push_back({member.source, *selected});
-    retain_destructor_call(*selected, std::nullopt,
-                           /*current_receiver=*/true, owner);
+    const auto* element = types_.record(selected->element_type, owner);
+    for (size_t index = 0; index < selected->element_count; ++index) {
+      CallArgument receiver = {
+          .source = nullptr,
+          .write_binding = member.source,
+      };
+      append_identity(
+          {member.source, index * element->component_count, element}, receiver);
+      construction_.defer_call(calls_.size());
+      retain_destructor_call(*selected, std::move(receiver),
+                             /*current_receiver=*/false, owner);
+    }
+  }
+}
+
+void ControlFlow::configure_receiver(Construction::ParameterMode mode) {
+  if (!receiver_partition_) {
+    return;
+  }
+  for (const auto& member : receiver_partition_->members) {
+    construction_.configure_parameter(
+        member.source, mode,
+        std::ranges::find(receiver_writes_, member.source) !=
+            receiver_writes_.end());
   }
 }
 
@@ -2509,17 +2598,47 @@ CallPropagation ControlFlow::propagate_call(const DirectCall& call,
 void ControlFlow::bind_field_calls(
     const std::unordered_map<cxx::FunctionSymbol*,
                              std::unique_ptr<ControlFlow>>& functions) {
+  for (auto& assignment : construction_.assignments()) {
+    const auto& target = field_assignments_[assignment.source_index];
+    auto count = types_
+                     .partition(types_.unqualified_value(target.source->type),
+                                target.source)
+                     .component_count;
+    visit_intervals(target, {}, [&](ObjectInterval interval) {
+      assignment.destinations.push_back(
+          {interval.binding,
+           {interval.begin, interval.end == ObjectInterval::kWholeObjectEnd
+                                ? interval.begin + count
+                                : interval.end},
+           interval.reference_offset,
+           true});
+    });
+    for (auto& destination : assignment.destinations) {
+      destination.definite =
+          std::ranges::all_of(assignment.destinations, [&](const auto& other) {
+            const auto end = destination.source_offset + destination.range.end -
+                             destination.range.begin;
+            const auto other_end =
+                other.source_offset + other.range.end - other.range.begin;
+            return end <= other.source_offset ||
+                   other_end <= destination.source_offset ||
+                   (destination.binding == other.binding &&
+                    destination.range == other.range);
+          });
+    }
+    std::erase_if(assignment.destinations, [&](const auto& destination) {
+      return !construction_.declared(destination.binding);
+    });
+  }
   for (auto& invocation : construction_.calls()) {
     const auto& call = calls_[invocation.source_index];
     auto found = functions.find(call.function->canonical());
     auto* callee = found == functions.end() ? nullptr : found->second.get();
-    auto bind = [&](const CallArgument& argument, const cxx::Type* type,
-                    const Construction::Parameter* parameter, bool writable) {
+    auto bind = [&](const CallArgument& argument, size_t total,
+                    const Construction::Parameter* parameter, bool writable,
+                    ReferenceProjection projection = {}) {
       const size_t first = invocation.arguments.size();
-      visit_intervals(argument, {}, [&](ObjectInterval interval) {
-        const size_t total =
-            types_.partition(types_.unqualified_value(type), call.source)
-                .component_count;
+      visit_intervals(argument, projection, [&](ObjectInterval interval) {
         const size_t count = interval.end == ObjectInterval::kWholeObjectEnd
                                  ? total - interval.reference_offset
                                  : interval.end - interval.begin;
@@ -2561,62 +2680,91 @@ void ControlFlow::bind_field_calls(
       if (!unit_.typeTraits().is_reference(parameter->type())) {
         continue;
       }
-      bind(call.arguments[ordinal], parameter->type(),
+      bind(call.arguments[ordinal],
+           types_
+               .partition(types_.unqualified_value(parameter->type()),
+                          call.source)
+               .component_count,
            callee ? callee->construction_.parameter(
                         callee->function_->parameters()[ordinal])
                   : nullptr,
            !unit_.typeTraits().is_const(
                unit_.typeTraits().remove_reference(parameter->type())));
     }
-    if (call.receiver) {
-      bind(*call.receiver, implicit_object_type(unit_, call.function), nullptr,
+    if (callee && callee->receiver_partition_) {
+      for (const auto& member : callee->receiver_partition_->members) {
+        auto* parameter = callee->construction_.parameter(member.source);
+        if (call.current_receiver) {
+          invocation.arguments.push_back(
+              {member.source,
+               0,
+               {0, member.partition->component_count},
+               parameter,
+               true,
+               parameter->returned});
+        } else if (call.receiver) {
+          bind(*call.receiver, member.partition->component_count, parameter,
+               parameter->returned,
+               {member.component_offset, member.partition->component_count});
+        }
+      }
+    } else if (call.receiver) {
+      const size_t count =
+          types_
+              .partition(types_.unqualified(
+                             implicit_object_type(unit_, call.function)),
+                         call.source)
+              .component_count;
+      bind(*call.receiver, count, nullptr,
            types_.implicit_object_may_mutate(call.function, call.source));
     }
   }
 }
 
-bool ControlFlow::propagate_field_outputs() {
-  bool changed = construction_.propagate_outputs();
-  for (auto* parameter : function_->parameters()) {
-    auto* effects = construction_.parameter(parameter);
-    if (!effects || effects->mode != Construction::ParameterMode::Projected ||
-        effects->outputs.empty()) {
-      continue;
+bool ControlFlow::normalize_field_groups(bool inputs) {
+  bool changed = false;
+  auto normalize = [&](cxx::Symbol* binding, const cxx::Type* type) {
+    auto* effects = construction_.parameter(binding);
+    if (!effects || effects->mode != Construction::ParameterMode::Projected) {
+      return;
+    }
+    auto& components = inputs ? effects->inputs : effects->outputs;
+    if (components.empty()) {
+      return;
     }
     for (const auto& group :
-         types_.projections(types_.unqualified_value(parameter->type()),
-                            function_->declaration())) {
+         types_.projections(type, function_->declaration())) {
       const ComponentRange range{
           group.component_offset,
           group.component_offset + group.partition->component_count};
-      if (effects->outputs.intersects(range)) {
-        changed = effects->outputs.add(range) || changed;
+      if (components.intersects(range)) {
+        changed = components.add(range) || changed;
       }
+    }
+  };
+  for (auto* parameter : function_->parameters()) {
+    normalize(parameter, types_.unqualified_value(parameter->type()));
+  }
+  if (receiver_partition_) {
+    auto traits = unit_.typeTraits();
+    for (const auto& member : receiver_partition_->members) {
+      normalize(member.source,
+                traits.is_reference(member.type())
+                    ? traits.add_pointer(traits.remove_reference(member.type()))
+                    : types_.unqualified(member.type()));
     }
   }
   return changed;
 }
 
+bool ControlFlow::propagate_field_outputs() {
+  const bool changed = construction_.propagate_outputs();
+  return normalize_field_groups(false) || changed;
+}
+
 bool ControlFlow::propagate_field_inputs() {
-  bool changed = construction_.propagate_inputs();
-  for (auto* parameter : function_->parameters()) {
-    auto* effects = construction_.parameter(parameter);
-    if (!effects || effects->mode != Construction::ParameterMode::Projected ||
-        effects->inputs.empty()) {
-      continue;
-    }
-    for (const auto& group :
-         types_.projections(types_.unqualified_value(parameter->type()),
-                            function_->declaration())) {
-      const ComponentRange range{
-          group.component_offset,
-          group.component_offset + group.partition->component_count};
-      if (effects->inputs.intersects(range)) {
-        changed = effects->inputs.add(range) || changed;
-      }
-    }
-  }
-  return changed;
+  const bool changed = construction_.propagate_inputs();
+  return normalize_field_groups(true) || changed;
 }
 
 void ControlFlow::finalize_callable_effects() {

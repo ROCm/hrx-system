@@ -308,3 +308,112 @@ event 7
 event 11
 OK 0
 retired 0
+
+// ====
+// Partial receiver fields survive method calls and every lexical cleanup exit.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Cursor {
+  const float* data;
+  unsigned position;
+  unsigned* output;
+  void reset() { position = 0; }
+  ~Cursor() { *output = position; }
+};
+static void cursor(unsigned* output, bool early) {
+  Cursor current;
+  current.output = output;
+  current.reset();
+  if (early) { current.position = 3; return; }
+  current.position = 4;
+}
+struct Leaf {
+  float* unused;
+  unsigned position;
+  void reset() { position = 7; }
+  void increment() { ++position; }
+  ~Leaf() { event(position); }
+};
+struct Holder {
+  Leaf nested;
+  void reset() { nested.reset(); }
+  void increment() { nested.increment(); }
+  ~Holder() { nested.increment(); }
+};
+struct Derived : Leaf {
+  unsigned unrelated;
+  void initialize() { reset(); }
+};
+static void nested(bool early) {
+  Holder holder;
+  holder.reset();
+  if (early) { holder.increment(); return; }
+  holder.increment();
+  holder.increment();
+}
+void run() {
+  unsigned output = 99;
+  cursor(&output, true);
+  event(output);
+  cursor(&output, false);
+  event(output);
+  nested(false);
+  nested(true);
+  { Derived item; item.initialize(); }
+  for (unsigned i = 0; i < 3; ++i) {
+    Leaf local;
+    local.reset();
+    if (i == 0) continue;
+    local.increment();
+    if (i == 1) break;
+  }
+}
+// ----
+event 3
+event 4
+event 10
+event 9
+event 7
+event 7
+event 8
+OK 0
+retired 0
+
+// ====
+// Destructor-body initialization precedes member/base destruction. Reference
+// members retain their binding, and nested arrays destroy in reverse order.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Leaf {
+  float* unused;
+  unsigned position;
+  void reset() { position = 7; }
+  ~Leaf() { event(position); }
+};
+struct InitializeOnExit {
+  Leaf child;
+  ~InitializeOnExit() { child.reset(); }
+};
+struct Reference {
+  unsigned& output;
+  unsigned ignored;
+  void set(unsigned value) { output = value; }
+  ~Reference() { event(output); }
+};
+struct Array {
+  Leaf items[2];
+};
+void run() {
+  { InitializeOnExit holder; }
+  unsigned output = 0;
+  { Reference reference{output, 19}; reference.set(12); }
+  event(output);
+  float unused = 0;
+  { Array array{{{&unused, 2}, {&unused, 3}}}; }
+}
+// ----
+event 7
+event 12
+event 12
+event 3
+event 2
+OK 0
+retired 0

@@ -42,6 +42,8 @@ class Construction {
     size_t component_count;
     // Selected source transport; storage calls do not define SSA fields.
     ParameterMode mode = ParameterMode::Projected;
+    // Whether writes survive this call. A destructor consumes its receiver.
+    bool returned = true;
     // Complete component groups required by the input contract.
     Components inputs;
     // Complete component groups returned by a value call.
@@ -67,18 +69,36 @@ class Construction {
     // Producer-resolved formal-to-actual component mappings.
     std::vector<Argument> arguments;
   };
+  struct Destination {
+    // Caller object selected by the resolved source lvalue.
+    cxx::Symbol* binding;
+    // Complete component interval assigned in that object.
+    ComponentRange range;
+    // First source-value component mapped into this destination interval.
+    size_t source_offset;
+    // Whether every alternative names this same object interval.
+    bool definite;
+  };
+  struct Assignment {
+    // Index into ControlFlow's retained assignment identities.
+    size_t source_index;
+    // Resolved destinations; selections can name several possible objects.
+    std::vector<Destination> destinations;
+  };
 
   const State& state() const { return current_; }
   void restore(State state) { current_ = state; }
   State join(State left, State right);
 
   void declare(cxx::Symbol* binding, size_t component_count);
-  void declare_parameter(cxx::Symbol* binding, size_t component_count);
+  void declare_parameter(cxx::Symbol* binding, size_t component_count,
+                         bool returned = true);
   bool tracked(cxx::Symbol* binding) const;
   bool declared(cxx::Symbol* binding) const {
     return declarations_.contains(binding);
   }
   bool has_parameters() const { return !parameters_.empty(); }
+  bool has_bindings() const { return !declarations_.empty(); }
   bool has_effects() const { return !nodes_.empty(); }
   Parameter* parameter(cxx::Symbol* binding);
   const Parameter* parameter(cxx::Symbol* binding) const;
@@ -86,7 +106,14 @@ class Construction {
                            bool written);
   void read(cxx::Symbol* binding, size_t offset, size_t count);
   void assign(cxx::Symbol* binding, size_t offset, size_t count);
+  // Retains an assignment through a selected or returned reference at its
+  // source position. Identity propagation binds its destinations later.
+  void assign_indirect(size_t source_index);
+  std::span<Assignment> assignments() { return assignments_; }
   void call(size_t source_index);
+  // Registers cleanup after successful construction. Its effects occur when
+  // the current declaration scope is left, in reverse registration order.
+  void defer_call(size_t source_index);
   std::span<Call> calls() { return calls_; }
 
   void enter(bool declaration_scope = true);
@@ -129,6 +156,10 @@ class Construction {
     // Index into the retained formal-to-actual mappings.
     size_t call_index;
   };
+  struct IndirectAssign {
+    // Index into the resolved assignment destinations.
+    size_t assignment_index;
+  };
   struct Join {
     // Alternative predecessor whose availability must also hold.
     size_t other;
@@ -141,7 +172,7 @@ class Construction {
     // Prior ordered effect on this source path.
     size_t previous;
     // Source effect or control-flow merge applied at this position.
-    std::variant<Read, Assign, Invoke, Join, Forget> effect;
+    std::variant<Read, Assign, IndirectAssign, Invoke, Join, Forget> effect;
   };
   struct Declaration {
     // Complete partition extent, retained after the lexical scope ends.
@@ -154,8 +185,12 @@ class Construction {
     State breaks;
     // Iteration continuations of the surrounding source owner.
     State continues;
+    // Returns outside this scope; new returns unwind through its cleanups.
+    State returns;
     // Objects whose lifetime ends when this declaration scope is left.
     std::vector<cxx::Symbol*> declarations;
+    // Call indices executed before the declarations in this scope expire.
+    std::vector<size_t> cleanups;
     // Enclosing declaration scope, or SIZE_MAX at function entry.
     size_t enclosing_declaration_scope;
   };
@@ -172,7 +207,9 @@ class Construction {
     Components available;
   };
   using Available = std::unordered_map<cxx::Symbol*, Components>;
-  void append(std::variant<Read, Assign, Invoke, Join, Forget> effect);
+  void append(
+      std::variant<Read, Assign, IndirectAssign, Invoke, Join, Forget> effect);
+  State cleanup(State state, std::span<const size_t> calls);
   ComponentRange range(cxx::Symbol* binding, size_t offset, size_t count) const;
 
   // Current source continuation and escaping alternatives.
@@ -195,6 +232,10 @@ class Construction {
   std::vector<Node> nodes_;
   // Direct call mappings supplied after source identity propagation.
   std::vector<Call> calls_;
+  // Assignments whose object identities arrive from the shared call analysis.
+  std::vector<Assignment> assignments_;
+  // Parameter and receiver subobject cleanups following body-local cleanup.
+  std::vector<size_t> function_cleanups_;
   // Region exits whose finalized availability is consumed by translation.
   std::unordered_map<cxx::AST*, State> checkpoints_;
   // Sparse outgoing facts, restricted to each region's written objects.

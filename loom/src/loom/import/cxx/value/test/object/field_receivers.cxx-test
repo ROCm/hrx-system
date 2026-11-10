@@ -1,0 +1,148 @@
+// RUN: roundtrip
+// Reset defines one field without reading the object; destruction reads only
+// that field and the pointer group. The object never needs private storage.
+struct Cursor {
+  const float* data;
+  unsigned position;
+  unsigned* output;
+  void reset() { position = 0; }
+  ~Cursor() { *output = position; }
+};
+void run(unsigned* output) {
+  Cursor cursor;
+  cursor.output = output;
+  cursor.reset();
+}
+// ----
+func.def public @run(%output: buffer, %output_byte_offset: offset) {
+  %2 = func.call pure @Cursor__reset_value() : () -> (i32)
+  func.call @Cursor___Cursor_value(%2, %output, %output_byte_offset) : (i32, buffer, offset)
+  func.return
+}
+
+func.def @Cursor__reset_value() -> (i32) {
+  %position = scalar.constant 0 : i32
+  func.return %position : i32
+}
+
+func.def inline @Cursor___Cursor_value(%this_position: i32, %this_output: buffer, %this_output_byte_offset: offset) {
+  %8 = buffer.view %this_output[%this_output_byte_offset] : buffer -> view<1xi32>
+  view.store %this_position, %8[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// A destructor can initialize a nested member before its implicit cleanup.
+// The unused semantic handle is never fabricated or transported.
+#include <loomcxx/buffer.h>
+void observe(unsigned value);
+struct Partial {
+  loom::type::buffer<const unsigned char> data;
+  unsigned position;
+  void reset() { position = 7; }
+  ~Partial() { observe(position); }
+};
+struct Holder {
+  Partial child;
+  ~Holder() { child.reset(); }
+};
+void run() { Holder holder; }
+// ----
+func.def public @run() {
+  func.call @Holder___Holder_value() : ()
+  func.return
+}
+
+func.def inline @Holder___Holder_value() {
+  %0 = func.call pure @Partial__reset_value() : () -> (i32)
+  func.call @Partial___Partial_value(%0) : (i32)
+  func.return
+}
+
+func.def @Partial__reset_value() -> (i32) {
+  %position = scalar.constant 7 : i32
+  func.return %position : i32
+}
+
+func.def inline @Partial___Partial_value(%this_position: i32) {
+  func.call @observe(%this_position) : (i32)
+  func.return
+}
+
+func.decl @observe(%4: i32)
+
+// ====
+// Nested groups and inherited receivers retain the direct field identity.
+struct Base {
+  const float* data;
+  unsigned position;
+  void reset(unsigned value) { position = value; }
+};
+struct Derived : Base {
+  unsigned unrelated;
+  unsigned initialize(unsigned value) { reset(value); return position; }
+};
+struct Holder {
+  Derived nested;
+  void initialize(unsigned value) { nested.initialize(value); }
+};
+unsigned run(unsigned value) {
+  Holder holder;
+  holder.initialize(value);
+  return holder.nested.position;
+}
+// ----
+func.def public @run(%value: i32) -> (i32) {
+  %2 = func.call pure @Holder__initialize_value(%value) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def @Holder__initialize_value(%value: i32) -> (i32) {
+  %5, %6 = func.call pure @Derived__initialize_value(%value) : (i32) -> (i32, i32)
+  func.return %6 : i32
+}
+
+func.def @Derived__initialize_value(%value: i32) -> (i32, i32) {
+  %position = func.call pure @Base__reset_value(%value) : (i32) -> (i32)
+  func.return %position, %position : i32, i32
+}
+
+func.def @Base__reset_value(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+// ====
+// The dimension, layout, and view stay one complete dependent group through
+// a member call; the pointer field remains unavailable.
+#include <loomcxx/view.h>
+namespace loomt = loom::type;
+using Rows = loomt::view<loomt::shape<loomt::dynamic, 4>, const float, loomt::encoding<loom::encoding::role::layout, 2>>;
+struct Window {
+  Rows rows;
+  const float* unused;
+  void trim(unsigned remaining) { rows = loom::view::subview(rows, {1, 0}, {remaining}); }
+};
+Rows cropped(Rows rows, unsigned remaining) {
+  Window window;
+  window.rows = rows;
+  window.trim(remaining);
+  return window.rows;
+}
+// ----
+func.def public @cropped(%rows_dim0: index, %rows_layout: encoding<layout>, %rows: view<[%rows_dim0]x4xf32, %rows_layout>, %remaining: i32) -> (%4: index, %5: encoding<layout>, view<[%4]x4xf32, %5>) {
+  %7, %8, %9 = func.call pure @Window__trim_value(%rows_dim0, %rows_layout, %rows, %remaining) : (index, encoding<layout>, view<[%rows_dim0]x4xf32, %rows_layout>, i32) -> (index, encoding<layout>, view<[%7]x4xf32, %8>)
+  func.return %7, %8, %9 : index, encoding<layout>, view<[%7]x4xf32, %8>
+}
+
+func.def @Window__trim_value(%this_rows_dim0: index, %this_rows_layout: encoding<layout>, %this_rows: view<[%this_rows_dim0]x4xf32, %this_rows_layout>, %remaining: i32) -> (%14: index, %15: encoding<layout>, view<[%14]x4xf32, %15>) {
+  %17 = scalar.constant 1 : i32
+  %18 = scalar.extsi %17 : i32 to i64
+  %19 = scalar.constant 0 : i32
+  %20 = scalar.extsi %19 : i32 to i64
+  %21 = scalar.extui %remaining : i32 to i64
+  %rows_dim0 = index.cast %21 : i64 to index
+  %23 = index.cast %18 : i64 to index
+  %24 = index.cast %20 : i64 to index
+  %rows = view.subview %this_rows[%23, %24] : view<[%this_rows_dim0]x4xf32, %this_rows_layout> -> view<[%rows_dim0]x4xf32, %this_rows_layout>
+  func.return %rows_dim0, %this_rows_layout, %rows : index, encoding<layout>, view<[%rows_dim0]x4xf32, %this_rows_layout>
+}

@@ -13,7 +13,7 @@
 namespace loom::cxx_import {
 
 void Construction::append(
-    std::variant<Read, Assign, Invoke, Join, Forget> effect) {
+    std::variant<Read, Assign, IndirectAssign, Invoke, Join, Forget> effect) {
   nodes_.push_back({current_.point, std::move(effect)});
   current_.point = nodes_.size();
 }
@@ -37,9 +37,10 @@ void Construction::declare(cxx::Symbol* binding, size_t component_count) {
 }
 
 void Construction::declare_parameter(cxx::Symbol* binding,
-                                     size_t component_count) {
+                                     size_t component_count, bool returned) {
   declare(binding, component_count);
-  parameters_.emplace(binding, Parameter{component_count});
+  parameters_.emplace(
+      binding, Parameter{component_count, ParameterMode::Projected, returned});
 }
 
 bool Construction::tracked(cxx::Symbol* binding) const {
@@ -67,7 +68,7 @@ void Construction::configure_parameter(cxx::Symbol* binding, ParameterMode mode,
   value->mode = mode;
   if (mode != ParameterMode::Projected) {
     value->inputs.add({0, value->component_count});
-    if (written) {
+    if (written && value->returned) {
       value->outputs.add({0, value->component_count});
     }
   }
@@ -98,7 +99,7 @@ void Construction::assign(cxx::Symbol* binding, size_t offset, size_t count) {
     return;
   }
   append(Assign{{binding, selected}});
-  if (auto* formal = parameter(binding)) {
+  if (auto* formal = parameter(binding); formal && formal->returned) {
     formal->outputs.add(selected);
   }
 }
@@ -111,19 +112,55 @@ void Construction::call(size_t source_index) {
   calls_.push_back({source_index, {}});
 }
 
+void Construction::assign_indirect(size_t source_index) {
+  if (!current_.reachable || declarations_.empty()) {
+    return;
+  }
+  append(IndirectAssign{assignments_.size()});
+  assignments_.push_back({source_index, {}});
+}
+
+void Construction::defer_call(size_t source_index) {
+  if (!current_.reachable || declarations_.empty()) {
+    return;
+  }
+  auto& cleanups = declaration_scope_ == SIZE_MAX
+                       ? function_cleanups_
+                       : frames_[declaration_scope_].cleanups;
+  cleanups.push_back(calls_.size());
+  calls_.push_back({source_index, {}});
+}
+
+Construction::State Construction::cleanup(State state,
+                                          std::span<const size_t> calls) {
+  if (state.reachable) {
+    for (size_t index = calls.size(); index > 0; --index) {
+      nodes_.push_back({state.point, Invoke{calls[index - 1]}});
+      state.point = nodes_.size();
+    }
+  }
+  return state;
+}
+
 void Construction::enter(bool declaration_scope) {
-  frames_.push_back({breaks_, continues_, {}, declaration_scope_});
+  frames_.push_back(
+      {breaks_, continues_, returns_, {}, {}, declaration_scope_});
   if (declaration_scope) {
     declaration_scope_ = frames_.size() - 1;
   }
   breaks_ = {false};
   continues_ = {false};
+  returns_ = {false};
 }
 
 void Construction::leave(cxx::AST* owner) {
   auto frame = std::move(frames_.back());
   frames_.pop_back();
   declaration_scope_ = frame.enclosing_declaration_scope;
+  current_ = cleanup(current_, frame.cleanups);
+  breaks_ = cleanup(breaks_, frame.cleanups);
+  continues_ = cleanup(continues_, frame.cleanups);
+  returns_ = cleanup(returns_, frame.cleanups);
   auto forget = [&](State state, cxx::Symbol* binding) {
     if (state.reachable) {
       nodes_.push_back({state.point, Forget{binding}});
@@ -136,6 +173,7 @@ void Construction::leave(cxx::AST* owner) {
     current_ = forget(current_, binding);
     breaks_ = forget(breaks_, binding);
     continues_ = forget(continues_, binding);
+    returns_ = forget(returns_, binding);
   }
   if (!nodes_.empty()) {
     // Calls can add written fields after this source visit. Keep the source
@@ -144,12 +182,16 @@ void Construction::leave(cxx::AST* owner) {
   }
   breaks_ = join(frame.breaks, breaks_);
   continues_ = join(frame.continues, continues_);
+  returns_ = join(frame.returns, returns_);
 }
 
 void Construction::return_from_function() {
   returns_ = join(returns_, current_);
 }
-void Construction::finish_function() { return_from_function(); }
+void Construction::finish_function() {
+  return_from_function();
+  returns_ = cleanup(returns_, function_cleanups_);
+}
 void Construction::end_path() { current_ = {false}; }
 void Construction::break_from_region() {
   breaks_ = join(breaks_, current_);
@@ -175,10 +217,18 @@ void Construction::finish_switch(State unmatched) {
 
 bool Construction::propagate_outputs() {
   bool changed = false;
+  for (const auto& assignment : assignments_) {
+    for (const auto& destination : assignment.destinations) {
+      if (auto* formal = parameter(destination.binding);
+          formal && formal->returned) {
+        changed = formal->outputs.add(destination.range) || changed;
+      }
+    }
+  }
   for (const auto& call : calls_) {
     for (const auto& argument : call.arguments) {
       auto* destination = parameter(argument.binding);
-      if (!destination) {
+      if (!destination || !destination->returned) {
         continue;
       }
       if (argument.parameter) {
@@ -271,6 +321,13 @@ void Construction::resolve(const Writes& writes) {
       }
     } else if (auto* assign = std::get_if<Assign>(&node.effect)) {
       (*state)[assign->access.binding].add(assign->access.range);
+    } else if (auto* assign = std::get_if<IndirectAssign>(&node.effect)) {
+      for (const auto& destination :
+           assignments_[assign->assignment_index].destinations) {
+        if (destination.definite) {
+          (*state)[destination.binding].add(destination.range);
+        }
+      }
     } else if (auto* invoke = std::get_if<Invoke>(&node.effect)) {
       const auto& call = calls_[invoke->call_index];
       // All reference arguments are read before any returned field is written.

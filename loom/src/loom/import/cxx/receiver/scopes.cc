@@ -111,7 +111,6 @@ void ReceiverScopes::publish(cxx::Symbol* subobject, Value value) {
 
 void ReceiverScopes::mark_complete(cxx::Symbol* subobject) {
   auto& owner = owners_.at(subobject);
-  IREE_ASSERT(frames_[owner.index].receiver.storage);
   owner.complete = true;
 }
 

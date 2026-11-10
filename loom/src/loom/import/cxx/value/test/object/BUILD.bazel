@@ -21,6 +21,7 @@ loom_check_test_suite(
         "class_conversions_invalid.cxx-test",
         "const.cxx-test",
         "const_default_initialization.cxx-test",
+        "field_receivers.cxx-test",
         "field_references.cxx-test",
         "lambdas.cxx-test",
         "lambdas_invalid.cxx-test",

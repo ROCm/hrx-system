@@ -72,6 +72,8 @@ struct FunctionInstance {
   ImplicitObjectABI receiver_abi;
 };
 
+struct ParameterProjection;
+
 // Admitted implicit object bound ahead of every explicit source parameter.
 struct ImplicitObjectParameter {
   // Native transport selected by the call site's owned representation.
@@ -80,6 +82,8 @@ struct ImplicitObjectParameter {
   const cxx::Type* object_type;
   // Exact top-level fields replaced by a value receiver, in declaration order.
   std::span<cxx::Symbol* const> written_fields;
+  // Sparse receiver contract, absent for complete-value and storage transport.
+  const ParameterProjection* projection = nullptr;
 };
 
 enum class ReferenceABI {
@@ -95,6 +99,8 @@ struct ParameterProjection {
   std::vector<ValueProjection> inputs;
   // Complete source groups replaced on return, in source component order.
   std::vector<ValueProjection> outputs;
+  // Flattened input extent retained for call argument/result correspondence.
+  size_t input_component_count = 0;
 };
 
 // One source reference parameter projected through its selected ABI. Parameters
@@ -232,6 +238,9 @@ class Functions {
   // Exact top-level implicit-object fields replaced by the definition.
   std::span<cxx::Symbol* const> receiver_writes(
       cxx::FunctionSymbol* symbol) const;
+  // Value receiver groups established before any body is translated.
+  const ParameterProjection* receiver_projection(
+      cxx::FunctionSymbol* symbol) const;
 
  private:
   enum class DeclarationScope { Namespace, Nested };
@@ -358,6 +367,9 @@ class Functions {
   // Nonempty value-reference ABIs indexed by canonical declaration identity.
   std::unordered_map<cxx::FunctionSymbol*, std::vector<ReferenceParameter>>
       reference_parameters_;
+  // Sparse implicit-object contracts indexed by canonical source identity.
+  std::unordered_map<cxx::FunctionSymbol*, ParameterProjection>
+      receiver_projections_;
   // Whole-function analyses retained by canonical semantic identity. Each body
   // is walked once; signature construction and translation query these facts.
   std::unordered_map<cxx::FunctionSymbol*, std::unique_ptr<ControlFlow>>

@@ -297,9 +297,17 @@ class Translator final : private Initialization::Evaluation {
       return traits.is_array(type) ? Value(projection.pointer)
                                    : objects_.load(projection, type, owner);
     }
-    return receiver_member(root, owner)
-        .project(*selected.partition,
-                 selected.component_offset - selected.root->component_offset);
+    if (!receivers_.is_complete(root)) {
+      fail(owner, "member is read before its initialization is complete");
+    }
+    auto value = values_.project(
+        root, *selected.partition,
+        selected.component_offset - selected.root->component_offset,
+        value_arena_);
+    if (!value) {
+      fail(owner, "source subobject is read before initialization");
+    }
+    return *value;
   }
 
   std::optional<StorageProjection> captured_object_storage(
@@ -359,7 +367,9 @@ class Translator final : private Initialization::Evaluation {
                        member_type, owner));
     }
     auto found = values_.find(field);
-    IREE_ASSERT(found != values_.end());
+    if (found == values_.end()) {
+      fail(owner, "source subobject is read before initialization");
+    }
     return found->second;
   }
 
@@ -649,31 +659,60 @@ class Translator final : private Initialization::Evaluation {
     cxx::AST* source = nullptr;
   };
 
-  void call_destructor(const Destruction& destruction, Value receiver,
+  void call_destructor(const Destruction& destruction,
+                       std::span<const loom_value_id_t> arguments,
                        ImplicitObjectABI receiver_abi, cxx::AST* source) {
     auto callee =
         functions_.declare(destruction.function, source, receiver_abi);
-    std::vector<loom_value_id_t> arguments;
-    receiver.append_to(arguments);
     loom_op_t* op;
     check(loom_func_call_build(&builder_, 0, 0, 0, 0, callee, arguments.data(),
                                arguments.size(), nullptr, 0, nullptr, 0,
                                locations_.get(source), &op));
   }
 
+  template <typename Read>
+  void destroy_components(const Destruction& destruction, cxx::AST* source,
+                          Read&& read) {
+    const auto* record = types_.record(destruction.element_type, source);
+    const auto* projection =
+        functions_.receiver_projection(destruction.function);
+    std::vector<loom_value_id_t> arguments;
+    arguments.reserve(projection ? projection->input_component_count
+                                 : record->component_count);
+    for (size_t index = destruction.element_count; index > 0; --index) {
+      const size_t offset = (index - 1) * record->component_count;
+      arguments.clear();
+      if (projection) {
+        for (const auto& group : projection->inputs) {
+          read(*group.partition, offset + group.component_offset)
+              .append_to(arguments);
+        }
+      } else {
+        read(*record, offset).append_to(arguments);
+      }
+      call_destructor(destruction, arguments, ImplicitObjectABI::Value, source);
+    }
+  }
+
   void destroy_value(Value value, const Destruction& destruction,
                      cxx::AST* source) {
-    auto* record = types_.record(destruction.element_type, source);
-    IREE_ASSERT(record);
-    IREE_ASSERT_EQ(value.partition().component_count,
-                   destruction.element_count * record->component_count);
-    for (size_t index = destruction.element_count; index > 0; --index) {
-      auto element =
-          destruction.element_count == 1
-              ? value
-              : value.project(*record, (index - 1) * record->component_count);
-      call_destructor(destruction, element, ImplicitObjectABI::Value, source);
-    }
+    destroy_components(destruction, source,
+                       [&](const Partition& partition, size_t offset) {
+                         return value.project(partition, offset);
+                       });
+  }
+
+  void destroy_binding(cxx::Symbol* binding, const Destruction& destruction,
+                       cxx::AST* source) {
+    destroy_components(
+        destruction, source, [&](const Partition& partition, size_t offset) {
+          auto value =
+              values_.project(binding, partition, offset, value_arena_);
+          if (!value) {
+            fail(source, "destructor reads an uninitialized source subobject");
+          }
+          return *value;
+        });
   }
 
   void destroy_storage(StorageProjection object, const cxx::Type* type,
@@ -686,7 +725,7 @@ class Translator final : private Initialization::Evaluation {
       }
       return;
     }
-    call_destructor(destruction, Value(object.pointer),
+    call_destructor(destruction, Value(object.pointer).components(),
                     ImplicitObjectABI::Storage, source);
   }
 
@@ -698,13 +737,7 @@ class Translator final : private Initialization::Evaluation {
                         source_object_type(active.binding), active.destruction,
                         active.source);
       } else {
-        if (!values_.initialized(active.binding)) {
-          fail(active.source,
-               "destruction of a semantic value requires all receiver "
-               "subobjects to be initialized");
-        }
-        destroy_value(values_.at(active.binding), active.destruction,
-                      active.source);
+        destroy_binding(active.binding, active.destruction, active.source);
       }
       return;
     }
@@ -713,8 +746,7 @@ class Translator final : private Initialization::Evaluation {
         destroy_storage(*storage, source_object_type(active.field),
                         active.destruction, active.source);
       } else {
-        destroy_value(receiver_member(active.field, active.source),
-                      active.destruction, active.source);
+        destroy_binding(active.field, active.destruction, active.source);
       }
       return;
     }
@@ -1063,8 +1095,16 @@ class Translator final : private Initialization::Evaluation {
     }
     if (current_function_.implicit_object &&
         current_function_.implicit_object->abi == ImplicitObjectABI::Value) {
-      for (auto* field : current_function_.implicit_object->written_fields) {
-        sources.push_back(types_.unqualified_value(source_object_type(field)));
+      const auto& implicit = *current_function_.implicit_object;
+      if (implicit.projection) {
+        for (const auto& group : implicit.projection->outputs) {
+          sources.push_back(group.type);
+        }
+      } else {
+        for (auto* field : implicit.written_fields) {
+          sources.push_back(
+              types_.unqualified_value(source_object_type(field)));
+        }
       }
     }
     auto parameters = current_function_.source->symbol->parameters();
@@ -1086,8 +1126,18 @@ class Translator final : private Initialization::Evaluation {
   Returned complete_return(Returned returned) {
     if (current_function_.implicit_object &&
         current_function_.implicit_object->abi == ImplicitObjectABI::Value) {
-      for (auto* field : current_function_.implicit_object->written_fields) {
-        receiver_member(field, returned.source).append_to(returned.values);
+      const auto& implicit = *current_function_.implicit_object;
+      if (implicit.projection) {
+        for (const auto& group : implicit.projection->outputs) {
+          read(project_call_target(current_receiver_target(), group,
+                                   returned.source),
+               returned.source)
+              .append_to(returned.values);
+        }
+      } else {
+        for (auto* field : implicit.written_fields) {
+          receiver_member(field, returned.source).append_to(returned.values);
+        }
       }
     }
     auto parameters = current_function_.source->symbol->parameters();
@@ -1263,7 +1313,25 @@ class Translator final : private Initialization::Evaluation {
         fail(defined.source,
              "implicit object receiver requires an admitted record type");
       }
-      if (implicit.abi == ImplicitObjectABI::Value) {
+      if (implicit.projection) {
+        receivers_.enter(*record, std::nullopt, record->source->type());
+        for (const auto& member : record->members) {
+          values_.declare(member.source, *member.partition);
+          receivers_.mark_complete(member.source);
+        }
+        for (const auto& group : implicit.projection->inputs) {
+          auto value = region_value(region, argument_index, *group.partition);
+          auto components = value.components();
+          for (size_t index = 0; index < components.size(); ++index) {
+            name(components[index],
+                 "this_" +
+                     record->component_names[group.component_offset + index]);
+          }
+          write(project_call_target(current_receiver_target(), group,
+                                    defined.source),
+                value, defined.source);
+        }
+      } else if (implicit.abi == ImplicitObjectABI::Value) {
         auto value =
             name(region_value(region, argument_index, *record), "this");
         bind_value_receiver(*record, value);
@@ -3006,6 +3074,11 @@ class Translator final : private Initialization::Evaluation {
          "storage");
   }
 
+  Lvalue current_receiver_target() const {
+    const auto* record = receivers_.current()->record;
+    return {ObjectLvalue{record->source->type(), CurrentReceiver{record}}};
+  }
+
   void materialize_call_argument(EvaluatedCallArgument& argument,
                                  cxx::AST* owner) {
     if (argument.projection) {
@@ -3317,6 +3390,20 @@ class Translator final : private Initialization::Evaluation {
                                      cxx::FunctionSymbol* function) {
     return receiver_argument(function, call->baseExpression,
                              cxx::TokenKind::T_DOT, call);
+  }
+
+  size_t receiver_input_count(
+      cxx::FunctionSymbol* function,
+      const std::optional<ReceiverArgument>& receiver) const {
+    if (!receiver) {
+      return 0;
+    }
+    if (receiver->abi == ImplicitObjectABI::Storage) {
+      return kPointerPartition.component_count;
+    }
+    const auto* projection = functions_.receiver_projection(function);
+    return projection ? projection->input_component_count
+                      : receiver->record->component_count;
   }
 
   Value materialize_receiver(ReceiverArgument& receiver, cxx::AST* owner) {
@@ -3882,11 +3969,30 @@ class Translator final : private Initialization::Evaluation {
       loom_location_id_t source) {
     auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
     IREE_ASSERT(signature);
+    const auto* receiver_projection =
+        receiver && receiver->abi == ImplicitObjectABI::Value
+            ? functions_.receiver_projection(function)
+            : nullptr;
     if (receiver) {
-      auto receiver_value = materialize_receiver(*receiver, call);
-      auto receiver_components = receiver_value.components();
-      arguments.insert(arguments.begin(), receiver_components.begin(),
-                       receiver_components.end());
+      const size_t explicit_count = arguments.size();
+      if (receiver_projection) {
+        for (const auto& group : receiver_projection->inputs) {
+          auto value =
+              receiver->value
+                  ? receiver->value->project(*group.partition,
+                                             group.component_offset)
+                  : read(project_call_target(receiver->current
+                                                 ? current_receiver_target()
+                                                 : *receiver->target,
+                                             group, call),
+                         call);
+          value.append_to(arguments);
+        }
+      } else {
+        materialize_receiver(*receiver, call).append_to(arguments);
+      }
+      std::rotate(arguments.begin(), arguments.begin() + explicit_count,
+                  arguments.end());
     }
 
     const bool returns_void =
@@ -3916,7 +4022,11 @@ class Translator final : private Initialization::Evaluation {
       ordinary_result_count =
           types_.partition(result_type, call).component_count;
     }
-    if (receiver_writeback) {
+    if (receiver_projection) {
+      for (const auto& group : receiver_projection->outputs) {
+        result_sources.push_back(group.type);
+      }
+    } else if (receiver_writeback) {
       for (auto* field : receiver->written_fields) {
         result_sources.push_back(
             types_.unqualified_value(source_object_type(field)));
@@ -3942,7 +4052,28 @@ class Translator final : private Initialization::Evaluation {
 
     size_t result_offset = ordinary_result_count;
     std::optional<Value> receiver_result;
-    if (receiver_writeback) {
+    if (receiver_projection) {
+      auto updated = receiver->value;
+      for (const auto& group : receiver_projection->outputs) {
+        const size_t count = group.partition->component_count;
+        auto value = value_arena_.capture(
+            *group.partition, {loom_op_results(op) + result_offset, count});
+        if (receiver->current || receiver->target) {
+          write(
+              project_call_target(receiver->current ? current_receiver_target()
+                                                    : *receiver->target,
+                                  group, call),
+              value, call);
+        } else {
+          updated =
+              value_arena_.replace(*updated, group.component_offset, value);
+        }
+        result_offset += count;
+      }
+      if (updated && !receiver_projection->outputs.empty()) {
+        write_receiver(*receiver, *updated, call);
+      }
+    } else if (receiver_writeback) {
       auto updated = *receiver->value;
       for (auto* field : receiver->written_fields) {
         const auto& member = types_.member(field, call);
@@ -4101,10 +4232,7 @@ class Translator final : private Initialization::Evaluation {
             ? functions_.reference_return_parameter(function)
             : std::nullopt;
     const size_t receiver_argument_count =
-        !receiver ? 0
-        : receiver->abi == ImplicitObjectABI::Value
-            ? receiver->record->component_count
-            : kPointerPartition.component_count;
+        receiver_input_count(function, receiver);
     std::vector<loom_value_id_t> arguments;
     std::vector<ReferenceWriteback> writebacks;
     std::optional<ReferenceResultAlias> reference_result_alias;
@@ -4209,10 +4337,7 @@ class Translator final : private Initialization::Evaluation {
     }
 
     const size_t receiver_argument_count =
-        !receiver ? 0
-        : receiver->abi == ImplicitObjectABI::Value
-            ? receiver->record->component_count
-            : kPointerPartition.component_count;
+        receiver_input_count(function, receiver);
     std::vector<loom_value_id_t> arguments;
     std::vector<ReferenceWriteback> writebacks;
     std::optional<ReferenceResultAlias> reference_result_alias;

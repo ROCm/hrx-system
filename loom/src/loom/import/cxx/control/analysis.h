@@ -328,6 +328,11 @@ class ControlFlow final : private cxx::ASTVisitor {
     construction_.configure_parameter(parameter, mode,
                                       reference_written(parameter));
   }
+  // Direct receiver fields share the reference-parameter effect solver.
+  const RecordPartition* receiver_partition() const {
+    return receiver_partition_;
+  }
+  void configure_receiver(Construction::ParameterMode mode);
   void bind_field_calls(
       const std::unordered_map<cxx::FunctionSymbol*,
                                std::unique_ptr<ControlFlow>>& functions);
@@ -481,6 +486,8 @@ class ControlFlow final : private cxx::ASTVisitor {
       StorageDemand demand = StorageDemand::Representation) const;
   void record_parameter_read(cxx::ExpressionAST* expression);
   void record_parameter_assignment(cxx::ExpressionAST* expression);
+  void record_member_binding_read(cxx::ExpressionAST* expression);
+  bool normalize_field_groups(bool inputs);
   bool record_callable_write(cxx::Symbol* binding);
   bool record_scoped_write(cxx::Symbol* binding,
                            std::span<cxx::AST* const> owners);
@@ -591,6 +598,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::vector<cxx::AST*> owners_;
   // Sparse source-construction facts propagated during this same traversal.
   Construction construction_;
+  // Direct member/base bindings used by implicit-object field contracts.
+  const RecordPartition* receiver_partition_ = nullptr;
   // Stable encounter order determines region argument/result order.
   std::unordered_map<cxx::AST*, std::vector<cxx::Symbol*>> writes_;
   // Sparse physical-representation facts indexed by source binding identity.
@@ -618,6 +627,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   cxx::ExpressionAST* pointer_value_read_ = nullptr;
   // Calls retained once for sparse fixed-point propagation.
   std::vector<DirectCall> calls_;
+  // Lvalue identities for assignments resolved after direct call propagation.
+  std::vector<CallArgument> field_assignments_;
   // Array copy plans own normalized default arguments and source identity.
   std::unordered_map<cxx::AST*, ArrayCopyInitialization> array_copies_;
   // Automatic variable identities mapped to their nontrivial cleanup action.

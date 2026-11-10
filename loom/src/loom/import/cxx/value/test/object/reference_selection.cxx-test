@@ -125,16 +125,16 @@ unsigned projected(unsigned input, unsigned next) {
 // ----
 func.def public @projected(%input: i32, %next: i32) -> (i32) {
   %value_prefix = scalar.constant 1 : i32
-  %value_pair_first$4 = scalar.constant 2 : i32
+  %value_pair_first = scalar.constant 2 : i32
   %value_suffix = scalar.constant 3 : i32
-  %value_pair_first$6, %value_pair_second = func.call pure @Envelope__update_value(%value_prefix, %value_pair_first$4, %input, %value_suffix, %next) : (i32, i32, i32, i32, i32) -> (i32, i32)
-  %8 = scalar.addi %value_pair_second, %value_suffix : i32
-  func.return %8 : i32
+  %value_pair_second = func.call pure @Envelope__update_value(%value_prefix, %value_pair_first, %input, %value_suffix, %next) : (i32, i32, i32, i32, i32) -> (i32)
+  %7 = scalar.addi %value_pair_second, %value_suffix : i32
+  func.return %7 : i32
 }
 
-func.def @Envelope__update_value(%this_prefix: i32, %this_pair_first: i32, %this_pair_second: i32, %this_suffix: i32, %next: i32) -> (i32, i32) {
+func.def @Envelope__update_value(%this_prefix: i32, %this_pair_first: i32, %this_pair_second: i32, %this_suffix: i32, %next: i32) -> (i32) {
   func.call pure @Envelope__self_value(%this_prefix, %this_pair_first, %this_pair_second, %this_suffix) : (i32, i32, i32, i32)
-  func.return %this_pair_first, %next : i32, i32
+  func.return %next : i32
 }
 
 func.def @Envelope__self_value(%this_prefix: i32, %this_pair_first: i32, %this_pair_second: i32, %this_suffix: i32) {

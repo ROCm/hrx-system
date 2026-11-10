@@ -436,6 +436,11 @@ void Functions::analyze(Types& types) {
                        function_contracts_.has_predicates(function) ||
                        template_definitions_.lookup(function) ||
                        unit_.typeTraits().is_reference(signature->returnType());
+    analysis->configure_receiver(
+        analysis->receiver_requires_storage() || function->isConstructor()
+            ? Construction::ParameterMode::Storage
+        : whole ? Construction::ParameterMode::Value
+                : Construction::ParameterMode::Projected);
     for (auto* parameter : function->parameters()) {
       if (!unit_.typeTraits().is_reference(parameter->type())) {
         continue;
@@ -455,6 +460,7 @@ void Functions::analyze(Types& types) {
   check(resolve_call_fields(control_flows_, analyzed_calls,
                             module_->arena.block_pool));
   reference_parameters_.clear();
+  receiver_projections_.clear();
   for (const auto& [canonical, analysis] : analyzed_functions) {
     analysis->publish_pointer_reference_snapshots(types);
     analysis->finalize_callable_effects();
@@ -502,6 +508,7 @@ void Functions::analyze(Types& types) {
       for (const auto& group : groups) {
         if (analysis->parameter_input(parameter, group)) {
           projection->inputs.push_back(group);
+          projection->input_component_count += group.partition->component_count;
         }
         if (reference.mutable_access &&
             analysis->parameter_output(parameter, group)) {
@@ -513,6 +520,49 @@ void Functions::analyze(Types& types) {
     if (!references.empty()) {
       reference_parameters_.emplace(canonical, std::move(references));
     }
+    const auto* receiver = analysis->receiver_partition();
+    if (!receiver || function->isConstructor() ||
+        analysis->receiver_requires_storage()) {
+      continue;
+    }
+    auto written = receiver_writes(function);
+    auto visit_groups = [&](auto&& visit) {
+      auto traits = unit_.typeTraits();
+      for (const auto& member : receiver->members) {
+        auto* type =
+            traits.is_reference(member.type())
+                ? traits.add_pointer(traits.remove_reference(member.type()))
+                : types.unqualified(member.type());
+        const bool output =
+            std::ranges::find(written, member.source) != written.end();
+        for (const auto& group :
+             types.projections(type, function->declaration())) {
+          visit(member, group, output);
+        }
+      }
+    };
+    bool complete = true;
+    visit_groups([&](const auto& member, const auto& group, bool output) {
+      complete &= analysis->parameter_input(member.source, group) &&
+                  (!output || analysis->parameter_output(member.source, group));
+    });
+    if (complete) {
+      continue;
+    }
+    ParameterProjection projection;
+    visit_groups([&](const auto& member, auto group, bool output) {
+      const bool input = analysis->parameter_input(member.source, group);
+      output &= analysis->parameter_output(member.source, group);
+      group.component_offset += member.component_offset;
+      if (input) {
+        projection.inputs.push_back(group);
+        projection.input_component_count += group.partition->component_count;
+      }
+      if (output) {
+        projection.outputs.push_back(group);
+      }
+    });
+    receiver_projections_.emplace(canonical, std::move(projection));
   }
 }
 
@@ -1343,7 +1393,16 @@ std::optional<ImplicitObjectParameter> Functions::implicit_object(
       instance.receiver_abi == ImplicitObjectABI::Value &&
               !symbol->isDestructor()
           ? analysis->receiver_writes()
-          : std::span<cxx::Symbol* const>{}};
+          : std::span<cxx::Symbol* const>{},
+      instance.receiver_abi == ImplicitObjectABI::Value
+          ? receiver_projection(symbol)
+          : nullptr};
+}
+
+const ParameterProjection* Functions::receiver_projection(
+    cxx::FunctionSymbol* symbol) const {
+  auto found = receiver_projections_.find(symbol->canonical());
+  return found == receiver_projections_.end() ? nullptr : &found->second;
 }
 
 BoundSignature Functions::bind_callable_signature(
@@ -1390,7 +1449,13 @@ BoundSignature Functions::bind_callable_signature(
                   (receiver ? receiver->written_fields.size() : 0));
   size_t argument_count = 0;
   size_t receiver_argument_count = 0;
-  if (receiver) {
+  if (receiver && receiver->projection) {
+    for (const auto& group : receiver->projection->inputs) {
+      sources.push_back(group.type);
+    }
+    receiver_argument_count = receiver->projection->input_component_count;
+    argument_count = receiver_argument_count;
+  } else if (receiver) {
     const cxx::Type* receiver_type =
         receiver->abi == ImplicitObjectABI::Value
             ? types.unqualified(receiver->object_type)
@@ -1433,7 +1498,11 @@ BoundSignature Functions::bind_callable_signature(
     ordinary_result_count =
         types.partition(result_type, source).component_count;
   }
-  if (receiver && receiver->abi == ImplicitObjectABI::Value) {
+  if (receiver && receiver->projection) {
+    for (const auto& group : receiver->projection->outputs) {
+      sources.push_back(group.type);
+    }
+  } else if (receiver && receiver->abi == ImplicitObjectABI::Value) {
     for (auto* field : receiver->written_fields) {
       sources.push_back(types.unqualified_value(source_object_type(field)));
     }
