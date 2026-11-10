@@ -231,6 +231,44 @@ void SourceToModule(::benchmark::State& state,
   RunCompileBenchmarkDirect(state, CreateSourceToModuleScenario, source);
 }
 
+// Keep source construction outside the timed importer. Named fields expose
+// selection/writeback growth independently of array storage or template work.
+void SelectedRecord(::benchmark::State& state) {
+  const auto count = static_cast<size_t>(state.range(0));
+  std::string source =
+      "struct Item { unsigned* data; unsigned value; }; struct Items {";
+  for (size_t index = 0; index < count; ++index) {
+    source += "Item item" + std::to_string(index) + ";";
+  }
+  source +=
+      "}; unsigned update(unsigned* data, unsigned selector, unsigned "
+      "next) { Items items{";
+  for (size_t index = 0; index < count; ++index) {
+    if (index) {
+      source += ",";
+    }
+    source += "{data," + std::to_string(index) + "u}";
+  }
+  source += "}; Item& selected = ";
+  for (size_t index = 0; index + 1 < count; ++index) {
+    source += "selector == " + std::to_string(index) + "u ? items.item" +
+              std::to_string(index) + " : ";
+  }
+  source += "items.item" + std::to_string(count - 1) +
+            "; selected.value = next; return ";
+  for (size_t index = 0; index < count; ++index) {
+    if (index) {
+      source += "+";
+    }
+    source += std::to_string(index + 1) + "u * items.item" +
+              std::to_string(index) + ".value";
+  }
+  source += ";}";
+  const SourceToModuleInput input = {SourceLanguage::kCxx, source.c_str(),
+                                     nullptr, nullptr};
+  SourceToModule(state, &input);
+}
+
 void SourceToPreamble(::benchmark::State& state,
                       const SourceToModuleInput* source) {
   RunCompileBenchmarkDirect(state, CreateSourceToModuleScenario, source);
@@ -398,6 +436,11 @@ BENCHMARK_CAPTURE(SourceToModule, NoIncludes, &kNoIncludes)
 BENCHMARK_CAPTURE(SourceToModule, AggregateRecord, &kAggregateRecord)
     ->Unit(::benchmark::kMicrosecond);
 BENCHMARK_CAPTURE(SourceToModule, UserConstructor, &kUserConstructor)
+    ->Unit(::benchmark::kMicrosecond);
+BENCHMARK(SelectedRecord)
+    ->Arg(2)
+    ->Arg(8)
+    ->Arg(32)
     ->Unit(::benchmark::kMicrosecond);
 BENCHMARK_CAPTURE(SourceToModule, StdFloat, &kStdFloat)
     ->Unit(::benchmark::kMicrosecond);

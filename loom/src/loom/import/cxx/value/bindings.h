@@ -69,6 +69,30 @@ class ValueBindings {
     std::variant<Map::node_type, PendingMap::node_type> state_;
   };
 
+  // Accumulates functional subobject replacements in one mutable component list
+  // per changed binding, then captures the completed value on apply. Reads see
+  // earlier replacements; source bindings and snapshots stay unchanged until
+  // then. No source expressions or externally observable effects occur in the
+  // batch.
+  class Updates {
+   public:
+    Updates(ValueBindings& bindings, ValueArena& arena)
+        : bindings_(bindings), arena_(arena) {}
+
+    std::optional<Value> project(cxx::Symbol* binding,
+                                 const Partition& partition, size_t offset);
+    void replace(cxx::Symbol* binding, size_t offset, Value value);
+    void apply();
+
+   private:
+    // Current source bindings receiving the completed replacements.
+    ValueBindings& bindings_;
+    // Function-local immutable payload storage for reads and completed values.
+    ValueArena& arena_;
+    // Mutable component lists owned only by this batch, never by a snapshot.
+    PendingMap pending_;
+  };
+
   // Removes the current binding until a source scope restores it.
   Binding take(cxx::Symbol* binding);
   // Replaces the current binding with state previously taken for this symbol.
@@ -115,6 +139,10 @@ class ValueBindings {
   }
 
  private:
+  static std::optional<Value> project(const Pending& pending,
+                                      const Partition& partition, size_t offset,
+                                      ValueArena& arena);
+
   // Canonical current source bindings copied at structured-control forks.
   Map values_;
   // Declared source objects with no complete payload yet.

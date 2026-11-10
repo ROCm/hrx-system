@@ -295,21 +295,28 @@ func.def public @selected_length(%choose: i1, %first: i32, %second: i32) -> (i32
   %result, %12 = func.call pure @advance(%10, %7) : (i32, i32) -> (i32, i32)
   %13 = scalar.constant 0 : i32
   %14 = scalar.cmpi eq, %6, %13 : i32
-  %left, %right = scf.if %14 -> (i32, i32) {
-    scf.yield %12, %second : i32, i32
+  %15 = scf.if %14 -> (i32) {
+    scf.yield %12 : i32
   } else {
-    scf.yield %first, %12 : i32, i32
+    scf.yield %first : i32
   }
-  %17 = scalar.constant 10 : i32
-  %18 = scalar.muli %left, %17 : i32
-  %19 = scalar.addi %result, %18 : i32
-  %20 = scalar.addi %19, %right : i32
-  func.return %20 : i32
+  %16 = scalar.constant 0 : i32
+  %17 = scalar.cmpi eq, %6, %16 : i32
+  %18 = scf.if %17 -> (i32) {
+    scf.yield %second : i32
+  } else {
+    scf.yield %12 : i32
+  }
+  %19 = scalar.constant 10 : i32
+  %20 = scalar.muli %15, %19 : i32
+  %21 = scalar.addi %result, %20 : i32
+  %22 = scalar.addi %21, %18 : i32
+  func.return %22 : i32
 }
 
 func.def noinline @advance(%slice_length: i32, %step: i32) -> (i32, i32) {
-  %25 = scalar.addi %slice_length, %step : i32
-  func.return %25, %25 : i32, i32
+  %27 = scalar.addi %slice_length, %step : i32
+  func.return %27, %27 : i32, i32
 }
 
 // ====
@@ -376,13 +383,20 @@ func.def @maybe_initialize(%output$5: i32, %other$6: i32, %choose: i1) -> (i32) 
     %10 = scalar.constant 1 : i32
     scf.yield %10 : i32
   }
-  %output$12 = func.call pure @initialize() : () -> (i32)
+  %12 = func.call pure @initialize() : () -> (i32)
   %13 = scalar.constant 0 : i32
   %14 = scalar.cmpi eq, %11, %13 : i32
-  %output$15, %other$16 = scf.if %14 -> (i32, i32) {
-    scf.yield %output$12, %other$6 : i32, i32
+  %output$15 = scf.if %14 -> (i32) {
+    scf.yield %12 : i32
   } else {
-    scf.yield %output$5, %output$12 : i32, i32
+    scf.yield %output$5 : i32
+  }
+  %16 = scalar.constant 0 : i32
+  %17 = scalar.cmpi eq, %11, %16 : i32
+  %other$18 = scf.if %17 -> (i32) {
+    scf.yield %other$6 : i32
+  } else {
+    scf.yield %12 : i32
   }
   func.return %output$15 : i32
 }
@@ -423,29 +437,36 @@ func.def public @selected_pointer(%choose: i1, %first: buffer, %first_byte_offse
   %13, %14 = func.call pure @advance(%11, %12) : (buffer, offset) -> (buffer, offset)
   %15 = scalar.constant 0 : i32
   %16 = scalar.cmpi eq, %8, %15 : i32
-  %left, %left_byte_offset, %right, %right_byte_offset = scf.if %16 -> (buffer, offset, buffer, offset) {
-    scf.yield %13, %14, %second, %second_byte_offset : buffer, offset, buffer, offset
+  %17, %18 = scf.if %16 -> (buffer, offset) {
+    scf.yield %13, %14 : buffer, offset
   } else {
-    scf.yield %first, %first_byte_offset, %13, %14 : buffer, offset, buffer, offset
+    scf.yield %first, %first_byte_offset : buffer, offset
   }
-  %21 = buffer.view %left[%left_byte_offset] : buffer -> view<1xi32>
-  %22 = view.load %21[0] : view<1xi32> -> i32
-  %23 = buffer.view %right[%right_byte_offset] : buffer -> view<1xi32>
+  %19 = scalar.constant 0 : i32
+  %20 = scalar.cmpi eq, %8, %19 : i32
+  %21, %22 = scf.if %20 -> (buffer, offset) {
+    scf.yield %second, %second_byte_offset : buffer, offset
+  } else {
+    scf.yield %13, %14 : buffer, offset
+  }
+  %23 = buffer.view %17[%18] : buffer -> view<1xi32>
   %24 = view.load %23[0] : view<1xi32> -> i32
-  %25 = scalar.addi %22, %24 : i32
-  func.return %25 : i32
+  %25 = buffer.view %21[%22] : buffer -> view<1xi32>
+  %26 = view.load %25[0] : view<1xi32> -> i32
+  %27 = scalar.addi %24, %26 : i32
+  func.return %27 : i32
 }
 
 func.def @advance(%slice_data: buffer, %slice_data_byte_offset: offset) -> (buffer, offset) {
-  %30 = scalar.constant 1 : i32
-  %31 = scalar.extsi %30 : i32 to i64
-  %32 = scalar.constant 4 : i64
-  %33 = scalar.muli %31, %32 : i64
-  %34 = index.cast %slice_data_byte_offset : offset to i64
-  %35 = scalar.addi %34, %33 : i64
-  %36 = scalar.assume %35 [range(%35, 0, 9223372036854775807)] : i64
-  %37 = index.cast %36 : i64 to offset
-  func.return %slice_data, %37 : buffer, offset
+  %32 = scalar.constant 1 : i32
+  %33 = scalar.extsi %32 : i32 to i64
+  %34 = scalar.constant 4 : i64
+  %35 = scalar.muli %33, %34 : i64
+  %36 = index.cast %slice_data_byte_offset : offset to i64
+  %37 = scalar.addi %36, %35 : i64
+  %38 = scalar.assume %37 [range(%37, 0, 9223372036854775807)] : i64
+  %39 = index.cast %38 : i64 to offset
+  func.return %slice_data, %39 : buffer, offset
 }
 
 // ====
@@ -492,25 +513,32 @@ func.def @choose_window(%left_rows_dim0: index, %left_rows_layout: encoding<layo
   %39, %40, %41 = func.call pure @trim(%36, %37, %38, %remaining) : (index, encoding<layout>, view<[%36]x4xf32, %37>, i32) -> (index, encoding<layout>, view<[%39]x4xf32, %40>)
   %42 = scalar.constant 0 : i32
   %43 = scalar.cmpi eq, %33, %42 : i32
-  %left_dim0, %left_layout, %left, %right_dim0, %right_layout, %right = scf.if %43 -> (index, encoding<layout>, view<[%left_dim0]x4xf32, %left_layout>, index, encoding<layout>, view<[%right_dim0]x4xf32, %right_layout>) {
-    scf.yield %39, %40, %41, %right_rows_dim0, %right_rows_layout, %right_rows : index, encoding<layout>, view<[%39]x4xf32, %40>, index, encoding<layout>, view<[%right_rows_dim0]x4xf32, %right_rows_layout>
+  %44, %45, %46 = scf.if %43 -> (index, encoding<layout>, view<[%44]x4xf32, %45>) {
+    scf.yield %39, %40, %41 : index, encoding<layout>, view<[%39]x4xf32, %40>
   } else {
-    scf.yield %left_rows_dim0, %left_rows_layout, %left_rows, %39, %40, %41 : index, encoding<layout>, view<[%left_rows_dim0]x4xf32, %left_rows_layout>, index, encoding<layout>, view<[%39]x4xf32, %40>
+    scf.yield %left_rows_dim0, %left_rows_layout, %left_rows : index, encoding<layout>, view<[%left_rows_dim0]x4xf32, %left_rows_layout>
   }
-  func.return %left_dim0, %left_layout, %left, %right_dim0, %right_layout, %right : index, encoding<layout>, view<[%left_dim0]x4xf32, %left_layout>, index, encoding<layout>, view<[%right_dim0]x4xf32, %right_layout>
+  %47 = scalar.constant 0 : i32
+  %48 = scalar.cmpi eq, %33, %47 : i32
+  %49, %50, %51 = scf.if %48 -> (index, encoding<layout>, view<[%49]x4xf32, %50>) {
+    scf.yield %right_rows_dim0, %right_rows_layout, %right_rows : index, encoding<layout>, view<[%right_rows_dim0]x4xf32, %right_rows_layout>
+  } else {
+    scf.yield %39, %40, %41 : index, encoding<layout>, view<[%39]x4xf32, %40>
+  }
+  func.return %44, %45, %46, %49, %50, %51 : index, encoding<layout>, view<[%44]x4xf32, %45>, index, encoding<layout>, view<[%49]x4xf32, %50>
 }
 
-func.def @trim(%window_rows_dim0: index, %window_rows_layout: encoding<layout>, %window_rows: view<[%window_rows_dim0]x4xf32, %window_rows_layout>, %remaining: i32) -> (%54: index, %55: encoding<layout>, view<[%54]x4xf32, %55>) {
-  %57 = scalar.constant 1 : i32
-  %58 = scalar.extsi %57 : i32 to i64
-  %59 = scalar.constant 0 : i32
+func.def @trim(%window_rows_dim0: index, %window_rows_layout: encoding<layout>, %window_rows: view<[%window_rows_dim0]x4xf32, %window_rows_layout>, %remaining: i32) -> (%56: index, %57: encoding<layout>, view<[%56]x4xf32, %57>) {
+  %59 = scalar.constant 1 : i32
   %60 = scalar.extsi %59 : i32 to i64
-  %61 = scalar.extui %remaining : i32 to i64
-  %62 = index.cast %61 : i64 to index
-  %63 = index.cast %58 : i64 to index
-  %64 = index.cast %60 : i64 to index
-  %65 = view.subview %window_rows[%63, %64] : view<[%window_rows_dim0]x4xf32, %window_rows_layout> -> view<[%62]x4xf32, %window_rows_layout>
-  func.return %62, %window_rows_layout, %65 : index, encoding<layout>, view<[%62]x4xf32, %window_rows_layout>
+  %61 = scalar.constant 0 : i32
+  %62 = scalar.extsi %61 : i32 to i64
+  %63 = scalar.extui %remaining : i32 to i64
+  %64 = index.cast %63 : i64 to index
+  %65 = index.cast %60 : i64 to index
+  %66 = index.cast %62 : i64 to index
+  %67 = view.subview %window_rows[%65, %66] : view<[%window_rows_dim0]x4xf32, %window_rows_layout> -> view<[%64]x4xf32, %window_rows_layout>
+  func.return %64, %window_rows_layout, %67 : index, encoding<layout>, view<[%64]x4xf32, %window_rows_layout>
 }
 
 // ====
@@ -552,29 +580,36 @@ func.def public @selected_lane(%choose: i1, %first_index: i32, %second_index: i3
   %19 = func.call pure @update(%14) : (i32) -> (i32)
   %20 = scalar.constant 0 : i32
   %21 = scalar.cmpi eq, %10, %20 : i32
-  %first$22, %second$23 = scf.if %21 -> (vector<2xi32>, vector<4xi32>) {
-    %24 = index.cast %11 : i64 to index
-    %first = vector.insert %19 into %first$4[%24] : i32, vector<2xi32>
-    scf.yield %first, %second$5 : vector<2xi32>, vector<4xi32>
+  %first$22 = scf.if %21 -> (vector<2xi32>) {
+    %23 = index.cast %11 : i64 to index
+    %24 = vector.insert %19 into %first$4[%23] : i32, vector<2xi32>
+    scf.yield %24 : vector<2xi32>
   } else {
-    %26 = index.cast %11 : i64 to index
-    %second = vector.insert %19 into %second$5[%26] : i32, vector<4xi32>
-    scf.yield %first$4, %second : vector<2xi32>, vector<4xi32>
+    scf.yield %first$4 : vector<2xi32>
   }
-  %28 = scalar.constant 1 : i32
-  %29 = index.cast %28 : i32 to index
-  %30 = vector.extract %first$22[%29] : vector<2xi32> -> i32
-  %31 = scalar.constant 10 : i32
-  %32 = scalar.muli %30, %31 : i32
-  %33 = scalar.constant 3 : i32
-  %34 = index.cast %33 : i32 to index
-  %35 = vector.extract %second$23[%34] : vector<4xi32> -> i32
-  %36 = scalar.addi %32, %35 : i32
-  func.return %36 : i32
+  %25 = scalar.constant 0 : i32
+  %26 = scalar.cmpi eq, %10, %25 : i32
+  %second$27 = scf.if %26 -> (vector<4xi32>) {
+    scf.yield %second$5 : vector<4xi32>
+  } else {
+    %28 = index.cast %11 : i64 to index
+    %29 = vector.insert %19 into %second$5[%28] : i32, vector<4xi32>
+    scf.yield %29 : vector<4xi32>
+  }
+  %30 = scalar.constant 1 : i32
+  %31 = index.cast %30 : i32 to index
+  %32 = vector.extract %first$22[%31] : vector<2xi32> -> i32
+  %33 = scalar.constant 10 : i32
+  %34 = scalar.muli %32, %33 : i32
+  %35 = scalar.constant 3 : i32
+  %36 = index.cast %35 : i32 to index
+  %37 = vector.extract %second$27[%36] : vector<4xi32> -> i32
+  %38 = scalar.addi %34, %37 : i32
+  func.return %38 : i32
 }
 
-func.def @update(%value$37: i32) -> (i32) {
-  %39 = scalar.constant 5 : i32
-  %value$40 = scalar.addi %value$37, %39 : i32
-  func.return %value$40 : i32
+func.def @update(%value$39: i32) -> (i32) {
+  %41 = scalar.constant 5 : i32
+  %value$42 = scalar.addi %value$39, %41 : i32
+  func.return %value$42 : i32
 }

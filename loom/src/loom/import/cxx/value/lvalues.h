@@ -69,6 +69,9 @@ struct Lvalue {
       projection;
 
   const SelectedLvalue* selection() const;
+  // Complete owner of one concrete object/lane/component projection. Selected
+  // references use their already flattened alternatives before this query.
+  const ObjectLvalue& object() const;
   // Appends unique source bindings, consuming retained selection summaries.
   void append_bindings(std::vector<cxx::Symbol*>& bindings) const;
   // Applies a resolved field/base projection to each possible source origin.
