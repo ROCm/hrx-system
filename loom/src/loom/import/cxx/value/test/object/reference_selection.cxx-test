@@ -31,30 +31,44 @@ func.def public @selected(%choose_left: i1, %choose_right: i1, %first$2: i32, %s
     %12 = scalar.constant 1 : i32
     scf.yield %12 : i32
   }
-  %first$14, %third$15 = func.call pure @replace(%next) : (i32) -> (i32, i32)
+  %14, %15 = func.call pure @replace(%next) : (i32) -> (i32, i32)
   %16 = scalar.constant 0 : i32
   %17 = scalar.cmpi eq, %10, %16 : i32
-  %first$18, %second$19 = scf.if %17 -> (i32, i32) {
-    scf.yield %first$14, %second$3 : i32, i32
+  %first$18 = scf.if %17 -> (i32) {
+    scf.yield %14 : i32
   } else {
-    scf.yield %first$2, %first$14 : i32, i32
+    scf.yield %first$2 : i32
   }
-  %20 = scalar.constant 0 : i32
-  %21 = scalar.cmpi eq, %13, %20 : i32
-  %third$22, %fourth$23 = scf.if %21 -> (i32, i32) {
-    scf.yield %third$15, %fourth$5 : i32, i32
+  %19 = scalar.constant 0 : i32
+  %20 = scalar.cmpi eq, %10, %19 : i32
+  %second$21 = scf.if %20 -> (i32) {
+    scf.yield %second$3 : i32
   } else {
-    scf.yield %third$4, %third$15 : i32, i32
+    scf.yield %14 : i32
   }
-  %24 = scalar.addi %first$18, %second$19 : i32
-  %25 = scalar.addi %24, %third$22 : i32
-  %26 = scalar.addi %25, %fourth$23 : i32
-  func.return %26 : i32
+  %22 = scalar.constant 0 : i32
+  %23 = scalar.cmpi eq, %13, %22 : i32
+  %third$24 = scf.if %23 -> (i32) {
+    scf.yield %15 : i32
+  } else {
+    scf.yield %third$4 : i32
+  }
+  %25 = scalar.constant 0 : i32
+  %26 = scalar.cmpi eq, %13, %25 : i32
+  %fourth$27 = scf.if %26 -> (i32) {
+    scf.yield %fourth$5 : i32
+  } else {
+    scf.yield %15 : i32
+  }
+  %28 = scalar.addi %first$18, %second$21 : i32
+  %29 = scalar.addi %28, %third$24 : i32
+  %30 = scalar.addi %29, %fourth$27 : i32
+  func.return %30 : i32
 }
 
 func.def noinline @replace(%next: i32) -> (i32, i32) {
-  %30 = scalar.constant 1 : i32
-  %right = scalar.addi %next, %30 : i32
+  %34 = scalar.constant 1 : i32
+  %right = scalar.addi %next, %34 : i32
   func.return %next, %right : i32, i32
 }
 
@@ -139,4 +153,86 @@ func.def @Envelope__update_value(%this_prefix: i32, %this_pair_first: i32, %this
 
 func.def @Envelope__self_value(%this_prefix: i32, %this_pair_first: i32, %this_pair_second: i32, %this_suffix: i32) {
   func.return
+}
+
+// ====
+// Dynamic writes carry only the selected field through each region. The
+// neighboring semantic pointer and copied record keep their original values.
+struct Item {
+  // Semantic member outside the selected update.
+  int* data;
+  // Independently updated scalar member.
+  unsigned value;
+};
+struct Items {
+  // First selection candidate.
+  Item first;
+  // Second selection candidate.
+  Item second;
+  // Third selection candidate.
+  Item third;
+};
+unsigned update(int* data, unsigned choice, unsigned next) {
+  Items items{{data, 1u}, {data, 2u}, {data, 3u}};
+  const auto saved = items;
+  Item& selected = choice == 0u ? items.first : choice == 1u ? items.second : items.third;
+  selected.value = next;
+  return items.first.value + 10u * items.second.value + 100u * items.third.value + 1000u * saved.first.value;
+}
+
+// ----
+func.def public @update(%data: buffer, %data_byte_offset: offset, %choice: i32, %next: i32) -> (i32) {
+  %items_first_value$5 = scalar.constant 1 : i32
+  %items_second_value$6 = scalar.constant 2 : i32
+  %items_third_value$7 = scalar.constant 3 : i32
+  %8 = scalar.constant 0 : i32
+  %9 = scalar.cmpi eq, %choice, %8 : i32
+  %18 = scf.if %9 -> (i32) {
+    %15 = scalar.constant 0 : i32
+    scf.yield %15 : i32
+  } else {
+    %10 = scalar.constant 1 : i32
+    %11 = scalar.cmpi eq, %choice, %10 : i32
+    %14 = scf.if %11 -> (i32) {
+      %12 = scalar.constant 0 : i32
+      scf.yield %12 : i32
+    } else {
+      %13 = scalar.constant 1 : i32
+      scf.yield %13 : i32
+    }
+    %16 = scalar.constant 1 : i32
+    %17 = scalar.addi %14, %16 : i32
+    scf.yield %17 : i32
+  }
+  %19 = scalar.constant 0 : i32
+  %20 = scalar.cmpi eq, %18, %19 : i32
+  %items_first_value$21 = scf.if %20 -> (i32) {
+    scf.yield %next : i32
+  } else {
+    scf.yield %items_first_value$5 : i32
+  }
+  %22 = scalar.constant 1 : i32
+  %23 = scalar.cmpi eq, %18, %22 : i32
+  %items_second_value$24 = scf.if %23 -> (i32) {
+    scf.yield %next : i32
+  } else {
+    scf.yield %items_second_value$6 : i32
+  }
+  %25 = scalar.constant 2 : i32
+  %26 = scalar.cmpi eq, %18, %25 : i32
+  %items_third_value$27 = scf.if %26 -> (i32) {
+    scf.yield %next : i32
+  } else {
+    scf.yield %items_third_value$7 : i32
+  }
+  %28 = scalar.constant 10 : i32
+  %29 = scalar.muli %28, %items_second_value$24 : i32
+  %30 = scalar.addi %items_first_value$21, %29 : i32
+  %31 = scalar.constant 100 : i32
+  %32 = scalar.muli %31, %items_third_value$27 : i32
+  %33 = scalar.addi %30, %32 : i32
+  %34 = scalar.constant 1000 : i32
+  %35 = scalar.muli %34, %items_first_value$5 : i32
+  %36 = scalar.addi %33, %35 : i32
+  func.return %36 : i32
 }

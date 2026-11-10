@@ -17,6 +17,16 @@ const SelectedLvalue* Lvalue::selection() const {
   return selected ? selected->get() : nullptr;
 }
 
+const ObjectLvalue& Lvalue::object() const {
+  if (const auto* object = std::get_if<ObjectLvalue>(&projection)) {
+    return *object;
+  }
+  if (const auto* lane = std::get_if<VectorLaneLvalue>(&projection)) {
+    return lane->destination;
+  }
+  return std::get<VectorComponentLvalue>(projection).destination;
+}
+
 void Lvalue::append_bindings(std::vector<cxx::Symbol*>& bindings) const {
   auto append = [&](cxx::Symbol* binding) {
     if (std::ranges::find(bindings, binding) == bindings.end()) {
@@ -29,18 +39,11 @@ void Lvalue::append_bindings(std::vector<cxx::Symbol*>& bindings) const {
     }
     return;
   }
-  const ObjectLvalue* object = std::get_if<ObjectLvalue>(&projection);
-  if (!object) {
-    if (const auto* lane = std::get_if<VectorLaneLvalue>(&projection)) {
-      object = &lane->destination;
-    } else {
-      object = &std::get<VectorComponentLvalue>(projection).destination;
-    }
-  }
-  if (const auto* destination = std::get_if<Destination>(&object->location)) {
+  const auto& owner = object();
+  if (const auto* destination = std::get_if<Destination>(&owner.location)) {
     append(destination->binding);
   } else if (const auto* receiver =
-                 std::get_if<CurrentReceiver>(&object->location)) {
+                 std::get_if<CurrentReceiver>(&owner.location)) {
     for (const auto& member : receiver->record->members) {
       append(member.source);
     }

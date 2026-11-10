@@ -175,6 +175,41 @@ unsigned selected_field(bool choice, unsigned observation) {
   return read(snapshot);
 }
 
+// Repeated alternatives name the same field. A later unselected alternative
+// must preserve the earlier update, and copied records remain independent.
+unsigned repeated_field(unsigned choice) {
+  Pair pair{make(11u), make(12u)};
+  const auto snapshot = pair;
+  Payload& selected = choice == 0u   ? pair.first
+                      : choice == 1u ? pair.second
+                      : choice == 2u ? pair.first
+                                     : pair.second;
+  assign(selected, make(22u));
+  assign(selected, make(33u));
+  return read(pair.first) + 100u * read(pair.second) +
+         10000u * read(snapshot.first) + 1000000u * read(snapshot.second);
+}
+
+struct Partial {
+  // A semantic member keeps the object in its source value representation.
+  Payload payload;
+  // First initialized candidate for the selected update.
+  unsigned first;
+  // Second initialized candidate for the selected update.
+  unsigned second;
+  // Unobserved state remains uninitialized through the update.
+  unsigned unused;
+};
+unsigned partial_field(bool choice) {
+  Partial value;
+  value.payload = make(11u);
+  value.first = 5u;
+  value.second = 7u;
+  unsigned& selected = choice ? value.first : value.second;
+  selected += 3u;
+  return 10u * value.first + value.second + read(value.payload);
+}
+
 struct Derived : Cell {
   // Neighboring field excluded from the selected base projection.
   unsigned marker;

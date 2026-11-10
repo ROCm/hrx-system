@@ -85,5 +85,65 @@ TEST(ValueBindingsTest, PartialSnapshotsRemainIndependentThroughCompletion) {
   EXPECT_FALSE(values.contains(right));
 }
 
+TEST(ValueBindingsTest, BatchedUpdatesPreserveAliasesAndPartialSnapshots) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct Record { unsigned first, second, third; };
+    void entry(Record complete, Record partial);
+  )"),
+                IREE_SV("bindings.cxx"), options);
+  Types types(source.unit(), source.diagnostics());
+  auto* overloads = cxx::symbol_cast<cxx::OverloadSetSymbol>(
+      *source.unit().globalScope()->find("entry").begin());
+  auto* function = overloads->functions().front();
+  auto* complete = function->parameters()[0];
+  auto* partial = function->parameters()[1];
+  const auto& partition =
+      types.partition(complete->type(), source.unit().ast());
+  ValueArena arena;
+  const loom_value_id_t initial[] = {1, 2, 3};
+  ValueBindings values;
+  values.set(complete, arena.capture(partition, initial));
+  values.declare(partial, partition);
+  values.replace(partial, 1, Value(12), arena);
+  const auto snapshot = values;
+
+  ValueBindings::Updates updates(values, arena);
+  EXPECT_EQ(updates.project(complete, kSSAPartition, 1)->ssa(), 2u);
+  EXPECT_FALSE(updates.project(partial, kSSAPartition, 0));
+  updates.replace(complete, 1, Value(22));
+  EXPECT_EQ(updates.project(complete, kSSAPartition, 1)->ssa(), 22u);
+  updates.replace(complete, 1, Value(32));
+  updates.replace(complete, 2, Value(33));
+  updates.replace(partial, 0, Value(11));
+  EXPECT_EQ(updates.project(complete, kSSAPartition, 1)->ssa(), 32u);
+  EXPECT_EQ(updates.project(partial, kSSAPartition, 0)->ssa(), 11u);
+  EXPECT_FALSE(updates.project(partial, partition, 0));
+  EXPECT_EQ(values.at(complete).components()[1], 2u);
+  EXPECT_FALSE(values.project(partial, kSSAPartition, 0, arena));
+  updates.apply();
+
+  EXPECT_EQ(values.at(complete).components()[0], 1u);
+  EXPECT_EQ(values.at(complete).components()[1], 32u);
+  EXPECT_EQ(values.at(complete).components()[2], 33u);
+  EXPECT_EQ(snapshot.at(complete).components()[1], 2u);
+  EXPECT_FALSE(values.initialized(partial));
+  EXPECT_EQ(values.project(partial, kSSAPartition, 0, arena)->ssa(), 11u);
+  EXPECT_EQ(values.project(partial, kSSAPartition, 1, arena)->ssa(), 12u);
+  EXPECT_FALSE(snapshot.project(partial, kSSAPartition, 0, arena));
+
+  ValueBindings::Updates completion(values, arena);
+  completion.replace(partial, 2, Value(13));
+  auto result = completion.project(partial, partition, 0);
+  ASSERT_TRUE(result);
+  EXPECT_EQ(result->components()[0], 11u);
+  EXPECT_EQ(result->components()[1], 12u);
+  EXPECT_EQ(result->components()[2], 13u);
+  completion.apply();
+  EXPECT_TRUE(values.initialized(partial));
+  EXPECT_FALSE(snapshot.initialized(partial));
+}
+
 }  // namespace
 }  // namespace loom::cxx_import

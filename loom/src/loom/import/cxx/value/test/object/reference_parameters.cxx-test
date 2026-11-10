@@ -1300,34 +1300,41 @@ func.def public @mutate_conditional_xvalue(%choose: i1, %left_value$31: i32, %ri
   } else {
     scf.yield %right_value$32 : i32
   }
-  %left_value$40 = func.call pure @increment_conditional_rvalue(%39) : (i32) -> (i32)
+  %40 = func.call pure @increment_conditional_rvalue(%39) : (i32) -> (i32)
   %41 = scalar.constant 0 : i32
   %42 = scalar.cmpi eq, %36, %41 : i32
-  %left_value$43, %right_value$44 = scf.if %42 -> (i32, i32) {
-    scf.yield %left_value$40, %right_value$32 : i32, i32
+  %left_value$43 = scf.if %42 -> (i32) {
+    scf.yield %40 : i32
   } else {
-    scf.yield %left_value$31, %left_value$40 : i32, i32
+    scf.yield %left_value$31 : i32
   }
-  %45 = scalar.addi %left_value$43, %right_value$44 : i32
-  func.return %45 : i32
+  %44 = scalar.constant 0 : i32
+  %45 = scalar.cmpi eq, %36, %44 : i32
+  %right_value$46 = scf.if %45 -> (i32) {
+    scf.yield %right_value$32 : i32
+  } else {
+    scf.yield %40 : i32
+  }
+  %47 = scalar.addi %left_value$43, %right_value$46 : i32
+  func.return %47 : i32
 }
 
-func.def @increment_rvalue(%state_value$46: i32) -> (i32) {
-  %48 = scalar.constant 1 : i32
-  %state_value$49 = scalar.addi %state_value$46, %48 : i32
-  func.return %state_value$49 : i32
+func.def @increment_rvalue(%state_value$48: i32) -> (i32) {
+  %50 = scalar.constant 1 : i32
+  %state_value$51 = scalar.addi %state_value$48, %50 : i32
+  func.return %state_value$51 : i32
 }
 
-func.def @invoke_rvalue__lambda_int____(%function_value$50: i32) -> (i32, i32) {
-  %53, %function_value$54 = func.call pure @operator_call_value(%function_value$50) : (i32) -> (i32, i32)
-  func.return %53, %function_value$54 : i32, i32
+func.def @invoke_rvalue__lambda_int____(%function_value$52: i32) -> (i32, i32) {
+  %55, %function_value$56 = func.call pure @operator_call_value(%function_value$52) : (i32) -> (i32, i32)
+  func.return %55, %function_value$56 : i32, i32
 }
 
 func.def @address_rvalue(%state: buffer, %state_byte_offset: offset) -> (i32) {
-  %58 = index.constant 0 : offset
-  %59 = index.add %state_byte_offset, %58 : offset
-  %60 = buffer.view %state[%59] : buffer -> view<1xi32>
-  %value = view.load %60[0] : view<1xi32> -> i32
+  %60 = index.constant 0 : offset
+  %61 = index.add %state_byte_offset, %60 : offset
+  %62 = buffer.view %state[%61] : buffer -> view<1xi32>
+  %value = view.load %62[0] : view<1xi32> -> i32
   func.return %value : i32
 }
 
@@ -1343,21 +1350,21 @@ func.def @identity_value_rvalue(%state_value: i32) {
   func.return
 }
 
-func.def @increment_chained_rvalue(%state_value$66: i32) -> (i32) {
-  %68 = scalar.constant 2 : i32
-  %state_value$69 = scalar.addi %state_value$66, %68 : i32
-  func.return %state_value$69 : i32
+func.def @increment_chained_rvalue(%state_value$68: i32) -> (i32) {
+  %70 = scalar.constant 2 : i32
+  %state_value$71 = scalar.addi %state_value$68, %70 : i32
+  func.return %state_value$71 : i32
 }
 
-func.def @increment_conditional_rvalue(%state_value$70: i32) -> (i32) {
-  %72 = scalar.constant 3 : i32
-  %state_value$73 = scalar.addi %state_value$70, %72 : i32
-  func.return %state_value$73 : i32
+func.def @increment_conditional_rvalue(%state_value$72: i32) -> (i32) {
+  %74 = scalar.constant 3 : i32
+  %state_value$75 = scalar.addi %state_value$72, %74 : i32
+  func.return %state_value$75 : i32
 }
 
 func.def @operator_call_value(%this_value: i32) -> (i32, i32) {
-  %77 = scalar.constant 1 : i32
-  %value = scalar.addi %this_value, %77 : i32
+  %79 = scalar.constant 1 : i32
+  %value = scalar.addi %this_value, %79 : i32
   func.return %value, %value : i32, i32
 }
 

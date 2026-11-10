@@ -2207,78 +2207,56 @@ class Translator final : private Initialization::Evaluation {
 
   enum class IncrementResult { Previous, Updated };
 
-  std::optional<Value> selected_operation(
-      loom_value_id_t condition, const cxx::Type* result_type,
-      std::span<cxx::Symbol* const> bindings, cxx::AST* owner,
-      const std::function<std::optional<Value>(size_t)>& operation) {
-    auto written = live_mutations(bindings);
-    std::vector<const cxx::Type*> sources;
-    const size_t result_count =
-        result_type ? types_.partition(result_type, owner).component_count : 0;
-    if (result_type) {
-      sources.push_back(result_type);
-    }
-    for (const auto& mutation : written) {
-      sources.push_back(mutation.projection.type);
-    }
+  // These arms only read evaluated lvalues or compute their replacements.
+  // Source expression effects and temporary construction have already finished.
+  Value selected_value(loom_value_id_t condition, const cxx::Type* result_type,
+                       cxx::AST* owner,
+                       const std::function<Value(size_t)>& operation) {
+    std::array<const cxx::Type*, 1> sources = {result_type};
     auto outputs = bind_signature(types_, sources, owner, &builder_);
-    auto initial = values_;
     auto source = locations_.get(owner);
     loom_op_t* op;
     check(loom_scf_if_build(&builder_, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION,
                             condition, outputs.types.data(),
                             outputs.types.size(), nullptr, 0, source, &op));
-    conditional_cleanup_anchors_.push_back(
-        {op->parent_block, op->parent_op, op});
     for (size_t arm = 0; arm < 2; ++arm) {
       auto* region =
           arm == 0 ? loom_scf_if_then_region(op) : loom_scf_if_else_region(op);
       auto saved = loom_builder_enter_region(&builder_, op, region);
-      const size_t temporary_mark = temporary_destructions_.size();
       auto value = operation(arm);
-      materialize_conditional_temporaries(temporary_mark);
-      std::vector<loom_value_id_t> yielded;
-      if (result_type) {
-        value->append_to(yielded);
-      }
-      auto mutations = current(written);
-      yielded.insert(yielded.end(), mutations.begin(), mutations.end());
+      auto components = value.components();
       loom_op_t* yield;
-      check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
-                                 source, &yield));
+      check(loom_scf_yield_build(&builder_, components.data(),
+                                 components.size(), source, &yield));
       loom_builder_restore(&builder_, saved);
-      values_ = initial;
-    }
-    conditional_cleanup_anchors_.pop_back();
-    bind_values(written, loom_op_results(op) + result_count);
-    if (!result_type) {
-      return std::nullopt;
     }
     return value_arena_.capture(types_.partition(result_type, owner),
-                                {loom_op_results(op), result_count});
+                                {loom_op_results(op), outputs.types.size()});
   }
 
-  std::optional<Value> dispatch_selection(
-      const SelectedLvalue& selected, const cxx::Type* result_type,
-      std::span<cxx::Symbol* const> bindings, cxx::AST* owner,
-      const std::function<std::optional<Value>(size_t)>& operation,
-      size_t ordinal = 0) {
-    if (ordinal + 1 == selected.alternatives.size()) {
-      return operation(ordinal);
-    }
+  loom_value_id_t selection_condition(const SelectedLvalue& selected,
+                                      size_t ordinal, cxx::AST* owner) {
     auto* ordinal_type = unit_.control()->getUnsignedIntType();
     auto expected =
         scalars_.integer(ordinal, LOOM_SCALAR_TYPE_I32, locations_.get(owner));
-    auto condition = scalars_.binary(cxx::TokenKind::T_EQUAL_EQUAL,
-                                     selected.selector, expected, ordinal_type,
-                                     unit_.control()->getBoolType(), owner);
-    return selected_operation(
-        condition, result_type, bindings, owner,
-        [&](size_t arm) -> std::optional<Value> {
-          return arm == 0 ? operation(ordinal)
-                          : dispatch_selection(selected, result_type, bindings,
-                                               owner, operation, ordinal + 1);
-        });
+    return scalars_.binary(cxx::TokenKind::T_EQUAL_EQUAL, selected.selector,
+                           expected, ordinal_type,
+                           unit_.control()->getBoolType(), owner);
+  }
+
+  Value dispatch_selection(const SelectedLvalue& selected, cxx::AST* owner,
+                           const std::function<Value(size_t)>& operation,
+                           size_t ordinal = 0) {
+    if (ordinal + 1 == selected.alternatives.size()) {
+      return operation(ordinal);
+    }
+    return selected_value(selection_condition(selected, ordinal, owner),
+                          selected.type, owner, [&](size_t arm) {
+                            return arm == 0 ? operation(ordinal)
+                                            : dispatch_selection(
+                                                  selected, owner, operation,
+                                                  ordinal + 1);
+                          });
   }
 
   // Result of one ordinary source call. Exact reference aliases retain the
@@ -2882,11 +2860,9 @@ class Translator final : private Initialization::Evaluation {
 
   Value read(const Lvalue& target, cxx::AST* owner) {
     if (const auto* selected = target.selection()) {
-      return *dispatch_selection(*selected, selected->type, {}, owner,
-                                 [&](size_t arm) -> std::optional<Value> {
-                                   return read(selected->alternatives[arm],
-                                               owner);
-                                 });
+      return dispatch_selection(*selected, owner, [&](size_t arm) {
+        return read(selected->alternatives[arm], owner);
+      });
     }
     if (auto* object = std::get_if<ObjectLvalue>(&target.projection)) {
       return read(*object, owner);
@@ -2903,13 +2879,93 @@ class Translator final : private Initialization::Evaluation {
     return read_vector_component(vector, component.selection);
   }
 
+  Value read_selected_object(const ObjectLvalue& object,
+                             ValueBindings::Updates& updates, cxx::AST* owner) {
+    auto project = [&](cxx::Symbol* binding, const Partition& partition,
+                       size_t offset) {
+      auto value = updates.project(binding, partition, offset);
+      if (!value) {
+        fail(owner, "source subobject is read before initialization");
+      }
+      return *value;
+    };
+    if (const auto* destination = std::get_if<Destination>(&object.location)) {
+      const auto& partition = destination->member
+                                  ? *destination->member
+                                  : values_.partition(destination->binding);
+      return project(destination->binding, partition,
+                     destination->component_offset);
+    }
+    const auto& receiver = std::get<CurrentReceiver>(object.location);
+    std::vector<loom_value_id_t> components;
+    components.reserve(receiver.record->component_count);
+    for (const auto& member : receiver.record->members) {
+      project(member.source, *member.partition, 0).append_to(components);
+    }
+    return value_arena_.capture(*receiver.record, components);
+  }
+
+  void write_selection(const SelectedLvalue& selected, Value value,
+                       cxx::AST* owner) {
+    ValueBindings::Updates updates(values_, value_arena_);
+    for (size_t ordinal = 0; ordinal < selected.alternatives.size();
+         ++ordinal) {
+      const auto& alternative = selected.alternatives[ordinal];
+      const auto& object = alternative.object();
+      // Binary choices share one predicate with opposite arm polarity. This
+      // retains the complement known by the selection owner without requiring
+      // a later pass to recover it from the ordinal's range.
+      const bool complementary =
+          selected.alternatives.size() == 2 && ordinal == 1;
+      auto updated = selected_value(
+          selection_condition(selected, complementary ? 0 : ordinal, owner),
+          object.type, owner, [&](size_t arm) {
+            const bool replace = (arm == 0) != complementary;
+            if (replace &&
+                std::holds_alternative<ObjectLvalue>(alternative.projection)) {
+              return value;
+            }
+            auto current = read_selected_object(object, updates, owner);
+            if (!replace) {
+              return current;
+            }
+            if (const auto* lane =
+                    std::get_if<VectorLaneLvalue>(&alternative.projection)) {
+              auto original = lane->value ? *lane->value : current;
+              return Value(vectors_.insert(original.ssa(), value.ssa(),
+                                           lane->index, object.type,
+                                           lane->index_type, owner));
+            }
+            const auto& component =
+                std::get<VectorComponentLvalue>(alternative.projection);
+            return update_vector_component(
+                component.value ? *component.value : current, value,
+                component.selection);
+          });
+      if (const auto* destination =
+              std::get_if<Destination>(&object.location)) {
+        updates.replace(destination->binding, destination->component_offset,
+                        updated);
+      } else {
+        const auto& receiver = std::get<CurrentReceiver>(object.location);
+        for (const auto& member : receiver.record->members) {
+          updates.replace(
+              member.source, 0,
+              updated.project(*member.partition, member.component_offset));
+        }
+      }
+    }
+    updates.apply();
+    for (auto* binding : selected.bindings) {
+      if (auto found = values_.find(binding); found != values_.end()) {
+        name(found->second, cxx::to_string(binding->name()));
+      }
+    }
+  }
+
   void write(const Lvalue& target, Value value, cxx::AST* owner) {
     if (const auto* selected = target.selection()) {
-      dispatch_selection(*selected, nullptr, selected->bindings, owner,
-                         [&](size_t arm) -> std::optional<Value> {
-                           write(selected->alternatives[arm], value, owner);
-                           return std::nullopt;
-                         });
+      write_selection(*selected, value, owner);
       return;
     }
     if (auto* object = std::get_if<ObjectLvalue>(&target.projection)) {

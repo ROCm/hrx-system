@@ -10,6 +10,24 @@
 
 #include <reference_selection.cxx>
 
+LOOM_CHECK_CASE(repeated_field_alternatives) {
+  const auto first = repeated_field(0u);
+  const auto second = repeated_field(1u);
+  const auto repeated_first = repeated_field(2u);
+  const auto repeated_second = repeated_field(3u);
+  loom::check::expect_equal(first, 12111233u);
+  loom::check::expect_equal(second, 12113311u);
+  loom::check::expect_equal(repeated_first, 12111233u);
+  loom::check::expect_equal(repeated_second, 12113311u);
+}
+
+LOOM_CHECK_CASE(partial_field_alternatives) {
+  const auto first = partial_field(true);
+  const auto second = partial_field(false);
+  loom::check::expect_equal(first, 98u);
+  loom::check::expect_equal(second, 71u);
+}
+
 LOOM_CHECK_CASE(saved_reference_selects_first) {
   const auto first = selected_object(true, 0u);
   const auto second = selected_object(true, 1u);
