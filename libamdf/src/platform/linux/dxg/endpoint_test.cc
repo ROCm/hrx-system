@@ -194,7 +194,7 @@ TEST_F(DxgEndpointTest, EnumeratesPhysicalAmdGpuEndpointsAndClosesSnapshot) {
             amdf_make_api_status(AMDF_STATUS_CODE_BUFFER_TOO_SMALL));
   EXPECT_EQ(count, 2u);
   EXPECT_EQ(summary.engine_kind, AMDF_ENGINE_KIND_GPU);
-  EXPECT_STREQ(summary.name, "AMD GPU 1002:744c:c8 (DXG 1234567887654321/0)");
+  EXPECT_STREQ(summary.name, "AMD Radeon RX 7900 XTX");
   EXPECT_EQ(native_.enumeration_call_count, 2u);
   EXPECT_EQ(native_.close_call_count, 2u);
 }
@@ -209,6 +209,7 @@ TEST_F(DxgEndpointTest, OpensAndRevalidatesOnePhysicalAdapter) {
   EXPECT_EQ(info.id.words[0], id.words[0]);
   EXPECT_EQ(info.id.words[1], id.words[1]);
   EXPECT_EQ(info.pci.device_id, 0x744Du);
+  EXPECT_STREQ(info.name, "AMD GPU 1002:744d:c8 (DXG 1234567887654321/1)");
   EXPECT_EQ(info.native_identity.type,
             AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_WINDOWS_ADAPTER);
   EXPECT_EQ(info.native_identity.value.windows_adapter.luid, kAmdLuid);

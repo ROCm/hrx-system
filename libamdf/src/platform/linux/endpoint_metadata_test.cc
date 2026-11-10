@@ -132,6 +132,9 @@ TEST_P(LinuxEndpointMetadataTest, DiscoversWithoutAnExecutionNode) {
       AMDF_STATUS_OK);
   EXPECT_TRUE(amdf_endpoint_id_is_equal(&summary.id, &info.id));
   EXPECT_STREQ(summary.name, info.name);
+  EXPECT_STREQ(info.name, GetParam() == AMDF_ENGINE_KIND_XDNA
+                              ? "AMD XDNA 1022:ffff:01 (0000:00:00.0)"
+                              : "AMD GPU 1002:ffff:01 (0000:00:00.0)");
   EXPECT_EQ(info.native_identity.type,
             AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_LINUX_DEVICE);
   EXPECT_EQ(info.native_identity.value.linux_device.major, 511u);
@@ -157,6 +160,39 @@ TEST_P(LinuxEndpointMetadataTest, DiscoversWithoutAnExecutionNode) {
   EXPECT_EQ(amdf_linux_endpoint_open_file(endpoint_, &descriptor),
             amdf_linux_error(ENOENT));
   EXPECT_EQ(descriptor, -1);
+}
+
+TEST_P(LinuxEndpointMetadataTest,
+       ProductNamesPreserveDistinctNativeIdentities) {
+  AddEndpoint(987654322, 64, "0000:00:00.1");
+  for (const char* address : {"0000:00:00.0", "0000:00:00.1"}) {
+    const auto device = directory_ / "devices" / address;
+    WriteAttribute(device / "device", "0x1586\n");
+    WriteAttribute(device / "revision", "0xc1\n");
+  }
+  amdf_endpoint_summary_t summaries[2] = {};
+  uint32_t count = 0;
+  ASSERT_EQ(amdf_platform_endpoint_enumerate(&instance_, 2, summaries, &count),
+            AMDF_STATUS_OK);
+  ASSERT_EQ(count, 2u);
+  EXPECT_FALSE(amdf_endpoint_id_is_equal(&summaries[0].id, &summaries[1].id));
+  for (const auto& summary : summaries) {
+    amdf_endpoint_info_t info;
+    ASSERT_EQ(
+        amdf_platform_endpoint_open(&instance_, &summary.id, &endpoint_, &info),
+        AMDF_STATUS_OK);
+    EXPECT_STREQ(summary.name, info.name);
+    EXPECT_TRUE(amdf_endpoint_id_is_equal(&summary.id, &info.id));
+    EXPECT_EQ(info.pci.device_id, 0x1586u);
+    EXPECT_EQ(info.pci.revision_id, 0xC1u);
+    if (GetParam() == AMDF_ENGINE_KIND_GPU) {
+      EXPECT_STREQ(info.name, "AMD Radeon 8060S Graphics");
+    } else {
+      EXPECT_EQ(std::string(info.name).find("AMD XDNA 1022:1586:c1 ("), 0u);
+    }
+    EXPECT_EQ(amdf_platform_endpoint_close(endpoint_), AMDF_STATUS_OK);
+    endpoint_ = nullptr;
+  }
 }
 
 TEST_P(LinuxEndpointMetadataTest, StaleIdentityDoesNotPublishMetadata) {

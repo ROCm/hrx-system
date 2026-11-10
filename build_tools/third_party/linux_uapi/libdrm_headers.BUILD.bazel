@@ -5,6 +5,8 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 exports_files([
+    "LICENSES/MIT.txt",
+    "data/amdgpu.ids",
     "include/drm/amdgpu_drm.h",
     "include/drm/drm.h",
     "include/drm/drm_mode.h",

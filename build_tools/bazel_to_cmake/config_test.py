@@ -1160,12 +1160,16 @@ cc_library(
         functions.iree_generated_files(
             name="tables_gen",
             tool=":generator",
+            srcs=["@registry//:data/names.ids"],
+            args=["--input=$(location @registry//:data/names.ids)"],
             outs=["tables/values.h", "tables/values.c"],
             output_args={"values.h": "--header={path}", "tables/values.c": "--source"},
             use_param_file=True,
         )
         content = converter.convert()
         self.assertIn('"--header=${IREE_BINARY_DIR}/pkg/tables/values.h"', content)
+        self.assertIn('"--input=@registry///data/names.ids"', content)
+        self.assertIn('"@registry///data/names.ids"', content)
         self.assertIn(
             '"--source"\n    "${IREE_BINARY_DIR}/pkg/tables/values.c"',
             content,

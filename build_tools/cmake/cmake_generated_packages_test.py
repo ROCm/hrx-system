@@ -6,9 +6,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -25,6 +27,63 @@ FIXTURE = REPO_ROOT / "build_tools/cmake/testdata/generated_packages"
 
 
 class CMakeGeneratedPackagesTest(unittest.TestCase):
+    def test_generator_inputs_resolve_from_locked_archives(self):
+        with tempfile.TemporaryDirectory(prefix="cmake registry inputs ") as temporary:
+            root = Path(temporary)
+            source, build = root / "source", root / "build"
+            source.mkdir()
+            registry = root / "registry"
+            (registry / "data").mkdir(parents=True)
+            (registry / "data/name file.txt").write_text("first")
+            (registry / "notice.txt").write_text("license")
+            archive = root / "registry.tar.gz"
+            with tarfile.open(archive, "w:gz") as output:
+                output.add(registry, arcname="registry")
+            digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+            (source / "generate.py").write_text(
+                "import argparse\nfrom pathlib import Path\n"
+                "p = argparse.ArgumentParser()\n"
+                "for name in ('input', 'notice', 'output'): p.add_argument('--' + name, type=Path)\n"
+                "a = p.parse_args()\na.output.write_text(a.input.read_text() + a.notice.read_text())\n"
+            )
+            (source / "CMakeLists.txt").write_text(
+                """cmake_minimum_required(VERSION 3.26)
+project(registry_generator NONE)
+set(IREE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+set(IREE_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+set(IREE_PACKAGE_ROOT_DIR "${IREE_SOURCE_DIR}")
+set(IREE_PACKAGE_ROOT_PREFIX fixture)
+include("${IREE_REPO_ROOT}/build_tools/cmake/iree_macros.cmake")
+include("${IREE_REPO_ROOT}/build_tools/cmake/iree_generated_files.cmake")
+"""
+                + f'set(IREE_DEP_SAMPLE_URLS "{archive.as_posix()}")\n'
+                + f'set(IREE_DEP_SAMPLE_SHA256 "{digest}")\n'
+                + """set(IREE_DEP_SAMPLE_PATCHES "")
+set(IREE_DEP_SAMPLE_PATCH_ARGS "")
+if(NOT DEFINED INPUT_PATH)
+  set(INPUT_PATH "data/name file.txt")
+endif()
+add_executable(generator IMPORTED)
+set_property(TARGET generator PROPERTY IMPORTED_LOCATION "${Python3_EXECUTABLE}")
+iree_generated_files(NAME names GENERATOR generator
+  OUTPUTS "${IREE_BINARY_DIR}/names.txt"
+  INPUTS "@sample///${INPUT_PATH}" "@sample///notice.txt"
+    "${IREE_SOURCE_DIR}/generate.py"
+  ARGS "${IREE_SOURCE_DIR}/generate.py" "--input=@sample///${INPUT_PATH}"
+    "--notice=@sample///notice.txt" "--output=${IREE_BINARY_DIR}/names.txt")
+"""
+            )
+            configure_project(source, build)
+            build_project(build, "fixture_names")
+            self.assertEqual((build / "names.txt").read_text(), "firstlicense")
+            (build / "_deps/sample-src/data/name file.txt").write_text("second")
+            build_project(build, "fixture_names")
+            self.assertEqual((build / "names.txt").read_text(), "secondlicense")
+            result = configure_project(
+                source, root / "missing", "-DINPUT_PATH=absent", expect_failure=True
+            )
+            self.assertIn("missing input @sample///absent", result)
+
     def test_setup_defaults_and_live_native_interfaces(self):
         with tempfile.TemporaryDirectory(prefix="cmake native defaults ") as temporary:
             source, build = Path(temporary) / "source", Path(temporary) / "build"

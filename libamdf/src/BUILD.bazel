@@ -4,8 +4,10 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:generate.bzl", "iree_generated_files")
 load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
 load("//libamdf/build_tools/bazel:cc_test.bzl", "amdf_cc_test")
+load("//libamdf/requirements:package_policy.bzl", "apply_amdf_target_policy")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -73,11 +75,68 @@ amdf_cc_library(
     visibility = ["//libamdf/src:__subpackages__"],
 )
 
+_PRODUCT_NAME_POLICY = apply_amdf_target_policy({})
+
+[
+    iree_generated_files(
+        name = name + "_source",
+        testonly = name.endswith("_fixture"),
+        srcs = [
+            database,
+            "pci_product_name.c.in",
+            "@libdrm_headers//:LICENSES/MIT.txt",
+        ],
+        outs = [name + ".c"],
+        args = [
+            "--input=$(location " + database + ")",
+            "--template=$(location pci_product_name.c.in)",
+            "--license=$(location @libdrm_headers//:LICENSES/MIT.txt)",
+        ],
+        output_args = {name + ".c": "--output"},
+        tags = _PRODUCT_NAME_POLICY["tags"],
+        target_compatible_with = _PRODUCT_NAME_POLICY["target_compatible_with"],
+        tool = "//libamdf/build_tools:generate_product_names",
+    )
+    for name, database in {
+        "pci_product_name": "@libdrm_headers//:data/amdgpu.ids",
+        "pci_product_name_fixture": "pci_product_names_test.ids",
+    }.items()
+]
+
 amdf_cc_library(
     name = "pci",
-    srcs = ["pci.c"],
-    hdrs = ["pci.h"],
+    srcs = [
+        "pci.c",
+        "pci_product_name.c",
+    ],
+    hdrs = [
+        "pci.h",
+        "pci_product_name.h",
+    ],
     visibility = ["//libamdf/src:__subpackages__"],
+)
+
+amdf_cc_test(
+    name = "pci_product_name_test",
+    srcs = ["pci_product_name_test.cc"],
+    deps = [
+        ":pci",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "pci_product_name_fixture_test",
+    srcs = [
+        "pci_product_name.h",
+        "pci_product_name_fixture.c",
+        "pci_product_name_fixture_test.cc",
+    ],
+    deps = [
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
 )
 
 amdf_cc_library(
