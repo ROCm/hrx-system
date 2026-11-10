@@ -316,3 +316,44 @@ func.def @unrolled_tail(%input: buffer, %begin0: index, %end0: index) -> (f32) {
   }
   func.return %sum : f32
 }
+
+// ====
+
+// RUN: pass canonicalize
+
+// A later range consumes ordering established by an earlier induction value.
+// Its endpoint's weaker disequality must keep that already-owned strict order.
+func.def @nested_counterpart_order(%limit_value: index, %end_value: index) {
+  %limit = index.assume %limit_value [range(%limit_value, 1, 32)] : index
+  %end = index.assume %end_value [range(%end_value, 1, 64)] : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.for %earlier = [%begin to %limit step %step] {
+    %lower = index.assume %limit [ne(%limit, %earlier)] : index
+    scf.for %later = [%lower to %end step %step] {
+      %ordered = index.cmp sgt, %later, %earlier : index
+      test.use %ordered : i1
+    }
+    %outside = index.cmp sgt, %end, %earlier : index
+    test.use %outside : i1
+  }
+  func.return
+}
+
+// ----
+func.def @nested_counterpart_order(%limit_value: index, %end_value: index) {
+  %limit = index.assume %limit_value [range(%limit_value, 1, 32)] : index
+  %end = index.assume %end_value [range(%end_value, 1, 64)] : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.for %earlier = [%begin to %limit step %step] {
+    %lower = index.assume %limit [ne(%limit, %earlier)] : index
+    scf.for %later = [%lower to %end step %step] {
+      %ordered = scalar.constant true : i1
+      test.use %ordered : i1
+    }
+    %outside = index.cmp sgt, %end, %earlier : index
+    test.use %outside : i1
+  }
+  func.return
+}

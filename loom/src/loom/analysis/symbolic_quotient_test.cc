@@ -28,9 +28,7 @@ TEST_F(SymbolicExprTest, ProvesIndexRemainderIsBelowDynamicDivisor) {
                                       LOOM_LOCATION_UNKNOWN, &remainder_op));
   loom_value_id_t remainder = loom_index_rem_result(remainder_op);
 
-  IREE_ASSERT_OK(loom_op_erase(module_, remainder_op));
-  IREE_ASSERT_OK(loom_module_compute_uses(module_));
-  loom_symbolic_expr_context_reset(&expression_context_);
+  ComputeFacts(remainder_op);
 
   loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
   IREE_ASSERT_OK(loom_symbolic_expr_prove_value_relation(
@@ -58,6 +56,7 @@ TEST_F(SymbolicExprTest, ProvesAssumedIndexRemainderIsBelowDynamicDivisor) {
   IREE_ASSERT_OK(loom_index_rem_build(&builder_, dividend, divisor,
                                       LOOM_LOCATION_UNKNOWN, &remainder_op));
   loom_value_id_t remainder = loom_index_rem_result(remainder_op);
+  ComputeFacts(remainder_op);
 
   loom_predicate_t predicate = {
       .kind = LOOM_PREDICATE_GE,
@@ -73,6 +72,7 @@ TEST_F(SymbolicExprTest, ProvesAssumedIndexRemainderIsBelowDynamicDivisor) {
                                          LOOM_LOCATION_UNKNOWN, &assume_op));
   loom_value_id_t assumed_remainder =
       loom_index_assume_results(assume_op).values[0];
+  ComputeFacts(assume_op);
 
   loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
   IREE_ASSERT_OK(loom_symbolic_expr_prove_value_relation(
@@ -90,6 +90,7 @@ TEST_F(SymbolicExprTest, RemainderBoundRequiresUnsignedInputFacts) {
   IREE_ASSERT_OK(loom_index_rem_build(&builder_, dividend, divisor,
                                       LOOM_LOCATION_UNKNOWN, &remainder_op));
   loom_value_id_t remainder = loom_index_rem_result(remainder_op);
+  ComputeFacts(remainder_op);
 
   loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
   IREE_ASSERT_OK(loom_symbolic_expr_prove_value_relation(
@@ -108,6 +109,7 @@ TEST_F(SymbolicExprTest, ProvesScalarUnsignedRemainderIsBelowDivisor) {
                                          loom_type_scalar(LOOM_SCALAR_TYPE_I64),
                                          LOOM_LOCATION_UNKNOWN, &remainder_op));
   loom_value_id_t remainder = loom_scalar_remui_result(remainder_op);
+  ComputeFacts(remainder_op);
 
   loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
   IREE_ASSERT_OK(loom_symbolic_expr_prove_value_relation(

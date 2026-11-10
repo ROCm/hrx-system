@@ -57,21 +57,21 @@ func.def @narrow_integer_extensions(%byte: i8, %halfword: i16) -> (i16, i16, i32
 
 // ----
 low.func.def target<wasm.core.simd128> abi(wasm_function) @narrow_integer_extensions(%byte: reg<wasm.i32>, %halfword: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i64>, reg<wasm.i64>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i64>, reg<wasm.i64>) asm {
-  %63 = i32.const 255
-  %byte_unsigned_halfword = i32.and %byte, %63
-  %65 = i32.const 24
-  %66 = i32.shl %byte_unsigned_halfword, %65
-  %byte_signed_halfword = i32.shr_s %66, %65
+  %34 = i32.const 24
+  %35 = i32.shl %byte, %34
+  %byte_signed_halfword = i32.shr_s %35, %34
+  %37 = i32.const 255
+  %byte_unsigned_halfword = i32.and %byte, %37
   %byte_signed_wide = i64.extend_i32_s %byte_signed_halfword
   %byte_unsigned_wide = i64.extend_i32_u %byte_unsigned_halfword
-  %70 = i32.const 65535
-  %71 = i32.and %halfword, %70
-  %72 = i32.const 16
-  %73 = i32.shl %71, %72
-  %halfword_signed_word = i32.shr_s %73, %72
+  %51 = i32.const 16
+  %52 = i32.shl %halfword, %51
+  %halfword_signed_word = i32.shr_s %52, %51
+  %54 = i32.const 65535
+  %halfword_unsigned_word = i32.and %halfword, %54
   %halfword_signed_wide = i64.extend_i32_s %halfword_signed_word
-  %halfword_unsigned_wide = i64.extend_i32_u %71
-  return %byte_signed_halfword, %byte_unsigned_halfword, %byte_signed_halfword, %byte_unsigned_halfword, %byte_signed_wide, %byte_unsigned_wide, %halfword_signed_word, %71, %halfword_signed_wide, %halfword_unsigned_wide
+  %halfword_unsigned_wide = i64.extend_i32_u %halfword_unsigned_word
+  return %byte_signed_halfword, %byte_unsigned_halfword, %byte_signed_halfword, %byte_unsigned_halfword, %byte_signed_wide, %byte_unsigned_wide, %halfword_signed_word, %halfword_unsigned_word, %halfword_signed_wide, %halfword_unsigned_wide
 }
 
 // ====
@@ -205,4 +205,145 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @partial_float_bitcast
   %tail = i8x16.shuffle %head, %head, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 0, 0, 0, 0, 0
   %result = i8x16.shuffle %head, %tail, 0, 1, 2, 3, 4, 5, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25
   return %result
+}
+
+// ====
+
+// Nonnegative source ranges avoid sign restoration. Different destination
+// widths share the same normalization without assuming clean upper carrier bits.
+func.def @nonnegative_integer_extensions(%byte_input: i8, %halfword_input: i16) -> (i16, i32, i64, i32, i64) {
+  %byte = scalar.assume %byte_input [range(%byte_input, 0, 127)] : i8
+  %halfword = scalar.assume %halfword_input [range(%halfword_input, 0, 32767)] : i16
+  %byte_halfword = scalar.extsi %byte : i8 to i16
+  %byte_word = scalar.extsi %byte : i8 to i32
+  %byte_wide = scalar.extsi %byte : i8 to i64
+  %halfword_word = scalar.extsi %halfword : i16 to i32
+  %halfword_wide = scalar.extsi %halfword : i16 to i64
+  func.return %byte_halfword, %byte_word, %byte_wide, %halfword_word, %halfword_wide : i16, i32, i64, i32, i64
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @nonnegative_integer_extensions(%byte: reg<wasm.i32>, %halfword: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i64>, reg<wasm.i32>, reg<wasm.i64>) asm {
+  %21 = i32.const 255
+  %byte_halfword = i32.and %byte, %21
+  %byte_wide = i64.extend_i32_u %byte_halfword
+  %28 = i32.const 65535
+  %halfword_word = i32.and %halfword, %28
+  %halfword_wide = i64.extend_i32_u %halfword_word
+  return %byte_halfword, %byte_halfword, %byte_wide, %halfword_word, %halfword_wide
+}
+
+// ====
+
+// The low result bits need no input normalization or intermediate widening.
+func.def @byte_binary_carriers(%lhs: i8, %rhs: i8, %count: i8) -> (i8, i8, i8, i8, i8, i8, i8) {
+  %sum = scalar.addi %lhs, %rhs : i8
+  %difference = scalar.subi %lhs, %rhs : i8
+  %product = scalar.muli %lhs, %rhs : i8
+  %conjunction = scalar.andi %lhs, %rhs : i8
+  %disjunction = scalar.ori %lhs, %rhs : i8
+  %exclusive = scalar.xori %lhs, %rhs : i8
+  %shifted = scalar.shli %lhs, %count : i8
+  func.return %sum, %difference, %product, %conjunction, %disjunction, %exclusive, %shifted : i8, i8, i8, i8, i8, i8, i8
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @byte_binary_carriers(%lhs: reg<wasm.i32>, %rhs: reg<wasm.i32>, %count: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
+  %sum = i32.add %lhs, %rhs
+  %difference = i32.sub %lhs, %rhs
+  %product = i32.mul %lhs, %rhs
+  %conjunction = i32.and %lhs, %rhs
+  %disjunction = i32.or %lhs, %rhs
+  %exclusive = i32.xor %lhs, %rhs
+  %shifted = i32.shl %lhs, %count
+  return %sum, %difference, %product, %conjunction, %disjunction, %exclusive, %shifted
+}
+
+// ====
+
+func.def @halfword_binary_carriers(%lhs: i16, %rhs: i16, %count: i16) -> (i16, i16, i16, i16, i16, i16, i16) {
+  %sum = scalar.addi %lhs, %rhs : i16
+  %difference = scalar.subi %lhs, %rhs : i16
+  %product = scalar.muli %lhs, %rhs : i16
+  %conjunction = scalar.andi %lhs, %rhs : i16
+  %disjunction = scalar.ori %lhs, %rhs : i16
+  %exclusive = scalar.xori %lhs, %rhs : i16
+  %shifted = scalar.shli %lhs, %count : i16
+  func.return %sum, %difference, %product, %conjunction, %disjunction, %exclusive, %shifted : i16, i16, i16, i16, i16, i16, i16
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @halfword_binary_carriers(%lhs: reg<wasm.i32>, %rhs: reg<wasm.i32>, %count: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
+  %sum = i32.add %lhs, %rhs
+  %difference = i32.sub %lhs, %rhs
+  %product = i32.mul %lhs, %rhs
+  %conjunction = i32.and %lhs, %rhs
+  %disjunction = i32.or %lhs, %rhs
+  %exclusive = i32.xor %lhs, %rhs
+  %shifted = i32.shl %lhs, %count
+  return %sum, %difference, %product, %conjunction, %disjunction, %exclusive, %shifted
+}
+
+// ====
+
+// Legalization must retain the narrow subtraction's bounded magnitude. The
+// resulting positivity is consumed after legalization invalidates its facts.
+// RUN: pass target-legalize{mode=final},canonicalize,dce
+
+wasm.target<simd128> @target
+
+func.def target(@target) @bounded_magnitudes(%byte_input: i8, %halfword_input: i16) -> (i1, i1) {
+  %byte = scalar.assume %byte_input [range(%byte_input, -8, 8), ne(%byte_input, 0)] : i8
+  %halfword = scalar.assume %halfword_input [range(%halfword_input, -256, 256), ne(%halfword_input, 0)] : i16
+  %byte_origin = scalar.constant 0 : i8
+  %halfword_origin = scalar.constant 0 : i16
+  %byte_negative = scalar.subi %byte_origin, %byte : i8
+  %halfword_negative = scalar.subi %halfword_origin, %halfword : i16
+  %byte_magnitude = scalar.absi %byte_negative : i8
+  %halfword_magnitude = scalar.absi %halfword_negative : i16
+  %byte_positive = scalar.cmpi sgt, %byte_magnitude, %byte_origin : i8
+  %halfword_positive = scalar.cmpi sgt, %halfword_magnitude, %halfword_origin : i16
+  func.return %byte_positive, %halfword_positive : i1, i1
+}
+
+// ----
+wasm.target<simd128> @target
+
+func.def target(@target) @bounded_magnitudes(%byte_input: i8, %halfword_input: i16) -> (i1, i1) {
+  %byte_positive = scalar.constant true : i1
+  %halfword_positive = scalar.constant true : i1
+  func.return %byte_positive, %halfword_positive : i1, i1
+}
+
+// ====
+
+// Nonzero alone cannot prove positivity: the signed minimum wraps under
+// subtraction and absolute value. Its comparison must remain dynamic.
+// RUN: pass target-legalize{mode=final},canonicalize,dce
+
+wasm.target<simd128> @target
+
+func.def target(@target) @wrapping_magnitude(%input: i8) -> (i1) {
+  %value = scalar.assume %input [ne(%input, 0)] : i8
+  %origin = scalar.constant 0 : i8
+  %negative = scalar.subi %origin, %value : i8
+  %magnitude = scalar.absi %negative : i8
+  %positive = scalar.cmpi sgt, %magnitude, %origin : i8
+  func.return %positive : i1
+}
+
+// ----
+wasm.target<simd128> @target
+
+func.def target(@target) @wrapping_magnitude(%input: i8) -> (i1) {
+  %value = scalar.assume %input [ne(%input, 0)] : i8
+  %origin = scalar.constant 0 : i8
+  %negative = scalar.subi %origin, %value : i8
+  %10 = scalar.extsi %negative : i8 to i32
+  %11 = scalar.absi %10 : i32
+  %magnitude = scalar.trunci %11 : i32 to i8
+  %7 = scalar.extsi %magnitude : i8 to i32
+  %13 = scalar.constant 0 : i32
+  %positive = scalar.cmpi sgt, %7, %13 : i32
+  func.return %positive : i1
 }

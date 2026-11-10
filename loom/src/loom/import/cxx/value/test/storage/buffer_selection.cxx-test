@@ -34,11 +34,11 @@ func.def public @observe_selection(%input: buffer, %input_byte_offset: offset, %
     %26 = scalar.addi %25, %101 : i64
     %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
     %28 = index.cast %27 : i64 to offset
-    %129 = scalar.constant 2 : i32
-    %130 = scalar.shli %20, %129 : i32
-    %131 = scalar.extui %130 : i32 to i64
+    %29 = scalar.extui %20 : i32 to i64
+    %115 = scalar.constant 2 : i64
+    %116 = scalar.shli %29, %115 : i64
     %32 = index.cast %28 : offset to i64
-    %33 = scalar.addi %32, %131 : i64
+    %33 = scalar.addi %32, %116 : i64
     %34 = scalar.assume %33 [range(%33, 0, 9223372036854775807)] : i64
     %first_byte_offset = index.cast %34 : i64 to offset
     %100 = scalar.constant 256 : i64
@@ -47,7 +47,7 @@ func.def public @observe_selection(%input: buffer, %input_byte_offset: offset, %
     %42 = scalar.assume %41 [range(%41, 0, 9223372036854775807)] : i64
     %43 = index.cast %42 : i64 to offset
     %47 = index.cast %43 : offset to i64
-    %48 = scalar.addi %47, %131 : i64
+    %48 = scalar.addi %47, %116 : i64
     %49 = scalar.assume %48 [range(%48, 0, 9223372036854775807)] : i64
     %second_byte_offset = index.cast %49 : i64 to offset
     %51 = scalar.addi %choice, %20 : i32
@@ -63,10 +63,10 @@ func.def public @observe_selection(%input: buffer, %input_byte_offset: offset, %
     view.store %61, %59[0] : i32, view<1xi32>
     %63 = view.load %59[0] : view<1xi32> -> i32
     %64 = scalar.constant 128 : i32
-    %121 = scalar.addi %20, %64 : i32
-    %119 = scalar.shli %121, %129 : i32
-    %120 = scalar.extui %119 : i32 to i64
-    %70 = scalar.addi %40, %120 : i64
+    %112 = scalar.addi %20, %64 : i32
+    %66 = scalar.extui %112 : i32 to i64
+    %111 = scalar.shli %66, %115 : i64
+    %70 = scalar.addi %40, %111 : i64
     %71 = scalar.assume %70 [range(%70, 0, 9223372036854775807)] : i64
     %72 = index.cast %71 : i64 to offset
     %73 = buffer.view %output[%72] : buffer -> view<1xi32>
@@ -74,10 +74,10 @@ func.def public @observe_selection(%input: buffer, %input_byte_offset: offset, %
     %74 = buffer.view %input[%first_byte_offset] : buffer -> view<1xi32>
     %75 = view.load %74[0] : view<1xi32> -> i32
     %76 = scalar.constant 160 : i32
-    %115 = scalar.addi %20, %76 : i32
-    %113 = scalar.shli %115, %129 : i32
-    %114 = scalar.extui %113 : i32 to i64
-    %82 = scalar.addi %40, %114 : i64
+    %109 = scalar.addi %20, %76 : i32
+    %78 = scalar.extui %109 : i32 to i64
+    %108 = scalar.shli %78, %115 : i64
+    %82 = scalar.addi %40, %108 : i64
     %83 = scalar.assume %82 [range(%82, 0, 9223372036854775807)] : i64
     %84 = index.cast %83 : i64 to offset
     %85 = buffer.view %output[%84] : buffer -> view<1xi32>
@@ -85,10 +85,10 @@ func.def public @observe_selection(%input: buffer, %input_byte_offset: offset, %
     %86 = buffer.view %output[%second_byte_offset] : buffer -> view<1xi32>
     %87 = view.load %86[0] : view<1xi32> -> i32
     %88 = scalar.constant 192 : i32
-    %109 = scalar.addi %20, %88 : i32
-    %107 = scalar.shli %109, %129 : i32
-    %108 = scalar.extui %107 : i32 to i64
-    %94 = scalar.addi %40, %108 : i64
+    %106 = scalar.addi %20, %88 : i32
+    %90 = scalar.extui %106 : i32 to i64
+    %105 = scalar.shli %90, %115 : i64
+    %94 = scalar.addi %40, %105 : i64
     %95 = scalar.assume %94 [range(%94, 0, 9223372036854775807)] : i64
     %96 = index.cast %95 : i64 to offset
     %97 = buffer.view %output[%96] : buffer -> view<1xi32>
@@ -168,16 +168,16 @@ func.def public @initialize_selection(%output: buffer, %output_byte_offset: offs
   scf.for %word = [%20 to %19 step %6] {
     %8 = index.cast %word : offset to i32
     %9 = scalar.constant 1806499840 : i32
-    %26 = scalar.addi %8, %9 : i32
-    %23 = scalar.constant 2 : i32
-    %24 = scalar.shli %8, %23 : i32
-    %25 = scalar.extui %24 : i32 to i64
+    %23 = scalar.addi %8, %9 : i32
+    %11 = scalar.extui %8 : i32 to i64
+    %21 = scalar.constant 2 : i64
+    %22 = scalar.shli %11, %21 : i64
     %14 = index.cast %output_byte_offset : offset to i64
-    %15 = scalar.addi %14, %25 : i64
+    %15 = scalar.addi %14, %22 : i64
     %16 = scalar.assume %15 [range(%15, 0, 9223372036854775807)] : i64
     %17 = index.cast %16 : i64 to offset
     %18 = buffer.view %output[%17] : buffer -> view<1xi32>
-    view.store %26, %18[0] : i32, view<1xi32>
+    view.store %23, %18[0] : i32, view<1xi32>
   }
   func.return
 }

@@ -369,13 +369,12 @@ func.def target(@target) @reconstructed_si8_remainder(%input: buffer, %bits_inpu
   %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 8)] : i8
   %14 = scalar.extsi %bits : i8 to i32
   %15 = scalar.extsi %divisor : i8 to i32
-  %25 = scalar.divui %14, %15 : i32
-  %22 = scalar.muli %25, %15 : i32
-  %23 = scalar.subi %14, %22 : i32
-  %24 = scalar.assume %23 [range(%23, 0, 7), lt(%23, %15)] : i32
-  %quotient = scalar.trunci %25 : i32 to i8
-  %19 = scalar.trunci %24 : i32 to i8
-  %remainder = scalar.assume %19 [lt(%19, %divisor)] : i8
+  %24 = scalar.divui %14, %15 : i32
+  %21 = scalar.muli %24, %15 : i32
+  %22 = scalar.subi %14, %21 : i32
+  %23 = scalar.assume %22 [range(%22, 0, 7), lt(%22, %15)] : i32
+  %quotient = scalar.trunci %24 : i32 to i8
+  %remainder = scalar.trunci %23 : i32 to i8
   %extent = index.cast %divisor : i8 to index
   %coordinate = index.cast %remainder : i8 to index
   %base = index.constant 0 : offset
@@ -441,4 +440,64 @@ func.def @matching_paired_quotients(%input: buffer, %position_input: index, %wid
   }
   test.use %tail : index
   func.return
+}
+
+// ====
+
+// RUN: pass target-legalize{mode=eager,policy=reference-only},dce,canonicalize,vector-memory-footprint
+
+// Unsigned payloads may use every input bit. The remainder's lossless
+// truncation carries its relation to the original narrow divisor directly.
+test.target<low_core> @target
+
+func.def target(@target) @reconstructed_ui16_remainder(%input: buffer, %bits: i16, %divisor_input: i16) -> (i16, i32) {
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 8)] : i16
+  %quotient, %remainder = scalar.divremui %bits, %divisor : i16
+  %extent = index.cast %divisor : i16 to index
+  %coordinate = index.cast %remainder : i16 to index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<[%extent]xi32>
+  %value = view.load %view[%coordinate] : view<[%extent]xi32> -> i32
+  func.return %quotient, %value : i16, i32
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @reconstructed_ui16_remainder(%input: buffer, %bits: i16, %divisor_input: i16) -> (i16, i32) {
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 8)] : i16
+  %13 = scalar.extui %bits : i16 to i32
+  %14 = scalar.extui %divisor : i16 to i32
+  %19 = scalar.divui %13, %14 : i32
+  %20 = scalar.muli %19, %14 : i32
+  %21 = scalar.subi %13, %20 : i32
+  %22 = scalar.assume %21 [range(%21, 0, 7), lt(%21, %14)] : i32
+  %quotient = scalar.trunci %19 : i32 to i16
+  %remainder = scalar.trunci %22 : i32 to i16
+  %extent = index.cast %divisor : i16 to index
+  %coordinate = index.cast %remainder : i16 to index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<[%extent]xi32>
+  %value = view.load %view[%coordinate] : view<[%extent]xi32> -> i32
+  func.return %quotient, %value : i16, i32
+}
+
+// ====
+
+// RUN: pass target-legalize{mode=eager,policy=reference-only},dce,canonicalize,vector-memory-footprint
+
+// Retaining the upper relation across the carrier change cannot manufacture
+// a nonnegative signed remainder from an unrestricted dividend.
+test.target<low_core> @target
+
+func.def target(@target) @reconstructed_signed_lower_bound(%input: buffer, %bits: i16, %divisor_input: i16) -> (i16, i32) {
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 8)] : i16
+  %quotient, %remainder = scalar.divremsi %bits, %divisor : i16
+  %extent = index.cast %divisor : i16 to index
+  %coordinate = index.cast %remainder : i16 to index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<[%extent]xi32>
+  // ERROR@+1: SUBRANGE/023 {op_name="view.load", view_axis="0"}
+  %value = view.load %view[%coordinate] : view<[%extent]xi32> -> i32
+  func.return %quotient, %value : i16, i32
 }

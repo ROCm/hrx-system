@@ -17,6 +17,7 @@ loom_check_test_suite(
         "integer_cast.loom-test",
         "narrowing.loom-test",
         "narrowing_phases.loom-test",
+        "shift_narrowing.loom-test",
         "symbolic_comparison.loom-test",
     ],
 )

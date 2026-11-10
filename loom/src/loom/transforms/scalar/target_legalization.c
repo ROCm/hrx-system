@@ -699,7 +699,8 @@ static iree_status_t loom_scalar_legalize_narrow_integer_extension(
   IREE_RETURN_IF_ERROR(loom_scalar_extui_build(
       builder, input, input_type, working_type, op->location, &conversion));
   loom_value_id_t value = loom_scalar_extui_result(conversion);
-  if (signed_extension) {
+  if (signed_extension && !loom_value_facts_is_non_negative(
+                              loom_rewriter_value_facts(rewriter, input))) {
     loom_value_id_t shift = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_i32_constant(
         builder, op->location, 32 - input_width, &shift));
@@ -993,9 +994,7 @@ static iree_status_t loom_scalar_legalize_narrow_binary(
       loom_module_value_type(context->module, loom_op_results(op)[0]);
 
   // A left shift may sign-extend its narrow operands: every defined shift
-  // amount is nonnegative and truncation preserves the low result bits. Unlike
-  // zero extension, this form remains stable when generic canonicalization
-  // moves a proven shift before an extension.
+  // amount is nonnegative and truncation preserves the low result bits.
   const bool sign_extend_operands =
       op->kind == LOOM_OP_SCALAR_DIVSI || op->kind == LOOM_OP_SCALAR_REMSI ||
       op->kind == LOOM_OP_SCALAR_SHLI || op->kind == LOOM_OP_SCALAR_SHRSI;
@@ -1031,8 +1030,8 @@ static iree_status_t loom_scalar_legalize_narrow_binary(
   return iree_ok_status();
 }
 
-// Arithmetic reconstruction and narrow truncation need not infer the original
-// remainder's range or its strict bound against a runtime positive divisor.
+// Arithmetic reconstruction need not infer the original remainder's range or
+// its strict bound against a runtime positive divisor.
 static iree_status_t loom_scalar_preserve_remainder_facts(
     loom_target_legalization_context_t* context,
     loom_value_id_t original_result, loom_value_id_t reconstructed_result,
@@ -1146,10 +1145,10 @@ static iree_status_t loom_scalar_legalize_divrem(
         result_type, op->location, &remainder));
     replacements[0] = loom_op_results(quotient)[0];
     replacements[1] = loom_scalar_subi_result(remainder);
+    IREE_RETURN_IF_ERROR(loom_scalar_preserve_remainder_facts(
+        context, old_results[1], replacements[1], rhs, result_type,
+        op->location, &replacements[1]));
   }
-  IREE_RETURN_IF_ERROR(loom_scalar_preserve_remainder_facts(
-      context, old_results[1], replacements[1], loom_op_const_operands(op)[1],
-      result_type, op->location, &replacements[1]));
 
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, replacements, IREE_ARRAYSIZE(replacements), checkpoint));
@@ -1320,9 +1319,18 @@ static iree_status_t loom_scalar_legalize_signed_unary(
       IREE_RETURN_IF_ERROR(loom_scalar_extsi_build(
           builder, value, input_type, working_type, op->location, &extension));
       value = loom_scalar_extsi_result(extension);
-    }
-
-    if (loom_scalar_negi_isa(op)) {
+      // Widen the semantic operation before choosing its implementation. The
+      // native carrier may have a contract even when the authored width does
+      // not; the legalization worklist owns that selection.
+      loom_op_t* widened = NULL;
+      IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
+          builder, op->kind, 1, 1, 0, 0, 0, op->location, &widened));
+      loom_op_operands(widened)[0] = value;
+      IREE_RETURN_IF_ERROR(loom_builder_define_result(
+          builder, working_type, &loom_op_results(widened)[0]));
+      IREE_RETURN_IF_ERROR(loom_builder_finalize_op(builder, widened));
+      replacement = loom_op_results(widened)[0];
+    } else if (loom_scalar_negi_isa(op)) {
       loom_value_id_t zero = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_scalar_constant(
           builder, op->location, working_type, 0, &zero));

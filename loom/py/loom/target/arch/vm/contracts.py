@@ -360,7 +360,16 @@ def _direct_cases(semantics_type, source_ops, type_prefix="i"):
                 IntegerBinaryOperation.OR,
                 IntegerBinaryOperation.XOR,
             ):
-                source_type = Scalar(("i1", "i32"))
+                source_type = Scalar(("i1", "i8", "i16", "i32"))
+            elif semantics.bit_width == 32 and semantics.operation in (
+                IntegerBinaryOperation.ADD,
+                IntegerBinaryOperation.SUB,
+                IntegerBinaryOperation.MUL,
+                IntegerBinaryOperation.SHIFT_LEFT,
+            ):
+                # Low logical result bits are independent of upper carrier
+                # bits. Preserve source semantics until instruction emission.
+                source_type = Scalar(("i8", "i16", "i32"))
             yield DirectDescriptorCase(
                 source_ops[semantics.operation],
                 descriptor,

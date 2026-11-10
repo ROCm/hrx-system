@@ -59,3 +59,115 @@ func.def target(@target) @constant_sign_boundaries() -> (i32, i32) {
   %signed = scalar.constant -1 : i32
   func.return %unsigned, %signed : i32, i32
 }
+
+// ====
+
+// RUN: pass combine,dce,canonicalize
+
+// Numeric identities survive both signed and unsigned round trips. The
+// original values, including their scoped bounds, remain directly usable.
+func.def @lossless_round_trips(%source: i32) -> (i32, i32) {
+  %signed = scalar.assume %source [range(%source, -128, 127)] : i32
+  %positive = scalar.assume %source [range(%source, 0, 32767)] : i32
+  %byte = scalar.trunci %signed : i32 to i8
+  %halfword = scalar.trunci %positive : i32 to i16
+  %signed_result = scalar.extsi %byte : i8 to i32
+  %unsigned_result = scalar.extui %halfword : i16 to i32
+  func.return %signed_result, %unsigned_result : i32, i32
+}
+
+// ----
+func.def @lossless_round_trips(%source: i32) -> (i32, i32) {
+  %signed = scalar.assume %source [range(%source, -128, 127)] : i32
+  %positive = scalar.assume %source [range(%source, 0, 32767)] : i32
+  func.return %signed, %positive : i32, i32
+}
+
+// ====
+
+// RUN: pass combine,dce,canonicalize
+
+// Endpoint types still control the final conversion; bypassing the narrow
+// intermediate does not authorize implicit type coercion.
+func.def @different_endpoint_widths(%wide_input: i64, %word_input: i32) -> (i32, i64) {
+  %wide = scalar.assume %wide_input [range(%wide_input, -32768, 32767)] : i64
+  %word = scalar.assume %word_input [range(%word_input, 0, 32767)] : i32
+  %wide_halfword = scalar.trunci %wide : i64 to i16
+  %word_halfword = scalar.trunci %word : i32 to i16
+  %narrower = scalar.extsi %wide_halfword : i16 to i32
+  %wider = scalar.extui %word_halfword : i16 to i64
+  func.return %narrower, %wider : i32, i64
+}
+
+// ----
+func.def @different_endpoint_widths(%wide_input: i64, %word_input: i32) -> (i32, i64) {
+  %wide = scalar.assume %wide_input [range(%wide_input, -32768, 32767)] : i64
+  %word = scalar.assume %word_input [range(%word_input, 0, 32767)] : i32
+  %narrower = scalar.trunci %wide : i64 to i32
+  %wider = scalar.extui %word : i32 to i64
+  func.return %narrower, %wider : i32, i64
+}
+
+// ====
+
+// RUN: pass combine,dce,canonicalize
+
+// An i1 round trip preserves a Boolean through zero extension. Sign extension
+// changes true into -1 and must retain that conversion boundary.
+func.def @boolean_round_trips(%source: i32) -> (i32, i32) {
+  %boolean = scalar.assume %source [range(%source, 0, 1)] : i32
+  %bit = scalar.trunci %boolean : i32 to i1
+  %unsigned = scalar.extui %bit : i1 to i32
+  %signed = scalar.extsi %bit : i1 to i32
+  func.return %unsigned, %signed : i32, i32
+}
+
+// ----
+func.def @boolean_round_trips(%source: i32) -> (i32, i32) {
+  %boolean = scalar.assume %source [range(%source, 0, 1)] : i32
+  %bit = scalar.trunci %boolean : i32 to i1
+  %signed = scalar.extsi %bit : i1 to i32
+  func.return %boolean, %signed : i32, i32
+}
+
+// ====
+
+// RUN: pass combine,dce,canonicalize
+
+// Either crossing the narrow signed range or reinterpreting its sign bit
+// changes the numeric value. Neither chain has a lossless identity.
+func.def @changing_round_trips(%source: i32) -> (i32, i32) {
+  %crossing = scalar.assume %source [range(%source, -129, 128)] : i32
+  %negative = scalar.assume %source [range(%source, -128, -1)] : i32
+  %crossing_byte = scalar.trunci %crossing : i32 to i8
+  %negative_byte = scalar.trunci %negative : i32 to i8
+  %signed = scalar.extsi %crossing_byte : i8 to i32
+  %unsigned = scalar.extui %negative_byte : i8 to i32
+  func.return %signed, %unsigned : i32, i32
+}
+
+// ====
+
+// RUN: pass combine,dce,canonicalize
+
+// The inner alias's range cannot make the outer conversion lossless.
+func.def @scoped_round_trip(%source: i32, %active: i1) -> (i32, i32) {
+  %outside_byte = scalar.trunci %source : i32 to i8
+  %outside = scalar.extsi %outside_byte : i8 to i32
+  %inside = scf.if %active -> (i32) {
+    %bounded = scalar.assume %source [range(%source, 0, 127)] : i32
+    %byte = scalar.trunci %bounded : i32 to i8
+    %wide = scalar.extui %byte : i8 to i32
+    scf.yield %wide : i32
+  } else {
+    scf.yield %source : i32
+  }
+  func.return %inside, %outside : i32, i32
+}
+
+// ----
+func.def @scoped_round_trip(%source: i32, %active: i1) -> (i32, i32) {
+  %outside_byte = scalar.trunci %source : i32 to i8
+  %outside = scalar.extsi %outside_byte : i8 to i32
+  func.return %source, %outside : i32, i32
+}

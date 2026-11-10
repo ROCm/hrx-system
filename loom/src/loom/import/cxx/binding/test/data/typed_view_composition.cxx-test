@@ -44,10 +44,10 @@ kernel.def @typed_view_static_layouts() {
   kernel.launch.config workgroups(%3, %3, %3) workgroup_size(%3, %3, %3) : index
 } launch(%input: buffer, %output: buffer, %input_origin$2: i32) {
   %input_origin$11 = scalar.assume %input_origin$2 [range(%input_origin$2, 0, 15)] : i32
-  %108 = scalar.constant 2 : i32
-  %109 = scalar.shli %input_origin$11, %108 : i32
-  %110 = scalar.extui %109 : i32 to i64
-  %17 = scalar.assume %110 [range(%110, 0, 9223372036854775807)] : i64
+  %12 = scalar.extui %input_origin$11 : i32 to i64
+  %103 = scalar.constant 2 : i64
+  %104 = scalar.shli %12, %103 : i64
+  %17 = scalar.assume %104 [range(%104, 0, 9223372036854775807)] : i64
   %18 = index.cast %17 : i64 to offset
   %dense_source_layout, %dense_source = func.call pure @make_view_0(%input, %18) : (buffer, offset) -> (encoding<layout>, view<3x8xf32, %dense_source_layout>)
   %28, %29, %30 = func.call pure @make_view_1(%input, %18) : (buffer, offset) -> (index, encoding<layout>, view<[%28]x8xf32, %29>)
@@ -74,25 +74,25 @@ func.def @preserve_view(%source_dim0: index, %source_layout: encoding<layout>, %
 }
 
 func.def @make_view_1(%input: buffer, %input_byte_offset: offset) -> (%68: index, %69: encoding<layout>, view<[%68]x8xf32, %69>) {
-  %113 = index.constant 11 : index
-  %112 = index.constant 1 : index
-  %layout = encoding.layout.strided [%113, %112] : encoding<layout>
-  %111 = index.constant 3 : index
-  %81 = buffer.view %input[%input_byte_offset] : buffer -> view<[%111]x8xf32, %layout>
-  func.return %111, %layout, %81 : index, encoding<layout>, view<[%111]x8xf32, %layout>
+  %107 = index.constant 11 : index
+  %106 = index.constant 1 : index
+  %layout = encoding.layout.strided [%107, %106] : encoding<layout>
+  %105 = index.constant 3 : index
+  %81 = buffer.view %input[%input_byte_offset] : buffer -> view<[%105]x8xf32, %layout>
+  func.return %105, %layout, %81 : index, encoding<layout>, view<[%105]x8xf32, %layout>
 }
 
 func.def @read_view___loom__type__view___loom__type__shape_3__8___const_float____loom__type__encoding_0__2__(%source_layout: encoding<layout>, %source: view<3x8xf32, %source_layout>) -> (f32) {
-  %115 = index.constant 2 : index
-  %114 = index.constant 3 : index
-  %89 = view.load %source[%115, %114] : view<3x8xf32, %source_layout> -> f32
+  %109 = index.constant 2 : index
+  %108 = index.constant 3 : index
+  %89 = view.load %source[%109, %108] : view<3x8xf32, %source_layout> -> f32
   func.return %89 : f32
 }
 
 func.def @read_view___loom__type__view___loom__type__shape_18446744073709551615__8___const_float____loom__type__encoding_0__2__(%source_dim0: index, %source_layout: encoding<layout>, %source: view<[%source_dim0]x8xf32, %source_layout>) -> (f32) {
-  %117 = index.constant 2 : index
-  %116 = index.constant 3 : index
-  %98 = view.load %source[%117, %116] : view<[%source_dim0]x8xf32, %source_layout> -> f32
+  %111 = index.constant 2 : index
+  %110 = index.constant 3 : index
+  %98 = view.load %source[%111, %110] : view<[%source_dim0]x8xf32, %source_layout> -> f32
   func.return %98 : f32
 }
 
@@ -158,16 +158,16 @@ kernel.def @typed_view_copy() {
   %output_layout = encoding.layout.dense : encoding<layout>
   %25 = scalar.extui %rows$14 : i32 to i64
   %row_count = index.cast %25 : i64 to index
-  %86 = scalar.constant 2 : i32
-  %87 = scalar.shli %input_origin$16, %86 : i32
-  %88 = scalar.extui %87 : i32 to i64
-  %32 = scalar.assume %88 [range(%88, 0, 9223372036854775807)] : i64
+  %27 = scalar.extui %input_origin$16 : i32 to i64
+  %81 = scalar.constant 2 : i64
+  %82 = scalar.shli %27, %81 : i64
+  %32 = scalar.assume %82 [range(%82, 0, 9223372036854775807)] : i64
   %33 = index.cast %32 : i64 to offset
   %34 = buffer.view %input[%33] : buffer -> view<[%row_count]x8xf32, %input_layout>
   %source_dim0, %source_layout, %source = func.call pure @preserve_view(%row_count, %input_layout, %34) : (index, encoding<layout>, view<[%row_count]x8xf32, %input_layout>) -> (index, encoding<layout>, view<[%source_dim0]x8xf32, %source_layout>)
-  %82 = scalar.shli %output_origin$17, %86 : i32
-  %83 = scalar.extui %82 : i32 to i64
-  %43 = scalar.assume %83 [range(%83, 0, 9223372036854775807)] : i64
+  %38 = scalar.extui %output_origin$17 : i32 to i64
+  %80 = scalar.shli %38, %81 : i64
+  %43 = scalar.assume %80 [range(%80, 0, 9223372036854775807)] : i64
   %44 = index.cast %43 : i64 to offset
   %destination = buffer.view %output[%44] : buffer -> view<[%row_count]x8xf32, %output_layout>
   %workitem_id_y = kernel.workitem.id<y> : index

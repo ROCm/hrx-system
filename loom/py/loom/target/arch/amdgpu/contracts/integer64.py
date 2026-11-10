@@ -4,11 +4,13 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Fixed-width wide shifts and disjoint-word register transport."""
+"""Fixed-width wide bitwise operations and disjoint-word register transport."""
 
 from loom.dialect.scalar import bitwise
+from loom.dsl import Op
 from loom.target.arch.amdgpu.contracts.materializers import I64_VGPR_MATERIALIZER
 from loom.target.contracts import (
+    DescriptorEmitForm,
     DescriptorResultType,
     DescriptorRule,
     EmitDescriptorOp,
@@ -168,6 +170,86 @@ def integer64_rules(descriptor_set: DescriptorSet) -> tuple[DescriptorRule, ...]
                     ),
                 )
             )
+    return tuple(rules)
+
+
+def integer64_bitwise_rules(
+    descriptor_set: DescriptorSet, source_op: Op, mnemonic: str
+) -> tuple[DescriptorRule, ...]:
+    rules: list[DescriptorRule] = []
+    result = ValueRef.result("result")
+    typed_guards = tuple(
+        Guard.value_type(field, Scalar("i64")) for field in ("lhs", "rhs", "result")
+    )
+    scalar_descriptor = descriptor_by_key(descriptor_set, f"amdgpu.s_{mnemonic}_b64")
+    rules.append(
+        DescriptorRule(
+            source_op=source_op,
+            descriptor=scalar_descriptor,
+            guards=(
+                *typed_guards,
+                *(
+                    Guard.low_value_register_class(field, "amdgpu.sgpr")
+                    for field in ("result", "lhs", "rhs")
+                ),
+                Guard.low_value_register_unit_count_eq("result", "lhs"),
+                Guard.low_value_register_unit_count_eq("result", "rhs"),
+                Guard.descriptor_available(scalar_descriptor),
+            ),
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=scalar_descriptor,
+                    operands={
+                        field: ValueRef.operand(field) for field in ("lhs", "rhs")
+                    },
+                    results={"dst": result},
+                ),
+            ),
+        )
+    )
+    vector_descriptor = descriptor_by_key(descriptor_set, f"amdgpu.v_{mnemonic}_b32")
+    # Only the first vector source accepts SGPRs or encoded literals. Keep
+    # either uniform operand there so word slicing preserves those choices.
+    for first, second, preserve_uniform in (
+        ("lhs", "rhs", True),
+        ("rhs", "lhs", True),
+        ("lhs", "rhs", False),
+    ):
+        rules.append(
+            DescriptorRule(
+                source_op=source_op,
+                descriptor=vector_descriptor,
+                guards=(
+                    *typed_guards,
+                    Guard.low_value_register_class("result", "amdgpu.vgpr"),
+                    Guard.low_value_register_unit_count("result", 2),
+                    Guard.low_value_register_class(first, "amdgpu.sgpr")
+                    if preserve_uniform
+                    else Guard.value_materializable(first, I64_VGPR_MATERIALIZER.name),
+                    Guard.value_materializable(second, I64_VGPR_MATERIALIZER.name),
+                    Guard.descriptor_available(vector_descriptor),
+                ),
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=vector_descriptor,
+                        operands={
+                            "lhs": ValueRef.operand(
+                                first,
+                                materializer=None
+                                if preserve_uniform
+                                else I64_VGPR_MATERIALIZER.name,
+                            ),
+                            "rhs": ValueRef.operand(
+                                second, materializer=I64_VGPR_MATERIALIZER.name
+                            ),
+                        },
+                        results={"dst": result},
+                        result_types={"dst": result},
+                        form=DescriptorEmitForm.PER_LANE,
+                    ),
+                ),
+            )
+        )
     return tuple(rules)
 
 

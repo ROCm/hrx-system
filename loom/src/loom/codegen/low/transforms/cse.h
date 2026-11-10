@@ -21,8 +21,11 @@ const loom_pass_info_t* loom_low_cse_pass_info(void);
 // block while that class and the execution boundary remain unchanged. Other
 // state writes remain distinct. Implicit reads require an unchanged state epoch
 // and straight-line control flow. Constants and arithmetic use dominance-scoped
-// SSA identity; register allocation owns physical lifetimes. Source definitions
-// are handled by the cse pass.
+// SSA identity. Pure calculations may also share results when every consumed
+// input is an unmanaged, same-type copy used only by that calculation and every
+// result use is ownership-insensitive. The redundant calculation leaves its
+// private copies dead; surviving storage identities remain distinct. Register
+// allocation owns physical lifetimes. Source definitions use the cse pass.
 iree_status_t loom_low_cse_run(loom_pass_t* pass, loom_module_t* module,
                                loom_func_like_t function);
 

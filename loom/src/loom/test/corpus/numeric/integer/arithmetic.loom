@@ -409,3 +409,95 @@ check.scenario @unsigned_carry_borrow_values {
   }
   check.return
 }
+
+// Arithmetic wraps at each narrow result before its signed or unsigned
+// consumer. Truncating full runtime words also exercises carriers whose bits
+// above the logical byte/halfword are not already normalized.
+func.def @narrow_binary_observations(%left: buffer, %right: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %left_values = buffer.view %left[%base] : buffer -> view<256xi32>
+  %right_values = buffer.view %right[%base] : buffer -> view<256xi32>
+  %results = buffer.view %output[%base] : buffer -> view<14x256xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 256 : index
+  %step = index.constant 1 : index
+  %byte_shift_mask = scalar.constant 7 : i8
+  %half_shift_mask = scalar.constant 15 : i16
+  scf.for %i = [%begin to %end step %step] {
+    %left_bits = view.load %left_values[%i] : view<256xi32> -> i32
+    %right_bits = view.load %right_values[%i] : view<256xi32> -> i32
+    %left_byte = scalar.trunci %left_bits : i32 to i8
+    %right_byte = scalar.trunci %right_bits : i32 to i8
+    %byte_count = scalar.andi %right_byte, %byte_shift_mask : i8
+    %byte_sum = scalar.addi %left_byte, %right_byte : i8
+    %byte_difference = scalar.subi %left_byte, %right_byte : i8
+    %byte_product = scalar.muli %left_byte, %right_byte : i8
+    %byte_and = scalar.andi %left_byte, %right_byte : i8
+    %byte_or = scalar.ori %left_byte, %right_byte : i8
+    %byte_xor = scalar.xori %left_byte, %right_byte : i8
+    %byte_shift = scalar.shli %left_byte, %byte_count : i8
+    %byte_sum_word = scalar.extsi %byte_sum : i8 to i32
+    %byte_difference_word = scalar.extui %byte_difference : i8 to i32
+    %byte_product_word = scalar.extsi %byte_product : i8 to i32
+    %byte_and_word = scalar.extui %byte_and : i8 to i32
+    %byte_or_word = scalar.extsi %byte_or : i8 to i32
+    %byte_xor_word = scalar.extui %byte_xor : i8 to i32
+    %byte_shift_word = scalar.extsi %byte_shift : i8 to i32
+    view.store %byte_sum_word, %results[0, %i] : i32, view<14x256xi32>
+    view.store %byte_difference_word, %results[1, %i] : i32, view<14x256xi32>
+    view.store %byte_product_word, %results[2, %i] : i32, view<14x256xi32>
+    view.store %byte_and_word, %results[3, %i] : i32, view<14x256xi32>
+    view.store %byte_or_word, %results[4, %i] : i32, view<14x256xi32>
+    view.store %byte_xor_word, %results[5, %i] : i32, view<14x256xi32>
+    view.store %byte_shift_word, %results[6, %i] : i32, view<14x256xi32>
+    %left_half = scalar.trunci %left_bits : i32 to i16
+    %right_half = scalar.trunci %right_bits : i32 to i16
+    %half_count = scalar.andi %right_half, %half_shift_mask : i16
+    %half_sum = scalar.addi %left_half, %right_half : i16
+    %half_difference = scalar.subi %left_half, %right_half : i16
+    %half_product = scalar.muli %left_half, %right_half : i16
+    %half_and = scalar.andi %left_half, %right_half : i16
+    %half_or = scalar.ori %left_half, %right_half : i16
+    %half_xor = scalar.xori %left_half, %right_half : i16
+    %half_shift = scalar.shli %left_half, %half_count : i16
+    %half_sum_word = scalar.extsi %half_sum : i16 to i32
+    %half_difference_word = scalar.extui %half_difference : i16 to i32
+    %half_product_word = scalar.extsi %half_product : i16 to i32
+    %half_and_word = scalar.extui %half_and : i16 to i32
+    %half_or_word = scalar.extsi %half_or : i16 to i32
+    %half_xor_word = scalar.extui %half_xor : i16 to i32
+    %half_shift_word = scalar.extsi %half_shift : i16 to i32
+    view.store %half_sum_word, %results[7, %i] : i32, view<14x256xi32>
+    view.store %half_difference_word, %results[8, %i] : i32, view<14x256xi32>
+    view.store %half_product_word, %results[9, %i] : i32, view<14x256xi32>
+    view.store %half_and_word, %results[10, %i] : i32, view<14x256xi32>
+    view.store %half_or_word, %results[11, %i] : i32, view<14x256xi32>
+    view.store %half_xor_word, %results[12, %i] : i32, view<14x256xi32>
+    view.store %half_shift_word, %results[13, %i] : i32, view<14x256xi32>
+  }
+  func.return
+}
+
+check.scenario @narrow_binary_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %left = check.generate.iota offset(-32768) step(257) : tensor<256xi32>
+    %right = check.generate.iota offset(32767) step(-127) : tensor<256xi32>
+    %output = check.generate.fill value(-1) : tensor<14x256xi32>
+    check.compare<@narrow_binary_observations>(%left, %right, %output) : (tensor<256xi32>, tensor<256xi32>, tensor<14x256xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<14x256xi32>
+    }
+  }
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %left_entropy = check.entropy.fork %entropy name("left") : check.entropy
+    %right_entropy = check.entropy.fork %entropy name("right") : check.entropy
+    %left_seed = check.entropy.read %left_entropy[%trial] : check.entropy -> i64
+    %right_seed = check.entropy.read %right_entropy[%trial] : check.entropy -> i64
+    %left = check.generate.random.uniform seed(%left_seed) range(-2147483648 to 2147483647) : tensor<256xi32>
+    %right = check.generate.random.uniform seed(%right_seed) range(-2147483648 to 2147483647) : tensor<256xi32>
+    %output = check.generate.fill value(-1) : tensor<14x256xi32>
+    check.compare<@narrow_binary_observations>(%left, %right, %output) : (tensor<256xi32>, tensor<256xi32>, tensor<14x256xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<14x256xi32>
+    }
+  }
+  check.return
+}

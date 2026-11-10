@@ -1,0 +1,264 @@
+// RUN: pass canonicalize
+
+// Every signed and unsigned remainder is below its positive runtime divisor.
+// Keeping both quotients alive distinguishes the paired result roles.
+func.def @remainder_bounds_i8(%input: i8, %divisor_input: i8) -> (i1, i1, i1, i1, i8, i8) {
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 127)] : i8
+  %signed = scalar.remsi %input, %divisor : i8
+  %unsigned = scalar.remui %input, %divisor : i8
+  %signed_quotient, %signed_tail = scalar.divremsi %input, %divisor : i8
+  %unsigned_quotient, %unsigned_tail = scalar.divremui %input, %divisor : i8
+  %signed_below = scalar.cmpi slt, %signed, %divisor : i8
+  %unsigned_below = scalar.cmpi slt, %unsigned, %divisor : i8
+  %signed_pair_below = scalar.cmpi slt, %signed_tail, %divisor : i8
+  %unsigned_pair_below = scalar.cmpi slt, %unsigned_tail, %divisor : i8
+  func.return %signed_below, %unsigned_below, %signed_pair_below, %unsigned_pair_below, %signed_quotient, %unsigned_quotient : i1, i1, i1, i1, i8, i8
+}
+
+// ----
+func.def @remainder_bounds_i8(%input: i8, %divisor_input: i8) -> (i1, i1, i1, i1, i8, i8) {
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 127)] : i8
+  %signed_quotient = scalar.divsi %input, %divisor : i8
+  %unsigned_quotient = scalar.divui %input, %divisor : i8
+  %signed_below = scalar.constant true : i1
+  %unsigned_below = scalar.constant true : i1
+  %signed_pair_below = scalar.constant true : i1
+  %unsigned_pair_below = scalar.constant true : i1
+  func.return %signed_below, %unsigned_below, %signed_pair_below, %unsigned_pair_below, %signed_quotient, %unsigned_quotient : i1, i1, i1, i1, i8, i8
+}
+
+// ====
+
+// Every signed and unsigned remainder is below its positive runtime divisor.
+// Keeping both quotients alive distinguishes the paired result roles.
+func.def @remainder_bounds_i16(%input: i16, %divisor_input: i16) -> (i1, i1, i1, i1, i16, i16) {
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 127)] : i16
+  %signed = scalar.remsi %input, %divisor : i16
+  %unsigned = scalar.remui %input, %divisor : i16
+  %signed_quotient, %signed_tail = scalar.divremsi %input, %divisor : i16
+  %unsigned_quotient, %unsigned_tail = scalar.divremui %input, %divisor : i16
+  %signed_below = scalar.cmpi slt, %signed, %divisor : i16
+  %unsigned_below = scalar.cmpi slt, %unsigned, %divisor : i16
+  %signed_pair_below = scalar.cmpi slt, %signed_tail, %divisor : i16
+  %unsigned_pair_below = scalar.cmpi slt, %unsigned_tail, %divisor : i16
+  func.return %signed_below, %unsigned_below, %signed_pair_below, %unsigned_pair_below, %signed_quotient, %unsigned_quotient : i1, i1, i1, i1, i16, i16
+}
+
+// ----
+func.def @remainder_bounds_i16(%input: i16, %divisor_input: i16) -> (i1, i1, i1, i1, i16, i16) {
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 127)] : i16
+  %signed_quotient = scalar.divsi %input, %divisor : i16
+  %unsigned_quotient = scalar.divui %input, %divisor : i16
+  %signed_below = scalar.constant true : i1
+  %unsigned_below = scalar.constant true : i1
+  %signed_pair_below = scalar.constant true : i1
+  %unsigned_pair_below = scalar.constant true : i1
+  func.return %signed_below, %unsigned_below, %signed_pair_below, %unsigned_pair_below, %signed_quotient, %unsigned_quotient : i1, i1, i1, i1, i16, i16
+}
+
+// ====
+
+// Every signed and unsigned remainder is below its positive runtime divisor.
+// Keeping both quotients alive distinguishes the paired result roles.
+func.def @remainder_bounds_i32(%input: i32, %divisor_input: i32) -> (i1, i1, i1, i1, i32, i32) {
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 127)] : i32
+  %signed = scalar.remsi %input, %divisor : i32
+  %unsigned = scalar.remui %input, %divisor : i32
+  %signed_quotient, %signed_tail = scalar.divremsi %input, %divisor : i32
+  %unsigned_quotient, %unsigned_tail = scalar.divremui %input, %divisor : i32
+  %signed_below = scalar.cmpi slt, %signed, %divisor : i32
+  %unsigned_below = scalar.cmpi slt, %unsigned, %divisor : i32
+  %signed_pair_below = scalar.cmpi slt, %signed_tail, %divisor : i32
+  %unsigned_pair_below = scalar.cmpi slt, %unsigned_tail, %divisor : i32
+  func.return %signed_below, %unsigned_below, %signed_pair_below, %unsigned_pair_below, %signed_quotient, %unsigned_quotient : i1, i1, i1, i1, i32, i32
+}
+
+// ----
+func.def @remainder_bounds_i32(%input: i32, %divisor_input: i32) -> (i1, i1, i1, i1, i32, i32) {
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 127)] : i32
+  %signed_quotient = scalar.divsi %input, %divisor : i32
+  %unsigned_quotient = scalar.divui %input, %divisor : i32
+  %signed_below = scalar.constant true : i1
+  %unsigned_below = scalar.constant true : i1
+  %signed_pair_below = scalar.constant true : i1
+  %unsigned_pair_below = scalar.constant true : i1
+  func.return %signed_below, %unsigned_below, %signed_pair_below, %unsigned_pair_below, %signed_quotient, %unsigned_quotient : i1, i1, i1, i1, i32, i32
+}
+
+// ====
+
+// Every signed and unsigned remainder is below its positive runtime divisor.
+// Keeping both quotients alive distinguishes the paired result roles.
+func.def @remainder_bounds_i64(%input: i64, %divisor_input: i64) -> (i1, i1, i1, i1, i64, i64) {
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 127)] : i64
+  %signed = scalar.remsi %input, %divisor : i64
+  %unsigned = scalar.remui %input, %divisor : i64
+  %signed_quotient, %signed_tail = scalar.divremsi %input, %divisor : i64
+  %unsigned_quotient, %unsigned_tail = scalar.divremui %input, %divisor : i64
+  %signed_below = scalar.cmpi slt, %signed, %divisor : i64
+  %unsigned_below = scalar.cmpi slt, %unsigned, %divisor : i64
+  %signed_pair_below = scalar.cmpi slt, %signed_tail, %divisor : i64
+  %unsigned_pair_below = scalar.cmpi slt, %unsigned_tail, %divisor : i64
+  func.return %signed_below, %unsigned_below, %signed_pair_below, %unsigned_pair_below, %signed_quotient, %unsigned_quotient : i1, i1, i1, i1, i64, i64
+}
+
+// ----
+func.def @remainder_bounds_i64(%input: i64, %divisor_input: i64) -> (i1, i1, i1, i1, i64, i64) {
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 127)] : i64
+  %signed_quotient = scalar.divsi %input, %divisor : i64
+  %unsigned_quotient = scalar.divui %input, %divisor : i64
+  %signed_below = scalar.constant true : i1
+  %unsigned_below = scalar.constant true : i1
+  %signed_pair_below = scalar.constant true : i1
+  %unsigned_pair_below = scalar.constant true : i1
+  func.return %signed_below, %unsigned_below, %signed_pair_below, %unsigned_pair_below, %signed_quotient, %unsigned_quotient : i1, i1, i1, i1, i64, i64
+}
+
+// ====
+
+// Logical coordinate division requires a nonnegative dividend as well.
+func.def @remainder_bounds_index(%input: index, %divisor_input: index) -> (i1, i1, index) {
+  %dividend = index.assume %input [range(%input, 0, 4095)] : index
+  %divisor = index.assume %divisor_input [range(%divisor_input, 1, 127)] : index
+  %remainder = index.rem %dividend, %divisor : index
+  %quotient, %tail = index.divrem %dividend, %divisor : index
+  %below = index.cmp slt, %remainder, %divisor : index
+  %paired_below = index.cmp slt, %tail, %divisor : index
+  func.return %below, %paired_below, %quotient : i1, i1, index
+}
+
+// ----
+func.def @remainder_bounds_index(%input: index, %divisor_input: index) -> (i1, i1, index) {
+  %dividend = index.assume %input [range(%input, 0, 4095)] : index
+  %divisor = index.assume %divisor_input [range(%divisor_input, 1, 127)] : index
+  %quotient = index.div %dividend, %divisor : index
+  %below = scalar.constant true : i1
+  %paired_below = scalar.constant true : i1
+  func.return %below, %paired_below, %quotient : i1, i1, index
+}
+
+// ====
+
+// One-bit payload facts use the Boolean numeric domain. Signed comparison
+// still interprets a set bit as -1; unsigned comparison interprets it as 1.
+func.def @boolean_remainder_bounds(%input: i1) -> (i1, i1, i1, i1) {
+  %divisor = scalar.constant true : i1
+  %signed = scalar.remsi %input, %divisor : i1
+  %unsigned = scalar.remui %input, %divisor : i1
+  %signed_below = scalar.cmpi slt, %signed, %divisor : i1
+  %unsigned_below = scalar.cmpi ult, %unsigned, %divisor : i1
+  %signed_value = scalar.extsi %signed : i1 to i8
+  %unsigned_value = scalar.extui %unsigned : i1 to i8
+  %expected_remainder = scalar.constant 0 : i8
+  %signed_zero = scalar.cmpi eq, %signed_value, %expected_remainder : i8
+  %unsigned_zero = scalar.cmpi eq, %unsigned_value, %expected_remainder : i8
+  func.return %signed_below, %unsigned_below, %signed_zero, %unsigned_zero : i1, i1, i1, i1
+}
+
+// ----
+func.def @boolean_remainder_bounds(%input: i1) -> (i1, i1, i1, i1) {
+  %signed_below = scalar.constant false : i1
+  %unsigned_below = scalar.constant true : i1
+  %signed_zero = scalar.constant true : i1
+  %unsigned_zero = scalar.constant true : i1
+  func.return %signed_below, %unsigned_below, %signed_zero, %unsigned_zero : i1, i1, i1, i1
+}
+
+// ====
+
+// An exact endpoint may still carry a dynamic relation. Constant intervals
+// must not suppress that inherited bound before later consumers see it.
+func.def @constant_divisor_dynamic_limit(%input: i32, %limit_input: i32) -> (i1) {
+  %divisor_value = scalar.constant 5 : i32
+  %divisor = scalar.assume %divisor_value [le(%divisor_value, %limit_input)] : i32
+  %remainder = scalar.remui %input, %divisor : i32
+  %below = scalar.cmpi slt, %remainder, %limit_input : i32
+  func.return %below : i1
+}
+
+// ----
+func.def @constant_divisor_dynamic_limit(%input: i32, %limit_input: i32) -> (i1) {
+  %below = scalar.constant true : i1
+  func.return %below : i1
+}
+
+// ====
+
+// The smaller dynamic extent supplies a bound against the containing extent.
+// The same result does not acquire an order against an independent extent.
+func.def @inherited_dynamic_limit(%input: i64, %divisor_input: i64, %limit: i64, %other: i64) -> (i1, i1) {
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 127), le(%divisor_input, %limit)] : i64
+  %remainder = scalar.remui %input, %divisor : i64
+  %below = scalar.cmpi slt, %remainder, %limit : i64
+  %independent = scalar.cmpi slt, %remainder, %other : i64
+  func.return %below, %independent : i1, i1
+}
+
+// ----
+func.def @inherited_dynamic_limit(%input: i64, %divisor_input: i64, %limit: i64, %other: i64) -> (i1, i1) {
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 127), le(%divisor_input, %limit)] : i64
+  %remainder = scalar.remui %input, %divisor : i64
+  %below = scalar.constant true : i1
+  %independent = scalar.cmpi slt, %remainder, %other : i64
+  func.return %below, %independent : i1, i1
+}
+
+// ====
+
+// The input guard is local. It proves the inner remainder bound without
+// publishing positivity for the original divisor outside the branch.
+func.def @scoped_divisor(%input: i32, %divisor: i32) -> (i1, i1) {
+  %positive_threshold = scalar.constant 0 : i32
+  %positive = scalar.cmpi sgt, %divisor, %positive_threshold : i32
+  %inside = scf.if %positive -> (i1) {
+    %remainder = scalar.remui %input, %divisor : i32
+    %below = scalar.cmpi slt, %remainder, %divisor : i32
+    scf.yield %below : i1
+  } else {
+    %inactive = scalar.constant false : i1
+    scf.yield %inactive : i1
+  }
+  %outside_positive = scalar.cmpi sgt, %divisor, %positive_threshold : i32
+  func.return %inside, %outside_positive : i1, i1
+}
+
+// ----
+func.def @scoped_divisor(%input: i32, %divisor: i32) -> (i1, i1) {
+  %positive_threshold = scalar.constant 0 : i32
+  %positive = scalar.cmpi sgt, %divisor, %positive_threshold : i32
+  %outside_positive = scalar.cmpi sgt, %divisor, %positive_threshold : i32
+  func.return %positive, %outside_positive : i1, i1
+}
+
+// ====
+
+// The signed paired Boolean case has only the zero dividend in its defined
+// quotient domain. Unsigned pairing admits either Boolean dividend.
+func.def @boolean_paired_remainders(%input: i1) -> (i1, i1, i1, i1) {
+  %dividend = scalar.constant false : i1
+  %unit = scalar.constant true : i1
+  %signed_quotient, %signed_remainder = scalar.divremsi %dividend, %unit : i1
+  %unsigned_quotient, %unsigned_remainder = scalar.divremui %input, %unit : i1
+  func.return %signed_quotient, %signed_remainder, %unsigned_quotient, %unsigned_remainder : i1, i1, i1, i1
+}
+
+// ----
+func.def @boolean_paired_remainders(%input: i1) -> (i1, i1, i1, i1) {
+  %signed_quotient = scalar.constant false : i1
+  %signed_remainder = scalar.constant false : i1
+  %unsigned_remainder = scalar.constant false : i1
+  func.return %signed_quotient, %signed_remainder, %input, %unsigned_remainder : i1, i1, i1, i1
+}
+
+// ====
+
+// A negative represented divisor cannot supply the signed positive-divisor
+// relation, even though unsigned remainder accepts those input bits.
+func.def @nonpositive_divisor(%input: i32, %divisor_input: i32) -> (i1, i1) {
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, -127, -1)] : i32
+  %signed = scalar.remsi %input, %divisor : i32
+  %unsigned = scalar.remui %input, %divisor : i32
+  %signed_below = scalar.cmpi slt, %signed, %divisor : i32
+  %unsigned_below = scalar.cmpi slt, %unsigned, %divisor : i32
+  func.return %signed_below, %unsigned_below : i1, i1
+}

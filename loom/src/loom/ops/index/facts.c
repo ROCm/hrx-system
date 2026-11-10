@@ -86,29 +86,20 @@ iree_status_t loom_index_cast_facts(loom_fact_context_t* context,
       !loom_index_cast_scalar_type(module, loom_index_cast_result(op),
                                    &result_scalar_type)) {
     result_facts[0] = loom_value_facts_unknown();
-    return loom_value_fact_table_define_exact_scalar_origin(
-        context->table, loom_index_cast_result(op),
-        (loom_value_fact_exact_scalar_origin_t){
-            .source_value_id = LOOM_VALUE_ID_INVALID,
-        });
+    // The complete publication withdraws any previous origin for this result.
+    return iree_ok_status();
   }
 
   result_facts[0] = loom_index_cast_transfer_facts(
       input_scalar_type, result_scalar_type, operand_facts[0]);
-  loom_value_fact_exact_scalar_origin_t exact_origin = {
-      .source_value_id = LOOM_VALUE_ID_INVALID,
-  };
-  if (loom_index_cast_transfer_preserves_value(
-          input_scalar_type, result_scalar_type, operand_facts[0])) {
-    const loom_value_id_t input = loom_index_cast_input(op);
-    if (!loom_value_fact_table_query_exact_scalar_origin(
-            context->table, module, input, &exact_origin)) {
-      exact_origin.source_value_id =
-          loom_value_fact_table_query_identity(context->table, input);
-    }
+  if (!context->publication) {
+    return iree_ok_status();
   }
-  return loom_value_fact_table_define_exact_scalar_origin(
-      context->table, loom_index_cast_result(op), exact_origin);
+  const bool preserves_value = loom_index_cast_transfer_preserves_value(
+      input_scalar_type, result_scalar_type, operand_facts[0]);
+  return loom_value_fact_table_define_numeric_identity(
+      context->table, loom_index_cast_result(op),
+      preserves_value ? loom_index_cast_input(op) : LOOM_VALUE_ID_INVALID);
 }
 
 iree_status_t loom_index_assume_facts(loom_fact_context_t* context,
@@ -245,13 +236,32 @@ static void loom_index_rem_result_facts(const loom_value_facts_t* operand_facts,
                          result_facts);
 }
 
+static iree_status_t loom_index_publish_remainder_bound(
+    loom_fact_context_t* context, const loom_op_t* op, uint16_t result_index,
+    const loom_value_facts_t* operand_facts,
+    const loom_value_facts_t* result_facts) {
+  if (!context->publication) {
+    return iree_ok_status();
+  }
+  const loom_value_id_t divisor =
+      loom_value_facts_is_non_negative(operand_facts[0]) &&
+              loom_value_facts_is_positive(operand_facts[1])
+          ? loom_op_const_operands(op)[1]
+          : LOOM_VALUE_ID_INVALID;
+  return loom_value_fact_integer_relations_define_strict_upper_bound(
+      context->table, loom_op_const_results(op)[result_index], divisor,
+      &result_facts[result_index], &operand_facts[1],
+      context->publication->changed);
+}
+
 iree_status_t loom_index_rem_facts(loom_fact_context_t* context,
                                    const loom_module_t* module,
                                    const loom_op_t* op,
                                    const loom_value_facts_t* operand_facts,
                                    loom_value_facts_t* result_facts) {
   loom_index_rem_result_facts(operand_facts, &result_facts[0]);
-  return iree_ok_status();
+  return loom_index_publish_remainder_bound(context, op, 0, operand_facts,
+                                            result_facts);
 }
 
 iree_status_t loom_index_divrem_facts(loom_fact_context_t* context,
@@ -261,7 +271,8 @@ iree_status_t loom_index_divrem_facts(loom_fact_context_t* context,
                                       loom_value_facts_t* result_facts) {
   loom_index_div_result_facts(operand_facts, &result_facts[0]);
   loom_index_rem_result_facts(operand_facts, &result_facts[1]);
-  return iree_ok_status();
+  return loom_index_publish_remainder_bound(context, op, 1, operand_facts,
+                                            result_facts);
 }
 
 typedef void (*loom_index_minmax_transfer_fn_t)(const loom_value_facts_t* lhs,

@@ -159,10 +159,11 @@ struct loom_fact_context_t {
                const loom_op_t* op, loom_value_facts_t* operand_facts);
   } refine_operands;
 
-  // Active change accumulator for auxiliary result facts published by the
-  // current inference callback. NULL when publication needs no change report,
-  // and outside an inference callback.
-  bool* result_facts_changed;
+  // Stack-owned result publication during a complete inference callback.
+  // Queries under additional conditions leave this NULL: they can return
+  // summaries and intern extension payloads, but cannot publish indexed result
+  // origins or update the owning solve's interprocedural observations.
+  loom_value_fact_origin_publication_t* publication;
 };
 
 struct loom_value_fact_table_t {
@@ -196,8 +197,6 @@ struct loom_value_fact_table_t {
   uint32_t result_type_kind_bits;
   // Context object passed to op-specific fact inference callbacks.
   loom_fact_context_t context;
-  // Stack-owned ordinary-result publication, active only during inference.
-  loom_value_fact_origin_publication_t* origin_publication;
 
   // Optional completion consumer installed by the owner of pending inference.
   // Nested summaries report completion within this table's solver traversal.
@@ -790,6 +789,24 @@ static inline loom_value_id_t loom_value_fact_table_query_identity(
   const loom_value_id_t representative =
       loom_value_fact_identity_root(identity)->representative;
   return representative != LOOM_VALUE_ID_INVALID ? representative : value_id;
+}
+
+// Returns the retained numeric representative, independently of storage type.
+// Producers flatten exact origins; lookup follows at most one numeric link.
+// Same-type SSA identity remains a separate representation contract.
+static inline loom_value_id_t loom_value_fact_table_query_numeric_identity(
+    const loom_value_fact_table_t* table, loom_value_id_t value_id) {
+  value_id = loom_value_fact_table_query_identity(table, value_id);
+  if (!table || !loom_value_fact_range_contains(
+                    table->exact_scalar_origins.range, value_id)) {
+    return value_id;
+  }
+  const loom_value_id_t source =
+      table->exact_scalar_origins.entries[loom_value_fact_range_offset(
+          table->exact_scalar_origins.range, value_id)];
+  return source == LOOM_VALUE_ID_INVALID
+             ? value_id
+             : loom_value_fact_table_query_identity(table, source);
 }
 
 // Returns true when exact predicate-bearing identities await consumption.

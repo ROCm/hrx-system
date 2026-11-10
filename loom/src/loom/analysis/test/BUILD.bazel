@@ -9,6 +9,7 @@ load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
 loom_check_test_suite(
     name = "test",
     srcs = [
+        "conditioned_value_facts.loom-test",
         "storage_calls.loom-test",
         "storage_cfg_instances.loom-test",
         "storage_globals.loom-test",

@@ -28,6 +28,7 @@ loom_check_test_suite(
         "copy_rematerialization.loom-test",
         "cse.loom-test",
         "cse_materializations.loom-test",
+        "cse_private_copies.loom-test",
         "cse_state.loom-test",
         "dce.loom-test",
         "operand_forms.loom-test",

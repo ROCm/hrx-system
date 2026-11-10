@@ -185,3 +185,56 @@ low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @bounded_varying
   %mixed_logical = concat(%47, %25) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %left, %logical, %mixed_left, %mixed_logical
 }
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+// Both source orders keep the uniform words in the scalar-capable operand.
+// Constants use the same path without broadcasts into temporary vector words.
+func.def target(@target) @mixed_bitwise(%values: vector<2xi64>, %uniform: i64) -> (i64, i64, i64, i64, i64, i64) {
+  %first = vector.extract %values[0] : vector<2xi64> -> i64
+  %second = vector.extract %values[1] : vector<2xi64> -> i64
+  %mask = scalar.constant -4 : i64
+  %pattern = scalar.constant 1311768467015204865 : i64
+  %mixed_and = scalar.andi %first, %uniform : i64
+  %mixed_or = scalar.ori %uniform, %second : i64
+  %mixed_xor = scalar.xori %first, %uniform : i64
+  %masked = scalar.andi %first, %mask : i64
+  %tagged = scalar.ori %pattern, %second : i64
+  %toggled = scalar.xori %first, %pattern : i64
+  func.return %mixed_and, %mixed_or, %mixed_xor, %masked, %tagged, %toggled : i64, i64, i64, i64, i64, i64
+}
+
+// ----
+low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @mixed_bitwise(%values: reg<amdgpu.vgpr x4>, %uniform: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %28 = s_mov_b32 4294967292
+  %29 = s_mov_b32 4294967295
+  %31 = s_mov_b32 2147483649
+  %32 = s_mov_b32 305419896
+  %34 = slice %uniform[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %87 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %36 = v_and_b32 %34, %87
+  %37 = slice %uniform[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %86 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %39 = v_and_b32 %37, %86
+  %mixed_and = concat(%36, %39) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %85 = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %43 = v_or_b32 %34, %85
+  %84 = slice %values[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %46 = v_or_b32 %37, %84
+  %mixed_or = concat(%43, %46) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %50 = v_xor_b32 %34, %87
+  %53 = v_xor_b32 %37, %86
+  %mixed_xor = concat(%50, %53) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %57 = v_and_b32 %28, %87
+  %60 = v_and_b32 %29, %86
+  %masked = concat(%57, %60) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %64 = v_or_b32 %31, %85
+  %67 = v_or_b32 %32, %84
+  %tagged = concat(%64, %67) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %71 = v_xor_b32 %31, %87
+  %74 = v_xor_b32 %32, %86
+  %toggled = concat(%71, %74) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %mixed_and, %mixed_or, %mixed_xor, %masked, %tagged, %toggled
+}

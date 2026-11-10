@@ -88,16 +88,14 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @while_c
   low.cond_br %37, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
   %38 = slice %mask[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %39 = v_mov_b32_copy %38
-  %40 = slice %mask[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %41 = v_mov_b32_copy %40
-  %43 = slice %state[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %45 = v_xor_b32 %43, %39
-  %46 = slice %state[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %48 = v_xor_b32 %46, %41
-  %next_state = concat(%45, %48) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %50 = s_add_u32 %i, %c1
-  low.br ^_bb1(%50: reg<amdgpu.sgpr>, %next_state: reg<amdgpu.vgpr x2>)
+  %39 = slice %state[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %40 = v_xor_b32 %38, %39
+  %41 = slice %mask[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %42 = slice %state[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %43 = v_xor_b32 %41, %42
+  %next_state = concat(%40, %43) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %45 = s_add_u32 %i, %c1
+  low.br ^_bb1(%45: reg<amdgpu.sgpr>, %next_state: reg<amdgpu.vgpr x2>)
 ^_bb3:
   return %state
 }

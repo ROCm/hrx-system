@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/ir/module.h"
+#include "loom/util/fact_relation.h"
 #include "loom/util/fact_table.h"
 
 struct loom_value_fact_exact_lane_origin_entry_t {
@@ -530,6 +531,22 @@ iree_status_t loom_value_fact_table_define_exact_scalar_origin(
   return iree_ok_status();
 }
 
+iree_status_t loom_value_fact_table_define_numeric_identity(
+    loom_value_fact_table_t* table, loom_value_id_t value_id,
+    loom_value_id_t source_value_id) {
+  const loom_value_fact_exact_scalar_origin_t origin = {
+      .source_value_id = source_value_id == LOOM_VALUE_ID_INVALID
+                             ? LOOM_VALUE_ID_INVALID
+                             : loom_value_fact_table_query_numeric_identity(
+                                   table, source_value_id),
+  };
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_define_exact_scalar_origin(
+      table, value_id, origin));
+  return loom_value_fact_integer_relations_forward_alias(
+      table, source_value_id, value_id,
+      table->context.publication ? table->context.publication->changed : NULL);
+}
+
 bool loom_value_fact_table_query_exact_scalar_origin(
     const loom_value_fact_table_t* table, const loom_module_t* module,
     loom_value_id_t value_id,
@@ -896,7 +913,7 @@ iree_status_t loom_value_fact_table_forward_origins(
     loom_value_fact_table_t* table, loom_value_id_t source_value_id,
     loom_value_id_t result_value_id) {
   const loom_value_fact_origin_publication_t* publication =
-      table->origin_publication;
+      table->context.publication;
   const uint16_t result_index = loom_value_def_index(
       loom_module_value(publication->module, result_value_id));
   return loom_value_fact_table_copy_origins(
@@ -907,7 +924,8 @@ iree_status_t loom_value_fact_table_forward_origins(
 void loom_value_fact_table_record_origin(loom_value_fact_table_t* table,
                                          loom_value_id_t value_id,
                                          uint8_t family, bool changed) {
-  loom_value_fact_origin_publication_t* publication = table->origin_publication;
+  loom_value_fact_origin_publication_t* publication =
+      table->context.publication;
   if (!publication) {
     return;
   }
@@ -1056,7 +1074,7 @@ iree_status_t loom_value_fact_table_begin_origins(
     loom_value_fact_table_t* table, const loom_module_t* module,
     const loom_op_t* op, bool* changed,
     loom_value_fact_origin_publication_t* publication) {
-  IREE_ASSERT(!table->origin_publication);
+  IREE_ASSERT(!table->context.publication);
   if (op->result_count > table->scratch.origins.capacity) {
     IREE_RETURN_IF_ERROR(
         iree_arena_grow_array(table->transient_arena, 0, op->result_count,
@@ -1073,14 +1091,14 @@ iree_status_t loom_value_fact_table_begin_origins(
       .published = table->scratch.origins.values,
       .changed = changed,
   };
-  table->origin_publication = publication;
+  table->context.publication = publication;
   return iree_ok_status();
 }
 
 void loom_value_fact_table_end_origins(loom_value_fact_table_t* table,
                                        bool complete) {
   const loom_value_fact_origin_publication_t* publication =
-      table->origin_publication;
+      table->context.publication;
   if (complete) {
     const loom_value_id_t* results = loom_op_const_results(publication->op);
     for (uint16_t i = 0; i < publication->op->result_count; ++i) {
@@ -1088,5 +1106,5 @@ void loom_value_fact_table_end_origins(loom_value_fact_table_t* table,
           table, results[i], (uint8_t)~publication->published[i]);
     }
   }
-  table->origin_publication = NULL;
+  table->context.publication = NULL;
 }

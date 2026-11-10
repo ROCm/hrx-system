@@ -165,6 +165,15 @@ static const loom_value_set_node_t* loom_value_set_index_node(
       &index->nodes, set, sizeof(loom_value_set_node_t));
 }
 
+loom_value_id_t loom_value_set_index_singleton(
+    const loom_value_set_index_t* index, loom_value_set_id_t set) {
+  if (!set) {
+    return LOOM_VALUE_ID_INVALID;
+  }
+  const loom_value_set_node_t* node = loom_value_set_index_node(index, set);
+  return node->bit < 0 ? node->value : LOOM_VALUE_ID_INVALID;
+}
+
 static void* loom_value_set_index_node_payload(
     const loom_value_set_index_t* index, loom_value_set_id_t set) {
   if (index->node_payload_size == 0) {
@@ -404,6 +413,36 @@ iree_status_t loom_value_set_index_union_nonempty(
   }
   *out_set = result;
   return iree_ok_status();
+}
+
+iree_status_t loom_value_set_index_intersection(loom_value_set_index_t* index,
+                                                loom_value_set_id_t first,
+                                                loom_value_set_id_t second,
+                                                loom_value_set_id_t* out_set) {
+  if (!first || !second || first == second) {
+    *out_set = first && second ? first : 0;
+    return iree_ok_status();
+  }
+  const loom_value_set_node_t* a = loom_value_set_index_node(index, first);
+  const loom_value_set_node_t* b = loom_value_set_index_node(index, second);
+  if (loom_value_set_highest_bit(a->value ^ b->value) >
+      iree_max(a->bit, b->bit)) {
+    *out_set = 0;
+    return iree_ok_status();
+  }
+  if (a->bit == b->bit) {
+    loom_value_set_id_t left = 0;
+    loom_value_set_id_t right = 0;
+    IREE_RETURN_IF_ERROR(loom_value_set_index_intersection(
+        index, a->children[0], b->children[0], &left));
+    IREE_RETURN_IF_ERROR(loom_value_set_index_intersection(
+        index, a->children[1], b->children[1], &right));
+    return loom_value_set_join(index, left, right, out_set);
+  }
+  const loom_value_set_node_t* higher = a->bit > b->bit ? a : b;
+  const uint32_t side = ((a->bit > b->bit ? b : a)->value >> higher->bit) & 1;
+  return loom_value_set_index_intersection(
+      index, higher->children[side], a->bit > b->bit ? second : first, out_set);
 }
 
 iree_status_t loom_value_set_index_add(loom_value_set_index_t* index,

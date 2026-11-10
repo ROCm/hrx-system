@@ -48,6 +48,41 @@ _NON_FLOAT_KINDS = frozenset(
 )
 
 
+def test_narrow_binary_arithmetic_uses_modular_i32_carriers():
+    expected = {
+        arithmetic.scalar_addi: "add",
+        arithmetic.scalar_subi: "sub",
+        arithmetic.scalar_muli: "mul",
+        bitwise.scalar_andi: "and",
+        bitwise.scalar_ori: "or",
+        bitwise.scalar_xori: "xor",
+        bitwise.scalar_shli: "shl",
+    }
+    actual = set()
+    for rule in WASM_CORE_SIMD128_CONTRACT_FRAGMENT.cases:
+        if not isinstance(rule, DescriptorRule) or rule.source_op not in expected:
+            continue
+        types = {
+            guard.field: guard.type_pattern
+            for guard in rule.guards
+            if guard.kind is GuardKind.VALUE_TYPE
+        }
+        if not types or types["result"].kind != "scalar":
+            continue
+        if not {"i8", "i16"}.intersection(types["result"].elements):
+            continue
+        assert types["lhs"] == types["rhs"] == types["result"]
+        assert set(types["result"].elements) == {"i8", "i16", "i32"}
+        assert len(rule.emit) == 1
+        assert rule.emit[0].descriptor.key == f"wasm.i32.{expected[rule.source_op]}"
+        assert rule.emit[0].operands == {
+            "lhs": ValueRef.operand("lhs"),
+            "rhs": ValueRef.operand("rhs"),
+        }
+        actual.add(rule.source_op)
+    assert actual == expected.keys()
+
+
 def test_uniform_shifts_cover_constant_and_runtime_counts_for_all_lane_widths():
     operations = {
         vector.vector_shli: "shl",

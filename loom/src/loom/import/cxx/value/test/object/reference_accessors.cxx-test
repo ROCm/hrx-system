@@ -816,10 +816,10 @@ func.def public @storage_alias(%sample: i32, %input: i32, %index$2: i32) -> (i32
   %18 = scalar.constant 7 : i32
   %19 = index.constant 3 : index
   view.store %18, %values_view[%19] : i32, view<4xi32>
-  %70 = scalar.constant 2 : i32
-  %71 = scalar.shli %index$4, %70 : i32
-  %72 = scalar.extui %71 : i32 to i64
-  %41 = scalar.assume %72 [range(%72, 0, 9223372036854775807)] : i64
+  %36 = scalar.extui %index$4 : i32 to i64
+  %68 = scalar.constant 2 : i64
+  %69 = scalar.shli %36, %68 : i64
+  %41 = scalar.assume %69 [range(%69, 0, 9223372036854775807)] : i64
   %42 = index.cast %41 : i64 to offset
   %54 = buffer.view %values_storage[%observed_storage_byte_offset] : buffer -> view<1xi32>
   %55 = view.load %54[0] : view<1xi32> -> i32

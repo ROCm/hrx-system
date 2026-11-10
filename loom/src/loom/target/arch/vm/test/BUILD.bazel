@@ -20,6 +20,7 @@ loom_check_test_suite(
         "assembly.loom-test",
         "atomic_policy.loom-test",
         "effects.loom-test",
+        "integer_unary.loom-test",
         "inverse_hyperbolic.loom-test",
         "math_contraction.loom-test",
         "math_policy.loom-test",

@@ -22,9 +22,7 @@ low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = 
   %24 = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
   %25 = and.imm.gpr32 %24 {imm32 = 1}
   %unsigned32 = vcvtsi2ss.xmm.gpr32 %17, %25
-  %28 = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
-  %29 = and.imm.gpr32 %28 {imm32 = 1}
-  %unsigned64 = vcvtsi2sd.xmm.gpr32 %17, %29
+  %unsigned64 = vcvtsi2sd.xmm.gpr32 %17, %25
   return %signed32, %signed64, %unsigned32, %unsigned64
 }
 
@@ -149,9 +147,7 @@ low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = 
   %unsigned32 = vblendvpd.xmm %signed32, %26, %27
   %31 = copy %input : reg<x86.gpr64> -> reg<x86.gpr64>
   %32 = shr.imm.gpr64 %31 {shift = 1}
-  %33 = copy %input : reg<x86.gpr64> -> reg<x86.gpr64>
-  %34 = and.imm.gpr64 %33 {imm32 = 1}
-  %35 = or.gpr64 %32, %34
+  %35 = or.gpr64 %32, %23
   %36 = vcvtsi2sd.xmm.gpr64 %14, %35
   %37 = vaddsd.xmm %36, %36
   %unsigned64 = vblendvpd.xmm %signed64, %37, %27

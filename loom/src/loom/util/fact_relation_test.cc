@@ -133,6 +133,28 @@ class FactRelationTest : public ::testing::Test {
     return snapshot;
   }
 
+  template <typename Build>
+  loom_value_id_t Convert(Build build, loom_value_id_t input,
+                          loom_scalar_type_t result_type) {
+    loom_op_t* op = nullptr;
+    IREE_CHECK_OK(
+        build(&builder_, input, loom_module_value_type(module_, input),
+              loom_type_scalar(result_type), LOOM_LOCATION_UNKNOWN, &op));
+    IREE_CHECK_OK(loom_value_fact_table_compute_op(&table_, module_, op));
+    return loom_op_results(op)[0];
+  }
+
+  loom_value_id_t ScalarLessThan(loom_value_id_t input, loom_value_id_t bound) {
+    const auto predicate = RelationPredicate(LOOM_PREDICATE_LT, input, bound);
+    const auto type = loom_module_value_type(module_, input);
+    loom_op_t* op = nullptr;
+    IREE_CHECK_OK(loom_scalar_assume_build(&builder_, &input, 1, &predicate, 1,
+                                           &type, 1, LOOM_LOCATION_UNKNOWN,
+                                           &op));
+    IREE_CHECK_OK(loom_value_fact_table_compute_op(&table_, module_, op));
+    return loom_op_results(op)[0];
+  }
+
   iree_arena_block_pool_t pool_;
   iree_arena_allocator_t arena_;
   loom_context_t context_;
@@ -148,6 +170,477 @@ TEST_F(FactRelationTest, RelationFreeIdentityAllocatesNoRelationState) {
   IREE_ASSERT_OK(BuildIdentity(inputs_[0], &identity));
   IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, identity));
   EXPECT_EQ(table_.integer_relations, nullptr);
+}
+
+TEST_F(FactRelationTest, DisjointUpperBoundIntervalsAllocateNoRelationState) {
+  const auto value_facts = loom_value_facts_make(0, 4, 1);
+  const auto bound_facts = loom_value_facts_exact_i64(5);
+  bool changed = false;
+  const auto bytes = arena_.used_allocation_size;
+  IREE_ASSERT_OK(loom_value_fact_integer_relations_define_strict_upper_bound(
+      &table_, inputs_[0], inputs_[1], &value_facts, &bound_facts, &changed));
+  EXPECT_FALSE(changed);
+  EXPECT_EQ(table_.integer_relations, nullptr);
+  EXPECT_EQ(arena_.used_allocation_size, bytes);
+}
+
+TEST_F(FactRelationTest, ExactUpperBoundRetainsDynamicEndpointRelations) {
+  const auto value = DefineValue(type_);
+  const auto lower = BuildConstant(0);
+  const auto bound = BuildConstant(5);
+  const auto value_facts = loom_value_facts_make(0, 4, 1);
+  const auto bound_facts = loom_value_facts_exact_i64(5);
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table_, value, value_facts));
+  IREE_ASSERT_OK(loom_value_fact_integer_relations_define_counted_range(
+      &table_, bound, lower, inputs_[1]));
+  bool changed = false;
+  IREE_ASSERT_OK(loom_value_fact_integer_relations_define_strict_upper_bound(
+      &table_, value, bound, &value_facts, &bound_facts, &changed));
+  EXPECT_TRUE(changed);
+  EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(&table_, value,
+                                                             inputs_[1]),
+            LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS);
+  const auto before = Snapshot(value);
+  const auto bytes = arena_.used_allocation_size;
+  changed = false;
+  IREE_ASSERT_OK(loom_value_fact_integer_relations_define_strict_upper_bound(
+      &table_, value, bound, &value_facts, &bound_facts, &changed));
+  EXPECT_FALSE(changed);
+  EXPECT_EQ(arena_.used_allocation_size, bytes);
+  const auto repeated = Snapshot(value);
+  EXPECT_TRUE(loom_value_fact_auxiliary_snapshot_equal(&before, &repeated));
+
+  IREE_ASSERT_OK(loom_value_fact_integer_relations_define_strict_upper_bound(
+      &table_, value, LOOM_VALUE_ID_INVALID, &value_facts, &bound_facts,
+      &changed));
+  EXPECT_TRUE(changed);
+  EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(&table_, value,
+                                                             inputs_[1]),
+            LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL);
+}
+
+TEST_F(FactRelationTest, RemainderPublicationHonorsQueryScopeAndWithdrawal) {
+  for (const auto scalar : {LOOM_SCALAR_TYPE_INDEX, LOOM_SCALAR_TYPE_I32}) {
+    SCOPED_TRACE(loom_scalar_type_name(scalar));
+    const auto type = loom_type_scalar(scalar);
+    const auto dividend = DefineValue(type);
+    const auto divisor = DefineValue(type);
+    const auto dividend_facts = loom_value_facts_make(0, 4095, 1);
+    const auto unrestricted_divisor = loom_value_facts_make(0, 127, 1);
+    const auto positive_divisor = loom_value_facts_make(1, 127, 1);
+    IREE_ASSERT_OK(
+        loom_value_fact_table_define(&table_, dividend, dividend_facts));
+    IREE_ASSERT_OK(
+        loom_value_fact_table_define(&table_, divisor, unrestricted_divisor));
+    loom_op_t* op = nullptr;
+    if (scalar == LOOM_SCALAR_TYPE_INDEX) {
+      IREE_ASSERT_OK(loom_index_divrem_build(&builder_, dividend, divisor,
+                                             LOOM_LOCATION_UNKNOWN, &op));
+    } else {
+      const loom_type_t types[] = {type, type};
+      IREE_ASSERT_OK(loom_scalar_divremui_build(
+          &builder_, dividend, divisor, types, LOOM_LOCATION_UNKNOWN, &op));
+    }
+    IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, op));
+    const auto quotient = loom_op_const_results(op)[0];
+    const auto remainder = loom_op_const_results(op)[1];
+    const auto original = Snapshot(remainder);
+
+    // Temporary condition evaluation may return narrower numeric facts, but
+    // cannot change the owning solve's retained relation or quotient role.
+    auto query = table_.context;
+    ASSERT_EQ(query.publication, nullptr);
+    const loom_value_facts_t operands[] = {dividend_facts, positive_divisor};
+    loom_value_facts_t results[2];
+    IREE_ASSERT_OK(loom_op_vtable(module_, op)
+                       ->infer_facts(&query, module_, op, operands, results));
+    EXPECT_EQ(results[1].range_hi, 126);
+    const auto queried = Snapshot(remainder);
+    EXPECT_TRUE(loom_value_fact_auxiliary_snapshot_equal(&original, &queried));
+    EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(
+                  &table_, remainder, divisor),
+              LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL);
+
+    IREE_ASSERT_OK(
+        loom_value_fact_table_define(&table_, divisor, positive_divisor));
+    bool changed = false;
+    IREE_ASSERT_OK(loom_value_fact_table_compute_op_and_report(&table_, module_,
+                                                               op, &changed));
+    EXPECT_TRUE(changed);
+    EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(
+                  &table_, remainder, divisor),
+              LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS);
+    EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(
+                  &table_, quotient, divisor),
+              LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL);
+    const auto bytes = arena_.used_allocation_size;
+    IREE_ASSERT_OK(loom_value_fact_table_compute_op_and_report(&table_, module_,
+                                                               op, &changed));
+    EXPECT_FALSE(changed);
+    EXPECT_EQ(arena_.used_allocation_size, bytes);
+
+    IREE_ASSERT_OK(
+        loom_value_fact_table_define(&table_, divisor, unrestricted_divisor));
+    IREE_ASSERT_OK(loom_value_fact_table_compute_op_and_report(&table_, module_,
+                                                               op, &changed));
+    EXPECT_TRUE(changed);
+    EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(
+                  &table_, remainder, divisor),
+              LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL);
+    IREE_ASSERT_OK(loom_value_fact_table_compute_op_and_report(&table_, module_,
+                                                               op, &changed));
+    EXPECT_FALSE(changed);
+
+    // A logical index additionally needs its dividend domain. Scalar unsigned
+    // remainder instead interprets the entire represented input bit pattern.
+    IREE_ASSERT_OK(
+        loom_value_fact_table_define(&table_, divisor, positive_divisor));
+    IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, op));
+    IREE_ASSERT_OK(loom_value_fact_table_define(
+        &table_, dividend, loom_value_facts_make(-4095, -1, 1)));
+    IREE_ASSERT_OK(loom_value_fact_table_compute_op_and_report(&table_, module_,
+                                                               op, &changed));
+    EXPECT_TRUE(changed);
+    EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(
+                  &table_, remainder, divisor),
+              scalar == LOOM_SCALAR_TYPE_INDEX
+                  ? LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL
+                  : LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS);
+  }
+}
+
+TEST_F(FactRelationTest, CountedBoundsComposeEveryEndpointOrder) {
+  const auto other_endpoint = DefineValue(type_);
+  const auto induction = DefineValue(type_);
+  for (int relation = LOOM_SYMBOLIC_INTEGER_RELATION_EQ;
+       relation <= LOOM_SYMBOLIC_INTEGER_RELATION_GE; ++relation) {
+    const auto order = static_cast<loom_symbolic_integer_relation_t>(relation);
+    const auto predicate = RelationPredicate(
+        loom_symbolic_integer_relation_to_predicate_kind(order), inputs_[0],
+        inputs_[1]);
+    loom_op_t* assume = nullptr;
+    IREE_ASSERT_OK(BuildAssume({inputs_[0]}, {predicate}, &assume));
+    IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, assume));
+    const auto endpoint = loom_op_results(assume)[0];
+    for (bool upper : {false, true}) {
+      SCOPED_TRACE(relation);
+      SCOPED_TRACE(upper);
+      IREE_ASSERT_OK(loom_value_fact_integer_relations_define_counted_range(
+          &table_, induction, upper ? other_endpoint : endpoint,
+          upper ? endpoint : other_endpoint));
+      const auto range_order = upper
+                                   ? LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS
+                                   : LOOM_INTEGER_ORDER_OUTCOME_BIT_EQUAL |
+                                         LOOM_INTEGER_ORDER_OUTCOME_BIT_GREATER;
+      EXPECT_EQ(
+          loom_value_fact_table_query_signed_integer_order(&table_, induction,
+                                                           inputs_[1]),
+          loom_integer_order_outcomes_compose(
+              range_order, loom_symbolic_integer_relation_outcomes(order)));
+    }
+  }
+}
+
+TEST_F(FactRelationTest, ContradictoryEndpointsDoNotProveTransitiveOrder) {
+  loom_op_t* assume = nullptr;
+  IREE_ASSERT_OK(BuildAssume(
+      {inputs_[0]},
+      {RelationPredicate(LOOM_PREDICATE_LT, inputs_[0], inputs_[1]),
+       RelationPredicate(LOOM_PREDICATE_GE, inputs_[0], inputs_[1])},
+      &assume));
+  IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, assume));
+  const auto endpoint = loom_op_results(assume)[0];
+  const auto other_endpoint = DefineValue(type_);
+  const auto induction = DefineValue(type_);
+  for (bool upper : {false, true}) {
+    IREE_ASSERT_OK(loom_value_fact_integer_relations_define_counted_range(
+        &table_, induction, upper ? other_endpoint : endpoint,
+        upper ? endpoint : other_endpoint));
+    EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(
+                  &table_, induction, inputs_[1]),
+              LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL);
+  }
+  // Reinference replaces the entire relation publication, including the
+  // contradictory entry. An ordinary upper bound must become usable again.
+  IREE_ASSERT_OK(loom_value_fact_integer_relations_define_counted_range(
+      &table_, induction, other_endpoint, inputs_[1]));
+  EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(&table_, induction,
+                                                             inputs_[1]),
+            LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS);
+}
+
+TEST_F(FactRelationTest, BoundCompositionKeepsCounterpartOwnedOrder) {
+  const auto zero = BuildConstant(0);
+  const auto child = DefineValue(type_);
+  IREE_ASSERT_OK(loom_value_fact_integer_relations_define_counted_range(
+      &table_, child, zero, inputs_[0]));
+  // The child publishes child < limit. A weaker predicate on the limit must
+  // retain that established ordering before another counted range consumes it.
+  loom_op_t* assume = nullptr;
+  IREE_ASSERT_OK(BuildAssume(
+      {inputs_[0]}, {RelationPredicate(LOOM_PREDICATE_NE, inputs_[0], child)},
+      &assume));
+  IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, assume));
+  const auto limit = loom_op_results(assume)[0];
+  const auto induction = DefineValue(type_);
+  IREE_ASSERT_OK(loom_value_fact_integer_relations_define_counted_range(
+      &table_, induction, limit, inputs_[1]));
+  EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(&table_, induction,
+                                                             child),
+            LOOM_INTEGER_ORDER_OUTCOME_BIT_GREATER);
+}
+
+TEST_F(FactRelationTest, NestedCountedBoundsShareTransitiveStorage) {
+  const auto lower = BuildConstant(0);
+  const auto upper = inputs_[0];
+  IREE_ASSERT_OK(loom_value_fact_table_define(
+      &table_, upper, loom_value_facts_make(1, INT64_MAX, 1)));
+  loom_value_id_t endpoint = upper;
+  iree_host_size_t midpoint_bytes = 0;
+  for (int i = 0; i < 1024; ++i) {
+    const auto induction = DefineValue(type_);
+    IREE_ASSERT_OK(loom_value_fact_table_define(
+        &table_, induction, loom_value_facts_make(0, INT64_MAX - i - 1, 1)));
+    IREE_ASSERT_OK(loom_value_fact_integer_relations_define_counted_range(
+        &table_, induction, lower, endpoint));
+    EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(
+                  &table_, induction, upper),
+              LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS);
+    endpoint = induction;
+    if (i == 511) {
+      midpoint_bytes = arena_.used_allocation_size;
+    }
+  }
+  std::vector<VisitedRelation> relations;
+  loom_value_fact_table_for_each_signed_integer_relation_while(
+      &table_, endpoint, CollectRelation, &relations);
+  EXPECT_EQ(relations.size(), 1025u);
+  // Doubling a chain may grow radix depth and slab capacity, but must not
+  // retain the quadratic intermediate sets from rebuilding every ancestor.
+  EXPECT_LT(arena_.used_allocation_size, midpoint_bytes * 3);
+}
+
+TEST_F(FactRelationTest, IntegerConversionFamilyKeepsOnlyNumericIdentities) {
+  const loom_scalar_type_t types[] = {
+      LOOM_SCALAR_TYPE_I1,  LOOM_SCALAR_TYPE_I8,  LOOM_SCALAR_TYPE_I16,
+      LOOM_SCALAR_TYPE_I32, LOOM_SCALAR_TYPE_I64,
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(types); ++i) {
+    int64_t source_lo = 0;
+    int64_t source_hi = 0;
+    ASSERT_TRUE(
+        loom_value_facts_scalar_type_domain(types[i], &source_lo, &source_hi));
+    const auto input = DefineValue(loom_type_scalar(types[i]));
+    IREE_ASSERT_OK(loom_value_fact_table_define(
+        &table_, input, loom_value_facts_make(source_lo, source_hi, 1)));
+    for (iree_host_size_t j = 0; j < IREE_ARRAYSIZE(types); ++j) {
+      if (i == j) {
+        continue;
+      }
+      SCOPED_TRACE(loom_scalar_type_name(types[i]));
+      SCOPED_TRACE(loom_scalar_type_name(types[j]));
+      if (i < j) {
+        const auto signed_result =
+            Convert(loom_scalar_extsi_build, input, types[j]);
+        const auto unsigned_result =
+            Convert(loom_scalar_extui_build, input, types[j]);
+        EXPECT_EQ(loom_value_fact_table_query_numeric_identity(&table_,
+                                                               signed_result),
+                  types[i] == LOOM_SCALAR_TYPE_I1 ? signed_result : input);
+        EXPECT_EQ(loom_value_fact_table_query_numeric_identity(&table_,
+                                                               unsigned_result),
+                  types[i] == LOOM_SCALAR_TYPE_I1 ? input : unsigned_result);
+        // Mathematical equality never authorizes replacing a typed SSA use.
+        EXPECT_EQ(loom_value_fact_table_query_identity(&table_, signed_result),
+                  signed_result);
+        EXPECT_EQ(
+            loom_value_fact_table_query_identity(&table_, unsigned_result),
+            unsigned_result);
+      } else {
+        const auto result = Convert(loom_scalar_trunci_build, input, types[j]);
+        EXPECT_EQ(loom_value_fact_table_query_numeric_identity(&table_, result),
+                  result);
+      }
+    }
+  }
+  // Relation-free casts do not allocate the relation index.
+  EXPECT_EQ(table_.integer_relations, nullptr);
+
+  for (auto source : types) {
+    for (auto destination : types) {
+      const auto source_width = loom_scalar_type_bitwidth(source);
+      const auto destination_width = loom_scalar_type_bitwidth(destination);
+      if (source_width <= destination_width) {
+        continue;
+      }
+      SCOPED_TRACE(loom_scalar_type_name(source));
+      SCOPED_TRACE(loom_scalar_type_name(destination));
+      const auto input = DefineValue(loom_type_scalar(source));
+      const int64_t maximum = destination == LOOM_SCALAR_TYPE_I1 ? 1 : 63;
+      IREE_ASSERT_OK(loom_value_fact_table_define(
+          &table_, input, loom_value_facts_make(0, maximum, 1)));
+      const auto narrow = Convert(loom_scalar_trunci_build, input, destination);
+      const auto restored = Convert(loom_scalar_extui_build, narrow, source);
+      EXPECT_EQ(loom_value_fact_table_query_numeric_identity(&table_, narrow),
+                input);
+      EXPECT_EQ(loom_value_fact_table_query_numeric_identity(&table_, restored),
+                input);
+      EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(&table_, input,
+                                                                 restored),
+                LOOM_INTEGER_ORDER_OUTCOME_BIT_EQUAL);
+      if (destination != LOOM_SCALAR_TYPE_I1) {
+        const auto negative = DefineValue(loom_type_scalar(source));
+        IREE_ASSERT_OK(loom_value_fact_table_define(
+            &table_, negative, loom_value_facts_make(-63, -1, 1)));
+        const auto signed_narrow =
+            Convert(loom_scalar_trunci_build, negative, destination);
+        const auto signed_restored =
+            Convert(loom_scalar_extsi_build, signed_narrow, source);
+        EXPECT_EQ(loom_value_fact_table_query_numeric_identity(&table_,
+                                                               signed_restored),
+                  negative);
+      }
+    }
+  }
+}
+
+TEST_F(FactRelationTest, SignedPredicateExtensionPreservesOnlyZero) {
+  for (int64_t value : {0, 1}) {
+    const auto input = DefineValue(loom_type_scalar(LOOM_SCALAR_TYPE_I1));
+    IREE_ASSERT_OK(loom_value_fact_table_define(
+        &table_, input, loom_value_facts_exact_i64(value)));
+    const auto result =
+        Convert(loom_scalar_extsi_build, input, LOOM_SCALAR_TYPE_I32);
+    EXPECT_EQ(loom_value_fact_table_lookup(&table_, result).range_lo, -value);
+    EXPECT_EQ(loom_value_fact_table_query_numeric_identity(&table_, result),
+              value == 0 ? input : result);
+  }
+}
+
+TEST_F(FactRelationTest, ConvertedAliasKeepsLiteralExclusionsLocal) {
+  const auto input = DefineValue(loom_type_scalar(LOOM_SCALAR_TYPE_I32));
+  IREE_ASSERT_OK(loom_value_fact_table_define(
+      &table_, input, loom_value_facts_make(-63, 63, 1)));
+  const auto type = loom_module_value_type(module_, input);
+  const auto predicate = LiteralPredicate(LOOM_PREDICATE_NE, input, 42);
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_scalar_assume_build(&builder_, &input, 1, &predicate, 1,
+                                          &type, 1, LOOM_LOCATION_UNKNOWN,
+                                          &op));
+  IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, op));
+  const auto alias = loom_op_results(op)[0];
+  const auto narrow =
+      Convert(loom_scalar_trunci_build, alias, LOOM_SCALAR_TYPE_I8);
+  const auto restored =
+      Convert(loom_scalar_extsi_build, narrow, LOOM_SCALAR_TYPE_I32);
+  for (auto value : {alias, narrow, restored}) {
+    EXPECT_EQ(loom_value_fact_table_query_signed_integer_literal_order(
+                  &table_, value, 42),
+              LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS |
+                  LOOM_INTEGER_ORDER_OUTCOME_BIT_GREATER);
+  }
+  EXPECT_EQ(loom_value_fact_table_query_signed_integer_literal_order(&table_,
+                                                                     input, 42),
+            LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL);
+}
+
+TEST_F(FactRelationTest, NumericConversionPreservesAliasLocalRelations) {
+  const auto i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  const auto input = DefineValue(i32);
+  const auto bound = DefineValue(i32);
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table_, input,
+                                              loom_value_facts_make(0, 63, 1)));
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table_, bound,
+                                              loom_value_facts_make(1, 64, 1)));
+  const auto alias = ScalarLessThan(input, bound);
+  const auto narrow =
+      Convert(loom_scalar_trunci_build, alias, LOOM_SCALAR_TYPE_I8);
+  const auto wide =
+      Convert(loom_scalar_extui_build, narrow, LOOM_SCALAR_TYPE_I64);
+  const auto coordinate =
+      Convert(loom_index_cast_build, wide, LOOM_SCALAR_TYPE_INDEX);
+  const auto bound_wide =
+      Convert(loom_scalar_extsi_build, bound, LOOM_SCALAR_TYPE_I64);
+  const auto extent =
+      Convert(loom_index_cast_build, bound_wide, LOOM_SCALAR_TYPE_INDEX);
+  for (auto value : {alias, narrow, wide, coordinate}) {
+    for (auto endpoint : {bound, bound_wide, extent}) {
+      EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(&table_, value,
+                                                                 endpoint),
+                LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS);
+      EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(
+                    &table_, endpoint, value),
+                LOOM_INTEGER_ORDER_OUTCOME_BIT_GREATER);
+    }
+  }
+  EXPECT_EQ(
+      loom_value_fact_table_query_signed_integer_order(&table_, input, bound),
+      LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL);
+  const auto unrefined =
+      Convert(loom_scalar_trunci_build, input, LOOM_SCALAR_TYPE_I8);
+  EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(&table_, unrefined,
+                                                             extent),
+            LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL);
+
+  const loom_value_id_t selected[] = {coordinate, extent};
+  loom_value_fact_table_t clone = {};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&clone, &arena_, 0));
+  IREE_ASSERT_OK(loom_value_fact_table_clone_values(
+      &clone, {&table_, selected, IREE_ARRAYSIZE(selected)}, module_));
+  EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(&clone, coordinate,
+                                                             extent),
+            LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS);
+  loom_value_fact_table_clear_scope(&table_);
+  EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(
+                &table_, coordinate, extent),
+            LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL);
+  EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(&clone, coordinate,
+                                                             extent),
+            LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS);
+}
+
+TEST_F(FactRelationTest, ConversionReinferenceWithdrawsOriginsAndRelations) {
+  const auto i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  const auto input = DefineValue(i32);
+  const auto bound = DefineValue(i32);
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table_, input,
+                                              loom_value_facts_make(0, 63, 1)));
+  IREE_ASSERT_OK(loom_value_fact_table_define(
+      &table_, bound, loom_value_facts_make(1, 2048, 1)));
+  const auto alias = ScalarLessThan(input, bound);
+  const auto narrow =
+      Convert(loom_scalar_trunci_build, alias, LOOM_SCALAR_TYPE_I8);
+  const auto widen =
+      Convert(loom_scalar_extui_build, narrow, LOOM_SCALAR_TYPE_I32);
+  EXPECT_EQ(
+      loom_value_fact_table_query_signed_integer_order(&table_, widen, bound),
+      LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS);
+  const auto original = Snapshot(narrow);
+
+  IREE_ASSERT_OK(loom_value_fact_table_define(
+      &table_, input, loom_value_facts_make(0, 1023, 1)));
+  for (auto value : {alias, narrow, widen}) {
+    auto* op = loom_value_def_op(loom_module_value(module_, value));
+    bool changed = false;
+    IREE_ASSERT_OK(loom_value_fact_table_compute_op_and_report(&table_, module_,
+                                                               op, &changed));
+    EXPECT_TRUE(changed);
+    IREE_ASSERT_OK(loom_value_fact_table_compute_op_and_report(&table_, module_,
+                                                               op, &changed));
+    EXPECT_FALSE(changed);
+  }
+  const auto current = Snapshot(narrow);
+  EXPECT_FALSE(loom_value_fact_auxiliary_snapshot_equal(&original, &current));
+  for (auto value : {narrow, widen}) {
+    EXPECT_EQ(loom_value_fact_table_query_numeric_identity(&table_, value),
+              value);
+    EXPECT_EQ(
+        loom_value_fact_table_query_signed_integer_order(&table_, value, bound),
+        LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL);
+  }
+  EXPECT_EQ(
+      loom_value_fact_table_query_signed_integer_order(&table_, alias, bound),
+      LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS);
 }
 
 TEST_F(FactRelationTest, IntegerOrderUsesIdentityAndExactFacts) {

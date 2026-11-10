@@ -665,12 +665,12 @@ func.def target(@test_target) @narrow_unsigned_operands(%left: i8, %right: i8, %
 }
 
 // ====
-// RUN: with-checks pass target-legalize{mode=final,policy=reference-only},canonicalize,dce
+// RUN: pass target-legalize{mode=final,policy=reference-only},canonicalize,dce
 
 test.target<low_core> @test_target
 
-// Generic canonicalization may move a proven left shift before zero extension.
 // The target fallback must remain in the supported i32 domain after cleanup.
+// Proven-positive extension needs no sign-restoration shifts.
 func.def target(@test_target) @narrow_shift_survives_cleanup(%input: i8, %amount: i8) -> (i8) {
   %bounded = scalar.assume %input [range(%input, 0, 1)] : i8
   %exact_amount = scalar.assume %amount [range(%amount, 7, 7)] : i8
@@ -678,9 +678,18 @@ func.def target(@test_target) @narrow_shift_survives_cleanup(%input: i8, %amount
   func.return %shifted : i8
 }
 
+
 // ----
-CHECK: * = scalar.shli * : i32
-CHECK-NOT: * = scalar.shli * : i8
+test.target<low_core> @test_target
+
+func.def target(@test_target) @narrow_shift_survives_cleanup(%input: i8, %amount: i8) -> (i8) {
+  %bounded = scalar.assume %input [range(%input, 0, 1)] : i8
+  %11 = scalar.extui %bounded : i8 to i32
+  %12 = scalar.constant 7 : i32
+  %8 = scalar.shli %11, %12 : i32
+  %shifted = scalar.trunci %8 : i32 to i8
+  func.return %shifted : i8
+}
 
 // ====
 // RUN: pass target-legalize{mode=final,policy=reference-only},dce

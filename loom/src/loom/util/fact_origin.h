@@ -245,6 +245,13 @@ iree_status_t loom_value_fact_table_define_exact_scalar_origin(
     loom_value_fact_table_t* table, loom_value_id_t value_id,
     loom_value_fact_exact_scalar_origin_t origin);
 
+// Publishes a proved numeric identity across scalar representations. Retains
+// the canonical exact origin and inherits source-local integer relations.
+// INVALID source withdraws both products when a conversion can change value.
+iree_status_t loom_value_fact_table_define_numeric_identity(
+    loom_value_fact_table_t* table, loom_value_id_t value_id,
+    loom_value_id_t source_value_id);
+
 // Returns the exact scalar value source for |value_id|. The query validates
 // that both values are scalar; their representation types may differ.
 bool loom_value_fact_table_query_exact_scalar_origin(

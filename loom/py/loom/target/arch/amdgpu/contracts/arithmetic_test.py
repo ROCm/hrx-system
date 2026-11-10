@@ -739,6 +739,54 @@ def test_scalar_i32_bitwise_rules_prefer_encoded_constants() -> None:
         )
 
 
+def test_scalar_i64_bitwise_preserves_either_uniform_source() -> None:
+    compiled = _COMPILED_INTEGER_RULES
+    for source_op, mnemonic in (
+        (scalar_bitwise.scalar_andi, "and"),
+        (scalar_bitwise.scalar_ori, "or"),
+        (scalar_bitwise.scalar_xori, "xor"),
+    ):
+        rules = tuple(
+            rule
+            for rule in _rules_for_source_op(compiled, source_op)
+            if set(_rule_type_patterns(compiled, rule)) == {Scalar("i64")}
+            and _rule_descriptor_keys(compiled, rule)
+        )
+        assert tuple(_rule_descriptor_keys(compiled, rule) for rule in rules) == (
+            (f"amdgpu.s_{mnemonic}_b64",),
+            *((f"amdgpu.v_{mnemonic}_b32",),) * 3,
+        )
+        for rule, expected_sources in zip(
+            rules[1:], ((0, 1), (1, 0), (0, 1)), strict=True
+        ):
+            emit = compiled.emits[rule.emit_start]
+            assert emit.kind is LowerEmitKind.DESCRIPTOR_OP_PER_LANE
+            sources = compiled.value_refs[
+                emit.operand_ref_start : emit.operand_ref_start + emit.operand_ref_count
+            ]
+            assert tuple(source.index for source in sources) == expected_sources
+            assert sources[1].materializer_index != 0
+            if rule == rules[-1]:
+                assert sources[0].materializer_index != 0
+            else:
+                assert sources[0].materializer_index == 0
+                guards = compiled.guards[
+                    rule.guard_start : rule.guard_start + rule.guard_count
+                ]
+                assert any(
+                    guard.kind is GuardKind.LOW_VALUE_REGISTER_CLASS
+                    and compiled.value_refs[guard.value_ref_index].kind
+                    is SourceValueKind.OPERAND
+                    and compiled.value_refs[guard.value_ref_index].index
+                    == expected_sources[0]
+                    and AMDGPU_INTEGER_CONTRACT_FRAGMENT.descriptor_set.reg_classes[
+                        guard.register_class_id
+                    ].name
+                    == "amdgpu.sgpr"
+                    for guard in guards
+                )
+
+
 def test_scalar_i64_shift_family_has_native_and_word_transport_rules() -> None:
     compiled = _COMPILED_INTEGER_RULES
     for source_op, scalar_key, vector_key in (

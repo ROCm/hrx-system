@@ -187,6 +187,7 @@ loom_corpus_test(
             "numeric/float/inverse_hyperbolic_narrow.loom",
             "numeric/integer/arithmetic.loom",
             "numeric/integer/division.loom",
+            "numeric/integer/widening.loom",
         ],
     },
     xfails = {

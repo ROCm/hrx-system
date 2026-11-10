@@ -1,0 +1,267 @@
+// A consumed private copy owns only disposable register storage. Repeated
+// computations share their borrow-only result, including more than two users.
+// RUN: pass low-cse,low-dce,low-cse,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @private_inputs(%input: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %first_copy = copy %input : reg<test.i32> -> reg<test.i32>
+  %first = test.tied.any %first_copy
+  %second_copy = copy %input : reg<test.i32> -> reg<test.i32>
+  %second = test.tied.any %second_copy
+  %third_copy = copy %input : reg<test.i32> -> reg<test.i32>
+  %third = test.tied.any %third_copy
+  return %first, %second, %third
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @private_inputs(%input: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %first_copy = copy %input : reg<test.i32> -> reg<test.i32>
+  %first = test.tied.any %first_copy
+  return %first, %first, %first
+}
+
+// ====
+
+// Destructive operands follow the same ownership rule as tied operands.
+// RUN: pass low-cse,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @private_destructive_inputs(%input: reg<test.i64 : i64>) -> (reg<test.i64 : i64>, reg<test.i64 : i64>) asm {
+  %first_copy = copy %input : reg<test.i64 : i64> -> reg<test.i64 : i64>
+  %first = test.destructive.any %first_copy : %first_copy as reg<test.i64 : i64>
+  %second_copy = copy %input : reg<test.i64 : i64> -> reg<test.i64 : i64>
+  %second = test.destructive.any %second_copy : %second_copy as reg<test.i64 : i64>
+  return %first, %second
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @private_destructive_inputs(%input: reg<test.i64 : i64>) -> (reg<test.i64 : i64>, reg<test.i64 : i64>) asm {
+  %first_copy = copy %input : reg<test.i64 : i64> -> reg<test.i64 : i64>
+  %first = test.destructive.any %first_copy : %first_copy as reg<test.i64 : i64>
+  return %first, %first
+}
+
+// ====
+
+// All consumed inputs and all result ownership constraints participate.
+// RUN: pass low-cse,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @private_pair(%left: reg<test.i32 : i32>, %right: reg<test.i64 : i64>) -> (reg<test.i64 : i64>, reg<test.i32 : i32>, reg<test.i64 : i64>, reg<test.i32 : i32>) asm {
+  %left_copy = copy %left : reg<test.i32 : i32> -> reg<test.i32 : i32>
+  %right_copy = copy %right : reg<test.i64 : i64> -> reg<test.i64 : i64>
+  %first, %second = test.tied.pair %left_copy, %right_copy
+  %next_left = copy %left : reg<test.i32 : i32> -> reg<test.i32 : i32>
+  %next_right = copy %right : reg<test.i64 : i64> -> reg<test.i64 : i64>
+  %third, %fourth = test.tied.pair %next_left, %next_right
+  return %first, %second, %third, %fourth
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @private_pair(%left: reg<test.i32 : i32>, %right: reg<test.i64 : i64>) -> (reg<test.i64 : i64>, reg<test.i32 : i32>, reg<test.i64 : i64>, reg<test.i32 : i32>) asm {
+  %left_copy = copy %left : reg<test.i32 : i32> -> reg<test.i32 : i32>
+  %right_copy = copy %right : reg<test.i64 : i64> -> reg<test.i64 : i64>
+  %first, %second = test.tied.pair %left_copy, %right_copy
+  return %first, %second, %first, %second
+}
+
+// ====
+
+// Different source values remain different computations.
+// RUN: pass low-cse,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @different_sources(%left: reg<test.i32>, %right: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %left_copy = copy %left : reg<test.i32> -> reg<test.i32>
+  %first = test.tied.any %left_copy
+  %right_copy = copy %right : reg<test.i32> -> reg<test.i32>
+  %second = test.tied.any %right_copy
+  return %first, %second
+}
+
+// ====
+
+// A copy observed before consumption is not private to the calculation.
+// RUN: pass low-cse,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @observed_copy(%input: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %first_copy = copy %input : reg<test.i32> -> reg<test.i32>
+  %observed = test.add.i32 %first_copy, %input
+  %first = test.tied.any %first_copy
+  %second_copy = copy %input : reg<test.i32> -> reg<test.i32>
+  %second = test.tied.any %second_copy
+  return %observed, %first, %second
+}
+
+// ====
+
+// A private first input does not license a nonprivate second input.
+// RUN: pass low-cse,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @partially_private_pair(%left: reg<test.i32>, %right: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %left_copy = copy %left : reg<test.i32> -> reg<test.i32>
+  %right_copy = copy %right : reg<test.i32> -> reg<test.i32>
+  %observed = test.add.i32 %right_copy, %right
+  %first, %second = test.tied.pair %left_copy, %right_copy
+  %next_left = copy %left : reg<test.i32> -> reg<test.i32>
+  %next_right = copy %right : reg<test.i32> -> reg<test.i32>
+  %third, %fourth = test.tied.pair %next_left, %next_right
+  return %observed, %first, %second, %third, %fourth
+}
+
+// ====
+
+// Consumed results must retain their independent storage even when their
+// producer consumes private inputs. Protect both an earlier and a later owner.
+// RUN: pass low-cse,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @consumed_result(%input: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %first_copy = copy %input : reg<test.i32> -> reg<test.i32>
+  %first = test.tied.any %first_copy
+  %changed_first = test.tied.any %first
+  %second_copy = copy %input : reg<test.i32> -> reg<test.i32>
+  %second = test.tied.any %second_copy
+  %third_copy = copy %input : reg<test.i32> -> reg<test.i32>
+  %third = test.tied.any %third_copy
+  %changed_third = test.tied.any %third
+  return %changed_first, %second, %changed_third
+}
+
+// ====
+
+// A required result alias protects its owner before the alias is consumed.
+// RUN: pass low-cse,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @aliased_result(%input: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %first_copy = copy %input : reg<test.i32> -> reg<test.i32>
+  %first = test.tied.any %first_copy
+  %second_copy = copy %input : reg<test.i32> -> reg<test.i32>
+  %second = test.tied.any %second_copy
+  %alias = low.assume %second [range(%second, 0, 1024)] : reg<test.i32>
+  %changed = test.tied.any %alias
+  return %first, %changed
+}
+
+// ====
+
+// Moves carry existing ownership. They do not supply a private copy proof.
+// RUN: pass low-cse,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @moved_inputs(%input: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %first_copy = copy %input : reg<test.i32> -> reg<test.i32>
+  %first_move = move %first_copy : reg<test.i32> -> reg<test.i32>
+  %first = test.tied.any %first_move
+  %second_copy = copy %input : reg<test.i32> -> reg<test.i32>
+  %second_move = move %second_copy : reg<test.i32> -> reg<test.i32>
+  %second = test.tied.any %second_move
+  return %first, %second
+}
+
+// ====
+
+// A dominating calculation can replace a later private calculation without
+// sharing either input copy's storage across blocks.
+// RUN: pass low-cse,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @dominated_copy(%input: reg<test.i32>, %condition: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  low.cond_br %condition, ^calculate, ^skip : reg<test.i32>
+^calculate:
+  %first_copy = copy %input : reg<test.i32> -> reg<test.i32>
+  %first = test.tied.any %first_copy
+  low.br ^finish
+^skip:
+  return %input, %input
+^finish:
+  %second_copy = copy %input : reg<test.i32> -> reg<test.i32>
+  %second = test.tied.any %second_copy
+  return %first, %second
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @dominated_copy(%input: reg<test.i32>, %condition: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  low.cond_br %condition, ^calculate, ^skip : reg<test.i32>
+^calculate:
+  %first_copy = copy %input : reg<test.i32> -> reg<test.i32>
+  %first = test.tied.any %first_copy
+  low.br ^finish
+^skip:
+  return %input, %input
+^finish:
+  return %first, %first
+}
+
+// ====
+
+// Identical private computations in sibling blocks do not dominate each other.
+// RUN: pass low-cse,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @sibling_copies(%input: reg<test.i32>, %condition: reg<test.i32>) -> (reg<test.i32>) asm {
+  low.cond_br %condition, ^left, ^right : reg<test.i32>
+^left:
+  %first_copy = copy %input : reg<test.i32> -> reg<test.i32>
+  %first = test.tied.any %first_copy
+  return %first
+^right:
+  %second_copy = copy %input : reg<test.i32> -> reg<test.i32>
+  %second = test.tied.any %second_copy
+  return %second
+}
+
+// ====
+
+// Changing register classes is a representation boundary, even when the
+// semantic payload type agrees and each destination is privately consumed.
+// RUN: pass low-cse,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @different_carriers(%input: reg<test.i32 : i32>) -> (reg<test.i64 : i32>, reg<test.i64 : i32>) asm {
+  %first_copy = copy %input : reg<test.i32 : i32> -> reg<test.i64 : i32>
+  %first = test.tied.any %first_copy
+  %second_copy = copy %input : reg<test.i32 : i32> -> reg<test.i64 : i32>
+  %second = test.tied.any %second_copy
+  return %first, %second
+}
+
+// ====
+
+// Predicate references also observe the copied identity; an ordinary operand
+// use count of one is insufficient to establish private ownership.
+// RUN: pass low-cse,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @predicate_observes_copy(%input: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %first_copy = copy %input : reg<test.i32> -> reg<test.i32>
+  %witness = low.assume %input [eq(%first_copy, %input)] : reg<test.i32>
+  %first = test.tied.any %first_copy
+  %second_copy = copy %input : reg<test.i32> -> reg<test.i32>
+  %second = test.tied.any %second_copy
+  return %witness, %first, %second
+}

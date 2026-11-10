@@ -12,6 +12,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/context.h"
+#include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/encoding/ops.h"
@@ -1029,6 +1030,60 @@ TEST_F(FactOriginTest, LayoutAliasPublishesOnlyChangedBindings) {
       loom_value_fact_table_query_layout_origin(&table_, result).values.data,
       after.values.data);
   EXPECT_EQ(arena_.used_allocation_size, bytes);
+}
+
+TEST_F(FactOriginTest, NumericQueryDoesNotPublishUniformOrigins) {
+  auto* splat = Splat(inputs_[0]);
+  const auto result = loom_vector_splat_result(splat);
+  loom_value_fact_table_clear_origins(&table_, result);
+  ASSERT_EQ(Uniform(result), LOOM_VALUE_ID_INVALID);
+  const auto input = loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 2.0);
+  loom_value_facts_t output;
+  loom_fact_context_t query = table_.context;
+  ASSERT_EQ(query.publication, nullptr);
+  IREE_ASSERT_OK(loom_op_vtable(module_, splat)
+                     ->infer_facts(&query, module_, splat, &input, &output));
+  loom_value_fact_uniform_element_t element;
+  ASSERT_TRUE(loom_value_facts_query_uniform_element(&query, output, &element));
+  double value;
+  ASSERT_TRUE(loom_value_facts_as_exact_float(LOOM_SCALAR_TYPE_F32,
+                                              element.element, &value));
+  EXPECT_EQ(value, 2.0);
+  EXPECT_EQ(Uniform(result), LOOM_VALUE_ID_INVALID);
+  EXPECT_TRUE(Compute(splat));
+  EXPECT_EQ(Uniform(result), inputs_[0]);
+}
+
+TEST_F(FactOriginTest, NumericQueryDoesNotPublishLayoutOrigins) {
+  const auto type =
+      loom_type_encoding_with_role(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT);
+  const int64_t dynamic = INT64_MIN;
+  loom_op_t* layout = nullptr;
+  IREE_ASSERT_OK(loom_encoding_layout_strided_build(
+      &rewriter_.builder, &inputs_[4], 1, &dynamic, 1, type,
+      LOOM_LOCATION_UNKNOWN, &layout));
+  const auto result = loom_encoding_layout_strided_result(layout);
+  loom_value_fact_table_clear_origins(&table_, result);
+  const auto input = loom_value_facts_exact_i64(4);
+  loom_value_facts_t output;
+  loom_fact_context_t query = table_.context;
+  ASSERT_EQ(query.publication, nullptr);
+  IREE_ASSERT_OK(loom_op_vtable(module_, layout)
+                     ->infer_facts(&query, module_, layout, &input, &output));
+  loom_value_fact_encoding_summary_t summary;
+  ASSERT_TRUE(
+      loom_value_facts_query_encoding_summary(&query, output, &summary));
+  ASSERT_EQ(summary.address_layout.rank, 1);
+  EXPECT_EQ(summary.address_layout.strides[0].range_lo, 4);
+  EXPECT_EQ(summary.address_layout.strides[0].range_hi, 4);
+  EXPECT_EQ(loom_value_fact_table_query_layout_origin(&table_, result).kind,
+            LOOM_VALUE_FACT_LAYOUT_ORIGIN_NONE);
+  EXPECT_TRUE(Compute(layout));
+  const auto origin =
+      loom_value_fact_table_query_layout_origin(&table_, result);
+  ASSERT_EQ(origin.kind, LOOM_VALUE_FACT_LAYOUT_ORIGIN_EXPLICIT_STRIDES);
+  ASSERT_EQ(origin.count, 1);
+  EXPECT_EQ(origin.values.explicit_strides[0], inputs_[4]);
 }
 
 }  // namespace

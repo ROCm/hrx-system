@@ -22,8 +22,8 @@ TEST(LowPacketHazardPlanJsonTest, MissingDataOmitsActionAndProgress) {
       .reason_id = 4,
       .reason_name = IREE_SV("target.missing-data"),
       .producer_node_index = LOOM_LOW_SCHEDULE_NODE_NONE,
-      .producer_packet_index = LOOM_LOW_PACKET_HAZARD_PLAN_PACKET_NONE,
       .producer_scheduled_ordinal = LOOM_LOW_PACKET_HAZARD_PLAN_ORDINAL_NONE,
+      .producer_packet_index = LOOM_LOW_PACKET_HAZARD_PLAN_PACKET_NONE,
       .progress_class_id = LOOM_LOW_PACKET_PROGRESS_CLASS_NONE,
   };
   const loom_low_packet_hazard_plan_t plan = {

@@ -211,13 +211,13 @@ func.def inline @mismatch_unsigned_long_long(%actual_value: i64, %actual_valid: 
     %294 = scalar.andi %182, %293 : i32
     %187 = scalar.cmpi ne, %294, %293 : i32
     %289 = scalar.constant false : i1
-    %310 = scf.select %in_range, %187, %289 : i1
-    %188 = scf.if %310 -> (i1) {
-      %297 = scalar.constant 2 : i32
-      %298 = scalar.shli %182, %297 : i32
-      %299 = scalar.extui %298 : i32 to i64
+    %301 = scf.select %in_range, %187, %289 : i1
+    %188 = scf.if %301 -> (i1) {
+      %189 = scalar.extui %182 : i32 to i64
+      %295 = scalar.constant 2 : i64
+      %296 = scalar.shli %189, %295 : i64
       %192 = index.cast %lanes_byte_offset : offset to i64
-      %193 = scalar.addi %192, %299 : i64
+      %193 = scalar.addi %192, %296 : i64
       %194 = scalar.assume %193 [range(%193, 0, 9223372036854775807)] : i64
       %195 = index.cast %194 : i64 to offset
       %196 = buffer.view %lanes[%195] : buffer -> view<1xi32>
@@ -228,11 +228,11 @@ func.def inline @mismatch_unsigned_long_long(%actual_value: i64, %actual_valid: 
       scf.yield %289 : i1
     }
     %199 = scf.if %188 -> (i1) {
-      %302 = scalar.constant 2 : i32
-      %303 = scalar.shli %182, %302 : i32
-      %304 = scalar.extui %303 : i32 to i64
+      %200 = scalar.extui %182 : i32 to i64
+      %297 = scalar.constant 2 : i64
+      %298 = scalar.shli %200, %297 : i64
       %203 = index.cast %subgroups_byte_offset : offset to i64
-      %204 = scalar.addi %203, %304 : i64
+      %204 = scalar.addi %203, %298 : i64
       %205 = scalar.assume %204 [range(%204, 0, 9223372036854775807)] : i64
       %206 = index.cast %205 : i64 to offset
       %207 = buffer.view %subgroups[%206] : buffer -> view<1xi32>
@@ -246,10 +246,11 @@ func.def inline @mismatch_unsigned_long_long(%actual_value: i64, %actual_valid: 
       %found = scalar.constant 1 : i1
       %213 = scalar.constant 1 : i32
       %214 = scalar.addi %182, %213 : i32
-      %308 = scalar.shli %214, %293 : i32
-      %309 = scalar.extui %308 : i32 to i64
+      %215 = scalar.extui %214 : i32 to i64
+      %299 = scalar.constant 3 : i64
+      %300 = scalar.shli %215, %299 : i64
       %218 = index.cast %input_byte_offset : offset to i64
-      %219 = scalar.addi %218, %309 : i64
+      %219 = scalar.addi %218, %300 : i64
       %220 = scalar.assume %219 [range(%219, 0, 9223372036854775807)] : i64
       %221 = index.cast %220 : i64 to offset
       %222 = buffer.view %input[%221] : buffer -> view<1xi64>
@@ -266,8 +267,8 @@ func.def inline @mismatch_unsigned_long_long(%actual_value: i64, %actual_valid: 
   %227 = scalar.cmpi ne, %225, %226 : i32
   %difference$228 = scalar.extui %227 : i1 to i32
   %286 = scalar.constant false : i1
-  %312 = scf.select %actual_valid, %found$180, %286 : i1
-  %230 = scf.if %312 -> (i1) {
+  %303 = scf.select %actual_valid, %found$180, %286 : i1
+  %230 = scf.if %303 -> (i1) {
     %231 = func.call pure @same_bits_unsigned_long_long(%actual_value, %expected$181) : (i64, i64) -> (i1)
     %232 = scalar.constant 1 : i1
     %233 = scalar.xori %231, %232 : i1
@@ -277,8 +278,8 @@ func.def inline @mismatch_unsigned_long_long(%actual_value: i64, %actual_valid: 
   }
   %235 = scalar.constant 2 : i32
   %difference$236 = scalar.ori %difference$228, %235 : i32
-  %difference$311 = scf.select %230, %difference$236, %difference$228 : i32
-  func.return %difference$311 : i32
+  %difference$302 = scf.select %230, %difference$236, %difference$228 : i32
+  func.return %difference$302 : i32
 }
 
 func.def inline @same_bits_unsigned_long_long(%left: i64, %right: i64) -> (i1) {
