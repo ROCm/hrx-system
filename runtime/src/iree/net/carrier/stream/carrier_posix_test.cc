@@ -4,9 +4,11 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <sys/resource.h>
 #include <sys/socket.h>
 
 #include <array>
+#include <vector>
 
 #include "iree/async/notification.h"
 #include "iree/async/operations/scheduling.h"
@@ -15,11 +17,75 @@
 
 namespace iree::net::testing {
 
+namespace {
+
+class ScopedLockedMemoryLimit {
+ public:
+  ScopedLockedMemoryLimit() = default;
+
+  ~ScopedLockedMemoryLimit() {
+    if (active_) {
+      EXPECT_EQ(setrlimit(RLIMIT_MEMLOCK, &original_limit_), 0);
+    }
+  }
+
+  void Exhaust() {
+    ASSERT_EQ(getrlimit(RLIMIT_MEMLOCK, &original_limit_), 0);
+    struct rlimit exhausted_limit = original_limit_;
+    exhausted_limit.rlim_cur = 0;
+    ASSERT_EQ(setrlimit(RLIMIT_MEMLOCK, &exhausted_limit), 0);
+    active_ = true;
+  }
+
+ private:
+  struct rlimit original_limit_ = {};
+  bool active_ = false;
+};
+
+}  // namespace
+
 void StreamCarrierTest::ConstrainSendBuffer(iree_async_socket_t* socket) {
   int send_buffer_size = 1;
   ASSERT_EQ(setsockopt(socket->primitive.value.fd, SOL_SOCKET, SO_SNDBUF,
                        &send_buffer_size, sizeof(send_buffer_size)),
             0);
+}
+
+TEST_P(StreamCarrierTest, ZeroCopyResourceRefusalFallsBackToCopiedSend) {
+  if (GetParam().socket_type != IREE_ASYNC_SOCKET_TYPE_TCP ||
+      GetParam().zero_copy_min_send_size != 0) {
+    GTEST_SKIP() << "requires the IPv4 zero-copy stream configuration";
+  }
+  ASSERT_NO_FATAL_FAILURE(CreateCarrierPair());
+  if (!iree_any_bit_set(iree_net_carrier_capabilities(client_carrier_),
+                        IREE_NET_CARRIER_CAPABILITY_ZERO_COPY_TX)) {
+    GTEST_SKIP() << "platform lacks native zero-copy sends";
+  }
+
+  ScopedLockedMemoryLimit locked_memory_limit;
+  ASSERT_NO_FATAL_FAILURE(locked_memory_limit.Exhaust());
+
+  std::vector<uint8_t> payload(64 * 1024, 0xA5);
+  iree_async_span_t span =
+      iree_async_span_from_ptr(payload.data(), payload.size());
+  SendResult send_result;
+  send_result.is_polling = &is_polling_;
+  iree_net_send_params_t params = {
+      iree_net_send_prefix_empty(),
+      iree_async_span_list_make(&span, 1),
+      {SendCompleted, &send_result},
+  };
+  IREE_ASSERT_OK(iree_net_carrier_send(client_carrier_, &params));
+  PollUntil([&] {
+    return send_result.completion_count == 1 &&
+           server_context_.received_data.size() == payload.size();
+  });
+
+  EXPECT_EQ(send_result.status_code, IREE_STATUS_OK);
+  EXPECT_EQ(send_result.bytes_transferred, payload.size());
+  EXPECT_EQ(server_context_.received_data, payload);
+  EXPECT_EQ(client_context_.error_count, 0);
+  EXPECT_EQ(server_context_.error_count, 0);
 }
 
 TEST_P(StreamCarrierTest,

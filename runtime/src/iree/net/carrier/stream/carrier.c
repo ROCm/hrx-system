@@ -73,6 +73,9 @@ typedef struct iree_net_stream_send_slot_t {
 
   // True while the slot owns one retain on each registered region.
   bool regions_retained;
+
+  // True after native copy avoidance was refused for this logical send.
+  bool force_copied_send;
 } iree_net_stream_send_slot_t;
 
 typedef enum iree_net_stream_receive_state_e {
@@ -352,6 +355,7 @@ static void iree_net_stream_recycle_send_slot_locked(
   slot->submitted_length = 0;
   slot->span_count = 0;
   slot->first_span = 0;
+  slot->force_copied_send = false;
   slot->state = IREE_NET_STREAM_SEND_SLOT_STATE_FREE;
   --carrier->send_slots_in_use;
 }
@@ -665,7 +669,8 @@ static iree_status_t iree_net_stream_submit_send_slot_locked(
     slot->submitted_length += slot->operation.buffers.values[i].length;
   }
   slot->operation.send_flags = IREE_ASYNC_SOCKET_SEND_FLAG_REPORT_PROGRESS;
-  if (slot->submitted_length < carrier->zero_copy_min_send_size ||
+  if (slot->force_copied_send ||
+      slot->submitted_length < carrier->zero_copy_min_send_size ||
       carrier->zero_copy_min_send_size == IREE_HOST_SIZE_MAX) {
     slot->operation.send_flags |= IREE_ASYNC_SOCKET_SEND_FLAG_NO_ZERO_COPY;
   }
@@ -702,9 +707,28 @@ static void iree_net_stream_process_send_result(
                               "stream socket send was cancelled");
   }
 
+  // Kernel copy avoidance can be refused when the process lacks enough locked
+  // memory to pin this send. The socket and logical send remain valid, and the
+  // slot retains the exact unsent spans required for one copied retry. Keep all
+  // later physical extents for this logical send copied so another partial
+  // completion cannot encounter the same resource limit.
+  const bool retry_with_copy =
+      !is_retiring && bytes_sent == 0 &&
+      !iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_CANCELLED) &&
+      iree_status_is_resource_exhausted(status) && !slot->force_copied_send &&
+      !iree_any_bit_set(slot->operation.send_flags,
+                        IREE_ASYNC_SOCKET_SEND_FLAG_NO_ZERO_COPY) &&
+      iree_any_bit_set(carrier->base.capabilities,
+                       IREE_NET_CARRIER_CAPABILITY_ZERO_COPY_TX);
+  if (retry_with_copy) {
+    slot->force_copied_send = true;
+    iree_status_free(status);
+    status = iree_ok_status();
+  }
+
   const iree_host_size_t remaining_length =
       slot->total_length - slot->bytes_transferred;
-  if (!is_retiring && iree_status_is_ok(status)) {
+  if (!is_retiring && !retry_with_copy && iree_status_is_ok(status)) {
     if (bytes_sent == 0) {
       status = iree_make_status(IREE_STATUS_UNAVAILABLE,
                                 "stream socket send made no forward progress");
@@ -1295,6 +1319,7 @@ static iree_status_t iree_net_stream_carrier_send(
     slot->submitted_length = 0;
     slot->span_count = 0;
     slot->first_span = 0;
+    slot->force_copied_send = false;
     slot->state = IREE_NET_STREAM_SEND_SLOT_STATE_PREPARING;
     ++carrier->send_slots_in_use;
     iree_atomic_fetch_add(&base_carrier->pending_operations, 1,

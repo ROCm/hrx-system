@@ -1137,6 +1137,40 @@ iree_async_proactor_io_uring_socket_from_io_operation(
   }
 }
 
+// Returns true when an operation failure proves that the socket is no longer
+// usable. A resource refusal from a zero-copy send is local to the requested
+// copy-avoidance path: the same socket and bytes may still be sent with kernel
+// copying, so the operation reports the error without poisoning the socket.
+static bool iree_async_proactor_io_uring_socket_error_is_terminal(
+    iree_async_proactor_io_uring_t* proactor, iree_async_operation_t* operation,
+    iree_status_code_t status_code) {
+  if (status_code != IREE_STATUS_RESOURCE_EXHAUSTED ||
+      !iree_any_bit_set(proactor->capabilities,
+                        IREE_ASYNC_PROACTOR_CAPABILITY_ZERO_COPY_SEND)) {
+    return true;
+  }
+  switch (operation->type) {
+    case IREE_ASYNC_OPERATION_TYPE_SOCKET_SEND: {
+      iree_async_socket_send_operation_t* send =
+          (iree_async_socket_send_operation_t*)operation;
+      return !iree_any_bit_set(send->socket->flags,
+                               IREE_ASYNC_SOCKET_FLAG_ZERO_COPY) ||
+             iree_any_bit_set(send->send_flags,
+                              IREE_ASYNC_SOCKET_SEND_FLAG_NO_ZERO_COPY);
+    }
+    case IREE_ASYNC_OPERATION_TYPE_SOCKET_SENDTO: {
+      iree_async_socket_sendto_operation_t* sendto =
+          (iree_async_socket_sendto_operation_t*)operation;
+      return !iree_any_bit_set(sendto->socket->flags,
+                               IREE_ASYNC_SOCKET_FLAG_ZERO_COPY) ||
+             iree_any_bit_set(sendto->send_flags,
+                              IREE_ASYNC_SOCKET_SEND_FLAG_NO_ZERO_COPY);
+    }
+    default:
+      return true;
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // Poll
 //===----------------------------------------------------------------------===//
@@ -1210,8 +1244,10 @@ iree_host_size_t iree_async_proactor_io_uring_process_cqe(
     flags = iree_async_proactor_io_uring_completion_flags(cqe, operation);
   }
 
-  // Propagate error to socket's sticky failure status.
-  if (!iree_status_is_ok(status)) {
+  // Propagate connection-terminal errors to the socket's sticky failure state.
+  if (!iree_status_is_ok(status) &&
+      iree_async_proactor_io_uring_socket_error_is_terminal(
+          proactor, operation, iree_status_code(status))) {
     iree_async_socket_t* socket =
         iree_async_proactor_io_uring_socket_from_io_operation(operation);
     if (socket) {
