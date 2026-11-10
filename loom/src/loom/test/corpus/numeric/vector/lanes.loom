@@ -376,6 +376,69 @@ check.scenario @constructed_numeric_lanes {
   check.return
 }
 
+// Constructors span packet boundaries and retain rank without reordering
+// scalar payloads. Integer observations make NaN payloads ordinary data.
+func.def @construct_packet_lanes(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %half_origin = index.constant 128 : offset
+  %words = buffer.view %input[%origin] : buffer -> view<4xf32>
+  %halves = buffer.view %input[%origin] : buffer -> view<4xbf16>
+  %word_result = buffer.view %output[%origin] : buffer -> view<17xf32>
+  %half_result = buffer.view %output[%half_origin] : buffer -> view<3x11xbf16>
+  %a = view.load %words[0] : view<4xf32> -> f32
+  %b = view.load %words[1] : view<4xf32> -> f32
+  %c = view.load %words[2] : view<4xf32> -> f32
+  %d = view.load %words[3] : view<4xf32> -> f32
+  %word_packet = vector.from_elements %a, %d, %c, %b, %a, %d, %c, %b, %a, %d, %c, %b, %a, %d, %c, %b, %a : vector<17xf32>
+  vector.store %word_packet, %word_result[0] : vector<17xf32>, view<17xf32>
+  %e = view.load %halves[0] : view<4xbf16> -> bf16
+  %f = view.load %halves[1] : view<4xbf16> -> bf16
+  %g = view.load %halves[2] : view<4xbf16> -> bf16
+  %h = view.load %halves[3] : view<4xbf16> -> bf16
+  %half_packet = vector.from_elements %e, %h, %g, %f, %e, %h, %g, %f, %e, %h, %g, %f, %e, %h, %g, %f, %e, %h, %g, %f, %e, %h, %g, %f, %e, %h, %g, %f, %e, %h, %g, %f, %e : vector<3x11xbf16>
+  vector.store %half_packet, %half_result[0, 0] : vector<3x11xbf16>, view<3x11xbf16>
+  func.return
+}
+
+func.def @construct_packet_lanes_oracle(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %half_origin = index.constant 128 : offset
+  %words = buffer.view %input[%origin] : buffer -> view<4xi32>
+  %halves = buffer.view %input[%origin] : buffer -> view<4xi16>
+  %word_result = buffer.view %output[%origin] : buffer -> view<17xi32>
+  %half_result = buffer.view %output[%half_origin] : buffer -> view<33xi16>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %mask = index.constant 3 : index
+  %word_count = index.constant 17 : index
+  %half_count = index.constant 33 : index
+  scf.for %i = [%begin to %half_count step %step] {
+    %negative = index.sub %begin, %i : index
+    %lane = index.andi %negative, %mask : index
+    %half = view.load %halves[%lane] : view<4xi16> -> i16
+    view.store %half, %half_result[%i] : i16, view<33xi16>
+    %is_word = index.cmp ult, %i, %word_count : index
+    scf.if %is_word {
+      %word = view.load %words[%lane] : view<4xi32> -> i32
+      view.store %word, %word_result[%i] : i32, view<17xi32>
+    }
+  }
+  func.return
+}
+
+check.scenario @constructed_packet_boundaries {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<16xi8>
+    %output = check.generate.fill value(91) : tensor<200xi8>
+    check.compare<@construct_packet_lanes, @construct_packet_lanes_oracle>(%input, %output) : (tensor<16xi8>, tensor<200xi8>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<16xi8>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<200xi8>
+    }
+  }
+  check.return
+}
+
 // Each shape carries 264 bytes, crossing both arithmetic packet boundaries and
 // a 64-word register tuple. The four cases cover packed bytes, packed halves,
 // single-word elements, and register pairs without doing floating arithmetic.
