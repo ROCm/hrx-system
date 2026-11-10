@@ -249,9 +249,10 @@ TEST_P(Aie2pSharingTest, UsedPathAdmitsExactlyOneRecordPerReceiverGrant) {
                 loom_xdna_register_field_encode(layout.packet.enable, 1),
             0u);
   const uint16_t engine = sender.engine;
-  EXPECT_EQ(delivery->grants->address, loom_xdna_register_field_address(
-                                   context_.family, layout.directions[0].start,
-                                   sender.tile->coordinate, &engine));
+  EXPECT_EQ(delivery->grants->address,
+            loom_xdna_register_field_address(context_.family,
+                                             layout.directions[0].start,
+                                             sender.tile->coordinate, &engine));
 }
 
 INSTANTIATE_TEST_SUITE_P(OnChipMemory, Aie2pSharingTest,

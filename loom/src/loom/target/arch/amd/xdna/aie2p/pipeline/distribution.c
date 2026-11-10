@@ -94,16 +94,14 @@ iree_status_t loom_aie2p_native_select_channel_endpoint(
       loom_xdna_register_field_encode(layout->locks.release_value, 1) |
       loom_xdna_register_field_encode(layout->locks.valid, 1);
   *out_endpoint = (loom_aie2p_native_distribution_endpoint_t){
-      .channel = channel,
-      .tile = tile,
-      .engine = engine};
+      .channel = channel, .tile = tile, .engine = engine};
   if (!shared) {
     ++*next_engine;
   }
   const loom_pipeline_invocation_t* owner =
       invocations->channels[channel - context->channels].invocation;
-  const uint32_t controller = sender ? channel->cursor.writer.worker
-                                     : channel->cursor.reader.worker;
+  const uint32_t controller =
+      sender ? channel->cursor.writer.worker : channel->cursor.reader.worker;
   const iree_host_size_t controller_engine =
       controller == UINT32_MAX ? IREE_HOST_SIZE_MAX
                                : context->core_engines[controller];
@@ -449,11 +447,11 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
   loom_aie2p_native_distribution_path_t* packet_path = distribution->path;
   const iree_host_size_t channel_count = realization->invocations.channel_count;
   const uint32_t* ordinals = distribution->receiver_ordinals;
-  distribution->sender = (loom_aie2p_native_distribution_endpoint_t){
-      .channel = channel,
-      .tile = tile,
-      .engine = engine,
-      .wait_for_idle = true};
+  distribution->sender =
+      (loom_aie2p_native_distribution_endpoint_t){.channel = channel,
+                                                  .tile = tile,
+                                                  .engine = engine,
+                                                  .wait_for_idle = true};
   if (!path) {
     ++tile->next_mm2s;
   }

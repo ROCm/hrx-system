@@ -351,8 +351,9 @@ iree_status_t loom_aie2p_native_initialize_endpoints(
                               (uint64_t)tile.row << context->family->row_shift;
       const uint16_t index = sequence->descriptor + descriptor;
       const uint32_t address =
-          (uint32_t)(loom_xdna_register_field_address(
-                         context->family, layout->descriptor_base, tile, &index) -
+          (uint32_t)(loom_xdna_register_field_address(context->family,
+                                                      layout->descriptor_base,
+                                                      tile, &index) -
                      origin);
       for (uint8_t word = 0; word < layout->descriptor_word_count;) {
         if (!(changed & (1u << word))) {

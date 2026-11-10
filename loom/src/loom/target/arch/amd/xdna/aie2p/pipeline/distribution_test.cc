@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/distribution.h"
+
 #include <array>
 #include <tuple>
 #include <utility>
@@ -12,7 +14,6 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/target/arch/amd/xdna/aie2p/pipeline/distribution.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/sharing.h"
 #include "loom/target/arch/amd/xdna/array/facts.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
@@ -153,7 +154,6 @@ TEST_F(DistributionReuseTest, PacketReusePreservesCopyOrderAndRepetition) {
   }
   EXPECT_EQ(Reuse(batch, 4), nullptr);
 }
-
 
 // Common execution has admitted three serial children. Each has one source
 // controller, two receiver controllers, and two independent transport strands.
