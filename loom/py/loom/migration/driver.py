@@ -20,7 +20,7 @@ from loom.diagnostics import DiagnosticSeverity, SourceRange
 from loom.format.bytecode.writer import FORMAT_VERSION, MAGIC
 from loom.format.text.parser import Parser
 from loom.format.text.tokenizer import ParseError
-from loom.importers.check.cases import CheckCase, rewrite_inline_case_inputs
+from loom.migration.loom_test import LoomTestCase, rewrite_loom_test_inputs
 from loom.migration.rules import (
     DEFAULT_MIGRATION_REWRITE_HOOKS,
     MigrationRule,
@@ -291,7 +291,7 @@ def migrate_loom_test_text(
     case_results: dict[int, SourceMigrationResult] = {}
 
     def migrate_input(
-        check_case: CheckCase,
+        check_case: LoomTestCase,
         input_text: str,
     ) -> str:
         result = migrate_source_text(
@@ -304,11 +304,7 @@ def migrate_loom_test_text(
         return result.text
 
     try:
-        rewrite_result = rewrite_inline_case_inputs(
-            filename or Path("<input.loom-test>"),
-            text,
-            migrate_input,
-        )
+        rewrite_result = rewrite_loom_test_inputs(text, migrate_input)
     except ValueError as exc:
         return SourceMigrationResult(
             text=text,
@@ -502,7 +498,7 @@ def _parse_error_summary(exc: ParseError) -> str:
 
 def _remap_loom_test_case_diagnostics(
     rewritten_text: str,
-    cases: Sequence[CheckCase],
+    cases: Sequence[LoomTestCase],
     case_results: dict[int, SourceMigrationResult],
     filename: Path | None,
 ) -> tuple[MigrationFileDiagnostic, ...]:

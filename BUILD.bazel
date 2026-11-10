@@ -10,5 +10,4 @@ exports_files([
     ".bazelversion",
     "LICENSE",
     "requirements-analysis.lock.txt",
-    "requirements-importers-mlir.lock.txt",
 ])

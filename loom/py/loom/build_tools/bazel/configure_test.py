@@ -157,14 +157,14 @@ def test_native_capability_selection_is_exact_and_complete() -> None:
         )
 
 
-def test_importer_options_and_amdgpu_targets_reach_native_settings() -> None:
+def test_cxx_importer_option_and_amdgpu_targets_reach_native_settings() -> None:
     config = generate(
         [
-            "-DLOOM_IMPORT_MLIR=ON",
+            "-DLOOM_IMPORT_CXX=ON",
             "--//loom/config/arch/amdgpu:targets=gfx942,gfx125X-all",
         ]
     )
-    assert "build --//loom/config/import:enable=mlir\n" in config
+    assert "build --//loom/config/import:enable=cxx\n" in config
     assert "build --//loom/config/arch/amdgpu:targets=gfx125X-all,gfx942\n" in config
 
 
@@ -172,7 +172,7 @@ def test_importer_options_and_amdgpu_targets_reach_native_settings() -> None:
     "arguments",
     [
         ["-DLOOM_ARCH_AMDGPU=ON", "--//loom/config/arch:enable=spirv"],
-        ["-DLOOM_IMPORT_MLIR=ON", "--//loom/config/import:enable=cxx"],
+        ["-DLOOM_IMPORT_CXX=ON", "--//loom/config/import:enable=cxx"],
         [
             "-DLOOM_EXECUTE_IREE_HAL=ON",
             "--//loom/config/execute:enable=iree_hal",

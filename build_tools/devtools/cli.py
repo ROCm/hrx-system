@@ -22,7 +22,6 @@ from build_tools.devtools import (
     presubmit,
     setup,
 )
-from build_tools.devtools import importers as importer_dev
 from build_tools.devtools.command_plan import CommandPlan, CommandStep, ExecCommandStep
 from build_tools.devtools.environment import (
     REPO_ROOT,
@@ -571,54 +570,6 @@ def add_root_commands(subparsers: argparse._SubParsersAction) -> None:
     add_tool_environment_options(check_parser)
     check_parser.set_defaults(handler=handle_tools_check)
 
-    importers_parser = add_subparser(
-        subparsers,
-        "importers",
-        command_help=help_text.root_command_help("importers"),
-        help="Manage optional importer Python environments.",
-    )
-    add_common_options(importers_parser)
-    importer_subparsers = importers_parser.add_subparsers(
-        dest="importers_command", required=True
-    )
-
-    importer_setup_parser = importer_subparsers.add_parser(
-        "setup",
-        help="Create or refresh an optional importer Python environment.",
-    )
-    add_common_options(importer_setup_parser)
-    add_tool_environment_options(importer_setup_parser)
-    importer_setup_parser.add_argument(
-        "name",
-        help="Importer environment name, comma-separated names, or all.",
-    )
-    importer_setup_parser.set_defaults(handler=handle_importers_setup)
-
-    importer_doctor_parser = importer_subparsers.add_parser(
-        "doctor",
-        help="Probe an optional importer Python environment.",
-    )
-    add_common_options(importer_doctor_parser)
-    importer_doctor_parser.add_argument(
-        "name",
-        help="Importer environment name, comma-separated names, or all.",
-    )
-    importer_doctor_parser.set_defaults(handler=handle_importers_doctor)
-
-    importer_env_parser = importer_subparsers.add_parser(
-        "env",
-        help="Print an optional importer Python environment manifest.",
-    )
-    add_common_options(importer_env_parser)
-    importer_env_parser.add_argument("name", help="Importer environment name.")
-    importer_env_parser.add_argument(
-        "--format",
-        choices=("json", "shell"),
-        default="json",
-        help="Output format. Defaults to json.",
-    )
-    importer_env_parser.set_defaults(handler=handle_importers_env)
-
     docs_parser = add_subparser(
         subparsers,
         "docs",
@@ -1111,28 +1062,6 @@ def handle_tools_check(args: argparse.Namespace) -> CommandPlan:
     )
 
 
-def handle_importers_setup(args: argparse.Namespace) -> CommandPlan:
-    tool_env = tool_environment_from_args(args)
-    plan = CommandPlan()
-    for importer_name in importer_dev.parse_names([args.name]):
-        plan.extend(importer_dev.setup_plan(importer_name, tool_env).steps)
-    return plan
-
-
-def handle_importers_doctor(args: argparse.Namespace) -> CommandPlan:
-    plan = CommandPlan()
-    for importer_name in importer_dev.parse_names([args.name]):
-        plan.extend(importer_dev.doctor_plan(importer_name).steps)
-    return plan
-
-
-def handle_importers_env(args: argparse.Namespace) -> CommandPlan:
-    importer_names = importer_dev.parse_names([args.name])
-    if len(importer_names) != 1:
-        raise ValueError("importers env prints exactly one importer environment")
-    return importer_dev.env_plan(importer_names[0], output_format=args.format)
-
-
 def handle_docs(args: argparse.Namespace) -> CommandPlan:
     tool_env = tool_environment_from_args(args)
     command = [
@@ -1156,20 +1085,6 @@ def handle_docs(args: argparse.Namespace) -> CommandPlan:
     )
 
 
-def extract_importer_options(args: list[str]) -> tuple[tuple[str, ...], list[str]]:
-    return importer_dev.extract_options(forwarded_args(args))
-
-
-def env_with_optional_importers(
-    tool_env,
-    importer_names: tuple[str, ...],
-) -> dict[str, str]:
-    base_env = tool_env.path_env()
-    if not importer_names:
-        return base_env
-    return importer_dev.env_with_importers(importer_names, base_env=base_env)
-
-
 def handle_hook(args: argparse.Namespace) -> CommandPlan:
     return hooks.hook_plan(
         args.lane,
@@ -1182,7 +1097,7 @@ def handle_hook(args: argparse.Namespace) -> CommandPlan:
 
 def handle_configure(args: argparse.Namespace) -> CommandPlan:
     tool_env = existing_or_system_environment(args)
-    importer_names, backend_args = extract_importer_options(args.args)
+    backend_args = forwarded_args(args.args)
     if args.lane == "bazel":
         return CommandPlan(
             [
@@ -1190,7 +1105,6 @@ def handle_configure(args: argparse.Namespace) -> CommandPlan:
                     [
                         tool_env.python,
                         str(REPO_ROOT / "build_tools/bazel/configure.py"),
-                        *importer_dev.bazel_configure_args(importer_names),
                         *backend_args,
                     ],
                     cwd=REPO_ROOT,
@@ -1202,22 +1116,16 @@ def handle_configure(args: argparse.Namespace) -> CommandPlan:
     return cmake_dev.configure_plan(
         tool_env,
         configured_build_dir=getattr(args, "cmake_build_dir", None),
-        backend_args=[
-            *importer_dev.cmake_configure_args(importer_names),
-            *backend_args,
-        ],
-        env=env_with_optional_importers(tool_env, importer_names),
+        backend_args=backend_args,
     )
 
 
 def handle_build(args: argparse.Namespace) -> CommandPlan:
     tool_env = existing_or_system_environment(args)
-    importer_names, backend_args = extract_importer_options(args.args)
+    backend_args = forwarded_args(args.args)
     if args.lane == "bazel":
         targets = bazel_args_with_target_separator(
-            bazel_targets_or_defaults(
-                [*importer_dev.bazel_configs(importer_names), *backend_args]
-            )
+            bazel_targets_or_defaults(backend_args)
         )
         command = [tool_env.tool("bazel"), "build", *targets]
         return CommandPlan(
@@ -1234,22 +1142,15 @@ def handle_build(args: argparse.Namespace) -> CommandPlan:
         tool_env,
         configured_build_dir=getattr(args, "cmake_build_dir", None),
         backend_args=backend_args,
-        env=env_with_optional_importers(tool_env, importer_names),
     )
 
 
 def handle_test(args: argparse.Namespace) -> CommandPlan:
     tool_env = existing_or_system_environment(args)
-    importer_names, backend_args = extract_importer_options(args.args)
+    backend_args = forwarded_args(args.args)
     if args.lane == "bazel":
         targets = bazel_args_with_target_separator(
-            bazel_targets_or_defaults(
-                [
-                    *importer_dev.bazel_configs(importer_names),
-                    *importer_dev.bazel_test_env_args(importer_names),
-                    *backend_args,
-                ]
-            )
+            bazel_targets_or_defaults(backend_args)
         )
         update_strategy_args = (
             BAZEL_TEST_UPDATE_STRATEGY_ARGS
@@ -1277,7 +1178,6 @@ def handle_test(args: argparse.Namespace) -> CommandPlan:
         tool_env,
         configured_build_dir=getattr(args, "cmake_build_dir", None),
         backend_args=backend_args,
-        env=env_with_optional_importers(tool_env, importer_names),
     )
 
 
@@ -1382,9 +1282,8 @@ def handle_cmake_clang_tidy(args: argparse.Namespace) -> CommandPlan:
 
 def handle_bazel_runnable_command(args: argparse.Namespace) -> CommandPlan:
     tool_env = existing_or_system_environment(args)
-    importer_names, backend_args = extract_importer_options(args.args)
-    backend_args = [*importer_dev.bazel_configs(importer_names), *backend_args]
-    env = env_with_optional_importers(tool_env, importer_names)
+    backend_args = forwarded_args(args.args)
+    env = tool_env.path_env()
     if args.backend_command == "run":
         command = bazel_dev.parse_bazel_run_args(backend_args, run_cwd=Path.cwd())
         step = bazel_dev.BazelRunStep(
@@ -1425,13 +1324,11 @@ def handler_for_runnable_command(lane: str, command_name: str):
 
 def handle_cmake_run_command(args: argparse.Namespace) -> CommandPlan:
     tool_env = existing_or_system_environment(args)
-    importer_names, backend_args = extract_importer_options(args.args)
     return cmake_dev.run_plan(
         tool_env,
         configured_build_dir=getattr(args, "cmake_build_dir", None),
-        backend_args=backend_args,
+        backend_args=forwarded_args(args.args),
         run_cwd=Path.cwd(),
-        env=env_with_optional_importers(tool_env, importer_names),
     )
 
 

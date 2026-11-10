@@ -12,7 +12,6 @@ DEFAULT_ENABLED = []
 
 SUPPORTED_VALUES = [
     "cxx",
-    "mlir",
 ]
 
 iree_string_list_flag(

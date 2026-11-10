@@ -1220,14 +1220,12 @@ class CiTest(unittest.TestCase):
                     test_step.argv,
                 )
 
-    def test_amdgpu_loom_importers_are_forwarded_to_configuration(self):
+    def test_amdgpu_loom_importer_is_forwarded_to_configuration(self):
         args = ci.parse_arguments(
             [
                 "iree-bazel-amdgpu",
                 "--loom-importer",
                 "cxx",
-                "--loom-importer",
-                "mlir",
             ]
         )
 
@@ -1235,7 +1233,7 @@ class CiTest(unittest.TestCase):
 
         configure_step = next(step for step in steps if step.name == "Configure Bazel")
         self.assertIn(
-            "--//loom/config/import:enable=cxx,mlir",
+            "--//loom/config/import:enable=cxx",
             configure_step.argv,
         )
 

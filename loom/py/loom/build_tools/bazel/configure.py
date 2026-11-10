@@ -24,7 +24,6 @@ from loom.build_tools import target_presets
 
 IMPORT_DEFINES = {
     "LOOM_IMPORT_CXX": "cxx",
-    "LOOM_IMPORT_MLIR": "mlir",
 }
 ARCHITECTURES = target_presets.ARCHITECTURES
 ARTIFACT_FORMATS = target_presets.ARTIFACT_FORMATS
