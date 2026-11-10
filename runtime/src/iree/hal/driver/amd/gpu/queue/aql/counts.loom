@@ -1,0 +1,93 @@
+// Ordinary DWORD fixups and immutable invocation-start counts write disjoint
+// fields in one private resident instance. No header or destination is read.
+func.decl @apply_fixup_lane(%entries: buffer, %values: buffer, %target: buffer, %entry_count: i32, %position: index)
+func.decl @load_counts(%address: i64) -> (vector<3xi32>)
+
+kernel.def export("prepare_counts") @prepare_counts(%groups: index) {
+  %one = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%width, %one, %one) : index
+} launch(%entries: buffer, %values: buffer, %target: buffer, %entry_count: i32, %launches: buffer, %launch_count: i32) {
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %group32 = index.cast %group : index to i32
+  %sixty_three = scalar.constant 63 : i32
+  %six = scalar.constant 6 : i32
+  %aligned = scalar.addi %entry_count, %sixty_three : i32
+  %fixup_groups = scalar.shrui %aligned, %six : i32
+  %ordinary = scalar.cmpi ult, %group32, %fixup_groups : i32
+  %width = index.constant 64 : offset
+  scf.if %ordinary {
+    %group_offset = index.scale %group, %width : index, offset -> offset
+    %group_begin = index.cast %group_offset : offset to index
+    %position = index.add %group_begin, %lane : index
+    func.call @apply_fixup_lane(%entries, %values, %target, %entry_count, %position) : (buffer, buffer, buffer, i32, index)
+  } else {
+    %relative32 = scalar.subi %group32, %fixup_groups : i32
+    %relative = index.cast %relative32 : i32 to index
+    %group_offset = index.scale %relative, %width : index, offset -> offset
+    %group_begin = index.cast %group_offset : offset to index
+    %position = index.add %group_begin, %lane : index
+    %position32 = index.cast %position : index to i32
+    %active = scalar.cmpi ult, %position32, %launch_count : i32
+    scf.if %active {
+      %stride = index.constant 32 : offset
+      %origin = index.scale %position, %stride : index, offset -> offset
+      %descriptor = buffer.view %launches[%origin] : buffer -> view<8xi32>
+      %target32 = view.load %descriptor[0] : view<8xi32> -> i32
+      %value32 = view.load %descriptor[1] : view<8xi32> -> i32
+      %wide = buffer.view %launches[%origin] : buffer -> view<4xi64>
+      %count_offset = view.load %wide[1] : view<4xi64> -> i64
+      %argument32 = view.load %descriptor[4] : view<8xi32> -> i32
+      %packed0 = view.load %descriptor[5] : view<8xi32> -> i32
+      %packed1 = view.load %descriptor[6] : view<8xi32> -> i32
+      %packed2 = view.load %descriptor[7] : view<8xi32> -> i32
+      %value64 = scalar.extui %value32 : i32 to i64
+      %value_shift = scalar.constant 3 : i64
+      %value_bytes = scalar.shli %value64, %value_shift : i64
+      %value_offset = index.cast %value_bytes : i64 to offset
+      %value_view = buffer.view %values[%value_offset] : buffer -> view<1xi64>
+      %value = view.load %value_view[0] : view<1xi64> -> i64
+      %count_address = scalar.addi %value, %count_offset : i64
+      %counts = func.call @load_counts(%count_address) : (i64) -> (vector<3xi32>)
+      %x = vector.extract %counts[0] : vector<3xi32> -> i32
+      %y = vector.extract %counts[1] : vector<3xi32> -> i32
+      %z = vector.extract %counts[2] : vector<3xi32> -> i32
+      %mask = scalar.constant 65535 : i32
+      %shift = scalar.constant 16 : i32
+      %size_x = scalar.andi %packed0, %mask : i32
+      %size_y = scalar.shrui %packed0, %shift : i32
+      %size_z = scalar.andi %packed1, %mask : i32
+      %offset_x = scalar.shrui %packed1, %shift : i32
+      %offset_y = scalar.andi %packed2, %mask : i32
+      %offset_z = scalar.shrui %packed2, %shift : i32
+      %grid_x = scalar.muli %x, %size_x : i32
+      %grid_y = scalar.muli %y, %size_y : i32
+      %grid_z = scalar.muli %z, %size_z : i32
+      %target64 = scalar.extui %target32 : i32 to i64
+      %packet_offset = index.cast %target64 : i64 to offset
+      %packet = buffer.view %target[%packet_offset] : buffer -> view<16xi32>
+      view.store %grid_x, %packet[3] : i32, view<16xi32>
+      view.store %grid_y, %packet[4] : i32, view<16xi32>
+      view.store %grid_z, %packet[5] : i32, view<16xi32>
+      %argument64 = scalar.extui %argument32 : i32 to i64
+      %argument_offset = index.cast %argument64 : i64 to offset
+      func.call @write_hidden(%target, %argument_offset, %offset_x, %x) : (buffer, offset, i32, i32)
+      func.call @write_hidden(%target, %argument_offset, %offset_y, %y) : (buffer, offset, i32, i32)
+      func.call @write_hidden(%target, %argument_offset, %offset_z, %z) : (buffer, offset, i32, i32)
+    }
+  }
+  kernel.return
+}
+
+func.def inline @write_hidden(%target: buffer, %argument_offset: offset, %field: i32, %count: i32) {
+  %absent = scalar.constant 65535 : i32
+  %present = scalar.cmpi ne, %field, %absent : i32
+  scf.if %present {
+    %field_offset = index.cast %field : i32 to offset
+    %offset = index.add %argument_offset, %field_offset : offset
+    %output = buffer.view %target[%offset] : buffer -> view<1xi32, align(1)>
+    view.store %count, %output[0] : i32, view<1xi32, align(1)>
+  }
+  func.return
+}

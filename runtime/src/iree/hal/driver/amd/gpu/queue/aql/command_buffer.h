@@ -64,6 +64,8 @@ typedef struct iree_hal_amd_gpu_aql_command_program_t {
   uint32_t dispatch_count;
   // Public encoded operations, independent of native packet count or folding.
   uint32_t operation_count;
+  // Immutable static-count descriptors consumed once by native preparation.
+  iree_hal_amd_gpu_aql_count_table_t counts;
   // Union of dispatch queue requirements, admitted once at execution.
   iree_hal_queue_feature_flags_t required_features;
   // Native IBs need 48-bit addresses and system publication of GPU fixups.

@@ -51,6 +51,33 @@ _PROGRAM_TARGETS = [
 
 [
     loom_kernel_binary(
+        name = "counts_program_" + target,
+        testonly = True,
+        srcs = [
+            "counts.loom",
+            "counts_load_" + target + ".loom",
+            "//runtime/src/iree/hal/driver/amd/gpu/queue:fixup.loom",
+        ],
+        out = "counts_program_" + target + ".hsaco",
+        roots = ["prepare_counts"],
+        target = ":program_profile_" + target,
+        target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+    )
+    for target in _PROGRAM_TARGETS
+]
+
+iree_c_embed_data(
+    name = "counts_programs",
+    testonly = True,
+    srcs = [":counts_program_" + target for target in _PROGRAM_TARGETS],
+    c_file_output = "counts_programs.c",
+    h_file_output = "counts_programs.h",
+    identifier = "iree_hal_amd_gpu_aql_counts_programs",
+    target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+)
+
+[
+    loom_kernel_binary(
         name = "indirect_program_" + target,
         testonly = True,
         srcs = ["indirect.loom"],
@@ -264,11 +291,43 @@ iree_runtime_cc_test(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
+        ":counts",
         ":indirect",
         ":indirect_programs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/driver/amd/gpu:kernarg",
+        "//runtime/src/iree/hal/driver/amd/gpu/image",
+        "//runtime/src/iree/hal/driver/amd/gpu/image:hsaco",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "counts",
+    srcs = ["counts.c"],
+    hdrs = ["counts.h"],
+    deps = [
+        ":indirect",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/driver/amd/gpu/image",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue:fixup",
+        "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "counts_test",
+    srcs = ["counts_test.cc"],
+    target_compatible_with = _PROGRAM_COMPATIBLE_WITH + select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":counts",
+        ":counts_programs",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/hal/driver/amd/gpu/image",
         "//runtime/src/iree/hal/driver/amd/gpu/image:hsaco",
         "//runtime/src/iree/testing:gtest",
@@ -543,6 +602,7 @@ iree_runtime_cc_library(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
+        ":counts",
         ":indirect",
         ":materialize",
         ":ring",
