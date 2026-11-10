@@ -16,6 +16,7 @@ extern "C" {
 #define HRX_AMDXDNA_EXECUTABLE_ENTRY_POINT_ABI_VERSION_1 1u
 #define HRX_AMDXDNA_EXECUTABLE_CREATE_PARAMS_ABI_VERSION_0 0u
 #define HRX_AMDXDNA_EXECUTABLE_CREATE_PARAMS_ABI_VERSION_1 1u
+#define HRX_AMDXDNA_EXECUTABLE_CREATE_PARAMS_ABI_VERSION_2 2u
 #define HRX_AMDXDNA_CONTROL_PARAMETER_ABI_VERSION_0 0u
 
 // `{0}` is valid C but GCC C++ -Wmissing-field-initializers rejects it when
@@ -145,6 +146,16 @@ hrx_amdxdna_executable_entry_point_default(void) {
   return entry_point;
 }
 
+// Stable content identity for an immutable xclbin. Producers may compute this
+// once and attach it to executable creation parameters so HRX can reuse
+// equivalent native executables without rescanning the xclbin on each call.
+// The identity must describe the corresponding xclbin bytes exactly.
+typedef struct hrx_amdxdna_xclbin_identity_t {
+  uint64_t hash_1;
+  uint64_t hash_2;
+  uint64_t data_length;
+} hrx_amdxdna_xclbin_identity_t;
+
 // Generic semantic description of an amdxdna executable. Repeated run and
 // entry-point records are walked using each record's |record_length| so future
 // ABI versions can append fields without changing the stride seen by HRX.
@@ -162,6 +173,12 @@ typedef struct hrx_amdxdna_executable_create_params_t {
   // from an xclbin by entry_point.pdi_ordinal.
   const hrx_const_byte_span_t* pdis;
   size_t pdi_count;
+  // Optional identities corresponding one-to-one with |xclbins|. Nonempty
+  // identity metadata requires create-parameter ABI version 2. HRX uses these
+  // only as cache keys; callers remain responsible for supplying identities
+  // computed from the exact xclbin contents.
+  const hrx_amdxdna_xclbin_identity_t* xclbin_identities;
+  size_t xclbin_identity_count;
 } hrx_amdxdna_executable_create_params_t;
 
 // Returns initialized v0 executable creation parameters.

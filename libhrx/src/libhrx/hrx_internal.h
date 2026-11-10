@@ -241,6 +241,8 @@ typedef struct hrx_allocator_s {
   hrx_device_t device;
 } hrx_allocator_s;
 
+typedef struct hrx_amdxdna_executable_cache_s hrx_amdxdna_executable_cache_s;
+
 // Device instance.
 typedef struct hrx_device_s {
   iree_atomic_ref_count_t ref_count;
@@ -252,6 +254,8 @@ typedef struct hrx_device_s {
   hrx_allocator_s allocator;           // Inline, owned by device.
   hrx_buffer_table_t buffer_table;     // Device-pointer-to-buffer lookup.
   iree_arena_block_pool_t block_pool;  // Shared arena pool for graphs.
+  // Lazily allocated, device-owned amdxdna executable cache.
+  hrx_amdxdna_executable_cache_s* amdxdna_executable_cache;
   char name[128];
   char architecture[64];
 } hrx_device_s;
@@ -674,6 +678,15 @@ iree_status_t hrx_status_to_iree(hrx_status_t status);
 iree_status_t hrx_iree_exact_pool_create(iree_hal_allocator_t* allocator,
                                          iree_hal_buffer_params_t params,
                                          iree_hal_pool_t** out_pool);
+
+// Wraps a retained HAL executable in an independently owned public handle.
+// Consumes the supplied HAL executable reference on both success and failure.
+hrx_status_t hrx_executable_wrap_hal(hrx_device_t device,
+                                     iree_hal_executable_t* hal_executable,
+                                     hrx_executable_t* out_executable);
+
+// Releases all device-owned cached amdxdna executables.
+void hrx_amdxdna_executable_cache_clear(hrx_device_t device);
 
 #ifdef __cplusplus
 }

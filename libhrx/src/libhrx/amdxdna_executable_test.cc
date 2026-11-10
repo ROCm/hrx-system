@@ -5,8 +5,12 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
+#include <memory>
 
+#include "amdxdna_executable_cache.h"
 #include "hrx_amdxdna.h"
+#include "iree/hal/resource.h"
 #include "iree/schemas/amdxdna_xclbin_executable_def_reader.h"
 #include "iree/schemas/amdxdna_xclbin_executable_def_verifier.h"
 
@@ -379,6 +383,169 @@ void TestVersion1RequiredForExtensions() {
   }
 }
 
+void TestVersion2XclbinIdentities() {
+  hrx_host_allocator_t allocator = hrx_host_allocator_system();
+  uint8_t* data = nullptr;
+  size_t data_length = 0;
+
+  ExecutableDescription description;
+  std::array<hrx_amdxdna_xclbin_identity_t, 2> identities = {
+      hrx_amdxdna_xclbin_identity_t{1, 2, description.xclbin0.size()},
+      hrx_amdxdna_xclbin_identity_t{3, 4, description.xclbin1.size()}};
+  description.params.abi_version =
+      HRX_AMDXDNA_EXECUTABLE_CREATE_PARAMS_ABI_VERSION_2;
+  description.params.xclbin_identities = identities.data();
+  description.params.xclbin_identity_count = identities.size();
+  CHECK(CheckStatus(hrx_amdxdna_xadx_serialize(&description.params, allocator,
+                                               &data, &data_length),
+                    HRX_STATUS_OK));
+  CHECK(data != nullptr);
+  hrx_host_allocator_free(allocator, data);
+
+  description.params.abi_version =
+      HRX_AMDXDNA_EXECUTABLE_CREATE_PARAMS_ABI_VERSION_1;
+  CheckStatus(hrx_amdxdna_xadx_serialize(&description.params, allocator, &data,
+                                         &data_length),
+              HRX_STATUS_INVALID_ARGUMENT);
+
+  description.params.abi_version =
+      HRX_AMDXDNA_EXECUTABLE_CREATE_PARAMS_ABI_VERSION_2;
+  description.params.xclbin_identity_count = 1;
+  CheckStatus(hrx_amdxdna_xadx_serialize(&description.params, allocator, &data,
+                                         &data_length),
+              HRX_STATUS_INVALID_ARGUMENT);
+
+  description.params.xclbin_identity_count = identities.size();
+  identities[0].data_length = description.xclbin0.size() + 1;
+  CheckStatus(hrx_amdxdna_xadx_serialize(&description.params, allocator, &data,
+                                         &data_length),
+              HRX_STATUS_INVALID_ARGUMENT);
+}
+
+struct FakeExecutable {
+  iree_hal_resource_t resource;
+  int* destroy_count;
+};
+
+void FakeExecutableDestroy(iree_hal_executable_t* base_executable) {
+  auto* executable = reinterpret_cast<FakeExecutable*>(base_executable);
+  ++*executable->destroy_count;
+  delete executable;
+}
+
+const iree_hal_executable_vtable_t kFakeExecutableVtable = {
+    FakeExecutableDestroy, nullptr, nullptr, nullptr,
+    nullptr,               nullptr, nullptr, nullptr};
+
+iree_hal_executable_t* CreateFakeExecutable(int* destroy_count) {
+  auto* executable = new FakeExecutable;
+  iree_hal_resource_initialize(&kFakeExecutableVtable, &executable->resource);
+  executable->destroy_count = destroy_count;
+  return reinterpret_cast<iree_hal_executable_t*>(executable);
+}
+
+hrx_amdxdna_executable_cache_descriptor_t MakeCacheDescriptor(
+    const hrx_amdxdna_xclbin_identity_t& identity, const uint32_t* transaction,
+    size_t transaction_word_count) {
+  hrx_amdxdna_executable_run_t run =
+      hrx_amdxdna_executable_run_default();
+  run.transaction =
+      ByteSpan(transaction, transaction_word_count * sizeof(uint32_t));
+  hrx_amdxdna_executable_entry_point_t entry_point =
+      hrx_amdxdna_executable_entry_point_default();
+  entry_point.name = StringView("MLIR_AIE");
+  hrx_amdxdna_executable_cache_descriptor_t descriptor;
+  CHECK(hrx_amdxdna_executable_cache_descriptor_initialize(
+      &identity, &entry_point, &run, &descriptor));
+  return descriptor;
+}
+
+void TestExecutableCacheHitMissLruAndTeardown() {
+  auto cache = std::make_unique<hrx_amdxdna_executable_cache_s>();
+  hrx_amdxdna_executable_cache_initialize(
+      /*max_entries=*/2, /*max_host_bytes=*/SIZE_MAX, cache.get());
+  const hrx_amdxdna_xclbin_identity_t identity = {1, 2, 4};
+  const uint32_t transaction_a[] = {1, 2, 3, 4};
+  const uint32_t transaction_b[] = {5, 6, 7, 8};
+  const uint32_t transaction_c[] = {9, 10, 11, 12};
+  const auto descriptor_a =
+      MakeCacheDescriptor(identity, transaction_a, std::size(transaction_a));
+  const auto descriptor_b =
+      MakeCacheDescriptor(identity, transaction_b, std::size(transaction_b));
+  const auto descriptor_c =
+      MakeCacheDescriptor(identity, transaction_c, std::size(transaction_c));
+
+  int destroy_a = 0;
+  int destroy_b = 0;
+  int destroy_c = 0;
+  iree_hal_executable_t* executable_a = CreateFakeExecutable(&destroy_a);
+  iree_hal_executable_t* executable_b = CreateFakeExecutable(&destroy_b);
+  iree_hal_executable_t* executable_c = CreateFakeExecutable(&destroy_c);
+  CHECK(hrx_amdxdna_executable_cache_insert(cache.get(), &descriptor_a,
+                                            executable_a));
+  iree_hal_executable_release(executable_a);
+  CHECK(hrx_amdxdna_executable_cache_lookup(cache.get(), &descriptor_b) ==
+        nullptr);
+
+  CHECK(hrx_amdxdna_executable_cache_insert(cache.get(), &descriptor_b,
+                                            executable_b));
+  iree_hal_executable_release(executable_b);
+  iree_hal_executable_t* hit =
+      hrx_amdxdna_executable_cache_lookup(cache.get(), &descriptor_a);
+  CHECK(hit != nullptr);
+  iree_hal_executable_release(hit);
+
+  CHECK(hrx_amdxdna_executable_cache_insert(cache.get(), &descriptor_c,
+                                            executable_c));
+  iree_hal_executable_release(executable_c);
+  CHECK(destroy_b == 1);
+  CHECK(hrx_amdxdna_executable_cache_lookup(cache.get(), &descriptor_b) ==
+        nullptr);
+  hit = hrx_amdxdna_executable_cache_lookup(cache.get(), &descriptor_a);
+  CHECK(hit != nullptr);
+  iree_hal_executable_release(hit);
+  hit = hrx_amdxdna_executable_cache_lookup(cache.get(), &descriptor_c);
+  CHECK(hit != nullptr);
+  iree_hal_executable_release(hit);
+
+  hrx_amdxdna_executable_cache_deinitialize(cache.get());
+  CHECK(destroy_a == 1);
+  CHECK(destroy_b == 1);
+  CHECK(destroy_c == 1);
+}
+
+void TestExecutableCacheByteBudgetEviction() {
+  auto cache = std::make_unique<hrx_amdxdna_executable_cache_s>();
+  const hrx_amdxdna_xclbin_identity_t identity = {3, 4, 4};
+  const uint32_t transaction_a[] = {1, 2};
+  const uint32_t transaction_b[] = {3, 4};
+  const auto descriptor_a =
+      MakeCacheDescriptor(identity, transaction_a, std::size(transaction_a));
+  const auto descriptor_b =
+      MakeCacheDescriptor(identity, transaction_b, std::size(transaction_b));
+  hrx_amdxdna_executable_cache_initialize(
+      /*max_entries=*/2,
+      /*max_host_bytes=*/descriptor_a.host_bytes + descriptor_b.host_bytes - 1,
+      cache.get());
+
+  int destroy_a = 0;
+  int destroy_b = 0;
+  iree_hal_executable_t* executable_a = CreateFakeExecutable(&destroy_a);
+  iree_hal_executable_t* executable_b = CreateFakeExecutable(&destroy_b);
+  CHECK(hrx_amdxdna_executable_cache_insert(cache.get(), &descriptor_a,
+                                            executable_a));
+  iree_hal_executable_release(executable_a);
+  CHECK(hrx_amdxdna_executable_cache_insert(cache.get(), &descriptor_b,
+                                            executable_b));
+  iree_hal_executable_release(executable_b);
+  CHECK(destroy_a == 1);
+  CHECK(hrx_amdxdna_executable_cache_lookup(cache.get(), &descriptor_a) ==
+        nullptr);
+
+  hrx_amdxdna_executable_cache_deinitialize(cache.get());
+  CHECK(destroy_b == 1);
+}
+
 }  // namespace
 
 int main() {
@@ -389,6 +556,9 @@ int main() {
   TestPriorCreateRecordOmitsStandalonePdis();
   TestInvalidRecords();
   TestVersion1RequiredForExtensions();
+  TestVersion2XclbinIdentities();
+  TestExecutableCacheHitMissLruAndTeardown();
+  TestExecutableCacheByteBudgetEviction();
   if (failure_count != 0) {
     std::fprintf(stderr, "amdxdna executable API test: %d failure(s)\n",
                  failure_count);

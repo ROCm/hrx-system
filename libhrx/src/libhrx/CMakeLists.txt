@@ -35,11 +35,13 @@ iree_cc_library(
     ${_hrx_static_platform_copts}
   HDRS
     "${LIBHRX_SOURCE_DIR}/src/iree_hal_compat.h"
+    "amdxdna_executable_cache.h"
     "buffer_table.h"
     "hrx_internal.h"
     "mem_pool.h"
   SRCS
     "allocator.c"
+    "amdxdna_executable_cache.c"
     "amdxdna_executable.c"
     "buffer.c"
     "buffer_table.c"
@@ -130,11 +132,13 @@ iree_cc_library(
     ${_hrx_platform_copts}
   HDRS
     "${LIBHRX_SOURCE_DIR}/src/iree_hal_compat.h"
+    "amdxdna_executable_cache.h"
     "buffer_table.h"
     "hrx_internal.h"
     "mem_pool.h"
   SRCS
     "allocator.c"
+    "amdxdna_executable_cache.c"
     "amdxdna_executable.c"
     "buffer.c"
     "buffer_table.c"

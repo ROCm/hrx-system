@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "hrx_amdxdna.h"
+#include "amdxdna_executable_cache.h"
 #include "hrx_internal.h"
 
 #if defined(HRX_HAS_IREE_AMDXDNA_DRIVER)
@@ -22,13 +23,17 @@ typedef struct hrx_amdxdna_serialization_workspace_t {
   size_t capacity;
 } hrx_amdxdna_serialization_workspace_t;
 
+#define HRX_AMDXDNA_EXECUTABLE_CACHE_MAX_HOST_BYTES (112u * 1024u * 1024u)
+
 static hrx_amdxdna_serialization_workspace_t
     hrx_amdxdna_serialization_workspace;
+static iree_slim_mutex_t hrx_amdxdna_executable_cache_mutex;
 static iree_once_flag hrx_amdxdna_serialization_workspace_once =
     IREE_ONCE_FLAG_INIT;
 
 static void hrx_amdxdna_serialization_workspace_initialize(void) {
   iree_slim_mutex_initialize(&hrx_amdxdna_serialization_workspace.mutex);
+  iree_slim_mutex_initialize(&hrx_amdxdna_executable_cache_mutex);
 }
 
 static bool hrx_amdxdna_span_is_valid(hrx_const_byte_span_t span) {
@@ -61,6 +66,9 @@ static const size_t
 static const size_t hrx_amdxdna_create_params_pdis_record_length =
     HRX_AMDXDNA_V0_RECORD_LENGTH(hrx_amdxdna_executable_create_params_t,
                                  pdi_count);
+static const size_t hrx_amdxdna_create_params_xclbin_identities_record_length =
+    HRX_AMDXDNA_V0_RECORD_LENGTH(hrx_amdxdna_executable_create_params_t,
+                                 xclbin_identity_count);
 static const size_t hrx_amdxdna_abi_header_length =
     offsetof(hrx_amdxdna_executable_run_t, abi_version) + sizeof(uint32_t);
 
@@ -121,7 +129,7 @@ static hrx_status_t hrx_amdxdna_validate_executable_create(
         "amdxdna executable parameter ABI header is truncated");
   }
   if (params->abi_version >
-      HRX_AMDXDNA_EXECUTABLE_CREATE_PARAMS_ABI_VERSION_1) {
+      HRX_AMDXDNA_EXECUTABLE_CREATE_PARAMS_ABI_VERSION_2) {
     return hrx_make_status(HRX_STATUS_UNIMPLEMENTED,
                            "unsupported amdxdna executable parameter ABI");
   }
@@ -151,6 +159,33 @@ static hrx_status_t hrx_amdxdna_validate_executable_create(
     if (params->xclbins[i].data_length > UINT32_MAX) {
       return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
                              "xclbin data is too large");
+    }
+  }
+  const bool has_xclbin_identities = hrx_amdxdna_record_has_field(
+      params->record_length,
+      hrx_amdxdna_create_params_xclbin_identities_record_length);
+  const size_t xclbin_identity_count =
+      has_xclbin_identities ? params->xclbin_identity_count : 0;
+  if (xclbin_identity_count != 0 &&
+      params->abi_version <
+          HRX_AMDXDNA_EXECUTABLE_CREATE_PARAMS_ABI_VERSION_2) {
+    return hrx_make_status(
+        HRX_STATUS_INVALID_ARGUMENT,
+        "xclbin identities require amdxdna executable parameter ABI version 2");
+  }
+  if (xclbin_identity_count != 0 &&
+      (!params->xclbin_identities ||
+       xclbin_identity_count != params->xclbin_count)) {
+    return hrx_make_status(
+        HRX_STATUS_INVALID_ARGUMENT,
+        "xclbin identities must correspond one-to-one with xclbins");
+  }
+  for (size_t i = 0; i < xclbin_identity_count; ++i) {
+    if (params->xclbin_identities[i].data_length !=
+        params->xclbins[i].data_length) {
+      return hrx_make_status(
+          HRX_STATUS_INVALID_ARGUMENT,
+          "xclbin identity length does not match xclbin data");
     }
   }
   const bool has_standalone_pdis = hrx_amdxdna_record_has_field(
@@ -836,8 +871,8 @@ static hrx_status_t hrx_amdxdna_xadx_serialize_reuse(
     goto cleanup;
   }
   if (*inout_capacity < executable_data_size) {
-    status = hrx_host_allocator_realloc(
-        host_allocator, executable_data_size, (void**)inout_data);
+    status = hrx_host_allocator_realloc(host_allocator, executable_data_size,
+                                        (void**)inout_data);
     if (!hrx_status_is_ok(status)) goto cleanup;
     *inout_capacity = executable_data_size;
   }
@@ -876,17 +911,11 @@ hrx_status_t hrx_amdxdna_xadx_serialize(
   return status;
 }
 
-hrx_status_t hrx_amdxdna_executable_create(
+#if defined(HRX_HAS_IREE_AMDXDNA_DRIVER)
+static hrx_status_t hrx_amdxdna_executable_create_uncached(
     hrx_device_t device, const hrx_amdxdna_executable_create_params_t* params,
     hrx_executable_t* executable) {
-  if (!device || !executable) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "device or executable is NULL");
-  }
-  *executable = NULL;
   hrx_host_allocator_t host_allocator = hrx_host_allocator_system();
-  iree_call_once(&hrx_amdxdna_serialization_workspace_once,
-                 hrx_amdxdna_serialization_workspace_initialize);
   iree_slim_mutex_lock(&hrx_amdxdna_serialization_workspace.mutex);
   size_t executable_data_size = 0;
   hrx_status_t status = hrx_amdxdna_xadx_serialize_reuse(
@@ -895,9 +924,148 @@ hrx_status_t hrx_amdxdna_executable_create(
   if (hrx_status_is_ok(status)) {
     status = hrx_executable_load_data(
         device, hrx_amdxdna_serialization_workspace.data, executable_data_size,
-        HRX_AMDXDNA_EXECUTABLE_TARGET_FAMILY,
-        HRX_AMDXDNA_EXECUTABLE_TARGET_KEY, executable);
+        HRX_AMDXDNA_EXECUTABLE_TARGET_FAMILY, HRX_AMDXDNA_EXECUTABLE_TARGET_KEY,
+        executable);
   }
   iree_slim_mutex_unlock(&hrx_amdxdna_serialization_workspace.mutex);
   return status;
 }
+
+static bool hrx_amdxdna_executable_cache_params(
+    const hrx_amdxdna_executable_create_params_t* params,
+    const hrx_amdxdna_executable_entry_point_t** out_entry_point,
+    const hrx_amdxdna_executable_run_t** out_run,
+    const hrx_amdxdna_xclbin_identity_t** out_xclbin_identity) {
+  if (params->abi_version <
+          HRX_AMDXDNA_EXECUTABLE_CREATE_PARAMS_ABI_VERSION_2 ||
+      !hrx_amdxdna_record_has_field(
+          params->record_length,
+          hrx_amdxdna_create_params_xclbin_identities_record_length) ||
+      params->xclbin_identity_count != params->xclbin_count ||
+      params->xclbin_count != 1 || params->entry_point_count != 1 ||
+      (hrx_amdxdna_record_has_field(
+           params->record_length,
+           hrx_amdxdna_create_params_pdis_record_length) &&
+       params->pdi_count != 0)) {
+    return false;
+  }
+  const hrx_amdxdna_executable_entry_point_t* entry_point =
+      params->entry_points;
+  if (entry_point->context_mode != HRX_AMDXDNA_CONTEXT_MODE_CREATE ||
+      entry_point->run_count != 1 ||
+      (hrx_amdxdna_record_has_field(
+           entry_point->record_length,
+           hrx_amdxdna_entry_point_control_parameters_record_length) &&
+       entry_point->control_parameter_count != 0) ||
+      entry_point->xclbin_ordinal >= params->xclbin_identity_count) {
+    return false;
+  }
+  const hrx_amdxdna_executable_run_t* run = entry_point->runs;
+  if (run->data_payload.data_length != 0 ||
+      (hrx_amdxdna_record_has_field(
+           run->record_length, hrx_amdxdna_run_pdi_relocations_record_length) &&
+       run->pdi_relocation_count != 0) ||
+      (hrx_amdxdna_record_has_field(
+           run->record_length,
+           hrx_amdxdna_run_control_parameter_relocations_record_length) &&
+       run->control_parameter_relocation_count != 0)) {
+    return false;
+  }
+  *out_entry_point = entry_point;
+  *out_run = run;
+  *out_xclbin_identity =
+      &params->xclbin_identities[entry_point->xclbin_ordinal];
+  return true;
+}
+
+hrx_status_t hrx_amdxdna_executable_create(
+    hrx_device_t device, const hrx_amdxdna_executable_create_params_t* params,
+    hrx_executable_t* executable) {
+  if (!device || !executable) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "device or executable is NULL");
+  }
+  *executable = NULL;
+  iree_call_once(&hrx_amdxdna_serialization_workspace_once,
+                 hrx_amdxdna_serialization_workspace_initialize);
+  hrx_status_t status = hrx_amdxdna_validate_executable_create(params);
+  if (!hrx_status_is_ok(status)) return status;
+
+  const hrx_amdxdna_executable_entry_point_t* entry_point = NULL;
+  const hrx_amdxdna_executable_run_t* run = NULL;
+  const hrx_amdxdna_xclbin_identity_t* xclbin_identity = NULL;
+  if (!hrx_amdxdna_executable_cache_params(params, &entry_point, &run,
+                                           &xclbin_identity)) {
+    return hrx_amdxdna_executable_create_uncached(device, params, executable);
+  }
+
+  hrx_amdxdna_executable_cache_descriptor_t descriptor;
+  if (!hrx_amdxdna_executable_cache_descriptor_initialize(
+          xclbin_identity, entry_point, run, &descriptor)) {
+    return hrx_amdxdna_executable_create_uncached(device, params, executable);
+  }
+  iree_slim_mutex_lock(&hrx_amdxdna_executable_cache_mutex);
+  hrx_amdxdna_executable_cache_s* cache = device->amdxdna_executable_cache;
+  if (!cache) {
+    status = hrx_host_allocator_malloc(hrx_host_allocator_system(),
+                                       sizeof(*cache), (void**)&cache);
+    if (hrx_status_is_ok(status)) {
+      hrx_amdxdna_executable_cache_initialize(
+          HRX_AMDXDNA_EXECUTABLE_CACHE_CAPACITY,
+          HRX_AMDXDNA_EXECUTABLE_CACHE_MAX_HOST_BYTES, cache);
+      device->amdxdna_executable_cache = cache;
+    } else {
+      hrx_status_ignore(status);
+      iree_slim_mutex_unlock(&hrx_amdxdna_executable_cache_mutex);
+      return hrx_amdxdna_executable_create_uncached(device, params, executable);
+    }
+  }
+
+  iree_hal_executable_t* cached_hal_executable =
+      hrx_amdxdna_executable_cache_lookup(cache, &descriptor);
+  if (cached_hal_executable) {
+    status =
+        hrx_executable_wrap_hal(device, cached_hal_executable, executable);
+    iree_slim_mutex_unlock(&hrx_amdxdna_executable_cache_mutex);
+    return status;
+  }
+
+  status = hrx_amdxdna_executable_create_uncached(device, params, executable);
+  if (!hrx_status_is_ok(status)) {
+    iree_slim_mutex_unlock(&hrx_amdxdna_executable_cache_mutex);
+    return status;
+  }
+
+  (void)hrx_amdxdna_executable_cache_insert(
+      cache, &descriptor, (*executable)->hal_executable);
+  iree_slim_mutex_unlock(&hrx_amdxdna_executable_cache_mutex);
+  return hrx_ok_status();
+}
+
+void hrx_amdxdna_executable_cache_clear(hrx_device_t device) {
+  if (!device || !device->amdxdna_executable_cache) return;
+  iree_call_once(&hrx_amdxdna_serialization_workspace_once,
+                 hrx_amdxdna_serialization_workspace_initialize);
+  iree_slim_mutex_lock(&hrx_amdxdna_executable_cache_mutex);
+  hrx_amdxdna_executable_cache_s* cache = device->amdxdna_executable_cache;
+  device->amdxdna_executable_cache = NULL;
+  hrx_amdxdna_executable_cache_deinitialize(cache);
+  hrx_host_allocator_free(hrx_host_allocator_system(), cache);
+  iree_slim_mutex_unlock(&hrx_amdxdna_executable_cache_mutex);
+}
+#else
+hrx_status_t hrx_amdxdna_executable_create(
+    hrx_device_t device, const hrx_amdxdna_executable_create_params_t* params,
+    hrx_executable_t* executable) {
+  (void)params;
+  if (!device || !executable) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "device or executable is NULL");
+  }
+  *executable = NULL;
+  return hrx_make_status(HRX_STATUS_UNIMPLEMENTED,
+                         "HRX was built without the amdxdna driver");
+}
+
+void hrx_amdxdna_executable_cache_clear(hrx_device_t device) { (void)device; }
+#endif  // HRX_HAS_IREE_AMDXDNA_DRIVER

@@ -97,9 +97,9 @@ static iree_status_t hrx_executable_snapshot_export_names(
   return iree_ok_status();
 }
 
-static hrx_status_t hrx_executable_wrap(hrx_device_t device,
-                                        iree_hal_executable_t* hal_executable,
-                                        hrx_executable_t* executable) {
+hrx_status_t hrx_executable_wrap_hal(hrx_device_t device,
+                                     iree_hal_executable_t* hal_executable,
+                                     hrx_executable_t* executable) {
   iree_host_size_t export_count = 0;
   const char** export_names = NULL;
   iree_status_t status = hrx_executable_snapshot_export_names(
@@ -174,7 +174,7 @@ hrx_status_t hrx_executable_load_data(hrx_device_t device,
     return hrx_status_from_iree(status);
   }
 
-  return hrx_executable_wrap(device, hal_executable, executable);
+  return hrx_executable_wrap_hal(device, hal_executable, executable);
 }
 
 hrx_status_t hrx_executable_load_file(hrx_device_t device, const char* path,

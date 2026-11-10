@@ -20,6 +20,8 @@ package(
 
 HRX_SRCS = [
     "allocator.c",
+    "amdxdna_executable_cache.c",
+    "amdxdna_executable_cache.h",
     "amdxdna_executable.c",
     "buffer.c",
     "buffer_table.c",
