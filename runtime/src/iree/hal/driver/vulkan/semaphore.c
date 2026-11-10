@@ -28,6 +28,9 @@ typedef struct iree_hal_vulkan_semaphore_t {
   // Native Vulkan timeline semaphore handle.
   VkSemaphore handle;
 
+  // Once exposed, native producers may advance the timeline outside the HAL.
+  iree_atomic_int32_t handle_exposed;
+
   // Creation flags controlling synchronization behavior.
   iree_hal_semaphore_flags_t flags;
 
@@ -169,6 +172,7 @@ iree_status_t iree_hal_vulkan_semaphore_handle(
   IREE_ASSERT_ARGUMENT(out_handle);
   iree_hal_vulkan_semaphore_t* semaphore =
       iree_hal_vulkan_semaphore_cast(base_semaphore);
+  iree_atomic_store(&semaphore->handle_exposed, 1, iree_memory_order_release);
   *out_handle = semaphore->handle;
   return iree_ok_status();
 }
@@ -284,6 +288,14 @@ static uint64_t iree_hal_vulkan_semaphore_query(
       &base_semaphore->failure_status, iree_memory_order_acquire);
   if (!iree_status_is_ok(failure_status)) {
     return iree_hal_status_as_semaphore_failure(failure_status);
+  }
+
+  // Until a native caller obtains the handle, HAL publication owns every
+  // timeline update. Native queue dependencies use their private queue epochs.
+  if (!iree_atomic_load(&semaphore->handle_exposed,
+                        iree_memory_order_acquire)) {
+    return (uint64_t)iree_atomic_load(&base_semaphore->timeline_value,
+                                      iree_memory_order_acquire);
   }
 
   uint64_t value = 0;

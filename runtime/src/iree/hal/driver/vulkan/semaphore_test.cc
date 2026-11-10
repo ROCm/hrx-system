@@ -28,6 +28,8 @@ struct NativeSemaphore {
   std::atomic<uint64_t> value{0};
   // Number of native signal calls, including terminal failure publication.
   std::atomic<int> signal_count{0};
+  // Number of native queries made after timeline publication or handle export.
+  std::atomic<int> query_count{0};
   // Whether native calls violated strictly increasing signal order.
   std::atomic<bool> regressed{false};
   // Normal signal result; failure-sentinel signals always succeed.
@@ -56,7 +58,9 @@ CaptureDestroySemaphore(VkDevice, VkSemaphore, const VkAllocationCallbacks*) {}
 
 static VKAPI_ATTR VkResult VKAPI_CALL CaptureGetSemaphoreCounterValue(
     VkDevice device, VkSemaphore, uint64_t* out_value) {
-  *out_value = reinterpret_cast<NativeSemaphore*>(device)->value.load();
+  auto* native = reinterpret_cast<NativeSemaphore*>(device);
+  ++native->query_count;
+  *out_value = native->value.load();
   return VK_SUCCESS;
 }
 
@@ -122,20 +126,44 @@ class VulkanSemaphoreTest : public ::testing::Test {
 };
 
 TEST_F(VulkanSemaphoreTest, QueryDoesNotPublishInFlightHostSignal) {
-  native_.paused_value = 1;
-  std::thread signal_thread([&]() {
-    IREE_EXPECT_OK(iree_hal_semaphore_signal(semaphore_, 1, nullptr));
-  });
-  native_.signal_entered.acquire();
+  for (uint64_t next_value : {1, 2}) {
+    if (next_value == 2) {
+      VkSemaphore handle = VK_NULL_HANDLE;
+      IREE_ASSERT_OK(iree_hal_vulkan_semaphore_handle(semaphore_, &handle));
+    }
+    native_.paused_value = next_value;
+    std::thread signal_thread([&]() {
+      IREE_EXPECT_OK(
+          iree_hal_semaphore_signal(semaphore_, next_value, nullptr));
+    });
+    native_.signal_entered.acquire();
 
+    uint64_t value = UINT64_MAX;
+    IREE_EXPECT_OK(iree_hal_semaphore_query(semaphore_, &value));
+    EXPECT_EQ(value, next_value - 1);
+
+    native_.signal_resume.release();
+    signal_thread.join();
+    IREE_EXPECT_OK(iree_hal_semaphore_query(semaphore_, &value));
+    EXPECT_EQ(value, next_value);
+  }
+}
+
+TEST_F(VulkanSemaphoreTest, QueryUsesPublishedValueUntilNativeHandleExposed) {
   uint64_t value = UINT64_MAX;
-  IREE_EXPECT_OK(iree_hal_semaphore_query(semaphore_, &value));
+  IREE_ASSERT_OK(iree_hal_semaphore_query(semaphore_, &value));
   EXPECT_EQ(value, 0u);
-
-  native_.signal_resume.release();
-  signal_thread.join();
-  IREE_EXPECT_OK(iree_hal_semaphore_query(semaphore_, &value));
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(semaphore_, 1, nullptr));
+  IREE_ASSERT_OK(iree_hal_semaphore_query(semaphore_, &value));
   EXPECT_EQ(value, 1u);
+  EXPECT_EQ(native_.query_count, 0);
+
+  VkSemaphore handle = VK_NULL_HANDLE;
+  IREE_ASSERT_OK(iree_hal_vulkan_semaphore_handle(semaphore_, &handle));
+  EXPECT_TRUE(handle != VK_NULL_HANDLE);
+  IREE_ASSERT_OK(iree_hal_semaphore_query(semaphore_, &value));
+  EXPECT_EQ(value, 1u);
+  EXPECT_EQ(native_.query_count, 1);
 }
 
 TEST_F(VulkanSemaphoreTest, NativeProducerIsIndependentOfFrontierCapacity) {
@@ -340,6 +368,8 @@ TEST_F(VulkanSemaphoreTest, NativeObservationDispatchesPendingTimepoint) {
       reinterpret_cast<iree_async_semaphore_t*>(semaphore_), 1, &timepoint));
 
   // The public native handle allows externally synchronized native producers.
+  VkSemaphore handle = VK_NULL_HANDLE;
+  IREE_ASSERT_OK(iree_hal_vulkan_semaphore_handle(semaphore_, &handle));
   native_.value = 1;
   uint64_t value = 0;
   IREE_ASSERT_OK(iree_hal_semaphore_query(semaphore_, &value));
