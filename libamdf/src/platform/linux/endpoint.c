@@ -15,12 +15,16 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/sysmacros.h>
+#include <unistd.h>
 
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/pci.h"
 #include "libamdf/src/platform/linux/dxg/endpoint.h"
 #include "libamdf/src/platform/linux/file.h"
+
+enum { AMDF_LINUX_DEVICE_PATH_CAPACITY = 64 };
 
 // Sysfs attributes are bounded single records. A short read is their complete
 // value; consuming the trailing newline is part of parsing each attribute.
@@ -194,6 +198,7 @@ amdf_status_t amdf_platform_endpoint_enumerate(
 
   const char* classes[] = {"class/drm", "class/accel"};
   const char* prefixes[] = {"renderD", "accel"};
+  const char* device_directories[] = {"/dev/dri", "/dev/accel"};
   uint32_t count = 0;
   amdf_status_t status = AMDF_STATUS_OK;
   for (size_t class_index = 0; amdf_status_is_ok(status) && class_index < 2;
@@ -230,6 +235,26 @@ amdf_status_t amdf_platform_endpoint_enumerate(
           entry->d_name[prefix_length] == 0 ||
           strspn(entry->d_name + prefix_length, "0123456789") !=
               strlen(entry->d_name + prefix_length)) {
+        continue;
+      }
+      char device_path[AMDF_LINUX_DEVICE_PATH_CAPACITY];
+      const int path_length =
+          snprintf(device_path, sizeof(device_path), "%s/%s",
+                   device_directories[class_index], entry->d_name);
+      if (path_length < 0 || (size_t)path_length >= sizeof(device_path)) {
+        status = amdf_linux_error(EOVERFLOW);
+        break;
+      }
+      // Native access checks include device cgroups without invoking open.
+      // Use faccessat2 directly: older libc AT_EACCESS emulation checks only
+      // mode bits. Only a denial hides metadata; other failures remain an
+      // explicit activation diagnostic (including an absent /dev namespace).
+      long access_result;
+      do {
+        access_result = syscall(SYS_faccessat2, AT_FDCWD, device_path,
+                                R_OK | W_OK, AT_EACCESS);
+      } while (access_result < 0 && errno == EINTR);
+      if (access_result < 0 && (errno == EACCES || errno == EPERM)) {
         continue;
       }
       int node =
@@ -282,8 +307,6 @@ amdf_status_t amdf_platform_endpoint_enumerate(
   amdf_free(instance->host_allocator, staged_summaries);
   return status;
 }
-
-enum { AMDF_LINUX_DEVICE_PATH_CAPACITY = 64 };
 
 // PCI attachment may name a memory-only NUMA node. CPU affinity requires an
 // online CPU at that node; sysfs cpulist is already filtered by the kernel's

@@ -582,7 +582,10 @@ static amdf_status_t amdf_gpu_kfd_read_memory_peers(
     snprintf(path, sizeof(path), "%u/gpu_id", link.destination);
     uint32_t gpu_id = 0;
     status = amdf_gpu_kfd_read_number(nodes, path, &gpu_id);
-    if (amdf_status_is_ok(status) && gpu_id != 0) {
+    if (status == amdf_linux_error(EPERM)) {
+      // Backing outside the process's device cgroup is not a peer route.
+      status = AMDF_STATUS_OK;
+    } else if (amdf_status_is_ok(status) && gpu_id != 0) {
       topology->memory_peers.gpu_ids[topology->memory_peers.count++] = gpu_id;
     }
   }
@@ -607,6 +610,11 @@ static amdf_status_t amdf_gpu_kfd_read_host_access(
       char path[64];
       snprintf(path, sizeof(path), "%u/gpu_id", link.destination);
       status = amdf_gpu_kfd_read_number(nodes, path, &gpu_id);
+      if (status == amdf_linux_error(EPERM)) {
+        // CPU nodes remain visible. A denied GPU is not a zero-ID CPU route.
+        status = AMDF_STATUS_OK;
+        continue;
+      }
     }
     if (amdf_status_is_ok(status) && gpu_id == 0) {
       ++cpu_link_count;
@@ -783,7 +791,10 @@ amdf_status_t amdf_gpu_kfd_topology_initialize(
     }
     uint32_t gpu_id = 0;
     status = amdf_gpu_kfd_read_number(node, "gpu_id", &gpu_id);
-    if (amdf_status_is_ok(status) && gpu_id != 0) {
+    if (status == amdf_linux_error(EPERM)) {
+      // KFD denies gpu_id reads for GPUs excluded by the device cgroup.
+      status = AMDF_STATUS_OK;
+    } else if (amdf_status_is_ok(status) && gpu_id != 0) {
       uint32_t io_link_count = 0;
       status = amdf_gpu_kfd_read_node(node, endpoint, &topology, &io_link_count,
                                       &found);
