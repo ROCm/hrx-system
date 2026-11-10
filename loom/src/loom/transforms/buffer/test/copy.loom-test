@@ -154,3 +154,119 @@ func.def @bounded_dynamic(%source: buffer, %target: buffer, %length: offset) {
   }
   func.return
 }
+
+// ====
+// RUN: pass target=amdgpu:gfx1100 target-legalize{mode=final},canonicalize,dce
+
+// Memory transfer widths do not truncate the physical byte-count carrier.
+// The mask producers carry the bounds and divisibility of both word tails.
+func.def @wide_dynamic(%source: buffer, %target: buffer, %length: offset) {
+  %aligned_source = buffer.assume.alignment %source {minimum_alignment = 4} : buffer
+  %aligned_target = buffer.assume.alignment %target {minimum_alignment = 4} : buffer
+  %origin = index.constant 0 : offset
+  buffer.copy %aligned_source[%origin], %aligned_target[%origin], %length
+  func.return
+}
+
+// ----
+func.def @wide_dynamic(%source: buffer, %target: buffer, %length: offset) {
+  %aligned_source = buffer.assume.alignment %source {minimum_alignment = 4} : buffer
+  %aligned_target = buffer.assume.alignment %target {minimum_alignment = 4} : buffer
+  %6 = index.constant 0 : offset
+  %7 = index.cast %length : offset to i64
+  %8 = scalar.constant -4 : i64
+  %9 = scalar.andi %7, %8 : i64
+  %10 = index.cast %9 : i64 to offset
+  %11 = index.constant 4 : offset
+  scf.for %12 = [%6 to %10 step %11] {
+    %14 = buffer.view %aligned_source[%12] : buffer -> view<1xi32, align(1)>
+    %15 = view.load %14[0] : view<1xi32, align(1)> -> i32
+    %17 = buffer.view %aligned_target[%12] : buffer -> view<1xi32, align(1)>
+    view.store %15, %17[0] : i32, view<1xi32, align(1)>
+  }
+  %18 = index.cast %length : offset to i64
+  %19 = scalar.constant -2 : i64
+  %20 = scalar.andi %18, %19 : i64
+  %21 = index.cast %20 : i64 to offset
+  %22 = index.cmp ult, %10, %21 : offset
+  scf.if %22 {
+    %32 = index.assume %10 [lt(%10, %21)] : offset
+    %24 = buffer.view %aligned_source[%32] : buffer -> view<1xi16, align(1)>
+    %25 = view.load %24[0] : view<1xi16, align(1)> -> i16
+    %27 = buffer.view %aligned_target[%32] : buffer -> view<1xi16, align(1)>
+    view.store %25, %27[0] : i16, view<1xi16, align(1)>
+  }
+  %28 = index.cmp ult, %21, %length : offset
+  scf.if %28 {
+    %33 = index.assume %21 [lt(%21, %length)] : offset
+    %30 = buffer.load.i8.u %aligned_source[%33]
+    buffer.store.i8 %30, %aligned_target[%33]
+  }
+  func.return
+}
+
+// ====
+// RUN: pass target=spirv:vulkan1.3+bda target-legalize{mode=final},canonicalize,dce
+
+// An arithmetic-derived word count has no byte suffix on a word-only profile.
+func.def @whole_words(%source: buffer, %target: buffer, %word_count: i32) {
+  %wide_count = scalar.extui %word_count : i32 to i64
+  %byte_shift = scalar.constant 2 : i64
+  %wide_bytes = scalar.shli %wide_count, %byte_shift : i64
+  %length = index.cast %wide_bytes : i64 to offset
+  %aligned_source = buffer.assume.alignment %source {minimum_alignment = 4} : buffer
+  %aligned_target = buffer.assume.alignment %target {minimum_alignment = 4} : buffer
+  %origin = index.constant 0 : offset
+  buffer.copy %aligned_source[%origin], %aligned_target[%origin], %length
+  func.return
+}
+
+// ----
+func.def @whole_words(%source: buffer, %target: buffer, %word_count: i32) {
+  %wide_count = scalar.extui %word_count : i32 to i64
+  %byte_shift = scalar.constant 2 : i64
+  %wide_bytes = scalar.shli %wide_count, %byte_shift : i64
+  %length = index.cast %wide_bytes : i64 to offset
+  %aligned_source = buffer.assume.alignment %source {minimum_alignment = 4} : buffer
+  %aligned_target = buffer.assume.alignment %target {minimum_alignment = 4} : buffer
+  %10 = index.constant 0 : offset
+  %11 = index.constant 4 : offset
+  scf.for %12 = [%10 to %length step %11] {
+    %14 = buffer.view %aligned_source[%12] : buffer -> view<1xi32, align(1)>
+    %15 = view.load %14[0] : view<1xi32, align(1)> -> i32
+    %17 = buffer.view %aligned_target[%12] : buffer -> view<1xi32, align(1)>
+    view.store %15, %17[0] : i32, view<1xi32, align(1)>
+  }
+  func.return
+}
+
+// ====
+// RUN: pass target=x86:avx512 target-legalize{mode=final},canonicalize,dce
+
+// A complete vector span needs no smaller transfer widths.
+func.def @whole_vectors(%source: buffer, %target: buffer, %vector_count: i32) {
+  %wide_count = scalar.extui %vector_count : i32 to i64
+  %byte_shift = scalar.constant 6 : i64
+  %wide_bytes = scalar.shli %wide_count, %byte_shift : i64
+  %length = index.cast %wide_bytes : i64 to offset
+  %origin = index.constant 0 : offset
+  buffer.copy %source[%origin], %target[%origin], %length
+  func.return
+}
+
+// ----
+func.def @whole_vectors(%source: buffer, %target: buffer, %vector_count: i32) {
+  %wide_count = scalar.extui %vector_count : i32 to i64
+  %byte_shift = scalar.constant 6 : i64
+  %wide_bytes = scalar.shli %wide_count, %byte_shift : i64
+  %length = index.cast %wide_bytes : i64 to offset
+  %8 = index.constant 0 : offset
+  %9 = index.constant 64 : offset
+  scf.for %10 = [%8 to %length step %9] {
+    %12 = buffer.view %source[%10] : buffer -> view<16xi32, align(1)>
+    %13 = vector.load %12[0] : view<16xi32, align(1)> -> vector<16xi32>
+    %15 = buffer.view %target[%10] : buffer -> view<16xi32, align(1)>
+    vector.store %13, %15[0] : vector<16xi32>, view<16xi32, align(1)>
+  }
+  func.return
+}

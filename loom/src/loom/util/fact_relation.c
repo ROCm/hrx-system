@@ -563,7 +563,7 @@ static iree_status_t loom_value_fact_relation_union_roots(
       source.excluded_literal_equal, &inout_target->excluded_literal_equal);
 }
 
-// Composes either value < upper or value >= lower by sharing the endpoint's
+// Composes upper or inclusive lower bounds by sharing the endpoint's
 // exclusion sets. Rebuilding each counterpart independently would retain a
 // quadratic number of intermediate sets for a chain of nested bounds.
 static iree_status_t loom_value_fact_relation_add_bound(
@@ -588,14 +588,22 @@ static iree_status_t loom_value_fact_relation_add_bound(
       endpoint.excluded[LOOM_INTEGER_ORDER_OUTCOME_GREATER];
   const loom_value_fact_relation_root_t not_less =
       endpoint.excluded[LOOM_INTEGER_ORDER_OUTCOME_LESS];
-  const loom_value_fact_relation_roots_t composed =
-      outcomes == LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS
-          ? (loom_value_fact_relation_roots_t){
-                .excluded = {contradictory, not_greater, not_greater},
-            }
-          : (loom_value_fact_relation_roots_t){
-                .excluded = {not_less, strictly_greater, contradictory},
-            };
+  loom_value_fact_relation_roots_t composed;
+  if (outcomes & LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS) {
+    loom_value_fact_relation_root_t excludes_equal = not_greater;
+    if (outcomes & LOOM_INTEGER_ORDER_OUTCOME_BIT_EQUAL) {
+      IREE_RETURN_IF_ERROR(loom_value_fact_relation_root_intersection(
+          table, endpoint.excluded[LOOM_INTEGER_ORDER_OUTCOME_EQUAL],
+          not_greater, &excludes_equal));
+    }
+    composed = (loom_value_fact_relation_roots_t){
+        .excluded = {contradictory, excludes_equal, not_greater},
+    };
+  } else {
+    composed = (loom_value_fact_relation_roots_t){
+        .excluded = {not_less, strictly_greater, contradictory},
+    };
+  }
   IREE_RETURN_IF_ERROR(
       loom_value_fact_relation_union_roots(table, composed, roots));
   IREE_RETURN_IF_ERROR(loom_value_fact_relation_add_exclusions(
@@ -619,18 +627,30 @@ iree_status_t loom_value_fact_integer_relations_define_counted_range(
                                                        &changed);
 }
 
-iree_status_t loom_value_fact_integer_relations_define_strict_upper_bound(
+iree_status_t loom_value_fact_integer_relations_define_upper_bounds(
     loom_value_fact_table_t* table, loom_value_id_t value,
-    loom_value_id_t upper_bound, const loom_value_facts_t* value_facts,
-    const loom_value_facts_t* upper_facts, bool* inout_changed) {
+    const loom_value_id_t* upper_bounds, const loom_value_facts_t* upper_facts,
+    iree_host_size_t bound_count, loom_symbolic_integer_relation_t relation,
+    const loom_value_facts_t* value_facts, bool* inout_changed) {
   loom_value_fact_relation_roots_t roots = {0};
-  if (upper_bound != LOOM_VALUE_ID_INVALID &&
-      (value_facts->range_hi >= upper_facts->range_lo ||
-       !loom_value_fact_relation_roots_empty(
-           loom_value_fact_integer_relations_snapshot(table, upper_bound)))) {
-    IREE_RETURN_IF_ERROR(loom_value_fact_relation_add_bound(
-        table, &roots, upper_bound, LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS));
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < bound_count && iree_status_is_ok(status);
+       ++i) {
+    if (upper_bounds[i] == LOOM_VALUE_ID_INVALID) {
+      continue;
+    }
+    const bool overlaps = relation == LOOM_SYMBOLIC_INTEGER_RELATION_LT
+                              ? value_facts->range_hi >= upper_facts[i].range_lo
+                              : value_facts->range_hi > upper_facts[i].range_lo;
+    if (overlaps || !loom_value_fact_relation_roots_empty(
+                        loom_value_fact_integer_relations_snapshot(
+                            table, upper_bounds[i]))) {
+      status = loom_value_fact_relation_add_bound(
+          table, &roots, upper_bounds[i],
+          loom_symbolic_integer_relation_outcomes(relation));
+    }
   }
+  IREE_RETURN_IF_ERROR(status);
   bool changed = false;
   IREE_RETURN_IF_ERROR(loom_value_fact_integer_relations_publish_one(
       table, value, roots, &changed));

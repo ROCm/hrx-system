@@ -519,3 +519,86 @@ func.def @bounded_left_and_signed_shifts(%raw: i32, %raw_amount: i32) -> (i64, i
   %divisor = scalar.constant 2 : i64
   func.return %left_lo, %left_hi, %right_lo, %right_hi, %divisor : i64, i64, i64, i64, i64
 }
+
+// ====
+
+// The mask retains the dynamic bound, including through a lossless widening.
+func.def @masked_lookup_bounds(%input: i8, %limit: i8, %mask: i8) -> (i1, i1, i1) {
+  %bounded = scalar.assume %input [range(%input, 0, 127), lt(%input, %limit)] : i8
+  %masked = scalar.andi %mask, %bounded : i8
+  %wide = scalar.extui %masked : i8 to i64
+  %wide_limit = scalar.extsi %limit : i8 to i64
+  %source_bound = scalar.cmpi sle, %masked, %bounded : i8
+  %strict_limit = scalar.cmpi slt, %masked, %limit : i8
+  %wide_bound = scalar.cmpi slt, %wide, %wide_limit : i64
+  func.return %source_bound, %strict_limit, %wide_bound : i1, i1, i1
+}
+
+// ----
+func.def @masked_lookup_bounds(%input: i8, %limit: i8, %mask: i8) -> (i1, i1, i1) {
+  %source_bound = scalar.constant true : i1
+  %strict_limit = scalar.constant true : i1
+  %wide_bound = scalar.constant true : i1
+  func.return %source_bound, %strict_limit, %wide_bound : i1, i1, i1
+}
+
+// ====
+
+// Clearing low bits preserves sign. Clearing the sign bit changes signed order.
+func.def @mask_sign_boundaries(%input: i16) -> (i1, i1, i1) {
+  %low_clear = scalar.constant -8 : i16
+  %sign_clear = scalar.constant 32767 : i16
+  %aligned = scalar.andi %input, %low_clear : i16
+  %magnitude_bits = scalar.andi %input, %sign_clear : i16
+  %aligned_bound = scalar.cmpi sle, %aligned, %input : i16
+  %unproven_signed = scalar.cmpi sle, %magnitude_bits, %input : i16
+  %unproven_unsigned = scalar.cmpi ule, %aligned, %input : i16
+  func.return %aligned_bound, %unproven_signed, %unproven_unsigned : i1, i1, i1
+}
+
+// ----
+func.def @mask_sign_boundaries(%input: i16) -> (i1, i1, i1) {
+  %low_clear = scalar.constant -8 : i16
+  %sign_clear = scalar.constant 32767 : i16
+  %aligned = scalar.andi %input, %low_clear : i16
+  %magnitude_bits = scalar.andi %input, %sign_clear : i16
+  %aligned_bound = scalar.constant true : i1
+  %unproven_signed = scalar.cmpi sle, %magnitude_bits, %input : i16
+  %unproven_unsigned = scalar.cmpi ule, %aligned, %input : i16
+  func.return %aligned_bound, %unproven_signed, %unproven_unsigned : i1, i1, i1
+}
+
+// ====
+
+func.def @both_mask_operands_bound(%left: i32, %right: i32) -> (i1, i1) {
+  %a = scalar.assume %left [range(%left, 0, 2147483647)] : i32
+  %b = scalar.assume %right [range(%right, 0, 2147483647)] : i32
+  %masked = scalar.andi %a, %b : i32
+  %left_bound = scalar.cmpi ule, %masked, %a : i32
+  %right_bound = scalar.cmpi ule, %masked, %b : i32
+  func.return %left_bound, %right_bound : i1, i1
+}
+
+// ----
+func.def @both_mask_operands_bound(%left: i32, %right: i32) -> (i1, i1) {
+  %left_bound = scalar.constant true : i1
+  %right_bound = scalar.constant true : i1
+  func.return %left_bound, %right_bound : i1, i1
+}
+
+// ====
+
+// Boolean facts use [0,1]; signed i1 comparisons reverse that numeric order.
+func.def @boolean_mask_order(%left: i1, %right: i1) -> (i1, i1) {
+  %masked = scalar.andi %left, %right : i1
+  %unsigned_bound = scalar.cmpi ule, %masked, %left : i1
+  %signed_bound = scalar.cmpi sge, %masked, %right : i1
+  func.return %unsigned_bound, %signed_bound : i1, i1
+}
+
+// ----
+func.def @boolean_mask_order(%left: i1, %right: i1) -> (i1, i1) {
+  %unsigned_bound = scalar.constant true : i1
+  %signed_bound = scalar.constant true : i1
+  func.return %unsigned_bound, %signed_bound : i1, i1
+}

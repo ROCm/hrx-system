@@ -202,3 +202,106 @@ func.def @symbolic_wrap_barrier_targetless(%input: offset) -> (i1) {
   %order = index.cmp ult, %wrapped, %bounded : offset
   func.return %order : i1
 }
+
+// ====
+
+// Full-carrier alignment retains its dynamic upper bound across both casts.
+test.target<low_core> @offset64 {index_bitwidth = 32, offset_bitwidth = 64}
+
+func.def target(@offset64) @aligned_endpoint(%length: offset) -> (i64, i64, i1, i1) {
+  %bits = index.cast %length : offset to i64
+  %mask = scalar.constant -64 : i64
+  %masked = scalar.andi %bits, %mask : i64
+  %end = index.cast %masked : i64 to offset
+  %lower = test.fact_range_lo %end : offset -> i64
+  %divisor = test.fact_divisor %end : offset -> i64
+  %bounded = index.cmp ule, %end, %length : offset
+  %origin = index.constant 0 : offset
+  %nonnegative = index.cmp sge, %end, %origin : offset
+  func.return %lower, %divisor, %bounded, %nonnegative : i64, i64, i1, i1
+}
+
+// ----
+test.target<low_core> @offset64 {index_bitwidth = 32, offset_bitwidth = 64}
+
+func.def target(@offset64) @aligned_endpoint(%length: offset) -> (i64, i64, i1, i1) {
+  %lower = scalar.constant 0 : i64
+  %divisor = scalar.constant 64 : i64
+  %bounded = scalar.constant true : i1
+  %nonnegative = scalar.constant true : i1
+  func.return %lower, %divisor, %bounded, %nonnegative : i64, i64, i1, i1
+}
+
+// ====
+
+func.def @logical_mask_bound(%coordinate: index, %limit: index, %mask: index) -> (i1, i1) {
+  %bounded = index.assume %coordinate [ge(%coordinate, 0), lt(%coordinate, %limit)] : index
+  %masked = index.andi %bounded, %mask : index
+  %input_bound = index.cmp sle, %masked, %bounded : index
+  %limit_bound = index.cmp slt, %masked, %limit : index
+  func.return %input_bound, %limit_bound : i1, i1
+}
+
+// ----
+func.def @logical_mask_bound(%coordinate: index, %limit: index, %mask: index) -> (i1, i1) {
+  %input_bound = scalar.constant true : i1
+  %limit_bound = scalar.constant true : i1
+  func.return %input_bound, %limit_bound : i1, i1
+}
+
+// ====
+
+// The upper half of a 32-bit offset needs a wider signed arithmetic carrier.
+test.target<low_core> @offset32 {index_bitwidth = 32, offset_bitwidth = 32}
+
+func.def target(@offset32) @unsigned_offset_endpoint(%raw_length: i32) -> (i64, i64, i1) {
+  %length = index.cast %raw_length : i32 to offset
+  %bits = index.cast %length : offset to i64
+  %mask = scalar.constant -64 : i64
+  %masked = scalar.andi %bits, %mask : i64
+  %end = index.cast %masked : i64 to offset
+  %lower = test.fact_range_lo %end : offset -> i64
+  %divisor = test.fact_divisor %end : offset -> i64
+  %bounded = index.cmp ule, %end, %length : offset
+  func.return %lower, %divisor, %bounded : i64, i64, i1
+}
+
+// ----
+test.target<low_core> @offset32 {index_bitwidth = 32, offset_bitwidth = 32}
+
+func.def target(@offset32) @unsigned_offset_endpoint(%raw_length: i32) -> (i64, i64, i1) {
+  %lower = scalar.constant 0 : i64
+  %divisor = scalar.constant 64 : i64
+  %bounded = scalar.constant true : i1
+  func.return %lower, %divisor, %bounded : i64, i64, i1
+}
+
+// ====
+
+// Native rounding constrains its result, not the source parameter's domain.
+test.target<low_core> @offset32 {index_bitwidth = 32, offset_bitwidth = 32}
+
+func.def target(@offset32) @native_offset_endpoint(%length: offset) -> (i64, i64, i64, i64, i1) {
+  %bits = index.cast %length : offset to i64
+  %mask = scalar.constant 4294967232 : i64
+  %masked = scalar.andi %bits, %mask : i64
+  %end = index.cast %masked : i64 to offset
+  %input_upper = test.fact_range_hi %length : offset -> i64
+  %lower = test.fact_range_lo %end : offset -> i64
+  %upper = test.fact_range_hi %end : offset -> i64
+  %divisor = test.fact_divisor %end : offset -> i64
+  %bounded = scalar.cmpi sle, %masked, %bits : i64
+  func.return %input_upper, %lower, %upper, %divisor, %bounded : i64, i64, i64, i64, i1
+}
+
+// ----
+test.target<low_core> @offset32 {index_bitwidth = 32, offset_bitwidth = 32}
+
+func.def target(@offset32) @native_offset_endpoint(%length: offset) -> (i64, i64, i64, i64, i1) {
+  %input_upper = scalar.constant 9223372036854775807 : i64
+  %lower = scalar.constant 0 : i64
+  %upper = scalar.constant 4294967232 : i64
+  %divisor = scalar.constant 64 : i64
+  %bounded = scalar.constant true : i1
+  func.return %input_upper, %lower, %upper, %divisor, %bounded : i64, i64, i64, i64, i1
+}
