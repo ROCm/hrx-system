@@ -269,6 +269,8 @@ typedef enum loom_low_schedule_pressure_progress_kind_e {
   LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NON_GROWING = 4,
   // Candidate advances a bounded constrained-storage completion chain.
   LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_CONSTRAINED_COMPLETION = 5,
+  // Candidate and its unlocked descriptor frontier reduce live register units.
+  LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_RETIRING_FRONTIER = 6,
 } loom_low_schedule_pressure_progress_kind_t;
 
 typedef enum loom_low_schedule_pressure_risk_e {

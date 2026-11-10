@@ -42,6 +42,8 @@ typedef struct loom_low_schedule_pressure_demand_t {
   uint32_t opened_constrained_completion_capacity;
   // Candidate properties discovered while traversing the ready frontier.
   uint16_t candidate_flags;
+  // Net pressure progress of the candidate and its unlocked descriptors.
+  loom_low_schedule_pressure_progress_kind_t frontier_progress;
 } loom_low_schedule_pressure_demand_t;
 
 static uint32_t loom_low_schedule_positive_delta_u32(uint32_t lhs,
@@ -1252,7 +1254,8 @@ void loom_low_schedule_pressure_initialize_current_cliff_penalty(
       score.persistent_pressure_cliff_penalty;
 }
 
-static bool loom_low_schedule_descriptor_frontier_is_non_growing(
+static loom_low_schedule_pressure_progress_kind_t
+loom_low_schedule_descriptor_frontier_progress(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state,
     uint32_t candidate_node_index, uint16_t candidate_storage_relation_count,
@@ -1361,7 +1364,12 @@ static bool loom_low_schedule_descriptor_frontier_is_non_growing(
       iree_math_saturating_add_u64(candidate_killed_units, killed_units);
   const uint64_t total_produced_units =
       iree_math_saturating_add_u64(candidate_produced_units, produced_units);
-  return total_produced_units <= total_killed_units;
+  if (total_produced_units < total_killed_units) {
+    return LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_RETIRING_FRONTIER;
+  }
+  return total_produced_units == total_killed_units
+             ? LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_FRONTIER
+             : LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE;
 }
 
 void loom_low_schedule_pressure_publish_unlock_consumer(
@@ -1607,10 +1615,11 @@ loom_low_schedule_score_candidate_pressure_demand(
       consumer_node =
           pressure_state->unlocks.descriptor_next_nodes[consumer_node];
     }
-    if (loom_low_schedule_descriptor_frontier_is_non_growing(
-            state, pressure_state, node_index, storage_relation_count,
-            killed_live_units, produced_live_units, descriptor_consumers,
-            consumer_count, &demand.opened_constrained_completion_capacity)) {
+    demand.frontier_progress = loom_low_schedule_descriptor_frontier_progress(
+        state, pressure_state, node_index, storage_relation_count,
+        killed_live_units, produced_live_units, descriptor_consumers,
+        consumer_count, &demand.opened_constrained_completion_capacity);
+    if (demand.frontier_progress != LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE) {
       demand.candidate_flags |=
           LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_NON_GROWING_DESCRIPTOR;
       demand.non_growing_descriptor_latency_cycles =
@@ -1940,7 +1949,8 @@ void loom_low_schedule_pressure_score_candidate(
   }
   if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
     out_score->pressure_progress_kind =
-        loom_low_schedule_classify_candidate_pressure_progress(out_score);
+        loom_low_schedule_classify_candidate_pressure_progress(
+            out_score, pressure_demand.frontier_progress);
     out_score->pressure_risk =
         loom_low_schedule_classify_candidate_pressure_risk(
             out_score, pressure_state->current_persistent_pressure_penalty);
