@@ -493,6 +493,12 @@ iree_status_t loom_module_add_encoding(loom_module_t* module,
                                        const loom_encoding_t* encoding,
                                        uint16_t* out_encoding_id);
 
+// Looks up a canonical display alias without modifying the module. Returns
+// the encoding's 1-based ID, or zero when the name has no canonical owner.
+// Alternate source spellings are owned by the parser, not this index.
+uint16_t loom_module_find_encoding_alias(const loom_module_t* module,
+                                         loom_string_id_t alias_id);
+
 // Returns the encoding at a 1-based index, or NULL if out of range.
 static inline const loom_encoding_t* loom_module_encoding(
     const loom_module_t* module, uint16_t encoding_id) {

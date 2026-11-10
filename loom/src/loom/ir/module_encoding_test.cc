@@ -192,6 +192,8 @@ TEST_F(ModuleEncodingTest, OnlyCanonicalDisplayNamesReserveAliases) {
   IREE_ASSERT_OK(Add(16, second_alias, &id));
   EXPECT_EQ(id, first_id);
   EXPECT_EQ(loom_module_encoding(module_, id)->alias_id, alias_id_);
+  EXPECT_EQ(loom_module_find_encoding_alias(module_, alias_id_), first_id);
+  EXPECT_EQ(loom_module_find_encoding_alias(module_, second_alias), 0);
 
   // An alternate spelling for an existing row does not become its display
   // name or reserve another name in the module's canonical alias namespace.
@@ -212,6 +214,7 @@ TEST_F(ModuleEncodingTest, AliasLookupSurvivesGrowthAndSymbolCompaction) {
     uint16_t id = 0;
     IREE_ASSERT_OK(Add(i + 1, aliases[i], &id));
     EXPECT_EQ(id, i + 1);
+    EXPECT_EQ(loom_module_find_encoding_alias(module_, aliases[i]), id);
   }
 
   // Removing a tombstone rebuilds the encoding index even when no encoding
@@ -229,6 +232,7 @@ TEST_F(ModuleEncodingTest, AliasLookupSurvivesGrowthAndSymbolCompaction) {
   const auto retained_bytes = module_->arena.used_allocation_size;
   for (uint16_t i = 0; i < aliases.size(); ++i) {
     SCOPED_TRACE(i);
+    EXPECT_EQ(loom_module_find_encoding_alias(module_, aliases[i]), i + 1);
     uint16_t id = 0;
     IREE_ASSERT_OK(Add(i + 1, aliases[i], &id));
     EXPECT_EQ(id, i + 1);
