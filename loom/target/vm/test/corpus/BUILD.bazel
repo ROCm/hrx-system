@@ -163,6 +163,7 @@ loom_corpus_test(
             "function/call/calls.loom",
             "function/call/direct.loom",
             "memory/address/logical_shift_loop.loom",
+            "memory/address/uniform_loads.loom",
             "memory/buffer/boundaries.loom",
             "memory/buffer/packing.loom",
             "memory/buffer/selection.loom",

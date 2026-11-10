@@ -38,6 +38,7 @@ _ADAPTER_ONLY_SCENARIOS = [
     "memory/address/biased_offsets.loom",
     "memory/address/logical_shift_loop.loom",
     "memory/address/tiled_channel.loom",
+    "memory/address/uniform_loads.loom",
     "memory/atomic/float64.loom",
     "memory/buffer/allocation_freshness.loom",
     "memory/buffer/boundaries.loom",

@@ -29,6 +29,7 @@ MEMORY_CORPUS = loom_corpus_manifest(
         "address/table_index.loom",
         "address/tiled_channel.loom",
         "address/uniform_add.loom",
+        "address/uniform_loads.loom",
         "address/widening.loom",
         "atomic/add_f32_subnormals.loom",
         "atomic/float64.loom",

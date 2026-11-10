@@ -1,0 +1,147 @@
+// RUN: emit source-low target=amdgpu:gfx942 output=low
+
+// The sign boundary and split packets require aligned positive immediates.
+kernel.def @uniform_offsets() {
+  %unit = index.constant 1 : index
+  %groups = index.constant 8 : index
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %before_limit = index.constant 1048572 : offset
+  %past_limit = index.constant 2097152 : offset
+  %group = kernel.workgroup.id<x> : index
+  %constant_input = buffer.assume.memory_space<constant> %input : buffer
+  %packet_view = buffer.view %constant_input[%before_limit] : buffer -> view<3xi32>
+  %packet = vector.load %packet_view[0] : view<3xi32> -> vector<3xi32>
+  %tail_view = buffer.view %constant_input[%past_limit] : buffer -> view<8xi32>
+  %tail = view.load %tail_view[%group] : view<8xi32> -> i32
+  %result = buffer.view %output[%origin] : buffer -> view<4xi32>
+  vector.store %packet, %result[0] : vector<3xi32>, view<4xi32>
+  view.store %tail, %result[3] : i32, view<4xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(8, 1, 1) @uniform_offsets() asm {
+  %group = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
+  %tail_view = resource<hal_binding> {extent = 2097184, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %17 = s_mov_b32 8
+  %18 = s_load_dwordx2 %tail_view, %17 {offset = 1048564}
+  %19 = s_load_dword %tail_view, %17 {offset = 1048572}
+  %21 = s_lshl_b32_rhs_inline %group, 2
+  %22 = s_mov_b32 1048580
+  %23 = s_add_u32 %21, %22
+  %tail = s_load_dword %tail_view, %23 {offset = 1048572}
+  %36 = slice %18[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26 = v_mov_b32_copy %36
+  %35 = slice %18[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %28 = v_mov_b32_copy %35
+  %30 = v_mov_b32_copy %19
+  %31 = concat(%26, %28, %30) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
+  %32 = v_mov_b32 0
+  global_store_dwordx3_saddr %32, %31, %result
+  %33 = v_mov_b32_copy %tail
+  global_store_dword_saddr %32, %33, %result {offset = 12}
+  return
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx1100 output=low
+
+// The sign boundary and split packets require aligned positive immediates.
+kernel.def @uniform_offsets() {
+  %unit = index.constant 1 : index
+  %groups = index.constant 8 : index
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %before_limit = index.constant 1048572 : offset
+  %past_limit = index.constant 2097152 : offset
+  %group = kernel.workgroup.id<x> : index
+  %constant_input = buffer.assume.memory_space<constant> %input : buffer
+  %packet_view = buffer.view %constant_input[%before_limit] : buffer -> view<3xi32>
+  %packet = vector.load %packet_view[0] : view<3xi32> -> vector<3xi32>
+  %tail_view = buffer.view %constant_input[%past_limit] : buffer -> view<8xi32>
+  %tail = view.load %tail_view[%group] : view<8xi32> -> i32
+  %result = buffer.view %output[%origin] : buffer -> view<4xi32>
+  vector.store %packet, %result[0] : vector<3xi32>, view<4xi32>
+  view.store %tail, %result[3] : i32, view<4xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(8, 1, 1) @uniform_offsets() asm {
+  %group = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
+  %tail_view = resource<hal_binding> {extent = 2097184, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %17 = s_mov_b32 8
+  %18 = s_load_dwordx2 %tail_view, %17 {offset = 1048564}
+  %19 = s_load_dword %tail_view, %17 {offset = 1048572}
+  %21 = s_lshl_b32_rhs_inline %group, 2
+  %22 = s_mov_b32 1048580
+  %23 = s_add_u32 %21, %22
+  %tail = s_load_dword %tail_view, %23 {offset = 1048572}
+  %36 = slice %18[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26 = v_mov_b32_copy %36
+  %35 = slice %18[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %28 = v_mov_b32_copy %35
+  %30 = v_mov_b32_copy %19
+  %31 = concat(%26, %28, %30) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
+  %32 = v_mov_b32 0
+  global_store_b96_saddr %32, %31, %result
+  %33 = v_mov_b32_copy %tail
+  global_store_b32_saddr %32, %33, %result {offset = 12}
+  return
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx1200 output=low
+
+// The sign boundary and split packets require aligned positive immediates.
+kernel.def @uniform_offsets() {
+  %unit = index.constant 1 : index
+  %groups = index.constant 8 : index
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %before_limit = index.constant 8388604 : offset
+  %past_limit = index.constant 16777216 : offset
+  %group = kernel.workgroup.id<x> : index
+  %constant_input = buffer.assume.memory_space<constant> %input : buffer
+  %packet_view = buffer.view %constant_input[%before_limit] : buffer -> view<3xi32>
+  %packet = vector.load %packet_view[0] : view<3xi32> -> vector<3xi32>
+  %tail_view = buffer.view %constant_input[%past_limit] : buffer -> view<8xi32>
+  %tail = view.load %tail_view[%group] : view<8xi32> -> i32
+  %result = buffer.view %output[%origin] : buffer -> view<4xi32>
+  vector.store %packet, %result[0] : vector<3xi32>, view<4xi32>
+  view.store %tail, %result[3] : i32, view<4xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(8, 1, 1) @uniform_offsets() asm {
+  %group = live_in<amdgpu.cluster_id_x> : reg<amdgpu.sgpr>
+  %tail_view = resource<hal_binding> {extent = 16777248, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %17 = s_mov_b32 0
+  %packet = s_load_b96 %tail_view, %17 {offset = 8388604}
+  %19 = s_lshl_b32_rhs_inline %group, 2
+  %20 = s_mov_b32 8388612
+  %21 = s_add_u32 %19, %20
+  %tail = s_load_dword %tail_view, %21 {offset = 8388604}
+  %23 = slice %packet[0] : reg<amdgpu.sgpr x3> -> reg<amdgpu.sgpr>
+  %24 = v_mov_b32_copy %23
+  %25 = slice %packet[1] : reg<amdgpu.sgpr x3> -> reg<amdgpu.sgpr>
+  %26 = v_mov_b32_copy %25
+  %27 = slice %packet[2] : reg<amdgpu.sgpr x3> -> reg<amdgpu.sgpr>
+  %28 = v_mov_b32_copy %27
+  %29 = concat(%24, %26, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
+  %30 = v_mov_b32 0
+  global_store_b96_saddr %30, %29, %result
+  %31 = v_mov_b32_copy %tail
+  global_store_b32_saddr %30, %31, %result {offset = 12}
+  return
+}

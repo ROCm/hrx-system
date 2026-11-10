@@ -456,13 +456,10 @@ static bool loom_amdgpu_memory_access_offset_immediate_info(
   const uint32_t descriptor_ordinal =
       loom_low_descriptor_set_descriptor_ordinal(descriptor_set,
                                                  access->descriptor);
-  const loom_low_immediate_kind_t expected_kind =
-      access->address_form == LOOM_AMDGPU_MEMORY_ADDRESS_FORM_GLOBAL_SMEM
-          ? LOOM_LOW_IMMEDIATE_KIND_UNSIGNED
-          : LOOM_LOW_IMMEDIATE_KIND_SIGNED;
   return descriptor_ordinal != LOOM_LOW_DESCRIPTOR_ORDINAL_NONE &&
          loom_amdgpu_descriptor_offset_immediate_info(
-             descriptor_set, descriptor_ordinal, 1, expected_kind, out_info) &&
+             descriptor_set, descriptor_ordinal, 1,
+             LOOM_LOW_IMMEDIATE_KIND_SIGNED, out_info) &&
          out_info->unit_byte_count == 1;
 }
 
@@ -491,6 +488,9 @@ static bool loom_amdgpu_memory_plan_try_rebias_shared_scalar_address(
                                     : (int64_t)offset_info.unsigned_max;
     if (access->payload_register_count == 4) {
       immediate_maximum &= ~INT64_C(15);
+    } else if (access->address_form ==
+               LOOM_AMDGPU_MEMORY_ADDRESS_FORM_GLOBAL_SMEM) {
+      immediate_maximum &= ~INT64_C(3);
     }
     if (access->static_byte_offset > immediate_maximum) {
       const int64_t required_base =
@@ -518,11 +518,7 @@ static bool loom_amdgpu_memory_plan_try_rebias_shared_scalar_address(
                               common_base_byte_offset, &immediate_offsets[i])) {
       return false;
     }
-    const int64_t immediate_minimum =
-        offset_info.kind == LOOM_LOW_IMMEDIATE_KIND_SIGNED
-            ? offset_info.signed_min
-            : 0;
-    if (immediate_offsets[i] < immediate_minimum ||
+    if (immediate_offsets[i] < offset_info.signed_min ||
         (immediate_offsets[i] >= 0 &&
          (uint64_t)immediate_offsets[i] > offset_info.unsigned_max)) {
       return false;

@@ -41,10 +41,27 @@ from loom.target.low_descriptors import (
     Constraint,
     ConstraintKind,
     EffectKind,
+    ImmediateKind,
     NativeAsmValueKind,
     OperandFlag,
     OperandRole,
 )
+
+
+@pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)
+def test_scalar_memory_offset_bounds(target: str) -> None:
+    for overlay in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[target].overlay_rows():
+        if overlay.encoding_name != "ENC_SMEM":
+            continue
+        for immediate in overlay.immediates:
+            if immediate.field_name != "offset":
+                continue
+            assert immediate.bit_width in (21, 24), overlay.descriptor_key
+            assert immediate.kind == ImmediateKind.SIGNED, overlay.descriptor_key
+            limit = 1 << (immediate.bit_width - 1)
+            assert immediate.unsigned_max == limit - 1, overlay.descriptor_key
+            minimum = 0 if overlay.instruction_name.startswith("S_BUFFER_") else -limit
+            assert immediate.signed_min == minimum, overlay.descriptor_key
 
 
 @pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)

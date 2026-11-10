@@ -883,7 +883,7 @@ static bool loom_amdgpu_memory_access_split_global_smem_static_offset(
     const loom_amdgpu_descriptor_offset_immediate_info_t* offset_info,
     loom_amdgpu_memory_access_diagnostic_t* diagnostic) {
   if (offset_info->unit_byte_count != 1 ||
-      offset_info->kind != LOOM_LOW_IMMEDIATE_KIND_UNSIGNED) {
+      offset_info->kind != LOOM_LOW_IMMEDIATE_KIND_SIGNED) {
     diagnostic->rejection_bits |=
         LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_DESCRIPTOR_OFFSET_IMMEDIATE;
     return false;
@@ -895,8 +895,10 @@ static bool loom_amdgpu_memory_access_split_global_smem_static_offset(
   }
 
   const uint64_t static_byte_offset = (uint64_t)access->static_byte_offset;
+  // SMEM ignores each address component's low two bits before adding them.
+  // Keep both sides of a split word aligned, including at the signed limit.
   const uint64_t immediate_offset =
-      iree_min(static_byte_offset, offset_info->unsigned_max);
+      iree_min(static_byte_offset, offset_info->unsigned_max & ~UINT64_C(3));
   const uint64_t scalar_byte_offset = static_byte_offset - immediate_offset;
   if (scalar_byte_offset > UINT32_MAX) {
     access->immediate_offset = 0;
@@ -1419,7 +1421,7 @@ static bool loom_amdgpu_memory_access_try_select_global_smem(
   loom_amdgpu_descriptor_offset_immediate_info_t offset_info;
   if (!loom_amdgpu_descriptor_offset_immediate_info(
           selection_context->descriptor_set, descriptor_ordinal, 1,
-          LOOM_LOW_IMMEDIATE_KIND_UNSIGNED, &offset_info)) {
+          LOOM_LOW_IMMEDIATE_KIND_SIGNED, &offset_info)) {
     return false;
   }
   loom_amdgpu_memory_access_diagnostic_t ignored_diagnostic = {0};
