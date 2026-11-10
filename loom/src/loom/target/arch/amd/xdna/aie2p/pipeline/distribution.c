@@ -1139,7 +1139,11 @@ iree_status_t loom_aie2p_native_bind_distribution_phases(
   for (iree_host_size_t i = 0; i < count; ++i) {
     command_tails[i] = &context->workers[i].distribution_commands;
   }
-  for (iree_host_size_t i = 0; i < count; ++i) {
+  // Preserve the existing reverse-declaration order of independent programs,
+  // while appending each program's phases in their required FIFO order.
+  for (iree_host_size_t remaining_workers = count; remaining_workers;
+       --remaining_workers) {
+    const iree_host_size_t i = remaining_workers - 1;
     next[i] = context->workers[i].distribution_phases;
     const loom_pipeline_invocation_t* invocation =
         realization->invocations.workers[i].invocation;
