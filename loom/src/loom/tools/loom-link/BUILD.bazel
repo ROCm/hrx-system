@@ -53,27 +53,15 @@ iree_assert_dependency_boundary(
 )
 
 iree_cli_test(
-    name = "execution_test",
+    name = "cli_test",
     data = [
-        "//loom/src/loom/link/testdata/provider_roots:direct.loom",
-        "//loom/src/loom/link/testdata/provider_roots:transitive.loom",
-        "//loom/src/loom/link/testdata/provider_roots:unused.loom",
-        "//loom/src/loom/link/testdata/template_selection:missing_provider.loom",
-        "//loom/src/loom/link/testdata/template_selection:root.loom",
-        "//loom/src/loom/tooling/input/testdata:duplicate_symbols.loom-test",
         "//loom/src/loom/tools/loom-link/testdata:dependency_component.loom",
         "//loom/src/loom/tools/loom-link/testdata:dependency_direct.loom",
         "//loom/src/loom/tools/loom-link/testdata:dependency_transitive.loom",
-        "//loom/src/loom/tools/loom-link/testdata:kernel_export_cases.loom",
-        "//loom/src/loom/tools/loom-link/testdata:kernel_exports.loom",
-        "//loom/src/loom/tools/loom-link/testdata:source_library.loom-test",
-        "//loom/src/loom/tools/loom-link/testdata:source_main.loom",
     ],
     manifests = ["loom-link.test.json"],
     tags = ["hostonly"],
     tools = {
-        "loom-format": "//loom/src/loom/tools/loom-format",
         "loom-link": ":loom-link",
-        "loom-opt": "//loom/src/loom/tools/loom-opt",
     },
 )

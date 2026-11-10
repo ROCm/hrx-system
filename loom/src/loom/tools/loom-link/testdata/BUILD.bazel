@@ -6,7 +6,4 @@
 
 package(default_visibility = ["//visibility:public"])
 
-exports_files(glob([
-    "*.loom",
-    "*.loom-test",
-]))
+exports_files(glob(["*.loom"]))

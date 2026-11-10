@@ -21,9 +21,12 @@
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/link/testdata/link_index/link_index_testdata.h"
 #include "loom/ops/check/ops.h"
 #include "loom/ops/config/ops.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/index/ops.h"
+#include "loom/ops/kernel/ops.h"
 #include "loom/ops/pipeline/ops.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/template/ops.h"
@@ -44,6 +47,17 @@ std::string StringViewToString(iree_string_view_t value) {
   return std::string(value.data, value.size);
 }
 
+iree_string_view_t LinkIndexFixture(iree_string_view_t name) {
+  const iree_file_toc_t* files = loom_link_index_testdata_create();
+  for (iree_host_size_t i = 0; i < loom_link_index_testdata_size(); ++i) {
+    if (iree_string_view_equal(iree_make_cstring_view(files[i].name), name)) {
+      return iree_make_string_view(files[i].data, files[i].size);
+    }
+  }
+  ADD_FAILURE() << "link index fixture not embedded";
+  return iree_string_view_empty();
+}
+
 class ModuleIndexTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -56,6 +70,10 @@ class ModuleIndexTest : public ::testing::Test {
                     loom_config_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables,
                     loom_func_dialect_op_semantics);
+    RegisterDialect(LOOM_DIALECT_INDEX, loom_index_dialect_vtables,
+                    loom_index_dialect_op_semantics);
+    RegisterDialect(LOOM_DIALECT_KERNEL, loom_kernel_dialect_vtables,
+                    loom_kernel_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_PIPELINE, loom_pipeline_dialect_vtables,
                     loom_pipeline_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables,
@@ -473,6 +491,89 @@ func.def @ordinary() {
   IndexPtr text_index = CreateIndex();
   IREE_ASSERT_OK(loom_link_module_index_add_text(
       text_index.get(), source, IREE_SV("input.loom"),
+      /*parse_options=*/nullptr, &options,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(text_index.get());
+}
+
+TEST_F(ModuleIndexTest, PreservesKernelExportRolesAcrossProviderForms) {
+  const iree_string_view_t source =
+      LinkIndexFixture(IREE_SV("kernel_exports.loom"));
+  ASSERT_FALSE(iree_string_view_is_empty(source));
+  loom_module_t* module = Parse(source, IREE_SV("kernel_exports.loom"));
+  ASSERT_NE(module, nullptr);
+  const std::vector<uint8_t> bytes = WriteModule(module);
+
+  auto verify_index = [&](const loom_link_module_index_t* index) {
+    const loom_link_module_index_symbol_t* entry =
+        loom_link_module_index_lookup_global(index, IREE_SV("entry"));
+    const loom_link_module_index_symbol_t* renamed_entry =
+        loom_link_module_index_lookup_global(index, IREE_SV("renamed_entry"));
+    const loom_link_module_index_symbol_t* public_entry =
+        loom_link_module_index_lookup_global(index, IREE_SV("public_entry"));
+    const loom_link_module_index_symbol_t* renamed_public_entry =
+        loom_link_module_index_lookup_global(index,
+                                             IREE_SV("renamed_public_entry"));
+    ASSERT_NE(entry, nullptr);
+    ASSERT_NE(renamed_entry, nullptr);
+    ASSERT_NE(public_entry, nullptr);
+    ASSERT_NE(renamed_public_entry, nullptr);
+    EXPECT_EQ(entry->identity, LOOM_LINK_SYMBOL_IDENTITY_GLOBAL);
+    EXPECT_EQ(renamed_entry->identity, LOOM_LINK_SYMBOL_IDENTITY_GLOBAL);
+    EXPECT_EQ(public_entry->identity, LOOM_LINK_SYMBOL_IDENTITY_GLOBAL);
+    EXPECT_EQ(renamed_public_entry->identity, LOOM_LINK_SYMBOL_IDENTITY_GLOBAL);
+    EXPECT_TRUE(iree_all_bits_set(
+        entry->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT |
+                          LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION));
+    EXPECT_FALSE(iree_any_bit_set(entry->flags, LOOM_LINK_SYMBOL_FLAG_PUBLIC));
+    EXPECT_TRUE(iree_all_bits_set(
+        renamed_entry->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT |
+                                  LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION));
+    EXPECT_FALSE(
+        iree_any_bit_set(renamed_entry->flags, LOOM_LINK_SYMBOL_FLAG_PUBLIC));
+    EXPECT_TRUE(iree_all_bits_set(
+        public_entry->flags, LOOM_LINK_SYMBOL_FLAG_PUBLIC |
+                                 LOOM_LINK_SYMBOL_FLAG_EXPORT |
+                                 LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION));
+    EXPECT_TRUE(iree_all_bits_set(
+        renamed_public_entry->flags,
+        LOOM_LINK_SYMBOL_FLAG_PUBLIC | LOOM_LINK_SYMBOL_FLAG_EXPORT |
+            LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION));
+
+    const loom_link_module_index_module_t* indexed_module =
+        loom_link_module_index_module_at(index, 0);
+    ASSERT_NE(indexed_module, nullptr);
+    const loom_link_module_index_symbol_t* private_alias =
+        loom_link_module_index_lookup_private(index, indexed_module,
+                                              IREE_SV("unused_helper"));
+    ASSERT_NE(private_alias, nullptr);
+    EXPECT_EQ(private_alias->identity, LOOM_LINK_SYMBOL_IDENTITY_PRIVATE);
+    EXPECT_FALSE(iree_any_bit_set(
+        private_alias->flags,
+        LOOM_LINK_SYMBOL_FLAG_PUBLIC | LOOM_LINK_SYMBOL_FLAG_EXPORT));
+  };
+
+  const loom_link_module_index_add_options_t options = {
+      .provider_name = IREE_SV("input"),
+      .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
+  };
+  IndexPtr materialized_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+      materialized_index.get(), module, &options,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(materialized_index.get());
+
+  IndexPtr bytecode_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
+      bytecode_index.get(),
+      iree_make_const_byte_span(bytes.data(), bytes.size()),
+      IREE_SV("kernel_exports.loombc"), /*index_options=*/nullptr, &options,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(bytecode_index.get());
+
+  IndexPtr text_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_text(
+      text_index.get(), source, IREE_SV("kernel_exports.loom"),
       /*parse_options=*/nullptr, &options,
       /*out_provider_ordinal=*/nullptr));
   verify_index(text_index.get());

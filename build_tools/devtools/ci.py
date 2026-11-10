@@ -765,7 +765,7 @@ def shared_tool_bazel_step(
             "//loom/src/loom/tools/loom-compile:execution_test",
             "//loom/src/loom/tools/loom-opt:execution_test",
             "//loom/src/loom/tools/loom-format:execution_test",
-            "//loom/src/loom/tools/loom-link:execution_test",
+            "//loom/src/loom/tools/loom-link:cli_test",
             "//loom/src/loom/tools/loom-run:execution_test",
             "//loom/src/loom/tooling/target/cpu/test:run_cxx_input_test",
             "//loom/src/loom/import/cxx/binding/test/contracts:contracts_export_test",

@@ -1,0 +1,8 @@
+low.func.decl public target<test.low.core> @register_type_binding(%width: reg<test.i32 : index>, %value: reg<test.i32 : vector<[%width]xf32>>)
+
+low.func.def public target<test.low.core> @call_register_type_binding(%width: reg<test.i32 : index>, %value: reg<test.i32 : vector<[%width]xf32>>) asm {
+  low.func.call @register_type_binding(%width, %value) : (reg<test.i32 : index>, reg<test.i32 : vector<[%width]xf32>>)
+  return
+}
+
+low.func.decl public target<test.low.core> @resource_type_binding(%width: reg<test.i32 : index>)

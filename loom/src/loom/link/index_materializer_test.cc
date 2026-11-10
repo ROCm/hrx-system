@@ -17,6 +17,7 @@
 #include "iree/io/vec_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/text_asm.h"
 #include "loom/format/bytecode/writer.h"
 #include "loom/format/text/parser.h"
 #include "loom/format/text/printer.h"
@@ -24,11 +25,13 @@
 #include "loom/ir/module.h"
 #include "loom/link/module_index.h"
 #include "loom/link/testdata/config_providers/config_providers_testdata.h"
+#include "loom/link/testdata/link_index/link_index_testdata.h"
 #include "loom/ops/config/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/op_registry.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
+#include "loom/target/low_descriptor_registry_core_test.h"
 #include "loom/verify/verify.h"
 
 namespace loom {
@@ -58,6 +61,17 @@ static iree_string_view_t ConfigFixture(iree_string_view_t name) {
   return iree_string_view_empty();
 }
 
+static iree_string_view_t LinkIndexFixture(iree_string_view_t name) {
+  const auto* files = loom_link_index_testdata_create();
+  for (size_t i = 0; i < loom_link_index_testdata_size(); ++i) {
+    if (iree_string_view_equal(iree_make_cstring_view(files[i].name), name)) {
+      return iree_make_string_view(files[i].data, files[i].size);
+    }
+  }
+  ADD_FAILURE() << "link index fixture not embedded";
+  return iree_string_view_empty();
+}
+
 class LinkIndexMaterializerTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -67,6 +81,7 @@ class LinkIndexMaterializerTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_op_registry_register_all_dialects(&context_));
     IREE_ASSERT_OK(loom_test_dialect_register(&context_));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
+    loom_target_core_test_low_descriptor_registry_initialize(&low_registry_);
   }
 
   void TearDown() override {
@@ -82,6 +97,8 @@ class LinkIndexMaterializerTest : public ::testing::Test {
     loom_text_parse_options_t options = {};
     options.diagnostic_sink.fn = loom_diagnostic_stderr_sink;
     options.max_errors = 20;
+    loom_low_descriptor_text_asm_environment_initialize(
+        &low_registry_.registry, &options.low_asm_environment);
     IREE_CHECK_OK(loom_text_parse(source, filename, &context_, &block_pool_,
                                   &options, &module));
     modules_.push_back(module);
@@ -94,8 +111,14 @@ class LinkIndexMaterializerTest : public ::testing::Test {
         IREE_IO_STREAM_MODE_WRITABLE | IREE_IO_STREAM_MODE_SEEKABLE |
             IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_RESIZABLE,
         4096, iree_allocator_system(), &stream));
-    IREE_CHECK_OK(loom_bytecode_write_module(
-        module, stream, /*options=*/nullptr, &block_pool_));
+    loom_text_low_asm_environment_t low_asm_environment = {};
+    loom_low_descriptor_text_asm_environment_initialize(&low_registry_.registry,
+                                                        &low_asm_environment);
+    const loom_bytecode_write_options_t options = {
+        .low_repr_environment = low_asm_environment.low_repr,
+    };
+    IREE_CHECK_OK(
+        loom_bytecode_write_module(module, stream, &options, &block_pool_));
     const iree_io_stream_pos_t length = iree_io_stream_length(stream);
     std::vector<uint8_t> bytes(length);
     IREE_CHECK_OK(iree_io_stream_seek(stream, IREE_IO_STREAM_SEEK_SET, 0));
@@ -103,6 +126,24 @@ class LinkIndexMaterializerTest : public ::testing::Test {
         iree_io_stream_read(stream, bytes.size(), bytes.data(), nullptr));
     iree_io_stream_release(stream);
     return bytes;
+  }
+
+  std::string Print(const loom_module_t* module) {
+    iree_string_builder_t builder;
+    iree_string_builder_initialize(iree_allocator_system(), &builder);
+    loom_text_low_asm_environment_t low_asm_environment = {};
+    loom_low_descriptor_text_asm_environment_initialize(&low_registry_.registry,
+                                                        &low_asm_environment);
+    const loom_text_print_options_t options = {
+        .flags = LOOM_TEXT_PRINT_DEFAULT,
+        .low_asm_environment = low_asm_environment,
+    };
+    IREE_EXPECT_OK(loom_text_print_module_to_builder_with_options(
+        module, &builder, &options));
+    std::string result(iree_string_builder_buffer(&builder),
+                       iree_string_builder_size(&builder));
+    iree_string_builder_deinitialize(&builder);
+    return result;
   }
 
   IndexPtr CreateIndex() {
@@ -151,6 +192,8 @@ class LinkIndexMaterializerTest : public ::testing::Test {
     loom_text_parse_options_t parse_options = {};
     parse_options.diagnostic_sink.fn = loom_diagnostic_stderr_sink;
     parse_options.max_errors = 20;
+    loom_low_descriptor_text_asm_environment_initialize(
+        &low_registry_.registry, &parse_options.low_asm_environment);
     iree_host_size_t provider_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
     IREE_CHECK_OK(loom_link_module_index_add_text(
         index, source, name, &parse_options, &options, &provider_ordinal));
@@ -179,9 +222,13 @@ class LinkIndexMaterializerTest : public ::testing::Test {
       const loom_link_module_index_t* index,
       const loom_link_plan_options_t* plan_options,
       loom_link_index_materialization_t* out_materialization) {
+    loom_text_low_asm_environment_t low_asm_environment = {};
+    loom_low_descriptor_text_asm_environment_initialize(&low_registry_.registry,
+                                                        &low_asm_environment);
     loom_link_plan_materialization_environment_t environment = {
         .context = &context_,
         .block_pool = &block_pool_,
+        .low_repr_environment = low_asm_environment.low_repr,
         .allocator = iree_allocator_system(),
     };
     return loom_link_index_materialize(index, plan_options, &environment,
@@ -322,6 +369,7 @@ class LinkIndexMaterializerTest : public ::testing::Test {
 
   iree_arena_block_pool_t block_pool_ = {};
   loom_context_t context_ = {};
+  loom_target_low_descriptor_registry_t low_registry_ = {};
   std::vector<loom_module_t*> modules_;
 };
 
@@ -403,6 +451,101 @@ template.def<@demo.choose> priority(1) @slow(%x: i32) -> (i32) {
   EXPECT_FALSE(
       loom_link_plan_contains_symbol(materialization.plan, slow->ordinal));
   loom_link_index_materialization_deinitialize(&materialization);
+}
+
+TEST_F(LinkIndexMaterializerTest,
+       PreservesTargetDependentCandidatesAcrossProviderForms) {
+  const iree_string_view_t root_source =
+      LinkIndexFixture(IREE_SV("target_roots.loom"));
+  const iree_string_view_t provider_source =
+      LinkIndexFixture(IREE_SV("target_providers.loom"));
+  ASSERT_FALSE(iree_string_view_is_empty(root_source));
+  ASSERT_FALSE(iree_string_view_is_empty(provider_source));
+  loom_module_t* root = Parse(root_source, IREE_SV("target_roots.loom"));
+  loom_module_t* provider =
+      Parse(provider_source, IREE_SV("target_providers.loom"));
+  ASSERT_NE(root, nullptr);
+  ASSERT_NE(provider, nullptr);
+  const std::vector<uint8_t> provider_bytecode = WriteModule(provider);
+
+  for (const ProviderForm form :
+       {ProviderForm::kText, ProviderForm::kBytecode}) {
+    SCOPED_TRACE(form == ProviderForm::kText ? "text" : "bytecode");
+    IndexPtr index = CreateIndex();
+    AddMaterialized(index.get(), root, IREE_SV("root"),
+                    LOOM_LINK_PROVIDER_ROLE_INPUT);
+    AddProvider(index.get(), form, provider_source, provider, provider_bytecode,
+                IREE_SV("providers"), LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+
+    loom_link_index_materialization_t unknown =
+        Materialize(index.get(), IREE_SV("@unknown"));
+    Verify(unknown.product.module);
+    EXPECT_NE(FindSymbol(unknown.product.module, IREE_SV("specialized")),
+              nullptr);
+    EXPECT_NE(FindSymbol(unknown.product.module, IREE_SV("generic")), nullptr);
+    EXPECT_EQ(FindSymbol(unknown.product.module, IREE_SV("shadowed")), nullptr);
+    loom_link_index_materialization_deinitialize(&unknown);
+
+    loom_link_index_materialization_t known =
+        Materialize(index.get(), IREE_SV("@known"));
+    Verify(known.product.module);
+    EXPECT_NE(FindSymbol(known.product.module, IREE_SV("specialized")),
+              nullptr);
+    EXPECT_EQ(FindSymbol(known.product.module, IREE_SV("generic")), nullptr);
+    EXPECT_EQ(FindSymbol(known.product.module, IREE_SV("shadowed")), nullptr);
+    loom_link_index_materialization_deinitialize(&known);
+  }
+}
+
+TEST_F(LinkIndexMaterializerTest,
+       PreservesScopedTypesThroughSelectedBytecodeMaterialization) {
+  const iree_string_view_t provider_source =
+      LinkIndexFixture(IREE_SV("scoped_type_provider.loom"));
+  const iree_string_view_t requester_source =
+      LinkIndexFixture(IREE_SV("scoped_type_requester.loom"));
+  ASSERT_FALSE(iree_string_view_is_empty(provider_source));
+  ASSERT_FALSE(iree_string_view_is_empty(requester_source));
+  loom_module_t* provider =
+      Parse(provider_source, IREE_SV("scoped_type_provider.loom"));
+  loom_module_t* requester =
+      Parse(requester_source, IREE_SV("scoped_type_requester.loom"));
+  ASSERT_NE(provider, nullptr);
+  ASSERT_NE(requester, nullptr);
+  const std::vector<uint8_t> provider_bytecode = WriteModule(provider);
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), requester, IREE_SV("requester"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddBytecode(index.get(), provider_bytecode, IREE_SV("provider.loombc"),
+              LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+
+  loom_link_index_materialization_t call =
+      Materialize(index.get(), IREE_SV("@call_register_type_binding"));
+  Verify(call.product.module);
+  const std::string call_text = Print(call.product.module);
+  EXPECT_NE(
+      call_text.find("@register_type_binding(%width: reg<test.i32 : index>, "
+                     "%value: reg<test.i32 : vector<[%width]xf32>>)"),
+      std::string::npos);
+  EXPECT_NE(
+      call_text.find("@call_register_type_binding(%width: reg<test.i32 : "
+                     "index>, %value: reg<test.i32 : vector<[%width]xf32>>)"),
+      std::string::npos);
+  EXPECT_NE(call_text.find("low.func.call @register_type_binding"),
+            std::string::npos);
+  EXPECT_EQ(call_text.find("low.func.decl"), std::string::npos);
+  EXPECT_EQ(call_text.find("vector<?>"), std::string::npos);
+  loom_link_index_materialization_deinitialize(&call);
+
+  loom_link_index_materialization_t resource =
+      Materialize(index.get(), IREE_SV("@resource_type_binding"));
+  Verify(resource.product.module);
+  const std::string resource_text = Print(resource.product.module);
+  EXPECT_NE(resource_text.find("source_type = vector<[%width]xf32>"),
+            std::string::npos);
+  EXPECT_EQ(resource_text.find("low.func.decl"), std::string::npos);
+  EXPECT_EQ(resource_text.find("vector<?>"), std::string::npos);
+  loom_link_index_materialization_deinitialize(&resource);
 }
 
 TEST_F(LinkIndexMaterializerTest,
