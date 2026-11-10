@@ -159,6 +159,13 @@ iree_status_t loom_low_lower_realizations_select(
 const loom_low_lower_realization_loop_t* loom_low_lower_realization_loop(
     const loom_low_lower_context_t* context, const loom_op_t* source_op);
 
+// Tests dependency availability at a prospective initialization boundary
+// without retaining physical state or creating source demands. Composite offers
+// use this for recipes constructed by their selected callback.
+bool loom_low_lower_realization_can_place(
+    const loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_realization_recipe_t* recipe);
+
 // Offers a replacement whose shared loop cost must be amortized by distinct
 // direct calculations. The bounded domain is the dedicated latch block, which
 // executes exactly trip_count times. Other blocks keep their direct plans.

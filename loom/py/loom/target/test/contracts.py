@@ -66,6 +66,7 @@ from loom.target.test.descriptors import (
     TEST_LOW_CORE_DESCRIPTOR_SET,
     TEST_LOW_DOT4I_S8S8_DESCRIPTOR,
     TEST_LOW_FROM_ELEMENTS_V4I32_DESCRIPTOR,
+    TEST_LOW_INCREMENT_I32_DESCRIPTOR,
     TEST_LOW_IOTA_PAIR_I32_DESCRIPTOR,
     TEST_LOW_LOAD_INDEX_ORDERED_V4I32_DESCRIPTOR,
     TEST_LOW_LOAD_INDEX_V4F32_DESCRIPTOR,
@@ -255,7 +256,9 @@ def _source_memory_byte_offset_materializer() -> SourceMemoryByteOffsetMateriali
         add=TEST_LOW_ADD_I32_DESCRIPTOR,
         multiply=TEST_LOW_MUL_I32_DESCRIPTOR,
         shift_left=None,
+        increment=TEST_LOW_INCREMENT_I32_DESCRIPTOR,
         constant_immediate="i32_value",
+        increment_immediate="i32_value",
     )
 
 
@@ -278,7 +281,7 @@ def _vector_load_rule(
                 if volatile
                 else ()
             ),
-            Guard.operand_segment_count("indices", 1 if dynamic else 0),
+            *((Guard.operand_segment_count("indices", 0),) if not dynamic else ()),
             Guard.value_type("result", result_type),
         ),
         emit=(
@@ -430,7 +433,7 @@ def _vector_store_rule(
         source_op=vector.vector_store,
         descriptor=descriptor,
         guards=(
-            Guard.operand_segment_count("indices", 1 if dynamic else 0),
+            *((Guard.operand_segment_count("indices", 0),) if not dynamic else ()),
             Guard.value_type("value", value_type),
         ),
         emit=(

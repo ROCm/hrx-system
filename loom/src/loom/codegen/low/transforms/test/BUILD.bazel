@@ -40,6 +40,7 @@ loom_check_test_suite(
         "source_to_low_lane_sequence.loom-test",
         "source_to_low_loop_counts.loom-test",
         "source_to_low_options.loom-test",
+        "source_to_low_recurrence_placement.loom-test",
         "source_to_low_source_graph.loom-test",
         "source_to_low_storage_demands.loom-test",
         "source_to_low_structured_control.loom-test",
