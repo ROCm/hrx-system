@@ -176,5 +176,91 @@ TEST_F(SymbolicValueTest, NestedSelectionInfersChosenProducerUnderItsScope) {
   EXPECT_TRUE(HasConditionMemo(inactive));
 }
 
+TEST_F(SymbolicValueTest, ConditionalCastFactsDoNotPublishGlobalOrigins) {
+  for (auto type :
+       {LOOM_SCALAR_TYPE_I8, LOOM_SCALAR_TYPE_I16, LOOM_SCALAR_TYPE_I32}) {
+    SCOPED_TRACE(loom_scalar_type_name(type));
+    const int64_t limit = INT64_C(1) << (loom_scalar_type_bitwidth(type) - 1);
+    const auto input = DefineIndexValue();
+    DefineFacts(input, loom_value_facts_make(0, 3 * limit, 1));
+    loom_op_t* cast = nullptr;
+    IREE_ASSERT_OK(loom_index_cast_build(
+        &builder_, input, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+        loom_type_scalar(type), LOOM_LOCATION_UNKNOWN, &cast));
+    ComputeFacts(cast);
+    const auto result = loom_index_cast_result(cast);
+    const auto global = loom_value_fact_table_lookup(&fact_table_, result);
+    ASSERT_FALSE(loom_value_fact_table_query_exact_scalar_origin(
+        &fact_table_, module_, result, nullptr));
+
+    auto relation =
+        LiteralRelation(LOOM_SYMBOLIC_INTEGER_RELATION_LT, input, limit);
+    auto conditions = SingleRelationFacts(&relation);
+    {
+      ScopedConditionFacts scope(&expression_context_, &conditions);
+      loom_value_facts_t local;
+      IREE_ASSERT_OK(loom_symbolic_value_lookup_condition_refined_facts(
+          &expression_context_, result, &local));
+      EXPECT_EQ(local.range_lo, 0);
+      EXPECT_EQ(local.range_hi, limit - 1);
+      EXPECT_FALSE(loom_value_fact_table_query_exact_scalar_origin(
+          &fact_table_, module_, result, nullptr));
+    }
+    EXPECT_TRUE(loom_value_facts_equal(
+        global, loom_value_fact_table_lookup(&fact_table_, result)));
+    EXPECT_FALSE(loom_value_fact_table_query_exact_scalar_origin(
+        &fact_table_, module_, result, nullptr));
+
+    relation.relation = LOOM_SYMBOLIC_INTEGER_RELATION_GE;
+    {
+      ScopedConditionFacts scope(&expression_context_, &conditions);
+      loom_value_facts_t local;
+      IREE_ASSERT_OK(loom_symbolic_value_lookup_condition_refined_facts(
+          &expression_context_, result, &local));
+      EXPECT_EQ(local.range_lo, -limit);
+      EXPECT_EQ(local.range_hi, limit - 1);
+    }
+    EXPECT_FALSE(loom_value_fact_table_query_exact_scalar_origin(
+        &fact_table_, module_, result, nullptr));
+  }
+}
+
+TEST_F(SymbolicValueTest, ConditionalCastQueryPreservesPublishedOrigin) {
+  const auto input = DefineIndexValue();
+  DefineFacts(input, loom_value_facts_make(0, 127, 1));
+  loom_op_t* cast = nullptr;
+  IREE_ASSERT_OK(loom_index_cast_build(
+      &builder_, input, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+      loom_type_scalar(LOOM_SCALAR_TYPE_I8), LOOM_LOCATION_UNKNOWN, &cast));
+  ComputeFacts(cast);
+  const auto result = loom_index_cast_result(cast);
+  loom_value_fact_exact_scalar_origin_t origin;
+  ASSERT_TRUE(loom_value_fact_table_query_exact_scalar_origin(
+      &fact_table_, module_, result, &origin));
+  EXPECT_EQ(origin.source_value_id, input);
+
+  auto relation = LiteralRelation(LOOM_SYMBOLIC_INTEGER_RELATION_LT, input, 16);
+  auto conditions = SingleRelationFacts(&relation);
+  {
+    ScopedConditionFacts scope(&expression_context_, &conditions);
+    loom_value_facts_t local;
+    IREE_ASSERT_OK(loom_symbolic_value_lookup_condition_refined_facts(
+        &expression_context_, result, &local));
+    EXPECT_EQ(local.range_lo, 0);
+    EXPECT_EQ(local.range_hi, 15);
+  }
+  ASSERT_TRUE(loom_value_fact_table_query_exact_scalar_origin(
+      &fact_table_, module_, result, &origin));
+  EXPECT_EQ(origin.source_value_id, input);
+  EXPECT_EQ(loom_value_fact_table_lookup(&fact_table_, result).range_hi, 127);
+
+  // A complete reinference still withdraws an origin when its input widens.
+  DefineFacts(input, loom_value_facts_make(0, 1000, 1));
+  ComputeFacts(cast);
+  EXPECT_FALSE(loom_value_fact_table_query_exact_scalar_origin(
+      &fact_table_, module_, result, nullptr));
+  EXPECT_EQ(loom_value_fact_table_lookup(&fact_table_, result).range_lo, -128);
+}
+
 }  // namespace
 }  // namespace loom

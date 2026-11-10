@@ -286,7 +286,7 @@ static iree_status_t loom_low_source_invocation_resolve_call(
     return iree_ok_status();
   }
   loom_value_fact_table_t* facts = &work->facts->boundaries;
-  if (call->callee->refine_arguments) {
+  if (context->publication && call->callee->refine_arguments) {
     uint16_t count = 0;
     const loom_value_id_t* formals =
         loom_func_like_arg_ids(call->callee->source, &count);

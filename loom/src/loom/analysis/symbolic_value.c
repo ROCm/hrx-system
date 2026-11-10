@@ -294,6 +294,7 @@ static iree_status_t loom_symbolic_value_lookup_condition_refined_facts_bounded(
       const loom_op_vtable_t* vtable =
           loom_op_vtable(context->module, frame->defining_op);
       loom_fact_context_t fact_context = context->fact_table->context;
+      fact_context.publication = NULL;
       status = vtable->infer_facts(&fact_context, context->module,
                                    frame->defining_op, frame->operand_facts,
                                    result_facts);

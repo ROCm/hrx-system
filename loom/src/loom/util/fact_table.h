@@ -159,10 +159,11 @@ struct loom_fact_context_t {
                const loom_op_t* op, loom_value_facts_t* operand_facts);
   } refine_operands;
 
-  // Active change accumulator for auxiliary result facts published by the
-  // current inference callback. NULL when publication needs no change report,
-  // and outside an inference callback.
-  bool* result_facts_changed;
+  // Stack-owned result publication during a complete inference callback.
+  // Queries under additional conditions leave this NULL: they can return
+  // summaries and intern extension payloads, but cannot publish indexed result
+  // origins or update the owning solve's interprocedural observations.
+  loom_value_fact_origin_publication_t* publication;
 };
 
 struct loom_value_fact_table_t {
@@ -196,8 +197,6 @@ struct loom_value_fact_table_t {
   uint32_t result_type_kind_bits;
   // Context object passed to op-specific fact inference callbacks.
   loom_fact_context_t context;
-  // Stack-owned ordinary-result publication, active only during inference.
-  loom_value_fact_origin_publication_t* origin_publication;
 
   // Optional completion consumer installed by the owner of pending inference.
   // Nested summaries report completion within this table's solver traversal.

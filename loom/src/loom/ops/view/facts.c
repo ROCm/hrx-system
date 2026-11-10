@@ -46,6 +46,9 @@ static iree_status_t loom_view_subview_capture_layout_origin(
     loom_type_t source_type,
     loom_value_fact_address_layout_kind_t source_layout_kind,
     loom_value_id_t result_value_id) {
+  if (!context->publication) {
+    return iree_ok_status();
+  }
   const bool has_source_encoding = loom_type_has_ssa_encoding(source_type);
   const loom_value_id_t source_encoding =
       has_source_encoding ? loom_type_encoding_value_id(source_type)

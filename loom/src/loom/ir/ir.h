@@ -1129,6 +1129,8 @@ typedef struct loom_value_facts_t loom_value_facts_t;
 // write result_facts[0]. Multi-result ops fill the entire array.
 // |module| provides type access (int vs float detection, bitwidth
 // queries via loom_module_value_type). Must not mutate IR.
+// A context without a publication returns summaries under query-local facts;
+// indexed result origins and solver observations require an active publication.
 typedef iree_status_t (*loom_op_infer_facts_fn_t)(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,

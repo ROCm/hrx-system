@@ -249,7 +249,7 @@ static iree_status_t loom_scf_if_preview_selectification_impl(
   preview.facts.context.table = &preview.facts;
   preview.facts.context.refine_operands.fn = NULL;
   preview.facts.context.refine_operands.user_data = NULL;
-  preview.facts.context.result_facts_changed = NULL;
+  preview.facts.context.publication = NULL;
 
   const iree_host_size_t arm_result_count = 2 * op->result_count;
   loom_value_id_t* arm_values = NULL;
