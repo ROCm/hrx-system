@@ -131,22 +131,6 @@ def common_setup_plan(
         )
         plan.add(
             CheckCommandStep(
-                [
-                    tool_env.tool("semgrep"),
-                    "--disable-version-check",
-                    "--version",
-                ],
-                cwd=REPO_ROOT,
-                env={
-                    **tool_env.path_env(),
-                    "PYTHONWARNINGS": doctor.SEMGREP_WARNING_FILTER,
-                },
-                expected_pattern=doctor.SEMGREP_VERSION_PATTERN,
-                label="check semgrep",
-            )
-        )
-        plan.add(
-            CheckCommandStep(
                 [tool_env.tool("zizmor"), "--version"],
                 cwd=REPO_ROOT,
                 env=tool_env.path_env(),

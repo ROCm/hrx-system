@@ -125,8 +125,8 @@ tool output are useful.
 ## Profiles
 
 `default` runs repository hygiene: buildifier, Ruff, clang-format, the CMake
-dependency lock, generated AMDGPU target metadata, watchwords, merge-conflict
-markers, and basic text hygiene.
+dependency lock, generated AMDGPU target metadata, repository policy,
+watchwords, merge-conflict markers, and basic text hygiene.
 
 Every hygiene run checks `MODULE.cmake.lock` against the Bazel dependency graph
 with `build_tools/bazel_to_cmake/deps.py --check`, including narrow commits and
@@ -145,9 +145,7 @@ clang-format runs C/C++ files in parallel batches. Set `IREE_CLANG_FORMAT_JOBS`
 to override the default worker cap when diagnosing local machine behavior.
 
 `paranoid` adds affected project tests for the selected build lane and the
-static-analysis lane. Semgrep hard rules are the first configured provider.
-Rules that inventory existing drift stay at `WARNING` or `INFO` severity until
-their baseline is cleaned up and the rule is promoted.
+external static-analysis providers.
 
 `ci` is the full-tree, non-mutating profile. It checks all tracked files and
 runs all configured project presubmit tests.
@@ -243,10 +241,10 @@ custom manual hook groups in addition to Git hook names.
 ## Tool Installation
 
 Python-packaged local tools are split by role. Core developer tools are pinned
-in `requirements-dev.lock.txt`. Optional static-analysis providers are pinned
-in `requirements-analysis.lock.txt` so analyzer dependency churn stays out of
-the smaller build/test tool environment. Bazel build and test dependencies
-belong in Bazel module fragments and `MODULE.bazel.lock`.
+in `requirements-dev.lock.txt`. Optional Zizmor automation analysis is pinned
+in `requirements-analysis.lock.txt` so its binary wheel stays out of the
+smaller build/test tool environment. Bazel build and test dependencies belong
+in Bazel module fragments and `MODULE.bazel.lock`.
 
 Managed setup installs both Python locks. The analysis lock is installed with
 `--only-binary=:all:` so an incompatible Python package wheel fails setup
@@ -267,12 +265,11 @@ and CTest plus the shared Python-packaged tools.
 
 Outside CI, optional static-analysis providers skip when their tool is
 unavailable and print the missing executable. CI requires the providers selected
-by the CI profile. `dev.py doctor` reports optional tool availability; Semgrep
-includes the managed setup command in its warning when it is missing or the
-wrong version. Clang-tidy uses the Bazel LLVM repository model under
-`build_tools/clang_tidy`; local paranoid precommit skips when the LLVM tools are
-not available. The GitHub presubmit workflow fetches the ROCm LLVM toolchain and
-sets `IREE_CLANG_TIDY_REQUIRED=1` so missing LLVM tools fail loudly instead of
+by the CI profile. `dev.py doctor` reports optional tool availability. Clang-tidy
+uses the Bazel LLVM repository model under `build_tools/clang_tidy`; local
+paranoid precommit skips when the LLVM tools are not available. The GitHub
+presubmit workflow fetches the ROCm LLVM toolchain and sets
+`IREE_CLANG_TIDY_REQUIRED=1` so missing LLVM tools fail loudly instead of
 silently skipping.
 
 ## Bazel Editing
@@ -357,44 +354,26 @@ the same package.
 
 ## Static Analysis
 
-The root static-analysis lane dispatches providers from
-`build_tools/lefthook/presubmit.py`. Provider-specific rule configuration stays
-native to each provider. Semgrep is installed by managed setup through
-`requirements-analysis.lock.txt`:
+Repository-specific lexical contracts live in
+`build_tools/lefthook/repository_policy.py`. The data-driven checker pairs each
+forbidden text pattern with the exact repository-relative paths it owns and
+reports stable rule identifiers with line and column locations. It runs during
+every hygiene pass without an external executable. Editing the checker or its
+tests scans all tracked candidate paths; ordinary changes scan only the selected
+files.
 
-```bash
-python dev.py bazel setup --venv
-```
+The policies keep C runtime sources free of goto-based cleanup, prevent
+suppression of the designated-initializer check, keep target-generic diagnostics
+independent of architecture vocabulary, and enforce documentation ownership
+between the AMD hardware reference, libamdf, and CTS. Focused unit cases exercise
+every path boundary and accepted/rejected spelling. Semantic C and C++ contracts
+remain in the clang-tidy plugin, where parsed source and macro-expansion context
+are available.
 
-Semgrep rules live under `build_tools/static_analysis/semgrep/` and can be run
-directly:
-
-```bash
-semgrep scan --metrics=off --disable-version-check \
-  --config build_tools/static_analysis/semgrep/iree.yml runtime/src/iree
-```
-
-Presubmit runs Semgrep with `--severity ERROR --error`; only promoted hard
-rules gate commits and CI. Lower-severity rules remain available for cleanup
-campaigns and rule prototyping without flooding the new CI lane. Semgrep
-parallelism is controlled by `IREE_SEMGREP_JOBS`; when unset, the dispatcher
-uses roughly 85% of detected logical CPUs capped at 14 jobs. That cap avoids
-Semgrep's current high-core-count OCaml-domain failure mode while keeping the
-local/CI default comfortably fast for this repository size.
-
-Semgrep and clang-tidy select C/C++ files under `runtime/src/iree/`,
-`loom/src/loom/`, `libamdf/`, and `libhrx/`. Semgrep also selects the AMD hardware
-reference under `docs/reference/amd/`, library guides under `libamdf/docs/`,
-and `libamdf/README.md`. Its documentation rules keep the reference independent
-of libamdf APIs, CTS, and local implementation links, and library guides
-independent of CTS documentation.
-Each rule further scopes its applicable paths and languages. The no-goto rule
-covers libamdf C sources; IREE status-ownership rules apply to IREE consumers.
-
-Changes to the documentation rules run a regression through the real Semgrep
-engine, including its path filters. The cases exercise the reference's vocabulary
-and link rules, library-guide separation, valid external primary-source links,
-and exclusion of other documentation.
+The root static-analysis lane dispatches external providers from
+`build_tools/lefthook/presubmit.py`. Zizmor checks GitHub automation, and
+clang-tidy selects C/C++ files under `runtime/src/iree/`, `loom/src/loom/`,
+`loom/binding/c/`, `libamdf/`, and `libhrx/`.
 
 In the Bazel lane, clang-tidy maps selected files to their nearest package and
 invokes the checked-in clang-tidy aspect. File-based and explicit-target analysis
@@ -422,7 +401,8 @@ present in the configured compilation database and reports the rest as skipped.
 For example, `AMDF_BUILD=OFF` skips libamdf while enabled projects still run.
 An entirely excluded source selection succeeds as a skip before plugin setup;
 selected plugin infrastructure checks still run.
-Native Windows hooks currently delegate both providers to Linux presubmit CI.
+Native Windows hooks run repository policy directly and delegate the external
+providers to Linux presubmit CI.
 See `build_tools/clang_tidy/README.md` for the direct Bazel commands and LLVM
 discovery environment variables.
 

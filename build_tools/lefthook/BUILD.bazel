@@ -22,12 +22,25 @@ py_library(
     srcs = ["package_boundary.py"],
 )
 
+py_library(
+    name = "repository_policy",
+    srcs = ["repository_policy.py"],
+)
+
 py_test(
     name = "package_boundary_test",
     size = _PRESUBMIT_TEST_SIZE,
     srcs = ["package_boundary_test.py"],
     tags = _PRESUBMIT_TEST_TAGS,
     deps = [":package_boundary"],
+)
+
+py_test(
+    name = "repository_policy_test",
+    size = _PRESUBMIT_TEST_SIZE,
+    srcs = ["repository_policy_test.py"],
+    tags = _PRESUBMIT_TEST_TAGS,
+    deps = [":repository_policy"],
 )
 
 py_test(
@@ -53,6 +66,7 @@ py_test(
     tags = _PRESUBMIT_TEST_TAGS,
     deps = [
         ":package_boundary",
+        ":repository_policy",
         "//build_tools/devtools",
         "//libamdf/build_tools/bazel:configure",
         "//runtime/build_tools/bazel:configure",
@@ -66,5 +80,6 @@ test_suite(
         ":commit_msg_test",
         ":package_boundary_test",
         ":presubmit_test",
+        ":repository_policy_test",
     ],
 )
