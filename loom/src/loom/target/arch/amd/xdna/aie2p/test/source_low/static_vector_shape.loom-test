@@ -157,3 +157,117 @@ func.def @broadcast_f64_identity(%source: vector<4xf64>) -> (vector<4xf64>) {
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @broadcast_f64_identity(%source: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   return %source
 }
+
+// ====
+
+func.def @broadcast_f32_accumulator_rows(%source: vector<8xf32>) -> (vector<8x8xf32>) {
+  %result = vector.broadcast %source : vector<8xf32> -> vector<8x8xf32>
+  func.return %result : vector<8x8xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @broadcast_f32_accumulator_rows(%source: reg<aie2p.vec256 x2>) -> (reg<aie2p.mbms x4>) asm {
+  %14 = slice %source[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %16 = concat(%14, %14) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %17 = vmov.vector512.to.accumulator512 %16
+  %19 = concat(%17, %17) : (reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x2>
+  %result = concat(%19, %19) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  return %result
+}
+
+// ====
+
+func.def @exchange_f32_accumulator_rows(%input: buffer, %output: buffer, %replacement: vector<8x8xf32>) -> (vector<8x8xf32>) {
+  %base = index.constant 0 : offset
+  %source_aligned, %destination_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %source = buffer.view %source_aligned[%base] : buffer -> view<8x8xf32>
+  %destination = buffer.view %destination_aligned[%base] : buffer -> view<8x8xf32>
+  %value = vector.load %source[0, 0] : view<8x8xf32> -> vector<8x8xf32>
+  vector.store %replacement, %destination[0, 0] : vector<8x8xf32>, view<8x8xf32>
+  func.return %value : vector<8x8xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @exchange_f32_accumulator_rows(%replacement: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x4>) asm {
+  %source_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %destination_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %19 = vlda.acc %source_aligned, 0
+  %20 = vlda.acc %source_aligned, 64
+  %21 = vlda.acc %source_aligned, 128
+  %22 = vlda.acc %source_aligned, 192
+  %value = concat(%19, %20, %21, %22) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %24 = slice %replacement[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %24, %destination_aligned, 0
+  %25 = slice %replacement[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %25, %destination_aligned, 64
+  %26 = slice %replacement[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %26, %destination_aligned, 128
+  %27 = slice %replacement[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %27, %destination_aligned, 192
+  return %value
+}
+
+// ====
+
+func.def @exchange_dynamic_accumulator_tile(%input: buffer, %output: buffer, %replacement: vector<8x8xf32>, %row: index, %column: index) -> (vector<8x8xf32>) where [range(%row, 0, 1), range(%column, 0, 3)] {
+  %base = index.constant 0 : offset
+  %source_aligned, %destination_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %source = buffer.view %source_aligned[%base] : buffer -> view<2x4x8x8xf32>
+  %destination = buffer.view %destination_aligned[%base] : buffer -> view<2x4x8x8xf32>
+  %value = vector.load %source[%row, %column, 0, 0] : view<2x4x8x8xf32> -> vector<8x8xf32>
+  vector.store<volatile> %replacement, %destination[%row, %column, 0, 0] : vector<8x8xf32>, view<2x4x8x8xf32>
+  func.return %value : vector<8x8xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @exchange_dynamic_accumulator_tile(%replacement: reg<aie2p.mbms x4>, %row: reg<aie2p.er>, %column: reg<aie2p.er>) -> (reg<aie2p.mbms x4>) where [range(%row, 0, 1), range(%column, 0, 3)] asm {
+  %source_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %destination_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %27 = mov.short 6
+  %28 = lshl %column, %27
+  %29 = mov.short 256
+  %30 = copy %28 : reg<aie2p.er> -> reg<aie2p.er>
+  %31 = mac %30, %row, %29
+  %32 = copy %source_aligned : reg<aie2p.ep> -> reg<aie2p.ep>
+  %33 = mov.i32 2
+  %34 = lshl %31, %33
+  %35 = mov.modifier %34
+  %36 = paddb.modifier %32, %35
+  %37 = vlda.acc %36, 0
+  %38 = vlda.acc %36, 64
+  %39 = vlda.acc %36, 128
+  %40 = vlda.acc %36, 192
+  %value = concat(%37, %38, %39, %40) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %42 = copy %destination_aligned : reg<aie2p.ep> -> reg<aie2p.ep>
+  %44 = paddb.modifier %42, %35
+  %45 = slice %replacement[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.volatile<volatile> %45, %44, 0
+  %46 = slice %replacement[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.volatile<volatile> %46, %44, 64
+  %47 = slice %replacement[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.volatile<volatile> %47, %44, 128
+  %48 = slice %replacement[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.volatile<volatile> %48, %44, 192
+  return %value
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final},canonicalize
+
+func.def @load_shaped_view_argument(%source: view<2x4x8x8xf32>, %row: index, %column: index) -> (vector<8x8xf32>) where [range(%row, 0, 1), range(%column, 0, 3)] {
+  %value = vector.load %source[%row, %column, 0, 0] : view<2x4x8x8xf32> -> vector<8x8xf32>
+  func.return %value : vector<8x8xf32>
+}
+
+// ----
+func.def @load_shaped_view_argument(%source: view<2x4x8x8xf32>, %row: index, %column: index) -> (vector<8x8xf32>) where [range(%row, 0, 1), range(%column, 0, 3)] {
+  %12 = index.constant 6 : index
+  %13 = index.shli %column, %12 : index
+  %7 = index.constant 256 : index
+  %8 = index.madd %row, %7, %13 : index
+  %9 = view.bitcast %source : view<2x4x8x8xf32> -> view<512xf32>
+  %10 = vector.load %9[%8] : view<512xf32> -> vector<64xf32>
+  %value = vector.bitcast %10 : vector<64xf32> to vector<8x8xf32>
+  func.return %value : vector<8x8xf32>
+}

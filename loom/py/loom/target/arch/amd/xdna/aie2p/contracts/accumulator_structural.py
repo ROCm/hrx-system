@@ -990,9 +990,9 @@ def _accumulator_concat_right_shapes(
 _ACCUMULATOR_BITCAST_TYPE_GROUPS = (
     (_F32X32_ACCUMULATOR,),
     (
-        Vector("f32", minimum_lanes=33, maximum_lanes=64),
-        Vector("i32", minimum_lanes=33, maximum_lanes=64),
-        Vector("i64", minimum_lanes=17, maximum_lanes=32),
+        Vector("f32", minimum_static_elements=33, maximum_static_elements=64),
+        Vector("i32", minimum_static_elements=33, maximum_static_elements=64),
+        Vector("i64", minimum_static_elements=17, maximum_static_elements=32),
     ),
 )
 

@@ -31,7 +31,8 @@ static bool loom_aie2p_legalizer_descriptor_set_is_core(
 }
 
 // Multidimensional memory survives eager legalization for shared view
-// normalization. Final legalization owns fallback for layouts left unchanged.
+// normalization. Final legalization first normalizes its logical vector shape
+// so native packet selection sees the contiguous lanes before scalar fallback.
 static bool loom_aie2p_defer_multidimensional_memory_reference(
     const loom_target_legalization_context_t* context,
     loom_type_t payload_type) {
@@ -459,15 +460,22 @@ static iree_status_t loom_aie2p_legalize_vector_load(
     return iree_ok_status();
   }
 
-  bool rewritten = false;
-  IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_load(
-      context, op, context->vector_packet_policy, &rewritten));
   const loom_type_t result_type =
       loom_module_value_type(context->module, loom_vector_load_result(op));
-  if (!rewritten &&
+  const bool can_rewrite_memory =
       !loom_aie2p_defer_multidimensional_memory_reference(context,
                                                           result_type) &&
-      loom_target_legalization_op_has_source_vector_carriers(context, op)) {
+      loom_target_legalization_op_has_source_vector_carriers(context, op);
+  bool rewritten = false;
+  if (loom_type_rank(result_type) > 1 && can_rewrite_memory) {
+    IREE_RETURN_IF_ERROR(
+        loom_vector_static_shape_memory_rewrite_op(context, op, &rewritten));
+  }
+  if (!rewritten) {
+    IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_load(
+        context, op, context->vector_packet_policy, &rewritten));
+  }
+  if (!rewritten && can_rewrite_memory) {
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_rewrite_op(
         context->pass, context->rewriter, op, &rewritten));
   }
@@ -536,13 +544,20 @@ static iree_status_t loom_aie2p_legalize_vector_store(
     }
   }
 
-  bool rewritten = false;
-  IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_store(
-      context, op, context->vector_packet_policy, &rewritten));
-  if (!rewritten && !has_native_store &&
+  const bool can_rewrite_memory =
       !loom_aie2p_defer_multidimensional_memory_reference(context,
                                                           value_type) &&
-      loom_target_legalization_op_has_source_vector_carriers(context, op)) {
+      loom_target_legalization_op_has_source_vector_carriers(context, op);
+  bool rewritten = false;
+  if (loom_type_rank(value_type) > 1 && can_rewrite_memory) {
+    IREE_RETURN_IF_ERROR(
+        loom_vector_static_shape_memory_rewrite_op(context, op, &rewritten));
+  }
+  if (!rewritten) {
+    IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_store(
+        context, op, context->vector_packet_policy, &rewritten));
+  }
+  if (!rewritten && !has_native_store && can_rewrite_memory) {
     IREE_RETURN_IF_ERROR(loom_vector_store_captured_to_scalar_rewrite_op(
         context->pass, context->rewriter, op, &rewritten));
   }

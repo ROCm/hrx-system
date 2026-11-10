@@ -109,3 +109,17 @@ func.def @f8e5m2_i8x4_bitcast(%floats: vector<4xf8E5M2>, %bytes: vector<4xi8>) -
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f8e5m2_i8x4_bitcast(%encoded_bits: reg<aie2p.vec256 x2>, %encoded: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
   return %encoded_bits, %encoded
 }
+
+// ====
+
+func.def @accumulator_shapes(%floats: vector<2x4x8xf32>, %words: vector<4x12xi32>, %double_words: vector<3x8xi64>) -> (vector<64xf32>, vector<48xi32>, vector<24xi64>) {
+  %flat_floats = vector.bitcast %floats : vector<2x4x8xf32> to vector<64xf32>
+  %flat_words = vector.bitcast %words : vector<4x12xi32> to vector<48xi32>
+  %flat_double_words = vector.bitcast %double_words : vector<3x8xi64> to vector<24xi64>
+  func.return %flat_floats, %flat_words, %flat_double_words : vector<64xf32>, vector<48xi32>, vector<24xi64>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @accumulator_shapes(%flat_floats: reg<aie2p.mbms x4>, %flat_words: reg<aie2p.mbms x4>, %flat_double_words: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x4>, reg<aie2p.mbms x4>, reg<aie2p.mbms x4>) asm {
+  return %flat_floats, %flat_words, %flat_double_words
+}
