@@ -136,6 +136,9 @@ bool loom_aie2p_array_resolve_binding_transfer(
     for (; first_transfer_axis < record_start; ++first_transfer_axis) {
       const loom_storage_geometry_axis_t axis =
           geometry->axes[first_transfer_axis];
+      if (axis.extent == 1) {
+        continue;
+      }
       if (axis.element_stride != 0) {
         break;
       }
@@ -143,7 +146,14 @@ bool loom_aie2p_array_resolve_binding_transfer(
       task_repeat_count *= axis.extent;
     }
 
+    uint8_t transfer_rank = 0;
     for (uint8_t axis = first_transfer_axis; axis < source_rank; ++axis) {
+      // A single coordinate contributes no address advance, regardless of its
+      // stride. It consumes neither a DMA dimension nor a repetition field.
+      if (geometry->axes[axis].extent == 1) {
+        continue;
+      }
+      ++transfer_rank;
       if (geometry->axes[axis].element_stride == 0) {
         return loom_aie2p_array_reject_binding_transfer(
             IREE_SV("only leading source sequence axes may use zero stride "
@@ -176,7 +186,6 @@ bool loom_aie2p_array_resolve_binding_transfer(
     binding_span_byte_length = binding_span_bit_length / 8u;
 
     if (!span.dense) {
-      const uint8_t transfer_rank = source_rank - first_transfer_axis;
       if (transfer_rank > dma_facts->address_dimension_count) {
         return loom_aie2p_array_reject_binding_transfer(
             IREE_SV("the strided transfer requires more address dimensions "
@@ -184,9 +193,12 @@ bool loom_aie2p_array_resolve_binding_transfer(
             out_reason);
       }
       dma_dimension_count = transfer_rank;
+      uint8_t dimension_index = 0;
       for (uint8_t axis = source_rank; axis-- > first_transfer_axis;) {
-        const uint8_t dimension_index = source_rank - axis - 1u;
         const loom_storage_geometry_axis_t source_axis = geometry->axes[axis];
+        if (source_axis.extent == 1) {
+          continue;
+        }
         if (!loom_aie2p_array_binding_address_dimension(
                 source_axis.element_stride, source_axis.extent,
                 element_bit_width, family->address_generation_granularity_bits,
@@ -194,6 +206,7 @@ bool loom_aie2p_array_resolve_binding_transfer(
                 &dma_dimensions[dimension_index], out_reason)) {
           return false;
         }
+        ++dimension_index;
       }
     }
   }

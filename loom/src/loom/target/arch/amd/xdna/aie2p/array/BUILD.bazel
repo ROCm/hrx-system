@@ -130,6 +130,18 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "binding_test",
+    srcs = ["binding_test.cc"],
+    deps = [
+        ":plan",
+        "//loom/src/loom/analysis:storage_geometry",
+        "//loom/src/loom/target/arch/amd/xdna/array:facts",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "program_test",
     srcs = ["program_test.cc"],
     deps = [

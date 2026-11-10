@@ -544,7 +544,7 @@ pipeline.def<kernel> public retain target(@device) @transfer_scratch_capacity() 
 
 aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
 
-// Singleton inner dimensions retain the compute DMA's eight-bit D1 wrap.
+// Removing a singleton inner axis still leaves an overflowing eight-bit wrap.
 pipeline.def<kernel> public retain target(@device) @dma_wrap_overflow() run(%input_arg: buffer, %output_arg: buffer) {
   %input_unique, %output_unique = buffer.assume.noalias %input_arg, %output_arg : buffer, buffer
   %input, %output = buffer.assume.alignment %input_unique, %output_unique {minimum_alignment = 4} : buffer, buffer

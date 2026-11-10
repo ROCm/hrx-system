@@ -24,7 +24,7 @@ const loom_storage_geometry_t kThreeDimensionRecord = {
     .layout_kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
     .element_bit_count = 32,
     .rank = 3,
-    .axes = {{2, 8}, {1, 4}, {2, 1}},
+    .axes = {{2, 8}, {2, 4}, {2, 1}},
 };
 
 void ExpectIngress(const loom_storage_geometry_t& geometry,
@@ -68,8 +68,8 @@ TEST(Aie2pDmaPlanTest, FixedSourceKeepsRecordGeometryAndTaskRepetition) {
 
 TEST(Aie2pDmaPlanTest, ThreeDimensionsRetainTheIndependentIterator) {
   ExpectIngress(
-      kThreeDimensionRecord, 16, 64, 64, 64, 64,
-      {4, 0, 0, 0x00200000, 0xc0100003, 0x02000007, 0x03f0000f, 0x02000000});
+      kThreeDimensionRecord, 32, 64, 64, 64, 64,
+      {8, 0, 0, 0x00200000, 0xc0200003, 0x02000007, 0x03f0000f, 0x02000000});
 }
 
 TEST(Aie2pDmaPlanTest, UnrepresentableSequenceCannotTruncateItsIterator) {
@@ -80,7 +80,7 @@ TEST(Aie2pDmaPlanTest, UnrepresentableSequenceCannotTruncateItsIterator) {
     uint32_t words[8] = {};
     uint32_t repetitions = 0;
     EXPECT_FALSE(loom_aie2p_native_encode_ingress(
-        family, &kThreeDimensionRecord, &facts->dma, 16, 64, count, count,
+        family, &kThreeDimensionRecord, &facts->dma, 32, 64, count, count,
         words, &repetitions));
   }
 }
@@ -102,7 +102,7 @@ TEST(Aie2pDmaPlanTest, RepeatedPeriodsCannotDuplicateIteratorState) {
   uint32_t words[8] = {};
   uint32_t repetitions = 0;
   EXPECT_FALSE(loom_aie2p_native_encode_ingress(family, &kThreeDimensionRecord,
-                                                &facts->dma, 16, 64, 1280, 8,
+                                                &facts->dma, 32, 64, 1280, 8,
                                                 words, &repetitions));
 }
 
@@ -150,22 +150,24 @@ TEST(Aie2pDmaPlanTest, EveryAddressWrapFieldRejectsTruncation) {
         .layout_kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
         .element_bit_count = 32,
         .rank = static_cast<uint8_t>(entry.dimension + 2),
-        .axes = {{2, 2064},
-                 {entry.maximum, entry.dimension ? 2u : 1u},
-                 {1, 1},
-                 {1, 1}},
+        .axes = {{2, 2064u << entry.dimension},
+                 {entry.maximum, 1u << entry.dimension}},
     };
+    for (uint8_t axis = 2; axis < geometry.rank; ++axis) {
+      geometry.axes[axis] = {2, 1u << (geometry.rank - axis - 1)};
+    }
+    const uint32_t bytes_per_wrap = (2u << entry.dimension) * sizeof(uint32_t);
     uint32_t words[8] = {};
     iree_string_view_t reason;
     ASSERT_TRUE(loom_aie2p_native_encode_descriptor(
-        family, &geometry, dma, 2 * entry.maximum * sizeof(uint32_t), 1,
-        entry.kind, words, &reason));
+        family, &geometry, dma, entry.maximum * bytes_per_wrap, 1, entry.kind,
+        words, &reason));
     EXPECT_EQ(Decode(words[entry.word], entry.field), entry.maximum);
 
     ++geometry.axes[1].extent;
     uint32_t rejected_words[8] = {};
     EXPECT_FALSE(loom_aie2p_native_encode_descriptor(
-        family, &geometry, dma, 2 * (entry.maximum + 1) * sizeof(uint32_t), 1,
+        family, &geometry, dma, (entry.maximum + 1) * bytes_per_wrap, 1,
         entry.kind, rejected_words, &reason));
     EXPECT_TRUE(iree_string_view_equal(
         reason,
