@@ -415,10 +415,12 @@ loom_cc_test(
     name = "program_test",
     srcs = [
         "jit_vm_test.cc",
+        "program_object_test.cc",
         "program_test.cc",
     ],
     args = [
         "--binding_source=$(rootpath :testdata/binding.loom)",
+        "--object_source=$(rootpath :testdata/objects.loom)",
         "--vm_sources=$(rootpath :testdata/jit/control.loom)",
         "--vm_invalid_source=$(rootpath :testdata/compilation/invalid.loom)",
     ],
@@ -428,6 +430,7 @@ loom_cc_test(
         "testdata/jit/control.loom",
         "testdata/jit/private_vm_helper.loom",
         "testdata/jit/vm_helpers.loom",
+        "testdata/objects.loom",
     ],
     deps = [
         ":input",
@@ -443,6 +446,7 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm:invocation_test_module",
         "//runtime/src/iree/vm:test_support",
     ],
 )

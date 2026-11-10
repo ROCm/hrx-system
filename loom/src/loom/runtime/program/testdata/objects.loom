@@ -1,0 +1,36 @@
+// The provider owns native payloads; source functions only transfer handles.
+type.decl import("invocation.test", "object") @Object
+
+func.decl import("invocation.test", "echo_ref") @native_echo(%owner: ref<@Object>) -> (ref<@Object>)
+
+func.decl import("invocation.test", "fail") @native_fail(%a: i32, %b: i32) -> (i32)
+
+func.decl import("invocation.test", "yield_ref") @native_yield(%owner: ref<@Object>) -> (ref<@Object>)
+
+func.def public @echo(%owner: ref<@Object>) -> (ref<@Object>) {
+  %result = func.call @native_echo(%owner) : (ref<@Object>) -> (ref<@Object>)
+  func.return %result : ref<@Object>
+}
+
+// One source turn replaces a request's owner and returns its previous payload
+// as a protected snapshot. Another request's state is never part of this call.
+func.def public @advance(%current: ref<@Object>, %replacement: ref<@Object>) -> (ref<@Object>, ptr<@Object>) {
+  %previous = ref.borrow %current : ref<@Object> -> ptr<@Object>
+  ref.release %current : ref<@Object>
+  %next = func.call @native_echo(%replacement) : (ref<@Object>) -> (ref<@Object>)
+  func.return %next, %previous : ref<@Object>, ptr<@Object>
+}
+
+// A failing native call leaves cleanup of the preceding native result to the
+// VM's terminal path, before an owning result can reach the host.
+func.def public @fail(%owner: ref<@Object>) -> (ref<@Object>) {
+  %current = func.call @native_echo(%owner) : (ref<@Object>) -> (ref<@Object>)
+  %c0 = scalar.constant 0 : i32
+  %unused = func.call @native_fail(%c0, %c0) : (i32, i32) -> (i32)
+  func.return %current : ref<@Object>
+}
+
+func.def public @yield(%owner: ref<@Object>) -> (ref<@Object>) {
+  %result = func.call @native_yield(%owner) : (ref<@Object>) -> (ref<@Object>)
+  func.return %result : ref<@Object>
+}

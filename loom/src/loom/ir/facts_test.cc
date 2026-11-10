@@ -134,14 +134,82 @@ TEST(FactsNarrowing, IntegerFeedbackHasFiniteDescendingHeight) {
 }
 
 TEST(FactsNarrowing, UnknownEndpointCanRefineAfterTheOtherEndpoint) {
-  const auto left_bounded = loom_value_facts_make(0, INT64_MAX, 1);
+  const auto left_bounded = loom_value_facts_make(4, INT64_MAX, 1);
   auto facts = loom_value_facts_narrow(
       LOOM_SCALAR_TYPE_I64, loom_value_facts_unknown(), left_bounded);
   facts = loom_value_facts_narrow(LOOM_SCALAR_TYPE_I64, facts,
                                   loom_value_facts_make(8, 64, 8));
-  EXPECT_EQ(facts.range_lo, 0);
+  EXPECT_EQ(facts.range_lo, 4);
   EXPECT_EQ(facts.range_hi, 64);
   EXPECT_EQ(facts.known_divisor, 8);
+}
+
+TEST(FactsNarrowing, SignRefinementPreservesFiniteDescendingHeight) {
+  const loom_scalar_type_t types[] = {
+      LOOM_SCALAR_TYPE_I8, LOOM_SCALAR_TYPE_I16, LOOM_SCALAR_TYPE_I32,
+      LOOM_SCALAR_TYPE_I64, LOOM_SCALAR_TYPE_INDEX};
+  struct Bound {
+    // Lower endpoint observed by the next completed analysis.
+    int64_t observed;
+    // Lower endpoint retained after bounded narrowing.
+    int64_t expected;
+  };
+  const Bound bounds[] = {{-8, -8}, {-4, -8}, {0, 0}, {2, 2},
+                          {3, 2},   {4, 2},   {5, 2}};
+  for (auto type : types) {
+    SCOPED_TRACE(type);
+    int64_t minimum;
+    int64_t maximum;
+    ASSERT_TRUE(loom_value_facts_scalar_type_domain(type, &minimum, &maximum));
+    auto lower = loom_value_facts_make(minimum, maximum, 1);
+    auto upper = lower;
+    for (const auto& bound : bounds) {
+      SCOPED_TRACE(bound.observed);
+      lower = loom_value_facts_narrow(
+          type, lower, loom_value_facts_make(bound.observed, 100, 1));
+      upper = loom_value_facts_narrow(
+          type, upper, loom_value_facts_make(-100, -bound.observed, 1));
+      EXPECT_EQ(lower.range_lo, bound.expected);
+      EXPECT_EQ(lower.range_hi, 100);
+      EXPECT_EQ(upper.range_lo, -100);
+      EXPECT_EQ(upper.range_hi, -bound.expected);
+    }
+  }
+}
+
+TEST(FactsNarrowing, NonnegativeDomainCanDiscoverPositiveExtent) {
+  const loom_scalar_type_t types[] = {
+      LOOM_SCALAR_TYPE_I1,    LOOM_SCALAR_TYPE_I8,  LOOM_SCALAR_TYPE_I16,
+      LOOM_SCALAR_TYPE_I32,   LOOM_SCALAR_TYPE_I64, LOOM_SCALAR_TYPE_INDEX,
+      LOOM_SCALAR_TYPE_OFFSET};
+  for (auto type : types) {
+    SCOPED_TRACE(type);
+    int64_t minimum;
+    int64_t maximum;
+    ASSERT_TRUE(loom_value_facts_scalar_type_domain(type, &minimum, &maximum));
+    const auto positive = type == LOOM_SCALAR_TYPE_I1
+                              ? loom_value_facts_exact_i64(1)
+                              : loom_value_facts_make(2, 5, 1);
+    const auto facts = loom_value_facts_narrow(
+        type, loom_value_facts_make(0, maximum, 1), positive);
+    EXPECT_EQ(facts.range_lo, positive.range_lo);
+    EXPECT_EQ(facts.range_hi, positive.range_hi);
+    EXPECT_TRUE(facts.flags & LOOM_VALUE_FACT_POSITIVE);
+    EXPECT_TRUE(facts.flags & LOOM_VALUE_FACT_NON_ZERO);
+    EXPECT_TRUE(facts.flags & LOOM_VALUE_FACT_NON_NEGATIVE);
+  }
+}
+
+TEST(FactsNarrowing, SignRefinementCanSkipZero) {
+  const auto previous = loom_value_facts_make(-8, 8, 1);
+  const auto positive = loom_value_facts_narrow(
+      LOOM_SCALAR_TYPE_INDEX, previous, loom_value_facts_make(2, 5, 1));
+  EXPECT_EQ(positive.range_lo, 2);
+  EXPECT_EQ(positive.range_hi, 8);
+  const auto negative = loom_value_facts_narrow(
+      LOOM_SCALAR_TYPE_INDEX, previous, loom_value_facts_make(-5, -2, 1));
+  EXPECT_EQ(negative.range_lo, -8);
+  EXPECT_EQ(negative.range_hi, -2);
 }
 
 TEST(FactsNarrowing, UntypedUnknownDoesNotEraseTheIntegerDomain) {

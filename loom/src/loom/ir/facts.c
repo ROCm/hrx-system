@@ -70,13 +70,21 @@ loom_value_facts_t loom_value_facts_narrow(loom_scalar_type_t scalar_type,
     int64_t upper = INT64_MAX;
     loom_value_facts_scalar_type_domain(scalar_type, &lower, &upper);
     const bool exact = loom_value_facts_is_exact(next);
+    // Sign information can arrive after a finite bound, such as a view extent
+    // becoming positive after its nonnegative domain was already established.
+    // Each endpoint can cross zero and leave zero only once, preserving finite
+    // descending height without freezing these independent predicates.
+    const bool narrow_lower = exact || previous.range_lo <= lower ||
+                              (previous.range_lo < 0 && next.range_lo >= 0) ||
+                              (previous.range_lo == 0 && next.range_lo > 0);
+    const bool narrow_upper = exact || previous.range_hi >= upper ||
+                              (previous.range_hi > 0 && next.range_hi <= 0) ||
+                              (previous.range_hi == 0 && next.range_hi < 0);
     result = loom_value_facts_make(
-        exact || previous.range_lo <= lower
-            ? iree_max(previous.range_lo, next.range_lo)
-            : previous.range_lo,
-        exact || previous.range_hi >= upper
-            ? iree_min(previous.range_hi, next.range_hi)
-            : previous.range_hi,
+        narrow_lower ? iree_max(previous.range_lo, next.range_lo)
+                     : previous.range_lo,
+        narrow_upper ? iree_min(previous.range_hi, next.range_hi)
+                     : previous.range_hi,
         exact || previous.known_divisor == 1 ? next.known_divisor
                                              : previous.known_divisor);
     result.flags |= (previous.flags | next.flags) &

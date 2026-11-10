@@ -842,11 +842,11 @@ static iree_status_t loom_refine_boundaries_materialize_exact_value(
   if (!loom_value_facts_can_materialize_constant(facts, type)) {
     return iree_ok_status();
   }
-  // A body constant cannot replace an identity needed by a dependent type at
-  // the function boundary. Refinement may eliminate those type uses in a
-  // later round; until then the argument continues to carry the exact facts.
-  if (predicate_owner.op &&
-      loom_module_value_has_type_uses(module, old_value)) {
+  // Dependent types must specialize before their carrier becomes a body
+  // constant. Their boundary owner may require the identity to remain, such as
+  // a public call result. Until those type uses retire, seed the exact facts
+  // without changing the identity in either arguments or results.
+  if (loom_module_value_has_type_uses(module, old_value)) {
     return iree_ok_status();
   }
 
@@ -1051,6 +1051,14 @@ static iree_status_t loom_refine_boundaries_apply_function_boundary_values(
         out_materialized_count, /*apply_replacements=*/mutate_values,
         /*materialize_constants=*/materialize_arguments));
   }
+  if (mutate_values && function_info->can_refine_boundary) {
+    const loom_value_id_t* results =
+        loom_op_const_results(function_info->function.op);
+    for (uint16_t i = 0; i < function_info->result_count; ++i) {
+      IREE_RETURN_IF_ERROR(loom_refine_boundaries_apply_value_replacement(
+          module, replacements, results[i], out_applied_count));
+    }
+  }
 
   loom_refine_boundaries_apply_t apply = {
       .module = module,
@@ -1244,39 +1252,47 @@ static iree_status_t loom_refine_boundaries_collect_argument_equality(
   return iree_ok_status();
 }
 
-static bool loom_refine_boundaries_call_result_is_tied(const loom_op_t* call_op,
-                                                       iree_host_size_t index) {
-  const loom_tied_result_t* tied_results = loom_op_tied_results(call_op);
-  for (uint16_t i = 0; i < call_op->tied_result_count; ++i) {
+static bool loom_refine_boundaries_result_can_forward(
+    const loom_module_t* module, const loom_op_t* boundary_op,
+    const loom_refine_boundaries_function_t* callee_info,
+    iree_host_size_t index) {
+  const loom_tied_result_t* tied_results = loom_op_tied_results(boundary_op);
+  for (uint16_t i = 0; i < boundary_op->tied_result_count; ++i) {
     if (tied_results[i].result_index == index) {
-      return true;
+      return false;
     }
   }
-  return false;
+  // A retained signature owns its dependent result identities. Replacing one
+  // only at a caller would make that call's result types disagree with the ABI.
+  return callee_info->can_refine_boundary ||
+         !loom_module_value_has_type_uses(
+             module, loom_op_const_results(callee_info->function.op)[index]);
 }
 
 static iree_status_t loom_refine_boundaries_collect_return_forwarding(
-    loom_refine_boundaries_collect_t* collect, const loom_op_t* call_op,
+    loom_refine_boundaries_collect_t* collect, const loom_op_t* boundary_op,
     const loom_refine_boundaries_function_t* callee_info,
-    loom_value_slice_t operands, loom_value_slice_t results) {
+    const loom_value_id_t* operands, uint16_t operand_count,
+    const loom_value_id_t* results, uint16_t result_count) {
   if (!callee_info->return_forward_argument_indices) {
     return iree_ok_status();
   }
-  iree_host_size_t count = results.count < callee_info->result_count
-                               ? results.count
+  iree_host_size_t count = result_count < callee_info->result_count
+                               ? result_count
                                : callee_info->result_count;
   for (iree_host_size_t i = 0; i < count; ++i) {
-    if (loom_refine_boundaries_call_result_is_tied(call_op, i)) {
+    if (!loom_refine_boundaries_result_can_forward(
+            collect->graph->module, boundary_op, callee_info, i)) {
       continue;
     }
 
     int32_t argument_index = callee_info->return_forward_argument_indices[i];
     if (argument_index < 0 ||
-        (iree_host_size_t)argument_index >= operands.count) {
+        (iree_host_size_t)argument_index >= operand_count) {
       continue;
     }
-    loom_value_id_t result = results.values[i];
-    loom_value_id_t replacement = operands.values[argument_index];
+    loom_value_id_t result = results[i];
+    loom_value_id_t replacement = operands[argument_index];
     if (!loom_refine_boundaries_values_have_equal_types(collect->graph->module,
                                                         result, replacement)) {
       continue;
@@ -1291,16 +1307,17 @@ static iree_status_t loom_refine_boundaries_collect_return_forwarding(
     if (callee_info->return_forward_argument_indices[i] >= 0) {
       continue;
     }
-    if (loom_refine_boundaries_call_result_is_tied(call_op, i)) {
+    if (!loom_refine_boundaries_result_can_forward(
+            collect->graph->module, boundary_op, callee_info, i)) {
       continue;
     }
 
     int32_t result_index = callee_info->return_forward_result_indices[i];
-    if (result_index < 0 || (iree_host_size_t)result_index >= results.count) {
+    if (result_index < 0 || (iree_host_size_t)result_index >= result_count) {
       continue;
     }
-    loom_value_id_t result = results.values[i];
-    loom_value_id_t replacement = results.values[result_index];
+    loom_value_id_t result = results[i];
+    loom_value_id_t replacement = results[result_index];
     if (!loom_refine_boundaries_values_have_equal_types(collect->graph->module,
                                                         result, replacement)) {
       continue;
@@ -1348,7 +1365,8 @@ static iree_status_t loom_refine_boundaries_collect_call(
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_refine_boundaries_collect_return_forwarding(
-      collect, op, callee_info, operands, results));
+      collect, op, callee_info, operands.values, operands.count, results.values,
+      results.count));
   loom_reference_call_t reference_call;
   bool has_reference_call = false;
   iree_host_size_t count = results.count < callee_info->result_count
@@ -1442,6 +1460,15 @@ static iree_status_t loom_refine_boundaries_collect_function(
       IREE_RETURN_IF_ERROR(loom_value_fact_table_define(
           next_boundary_facts, results[i], function_info->return_facts[i]));
     }
+  }
+  // Forwarded signature identities must change with caller identities: a
+  // dependent result cannot keep naming a dimension or encoding that callers
+  // have replaced. Public signatures keep their authored result identities.
+  if (function_info->can_refine_boundary) {
+    IREE_RETURN_IF_ERROR(loom_refine_boundaries_collect_return_forwarding(
+        &collect, function_info->function.op, function_info,
+        function_info->argument_ids, function_info->argument_count, results,
+        function_info->result_count));
   }
   function_info->has_return_facts = true;
   return iree_ok_status();
