@@ -2328,7 +2328,7 @@ records remain partitioned SSA values. Aggregate copies preserve value semantics
 in either representation, and shared private-storage promotion can remove the
 allocation after inlining.
 
-### Private reference helpers
+### Private reference helpers and methods
 
 Private helpers transport the fields they read and return the fields they
 update. Other fields can remain uninitialized, including fields whose values
@@ -2358,6 +2358,31 @@ and views with their dimensions and encodings remain complete value groups.
 Public signatures, source predicates, and reference-returning helpers preserve
 their complete source contracts. Observable addresses and overlapping
 arguments retain the shared storage needed to preserve object identity.
+
+Methods and destructors use the same field contracts:
+
+```cpp
+struct Cursor {
+  const float* data;
+  unsigned position;
+  unsigned* output;
+  void reset() { position = 0; }
+  ~Cursor() { *output = position; }
+};
+void initialize(unsigned* output) {
+  Cursor cursor;
+  cursor.output = output;
+  cursor.reset();
+}
+```
+
+`reset()` needs no receiver inputs and returns the new position. The destructor
+takes that position and the output pointer's buffer/offset pair. The unused
+`data` field stays uninitialized, and `cursor` needs no allocation. Cleanup
+reads the current fields at scope exit, including early returns, `break`, and
+`continue`; nested members and bases retain their destruction order. Reading
+an uninitialized field still produces a source diagnostic. Exported C++ uses
+explicit helper calls and results to preserve this behavior.
 
 ### Selected references
 
