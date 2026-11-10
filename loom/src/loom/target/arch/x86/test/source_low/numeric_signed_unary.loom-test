@@ -23,17 +23,16 @@ func.def @signed_unary_i8(%input: i8) -> (i8, i8, i8) {
 
 // ----
 low.func.def target<x86.scalar.core> abi(object_function) abi_layout({signature = (i8) -> (i8, i8, i8)}) @signed_unary_i8(%input: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm {
-  %29 = movsx.i8.gpr32 %input
-  %30 = mov.imm32 0
+  %30 = movsx.i8.gpr32 %input
   %31 = copy %30 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %negative = sub.gpr32 %31, %29
-  %33 = copy %29 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %negative = neg.gpr32 %31
+  %33 = copy %30 : reg<x86.gpr32> -> reg<x86.gpr32>
   %34 = sar.imm.gpr32 %33 {shift = 31}
-  %35 = copy %29 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %35 = copy %30 : reg<x86.gpr32> -> reg<x86.gpr32>
   %36 = xor.gpr32 %35, %34
   %37 = copy %36 : reg<x86.gpr32> -> reg<x86.gpr32>
   %absolute = sub.gpr32 %37, %34
-  %39 = cmp.imm.gpr32 %29, 0, "ne"
+  %39 = cmp.imm.gpr32 %30, 0, "ne"
   %40 = copy %34 : reg<x86.gpr32> -> reg<x86.gpr32>
   %sign = or.gpr32 %40, %39
   return %negative, %absolute, %sign
@@ -50,17 +49,16 @@ func.def @signed_unary_i16(%input: i16) -> (i16, i16, i16) {
 
 // ----
 low.func.def target<x86.scalar.core> abi(object_function) abi_layout({signature = (i16) -> (i16, i16, i16)}) @signed_unary_i16(%input: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm {
-  %29 = movsx.i16.gpr32 %input
-  %30 = mov.imm32 0
+  %30 = movsx.i16.gpr32 %input
   %31 = copy %30 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %negative = sub.gpr32 %31, %29
-  %33 = copy %29 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %negative = neg.gpr32 %31
+  %33 = copy %30 : reg<x86.gpr32> -> reg<x86.gpr32>
   %34 = sar.imm.gpr32 %33 {shift = 31}
-  %35 = copy %29 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %35 = copy %30 : reg<x86.gpr32> -> reg<x86.gpr32>
   %36 = xor.gpr32 %35, %34
   %37 = copy %36 : reg<x86.gpr32> -> reg<x86.gpr32>
   %absolute = sub.gpr32 %37, %34
-  %39 = cmp.imm.gpr32 %29, 0, "ne"
+  %39 = cmp.imm.gpr32 %30, 0, "ne"
   %40 = copy %34 : reg<x86.gpr32> -> reg<x86.gpr32>
   %sign = or.gpr32 %40, %39
   return %negative, %absolute, %sign

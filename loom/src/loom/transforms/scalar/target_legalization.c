@@ -1320,9 +1320,18 @@ static iree_status_t loom_scalar_legalize_signed_unary(
       IREE_RETURN_IF_ERROR(loom_scalar_extsi_build(
           builder, value, input_type, working_type, op->location, &extension));
       value = loom_scalar_extsi_result(extension);
-    }
-
-    if (loom_scalar_negi_isa(op)) {
+      // Widen the semantic operation before choosing its implementation. The
+      // native carrier may have a contract even when the authored width does
+      // not; the legalization worklist owns that selection.
+      loom_op_t* widened = NULL;
+      IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
+          builder, op->kind, 1, 1, 0, 0, 0, op->location, &widened));
+      loom_op_operands(widened)[0] = value;
+      IREE_RETURN_IF_ERROR(loom_builder_define_result(
+          builder, working_type, &loom_op_results(widened)[0]));
+      IREE_RETURN_IF_ERROR(loom_builder_finalize_op(builder, widened));
+      replacement = loom_op_results(widened)[0];
+    } else if (loom_scalar_negi_isa(op)) {
       loom_value_id_t zero = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_scalar_constant(
           builder, op->location, working_type, 0, &zero));

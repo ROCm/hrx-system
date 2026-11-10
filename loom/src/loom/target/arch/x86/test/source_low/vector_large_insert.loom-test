@@ -63,72 +63,71 @@ func.def public target(@target) @i16x23_insert_dynamic(%input: buffer, %output: 
 
 // ----
 low.func.def public target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (buffer, buffer, i16, index) -> ()}) @i16x23_insert_dynamic(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %value: reg<x86.gpr32>, %position: reg<x86.gpr64>) asm {
-  %76 = movzx.load.u16.gpr32 %input {disp32 = 40}
-  %77 = movzx.load.u16.gpr32 %input {disp32 = 42}
-  %78 = movzx.load.u16.gpr32 %input {disp32 = 44}
-  %79 = mov.trunc.gpr32.gpr64 %position
-  %80 = movsx.i16.gpr32 %79
-  %81 = mov.imm32 0
-  %82 = copy %81 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %83 = sub.gpr32 %82, %80
-  %84 = mov.imm64 506097522914230528
-  %85 = vmovq.xmm.gpr64 %84
-  %86 = mov.imm64 1084818905618843912
-  %87 = vmovq.xmm.gpr64 %86
-  %88 = vpunpcklqdq.xmm %85, %87
-  %89 = vpmovzxbw.ymm %88
-  %90 = vmovd.xmm.gpr32 %83
-  %91 = vpbroadcastw.ymm %90
-  %92 = vpaddw.ymm %91, %89
-  %93 = vxorps.zero.ymm
-  %94 = vpcmpeqw.ymm %92, %93
-  %95 = cmp.imm.gpr64 %position, 16, "ult"
-  %96 = mov.imm32 0
-  %97 = sub.gpr32 %96, %95
-  %98 = vmovd.xmm.gpr32 %97
+  %74 = movzx.load.u16.gpr32 %input {disp32 = 40}
+  %75 = movzx.load.u16.gpr32 %input {disp32 = 42}
+  %76 = movzx.load.u16.gpr32 %input {disp32 = 44}
+  %77 = mov.trunc.gpr32.gpr64 %position
+  %78 = movsx.i16.gpr32 %77
+  %79 = copy %78 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %80 = neg.gpr32 %79
+  %81 = mov.imm64 506097522914230528
+  %82 = vmovq.xmm.gpr64 %81
+  %83 = mov.imm64 1084818905618843912
+  %84 = vmovq.xmm.gpr64 %83
+  %85 = vpunpcklqdq.xmm %82, %84
+  %86 = vpmovzxbw.ymm %85
+  %87 = vmovd.xmm.gpr32 %80
+  %88 = vpbroadcastw.ymm %87
+  %89 = vpaddw.ymm %88, %86
+  %90 = vxorps.zero.ymm
+  %91 = vpcmpeqw.ymm %89, %90
+  %92 = cmp.imm.gpr64 %position, 16, "ult"
+  %93 = mov.imm32 0
+  %94 = sub.gpr32 %93, %92
+  %95 = vmovd.xmm.gpr32 %94
+  %96 = vpbroadcastw.ymm %95
+  %97 = vpand.ymm %91, %96
+  %98 = vmovd.xmm.gpr32 %value
   %99 = vpbroadcastw.ymm %98
-  %100 = vpand.ymm %94, %99
-  %101 = vmovd.xmm.gpr32 %value
-  %102 = vpbroadcastw.ymm %101
-  %103 = vmovdqu32.load.ymm %input {disp32 = 0}
-  %104 = vpblendvb.ymm %103, %102, %100
-  %105 = movzx.u16.gpr32 %79
+  %100 = vmovdqu32.load.ymm %input {disp32 = 0}
+  %101 = vpblendvb.ymm %100, %99, %97
+  %102 = movzx.u16.gpr32 %77
+  %103 = copy %102 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %104 = add.imm.gpr32 %103 {imm32 = -16}
+  %105 = movsx.i16.gpr32 %104
   %106 = copy %105 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %107 = add.imm.gpr32 %106 {imm32 = -16}
-  %108 = movsx.i16.gpr32 %107
-  %109 = copy %81 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %110 = sub.gpr32 %109, %108
-  %111 = mov.imm32 50462976
-  %112 = vmovd.xmm.gpr32 %111
-  %113 = vpmovzxbw.xmm %112
-  %114 = vmovd.xmm.gpr32 %110
-  %115 = vpbroadcastw.xmm %114
-  %116 = vpaddw.xmm %115, %113
-  %117 = vxorps.zero.xmm
-  %118 = vpcmpeqw.xmm %116, %117
-  %119 = cmp.imm.gpr64 %position, 20, "ult"
-  %120 = cmp.imm.gpr64 %position, 16, "uge"
-  %121 = copy %120 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %122 = and.gpr32 %121, %119
-  %123 = mov.imm32 0
-  %124 = sub.gpr32 %123, %122
-  %125 = vmovd.xmm.gpr32 %124
-  %126 = vpbroadcastw.xmm %125
-  %127 = vpand.xmm %118, %126
-  %129 = vpbroadcastw.xmm %101
-  %130 = vmovsd.load.xmm %input {disp32 = 32}
-  %131 = vpblendvb.xmm %130, %129, %127
-  %132 = copy %76 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %133 = cmp.select.imm.gpr64.gpr32 %position, %value, %132, 20, "eq"
-  %134 = copy %77 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %135 = cmp.select.imm.gpr64.gpr32 %position, %value, %134, 21, "eq"
-  %136 = copy %78 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %137 = cmp.select.imm.gpr64.gpr32 %position, %value, %136, 22, "eq"
-  vmovdqu32.store.ymm %104, %output {disp32 = 0}
-  vmovsd.store.xmm %131, %output {disp32 = 32}
-  mov.store.u16.gpr32 %133, %output {disp32 = 40}
-  mov.store.u16.gpr32 %135, %output {disp32 = 42}
-  mov.store.u16.gpr32 %137, %output {disp32 = 44}
+  %107 = neg.gpr32 %106
+  %108 = mov.imm32 50462976
+  %109 = vmovd.xmm.gpr32 %108
+  %110 = vpmovzxbw.xmm %109
+  %111 = vmovd.xmm.gpr32 %107
+  %112 = vpbroadcastw.xmm %111
+  %113 = vpaddw.xmm %112, %110
+  %114 = vxorps.zero.xmm
+  %115 = vpcmpeqw.xmm %113, %114
+  %116 = cmp.imm.gpr64 %position, 20, "ult"
+  %117 = cmp.imm.gpr64 %position, 16, "uge"
+  %118 = copy %117 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %119 = and.gpr32 %118, %116
+  %120 = mov.imm32 0
+  %121 = sub.gpr32 %120, %119
+  %122 = vmovd.xmm.gpr32 %121
+  %123 = vpbroadcastw.xmm %122
+  %124 = vpand.xmm %115, %123
+  %126 = vpbroadcastw.xmm %98
+  %127 = vmovsd.load.xmm %input {disp32 = 32}
+  %128 = vpblendvb.xmm %127, %126, %124
+  %129 = copy %74 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %130 = cmp.select.imm.gpr64.gpr32 %position, %value, %129, 20, "eq"
+  %131 = copy %75 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %132 = cmp.select.imm.gpr64.gpr32 %position, %value, %131, 21, "eq"
+  %133 = copy %76 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %134 = cmp.select.imm.gpr64.gpr32 %position, %value, %133, 22, "eq"
+  vmovdqu32.store.ymm %101, %output {disp32 = 0}
+  vmovsd.store.xmm %128, %output {disp32 = 32}
+  mov.store.u16.gpr32 %130, %output {disp32 = 40}
+  mov.store.u16.gpr32 %132, %output {disp32 = 42}
+  mov.store.u16.gpr32 %134, %output {disp32 = 44}
   return
 }
 
@@ -149,67 +148,66 @@ func.def public target(@target) @f8e4m3x39_insert_dynamic(%input: buffer, %outpu
 
 // ----
 low.func.def public target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (buffer, buffer, f8E4M3, index) -> ()}) @f8e4m3x39_insert_dynamic(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %value: reg<x86.gpr32>, %position: reg<x86.gpr64>) asm {
-  %63 = movzx.load.u8.gpr32 %input {disp32 = 32}
-  %64 = movzx.load.u8.gpr32 %input {disp32 = 33}
-  %65 = movzx.load.u8.gpr32 %input {disp32 = 34}
-  %66 = movzx.load.u8.gpr32 %input {disp32 = 35}
-  %67 = movzx.load.u8.gpr32 %input {disp32 = 36}
-  %68 = movzx.load.u8.gpr32 %input {disp32 = 37}
-  %69 = movzx.load.u8.gpr32 %input {disp32 = 38}
-  %70 = mov.trunc.gpr32.gpr64 %position
-  %71 = movsx.i8.gpr32 %70
-  %72 = mov.imm32 0
-  %73 = copy %72 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %74 = sub.gpr32 %73, %71
-  %75 = mov.imm64 506097522914230528
+  %62 = movzx.load.u8.gpr32 %input {disp32 = 32}
+  %63 = movzx.load.u8.gpr32 %input {disp32 = 33}
+  %64 = movzx.load.u8.gpr32 %input {disp32 = 34}
+  %65 = movzx.load.u8.gpr32 %input {disp32 = 35}
+  %66 = movzx.load.u8.gpr32 %input {disp32 = 36}
+  %67 = movzx.load.u8.gpr32 %input {disp32 = 37}
+  %68 = movzx.load.u8.gpr32 %input {disp32 = 38}
+  %69 = mov.trunc.gpr32.gpr64 %position
+  %70 = movsx.i8.gpr32 %69
+  %71 = copy %70 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %72 = neg.gpr32 %71
+  %73 = mov.imm64 506097522914230528
+  %74 = vmovq.xmm.gpr64 %73
+  %75 = mov.imm64 1084818905618843912
   %76 = vmovq.xmm.gpr64 %75
-  %77 = mov.imm64 1084818905618843912
-  %78 = vmovq.xmm.gpr64 %77
-  %79 = vpunpcklqdq.xmm %76, %78
-  %80 = mov.imm64 1663540288323457296
+  %77 = vpunpcklqdq.xmm %74, %76
+  %78 = mov.imm64 1663540288323457296
+  %79 = vmovq.xmm.gpr64 %78
+  %80 = mov.imm64 2242261671028070680
   %81 = vmovq.xmm.gpr64 %80
-  %82 = mov.imm64 2242261671028070680
-  %83 = vmovq.xmm.gpr64 %82
-  %84 = vpunpcklqdq.xmm %81, %83
-  %85 = vxorps.zero.ymm
-  %86 = vinsertf128.ymm.xmm %85, %79, 0
-  %87 = vinsertf128.ymm.xmm %86, %84, 1
-  %88 = vmovd.xmm.gpr32 %74
-  %89 = vpbroadcastb.ymm %88
-  %90 = vpaddb.ymm %89, %87
-  %92 = vpcmpeqb.ymm %90, %85
-  %93 = cmp.imm.gpr64 %position, 32, "ult"
-  %94 = mov.imm32 0
-  %95 = sub.gpr32 %94, %93
-  %96 = vmovd.xmm.gpr32 %95
-  %97 = vpbroadcastb.ymm %96
-  %98 = vpand.ymm %92, %97
-  %99 = vmovd.xmm.gpr32 %value
-  %100 = vpbroadcastb.ymm %99
-  %101 = vmovdqu32.load.ymm %input {disp32 = 0}
-  %102 = vpblendvb.ymm %101, %100, %98
+  %82 = vpunpcklqdq.xmm %79, %81
+  %83 = vxorps.zero.ymm
+  %84 = vinsertf128.ymm.xmm %83, %77, 0
+  %85 = vinsertf128.ymm.xmm %84, %82, 1
+  %86 = vmovd.xmm.gpr32 %72
+  %87 = vpbroadcastb.ymm %86
+  %88 = vpaddb.ymm %87, %85
+  %90 = vpcmpeqb.ymm %88, %83
+  %91 = cmp.imm.gpr64 %position, 32, "ult"
+  %92 = mov.imm32 0
+  %93 = sub.gpr32 %92, %91
+  %94 = vmovd.xmm.gpr32 %93
+  %95 = vpbroadcastb.ymm %94
+  %96 = vpand.ymm %90, %95
+  %97 = vmovd.xmm.gpr32 %value
+  %98 = vpbroadcastb.ymm %97
+  %99 = vmovdqu32.load.ymm %input {disp32 = 0}
+  %100 = vpblendvb.ymm %99, %98, %96
+  %101 = copy %62 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %102 = cmp.select.imm.gpr64.gpr32 %position, %value, %101, 32, "eq"
   %103 = copy %63 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %104 = cmp.select.imm.gpr64.gpr32 %position, %value, %103, 32, "eq"
+  %104 = cmp.select.imm.gpr64.gpr32 %position, %value, %103, 33, "eq"
   %105 = copy %64 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %106 = cmp.select.imm.gpr64.gpr32 %position, %value, %105, 33, "eq"
+  %106 = cmp.select.imm.gpr64.gpr32 %position, %value, %105, 34, "eq"
   %107 = copy %65 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %108 = cmp.select.imm.gpr64.gpr32 %position, %value, %107, 34, "eq"
+  %108 = cmp.select.imm.gpr64.gpr32 %position, %value, %107, 35, "eq"
   %109 = copy %66 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %110 = cmp.select.imm.gpr64.gpr32 %position, %value, %109, 35, "eq"
+  %110 = cmp.select.imm.gpr64.gpr32 %position, %value, %109, 36, "eq"
   %111 = copy %67 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %112 = cmp.select.imm.gpr64.gpr32 %position, %value, %111, 36, "eq"
+  %112 = cmp.select.imm.gpr64.gpr32 %position, %value, %111, 37, "eq"
   %113 = copy %68 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %114 = cmp.select.imm.gpr64.gpr32 %position, %value, %113, 37, "eq"
-  %115 = copy %69 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %116 = cmp.select.imm.gpr64.gpr32 %position, %value, %115, 38, "eq"
-  vmovdqu32.store.ymm %102, %output {disp32 = 0}
-  mov.store.u8.gpr32 %104, %output {disp32 = 32}
-  mov.store.u8.gpr32 %106, %output {disp32 = 33}
-  mov.store.u8.gpr32 %108, %output {disp32 = 34}
-  mov.store.u8.gpr32 %110, %output {disp32 = 35}
-  mov.store.u8.gpr32 %112, %output {disp32 = 36}
-  mov.store.u8.gpr32 %114, %output {disp32 = 37}
-  mov.store.u8.gpr32 %116, %output {disp32 = 38}
+  %114 = cmp.select.imm.gpr64.gpr32 %position, %value, %113, 38, "eq"
+  vmovdqu32.store.ymm %100, %output {disp32 = 0}
+  mov.store.u8.gpr32 %102, %output {disp32 = 32}
+  mov.store.u8.gpr32 %104, %output {disp32 = 33}
+  mov.store.u8.gpr32 %106, %output {disp32 = 34}
+  mov.store.u8.gpr32 %108, %output {disp32 = 35}
+  mov.store.u8.gpr32 %110, %output {disp32 = 36}
+  mov.store.u8.gpr32 %112, %output {disp32 = 37}
+  mov.store.u8.gpr32 %114, %output {disp32 = 38}
   return
 }
 
@@ -233,76 +231,75 @@ func.def public target(@target) @i1x40_insert_dynamic(%input: buffer, %output: b
 
 // ----
 low.func.def public target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (buffer, buffer, i1, index) -> ()}) @i1x40_insert_dynamic(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %value: reg<x86.gpr32>, %position: reg<x86.gpr64>) asm {
-  %82 = vmovdqu32.load.ymm %input {disp32 = 0}
-  %83 = vmovsd.load.xmm %input {disp32 = 32}
-  %84 = vxorps.zero.ymm
-  %85 = vpcmpeqb.ymm %82, %84
-  %86 = vxorps.zero.xmm
-  %87 = vpcmpeqb.xmm %83, %86
-  %88 = mov.trunc.gpr32.gpr64 %position
-  %89 = movsx.i8.gpr32 %88
-  %90 = mov.imm32 0
-  %91 = copy %90 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %92 = sub.gpr32 %91, %89
-  %93 = mov.imm64 506097522914230528
-  %94 = vmovq.xmm.gpr64 %93
-  %95 = mov.imm64 1084818905618843912
+  %80 = vmovdqu32.load.ymm %input {disp32 = 0}
+  %81 = vmovsd.load.xmm %input {disp32 = 32}
+  %82 = vxorps.zero.ymm
+  %83 = vpcmpeqb.ymm %80, %82
+  %84 = vxorps.zero.xmm
+  %85 = vpcmpeqb.xmm %81, %84
+  %86 = mov.trunc.gpr32.gpr64 %position
+  %87 = movsx.i8.gpr32 %86
+  %88 = copy %87 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %89 = neg.gpr32 %88
+  %90 = mov.imm64 506097522914230528
+  %91 = vmovq.xmm.gpr64 %90
+  %92 = mov.imm64 1084818905618843912
+  %93 = vmovq.xmm.gpr64 %92
+  %94 = vpunpcklqdq.xmm %91, %93
+  %95 = mov.imm64 1663540288323457296
   %96 = vmovq.xmm.gpr64 %95
-  %97 = vpunpcklqdq.xmm %94, %96
-  %98 = mov.imm64 1663540288323457296
-  %99 = vmovq.xmm.gpr64 %98
-  %100 = mov.imm64 2242261671028070680
-  %101 = vmovq.xmm.gpr64 %100
-  %102 = vpunpcklqdq.xmm %99, %101
-  %104 = vinsertf128.ymm.xmm %84, %97, 0
-  %105 = vinsertf128.ymm.xmm %104, %102, 1
-  %106 = vmovd.xmm.gpr32 %92
-  %107 = vpbroadcastb.ymm %106
-  %108 = vpaddb.ymm %107, %105
-  %109 = vpcmpeqb.ymm %108, %84
-  %110 = cmp.imm.gpr64 %position, 32, "ult"
-  %111 = mov.imm32 0
-  %112 = sub.gpr32 %111, %110
-  %113 = vmovd.xmm.gpr32 %112
-  %114 = vpbroadcastb.ymm %113
-  %115 = vpand.ymm %109, %114
-  %116 = mov.imm32 0
-  %117 = sub.gpr32 %116, %value
-  %118 = vmovd.xmm.gpr32 %117
-  %119 = vpbroadcastb.ymm %118
-  %120 = vpxor.ymm %85, %119
-  %121 = vpand.ymm %120, %115
-  %122 = vpxor.ymm %85, %121
-  %123 = movzx.u8.gpr32 %88
+  %97 = mov.imm64 2242261671028070680
+  %98 = vmovq.xmm.gpr64 %97
+  %99 = vpunpcklqdq.xmm %96, %98
+  %101 = vinsertf128.ymm.xmm %82, %94, 0
+  %102 = vinsertf128.ymm.xmm %101, %99, 1
+  %103 = vmovd.xmm.gpr32 %89
+  %104 = vpbroadcastb.ymm %103
+  %105 = vpaddb.ymm %104, %102
+  %106 = vpcmpeqb.ymm %105, %82
+  %107 = cmp.imm.gpr64 %position, 32, "ult"
+  %108 = mov.imm32 0
+  %109 = sub.gpr32 %108, %107
+  %110 = vmovd.xmm.gpr32 %109
+  %111 = vpbroadcastb.ymm %110
+  %112 = vpand.ymm %106, %111
+  %113 = mov.imm32 0
+  %114 = sub.gpr32 %113, %value
+  %115 = vmovd.xmm.gpr32 %114
+  %116 = vpbroadcastb.ymm %115
+  %117 = vpxor.ymm %83, %116
+  %118 = vpand.ymm %117, %112
+  %119 = vpxor.ymm %83, %118
+  %120 = movzx.u8.gpr32 %86
+  %121 = copy %120 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %122 = add.imm.gpr32 %121 {imm32 = -32}
+  %123 = movsx.i8.gpr32 %122
   %124 = copy %123 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %125 = add.imm.gpr32 %124 {imm32 = -32}
-  %126 = movsx.i8.gpr32 %125
-  %127 = copy %90 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %128 = sub.gpr32 %127, %126
-  %131 = vmovd.xmm.gpr32 %128
-  %132 = vpbroadcastb.xmm %131
-  %133 = vpaddb.xmm %132, %94
-  %134 = vpcmpeqb.xmm %133, %86
-  %135 = cmp.imm.gpr64 %position, 40, "ult"
-  %136 = cmp.imm.gpr64 %position, 32, "uge"
-  %137 = copy %136 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %138 = and.gpr32 %137, %135
-  %139 = mov.imm32 0
-  %140 = sub.gpr32 %139, %138
-  %141 = vmovd.xmm.gpr32 %140
-  %142 = vpbroadcastb.xmm %141
-  %143 = vpand.xmm %134, %142
-  %144 = mov.imm32 0
-  %145 = sub.gpr32 %144, %value
-  %146 = vmovd.xmm.gpr32 %145
-  %147 = vpbroadcastb.xmm %146
-  %148 = vpxor.xmm %87, %147
-  %149 = vpand.xmm %148, %143
-  %150 = vpxor.xmm %87, %149
-  %151 = vpblendvb.ymm %84, %82, %122
-  vmovdqu32.store.ymm %151, %output {disp32 = 0}
-  %152 = vpblendvb.xmm %86, %83, %150
-  vmovsd.store.xmm %152, %output {disp32 = 32}
+  %125 = neg.gpr32 %124
+  %128 = vmovd.xmm.gpr32 %125
+  %129 = vpbroadcastb.xmm %128
+  %130 = vpaddb.xmm %129, %91
+  %131 = vpcmpeqb.xmm %130, %84
+  %132 = cmp.imm.gpr64 %position, 40, "ult"
+  %133 = cmp.imm.gpr64 %position, 32, "uge"
+  %134 = copy %133 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %135 = and.gpr32 %134, %132
+  %136 = mov.imm32 0
+  %137 = sub.gpr32 %136, %135
+  %138 = vmovd.xmm.gpr32 %137
+  %139 = vpbroadcastb.xmm %138
+  %140 = vpand.xmm %131, %139
+  %141 = mov.imm32 0
+  %142 = sub.gpr32 %141, %value
+  %143 = vmovd.xmm.gpr32 %142
+  %144 = vpbroadcastb.xmm %143
+  %145 = vpxor.xmm %85, %144
+  %146 = vpand.xmm %145, %140
+  %147 = vpxor.xmm %85, %146
+  %148 = vpblendvb.ymm %82, %80, %119
+  vmovdqu32.store.ymm %148, %output {disp32 = 0}
+  %149 = vpblendvb.xmm %84, %81, %147
+  vmovsd.store.xmm %149, %output {disp32 = 32}
   return
 }
 
@@ -324,77 +321,76 @@ func.def public target(@target) @avx512_i16x39_insert_dynamic(%input: buffer, %o
 
 // ----
 low.func.def public target<x86.avx512.core>(@target) abi(object_function) abi_layout({signature = (buffer, buffer, i16, index) -> ()}) @avx512_i16x39_insert_dynamic(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %value: reg<x86.gpr32>, %position: reg<x86.gpr64>) asm {
-  %76 = movzx.load.u16.gpr32 %input {disp32 = 72}
-  %77 = movzx.load.u16.gpr32 %input {disp32 = 74}
-  %78 = movzx.load.u16.gpr32 %input {disp32 = 76}
-  %79 = mov.trunc.gpr32.gpr64 %position
-  %80 = movsx.i16.gpr32 %79
-  %81 = mov.imm32 0
-  %82 = copy %81 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %83 = sub.gpr32 %82, %80
-  %84 = mov.imm64 506097522914230528
-  %85 = vmovq.xmm.gpr64 %84
-  %86 = mov.imm64 1084818905618843912
-  %87 = vmovq.xmm.gpr64 %86
-  %88 = vpunpcklqdq.xmm %85, %87
-  %89 = mov.imm32 16
-  %90 = avx512.vpbroadcastb.xmm %89
-  %91 = vpaddb.xmm %88, %90
-  %92 = vxorps.zero.ymm
-  %93 = vinsertf128.ymm.xmm %92, %88, 0
-  %94 = vinsertf128.ymm.xmm %93, %91, 1
-  %95 = avx512.vpmovzxbw.zmm.ymm %94
-  %96 = vpbroadcastw %83
-  %97 = vpaddw %96, %95
-  %98 = vxorps.zero
-  %99 = vpcmpw %97, %98, 0
-  %100 = cmp.imm.gpr64 %position, 32, "ult"
-  %101 = mov.imm32 0
-  %102 = sub.gpr32 %101, %100
-  %103 = movsxd.gpr64.gpr32 %102
-  %104 = avx512.kmovq.k.gpr64 %103
-  %105 = kandq %99, %104
-  %106 = vpbroadcastw %value
-  %107 = vmovdqu32.load %input {disp32 = 0}
-  %108 = vpblendmw %105, %106, %107
-  %109 = movzx.u16.gpr32 %79
+  %74 = movzx.load.u16.gpr32 %input {disp32 = 72}
+  %75 = movzx.load.u16.gpr32 %input {disp32 = 74}
+  %76 = movzx.load.u16.gpr32 %input {disp32 = 76}
+  %77 = mov.trunc.gpr32.gpr64 %position
+  %78 = movsx.i16.gpr32 %77
+  %79 = copy %78 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %80 = neg.gpr32 %79
+  %81 = mov.imm64 506097522914230528
+  %82 = vmovq.xmm.gpr64 %81
+  %83 = mov.imm64 1084818905618843912
+  %84 = vmovq.xmm.gpr64 %83
+  %85 = vpunpcklqdq.xmm %82, %84
+  %86 = mov.imm32 16
+  %87 = avx512.vpbroadcastb.xmm %86
+  %88 = vpaddb.xmm %85, %87
+  %89 = vxorps.zero.ymm
+  %90 = vinsertf128.ymm.xmm %89, %85, 0
+  %91 = vinsertf128.ymm.xmm %90, %88, 1
+  %92 = avx512.vpmovzxbw.zmm.ymm %91
+  %93 = vpbroadcastw %80
+  %94 = vpaddw %93, %92
+  %95 = vxorps.zero
+  %96 = vpcmpw %94, %95, 0
+  %97 = cmp.imm.gpr64 %position, 32, "ult"
+  %98 = mov.imm32 0
+  %99 = sub.gpr32 %98, %97
+  %100 = movsxd.gpr64.gpr32 %99
+  %101 = avx512.kmovq.k.gpr64 %100
+  %102 = kandq %96, %101
+  %103 = vpbroadcastw %value
+  %104 = vmovdqu32.load %input {disp32 = 0}
+  %105 = vpblendmw %102, %103, %104
+  %106 = movzx.u16.gpr32 %77
+  %107 = copy %106 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %108 = add.imm.gpr32 %107 {imm32 = -32}
+  %109 = movsx.i16.gpr32 %108
   %110 = copy %109 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %111 = add.imm.gpr32 %110 {imm32 = -32}
-  %112 = movsx.i16.gpr32 %111
-  %113 = copy %81 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %114 = sub.gpr32 %113, %112
-  %115 = mov.imm32 50462976
-  %116 = vmovd.xmm.gpr32 %115
-  %117 = vpmovzxbw.xmm %116
-  %118 = vmovd.xmm.gpr32 %114
-  %119 = vpbroadcastw.xmm %118
-  %120 = vpaddw.xmm %119, %117
-  %121 = vxorps.zero.xmm
-  %122 = vpcmpeqw.xmm %120, %121
-  %123 = cmp.imm.gpr64 %position, 36, "ult"
-  %124 = cmp.imm.gpr64 %position, 32, "uge"
-  %125 = copy %124 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %126 = and.gpr32 %125, %123
-  %127 = mov.imm32 0
-  %128 = sub.gpr32 %127, %126
-  %129 = vmovd.xmm.gpr32 %128
+  %111 = neg.gpr32 %110
+  %112 = mov.imm32 50462976
+  %113 = vmovd.xmm.gpr32 %112
+  %114 = vpmovzxbw.xmm %113
+  %115 = vmovd.xmm.gpr32 %111
+  %116 = vpbroadcastw.xmm %115
+  %117 = vpaddw.xmm %116, %114
+  %118 = vxorps.zero.xmm
+  %119 = vpcmpeqw.xmm %117, %118
+  %120 = cmp.imm.gpr64 %position, 36, "ult"
+  %121 = cmp.imm.gpr64 %position, 32, "uge"
+  %122 = copy %121 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %123 = and.gpr32 %122, %120
+  %124 = mov.imm32 0
+  %125 = sub.gpr32 %124, %123
+  %126 = vmovd.xmm.gpr32 %125
+  %127 = vpbroadcastw.xmm %126
+  %128 = vpand.xmm %119, %127
+  %129 = vmovd.xmm.gpr32 %value
   %130 = vpbroadcastw.xmm %129
-  %131 = vpand.xmm %122, %130
-  %132 = vmovd.xmm.gpr32 %value
-  %133 = vpbroadcastw.xmm %132
-  %134 = vmovsd.load.xmm %input {disp32 = 64}
-  %135 = vpblendvb.xmm %134, %133, %131
-  %136 = copy %76 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %137 = cmp.select.imm.gpr64.gpr32 %position, %value, %136, 36, "eq"
-  %138 = copy %77 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %139 = cmp.select.imm.gpr64.gpr32 %position, %value, %138, 37, "eq"
-  %140 = copy %78 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %141 = cmp.select.imm.gpr64.gpr32 %position, %value, %140, 38, "eq"
-  vmovdqu32.store %108, %output {disp32 = 0}
-  vmovsd.store.xmm %135, %output {disp32 = 64}
-  mov.store.u16.gpr32 %137, %output {disp32 = 72}
-  mov.store.u16.gpr32 %139, %output {disp32 = 74}
-  mov.store.u16.gpr32 %141, %output {disp32 = 76}
+  %131 = vmovsd.load.xmm %input {disp32 = 64}
+  %132 = vpblendvb.xmm %131, %130, %128
+  %133 = copy %74 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %134 = cmp.select.imm.gpr64.gpr32 %position, %value, %133, 36, "eq"
+  %135 = copy %75 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %136 = cmp.select.imm.gpr64.gpr32 %position, %value, %135, 37, "eq"
+  %137 = copy %76 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %138 = cmp.select.imm.gpr64.gpr32 %position, %value, %137, 38, "eq"
+  vmovdqu32.store %105, %output {disp32 = 0}
+  vmovsd.store.xmm %132, %output {disp32 = 64}
+  mov.store.u16.gpr32 %134, %output {disp32 = 72}
+  mov.store.u16.gpr32 %136, %output {disp32 = 74}
+  mov.store.u16.gpr32 %138, %output {disp32 = 76}
   return
 }
 
@@ -427,29 +423,28 @@ func.def public target(@target) @short_dynamic_insert(%output: buffer, %value: f
 // ----
 low.func.def public target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (buffer, f8E4M3, index) -> ()}) @short_dynamic_insert(%output: reg<x86.gpr64>, %value: reg<x86.gpr32>, %position: reg<x86.gpr64>) asm {
   %values = vxorps.zero.xmm
-  %28 = mov.trunc.gpr32.gpr64 %position
-  %29 = movsx.i16.gpr32 %28
-  %30 = mov.imm32 0
-  %31 = copy %30 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %32 = sub.gpr32 %31, %29
-  %33 = mov.imm32 50462976
-  %34 = vmovd.xmm.gpr32 %33
-  %35 = vpmovzxbw.xmm %34
-  %36 = vmovd.xmm.gpr32 %32
-  %37 = vpbroadcastw.xmm %36
-  %38 = vpaddw.xmm %37, %35
-  %40 = vpcmpeqw.xmm %38, %values
-  %41 = cmp.imm.gpr64 %position, 4, "ult"
-  %42 = mov.imm32 0
-  %43 = sub.gpr32 %42, %41
-  %44 = vmovd.xmm.gpr32 %43
-  %45 = vpbroadcastw.xmm %44
-  %46 = vpand.xmm %40, %45
-  %47 = vmovd.xmm.gpr32 %value
-  %48 = vpbroadcastb.xmm %47
-  %49 = avx2.vmovdqu.rodata.xmm @__low_rodata_6497a0a7
-  %50 = vpshufb.xmm %46, %49
-  %result = vpblendvb.xmm %values, %48, %50
+  %27 = mov.trunc.gpr32.gpr64 %position
+  %28 = movsx.i16.gpr32 %27
+  %29 = copy %28 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %30 = neg.gpr32 %29
+  %31 = mov.imm32 50462976
+  %32 = vmovd.xmm.gpr32 %31
+  %33 = vpmovzxbw.xmm %32
+  %34 = vmovd.xmm.gpr32 %30
+  %35 = vpbroadcastw.xmm %34
+  %36 = vpaddw.xmm %35, %33
+  %38 = vpcmpeqw.xmm %36, %values
+  %39 = cmp.imm.gpr64 %position, 4, "ult"
+  %40 = mov.imm32 0
+  %41 = sub.gpr32 %40, %39
+  %42 = vmovd.xmm.gpr32 %41
+  %43 = vpbroadcastw.xmm %42
+  %44 = vpand.xmm %38, %43
+  %45 = vmovd.xmm.gpr32 %value
+  %46 = vpbroadcastb.xmm %45
+  %47 = avx2.vmovdqu.rodata.xmm @__low_rodata_6497a0a7
+  %48 = vpshufb.xmm %44, %47
+  %result = vpblendvb.xmm %values, %46, %48
   vmovss.store.xmm %result, %output {disp32 = 0}
   return
 }

@@ -1,0 +1,139 @@
+// RUN: pass target-legalize{mode=eager},dce
+
+// Carrier widening preserves native VM operations. Sign has no native recipe
+// and must still reach the portable implementation at the widened type.
+vm.target<core> @target
+
+func.def target(@target) @byte_carriers(%value: i8) -> (i8, i8, i8) {
+  %negative = scalar.negi %value : i8
+  %absolute = scalar.absi %value : i8
+  %sign = scalar.signi %value : i8
+  func.return %negative, %absolute, %sign : i8, i8, i8
+}
+
+// ----
+vm.target<core> @target
+
+func.def target(@target) @byte_carriers(%value: i8) -> (i8, i8, i8) {
+  %19 = scalar.extsi %value : i8 to i32
+  %20 = scalar.negi %19 : i32
+  %negative = scalar.trunci %20 : i32 to i8
+  %16 = scalar.extsi %value : i8 to i32
+  %17 = scalar.absi %16 : i32
+  %absolute = scalar.trunci %17 : i32 to i8
+  %7 = scalar.extsi %value : i8 to i32
+  %10 = scalar.constant 31 : i32
+  %11 = scalar.shrsi %7, %10 : i32
+  %12 = scalar.constant 0 : i32
+  %13 = scalar.cmpi ne, %7, %12 : i32
+  %14 = scalar.extui %13 : i1 to i32
+  %15 = scalar.ori %11, %14 : i32
+  %sign = scalar.trunci %15 : i32 to i8
+  func.return %negative, %absolute, %sign : i8, i8, i8
+}
+
+// ====
+
+vm.target<core> @target
+
+func.def target(@target) @halfword_carriers(%value: i16) -> (i16, i16, i16) {
+  %negative = scalar.negi %value : i16
+  %absolute = scalar.absi %value : i16
+  %sign = scalar.signi %value : i16
+  func.return %negative, %absolute, %sign : i16, i16, i16
+}
+
+// ----
+vm.target<core> @target
+
+func.def target(@target) @halfword_carriers(%value: i16) -> (i16, i16, i16) {
+  %19 = scalar.extsi %value : i16 to i32
+  %20 = scalar.negi %19 : i32
+  %negative = scalar.trunci %20 : i32 to i16
+  %16 = scalar.extsi %value : i16 to i32
+  %17 = scalar.absi %16 : i32
+  %absolute = scalar.trunci %17 : i32 to i16
+  %7 = scalar.extsi %value : i16 to i32
+  %10 = scalar.constant 31 : i32
+  %11 = scalar.shrsi %7, %10 : i32
+  %12 = scalar.constant 0 : i32
+  %13 = scalar.cmpi ne, %7, %12 : i32
+  %14 = scalar.extui %13 : i1 to i32
+  %15 = scalar.ori %11, %14 : i32
+  %sign = scalar.trunci %15 : i32 to i16
+  func.return %negative, %absolute, %sign : i16, i16, i16
+}
+
+// ====
+
+// Recompute facts after legalization has invalidated its workspace.
+// RUN: pass target-legalize{mode=eager},canonicalize
+vm.target<core> @target
+
+func.def target(@target) @magnitude_bound(%input: i8) -> (i64, i64, i1) {
+  %value = scalar.assume %input [range(%input, -8, 8), ne(%input, 0)] : i8
+  %absolute = scalar.absi %value : i8
+  %lower = test.fact_range_lo %absolute : i8 -> i64
+  %upper = test.fact_range_hi %absolute : i8 -> i64
+  %nonzero = test.fact_non_zero %absolute : i8 -> i1
+  func.return %lower, %upper, %nonzero : i64, i64, i1
+}
+
+// ----
+vm.target<core> @target
+
+func.def target(@target) @magnitude_bound(%input: i8) -> (i64, i64, i1) {
+  %lower = scalar.constant 1 : i64
+  %upper = scalar.constant 8 : i64
+  %nonzero = scalar.constant true : i1
+  func.return %lower, %upper, %nonzero : i64, i64, i1
+}
+
+// ====
+
+// The signed minimum still wraps after truncation. Widening does not prove a
+// nonnegative result or a nonzero result for unconstrained source values.
+// RUN: pass target-legalize{mode=eager},canonicalize
+vm.target<core> @target
+
+func.def target(@target) @signed_minimum_domain(%input: i16) -> (i64, i64, i1) {
+  %absolute = scalar.absi %input : i16
+  %lower = test.fact_range_lo %absolute : i16 -> i64
+  %upper = test.fact_range_hi %absolute : i16 -> i64
+  %nonzero = test.fact_non_zero %absolute : i16 -> i1
+  func.return %lower, %upper, %nonzero : i64, i64, i1
+}
+
+// ----
+vm.target<core> @target
+
+func.def target(@target) @signed_minimum_domain(%input: i16) -> (i64, i64, i1) {
+  %lower = scalar.constant -32768 : i64
+  %upper = scalar.constant 32767 : i64
+  %nonzero = scalar.constant false : i1
+  func.return %lower, %upper, %nonzero : i64, i64, i1
+}
+
+// ====
+
+// Reference-only policy still decomposes native carrier operations.
+// RUN: pass target-legalize{mode=eager,policy=reference-only},dce
+vm.target<core> @target
+
+func.def target(@target) @reference_carrier(%value: i8) -> (i8) {
+  %absolute = scalar.absi %value : i8
+  func.return %absolute : i8
+}
+
+// ----
+vm.target<core> @target
+
+func.def target(@target) @reference_carrier(%value: i8) -> (i8) {
+  %3 = scalar.extsi %value : i8 to i32
+  %6 = scalar.constant 31 : i32
+  %7 = scalar.shrsi %3, %6 : i32
+  %8 = scalar.xori %3, %7 : i32
+  %9 = scalar.subi %8, %7 : i32
+  %absolute = scalar.trunci %9 : i32 to i8
+  func.return %absolute : i8
+}
