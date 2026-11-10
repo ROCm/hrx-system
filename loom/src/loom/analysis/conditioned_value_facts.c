@@ -350,8 +350,11 @@ static void loom_conditioned_value_facts_apply_active_refinement(
   if (active->known_divisor % inout_facts->known_divisor == 0) {
     inout_facts->known_divisor = active->known_divisor;
   }
+  // Both inputs constrain the same value. Their noncontiguous predicates
+  // remain true even when the intersected interval cannot express them.
   const uint32_t retained_flags =
-      active->flags & (LOOM_VALUE_FACT_NON_ZERO | LOOM_VALUE_FACT_POWER_OF_TWO);
+      (active->flags | inout_facts->flags) &
+      (LOOM_VALUE_FACT_NON_ZERO | LOOM_VALUE_FACT_POWER_OF_TWO);
   loom_value_facts_recompute_flags(inout_facts);
   inout_facts->flags |= retained_flags;
 }
