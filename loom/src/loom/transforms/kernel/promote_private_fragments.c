@@ -1203,8 +1203,8 @@ static iree_status_t loom_private_storage_rewrite(
   }
   // Stores may retain load results until all forwarding is complete.
   for (loom_private_storage_access_t* a = plan->accesses; a; a = a->next) {
-    if (a->cell && a->cell->allocation->selected &&
-        loom_view_store_isa(a->op)) {
+    if (a->allocation->write_only ||
+        (a->cell && a->allocation->selected && loom_view_store_isa(a->op))) {
       IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, a->op));
     }
   }
@@ -1294,7 +1294,7 @@ iree_status_t loom_promote_private_fragments_run(loom_pass_t* pass,
     }
     status = loom_private_storage_plan_build(pass, module, function, &plan);
   }
-  if (iree_status_is_ok(status) && plan.cell_count) {
+  if (iree_status_is_ok(status) && plan.allocations) {
     status = loom_private_storage_rewrite(
         &plan, &rewriter, loom_promote_private_fragments_statistics(pass));
   }
