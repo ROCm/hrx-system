@@ -902,5 +902,75 @@ TEST_F(BytecodeTypeTest, ScopedShapeRejectsEveryTruncatedPrefix) {
   }
 }
 
+TEST_F(BytecodeTypeTest, ScopedRecordFramingPreservesItsEnclosingCursor) {
+  // Empty extensions select static types; zero-node nonempty extensions may
+  // select a type completed by an earlier signature value.
+  const uint8_t data[] = {0, 2, 0, 2, 99};
+  loom_bytecode_reader_cursor_t cursor;
+  loom_bytecode_reader_cursor_initialize(data, sizeof(data), 100,
+                                         IREE_SV("SIGNATURE"), &cursor);
+  loom_bytecode_reader_cursor_t records;
+  uint64_t count = UINT64_MAX;
+  IREE_ASSERT_OK(loom_bytecode_type_open_scoped_records(
+      &decoder_, &cursor, /*reference=*/0, &records, &count));
+  EXPECT_EQ(records.cursor.length, 0u);
+  EXPECT_EQ(count, 0u);
+  EXPECT_EQ(cursor.cursor.position, 1u);
+
+  IREE_ASSERT_OK(loom_bytecode_type_open_scoped_records(
+      &decoder_, &cursor, /*reference=*/1, &records, &count));
+  EXPECT_EQ(count, 0u);
+  EXPECT_EQ(records.absolute_offset, 102u);
+  EXPECT_EQ(records.cursor.length, 2u);
+  EXPECT_EQ(cursor.cursor.position, 4u);
+  uint64_t root = UINT64_MAX;
+  IREE_ASSERT_OK(loom_bytecode_type_close_scoped_records(
+      &decoder_, &records, /*completed_count=*/2, &root));
+  EXPECT_EQ(root, 1u);
+  EXPECT_EQ(records.cursor.position, records.cursor.length);
+  EXPECT_EQ(cursor.cursor.data[cursor.cursor.position], 99u);
+  EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
+}
+
+TEST_F(BytecodeTypeTest, ScopedRecordFramingRejectsInvalidExtensions) {
+  struct Case {
+    // Encoded type reference whose extension is tested.
+    uint64_t reference;
+    // Extension length, node count, root, and any trailing malformed bytes.
+    std::vector<uint8_t> bytes;
+  };
+  const Case cases[] = {
+      {1, {0}},           // Scoped reference without an extension.
+      {0, {2, 0, 1}},     // Static reference carrying an extension.
+      {3, {2, 0, 1}},     // Only the scoped sentinel introduces an extension.
+      {1, {3, 0, 1}},     // Truncated bounded payload.
+      {1, {1, 0}},        // Missing root.
+      {1, {2, 0, 0}},     // Zero is not a completed root.
+      {1, {2, 0, 3}},     // Root outside the completed prefix.
+      {1, {3, 0, 2, 9}},  // Bytes after the selected root.
+  };
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(::testing::Message() << "case=" << (&test_case - cases));
+    loom_bytecode_reader_cursor_t cursor;
+    loom_bytecode_reader_cursor_initialize(test_case.bytes.data(),
+                                           test_case.bytes.size(), 0,
+                                           IREE_SV("SIGNATURE"), &cursor);
+    loom_bytecode_reader_cursor_t records;
+    uint64_t count = 0;
+    uint64_t root = UINT64_MAX;
+    error_count_ = 0;
+    iree_status_t status = loom_bytecode_type_open_scoped_records(
+        &decoder_, &cursor, test_case.reference, &records, &count);
+    if (iree_status_is_ok(status)) {
+      status = loom_bytecode_type_close_scoped_records(
+          &decoder_, &records, /*completed_count=*/2, &root);
+    }
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED, status);
+    EXPECT_EQ(error_count_, 1u);
+    EXPECT_EQ(root, UINT64_MAX);
+    EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
+  }
+}
+
 }  // namespace
 }  // namespace loom

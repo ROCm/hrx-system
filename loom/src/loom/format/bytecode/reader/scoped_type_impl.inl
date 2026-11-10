@@ -8,15 +8,6 @@
 // canonicalized once after all referenced nodes have completed. Only final type
 // IDs survive the per-record scratch checkpoint.
 
-static iree_status_t loom_bytecode_complete_type_invalid(
-    loom_bytecode_attribute_policy_materializer_t* materializer,
-    loom_bytecode_reader_cursor_t* cursor, iree_string_view_t reason) {
-  return loom_bytecode_reader_emit_invalid_field(
-      materializer->decoder, cursor->range_name, IREE_SV("scoped_type"), 0,
-      IREE_SV("record"), loom_bytecode_reader_cursor_absolute_position(cursor),
-      reason);
-}
-
 iree_status_t LOOM_BYTECODE_TYPE_PROJECT_COMPLETED(
     loom_bytecode_attribute_policy_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
@@ -25,15 +16,15 @@ iree_status_t LOOM_BYTECODE_TYPE_PROJECT_COMPLETED(
   const uint64_t ordinal = reference >> 1;
   if (reference & 1) {
     if (ordinal >= scope->bindings->count) {
-      return loom_bytecode_complete_type_invalid(materializer, cursor,
-                                                 IREE_SV("incomplete_child"));
+      return loom_bytecode_type_emit_invalid_scoped_record(
+          materializer->decoder, cursor, IREE_SV("incomplete_child"));
     }
     *out_type = scope->bindings->entries[ordinal].type;
     return iree_ok_status();
   }
   if (ordinal >= LOOM_BYTECODE_ATTRIBUTE_TABLES(materializer)->types.count) {
-    return loom_bytecode_complete_type_invalid(materializer, cursor,
-                                               IREE_SV("unknown_static_type"));
+    return loom_bytecode_type_emit_invalid_scoped_record(
+        materializer->decoder, cursor, IREE_SV("unknown_static_type"));
   }
 #if LOOM_BYTECODE_ATTRIBUTE_SELECTED
   return loom_bytecode_selected_table_materialize_type(materializer, ordinal,
@@ -79,8 +70,8 @@ static iree_status_t loom_bytecode_read_complete_type(
     } else if (shape.attachment == LOOM_BYTECODE_ENCODING_ATTACHMENT_SSA) {
       const loom_value_id_t value_id = scope->values[shape.encoding_ordinal];
       if (value_id > UINT16_MAX) {
-        return loom_bytecode_complete_type_invalid(materializer, cursor,
-                                                   IREE_SV("encoding_value"));
+        return loom_bytecode_type_emit_invalid_scoped_record(
+            materializer->decoder, cursor, IREE_SV("encoding_value"));
       }
       target_encoding = (uint16_t)value_id;
     }
@@ -117,73 +108,26 @@ static iree_status_t loom_bytecode_read_complete_type(
   }
   loom_bytecode_structural_type_plan_t plan = {0};
   loom_bytecode_structural_type_fact_t fact = {0};
-  uint64_t dependency_count_offset = kind_offset;
-  fact.base.kind = kind;
-  switch (kind) {
-    case LOOM_TYPE_FUNCTION: {
-      uint64_t argument_count = 0;
-      uint64_t result_count = 0;
-      dependency_count_offset =
-          loom_bytecode_reader_cursor_absolute_position(cursor);
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-          materializer->decoder, cursor, &argument_count));
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-          materializer->decoder, cursor, &result_count));
-      if (argument_count > UINT16_MAX || result_count > UINT16_MAX) {
-        return loom_bytecode_complete_type_invalid(materializer, cursor,
-                                                   IREE_SV("structural_count"));
-      }
-      const loom_func_type_data_t header = {
-          .arg_count = (uint16_t)argument_count,
-          .result_count = (uint16_t)result_count,
-      };
-      memcpy(fact.payload_prefix, &header, sizeof(header));
-      plan.dependency_count = argument_count + result_count;
-      break;
-    }
-    case LOOM_TYPE_DIALECT: {
-      uint64_t name_id = 0;
-      uint64_t parameter_count = 0;
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-          materializer->decoder, cursor, &name_id));
-      dependency_count_offset =
-          loom_bytecode_reader_cursor_absolute_position(cursor);
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-          materializer->decoder, cursor, &parameter_count));
-      if (name_id >=
-          LOOM_BYTECODE_ATTRIBUTE_TABLES(materializer)->strings.count) {
-        return loom_bytecode_complete_type_invalid(materializer, cursor,
-                                                   IREE_SV("type_name"));
-      }
-      if (parameter_count > UINT16_MAX) {
-        return loom_bytecode_complete_type_invalid(materializer, cursor,
-                                                   IREE_SV("structural_count"));
-      }
-#if LOOM_BYTECODE_ATTRIBUTE_SELECTED
-      IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_intern_string(
-          materializer, name_id, &plan.name_id));
-#else
-      plan.name_id = (loom_string_id_t)name_id;
-#endif
-      plan.parameter_count = (uint16_t)parameter_count;
-      plan.dependency_count = (uint32_t)parameter_count;
-      break;
-    }
-    case LOOM_TYPE_REGISTER: {
-      IREE_RETURN_IF_ERROR(loom_bytecode_type_read_register_carrier(
-          materializer->decoder, cursor, 0, fact.payload_prefix));
-      plan.dependency_count = 1;
-      break;
-    }
-    default:
-      return loom_bytecode_complete_type_invalid(
-          materializer, cursor, IREE_SV("invalid_scoped_type_kind"));
+  if (kind != LOOM_TYPE_FUNCTION && kind != LOOM_TYPE_DIALECT &&
+      kind != LOOM_TYPE_REGISTER) {
+    return loom_bytecode_type_emit_invalid_scoped_record(
+        materializer->decoder, cursor, IREE_SV("invalid_scoped_type_kind"));
   }
+  fact.base.kind = kind;
+  IREE_RETURN_IF_ERROR(loom_bytecode_type_read_structural_header(
+      materializer->decoder, cursor, kind, 0,
+      LOOM_BYTECODE_ATTRIBUTE_TABLES(materializer)->strings.count, &plan,
+      fact.payload_prefix));
+#if LOOM_BYTECODE_ATTRIBUTE_SELECTED
+  if (kind == LOOM_TYPE_DIALECT) {
+    IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_intern_string(
+        materializer, plan.name_id, &plan.name_id));
+  }
+#endif
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
       materializer->decoder, cursor, IREE_SV("scoped_type_children"),
       plan.dependency_count,
-      /*minimum_entry_length=*/1, /*minimum_trailing_length=*/0,
-      dependency_count_offset));
+      /*minimum_entry_length=*/1, /*minimum_trailing_length=*/0, kind_offset));
   loom_type_id_t* children = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       materializer->scratch_arena, plan.dependency_count, sizeof(*children),
@@ -204,32 +148,14 @@ iree_status_t LOOM_BYTECODE_TYPE_MATERIALIZE_BINDINGS(
     loom_bytecode_reader_cursor_t* cursor,
     const loom_bytecode_attribute_ssa_materialization_scope_t* scope,
     uint64_t source_type_id, loom_type_id_t* out_type_id) {
-  uint64_t length = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(materializer->decoder,
-                                                         cursor, &length));
-  if (length == 0) {
-    if (source_type_id & 1) {
-      return loom_bytecode_complete_type_invalid(
-          materializer, cursor, IREE_SV("missing_scoped_record"));
-    }
+  loom_bytecode_reader_cursor_t records;
+  uint64_t count = 0;
+  IREE_RETURN_IF_ERROR(loom_bytecode_type_open_scoped_records(
+      materializer->decoder, cursor, source_type_id, &records, &count));
+  if (records.cursor.length == 0) {
     return LOOM_BYTECODE_TYPE_PROJECT_COMPLETED(materializer, cursor, scope,
                                                 source_type_id, out_type_id);
   }
-  if (source_type_id != 1) {
-    return loom_bytecode_complete_type_invalid(
-        materializer, cursor, IREE_SV("unexpected_scoped_record"));
-  }
-  const uint64_t offset = loom_bytecode_reader_cursor_absolute_position(cursor);
-  iree_const_byte_span_t payload;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_span(
-      materializer->decoder, cursor, length, &payload));
-  loom_bytecode_reader_cursor_t records;
-  loom_bytecode_reader_cursor_initialize(payload.data, payload.data_length,
-                                         offset, IREE_SV("SCOPED_TYPES"),
-                                         &records);
-  uint64_t count = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(materializer->decoder,
-                                                         &records, &count));
   iree_status_t status = iree_ok_status();
   for (uint64_t i = 0; i < count && iree_status_is_ok(status); ++i) {
     const iree_arena_checkpoint_t checkpoint =
@@ -252,14 +178,8 @@ iree_status_t LOOM_BYTECODE_TYPE_MATERIALIZE_BINDINGS(
   }
   IREE_RETURN_IF_ERROR(status);
   uint64_t root = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(materializer->decoder,
-                                                         &records, &root));
-  if (!root || root > scope->bindings->count) {
-    return loom_bytecode_complete_type_invalid(materializer, &records,
-                                               IREE_SV("root"));
-  }
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_expect_empty(
-      materializer->decoder, &records, IREE_SV("SCOPED_TYPES")));
-  *out_type_id = scope->bindings->entries[root - 1].type;
+  IREE_RETURN_IF_ERROR(loom_bytecode_type_close_scoped_records(
+      materializer->decoder, &records, scope->bindings->count, &root));
+  *out_type_id = scope->bindings->entries[root].type;
   return iree_ok_status();
 }
