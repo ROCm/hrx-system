@@ -336,7 +336,6 @@ TEST_F(GraphExecSemaphoreTest,
   std::vector<iree_hal_semaphore_t*> semaphores;
   for (uint32_t i = 0; i < exec->semaphore_count; ++i) {
     ASSERT_NE(exec->semaphores[i], nullptr);
-    EXPECT_EQ(exec->semaphore_base_values[i], 0u);
     iree_hal_semaphore_retain(exec->semaphores[i]);
     semaphores.push_back(exec->semaphores[i]);
   }

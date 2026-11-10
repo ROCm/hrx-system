@@ -1404,6 +1404,12 @@ HRX_API hrx_status_t hrx_graph_instantiate(hrx_graph_t graph, uint32_t flags,
                                            hrx_graph_exec_t* out_exec);
 HRX_API void hrx_graph_exec_retain(hrx_graph_exec_t exec);
 HRX_API void hrx_graph_exec_release(hrx_graph_exec_t exec);
+// Enqueues the graph after prior work on |stream|. Stream completion includes
+// every graph workstream. Replays of the same executable are ordered, including
+// launches on different streams; distinct executables may run concurrently.
+// Calls targeting one stream require external serialization. Failure submitting
+// graph blocks permanently fails the internal and stream timelines; neither may
+// be reused. Failure does not establish device retirement.
 HRX_API hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec,
                                            hrx_stream_t stream);
 HRX_API hrx_status_t hrx_graph_exec_update(hrx_graph_exec_t exec,

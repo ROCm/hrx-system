@@ -631,7 +631,9 @@ hrx_status_t hrx_graph_instantiate(hrx_graph_t graph, uint32_t flags,
   exec->block_count = 0;
   exec->semaphores = NULL;
   exec->semaphore_count = 0;
-  exec->semaphore_base_values = NULL;
+  exec->launch_generation = 0;
+  exec->last_launch_semaphore = NULL;
+  exec->last_launch_value = 0;
   exec->resource_set = NULL;
   exec->flags = flags;
   iree_slim_mutex_initialize(&exec->mutex);
@@ -663,6 +665,7 @@ hrx_status_t hrx_graph_instantiate(hrx_graph_t graph, uint32_t flags,
 static void hrx_graph_exec_destroy(hrx_graph_exec_s* exec) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  iree_hal_semaphore_release(exec->last_launch_semaphore);
   iree_hal_resource_set_free(exec->resource_set);
   iree_arena_deinitialize(&exec->arena_allocator);
   hrx_graph_release(exec->graph);

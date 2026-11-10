@@ -73,6 +73,10 @@ class GraphVisibilityTest : public HrxTestFixture {
   }
 
   ~GraphVisibilityTest() {
+    if (other_stream_) {
+      ReportHrxTestFailure("Other stream graph completion",
+                           hrx().stream_synchronize(other_stream_));
+    }
     if (stream_) {
       ReportHrxTestFailure("Graph completion",
                            hrx().stream_synchronize(stream_));
@@ -84,6 +88,7 @@ class GraphVisibilityTest : public HrxTestFixture {
     }
     hrx().buffer_release(buffer_);
     hrx().stream_release(stream_);
+    hrx().stream_release(other_stream_);
     hrx().executable_release(executable_);
   }
 
@@ -128,6 +133,8 @@ class GraphVisibilityTest : public HrxTestFixture {
   hrx_executable_export_info_t info_ = {};
   // Timeline joined before inspecting or releasing mapped storage.
   hrx_stream_t stream_ = nullptr;
+  // Optional independent stream exercising executable reuse across timelines.
+  hrx_stream_t other_stream_ = nullptr;
   // Coherent host allocation retained through all replays.
   hrx_buffer_t buffer_ = nullptr;
   // Persistent mapping, kept live until after the last host observation.
@@ -331,6 +338,36 @@ TEST_CASE_METHOD(GraphVisibilityTest,
       CAPTURE(i);
       REQUIRE(words_[i] == sentinel);
     }
+  }
+}
+
+TEST_CASE_METHOD(GraphVisibilityTest,
+                 "graph_parallel_replays_order_every_workstream") {
+  Initialize();
+  const size_t width = GENERATE(size_t{17}, size_t{64});
+  const bool cross_stream = GENERATE(false, true);
+  REQUIRE_OK(hrx().stream_create(device_, 0, &other_stream_));
+  std::array<uint32_t, kWordCount> expected;
+  for (size_t i = 0; i < kWordCount; ++i) {
+    words_[i] = expected[i] = static_cast<uint32_t>(i + 1);
+  }
+  for (size_t i = 0; i < width; ++i) {
+    AddTransform(i, i);
+  }
+  REQUIRE_OK(hrx().graph_instantiate(graph_, 0, &exec_));
+  for (size_t replay = 0; replay < 8; ++replay) {
+    auto stream = cross_stream && (replay & 1) ? other_stream_ : stream_;
+    REQUIRE_OK(hrx().graph_exec_launch(exec_, stream));
+    for (size_t i = 0; i < width; ++i) {
+      expected[i] = expected[i] * 3 + 7;
+    }
+  }
+  // The last launch includes every branch of every earlier replay, even when
+  // those replays came from another stream. No intermediate host wait is used.
+  REQUIRE_OK(hrx().stream_synchronize(cross_stream ? other_stream_ : stream_));
+  for (size_t i = 0; i < kWordCount; ++i) {
+    CAPTURE(width, cross_stream, i);
+    REQUIRE(words_[i] == expected[i]);
   }
 }
 

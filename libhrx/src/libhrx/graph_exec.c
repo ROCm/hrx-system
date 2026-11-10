@@ -105,10 +105,11 @@ static_assert(sizeof(hrx_graph_exec_block_t) % iree_alignof(uint32_t) == 0,
 // Resolved pointers to a block's payload: the attributes stored inline in the
 // block and the variable-length arrays trailing it.
 typedef struct hrx_graph_block_ptrs_t {
-  uint32_t* wait_payload_deltas;
-  uint32_t* signal_payload_deltas;
-  uint16_t* wait_semaphore_indices;
-  uint16_t* signal_semaphore_indices;
+  // Indices of the preceding partition's completion semaphores.
+  uint32_t* wait_semaphore_indices;
+  // Indices of the semaphores produced by this block.
+  uint32_t* signal_semaphore_indices;
+  // Type-specific attributes embedded in the block header.
   hrx_graph_block_attrs_t* attrs;
 } hrx_graph_block_ptrs_t;
 
@@ -116,22 +117,15 @@ typedef struct hrx_graph_block_ptrs_t {
 // Block helpers
 //===----------------------------------------------------------------------===//
 
-// Resolves the payload pointers for |block|. The trailing arrays run in
-// descending alignment order - both payload delta arrays before both semaphore
-// index arrays - starting at the end of the block header, whose size is a
-// multiple of the block's own alignment. Every region therefore lands on its
-// natural alignment and the block holds no interior padding.
+// Resolves the semaphore indices trailing |block|. Every edge carries the
+// launch generation, so blocks only store indices, not per-edge payloads.
 // hrx_graph_block_allocate sizes the allocation from this same order.
 static inline void hrx_graph_block_get_ptrs(hrx_graph_exec_block_t* block,
                                             hrx_graph_block_ptrs_t* out_ptrs) {
   uint8_t* ptr = (uint8_t*)block + sizeof(*block);
-  out_ptrs->wait_payload_deltas = (uint32_t*)ptr;
+  out_ptrs->wait_semaphore_indices = (uint32_t*)ptr;
   ptr += block->wait_semaphore_count * sizeof(uint32_t);
-  out_ptrs->signal_payload_deltas = (uint32_t*)ptr;
-  ptr += block->signal_semaphore_count * sizeof(uint32_t);
-  out_ptrs->wait_semaphore_indices = (uint16_t*)ptr;
-  ptr += block->wait_semaphore_count * sizeof(uint16_t);
-  out_ptrs->signal_semaphore_indices = (uint16_t*)ptr;
+  out_ptrs->signal_semaphore_indices = (uint32_t*)ptr;
   out_ptrs->attrs = &block->attrs;
 }
 
@@ -144,8 +138,6 @@ static iree_status_t hrx_graph_block_allocate(
   iree_host_size_t size = sizeof(hrx_graph_exec_block_t);
   size += wait_semaphore_count * sizeof(uint32_t);
   size += signal_semaphore_count * sizeof(uint32_t);
-  size += wait_semaphore_count * sizeof(uint16_t);
-  size += signal_semaphore_count * sizeof(uint16_t);
 
   hrx_graph_exec_block_t* block = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, size, (void**)&block));
@@ -389,58 +381,40 @@ iree_status_t hrx_graph_exec_instantiate_locked(
       z0, hrx_graph_schedule_nodes(node_blocks, node_count, additional_edges,
                                    &exec->arena_allocator, &schedule));
 
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_arena_allocate(&exec->arena_allocator,
-                              schedule.block_count * sizeof(*exec->blocks),
-                              (void**)&exec->blocks));
-
   if (schedule.partition_count == 0) {
     exec->block_count = 0;
     exec->blocks = NULL;
     exec->semaphore_count = 0;
     exec->semaphores = NULL;
-    exec->semaphore_base_values = NULL;
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
 
+  const hrx_graph_partition_t* final_partition =
+      &schedule.partitions[schedule.partition_count - 1];
+  const bool needs_final_join = final_partition->stream_count > 1;
+  const iree_host_size_t signaling_partition_count =
+      schedule.partition_count - (needs_final_join ? 0 : 1);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_arena_allocate(&exec->arena_allocator,
+                          (schedule.block_count + (needs_final_join ? 1 : 0)) *
+                              sizeof(*exec->blocks),
+                          (void**)&exec->blocks));
+
   uint32_t semaphore_count = 0;
-  if (schedule.partition_count > 1) {
-    for (iree_host_size_t i = 0; i < schedule.partition_count - 1; i++) {
-      if (schedule.partitions[i].stream_count > 1) {
-        semaphore_count += schedule.partitions[i].stream_count;
-      } else {
-        semaphore_count += 1;
-      }
-    }
+  for (iree_host_size_t i = 0; i < signaling_partition_count; ++i) {
+    semaphore_count += schedule.partitions[i].stream_count;
   }
   if (semaphore_count > 0) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_arena_allocate(&exec->arena_allocator,
                                 semaphore_count * sizeof(*exec->semaphores),
                                 (void**)&exec->semaphores));
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_arena_allocate(
-                &exec->arena_allocator,
-                semaphore_count * sizeof(*exec->semaphore_base_values),
-                (void**)&exec->semaphore_base_values));
-
-    // Arena memory is uninitialized. Zeroing up front keeps the arrays
-    // well-defined if the creation loop below fails part way through, and is
-    // what leaves every base value at zero when it succeeds.
+    // Each fresh semaphore transfers its sole retained reference to the set;
+    // this array borrows those references, including on partial construction.
     memset(exec->semaphores, 0, semaphore_count * sizeof(*exec->semaphores));
-    memset(exec->semaphore_base_values, 0,
-           semaphore_count * sizeof(*exec->semaphore_base_values));
 
-    // The insert retains a resource the set has not already seen rather than
-    // consuming the creation reference, so each semaphore is released once
-    // inserted and the set holds it until the executable is destroyed;
-    // exec->semaphores stores borrowed pointers. Releasing after inserting is
-    // valid only because these semaphores are freshly created: an insert handed
-    // a resource the set already holds returns without retaining. Launching
-    // takes further references: the queue retains the semaphores an operation
-    // waits on and clones the signal list, so work in flight keeps them alive
-    // independently of the executable.
     iree_hal_device_t* hal_device = exec->device->hal_device;
     iree_status_t status = iree_ok_status();
     for (uint32_t i = 0; iree_status_is_ok(status) && i < semaphore_count;
@@ -479,7 +453,7 @@ iree_status_t hrx_graph_exec_instantiate_locked(
     }
 
     uint16_t signal_semaphore_count = 0;
-    if (p < schedule.partition_count - 1) {
+    if (p < signaling_partition_count) {
       signal_semaphore_count =
           partition->stream_count > 1 ? partition->stream_count : 1;
     }
@@ -542,19 +516,16 @@ iree_status_t hrx_graph_exec_instantiate_locked(
         if (wait_semaphore_count > 0) {
           for (uint16_t w = 0; w < wait_semaphore_count; w++) {
             ptrs.wait_semaphore_indices[w] = partition_wait_semaphore_start + w;
-            ptrs.wait_payload_deltas[w] = 1;
           }
         }
         if (block_signal_count > 0) {
           if (stream_count > 1) {
             ptrs.signal_semaphore_indices[0] =
                 partition_signal_semaphore_start + s;
-            ptrs.signal_payload_deltas[0] = 1;
           } else {
             for (uint16_t i = 0; i < block_signal_count; i++) {
               ptrs.signal_semaphore_indices[i] =
                   partition_signal_semaphore_start + i;
-              ptrs.signal_payload_deltas[i] = 1;
             }
           }
         }
@@ -590,18 +561,33 @@ iree_status_t hrx_graph_exec_instantiate_locked(
         for (uint16_t w = 0; w < wait_semaphore_count; w++) {
           ptrs.wait_semaphore_indices[w] =
               semaphore_index - wait_semaphore_count + w;
-          ptrs.wait_payload_deltas[w] = 1;
         }
       }
       if (signal_semaphore_count > 0) {
         for (uint16_t i = 0; i < signal_semaphore_count; i++) {
           ptrs.signal_semaphore_indices[i] = semaphore_index + i;
-          ptrs.signal_payload_deltas[i] = 1;
         }
       }
       semaphore_index += signal_semaphore_count;
       exec->blocks[block_index++] = block;
     }
+  }
+
+  if (needs_final_join) {
+    hrx_graph_exec_block_t* block = NULL;
+    hrx_graph_block_ptrs_t ptrs;
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, hrx_graph_block_allocate(
+                &exec->arena_allocator, HRX_GRAPH_BLOCK_TYPE_QUEUE_BARRIER,
+                /*node_start_index=*/0, /*node_count=*/0,
+                final_partition->stream_count, /*signal_semaphore_count=*/0,
+                &block, &ptrs));
+    ptrs.attrs->barrier.flags = IREE_HAL_QUEUE_BARRIER_FLAG_NONE;
+    for (uint16_t i = 0; i < final_partition->stream_count; ++i) {
+      ptrs.wait_semaphore_indices[i] =
+          semaphore_count - final_partition->stream_count + i;
+    }
+    exec->blocks[block_index++] = block;
   }
 
   // Published only once every entry has been constructed. A failure above
@@ -644,28 +630,22 @@ hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec, hrx_stream_t stream) {
     HRX_RETURN_AND_END_ZONE(z0, flush_status);
   }
 
-  // Multiple threads may launch the same executable. Serialize the semaphore
-  // query and advancement as one transaction so each launch observes the
-  // timeline values committed by the preceding launch.
+  // Reservations describe submitted work, not completed payloads. Each edge
+  // has one producer per launch; the previous launch must finish before any
+  // producer can publish the next generation and satisfy an earlier reader.
   iree_slim_mutex_lock(&exec->mutex);
+  const uint64_t generation = ++exec->launch_generation;
+  iree_hal_semaphore_t* stream_semaphore = stream->semaphore->hal_semaphore;
+  const uint64_t stream_wait_value = stream->timepoint;
+  const uint64_t stream_signal_value = stream_wait_value + 1;
 
+  // The partitioner bounds the widest join. Reuse these lists for every block
+  // instead of accumulating graph-sized scratch on the stack.
+  iree_hal_semaphore_t* wait_sems[HRX_GRAPH_MAX_WORKSTREAMS + 2];
+  uint64_t wait_vals[IREE_ARRAYSIZE(wait_sems)];
+  iree_hal_semaphore_t* signal_sems[1];
+  uint64_t signal_vals[IREE_ARRAYSIZE(signal_sems)];
   iree_status_t status = iree_ok_status();
-  for (uint32_t i = 0; iree_status_is_ok(status) && i < exec->semaphore_count;
-       i++) {
-    status = iree_hal_semaphore_query(exec->semaphores[i],
-                                      &exec->semaphore_base_values[i]);
-  }
-
-  uint64_t stream_wait_value = stream->timepoint;
-  uint64_t stream_signal_value = stream->timepoint + 1;
-
-  uint64_t* new_base_values = NULL;
-  if (exec->semaphore_count > 0) {
-    const iree_host_size_t base_values_size =
-        exec->semaphore_count * sizeof(uint64_t);
-    new_base_values = (uint64_t*)iree_alloca(base_values_size);
-    memcpy(new_base_values, exec->semaphore_base_values, base_values_size);
-  }
 
   for (uint32_t block_index = 0;
        iree_status_is_ok(status) && block_index < exec->block_count;
@@ -674,49 +654,32 @@ hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec, hrx_stream_t stream) {
     hrx_graph_block_ptrs_t ptrs;
     hrx_graph_block_get_ptrs(block, &ptrs);
 
-    const iree_host_size_t total_semaphores =
-        block->wait_semaphore_count + block->signal_semaphore_count + 2;
-    iree_hal_semaphore_t** semaphore_array =
-        (iree_hal_semaphore_t**)iree_alloca(total_semaphores *
-                                            sizeof(iree_hal_semaphore_t*));
-    uint64_t* value_array =
-        (uint64_t*)iree_alloca(total_semaphores * sizeof(uint64_t));
-
-    iree_hal_semaphore_t** wait_sems = semaphore_array;
-    uint64_t* wait_vals = value_array;
-    iree_hal_semaphore_t** signal_sems =
-        semaphore_array + (block->wait_semaphore_count + 1);
-    uint64_t* signal_vals = value_array + (block->wait_semaphore_count + 1);
-
     iree_host_size_t wait_count = 0;
-    if (block_index == 0 && stream_wait_value > 0) {
-      wait_sems[wait_count] = stream->semaphore->hal_semaphore;
-      wait_vals[wait_count] = stream_wait_value;
-      wait_count++;
+    if (block->wait_semaphore_count == 0) {
+      if (stream_wait_value > 0) {
+        wait_sems[wait_count] = stream_semaphore;
+        wait_vals[wait_count++] = stream_wait_value;
+      }
+      // On the same stream its tail already includes the preceding launch.
+      if (exec->last_launch_semaphore &&
+          exec->last_launch_semaphore != stream_semaphore) {
+        wait_sems[wait_count] = exec->last_launch_semaphore;
+        wait_vals[wait_count++] = exec->last_launch_value;
+      }
+    }
+    for (uint16_t i = 0; i < block->wait_semaphore_count; ++i) {
+      wait_sems[wait_count] = exec->semaphores[ptrs.wait_semaphore_indices[i]];
+      wait_vals[wait_count++] = generation;
     }
 
-    for (uint16_t i = 0; i < block->wait_semaphore_count; i++) {
-      const uint16_t sem_idx = ptrs.wait_semaphore_indices[i];
-      const uint32_t delta = ptrs.wait_payload_deltas[i];
-      wait_sems[wait_count] = exec->semaphores[sem_idx];
-      wait_vals[wait_count] = exec->semaphore_base_values[sem_idx] + delta;
-      wait_count++;
-    }
-
-    iree_host_size_t signal_count = 0;
-    for (uint16_t i = 0; i < block->signal_semaphore_count; i++) {
-      const uint16_t sem_idx = ptrs.signal_semaphore_indices[i];
-      const uint32_t delta = ptrs.signal_payload_deltas[i];
-      signal_sems[signal_count] = exec->semaphores[sem_idx];
-      signal_vals[signal_count] = exec->semaphore_base_values[sem_idx] + delta;
-      new_base_values[sem_idx] = signal_vals[signal_count];
-      signal_count++;
-    }
-
-    if (block_index == exec->block_count - 1) {
-      signal_sems[signal_count] = stream->semaphore->hal_semaphore;
-      signal_vals[signal_count] = stream_signal_value;
-      signal_count++;
+    // Every block has exactly one completion producer: either an internal
+    // edge or, for the single exit/join, the external stream timeline.
+    if (block->signal_semaphore_count) {
+      signal_sems[0] = exec->semaphores[ptrs.signal_semaphore_indices[0]];
+      signal_vals[0] = generation;
+    } else {
+      signal_sems[0] = stream_semaphore;
+      signal_vals[0] = stream_signal_value;
     }
 
     iree_hal_semaphore_list_t wait_semaphores = {
@@ -725,17 +688,23 @@ hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec, hrx_stream_t stream) {
         .payload_values = wait_vals,
     };
     iree_hal_semaphore_list_t signal_semaphores = {
-        .count = signal_count,
+        .count = 1,
         .semaphores = signal_sems,
         .payload_values = signal_vals,
     };
 
     switch (block->type) {
-      case HRX_GRAPH_BLOCK_TYPE_QUEUE_BARRIER:
+      case HRX_GRAPH_BLOCK_TYPE_QUEUE_BARRIER: {
+        // Empty graph nodes and terminal joins only order semaphore points.
+        // Recorded work owns its acquire/release boundaries; repeating system
+        // visibility here would add a cache flush to a pure dependency join.
+        const iree_hal_barrier_list_t empty_list = {0};
+        const iree_hal_queue_barriers_t barriers = {&empty_list, &empty_list};
         status = iree_hal_queue_barrier(stream->hal_queue, wait_semaphores,
-                                        signal_semaphores, /*barriers=*/NULL,
+                                        signal_semaphores, &barriers,
                                         ptrs.attrs->barrier.flags);
         break;
+      }
       case HRX_GRAPH_BLOCK_TYPE_QUEUE_FILL:
         status = iree_hal_queue_fill(
             exec->device->transfer_queue, wait_semaphores, signal_semaphores,
@@ -790,13 +759,21 @@ hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec, hrx_stream_t stream) {
     }
   }
 
-  if (iree_status_is_ok(status) && exec->semaphore_count > 0) {
-    memcpy(exec->semaphore_base_values, new_base_values,
-           exec->semaphore_count * sizeof(uint64_t));
+  // Preserve the reservation even on rejection after an accepted prefix. A
+  // failed launch is terminal, not an invitation to reuse its points or leave
+  // a stream waiting on a final block that was never submitted.
+  stream->timepoint = stream_signal_value;
+  if (exec->last_launch_semaphore != stream_semaphore) {
+    iree_hal_semaphore_retain(stream_semaphore);
+    iree_hal_semaphore_release(exec->last_launch_semaphore);
+    exec->last_launch_semaphore = stream_semaphore;
   }
-
-  if (iree_status_is_ok(status)) {
-    stream->timepoint = stream_signal_value;
+  exec->last_launch_value = stream_signal_value;
+  if (!iree_status_is_ok(status)) {
+    for (uint32_t i = 0; i < exec->semaphore_count; ++i) {
+      iree_hal_semaphore_fail(exec->semaphores[i], iree_status_clone(status));
+    }
+    iree_hal_semaphore_fail(stream_semaphore, iree_status_clone(status));
   }
 
   iree_slim_mutex_unlock(&exec->mutex);
