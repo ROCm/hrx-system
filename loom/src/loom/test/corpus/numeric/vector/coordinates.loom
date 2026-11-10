@@ -1,0 +1,156 @@
+// Every coordinate carrier uses runtime base/step values. Two logical rows
+// cross ordinary packet boundaries, and all payload widths retain wraparound.
+func.def @coordinates(%base: i64, %step: i64, %position_input: index, %bytes: buffer, %shorts: buffer, %words: buffer, %longs: buffer, %indices: buffer) {
+  %position = index.assume %position_input [range(%position_input, 0, 5)] : index
+  %origin = index.constant 0 : offset
+  %byte_output = buffer.view %bytes[%origin] : buffer -> view<2x3xi8>
+  %short_output = buffer.view %shorts[%origin] : buffer -> view<2x3xi16>
+  %word_output = buffer.view %words[%origin] : buffer -> view<2x3xi32>
+  %long_output = buffer.view %longs[%origin] : buffer -> view<2x3xi64>
+  %index_output = buffer.view %indices[%origin] : buffer -> view<2x3xi64>
+  %byte_base = scalar.trunci %base : i64 to i8
+  %byte_step = scalar.trunci %step : i64 to i8
+  %short_base = scalar.trunci %base : i64 to i16
+  %short_step = scalar.trunci %step : i64 to i16
+  %word_base = scalar.trunci %base : i64 to i32
+  %word_step = scalar.trunci %step : i64 to i32
+  %byte_values = vector.iota %byte_base step %byte_step : vector<2x3xi8>
+  %short_values = vector.iota %short_base step %short_step : vector<2x3xi16>
+  %word_values = vector.iota %word_base step %word_step : vector<2x3xi32>
+  %long_values = vector.iota %base step %step : vector<2x3xi64>
+  vector.store %byte_values, %byte_output[0, 0] : vector<2x3xi8>, view<2x3xi8>
+  vector.store %short_values, %short_output[0, 0] : vector<2x3xi16>, view<2x3xi16>
+  vector.store %word_values, %word_output[0, 0] : vector<2x3xi32>, view<2x3xi32>
+  vector.store %long_values, %long_output[0, 0] : vector<2x3xi64>, view<2x3xi64>
+
+  // Index width is target-defined; bounded positive values agree on every ABI.
+  %mask = scalar.constant 255 : i64
+  %index_base_bits = scalar.andi %base, %mask : i64
+  %index_step_bits = scalar.andi %step, %mask : i64
+  %index_base = index.cast %index_base_bits : i64 to index
+  %index_step = index.cast %index_step_bits : i64 to index
+  %index_values = vector.iota %index_base step %index_step : vector<2x3xindex>
+  %wide_indices = vector.index_cast %index_values : vector<2x3xindex> to vector<2x3xi64>
+  vector.store %wide_indices, %index_output[0, 0] : vector<2x3xi64>, view<2x3xi64>
+
+  %row_width = index.constant 3 : index
+  %row = index.div %position, %row_width : index
+  %column = index.rem %position, %row_width : index
+  %byte_selected = vector.extract %byte_values[%row, %column] : vector<2x3xi8> -> i8
+  %byte_observations = buffer.view %bytes[%origin] : buffer -> view<7xi8>
+  view.store %byte_selected, %byte_observations[6] : i8, view<7xi8>
+  %short_selected = vector.extract %short_values[%row, %column] : vector<2x3xi16> -> i16
+  %short_observations = buffer.view %shorts[%origin] : buffer -> view<7xi16>
+  view.store %short_selected, %short_observations[6] : i16, view<7xi16>
+  %word_selected = vector.extract %word_values[%row, %column] : vector<2x3xi32> -> i32
+  %word_observations = buffer.view %words[%origin] : buffer -> view<7xi32>
+  view.store %word_selected, %word_observations[6] : i32, view<7xi32>
+  %long_selected = vector.extract %long_values[%row, %column] : vector<2x3xi64> -> i64
+  %long_observations = buffer.view %longs[%origin] : buffer -> view<7xi64>
+  view.store %long_selected, %long_observations[6] : i64, view<7xi64>
+  %index_selected = vector.extract %index_values[%row, %column] : vector<2x3xindex> -> index
+  %index_stored = index.cast %index_selected : index to i64
+  %index_observations = buffer.view %indices[%origin] : buffer -> view<7xi64>
+  view.store %index_stored, %index_observations[6] : i64, view<7xi64>
+  func.return
+}
+
+// Scalar recurrence independently checks ordinal multiplication and row order.
+func.def @coordinates_oracle(%base: i64, %step: i64, %position_input: index, %bytes: buffer, %shorts: buffer, %words: buffer, %longs: buffer, %indices: buffer) {
+  %position = index.assume %position_input [range(%position_input, 0, 5)] : index
+  %origin = index.constant 0 : offset
+  %byte_output = buffer.view %bytes[%origin] : buffer -> view<7xi8>
+  %short_output = buffer.view %shorts[%origin] : buffer -> view<7xi16>
+  %word_output = buffer.view %words[%origin] : buffer -> view<7xi32>
+  %long_output = buffer.view %longs[%origin] : buffer -> view<7xi64>
+  %index_output = buffer.view %indices[%origin] : buffer -> view<7xi64>
+  %mask = scalar.constant 255 : i64
+  %index_base = scalar.andi %base, %mask : i64
+  %index_step = scalar.andi %step, %mask : i64
+  %begin = index.constant 0 : index
+  %end = index.constant 6 : index
+  %increment = index.constant 1 : index
+  %last, %index_last = scf.for %lane = [%begin to %end step %increment](%current = %base : i64, %index_current = %index_base : i64) -> (i64, i64) {
+    %byte_value = scalar.trunci %current : i64 to i8
+    %short_value = scalar.trunci %current : i64 to i16
+    %word_value = scalar.trunci %current : i64 to i32
+    view.store %byte_value, %byte_output[%lane] : i8, view<7xi8>
+    view.store %short_value, %short_output[%lane] : i16, view<7xi16>
+    view.store %word_value, %word_output[%lane] : i32, view<7xi32>
+    view.store %current, %long_output[%lane] : i64, view<7xi64>
+    view.store %index_current, %index_output[%lane] : i64, view<7xi64>
+    %next = scalar.addi %current, %step : i64
+    %index_next = scalar.addi %index_current, %index_step : i64
+    scf.yield %next, %index_next : i64, i64
+  }
+  %byte_selected = view.load %byte_output[%position] : view<7xi8> -> i8
+  view.store %byte_selected, %byte_output[6] : i8, view<7xi8>
+  %short_selected = view.load %short_output[%position] : view<7xi16> -> i16
+  view.store %short_selected, %short_output[6] : i16, view<7xi16>
+  %word_selected = view.load %word_output[%position] : view<7xi32> -> i32
+  view.store %word_selected, %word_output[6] : i32, view<7xi32>
+  %long_selected = view.load %long_output[%position] : view<7xi64> -> i64
+  view.store %long_selected, %long_output[6] : i64, view<7xi64>
+  %index_selected = view.load %index_output[%position] : view<7xi64> -> i64
+  view.store %index_selected, %index_output[6] : i64, view<7xi64>
+  func.return
+}
+
+func.def @coordinate_position(%trial: index) -> (index) {
+  %lane_count = index.constant 6 : index
+  %position = index.rem %trial, %lane_count : index
+  func.return %position : index
+}
+
+func.def @coordinate_step(%trial: index) -> (i64) {
+  %integer = index.cast %trial : index to i64
+  %bias = scalar.constant 4 : i64
+  %step = scalar.subi %integer, %bias : i64
+  func.return %step : i64
+}
+
+// Positive and negative steps cross each payload width's signed boundary.
+func.def @coordinate_base(%trial: index, %entropy: i64) -> (i64) {
+  %slot_mask = index.constant 3 : index
+  %slot = index.andi %trial, %slot_mask : index
+  %slot_bits = index.cast %slot : index to i64
+  %byte_width = scalar.constant 8 : i64
+  %width = scalar.shli %byte_width, %slot_bits : i64
+  %c1 = scalar.constant 1 : i64
+  %shift = scalar.subi %width, %c1 : i64
+  %sign_bit = scalar.shli %c1, %shift : i64
+  %maximum = scalar.subi %sign_bit, %c1 : i64
+  %stationary_trial = index.constant 4 : index
+  %descending = index.cmp ult, %trial, %stationary_trial : index
+  %boundary = scf.select %descending, %sign_bit, %maximum : i64
+  %stationary = index.cmp eq, %trial, %stationary_trial : index
+  %base = scf.select %stationary, %entropy, %boundary : i64
+  func.return %base : i64
+}
+
+check.scenario @runtime_coordinate_values {
+  check.trial[9](%trial: index, %entropy: check.entropy) {
+    %entropy_bits = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %base = check.generate<@coordinate_base>(%trial, %entropy_bits) : (index, i64) -> (i64)
+    %step = check.generate<@coordinate_step>(%trial) : (index) -> (i64)
+    %position = check.generate<@coordinate_position>(%trial) : (index) -> (index)
+    %bytes_storage = check.generate.fill value(23) : tensor<9xi8>
+    %shorts_storage = check.generate.fill value(23) : tensor<9xi16>
+    %words_storage = check.generate.fill value(23) : tensor<9xi32>
+    %longs_storage = check.generate.fill value(23) : tensor<9xi64>
+    %indices_storage = check.generate.fill value(23) : tensor<9xi64>
+    %bytes = check.tensor.view %bytes_storage offset(1) : tensor<9xi8> -> tensor<7xi8>
+    %shorts = check.tensor.view %shorts_storage offset(2) : tensor<9xi16> -> tensor<7xi16>
+    %words = check.tensor.view %words_storage offset(4) : tensor<9xi32> -> tensor<7xi32>
+    %longs = check.tensor.view %longs_storage offset(8) : tensor<9xi64> -> tensor<7xi64>
+    %indices = check.tensor.view %indices_storage offset(8) : tensor<9xi64> -> tensor<7xi64>
+    check.compare<@coordinates, @coordinates_oracle>(%base, %step, %position, %bytes, %shorts, %words, %longs, %indices) : (i64, i64, index, tensor<7xi8>, tensor<7xi16>, tensor<7xi32>, tensor<7xi64>, tensor<7xi64>) -> () {
+      check.expect.bitwise actual(%bytes_storage) expected(%bytes_storage) : tensor<9xi8>
+      check.expect.bitwise actual(%shorts_storage) expected(%shorts_storage) : tensor<9xi16>
+      check.expect.bitwise actual(%words_storage) expected(%words_storage) : tensor<9xi32>
+      check.expect.bitwise actual(%longs_storage) expected(%longs_storage) : tensor<9xi64>
+      check.expect.bitwise actual(%indices_storage) expected(%indices_storage) : tensor<9xi64>
+    }
+  }
+  check.return
+}

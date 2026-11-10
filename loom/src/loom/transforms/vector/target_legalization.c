@@ -1763,6 +1763,10 @@ static iree_status_t loom_vector_legalize_workgroup_reduce(
 
 static const loom_target_legalizer_rule_t kVectorLegalizerRules[] = {
     {
+        .root_kind = LOOM_OP_VECTOR_IOTA,
+        .legalize = loom_vector_legalize_descriptor,
+    },
+    {
         .root_kind = LOOM_OP_VECTOR_CONSTANTI,
         .legalize = loom_vector_legalize_literal_patches,
     },
