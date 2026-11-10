@@ -331,7 +331,12 @@ static loom_func_like_t loom_template_application_blocker_contract_function(
   const loom_template_provider_summary_t* provider =
       entry->unresolved_provider ? entry->unresolved_provider
                                  : entry->selected_provider;
-  return provider ? provider->function : (loom_func_like_t){0};
+  if (!provider || !loom_symbol_ref_is_valid(provider->symbol)) {
+    return (loom_func_like_t){0};
+  }
+  const loom_symbol_t* provider_symbol =
+      &provider->module->symbols.entries[provider->symbol.symbol_id];
+  return loom_func_like_cast(provider->module, provider_symbol->defining_op);
 }
 
 static iree_string_view_t loom_template_application_blocker_contract_name(

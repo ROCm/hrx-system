@@ -157,12 +157,7 @@ template.def<@qwen.q4.matmul> public priority(10) @fast(%arg0: i32) -> (i32) {
       FindProvider(qwen, IREE_SV("fast"));
   ASSERT_NE(fast, nullptr);
   EXPECT_EQ(fast->kind, LOOM_TEMPLATE_PROVIDER_KIND_DEF);
-  EXPECT_EQ(fast->func_facts->visibility, LOOM_TEMPLATE_VISIBILITY_PUBLIC);
   EXPECT_TRUE(fast->has_body);
-  EXPECT_EQ(fast->func_facts->calling_convention, 0);
-  EXPECT_EQ(fast->func_facts->effect_contract, 0);
-  EXPECT_EQ(fast->func_facts->temperature, 0);
-  EXPECT_EQ(fast->func_facts->inline_policy, 0);
   EXPECT_EQ(fast->priority, 10);
   ASSERT_EQ(fast->argument_count, 1u);
   ASSERT_EQ(fast->result_count, 1u);
@@ -177,7 +172,6 @@ template.def<@qwen.q4.matmul> public priority(10) @fast(%arg0: i32) -> (i32) {
       FindProvider(qwen, IREE_SV("asm_impl"));
   ASSERT_NE(asm_impl, nullptr);
   EXPECT_EQ(asm_impl->kind, LOOM_TEMPLATE_PROVIDER_KIND_UKERNEL);
-  EXPECT_NE(asm_impl->func_facts->visibility, LOOM_TEMPLATE_VISIBILITY_PUBLIC);
   EXPECT_FALSE(asm_impl->has_body);
   EXPECT_EQ(asm_impl->priority, 5);
 
@@ -195,8 +189,6 @@ template.def<@qwen.q4.matmul> public priority(10) @fast(%arg0: i32) -> (i32) {
   ASSERT_EQ(other.count, 1u);
   EXPECT_TRUE(
       iree_string_view_equal(other.providers[0].name, IREE_SV("other")));
-  EXPECT_EQ(other.providers[0].func_facts->visibility,
-            LOOM_TEMPLATE_VISIBILITY_PUBLIC);
 
   loom_template_provider_slice_t missing =
       loom_template_provider_catalog_lookup(&catalog_, loom_symbol_ref_null());
@@ -420,12 +412,8 @@ template.decl @target.family(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]x
   EXPECT_EQ(target->values.count, target_value_count_before);
   EXPECT_EQ(bound.module, target.get());
   EXPECT_FALSE(loom_symbol_ref_is_valid(bound.symbol));
-  EXPECT_FALSE(loom_func_like_isa(bound.function));
-  EXPECT_EQ(bound.func_facts, nullptr);
   EXPECT_EQ(bound.origin_ordinal, 123u);
   EXPECT_EQ(bound.family.symbol_id, target_family.symbol_id);
-  EXPECT_TRUE(
-      iree_string_view_equal(bound.family_name, IREE_SV("target.family")));
   EXPECT_EQ(bound.target_symbol.symbol_id, target_target.symbol_id);
   EXPECT_EQ(bound.target_facts, source_provider.target_facts);
 

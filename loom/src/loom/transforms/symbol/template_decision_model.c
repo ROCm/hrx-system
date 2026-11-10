@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/target/facts.h"
 #include "loom/ops/template/ops.h"

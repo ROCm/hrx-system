@@ -22,6 +22,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/target/facts.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/template/ops.h"

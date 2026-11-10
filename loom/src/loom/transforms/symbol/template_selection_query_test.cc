@@ -104,8 +104,6 @@ class TemplateSelectionQueryTest : public ::testing::Test {
     IREE_ASSERT(selected != nullptr);
     loom_template_provider_summary_t external = *selected;
     external.symbol = loom_symbol_ref_null();
-    external.function = {};
-    external.func_facts = nullptr;
     external.origin_ordinal = origin_ordinal;
 
     const loom_symbol_id_t provider_symbol_id =

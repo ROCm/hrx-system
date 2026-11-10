@@ -18,7 +18,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/symbol_facts.h"
 #include "loom/ir/ir.h"
-#include "loom/ops/func_symbol_facts.h"
+#include "loom/target/condition.h"
 #include "loom/target/facts.h"
 
 #ifdef __cplusplus
@@ -69,12 +69,6 @@ typedef struct loom_template_provider_summary_t {
   // bound into this module. Presence is owned by has_target_requirement.
   loom_symbol_ref_t target_symbol;
 
-  // Local function-like operation, or empty for external providers.
-  loom_func_like_t function;
-
-  // Local function facts backing this summary, or NULL for external providers.
-  const loom_func_symbol_facts_t* func_facts;
-
   // Caller-defined stable source identity, or IREE_HOST_SIZE_MAX when absent.
   iree_host_size_t origin_ordinal;
 
@@ -92,9 +86,6 @@ typedef struct loom_template_provider_summary_t {
 
   // Number of resolved target-condition entries.
   uint16_t target_condition_count;
-
-  // Borrowed template family symbol name.
-  iree_string_view_t family_name;
 
   // Borrowed provider symbol name.
   iree_string_view_t name;

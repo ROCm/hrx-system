@@ -576,6 +576,7 @@ loom_cc_library(
         "//loom/src/loom/ops:func_symbol_facts",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/target",
+        "//loom/src/loom/target:condition",
         "//loom/src/loom/target:facts",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

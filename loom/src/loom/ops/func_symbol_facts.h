@@ -61,9 +61,6 @@ typedef struct loom_func_symbol_facts_t {
   // Module-local template family symbol, or null for non-provider functions.
   loom_symbol_ref_t template_family;
 
-  // Borrowed template family symbol name, or empty when absent.
-  iree_string_view_t template_family_name;
-
   // Concrete provider priority, or zero when not applicable.
   int64_t priority;
 

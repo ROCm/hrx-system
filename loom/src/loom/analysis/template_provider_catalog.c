@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/ir/module.h"
+#include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/target/facts.h"
 
@@ -131,13 +132,6 @@ static iree_status_t loom_template_provider_catalog_populate_local(
     const loom_func_symbol_facts_t* facts = NULL;
     IREE_RETURN_IF_ERROR(loom_template_provider_catalog_lookup_facts(
         module, fact_table, (loom_symbol_id_t)i, &facts));
-    loom_func_like_t function =
-        loom_func_like_cast(module, symbol->defining_op);
-    if (!loom_func_like_isa(function)) {
-      IREE_ASSERT_UNREACHABLE("template provider symbol is not function-like");
-      IREE_BUILTIN_UNREACHABLE();
-    }
-
     loom_template_provider_catalog_bucket_t* bucket =
         &buckets[facts->template_family.symbol_id];
     IREE_ASSERT(bucket->first_provider_index !=
@@ -157,13 +151,10 @@ static iree_status_t loom_template_provider_catalog_populate_local(
                 .symbol_id = (loom_symbol_id_t)i,
             },
         .target_symbol = facts->target_symbol,
-        .function = function,
-        .func_facts = facts,
         .origin_ordinal = IREE_HOST_SIZE_MAX,
         .family = facts->template_family,
         .argument_count = facts->argument_count,
         .result_count = facts->result_count,
-        .family_name = facts->template_family_name,
         .name = facts->name,
         .priority = facts->priority,
         .argument_ids = facts->argument_ids,
@@ -330,11 +321,9 @@ iree_status_t loom_template_provider_catalog_build_local(
                                               /*external_provider_count=*/0);
 }
 
-static iree_status_t loom_template_provider_resolve_family_binding(
+static iree_status_t loom_template_provider_validate_family_binding(
     const loom_module_t* target_module, loom_symbol_ref_t target_family,
-    uint16_t expected_argument_count, uint16_t expected_result_count,
-    const loom_symbol_t** out_symbol) {
-  *out_symbol = NULL;
+    uint16_t expected_argument_count, uint16_t expected_result_count) {
   if (!loom_symbol_ref_is_valid(target_family) ||
       target_family.module_id != 0 ||
       target_family.symbol_id >= target_module->symbols.count) {
@@ -359,7 +348,6 @@ static iree_status_t loom_template_provider_resolve_family_binding(
         IREE_STATUS_INVALID_ARGUMENT,
         "provider signature does not match its bound template family");
   }
-  *out_symbol = family_symbol;
   return iree_ok_status();
 }
 
@@ -373,21 +361,16 @@ iree_status_t loom_template_provider_summary_bind_family(
   IREE_ASSERT_ARGUMENT(target_module);
   IREE_ASSERT_ARGUMENT(out_provider);
   *out_provider = (loom_template_provider_summary_t){0};
-  const loom_symbol_t* family_symbol = NULL;
-  IREE_RETURN_IF_ERROR(loom_template_provider_resolve_family_binding(
+  IREE_RETURN_IF_ERROR(loom_template_provider_validate_family_binding(
       target_module, target_family, source->argument_count,
-      source->result_count, &family_symbol));
+      source->result_count));
 
   *out_provider = *source;
   out_provider->module = target_module;
   out_provider->symbol = loom_symbol_ref_null();
   out_provider->target_symbol = target_symbol;
-  out_provider->function = (loom_func_like_t){0};
-  out_provider->func_facts = NULL;
   out_provider->origin_ordinal = origin_ordinal;
   out_provider->family = target_family;
-  out_provider->family_name =
-      loom_string_table_get(&target_module->strings, family_symbol->name_id);
   return iree_ok_status();
 }
 
@@ -401,10 +384,9 @@ iree_status_t loom_template_provider_contract_bind_family(
   IREE_ASSERT_ARGUMENT(out_provider);
   *out_provider = (loom_template_provider_summary_t){0};
 
-  const loom_symbol_t* family_symbol = NULL;
-  IREE_RETURN_IF_ERROR(loom_template_provider_resolve_family_binding(
+  IREE_RETURN_IF_ERROR(loom_template_provider_validate_family_binding(
       target_module, target_family, contract->argument_count,
-      contract->result_count, &family_symbol));
+      contract->result_count));
   *out_provider = (loom_template_provider_summary_t){
       .module = target_module,
       .kind = contract->kind,
@@ -419,8 +401,6 @@ iree_status_t loom_template_provider_contract_bind_family(
       .result_count = contract->result_count,
       .predicate_count = contract->predicate_count,
       .target_condition_count = contract->target_condition_count,
-      .family_name = loom_string_table_get(&target_module->strings,
-                                           family_symbol->name_id),
       .name = contract->name,
       .priority = contract->priority,
       .predicates = contract->predicates,
