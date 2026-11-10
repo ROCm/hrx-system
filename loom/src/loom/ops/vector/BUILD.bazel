@@ -195,6 +195,19 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "lane_origin_test",
+    srcs = ["lane_origin_test.cc"],
+    deps = [
+        ":vector",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "storage_test",
     srcs = ["storage_test.cc"],
     deps = [

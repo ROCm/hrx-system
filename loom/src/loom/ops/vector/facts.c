@@ -2726,6 +2726,8 @@ static iree_status_t loom_vector_concat_define_partition_fact(
       LOOM_VALUE_FACT_VECTOR_PARTITION_FLAG_NONE;
   uint32_t direct_regular_lane_count = 0;
   uint64_t partition_lane_count = 0;
+  loom_value_fact_exact_lane_origin_t exact_origin = {0};
+  bool has_exact_origin = true;
   for (iree_host_size_t i = 0; i < inputs.count; ++i) {
     const loom_value_id_t input = inputs.values[i];
     const loom_type_t input_type = loom_module_value_type(module, input);
@@ -2743,6 +2745,22 @@ static iree_status_t loom_vector_concat_define_partition_fact(
                (i + 1u < inputs.count &&
                 input_lane_count != direct_regular_lane_count)) {
       direct_partition_is_regular = false;
+    }
+    if (has_exact_origin) {
+      loom_value_fact_exact_lane_origin_t input_origin = {0};
+      has_exact_origin = loom_value_fact_table_query_exact_lane_origin(
+          context->table, module, input, &input_origin);
+      if (has_exact_origin && i == 0) {
+        exact_origin = input_origin;
+      } else if (has_exact_origin) {
+        has_exact_origin =
+            input_origin.source_value_id == exact_origin.source_value_id &&
+            input_origin.source_lane_stride ==
+                exact_origin.source_lane_stride &&
+            input_origin.source_lane_offset ==
+                (uint64_t)exact_origin.source_lane_offset +
+                    partition_lane_count * exact_origin.source_lane_stride;
+      }
     }
     const loom_value_fact_vector_partition_t input_partition =
         loom_value_fact_table_query_vector_partition(context->table, input);
@@ -2779,6 +2797,10 @@ static iree_status_t loom_vector_concat_define_partition_fact(
   }
   if (inputs.count == 0 || partition_lane_count != result_lane_count) {
     return loom_vector_define_partition_fact(context, result, empty_partition);
+  }
+  if (has_exact_origin) {
+    IREE_RETURN_IF_ERROR(loom_value_fact_table_define_exact_lane_origin(
+        context->table, result, exact_origin));
   }
   if (!expand_nested_partitions) {
     if (!direct_partition_is_regular) {
@@ -3836,17 +3858,8 @@ static iree_status_t loom_vector_try_define_exact_same_lane_origin(
   };
   loom_value_fact_exact_lane_origin_t existing_origin = {0};
   if (loom_value_fact_table_query_exact_lane_origin(context->table, module,
-                                                    source, &existing_origin) &&
-      existing_origin.source_lane_offset == 0 &&
-      existing_origin.source_lane_stride == 1) {
-    iree_host_size_t existing_source_lane_count = 0;
-    const loom_type_t existing_source_type =
-        loom_module_value_type(module, existing_origin.source_value_id);
-    if (loom_vector_type_static_lane_count(existing_source_type,
-                                           &existing_source_lane_count) &&
-        existing_source_lane_count == source_lane_count) {
-      source_origin = existing_origin;
-    }
+                                                    source, &existing_origin)) {
+    source_origin = existing_origin;
   }
   return loom_value_fact_table_define_exact_lane_origin(context->table, result,
                                                         source_origin);
