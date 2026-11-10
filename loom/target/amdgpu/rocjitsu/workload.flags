@@ -1,0 +1,2 @@
+--device=amdgpu://3
+--case=@buffer_copy_bytes_case

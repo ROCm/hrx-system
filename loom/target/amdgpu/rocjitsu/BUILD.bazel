@@ -1,0 +1,94 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# Declared simulator runtime packaging has a Bazel execution surface.
+# bazel-to-cmake: skip
+
+load("//build_tools/bazel:executable.bzl", "iree_executable_test")
+load("//build_tools/bazel:execution_profiles.bzl", "native_gpu_test_compatibility")
+load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
+load("//build_tools/third_party/rocjitsu:profiles.bzl", "ROCJITSU_PROFILES", "rocjitsu_test_compatibility")
+load("//loom/build_tools/amdgpu:rocjitsu.bzl", "loom_rocjitsu_executable")
+load("//loom/build_tools/bazel:defs.bzl", "loom_execution_profile", "loom_test", "loom_test_module")
+load("//loom/target/amdgpu:execution_profiles.bzl", "AMD_GPU_HARDWARE_PROFILE")
+
+package(default_visibility = ["//visibility:public"])
+
+[
+    loom_rocjitsu_executable(
+        name = tool + "_" + profile,
+        src = "//loom/src/loom/tools/" + tool,
+        profile = profile,
+        tags = ["manual"],
+    )
+    for tool in [
+        "loom-test",
+        "loom-serve",
+    ]
+    for profile in ROCJITSU_PROFILES
+]
+
+loom_test_module(
+    name = "buffer_bulk_module",
+    srcs = ["//loom/src/loom/tooling/execution/hal/testdata:buffer_bulk_hal_actual.loom"],
+)
+
+loom_test(
+    name = "buffer_bulk_native",
+    benchmark_smoke = False,
+    execution_profiles = [AMD_GPU_HARDWARE_PROFILE],
+    module = ":buffer_bulk_module",
+    target_compatible_with = native_gpu_test_compatibility(),
+)
+
+[
+    loom_test(
+        name = "buffer_bulk_" + profile,
+        benchmark_smoke = False,
+        execution_profiles = [loom_execution_profile(
+            name = "rocjitsu_" + profile,
+            build_requirements = AMD_GPU_HARDWARE_PROFILE.build_requirements,
+            executor = "rocjitsu",
+            runner = ":loom-test_" + profile,
+            runner_args = ["--device=amdgpu://0"],
+            target_class = "gpu",
+            target_family = "amdgpu",
+        )],
+        module = ":buffer_bulk_module",
+        target_compatible_with = rocjitsu_test_compatibility(profile),
+    )
+    for profile in ROCJITSU_PROFILES
+]
+
+test_suite(
+    name = "buffer_bulk_test",
+    tests = [":buffer_bulk_native"] + [":buffer_bulk_" + profile for profile in ROCJITSU_PROFILES],
+)
+
+iree_cli_test(
+    name = "bootstrap_test",
+    data = [
+        "bootstrap_override.flags",
+        "bootstrap_override_outer.flags",
+    ],
+    manifests = ["bootstrap.test.json"],
+    tags = ["manual"],
+    tools = {"loom-test": ":loom-test_gfx1151"},
+)
+
+iree_executable_test(
+    name = "workload_flags_test",
+    src = ":loom-test_gfx1151",
+    args = [
+        "$(rootpath :buffer_bulk_module)",
+        "--flagfile=$(rootpath :workload.flags)",
+    ],
+    data = [
+        "workload.flags",
+        ":buffer_bulk_module",
+    ],
+    tags = ["manual"],
+)

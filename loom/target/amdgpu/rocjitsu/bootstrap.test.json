@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "reject '--amd_rocjitsu_library=wrong'",
+      "run": {
+        "tool": "loom-test",
+        "args": [
+          "--amd_rocjitsu_library=wrong"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "cannot override rocjitsu invocation option"
+        ]
+      }
+    },
+    {
+      "name": "reject '--amd-rocjitsu-library=wrong'",
+      "run": {
+        "tool": "loom-test",
+        "args": [
+          "--amd-rocjitsu-library=wrong"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "is locked by the invocation"
+        ]
+      }
+    },
+    {
+      "name": "reject ' --amd_rocjitsu_library = wrong '",
+      "run": {
+        "tool": "loom-test",
+        "args": [
+          " --amd_rocjitsu_library = wrong "
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "is locked by the invocation"
+        ]
+      }
+    },
+    {
+      "name": "reject '--amd-rocjitsu-config=wrong'",
+      "run": {
+        "tool": "loom-test",
+        "args": [
+          "--amd-rocjitsu-config=wrong"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "is locked by the invocation"
+        ]
+      }
+    },
+    {
+      "name": "reject nested topology changes",
+      "cwd": "{srcdir}",
+      "run": {
+        "tool": "loom-test",
+        "args": [
+          "--flagfile={srcdir}/bootstrap_override_outer.flags"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "flag 'amd_rocjitsu_config' is locked",
+          "bootstrap_override.flags"
+        ]
+      }
+    }
+  ]
+}
