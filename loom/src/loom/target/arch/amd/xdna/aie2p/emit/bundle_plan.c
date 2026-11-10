@@ -2185,7 +2185,10 @@ static iree_status_t loom_aie2p_bundle_plan_try_append_hardware_loop_impl(
   analysis->blocks[loop->header_block_index].elide_control = true;
   body_analysis->elide_control = true;
 
-  loom_low_physical_issue_reset_execution_state(&builder->issue);
+  // The fixed body's physical history also describes its final iteration,
+  // relative to the continuation. Recurrence admits a following iteration,
+  // not arbitrary consumers: preserve outstanding register and resource
+  // deadlines so continuation instructions wait only for their own hazards.
   builder->execution_bundle_start = builder->bundle_count;
   builder->execution_issue_cycle = builder->next_issue_cycle;
   builder->pending.minimum_issue_cycle = builder->next_issue_cycle;

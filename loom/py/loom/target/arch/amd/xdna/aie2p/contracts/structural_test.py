@@ -558,6 +558,28 @@ def test_accumulator_bitcast_aliases_preserve_mbms_units() -> None:
     ]
 
 
+def test_index_shape_aliases_preserve_the_semantic_element_type() -> None:
+    index_types = tuple(
+        Vector(element_type, minimum_static_elements=1, maximum_static_elements=64)
+        for element_type in ("index", "offset")
+    )
+    rules = tuple(
+        rule
+        for rule in AIE2P_STRUCTURAL_RULES
+        if isinstance(rule, ValueAliasRule)
+        and rule.source_op is vector.vector_bitcast
+        and rule.guards[0].type_pattern in index_types
+    )
+    assert len(rules) == 2
+    for rule, source_type in zip(rules, index_types, strict=True):
+        assert rule.guards == (
+            Guard.value_type("input", source_type),
+            Guard.value_type("result", source_type),
+        )
+        assert rule.source == ValueRef.operand("input")
+        assert rule.result == ValueRef.result("result")
+
+
 def test_f32x32_bitcasts_move_each_unit_across_register_files() -> None:
     assert _ORDINARY_1024_BITCAST_TYPES == (
         Vector(

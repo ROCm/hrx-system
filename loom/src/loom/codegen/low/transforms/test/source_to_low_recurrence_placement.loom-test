@@ -1,0 +1,105 @@
+// RUN: pass scf-to-cfg,source-to-low,low-dce
+
+test.target<low_core> @target
+
+// The address's canonical outer coordinates are invariant, but the retained
+// combined coordinate is materialized inside the loop. A complete-offset
+// recurrence cannot initialize from that unavailable inner definition.
+func.def target(@target) @inner_materialized_coordinate(%input: buffer, %output: buffer, %panel_input: index, %row_input: index) where [range(%panel_input, 0, 1), range(%row_input, 0, 15)] {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<32x128xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<32x128xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 4 : index
+  scf.for %column = [%begin to %end step %step] {
+    %coordinate = index.add %panel_input, %row_input : index
+    %left = vector.load %source[%coordinate, %column] : view<32x128xi32> -> vector<4xi32>
+    %right = vector.load %destination[%coordinate, %column] : view<32x128xi32> -> vector<4xi32>
+    vector.store %right, %source[%coordinate, %column] : vector<4xi32>, view<32x128xi32>
+    vector.store %left, %destination[%coordinate, %column] : vector<4xi32>, view<32x128xi32>
+  }
+  func.return
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) abi(object_function) @inner_materialized_coordinate(%panel_input: reg<test.i32>, %row_input: reg<test.i32>) where [range(%panel_input, 0, 1), range(%row_input, 0, 15)] asm {
+  %source = resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
+  %destination = resource<native_pointer> {index = 1, source_type = buffer} : reg<test.ptr>
+  %begin = test.const.i32 0
+  %end = test.const.i32 64
+  %step = test.const.i32 4
+  low.br ^_bb1(%begin: reg<test.i32>)
+^_bb1(%column: reg<test.i32>):
+  %26 = test.cmp.slt.i32 %column, %end
+  low.cond_br %26, ^_bb2, ^_bb3 : reg<test.i32>
+^_bb2:
+  %coordinate = test.add.i32 %panel_input, %row_input
+  %28 = test.const.i32 512
+  %29 = test.mul.i32 %coordinate, %28
+  %30 = test.const.i32 4
+  %31 = test.mul.i32 %column, %30
+  %32 = test.add.i32 %29, %31
+  %left = test.load.index.v4i32 %source, %32
+  %right = test.load.index.v4i32 %destination, %32
+  test.store.index.v4i32 %source, %32, %right
+  test.store.index.v4i32 %destination, %32, %left
+  %35 = test.add.i32 %column, %step
+  low.br ^_bb1(%35: reg<test.i32>)
+^_bb3:
+  return
+}
+
+// ====
+// RUN: pass scf-to-cfg,source-to-low,low-dce
+
+test.target<low_core> @target
+
+// Moving the shared coordinate before entry makes the complete byte-offset
+// recurrence available; the loop carries it instead of recomputing it.
+func.def target(@target) @outer_materialized_coordinate(%input: buffer, %output: buffer, %panel_input: index, %row_input: index) where [range(%panel_input, 0, 1), range(%row_input, 0, 15)] {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<32x128xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<32x128xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 4 : index
+  %coordinate = index.add %panel_input, %row_input : index
+  scf.for %column = [%begin to %end step %step] {
+    %left = vector.load %source[%coordinate, %column] : view<32x128xi32> -> vector<4xi32>
+    %right = vector.load %destination[%coordinate, %column] : view<32x128xi32> -> vector<4xi32>
+    vector.store %right, %source[%coordinate, %column] : vector<4xi32>, view<32x128xi32>
+    vector.store %left, %destination[%coordinate, %column] : vector<4xi32>, view<32x128xi32>
+  }
+  func.return
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) abi(object_function) @outer_materialized_coordinate(%panel_input: reg<test.i32>, %row_input: reg<test.i32>) where [range(%panel_input, 0, 1), range(%row_input, 0, 15)] asm {
+  %source = resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
+  %destination = resource<native_pointer> {index = 1, source_type = buffer} : reg<test.ptr>
+  %begin = test.const.i32 0
+  %end = test.const.i32 64
+  %step = test.const.i32 4
+  %coordinate = test.add.i32 %panel_input, %row_input
+  %28 = test.const.i32 512
+  %29 = test.mul.i32 %coordinate, %28
+  low.br ^_bb1(%begin: reg<test.i32>, %29: reg<test.i32>)
+^_bb1(%column: reg<test.i32>, %21: reg<test.i32>):
+  %30 = test.cmp.slt.i32 %column, %end
+  low.cond_br %30, ^_bb2, ^_bb3 : reg<test.i32>
+^_bb2:
+  %left = test.load.index.v4i32 %source, %21
+  %right = test.load.index.v4i32 %destination, %21
+  test.store.index.v4i32 %source, %21, %right
+  test.store.index.v4i32 %destination, %21, %left
+  %33 = test.increment.i32 %21, 16
+  %34 = test.add.i32 %column, %step
+  low.br ^_bb1(%34: reg<test.i32>, %33: reg<test.i32>)
+^_bb3:
+  return
+}

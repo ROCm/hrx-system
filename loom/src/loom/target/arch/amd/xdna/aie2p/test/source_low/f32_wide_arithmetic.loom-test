@@ -1,0 +1,76 @@
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+// A full physical accumulator also carries a partial logical vector. Add and
+// subtract use one native operation without extracting sixteen-lane packets.
+func.def @partial_accumulator(%lhs: vector<33xf32>, %rhs: vector<33xf32>) -> (vector<33xf32>, vector<33xf32>) {
+  %sum = vector.addf %lhs, %rhs : vector<33xf32>
+  %difference = vector.subf %lhs, %rhs : vector<33xf32>
+  func.return %sum, %difference : vector<33xf32>, vector<33xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @partial_accumulator(%lhs: reg<aie2p.mbms x4>, %rhs: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x4>, reg<aie2p.mbms x4>) asm {
+  %10 = mova.i32 60
+  %sum = vadd.f32x64 %lhs, %rhs, %10
+  %difference = vsub.f32x64 %lhs, %rhs, %10
+  return %sum, %difference
+}
+
+// ====
+
+func.def @full_accumulator(%lhs: vector<64xf32>, %rhs: vector<64xf32>) -> (vector<64xf32>, vector<64xf32>) {
+  %sum = vector.addf %lhs, %rhs : vector<64xf32>
+  %difference = vector.subf %lhs, %rhs : vector<64xf32>
+  func.return %sum, %difference : vector<64xf32>, vector<64xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @full_accumulator(%lhs: reg<aie2p.mbms x4>, %rhs: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x4>, reg<aie2p.mbms x4>) asm {
+  %10 = mova.i32 60
+  %sum = vadd.f32x64 %lhs, %rhs, %10
+  %difference = vsub.f32x64 %lhs, %rhs, %10
+  return %sum, %difference
+}
+
+// ====
+
+func.def @shaped_accumulator(%lhs: vector<4x3x4xf32>, %rhs: vector<4x3x4xf32>) -> (vector<4x3x4xf32>, vector<4x3x4xf32>) {
+  %sum = vector.addf %lhs, %rhs : vector<4x3x4xf32>
+  %difference = vector.subf %lhs, %rhs : vector<4x3x4xf32>
+  func.return %sum, %difference : vector<4x3x4xf32>, vector<4x3x4xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @shaped_accumulator(%lhs: reg<aie2p.mbms x4>, %rhs: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x4>, reg<aie2p.mbms x4>) asm {
+  %10 = mova.i32 60
+  %sum = vadd.f32x64 %lhs, %rhs, %10
+  %difference = vsub.f32x64 %lhs, %rhs, %10
+  return %sum, %difference
+}
+
+// ====
+
+// Native subtraction retains its full accumulator result through packetized
+// nonlinear consumers, including the terminal BF16 conversion.
+func.def @centered_exponential(%input: vector<64xf32>, %anchor: vector<64xf32>) -> (vector<64xbf16>) {
+  %delta = vector.subf<nnan|nsz> %input, %anchor : vector<64xf32>
+  %exponent = vector.exp2f<nnan|afn> %delta : vector<64xf32>
+  %result = vector.fptrunc<daz> %exponent : vector<64xf32> to vector<64xbf16>
+  func.return %result : vector<64xbf16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @centered_exponential(%input: reg<aie2p.mbms x4>, %anchor: reg<aie2p.mbms x4>) -> (reg<aie2p.vec256 x4>) asm {
+  %9 = mova.i32 60
+  %delta = vsub.f32x64 %input, %anchor, %9
+  %11 = slice %delta[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %12 = vexp2.bf16x16 %11
+  %13 = slice %delta[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %14 = vexp2.bf16x16 %13
+  %15 = slice %delta[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %16 = vexp2.bf16x16 %15
+  %17 = slice %delta[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %18 = vexp2.bf16x16 %17
+  %result = concat(%12, %14, %16, %18) : (reg<aie2p.vec256>, reg<aie2p.vec256>, reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x4>
+  return %result
+}

@@ -285,6 +285,16 @@ static bool loom_low_lower_realization_find_anchor(
     const loom_op_t* use, const loom_low_lower_realization_recipe_t* recipe,
     const loom_block_t** out_block, const loom_op_t** out_anchor);
 
+bool loom_low_lower_realization_can_place(
+    const loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_realization_recipe_t* recipe) {
+  const loom_block_t* initial_block = NULL;
+  const loom_op_t* initial_anchor = NULL;
+  return loom_low_lower_realization_find_anchor(
+      context, context->lowering->source_plan.realizations->construction,
+      source_op, recipe, &initial_block, &initial_anchor);
+}
+
 iree_status_t loom_low_lower_realization_offer(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_realization_loop_t* loop,
@@ -294,14 +304,9 @@ iree_status_t loom_low_lower_realization_offer(
   }
   loom_low_lower_realization_construction_t* construction =
       context->lowering->source_plan.realizations->construction;
-  if (offer->recipe != NULL) {
-    const loom_block_t* initial_block = NULL;
-    const loom_op_t* initial_anchor = NULL;
-    if (!loom_low_lower_realization_find_anchor(
-            context, construction, loop->entry, offer->recipe, &initial_block,
-            &initial_anchor)) {
-      return iree_ok_status();
-    }
+  if (offer->recipe != NULL && !loom_low_lower_realization_can_place(
+                                   context, loop->entry, offer->recipe)) {
+    return iree_ok_status();
   }
   loom_low_lower_realization_offer_record_t* record = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(construction->arena, sizeof(*record),

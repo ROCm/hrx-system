@@ -102,6 +102,17 @@ loom_cc_library(
     deps = ["//loom/src/loom/ir"],
 )
 
+loom_cc_test(
+    name = "vector_carrier_test",
+    srcs = ["vector_carrier_test.cc"],
+    deps = [
+        ":vector_carrier",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "gather",
     srcs = ["gather.c"],

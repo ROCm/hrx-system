@@ -935,6 +935,11 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_per_lane_sequence(
   const loom_low_lower_resolved_emit_t* final_resolved =
       &resolved_emits[rule->emit_count - 1];
   const loom_low_lower_emit_t* final_emit = final_resolved->emit;
+  const bool collects_result =
+      final_emit->result_ref_count != 0 &&
+      rule_set->value_refs[loom_low_lower_rule_emit_result_bind_ref_index(
+                               final_emit, 0)]
+              .kind == LOOM_LOW_LOWER_VALUE_REF_RESULT;
   uint32_t result_count = 0;
   uint16_t max_operand_ref_count = 0;
   for (uint16_t i = sequence_start_ordinal; i < rule->emit_count; ++i) {
@@ -961,9 +966,6 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_per_lane_sequence(
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_materialize_attributes(
         context, resolved, &attrs[i - sequence_start_ordinal]));
   }
-  const loom_type_t final_result_type = loom_type_table_get(
-      &context->module->types,
-      loom_low_lower_resolved_emit_result_type_id(final_resolved, 0));
   const uint32_t lane_count =
       loom_low_lower_resolved_emit_lane_plan(final_resolved)->lane_count;
   loom_value_id_t* lane_operands = NULL;
@@ -972,14 +974,16 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_per_lane_sequence(
       (void**)&lane_operands));
   loom_value_id_t* lane_results = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
-      context, lane_count, sizeof(*lane_results), (void**)&lane_results));
+      context, collects_result ? lane_count : 0, sizeof(*lane_results),
+      (void**)&lane_results));
 
   for (uint32_t lane_index = 0; lane_index < lane_count; ++lane_index) {
     result_offset = 0;
     for (uint16_t i = sequence_start_ordinal; i < rule->emit_count; ++i) {
       const loom_low_lower_resolved_emit_t* resolved = &resolved_emits[i];
       const loom_low_lower_emit_t* emit = resolved->emit;
-      const loom_type_t* result_types = &lane_result_types[result_offset];
+      const loom_type_t* result_types =
+          emit->result_ref_count ? &lane_result_types[result_offset] : NULL;
       result_offset += emit->result_ref_count;
       if (lane_index + 1 == lane_count &&
           iree_any_bit_set(emit->flags,
@@ -1017,11 +1021,17 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_per_lane_sequence(
       }
     }
   }
+  if (!collects_result) {
+    return iree_ok_status();
+  }
   if (lane_count == 1) {
     return loom_low_lower_rule_bind_results(context, rule_set, source_op, state,
                                             final_emit, lane_results);
   }
   loom_op_t* concat_op = NULL;
+  const loom_type_t final_result_type = loom_type_table_get(
+      &context->module->types,
+      loom_low_lower_resolved_emit_result_type_id(final_resolved, 0));
   IREE_RETURN_IF_ERROR(loom_low_concat_build(
       loom_low_lower_context_builder(context), lane_results, lane_count,
       final_result_type, source_op->location, &concat_op));

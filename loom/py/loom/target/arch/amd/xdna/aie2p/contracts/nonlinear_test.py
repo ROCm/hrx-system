@@ -19,9 +19,12 @@ from loom.target.arch.amd.xdna.aie2p.contracts import nonlinear
 from loom.target.contracts import (
     EmitDescriptorOp,
     EmitRegisterConcat,
+    EmitRegisterSlice,
+    Guard,
     GuardKind,
     SourceNodeRelation,
     ValueRef,
+    Vector,
 )
 
 
@@ -353,4 +356,46 @@ def test_native_bf16_nonlinear_results_bypass_f32_round_trip() -> None:
         vector.vector_expf: set(),
         vector.vector_exp2f: {"aie2p.vec256", "aie2p.ebmll"},
         vector.vector_tanhf: {"aie2p.vec256", "aie2p.ebmll"},
+    }
+
+
+def test_wide_native_nonlinear_family_keeps_accumulator_quarters() -> None:
+    rules = [
+        rule
+        for rule in nonlinear.AIE2P_NONLINEAR_RULES
+        if "_accumulator_" in rule.report_key
+    ]
+    observed = set()
+    for rule in rules:
+        slices = [emit for emit in rule.emit if isinstance(emit, EmitRegisterSlice)]
+        quarter_count = len(slices)
+        fused = bool(rule.source_nodes)
+        source_type = rule.guards[0].type_pattern
+        observed.add((rule.source_op, source_type, fused))
+        assert Guard.instance_flags_has_all("fastmath", "afn") in rule.guards
+        assert [emit.unit_offset for emit in slices] == list(range(quarter_count))
+        assert all(emit.source == ValueRef.operand("input") for emit in slices)
+        assert all(emit.unit_count == 1 for emit in slices)
+        packets = [emit for emit in rule.emit if isinstance(emit, EmitDescriptorOp)]
+        assert (
+            sum(emit.descriptor == rule.descriptor for emit in packets) == quarter_count
+        )
+        assert all(not emit.copy_operands for emit in packets)
+        assert not any(
+            "register.move" in emit.descriptor.semantic_tag for emit in packets
+        )
+        assert sum(
+            "convert.bf16x16.to.f32x16" in emit.descriptor.key for emit in packets
+        ) == (0 if fused else quarter_count)
+        assert isinstance(rule.emit[-1], EmitRegisterConcat)
+        assert len(rule.emit[-1].sources) == quarter_count
+    assert observed == {
+        (operation, source_type, fused)
+        for operation in (vector.vector_exp2f, vector.vector_tanhf)
+        for source_type in (
+            Vector("f32", lanes=32),
+            Vector("f32", minimum_static_elements=33, maximum_static_elements=64),
+        )
+        for fused in (False, True)
+        if source_type != Vector("f32", lanes=32) or fused
     }

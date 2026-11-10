@@ -118,6 +118,40 @@ def _bfp_encode_rule() -> DescriptorRule:
 
 AIE2P_BFP_ENCODE_RULE = _bfp_encode_rule()
 
+AIE2P_BFP_ENCODE_RULES = (
+    AIE2P_BFP_ENCODE_RULE,
+    DescriptorRule(
+        source_op=vector.vector_encode,
+        descriptor=descriptor_by_key(
+            AIE2P_CORE_DESCRIPTOR_SET, "amd.xdna.aie2p.convert.f32x64.bfp16ebs8"
+        ),
+        guards=(
+            Guard.value_type("source", Vector("f32", lanes=64)),
+            *BFP_ENCODE_GUARDS[1:],
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor_by_key(
+                    AIE2P_CORE_DESCRIPTOR_SET,
+                    "amd.xdna.aie2p.state.rounding.immediate",
+                ),
+                immediates={"i": BF16_CONVERSION_ROUNDING},
+                form=DescriptorEmitForm.OP,
+            ),
+            EmitDescriptorOp(
+                descriptor=descriptor_by_key(
+                    AIE2P_CORE_DESCRIPTOR_SET,
+                    "amd.xdna.aie2p.convert.f32x64.bfp16ebs8",
+                ),
+                operands={"src": ValueRef.operand("source")},
+                results={"dst": ValueRef.result("result")},
+                form=DescriptorEmitForm.OP,
+            ),
+        ),
+        report_key="encode.f32.bfp16ebs8",
+    ),
+)
+
 
 def bfp_unpack_emits(
     low_bytes: ValueRef, high_bytes: ValueRef, result: ValueRef

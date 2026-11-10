@@ -797,6 +797,11 @@ def _register_packing_resources() -> tuple[RegisterPackingResource, ...]:
         for register_name in _MACHINE_CLASSES["eR"].candidates
         for atomic_unit in _MACHINE_REGISTERS[register_name].atomic_units
     )
+    pointer_atomic_units = frozenset(
+        atomic_unit
+        for register_name in _MACHINE_CLASSES["eP"].candidates
+        for atomic_unit in _MACHINE_REGISTERS[register_name].atomic_units
+    )
     return (
         RegisterPackingResource(
             name=f"{descriptor_specs._TARGET_KEY}.register.x.pairs",
@@ -812,6 +817,15 @@ def _register_packing_resources() -> tuple[RegisterPackingResource, ...]:
             capacity_register_class=_low_register_class_name("eR"),
             members=_register_packing_members(
                 scalar_atomic_units, resource_unit_atom_count=1
+            ),
+        ),
+        RegisterPackingResource(
+            name=f"{descriptor_specs._TARGET_KEY}.register.pointer.units",
+            capacity_register_class=_low_register_class_name("eP"),
+            # Load and store FIFO pointers occupy subsets of the same eight
+            # registers as ordinary addresses.
+            members=_register_packing_members(
+                pointer_atomic_units, resource_unit_atom_count=1
             ),
         ),
     )
@@ -1474,6 +1488,27 @@ def _descriptor(spec: descriptor_specs._DescriptorSpec) -> Descriptor:
             f"{form.name}: implicit inputs name unknown machine inputs "
             f"{sorted(unknown_implicit_inputs)}"
         )
+    if len(set(spec.overwritten_inputs)) != len(spec.overwritten_inputs):
+        raise ValueError(f"{form.name}: overwritten input names must be unique")
+    encoded_fields = {
+        field.name for field in _INSTRUCTION_ENCODINGS[spec.form_name].fields
+    }
+    for name in spec.overwritten_inputs:
+        operand = next(
+            (operand for operand in form.inputs if operand.name == name), None
+        )
+        if (
+            operand is None
+            or operand.kind is MachineOperandKind.IMMEDIATE
+            or name in encoded_fields
+            or name in spec.implicit_inputs
+            or not any(tie.use == name for tie in form.ties)
+        ):
+            raise ValueError(
+                f"{form.name}: overwritten input {name!r} must be an unencoded "
+                "explicit tied register input"
+            )
+        _fixed_operand_storage(spec, operand)
     if len(set(spec.symbolic_immediates)) != len(spec.symbolic_immediates):
         raise ValueError(f"{form.name}: symbolic immediate names must be unique")
     machine_immediate_names = {
@@ -1508,6 +1543,7 @@ def _descriptor(spec: descriptor_specs._DescriptorSpec) -> Descriptor:
         for operand in form.inputs
         if operand.kind is not MachineOperandKind.IMMEDIATE
         and operand.name not in spec.implicit_inputs
+        and operand.name not in spec.overwritten_inputs
     )
     immediate_inputs = tuple(
         operand

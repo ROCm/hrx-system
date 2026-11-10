@@ -8,20 +8,69 @@
 
 import struct
 
+import pytest
+
 from loom.dialect.scalar import arithmetic as scalar
 from loom.dialect.vector import defs as vector
 from loom.target.arch.amd.xdna.aie2p.contracts.floating import AIE2P_FLOATING_RULES
+from loom.target.arch.amd.xdna.aie2p.contracts.floating_fma import (
+    AIE2P_FLOATING_FMA_RULES,
+)
 from loom.target.contracts import (
     DescriptorEmitForm,
     DescriptorResultType,
     EmitDescriptorOp,
     EmitRegisterSlice,
     Guard,
+    GuardKind,
     Scalar,
     SourceNodeRelation,
     ValueRef,
     Vector,
 )
+
+
+@pytest.mark.parametrize("lane_count", tuple(range(66)))
+def test_widening_fma_covers_native_prefixes(lane_count: int) -> None:
+    rules = [
+        rule
+        for rule in AIE2P_FLOATING_FMA_RULES
+        if rule.guards[0].type_pattern.minimum_static_elements
+        <= lane_count
+        <= rule.guards[0].type_pattern.maximum_static_elements
+    ]
+    if lane_count in (0, 65):
+        assert not rules
+        return
+    # Each legal prefix supports both a fresh product and a seeded chain,
+    # whether its BF16 values survive as SSA origins or only as numerical facts.
+    strategies = set()
+    for rule in rules:
+        zero = Guard.value_float_equals("c", 0.0) in rule.guards
+        origins = tuple(
+            any(
+                guard.value_ref == ValueRef.exact_lane_origin_operand(name)
+                for guard in rule.guards
+            )
+            for name in ("a", "b")
+        )
+        strategies.add((zero, origins))
+        width = 32 if lane_count <= 32 else 64
+        operation = "multiply" if zero else "accumulate"
+        assert (
+            rule.descriptor.key == f"amd.xdna.aie2p.{operation}.bf16x{width}.configured"
+        )
+        for flag in ("afn", "nnan", "ninf", "nsz"):
+            assert Guard.instance_flags_has_all("fastmath", flag) in rule.guards
+        for guard in rule.guards:
+            if guard.kind == GuardKind.VALUE_TYPE and guard.value_ref is None:
+                assert guard.type_pattern.element == "f32"
+    assert strategies == {
+        (zero, (left, right))
+        for zero in (False, True)
+        for left in (False, True)
+        for right in (False, True)
+    }
 
 
 def _bf16_origin_scale_rule():
@@ -61,6 +110,32 @@ def _f32_bits(value: float) -> int:
 
 def _bf16_value(bits: int) -> float:
     return struct.unpack("<f", struct.pack("<I", bits << 16))[0]
+
+
+def test_full_accumulator_add_and_subtract_share_native_lane_coverage() -> None:
+    accumulator = Vector("f32", minimum_static_elements=33, maximum_static_elements=64)
+    for source_op, operation in (
+        (vector.vector_addf, "add"),
+        (vector.vector_subf, "sub"),
+    ):
+        descriptor_key = f"amd.xdna.aie2p.{operation}.f32x64.configured"
+        (rule,) = (
+            rule
+            for rule in AIE2P_FLOATING_RULES
+            if rule.source_op is source_op and rule.descriptor.key == descriptor_key
+        )
+        assert rule.guards == tuple(
+            Guard.value_type(name, accumulator) for name in ("lhs", "rhs", "result")
+        )
+        control, arithmetic = rule.emit
+        assert control.immediates == {"i": 60}
+        assert arithmetic.descriptor.key == descriptor_key
+        assert arithmetic.operands == {
+            "acc1": ValueRef.operand("lhs"),
+            "acc2": ValueRef.operand("rhs"),
+            "acc": ValueRef.temporary("arithmetic_control"),
+        }
+        assert arithmetic.results == {"dst": ValueRef.result("result")}
 
 
 def test_bf16_origin_scale_uses_native_multiply_with_packed_underflow_repair() -> None:

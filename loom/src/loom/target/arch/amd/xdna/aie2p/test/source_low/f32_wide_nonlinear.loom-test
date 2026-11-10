@@ -1,0 +1,225 @@
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+// FP32 results retain the sixteen-lane packetization used by connected
+// arithmetic. Terminal BF16 results use the accumulator quarters directly.
+func.def @exponential32(%input: vector<32xf32>) -> (vector<32xf32>) {
+  %result = vector.exp2f<afn> %input : vector<32xf32>
+  func.return %result : vector<32xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @exponential32(%input: reg<aie2p.mbms x2>) -> (reg<aie2p.mbms x2>) asm {
+  %10 = slice %input[0] : reg<aie2p.mbms x2> -> reg<aie2p.mbms>
+  %11 = vmov.accumulator512.to.vector512 %10
+  %12 = vmov.vector512.to.accumulator512 %11
+  %13 = vexp2.bf16x16 %12
+  %14 = vconv.fp32.bf16x16 %13
+  %15 = vmov.accumulator512.to.vector512 %14
+  %16 = slice %input[1] : reg<aie2p.mbms x2> -> reg<aie2p.mbms>
+  %17 = vmov.accumulator512.to.vector512 %16
+  %18 = vmov.vector512.to.accumulator512 %17
+  %19 = vexp2.bf16x16 %18
+  %20 = vconv.fp32.bf16x16 %19
+  %21 = vmov.accumulator512.to.vector512 %20
+  %22 = vmov.vector512.to.accumulator512 %15
+  %23 = vmov.vector512.to.accumulator512 %21
+  %result = concat(%22, %23) : (reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x2>
+  return %result
+}
+
+// ====
+
+func.def @tanh32_bf16(%input: vector<32xf32>) -> (vector<32xbf16>) {
+  %wide = vector.tanhf<afn> %input : vector<32xf32>
+  %result = vector.fptrunc<daz> %wide : vector<32xf32> to vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @tanh32_bf16(%input: reg<aie2p.mbms x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %6 = slice %input[0] : reg<aie2p.mbms x2> -> reg<aie2p.mbms>
+  %7 = vtanh.bf16x16 %6
+  %8 = slice %input[1] : reg<aie2p.mbms x2> -> reg<aie2p.mbms>
+  %9 = vtanh.bf16x16 %8
+  %result = concat(%7, %9) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  return %result
+}
+
+// ====
+
+func.def @exponential64(%input: vector<64xf32>) -> (vector<64xf32>) {
+  %result = vector.exp2f<afn> %input : vector<64xf32>
+  func.return %result : vector<64xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @exponential64(%input: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x4>) asm {
+  %5 = slice %input[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %6 = vexp2.bf16x16 %5
+  %7 = vconv.fp32.bf16x16 %6
+  %8 = slice %input[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %9 = vexp2.bf16x16 %8
+  %10 = vconv.fp32.bf16x16 %9
+  %11 = slice %input[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %12 = vexp2.bf16x16 %11
+  %13 = vconv.fp32.bf16x16 %12
+  %14 = slice %input[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %15 = vexp2.bf16x16 %14
+  %16 = vconv.fp32.bf16x16 %15
+  %result = concat(%7, %10, %13, %16) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  return %result
+}
+
+// ====
+
+func.def @tanh64_bf16(%input: vector<64xf32>) -> (vector<64xbf16>) {
+  %wide = vector.tanhf<afn> %input : vector<64xf32>
+  %result = vector.fptrunc<daz> %wide : vector<64xf32> to vector<64xbf16>
+  func.return %result : vector<64xbf16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @tanh64_bf16(%input: reg<aie2p.mbms x4>) -> (reg<aie2p.vec256 x4>) asm {
+  %6 = slice %input[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %7 = vtanh.bf16x16 %6
+  %8 = slice %input[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %9 = vtanh.bf16x16 %8
+  %10 = slice %input[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %11 = vtanh.bf16x16 %10
+  %12 = slice %input[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %13 = vtanh.bf16x16 %12
+  %result = concat(%7, %9, %11, %13) : (reg<aie2p.vec256>, reg<aie2p.vec256>, reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x4>
+  return %result
+}
+
+// ====
+
+// Unobserved lanes of a partial accumulator do not need a separate carrier.
+func.def @partial_exponential(%input: vector<33xf32>) -> (vector<33xbf16>) {
+  %wide = vector.exp2f<afn> %input : vector<33xf32>
+  %result = vector.fptrunc<daz> %wide : vector<33xf32> to vector<33xbf16>
+  func.return %result : vector<33xbf16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @partial_exponential(%input: reg<aie2p.mbms x4>) -> (reg<aie2p.vec256 x4>) asm {
+  %6 = slice %input[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %7 = vexp2.bf16x16 %6
+  %8 = slice %input[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %9 = vexp2.bf16x16 %8
+  %10 = slice %input[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %11 = vexp2.bf16x16 %10
+  %12 = slice %input[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %13 = vexp2.bf16x16 %12
+  %result = concat(%7, %9, %11, %13) : (reg<aie2p.vec256>, reg<aie2p.vec256>, reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x4>
+  return %result
+}
+
+// ====
+
+// Logical rank does not change the four-quarter physical representation.
+func.def @shaped_tanh(%input: vector<3x16xf32>) -> (vector<3x16xf32>) {
+  %result = vector.tanhf<afn> %input : vector<3x16xf32>
+  func.return %result : vector<3x16xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @shaped_tanh(%input: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x4>) asm {
+  %5 = slice %input[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %6 = vtanh.bf16x16 %5
+  %7 = vconv.fp32.bf16x16 %6
+  %8 = slice %input[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %9 = vtanh.bf16x16 %8
+  %10 = vconv.fp32.bf16x16 %9
+  %11 = slice %input[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %12 = vtanh.bf16x16 %11
+  %13 = vconv.fp32.bf16x16 %12
+  %14 = slice %input[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %15 = vtanh.bf16x16 %14
+  %16 = vconv.fp32.bf16x16 %15
+  %result = concat(%7, %10, %13, %16) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  return %result
+}
+
+// ====
+
+// Non-accumulator shapes still use native sixteen-lane packets.
+func.def @shaped_small_tanh(%input: vector<2x16xf32>) -> (vector<2x16xf32>) {
+  %result = vector.tanhf<afn> %input : vector<2x16xf32>
+  func.return %result : vector<2x16xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @shaped_small_tanh(%input: reg<aie2p.vec256 x4>) -> (reg<aie2p.vec256 x4>) asm {
+  %12 = slice %input[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %13 = vmov.vector512.to.accumulator512 %12
+  %14 = slice %input[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %15 = vmov.vector512.to.accumulator512 %14
+  %18 = vmov.accumulator512.to.vector512 %13
+  %19 = vmov.vector512.to.accumulator512 %18
+  %20 = vtanh.bf16x16 %19
+  %21 = vconv.fp32.bf16x16 %20
+  %22 = vmov.accumulator512.to.vector512 %21
+  %24 = vmov.accumulator512.to.vector512 %15
+  %25 = vmov.vector512.to.accumulator512 %24
+  %26 = vtanh.bf16x16 %25
+  %27 = vconv.fp32.bf16x16 %26
+  %28 = vmov.accumulator512.to.vector512 %27
+  %29 = vmov.vector512.to.accumulator512 %22
+  %30 = vmov.vector512.to.accumulator512 %28
+  %33 = vmov.accumulator512.to.vector512 %29
+  %35 = vmov.accumulator512.to.vector512 %30
+  %result = concat(%33, %35) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  return %result
+}
+
+// ====
+
+// Wider logical vectors are packetized, not excluded by the math policy.
+func.def @packetized_tanh(%input_arg: buffer, %output_arg: buffer) {
+  %input_buffer, %output_buffer = buffer.assume.alignment %input_arg, %output_arg {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %input = buffer.view %input_buffer[%origin] : buffer -> view<80xf32>
+  %output = buffer.view %output_buffer[%origin] : buffer -> view<80xf32>
+  %values = vector.load %input[0] : view<80xf32> -> vector<80xf32>
+  %result = vector.tanhf<afn> %values : vector<80xf32>
+  vector.store %result, %output[0] : vector<80xf32>, view<80xf32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @packetized_tanh() asm {
+  %input_buffer = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_buffer = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %30 = vlda.512.f32x16 %input_buffer, 0
+  %31 = vlda.512.f32x16 %input_buffer, 64
+  %32 = vlda.512.f32x16 %input_buffer, 128
+  %33 = vlda.512.f32x16 %input_buffer, 192
+  %34 = vmov.vector512.to.accumulator512 %30
+  %35 = vmov.vector512.to.accumulator512 %31
+  %37 = vmov.vector512.to.accumulator512 %32
+  %38 = vmov.vector512.to.accumulator512 %33
+  %42 = vtanh.bf16x16 %34
+  %43 = vconv.fp32.bf16x16 %42
+  %45 = vtanh.bf16x16 %35
+  %46 = vconv.fp32.bf16x16 %45
+  %48 = vtanh.bf16x16 %37
+  %49 = vconv.fp32.bf16x16 %48
+  %51 = vtanh.bf16x16 %38
+  %52 = vconv.fp32.bf16x16 %51
+  %54 = vlda.512.f32x16 %input_buffer, 256
+  %55 = vmov.vector512.to.accumulator512 %54
+  %56 = vtanh.bf16x16 %55
+  %57 = vconv.fp32.bf16x16 %56
+  %58 = vmov.accumulator512.to.vector512 %57
+  %60 = vmov.accumulator512.to.vector512 %43
+  vst.512.f32x16 %60, %output_buffer, 0
+  %62 = vmov.accumulator512.to.vector512 %46
+  vst.512.f32x16 %62, %output_buffer, 64
+  %64 = vmov.accumulator512.to.vector512 %49
+  vst.512.f32x16 %64, %output_buffer, 128
+  %66 = vmov.accumulator512.to.vector512 %52
+  vst.512.f32x16 %66, %output_buffer, 192
+  vst.512.f32x16 %58, %output_buffer, 256
+  return
+}

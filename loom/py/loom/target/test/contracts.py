@@ -66,6 +66,7 @@ from loom.target.test.descriptors import (
     TEST_LOW_CORE_DESCRIPTOR_SET,
     TEST_LOW_DOT4I_S8S8_DESCRIPTOR,
     TEST_LOW_FROM_ELEMENTS_V4I32_DESCRIPTOR,
+    TEST_LOW_INCREMENT_I32_DESCRIPTOR,
     TEST_LOW_IOTA_PAIR_I32_DESCRIPTOR,
     TEST_LOW_LOAD_INDEX_ORDERED_V4I32_DESCRIPTOR,
     TEST_LOW_LOAD_INDEX_V4F32_DESCRIPTOR,
@@ -255,7 +256,9 @@ def _source_memory_byte_offset_materializer() -> SourceMemoryByteOffsetMateriali
         add=TEST_LOW_ADD_I32_DESCRIPTOR,
         multiply=TEST_LOW_MUL_I32_DESCRIPTOR,
         shift_left=None,
+        increment=TEST_LOW_INCREMENT_I32_DESCRIPTOR,
         constant_immediate="i32_value",
+        increment_immediate="i32_value",
     )
 
 
@@ -278,7 +281,7 @@ def _vector_load_rule(
                 if volatile
                 else ()
             ),
-            Guard.operand_segment_count("indices", 1 if dynamic else 0),
+            *((Guard.operand_segment_count("indices", 0),) if not dynamic else ()),
             Guard.value_type("result", result_type),
         ),
         emit=(
@@ -364,6 +367,56 @@ def _streaming_vector_load_rule(*, volatile: bool) -> DescriptorRule:
     )
 
 
+def _streaming_vector_store_rule() -> DescriptorRule:
+    index = ValueRef.temporary("index")
+    advance = ValueRef.temporary("advance")
+    return DescriptorRule(
+        source_op=vector.vector_store,
+        descriptor=TEST_LOW_STORE_INDEX_V4I32_DESCRIPTOR,
+        guards=(
+            Guard.value_type(
+                "value", Vector("i32", minimum_lanes=8, maximum_lanes=65535)
+            ),
+            Guard.value_static_dim0_multiple("value", 4),
+        ),
+        emit=(
+            *(
+                EmitDescriptorOp(
+                    descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                    results={"dst": result},
+                    result_types={"dst": _I32},
+                    immediates={"i32_value": value},
+                    form=DescriptorEmitForm.CONST,
+                )
+                for result, value in ((index, 0), (advance, 16))
+            ),
+            EmitDescriptorOp(
+                descriptor=TEST_LOW_STORE_INDEX_V4I32_DESCRIPTOR,
+                operands={
+                    "address": ValueRef.operand("view"),
+                    "index": index,
+                    "value": ValueRef.operand("value"),
+                },
+                source_memory=replace(
+                    _source_memory_constraint(
+                        SourceMemoryOperation.STORE, dynamic=False
+                    ),
+                    vector_lane_count=None,
+                ),
+                form=DescriptorEmitForm.PER_LANE_SEQUENCE,
+            ),
+            EmitDescriptorOp(
+                descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+                operands={"lhs": index, "rhs": advance},
+                results={"dst": index},
+                result_types={"dst": index},
+                form=DescriptorEmitForm.PER_LANE_SEQUENCE,
+            ),
+        ),
+        sequence_carried=("index",),
+    )
+
+
 def _vector_store_rule(
     descriptor: Descriptor,
     value_type: TypePattern,
@@ -380,7 +433,7 @@ def _vector_store_rule(
         source_op=vector.vector_store,
         descriptor=descriptor,
         guards=(
-            Guard.operand_segment_count("indices", 1 if dynamic else 0),
+            *((Guard.operand_segment_count("indices", 0),) if not dynamic else ()),
             Guard.value_type("value", value_type),
         ),
         emit=(
@@ -780,6 +833,7 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
             _V4F32,
             dynamic=True,
         ),
+        _streaming_vector_store_rule(),
         _vector_store_rule(
             TEST_LOW_STORE_V4I32_DESCRIPTOR,
             _V4I32,

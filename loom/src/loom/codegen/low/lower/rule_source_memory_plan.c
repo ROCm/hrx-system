@@ -947,6 +947,13 @@ loom_low_lower_rule_source_memory_consider_term_recurrence(
   };
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_set_recipe_inputs(
       context, initializer_terms, initializer_term_count, &complete->recipe));
+  // Canonical terms can be loop invariant while their retained materialized
+  // sum is defined inside the loop. Initialization must consume the selected
+  // representation's actual dependencies, not only its algebraic invariance.
+  if (!loom_low_lower_realization_can_place(context, loop->entry,
+                                            &complete->recipe)) {
+    return iree_ok_status();
+  }
   complete->stride_recipe = (loom_low_lower_realization_recipe_t){0};
   if (resolution.uses_stride_operand) {
     if (has_constant_stride) {

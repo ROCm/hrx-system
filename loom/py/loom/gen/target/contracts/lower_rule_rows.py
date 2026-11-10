@@ -67,6 +67,7 @@ _GUARD_VALUE_REF_KINDS = frozenset(
         GuardKind.VALUE_U32_DIVISOR_MAGIC_KIND,
         GuardKind.VALUE_I32_DIVISOR_MAGIC_KIND,
         GuardKind.VALUE_EXACT_FLOAT,
+        GuardKind.VALUE_EXACT_FLOAT_TYPE,
         GuardKind.VALUE_FLOAT_EXACTLY_REPRESENTABLE_AS,
         GuardKind.VALUE_EXACT_POWER_OF_TWO_FLOAT,
         GuardKind.VALUE_NOT_NAN,
@@ -767,9 +768,12 @@ def guard_payload_row(row: LowerGuard) -> list[str]:
         GuardKind.VALUE_NOT_SUBNORMAL_OR_INSTANCE_FLAGS_HAS_ALL,
     ):
         u64_payload = lower_rule_spelling.u64_c_literal(row.u64)
-    elif row.kind == GuardKind.VALUE_STORAGE_ELEMENT_FORMAT:
+    elif row.kind in (
+        GuardKind.VALUE_STORAGE_ELEMENT_FORMAT,
+        GuardKind.VALUE_EXACT_FLOAT_TYPE,
+    ):
         if row.u64_c_expression is None:
-            raise ValueError("storage element-format guard is missing expression")
+            raise ValueError(f"{row.kind.value} guard is missing expression")
         u64_payload = row.u64_c_expression
     elif row.kind == GuardKind.VALUE_MEMORY_SPACE:
         u64_payload = lower_rule_spelling.memory_space_mask(row.memory_spaces)

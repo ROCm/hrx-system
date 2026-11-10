@@ -1,0 +1,101 @@
+// A loop-carried accumulator is consumed immediately after the final backedge.
+// The last native MAC and its edge copy must retire before the reduction reads
+// that value. Prefixes ending before the last packet cannot expose this hazard.
+aie2p.target<array> @device {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+func.def noinline @prefix_square_sum(%input: view<1024xbf16>, %dimensions: i32) -> (f32) {
+  %c0 = index.constant 0 : index
+  %end = index.constant 1024 : index
+  %step = index.constant 32 : index
+  %dimension16 = scalar.trunci %dimensions : i32 to i16
+  %bounds = vector.splat %dimension16 : vector<32xi16>
+  %lanes = vector.constanti [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31] : vector<32xi16>
+  %initial = vector.splatf 0.0 : vector<16xf32>
+  %excluded = vector.splatf 0.0 : vector<32xbf16>
+  %partial = scf.for %position = [%c0 to %end step %step](%sum = %initial : vector<16xf32>) -> (vector<16xf32>) {
+    %position32 = index.cast %position : index to i32
+    %position16 = scalar.trunci %position32 : i32 to i16
+    %positions = vector.splat %position16 : vector<32xi16>
+    %indices = vector.addi %lanes, %positions : vector<32xi16>
+    %included = vector.cmpi ult, %indices, %bounds : vector<32xi16> -> vector<32xi1>
+    %values = vector.load %input[%position] : view<1024xbf16> -> vector<32xbf16>
+    %masked = vector.select %included, %values, %excluded : vector<32xbf16>
+    %next = vector.dot2f %masked, %masked, %sum : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+    scf.yield %next : vector<16xf32>
+  }
+  %identity = scalar.constant 0.0 : f32
+  %sum = vector.reduce<addf, reassoc|nnan|ninf|nsz> %partial, %identity : vector<16xf32>, f32
+  func.return %sum : f32
+}
+
+pipeline.def<kernel> public retain target(@device) @native_sums() run(%input_arg: buffer, %output_arg: buffer) {
+  %input, %output = buffer.assume.alignment %input_arg, %output_arg {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %size = index.constant 2112 : offset
+  %capacity = index.constant 1 : index
+  %pool = pipeline.memory<workgroup>[0, 2] : pool
+  %storage = buffer.alloca<workgroup> pool(%pool) align(64) %size : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x2112xi8>
+  %channel = channel.bind<fifo> %slots, %capacity : view<1x2112xi8>, index -> channel<tile<2112xi8>>
+  %source = buffer.view %input[%origin] : buffer -> view<2048xi8>
+  %destination = buffer.view %output[%origin] : buffer -> view<16xi8>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %write, %local = channel.reserve %channel : channel<tile<2112xi8>> -> (write<tile<2112xi8>>, view<2112xi8>)
+    %input_bytes = view.subview %local[0] : view<2112xi8> -> view<2048xi8>
+    %output_bytes = view.subview %local[2048] : view<2112xi8> -> view<16xi8>
+    %load = kernel.async.copy %source to %input_bytes {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<2048xi8> to view<2048xi8> -> kernel.async.token
+    %arrival = kernel.async.group %load : kernel.async.token -> kernel.async.group
+    kernel.async.wait %arrival {newer_groups = 0} : kernel.async.group
+    %values = view.bitcast %input_bytes : view<2048xi8> -> view<1024xbf16>
+    %results = view.bitcast %output_bytes : view<16xi8> -> view<4xf32>
+    %first = scalar.constant 1008 : i32
+    %last = scalar.constant 1024 : i32
+    %step = scalar.constant 6 : i32
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %case_count = index.constant 4 : index
+    scf.for %case = [%c0 to %case_count step %c1] {
+      %number = index.cast %case : index to i32
+      %offset = scalar.muli %number, %step : i32
+      %prefix = scalar.addi %first, %offset : i32
+      %beyond = scalar.cmpi ugt, %prefix, %last : i32
+      %bounded = scf.select %beyond, %last, %prefix : i32
+      %sum = func.call @prefix_square_sum(%values, %bounded) : (view<1024xbf16>, i32) -> (f32)
+      view.store %sum, %results[%case] : f32, view<4xf32>
+    }
+    channel.publish %write : write<tile<2112xi8>>
+    %read, %ready = channel.acquire %channel : channel<tile<2112xi8>> -> (read<tile<2112xi8>>, view<2112xi8>)
+    %completed = view.subview %ready[2048] : view<2112xi8> -> view<16xi8>
+    %store = kernel.async.copy %completed to %destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi8> to view<16xi8> -> kernel.async.token
+    %departure = kernel.async.group %store : kernel.async.token -> kernel.async.group
+    kernel.async.wait %departure {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<2112xi8>>
+  }
+}
+
+// Unit inputs make each selected lane contribute exactly one. This oracle
+// checks the completed mathematical sum independently of native instructions.
+func.def @reference(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %results = buffer.view %output[%origin] : buffer -> view<4xf32>
+  %a = scalar.constant 1008.0 : f32
+  %b = scalar.constant 1014.0 : f32
+  %c = scalar.constant 1020.0 : f32
+  %d = scalar.constant 1024.0 : f32
+  view.store %a, %results[0] : f32, view<4xf32>
+  view.store %b, %results[1] : f32, view<4xf32>
+  view.store %c, %results[2] : f32, view<4xf32>
+  view.store %d, %results[3] : f32, view<4xf32>
+  func.return
+}
+
+check.scenario public @completed_prefix_sums {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(1.0) : tensor<1024xbf16>
+    %output = check.generate.fill value(-1.0) : tensor<4xf32>
+    check.compare<@native_sums, @reference>(%input, %output) : (tensor<1024xbf16>, tensor<4xf32>) -> () {
+      check.expect.equal actual(%output) expected(%output) : tensor<4xf32>
+    }
+  }
+  check.return
+}

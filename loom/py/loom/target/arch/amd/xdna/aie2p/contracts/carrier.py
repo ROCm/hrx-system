@@ -31,7 +31,7 @@ BITCAST_VECTOR_CARRIER_SPECS = (
 )
 
 # Index-shaped values use the same 32-bit X representation as i32 values but
-# are excluded from source-level bitcasts.
+# are excluded from numeric reinterpretation bitcasts.
 VECTOR_CARRIER_SPECS = (
     *BITCAST_VECTOR_CARRIER_SPECS,
     (("index", "offset"), 4, 32),

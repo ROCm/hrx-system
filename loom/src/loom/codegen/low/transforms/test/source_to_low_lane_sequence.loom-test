@@ -89,3 +89,36 @@ low.func.def target<test.low.core>(@test_target) abi(object_function) @stream_pa
   %result = concat(%11, %14, %16) : (reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x12>
   return %result
 }
+
+// ====
+// RUN: pass source-to-low
+
+// A sink has no vector result to determine the number of repetitions. Its
+// final scalar cursor update still follows every input packet, in order.
+test.target<low_core> @test_target
+
+func.def target(@test_target) @store_packets(%output: buffer, %value: vector<12xi32>) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<12xi32>
+  vector.store %value, %view[0] : vector<12xi32>, view<12xi32>
+  func.return
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) abi(object_function) @store_packets(%value: reg<test.i32 x12>) asm {
+  %view = resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
+  %6 = test.const.i32 0
+  %7 = test.const.i32 16
+  %8 = slice %value[0] : reg<test.i32 x12> -> reg<test.i32 x4>
+  test.store.index.v4i32 %view, %6, %8
+  %9 = test.add.i32 %6, %7
+  %10 = slice %value[4] : reg<test.i32 x12> -> reg<test.i32 x4>
+  test.store.index.v4i32 %view, %9, %10
+  %11 = test.add.i32 %9, %7
+  %12 = slice %value[8] : reg<test.i32 x12> -> reg<test.i32 x4>
+  test.store.index.v4i32 %view, %11, %12
+  %13 = test.add.i32 %11, %7
+  return
+}

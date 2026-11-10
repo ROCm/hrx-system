@@ -6,7 +6,9 @@
 
 load("//libamdf/requirements:defs.bzl", "LIBAMDF")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with", "loom_generated_source")
+load("//loom/build_tools/bazel:defs.bzl", "loom_test")
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
+load("//loom/target/amd/xdna:execution_profiles.bzl", "XDNA_HARDWARE_PROFILE")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -25,6 +27,13 @@ _XDNA_ARTIFACT_COMPATIBLE_WITH = loom_config_compatible_with([
 _XDNA_IMAGE_COMPATIBLE_WITH = _XDNA_ARTIFACT_COMPATIBLE_WITH + loom_config_compatible_with([
     LIBAMDF.enabled_by,
 ])
+
+loom_test(
+    name = "hardware_loop_retirement_test",
+    srcs = ["hardware_loop_retirement.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [XDNA_HARDWARE_PROFILE],
+)
 
 loom_check_test_suite(
     name = "loom_check_test",

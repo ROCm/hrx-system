@@ -1,0 +1,111 @@
+// A read-only copy can share the live source's register. Its acquisition adds
+// no pressure even though both values survive the independent load.
+// RUN: emit low-schedule-query @read_only_copy strategy=resource-stall diagnostics=candidates order=*
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @read_only_copy(%source: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32 x4>) asm {
+  %alias = copy %source : reg<test.i32> -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {rejected_packet="low.copy", rejected_produced_live_units="0"}
+  %load = test.load.v4i32 %ptr
+  %sum = test.add.i32 %alias, %source
+  return %source, %sum, %load
+}
+
+// ----
+block 0 order: 1, 0, 2, 3
+
+// ====
+
+// Explicit moves consume their source. The writable result replaces the
+// original owner instead of adding another live register.
+// RUN: emit low-schedule-query @moved_update strategy=resource-stall order=* scheduled-pressure=test.i32
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @moved_update(%source: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32 x4>) asm {
+  %owner = move %source : reg<test.i32> -> reg<test.i32>
+  %load = test.load.v4i32 %ptr
+  %updated = test.tied.any %owner
+  return %updated, %load
+}
+
+// ----
+block 0 order: 0, 1, 2, 3
+scheduled pressure test.i32: peak-live-units=5 peak-live-values=2
+
+// ====
+
+// When acquisition is the original value's final read, retiring its register
+// pays for the writable result. The copy adds no net live storage.
+// RUN: emit low-schedule-query @retired_source strategy=resource-stall diagnostics=candidates order=*
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @retired_source(%source: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32 x4>) asm {
+  %owner = copy %source : reg<test.i32> -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {rejected_packet="low.copy", rejected_killed_live_units="1", rejected_produced_live_units="1"}
+  %load = test.load.v4i32 %ptr
+  %updated = test.tied.any %owner
+  return %updated, %load
+}
+
+// ----
+block 0 order: 1, 0, 2, 3
+
+// ====
+
+// The tied update needs an independently writable copy while the original
+// survives. Count its register at acquisition, before the consuming update.
+// RUN: emit low-schedule-query @copied_update strategy=resource-stall diagnostics=candidates order=*
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @copied_update(%source: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32 x4>) asm {
+  %owner = copy %source : reg<test.i32> -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {rejected_packet="low.copy", rejected_produced_live_units="1"}
+  %load = test.load.v4i32 %ptr
+  %updated = test.tied.any %owner
+  return %source, %updated, %load
+}
+
+// ----
+block 0 order: 1, 0, 2, 3
+
+// ====
+
+// A writable slice owns only the selected unit, not the complete four-unit
+// source. The source keeps its original contents after the update.
+// RUN: emit low-schedule-query @sliced_update strategy=resource-stall diagnostics=candidates order=*
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @sliced_update(%source: reg<test.i32 x4>, %ptr: reg<test.ptr>) -> (reg<test.i32 x4>, reg<test.i32>, reg<test.i32 x4>) asm {
+  %owner = slice %source[1] : reg<test.i32 x4> -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {rejected_packet="low.slice", rejected_produced_live_units="1"}
+  %load = test.load.v4i32 %ptr
+  %updated = test.tied.any %owner
+  return %source, %updated, %load
+}
+
+// ----
+block 0 order: 1, 0, 2, 3
+
+// ====
+
+// A writable aggregate owns all four units, including the lane that a
+// read-only concatenation could borrow from the repeated source.
+// RUN: emit low-schedule-query @concatenated_update strategy=resource-stall diagnostics=candidates order=*
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @concatenated_update(%source: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32 x4>, reg<test.i32 x4>) asm {
+  %owner = concat(%source, %source, %source, %source) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {rejected_packet="low.concat", rejected_produced_live_units="4"}
+  %load = test.load.v4i32 %ptr
+  %updated = test.early_tied.v4i32 %owner
+  return %source, %updated, %load
+}
+
+// ----
+block 0 order: 1, 0, 2, 3

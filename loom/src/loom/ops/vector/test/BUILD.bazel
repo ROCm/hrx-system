@@ -25,6 +25,7 @@ loom_check_test_suite(
         "construction_combine.loom-test",
         "coordinate_facts.loom-test",
         "divrem.loom-test",
+        "element_summary_facts.loom-test",
         "elementary_folding.loom-test",
         "facts.loom-test",
         "fast_math_facts.loom-test",

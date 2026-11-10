@@ -43,16 +43,17 @@ loom_aie2p_vector_carrier_t loom_aie2p_vector_carrier_for_type(
     };
   }
 
-  // Rank-one accumulator values above 1024 bits retain the containing
-  // four-unit physical view. AIE2P has no allocatable three-unit accumulator
-  // view; units beyond the source vector's logical extent are unobservable.
+  // Accumulator values above 1024 bits retain the containing four-unit
+  // physical view independently of logical rank. AIE2P has no allocatable
+  // three-unit accumulator view; units beyond the logical extent are
+  // unobservable.
   const bool has_accumulator_element_type =
       element_type == LOOM_SCALAR_TYPE_I32 ||
       element_type == LOOM_SCALAR_TYPE_I64 ||
       element_type == LOOM_SCALAR_TYPE_F32 ||
       element_type == LOOM_SCALAR_TYPE_INDEX ||
       element_type == LOOM_SCALAR_TYPE_OFFSET;
-  if (is_rank_one && has_accumulator_element_type && element_bit_count > 0 &&
+  if (has_accumulator_element_type && element_bit_count > 0 &&
       element_count > 1024 / (uint32_t)element_bit_count &&
       element_count <= 2048 / (uint32_t)element_bit_count) {
     return (loom_aie2p_vector_carrier_t){

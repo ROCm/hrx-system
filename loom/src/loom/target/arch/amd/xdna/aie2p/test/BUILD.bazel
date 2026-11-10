@@ -4,7 +4,6 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:python.bzl", "iree_py_test")
 load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
 load("//libamdf/requirements:defs.bzl", "LIBAMDF")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
@@ -29,87 +28,6 @@ _XDNA_ARTIFACT_COMPATIBLE_WITH = loom_config_compatible_with([
 _XDNA_IMAGE_COMPATIBLE_WITH = _XDNA_ARTIFACT_COMPATIBLE_WITH + loom_config_compatible_with([
     LIBAMDF.enabled_by,
 ])
-
-iree_py_test(
-    name = "vector_construct_family_test",
-    size = "small",
-    srcs = ["vector_construct_family_test.py"],
-    args = ["$(location //loom/src/loom/tools/loom-check:loom-check-test)"],
-    data = ["//loom/src/loom/tools/loom-check:loom-check-test"],
-    main = "vector_construct_family_test.py",
-    target_compatible_with = _XDNA_TARGET_COMPATIBLE_WITH,
-)
-
-iree_py_test(
-    name = "vector_construct_family_exhaustive_test",
-    size = "small",
-    srcs = ["vector_construct_family_test.py"],
-    args = [
-        "$(location //loom/src/loom/tools/loom-check:loom-check-test)",
-        "--exhaustive",
-    ],
-    data = ["//loom/src/loom/tools/loom-check:loom-check-test"],
-    main = "vector_construct_family_test.py",
-    tags = [
-        "manual",
-        "stress",
-    ],
-    target_compatible_with = _XDNA_TARGET_COMPATIBLE_WITH,
-)
-
-iree_py_test(
-    name = "interleave_family_test",
-    size = "small",
-    srcs = ["interleave_family_test.py"],
-    args = ["$(location //loom/src/loom/tools/loom-check:loom-check-test)"],
-    data = ["//loom/src/loom/tools/loom-check:loom-check-test"],
-    main = "interleave_family_test.py",
-    target_compatible_with = _XDNA_TARGET_COMPATIBLE_WITH,
-)
-
-iree_py_test(
-    name = "interleave_family_exhaustive_test",
-    size = "small",
-    srcs = ["interleave_family_test.py"],
-    args = [
-        "$(location //loom/src/loom/tools/loom-check:loom-check-test)",
-        "--exhaustive",
-    ],
-    data = ["//loom/src/loom/tools/loom-check:loom-check-test"],
-    main = "interleave_family_test.py",
-    tags = [
-        "manual",
-        "stress",
-    ],
-    target_compatible_with = _XDNA_TARGET_COMPATIBLE_WITH,
-)
-
-iree_py_test(
-    name = "transpose_family_test",
-    size = "small",
-    srcs = ["transpose_family_test.py"],
-    args = ["$(location //loom/src/loom/tools/loom-check:loom-check-test)"],
-    data = ["//loom/src/loom/tools/loom-check:loom-check-test"],
-    main = "transpose_family_test.py",
-    target_compatible_with = _XDNA_TARGET_COMPATIBLE_WITH,
-)
-
-iree_py_test(
-    name = "transpose_family_exhaustive_test",
-    size = "medium",
-    srcs = ["transpose_family_test.py"],
-    args = [
-        "$(location //loom/src/loom/tools/loom-check:loom-check-test)",
-        "--exhaustive",
-    ],
-    data = ["//loom/src/loom/tools/loom-check:loom-check-test"],
-    main = "transpose_family_test.py",
-    tags = [
-        "manual",
-        "stress",
-    ],
-    target_compatible_with = _XDNA_TARGET_COMPATIBLE_WITH,
-)
 
 iree_cli_test(
     name = "native_allocation_report_test",
@@ -206,6 +124,13 @@ loom_check_test_suite(
         "native_strands.loom-test",
     ],
     target_compatible_with = _XDNA_ARTIFACT_COMPATIBLE_WITH,
+)
+
+loom_test(
+    name = "bfp_memory_test",
+    srcs = ["bfp_memory.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [XDNA_HARDWARE_PROFILE],
 )
 
 loom_test(

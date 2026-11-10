@@ -45,6 +45,17 @@ static bool loom_low_schedule_storage_relation_can_alias_pressure(
       result->register_class_id != source->register_class_id) {
     return false;
   }
+  // Reserve storage for a preferred alias feeding an in-place update while
+  // its source remains live. Charging the acquisition here prevents
+  // apparently free copies from occupying the registers needed by their later
+  // consumers. Physical coalescing may still prove that storage can be reused;
+  // required ties retain their shared footprint in this pressure model.
+  if (iree_any_bit_set(relation->flags,
+                       LOOM_LOW_STORAGE_RELATION_FLAG_PREFERRED) &&
+      iree_any_bit_set(result->flags,
+                       LOOM_LOW_SCHEDULE_VALUE_FLAG_WRITTEN_IN_PLACE)) {
+    return false;
+  }
   IREE_ASSERT(relation->destination_unit_offset <= result->unit_count &&
                   relation->unit_count <=
                       result->unit_count - relation->destination_unit_offset,

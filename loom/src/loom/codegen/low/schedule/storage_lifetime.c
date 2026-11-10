@@ -113,6 +113,11 @@ iree_status_t loom_low_schedule_storage_lifetimes_initialize(
             LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_READ_TRACKED;
         needs_storage_read_tracking = true;
       }
+      if (iree_any_bit_set(relation->flags,
+                           LOOM_LOW_STORAGE_RELATION_FLAG_WRITES_STORAGE)) {
+        state->values[relation->source_ordinal].flags |=
+            LOOM_LOW_SCHEDULE_VALUE_FLAG_WRITTEN_IN_PLACE;
+      }
       if (loom_low_schedule_storage_relation_is_handoff(relation)) {
         state->values[relation->destination_ordinal].flags |=
             LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_READ_TRACKED;

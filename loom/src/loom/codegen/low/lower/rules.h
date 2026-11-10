@@ -929,6 +929,9 @@ typedef enum loom_low_lower_guard_kind_e {
   LOOM_LOW_LOWER_GUARD_ATTR_I64_ARRAY_ELEMENT_MULTIPLE = 50,
   // Source integer element facts must prove divisibility by a positive i64.
   LOOM_LOW_LOWER_GUARD_VALUE_DIVISIBLE_BY = 51,
+  // Every finite lane must be exactly representable in the float type
+  // carried by the u64 payload. Nonfinite class permissions are separate.
+  LOOM_LOW_LOWER_GUARD_VALUE_EXACT_FLOAT_TYPE = 52,
   // Maximum guard kind value plus one.
   LOOM_LOW_LOWER_GUARD_COUNT_,
 } loom_low_lower_guard_kind_t;

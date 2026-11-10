@@ -146,7 +146,7 @@ def test_complete_byte_offset_validates_fused_arithmetic_descriptors():
 def test_byte_offset_increment_is_unary_and_binds_its_immediate():
     increment = replace(
         TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
-        key="test.increment.i32",
+        key="test.byte_offset_increment.i32",
         immediates=(
             Immediate(
                 "increment",

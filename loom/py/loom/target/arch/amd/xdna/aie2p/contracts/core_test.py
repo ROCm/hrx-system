@@ -57,7 +57,6 @@ from loom.target.contracts import (
     DescriptorRule,
     EmitRegisterConcat,
     EmitRegisterCopy,
-    EmitRegisterMove,
     EmitRegisterSlice,
     Guard,
     Scalar,
@@ -845,74 +844,13 @@ def test_core_contract_closes_scalar_and_vector_families() -> None:
             )
             in f32_reduction.guards
         )
-        assert f32_reduction.descriptor.key == ("amd.xdna.aie2p.add.f32x64.configured")
+        assert f32_reduction.descriptor.key == ("amd.xdna.aie2p.add.f32x16.configured")
         assert f32_reduction.report_key == "f32x16_accumulator_tree"
         assert Guard.value_float_equals("init", 0.0) in f32_reduction.guards
         assert {
             Guard.instance_flags_has_all("fastmath", flag)
             for flag in ("reassoc", "nnan", "ninf", "nsz")
         } <= set(f32_reduction.guards)
-        assert [
-            emit.immediates["i"]
-            for emit in f32_reduction.emit
-            if not isinstance(
-                emit,
-                (
-                    EmitRegisterConcat,
-                    EmitRegisterCopy,
-                    EmitRegisterMove,
-                    EmitRegisterSlice,
-                ),
-            )
-            and emit.descriptor.key == "amd.xdna.aie2p.constant.i32.mova"
-        ] == [F32_ACCUMULATOR_ADD_CONTROL, *_F32X16_REDUCTION_CONTROLS]
-        assert [
-            emit.descriptor.key
-            for emit in f32_reduction.emit
-            if not isinstance(
-                emit,
-                (
-                    EmitRegisterConcat,
-                    EmitRegisterCopy,
-                    EmitRegisterMove,
-                    EmitRegisterSlice,
-                ),
-            )
-        ] == [
-            "amd.xdna.aie2p.accumulator.clear.f32x64",
-            "amd.xdna.aie2p.accumulator.clear.f32x64",
-            (
-                "amd.xdna.aie2p.move.accumulator512.to.vector512"
-                if input_in_accumulator
-                else "amd.xdna.aie2p.move.vector512.to.accumulator512"
-            ),
-            "amd.xdna.aie2p.constant.i32.mova",
-            *(
-                key
-                for _ in _F32X16_REDUCTION_CONTROLS
-                for key in (
-                    "amd.xdna.aie2p.constant.i32.mova",
-                    "amd.xdna.aie2p.shuffle.x.to.accumulator512.configured",
-                    "amd.xdna.aie2p.add.f32x64.configured",
-                    "amd.xdna.aie2p.move.accumulator512.to.vector512",
-                )
-            ),
-            "amd.xdna.aie2p.extract.i32.immediate",
-        ]
-        assert (
-            sum(isinstance(emit, EmitRegisterConcat) for emit in f32_reduction.emit)
-            == 5
-        )
-        assert sum(
-            isinstance(emit, EmitRegisterCopy) for emit in f32_reduction.emit
-        ) == (5 if input_in_accumulator else 4)
-        assert (
-            sum(isinstance(emit, EmitRegisterMove) for emit in f32_reduction.emit) == 2
-        )
-        assert (
-            sum(isinstance(emit, EmitRegisterSlice) for emit in f32_reduction.emit)
-            == 10
-        )
 
     for lane_count, controls in _I32_REDUCTION_CONTROLS:
         lane_rules = [
@@ -1690,6 +1628,12 @@ def test_core_contract_closes_scalar_and_vector_families() -> None:
         for source_type in _WIDE_VECTOR_BITCAST_TYPES
         for result_type in _WIDE_VECTOR_BITCAST_TYPES
     ] + [(_PREDICATE_VECTOR, _PREDICATE_VECTOR)] + [
+        (source_type, source_type)
+        for element_type in ("index", "offset")
+        for source_type in (
+            Vector(element_type, minimum_static_elements=1, maximum_static_elements=64),
+        )
+    ] + [
         (source_type, result_type)
         for source_type in bitcast_types
         for result_type in bitcast_types

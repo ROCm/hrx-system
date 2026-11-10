@@ -21,6 +21,7 @@ loom_check_test_suite(
     name = "loom_check_test",
     srcs = [
         "bf16_vectors.loom-test",
+        "bfp_memory.loom-test",
         "buffer_bulk.loom-test",
         "buffer_selection.loom-test",
         "callable_memory.loom-test",
@@ -32,6 +33,9 @@ loom_check_test_suite(
         "component_packetization_report.loom-test",
         "exact_bf16_accumulator_conversion.loom-test",
         "f32_representation.loom-test",
+        "f32_wide_arithmetic.loom-test",
+        "f32_wide_nonlinear.loom-test",
+        "floating_fma.loom-test",
         "function_storage.loom-test",
         "fused_packet_memory.loom-test",
         "immutable_gather.loom-test",
