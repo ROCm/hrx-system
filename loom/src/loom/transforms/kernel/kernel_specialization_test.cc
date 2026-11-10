@@ -120,7 +120,6 @@ class KernelSpecializationTest : public ::testing::TestWithParam<bool> {
     loom_rewriter_initialize(&rewriter, module, &scratch_);
     const loom_kernel_specialization_value_t specialization = {
         .type = index_type,
-        .literal = nullptr,
         .facts = loom_value_facts_exact_i64(16),
     };
     IREE_ASSERT_OK(loom_kernel_specializations_apply(
