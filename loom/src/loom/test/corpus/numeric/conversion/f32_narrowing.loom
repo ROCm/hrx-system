@@ -415,12 +415,13 @@ check.scenario @f32_half_packet_values {
 // Exercise every packed F32 narrowing format with an odd active lane count.
 // The oracle deliberately performs each conversion as a scalar operation.
 func.def @narrow_f32_family_packet(%input: buffer, %bf16_output: buffer, %f16_output: buffer, %e4m3_output: buffer, %e5m2_output: buffer) {
+  %source_buffer, %bf16_buffer, %f16_buffer, %e4m3_buffer, %e5m2_buffer = buffer.assume.noalias %input, %bf16_output, %f16_output, %e4m3_output, %e5m2_output : buffer, buffer, buffer, buffer, buffer
   %base = index.constant 0 : offset
-  %source = buffer.view %input[%base] : buffer -> view<3xf32>
-  %bf16_destination = buffer.view %bf16_output[%base] : buffer -> view<3xbf16>
-  %f16_destination = buffer.view %f16_output[%base] : buffer -> view<3xf16>
-  %e4m3_destination = buffer.view %e4m3_output[%base] : buffer -> view<3xf8E4M3>
-  %e5m2_destination = buffer.view %e5m2_output[%base] : buffer -> view<3xf8E5M2>
+  %source = buffer.view %source_buffer[%base] : buffer -> view<3xf32>
+  %bf16_destination = buffer.view %bf16_buffer[%base] : buffer -> view<3xbf16>
+  %f16_destination = buffer.view %f16_buffer[%base] : buffer -> view<3xf16>
+  %e4m3_destination = buffer.view %e4m3_buffer[%base] : buffer -> view<3xf8E4M3>
+  %e5m2_destination = buffer.view %e5m2_buffer[%base] : buffer -> view<3xf8E5M2>
   %values = vector.load %source[0] : view<3xf32> -> vector<3xf32>
   %bf16_values = vector.fptrunc %values : vector<3xf32> to vector<3xbf16>
   %f16_values = vector.fptrunc %values : vector<3xf32> to vector<3xf16>
