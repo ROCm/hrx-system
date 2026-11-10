@@ -271,15 +271,35 @@ iree_status_t loom_spirv_map_index_value(loom_low_lower_context_t* context,
       out_type);
 }
 
-static bool loom_spirv_index_type_is_wide(loom_type_t type) {
+static uint32_t loom_spirv_index_carrier_bitwidth(loom_type_t type) {
+  if (loom_low_register_type_class_id(type) !=
+          SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID ||
+      loom_low_register_type_unit_count(type) != 1) {
+    return 0;
+  }
   const loom_type_t* payload = loom_type_register_value_type(type);
-  return payload && loom_type_element_type(*payload) == LOOM_SCALAR_TYPE_I64;
+  if (payload == NULL || !loom_type_is_scalar(*payload)) {
+    return 0;
+  }
+  switch (loom_type_element_type(*payload)) {
+    case LOOM_SCALAR_TYPE_INDEX:
+      return 32;
+    case LOOM_SCALAR_TYPE_I64:
+      return 64;
+    default:
+      return 0;
+  }
 }
 
 loom_type_t loom_spirv_join_index_type(loom_type_t source_type, loom_type_t lhs,
                                        loom_type_t rhs) {
-  if (loom_type_element_type(source_type) != LOOM_SCALAR_TYPE_INDEX) {
+  if (!loom_type_equal(source_type, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX))) {
     return loom_type_none();
   }
-  return loom_spirv_index_type_is_wide(rhs) ? rhs : lhs;
+  const uint32_t left_width = loom_spirv_index_carrier_bitwidth(lhs);
+  const uint32_t right_width = loom_spirv_index_carrier_bitwidth(rhs);
+  if (left_width == 0 || right_width == 0) {
+    return loom_type_none();
+  }
+  return right_width > left_width ? rhs : lhs;
 }

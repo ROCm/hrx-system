@@ -1,0 +1,47 @@
+// RUN: emit source-low output=low
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) @wide_coordinate(%value: reg<spirv.id : i64>) -> (reg<spirv.id : i64>) asm {
+  return %value
+}
+
+func.def target(@target) @widen_helper_argument(%value: index) -> (i64) {
+  %result = low.invoke @wide_coordinate(%value) : (index) -> (i64)
+  func.return %result : i64
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @widen_helper_argument(%value: reg<spirv.id : index>) -> (reg<spirv.id : i64>) asm {
+  %7 = OpSConvert.i32.i64 %value
+  return %7
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) @float_input(%value: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
+  return %value
+}
+
+func.def target(@target) @incompatible_helper_argument(%value: index) -> (f32) {
+  // ERROR@+1: TARGET/074 {callee_name="float_input", value_kind="operand", actual_type="reg<spirv.id : index>", expected_type="reg<spirv.id : f32>"}
+  %result = low.invoke @float_input(%value) : (index) -> (f32)
+  func.return %result : f32
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) @native_coordinate(%value: reg<spirv.id : index>) -> (reg<spirv.id : index>) asm {
+  return %value
+}
+
+func.def target(@target) @narrow_helper_argument() -> (index) {
+  %limit = index.constant 4294967296 : index
+  // ERROR@+1: TARGET/074 {callee_name="native_coordinate", value_kind="operand", actual_type="reg<spirv.id : i64>", expected_type="reg<spirv.id : index>"}
+  %result = low.invoke @native_coordinate(%limit) : (index) -> (index)
+  func.return %result : index
+}

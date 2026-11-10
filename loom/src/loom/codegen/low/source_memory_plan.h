@@ -318,6 +318,9 @@ typedef struct loom_low_source_memory_access_plan_t {
   // Required visibility selected by the shared acquire plan. Thread scope
   // means no per-access obligation. This is independent of advisory caching.
   uint8_t read_visibility_scope;
+  // Analyzed ordinary load observes memory unchanged since source entry.
+  // Callers must separately establish the memory contract at that entry.
+  bool reads_entry_contents;
 } loom_low_source_memory_access_plan_t;
 
 // Scope over which the complete origin and retained view strides are identical.

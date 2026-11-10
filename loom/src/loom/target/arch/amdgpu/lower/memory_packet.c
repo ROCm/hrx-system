@@ -883,7 +883,7 @@ static bool loom_amdgpu_memory_access_split_global_smem_static_offset(
     const loom_amdgpu_descriptor_offset_immediate_info_t* offset_info,
     loom_amdgpu_memory_access_diagnostic_t* diagnostic) {
   if (offset_info->unit_byte_count != 1 ||
-      offset_info->kind != LOOM_LOW_IMMEDIATE_KIND_UNSIGNED) {
+      offset_info->kind != LOOM_LOW_IMMEDIATE_KIND_SIGNED) {
     diagnostic->rejection_bits |=
         LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_DESCRIPTOR_OFFSET_IMMEDIATE;
     return false;
@@ -895,8 +895,10 @@ static bool loom_amdgpu_memory_access_split_global_smem_static_offset(
   }
 
   const uint64_t static_byte_offset = (uint64_t)access->static_byte_offset;
+  // SMEM ignores each address component's low two bits before adding them.
+  // Keep both sides of a split word aligned, including at the signed limit.
   const uint64_t immediate_offset =
-      iree_min(static_byte_offset, offset_info->unsigned_max);
+      iree_min(static_byte_offset, offset_info->unsigned_max & ~UINT64_C(3));
   const uint64_t scalar_byte_offset = static_byte_offset - immediate_offset;
   if (scalar_byte_offset > UINT32_MAX) {
     access->immediate_offset = 0;
@@ -1390,6 +1392,8 @@ static bool loom_amdgpu_memory_access_try_select_global_smem(
   // Scalar memory discards the address's two low bits. Packed element types
   // may require less alignment than the register-sized packets carrying them.
   if (kind != LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD ||
+      iree_any_bit_set(candidate.source->access_flags,
+                       LOOM_MEMORY_ACCESS_FLAG_VOLATILE) ||
       candidate.source->minimum_alignment < 4 ||
       (candidate.source->memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL &&
        candidate.source->memory_space !=
@@ -1401,9 +1405,11 @@ static bool loom_amdgpu_memory_access_try_select_global_smem(
           selection_context->materialization_plan, &candidate) ||
       !loom_amdgpu_memory_access_uses_only_scalar_address_terms(&candidate) ||
       !selection_context->view_regions ||
-      !loom_view_region_table_root_is_stable(
-          selection_context->view_regions, candidate.source->root_value_id,
-          candidate.source->alias_scope_id, candidate.source->memory_space)) {
+      !(loom_view_region_table_root_is_stable(
+            selection_context->view_regions, candidate.source->root_value_id,
+            candidate.source->alias_scope_id, candidate.source->memory_space) ||
+        (candidate.source->reads_entry_contents &&
+         loom_kernel_def_isa(selection_context->source_function.op)))) {
     return false;
   }
 
@@ -1419,7 +1425,7 @@ static bool loom_amdgpu_memory_access_try_select_global_smem(
   loom_amdgpu_descriptor_offset_immediate_info_t offset_info;
   if (!loom_amdgpu_descriptor_offset_immediate_info(
           selection_context->descriptor_set, descriptor_ordinal, 1,
-          LOOM_LOW_IMMEDIATE_KIND_UNSIGNED, &offset_info)) {
+          LOOM_LOW_IMMEDIATE_KIND_SIGNED, &offset_info)) {
     return false;
   }
   loom_amdgpu_memory_access_diagnostic_t ignored_diagnostic = {0};

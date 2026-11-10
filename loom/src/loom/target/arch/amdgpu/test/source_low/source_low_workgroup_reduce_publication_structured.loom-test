@@ -41,45 +41,49 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %output_view = resource<hal_binding> {extent = 4, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %flags_view = resource<hal_binding> {extent = 4, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %leader_index = s_mov_b32 0
-  %23 = v_lshlrev_b32_src0_inline %tid, 2
-  %value = global_load_b32_saddr %23, %input_view
-  %25 = v_and_b32_src0_inline %tid, 31
-  %26 = storage {byte_alignment = 4, byte_length = 8} : low.storage<workgroup>
-  %27 = storage_address %26 : low.storage<workgroup> -> reg<amdgpu.vgpr>
-  %28 = v_add_f32_dpp16 %value, %value {dpp_ctrl = 177}
-  %29 = v_add_f32_dpp16 %28, %28 {dpp_ctrl = 78}
-  %30 = v_add_f32_dpp16 %29, %29 {dpp_ctrl = 321}
-  %31 = v_add_f32_dpp16 %30, %30 {dpp_ctrl = 320}
-  %32 = v_permlanex16_b32_src12_inline %31, 0, 0
-  %33 = v_add_f32 %31, %32
-  %34 = v_lshrrev_b32_src0_inline %tid, 5
-  %35 = v_lshlrev_b32_src0_inline %34, 2
-  %36 = v_mov_b32 1
-  %37 = v_cmp_lt_u32 %25, %36
-  %38, %39 = s_and_saveexec_b64 %37
-  %40 = v_add_u32 %27, %35
-  ds_write_b32 %40, %33
-  s_mov_b64_exec %38
+  %c0 = s_mov_b32 0
+  %24 = v_lshlrev_b32_src0_inline %tid, 2
+  %value = global_load_b32_saddr %24, %input_view
+  %26 = v_and_b32_src0_inline %tid, 31
+  %27 = storage {byte_alignment = 4, byte_length = 8} : low.storage<workgroup>
+  %28 = storage_address %27 : low.storage<workgroup> -> reg<amdgpu.vgpr>
+  %29 = v_add_f32_dpp16 %value, %value {dpp_ctrl = 177}
+  %30 = v_add_f32_dpp16 %29, %29 {dpp_ctrl = 78}
+  %31 = v_add_f32_dpp16 %30, %30 {dpp_ctrl = 321}
+  %32 = v_add_f32_dpp16 %31, %31 {dpp_ctrl = 320}
+  %33 = v_permlanex16_b32_src12_inline %32, 0, 0
+  %34 = v_add_f32 %32, %33
+  %35 = v_lshrrev_b32_src0_inline %tid, 5
+  %36 = v_lshlrev_b32_src0_inline %35, 2
+  %37 = v_mov_b32 1
+  %38 = v_cmp_lt_u32 %26, %37
+  %39, %40 = s_and_saveexec_b64 %38
+  %41 = v_add_u32 %28, %36
+  ds_write_b32 %41, %34
+  s_mov_b64_exec %39
   s_barrier
-  %41 = v_mov_b32 1
-  %42 = v_cmp_lt_u32 %tid, %41
-  %43, %44 = s_and_saveexec_b64 %42
-  %45 = ds_read_b32 %27
-  %46 = v_add_u32_src0_inline %27, 4
-  %47 = ds_read_b32 %46
-  %sum = v_add_f32 %45, %47
-  s_mov_b64_exec %43
+  %42 = v_mov_b32 1
+  %43 = v_cmp_lt_u32 %tid, %42
+  %44, %45 = s_and_saveexec_b64 %43
+  %46 = ds_read_b32 %28
+  %47 = v_add_u32_src0_inline %28, 4
+  %48 = ds_read_b32 %47
+  %sum = v_add_f32 %46, %48
+  s_mov_b64_exec %44
   s_barrier
-  %49 = v_mov_b32 0
-  %flag = global_load_b32_saddr %49, %flags_view
-  %has_output = v_cmp_ne_i32_src1_inline %flag {rhs = 0}
+  %50 = s_mov_b32 0
+  %flag = s_load_dword %flags_view, %50
+  %52 = s_cmp_lg_i32 %flag, %c0
+  %53 = s_mov_b32 0
+  %54 = s_mov_b32 1
+  %has_output = s_cselect_b32 %54, %53, %52
   %coordinate = v_add_u32 %leader_index, %tid
   %is_nonleader = v_cmp_ne_i32_src1_inline %coordinate {rhs = 0}
   low.scf.if %is_nonleader {
   } else {
     low.scf.if %has_output {
-      %54 = v_mov_b32 0
-      global_store_b32_saddr %54, %sum, %output_view
+      %58 = v_mov_b32 0
+      global_store_b32_saddr %58, %sum, %output_view
     }
   }
   return

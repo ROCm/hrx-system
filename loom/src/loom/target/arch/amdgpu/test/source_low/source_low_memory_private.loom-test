@@ -75,18 +75,21 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %input_view = resource<hal_binding> {extent = 8, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %23 = storage {byte_alignment = 8, byte_length = 24} : low.storage<private>
-  %26 = v_mov_b32 0
-  %lhs = global_load_b32_saddr %26, %input_view
-  scratch_store_b32_vaddr %26, %lhs
-  %rhs = global_load_b32_saddr %26, %input_view {offset = 4}
-  scratch_store_b32_vaddr %26, %rhs {offset = 4}
-  scratch_store_b32_vaddr %26, %lhs {offset = 12}
-  scratch_store_b32_vaddr %26, %rhs {offset = 16}
-  %34 = v_lshlrev_b32_src0_inline %lane, 2
-  %first_loaded = scratch_load_b32_vaddr %34
-  %second_loaded = scratch_load_b32_vaddr %34 {offset = 12}
-  global_store_b32_saddr %34, %first_loaded, %output_view
-  global_store_b32_saddr %34, %second_loaded, %output_view {offset = 4}
+  %26 = s_mov_b32 0
+  %lhs = s_load_dword %input_view, %26
+  %28 = v_mov_b32_copy %lhs
+  %29 = v_mov_b32 0
+  scratch_store_b32_vaddr %29, %28
+  %rhs = s_load_dword %input_view, %26 {offset = 4}
+  %32 = v_mov_b32_copy %rhs
+  scratch_store_b32_vaddr %29, %32 {offset = 4}
+  scratch_store_b32_vaddr %29, %28 {offset = 12}
+  scratch_store_b32_vaddr %29, %32 {offset = 16}
+  %38 = v_lshlrev_b32_src0_inline %lane, 2
+  %first_loaded = scratch_load_b32_vaddr %38
+  %second_loaded = scratch_load_b32_vaddr %38 {offset = 12}
+  global_store_b32_saddr %38, %first_loaded, %output_view
+  global_store_b32_saddr %38, %second_loaded, %output_view {offset = 4}
   return
 }
 

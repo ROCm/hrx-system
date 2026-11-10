@@ -141,16 +141,30 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %input_view = resource<hal_binding> {extent = 24, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {extent = 24, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %14 = storage {byte_alignment = 8, byte_length = 64} : low.storage<workgroup>
-  %16 = v_mov_b32 0
-  %17 = global_load_b128_saddr %16, %input_view
-  %18 = global_load_b64_saddr %16, %input_view {offset = 16}
-  %37 = slice %17[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
-  %35 = slice %17[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
-  ds_write2_b64 %16, %37, %35 {offset1 = 3}
-  ds_write_b64 %16, %18 {offset = 48}
-  %27 = ds_read2_b64 %16 {offset1 = 3}
-  %29 = ds_read_b64 %16 {offset = 48}
-  global_store_b128_saddr %16, %27, %output_view
-  global_store_b64_saddr %16, %29, %output_view {offset = 16}
+  %16 = s_mov_b32 0
+  %17 = s_load_dwordx4 %input_view, %16
+  %18 = slice %17[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %19 = v_mov_b32_copy %18
+  %20 = slice %17[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %21 = v_mov_b32_copy %20
+  %22 = slice %17[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %23 = v_mov_b32_copy %22
+  %24 = slice %17[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %25 = v_mov_b32_copy %24
+  %27 = s_load_dwordx2 %input_view, %16 {offset = 16}
+  %28 = slice %27[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %29 = v_mov_b32_copy %28
+  %30 = slice %27[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %31 = v_mov_b32_copy %30
+  %32 = concat(%29, %31) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %35 = v_mov_b32 0
+  %53 = concat(%19, %21) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %50 = concat(%23, %25) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  ds_write2_b64 %35, %53, %50 {offset1 = 3}
+  ds_write_b64 %35, %32 {offset = 48}
+  %41 = ds_read2_b64 %35 {offset1 = 3}
+  %43 = ds_read_b64 %35 {offset = 48}
+  global_store_b128_saddr %35, %41, %output_view
+  global_store_b64_saddr %35, %43, %output_view {offset = 16}
   return
 }

@@ -424,12 +424,10 @@ kernel.def target(@target) @uniform_global_load_controls_barrier() {
 // ----
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_global_load_controls_barrier() asm {
   %control_view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %10 = v_mov_b32 0
-  %control_value = global_load_b32_saddr %10, %control_view
-  %is_zero = v_cmp_eq_i32_src1_inline %control_value {rhs = 0}
-  %13 = s_mov_b64_exec_read
-  %14, %15 = s_and_b64_scc %is_zero, %13
-  low.cond_br %15, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+  %barrier_control = s_mov_b32 0
+  %control_value = s_load_dword %control_view, %barrier_control
+  %is_zero = s_cmp_eq_i32 %control_value, %barrier_control
+  low.cond_br %is_zero, ^_bb1, ^_bb2 : reg<amdgpu.scc>
 ^_bb1:
   s_waitcnt {lgkmcnt = 0}
   low.br ^_bb2

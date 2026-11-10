@@ -1,7 +1,7 @@
 // RUN: with-checks emit source-low target=amdgpu:gfx1151 output=low
 
-// AMDGPU acquisition refreshes vector caches. Both register preference and
-// memory selection must keep an externally mutable payload out of scalar caches.
+// AMDGPU acquisition refreshes vector caches. The entry read can use scalar
+// memory; the read observing acquired writes must use the refreshed vector cache.
 // A producer waits for the initial reads' acknowledgements before publishing.
 kernel.def @read_after_acquire_publication() {
   %c1 = index.constant 1 : index
@@ -34,9 +34,8 @@ kernel.def @read_after_acquire_publication() {
 }
 
 // ----
-CHECK: %before = global_load_*
+CHECK: %before = s_load_dword *
 CHECK: %after = global_load_*
-CHECK-NOT: * = s_load_dword *
 
 // ====
 

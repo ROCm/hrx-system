@@ -59,13 +59,13 @@ low.kernel.def target<amdgpu.rdna3_5.core>(@target) abi_layout({constant_count =
   %payload = s_load_dword %payloads, %63
   %next = v_add_f32 %payload, %consumed
   low.schedule.fence
-  %consumed_1 = v_add_f32 %next, %59
+  %consumed_1 = v_add_f32 %bias, %next
   low.schedule.fence
   %bounded_1 = s_load_dword %ids, %61 {offset = 4}
-  %70 = s_lshl_b32_rhs_inline %bounded_1, 2
-  %payload_1 = s_load_dword %payloads, %70
+  %69 = s_lshl_b32_rhs_inline %bounded_1, 2
+  %payload_1 = s_load_dword %payloads, %69
   %next_1 = v_add_f32 %payload_1, %consumed_1
-  %73 = v_mov_b32 0
-  global_store_b32_saddr %73, %next_1, %output
+  %72 = v_mov_b32 0
+  global_store_b32_saddr %72, %next_1, %output
   return
 }

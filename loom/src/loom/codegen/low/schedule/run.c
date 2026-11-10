@@ -919,14 +919,22 @@ static uint32_t loom_low_schedule_count_unscheduled_nodes_in_block(
   return unscheduled_count;
 }
 
+enum loom_low_schedule_cycle_visit_state_e {
+  LOOM_LOW_SCHEDULE_CYCLE_UNVISITED = 0,
+  LOOM_LOW_SCHEDULE_CYCLE_ACTIVE,
+  LOOM_LOW_SCHEDULE_CYCLE_FINISHED,
+  LOOM_LOW_SCHEDULE_CYCLE_MEMBER,
+};
+
 static void loom_low_schedule_record_dependency_cycle_path(
     loom_low_schedule_failure_t* failure, const uint32_t* parent_nodes,
-    uint32_t producer_node, uint32_t consumer_node) {
+    uint8_t* visit_states, uint32_t producer_node, uint32_t consumer_node) {
   uint32_t reverse_nodes[LOOM_LOW_SCHEDULE_FAILURE_CYCLE_NODE_CAPACITY];
   uint32_t reverse_count = 0;
   bool truncated = false;
   uint32_t cursor = producer_node;
   while (cursor != LOOM_LOW_SCHEDULE_NODE_NONE) {
+    visit_states[cursor] = LOOM_LOW_SCHEDULE_CYCLE_MEMBER;
     if (reverse_count < IREE_ARRAYSIZE(reverse_nodes)) {
       reverse_nodes[reverse_count++] = cursor;
     } else {
@@ -970,7 +978,8 @@ loom_low_schedule_find_dependency_witness(
 
 // Finds the explicit architectural-state value retained on a read-before-
 // clobber dependency. Other state dependency forms have no SSA value that can
-// be rematerialized.
+// be rematerialized. Already-private values cannot be cloned again and must
+// not hide an unrepaired value on the same cycle.
 static loom_value_id_t loom_low_schedule_state_value_for_dependency(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_dependency_t* dependency) {
@@ -983,28 +992,46 @@ static loom_value_id_t loom_low_schedule_state_value_for_dependency(
       loom_low_schedule_node_const_operand_ordinals(reader);
   if (dependency->value_operand_index != LOOM_LOW_ID_NONE) {
     IREE_ASSERT_LT(dependency->value_operand_index, reader->operand_count);
-    return state->value_domain
-        ->value_ids[operand_ordinals[dependency->value_operand_index]];
+    const loom_value_id_t value_id =
+        state->value_domain
+            ->value_ids[operand_ordinals[dependency->value_operand_index]];
+    const iree_bitmap_t private_values =
+        state->options->per_user_placement_values;
+    if (value_id < private_values.bit_count &&
+        iree_bitmap_test(private_values, value_id)) {
+      return LOOM_VALUE_ID_INVALID;
+    }
+    return value_id;
   }
   return LOOM_VALUE_ID_INVALID;
 }
 
 static void loom_low_schedule_record_cycle_state_value(
-    loom_low_schedule_build_state_t* state) {
+    loom_low_schedule_build_state_t* state, const uint32_t* parent_nodes,
+    const uint8_t* visit_states) {
   if (state->failure.state_value_id != LOOM_VALUE_ID_INVALID ||
-      state->failure.cycle_node_count < 2 ||
       iree_any_bit_set(state->failure.flags,
-                       LOOM_LOW_SCHEDULE_FAILURE_FLAG_CYCLE_PATH_TRUNCATED |
-                           LOOM_LOW_SCHEDULE_FAILURE_FLAG_WITNESS_EDGE_ONLY)) {
+                       LOOM_LOW_SCHEDULE_FAILURE_FLAG_WITNESS_EDGE_ONLY)) {
     return;
   }
-  for (uint32_t i = 0; i < state->failure.cycle_node_count; ++i) {
-    const uint32_t producer_node = state->failure.cycle_nodes[i];
-    const uint32_t consumer_node =
-        state->failure.cycle_nodes[(i + 1) % state->failure.cycle_node_count];
+
+  // The diagnostic excerpt may omit the repairable edge. The completed DFS
+  // retains the full cycle in its parent links and membership marks. Inspect
+  // every raw edge on that path, including parallel SSA/state dependencies.
+  for (uint32_t i = 0; i < state->dependencies.count; ++i) {
     const loom_low_schedule_dependency_t* dependency =
-        loom_low_schedule_find_dependency_witness(state, producer_node,
-                                                  consumer_node);
+        loom_low_schedule_dependency_graph_at(&state->dependencies, i);
+    const uint32_t producer_node = dependency->producer_node;
+    const uint32_t consumer_node = dependency->consumer_node;
+    if (visit_states[producer_node] != LOOM_LOW_SCHEDULE_CYCLE_MEMBER ||
+        visit_states[consumer_node] != LOOM_LOW_SCHEDULE_CYCLE_MEMBER) {
+      continue;
+    }
+    if (parent_nodes[consumer_node] != producer_node &&
+        !(producer_node == state->failure.producer_node &&
+          consumer_node == state->failure.consumer_node)) {
+      continue;
+    }
     const loom_value_id_t state_value_id =
         loom_low_schedule_state_value_for_dependency(state, dependency);
     if (state_value_id != LOOM_VALUE_ID_INVALID) {
@@ -1155,14 +1182,14 @@ static iree_status_t loom_low_schedule_record_dependency_cycle(
        start_node < block_node_end; ++start_node) {
     if (!loom_low_schedule_node_is_unscheduled_in_block(
             state, start_node, node_count, state->current_block_index) ||
-        visit_states[start_node] != 0) {
+        visit_states[start_node] != LOOM_LOW_SCHEDULE_CYCLE_UNVISITED) {
       continue;
     }
     iree_host_size_t stack_count = 1;
     stack_nodes[0] = start_node;
     stack_next_groups[0] = loom_low_schedule_dependency_index_group_begin(
         &state->dependency_index, start_node);
-    visit_states[start_node] = 1;
+    visit_states[start_node] = LOOM_LOW_SCHEDULE_CYCLE_ACTIVE;
     while (stack_count != 0) {
       const uint32_t producer_node = stack_nodes[stack_count - 1];
       bool advanced = false;
@@ -1179,18 +1206,18 @@ static iree_status_t loom_low_schedule_record_dependency_cycle(
                 state, consumer_node, node_count, state->current_block_index)) {
           continue;
         }
-        if (visit_states[consumer_node] == 0) {
+        if (visit_states[consumer_node] == LOOM_LOW_SCHEDULE_CYCLE_UNVISITED) {
           parent_nodes[consumer_node] = producer_node;
           stack_nodes[stack_count] = consumer_node;
           stack_next_groups[stack_count] =
               loom_low_schedule_dependency_index_group_begin(
                   &state->dependency_index, consumer_node);
-          visit_states[consumer_node] = 1;
+          visit_states[consumer_node] = LOOM_LOW_SCHEDULE_CYCLE_ACTIVE;
           ++stack_count;
           advanced = true;
           break;
         }
-        if (visit_states[consumer_node] == 1) {
+        if (visit_states[consumer_node] == LOOM_LOW_SCHEDULE_CYCLE_ACTIVE) {
           const loom_low_schedule_dependency_t* dependency =
               loom_low_schedule_find_dependency_witness(state, producer_node,
                                                         consumer_node);
@@ -1198,15 +1225,17 @@ static iree_status_t loom_low_schedule_record_dependency_cycle(
               state, block_record, scheduled_in_block, producer_node,
               consumer_node, dependency);
           loom_low_schedule_record_dependency_cycle_path(
-              &state->failure, parent_nodes, producer_node, consumer_node);
-          loom_low_schedule_record_cycle_state_value(state);
+              &state->failure, parent_nodes, visit_states, producer_node,
+              consumer_node);
+          loom_low_schedule_record_cycle_state_value(state, parent_nodes,
+                                                     visit_states);
           return iree_ok_status();
         }
       }
       if (advanced) {
         continue;
       }
-      visit_states[producer_node] = 2;
+      visit_states[producer_node] = LOOM_LOW_SCHEDULE_CYCLE_FINISHED;
       --stack_count;
     }
   }

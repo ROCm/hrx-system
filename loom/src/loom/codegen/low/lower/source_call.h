@@ -74,13 +74,13 @@ iree_status_t loom_low_lower_projected_call(
 // already planned the helper's exact Low contract; publication is not required.
 iree_status_t loom_low_lower_source_invoke_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_low_lower_source_invoke_plan_t** out_plan);
+    loom_low_lower_source_invoke_plan_t** out_plan);
 
-// Checks actual producer carriers against the retained helper arguments before
-// Low construction. The shared definition-ordered planner owns this boundary.
+// Prepares lossless producer-to-receiver conversions before Low construction.
+// Incompatible authored helper carriers are rejected at this boundary.
 iree_status_t loom_low_lower_source_invoke_finalize(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_low_lower_source_invoke_plan_t* plan);
+    loom_low_lower_source_invoke_plan_t* plan);
 
 // Normalizes low.invoke using the helper contract and validated carriers.
 iree_status_t loom_low_lower_source_invoke(

@@ -667,7 +667,9 @@ def _constant_vector_shift_rule(
         emit=(
             EmitDescriptorOp(
                 descriptor=descriptor,
-                operands={"value": ValueRef.operand("lhs")},
+                operands={
+                    "value": _materialized_operand("lhs", REGISTERS_VGPR_MATERIALIZER)
+                },
                 results={"dst": ValueRef.result("result")},
                 immediates={"imm32": ValueProject.exact_i64("rhs")},
                 form=_emit_form(type_pattern),
@@ -696,7 +698,7 @@ def _i64_vector_shift_rule(
                     "shift": ValueRef.operand(
                         "rhs", materializer=I64_LOW_WORDS_MATERIALIZER.name
                     ),
-                    "value": ValueRef.operand("lhs"),
+                    "value": _materialized_operand("lhs", REGISTERS_VGPR_MATERIALIZER),
                 },
                 results={"dst": ValueRef.result("result")},
                 form=DescriptorEmitForm.PER_LANE,
@@ -884,16 +886,6 @@ def _f32_copysign_rules(
     register_insert = _descriptor("amdgpu.v_bfi_b32")
     typed_guards = _typed_guards(("lhs", "rhs", "result"), type_pattern)
     emit_form = _emit_form(type_pattern)
-    register_insert_operand = (
-        ValueRef.operand("lhs")
-        if type_pattern.kind == "vector"
-        else _f32_vgpr_operand("lhs")
-    )
-    register_base_operand = (
-        ValueRef.operand("rhs")
-        if type_pattern.kind == "vector"
-        else _f32_vgpr_operand("rhs")
-    )
     return (
         DescriptorRule(
             source_op=source_op,
@@ -931,8 +923,8 @@ def _f32_copysign_rules(
                     descriptor=register_insert,
                     operands={
                         "mask": ValueRef.temporary("magnitude_mask"),
-                        "insert": register_insert_operand,
-                        "base": register_base_operand,
+                        "insert": _f32_vgpr_operand("lhs"),
+                        "base": _f32_vgpr_operand("rhs"),
                     },
                     results={"dst": ValueRef.result("result")},
                     form=emit_form,

@@ -13,6 +13,7 @@
 #include "loom/analysis/consumption.h"
 #include "loom/analysis/motion.h"
 #include "loom/analysis/symbolic_expr_proof.h"
+#include "loom/codegen/low/lower/bindings.h"
 #include "loom/codegen/low/lower/context.h"
 #include "loom/codegen/low/lower/rule_descriptor.h"
 #include "loom/codegen/low/lower/rule_source_memory.h"
@@ -2008,8 +2009,15 @@ static iree_status_t loom_low_lower_rule_match_map_value_from_lowering(
   *out_mapped_value = loom_low_lower_rule_mapped_value_none();
   loom_low_lower_context_t* context = (loom_low_lower_context_t*)user_data;
   loom_type_t low_type = loom_type_none();
-  IREE_RETURN_IF_ERROR(loom_low_lower_query_value(context, source_op,
-                                                  source_value_id, &low_type));
+  // Contract probes precede source planning. Once a producer has selected its
+  // carrier, operand guards must use that decision instead of its preference.
+  if (context->lowering->source_plan.value_flags != NULL &&
+      loom_low_lower_value_binding_type_is_planned(context, source_value_id)) {
+    low_type = loom_low_lower_value_binding_type(context, source_value_id);
+  } else {
+    IREE_RETURN_IF_ERROR(loom_low_lower_query_value(
+        context, source_op, source_value_id, &low_type));
+  }
   if (!loom_low_type_is_register(low_type)) {
     return iree_ok_status();
   }

@@ -1797,8 +1797,11 @@ static bool loom_low_source_memory_access_plan_build_byte_offset_impl(
 }
 
 static void loom_low_source_memory_access_retain_semantics(
-    loom_memory_access_t access, loom_low_source_memory_access_plan_t* plan) {
+    const loom_view_region_table_t* view_regions, loom_memory_access_t access,
+    loom_low_source_memory_access_plan_t* plan) {
   plan->access_flags = loom_memory_access_flags(access);
+  plan->reads_entry_contents =
+      loom_view_region_table_reads_entry_contents(view_regions, access.op);
   const loom_memory_access_operation_kind_t operation_kind =
       (loom_memory_access_operation_kind_t)plan->operation_kind;
   if (!loom_memory_access_operation_kind_is_atomic(operation_kind)) {
@@ -1876,7 +1879,8 @@ bool loom_low_source_memory_access_plan_build(
             view_regions, operation_kind, view_value_id, byte_offset_value_id,
             cache_policy, out_plan, out_diagnostic);
     if (built) {
-      loom_low_source_memory_access_retain_semantics(access, out_plan);
+      loom_low_source_memory_access_retain_semantics(view_regions, access,
+                                                     out_plan);
     }
     return built;
   }
@@ -1891,7 +1895,8 @@ bool loom_low_source_memory_access_plan_build(
       loom_memory_access_static_indices(access), vector_type, cache_policy,
       axis_byte_strides, out_plan, out_diagnostic);
   if (built) {
-    loom_low_source_memory_access_retain_semantics(access, out_plan);
+    loom_low_source_memory_access_retain_semantics(view_regions, access,
+                                                   out_plan);
     out_plan->vector_offset_kind =
         loom_low_source_memory_access_vector_offset_kind(
             fact_table, loom_memory_access_offsets(access),

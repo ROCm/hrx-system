@@ -435,9 +435,10 @@ func.def @varying_wide_division(%input: buffer, %output: buffer) {
 // Vector operands are loaded at runtime; positive divisors avoid the signed
 // minimum/-1 overflow case while retaining the entire positive i64 domain.
 func.def @varying_wide_vector_division(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.noalias %input, %output : buffer, buffer
   %base = index.constant 0 : offset
-  %inputs = buffer.view %input[%base] : buffer -> view<16xi64>
-  %outputs = buffer.view %output[%base] : buffer -> view<48xi64>
+  %inputs = buffer.view %source[%base] : buffer -> view<16xi64>
+  %outputs = buffer.view %destination[%base] : buffer -> view<48xi64>
   %dividends = vector.load %inputs[0] : view<16xi64> -> vector<2xi64>
   %bits = vector.load %inputs[8] : view<16xi64> -> vector<2xi64>
   %mask = scalar.constant 9223372036854775807 : i64

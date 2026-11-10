@@ -1382,8 +1382,7 @@ iree_status_t loom_amdgpu_materialize_low_vgpr_b32_registers(
 
   const bool is_sgpr = loom_amdgpu_low_type_is_register_class(
       context, low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR);
-  if (!is_sgpr || unit_count == 0 ||
-      unit_count > LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES) {
+  if (!is_sgpr || unit_count == 0) {
     IREE_ASSERT_UNREACHABLE(
         "AMDGPU VGPR materializer selected an unsupported low value");
     IREE_BUILTIN_UNREACHABLE();
@@ -1399,7 +1398,12 @@ iree_status_t loom_amdgpu_materialize_low_vgpr_b32_registers(
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_make_vgpr_range_type(context, unit_count, &vgpr_range_type));
 
-  loom_value_id_t lanes[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES];
+  loom_value_id_t inline_lanes[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES];
+  loom_value_id_t* lanes = inline_lanes;
+  if (unit_count > IREE_ARRAYSIZE(inline_lanes)) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
+        context, unit_count, sizeof(*lanes), (void**)&lanes));
+  }
   for (uint32_t i = 0; i < unit_count; ++i) {
     loom_value_id_t sgpr_lane = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_slice(

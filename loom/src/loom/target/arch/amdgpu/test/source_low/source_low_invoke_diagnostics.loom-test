@@ -145,3 +145,32 @@ func.def target(@target) @recursive_closure_caller(%value: vector<1xi32>) -> (ve
   %result = low.invoke @cycle_a(%value) : (vector<1xi32>) -> (vector<1xi32>)
   func.return %result : vector<1xi32>
 }
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @scalar_input(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %result = v_mov_b32_copy %value
+  return %result
+}
+
+func.def target(@target) @varying_helper_argument(%value: vector<1xi32>) -> (vector<1xi32>) {
+  // ERROR@+1: TARGET/074 {callee_name="scalar_input", value_kind="operand", actual_type="reg<amdgpu.vgpr>", expected_type="reg<amdgpu.sgpr>"}
+  %result = low.invoke @scalar_input(%value) : (vector<1xi32>) -> (vector<1xi32>)
+  func.return %result : vector<1xi32>
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @packet_input(%value: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
+  return %value
+}
+
+func.def target(@target) @wrong_address_width(%value: index) -> (vector<4xi32>) {
+  // ERROR@+1: TARGET/074 {callee_name="packet_input", value_kind="operand", actual_type="reg<amdgpu.sgpr>", expected_type="reg<amdgpu.vgpr x4>"}
+  %result = low.invoke @packet_input(%value) : (index) -> (vector<4xi32>)
+  func.return %result : vector<4xi32>
+}

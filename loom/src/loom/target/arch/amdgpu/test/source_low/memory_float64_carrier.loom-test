@@ -18,22 +18,95 @@ kernel.def @float64_memory_copy() {
 low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @float64_memory_copy() asm {
   %source = resource<hal_binding> {extent = 144, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %destination = resource<hal_binding> {extent = 144, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %9 = v_mov_b32 0
-  %10 = global_load_b128_saddr %9, %source {offset = 8}
-  %11 = global_load_b128_saddr %9, %source {offset = 24}
-  %12 = global_load_b128_saddr %9, %source {offset = 40}
-  %13 = global_load_b128_saddr %9, %source {offset = 56}
-  %14 = global_load_b128_saddr %9, %source {offset = 72}
-  %15 = global_load_b128_saddr %9, %source {offset = 88}
-  %16 = global_load_b128_saddr %9, %source {offset = 104}
-  %17 = global_load_b128_saddr %9, %source {offset = 120}
-  global_store_b128_saddr %9, %10, %destination {offset = 8}
-  global_store_b128_saddr %9, %11, %destination {offset = 24}
-  global_store_b128_saddr %9, %12, %destination {offset = 40}
-  global_store_b128_saddr %9, %13, %destination {offset = 56}
-  global_store_b128_saddr %9, %14, %destination {offset = 72}
-  global_store_b128_saddr %9, %15, %destination {offset = 88}
-  global_store_b128_saddr %9, %16, %destination {offset = 104}
-  global_store_b128_saddr %9, %17, %destination {offset = 120}
+  %9 = s_mov_b32 0
+  %10 = s_load_dwordx4 %source, %9 {offset = 8}
+  %11 = slice %10[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %12 = v_mov_b32_copy %11
+  %13 = slice %10[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %14 = v_mov_b32_copy %13
+  %15 = slice %10[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %16 = v_mov_b32_copy %15
+  %17 = slice %10[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %18 = v_mov_b32_copy %17
+  %19 = concat(%12, %14, %16, %18) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %20 = s_load_dwordx4 %source, %9 {offset = 24}
+  %21 = slice %20[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %22 = v_mov_b32_copy %21
+  %23 = slice %20[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %24 = v_mov_b32_copy %23
+  %25 = slice %20[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %26 = v_mov_b32_copy %25
+  %27 = slice %20[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %28 = v_mov_b32_copy %27
+  %29 = concat(%22, %24, %26, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %30 = s_load_dwordx4 %source, %9 {offset = 40}
+  %31 = slice %30[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %32 = v_mov_b32_copy %31
+  %33 = slice %30[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %34 = v_mov_b32_copy %33
+  %35 = slice %30[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %36 = v_mov_b32_copy %35
+  %37 = slice %30[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %38 = v_mov_b32_copy %37
+  %39 = concat(%32, %34, %36, %38) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %40 = s_load_dwordx4 %source, %9 {offset = 56}
+  %41 = slice %40[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %42 = v_mov_b32_copy %41
+  %43 = slice %40[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %44 = v_mov_b32_copy %43
+  %45 = slice %40[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %46 = v_mov_b32_copy %45
+  %47 = slice %40[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %48 = v_mov_b32_copy %47
+  %49 = concat(%42, %44, %46, %48) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %50 = s_load_dwordx4 %source, %9 {offset = 72}
+  %51 = slice %50[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %52 = v_mov_b32_copy %51
+  %53 = slice %50[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %54 = v_mov_b32_copy %53
+  %55 = slice %50[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %56 = v_mov_b32_copy %55
+  %57 = slice %50[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %58 = v_mov_b32_copy %57
+  %59 = concat(%52, %54, %56, %58) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %60 = s_load_dwordx4 %source, %9 {offset = 88}
+  %61 = slice %60[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %62 = v_mov_b32_copy %61
+  %63 = slice %60[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %64 = v_mov_b32_copy %63
+  %65 = slice %60[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %66 = v_mov_b32_copy %65
+  %67 = slice %60[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %68 = v_mov_b32_copy %67
+  %69 = concat(%62, %64, %66, %68) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %70 = s_load_dwordx4 %source, %9 {offset = 104}
+  %71 = slice %70[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %72 = v_mov_b32_copy %71
+  %73 = slice %70[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %74 = v_mov_b32_copy %73
+  %75 = slice %70[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %76 = v_mov_b32_copy %75
+  %77 = slice %70[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %78 = v_mov_b32_copy %77
+  %79 = concat(%72, %74, %76, %78) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %80 = s_load_dwordx4 %source, %9 {offset = 120}
+  %81 = slice %80[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %82 = v_mov_b32_copy %81
+  %83 = slice %80[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %84 = v_mov_b32_copy %83
+  %85 = slice %80[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %86 = v_mov_b32_copy %85
+  %87 = slice %80[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %88 = v_mov_b32_copy %87
+  %89 = concat(%82, %84, %86, %88) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %92 = v_mov_b32 0
+  global_store_b128_saddr %92, %19, %destination {offset = 8}
+  global_store_b128_saddr %92, %29, %destination {offset = 24}
+  global_store_b128_saddr %92, %39, %destination {offset = 40}
+  global_store_b128_saddr %92, %49, %destination {offset = 56}
+  global_store_b128_saddr %92, %59, %destination {offset = 72}
+  global_store_b128_saddr %92, %69, %destination {offset = 88}
+  global_store_b128_saddr %92, %79, %destination {offset = 104}
+  global_store_b128_saddr %92, %89, %destination {offset = 120}
   return
 }

@@ -249,13 +249,19 @@ class ViewRegionsTest : public ::testing::Test {
     return loom_buffer_view_result(view);
   }
 
-  loom_value_id_t BuildReadOnlyView(loom_value_id_t buffer) {
-    const loom_value_id_t view = BuildView(buffer);
+  loom_op_t* BuildVectorLoad(loom_value_id_t view,
+                             loom_memory_access_flags_t flags = 0) {
     const int64_t indices[] = {0};
     loom_op_t* load = nullptr;
-    IREE_CHECK_OK(loom_vector_load_build(&builder_, 0, 0, view, nullptr, 0,
+    IREE_CHECK_OK(loom_vector_load_build(&builder_, 0, flags, view, nullptr, 0,
                                          indices, 1, 0, 0, VectorType1D(4),
                                          LOOM_LOCATION_UNKNOWN, &load));
+    return load;
+  }
+
+  loom_value_id_t BuildReadOnlyView(loom_value_id_t buffer) {
+    const loom_value_id_t view = BuildView(buffer);
+    BuildVectorLoad(view);
     return view;
   }
 
@@ -555,9 +561,11 @@ TEST_F(ViewRegionsTest, ProvesDisjointReadAndWriteViewsInOneSlab) {
 TEST_F(ViewRegionsTest, UnknownEffectsPreventStorageStability) {
   const loom_value_id_t buffer = DefineBufferArg();
   const loom_value_id_t view = BuildReadOnlyView(BuildNoAliasBuffer(buffer));
+  loom_op_t* before = BuildVectorLoad(view);
   loom_op_t* opaque = nullptr;
   IREE_ASSERT_OK(loom_test_clause_copy_build(&builder_, buffer, buffer,
                                              LOOM_LOCATION_UNKNOWN, &opaque));
+  loom_op_t* after = BuildVectorLoad(view);
   loom_value_fact_table_t facts = {};
   ComputeFacts(&facts);
   loom_view_region_table_t table = {};
@@ -565,6 +573,76 @@ TEST_F(ViewRegionsTest, UnknownEffectsPreventStorageStability) {
   EXPECT_EQ(loom_view_region_table_root_access_flags(&table, buffer),
             LOOM_VIEW_ACCESS_READ);
   EXPECT_FALSE(RootIsStable(&table, view));
+  EXPECT_TRUE(loom_view_region_table_reads_entry_contents(&table, before));
+  EXPECT_FALSE(loom_view_region_table_reads_entry_contents(&table, after));
+}
+
+class EntryMemoryReadTest
+    : public ViewRegionsTest,
+      public ::testing::WithParamInterface<loom_value_fact_memory_space_t> {};
+
+TEST_P(EntryMemoryReadTest, LaterWritesDoNotInvalidateEarlierReads) {
+  const loom_value_id_t input =
+      BuildView(BuildNoAliasBuffer(DefineBufferArg()));
+  const loom_value_id_t destination =
+      BuildView(BuildNoAliasBuffer(DefineBufferArg(), GetParam()));
+  loom_op_t* before = BuildVectorLoad(input);
+  loom_op_t* volatile_read =
+      BuildVectorLoad(input, LOOM_MEMORY_ACCESS_FLAG_VOLATILE);
+  const int64_t indices[] = {0};
+  loom_op_t* store = nullptr;
+  IREE_ASSERT_OK(loom_vector_store_build(
+      &builder_, 0, 0, loom_vector_load_result(before), destination, nullptr, 0,
+      indices, 1, 0, 0, LOOM_LOCATION_UNKNOWN, &store));
+  loom_op_t* after = BuildVectorLoad(input);
+
+  loom_value_fact_table_t facts = {};
+  ComputeFacts(&facts);
+  loom_view_region_table_t table = {};
+  Analyze(&facts, &table);
+  EXPECT_TRUE(loom_view_region_table_reads_entry_contents(&table, before));
+  EXPECT_FALSE(
+      loom_view_region_table_reads_entry_contents(&table, volatile_read));
+  EXPECT_FALSE(loom_view_region_table_reads_entry_contents(&table, store));
+  EXPECT_EQ(loom_view_region_table_reads_entry_contents(&table, after),
+            GetParam() == LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE ||
+                GetParam() == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP);
+  // The per-load bit must not become a buffer root-use flag.
+  EXPECT_EQ(loom_view_region_table_root_use_flags(
+                &table, loom_vector_load_result(before)),
+            0);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ViewRegions, EntryMemoryReadTest,
+    ::testing::Values(LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN,
+                      LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC,
+                      LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
+                      LOOM_VALUE_FACT_MEMORY_SPACE_HOST,
+                      LOOM_VALUE_FACT_MEMORY_SPACE_DESCRIPTOR,
+                      LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE,
+                      LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP));
+
+TEST_F(ViewRegionsTest, RawByteLoadsRetainEntryContents) {
+  const loom_value_id_t buffer = DefineBufferArg();
+  const loom_value_id_t offset =
+      loom_index_constant_result(BuildOffsetConstant(0));
+  loom_op_t* before = nullptr;
+  IREE_ASSERT_OK(loom_buffer_load_i8_u_build(&builder_, buffer, offset,
+                                             LOOM_LOCATION_UNKNOWN, &before));
+  loom_op_t* store = nullptr;
+  IREE_ASSERT_OK(
+      loom_buffer_store_i8_build(&builder_, loom_op_results(before)[0], buffer,
+                                 offset, LOOM_LOCATION_UNKNOWN, &store));
+  loom_op_t* after = nullptr;
+  IREE_ASSERT_OK(loom_buffer_load_i8_u_build(&builder_, buffer, offset,
+                                             LOOM_LOCATION_UNKNOWN, &after));
+  loom_value_fact_table_t facts = {};
+  ComputeFacts(&facts);
+  loom_view_region_table_t table = {};
+  Analyze(&facts, &table);
+  EXPECT_TRUE(loom_view_region_table_reads_entry_contents(&table, before));
+  EXPECT_FALSE(loom_view_region_table_reads_entry_contents(&table, after));
 }
 
 enum class GlobalStorageEffect {
@@ -1016,9 +1094,12 @@ TEST_P(ThreadFenceStorageStabilityTest, OnlyAcquisitionImportsSharedWrites) {
       BuildReadOnlyView(BuildNoAliasBuffer(DefineBufferArg()));
   const loom_value_id_t private_view = BuildReadOnlyView(BuildNoAliasBuffer(
       DefineBufferArg(), LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE));
+  loom_op_t* before = BuildVectorLoad(global);
   loom_op_t* fence = nullptr;
   IREE_ASSERT_OK(loom_buffer_fence_build(&builder_, scope, ordering,
                                          LOOM_LOCATION_UNKNOWN, &fence));
+  loom_op_t* after = BuildVectorLoad(global);
+  loom_op_t* private_after = BuildVectorLoad(private_view);
 
   loom_value_fact_table_t facts = {};
   ComputeFacts(&facts);
@@ -1026,6 +1107,11 @@ TEST_P(ThreadFenceStorageStabilityTest, OnlyAcquisitionImportsSharedWrites) {
   Analyze(&facts, &table);
   EXPECT_EQ(RootIsStable(&table, global), shared_stable);
   EXPECT_TRUE(RootIsStable(&table, private_view));
+  EXPECT_TRUE(loom_view_region_table_reads_entry_contents(&table, before));
+  EXPECT_EQ(loom_view_region_table_reads_entry_contents(&table, after),
+            shared_stable);
+  EXPECT_TRUE(
+      loom_view_region_table_reads_entry_contents(&table, private_after));
 }
 
 INSTANTIATE_TEST_SUITE_P(

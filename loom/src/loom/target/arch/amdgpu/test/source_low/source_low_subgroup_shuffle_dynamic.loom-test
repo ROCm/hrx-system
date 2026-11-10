@@ -261,29 +261,31 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %item = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %61 = v_mov_b32 0
-  %offset = global_load_b32_saddr %61, %input_view
+  %61 = s_mov_b32 0
+  %offset = s_load_dword %input_view, %61
   %value = s_mov_b32 1
   %65 = v_cmp_lt_u32_src1_inline %offset {rhs = 32}
-  %66 = v_cndmask_b32_src0_inline %offset, %65 {false_value = 0}
-  %67 = v_and_b32_src0_inline %item, 31
-  %68 = v_xor_b32 %67, %66
-  %69 = v_cndmask_b32 %67, %68, %65
-  %70 = v_mov_b32_copy %value
-  %71 = s_mov_b64_exec_read
-  %72 = slice %71[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %73 = v_mov_b32_copy %72
-  %74 = v_lshrrev_b32 %69, %73
-  %75 = v_and_b32_src0_inline %74, 1
-  %77 = v_cmp_ne_i32 %75, %61
-  %78 = v_lshlrev_b32_src0_inline %69, 2
-  %shuffle = ds_bpermute_b32 %78, %70
-  %valid = s_and_b64 %65, %77
+  %66 = v_mov_b32_copy %offset
+  %67 = v_cndmask_b32_src0_inline %66, %65 {false_value = 0}
+  %68 = v_and_b32_src0_inline %item, 31
+  %69 = v_xor_b32 %68, %67
+  %70 = v_cndmask_b32 %68, %69, %65
+  %71 = v_mov_b32_copy %value
+  %72 = s_mov_b64_exec_read
+  %73 = slice %72[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %74 = v_mov_b32_copy %73
+  %75 = v_lshrrev_b32 %70, %74
+  %76 = v_and_b32_src0_inline %75, 1
+  %77 = v_mov_b32 0
+  %78 = v_cmp_ne_i32 %76, %77
+  %79 = v_lshlrev_b32_src0_inline %70, 2
+  %shuffle = ds_bpermute_b32 %79, %71
+  %valid = s_and_b64 %65, %78
   %selected = v_cndmask_b32_src0_inline %shuffle, %valid {false_value = 0}
   %valid_bits = v_cndmask_b32_src0_lit_src1_inline %valid {imm32 = 0, true_value = 1}
-  %83 = v_lshlrev_b32_src0_inline %item, 3
-  global_store_b32_saddr %83, %selected, %output_view
-  global_store_b32_saddr %83, %valid_bits, %output_view {offset = 4}
+  %84 = v_lshlrev_b32_src0_inline %item, 3
+  global_store_b32_saddr %84, %selected, %output_view
+  global_store_b32_saddr %84, %valid_bits, %output_view {offset = 4}
   return
 }
 
@@ -319,68 +321,82 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %item = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %57 = v_mov_b32 0
-  %width = global_load_b32_saddr %57, %input_view
+  %57 = s_mov_b32 0
+  %width = s_load_dword %input_view, %57
   %offset = s_mov_b32 1
-  %61 = v_cmp_ne_i32_src1_inline %width {rhs = 0}
-  %62 = v_cmp_le_u32_src1_inline %width {rhs = 32}
-  %63 = s_and_b64 %61, %62
-  %64 = v_cndmask_b32_src0_inline %width, %63 {false_value = 1}
-  %65 = v_cmp_gt_u32_src1_inline %64 {rhs = 1}
-  %66 = s_and_b64 %63, %65
-  %67 = v_cndmask_b32_src0_lit_src1_inline %66 {imm32 = 0, true_value = 1}
-  %68 = v_and_b32_src0_inline %item, 31
-  %70 = v_mov_b32 1
-  %71 = v_cvt_f32_u32 %64
-  %72 = v_rcp_f32 %71
-  %73 = v_mul_f32_lit %72, 1333788670
-  %74 = v_cvt_u32_f32 %73
-  %75 = v_mul_lo_u32 %64, %74
-  %76 = v_sub_nc_u32 %57, %75
-  %77 = v_mul_hi_u32 %74, %76
-  %78 = v_add_u32 %74, %77
-  %79 = v_mul_hi_u32 %68, %78
-  %80 = v_mul_lo_u32 %79, %64
-  %81 = v_sub_nc_u32 %68, %80
-  %82 = v_add_u32 %79, %70
-  %83, %84 = v_sub_co_u32 %81, %64
-  %85 = v_cndmask_b32 %82, %79, %84
-  %86 = v_cndmask_b32 %83, %81, %84
-  %87 = v_add_u32 %85, %70
-  %88, %89 = v_sub_co_u32 %86, %64
-  %90 = v_cndmask_b32 %87, %85, %89
-  %92 = v_add_u32 %68, %67
-  %93 = v_mul_hi_u32 %92, %78
-  %94 = v_mul_lo_u32 %93, %64
-  %95 = v_sub_nc_u32 %92, %94
-  %96 = v_add_u32 %93, %70
-  %97, %98 = v_sub_co_u32 %95, %64
-  %99 = v_cndmask_b32 %96, %93, %98
-  %100 = v_cndmask_b32 %97, %95, %98
-  %101 = v_add_u32 %99, %70
-  %102, %103 = v_sub_co_u32 %100, %64
-  %104 = v_cndmask_b32 %101, %99, %103
-  %106 = v_cmp_eq_i32 %104, %90
-  %107 = v_cmp_lt_u32_src1_inline %92 {rhs = 32}
-  %108 = s_and_b64 %66, %106
-  %109 = s_and_b64 %108, %107
-  %110 = v_cndmask_b32 %68, %92, %109
-  %111 = v_and_b32_src0_inline %110, 31
-  %112 = v_mov_b32_copy %offset
-  %113 = s_mov_b64_exec_read
-  %114 = slice %113[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %115 = v_mov_b32_copy %114
-  %116 = v_lshrrev_b32 %111, %115
-  %117 = v_and_b32_src0_inline %116, 1
-  %119 = v_cmp_ne_i32 %117, %57
-  %120 = v_lshlrev_b32_src0_inline %111, 2
-  %shuffle = ds_bpermute_b32 %120, %112
-  %valid = s_and_b64 %109, %119
+  %61 = s_mov_b32 32
+  %62 = s_cmp_lg_i32 %width, %57
+  %63 = s_cmp_le_u32 %width, %61
+  %66 = s_cselect_b32 %offset, %57, %62
+  %67 = s_cselect_b32 %offset, %57, %63
+  %68 = s_and_b32 %66, %67
+  %69 = s_cmp_lg_i32 %68, %57
+  %70 = s_cselect_b32 %width, %offset, %69
+  %71 = s_cmp_gt_u32 %70, %offset
+  %74 = s_cselect_b32 %offset, %57, %69
+  %75 = s_cselect_b32 %offset, %57, %71
+  %76 = s_and_b32 %74, %75
+  %77 = s_cmp_lg_i32 %76, %57
+  %78 = s_cselect_b32 %offset, %57, %77
+  %79 = v_and_b32_src0_inline %item, 31
+  %80 = v_mov_b32_copy %70
+  %81 = v_mov_b32 0
+  %82 = v_mov_b32 1
+  %83 = v_cvt_f32_u32 %80
+  %84 = v_rcp_f32 %83
+  %85 = v_mul_f32_lit %84, 1333788670
+  %86 = v_cvt_u32_f32 %85
+  %87 = v_mul_lo_u32 %80, %86
+  %88 = v_sub_nc_u32 %81, %87
+  %89 = v_mul_hi_u32 %86, %88
+  %90 = v_add_u32 %86, %89
+  %91 = v_mul_hi_u32 %79, %90
+  %92 = v_mul_lo_u32 %91, %80
+  %93 = v_sub_nc_u32 %79, %92
+  %94 = v_add_u32 %91, %82
+  %95, %96 = v_sub_co_u32 %93, %80
+  %97 = v_cndmask_b32 %94, %91, %96
+  %98 = v_cndmask_b32 %95, %93, %96
+  %99 = v_add_u32 %97, %82
+  %100, %101 = v_sub_co_u32 %98, %80
+  %102 = v_cndmask_b32 %99, %97, %101
+  %104 = v_mov_b32_copy %78
+  %105 = v_add_u32 %79, %104
+  %117 = v_mul_hi_u32 %105, %90
+  %118 = v_mul_lo_u32 %117, %80
+  %119 = v_sub_nc_u32 %105, %118
+  %120 = v_add_u32 %117, %82
+  %121, %122 = v_sub_co_u32 %119, %80
+  %123 = v_cndmask_b32 %120, %117, %122
+  %124 = v_cndmask_b32 %121, %119, %122
+  %125 = v_add_u32 %123, %82
+  %126, %127 = v_sub_co_u32 %124, %80
+  %128 = v_cndmask_b32 %125, %123, %127
+  %130 = v_cmp_eq_i32 %128, %102
+  %131 = v_cmp_lt_u32_src1_inline %105 {rhs = 32}
+  %133 = slice %130[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %134 = s_cselect_b32 %133, %57, %77
+  %135 = slice %130[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %136 = s_cselect_b32 %135, %57, %77
+  %137 = concat(%134, %136) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %138 = s_and_b64 %137, %131
+  %139 = v_cndmask_b32 %79, %105, %138
+  %140 = v_and_b32_src0_inline %139, 31
+  %141 = v_mov_b32_copy %offset
+  %142 = s_mov_b64_exec_read
+  %143 = slice %142[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %144 = v_mov_b32_copy %143
+  %145 = v_lshrrev_b32 %140, %144
+  %146 = v_and_b32_src0_inline %145, 1
+  %148 = v_cmp_ne_i32 %146, %81
+  %149 = v_lshlrev_b32_src0_inline %140, 2
+  %shuffle = ds_bpermute_b32 %149, %141
+  %valid = s_and_b64 %138, %148
   %selected = v_cndmask_b32_src0_inline %shuffle, %valid {false_value = 0}
   %valid_bits = v_cndmask_b32_src0_lit_src1_inline %valid {imm32 = 0, true_value = 1}
-  %125 = v_lshlrev_b32_src0_inline %item, 3
-  global_store_b32_saddr %125, %selected, %output_view
-  global_store_b32_saddr %125, %valid_bits, %output_view {offset = 4}
+  %154 = v_lshlrev_b32_src0_inline %item, 3
+  global_store_b32_saddr %154, %selected, %output_view
+  global_store_b32_saddr %154, %valid_bits, %output_view {offset = 4}
   return
 }
 
@@ -513,71 +529,85 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 0
   %value = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {extent = 8, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %53 = v_mov_b32 0
-  %offset = global_load_dword_saddr %53, %input_view : reg<amdgpu.vgpr>
-  %width = global_load_dword_saddr %53, %input_view {offset = 4} : reg<amdgpu.vgpr>
-  %57 = s_mov_b32 0
-  %59 = v_cmp_ne_i32_src1_inline %width {rhs = 0}
-  %60 = v_cmp_le_u32_src1_inline %width {rhs = 64}
-  %61 = s_and_b64 %59, %60
-  %62 = v_cndmask_b32_src0_inline %width, %61 {false_value = 1}
-  %63 = v_cmp_lt_u32 %offset, %62
-  %64 = s_and_b64 %61, %63
-  %65 = v_cndmask_b32_src0_inline %offset, %64 {false_value = 0}
-  %67 = v_mov_b32 1
-  %68 = v_cvt_f32_u32 %62
-  %69 = v_rcp_f32 %68
-  %70 = v_mul_f32_lit %69, 1333788670
-  %71 = v_cvt_u32_f32 %70
-  %72 = v_mul_lo_u32 %62, %71
-  %73 = v_sub_u32 %53, %72
-  %74 = v_mul_hi_u32 %71, %73
-  %75 = v_add_u32 %71, %74
-  %76 = v_mul_hi_u32 %value, %75
-  %77 = v_mul_lo_u32 %76, %62
-  %78 = v_sub_u32 %value, %77
-  %79 = v_add_u32 %76, %67
-  %80, %81 = v_sub_co_u32 %78, %62
-  %82 = v_cndmask_b32 %79, %76, %81
-  %83 = v_cndmask_b32 %80, %78, %81
-  %84 = v_add_u32 %82, %67
-  %85, %86 = v_sub_co_u32 %83, %62
-  %87 = v_cndmask_b32 %84, %82, %86
-  %89 = v_sub_u32 %value, %65
-  %90 = v_mul_hi_u32 %89, %75
-  %91 = v_mul_lo_u32 %90, %62
-  %92 = v_sub_u32 %89, %91
-  %93 = v_add_u32 %90, %67
-  %94, %95 = v_sub_co_u32 %92, %62
-  %96 = v_cndmask_b32 %93, %90, %95
-  %97 = v_cndmask_b32 %94, %92, %95
-  %98 = v_add_u32 %96, %67
-  %99, %100 = v_sub_co_u32 %97, %62
-  %101 = v_cndmask_b32 %98, %96, %100
-  %103 = v_cmp_eq_i32 %101, %87
-  %104 = v_cmp_lt_u32_src1_inline %89 {rhs = 64}
-  %105 = s_and_b64 %64, %103
-  %106 = s_and_b64 %105, %104
-  %107 = v_cndmask_b32 %value, %89, %106
-  %108 = v_and_b32_src0_inline %107, 63
-  %109 = s_mov_b64_exec_read
-  %110 = slice %109[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %111 = v_mov_b32_copy %110
-  %112 = slice %109[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %113 = v_mov_b32_copy %112
-  %114 = concat(%111, %113) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %115 = v_lshrrev_b64 %108, %114
-  %116 = slice %115[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %117 = v_and_b32_src0_inline %116, 1
-  %119 = v_cmp_ne_i32 %117, %53
-  %120 = v_lshlrev_b32_src0_inline %108, 2
-  %shuffled = ds_bpermute_b32 %120, %value
-  %valid = s_and_b64 %106, %119
+  %53 = s_mov_b32 0
+  %offset = s_load_dword %input_view, %53
+  %width = s_load_dword %input_view, %53 {offset = 4}
+  %58 = s_mov_b32 1
+  %59 = s_mov_b32 64
+  %60 = s_cmp_lg_i32 %width, %53
+  %61 = s_cmp_le_u32 %width, %59
+  %64 = s_cselect_b32 %58, %53, %60
+  %65 = s_cselect_b32 %58, %53, %61
+  %66 = s_and_b32 %64, %65
+  %67 = s_cmp_lg_i32 %66, %53
+  %68 = s_cselect_b32 %width, %58, %67
+  %69 = s_cmp_lt_u32 %offset, %68
+  %72 = s_cselect_b32 %58, %53, %67
+  %73 = s_cselect_b32 %58, %53, %69
+  %74 = s_and_b32 %72, %73
+  %75 = s_cmp_lg_i32 %74, %53
+  %76 = s_cselect_b32 %offset, %53, %75
+  %77 = v_mov_b32_copy %68
+  %78 = v_mov_b32 0
+  %79 = v_mov_b32 1
+  %80 = v_cvt_f32_u32 %77
+  %81 = v_rcp_f32 %80
+  %82 = v_mul_f32_lit %81, 1333788670
+  %83 = v_cvt_u32_f32 %82
+  %84 = v_mul_lo_u32 %77, %83
+  %85 = v_sub_u32 %78, %84
+  %86 = v_mul_hi_u32 %83, %85
+  %87 = v_add_u32 %83, %86
+  %88 = v_mul_hi_u32 %value, %87
+  %89 = v_mul_lo_u32 %88, %77
+  %90 = v_sub_u32 %value, %89
+  %91 = v_add_u32 %88, %79
+  %92, %93 = v_sub_co_u32 %90, %77
+  %94 = v_cndmask_b32 %91, %88, %93
+  %95 = v_cndmask_b32 %92, %90, %93
+  %96 = v_add_u32 %94, %79
+  %97, %98 = v_sub_co_u32 %95, %77
+  %99 = v_cndmask_b32 %96, %94, %98
+  %101 = v_mov_b32_copy %76
+  %102 = v_sub_u32 %value, %101
+  %114 = v_mul_hi_u32 %102, %87
+  %115 = v_mul_lo_u32 %114, %77
+  %116 = v_sub_u32 %102, %115
+  %117 = v_add_u32 %114, %79
+  %118, %119 = v_sub_co_u32 %116, %77
+  %120 = v_cndmask_b32 %117, %114, %119
+  %121 = v_cndmask_b32 %118, %116, %119
+  %122 = v_add_u32 %120, %79
+  %123, %124 = v_sub_co_u32 %121, %77
+  %125 = v_cndmask_b32 %122, %120, %124
+  %127 = v_cmp_eq_i32 %125, %99
+  %128 = v_cmp_lt_u32_src1_inline %102 {rhs = 64}
+  %130 = slice %127[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %131 = s_cselect_b32 %130, %53, %75
+  %132 = slice %127[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %133 = s_cselect_b32 %132, %53, %75
+  %134 = concat(%131, %133) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %135 = s_and_b64 %134, %128
+  %136 = v_cndmask_b32 %value, %102, %135
+  %137 = v_and_b32_src0_inline %136, 63
+  %138 = s_mov_b64_exec_read
+  %139 = slice %138[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %140 = v_mov_b32_copy %139
+  %141 = slice %138[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %142 = v_mov_b32_copy %141
+  %143 = concat(%140, %142) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %144 = v_lshrrev_b64 %137, %143
+  %145 = slice %144[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %146 = v_and_b32_src0_inline %145, 1
+  %148 = v_cmp_ne_i32 %146, %78
+  %149 = v_lshlrev_b32_src0_inline %137, 2
+  %shuffled = ds_bpermute_b32 %149, %value
+  %valid = s_and_b64 %135, %148
   %selected = v_cndmask_b32_src0_inline %shuffled, %valid {false_value = 0}
-  %124 = v_mov_b32_copy %57
-  %valid_bits = v_cndmask_b32_src1_inline %124, %valid {true_value = 1}
-  %126 = v_lshlrev_b32_src0_inline %value, 3
-  global_store_dword_saddr %126, %selected, %output_view
-  global_store_dword_saddr %126, %valid_bits, %output_view {offset = 4}
+  %153 = v_mov_b32_copy %53
+  %valid_bits = v_cndmask_b32_src1_inline %153, %valid {true_value = 1}
+  %155 = v_lshlrev_b32_src0_inline %value, 3
+  global_store_dword_saddr %155, %selected, %output_view
+  global_store_dword_saddr %155, %valid_bits, %output_view {offset = 4}
   return
 }

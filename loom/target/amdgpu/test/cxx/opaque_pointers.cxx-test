@@ -16,9 +16,11 @@ void copy(const void* input, void* output) {
 low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @copy() asm {
   %input = resource<hal_binding> {extent = 24, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {extent = 12, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %41 = v_mov_b32 0
-  %42 = global_load_b32_saddr %41, %input {offset = 20}
-  global_store_b32_saddr %41, %42, %output {offset = 8}
+  %41 = s_mov_b32 0
+  %42 = s_load_dword %input, %41 {offset = 20}
+  %43 = v_mov_b32_copy %42
+  %44 = v_mov_b32 0
+  global_store_b32_saddr %44, %43, %output {offset = 8}
   return
 }
 
@@ -30,8 +32,10 @@ void copy(const unsigned* input, unsigned* output) { output[2] = input[5]; }
 low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @copy() asm {
   %input = resource<hal_binding> {extent = 24, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {extent = 12, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %35 = v_mov_b32 0
-  %36 = global_load_b32_saddr %35, %input {offset = 20}
-  global_store_b32_saddr %35, %36, %output {offset = 8}
+  %35 = s_mov_b32 0
+  %36 = s_load_dword %input, %35 {offset = 20}
+  %37 = v_mov_b32_copy %36
+  %38 = v_mov_b32 0
+  global_store_b32_saddr %38, %37, %output {offset = 8}
   return
 }

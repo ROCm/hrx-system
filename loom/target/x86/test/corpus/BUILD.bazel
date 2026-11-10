@@ -29,6 +29,7 @@ loom_corpus_test(
             "function/call/direct.loom",
             "function/rodata.loom",
             "memory/address/logical_shift_loop.loom",
+            "memory/address/uniform_loads.loom",
             "memory/buffer/boundaries.loom",
             "memory/view/offset_recurrence.loom",
             "memory/view/scalar_exchange.loom",
