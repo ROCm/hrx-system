@@ -13,6 +13,8 @@ load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
 load("//build_tools/third_party/rocjitsu:profiles.bzl", "ROCJITSU_PROFILES", "rocjitsu_test_compatibility")
 load("//loom/build_tools/amdgpu:rocjitsu.bzl", "loom_rocjitsu_executable")
 load("//loom/build_tools/bazel:defs.bzl", "loom_execution_profile", "loom_test", "loom_test_module")
+load("//loom/build_tools/bazel:python.bzl", "loom_py_test")
+load("//loom/src/loom/serve/fixture/embedding:sources.bzl", "SOURCES")
 load("//loom/target/amdgpu:execution_profiles.bzl", "AMD_GPU_HARDWARE_PROFILE")
 
 package(default_visibility = ["//visibility:public"])
@@ -91,4 +93,25 @@ iree_executable_test(
         ":buffer_bulk_module",
     ],
     tags = ["manual"],
+)
+
+[
+    loom_py_test(
+        name = "server_" + profile + "_test",
+        srcs = ["server_test.py"],
+        args = [
+            "$(rootpath :loom-serve_" + profile + ")",
+            "$(rootpath //loom/src/loom/serve/fixture/embedding:model.json)",
+        ],
+        data = [":loom-serve_" + profile] + SOURCES,
+        main = "server_test.py",
+        target_compatible_with = rocjitsu_test_compatibility(profile),
+        deps = ["//loom/src/loom/serve/testing/loom_serve_testing:http"],
+    )
+    for profile in ROCJITSU_PROFILES
+]
+
+test_suite(
+    name = "server_test",
+    tests = [":server_" + profile + "_test" for profile in ROCJITSU_PROFILES],
 )

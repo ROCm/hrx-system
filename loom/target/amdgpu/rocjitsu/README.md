@@ -37,3 +37,11 @@ Add `--//build_tools/bazel:gpu_execution=native,rocjitsu` to include the physica
 GPU leaf. Its hardware resource requirement is independent of the simulated
 leaves. The bootstrap CLI checks and `workload_flags_test` exercise fixed topology
 bindings and ordinary workload selection, including selection of a fourth GPU.
+
+`server_test` uses the same selection flags to run the canonical embedding model
+on two devices sharing one pool in each topology. It checks exact HTTP results
+and normal SIGTERM shutdown. The ordinary `loom-serve_<profile>` invocations can
+serve other model packages with their usual `--devices` and `--model` options.
+Serving pools use `"pool_backing":"fixed"` in the device configuration, or
+`--pool_backing=fixed` for the single-device CLI form, because the simulator
+does not expose libamdf virtual memory reservations and remapping.
