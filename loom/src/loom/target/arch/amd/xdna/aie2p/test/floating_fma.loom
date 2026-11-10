@@ -39,6 +39,13 @@ func.def noinline @products(%input: view<4x64xbf16>, %output: view<5x64xf32>) {
   %product16 = vector.fmaf<nnan|ninf|nsz|afn> %a16, %b16, %identity16 : vector<16xf32>
   %chain16 = vector.fmaf<nnan|ninf|nsz|afn> %a16, %a16, %product16 : vector<16xf32>
   vector.store %chain16, %output[3, 0] : vector<16xf32>, view<5x64xf32>
+  %initial_sum = scalar.constant 0.0 : f32
+  %input_sum = vector.reduce<addf, reassoc|nnan|ninf|nsz> %a16, %initial_sum : vector<16xf32>, f32
+  %product_sum = vector.reduce<addf, reassoc|nnan|ninf|nsz> %chain16, %initial_sum : vector<16xf32>, f32
+  %input_sum_vector = vector.splat %input_sum : vector<1xf32>
+  %product_sum_vector = vector.splat %product_sum : vector<1xf32>
+  vector.store %input_sum_vector, %output[3, 17] : vector<1xf32>, view<5x64xf32>
+  vector.store %product_sum_vector, %output[3, 18] : vector<1xf32>, view<5x64xf32>
   %left17 = vector.slice %left[0] : vector<64xbf16> -> vector<17xbf16>
   %right17 = vector.slice %right[0] : vector<64xbf16> -> vector<17xbf16>
   %a17 = vector.extf %left17 : vector<17xbf16> to vector<17xf32>
