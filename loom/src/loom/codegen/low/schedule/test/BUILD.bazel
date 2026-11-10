@@ -20,6 +20,7 @@ loom_check_test_suite(
         "memory_access_flags.loom-test",
         "memory_frontier.loom-test",
         "packing_completion.loom-test",
+        "pressure_alias.loom-test",
         "pressure_cfg.loom-test",
         "pressure_headroom.loom-test",
         "ready_nomination.loom-test",

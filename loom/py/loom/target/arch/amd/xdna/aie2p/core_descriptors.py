@@ -797,6 +797,11 @@ def _register_packing_resources() -> tuple[RegisterPackingResource, ...]:
         for register_name in _MACHINE_CLASSES["eR"].candidates
         for atomic_unit in _MACHINE_REGISTERS[register_name].atomic_units
     )
+    pointer_atomic_units = frozenset(
+        atomic_unit
+        for register_name in _MACHINE_CLASSES["eP"].candidates
+        for atomic_unit in _MACHINE_REGISTERS[register_name].atomic_units
+    )
     return (
         RegisterPackingResource(
             name=f"{descriptor_specs._TARGET_KEY}.register.x.pairs",
@@ -812,6 +817,15 @@ def _register_packing_resources() -> tuple[RegisterPackingResource, ...]:
             capacity_register_class=_low_register_class_name("eR"),
             members=_register_packing_members(
                 scalar_atomic_units, resource_unit_atom_count=1
+            ),
+        ),
+        RegisterPackingResource(
+            name=f"{descriptor_specs._TARGET_KEY}.register.pointer.units",
+            capacity_register_class=_low_register_class_name("eP"),
+            # Load and store FIFO pointers occupy subsets of the same eight
+            # registers as ordinary addresses.
+            members=_register_packing_members(
+                pointer_atomic_units, resource_unit_atom_count=1
             ),
         ),
     )

@@ -203,6 +203,11 @@ def test_core_descriptor_closure_is_complete() -> None:
                 ("aie2p.mr31_scd", 1, 1),
             ),
         ),
+        (
+            "amd.xdna.aie2p.register.pointer.units",
+            "aie2p.ep",
+            (("aie2p.ep", 1, 1), ("aie2p.eps", 1, 1), ("aie2p.mpfs", 1, 1)),
+        ),
     ]
 
 
@@ -211,6 +216,7 @@ def test_core_descriptor_closure_is_complete() -> None:
     [
         ("register.x.pairs", "mXm", 2),
         ("register.scalar.units", "eR", 1),
+        ("register.pointer.units", "eP", 1),
     ],
 )
 def test_register_packing_covers_physical_aliases(
