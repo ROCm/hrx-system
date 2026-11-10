@@ -53,6 +53,7 @@ loom_corpus_test(
             "numeric/integer/rotation.loom",
             "numeric/integer/scalar_observations.loom",
             "numeric/integer/signed_unary.loom",
+            "numeric/integer/widening.loom",
             "numeric/vector/concatenation.loom",
             "numeric/vector/conversion.loom",
             "numeric/vector/float_extrema.loom",

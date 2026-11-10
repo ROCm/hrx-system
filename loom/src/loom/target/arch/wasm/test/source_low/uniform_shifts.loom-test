@@ -13,10 +13,8 @@ func.def @byte_shifts(%values: vector<16xi8>, %count: i8) -> (vector<16xi8>, vec
 
 // ----
 low.func.def target<wasm.core.simd128> abi(wasm_function) @byte_shifts(%values: reg<wasm.v128>, %count: reg<wasm.i32>) -> (reg<wasm.v128>, reg<wasm.v128>, reg<wasm.v128>) asm {
-  %21 = i32.const 255
-  %22 = i32.and %count, %21
-  %23 = i32.const 7
-  %bounded_count = i32.and %22, %23
+  %mask = i32.const 7
+  %bounded_count = i32.and %count, %mask
   %left = i8x16.shl %values, %bounded_count
   %signed = i8x16.shr_s %values, %bounded_count
   %unsigned = i8x16.shr_u %values, %bounded_count
