@@ -34,6 +34,7 @@ loom_check_test_suite(
         "exact_bf16_accumulator_conversion.loom-test",
         "f32_representation.loom-test",
         "f32_wide_arithmetic.loom-test",
+        "f32_wide_nonlinear.loom-test",
         "function_storage.loom-test",
         "fused_packet_memory.loom-test",
         "immutable_gather.loom-test",

@@ -1,0 +1,178 @@
+aie2p.target<array> @device
+
+// Distinct values in every lane expose quarter order and carrier boundaries.
+func.def noinline @compute(%input: view<64xf32>, %wide_exp: view<64xf32>, %wide_tanh: view<64xf32>, %narrow_exp: view<96xbf16>, %narrow_tanh: view<96xbf16>) {
+  %values = vector.load %input[0] : view<64xf32> -> vector<64xf32>
+  %shift = vector.splatf 4.0 : vector<64xf32>
+  %centered = vector.subf<nnan|nsz> %values, %shift : vector<64xf32>
+  %exponential = vector.exp2f<afn> %centered : vector<64xf32>
+  vector.store %exponential, %wide_exp[0] : vector<64xf32>, view<64xf32>
+  %tanh = vector.tanhf<afn> %values : vector<64xf32>
+  vector.store %tanh, %wide_tanh[0] : vector<64xf32>, view<64xf32>
+  %uncentered = vector.exp2f<afn> %values : vector<64xf32>
+  %exponential_bf16 = vector.fptrunc<daz> %uncentered : vector<64xf32> to vector<64xbf16>
+  vector.store %exponential_bf16, %narrow_exp[0] : vector<64xbf16>, view<96xbf16>
+  %centered_tanh = vector.tanhf<afn> %centered : vector<64xf32>
+  %tanh_bf16 = vector.fptrunc<daz> %centered_tanh : vector<64xf32> to vector<64xbf16>
+  vector.store %tanh_bf16, %narrow_tanh[0] : vector<64xbf16>, view<96xbf16>
+  %first = vector.load %input[0] : view<64xf32> -> vector<32xf32>
+  %first_exponential = vector.exp2f<afn> %first : vector<32xf32>
+  %first_bf16 = vector.fptrunc<daz> %first_exponential : vector<32xf32> to vector<32xbf16>
+  vector.store %first_bf16, %narrow_exp[64] : vector<32xbf16>, view<96xbf16>
+  %second = vector.load %input[32] : view<64xf32> -> vector<32xf32>
+  %second_tanh = vector.tanhf<afn> %second : vector<32xf32>
+  %second_bf16 = vector.fptrunc<daz> %second_tanh : vector<32xf32> to vector<32xbf16>
+  vector.store %second_bf16, %narrow_tanh[64] : vector<32xbf16>, view<96xbf16>
+  func.return
+}
+
+// This independent packet loop uses the existing sixteen-lane native path.
+// Compare its result bits with the wide lowering so register routing is tested
+// without assigning the approximate instructions a new mathematical contract.
+func.def noinline @check_packets(%input: view<64xf32>, %wide_exp: view<64xf32>, %wide_tanh: view<64xf32>, %narrow_exp: view<96xbf16>, %narrow_tanh: view<96xbf16>) {
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 16 : index
+  %boundary = index.constant 32 : index
+  scf.for %position = [%begin to %end step %step] {
+    %values = vector.load %input[%position] : view<64xf32> -> vector<16xf32>
+    %shift = vector.splatf 4.0 : vector<16xf32>
+    %centered = vector.subf<nnan|nsz> %values, %shift : vector<16xf32>
+    %exponential = vector.exp2f<afn> %centered : vector<16xf32>
+    %actual_exp = vector.load %wide_exp[%position] : view<64xf32> -> vector<16xf32>
+    %exp_difference_bits_left = vector.bitcast %actual_exp : vector<16xf32> to vector<16xi32>
+    %exp_difference_bits_right = vector.bitcast %exponential : vector<16xf32> to vector<16xi32>
+    %exp_difference_bits = vector.xori %exp_difference_bits_left, %exp_difference_bits_right : vector<16xi32>
+    %exp_difference = vector.bitcast %exp_difference_bits : vector<16xi32> to vector<16xf32>
+    vector.store %exp_difference, %wide_exp[%position] : vector<16xf32>, view<64xf32>
+    %tanh = vector.tanhf<afn> %values : vector<16xf32>
+    %actual_tanh = vector.load %wide_tanh[%position] : view<64xf32> -> vector<16xf32>
+    %tanh_difference_bits_left = vector.bitcast %actual_tanh : vector<16xf32> to vector<16xi32>
+    %tanh_difference_bits_right = vector.bitcast %tanh : vector<16xf32> to vector<16xi32>
+    %tanh_difference_bits = vector.xori %tanh_difference_bits_left, %tanh_difference_bits_right : vector<16xi32>
+    %tanh_difference = vector.bitcast %tanh_difference_bits : vector<16xi32> to vector<16xf32>
+    vector.store %tanh_difference, %wide_tanh[%position] : vector<16xf32>, view<64xf32>
+    %uncentered = vector.exp2f<afn> %values : vector<16xf32>
+    %exponential_bf16 = vector.fptrunc<daz> %uncentered : vector<16xf32> to vector<16xbf16>
+    %actual_narrow_exp = vector.load %narrow_exp[%position] : view<96xbf16> -> vector<16xbf16>
+    %narrow_exp_difference_bits_left = vector.bitcast %actual_narrow_exp : vector<16xbf16> to vector<16xi16>
+    %narrow_exp_difference_bits_right = vector.bitcast %exponential_bf16 : vector<16xbf16> to vector<16xi16>
+    %narrow_exp_difference_bits = vector.xori %narrow_exp_difference_bits_left, %narrow_exp_difference_bits_right : vector<16xi16>
+    %narrow_exp_difference = vector.bitcast %narrow_exp_difference_bits : vector<16xi16> to vector<16xbf16>
+    vector.store %narrow_exp_difference, %narrow_exp[%position] : vector<16xbf16>, view<96xbf16>
+    %centered_tanh = vector.tanhf<afn> %centered : vector<16xf32>
+    %tanh_bf16 = vector.fptrunc<daz> %centered_tanh : vector<16xf32> to vector<16xbf16>
+    %actual_narrow_tanh = vector.load %narrow_tanh[%position] : view<96xbf16> -> vector<16xbf16>
+    %narrow_tanh_difference_bits_left = vector.bitcast %actual_narrow_tanh : vector<16xbf16> to vector<16xi16>
+    %narrow_tanh_difference_bits_right = vector.bitcast %tanh_bf16 : vector<16xbf16> to vector<16xi16>
+    %narrow_tanh_difference_bits = vector.xori %narrow_tanh_difference_bits_left, %narrow_tanh_difference_bits_right : vector<16xi16>
+    %narrow_tanh_difference = vector.bitcast %narrow_tanh_difference_bits : vector<16xi16> to vector<16xbf16>
+    vector.store %narrow_tanh_difference, %narrow_tanh[%position] : vector<16xbf16>, view<96xbf16>
+    %first_half = index.cmp slt, %position, %boundary : index
+    scf.if %first_half {
+      %tail_position = index.add %position, %end : index
+      %actual = vector.load %narrow_exp[%tail_position] : view<96xbf16> -> vector<16xbf16>
+      %difference_bits_left = vector.bitcast %actual : vector<16xbf16> to vector<16xi16>
+      %difference_bits_right = vector.bitcast %exponential_bf16 : vector<16xbf16> to vector<16xi16>
+      %difference_bits = vector.xori %difference_bits_left, %difference_bits_right : vector<16xi16>
+      %difference = vector.bitcast %difference_bits : vector<16xi16> to vector<16xbf16>
+      vector.store %difference, %narrow_exp[%tail_position] : vector<16xbf16>, view<96xbf16>
+    } else {
+      %tail_position = index.add %position, %boundary : index
+      %tail_bf16 = vector.fptrunc<daz> %tanh : vector<16xf32> to vector<16xbf16>
+      %actual = vector.load %narrow_tanh[%tail_position] : view<96xbf16> -> vector<16xbf16>
+      %difference_bits_left = vector.bitcast %actual : vector<16xbf16> to vector<16xi16>
+      %difference_bits_right = vector.bitcast %tail_bf16 : vector<16xbf16> to vector<16xi16>
+      %difference_bits = vector.xori %difference_bits_left, %difference_bits_right : vector<16xi16>
+      %difference = vector.bitcast %difference_bits : vector<16xi16> to vector<16xbf16>
+      vector.store %difference, %narrow_tanh[%tail_position] : vector<16xbf16>, view<96xbf16>
+    }
+  }
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@device) @wide_nonlinear() run(%input_arg: buffer, %wide_exp_arg: buffer, %wide_tanh_arg: buffer, %narrow_exp_arg: buffer, %narrow_tanh_arg: buffer) {
+  %input, %wide_exp, %wide_tanh, %narrow_exp, %narrow_tanh = buffer.assume.alignment %input_arg, %wide_exp_arg, %wide_tanh_arg, %narrow_exp_arg, %narrow_tanh_arg {minimum_alignment = 64} : buffer, buffer, buffer, buffer, buffer
+  %origin = index.constant 0 : offset
+  %size = index.constant 1152 : offset
+  %capacity = index.constant 1 : index
+  %pool = pipeline.memory<workgroup>[0, 2] : pool
+  %storage = buffer.alloca<workgroup> pool(%pool) align(64) %size : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x288xf32>
+  %channel = channel.bind<fifo> %slots, %capacity : view<1x288xf32>, index -> channel<tile<288xf32>>
+  %external_input = buffer.view %input[%origin] : buffer -> view<64xf32>
+  %external_wide_exp = buffer.view %wide_exp[%origin] : buffer -> view<64xf32>
+  %external_wide_tanh = buffer.view %wide_tanh[%origin] : buffer -> view<64xf32>
+  %external_narrow_exp = buffer.view %narrow_exp[%origin] : buffer -> view<96xbf16>
+  %external_narrow_tanh = buffer.view %narrow_tanh[%origin] : buffer -> view<96xbf16>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %write, %local = channel.reserve %channel : channel<tile<288xf32>> -> (write<tile<288xf32>>, view<288xf32>)
+    %local_input = view.subview %local[0] : view<288xf32> -> view<64xf32>
+    %local_wide_exp = view.subview %local[64] : view<288xf32> -> view<64xf32>
+    %local_wide_tanh = view.subview %local[128] : view<288xf32> -> view<64xf32>
+    %local_exp_storage = view.subview %local[192] : view<288xf32> -> view<48xf32>
+    %local_narrow_exp = view.bitcast %local_exp_storage : view<48xf32> -> view<96xbf16>
+    %local_tanh_storage = view.subview %local[240] : view<288xf32> -> view<48xf32>
+    %local_narrow_tanh = view.bitcast %local_tanh_storage : view<48xf32> -> view<96xbf16>
+    %load = kernel.async.copy %external_input to %local_input {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<64xf32> to view<64xf32> -> kernel.async.token
+    %arrival = kernel.async.group %load : kernel.async.token -> kernel.async.group
+    kernel.async.wait %arrival {newer_groups = 0} : kernel.async.group
+    func.call @compute(%local_input, %local_wide_exp, %local_wide_tanh, %local_narrow_exp, %local_narrow_tanh) : (view<64xf32>, view<64xf32>, view<64xf32>, view<96xbf16>, view<96xbf16>)
+    func.call @check_packets(%local_input, %local_wide_exp, %local_wide_tanh, %local_narrow_exp, %local_narrow_tanh) : (view<64xf32>, view<64xf32>, view<64xf32>, view<96xbf16>, view<96xbf16>)
+    channel.publish %write : write<tile<288xf32>>
+    %read, %ready = channel.acquire %channel : channel<tile<288xf32>> -> (read<tile<288xf32>>, view<288xf32>)
+    %ready_wide_exp = view.subview %ready[64] : view<288xf32> -> view<64xf32>
+    %store_wide_exp = kernel.async.copy %ready_wide_exp to %external_wide_exp {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<64xf32> to view<64xf32> -> kernel.async.token
+    %depart_wide_exp = kernel.async.group %store_wide_exp : kernel.async.token -> kernel.async.group
+    kernel.async.wait %depart_wide_exp {newer_groups = 0} : kernel.async.group
+    %ready_wide_tanh = view.subview %ready[128] : view<288xf32> -> view<64xf32>
+    %store_wide_tanh = kernel.async.copy %ready_wide_tanh to %external_wide_tanh {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<64xf32> to view<64xf32> -> kernel.async.token
+    %depart_wide_tanh = kernel.async.group %store_wide_tanh : kernel.async.token -> kernel.async.group
+    kernel.async.wait %depart_wide_tanh {newer_groups = 0} : kernel.async.group
+    %ready_narrow_exp_storage = view.subview %ready[192] : view<288xf32> -> view<48xf32>
+    %ready_narrow_exp = view.bitcast %ready_narrow_exp_storage : view<48xf32> -> view<96xbf16>
+    %store_narrow_exp = kernel.async.copy %ready_narrow_exp to %external_narrow_exp {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<96xbf16> to view<96xbf16> -> kernel.async.token
+    %depart_narrow_exp = kernel.async.group %store_narrow_exp : kernel.async.token -> kernel.async.group
+    kernel.async.wait %depart_narrow_exp {newer_groups = 0} : kernel.async.group
+    %ready_narrow_tanh_storage = view.subview %ready[240] : view<288xf32> -> view<48xf32>
+    %ready_narrow_tanh = view.bitcast %ready_narrow_tanh_storage : view<48xf32> -> view<96xbf16>
+    %store_narrow_tanh = kernel.async.copy %ready_narrow_tanh to %external_narrow_tanh {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<96xbf16> to view<96xbf16> -> kernel.async.token
+    %depart_narrow_tanh = kernel.async.group %store_narrow_tanh : kernel.async.token -> kernel.async.group
+    kernel.async.wait %depart_narrow_tanh {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<288xf32>>
+  }
+}
+
+func.def @zero_difference(%input: buffer, %wide_exp: buffer, %wide_tanh: buffer, %narrow_exp: buffer, %narrow_tanh: buffer) {
+  %origin = index.constant 0 : offset
+  %wide_exp_output = buffer.view %wide_exp[%origin] : buffer -> view<64xf32>
+  %wide_tanh_output = buffer.view %wide_tanh[%origin] : buffer -> view<64xf32>
+  %narrow_exp_output = buffer.view %narrow_exp[%origin] : buffer -> view<96xbf16>
+  %narrow_tanh_output = buffer.view %narrow_tanh[%origin] : buffer -> view<96xbf16>
+  %wide_zero = vector.splatf 0.0 : vector<64xf32>
+  %narrow_zero = vector.splatf 0.0 : vector<96xbf16>
+  vector.store %wide_zero, %wide_exp_output[0] : vector<64xf32>, view<64xf32>
+  vector.store %wide_zero, %wide_tanh_output[0] : vector<64xf32>, view<64xf32>
+  vector.store %narrow_zero, %narrow_exp_output[0] : vector<96xbf16>, view<96xbf16>
+  vector.store %narrow_zero, %narrow_tanh_output[0] : vector<96xbf16>, view<96xbf16>
+  func.return
+}
+
+check.scenario public @wide_nonlinear_quarters {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-4.0 to 4.0) : tensor<64xf32>
+    %wide_exp = check.generate.fill value(-99.0) : tensor<64xf32>
+    %wide_tanh = check.generate.fill value(-99.0) : tensor<64xf32>
+    %narrow_exp = check.generate.fill value(-99.0) : tensor<96xbf16>
+    %narrow_tanh = check.generate.fill value(-99.0) : tensor<96xbf16>
+    check.compare<@wide_nonlinear, @zero_difference>(%input, %wide_exp, %wide_tanh, %narrow_exp, %narrow_tanh) : (tensor<64xf32>, tensor<64xf32>, tensor<64xf32>, tensor<96xbf16>, tensor<96xbf16>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64xf32>
+      check.expect.bitwise actual(%wide_exp) expected(%wide_exp) : tensor<64xf32>
+      check.expect.bitwise actual(%narrow_exp) expected(%narrow_exp) : tensor<96xbf16>
+      check.expect.bitwise actual(%wide_tanh) expected(%wide_tanh) : tensor<64xf32>
+      check.expect.bitwise actual(%narrow_tanh) expected(%narrow_tanh) : tensor<96xbf16>
+    }
+  }
+  check.return
+}

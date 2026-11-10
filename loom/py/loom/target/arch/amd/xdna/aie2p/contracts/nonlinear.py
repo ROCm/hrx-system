@@ -976,6 +976,117 @@ _NATIVE_NONLINEAR_FAMILIES = (
 )
 
 
+def _native_accumulator_nonlinear_rule(
+    source_op: Op,
+    native_descriptor_key: str,
+    operation: str,
+    *,
+    unit_count: int,
+    fuse_bf16_narrow: bool,
+) -> DescriptorRule:
+    # Wide F32 values already occupy the accumulator file. Keep its quarters
+    # directly addressable instead of packetizing through ordinary X carriers.
+    source_type = (
+        Vector("f32", lanes=32)
+        if unit_count == 2
+        else Vector("f32", minimum_static_elements=33, maximum_static_elements=64)
+    )
+    narrow_type = (
+        Vector("bf16", lanes=32)
+        if unit_count == 2
+        else Vector("bf16", minimum_static_elements=33, maximum_static_elements=64)
+    )
+    emits: list[ContractEmit] = []
+    results: list[ValueRef] = []
+    for index in range(unit_count):
+        source = ValueRef.temporary(f"input_quarter_{index}")
+        narrow = ValueRef.temporary(f"native_result_{index}")
+        emits.append(
+            EmitRegisterSlice(
+                source=ValueRef.operand("input"),
+                result=source,
+                unit_offset=index,
+                unit_count=1,
+            )
+        )
+        emits.append(
+            _inferred_emit(
+                native_descriptor_key, operands={"src": source}, result=narrow
+            )
+        )
+        result = narrow
+        if not fuse_bf16_narrow:
+            result = ValueRef.temporary(f"wide_result_{index}")
+            emits.append(
+                _inferred_emit(
+                    "amd.xdna.aie2p.convert.bf16x16.to.f32x16",
+                    operands={"src": narrow},
+                    result=result,
+                )
+            )
+        results.append(result)
+    emits.append(
+        EmitRegisterConcat(
+            sources=tuple(results),
+            result=ValueRef.result(
+                "result", source_node="narrow" if fuse_bf16_narrow else ""
+            ),
+        )
+    )
+    # The related narrowing establishes legality for the complete wide graph.
+    # A lowering-only fusion would let packetization split that consumer first.
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=descriptor_by_key(AIE2P_CORE_DESCRIPTOR_SET, native_descriptor_key),
+        source_nodes=(
+            (
+                SourceNode.exclusive_user(
+                    "narrow",
+                    source_op=vector.vector_fptrunc,
+                    parent_result=ValueRef.result("result"),
+                    node_operand=ValueRef.operand("input"),
+                    guards=(
+                        Guard.value_type("input", source_type),
+                        Guard.value_type("result", narrow_type),
+                    ),
+                ),
+            )
+            if fuse_bf16_narrow
+            else ()
+        ),
+        priority=1 if fuse_bf16_narrow else 0,
+        guards=(
+            Guard.value_type("input", source_type),
+            Guard.value_type("result", source_type),
+            Guard.instance_flags_has_all("fastmath", "afn"),
+        ),
+        emit=tuple(emits),
+        report_key=(
+            f"native_bf16_{operation}_accumulator_{unit_count}_quarters"
+            + ("_to_bf16" if fuse_bf16_narrow else "_to_f32")
+        ),
+    )
+
+
+_ACCUMULATOR_NATIVE_NONLINEAR_RULES = tuple(
+    _native_accumulator_nonlinear_rule(
+        source_op,
+        native_descriptor_key,
+        operation,
+        unit_count=unit_count,
+        fuse_bf16_narrow=fuse_bf16_narrow,
+    )
+    for _, source_op, native_descriptor_key, operation in _NATIVE_NONLINEAR_FAMILIES
+    for unit_count in (2, 4)
+    for fuse_bf16_narrow in (False, True)
+    # Two-quarter FP32 arithmetic is packetized into connected sixteen-lane
+    # chains. Keep that shape unless the terminal BF16 result removes the
+    # need to return to the FP32 arithmetic carriers. Full DM arithmetic
+    # already consumes and produces all four quarters directly.
+    if unit_count == 4 or fuse_bf16_narrow
+)
+
+
 _SCALAR_NATIVE_NONLINEAR_RULES = tuple(
     _native_nonlinear_rule(
         source_op,
@@ -1061,6 +1172,7 @@ _SCALAR_NONLINEAR_RULES = tuple(
 )
 
 AIE2P_NONLINEAR_RULES = (
+    *_ACCUMULATOR_NATIVE_NONLINEAR_RULES,
     _native_exp_rule(
         scalar_math.scalar_expf,
         _F32,

@@ -61,6 +61,7 @@ _VM_REFERENCE_COMPATIBLE_WITH = loom_config_compatible_with([
         "source_owned_accumulation",
         "stack_calls",
         "stack_fifo",
+        "wide_nonlinear",
     ]
 ]
 
