@@ -225,24 +225,36 @@ static iree_status_t loom_kernel_specialize_float_predicates(
 }
 
 static iree_status_t loom_kernel_specialize_predicates(
-    loom_func_like_t function, const loom_value_fact_table_t* facts,
-    loom_rewriter_t* rewriter, iree_arena_allocator_t* arena) {
+    loom_func_like_t function,
+    const loom_kernel_specialization_value_t* specializations,
+    uint16_t specialization_count, loom_rewriter_t* rewriter,
+    iree_arena_allocator_t* arena) {
   uint16_t predicate_count = 0;
   const loom_predicate_t* predicates =
       loom_func_like_predicates(function, &predicate_count);
   if (predicate_count == 0) {
     return iree_ok_status();
   }
+  const loom_block_t* block =
+      loom_region_entry_block(loom_func_like_body(function));
+  loom_value_fact_table_t facts;
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_initialize(&facts, arena, 0));
+  iree_status_t status = iree_ok_status();
+  for (uint16_t i = 0; i < specialization_count && iree_status_is_ok(status);
+       ++i) {
+    status = loom_value_fact_table_define(&facts, block->arg_ids[i],
+                                          specializations[i].facts);
+  }
+  IREE_RETURN_IF_ERROR(status);
   loom_predicate_t* projected = NULL;
   IREE_RETURN_IF_ERROR(loom_builder_copy_predicate_list_attr_storage(
       &rewriter->builder, predicates, predicate_count,
       IREE_SV("specialized pipeline predicates"), &projected));
   uint16_t projected_count = 0;
   uint16_t body_count = 0;
-  iree_status_t status = iree_ok_status();
   for (uint16_t i = 0; i < predicate_count && iree_status_is_ok(status); ++i) {
     const loom_decision_truth_t truth =
-        loom_value_fact_table_evaluate_predicate(facts, &predicates[i]);
+        loom_value_fact_table_evaluate_predicate(&facts, &predicates[i]);
     if (truth == LOOM_DECISION_TRUTH_TRUE) {
       continue;
     }
@@ -259,7 +271,7 @@ static iree_status_t loom_kernel_specialize_predicates(
         continue;
       }
       const loom_value_facts_t argument_facts =
-          loom_value_fact_table_lookup(facts, predicate.args[j]);
+          loom_value_fact_table_lookup(&facts, predicate.args[j]);
       has_bound_float |= loom_value_facts_is_float(argument_facts);
       int64_t constant = 0;
       if (loom_value_facts_as_exact_i64(argument_facts, &constant)) {
@@ -389,15 +401,7 @@ iree_status_t loom_kernel_specializations_apply(
     uint16_t specialization_count, loom_func_like_t function,
     loom_rewriter_t* rewriter, iree_arena_allocator_t* arena) {
   loom_block_t* block = loom_region_entry_block(loom_func_like_body(function));
-  loom_value_fact_table_t facts;
-  IREE_RETURN_IF_ERROR(loom_value_fact_table_initialize(&facts, arena, 0));
   iree_status_t status = iree_ok_status();
-  for (uint16_t i = 0; i < specialization_count && iree_status_is_ok(status);
-       ++i) {
-    status = loom_value_fact_table_define(&facts, block->arg_ids[i],
-                                          specializations[i].facts);
-  }
-  IREE_RETURN_IF_ERROR(status);
   loom_ir_remap_t remap;
   IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(site_module, rewriter->module,
                                                 arena, NULL, &remap));
@@ -407,11 +411,16 @@ iree_status_t loom_kernel_specializations_apply(
     loom_builder_enter_region(&rewriter->builder, function.op,
                               loom_func_like_body(function));
   }
-  IREE_RETURN_IF_ERROR(
-      loom_kernel_specialize_predicates(function, &facts, rewriter, arena));
+  IREE_RETURN_IF_ERROR(loom_kernel_specialize_predicates(
+      function, specializations, specialization_count, rewriter, arena));
   if (block->first_op) {
     loom_builder_set_before(&rewriter->builder, block->first_op);
   }
+  // Replacement constants have new SSA IDs, separate from the original formal
+  // arguments. Only the replacements supply dependent body types now; keeping
+  // the old IDs here would allocate facts for the intervening function body.
+  loom_value_fact_table_t facts;
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_initialize(&facts, arena, 0));
   // Scalar literals define all possible dimension dependencies before shaped
   // literals are built, including signatures with forward argument references.
   for (uint8_t phase = 0; phase < 2 && iree_status_is_ok(status); ++phase) {

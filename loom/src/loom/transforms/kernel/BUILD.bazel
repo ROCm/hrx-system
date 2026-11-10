@@ -34,6 +34,22 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "kernel_specialization_test",
+    srcs = ["kernel_specialization_test.cc"],
+    deps = [
+        ":kernel_specialization",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/pipeline",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "kernel_shape_requirements",
     srcs = ["kernel_shape_requirements.c"],
