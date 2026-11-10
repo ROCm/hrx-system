@@ -187,13 +187,11 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @dependent_cross_block(%input:
 // Shared zero padding has multiple consumers on both sides of an ownership
 // move. Setup ordering must preserve that fan-out and the source-order boundary
 // while keeping the rematerialized broadcasts out of persistent vector storage.
-// RUN: emit aie2p-leaf @bounded_padding diagnostics=predicted-spills
+// RUN: emit aie2p-leaf @bounded_padding diagnostics=predicted-spills report=emission
 
 aie2p.target<core> @target
 
-// REMARK@+4: BACKEND/045 {function_name="bounded_padding", trigger_kind="spill-plan", repaired_value_count="4", cloned_packet_count="4", rewritten_operand_count="4", retained_placement_count="0"}
-// REMARK@+3: BACKEND/045 {function_name="bounded_padding", trigger_kind="spill-plan", repaired_value_count="1", cloned_packet_count="1", rewritten_operand_count="1", retained_placement_count="0"}
-// REMARK@+2: BACKEND/045 {function_name="bounded_padding", trigger_kind="spill-plan", repaired_value_count="2", cloned_packet_count="2", rewritten_operand_count="2", retained_placement_count="0"}
+// REMARK@+2: BACKEND/045 {function_name="bounded_padding", trigger_kind="spill-plan", repaired_value_count="4", cloned_packet_count="4", rewritten_operand_count="4", retained_placement_count="0"}
 // REMARK@+1: BACKEND/045 {function_name="bounded_padding", trigger_kind="spill-plan", repaired_value_count="1", cloned_packet_count="1", rewritten_operand_count="1", retained_placement_count="0"}
 low.func.def target<amd.xdna.aie2p.core>(@target) @bounded_padding(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>) asm {
   %zeros = acc.clear.f32x64
@@ -325,6 +323,10 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @bounded_padding(%input: reg<a
 }
 
 // ----
+issue cycles: 182
+code bytes: 784
+coissued bundles: 24
+coissued components: 52
 
 // ====
 

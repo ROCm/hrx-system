@@ -52,11 +52,8 @@ static bool loom_low_schedule_setup_order_has_per_user_placement(
 
 static bool loom_low_schedule_setup_order_is_member(
     const loom_low_schedule_build_state_t* state,
-    const loom_low_schedule_node_t* node, bool order_structural_setup) {
+    const loom_low_schedule_node_t* node) {
   if (node->kind == LOOM_LOW_SCHEDULE_NODE_STRUCTURAL) {
-    if (order_structural_setup) {
-      return true;
-    }
     bool requires_register = false;
     if (loom_low_schedule_setup_order_has_per_user_placement(
             state, node, &requires_register) &&
@@ -64,9 +61,27 @@ static bool loom_low_schedule_setup_order_is_member(
       return true;
     }
     if (!iree_any_bit_set(node->flags,
-                          LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP) ||
-        node->result_count != 1) {
+                          LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP)) {
       return false;
+    }
+    // Structural composition can separate a private input from the native
+    // consumer of the assembled value. Preserve that input's placement through
+    // its immediate composition, subject to the same footprint and unique
+    // successor checks as other setup. Unrelated storage keeps its freedom to
+    // retire live operands instead of inheriting a function-wide repair policy.
+    const iree_bitmap_t per_user_values =
+        state->options->per_user_placement_values;
+    if (per_user_values.bit_count != 0) {
+      const loom_value_ordinal_t* operands =
+          loom_low_schedule_node_const_operand_ordinals(node);
+      for (uint16_t i = 0; i < node->operand_count; ++i) {
+        const loom_value_id_t value_id =
+            state->value_domain->value_ids[operands[i]];
+        if (value_id < per_user_values.bit_count &&
+            iree_bitmap_test(per_user_values, value_id)) {
+          return true;
+        }
+      }
     }
     // A singleton cannot hold a later setup while its consumer's prerequisites
     // still need that location. Other storage remains available for pressure
@@ -265,16 +280,14 @@ static void loom_low_schedule_setup_order_classify_storage_continuation(
 }
 
 void loom_low_schedule_setup_order_classify_node(
-    loom_low_schedule_build_state_t* state, uint32_t node_index,
-    bool order_structural_setup) {
+    loom_low_schedule_build_state_t* state, uint32_t node_index) {
   loom_low_schedule_node_t* node = &state->nodes[node_index];
   if (node->result_count != 1) {
     return;
   }
   loom_low_schedule_setup_order_classify_storage_continuation(state, node,
                                                               node_index);
-  if (loom_low_schedule_setup_order_is_member(state, node,
-                                              order_structural_setup)) {
+  if (loom_low_schedule_setup_order_is_member(state, node)) {
     (void)loom_low_schedule_setup_order_mark_node(state, node);
   }
 }

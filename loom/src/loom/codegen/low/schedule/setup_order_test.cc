@@ -18,7 +18,7 @@
 namespace loom {
 namespace {
 
-TEST(SetupMembershipTest, StructuralSetupRequiresPolicyOrRetainedRegister) {
+TEST(SetupMembershipTest, StructuralSetupRetainsPrivateInputsOrItsOwnRepair) {
   const loom_low_reg_class_t reg_class = {
       .alloc_unit_bits = 32,
       .allocatable_count = 8,
@@ -27,37 +27,45 @@ TEST(SetupMembershipTest, StructuralSetupRequiresPolicyOrRetainedRegister) {
       .reg_classes = &reg_class,
       .reg_class_count = 1,
   };
-  loom_value_id_t value_ids[] = {7, 19};
+  loom_value_id_t value_ids[] = {7, 19, 31};
   loom_local_value_domain_t domain = {
       .value_ids = value_ids,
       .value_count = IREE_ARRAYSIZE(value_ids),
   };
   const struct {
+    // Allocation retained the input next to this structural consumer.
+    bool private_input;
     // Allocation retained private placement for the result.
     bool retained;
     // Allocation requires the result to remain in a register.
     bool required;
-    // The caller requested ordering for all structural setup.
-    bool order_structural;
+    // The operation has a storage relation or materializes structural storage.
+    bool storage;
     // Whether this node belongs to an ordered setup chain.
     bool ordered;
   } cases[] = {
-      {false, false, false, false}, {true, false, false, false},
-      {false, true, false, false},  {true, true, false, true},
-      {false, false, true, true},   {true, false, true, true},
-      {false, true, true, true},    {true, true, true, true},
+      {false, false, false, true, false}, {false, true, false, true, false},
+      {false, false, true, true, false},  {false, true, true, true, true},
+      {true, false, false, true, true},   {true, true, false, true, true},
+      {true, false, true, true, true},    {true, true, true, true, true},
+      {true, false, false, false, false},
   };
   for (const auto& test_case : cases) {
     SCOPED_TRACE(::testing::Message()
-                 << "retained=" << test_case.retained
-                 << " required=" << test_case.required
-                 << " structural=" << test_case.order_structural);
-    uint64_t placement_word = 0;
+                 << "private_input=" << test_case.private_input << " retained="
+                 << test_case.retained << " required=" << test_case.required
+                 << " storage=" << test_case.storage);
+    // Another producer has retained placement in every row. It does not
+    // confer ordering on this result.
+    uint64_t placement_word = UINT64_C(1) << value_ids[2];
     uint64_t required_word = 0;
     loom_low_schedule_options_t options = {
         .required_register_values = {64, &required_word},
         .per_user_placement_values = {64, &placement_word},
     };
+    if (test_case.private_input) {
+      iree_bitmap_set(options.per_user_placement_values, value_ids[0]);
+    }
     if (test_case.retained) {
       iree_bitmap_set(options.per_user_placement_values, value_ids[1]);
     }
@@ -65,6 +73,7 @@ TEST(SetupMembershipTest, StructuralSetupRequiresPolicyOrRetainedRegister) {
       iree_bitmap_set(options.required_register_values, value_ids[1]);
     }
     loom_low_schedule_value_record_t values[] = {
+        {.unit_count = 1, .register_class_id = 0},
         {.unit_count = 1, .register_class_id = 0},
         {.unit_count = 1, .register_class_id = 0},
     };
@@ -81,12 +90,13 @@ TEST(SetupMembershipTest, StructuralSetupRequiresPolicyOrRetainedRegister) {
         .kind = LOOM_LOW_SCHEDULE_NODE_STRUCTURAL,
         .operand_count = 1,
         .result_count = 1,
-        .flags = LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP,
         .value_ordinals = {.inline_value_ordinals = {0, 1}},
     };
+    if (test_case.storage) {
+      node.flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP;
+    }
     state.nodes = &node;
-    loom_low_schedule_setup_order_classify_node(&state, 0,
-                                                test_case.order_structural);
+    loom_low_schedule_setup_order_classify_node(&state, 0);
     EXPECT_EQ(
         iree_any_bit_set(node.flags, LOOM_LOW_SCHEDULE_NODE_FLAG_ORDERED_SETUP),
         test_case.ordered);
@@ -159,8 +169,7 @@ TEST(SetupMembershipTest, SingletonRequiredStorageNeedsExclusionOrdering) {
       node.flags = LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP;
     }
     state.nodes = &node;
-    loom_low_schedule_setup_order_classify_node(
-        &state, 0, /*order_structural_setup=*/false);
+    loom_low_schedule_setup_order_classify_node(&state, 0);
     EXPECT_EQ(
         iree_any_bit_set(node.flags, LOOM_LOW_SCHEDULE_NODE_FLAG_ORDERED_SETUP),
         test_case.ordered);
@@ -179,7 +188,11 @@ TEST(SetupMembershipTest, CapturedRequiredStorageMustPreserveItsFootprint) {
       .reg_classes = classes,
       .reg_class_count = IREE_ARRAYSIZE(classes),
   };
-  const loom_low_schedule_options_t options = {};
+  loom_value_id_t value_ids[] = {7, 19, 25};
+  loom_local_value_domain_t domain = {
+      .value_ids = value_ids,
+      .value_count = IREE_ARRAYSIZE(value_ids),
+  };
   const struct {
     // Human-readable invariant represented by this row.
     const char* name;
@@ -211,44 +224,54 @@ TEST(SetupMembershipTest, CapturedRequiredStorageMustPreserveItsFootprint) {
   };
   for (const auto& test_case : cases) {
     SCOPED_TRACE(test_case.name);
-    loom_low_schedule_value_record_t values[] = {
-        {.unit_count = test_case.first_units, .register_class_id = 0},
-        {.unit_count = test_case.second_units, .register_class_id = 0},
-        {
-            .unit_count = test_case.result_units,
-            .register_class_id = test_case.result_class,
-        },
-    };
-    if (test_case.inputs_required) {
-      values[0].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER;
-      if (test_case.second_units != 0) {
-        values[1].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER;
+    for (bool private_input : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << "private_input=" << private_input);
+      uint64_t placement_word = UINT64_C(1) << value_ids[private_input ? 0 : 2];
+      uint64_t required_word =
+          test_case.result_required ? UINT64_C(1) << value_ids[2] : 0;
+      const loom_low_schedule_options_t options = {
+          .required_register_values = {64, &required_word},
+          .per_user_placement_values = {64, &placement_word},
+      };
+      loom_low_schedule_value_record_t values[] = {
+          {.unit_count = test_case.first_units, .register_class_id = 0},
+          {.unit_count = test_case.second_units, .register_class_id = 0},
+          {
+              .unit_count = test_case.result_units,
+              .register_class_id = test_case.result_class,
+          },
+      };
+      if (test_case.inputs_required) {
+        values[0].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER;
+        if (test_case.second_units != 0) {
+          values[1].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER;
+        }
       }
+      if (test_case.result_required) {
+        values[2].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER;
+      }
+      loom_low_schedule_build_state_t state = {
+          .options = &options,
+          .target = {.descriptor_set = &descriptors},
+          .value_domain = &domain,
+          .values = values,
+      };
+      loom_low_schedule_node_t node = {
+          .kind = LOOM_LOW_SCHEDULE_NODE_STRUCTURAL,
+          .operand_count =
+              test_case.second_units == 0 ? uint16_t{1} : uint16_t{2},
+          .result_count = 1,
+          .flags = LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP,
+          .value_ordinals = {.inline_value_ordinals = {0, 1}},
+      };
+      loom_low_schedule_node_result_ordinals(&node)[0] = 2;
+      state.nodes = &node;
+      loom_low_schedule_setup_order_classify_node(&state, 0);
+      EXPECT_EQ(iree_any_bit_set(node.flags,
+                                 LOOM_LOW_SCHEDULE_NODE_FLAG_ORDERED_SETUP),
+                test_case.ordered);
+      EXPECT_EQ(state.setup_order.has_members, test_case.ordered);
     }
-    if (test_case.result_required) {
-      values[2].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER;
-    }
-    loom_low_schedule_build_state_t state = {
-        .options = &options,
-        .target = {.descriptor_set = &descriptors},
-        .values = values,
-    };
-    loom_low_schedule_node_t node = {
-        .kind = LOOM_LOW_SCHEDULE_NODE_STRUCTURAL,
-        .operand_count =
-            test_case.second_units == 0 ? uint16_t{1} : uint16_t{2},
-        .result_count = 1,
-        .flags = LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP,
-        .value_ordinals = {.inline_value_ordinals = {0, 1}},
-    };
-    loom_low_schedule_node_result_ordinals(&node)[0] = 2;
-    state.nodes = &node;
-    loom_low_schedule_setup_order_classify_node(
-        &state, 0, /*order_structural_setup=*/true);
-    EXPECT_EQ(
-        iree_any_bit_set(node.flags, LOOM_LOW_SCHEDULE_NODE_FLAG_ORDERED_SETUP),
-        test_case.ordered);
-    EXPECT_EQ(state.setup_order.has_members, test_case.ordered);
   }
 }
 
@@ -341,8 +364,7 @@ TEST(SetupMembershipTest, DescriptorMembershipPreservesRequiredReadPhases) {
         .values = values,
         .nodes = &node,
     };
-    loom_low_schedule_setup_order_classify_node(
-        &state, 0, /*order_structural_setup=*/false);
+    loom_low_schedule_setup_order_classify_node(&state, 0);
     EXPECT_EQ(
         iree_any_bit_set(node.flags, LOOM_LOW_SCHEDULE_NODE_FLAG_ORDERED_SETUP),
         test_case.ordered);
@@ -705,23 +727,15 @@ TEST_F(SetupOrderTest, ContinuationsConsumeRetainedStorageIdentity) {
         .nodes = nodes,
         .storage_relations = {relation_starts, &relations, 2, 1},
     };
-    for (bool order_structural : {false, true}) {
-      SCOPED_TRACE(order_structural);
-      for (auto& node : nodes) {
-        node.flags = 0;
-      }
-      state.setup_order.has_members = false;
-      for (uint32_t i = 0; i < IREE_ARRAYSIZE(nodes); ++i) {
-        loom_low_schedule_setup_order_classify_node(&state, i,
-                                                    order_structural);
-      }
-      for (uint32_t i = 0; i < IREE_ARRAYSIZE(nodes); ++i) {
-        EXPECT_EQ(iree_any_bit_set(nodes[i].flags,
-                                   LOOM_LOW_SCHEDULE_NODE_FLAG_ORDERED_SETUP),
-                  (test_case.members & (1u << i)) != 0);
-      }
-      EXPECT_EQ(state.setup_order.has_members, test_case.members != 0);
+    for (uint32_t i = 0; i < IREE_ARRAYSIZE(nodes); ++i) {
+      loom_low_schedule_setup_order_classify_node(&state, i);
     }
+    for (uint32_t i = 0; i < IREE_ARRAYSIZE(nodes); ++i) {
+      EXPECT_EQ(iree_any_bit_set(nodes[i].flags,
+                                 LOOM_LOW_SCHEDULE_NODE_FLAG_ORDERED_SETUP),
+                (test_case.members & (1u << i)) != 0);
+    }
+    EXPECT_EQ(state.setup_order.has_members, test_case.members != 0);
   }
 }
 
@@ -776,8 +790,7 @@ TEST_F(SetupOrderTest, PrivateConstantsShareTheirConsumersPrerequisites) {
       nodes_[i].kind = LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR;
       nodes_[i].result_count = 1;
       loom_low_schedule_node_result_ordinals(&nodes_[i])[0] = i;
-      loom_low_schedule_setup_order_classify_node(
-          &state_, i, /*order_structural_setup=*/false);
+      loom_low_schedule_setup_order_classify_node(&state_, i);
       Append(i, 3);
     }
     Append(2, 3);

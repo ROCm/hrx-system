@@ -2364,6 +2364,17 @@ TEST_LOW_STORE_PHYS_DESCRIPTORS = tuple(
     for unit_count in (1, 2)
 )
 
+TEST_LOW_STORE_V2PHYS_DESCRIPTOR = replace(
+    TEST_LOW_STORE_PHYS_DESCRIPTORS[1],
+    key="test.store.v2phys",
+    mnemonic="test.store.v2phys",
+    operands=(
+        _ptr_resource("address"),
+        replace(_phys_operand("value"), unit_count=2),
+    ),
+    asm_forms=_asm(operands=("address", "value")),
+)
+
 # Distinct storage spaces exercise the same write contract independently of a
 # physical target's address width, instruction spelling, or register classes.
 TEST_LOW_SCOPED_STORE_V4I32_DESCRIPTORS = tuple(
@@ -3396,6 +3407,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_LOAD_INDEX_V4F32_DESCRIPTOR,
         TEST_LOW_STORE_V4I32_DESCRIPTOR,
         *TEST_LOW_STORE_PHYS_DESCRIPTORS,
+        TEST_LOW_STORE_V2PHYS_DESCRIPTOR,
         *TEST_LOW_PRIVATE_TRAFFIC_DESCRIPTORS,
         TEST_LOW_CONST_PTR_DESCRIPTOR,
         TEST_LOW_LEASED_CONSUME_I32_DESCRIPTOR,
