@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "libamdf/src/gpu/endpoint_profile.h"
+#include "libamdf/src/gpu/umd/aql_descriptor.h"
 #include "libamdf/src/gpu/umd/kfd/buffer.h"
 #include "libamdf/src/gpu/umd/kfd/target/compute_storage.h"
 
@@ -58,38 +59,8 @@ typedef struct amdf_gpu_kfd_user_queue_plan_t {
   } control;
   // Side storage required only by KFD compute queues.
   amdf_gpu_kfd_compute_storage_plan_t compute;
-  // AMD AQL descriptor and fixed-scratch encoding, absent when xcc_count is
-  // zero.
-  struct {
-    // Number of equal scratch partitions addressed by the command processors.
-    uint32_t xcc_count;
-    // Highest physical CU identifier accepted by the firmware descriptor.
-    uint32_t maximum_compute_unit_id;
-    // Highest resident wave identifier within one CU.
-    uint32_t maximum_wave_id;
-    // Native flat-address apertures programmed by KFD for this process.
-    struct {
-      // High 32 bits of the LDS aperture base.
-      uint32_t group_base_hi;
-      // High 32 bits of the private aperture base.
-      uint32_t private_base_hi;
-    } apertures;
-    // Fixed scratch slot provisioning and target register encodings.
-    struct {
-      // Physical slots per XCC, including shader-engine rounding.
-      uint32_t slot_count_per_xcc;
-      // COMPUTE_TMPRING_SIZE.WAVES, in the target's scheduling unit.
-      uint32_t temporary_ring_wave_count;
-      // Log2 byte granularity of COMPUTE_TMPRING_SIZE.WAVESIZE.
-      uint32_t wave_size_shift;
-      // Largest supported scratch allocation in bytes per 64-lane wave.
-      uint32_t maximum_wave_byte_length;
-      // Address-free buffer descriptor template; WORD2 capacity is initially 0.
-      uint32_t resource_descriptor[4];
-    } scratch;
-    // Native firmware signal block byte offset in control storage.
-    size_t inactive_signal_byte_offset;
-  } aql;
+  // AMD AQL descriptor geometry; absent when xcc_count is zero.
+  amdf_gpu_aql_descriptor_profile_t aql;
   // Storage used to establish safe native queue retirement.
   struct {
     // Mapped allocation that is never reachable by the queue. Invalidating

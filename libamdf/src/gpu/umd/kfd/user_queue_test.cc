@@ -1137,7 +1137,7 @@ TEST_F(KfdUserQueueTest,
   EXPECT_EQ(descriptor.scratch_backing_address, 0u);
   EXPECT_EQ(descriptor.inactive_signal_address,
             native_state_.buffers[1].device_address + 256);
-  const auto* signal = reinterpret_cast<const amdf_gpu_kfd_aql_signal_t*>(
+  const auto* signal = reinterpret_cast<const amdf_gpu_aql_signal_t*>(
       reinterpret_cast<const uint8_t*>(
           native_state_.buffers[1].storage.data()) +
       256);
@@ -1591,9 +1591,9 @@ TEST_F(KfdUserQueueTest, AqlScratchServicePreservesOwnershipAcrossGrowth) {
                                              &queue_result_),
               AMDF_STATUS_OK);
     ASSERT_NO_FATAL_FAILURE(MapQueue());
-    auto* descriptor = reinterpret_cast<amdf_gpu_kfd_aql_descriptor_t*>(
+    auto* descriptor = reinterpret_cast<amdf_gpu_aql_descriptor_t*>(
         native_state_.buffers[1].storage.data());
-    auto* signal = reinterpret_cast<amdf_gpu_kfd_aql_signal_t*>(
+    auto* signal = reinterpret_cast<amdf_gpu_aql_signal_t*>(
         reinterpret_cast<uint8_t*>(descriptor) + 256);
     EXPECT_EQ(signal->event_mailbox_address, 0x76540000u);
     EXPECT_EQ(signal->event_id, 23u);
@@ -1676,7 +1676,7 @@ TEST_F(KfdUserQueueTest, ScratchServiceDoesNotHideOtherFirmwareErrors) {
   ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create_info, &queue_,
                                            &queue_result_),
             AMDF_STATUS_OK);
-  auto* signal = reinterpret_cast<amdf_gpu_kfd_aql_signal_t*>(
+  auto* signal = reinterpret_cast<amdf_gpu_aql_signal_t*>(
       reinterpret_cast<uint8_t*>(native_state_.buffers[1].storage.data()) +
       256);
   signal->value = 0x401 | 2;
@@ -1698,7 +1698,7 @@ TEST_F(KfdUserQueueTest, IdleScratchTrimRebindsOnlyTheScratchDescriptor) {
   ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create_info, &queue_,
                                            &queue_result_),
             AMDF_STATUS_OK);
-  auto* descriptor = reinterpret_cast<amdf_gpu_kfd_aql_descriptor_t*>(
+  auto* descriptor = reinterpret_cast<amdf_gpu_aql_descriptor_t*>(
       native_state_.buffers[1].storage.data());
   // Model the state left by a previously serviced and completed dispatch.
   descriptor->read_dispatch_id = descriptor->write_dispatch_id = 37;
@@ -1750,7 +1750,7 @@ TEST_F(KfdUserQueueTest, ScratchTrimNativeFailureIsTerminal) {
     ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create_info, &queue_,
                                              &queue_result_),
               AMDF_STATUS_OK);
-    auto* descriptor = reinterpret_cast<amdf_gpu_kfd_aql_descriptor_t*>(
+    auto* descriptor = reinterpret_cast<amdf_gpu_aql_descriptor_t*>(
         native_state_.buffers[1].storage.data());
     descriptor->scratch_wave64_lane_byte_length = 32;
     native_state_.queue_update.fail_call = fail_call;
@@ -1779,7 +1779,7 @@ TEST_F(KfdUserQueueTest, DispatchTimestampSelectionPreservesQueueAndScratch) {
   ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create_info, &queue_,
                                            &queue_result_),
             AMDF_STATUS_OK);
-  auto* descriptor = reinterpret_cast<amdf_gpu_kfd_aql_descriptor_t*>(
+  auto* descriptor = reinterpret_cast<amdf_gpu_aql_descriptor_t*>(
       native_state_.buffers[1].storage.data());
   auto expected = *descriptor;
   for (bool enabled : {true, true, false, false}) {
@@ -1838,7 +1838,7 @@ TEST_F(KfdUserQueueTest, DispatchTimestampNativeFailureRemainsTerminal) {
     ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create_info, &queue_,
                                              &queue_result_),
               AMDF_STATUS_OK);
-    auto* descriptor = reinterpret_cast<amdf_gpu_kfd_aql_descriptor_t*>(
+    auto* descriptor = reinterpret_cast<amdf_gpu_aql_descriptor_t*>(
         native_state_.buffers[1].storage.data());
     descriptor->read_dispatch_id = descriptor->write_dispatch_id = 37;
     native_state_.queue_update.fail_call = fail_call;

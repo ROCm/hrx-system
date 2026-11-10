@@ -508,28 +508,16 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
-    name = "aql",
-    srcs = ["aql.c"],
-    hdrs = ["aql.h"],
-    target_compatible_with = KFD_COMPATIBILITY,
-    visibility = ["//libamdf/src/gpu/umd/kfd:__subpackages__"],
-    deps = [
-        "//libamdf/src/gpu/umd:user_queue",
-        "//libamdf/src/gpu/umd/kfd/target:queue_plan",
-    ],
-)
-
-amdf_cc_library(
     name = "user_queue",
     srcs = ["user_queue.c"],
     target_compatible_with = KFD_COMPATIBILITY,
     deps = [
-        ":aql",
         ":buffer",
         ":device_state",
         ":user_queue_native",
         "//libamdf/src:allocator",
         "//libamdf/src:atomics",
+        "//libamdf/src/gpu/umd:aql_descriptor",
         "//libamdf/src/gpu/umd:user_queue",
         "//libamdf/src/gpu/umd/kfd/target:user_queue",
         "//libamdf/src/platform:wait",
@@ -547,13 +535,13 @@ amdf_cc_test(
     ],
     target_compatible_with = KFD_COMPATIBILITY,
     deps = [
-        ":aql",
         ":device_state",
         ":topology",
         ":user_queue",
         ":user_queue_native",
         "//libamdf/src:allocator",
         "//libamdf/src:atomics",
+        "//libamdf/src/gpu/umd:aql_descriptor",
         "//libamdf/src/gpu/umd:user_queue",
         "//libamdf/src/gpu/umd/kfd/target:user_queue",
         "//third_party:google_test",

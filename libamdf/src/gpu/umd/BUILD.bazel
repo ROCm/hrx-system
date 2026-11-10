@@ -115,6 +115,17 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "aql_descriptor",
+    srcs = ["aql_descriptor.c"],
+    hdrs = ["aql_descriptor.h"],
+    visibility = ["//libamdf/src/gpu:__subpackages__"],
+    deps = [
+        ":user_queue",
+        "//libamdf/src/gpu:endpoint_profile",
+    ],
+)
+
+amdf_cc_library(
     name = "event",
     hdrs = ["event.h"],
     visibility = ["//libamdf/src/gpu:__subpackages__"],

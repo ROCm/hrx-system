@@ -18,7 +18,7 @@
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/atomics.h"
-#include "libamdf/src/gpu/umd/kfd/aql.h"
+#include "libamdf/src/gpu/umd/aql_descriptor.h"
 #include "libamdf/src/gpu/umd/kfd/device.h"
 #include "libamdf/src/gpu/umd/kfd/target/user_queue.h"
 #include "libamdf/src/gpu/umd/kfd/topology.h"
@@ -190,7 +190,7 @@ struct FakeNativeState {
     auto* self = static_cast<FakeNativeState*>(user_data);
     self->queue_update.arguments.push_back(*arguments);
     self->queue_update.descriptors.push_back(
-        *reinterpret_cast<const amdf_gpu_kfd_aql_descriptor_t*>(
+        *reinterpret_cast<const amdf_gpu_aql_descriptor_t*>(
             self->buffers[1].storage.data()));
     return self->queue_update.arguments.size() == self->queue_update.fail_call
                ? amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EIO)
@@ -361,7 +361,7 @@ struct FakeNativeState {
     // Exact ring identity and activation percentage passed to each call.
     std::vector<kfd_ioctl_update_queue_args> arguments;
     // Firmware descriptor as each native operation observes it.
-    std::vector<amdf_gpu_kfd_aql_descriptor_t> descriptors;
+    std::vector<amdf_gpu_aql_descriptor_t> descriptors;
     // One-based failed native operation, or zero for success.
     size_t fail_call = 0;
   } queue_update;
@@ -395,7 +395,7 @@ struct FakeNativeState {
   uint64_t doorbell_offset = UINT64_C(0x20000080);
   struct kfd_ioctl_create_queue_args observed_create = {};
   // Firmware-visible AQL descriptor captured at the activation boundary.
-  amdf_gpu_kfd_aql_descriptor_t observed_aql_descriptor = {};
+  amdf_gpu_aql_descriptor_t observed_aql_descriptor = {};
   // Per-XCC save headers captured before native creation can consume them.
   std::vector<kfd_context_save_area_header> observed_context_headers;
   uint64_t observed_doorbell_mapping_offset = 0;

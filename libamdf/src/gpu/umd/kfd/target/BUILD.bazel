@@ -49,6 +49,7 @@ amdf_cc_library(
     deps = [
         ":compute_storage",
         "//libamdf/src/gpu:endpoint_profile",
+        "//libamdf/src/gpu/umd:aql_descriptor",
         "//libamdf/src/gpu/umd/kfd:buffer",
     ],
 )
@@ -62,7 +63,7 @@ amdf_cc_library(
         ":queue_plan",
         "//libamdf/src/gpu/umd/kfd:topology",
         "//third_party:linux_kfd_uapi",
-    ] + ([":compute_storage"] if name != "sdma_queue" else []) + (["//libamdf/src/gpu/umd/kfd:aql"] if name == "aql_queue" else []),
+    ] + ([":compute_storage"] if name != "sdma_queue" else []) + (["//libamdf/src/gpu/umd:aql_descriptor"] if name == "aql_queue" else []),
 ) for name in [
     "aql_queue",
     "pm4_queue",

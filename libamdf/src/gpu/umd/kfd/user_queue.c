@@ -14,7 +14,7 @@
 
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/atomics.h"
-#include "libamdf/src/gpu/umd/kfd/aql.h"
+#include "libamdf/src/gpu/umd/aql_descriptor.h"
 #include "libamdf/src/gpu/umd/kfd/buffer.h"
 #include "libamdf/src/gpu/umd/kfd/device.h"
 #include "libamdf/src/gpu/umd/kfd/target/user_queue.h"
@@ -412,7 +412,7 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
 
-  amdf_gpu_kfd_aql_descriptor_t aql_descriptor = {0};
+  amdf_gpu_aql_descriptor_t aql_descriptor = {0};
   if (plan.aql.xcc_count != 0) {
     if (create_info->inactive_event.format != 0 &&
         (create_info->inactive_event.format !=
@@ -420,8 +420,8 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
          create_info->inactive_event.format_version != 1)) {
       return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
     }
-    const amdf_status_t status = amdf_gpu_kfd_aql_descriptor_initialize(
-        &plan, create_info, &aql_descriptor);
+    const amdf_status_t status = amdf_gpu_aql_descriptor_initialize(
+        &plan.aql, plan.ring.primary_byte_length, create_info, &aql_descriptor);
     if (!amdf_status_is_ok(status)) {
       return status;
     }
@@ -501,10 +501,9 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
         queue->plan.aql.inactive_signal_byte_offset;
     memcpy(queue->control.host_pointer, &aql_descriptor,
            sizeof(aql_descriptor));
-    amdf_gpu_kfd_aql_signal_t* inactive_signal =
-        (amdf_gpu_kfd_aql_signal_t*)((uint8_t*)queue->control.host_pointer +
-                                     queue->plan.aql
-                                         .inactive_signal_byte_offset);
+    amdf_gpu_aql_signal_t* inactive_signal =
+        (amdf_gpu_aql_signal_t*)((uint8_t*)queue->control.host_pointer +
+                                 queue->plan.aql.inactive_signal_byte_offset);
     inactive_signal->kind = 1;
     inactive_signal->event_mailbox_address =
         create_info->inactive_event.mailbox_address;
@@ -735,7 +734,7 @@ amdf_status_t amdf_gpu_umd_user_queue_query_scratch(
   const uint64_t inactive_value =
       amdf_atomic_uint64_load_acquire(amdf_gpu_kfd_user_queue_control_value(
           queue, queue->plan.aql.inactive_signal_byte_offset +
-                     offsetof(amdf_gpu_kfd_aql_signal_t, value)));
+                     offsetof(amdf_gpu_aql_signal_t, value)));
   if (inactive_value == 0) {
     *out_request = (amdf_gpu_aql_scratch_request_t){0};
     return AMDF_STATUS_OK;
@@ -772,8 +771,8 @@ amdf_status_t amdf_gpu_umd_user_queue_query_scratch(
       continue;
     }
     amdf_gpu_aql_scratch_request_t request;
-    const amdf_status_t status = amdf_gpu_kfd_aql_scratch_requirements(
-        &queue->plan, private_byte_length,
+    const amdf_status_t status = amdf_gpu_aql_scratch_requirements(
+        &queue->plan.aql, private_byte_length,
         (inactive_value & 0x400) != 0 ? 32 : 64, &request);
     if (!amdf_status_is_ok(status)) {
       return status;
@@ -807,16 +806,16 @@ amdf_status_t amdf_gpu_umd_user_queue_resume_scratch(
            request.wavefront_size +
        alignment - 1) &
       ~(alignment - 1);
-  status = amdf_gpu_kfd_aql_scratch_initialize(
-      &queue->plan, scratch, wave_byte_length,
-      (amdf_gpu_kfd_aql_descriptor_t*)queue->control.host_pointer);
+  status = amdf_gpu_aql_scratch_initialize(
+      &queue->plan.aql, scratch, wave_byte_length,
+      (amdf_gpu_aql_descriptor_t*)queue->control.host_pointer);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
   amdf_atomic_uint64_store_release(
       amdf_gpu_kfd_user_queue_control_value(
           queue, queue->plan.aql.inactive_signal_byte_offset +
-                     offsetof(amdf_gpu_kfd_aql_signal_t, value)),
+                     offsetof(amdf_gpu_aql_signal_t, value)),
       0);
   return AMDF_STATUS_OK;
 }
@@ -851,7 +850,7 @@ amdf_status_t amdf_gpu_umd_user_queue_trim_scratch(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  amdf_gpu_kfd_aql_descriptor_t* descriptor = queue->control.host_pointer;
+  amdf_gpu_aql_descriptor_t* descriptor = queue->control.host_pointer;
   if (descriptor->scratch_wave64_lane_byte_length == 0) {
     return AMDF_STATUS_OK;
   }
@@ -876,7 +875,7 @@ amdf_status_t amdf_gpu_umd_user_queue_set_dispatch_timestamps(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  amdf_gpu_kfd_aql_descriptor_t* descriptor = queue->control.host_pointer;
+  amdf_gpu_aql_descriptor_t* descriptor = queue->control.host_pointer;
   const uint32_t properties =
       (descriptor->queue_properties & ~(1u << 3)) | (enabled ? (1u << 3) : 0);
   if (properties == descriptor->queue_properties) {
@@ -924,7 +923,7 @@ amdf_status_t amdf_gpu_umd_user_queue_query_status(
     const uint64_t inactive_value =
         amdf_atomic_uint64_load_acquire(amdf_gpu_kfd_user_queue_control_value(
             queue, queue->plan.aql.inactive_signal_byte_offset +
-                       offsetof(amdf_gpu_kfd_aql_signal_t, value)));
+                       offsetof(amdf_gpu_aql_signal_t, value)));
     if (inactive_value != 0 &&
         !(queue->scratch_service &&
           amdf_gpu_kfd_aql_is_scratch_request(inactive_value))) {
