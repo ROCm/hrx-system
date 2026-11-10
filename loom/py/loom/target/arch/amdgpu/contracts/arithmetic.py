@@ -886,16 +886,6 @@ def _f32_copysign_rules(
     register_insert = _descriptor("amdgpu.v_bfi_b32")
     typed_guards = _typed_guards(("lhs", "rhs", "result"), type_pattern)
     emit_form = _emit_form(type_pattern)
-    register_insert_operand = (
-        ValueRef.operand("lhs")
-        if type_pattern.kind == "vector"
-        else _f32_vgpr_operand("lhs")
-    )
-    register_base_operand = (
-        ValueRef.operand("rhs")
-        if type_pattern.kind == "vector"
-        else _f32_vgpr_operand("rhs")
-    )
     return (
         DescriptorRule(
             source_op=source_op,
@@ -933,8 +923,8 @@ def _f32_copysign_rules(
                     descriptor=register_insert,
                     operands={
                         "mask": ValueRef.temporary("magnitude_mask"),
-                        "insert": register_insert_operand,
-                        "base": register_base_operand,
+                        "insert": _f32_vgpr_operand("lhs"),
+                        "base": _f32_vgpr_operand("rhs"),
                     },
                     results={"dst": ValueRef.result("result")},
                     form=emit_form,
