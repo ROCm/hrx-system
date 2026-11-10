@@ -38,10 +38,23 @@ loom_test_module(
     srcs = ["//loom/src/loom/tooling/execution/hal/testdata:buffer_bulk_hal_actual.loom"],
 )
 
+# Match the simulator's ordinary tool configuration, including instrumentation.
+# The default Loom test toolchain builds a separate execution-platform tool.
 loom_test(
     name = "buffer_bulk_native",
     benchmark_smoke = False,
-    execution_profiles = [AMD_GPU_HARDWARE_PROFILE],
+    execution_profiles = [loom_execution_profile(
+        name = AMD_GPU_HARDWARE_PROFILE.name,
+        build_requirements = AMD_GPU_HARDWARE_PROFILE.build_requirements,
+        executor = AMD_GPU_HARDWARE_PROFILE.executor,
+        resource_group = AMD_GPU_HARDWARE_PROFILE.resource_group,
+        run_requirements = AMD_GPU_HARDWARE_PROFILE.run_requirements,
+        runner = "//loom/src/loom/tools/loom-test",
+        runner_args = AMD_GPU_HARDWARE_PROFILE.runner_args,
+        tags = AMD_GPU_HARDWARE_PROFILE.tags,
+        target_class = AMD_GPU_HARDWARE_PROFILE.target_class,
+        target_family = AMD_GPU_HARDWARE_PROFILE.target_family,
+    )],
     module = ":buffer_bulk_module",
     target_compatible_with = native_gpu_test_compatibility(),
 )

@@ -24,7 +24,8 @@ Custom topologies can be supplied to the ordinary tools with
 
 The `buffer_bulk_test` suite qualifies canonical buffer kernels through the
 ordinary HAL and JIT. All execution leaves share `buffer_bulk_module`, including
-its imported and linked artifacts. Select the test matrix independently:
+its imported and linked artifacts, and the same ordinary `loom-test` binary
+with the requested build instrumentation. Select the test matrix independently:
 
 ```sh
 iree-bazel-test --config=asan --config=rocjitsu \
