@@ -59,7 +59,6 @@ _ATOMIC_KIND = {
 _ATOMIC_ADDRESS_FORM = (
     ("amdgpu.ds_", AmdgpuMemoryAddressForm.DEFAULT),
     ("amdgpu.buffer_atomic_", AmdgpuMemoryAddressForm.DEFAULT),
-    ("amdgpu.global_atomic_", AmdgpuMemoryAddressForm.GLOBAL_SADDR),
     ("amdgpu.flat_atomic_", AmdgpuMemoryAddressForm.FLAT),
 )
 
@@ -77,9 +76,13 @@ _ATOMIC_CANDIDATE_MEMORY_ORDER = {
         AmdgpuMemoryAddressForm.GLOBAL_SADDR,
     ): 2,
     (
-        AmdgpuAtomicMemorySpace.GENERIC,
+        AmdgpuAtomicMemorySpace.GLOBAL,
         AmdgpuMemoryAddressForm.FLAT,
     ): 3,
+    (
+        AmdgpuAtomicMemorySpace.GENERIC,
+        AmdgpuMemoryAddressForm.FLAT,
+    ): 4,
 }
 
 _ATOMIC_CANDIDATE_OPERATION_ORDER = {
@@ -169,6 +172,12 @@ def _record_amdgpu_async_gather_candidate(
 
 
 def _atomic_address_form(descriptor_key: str) -> AmdgpuMemoryAddressForm | None:
+    if descriptor_key.startswith("amdgpu.global_atomic_"):
+        return (
+            AmdgpuMemoryAddressForm.GLOBAL_SADDR
+            if descriptor_key.endswith("_saddr")
+            else AmdgpuMemoryAddressForm.FLAT
+        )
     for prefix, address_form in _ATOMIC_ADDRESS_FORM:
         if descriptor_key.startswith(prefix):
             return address_form
@@ -183,11 +192,6 @@ def _amdgpu_atomic_candidate_from_overlay(
     address_form = _atomic_address_form(overlay.descriptor_key)
     if address_form is None:
         return None
-    if overlay.descriptor_key.startswith("amdgpu.global_atomic_") and not (
-        overlay.descriptor_key.endswith("_saddr")
-    ):
-        return None
-
     tag_parts = overlay.semantic_tag.split(".")
     if len(tag_parts) < 4 or tag_parts[0] != "memory" or tag_parts[2] != "atomic":
         return None

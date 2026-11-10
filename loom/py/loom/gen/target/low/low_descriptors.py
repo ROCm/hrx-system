@@ -31,6 +31,7 @@ from loom.gen.target.low.compiled import (
     GeneratedDescriptorSet,
     GeneratedDescriptorSetFamily,
 )
+from loom.gen.target.low.native_assembly import NativeAsmValuePool
 from loom.target.low_descriptors import (
     Descriptor,
     DescriptorSet,
@@ -364,6 +365,7 @@ def generate_descriptor_set_family(
     *,
     primary_strings: CStringBank | None = None,
     shared_strings: CStringBank | None = None,
+    native_asm_values: NativeAsmValuePool | None = None,
     identity_domain: DescriptorIdentityDomain | None = None,
 ) -> GeneratedDescriptorSetFamily:
     """Generates shared C storage and public headers for descriptor-set views."""
@@ -379,6 +381,7 @@ def generate_descriptor_set_family(
             views=descriptor_set_views,
             primary_strings=primary_strings,
             shared_strings=shared_strings,
+            native_asm_values=native_asm_values,
             identity_domain=identity_domain,
         ),
         view_headers=tuple(

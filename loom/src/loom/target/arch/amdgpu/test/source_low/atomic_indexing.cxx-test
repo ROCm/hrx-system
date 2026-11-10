@@ -1,0 +1,145 @@
+// RUN: emit source-low target=amdgpu:gfx90a output=low
+// INPUT: cxx data-model=lp64
+
+// Loaded element indices have no 32-bit range proof. Address scaling must retain
+// both words for updates and compare-exchanges alike.
+#include <hip/hip_runtime.h>
+#define KERNEL __global__ [[loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+
+KERNEL void increment(const long* indices, unsigned* counts) {
+  long index = indices[threadIdx.x];
+  __atomic_fetch_add(&counts[index], 1u, __ATOMIC_RELAXED);
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna2.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @increment() asm {
+  %workitem_id_x = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %indices = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %counts = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %44 = v_lshlrev_b32_src0_inline %workitem_id_x, 3
+  %index = global_load_dwordx2_saddr %44, %indices : reg<amdgpu.vgpr x2>
+  %46 = s_mov_b32 2
+  %50 = v_lshlrev_b64 %46, %index
+  %52 = slice %50[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %53 = slice %50[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %54 = slice %counts[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %55 = slice %counts[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %56, %57 = v_add_co_u32 %54, %52
+  %58 = v_mov_b32_copy %55
+  %59, %60 = v_addc_co_u32 %58, %53, %57
+  %61 = concat(%56, %59) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %62 = v_mov_b32 1
+  %63 = global_atomic_add_rtn_vaddr %61, %62 : reg<amdgpu.vgpr>
+  return
+}
+
+// ====
+
+#include <hip/hip_runtime.h>
+#define KERNEL __global__ [[loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+
+KERNEL void claim(const long* indices, unsigned long* words) {
+  long index = indices[threadIdx.x];
+  unsigned long expected = 0;
+  __atomic_compare_exchange_n(&words[index], &expected, 1ul, false,
+                              __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna2.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @claim() asm {
+  %workitem_id_x = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %indices = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %words = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %60 = v_lshlrev_b32_src0_inline %workitem_id_x, 3
+  %index = global_load_dwordx2_saddr %60, %indices : reg<amdgpu.vgpr x2>
+  %65 = s_mov_b32 3
+  %69 = v_lshlrev_b64 %65, %index
+  %73 = slice %69[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %74 = slice %69[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %75 = slice %words[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %76 = slice %words[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %77, %78 = v_add_co_u32 %75, %73
+  %79 = v_mov_b32_copy %76
+  %80, %81 = v_addc_co_u32 %79, %74, %78
+  %82 = concat(%77, %80) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %83 = v_mov_b32 0
+  %85 = concat(%83, %83) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %86 = v_mov_b32 1
+  %88 = concat(%86, %83) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %89 = concat(%88, %85) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %90 = global_atomic_cmpswap_x2_rtn_vaddr %82, %89 : reg<amdgpu.vgpr x2>
+  return
+}
+
+// ====
+// RUN: emit source-low target=amdgpu:gfx1200 output=low
+// INPUT: cxx data-model=lp64
+
+#include <hip/hip_runtime.h>
+#define KERNEL __global__ [[loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+
+KERNEL void increment(const long* indices, unsigned* counts) {
+  long index = indices[threadIdx.x];
+  __atomic_fetch_add(&counts[index], 1u, __ATOMIC_RELAXED);
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @increment() asm {
+  %workitem_id_x = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %indices = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %counts = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %44 = v_lshlrev_b32_src0_inline %workitem_id_x, 3
+  %index = global_load_b64_saddr %44, %indices
+  %46 = s_mov_b32 2
+  %50 = v_lshlrev_b64 %46, %index
+  %52 = slice %50[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %53 = slice %50[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %54 = slice %counts[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %55 = slice %counts[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %56, %57 = v_add_co_u32 %54, %52
+  %58 = v_mov_b32_copy %55
+  %59, %60 = v_add_co_ci_u32 %58, %53, %57
+  %61 = concat(%56, %59) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %62 = v_mov_b32 1
+  %63 = global_atomic_add_u32_rtn_vaddr %61, %62 {scope = 3}
+  return
+}
+
+// ====
+// RUN: emit source-low target=amdgpu:gfx1200 output=low
+
+#include <hip/hip_runtime.h>
+#define KERNEL __global__ [[loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+
+KERNEL void claim(const long* indices, unsigned long* words) {
+  long index = indices[threadIdx.x];
+  unsigned long expected = 0;
+  __atomic_compare_exchange_n(&words[index], &expected, 1ul, false,
+                              __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @claim() asm {
+  %workitem_id_x = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %indices = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %words = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %60 = v_lshlrev_b32_src0_inline %workitem_id_x, 3
+  %index = global_load_b64_saddr %60, %indices
+  %65 = s_mov_b32 3
+  %69 = v_lshlrev_b64 %65, %index
+  %73 = slice %69[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %74 = slice %69[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %75 = slice %words[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %76 = slice %words[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %77, %78 = v_add_co_u32 %75, %73
+  %79 = v_mov_b32_copy %76
+  %80, %81 = v_add_co_ci_u32 %79, %74, %78
+  %82 = concat(%77, %80) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %83 = v_mov_b32 0
+  %85 = concat(%83, %83) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %86 = v_mov_b32 1
+  %88 = concat(%86, %83) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %89 = concat(%88, %85) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %90 = global_atomic_cmpswap_b64_rtn_vaddr %82, %89 {scope = 3}
+  return
+}

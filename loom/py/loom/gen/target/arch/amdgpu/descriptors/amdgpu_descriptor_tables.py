@@ -38,6 +38,7 @@ from loom.gen.target.arch.amdgpu.descriptors.amdgpu_descriptors import (  # noqa
     AMDGPU_DESCRIPTOR_IDENTITY_PUBLIC_HEADER,
     AMDGPU_DESCRIPTOR_IDENTITY_TABLE_SYMBOL,
     amdgpu_descriptor_identity_domain,
+    amdgpu_descriptor_table_family_native_spans,
     amdgpu_descriptor_table_family_string_values,
 )
 from loom.gen.target.arch.amdgpu.descriptors.amdgpu_lower_capabilities import (  # noqa: E402
@@ -59,6 +60,7 @@ from loom.gen.target.arch.amdgpu.refs.amdgpu_target_refs import (  # noqa: E402
     select_target_ref_descriptor_set_infos,
 )
 from loom.gen.target.low import c_spelling  # noqa: E402
+from loom.gen.target.low.native_assembly import NativeAsmValuePool  # noqa: E402
 from loom.target.arch.amdgpu.descriptors.matrix import MATRIX_OPERAND_PLACEMENT_QUALIFICATIONS  # noqa: E402
 from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     amdgpu_descriptor_set_ordinal,
@@ -250,6 +252,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         required=True,
         help="Secondary string bank shared with descriptor tables.",
     )
+    parser.add_argument("--native-asm-values-header", type=Path, required=True)
+    parser.add_argument("--native-asm-values-source", type=Path, required=True)
+    parser.add_argument("--native-asm-values-layout", type=Path, required=True)
     args = parser.parse_args(argv)
 
     inputs = load_amdgpu_planning_table_inputs(
@@ -278,6 +283,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     write_text_file(args.descriptor_strings_header, descriptor_strings.emit_header())
     write_text_file(args.descriptor_strings_source, descriptor_strings.emit_source())
     write_text_file(args.descriptor_strings_layout, descriptor_strings.manifest())
+    native_asm_values = NativeAsmValuePool.build(
+        (
+            span
+            for storage_target in storage_generator_targets
+            for span in amdgpu_descriptor_table_family_native_spans(amdgpu_target_table_family(storage_target), inputs.descriptor_sets_by_generator_target)
+        ),
+        symbol="loom_amdgpu_native_asm_values",
+        header="loom/target/arch/amdgpu/descriptors/native_asm_values.h",
+    )
+    write_text_file(args.native_asm_values_header, native_asm_values.emit_header())
+    write_text_file(args.native_asm_values_source, native_asm_values.emit_source(descriptor_strings, descriptor_shared_strings))
+    write_text_file(args.native_asm_values_layout, native_asm_values.manifest())
     write_text_file(
         args.descriptor_identities_header,
         _descriptor_identity_header(len(amdgpu_descriptor_identity_domain().keys)),

@@ -1,7 +1,6 @@
 // Each cell isolates one integer atomic operation. Reductions run before their
 // returning forms so both packet shapes contribute to the observed result.
-func.def inline @integer_atomic_i64_cells(%initial: i64, %value: i64, %storage: buffer, %output: buffer, %output_base: offset) {
-  %storage_base = index.constant 8 : offset
+func.def inline @integer_atomic_i64_cells(%initial: i64, %value: i64, %storage: buffer, %output: buffer, %output_base: offset, %storage_base: offset) {
   %begin = index.constant 0 : index
   %end = index.constant 12 : index
   %step = index.constant 1 : index
@@ -49,17 +48,39 @@ func.def inline @integer_atomic_i64_cells(%initial: i64, %value: i64, %storage: 
   func.return
 }
 
-// Global and generic paths retain the bounded base and subview address chain.
+// Global and generic paths retain the base and subview address chain. The
+// 8 KiB origin also requires splitting the address on narrower-immediate ISAs.
 kernel.def @integer_atomic_i64() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%global_storage: buffer, %generic_storage: buffer, %output: buffer, %value: i64, %initial: i64) {
+  %storage_base = index.constant 8192 : offset
   %global_output_base = index.constant 16 : offset
   %generic_output_base = index.constant 112 : offset
   %global = buffer.assume.memory_space<global> %global_storage : buffer
   %generic = buffer.assume.memory_space<generic> %generic_storage : buffer
-  func.call @integer_atomic_i64_cells(%initial, %value, %global, %output, %global_output_base) : (i64, i64, buffer, buffer, offset)
-  func.call @integer_atomic_i64_cells(%initial, %value, %generic, %output, %generic_output_base) : (i64, i64, buffer, buffer, offset)
+  func.call @integer_atomic_i64_cells(%initial, %value, %global, %output, %global_output_base, %storage_base) : (i64, i64, buffer, buffer, offset, offset)
+  func.call @integer_atomic_i64_cells(%initial, %value, %generic, %output, %generic_output_base, %storage_base) : (i64, i64, buffer, buffer, offset, offset)
+  kernel.return
+}
+
+// The loaded byte origin remains a full-width runtime value through inlining,
+// subview formation, reductions, returning updates, and both CAS outcomes.
+kernel.def @indirect_integer_atomic_i64() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%global_storage: buffer, %generic_storage: buffer, %output: buffer, %offsets: buffer, %value: i64, %initial: i64) {
+  %c0 = index.constant 0 : offset
+  %global_output_base = index.constant 16 : offset
+  %generic_output_base = index.constant 112 : offset
+  %indices = buffer.view %offsets[%c0] : buffer -> view<1xi64>
+  %byte_offset = view.load %indices[0] : view<1xi64> -> i64
+  %nonnegative = scalar.assume %byte_offset [range(%byte_offset, 0, 9223372036854775807)] : i64
+  %storage_base = index.cast %nonnegative : i64 to offset
+  %global = buffer.assume.memory_space<global> %global_storage : buffer
+  %generic = buffer.assume.memory_space<generic> %generic_storage : buffer
+  func.call @integer_atomic_i64_cells(%initial, %value, %global, %output, %global_output_base, %storage_base) : (i64, i64, buffer, buffer, offset, offset)
+  func.call @integer_atomic_i64_cells(%initial, %value, %generic, %output, %generic_output_base, %storage_base) : (i64, i64, buffer, buffer, offset, offset)
   kernel.return
 }
 
@@ -140,8 +161,7 @@ kernel.def @workgroup_integer_atomic_i64() {
 
 // The oracle computes ordinary scalar expressions. It neither executes atomic
 // operations nor shares storage with the device invocation.
-func.def inline @integer_atomic_i64_cells_oracle(%initial: i64, %value: i64, %storage: buffer, %output: buffer, %output_base: offset) {
-  %storage_base = index.constant 8 : offset
+func.def inline @integer_atomic_i64_cells_oracle(%initial: i64, %value: i64, %storage: buffer, %output: buffer, %output_base: offset, %storage_base: offset) {
   %whole = buffer.view %storage[%storage_base] : buffer -> view<14xi64>
   %state = view.subview %whole[1] : view<14xi64> -> view<12xi64>
   %results = buffer.view %output[%output_base] : buffer -> view<12xi64>
@@ -184,10 +204,24 @@ func.def inline @integer_atomic_i64_cells_oracle(%initial: i64, %value: i64, %st
 }
 
 func.def @integer_atomic_i64_oracle(%global_storage: buffer, %generic_storage: buffer, %output: buffer, %value: i64, %initial: i64) {
+  %storage_base = index.constant 8192 : offset
   %global_output_base = index.constant 16 : offset
   %generic_output_base = index.constant 112 : offset
-  func.call @integer_atomic_i64_cells_oracle(%initial, %value, %global_storage, %output, %global_output_base) : (i64, i64, buffer, buffer, offset)
-  func.call @integer_atomic_i64_cells_oracle(%initial, %value, %generic_storage, %output, %generic_output_base) : (i64, i64, buffer, buffer, offset)
+  func.call @integer_atomic_i64_cells_oracle(%initial, %value, %global_storage, %output, %global_output_base, %storage_base) : (i64, i64, buffer, buffer, offset, offset)
+  func.call @integer_atomic_i64_cells_oracle(%initial, %value, %generic_storage, %output, %generic_output_base, %storage_base) : (i64, i64, buffer, buffer, offset, offset)
+  func.return
+}
+
+func.def @indirect_integer_atomic_i64_oracle(%global_storage: buffer, %generic_storage: buffer, %output: buffer, %offsets: buffer, %value: i64, %initial: i64) {
+  %c0 = index.constant 0 : offset
+  %global_output_base = index.constant 16 : offset
+  %generic_output_base = index.constant 112 : offset
+  %indices = buffer.view %offsets[%c0] : buffer -> view<1xi64>
+  %byte_offset = view.load %indices[0] : view<1xi64> -> i64
+  %nonnegative = scalar.assume %byte_offset [range(%byte_offset, 0, 9223372036854775807)] : i64
+  %storage_base = index.cast %nonnegative : i64 to offset
+  func.call @integer_atomic_i64_cells_oracle(%initial, %value, %global_storage, %output, %global_output_base, %storage_base) : (i64, i64, buffer, buffer, offset, offset)
+  func.call @integer_atomic_i64_cells_oracle(%initial, %value, %generic_storage, %output, %generic_output_base, %storage_base) : (i64, i64, buffer, buffer, offset, offset)
   func.return
 }
 
@@ -234,12 +268,12 @@ check.scenario @integer_atomic_i64_values {
     %value_entropy = check.entropy.fork %entropy name("global_value") : check.entropy
     %initial = check.entropy.read %initial_entropy[%trial] : check.entropy -> i64
     %value = check.entropy.read %value_entropy[%trial] : check.entropy -> i64
-    %global = check.generate.fill value(37) : tensor<16xi64>
-    %generic = check.generate.fill value(37) : tensor<16xi64>
+    %global = check.generate.fill value(37) : tensor<1040xi64>
+    %generic = check.generate.fill value(37) : tensor<1040xi64>
     %output = check.generate.fill value(-1) : tensor<28xi64>
-    check.compare<@integer_atomic_i64, @integer_atomic_i64_oracle>(%global, %generic, %output, %value, %initial) : (tensor<16xi64>, tensor<16xi64>, tensor<28xi64>, i64, i64) -> () {
-      check.expect.bitwise actual(%global) expected(%global) : tensor<16xi64>
-      check.expect.bitwise actual(%generic) expected(%generic) : tensor<16xi64>
+    check.compare<@integer_atomic_i64, @integer_atomic_i64_oracle>(%global, %generic, %output, %value, %initial) : (tensor<1040xi64>, tensor<1040xi64>, tensor<28xi64>, i64, i64) -> () {
+      check.expect.bitwise actual(%global) expected(%global) : tensor<1040xi64>
+      check.expect.bitwise actual(%generic) expected(%generic) : tensor<1040xi64>
       check.expect.bitwise actual(%output) expected(%output) : tensor<28xi64>
     }
   }
@@ -247,12 +281,12 @@ check.scenario @integer_atomic_i64_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %initial = check.literal value(-4294967297) : i64
     %value = check.literal value(4294967299) : i64
-    %global = check.generate.fill value(37) : tensor<16xi64>
-    %generic = check.generate.fill value(37) : tensor<16xi64>
+    %global = check.generate.fill value(37) : tensor<1040xi64>
+    %generic = check.generate.fill value(37) : tensor<1040xi64>
     %output = check.generate.fill value(-1) : tensor<28xi64>
-    check.compare<@integer_atomic_i64, @integer_atomic_i64_oracle>(%global, %generic, %output, %value, %initial) : (tensor<16xi64>, tensor<16xi64>, tensor<28xi64>, i64, i64) -> () {
-      check.expect.bitwise actual(%global) expected(%global) : tensor<16xi64>
-      check.expect.bitwise actual(%generic) expected(%generic) : tensor<16xi64>
+    check.compare<@integer_atomic_i64, @integer_atomic_i64_oracle>(%global, %generic, %output, %value, %initial) : (tensor<1040xi64>, tensor<1040xi64>, tensor<28xi64>, i64, i64) -> () {
+      check.expect.bitwise actual(%global) expected(%global) : tensor<1040xi64>
+      check.expect.bitwise actual(%generic) expected(%generic) : tensor<1040xi64>
       check.expect.bitwise actual(%output) expected(%output) : tensor<28xi64>
     }
   }
@@ -272,6 +306,25 @@ check.scenario @integer_atomic_i64_values {
     %output = check.generate.fill value(-1) : tensor<20xi64>
     check.compare<@workgroup_integer_atomic_i64, @workgroup_integer_atomic_i64_oracle>(%output, %value, %initial) : (tensor<20xi64>, i64, i64) -> () {
       check.expect.bitwise actual(%output) expected(%output) : tensor<20xi64>
+    }
+  }
+  check.return
+}
+
+check.scenario @indirect_integer_atomic_i64_values {
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %initial_entropy = check.entropy.fork %entropy name("initial") : check.entropy
+    %value_entropy = check.entropy.fork %entropy name("value") : check.entropy
+    %initial = check.entropy.read %initial_entropy[%trial] : check.entropy -> i64
+    %value = check.entropy.read %value_entropy[%trial] : check.entropy -> i64
+    %offsets = check.generate.fill value(16) : tensor<1xi64>
+    %global = check.generate.fill value(37) : tensor<20xi64>
+    %generic = check.generate.fill value(37) : tensor<20xi64>
+    %output = check.generate.fill value(-1) : tensor<28xi64>
+    check.compare<@indirect_integer_atomic_i64, @indirect_integer_atomic_i64_oracle>(%global, %generic, %output, %offsets, %value, %initial) : (tensor<20xi64>, tensor<20xi64>, tensor<28xi64>, tensor<1xi64>, i64, i64) -> () {
+      check.expect.bitwise actual(%global) expected(%global) : tensor<20xi64>
+      check.expect.bitwise actual(%generic) expected(%generic) : tensor<20xi64>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<28xi64>
     }
   }
   check.return

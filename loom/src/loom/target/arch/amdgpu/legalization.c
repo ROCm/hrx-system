@@ -850,20 +850,15 @@ static iree_status_t loom_amdgpu_legalize_atomic(
     };
     return iree_ok_status();
   }
-  // Narrow logical CAS uses a masked word packet and a full flat pointer for
+  // Narrow logical CAS uses a masked word packet and a full-width pointer for
   // device-visible storage. Check the same physical carrier here while the
   // shared rewrite retains the source payload and memory space.
   const bool subword =
       loom_scalar_type_bitwidth(loom_type_element_type(value_type)) < 32;
   const loom_type_t cmpxchg_type =
       subword ? loom_type_scalar(LOOM_SCALAR_TYPE_I32) : value_type;
-  const loom_value_fact_memory_space_t cmpxchg_space =
-      subword &&
-              view_reference.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL
-          ? LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC
-          : view_reference.memory_space;
   if (!loom_amdgpu_atomic_has_native_candidate(
-          context->descriptor_set, cmpxchg_space,
+          context->descriptor_set, view_reference.memory_space,
           LOOM_AMDGPU_ATOMIC_OPERATION_CMPXCHG, atomic_kind, scope,
           /*access_flags=*/0, cmpxchg_type)) {
     return iree_ok_status();

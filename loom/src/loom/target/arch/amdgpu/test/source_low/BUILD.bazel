@@ -29,6 +29,7 @@ _AMDGPU_ARTIFACT_CHECK_TESTS = [
     "low_dpp_legacy.loom-test",
     "low_exec_mask_encoding.loom-test",
     "low_f64_native_assembly_gfx942.loom-test",
+    "low_global_atomic_addresses.loom-test",
     "low_lds_pair_gfx1250.loom-test",
     "low_loop_vector_relocation.loom-test",
     "low_mask_allocation.loom-test",
@@ -109,5 +110,14 @@ loom_check_test_suite(
     srcs = _AMDGPU_ARTIFACT_CHECK_TESTS,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/emit:amdgpu_elf",
+    ]),
+)
+
+loom_check_test_suite(
+    name = "cxx_test",
+    srcs = ["atomic_indexing.cxx-test"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/arch:amdgpu",
     ]),
 )

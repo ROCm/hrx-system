@@ -8,7 +8,11 @@ from dataclasses import replace
 
 from loom.target.arch.amdgpu.descriptors.api import (
     _AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X,
+    _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS,
     _with_storage_lease_rows,
+)
+from loom.target.arch.amdgpu.descriptors.candidates import (
+    _amdgpu_atomic_candidate_from_overlay,
 )
 from loom.target.arch.amdgpu.descriptors.cdna import (
     _AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE,
@@ -19,6 +23,8 @@ from loom.target.arch.amdgpu.descriptors.common import (
     _COUNTER_VMEM_LOAD,
     _COUNTER_VMEM_STORE,
     _COUNTER_X,
+    AmdgpuAtomicMemorySpace,
+    AmdgpuMemoryAddressForm,
 )
 from loom.target.arch.amdgpu.descriptors.contracts import (
     _amdgpu_contract_descriptor_from_overlay,
@@ -38,6 +44,54 @@ from loom.target.arch.amdgpu.descriptors.sets import (
     _gfx950_core_overlays,
 )
 from loom.target.low_descriptors import MemorySpace, OperandRole, StorageLeaseKind
+
+
+def test_global_atomic_address_forms_cover_every_operation_and_target() -> None:
+    for target, builder in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS.items():
+        overlays = {
+            row.descriptor_key: row
+            for row in builder.overlay_rows()
+            if row.descriptor_key.startswith("amdgpu.global_atomic_")
+        }
+        full_address_keys = {key for key in overlays if not key.endswith("_saddr")}
+        scalar_base_keys = {
+            key.removesuffix("_saddr") for key in overlays if key.endswith("_saddr")
+        }
+        assert full_address_keys, target
+        assert full_address_keys == scalar_base_keys, target
+        for key in sorted(full_address_keys):
+            full = overlays[key]
+            scalar_base = overlays[f"{key}_saddr"]
+            assert full.instruction_name == scalar_base.instruction_name
+            assert full.semantic_tag == scalar_base.semantic_tag
+            assert full.effects == scalar_base.effects
+            assert full.immediates == scalar_base.immediates
+            assert all(
+                effect.memory_space is MemorySpace.GLOBAL for effect in full.effects
+            )
+            full_operands = {
+                row.descriptor_operand.field_name: row.descriptor_operand
+                for row in full.operands
+            }
+            scalar_operands = {
+                row.descriptor_operand.field_name: row.descriptor_operand
+                for row in scalar_base.operands
+            }
+            assert full_operands["addr"].unit_count == 2
+            assert scalar_operands["addr"].unit_count == 1
+            assert "saddr" not in full_operands
+            assert scalar_operands["saddr"].unit_count == 2
+            assert "SADDR" in dict(full.fixed_encoding_fields)
+            assert "SADDR" not in dict(scalar_base.fixed_encoding_fields)
+            full_candidate = _amdgpu_atomic_candidate_from_overlay(full)
+            scalar_candidate = _amdgpu_atomic_candidate_from_overlay(scalar_base)
+            assert full_candidate is not None
+            assert scalar_candidate is not None
+            assert full_candidate.memory_space is AmdgpuAtomicMemorySpace.GLOBAL
+            assert full_candidate.address_form is AmdgpuMemoryAddressForm.FLAT
+            assert full_candidate.operation_kind == scalar_candidate.operation_kind
+            assert full_candidate.atomic_kind == scalar_candidate.atomic_kind
+            assert full_candidate.value_kind == scalar_candidate.value_kind
 
 
 def test_cdna_global_integer_atomics_preserve_return_and_native_spelling() -> None:
