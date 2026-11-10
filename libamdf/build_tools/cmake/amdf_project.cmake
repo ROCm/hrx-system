@@ -15,6 +15,8 @@ option(AMDF_FAMILY_RDNA "Admit RDNA implementation packages." ON)
 option(AMDF_FAMILY_CDNA "Admit CDNA implementation packages." ON)
 option(AMDF_FAMILY_XDNA "Admit XDNA implementation packages." ON)
 
+option(AMDF_ROCJITSU "Build the explicit rocjitsu GPU implementation." ON)
+
 set(AMDF_VERSION "0.1.0")
 
 # The installed shared library and its public table negotiate the same ABI.

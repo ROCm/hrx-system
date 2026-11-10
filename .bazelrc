@@ -101,6 +101,7 @@ build:loom-sdk --features=dynamic_link_msvcrt_release
 build:loom-sdk --//runtime/config/hal:drivers=task,amd,vulkan
 build:loom-sdk --//libamdf/config:enabled=true
 build:loom-sdk --//libamdf/config:families=rdna,cdna,xdna
+build:loom-sdk --//libamdf/config:rocjitsu=false
 build:loom-sdk --//loom/config/arch:enable=aie2p,amdgpu,spirv,vm,x86
 build:loom-sdk --//loom/config/emit:enable=elf,spirv,vm
 build:loom-sdk --//loom/config/execute:enable=iree_hal,iree_vm

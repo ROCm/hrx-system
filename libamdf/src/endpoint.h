@@ -23,6 +23,14 @@ amdf_status_t AMDF_CALL amdf_endpoint_open(amdf_instance_t* instance,
                                            const amdf_endpoint_id_t* id,
                                            amdf_endpoint_t** out_endpoint);
 
+// Creates a configured endpoint without a native platform query handle. The
+// metadata is copied; the instance owns the borrowed binding and context
+// through endpoint close. Host PCI placement and NUMA locality are unavailable.
+amdf_status_t amdf_endpoint_create(amdf_instance_t* instance,
+                                   const amdf_endpoint_info_t* info,
+                                   const void* binding, void* context,
+                                   amdf_endpoint_t** out_endpoint);
+
 // Copies the immutable queue-family records selected during provider open.
 void amdf_endpoint_set_queue_families(
     amdf_endpoint_t* endpoint, uint32_t queue_family_count,

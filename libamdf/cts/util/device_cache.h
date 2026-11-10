@@ -26,6 +26,20 @@ class CtsDeviceCache {
   }
   amdf_native_lifetime_t native_lifetime() const { return native_lifetime_; }
 
+  // Explicit simulator bootstrap, configured before the first instance query.
+  void SetRocjitsuLibrary(const char* path) { rocjitsu_library_ = path; }
+  void AddRocjitsuConfiguration(const char* path) {
+    rocjitsu_configurations_.emplace_back(path);
+  }
+  bool has_rocjitsu_library() const { return !rocjitsu_library_.empty(); }
+  bool has_rocjitsu_configurations() const {
+    return !rocjitsu_configurations_.empty();
+  }
+  const std::string& rocjitsu_library() const { return rocjitsu_library_; }
+  const std::vector<std::string>& rocjitsu_configurations() const {
+    return rocjitsu_configurations_;
+  }
+
   // Optional canonical gfx targets accepted before any GPU is activated.
   void AddGpuTarget(const char* target) { gpu_targets_.emplace_back(target); }
   const std::vector<std::string>& gpu_targets() const { return gpu_targets_; }
@@ -39,6 +53,9 @@ class CtsDeviceCache {
   // An existing opaque selection must identify the same endpoint.
   amdf_status_t ResolveGpuEndpoint(
       const amdf_endpoint_native_identity_t& native_identity);
+  // Selects a primary target and an independent peer from the explicitly owned
+  // simulator inventory. Physical devices still require runner allocation.
+  amdf_status_t ResolveRocjitsuGpuSelection();
   // Applies primary GPU selection to every fixture that can activate a GPU.
   bool IsGpuEndpointSelected(const amdf_endpoint_id_t& id) const {
     return !gpu_endpoint_id_.has_value() ||
@@ -92,8 +109,15 @@ class CtsDeviceCache {
                           amdf_engine_kind_t engine_kind,
                           amdf_device_t** out_device);
 
+  // Adds explicit machines before publishing the cached instance.
+  amdf_status_t ConfigureRocjitsu();
+
   // Core table borrowed from the initialized CTS provider.
   const amdf_api_t* api_ = nullptr;
+  // Explicit DSO override; empty uses the adapter's normal loader precedence.
+  std::string rocjitsu_library_;
+  // Ordered configurations defining the complete simulated inventory.
+  std::vector<std::string> rocjitsu_configurations_;
   // Empty admits any target; otherwise an endpoint must match one listed
   // target.
   std::vector<std::string> gpu_targets_;

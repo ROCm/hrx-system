@@ -36,6 +36,10 @@ bool ParseEndpointId(const char* value, amdf_endpoint_id_t* out_id) {
 }
 
 bool ResolveRunnerGpuSelection() {
+  // Native runner allocation is independent of the configured simulator fabric.
+  if (GetCtsDeviceCache().has_rocjitsu_configurations()) {
+    return true;
+  }
   const char* value = std::getenv("AMDF_CTS_GPU_NATIVE_IDENTITY");
   if (value == nullptr) {
     return true;
@@ -105,6 +109,8 @@ int main(int argument_count, char** argument_values) {
   const char gpu_target_prefix[] = "--amdf_gpu_target=";
   const char gpu_endpoint_prefix[] = "--amdf_gpu_endpoint_id=";
   const char gpu_peer_endpoint_prefix[] = "--amdf_gpu_peer_endpoint_id=";
+  const char rocjitsu_library_prefix[] = "--amdf_rocjitsu_library=";
+  const char rocjitsu_configuration_prefix[] = "--amdf_rocjitsu_config=";
   std::vector<std::string> required_tests;
   for (int i = 1; i < argument_count; ++i) {
     if (std::strncmp(argument_values[i], prefix, sizeof(prefix) - 1) == 0) {
@@ -166,6 +172,27 @@ int main(int argument_count, char** argument_values) {
         return EXIT_FAILURE;
       }
       GetCtsDeviceCache().AddGpuTarget(target);
+    } else if (std::strncmp(argument_values[i], rocjitsu_library_prefix,
+                            sizeof(rocjitsu_library_prefix) - 1) == 0) {
+      const char* path =
+          argument_values[i] + sizeof(rocjitsu_library_prefix) - 1;
+      if (path[0] == 0 || GetCtsDeviceCache().has_rocjitsu_library()) {
+        std::fprintf(
+            stderr,
+            "--amdf_rocjitsu_library requires one explicit library path\n");
+        return EXIT_FAILURE;
+      }
+      GetCtsDeviceCache().SetRocjitsuLibrary(path);
+    } else if (std::strncmp(argument_values[i], rocjitsu_configuration_prefix,
+                            sizeof(rocjitsu_configuration_prefix) - 1) == 0) {
+      const char* path =
+          argument_values[i] + sizeof(rocjitsu_configuration_prefix) - 1;
+      if (path[0] == 0) {
+        std::fprintf(stderr,
+                     "--amdf_rocjitsu_config requires a configuration path\n");
+        return EXIT_FAILURE;
+      }
+      GetCtsDeviceCache().AddRocjitsuConfiguration(path);
     } else {
       continue;
     }
@@ -174,6 +201,12 @@ int main(int argument_count, char** argument_values) {
     }
     argument_values[--argument_count] = nullptr;
     --i;
+  }
+  if (GetCtsDeviceCache().has_rocjitsu_library() &&
+      !GetCtsDeviceCache().has_rocjitsu_configurations()) {
+    std::fprintf(stderr,
+                 "--amdf_rocjitsu_library requires --amdf_rocjitsu_config\n");
+    return EXIT_FAILURE;
   }
   if (!amdf_cts_provider_initialize(&argument_count, &argument_values)) {
     return EXIT_FAILURE;

@@ -52,16 +52,8 @@ struct amdf_endpoint_t {
   amdf_child_tracker_t children;
 };
 
-amdf_status_t AMDF_CALL amdf_endpoint_open(amdf_instance_t* instance,
-                                           const amdf_endpoint_id_t* id,
-                                           amdf_endpoint_t** out_endpoint) {
-  if (out_endpoint == NULL) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
-  }
-  if (instance == NULL || id == NULL) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
-  }
-
+static amdf_status_t amdf_endpoint_allocate(amdf_instance_t* instance,
+                                            amdf_endpoint_t** out_endpoint) {
   const amdf_allocator_t host_allocator =
       amdf_instance_host_allocator(instance);
   amdf_endpoint_t* endpoint = NULL;
@@ -79,19 +71,50 @@ amdf_status_t AMDF_CALL amdf_endpoint_open(amdf_instance_t* instance,
     endpoint->instance = instance;
     endpoint->info.type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO;
     endpoint->info.structure_size = sizeof(endpoint->info);
-    status = amdf_platform_endpoint_open(amdf_instance_platform(instance), id,
-                                         &endpoint->platform, &endpoint->info);
+    *out_endpoint = endpoint;
+  } else {
+    amdf_free(host_allocator, endpoint);
   }
+  return status;
+}
+
+amdf_status_t AMDF_CALL amdf_endpoint_open(amdf_instance_t* instance,
+                                           const amdf_endpoint_id_t* id,
+                                           amdf_endpoint_t** out_endpoint) {
+  if (instance == NULL || id == NULL || out_endpoint == NULL) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  amdf_endpoint_t* endpoint = NULL;
+  amdf_status_t status = amdf_endpoint_allocate(instance, &endpoint);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  status = amdf_platform_endpoint_open(amdf_instance_platform(instance), id,
+                                       &endpoint->platform, &endpoint->info);
   if (amdf_status_is_ok(status)) {
     endpoint->info.queue_family_count = 0;
     *out_endpoint = endpoint;
   } else {
-    if (endpoint->instance != NULL) {
-      amdf_instance_unregister_endpoint(endpoint->instance);
-    }
-    amdf_free(host_allocator, endpoint);
+    amdf_instance_unregister_endpoint(instance);
+    amdf_free(amdf_instance_host_allocator(instance), endpoint);
   }
   return status;
+}
+
+amdf_status_t amdf_endpoint_create(amdf_instance_t* instance,
+                                   const amdf_endpoint_info_t* info,
+                                   const void* binding, void* context,
+                                   amdf_endpoint_t** out_endpoint) {
+  amdf_endpoint_t* endpoint = NULL;
+  const amdf_status_t status = amdf_endpoint_allocate(instance, &endpoint);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  endpoint->info = *info;
+  endpoint->info.queue_family_count = 0;
+  amdf_endpoint_set_engine_binding(endpoint, binding, context);
+  *out_endpoint = endpoint;
+  return AMDF_STATUS_OK;
 }
 
 void amdf_endpoint_set_queue_families(
@@ -214,7 +237,9 @@ amdf_status_t AMDF_CALL amdf_endpoint_query_info(
           return status;
         }
         locality->numa_node =
-            amdf_platform_endpoint_host_numa_node(endpoint->platform);
+            endpoint->platform != NULL
+                ? amdf_platform_endpoint_host_numa_node(endpoint->platform)
+                : UINT32_MAX;
         break;
       }
       case AMDF_STRUCTURE_TYPE_ENDPOINT_PCI_ADDRESS: {
@@ -224,8 +249,11 @@ amdf_status_t AMDF_CALL amdf_endpoint_query_info(
         if (!amdf_status_is_ok(status)) {
           return status;
         }
+        const amdf_endpoint_pci_address_t unavailable = {0};
         const amdf_endpoint_pci_address_t* cached =
-            amdf_platform_endpoint_pci_address(endpoint->platform);
+            endpoint->platform != NULL
+                ? amdf_platform_endpoint_pci_address(endpoint->platform)
+                : &unavailable;
         address->available = cached->available;
         address->domain = cached->domain;
         address->bus = cached->bus;
@@ -278,7 +306,10 @@ amdf_status_t AMDF_CALL amdf_endpoint_close(amdf_endpoint_t* endpoint) {
   if (amdf_child_tracker_count(&endpoint->children) != 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
   }
-  const amdf_status_t status = amdf_platform_endpoint_close(endpoint->platform);
+  const amdf_status_t status =
+      endpoint->platform != NULL
+          ? amdf_platform_endpoint_close(endpoint->platform)
+          : AMDF_STATUS_OK;
   if (amdf_status_is_ok(status)) {
     const amdf_allocator_t host_allocator =
         amdf_endpoint_host_allocator(endpoint);

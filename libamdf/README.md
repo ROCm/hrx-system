@@ -130,6 +130,20 @@ A caller follows an explicit resource lifecycle:
 The [enumeration example](examples/enumerate.c) shows ABI negotiation and
 passive selection without activating a device.
 
+Linux x86-64 GPU builds also provide an optional
+[rocjitsu bootstrap extension](include/amdf/rocjitsu.h). Configure the instance
+before opening endpoints: its configured topology becomes the complete device
+inventory, and consumers then use the ordinary GPU and memory APIs. Configuration
+loads the simulator library and reads passive metadata; first device creation
+starts execution. Each configuration can contain multiple GPUs.
+
+The simulator is a separately supplied shared library, loaded through an explicit
+C API without libc interposition or signal-handler installation. An explicit
+library path takes precedence over `LIBAMDF_ROCJITSU_PATH`; otherwise the system
+loader searches for `librocjitsu.so`, including `LD_LIBRARY_PATH`. The
+[runtime package guide](../build_tools/third_party/rocjitsu/README.md) describes
+the qualified build, dependency layout, and Bazel execution inputs.
+
 Focused design documents describe the contracts:
 
 - [Discovery and activation](docs/discovery.md): passive identity and live capabilities,
@@ -236,13 +250,20 @@ Linux GPU builds contain both native KFD/DRM and WSL DXG/KMT providers in
 device service, so the same library and wheel run on native Linux and under
 WSL without a companion runtime file or deployment setting.
 
-`AMDF_BUILD` controls the CMake subtree and defaults to `OFF` unless the XDNA
-HAL driver requires it. The Bazel equivalent is
+`AMDF_BUILD` controls the CMake subtree and defaults to `OFF` unless an AMD
+HAL engine requires it. The Bazel equivalent is
 `--//libamdf/config:enabled`. RDNA, CDNA, and XDNA package admission is selected
 with the `AMDF_FAMILY_*` CMake options or the
 `--//libamdf/config:families=...` Bazel setting. Bazel implementation packages
 select individual members through `//libamdf/config/family:rdna`, `:cdna`, and
 `:xdna` without interpreting the setting themselves.
+
+The rocjitsu adapter defaults to enabled in supported development builds. It can
+be omitted with `-DAMDF_ROCJITSU=OFF` or
+`--//libamdf/config:rocjitsu=false`. The `loom-sdk` package preset selects this
+compile-out setting, including the packages measured by binary-size CI. Ordinary
+development builds retain one set of binaries for native and simulated devices;
+loading the simulator requires explicit instance configuration.
 
 Linux builds use pinned userspace driver protocol headers instead of depending
 on the host's installed DRM/KFD/XDNA header versions. These are private build

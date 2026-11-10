@@ -17,6 +17,10 @@
 #include "libamdf/src/gpu/umd/api.h"
 #endif  // AMDF_HAVE_GPU
 
+#if defined(AMDF_HAVE_ROCJITSU)
+#include "libamdf/src/gpu/umd/rocjitsu/source.h"
+#endif  // AMDF_HAVE_ROCJITSU
+
 amdf_status_t AMDF_CALL
 amdf_instance_create(const amdf_instance_create_info_t* create_info,
                      amdf_instance_t** out_instance) {
@@ -79,8 +83,11 @@ amdf_status_t AMDF_CALL amdf_instance_destroy(amdf_instance_t* instance) {
     return amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
   }
   amdf_status_t status = AMDF_STATUS_OK;
+#if defined(AMDF_HAVE_ROCJITSU)
+  status = amdf_rocjitsu_sources_destroy(instance);
+#endif  // AMDF_HAVE_ROCJITSU
 #if defined(AMDF_HAVE_GPU)
-  if (instance->gpu != NULL) {
+  if (amdf_status_is_ok(status) && instance->gpu != NULL) {
     status = instance->gpu_api->instance_destroy(instance->gpu);
     if (amdf_status_is_ok(status)) {
       instance->gpu = NULL;

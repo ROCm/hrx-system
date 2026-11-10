@@ -14,10 +14,17 @@ from loom_binary import LoomBinaryBuildFileFunctions
 
 _AMDF_CONFIG_CMAKE_OPTIONS = {
     "//libamdf/config:enabled_setting": "AMDF_BUILD",
+    "//libamdf/config:rocjitsu_enabled": "AMDF_ROCJITSU",
     "//libamdf/config/family:cdna": "AMDF_FAMILY_CDNA",
     "//libamdf/config/family:gpu": any_of("AMDF_FAMILY_RDNA", "AMDF_FAMILY_CDNA"),
     "//libamdf/config/family:rdna": "AMDF_FAMILY_RDNA",
     "//libamdf/config/family:xdna": "AMDF_FAMILY_XDNA",
+    "//libamdf/config/provider:rocjitsu": all_of(
+        "AMDF_ROCJITSU",
+        any_of("AMDF_FAMILY_RDNA", "AMDF_FAMILY_CDNA"),
+        Equal("CMAKE_SYSTEM_NAME", "Linux"),
+        Equal("IREE_ARCH", "x86_64"),
+    ),
     "//libamdf/config/provider:gpu": all_of(
         any_of("AMDF_FAMILY_RDNA", "AMDF_FAMILY_CDNA"),
         any_of(

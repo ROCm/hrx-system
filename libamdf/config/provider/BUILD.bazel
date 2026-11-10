@@ -80,3 +80,12 @@ selects.config_setting_group(
         "//libamdf/config/family:gpu",
     ],
 )
+
+selects.config_setting_group(
+    name = "rocjitsu",
+    match_all = [
+        ":linux_x86_64",
+        "//libamdf/config/family:gpu",
+        "//libamdf/config:rocjitsu_enabled",
+    ],
+)

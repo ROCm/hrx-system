@@ -1,0 +1,68 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+amdf_cc_library(
+    name = "rocjitsu",
+    srcs = [
+        "api.c",
+        "buffer.c",
+        "device.c",
+        "event.c",
+        "library.c",
+        "memory.c",
+        "source.c",
+        "user_queue.c",
+    ],
+    hdrs = [
+        "buffer.h",
+        "device.h",
+        "event.h",
+        "library.h",
+        "memory.h",
+        "source.h",
+        "user_queue.h",
+    ],
+    linkopts = [
+        "-ldl",
+        "-pthread",
+    ],
+    target_compatible_with = select({
+        "//libamdf/config/provider:rocjitsu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//libamdf/src/provider:__pkg__"],
+    deps = [
+        "//libamdf/src:allocator",
+        "//libamdf/src:atomics",
+        "//libamdf/src:child_tracker",
+        "//libamdf/src:device_state",
+        "//libamdf/src:endpoint",
+        "//libamdf/src:host_memory",
+        "//libamdf/src:instance",
+        "//libamdf/src:memory_profile",
+        "//libamdf/src:structure",
+        "//libamdf/src:wait",
+        "//libamdf/src/gpu:endpoint_profile",
+        "//libamdf/src/gpu/umd:api",
+        "//libamdf/src/gpu/umd:aql_descriptor",
+        "//libamdf/src/gpu/umd:event",
+        "//libamdf/src/gpu/umd:memory",
+        "//libamdf/src/gpu/umd:user_queue",
+        "//libamdf/src/platform",
+        "//libamdf/src/platform:wait",
+        "//libamdf/src/platform/linux:file",
+        "//third_party:linux_kfd_uapi",
+        "//third_party:rocjitsu_headers",
+    ],
+)

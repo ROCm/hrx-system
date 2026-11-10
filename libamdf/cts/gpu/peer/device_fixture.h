@@ -9,12 +9,19 @@
 
 #include "libamdf/cts/gpu/gpu_device_fixture.h"
 
-// Borrows exactly the two endpoints reserved by the runner. Endpoint IDs and
-// native correlation keys do not establish physical topology or exclusivity;
+// Borrows exactly the two endpoints selected by the invocation. Native devices
+// must be reserved by the runner; configured simulator devices are owned by the
+// invocation's instance. Endpoint IDs and native correlation keys do not
+// establish physical topology or exclusivity;
 // the runner supplies those facts through its inventory and resource lease.
 class GpuPeerDeviceFixture : public GpuDeviceFixture {
  protected:
   void SetUp() override {
+    if (GetCtsDeviceCache().has_rocjitsu_configurations() &&
+        !GetCtsDeviceCache().gpu_peer_endpoint_id().has_value()) {
+      ASSERT_EQ(GetCtsDeviceCache().ResolveRocjitsuGpuSelection(),
+                AMDF_STATUS_OK);
+    }
     if (!GetCtsDeviceCache().gpu_peer_endpoint_id().has_value()) {
       GTEST_SKIP() << "requires explicit primary and peer GPU endpoint IDs";
     }

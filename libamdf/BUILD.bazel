@@ -51,6 +51,7 @@ amdf_library(
         "include/amdf/native_event.h",
         "include/amdf/observation.h",
         "include/amdf/queue.h",
+        "include/amdf/rocjitsu.h",
         "include/amdf/xdna.h",
         "include/amdf/xdna_result.h",
         "include/amdf/xdna_trace.h",

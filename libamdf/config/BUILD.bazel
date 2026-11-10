@@ -28,3 +28,13 @@ config_setting(
     name = "enabled_setting",
     flag_values = {":enabled": "true"},
 )
+
+bool_flag(
+    name = "rocjitsu",
+    build_setting_default = True,
+)
+
+config_setting(
+    name = "rocjitsu_enabled",
+    flag_values = {":rocjitsu": "true"},
+)

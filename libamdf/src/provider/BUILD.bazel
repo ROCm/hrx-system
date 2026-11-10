@@ -24,6 +24,9 @@ amdf_cc_library(
         "//libamdf/config/provider:gpu": ["AMDF_HAVE_GPU=1"],
         "//conditions:default": [],
     }) + select({
+        "//libamdf/config/provider:rocjitsu": ["AMDF_HAVE_ROCJITSU=1"],
+        "//conditions:default": [],
+    }) + select({
         "//libamdf/config/provider:xdna": ["AMDF_HAVE_XDNA=1"],
         "//conditions:default": [],
     }),
@@ -58,6 +61,9 @@ amdf_cc_library(
             "//libamdf/src/gpu/umd:api",
             "//libamdf/src/gpu/umd:native",
         ],
+        "//conditions:default": [],
+    }) + select({
+        "//libamdf/config/provider:rocjitsu": ["//libamdf/src/gpu/umd/rocjitsu"],
         "//conditions:default": [],
     }) + select({
         "//libamdf/config/provider:xdna": [

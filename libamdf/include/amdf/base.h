@@ -100,6 +100,8 @@ enum amdf_status_domain_e {
   AMDF_STATUS_DOMAIN_WIN32 = 4,
   /// Failed Windows COM/DXGI/D3D HRESULT values.
   AMDF_STATUS_DOMAIN_HRESULT = 5,
+  /// Status reported by the explicitly loaded rocjitsu C API.
+  AMDF_STATUS_DOMAIN_ROCJITSU = 6,
 };
 
 /// Portable status code used with `AMDF_STATUS_DOMAIN_API`.
@@ -238,6 +240,8 @@ enum amdf_extension_id_e {
   AMDF_EXTENSION_GPU = 2,
   /// Portable timing and observation services, independent of device families.
   AMDF_EXTENSION_OBSERVATION = 3,
+  /// Explicit instance-owned rocjitsu configuration and device discovery.
+  AMDF_EXTENSION_ROCJITSU = 4,
 };
 
 /// Common prefix of every extensible input structure.

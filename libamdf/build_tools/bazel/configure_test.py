@@ -18,6 +18,17 @@ class LibamdfConfigureTest(unittest.TestCase):
             bazel_configure.parse_arguments(arguments)
         )
 
+    def test_rocjitsu_adapter_defaults_on_and_can_be_compiled_out(self):
+        self.assertIn("build --//libamdf/config:rocjitsu=true\n", self.generate([]))
+        for option in ("-DAMDF_ROCJITSU=OFF", "--//libamdf/config:rocjitsu=false"):
+            with self.subTest(option=option):
+                self.assertIn(
+                    "build --//libamdf/config:rocjitsu=false\n",
+                    self.generate([option]),
+                )
+        with self.assertRaisesRegex(SystemExit, "Do not mix"):
+            self.generate(["-DAMDF_ROCJITSU=OFF", "--//libamdf/config:rocjitsu=true"])
+
     def test_library_can_be_enabled_without_an_amd_hal_engine(self):
         config = self.generate(["-DIREE_HAL_DRIVER_AMD=OFF", "-DAMDF_BUILD=ON"])
 

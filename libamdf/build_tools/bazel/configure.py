@@ -28,6 +28,7 @@ FAMILY_DEFINES = {
 FAMILIES = tuple(FAMILY_DEFINES.values())
 NATIVE_ENABLED_FLAG = "--//libamdf/config:enabled"
 NATIVE_FAMILIES_FLAG = "--//libamdf/config:families"
+NATIVE_ROCJITSU_FLAG = "--//libamdf/config:rocjitsu"
 
 _NAME = "libamdf"
 
@@ -36,6 +37,10 @@ _NAME = "libamdf"
 class State:
     enabled: bool = False  # Whether the library is built.
     enabled_source: str | None = None  # Portable or native explicit selection.
+    # Compile the optional explicit simulator adapter.
+    rocjitsu: bool = True
+    # Portable or native spelling of the adapter build option.
+    rocjitsu_source: str | None = None
     # Selected implementation families.
     families: set[str] = field(default_factory=lambda: set(FAMILIES))
     family_source: str | None = None  # Portable or native family spelling.
@@ -65,10 +70,23 @@ def _set_enabled(state: State, enabled: bool, source: str) -> None:
     state.enabled_source = source
 
 
+def _set_rocjitsu(state: State, enabled: bool, source: str) -> None:
+    if state.rocjitsu_source not in (None, source):
+        raise SystemExit(
+            "Do not mix portable -DAMDF_ROCJITSU with the native "
+            f"{NATIVE_ROCJITSU_FLAG}=... Bazel option."
+        )
+    state.rocjitsu = enabled
+    state.rocjitsu_source = source
+
+
 def _apply_define(request: ConfigRequest, name: str, value: str) -> None:
     state = configuration(request)
     if name == "AMDF_BUILD":
         _set_enabled(state, parse_bool(name, value), "portable")
+        return
+    if name == "AMDF_ROCJITSU":
+        _set_rocjitsu(state, parse_bool(name, value), "portable")
         return
     family = FAMILY_DEFINES[name]
     if state.family_source == "native":
@@ -87,6 +105,9 @@ def _apply_native_option(request: ConfigRequest, name: str, value: str) -> None:
     state = configuration(request)
     if name == NATIVE_ENABLED_FLAG:
         _set_enabled(state, parse_bool(name, value), "native")
+        return
+    if name == NATIVE_ROCJITSU_FLAG:
+        _set_rocjitsu(state, parse_bool(name, value), "native")
         return
     if state.family_source == "portable":
         raise SystemExit(
@@ -128,6 +149,9 @@ def _sections(request: ConfigRequest) -> tuple[BazelrcSection, ...]:
                     "build", NATIVE_ENABLED_FLAG + "=" + str(state.enabled).lower()
                 ),
                 bazelrc_line("build", NATIVE_FAMILIES_FLAG + "=" + families),
+                bazelrc_line(
+                    "build", NATIVE_ROCJITSU_FLAG + "=" + str(state.rocjitsu).lower()
+                ),
             ),
         ),
     )
@@ -138,11 +162,13 @@ CONTRIBUTOR = Contributor(
     initialize=_initialize,
     defines={
         "AMDF_BUILD": _apply_define,
+        "AMDF_ROCJITSU": _apply_define,
         **{name: _apply_define for name in FAMILY_DEFINES},
     },
     native_options={
         NATIVE_ENABLED_FLAG: _apply_native_option,
         NATIVE_FAMILIES_FLAG: _apply_native_option,
+        NATIVE_ROCJITSU_FLAG: _apply_native_option,
     },
     finalize=_finalize,
     validate=_validate,

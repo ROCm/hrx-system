@@ -9,6 +9,7 @@
 #include <stddef.h>
 
 #include "libamdf/src/endpoint.h"
+#include "libamdf/src/instance.h"
 #include "libamdf/src/observation.h"
 
 #if defined(AMDF_HAVE_GPU)
@@ -16,22 +17,58 @@
 #include "libamdf/src/gpu/umd/native.h"
 #endif  // AMDF_HAVE_GPU
 
+#if defined(AMDF_HAVE_ROCJITSU)
+#include "libamdf/src/gpu/umd/rocjitsu/source.h"
+#endif  // AMDF_HAVE_ROCJITSU
+
 #if defined(AMDF_HAVE_XDNA)
 #include "libamdf/src/xdna/device_profile.h"
 #include "libamdf/src/xdna/extension.h"
 #endif  // AMDF_HAVE_XDNA
 
+amdf_status_t AMDF_CALL amdf_provider_endpoint_enumerate(
+    amdf_instance_t* instance, uint32_t capacity,
+    amdf_endpoint_summary_t* summaries, uint32_t* out_count) {
+  if (instance == NULL || out_count == NULL ||
+      (capacity != 0 && summaries == NULL)) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+#if defined(AMDF_HAVE_ROCJITSU)
+  if (instance->rocjitsu_source_count != 0) {
+    const uint32_t count =
+        amdf_rocjitsu_endpoint_enumerate(instance, capacity, summaries);
+    *out_count = count;
+    return capacity != 0 && capacity < count
+               ? amdf_make_api_status(AMDF_STATUS_CODE_BUFFER_TOO_SMALL)
+               : AMDF_STATUS_OK;
+  }
+#endif  // AMDF_HAVE_ROCJITSU
+  return amdf_endpoint_enumerate(instance, capacity, summaries, out_count);
+}
+
 amdf_status_t AMDF_CALL amdf_provider_endpoint_open(
     amdf_instance_t* instance, const amdf_endpoint_id_t* id,
     amdf_endpoint_t** out_endpoint) {
-  const amdf_status_t status = amdf_endpoint_open(instance, id, out_endpoint);
+  if (instance == NULL || id == NULL || out_endpoint == NULL) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  amdf_status_t status;
+#if defined(AMDF_HAVE_ROCJITSU)
+  if (instance->rocjitsu_source_count != 0) {
+    status = amdf_rocjitsu_endpoint_open(instance, id, out_endpoint);
+  } else
+#endif  // AMDF_HAVE_ROCJITSU
+  {
+    status = amdf_endpoint_open(instance, id, out_endpoint);
+  }
   if (!amdf_status_is_ok(status)) {
     return status;
   }
 
 #if defined(AMDF_HAVE_GPU)
   if (amdf_endpoint_get_cached_info(*out_endpoint)->engine_kind ==
-      AMDF_ENGINE_KIND_GPU) {
+          AMDF_ENGINE_KIND_GPU &&
+      amdf_endpoint_get_platform(*out_endpoint) != NULL) {
     amdf_platform_endpoint_t* platform =
         amdf_endpoint_get_platform(*out_endpoint);
     amdf_endpoint_set_engine_binding(
@@ -63,6 +100,11 @@ amdf_status_t AMDF_CALL amdf_extension_query(amdf_extension_id_t extension_id,
   }
 
   switch (extension_id) {
+#if defined(AMDF_HAVE_ROCJITSU)
+    case AMDF_EXTENSION_ROCJITSU:
+      return amdf_rocjitsu_extension_query(minimum_version, maximum_version,
+                                           out_extension_api);
+#endif  // AMDF_HAVE_ROCJITSU
     case AMDF_EXTENSION_OBSERVATION:
       return amdf_observation_extension_query(minimum_version, maximum_version,
                                               out_extension_api);

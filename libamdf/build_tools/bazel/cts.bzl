@@ -78,6 +78,8 @@ def amdf_cts_test_suite(
             deps = common_deps + ["//libamdf/cts/util:" + mode + "_provider"],
             tags = corpus_tags,
             target_compatible_with = target_compatible_with,
+            # Invocation leaves reuse this corpus with their execution inputs.
+            visibility = ["//libamdf/cts:__subpackages__"],
         )
         provider_args = []
         if mode == "dynamic":

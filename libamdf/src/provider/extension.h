@@ -13,6 +13,11 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Enumerates the instance's complete native or explicitly configured inventory.
+amdf_status_t AMDF_CALL amdf_provider_endpoint_enumerate(
+    amdf_instance_t* instance, uint32_t capacity,
+    amdf_endpoint_summary_t* summaries, uint32_t* out_count);
+
 // Opens one endpoint and composes all compiled engine queue families.
 amdf_status_t AMDF_CALL amdf_provider_endpoint_open(
     amdf_instance_t* instance, const amdf_endpoint_id_t* id,

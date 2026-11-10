@@ -1,0 +1,134 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# Bazel execution inputs wrap the ordinary CMake-compatible CTS binaries.
+# bazel-to-cmake: skip
+
+load("//libamdf/build_tools/bazel:rocjitsu.bzl", "amdf_rocjitsu_cts_invocation")
+load("//libamdf/requirements:defs.bzl", "AMDGPU_RESOURCE")
+
+package(default_visibility = ["//visibility:public"])
+
+_PROFILES = {
+    "gfx1100": "gfx1100_four_gpu.json",
+    "gfx1151": "gfx1151_four_gpu.json",
+    "gfx1201": "gfx1201_four_gpu.json",
+    "gfx1250": "gfx1250_two_gpu.json",
+    "gfx942": "gfx942_two_gpu.json",
+    "gfx950": "gfx950_two_gpu.json",
+}
+
+[
+    amdf_rocjitsu_cts_invocation(
+        name = corpus + "_" + target,
+        src = src,
+        configurations = ["//build_tools/third_party/rocjitsu/profiles:" + configuration],
+        gpu_target = target,
+        required_tests = required_tests,
+        tags = ["manual"],
+    )
+    for corpus, (src, required_tests) in {
+        "gpu": (
+            "//libamdf/cts/gpu:gpu_extension_dynamic_bin",
+            [
+                "GpuEndpointTest.CreatesReclaimableDevicesFromOneEndpoint",
+                "GpuEventTest.HostSignalRacesNativeWaitEntry",
+            ],
+        ),
+        "memory": (
+            "//libamdf/cts/gpu/linux:memory_dynamic_bin",
+            [
+                "GpuLinuxMemoryTest.OwnsAlignedSystemMemoryAndBorrowedHostViews",
+                "GpuLinuxMemoryTest.BufferedFileIoUsesOwnedSystemMemory",
+                "GpuLinuxMemoryTest.HonorsExactSystemDeviceAccess",
+                "GpuLinuxMemoryTest.HonorsLocalPlacementCapabilities",
+            ],
+        ),
+        "peer": (
+            "//libamdf/cts/gpu/peer:peer_dynamic_bin",
+            [
+                "Acquisition/GpuMemoryGroupTest.OneBackingForTwoPhysicalConsumers/SystemCreate",
+                "Acquisition/GpuMemoryGroupTest.OneBackingForTwoPhysicalConsumers/LocalCreate",
+            ],
+        ),
+        "peer_aql": (
+            "//libamdf/cts/gpu/peer/aql:aql_dynamic_bin",
+            [
+                "PeerAqlMemoryTest.NativeSignalsAcrossBothDevices",
+                "Placement/PeerAqlLocalMemoryTest.TransformAcrossPhysicalDevices/Owner0Producer0",
+                "Placement/PeerAqlLocalMemoryTest.TransformAcrossPhysicalDevices/Owner0Producer1",
+                "Placement/PeerAqlLocalMemoryTest.TransformAcrossPhysicalDevices/Owner1Producer0",
+                "Placement/PeerAqlLocalMemoryTest.TransformAcrossPhysicalDevices/Owner1Producer1",
+            ],
+        ),
+    }.items()
+    for target, configuration in _PROFILES.items()
+]
+
+[
+    amdf_rocjitsu_cts_invocation(
+        name = "lifecycle_" + target,
+        src = "//libamdf/cts/gpu/rocjitsu:rocjitsu_dynamic_bin",
+        configurations = ["//build_tools/third_party/rocjitsu/profiles:" + configuration],
+        gpu_target = target,
+        required_tests = [
+            "RocjitsuTest.LeavesDescriptorBudgetUnderHostControl",
+            "RocjitsuTest.ValidatesBootstrapWithoutPublishingPartialMachines",
+            "RocjitsuTest.ResolvesExplicitEnvironmentAndLoaderLibraryPaths",
+            "Protocols/RocjitsuQueueTest.IndependentMachinesSurviveQueueAndPeerTeardown/Aql",
+        ],
+        tags = ["manual"],
+    )
+    for target, configuration in _PROFILES.items()
+]
+
+amdf_rocjitsu_cts_invocation(
+    name = "lifecycle_gfx1151_native_host",
+    src = "//libamdf/cts/gpu/rocjitsu:rocjitsu_dynamic_bin",
+    configurations = ["//build_tools/third_party/rocjitsu/profiles:gfx1151_four_gpu.json"],
+    gpu_target = "gfx1151",
+    required_tests = [
+        "RocjitsuTest.NativeEndpointsRemainScopedToNativeInstances",
+        "Protocols/RocjitsuQueueTest.IndependentMachinesSurviveQueueAndPeerTeardown/Aql",
+    ],
+    run_requirements = [AMDGPU_RESOURCE],
+    tags = ["manual"],
+)
+
+[
+    amdf_rocjitsu_cts_invocation(
+        name = "aql_" + target,
+        src = "//libamdf/cts/gpu/aql:aql_dynamic_bin",
+        configurations = ["//build_tools/third_party/rocjitsu/profiles:" + configuration],
+        gpu_target = target,
+        required_tests = [
+            "AqlDispatchTest.CoherentSystemPayloadChangesAcrossEpochs",
+            "AqlQueueTest.MultipleProducersReserveAndPublishIndependently",
+            "Publication/AqlDevicePublicationTest.DevicePublishesIndirectDispatchAcrossRingWrap/ReservedSuccessor",
+            "Publication/AqlDevicePublicationTest.DevicePublishesIndirectDispatchAcrossRingWrap/DeviceDoorbell",
+            "InitialBacking/AqlScratchServiceTest.FirmwareRequestsBackingAndReleasesPreviousRange/Empty",
+            "InitialBacking/AqlScratchServiceTest.FirmwareRequestsBackingAndReleasesPreviousRange/Smaller",
+        ],
+        tags = ["manual"],
+    )
+    for target, configuration in _PROFILES.items()
+]
+
+[
+    amdf_rocjitsu_cts_invocation(
+        name = "pm4_" + target,
+        src = "//libamdf/cts/gpu/pm4:pm4_dynamic_bin",
+        configurations = ["//build_tools/third_party/rocjitsu/profiles:" + _PROFILES[target]],
+        gpu_target = target,
+        required_tests = ["Pm4DispatchTest.PrivateStorageReplacementAndReuseAcrossQueues"],
+        tags = ["manual"],
+    )
+    for target in [
+        "gfx1100",
+        "gfx1151",
+        "gfx1201",
+    ]
+]
