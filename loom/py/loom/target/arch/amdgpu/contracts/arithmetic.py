@@ -242,11 +242,13 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.v_and_b32.src0_inline",
     "amdgpu.v_and_b32.lit",
     "amdgpu.v_or_b32",
+    "amdgpu.v_or_b32.src0_inline",
     "amdgpu.v_or_b32.lit",
     "amdgpu.v_cmp_ogt_f32",
     "amdgpu.v_cmp_olt_f32",
     "amdgpu.v_cmp_uno_f32",
     "amdgpu.v_xor_b32",
+    "amdgpu.v_xor_b32.src0_inline",
     "amdgpu.v_xor_b32.lit",
     "amdgpu.v_lshlrev_b32",
     "amdgpu.v_lshlrev_b32.src0_inline",
@@ -3211,6 +3213,24 @@ def _constant_binary_rule(
     )
 
 
+def _commutative_constant_binary_rules(
+    source_op: Op, descriptor_key: str
+) -> tuple[DescriptorRule, ...]:
+    return tuple(
+        _constant_binary_rule(
+            source_op,
+            f"{descriptor_key}.{suffix}",
+            literal_source=literal_source,
+            nonliteral_source=nonliteral_source,
+            extra_guards=(Guard.value_i64_range(literal_source, 0, 64),)
+            if suffix == "src0_inline"
+            else (),
+        )
+        for suffix in ("src0_inline", "lit")
+        for literal_source, nonliteral_source in (("lhs", "rhs"), ("rhs", "lhs"))
+    )
+
+
 def _f32_literal_binary_rule(
     source_op: Op,
     type_pattern: TypePattern,
@@ -4908,18 +4928,7 @@ def _rules() -> tuple[ContractCase, ...]:
     rules.extend(
         (
             *packed_i8_add_rules(_DESCRIPTOR_SET),
-            _constant_binary_rule(
-                vector.vector_addi,
-                "amdgpu.v_add_u32.lit",
-                literal_source="lhs",
-                nonliteral_source="rhs",
-            ),
-            _constant_binary_rule(
-                vector.vector_addi,
-                "amdgpu.v_add_u32.lit",
-                literal_source="rhs",
-                nonliteral_source="lhs",
-            ),
+            *_commutative_constant_binary_rules(vector.vector_addi, "amdgpu.v_add_u32"),
             _binary_rule(
                 vector.vector_addi,
                 _VEC_I32_STATIC,
@@ -4992,18 +5001,7 @@ def _rules() -> tuple[ContractCase, ...]:
         )
         rules.extend(
             (
-                _constant_binary_rule(
-                    source_op,
-                    f"{descriptor_key}.lit",
-                    literal_source="lhs",
-                    nonliteral_source="rhs",
-                ),
-                _constant_binary_rule(
-                    source_op,
-                    f"{descriptor_key}.lit",
-                    literal_source="rhs",
-                    nonliteral_source="lhs",
-                ),
+                *_commutative_constant_binary_rules(source_op, descriptor_key),
                 _binary_rule(
                     source_op,
                     _VEC_I32_STATIC,

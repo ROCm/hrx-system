@@ -135,6 +135,59 @@ check.scenario @vector_i64_bitwise_values {
   check.return
 }
 
+// Odd-width vectors keep each lane observable across small positive constants
+// and larger or negative bit patterns. The VM oracle evaluates the source
+// operations independently of native immediate encoding and operand placement.
+func.def @vector_i32_constant_operands(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<7xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<77xi32>
+  %values = vector.load %source[0] : view<7xi32> -> vector<7xi32>
+  %c1 = vector.splati 1 : vector<7xi32>
+  %c64 = vector.splati 64 : vector<7xi32>
+  %c65 = vector.splati 65 : vector<7xi32>
+  %negative = vector.splati -17 : vector<7xi32>
+
+  %and_right = vector.andi %values, %c1 : vector<7xi32>
+  %and_left = vector.andi %c64, %values : vector<7xi32>
+  %or_right = vector.ori %values, %c1 : vector<7xi32>
+  %or_left = vector.ori %c64, %values : vector<7xi32>
+  %xor_right = vector.xori %values, %c1 : vector<7xi32>
+  %xor_left = vector.xori %c64, %values : vector<7xi32>
+  %and_literal = vector.andi %values, %c65 : vector<7xi32>
+  %or_literal = vector.ori %negative, %values : vector<7xi32>
+  %xor_literal = vector.xori %values, %c65 : vector<7xi32>
+  %add_right = vector.addi %values, %c1 : vector<7xi32>
+  %add_left = vector.addi %c64, %values : vector<7xi32>
+
+  vector.store %and_right, %destination[0] : vector<7xi32>, view<77xi32>
+  vector.store %and_left, %destination[7] : vector<7xi32>, view<77xi32>
+  vector.store %or_right, %destination[14] : vector<7xi32>, view<77xi32>
+  vector.store %or_left, %destination[21] : vector<7xi32>, view<77xi32>
+  vector.store %xor_right, %destination[28] : vector<7xi32>, view<77xi32>
+  vector.store %xor_left, %destination[35] : vector<7xi32>, view<77xi32>
+  vector.store %and_literal, %destination[42] : vector<7xi32>, view<77xi32>
+  vector.store %or_literal, %destination[49] : vector<7xi32>, view<77xi32>
+  vector.store %xor_literal, %destination[56] : vector<7xi32>, view<77xi32>
+  vector.store %add_right, %destination[63] : vector<7xi32>, view<77xi32>
+  vector.store %add_left, %destination[70] : vector<7xi32>, view<77xi32>
+  func.return
+}
+
+check.scenario @vector_i32_constant_operand_values {
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<7xi32>
+    %storage = check.generate.fill value(-123) : tensor<85xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<85xi32> -> tensor<77xi32>
+    check.compare<@vector_i32_constant_operands>(%input, %output) : (tensor<7xi32>, tensor<77xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<7xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<85xi32>
+    }
+  }
+  check.return
+}
+
 // Uniform shifts exercise every valid runtime count and a constant count.
 // The VM oracle evaluates the source lane operations independently of the
 // target's packed instruction and scalar-count selection.

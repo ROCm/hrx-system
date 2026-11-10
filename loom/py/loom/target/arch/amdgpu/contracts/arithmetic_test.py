@@ -39,6 +39,7 @@ from loom.target.contracts import (
     SourceValueKind,
     TypePattern,
     UnsignedDivisorMagicKind,
+    Vector,
     View,
     compile_lower_rule_set,
 )
@@ -737,6 +738,59 @@ def test_scalar_i32_bitwise_rules_prefer_encoded_constants() -> None:
             (f"amdgpu.s_{suffix}",),
             (f"amdgpu.v_{suffix}",),
         )
+
+
+def test_vector_i32_constants_prefer_inline_without_changing_operand_storage() -> None:
+    compiled = _COMPILED_ARITHMETIC_RULES
+    word_vectors = Vector(
+        "i32",
+        minimum_static_elements=1,
+        maximum_static_elements="LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES",
+    )
+    for source_op, mnemonic in (
+        (vector.vector_addi, "add_u32"),
+        (vector.vector_andi, "and_b32"),
+        (vector.vector_ori, "or_b32"),
+        (vector.vector_xori, "xor_b32"),
+    ):
+        rules = tuple(
+            rule
+            for rule in _rules_for_source_op(compiled, source_op)
+            if set(_rule_type_patterns(compiled, rule)) == {word_vectors}
+        )
+        assert tuple(_rule_descriptor_keys(compiled, rule) for rule in rules) == (
+            (f"amdgpu.v_{mnemonic}.src0_inline",),
+            (f"amdgpu.v_{mnemonic}.src0_inline",),
+            (f"amdgpu.v_{mnemonic}.lit",),
+            (f"amdgpu.v_{mnemonic}.lit",),
+            (f"amdgpu.v_{mnemonic}",),
+        )
+        for ordinal, rule in enumerate(rules[:4]):
+            guards = compiled.guards[
+                rule.guard_start : rule.guard_start + rule.guard_count
+            ]
+            exact = next(
+                guard for guard in guards if guard.kind == GuardKind.VALUE_EXACT_I64
+            )
+            constant = compiled.value_refs[exact.value_ref_index]
+            assert constant.kind == SourceValueKind.OPERAND
+            assert constant.index == ordinal % 2
+            ranges = tuple(
+                guard for guard in guards if guard.kind == GuardKind.VALUE_I64_RANGE
+            )
+            assert len(ranges) == (1 if ordinal < 2 else 0)
+            if ranges:
+                assert ranges[0].value_ref_index == exact.value_ref_index
+                assert (ranges[0].minimum_i64, ranges[0].maximum_i64) == (0, 64)
+            emit = compiled.emits[rule.emit_start]
+            assert emit.operand_ref_count == 1
+            operand = compiled.value_refs[emit.operand_ref_start]
+            assert operand.kind == SourceValueKind.OPERAND
+            assert operand.index == 1 - constant.index
+            assert operand.materializer_index != 0
+            projection = compiled.attr_copies[emit.attr_copy_start]
+            assert projection.kind == LowerAttrCopyKind.VALUE_I32_AS_U32_BITS
+            assert projection.value_ref_index == exact.value_ref_index
 
 
 def test_scalar_i64_bitwise_preserves_either_uniform_source() -> None:
