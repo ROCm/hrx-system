@@ -153,10 +153,8 @@ class DeferredPackageBackend:
 
 def register_builtin_backends(registry: BackendRegistry) -> None:
     from loom.importers.check.mlir.backend import MlirBackend
-    from loom.importers.check.tilelang.backend import TileLangBackend
 
     registry.register(MlirBackend())
-    registry.register(TileLangBackend())
     registry.register(
         DeferredPackageBackend(
             name="triton",

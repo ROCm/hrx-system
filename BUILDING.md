@@ -968,7 +968,7 @@ select only the capabilities they consume.
 Importers are optional. The native [C/C++ importer](loom/src/loom/import/cxx/README.md)
 uses `--config=loom-importer-cxx` with Bazel or `-DLOOM_IMPORT_CXX=ON` with
 CMake. The [Python importer guide](loom/py/loom/importers/README.md) covers
-TileLang and MLIR, including their separate managed Python environments:
+MLIR and its separate managed Python environment:
 
 ```bash
 python dev.py importers setup mlir

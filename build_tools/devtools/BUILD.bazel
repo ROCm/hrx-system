@@ -282,7 +282,7 @@ py_test(
         "setup.py",
     ],
     data = [
-        "//:requirements-importers-tilelang.lock.txt",
+        "//:requirements-importers-mlir.lock.txt",
         "//build_tools/bin:devtools_wrappers",
         "//loom/binding/c:BUILD.bazel",
     ],

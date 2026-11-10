@@ -82,22 +82,6 @@ IMPORTER_ENVIRONMENTS: dict[str, ImporterEnvironmentSpec] = {
         bazel_config="loom-importer-mlir",
         cmake_options=("LOOM_IMPORT_MLIR=ON",),
     ),
-    "tilelang": ImporterEnvironmentSpec(
-        name="tilelang",
-        lock_file=REPO_ROOT / "requirements-importers-tilelang.lock.txt",
-        import_modules=(
-            "tilelang",
-            "tilelang.language",
-            "torch",
-            "tvm",
-            "tvm.tirx",
-            "tvm.te",
-            "tvm_ffi",
-        ),
-        python_version="3.12",
-        bazel_config="loom-importer-tilelang",
-        cmake_options=("LOOM_IMPORT_TILELANG=ON",),
-    ),
 }
 
 

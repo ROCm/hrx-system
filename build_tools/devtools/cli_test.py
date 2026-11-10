@@ -58,7 +58,7 @@ class CliTest(unittest.TestCase):
     def importer_manifest_patch(self):
         return mock.patch(
             "build_tools.devtools.importers.selected_manifests",
-            return_value=({"site_packages": "/tmp/loom-tilelang-site"},),
+            return_value=({"site_packages": "/tmp/loom-mlir-site"},),
         )
 
     def test_root_setup_can_add_optional_docs_toolchain(self):
@@ -107,14 +107,14 @@ class CliTest(unittest.TestCase):
         )
 
     def test_importers_setup_uses_locked_requirements(self):
-        args = cli.parse_arguments(["importers", "setup", "tilelang"])
+        args = cli.parse_arguments(["importers", "setup", "mlir"])
 
         plan = args.handler(args)
         description = normalized_plan_description(plan)
 
-        self.assertIn(".tmp/importers/tilelang/venv", description)
+        self.assertIn(".tmp/importers/mlir/venv", description)
         self.assertIn("pip install --require-hashes --only-binary=:all:", description)
-        self.assertIn("requirements-importers-tilelang.lock.txt", description)
+        self.assertIn("requirements-importers-mlir.lock.txt", description)
 
     def test_importers_setup_uses_locked_python_abi(self):
         with (
@@ -129,15 +129,15 @@ class CliTest(unittest.TestCase):
                 return_value="/tools/python3.12",
             ),
         ):
-            args = cli.parse_arguments(["importers", "setup", "tilelang"])
+            args = cli.parse_arguments(["importers", "setup", "mlir"])
             plan = args.handler(args)
 
         description = normalized_plan_description(plan)
         self.assertIn("/tools/python3.12 -m venv", description)
-        self.assertIn(".tmp/importers/tilelang/venv-3.12", description)
+        self.assertIn(".tmp/importers/mlir/venv-3.12", description)
 
     def test_importers_reject_manifest_from_wrong_python_abi(self):
-        importer_spec = importers.spec("tilelang")
+        importer_spec = importers.spec("mlir")
         manifest = {
             "lock_sha256": importers.lock_hash(importer_spec),
             "ok": True,
@@ -155,12 +155,12 @@ class CliTest(unittest.TestCase):
             importers.load_manifest(importer_spec)
 
     def test_importers_env_prints_manifest(self):
-        args = cli.parse_arguments(["importers", "env", "tilelang", "--format=shell"])
+        args = cli.parse_arguments(["importers", "env", "mlir", "--format=shell"])
 
         plan = args.handler(args)
         description = normalized_plan_description(plan)
 
-        self.assertIn("# print importer environment tilelang manifest", description)
+        self.assertIn("# print importer environment mlir manifest", description)
 
     def test_cmake_configure_forwards_options_without_separator(self):
         args = cli.parse_arguments(["cmake", "configure", "--fresh"])
@@ -219,12 +219,12 @@ class CliTest(unittest.TestCase):
         self.assertIn("-DLOOM_TARGET_ALL_AMD_GPU=ON", description)
 
     def test_bazel_configure_accepts_importer_environment(self):
-        args = cli.parse_arguments(["bazel", "configure", "--importer-env", "tilelang"])
+        args = cli.parse_arguments(["bazel", "configure", "--importer-env", "mlir"])
 
         plan = args.handler(args)
         description = plan.describe()
 
-        self.assertIn("-DLOOM_IMPORT_TILELANG=ON", description)
+        self.assertIn("-DLOOM_IMPORT_MLIR=ON", description)
 
     def test_bazel_configure_accepts_native_driver_options(self):
         args = cli.parse_arguments(
@@ -280,37 +280,35 @@ class CliTest(unittest.TestCase):
                     "bazel",
                     "test",
                     "--importer-env",
-                    "tilelang",
-                    "//loom/py/loom/importers/tilelang:tilelang_import_test",
+                    "mlir",
+                    "//loom/py/loom/importers/mlir:mlir_import_test",
                 ]
             )
             plan = args.handler(args)
 
         description = plan.describe()
-        self.assertIn("--config=loom-importer-tilelang", description)
-        self.assertIn("--test_env=PYTHONPATH=/tmp/loom-tilelang-site", description)
+        self.assertIn("--config=loom-importer-mlir", description)
+        self.assertIn("--test_env=PYTHONPATH=/tmp/loom-mlir-site", description)
         self.assertIn(
-            "//loom/py/loom/importers/tilelang:tilelang_import_test",
+            "//loom/py/loom/importers/mlir:mlir_import_test",
             description,
         )
 
-    def test_bazel_test_all_importer_environments_use_aggregate_config(self):
+    def test_bazel_test_all_importer_environments_use_selected_config(self):
         with self.importer_manifest_patch():
             args = cli.parse_arguments(
                 [
                     "bazel",
                     "test",
                     "--importer-env",
-                    "mlir,tilelang",
+                    "all",
                     "//loom/py/loom/importers/...",
                 ]
             )
             plan = args.handler(args)
 
         description = plan.describe()
-        self.assertIn("--config=loom-importers", description)
-        self.assertNotIn("--config=loom-importer-mlir", description)
-        self.assertNotIn("--config=loom-importer-tilelang", description)
+        self.assertIn("--config=loom-importer-mlir", description)
 
     def test_bazel_build_preserves_negative_target_separator(self):
         argv = self.planned_argv(
@@ -486,7 +484,7 @@ class CliTest(unittest.TestCase):
                 [
                     "bazel",
                     "run",
-                    "--importer-env=tilelang",
+                    "--importer-env=mlir",
                     "//loom/py/loom/importers/check:loom_import_check",
                     "--",
                     "--list-importers",
@@ -495,10 +493,10 @@ class CliTest(unittest.TestCase):
             plan = args.handler(args)
 
         description = normalized_plan_description(plan)
-        self.assertIn("--config=loom-importer-tilelang", description)
+        self.assertIn("--config=loom-importer-mlir", description)
         self.assertEqual(
             plan.steps[0].env.get("PYTHONPATH", "").split(os.pathsep)[0],
-            "/tmp/loom-tilelang-site",
+            "/tmp/loom-mlir-site",
         )
 
     def test_bazel_run_can_print_resolved_executable_path(self):
@@ -562,25 +560,23 @@ class CliTest(unittest.TestCase):
 
     def test_cmake_configure_importer_environment_adds_option_and_pythonpath(self):
         with self.importer_manifest_patch():
-            args = cli.parse_arguments(
-                ["cmake", "configure", "--importer-env=tilelang"]
-            )
+            args = cli.parse_arguments(["cmake", "configure", "--importer-env=mlir"])
             plan = args.handler(args)
 
         description = plan.describe()
-        self.assertIn("-DLOOM_IMPORT_TILELANG=ON", description)
-        self.assertIn("PYTHONPATH=/tmp/loom-tilelang-site", description)
+        self.assertIn("-DLOOM_IMPORT_MLIR=ON", description)
+        self.assertIn("PYTHONPATH=/tmp/loom-mlir-site", description)
 
     def test_cmake_test_importer_environment_adds_pythonpath(self):
         with self.importer_manifest_patch():
             args = cli.parse_arguments(
-                ["cmake", "test", "--importer-env", "tilelang", "-R", "tilelang"]
+                ["cmake", "test", "--importer-env", "mlir", "-R", "mlir"]
             )
             plan = args.handler(args)
 
         description = plan.describe()
-        self.assertIn("PYTHONPATH=/tmp/loom-tilelang-site", description)
-        self.assertIn("-R tilelang", description)
+        self.assertIn("PYTHONPATH=/tmp/loom-mlir-site", description)
+        self.assertIn("-R mlir", description)
 
     def test_cmake_build_importer_environment_adds_pythonpath(self):
         with (
@@ -594,14 +590,14 @@ class CliTest(unittest.TestCase):
                     "cmake",
                     "build",
                     "--importer-env",
-                    "tilelang",
+                    "mlir",
                     "loom-opt",
                 ]
             )
             plan = args.handler(args)
 
         description = plan.describe()
-        self.assertIn("PYTHONPATH=/tmp/loom-tilelang-site", description)
+        self.assertIn("PYTHONPATH=/tmp/loom-mlir-site", description)
         self.assertIn("--target loom-opt", description)
 
     def test_bazel_try_preserves_local_input_paths(self):

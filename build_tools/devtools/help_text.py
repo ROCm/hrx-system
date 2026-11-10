@@ -29,7 +29,7 @@ ROOT_COMMAND_EPILOG = """Common build-system commands:
   python dev.py bazel fuzz
   python dev.py bazel compile-commands
   python dev.py bazel clang-tidy
-  python dev.py importers setup tilelang
+  python dev.py importers setup mlir
   python dev.py docs build
   python dev.py docs serve
 
@@ -79,11 +79,8 @@ tool environment.""",
         return CommandHelp(
             description="Manage optional importer Python environments.",
             epilog="""Examples:
-  python dev.py importers setup tilelang
   python dev.py importers setup mlir
-  python dev.py importers doctor tilelang
   python dev.py importers doctor mlir
-  python dev.py importers env tilelang
   python dev.py importers env mlir --format shell
 
 Importer environments are explicit, locked Python environments under .tmp/.
@@ -171,7 +168,6 @@ active.""",
   python dev.py bazel configure -DIREE_HAL_DRIVER_AMD=OFF
   python dev.py bazel configure --config=loom-target-amd-gpu
   python dev.py bazel configure --config=loom-target-all
-  python dev.py bazel configure --importer-env tilelang
   python dev.py bazel configure --importer-env mlir
   python dev.py bazel configure --//runtime/config/hal:drivers=amd-gpu,task
 
@@ -195,7 +191,6 @@ without adding frontend packages to the base module lock.""",
   python dev.py cmake configure -DIREE_HAL_DRIVER_AMD=OFF -DLIBHRX_BUILD=OFF
   python dev.py cmake configure -DLOOM_TARGET_ALL_CPU=ON
   python dev.py cmake configure -DLOOM_TARGET_ALL=ON
-  python dev.py cmake configure --importer-env tilelang
   python dev.py cmake configure --importer-env mlir
   python dev.py --cmake-build-dir build/cmake-asan cmake configure -DIREE_ENABLE_ASAN=ON
 
@@ -242,7 +237,6 @@ CMake.""",
   python dev.py bazel test
   python dev.py bazel test //build_tools/devtools:cli_test
   python dev.py bazel test //libhrx/...
-  python dev.py bazel test --importer-env tilelang //loom/py/loom/importers/tilelang:tilelang_import_test
   python dev.py bazel test --importer-env mlir //loom/py/loom/importers/mlir:mlir_import_test
 
 `--importer-env <name>` selects the Bazel importer config and forwards the
@@ -255,7 +249,6 @@ locked importer site-packages path through Bazel test_env.""",
   python dev.py cmake test
   python dev.py cmake test -R hrx
   python dev.py cmake test --rerun-failed
-  python dev.py cmake test --importer-env tilelang -R tilelang
   python dev.py cmake test --importer-env mlir -R mlir
 
 CTest first enumerates the exact selection, builds the concrete CMake roots

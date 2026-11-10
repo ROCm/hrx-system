@@ -135,9 +135,6 @@ CMAKE_COMMANDS = {
     "iree-cmake-vulkan-sanitizers": ("vulkan", "all"),
 }
 CMAKE_SANITIZER_SMOKE_COMMAND = "iree-cmake-sanitizer-smoke"
-IMPORTER_COMMANDS = {
-    "iree-importers-tilelang": "tilelang",
-}
 if __package__:
     from . import ci_config
 else:
@@ -1530,74 +1527,6 @@ def cmake_sanitizer_smoke_steps() -> list[CiStep]:
     return steps
 
 
-def importer_steps(command_name: str, importer_name: str) -> list[CiStep]:
-    if importer_name == "tilelang":
-        return tilelang_importer_steps(command_name)
-    raise ValueError(f"unknown importer CI target: {importer_name}")
-
-
-def tilelang_importer_steps(command_name: str) -> list[CiStep]:
-    ctest_regex = combine_ctest_regex(*ci_config.IMPORTER_TILELANG_CTEST_REGEXES)
-    return [
-        CiStep(
-            "Setup TileLang importer environment",
-            dev_command("importers", "setup", "tilelang"),
-        ),
-        CiStep(
-            "Report TileLang importer environment",
-            dev_command("importers", "env", "tilelang"),
-        ),
-        CiStep(
-            "Test TileLang importer with Bazel",
-            dev_command(
-                "bazel",
-                "test",
-                "--importer-env",
-                "tilelang",
-                *codec_options("bazel"),
-                *ci_config.IMPORTER_TILELANG_BAZEL_TEST_TARGETS,
-            ),
-        ),
-        CiStep(
-            "Configure TileLang importer CMake",
-            cmake_dev_command(
-                command_name,
-                "configure",
-                "--fresh",
-                "-GNinja",
-                "--importer-env",
-                "tilelang",
-                "-DIREE_BUILD_TESTS=ON",
-                "-DLIBHRX_BUILD=OFF",
-                *codec_options("cmake"),
-            ),
-        ),
-        CiStep(
-            "Build TileLang importer CMake verifier",
-            cmake_dev_command(
-                command_name,
-                "build",
-                "loom-opt",
-                "--parallel",
-            ),
-        ),
-        CiStep(
-            "Test TileLang importer with CMake",
-            cmake_dev_command(
-                command_name,
-                "test",
-                "--importer-env",
-                "tilelang",
-                "--parallel",
-                "8",
-                "--no-tests=error",
-                "-R",
-                ctest_regex,
-            ),
-        ),
-    ]
-
-
 def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
     bazel_target_group = BAZEL_COMMANDS.get(args.command, (None, None))[0]
     cmake_target_group = CMAKE_COMMANDS.get(args.command, (None, None))[0]
@@ -1634,11 +1563,6 @@ def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
         if args.target:
             raise ValueError("--target is only supported for Bazel CI commands")
         return cmake_sanitizer_smoke_steps()
-
-    if args.command in IMPORTER_COMMANDS:
-        if args.target:
-            raise ValueError("--target is not supported for importer CI commands")
-        return importer_steps(args.command, IMPORTER_COMMANDS[args.command])
 
     if args.command in CMAKE_COMMANDS:
         if args.target:
@@ -2044,7 +1968,6 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
             *BAZEL_COMMANDS,
             *CMAKE_COMMANDS,
             CMAKE_SANITIZER_SMOKE_COMMAND,
-            *IMPORTER_COMMANDS,
         ),
         help="CI command group to run.",
     )

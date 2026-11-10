@@ -33,8 +33,8 @@ class _TirLikeSource:
 def test_maps_unhashable_source_objects_by_identity() -> None:
     _, builder = loom.module_builder()
     ref = builder.value("value", I32)
-    source = _UnhashableSource("tilelang-node")
-    equal_source = _UnhashableSource("tilelang-node")
+    source = _UnhashableSource("source-node")
+    equal_source = _UnhashableSource("source-node")
     session = SourceImportSession(builder=builder)
 
     session.map_value(source, ref)

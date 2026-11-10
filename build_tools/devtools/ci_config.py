@@ -65,16 +65,6 @@ BAZEL_REPOSITORY_DEVICE_TARGETS = (
     "//runtime/src/iree/hal/driver/amdgpu/util:pm4_dispatch_test_kernels",
 )
 BAZEL_REPOSITORY_TEST_TARGETS = ("//...",)
-IMPORTER_TILELANG_BAZEL_TEST_TARGETS = (
-    "//loom/py/loom/importers/check/tilelang:tilelang_test",
-    "//loom/py/loom/importers/tilelang:tilelang_test",
-    "//loom/py/loom/importers/tilelang:tilelang_import_test",
-)
-IMPORTER_TILELANG_CTEST_REGEXES = (
-    "^loom/py/loom/importers/check/tilelang/tilelang_test$",
-    "^loom/py/loom/importers/tilelang/tilelang_test$",
-    "^loom/py/loom/importers/tilelang/tilelang_import_test$",
-)
 
 
 @dataclass(frozen=True)

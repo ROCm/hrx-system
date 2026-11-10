@@ -110,5 +110,5 @@ def test_main_prints_agent_markdown_without_importer() -> None:
     output = stdout.getvalue()
     assert "## loom-import-check" in output
     assert "loom_import_check -- \\" in output
-    assert "tilelang --update path/to/case.py" in output
+    assert "mlir --update path/to/case.mlir" in output
     assert "enabled  empty" in output

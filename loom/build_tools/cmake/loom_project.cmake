@@ -100,8 +100,6 @@ option(LOOM_IMPORT_CXX_EMBED_INCLUDES
   "Embeds Loom C++ and HIP source headers in the C++ importer." ON)
 option(LOOM_IMPORT_MLIR
   "Enables the Loom MLIR importer package and importer tests." OFF)
-option(LOOM_IMPORT_TILELANG
-  "Enables the Loom TileLang importer package and importer tests." OFF)
 
 set(_LOOM_SERVE_MEDIA_HOST OFF)
 if(CMAKE_SYSTEM_NAME MATCHES "^(Linux|Darwin|Windows)$")

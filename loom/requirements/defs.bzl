@@ -83,12 +83,6 @@ IMPORT_MLIR = build_requirement(
     enabled_by = Label("//loom/config/import:mlir"),
 )
 
-IMPORT_TILELANG = build_requirement(
-    id = "loom.import.tilelang",
-    label = Label("//loom/requirements:import_tilelang"),
-    enabled_by = Label("//loom/config/import:tilelang"),
-)
-
 ARCH_AMDGPU = build_requirement(
     id = "loom.arch.amdgpu",
     label = Label("//loom/requirements:arch_amdgpu"),
@@ -144,5 +138,4 @@ REQUIREMENTS = [
     EXECUTE_WASM_HOST,
     IMPORT_CXX,
     IMPORT_MLIR,
-    IMPORT_TILELANG,
 ]

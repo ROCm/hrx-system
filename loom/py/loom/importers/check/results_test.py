@@ -65,10 +65,10 @@ def test_results_json_preserves_metadata() -> None:
                 0,
                 "actual\n",
                 "",
-                metadata={"tilelang_oracle": {"status": "unavailable"}},
+                metadata={"oracle": {"status": "unavailable"}},
             )
         ]
     )
 
-    assert '"tilelang_oracle"' in rendered
+    assert '"oracle"' in rendered
     assert '"status": "unavailable"' in rendered

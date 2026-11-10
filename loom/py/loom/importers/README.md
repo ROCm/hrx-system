@@ -21,28 +21,22 @@ and local developers a reproducible package surface when an importer needs one.
 
 ## Build Selection
 
-Bazel importer targets are disabled until the corresponding import config is
-selected:
+Bazel MLIR importer targets are disabled until the import config is selected:
 
 ```bash
-iree-bazel-configure -DLOOM_IMPORT_TILELANG=ON
 iree-bazel-configure -DLOOM_IMPORT_MLIR=ON
-iree-bazel-test --importer-env tilelang <targets>
 iree-bazel-test --importer-env mlir <targets>
-iree-bazel-test --importer-env mlir --importer-env tilelang <targets>
 ```
 
-The native Bazel setting behind those shorthands is:
+The native Bazel setting behind that shorthand is:
 
 ```bash
---//loom/config/import:enable=tilelang
---//loom/config/import:enable=mlir,tilelang
+--//loom/config/import:enable=mlir
 ```
 
-CMake uses matching project options:
+CMake uses the matching project option:
 
 ```bash
-iree-cmake-configure -DLOOM_IMPORT_TILELANG=ON
 iree-cmake-configure -DLOOM_IMPORT_MLIR=ON
 ```
 
@@ -51,11 +45,8 @@ iree-cmake-configure -DLOOM_IMPORT_MLIR=ON
 Managed importer environments are selected through `dev.py importers`:
 
 ```bash
-python dev.py importers setup tilelang
 python dev.py importers setup mlir
-python dev.py importers doctor tilelang
 python dev.py importers doctor mlir
-python dev.py importers env tilelang --format=shell
 python dev.py importers env mlir --format=shell
 ```
 
@@ -70,41 +61,29 @@ build toggle and the locked Python environment:
 
 ```bash
 iree-bazel-test --config=asan \
-    --importer-env tilelang \
-    //loom/py/loom/importers/tilelang:tilelang_import_test
-iree-bazel-test --config=asan \
     --importer-env mlir \
     //loom/py/loom/importers/mlir:mlir_import_test
 
-iree-cmake-configure --importer-env tilelang
 iree-cmake-configure --importer-env mlir
-iree-cmake-build --importer-env tilelang loom_tools_loom-opt_loom-opt
-iree-cmake-test --importer-env tilelang -R tilelang
+iree-cmake-build --importer-env mlir loom_tools_loom-opt_loom-opt
 iree-cmake-test --importer-env mlir -R mlir
 ```
 
 The flag refuses missing, stale, or failed environments instead of silently
 running against whatever packages happen to be importable.
 
-## CI
-
-TileLang importing is experimental and is not part of hosted CI. The dedicated
-`iree-importers-tilelang` command profile remains available for explicit Bazel
-and CMake validation with the hash-locked environment. Checked-in importer
-tests use fail-on-skip semantics so missing frontend packages fail an explicitly
-selected importer lane instead of reporting a false green.
-
 ## Importer Map
 
-- `tilelang/` imports TileLang kernels. It has a managed locked environment and
-  Bazel/CMake test coverage. Start with `tilelang/README.md`.
 - `mlir/` imports IREE HAL executable MLIR through IREE's Python MLIR bindings.
   It is a narrow continuity bridge, not a general upstream MLIR frontend. It
   has a managed locked environment and Bazel/CMake test coverage. Start with
   `mlir/README.md`.
 - `check/` owns the shared golden fixture runner. Its README is for fixture
-  authoring, update mode, diagnostics, and oracle sidecar capture after an
-  importer has already been enabled.
+  authoring, update mode, and diagnostics after an importer has already been
+  enabled.
+- The [Python construction guide](https://rocm.github.io/hrx-system/loom/integration/python-importer/)
+  shows how a source-specific frontend can build, verify, and serialize Loom IR
+  without adding another managed frontend dependency.
 
 New managed importer environments follow the same shape: a root lock file named
 `requirements-importers-<name>.lock.txt`, a `dev.py importers` environment

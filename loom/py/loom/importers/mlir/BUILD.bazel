@@ -118,7 +118,6 @@ iree_py_test(
         ":mlir_packages",
         "//loom/py/loom/importers/check",
         "//loom/py/loom/importers/check/mlir",
-        "//loom/py/loom/importers/check/tilelang",
     ],
 )
 

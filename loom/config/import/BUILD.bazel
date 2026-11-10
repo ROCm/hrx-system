@@ -13,7 +13,6 @@ DEFAULT_ENABLED = []
 SUPPORTED_VALUES = [
     "cxx",
     "mlir",
-    "tilelang",
 ]
 
 iree_string_list_flag(

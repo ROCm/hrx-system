@@ -14,20 +14,12 @@ package(
 
 exports_files(["import_test.py"])
 
-_IMPORTER_PACKAGE_DEPS = (
-    iree_select({
-        "//loom/config/import:mlir": [
-            "//loom/py/loom/importers/mlir:mlir_packages",
-        ],
-        "//conditions:default": [],
-    }) +
-    iree_select({
-        "//loom/config/import:tilelang": [
-            "//loom/py/loom/importers/tilelang:tilelang_packages",
-        ],
-        "//conditions:default": [],
-    })
-)
+_IMPORTER_PACKAGE_DEPS = iree_select({
+    "//loom/config/import:mlir": [
+        "//loom/py/loom/importers/mlir:mlir_packages",
+    ],
+    "//conditions:default": [],
+})
 
 iree_py_library(
     name = "check",
@@ -56,7 +48,6 @@ iree_py_binary(
     deps = [
         ":check",
         "//loom/py/loom/importers/check/mlir",
-        "//loom/py/loom/importers/check/tilelang",
     ] + _IMPORTER_PACKAGE_DEPS,
 )
 
