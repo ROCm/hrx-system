@@ -576,117 +576,80 @@ def _global_atomic_overlays(
     return_field_value: int,
     cache_fields: tuple[tuple[str, int], ...],
     cache_immediate_field_names: tuple[str, ...] = (),
-    saddr_off: AmdgpuFixedEncodingValue | None,
-    address_units: int,
-    descriptor_key_suffix: str = "",
+    saddr_off: AmdgpuFixedEncodingValue,
     xml_has_m0: bool = False,
     cmpswap_mnemonic_suffixes: tuple[str, str] = ("_b32", "_b64"),
 ) -> tuple[AmdgpuDescriptorOverlay, ...]:
     overlays: list[AmdgpuDescriptorOverlay] = []
-    for row in rows:
-        if row.has_no_return_form:
+    for descriptor_key_suffix, address_units, encoded_saddr in (
+        ("", 2, saddr_off),
+        ("_saddr", 1, None),
+    ):
+        for row in rows:
+            return_forms = (False, True) if row.has_no_return_form else (True,)
+            for returns_old_value in return_forms:
+                return_suffix = "_rtn" if returns_old_value else ""
+                semantic_suffix = ".return" if returns_old_value else ""
+                overlays.append(
+                    _global_atomic_overlay(
+                        descriptor_key=(
+                            f"amdgpu.global_atomic_{row.descriptor_suffix}"
+                            f"{return_suffix}{descriptor_key_suffix}"
+                        ),
+                        instruction_name=row.instruction_name,
+                        mnemonic=f"global_atomic_{row.mnemonic_suffix}",
+                        semantic_tag=(
+                            f"memory.global.atomic.{row.semantic_suffix}"
+                            f"{semantic_suffix}"
+                        ),
+                        data_format_name=row.data_format_name,
+                        returns_old_value=returns_old_value,
+                        encoding_name=encoding_name,
+                        address_field_name=address_field_name,
+                        data_field_name=data_field_name,
+                        offset_field_name=offset_field_name,
+                        offset_bit_width=offset_bit_width,
+                        return_field_name=return_field_name,
+                        return_field_value=return_field_value,
+                        cache_fields=cache_fields,
+                        cache_immediate_field_names=cache_immediate_field_names,
+                        saddr_off=encoded_saddr,
+                        address_units=address_units,
+                        value_units=row.value_units,
+                        width_bits=row.width_bits,
+                        xml_has_m0=xml_has_m0,
+                    )
+                )
+        for value_units, mnemonic_suffix in enumerate(cmpswap_mnemonic_suffixes, 1):
+            width_bits = value_units * 32
             overlays.append(
-                _global_atomic_overlay(
-                    descriptor_key=(
-                        f"amdgpu.global_atomic_{row.descriptor_suffix}"
-                        f"{descriptor_key_suffix}"
-                    ),
-                    instruction_name=row.instruction_name,
-                    mnemonic=f"global_atomic_{row.mnemonic_suffix}",
-                    semantic_tag=f"memory.global.atomic.{row.semantic_suffix}",
-                    data_format_name=row.data_format_name,
-                    returns_old_value=False,
+                _global_atomic_cmpswap_overlay(
+                    descriptor_suffix=f"b{width_bits}",
                     encoding_name=encoding_name,
                     address_field_name=address_field_name,
                     data_field_name=data_field_name,
+                    instruction_name=(
+                        "GLOBAL_ATOMIC_CMPSWAP" + ("_X2" if value_units == 2 else "")
+                    ),
+                    mnemonic=f"global_atomic_cmpswap{mnemonic_suffix}",
+                    semantic_tag=(
+                        f"memory.global.atomic.compare_exchange.b{width_bits}.return"
+                    ),
+                    data_format_name=f"FMT_NUM_U{width_bits}",
                     offset_field_name=offset_field_name,
                     offset_bit_width=offset_bit_width,
                     return_field_name=return_field_name,
                     return_field_value=return_field_value,
                     cache_fields=cache_fields,
                     cache_immediate_field_names=cache_immediate_field_names,
-                    saddr_off=saddr_off,
+                    saddr_off=encoded_saddr,
                     address_units=address_units,
-                    value_units=row.value_units,
-                    width_bits=row.width_bits,
+                    value_units=value_units,
+                    width_bits=width_bits,
+                    descriptor_key_suffix=descriptor_key_suffix,
                     xml_has_m0=xml_has_m0,
                 )
             )
-        overlays.append(
-            _global_atomic_overlay(
-                descriptor_key=(
-                    f"amdgpu.global_atomic_{row.descriptor_suffix}_rtn"
-                    f"{descriptor_key_suffix}"
-                ),
-                instruction_name=row.instruction_name,
-                mnemonic=f"global_atomic_{row.mnemonic_suffix}",
-                semantic_tag=f"memory.global.atomic.{row.semantic_suffix}.return",
-                data_format_name=row.data_format_name,
-                returns_old_value=True,
-                encoding_name=encoding_name,
-                address_field_name=address_field_name,
-                data_field_name=data_field_name,
-                offset_field_name=offset_field_name,
-                offset_bit_width=offset_bit_width,
-                return_field_name=return_field_name,
-                return_field_value=return_field_value,
-                cache_fields=cache_fields,
-                cache_immediate_field_names=cache_immediate_field_names,
-                saddr_off=saddr_off,
-                address_units=address_units,
-                value_units=row.value_units,
-                width_bits=row.width_bits,
-                xml_has_m0=xml_has_m0,
-            )
-        )
-    overlays.append(
-        _global_atomic_cmpswap_overlay(
-            descriptor_suffix="b32",
-            encoding_name=encoding_name,
-            address_field_name=address_field_name,
-            data_field_name=data_field_name,
-            instruction_name="GLOBAL_ATOMIC_CMPSWAP",
-            mnemonic=f"global_atomic_cmpswap{cmpswap_mnemonic_suffixes[0]}",
-            semantic_tag="memory.global.atomic.compare_exchange.b32.return",
-            data_format_name="FMT_NUM_U32",
-            offset_field_name=offset_field_name,
-            offset_bit_width=offset_bit_width,
-            return_field_name=return_field_name,
-            return_field_value=return_field_value,
-            cache_fields=cache_fields,
-            cache_immediate_field_names=cache_immediate_field_names,
-            saddr_off=saddr_off,
-            address_units=address_units,
-            value_units=1,
-            width_bits=32,
-            descriptor_key_suffix=descriptor_key_suffix,
-            xml_has_m0=xml_has_m0,
-        )
-    )
-    overlays.append(
-        _global_atomic_cmpswap_overlay(
-            descriptor_suffix="b64",
-            encoding_name=encoding_name,
-            address_field_name=address_field_name,
-            data_field_name=data_field_name,
-            instruction_name="GLOBAL_ATOMIC_CMPSWAP_X2",
-            mnemonic=f"global_atomic_cmpswap{cmpswap_mnemonic_suffixes[1]}",
-            semantic_tag="memory.global.atomic.compare_exchange.b64.return",
-            data_format_name="FMT_NUM_U64",
-            offset_field_name=offset_field_name,
-            offset_bit_width=offset_bit_width,
-            return_field_name=return_field_name,
-            return_field_value=return_field_value,
-            cache_fields=cache_fields,
-            cache_immediate_field_names=cache_immediate_field_names,
-            saddr_off=saddr_off,
-            address_units=address_units,
-            value_units=2,
-            width_bits=64,
-            descriptor_key_suffix=descriptor_key_suffix,
-            xml_has_m0=xml_has_m0,
-        )
-    )
     return tuple(overlays)
 
 

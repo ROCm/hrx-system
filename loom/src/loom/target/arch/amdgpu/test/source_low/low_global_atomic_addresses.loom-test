@@ -1,0 +1,228 @@
+// RUN: emit amdgpu-assembly @global_address_gfx90a
+
+amdgpu.target<gfx90a> @target
+
+low.func.def target<amdgpu.cdna2.core>(@target) @global_address_gfx90a(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %wide_value: reg<amdgpu.vgpr x2>, %compare_exchange: reg<amdgpu.vgpr x4>) asm {
+  %old = global_atomic_add_rtn_vaddr %address, %value {offset = 16} : reg<amdgpu.vgpr>
+  global_atomic_xor_x2_vaddr %address, %wide_value {offset = 32}
+  %observed = global_atomic_cmpswap_x2_rtn_vaddr %address, %compare_exchange {offset = 64} : reg<amdgpu.vgpr x2>
+  return
+}
+
+// ----
+  global_atomic_add v0, v[4:5], v0, off offset:16 glc
+  s_nop 0
+  global_atomic_xor_x2 v[4:5], v[2:3], off offset:32
+  global_atomic_cmpswap_x2 v[0:1], v[4:5], v[8:11], off offset:64 glc
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-native-words @global_address_gfx90a
+
+amdgpu.target<gfx90a> @target
+
+low.func.def target<amdgpu.cdna2.core>(@target) @global_address_gfx90a(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %wide_value: reg<amdgpu.vgpr x2>, %compare_exchange: reg<amdgpu.vgpr x4>) asm {
+  %old = global_atomic_add_rtn_vaddr %address, %value {offset = 16} : reg<amdgpu.vgpr>
+  global_atomic_xor_x2_vaddr %address, %wide_value {offset = 32}
+  %observed = global_atomic_cmpswap_x2_rtn_vaddr %address, %compare_exchange {offset = 64} : reg<amdgpu.vgpr x2>
+  return
+}
+
+// ----
+0xDD098010
+0x007F0004
+0xBF800000
+0xDDA88020
+0x007F0204
+0xDD858040
+0x007F0804
+0xBF8C0F70
+0xBF810000
+
+// ====
+
+// RUN: emit amdgpu-assembly @global_address_gfx942
+
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @global_address_gfx942(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %wide_value: reg<amdgpu.vgpr x2>, %compare_exchange: reg<amdgpu.vgpr x4>) asm {
+  %old = global_atomic_add_rtn_vaddr %address, %value {offset = 16} : reg<amdgpu.vgpr>
+  global_atomic_xor_x2_vaddr %address, %wide_value {offset = 32}
+  %observed = global_atomic_cmpswap_x2_rtn_vaddr %address, %compare_exchange {offset = 64} : reg<amdgpu.vgpr x2>
+  return
+}
+
+// ----
+  global_atomic_add v0, v[4:5], v0, off offset:16 sc0
+  s_nop 0
+  global_atomic_xor_x2 v[4:5], v[2:3], off offset:32
+  global_atomic_cmpswap_x2 v[0:1], v[4:5], v[8:11], off offset:64 sc0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-native-words @global_address_gfx942
+
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @global_address_gfx942(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %wide_value: reg<amdgpu.vgpr x2>, %compare_exchange: reg<amdgpu.vgpr x4>) asm {
+  %old = global_atomic_add_rtn_vaddr %address, %value {offset = 16} : reg<amdgpu.vgpr>
+  global_atomic_xor_x2_vaddr %address, %wide_value {offset = 32}
+  %observed = global_atomic_cmpswap_x2_rtn_vaddr %address, %compare_exchange {offset = 64} : reg<amdgpu.vgpr x2>
+  return
+}
+
+// ----
+0xDD098010
+0x007F0004
+0xBF800000
+0xDDA88020
+0x007F0204
+0xDD858040
+0x007F0804
+0xBF8C0F70
+0xBF810000
+
+// ====
+
+// RUN: emit amdgpu-assembly @global_address_gfx1100
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @global_address_gfx1100(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %wide_value: reg<amdgpu.vgpr x2>, %compare_exchange: reg<amdgpu.vgpr x4>) asm {
+  %old = global_atomic_add_u32_rtn_vaddr %address, %value {offset = 16}
+  global_atomic_xor_b64_vaddr %address, %wide_value {offset = 32}
+  %observed = global_atomic_cmpswap_b64_rtn_vaddr %address, %compare_exchange {offset = 64}
+  return
+}
+
+// ----
+  global_atomic_add_u32 v0, v[4:5], v0, off offset:16 glc
+  global_atomic_xor_b64 v[4:5], v[2:3], off offset:32
+  global_atomic_cmpswap_b64 v[0:1], v[4:5], v[8:11], off offset:64 glc
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-native-words @global_address_gfx1100
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @global_address_gfx1100(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %wide_value: reg<amdgpu.vgpr x2>, %compare_exchange: reg<amdgpu.vgpr x4>) asm {
+  %old = global_atomic_add_u32_rtn_vaddr %address, %value {offset = 16}
+  global_atomic_xor_b64_vaddr %address, %wide_value {offset = 32}
+  %observed = global_atomic_cmpswap_b64_rtn_vaddr %address, %compare_exchange {offset = 64}
+  return
+}
+
+// ----
+0xDCD64010
+0x007C0004
+0xDD2E0020
+0x007C0204
+0xDD0A4040
+0x007C0804
+0xBC7C0000
+0xBFB00000
+
+// ====
+
+// RUN: emit amdgpu-assembly @global_address_gfx1200
+
+amdgpu.target<gfx1200> @target
+
+low.func.def target<amdgpu.rdna4.core>(@target) @global_address_gfx1200(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %wide_value: reg<amdgpu.vgpr x2>, %compare_exchange: reg<amdgpu.vgpr x4>) asm {
+  %old = global_atomic_add_u32_rtn_vaddr %address, %value {offset = 16}
+  global_atomic_xor_b64_vaddr %address, %wide_value {offset = 32}
+  %observed = global_atomic_cmpswap_b64_rtn_vaddr %address, %compare_exchange {offset = 64}
+  return
+}
+
+// ----
+  global_atomic_add_u32 v0, v[4:5], v0, off offset:16 th:TH_ATOMIC_RETURN
+  global_atomic_xor_b64 v[4:5], v[2:3], off offset:32
+  s_wait_loadcnt loadcnt(0)
+  global_atomic_cmpswap_b64 v[0:1], v[4:5], v[8:11], off offset:64 th:TH_ATOMIC_RETURN
+  s_wait_storecnt storecnt(0)
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-native-words @global_address_gfx1200
+
+amdgpu.target<gfx1200> @target
+
+low.func.def target<amdgpu.rdna4.core>(@target) @global_address_gfx1200(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %wide_value: reg<amdgpu.vgpr x2>, %compare_exchange: reg<amdgpu.vgpr x4>) asm {
+  %old = global_atomic_add_u32_rtn_vaddr %address, %value {offset = 16}
+  global_atomic_xor_b64_vaddr %address, %wide_value {offset = 32}
+  %observed = global_atomic_cmpswap_b64_rtn_vaddr %address, %compare_exchange {offset = 64}
+  return
+}
+
+// ----
+0xEE0D407C
+0x00100000
+0x00001004
+0xEE12C07C
+0x01000000
+0x00002004
+0xBFC00000
+0xEE10807C
+0x04100000
+0x00004004
+0xBFC10000
+0xBFB00000
+
+// ====
+
+// RUN: emit amdgpu-assembly @global_address_gfx1250
+
+amdgpu.target<gfx1250> @target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @global_address_gfx1250(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %wide_value: reg<amdgpu.vgpr x2>, %compare_exchange: reg<amdgpu.vgpr x4>) asm {
+  %old = global_atomic_add_u32_rtn_vaddr %address, %value {offset = 16}
+  global_atomic_xor_b64_vaddr %address, %wide_value {offset = 32}
+  %observed = global_atomic_cmpswap_b64_rtn_vaddr %address, %compare_exchange {offset = 64}
+  return
+}
+
+// ----
+  global_atomic_add_u32 v1, v[4:5], v0, off offset:16 th:TH_ATOMIC_RETURN
+  s_wait_xcnt xcnt(0)
+  global_atomic_xor_b64 v[4:5], v[2:3], off offset:32
+  s_wait_xcnt xcnt(0)
+  global_atomic_cmpswap_b64 v[6:7], v[4:5], v[8:11], off offset:64 th:TH_ATOMIC_RETURN
+  s_wait_storecnt storecnt(0)
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-native-words @global_address_gfx1250
+
+amdgpu.target<gfx1250> @target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @global_address_gfx1250(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %wide_value: reg<amdgpu.vgpr x2>, %compare_exchange: reg<amdgpu.vgpr x4>) asm {
+  %old = global_atomic_add_u32_rtn_vaddr %address, %value {offset = 16}
+  global_atomic_xor_b64_vaddr %address, %wide_value {offset = 32}
+  %observed = global_atomic_cmpswap_b64_rtn_vaddr %address, %compare_exchange {offset = 64}
+  return
+}
+
+// ----
+0xEE0D407C
+0x00100001
+0x00001004
+0xBFC50000
+0xEE12C07C
+0x01000000
+0x00002004
+0xBFC50000
+0xEE10807C
+0x04100006
+0x00004004
+0xBFC10000
+0xBFB00000
