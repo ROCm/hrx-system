@@ -164,7 +164,7 @@ static iree_status_t loom_target_pass_predicate_resolve_facts(
   if (target == NULL) {
     return iree_ok_status();
   }
-  return loom_target_function_contract_refine_facts(
+  return loom_target_function_contract_refine_internal_facts(
       context->target_module, func_facts, target->name, target->projection,
       (iree_diagnostic_emitter_t){0}, arena, out_valid, out_facts);
 }

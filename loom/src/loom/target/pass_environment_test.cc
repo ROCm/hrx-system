@@ -237,6 +237,8 @@ TEST_F(TargetPassFactsTest, UnrefinedFunctionProjectsAuthoredFacts) {
   const loom_target_bundle_t* bundle = loom_target_facts_bundle(resolved_facts);
   ASSERT_NE(bundle, nullptr);
   EXPECT_EQ(bundle->snapshot->index_bitwidth, 64u);
+  EXPECT_EQ(bundle->export_plan->abi_kind, LOOM_TARGET_ABI_UNKNOWN);
+  EXPECT_EQ(bundle->export_plan->linkage, LOOM_TARGET_LINKAGE_DEFAULT);
   iree_arena_deinitialize(&scratch_arena);
   iree_arena_deinitialize(&instance_arena);
 }
