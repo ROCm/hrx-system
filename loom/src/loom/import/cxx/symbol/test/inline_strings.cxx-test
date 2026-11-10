@@ -184,18 +184,18 @@ unsigned nested(unsigned row, unsigned position) {
 func.def public @nested(%row: i32, %position: i32) -> (i32) {
   %3 = index.constant 8 : offset
   %record_storage = buffer.alloca<private> align(4) %3 : buffer
-  %81 = index.constant 0 : offset
+  %78 = index.constant 0 : offset
   %9 = buffer.constant align(4) utf8("abc\u0000") : buffer
   %11 = index.constant 4 : offset
-  buffer.copy %9[%81], %record_storage[%81], %11
+  buffer.copy %9[%78], %record_storage[%78], %11
   %14 = scalar.constant 7 : i32
   %16 = buffer.view %record_storage[%11] : buffer -> view<1xi32>
   view.store %14, %16[0] : i32, view<1xi32>
   %nested_storage = buffer.alloca<private> align(1) %3 : buffer
   %21 = buffer.constant align(1) utf8("def\u0000") : buffer
-  buffer.copy %21[%81], %nested_storage[%81], %11
+  buffer.copy %21[%78], %nested_storage[%78], %11
   %26 = buffer.constant align(1) utf8("ghi\u0000") : buffer
-  buffer.copy %26[%81], %nested_storage[%11], %11
+  buffer.copy %26[%78], %nested_storage[%11], %11
   %31 = scalar.constant 3 : i32
   %32 = scalar.andi %position, %31 : i32
   %33 = scalar.extui %32 : i32 to i64
@@ -207,10 +207,10 @@ func.def public @nested(%row: i32, %position: i32) -> (i32) {
   %43 = scalar.extui %42 : i8 to i32
   %44 = scalar.constant 1 : i32
   %45 = scalar.andi %row, %44 : i32
-  %76 = scalar.constant 2 : i32
-  %77 = scalar.shli %45, %76 : i32
-  %78 = scalar.extui %77 : i32 to i64
-  %51 = scalar.assume %78 [range(%78, 0, 9223372036854775807)] : i64
+  %46 = scalar.extui %45 : i32 to i64
+  %74 = scalar.constant 2 : i64
+  %75 = scalar.shli %46, %74 : i64
+  %51 = scalar.assume %75 [range(%75, 0, 9223372036854775807)] : i64
   %52 = index.cast %51 : i64 to offset
   %58 = index.cast %52 : offset to i64
   %59 = scalar.addi %58, %38 : i64

@@ -45,15 +45,15 @@ kernel.def @uniform_helper_barrier() {
     kernel.barrier<global> scope(workgroup) ordering(acq_rel)
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   }
-  %46 = scalar.constant 6 : i32
-  %47 = scalar.shli %workgroup, %46 : i32
+  %43 = scalar.constant 6 : i32
+  %44 = scalar.shli %workgroup, %43 : i32
   %workitem_id_x = kernel.workitem.id<x> : index
   %30 = index.cast %workitem_id_x : index to i32
-  %item = scalar.addi %47, %30 : i32
-  %43 = scalar.constant 2 : i32
-  %44 = scalar.shli %item, %43 : i32
-  %45 = scalar.extui %44 : i32 to i64
-  %37 = scalar.assume %45 [range(%45, 0, 9223372036854775807)] : i64
+  %item = scalar.addi %44, %30 : i32
+  %32 = scalar.extui %item : i32 to i64
+  %41 = scalar.constant 2 : i64
+  %42 = scalar.shli %32, %41 : i64
+  %37 = scalar.assume %42 [range(%42, 0, 9223372036854775807)] : i64
   %38 = index.cast %37 : i64 to offset
   %39 = buffer.view %output[%38] : buffer -> view<1xi32>
   view.store %item, %39[0] : i32, view<1xi32>

@@ -532,7 +532,7 @@ static iree_status_t loom_buffer_legalize_build_fill_value(
     loom_builder_t* builder, const loom_buffer_fill_pattern_t* pattern,
     loom_value_id_t bits, loom_type_t transfer_type,
     loom_location_id_t location, loom_value_id_t* out_value) {
-  const uint32_t repeated_bits =
+  uint32_t repeated_bits =
       pattern->byte_count == 1 ? 8 : loom_scalar_type_bitwidth(pattern->type);
   if (loom_type_is_vector(transfer_type)) {
     IREE_RETURN_IF_ERROR(loom_buffer_legalize_build_repeated_bits(
@@ -556,6 +556,14 @@ static iree_status_t loom_buffer_legalize_build_fill_value(
   loom_scalar_type_t scalar_type = loom_type_element_type(transfer_type);
   if (scalar_type == LOOM_SCALAR_TYPE_I8) {
     scalar_type = LOOM_SCALAR_TYPE_I32;
+  }
+  if (loom_scalar_type_bitwidth(scalar_type) >
+      loom_scalar_type_bitwidth(pattern->type)) {
+    // Complete the existing carrier before widening so wide transfers share
+    // their repeated low word with narrower transfers and vector splats.
+    IREE_RETURN_IF_ERROR(loom_buffer_legalize_build_repeated_bits(
+        builder, bits, pattern->type, repeated_bits, location, &bits));
+    repeated_bits = loom_scalar_type_bitwidth(pattern->type);
   }
   IREE_RETURN_IF_ERROR(loom_buffer_legalize_build_integer_cast(
       builder, bits, pattern->type, scalar_type, location, &bits));

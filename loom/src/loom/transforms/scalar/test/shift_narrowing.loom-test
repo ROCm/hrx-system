@@ -1,4 +1,4 @@
-// RUN: with-checks pass canonicalize
+// RUN: pass combine
 
 // A bounded word index can be scaled before widening. Another user of the
 // original extension must keep its unscaled value.
@@ -9,12 +9,16 @@ func.def @bounded_word_offset(%input: i32) -> (i64, i64) {
   %scaled = scalar.shli %wide, %scale_shift : i64
   func.return %wide, %scaled : i64, i64
 }
+
 // ----
-CHECK: %wide = scalar.extui %word : i32 to i64
-CHECK: * = scalar.shli %word, * : i32
-CHECK: %scaled = scalar.extui * : i32 to i64
-CHECK: func.return %wide, %scaled : i64, i64
-CHECK-NOT: * = scalar.shli * : i64
+func.def @bounded_word_offset(%input: i32) -> (i64, i64) {
+  %word = scalar.assume %input [range(%input, 0, 524287)] : i32
+  %wide = scalar.extui %word : i32 to i64
+  %7 = scalar.constant 2 : i32
+  %8 = scalar.shli %word, %7 : i32
+  %scaled = scalar.extui %8 : i32 to i64
+  func.return %wide, %scaled : i64, i64
+}
 
 // ====
 
@@ -27,11 +31,15 @@ func.def @unsigned_capacity(%input: i32) -> (i64) {
   %scaled = scalar.shli<nsw|nuw> %wide, %scale_shift : i64
   func.return %scaled : i64
 }
+
 // ----
-CHECK: * = scalar.shli %word, * : i32
-CHECK: %scaled = scalar.extui * : i32 to i64
-CHECK-NOT: *scalar.shli<*
-CHECK-NOT: *scalar.extsi*
+func.def @unsigned_capacity(%input: i32) -> (i64) {
+  %word = scalar.assume %input [range(%input, 0, 1073741823)] : i32
+  %6 = scalar.constant 2 : i32
+  %7 = scalar.shli %word, %6 : i32
+  %scaled = scalar.extui %7 : i32 to i64
+  func.return %scaled : i64
+}
 
 // ====
 
@@ -44,10 +52,16 @@ func.def @masked_byte(%input: i8) -> (i16) {
   %scaled = scalar.shli %wide, %scale_shift : i16
   func.return %scaled : i16
 }
+
 // ----
-CHECK: * = scalar.shli %word, * : i8
-CHECK: %scaled = scalar.extui * : i8 to i16
-CHECK-NOT: * = scalar.shli * : i16
+func.def @masked_byte(%input: i8) -> (i16) {
+  %mask = scalar.constant 63 : i8
+  %word = scalar.andi %input, %mask : i8
+  %7 = scalar.constant 2 : i8
+  %8 = scalar.shli %word, %7 : i8
+  %scaled = scalar.extui %8 : i8 to i16
+  func.return %scaled : i16
+}
 
 // ====
 
@@ -62,10 +76,6 @@ func.def @insufficient_bounds(%input: i32) -> (i64, i64) {
   %unknown_scaled = scalar.shli<nuw> %unknown, %scale_shift : i64
   func.return %bounded_scaled, %unknown_scaled : i64, i64
 }
-// ----
-CHECK: %bounded_scaled = scalar.shli %bounded, %scale_shift : i64
-CHECK: %unknown_scaled = scalar.shli<nuw> %unknown, %scale_shift : i64
-CHECK-NOT: * = scalar.shli * : i32
 
 // ====
 
@@ -79,10 +89,6 @@ func.def @shift_domain(%input: i32, %amount: i64) -> (i64, i64) {
   %dynamic = scalar.shli %wide, %amount : i64
   func.return %large, %dynamic : i64, i64
 }
-// ----
-CHECK: %large = scalar.shli %wide, %source_width : i64
-CHECK: %dynamic = scalar.shli %wide, %amount : i64
-CHECK-NOT: * = scalar.shli * : i32
 
 // ====
 
@@ -97,7 +103,3 @@ func.def @signed_inputs(%input: i32) -> (i64, i64) {
   %unsigned_scaled = scalar.shli %unsigned, %scale_shift : i64
   func.return %signed_scaled, %unsigned_scaled : i64, i64
 }
-// ----
-CHECK: %signed_scaled = scalar.shli %signed, %scale_shift : i64
-CHECK: %unsigned_scaled = scalar.shli %unsigned, %scale_shift : i64
-CHECK-NOT: * = scalar.shli * : i32

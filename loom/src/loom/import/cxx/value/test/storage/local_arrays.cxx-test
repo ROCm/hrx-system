@@ -188,10 +188,10 @@ func.def public @output_parameter(%index: i32) -> (i32) {
     %19 = index.cast %i : offset to i32
     %20 = scalar.constant 3 : i32
     %21 = scalar.addi %19, %20 : i32
-    %35 = scalar.constant 2 : i32
-    %36 = scalar.shli %19, %35 : i32
-    %37 = scalar.extui %36 : i32 to i64
-    %27 = scalar.assume %37 [range(%37, 0, 9223372036854775807)] : i64
+    %22 = scalar.extui %19 : i32 to i64
+    %33 = scalar.constant 2 : i64
+    %34 = scalar.shli %22, %33 : i64
+    %27 = scalar.assume %34 [range(%34, 0, 9223372036854775807)] : i64
     %28 = index.cast %27 : i64 to offset
     %29 = buffer.view %values_storage[%28] : buffer -> view<1xi32>
     view.store %21, %29[0] : i32, view<1xi32>

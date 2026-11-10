@@ -70,10 +70,10 @@ kernel.def @scheduled_sum_unroll_1_depth_1() {
   scf.if %46 {
     %factor = scalar.constant 1 : i32
     %58 = func.call readonly @sum(%input, %input_byte_offset, %row, %columns, %factor, %factor) : (buffer, offset, i32, i32, i32, i32) -> (i32)
-    %75 = scalar.constant 2 : i32
-    %76 = scalar.shli %row, %75 : i32
-    %77 = scalar.extui %76 : i32 to i64
-    %64 = scalar.assume %77 [range(%77, 0, 9223372036854775807)] : i64
+    %59 = scalar.extui %row : i32 to i64
+    %73 = scalar.constant 2 : i64
+    %74 = scalar.shli %59, %73 : i64
+    %64 = scalar.assume %74 [range(%74, 0, 9223372036854775807)] : i64
     %65 = index.cast %64 : i64 to offset
     %66 = buffer.view %output[%65] : buffer -> view<1xi32>
     view.store %58, %66[0] : i32, view<1xi32>
@@ -155,9 +155,10 @@ kernel.def @scheduled_sum_unroll_1_depth_2() {
     %factor = scalar.constant 1 : i32
     %depth = scalar.constant 2 : i32
     %58 = func.call readonly @sum(%input, %input_byte_offset, %row, %columns, %factor, %depth) : (buffer, offset, i32, i32, i32, i32) -> (i32)
-    %76 = scalar.shli %row, %depth : i32
-    %77 = scalar.extui %76 : i32 to i64
-    %64 = scalar.assume %77 [range(%77, 0, 9223372036854775807)] : i64
+    %59 = scalar.extui %row : i32 to i64
+    %73 = scalar.constant 2 : i64
+    %74 = scalar.shli %59, %73 : i64
+    %64 = scalar.assume %74 [range(%74, 0, 9223372036854775807)] : i64
     %65 = index.cast %64 : i64 to offset
     %66 = buffer.view %output[%65] : buffer -> view<1xi32>
     view.store %58, %66[0] : i32, view<1xi32>
@@ -239,10 +240,10 @@ kernel.def @scheduled_sum_unroll_3_depth_1() {
     %factor = scalar.constant 3 : i32
     %depth = scalar.constant 1 : i32
     %58 = func.call readonly @sum(%input, %input_byte_offset, %row, %columns, %factor, %depth) : (buffer, offset, i32, i32, i32, i32) -> (i32)
-    %75 = scalar.constant 2 : i32
-    %76 = scalar.shli %row, %75 : i32
-    %77 = scalar.extui %76 : i32 to i64
-    %64 = scalar.assume %77 [range(%77, 0, 9223372036854775807)] : i64
+    %59 = scalar.extui %row : i32 to i64
+    %73 = scalar.constant 2 : i64
+    %74 = scalar.shli %59, %73 : i64
+    %64 = scalar.assume %74 [range(%74, 0, 9223372036854775807)] : i64
     %65 = index.cast %64 : i64 to offset
     %66 = buffer.view %output[%65] : buffer -> view<1xi32>
     view.store %58, %66[0] : i32, view<1xi32>
@@ -324,9 +325,10 @@ kernel.def @scheduled_sum_unroll_3_depth_2() {
     %factor = scalar.constant 3 : i32
     %depth = scalar.constant 2 : i32
     %58 = func.call readonly @sum(%input, %input_byte_offset, %row, %columns, %factor, %depth) : (buffer, offset, i32, i32, i32, i32) -> (i32)
-    %76 = scalar.shli %row, %depth : i32
-    %77 = scalar.extui %76 : i32 to i64
-    %64 = scalar.assume %77 [range(%77, 0, 9223372036854775807)] : i64
+    %59 = scalar.extui %row : i32 to i64
+    %73 = scalar.constant 2 : i64
+    %74 = scalar.shli %59, %73 : i64
+    %64 = scalar.assume %74 [range(%74, 0, 9223372036854775807)] : i64
     %65 = index.cast %64 : i64 to offset
     %66 = buffer.view %output[%65] : buffer -> view<1xi32>
     view.store %58, %66[0] : i32, view<1xi32>

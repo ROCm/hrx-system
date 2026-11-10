@@ -83,30 +83,30 @@ kernel.def @volatile_views() {
   %stride$13 = scalar.assume %stride$3 [range(%stride$3, 0, 15)] : i32
   %15 = scalar.extui %stride$13 : i32 to i64
   %16 = index.cast %15 : i64 to index
-  %77 = index.constant 1 : index
-  %layout = encoding.layout.strided [%16, %77] : encoding<layout>
-  %74 = scalar.constant 2 : i32
-  %75 = scalar.shli %origin$12, %74 : i32
-  %76 = scalar.extui %75 : i32 to i64
-  %25 = scalar.assume %76 [range(%76, 0, 9223372036854775807)] : i64
+  %74 = index.constant 1 : index
+  %layout = encoding.layout.strided [%16, %74] : encoding<layout>
+  %20 = scalar.extui %origin$12 : i32 to i64
+  %72 = scalar.constant 2 : i64
+  %73 = scalar.shli %20, %72 : i64
+  %25 = scalar.assume %73 [range(%73, 0, 9223372036854775807)] : i64
   %26 = index.cast %25 : i64 to offset
   %source = buffer.view %input[%26] : buffer -> view<2x4xi32, %layout>
   %70 = index.constant 0 : index
-  %row = view.subview %source[%77, %70] : view<2x4xi32, %layout> -> view<1x4xi32, %layout>
+  %row = view.subview %source[%74, %70] : view<2x4xi32, %layout> -> view<1x4xi32, %layout>
   %destination = buffer.view %output[%output_byte_offset] : buffer -> view<1x4xi32>
   %value = func.call @read_view_twice___loom__type__view___loom__type__shape_1__4___const_volatile_unsigned_int____loom__type__encoding_0__2__(%layout, %row) : (encoding<layout>, view<1x4xi32, %layout>) -> (i32)
   %38 = scalar.constant 0 : i32
-  view.store<volatile> %38, %destination[%70, %77] : i32, view<1x4xi32>
-  view.store<volatile> %value, %destination[%70, %77] : i32, view<1x4xi32>
+  view.store<volatile> %38, %destination[%70, %74] : i32, view<1x4xi32>
+  view.store<volatile> %value, %destination[%70, %74] : i32, view<1x4xi32>
   kernel.return
 }
 
 func.def @read_view_twice___loom__type__view___loom__type__shape_1__4___const_volatile_unsigned_int____loom__type__encoding_0__2__(%source_layout: encoding<layout>, %source: view<1x4xi32, %source_layout>) -> (i32) {
-  %83 = index.constant 0 : index
-  %82 = index.constant 1 : index
-  %54 = view.load<volatile> %source[%83, %82] : view<1x4xi32, %source_layout> -> i32
-  %first = view.load<volatile> %source[%83, %82] : view<1x4xi32, %source_layout> -> i32
-  %second = view.load<volatile> %source[%83, %82] : view<1x4xi32, %source_layout> -> i32
+  %80 = index.constant 0 : index
+  %79 = index.constant 1 : index
+  %54 = view.load<volatile> %source[%80, %79] : view<1x4xi32, %source_layout> -> i32
+  %first = view.load<volatile> %source[%80, %79] : view<1x4xi32, %source_layout> -> i32
+  %second = view.load<volatile> %source[%80, %79] : view<1x4xi32, %source_layout> -> i32
   %65 = scalar.addi %first, %second : i32
   func.return %65 : i32
 }

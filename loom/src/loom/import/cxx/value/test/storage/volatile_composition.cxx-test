@@ -122,25 +122,25 @@ func.def @copy_observations_const_volatile_unsigned_int_volatile_unsigned_int(%i
   %20 = scalar.cmpi ult, %lane, %count$19 : i32
   scf.if %20 {
     %119 = scalar.assume %lane [ge(%lane, 0), lt(%lane, %count$19)] : i32
-    %133 = scalar.constant 2 : i32
-    %134 = scalar.shli %119, %133 : i32
-    %135 = scalar.extui %134 : i32 to i64
+    %21 = scalar.extui %119 : i32 to i64
+    %125 = scalar.constant 2 : i64
+    %126 = scalar.shli %21, %125 : i64
     %24 = index.cast %input_byte_offset : offset to i64
-    %25 = scalar.addi %24, %135 : i64
+    %25 = scalar.addi %24, %126 : i64
     %26 = scalar.assume %25 [range(%25, 0, 9223372036854775807)] : i64
     %27 = index.cast %26 : i64 to offset
     %31 = index.cast %output_byte_offset : offset to i64
-    %32 = scalar.addi %31, %135 : i64
+    %32 = scalar.addi %31, %126 : i64
     %33 = scalar.assume %32 [range(%32, 0, 9223372036854775807)] : i64
     %34 = index.cast %33 : i64 to offset
     %observed = func.call @observe_one_const_volatile_unsigned_int_volatile_unsigned_int(%input, %27, %output, %34) : (buffer, offset, buffer, offset) -> (i32)
     %36 = scalar.constant -1515890086 : i32
     %37 = scalar.xori %observed, %36 : i32
     %38 = scalar.constant 64 : i32
-    %125 = scalar.addi %119, %38 : i32
-    %123 = scalar.shli %125, %133 : i32
-    %124 = scalar.extui %123 : i32 to i64
-    %44 = scalar.addi %31, %124 : i64
+    %122 = scalar.addi %119, %38 : i32
+    %40 = scalar.extui %122 : i32 to i64
+    %121 = scalar.shli %40, %125 : i64
+    %44 = scalar.addi %31, %121 : i64
     %45 = scalar.assume %44 [range(%44, 0, 9223372036854775807)] : i64
     %46 = index.cast %45 : i64 to offset
     %47 = buffer.view %output[%46] : buffer -> view<1xi32>
@@ -236,25 +236,25 @@ func.def @copy_observations_const_unsigned_int_unsigned_int(%input: buffer, %inp
   %20 = scalar.cmpi ult, %lane, %count$19 : i32
   scf.if %20 {
     %119 = scalar.assume %lane [ge(%lane, 0), lt(%lane, %count$19)] : i32
-    %133 = scalar.constant 2 : i32
-    %134 = scalar.shli %119, %133 : i32
-    %135 = scalar.extui %134 : i32 to i64
+    %21 = scalar.extui %119 : i32 to i64
+    %125 = scalar.constant 2 : i64
+    %126 = scalar.shli %21, %125 : i64
     %24 = index.cast %input_byte_offset : offset to i64
-    %25 = scalar.addi %24, %135 : i64
+    %25 = scalar.addi %24, %126 : i64
     %26 = scalar.assume %25 [range(%25, 0, 9223372036854775807)] : i64
     %27 = index.cast %26 : i64 to offset
     %31 = index.cast %output_byte_offset : offset to i64
-    %32 = scalar.addi %31, %135 : i64
+    %32 = scalar.addi %31, %126 : i64
     %33 = scalar.assume %32 [range(%32, 0, 9223372036854775807)] : i64
     %34 = index.cast %33 : i64 to offset
     %observed = func.call @observe_one_const_unsigned_int_unsigned_int(%input, %27, %output, %34) : (buffer, offset, buffer, offset) -> (i32)
     %36 = scalar.constant -1515890086 : i32
     %37 = scalar.xori %observed, %36 : i32
     %38 = scalar.constant 64 : i32
-    %125 = scalar.addi %119, %38 : i32
-    %123 = scalar.shli %125, %133 : i32
-    %124 = scalar.extui %123 : i32 to i64
-    %44 = scalar.addi %31, %124 : i64
+    %122 = scalar.addi %119, %38 : i32
+    %40 = scalar.extui %122 : i32 to i64
+    %121 = scalar.shli %40, %125 : i64
+    %44 = scalar.addi %31, %121 : i64
     %45 = scalar.assume %44 [range(%44, 0, 9223372036854775807)] : i64
     %46 = index.cast %45 : i64 to offset
     %47 = buffer.view %output[%46] : buffer -> view<1xi32>
@@ -428,15 +428,14 @@ kernel.def @volatile_shared() {
   %table_view = buffer.view %table[%table_byte_offset] : buffer -> view<64xi32>
   %workitem_id_x = kernel.workitem.id<x> : index
   %lane = index.cast %workitem_id_x : index to i32
-  %60 = scalar.constant 2 : i32
-  %61 = scalar.shli %lane, %60 : i32
-  %62 = scalar.extui %61 : i32 to i64
-  %21 = scalar.assume %62 [range(%62, 0, 9223372036854775807)] : i64
+  %16 = scalar.extui %lane : i32 to i64
+  %55 = scalar.constant 2 : i64
+  %56 = scalar.shli %16, %55 : i64
+  %21 = scalar.assume %56 [range(%56, 0, 9223372036854775807)] : i64
   %22 = index.cast %21 : i64 to offset
   %23 = buffer.view %input[%22] : buffer -> view<1xi32>
   %24 = view.load %23[0] : view<1xi32> -> i32
-  %25 = scalar.extui %lane : i32 to i64
-  %26 = scalar.assume %25 [range(%25, 0, 63)] : i64
+  %26 = scalar.assume %16 [range(%16, 0, 63)] : i64
   %27 = index.cast %26 : i64 to index
   view.store<volatile> %24, %table_view[%27] : i32, view<64xi32>
   %31 = view.load<volatile> %table_view[%27] : view<64xi32> -> i32
@@ -445,7 +444,10 @@ kernel.def @volatile_shared() {
   %37 = scalar.addi %first, %36 : i32
   view.store<volatile> %37, %table_view[%27] : i32, view<64xi32>
   %44 = view.load<volatile> %table_view[%27] : view<64xi32> -> i32
-  %52 = buffer.view %output[%22] : buffer -> view<1xi32>
+  %54 = scalar.shli %26, %55 : i64
+  %50 = scalar.assume %54 [range(%54, 0, 9223372036854775807)] : i64
+  %51 = index.cast %50 : i64 to offset
+  %52 = buffer.view %output[%51] : buffer -> view<1xi32>
   view.store %44, %52[0] : i32, view<1xi32>
   kernel.return
 }

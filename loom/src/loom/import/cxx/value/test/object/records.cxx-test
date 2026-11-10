@@ -75,32 +75,32 @@ func.def @update_eos_state_double(%input: buffer, %input_byte_offset: offset, %i
   %9 = index.constant 32 : offset
   %state_storage = buffer.alloca<private> align(8) %9 : buffer
   %zero$f64 = scalar.constant 0.0 : f64
-  %84 = index.constant 0 : offset
-  %17 = buffer.view %state_storage[%84] : buffer -> view<1xf64>
+  %78 = index.constant 0 : offset
+  %17 = buffer.view %state_storage[%78] : buffer -> view<1xf64>
   view.store %zero$f64, %17[0] : f64, view<1xf64>
-  %83 = index.constant 8 : offset
-  %22 = buffer.view %state_storage[%83] : buffer -> view<1xf64>
+  %77 = index.constant 8 : offset
+  %22 = buffer.view %state_storage[%77] : buffer -> view<1xf64>
   view.store %zero$f64, %22[0] : f64, view<1xf64>
-  %82 = index.constant 16 : offset
-  %27 = buffer.view %state_storage[%82] : buffer -> view<1xf64>
+  %76 = index.constant 16 : offset
+  %27 = buffer.view %state_storage[%76] : buffer -> view<1xf64>
   view.store %zero$f64, %27[0] : f64, view<1xf64>
-  %81 = index.constant 24 : offset
-  %32 = buffer.view %state_storage[%81] : buffer -> view<1xf64>
+  %75 = index.constant 24 : offset
+  %32 = buffer.view %state_storage[%75] : buffer -> view<1xf64>
   view.store %zero$f64, %32[0] : f64, view<1xf64>
   %33 = scalar.extui %index : i32 to i64
-  %79 = scalar.constant 3 : i64
-  %80 = scalar.shli %33, %79 : i64
+  %73 = scalar.constant 3 : i64
+  %74 = scalar.shli %33, %73 : i64
   %36 = index.cast %input_byte_offset : offset to i64
-  %37 = scalar.addi %36, %80 : i64
+  %37 = scalar.addi %36, %74 : i64
   %38 = scalar.assume %37 [range(%37, 0, 9223372036854775807)] : i64
   %39 = index.cast %38 : i64 to offset
   %40 = buffer.view %input[%39] : buffer -> view<1xf64>
   %41 = view.load %40[0] : view<1xf64> -> f64
   %44 = scalar.constant 3 : i32
   %45 = scalar.andi %index, %44 : i32
-  %77 = scalar.shli %45, %44 : i32
-  %78 = scalar.extui %77 : i32 to i64
-  %51 = scalar.assume %78 [range(%78, 0, 9223372036854775807)] : i64
+  %46 = scalar.extui %45 : i32 to i64
+  %72 = scalar.shli %46, %73 : i64
+  %51 = scalar.assume %72 [range(%72, 0, 9223372036854775807)] : i64
   %52 = index.cast %51 : i64 to offset
   %53 = index.assume %52 [range(%52, 0, 24)] : offset
   %54 = buffer.view %state_storage[%53] : buffer -> view<1xf64>

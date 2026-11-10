@@ -422,11 +422,11 @@ func.def public @packed_array_copy(%input: buffer, %input_byte_offset: offset, %
       %26 = scalar.addi %25, %24 : i64
       %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
       %28 = index.cast %27 : i64 to offset
-      %196 = scalar.constant 2 : i32
-      %197 = scalar.shli %19, %196 : i32
-      %198 = scalar.extui %197 : i32 to i64
+      %29 = scalar.extui %19 : i32 to i64
+      %191 = scalar.constant 2 : i64
+      %192 = scalar.shli %29, %191 : i64
       %32 = index.cast %28 : offset to i64
-      %33 = scalar.addi %32, %198 : i64
+      %33 = scalar.addi %32, %192 : i64
       %34 = scalar.assume %33 [range(%33, 0, 9223372036854775807)] : i64
       %35 = index.cast %34 : i64 to offset
       %36 = buffer.view %input[%35] : buffer -> view<1xi32, align(1)>
@@ -437,7 +437,7 @@ func.def public @packed_array_copy(%input: buffer, %input_byte_offset: offset, %
       %45 = scalar.assume %44 [range(%44, 0, 9223372036854775807)] : i64
       %46 = index.cast %45 : i64 to offset
       %50 = index.cast %46 : offset to i64
-      %51 = scalar.addi %50, %198 : i64
+      %51 = scalar.addi %50, %192 : i64
       %52 = scalar.assume %51 [range(%51, 0, 9223372036854775807)] : i64
       %53 = index.cast %52 : i64 to offset
       %54 = buffer.view %output[%53] : buffer -> view<1xi32, align(1)>

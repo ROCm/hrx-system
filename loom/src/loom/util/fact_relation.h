@@ -99,6 +99,12 @@ iree_status_t loom_value_fact_integer_relations_propagate_origins(
     loom_value_fact_table_t* table, const loom_module_t* module,
     const loom_op_t* op, loom_trait_flags_t traits, bool* inout_changed);
 
+// Shares immutable relation roots after the producer proves numeric equality.
+// INVALID source withdraws prior roots without changing SSA identity.
+iree_status_t loom_value_fact_integer_relations_forward_alias(
+    loom_value_fact_table_t* table, loom_value_id_t source,
+    loom_value_id_t result, bool* inout_changed);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

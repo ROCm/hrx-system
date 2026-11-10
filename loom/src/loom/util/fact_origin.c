@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/ir/module.h"
+#include "loom/util/fact_relation.h"
 #include "loom/util/fact_table.h"
 
 struct loom_value_fact_exact_lane_origin_entry_t {
@@ -528,6 +529,22 @@ iree_status_t loom_value_fact_table_define_exact_scalar_origin(
   table->exact_scalar_origins.entries[loom_value_fact_range_offset(
       table->exact_scalar_origins.range, value_id)] = origin.source_value_id;
   return iree_ok_status();
+}
+
+iree_status_t loom_value_fact_table_define_numeric_identity(
+    loom_value_fact_table_t* table, loom_value_id_t value_id,
+    loom_value_id_t source_value_id) {
+  const loom_value_fact_exact_scalar_origin_t origin = {
+      .source_value_id = source_value_id == LOOM_VALUE_ID_INVALID
+                             ? LOOM_VALUE_ID_INVALID
+                             : loom_value_fact_table_query_numeric_identity(
+                                   table, source_value_id),
+  };
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_define_exact_scalar_origin(
+      table, value_id, origin));
+  return loom_value_fact_integer_relations_forward_alias(
+      table, source_value_id, value_id,
+      table->context.publication ? table->context.publication->changed : NULL);
 }
 
 bool loom_value_fact_table_query_exact_scalar_origin(

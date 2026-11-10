@@ -202,6 +202,52 @@ static iree_status_t loom_scalar_conversion_chain_pattern(
   return loom_scalar_combine_conversion(op, rewriter, false, out_changed);
 }
 
+static iree_status_t loom_scalar_shift_narrowing_pattern(
+    const loom_rewrite_pattern_t* pattern, void* context, loom_op_t* op,
+    loom_rewriter_t* rewriter, bool* out_changed) {
+  (void)pattern;
+  (void)context;
+  *out_changed = false;
+  const loom_value_facts_t amount_facts =
+      loom_rewriter_value_facts(rewriter, loom_scalar_shli_rhs(op));
+  if (!loom_value_facts_is_exact(amount_facts)) {
+    return iree_ok_status();
+  }
+  loom_op_t* extension =
+      loom_rewriter_value_defining_op(rewriter, loom_scalar_shli_lhs(op));
+  if (!extension || !loom_scalar_extui_isa(extension)) {
+    return iree_ok_status();
+  }
+  const loom_value_id_t input = loom_scalar_extui_input(extension);
+  const loom_type_t input_type =
+      loom_module_value_type(rewriter->module, input);
+  const int32_t input_bitwidth =
+      loom_scalar_type_bitwidth(loom_type_element_type(input_type));
+  const int64_t amount = amount_facts.range_lo;
+  if (amount <= 0 || amount >= input_bitwidth ||
+      !loom_value_facts_fit_unsigned_bit_count(
+          loom_rewriter_value_facts(rewriter, input),
+          (uint8_t)(input_bitwidth - amount))) {
+    return iree_ok_status();
+  }
+
+  // The unsigned product fits the input width but may set its sign bit.
+  // Keep zero extension and drop both redundant wide no-wrap contracts.
+  loom_builder_set_before(&rewriter->builder, op);
+  loom_op_t* narrow_amount = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_scalar_constant_build(&rewriter->builder, loom_attr_i64(amount),
+                                 input_type, op->location, &narrow_amount));
+  loom_op_t* narrow_shift = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_scalar_shli_build(&rewriter->builder, /*overflow=*/0, input,
+                             loom_scalar_constant_result(narrow_amount),
+                             input_type, op->location, &narrow_shift));
+  return loom_scalar_combine_replace_with_conversion(
+      rewriter, op, LOOM_CONVERSION_EXTUI,
+      loom_scalar_shli_result(narrow_shift), out_changed);
+}
+
 static const loom_rewrite_pattern_t kScalarSourceCombinePatterns[] = {
     {
         .root_kind = LOOM_OP_SCALAR_EXTF,
@@ -222,6 +268,10 @@ static const loom_rewrite_pattern_t kScalarSourceCombinePatterns[] = {
     {
         .root_kind = LOOM_OP_SCALAR_TRUNCI,
         .match_and_rewrite = loom_scalar_conversion_chain_pattern,
+    },
+    {
+        .root_kind = LOOM_OP_SCALAR_SHLI,
+        .match_and_rewrite = loom_scalar_shift_narrowing_pattern,
     },
 };
 

@@ -699,7 +699,8 @@ static iree_status_t loom_scalar_legalize_narrow_integer_extension(
   IREE_RETURN_IF_ERROR(loom_scalar_extui_build(
       builder, input, input_type, working_type, op->location, &conversion));
   loom_value_id_t value = loom_scalar_extui_result(conversion);
-  if (signed_extension) {
+  if (signed_extension && !loom_value_facts_is_non_negative(
+                              loom_rewriter_value_facts(rewriter, input))) {
     loom_value_id_t shift = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_i32_constant(
         builder, op->location, 32 - input_width, &shift));
@@ -993,9 +994,7 @@ static iree_status_t loom_scalar_legalize_narrow_binary(
       loom_module_value_type(context->module, loom_op_results(op)[0]);
 
   // A left shift may sign-extend its narrow operands: every defined shift
-  // amount is nonnegative and truncation preserves the low result bits. Unlike
-  // zero extension, this form remains stable when generic canonicalization
-  // moves a proven shift before an extension.
+  // amount is nonnegative and truncation preserves the low result bits.
   const bool sign_extend_operands =
       op->kind == LOOM_OP_SCALAR_DIVSI || op->kind == LOOM_OP_SCALAR_REMSI ||
       op->kind == LOOM_OP_SCALAR_SHLI || op->kind == LOOM_OP_SCALAR_SHRSI;

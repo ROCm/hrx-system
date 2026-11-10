@@ -30,14 +30,14 @@ kernel.def @entry() {
     %49 = scalar.constant 65 : i32
     %23 = kernel.subgroup.size : index
     %24 = index.cast %23 : index to i32
-    %60 = scalar.addi %24, %49 : i32
-    %57 = scalar.constant 2 : i32
-    %58 = scalar.shli %46, %57 : i32
-    %59 = scalar.extui %58 : i32 to i64
-    %31 = scalar.assume %59 [range(%59, 0, 9223372036854775807)] : i64
+    %54 = scalar.addi %24, %49 : i32
+    %26 = scalar.extui %46 : i32 to i64
+    %52 = scalar.constant 2 : i64
+    %53 = scalar.shli %26, %52 : i64
+    %31 = scalar.assume %53 [range(%53, 0, 9223372036854775807)] : i64
     %32 = index.cast %31 : i64 to offset
     %33 = buffer.view %coordinates[%32] : buffer -> view<1xi32>
-    view.store %60, %33[0] : i32, view<1xi32>
+    view.store %54, %33[0] : i32, view<1xi32>
     %34 = scalar.constant 1 : i32
     %36, %37 = kernel.subgroup.shuffle<xor> %value, %34, %13 : f32, i32, i32
     %45 = buffer.view %output[%32] : buffer -> view<1xf32>
@@ -119,10 +119,10 @@ kernel.def @entry() {
   %workitem_id_x = kernel.workitem.id<x> : index
   %lane = index.cast %workitem_id_x : index to i32
   %13 = func.call pure @topology() : () -> (i32)
-  %59 = scalar.constant 2 : i32
-  %60 = scalar.shli %lane, %59 : i32
-  %61 = scalar.extui %60 : i32 to i64
-  %19 = scalar.assume %61 [range(%61, 0, 9223372036854775807)] : i64
+  %14 = scalar.extui %lane : i32 to i64
+  %54 = scalar.constant 2 : i64
+  %55 = scalar.shli %14, %54 : i64
+  %19 = scalar.assume %55 [range(%55, 0, 9223372036854775807)] : i64
   %20 = index.cast %19 : i64 to offset
   %21 = buffer.view %coordinates[%20] : buffer -> view<1xi32>
   view.store %13, %21[0] : i32, view<1xi32>
@@ -209,14 +209,13 @@ kernel.def @topology_identity() {
   %23 = index.cast %22 : i64 to index
   view.store %lane, %values_view[%23] : i32, view<4xi32>
   %33 = view.load %values_view[%23] : view<4xi32> -> i32
-  %58 = scalar.addi %lane, %33 : i32
-  %55 = scalar.constant 2 : i32
-  %56 = scalar.shli %lane, %55 : i32
-  %57 = scalar.extui %56 : i32 to i64
-  %41 = scalar.assume %57 [range(%57, 0, 9223372036854775807)] : i64
+  %55 = scalar.addi %lane, %33 : i32
+  %53 = scalar.constant 2 : i64
+  %54 = scalar.shli %22, %53 : i64
+  %41 = scalar.assume %54 [range(%54, 0, 9223372036854775807)] : i64
   %42 = index.cast %41 : i64 to offset
   %43 = buffer.view %output[%42] : buffer -> view<1xi32>
-  view.store %58, %43[0] : i32, view<1xi32>
+  view.store %55, %43[0] : i32, view<1xi32>
   %output_view = buffer.view %output[%output_byte_offset] : buffer -> view<4xi32>
   view.store %lane, %output_view[%coordinate] : i32, view<4xi32>
   %50 = index.add %subgroup, %subgroup_count : index

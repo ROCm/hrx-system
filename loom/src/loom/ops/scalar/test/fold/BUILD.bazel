@@ -33,7 +33,6 @@ loom_check_test_suite(
         "poison.loom-test",
         "remainder.loom-test",
         "scaling.loom-test",
-        "shift_narrowing.loom-test",
     ],
 )
 

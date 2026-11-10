@@ -95,20 +95,11 @@ iree_status_t loom_index_cast_facts(loom_fact_context_t* context,
   if (!context->publication) {
     return iree_ok_status();
   }
-  loom_value_fact_exact_scalar_origin_t exact_origin = {
-      .source_value_id = LOOM_VALUE_ID_INVALID,
-  };
-  if (loom_index_cast_transfer_preserves_value(
-          input_scalar_type, result_scalar_type, operand_facts[0])) {
-    const loom_value_id_t input = loom_index_cast_input(op);
-    if (!loom_value_fact_table_query_exact_scalar_origin(
-            context->table, module, input, &exact_origin)) {
-      exact_origin.source_value_id =
-          loom_value_fact_table_query_identity(context->table, input);
-    }
-  }
-  return loom_value_fact_table_define_exact_scalar_origin(
-      context->table, loom_index_cast_result(op), exact_origin);
+  const bool preserves_value = loom_index_cast_transfer_preserves_value(
+      input_scalar_type, result_scalar_type, operand_facts[0]);
+  return loom_value_fact_table_define_numeric_identity(
+      context->table, loom_index_cast_result(op),
+      preserves_value ? loom_index_cast_input(op) : LOOM_VALUE_ID_INVALID);
 }
 
 iree_status_t loom_index_assume_facts(loom_fact_context_t* context,

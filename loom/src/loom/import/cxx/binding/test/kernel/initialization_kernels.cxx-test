@@ -25,11 +25,11 @@ kernel.def @initialize_weights() {
 } launch(%weights: buffer) {
   %workgroup_id_x = kernel.workgroup.id<x> : index
   %9 = index.cast %workgroup_id_x : index to i32
-  %50 = scalar.constant 8 : i32
-  %51 = scalar.shli %9, %50 : i32
+  %47 = scalar.constant 8 : i32
+  %48 = scalar.shli %9, %47 : i32
   %workitem_id_x = kernel.workitem.id<x> : index
   %13 = index.cast %workitem_id_x : index to i32
-  %index = scalar.addi %51, %13 : i32
+  %index = scalar.addi %48, %13 : i32
   %15 = scalar.constant 768 : i32
   %16 = scalar.cmpi ult, %index, %15 : i32
   %18 = scalar.constant 1.0 : f32
@@ -46,10 +46,10 @@ kernel.def @initialize_weights() {
   %31 = scalar.mulf %sign, %30 : f32
   %32 = scalar.fptrunc %31 : f32 to f16
   %33 = vector.from_elements %23, %26, %29, %32 : vector<4xf16>
-  %46 = scalar.constant 3 : i32
-  %47 = scalar.shli %index, %46 : i32
-  %48 = scalar.extui %47 : i32 to i64
-  %39 = scalar.assume %48 [range(%48, 0, 9223372036854775807)] : i64
+  %34 = scalar.extui %index : i32 to i64
+  %44 = scalar.constant 3 : i64
+  %45 = scalar.shli %34, %44 : i64
+  %39 = scalar.assume %45 [range(%45, 0, 9223372036854775807)] : i64
   %40 = index.cast %39 : i64 to offset
   %41 = buffer.view %weights[%40] : buffer -> view<4xf16>
   vector.store %33, %41[0] : vector<4xf16>, view<4xf16>
@@ -108,37 +108,37 @@ kernel.def @check_rows() {
 } launch(%output: buffer, %matches: buffer) {
   %workgroup_id_x = kernel.workgroup.id<x> : index
   %11 = index.cast %workgroup_id_x : index to i32
-  %65 = scalar.constant 8 : i32
-  %66 = scalar.shli %11, %65 : i32
+  %59 = scalar.constant 8 : i32
+  %60 = scalar.shli %11, %59 : i32
   %workitem_id_x = kernel.workitem.id<x> : index
   %15 = index.cast %workitem_id_x : index to i32
-  %index = scalar.addi %66, %15 : i32
-  %63 = scalar.constant 3 : i32
-  %64 = scalar.andi %index, %63 : i32
+  %index = scalar.addi %60, %15 : i32
+  %57 = scalar.constant 3 : i32
+  %58 = scalar.andi %index, %57 : i32
   %19 = scalar.constant 1 : i32
-  %20 = scalar.addi %64, %19 : i32
+  %20 = scalar.addi %58, %19 : i32
   %expected$21 = scalar.uitofp %20 : i32 to f32
   %22 = scalar.constant 3072 : i32
   %23 = scalar.cmpi ult, %index, %22 : i32
   %expected$25 = scalar.negf %expected$21 : f32
-  %expected$62 = scf.select %23, %expected$25, %expected$21 : f32
+  %expected$56 = scf.select %23, %expected$25, %expected$21 : f32
   %26 = scalar.constant 16 : i32
   %27 = scalar.addi %index, %26 : i32
-  %59 = scalar.constant 2 : i32
-  %60 = scalar.shli %27, %59 : i32
-  %61 = scalar.extui %60 : i32 to i64
-  %33 = scalar.assume %61 [range(%61, 0, 9223372036854775807)] : i64
+  %28 = scalar.extui %27 : i32 to i64
+  %54 = scalar.constant 2 : i64
+  %55 = scalar.shli %28, %54 : i64
+  %33 = scalar.assume %55 [range(%55, 0, 9223372036854775807)] : i64
   %34 = index.cast %33 : i64 to offset
   %35 = buffer.view %output[%34] : buffer -> view<1xf32>
   %36 = view.load %35[0] : view<1xf32> -> f32
-  %37 = scalar.cmpf oeq, %36, %expected$62 : f32
+  %37 = scalar.cmpf oeq, %36, %expected$56 : f32
   %40 = scalar.constant 0 : i32
-  %56 = scf.select %37, %19, %40 : i32
-  %54 = scalar.shli %index, %59 : i32
-  %55 = scalar.extui %54 : i32 to i64
-  %46 = scalar.assume %55 [range(%55, 0, 9223372036854775807)] : i64
+  %53 = scf.select %37, %19, %40 : i32
+  %41 = scalar.extui %index : i32 to i64
+  %52 = scalar.shli %41, %54 : i64
+  %46 = scalar.assume %52 [range(%52, 0, 9223372036854775807)] : i64
   %47 = index.cast %46 : i64 to offset
   %48 = buffer.view %matches[%47] : buffer -> view<1xi32>
-  view.store %56, %48[0] : i32, view<1xi32>
+  view.store %53, %48[0] : i32, view<1xi32>
   kernel.return
 }

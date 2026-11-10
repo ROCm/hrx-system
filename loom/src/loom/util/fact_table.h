@@ -791,6 +791,24 @@ static inline loom_value_id_t loom_value_fact_table_query_identity(
   return representative != LOOM_VALUE_ID_INVALID ? representative : value_id;
 }
 
+// Returns the retained numeric representative, independently of storage type.
+// Producers flatten exact origins; lookup follows at most one numeric link.
+// Same-type SSA identity remains a separate representation contract.
+static inline loom_value_id_t loom_value_fact_table_query_numeric_identity(
+    const loom_value_fact_table_t* table, loom_value_id_t value_id) {
+  value_id = loom_value_fact_table_query_identity(table, value_id);
+  if (!table || !loom_value_fact_range_contains(
+                    table->exact_scalar_origins.range, value_id)) {
+    return value_id;
+  }
+  const loom_value_id_t source =
+      table->exact_scalar_origins.entries[loom_value_fact_range_offset(
+          table->exact_scalar_origins.range, value_id)];
+  return source == LOOM_VALUE_ID_INVALID
+             ? value_id
+             : loom_value_fact_table_query_identity(table, source);
+}
+
 // Returns true when exact predicate-bearing identities await consumption.
 static inline bool loom_value_fact_table_has_pending_exact_relations(
     const loom_value_fact_table_t* table) {

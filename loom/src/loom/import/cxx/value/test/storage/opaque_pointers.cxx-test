@@ -205,11 +205,11 @@ kernel.def @erased() {
     %cursor$51, %cursor_byte_offset$52 = func.call pure @advance(%cursor$46, %cursor_byte_offset$47, %step_bytes) : (buffer, offset, i32) -> (buffer, offset)
     %53 = buffer.view %cursor$51[%cursor_byte_offset$52] : buffer -> view<1xi32>
     %54 = view.load %53[0] : view<1xi32> -> i32
-    %94 = scalar.constant 2 : i32
-    %95 = scalar.shli %50, %94 : i32
-    %96 = scalar.extui %95 : i32 to i64
+    %55 = scalar.extui %50 : i32 to i64
+    %92 = scalar.constant 2 : i64
+    %93 = scalar.shli %55, %92 : i64
     %86 = scalar.constant 4 : i64
-    %91 = scalar.addi %96, %86 : i64
+    %91 = scalar.addi %93, %86 : i64
     %60 = scalar.assume %91 [range(%91, 0, 9223372036854775807)] : i64
     %61 = index.cast %60 : i64 to offset
     %62 = buffer.view %output[%61] : buffer -> view<1xi32>
@@ -222,9 +222,9 @@ kernel.def @erased() {
 func.def @select(%first: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset, %choose_second: i32) -> (buffer, offset) {
   %70 = scalar.constant 0 : i32
   %71 = scalar.cmpi ne, %choose_second, %70 : i32
-  %97 = scf.select %71, %second, %first : buffer
-  %98 = scf.select %71, %second_byte_offset, %first_byte_offset : offset
-  func.return %97, %98 : buffer, offset
+  %94 = scf.select %71, %second, %first : buffer
+  %95 = scf.select %71, %second_byte_offset, %first_byte_offset : offset
+  func.return %94, %95 : buffer, offset
 }
 
 func.def @advance(%pointer: buffer, %pointer_byte_offset: offset, %bytes: i32) -> (buffer, offset) {
@@ -268,20 +268,20 @@ kernel.def @typed() {
   %72 = index.constant 0 : offset
   %71 = index.constant 3 : offset
   %46 = index.constant 1 : offset
-  %cursor_byte_offset$83 = scf.for %index = [%72 to %71 step %46](%cursor_byte_offset$82 = %cursor_byte_offset$17 : offset) -> (offset) {
+  %cursor_byte_offset$80 = scf.for %index = [%72 to %71 step %46](%cursor_byte_offset$79 = %cursor_byte_offset$17 : offset) -> (offset) {
     %52 = index.cast %index : offset to i32
     %53 = scalar.extui %step_bytes : i32 to i64
-    %56 = index.cast %cursor_byte_offset$82 : offset to i64
+    %56 = index.cast %cursor_byte_offset$79 : offset to i64
     %57 = scalar.addi %56, %53 : i64
     %58 = scalar.assume %57 [range(%57, 0, 9223372036854775807)] : i64
     %cursor_byte_offset$59 = index.cast %58 : i64 to offset
     %60 = buffer.view %cursor[%cursor_byte_offset$59] : buffer -> view<1xi32>
     %61 = view.load %60[0] : view<1xi32> -> i32
-    %78 = scalar.constant 2 : i32
-    %79 = scalar.shli %52, %78 : i32
-    %80 = scalar.extui %79 : i32 to i64
+    %62 = scalar.extui %52 : i32 to i64
+    %76 = scalar.constant 2 : i64
+    %77 = scalar.shli %62, %76 : i64
     %70 = scalar.constant 4 : i64
-    %75 = scalar.addi %80, %70 : i64
+    %75 = scalar.addi %77, %70 : i64
     %67 = scalar.assume %75 [range(%75, 0, 9223372036854775807)] : i64
     %68 = index.cast %67 : i64 to offset
     %69 = buffer.view %output[%68] : buffer -> view<1xi32>

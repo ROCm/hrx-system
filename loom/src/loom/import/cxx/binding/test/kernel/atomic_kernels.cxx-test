@@ -144,14 +144,14 @@ kernel.def @atomic_workgroup_tickets() {
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %25 = scalar.constant 1 : i32
   %ticket = view.atomic.rmw<addi> %25, %counter_view[0] {ordering = relaxed, scope = workgroup} : i32, view<1xi32> -> i32
-  %80 = scalar.constant 5 : i32
-  %81 = scalar.shli %group, %80 : i32
-  %40 = scalar.addi %81, %ticket : i32
+  %77 = scalar.constant 5 : i32
+  %78 = scalar.shli %group, %77 : i32
+  %40 = scalar.addi %78, %ticket : i32
   %42 = scalar.addi %40, %25 : i32
   %43 = scalar.extui %42 : i32 to i64
-  %78 = scalar.constant 2 : i64
-  %79 = scalar.shli %43, %78 : i64
-  %48 = scalar.assume %79 [range(%79, 0, 9223372036854775807)] : i64
+  %75 = scalar.constant 2 : i64
+  %76 = scalar.shli %43, %75 : i64
+  %48 = scalar.assume %76 [range(%76, 0, 9223372036854775807)] : i64
   %49 = index.cast %48 : i64 to offset
   %50 = buffer.view %slots[%49] : buffer -> view<1xi32>
   view.store %25, %50[0] : i32, view<1xi32>
@@ -161,10 +161,9 @@ kernel.def @atomic_workgroup_tickets() {
     %69 = index.constant 0 : index
     %57 = view.load %counter_view[%69] : view<1xi32> -> i32
     %59 = scalar.addi %group, %25 : i32
-    %75 = scalar.constant 2 : i32
-    %76 = scalar.shli %59, %75 : i32
-    %77 = scalar.extui %76 : i32 to i64
-    %65 = scalar.assume %77 [range(%77, 0, 9223372036854775807)] : i64
+    %60 = scalar.extui %59 : i32 to i64
+    %74 = scalar.shli %60, %75 : i64
+    %65 = scalar.assume %74 [range(%74, 0, 9223372036854775807)] : i64
     %66 = index.cast %65 : i64 to offset
     %67 = buffer.view %counts[%66] : buffer -> view<1xi32>
     view.store %57, %67[0] : i32, view<1xi32>

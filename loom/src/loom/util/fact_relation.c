@@ -559,7 +559,7 @@ static iree_status_t loom_value_fact_relation_add_bound(
     loom_value_id_t bound, loom_integer_order_outcome_bits_t outcomes) {
   IREE_RETURN_IF_ERROR(loom_value_fact_relation_add_exclusions(
       table, roots, outcomes,
-      loom_value_fact_table_query_identity(table, bound)));
+      loom_value_fact_table_query_numeric_identity(table, bound)));
   loom_value_fact_bound_composition_t composition = {
       .table = table,
       .roots = roots,
@@ -641,9 +641,9 @@ loom_value_fact_relation_query_signed_integer_order(
   }
 
   const loom_value_id_t lhs_identity =
-      loom_value_fact_table_query_identity(table, lhs);
+      loom_value_fact_table_query_numeric_identity(table, lhs);
   const loom_value_id_t rhs_identity =
-      loom_value_fact_table_query_identity(table, rhs);
+      loom_value_fact_table_query_numeric_identity(table, rhs);
   if (lhs_identity == rhs_identity) {
     return LOOM_INTEGER_ORDER_OUTCOME_BIT_EQUAL;
   }
@@ -1039,7 +1039,7 @@ static iree_status_t loom_value_fact_relation_plan_initialize(
   }
   for (uint16_t i = 0; i < pair_count; ++i) {
     plan->identities[i] =
-        loom_value_fact_table_query_identity(table, operands[i]);
+        loom_value_fact_table_query_numeric_identity(table, operands[i]);
     plan->plans[i] =
         loom_value_fact_integer_relations_snapshot(table, operands[i]);
     plan->locals[i] = (loom_value_fact_relation_roots_t){0};
@@ -1058,9 +1058,9 @@ static iree_status_t loom_value_fact_relation_plan_add(
     loom_value_id_t lhs, loom_symbolic_integer_relation_t relation,
     loom_value_id_t rhs) {
   const loom_value_id_t lhs_identity =
-      loom_value_fact_table_query_identity(table, lhs);
+      loom_value_fact_table_query_numeric_identity(table, lhs);
   const loom_value_id_t rhs_identity =
-      loom_value_fact_table_query_identity(table, rhs);
+      loom_value_fact_table_query_numeric_identity(table, rhs);
   uint16_t ordinal = 0;
   if (loom_value_fact_ordinal_map_find(&plan->identity_map, lhs_identity,
                                        &ordinal)) {
@@ -1083,7 +1083,7 @@ static iree_status_t loom_value_fact_relation_plan_add_literal_exclusion(
     loom_value_fact_table_t* table, loom_value_fact_relation_plan_t* plan,
     loom_value_id_t value, int64_t excluded_literal) {
   const loom_value_id_t identity =
-      loom_value_fact_table_query_identity(table, value);
+      loom_value_fact_table_query_numeric_identity(table, value);
   uint16_t ordinal = 0;
   if (!loom_value_fact_ordinal_map_find(&plan->identity_map, identity,
                                         &ordinal)) {
@@ -1289,7 +1289,7 @@ static iree_status_t loom_value_fact_integer_relations_propagate_identity(
   return status;
 }
 
-static iree_status_t loom_value_fact_integer_relations_forward_alias(
+iree_status_t loom_value_fact_integer_relations_forward_alias(
     loom_value_fact_table_t* table, loom_value_id_t source,
     loom_value_id_t result, bool* inout_changed) {
   const loom_value_fact_relation_roots_t source_roots =
