@@ -203,6 +203,90 @@ template.def<@qwen.q4.matmul> public priority(10) @fast(%arg0: i32) -> (i32) {
   EXPECT_EQ(missing.count, 0u);
 }
 
+TEST_F(TemplateProviderCatalogTest,
+       PreservesExternalGroupsAndMixedSourceOrder) {
+  ModulePtr module = ParseModule(R"(
+template.decl @a(%value: i32) -> (i32)
+template.decl @b(%value: i32) -> (i32)
+)");
+  const loom_symbol_ref_t families[] = {
+      {.module_id = 0, .symbol_id = FindSymbol(module.get(), IREE_SV("a"))},
+      {.module_id = 0, .symbol_id = FindSymbol(module.get(), IREE_SV("b"))},
+  };
+  const char* orders[] = {"aabb", "bbaa", "abab", "baba", "abba", "baab"};
+  for (bool has_local : {false, true}) {
+    SCOPED_TRACE(has_local);
+    if (has_local) {
+      AddUkernelProvider(module.get(), IREE_SV("a"), IREE_SV("local.a"), 3);
+      AddUkernelProvider(module.get(), IREE_SV("b"), IREE_SV("local.b"), 7);
+    }
+    for (size_t order_index = 0; order_index < IREE_ARRAYSIZE(orders);
+         ++order_index) {
+      const char* order = orders[order_index];
+      SCOPED_TRACE(order);
+      loom_template_provider_summary_t external[4] = {};
+      for (size_t i = 0; i < IREE_ARRAYSIZE(external); ++i) {
+        const loom_template_provider_contract_t contract = {
+            .kind = LOOM_TEMPLATE_PROVIDER_KIND_UKERNEL,
+            .argument_count = 1,
+            .result_count = 1,
+            .name = IREE_SV("external"),
+            .priority = (int64_t)i,
+        };
+        IREE_ASSERT_OK(loom_template_provider_contract_bind_family(
+            &contract, module.get(), families[order[i] - 'a'],
+            loom_symbol_ref_null(), i, &external[i]));
+      }
+      IREE_ASSERT_OK(loom_template_provider_catalog_build(
+          &catalog_, module.get(), &fact_table_, external,
+          IREE_ARRAYSIZE(external)));
+      EXPECT_EQ(catalog_.provider_count, has_local ? 6u : 4u);
+      if (!has_local && order_index < 2) {
+        // Both ascending and descending family order already form a catalog.
+        EXPECT_EQ(catalog_.providers, external);
+      } else {
+        EXPECT_NE(catalog_.providers, external);
+      }
+      for (size_t family_index = 0; family_index < IREE_ARRAYSIZE(families);
+           ++family_index) {
+        const auto providers = loom_template_provider_catalog_lookup(
+            &catalog_, families[family_index]);
+        ASSERT_EQ(providers.count, has_local ? 3u : 2u);
+        size_t position = 0;
+        if (has_local) {
+          EXPECT_EQ(providers.providers[position++].origin_ordinal,
+                    IREE_HOST_SIZE_MAX);
+        }
+        for (size_t i = 0; i < IREE_ARRAYSIZE(external); ++i) {
+          if (order[i] == 'a' + family_index) {
+            const auto& provider = providers.providers[position++];
+            EXPECT_EQ(provider.origin_ordinal, i);
+            EXPECT_EQ(provider.priority, (int64_t)i);
+            EXPECT_EQ(provider.family.symbol_id,
+                      families[family_index].symbol_id);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_F(TemplateProviderCatalogTest, EmptyExternalCatalogRetainsNoProviders) {
+  ModulePtr module = ParseModule(R"(
+template.decl @empty(%value: i32) -> (i32)
+)");
+  IREE_ASSERT_OK(loom_template_provider_catalog_build(
+      &catalog_, module.get(), &fact_table_, nullptr, 0));
+  EXPECT_EQ(catalog_.provider_count, 0u);
+  EXPECT_EQ(catalog_.providers, nullptr);
+  const auto providers = loom_template_provider_catalog_lookup(
+      &catalog_, {
+                     .module_id = 0,
+                     .symbol_id = FindSymbol(module.get(), IREE_SV("empty")),
+                 });
+  EXPECT_EQ(providers.count, 0u);
+}
+
 TEST_F(TemplateProviderCatalogTest, RebuildDropsErasedProvider) {
   ModulePtr module = ParseModule(R"(
 template.decl @demo.contract(%arg0: i32) -> (i32)

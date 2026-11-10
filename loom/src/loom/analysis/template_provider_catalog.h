@@ -196,7 +196,8 @@ typedef struct loom_template_provider_catalog_t {
   // Arena used for provider and bucket storage.
   iree_arena_allocator_t* arena;
 
-  // Provider summaries grouped by family in stable source order.
+  // Provider summaries grouped by family in stable source order. Borrows an
+  // already grouped external array, otherwise owns merged storage in arena.
   const loom_template_provider_summary_t* providers;
 
   // Number of provider summaries.
@@ -225,8 +226,10 @@ iree_status_t loom_template_provider_catalog_build_local(
 // Rebuilds |catalog| from local providers plus external summaries.
 //
 // Every external provider must already be bound to |module|'s family and target
-// symbols. Borrowed source-owned signatures, predicates, names, conditions, and
-// target facts must remain live for the catalog lifetime.
+// symbols. The external array and its source-owned signatures, predicates,
+// names, conditions, and target facts remain immutable and live for the
+// catalog lifetime. Already grouped external arrays are borrowed directly when
+// no local providers need merging; other inputs retain stable order per family.
 iree_status_t loom_template_provider_catalog_build(
     loom_template_provider_catalog_t* catalog, const loom_module_t* module,
     loom_symbol_fact_table_t* fact_table,

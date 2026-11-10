@@ -262,6 +262,7 @@ iree_status_t loom_template_provider_catalog_build(
   iree_host_size_t local_provider_count = 0;
   IREE_RETURN_IF_ERROR(loom_template_provider_catalog_count_local(
       module, buckets, &local_provider_count));
+  bool external_groups_contiguous = local_provider_count == 0;
   for (iree_host_size_t i = 0; i < external_provider_count; ++i) {
     IREE_ASSERT(external_providers[i].module == module);
     const loom_symbol_ref_t family = external_providers[i].family;
@@ -274,6 +275,13 @@ iree_status_t loom_template_provider_catalog_build(
       return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                               "template family provider count overflow");
     }
+    if (bucket->provider_count == 0) {
+      bucket->first_provider_index = (uint32_t)i;
+    } else if ((iree_host_size_t)bucket->first_provider_index +
+                   bucket->provider_count !=
+               i) {
+      external_groups_contiguous = false;
+    }
     ++bucket->provider_count;
   }
 
@@ -285,6 +293,12 @@ iree_status_t loom_template_provider_catalog_build(
                             "template provider count overflow");
   }
   catalog->provider_count = provider_count;
+  if (external_groups_contiguous) {
+    // Lazy library loading already groups demanded providers by family. Keep
+    // that immutable storage when no local providers require a merged array.
+    catalog->providers = external_providers;
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(
       loom_template_provider_catalog_prepare_buckets(catalog, buckets));
 
