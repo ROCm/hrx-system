@@ -1,0 +1,122 @@
+// Publication retains the structure of possible later choices, but excludes
+// providers already rejected by source facts or shadowed by a proven fallback.
+template.decl @residual.select(%matches: i1, %disabled: i1, %columns: index, %unused: index) -> (i32)
+
+template.def<@residual.select> priority(20) @residual.impossible(%matches: i1, %disabled: i1, %columns: index, %unused: index) -> (i32) where [eq(%disabled, 1)] {
+  %values = vector.splati 1 : vector<[%unused]xi32>
+  %sum_identity = scalar.constant 0 : i32
+  %result = vector.reduce<addi> %values, %sum_identity : vector<[%unused]xi32>, i32
+  template.return %result : i32
+}
+
+template.def<@residual.select> priority(10) @residual.vector(%matches: i1, %disabled: i1, %columns: index, %unused: index) -> (i32) where [eq(%matches, 1)] {
+  %values = vector.splati 1 : vector<[%columns]xi32>
+  %sum_identity = scalar.constant 0 : i32
+  %result = vector.reduce<addi> %values, %sum_identity : vector<[%columns]xi32>, i32
+  template.return %result : i32
+}
+
+template.def<@residual.select> priority(1) @residual.scalar(%matches: i1, %disabled: i1, %columns: index, %unused: index) -> (i32) {
+  %result = scalar.constant 8 : i32
+  template.return %result : i32
+}
+
+template.def<@residual.select> @residual.shadowed(%matches: i1, %disabled: i1, %columns: index, %unused: index) -> (i32) {
+  %values = vector.splati 1 : vector<[%unused]xi32>
+  %sum_identity = scalar.constant 0 : i32
+  %result = vector.reduce<addi> %values, %sum_identity : vector<[%unused]xi32>, i32
+  template.return %result : i32
+}
+
+template.decl @residual.targeted(%columns: index) -> (i32)
+
+template.def<@residual.targeted> requires [#target.subgroup.size<32>] priority(10) @residual.wave(%columns: index) -> (i32) {
+  %values = vector.splati 1 : vector<[%columns]xi32>
+  %sum_identity = scalar.constant 0 : i32
+  %result = vector.reduce<addi> %values, %sum_identity : vector<[%columns]xi32>, i32
+  template.return %result : i32
+}
+
+template.def<@residual.targeted> @residual.other_target(%columns: index) -> (i32) {
+  %result = scalar.constant 8 : i32
+  template.return %result : i32
+}
+
+pipeline.def<kernel> @residual.computed() run(%mode: index, %columns: index, %unused: index, %output: view<1xi32>) {
+  %vector_mode = index.constant 4 : index
+  %disabled = scalar.constant 0 : i1
+  %matches = index.cmp eq, %mode, %vector_mode : index
+  %result = template.apply<@residual.select>(%matches, %disabled, %columns, %unused) : (i1, i1, index, index) -> (i32)
+  pipeline.strand workers([0], [1], [1]) {
+    view.store %result, %output[0] : i32, view<1xi32>
+  }
+}
+
+pipeline.def<kernel> @residual.guarded() run(%matches: i1, %columns: index, %unused: index, %output: view<1xi32>) {
+  %disabled = scalar.constant 0 : i1
+  %result = scf.if %matches -> (i32) {
+    %value = template.apply<@residual.select>(%matches, %disabled, %columns, %unused) : (i1, i1, index, index) -> (i32)
+    scf.yield %value : i32
+  } else {
+    %value = scalar.constant 0 : i32
+    scf.yield %value : i32
+  }
+  pipeline.strand workers([0], [1], [1]) {
+    view.store %result, %output[0] : i32, view<1xi32>
+  }
+}
+
+pipeline.def<kernel> @residual.target() run(%columns: index, %output: view<1xi32>) {
+  %result = template.apply<@residual.targeted>(%columns) : (index) -> (i32)
+  pipeline.strand workers([0], [1], [1]) {
+    view.store %result, %output[0] : i32, view<1xi32>
+  }
+}
+
+pipeline.def<kernel> @residual.false() run(%columns: index, %unused: index, %output: view<1xi32>) {
+  %disabled = scalar.constant 0 : i1
+  %result = template.apply<@residual.select>(%disabled, %disabled, %columns, %unused) : (i1, i1, index, index) -> (i32)
+  pipeline.strand workers([0], [1], [1]) {
+    view.store %result, %output[0] : i32, view<1xi32>
+  }
+}
+
+command.def public @residual_computed() launch(%output: view<1xi32>) {
+  %mode = index.constant 4 : index
+  %small = index.constant 16 : index
+  %large = index.constant 32 : index
+  kernel.launch @residual.computed(%mode, %small, %small, %output) : (index, index, index, view<1xi32>)
+  kernel.launch @residual.computed(%mode, %small, %large, %output) : (index, index, index, view<1xi32>)
+  kernel.launch @residual.computed(%mode, %large, %small, %output) : (index, index, index, view<1xi32>)
+  kernel.launch @residual.computed(%mode, %large, %large, %output) : (index, index, index, view<1xi32>)
+  command.return
+}
+
+command.def public @residual_guarded() launch(%output: view<1xi32>) {
+  %matches = scalar.constant 1 : i1
+  %small = index.constant 16 : index
+  %large = index.constant 32 : index
+  kernel.launch @residual.guarded(%matches, %small, %small, %output) : (i1, index, index, view<1xi32>)
+  kernel.launch @residual.guarded(%matches, %small, %large, %output) : (i1, index, index, view<1xi32>)
+  kernel.launch @residual.guarded(%matches, %large, %small, %output) : (i1, index, index, view<1xi32>)
+  kernel.launch @residual.guarded(%matches, %large, %large, %output) : (i1, index, index, view<1xi32>)
+  command.return
+}
+
+command.def public @residual_target() launch(%output: view<1xi32>) {
+  %small = index.constant 16 : index
+  %large = index.constant 32 : index
+  kernel.launch @residual.target(%small, %output) : (index, view<1xi32>)
+  kernel.launch @residual.target(%large, %output) : (index, view<1xi32>)
+  command.return
+}
+
+command.def public @residual_false() launch(%output: view<1xi32>) {
+  %small = index.constant 16 : index
+  %large = index.constant 32 : index
+  kernel.launch @residual.false(%small, %small, %output) : (index, index, view<1xi32>)
+  kernel.launch @residual.false(%small, %large, %output) : (index, index, view<1xi32>)
+  kernel.launch @residual.false(%large, %small, %output) : (index, index, view<1xi32>)
+  kernel.launch @residual.false(%large, %large, %output) : (index, index, view<1xi32>)
+  command.return
+}

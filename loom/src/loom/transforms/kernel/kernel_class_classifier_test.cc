@@ -609,15 +609,23 @@ TEST_F(KernelClassClassifierTest, StructuralCostIsIncludedBeforeAdmission) {
   fixture.classifier()->has_shape_requirements = true;
   fixture.classifier()->decision_count = 1;
   fixture.decisions()[0].action_shapes = shapes;
+  fixture.decisions()[0].residual_shape = shapes[0];
   for (uint16_t limit : {1, 2, 3, 4}) {
     SCOPED_TRACE(limit);
     auto options = loom_kernel_class_collection_options_default();
     options.class_limit = limit;
     loom_kernel_class_collection_t collection = {};
+    if (limit == 1) {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            loom_kernel_class_classifier_collect(
+                                fixture.classifier(), nullptr, fixture.sites(),
+                                4, &options, &analysis_arena_, &collection));
+      continue;
+    }
     IREE_ASSERT_OK(loom_kernel_class_classifier_collect(
         fixture.classifier(), nullptr, fixture.sites(), 4, &options,
         &analysis_arena_, &collection));
-    EXPECT_EQ(collection.class_count, limit < 3 ? 1 : 3);
+    EXPECT_EQ(collection.class_count, limit < 3 ? 2 : 3);
     EXPECT_EQ(collection.accepted_decision_count, limit < 3 ? 0 : 1);
     if (limit >= 3) {
       EXPECT_EQ(collection.site_classes[0], collection.site_classes[1]);
@@ -643,7 +651,9 @@ TEST_F(KernelClassClassifierTest, SelectedProvidersCanRemoveGenericStructure) {
   };
   fixture.classifier()->has_shape_requirements = true;
   fixture.decisions()[0].action_shapes = shapes;
+  fixture.decisions()[0].residual_shape = shapes[1];
   fixture.decisions()[1].action_shapes = shapes;
+  fixture.decisions()[1].residual_shape = shapes[1];
   fixture.decisions()[1].argument_values =
       fixture.decisions()[0].argument_values;
   fixture.decisions()[1].projection_ordinals =
@@ -692,12 +702,13 @@ TEST_F(KernelClassClassifierTest,
   const uint32_t width = 1;
   const loom_kernel_class_shape_t first_shapes[2] = {};
   const loom_kernel_class_shape_t second_shapes[] = {
-      {},
       {.projections = &width, .count = 1},
+      {},
   };
   fixture.classifier()->has_shape_requirements = true;
   fixture.decisions()[0].action_shapes = first_shapes;
   fixture.decisions()[1].action_shapes = second_shapes;
+  fixture.decisions()[1].residual_shape = second_shapes[0];
   auto options = loom_kernel_class_collection_options_default();
   options.class_limit = 2;
   loom_kernel_class_collection_t collection = {};
@@ -753,6 +764,7 @@ TEST_F(KernelClassClassifierTest, UnknownShapeValuesDoNotAliasExactShapes) {
   fixture.classifier()->has_shape_requirements = true;
   fixture.classifier()->decision_count = 1;
   fixture.decisions()[0].action_shapes = shapes;
+  fixture.decisions()[0].residual_shape = shapes[0];
   auto options = loom_kernel_class_collection_options_default();
   options.class_limit = 3;
   loom_kernel_class_collection_t collection = {};
@@ -765,11 +777,10 @@ TEST_F(KernelClassClassifierTest, UnknownShapeValuesDoNotAliasExactShapes) {
   ASSERT_EQ(unknown.shape_value_count, 1u);
   EXPECT_TRUE(loom_value_facts_is_unknown(unknown.shape_values[0].facts));
   options.class_limit = 2;
-  IREE_ASSERT_OK(loom_kernel_class_classifier_collect(
-      fixture.classifier(), nullptr, fixture.sites(), 4, &options,
-      &analysis_arena_, &collection));
-  EXPECT_EQ(collection.class_count, 1u);
-  EXPECT_EQ(collection.accepted_decision_count, 0u);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_kernel_class_classifier_collect(
+                            fixture.classifier(), nullptr, fixture.sites(), 4,
+                            &options, &analysis_arena_, &collection));
 }
 
 TEST_F(KernelClassClassifierTest, UnavailableDecisionsRetainTheirStructure) {
@@ -777,31 +788,33 @@ TEST_F(KernelClassClassifierTest, UnavailableDecisionsRetainTheirStructure) {
   IREE_ASSERT_OK(fixture.InitializeSites(&analysis_arena_));
   const uint32_t width = 1;
   const loom_kernel_class_shape_t shapes[] = {
-      {},
       {.projections = &width, .count = 1},
+      {},
   };
   fixture.classifier()->has_shape_requirements = true;
   fixture.classifier()->decision_count = 1;
   fixture.decisions()[0].action_shapes = shapes;
-  fixture.decisions()[0].unavailable_reason =
-      LOOM_KERNEL_CLASS_DECISION_PATH_CONDITION;
-  auto options = loom_kernel_class_collection_options_default();
-  options.class_limit = 2;
-  loom_kernel_class_collection_t collection = {};
-  IREE_ASSERT_OK(loom_kernel_class_classifier_collect(
-      fixture.classifier(), nullptr, fixture.sites(), 4, &options,
-      &analysis_arena_, &collection));
-  EXPECT_EQ(collection.class_count, 2u);
-  EXPECT_EQ(collection.accepted_decision_count, 0u);
-  EXPECT_EQ(collection.decision_results[0].state,
-            LOOM_KERNEL_CLASS_DECISION_SKIPPED_PATH_CONDITION);
-  EXPECT_EQ(collection.site_classes[0], collection.site_classes[2]);
-  EXPECT_EQ(collection.site_classes[1], collection.site_classes[3]);
-  options.class_limit = 1;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
-                        loom_kernel_class_classifier_collect(
-                            fixture.classifier(), nullptr, fixture.sites(), 4,
-                            &options, &analysis_arena_, &collection));
+  fixture.decisions()[0].residual_shape = shapes[0];
+  for (auto reason : {LOOM_KERNEL_CLASS_DECISION_PATH_CONDITION,
+                      LOOM_KERNEL_CLASS_DECISION_UNPROJECTABLE_INPUT,
+                      LOOM_KERNEL_CLASS_DECISION_UNRESOLVED_TARGET}) {
+    fixture.decisions()[0].unavailable_reason = reason;
+    auto options = loom_kernel_class_collection_options_default();
+    options.class_limit = 2;
+    loom_kernel_class_collection_t collection = {};
+    IREE_ASSERT_OK(loom_kernel_class_classifier_collect(
+        fixture.classifier(), nullptr, fixture.sites(), 4, &options,
+        &analysis_arena_, &collection));
+    EXPECT_EQ(collection.class_count, 2u);
+    EXPECT_EQ(collection.accepted_decision_count, 0u);
+    EXPECT_EQ(collection.site_classes[0], collection.site_classes[2]);
+    EXPECT_EQ(collection.site_classes[1], collection.site_classes[3]);
+    options.class_limit = 1;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                          loom_kernel_class_classifier_collect(
+                              fixture.classifier(), nullptr, fixture.sites(), 4,
+                              &options, &analysis_arena_, &collection));
+  }
 }
 
 TEST_F(KernelClassClassifierTest, AllocationFailureReleasesAllScratch) {
@@ -814,7 +827,15 @@ TEST_F(KernelClassClassifierTest, AllocationFailureReleasesAllScratch) {
   };
   fixture.classifier()->has_shape_requirements = true;
   fixture.decisions()[0].action_shapes = shapes;
+  fixture.decisions()[0].residual_shape = {
+      .projections = projections,
+      .count = 2,
+  };
   fixture.decisions()[1].action_shapes = shapes;
+  fixture.decisions()[1].residual_shape = {
+      .projections = projections,
+      .count = 2,
+  };
   fixture.decisions()[1].argument_values =
       fixture.decisions()[0].argument_values;
   fixture.decisions()[1].projection_ordinals =
@@ -913,6 +934,7 @@ TEST_F(KernelClassClassifierTest, StagedTuplesShareOneStructuralBudget) {
   };
   fixture.decisions()[0] = fixture.decisions()[1];
   fixture.decisions()[0].action_shapes = shapes;
+  fixture.decisions()[0].residual_shape = shapes[0];
   fixture.classifier()->decision_count = 1;
   fixture.classifier()->specialization_count = 1;
   fixture.classifier()->has_shape_requirements = true;
@@ -921,11 +943,18 @@ TEST_F(KernelClassClassifierTest, StagedTuplesShareOneStructuralBudget) {
     auto options = loom_kernel_class_collection_options_default();
     options.class_limit = limit;
     loom_kernel_class_collection_t collection = {};
+    if (limit < 4) {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            loom_kernel_class_classifier_collect(
+                                fixture.classifier(), module, fixture.sites(),
+                                4, &options, &analysis_arena_, &collection));
+      continue;
+    }
     IREE_ASSERT_OK(loom_kernel_class_classifier_collect(
         fixture.classifier(), module, fixture.sites(), 4, &options,
         &analysis_arena_, &collection));
-    EXPECT_EQ(collection.class_count, limit == 4 ? 4 : 2);
-    EXPECT_EQ(collection.accepted_decision_count, limit == 4 ? 1 : 0);
+    EXPECT_EQ(collection.class_count, 4u);
+    EXPECT_EQ(collection.accepted_decision_count, 1u);
     for (uint32_t site = 0; site < 4; ++site) {
       const auto& entry = collection.classes[collection.site_classes[site]];
       ASSERT_NE(entry.specializations, nullptr);

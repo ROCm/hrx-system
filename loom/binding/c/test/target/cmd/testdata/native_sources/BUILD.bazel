@@ -13,6 +13,8 @@ exports_files(
     [
         "command.loom",
         "providers.loom-test",
+        "residual_shapes.loom",
+        "structural_specializations.loom",
     ],
     visibility = ["//loom/binding/c/test/target/cmd:__pkg__"],
 )

@@ -151,6 +151,13 @@ class KernelClassClassifierBenchmarkFixture {
           .feature_outcomes = nullptr,
           .actions = actions_,
           .action_shapes = shapes_,
+          .residual_shape =
+              {
+                  .projections = shape_projections_,
+                  .count = shape_mode == ShapeMode::kNone        ? 0u
+                           : shape_mode == ShapeMode::kDifferent ? 2u
+                                                                 : 1u,
+              },
           .generic_result =
               {
                   .kind = LOOM_DECISION_PROGRAM_RESULT_SELECTED,

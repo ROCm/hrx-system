@@ -285,12 +285,11 @@ static loom_kernel_class_contract_flags_t loom_kernel_class_contract_flags(
 // During construction a shape slice names source SSA values. Once projection
 // discovery is complete it is translated in place to projection ordinals.
 static iree_status_t loom_kernel_class_shape_values(
-    const loom_kernel_shape_requirements_t* requirements,
-    loom_value_set_id_t values, iree_arena_allocator_t* arena,
-    loom_kernel_class_shape_t* out_shape) {
+    loom_value_set_index_t* sets, loom_value_set_id_t values,
+    iree_arena_allocator_t* arena, loom_kernel_class_shape_t* out_shape) {
   *out_shape = (loom_kernel_class_shape_t){0};
   loom_value_set_cursor_t cursor;
-  loom_value_set_cursor_begin(requirements->sets, values, &cursor);
+  loom_value_set_cursor_begin(sets, values, &cursor);
   while (loom_value_set_cursor_next(&cursor) != LOOM_VALUE_ID_INVALID) {
     ++out_shape->count;
   }
@@ -298,7 +297,7 @@ static iree_status_t loom_kernel_class_shape_values(
   IREE_RETURN_IF_ERROR(loom_kernel_class_allocate_array(
       arena, out_shape->count, sizeof(*storage), (void**)&storage));
   out_shape->projections = storage;
-  loom_value_set_cursor_begin(requirements->sets, values, &cursor);
+  loom_value_set_cursor_begin(sets, values, &cursor);
   for (uint32_t i = 0; i < out_shape->count; ++i) {
     storage[i] = loom_value_set_cursor_next(&cursor);
   }
@@ -336,7 +335,8 @@ static iree_status_t loom_kernel_class_shape_resolve(
           loom_kernel_shape_value_arguments(requirements, value), &values));
     }
   }
-  return loom_kernel_class_shape_values(requirements, values, arena, shape);
+  return loom_kernel_class_shape_values(requirements->sets, values, arena,
+                                        shape);
 }
 
 static iree_status_t loom_kernel_class_provider_shape(
@@ -366,7 +366,8 @@ static iree_status_t loom_kernel_class_provider_shape(
           requirements->sets, values, actuals.values[i], &values));
     }
   }
-  return loom_kernel_class_shape_values(requirements, values, arena, out_shape);
+  return loom_kernel_class_shape_values(requirements->sets, values, arena,
+                                        out_shape);
 }
 
 static void loom_kernel_class_shape_project(
@@ -385,6 +386,74 @@ static void loom_kernel_class_shape_project(
     }
   }
   shape->count = count;
+}
+
+static iree_status_t loom_kernel_class_union_shape(
+    loom_value_set_index_t* sets, const loom_kernel_class_shape_t* shape,
+    loom_value_set_id_t* inout_values) {
+  for (uint32_t i = 0; i < shape->count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_value_set_index_add(
+        sets, *inout_values, shape->projections[i], inout_values));
+  }
+  return iree_ok_status();
+}
+
+static bool loom_kernel_class_shape_equal(
+    const loom_kernel_class_shape_t* lhs,
+    const loom_kernel_class_shape_t* rhs) {
+  return lhs->count == rhs->count &&
+         (lhs->count == 0 ||
+          memcmp(lhs->projections, rhs->projections,
+                 lhs->count * sizeof(*lhs->projections)) == 0);
+}
+
+// A currently proven fallback does not settle a deferred application. Later
+// target and class facts can make a higher-ranked provider applicable, so keep
+// its structural requirements until an exact choice retires that possibility.
+static iree_status_t loom_kernel_class_build_residual_shape(
+    loom_kernel_class_decision_t* decision,
+    const loom_decision_program_binding_t* binding,
+    loom_value_set_index_t* sets, uint32_t maximum_provider_count,
+    iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch,
+    uint32_t** live_actions) {
+  if (decision->generic_result.kind != LOOM_DECISION_PROGRAM_RESULT_SELECTED) {
+    return iree_ok_status();
+  }
+  const loom_kernel_class_shape_t* generic =
+      &decision->action_shapes[decision->generic_result.action_ordinal];
+  decision->residual_shape = *generic;
+  bool different = false;
+  for (uint32_t i = 0; i < decision->model->program.choice_count; ++i) {
+    const loom_kernel_class_shape_t* shape = &decision->action_shapes[i];
+    different |= shape->count && !loom_kernel_class_shape_equal(shape, generic);
+  }
+  if (!different) {
+    return iree_ok_status();
+  }
+  if (!*live_actions) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        scratch, maximum_provider_count, sizeof(**live_actions),
+        (void**)live_actions));
+  }
+  uint32_t live_count = 0;
+  loom_decision_program_result_t result;
+  loom_decision_program_evaluate(
+      &decision->model->program, binding,
+      loom_kernel_class_feature_evaluator(decision),
+      loom_decision_program_predicate_refiner_empty(),
+      LOOM_DECISION_PROGRAM_DEFER_UNRESOLVED, *live_actions, &live_count,
+      &result);
+  if (live_count == 1) {
+    decision->residual_shape = decision->action_shapes[(*live_actions)[0]];
+    return iree_ok_status();
+  }
+  loom_value_set_id_t values = 0;
+  for (uint32_t i = 0; i < live_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_kernel_class_union_shape(
+        sets, &decision->action_shapes[(*live_actions)[i]], &values));
+  }
+  return loom_kernel_class_shape_values(sets, values, arena,
+                                        &decision->residual_shape);
 }
 
 //===----------------------------------------------------------------------===//
@@ -461,7 +530,7 @@ static iree_status_t loom_kernel_class_classifier_build_impl(
   IREE_RETURN_IF_ERROR(loom_kernel_shape_requirements_build(
       module, decision_models, scratch_arena, &requirements));
   IREE_RETURN_IF_ERROR(loom_kernel_class_shape_values(
-      &requirements, requirements.symbols[kernel_symbol_id].values,
+      requirements.sets, requirements.symbols[kernel_symbol_id].values,
       scratch_arena, &out_classifier->shape));
   IREE_RETURN_IF_ERROR(loom_kernel_class_shape_resolve(
       &requirements, expression_context, &argument_lookup, arena,
@@ -687,6 +756,7 @@ static iree_status_t loom_kernel_class_classifier_build_impl(
   iree_host_size_t projection_cursor = 0;
   iree_host_size_t feature_cursor = 0;
   iree_host_size_t action_cursor = 0;
+  uint32_t* live_actions = NULL;
   for (uint32_t i = 0; i < decision_count; ++i) {
     loom_kernel_class_decision_t* decision = &decisions[i];
     decision->argument_values =
@@ -794,6 +864,11 @@ static iree_status_t loom_kernel_class_classifier_build_impl(
         LOOM_DECISION_PROGRAM_SELECT_PROVEN,
         /*live_action_ordinals=*/NULL, &generic_live_provider_count,
         &decision->generic_result);
+
+    IREE_RETURN_IF_ERROR(loom_kernel_class_build_residual_shape(
+        decision, &generic_binding, requirements.sets,
+        out_classifier->maximum_provider_count, arena, scratch_arena,
+        &live_actions));
 
     if (decision->unavailable_reason ==
         LOOM_KERNEL_CLASS_DECISION_PATH_CONDITION) {
@@ -945,16 +1020,6 @@ static bool loom_kernel_class_action_is_publishable(
                            LOOM_KERNEL_CLASS_CONTRACT_FLAG_RESULT_DEPENDENT);
 }
 
-static iree_status_t loom_kernel_class_union_shape(
-    loom_value_set_index_t* sets, const loom_kernel_class_shape_t* shape,
-    loom_value_set_id_t* inout_values) {
-  for (uint32_t i = 0; i < shape->count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_value_set_index_add(
-        sets, *inout_values, shape->projections[i], inout_values));
-  }
-  return iree_ok_status();
-}
-
 // Finalized decisions refine a bounded prefix partition. Unprocessed optional
 // decisions retain their generic structural requirements in a residual
 // partition. Admission counts the observed intersection, including mandatory
@@ -1071,8 +1136,7 @@ static iree_status_t loom_kernel_class_residual_build(
             LOOM_DECISION_PROGRAM_RESULT_SELECTED) {
       continue;
     }
-    const loom_kernel_class_shape_t* shape =
-        &decision->action_shapes[decision->generic_result.action_ordinal];
+    const loom_kernel_class_shape_t* shape = &decision->residual_shape;
     for (uint32_t j = 0; j < shape->count; ++j) {
       if (!loom_value_set_index_contains(sets, covered,
                                          shape->projections[j])) {
@@ -1122,8 +1186,7 @@ static iree_status_t loom_kernel_class_residual_build(
             LOOM_DECISION_PROGRAM_RESULT_SELECTED) {
       continue;
     }
-    const loom_kernel_class_shape_t* shape =
-        &decision->action_shapes[decision->generic_result.action_ordinal];
+    const loom_kernel_class_shape_t* shape = &decision->residual_shape;
     for (uint32_t j = 0; j < shape->count; ++j) {
       uint32_t projection = shape->projections[j];
       if (last[projection] != decision_ordinal) {
@@ -1338,7 +1401,9 @@ static iree_status_t loom_kernel_class_refine(
     uint16_t parent = partition->candidate_parent_classes[pair];
     uint32_t action = partition->candidate_outcomes[pair];
     const loom_kernel_class_shape_t* shape =
-        decision ? &decision->action_shapes[action] : fixed_shape;
+        !decision  ? fixed_shape
+        : evaluate ? &decision->action_shapes[action]
+                   : &decision->residual_shape;
     loom_value_set_id_t keys = bindings[parent] ? bindings[parent]->keys : 0;
     uint32_t count = 0;
     for (uint32_t j = 0; j < shape->count; ++j) {
@@ -1655,16 +1720,13 @@ static iree_status_t loom_kernel_class_collect(
     ++skipped;
     if (classifier->has_shape_requirements) {
       IREE_RETURN_IF_ERROR(loom_kernel_class_union_shape(
-          sets,
-          &decision->action_shapes[decision->generic_result.action_ordinal],
-          &common_values));
+          sets, &decision->residual_shape, &common_values));
     }
   }
-  const loom_kernel_shape_requirements_t membership = {.sets = sets};
   loom_kernel_class_shape_t common = {0};
   if (common_values) {
-    IREE_RETURN_IF_ERROR(loom_kernel_class_shape_values(
-        &membership, common_values, scratch, &common));
+    IREE_RETURN_IF_ERROR(
+        loom_kernel_class_shape_values(sets, common_values, scratch, &common));
   }
   loom_kernel_class_candidate_t candidate;
   if (common.count) {

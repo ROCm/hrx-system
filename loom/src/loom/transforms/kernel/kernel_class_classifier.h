@@ -164,6 +164,11 @@ typedef struct loom_kernel_class_decision_t {
   // header predicates used to select that provider.
   const loom_kernel_class_shape_t* action_shapes;
 
+  // Structural requirements of every provider still possible in a generic
+  // residual. Provider headers determine applicability; bodies supply
+  // structure.
+  loom_kernel_class_shape_t residual_shape;
+
   // Selection result from kernel-source facts before launch-site refinement.
   loom_decision_program_result_t generic_result;
 
