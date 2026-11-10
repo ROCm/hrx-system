@@ -193,10 +193,10 @@ set(IREE_DEP_MINIAUDIO_VERSION "")
 set(IREE_DEP_MINIAUDIO_DEV_DEPENDENCY "FALSE")
 set(IREE_DEP_MINIAUDIO_SOURCE_URL "")
 set(IREE_DEP_MINIAUDIO_URLS
-  "https://github.com/mackron/miniaudio/archive/refs/tags/0.11.25.tar.gz"
+  "https://github.com/mackron/miniaudio/archive/refs/tags/0.11.26.tar.gz"
 )
-set(IREE_DEP_MINIAUDIO_SHA256 "b900edcffe979816e2560a0580b9b1216d674b4f17fbadeca8f777a7f8ab0274")
-set(IREE_DEP_MINIAUDIO_STRIP_PREFIX "miniaudio-0.11.25")
+set(IREE_DEP_MINIAUDIO_SHA256 "838ba55a21c9142adf7b76bdc4351e5cd8b7ae128f46b25ec25f94ae9969c600")
+set(IREE_DEP_MINIAUDIO_STRIP_PREFIX "miniaudio-0.11.26")
 set(IREE_DEP_MINIAUDIO_BUILD_FILE "//build_tools/third_party/miniaudio:miniaudio.BUILD.bazel")
 set(IREE_DEP_MINIAUDIO_PATCHES "")
 set(IREE_DEP_MINIAUDIO_PATCH_ARGS "")
