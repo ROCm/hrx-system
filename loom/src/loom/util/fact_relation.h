@@ -97,13 +97,17 @@ iree_status_t loom_value_fact_integer_relations_define_counted_range(
 // definition-scope result and endpoint facts; result facts need not have been
 // published yet. Disjoint intervals need no retained relation unless an
 // endpoint carries further dynamic constraints. INVALID endpoints are omitted,
-// and an empty publication withdraws prior relations. The caller owns
+// and an empty publication withdraws prior relations. Optional |equivalents|
+// names additional endpoints equal to the corresponding bounds in this
+// definition's scope. Both endpoints retain their own transitive relations;
+// their equality is not published for uses outside the scope. The caller owns
 // publication and includes auxiliary changes in its ordinary inference change
 // accumulator.
 iree_status_t loom_value_fact_integer_relations_define_upper_bounds(
     loom_value_fact_table_t* table, loom_value_id_t value,
-    const loom_value_id_t* upper_bounds, const loom_value_facts_t* upper_facts,
-    iree_host_size_t bound_count, loom_symbolic_integer_relation_t relation,
+    const loom_value_id_t* upper_bounds, const loom_value_id_t* equivalents,
+    const loom_value_facts_t* upper_facts, iree_host_size_t bound_count,
+    loom_symbolic_integer_relation_t relation,
     const loom_value_facts_t* value_facts, bool* inout_changed);
 
 // Propagates inherited alias relations and retains signed predicates declared

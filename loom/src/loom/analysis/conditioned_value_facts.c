@@ -10,6 +10,9 @@
 
 #include "loom/analysis/cfg_value_identity.h"
 #include "loom/analysis/condition_fact_scope.h"
+#include "loom/analysis/symbolic_integer_cast.h"
+#include "loom/ir/intern_table.h"
+#include "loom/ir/structural_hash.h"
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/index/cast.h"
 #include "loom/ops/op_defs.h"
@@ -93,7 +96,126 @@ typedef struct loom_conditioned_value_facts_t {
   loom_conditioned_value_facts_local_scope_t** transition_path;
   // Local scope active at the previous operand-refinement callback.
   loom_conditioned_value_facts_local_scope_t* active_scope;
+  // Immutable conversion rows indexed only for this conditioned solve.
+  struct loom_conditioned_value_facts_cast_t* casts;
+  // Allocated conversion row capacity.
+  iree_host_size_t cast_capacity;
+  // Sparse result-to-conversion index.
+  loom_intern_table_t cast_index;
+  // Reusable numeric representatives borrowed by one result publication.
+  loom_value_id_t* numeric_operands;
+  // Largest operand count in the immutable function.
+  uint16_t max_operand_count;
 } loom_conditioned_value_facts_t;
+
+typedef struct loom_conditioned_value_facts_cast_t {
+  // Result whose conversion semantics are retained.
+  loom_value_id_t value;
+  // Exact interpretation of the source payload.
+  loom_symbolic_integer_cast_t cast;
+  // Transitive interpretation composed once during immutable construction.
+  loom_symbolic_integer_cast_t composed;
+} loom_conditioned_value_facts_cast_t;
+
+typedef struct loom_conditioned_value_facts_cast_key_t {
+  // Immutable conversion rows.
+  const loom_conditioned_value_facts_t* state;
+  // Conversion result being queried.
+  loom_value_id_t value;
+} loom_conditioned_value_facts_cast_key_t;
+
+static bool loom_conditioned_value_facts_cast_equal(const void* user_data,
+                                                    uint32_t ordinal) {
+  const loom_conditioned_value_facts_cast_key_t* key = user_data;
+  return key->state->casts[ordinal].value == key->value;
+}
+
+static uint32_t loom_conditioned_value_facts_cast_hash(loom_value_id_t value) {
+  return loom_structural_hash_finalize(
+      loom_structural_hash_mix_u32(loom_structural_hash_initialize(), value));
+}
+
+static uint32_t loom_conditioned_value_facts_lookup_cast(
+    const loom_conditioned_value_facts_t* state, loom_value_id_t value) {
+  const loom_conditioned_value_facts_cast_key_t key = {state, value};
+  return loom_intern_table_probe(&state->cast_index,
+                                 loom_conditioned_value_facts_cast_hash(value),
+                                 loom_conditioned_value_facts_cast_equal, &key)
+      .index;
+}
+
+static iree_status_t loom_conditioned_value_facts_collect_cast(
+    loom_conditioned_value_facts_t* state, const loom_op_t* op) {
+  loom_symbolic_integer_cast_t cast;
+  if (!loom_symbolic_integer_cast_from_op(state->module, op, &cast)) {
+    return iree_ok_status();
+  }
+  const loom_value_id_t value = loom_op_const_results(op)[0];
+  // Globally value-preserving conversions already have an indexed numeric
+  // representative. Only interpretations that can change value need a row.
+  if (loom_value_fact_table_query_numeric_identity(state->table, value) !=
+      value) {
+    return iree_ok_status();
+  }
+  const uint32_t hash = loom_conditioned_value_facts_cast_hash(value);
+  const loom_conditioned_value_facts_cast_key_t key = {state, value};
+  loom_intern_probe_t probe = loom_intern_table_probe(
+      &state->cast_index, hash, loom_conditioned_value_facts_cast_equal, &key);
+  IREE_RETURN_IF_ERROR(loom_intern_table_reserve_insert(
+      &state->arena, &state->cast_index, hash, 1, &probe.slot));
+  if (state->cast_index.count == state->cast_capacity) {
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        &state->arena, state->cast_index.count, state->cast_index.count + 1,
+        sizeof(*state->casts), &state->cast_capacity, (void**)&state->casts));
+  }
+  const uint32_t ordinal = (uint32_t)state->cast_index.count;
+  state->casts[ordinal] =
+      (loom_conditioned_value_facts_cast_t){.value = value, .cast = cast};
+  loom_intern_table_insert(&state->cast_index, probe.slot, hash, ordinal);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_conditioned_value_facts_compose_casts(
+    loom_conditioned_value_facts_t* state) {
+  if (!state->cast_index.count) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      &state->arena, state->max_operand_count, sizeof(*state->numeric_operands),
+      (void**)&state->numeric_operands));
+  uint32_t* path = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      &state->arena, state->cast_index.count, sizeof(*path), (void**)&path));
+  for (uint32_t i = 0; i < state->cast_index.count; ++i) {
+    loom_symbolic_integer_cast_t* cast = &state->casts[i].cast;
+    cast->source_value_id = loom_cfg_value_identity_table_lookup(
+        &state->identities, cast->source_value_id);
+  }
+  for (uint32_t i = 0; i < state->cast_index.count; ++i) {
+    uint32_t ordinal = i;
+    iree_host_size_t path_count = 0;
+    while (ordinal != UINT32_MAX && !state->casts[ordinal].composed.bit_count) {
+      loom_conditioned_value_facts_cast_t* row = &state->casts[ordinal];
+      row->composed = row->cast;
+      path[path_count++] = ordinal;
+      ordinal = loom_conditioned_value_facts_lookup_cast(
+          state, row->cast.source_value_id);
+    }
+    while (path_count) {
+      ordinal = path[--path_count];
+      loom_conditioned_value_facts_cast_t* row = &state->casts[ordinal];
+      const uint32_t parent = loom_conditioned_value_facts_lookup_cast(
+          state, row->cast.source_value_id);
+      if (parent != UINT32_MAX && parent != ordinal) {
+        row->composed = loom_symbolic_integer_cast_compose(
+            state->casts[parent].composed,
+            (loom_symbolic_integer_cast_kind_t)row->cast.kind,
+            row->cast.bit_count);
+      }
+    }
+  }
+  return iree_ok_status();
+}
 
 static void loom_conditioned_value_facts_initialize_local_scope(
     loom_conditioned_value_facts_t* state,
@@ -261,6 +383,10 @@ static iree_status_t loom_conditioned_value_facts_collect(
         &entry->local_scopes[block->region_index];
     loom_op_t* op = NULL;
     loom_block_for_each_op(block, op) {
+      state->max_operand_count =
+          iree_max(state->max_operand_count, op->operand_count);
+      IREE_RETURN_IF_ERROR(
+          loom_conditioned_value_facts_collect_cast(state, op));
       loom_region_t** regions = loom_op_regions(op);
       for (uint8_t i = 0; i < op->region_count; ++i) {
         if (regions[i]) {
@@ -377,7 +503,25 @@ static void loom_conditioned_value_facts_refine_canonical_value(
                                                  canonical, inout_facts);
 }
 
-static void loom_conditioned_value_facts_refine_operands(
+static loom_value_id_t loom_conditioned_value_facts_refine_cast(
+    const loom_conditioned_value_facts_t* state,
+    const loom_conditioned_value_facts_region_t* entry,
+    const loom_value_fact_table_t* table,
+    const loom_symbolic_integer_cast_t* cast, loom_value_facts_t* inout_facts) {
+  loom_value_facts_t source_facts =
+      loom_value_fact_table_lookup(table, cast->source_value_id);
+  loom_conditioned_value_facts_refine_canonical_value(
+      state, entry, table, cast->source_value_id, &source_facts);
+  const loom_value_facts_t transferred =
+      loom_symbolic_integer_cast_apply(cast, source_facts);
+  loom_conditioned_value_facts_apply_active_refinement(&transferred,
+                                                       inout_facts);
+  return loom_symbolic_integer_cast_is_identity(cast, source_facts)
+             ? cast->source_value_id
+             : LOOM_VALUE_ID_INVALID;
+}
+
+static const loom_value_id_t* loom_conditioned_value_facts_refine_operands(
     void* user_data, const loom_value_fact_table_t* table, const loom_op_t* op,
     loom_value_facts_t* operands) {
   loom_conditioned_value_facts_t* state = user_data;
@@ -390,14 +534,14 @@ static void loom_conditioned_value_facts_refine_operands(
   }
   // Projected configuration regions lie outside the function body domain.
   if (!entry) {
-    return;
+    return loom_op_const_operands(op);
   }
   if (state->local_condition_scope_count) {
     loom_conditioned_value_facts_transition_local_scope(
         state, &entry->local_scopes[op->parent_block->region_index], table);
   }
   if (!op->operand_count) {
-    return;
+    return loom_op_const_operands(op);
   }
   const loom_value_id_t* values = loom_op_const_operands(op);
   for (uint16_t i = 0; i < op->operand_count; ++i) {
@@ -405,9 +549,29 @@ static void loom_conditioned_value_facts_refine_operands(
         loom_cfg_value_identity_table_lookup(&state->identities, values[i]);
     loom_conditioned_value_facts_refine_canonical_value(
         state, entry, table, canonical, &operands[i]);
+    if (state->numeric_operands) {
+      state->numeric_operands[i] = canonical;
+    }
+    const uint32_t ordinal =
+        loom_conditioned_value_facts_lookup_cast(state, canonical);
+    if (ordinal != UINT32_MAX) {
+      const loom_conditioned_value_facts_cast_t* row = &state->casts[ordinal];
+      loom_value_id_t numeric = loom_conditioned_value_facts_refine_cast(
+          state, entry, table, &row->cast, &operands[i]);
+      if (numeric != LOOM_VALUE_ID_INVALID) {
+        state->numeric_operands[i] = numeric;
+      }
+      if (row->composed.source_value_id != row->cast.source_value_id) {
+        numeric = loom_conditioned_value_facts_refine_cast(
+            state, entry, table, &row->composed, &operands[i]);
+        if (numeric != LOOM_VALUE_ID_INVALID) {
+          state->numeric_operands[i] = numeric;
+        }
+      }
+    }
   }
   if (!table->exact_scalar_origins.entries) {
-    return;
+    return state->numeric_operands ? state->numeric_operands : values;
   }
   for (uint16_t i = 0; i < op->operand_count; ++i) {
     const loom_value_id_t canonical =
@@ -436,6 +600,7 @@ static void loom_conditioned_value_facts_refine_operands(
     loom_conditioned_value_facts_apply_active_refinement(&transferred,
                                                          &operands[i]);
   }
+  return state->numeric_operands ? state->numeric_operands : values;
 }
 
 static void loom_conditioned_value_facts_canonicalize_facts(
@@ -467,8 +632,8 @@ static void loom_conditioned_value_facts_compose_identities(
     for (iree_host_size_t depth = 0;; ++depth) {
       IREE_ASSERT_LT(depth, state->domain.value_count);
       const loom_value_id_t next = loom_cfg_value_identity_table_lookup(
-          &state->identities,
-          loom_value_fact_table_query_identity(state->table, canonical));
+          &state->identities, loom_value_fact_table_query_numeric_identity(
+                                  state->table, canonical));
       if (next == canonical) {
         break;
       }
@@ -568,6 +733,8 @@ static iree_status_t loom_conditioned_value_facts_solve(
       .arena = &state->arena,
   };
   state->bucket_count = state->table->regions.bucket_count;
+  IREE_RETURN_IF_ERROR(
+      loom_intern_table_initialize(&state->arena, 0, &state->cast_index));
   loom_condition_query_initialize(state->module, &state->domain, &state->arena,
                                   &state->query);
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -631,6 +798,7 @@ static iree_status_t loom_conditioned_value_facts_solve(
     return iree_ok_status();
   }
   loom_conditioned_value_facts_compose_identities(state);
+  IREE_RETURN_IF_ERROR(loom_conditioned_value_facts_compose_casts(state));
   for (loom_conditioned_value_facts_local_scope_t* local_scope =
            state->local_scopes;
        local_scope; local_scope = local_scope->next) {

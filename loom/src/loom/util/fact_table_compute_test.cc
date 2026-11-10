@@ -181,9 +181,10 @@ TEST_F(FactTableReplayTest, RefinementCanReadAnUnlistedValue) {
   table_.context.refine_operands.user_data = &source;
   table_.context.refine_operands.fn =
       [](void* user_data, const loom_value_fact_table_t* table,
-         const loom_op_t*, loom_value_facts_t* facts) {
+         const loom_op_t* op, loom_value_facts_t* facts) {
         facts[0] = loom_value_fact_table_lookup(
             table, *static_cast<loom_value_id_t*>(user_data));
+        return loom_op_const_operands(op);
       };
   SetInput(source, 11);
   Expect(sum_, 15);

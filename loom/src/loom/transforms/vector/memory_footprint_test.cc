@@ -11,10 +11,10 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
 #include "loom/pass/value_facts.h"
 
@@ -43,16 +43,32 @@ class VectorMemoryFootprintPassTest : public ::testing::Test {
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
 
-  loom_module_t* Parse(iree_string_view_t source) {
-    const loom_text_parse_options_t options = {
-        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
-        .max_errors = 20,
-    };
-    IREE_EXPECT_OK(
-        loom_text_parse(source, IREE_SV("memory_footprint_test.loom"),
-                        &context_, &block_pool_, &options, &module_));
-    EXPECT_NE(module_, nullptr);
-    return module_;
+  loom_func_like_t BuildFunction() {
+    IREE_CHECK_OK(loom_module_allocate(&context_, IREE_SV("footprint"),
+                                       &block_pool_, nullptr,
+                                       iree_allocator_system(), &module_));
+    loom_builder_t builder;
+    loom_builder_initialize(module_, &module_->arena,
+                            loom_module_block(module_), &builder);
+    loom_string_id_t name = LOOM_STRING_ID_INVALID;
+    IREE_CHECK_OK(loom_builder_intern_string(&builder, IREE_SV("main"), &name));
+    uint16_t symbol = LOOM_SYMBOL_ID_INVALID;
+    IREE_CHECK_OK(loom_module_add_symbol(module_, name, &symbol));
+    loom_op_t* function_op = nullptr;
+    IREE_CHECK_OK(loom_test_func_build(&builder, 0, 0, 0, {0, symbol}, nullptr,
+                                       0, nullptr, 0, nullptr, 0, nullptr, 0,
+                                       LOOM_LOCATION_UNKNOWN, &function_op));
+    const auto function = loom_func_like_cast(module_, function_op);
+    loom_builder_enter_region(&builder, function_op,
+                              loom_func_like_body(function));
+    loom_op_t* constant = nullptr;
+    IREE_CHECK_OK(loom_test_constant_build(
+        &builder, loom_attr_i64(42), loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+        LOOM_LOCATION_UNKNOWN, &constant));
+    loom_op_t* terminator = nullptr;
+    IREE_CHECK_OK(loom_test_yield_build(&builder, nullptr, 0,
+                                        LOOM_LOCATION_UNKNOWN, &terminator));
+    return function;
   }
 
   iree_arena_block_pool_t block_pool_ = {};
@@ -63,16 +79,7 @@ class VectorMemoryFootprintPassTest : public ::testing::Test {
 };
 
 TEST_F(VectorMemoryFootprintPassTest, PreservesReadOnlyFunctionFacts) {
-  loom_module_t* module =
-      Parse(IREE_SV("test.func @main() {\n"
-                    "  %value = test.constant 42 : i32\n"
-                    "  test.yield\n"
-                    "}\n"));
-  ASSERT_NE(module, nullptr);
-  loom_op_t* function_op = loom_block_op(loom_module_block(module), 0);
-  ASSERT_NE(function_op, nullptr);
-  loom_func_like_t function = loom_func_like_cast(module, function_op);
-  ASSERT_TRUE(loom_func_like_isa(function));
+  const auto function = BuildFunction();
 
   loom_pass_value_fact_lifecycle_counts_t counts = {};
   value_facts_.lifecycle_counts = &counts;
@@ -91,11 +98,11 @@ TEST_F(VectorMemoryFootprintPassTest, PreservesReadOnlyFunctionFacts) {
   pass.statistic_storage = statistic_storage;
   memset(pass.statistic_storage, 0, pass.info->statistic_layout->storage_size);
 
-  IREE_ASSERT_OK(loom_vector_memory_footprint_run(&pass, module, function));
+  IREE_ASSERT_OK(loom_vector_memory_footprint_run(&pass, module_, function));
 
   loom_value_fact_table_t* reused_facts = nullptr;
   IREE_ASSERT_OK(loom_pass_value_facts_acquire(
-      &pass, module, loom_pass_value_fact_scope_function(function),
+      &pass, module_, loom_pass_value_fact_scope_function(function),
       &reused_facts));
   ASSERT_NE(reused_facts, nullptr);
   EXPECT_EQ(counts.acquisition_count, 2u);
@@ -103,6 +110,8 @@ TEST_F(VectorMemoryFootprintPassTest, PreservesReadOnlyFunctionFacts) {
   EXPECT_EQ(counts.cache_hit_count, 1u);
   EXPECT_EQ(counts.invalidation_count, 0u);
   EXPECT_EQ(counts.scope_clear_count, 0u);
+  EXPECT_EQ(value_facts_.active_scope.kind,
+            LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION);
 
   value_facts_.lifecycle_counts = nullptr;
 }

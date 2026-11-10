@@ -1317,8 +1317,9 @@ static iree_status_t loom_value_fact_table_compute_ordinary_op(
     operand_facts[i] = loom_value_fact_table_lookup(table, operands[i]);
   }
   if (table->context.refine_operands.fn) {
-    table->context.refine_operands.fn(table->context.refine_operands.user_data,
-                                      table, op, operand_facts);
+    table->context.publication->numeric_operands =
+        table->context.refine_operands.fn(
+            table->context.refine_operands.user_data, table, op, operand_facts);
   }
 
   // The active publication owns auxiliary result changes alongside the dense

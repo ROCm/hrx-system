@@ -265,6 +265,52 @@ TEST_F(ConditionedValueFactsTest,
   owner_.lifecycle_counts = nullptr;
 }
 
+TEST_F(ConditionedValueFactsTest, CastSummariesAreRebuiltAfterInvalidation) {
+  const auto byte_type = loom_type_scalar(LOOM_SCALAR_TYPE_I8);
+  loom_op_t* narrow = nullptr;
+  IREE_ASSERT_OK(loom_scalar_trunci_build(&builder_, input_, i32_, byte_type,
+                                          LOOM_LOCATION_UNKNOWN, &narrow));
+  loom_op_t* widen = nullptr;
+  IREE_ASSERT_OK(
+      loom_scalar_extui_build(&builder_, loom_scalar_trunci_result(narrow),
+                              byte_type, i32_, LOOM_LOCATION_UNKNOWN, &widen));
+  const auto converted = loom_scalar_extui_result(widen);
+  auto* live = AppendBlock();
+  auto* join = AppendBlock();
+  auto* guard = Guard(input_, Constant(1), live, join);
+  IREE_ASSERT_OK(loom_scalar_cmpi_set_predicate(
+      module_, guard, loom_attr_enum(LOOM_SCALAR_CMPI_PREDICATE_EQ)));
+  SetBlock(live);
+  const auto guarded_high = RangeHigh(converted);
+  Branch(join);
+  SetBlock(join);
+  const auto joined_high = RangeHigh(converted);
+  YieldBlock();
+
+  auto* table = Acquire(LOOM_PASS_VALUE_FACT_SCOPE_CONDITIONED_FUNCTION);
+  ExpectRange(table, guarded_high, 1, 1);
+  ExpectRange(table, joined_high, 255, 255);
+  ExpectRange(table, converted, 0, 255);
+
+  loom_pass_value_fact_owner_invalidate(&owner_);
+  IREE_ASSERT_OK(loom_op_set_operand(module_, narrow, 0, other_));
+  table = Acquire(LOOM_PASS_VALUE_FACT_SCOPE_CONDITIONED_FUNCTION);
+  ExpectRange(table, guarded_high, 255, 255);
+  ExpectRange(table, joined_high, 255, 255);
+
+  loom_pass_value_fact_owner_invalidate(&owner_);
+  IREE_ASSERT_OK(loom_op_set_operand(module_, narrow, 0, input_));
+  table = Acquire(LOOM_PASS_VALUE_FACT_SCOPE_CONDITIONED_FUNCTION);
+  ExpectRange(table, guarded_high, 1, 1);
+
+  loom_pass_value_fact_owner_invalidate(&owner_);
+  IREE_ASSERT_OK(loom_scalar_cmpi_set_predicate(
+      module_, guard, loom_attr_enum(LOOM_SCALAR_CMPI_PREDICATE_NE)));
+  table = Acquire(LOOM_PASS_VALUE_FACT_SCOPE_CONDITIONED_FUNCTION);
+  ExpectRange(table, guarded_high, 255, 255);
+  ExpectRange(table, joined_high, 255, 255);
+}
+
 TEST_F(ConditionedValueFactsTest, FactAliasesShareIndexedGuardRefinement) {
   const auto guard_value = Identity(input_);
   const auto consumed_value = Identity(input_);
@@ -741,6 +787,8 @@ TEST_F(ConditionedValueFactsTest,
   loom_builder_restore(&builder_, saved);
   YieldBlock();
 
+  loom_pass_value_fact_lifecycle_counts_t counts = {};
+  owner_.lifecycle_counts = &counts;
   auto* table = Acquire(LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION);
   EXPECT_EQ(table->regions.cfg_count, 0u);
   EXPECT_EQ(table->condition_integer_projection_count, 0u);
@@ -748,6 +796,19 @@ TEST_F(ConditionedValueFactsTest,
   table = Acquire(LOOM_PASS_VALUE_FACT_SCOPE_CONDITIONED_FUNCTION);
   EXPECT_FALSE(table->has_conditioned_results);
   ExpectRange(table, body_count, 0, 32);
+
+  // An unrefined conditioned scope can return its ordinary baseline without a
+  // clear, but must relinquish the immutable scope before a mutable consumer.
+  table = Acquire(LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION);
+  EXPECT_EQ(counts.cache_hit_count, 1u);
+  EXPECT_EQ(counts.scope_clear_count, 0u);
+  EXPECT_EQ(owner_.active_scope.kind, LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION);
+  const auto recomputations = counts.recomputation_count;
+  table = Acquire(LOOM_PASS_VALUE_FACT_SCOPE_CONDITIONED_FUNCTION);
+  EXPECT_EQ(counts.recomputation_count, recomputations + 1);
+  EXPECT_FALSE(table->has_conditioned_results);
+  ExpectRange(table, body_count, 0, 32);
+  owner_.lifecycle_counts = nullptr;
 }
 
 TEST_F(ConditionedValueFactsTest,
