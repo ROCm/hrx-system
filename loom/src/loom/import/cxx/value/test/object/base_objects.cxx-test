@@ -537,3 +537,27 @@ func.def public @advance(%input: i32, %count: i32) -> (i32) {
   }
   func.return %value_Base_value : i32
 }
+
+// ====
+// RUN: pass inline-callables,canonicalize,cse,dce
+// Instantiated member bodies retain their specialized base subobject paths.
+struct TemplatePrefix { unsigned words[3]; };
+struct TemplateBase {
+  unsigned value;
+  [[loom::inline]] unsigned get() const { return value; }
+};
+template <class T>
+struct TemplateDerived : TemplatePrefix, TemplateBase {
+  [[loom::inline]] unsigned read() const { return this->get(); }
+};
+unsigned template_base_member(TemplateDerived<unsigned>* object) {
+  return object->read();
+}
+// ----
+func.def public @template_base_member(%object: buffer, %object_byte_offset: offset) -> (i32) {
+  %7 = index.constant 12 : offset
+  %8 = index.add %object_byte_offset, %7 : offset
+  %15 = buffer.view %object[%8] : buffer -> view<1xi32>
+  %value = view.load %15[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
