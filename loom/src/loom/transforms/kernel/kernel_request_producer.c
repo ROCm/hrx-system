@@ -156,6 +156,8 @@ static iree_status_t loom_kernel_request_source_prepare(
           },
       .dependency_policy = LOOM_LINK_PLAN_DEPENDENCY_REQUESTED_FACETS,
   };
+  iree_arena_allocator_t construction_arena;
+  iree_arena_initialize(scratch_arena->block_pool, &construction_arena);
   loom_link_index_materialization_t materialization = {0};
   iree_status_t status = loom_link_index_materialize(
       producer->index, &link_options, environment,
@@ -189,8 +191,8 @@ static iree_status_t loom_kernel_request_source_prepare(
 
   loom_symbol_reference_table_t references = {0};
   if (iree_status_is_ok(status)) {
-    status = loom_symbol_reference_table_build(materialization.product.module,
-                                               scratch_arena, &references);
+    status = loom_symbol_reference_table_build(
+        materialization.product.module, &construction_arena, &references);
   }
   loom_symbol_fact_table_t symbol_facts = {0};
   loom_symbol_fact_table_initialize(&symbol_facts, scratch_arena);
@@ -216,7 +218,7 @@ static iree_status_t loom_kernel_request_source_prepare(
   loom_value_fact_table_t kernel_facts = {0};
   if (iree_status_is_ok(status)) {
     status = loom_value_fact_table_initialize(
-        &kernel_facts, scratch_arena,
+        &kernel_facts, &construction_arena,
         materialization.product.module->values.count);
   }
   if (iree_status_is_ok(status)) {
@@ -230,7 +232,8 @@ static iree_status_t loom_kernel_request_source_prepare(
   if (iree_status_is_ok(status)) {
     loom_symbolic_expr_context_initialize(materialization.product.module,
                                           /*value_domain=*/NULL, &kernel_facts,
-                                          scratch_arena, &expression_context);
+                                          &construction_arena,
+                                          &expression_context);
   }
   if (iree_status_is_ok(status)) {
     status = loom_kernel_class_classifier_build(
@@ -244,6 +247,7 @@ static iree_status_t loom_kernel_request_source_prepare(
     materialization = (loom_link_index_materialization_t){0};
   }
   loom_link_index_materialization_deinitialize(&materialization);
+  iree_arena_deinitialize(&construction_arena);
   return status;
 }
 

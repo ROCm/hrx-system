@@ -139,8 +139,8 @@ typedef struct loom_kernel_class_shape_t {
 
 // Immutable boundary form of one template application decision.
 typedef struct loom_kernel_class_decision_t {
-  // Source application demand.
-  const loom_template_demand_t* demand;
+  // Source application, retained directly without reference-analysis storage.
+  const loom_op_t* application;
 
   // Ranked family decision model.
   const loom_template_decision_model_t* model;
@@ -359,8 +359,10 @@ typedef struct loom_kernel_class_collection_t {
 // projects its header decisions without walking IR. The structural requirement
 // analysis owns one immutable body/call traversal. |kernel_facts| and
 // |expression_context| must describe the same kernel function and immutable
-// module snapshot. The classifier borrows all supplied analyses and owns only
-// storage allocated from |arena|.
+// module snapshot. The classifier borrows |module| and the provider/model
+// contracts backing |decision_models|; references, kernel facts, and symbolic
+// expressions may retire after construction. Result storage belongs to |arena|;
+// construction scratch returns to its block pool before this call returns.
 iree_status_t loom_kernel_class_classifier_build(
     const loom_module_t* module, loom_symbol_id_t kernel_symbol_id,
     const loom_symbol_reference_table_t* references,

@@ -183,13 +183,13 @@ loom_kernel_class_lookup_projection(
 }
 
 static loom_value_id_t loom_kernel_class_decision_source_value(
-    const loom_template_demand_t* demand,
+    const loom_op_t* application,
     loom_decision_program_operand_ref_t operand_ref) {
   const uint32_t ordinal = loom_decision_program_operand_ordinal(operand_ref);
   const loom_value_slice_t values =
       loom_decision_program_operand_is_result(operand_ref)
-          ? loom_template_apply_results(demand->apply_op)
-          : loom_template_apply_operands(demand->apply_op);
+          ? loom_template_apply_results(application)
+          : loom_template_apply_operands(application);
   IREE_ASSERT(ordinal < values.count);
   return values.values[ordinal];
 }
@@ -391,14 +391,14 @@ static void loom_kernel_class_shape_project(
 // Classifier construction
 //===----------------------------------------------------------------------===//
 
-iree_status_t loom_kernel_class_classifier_build(
+static iree_status_t loom_kernel_class_classifier_build_impl(
     const loom_module_t* module, loom_symbol_id_t kernel_symbol_id,
     const loom_symbol_reference_table_t* references,
     const loom_template_decision_model_catalog_t* decision_models,
     const loom_value_fact_table_t* kernel_facts,
     loom_symbolic_expr_context_t* expression_context,
     const loom_template_applicability_target_t* kernel_target,
-    iree_arena_allocator_t* arena,
+    iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
     loom_kernel_class_classifier_t* out_classifier) {
   *out_classifier = (loom_kernel_class_classifier_t){
       .module = module,
@@ -455,13 +455,14 @@ iree_status_t loom_kernel_class_classifier_build(
 
   loom_kernel_class_argument_lookup_t argument_lookup;
   IREE_RETURN_IF_ERROR(loom_kernel_class_prepare_argument_lookup(
-      kernel_argument_ids, kernel_argument_count, arena, &argument_lookup));
+      kernel_argument_ids, kernel_argument_count, scratch_arena,
+      &argument_lookup));
   loom_kernel_shape_requirements_t requirements;
   IREE_RETURN_IF_ERROR(loom_kernel_shape_requirements_build(
-      module, decision_models, arena, &requirements));
+      module, decision_models, scratch_arena, &requirements));
   IREE_RETURN_IF_ERROR(loom_kernel_class_shape_values(
-      &requirements, requirements.symbols[kernel_symbol_id].values, arena,
-      &out_classifier->shape));
+      &requirements, requirements.symbols[kernel_symbol_id].values,
+      scratch_arena, &out_classifier->shape));
   IREE_RETURN_IF_ERROR(loom_kernel_class_shape_resolve(
       &requirements, expression_context, &argument_lookup, arena,
       &out_classifier->shape));
@@ -491,7 +492,10 @@ iree_status_t loom_kernel_class_classifier_build(
           "kernel template decision has no ranked provider model");
     }
     loom_kernel_class_decision_t* decision = &decisions[--decision_ordinal];
-    decision->demand = demand;
+    decision->application = demand->apply_op;
+    if (demand->has_path_condition) {
+      decision->unavailable_reason = LOOM_KERNEL_CLASS_DECISION_PATH_CONDITION;
+    }
     decision->model = model;
     const loom_value_slice_t arguments =
         loom_template_apply_operands(demand->apply_op);
@@ -508,8 +512,8 @@ iree_status_t loom_kernel_class_classifier_build(
     for (uint32_t i = 0; i < model->providers.count; ++i) {
       IREE_RETURN_IF_ERROR(loom_kernel_class_provider_shape(
           module, &requirements,
-          loom_template_decision_model_provider(model, i), arguments, arena,
-          &shapes[i]));
+          loom_template_decision_model_provider(model, i), arguments,
+          scratch_arena, &shapes[i]));
       IREE_RETURN_IF_ERROR(
           loom_kernel_class_shape_resolve(&requirements, expression_context,
                                           &argument_lookup, arena, &shapes[i]));
@@ -556,7 +560,7 @@ iree_status_t loom_kernel_class_classifier_build(
           continue;
         }
         referenced_value_ids[referenced_value_count++] =
-            loom_kernel_class_decision_source_value(decision->demand,
+            loom_kernel_class_decision_source_value(decision->application,
                                                     operand_ref);
       }
     }
@@ -731,7 +735,7 @@ iree_status_t loom_kernel_class_classifier_build(
           continue;
         }
         const loom_value_id_t source_value_id =
-            loom_kernel_class_decision_source_value(decision->demand,
+            loom_kernel_class_decision_source_value(decision->application,
                                                     operand_ref);
         uint32_t projection_ordinal = 0;
         const loom_kernel_class_projection_t* projection =
@@ -774,9 +778,9 @@ iree_status_t loom_kernel_class_classifier_build(
     }
 
     const loom_value_slice_t source_arguments =
-        loom_template_apply_operands(decision->demand->apply_op);
+        loom_template_apply_operands(decision->application);
     const loom_value_slice_t source_results =
-        loom_template_apply_results(decision->demand->apply_op);
+        loom_template_apply_results(decision->application);
     const loom_decision_program_binding_t generic_binding = {
         .facts = kernel_facts,
         .argument_values = source_arguments.values,
@@ -791,9 +795,11 @@ iree_status_t loom_kernel_class_classifier_build(
         /*live_action_ordinals=*/NULL, &generic_live_provider_count,
         &decision->generic_result);
 
-    if (decision->demand->has_path_condition) {
-      decision->unavailable_reason = LOOM_KERNEL_CLASS_DECISION_PATH_CONDITION;
-    } else if (has_unprojectable_input) {
+    if (decision->unavailable_reason ==
+        LOOM_KERNEL_CLASS_DECISION_PATH_CONDITION) {
+      continue;
+    }
+    if (has_unprojectable_input) {
       decision->unavailable_reason =
           LOOM_KERNEL_CLASS_DECISION_UNPROJECTABLE_INPUT;
     } else if (has_unresolved_target) {
@@ -806,6 +812,24 @@ iree_status_t loom_kernel_class_classifier_build(
   IREE_ASSERT(feature_cursor == feature_count);
   IREE_ASSERT(action_cursor == action_count);
   return iree_ok_status();
+}
+
+iree_status_t loom_kernel_class_classifier_build(
+    const loom_module_t* module, loom_symbol_id_t kernel_symbol_id,
+    const loom_symbol_reference_table_t* references,
+    const loom_template_decision_model_catalog_t* decision_models,
+    const loom_value_fact_table_t* kernel_facts,
+    loom_symbolic_expr_context_t* expression_context,
+    const loom_template_applicability_target_t* kernel_target,
+    iree_arena_allocator_t* arena,
+    loom_kernel_class_classifier_t* out_classifier) {
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(arena->block_pool, &scratch_arena);
+  iree_status_t status = loom_kernel_class_classifier_build_impl(
+      module, kernel_symbol_id, references, decision_models, kernel_facts,
+      expression_context, kernel_target, arena, &scratch_arena, out_classifier);
+  iree_arena_deinitialize(&scratch_arena);
+  return status;
 }
 
 //===----------------------------------------------------------------------===//

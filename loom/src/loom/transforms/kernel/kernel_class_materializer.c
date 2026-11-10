@@ -494,7 +494,7 @@ iree_status_t loom_kernel_class_materialize(
           &collection->traces[selected_trace_ids[i]];
       operation_projections[i] = (loom_ir_remap_op_projection_t){
           .source_op =
-              classifier->decisions[trace->decision_ordinal].demand->apply_op,
+              classifier->decisions[trace->decision_ordinal].application,
       };
     }
   }

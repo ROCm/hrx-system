@@ -1043,6 +1043,77 @@ TEST_P(KernelRequestProducerTest, RejectsDynamicEncodingCaptures) {
   }
 }
 
+TEST_P(KernelRequestProducerTest,
+       PreparationFailureReleasesConstructionStorage) {
+  ModulePtr source_module = ParseSource();
+  ASSERT_NE(source_module, nullptr);
+  const std::vector<uint8_t> bytecode = WriteModule(source_module.get());
+  for (bool frozen : {false, true}) {
+    SCOPED_TRACE(frozen);
+    IndexPtr index = CreateIndex();
+    const iree_host_size_t source_ordinal =
+        frozen ? AddBytecodeSource(index.get(), bytecode, source_module.get())
+               : AddMaterializedSource(index.get(), source_module.get());
+    struct Allocations {
+      // Allocation attempt rejected in this preparation.
+      size_t fail_at = 0;
+      // Allocation attempts, excluding retirement.
+      size_t attempts = 0;
+      // Allocator-owned blocks still live.
+      size_t live = 0;
+    };
+    for (size_t fail_at = 0;; ++fail_at) {
+      SCOPED_TRACE(fail_at);
+      Allocations allocations = {.fail_at = fail_at};
+      const iree_allocator_t allocator = {
+          .self = &allocations,
+          .ctl = [](void* self, iree_allocator_command_t command,
+                    const void* params, void** inout_ptr) -> iree_status_t {
+            auto& state = *static_cast<Allocations*>(self);
+            if (command != IREE_ALLOCATOR_COMMAND_FREE &&
+                state.attempts++ == state.fail_at) {
+              return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+            }
+            const bool had_allocation = *inout_ptr != nullptr;
+            const auto system = iree_allocator_system();
+            iree_status_t status =
+                system.ctl(system.self, command, params, inout_ptr);
+            if (iree_status_is_ok(status)) {
+              if (command == IREE_ALLOCATOR_COMMAND_FREE && had_allocation) {
+                --state.live;
+              } else if (!had_allocation && *inout_ptr) {
+                ++state.live;
+              }
+            }
+            return status;
+          },
+      };
+      iree_arena_block_pool_t pool;
+      iree_arena_block_pool_initialize(4096, allocator, &pool);
+      auto environment = MaterializationEnvironment();
+      environment.block_pool = &pool;
+      environment.allocator = allocator;
+      loom_kernel_request_preparation_t* preparation = nullptr;
+      iree_status_t status = loom_kernel_request_preparation_allocate(
+          index.get(), &environment, source_ordinal, &preparation);
+      const bool complete = iree_status_is_ok(status);
+      if (!complete) {
+        EXPECT_TRUE(iree_status_is_resource_exhausted(status));
+        EXPECT_EQ(preparation, nullptr);
+        EXPECT_EQ(allocations.attempts, fail_at + 1);
+        iree_status_ignore(status);
+      }
+      loom_kernel_request_preparation_free(preparation);
+      iree_arena_block_pool_deinitialize(&pool);
+      EXPECT_EQ(allocations.live, 0u);
+      if (complete) {
+        break;
+      }
+      ASSERT_GT(allocations.attempts, fail_at);
+    }
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(TargetDeclaration, KernelRequestProducerTest,
                          ::testing::Bool());
 

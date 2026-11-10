@@ -143,7 +143,7 @@ class KernelClassClassifierBenchmarkFixture {
     }
     for (loom_kernel_class_decision_t& decision : decisions_) {
       decision = {
-          .demand = nullptr,
+          .application = nullptr,
           .model = &model_,
           .argument_values = projection_value_ids_,
           .result_values = nullptr,

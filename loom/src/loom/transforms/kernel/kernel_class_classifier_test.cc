@@ -271,7 +271,7 @@ class ManualBinaryClassifier {
           .trailing_reserved = {},
       };
       decisions_[i] = {
-          .demand = nullptr,
+          .application = nullptr,
           .model = &model_,
           .argument_values = decision_argument_values_[i],
           .result_values = nullptr,
