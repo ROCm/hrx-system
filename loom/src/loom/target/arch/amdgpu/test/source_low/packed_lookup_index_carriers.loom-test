@@ -55,7 +55,7 @@ func.def @byte_table_i32_one_index(%table: vector<8xi8>, %input: vector<1xi32>) 
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @byte_table_i32_one_index(%table: reg<amdgpu.vgpr x2>, %input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %indices = v_and_b32_lit %input, 7
+  %indices = v_and_b32_src0_inline %input, 7
   %10 = slice %table[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %11 = slice %table[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %values = v_perm_b32 %11, %10, %indices
@@ -97,11 +97,11 @@ func.def @byte_table_i32_three_indices(%table: vector<8xi8>, %input: vector<3xi3
 // ----
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @byte_table_i32_three_indices(%table: reg<amdgpu.vgpr x2>, %input: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr>) asm {
   %9 = slice %input[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
-  %10 = v_and_b32_lit %9, 7
+  %10 = v_and_b32_src0_inline %9, 7
   %11 = slice %input[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
-  %12 = v_and_b32_lit %11, 7
+  %12 = v_and_b32_src0_inline %11, 7
   %13 = slice %input[2] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
-  %14 = v_and_b32_lit %13, 7
+  %14 = v_and_b32_src0_inline %13, 7
   %16 = slice %table[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %17 = slice %table[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %21 = v_perm_b32_src2_lit %10, %12, 4
@@ -122,13 +122,13 @@ func.def @byte_table_i32_four_indices(%table: vector<8xi8>, %input: vector<4xi32
 // ----
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @byte_table_i32_four_indices(%table: reg<amdgpu.vgpr x2>, %input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm {
   %9 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %10 = v_and_b32_lit %9, 7
+  %10 = v_and_b32_src0_inline %9, 7
   %11 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %12 = v_and_b32_lit %11, 7
+  %12 = v_and_b32_src0_inline %11, 7
   %13 = slice %input[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %14 = v_and_b32_lit %13, 7
+  %14 = v_and_b32_src0_inline %13, 7
   %15 = slice %input[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %16 = v_and_b32_lit %15, 7
+  %16 = v_and_b32_src0_inline %15, 7
   %18 = slice %table[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %19 = slice %table[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %24 = v_perm_b32_src2_lit %10, %12, 4
