@@ -66,7 +66,16 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   }
   func.call @parameter(%stage, %c0_i32, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
   func.call @parameter(%media_stage, %c0_i32, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
-  %state_bytes = index.constant 128 : offset
+  %group_prefix_root = buffer.constant utf8("group_prefix") : buffer
+  %group_residual_root = buffer.constant utf8("group_residual") : buffer
+  %group_prefix = func.call @stage(%group_prefix_root, %c0_i64) : (buffer, i64) -> (i32)
+  %group_residual = func.call @stage(%group_residual_root, %c0_i64) : (buffer, i64) -> (i32)
+  func.call @config_i64(%group_prefix, %context_key, %context) : (i32, buffer, i64)
+  func.call @config_i64(%group_residual, %context_key, %context) : (i32, buffer, i64)
+  func.call @config_i64(%group_prefix, %media_key, %c0_i64) : (i32, buffer, i64)
+  func.call @config_i64(%group_residual, %media_key, %c0_i64) : (i32, buffer, i64)
+  func.call @parameter(%group_prefix, %c0_i32, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
+  %state_bytes = index.constant 144 : offset
   %state = buffer.alloca<private> align(8) %state_bytes : buffer
   %state_view = buffer.view %state[%origin] : buffer -> view<2xi32>
   view.store %stage, %state_view[0] : i32, view<2xi32>
@@ -89,6 +98,14 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %spans_key = buffer.constant utf8("fixture.spans") : buffer
   func.call @config_i64(%stage, %spans_key, %span_capacity) : (i32, buffer, i64)
   func.call @config_i64(%media_stage, %spans_key, %span_capacity) : (i32, buffer, i64)
+  func.call @config_i64(%group_prefix, %spans_key, %span_capacity) : (i32, buffer, i64)
+  func.call @config_i64(%group_residual, %spans_key, %span_capacity) : (i32, buffer, i64)
+  %group_origin = index.constant 128 : offset
+  %group_state = buffer.view %state[%group_origin] : buffer -> view<4xi32>
+  %group_shapes = scalar.trunci %shape_count : i64 to i32
+  view.store %group_shapes, %group_state[0] : i32, view<4xi32>
+  view.store %group_prefix, %group_state[1] : i32, view<4xi32>
+  view.store %group_residual, %group_state[2] : i32, view<4xi32>
   %layout_origin = index.constant 88 : offset
   %layout = buffer.view %state[%layout_origin] : buffer -> view<5xi64>
   view.store %maximum, %layout[0] : i64, view<5xi64>

@@ -111,6 +111,8 @@ typedef struct loom_model_component_t {
 // Immutable selected model facts, with no device, HTTP, or acquisition policy.
 // Every view is owned by the enclosing card and remains valid until release.
 typedef struct loom_model_selection_t {
+  // Portable card schema; v2 adds source-aware execution plan defaults.
+  uint32_t schema_version;
   // Base model identity from its original training source.
   iree_string_view_t model_id;
   // Human-readable model name.

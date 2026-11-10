@@ -10,6 +10,7 @@ package(default_visibility = ["//visibility:public"])
 
 exports_files([
     "model-card.v1.schema.json",
+    "model-card.v2.schema.json",
     "model-catalog.v1.schema.json",
     "model-lock.v1.schema.json",
     "model-lock.v2.schema.json",

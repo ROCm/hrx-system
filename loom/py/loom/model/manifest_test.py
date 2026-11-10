@@ -542,3 +542,26 @@ def test_voice_recordings_require_one_explicit_role_and_format_contract(voice):
     _service(document)["voices"] = {"narrator": voice}
     with pytest.raises(ManifestError):
         ModelCard(document)
+
+
+def test_group_execution_requires_version_two_and_keeps_source_closure():
+    document = _document()
+    before = ModelCard(document).select("check")
+    document["presets"]["check"]["execution"]["group_mode"] = "two_bank"
+    document["presets"]["check"]["execution"]["plan_provider"] = "two_bank_v1"
+    with pytest.raises(ManifestError, match="version 2"):
+        ModelCard(document)
+    document["schema_version"] = 2
+    after = ModelCard(document).select("check")
+    assert after.settings["execution"]["group_mode"] == "two_bank"
+    assert after.settings["execution"]["plan_provider"] == "two_bank_v1"
+    assert after.files == before.files
+
+
+@pytest.mark.parametrize("mode", ["auto", "", True, 1, None])
+def test_group_execution_rejects_invalid_modes(mode):
+    document = _document()
+    document["schema_version"] = 2
+    document["presets"]["check"]["execution"]["group_mode"] = mode
+    with pytest.raises(ManifestError, match="single or two_bank"):
+        ModelCard(document)

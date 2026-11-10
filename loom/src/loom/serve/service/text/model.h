@@ -11,6 +11,7 @@
 #include "iree/tokenizer/tokenizer.h"
 #include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/execution/execution.h"
+#include "loom/serve/runtime/execution/plan.h"
 #include "loom/serve/runtime/parameter/weights.h"
 #include "loom/serve/runtime/program/compilation.h"
 #include "loom/serve/runtime/program/sources.h"
@@ -107,6 +108,11 @@ iree_status_t loom_serve_text_model_prepare_request(
     iree_vm_buffer_t** out_options);
 
 typedef struct loom_serve_text_options_t {
+  // Explicit deployment choice. DEFAULT is SINGLE for native callers; the
+  // server translates startup compatibility settings before model allocation.
+  loom_serve_group_mode_t group_mode;
+  // Registered plan ID; empty selects two_bank_v1 for explicit TWO_BANK.
+  iree_string_view_t plan_provider;
   // Source root contract and request semantics, fixed for this residency.
   loom_serve_text_mode_t mode;
   // Explicit program inputs and local base, borrowed through load completion.
@@ -606,12 +612,20 @@ iree_status_t loom_serve_text_model_submit_epoch(
     loom_serve_text_capture_t** out_capture,
     loom_serve_execution_frontier_t* out_frontier);
 
-// Experimental two-bank prefill (LOOM_SERVE_TWO_BANK). Submits two consecutive
-// single-row known-input prefill spans of one row as one grouped execution:
-// the first span must be unselected. The second runs on a private bank of
-// residual, metadata, token and output buffers; KV/recurrent state and origins
-// are shared. The first span is published on the host before the second is
-// encoded, so completion is ordinary and reports both spans' known tokens.
+// Submits a source-declared two-bank group without a device wait. Only known,
+// contiguous input for one row is accepted; A cannot select. Both banks and the
+// source publication record survive through completion/failure retirement.
+// Committed positions and request/cache publication remain unchanged until
+// complete_epoch consumes successful group readiness.
+bool loom_serve_text_model_two_bank(const loom_serve_text_model_t* model);
+// Queries the retained provider with immutable facts before choosing a group.
+// False selects the ordinary primary path without source/state mutation.
+bool loom_serve_text_model_can_pair(const loom_serve_text_model_t* model,
+                                    iree_host_size_t first_shape,
+                                    const loom_serve_text_span_t* first,
+                                    iree_host_size_t second_shape,
+                                    const loom_serve_text_span_t* second);
+
 iree_status_t loom_serve_text_model_submit_epoch_pair(
     loom_serve_text_model_t* model, iree_host_size_t first_shape,
     const loom_serve_text_span_t* first, iree_host_size_t second_shape,

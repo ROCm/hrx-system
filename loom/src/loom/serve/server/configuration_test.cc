@@ -131,6 +131,22 @@ INSTANTIATE_TEST_SUITE_P(NativeServices, CardConfigurationTest,
                                            "embedding", "decision", "speech",
                                            "recognition", "activity"));
 
+TEST_F(ConfigurationTest, GroupModesAreTypedPerDeployment) {
+  IREE_ASSERT_OK(
+      Parse(Text(R"(,"group_mode":"two_bank","plan_provider":"two_bank_v1")")));
+  EXPECT_EQ(model_.text.group_mode, LOOM_SERVE_GROUP_MODE_TWO_BANK);
+  EXPECT_EQ(String(model_.text.plan_provider), "two_bank_v1");
+  loom_serve_model_configuration_deinitialize(&model_);
+  IREE_ASSERT_OK(Parse(Text(R"(,"group_mode":"single")")));
+  EXPECT_EQ(model_.text.group_mode, LOOM_SERVE_GROUP_MODE_SINGLE);
+  loom_serve_model_configuration_deinitialize(&model_);
+  IREE_ASSERT_OK(Parse(Text(R"(,"group_mode":"two_\u0062ank")")));
+  EXPECT_EQ(model_.text.group_mode, LOOM_SERVE_GROUP_MODE_TWO_BANK);
+  loom_serve_model_configuration_deinitialize(&model_);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Parse(Text(R"(,"group_mode":"auto")")));
+}
+
 TEST_F(ConfigurationTest,
        DirectCardSelectsNamedPresetAndPreservesDecodedIdentity) {
   IREE_ASSERT_OK(

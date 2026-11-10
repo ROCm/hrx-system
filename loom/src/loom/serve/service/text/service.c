@@ -6,7 +6,6 @@
 
 #include "loom/serve/service/text/service.h"
 
-#include <stdlib.h>
 #include <string.h>
 
 #include "iree/async/util/proactor_pool.h"
@@ -481,17 +480,10 @@ static iree_status_t loom_serve_text_submit_epoch(
   service->cursor = loom_serve_text_epoch_prepare(
       &service->scheduling, rows, service->row_count, plan, scheduled,
       &service->epoch, &continuation);
-  // Experimental two-bank prefill: a lone unselected known-input chunk is
-  // paired with the row's next chunk in one grouped device submission.
-  static int two_bank = -1;
-  if (two_bank < 0) {
-    const char* value = getenv("LOOM_SERVE_TWO_BANK");
-    two_bank = value && value[0] == '1';
-  }
   loom_serve_text_span_t second = {0};
   iree_host_size_t second_shape = 0;
   bool paired = false;
-  if (two_bank &&
+  if (loom_serve_text_model_two_bank(service->model) &&
       service->scheduling.schedule_mode == LOOM_SERVICE_TEXT_SCHEDULE_PACKED &&
       service->scheduling.model_mode == LOOM_SERVE_TEXT_MODE_GENERATE &&
       service->epoch.count == 1 && service->epoch.prefill[0] &&
@@ -513,6 +505,15 @@ static iree_status_t loom_serve_text_submit_epoch(
     }
     if (best != IREE_HOST_SIZE_MAX) {
       paired = true;
+      for (iree_host_size_t row = 0; row < service->row_count; ++row) {
+        if (row != first->row_index &&
+            (service->ready[row].token_count ||
+             (service->sessions[row]->request.consumer.self &&
+              service->sessions[row]->request.phase ==
+                  LOOM_SERVE_TEXT_REQUEST_DECODE))) {
+          paired = false;
+        }
+      }
       second_shape = best;
       second = (loom_serve_text_span_t){
           .row_index = first->row_index,
@@ -522,7 +523,13 @@ static iree_status_t loom_serve_text_submit_epoch(
           .input_offset = first->input_offset + first->token_count,
           .media = NULL,
       };
-      service->epoch.input_count += count;
+      paired &= loom_serve_text_model_can_pair(service->model,
+                                               service->epoch.shape_index,
+                                               first, second_shape, &second);
+      if (paired) {
+        service->epoch.input_count += count;
+        service->epoch.device_epochs = 2;
+      }
     }
   }
   loom_serve_text_observe(service, "execute");
@@ -550,6 +557,13 @@ static iree_status_t loom_serve_text_submit_epoch(
                     service->model, service->scheduling.schedule_mode,
                     &service->epoch, &continuation, encodes ? &capture : NULL,
                     &service->completion.frontier));
+  if (paired) {
+    service->epoch.spans[0].token_count += second.token_count;
+    service->epoch.spans[0].flags = second.flags;
+    service->epoch.token_slots +=
+        service->scheduling.shapes[second_shape].token_capacity;
+    service->epoch.continued_prefill_count += second.token_count;
+  }
   iree_status_t status = iree_ok_status();
   if (capture) {
     status = loom_serve_text_capture_download(capture, &service->capture,

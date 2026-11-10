@@ -1031,7 +1031,14 @@ static iree_status_t loom_serve_text_registration_create(
   registration->shapes =
       (loom_serve_packing_shape_t*)((uint8_t*)registration + shapes_offset);
   loom_serve_text_default_shapes(text->prefill_capacity, registration->shapes);
+  loom_serve_group_mode_t group_mode = text->group_mode;
+  if (group_mode == LOOM_SERVE_GROUP_MODE_DEFAULT &&
+      configuration->legacy_two_bank && text->plan_provider.size) {
+    group_mode = LOOM_SERVE_GROUP_MODE_TWO_BANK;
+  }
   const loom_serve_text_options_t model_options = {
+      .group_mode = group_mode,
+      .plan_provider = text->plan_provider,
       .mode = configuration->kind == LOOM_SERVE_MODEL_KIND_SEQUENCE
                   ? LOOM_SERVE_TEXT_MODE_ENCODE
                   : LOOM_SERVE_TEXT_MODE_GENERATE,

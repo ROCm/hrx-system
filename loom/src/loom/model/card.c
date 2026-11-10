@@ -752,17 +752,19 @@ static iree_status_t loom_model_select(loom_model_card_t* card,
       &root, "schema_version", IREE_JSON_VALUE_TYPE_NUMBER, true, &version));
   uint64_t schema_version = 0;
   IREE_RETURN_IF_ERROR(iree_json_parse_uint64(version, &schema_version));
-  if (schema_version != 1) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "model schema version %" PRIu64
-                            " is unsupported; this host supports version 1",
-                            schema_version);
+  if (schema_version != 1 && schema_version != 2) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "model schema version %" PRIu64
+        " is unsupported; this host supports versions 1 and 2",
+        schema_version);
   }
   IREE_RETURN_IF_ERROR(loom_model_check_fields(
       &root,
       "$schema schema_version model origins programs services variants "
       "presets"));
   loom_model_selection_t* selection = &card->selection;
+  selection->schema_version = (uint32_t)schema_version;
   loom_model_json_object_t metadata;
   IREE_RETURN_IF_ERROR(loom_model_object_field(
       &root, "model", true, "id name description license origin implementation",
@@ -789,6 +791,38 @@ static iree_status_t loom_model_select(loom_model_card_t* card,
       "service variant programs partition options execution request workload "
       "memory components",
       &preset));
+  loom_model_json_object_t execution;
+  IREE_RETURN_IF_ERROR(
+      loom_model_object_field(&preset, "execution", false, NULL, &execution));
+  if (loom_model_field(&execution, IREE_SV("group_mode")) ||
+      loom_model_field(&execution, IREE_SV("plan_provider"))) {
+    if (schema_version != 2) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "group execution requires model schema version 2");
+    }
+    iree_string_view_t mode = iree_string_view_empty(),
+                       provider = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(
+        loom_model_string_field(&execution, "group_mode", false, &mode));
+    IREE_RETURN_IF_ERROR(
+        loom_model_string_field(&execution, "plan_provider", false, &provider));
+    if ((loom_model_field(&execution, IREE_SV("group_mode")) && !mode.size) ||
+        (mode.size && !iree_string_view_equal(mode, IREE_SV("single")) &&
+         !iree_string_view_equal(mode, IREE_SV("two_bank")))) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "group_mode must be single or two_bank");
+    }
+  }
+  if (loom_model_field(&execution, IREE_SV("plan_provider"))) {
+    iree_string_view_t provider = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(
+        loom_model_string_field(&execution, "plan_provider", true, &provider));
+    if (!provider.size) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "plan_provider must be nonempty");
+    }
+  }
   loom_model_selector_t defaults = {0};
   IREE_RETURN_IF_ERROR(
       loom_model_string_field(&preset, "service", false, &defaults.service));

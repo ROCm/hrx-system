@@ -33,6 +33,7 @@ void SourceTextServiceTest::SetUp() {
   auto application_options = loom_serve_test_application_options_default();
   application_options.worker_count = WorkerCount();
   application_options.device_count = DeviceCount();
+  application_options.backing = PoolBacking();
   if (application_options.backing == LOOM_SERVE_POOL_BACKING_ELASTIC) {
     application_options.memory_limit = 64 * 1024 * 1024;
   }

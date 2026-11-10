@@ -743,3 +743,74 @@ func.def public @resize_state(%state: buffer, %rows: i64) -> (buffer, buffer, bu
   %allocations, %views, %origins, %draft, %geometry = func.call @fixture_storage(%maximum, %span_capacity, %context, %pool, %rows, %pins) : (i64, i64, i64, i64, i64, i64) -> (buffer, buffer, buffer, buffer, buffer)
   func.return %state, %allocations, %views, %origins, %draft, %geometry : buffer, buffer, buffer, buffer, buffer, buffer
 }
+
+// The group ABI reserves source positions in private host plans. It never
+// commits retained row state or invokes the runner while encoding a group.
+func.def public @text_prefill_group_plan_v1(%state: buffer) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %state_origin = index.constant 128 : offset
+  %state_view = buffer.view %state[%state_origin] : buffer -> view<4xi32>
+  %shapes32 = view.load %state_view[0] : view<4xi32> -> i32
+  %prefix = view.load %state_view[1] : view<4xi32> -> i32
+  %residual = view.load %state_view[2] : view<4xi32> -> i32
+  %shape_bound = scalar.assume %shapes32 [range(%shapes32, 1, 1024)] : i32
+  %shapes = index.cast %shape_bound : i32 to index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %stride = index.constant 12 : offset
+  %header_bytes = index.constant 16 : offset
+  %table_bytes = index.scale %shapes, %stride : index, offset -> offset
+  %bytes = index.add %header_bytes, %table_bytes : offset
+  %result = buffer.alloca<private> align(4) %bytes : buffer
+  %header = buffer.view %result[%origin] : buffer -> view<4xi32>
+  %one = scalar.constant 1 : i32
+  %none = scalar.constant -1 : i32
+  view.store %one, %header[0] : i32, view<4xi32>
+  view.store %shapes32, %header[1] : i32, view<4xi32>
+  view.store %one, %header[2] : i32, view<4xi32>
+  view.store %one, %header[3] : i32, view<4xi32>
+  %table = buffer.view %result[%header_bytes] : buffer -> view<[%shapes]x3xi32>
+  scf.for %i = [%c0 to %shapes step %c1] {
+    view.store %prefix, %table[%i, 0] : i32, view<[%shapes]x3xi32>
+    view.store %none, %table[%i, 1] : i32, view<[%shapes]x3xi32>
+    view.store %residual, %table[%i, 2] : i32, view<[%shapes]x3xi32>
+  }
+  func.return %result : buffer
+}
+
+func.def public @text_encode_prefill_group_v1(%state: buffer, %plan_a: buffer, %inputs_a: buffer, %plan_b: buffer, %inputs_b: buffer, %metadata_a: buffer, %tokens_a: buffer, %metadata_b: buffer, %tokens_b: buffer) {
+  %origin = index.constant 0 : offset
+  %a = buffer.view %plan_a[%origin] : buffer -> view<1x9xi32>
+  %b = buffer.view %plan_b[%origin] : buffer -> view<1x9xi32>
+  %length_a = view.load %a[0, 0] : view<1x9xi32> -> i32
+  %length_b = view.load %b[0, 0] : view<1x9xi32> -> i32
+  %position_a = view.load %a[0, 1] : view<1x9xi32> -> i32
+  %source_a = view.load %a[0, 2] : view<1x9xi32> -> i32
+  %two = scalar.constant 2 : i32
+  %source_advance = scalar.muli %length_a, %two : i32
+  %position_b = scalar.addi %position_a, %length_a : i32
+  %source_b = scalar.addi %source_a, %source_advance : i32
+  view.store %position_b, %b[0, 1] : i32, view<1x9xi32>
+  view.store %source_b, %b[0, 2] : i32, view<1x9xi32>
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %eos = scalar.constant 3 : i32
+  %out_a, %transfers_a, %begin_a, %bytes_a = func.call @encode_epoch(%state, %plan_a, %inputs_a, %inputs_a, %one, %zero, %length_a, %zero, %zero, %zero, %zero, %eos, %metadata_a, %tokens_a) : (buffer, buffer, buffer, buffer, i32, i32, i32, i32, i32, i32, i32, i32, buffer, buffer) -> (i32, buffer, i64, i64)
+  %out_b, %transfers_b, %begin_b, %bytes_b = func.call @encode_epoch(%state, %plan_b, %inputs_b, %inputs_b, %one, %zero, %length_b, %zero, %zero, %zero, %zero, %eos, %metadata_b, %tokens_b) : (buffer, buffer, buffer, buffer, i32, i32, i32, i32, i32, i32, i32, i32, buffer, buffer) -> (i32, buffer, i64, i64)
+  func.return
+}
+
+func.def public @text_publish_prefill_group_v1(%plan_a: buffer, %plan_b: buffer, %outputs: buffer, %progress: buffer) {
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  func.call @publish_epoch(%plan_b, %plan_b, %one, %zero, %zero, %zero, %zero, %plan_b, %outputs, %outputs, %outputs, %progress) : (buffer, buffer, i32, i32, i32, i32, i32, buffer, buffer, buffer, buffer, buffer)
+  %origin = index.constant 0 : offset
+  %a = buffer.view %plan_a[%origin] : buffer -> view<1x9xi32>
+  %length_a = view.load %a[0, 0] : view<1x9xi32> -> i32
+  %result = buffer.view %progress[%origin] : buffer -> view<21xi32>
+  %length_b = view.load %result[0] : view<21xi32> -> i32
+  %total = scalar.addi %length_a, %length_b : i32
+  view.store %total, %result[0] : i32, view<21xi32>
+  view.store %total, %result[1] : i32, view<21xi32>
+  func.return
+}

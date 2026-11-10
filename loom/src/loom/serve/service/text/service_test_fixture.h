@@ -34,6 +34,7 @@
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/model.h"
 #include "loom/serve/testing/model_wait.h"
+#include "loom/serve/testing/service_application.h"
 #include "loom/serve/testing/stalled_http_client.h"
 #include "loom/serve/testing/stalled_stderr.h"
 #include "loom/serve/transport/http/listener.h"
@@ -65,6 +66,10 @@ class SourceTextServiceTest : public ::testing::Test {
 
   // Dedicated group suites select additional independent device owners.
   virtual iree_host_size_t DeviceCount() const { return 1; }
+
+  virtual loom_serve_pool_backing_t PoolBacking() const {
+    return loom_serve_test_application_options_default().backing;
+  }
 
   virtual loom_serve_http_server_options_t ServerOptions() const {
     return loom_serve_http_server_options_default();

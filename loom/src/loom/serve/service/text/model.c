@@ -8,7 +8,6 @@
 
 #include "loom/serve/service/text/model.h"
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -32,6 +31,7 @@
 #include "loom/serve/service/text/epoch_upload.h"
 #include "loom/serve/service/text/media_epoch.h"
 #include "loom/serve/service/text/model_instance.h"
+#include "loom/serve/service/text/prefill_group.h"
 #include "loom/serve/service/text/source.h"
 #include "loom/serve/service/text/stages.h"
 #include "loom/serve/service/text/state.h"
@@ -173,6 +173,19 @@ static iree_status_t loom_serve_text_load_prepare(
   IREE_RETURN_IF_ERROR(loom_serve_text_source_initialize(
       model->jit, options, model->host_allocator, &model->source,
       &model->state.storage));
+  if (model->two_bank) {
+    if (options->mode != LOOM_SERVE_TEXT_MODE_GENERATE ||
+        !options->epoch_count) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "text_prefill_group_v1 requires packed generative input");
+    }
+    IREE_RETURN_IF_ERROR(loom_serve_host_lookup_plan_provider(
+        loom_serve_device_host(model->device_owner),
+        options->plan_provider.size ? options->plan_provider
+                                    : IREE_SV("two_bank_v1"),
+        &model->plan_provider));
+  }
   model->state.cache.capacity = model->source.pool_capacity;
   model->state.checkpoints.capacity =
       (uint32_t)model->source.cache.checkpoint_capacity;
@@ -344,6 +357,7 @@ static iree_status_t loom_serve_text_load_link(loom_serve_text_load_t* load) {
       &model->source, model->execution, model->transfer, &model->state,
       model->shape_count, model->shapes, model->stage_count,
       model->stage_bindings, model->host_allocator, &model->control));
+  IREE_RETURN_IF_ERROR(loom_serve_text_prefill_group_initialize(model));
   model->stage_workspace_bytes =
       loom_serve_module_workspace_requirement(model->control.native_module)
           .allocation_size;
@@ -376,6 +390,10 @@ iree_status_t loom_serve_text_load_allocate(
     loom_serve_text_load_wake_fn_t wake, void* user_data,
     iree_allocator_t host_allocator, loom_serve_text_load_t** out_load) {
   *out_load = NULL;
+  if (options->group_mode > LOOM_SERVE_GROUP_MODE_TWO_BANK) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid text group mode");
+  }
   if ((options->mode != LOOM_SERVE_TEXT_MODE_GENERATE &&
        options->mode != LOOM_SERVE_TEXT_MODE_ENCODE) ||
       (options->mode == LOOM_SERVE_TEXT_MODE_ENCODE &&
@@ -461,6 +479,9 @@ iree_status_t loom_serve_text_load_allocate(
     model->group = loom_serve_device_group(device);
     model->dispatch = loom_serve_device_dispatch_queue(device);
     model->transfer = loom_serve_device_transfer_queue(device);
+    model->two_bank = options->group_mode == LOOM_SERVE_GROUP_MODE_TWO_BANK;
+    load->options.group_mode = model->two_bank ? LOOM_SERVE_GROUP_MODE_TWO_BANK
+                                               : LOOM_SERVE_GROUP_MODE_SINGLE;
     model->row_count = options->row_count;
     model->draft_depth = options->draft_depth;
     model->command_mode =
@@ -747,9 +768,9 @@ void loom_serve_text_model_retire(loom_serve_text_model_t* model,
       model->stages[i].fixed_buffers[j] = NULL;
     }
   }
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(model->bank); ++i) {
-    iree_hal_buffer_release(model->bank[i]);
-    model->bank[i] = NULL;
+  loom_serve_execution_group_retire(model->prefill_group.pending);
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    loom_serve_text_bank_retire(&model->banks[i]);
   }
   loom_serve_text_state_retire(&model->state, wake, user_data);
 }
@@ -803,6 +824,14 @@ iree_status_t loom_serve_text_model_free_retired(
   iree_allocator_free(model->host_allocator, model->stage_bindings);
   iree_allocator_free(model->host_allocator, model->parameters.plans);
   iree_allocator_free(model->host_allocator, model->parameters.sources);
+  loom_serve_execution_group_free(model->prefill_group.pending);
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    loom_serve_text_bank_deinitialize(&model->banks[i]);
+  }
+  loom_serve_execution_plan_release(model->execution_plan);
+  if (model->plan_provider.release) {
+    model->plan_provider.release(model->plan_provider.self);
+  }
   loom_serve_jit_release(model->jit);
   loom_serve_text_media_epoch_deinitialize(&model->invocation.media);
   loom_serve_text_control_deinitialize(&model->control);
@@ -856,6 +885,10 @@ iree_status_t loom_serve_text_model_compile_variant_async(
 
 iree_status_t loom_serve_text_model_select_variant(
     loom_serve_text_model_t* model, const loom_serve_text_variant_t* variant) {
+  if (model->two_bank) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "group model variants require plan re-preparation");
+  }
   if (variant) {
     return loom_serve_text_variant_bind(
         variant, model, model->control.native_module, model->residency);
@@ -1089,7 +1122,7 @@ static iree_status_t loom_serve_text_submit_step(
 
 // Only ownership changes visit this path. The source encoder owns device
 // record offsets; native state contributes its already validated byte ranges.
-static iree_status_t loom_serve_text_publish_state_bindings(
+iree_status_t loom_serve_text_model_publish_state_bindings(
     loom_serve_text_model_t* model) {
   if (!model->state.recurrent.dirty_count) {
     return iree_ok_status();
@@ -1400,7 +1433,7 @@ iree_status_t loom_serve_text_model_submit_epoch(
   status =
       loom_serve_text_state_grow(&model->state, span_count, spans, extents);
   if (iree_status_is_ok(status)) {
-    status = loom_serve_text_publish_state_bindings(model);
+    status = loom_serve_text_model_publish_state_bindings(model);
   }
 
   loom_serve_text_media_epoch_t* invocation_media = &model->invocation.media;
@@ -1567,110 +1600,15 @@ iree_status_t loom_serve_text_model_submit_epoch(
   return status;
 }
 
-static iree_status_t loom_serve_text_model_ensure_bank(
-    loom_serve_text_model_t* model) {
-  if (model->bank[0]) {
-    return iree_ok_status();
-  }
-  iree_hal_buffer_t* sources[IREE_ARRAYSIZE(model->bank)] = {
-      model->state.residual, model->state.epoch.buffers[1],
-      model->state.epoch.buffers[4], model->state.epoch.buffers[5]};
-  iree_hal_pool_reservation_request_t requests[IREE_ARRAYSIZE(model->bank)];
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(model->bank); ++i) {
-    if (!sources[i]) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "two-bank prefill requires packed epoch roots");
-    }
-    requests[i] = iree_hal_make_pool_reservation_request(
-        iree_hal_buffer_byte_length(sources[i]), 256);
-  }
-  IREE_RETURN_IF_ERROR(loom_serve_execution_alloca_from_pool(
-      model->execution, loom_serve_pool_storage(model->state.pool),
-      IREE_ARRAYSIZE(model->bank), requests, model->bank));
-  const uint32_t zero = 0;
-  iree_hal_transfer_operation_t fills[IREE_ARRAYSIZE(model->bank)];
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(model->bank); ++i) {
-    fills[i] = (iree_hal_transfer_operation_t){
-        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
-        .fill = {.target_buffer = model->bank[i],
-                 .length = iree_hal_buffer_byte_length(model->bank[i]),
-                 .pattern = &zero,
-                 .pattern_length = sizeof(zero)},
-    };
-  }
-  uint64_t completion = 0;
-  IREE_RETURN_IF_ERROR(loom_serve_execution_transfer(
-      model->execution, IREE_ARRAYSIZE(fills), fills, &completion));
-  return loom_serve_execution_wait(model->execution, completion);
-}
-
-static void loom_serve_text_model_swap_bank(loom_serve_text_model_t* model) {
-  iree_hal_buffer_t** slots[IREE_ARRAYSIZE(model->bank)] = {
-      &model->state.residual, &model->state.epoch.buffers[1],
-      &model->state.epoch.buffers[4], &model->state.epoch.buffers[5]};
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(model->bank); ++i) {
-    iree_hal_buffer_t* buffer = *slots[i];
-    *slots[i] = model->bank[i];
-    model->bank[i] = buffer;
-  }
-  model->state.epoch.buffers[0] = model->state.residual;
-}
-
-iree_status_t loom_serve_text_model_submit_epoch_pair(
-    loom_serve_text_model_t* model, iree_host_size_t first_shape,
-    const loom_serve_text_span_t* first, iree_host_size_t second_shape,
-    const loom_serve_text_span_t* second,
-    loom_serve_execution_frontier_t* out_frontier) {
-  *out_frontier = (loom_serve_execution_frontier_t){0};
-  if (first->row_index != second->row_index || first->media || second->media ||
-      iree_any_bit_set(first->flags, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT |
-                                         LOOM_SERVICE_TEXT_SPAN_FLAG_PROPOSE) ||
-      iree_any_bit_set(second->flags, LOOM_SERVICE_TEXT_SPAN_FLAG_PROPOSE)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "invalid two-bank prefill pair");
-  }
-  IREE_RETURN_IF_ERROR(loom_serve_text_model_ensure_bank(model));
-  // Holds parameters between the first bank's host publication and the
-  // second bank's own acquisition.
-  IREE_RETURN_IF_ERROR(loom_serve_residency_acquire(model->residency));
-  loom_serve_execution_begin_group(model->execution);
-  loom_serve_execution_frontier_t frontier;
-  iree_status_t status = loom_serve_text_model_submit_epoch(
-      model, first_shape, 1, first, NULL, NULL, NULL, &frontier);
-  // The first bank's uploads borrow host staging that the second bank's
-  // encode reuses; its stage execution itself is still deferred.
-  if (iree_status_is_ok(status)) {
-    status = loom_serve_execution_wait(model->execution, frontier.values[0]);
-  }
-  loom_serve_text_result_t first_result = {0};
-  if (iree_status_is_ok(status)) {
-    // An unselected known-input span publishes from its host plan alone.
-    status = loom_serve_text_model_complete_epoch(model, &first_result);
-  }
-  if (iree_status_is_ok(status)) {
-    loom_serve_text_model_swap_bank(model);
-    status = loom_serve_text_model_submit_epoch(model, second_shape, 1, second,
-                                                NULL, NULL, NULL, &frontier);
-    loom_serve_text_model_swap_bank(model);
-  }
-  status = iree_status_join(status,
-                            loom_serve_execution_end_group(model->execution));
-  loom_serve_residency_release(model->residency);
-  if (iree_status_is_ok(status)) {
-    if (getenv("LOOM_SERVE_TWO_BANK_LOG")) {
-      fprintf(
-          stderr, "TWO_BANK_PAIR first=%zu second=%zu select=%d\n",
-          first->token_count, second->token_count,
-          iree_any_bit_set(second->flags, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT));
-    }
-    model->invocation.paired_known = first_result.known_count;
-    *out_frontier = loom_serve_execution_frontier(model->execution);
-  }
-  return status;
-}
-
 iree_status_t loom_serve_text_model_complete_epoch(
     loom_serve_text_model_t* model, loom_serve_text_result_t* out_results) {
+  if (!model->invocation.span_count) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "no text invocation to publish");
+  }
+  if (model->prefill_group.active) {
+    return loom_serve_text_prefill_group_complete(model, out_results);
+  }
   const loom_serve_text_media_epoch_t* media = &model->invocation.media;
   iree_vm_buffer_t* media_plan =
       media->plan ? media->plan : model->control.host.buffers[TEXT_HOST_INPUT];
@@ -1727,11 +1665,6 @@ iree_status_t loom_serve_text_model_complete_epoch(
           row->transfer.token == model->source.eos_token;
     }
   }
-  if (out_results && model->invocation.paired_known) {
-    out_results[0].known_count += (uint32_t)model->invocation.paired_known;
-    out_results[0].consumed_count += (uint32_t)model->invocation.paired_known;
-  }
-  model->invocation.paired_known = 0;
   model->invocation.span_count = 0;
   loom_serve_text_media_epoch_deinitialize(&model->invocation.media);
   loom_serve_residency_release(model->residency);

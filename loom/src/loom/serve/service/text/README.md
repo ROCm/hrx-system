@@ -341,3 +341,49 @@ IDs through the existing completion path; logits and RNG state stay on device.
 These observers do not decide admission, advancement or retirement. Unit tests
 exercise the pure packing and epoch contracts; actual source-model HTTP tests
 exercise retained continuation, cancellation, cache ownership and final output.
+
+## Primary-device two-bank groups
+
+A deployment can select `group_mode: "two_bank"` and the registered
+`plan_provider: "two_bank_v1"` in its text definition. Portable model cards
+put the same defaults in a schema-version-2 preset's `execution` object.
+`group_mode: "single"` preserves ordinary epochs. Missing group exports or an
+unknown provider fail preparation before the model becomes ready. Existing
+version-1 cards continue using their ordinary execution contract.
+
+The source implements [text_prefill_group_v1](prefill_group.h): a semantic
+stage table, group encoding and one final publication. Each layer's prefix
+publishes the shared causal state that B needs; bank-private residuals,
+packets, outputs and workspaces remain live through every declared consumer.
+The source reserves both positions while committed row state stays at the last
+successful boundary. Completion publishes both known-input counts together.
+There is no intermediate device wait or host completion of A.
+
+The builtin `sequential_v1` provider consumes the same source contract as a
+comparison baseline. Providers are explicitly registered on the host before
+model preparation and retained by each selected model. Preparation runs once;
+a pure selection callback receives absolute position, shapes and live token
+counts at each candidate chunk boundary and can choose ordinary packing. Group construction
+copies upload bytes and bindings; partial enqueue failure ends model execution
+and keeps accepted resources through actual queue retirement. Readiness failure
+alone never releases borrowed host payloads.
+
+The startup compatibility variable `LOOM_SERVE_TWO_BANK=1` applies only to a
+single startup deployment, when a provider ID declares group-capable source
+and no explicit group mode is set. Its value is captured at host creation and
+translated into the model's immutable selection after card resolution.
+Dynamic registration never inherits this compatibility choice. Requests never
+read environment variables. Native callers use the typed mode. Registration by shared-library symbol and preload interception
+are unsupported.
+
+Initial pairing covers two contiguous known-input spans of one row. Media,
+proposals, device-fed continuation and ready peer work use ordinary packing.
+Only B may select. Resource ABI 2 allows source-owned draft-cache warm stages;
+proposal/verification stages remain outside groups. The model source must
+include every warm/capture consumer before bank reuse. Native variant selection
+requires plan re-preparation and currently rejects for group models.
+
+This path uses one existing device and its queues. It changes scheduling and
+storage ownership without introducing approximate arithmetic or NPU transport.
+The shared tests run on CPU and AMDGPU leaves; real-model golden, DFlash and
+teacher-forced numerical qualification remain separate release checks.

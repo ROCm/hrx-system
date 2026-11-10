@@ -258,6 +258,7 @@ loom_cc_library(
     hdrs = ["configuration.h"],
     deps = [
         "//loom/src/loom/serve/runtime/device:pool",
+        "//loom/src/loom/serve/runtime/execution:plan",
         "//loom/src/loom/serve/runtime/program:sources",
         "//loom/src/loom/serve/runtime/program:variant_pool",
         "//loom/src/loom/serve/service:kind",

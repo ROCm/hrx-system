@@ -15,6 +15,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/execution/execution.h"
+#include "loom/serve/runtime/execution/group.h"
 #include "loom/serve/runtime/execution/queues.h"
 
 namespace {
@@ -237,6 +238,105 @@ class WorkspaceTest : public ::testing::TestWithParam<uint32_t> {
   // Upload payload owned until all producer work has retired.
   std::array<uint32_t, 16> input_ = {};
 };
+
+TEST_P(WorkspaceTest, GroupPreservesFeedbackBeforeOverwriteAndCopiesPayloads) {
+  IREE_ASSERT_OK(Allocate(producer_));
+  loom_serve_execution_group_t* group = nullptr;
+  IREE_ASSERT_OK(loom_serve_execution_group_create(
+      producer_.execution, 4, iree_allocator_system(), &group));
+  loom_serve_group_submission_t submission;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_serve_execution_group_submit(group, &submission));
+  uint32_t input = 7;
+  std::array<uint32_t, 2> outputs = {};
+  for (unsigned i = 0; i < 2; ++i) {
+    input = i ? 9 : 7;
+    loom_serve_group_node_t upload = {
+        .kind = LOOM_SERVE_GROUP_TRANSFER,
+        .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+                     .upload = {.source = &input,
+                                .target_buffer = producer_.buffer,
+                                .length = sizeof(input)}}};
+    IREE_ASSERT_OK(loom_serve_execution_group_append(group, &upload));
+    loom_serve_group_node_t download = {
+        .kind = LOOM_SERVE_GROUP_TRANSFER,
+        .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+                     .download = {.source_buffer = producer_.buffer,
+                                  .target = &outputs[i],
+                                  .length = sizeof(input)}}};
+    IREE_ASSERT_OK(loom_serve_execution_group_append(group, &download));
+  }
+  input = 99;
+  loom_serve_group_node_t overflow = {};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_serve_execution_group_append(group, &overflow));
+  IREE_ASSERT_OK(loom_serve_execution_group_submit(group, &submission));
+  EXPECT_EQ(submission.accepted_count, 4u);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_serve_execution_group_submit(group, &submission));
+  loom_serve_execution_group_retire(group);
+  iree_hal_buffer_release(producer_.buffer);
+  producer_.buffer = nullptr;
+  IREE_ASSERT_OK(loom_serve_execution_drain(producer_.execution));
+  EXPECT_EQ(outputs, (std::array<uint32_t, 2>{7, 9}));
+  loom_serve_execution_group_free(group);
+}
+
+TEST_P(WorkspaceTest, GroupPayloadAllocationFailureDoesNotAppendOrSubmit) {
+  struct Allocator {
+    bool fail = false;
+    static iree_status_t Control(void* self, iree_allocator_command_t command,
+                                 const void* parameters, void** pointer) {
+      if (static_cast<Allocator*>(self)->fail &&
+          command != IREE_ALLOCATOR_COMMAND_FREE) {
+        return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+      }
+      auto system = iree_allocator_system();
+      return system.ctl(system.self, command, parameters, pointer);
+    }
+  } allocator;
+  IREE_ASSERT_OK(Allocate(producer_));
+  loom_serve_execution_group_t* group = nullptr;
+  IREE_ASSERT_OK(loom_serve_execution_group_create(
+      producer_.execution, 1, {&allocator, Allocator::Control}, &group));
+  uint32_t input = 1;
+  loom_serve_group_node_t upload = {
+      .kind = LOOM_SERVE_GROUP_TRANSFER,
+      .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+                   .upload = {.source = &input,
+                              .target_buffer = producer_.buffer,
+                              .length = 4}}};
+  allocator.fail = true;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_serve_execution_group_append(group, &upload));
+  loom_serve_group_submission_t submission;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_serve_execution_group_submit(group, &submission));
+  EXPECT_EQ(submission.accepted_count, 0u);
+  allocator.fail = false;
+  IREE_ASSERT_OK(loom_serve_execution_group_append(group, &upload));
+  loom_serve_execution_group_free(group);
+}
+
+TEST_P(WorkspaceTest, GroupDiscardLeavesAcceptedFrontierUnchanged) {
+  IREE_ASSERT_OK(Allocate(producer_));
+  const auto before = loom_serve_execution_frontier(producer_.execution);
+  loom_serve_execution_group_t* group = nullptr;
+  IREE_ASSERT_OK(loom_serve_execution_group_create(
+      producer_.execution, 1, iree_allocator_system(), &group));
+  uint32_t input = 17;
+  loom_serve_group_node_t upload = {
+      .kind = LOOM_SERVE_GROUP_TRANSFER,
+      .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+                   .upload = {.source = &input,
+                              .target_buffer = producer_.buffer,
+                              .length = sizeof(input)}}};
+  IREE_ASSERT_OK(loom_serve_execution_group_append(group, &upload));
+  loom_serve_execution_group_free(group);
+  const auto after = loom_serve_execution_frontier(producer_.execution);
+  EXPECT_EQ(before.values[0], after.values[0]);
+  EXPECT_EQ(before.values[1], after.values[1]);
+}
 
 TEST_P(WorkspaceTest, RejectedBatchPublishesNoPrefixOrTimelineEdge) {
   const iree_hal_pool_reservation_request_t requests[] = {

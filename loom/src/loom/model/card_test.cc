@@ -296,8 +296,28 @@ TEST_F(CardTest, UnknownRevisionFailsBeforeInterpretingNewFields) {
   IREE_ASSERT_STATUS_IS(
       IREE_STATUS_UNIMPLEMENTED,
       Parse(Replace("\"schema_version\": 1",
-                    "\"schema_version\": 2, \"future_field\": {}")));
+                    "\"schema_version\": 3, \"future_field\": {}")));
   EXPECT_EQ(card_, nullptr);
+}
+
+TEST_F(CardTest, VersionTwoGroupsKeepVersionOneClosure) {
+  auto json = Replace("\"schema_version\": 1", "\"schema_version\": 2");
+  auto offset = json.find("\"execution\": {\"rows\": 2}");
+  json.replace(offset, std::string("\"execution\": {\"rows\": 2}").size(),
+               "\"execution\": {\"rows\": 2, \"group_mode\":\"two_bank\", "
+               "\"plan_provider\":\"two_bank_v1\"}");
+  IREE_ASSERT_OK(Parse(json));
+  EXPECT_EQ(loom_model_card_selection(card_)->schema_version, 2u);
+  EXPECT_NE(
+      String(loom_model_card_selection(card_)->execution).find("two_bank"),
+      std::string::npos);
+}
+
+TEST_F(CardTest, VersionOneRejectsGroupDefaults) {
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      Parse(Replace("\"execution\": {\"rows\": 2}",
+                    "\"execution\": {\"group_mode\":\"two_bank\"}")));
 }
 
 TEST_F(CardTest, CanonicalOptionsBelongToTheSelectedService) {

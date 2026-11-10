@@ -360,6 +360,13 @@ int loom_serve_main(int argc, char** argv,
   for (iree_host_size_t i = 0; i < models.count && iree_status_is_ok(status);
        ++i) {
     loom_serve_model_configuration_t* entry = &configurations[i];
+    entry->legacy_two_bank =
+        models.count == 1 && loom_serve_host_legacy_two_bank(host);
+    if (entry->legacy_two_bank) {
+      fprintf(stderr,
+              "LOOM_SERVE_TWO_BANK is deprecated; select group_mode in the "
+              "deployment.\n");
+    }
     iree_host_size_t index = 0;
     status = loom_serve_registry_register(registry, entry, &index);
   }

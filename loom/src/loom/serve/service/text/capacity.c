@@ -95,6 +95,21 @@ iree_status_t loom_serve_text_model_prepare_resize(
         model->context_capacity, model->state.cache.capacity,
         model->host_allocator, &resize->storage);
   }
+  if (iree_status_is_ok(status) && model->two_bank) {
+    const uint32_t slots[] = {0, 2, 4, 5};
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(slots); ++i) {
+      const uint8_t* record =
+          resize->storage.bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data +
+          slots[i] * 24;
+      if (iree_unaligned_load_le_u64(record) !=
+          iree_hal_buffer_byte_length(model->banks[0].roots[i])) {
+        status =
+            iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "group resize must preserve bank packet geometry");
+        break;
+      }
+    }
+  }
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
   if (iree_status_is_ok(status)) {

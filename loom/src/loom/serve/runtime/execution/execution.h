@@ -169,16 +169,6 @@ iree_status_t loom_serve_execution_feedback_wait(
 // raw allocation bookkeeping transfers on release to the shared workspace.
 iree_status_t loom_serve_execution_drain(loom_serve_execution_t* execution);
 
-// Experimental two-bank prefill grouping. Between begin and end, executes,
-// dispatches, deallocas and feedback downloads are deferred instead of queued;
-// allocas and transfers still queue immediately. End submits the deferred
-// executes as one timeline step through an optional process-global
-// `loom_hybrid_execute_group` hook (resolved with dlsym), or sequentially when
-// no hook exists, and then queues the deferred deallocas and feedback in their
-// original order.
-void loom_serve_execution_begin_group(loom_serve_execution_t* execution);
-iree_status_t loom_serve_execution_end_group(loom_serve_execution_t* execution);
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif

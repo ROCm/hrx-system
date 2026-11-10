@@ -7,6 +7,7 @@
 #ifndef LOOM_SERVE_SERVICE_TEXT_MODEL_INSTANCE_H_
 #define LOOM_SERVE_SERVICE_TEXT_MODEL_INSTANCE_H_
 
+#include "loom/serve/service/text/bank.h"
 #include "loom/serve/service/text/control.h"
 #include "loom/serve/service/text/media_epoch.h"
 #include "loom/serve/service/text/model.h"
@@ -105,11 +106,23 @@ struct loom_serve_text_model_t {
     loom_serve_text_epoch_flags_t flags;
     // Exact mixed-input host plan and packet records; empty for text-only.
     loom_serve_text_media_epoch_t media;
-    // Known tokens already published by the first bank of a two-bank pair.
-    iree_host_size_t paired_known;
+
   } invocation;
-  // Experimental second prefill bank: residual, metadata, tokens, outputs.
-  iree_hal_buffer_t* bank[4];
+  // Immutable configuration and retained source-aware provider for this model.
+  bool two_bank;
+  loom_serve_plan_provider_v1_t plan_provider;
+  loom_serve_execution_plan_t* execution_plan;
+  loom_serve_text_bank_t banks[2];
+  struct {
+    iree_vm_function_t describe;
+    iree_vm_function_t encode;
+    iree_vm_function_t publish;
+    loom_serve_execution_group_t* pending;
+    iree_host_size_t row_index;
+    uint32_t known_count;
+    bool selects;
+    bool active;
+  } prefill_group;
 };
 
 struct loom_serve_text_row_t {

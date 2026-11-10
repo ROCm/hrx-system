@@ -273,11 +273,13 @@ def _file(
         record,
         path,
         ("path",),
-        ("origin", "format", "options", "data")
-        if provider
-        else ("origin", "format", "transform")
-        if parameter
-        else ("origin", "format"),
+        (
+            ("origin", "format", "options", "data")
+            if provider
+            else (
+                ("origin", "format", "transform") if parameter else ("origin", "format")
+            )
+        ),
     )
     _path(record["path"], path + ".path")
     if "format" in record:
@@ -398,8 +400,11 @@ class ModelCard:
 
     def _validate(self) -> None:
         doc = _mapping(self._document, "$")
-        if type(doc.get("schema_version")) is not int or doc["schema_version"] != 1:
-            _fail("$.schema_version", "unsupported model-card version; supported: 1")
+        if type(doc.get("schema_version")) is not int or doc["schema_version"] not in (
+            1,
+            2,
+        ):
+            _fail("$.schema_version", "unsupported model-card version; supported: 1, 2")
         _object(
             doc,
             "$",
@@ -516,6 +521,19 @@ class ModelCard:
                 for key in ("options", "execution"):
                     _mapping(
                         component.get(key, {}), component_path + "." + key, empty=True
+                    )
+            execution = preset.get("execution", {})
+            if "group_mode" in execution or "plan_provider" in execution:
+                if doc["schema_version"] != 2:
+                    _fail(
+                        path + ".execution",
+                        "group execution requires model-card version 2",
+                    )
+                if execution.get("group_mode", "single") not in ("single", "two_bank"):
+                    _fail(path + ".execution.group_mode", "expected single or two_bank")
+                if "plan_provider" in execution:
+                    _string(
+                        execution["plan_provider"], path + ".execution.plan_provider"
                     )
             if "partition" in preset:
                 _string(preset["partition"], path + ".partition")

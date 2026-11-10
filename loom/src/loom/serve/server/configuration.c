@@ -239,6 +239,8 @@ typedef enum loom_serve_model_definition_field_e {
   DEFINITION_MAX_TOKENS,
   DEFINITION_DRAFT_DEPTH,
   DEFINITION_CONTINUATION_EPOCHS,
+  DEFINITION_GROUP_MODE,
+  DEFINITION_PLAN_PROVIDER,
   DEFINITION_CHECKPOINT,
   DEFINITION_ADAPTER,
   DEFINITION_WIDTH,
@@ -309,6 +311,25 @@ static iree_status_t loom_serve_model_configuration_text(
   IREE_RETURN_IF_ERROR(loom_serve_model_configuration_size(
       &fields[DEFINITION_CACHE_TARGET_BYTES], 0, IREE_HOST_SIZE_MAX - 1,
       &text->cache_target_bytes));
+  if (fields[DEFINITION_GROUP_MODE].value.data) {
+    iree_string_view_t mode = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(loom_serve_model_configuration_string(
+        &fields[DEFINITION_GROUP_MODE], host_allocator, &mode));
+    const bool single = iree_string_view_equal(mode, IREE_SV("single"));
+    const bool two_bank = iree_string_view_equal(mode, IREE_SV("two_bank"));
+    iree_allocator_free(host_allocator, (void*)mode.data);
+    if (!single && !two_bank) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "group_mode must be single or two_bank");
+    }
+    text->group_mode = two_bank ? LOOM_SERVE_GROUP_MODE_TWO_BANK
+                                : LOOM_SERVE_GROUP_MODE_SINGLE;
+  }
+  if (fields[DEFINITION_PLAN_PROVIDER].value.data) {
+    IREE_RETURN_IF_ERROR(loom_serve_model_configuration_string(
+        &fields[DEFINITION_PLAN_PROVIDER], host_allocator,
+        &text->plan_provider));
+  }
   const iree_host_size_t prefix_capacity =
       text->prefix_cache_capacity == LOOM_SERVE_TEXT_CACHE_AUTOMATIC
           ? 0
@@ -416,6 +437,12 @@ static iree_status_t loom_serve_model_configuration_definition_parse(
                                  .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
       [DEFINITION_DRAFT_DEPTH] = {"draft_depth", IREE_JSON_VALUE_TYPE_NUMBER,
                                   .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
+      [DEFINITION_GROUP_MODE] = {"group_mode", IREE_JSON_VALUE_TYPE_STRING,
+                                 .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
+      [DEFINITION_PLAN_PROVIDER] = {"plan_provider",
+                                    IREE_JSON_VALUE_TYPE_STRING,
+                                    .kinds =
+                                        (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
       [DEFINITION_CONTINUATION_EPOCHS] =
           {"continuation_epochs", IREE_JSON_VALUE_TYPE_NUMBER,
            .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
@@ -507,6 +534,13 @@ static iree_status_t loom_serve_model_configuration_definition_parse(
     IREE_RETURN_IF_ERROR(iree_json_enumerate_object_typed(
         selection->execution, loom_serve_model_configuration_field_visit,
         &default_context));
+    if (selection->schema_version == 1 &&
+        (defaults[DEFINITION_GROUP_MODE].value.data ||
+         defaults[DEFINITION_PLAN_PROVIDER].value.data)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "group execution defaults require model schema version 2");
+    }
     const int facts[] = {DEFINITION_KIND,    DEFINITION_PREPARE,
                          DEFINITION_CONTROL, DEFINITION_SOURCES,
                          DEFINITION_WEIGHTS, DEFINITION_TOKENIZER,
@@ -666,6 +700,7 @@ void loom_serve_model_configuration_deinitialize(
   if (model->kind == LOOM_SERVE_MODEL_KIND_TEXT ||
       model->kind == LOOM_SERVE_MODEL_KIND_SEQUENCE) {
     iree_allocator_free(host_allocator, (void*)model->text.weights.data);
+    iree_allocator_free(host_allocator, (void*)model->text.plan_provider.data);
     iree_allocator_free(host_allocator, (void*)model->text.tokenizer.data);
     iree_allocator_free(host_allocator, (void*)model->text.image.prepare.data);
     iree_allocator_free(host_allocator, (void*)model->text.image.control.data);
@@ -878,6 +913,7 @@ iree_status_t loom_serve_model_configuration_resolve(
       out_model);
   loom_serve_sources_free(sources, host_allocator);
   if (iree_status_is_ok(status)) {
+    out_model->legacy_two_bank = model->legacy_two_bank;
     out_model->device_index = model->device_index;
     out_model->pool_index = model->pool_index;
     if (!out_model->device.size && model->device.size) {

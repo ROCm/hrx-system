@@ -29,6 +29,7 @@ loom_cc_library(
         "//loom/binding/c:task_queue",
         "//loom/binding/c/target/vm",
         "//loom/src/loom/serve/runtime/program:native_artifact",
+        "//loom/src/loom/serve/runtime/execution:plan",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/async/util:proactor_thread",
         "//runtime/src/iree/base",
@@ -59,6 +60,7 @@ loom_cc_test(
     deps = [
         ":host",
         "//loom/binding/c:task_pool",
+        "//loom/src/loom/serve/runtime/execution:plan",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

@@ -48,8 +48,14 @@ loom_cc_library(
 
 loom_cc_library(
     name = "execution",
-    srcs = ["execution.c"],
-    hdrs = ["execution.h"],
+    srcs = [
+        "execution.c",
+        "group.c",
+    ],
+    hdrs = [
+        "execution.h",
+        "group.h",
+    ],
     deps = [
         ":queues",
         ":retirement",
@@ -128,4 +134,21 @@ loom_cc_library(
         "//runtime/src/iree/testing:gtest",
     ],
     alwayslink = True,
+)
+
+loom_cc_library(
+    name = "plan",
+    srcs = ["plan.c"],
+    hdrs = ["plan.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "plan_test",
+    srcs = ["plan_test.cc"],
+    deps = [
+        ":plan",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )
