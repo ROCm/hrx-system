@@ -23,6 +23,10 @@ extern "C" {
 // backing retains exact native geometry caches until their raw roots retire.
 typedef struct loom_serve_workspace_t loom_serve_workspace_t;
 
+// Borrowed sealed topology, retained by the workspace through its final owner.
+iree_hal_device_group_t* loom_serve_workspace_group(
+    const loom_serve_workspace_t* workspace);
+
 // Retains the sealed group and an already qualified backing pool. The caller
 // selects the pool's complete access scope and a sanitizer policy compatible
 // with all of its consumers. The policy is copied and HAL qualifies it when

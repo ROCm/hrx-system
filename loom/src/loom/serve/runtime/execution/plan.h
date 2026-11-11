@@ -25,25 +25,69 @@ typedef enum loom_serve_plan_phase_e {
   LOOM_SERVE_PLAN_RESIDUAL = 2,
 } loom_serve_plan_phase_t;
 
+// Version 2 separates disjoint output-column producers from their consumers.
+// Prefix includes activation packing. FFN merge concatenates gate/up columns,
+// applies activation and packs the down input. Down merge concatenates output
+// columns before residual/norm/capture. Each merge waits for both producers.
+typedef enum loom_serve_plan_ffn_phase_e {
+  LOOM_SERVE_PLAN_FFN_PREFIX = 0,
+  LOOM_SERVE_PLAN_FFN_PRIMARY,
+  LOOM_SERVE_PLAN_FFN_SECONDARY,
+  LOOM_SERVE_PLAN_FFN_MERGE,
+  LOOM_SERVE_PLAN_DOWN_PRIMARY,
+  LOOM_SERVE_PLAN_DOWN_SECONDARY,
+  LOOM_SERVE_PLAN_DOWN_MERGE,
+  LOOM_SERVE_PLAN_FFN_RESIDUAL,
+  LOOM_SERVE_PLAN_FFN_PHASE_COUNT,
+} loom_serve_plan_ffn_phase_t;
+
+// Version 3 consumes each resident projection before starting the next one.
+// Each projection forks into primary/remainder and secondary/resident work,
+// then joins at its consumer. Activation prepares the down input.
+enum {
+  LOOM_SERVE_PLAN_RESIDENT_PREFIX = 0,
+  LOOM_SERVE_PLAN_GATE_PRIMARY,
+  LOOM_SERVE_PLAN_GATE_SECONDARY,
+  LOOM_SERVE_PLAN_GATE_CONSUME,
+  LOOM_SERVE_PLAN_UP_PRIMARY,
+  LOOM_SERVE_PLAN_UP_SECONDARY,
+  LOOM_SERVE_PLAN_UP_CONSUME,
+  LOOM_SERVE_PLAN_ACTIVATION,
+  LOOM_SERVE_PLAN_RESIDENT_DOWN_PRIMARY,
+  LOOM_SERVE_PLAN_RESIDENT_DOWN_SECONDARY,
+  LOOM_SERVE_PLAN_RESIDENT_DOWN_CONSUME,
+  LOOM_SERVE_PLAN_RESIDENT_RESIDUAL,
+  LOOM_SERVE_PLAN_RESIDENT_PHASE_COUNT,
+};
+
 // Source-owned semantic table, indexed [shape][layer][phase]. UINT32_MAX
-// omits an FFN/residual phase; a prefix is required in every layer. Leaves use
+// omits an optional phase; a prefix is required in every supported layer.
+// An eight-phase shape with every stage omitted has no grouped implementation
+// and is rejected by selection before encoding. Partial shapes are invalid.
+// Leaves use
 // the source extension's declared bank/state resource ABI, never kernel names.
 typedef struct loom_serve_plan_description_t {
   iree_host_size_t shape_count;
   iree_host_size_t layer_count;
   iree_host_size_t stage_count;
   const uint32_t* stages;
+  // Zero or 3 selects ordered phases, 8 selects FFN fork/join, and 12 selects
+  // resident projections. UINT32_MAX omits an optional phase. A projection
+  // producer requires its consumer; versions 2/3 require a residual leaf.
+  iree_host_size_t phase_count;
 } loom_serve_plan_description_t;
 
 typedef struct loom_serve_execution_plan_t loom_serve_execution_plan_t;
 
-// Produces an immutable primary-only plan. Validation and cloning happen here,
+// Produces an immutable semantic plan. Validation and cloning happen here,
 // before numerical enqueue. Refcounted plans retain source tables by value.
 iree_status_t loom_serve_execution_plan_create(
     const loom_serve_plan_description_t* description, bool interleave,
     iree_allocator_t allocator, loom_serve_execution_plan_t** out_plan);
 void loom_serve_execution_plan_retain(loom_serve_execution_plan_t* plan);
 void loom_serve_execution_plan_release(loom_serve_execution_plan_t* plan);
+bool loom_serve_execution_plan_equal(const loom_serve_execution_plan_t* lhs,
+                                     const loom_serve_execution_plan_t* rhs);
 iree_host_size_t loom_serve_execution_plan_node_capacity(
     const loom_serve_execution_plan_t* plan);
 
@@ -54,6 +98,20 @@ typedef iree_status_t (*loom_serve_plan_emit_fn_t)(void* self, uint32_t bank,
 iree_status_t loom_serve_execution_plan_encode(
     const loom_serve_execution_plan_t* plan, iree_host_size_t first_shape,
     iree_host_size_t second_shape, loom_serve_plan_emit_fn_t emit, void* self);
+
+// Emits explicit dependencies using the ordinals returned by the caller.
+// Version 1 retains its total ordering. Version 2 permits both FFN branches
+// to overlap and orders bank B's prefix after bank A's same-layer prefix.
+// Every callback runs before numerical submission. Out-node is set only on
+// success, and a callback failure stops encoding immediately.
+typedef iree_status_t (*loom_serve_plan_emit_dag_fn_t)(
+    void* self, uint32_t bank, uint32_t stage,
+    iree_host_size_t predecessor_count, const uint32_t* predecessors,
+    uint32_t* out_node);
+iree_status_t loom_serve_execution_plan_encode_dag(
+    const loom_serve_execution_plan_t* plan, iree_host_size_t first_shape,
+    iree_host_size_t second_shape, loom_serve_plan_emit_dag_fn_t emit,
+    void* self);
 
 // Immutable chunk-boundary facts. Selection is pure and cannot enqueue work,
 // mutate source state, or call back into the model owner.

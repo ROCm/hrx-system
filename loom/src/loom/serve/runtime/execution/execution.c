@@ -73,6 +73,12 @@ bool loom_serve_execution_is_retired(loom_serve_execution_t* execution) {
   return loom_serve_retirement_is_idle(&execution->consumers);
 }
 
+bool loom_serve_execution_shares_group(loom_serve_execution_t* lhs,
+                                       loom_serve_execution_t* rhs) {
+  return loom_serve_workspace_group(lhs->workspace) ==
+         loom_serve_workspace_group(rhs->workspace);
+}
+
 iree_status_t loom_serve_execution_reserve_workspace(
     loom_serve_execution_t* execution, iree_device_size_t length,
     iree_device_size_t alignment) {
@@ -582,6 +588,8 @@ iree_status_t loom_serve_execution_validate_group_node(
   const iree_hal_queue_family_t* dispatch =
       iree_hal_queue_family(execution->binding.dispatch);
   switch (node->kind) {
+    case LOOM_SERVE_GROUP_BARRIER:
+      return iree_ok_status();
     case LOOM_SERVE_GROUP_EXECUTE:
       if (iree_hal_command_buffer_queue_family(node->command_buffer) !=
           dispatch) {
@@ -644,10 +652,13 @@ iree_status_t loom_serve_execution_submit_group(
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
     uint64_t next = execution->work.submitted_value + 1;
     iree_hal_semaphore_t* semaphores[] = {execution->work.semaphore,
-                                          execution->feedback.semaphore};
+                                          execution->feedback.semaphore,
+                                          nodes[i].wait_semaphore};
     uint64_t values[] = {execution->work.submitted_value,
-                         execution->feedback.submitted_value};
-    iree_hal_semaphore_list_t waits = {2, semaphores, values};
+                         execution->feedback.submitted_value,
+                         nodes[i].wait_value};
+    iree_hal_semaphore_list_t waits = {nodes[i].wait_semaphore ? 3u : 2u,
+                                       semaphores, values};
     iree_hal_semaphore_list_t signals = {1, &execution->work.semaphore, &next};
     const loom_serve_group_node_t* node = &nodes[i];
     if (execution->rejected_group_node == i + 1) {
@@ -657,6 +668,11 @@ iree_status_t loom_serve_execution_submit_group(
       break;
     }
     switch (node->kind) {
+      case LOOM_SERVE_GROUP_BARRIER:
+        status =
+            iree_hal_queue_barrier(execution->binding.dispatch, waits, signals,
+                                   NULL, IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+        break;
       case LOOM_SERVE_GROUP_EXECUTE:
         status = iree_hal_queue_execute(
             execution->binding.dispatch, waits, signals, node->command_buffer,
@@ -687,6 +703,201 @@ iree_status_t loom_serve_execution_submit_group(
       .semaphores = {execution->work.semaphore, execution->feedback.semaphore},
       .values = {execution->work.submitted_value,
                  execution->feedback.submitted_value}};
+  out_submission->lane_count = 1;
+  out_submission->lanes[0] = out_submission->frontier;
+  out_submission->joined = iree_status_is_ok(status);
   iree_slim_mutex_unlock(&execution->mutex);
+  return status;
+}
+
+iree_status_t loom_serve_execution_submit_multi_group(
+    iree_host_size_t lane_count, loom_serve_execution_t* const* lanes,
+    iree_host_size_t count, const loom_serve_group_node_t* nodes,
+    loom_serve_group_dependency_t* dependencies,
+    loom_serve_group_submission_t* out_submission) {
+  *out_submission = (loom_serve_group_submission_t){0};
+  if (!lane_count || lane_count > LOOM_SERVE_GROUP_MAX_LANES || !count ||
+      count > 65536) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid multi-lane group geometry");
+  }
+  iree_host_size_t ordered[LOOM_SERVE_GROUP_MAX_LANES];
+  iree_host_size_t required[LOOM_SERVE_GROUP_MAX_LANES] = {1};
+  for (iree_host_size_t i = 0; i < lane_count; ++i) {
+    if (!lanes[i] || !loom_serve_execution_shares_group(lanes[0], lanes[i])) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "group lanes must share one HAL group");
+    }
+    iree_host_size_t j = i;
+    while (j && (uintptr_t)lanes[ordered[j - 1]] > (uintptr_t)lanes[i]) {
+      ordered[j] = ordered[j - 1];
+      --j;
+    }
+    ordered[j] = i;
+    for (iree_host_size_t k = 0; k < i; ++k) {
+      if (lanes[k] == lanes[i]) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "duplicate execution lane");
+      }
+    }
+  }
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    const loom_serve_group_dependency_t* dependency = &dependencies[i];
+    if (dependency->lane >= lane_count ||
+        dependency->count > LOOM_SERVE_GROUP_MAX_LANES) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "invalid group lane or dependency count");
+    }
+    for (iree_host_size_t j = 0; j < dependency->count; ++j) {
+      if (dependency->predecessors[j] >= i) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "group dependency is not topological");
+      }
+      if (dependency->payload_mask & (1u << j)) {
+        const uint32_t producer = dependency->predecessors[j];
+        if (dependencies[producer].lane == dependency->lane ||
+            !nodes[producer].payload_semaphore ||
+            !nodes[producer].payload_value ||
+            nodes[producer].payload_value > IREE_HAL_SEMAPHORE_MAX_VALUE) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "invalid payload dependency");
+        }
+        for (iree_host_size_t k = 0; k < lane_count; ++k) {
+          if (nodes[producer].payload_semaphore == lanes[k]->work.semaphore ||
+              nodes[producer].payload_semaphore ==
+                  lanes[k]->feedback.semaphore) {
+            return iree_make_status(
+                IREE_STATUS_INVALID_ARGUMENT,
+                "payload readiness must be independent of lane completion");
+          }
+        }
+      }
+    }
+    ++required[dependency->lane];
+  }
+  // Every group locks shared lanes in the same order, including when two
+  // model owners provide opposite primary/secondary orderings.
+  for (iree_host_size_t i = 0; i < lane_count; ++i) {
+    iree_slim_mutex_lock(&lanes[ordered[i]]->mutex);
+  }
+  iree_status_t status = iree_ok_status();
+  iree_hal_semaphore_t* semaphores[3 * LOOM_SERVE_GROUP_MAX_LANES + 1];
+  uint64_t initial[2 * LOOM_SERVE_GROUP_MAX_LANES];
+  for (iree_host_size_t i = 0; i < lane_count; ++i) {
+    loom_serve_execution_t* lane = lanes[i];
+    semaphores[2 * i] = lane->work.semaphore;
+    semaphores[2 * i + 1] = lane->feedback.semaphore;
+    initial[2 * i] = lane->work.submitted_value;
+    initial[2 * i + 1] = lane->feedback.submitted_value;
+    if (iree_status_is_ok(status) && lane->failed_group) {
+      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "group lane has a partially accepted failure");
+    }
+    if (iree_status_is_ok(status) &&
+        required[i] > IREE_HAL_SEMAPHORE_MAX_VALUE - initial[2 * i]) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "group lane timeline is exhausted");
+    }
+  }
+  for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+    loom_serve_group_dependency_t* dependency = &dependencies[i];
+    loom_serve_execution_t* lane = lanes[dependency->lane];
+    uint64_t values[3 * LOOM_SERVE_GROUP_MAX_LANES + 1];
+    memcpy(values, initial, 2 * lane_count * sizeof(*values));
+    values[2 * dependency->lane] = lane->work.submitted_value;
+    iree_host_size_t wait_count = 2 * lane_count;
+    for (iree_host_size_t j = 0; j < dependency->count; ++j) {
+      const loom_serve_group_dependency_t* predecessor =
+          &dependencies[dependency->predecessors[j]];
+      if (dependency->payload_mask & (1u << j)) {
+        const loom_serve_group_node_t* producer =
+            &nodes[dependency->predecessors[j]];
+        semaphores[wait_count] = producer->payload_semaphore;
+        values[wait_count++] = producer->payload_value;
+      } else {
+        values[2 * predecessor->lane] =
+            iree_max(values[2 * predecessor->lane], predecessor->value);
+      }
+    }
+    if (nodes[i].wait_semaphore) {
+      semaphores[wait_count] = nodes[i].wait_semaphore;
+      values[wait_count++] = nodes[i].wait_value;
+    }
+    const iree_hal_semaphore_list_t waits = {wait_count, semaphores, values};
+    uint64_t next = lane->work.submitted_value + 1;
+    const iree_hal_semaphore_list_t signals = {1, &lane->work.semaphore, &next};
+    const loom_serve_group_node_t* node = &nodes[i];
+    if (lane->rejected_group_node == i + 1) {
+      lane->rejected_group_node = 0;
+      status = iree_make_status(IREE_STATUS_INTERNAL,
+                                "injected queue rejection for testing");
+      break;
+    }
+    switch (node->kind) {
+      case LOOM_SERVE_GROUP_BARRIER:
+        status = iree_hal_queue_barrier(lane->binding.dispatch, waits, signals,
+                                        NULL, IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+        break;
+      case LOOM_SERVE_GROUP_EXECUTE:
+        status = iree_hal_queue_execute(lane->binding.dispatch, waits, signals,
+                                        node->command_buffer, node->bindings,
+                                        IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
+        break;
+      case LOOM_SERVE_GROUP_DISPATCH:
+        status = iree_hal_queue_dispatch(
+            lane->binding.dispatch, waits, signals, node->executable,
+            node->function, node->config, iree_const_byte_span_empty(),
+            node->refs, NULL, IREE_HAL_DISPATCH_FLAG_NONE);
+        break;
+      case LOOM_SERVE_GROUP_TRANSFER:
+        status = iree_hal_queue_transfer(lane->binding.transfer, waits, signals,
+                                         1, &node->transfer, NULL);
+        break;
+      default:
+        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "invalid group node");
+    }
+    if (iree_status_is_ok(status)) {
+      lane->work.submitted_value = next;
+      dependency->value = next;
+      ++out_submission->accepted_count;
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    uint64_t values[2 * LOOM_SERVE_GROUP_MAX_LANES];
+    for (iree_host_size_t i = 0; i < lane_count; ++i) {
+      values[2 * i] = lanes[i]->work.submitted_value;
+      values[2 * i + 1] = lanes[i]->feedback.submitted_value;
+    }
+    uint64_t next = lanes[0]->work.submitted_value + 1;
+    if (lanes[0]->rejected_group_node == count + 1) {
+      lanes[0]->rejected_group_node = 0;
+      status = iree_make_status(IREE_STATUS_INTERNAL,
+                                "injected terminal join rejection for testing");
+    } else {
+      status = iree_hal_queue_barrier(
+          lanes[0]->binding.dispatch,
+          (iree_hal_semaphore_list_t){2 * lane_count, semaphores, values},
+          (iree_hal_semaphore_list_t){1, &lanes[0]->work.semaphore, &next},
+          NULL, IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+    }
+    if (iree_status_is_ok(status)) {
+      lanes[0]->work.submitted_value = next;
+      out_submission->joined = true;
+    }
+  }
+  out_submission->lane_count = lane_count;
+  for (iree_host_size_t i = 0; i < lane_count; ++i) {
+    lanes[i]->failed_group |=
+        !iree_status_is_ok(status) && out_submission->accepted_count != 0;
+    out_submission->lanes[i] = (loom_serve_execution_frontier_t){
+        .semaphores = {lanes[i]->work.semaphore, lanes[i]->feedback.semaphore},
+        .values = {lanes[i]->work.submitted_value,
+                   lanes[i]->feedback.submitted_value}};
+  }
+  out_submission->frontier = out_submission->lanes[0];
+  for (iree_host_size_t i = lane_count; i > 0; --i) {
+    iree_slim_mutex_unlock(&lanes[ordered[i - 1]]->mutex);
+  }
   return status;
 }

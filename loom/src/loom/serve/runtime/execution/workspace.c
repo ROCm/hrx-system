@@ -92,6 +92,11 @@ typedef enum loom_serve_workspace_collection_mode_e {
   WORKSPACE_COLLECTION_COMPLETE,
 } loom_serve_workspace_collection_mode_t;
 
+iree_hal_device_group_t* loom_serve_workspace_group(
+    const loom_serve_workspace_t* workspace) {
+  return workspace->group;
+}
+
 // The scope owns one reference. Uniqueness proves the queue's allocation and
 // deallocation records have retired, independently of semaphore readiness.
 static bool loom_serve_workspace_root_release(

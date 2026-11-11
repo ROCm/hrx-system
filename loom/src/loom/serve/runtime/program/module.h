@@ -27,6 +27,10 @@ typedef struct loom_serve_stage_t {
   // Retained native stage, mutually exclusive with command_buffer. Direct
   // stages have no compiler-planned global transient workspace.
   loom_serve_dispatch_t* dispatch;
+  // Optional exact lane for this leaf. NULL uses the module's primary lane.
+  // A foreign leaf is followed by a primary join, preserving scalar work
+  // tokens.
+  loom_serve_execution_t* execution;
 } loom_serve_stage_t;
 
 // Cold capabilities shared by every invocation of one model program.
