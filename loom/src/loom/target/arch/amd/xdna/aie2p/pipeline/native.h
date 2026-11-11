@@ -198,7 +198,7 @@ typedef struct loom_aie2p_native_dma_path_t {
   loom_aie2p_native_tile_t* local;
   // External endpoint.
   loom_aie2p_native_tile_t* shim;
-  // Local direction-specific engine.
+  // Local direction-specific engine, UINT8_MAX before physical selection.
   uint8_t local_engine;
   // Shim direction-specific engine.
   uint8_t shim_engine;
@@ -310,6 +310,8 @@ typedef struct loom_aie2p_native_transfer_t {
   struct loom_aie2p_native_transfer_t* task_next;
   // Physical task selected for this transfer's compatible group partition.
   loom_aie2p_native_transfer_task_t* task;
+  // Tasks whose source group closes here, in endpoint allocation order.
+  loom_aie2p_native_transfer_task_t* closed_tasks;
   // Canonical admitted copy request and its group index.
   const loom_kernel_async_transfer_t* source;
   // Wait that retires this transfer's group.
@@ -353,6 +355,8 @@ typedef struct loom_aie2p_native_transfer_t {
 struct loom_aie2p_native_transfer_task_t {
   // Next task in the worker's retained issue order.
   loom_aie2p_native_transfer_task_t* next;
+  // Next task closed at the same transfer, in tile/direction order.
+  loom_aie2p_native_transfer_task_t* group_next;
   // First transfer in this task's descriptor order.
   loom_aie2p_native_transfer_t* first_transfer;
   // Last transfer, retained while selection appends compatible members.
