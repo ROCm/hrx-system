@@ -531,20 +531,45 @@ iree_status_t loom_value_fact_table_define_exact_scalar_origin(
   return iree_ok_status();
 }
 
-iree_status_t loom_value_fact_table_define_numeric_identity(
-    loom_value_fact_table_t* table, loom_value_id_t value_id,
-    loom_value_id_t source_value_id) {
-  const loom_value_fact_exact_scalar_origin_t origin = {
-      .source_value_id = source_value_id == LOOM_VALUE_ID_INVALID
-                             ? LOOM_VALUE_ID_INVALID
-                             : loom_value_fact_table_query_numeric_identity(
-                                   table, source_value_id),
-  };
+iree_status_t loom_value_fact_table_define_operand_identity(
+    loom_fact_context_t* context, uint16_t result_ordinal,
+    int32_t operand_ordinal) {
+  if (!context->publication) {
+    return iree_ok_status();
+  }
+  loom_value_fact_table_t* table = context->table;
+  const loom_value_fact_origin_publication_t* publication =
+      context->publication;
+  const loom_value_id_t value_id =
+      loom_op_const_results(publication->op)[result_ordinal];
+  loom_value_id_t source = LOOM_VALUE_ID_INVALID;
+  loom_value_fact_exact_scalar_origin_t origin =
+      loom_value_fact_exact_scalar_origin_invalid();
+  if (operand_ordinal >= 0) {
+    source = loom_op_const_operands(publication->op)[operand_ordinal];
+    origin.source_value_id = loom_value_fact_table_query_numeric_identity(
+        table, publication->numeric_operands
+                   ? publication->numeric_operands[operand_ordinal]
+                   : source);
+  }
   IREE_RETURN_IF_ERROR(loom_value_fact_table_define_exact_scalar_origin(
       table, value_id, origin));
   return loom_value_fact_integer_relations_forward_alias(
-      table, source_value_id, value_id,
-      table->context.publication ? table->context.publication->changed : NULL);
+      table, source, value_id, publication->changed);
+}
+
+iree_status_t loom_value_fact_table_define_binary_identity(
+    loom_fact_context_t* context, const loom_value_facts_t* operand_facts,
+    int64_t neutral, bool symmetric) {
+  int32_t ordinal = -1;
+  if (loom_value_facts_is_exact(operand_facts[1]) &&
+      operand_facts[1].range_lo == neutral) {
+    ordinal = 0;
+  } else if (symmetric && loom_value_facts_is_exact(operand_facts[0]) &&
+             operand_facts[0].range_lo == neutral) {
+    ordinal = 1;
+  }
+  return loom_value_fact_table_define_operand_identity(context, 0, ordinal);
 }
 
 bool loom_value_fact_table_query_exact_scalar_origin(
@@ -930,8 +955,12 @@ void loom_value_fact_table_record_origin(loom_value_fact_table_t* table,
     return;
   }
   const loom_value_t* value = loom_module_value(publication->module, value_id);
-  IREE_ASSERT(loom_value_def_op(value) == publication->op);
   const uint16_t result_index = loom_value_def_index(value);
+  // A speculative operation may remap operands in a private copy while
+  // retaining the original result tuple. Publication belongs to that tuple,
+  // independently of the address of the operation being evaluated.
+  IREE_ASSERT(result_index < publication->op->result_count);
+  IREE_ASSERT(loom_op_const_results(publication->op)[result_index] == value_id);
   // A callback chooses its final proof before publishing. Reporting an
   // intermediate alternative would prevent unchanged inference from converging.
   IREE_ASSERT(!(publication->published[result_index] & family));

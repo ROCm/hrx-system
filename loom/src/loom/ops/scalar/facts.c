@@ -48,7 +48,7 @@
     return iree_ok_status();                                             \
   }
 
-#define WIDTH_BINARY_FACTS(name, transfer_fn)                          \
+#define WIDTH_BINARY_FACTS(name, transfer_fn, ...)                     \
   iree_status_t name(loom_fact_context_t* context,                     \
                      const loom_module_t* module, const loom_op_t* op, \
                      const loom_value_facts_t* operand_facts,          \
@@ -57,10 +57,11 @@
         loom_scalar_result_element_type(module, op));                  \
     transfer_fn(&operand_facts[0], &operand_facts[1], bit_count,       \
                 &result_facts[0]);                                     \
+    __VA_ARGS__                                                        \
     return iree_ok_status();                                           \
   }
 
-#define MODULAR_BINARY_FACTS(name, mathematical_fn, modular_fn)                \
+#define MODULAR_BINARY_FACTS(name, mathematical_fn, modular_fn, ...)           \
   iree_status_t name(loom_fact_context_t* context,                             \
                      const loom_module_t* module, const loom_op_t* op,         \
                      const loom_value_facts_t* operand_facts,                  \
@@ -74,6 +75,7 @@
       modular_fn(&operand_facts[0], &operand_facts[1], bit_count,              \
                  &result_facts[0]);                                            \
     }                                                                          \
+    __VA_ARGS__                                                                \
     return iree_ok_status();                                                   \
   }
 
@@ -160,9 +162,13 @@ iree_status_t loom_scalar_constant_facts(
 //===----------------------------------------------------------------------===//
 
 MODULAR_BINARY_FACTS(loom_scalar_addi_facts, loom_value_facts_addi,
-                     loom_value_facts_addi_modular)
+                     loom_value_facts_addi_modular,
+                     return loom_value_fact_table_define_binary_identity(
+                         context, operand_facts, 0, true);)
 MODULAR_BINARY_FACTS(loom_scalar_subi_facts, loom_value_facts_subi,
-                     loom_value_facts_subi_modular)
+                     loom_value_facts_subi_modular,
+                     return loom_value_fact_table_define_binary_identity(
+                         context, operand_facts, 0, false);)
 
 static iree_status_t loom_scalar_unsigned_carry_borrow_facts(
     const loom_module_t* module, const loom_op_t* op,
@@ -184,22 +190,33 @@ iree_status_t loom_scalar_addcarryui_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts) {
-  return loom_scalar_unsigned_carry_borrow_facts(
-      module, op, operand_facts, /*is_subtraction=*/false, result_facts);
+  IREE_RETURN_IF_ERROR(loom_scalar_unsigned_carry_borrow_facts(
+      module, op, operand_facts, /*is_subtraction=*/false, result_facts));
+  return loom_value_fact_table_define_binary_identity(context, operand_facts, 0,
+                                                      true);
 }
 
 iree_status_t loom_scalar_subborrowui_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts) {
-  return loom_scalar_unsigned_carry_borrow_facts(
-      module, op, operand_facts, /*is_subtraction=*/true, result_facts);
+  IREE_RETURN_IF_ERROR(loom_scalar_unsigned_carry_borrow_facts(
+      module, op, operand_facts, /*is_subtraction=*/true, result_facts));
+  return loom_value_fact_table_define_binary_identity(context, operand_facts, 0,
+                                                      false);
 }
 
 MODULAR_BINARY_FACTS(loom_scalar_muli_facts, loom_value_facts_muli,
-                     loom_value_facts_muli_modular)
-BINARY_FACTS(loom_scalar_divsi_facts, loom_value_facts_divsi)
-WIDTH_BINARY_FACTS(loom_scalar_divui_facts, loom_value_facts_divui)
+                     loom_value_facts_muli_modular,
+                     return loom_value_fact_table_define_binary_identity(
+                         context, operand_facts, 1, true);)
+BINARY_FACTS(loom_scalar_divsi_facts, loom_value_facts_divsi,
+             return loom_value_fact_table_define_binary_identity(context,
+                                                                 operand_facts,
+                                                                 1, false);)
+WIDTH_BINARY_FACTS(loom_scalar_divui_facts, loom_value_facts_divui,
+                   return loom_value_fact_table_define_binary_identity(
+                       context, operand_facts, 1, false);)
 
 static iree_status_t loom_scalar_publish_remainder_bound(
     loom_fact_context_t* context, const loom_op_t* op, uint16_t result_index,
@@ -254,6 +271,8 @@ iree_status_t loom_scalar_divremsi_facts(
                          &result_facts[0]);
   loom_value_facts_remsi(&operand_facts[0], &operand_facts[1],
                          &result_facts[1]);
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_define_binary_identity(
+      context, operand_facts, 1, false));
   return loom_scalar_publish_remainder_bound(context, op, 1, operand_facts,
                                              result_facts);
 }
@@ -268,6 +287,8 @@ iree_status_t loom_scalar_divremui_facts(
                          &result_facts[0]);
   loom_value_facts_remui(&operand_facts[0], &operand_facts[1], bit_count,
                          &result_facts[1]);
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_define_binary_identity(
+      context, operand_facts, 1, false));
   return loom_scalar_publish_remainder_bound(context, op, 1, operand_facts,
                                              result_facts);
 }
@@ -594,6 +615,15 @@ iree_status_t loom_scalar_andi_facts(loom_fact_context_t* context,
   loom_value_facts_andi(&operand_facts[0], &operand_facts[1], &result_facts[0]);
   loom_scalar_mark_i1_bitwise_distribution(module, loom_scalar_andi_result(op),
                                            &result_facts[0]);
+  const int64_t neutral =
+      loom_scalar_result_is_i1(module, loom_scalar_andi_result(op)) ? 1 : -1;
+  if ((loom_value_facts_is_exact(operand_facts[0]) &&
+       operand_facts[0].range_lo == neutral) ||
+      (loom_value_facts_is_exact(operand_facts[1]) &&
+       operand_facts[1].range_lo == neutral)) {
+    return loom_value_fact_table_define_binary_identity(context, operand_facts,
+                                                        neutral, true);
+  }
   if (!context->publication) {
     return iree_ok_status();
   }
@@ -622,7 +652,8 @@ iree_status_t loom_scalar_ori_facts(loom_fact_context_t* context,
   loom_value_facts_ori(&operand_facts[0], &operand_facts[1], &result_facts[0]);
   loom_scalar_mark_i1_bitwise_distribution(module, loom_scalar_ori_result(op),
                                            &result_facts[0]);
-  return iree_ok_status();
+  return loom_value_fact_table_define_binary_identity(context, operand_facts, 0,
+                                                      true);
 }
 
 iree_status_t loom_scalar_xori_facts(loom_fact_context_t* context,
@@ -633,7 +664,8 @@ iree_status_t loom_scalar_xori_facts(loom_fact_context_t* context,
   loom_value_facts_xori(&operand_facts[0], &operand_facts[1], &result_facts[0]);
   loom_scalar_mark_i1_bitwise_distribution(module, loom_scalar_xori_result(op),
                                            &result_facts[0]);
-  return iree_ok_status();
+  return loom_value_fact_table_define_binary_identity(context, operand_facts, 0,
+                                                      true);
 }
 
 iree_status_t loom_scalar_shli_facts(loom_fact_context_t* context,
@@ -650,9 +682,13 @@ iree_status_t loom_scalar_shli_facts(loom_fact_context_t* context,
     loom_value_facts_shli_modular(&operand_facts[0], &operand_facts[1],
                                   bit_count, &result_facts[0]);
   }
-  return iree_ok_status();
+  return loom_value_fact_table_define_binary_identity(context, operand_facts, 0,
+                                                      false);
 }
-BINARY_FACTS(loom_scalar_shrsi_facts, loom_value_facts_shrsi)
+BINARY_FACTS(loom_scalar_shrsi_facts, loom_value_facts_shrsi,
+             return loom_value_fact_table_define_binary_identity(context,
+                                                                 operand_facts,
+                                                                 0, false);)
 iree_status_t loom_scalar_shrui_facts(loom_fact_context_t* context,
                                       const loom_module_t* module,
                                       const loom_op_t* op,
@@ -662,7 +698,8 @@ iree_status_t loom_scalar_shrui_facts(loom_fact_context_t* context,
       loom_scalar_type_bitwidth(loom_scalar_result_element_type(module, op));
   loom_value_facts_shrui(&operand_facts[0], &operand_facts[1], bit_count,
                          &result_facts[0]);
-  return iree_ok_status();
+  return loom_value_fact_table_define_binary_identity(context, operand_facts, 0,
+                                                      false);
 }
 
 static bool loom_scalar_integer_bitwidth(loom_type_t type,
@@ -749,7 +786,15 @@ iree_status_t loom_scalar_rotli_facts(loom_fact_context_t* context,
       loom_scalar_type_bitwidth(loom_scalar_result_element_type(module, op));
   loom_value_facts_rotli(&operand_facts[0], &operand_facts[1], bit_count,
                          &result_facts[0]);
-  return iree_ok_status();
+  const bool preserves_value =
+      bit_count == 1 ||
+      (loom_value_facts_is_exact(operand_facts[1]) &&
+       ((uint64_t)operand_facts[1].range_lo & (uint64_t)(bit_count - 1)) == 0);
+  if (preserves_value) {
+    result_facts[0] = operand_facts[0];
+  }
+  return loom_value_fact_table_define_operand_identity(
+      context, 0, preserves_value ? 0 : -1);
 }
 
 iree_status_t loom_scalar_rotri_facts(loom_fact_context_t* context,
@@ -761,7 +806,15 @@ iree_status_t loom_scalar_rotri_facts(loom_fact_context_t* context,
       loom_scalar_type_bitwidth(loom_scalar_result_element_type(module, op));
   loom_value_facts_rotri(&operand_facts[0], &operand_facts[1], bit_count,
                          &result_facts[0]);
-  return iree_ok_status();
+  const bool preserves_value =
+      bit_count == 1 ||
+      (loom_value_facts_is_exact(operand_facts[1]) &&
+       ((uint64_t)operand_facts[1].range_lo & (uint64_t)(bit_count - 1)) == 0);
+  if (preserves_value) {
+    result_facts[0] = operand_facts[0];
+  }
+  return loom_value_fact_table_define_operand_identity(
+      context, 0, preserves_value ? 0 : -1);
 }
 
 // Bit counting is bounded by the declared integer width. A proven nonzero
@@ -1148,13 +1201,9 @@ static bool loom_scalar_truncate_exact_i64(
 }
 
 static iree_status_t loom_scalar_publish_conversion_identity(
-    loom_fact_context_t* context, const loom_op_t* op, bool preserves_value) {
-  if (!context->publication) {
-    return iree_ok_status();
-  }
-  return loom_value_fact_table_define_numeric_identity(
-      context->table, loom_op_const_results(op)[0],
-      preserves_value ? loom_op_const_operands(op)[0] : LOOM_VALUE_ID_INVALID);
+    loom_fact_context_t* context, bool preserves_value) {
+  return loom_value_fact_table_define_operand_identity(
+      context, 0, preserves_value ? 0 : -1);
 }
 
 iree_status_t loom_scalar_extsi_facts(loom_fact_context_t* context,
@@ -1167,9 +1216,8 @@ iree_status_t loom_scalar_extsi_facts(loom_fact_context_t* context,
   result_facts[0] = loom_value_facts_sign_extend(
       operand_facts[0], loom_scalar_type_bitwidth(input_scalar_type));
   return loom_scalar_publish_conversion_identity(
-      context, op,
-      input_scalar_type != LOOM_SCALAR_TYPE_I1 ||
-          operand_facts[0].range_hi == 0);
+      context, input_scalar_type != LOOM_SCALAR_TYPE_I1 ||
+                   operand_facts[0].range_hi == 0);
 }
 
 iree_status_t loom_scalar_extui_facts(loom_fact_context_t* context,
@@ -1190,7 +1238,7 @@ iree_status_t loom_scalar_extui_facts(loom_fact_context_t* context,
                                         &result_scalar_type, &result_lo,
                                         &result_hi)) {
     result_facts[0] = loom_value_facts_unknown();
-    return loom_scalar_publish_conversion_identity(context, op, false);
+    return loom_scalar_publish_conversion_identity(context, false);
   }
   (void)result_scalar_type;
 
@@ -1200,7 +1248,7 @@ iree_status_t loom_scalar_extui_facts(loom_fact_context_t* context,
   result_facts[0] =
       loom_value_facts_clamp_domain(result_facts[0], result_lo, result_hi);
   return loom_scalar_publish_conversion_identity(
-      context, op,
+      context,
       input_lo >= 0 || loom_value_facts_is_non_negative(operand_facts[0]));
 }
 
@@ -1222,7 +1270,7 @@ iree_status_t loom_scalar_trunci_facts(loom_fact_context_t* context,
                                         &result_scalar_type, &result_lo,
                                         &result_hi)) {
     result_facts[0] = loom_value_facts_unknown();
-    return loom_scalar_publish_conversion_identity(context, op, false);
+    return loom_scalar_publish_conversion_identity(context, false);
   }
   (void)input_scalar_type;
 
@@ -1236,17 +1284,16 @@ iree_status_t loom_scalar_trunci_facts(loom_fact_context_t* context,
       loom_scalar_truncate_exact_i64(exact_value, result_scalar_type,
                                      &exact_value)) {
     result_facts[0] = loom_value_facts_exact_i64(exact_value);
-    return loom_scalar_publish_conversion_identity(context, op,
-                                                   preserves_value);
+    return loom_scalar_publish_conversion_identity(context, preserves_value);
   }
 
   if (preserves_value) {
     result_facts[0] = input_facts;
-    return loom_scalar_publish_conversion_identity(context, op, true);
+    return loom_scalar_publish_conversion_identity(context, true);
   }
   result_facts[0] =
       loom_scalar_integer_domain_facts(operand_facts[0], result_lo, result_hi);
-  return loom_scalar_publish_conversion_identity(context, op, false);
+  return loom_scalar_publish_conversion_identity(context, false);
 }
 
 iree_status_t loom_scalar_bitcast_facts(loom_fact_context_t* context,
