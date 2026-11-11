@@ -405,6 +405,52 @@ TEST_CASE_METHOD(GraphVisibilityTest,
 }
 
 TEST_CASE_METHOD(GraphVisibilityTest,
+                 "graph_orders_dependent_transfers_and_dispatches") {
+  Initialize();
+  constexpr uint32_t kInput = 0x102u;
+  const hrx_graph_fill_buffer_node_attrs_t fill_attrs = {
+      .dst = {buffer_, 0, sizeof(uint32_t)},
+      .pattern = kInput,
+      .pattern_size = sizeof(uint32_t),
+  };
+  hrx_graph_node_t fill = nullptr;
+  REQUIRE_OK(
+      hrx().graph_add_fill_buffer_node(graph_, nullptr, 0, &fill_attrs, &fill));
+  const hrx_graph_copy_buffer_node_attrs_t input_copy_attrs = {
+      .src = {buffer_, 0, sizeof(uint32_t)},
+      .dst = {buffer_, 64 * sizeof(uint32_t), sizeof(uint32_t)},
+  };
+  hrx_graph_node_t input_copy = nullptr;
+  REQUIRE_OK(hrx().graph_add_copy_buffer_node(graph_, &fill, 1,
+                                              &input_copy_attrs, &input_copy));
+  const auto first_dispatch = AddTransform(64, 128, input_copy);
+  const auto second_dispatch = AddTransform(128, 192, first_dispatch);
+  const hrx_graph_copy_buffer_node_attrs_t output_copy_attrs = {
+      .src = {buffer_, 192 * sizeof(uint32_t), sizeof(uint32_t)},
+      .dst = {buffer_, 224 * sizeof(uint32_t), sizeof(uint32_t)},
+  };
+  REQUIRE_OK(hrx().graph_add_copy_buffer_node(graph_, &second_dispatch, 1,
+                                              &output_copy_attrs, nullptr));
+  REQUIRE_OK(hrx().graph_instantiate(graph_, hrx().stream_get_queue(stream_), 0,
+                                     &exec_));
+  for (uint32_t replay = 0; replay < 16; ++replay) {
+    const uint32_t sentinel = 0x12345678u + replay;
+    std::fill_n(words_, kWordCount, sentinel);
+    REQUIRE_OK(hrx().graph_exec_launch(exec_, stream_));
+    REQUIRE_OK(hrx().stream_synchronize(stream_));
+    for (size_t i = 0; i < kWordCount; ++i) {
+      CAPTURE(replay, i);
+      const uint32_t expected = i == 0 || i == 64 ? kInput
+                                : i == 128        ? kInput * 3 + 7
+                                : i == 192 || i == 224
+                                    ? (kInput * 3 + 7) * 3 + 7
+                                    : sentinel;
+      REQUIRE(words_[i] == expected);
+    }
+  }
+}
+
+TEST_CASE_METHOD(GraphVisibilityTest,
                  "graph_parallel_replays_order_every_workstream") {
   Initialize();
   const size_t width = GENERATE(size_t{17}, size_t{64});

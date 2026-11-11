@@ -223,11 +223,18 @@ iree_status_t hrx_graph_record_node_barrier(
   }
 
   if (has_hazard) {
+    // Every operation in a recorded partition executes on this device. Host
+    // calls and other partitions cross the system-scope entry/exit barriers;
+    // dependencies within the partition only order device memory accesses.
+    const iree_hal_access_scope_t device_access =
+        IREE_HAL_ACCESS_SCOPE_CONSTANT_READ |
+        IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+        IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+        IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+        IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE;
     const iree_hal_memory_barrier_t memory_barrier = {
-        .source_scope = IREE_HAL_ACCESS_SCOPE_MEMORY_READ |
-                        IREE_HAL_ACCESS_SCOPE_MEMORY_WRITE,
-        .target_scope = IREE_HAL_ACCESS_SCOPE_MEMORY_READ |
-                        IREE_HAL_ACCESS_SCOPE_MEMORY_WRITE,
+        .source_scope = device_access,
+        .target_scope = device_access,
     };
     const iree_hal_barrier_t execution_barrier = {
         .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
@@ -300,16 +307,11 @@ static iree_status_t hrx_graph_record_partition(
                                attrs->block_dim[2]},
             .workgroup_count = {attrs->grid_dim[0], attrs->grid_dim[1],
                                 attrs->grid_dim[2]},
-            .dynamic_workgroup_local_memory = attrs->shared_memory_bytes,
         };
-        const iree_hal_dispatch_flags_t flags =
-            attrs->bindings.count
-                ? IREE_HAL_DISPATCH_FLAG_NONE
-                : IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS;
         status = iree_hal_command_buffer_dispatch(
             command_buffer, attrs->executable,
             iree_hal_executable_function_from_index(attrs->export_ordinal),
-            config, attrs->constants, attrs->bindings, flags);
+            config, attrs->constants, attrs->bindings, attrs->flags);
         break;
       }
       case HRX_GRAPH_NODE_TYPE_INTERNAL_MEMCPY: {

@@ -571,6 +571,11 @@ bool iree_hal_streaming_graph_exec_try_retain_live(
     iree_hal_streaming_graph_exec_t* exec);
 bool iree_hal_streaming_graph_exec_is_live(
     iree_hal_streaming_graph_exec_t* exec);
+
+// Invalidates the handle, joins its accepted launches, and releases the
+// handle's reference on success. Independent work and later stream operations
+// are not joined. A failed wait leaves the handle live and its reference
+// unchanged.
 iree_status_t iree_hal_streaming_graph_exec_destroy_handle(
     iree_hal_streaming_graph_exec_t* exec);
 

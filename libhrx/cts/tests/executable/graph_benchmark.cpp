@@ -14,8 +14,9 @@
 #include "iree/base/tooling/flags.h"
 #include "libhrx/cts/core/amdgpu_executable_test_data.hpp"
 
-IREE_FLAG(string, graph_runtime, "hrx", "Graph implementation: hrx or rocm.");
-IREE_FLAG(string, graph_hip_library, "", "Exact ROCm libamdhip64 path.");
+IREE_FLAG(string, graph_runtime, "hrx",
+          "Graph implementation: hrx, hip (HRX frontend), or rocm.");
+IREE_FLAG(string, graph_hip_library, "", "Exact selected libamdhip64 path.");
 
 namespace {
 
@@ -219,9 +220,9 @@ class HrxRuntime {
   std::string label_;
 };
 
-class RocmRuntime {
+class HipRuntime {
  public:
-  RocmRuntime() {
+  HipRuntime() {
     Require(FLAG_graph_hip_library[0] != 0, "--graph_hip_library is required");
     library_.load(FLAG_graph_hip_library);
     Check(Resolve<decltype(&hipInit)>("hipInit")(0));
@@ -233,8 +234,10 @@ class RocmRuntime {
     char pci_address[32] = {};
     Check(Resolve<decltype(&hipDeviceGetPCIBusId)>("hipDeviceGetPCIBusId")(
         pci_address, sizeof(pci_address), 0));
-    label_ = std::string("ROCm ") + properties.gcnArchName + " " + pci_address +
-             " wait=blocking";
+    label_ =
+        std::string(std::string(FLAG_graph_runtime) == "hip" ? "HRX HIP "
+                                                             : "ROCm HIP ") +
+        properties.gcnArchName + " " + pci_address + " wait=blocking";
     const auto image =
         hrx_cts::FindAmdgpuExecutableTestImage(properties.gcnArchName);
     Require(image.file != nullptr, "no configured HSACO for selected GPU");
@@ -248,10 +251,13 @@ class RocmRuntime {
     wait_ = Resolve<decltype(&hipStreamSynchronize)>("hipStreamSynchronize");
   }
 
-  ~RocmRuntime() {
+  ~HipRuntime() {
     Wait();
     Check(Resolve<decltype(&hipStreamDestroy)>("hipStreamDestroy")(stream_));
     Check(Resolve<decltype(&hipModuleUnload)>("hipModuleUnload")(module_));
+    if (std::string(FLAG_graph_runtime) == "hip") {
+      Check(Resolve<decltype(&hipHALDeinit)>("hipHALDeinit")());
+    }
   }
 
   template <typename T>
@@ -309,7 +315,7 @@ class RocmRuntime {
           hipMemcpyDeviceToHost));
     }
     for (size_t i = 0; i < values_.size(); ++i) {
-      Require(values_[i] == kOutputBase + i, "ROCm graph output mismatch");
+      Require(values_[i] == kOutputBase + i, "HIP graph output mismatch");
     }
   }
 
@@ -328,7 +334,7 @@ class RocmRuntime {
   const std::string& label() const { return label_; }
 
  private:
-  // Explicit ROCm DSO whose symbols never resolve against the HRX frontend.
+  // Exact selected HIP implementation; symbols resolve only through this DSO.
   HrxDynamicLibrary library_;
   // Persistent code object and reflected finite store function.
   hipModule_t module_ = nullptr;
@@ -403,8 +409,8 @@ void Graph(benchmark::State& state) {
   if (runtime == "hrx") {
     RunGraph<HrxRuntime, IncludeCompletion>(state);
   } else {
-    Require(runtime == "rocm", "unknown --graph_runtime");
-    RunGraph<RocmRuntime, IncludeCompletion>(state);
+    Require(runtime == "hip" || runtime == "rocm", "unknown --graph_runtime");
+    RunGraph<HipRuntime, IncludeCompletion>(state);
   }
 }
 

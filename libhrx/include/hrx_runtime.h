@@ -852,13 +852,22 @@ typedef enum hrx_graph_node_type_t {
 } hrx_graph_node_type_t;
 
 typedef struct hrx_graph_kernel_node_attrs_t {
+  // Executable whose native resources are retained by the graph.
   hrx_executable_t executable;
+  // Export ordinal within |executable|.
   uint32_t export_ordinal;
+  // Workgroup geometry for the dispatch.
   hrx_dispatch_config_t config;
+  // Argument bytes copied when the node is added.
   const void* constants;
+  // Number of bytes in |constants|.
   size_t constants_size;
+  // Buffer references copied and retained when the node is added.
   const hrx_buffer_ref_t* bindings;
+  // Number of entries in |bindings|.
   size_t binding_count;
+  // hrx_dispatch_flags_t controlling argument interpretation and execution.
+  // An empty binding list does not imply custom arguments.
   uint32_t flags;
 } hrx_graph_kernel_node_attrs_t;
 
