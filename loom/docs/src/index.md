@@ -58,6 +58,8 @@ drivers.
 </div>
 </div>
 
+<p class="loom-authorship">This project has been engineered with the assistance of agents.</p>
+
 <div class="loom-scope" markdown>
 
 | Layer | What it provides |

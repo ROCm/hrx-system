@@ -172,6 +172,13 @@
   margin-top: 1.5rem;
 }
 
+.md-typeset .loom-authorship {
+  margin: 0.65rem 0 0;
+  color: var(--md-default-fg-color--light);
+  font-size: 0.7rem;
+  line-height: 1.5;
+}
+
 .loom-scope {
   margin: 1.5rem auto 2rem;
   max-width: 50rem;
