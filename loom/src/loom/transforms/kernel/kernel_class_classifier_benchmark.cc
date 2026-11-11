@@ -14,7 +14,7 @@
 
 #include "benchmark/benchmark.h"
 #include "iree/base/internal/arena.h"
-#include "loom/transforms/kernel/kernel_class_classifier.h"
+#include "loom/transforms/kernel/kernel_class_collection.h"
 
 namespace loom {
 namespace {
