@@ -18,6 +18,13 @@
 extern "C" {
 #endif
 
+// Selects the exact native form of a concrete constant. The selected descriptor
+// preserves allocated operand bindings and register event timing; its issue
+// resources must be used for native bundle planning. Relocatable forms retain
+// their original encoding even when their unresolved immediate is zero.
+uint32_t loom_aie2p_descriptor_select_constant_encoding(
+    uint32_t descriptor_ordinal, const int64_t* immediate_values);
+
 // Encodes one compiler-verified descriptor after register allocation.
 // Assignment pointers correspond positionally to descriptor operand rows,
 // including results. Immediate values correspond positionally to descriptor

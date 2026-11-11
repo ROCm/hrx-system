@@ -161,6 +161,44 @@ iree_status_t BuildVectorAddLeaf(std::string_view vector_add_key,
   return iree_ok_status();
 }
 
+TEST(DescriptorEncodingTest, ConcreteConstantsSelectSignedElevenBitForms) {
+  const uint32_t original_ordinals[] = {
+      AIE2P_CORE_DESCRIPTOR_REF_CONSTANT_I32,
+      AIE2P_CORE_DESCRIPTOR_REF_MATERIALIZE_STATIC_BYTE_OFFSET_I32,
+      AIE2P_CORE_DESCRIPTOR_REF_MATERIALIZE_STATIC_ADDRESS_INDEX_I20,
+  };
+  const uint32_t compact_ordinals[] = {
+      AIE2P_CORE_DESCRIPTOR_REF_CONSTANT_I32_SHORT,
+      AIE2P_CORE_DESCRIPTOR_REF_CONSTANT_I32_SHORT,
+      AIE2P_CORE_DESCRIPTOR_REF_MATERIALIZE_STATIC_ADDRESS_INDEX_I20_SHORT,
+  };
+  for (size_t i = 0; i < IREE_ARRAYSIZE(original_ordinals); ++i) {
+    for (int64_t value : {-1024, -1, 0, 1, 1023}) {
+      EXPECT_EQ(loom_aie2p_descriptor_select_constant_encoding(
+                    original_ordinals[i], &value),
+                compact_ordinals[i]);
+    }
+    for (int64_t value : {INT32_MIN, -1025, 1024, INT32_MAX}) {
+      EXPECT_EQ(loom_aie2p_descriptor_select_constant_encoding(
+                    original_ordinals[i], &value),
+                original_ordinals[i]);
+    }
+  }
+}
+
+TEST(DescriptorEncodingTest, RelocationsAndOtherFormsKeepTheirEncoding) {
+  const int64_t zero = 0;
+  EXPECT_EQ(loom_aie2p_descriptor_select_constant_encoding(
+                AIE2P_CORE_DESCRIPTOR_REF_MATERIALIZE_LOCAL_ADDRESS_I32, &zero),
+            AIE2P_CORE_DESCRIPTOR_REF_MATERIALIZE_LOCAL_ADDRESS_I32);
+  EXPECT_EQ(loom_aie2p_descriptor_select_constant_encoding(
+                AIE2P_CORE_DESCRIPTOR_REF_CONSTANT_I32_MOVA, &zero),
+            AIE2P_CORE_DESCRIPTOR_REF_CONSTANT_I32_MOVA);
+  EXPECT_EQ(loom_aie2p_descriptor_select_constant_encoding(
+                AIE2P_CORE_DESCRIPTOR_REF_MOVE_SCALAR, nullptr),
+            AIE2P_CORE_DESCRIPTOR_REF_MOVE_SCALAR);
+}
+
 TEST(DescriptorEncodingTest, PhysicalAssignmentsReproduceVectorLeaves) {
   struct TestCase {
     std::string_view descriptor_key;

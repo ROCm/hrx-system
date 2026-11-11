@@ -1616,8 +1616,9 @@ static iree_status_t loom_aie2p_bundle_plan_append_packet(
     if (packet->descriptor != NULL) {
       loom_aie2p_encoded_slot_t encoded_slot;
       uint32_t read_only_data_ordinal = UINT32_MAX;
-      loom_aie2p_bundle_encoding_encode_packet(
-          builder->frame, packet, &encoded_slot, &read_only_data_ordinal);
+      const uint32_t descriptor_ordinal =
+          loom_aie2p_bundle_encoding_encode_packet(
+              builder->frame, packet, &encoded_slot, &read_only_data_ordinal);
       if (read_only_data_ordinal != UINT32_MAX) {
         loom_aie2p_bundle_plan_append_read_only_data_fixup(
             builder, packet_index, read_only_data_ordinal);
@@ -1632,7 +1633,7 @@ static iree_status_t loom_aie2p_bundle_plan_append_packet(
                            : 0,
           },
           (loom_aie2p_slot_realization_t){.descriptor_ordinal =
-                                              packet->descriptor_ordinal});
+                                              descriptor_ordinal});
     }
     const loom_aie2p_core_structure_kind_t structure_kind =
         loom_aie2p_core_structure_classify(packet->node->op);

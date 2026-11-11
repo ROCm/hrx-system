@@ -233,8 +233,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @repeat_loop(%input: reg<aie2p
 }
 
 // ----
-issue cycles: 30
-code bytes: 86
+issue cycles: 29
+code bytes: 82
 coissued bundles: 2
 coissued components: 4
 

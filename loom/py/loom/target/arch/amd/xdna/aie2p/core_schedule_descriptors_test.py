@@ -65,6 +65,43 @@ from loom.target.low_descriptors import (
 )
 
 
+@pytest.mark.parametrize(
+    ("original", "compact"),
+    [
+        ("constant.i32", "constant.i32.short"),
+        ("materialize.static-byte-offset.i32", "constant.i32.short"),
+        (
+            "materialize.static-address-index.i20",
+            "materialize.static-address-index.i20.short",
+        ),
+    ],
+)
+def test_compact_constants_preserve_native_operand_events(
+    original: str, compact: str
+) -> None:
+    descriptors = {row.key: row for row in AIE2P_CORE_DESCRIPTOR_SET.descriptors}
+    specs = {row.key: row for row in _DESCRIPTOR_SPECS}
+    original_key = f"amd.xdna.aie2p.{original}"
+    compact_key = f"amd.xdna.aie2p.{compact}"
+    source = descriptors[original_key]
+    target = descriptors[compact_key]
+    assert source.operands == target.operands
+    assert source.effects == target.effects
+    assert source.constraints == target.constraints
+    assert source.feature_mask_words == target.feature_mask_words
+    assert itinerary_payload(_itinerary(specs[original_key])) == itinerary_payload(
+        _itinerary(specs[compact_key])
+    )
+    assert source.immediates[0].flags == target.immediates[0].flags == ()
+    assert (
+        source.immediates[0].encoding_field_id == target.immediates[0].encoding_field_id
+    )
+    assert source.immediates[0].bit_width == 32
+    assert target.immediates[0].bit_width == 11
+    assert _INSTRUCTION_ENCODINGS[specs[original_key].form_name].slot == "lng"
+    assert _INSTRUCTION_ENCODINGS[specs[compact_key].form_name].slot == "mv"
+
+
 def test_scalar_move_resource_fragments_exactly_cover_native_itineraries() -> None:
     schedule_classes = {
         row.name: row for row in AIE2P_CORE_DESCRIPTOR_SET.schedule_classes

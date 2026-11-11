@@ -1874,6 +1874,16 @@ _BASE_DESCRIPTOR_SPECS = (
         flags=(DescriptorFlag.SAFE_TO_SPECULATE,),
     ),
     _DescriptorSpec(
+        "MOV_alu_mv_mv_mv_cg",
+        f"{_TARGET_KEY}.materialize.static-address-index.i20.short",
+        "integer.materialize.static-address-index.i20",
+        "II_MOV_alu_mv_mv_mv_cg_eDJ",
+        (("dst", "eDJ"),),
+        asm_mnemonic="mov.static-address-index.short",
+        rematerializable=True,
+        flags=(DescriptorFlag.SAFE_TO_SPECULATE,),
+    ),
+    _DescriptorSpec(
         "MOVXM",
         f"{_TARGET_KEY}.materialize.local-address.i32",
         "memory.materialize.local-address.i32",
