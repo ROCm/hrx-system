@@ -26,15 +26,15 @@ parts of it, or take the compiler's output into your own runtime.
 <dl>
 <div>
 <dt>~8 MB</dt>
-<dd>The full SDK, including the server, compressed with xz.</dd>
+<dd>The full SDK: compiler, runtime, and inference server, compressed with xz.</dd>
 </div>
 <div>
-<dt>~1 second</dt>
-<dd>All of DeepSeek's kernels and programs JIT from source text.</dd>
+<dt>Fast JIT</dt>
+<dd>Kernels compile in microseconds to milliseconds. Full model programs in seconds.</dd>
 </div>
 <div>
-<dt>CPU to multi-GPU</dt>
-<dd>From CPUs and integrated GPUs to DeepSeek on eight MI300X GPUs.</dd>
+<dt>CPU + NPU + GPU</dt>
+<dd>From integrated graphics to models spanning datacenter GPUs.</dd>
 </div>
 </dl>
 </aside>
@@ -304,9 +304,10 @@ the platform.**
 
 ## From CPUs to multi-GPU servers
 
-Deployments already span CPU applications, integrated GPUs, and full DeepSeek serving
-across eight MI300X GPUs. They use the same compiler and runtime foundation,
-with model programs and deployment configuration describing how work is placed.
+Deployments span CPU applications and integrated GPUs. A development
+demonstration has also served full DeepSeek across eight MI300X GPUs.
+These use the same compiler and runtime foundation, with model programs and
+deployment configuration describing how work is placed.
 x86 execution covers AMD and Intel CPUs; Vulkan provides a path to other vendors'
 GPUs alongside the native AMD GPU backend. AMD XDNA NPUs already run embedding
 models and can work alongside GPU workloads.
