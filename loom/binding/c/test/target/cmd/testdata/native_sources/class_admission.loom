@@ -1,0 +1,68 @@
+// A source publication reaches the default 128-class limit with 127 vector
+// widths and one scalar provider. An earlier optional choice retains the same
+// structural width in both providers, so its extra distinction must not prevent
+// the later scalar provider from making the complete publication fit.
+template.decl @admission.ordinary(%n: index, %width: index, %enabled: i1) -> (i32)
+
+// This structurally simpler provider is ruled out by source facts. It must not
+// make the ordinary choice appear able to remove a generic requirement.
+template.def<@admission.ordinary> priority(20) @admission.ordinary.disabled(%n: index, %width: index, %enabled: i1) -> (i32) where [eq(%enabled, 1)] {
+  %identity = scalar.constant 0 : i32
+  template.return %identity : i32
+}
+
+template.def<@admission.ordinary> priority(10) @admission.ordinary.fast(%n: index, %width: index, %enabled: i1) -> (i32) where [ge(%n, 64)] {
+  %terms = vector.splati 0 : vector<[%width]xi32>
+  %identity = scalar.constant 0 : i32
+  %result = vector.reduce<addi> %terms, %identity : vector<[%width]xi32>, i32
+  template.return %result : i32
+}
+
+template.def<@admission.ordinary> @admission.ordinary.generic(%n: index, %width: index, %enabled: i1) -> (i32) {
+  %terms = vector.splati 0 : vector<[%width]xi32>
+  %identity = scalar.constant 0 : i32
+  %result = vector.reduce<addi> %terms, %identity : vector<[%width]xi32>, i32
+  template.return %result : i32
+}
+
+template.decl @admission.area(%rows: index, %columns: index) -> (i32)
+
+template.def<@admission.area> priority(10) @admission.area.scalar(%rows: index, %columns: index) -> (i32) where [ge(%columns, 2)] {
+  %count = index.mul %rows, %columns : index
+  %result = index.cast %count : index to i32
+  template.return %result : i32
+}
+
+template.def<@admission.area> @admission.area.vector(%rows: index, %columns: index) -> (i32) {
+  %row_elements = vector.splati 1 : vector<[%rows]xi32>
+  %column_elements = vector.splati 1 : vector<[%columns]xi32>
+  %identity = scalar.constant 0 : i32
+  %row_count = vector.reduce<addi> %row_elements, %identity : vector<[%rows]xi32>, i32
+  %column_count = vector.reduce<addi> %column_elements, %identity : vector<[%columns]xi32>, i32
+  %result = scalar.muli %row_count, %column_count : i32
+  template.return %result : i32
+}
+
+pipeline.def<kernel> @admission.kernel() run(%rows: index, %columns: index, %width: index, %output: view<1xi32>) {
+  %disabled = scalar.constant 0 : i1
+  %first = template.apply<@admission.ordinary>(%rows, %width, %disabled) : (index, index, i1) -> (i32)
+  %second = template.apply<@admission.area>(%rows, %columns) : (index, index) -> (i32)
+  %sum = scalar.addi %first, %second : i32
+  pipeline.strand workers([0], [1], [1]) {
+    view.store %sum, %output[0] : i32, view<1xi32>
+  }
+}
+
+command.def public @class_budget() launch(%storage: buffer) {
+  %base = index.constant 0 : offset
+  %output = buffer.view %storage[%base] : buffer -> view<1xi32>
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %width = index.constant 16 : index
+  %end = index.constant 128 : index
+  scf.for %rows = [%c1 to %end step %c1] unroll {
+    kernel.launch @admission.kernel(%rows, %c1, %width, %output) : (index, index, index, view<1xi32>)
+    kernel.launch @admission.kernel(%rows, %c2, %width, %output) : (index, index, index, view<1xi32>)
+  }
+  command.return
+}

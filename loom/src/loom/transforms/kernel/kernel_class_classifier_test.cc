@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "iree/testing/gtest.h"
@@ -610,6 +611,7 @@ TEST_F(KernelClassClassifierTest, StructuralCostIsIncludedBeforeAdmission) {
   fixture.classifier()->decision_count = 1;
   fixture.decisions()[0].action_shapes = shapes;
   fixture.decisions()[0].residual_shape = shapes[0];
+  fixture.decisions()[0].can_reduce_structure = true;
   for (uint16_t limit : {1, 2, 3, 4}) {
     SCOPED_TRACE(limit);
     auto options = loom_kernel_class_collection_options_default();
@@ -652,8 +654,10 @@ TEST_F(KernelClassClassifierTest, SelectedProvidersCanRemoveGenericStructure) {
   fixture.classifier()->has_shape_requirements = true;
   fixture.decisions()[0].action_shapes = shapes;
   fixture.decisions()[0].residual_shape = shapes[1];
+  fixture.decisions()[0].can_reduce_structure = true;
   fixture.decisions()[1].action_shapes = shapes;
   fixture.decisions()[1].residual_shape = shapes[1];
+  fixture.decisions()[1].can_reduce_structure = true;
   fixture.decisions()[1].argument_values =
       fixture.decisions()[0].argument_values;
   fixture.decisions()[1].projection_ordinals =
@@ -709,6 +713,7 @@ TEST_F(KernelClassClassifierTest,
   fixture.decisions()[0].action_shapes = first_shapes;
   fixture.decisions()[1].action_shapes = second_shapes;
   fixture.decisions()[1].residual_shape = second_shapes[0];
+  fixture.decisions()[1].can_reduce_structure = true;
   auto options = loom_kernel_class_collection_options_default();
   options.class_limit = 2;
   loom_kernel_class_collection_t collection = {};
@@ -723,6 +728,94 @@ TEST_F(KernelClassClassifierTest,
   EXPECT_EQ(collection.site_classes[0], collection.site_classes[2]);
   EXPECT_EQ(collection.site_classes[1], collection.site_classes[3]);
   EXPECT_NE(collection.site_classes[0], collection.site_classes[1]);
+}
+
+// A scalar-only choice cannot help an over-budget residual. Its extra classes
+// must not block a later provider that removes structural requirements. The
+// same holds when every action retains a shared, launch-invariant dimension.
+TEST_F(KernelClassClassifierTest, OptionalGrowthLeavesRoomForStructuralRelief) {
+  for (bool shared_shape : {false, true}) {
+    for (bool reverse : {false, true}) {
+      for (uint16_t limit : {2, 3, 4}) {
+        SCOPED_TRACE(shared_shape);
+        SCOPED_TRACE(reverse);
+        SCOPED_TRACE(limit);
+        ManualBinaryClassifier fixture(/*has_generic_residual=*/true);
+        const loom_kernel_class_projection_term_t shared_term = {
+            .coefficient = 1,
+            .argument_ordinal = 2,
+        };
+        const loom_kernel_class_projection_t projections[] = {
+            fixture.classifier()->projections[0],
+            fixture.classifier()->projections[1],
+            {
+                .source_value_id = 2,
+                .kind = LOOM_KERNEL_CLASS_PROJECTION_AFFINE,
+                .terms = &shared_term,
+                .term_count = 1,
+            },
+        };
+        fixture.classifier()->projections = projections;
+        fixture.classifier()->projection_count = 3;
+        fixture.classifier()->kernel_argument_count = 3;
+        fixture.classifier()->has_shape_requirements = true;
+        const uint32_t widths[] = {0, 1, 2};
+        const loom_kernel_class_shape_t shared = {
+            .projections = widths + 2,
+            .count = shared_shape ? 1u : 0u,
+        };
+        const loom_kernel_class_shape_t first_shapes[] = {shared, shared};
+        const loom_kernel_class_shape_t second_shapes[] = {
+            {}, {.projections = widths, .count = 2}};
+        fixture.decisions()[0].action_shapes = first_shapes;
+        fixture.decisions()[0].residual_shape = shared;
+        fixture.decisions()[1].action_shapes = second_shapes;
+        fixture.decisions()[1].residual_shape = second_shapes[1];
+        fixture.decisions()[1].can_reduce_structure = true;
+        if (reverse) {
+          std::swap(fixture.decisions()[0], fixture.decisions()[1]);
+        }
+        loom_value_fact_table_t facts = {};
+        IREE_ASSERT_OK(
+            loom_value_fact_table_initialize(&facts, &analysis_arena_, 12));
+        loom_value_id_t arguments[4][3];
+        loom_kernel_class_site_t sites[4];
+        for (uint32_t site = 0; site < 4; ++site) {
+          const int64_t values[] = {site / 2, site % 2, 16};
+          for (uint32_t argument = 0; argument < 3; ++argument) {
+            arguments[site][argument] = site * 3 + argument;
+            IREE_ASSERT_OK(loom_value_fact_table_define(
+                &facts, arguments[site][argument],
+                loom_value_facts_exact_i64(values[argument])));
+          }
+          sites[site] = {.facts = &facts, .argument_values = arguments[site]};
+        }
+        auto options = loom_kernel_class_collection_options_default();
+        options.class_limit = limit;
+        loom_kernel_class_collection_t collection = {};
+        auto status = loom_kernel_class_classifier_collect(
+            fixture.classifier(), nullptr, sites, 4, &options, &analysis_arena_,
+            &collection);
+        if (limit == 2) {
+          IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+          continue;
+        }
+        IREE_ASSERT_OK(status);
+        ASSERT_EQ(collection.class_count, limit);
+        EXPECT_EQ(collection.accepted_decision_count, limit == 3 ? 1 : 2);
+        if (limit == 3) {
+          EXPECT_EQ(collection.decision_results[reverse ? 1 : 0].state,
+                    LOOM_KERNEL_CLASS_DECISION_SKIPPED_CLASS_LIMIT);
+          EXPECT_EQ(collection.decision_results[reverse ? 0 : 1].state,
+                    LOOM_KERNEL_CLASS_DECISION_ACCEPTED);
+          EXPECT_EQ(collection.site_classes[1], collection.site_classes[3]);
+          EXPECT_NE(collection.site_classes[0], collection.site_classes[2]);
+          EXPECT_NE(collection.site_classes[0], collection.site_classes[1]);
+          EXPECT_NE(collection.site_classes[2], collection.site_classes[1]);
+        }
+      }
+    }
+  }
 }
 
 TEST_F(KernelClassClassifierTest, SourceStructureIsReservedBeforeDecisions) {
@@ -765,6 +858,7 @@ TEST_F(KernelClassClassifierTest, UnknownShapeValuesDoNotAliasExactShapes) {
   fixture.classifier()->decision_count = 1;
   fixture.decisions()[0].action_shapes = shapes;
   fixture.decisions()[0].residual_shape = shapes[0];
+  fixture.decisions()[0].can_reduce_structure = true;
   auto options = loom_kernel_class_collection_options_default();
   options.class_limit = 3;
   loom_kernel_class_collection_t collection = {};
@@ -795,6 +889,7 @@ TEST_F(KernelClassClassifierTest, UnavailableDecisionsRetainTheirStructure) {
   fixture.classifier()->decision_count = 1;
   fixture.decisions()[0].action_shapes = shapes;
   fixture.decisions()[0].residual_shape = shapes[0];
+  fixture.decisions()[0].can_reduce_structure = true;
   for (auto reason : {LOOM_KERNEL_CLASS_DECISION_PATH_CONDITION,
                       LOOM_KERNEL_CLASS_DECISION_UNPROJECTABLE_INPUT,
                       LOOM_KERNEL_CLASS_DECISION_UNRESOLVED_TARGET}) {
@@ -831,11 +926,13 @@ TEST_F(KernelClassClassifierTest, AllocationFailureReleasesAllScratch) {
       .projections = projections,
       .count = 2,
   };
+  fixture.decisions()[0].can_reduce_structure = true;
   fixture.decisions()[1].action_shapes = shapes;
   fixture.decisions()[1].residual_shape = {
       .projections = projections,
       .count = 2,
   };
+  fixture.decisions()[1].can_reduce_structure = true;
   fixture.decisions()[1].argument_values =
       fixture.decisions()[0].argument_values;
   fixture.decisions()[1].projection_ordinals =
@@ -935,6 +1032,7 @@ TEST_F(KernelClassClassifierTest, StagedTuplesShareOneStructuralBudget) {
   fixture.decisions()[0] = fixture.decisions()[1];
   fixture.decisions()[0].action_shapes = shapes;
   fixture.decisions()[0].residual_shape = shapes[0];
+  fixture.decisions()[0].can_reduce_structure = true;
   fixture.classifier()->decision_count = 1;
   fixture.classifier()->specialization_count = 1;
   fixture.classifier()->has_shape_requirements = true;

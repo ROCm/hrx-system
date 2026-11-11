@@ -173,6 +173,8 @@ class KernelClassClassifierBenchmarkFixture {
           .projection_count = 1,
           .unavailable_reason = LOOM_KERNEL_CLASS_DECISION_AVAILABLE,
           .hard_requirement_flags = 0,
+          .can_reduce_structure = shape_mode != ShapeMode::kNone &&
+                                  shape_mode != ShapeMode::kSource,
           .reserved = {},
       };
     }

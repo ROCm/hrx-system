@@ -330,6 +330,22 @@ class NativeSourceTest : public ::testing::TestWithParam<bool> {
   CompilerPtr compiler_;
 };
 
+TEST_P(NativeSourceTest, CompleteClassBudgetSurvivesReuseAndOwnerRetirement) {
+  Output cold;
+  LOOMC_ASSERT_OK(Build("{}", &cold, 0, {}, nullptr, "class_budget"));
+  ExpectSucceeded(cold, 128);
+  ASSERT_EQ(cold.requests.size(), 128u);
+  Output warm;
+  LOOMC_ASSERT_OK(Build("{}", &warm, 0, {}, nullptr, "class_budget"));
+  ExpectSucceeded(warm, 128);
+  ASSERT_EQ(warm.requests.size(), cold.requests.size());
+  compiler_.reset();
+  EXPECT_EQ(allocator_.live_bytes(), 0u);
+  for (size_t ordinal = 0; ordinal < cold.requests.size(); ++ordinal) {
+    EXPECT_EQ(RequestBytes(cold, ordinal), RequestBytes(warm, ordinal));
+  }
+}
+
 TEST_P(NativeSourceTest, DeferredProvidersRetainOnlyPossibleStructure) {
   for (size_t byte_limit : {size_t{0}, size_t{64 * 1024 * 1024}}) {
     ResetCompiler(byte_limit);

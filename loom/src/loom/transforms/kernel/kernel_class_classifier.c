@@ -425,7 +425,7 @@ static iree_status_t loom_kernel_class_build_residual_shape(
   bool different = false;
   for (uint32_t i = 0; i < decision->model->program.choice_count; ++i) {
     const loom_kernel_class_shape_t* shape = &decision->action_shapes[i];
-    different |= shape->count && !loom_kernel_class_shape_equal(shape, generic);
+    different |= !loom_kernel_class_shape_equal(shape, generic);
   }
   if (!different) {
     return iree_ok_status();
@@ -443,8 +443,16 @@ static iree_status_t loom_kernel_class_build_residual_shape(
       loom_decision_program_predicate_refiner_empty(),
       LOOM_DECISION_PROGRAM_DEFER_UNRESOLVED, *live_actions, &live_count,
       &result);
-  if (live_count == 1) {
-    decision->residual_shape = decision->action_shapes[(*live_actions)[0]];
+  const loom_kernel_class_shape_t* first =
+      &decision->action_shapes[(*live_actions)[0]];
+  for (uint32_t i = 1; i < live_count; ++i) {
+    decision->can_reduce_structure |= !loom_kernel_class_shape_equal(
+        &decision->action_shapes[(*live_actions)[i]], first);
+  }
+  // Equal feasible shapes already own the complete union. Otherwise at least
+  // one provider omits a requirement from that union and may free class budget.
+  if (!decision->can_reduce_structure) {
+    decision->residual_shape = *first;
     return iree_ok_status();
   }
   loom_value_set_id_t values = 0;
@@ -1786,8 +1794,13 @@ static iree_status_t loom_kernel_class_collect(
                            &residual, partition.candidate_site_classes,
                            site_count, candidate.count, options->class_limit,
                            completion_buckets, bucket_count));
+      // Before a complete plan fits, extra classes must buy potential
+      // structural relief. A pure refinement only consumes the budget needed
+      // by a later decision that can remove generic requirements.
       bool take = candidate.fits && candidate.publishable &&
-                  (!optional || !viable || complete);
+                  (!optional || complete ||
+                   (!viable && (candidate.count == partition.class_count ||
+                                decision->can_reduce_structure)));
       if (take) {
         IREE_RETURN_IF_ERROR(loom_kernel_class_commit(
             &candidate, i, sets, bindings, next_bindings, trace_ids,

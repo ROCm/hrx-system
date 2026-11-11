@@ -11,6 +11,7 @@ package(
 
 exports_files(
     [
+        "class_admission.loom",
         "command.loom",
         "providers.loom-test",
         "residual_shapes.loom",

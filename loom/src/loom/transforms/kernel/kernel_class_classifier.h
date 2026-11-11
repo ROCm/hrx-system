@@ -131,7 +131,7 @@ static_assert(sizeof(loom_kernel_class_action_t) == 8,
 
 // Boundary projections supplying static structure in one selected body.
 typedef struct loom_kernel_class_shape_t {
-  // Distinct projection ordinals; facts are evaluated only for live classes.
+  // Sorted distinct projection ordinals; evaluated only for live classes.
   const uint32_t* projections;
   // Number of required projections.
   uint32_t count;
@@ -187,8 +187,12 @@ typedef struct loom_kernel_class_decision_t {
   // Publication properties of the family hard requirements.
   loom_kernel_class_contract_flags_t hard_requirement_flags;
 
-  // Reserved bytes. Always zero.
-  uint8_t reserved[2];
+  // True if a source-feasible provider omits a generic structural requirement.
+  // Used only for class-budget admission, never provider applicability or rank.
+  bool can_reduce_structure;
+
+  // Reserved byte. Always zero.
+  uint8_t reserved;
 } loom_kernel_class_decision_t;
 
 // Immutable classifier owned by one materialized kernel source product.
