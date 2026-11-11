@@ -102,3 +102,13 @@ LOOM_CHECK_CASE(unused_view_carrier_preserves_producer_writes) {
   loom::check::expect_equal(second_write, 2u);
   loom::check::expect_equal(third_write, 3u);
 }
+
+LOOM_CHECK_CASE(constructor_transports_native_view) {
+  const auto result = constructed_native_constant(1u, 30u);
+  loom::check::expect_equal(result, 42u);
+}
+
+LOOM_CHECK_CASE(constructor_preserves_referent_identity) {
+  const auto result = constructed_reference_identity(7u, 42u);
+  loom::check::expect_equal(result, 42u);
+}

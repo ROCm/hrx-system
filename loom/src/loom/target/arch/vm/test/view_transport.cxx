@@ -175,3 +175,57 @@ unsigned unused_carrier(unsigned position) {
   }
   return output[position];
 }
+
+using NativePayload = loom::type::buffer<const unsigned char>;
+
+struct NativeSlice {
+  NativePayload data;
+  unsigned index;
+};
+
+struct ConstructedNativeView {
+  NativeSlice slice;
+  unsigned bias;
+
+  ConstructedNativeView(const NativeSlice& source, unsigned bias)
+      : slice(source), bias(bias) {}
+};
+
+// A user-provided constructor transports the buffer as a semantic
+// buffer component instead of requiring a byte representation of the record.
+unsigned constructed_native_view(NativePayload data, unsigned index,
+                                 unsigned bias) {
+  if (index >= 3u) {
+    return 0u;
+  }
+  ConstructedNativeView value(NativeSlice{data, index}, bias);
+  auto view = loom::buffer::view<loom::type::dynamic>(value.slice.data, {3u});
+  return loom::view::load(view, value.slice.index) + value.bias;
+}
+
+unsigned constructed_native_constant(unsigned index, unsigned bias) {
+  auto data = loom::buffer::root(loom::buffer::constant("\x0b\x0c\x0d"));
+  return constructed_native_view(data, index, bias);
+}
+
+struct ConstructorIdentityBox {
+  unsigned value;
+};
+
+struct ConstructorIdentityIterator {
+  const ConstructorIdentityBox* box;
+
+  explicit ConstructorIdentityIterator(const ConstructorIdentityBox& source)
+      : box(&source) {}
+
+  unsigned read() const { return box->value; }
+};
+
+// The constructed iterator is a semantic value, but its pointer component
+// continues to identify the separately addressable source object.
+unsigned constructed_reference_identity(unsigned initial, unsigned updated) {
+  ConstructorIdentityBox box{initial};
+  ConstructorIdentityIterator iterator(box);
+  box.value = updated;
+  return iterator.read();
+}

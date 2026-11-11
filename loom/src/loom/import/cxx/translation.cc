@@ -1438,7 +1438,9 @@ class Translator final : private Initialization::Evaluation {
         receivers_.enter(*record, std::nullopt, record->source->type());
         for (const auto& member : record->members) {
           values_.declare(member.source, *member.partition);
-          receivers_.mark_complete(member.source);
+          if (!defined.source->symbol->isConstructor()) {
+            receivers_.mark_complete(member.source);
+          }
         }
         for (const auto& group : implicit.projection->inputs) {
           auto value = region_value(region, argument_index, *group.partition);
@@ -1550,13 +1552,21 @@ class Translator final : private Initialization::Evaluation {
       ++parameter_index;
     }
     if (defined.source->symbol->isConstructor()) {
-      IREE_ASSERT(defined.implicit_object &&
-                  defined.implicit_object->abi == ImplicitObjectABI::Storage &&
-                  receivers_.current() && receivers_.current()->storage);
-      initialization_.constructor_receiver(
-          *receivers_.current()->storage, *receivers_.current()->record,
-          defined.implicit_object->object_type, defined.source->symbol,
-          defined.source);
+      IREE_ASSERT(defined.implicit_object && receivers_.current());
+      auto initializers = control_->constructor_initializers();
+      if (defined.implicit_object->abi == ImplicitObjectABI::Storage) {
+        IREE_ASSERT(receivers_.current()->storage);
+        initialization_.constructor_receiver(
+            *receivers_.current()->storage, *receivers_.current()->record,
+            defined.implicit_object->object_type, defined.source->symbol,
+            initializers, defined.source);
+      } else {
+        IREE_ASSERT(defined.implicit_object->abi == ImplicitObjectABI::Value &&
+                    !receivers_.current()->storage);
+        initialization_.value_constructor_receiver(
+            *receivers_.current()->record, defined.implicit_object->object_type,
+            defined.source->symbol, initializers, defined.source);
+      }
     }
     if (defined.source->symbol->isDestructor()) {
       activate_subobject_destructions(defined.source);
@@ -1806,9 +1816,12 @@ class Translator final : private Initialization::Evaluation {
                                 owner);
     }
     auto value = apply_constexpr_contract(
-        initializer ? expression(initializer)
-                    : initialization_.value(variable->type(), nullptr,
-                                            variable->constructor(), owner),
+        record_constructor_call
+            ? initialization_.value(variable->type(), initializer,
+                                    variable->constructor(), owner)
+        : initializer ? expression(initializer)
+                      : initialization_.value(variable->type(), nullptr,
+                                              variable->constructor(), owner),
         constexpr_contract);
     adopt_temporary_result(initializer);
     values_.set(variable, name(value, cxx::to_string(variable->name())));
@@ -3620,6 +3633,9 @@ class Translator final : private Initialization::Evaluation {
     std::span<cxx::Symbol* const> written_fields;
     // Exact evaluated temporary whose current payload cleanup must observe.
     std::optional<TemporaryReference> temporary;
+    // Whether this value receiver has no incoming object and returns a newly
+    // constructed complete record.
+    bool constructing = false;
   };
 
   ReceiverArgument current_receiver_argument(
@@ -4403,6 +4419,37 @@ class Translator final : private Initialization::Evaluation {
                           SourceArguments{.range = arguments}, owner);
   }
 
+  Value construct_value(const RecordPartition& record,
+                        const cxx::Type* object_type,
+                        cxx::FunctionSymbol* constructor,
+                        std::span<cxx::ExpressionAST* const> arguments,
+                        cxx::AST* owner) override {
+    auto* receiver_type = implicit_object_type(unit_, constructor);
+    IREE_ASSERT(receiver_type);
+    IREE_ASSERT(unit_.typeTraits().is_same(types_.unqualified(object_type),
+                                           types_.unqualified(receiver_type)));
+    if (functions_.receiver_requires_storage(constructor)) {
+      auto allocation = storage_.allocate(
+          object_type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, owner);
+      auto destination =
+          storage_.project(allocation.pointer, object_type, owner);
+      emit_constructor_call(destination, record, constructor,
+                            SourceArguments{.range = arguments}, owner);
+      return objects_.load(destination, object_type, owner);
+    }
+    ReceiverArgument receiver = {
+        .abi = ImplicitObjectABI::Value,
+        .record = &record,
+        .written_fields = functions_.receiver_writes(constructor),
+        .constructing = true,
+    };
+    auto result = emit_ordinary_call(
+        owner, constructor, SourceArguments{.range = arguments},
+        std::move(receiver), locations_.get(owner));
+    IREE_ASSERT(result.value && &result.value->partition() == &record);
+    return *result.value;
+  }
+
   const ArrayCopyInitialization* array_copy(cxx::AST* owner) override {
     return control_->array_copy(owner);
   }
@@ -4574,26 +4621,37 @@ class Translator final : private Initialization::Evaluation {
     size_t result_offset = ordinary_result_count;
     std::optional<Value> receiver_result;
     if (receiver_projection) {
-      auto updated = receiver->value;
-      for (const auto& group : receiver_projection->outputs) {
-        const size_t count = group.partition->component_count;
-        auto value = value_arena_.capture(
-            *group.partition, {loom_op_results(op) + result_offset, count});
-        if (receiver->current || receiver->target) {
-          write(
-              project_call_target(receiver->current ? current_receiver_target()
-                                                    : *receiver->target,
-                                  group, call),
-              value, call);
-        } else {
-          updated =
-              value_arena_.replace(*updated, group.component_offset, value);
+      if (receiver->constructing) {
+        IREE_ASSERT(!receiver->value && !receiver->current &&
+                    !receiver->target);
+        IREE_ASSERT_EQ(receiver_projection->output_component_count,
+                       receiver->record->component_count);
+        receiver_result = value_arena_.capture(
+            *receiver->record, {loom_op_results(op) + result_offset,
+                                receiver_projection->output_component_count});
+        result_offset += receiver_projection->output_component_count;
+      } else {
+        auto updated = receiver->value;
+        for (const auto& group : receiver_projection->outputs) {
+          const size_t count = group.partition->component_count;
+          auto value = value_arena_.capture(
+              *group.partition, {loom_op_results(op) + result_offset, count});
+          if (receiver->current || receiver->target) {
+            write(project_call_target(receiver->current
+                                          ? current_receiver_target()
+                                          : *receiver->target,
+                                      group, call),
+                  value, call);
+          } else {
+            updated =
+                value_arena_.replace(*updated, group.component_offset, value);
+          }
+          result_offset += count;
         }
-        result_offset += count;
-      }
-      if (updated && !receiver_projection->outputs.empty()) {
-        write_receiver(*receiver, *updated, call);
-        receiver_result = *updated;
+        if (updated && !receiver_projection->outputs.empty()) {
+          write_receiver(*receiver, *updated, call);
+          receiver_result = *updated;
+        }
       }
     } else if (receiver_writeback) {
       auto updated = *receiver->value;
@@ -4649,7 +4707,9 @@ class Translator final : private Initialization::Evaluation {
       result_offset += component_count;
     }
     if (returns_void) {
-      return {};
+      return receiver && receiver->constructing
+                 ? EvaluatedCallResult{.value = receiver_result}
+                 : EvaluatedCallResult{};
     }
     if (returns_receiver_alias) {
       return {

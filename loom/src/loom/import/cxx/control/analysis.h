@@ -297,6 +297,12 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Calls retained by the same source walk for sparse interprocedural effect
   // propagation before callable signatures are frozen.
   std::span<const DirectCall> calls() const { return calls_; }
+  // Frontend-normalized constructor member initializers in source execution
+  // order. Translation consumes this retained plan instead of rescanning the
+  // function body after callable analysis has completed.
+  cxx::List<cxx::MemInitializerAST*>* constructor_initializers() const {
+    return constructor_initializers_;
+  }
   // Static declarations in lexical order within this instantiated function.
   // The ordinal distinguishes same-named objects in separate nested scopes.
   std::span<cxx::InitDeclaratorAST* const> static_locals() const {
@@ -354,6 +360,10 @@ class ControlFlow final : private cxx::ASTVisitor {
   const RecordPartition* receiver_partition() const {
     return receiver_partition_;
   }
+  // Selects storage for a constructor that cannot publish one complete value
+  // without consuming an incoming receiver. Must precede call propagation so
+  // callers retain the selected object identity.
+  void select_constructor_receiver_storage();
   void configure_receiver(Construction::ParameterMode mode);
   void bind_field_calls(
       const std::unordered_map<cxx::FunctionSymbol*,
@@ -409,6 +419,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   void finalize_callable_effects();
 
  private:
+  bool receiver_can_construct_value() const;
+
   struct TemporaryDestructionFacts;
   struct ReferenceIdentityFacts;
   struct ReferenceWriteFacts;
@@ -534,8 +546,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   bool require_reference_storage(cxx::Symbol* parameter);
   bool require_address(cxx::Symbol* binding);
   void retain_automatic_storage(cxx::VariableSymbol* variable,
-                                cxx::ExpressionAST* initializer,
-                                bool record_constructor_call);
+                                cxx::ExpressionAST* initializer);
   bool add_receiver_write(cxx::Symbol* field);
   void retain_reference_receiver_write(const DirectCall& call);
   CallArgument retain_call_argument(cxx::ExpressionAST* expression);
@@ -676,6 +687,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   cxx::ExpressionAST* pointer_value_read_ = nullptr;
   // Calls retained once for sparse fixed-point propagation.
   std::vector<DirectCall> calls_;
+  // Frontend-owned constructor plan retained by the owning source traversal.
+  cxx::List<cxx::MemInitializerAST*>* constructor_initializers_ = nullptr;
   // Lvalue identities for assignments resolved after direct call propagation.
   std::vector<CallArgument> field_assignments_;
   // Array copy plans own normalized default arguments and source identity.
