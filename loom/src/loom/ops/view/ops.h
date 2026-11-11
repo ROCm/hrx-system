@@ -99,10 +99,10 @@ iree_status_t loom_view_reinterpret_facts(
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
-iree_status_t loom_view_refine_type_transfer(
+iree_status_t loom_value_refinement_type_transfer(
     loom_type_transfer_context_t* context,
     const loom_module_t* module, loom_op_t* op);
-iree_status_t loom_view_refine_verify(
+iree_status_t loom_value_refinement_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 

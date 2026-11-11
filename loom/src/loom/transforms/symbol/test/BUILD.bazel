@@ -30,6 +30,7 @@ loom_check_test_suite(
         "reference_boundaries.loom-test",
         "refine_boundaries.loom-test",
         "refine_boundary_returns.loom-test",
+        "refine_carriers.loom-test",
         "refine_dependent_boundaries.loom-test",
         "refine_dependent_forwarding.loom-test",
         "refine_encoding_identity.loom-test",

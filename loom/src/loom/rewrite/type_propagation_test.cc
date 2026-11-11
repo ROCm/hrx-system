@@ -15,8 +15,11 @@
 #include "loom/ir/module.h"
 #include "loom/ops/encoding/families.h"
 #include "loom/ops/encoding/ops.h"
+#include "loom/ops/group/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/tensor/ops.h"
 #include "loom/ops/test/ops.h"
+#include "loom/ops/tile/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
 #include "loom/pass/value_facts.h"
@@ -42,6 +45,9 @@ class TypePropagationTest : public ::testing::Test {
     RegisterDialect(LOOM_DIALECT_ENCODING, loom_encoding_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_VIEW, loom_view_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_VECTOR, loom_vector_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_TENSOR, loom_tensor_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_TILE, loom_tile_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_GROUP, loom_group_dialect_vtables);
     IREE_ASSERT_OK(loom_context_register_builtin_encoding_vtables(&context_));
     IREE_ASSERT_OK(
         loom_context_register_encoding_vtable(&context_, &kLayoutVtable));
@@ -1082,45 +1088,106 @@ TEST_F(TypePropagationTest, VectorTransposeNarrowsPermutedResultShape) {
   EXPECT_EQ(loom_type_dim_static_size_at(refined_type, 1), 4);
 }
 
-TEST_F(TypePropagationTest, ViewRefineNarrowsSourceStaticShapeAndEncoding) {
+TEST_F(TypePropagationTest, EveryShapedRefinementPropagatesInBothDirections) {
+  using BuildRefinement =
+      iree_status_t (*)(loom_builder_t*, loom_value_id_t, loom_type_t,
+                        loom_location_id_t, loom_op_t**);
+  struct Carrier {
+    // Carrier whose explicit refinement is exercised.
+    loom_type_kind_t kind;
+    // Typed production operation builder.
+    BuildRefinement build;
+    // First rank admitted by this carrier's type grammar.
+    uint8_t first_rank;
+  };
+  const Carrier carriers[] = {
+      {LOOM_TYPE_TENSOR, loom_tensor_refine_build, 0},
+      {LOOM_TYPE_TILE, loom_tile_refine_build, 0},
+      {LOOM_TYPE_VECTOR, loom_vector_refine_build, 1},
+      {LOOM_TYPE_VIEW, loom_view_refine_build, 0},
+      {LOOM_TYPE_GROUP, loom_group_refine_build, 1},
+  };
   uint16_t encoding_id = 0;
   IREE_ASSERT_OK(AddStaticLayout(&encoding_id));
-  loom_op_t* layout_op = NULL;
-  IREE_ASSERT_OK(loom_encoding_layout_dense_build(
-      &builder_, loom_type_encoding(), LOOM_LOCATION_UNKNOWN, &layout_op));
-  loom_value_id_t layout = loom_encoding_layout_dense_result(layout_op);
-
-  loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
-  loom_op_t* dim_op = NULL;
-  IREE_ASSERT_OK(BuildConstant(loom_attr_i64(0), index_type, &dim_op));
-
-  loom_type_t source_type = loom_type_shaped_1d(
-      LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_F32,
-      loom_dim_pack_dynamic(loom_test_constant_result(dim_op)), 0);
-  source_type.encoding_id = (uint16_t)layout;
-  source_type.encoding_flags = LOOM_ENCODING_FLAG_SSA;
-
-  loom_type_t result_type =
-      loom_type_shaped_1d(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_F32,
-                          loom_dim_pack_static(16), encoding_id);
-
-  loom_op_t* source_op = NULL;
-  IREE_ASSERT_OK(BuildConstant(loom_attr_i64(0), source_type, &source_op));
-  loom_op_t* refine_op = NULL;
-  IREE_ASSERT_OK(
-      loom_view_refine_build(&builder_, loom_test_constant_result(source_op),
-                             result_type, LOOM_LOCATION_UNKNOWN, &refine_op));
-
-  bool changed = false;
-  IREE_EXPECT_OK(Propagate(refine_op, &changed));
-
-  EXPECT_TRUE(changed);
-  loom_type_t refined_source =
-      loom_module_value_type(module_, loom_test_constant_result(source_op));
-  EXPECT_FALSE(loom_type_dim_is_dynamic_at(refined_source, 0));
-  EXPECT_EQ(loom_type_dim_static_size_at(refined_source, 0), 16);
-  EXPECT_TRUE(loom_type_has_static_encoding(refined_source));
-  EXPECT_EQ(refined_source.encoding_id, encoding_id);
+  loom_op_t* layout = nullptr;
+  IREE_ASSERT_OK(loom_encoding_define_build(
+      &builder_, encoding_id, nullptr, 0,
+      loom_type_encoding_with_role(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT),
+      LOOM_LOCATION_UNKNOWN, &layout));
+  uint64_t dynamic_dimensions[LOOM_TYPE_MAX_RANK];
+  uint64_t static_dimensions[LOOM_TYPE_MAX_RANK];
+  for (uint8_t axis = 0; axis < LOOM_TYPE_MAX_RANK; ++axis) {
+    loom_op_t* extent = nullptr;
+    IREE_ASSERT_OK(BuildConstant(loom_attr_i64(axis + 2),
+                                 loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+                                 &extent));
+    dynamic_dimensions[axis] =
+        loom_dim_pack_dynamic(loom_test_constant_result(extent));
+    static_dimensions[axis] = loom_dim_pack_static(axis + 2);
+  }
+  auto shape = [&](loom_type_kind_t kind, uint8_t rank, bool dynamic) {
+    const uint64_t* dimensions =
+        dynamic ? dynamic_dimensions : static_dimensions;
+    loom_type_t type = {};
+    uint8_t flags = rank <= 2 ? LOOM_TYPE_FLAG_INLINE_DIMS : 0;
+    if (!dynamic || rank == 0) {
+      flags |= LOOM_TYPE_FLAG_ALL_STATIC;
+    }
+    type.header = loom_type_make_header(
+        kind,
+        kind == LOOM_TYPE_GROUP ? LOOM_SCALAR_TYPE_NONE : LOOM_SCALAR_TYPE_F32,
+        rank, flags);
+    if (rank <= 2) {
+      for (uint8_t axis = 0; axis < rank; ++axis) {
+        type.dims[axis] = dimensions[axis];
+      }
+    } else {
+      type.dims[0] = reinterpret_cast<uintptr_t>(dimensions);
+    }
+    if (loom_type_can_have_encoding(type)) {
+      type.encoding_id =
+          dynamic ? (uint16_t)loom_encoding_define_result(layout) : encoding_id;
+      type.encoding_flags = dynamic ? LOOM_ENCODING_FLAG_SSA : 0;
+    }
+    return type;
+  };
+  for (const Carrier& carrier : carriers) {
+    for (uint8_t rank = carrier.first_rank; rank <= LOOM_TYPE_MAX_RANK;
+         ++rank) {
+      for (bool narrow_source : {false, true}) {
+        SCOPED_TRACE(::testing::Message()
+                     << "kind=" << int(carrier.kind) << " rank=" << int(rank)
+                     << " narrow_source=" << narrow_source);
+        const loom_type_t source_type =
+            shape(carrier.kind, rank, narrow_source);
+        const loom_type_t result_type =
+            shape(carrier.kind, rank, !narrow_source);
+        loom_op_t* source = nullptr;
+        IREE_ASSERT_OK(BuildConstant(loom_attr_i64(0), source_type, &source));
+        loom_op_t* refine = nullptr;
+        IREE_ASSERT_OK(
+            carrier.build(&builder_, loom_test_constant_result(source),
+                          result_type, LOOM_LOCATION_UNKNOWN, &refine));
+        bool changed = false;
+        IREE_ASSERT_OK(Propagate(refine, &changed));
+        EXPECT_EQ(changed,
+                  rank != 0 || loom_type_can_have_encoding(source_type));
+        for (loom_value_id_t value :
+             {loom_test_constant_result(source), loom_op_results(refine)[0]}) {
+          const loom_type_t type = loom_module_value_type(module_, value);
+          EXPECT_EQ(loom_type_kind(type), carrier.kind);
+          EXPECT_EQ(loom_type_rank(type), rank);
+          if (loom_type_can_have_encoding(type)) {
+            EXPECT_TRUE(loom_type_has_static_encoding(type));
+            EXPECT_EQ(type.encoding_id, encoding_id);
+          }
+          for (uint8_t axis = 0; axis < rank; ++axis) {
+            EXPECT_EQ(loom_type_dim(type, axis), static_dimensions[axis]);
+          }
+        }
+      }
+    }
+  }
 }
 
 }  // namespace

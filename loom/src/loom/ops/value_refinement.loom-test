@@ -1,0 +1,63 @@
+// RUN: verify
+
+func.def @tensor_conflicting_extent(%source: tensor<2x3x4xf32>) {
+  // ERROR@+1: SHAPE/001 "source static dimension" "4" "result static dimension" "5"
+  %refined = tensor.refine %source : tensor<2x3x4xf32> -> tensor<2x3x5xf32>
+  func.return
+}
+
+// ====
+
+func.def @tensor_different_rank(%source: tensor<2x3x4xf32>) {
+  // ERROR@+1: SHAPE/001
+  %refined = tensor.refine %source : tensor<2x3x4xf32> -> tensor<2x3xf32>
+  func.return
+}
+
+// ====
+
+func.def @tensor_different_element(%source: tensor<4xf32>) {
+  // ERROR@+1: TYPE/002
+  %refined = tensor.refine %source : tensor<4xf32> -> tensor<4xi32>
+  func.return
+}
+
+// ====
+
+func.def @tile_conflicting_extent(%source: tile<2x3x4xf32>) {
+  // ERROR@+1: SHAPE/001 "source static dimension" "4" "result static dimension" "5"
+  %refined = tile.refine %source : tile<2x3x4xf32> -> tile<2x3x5xf32>
+  func.return
+}
+
+// ====
+
+func.def @tile_different_rank(%source: tile<2x3x4xf32>) {
+  // ERROR@+1: SHAPE/001
+  %refined = tile.refine %source : tile<2x3x4xf32> -> tile<2x3xf32>
+  func.return
+}
+
+// ====
+
+func.def @tile_different_element(%source: tile<4xf32>) {
+  // ERROR@+1: TYPE/002
+  %refined = tile.refine %source : tile<4xf32> -> tile<4xi32>
+  func.return
+}
+
+// ====
+
+func.def @group_conflicting_extent(%source: group<2x3x4>) {
+  // ERROR@+1: SHAPE/001 "source static dimension" "4" "result static dimension" "5"
+  %refined = group.refine %source : group<2x3x4> -> group<2x3x5>
+  func.return
+}
+
+// ====
+
+func.def @group_different_rank(%source: group<2x3x4>) {
+  // ERROR@+1: SHAPE/001
+  %refined = group.refine %source : group<2x3x4> -> group<2x3>
+  func.return
+}

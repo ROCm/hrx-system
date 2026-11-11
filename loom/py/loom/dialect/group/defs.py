@@ -16,6 +16,7 @@ from loom.dsl import (
     Result,
     TypeDef,
     value_duplication_op,
+    value_refinement_op,
 )
 
 group_ops = Dialect(
@@ -48,6 +49,14 @@ group_create = Op(
     examples=["%workers = group.create %worker_count : index -> group<[%worker_count]>"],
 )
 
+group_refine = value_refinement_op(
+    "group.refine",
+    group=group_ops,
+    carrier=GROUP,
+    doc=("Assert more precise shape information for the same participant domain. Source and result describe the same value and ownership identity; this operation performs no conversion or copy."),
+    examples=["%refined = group.refine %source : group<[%count]> -> group<16>"],
+)
+
 group_duplicate = value_duplication_op(
     "group.duplicate",
     group=group_ops,
@@ -57,4 +66,4 @@ group_duplicate = value_duplication_op(
 )
 
 ALL_GROUP_TYPES: tuple[TypeDef, ...] = ()
-ALL_GROUP_OPS: tuple[Op, ...] = (group_create, group_duplicate)
+ALL_GROUP_OPS: tuple[Op, ...] = (group_create, group_refine, group_duplicate)

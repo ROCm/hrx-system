@@ -113,33 +113,6 @@ static iree_status_t loom_view_verify_atomic_cmpxchg_ordering(
       loom_atomic_cmpxchg_ordering_error_expected_constraint(error));
 }
 
-static iree_status_t loom_view_refine_verify_static_dimensions(
-    const loom_op_t* op, iree_diagnostic_emitter_t emitter,
-    loom_type_t source_type, loom_type_t result_type) {
-  uint8_t rank = loom_type_rank(source_type);
-  for (uint8_t axis = 0; axis < rank; ++axis) {
-    if (loom_type_dim_is_dynamic_at(source_type, axis) ||
-        loom_type_dim_is_dynamic_at(result_type, axis)) {
-      continue;
-    }
-    int64_t source_size = loom_type_dim_static_size_at(source_type, axis);
-    int64_t result_size = loom_type_dim_static_size_at(result_type, axis);
-    if (source_size == result_size) {
-      continue;
-    }
-
-    loom_diagnostic_param_t params[] = {
-        loom_param_string(IREE_SV("source static dimension")),
-        loom_param_i64(source_size),
-        loom_param_string(IREE_SV("result static dimension")),
-        loom_param_i64(result_size),
-    };
-    return loom_view_emit(emitter, op, LOOM_ERR_SHAPE_001, params,
-                          IREE_ARRAYSIZE(params));
-  }
-  return iree_ok_status();
-}
-
 static bool loom_view_subview_dense_suffixes_equal(loom_type_t source_type,
                                                    loom_type_t result_type) {
   const uint8_t rank = loom_type_rank(source_type);
@@ -360,22 +333,6 @@ iree_status_t loom_view_subview_verify(const loom_module_t* module,
                           IREE_ARRAYSIZE(params));
   }
   return iree_ok_status();
-}
-
-iree_status_t loom_view_refine_verify(const loom_module_t* module,
-                                      const loom_op_t* op,
-                                      iree_diagnostic_emitter_t emitter) {
-  loom_type_t source_type =
-      loom_module_value_type(module, loom_view_refine_source(op));
-  loom_type_t result_type =
-      loom_module_value_type(module, loom_view_refine_result(op));
-
-  if (!loom_type_is_view(source_type) || !loom_type_is_view(result_type) ||
-      !loom_type_rank_equals(source_type, result_type)) {
-    return iree_ok_status();
-  }
-  return loom_view_refine_verify_static_dimensions(op, emitter, source_type,
-                                                   result_type);
 }
 
 iree_status_t loom_view_bitcast_verify(const loom_module_t* module,

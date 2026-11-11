@@ -798,8 +798,8 @@ iree_status_t loom_type_transfer_seed_static_structure_from_type(
   loom_type_t current_type =
       loom_type_propagator_value_type(propagator, value_id);
   if (propagator->scope == LOOM_TYPE_PROPAGATOR_SCOPE_ALL &&
-      loom_type_is_shaped(current_type) &&
-      loom_type_is_shaped(candidate_type) &&
+      loom_type_has_dimensions(current_type) &&
+      loom_type_has_dimensions(candidate_type) &&
       loom_type_rank(current_type) == loom_type_rank(candidate_type)) {
     uint8_t rank = loom_type_rank(candidate_type);
     uint64_t candidate_dimensions[LOOM_TYPE_MAX_RANK] = {0};

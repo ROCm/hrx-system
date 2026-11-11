@@ -13,6 +13,7 @@ load(
     "loom_cc_test",
     "loom_generated_source_family",
 )
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -98,6 +99,26 @@ loom_cc_library(
         ":headers",
         "//loom/src/loom/ir:facts",
     ],
+)
+
+loom_cc_library(
+    name = "value_refinement",
+    srcs = ["value_refinement.c"],
+    hdrs = ["value_refinement.h"],
+    deps = [
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/rewrite:type_propagation",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_check_test(
+    name = "value_refinement_verification",
+    src = "value_refinement.loom-test",
 )
 
 # Complete operation support. Native constructors can select :builders without

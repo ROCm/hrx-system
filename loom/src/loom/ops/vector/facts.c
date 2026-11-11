@@ -1900,18 +1900,6 @@ static void loom_vector_fmai_transfer(const loom_value_facts_t* a,
 // Construction
 //===----------------------------------------------------------------------===//
 
-iree_status_t loom_vector_refine_facts(loom_fact_context_t* context,
-                                       const loom_module_t* module,
-                                       const loom_op_t* op,
-                                       const loom_value_facts_t* operand_facts,
-                                       loom_value_facts_t* result_facts) {
-  (void)context;
-  (void)module;
-  (void)op;
-  result_facts[0] = operand_facts[0];
-  return iree_ok_status();
-}
-
 // Returns the scalar before an exact floating-point extension, when present.
 // Operand roles carry the conversion semantics so this remains independent of
 // any particular scalar dialect operation.
