@@ -60,13 +60,13 @@ jobs:
       - name: Install compiler and host tools
         run: |
           case "$PROFILE" in Release|Tracy|Debug|ASAN) ;; *) exit 2 ;; esac
-          curl --fail --location --silent --show-error \
-            https://apt.llvm.org/llvm-snapshot.gpg.key --output "$RUNNER_TEMP/llvm.asc"
-          echo "8b2a587ffd672c4687e7581dad4b2f6c1bb2ad6b480cd9771ba2ff48e0b8c75d  $RUNNER_TEMP/llvm.asc" | sha256sum --check
-          sudo install -m 644 "$RUNNER_TEMP/llvm.asc" /usr/share/keyrings/llvm.asc
+          llvm_key_path=.github/scripts/llvm_snapshot_archive_key.asc
+          echo "8b2a587ffd672c4687e7581dad4b2f6c1bb2ad6b480cd9771ba2ff48e0b8c75d  $llvm_key_path" | sha256sum --check
+          sudo install -m 644 "$llvm_key_path" /usr/share/keyrings/llvm.asc
           echo 'deb [signed-by=/usr/share/keyrings/llvm.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main' | sudo tee /etc/apt/sources.list.d/llvm.list
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends \
+          apt_options=(-o Acquire::ForceIPv4=true -o Acquire::Retries=3)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install --yes --no-install-recommends \
             "clang-22=$LLVM_APT_VERSION" "lld-22=$LLVM_APT_VERSION" \
             "llvm-22=$LLVM_APT_VERSION" "libclang-rt-22-dev=$LLVM_APT_VERSION" \
             g++-13 patchelf p7zip-full python3-venv
