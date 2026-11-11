@@ -27,6 +27,7 @@ exports_files([
     "byte_copy_unaligned.loom",
     "completed_tick.cxx",
     "completed_tick.loom",
+    "cross_process_progress.loom",
     "device_sdma.loom",
     "device_sdma_batched.loom",
     "device_sdma_lookahead.loom",
@@ -150,6 +151,20 @@ amdf_cc_library(
     name = "program_atomic",
     testonly = True,
     hdrs = ["program_atomic.h"],
+)
+
+amdf_cc_library(
+    name = "cross_process_progress",
+    testonly = True,
+    hdrs = ["cross_process_progress.h"],
+)
+
+amdf_cts_gpu_kernel_set(
+    name = "cross_process_progress_kernels",
+    srcs = ["cross_process_progress.loom"],
+    entry_point = "cross_process_progress",
+    namespace = "kernels::cross_process_progress",
+    targets = AMDF_CTS_GPU_KERNEL_TARGETS,
 )
 
 amdf_cts_gpu_kernel_set(
@@ -611,6 +626,8 @@ amdf_cc_test(
     deps = [
         ":byte_copy_unaligned",
         ":byte_copy_unaligned_kernels",
+        ":cross_process_progress",
+        ":cross_process_progress_kernels",
         ":device_sdma",
         ":device_sdma_batched",
         ":device_sdma_batched_kernels",

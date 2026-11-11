@@ -1,0 +1,36 @@
+// One workitem remains live while another process activates the same physical
+// endpoint. The host may release it after activation; a fixed iteration limit
+// preserves progress when native activation legitimately serializes behind
+// accepted compute. The recurrence supplies an exact, cheaply checked result.
+kernel.def export("cross_process_progress") @cross_process_progress() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%control: buffer, %payload: buffer, %iteration_limit: i32, %seed: i32) {
+  %origin = index.constant 0 : offset
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %multiplier = scalar.constant 1664525 : i32
+  %increment = scalar.constant 1013904223 : i32
+  %control_aligned = buffer.assume.alignment %control {minimum_alignment = 64} : buffer
+  %payload_aligned = buffer.assume.alignment %payload {minimum_alignment = 4} : buffer
+  %control_words = buffer.view %control_aligned[%origin] : buffer -> view<16xi32>
+  %payload_word = buffer.view %payload_aligned[%origin] : buffer -> view<1xi32>
+
+  view.atomic.store %one, %control_words[4] {ordering = release, scope = system} : i32, view<16xi32>
+  %iterations, %result, %released = scf.while(%iteration = %zero : i32, %value = %seed : i32, %release = %zero : i32) -> (i32, i32, i32) {
+    %below_limit = scalar.cmpi ult, %iteration, %iteration_limit : i32
+    %not_released = scalar.cmpi eq, %release, %zero : i32
+    %running = scalar.andi %below_limit, %not_released : i1
+    scf.condition %running, %iteration, %value, %release : i1, i32, i32, i32
+  } do(%iteration: i32, %value: i32, %release: i32) {
+    %product = scalar.muli %value, %multiplier : i32
+    %next_value = scalar.addi %product, %increment : i32
+    %next_iteration = scalar.addi %iteration, %one : i32
+    %next_release = view.atomic.load %control_words[5] {ordering = acquire, scope = system} : view<16xi32> -> i32
+    scf.yield %next_iteration, %next_value, %next_release : i32, i32, i32
+  }
+  view.store %iterations, %control_words[6] : i32, view<16xi32>
+  view.store %result, %control_words[7] : i32, view<16xi32>
+  view.store %result, %payload_word[0] : i32, view<1xi32>
+  kernel.return
+}

@@ -14,6 +14,8 @@
 #include "gtest/gtest.h"
 #include "libamdf/cts/gpu/kernels/byte_copy_unaligned.h"
 #include "libamdf/cts/gpu/kernels/byte_copy_unaligned_kernels.h"
+#include "libamdf/cts/gpu/kernels/cross_process_progress.h"
+#include "libamdf/cts/gpu/kernels/cross_process_progress_kernels.h"
 #include "libamdf/cts/gpu/kernels/device_sdma.h"
 #include "libamdf/cts/gpu/kernels/device_sdma_batched.h"
 #include "libamdf/cts/gpu/kernels/device_sdma_batched_kernels.h"
@@ -49,6 +51,20 @@
 namespace {
 
 using kernels::testing::CheckArgumentLayout;
+
+TEST(KernelTest, CrossProcessProgressProductsPreserveTheCallerContract) {
+  namespace protocol = kernels::cross_process_progress;
+  for (const auto& kernel : protocol::kKernels.variants) {
+    SCOPED_TRACE(kernel.target);
+    CheckArgumentLayout(
+        kernel, protocol::kArgumentByteOffsets, protocol::kArgumentByteLengths,
+        protocol::kArgumentValueKinds, sizeof(protocol::Arguments),
+        alignof(protocol::Arguments));
+    EXPECT_EQ(kernel.workgroup_size(), 1u);
+    EXPECT_EQ(kernel.group_segment_byte_length, 0u);
+    EXPECT_EQ(kernel.private_segment_byte_length, 0u);
+  }
+}
 
 TEST(KernelTest, ProgramAtomicProductsPreserveTheCallerContract) {
   namespace protocol = kernels::program_atomic;
