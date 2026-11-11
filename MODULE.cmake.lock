@@ -180,6 +180,7 @@ set(IREE_DEP_LIBBACKTRACE_PATCHES
   "//build_tools/third_party/libbacktrace:ignore_nonruntime_symbols.patch"
   "//build_tools/third_party/libbacktrace:zero_size_vectors.patch"
   "//build_tools/third_party/libbacktrace:iterative_function_scopes.patch"
+  "//build_tools/third_party/libbacktrace:portable_test_warnings.patch"
 )
 set(IREE_DEP_LIBBACKTRACE_PATCH_ARGS
   "-p1"
@@ -291,6 +292,7 @@ set(IREE_DEP_MIMALLOC_STRIP_PREFIX "mimalloc-3.5.3")
 set(IREE_DEP_MIMALLOC_BUILD_FILE "//build_tools/third_party/mimalloc:mimalloc.BUILD.bazel")
 set(IREE_DEP_MIMALLOC_PATCHES
   "//build_tools/third_party/mimalloc:c_new_handler.patch"
+  "//build_tools/third_party/mimalloc:guarded_page_gcc_warning.patch"
 )
 set(IREE_DEP_MIMALLOC_PATCH_ARGS
   "-p1"

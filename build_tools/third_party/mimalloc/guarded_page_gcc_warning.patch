@@ -1,0 +1,8 @@
+diff --git a/src/sample-guarded.c b/src/sample-guarded.c
+--- a/src/sample-guarded.c
++++ b/src/sample-guarded.c
+@@ -48,3 +48,4 @@ static void* mi_block_ptr_set_guarded(mi_block_t* block, size_t obj_size, size_t* usable_size) {
+   // todo: we can still make padding work by moving it out of the guard page area
+   mi_page_t* const page = _mi_ptr_page(block);
++  if mi_unlikely(page == NULL) return NULL;  // should not happen, but avoids gcc -Wstringop-overflow warnings
+   mi_page_set_has_interior_pointers(page, true);
