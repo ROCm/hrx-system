@@ -7473,6 +7473,52 @@ class Translator final : private Initialization::Evaluation {
       effect(nested->expression);
       return;
     }
+    if (ast->valueCategory != cxx::ValueCategory::kPrValue &&
+        !unit_.typeTraits().is_volatile(ast->type)) {
+      // Discarded glvalues evaluate their selection and call effects without
+      // fetching the designated value. Volatile observations retain loads.
+      if (cxx::ast_cast<cxx::IdExpressionAST>(ast)) {
+        return;
+      }
+      if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(ast)) {
+        effect(member->baseExpression);
+        return;
+      }
+      if (auto* operand = explicit_reference_operand(unit_, ast)) {
+        effect(operand);
+        return;
+      }
+      if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(ast);
+          cast && !cast->conversionFunction) {
+        effect(cast->expression);
+        return;
+      }
+      if (auto* unary = cxx::ast_cast<cxx::UnaryExpressionAST>(ast);
+          unary && !unary->symbol && unary->op == cxx::TokenKind::T_STAR) {
+        effect(unary->expression);
+        return;
+      }
+      if (auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(ast);
+          subscript && !subscript->symbol) {
+        effect(subscript->baseExpression);
+        effect(subscript->indexExpression);
+        return;
+      }
+      if (auto* select = cxx::ast_cast<cxx::ConditionalExpressionAST>(ast)) {
+        conditional(
+            ast, expression(select->condition).ssa(),
+            [&] { effect(select->iftrueExpression); },
+            [&] { effect(select->iffalseExpression); });
+        return;
+      }
+      auto call = direct_operator_call(ast);
+      if (cxx::ast_cast<cxx::CallExpressionAST>(ast) ||
+          (call && !types_.is_trivial_value_operation(call->function))) {
+        if (reference_call(ast)) {
+          return;
+        }
+      }
+    }
     if (auto call = direct_operator_call(ast);
         call && types_.unqualified(ast->type)->kind() == cxx::TypeKind::kVoid) {
       if (ordinary_operator_call(ast, *call).value) {

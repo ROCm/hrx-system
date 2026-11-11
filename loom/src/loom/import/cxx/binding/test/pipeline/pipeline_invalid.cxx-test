@@ -204,7 +204,7 @@ namespace loomt = loom::type;
 #include <loomcxx/pipeline.h>
 [[loom::pipeline("kernel")]] void kernel_intrinsic_outside_strand() {
   // ERROR@+1: LOWERING/059 "kernel intrinsic in a pipeline requires a strand body"
-  (void)loom::kernel::workitem::id.x;
+  unsigned coordinate = loom::kernel::workitem::id.x;
 }
 
 // ====
