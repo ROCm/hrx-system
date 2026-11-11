@@ -49,19 +49,19 @@ unsigned ordinary(const unsigned* input, unsigned* output) {
 }
 // ----
 func.def public @ordinary(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) -> (i32) {
-  %33 = index.cast %input_byte_offset : offset to i64
-  %35 = scalar.assume %33 [range(%33, 0, 9223372036854775807)] : i64
-  %36 = index.cast %35 : i64 to offset
-  %37 = buffer.view %input[%36] : buffer -> view<1xi32>
-  %first = view.load<root_in_bounds> %37[0] : view<1xi32> -> i32
-  %53 = index.cast %output_byte_offset : offset to i64
-  %55 = scalar.assume %53 [range(%53, 0, 9223372036854775807)] : i64
-  %56 = index.cast %55 : i64 to offset
-  %57 = buffer.view %output[%56] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %first, %57[0] : i32, view<1xi32>
-  view.store<root_in_bounds> %first, %57[0] : i32, view<1xi32>
-  %67 = scalar.addi %first, %first : i32
-  func.return %67 : i32
+  %11 = index.cast %input_byte_offset : offset to i64
+  %13 = scalar.assume %11 [range(%11, 0, 9223372036854775807)] : i64
+  %14 = index.cast %13 : i64 to offset
+  %15 = buffer.view %input[%14] : buffer -> view<1xi32>
+  %first = view.load<root_in_bounds> %15[0] : view<1xi32> -> i32
+  %31 = index.cast %output_byte_offset : offset to i64
+  %33 = scalar.assume %31 [range(%31, 0, 9223372036854775807)] : i64
+  %34 = index.cast %33 : i64 to offset
+  %35 = buffer.view %output[%34] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %first, %35[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %first, %35[0] : i32, view<1xi32>
+  %45 = scalar.addi %first, %first : i32
+  func.return %45 : i32
 }
 
 // ====

@@ -247,18 +247,18 @@ void observe(Device* device) {
 
 // ----
 func.def public @observe(%device: buffer, %device_byte_offset: offset) {
-  %6 = index.constant 4 : offset
-  %7 = index.add %device_byte_offset, %6 : offset
-  %8 = buffer.view %device[%7] : buffer -> view<1xi32>
-  %status$9 = view.load<volatile|root_in_bounds> %8[0] : view<1xi32> -> i32
-  %22 = scalar.constant 8 : i64
-  %14 = index.cast %device_byte_offset : offset to i64
-  %15 = scalar.addi %14, %22 : i64
-  %16 = scalar.assume %15 [range(%15, 0, 9223372036854775807)] : i64
-  %17 = index.cast %16 : i64 to offset
-  %19 = index.add %17, %6 : offset
-  %20 = buffer.view %device[%19] : buffer -> view<1xi32>
-  %status$21 = view.load<volatile|root_in_bounds> %20[0] : view<1xi32> -> i32
+  %2 = index.constant 4 : offset
+  %3 = index.add %device_byte_offset, %2 : offset
+  %4 = buffer.view %device[%3] : buffer -> view<1xi32>
+  %status$5 = view.load<volatile|root_in_bounds> %4[0] : view<1xi32> -> i32
+  %18 = scalar.constant 8 : i64
+  %10 = index.cast %device_byte_offset : offset to i64
+  %11 = scalar.addi %10, %18 : i64
+  %12 = scalar.assume %11 [range(%11, 0, 9223372036854775807)] : i64
+  %13 = index.cast %12 : i64 to offset
+  %15 = index.add %13, %2 : offset
+  %16 = buffer.view %device[%15] : buffer -> view<1xi32>
+  %status$17 = view.load<volatile|root_in_bounds> %16[0] : view<1xi32> -> i32
   func.return
 }
 

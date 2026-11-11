@@ -462,6 +462,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   void visit(cxx::LambdaExpressionAST* ast) override;
   void visit(cxx::SubscriptExpressionAST* ast) override;
   void visit(cxx::ImplicitCastExpressionAST* ast) override;
+  void visit(cxx::BuiltinBitCastExpressionAST* ast) override;
   void visit(cxx::InitDeclaratorAST* ast) override;
   void visit(cxx::StructuredBindingDeclarationAST* ast) override;
   void visit(cxx::ParenMemInitializerAST* ast) override;
@@ -487,6 +488,8 @@ class ControlFlow final : private cxx::ASTVisitor {
       const CallArgument& argument,
       StorageDemand demand = StorageDemand::Representation) const;
   void record_parameter_read(cxx::ExpressionAST* expression);
+  void record_copy_read(const cxx::Type* type,
+                        cxx::List<cxx::ExpressionAST*>* arguments);
   void record_parameter_assignment(cxx::ExpressionAST* expression);
   void record_member_binding_read(cxx::ExpressionAST* expression);
   bool normalize_field_groups(bool inputs);

@@ -1566,6 +1566,10 @@ void ControlFlow::record_parameter_read(cxx::ExpressionAST* expression) {
   // initializer beneath its frontend conversion (including semantic handles).
   cxx::Initializer initializer(expression);
   auto* value = initializer.singleExpression();
+  if (auto* list = cxx::ast_cast<cxx::BracedInitListAST>(expression)) {
+    record_copy_read(list->type, list->expressionList);
+    return;
+  }
   if (value && receiver_partition_ && is_current_object(unit_, value)) {
     for (const auto& member : receiver_partition_->members) {
       construction_.read(member.source, 0, member.partition->component_count);
@@ -1576,6 +1580,16 @@ void ControlFlow::record_parameter_read(cxx::ExpressionAST* expression) {
     construction_.read(
         selected->binding, selected->component_offset,
         selected->member ? selected->member->component_count : SIZE_MAX);
+  }
+}
+
+void ControlFlow::record_copy_read(const cxx::Type* type,
+                                   cxx::List<cxx::ExpressionAST*>* arguments) {
+  // A single same-type initializer copies the object, including when the
+  // frontend preserves a glvalue instead of inserting a value conversion.
+  if (construction_.has_parameters() && type && arguments && !arguments->next &&
+      types_.unqualified(type) == types_.unqualified(arguments->value->type)) {
+    record_parameter_read(arguments->value);
   }
 }
 
@@ -2981,10 +2995,7 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
   if (variable) {
     if (!unit_.typeTraits().is_reference(variable->type()) &&
         ast->initializer) {
-      cxx::Initializer initializer(ast->initializer);
-      if (auto* expression = initializer.singleExpression()) {
-        record_parameter_read(expression);
-      }
+      record_parameter_read(ast->initializer);
     }
     if (unit_.typeTraits().is_reference(variable->type()) && ast->initializer) {
       auto* referent = cxx::Initializer(ast->initializer)
@@ -3078,6 +3089,11 @@ void ControlFlow::visit(cxx::ImplicitCastExpressionAST* ast) {
                           /*storage_receiver=*/true, ast);
 }
 
+void ControlFlow::visit(cxx::BuiltinBitCastExpressionAST* ast) {
+  cxx::ASTVisitor::visit(ast);
+  record_parameter_read(ast->expression);
+}
+
 bool ControlFlow::retain_array_copy(const cxx::Type* type,
                                     cxx::ExpressionAST* initializer,
                                     cxx::FunctionSymbol* constructor,
@@ -3140,9 +3156,14 @@ void ControlFlow::retain_member_constructor(
     return;
   }
   auto* field = initializer->symbol;
-  if (!is_direct_subobject(field) ||
-      !types_.record_constructor_requires_call(
+  if (!is_direct_subobject(field)) {
+    return;
+  }
+  if (!types_.record_constructor_requires_call(
           source_object_type(field), initializer->constructor, initializer)) {
+    if (auto** arguments = cxx::memInitializerListSlot(initializer)) {
+      record_copy_read(source_object_type(field), *arguments);
+    }
     return;
   }
   auto* source = cxx::memInitializerClause(unit_.arena(), initializer);
@@ -3196,6 +3217,8 @@ void ControlFlow::visit(cxx::TypeConstructionAST* ast) {
     retain_constructor_call(ast->constructorSymbol, ast,
                             CallArgument{.inherent_storage = true},
                             /*storage_receiver=*/true, ast);
+  } else {
+    record_copy_read(ast->type, ast->expressionList);
   }
   analyze_default_constructor(ast->type, ast->constructorSymbol, ast);
 }
@@ -3207,6 +3230,8 @@ void ControlFlow::visit(cxx::BracedTypeConstructionAST* ast) {
     retain_constructor_call(ast->constructorSymbol, ast,
                             CallArgument{.inherent_storage = true},
                             /*storage_receiver=*/true, ast);
+  } else if (ast->bracedInitList) {
+    record_copy_read(ast->type, ast->bracedInitList->expressionList);
   }
   analyze_default_constructor(ast->type, ast->constructorSymbol, ast);
 }

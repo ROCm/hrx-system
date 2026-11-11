@@ -235,26 +235,26 @@ func.def @copy_observations_const_unsigned_int_unsigned_int(%input: buffer, %inp
   %count$19 = scalar.assume %count$17 [range(%count$17, 0, 64)] : i32
   %20 = scalar.cmpi ult, %lane, %count$19 : i32
   scf.if %20 {
-    %119 = scalar.assume %lane [ge(%lane, 0), lt(%lane, %count$19)] : i32
-    %21 = scalar.extui %119 : i32 to i64
-    %125 = scalar.constant 2 : i64
-    %126 = scalar.shli %21, %125 : i64
+    %108 = scalar.assume %lane [ge(%lane, 0), lt(%lane, %count$19)] : i32
+    %21 = scalar.extui %108 : i32 to i64
+    %114 = scalar.constant 2 : i64
+    %115 = scalar.shli %21, %114 : i64
     %24 = index.cast %input_byte_offset : offset to i64
-    %25 = scalar.addi %24, %126 : i64
+    %25 = scalar.addi %24, %115 : i64
     %26 = scalar.assume %25 [range(%25, 0, 9223372036854775807)] : i64
     %27 = index.cast %26 : i64 to offset
     %31 = index.cast %output_byte_offset : offset to i64
-    %32 = scalar.addi %31, %126 : i64
+    %32 = scalar.addi %31, %115 : i64
     %33 = scalar.assume %32 [range(%32, 0, 9223372036854775807)] : i64
     %34 = index.cast %33 : i64 to offset
     %observed = func.call @observe_one_const_unsigned_int_unsigned_int(%input, %27, %output, %34) : (buffer, offset, buffer, offset) -> (i32)
     %36 = scalar.constant -1515890086 : i32
     %37 = scalar.xori %observed, %36 : i32
     %38 = scalar.constant 64 : i32
-    %122 = scalar.addi %119, %38 : i32
-    %40 = scalar.extui %122 : i32 to i64
-    %121 = scalar.shli %40, %125 : i64
-    %44 = scalar.addi %31, %121 : i64
+    %111 = scalar.addi %108, %38 : i32
+    %40 = scalar.extui %111 : i32 to i64
+    %110 = scalar.shli %40, %114 : i64
+    %44 = scalar.addi %31, %110 : i64
     %45 = scalar.assume %44 [range(%44, 0, 9223372036854775807)] : i64
     %46 = index.cast %45 : i64 to offset
     %47 = buffer.view %output[%46] : buffer -> view<1xi32>
@@ -277,13 +277,13 @@ func.def @observe_one_const_unsigned_int_unsigned_int(%input: buffer, %input_byt
 }
 
 func.def @read_twice_const_unsigned_int(%source_data: buffer, %source_data_byte_offset: offset) -> (i32) {
-  %102 = index.cast %source_data_byte_offset : offset to i64
-  %104 = scalar.assume %102 [range(%102, 0, 9223372036854775807)] : i64
-  %105 = index.cast %104 : i64 to offset
-  %106 = buffer.view %source_data[%105] : buffer -> view<1xi32>
-  %first = view.load<root_in_bounds> %106[0] : view<1xi32> -> i32
-  %118 = scalar.addi %first, %first : i32
-  func.return %118 : i32
+  %91 = index.cast %source_data_byte_offset : offset to i64
+  %93 = scalar.assume %91 [range(%91, 0, 9223372036854775807)] : i64
+  %94 = index.cast %93 : i64 to offset
+  %95 = buffer.view %source_data[%94] : buffer -> view<1xi32>
+  %first = view.load<root_in_bounds> %95[0] : view<1xi32> -> i32
+  %107 = scalar.addi %first, %first : i32
+  func.return %107 : i32
 }
 
 // ====

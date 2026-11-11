@@ -613,3 +613,173 @@ func.def @update(%value$39: i32) -> (i32) {
   %value$42 = scalar.addi %value$39, %41 : i32
   func.return %value$42 : i32
 }
+
+// ====
+// Discarding a non-volatile reference does not read uninitialized fields.
+struct Pair { int x, y; };
+static int first(const Pair& p, const Pair& q) {
+  (void)q;
+  static_cast<void>(q);
+  static_cast<void>(q.y);
+  return p.x;
+}
+struct Holder {
+  Pair p, q;
+  int get() const { return first(p, q); }
+};
+int discarded_reference(int value) {
+  Pair unused;
+  (void)unused;
+  static_cast<void>(unused.y);
+  Holder holder{{value, 1}, {2, 3}};
+  return holder.get();
+}
+// ----
+func.def public @discarded_reference(%value: i32) -> (i32) {
+  %2 = index.constant 8 : offset
+  %unused_storage = buffer.alloca<private> align(4) %2 : buffer
+  %unused_storage_byte_offset = index.constant 0 : offset
+  %unused_view = buffer.view %unused_storage[%unused_storage_byte_offset] : buffer -> view<8xi8>
+  %holder_p_y = scalar.constant 1 : i32
+  %holder_q_x = scalar.constant 2 : i32
+  %holder_q_y = scalar.constant 3 : i32
+  %9 = func.call pure @Holder__get_value(%value) : (i32) -> (i32)
+  func.return %9 : i32
+}
+
+func.def @Holder__get_value(%this_p_x: i32) -> (i32) {
+  %12 = func.call pure @first(%this_p_x) : (i32) -> (i32)
+  func.return %12 : i32
+}
+
+func.def @first(%p_x: i32) -> (i32) {
+  func.return %p_x : i32
+}
+
+// ====
+// Bit casts consume scalar and vector reference values without requiring an
+// explicit frontend lvalue-to-rvalue conversion.
+using Float2 = float __attribute__((ext_vector_type(2)));
+using Word2 = unsigned __attribute__((ext_vector_type(2)));
+static unsigned scalar_bits(const float& value) { return __builtin_bit_cast(unsigned, value); }
+static Word2 vector_bits(const Float2& value) { return __builtin_bit_cast(Word2, value); }
+struct Samples {
+  float scalar;
+  Float2 vector;
+  unsigned unused;
+  unsigned bits() const { return scalar_bits(scalar) + vector_bits(vector)[1]; }
+};
+unsigned bitcast_references(float value, Float2 vector) {
+  Samples samples{value, vector, 0};
+  return samples.bits();
+}
+// ----
+func.def public @bitcast_references(%value: f32, %vector: vector<2xf32>) -> (i32) {
+  %samples_unused = scalar.constant 0 : i32
+  %4 = func.call pure @Samples__bits_value(%value, %vector) : (f32, vector<2xf32>) -> (i32)
+  func.return %4 : i32
+}
+
+func.def @Samples__bits_value(%this_scalar: f32, %this_vector: vector<2xf32>) -> (i32) {
+  %8 = func.call pure @scalar_bits(%this_scalar) : (f32) -> (i32)
+  %9 = func.call pure @vector_bits(%this_vector) : (vector<2xf32>) -> (vector<2xi32>)
+  %10 = scalar.constant 1 : i32
+  %11 = index.cast %10 : i32 to index
+  %12 = vector.extract %9[%11] : vector<2xi32> -> i32
+  %13 = scalar.addi %8, %12 : i32
+  func.return %13 : i32
+}
+
+func.def @scalar_bits(%value: f32) -> (i32) {
+  %16 = scalar.bitcast %value : f32 to i32
+  func.return %16 : i32
+}
+
+func.def @vector_bits(%value: vector<2xf32>) -> (vector<2xi32>) {
+  %19 = vector.bitcast %value : vector<2xf32> to vector<2xi32>
+  func.return %19 : vector<2xi32>
+}
+
+// ====
+// Copy expressions and local list initialization retain the same field reads.
+struct Pair { int x, y; };
+static Pair paren_copy(const Pair& value) { return Pair(value); }
+static Pair braced_copy(const Pair& value) { return Pair{value}; }
+static Pair local_copy(const Pair& value) { Pair copy{value}; return copy; }
+struct Holder {
+  Pair pair;
+  int unused;
+  int sum() const { return paren_copy(pair).x + braced_copy(pair).y + local_copy(pair).x; }
+};
+int copied_references(int x, int y) {
+  Holder holder{{x, y}, 0};
+  return holder.sum();
+}
+// ----
+func.def public @copied_references(%x: i32, %y: i32) -> (i32) {
+  %holder_unused = scalar.constant 0 : i32
+  %4 = func.call pure @Holder__sum_value(%x, %y) : (i32, i32) -> (i32)
+  func.return %4 : i32
+}
+
+func.def @Holder__sum_value(%this_pair_x: i32, %this_pair_y: i32) -> (i32) {
+  %8, %9 = func.call pure @paren_copy(%this_pair_x, %this_pair_y) : (i32, i32) -> (i32, i32)
+  %10, %11 = func.call pure @braced_copy(%this_pair_x, %this_pair_y) : (i32, i32) -> (i32, i32)
+  %12 = scalar.addi %8, %11 : i32
+  %13, %14 = func.call pure @local_copy(%this_pair_x, %this_pair_y) : (i32, i32) -> (i32, i32)
+  %15 = scalar.addi %12, %13 : i32
+  func.return %15 : i32
+}
+
+func.def @paren_copy(%value_x: i32, %value_y: i32) -> (i32, i32) {
+  func.return %value_x, %value_y : i32, i32
+}
+
+func.def @braced_copy(%value_x: i32, %value_y: i32) -> (i32, i32) {
+  func.return %value_x, %value_y : i32, i32
+}
+
+func.def @local_copy(%value_x: i32, %value_y: i32) -> (i32, i32) {
+  func.return %value_x, %value_y : i32, i32
+}
+
+// ====
+// Discarding references preserves subscript, call, and branch effects without
+// loading the referent. Each selected source expression executes once.
+static int& touched(int* input, unsigned& count) { ++count; return *input; }
+unsigned discarded_effects(int* input, bool choose) {
+  unsigned count = 0;
+  unsigned index = 0;
+  (void)input[index++];
+  static_cast<void>(*input);
+  static_cast<void>(choose ? touched(input, count) : input[index++]);
+  static_cast<void>((++count, static_cast<int&&>(*input)));
+  return count * 10 + index;
+}
+// ----
+func.def public @discarded_effects(%input: buffer, %input_byte_offset: offset, %choose: i1) -> (i32) {
+  %count$4 = scalar.constant 0 : i32
+  %index$5 = scalar.constant 0 : i32
+  %6 = scalar.constant 1 : i32
+  %index$7 = scalar.addi %index$5, %6 : i32
+  %count$8, %index$9 = scf.if %choose -> (i32, i32) {
+    %10, %11, %count = func.call pure @touched(%input, %input_byte_offset, %count$4) : (buffer, offset, i32) -> (buffer, offset, i32)
+    scf.yield %count, %index$7 : i32, i32
+  } else {
+    %13 = scalar.constant 1 : i32
+    %index = scalar.addi %index$7, %13 : i32
+    scf.yield %count$4, %index : i32, i32
+  }
+  %15 = scalar.constant 1 : i32
+  %count$16 = scalar.addi %count$8, %15 : i32
+  %17 = scalar.constant 10 : i32
+  %18 = scalar.muli %count$16, %17 : i32
+  %19 = scalar.addi %18, %index$9 : i32
+  func.return %19 : i32
+}
+
+func.def @touched(%input: buffer, %input_byte_offset: offset, %count$22: i32) -> (buffer, offset, i32) {
+  %26 = scalar.constant 1 : i32
+  %count$27 = scalar.addi %count$22, %26 : i32
+  func.return %input, %input_byte_offset, %count$27 : buffer, offset, i32
+}
