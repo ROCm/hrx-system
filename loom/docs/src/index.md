@@ -52,7 +52,7 @@ bytecode, weights, and a JSON descriptor. Model-specific code lives in those
 files. You can load a new model, edit an implementation, or share your changes
 without rebuilding the server.
 
-It runs on **Windows and Linux**; native execution needs the OS and hardware
+It runs on **Windows and Linux**; native execution needs only the OS and hardware
 drivers.
 
 </div>
@@ -65,7 +65,7 @@ drivers.
 | **Loom language and compiler** | Reusable programs, command schedules, and kernels, specialized and compiled ahead of time or just in time. |
 | **Runtime and hardware abstraction** | Asynchronous execution, memory, and data movement on CPUs, AMD GPUs, AMD XDNA NPUs, and Vulkan devices. |
 | **Model and kernel libraries** | A growing source library of model implementations, kernels, and shared math in [hrx-loom-library](https://github.com/ROCm/hrx-loom-library). |
-| **loom-serve** | Model hosting, compatible request batching, residency management, and HTTP APIs. |
+| **Loom services and loom-serve** | Model hosting, compatible request batching, residency management, and HTTP APIs. |
 
 Your application supplies its interface, tools, and behavior. These layers run
 the computation underneath it.
@@ -99,10 +99,15 @@ with the running server.
 </div>
 </div>
 <div class="loom-request-path"><span aria-hidden="true">↓</span> HTTP requests</div>
+<div class="loom-node loom-host-heading">
+<strong>loom-serve</strong>
+<span>HTTP endpoints · telemetry · serving policy</span>
+</div>
+<div class="loom-request-path"><span aria-hidden="true">↓</span> Embeddable C API (in development)</div>
 <div class="loom-host">
 <div class="loom-host-heading">
-<strong>loom-serve</strong>
-<span>Register model packages while the server runs</span>
+<strong>Loom services</strong>
+<span>Models · scheduling · resource management</span>
 </div>
 <p>Each model brings its programs, weights, and descriptor.</p>
 <ul class="loom-models">
@@ -116,7 +121,7 @@ with the running server.
 <li class="loom-add-model">+ Another model</li>
 </ul>
 <div class="loom-shared">
-<strong>Shared hosting and execution</strong>
+<strong>Shared scheduling and execution</strong>
 <span>Compatible batches · on-demand weights · retained state · managed memory</span>
 </div>
 </div>
@@ -149,8 +154,9 @@ resident, or trim idle backing while the server keeps running.
 A model's structure, tensor layouts, parameter handling, and numerical
 implementations live in its source. The compiler works with programs, types,
 memory, and target instructions. The hardware abstraction handles execution and
-data movement. `loom-serve` knows how to host text, image, speech, and other
-services. The model supplies the computation behind those services.
+data movement. Loom's services host text, image, speech, and other workloads;
+`loom-serve` exposes them over HTTP. The model supplies the computation behind
+those services.
 
 That source covers more than individual kernels. Command programs describe
 kernel launches, their buffers, and their dependencies. Model programs prepare
