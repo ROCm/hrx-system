@@ -58,6 +58,8 @@ typedef struct loom_aie2p_native_register_bank_t {
 typedef struct loom_aie2p_native_switch_t {
   // Next routed switch in first-use order, excluding untouched tiles.
   struct loom_aie2p_native_switch_t* next;
+  // Physical owner retained from switch admission.
+  loom_xdna_tile_coordinate_t coordinate;
   // Master, slave, and packet-filter banks from the generated register facts.
   loom_aie2p_native_register_bank_t banks[LOOM_AIE2P_NATIVE_SWITCH_BANK_COUNT];
 } loom_aie2p_native_switch_t;

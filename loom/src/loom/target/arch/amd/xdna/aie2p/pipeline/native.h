@@ -842,6 +842,10 @@ typedef struct loom_aie2p_native_context_t {
   struct loom_aie2p_native_delivery_t** deliveries;
   // Complete desired routing state for each traversed switch.
   loom_aie2p_native_switch_t* switches;
+  // Intended control deliveries retained independently of route selection.
+  struct loom_aie2p_native_control_connection_t* control_connections;
+  // Number of requested deliveries in the independent connection inventory.
+  iree_host_size_t control_connection_count;
   // Typed ordinary helper emitter.
   loom_aie2p_worker_builder_t code;
 } loom_aie2p_native_context_t;

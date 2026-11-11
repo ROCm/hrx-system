@@ -7,6 +7,7 @@
 #include "loom/analysis/storage_geometry.h"
 #include "loom/ops/channel/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/connectivity.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/credits.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/distribution.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_queues.h"
@@ -131,6 +132,11 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
                                     loom_xdna_stream_port_t destination_port,
                                     uint8_t packet,
                                     loom_aie2p_native_delivery_t* delivery) {
+  context->control_connections[context->control_connection_count++] =
+      (loom_aie2p_native_control_connection_t){
+          .source = {source, source_port, 0},
+          .destination = {destination, destination_port, 0},
+          .packet = packet};
   const iree_host_size_t first = context->routing.route_count;
   const uint32_t index = (*next_source)++;
   const iree_host_size_t tile =
@@ -1095,6 +1101,9 @@ iree_status_t loom_aie2p_native_select_transfers(
   const iree_host_size_t route_capacity =
       source_count *
       (context->family->column_count + context->family->row_count + 2);
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, source_count, sizeof(*context->control_connections),
+      (void**)&context->control_connections));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_route_builder_initialize(
       context->family, route_capacity, arena, &context->routing));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, route_capacity,
@@ -1329,6 +1338,9 @@ iree_status_t loom_aie2p_native_select_transfers(
     loom_aie2p_native_commit_sharing(context);
     status = loom_aie2p_native_switches_build(context, realization->function.op,
                                               out_valid);
+  }
+  if (iree_status_is_ok(status) && *out_valid) {
+    status = loom_aie2p_native_connections_verify(context);
   }
   return status;
 }

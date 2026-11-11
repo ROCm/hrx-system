@@ -321,6 +321,8 @@ TEST_P(Aie2pSharingTest, UsedPathAdmitsExactlyOneRecordPerReceiverGrant) {
   sender.sequence.tasks = tasks;
   loom_aie2p_native_commit_sharing(&context_);
   EXPECT_EQ(sender.sequence.descriptor_count, 1u);
+  EXPECT_TRUE(payload_source_.framed);
+  EXPECT_EQ(payload_.packet, LOOM_AIE2P_NATIVE_DELIVERY_PACKET_ID);
   EXPECT_EQ(sender.sequence.task_count, 1u);
   EXPECT_EQ(tasks[0], 2u);
   EXPECT_EQ(delivery->grants->task, tasks[0]);

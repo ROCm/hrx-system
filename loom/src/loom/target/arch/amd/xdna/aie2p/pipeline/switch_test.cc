@@ -14,6 +14,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/pass/types.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/route.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/connectivity.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/sharing.h"
 #include "loom/target/arch/amd/xdna/array/facts.h"
@@ -165,6 +166,8 @@ class Aie2pControlSwitchTest : public Aie2pSwitchTest {
     context_.control_destination_sources = destinations_.data();
     routes_.resize(128);
     context_.routes = routes_.data();
+    connections_.resize(128);
+    context_.control_connections = connections_.data();
   }
 
   void AddControl(loom_xdna_tile_coordinate_t source,
@@ -235,6 +238,8 @@ class Aie2pControlSwitchTest : public Aie2pSwitchTest {
 
   // Native routing retains these complete stream endpoint facts.
   std::vector<loom_aie2p_native_control_source_t> sources_;
+  // Intended deliveries retained separately from physical switch choices.
+  std::vector<loom_aie2p_native_control_connection_t> connections_;
   // A destination stays private only while every use names the same source.
   std::vector<uint32_t> destinations_;
   // Eligible payload paths indexed by destination tile.

@@ -86,6 +86,7 @@ static iree_status_t loom_aie2p_native_switch_initialize(
   IREE_RETURN_IF_ERROR(iree_arena_allocate(context->pass->arena, byte_length,
                                            (void**)&state->desired));
   memset(state->desired, 0, byte_length);
+  state->desired->coordinate = tile->coordinate;
   uint32_t* words = (uint32_t*)(state->desired + 1);
   const uint16_t first_indices[] = {0, 0};
   for (unsigned i = 0; i < LOOM_AIE2P_NATIVE_SWITCH_BANK_COUNT; ++i) {

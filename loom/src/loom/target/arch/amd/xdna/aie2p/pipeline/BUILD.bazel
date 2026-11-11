@@ -13,6 +13,21 @@ package(
 )
 
 loom_cc_test(
+    name = "connectivity_test",
+    srcs = ["connectivity_test.cc"],
+    deps = [
+        ":native",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/array:plan",
+        "//loom/src/loom/target/arch/amd/xdna/array:facts",
+        "//loom/src/loom/testing:diagnostic_matchers",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "endpoints_test",
     srcs = ["endpoints_test.cc"],
     deps = [
@@ -131,6 +146,7 @@ loom_cc_library(
         "channels.c",
         "collective.c",
         "configuration.c",
+        "connectivity.c",
         "credits.c",
         "distribution.c",
         "dma.c",
@@ -153,6 +169,7 @@ loom_cc_library(
     ],
     hdrs = [
         "channel_state.h",
+        "connectivity.h",
         "credits.h",
         "distribution.h",
         "dma_queues.h",
