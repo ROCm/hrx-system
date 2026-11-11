@@ -59,6 +59,8 @@ struct ObjectInterval {
   // Position of this interval within the complete referenced value. A current
   // receiver can span several independently bound fields.
   size_t reference_offset = 0;
+
+  bool operator==(const ObjectInterval&) const = default;
 };
 
 // A source subobject's component range relative to a referenced value.
@@ -69,6 +71,26 @@ struct ReferenceProjection {
   size_t component_count = SIZE_MAX;
 
   bool operator==(const ReferenceProjection&) const = default;
+};
+
+// One caller-owned source subobject that can supply a value-backed reference
+// result. The owner is either a reference parameter or the implicit object;
+// the projection is relative to that complete owner value.
+struct ReferenceResultOrigin {
+  // Sentinel owner ordinal identifying the current implicit object.
+  static constexpr size_t kReceiver = SIZE_MAX;
+
+  // Source parameter ordinal, or kReceiver for the implicit object.
+  size_t owner_ordinal;
+  // Complete returned subobject within the owner value.
+  ValueProjection projection;
+
+  bool operator==(const ReferenceResultOrigin& other) const {
+    return owner_ordinal == other.owner_ordinal &&
+           projection.type == other.projection.type &&
+           projection.partition == other.projection.partition &&
+           projection.component_offset == other.projection.component_offset;
+  }
 };
 
 // Retained correspondence between a reference result and a source subobject.
@@ -350,11 +372,13 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Exact source parameter aliased by every reference return, when one exists.
   // Callers can reuse that evaluated argument instead of inventing a result.
   std::optional<size_t> reference_return_parameter() const;
-  // Finite parameter-origin set selected by a reference return. Two or more
-  // origins use an ordinal result instead of inventing a pointer carrier.
-  std::span<const size_t> selected_reference_return_parameters() const;
-  // Selector index for one direct parameter leaf of a selected return.
-  std::optional<size_t> selected_reference_return_index(
+  // Caller-owned subobjects selected by a projected reference return. One
+  // origin is reconstructed directly; two or more use an ordinal result.
+  std::span<const ReferenceResultOrigin> projected_reference_return_origins(
+      bool value_receiver) const;
+  // Ordered origin indices contributed by one receiver-subobject leaf. A
+  // dynamic fixed-array subscript contributes one index per source element.
+  std::span<const size_t> projected_reference_return_indices(
       cxx::ExpressionAST* expression) const;
   // Whether this reached call must materialize a self-reference result as
   // durable storage for a caller-side identity use.
@@ -388,7 +412,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   struct TemporaryDestructionFacts;
   struct ReferenceIdentityFacts;
   struct ReferenceWriteFacts;
-  struct SelectedReferenceReturnFacts;
+  struct ProjectedReferenceReturnFacts;
 
   struct PointerReferenceCapture {
     // Synthesized closure field carrying either the referent value or storage
@@ -420,6 +444,7 @@ class ControlFlow final : private cxx::ASTVisitor {
     None,
     CurrentReceiver,
     Parameter,
+    Projected,
     Storage,
   };
 
@@ -556,8 +581,6 @@ class ControlFlow final : private cxx::ASTVisitor {
   template <typename Visitor>
   void visit_intervals(const CallArgument& argument,
                        ReferenceProjection projection, Visitor&& visitor) const;
-  void append_intervals(const CallArgument& argument,
-                        std::vector<ObjectInterval>& intervals) const;
   bool identities_overlap(const CallArgument& left,
                           const CallArgument& right) const;
   bool references_current_receiver_field(const CallArgument& argument) const;
@@ -567,8 +590,26 @@ class ControlFlow final : private cxx::ASTVisitor {
                                                    ControlFlow& callee);
   std::optional<Destination> classify_destination(
       cxx::ExpressionAST* expression);
-  bool collect_reference_return_parameters(cxx::ExpressionAST* expression,
-                                           std::vector<size_t>& ordinals);
+  bool collect_reference_return_parameters(
+      cxx::ExpressionAST* expression, std::vector<size_t>& ordinals,
+      std::unordered_map<cxx::Symbol*, size_t>* parameter_indices = nullptr);
+  bool collect_projected_reference_return(cxx::ExpressionAST* expression,
+                                          ProjectedReferenceReturnFacts& facts);
+  std::pair<size_t, bool> retain_projected_reference_origin(
+      ProjectedReferenceReturnFacts& facts, ReferenceResultOrigin origin);
+  bool promote_projected_reference_storage(
+      ProjectedReferenceReturnFacts& facts);
+  bool reference_uses_storage_abi(cxx::Symbol* parameter) const;
+  std::optional<std::pair<size_t, size_t>> projected_reference_owner(
+      ProjectedReferenceReturnFacts& facts, cxx::Symbol* binding);
+  void merge_projected_reference_returns(ProjectedReferenceReturnFacts& target,
+                                         ProjectedReferenceReturnFacts source);
+  void retain_complete_parameter_reference_origins(
+      ProjectedReferenceReturnFacts& facts, std::span<const size_t> ordinals);
+  void retain_complete_receiver_reference_origin(
+      ProjectedReferenceReturnFacts& facts);
+  bool propagate_projected_reference_return(const DirectCall& call,
+                                            const ControlFlow& callee);
   std::span<const size_t> reference_return_parameters() const;
   bool classify_storage(cxx::ExpressionAST* expression) const;
   bool is_captured_object_field(cxx::Symbol* field) const;
@@ -672,10 +713,10 @@ class ControlFlow final : private cxx::ASTVisitor {
   ReferenceReturn reference_return_ = ReferenceReturn::None;
   // Source ordinal retained by the allocation-free single-parameter case.
   size_t reference_return_parameter_ = SIZE_MAX;
-  // Sparse multi-origin return facts. Ordinary functions and exact aliases do
-  // not retain selected-return containers after analysis.
-  std::unique_ptr<SelectedReferenceReturnFacts>
-      selected_reference_return_facts_;
+  // Sparse projected or multi-owner origins. Ordinary functions and exact
+  // whole-object aliases retain only the allocation-free fields above.
+  std::unique_ptr<ProjectedReferenceReturnFacts>
+      projected_reference_return_facts_;
   // Nested lvalue ownership and transitive component offsets computed once.
   std::unordered_map<cxx::ExpressionAST*, Destination> destinations_;
   // Memory record objects and member projections, including nested fields.

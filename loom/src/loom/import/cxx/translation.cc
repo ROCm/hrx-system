@@ -1079,7 +1079,11 @@ class Translator final : private Initialization::Evaluation {
                                const Value& result) const {
     return returns_value_reference_parameter(function) ||
            (!result.is_pointer() &&
-            functions_.returns_current_receiver_reference(function));
+            (functions_.returns_current_receiver_reference(function) ||
+             !functions_
+                  .projected_reference_return_origins(function,
+                                                      ImplicitObjectABI::Value)
+                  .empty()));
   }
 
   std::vector<const cxx::Type*> function_result_sources() {
@@ -1089,18 +1093,25 @@ class Translator final : private Initialization::Evaluation {
     const bool returns_parameter_alias =
         returns_reference && current_function_.control &&
         current_function_.control->reference_return_parameter().has_value();
-    const bool returns_selected_parameter_alias =
-        returns_reference && current_function_.control &&
-        !current_function_.control->selected_reference_return_parameters()
-             .empty();
+    const auto projected_origins =
+        functions_.projected_reference_return_origins(
+            current_function_.source->symbol,
+            current_function_.implicit_object
+                ? current_function_.implicit_object->abi
+                : ImplicitObjectABI::None);
+    const bool returns_projected_reference =
+        returns_reference && !projected_origins.empty();
     const bool returns_receiver_alias =
         current_function_.implicit_object && current_function_.control &&
         current_function_.implicit_object->abi == ImplicitObjectABI::Value &&
         current_function_.control->returns_current_receiver_reference();
+    const bool returns_exact_projection =
+        returns_projected_reference && projected_origins.size() == 1;
     if (!unit_.typeTraits().is_void(current_function_.return_type) &&
-        !returns_receiver_alias && !returns_parameter_alias) {
+        !returns_receiver_alias && !returns_parameter_alias &&
+        !returns_exact_projection) {
       const cxx::Type* result_type = current_function_.return_type;
-      if (returns_selected_parameter_alias) {
+      if (returns_projected_reference) {
         result_type = unit_.control()->getUnsignedIntType();
       } else if (returns_reference) {
         result_type = unit_.typeTraits().add_pointer(
@@ -1200,10 +1211,29 @@ class Translator final : private Initialization::Evaluation {
       append_reference_return_indices(conditional->iffalseExpression, indices);
       return;
     }
-    auto index =
-        current_function_.control->selected_reference_return_index(expression);
-    IREE_ASSERT(index);
-    indices.push_back(*index);
+    auto projected_indices =
+        current_function_.control->projected_reference_return_indices(
+            expression);
+    IREE_ASSERT(!projected_indices.empty());
+    indices.insert(indices.end(), projected_indices.begin(),
+                   projected_indices.end());
+  }
+
+  Value encode_reference_return_index(const Lvalue& target,
+                                      std::span<const size_t> indices,
+                                      size_t& leaf_index, cxx::AST* owner) {
+    const auto* selected = target.selection();
+    if (!selected) {
+      IREE_ASSERT_LT(leaf_index, indices.size());
+      return Value(scalars_.integer(indices[leaf_index++], LOOM_SCALAR_TYPE_I32,
+                                    locations_.get(owner)));
+    }
+    return dispatch_ordinal(
+        selected->selector, selected->alternatives.size(),
+        unit_.control()->getUnsignedIntType(), owner, [&](size_t ordinal) {
+          return encode_reference_return_index(selected->alternatives[ordinal],
+                                               indices, leaf_index, owner);
+        });
   }
 
   loom_value_id_t selected_reference_return(cxx::ExpressionAST* expression,
@@ -1220,30 +1250,25 @@ class Translator final : private Initialization::Evaluation {
     }
     const auto* selected = target.selection();
     IREE_ASSERT(selected);
-    IREE_ASSERT_EQ(selected->alternatives.size(), indices.size());
-    bool identity_mapping = true;
-    for (size_t ordinal = 0; ordinal < indices.size(); ++ordinal) {
-      identity_mapping &= indices[ordinal] == ordinal;
-    }
-    if (identity_mapping) {
-      return selected->selector;
+    if (selected->alternatives.size() == indices.size() &&
+        std::ranges::none_of(selected->alternatives,
+                             [](const Lvalue& alternative) {
+                               return alternative.selection();
+                             })) {
+      bool identity_mapping = true;
+      for (size_t ordinal = 0; ordinal < indices.size(); ++ordinal) {
+        identity_mapping &= indices[ordinal] == ordinal;
+      }
+      if (identity_mapping) {
+        return selected->selector;
+      }
     }
 
-    auto source = locations_.get(owner);
-    auto result =
-        scalars_.integer(indices.back(), LOOM_SCALAR_TYPE_I32, source);
-    for (size_t ordinal = indices.size() - 1; ordinal > 0; --ordinal) {
-      const size_t candidate = ordinal - 1;
-      auto condition = selection_condition(*selected, candidate, owner);
-      auto value =
-          scalars_.integer(indices[candidate], LOOM_SCALAR_TYPE_I32, source);
-      loom_op_t* select;
-      check(loom_scf_select_build(&builder_, condition, value, result,
-                                  loom_type_scalar(LOOM_SCALAR_TYPE_I32),
-                                  source, &select));
-      result = loom_scf_select_result(select);
-    }
-    return result;
+    size_t leaf_index = 0;
+    auto encoded =
+        encode_reference_return_index(target, indices, leaf_index, owner);
+    IREE_ASSERT_EQ(leaf_index, indices.size());
+    return encoded.ssa();
   }
 
   Returned return_values_impl(cxx::ReturnStatementAST* statement) {
@@ -1270,20 +1295,27 @@ class Translator final : private Initialization::Evaluation {
       const bool returns_parameter_alias =
           current_function_.control &&
           current_function_.control->reference_return_parameter().has_value();
-      const bool returns_selected_parameter_alias =
-          current_function_.control &&
-          !current_function_.control->selected_reference_return_parameters()
-               .empty();
+      const auto projected_origins =
+          functions_.projected_reference_return_origins(
+              current_function_.source->symbol,
+              current_function_.implicit_object
+                  ? current_function_.implicit_object->abi
+                  : ImplicitObjectABI::None);
+      const bool returns_projected_reference = !projected_origins.empty();
       const bool returns_receiver_alias =
           current_function_.implicit_object && current_function_.control &&
           current_function_.implicit_object->abi == ImplicitObjectABI::Value &&
           current_function_.control->returns_current_receiver_reference();
       if (returns_receiver_alias) {
         IREE_ASSERT(is_current_object(unit_, statement->expression));
-      } else if (returns_selected_parameter_alias) {
+      } else if (returns_projected_reference && projected_origins.size() > 1) {
         returned.values.push_back(
             selected_reference_return(statement->expression, statement));
-      } else if (!returns_parameter_alias) {
+      } else if (returns_parameter_alias || returns_projected_reference) {
+        // The alias needs no runtime payload, but selecting it can still
+        // evaluate a condition or call an effectful forwarding helper.
+        effect(statement->expression);
+      } else {
         reference_value(statement->expression, statement)
             .append_to(returned.values);
       }
@@ -2313,57 +2345,64 @@ class Translator final : private Initialization::Evaluation {
                                 {loom_op_results(op), outputs.types.size()});
   }
 
-  loom_value_id_t selection_condition(const SelectedLvalue& selected,
-                                      size_t ordinal, cxx::AST* owner) {
+  loom_value_id_t ordinal_condition(loom_value_id_t selector,
+                                    cxx::TokenKind predicate, size_t ordinal,
+                                    cxx::AST* owner) {
     auto* ordinal_type = unit_.control()->getUnsignedIntType();
     auto expected =
         scalars_.integer(ordinal, LOOM_SCALAR_TYPE_I32, locations_.get(owner));
-    return scalars_.binary(cxx::TokenKind::T_EQUAL_EQUAL, selected.selector,
-                           expected, ordinal_type,
+    return scalars_.binary(predicate, selector, expected, ordinal_type,
                            unit_.control()->getBoolType(), owner);
   }
 
-  loom_value_id_t selection_before(const SelectedLvalue& selected,
-                                   size_t ordinal, cxx::AST* owner) {
-    auto* ordinal_type = unit_.control()->getUnsignedIntType();
-    auto expected =
-        scalars_.integer(ordinal, LOOM_SCALAR_TYPE_I32, locations_.get(owner));
-    return scalars_.binary(cxx::TokenKind::T_LESS, selected.selector, expected,
-                           ordinal_type, unit_.control()->getBoolType(), owner);
+  loom_value_id_t selection_condition(const SelectedLvalue& selected,
+                                      size_t ordinal, cxx::AST* owner) {
+    return ordinal_condition(selected.selector, cxx::TokenKind::T_EQUAL_EQUAL,
+                             ordinal, owner);
   }
 
-  Value dispatch_selection_range(const SelectedLvalue& selected,
-                                 cxx::AST* owner,
-                                 const std::function<Value(size_t)>& operation,
-                                 size_t begin, size_t end) {
+  Value dispatch_ordinal_range(loom_value_id_t selector,
+                               const cxx::Type* result_type, cxx::AST* owner,
+                               const std::function<Value(size_t)>& operation,
+                               size_t begin, size_t end) {
     IREE_ASSERT_LT(begin, end);
     if (begin + 1 == end) {
       return operation(begin);
     }
-    if (end - begin <= 3) {
-      return selected_value(
-          selection_condition(selected, begin, owner),
-          types_.unqualified_value(selected.type), owner, [&](size_t arm) {
-            return arm == 0 ? operation(begin)
-                            : dispatch_selection_range(
-                                  selected, owner, operation, begin + 1, end);
-          });
-    }
-    const size_t midpoint = begin + (end - begin) / 2;
-    return selected_value(
-        selection_before(selected, midpoint, owner),
-        types_.unqualified_value(selected.type), owner, [&](size_t arm) {
-          return arm == 0 ? dispatch_selection_range(selected, owner, operation,
-                                                     begin, midpoint)
-                          : dispatch_selection_range(selected, owner, operation,
-                                                     midpoint, end);
-        });
+    const bool compact_tail = end - begin <= 3;
+    const size_t split = compact_tail ? begin : begin + (end - begin) / 2;
+    auto condition = ordinal_condition(
+        selector,
+        compact_tail ? cxx::TokenKind::T_EQUAL_EQUAL : cxx::TokenKind::T_LESS,
+        split, owner);
+    return selected_value(condition, result_type, owner, [&](size_t arm) {
+      if (compact_tail) {
+        return arm == 0 ? operation(begin)
+                        : dispatch_ordinal_range(selector, result_type, owner,
+                                                 operation, begin + 1, end);
+      }
+      return arm == 0 ? dispatch_ordinal_range(selector, result_type, owner,
+                                               operation, begin, split)
+                      : dispatch_ordinal_range(selector, result_type, owner,
+                                               operation, split, end);
+    });
+  }
+
+  Value dispatch_ordinal(loom_value_id_t selector, size_t count,
+                         const cxx::Type* result_type, cxx::AST* owner,
+                         const std::function<Value(size_t)>& operation) {
+    // Region construction visits every ordinal exactly once in ascending
+    // order. Reference-result encoding consumes its retained leaf map in that
+    // same source order without building a parallel flattened target list.
+    return dispatch_ordinal_range(selector, result_type, owner, operation, 0,
+                                  count);
   }
 
   Value dispatch_selection(const SelectedLvalue& selected, cxx::AST* owner,
                            const std::function<Value(size_t)>& operation) {
-    return dispatch_selection_range(selected, owner, operation, 0,
-                                    selected.alternatives.size());
+    return dispatch_ordinal(selected.selector, selected.alternatives.size(),
+                            types_.unqualified_value(selected.type), owner,
+                            operation);
   }
 
   // Result of one ordinary source call. Exact reference aliases retain the
@@ -3168,16 +3207,37 @@ class Translator final : private Initialization::Evaluation {
     return value_arena_.capture(*receiver.record, components);
   }
 
-  void write_selection(const SelectedLvalue& selected, Value value,
-                       cxx::AST* owner) {
-    ValueBindings::Updates updates(values_, value_arena_);
+  loom_value_id_t combine_selection_condition(
+      std::optional<loom_value_id_t> outer, loom_value_id_t inner,
+      cxx::AST* owner) {
+    if (!outer) {
+      return inner;
+    }
+    auto* bool_type = unit_.control()->getBoolType();
+    return scalars_.binary(cxx::TokenKind::T_AMP, *outer, inner, bool_type,
+                           bool_type, owner);
+  }
+
+  void accumulate_selection_write(
+      const SelectedLvalue& selected, Value value, cxx::AST* owner,
+      std::optional<loom_value_id_t> outer_condition,
+      ValueBindings::Updates& updates) {
     for (size_t ordinal = 0; ordinal < selected.alternatives.size();
          ++ordinal) {
       const auto& alternative = selected.alternatives[ordinal];
+      if (const auto* nested = alternative.selection()) {
+        auto condition = combine_selection_condition(
+            outer_condition, selection_condition(selected, ordinal, owner),
+            owner);
+        accumulate_selection_write(*nested, value, owner, condition, updates);
+        continue;
+      }
       const auto& object = alternative.object();
       if (std::holds_alternative<StorageAccess>(object.location) ||
           std::holds_alternative<StorageProjection>(object.location)) {
-        auto condition = selection_condition(selected, ordinal, owner);
+        auto condition = combine_selection_condition(
+            outer_condition, selection_condition(selected, ordinal, owner),
+            owner);
         auto source = locations_.get(owner);
         loom_op_t* op;
         check(loom_scf_if_build(&builder_, 0, condition, nullptr, 0, nullptr, 0,
@@ -3194,10 +3254,13 @@ class Translator final : private Initialization::Evaluation {
       // retains the complement known by the selection owner without requiring
       // a later pass to recover it from the ordinal's range.
       const bool complementary =
-          selected.alternatives.size() == 2 && ordinal == 1;
-      auto updated = selected_value(
+          !outer_condition && selected.alternatives.size() == 2 && ordinal == 1;
+      auto condition = combine_selection_condition(
+          outer_condition,
           selection_condition(selected, complementary ? 0 : ordinal, owner),
-          object.type, owner, [&](size_t arm) {
+          owner);
+      auto updated =
+          selected_value(condition, object.type, owner, [&](size_t arm) {
             const bool replace = (arm == 0) != complementary;
             if (replace &&
                 std::holds_alternative<ObjectLvalue>(alternative.projection)) {
@@ -3233,6 +3296,12 @@ class Translator final : private Initialization::Evaluation {
         }
       }
     }
+  }
+
+  void write_selection(const SelectedLvalue& selected, Value value,
+                       cxx::AST* owner) {
+    ValueBindings::Updates updates(values_, value_arena_);
+    accumulate_selection_write(selected, value, owner, std::nullopt, updates);
     updates.apply();
     for (auto* binding : selected.bindings) {
       if (auto found = values_.find(binding); found != values_.end()) {
@@ -3400,30 +3469,31 @@ class Translator final : private Initialization::Evaluation {
     return {.value = *argument.value};
   }
 
+  SelectedReferenceCandidate project_reference_candidate(
+      SelectedReferenceCandidate candidate, const ValueProjection& projection,
+      cxx::AST* owner) {
+    if (candidate.target) {
+      candidate.target =
+          project_call_target(*candidate.target, projection, owner);
+    } else {
+      IREE_ASSERT(candidate.value);
+      candidate.value = candidate.value->project(*projection.partition,
+                                                 projection.component_offset);
+    }
+    return candidate;
+  }
+
   Value selected_call_result_value(
       loom_value_id_t selector,
       std::span<const SelectedReferenceCandidate> candidates,
-      const cxx::Type* result_type, cxx::AST* owner, size_t ordinal = 0) {
-    const auto& candidate = candidates[ordinal];
-    auto evaluate = [&]() {
+      const cxx::Type* result_type, cxx::AST* owner) {
+    auto evaluate = [&](size_t ordinal) {
+      const auto& candidate = candidates[ordinal];
       return candidate.target ? read(*candidate.target, owner)
                               : *candidate.value;
     };
-    if (ordinal + 1 == candidates.size()) {
-      return evaluate();
-    }
-    auto expected =
-        scalars_.integer(ordinal, LOOM_SCALAR_TYPE_I32, locations_.get(owner));
-    auto condition =
-        scalars_.binary(cxx::TokenKind::T_EQUAL_EQUAL, selector, expected,
-                        unit_.control()->getUnsignedIntType(),
-                        unit_.control()->getBoolType(), owner);
-    return selected_value(condition, result_type, owner, [&](size_t arm) {
-      return arm == 0
-                 ? evaluate()
-                 : selected_call_result_value(selector, candidates, result_type,
-                                              owner, ordinal + 1);
-    });
+    return dispatch_ordinal(selector, candidates.size(), result_type, owner,
+                            evaluate);
   }
 
   Lvalue project_call_target(const Lvalue& target, const ValueProjection& group,
@@ -3824,6 +3894,32 @@ class Translator final : private Initialization::Evaluation {
            "member call receiver must preserve its admitted record type");
     }
     return value;
+  }
+
+  SelectedReferenceCandidate receiver_reference_candidate(
+      ReceiverArgument& receiver, const ValueProjection& origin,
+      const std::optional<Value>& updated, cxx::AST* owner) {
+    if (receiver.abi == ImplicitObjectABI::Storage) {
+      IREE_ASSERT(receiver.value && receiver.value->is_pointer());
+      IREE_ASSERT_EQ(origin.component_offset, 0u);
+      IREE_ASSERT(origin.type ==
+                  types_.unqualified(receiver.record->source->type()));
+      auto projection =
+          storage_.project(receiver.value->pointer(), origin.type, owner);
+      return {.target = Lvalue{ObjectLvalue{origin.type, projection}}};
+    }
+    if (receiver.current || receiver.target) {
+      auto target =
+          receiver.current ? current_receiver_target() : *receiver.target;
+      return {.target = project_call_target(target, origin, owner)};
+    }
+    const Value* value = updated          ? &*updated
+                         : receiver.value ? &*receiver.value
+                                          : nullptr;
+    IREE_ASSERT(value);
+    return {
+        .value = value->project(*origin.partition, origin.component_offset),
+    };
   }
 
   void write_receiver(const ReceiverArgument& receiver, Value value,
@@ -4369,6 +4465,7 @@ class Translator final : private Initialization::Evaluation {
       std::vector<loom_value_id_t> arguments,
       std::vector<ReferenceWriteback> writebacks,
       std::optional<ReferenceResultAlias> reference_result_alias,
+      std::span<const ReferenceResultOrigin> projected_origins,
       std::vector<SelectedReferenceCandidate> selected_reference_candidates,
       loom_location_id_t source) {
     auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
@@ -4404,8 +4501,12 @@ class Translator final : private Initialization::Evaluation {
     const bool returns_reference =
         unit_.typeTraits().is_reference(signature->returnType());
     const bool returns_parameter_alias = reference_result_alias.has_value();
-    const bool returns_selected_parameter_alias =
-        !selected_reference_candidates.empty();
+    const bool returns_projected_reference =
+        returns_reference && !projected_origins.empty();
+    const bool returns_exact_projected_reference =
+        returns_projected_reference && projected_origins.size() == 1;
+    const bool returns_selected_projected_reference =
+        returns_projected_reference && projected_origins.size() > 1;
     const bool returns_receiver_alias =
         returns_reference && receiver &&
         receiver->abi == ImplicitObjectABI::Value &&
@@ -4415,12 +4516,14 @@ class Translator final : private Initialization::Evaluation {
                                     receiver->abi == ImplicitObjectABI::Value &&
                                     !receiver->written_fields.empty();
     result_sources.reserve(
-        (!returns_void && !returns_receiver_alias && !returns_parameter_alias) +
+        (!returns_void && !returns_receiver_alias && !returns_parameter_alias &&
+         !returns_exact_projected_reference) +
         (receiver ? receiver->written_fields.size() : 0) + writebacks.size());
     size_t ordinary_result_count = 0;
-    if (!returns_void && !returns_receiver_alias && !returns_parameter_alias) {
+    if (!returns_void && !returns_receiver_alias && !returns_parameter_alias &&
+        !returns_exact_projected_reference) {
       const cxx::Type* result_type = signature->returnType();
-      if (returns_selected_parameter_alias) {
+      if (returns_selected_projected_reference) {
         result_type = unit_.control()->getUnsignedIntType();
       } else if (returns_reference) {
         result_type = unit_.typeTraits().add_pointer(
@@ -4480,6 +4583,7 @@ class Translator final : private Initialization::Evaluation {
       }
       if (updated && !receiver_projection->outputs.empty()) {
         write_receiver(*receiver, *updated, call);
+        receiver_result = *updated;
       }
     } else if (receiver_writeback) {
       auto updated = *receiver->value;
@@ -4550,6 +4654,33 @@ class Translator final : private Initialization::Evaluation {
           .temporary = receiver->temporary,
       };
     }
+    if (returns_projected_reference) {
+      if (selected_reference_candidates.empty()) {
+        selected_reference_candidates.resize(projected_origins.size());
+      } else {
+        IREE_ASSERT_EQ(selected_reference_candidates.size(),
+                       projected_origins.size());
+      }
+      for (size_t ordinal = 0; ordinal < projected_origins.size(); ++ordinal) {
+        const auto& origin = projected_origins[ordinal];
+        if (origin.owner_ordinal == ReferenceResultOrigin::kReceiver) {
+          IREE_ASSERT(receiver);
+          selected_reference_candidates[ordinal] = receiver_reference_candidate(
+              *receiver, origin.projection, receiver_result, call);
+        } else {
+          IREE_ASSERT(selected_reference_candidates[ordinal].target ||
+                      selected_reference_candidates[ordinal].value);
+        }
+      }
+      if (returns_exact_projected_reference) {
+        auto candidate = std::move(selected_reference_candidates.front());
+        return {
+            .value = std::move(candidate.value),
+            .reference_target = std::move(candidate.target),
+            .temporary = receiver ? receiver->temporary : std::nullopt,
+        };
+      }
+    }
     if (reference_result_alias) {
       return {
           .value = reference_result_alias->value,
@@ -4557,7 +4688,7 @@ class Translator final : private Initialization::Evaluation {
           .temporary = reference_result_alias->temporary,
       };
     }
-    if (returns_selected_parameter_alias) {
+    if (returns_selected_projected_reference) {
       IREE_ASSERT_EQ(ordinary_result_count, 1u);
       auto selector = loom_op_results(op)[0];
       auto* result_type =
@@ -4571,6 +4702,7 @@ class Translator final : private Initialization::Evaluation {
         return {
             .value = selected_call_result_value(
                 selector, selected_reference_candidates, result_type, call),
+            .temporary = receiver ? receiver->temporary : std::nullopt,
         };
       }
       std::vector<Lvalue> targets;
@@ -4581,6 +4713,7 @@ class Translator final : private Initialization::Evaluation {
       return {
           .reference_target = Lvalue{std::make_shared<const SelectedLvalue>(
               selector, result_type, std::move(targets))},
+          .temporary = receiver ? receiver->temporary : std::nullopt,
       };
     }
     return {
@@ -4615,9 +4748,11 @@ class Translator final : private Initialization::Evaluation {
         expression(variadic_argument).append_to(arguments);
       }
       if (receiver) {
+        auto projected_origins = functions_.projected_reference_return_origins(
+            function, receiver->abi);
         return emit_evaluated_call(call, function, callee, std::move(receiver),
-                                   std::move(arguments), {}, std::nullopt, {},
-                                   source);
+                                   std::move(arguments), {}, std::nullopt,
+                                   projected_origins, {}, source);
       }
       return {
           .value = emit_simple_call(call, function, callee,
@@ -4674,9 +4809,9 @@ class Translator final : private Initialization::Evaluation {
       materialize_call_argument(evaluated, call);
     }
     std::vector<SelectedReferenceCandidate> selected_reference_candidates;
-    auto selected_parameters =
-        functions_.selected_reference_return_parameters(function);
-    if (!selected_parameters.empty()) {
+    auto projected_origins = functions_.projected_reference_return_origins(
+        function, receiver ? receiver->abi : ImplicitObjectABI::None);
+    if (!projected_origins.empty()) {
       auto parameters = function->parameters();
       auto references = functions_.reference_parameters(function);
       std::vector<const ReferenceParameter*> references_by_ordinal(
@@ -4684,14 +4819,21 @@ class Translator final : private Initialization::Evaluation {
       for (const auto& reference : references) {
         references_by_ordinal[reference.ordinal] = &reference;
       }
-      selected_reference_candidates.reserve(selected_parameters.size());
-      for (size_t ordinal : selected_parameters) {
-        const auto* reference = references_by_ordinal[ordinal];
+      selected_reference_candidates.reserve(projected_origins.size());
+      for (const auto& origin : projected_origins) {
+        if (origin.owner_ordinal == ReferenceResultOrigin::kReceiver) {
+          IREE_ASSERT(receiver);
+          selected_reference_candidates.push_back(receiver_reference_candidate(
+              *receiver, origin.projection, std::nullopt, call));
+          continue;
+        }
+        const auto* reference = references_by_ordinal[origin.owner_ordinal];
         IREE_ASSERT(reference);
-        selected_reference_candidates.push_back(
-            selected_call_argument_candidate(evaluated_arguments[ordinal],
-                                             parameters[ordinal], *reference,
-                                             call));
+        auto candidate = selected_call_argument_candidate(
+            evaluated_arguments[origin.owner_ordinal],
+            parameters[origin.owner_ordinal], *reference, call);
+        selected_reference_candidates.push_back(project_reference_candidate(
+            std::move(candidate), origin.projection, call));
       }
     }
     for (size_t ordinal = 0; ordinal < evaluated_arguments.size(); ++ordinal) {
@@ -4709,7 +4851,7 @@ class Translator final : private Initialization::Evaluation {
     return emit_evaluated_call(
         call, function, callee, std::move(receiver), std::move(arguments),
         std::move(writebacks), std::move(reference_result_alias),
-        std::move(selected_reference_candidates), source);
+        projected_origins, std::move(selected_reference_candidates), source);
   }
 
   EvaluatedCallResult ordinary_operator_call(cxx::ExpressionAST* expression,
@@ -4809,16 +4951,24 @@ class Translator final : private Initialization::Evaluation {
       materialize_call_argument(*evaluated_arguments[ordinal], expression);
     }
     std::vector<SelectedReferenceCandidate> selected_reference_candidates;
-    auto selected_parameters =
-        functions_.selected_reference_return_parameters(function);
-    selected_reference_candidates.reserve(selected_parameters.size());
-    for (size_t ordinal : selected_parameters) {
-      IREE_ASSERT(evaluated_arguments[ordinal]);
-      const auto* reference = reference_by_ordinal[ordinal];
+    auto projected_origins =
+        functions_.projected_reference_return_origins(function, receiver_abi);
+    selected_reference_candidates.reserve(projected_origins.size());
+    for (const auto& origin : projected_origins) {
+      if (origin.owner_ordinal == ReferenceResultOrigin::kReceiver) {
+        IREE_ASSERT(receiver);
+        selected_reference_candidates.push_back(receiver_reference_candidate(
+            *receiver, origin.projection, std::nullopt, expression));
+        continue;
+      }
+      IREE_ASSERT(evaluated_arguments[origin.owner_ordinal]);
+      const auto* reference = reference_by_ordinal[origin.owner_ordinal];
       IREE_ASSERT(reference);
-      selected_reference_candidates.push_back(selected_call_argument_candidate(
-          *evaluated_arguments[ordinal], parameters[ordinal], *reference,
-          expression));
+      auto candidate = selected_call_argument_candidate(
+          *evaluated_arguments[origin.owner_ordinal],
+          parameters[origin.owner_ordinal], *reference, expression);
+      selected_reference_candidates.push_back(project_reference_candidate(
+          std::move(candidate), origin.projection, expression));
     }
     for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
       IREE_ASSERT(evaluated_arguments[ordinal]);
@@ -4833,7 +4983,8 @@ class Translator final : private Initialization::Evaluation {
     return emit_evaluated_call(
         expression, function, callee, std::move(receiver), std::move(arguments),
         std::move(writebacks), std::move(reference_result_alias),
-        std::move(selected_reference_candidates), locations_.get(expression));
+        projected_origins, std::move(selected_reference_candidates),
+        locations_.get(expression));
   }
 
   EvaluatedCallResult ordinary_operator_call(cxx::ExpressionAST* expression) {

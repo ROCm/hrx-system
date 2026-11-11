@@ -69,11 +69,9 @@ struct Lvalue {
       projection;
 
   const SelectedLvalue* selection() const;
-  // Complete owner of one concrete object/lane/component projection. Selected
-  // references use their already flattened alternatives before this query.
+  // Complete owner of one concrete object/lane/component projection. Callers
+  // recurse through selected references before this query.
   const ObjectLvalue& object() const;
-  // Appends unique source bindings, consuming retained selection summaries.
-  void append_bindings(std::vector<cxx::Symbol*>& bindings) const;
   // Applies a resolved field/base projection to each possible source origin.
   Lvalue project(const SubobjectProjection& selected, const cxx::Type* type,
                  Storage& storage, cxx::AST* owner) const;
@@ -88,7 +86,9 @@ struct SelectedLvalue {
   loom_value_id_t selector;
   // Source object type shared by the selected alternatives.
   const cxx::Type* type;
-  // Flat concrete destinations; nested source choices share one ordinal.
+  // Concrete destinations or independently selected nested destinations.
+  // Retaining the selection tree avoids multiplying already evaluated source
+  // choices merely to encode another choice around them.
   std::vector<Lvalue> alternatives;
   // Joined lane coordinate, if any alternative names an indexed vector.
   // Source-valid coordinates use an unsigned 64-bit carrier independently of

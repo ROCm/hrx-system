@@ -7,10 +7,208 @@
 #include "loom/import/cxx/control/construction.h"
 
 #include <algorithm>
+#include <array>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <utility>
 
 namespace loom::cxx_import {
+namespace {
+
+// Tiny source choices dominate ordinary calls. Bound their direct comparison
+// before switching wide choices to a sorted endpoint sweep.
+constexpr size_t kLinearChoiceThreshold = 8;
+
+struct ChoiceIdentity {
+  // Caller object selected by this source alternative.
+  cxx::Symbol* binding;
+  // First caller component participating in identity equality.
+  size_t component_offset;
+  // Exclusive caller component bound, equal to the offset when unused.
+  size_t component_end;
+
+  bool operator==(const ChoiceIdentity&) const = default;
+};
+
+struct ChoiceInterval {
+  // Formal or source components in which alternatives compete.
+  ComponentRange overlap;
+  // Caller destination that must agree across overlapping alternatives.
+  ChoiceIdentity identity;
+  // Original order used to make endpoint sorting deterministic.
+  size_t ordinal;
+  // Classification result retained directly in the owning construction fact.
+  bool* definite;
+};
+
+struct IdentityExtremum {
+  // Source identity owning this extremum, or no identity for an empty slot.
+  std::optional<ChoiceIdentity> identity;
+  // Furthest endpoint observed for this identity in the active sweep.
+  size_t value = 0;
+};
+
+template <typename IsBetter>
+void retain_identity_extremum(std::array<IdentityExtremum, 2>& extrema,
+                              ChoiceIdentity identity, size_t value,
+                              IsBetter is_better) {
+  for (size_t index = 0; index < extrema.size(); ++index) {
+    auto& candidate = extrema[index];
+    if (!candidate.identity || *candidate.identity != identity) {
+      continue;
+    }
+    if (is_better(value, candidate.value)) {
+      candidate.value = value;
+      if (index == 1 && is_better(candidate.value, extrema[0].value)) {
+        std::swap(extrema[0], extrema[1]);
+      }
+    }
+    return;
+  }
+
+  IdentityExtremum candidate{identity, value};
+  if (!extrema[0].identity || is_better(value, extrema[0].value)) {
+    extrema[1] = std::move(extrema[0]);
+    extrema[0] = std::move(candidate);
+  } else if (!extrema[1].identity || is_better(value, extrema[1].value)) {
+    extrema[1] = std::move(candidate);
+  }
+}
+
+std::optional<size_t> other_identity_extremum(
+    const std::array<IdentityExtremum, 2>& extrema,
+    const ChoiceIdentity& identity) {
+  for (const auto& candidate : extrema) {
+    if (candidate.identity && *candidate.identity != identity) {
+      return candidate.value;
+    }
+  }
+  return std::nullopt;
+}
+
+void classify_choices(std::span<ChoiceInterval> choices) {
+  if (choices.size() <= kLinearChoiceThreshold) {
+    for (size_t i = 0; i < choices.size(); ++i) {
+      const auto left_range = choices[i].overlap;
+      for (size_t j = 0; j < i; ++j) {
+        const auto right_range = choices[j].overlap;
+        if (left_range.begin < right_range.end &&
+            right_range.begin < left_range.end &&
+            choices[i].identity != choices[j].identity) {
+          *choices[i].definite = false;
+          *choices[j].definite = false;
+        }
+      }
+    }
+    return;
+  }
+
+  std::sort(choices.begin(), choices.end(),
+            [](const ChoiceInterval& left, const ChoiceInterval& right) {
+              const auto left_range = left.overlap;
+              const auto right_range = right.overlap;
+              return left_range.begin != right_range.begin
+                         ? left_range.begin < right_range.begin
+                         : left.ordinal < right.ordinal;
+            });
+
+  std::array<IdentityExtremum, 2> furthest_ends;
+  for (auto& choice : choices) {
+    const auto item_range = choice.overlap;
+    const auto item_identity = choice.identity;
+    auto other_end = other_identity_extremum(furthest_ends, item_identity);
+    if (other_end && *other_end > item_range.begin) {
+      *choice.definite = false;
+    }
+    retain_identity_extremum(furthest_ends, item_identity, item_range.end,
+                             std::greater<size_t>{});
+  }
+
+  std::array<IdentityExtremum, 2> nearest_begins;
+  for (auto cursor = choices.rbegin(); cursor != choices.rend(); ++cursor) {
+    const auto item_range = cursor->overlap;
+    const auto item_identity = cursor->identity;
+    auto other_begin = other_identity_extremum(nearest_begins, item_identity);
+    if (other_begin && *other_begin < item_range.end) {
+      *cursor->definite = false;
+    }
+    retain_identity_extremum(nearest_begins, item_identity, item_range.begin,
+                             std::less<size_t>{});
+  }
+}
+
+template <typename Item, typename MakeChoice>
+void classify_definite(std::span<Item> items, MakeChoice make_choice) {
+  if (items.empty()) {
+    return;
+  }
+  auto first = make_choice(items.front(), 0);
+  bool common_range = true;
+  bool common_identity = true;
+  for (size_t ordinal = 0; ordinal < items.size(); ++ordinal) {
+    items[ordinal].definite = true;
+    auto choice = make_choice(items[ordinal], ordinal);
+    common_range &= choice.overlap == first.overlap;
+    common_identity &= choice.identity == first.identity;
+  }
+  if (common_range) {
+    if (!common_identity) {
+      for (auto& item : items) {
+        item.definite = false;
+      }
+    }
+    return;
+  }
+
+  std::array<ChoiceInterval, kLinearChoiceThreshold> inline_choices;
+  std::vector<ChoiceInterval> wide_choices;
+  std::span<ChoiceInterval> choices;
+  if (items.size() <= inline_choices.size()) {
+    choices = std::span(inline_choices).first(items.size());
+  } else {
+    wide_choices.reserve(items.size());
+  }
+  for (size_t ordinal = 0; ordinal < items.size(); ++ordinal) {
+    auto choice = make_choice(items[ordinal], ordinal);
+    if (!choices.empty()) {
+      choices[ordinal] = choice;
+    } else {
+      wide_choices.push_back(choice);
+    }
+  }
+  if (!wide_choices.empty()) {
+    choices = wide_choices;
+  }
+  classify_choices(choices);
+}
+
+}  // namespace
+
+void Construction::classify_definite_arguments(std::span<Argument> arguments) {
+  classify_definite(arguments, [](Argument& argument, size_t ordinal) {
+    return ChoiceInterval{
+        argument.formal,
+        {argument.binding, argument.offset, argument.offset},
+        ordinal,
+        &argument.definite,
+    };
+  });
+}
+
+void Construction::classify_definite_destinations(
+    std::span<Destination> destinations) {
+  classify_definite(destinations, [](Destination& destination, size_t ordinal) {
+    return ChoiceInterval{
+        {destination.source_offset, destination.source_offset +
+                                        destination.range.end -
+                                        destination.range.begin},
+        {destination.binding, destination.range.begin, destination.range.end},
+        ordinal,
+        &destination.definite,
+    };
+  });
+}
 
 void Construction::append(
     std::variant<Read, Assign, IndirectAssign, Invoke, Join, Forget> effect) {
