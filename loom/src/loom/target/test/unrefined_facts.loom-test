@@ -203,3 +203,46 @@ kernel.def target(@identity) @kernel() {
 } launch() {
   kernel.return
 }
+
+// ====
+// RUN: pass select-templates{mode=early,rewrite=inline},canonicalize,select-templates{mode=final,rewrite=inline},symbol-dce
+
+// Cleanup between nested selections preserves each provider's target identity
+// without requiring an artifact ABI on that provider.
+target.generic<reference> @request_target {abi = object_function, subgroup_size = 64}
+
+target.generic<reference> @provider_target
+
+template.decl @outer() -> (index)
+
+template.decl @inner() -> (index)
+
+func.def public target(@request_target) @entry() -> (index) {
+  %result = template.apply<@outer>() : () -> (index)
+  func.return %result : index
+}
+
+template.def<@outer> target(@provider_target) requires [#target.subgroup.size<64>] @outer_selected() -> (index) {
+  %result = template.apply<@inner>() : () -> (index)
+  template.return %result : index
+}
+
+template.def<@inner> target(@provider_target) requires [#target.subgroup.size<64>] @inner_selected() -> (index) {
+  %result = index.constant 42 : index
+  template.return %result : index
+}
+
+template.def<@inner> requires [#target.subgroup.size<32>] priority(10) @inner_rejected() -> (index) {
+  %result = index.constant -3 : index
+  template.return %result : index
+}
+
+// ----
+target.generic<reference> @request_target {abi = object_function, subgroup_size = 64}
+
+target.generic<reference> @provider_target
+
+func.def public target(@request_target) @entry() -> (index) {
+  %result = index.constant 42 : index
+  func.return %result : index
+}

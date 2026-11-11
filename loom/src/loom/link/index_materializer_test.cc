@@ -517,13 +517,13 @@ TEST_F(LinkIndexMaterializerTest,
   const std::vector<uint8_t> outer_bytecode = WriteModule(outer);
   const std::vector<uint8_t> inner_bytecode = WriteModule(inner);
 
-  for (const ProviderForm outer_form : {ProviderForm::kMaterialized,
-                                        ProviderForm::kText,
-                                        ProviderForm::kBytecode}) {
+  for (const ProviderForm outer_form :
+       {ProviderForm::kMaterialized, ProviderForm::kText,
+        ProviderForm::kBytecode}) {
     SCOPED_TRACE(static_cast<int>(outer_form));
-    for (const ProviderForm inner_form : {ProviderForm::kMaterialized,
-                                          ProviderForm::kText,
-                                          ProviderForm::kBytecode}) {
+    for (const ProviderForm inner_form :
+         {ProviderForm::kMaterialized, ProviderForm::kText,
+          ProviderForm::kBytecode}) {
       SCOPED_TRACE(static_cast<int>(inner_form));
       IndexPtr index = CreateIndex();
       AddMaterialized(index.get(), root, IREE_SV("root"),
@@ -536,21 +536,21 @@ TEST_F(LinkIndexMaterializerTest,
       loom_link_index_materialization_t materialization =
           Materialize(index.get(), IREE_SV("@entry"));
       Verify(materialization.product.module);
-      EXPECT_NE(FindSymbol(materialization.product.module,
-                           IREE_SV("outer_selected")),
-                nullptr);
-      EXPECT_NE(FindSymbol(materialization.product.module,
-                           IREE_SV("inner_selected")),
-                nullptr);
-      EXPECT_NE(FindSymbol(materialization.product.module,
-                           IREE_SV("inner_rejected")),
-                nullptr);
-      EXPECT_EQ(FindSymbol(materialization.product.module,
-                           IREE_SV("outer_before")),
-                nullptr);
-      EXPECT_EQ(FindSymbol(materialization.product.module,
-                           IREE_SV("outer_after")),
-                nullptr);
+      EXPECT_NE(
+          FindSymbol(materialization.product.module, IREE_SV("outer_selected")),
+          nullptr);
+      EXPECT_NE(
+          FindSymbol(materialization.product.module, IREE_SV("inner_selected")),
+          nullptr);
+      EXPECT_NE(
+          FindSymbol(materialization.product.module, IREE_SV("inner_rejected")),
+          nullptr);
+      EXPECT_EQ(
+          FindSymbol(materialization.product.module, IREE_SV("outer_before")),
+          nullptr);
+      EXPECT_EQ(
+          FindSymbol(materialization.product.module, IREE_SV("outer_after")),
+          nullptr);
       loom_link_index_materialization_deinitialize(&materialization);
     }
   }
