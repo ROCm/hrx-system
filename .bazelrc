@@ -163,13 +163,8 @@ build --test_env=PYTHONSAFEPATH=1
 test:presubmit --config=locked
 test:presubmit --test_output=errors
 
-# Optional Loom importer lanes. These configs make importer-specific targets
-# compatible in the Bazel graph. The native C/C++ dependency is pinned; Python
-# frontend packages are runtime-probed by the importer backends.
+# Optional Loom importer lane.
 build:loom-importer-cxx --//loom/config/import:enable=cxx
-build:loom-importer-mlir --//loom/config/import:enable=mlir
-build:loom-importer-tilelang --//loom/config/import:enable=tilelang
-build:loom-importers --//loom/config/import:enable=cxx,mlir,tilelang
 
 # Manual sweeps can keep going to expose the full failure set without changing
 # the default hook behavior.

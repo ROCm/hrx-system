@@ -29,7 +29,6 @@ ROOT_COMMAND_EPILOG = """Common build-system commands:
   python dev.py bazel fuzz
   python dev.py bazel compile-commands
   python dev.py bazel clang-tidy
-  python dev.py importers setup tilelang
   python dev.py docs build
   python dev.py docs serve
 
@@ -48,10 +47,7 @@ Most developer scratch/state defaults under .tmp/. Set IREE_DEVTOOLS_TMP to
 redirect scratch that does not need to be a Bazel workspace package.
 
 Use `python dev.py bazel --help` or `python dev.py cmake --help` for the full
-subcommand list for that build system. Optional importer environments use
-locked requirement files outside the base Bazel module lock; set one up with
-`python dev.py importers setup <name>` and select it for build-system commands
-with `--importer-env <name>`."""
+subcommand list for that build system."""
 
 
 def root_command_help(command: str) -> CommandHelp:
@@ -74,23 +70,6 @@ tool environment.""",
   python dev.py doctor
   python dev.py doctor --system
   python dev.py doctor --tool-root ../.tools/iree-x""",
-        )
-    if command == "importers":
-        return CommandHelp(
-            description="Manage optional importer Python environments.",
-            epilog="""Examples:
-  python dev.py importers setup tilelang
-  python dev.py importers setup mlir
-  python dev.py importers doctor tilelang
-  python dev.py importers doctor mlir
-  python dev.py importers env tilelang
-  python dev.py importers env mlir --format shell
-
-Importer environments are explicit, locked Python environments under .tmp/.
-They keep heavyweight frontend packages out of the base Bazel module lock while
-still giving Bazel, CMake, and CI one deterministic package surface. Select a
-ready environment for build-system commands with `--importer-env <name>`.
-Importer docs live under loom/py/loom/importers/.""",
         )
     if command == "docs":
         return CommandHelp(
@@ -171,17 +150,13 @@ active.""",
   python dev.py bazel configure -DIREE_HAL_DRIVER_AMD=OFF
   python dev.py bazel configure --config=loom-target-amd-gpu
   python dev.py bazel configure --config=loom-target-all
-  python dev.py bazel configure --importer-env tilelang
-  python dev.py bazel configure --importer-env mlir
   python dev.py bazel configure --//runtime/config/hal:drivers=amd-gpu,task
 
 The default includes task and native AMD GPU/XDNA drivers. This writes
 .bazelrc.configured. Loom target presets resolve to complete architecture,
 artifact, and execution sets, which are printed in the configure summary.
 Published portable build options and exact-selection rules live in BUILDING.md.
-Use .bazelrc.local for checkout-specific Bazel overrides.
-`--importer-env <name>` writes the matching Loom importer build setting
-without adding frontend packages to the base module lock.""",
+Use .bazelrc.local for checkout-specific Bazel overrides.""",
             )
         return CommandHelp(
             description="Configure the CMake build tree.",
@@ -195,17 +170,13 @@ without adding frontend packages to the base module lock.""",
   python dev.py cmake configure -DIREE_HAL_DRIVER_AMD=OFF -DLIBHRX_BUILD=OFF
   python dev.py cmake configure -DLOOM_TARGET_ALL_CPU=ON
   python dev.py cmake configure -DLOOM_TARGET_ALL=ON
-  python dev.py cmake configure --importer-env tilelang
-  python dev.py cmake configure --importer-env mlir
   python dev.py --cmake-build-dir build/cmake-asan cmake configure -DIREE_ENABLE_ASAN=ON
 
 The first configure uses build/cmake unless --cmake-build-dir or
 IREE_CMAKE_BUILD_DIR selects another tree. The selected tree is recorded for
 later iree-cmake-build, iree-cmake-test, iree-cmake-run, iree-cmake-try, and
 iree-cmake-fuzz invocations.
-Published project build options live in BUILDING.md. `--importer-env <name>`
-adds the matching `-DLOOM_IMPORT_<NAME>=ON` option and runs configure with the
-locked importer environment on PYTHONPATH.""",
+Published project build options live in BUILDING.md.""",
         )
     if command == "build":
         if lane == "bazel":
@@ -241,12 +212,7 @@ CMake.""",
                 epilog="""Examples:
   python dev.py bazel test
   python dev.py bazel test //build_tools/devtools:cli_test
-  python dev.py bazel test //libhrx/...
-  python dev.py bazel test --importer-env tilelang //loom/py/loom/importers/tilelang:tilelang_import_test
-  python dev.py bazel test --importer-env mlir //loom/py/loom/importers/mlir:mlir_import_test
-
-`--importer-env <name>` selects the Bazel importer config and forwards the
-locked importer site-packages path through Bazel test_env.""",
+  python dev.py bazel test //libhrx/...""",
             )
         return CommandHelp(
             description="Build and run selected CTests in the configured CMake tree.",
@@ -255,14 +221,10 @@ locked importer site-packages path through Bazel test_env.""",
   python dev.py cmake test
   python dev.py cmake test -R hrx
   python dev.py cmake test --rerun-failed
-  python dev.py cmake test --importer-env tilelang -R tilelang
-  python dev.py cmake test --importer-env mlir -R mlir
 
 CTest first enumerates the exact selection, builds the concrete CMake roots
 declared by those tests, and then runs the same selection with
-`--output-on-failure`. Source-only selections skip the build.
-`--importer-env <name>` runs CTest with the locked importer site-packages path
-on PYTHONPATH.""",
+`--output-on-failure`. Source-only selections skip the build.""",
         )
     if command == "query" and lane == "bazel":
         return CommandHelp(

@@ -913,18 +913,17 @@ class CiTest(unittest.TestCase):
             ci.add_bazel_profiles(duplicate_steps, Path("/tmp/profiles"))
 
     def test_non_bazel_commands_reject_bazel_profile_directory(self):
-        for command in ("iree-cmake-cpu", "iree-importers-tilelang"):
-            for option, path in (
-                ("--bazel-profile-dir", "/tmp/profiles"),
-                ("--bazel-test-results-dir", "/tmp/results"),
-            ):
-                with self.subTest(command=command, option=option):
-                    args = ci.parse_arguments([command, option, path])
-                    with self.assertRaisesRegex(
-                        ValueError,
-                        f"{option} is only supported for Bazel CI commands",
-                    ):
-                        ci.steps_from_args(args)
+        for option, path in (
+            ("--bazel-profile-dir", "/tmp/profiles"),
+            ("--bazel-test-results-dir", "/tmp/results"),
+        ):
+            with self.subTest(option=option):
+                args = ci.parse_arguments(["iree-cmake-cpu", option, path])
+                with self.assertRaisesRegex(
+                    ValueError,
+                    f"{option} is only supported for Bazel CI commands",
+                ):
+                    ci.steps_from_args(args)
 
     def test_main_creates_bazel_profile_directory_only_when_executing(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -1221,14 +1220,12 @@ class CiTest(unittest.TestCase):
                     test_step.argv,
                 )
 
-    def test_amdgpu_loom_importers_are_forwarded_to_configuration(self):
+    def test_amdgpu_loom_importer_is_forwarded_to_configuration(self):
         args = ci.parse_arguments(
             [
                 "iree-bazel-amdgpu",
                 "--loom-importer",
                 "cxx",
-                "--loom-importer",
-                "mlir",
             ]
         )
 
@@ -1236,7 +1233,7 @@ class CiTest(unittest.TestCase):
 
         configure_step = next(step for step in steps if step.name == "Configure Bazel")
         self.assertIn(
-            "--//loom/config/import:enable=cxx,mlir",
+            "--//loom/config/import:enable=cxx",
             configure_step.argv,
         )
 
@@ -1372,47 +1369,6 @@ class CiTest(unittest.TestCase):
         self.assertFalse(
             any("-DIREE_HAL_DRIVER_AMDGPU=ON" in line for line in command_lines)
         )
-
-    def test_tilelang_importer_command_sets_up_and_tests_bazel_and_cmake(self):
-        args = ci.parse_arguments(["iree-importers-tilelang"])
-
-        steps = ci.steps_from_args(args)
-        command_lines = [step.command_line() for step in steps]
-
-        self.assertEqual(
-            [step.name for step in steps],
-            [
-                "Setup TileLang importer environment",
-                "Report TileLang importer environment",
-                "Test TileLang importer with Bazel",
-                "Configure TileLang importer CMake",
-                "Build TileLang importer CMake verifier",
-                "Test TileLang importer with CMake",
-            ],
-        )
-        self.assertIn("python3 dev.py importers setup tilelang", command_lines)
-        self.assertIn("python3 dev.py importers env tilelang", command_lines)
-        self.assertIn("--importer-env tilelang", command_lines[2])
-        self.assertIn(
-            "//loom/py/loom/importers/tilelang:tilelang_import_test",
-            command_lines[2],
-        )
-        self.assertTrue(self.uses_cmake_build_dir(steps[3], "iree-importers-tilelang"))
-        self.assertIn("--importer-env tilelang", command_lines[3])
-        self.assertIn("cmake build loom-opt --parallel", command_lines[4])
-        self.assertIn(
-            "loom/py/loom/importers/tilelang/tilelang_import_test",
-            command_lines[5],
-        )
-
-    def test_importer_command_rejects_target_override(self):
-        args = ci.parse_arguments(["iree-importers-tilelang", "--target", "//loom/..."])
-
-        with self.assertRaisesRegex(
-            ValueError,
-            "--target is not supported for importer CI commands",
-        ):
-            ci.steps_from_args(args)
 
     def test_cpu_sanitizer_aggregate_configures_once_and_preserves_scope(self):
         with mock.patch.object(

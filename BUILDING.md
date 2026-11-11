@@ -965,15 +965,11 @@ select only the capabilities they consume.
 
 ### Loom importers
 
-Importers are optional. The native [C/C++ importer](loom/src/loom/import/cxx/README.md)
+The native [C/C++ importer](loom/src/loom/import/cxx/README.md) is optional. It
 uses `--config=loom-importer-cxx` with Bazel or `-DLOOM_IMPORT_CXX=ON` with
-CMake. The [Python importer guide](loom/py/loom/importers/README.md) covers
-TileLang and MLIR, including their separate managed Python environments:
-
-```bash
-python dev.py importers setup mlir
-iree-bazel-test --importer-env mlir //loom/py/loom/importers/mlir:mlir_test
-```
+CMake. Foreign frontend integrations can use the separately versioned Python
+[importer construction API](loom/py/loom/importers/README.md) without adding
+their parser or compiler dependencies to an HRX deployment.
 
 ### Serving image inputs
 

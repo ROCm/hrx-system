@@ -32,8 +32,6 @@ load(
     "ARTIFACT_WASM_BINARY",
     "ARTIFACT_X86_ELF",
     "IMPORT_CXX",
-    "IMPORT_MLIR",
-    "IMPORT_TILELANG",
     "NATIVE_EMISSION",
 )
 
@@ -157,14 +155,6 @@ PACKAGE_POLICIES = [
     package_policy(
         packages = ["loom/src/loom/tooling/target/wasm/..."],
         build_requirements = [ARCH_WASM, ARTIFACT_WASM_BINARY],
-    ),
-    package_policy(
-        packages = ["loom/py/loom/importers/mlir/..."],
-        build_requirements = [IMPORT_MLIR],
-    ),
-    package_policy(
-        packages = ["loom/py/loom/importers/tilelang/..."],
-        build_requirements = [IMPORT_TILELANG],
     ),
     package_policy(
         packages = ["loom/binding/c/benchmark/target/amdgpu/..."],

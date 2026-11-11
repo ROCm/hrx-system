@@ -14,7 +14,7 @@ _REPRESENTATIVE_VALUES = {
     "loom/config/arch": ["x86"],
     "loom/config/emit": ["elf"],
     "loom/config/execute": ["iree_hal"],
-    "loom/config/import": ["mlir", "tilelang"],
+    "loom/config/import": ["cxx"],
 }
 
 def _expect_values(env, target):

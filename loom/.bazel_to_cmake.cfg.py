@@ -133,8 +133,6 @@ _LOOM_CONFIG_CMAKE_OPTIONS = {
     "//loom/config/execute:x86_task_hal": "LOOM_ROUTE_X86_TASK_HAL",
     "//loom/config/import/cxx:embed_includes_enabled": "LOOM_IMPORT_CXX_EMBED_INCLUDES",
     "//loom/config/import:cxx": "LOOM_IMPORT_CXX",
-    "//loom/config/import:mlir": "LOOM_IMPORT_MLIR",
-    "//loom/config/import:tilelang": "LOOM_IMPORT_TILELANG",
     "//loom/config/serve:audio_decoding": "LOOM_SERVE_AUDIO_DECODING",
     "//loom/config/serve:flac": "LOOM_SERVE_AUDIO_CODEC_FLAC",
     "//loom/config/serve:gif": "LOOM_SERVE_IMAGE_CODEC_GIF",

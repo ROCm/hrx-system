@@ -84,6 +84,10 @@ from importlib.resources import files
 schema = files("loom.model").joinpath("model-card.v1.schema.json").read_text()
 ```
 
+The [Python importer construction guide](https://rocm.github.io/hrx-system/loom/integration/python-importer/)
+builds, verifies, and serializes a complete kernel using only APIs shipped in
+the base wheel.
+
 The [model format and acquisition guide](https://github.com/ROCm/hrx-system/blob/main/loom/py/loom/model/README.md)
 describes origins, variants, presets, locks, offline use, and model publication.
 The [Loom library](https://github.com/ROCm/hrx-loom-library) contains model cards,
