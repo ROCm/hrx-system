@@ -1027,7 +1027,7 @@ class CiTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "repository-wide"):
             ci.steps_from_args(args)
 
-    def test_bazel_repository_tests_build_only_their_dependencies(self):
+    def test_bazel_repository_integration_tests_then_builds_complete_graph(self):
         args = ci.parse_arguments(["iree-bazel-repository-integration"])
         for platform_coverage in ("0", "1"):
             with (
@@ -1038,7 +1038,7 @@ class CiTest(unittest.TestCase):
                     clear=True,
                 ),
             ):
-                configure, test = ci.steps_from_args(args)
+                configure, test, build = ci.steps_from_args(args)
                 self.assertEqual(configure.argv[2:4], ("bazel", "configure"))
                 self.assertEqual(test.argv[2:4], ("bazel", "test"))
                 self.assertIn("--build_tests_only", test.argv)
@@ -1046,6 +1046,34 @@ class CiTest(unittest.TestCase):
                 self.assertEqual(
                     "--test_lang_filters=-py" in test.argv, platform_coverage == "0"
                 )
+                self.assertEqual(build.argv[2:4], ("bazel", "build"))
+                self.assertIn("//...", build.argv)
+                self.assertIn("--nobuild_runfile_links", build.argv)
+
+    def test_bazel_repository_integration_isolates_device_probe(self):
+        args = ci.parse_arguments(
+            ["iree-bazel-repository-integration", "--amdgpu-target", "gfx11-generic"]
+        )
+        with mock.patch.dict(ci.os.environ, {"HRX_ROCM_ROOT": "/tmp/rocm-root"}):
+            configure, _test, build, device_build = ci.steps_from_args(args)
+
+        self.assertIn("-DIREE_ROCM_PATH=/tmp/rocm-root", configure.argv)
+        self.assertIn("//...", build.argv)
+        self.assertFalse(
+            any(
+                arg.startswith("--//runtime/src/iree/hal/driver/amdgpu:targets=")
+                for arg in build.argv
+            )
+        )
+        self.assertNotIn("//...", device_build.argv)
+        self.assertIn(
+            "//runtime/src/iree/hal/driver/amdgpu/util:pm4_dispatch_test_kernels",
+            device_build.argv,
+        )
+        self.assertIn(
+            "--//runtime/src/iree/hal/driver/amdgpu:targets=gfx11-generic",
+            device_build.argv,
+        )
 
     def test_bazel_repository_device_compilation_shares_the_build_invocation(self):
         args = ci.parse_arguments(
@@ -1062,12 +1090,15 @@ class CiTest(unittest.TestCase):
         )
 
     def test_bazel_repository_device_compilation_requires_rocm(self):
-        args = ci.parse_arguments(
-            ["iree-bazel-repository-build", "--amdgpu-target", "gfx11-generic"]
-        )
-        with mock.patch.dict(ci.os.environ, {}, clear=True):
-            with self.assertRaisesRegex(ValueError, "requires HRX_ROCM_ROOT"):
-                ci.steps_from_args(args)
+        for command in (
+            "iree-bazel-repository-build",
+            "iree-bazel-repository-integration",
+        ):
+            with self.subTest(command=command):
+                args = ci.parse_arguments([command, "--amdgpu-target", "gfx11-generic"])
+                with mock.patch.dict(ci.os.environ, {}, clear=True):
+                    with self.assertRaisesRegex(ValueError, "requires HRX_ROCM_ROOT"):
+                        ci.steps_from_args(args)
 
     def test_shared_tool_commands_do_not_run_a_static_configuration(self):
         for command in (
