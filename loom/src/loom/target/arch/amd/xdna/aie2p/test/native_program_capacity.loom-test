@@ -34,7 +34,7 @@ pipeline.def<kernel> public retain target(@device) @combined_program() run() {
   %memory = pipeline.memory<workgroup>[0, 3] : pool
   %bytes = index.constant 4096 : offset
   %storage = buffer.alloca<workgroup> pool(%memory) align(4) %bytes : buffer
-  // ERROR@+1: XDNA/058 {function_name="__aie2p_worker_helper_2", required="20524", capacity="16384"}
+  // ERROR@+1: XDNA/058 {function_name="__aie2p_worker_helper_2", required="19532", capacity="16384"}
   pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
     func.call @fill_a(%storage) : (buffer)
     func.call @fill_b(%storage) : (buffer)
@@ -57,7 +57,7 @@ pipeline.def<kernel> public retain target(@device) @oversized_native_program() r
   %end = index.constant 2048 : index
   %step = index.constant 1 : index
   %value = scalar.constant 1 : i32
-  // ERROR@+1: XDNA/058 {function_name="__aie2p_worker_helper_2", required="20486", capacity="16384"}
+  // ERROR@+1: XDNA/058 {function_name="__aie2p_worker_helper_2", required="19990", capacity="16384"}
   pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
     %values = buffer.view %storage[%origin] : buffer -> view<2048xi32>
     scf.for %i = [%begin to %end step %step] unroll {
@@ -68,4 +68,4 @@ pipeline.def<kernel> public retain target(@device) @oversized_native_program() r
 
 // ----
 CHECK: COMPILE-REPORT: summary artifact=hal-executable status=FAILED_PRECONDITION *
-CHECK: COMPILE-REPORT: emission * code_bytes=20486 *
+CHECK: COMPILE-REPORT: emission * code_bytes=19990 *

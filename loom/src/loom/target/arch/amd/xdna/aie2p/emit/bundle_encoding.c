@@ -99,7 +99,7 @@ loom_aie2p_bundle_encoding_packet_move_group(
       &frame->allocation, packet->node_index);
 }
 
-void loom_aie2p_bundle_encoding_encode_packet(
+uint32_t loom_aie2p_bundle_encoding_encode_packet(
     const loom_low_emission_frame_t* frame,
     const loom_low_packet_view_t* packet,
     loom_aie2p_encoded_slot_t* out_encoded_slot,
@@ -157,9 +157,13 @@ void loom_aie2p_bundle_encoding_encode_packet(
     immediate_values[i] = value.i64;
   }
 
+  const uint32_t descriptor_ordinal =
+      loom_aie2p_descriptor_select_constant_encoding(packet->descriptor_ordinal,
+                                                     immediate_values);
   *out_encoded_slot =
-      loom_aie2p_descriptor_encode(descriptor_set, packet->descriptor_ordinal,
+      loom_aie2p_descriptor_encode(descriptor_set, descriptor_ordinal,
                                    operand_assignments, immediate_values);
+  return descriptor_ordinal;
 }
 
 void loom_aie2p_bundle_encoding_encode_storage_address(

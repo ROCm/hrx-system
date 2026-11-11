@@ -78,3 +78,33 @@ low.func.def target<amd.xdna.aie2p.core> @wrong_kind(%address: reg<aie2p.em>, %i
   mov.cph %address, %id, "two", 1
   return
 }
+
+// ====
+
+// Concrete constants select short MV-slot encodings, including rematerialized
+// byte offsets and DJ address indices. Neighboring values retain LNG slots.
+// RUN: emit aie2p-leaf @constant_forms report=code
+
+aie2p.target<core> @target
+
+low.func.def target<amd.xdna.aie2p.core>(@target) @constant_forms(%output: reg<aie2p.ep>) asm {
+  %lower = mov.i32 -1024
+  %upper = mov.i32 1023
+  %below = mov.i32 -1025
+  %above = mov.i32 1024
+  %mask = mov.i32 -1
+  %zero = mov.i32 0
+  %offset = mov.static-byte-offset 16
+  %index = mov.static-address-index 20
+  st.volatile %lower, %output, 0
+  st.volatile %upper, %output, 4
+  st.volatile %below, %output, 8
+  st.volatile %above, %output, 12
+  st.volatile %mask, %output, 16
+  st.i32.index.volatile %zero, %output, %index
+  st.volatile %offset, %output, 24
+  return
+}
+
+// ----
+code: b8 00 18 18 02 50 ff 0b 00 30 82 00 3a 91 ff 0d fc ff 3f 30 82 02 3a 11 00 0a 00 00 00 30 82 04 02 50 ff 0f 00 30 82 06 02 50 00 08 00 30 82 08 64 51 00 01 00 05 02 50 10 08 00 30 02 00 98 11 64 08 00 00 00 00 00 00

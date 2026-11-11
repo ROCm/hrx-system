@@ -45,5 +45,5 @@ low.func.def target<amd.xdna.aie2p.core>(@configuration_core_target) @duplicate_
 }
 
 // ----
-CHECK: COMPILE-REPORT: emission instructions=40 code_bytes=152 storage_bytes=162 body_instructions=40 entry_instructions=0 coissued_instructions=0 coissued_components=0
+CHECK: COMPILE-REPORT: emission instructions=40 code_bytes=136 storage_bytes=146 body_instructions=40 entry_instructions=0 coissued_instructions=0 coissued_components=0
 CHECK: COMPILE-REPORT: dynamic_instruction_mix descriptors=7 unknown=0 scalar_alu=6 * branch=4 *

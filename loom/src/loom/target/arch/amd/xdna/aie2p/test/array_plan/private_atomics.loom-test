@@ -153,7 +153,7 @@ control-relocation index=0 record=0 word=1 binding=0 addend=0 alignment=4
 control-relocation index=1 record=2 word=1 binding=1 addend=0 alignment=4
 
 resident-programs count=1 instances=1
-resident-program index=0 representative-worker=0 instances=1 entry=@private_atomic_array$worker$0 tile=(0,2) code-bytes=402 resources=0 fixups=1
+resident-program index=0 representative-worker=0 instances=1 entry=@private_atomic_array$worker$0 tile=(0,2) code-bytes=374 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core> @private_atomic_array$worker$0() asm {
   %acquire_delta = mov.short -1

@@ -398,7 +398,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @pinned_encode_address_prerequ
 
 // ----
 issue cycles: 29
-code bytes: 102
+code bytes: 100
 coissued bundles: 2
 coissued components: 4
 
@@ -438,7 +438,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @pinned_encode_state_prerequis
 }
 
 // ----
-code: d4 15 03 d8 86 00 44 80 28 01 00 00 44 00 a1 01 00 00 b8 18 b0 1f 00 00 00 00 00 00 98 30 42 10 98 20 00 10 18 0b 20 08 98 1b 00 01 00 00 00 00 18 00 0c 03 48 69 08 00 00 00 00 00 f8 8a 81 1c f8 8a 03 1c 02 70 c5 42 02 c0 46 01 b8 18 b0 1f 18 36 8a 08 00 00 48 69 20 01 00 00 48 29 48 02 48 29 60 03 18 00 28 10 00 00 00 00 00 00 00 00 00 00
+code: d4 15 03 d8 86 00 44 80 28 01 00 00 b8 00 d1 18 b8 18 b0 1f 00 00 00 00 00 00 98 30 42 10 98 20 00 10 18 0b 20 08 98 1b 00 01 00 00 00 00 18 00 0c 03 48 69 08 00 00 00 00 00 f8 8a 81 1c f8 8a 03 1c 02 70 c5 42 02 c0 46 01 b8 18 b0 1f 18 36 8a 08 00 00 48 69 20 01 00 00 48 29 48 02 48 29 60 03 18 00 28 10 00 00 00 00 00 00 00 00 00 00
 
 // ====
 
