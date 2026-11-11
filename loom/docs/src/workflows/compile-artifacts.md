@@ -240,6 +240,12 @@ byte offset must fit within 32 bits. Modules using memory define one private
 64 KiB linear memory; buffer parameters are byte addresses into it, and exported
 functions provide the host's access to that memory.
 
+Buffer address zero represents null. Hosts place every storage root at a
+nonzero address, including zero-length allocations. `buffer.null` produces
+zero, and `buffer.compare.null` tests that address without accessing memory;
+an empty allocation remains distinct from null. Null does not permit a memory
+access through a view.
+
 ## Select a compile pipeline
 
 The selected format's default pipeline is the maintained path from ordinary

@@ -54,6 +54,7 @@
 #include "loom/import/cxx/control/regions.h"
 #include "loom/import/cxx/receiver/scopes.h"
 #include "loom/import/cxx/source/attributes.h"
+#include "loom/import/cxx/source/constants.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/source/locations.h"
@@ -418,12 +419,21 @@ class Translator final : private Initialization::Evaluation {
       return value;
     }
     if (value.is_pointer()) {
+      if (types_.unqualified(output_type)->kind() == cxx::TypeKind::kBool) {
+        return storage_.compare_null(value.pointer().root, false, owner);
+      }
       if (loom_type_kind(types_.get(output_type, owner)) != LOOM_TYPE_BUFFER) {
         fail(owner, "conversion must preserve pointer representation");
       }
       return value;
     }
     const auto& output_partition = types_.partition(output_type, owner);
+    if (output_partition.kind == ValueKind::Pointer) {
+      if (!null_pointer_expression(unit_, input_ast)) {
+        fail(owner, "integer-to-pointer conversion requires a null constant");
+      }
+      return storage_.null(owner);
+    }
     if (output_partition.kind == ValueKind::Address) {
       auto input = value.ssa();
       auto input_type = value_type(input);
@@ -5610,7 +5620,13 @@ class Translator final : private Initialization::Evaluation {
     if (auto* cast = cxx::ast_cast<cxx::CastExpressionAST>(ast)) {
       auto input = loom_type_kind(types_.get(cast->expression->type, ast));
       auto output = loom_type_kind(types_.get(cast->type, ast));
-      if (input != output) {
+      const bool null_conversion =
+          input != output && output == LOOM_TYPE_BUFFER &&
+          null_pointer_expression(unit_, cast->expression);
+      const bool boolean_conversion =
+          input == LOOM_TYPE_BUFFER &&
+          types_.unqualified(cast->type)->kind() == cxx::TypeKind::kBool;
+      if (input != output && !null_conversion && !boolean_conversion) {
         fail(ast,
              "explicit casts require two scalars, two vectors or two pointers");
       }
@@ -5627,10 +5643,17 @@ class Translator final : private Initialization::Evaluation {
       }
       auto input = loom_type_kind(types_.get(cast->expression->type, ast));
       auto output = loom_type_kind(types_.get(cast->type, ast));
-      if (input != output ||
+      const bool null_conversion =
+          input != output && output == LOOM_TYPE_BUFFER &&
+          null_pointer_expression(unit_, cast->expression);
+      const bool boolean_conversion =
+          input == LOOM_TYPE_BUFFER &&
+          types_.unqualified(cast->type)->kind() == cxx::TypeKind::kBool;
+      if ((input != output && !null_conversion && !boolean_conversion) ||
           (cast->castOp != cxx::TokenKind::T_STATIC_CAST &&
            !(cast->castOp == cxx::TokenKind::T_REINTERPRET_CAST &&
-             (input == LOOM_TYPE_BUFFER || input == LOOM_TYPE_VECTOR)))) {
+             (input == LOOM_TYPE_BUFFER || input == LOOM_TYPE_VECTOR ||
+              null_conversion)))) {
         fail(ast,
              "casts require numeric static_cast or pointer/vector "
              "reinterpret_cast");
@@ -5651,19 +5674,17 @@ class Translator final : private Initialization::Evaluation {
       }
       auto output = types_.get(ast->type, ast);
       if (cast->constructorSymbol ||
-          loom_type_kind(output) != LOOM_TYPE_SCALAR ||
+          (loom_type_kind(output) != LOOM_TYPE_SCALAR &&
+           types_.partition(ast->type, ast).kind != ValueKind::Pointer) ||
           (cast->expressionList && cast->expressionList->next)) {
-        fail(ast, "functional casts require a scalar and at most one argument");
+        fail(ast,
+             "functional casts require a scalar or pointer and at most one "
+             "argument");
       }
       if (cast->expressionList) {
         return convert(cast->expressionList->value, ast->type, ast);
       }
-      loom_op_t* op;
-      check(loom_scalar_constant_build(
-          &builder_,
-          types_.is_float(ast->type) ? loom_attr_f64(0.0) : loom_attr_i64(0),
-          output, source, &op));
-      return result(op);
+      return initialization_.value(ast->type, ast, nullptr, ast);
     }
     if (auto* construction =
             cxx::ast_cast<cxx::BracedTypeConstructionAST>(ast)) {
@@ -5791,6 +5812,9 @@ class Translator final : private Initialization::Evaluation {
     }
     if (auto* literal = cxx::ast_cast<cxx::BoolLiteralExpressionAST>(ast)) {
       return scalars_.integer(literal->isTrue, LOOM_SCALAR_TYPE_I1, source);
+    }
+    if (cxx::ast_cast<cxx::NullptrLiteralExpressionAST>(ast)) {
+      return storage_.null(ast);
     }
     if (auto* literal = cxx::ast_cast<cxx::StringLiteralExpressionAST>(ast)) {
       return string_literal(literal).pointer;
@@ -5943,6 +5967,19 @@ class Translator final : private Initialization::Evaluation {
       }
       auto right = expression(binary->rightExpression);
       if (left.is_pointer() || right.is_pointer()) {
+        if (binary->op == cxx::TokenKind::T_EQUAL_EQUAL ||
+            binary->op == cxx::TokenKind::T_EXCLAIM_EQUAL) {
+          const bool equal = binary->op == cxx::TokenKind::T_EQUAL_EQUAL;
+          if (null_pointer_expression(unit_, binary->rightExpression)) {
+            return storage_.compare_null(left.pointer().root, equal, ast);
+          }
+          if (null_pointer_expression(unit_, binary->leftExpression)) {
+            return storage_.compare_null(right.pointer().root, equal, ast);
+          }
+          fail(ast,
+               "pointer equality between potentially nonnull values "
+               "requires buffer address identity");
+        }
         if (left.is_pointer() && !right.is_pointer()) {
           return storage_
               .advance(

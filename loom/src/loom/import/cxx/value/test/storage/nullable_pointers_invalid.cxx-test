@@ -1,0 +1,29 @@
+// RUN: verify
+// Native addresses cannot be manufactured from runtime integers.
+int* integer_address(unsigned long long value) {
+  // ERROR@+1: LOWERING/059 "integer-to-pointer conversion requires a null constant"
+  return reinterpret_cast<int*>(value);
+}
+
+// ====
+// Two live roots need address identity, not buffer-handle or content equality.
+bool compare(const int* left, const int* right) {
+  // ERROR@+1: LOWERING/059 "pointer equality between potentially nonnull values requires buffer address identity"
+  return left == right;
+}
+
+// ====
+// Raw pointers carry a byte origin as well as a root; the facade returns a root.
+// ERROR@+1: LOWERING/059 "buffer.null requires a typed buffer result"
+[[loom::op("buffer.null")]] int* wrong_result();
+int* entry() {
+  return wrong_result();
+}
+
+// ====
+#include <loomcxx/buffer.h>
+// ERROR@+1: LOWERING/059 "buffer.compare.null requires a typed buffer operand and bool result"
+[[loom::op("buffer.compare.null")]] unsigned wrong_predicate(loom::type::buffer<int>);
+unsigned entry(loom::type::buffer<int> input) {
+  return wrong_predicate(input);
+}

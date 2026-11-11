@@ -80,6 +80,10 @@ enum loom_amdgpu_select_data_flag_bits_e {
   LOOM_AMDGPU_SELECT_DATA_SIGN_EXTEND_TRUE = 1u << 1,
   // Replicate the false operand's sign when widening a compact index.
   LOOM_AMDGPU_SELECT_DATA_SIGN_EXTEND_FALSE = 1u << 2,
+  // Rematerialize a null true operand in the selected buffer's carrier.
+  LOOM_AMDGPU_SELECT_DATA_NULL_TRUE = 1u << 3,
+  // Rematerialize a null false operand in the selected buffer's carrier.
+  LOOM_AMDGPU_SELECT_DATA_NULL_FALSE = 1u << 4,
 };
 
 // Boolean operands either reuse their selected carrier or materialize the

@@ -1241,6 +1241,31 @@ def _cases() -> Sequence[ContractCase]:
         *_view_alias_rules(),
         _buffer_load_i8_u_rule(descriptor_lookup),
         _buffer_store_i8_rule(descriptor_lookup),
+        DescriptorRule(
+            source_op=buffer.buffer_null,
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=descriptor_lookup("x86.scalar.movimm.gpr64"),
+                    results={"dst": ValueRef.result("result")},
+                    immediates={"imm64": 0},
+                    form=DescriptorEmitForm.CONST,
+                ),
+            ),
+        ),
+        DescriptorRule(
+            source_op=buffer.buffer_compare_null,
+            emit=(
+                _op_emit(
+                    descriptor=descriptor_lookup("x86.scalar.cmp.imm.gpr64"),
+                    operands={"lhs": ValueRef.operand("buffer")},
+                    results={"dst": ValueRef.result("result")},
+                    immediates={
+                        "imm32": 0,
+                        "predicate": _INTEGER_CONDITION_CODE_MAP["eq"],
+                    },
+                ),
+            ),
+        ),
         *_unsigned_carry_borrow_rules(descriptor_lookup),
         *(
             rule

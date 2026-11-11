@@ -31,6 +31,7 @@ loom_corpus_test(
             "memory/address/logical_shift_loop.loom",
             "memory/address/uniform_loads.loom",
             "memory/buffer/boundaries.loom",
+            "memory/buffer/null.loom",
             "memory/view/offset_recurrence.loom",
             "memory/view/scalar_exchange.loom",
             "numeric/conversion/conversion.loom",

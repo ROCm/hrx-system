@@ -285,6 +285,26 @@ class CxxRenderer(CxxFunctionRenderer):
 
     def _render_memory(self, operation: Operation) -> tuple[str, ...] | None:
         name = operation.name
+        if name == "buffer.null":
+            resolved = self._resolved(operation)
+            result = resolved.value_id("result")
+            element = self._buffer_element(result)
+            self._declare(
+                result,
+                f"loom::buffer::null<{element}>()",
+                declaration_type="auto",
+                expression_type=f"loom::type::buffer<{element}>",
+            )
+            return ()
+        if name == "buffer.compare.null":
+            resolved = self._resolved(operation)
+            operand = resolved.value_id("buffer")
+            argument = self._buffer_argument(operand, self._buffer_element(operand))
+            self._declare(
+                resolved.value_id("result"),
+                f"loom::buffer::compare::null({argument})",
+            )
+            return ()
         projected = self._render_atomic(operation)
         if projected is not None:
             return projected

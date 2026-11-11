@@ -18,6 +18,7 @@ loom_check_test_suite(
         "distribution_facts.loom-test",
         "fold.loom-test",
         "literals.loom-test",
+        "null.loom-test",
         "roundtrip.loom-test",
         "verify.loom-test",
     ],

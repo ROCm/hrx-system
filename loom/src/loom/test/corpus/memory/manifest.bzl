@@ -57,6 +57,7 @@ MEMORY_CORPUS = loom_corpus_manifest(
         "buffer/buffer_access.loom",
         "buffer/buffers.loom",
         "buffer/masked_memory.loom",
+        "buffer/null.loom",
         "buffer/packing.loom",
         "buffer/selection.loom",
         "packed/alignment.loom",

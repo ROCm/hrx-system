@@ -13,6 +13,7 @@
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/ops.h"
+#include "loom/target/arch/amdgpu/lower/buffer.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/descriptor_ref.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
@@ -888,6 +889,14 @@ iree_status_t loom_amdgpu_select_scf_select_plan(
     allows_lane_immediates = register_count == 1;
   }
   loom_amdgpu_select_data_flags_t data_flags = 0;
+  if (loom_type_is_buffer(result_type)) {
+    if (loom_amdgpu_buffer_is_null(context, true_value)) {
+      data_flags |= LOOM_AMDGPU_SELECT_DATA_NULL_TRUE;
+    }
+    if (loom_amdgpu_buffer_is_null(context, false_value)) {
+      data_flags |= LOOM_AMDGPU_SELECT_DATA_NULL_FALSE;
+    }
+  }
   if (address_operands) {
     data_flags |= LOOM_AMDGPU_SELECT_DATA_ADDRESS;
     if (loom_value_fact_table_lookup(loom_low_lower_context_fact_table(context),
@@ -1553,6 +1562,18 @@ iree_status_t loom_amdgpu_lower_select(
       loom_low_lower_lookup_value(context, plan->false_value);
 
   const loom_amdgpu_select_data_flags_t data_flags = plan->payload.data.flags;
+  if (iree_any_bit_set(data_flags, LOOM_AMDGPU_SELECT_DATA_NULL_TRUE)) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_buffer_null(
+        context, source_op,
+        loom_low_lower_value_binding_type(context, plan->result),
+        &low_true_value));
+  }
+  if (iree_any_bit_set(data_flags, LOOM_AMDGPU_SELECT_DATA_NULL_FALSE)) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_buffer_null(
+        context, source_op,
+        loom_low_lower_value_binding_type(context, plan->result),
+        &low_false_value));
+  }
   if (iree_any_bit_set(data_flags, LOOM_AMDGPU_SELECT_DATA_ADDRESS)) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_resize_select_address_operand(
         context, source_op, low_true_value, lane_count,

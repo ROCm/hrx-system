@@ -22,6 +22,7 @@ loom_corpus_test(
         XDNA_HARDWARE_PROFILE.name: [
             "function/rodata.loom",
             "memory/address/tiled_channel.loom",
+            "memory/buffer/null.loom",
             "memory/packed/transport.loom",
             "memory/storage/load_snapshot.loom",
             "numeric/conversion/bfloat_rounding.loom",
@@ -55,6 +56,7 @@ loom_corpus_test(
             "function/rodata.loom:@rodata_copy_values": "XDNA/051",
             "function/rodata.loom:@rodata_gather_values": "XDNA/051",
             "function/rodata.loom:@rodata_values": "XDNA/051",
+            "memory/buffer/null.loom:@nullable_buffer_values": "XDNA/051",
             "memory/packed/transport.loom:@packed_byte_transport_all_bits": "XDNA/051",
             "memory/packed/transport.loom:@packed_word_transport_all_bits": "XDNA/051",
             "memory/packed/transport.loom:@strided_byte_packet_values": "XDNA/051",

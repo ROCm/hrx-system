@@ -189,18 +189,6 @@ long diff(int* a, int* b) { return a - b; }
 
 // ====
 // RUN: verify
-// Unsupported pointer operations produce source diagnostics.
-// ERROR@+1: LOWERING/059 "pointer arithmetic requires a pointer and an integral displacement"
-bool equal(int* a, int* b) { return a == b; }
-
-// ====
-// RUN: verify
-// Unsupported pointer operations produce source diagnostics.
-// ERROR@+1: LOWERING/059 "conversion must preserve pointer representation"
-bool truth(int* a) { return a; }
-
-// ====
-// RUN: verify
 // A pointer value's buffer and byte origin have no stored object representation.
 int* local(int* input) {
   // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"

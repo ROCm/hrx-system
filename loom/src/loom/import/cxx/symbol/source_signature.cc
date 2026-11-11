@@ -160,9 +160,10 @@ class CSourceSignatureBuilder {
             component_count, 0, FloatFormat(type), 0, 0, 0, 0, absent_string,
             no_fields, &node));
         break;
+      case cxx::TypeKind::kNullptr:
       case cxx::TypeKind::kPointer: {
         auto* pointer = cxx::type_cast<cxx::PointerType>(type);
-        if (traits.is_function(pointer->elementType())) {
+        if (pointer && traits.is_function(pointer->elementType())) {
           diagnostics_.reject(unit_, source_,
                               "C ABI signatures cannot contain function "
                               "pointers");

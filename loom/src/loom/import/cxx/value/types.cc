@@ -362,7 +362,8 @@ bool Types::requires_binding(const cxx::Type* input, cxx::AST* owner) {
 bool Types::requires_value_transport(const cxx::Type* input) {
   input = unqualified(input);
   auto traits = unit_.typeTraits();
-  if (traits.is_pointer(input) || traits.is_reference(input)) {
+  if (traits.is_pointer(input) || traits.is_reference(input) ||
+      traits.is_null_pointer(input)) {
     return true;
   }
   if (auto* array = cxx::type_cast<cxx::BoundedArrayType>(input)) {
@@ -1569,6 +1570,8 @@ loom_type_t Types::get(const cxx::Type* input, cxx::AST* ast) {
       }
       return loom_type_buffer();
     }
+    case cxx::TypeKind::kNullptr:
+      return loom_type_buffer();
     case cxx::TypeKind::kPointer: {
       auto* pointer = cxx::type_cast<cxx::PointerType>(unqualified(input));
       if (unit_.typeTraits().is_function(pointer->elementType())) {

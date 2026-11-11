@@ -1465,6 +1465,38 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         *_select_rules(),
         _raw_storage_buffer_byte_load_rule(),
         _raw_storage_buffer_byte_store_rule(),
+        DescriptorRule(
+            source_op=buffer.buffer_null,
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=_descriptor("spirv.op_constant.storage_buffer"),
+                    results={"dst": ValueRef.result("result")},
+                    immediates={"offset64_value": 0},
+                    form=DescriptorEmitForm.CONST,
+                ),
+            ),
+        ),
+        DescriptorRule(
+            source_op=buffer.buffer_compare_null,
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=_descriptor("spirv.op_constant.storage_buffer"),
+                    results={"dst": ValueRef.temporary("zero")},
+                    result_types={"dst": DescriptorResultType()},
+                    immediates={"offset64_value": 0},
+                    form=DescriptorEmitForm.CONST,
+                ),
+                EmitDescriptorOp(
+                    descriptor=_descriptor("spirv.op_iequal.storage_buffer"),
+                    operands={
+                        "lhs": ValueRef.operand("buffer"),
+                        "rhs": ValueRef.temporary("zero"),
+                    },
+                    results={"dst": ValueRef.result("result")},
+                    form=DescriptorEmitForm.OP,
+                ),
+            ),
+        ),
         *_storage_buffer_rules(),
         *bfloat_carrier_memory_rules(),
         *SPIRV_ATOMIC_CONTRACT_CASES,

@@ -41,6 +41,7 @@ from loom.dsl import (
     BYTE_PATTERN_SCALAR,
     CONSTANT_LIKE,
     FACT_IDENTITY,
+    I1,
     I32,
     MEMORY_FENCE,
     OFFSET,
@@ -116,6 +117,39 @@ buffer_constant = Op(
         ResultType("result"),
     ],
     examples=['%message = buffer.constant utf8("ready") : buffer'],
+)
+
+buffer_null = Op(
+    name="buffer.null",
+    group=buffer_ops,
+    doc=(
+        "Produce the null buffer, which identifies no storage. The result has "
+        "zero byte length, allocates nothing, and carries no release obligation. "
+        "It may be selected, passed, returned, and tested for null, but cannot "
+        "back a memory access. Null is distinct from every allocated buffer, "
+        "including zero-length storage. Its physical representation is target "
+        "and memory-space dependent; it is not an integer address."
+    ),
+    results=[Result("result", BUFFER, doc="Null storage reference.")],
+    traits=[PURE, CONSTANT_LIKE, SAFE_TO_SPECULATE],
+    facts="loom_buffer_null_facts",
+    eager_execution_cost=1,
+    format=[COLON, ResultType("result")],
+    examples=["%empty = buffer.null : buffer"],
+)
+
+buffer_compare_null = Op(
+    name="buffer.compare.null",
+    group=buffer_ops,
+    doc=("Test whether a buffer is null. Returns true exactly when the operand identifies no storage, independently of its byte length. The query does not access memory or change ownership."),
+    operands=[Operand("buffer", BUFFER, doc="Storage reference to test.")],
+    results=[Result("result", I1, doc="True for null, false for storage.")],
+    traits=[PURE, SAFE_TO_SPECULATE],
+    ownership_effects=[Borrow("buffer")],
+    facts="loom_buffer_compare_null_facts",
+    eager_execution_cost=1,
+    format=[Ref("buffer"), COLON, TypeOf("buffer")],
+    examples=["%missing = buffer.compare.null %input : buffer"],
 )
 
 # ============================================================================
@@ -789,4 +823,6 @@ ALL_BUFFER_OPS: tuple[Op, ...] = (
     buffer_constant,
     buffer_alloca_init,
     buffer_duplicate,
+    buffer_null,
+    buffer_compare_null,
 )

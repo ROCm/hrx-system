@@ -162,3 +162,33 @@ unsigned observe_views(unsigned observation) {
       return *select_pointer(1u, first, second);
   }
 }
+
+[[loom::noinline]] const unsigned* optional_pointer(const unsigned* input,
+                                                    bool use) {
+  return use ? input + 1 : nullptr;
+}
+
+unsigned observe_nullable(bool use, unsigned count) {
+  const unsigned input[] = {23u, 41u};
+  const unsigned* current = optional_pointer(input, use);
+  const unsigned* next = nullptr;
+  for (unsigned i = 0; i < count; ++i) {
+    const unsigned* previous = current;
+    current = next;
+    next = previous;
+  }
+  return current ? *current : 7u;
+}
+
+[[loom::noinline]] decltype(nullptr) observed_null(unsigned* calls) {
+  ++*calls;
+  return nullptr;
+}
+
+unsigned observe_null_effect(bool use) {
+  const unsigned input[] = {23u, 41u};
+  const unsigned* pointer = optional_pointer(input, use);
+  unsigned calls = 0;
+  const bool missing = pointer == observed_null(&calls);
+  return calls * 100u + missing;
+}

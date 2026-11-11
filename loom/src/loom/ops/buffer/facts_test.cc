@@ -28,7 +28,7 @@ class BufferFactsTest : public ::testing::Test {
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
 
-  loom_value_facts_t InferLength(
+  loom_value_facts_t ReferenceFacts(
       loom_value_fact_reference_nullability_t nullability,
       loom_value_facts_t maximum_byte_extent) {
     loom_value_fact_buffer_reference_t reference = {
@@ -44,6 +44,14 @@ class BufferFactsTest : public ::testing::Test {
     loom_value_facts_t operand_facts = loom_value_facts_unknown();
     IREE_EXPECT_OK(loom_value_facts_make_buffer_reference(
         &fact_table_.context, reference, &operand_facts));
+    return operand_facts;
+  }
+
+  loom_value_facts_t InferLength(
+      loom_value_fact_reference_nullability_t nullability,
+      loom_value_facts_t maximum_byte_extent) {
+    loom_value_facts_t operand_facts =
+        ReferenceFacts(nullability, maximum_byte_extent);
     loom_value_facts_t result_facts = loom_value_facts_unknown();
     IREE_EXPECT_OK(loom_buffer_length_facts(&fact_table_.context,
                                             /*module=*/nullptr, /*op=*/nullptr,
@@ -80,6 +88,44 @@ TEST_F(BufferFactsTest, LengthAccountsForNullability) {
   EXPECT_EQ(maybe_null_length.range_lo, 0);
   EXPECT_EQ(maybe_null_length.range_hi, 48);
   EXPECT_EQ(maybe_null_length.known_divisor, 48);
+}
+
+TEST_F(BufferFactsTest, NullQueryUsesIdentityInsteadOfExtent) {
+  for (auto nullability : {LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN,
+                           LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NULL,
+                           LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL}) {
+    for (int64_t byte_extent : {0, 48}) {
+      auto operand =
+          ReferenceFacts(nullability, loom_value_facts_exact_i64(byte_extent));
+      loom_value_facts_t result = loom_value_facts_unknown();
+      IREE_ASSERT_OK(loom_buffer_compare_null_facts(
+          &fact_table_.context, /*module=*/nullptr, /*op=*/nullptr, &operand,
+          &result));
+      EXPECT_EQ(result.range_lo,
+                nullability == LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NULL);
+      EXPECT_EQ(result.range_hi,
+                nullability != LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL);
+    }
+  }
+}
+
+TEST_F(BufferFactsTest, NullQueryRetainsPredicateDistribution) {
+  auto operand = ReferenceFacts(LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN,
+                                loom_value_facts_unknown());
+  loom_value_facts_t result = loom_value_facts_unknown();
+  loom_value_facts_mark_lane_varying(&operand);
+  IREE_ASSERT_OK(
+      loom_buffer_compare_null_facts(&fact_table_.context, /*module=*/nullptr,
+                                     /*op=*/nullptr, &operand, &result));
+  EXPECT_TRUE(loom_value_facts_is_lane_predicate(result));
+  EXPECT_FALSE(loom_value_facts_is_subgroup_uniform(result));
+
+  loom_value_facts_mark_workgroup_uniform(&operand);
+  IREE_ASSERT_OK(
+      loom_buffer_compare_null_facts(&fact_table_.context, /*module=*/nullptr,
+                                     /*op=*/nullptr, &operand, &result));
+  EXPECT_TRUE(loom_value_facts_is_workgroup_uniform(result));
+  EXPECT_FALSE(loom_value_facts_is_lane_predicate(result));
 }
 
 }  // namespace

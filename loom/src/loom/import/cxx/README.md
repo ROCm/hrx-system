@@ -3218,6 +3218,29 @@ single-buffer binding ABI. Signed displacements are combined with the current
 origin before entering the nonnegative offset domain, so an interior pointer
 can move backward within its allocation.
 
+Optional pointers use ordinary C++ null spellings: `nullptr`, zero conversion,
+and value initialization. Comparisons against null, `!pointer`, and implicit or
+explicit Boolean conversion inspect storage identity without loading memory:
+
+```cpp
+int read_optional(const int* input, bool use) {
+  const int* selected = use ? input : nullptr;
+  return selected ? *selected : 0;
+}
+```
+
+Null values survive helper calls, returns, branches, loops, and pointer-bearing
+SSA records. Native callers can supply a null pointer directly. The VM carries
+an opaque null reference, never a native address encoded as an integer. A valid
+empty buffer is nonnull. The imported `buffer.null` and `buffer.compare.null`
+operations fold when their nullability is known, while a mixed null/live choice
+retains its runtime test. Exported C++ spells these operations
+`loom::buffer::null<T>()` and `loom::buffer::compare::null(buffer)`.
+
+Dereferencing null remains invalid. Equality between two potentially live
+pointers requires source-address identity across buffer origins and is
+diagnosed; it is not approximated with buffer-handle equality.
+
 `void*`, qualified void pointers, and pointers to forward-declared objects use
 the same representation. Copies, casts, helpers, branches, loops, and SSA record
 fields preserve the buffer and byte origin without requiring a pointee layout.

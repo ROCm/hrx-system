@@ -346,7 +346,8 @@ static bool loom_amdgpu_source_buffer_value_register_shape(
   // Unqualified entry buffers use the raw address ABI. A join with local
   // storage loses that entry origin and requires a generic pointer contract.
   if (reference.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN &&
-      reference.origin.kind != LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY) {
+      reference.origin.kind != LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY &&
+      reference.nullability != LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NULL) {
     return false;
   }
   switch (reference.memory_space) {
@@ -362,9 +363,9 @@ static bool loom_amdgpu_source_buffer_value_register_shape(
           2);
       return true;
     case LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE:
+    case LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP:
       *out_shape = loom_amdgpu_register_shape(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1);
       return true;
-    case LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP:
     case LOOM_VALUE_FACT_MEMORY_SPACE_HOST:
     case LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC:
       return false;

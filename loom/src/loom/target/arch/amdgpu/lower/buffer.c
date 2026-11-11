@@ -13,9 +13,44 @@
 #include "loom/ops/global/ops.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/data_symbol.h"
+#include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/source_alloca_layout.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
+#include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/util/fact_table.h"
+
+bool loom_amdgpu_buffer_is_null(loom_low_lower_context_t* context,
+                                loom_value_id_t source_value) {
+  const loom_value_fact_table_t* facts =
+      loom_low_lower_context_fact_table(context);
+  loom_value_fact_buffer_reference_t reference = {0};
+  return loom_value_facts_query_buffer_reference(
+             &facts->context, loom_value_fact_table_lookup(facts, source_value),
+             &reference) &&
+         reference.nullability == LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NULL;
+}
+
+iree_status_t loom_amdgpu_emit_buffer_null(loom_low_lower_context_t* context,
+                                           const loom_op_t* source_op,
+                                           loom_type_t result_type,
+                                           loom_value_id_t* out_value) {
+  const uint32_t unit_count = loom_low_register_type_unit_count(result_type);
+  const bool is_vgpr = loom_amdgpu_low_type_is_register_class(
+      context, result_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
+  loom_type_t word_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(is_vgpr
+                           ? loom_amdgpu_make_vgpr_type(context, &word_type)
+                           : loom_amdgpu_make_sgpr_type(context, &word_type));
+  loom_value_id_t word = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+      context, source_op,
+      is_vgpr ? LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32
+              : LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32,
+      unit_count == 1 ? UINT32_MAX : 0, word_type, &word));
+  const loom_value_id_t words[] = {word, word};
+  return loom_amdgpu_build_low_register_range(
+      context, source_op, words, unit_count, result_type, out_value);
+}
 
 static bool loom_amdgpu_select_buffer_alloca_plan_from_facts(
     const loom_value_fact_table_t* fact_table, const loom_op_t* source_op,

@@ -64,6 +64,7 @@ from loom.target.arch.amd.xdna.aie2p.contracts.integer_shift import (
     AIE2P_INTEGER_SHIFT_RULES,
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.memory import (
+    AIE2P_BUFFER_VALUE_RULES,
     AIE2P_MEMORY_RULES,
     AIE2P_VIEW_CARRIER_RULES,
     AIE2P_VIEW_ELEMENT_TYPES,
@@ -128,6 +129,7 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             result=ValueRef.result("result"),
         ),
         *AIE2P_VIEW_CARRIER_RULES,
+        *AIE2P_BUFFER_VALUE_RULES,
         RecipeRule(source_op=global_load),
         *AIE2P_BF16_MATRIX_RULES,
         DescriptorMatrixRule(

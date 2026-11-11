@@ -410,6 +410,7 @@ def test_vector_scale_uses_same_type_scalar_origins_on_either_side() -> None:
         case
         for case in SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT.cases
         if isinstance(case, DescriptorRule)
+        and case.descriptor is not None
         and case.descriptor.key.startswith("spirv.op_vector_times_scalar.")
     ]
     expected = {

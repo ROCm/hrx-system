@@ -600,6 +600,8 @@ def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
     add_scalar_recipe("spirv.op_select.bool", "i1")
     add_carrier_only("spirv.op_select.offset64")
     add_carrier_only("spirv.op_select.storage_buffer")
+    add_carrier_only("spirv.op_constant.storage_buffer")
+    add_scalar_recipe("spirv.op_iequal.storage_buffer", "i1")
     add_carrier_only("spirv.op_copy_object.storage_buffer")
     add_carrier_only("spirv.op_iadd.storage_buffer.byte_offset")
 
