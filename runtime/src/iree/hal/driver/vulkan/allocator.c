@@ -530,7 +530,7 @@ static bool iree_hal_vulkan_allocator_strip_optional_mapping(
   return true;
 }
 
-static int iree_hal_vulkan_allocator_score_memory_type(
+int iree_hal_vulkan_allocator_score_memory_type(
     const iree_hal_vulkan_buffer_spec_t* params,
     iree_hal_memory_type_t memory_type) {
   const bool mapping_requested =
@@ -545,7 +545,12 @@ static int iree_hal_vulkan_allocator_score_memory_type(
     score += mapping_requested ? 80 : 5;
   }
   if (iree_all_bits_set(memory_type, IREE_HAL_MEMORY_TYPE_HOST_CACHED)) {
-    score += mapping_requested ? 20 : 0;
+    // Random host reads must outweigh device locality and coherence. Otherwise
+    // cached host memory can tie an uncached device mapping, leaving expensive
+    // uncached CPU reads to enumeration order.
+    const bool random_access = iree_any_bit_set(
+        params->usage, IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_RANDOM);
+    score += random_access ? 40 : mapping_requested ? 20 : 0;
   }
   if (iree_all_bits_set(memory_type, IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
     score += mapping_requested ? 10 : 0;

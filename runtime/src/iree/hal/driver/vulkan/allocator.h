@@ -54,6 +54,14 @@ typedef struct iree_hal_vulkan_buffer_spec_t {
   iree_hal_vulkan_buffer_allocation_flags_t flags;
 } iree_hal_vulkan_buffer_spec_t;
 
+// Ranks compatible memory types for a private allocation. Higher scores are
+// preferred; callers establish required properties and native compatibility
+// before ranking. Random host access prefers cacheability over device locality
+// and coherence, while sequential-only mappings may use uncached memory.
+int iree_hal_vulkan_allocator_score_memory_type(
+    const iree_hal_vulkan_buffer_spec_t* spec,
+    iree_hal_memory_type_t memory_type);
+
 // Maps one canonical HAL queue family ordinal to its Vulkan queue family.
 // Array position is the HAL queue family ordinal.
 typedef struct iree_hal_vulkan_allocator_queue_family_t {
