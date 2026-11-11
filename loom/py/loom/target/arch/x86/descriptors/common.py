@@ -772,6 +772,27 @@ def _vector_zero_descriptor(
     )
 
 
+def _vector_ones_descriptor(
+    *,
+    vector_bit_width: int,
+    key: str,
+    mnemonic: str,
+) -> Descriptor:
+    return Descriptor(
+        key=key,
+        mnemonic=mnemonic,
+        semantic_tag=f"bits.const.ones.{vector_bit_width}",
+        operands=(_vector_result(vector_bit_width),),
+        constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
+        asm_forms=_asm(
+            mnemonic=_vector_asm_mnemonic(f"{mnemonic}.ones", vector_bit_width),
+            results=("dst",),
+        ),
+        schedule_class=_vector_i32_schedule_class(vector_bit_width),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 def _scalar_float_binary_descriptor(
     *,
     key: str,

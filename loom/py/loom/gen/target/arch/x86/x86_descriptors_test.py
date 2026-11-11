@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from pathlib import Path
 from re import Pattern
 from tempfile import TemporaryDirectory
@@ -17,11 +18,11 @@ from loom.gen.target.arch.x86 import x86_descriptors
 from loom.gen.target.low import compiler
 from loom.target.arch.x86 import descriptors as x86_descriptor_data
 from loom.target.arch.x86 import native_vector
-from loom.target.arch.x86.descriptors.encoding import Flag, Form, encoding
+from loom.target.arch.x86.descriptors.encoding import Flag, Form, encoding, validate_descriptor_encoding
 from loom.target.arch.x86.descriptors.integer_bits import (
     X86_SCALAR_NATIVE_COUNT_DESCRIPTORS,
 )
-from loom.target.arch.x86.feature_bits import FEATURE_BMI2
+from loom.target.arch.x86.feature_bits import FEATURE_AVX512_VL, FEATURE_BMI2
 from loom.target.arch.x86.scalar_families import (
     X86_SCALAR_READ_MEMORY_FAMILIES,
     X86_SCALAR_VARIABLE_SHIFT_FAMILIES,
@@ -44,6 +45,7 @@ from loom.target.low_descriptors import (
     DescriptorOpKind,
     EffectFlag,
     EffectKind,
+    EncodingFieldValue,
     ImmediateKind,
     InstructionClass,
     OperandAddressMapKind,
@@ -289,6 +291,46 @@ def test_native_vector_binding_rejects_cross_wired_facts() -> None:
     with _RaisesValueError(r"native operand shape mismatch"):
         native_vector.VMOVD_TO_GPR32.bind(to_xmm, VectorEncodingPrefix.VEX)
     assert to_gpr.encoding_format_id & VECTOR_ENCODING_FORMAT_MARKER
+
+
+def test_vector_ones_are_input_free_native_constants() -> None:
+    descriptors = {descriptor.key: descriptor for descriptor in x86_descriptor_data.X86_AVX512_CORE_DESCRIPTOR_SET.descriptors}
+    for key, recipe, encoding_id in (
+        ("x86.avx2.vpcmpeqd.ones.xmm", 0x8000, 0x0576),
+        ("x86.avx2.vpcmpeqd.ones.ymm", 0x8000, 0x4576),
+        ("x86.avx512.vpternlogd.ones.xmm", 0x9000, 0x2725),
+        ("x86.avx512.vpternlogd.ones.ymm", 0x9000, 0x6725),
+        ("x86.avx512.vpternlogd.ones.zmm", 0x9000, 0xA725),
+    ):
+        descriptor = descriptors[key]
+        validate_descriptor_encoding(descriptor)
+        assert descriptor.encoding_format_id == recipe
+        assert descriptor.encoding_id == encoding_id
+        assert tuple(operand.role for operand in descriptor.operands) == (OperandRole.RESULT,)
+        assert not descriptor.immediates
+        evex = ".avx512." in key
+        assert descriptor.encoding_field_values == ((EncodingFieldValue(1, 255),) if evex else ())
+        assert descriptor.feature_mask_words == ((FEATURE_AVX512_VL,) if evex and not key.endswith("zmm") else ())
+        assert descriptor.operands[0].address_map_kind is (OperandAddressMapKind.DIRECT if evex else OperandAddressMapKind.LOW_SUBSET)
+        assert Constraint(ConstraintKind.REMATERIALIZABLE, 0) in descriptor.constraints
+
+
+def test_fixed_native_immediate_contract_rejects_malformed_descriptors() -> None:
+    descriptor = next(d for d in x86_descriptor_data.X86_AVX512_CORE_DESCRIPTOR_SET.descriptors if d.key == "x86.avx512.vpternlogd.ones.zmm")
+    for fields in (
+        (EncodingFieldValue(2, 255),),
+        (EncodingFieldValue(1, 256),),
+        (EncodingFieldValue(1, 255), EncodingFieldValue(1, 255)),
+    ):
+        with _RaisesValueError("invalid fixed native immediate"):
+            validate_descriptor_encoding(replace(descriptor, encoding_field_values=fields))
+    with _RaisesValueError("invalid fixed native immediate"):
+        validate_descriptor_encoding(replace(descriptor, encoding_format_id=0x8000))
+    authored = next(d for d in x86_descriptor_data.X86_AVX512_CORE_DESCRIPTOR_SET.descriptors if d.immediates)
+    with _RaisesValueError("invalid fixed native immediate"):
+        validate_descriptor_encoding(replace(descriptor, immediates=authored.immediates))
+    with _RaisesValueError("fixed immediate requires"):
+        replace(native_vector.VPTERNLOGD_ONES, fixed_immediate=256)
 
 
 def test_explicit_writemasks_use_seven_location_window() -> None:

@@ -531,22 +531,22 @@ def _predicate_conversion_emits(
     )
 
 
-def _render_binary_compare_program(
-    operations: Sequence[tuple[Descriptor, ValueRef, ValueRef, str]],
+def _render_compare_program(
+    operations: Sequence[tuple[Descriptor, dict[str, ValueRef], str]],
     *,
     native_result: ValueRef,
     native_result_type: TypePattern | None,
     temporary_type: TypePattern,
 ) -> tuple[EmitDescriptorOp, ...]:
     emit_ops: list[EmitDescriptorOp] = []
-    for index, (descriptor, lhs, rhs, name) in enumerate(operations):
+    for index, (descriptor, operands, name) in enumerate(operations):
         is_last = index + 1 == len(operations)
         result = native_result if is_last else ValueRef.temporary(name)
         result_type = native_result_type if is_last else temporary_type
         emit_ops.append(
             _op_emit(
                 descriptor=descriptor,
-                operands={"lhs": lhs, "rhs": rhs},
+                operands=operands,
                 results={"dst": result},
                 result_types=None if result_type is None else {"dst": result_type},
             )
@@ -569,23 +569,26 @@ def _integer_compare_program(
     equal_mnemonic, greater_mnemonic = AVX2_INTEGER_COMPARE_MNEMONICS[element.name]
     equal = descriptor_lookup(f"x86.avx2.{equal_mnemonic}.{register_suffix}")
     greater = descriptor_lookup(f"x86.avx2.{greater_mnemonic}.{register_suffix}")
+    ones = descriptor_lookup(f"x86.avx2.vpcmpeqd.ones.{register_suffix}")
     xor = descriptor_lookup(f"x86.avx2.vpxor.{register_suffix}")
     and_ = descriptor_lookup(f"x86.avx2.vpand.{register_suffix}")
     lhs = ValueRef.operand("lhs")
     rhs = ValueRef.operand("rhs")
-    operations: list[tuple[Descriptor, ValueRef, ValueRef, str]] = []
+    operations: list[tuple[Descriptor, dict[str, ValueRef], str]] = []
 
     if predicate == "eq":
-        operations.append((equal, lhs, rhs, "equal"))
+        operations.append((equal, {"lhs": lhs, "rhs": rhs}, "equal"))
     elif predicate == "ne":
         operations.extend(
             (
-                (equal, lhs, rhs, "equal"),
-                (equal, lhs, lhs, "all_ones"),
+                (equal, {"lhs": lhs, "rhs": rhs}, "equal"),
+                (ones, {}, "all_ones"),
                 (
                     xor,
-                    ValueRef.temporary("equal"),
-                    ValueRef.temporary("all_ones"),
+                    {
+                        "lhs": ValueRef.temporary("equal"),
+                        "rhs": ValueRef.temporary("all_ones"),
+                    },
                     "not_equal",
                 ),
             )
@@ -594,15 +597,19 @@ def _integer_compare_program(
         swapped = predicate in ("slt", "sge")
         invert = predicate in ("sle", "sge")
         compare_lhs, compare_rhs = (rhs, lhs) if swapped else (lhs, rhs)
-        operations.append((greater, compare_lhs, compare_rhs, "ordered"))
+        operations.append(
+            (greater, {"lhs": compare_lhs, "rhs": compare_rhs}, "ordered")
+        )
         if invert:
             operations.extend(
                 (
-                    (equal, lhs, lhs, "all_ones"),
+                    (ones, {}, "all_ones"),
                     (
                         xor,
-                        ValueRef.temporary("ordered"),
-                        ValueRef.temporary("all_ones"),
+                        {
+                            "lhs": ValueRef.temporary("ordered"),
+                            "rhs": ValueRef.temporary("all_ones"),
+                        },
                         "ordered_or_equal",
                     ),
                 )
@@ -616,38 +623,46 @@ def _integer_compare_program(
         compare_operand = lhs if predicate in ("ult", "ule") else rhs
         operations.extend(
             (
-                (minimum, lhs, rhs, "minimum"),
-                (equal, ValueRef.temporary("minimum"), compare_operand, "inclusive"),
+                (minimum, {"lhs": lhs, "rhs": rhs}, "minimum"),
+                (
+                    equal,
+                    {"lhs": ValueRef.temporary("minimum"), "rhs": compare_operand},
+                    "inclusive",
+                ),
             )
         )
         if predicate in ("ult", "ugt"):
             operations.extend(
                 (
-                    (equal, lhs, rhs, "equal"),
-                    (equal, lhs, lhs, "all_ones"),
+                    (equal, {"lhs": lhs, "rhs": rhs}, "equal"),
+                    (ones, {}, "all_ones"),
                     (
                         xor,
-                        ValueRef.temporary("equal"),
-                        ValueRef.temporary("all_ones"),
+                        {
+                            "lhs": ValueRef.temporary("equal"),
+                            "rhs": ValueRef.temporary("all_ones"),
+                        },
                         "not_equal",
                     ),
                     (
                         and_,
-                        ValueRef.temporary("inclusive"),
-                        ValueRef.temporary("not_equal"),
+                        {
+                            "lhs": ValueRef.temporary("inclusive"),
+                            "rhs": ValueRef.temporary("not_equal"),
+                        },
                         "strict",
                     ),
                 )
             )
     else:
         shift = descriptor_lookup(f"x86.avx2.vpsllq.{register_suffix}")
-        operations.extend(((equal, lhs, lhs, "all_ones"),))
+        operations.append((ones, {}, "all_ones"))
         all_ones = ValueRef.temporary("all_ones")
         sign_bit = ValueRef.temporary("sign_bit")
         biased_lhs = ValueRef.temporary("biased_lhs")
         biased_rhs = ValueRef.temporary("biased_rhs")
         prefix_emits = (
-            *_render_binary_compare_program(
+            *_render_compare_program(
                 operations,
                 native_result=all_ones,
                 native_result_type=operand_type,
@@ -678,27 +693,28 @@ def _integer_compare_program(
         compare_lhs, compare_rhs = (
             (biased_rhs, biased_lhs) if swapped else (biased_lhs, biased_rhs)
         )
-        suffix_operations = [(greater, compare_lhs, compare_rhs, "unsigned_ordered")]
+        suffix_operations = [
+            (greater, {"lhs": compare_lhs, "rhs": compare_rhs}, "unsigned_ordered")
+        ]
         if invert:
             suffix_operations.append(
                 (
                     xor,
-                    ValueRef.temporary("unsigned_ordered"),
-                    all_ones,
+                    {"lhs": ValueRef.temporary("unsigned_ordered"), "rhs": all_ones},
                     "unsigned_ordered_or_equal",
                 )
             )
-        suffix_emits = _render_binary_compare_program(
+        suffix_emits = _render_compare_program(
             suffix_operations,
             native_result=native_result,
             native_result_type=native_result_type,
             temporary_type=operand_type,
         )
-        descriptors = tuple(dict.fromkeys((equal, greater, xor, and_, shift)))
+        descriptors = tuple(dict.fromkeys((ones, greater, xor, and_, shift)))
         return descriptors, (*prefix_emits, *suffix_emits)
 
     descriptors = tuple(dict.fromkeys(operation[0] for operation in operations))
-    return descriptors, _render_binary_compare_program(
+    return descriptors, _render_compare_program(
         operations,
         native_result=native_result,
         native_result_type=native_result_type,

@@ -1,0 +1,36 @@
+// RUN: emit x86-native-bytes @ones_xmm
+x86.target<avx2> @target
+
+low.func.def target<x86.avx2.core>(@target) @ones_xmm() -> (reg<x86.xmm>) asm {
+  %value = vpcmpeqd.ones.xmm
+  return %value
+}
+
+// ----
+code: c5 f9 76 c0 c3
+
+// ====
+
+// RUN: emit x86-native-bytes @ones_ymm
+x86.target<avx2> @target
+
+low.func.def target<x86.avx2.core>(@target) @ones_ymm() -> (reg<x86.ymm>) asm {
+  %value = vpcmpeqd.ones.ymm
+  return %value
+}
+
+// ----
+code: c5 fd 76 c0 c3
+
+// ====
+
+// RUN: emit x86-native-bytes @ones_zmm
+x86.target<avx512> @target
+
+low.func.def target<x86.avx512.core>(@target) @ones_zmm() -> (reg<x86.zmm>) asm {
+  %value = vpternlogd.ones
+  return %value
+}
+
+// ----
+code: 62 f3 7d 48 25 c0 ff c3

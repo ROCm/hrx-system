@@ -10,6 +10,8 @@ from enum import IntEnum, IntFlag
 
 from loom.target.arch.x86.vector_encoding import (
     VECTOR_ENCODING_FORMAT_MARKER,
+    VECTOR_IMMEDIATE_ENCODING_FIELD,
+    VectorEncodingBehavior,
     validate_vector_encoding_recipe,
     vector_encoding_address_base_input,
 )
@@ -81,6 +83,16 @@ def validate_descriptor_encoding(descriptor: Descriptor) -> None:
     if not descriptor.encoding_format_id:
         return
     is_vector = bool(descriptor.encoding_format_id & VECTOR_ENCODING_FORMAT_MARKER)
+    if descriptor.encoding_field_values and (
+        not is_vector
+        or (descriptor.encoding_format_id >> 12) & 7 != VectorEncodingBehavior.IMMEDIATE
+        or descriptor.immediates
+        or len(descriptor.encoding_field_values) != 1
+        or descriptor.encoding_field_values[0].encoding_field_id
+        != VECTOR_IMMEDIATE_ENCODING_FIELD
+        or not 0 <= descriptor.encoding_field_values[0].value <= 0xFF
+    ):
+        raise ValueError(f"{descriptor.key}: invalid fixed native immediate")
     input_operands = tuple(
         operand
         for operand in descriptor.operands

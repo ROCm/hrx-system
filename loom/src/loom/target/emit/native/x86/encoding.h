@@ -123,6 +123,10 @@ typedef enum loom_x86_vector_register_selector_e {
 } loom_x86_vector_register_selector_t;
 
 // Bits 12..14 of a packed vector recipe select bounded encoding behavior.
+// An immediate recipe may obtain its byte from the descriptor's fixed encoding
+// field 1 instead of an authored immediate. Generation ensures that this is the
+// only fixed field and that fixed and authored immediates are mutually
+// exclusive.
 typedef enum loom_x86_vector_encoding_behavior_e {
   LOOM_X86_VECTOR_ENCODING_REGISTERS = 0,
   LOOM_X86_VECTOR_ENCODING_IMMEDIATE = 1,

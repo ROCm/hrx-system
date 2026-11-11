@@ -109,6 +109,24 @@ TEST(EncodingTest, VectorRegisterPrefixesAndBehaviors) {
                        {0x62, 0x61, 0x7e, 0x48, 0x7f, 0x3e});
 }
 
+TEST(EncodingTest, AllOnesConstantsPreserveVectorRegisterDomains) {
+  loom_x86_encoding_operands_t operands = {
+      .immediate = 255,
+      .result = 15,
+  };
+  ExpectVectorEncoding(0x8000, 0x0576, operands,
+                       {0xc4, 0x41, 0x01, 0x76, 0xff});
+  ExpectVectorEncoding(0x8000, 0x4576, operands,
+                       {0xc4, 0x41, 0x05, 0x76, 0xff});
+  operands.result = 31;
+  ExpectVectorEncoding(0x9000, 0x2725, operands,
+                       {0x62, 0x03, 0x05, 0x00, 0x25, 0xff, 0xff});
+  ExpectVectorEncoding(0x9000, 0x6725, operands,
+                       {0x62, 0x03, 0x05, 0x20, 0x25, 0xff, 0xff});
+  ExpectVectorEncoding(0x9000, 0xa725, operands,
+                       {0x62, 0x03, 0x05, 0x40, 0x25, 0xff, 0xff});
+}
+
 TEST(EncodingTest, IntegerToScalarFloat) {
   loom_x86_encoding_operands_t operands = {
       .result = 1,
@@ -1172,6 +1190,56 @@ TEST(EncodingTest, ImmediateWidthsAndCountRegister) {
   ExpectEncoding(LOOM_X86_ENCODING_FORM_SHIFT_IMMEDIATE,
                  0xc1 | (5u << 9) | LOOM_X86_ENCODING_REX_W, operands,
                  {0x49, 0xc1, 0xe9, 0x3f}, 1u << 9);
+}
+
+TEST(EncodingTest, ConstantsUseShortestExactExtension) {
+  loom_x86_encoding_operands_t operands = {
+      .immediate = INT32_MIN,
+      .result = 0,
+  };
+  const uint16_t wide = 0xb8 | LOOM_X86_ENCODING_REX_W;
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_CONSTANT, wide, operands,
+                 {0x48, 0xc7, 0xc0, 0x00, 0x00, 0x00, 0x80}, 1u);
+  operands.immediate = -1;
+  operands.result = 9;
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_CONSTANT, wide, operands,
+                 {0x49, 0xc7, 0xc1, 0xff, 0xff, 0xff, 0xff}, 1u << 9);
+
+  // Neither a zero-extending nor a sign-extending imm32 preserves these values.
+  operands.immediate = INT64_C(-2147483649);
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_CONSTANT, wide, operands,
+                 {0x49, 0xb9, 0xff, 0xff, 0xff, 0x7f, 0xff, 0xff, 0xff, 0xff},
+                 1u << 9);
+  operands.immediate = INT64_C(4294967296);
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_CONSTANT, wide, operands,
+                 {0x49, 0xb9, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00},
+                 1u << 9);
+
+  // Nonnegative imm32 values use the shorter zero-extending register write,
+  // including values whose bit31 would make the signed form incorrect.
+  operands.result = 0;
+  operands.immediate = 0;
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_CONSTANT, wide, operands,
+                 {0xb8, 0x00, 0x00, 0x00, 0x00}, 1u);
+  operands.immediate = INT32_MAX;
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_CONSTANT, wide, operands,
+                 {0xb8, 0xff, 0xff, 0xff, 0x7f}, 1u);
+  operands.immediate = INT64_C(2147483648);
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_CONSTANT, wide, operands,
+                 {0xb8, 0x00, 0x00, 0x00, 0x80}, 1u);
+  operands.immediate = UINT32_MAX;
+  operands.result = 9;
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_CONSTANT, wide, operands,
+                 {0x41, 0xb9, 0xff, 0xff, 0xff, 0xff}, 1u << 9);
+
+  // A negative 32-bit constant still requires only its low32 bits.
+  operands.immediate = -1;
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_CONSTANT, 0xb8, operands,
+                 {0x41, 0xb9, 0xff, 0xff, 0xff, 0xff}, 1u << 9);
+  operands.immediate = INT32_MIN;
+  operands.result = 0;
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_CONSTANT, 0xb8, operands,
+                 {0xb8, 0x00, 0x00, 0x00, 0x80}, 1u);
 }
 
 TEST(EncodingTest, SignedImmediateBoundariesUseShortestExactEncoding) {
