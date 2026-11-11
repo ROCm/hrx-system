@@ -16,9 +16,18 @@
 namespace loom::cxx_import {
 
 TemporaryOrigins::Facts TemporaryOrigins::facts(
-    cxx::ExpressionAST* expression) const {
+    cxx::ExpressionAST* expression, bool retain_materialization) const {
   auto found = expressions_.find(expression);
-  return found == expressions_.end() ? Facts{} : found->second;
+  Facts result;
+  if (found != expressions_.end()) {
+    result.result = found->second.result;
+    result.lifetime = found->second.lifetime;
+    result.members = found->second.members;
+  }
+  if (retain_materialization) {
+    result.materialization = materialization(expression);
+  }
+  return result;
 }
 
 cxx::ExpressionAST* TemporaryOrigins::result(
@@ -28,7 +37,17 @@ cxx::ExpressionAST* TemporaryOrigins::result(
 
 cxx::ExpressionAST* TemporaryOrigins::materialization(
     cxx::ExpressionAST* expression) const {
-  return facts(expression).materialization;
+  auto found = materializations_.find(expression);
+  if (found != materializations_.end()) {
+    return found->second;
+  }
+  auto retained = expressions_.find(expression);
+  if (retained == expressions_.end() || !retained->second.lifetime) {
+    return nullptr;
+  }
+  const auto& lifetime = lifetimes_[retained->second.lifetime - 1];
+  const auto* construction = std::get_if<Construction>(&lifetime.value);
+  return construction ? construction->origin : nullptr;
 }
 
 bool TemporaryOrigins::extended(cxx::ExpressionAST* origin) const {
@@ -41,36 +60,45 @@ const Destruction& TemporaryOrigins::destruction(
       .destruction;
 }
 
-void TemporaryOrigins::retain(cxx::ExpressionAST* expression) {
-  auto retained = classify(expression);
-  if (retained.result || retained.materialization || retained.lifetime ||
-      retained.members) {
-    expressions_.insert_or_assign(expression, retained);
+void TemporaryOrigins::retain(cxx::ExpressionAST* expression,
+                              bool retain_materialization) {
+  auto retained = classify(expression, retain_materialization);
+  if (retained.result || retained.lifetime || retained.members) {
+    expressions_.insert_or_assign(
+        expression,
+        StoredFacts{retained.result, retained.lifetime, retained.members});
+  }
+  if (retained.materialization && !result(retained.materialization)) {
+    materializations_.insert_or_assign(expression, retained.materialization);
   }
 }
 
 TemporaryOrigins::Facts TemporaryOrigins::classify(
-    cxx::ExpressionAST* expression) {
+    cxx::ExpressionAST* expression, bool retain_materialization) {
   auto traits = unit_.typeTraits();
   size_t members = 0;
   switch (expression->kind()) {
     case cxx::ASTKind::NestedExpression:
       return facts(
-          static_cast<cxx::NestedExpressionAST*>(expression)->expression);
+          static_cast<cxx::NestedExpressionAST*>(expression)->expression,
+          retain_materialization);
     case cxx::ASTKind::EqualInitializer:
       return facts(
-          static_cast<cxx::EqualInitializerAST*>(expression)->expression);
+          static_cast<cxx::EqualInitializerAST*>(expression)->expression,
+          retain_materialization);
     case cxx::ASTKind::DefaultInitializerExpression:
       return facts(
           static_cast<cxx::DefaultInitializerExpressionAST*>(expression)
-              ->expression);
+              ->expression,
+          retain_materialization);
     case cxx::ASTKind::ImplicitCastExpression: {
       auto* cast = static_cast<cxx::ImplicitCastExpressionAST*>(expression);
-      auto child = facts(cast->expression);
+      auto child = facts(cast->expression, retain_materialization);
       if (cast->conversionFunction) {
         // The frontend's constructor conversion wraps its completed argument
         // initializer. Both nodes denote the one constructed result object.
-        if (cast->conversionFunction->isConstructor() && child.result &&
+        if (cast->conversionFunction->isConstructor() &&
+            (child.result || child.materialization) &&
             traits.remove_cv(cast->expression->type) ==
                 traits.remove_cv(cast->type)) {
           return child;
@@ -82,7 +110,8 @@ TemporaryOrigins::Facts TemporaryOrigins::classify(
         child.members = 0;
         return child;
       }
-      if (traits.is_class(cast->type) && child.result) {
+      if (traits.is_class(cast->type) &&
+          (child.result || child.materialization)) {
         return child;
       }
       return {};
@@ -90,21 +119,28 @@ TemporaryOrigins::Facts TemporaryOrigins::classify(
     case cxx::ASTKind::BinaryExpression: {
       auto* binary = static_cast<cxx::BinaryExpressionAST*>(expression);
       if (!binary->symbol && binary->op == cxx::TokenKind::T_COMMA) {
-        return facts(binary->rightExpression);
+        return facts(binary->rightExpression, retain_materialization);
       }
       if (!binary->symbol && binary->op == cxx::TokenKind::T_DOT_STAR &&
           !traits.is_reference(binary->type)) {
-        return {.lifetime = facts(binary->leftExpression).lifetime};
+        auto retained = facts(binary->leftExpression, retain_materialization);
+        retained.result = nullptr;
+        retained.members = 0;
+        return retained;
       }
       break;
     }
     case cxx::ASTKind::MemberExpression: {
       auto* member = static_cast<cxx::MemberExpressionAST*>(expression);
       auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
-      return member->accessOp == cxx::TokenKind::T_DOT && field &&
-                     !traits.is_reference(field->type())
-                 ? Facts{.lifetime = facts(member->baseExpression).lifetime}
-                 : Facts{};
+      if (member->accessOp != cxx::TokenKind::T_DOT || !field ||
+          traits.is_reference(field->type())) {
+        return {};
+      }
+      auto retained = facts(member->baseExpression, retain_materialization);
+      retained.result = nullptr;
+      retained.members = 0;
+      return retained;
     }
     case cxx::ASTKind::SubscriptExpression: {
       auto* subscript = static_cast<cxx::SubscriptExpressionAST*>(expression);
@@ -114,14 +150,18 @@ TemporaryOrigins::Facts TemporaryOrigins::classify(
       auto* base = traits.is_array(subscript->baseExpression->type)
                        ? subscript->baseExpression
                        : subscript->indexExpression;
-      return traits.is_array(base->type)
-                 ? Facts{.lifetime = facts(base).lifetime}
-                 : Facts{};
+      if (!traits.is_array(base->type)) {
+        return {};
+      }
+      auto retained = facts(base, retain_materialization);
+      retained.result = nullptr;
+      retained.members = 0;
+      return retained;
     }
     case cxx::ASTKind::CppCastExpression: {
       auto* cast = static_cast<cxx::CppCastExpressionAST*>(expression);
       if (cast->valueCategory != cxx::ValueCategory::kPrValue) {
-        auto child = facts(cast->expression);
+        auto child = facts(cast->expression, retain_materialization);
         child.result = nullptr;
         child.members = 0;
         return child;
@@ -131,8 +171,9 @@ TemporaryOrigins::Facts TemporaryOrigins::classify(
     case cxx::ASTKind::ConditionalExpression: {
       auto* conditional =
           static_cast<cxx::ConditionalExpressionAST*>(expression);
-      auto first = facts(conditional->iftrueExpression);
-      auto second = facts(conditional->iffalseExpression);
+      auto first = facts(conditional->iftrueExpression, retain_materialization);
+      auto second =
+          facts(conditional->iffalseExpression, retain_materialization);
       if (expression->valueCategory == cxx::ValueCategory::kPrValue) {
         members = combine(first.members, second.members);
         break;
@@ -174,10 +215,22 @@ TemporaryOrigins::Facts TemporaryOrigins::classify(
   }
   auto destruction = destruction_for(unit_, expression->type);
   if (!destruction) {
-    return {.lifetime = members, .members = members};
+    return {
+        .materialization =
+            retain_materialization &&
+                    types_.requires_value_transport(expression->type)
+                ? expression
+                : nullptr,
+        .lifetime = members,
+        .members = members,
+    };
   }
-  lifetimes_.push_back({Construction{*destruction, members}});
-  return {expression, expression, lifetimes_.size(), members};
+  lifetimes_.push_back({Construction{*destruction, expression, members}});
+  return {
+      .result = expression,
+      .lifetime = lifetimes_.size(),
+      .members = members,
+  };
 }
 
 size_t TemporaryOrigins::aggregate_members(

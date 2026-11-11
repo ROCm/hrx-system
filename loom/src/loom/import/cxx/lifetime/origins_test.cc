@@ -28,13 +28,14 @@ namespace {
 // without asking a query to revisit an expression's descendants.
 class Expressions final : public cxx::ASTVisitor {
  public:
-  explicit Expressions(Source& source)
+  explicit Expressions(Source& source, bool retain_materialization = true)
       : types(source.unit(), source.diagnostics()),
-        origins(source.unit(), types) {}
+        origins(source.unit(), types),
+        retain_materialization_(retain_materialization) {}
 
   void postVisit(cxx::AST* ast) override {
     if (auto* expression = cxx::ast_cast<cxx::ExpressionAST>(ast)) {
-      origins.retain(expression);
+      origins.retain(expression, retain_materialization_);
     }
   }
 
@@ -65,6 +66,10 @@ class Expressions final : public cxx::ASTVisitor {
   std::vector<cxx::BracedTypeConstructionAST*> constructions;
   // Last return operand, used by the single-return construction witness.
   cxx::ExpressionAST* returned = nullptr;
+
+ private:
+  // Whether this synthetic walk models a lifetime-extending initializer.
+  bool retain_materialization_;
 };
 
 TEST(TemporaryOriginsTest, ConstructorSyntaxSharesOneResultObject) {
@@ -75,7 +80,7 @@ TEST(TemporaryOriginsTest, ConstructorSyntaxSharesOneResultObject) {
     Guard copy(const Guard& input) { return input; }
   )"),
                 IREE_SV("copy_result.cxx"), options);
-  Expressions expressions(source);
+  Expressions expressions(source, /*retain_materialization=*/false);
   expressions.accept(source.unit().ast());
   auto* conversion =
       cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expressions.returned);
@@ -85,6 +90,7 @@ TEST(TemporaryOriginsTest, ConstructorSyntaxSharesOneResultObject) {
   auto* result = expressions.origins.result(conversion);
   ASSERT_NE(result, nullptr);
   EXPECT_EQ(result, expressions.origins.result(conversion->expression));
+  EXPECT_EQ(expressions.origins.materialization(conversion), result);
   auto* arguments =
       cxx::ast_cast<cxx::ParenInitializerAST>(conversion->expression);
   ASSERT_NE(arguments, nullptr);
@@ -114,6 +120,47 @@ TEST(TemporaryOriginsTest, EqualPayloadsRemainSeparateConstructionSites) {
   ASSERT_NE(second, nullptr);
   EXPECT_NE(first, second);
   EXPECT_EQ(expressions.origins.result(expressions.initializers.at("scalar")),
+            nullptr);
+}
+
+TEST(TemporaryOriginsTest, SemanticMaterializationIsIndependentOfCleanup) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct Semantic { unsigned* pointer; };
+    void entry(unsigned* pointer) {
+      const Semantic& complete = Semantic{pointer};
+      unsigned* const& projected = Semantic{pointer}.pointer;
+    }
+  )"),
+                IREE_SV("semantic_materializations.cxx"), options);
+  Expressions expressions(source);
+  expressions.accept(source.unit().ast());
+  ASSERT_EQ(expressions.constructions.size(), 2u);
+
+  auto* complete = expressions.initializers.at("complete");
+  EXPECT_EQ(expressions.origins.result(complete), nullptr);
+  EXPECT_EQ(expressions.origins.materialization(complete),
+            expressions.constructions[0]);
+
+  auto* projected = expressions.initializers.at("projected");
+  EXPECT_EQ(expressions.origins.result(projected), nullptr);
+  EXPECT_EQ(expressions.origins.materialization(projected),
+            expressions.constructions[1]);
+}
+
+TEST(TemporaryOriginsTest, OrdinaryExpressionsRetainNoSemanticMaterialization) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct Semantic { unsigned* pointer; };
+    Semantic entry(unsigned* pointer) { return Semantic{pointer}; }
+  )"),
+                IREE_SV("ordinary_semantic_values.cxx"), options);
+  Expressions expressions(source, /*retain_materialization=*/false);
+  expressions.accept(source.unit().ast());
+  ASSERT_EQ(expressions.constructions.size(), 1u);
+  EXPECT_EQ(expressions.origins.materialization(expressions.constructions[0]),
             nullptr);
 }
 

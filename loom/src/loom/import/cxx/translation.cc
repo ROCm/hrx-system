@@ -651,6 +651,16 @@ class Translator final : private Initialization::Evaluation {
     uint64_t byte_offset = 0;
   };
 
+  // One reference declaration currently adopting a semantic temporary. The
+  // existing lvalue evaluator installs the complete value under this owner,
+  // then applies the source-written projection without materializing bytes.
+  struct MaterializedReference {
+    // Reference declaration owning the lifetime-extended object.
+    cxx::Symbol* binding;
+    // Canonical complete-object construction selected by lifetime analysis.
+    cxx::ExpressionAST* origin;
+  };
+
   // One completed source object awaiting destruction. Automatic bindings and
   // current receiver fields resolve their latest value at the cleanup edge;
   // temporary objects retain the value or storage created by their expression.
@@ -989,6 +999,17 @@ class Translator final : private Initialization::Evaluation {
   // the immutable payload and the number of transparent syntax wrappers.
   void adopt_temporary_result(cxx::ExpressionAST* expression) {
     auto* origin = control_->temporary_origins().result(expression);
+    auto found = temporary_results_.find(origin);
+    if (found != temporary_results_.end()) {
+      forget_temporary(found->second);
+    }
+  }
+
+  // A reference can extend a complete temporary through one of its
+  // subobjects. Adopt the complete materialization rather than requiring the
+  // initializer expression itself to be the owning prvalue.
+  void adopt_temporary_materialization(cxx::ExpressionAST* expression) {
+    auto* origin = control_->temporary_origins().materialization(expression);
     auto found = temporary_results_.find(origin);
     if (found != temporary_results_.end()) {
       forget_temporary(found->second);
@@ -1767,6 +1788,26 @@ class Translator final : private Initialization::Evaluation {
              "reference locals require one initializer expression");
       }
       auto* referent = unit_.typeTraits().remove_reference(variable->type());
+      if (auto* materialization =
+              control_->reference_materialization(variable)) {
+        if (control_->reference_requires_storage(variable)) {
+          fail(initializer,
+               "lifetime-extended semantic objects cannot provide physical "
+               "storage identity");
+        }
+        auto previous = materialized_reference_;
+        materialized_reference_ =
+            MaterializedReference{variable, materialization};
+        auto target = reference_lvalue(referent_expression, owner,
+                                       unit_.typeTraits().is_const(referent)
+                                           ? LvalueAccess::Read
+                                           : LvalueAccess::Write);
+        materialized_reference_ = previous;
+        adopt_temporary_materialization(referent_expression);
+        references_.emplace(variable, std::move(target));
+        activate_automatic_destruction(variable, owner);
+        return;
+      }
       auto target =
           control_->reference_requires_storage(variable)
               ? Lvalue{ObjectLvalue{
@@ -2516,6 +2557,12 @@ class Translator final : private Initialization::Evaluation {
         }
       }
       if (!locals_.contains(destination->binding)) {
+        // A lifetime-extended semantic temporary uses its reference
+        // declaration as the complete SSA owner. Ordinary references have no
+        // value binding and continue to resolve through their retained lvalue.
+        if (values_.contains(destination->binding)) {
+          return {expression->type, *destination};
+        }
         if (references_.contains(destination->binding)) {
           auto traits = unit_.typeTraits();
           if (preserve_identity || traits.is_class(expression->type) ||
@@ -2523,9 +2570,6 @@ class Translator final : private Initialization::Evaluation {
             return {expression->type, object_address(expression)};
           }
           return {expression->type, address(expression)};
-        }
-        if (values_.contains(destination->binding)) {
-          return {expression->type, *destination};
         }
         if (access == LvalueAccess::Write) {
           fail(owner, "mutation requires an owned automatic source binding");
@@ -3141,6 +3185,33 @@ class Translator final : private Initialization::Evaluation {
   Lvalue reference_lvalue(cxx::ExpressionAST* expression, cxx::AST* owner,
                           LvalueAccess access, bool force_ordinal = false) {
     auto* projected = unwrap_object_identity(unit_, expression);
+    if (materialized_reference_ &&
+        projected->valueCategory == cxx::ValueCategory::kPrValue &&
+        control_->temporary_origins().materialization(projected) ==
+            materialized_reference_->origin) {
+      if (access == LvalueAccess::Write) {
+        types_.require_mutable(projected->type, owner);
+      }
+      auto value = this->expression(projected);
+      values_.set(materialized_reference_->binding,
+                  name(value, cxx::to_string(
+                                  materialized_reference_->binding->name())));
+      return {ObjectLvalue{
+          projected->type,
+          Destination{materialized_reference_->binding, 0, nullptr}}};
+    }
+    if (materialized_reference_) {
+      if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(projected);
+          cast &&
+          cast->castKind == cxx::ImplicitCastKind::kDerivedToBaseConversion &&
+          control_->temporary_origins().materialization(cast) ==
+              materialized_reference_->origin) {
+        auto base =
+            reference_lvalue(cast->expression, owner, access, force_ordinal);
+        return base.project(types_.projection(cast->subobjectPath, cast),
+                            cast->type, storage_, owner);
+      }
+    }
     if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(projected);
         member &&
         member->vectorComponentKind != cxx::VectorComponentKind::kNone) {
@@ -8317,6 +8388,8 @@ class Translator final : private Initialization::Evaluation {
   // Latest evaluated result at each retained construction site. Cleanup tokens
   // remain stable when another result is adopted or extended to lexical scope.
   std::unordered_map<cxx::ExpressionAST*, size_t> temporary_results_;
+  // Active only while one reference initializer adopts its semantic prvalue.
+  std::optional<MaterializedReference> materialized_reference_;
   // Temporary prefix owned by the current full expression. Lexical caller
   // tokens retain parent marks without a heap-backed translator stack.
   std::optional<size_t> full_expression_mark_;

@@ -247,3 +247,46 @@ event 9
 event 89
 OK 0
 retired 0
+
+// ====
+// Semantic pointer fields remain SSA values while a reference declaration owns
+// the complete temporary. Mutable updates reach cleanup, and a reference to a
+// field keeps the enclosing object alive until the lexical scope exits.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+
+struct Semantic {
+  // Pointer transport cannot be represented as bytes in a C++ object.
+  unsigned* pointer;
+  // Scalar payload distinguishes mutation from the constructed value.
+  unsigned tag;
+  ~Semantic() { observe(*pointer + tag); }
+};
+
+void run() {
+  unsigned first = 5;
+  unsigned second = 9;
+  {
+    const Semantic& selected = Semantic{&first, 1};
+    observe(*selected.pointer + selected.tag);
+  }
+  {
+    Semantic&& mutable_value = Semantic{&first, 1};
+    mutable_value.pointer = &second;
+    mutable_value.tag = 2;
+    observe(*mutable_value.pointer);
+  }
+  {
+    unsigned* const& pointer = Semantic{&first, 3}.pointer;
+    observe(*pointer);
+  }
+}
+
+// ----
+event 6
+event 6
+event 9
+event 11
+event 5
+event 8
+OK 0
+retired 0

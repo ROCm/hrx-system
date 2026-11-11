@@ -335,6 +335,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   const ArrayCopyInitialization* array_copy(cxx::AST* initializer) const;
   // Whether a reference binding must carry durable storage identity.
   bool reference_requires_storage(cxx::Symbol* binding) const;
+  // Complete semantic temporary whose lifetime is owned by this reference
+  // declaration, or null when the reference aliases another source object.
+  cxx::ExpressionAST* reference_materialization(cxx::Symbol* binding) const;
   // Whether execution may modify the object named by a reference parameter.
   bool reference_written(cxx::Symbol* parameter) const;
   // Complete-group requirements produced after call effects and source
@@ -583,7 +586,8 @@ class ControlFlow final : private cxx::ASTVisitor {
                          cxx::FunctionSymbol* constructor, cxx::AST* owner);
   bool retain_constructor(cxx::VariableSymbol* variable,
                           cxx::ExpressionAST* initializer, cxx::AST* owner);
-  void retain_automatic_destruction(cxx::Symbol* binding, cxx::AST* owner);
+  void retain_automatic_destruction(cxx::Symbol* binding, cxx::AST* owner,
+                                    const cxx::Type* object_type = nullptr);
   void retain_subobject_destructions();
   void retain_temporary_destruction(cxx::ExpressionAST* expression);
   void retain_temporary_destructions();
@@ -607,6 +611,9 @@ class ControlFlow final : private cxx::ASTVisitor {
                                                    ControlFlow& callee);
   std::optional<Destination> classify_destination(
       cxx::ExpressionAST* expression);
+  std::optional<Destination> classify_materialized_destination(
+      cxx::ExpressionAST* expression, cxx::ExpressionAST* materialization,
+      cxx::Symbol* owner);
   bool collect_reference_return_parameters(
       cxx::ExpressionAST* expression, std::vector<size_t>& ordinals,
       std::unordered_map<cxx::Symbol*, size_t>* parameter_indices = nullptr);
@@ -675,10 +682,15 @@ class ControlFlow final : private cxx::ASTVisitor {
     std::optional<Destination> destination;
     // Canonical possible origins and reference-call edges of the initializer.
     CallArgument identity;
+    // Complete lifetime-extended semantic value owned by this declaration.
+    cxx::ExpressionAST* materialization = nullptr;
   };
   // Reference locals retain their initializer facts once. Later identity and
   // effect queries consume these facts without following initializer ASTs.
   std::unordered_map<cxx::Symbol*, ReferenceAlias> reference_aliases_;
+  // Whether the current source subtree can lifetime-extend a semantic prvalue.
+  // Ordinary expressions retain no materialization entry.
+  bool retain_reference_materializations_ = false;
   struct PointerAlias {
     // Source lvalue evaluated once by the pointer initializer.
     cxx::ExpressionAST* referent;

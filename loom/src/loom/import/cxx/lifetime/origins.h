@@ -22,8 +22,8 @@ namespace loom::cxx_import {
 
 class Types;
 
-// Nontrivial result-object and reference lifetime facts from the owning source
-// walk. Construction syntax and its implicit conversion can describe the same
+// Result-object and reference lifetime facts from the owning source walk.
+// Construction syntax and its implicit conversion can describe the same
 // object; equal payloads from separate constructions never establish identity.
 // Source nodes identify construction sites, not dynamic evaluation instances.
 class TemporaryOrigins {
@@ -33,7 +33,9 @@ class TemporaryOrigins {
 
   // Visits one expression after its evaluated children. Forwarding consumes
   // their retained facts rather than walking the source expression again.
-  void retain(cxx::ExpressionAST* expression);
+  // Reference initializer subtrees additionally retain semantic
+  // materializations that have no destruction node.
+  void retain(cxx::ExpressionAST* expression, bool retain_materialization);
   // Extends the materializations selected by one reference initializer. This
   // consumes the retained lifetime graph, including both conditional arms.
   void extend(cxx::ExpressionAST* initializer);
@@ -47,8 +49,9 @@ class TemporaryOrigins {
   // Nontrivial result supplied by a class/array prvalue or initializer wrapper.
   // A glvalue or subobject access does not supply an owning result.
   cxx::ExpressionAST* result(cxx::ExpressionAST* expression) const;
-  // Complete temporary reached through materialization, without changing its
-  // lifetime. Reference-returning function calls are not lifetime extenders.
+  // Complete temporary reached through materialization, independently of
+  // whether it has nontrivial destruction. Reference-returning function calls
+  // are not lifetime extenders.
   cxx::ExpressionAST* materialization(cxx::ExpressionAST* expression) const;
   // Whether a reference declaration extends this construction's lifetime.
   bool extended(cxx::ExpressionAST* origin) const;
@@ -59,6 +62,8 @@ class TemporaryOrigins {
   struct Construction {
     // Selected complete-object destruction, including any array extent.
     Destruction destruction;
+    // Canonical expression constructing the complete temporary object.
+    cxx::ExpressionAST* origin;
     // Lifetime dependencies of references initialized inside this result.
     size_t members = 0;
   };
@@ -85,9 +90,18 @@ class TemporaryOrigins {
     // and glvalues carry no new member lifetimes.
     size_t members = 0;
   };
+  struct StoredFacts {
+    // Complete owning result, absent on a glvalue or scalar expression.
+    cxx::ExpressionAST* result = nullptr;
+    // Shared lifetime-extension path; forwarding introduces no additional node.
+    size_t lifetime = 0;
+    // New reference bindings in the result's aggregate initialization.
+    size_t members = 0;
+  };
 
-  Facts facts(cxx::ExpressionAST* expression) const;
-  Facts classify(cxx::ExpressionAST* expression);
+  Facts facts(cxx::ExpressionAST* expression,
+              bool retain_materialization = false) const;
+  Facts classify(cxx::ExpressionAST* expression, bool retain_materialization);
   size_t aggregate_members(cxx::ExpressionAST* initializer,
                            cxx::List<cxx::ExpressionAST*>* elements,
                            cxx::VariableSymbol* implicit_element,
@@ -100,7 +114,11 @@ class TemporaryOrigins {
   // Canonical admitted type partitions, shared with control and value lowering.
   Types& types_;
   // Sparse facts; ordinary scalar expressions allocate no entries.
-  std::unordered_map<cxx::ExpressionAST*, Facts> expressions_;
+  std::unordered_map<cxx::ExpressionAST*, StoredFacts> expressions_;
+  // Complete materializations retained only beneath reference initializers.
+  // Keeping these separate leaves every ordinary lifetime entry compact.
+  std::unordered_map<cxx::ExpressionAST*, cxx::ExpressionAST*>
+      materializations_;
   // One-based nodes for constructions and joins; zero denotes no extension.
   std::vector<Lifetime> lifetimes_;
 };

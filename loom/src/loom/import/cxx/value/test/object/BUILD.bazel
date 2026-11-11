@@ -51,6 +51,8 @@ loom_check_test_suite(
         "reference_selection.cxx-test",
         "special_members_invalid.cxx-test",
         "structured_bindings.cxx-test",
+        "temporary_references.cxx-test",
+        "temporary_references_invalid.cxx-test",
         "value_initialization.cxx-test",
         "value_writebacks.cxx-test",
     ],

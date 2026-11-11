@@ -527,6 +527,13 @@ bool ControlFlow::reference_requires_storage(cxx::Symbol* binding) const {
   return storage_references_.contains(binding);
 }
 
+cxx::ExpressionAST* ControlFlow::reference_materialization(
+    cxx::Symbol* binding) const {
+  auto found = reference_aliases_.find(binding);
+  return found == reference_aliases_.end() ? nullptr
+                                           : found->second.materialization;
+}
+
 bool ControlFlow::reference_written(cxx::Symbol* parameter) const {
   return written_references_.contains(parameter);
 }
@@ -955,7 +962,7 @@ bool ControlFlow::preVisit(cxx::AST* ast) {
 
 void ControlFlow::postVisit(cxx::AST* ast) {
   if (auto* expression = cxx::ast_cast<cxx::ExpressionAST>(ast)) {
-    temporary_origins_.retain(expression);
+    temporary_origins_.retain(expression, retain_reference_materializations_);
     cxx::Symbol* owner = nullptr;
     bool reference_member = false;
     if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression)) {
@@ -2974,7 +2981,8 @@ void ControlFlow::retain_temporary_destructions() {
 }
 
 void ControlFlow::retain_automatic_destruction(cxx::Symbol* binding,
-                                               cxx::AST* owner) {
+                                               cxx::AST* owner,
+                                               const cxx::Type* object_type) {
   if (!binding) {
     return;
   }
@@ -2983,7 +2991,8 @@ void ControlFlow::retain_automatic_destruction(cxx::Symbol* binding,
                    variable->isThreadLocal())) {
     return;
   }
-  auto selected = destruction_for(unit_, binding->type());
+  auto selected =
+      destruction_for(unit_, object_type ? object_type : binding->type());
   if (!selected) {
     return;
   }
@@ -3895,10 +3904,14 @@ void ControlFlow::finalize_callable_effects() {
 void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
   auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(ast->symbol);
   auto* saved_pointer_alias_initializer = pointer_alias_initializer_;
+  const bool saved_retain_reference_materializations =
+      retain_reference_materializations_;
   if (variable && variable->isStatic()) {
     static_locals_.push_back(ast);
   }
   if (variable) {
+    retain_reference_materializations_ |=
+        ast->initializer && unit_.typeTraits().is_reference(variable->type());
     if (auto* conversion = constructor_conversion(ast->initializer);
         conversion &&
         same_function(conversion->conversionFunction,
@@ -3928,7 +3941,9 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
   }
   cxx::ASTVisitor::visit(ast);
   pointer_alias_initializer_ = saved_pointer_alias_initializer;
+  retain_reference_materializations_ = saved_retain_reference_materializations;
   if (variable) {
+    const cxx::Type* automatic_object_type = nullptr;
     if (!unit_.typeTraits().is_reference(variable->type()) &&
         ast->initializer) {
       record_parameter_read(ast->initializer);
@@ -3941,13 +3956,28 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
                             "reference locals require one initializer "
                             "expression");
       }
-      auto destination = retain_destination(referent);
+      auto* materialization = temporary_origins_.materialization(referent);
+      if (materialization &&
+          !types_.requires_value_transport(materialization->type)) {
+        materialization = nullptr;
+      }
+      automatic_object_type = materialization ? materialization->type : nullptr;
+      auto destination = materialization
+                             ? classify_materialized_destination(
+                                   referent, materialization, variable)
+                             : retain_destination(referent);
       auto identity = retain_call_argument(referent);
+      if (materialization) {
+        identity = {.source = referent, .write_binding = variable};
+        append_identity(destination.value_or(Destination{variable, 0, nullptr}),
+                        identity);
+      }
       if (argument_requires_storage(identity)) {
         require_identity(identity);
       }
       reference_aliases_.emplace(
-          variable, ReferenceAlias{destination, std::move(identity)});
+          variable,
+          ReferenceAlias{destination, std::move(identity), materialization});
       temporary_origins_.extend(referent);
     } else {
       temporary_origins_.extend_members(ast->initializer);
@@ -3963,7 +3993,7 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
         construction_.assign(variable, 0, SIZE_MAX);
       }
     }
-    retain_automatic_destruction(variable, ast);
+    retain_automatic_destruction(variable, ast, automatic_object_type);
   }
 }
 
@@ -4366,6 +4396,59 @@ std::optional<Destination> ControlFlow::classify_destination(
     auto slice = types_.selection(field, member->subobjectPath, member);
     target->component_offset += slice.component_offset;
     target->member = slice.partition;
+  }
+  return target;
+}
+
+std::optional<Destination> ControlFlow::classify_materialized_destination(
+    cxx::ExpressionAST* expression, cxx::ExpressionAST* materialization,
+    cxx::Symbol* owner) {
+  if (!expression) {
+    return std::nullopt;
+  }
+  if (expression->valueCategory == cxx::ValueCategory::kPrValue &&
+      temporary_origins_.materialization(expression) == materialization) {
+    return Destination{owner, 0, nullptr};
+  }
+  auto* unwrapped = unwrap_object_identity(unit_, expression);
+  if (unwrapped != expression) {
+    return classify_materialized_destination(unwrapped, materialization, owner);
+  }
+  if (auto* binary = cxx::ast_cast<cxx::BinaryExpressionAST>(expression);
+      binary && !binary->symbol && binary->op == cxx::TokenKind::T_COMMA) {
+    return classify_materialized_destination(binary->rightExpression,
+                                             materialization, owner);
+  }
+  if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression);
+      cast && is_class_adjustment(cast)) {
+    if (cast->castKind == cxx::ImplicitCastKind::kBaseToDerivedConversion) {
+      return std::nullopt;
+    }
+    auto target = classify_materialized_destination(cast->expression,
+                                                    materialization, owner);
+    if (target) {
+      const auto& selected = types_.projection(cast->subobjectPath, cast);
+      target->component_offset += selected.component_offset;
+      target->member = selected.partition;
+    }
+    return target;
+  }
+  auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression);
+  if (!member || member->accessOp != cxx::TokenKind::T_DOT ||
+      member->vectorComponentKind != cxx::VectorComponentKind::kNone) {
+    return std::nullopt;
+  }
+  auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
+  if (!field || field->isStatic() ||
+      unit_.typeTraits().is_reference(field->type())) {
+    return std::nullopt;
+  }
+  auto target = classify_materialized_destination(member->baseExpression,
+                                                  materialization, owner);
+  if (target) {
+    auto selected = types_.selection(field, member->subobjectPath, member);
+    target->component_offset += selected.component_offset;
+    target->member = selected.partition;
   }
   return target;
 }

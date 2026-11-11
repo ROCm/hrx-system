@@ -355,3 +355,67 @@ config.decl @probe.workgroup_size.x : index
 config.decl @probe.workgroup_size.y : index
 
 config.decl @probe.workgroup_size.z : index
+
+// ====
+// Null buffers remain ordinary semantic record components through
+// user-provided construction, function boundaries, lifetime extension, and a
+// nonescaping pointer alias of the retained temporary.
+struct OptionalOwner {
+  const unsigned* pointer;
+  unsigned fallback;
+
+  OptionalOwner(const unsigned* pointer)
+      : pointer(pointer), fallback(7u) {}
+};
+
+OptionalOwner null_record() { return OptionalOwner(nullptr); }
+
+const unsigned* record_pointer(OptionalOwner value) { return value.pointer; }
+
+unsigned temporary_alias(const unsigned* input, bool use) {
+  const OptionalOwner& value = OptionalOwner(use ? input : nullptr);
+  const OptionalOwner* alias = &value;
+  return alias->pointer ? alias->pointer[0] : alias->fallback;
+}
+
+// ----
+func.def public @null_record() -> (buffer, offset, i32) {
+  %3 = buffer.null : buffer
+  %4 = index.constant 0 : offset
+  %5, %6, %7 = func.call pure @OptionalOwner__OptionalOwner_value(%3, %4) : (buffer, offset) -> (buffer, offset, i32)
+  func.return %5, %6, %7 : buffer, offset, i32
+}
+
+func.def public @record_pointer(%value_pointer: buffer, %value_pointer_byte_offset: offset, %value_fallback: i32) -> (buffer, offset) {
+  func.return %value_pointer, %value_pointer_byte_offset : buffer, offset
+}
+
+func.def public @temporary_alias(%input: buffer, %input_byte_offset: offset, %use: i1) -> (i32) {
+  %17, %18 = scf.if %use -> (buffer, offset) {
+    scf.yield %input, %input_byte_offset : buffer, offset
+  } else {
+    %19 = buffer.null : buffer
+    %20 = index.constant 0 : offset
+    scf.yield %19, %20 : buffer, offset
+  }
+  %value_pointer, %value_pointer_byte_offset, %value_fallback = func.call pure @OptionalOwner__OptionalOwner_value(%17, %18) : (buffer, offset) -> (buffer, offset, i32)
+  %24 = buffer.compare.null %value_pointer : buffer
+  %25 = scalar.constant 1 : i1
+  %26 = scalar.xori %24, %25 : i1
+  %27 = scf.if %26 -> (i32) {
+    %32 = index.cast %value_pointer_byte_offset : offset to i64
+    %34 = scalar.assume %32 [range(%32, 0, 9223372036854775807)] : i64
+    %35 = index.cast %34 : i64 to offset
+    %36 = buffer.view %value_pointer[%35] : buffer -> view<1xi32>
+    %37 = view.load<root_in_bounds> %36[0] : view<1xi32> -> i32
+    scf.yield %37 : i32
+  } else {
+    scf.yield %value_fallback : i32
+  }
+  func.return %27 : i32
+}
+
+func.def inline @OptionalOwner__OptionalOwner_value(%pointer: buffer, %pointer_byte_offset: offset) -> (buffer, offset, i32) {
+  %43 = scalar.constant 7 : i32
+  func.return %pointer, %pointer_byte_offset, %43 : buffer, offset, i32
+}
