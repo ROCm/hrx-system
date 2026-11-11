@@ -1,7 +1,7 @@
 # Fetch and serve a model
 
-`loom-fetch` installs the files for one model preset. Pass the resulting
-`model.json` to `loom-serve` to run it. The card connects the model's programs,
+`loom-fetch` installs the files for one model preset. Pass the installation
+directory to `loom-serve` to run it. Its `model.json` connects the model's programs,
 parameters, tokenizer, and service contract; a separate server configuration is
 optional.
 
@@ -217,8 +217,12 @@ describes credential setup.
 ## Start the server
 
 ```sh
-loom-serve --device=amdgpu --workers=4 --listen=127.0.0.1:8080 --model=./moonshine/model.json
+loom-serve --device=amdgpu --workers=4 --listen=127.0.0.1:8080 --model=./moonshine
 ```
+
+`--model=./moonshine` selects `./moonshine/model.json`. An explicit model-card
+or deployment-document path is also accepted. Relative paths inside the
+document resolve from its directory.
 
 Leave this terminal running. The server loads only local files; it does not
 contact Hugging Face or interpret the acquisition lock. Preparation, linking,

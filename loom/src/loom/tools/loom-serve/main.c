@@ -17,13 +17,15 @@
 #include "loom/serve/server/router.h"
 #include "loom/serve/transport/http/listener.h"
 #include "loom/tooling/cli/help.h"
+#include "loom/tooling/io/file.h"
 #include "loom/tools/loom-serve/signals.h"
 #include "loom/util/json.h"
 #include "loom/util/stream.h"
 
 IREE_FLAG_LIST(
     string, model,
-    "Model card or serving deployment JSON; repeat to register multiple "
+    "Model card, serving deployment JSON, or directory containing model.json; "
+    "repeat to register multiple "
     "models. "
     "Omit to start empty. Relative arguments use the working directory; "
     "paths within each document use its directory.");
@@ -131,7 +133,9 @@ static int loom_serve_main_agents_markdown(void) {
              "`--device=amdgpu:?feedback`. Combine services with `&`; "
              "address-sanitized devices require fixed backing.\n\n"
              "## Register models\n\n"
-             "Pass a fetched model card with `--model=path/model.json`. "
+             "Pass a fetched model directory with `--model=path`, or an "
+             "explicit card with `--model=path/model.json`. Directories select "
+             "their model.json. "
              "Its model ID becomes the request's model name, and its selected "
              "preset supplies the service and execution settings. A card with "
              "several presets requires `--preset=NAME` with one `--model`. "
@@ -231,6 +235,25 @@ static int loom_serve_main_version(
              : EXIT_SUCCESS;
 }
 
+static iree_status_t loom_serve_main_load_model(
+    iree_string_view_t path, iree_string_view_t preset,
+    iree_allocator_t host_allocator,
+    loom_serve_model_configuration_t* out_configuration) {
+  bool is_directory = false;
+  IREE_RETURN_IF_ERROR(
+      loom_tooling_file_path_is_directory(path, host_allocator, &is_directory));
+  char* document_path = NULL;
+  if (is_directory) {
+    IREE_RETURN_IF_ERROR(loom_tooling_file_path_join(
+        path, IREE_SV("model.json"), host_allocator, &document_path));
+    path = iree_make_cstring_view(document_path);
+  }
+  iree_status_t status = loom_serve_model_configuration_load(
+      path, preset, host_allocator, out_configuration);
+  iree_allocator_free(host_allocator, document_path);
+  return status;
+}
+
 int loom_serve_main(int argc, char** argv,
                     const loom_serve_configuration_t* configuration) {
   static char usage[4096];
@@ -242,7 +265,7 @@ int loom_serve_main(int argc, char** argv,
       "workers.\n"
       "\n"
       "Usage:\n"
-      "  loom-serve --device=URI [--model=path/model.json ...] [options]\n"
+      "  loom-serve --device=URI [--model=path ...] [options]\n"
       "  loom-serve --devices=devices.json [--model=path/deployment.json ...]\n"
       "  loom-serve --device=task --pool_backing=fixed "
       "--listen=127.0.0.1:8080\n"
@@ -319,9 +342,9 @@ int loom_serve_main(int argc, char** argv,
   }
   for (iree_host_size_t i = 0; i < models.count && iree_status_is_ok(status);
        ++i) {
-    status = loom_serve_model_configuration_load(
-        models.values[i], iree_make_cstring_view(FLAG_preset), host_allocator,
-        &configurations[i]);
+    status = loom_serve_main_load_model(models.values[i],
+                                        iree_make_cstring_view(FLAG_preset),
+                                        host_allocator, &configurations[i]);
   }
   if (iree_status_is_ok(status)) {
     status = iree_async_signal_block_default();

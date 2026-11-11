@@ -119,7 +119,10 @@ def _check_models(server, checks, environment):
         # Preserve the runfiles namespace: resolving its symlinks would discard
         # the declared relative relationship between a deployment and its assets.
         model = str(Path(model).absolute())
-        document = json.loads(Path(model).read_text())
+        document_path = Path(model)
+        if document_path.is_dir():
+            document_path /= "model.json"
+        document = json.loads(document_path.read_text())
         model_name = (
             document["model"]["id"]
             if "schema_version" in document

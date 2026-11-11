@@ -125,6 +125,7 @@ loom_cc_library(
         "//loom/src/loom/serve/transport/http:listener",
         "//loom/src/loom/serve/transport/http:server",
         "//loom/src/loom/tooling/cli:help",
+        "//loom/src/loom/tooling/io:file",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/async",

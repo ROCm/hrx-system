@@ -58,13 +58,17 @@ distinguishes elapsed preparation from overlapping compilation-stage durations.
 
 ```sh
 loom-serve --device=task --pool_backing=fixed \
-  --model=/srv/models/vectors/model.json \
-  --model=/srv/models/scout/model.json
+  --model=/srv/models/vectors \
+  --model=/srv/models/scout
 ```
 
-Each JSON document contains a deployment `name` and a `definition` selecting
-the modality, preparation/control programs, source providers, asset references
-and capacities. Program roles and providers accept both `.loom` and `.loombc`.
+Each directory selects its `model.json`; an explicit JSON file path is also
+accepted.
+
+A model card selects its preset and serving contract. A deployment document
+contains a routing `name` and a `definition` selecting the modality,
+preparation/control programs, source providers, asset references and capacities.
+Program roles and providers accept both `.loom` and `.loombc`.
 The complete source contract is modality-specific; an arbitrary checkpoint
 alone is not a runnable model package.
 
