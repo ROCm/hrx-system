@@ -6,6 +6,7 @@
 
 #include "iree/hal/driver/amd/gpu/kernarg.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <vector>
@@ -176,8 +177,9 @@ TEST_F(KernargTest, EveryHiddenFieldUsesItsDeclaredDestinationAndWidth) {
           },
       .apertures = {.private_base = 0x31415926, .shared_base = 0x27182818},
   };
-  // Independent ABI oracle in metadata-kind order, with deliberately sparse
-  // destinations instead of the usual V5 suffix placement.
+  // Independent ABI oracle in metadata-kind order. Adjacent destinations join
+  // both contiguous and discontiguous host fields; sparse destinations also
+  // split contiguous host fields. Neither is the usual V5 suffix placement.
   const uint64_t values[] = {11,          12,          13,          0x100000001,
                              0x200000002, 0x300000003, 0x400000004, 0x500000005,
                              21,          22,          23,          31,
@@ -189,29 +191,105 @@ TEST_F(KernargTest, EveryHiddenFieldUsesItsDeclaredDestinationAndWidth) {
   static_assert(IREE_ARRAYSIZE(values) ==
                 IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_QUEUE_PTR -
                     IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_NONE);
-  std::vector<Argument> arguments = {
-      Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_NONE, 0, 13)};
-  std::vector<uint8_t> expected((IREE_ARRAYSIZE(values) + 1) * 16, 0);
-  for (size_t i = 0; i < IREE_ARRAYSIZE(values); ++i) {
-    const uint32_t offset = (i + 1) * 16;
-    arguments.push_back(Arg(
-        static_cast<Kind>(
-            IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_GLOBAL_OFFSET_X + i),
-        offset, widths[i]));
-    for (uint32_t byte = 0; byte < widths[i]; ++byte) {
-      expected[offset + byte] = values[i] >> (8 * byte);
+  for (bool sparse : {false, true}) {
+    SCOPED_TRACE(sparse);
+    std::vector<Argument> arguments = {
+        Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_NONE, 0, 13)};
+    std::vector<uint8_t> expected((IREE_ARRAYSIZE(values) + 1) * 16, 0);
+    uint32_t offset = 16;
+    uint32_t grid_sync_offset = 0;
+    for (size_t i = 0; i < IREE_ARRAYSIZE(values); ++i) {
+      const Kind kind = static_cast<Kind>(
+          IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_GLOBAL_OFFSET_X + i);
+      arguments.push_back(Arg(kind, offset, widths[i]));
+      if (kind ==
+          IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_MULTIGRID_SYNC_ARG) {
+        grid_sync_offset = offset;
+      }
+      for (uint32_t byte = 0; byte < widths[i]; ++byte) {
+        expected[offset + byte] = values[i] >> (8 * byte);
+      }
+      offset += sparse ? 16 : widths[i];
     }
+    IREE_ASSERT_OK(Build(std::move(arguments), expected.size()));
+    EXPECT_EQ(layout_->requirements, 0x1ffu);
+    EXPECT_EQ(layout_->grid_sync_offset, grid_sync_offset);
+    EXPECT_LE(sizeof(*layout_), 56u);
+    EXPECT_EQ(layout_->parameter_count, 0u);
+    EXPECT_EQ(layout_->runtime_copy_count,
+              sparse ? IREE_ARRAYSIZE(values) : 7u);
+    std::vector<uint8_t> actual(expected.size(), 0xa5);
+    iree_hal_amd_gpu_kernarg_layout_emplace(layout_, nullptr, nullptr, &inputs,
+                                            actual.data());
+    EXPECT_EQ(actual, expected);
+    std::fill(actual.begin(), actual.end(), 0xa5);
+    iree_hal_amd_gpu_kernarg_layout_emplace_native(
+        layout_, iree_const_byte_span_empty(), &inputs, actual.data());
+    EXPECT_EQ(actual, expected);
   }
-  IREE_ASSERT_OK(Build(std::move(arguments), expected.size()));
-  EXPECT_EQ(layout_->requirements, 0x1ffu);
-  EXPECT_EQ(layout_->grid_sync_offset, 128u);
-  EXPECT_LE(sizeof(*layout_), 56u);
-  EXPECT_EQ(layout_->parameter_count, 0u);
-  EXPECT_EQ(layout_->runtime_copy_count, IREE_ARRAYSIZE(values));
-  std::vector<uint8_t> actual(expected.size(), 0xa5);
+}
+
+TEST_F(KernargTest, V5GeometryUsesThreeCopiesWithoutTouchingAbiHoles) {
+  IREE_ASSERT_OK(Build(
+      {Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_X, 0, 4),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_Y, 4, 4),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_Z, 8, 4),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_GROUP_SIZE_X, 12, 2),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_GROUP_SIZE_Y, 14, 2),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_GROUP_SIZE_Z, 16, 2),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_REMAINDER_X, 18, 2),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_REMAINDER_Y, 20, 2),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_REMAINDER_Z, 22, 2),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_GLOBAL_OFFSET_X, 40,
+           8),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_GLOBAL_OFFSET_Y, 48,
+           8),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_GLOBAL_OFFSET_Z, 56,
+           8),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_GRID_DIMS, 64, 2)},
+      256));
+  EXPECT_EQ(layout_->runtime_copy_count, 3u);
+  ASSERT_EQ(layout_->indirect_copy_count, 1u);
+  const auto* counts = iree_hal_amd_gpu_kernarg_layout_indirect_copies(layout_);
+  EXPECT_EQ(counts[0].target_offset, 0u);
+  EXPECT_EQ(counts[0].source_offset, 0u);
+  EXPECT_EQ(counts[0].length, 12u);
+  const iree_hal_amd_gpu_kernarg_inputs_t inputs = {
+      .global_offset = {11, 12, 13},
+      .block_count = {21, 22, 23},
+      .group_size = {31, 32, 33},
+      .remainder = {1, 2, 3},
+      .grid_dimensions = 3,
+  };
+  // Geometry occupies [0, 24), global offsets [40, 64), and dimensions [64,
+  // 66). All remaining ABI bytes are zero in the general packing path.
+  std::array<uint8_t, 256> expected = {
+      21, 0, 0, 0, 22, 0, 0, 0, 23, 0, 0, 0, 31, 0, 32, 0, 33, 0, 1,  0, 2, 0,
+      3,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0,  0, 0,  0, 11, 0, 0, 0,
+      0,  0, 0, 0, 12, 0, 0, 0, 0,  0, 0, 0, 13, 0, 0,  0, 0,  0, 0,  0, 3, 0,
+  };
+  std::array<uint8_t, 258> storage;
+  storage.fill(0xa5);
   iree_hal_amd_gpu_kernarg_layout_emplace(layout_, nullptr, nullptr, &inputs,
-                                          actual.data());
-  EXPECT_EQ(actual, expected);
+                                          storage.data() + 1);
+  EXPECT_EQ(std::memcmp(storage.data() + 1, expected.data(), expected.size()),
+            0);
+  EXPECT_EQ(storage.front(), 0xa5);
+  EXPECT_EQ(storage.back(), 0xa5);
+
+  // A complete native input retains caller bytes in ABI holes and trailing
+  // padding. Hidden copies overwrite only the thirteen admitted fields.
+  std::array<uint8_t, 256> native;
+  native.fill(0x5a);
+  std::fill(expected.begin() + 24, expected.begin() + 40, 0x5a);
+  std::fill(expected.begin() + 66, expected.end(), 0x5a);
+  iree_hal_amd_gpu_kernarg_layout_emplace_native(
+      layout_, iree_make_const_byte_span(native.data(), native.size()), &inputs,
+      storage.data() + 1);
+  EXPECT_EQ(std::memcmp(storage.data() + 1, expected.data(), expected.size()),
+            0);
+  EXPECT_EQ(storage.front(), 0xa5);
+  EXPECT_EQ(storage.back(), 0xa5);
 }
 
 TEST_F(KernargTest, NativePrefixPreservesExplicitHolesAndPopulatesRuntime) {
