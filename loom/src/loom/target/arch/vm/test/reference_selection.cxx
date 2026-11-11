@@ -18,6 +18,9 @@ static Payload make(unsigned value) {
   if (value == 22u) {
     return loom::buffer::root(loom::buffer::constant("\x16"));
   }
+  if (value == 44u) {
+    return loom::buffer::root(loom::buffer::constant("\x2c"));
+  }
   return loom::buffer::root(loom::buffer::constant("\x21"));
 }
 
@@ -357,4 +360,31 @@ unsigned selected_destruction(bool choose, unsigned observation) {
     return total;
   }
   return observation == 1u ? snapshot : during_lifetime;
+}
+
+// Arrays containing semantic members remain value partitions. Dynamic
+// selection may replace one element while saved values and unselected elements
+// retain their independent payloads.
+unsigned selected_array(unsigned choice) {
+  Cell values[3] = {{make(11u)}, {make(12u)}, {make(22u)}};
+  Cell& selected = choice[values];
+  const auto snapshot = selected.payload;
+  replace(selected, make(44u));
+  return read(values[0].payload) + 100u * read(values[1].payload) +
+         10000u * read(values[2].payload) + 1000000u * read(snapshot);
+}
+
+// Nested dynamic subscripts form one row-major source selection. Mutation and
+// subsequent observations use that same retained identity.
+unsigned selected_array_matrix(unsigned row, unsigned column) {
+  Cell values[2][2] = {
+      {{make(11u)}, {make(12u)}},
+      {{make(22u)}, {make(33u)}},
+  };
+  Cell& selected = values[row][column];
+  const auto snapshot = selected.payload;
+  replace(selected, make(44u));
+  return read(values[0][0].payload) + 100u * read(values[0][1].payload) +
+         10000u * read(values[1][0].payload) +
+         1000000u * read(values[1][1].payload) + 100000000u * read(snapshot);
 }

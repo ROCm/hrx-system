@@ -811,3 +811,79 @@ func.def public @composed(%input: f64) -> (f64) {
   %123 = scalar.addf %107, %74 : f64
   func.return %123 : f64
 }
+
+// ====
+// Arrays containing semantic pointer members remain value partitions. A
+// commuted dynamic subscript retains an alias for sparse field mutation, and
+// nested selectors flatten to one row-major ordinal.
+struct SemanticItem {
+  // Semantic component that cannot be materialized as C++ object bytes.
+  int* data;
+  // Independently writable scalar component.
+  unsigned value;
+};
+unsigned semantic_array(int* data, unsigned choice, unsigned next) {
+  SemanticItem items[3] = {{data, 1u}, {data, 2u}, {data, 3u}};
+  SemanticItem& selected = choice[items];
+  selected.value += next;
+  return selected.value + items[2].value;
+}
+unsigned semantic_matrix(int* data, unsigned row, unsigned column,
+                         unsigned next) {
+  SemanticItem items[2][2] = {
+      {{data, 1u}, {data, 2u}},
+      {{data, 3u}, {data, 4u}},
+  };
+  items[row][column].value += next;
+  return items[row][column].value + items[1][0].value;
+}
+
+// ----
+func.def public @semantic_array(%data: buffer, %data_byte_offset: offset, %choice: i32, %next: i32) -> (i32) {
+  %items_0_value$5 = scalar.constant 1 : i32
+  %items_1_value$6 = scalar.constant 2 : i32
+  %items_2_value$7 = scalar.constant 3 : i32
+  %8 = scalar.constant 0 : i32
+  %9 = scalar.cmpi eq, %choice, %8 : i32
+  %12 = scalar.cmpi eq, %choice, %items_0_value$5 : i32
+  %88 = scf.select %12, %items_1_value$6, %items_2_value$7 : i32
+  %96 = scf.select %9, %items_0_value$5, %88 : i32
+  %14 = scalar.addi %96, %next : i32
+  %items_0_value$95 = scf.select %9, %14, %items_0_value$5 : i32
+  %items_1_value$94 = scf.select %12, %14, %items_1_value$6 : i32
+  %22 = scalar.cmpi eq, %choice, %items_1_value$6 : i32
+  %items_2_value$93 = scf.select %22, %14, %items_2_value$7 : i32
+  %90 = scf.select %12, %items_1_value$94, %items_2_value$93 : i32
+  %selected_value = scf.select %9, %items_0_value$95, %90 : i32
+  %35 = scalar.addi %selected_value, %items_2_value$93 : i32
+  func.return %35 : i32
+}
+
+func.def public @semantic_matrix(%data: buffer, %data_byte_offset: offset, %row: i32, %column: i32, %next: i32) -> (i32) {
+  %items_0_0_value$42 = scalar.constant 1 : i32
+  %items_0_1_value$43 = scalar.constant 2 : i32
+  %items_1_0_value$44 = scalar.constant 3 : i32
+  %items_1_1_value$45 = scalar.constant 4 : i32
+  %124 = scalar.shli %row, %items_0_0_value$42 : i32
+  %48 = scalar.addi %124, %column : i32
+  %50 = scalar.cmpi ult, %48, %items_0_1_value$43 : i32
+  %52 = scalar.constant 0 : i32
+  %53 = scalar.cmpi eq, %48, %52 : i32
+  %56 = scalar.cmpi eq, %48, %items_0_1_value$43 : i32
+  %120 = scf.select %50, %53, %56 : i1
+  %121 = scf.select %50, %items_0_0_value$42, %items_1_0_value$44 : i32
+  %122 = scf.select %50, %items_0_1_value$43, %items_1_1_value$45 : i32
+  %119 = scf.select %120, %121, %122 : i32
+  %58 = scalar.addi %119, %next : i32
+  %items_0_0_value$115 = scf.select %53, %58, %items_0_0_value$42 : i32
+  %63 = scalar.cmpi eq, %48, %items_0_0_value$42 : i32
+  %items_0_1_value$114 = scf.select %63, %58, %items_0_1_value$43 : i32
+  %items_1_0_value$113 = scf.select %56, %58, %items_1_0_value$44 : i32
+  %69 = scalar.cmpi eq, %48, %items_1_0_value$44 : i32
+  %items_1_1_value$112 = scf.select %69, %58, %items_1_1_value$45 : i32
+  %108 = scf.select %50, %items_0_0_value$115, %items_1_0_value$113 : i32
+  %109 = scf.select %50, %items_0_1_value$114, %items_1_1_value$112 : i32
+  %value = scf.select %120, %108, %109 : i32
+  %85 = scalar.addi %value, %items_1_0_value$113 : i32
+  func.return %85 : i32
+}

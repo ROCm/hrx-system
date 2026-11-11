@@ -331,3 +331,23 @@ LOOM_CHECK_CASE(selected_objects_keep_distinct_lifetimes) {
   loom::check::expect_equal(first_before_cleanup, 0u);
   loom::check::expect_equal(second_before_cleanup, 0u);
 }
+
+LOOM_CHECK_CASE(semantic_array_selection) {
+  const auto first = selected_array(0u);
+  const auto second = selected_array(1u);
+  const auto third = selected_array(2u);
+  loom::check::expect_equal(first, 11221244u);
+  loom::check::expect_equal(second, 12224411u);
+  loom::check::expect_equal(third, 22441211u);
+}
+
+LOOM_CHECK_CASE(nested_semantic_array_selection) {
+  const auto first = selected_array_matrix(0u, 0u);
+  const auto second = selected_array_matrix(0u, 1u);
+  const auto third = selected_array_matrix(1u, 0u);
+  const auto fourth = selected_array_matrix(1u, 1u);
+  loom::check::expect_equal(first, 1133221244u);
+  loom::check::expect_equal(second, 1233224411u);
+  loom::check::expect_equal(third, 2233441211u);
+  loom::check::expect_equal(fourth, 3344221211u);
+}

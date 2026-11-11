@@ -662,11 +662,13 @@ void ControlFlow::postVisit(cxx::AST* ast) {
     }
     if (owner) {
       object_owners_.emplace(expression, owner);
-      // The resolved frontend can retain an array operand directly on builtin
-      // subscripts instead of inserting an explicit decay cast. Evaluating an
-      // array lvalue borrows its storage in either spelling.
+      // Ordinary source arrays borrow their storage even when the frontend
+      // retains the array operand directly on a builtin subscript. Arrays
+      // containing values without a C++ object-storage representation instead
+      // keep their element components until an operation observes an address.
       if (!reference_member && expression->type &&
-          unit_.typeTraits().is_array(expression->type)) {
+          unit_.typeTraits().is_array(expression->type) &&
+          !types_.requires_value_transport(expression->type)) {
         require_address(owner);
       }
     }
@@ -1358,9 +1360,17 @@ void ControlFlow::visit(cxx::SubscriptExpressionAST* ast) {
   auto* base_type = traits.remove_reference(ast->baseExpression->type);
   auto* index_type = traits.remove_reference(ast->indexExpression->type);
   if (traits.is_array(base_type)) {
-    require_identity(ast->baseExpression);
+    if (types_.requires_value_transport(base_type)) {
+      retain_destination(ast->baseExpression);
+    } else {
+      require_identity(ast->baseExpression);
+    }
   } else if (traits.is_array(index_type)) {
-    require_identity(ast->indexExpression);
+    if (types_.requires_value_transport(index_type)) {
+      retain_destination(ast->indexExpression);
+    } else {
+      require_identity(ast->indexExpression);
+    }
   }
 }
 
@@ -1903,11 +1913,22 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
       }
       return;
     }
-    argument.inherent_storage = true;
     if (traits.is_array(base_type)) {
+      if (types_.requires_value_transport(base_type)) {
+        collect_identity(subscript->baseExpression, argument);
+        return;
+      }
+      argument.inherent_storage = true;
       collect_identity(subscript->baseExpression, argument);
     } else if (traits.is_array(index_type)) {
+      if (types_.requires_value_transport(index_type)) {
+        collect_identity(subscript->indexExpression, argument);
+        return;
+      }
+      argument.inherent_storage = true;
       collect_identity(subscript->indexExpression, argument);
+    } else {
+      argument.inherent_storage = true;
     }
     return;
   }
@@ -1961,7 +1982,9 @@ void ControlFlow::retain_automatic_storage(cxx::VariableSymbol* variable,
   auto traits = unit_.typeTraits();
   if (!traits.is_reference(variable->type()) &&
       ((!initializer && !types_.requires_value_transport(variable->type())) ||
-       record_constructor_call || traits.is_array(variable->type()) ||
+       record_constructor_call ||
+       (traits.is_array(variable->type()) &&
+        !types_.requires_value_transport(variable->type())) ||
        traits.is_volatile(variable->type()))) {
     binding_storage_[variable].automatic_storage = true;
   }

@@ -510,6 +510,14 @@ class Translator final : private Initialization::Evaluation {
       for (size_t index = 0; index < components.size(); ++index) {
         name(components[index], hint + "_" + partition.component_names[index]);
       }
+    } else if (value.is_array()) {
+      const auto& partition =
+          static_cast<const ArrayPartition&>(value.partition());
+      for (size_t index = 0; index < partition.source->size(); ++index) {
+        name(value.project(*partition.element,
+                           index * partition.element->component_count),
+             hint + "_" + std::to_string(index));
+      }
     } else if (value.is_vector()) {
       const auto& partition =
           static_cast<const VectorPartition&>(value.partition());
@@ -2484,6 +2492,153 @@ class Translator final : private Initialization::Evaluation {
     }
   }
 
+  struct ArraySubscriptExpressions {
+    // Source array operand, independent of the commuted i[array] spelling.
+    cxx::ExpressionAST* array;
+    // Integral source selector evaluated in its written position.
+    cxx::ExpressionAST* index;
+    // Whether the array is evaluated before the selector.
+    bool array_first;
+  };
+
+  std::optional<ArraySubscriptExpressions> array_subscript_expressions(
+      cxx::SubscriptExpressionAST* subscript) {
+    if (subscript->symbol) {
+      return std::nullopt;
+    }
+    auto traits = unit_.typeTraits();
+    auto* base_type = traits.remove_reference(subscript->baseExpression->type);
+    auto* index_type =
+        traits.remove_reference(subscript->indexExpression->type);
+    if (traits.is_array(base_type)) {
+      return ArraySubscriptExpressions{subscript->baseExpression,
+                                       subscript->indexExpression, true};
+    }
+    if (traits.is_array(index_type)) {
+      return ArraySubscriptExpressions{subscript->indexExpression,
+                                       subscript->baseExpression, false};
+    }
+    return std::nullopt;
+  }
+
+  bool is_semantic_array(cxx::ExpressionAST* expression) {
+    auto* type = unit_.typeTraits().remove_reference(expression->type);
+    return unit_.typeTraits().is_array(type) &&
+           types_.requires_value_transport(type);
+  }
+
+  bool is_semantic_array_element(cxx::ExpressionAST* expression) {
+    expression = unwrap_object_identity(unit_, expression);
+    auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(expression);
+    auto operands =
+        subscript ? array_subscript_expressions(subscript) : std::nullopt;
+    return operands && is_semantic_array(operands->array);
+  }
+
+  Lvalue project_array_element(const Lvalue& target,
+                               const ArrayPartition& array, size_t index,
+                               const cxx::Type* element_type, cxx::AST* owner) {
+    const size_t component_offset = index * array.element->component_count;
+    if (const auto* selected = target.selection()) {
+      std::vector<Lvalue> alternatives;
+      alternatives.reserve(selected->alternatives.size());
+      for (const auto& alternative : selected->alternatives) {
+        alternatives.push_back(project_array_element(alternative, array, index,
+                                                     element_type, owner));
+      }
+      return {std::make_shared<const SelectedLvalue>(
+          selected->selector, element_type, std::move(alternatives),
+          selected->lane)};
+    }
+    const auto* object = std::get_if<ObjectLvalue>(&target.projection);
+    if (!object) {
+      fail(owner, "array element requires a complete source object");
+    }
+    if (const auto* destination = std::get_if<Destination>(&object->location)) {
+      return {ObjectLvalue{
+          element_type,
+          Destination{destination->binding,
+                      destination->component_offset + component_offset,
+                      array.element}}};
+    }
+    if (const auto* storage =
+            std::get_if<StorageProjection>(&object->location)) {
+      return {
+          ObjectLvalue{element_type,
+                       storage_.element(*storage, array.source, index, owner)}};
+    }
+    fail(owner, "semantic array element lost its retained source owner");
+  }
+
+  std::optional<Lvalue> semantic_array_element(
+      cxx::SubscriptExpressionAST* subscript, cxx::AST* owner,
+      LvalueAccess access) {
+    auto operands = array_subscript_expressions(subscript);
+    if (!operands || !is_semantic_array(operands->array)) {
+      return std::nullopt;
+    }
+
+    std::optional<Lvalue> array_target;
+    std::optional<Value> index_value;
+    if (operands->array_first) {
+      array_target = reference_lvalue(operands->array, owner, access);
+      index_value = expression(operands->index);
+    } else {
+      index_value = expression(operands->index);
+      array_target = reference_lvalue(operands->array, owner, access);
+    }
+
+    auto* array = types_.array(operands->array->type, owner);
+    if (!array || !array->source->size()) {
+      fail(owner, "semantic subscript requires a nonempty bounded array");
+    }
+    auto* element_type = array->source->elementType();
+    cxx::ASTInterpreter interpreter(&unit_);
+    auto constant = interpreter.evaluate(operands->index);
+    auto* integer = constant ? std::get_if<cxx::ConstInt>(&*constant) : nullptr;
+    if (integer && !integer->isNegative() &&
+        integer->toUWide() <
+            static_cast<cxx::ConstInt::UWide>(array->source->size())) {
+      return project_array_element(*array_target, *array,
+                                   static_cast<size_t>(integer->toUIntMax()),
+                                   element_type, owner);
+    }
+    if (array->source->size() == 1) {
+      return project_array_element(*array_target, *array, 0, element_type,
+                                   owner);
+    }
+
+    auto* ordinal_type = unit_.control()->getUnsignedIntType();
+    auto selector = scalars_.convert(index_value->ssa(), operands->index->type,
+                                     ordinal_type, owner);
+    std::vector<Lvalue> alternatives;
+    std::optional<loom_value_id_t> lane;
+    if (const auto* outer = array_target->selection()) {
+      alternatives.reserve(outer->alternatives.size() * array->source->size());
+      for (const auto& alternative : outer->alternatives) {
+        for (size_t index = 0; index < array->source->size(); ++index) {
+          alternatives.push_back(project_array_element(
+              alternative, *array, index, element_type, owner));
+        }
+      }
+      auto extent = scalars_.integer(
+          array->source->size(), LOOM_SCALAR_TYPE_I32, locations_.get(owner));
+      auto base = scalars_.binary(cxx::TokenKind::T_STAR, outer->selector,
+                                  extent, ordinal_type, ordinal_type, owner);
+      selector = scalars_.binary(cxx::TokenKind::T_PLUS, base, selector,
+                                 ordinal_type, ordinal_type, owner);
+      lane = outer->lane;
+    } else {
+      alternatives.reserve(array->source->size());
+      for (size_t index = 0; index < array->source->size(); ++index) {
+        alternatives.push_back(project_array_element(
+            *array_target, *array, index, element_type, owner));
+      }
+    }
+    return Lvalue{std::make_shared<const SelectedLvalue>(
+        selector, element_type, std::move(alternatives), lane)};
+  }
+
   Lvalue project_vector_lane(const Lvalue& target, loom_value_id_t index,
                              const cxx::Type* index_type,
                              const cxx::Type* element_type, cxx::AST* owner,
@@ -2664,6 +2819,12 @@ class Translator final : private Initialization::Evaluation {
     if (cxx::ast_cast<cxx::ConditionalExpressionAST>(projected)) {
       return reference_lvalue(projected, owner, access);
     }
+    if (auto* subscript =
+            cxx::ast_cast<cxx::SubscriptExpressionAST>(projected)) {
+      if (auto target = semantic_array_element(subscript, owner, access)) {
+        return std::move(*target);
+      }
+    }
     if (auto called = reference_call(projected)) {
       if (called->reference_target) {
         return *called->reference_target;
@@ -2700,7 +2861,9 @@ class Translator final : private Initialization::Evaluation {
     if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(projected);
         member && member->accessOp == cxx::TokenKind::T_DOT &&
         member->vectorComponentKind == cxx::VectorComponentKind::kNone &&
-        !control_->destination(member) && !control_->storage_backed(member)) {
+        ((!control_->destination(member) &&
+          !control_->storage_backed(member)) ||
+         is_semantic_array_element(member->baseExpression))) {
       auto base = reference_lvalue(member->baseExpression, owner, access);
       return base.project(
           types_.selection(member->symbol, member->subobjectPath, member),
@@ -5509,6 +5672,10 @@ class Translator final : private Initialization::Evaluation {
                     cxx::to_string(field->name()));
       }
       auto* base = cxx::ast_cast<cxx::IdExpressionAST>(member->baseExpression);
+      if (is_semantic_array_element(member->baseExpression)) {
+        return name(read(destination(member, ast, LvalueAccess::Read), ast),
+                    cxx::to_string(member->symbol->name()));
+      }
       if (control_->storage_backed(member) ||
           unit_.typeTraits().is_array(member->type)) {
         return name(load(ast), cxx::to_string(member->symbol->name()));
@@ -5794,6 +5961,10 @@ class Translator final : private Initialization::Evaluation {
         }
         return vectors_.extract(base.ssa(), index.ssa(), base_type, index_type,
                                 ast);
+      }
+      if (auto target =
+              semantic_array_element(subscript, ast, LvalueAccess::Read)) {
+        return read(*target, ast);
       }
       return load(ast);
     }

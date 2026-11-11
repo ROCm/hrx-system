@@ -269,6 +269,29 @@ void SelectedRecord(::benchmark::State& state) {
   SourceToModule(state, &input);
 }
 
+// Keep source construction outside the timed importer. A semantic array read
+// exercises ordinal planning and sparse writeback across increasing extents.
+void SelectedArray(::benchmark::State& state) {
+  const auto count = static_cast<size_t>(state.range(0));
+  std::string source =
+      "struct Item { unsigned* data; unsigned value; }; unsigned update("
+      "unsigned* data, unsigned selector, unsigned next) { Item items[" +
+      std::to_string(count) + "] = {";
+  for (size_t index = 0; index < count; ++index) {
+    if (index) {
+      source += ",";
+    }
+    source += "{data," + std::to_string(index) + "u}";
+  }
+  source +=
+      "}; items[selector].value += next; return items[selector].value + "
+      "items[" +
+      std::to_string(count - 1) + "].value;}";
+  const SourceToModuleInput input = {SourceLanguage::kCxx, source.c_str(),
+                                     nullptr, nullptr};
+  SourceToModule(state, &input);
+}
+
 void SourceToPreamble(::benchmark::State& state,
                       const SourceToModuleInput* source) {
   RunCompileBenchmarkDirect(state, CreateSourceToModuleScenario, source);
@@ -438,6 +461,11 @@ BENCHMARK_CAPTURE(SourceToModule, AggregateRecord, &kAggregateRecord)
 BENCHMARK_CAPTURE(SourceToModule, UserConstructor, &kUserConstructor)
     ->Unit(::benchmark::kMicrosecond);
 BENCHMARK(SelectedRecord)
+    ->Arg(2)
+    ->Arg(8)
+    ->Arg(32)
+    ->Unit(::benchmark::kMicrosecond);
+BENCHMARK(SelectedArray)
     ->Arg(2)
     ->Arg(8)
     ->Arg(32)
