@@ -186,7 +186,7 @@ def _vector_ones_rules(
 ) -> tuple[DescriptorRule, ...]:
     types = Vector(
         tuple(element.name for element in INTEGER_ELEMENTS),
-        minimum_lanes=2,
+        minimum_lanes=1,
         maximum_lanes=max(vector_bit_widths) // 8,
     )
     return tuple(

@@ -116,7 +116,7 @@ def test_all_ones_constants_cover_integer_types_and_vector_carriers() -> None:
             rule.validate(descriptor_set)
             pattern = _value_type_guard(rule, "result")
             assert set(pattern.elements) == {"i8", "i16", "i32", "i64"}
-            assert pattern.minimum_lanes == 2
+            assert pattern.minimum_lanes == 1
             register_class = next(
                 guard.register_class
                 for guard in rule.guards
