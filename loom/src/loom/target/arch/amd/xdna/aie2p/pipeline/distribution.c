@@ -170,16 +170,6 @@ iree_status_t loom_aie2p_native_select_channel_endpoint(
   return iree_ok_status();
 }
 
-// A contiguous source range delivered to one immutable packet class.
-typedef struct loom_aie2p_native_distribution_range_t {
-  // First source record within the retained batch.
-  uint32_t first;
-  // Consecutive records coalesced into one DMA packet.
-  uint32_t count;
-  // Index in the distribution's retained packet-class table.
-  uint8_t packet;
-} loom_aie2p_native_distribution_range_t;
-
 static bool loom_aie2p_native_distribution_destinations_equal(
     const loom_aie2p_native_distribution_packet_t* a,
     const loom_aie2p_native_distribution_packet_t* b) {
@@ -395,18 +385,16 @@ loom_aie2p_native_distribution_next_copy(
   return copy;
 }
 
-// Selects a complete retained source lifetime with independent receiver counts.
-// Physical packets coalesce adjacent records only when their destination sets
-// agree; source admission and reclamation bracket the entire descriptor chain.
-static iree_status_t loom_aie2p_native_select_packet_distribution(
+// Forms the packet itinerary once from retained transport order. Physical
+// selection consumes its classes and ranges without replaying the copy cursor.
+static iree_status_t loom_aie2p_native_form_packet_program(
     loom_aie2p_native_context_t* context,
-    const loom_pipeline_realization_t* realization,
     const loom_pipeline_transport_t* transport,
     const loom_pipeline_transport_batch_t* batch,
     const loom_aie2p_native_channel_t* channel,
-    loom_aie2p_native_distribution_t* path, uint32_t* next_source,
-    loom_aie2p_native_distribution_t* distribution, const uint32_t* totals,
-    const uint32_t* copy_receivers, bool* out_valid) {
+    loom_aie2p_native_distribution_t* distribution,
+    const uint32_t* copy_receivers,
+    loom_aie2p_native_packet_program_t* out_program, bool* out_valid) {
   *out_valid = false;
   const loom_pipeline_transport_cohort_t* first = batch->records;
   if (!first->release) {
@@ -414,19 +402,9 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
         context, first->admission->op,
         IREE_SV("a complete retained source lifetime per packet program"));
   }
-  loom_aie2p_native_tile_t* tile = context->pool_tiles[channel->pool_index];
+  const loom_aie2p_native_tile_t* tile =
+      context->pool_tiles[channel->pool_index];
   const loom_xdna_dma_facts_t* dma = &tile->facts->dma;
-  const loom_aie2p_native_memory_layout_t* layout = tile->memory_layout;
-  const uint8_t engine = path ? path->sender.engine : tile->next_mm2s;
-  uint16_t descriptor_base, descriptor_capacity;
-  uint16_t* used = loom_aie2p_native_descriptor_bank(
-      tile, engine, &descriptor_base, &descriptor_capacity);
-  if (engine == dma->channel_count_per_direction ||
-      *used == descriptor_capacity) {
-    return loom_aie2p_native_reject(
-        context, first->admission->op,
-        IREE_SV("an available on-chip DMA engine and descriptor"));
-  }
   const uint64_t maximum_bytes =
       ((uint64_t)dma->maximum_encoded_transfer_length +
        dma->transfer_length_offset) *
@@ -450,62 +428,19 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
   }
   iree_arena_allocator_t* arena = context->pass->arena;
   loom_aie2p_native_distribution_path_t* packet_path = distribution->path;
-  const iree_host_size_t channel_count = realization->invocations.channel_count;
-  const uint32_t* ordinals = distribution->receiver_ordinals;
-  distribution->sender =
-      (loom_aie2p_native_distribution_endpoint_t){.channel = channel,
-                                                  .tile = tile,
-                                                  .engine = engine,
-                                                  .wait_for_idle = true};
-  if (!path) {
-    ++tile->next_mm2s;
-  }
-  for (iree_host_size_t i = 0; i < channel_count; ++i) {
-    if (!totals[i]) {
-      continue;
-    }
-    const uint32_t ordinal = ordinals[i];
-    const loom_aie2p_native_channel_t* receiver_channel = &context->channels[i];
-    if (((path || transport->batch_count > 1) &&
-         totals[i] % receiver_channel->source->capacity) ||
-        (path && path->receivers[ordinal].sequence.terminal_slot)) {
-      return loom_aie2p_native_reject(
-          context, first->admission->op,
-          IREE_SV("complete destination-ring turns on the same packet path"));
-    }
-    iree_string_view_t reason;
-    bool valid = false;
-    IREE_RETURN_IF_ERROR(loom_aie2p_native_select_channel_endpoint(
-        context, &realization->invocations, distribution->invocation,
-        receiver_channel, LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY, totals[i],
-        1, 0, path ? &path->receivers[ordinal] : NULL,
-        path ? NULL : receiver_channel, &distribution->receivers[ordinal],
-        &reason, &valid));
-    if (!valid) {
-      return loom_aie2p_native_reject(context, first->admission->op, reason);
-    }
-    loom_aie2p_native_distribution_endpoint_t* receiver =
-        &distribution->receivers[ordinal];
-    receiver->wait_for_idle = true;
-    if (tile == receiver->tile &&
-        (engine >= dma->loopback_channel_count || engine != receiver->engine)) {
-      return loom_aie2p_native_reject(
-          context, first->admission->op,
-          IREE_SV("matching same-tile DMA channels"));
-    }
-  }
   // Packet identities belong to the physical path, so every phase can select
   // a different subset without reprogramming filters or renumbering earlier
   // descriptors. Filter/arbiter admission enforces the smaller switch limits.
-  if (!path) {
+  if (!packet_path->packets) {
     IREE_RETURN_IF_ERROR(
         iree_arena_allocate_array(arena, 32, sizeof(*packet_path->packets),
                                   (void**)&packet_path->packets));
-    packet_path->source_route = (*next_source)++;
   }
   const uint8_t first_packet = packet_path->packet_count;
   loom_aie2p_native_distribution_range_t* ranges;
-  const uint16_t available = descriptor_capacity - *used;
+  const uint16_t available =
+      dma->buffer_descriptor_count /
+      (tile->facts->kind == LOOM_XDNA_TILE_KIND_MEMORY ? 2 : 1);
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, available, sizeof(*ranges), (void**)&ranges));
   uint32_t* visit_receivers;
@@ -584,7 +519,102 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
     }
     copy = next;
   }
-  for (uint8_t i = first_packet; i < packet_path->packet_count; ++i) {
+  *out_program = (loom_aie2p_native_packet_program_t){
+      .ranges = ranges,
+      .range_count = range_count,
+      .task_count = (uint8_t)task_count,
+      .first_packet = first_packet,
+      .packet_count = packet_path->packet_count - first_packet};
+  *out_valid = true;
+  return iree_ok_status();
+}
+
+// Selects a complete retained source lifetime with independent receiver counts.
+// Physical packets coalesce adjacent records only when their destination sets
+// agree; source admission and reclamation bracket the entire descriptor chain.
+static iree_status_t loom_aie2p_native_select_packet_distribution(
+    loom_aie2p_native_context_t* context,
+    const loom_pipeline_realization_t* realization,
+    const loom_pipeline_transport_t* transport,
+    const loom_pipeline_transport_batch_t* batch,
+    const loom_aie2p_native_channel_t* channel,
+    loom_aie2p_native_distribution_t* path, uint32_t* next_source,
+    loom_aie2p_native_distribution_t* distribution, const uint32_t* totals,
+    const loom_aie2p_native_packet_program_t* program, bool* out_valid) {
+  *out_valid = false;
+  const loom_pipeline_transport_cohort_t* first = batch->records;
+  loom_aie2p_native_tile_t* tile = context->pool_tiles[channel->pool_index];
+  const loom_xdna_dma_facts_t* dma = &tile->facts->dma;
+  const loom_aie2p_native_memory_layout_t* layout = tile->memory_layout;
+  const uint8_t engine = path ? path->sender.engine : tile->next_mm2s;
+  uint16_t descriptor_base, descriptor_capacity;
+  uint16_t* used = loom_aie2p_native_descriptor_bank(
+      tile, engine, &descriptor_base, &descriptor_capacity);
+  if (engine == dma->channel_count_per_direction ||
+      *used == descriptor_capacity) {
+    return loom_aie2p_native_reject(
+        context, first->admission->op,
+        IREE_SV("an available on-chip DMA engine and descriptor"));
+  }
+  iree_arena_allocator_t* arena = context->pass->arena;
+  loom_aie2p_native_distribution_path_t* packet_path = distribution->path;
+  const iree_host_size_t channel_count = realization->invocations.channel_count;
+  const uint32_t* ordinals = distribution->receiver_ordinals;
+  distribution->sender =
+      (loom_aie2p_native_distribution_endpoint_t){.channel = channel,
+                                                  .tile = tile,
+                                                  .engine = engine,
+                                                  .wait_for_idle = true};
+  if (!path) {
+    ++tile->next_mm2s;
+  }
+  for (iree_host_size_t i = 0; i < channel_count; ++i) {
+    if (!totals[i]) {
+      continue;
+    }
+    const uint32_t ordinal = ordinals[i];
+    const loom_aie2p_native_channel_t* receiver_channel = &context->channels[i];
+    if (((path || transport->batch_count > 1) &&
+         totals[i] % receiver_channel->source->capacity) ||
+        (path && path->receivers[ordinal].sequence.terminal_slot)) {
+      return loom_aie2p_native_reject(
+          context, first->admission->op,
+          IREE_SV("complete destination-ring turns on the same packet path"));
+    }
+    iree_string_view_t reason;
+    bool valid = false;
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_select_channel_endpoint(
+        context, &realization->invocations, distribution->invocation,
+        receiver_channel, LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY, totals[i],
+        1, 0, path ? &path->receivers[ordinal] : NULL,
+        path ? NULL : receiver_channel, &distribution->receivers[ordinal],
+        &reason, &valid));
+    if (!valid) {
+      return loom_aie2p_native_reject(context, first->admission->op, reason);
+    }
+    loom_aie2p_native_distribution_endpoint_t* receiver =
+        &distribution->receivers[ordinal];
+    receiver->wait_for_idle = true;
+    if (tile == receiver->tile &&
+        (engine >= dma->loopback_channel_count || engine != receiver->engine)) {
+      return loom_aie2p_native_reject(
+          context, first->admission->op,
+          IREE_SV("matching same-tile DMA channels"));
+    }
+  }
+  if (!path) {
+    packet_path->source_route = (*next_source)++;
+  }
+  const uint16_t range_count = program->range_count;
+  const uint8_t task_count = program->task_count;
+  const loom_aie2p_native_distribution_range_t* ranges = program->ranges;
+  if (range_count > descriptor_capacity - *used) {
+    return loom_aie2p_native_reject(context, first->admission->op,
+                                    IREE_SV("a complete ordered packet program "
+                                            "within its DMA descriptor bank"));
+  }
+  for (uint8_t i = program->first_packet;
+       i < program->first_packet + program->packet_count; ++i) {
     const loom_aie2p_native_distribution_packet_t* packet =
         &packet_path->packets[i];
     for (iree_host_size_t j = 0; j < packet->destination_count; ++j) {
@@ -983,7 +1013,15 @@ iree_status_t loom_aie2p_native_form_worker_distributions(
       selected->creates_geometry = true;
       selected->shared = path;
       selected->packet_totals = totals;
-      selected->copy_receivers = copy_receivers;
+      if (packet_program) {
+        bool valid;
+        IREE_RETURN_IF_ERROR(loom_aie2p_native_form_packet_program(
+            context, &source->transport, batch, source_channel, distribution,
+            copy_receivers, &selected->packet_program, &valid));
+        if (!valid) {
+          return iree_ok_status();
+        }
+      }
       *tail = distribution;
       tail = &distribution->next;
     }
@@ -1048,13 +1086,13 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
     const uint32_t repetitions =
         (uint32_t)(cohort->transfers * batch->record_count);
     const uint32_t* totals = selected->packet_totals;
-    const uint32_t* copy_receivers = selected->copy_receivers;
     if (selected->creates_geometry) {
       if (packet_program) {
         bool valid = false;
         IREE_RETURN_IF_ERROR(loom_aie2p_native_select_packet_distribution(
             context, realization, &source->transport, batch, source_channel,
-            path, next_source, distribution, totals, copy_receivers, &valid));
+            path, next_source, distribution, totals, &selected->packet_program,
+            &valid));
         if (!valid) {
           return iree_ok_status();
         }

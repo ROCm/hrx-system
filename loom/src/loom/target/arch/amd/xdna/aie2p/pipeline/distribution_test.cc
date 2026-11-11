@@ -456,6 +456,42 @@ TEST_P(DistributionPathTest, PacketDemandPrecedesPhysicalAllocation) {
   CheckCompleteDemandFormation(true);
 }
 
+TEST_P(DistributionPathTest, PacketItinerariesRetainNewDestinationClasses) {
+  const auto* first = Form(0, 1, 2, true);
+  const auto* second = Form(2, 1, 2, true, true);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  ASSERT_EQ(first->path, second->path);
+  ASSERT_EQ(first->path->packet_count, 2);
+  const auto& first_program =
+      workers_[Worker(0)].distribution_plan->batches[0].packet_program;
+  const auto& second_program =
+      workers_[Worker(2)].distribution_plan->batches[0].packet_program;
+  ASSERT_EQ(first_program.range_count, 1);
+  EXPECT_EQ(first_program.task_count, 1);
+  EXPECT_EQ(first_program.first_packet, 0);
+  EXPECT_EQ(first_program.packet_count, 1);
+  EXPECT_EQ(first_program.ranges[0].first, 0u);
+  EXPECT_EQ(first_program.ranges[0].count, 1u);
+  EXPECT_EQ(first_program.ranges[0].packet, 0);
+  ASSERT_EQ(second_program.range_count, 2);
+  EXPECT_EQ(second_program.first_packet, 1);
+  EXPECT_EQ(second_program.packet_count, 1);
+  EXPECT_EQ(second_program.ranges[0].packet, 0);
+  EXPECT_EQ(second_program.ranges[1].packet, 1);
+  EXPECT_EQ(context_.routing.route_count, 0u);
+  EXPECT_EQ(pools_[0]->next_mm2s, 0);
+  EXPECT_EQ(pools_[0]->descriptor_counts[0], 0);
+
+  ASSERT_NE(SelectPrepared(0), nullptr);
+  const auto first_routes = context_.routing.route_count;
+  EXPECT_GT(first_routes, 0u);
+  ASSERT_NE(SelectPrepared(2), nullptr);
+  EXPECT_GT(context_.routing.route_count, first_routes);
+  EXPECT_EQ(first->sender.sequence.descriptor_count, 1);
+  EXPECT_EQ(second->sender.sequence.descriptor_count, 2);
+}
+
 TEST_P(DistributionPathTest, EarlierSelectionSweepCannotReuseItsOwnPath) {
   const auto* first = Select(0);
   const auto* later = Select(2);

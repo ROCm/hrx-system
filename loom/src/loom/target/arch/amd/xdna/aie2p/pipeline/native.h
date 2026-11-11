@@ -496,6 +496,30 @@ typedef struct loom_aie2p_native_distribution_t {
   uint32_t grant_reader;
 } loom_aie2p_native_distribution_t;
 
+// A contiguous source range delivered to one immutable packet class.
+typedef struct loom_aie2p_native_distribution_range_t {
+  // First source record within the retained batch.
+  uint32_t first;
+  // Consecutive records coalesced into one DMA packet.
+  uint32_t count;
+  // Index in the distribution path's retained destination-class table.
+  uint8_t packet;
+} loom_aie2p_native_distribution_range_t;
+
+// Ordered source ranges and destination classes before queue/descriptor layout.
+typedef struct loom_aie2p_native_packet_program_t {
+  // Consecutive DMA packet ranges in the source's retained copy order.
+  loom_aie2p_native_distribution_range_t* ranges;
+  // Number of source descriptors required by those ranges.
+  uint16_t range_count;
+  // Finite task publications covering the retained source admissions.
+  uint8_t task_count;
+  // First destination class introduced by this geometry.
+  uint8_t first_packet;
+  // Number of new classes, excluding classes shared with earlier geometries.
+  uint8_t packet_count;
+} loom_aie2p_native_packet_program_t;
+
 // One retained source batch awaiting physical descriptor and route selection.
 typedef struct loom_aie2p_native_distribution_batch_t {
   // Canonical geometry supplying this batch's source and receiver endpoints.
@@ -504,8 +528,8 @@ typedef struct loom_aie2p_native_distribution_batch_t {
   loom_aie2p_native_distribution_t* shared;
   // Channel-indexed transfer totals for a packet program, otherwise NULL.
   uint32_t* packet_totals;
-  // Receiver ordinal for each retained packet copy, otherwise NULL.
-  uint32_t* copy_receivers;
+  // Packet source program; empty for circuit or reused geometry.
+  loom_aie2p_native_packet_program_t packet_program;
   // This occurrence owns physical selection of its canonical geometry.
   bool creates_geometry;
 } loom_aie2p_native_distribution_batch_t;
