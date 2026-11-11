@@ -1,15 +1,10 @@
 # Acquiring Loom
 
-The `hrx-loom` Python wheel installs the Loom compiler, runtime, Python APIs,
-and command-line tools, including `loom-fetch`, `loom-serve`, and
+The [hrx-loom Python wheel](https://pypi.org/project/hrx-loom/) installs the
+Loom compiler, runtime, Python APIs, and command-line tools, including
+`loom-fetch`, `loom-serve`, and
 `loom-benchmark`. Source models use the included JIT compiler. Running a
 published model requires neither a repository checkout nor a build toolchain.
-
-!!! info "First release"
-
-    The first PyPI release has not been published. Until then, install a tested
-    development wheel from a successful [Loom CI run](https://github.com/ROCm/hrx-system/actions/workflows/ci_iree.yml).
-    The PyPI commands below describe installation once a release is available.
 
 ## Platform requirements
 

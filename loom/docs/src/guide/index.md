@@ -2,10 +2,14 @@
 
 The programming guide explains Loom by the boundary that owns each decision.
 It is written for systems and ML engineers who are comfortable reading a
-kernel.
+kernel. You can write programs in Loom IR or a subset of C++; the C++ frontend
+produces Loom IR, and both use the same compiler, runtime, and tools.
 
 Start with [Run your first Loom kernel](../getting-started/first-kernel.md) for
-one direct author-test-benchmark loop. Continue with the
+one direct author-test-benchmark loop, with the same operation in
+[IR](../getting-started/first-kernel.md#create-one-source-file) and
+[C++](../getting-started/first-kernel.md#write-the-same-kernel-in-cpp).
+Continue with the
 [source-to-artifacts walkthrough](../getting-started/source-to-artifacts.md)
 when you are ready to add modules, templates, specialization, and command
 programs. Use the chapters here to understand why a source construct exists
