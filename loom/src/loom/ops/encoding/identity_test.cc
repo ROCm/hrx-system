@@ -249,6 +249,10 @@ TEST_F(EncodingIdentityTest, CommonComponentsDoNotProveCommonStorageFamily) {
   EXPECT_EQ(summary.family_id, LOOM_ENCODING_FAMILY_ID_INVALID);
   EXPECT_EQ(summary.address_layout.static_spec_encoding_id, dense);
   EXPECT_EQ(summary.storage_schema.static_spec_encoding_id, schema);
+  EXPECT_EQ(loom_encoding_match_spec(module_, summary, builtin),
+            LOOM_ENCODING_MATCH_RESULT_UNKNOWN);
+  EXPECT_EQ(loom_encoding_match_spec(module_, summary, custom),
+            LOOM_ENCODING_MATCH_RESULT_UNKNOWN);
   uint16_t replacement = 0;
   IREE_ASSERT_OK(
       loom_encoding_intern_exact_summary(module_, &summary, &replacement));
@@ -257,6 +261,10 @@ TEST_F(EncodingIdentityTest, CommonComponentsDoNotProveCommonStorageFamily) {
   // Complete custom storage remains materializable without reconstruction.
   ASSERT_TRUE(loom_value_facts_query_encoding_summary(&facts_.context,
                                                       custom_facts, &summary));
+  EXPECT_EQ(loom_encoding_match_spec(module_, summary, custom),
+            LOOM_ENCODING_MATCH_RESULT_TRUE);
+  EXPECT_EQ(loom_encoding_match_spec(module_, summary, builtin),
+            LOOM_ENCODING_MATCH_RESULT_FALSE);
   IREE_ASSERT_OK(
       loom_encoding_intern_exact_summary(module_, &summary, &replacement));
   EXPECT_EQ(replacement, custom);

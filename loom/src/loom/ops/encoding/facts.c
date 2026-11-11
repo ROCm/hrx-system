@@ -367,12 +367,6 @@ iree_status_t loom_encoding_assume_spec_facts(
       &result_facts[0]);
 }
 
-typedef enum loom_encoding_match_result_e {
-  LOOM_ENCODING_MATCH_RESULT_UNKNOWN = 0,
-  LOOM_ENCODING_MATCH_RESULT_FALSE = 1,
-  LOOM_ENCODING_MATCH_RESULT_TRUE = 2,
-} loom_encoding_match_result_t;
-
 // Matches one exclusive enum fact. Multiple possible actual values remain
 // unknown unless they are disjoint from the requested value. Explicit absence
 // facts distinguish semantic none from an unknown zero-valued summary field.
@@ -456,7 +450,7 @@ static loom_encoding_match_result_t loom_encoding_match_layout_spec(
   return match;
 }
 
-static loom_encoding_match_result_t loom_encoding_match_spec(
+loom_encoding_match_result_t loom_encoding_match_spec(
     const loom_module_t* module, loom_value_fact_encoding_summary_t summary,
     uint16_t required_id) {
   if (summary.static_spec_encoding_id != 0) {
