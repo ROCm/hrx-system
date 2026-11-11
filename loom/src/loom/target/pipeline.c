@@ -279,6 +279,16 @@ static iree_status_t
 loom_target_pipeline_build_cleanup_expanded_target_functions(
     loom_builder_t* builder, void* user_data) {
   (void)user_data;
+  // Selected providers can expose more ordinary helpers. Give those helpers
+  // the caller's context before the next template-selection iteration.
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
+      builder, IREE_SV("specialize-target-callgraph")));
+  // Newly specialized helpers must participate in CSE before inlining costs
+  // their bodies; repeated constants and view construction are shared work.
+  loom_op_t* specialized_source_changed = NULL;
+  IREE_RETURN_IF_ERROR(loom_pass_ir_build_if_changed(
+      builder, loom_target_pipeline_build_deduplicate_target_functions, NULL,
+      &specialized_source_changed));
   loom_op_t* for_op = NULL;
   return loom_target_pipeline_build_for_target_functions(
       builder, IREE_SV("source"),
@@ -701,6 +711,10 @@ static iree_status_t loom_target_pipeline_build_low_preparation(
 
 static iree_status_t loom_target_pipeline_build_expanded_source_body(
     loom_builder_t* builder, void* user_data) {
+  // Template applications in ordinary helpers consume the same invocation
+  // context as applications written directly in the entry.
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
+      builder, IREE_SV("specialize-target-callgraph")));
   loom_op_t* for_op = NULL;
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
       builder, IREE_SV("source"),
@@ -855,18 +869,6 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
   loom_op_t* for_op = NULL;
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_expanded_source_body(builder, user_data));
-  // Authoring expansion has selected every resolvable provider and exposed
-  // its retained callees. Specialize the complete semantic call graph before
-  // any target-aware function pass observes those callees.
-  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
-      builder, IREE_SV("specialize-target-callgraph")));
-  // Newly specialized helpers have not participated in target-function CSE.
-  // Cost the shared expressions callers would materialize instead of charging
-  // separately for repeated constants, casts, and view construction.
-  loom_op_t* specialized_source_changed = NULL;
-  IREE_RETURN_IF_ERROR(loom_pass_ir_build_if_changed(
-      builder, loom_target_pipeline_build_deduplicate_target_functions, NULL,
-      &specialized_source_changed));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_preparatory_source_inlining(
       builder, user_data));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(

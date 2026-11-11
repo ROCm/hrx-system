@@ -26,9 +26,9 @@ static T pack(T even, T odd) {
 [[loom::kernel, loom::workgroup_size(32, 1, 1), loom::workgroup_count(1, 1, 1)]]
 void pack_words(const unsigned* input, unsigned* output) {
   unsigned lane = loom::kernel::workitem::id.x;
-  Word even = {input[2 * lane + 1]};
-  Word odd = {input[2 * lane + 2]};
-  output[lane + 1] = pack(even, odd)[0];
+  unsigned even = input[2 * lane + 1];
+  unsigned odd = input[2 * lane + 2];
+  output[lane + 1] = pack(even, odd);
 }
 
 [[loom::kernel, loom::workgroup_size(32, 1, 1), loom::workgroup_count(1, 1, 1)]]

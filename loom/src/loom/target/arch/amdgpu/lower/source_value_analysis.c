@@ -16,6 +16,7 @@
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
+#include "loom/ops/low/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/ops.h"
@@ -28,6 +29,39 @@
 #include "loom/util/walk.h"
 
 static int loom_amdgpu_source_value_analysis_state_key;
+
+bool loom_amdgpu_source_invoke_result_shape(
+    const loom_module_t* module, const loom_value_t* value,
+    loom_amdgpu_register_shape_t* out_shape) {
+  if (loom_value_is_block_arg(value)) {
+    return false;
+  }
+  const loom_op_t* op = loom_value_def_op(value);
+  if (op == NULL || !loom_low_invoke_isa(op)) {
+    return false;
+  }
+  const loom_symbol_ref_t callee = loom_low_invoke_callee(op);
+  if (callee.module_id != 0 || callee.symbol_id >= module->symbols.count) {
+    return false;
+  }
+  const loom_op_t* function =
+      module->symbols.entries[callee.symbol_id].defining_op;
+  if (function == NULL || !loom_low_func_def_isa(function)) {
+    return false;
+  }
+  const loom_value_slice_t results = loom_low_func_def_results(function);
+  const uint16_t index = loom_value_def_index(value);
+  if (index >= results.count) {
+    return false;
+  }
+  const loom_type_t type =
+      loom_module_value_type(module, results.values[index]);
+  *out_shape = (loom_amdgpu_register_shape_t){
+      .class_id = loom_low_register_type_class_id(type),
+      .unit_count = loom_low_register_type_unit_count(type),
+  };
+  return true;
+}
 
 typedef struct loom_amdgpu_scc_boundary_analysis_t {
   const loom_module_t* module;

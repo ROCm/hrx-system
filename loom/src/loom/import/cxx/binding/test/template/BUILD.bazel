@@ -17,6 +17,7 @@ loom_check_test_suite(
     srcs = [
         "template_apply.cxx-test",
         "template_apply_invalid.cxx-test",
+        "template_contexts.cxx-test",
         "template_definitions.cxx-test",
         "template_definitions_invalid.cxx-test",
         "template_explicit_apply.cxx-test",

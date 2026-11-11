@@ -116,6 +116,7 @@ loom_cc_library(
         ":pass_environment",
         ":provider",
         "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/analysis:symbol_liveness",
         "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/codegen/low:loop_execution",
         "//loom/src/loom/codegen/low:memory_access",

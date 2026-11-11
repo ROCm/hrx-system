@@ -16,17 +16,14 @@ func.def noinline @add_i32(%value: i32, %delta: i32) -> (i32) {
 }
 
 // ----
-low.func.def public target<vm.core> abi(vm_function) @call_mixed_i32(%19: reg<vm.value : i32>, %delta: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
-  %mixed = low.func.call pure @add_i32(%19, %delta) : (reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)
+low.func.def public target<vm.core> abi(vm_function) @call_mixed_i32(%20: reg<vm.value : i32>, %delta: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
+  %mixed = low.func.call pure @add_i32(%20, %delta) : (reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)
   %uniform = low.func.call pure @add_i32(%delta, %delta) : (reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)
   return %mixed, %uniform
 }
 
 low.func.def noinline target<vm.core> @add_i32(%value: reg<vm.value : i32>, %delta: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
-  %wide_value = conversion.integer %value, "u32.to.i64"
-  %wide_delta = conversion.integer %delta, "u32.to.i64"
-  %sum = integer.add.i64 %wide_value, %wide_delta
-  %result = conversion.integer %sum, "i64.to.i32" : reg<vm.value : i32>
+  %result = integer.add.i32 %value, %delta
   return %result
 }
 

@@ -33,26 +33,26 @@ int evaluate(const int* pointer, int index, const Pair* pair,
 
 // ----
 low.func.def public target<wasm.core.simd128> abi(wasm_function) @evaluate(%pointer: reg<wasm.i32>, %pointer_byte_offset: reg<wasm.i32>, %index: reg<wasm.i32>, %pair: reg<wasm.i32>, %pair_byte_offset: reg<wasm.i32>, %matrix: reg<wasm.i32>, %matrix_byte_offset: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
-  %111 = i32.add %pointer, %pointer_byte_offset
-  %112 = i32.load %111
-  %113 = i32.const 2
-  %114 = i32.shl %index, %113
-  %115 = i32.add %pointer_byte_offset, %114
-  %116 = i32.add %pointer, %115
-  %117 = i32.load %116
-  %118 = i32.add %112, %117
-  %119 = i32.const 4
-  %120 = i32.add %pair_byte_offset, %119
-  %121 = i32.add %pair, %120
-  %second = i32.load %121
-  %123 = i32.add %118, %second
-  %125 = i32.add %pointer_byte_offset, %119
-  %126 = i32.add %125, %119
-  %127 = i32.add %pointer, %126
-  %128 = i32.load %127
-  %129 = i32.add %123, %128
-  %130 = i32.add %matrix, %matrix_byte_offset
-  %131 = i32.load %130
-  %132 = i32.add %129, %131
-  return %132
+  %112 = i32.add %pointer, %pointer_byte_offset
+  %113 = i32.load %112
+  %114 = i32.const 2
+  %115 = i32.shl %index, %114
+  %116 = i32.add %pointer_byte_offset, %115
+  %117 = i32.add %pointer, %116
+  %118 = i32.load %117
+  %119 = i32.add %113, %118
+  %120 = i32.const 4
+  %121 = i32.add %pair_byte_offset, %120
+  %122 = i32.add %pair, %121
+  %second = i32.load %122
+  %124 = i32.add %119, %second
+  %126 = i32.add %pointer_byte_offset, %120
+  %127 = i32.add %126, %120
+  %128 = i32.add %pointer, %127
+  %129 = i32.load %128
+  %130 = i32.add %124, %129
+  %131 = i32.add %matrix, %matrix_byte_offset
+  %132 = i32.load %131
+  %133 = i32.add %130, %132
+  return %133
 }

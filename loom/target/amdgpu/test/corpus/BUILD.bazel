@@ -193,7 +193,6 @@ loom_corpus_test(
             "function/call/overflow.loom:@mixed_overflow_call_values": "TARGET/001",
             "function/call/overflow.loom:@overflow_call_values": "AMDGPU/055",
             "function/call/spill.loom:@spill_values": "AMDGPU/055",
-            "function/template/library.loom:@template_dead_library_values": "LOWERING/045",
             "kernel/subgroup/transport.loom:@subgroup_transport_address_5_values": "TARGET/002,AMDGPU/023",
             "memory/buffer/buffers.loom:@buffer_values": "TARGET/092",
             "memory/view/offset_recurrence.loom:@window_recurrence_values": "SUBRANGE/026",

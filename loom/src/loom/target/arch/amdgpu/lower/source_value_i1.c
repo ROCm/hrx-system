@@ -599,6 +599,11 @@ static bool loom_amdgpu_source_value_can_lower_as_scc_i1(
   const loom_value_id_t next_excluded_value_id =
       excluded_value_id == LOOM_VALUE_ID_INVALID ? source_value_id
                                                  : excluded_value_id;
+  const loom_value_t* value = loom_module_value(module, source_value_id);
+  loom_amdgpu_register_shape_t native_shape = {0};
+  if (loom_amdgpu_source_invoke_result_shape(module, value, &native_shape)) {
+    return native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_SCC;
+  }
   if (loom_amdgpu_source_value_facts_are_native_i1_mask(module, fact_table,
                                                         source_value_id)) {
     return false;
@@ -608,7 +613,6 @@ static bool loom_amdgpu_source_value_can_lower_as_scc_i1(
     return true;
   }
 
-  const loom_value_t* value = loom_module_value(module, source_value_id);
   if (loom_value_is_block_arg(value)) {
     const loom_block_t* block = loom_value_def_block(value);
     return !loom_amdgpu_block_arg_has_cfg_predecessor(
@@ -689,12 +693,17 @@ static bool loom_amdgpu_source_value_can_lower_as_sgpr_i1_bool(
   const loom_value_id_t next_excluded_value_id =
       excluded_value_id == LOOM_VALUE_ID_INVALID ? source_value_id
                                                  : excluded_value_id;
+  const loom_value_t* value = loom_module_value(module, source_value_id);
+  loom_amdgpu_register_shape_t native_shape = {0};
+  if (loom_amdgpu_source_invoke_result_shape(module, value, &native_shape)) {
+    return native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR &&
+           native_shape.unit_count == 1;
+  }
   if (loom_amdgpu_source_value_facts_are_native_i1_mask(module, fact_table,
                                                         source_value_id)) {
     return false;
   }
 
-  const loom_value_t* value = loom_module_value(module, source_value_id);
   if (loom_value_is_block_arg(value)) {
     return true;
   }
@@ -777,12 +786,17 @@ static bool loom_amdgpu_source_value_is_native_i1_mask_excluding(
   const loom_value_id_t next_excluded_value_id =
       excluded_value_id == LOOM_VALUE_ID_INVALID ? source_value_id
                                                  : excluded_value_id;
+  const loom_value_t* value = loom_module_value(module, source_value_id);
+  loom_amdgpu_register_shape_t native_shape = {0};
+  if (loom_amdgpu_source_invoke_result_shape(module, value, &native_shape)) {
+    return native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR &&
+           native_shape.unit_count == 2;
+  }
   if (loom_amdgpu_source_value_facts_are_native_i1_mask(module, fact_table,
                                                         source_value_id)) {
     return true;
   }
 
-  const loom_value_t* value = loom_module_value(module, source_value_id);
   if (loom_value_is_block_arg(value)) {
     const loom_block_t* block = loom_value_def_block(value);
     if (block != loom_region_const_entry_block(block->parent_region) &&
@@ -1114,6 +1128,11 @@ static bool loom_amdgpu_source_value_is_durable_i1_bool(
     loom_amdgpu_source_value_analysis_t* analysis,
     loom_value_id_t source_value_id) {
   const loom_value_t* value = loom_module_value(module, source_value_id);
+  loom_amdgpu_register_shape_t native_shape = {0};
+  if (loom_amdgpu_source_invoke_result_shape(module, value, &native_shape)) {
+    return native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR &&
+           native_shape.unit_count == 1;
+  }
   if (loom_value_is_block_arg(value)) {
     // Arguments transport independent values across entry and CFG boundaries.
     // SCC is a single ephemeral condition bit, not Boolean argument storage.

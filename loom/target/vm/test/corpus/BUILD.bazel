@@ -144,7 +144,6 @@ loom_corpus_build(
     profiles = ["//loom/target/vm:all"],
     xfails = {
         "//loom/target/vm:all": {
-            "function/template/library.loom:@template_dead_library_observations": "LOWERING/045",
             "memory/atomic/float64.loom:@atomic_f64_values": "TARGET/003",
             "memory/view/offset_recurrence.loom:@window_recurrence_observations": "SUBRANGE/026",
             "numeric/conversion/float8_schema_conversion.loom:@float8_schema_conversion": "TARGET/031",
@@ -162,6 +161,7 @@ loom_corpus_test(
             "control/loop/scalar_state.loom",
             "function/call/calls.loom",
             "function/call/direct.loom",
+            "function/template/library.loom",
             "memory/address/logical_shift_loop.loom",
             "memory/address/uniform_loads.loom",
             "memory/buffer/boundaries.loom",

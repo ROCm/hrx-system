@@ -647,3 +647,110 @@ check.scenario @selected_fragment_scale_values {
   }
   check.return
 }
+
+// Uniform representation choices inside a partial lane range retain one
+// decision owner. The guarded iteration may bypass the read, but cannot
+// bypass that owner's join and enter its dense or indexed arm directly.
+kernel.def @partial_uniform_indexing() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %indices: buffer, %output: buffer, %representation: index) {
+  %mode = index.cast %representation : index to i32
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 3 : index
+  %limit = index.constant 37 : index
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %mask = scalar.constant 63 : i32
+  %lane = kernel.workitem.id<x> : index
+  %active = index.cmp ult, %lane, %limit : index
+  %values = buffer.view %input[%base] : buffer -> view<64xi32>
+  %table = buffer.view %indices[%base] : buffer -> view<64xi32>
+  %results = buffer.view %output[%base] : buffer -> view<64xi32>
+  scf.if %active {
+    %guarded = scalar.cmpi eq, %mode, %c1 : i32
+    %indexed = scalar.cmpi eq, %mode, %c2 : i32
+    %sum = scf.for %iteration = [%begin to %end step %step](%accumulator = %c0 : i32) -> (i32) {
+      %skip = scf.if %guarded -> (i1) {
+        %position = index.add %lane, %iteration : index
+        %integer = index.cast %position : index to i32
+        %bit = scalar.andi %integer, %c1 : i32
+        %odd = scalar.cmpi ne, %bit, %c0 : i32
+        scf.yield %odd : i1
+      } else {
+        scf.yield %guarded : i1
+      }
+      %value = scf.if %skip -> (i32) {
+        scf.yield %c0 : i32
+      } else {
+        %position = scf.if %indexed -> (index) {
+          %encoded = view.load %table[%lane] : view<64xi32> -> i32
+          %bounded = scalar.andi %encoded, %mask : i32
+          %index = index.cast %bounded : i32 to index
+          scf.yield %index : index
+        } else {
+          scf.yield %lane : index
+        }
+        %loaded = view.load %values[%position] : view<64xi32> -> i32
+        scf.yield %loaded : i32
+      }
+      %next = scalar.addi %accumulator, %value : i32
+      scf.yield %next : i32
+    }
+    view.store %sum, %results[%lane] : i32, view<64xi32>
+  }
+  kernel.return
+}
+
+// Count the accepted iterations algebraically. This has no conditional load
+// or repeated representation decision to share the subject's CFG shape.
+func.def @partial_uniform_indexing_oracle(%input: buffer, %indices: buffer, %output: buffer, %representation: index) {
+  %mode = index.cast %representation : index to i32
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 37 : index
+  %step = index.constant 1 : index
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %c3 = scalar.constant 3 : i32
+  %mask = scalar.constant 63 : i32
+  %values = buffer.view %input[%base] : buffer -> view<64xi32>
+  %table = buffer.view %indices[%base] : buffer -> view<64xi32>
+  %results = buffer.view %output[%base] : buffer -> view<64xi32>
+  %guarded = scalar.cmpi eq, %mode, %c1 : i32
+  %indexed = scalar.cmpi eq, %mode, %c2 : i32
+  scf.for %lane = [%begin to %end step %step] {
+    %encoded = view.load %table[%lane] : view<64xi32> -> i32
+    %bounded = scalar.andi %encoded, %mask : i32
+    %index = index.cast %bounded : i32 to index
+    %position = scf.select %indexed, %index, %lane : index
+    %value = view.load %values[%position] : view<64xi32> -> i32
+    %integer = index.cast %lane : index to i32
+    %bit = scalar.andi %integer, %c1 : i32
+    %odd = scalar.cmpi eq, %bit, %c1 : i32
+    %accepted = scf.select %odd, %c1, %c2 : i32
+    %count = scf.select %guarded, %accepted, %c3 : i32
+    %result = scalar.muli %value, %count : i32
+    view.store %result, %results[%lane] : i32, view<64xi32>
+  }
+  func.return
+}
+
+check.scenario @partial_uniform_indexing_values {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-18) step(1) : tensor<64xi32>
+    %indices = check.generate.iota offset(63) step(-1) : tensor<64xi32>
+    %storage = check.generate.fill value(-123) : tensor<96xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<96xi32> -> tensor<64xi32>
+    check.compare<@partial_uniform_indexing, @partial_uniform_indexing_oracle>(%input, %indices, %output, %trial) : (tensor<64xi32>, tensor<64xi32>, tensor<64xi32>, index) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64xi32>
+      check.expect.bitwise actual(%indices) expected(%indices) : tensor<64xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<96xi32>
+    }
+  }
+  check.return
+}
