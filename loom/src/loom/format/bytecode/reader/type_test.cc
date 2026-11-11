@@ -617,6 +617,28 @@ TEST_F(BytecodeTypeTest, RejectsNonTopologicalTypeReference) {
   EXPECT_EQ(error_count_, 1u);
 }
 
+TEST_F(BytecodeTypeTest, ParameterKindsAreCheckedWithValidReferences) {
+  iree_string_view_t strings[] = {IREE_SV("wire.parameters"), IREE_SV("first"),
+                                  IREE_SV("last")};
+  module_view_.strings = {strings, IREE_ARRAYSIZE(strings)};
+  const uint8_t data[] = {
+      2,
+      LOOM_BYTECODE_TYPE_SCALAR,
+      LOOM_SCALAR_TYPE_I32,
+      LOOM_BYTECODE_TYPE_PARAMETERIZED,
+      0,
+      2,
+      1,
+      LOOM_BYTECODE_ATTR_TYPE,
+      0,
+      2,
+      LOOM_BYTECODE_ATTR_I64,
+      2,
+  };
+  ASSERT_NO_FATAL_FAILURE(
+      CheckValidationModes(data, sizeof(data), IREE_STATUS_DEFERRED));
+}
+
 TEST_F(BytecodeTypeTest, MaterializesEmptyFunctionPayload) {
   const uint8_t data[] = {0x01, LOOM_BYTECODE_TYPE_FUNCTION, 0x00, 0x00};
   IREE_ASSERT_OK(BuildPlan(data, sizeof(data)));
@@ -771,6 +793,205 @@ TEST_F(BytecodeTypeTest, DecodesOneIndexedEntry) {
   EXPECT_EQ(structural_fact->type_ids[0], 1u);
   EXPECT_EQ(structural_fact->type_ids[1], 0u);
   EXPECT_EQ(error_count_, 0u);
+}
+
+TEST_F(BytecodeTypeTest, ScopedShapesRetainSourceCoordinatesAcrossRanks) {
+  for (loom_type_kind_t kind :
+       {LOOM_TYPE_GROUP, LOOM_TYPE_TENSOR, LOOM_TYPE_TILE, LOOM_TYPE_VECTOR,
+        LOOM_TYPE_VIEW}) {
+    for (uint8_t rank = 0; rank <= LOOM_TYPE_MAX_RANK; ++rank) {
+      if (rank == 0 && (kind == LOOM_TYPE_GROUP || kind == LOOM_TYPE_VECTOR)) {
+        continue;
+      }
+      SCOPED_TRACE(::testing::Message()
+                   << "kind=" << kind << " rank=" << +rank);
+      const bool has_encoding =
+          kind != LOOM_TYPE_GROUP && kind != LOOM_TYPE_VECTOR;
+      std::vector<uint8_t> data;
+      if (kind != LOOM_TYPE_GROUP) {
+        data.push_back(LOOM_SCALAR_TYPE_F32);
+      }
+      data.push_back(rank);
+      if (kind != LOOM_TYPE_GROUP) {
+        data.push_back(has_encoding ? LOOM_BYTECODE_ENCODING_ATTACHMENT_SSA
+                                    : LOOM_BYTECODE_ENCODING_ATTACHMENT_NONE);
+        data.push_back(has_encoding ? 2 : 0);
+      }
+      if (kind == LOOM_TYPE_VIEW) {
+        data.push_back(1);
+      }
+      uint16_t expected_dynamic_axes = 0;
+      for (uint8_t axis = 0; axis < rank; ++axis) {
+        const bool dynamic = (axis % 3) != 1;
+        data.push_back(dynamic);
+        // Axis zero is deliberately unbound; subsequent dynamic dimensions
+        // use the one-based wire coordinates, independent of any IR module.
+        data.push_back(dynamic ? axis : 31);
+        expected_dynamic_axes |= uint16_t(dynamic << axis);
+      }
+      loom_bytecode_reader_cursor_t cursor;
+      loom_bytecode_reader_cursor_initialize(data.data(), data.size(), 0,
+                                             IREE_SV("SCOPED_TYPES"), &cursor);
+      loom_bytecode_scoped_shape_t shape;
+      IREE_ASSERT_OK(loom_bytecode_type_read_scoped_shape(
+          &decoder_, &cursor, kind, LOOM_TYPE_MAX_RANK,
+          /*encoding_count=*/0, &shape));
+      EXPECT_EQ(cursor.cursor.position, data.size());
+      EXPECT_EQ(shape.rank, rank);
+      EXPECT_EQ(shape.element_type, kind == LOOM_TYPE_GROUP
+                                        ? LOOM_SCALAR_TYPE_NONE
+                                        : LOOM_SCALAR_TYPE_F32);
+      EXPECT_EQ(shape.dynamic_axes, expected_dynamic_axes);
+      EXPECT_EQ(shape.attachment, has_encoding
+                                      ? LOOM_BYTECODE_ENCODING_ATTACHMENT_SSA
+                                      : LOOM_BYTECODE_ENCODING_ATTACHMENT_NONE);
+      EXPECT_EQ(shape.encoding_ordinal, has_encoding ? 2u : 0u);
+      EXPECT_EQ(shape.access_alignment, kind == LOOM_TYPE_VIEW ? 1u : 0u);
+      for (uint8_t axis = 0; axis < rank; ++axis) {
+        EXPECT_EQ(shape.dimensions[axis], (axis % 3) != 1 ? axis : 31);
+      }
+      EXPECT_EQ(module_->values.count, 0u);
+      EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
+    }
+  }
+  EXPECT_EQ(error_count_, 0u);
+}
+
+TEST_F(BytecodeTypeTest, ScopedShapesRejectInvalidWireFields) {
+  struct InvalidShape {
+    // Native kind already established by the owning record decoder.
+    loom_type_kind_t kind;
+    // Wire payload following the kind, with one invalid field per row.
+    std::vector<uint8_t> payload;
+  };
+  const InvalidShape cases[] = {
+      {LOOM_TYPE_GROUP, {0}},
+      {LOOM_TYPE_GROUP, {LOOM_TYPE_MAX_RANK + 1}},
+      {LOOM_TYPE_GROUP, {1, 2, 1}},
+      {LOOM_TYPE_GROUP, {1, 1, 4}},
+      {LOOM_TYPE_VECTOR, {LOOM_SCALAR_TYPE_F32, 0, 0, 0}},
+      {LOOM_TYPE_VECTOR, {LOOM_SCALAR_TYPE_F32, 1, 2, 0, 1, 1}},
+      {LOOM_TYPE_TENSOR, {LOOM_SCALAR_TYPE_NONE, 0, 0, 0}},
+      {LOOM_TYPE_TENSOR, {LOOM_SCALAR_TYPE_F32, 16, 0, 0}},
+      {LOOM_TYPE_TILE, {LOOM_SCALAR_TYPE_F32, 0, 3, 0}},
+      {LOOM_TYPE_TILE, {LOOM_SCALAR_TYPE_F32, 0, 0, 1}},
+      {LOOM_TYPE_TILE, {LOOM_SCALAR_TYPE_F32, 0, 1, 0}},
+      {LOOM_TYPE_TILE, {LOOM_SCALAR_TYPE_F32, 0, 1, 3}},
+      {LOOM_TYPE_TILE, {LOOM_SCALAR_TYPE_F32, 0, 2, 3}},
+      {LOOM_TYPE_VIEW, {LOOM_SCALAR_TYPE_F32, 0, 0, 0, 3}},
+      {LOOM_TYPE_VIEW, {LOOM_SCALAR_TYPE_F32, 0, 0, 0, 0x80, 2}},
+      {LOOM_TYPE_VIEW, {LOOM_SCALAR_TYPE_F32, 1, 0, 0, 0, 2, 1}},
+      {LOOM_TYPE_VIEW, {LOOM_SCALAR_TYPE_F32, 1, 0, 0, 0, 1, 4}},
+      {LOOM_TYPE_VIEW,
+       {LOOM_SCALAR_TYPE_F32, 1, 0, 0, 0, 0, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
+        0x80, 0x80, 0x80, 1}},
+  };
+  for (const auto& invalid : cases) {
+    SCOPED_TRACE(::testing::Message() << "case=" << (&invalid - cases));
+    loom_bytecode_reader_cursor_t cursor;
+    loom_bytecode_reader_cursor_initialize(invalid.payload.data(),
+                                           invalid.payload.size(), 0,
+                                           IREE_SV("SCOPED_TYPES"), &cursor);
+    loom_bytecode_scoped_shape_t shape;
+    error_count_ = 0;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_DEFERRED,
+        loom_bytecode_type_read_scoped_shape(&decoder_, &cursor, invalid.kind,
+                                             /*value_count=*/3,
+                                             /*encoding_count=*/2, &shape));
+    EXPECT_EQ(error_count_, 1u);
+    EXPECT_EQ(module_->values.count, 0u);
+    EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
+  }
+}
+
+TEST_F(BytecodeTypeTest, ScopedShapeRejectsEveryTruncatedPrefix) {
+  const uint8_t data[] = {LOOM_SCALAR_TYPE_F32, 3, 2, 2, 1, 1, 1, 0, 31, 1, 3};
+  for (size_t length = 0; length < sizeof(data); ++length) {
+    SCOPED_TRACE(length);
+    loom_bytecode_reader_cursor_t cursor;
+    loom_bytecode_reader_cursor_initialize(data, length, 0,
+                                           IREE_SV("SCOPED_TYPES"), &cursor);
+    loom_bytecode_scoped_shape_t shape;
+    error_count_ = 0;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_DEFERRED,
+        loom_bytecode_type_read_scoped_shape(&decoder_, &cursor, LOOM_TYPE_VIEW,
+                                             /*value_count=*/3,
+                                             /*encoding_count=*/0, &shape));
+    EXPECT_EQ(error_count_, 1u);
+    EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
+  }
+}
+
+TEST_F(BytecodeTypeTest, ScopedRecordFramingPreservesItsEnclosingCursor) {
+  // Empty extensions select static types; zero-node nonempty extensions may
+  // select a type completed by an earlier signature value.
+  const uint8_t data[] = {0, 2, 0, 2, 99};
+  loom_bytecode_reader_cursor_t cursor;
+  loom_bytecode_reader_cursor_initialize(data, sizeof(data), 100,
+                                         IREE_SV("SIGNATURE"), &cursor);
+  loom_bytecode_reader_cursor_t records;
+  uint64_t count = UINT64_MAX;
+  IREE_ASSERT_OK(loom_bytecode_type_open_scoped_records(
+      &decoder_, &cursor, /*reference=*/0, &records, &count));
+  EXPECT_EQ(records.cursor.length, 0u);
+  EXPECT_EQ(count, 0u);
+  EXPECT_EQ(cursor.cursor.position, 1u);
+
+  IREE_ASSERT_OK(loom_bytecode_type_open_scoped_records(
+      &decoder_, &cursor, /*reference=*/1, &records, &count));
+  EXPECT_EQ(count, 0u);
+  EXPECT_EQ(records.absolute_offset, 102u);
+  EXPECT_EQ(records.cursor.length, 2u);
+  EXPECT_EQ(cursor.cursor.position, 4u);
+  uint64_t root = UINT64_MAX;
+  IREE_ASSERT_OK(loom_bytecode_type_close_scoped_records(
+      &decoder_, &records, /*completed_count=*/2, &root));
+  EXPECT_EQ(root, 1u);
+  EXPECT_EQ(records.cursor.position, records.cursor.length);
+  EXPECT_EQ(cursor.cursor.data[cursor.cursor.position], 99u);
+  EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
+}
+
+TEST_F(BytecodeTypeTest, ScopedRecordFramingRejectsInvalidExtensions) {
+  struct Case {
+    // Encoded type reference whose extension is tested.
+    uint64_t reference;
+    // Extension length, node count, root, and any trailing malformed bytes.
+    std::vector<uint8_t> bytes;
+  };
+  const Case cases[] = {
+      {1, {0}},           // Scoped reference without an extension.
+      {0, {2, 0, 1}},     // Static reference carrying an extension.
+      {3, {2, 0, 1}},     // Only the scoped sentinel introduces an extension.
+      {1, {3, 0, 1}},     // Truncated bounded payload.
+      {1, {1, 0}},        // Missing root.
+      {1, {2, 0, 0}},     // Zero is not a completed root.
+      {1, {2, 0, 3}},     // Root outside the completed prefix.
+      {1, {3, 0, 2, 9}},  // Bytes after the selected root.
+  };
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(::testing::Message() << "case=" << (&test_case - cases));
+    loom_bytecode_reader_cursor_t cursor;
+    loom_bytecode_reader_cursor_initialize(test_case.bytes.data(),
+                                           test_case.bytes.size(), 0,
+                                           IREE_SV("SIGNATURE"), &cursor);
+    loom_bytecode_reader_cursor_t records;
+    uint64_t count = 0;
+    uint64_t root = UINT64_MAX;
+    error_count_ = 0;
+    iree_status_t status = loom_bytecode_type_open_scoped_records(
+        &decoder_, &cursor, test_case.reference, &records, &count);
+    if (iree_status_is_ok(status)) {
+      status = loom_bytecode_type_close_scoped_records(
+          &decoder_, &records, /*completed_count=*/2, &root);
+    }
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED, status);
+    EXPECT_EQ(error_count_, 1u);
+    EXPECT_EQ(root, UINT64_MAX);
+    EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
+  }
 }
 
 }  // namespace

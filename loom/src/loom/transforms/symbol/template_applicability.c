@@ -47,6 +47,7 @@ loom_template_applicability_provider_contract(
       .predicate_count = provider->predicate_count,
       .target_condition_count = provider->target_condition_count,
       .has_target_requirement = provider->has_target_requirement,
+      .predicates_use_ordinals = provider->predicates_use_ordinals,
   };
 }
 
@@ -81,6 +82,15 @@ static bool loom_template_applicability_remap_contract_value(
     loom_value_id_t* out_application_value_id) {
   loom_value_slice_t operands =
       loom_template_applicability_application_operands(application_op);
+  loom_value_slice_t results =
+      loom_template_applicability_application_results(application_op);
+  if (contract->predicates_use_ordinals) {
+    *out_application_value_id =
+        contract_value_id < contract->argument_count
+            ? operands.values[contract_value_id]
+            : results.values[contract_value_id - contract->argument_count];
+    return true;
+  }
   for (uint16_t i = 0; i < contract->argument_count && i < operands.count;
        ++i) {
     if (contract->argument_ids[i] == contract_value_id) {
@@ -89,8 +99,6 @@ static bool loom_template_applicability_remap_contract_value(
     }
   }
 
-  loom_value_slice_t results =
-      loom_template_applicability_application_results(application_op);
   for (uint16_t i = 0; i < contract->result_count && i < results.count; ++i) {
     if (contract->result_ids[i] == contract_value_id) {
       *out_application_value_id = results.values[i];

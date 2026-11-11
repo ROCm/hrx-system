@@ -12,6 +12,56 @@
 #include "loom/ops/op_defs.h"
 #include "loom/ops/target/facts.h"
 #include "loom/target/condition.h"
+#include "loom/util/ordinal_map.h"
+#include "loom/util/segmented_storage.h"
+
+#define LOOM_LINK_BYTECODE_TEMPLATE_TARGET_SEGMENT_CAPACITY 128u
+
+struct loom_link_bytecode_template_target_cache_t {
+  // Reached target source ordinals mapped to stable payload slots.
+  loom_ordinal_map_t index;
+  // Cached target identities; a null entry is a resolved target declaration.
+  loom_segmented_storage_t entries;
+};
+
+static const loom_target_facts_t* const*
+loom_link_bytecode_template_cached_target(
+    const loom_link_bytecode_template_target_cache_t* cache, uint32_t ordinal) {
+  const loom_target_facts_t* const* segment =
+      loom_segmented_storage_const_segment(
+          &cache->entries,
+          ordinal / LOOM_LINK_BYTECODE_TEMPLATE_TARGET_SEGMENT_CAPACITY);
+  return &segment[ordinal %
+                  LOOM_LINK_BYTECODE_TEMPLATE_TARGET_SEGMENT_CAPACITY];
+}
+
+static iree_status_t loom_link_bytecode_template_cache_target(
+    loom_link_bytecode_template_contract_reader_t* reader,
+    uint32_t source_symbol_ordinal, const loom_target_facts_t* facts) {
+  if (!reader->targets) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate(
+        reader->arena, sizeof(*reader->targets), (void**)&reader->targets));
+    loom_ordinal_map_initialize(reader->arena, &reader->targets->index);
+    loom_segmented_storage_initialize(
+        LOOM_LINK_BYTECODE_TEMPLATE_TARGET_SEGMENT_CAPACITY * sizeof(facts),
+        iree_alignof(const loom_target_facts_t*), &reader->targets->entries);
+  }
+  loom_link_bytecode_template_target_cache_t* cache = reader->targets;
+  const uint32_t ordinal = cache->index.buckets.count;
+  const uint32_t segment_ordinal =
+      ordinal / LOOM_LINK_BYTECODE_TEMPLATE_TARGET_SEGMENT_CAPACITY;
+  const loom_target_facts_t** segment = NULL;
+  if (segment_ordinal == cache->entries.segment_count) {
+    IREE_RETURN_IF_ERROR(loom_segmented_storage_append(
+        &cache->entries, reader->arena, (void**)&segment));
+  } else {
+    segment = loom_segmented_storage_segment(&cache->entries, segment_ordinal);
+  }
+  segment[ordinal % LOOM_LINK_BYTECODE_TEMPLATE_TARGET_SEGMENT_CAPACITY] =
+      facts;
+  return loom_ordinal_map_insert(&cache->index, 0, source_symbol_ordinal,
+                                 ordinal);
+}
 
 static loom_template_provider_kind_t loom_link_bytecode_template_provider_kind(
     loom_bytecode_symbol_kind_t kind) {
@@ -259,38 +309,6 @@ static iree_status_t loom_link_bytecode_template_target_symbol_ordinal(
   return iree_ok_status();
 }
 
-static bool loom_link_bytecode_template_target_is_projected(
-    const loom_link_bytecode_template_contract_reader_t* reader,
-    uint32_t source_symbol_ordinal) {
-  return reader->targets.projected_words != NULL &&
-         (reader->targets.projected_words[source_symbol_ordinal >> 6] &
-          (UINT64_C(1) << (source_symbol_ordinal & 63u))) != 0;
-}
-
-static iree_status_t loom_link_bytecode_template_prepare_target_cache(
-    loom_link_bytecode_template_contract_reader_t* reader) {
-  if (reader->targets.projected_words != NULL) {
-    return iree_ok_status();
-  }
-  const iree_host_size_t symbol_count = reader->metadata->symbol_count;
-  const iree_host_size_t word_count = (symbol_count + 63) / 64;
-  if (symbol_count != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        reader->arena, symbol_count, sizeof(*reader->targets.values),
-        (void**)&reader->targets.values));
-    memset(reader->targets.values, 0,
-           symbol_count * sizeof(*reader->targets.values));
-  }
-  if (word_count != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        reader->arena, word_count, sizeof(*reader->targets.projected_words),
-        (void**)&reader->targets.projected_words));
-    memset(reader->targets.projected_words, 0,
-           word_count * sizeof(*reader->targets.projected_words));
-  }
-  return iree_ok_status();
-}
-
 static iree_string_view_t loom_link_bytecode_template_target_string(
     const void* context, loom_string_id_t string_id) {
   const loom_bytecode_module_metadata_t* metadata =
@@ -304,11 +322,12 @@ static iree_status_t loom_link_bytecode_template_project_target_facts(
     uint32_t source_symbol_ordinal,
     const loom_target_facts_t** out_target_facts) {
   IREE_ASSERT(source_symbol_ordinal < reader->metadata->symbol_count);
-  IREE_RETURN_IF_ERROR(
-      loom_link_bytecode_template_prepare_target_cache(reader));
-  if (loom_link_bytecode_template_target_is_projected(reader,
-                                                      source_symbol_ordinal)) {
-    *out_target_facts = reader->targets.values[source_symbol_ordinal];
+  uint32_t cached_ordinal = 0;
+  if (reader->targets &&
+      loom_ordinal_map_lookup(&reader->targets->index, 0, source_symbol_ordinal,
+                              &cached_ordinal)) {
+    *out_target_facts = *loom_link_bytecode_template_cached_target(
+        reader->targets, cached_ordinal);
     return iree_ok_status();
   }
 
@@ -371,14 +390,13 @@ static iree_status_t loom_link_bytecode_template_project_target_facts(
     facts = mutable_facts;
   }
 
-  reader->targets.values[source_symbol_ordinal] = facts;
-  reader->targets.projected_words[source_symbol_ordinal >> 6] |=
-      UINT64_C(1) << (source_symbol_ordinal & 63u);
+  IREE_RETURN_IF_ERROR(loom_link_bytecode_template_cache_target(
+      reader, source_symbol_ordinal, facts));
   *out_target_facts = facts;
   return iree_ok_status();
 }
 
-iree_status_t loom_link_bytecode_template_contract_reader_initialize(
+void loom_link_bytecode_template_contract_reader_initialize(
     iree_const_byte_span_t bytecode, loom_context_t* context,
     const loom_bytecode_module_metadata_t* metadata,
     iree_arena_allocator_t* arena,
@@ -392,29 +410,17 @@ iree_status_t loom_link_bytecode_template_contract_reader_initialize(
       .context = context,
       .metadata = metadata,
       .arena = arena,
-      .contracts = {.count = metadata->symbol_count},
   };
-  if (metadata->symbol_count != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, metadata->symbol_count, sizeof(*out_reader->contracts.values),
-        (void**)&out_reader->contracts.values));
-    memset(out_reader->contracts.values, 0,
-           metadata->symbol_count * sizeof(*out_reader->contracts.values));
-  }
-  return iree_ok_status();
 }
 
 iree_status_t loom_link_bytecode_template_contract_reader_load(
     loom_link_bytecode_template_contract_reader_t* reader,
     uint32_t source_symbol_ordinal,
-    const loom_link_bytecode_template_contract_t** out_contract) {
+    loom_link_bytecode_template_provider_projection_t* projection,
+    loom_link_bytecode_template_contract_t* out_contract) {
   IREE_ASSERT_ARGUMENT(reader);
   IREE_ASSERT_ARGUMENT(out_contract);
-  IREE_ASSERT(source_symbol_ordinal < reader->contracts.count);
-  if (reader->contracts.values[source_symbol_ordinal] != NULL) {
-    *out_contract = reader->contracts.values[source_symbol_ordinal];
-    return iree_ok_status();
-  }
+  IREE_ASSERT(source_symbol_ordinal < reader->metadata->symbol_count);
 
   const loom_bytecode_symbol_metadata_t* symbol =
       &reader->metadata->symbols[source_symbol_ordinal];
@@ -428,10 +434,7 @@ iree_status_t loom_link_bytecode_template_contract_reader_load(
       reader->metadata->ops.entries[symbol->defining_op_ordinal].vtable;
   IREE_ASSERT(vtable->func_like != NULL);
 
-  loom_link_bytecode_template_contract_t* contract = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate(reader->arena, sizeof(*contract), (void**)&contract));
-  *contract = (loom_link_bytecode_template_contract_t){
+  *out_contract = (loom_link_bytecode_template_contract_t){
       .provider =
           {
               .kind = loom_link_bytecode_template_provider_kind(symbol->kind),
@@ -445,19 +448,30 @@ iree_status_t loom_link_bytecode_template_contract_reader_load(
           },
       .target_symbol_ordinal = UINT32_MAX,
   };
-  IREE_RETURN_IF_ERROR(loom_link_bytecode_template_target_symbol_ordinal(
-      reader, symbol, vtable->func_like, &contract->target_symbol_ordinal));
-  contract->provider.has_target_requirement =
-      contract->target_symbol_ordinal != UINT32_MAX;
-  IREE_RETURN_IF_ERROR(loom_link_bytecode_template_decode_conditions(
-      reader, symbol, vtable->func_like, &contract->provider.target_conditions,
-      &contract->provider.target_condition_count));
-  if (contract->provider.has_target_requirement) {
-    IREE_RETURN_IF_ERROR(loom_link_bytecode_template_project_target_facts(
-        reader, contract->target_symbol_ordinal,
-        &contract->provider.target_facts));
+  if (!symbol->template_target_attribute_ordinal_plus_one &&
+      !symbol->template_requires_attribute_ordinal_plus_one) {
+    return iree_ok_status();
   }
-  reader->contracts.values[source_symbol_ordinal] = contract;
-  *out_contract = contract;
+
+  if (!projection->initialized) {
+    *projection = (loom_link_bytecode_template_provider_projection_t){0};
+    IREE_RETURN_IF_ERROR(loom_link_bytecode_template_target_symbol_ordinal(
+        reader, symbol, vtable->func_like, &projection->target_symbol_ordinal));
+    IREE_RETURN_IF_ERROR(loom_link_bytecode_template_decode_conditions(
+        reader, symbol, vtable->func_like, &projection->conditions,
+        &projection->condition_count));
+    if (projection->target_symbol_ordinal != UINT32_MAX) {
+      IREE_RETURN_IF_ERROR(loom_link_bytecode_template_project_target_facts(
+          reader, projection->target_symbol_ordinal,
+          &projection->target_facts));
+    }
+    projection->initialized = true;
+  }
+  out_contract->target_symbol_ordinal = projection->target_symbol_ordinal;
+  out_contract->provider.has_target_requirement =
+      projection->target_symbol_ordinal != UINT32_MAX;
+  out_contract->provider.target_conditions = projection->conditions;
+  out_contract->provider.target_condition_count = projection->condition_count;
+  out_contract->provider.target_facts = projection->target_facts;
   return iree_ok_status();
 }

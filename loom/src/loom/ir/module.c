@@ -559,6 +559,19 @@ static bool loom_encoding_alias_equal_fn(const void* context, uint32_t index) {
          equal_context->encoding->alias_id;
 }
 
+uint16_t loom_module_find_encoding_alias(const loom_module_t* module,
+                                         loom_string_id_t alias_id) {
+  const loom_encoding_t encoding = {.alias_id = alias_id};
+  const loom_encoding_equal_context_t context = {
+      .module = module,
+      .encoding = &encoding,
+  };
+  const loom_intern_probe_t probe = loom_intern_table_probe(
+      &module->encoding_intern, loom_encoding_alias_hash(alias_id),
+      loom_encoding_alias_equal_fn, &context);
+  return probe.index == UINT32_MAX ? 0 : (uint16_t)(probe.index + 1);
+}
+
 static void loom_module_index_encoding_alias(loom_module_t* module,
                                              uint32_t hash, uint32_t index) {
   const iree_host_size_t slot =

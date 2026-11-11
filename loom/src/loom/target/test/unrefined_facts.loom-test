@@ -1,0 +1,248 @@
+// RUN: pass canonicalize
+
+// A provider target is an eligibility witness, not an artifact contract.
+// Requirements filter applications; they do not invent target facts here.
+target.generic<reference> @identity
+
+target.generic<reference> @configured {subgroup_size = 64}
+
+template.decl @width() -> (index, index)
+
+template.def<@width> target(@identity) requires [#target.subgroup.size<64>] @generic_width() -> (index, index) {
+  %half = index.constant 21 : index
+  %sum = index.add %half, %half : index
+  %width = target.subgroup.size : index
+  template.return %sum, %width : index, index
+}
+
+func.def public target(@configured) @known_width() -> (index) {
+  %width = target.subgroup.size : index
+  func.return %width : index
+}
+
+// ----
+target.generic<reference> @identity
+
+target.generic<reference> @configured {subgroup_size = 64}
+
+template.decl @width() -> (index, index)
+
+template.def<@width> target(@identity) requires [#target.subgroup.size<64>] @generic_width() -> (index, index) {
+  %sum = index.constant 42 : index
+  %width = target.subgroup.size : index
+  template.return %sum, %width : index, index
+}
+
+func.def public target(@configured) @known_width() -> (index) {
+  %width = index.constant 64 : index
+  func.return %width : index
+}
+
+// ====
+// RUN: pass @cleanup_generic
+
+// Target predicates must be usable before artifact specialization too.
+pass.pipeline<module> @cleanup_generic pipeline {
+  for func {
+    where target(bundle = "identity") {
+      canonicalize
+    }
+  }
+}
+
+target.generic<reference> @identity
+
+test.target<low_core> @other
+
+template.decl @increment(%value: index) -> (index)
+
+template.def<@increment> target(@identity) @generic_increment(%value: index) -> (index) {
+  %c0 = index.constant 0 : index
+  %result = index.add %value, %c0 : index
+  template.return %result : index
+}
+
+template.def<@increment> target(@other) @other_increment(%value: index) -> (index) {
+  %c0 = index.constant 0 : index
+  %result = index.add %value, %c0 : index
+  template.return %result : index
+}
+
+// ----
+pass.pipeline<module> @cleanup_generic pipeline {
+  for func {
+    where target(bundle = "identity") {
+      canonicalize
+    }
+  }
+}
+
+target.generic<reference> @identity
+
+test.target<low_core> @other
+
+template.decl @increment(%value: index) -> (index)
+
+template.def<@increment> target(@identity) @generic_increment(%value: index) -> (index) {
+  template.return %value : index
+}
+
+template.def<@increment> target(@other) @other_increment(%value: index) -> (index) {
+  %c0 = index.constant 0 : index
+  %result = index.add %value, %c0 : index
+  template.return %result : index
+}
+
+// ====
+// RUN: pass @cleanup_callable_abi
+
+// Before specialization, the ABI comes from the callable, not the target's
+// default output contract. Match unknown and explicit ABIs independently.
+pass.pipeline<module> @cleanup_callable_abi pipeline {
+  for func {
+    where target(abi = "unknown") {
+      canonicalize
+    }
+    where target(abi = "object_function") {
+      dce
+    }
+  }
+}
+
+test.target<low_core> @target
+
+template.decl @increment(%value: index) -> (index)
+
+template.def<@increment> public target(@target) @provider(%value: index) -> (index) {
+  %unused = index.constant 17 : index
+  %c0 = index.constant 0 : index
+  %result = index.add %value, %c0 : index
+  template.return %result : index
+}
+
+func.def public target(@target) @unrefined(%value: index) -> (index) {
+  %unused = index.constant 17 : index
+  %c0 = index.constant 0 : index
+  %result = index.add %value, %c0 : index
+  func.return %result : index
+}
+
+func.def public target(@target) abi(object_function) @explicit(%value: index) -> (index) {
+  %unused = index.constant 17 : index
+  %c0 = index.constant 0 : index
+  %result = index.add %value, %c0 : index
+  func.return %result : index
+}
+
+// ----
+pass.pipeline<module> @cleanup_callable_abi pipeline {
+  for func {
+    where target(abi = "unknown") {
+      canonicalize
+    }
+    where target(abi = "object_function") {
+      dce
+    }
+  }
+}
+
+test.target<low_core> @target
+
+template.decl @increment(%value: index) -> (index)
+
+template.def<@increment> public target(@target) @provider(%value: index) -> (index) {
+  template.return %value : index
+}
+
+func.def public target(@target) @unrefined(%value: index) -> (index) {
+  func.return %value : index
+}
+
+func.def public target(@target) abi(object_function) @explicit(%value: index) -> (index) {
+  %c0 = index.constant 0 : index
+  %result = index.add %value, %c0 : index
+  func.return %result : index
+}
+
+// ====
+// RUN: pass @cleanup_kernel
+
+// Kernel syntax establishes a callable ABI without an artifact version.
+pass.pipeline<module> @cleanup_kernel pipeline {
+  for func {
+    where target(abi = "hal_kernel") {
+      canonicalize
+    }
+  }
+}
+
+target.generic<reference> @identity
+
+kernel.def target(@identity) @kernel() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch() {
+  %unused = index.constant 17 : index
+  kernel.return
+}
+
+// ----
+pass.pipeline<module> @cleanup_kernel pipeline {
+  for func {
+    where target(abi = "hal_kernel") {
+      canonicalize
+    }
+  }
+}
+
+target.generic<reference> @identity
+
+kernel.def target(@identity) @kernel() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch() {
+  kernel.return
+}
+
+// ====
+// RUN: pass select-templates{mode=early,rewrite=inline},canonicalize,select-templates{mode=final,rewrite=inline},symbol-dce
+
+// Cleanup between nested selections preserves each provider's target identity
+// without requiring an artifact ABI on that provider.
+target.generic<reference> @request_target {abi = object_function, subgroup_size = 64}
+
+target.generic<reference> @provider_target
+
+template.decl @outer() -> (index)
+
+template.decl @inner() -> (index)
+
+func.def public target(@request_target) @entry() -> (index) {
+  %result = template.apply<@outer>() : () -> (index)
+  func.return %result : index
+}
+
+template.def<@outer> target(@provider_target) requires [#target.subgroup.size<64>] @outer_selected() -> (index) {
+  %result = template.apply<@inner>() : () -> (index)
+  template.return %result : index
+}
+
+template.def<@inner> target(@provider_target) requires [#target.subgroup.size<64>] @inner_selected() -> (index) {
+  %result = index.constant 42 : index
+  template.return %result : index
+}
+
+template.def<@inner> requires [#target.subgroup.size<32>] priority(10) @inner_rejected() -> (index) {
+  %result = index.constant -3 : index
+  template.return %result : index
+}
+
+// ----
+target.generic<reference> @request_target {abi = object_function, subgroup_size = 64}
+
+target.generic<reference> @provider_target
+
+func.def public target(@request_target) @entry() -> (index) {
+  %result = index.constant 42 : index
+  func.return %result : index
+}

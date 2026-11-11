@@ -18,7 +18,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/symbol_facts.h"
 #include "loom/ir/ir.h"
-#include "loom/ops/func_symbol_facts.h"
+#include "loom/target/condition.h"
 #include "loom/target/facts.h"
 
 #ifdef __cplusplus
@@ -45,7 +45,7 @@ typedef struct loom_template_provider_catalog_t
 
 // Compact immutable provider summary.
 typedef struct loom_template_provider_summary_t {
-  // Module whose value/type/string domain owns this summary's IR payloads.
+  // Module owning this summary's family and target symbol references.
   const loom_module_t* module;
 
   // Provider implementation kind.
@@ -58,18 +58,16 @@ typedef struct loom_template_provider_summary_t {
   // external target declaration not yet bound into this module.
   bool has_target_requirement;
 
+  // True when predicate VALUE operands are signature ordinals (arguments,
+  // then results), without source SSA identity maps.
+  bool predicates_use_ordinals;
+
   // Local module symbol reference, or null for external providers.
   loom_symbol_ref_t symbol;
 
   // Module-local target applicability symbol, or null when absent or not yet
   // bound into this module. Presence is owned by has_target_requirement.
   loom_symbol_ref_t target_symbol;
-
-  // Local function-like operation, or empty for external providers.
-  loom_func_like_t function;
-
-  // Local function facts backing this summary, or NULL for external providers.
-  const loom_func_symbol_facts_t* func_facts;
 
   // Caller-defined stable source identity, or IREE_HOST_SIZE_MAX when absent.
   iree_host_size_t origin_ordinal;
@@ -89,22 +87,21 @@ typedef struct loom_template_provider_summary_t {
   // Number of resolved target-condition entries.
   uint16_t target_condition_count;
 
-  // Borrowed template family symbol name.
-  iree_string_view_t family_name;
-
   // Borrowed provider symbol name.
   iree_string_view_t name;
 
   // Provider priority used to rank applicable implementations.
   int64_t priority;
 
-  // Borrowed argument value IDs in the summary module's value domain.
+  // Borrowed source argument identities mapping predicates to signature
+  // positions. NULL when predicates_use_ordinals is true.
   const loom_value_id_t* argument_ids;
 
-  // Borrowed result value IDs in the summary module's value domain.
+  // Borrowed source result identities mapping predicates to signature
+  // positions. NULL when predicates_use_ordinals is true.
   const loom_value_id_t* result_ids;
 
-  // Borrowed predicate list for feasibility checks.
+  // Borrowed predicates in source-identity or signature-ordinal coordinates.
   const loom_predicate_t* predicates;
 
   // Borrowed resolved target-condition conjunction.
@@ -117,7 +114,8 @@ typedef struct loom_template_provider_summary_t {
 // Representation-independent applicability contract for an external provider.
 //
 // Predicate VALUE arguments are signature ordinals: arguments first, followed
-// by results. Binding translates them into the linked family's value domain.
+// by results. Binding preserves these coordinates through decision
+// construction.
 typedef struct loom_template_provider_contract_t {
   // Provider implementation kind.
   loom_template_provider_kind_t kind;
@@ -189,7 +187,8 @@ typedef struct loom_template_provider_catalog_t {
   // Arena used for provider and bucket storage.
   iree_arena_allocator_t* arena;
 
-  // Provider summaries grouped by family in stable source order.
+  // Provider summaries grouped by family in stable source order. Borrows an
+  // already grouped external array, otherwise owns merged storage in arena.
   const loom_template_provider_summary_t* providers;
 
   // Number of provider summaries.
@@ -217,9 +216,11 @@ iree_status_t loom_template_provider_catalog_build_local(
 
 // Rebuilds |catalog| from local providers plus external summaries.
 //
-// Every external provider must already be bound to |module|'s family and
-// signature domain. Borrowed source-owned names, conditions, and target facts
-// must remain live for the catalog lifetime.
+// Every external provider must already be bound to |module|'s family and target
+// symbols. The external array and its source-owned signatures, predicates,
+// names, conditions, and target facts remain immutable and live for the
+// catalog lifetime. Already grouped external arrays are borrowed directly when
+// no local providers need merging; other inputs retain stable order per family.
 iree_status_t loom_template_provider_catalog_build(
     loom_template_provider_catalog_t* catalog, const loom_module_t* module,
     loom_symbol_fact_table_t* fact_table,
@@ -228,30 +229,30 @@ iree_status_t loom_template_provider_catalog_build(
 
 // Binds one provider contract to an already-linked template family.
 //
-// The family owns the canonical signature used for applicability. Provider
-// predicates are translated from |source|'s signature values to the matching
-// family values; no values, types, symbols, or operations are added to
-// |target_module|. |target_symbol| is the already-linked target witness when
-// available and may be null when |source| carries immutable target facts.
-// Source-owned names, conditions, and target facts must remain live while the
-// bound summary is queried.
+// The family owns the canonical signature used for applicability. Predicates
+// retain their source signature coordinates; no values, types, symbols, or
+// operations are added to |target_module|. |target_symbol| is the
+// already-linked target witness when available and may be null when |source|
+// carries immutable target facts. Source-owned signatures, predicates, names,
+// conditions, and target facts must remain live while the bound summary is
+// queried.
 iree_status_t loom_template_provider_summary_bind_family(
     const loom_template_provider_summary_t* source,
     const loom_module_t* target_module, loom_symbol_ref_t target_family,
     loom_symbol_ref_t target_symbol, iree_host_size_t origin_ordinal,
-    iree_arena_allocator_t* arena,
     loom_template_provider_summary_t* out_provider);
 
 // Binds a representation-independent provider contract to a linked family.
 //
 // |target_symbol| is the already-linked target witness when available and may
-// be null when |contract| carries immutable target facts. Contract-owned names,
-// conditions, and target facts must remain live while the result is queried.
+// be null when |contract| carries immutable target facts. Contract-owned
+// predicates, names, conditions, and target facts must remain live while the
+// result is queried. Signature-ordinal predicates are borrowed without
+// remapping.
 iree_status_t loom_template_provider_contract_bind_family(
     const loom_template_provider_contract_t* contract,
     const loom_module_t* target_module, loom_symbol_ref_t target_family,
     loom_symbol_ref_t target_symbol, iree_host_size_t origin_ordinal,
-    iree_arena_allocator_t* arena,
     loom_template_provider_summary_t* out_provider);
 
 // Returns local providers for |family|.

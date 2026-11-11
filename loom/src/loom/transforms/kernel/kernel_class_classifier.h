@@ -131,7 +131,7 @@ static_assert(sizeof(loom_kernel_class_action_t) == 8,
 
 // Boundary projections supplying static structure in one selected body.
 typedef struct loom_kernel_class_shape_t {
-  // Distinct projection ordinals; facts are evaluated only for live classes.
+  // Sorted distinct projection ordinals; evaluated only for live classes.
   const uint32_t* projections;
   // Number of required projections.
   uint32_t count;
@@ -139,8 +139,8 @@ typedef struct loom_kernel_class_shape_t {
 
 // Immutable boundary form of one template application decision.
 typedef struct loom_kernel_class_decision_t {
-  // Source application demand.
-  const loom_template_demand_t* demand;
+  // Source application, retained directly without reference-analysis storage.
+  const loom_op_t* application;
 
   // Ranked family decision model.
   const loom_template_decision_model_t* model;
@@ -164,6 +164,11 @@ typedef struct loom_kernel_class_decision_t {
   // header predicates used to select that provider.
   const loom_kernel_class_shape_t* action_shapes;
 
+  // Structural requirements of every provider still possible in a generic
+  // residual. Provider headers determine applicability; bodies supply
+  // structure.
+  loom_kernel_class_shape_t residual_shape;
+
   // Selection result from kernel-source facts before launch-site refinement.
   loom_decision_program_result_t generic_result;
 
@@ -182,8 +187,12 @@ typedef struct loom_kernel_class_decision_t {
   // Publication properties of the family hard requirements.
   loom_kernel_class_contract_flags_t hard_requirement_flags;
 
-  // Reserved bytes. Always zero.
-  uint8_t reserved[2];
+  // True if a source-feasible provider omits a generic structural requirement.
+  // Used only for class-budget admission, never provider applicability or rank.
+  bool can_reduce_structure;
+
+  // Reserved byte. Always zero.
+  uint8_t reserved;
 } loom_kernel_class_decision_t;
 
 // Immutable classifier owned by one materialized kernel source product.
@@ -277,7 +286,9 @@ typedef struct loom_kernel_class_decision_result_t {
 
 // One accepted decision outcome in a class trace.
 typedef struct loom_kernel_class_trace_t {
-  // Previous trace node, or LOOM_KERNEL_CLASS_TRACE_ID_INVALID.
+  // Previous collected decision, or LOOM_KERNEL_CLASS_TRACE_ID_INVALID.
+  // Collection reserves required decisions first, independently of source
+  // order.
   loom_kernel_class_trace_id_t parent_trace_id;
 
   // Classifier decision ordinal.
@@ -357,8 +368,10 @@ typedef struct loom_kernel_class_collection_t {
 // projects its header decisions without walking IR. The structural requirement
 // analysis owns one immutable body/call traversal. |kernel_facts| and
 // |expression_context| must describe the same kernel function and immutable
-// module snapshot. The classifier borrows all supplied analyses and owns only
-// storage allocated from |arena|.
+// module snapshot. The classifier borrows |module| and the provider/model
+// contracts backing |decision_models|; references, kernel facts, and symbolic
+// expressions may retire after construction. Result storage belongs to |arena|;
+// construction scratch returns to its block pool before this call returns.
 iree_status_t loom_kernel_class_classifier_build(
     const loom_module_t* module, loom_symbol_id_t kernel_symbol_id,
     const loom_symbol_reference_table_t* references,
@@ -371,11 +384,13 @@ iree_status_t loom_kernel_class_classifier_build(
 
 // Collects the finite live quotient of |sites| under |classifier|.
 //
-// Mandatory staged values are interned from |site_module| before optional
-// decision refinement. |site_module| is required when the source has staged
-// arguments. Optional decision evaluation performs no allocation, IR traversal,
-// string work, hashing, or fact-table cloning. A decision can remain generic
-// only when its kernel-source facts select a valid residual provider.
+// Mandatory staged values, source structure, and decisions without generic
+// residuals reserve their classes before optional refinement. |site_module| is
+// required when the source has staged arguments. Provider evaluation consumes
+// retained projections without allocation, IR traversal, or fact-table cloning.
+// Admission includes the selected providers' structural variants and the
+// remaining generic requirements. A decision can remain generic only when its
+// kernel-source facts select a valid residual provider.
 iree_status_t loom_kernel_class_classifier_collect(
     const loom_kernel_class_classifier_t* classifier,
     const loom_module_t* site_module, const loom_kernel_class_site_t* sites,

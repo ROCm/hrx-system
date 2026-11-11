@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/target/facts.h"
 #include "loom/ops/template/ops.h"
@@ -40,6 +41,7 @@ typedef enum loom_template_decision_signature_lookup_mode_e {
   LOOM_TEMPLATE_DECISION_SIGNATURE_LOOKUP_LINEAR = 0,
   LOOM_TEMPLATE_DECISION_SIGNATURE_LOOKUP_ORDERED = 1,
   LOOM_TEMPLATE_DECISION_SIGNATURE_LOOKUP_MAPPED = 2,
+  LOOM_TEMPLATE_DECISION_SIGNATURE_LOOKUP_ORDINAL = 3,
 } loom_template_decision_signature_lookup_mode_t;
 
 typedef struct loom_template_decision_operand_map_entry_t {
@@ -268,7 +270,8 @@ static bool loom_template_decision_signature_needs_operand_map(
 static void loom_template_decision_prepare_signature_lookup(
     const loom_value_id_t* argument_ids, uint16_t argument_count,
     const loom_value_id_t* result_ids, uint16_t result_count,
-    const loom_predicate_t* predicates, uint16_t predicate_count,
+    bool predicates_use_ordinals, const loom_predicate_t* predicates,
+    uint16_t predicate_count,
     loom_template_decision_operand_map_entry_t* operand_map,
     loom_template_decision_signature_lookup_t* out_lookup) {
   *out_lookup = (loom_template_decision_signature_lookup_t){
@@ -278,6 +281,10 @@ static void loom_template_decision_prepare_signature_lookup(
       .result_count = result_count,
       .mode = LOOM_TEMPLATE_DECISION_SIGNATURE_LOOKUP_LINEAR,
   };
+  if (predicates_use_ordinals) {
+    out_lookup->mode = LOOM_TEMPLATE_DECISION_SIGNATURE_LOOKUP_ORDINAL;
+    return;
+  }
   const uint32_t signature_count = (uint32_t)argument_count + result_count;
   if (signature_count <= 8) {
     return;
@@ -420,6 +427,11 @@ loom_template_decision_compile_value_operand(
     case LOOM_TEMPLATE_DECISION_SIGNATURE_LOOKUP_MAPPED:
       return loom_template_decision_find_signature_operand_mapped(
           signature_lookup, value_id);
+    case LOOM_TEMPLATE_DECISION_SIGNATURE_LOOKUP_ORDINAL:
+      return value_id < signature_lookup->argument_count
+                 ? loom_decision_program_argument_ref(value_id)
+                 : loom_decision_program_result_ref(
+                       value_id - signature_lookup->argument_count);
   }
   IREE_ASSERT_UNREACHABLE("invalid template signature lookup mode");
   IREE_BUILTIN_UNREACHABLE();
@@ -430,16 +442,13 @@ static void loom_template_decision_compile_contract(
     loom_symbol_ref_t target_symbol, const loom_target_facts_t* target_facts,
     const loom_value_id_t* argument_ids, uint16_t argument_count,
     const loom_value_id_t* result_ids, uint16_t result_count,
-    const loom_predicate_t* source_predicates, uint16_t source_predicate_count,
+    bool predicates_use_ordinals, const loom_predicate_t* source_predicates,
+    uint16_t source_predicate_count,
     const loom_target_condition_t* target_conditions,
     uint16_t target_condition_count,
     loom_template_decision_operand_map_entry_t* operand_map,
     loom_template_decision_build_cursor_t* cursor,
     loom_decision_program_conjunction_t* out_conjunction) {
-  loom_template_decision_signature_lookup_t signature_lookup;
-  loom_template_decision_prepare_signature_lookup(
-      argument_ids, argument_count, result_ids, result_count, source_predicates,
-      source_predicate_count, operand_map, &signature_lookup);
   *out_conjunction = (loom_decision_program_conjunction_t){
       .first_predicate = cursor->predicate_ordinal - cursor->predicate_ref_base,
       .first_feature = cursor->feature_ordinal - cursor->feature_ref_base,
@@ -468,6 +477,14 @@ static void loom_template_decision_compile_contract(
     ++cursor->feature_ordinal;
   }
 
+  if (source_predicate_count == 0) {
+    return;
+  }
+  loom_template_decision_signature_lookup_t signature_lookup;
+  loom_template_decision_prepare_signature_lookup(
+      argument_ids, argument_count, result_ids, result_count,
+      predicates_use_ordinals, source_predicates, source_predicate_count,
+      operand_map, &signature_lookup);
   for (uint16_t i = 0; i < source_predicate_count; ++i) {
     const loom_predicate_t* source = &source_predicates[i];
     loom_decision_program_predicate_t* predicate = cursor->predicates++;
@@ -513,7 +530,7 @@ static void loom_template_decision_build_family(
       build_family->family_facts->argument_count,
       build_family->family_facts->result_ids,
       build_family->family_facts->result_count,
-      build_family->family_facts->predicates,
+      /*predicates_use_ordinals=*/false, build_family->family_facts->predicates,
       build_family->family_facts->predicate_count,
       build_family->family_facts->target_conditions,
       build_family->family_facts->target_condition_count, operand_map, cursor,
@@ -527,9 +544,9 @@ static void loom_template_decision_build_family(
         provider->has_target_requirement, provider->module,
         provider->target_symbol, provider->target_facts, provider->argument_ids,
         provider->argument_count, provider->result_ids, provider->result_count,
-        provider->predicates, provider->predicate_count,
-        provider->target_conditions, provider->target_condition_count,
-        operand_map, cursor, &conjunction);
+        provider->predicates_use_ordinals, provider->predicates,
+        provider->predicate_count, provider->target_conditions,
+        provider->target_condition_count, operand_map, cursor, &conjunction);
     const loom_decision_program_choice_t choice = {
         .conjunction = conjunction,
         .action_ordinal = i,
@@ -728,7 +745,8 @@ iree_status_t loom_template_decision_model_catalog_build(
           provider->predicate_count, provider->target_conditions,
           provider->target_condition_count, build_family,
           &provider_value_reference_count));
-      if (loom_template_decision_signature_needs_operand_map(
+      if (!provider->predicates_use_ordinals &&
+          loom_template_decision_signature_needs_operand_map(
               provider->argument_ids, provider->argument_count,
               provider->result_ids, provider->result_count,
               provider_value_reference_count)) {

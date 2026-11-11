@@ -22,6 +22,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/target/facts.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/template/ops.h"
@@ -443,12 +444,46 @@ func.def public @entry(%x: index, %y: index, %m: index) -> (index, index) {
 }
 )");
 
+  // External headers retain signature positions, including result positions,
+  // while the local providers above retain their original SSA identities.
+  std::array<loom_predicate_t, 2> external_predicates = {};
+  std::array<loom_template_provider_summary_t, 2> external_providers = {};
+  const std::array<iree_string_view_t, 2> families = {IREE_SV("family.a"),
+                                                      IREE_SV("family.b")};
+  for (size_t i = 0; i < external_providers.size(); ++i) {
+    const uint16_t argument_count = i == 0 ? 2 : 9;
+    external_predicates[i] = {
+        .kind = LOOM_PREDICATE_EQ,
+        .arg_count = 2,
+        .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+        .args = {argument_count - 1, argument_count},
+    };
+    const loom_template_provider_contract_t contract = {
+        .kind = LOOM_TEMPLATE_PROVIDER_KIND_DEF,
+        .has_body = true,
+        .argument_count = argument_count,
+        .result_count = 1,
+        .predicate_count = 1,
+        .name = IREE_SV("external_result"),
+        .priority = 10,
+        .predicates = &external_predicates[i],
+    };
+    const loom_symbol_ref_t family = {
+        .module_id = 0,
+        .symbol_id = FindSymbol(module.get(), families[i]),
+    };
+    IREE_ASSERT_OK(loom_template_provider_contract_bind_family(
+        &contract, module.get(), family, loom_symbol_ref_null(), i,
+        &external_providers[i]));
+  }
+
   loom_symbol_fact_table_t symbol_facts = {};
   loom_symbol_fact_table_initialize(&symbol_facts, &analysis_arena_);
   loom_template_provider_catalog_t providers = {};
   loom_template_provider_catalog_initialize(&providers, &analysis_arena_);
-  IREE_ASSERT_OK(loom_template_provider_catalog_build_local(
-      &providers, module.get(), &symbol_facts));
+  IREE_ASSERT_OK(loom_template_provider_catalog_build(
+      &providers, module.get(), &symbol_facts, external_providers.data(),
+      external_providers.size()));
   loom_symbol_reference_table_t references = {};
   IREE_ASSERT_OK(loom_symbol_reference_table_build(
       module.get(), &analysis_arena_, &references));
@@ -484,8 +519,9 @@ func.def public @entry(%x: index, %y: index, %m: index) -> (index, index) {
   std::mt19937_64 random(0xdec1510ada77ULL);
   for (uint32_t iteration = 0; iteration < 5000; ++iteration) {
     loom_value_fact_table_clear_scope(&value_facts);
-    std::array<loom_value_facts_t, 3> facts = {
-        RandomFacts(random), RandomFacts(random), RandomFacts(random)};
+    std::array<loom_value_facts_t, 4> facts = {
+        RandomFacts(random), RandomFacts(random), RandomFacts(random),
+        RandomFacts(random)};
     for (iree_host_size_t i = 0; i < references.template_demands.count; ++i) {
       const loom_template_demand_t& demand =
           references.template_demands.values[i];
@@ -503,6 +539,9 @@ func.def public @entry(%x: index, %y: index, %m: index) -> (index, index) {
               &value_facts, operands.values[j], facts[2]));
         }
       }
+      IREE_ASSERT_OK(loom_value_fact_table_define(
+          &value_facts, loom_template_apply_results(demand.apply_op).values[0],
+          facts[3]));
       const loom_symbol_ref_t family = {
           .module_id = 0,
           .symbol_id = demand.family_symbol_id,

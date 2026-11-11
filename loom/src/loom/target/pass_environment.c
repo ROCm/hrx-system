@@ -170,7 +170,7 @@ iree_status_t loom_target_pass_resolve_function_facts(
   }
 
   bool contract_valid = false;
-  IREE_RETURN_IF_ERROR(loom_target_function_contract_refine_facts(
+  IREE_RETURN_IF_ERROR(loom_target_function_contract_refine_internal_facts(
       module, func_facts, target->name, target->projection,
       pass->diagnostic_emitter, pass->instance_arena, &contract_valid,
       out_facts));

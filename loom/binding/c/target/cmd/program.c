@@ -665,11 +665,11 @@ static iree_status_t loomc_cmd_program_publish_native_source(
     const loom_kernel_class_site_t* sites, iree_host_size_t site_count,
     const loom_kernel_class_collection_options_t* collection_options,
     loom_kernel_request_sink_t sink, iree_arena_allocator_t* scratch_arena,
-    loom_kernel_class_collection_t* out_collection) {
+    const loom_decision_class_ordinal_t** out_site_classes) {
   return loomc_cmd_native_source_cache_publish(
       user_data, environment->user_data, environment, source_symbol_ordinal,
       site_module, sites, site_count, collection_options, sink, scratch_arena,
-      out_collection);
+      out_site_classes);
 }
 
 static loomc_status_t loomc_cmd_program_product_build_indexed(

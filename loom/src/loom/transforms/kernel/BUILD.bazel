@@ -34,6 +34,22 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "kernel_specialization_test",
+    srcs = ["kernel_specialization_test.cc"],
+    deps = [
+        ":kernel_specialization",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/pipeline",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "kernel_shape_requirements",
     srcs = ["kernel_shape_requirements.c"],
@@ -86,6 +102,7 @@ loom_cc_test(
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/testing:module_ptr",
         "//loom/src/loom/tooling/context",
@@ -123,6 +140,7 @@ loom_cc_library(
         "//loom/src/loom/rewrite:module_projection",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/transforms/symbol:template_rewrite",
+        "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:predicate_facts",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -218,11 +236,13 @@ loom_cc_test(
         ":kernel_request_producer",
         "//loom/src/loom/format/bytecode:writer",
         "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",
         "//loom/src/loom/link:module_index",
         "//loom/src/loom/ops:op_registry",
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/template",
         "//loom/src/loom/testing:module_ptr",
         "//loom/src/loom/util:fact_table",
         "//loom/src/loom/verify",

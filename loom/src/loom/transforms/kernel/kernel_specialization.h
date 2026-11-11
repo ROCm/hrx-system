@@ -29,10 +29,20 @@ typedef struct loom_kernel_class_site_t {
 typedef struct loom_kernel_specialization_value_t {
   // Fact-specialized source type, including the exact scalar representation.
   loom_type_t type;
-  // Closed ConstantLike producer for non-scalar literals, or NULL for facts.
-  const loom_op_t* literal;
-  // Exact scalar facts when literal is NULL; unknown otherwise.
-  loom_value_facts_t facts;
+  // Closed ConstantLike operation kind, or zero for an exact scalar fact.
+  loom_op_kind_t kind;
+  // Literal operation flags; zero for scalar facts.
+  uint8_t instance_flags;
+  // Number of immutable literal attributes; zero for scalar facts.
+  uint8_t attribute_count;
+  // Literal source location, independent of any generated binding operation.
+  loom_location_id_t location;
+  union {
+    // Exact scalar facts when kind is zero.
+    loom_value_facts_t facts;
+    // Borrowed closed payload when kind is nonzero.
+    const loom_attribute_t* attributes;
+  };
 } loom_kernel_specialization_value_t;
 
 // Interns mandatory argument tuples and seeds the initial partition. Unlike

@@ -145,7 +145,7 @@ std::string Diagnostics(const loomc_result_t* result) {
   return text;
 }
 
-void ExpectSucceeded(const Output& output) {
+void ExpectSucceeded(const Output& output, size_t request_count = 1) {
   ASSERT_NE(output.result, nullptr);
   for (size_t i = 0; i < loomc_result_diagnostic_count(output.result.get());
        ++i) {
@@ -155,16 +155,16 @@ void ExpectSucceeded(const Output& output) {
   }
   EXPECT_TRUE(loomc_result_succeeded(output.result.get()));
   ASSERT_NE(output.product, nullptr);
-  EXPECT_EQ(output.requests.size(), 1u);
+  EXPECT_EQ(output.requests.size(), request_count);
 }
 
-std::string RequestBytes(const Output& output) {
-  EXPECT_EQ(output.requests.size(), 1u);
-  if (output.requests.size() != 1) {
+std::string RequestBytes(const Output& output, size_t ordinal = 0) {
+  EXPECT_GT(output.requests.size(), ordinal);
+  if (output.requests.size() <= ordinal) {
     return {};
   }
   const auto bytes = loomc_source_contents(
-      loomc_request_source(output.requests.front().get()));
+      loomc_request_source(output.requests[ordinal].get()));
   return std::string(reinterpret_cast<const char*>(bytes.data),
                      bytes.data_length);
 }
@@ -329,6 +329,47 @@ class NativeSourceTest : public ::testing::TestWithParam<bool> {
   // Real public compiler whose reuse and residency are observed.
   CompilerPtr compiler_;
 };
+
+TEST_P(NativeSourceTest, CompleteClassBudgetSurvivesReuseAndOwnerRetirement) {
+  Output cold;
+  LOOMC_ASSERT_OK(Build("{}", &cold, 0, {}, nullptr, "class_budget"));
+  ExpectSucceeded(cold, 128);
+  ASSERT_EQ(cold.requests.size(), 128u);
+  Output warm;
+  LOOMC_ASSERT_OK(Build("{}", &warm, 0, {}, nullptr, "class_budget"));
+  ExpectSucceeded(warm, 128);
+  ASSERT_EQ(warm.requests.size(), cold.requests.size());
+  compiler_.reset();
+  EXPECT_EQ(allocator_.live_bytes(), 0u);
+  for (size_t ordinal = 0; ordinal < cold.requests.size(); ++ordinal) {
+    EXPECT_EQ(RequestBytes(cold, ordinal), RequestBytes(warm, ordinal));
+  }
+}
+
+TEST_P(NativeSourceTest, DeferredProvidersRetainOnlyPossibleStructure) {
+  for (size_t byte_limit : {size_t{0}, size_t{64 * 1024 * 1024}}) {
+    ResetCompiler(byte_limit);
+    for (const char* root : {"residual_computed", "residual_guarded",
+                             "residual_target", "residual_false"}) {
+      SCOPED_TRACE(root);
+      std::vector<std::string> previous;
+      for (unsigned round = 0; round < 2; ++round) {
+        Output output;
+        LOOMC_ASSERT_OK(Build("{}", &output, 0, {}, nullptr, root));
+        ExpectSucceeded(output,
+                        std::strcmp(root, "residual_false") == 0 ? 1 : 2);
+        std::vector<std::string> current;
+        for (size_t ordinal = 0; ordinal < output.requests.size(); ++ordinal) {
+          current.push_back(RequestBytes(output, ordinal));
+        }
+        if (round) {
+          EXPECT_EQ(current, previous);
+        }
+        previous = std::move(current);
+      }
+    }
+  }
+}
 
 TEST_P(NativeSourceTest, MatchesSuccessfulClosureAndConfigurationPolicy) {
   const char* configurations[] = {
@@ -522,29 +563,40 @@ TEST_P(NativeSourceTest, OversizedSourcesPublishWithoutRetention) {
 }
 
 TEST_P(NativeSourceTest, AllocationFailuresReleasePartialPreparations) {
-  const size_t initial_allocations = allocator_.allocations();
-  Output baseline;
-  LOOMC_ASSERT_OK(Build("{\"mode\":1,\"extra\":7}", &baseline));
-  ExpectSucceeded(baseline);
-  const size_t preparation_allocations =
-      allocator_.allocations() - initial_allocations;
-  ASSERT_GT(preparation_allocations, 0u);
-  for (size_t i = 0; i < preparation_allocations; ++i) {
-    SCOPED_TRACE(i);
+  for (const char* root : {"dispatch", "residual_computed"}) {
+    SCOPED_TRACE(root);
     ResetCompiler(64u * 1024u * 1024u);
-    const size_t owner_bytes = allocator_.live_bytes();
-    allocator_.FailAfter(i);
-    Output failed;
-    const loomc_status_t status = Build("{\"mode\":1,\"extra\":7}", &failed);
-    EXPECT_EQ(loomc_status_consume_code(status),
-              LOOMC_STATUS_RESOURCE_EXHAUSTED);
-    EXPECT_EQ(failed.product, nullptr);
-    EXPECT_TRUE(failed.requests.empty());
-    EXPECT_EQ(allocator_.live_bytes(), owner_bytes);
-    Output recovered;
-    LOOMC_ASSERT_OK(Build("{\"mode\":1,\"extra\":7}", &recovered));
-    ExpectSucceeded(recovered);
-    EXPECT_EQ(RequestBytes(recovered), RequestBytes(baseline));
+    const size_t request_count = std::strcmp(root, "dispatch") == 0 ? 1 : 2;
+    const size_t initial_allocations = allocator_.allocations();
+    Output baseline;
+    LOOMC_ASSERT_OK(
+        Build("{\"mode\":1,\"extra\":7}", &baseline, 0, {}, nullptr, root));
+    ExpectSucceeded(baseline, request_count);
+    const size_t preparation_allocations =
+        allocator_.allocations() - initial_allocations;
+    ASSERT_GT(preparation_allocations, 0u);
+    for (size_t i = 0; i < preparation_allocations; ++i) {
+      SCOPED_TRACE(i);
+      ResetCompiler(64u * 1024u * 1024u);
+      const size_t owner_bytes = allocator_.live_bytes();
+      allocator_.FailAfter(i);
+      Output failed;
+      const loomc_status_t status =
+          Build("{\"mode\":1,\"extra\":7}", &failed, 0, {}, nullptr, root);
+      EXPECT_EQ(loomc_status_consume_code(status),
+                LOOMC_STATUS_RESOURCE_EXHAUSTED);
+      EXPECT_EQ(failed.product, nullptr);
+      EXPECT_TRUE(failed.requests.empty());
+      EXPECT_EQ(allocator_.live_bytes(), owner_bytes);
+      Output recovered;
+      LOOMC_ASSERT_OK(
+          Build("{\"mode\":1,\"extra\":7}", &recovered, 0, {}, nullptr, root));
+      ExpectSucceeded(recovered, request_count);
+      for (size_t ordinal = 0; ordinal < request_count; ++ordinal) {
+        EXPECT_EQ(RequestBytes(recovered, ordinal),
+                  RequestBytes(baseline, ordinal));
+      }
+    }
   }
 }
 

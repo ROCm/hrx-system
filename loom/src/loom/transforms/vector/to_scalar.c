@@ -371,11 +371,9 @@ static iree_status_t loom_vector_to_scalar_lower_scalar_extract(
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_terms_to_index_list(
       &state, explicit_terms, explicit_count, &source_indices));
   loom_value_id_t source = loom_vector_extract_source(op);
-  loom_type_t source_type = loom_module_value_type(rewriter->module, source);
   bool materialized = false;
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_try_materialize_def_lane(
-      &state, source, source_type, source_indices, &materialized,
-      &replacement));
+      &state, &source, source_indices, &materialized, &replacement));
   if (loom_pass_has_error_diagnostics(pass)) {
     return iree_ok_status();
   }
@@ -383,7 +381,8 @@ static iree_status_t loom_vector_to_scalar_lower_scalar_extract(
     loom_op_t* load =
         loom_vector_to_scalar_value_def_op(rewriter->module, source);
     if (!load || !loom_vector_load_isa(load) ||
-        !loom_type_is_all_static(source_type)) {
+        !loom_type_is_all_static(
+            loom_module_value_type(rewriter->module, source))) {
       return iree_ok_status();
     }
     // A read that cannot move to this extraction still defines a snapshot.
@@ -397,8 +396,7 @@ static iree_status_t loom_vector_to_scalar_lower_scalar_extract(
     loom_builder_set_before(&rewriter->builder, op);
     source = loom_vector_extract_source(op);
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_try_materialize_def_lane(
-        &state, source, source_type, source_indices, &materialized,
-        &replacement));
+        &state, &source, source_indices, &materialized, &replacement));
     if (!materialized || loom_pass_has_error_diagnostics(pass)) {
       return iree_ok_status();
     }

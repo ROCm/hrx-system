@@ -151,8 +151,6 @@ typedef struct loom_bytecode_symbol_metadata_t {
   uint8_t kernel_workload_region_payload_ordinal_plus_one;
   // Number of root region slots declared by the defining operation.
   uint8_t root_region_count;
-  // Global declaration-local value count, or zero for non-global symbols.
-  uint64_t local_value_count;
   // Source SYMBOLS ordinal naming the provider's template family, or
   // UINT32_MAX for non-provider symbols.
   uint32_t template_family_symbol_ordinal;

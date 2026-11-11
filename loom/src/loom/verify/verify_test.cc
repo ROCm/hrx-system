@@ -2408,24 +2408,80 @@ TEST_F(VerifyTest, DynamicDimensionOutOfRange) {
   const loom_type_t arg_types[] = {i32_type};
   loom_value_id_t args[1];
   EnterTestFunc(arg_types, IREE_ARRAYSIZE(arg_types), args);
-
-  const loom_type_t tile_type =
-      loom_type_shaped_1d(LOOM_TYPE_TILE, LOOM_SCALAR_TYPE_F32,
-                          loom_dim_pack_dynamic(/*value_id=*/9999), 0);
   loom_op_t* op = nullptr;
-  IREE_ASSERT_OK(loom_test_convert_build(&builder_, args[0], tile_type,
+  IREE_ASSERT_OK(loom_test_convert_build(&builder_, args[0], i32_type,
                                          LOOM_LOCATION_UNKNOWN, &op));
-
   TerminateFunc();
+
+  for (loom_value_id_t dimension : {9999u, LOOM_VALUE_ID_INVALID}) {
+    for (loom_type_kind_t kind :
+         {LOOM_TYPE_GROUP, LOOM_TYPE_TENSOR, LOOM_TYPE_TILE, LOOM_TYPE_VECTOR,
+          LOOM_TYPE_VIEW}) {
+      const uint64_t packed = loom_dim_pack_dynamic(dimension);
+      const loom_type_t shape =
+          kind == LOOM_TYPE_GROUP
+              ? loom_type_group_1d(packed)
+              : loom_type_shaped_1d(kind, LOOM_SCALAR_TYPE_F32, packed, 0);
+      loom_type_t callback;
+      IREE_ASSERT_OK(loom_module_intern_function_type(module_, &shape, 1,
+                                                      nullptr, 0, &callback));
+      for (loom_type_t type : {shape, callback}) {
+        SCOPED_TRACE(::testing::Message()
+                     << "dimension=" << dimension << " kind=" << +kind
+                     << " nested=" << loom_type_is_function(type));
+        IREE_ASSERT_OK(loom_module_set_value_type(
+            module_, loom_test_convert_result(op), type));
+        DiagnosticCapture structured;
+        const auto result = VerifyStructured(&structured);
+        EXPECT_GT(result.error_count, 0u);
+        const CapturedDiagnostic* entry = FindDiagnostic(
+            structured, loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 19));
+        ASSERT_NE(entry, nullptr) << "Expected TYPE/019 out-of-range error";
+        EXPECT_EQ(GetStringParam(*entry, 0), "result");
+        ExpectFieldRefParam(*entry, 0, LOOM_DIAGNOSTIC_FIELD_RESULT, 0);
+        ExpectU32Param(*entry, 1, dimension);
+      }
+    }
+  }
+  IREE_ASSERT_OK(loom_module_set_value_type(
+      module_, loom_test_convert_result(op), i32_type));
+  EXPECT_EQ(Verify().error_count, 0u);
+}
+
+TEST_F(VerifyTest, UnboundDimensionInTypeAttribute) {
+  const loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_value_id_t argument;
+  EnterTestFunc(&i32_type, 1, &argument);
+  const loom_type_t shape =
+      loom_type_shaped_1d(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_I32,
+                          loom_dim_pack_dynamic(LOOM_VALUE_ID_INVALID), 0);
+  loom_type_t callback;
+  IREE_ASSERT_OK(loom_module_intern_function_type(module_, &shape, 1, nullptr,
+                                                  0, &callback));
+  loom_type_id_t type_id;
+  IREE_ASSERT_OK(loom_module_intern_type_id(module_, callback, &type_id));
+  loom_string_id_t name;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module_, IREE_SV("callback"), &name));
+  const loom_named_attr_t entry = {
+      .name_id = name,
+      .value = loom_attr_type(type_id),
+  };
+  const loom_named_attr_slice_t entries = {.entries = &entry, .count = 1};
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_attrs_build(
+      &builder_, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT, argument, entries,
+      i32_type, LOOM_LOCATION_UNKNOWN, &op));
+  TerminateFunc();
+
   DiagnosticCapture structured;
   const auto result = VerifyStructured(&structured);
-  EXPECT_GT(result.error_count, 0u);
-  const CapturedDiagnostic* entry = FindDiagnostic(
+  EXPECT_EQ(result.error_count, 1u);
+  const CapturedDiagnostic* diagnostic = FindDiagnostic(
       structured, loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 19));
-  ASSERT_NE(entry, nullptr) << "Expected TYPE/019 out-of-range error";
-  EXPECT_EQ(GetStringParam(*entry, 0), "result");
-  ExpectFieldRefParam(*entry, 0, LOOM_DIAGNOSTIC_FIELD_RESULT, 0);
-  ExpectU32Param(*entry, 1, 9999);
+  ASSERT_NE(diagnostic, nullptr);
+  ExpectFieldRefParam(*diagnostic, 0, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, 0);
+  ExpectU32Param(*diagnostic, 1, LOOM_VALUE_ID_INVALID);
 }
 
 TEST_F(VerifyTest, DynamicDimensionRequiresIndexType) {

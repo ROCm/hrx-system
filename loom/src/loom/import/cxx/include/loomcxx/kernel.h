@@ -10,6 +10,7 @@
 #include <loomcxx/buffer.h>
 #include <loomcxx/cache.h>
 #include <loomcxx/predicate.h>
+#include <loomcxx/template.h>
 #include <loomcxx/view.h>
 
 // Fixed launch geometry belongs on the entry with
@@ -40,15 +41,6 @@
 // by every invocation in the enclosing kernel workgroup.
 #define LOOM_WORKGROUP [[loom::workgroup]]
 #define LOOM_INLINE [[loom::inline]] inline
-// Declares an ordinary C++ function whose calls apply the named link-selected
-// Loom template family. The declaration has no C++ definition; its parameters
-// and result define the semantic family signature at each call site.
-#define LOOM_TEMPLATE_DECL(FAMILY) [[loom::op("template.apply", FAMILY)]]
-// Defines one bodyful implementation of a LOOM_TEMPLATE_DECL family. Linking
-// selects among providers using optional loom::target(object) and
-// loom::priority(constant) attributes. Providers inherit the family's calling
-// convention and are retained without becoming ordinary callable C++ symbols.
-#define LOOM_TEMPLATE_DEF(FAMILY) [[loom::template_def(FAMILY)]]
 
 namespace loom {
 

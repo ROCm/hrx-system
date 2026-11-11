@@ -1,0 +1,86 @@
+// RUN: pass target=spirv:vulkan1.3+bda+extended-types target-legalize{mode=final},dce,canonicalize
+
+// Runtime coordinates expand in logical row-major order, including packet tails.
+func.def @payload_coordinates(%base: i32, %step: i32, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %destination = buffer.view %output[%origin] : buffer -> view<2x3xi32>
+  %coordinates = vector.iota %base step %step : vector<2x3xi32>
+  vector.store %coordinates, %destination[0, 0] : vector<2x3xi32>, view<2x3xi32>
+  func.return
+}
+
+// ----
+func.def @payload_coordinates(%base: i32, %step: i32, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %destination = buffer.view %output[%origin] : buffer -> view<2x3xi32>
+  %11 = scalar.addi %base, %step : i32
+  %26 = scalar.constant 1 : i32
+  %27 = scalar.shli %step, %26 : i32
+  %14 = scalar.addi %base, %27 : i32
+  %15 = scalar.constant 3 : i32
+  %16 = scalar.muli %15, %step : i32
+  %17 = scalar.addi %base, %16 : i32
+  %24 = scalar.constant 2 : i32
+  %25 = scalar.shli %step, %24 : i32
+  %20 = scalar.addi %base, %25 : i32
+  %21 = scalar.constant 5 : i32
+  %22 = scalar.muli %21, %step : i32
+  %23 = scalar.addi %base, %22 : i32
+  view.store %base, %destination[0, 0] : i32, view<2x3xi32>
+  view.store %11, %destination[0, 1] : i32, view<2x3xi32>
+  view.store %14, %destination[0, 2] : i32, view<2x3xi32>
+  view.store %17, %destination[1, 0] : i32, view<2x3xi32>
+  view.store %20, %destination[1, 1] : i32, view<2x3xi32>
+  view.store %23, %destination[1, 2] : i32, view<2x3xi32>
+  func.return
+}
+
+// ====
+
+// Index coordinates use index arithmetic without narrowing to a payload type.
+func.def @index_coordinates(%base: index, %step: index, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %destination = buffer.view %output[%origin] : buffer -> view<3xi64>
+  %coordinates = vector.iota %base step %step : vector<3xindex>
+  %stored = vector.index_cast %coordinates : vector<3xindex> to vector<3xi64>
+  vector.store %stored, %destination[0] : vector<3xi64>, view<3xi64>
+  func.return
+}
+
+// ----
+func.def @index_coordinates(%base: index, %step: index, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %destination = buffer.view %output[%origin] : buffer -> view<3xi64>
+  %13 = index.cast %base : index to i64
+  %16 = index.add %base, %step : index
+  %17 = index.cast %16 : index to i64
+  %18 = index.constant 2 : index
+  %23 = index.madd %step, %18, %base : index
+  %21 = index.cast %23 : index to i64
+  view.store %13, %destination[0] : i64, view<3xi64>
+  view.store %17, %destination[1] : i64, view<3xi64>
+  view.store %21, %destination[2] : i64, view<3xi64>
+  func.return
+}
+
+// ====
+
+// Runtime lane selection needs the coordinate producer before value mapping.
+func.def @selected_coordinate(%base: i32, %step: i32, %position_input: index) -> (i32) {
+  %position = index.assume %position_input [range(%position_input, 0, 2)] : index
+  %coordinates = vector.iota %base step %step : vector<3xi32>
+  %selected = vector.extract %coordinates[%position] : vector<3xi32> -> i32
+  func.return %selected : i32
+}
+
+// ----
+func.def @selected_coordinate(%base: i32, %step: i32, %position_input: index) -> (i32) {
+  %position = index.assume %position_input [range(%position_input, 0, 2)] : index
+  %12 = scalar.addi %base, %step : i32
+  %17 = scalar.constant 1 : i32
+  %18 = scalar.shli %step, %17 : i32
+  %15 = scalar.addi %base, %18 : i32
+  %coordinates = vector.from_elements %base, %12, %15 : vector<3xi32>
+  %selected = vector.extract %coordinates[%position] : vector<3xi32> -> i32
+  func.return %selected : i32
+}

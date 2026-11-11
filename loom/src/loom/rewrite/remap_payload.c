@@ -806,6 +806,14 @@ static iree_status_t loom_payload_finish_encoding(loom_payload_walk_t* walk) {
                                                false, &target.name_id));
   IREE_RETURN_IF_ERROR(loom_ir_remap_string_id(walk->remap, source->alias_id,
                                                true, &target.alias_id));
+  // File-local display names do not constrain imported structural identity.
+  // An occupied name already belongs to a canonical row: interning below
+  // either reuses that row or keeps the distinct incoming encoding anonymous.
+  if (target.alias_id != LOOM_STRING_ID_INVALID &&
+      loom_module_find_encoding_alias(walk->remap->target_module,
+                                      target.alias_id) != 0) {
+    target.alias_id = LOOM_STRING_ID_INVALID;
+  }
   uint16_t result;
   IREE_RETURN_IF_ERROR(
       loom_module_add_encoding(walk->remap->target_module, &target, &result));

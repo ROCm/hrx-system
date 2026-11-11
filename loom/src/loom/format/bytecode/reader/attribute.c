@@ -335,6 +335,43 @@ static iree_status_t loom_bytecode_attribute_validate_at_depth(
     iree_host_size_t available_type_count,
     const loom_bytecode_attribute_validation_scope_t* scope,
     uint8_t aggregate_depth) {
+  // Wire kinds and native attribute kinds have independent numbering. UTF8
+  // carries the BYTES payload kind with an additional validated form flag.
+  static const uint8_t native_kinds[] = {
+      [LOOM_BYTECODE_ATTR_I64] = LOOM_ATTR_I64,
+      [LOOM_BYTECODE_ATTR_F64] = LOOM_ATTR_F64,
+      [LOOM_BYTECODE_ATTR_STRING] = LOOM_ATTR_STRING,
+      [LOOM_BYTECODE_ATTR_BOOL] = LOOM_ATTR_BOOL,
+      [LOOM_BYTECODE_ATTR_ENUM] = LOOM_ATTR_ENUM,
+      [LOOM_BYTECODE_ATTR_I64_ARRAY] = LOOM_ATTR_I64_ARRAY,
+      [LOOM_BYTECODE_ATTR_SYMBOL] = LOOM_ATTR_SYMBOL,
+      [LOOM_BYTECODE_ATTR_TYPE] = LOOM_ATTR_TYPE,
+      [LOOM_BYTECODE_ATTR_PREDICATE_LIST] = LOOM_ATTR_PREDICATE_LIST,
+      [LOOM_BYTECODE_ATTR_DICT] = LOOM_ATTR_DICT,
+      [LOOM_BYTECODE_ATTR_ENCODING] = LOOM_ATTR_ENCODING,
+      [LOOM_BYTECODE_ATTR_BYTES] = LOOM_ATTR_BYTES,
+      [LOOM_BYTECODE_ATTR_SCOPED_ENUM] = LOOM_ATTR_SCOPED_ENUM,
+      [LOOM_BYTECODE_ATTR_ENUM_ARRAY] = LOOM_ATTR_ENUM_ARRAY,
+      [LOOM_BYTECODE_ATTR_PARAMETERIZED] = LOOM_ATTR_PARAMETERIZED,
+      [LOOM_BYTECODE_ATTR_PARAMETERIZED_ARRAY] = LOOM_ATTR_PARAMETERIZED_ARRAY,
+      [LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET] = LOOM_ATTR_SIGNED_ENUM_SET,
+      [LOOM_BYTECODE_ATTR_SYMBOL_ARRAY] = LOOM_ATTR_SYMBOL_ARRAY,
+      [LOOM_BYTECODE_ATTR_SYMBOL_SET] = LOOM_ATTR_SYMBOL_SET,
+      [LOOM_BYTECODE_ATTR_STRING_ARRAY] = LOOM_ATTR_STRING_ARRAY,
+      [LOOM_BYTECODE_ATTR_UTF8] = LOOM_ATTR_BYTES,
+      [LOOM_BYTECODE_ATTR_F64_ARRAY] = LOOM_ATTR_F64_ARRAY,
+  };
+  static_assert(IREE_ARRAYSIZE(native_kinds) == LOOM_BYTECODE_ATTR_COUNT,
+                "every wire kind must have a native attribute kind");
+  if (descriptor && kind < LOOM_BYTECODE_ATTR_COUNT &&
+      !loom_attr_descriptor_accepts_kind(
+          descriptor, (loom_attr_kind_t)native_kinds[kind])) {
+    return loom_bytecode_reader_emit_invalid_field(
+        validator->decoder, cursor->range_name, IREE_SV("attribute"), 0,
+        IREE_SV("value_kind"),
+        loom_bytecode_reader_cursor_absolute_position(cursor),
+        IREE_SV("attribute_kind_does_not_match_its_descriptor"));
+  }
   switch (kind) {
     case LOOM_BYTECODE_ATTR_I64: {
       int64_t value = 0;

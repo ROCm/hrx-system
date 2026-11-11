@@ -10,6 +10,9 @@ load(
     "loom_cc_test",
     "loom_config_compatible_with",
 )
+load("//loom/build_tools/bazel:defs.bzl", "loom_test")
+load("//loom/target:execution_profiles.bzl", "GPU_HARDWARE_PROFILES")
+load("//loom/target/x86:execution_profiles.bzl", "X86_TASK_HARDWARE_PROFILE")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -50,8 +53,10 @@ iree_c_embed_data(
     name = "native_source_testdata",
     testonly = True,
     srcs = [
+        "//loom/binding/c/test/target/cmd/testdata/native_sources:class_admission.loom",
         "//loom/binding/c/test/target/cmd/testdata/native_sources:command.loom",
         "//loom/binding/c/test/target/cmd/testdata/native_sources:providers.loom-test",
+        "//loom/binding/c/test/target/cmd/testdata/native_sources:residual_shapes.loom",
     ],
     c_file_output = "native_source_testdata.c",
     flatten = True,
@@ -71,4 +76,11 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
+)
+
+loom_test(
+    name = "native_source_shapes_test",
+    srcs = ["//loom/binding/c/test/target/cmd/testdata/native_sources:structural_specializations.loom"],
+    benchmark_smoke = False,
+    execution_profiles = GPU_HARDWARE_PROFILES + [X86_TASK_HARDWARE_PROFILE],
 )

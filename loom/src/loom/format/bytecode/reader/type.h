@@ -24,6 +24,26 @@ extern "C" {
 typedef struct loom_bytecode_reader_module_view_t
     loom_bytecode_reader_module_view_t;
 
+// Validated scoped shape before projecting source references into native IR.
+// One stack record is consumed at a time; no field owns allocated storage.
+typedef struct loom_bytecode_scoped_shape_t {
+  // Literal sizes or one-based source value numbers selected by dynamic_axes.
+  // A dynamic zero denotes an unbound dimension.
+  uint64_t dimensions[LOOM_TYPE_MAX_RANK];
+  // Static encoding index or zero-based source value number, per attachment.
+  uint64_t encoding_ordinal;
+  // Bit i selects a source value number in dimensions[i].
+  uint16_t dynamic_axes;
+  // Number of initialized dimensions.
+  uint8_t rank;
+  // Scalar element type, or NONE for a group.
+  uint8_t element_type;
+  // Wire encoding attachment kind: none, static, or SSA.
+  uint8_t attachment;
+  // Explicit view access alignment in bytes, or zero for natural alignment.
+  uint8_t access_alignment;
+} loom_bytecode_scoped_shape_t;
+
 // State required to materialize a validated type plan into a module.
 typedef struct loom_bytecode_type_materializer_t {
   // Bounded decoder and structured diagnostic state.
@@ -55,6 +75,84 @@ iree_status_t loom_bytecode_type_read_register_carrier(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint64_t type_index,
     uint64_t out_payload[2]);
+
+// Decodes the shared function, dialect, or register parent header after its
+// wire kind. Names remain in source STRINGS coordinates; child references are
+// read separately by their owning static or scoped reference domain. Register
+// headers describe one child; the static grammar's following presence byte may
+// select an untyped carrier instead. No storage is allocated.
+iree_status_t loom_bytecode_type_read_structural_header(
+    loom_bytecode_reader_decoder_t* decoder,
+    loom_bytecode_reader_cursor_t* cursor, loom_type_kind_t kind,
+    uint64_t type_index, iree_host_size_t string_count,
+    loom_bytecode_structural_type_plan_t* out_plan, uint64_t out_payload[2]);
+
+// Emits a malformed scoped-record diagnostic without constructing native IR.
+iree_status_t loom_bytecode_type_emit_invalid_scoped_record(
+    loom_bytecode_reader_decoder_t* decoder,
+    loom_bytecode_reader_cursor_t* cursor, iree_string_view_t reason);
+
+// Opens the bounded extension following a type reference. Static references
+// return an empty cursor without entering the scoped decoder. Otherwise the
+// cursor starts at the first completed-type record and borrows the input bytes.
+static inline iree_status_t loom_bytecode_type_open_scoped_records(
+    loom_bytecode_reader_decoder_t* decoder,
+    loom_bytecode_reader_cursor_t* cursor, uint64_t reference,
+    loom_bytecode_reader_cursor_t* out_records, uint64_t* out_count) {
+  uint64_t length = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_bytecode_reader_read_uvarint(decoder, cursor, &length));
+  if (length == 0) {
+    if (reference & 1) {
+      return loom_bytecode_type_emit_invalid_scoped_record(
+          decoder, cursor, IREE_SV("missing_scoped_record"));
+    }
+    loom_bytecode_reader_cursor_initialize(NULL, 0, 0, iree_string_view_empty(),
+                                           out_records);
+    *out_count = 0;
+    return iree_ok_status();
+  }
+  if (reference != 1) {
+    return loom_bytecode_type_emit_invalid_scoped_record(
+        decoder, cursor, IREE_SV("unexpected_scoped_record"));
+  }
+  const uint64_t offset = loom_bytecode_reader_cursor_absolute_position(cursor);
+  iree_const_byte_span_t payload;
+  IREE_RETURN_IF_ERROR(
+      loom_bytecode_reader_read_span(decoder, cursor, length, &payload));
+  loom_bytecode_reader_cursor_initialize(payload.data, payload.data_length,
+                                         offset, IREE_SV("SCOPED_TYPES"),
+                                         out_records);
+  return loom_bytecode_reader_read_uvarint(decoder, out_records, out_count);
+}
+
+// Finishes a nonempty extension after its records have completed. Returns the
+// zero-based root ordinal in the enclosing completed-type scope and requires
+// that no bytes remain in the extension.
+static inline iree_status_t loom_bytecode_type_close_scoped_records(
+    loom_bytecode_reader_decoder_t* decoder,
+    loom_bytecode_reader_cursor_t* records, uint64_t completed_count,
+    uint64_t* out_root) {
+  uint64_t root = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_bytecode_reader_read_uvarint(decoder, records, &root));
+  if (!root || root > completed_count) {
+    return loom_bytecode_type_emit_invalid_scoped_record(decoder, records,
+                                                         IREE_SV("root"));
+  }
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_expect_empty(
+      decoder, records, IREE_SV("SCOPED_TYPES")));
+  *out_root = root - 1;
+  return iree_ok_status();
+}
+
+// Decodes a group, tensor, tile, vector, or view after its wire kind. Validates
+// source references against their owning scope/table without constructing IR.
+iree_status_t loom_bytecode_type_read_scoped_shape(
+    loom_bytecode_reader_decoder_t* decoder,
+    loom_bytecode_reader_cursor_t* cursor, loom_type_kind_t kind,
+    uint64_t value_count, iree_host_size_t encoding_count,
+    loom_bytecode_scoped_shape_t* out_shape);
 
 // Interns a structural type from validated parent metadata and canonical child
 // IDs. No temporary child payload is assembled. Selected readers project the

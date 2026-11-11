@@ -12,6 +12,7 @@
 #define LOOM_TRANSFORMS_SYMBOL_TEMPLATE_APPLICATION_H_
 
 #include "loom/error/emitter.h"
+#include "loom/ops/func_symbol_facts.h"
 #include "loom/transforms/symbol/template_decision_model.h"
 
 #ifdef __cplusplus

@@ -7,6 +7,7 @@
 #include "loom/rewrite/remap.h"
 
 #include <cstring>
+#include <string>
 #include <vector>
 
 #include "iree/base/internal/arena.h"
@@ -939,6 +940,74 @@ TEST_F(RemapTest, RemapsTypeAttributesAcrossModules) {
   ASSERT_LT(target_attr.type_id, target_->types.count);
   EXPECT_TRUE(loom_type_equal(
       loom_type_table_get(&target_->types, target_attr.type_id), source_type));
+}
+
+TEST_F(RemapTest, PayloadRemappingDoesNotImportSourceInventory) {
+  for (uint32_t i = 0; i < 4096; ++i) {
+    const std::string filename = "source-" + std::to_string(i) + ".loom";
+    loom_source_id_t source_id = LOOM_SOURCE_ID_INVALID;
+    IREE_ASSERT_OK(loom_module_register_source(
+        source_, iree_make_string_view(filename.data(), filename.size()),
+        &source_id));
+  }
+  const auto scratch_bytes = remap_arena_.used_allocation_size;
+  loom_ir_remap_t remap = InitializeRemap();
+  loom_type_t remapped_type = {};
+  IREE_ASSERT_OK(loom_ir_remap_type(
+      &remap, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &remapped_type));
+  loom_attribute_t remapped_attribute = {};
+  IREE_ASSERT_OK(
+      loom_ir_remap_attribute(&remap, loom_attr_i64(16), &remapped_attribute));
+  EXPECT_TRUE(
+      loom_type_equal(remapped_type, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX)));
+  EXPECT_EQ(loom_attr_as_i64(remapped_attribute), 16);
+  EXPECT_EQ(target_->sources.count, 0u);
+  EXPECT_EQ(remap.target_sources, nullptr);
+  EXPECT_EQ(remap_arena_.used_allocation_size, scratch_bytes);
+}
+
+TEST_F(RemapTest, ExplicitlyPublishesCompleteSourceMappingWithoutLocations) {
+  const iree_string_view_t filenames[] = {IREE_SV("first.loom"),
+                                          IREE_SV("second.loom")};
+  loom_source_id_t source_ids[IREE_ARRAYSIZE(filenames)];
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(filenames); ++i) {
+    IREE_ASSERT_OK(
+        loom_module_register_source(source_, filenames[i], &source_ids[i]));
+  }
+  loom_source_id_t existing_id = LOOM_SOURCE_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_register_source(target_, filenames[1], &existing_id));
+  loom_ir_remap_t remap = InitializeRemap();
+  IREE_ASSERT_OK(loom_ir_remap_sources(&remap));
+  ASSERT_NE(remap.target_sources, nullptr);
+  ASSERT_EQ(target_->sources.count, IREE_ARRAYSIZE(filenames));
+  EXPECT_EQ(remap.target_sources[source_ids[1]], existing_id);
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(filenames); ++i) {
+    EXPECT_TRUE(iree_string_view_equal(
+        target_->sources.entries[remap.target_sources[source_ids[i]]],
+        filenames[i]));
+  }
+  const auto* mapping = remap.target_sources;
+  const auto scratch_bytes = remap_arena_.used_allocation_size;
+  IREE_ASSERT_OK(loom_ir_remap_sources(&remap));
+  EXPECT_EQ(remap.target_sources, mapping);
+  EXPECT_EQ(remap_arena_.used_allocation_size, scratch_bytes);
+}
+
+TEST_F(RemapTest, EmptyAndSameModuleSourceMappingsNeedNoStorage) {
+  loom_ir_remap_t empty = InitializeRemap();
+  IREE_ASSERT_OK(loom_ir_remap_sources(&empty));
+  EXPECT_EQ(empty.target_sources, nullptr);
+
+  loom_source_id_t source_id = LOOM_SOURCE_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_register_source(source_, IREE_SV("model.loom"), &source_id));
+  loom_ir_remap_t same = {};
+  IREE_ASSERT_OK(loom_ir_remap_initialize(source_, source_, &remap_arena_,
+                                          nullptr, &same));
+  IREE_ASSERT_OK(loom_ir_remap_sources(&same));
+  EXPECT_EQ(same.target_sources, nullptr);
+  EXPECT_EQ(remap_arena_.used_allocation_size, 0u);
 }
 
 TEST_F(RemapTest, RemapsLocationsAcrossModules) {

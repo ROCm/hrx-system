@@ -70,7 +70,7 @@ typedef struct loom_template_applicability_facts_t {
 
 // Allocation-free applicability fields shared by families and providers.
 typedef struct loom_template_applicability_contract_t {
-  // Module whose symbols and values own this contract.
+  // Module owning this contract's target symbol reference.
   const loom_module_t* module;
 
   // Module-local target requirement, or null when absent or not yet bound.
@@ -79,10 +79,12 @@ typedef struct loom_template_applicability_contract_t {
   // Immutable target identity requirement, or NULL when unresolved.
   const loom_target_facts_t* target_facts;
 
-  // Borrowed argument value IDs in signature order.
+  // Borrowed source argument identities in signature order, or NULL when
+  // predicate VALUE operands are signature ordinals.
   const loom_value_id_t* argument_ids;
 
-  // Borrowed result value IDs in signature order.
+  // Borrowed source result identities in signature order, or NULL when
+  // predicate VALUE operands are signature ordinals.
   const loom_value_id_t* result_ids;
 
   // Borrowed value predicates.
@@ -106,6 +108,9 @@ typedef struct loom_template_applicability_contract_t {
   // True when a target identity is required, even before its symbol or facts
   // are available in this contract's module.
   bool has_target_requirement;
+
+  // True when predicate VALUE operands are argument-then-result ordinals.
+  bool predicates_use_ordinals;
 } loom_template_applicability_contract_t;
 
 // Returns an allocation-free applicability contract over |provider|.

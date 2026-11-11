@@ -91,6 +91,7 @@ NUMERIC_CORPUS = loom_corpus_manifest(
         "vector/conversion.loom",
         "vector/constants.loom",
         "vector/concatenation.loom",
+        "vector/coordinates.loom",
         "vector/dynamic_windows.loom",
         "vector/f32.loom",
         "vector/float_partial_load_reductions.loom",
@@ -111,6 +112,7 @@ NUMERIC_CORPUS = loom_corpus_manifest(
         "vector/packed/narrowing.loom",
         "vector/packed/selection.loom",
         "vector/reductions.loom",
+        "vector/refinement.loom",
         "vector/selection.loom",
     ],
 )

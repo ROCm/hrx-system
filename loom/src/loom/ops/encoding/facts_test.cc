@@ -278,5 +278,80 @@ TEST_F(EncodingFactDomainTest, WideningRetainsStridedDescriptorShape) {
   EXPECT_EQ(unit_stride, 1);
 }
 
+TEST_F(EncodingFactDomainTest, JoinsRetainFamilyAcrossDistinctSpecifications) {
+  const loom_value_facts_t lhs_strides[] = {loom_value_facts_exact_i64(4),
+                                            loom_value_facts_exact_i64(1)};
+  const loom_value_facts_t rhs_strides[] = {loom_value_facts_exact_i64(8),
+                                            loom_value_facts_exact_i64(1)};
+  // Two complete strided specifications in the same registered family.
+  const loom_value_fact_encoding_summary_t lhs_summary = {
+      .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+      .static_spec_encoding_id = 7,
+      .family_id = 1,
+      .address_layout =
+          {
+              .kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
+              .rank = 2,
+              .family_id = 1,
+              .static_spec_encoding_id = 7,
+              .strides = lhs_strides,
+          },
+  };
+  auto rhs_summary = lhs_summary;
+  rhs_summary.static_spec_encoding_id = 9;
+  rhs_summary.address_layout.static_spec_encoding_id = 9;
+  rhs_summary.address_layout.strides = rhs_strides;
+  loom_value_facts_t lhs;
+  loom_value_facts_t rhs;
+  IREE_ASSERT_OK(
+      loom_value_facts_make_encoding_summary(&lhs_.context, lhs_summary, &lhs));
+  IREE_ASSERT_OK(
+      loom_value_facts_make_encoding_summary(&rhs_.context, rhs_summary, &rhs));
+  const loom_type_t type =
+      loom_type_encoding_with_role(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT);
+  for (bool widen : {false, true}) {
+    SCOPED_TRACE(widen);
+    loom_value_facts_t joined;
+    if (widen) {
+      IREE_ASSERT_OK(loom_value_fact_table_widen_for_type(
+          &target_, nullptr, type, &lhs_, lhs, &rhs_, rhs, 2, &joined));
+    } else {
+      IREE_ASSERT_OK(loom_value_fact_table_meet_for_type(
+          &target_, nullptr, type, &lhs_, lhs, &rhs_, rhs, &joined));
+    }
+    loom_value_fact_encoding_summary_t summary;
+    ASSERT_TRUE(loom_value_facts_query_encoding_summary(&target_.context,
+                                                        joined, &summary));
+    EXPECT_EQ(summary.family_id, 1);
+    EXPECT_EQ(summary.address_layout.family_id, 1);
+    EXPECT_EQ(summary.static_spec_encoding_id, 0);
+    EXPECT_EQ(summary.address_layout.static_spec_encoding_id, 0);
+    EXPECT_TRUE(loom_value_facts_equal(summary.address_layout.strides[1],
+                                       loom_value_facts_exact_i64(1)));
+  }
+}
+
+TEST_F(EncodingFactDomainTest, EmptyStrideJoinRetainsLayoutKind) {
+  loom_value_facts_t lhs;
+  loom_value_facts_t rhs;
+  IREE_ASSERT_OK(MakeEncodingSummary(&lhs_, LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+                                     0, LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
+                                     nullptr, 0, {}, &lhs));
+  IREE_ASSERT_OK(MakeEncodingSummary(&rhs_, LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+                                     0, LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
+                                     nullptr, 0, {}, &rhs));
+  loom_value_facts_t joined;
+  IREE_ASSERT_OK(loom_value_fact_table_meet_for_type(
+      &target_, nullptr,
+      loom_type_encoding_with_role(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT), &lhs_,
+      lhs, &rhs_, rhs, &joined));
+  loom_value_fact_encoding_summary_t summary;
+  ASSERT_TRUE(loom_value_facts_query_encoding_summary(&target_.context, joined,
+                                                      &summary));
+  EXPECT_EQ(summary.address_layout.kind,
+            LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED);
+  EXPECT_EQ(summary.address_layout.rank, 0);
+}
+
 }  // namespace
 }  // namespace loom

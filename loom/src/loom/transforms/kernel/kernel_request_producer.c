@@ -24,7 +24,11 @@
 
 struct loom_kernel_request_source_t {
   // Callback-live boundary classifier over the materialized source module.
-  loom_kernel_class_classifier_t classifier;
+  const loom_kernel_class_classifier_t* classifier;
+
+  // Invocation-local classes and accepted decisions, borrowed during
+  // publication.
+  const loom_kernel_class_collection_t* collection;
 };
 
 struct loom_kernel_request_producer_t {
@@ -54,8 +58,8 @@ struct loom_kernel_request_preparation_t {
   // Classifier analyses and configuration-key array backing the source view.
   iree_arena_allocator_t arena;
 
-  // Read-only source view shared by concurrent class collections.
-  loom_kernel_request_source_t source;
+  // Read-only boundary classifier shared by concurrent class collections.
+  loom_kernel_class_classifier_t classifier;
 
   // Unique names of config symbols selected by the successful source closure.
   iree_string_view_list_t config_keys;
@@ -126,9 +130,9 @@ static iree_status_t loom_kernel_request_source_prepare(
     const loom_link_plan_materialization_environment_t* environment,
     iree_host_size_t source_symbol_ordinal,
     iree_arena_allocator_t* scratch_arena,
-    loom_kernel_request_source_t* out_source,
+    loom_kernel_class_classifier_t* out_classifier,
     loom_link_index_materialization_t* out_materialization) {
-  *out_source = (loom_kernel_request_source_t){0};
+  *out_classifier = (loom_kernel_class_classifier_t){0};
   *out_materialization = (loom_link_index_materialization_t){0};
   const loom_link_module_index_symbol_t* source_symbol =
       loom_link_module_index_symbol_at(producer->index, source_symbol_ordinal);
@@ -152,6 +156,8 @@ static iree_status_t loom_kernel_request_source_prepare(
           },
       .dependency_policy = LOOM_LINK_PLAN_DEPENDENCY_REQUESTED_FACETS,
   };
+  iree_arena_allocator_t construction_arena;
+  iree_arena_initialize(scratch_arena->block_pool, &construction_arena);
   loom_link_index_materialization_t materialization = {0};
   iree_status_t status = loom_link_index_materialize(
       producer->index, &link_options, environment,
@@ -185,8 +191,8 @@ static iree_status_t loom_kernel_request_source_prepare(
 
   loom_symbol_reference_table_t references = {0};
   if (iree_status_is_ok(status)) {
-    status = loom_symbol_reference_table_build(materialization.product.module,
-                                               scratch_arena, &references);
+    status = loom_symbol_reference_table_build(
+        materialization.product.module, &construction_arena, &references);
   }
   loom_symbol_fact_table_t symbol_facts = {0};
   loom_symbol_fact_table_initialize(&symbol_facts, scratch_arena);
@@ -212,7 +218,7 @@ static iree_status_t loom_kernel_request_source_prepare(
   loom_value_fact_table_t kernel_facts = {0};
   if (iree_status_is_ok(status)) {
     status = loom_value_fact_table_initialize(
-        &kernel_facts, scratch_arena,
+        &kernel_facts, &construction_arena,
         materialization.product.module->values.count);
   }
   if (iree_status_is_ok(status)) {
@@ -226,13 +232,14 @@ static iree_status_t loom_kernel_request_source_prepare(
   if (iree_status_is_ok(status)) {
     loom_symbolic_expr_context_initialize(materialization.product.module,
                                           /*value_domain=*/NULL, &kernel_facts,
-                                          scratch_arena, &expression_context);
+                                          &construction_arena,
+                                          &expression_context);
   }
   if (iree_status_is_ok(status)) {
     status = loom_kernel_class_classifier_build(
         materialization.product.module, kernel_ref.symbol_id, &references,
         &decision_models, &kernel_facts, &expression_context, &kernel_target,
-        scratch_arena, &out_source->classifier);
+        scratch_arena, out_classifier);
   }
 
   if (iree_status_is_ok(status)) {
@@ -240,6 +247,7 @@ static iree_status_t loom_kernel_request_source_prepare(
     materialization = (loom_link_index_materialization_t){0};
   }
   loom_link_index_materialization_deinitialize(&materialization);
+  iree_arena_deinitialize(&construction_arena);
   return status;
 }
 
@@ -248,35 +256,39 @@ iree_status_t loom_kernel_request_materialize(
     iree_allocator_t allocator, loom_kernel_class_product_t* out_product) {
   IREE_ASSERT_ARGUMENT(request);
   IREE_ASSERT_ARGUMENT(request->source);
-  IREE_ASSERT_ARGUMENT(request->collection);
-  IREE_ASSERT_LT(request->class_ordinal, request->collection->class_count);
+  IREE_ASSERT_LT(request->class_ordinal,
+                 request->source->collection->class_count);
   IREE_ASSERT_ARGUMENT(block_pool);
   IREE_ASSERT_ARGUMENT(out_product);
   return loom_kernel_class_materialize(
-      &request->source->classifier, request->collection, request->class_ordinal,
-      block_pool, allocator, out_product);
+      request->source->classifier, request->source->collection,
+      request->class_ordinal, block_pool, allocator, out_product);
 }
 
 static iree_status_t loom_kernel_request_source_publish(
-    const loom_kernel_request_source_t* source,
+    const loom_kernel_class_classifier_t* classifier,
     iree_host_size_t source_symbol_ordinal, const loom_module_t* site_module,
     const loom_kernel_class_site_t* sites, iree_host_size_t site_count,
     const loom_kernel_class_collection_options_t* collection_options,
     loom_kernel_request_sink_t sink, iree_arena_allocator_t* scratch_arena,
-    loom_kernel_class_collection_t* out_collection) {
-  IREE_ASSERT_ARGUMENT(source);
+    const loom_decision_class_ordinal_t** out_site_classes) {
+  IREE_ASSERT_ARGUMENT(classifier);
   IREE_ASSERT_ARGUMENT(sites);
   IREE_ASSERT_GT(site_count, 0u);
   IREE_ASSERT_ARGUMENT(collection_options);
   IREE_ASSERT_ARGUMENT(sink.publish);
   IREE_ASSERT_ARGUMENT(scratch_arena);
-  IREE_ASSERT_ARGUMENT(out_collection);
-  *out_collection = (loom_kernel_class_collection_t){0};
+  IREE_ASSERT_ARGUMENT(out_site_classes);
+  *out_site_classes = NULL;
 
   loom_kernel_class_collection_t collection = {0};
   iree_status_t status = loom_kernel_class_classifier_collect(
-      &source->classifier, site_module, sites, site_count, collection_options,
+      classifier, site_module, sites, site_count, collection_options,
       scratch_arena, &collection);
+  const loom_kernel_request_source_t source = {
+      .classifier = classifier,
+      .collection = &collection,
+  };
 
   for (loom_decision_class_ordinal_t class_ordinal = 0;
        class_ordinal < collection.class_count && iree_status_is_ok(status);
@@ -285,14 +297,13 @@ static iree_status_t loom_kernel_request_source_publish(
         .source_symbol_ordinal = source_symbol_ordinal,
         .class_ordinal = class_ordinal,
         .member_count = collection.classes[class_ordinal].member_count,
-        .source = source,
-        .collection = &collection,
+        .source = &source,
     };
     status = sink.publish(sink.user_data, &request);
   }
 
   if (iree_status_is_ok(status)) {
-    *out_collection = collection;
+    *out_site_classes = collection.site_classes;
   }
   return status;
 }
@@ -304,17 +315,17 @@ iree_status_t loom_kernel_request_producer_publish(
     const loom_kernel_class_site_t* sites, iree_host_size_t site_count,
     const loom_kernel_class_collection_options_t* collection_options,
     loom_kernel_request_sink_t sink, iree_arena_allocator_t* scratch_arena,
-    loom_kernel_class_collection_t* out_collection) {
-  *out_collection = (loom_kernel_class_collection_t){0};
-  loom_kernel_request_source_t source = {0};
+    const loom_decision_class_ordinal_t** out_site_classes) {
+  *out_site_classes = NULL;
+  loom_kernel_class_classifier_t classifier = {0};
   loom_link_index_materialization_t materialization = {0};
   iree_status_t status = loom_kernel_request_source_prepare(
-      producer, environment, source_symbol_ordinal, scratch_arena, &source,
+      producer, environment, source_symbol_ordinal, scratch_arena, &classifier,
       &materialization);
   if (iree_status_is_ok(status)) {
     status = loom_kernel_request_source_publish(
-        &source, source_symbol_ordinal, site_module, sites, site_count,
-        collection_options, sink, scratch_arena, out_collection);
+        &classifier, source_symbol_ordinal, site_module, sites, site_count,
+        collection_options, sink, scratch_arena, out_site_classes);
   }
   loom_link_index_materialization_deinitialize(&materialization);
   return status;
@@ -398,7 +409,7 @@ iree_status_t loom_kernel_request_preparation_allocate(
   if (iree_status_is_ok(status)) {
     status = loom_kernel_request_source_prepare(
         preparation->producer, environment, source_symbol_ordinal,
-        &preparation->arena, &preparation->source, &materialization);
+        &preparation->arena, &preparation->classifier, &materialization);
   }
   if (iree_status_is_ok(status)) {
     status = loom_kernel_request_preparation_capture_config_keys(
@@ -438,9 +449,9 @@ iree_status_t loom_kernel_request_preparation_publish(
     iree_host_size_t site_count,
     const loom_kernel_class_collection_options_t* collection_options,
     loom_kernel_request_sink_t sink, iree_arena_allocator_t* scratch_arena,
-    loom_kernel_class_collection_t* out_collection) {
+    const loom_decision_class_ordinal_t** out_site_classes) {
   return loom_kernel_request_source_publish(
-      &preparation->source, preparation->source_symbol_ordinal, site_module,
+      &preparation->classifier, preparation->source_symbol_ordinal, site_module,
       sites, site_count, collection_options, sink, scratch_arena,
-      out_collection);
+      out_site_classes);
 }

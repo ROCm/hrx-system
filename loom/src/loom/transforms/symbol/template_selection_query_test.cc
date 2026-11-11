@@ -104,8 +104,6 @@ class TemplateSelectionQueryTest : public ::testing::Test {
     IREE_ASSERT(selected != nullptr);
     loom_template_provider_summary_t external = *selected;
     external.symbol = loom_symbol_ref_null();
-    external.function = {};
-    external.func_facts = nullptr;
     external.origin_ordinal = origin_ordinal;
 
     const loom_symbol_id_t provider_symbol_id =
@@ -248,7 +246,7 @@ func.def public @entry(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) 
   loom_template_provider_summary_t external = {};
   IREE_ASSERT_OK(loom_template_provider_summary_bind_family(
       &source_provider, application.get(), target_family,
-      loom_symbol_ref_null(), /*origin_ordinal=*/11, &arena_, &external));
+      loom_symbol_ref_null(), /*origin_ordinal=*/11, &external));
   const std::string module_before = PrintModule(application.get());
 
   const loom_template_selection_query_result_t result =

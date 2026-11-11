@@ -146,7 +146,7 @@ class KernelClassMaterializerTest : public ::testing::Test {
 };
 
 TEST_F(KernelClassMaterializerTest,
-       PublishesIndependentAffineClassesAsOrdinaryKernelIR) {
+       PublishesRequiredAndOptionalDecisionsInSourceOrder) {
   constexpr iree_host_size_t kSiteCount = 1000;
   const iree_string_view_t source = IREE_SV(R"(
 template.decl @boundary.family(%effective_n: index, %duplicate: index) -> (index)
@@ -167,7 +167,7 @@ template.def<@sign.family> priority(10) @nonnegative(%value: i32) where [ge(%val
   template.return
 }
 
-template.def<@sign.family> priority(1) @negative(%value: i32) {
+template.def<@sign.family> priority(1) @negative(%value: i32) where [lt(%value, 0)] {
   template.return
 }
 
@@ -196,9 +196,11 @@ kernel.def @classified() {
 
   iree_arena_allocator_t analysis_arena;
   iree_arena_initialize(&block_pool_, &analysis_arena);
+  iree_arena_allocator_t construction_arena;
+  iree_arena_initialize(&block_pool_, &construction_arena);
   loom_symbol_reference_table_t references = {};
   ModulePtr source_module =
-      ParseAndVerify(source, &analysis_arena, &references);
+      ParseAndVerify(source, &construction_arena, &references);
   ASSERT_NE(source_module, nullptr);
 
   loom_symbol_fact_table_t symbol_facts = {};
@@ -220,20 +222,29 @@ kernel.def @classified() {
       source_module->symbols.entries[kernel_symbol_id].defining_op);
   loom_value_fact_table_t kernel_facts = {};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(
-      &kernel_facts, &analysis_arena, source_module->values.count));
+      &kernel_facts, &construction_arena, source_module->values.count));
   IREE_ASSERT_OK(loom_value_fact_table_compute(&kernel_facts,
                                                source_module.get(), kernel));
   loom_symbolic_expr_context_t expression_context = {};
   loom_symbolic_expr_context_initialize(source_module.get(),
                                         /*value_domain=*/nullptr, &kernel_facts,
-                                        &analysis_arena, &expression_context);
+                                        &construction_arena,
+                                        &expression_context);
   const loom_template_applicability_target_t kernel_target = {};
   loom_kernel_class_classifier_t classifier = {};
   IREE_ASSERT_OK(loom_kernel_class_classifier_build(
       source_module.get(), kernel_symbol_id, &references, &decision_models,
       &kernel_facts, &expression_context, &kernel_target, &analysis_arena,
       &classifier));
+  // Publication retains the compact boundary facts and source operation
+  // identity; construction references and dataflow tables can retire first.
+  iree_arena_deinitialize(&construction_arena);
+  iree_arena_block_pool_trim(&block_pool_);
   ASSERT_EQ(classifier.decision_count, 4u);
+  EXPECT_EQ(classifier.decisions[0].generic_result.kind,
+            LOOM_DECISION_PROGRAM_RESULT_SELECTED);
+  EXPECT_EQ(classifier.decisions[1].generic_result.kind,
+            LOOM_DECISION_PROGRAM_RESULT_UNRESOLVED);
   ASSERT_EQ(classifier.projection_count, 2u);
   EXPECT_EQ(classifier.projections[0].kind,
             LOOM_KERNEL_CLASS_PROJECTION_AFFINE);
@@ -550,7 +561,7 @@ kernel.def @classified() {
   loom_template_provider_summary_t external_provider = {};
   IREE_ASSERT_OK(loom_template_provider_contract_bind_family(
       &external_contract, source_module.get(), family, loom_symbol_ref_null(),
-      /*origin_ordinal=*/7, &analysis_arena, &external_provider));
+      /*origin_ordinal=*/7, &external_provider));
 
   loom_symbol_fact_table_t symbol_facts = {};
   loom_symbol_fact_table_initialize(&symbol_facts, &analysis_arena);
@@ -673,7 +684,7 @@ kernel.def @classified() {
   loom_template_provider_summary_t rebound_external_provider = {};
   IREE_ASSERT_OK(loom_template_provider_contract_bind_family(
       &external_contract, class_module, class_family, loom_symbol_ref_null(),
-      /*origin_ordinal=*/7, &query_arena, &rebound_external_provider));
+      /*origin_ordinal=*/7, &rebound_external_provider));
   loom_symbol_fact_table_t class_symbol_facts = {};
   loom_symbol_fact_table_initialize(&class_symbol_facts, &query_arena);
   loom_template_provider_catalog_t class_providers = {};

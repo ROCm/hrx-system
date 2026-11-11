@@ -43,6 +43,7 @@ exports_files([
     "include/loomcxx/target.h",
     "include/loomcxx/target/aie2p.h",
     "include/loomcxx/target/amdgpu.h",
+    "include/loomcxx/template.h",
     "include/loomcxx/vector.h",
     "include/loomcxx/view.h",
     "include/initializer_list",

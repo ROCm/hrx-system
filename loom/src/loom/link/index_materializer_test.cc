@@ -498,6 +498,65 @@ TEST_F(LinkIndexMaterializerTest,
 }
 
 TEST_F(LinkIndexMaterializerTest,
+       PreservesCachedContractsAcrossNestedProviderDiscovery) {
+  const iree_string_view_t root_source =
+      LinkIndexFixture(IREE_SV("nested_roots.loom"));
+  const iree_string_view_t outer_source =
+      LinkIndexFixture(IREE_SV("nested_outer.loom"));
+  const iree_string_view_t inner_source =
+      LinkIndexFixture(IREE_SV("nested_inner.loom"));
+  ASSERT_FALSE(iree_string_view_is_empty(root_source));
+  ASSERT_FALSE(iree_string_view_is_empty(outer_source));
+  ASSERT_FALSE(iree_string_view_is_empty(inner_source));
+  loom_module_t* root = Parse(root_source, IREE_SV("nested_roots.loom"));
+  loom_module_t* outer = Parse(outer_source, IREE_SV("nested_outer.loom"));
+  loom_module_t* inner = Parse(inner_source, IREE_SV("nested_inner.loom"));
+  ASSERT_NE(root, nullptr);
+  ASSERT_NE(outer, nullptr);
+  ASSERT_NE(inner, nullptr);
+  const std::vector<uint8_t> outer_bytecode = WriteModule(outer);
+  const std::vector<uint8_t> inner_bytecode = WriteModule(inner);
+
+  for (const ProviderForm outer_form :
+       {ProviderForm::kMaterialized, ProviderForm::kText,
+        ProviderForm::kBytecode}) {
+    SCOPED_TRACE(static_cast<int>(outer_form));
+    for (const ProviderForm inner_form :
+         {ProviderForm::kMaterialized, ProviderForm::kText,
+          ProviderForm::kBytecode}) {
+      SCOPED_TRACE(static_cast<int>(inner_form));
+      IndexPtr index = CreateIndex();
+      AddMaterialized(index.get(), root, IREE_SV("root"),
+                      LOOM_LINK_PROVIDER_ROLE_INPUT);
+      AddProvider(index.get(), outer_form, outer_source, outer, outer_bytecode,
+                  IREE_SV("outer"), LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+      AddProvider(index.get(), inner_form, inner_source, inner, inner_bytecode,
+                  IREE_SV("inner"), LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+
+      loom_link_index_materialization_t materialization =
+          Materialize(index.get(), IREE_SV("@entry"));
+      Verify(materialization.product.module);
+      EXPECT_NE(
+          FindSymbol(materialization.product.module, IREE_SV("outer_selected")),
+          nullptr);
+      EXPECT_NE(
+          FindSymbol(materialization.product.module, IREE_SV("inner_selected")),
+          nullptr);
+      EXPECT_NE(
+          FindSymbol(materialization.product.module, IREE_SV("inner_rejected")),
+          nullptr);
+      EXPECT_EQ(
+          FindSymbol(materialization.product.module, IREE_SV("outer_before")),
+          nullptr);
+      EXPECT_EQ(
+          FindSymbol(materialization.product.module, IREE_SV("outer_after")),
+          nullptr);
+      loom_link_index_materialization_deinitialize(&materialization);
+    }
+  }
+}
+
+TEST_F(LinkIndexMaterializerTest,
        PreservesScopedTypesThroughSelectedBytecodeMaterialization) {
   const iree_string_view_t provider_source =
       LinkIndexFixture(IREE_SV("scoped_type_provider.loom"));
@@ -644,6 +703,90 @@ template.def<@demo.choose> priority(1) @fallback(%x: i32) -> (i32) {
       FindSymbol(materialization.product.module, IREE_SV("mismatched_target")),
       nullptr);
   loom_link_index_materialization_deinitialize(&materialization);
+}
+
+TEST_F(LinkIndexMaterializerTest,
+       PreservesPredicatePositionsAcrossProviderRepresentations) {
+  const auto root_source = IREE_SV(R"(
+template.decl @choose(%left: index, %right: index) -> (index)
+template.decl @produce(%input: index) -> (%first: index, %second: index)
+
+func.def public @ascending(%left: index, %right: index) -> (index) where [eq(%left, 1), eq(%right, 32)] {
+  %result = template.apply<@choose>(%left, %right) : (index, index) -> (index)
+  func.return %result : index
+}
+
+func.def public @descending(%left: index, %right: index) -> (index) where [eq(%left, 32), eq(%right, 1)] {
+  %result = template.apply<@choose>(%left, %right) : (index, index) -> (index)
+  func.return %result : index
+}
+
+func.def public @result_unknown(%input: index) -> (index, index) where [eq(%input, 64)] {
+  %first, %second = template.apply<@produce>(%input) : (index) -> (index, index)
+  func.return %first, %second : index, index
+}
+)");
+  const auto library_source = IREE_SV(R"(
+template.decl @padding(%a: i32, %b: i32, %c: i32) -> (i32)
+template.decl @choose(%left: index, %right: index) -> (index)
+template.decl @produce(%input: index) -> (%first: index, %second: index)
+
+template.def<@choose> priority(10) @ordered(%left: index, %right: index) -> (index) where [lt(%left, %right), eq(%right, 32)] {
+  template.return %left : index
+}
+
+template.def<@choose> @fallback(%left: index, %right: index) -> (index) {
+  template.return %right : index
+}
+
+template.def<@produce> priority(10) @result_constrained(%input: index) -> (%first: index, %second: index) where [eq(%second, 64)] {
+  template.return %input, %input : index, index
+}
+
+template.def<@produce> @result_fallback(%input: index) -> (index, index) {
+  template.return %input, %input : index, index
+}
+)");
+  const loom_module_t* root = Parse(root_source, IREE_SV("roots.loom"));
+  const loom_module_t* library = Parse(library_source, IREE_SV("library.loom"));
+  const auto root_bytecode = WriteModule(root);
+  const auto library_bytecode = WriteModule(library);
+  for (auto root_form : {ProviderForm::kMaterialized, ProviderForm::kText,
+                         ProviderForm::kBytecode}) {
+    for (auto library_form : {ProviderForm::kMaterialized, ProviderForm::kText,
+                              ProviderForm::kBytecode}) {
+      SCOPED_TRACE(static_cast<int>(root_form));
+      SCOPED_TRACE(static_cast<int>(library_form));
+      IndexPtr index = CreateIndex();
+      AddProvider(index.get(), root_form, root_source, root, root_bytecode,
+                  IREE_SV("root"), LOOM_LINK_PROVIDER_ROLE_INPUT);
+      AddProvider(index.get(), library_form, library_source, library,
+                  library_bytecode, IREE_SV("library"),
+                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+      for (auto entry : {IREE_SV("@ascending"), IREE_SV("@descending"),
+                         IREE_SV("@result_unknown")}) {
+        SCOPED_TRACE(std::string(entry.data, entry.size));
+        auto materialization = Materialize(index.get(), entry);
+        const loom_module_t* linked = materialization.product.module;
+        ASSERT_NE(linked, nullptr);
+        Verify(linked);
+        const bool ascending =
+            iree_string_view_equal(entry, IREE_SV("@ascending"));
+        const bool descending =
+            iree_string_view_equal(entry, IREE_SV("@descending"));
+        EXPECT_EQ(FindSymbol(linked, IREE_SV("ordered")) != nullptr, ascending);
+        EXPECT_EQ(FindSymbol(linked, IREE_SV("fallback")) != nullptr,
+                  descending);
+        // A provider's result requirement is still unknown before selection,
+        // even when its body would return the known input in that position.
+        EXPECT_EQ(FindSymbol(linked, IREE_SV("result_constrained")) != nullptr,
+                  !ascending && !descending);
+        EXPECT_EQ(FindSymbol(linked, IREE_SV("result_fallback")) != nullptr,
+                  !ascending && !descending);
+        loom_link_index_materialization_deinitialize(&materialization);
+      }
+    }
+  }
 }
 
 TEST_F(LinkIndexMaterializerTest,

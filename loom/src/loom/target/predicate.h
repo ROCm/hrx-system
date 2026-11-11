@@ -28,6 +28,9 @@ void loom_target_pass_predicate_provider_storage_initialize(
     loom_target_pass_predicate_provider_storage_t* out_storage);
 
 // Returns a pass.where provider implementing the `target` predicate.
+// Concrete function versions supply their complete target facts. Unrefined
+// callables supply their target snapshot/configuration and explicit callable
+// ABI; target-record artifact defaults do not establish an entry role.
 loom_pass_predicate_provider_t loom_target_pass_predicate_provider(
     loom_target_pass_predicate_provider_storage_t* storage);
 

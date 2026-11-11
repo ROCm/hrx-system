@@ -46,12 +46,15 @@ static iree_status_t loom_kernel_specialization_capture(
       loom_value_is_block_arg(value) ? NULL : loom_value_def_op(value);
   if (literal && iree_all_bits_set(literal->traits, LOOM_TRAIT_CONSTANT_LIKE) &&
       !loom_type_may_reference_values(type)) {
-    out_value->literal = literal;
-    out_value->facts = loom_value_facts_unknown();
+    out_value->kind = literal->kind;
+    out_value->instance_flags = literal->instance_flags;
+    out_value->attribute_count = literal->attribute_count;
+    out_value->location = literal->location;
+    out_value->attributes = loom_op_const_attrs(literal);
     *inout_hash = loom_structural_hash_mix_u16(*inout_hash, literal->kind);
     *inout_hash =
         loom_structural_hash_mix_u8(*inout_hash, literal->instance_flags);
-    const loom_attribute_t* attributes = loom_op_attrs((loom_op_t*)literal);
+    const loom_attribute_t* attributes = out_value->attributes;
     for (uint8_t i = 0; i < literal->attribute_count; ++i) {
       *inout_hash = loom_structural_hash_mix_u32(
           *inout_hash, loom_attribute_hash(&attributes[i]));
@@ -70,20 +73,18 @@ static bool loom_kernel_specializations_equal(
     const loom_kernel_specialization_value_t* rhs, uint16_t count) {
   for (uint16_t i = 0; i < count; ++i) {
     if (!loom_type_equal(lhs[i].type, rhs[i].type) ||
-        (lhs[i].literal == NULL) != (rhs[i].literal == NULL)) {
+        lhs[i].kind != rhs[i].kind) {
       return false;
     }
-    if (lhs[i].literal) {
-      const loom_op_t* a = lhs[i].literal;
-      const loom_op_t* b = rhs[i].literal;
-      if (a->kind != b->kind || a->instance_flags != b->instance_flags ||
+    if (lhs[i].kind) {
+      const loom_kernel_specialization_value_t* a = &lhs[i];
+      const loom_kernel_specialization_value_t* b = &rhs[i];
+      if (a->instance_flags != b->instance_flags ||
           a->attribute_count != b->attribute_count) {
         return false;
       }
-      const loom_attribute_t* a_attributes = loom_op_attrs((loom_op_t*)a);
-      const loom_attribute_t* b_attributes = loom_op_attrs((loom_op_t*)b);
       for (uint8_t j = 0; j < a->attribute_count; ++j) {
-        if (!loom_attribute_equal(&a_attributes[j], &b_attributes[j])) {
+        if (!loom_attribute_equal(&a->attributes[j], &b->attributes[j])) {
           return false;
         }
       }
@@ -92,6 +93,11 @@ static bool loom_kernel_specializations_equal(
     }
   }
   return true;
+}
+
+static loom_value_facts_t loom_kernel_specialization_facts(
+    const loom_kernel_specialization_value_t* value) {
+  return value->kind ? loom_value_facts_unknown() : value->facts;
 }
 
 iree_status_t loom_kernel_specializations_collect(
@@ -225,24 +231,37 @@ static iree_status_t loom_kernel_specialize_float_predicates(
 }
 
 static iree_status_t loom_kernel_specialize_predicates(
-    loom_func_like_t function, const loom_value_fact_table_t* facts,
-    loom_rewriter_t* rewriter, iree_arena_allocator_t* arena) {
+    loom_func_like_t function,
+    const loom_kernel_specialization_value_t* specializations,
+    uint16_t specialization_count, loom_rewriter_t* rewriter,
+    iree_arena_allocator_t* arena) {
   uint16_t predicate_count = 0;
   const loom_predicate_t* predicates =
       loom_func_like_predicates(function, &predicate_count);
   if (predicate_count == 0) {
     return iree_ok_status();
   }
+  const loom_block_t* block =
+      loom_region_entry_block(loom_func_like_body(function));
+  loom_value_fact_table_t facts;
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_initialize(&facts, arena, 0));
+  iree_status_t status = iree_ok_status();
+  for (uint16_t i = 0; i < specialization_count && iree_status_is_ok(status);
+       ++i) {
+    status = loom_value_fact_table_define(
+        &facts, block->arg_ids[i],
+        loom_kernel_specialization_facts(&specializations[i]));
+  }
+  IREE_RETURN_IF_ERROR(status);
   loom_predicate_t* projected = NULL;
   IREE_RETURN_IF_ERROR(loom_builder_copy_predicate_list_attr_storage(
       &rewriter->builder, predicates, predicate_count,
       IREE_SV("specialized pipeline predicates"), &projected));
   uint16_t projected_count = 0;
   uint16_t body_count = 0;
-  iree_status_t status = iree_ok_status();
   for (uint16_t i = 0; i < predicate_count && iree_status_is_ok(status); ++i) {
     const loom_decision_truth_t truth =
-        loom_value_fact_table_evaluate_predicate(facts, &predicates[i]);
+        loom_value_fact_table_evaluate_predicate(&facts, &predicates[i]);
     if (truth == LOOM_DECISION_TRUTH_TRUE) {
       continue;
     }
@@ -259,7 +278,7 @@ static iree_status_t loom_kernel_specialize_predicates(
         continue;
       }
       const loom_value_facts_t argument_facts =
-          loom_value_fact_table_lookup(facts, predicate.args[j]);
+          loom_value_fact_table_lookup(&facts, predicate.args[j]);
       has_bound_float |= loom_value_facts_is_float(argument_facts);
       int64_t constant = 0;
       if (loom_value_facts_as_exact_i64(argument_facts, &constant)) {
@@ -290,14 +309,15 @@ static iree_status_t loom_kernel_specialize_predicates(
 // that payload with the target argument type preserves dependent body types
 // without importing caller SSA identities into the independent product.
 static iree_status_t loom_kernel_specialize_literal(
-    const loom_op_t* source, loom_type_t body_type, loom_ir_remap_t* remap,
-    loom_builder_t* builder, loom_value_id_t* out_value) {
+    const loom_kernel_specialization_value_t* source, loom_type_t body_type,
+    loom_ir_remap_t* remap, loom_builder_t* builder,
+    loom_value_id_t* out_value) {
   loom_location_id_t location;
   IREE_RETURN_IF_ERROR(
       loom_ir_remap_location_id(remap, source->location, &location));
   loom_op_t* literal = NULL;
   iree_status_t status = iree_ok_status();
-  if (loom_op_is_empty(source) &&
+  if (source->kind == LOOM_OP_VECTOR_EMPTY &&
       !loom_type_has_static_zero_extent(body_type)) {
     const loom_scalar_type_t element_type = loom_type_element_type(body_type);
     if (loom_scalar_type_is_float(element_type)) {
@@ -314,7 +334,7 @@ static iree_status_t loom_kernel_specialize_literal(
     literal->instance_flags = source->instance_flags;
     IREE_RETURN_IF_ERROR(loom_builder_define_result(builder, body_type,
                                                     loom_op_results(literal)));
-    const loom_attribute_t* attributes = loom_op_attrs((loom_op_t*)source);
+    const loom_attribute_t* attributes = source->attributes;
     for (uint8_t i = 0;
          i < source->attribute_count && iree_status_is_ok(status); ++i) {
       status = loom_ir_remap_attribute(remap, attributes[i],
@@ -371,15 +391,15 @@ static iree_status_t loom_kernel_specialize_argument(
   loom_value_id_t replacement = LOOM_VALUE_ID_INVALID;
   const loom_type_t body_type =
       loom_module_value_type(rewriter->module, argument);
-  if (value->literal) {
+  if (value->kind) {
     IREE_RETURN_IF_ERROR(loom_kernel_specialize_literal(
-        value->literal, body_type, remap, &rewriter->builder, &replacement));
+        value, body_type, remap, &rewriter->builder, &replacement));
   } else {
     IREE_RETURN_IF_ERROR(loom_constant_build(
         &rewriter->builder, value->facts, body_type, location, &replacement));
   }
-  IREE_RETURN_IF_ERROR(
-      loom_value_fact_table_define(facts, replacement, value->facts));
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_define(
+      facts, replacement, loom_kernel_specialization_facts(value)));
   return loom_rewriter_replace_all_uses_with(rewriter, argument, replacement);
 }
 
@@ -389,15 +409,7 @@ iree_status_t loom_kernel_specializations_apply(
     uint16_t specialization_count, loom_func_like_t function,
     loom_rewriter_t* rewriter, iree_arena_allocator_t* arena) {
   loom_block_t* block = loom_region_entry_block(loom_func_like_body(function));
-  loom_value_fact_table_t facts;
-  IREE_RETURN_IF_ERROR(loom_value_fact_table_initialize(&facts, arena, 0));
   iree_status_t status = iree_ok_status();
-  for (uint16_t i = 0; i < specialization_count && iree_status_is_ok(status);
-       ++i) {
-    status = loom_value_fact_table_define(&facts, block->arg_ids[i],
-                                          specializations[i].facts);
-  }
-  IREE_RETURN_IF_ERROR(status);
   loom_ir_remap_t remap;
   IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(site_module, rewriter->module,
                                                 arena, NULL, &remap));
@@ -407,18 +419,23 @@ iree_status_t loom_kernel_specializations_apply(
     loom_builder_enter_region(&rewriter->builder, function.op,
                               loom_func_like_body(function));
   }
-  IREE_RETURN_IF_ERROR(
-      loom_kernel_specialize_predicates(function, &facts, rewriter, arena));
+  IREE_RETURN_IF_ERROR(loom_kernel_specialize_predicates(
+      function, specializations, specialization_count, rewriter, arena));
   if (block->first_op) {
     loom_builder_set_before(&rewriter->builder, block->first_op);
   }
+  // Replacement constants have new SSA IDs, separate from the original formal
+  // arguments. Only the replacements supply dependent body types now; keeping
+  // the old IDs here would allocate facts for the intervening function body.
+  loom_value_fact_table_t facts;
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_initialize(&facts, arena, 0));
   // Scalar literals define all possible dimension dependencies before shaped
   // literals are built, including signatures with forward argument references.
   for (uint8_t phase = 0; phase < 2 && iree_status_is_ok(status); ++phase) {
     for (uint16_t i = 0; i < specialization_count && iree_status_is_ok(status);
          ++i) {
       const loom_kernel_specialization_value_t* value = &specializations[i];
-      if ((value->literal != NULL) != (phase != 0)) {
+      if ((value->kind != 0) != (phase != 0)) {
         continue;
       }
       status = loom_kernel_specialize_argument(value, block->arg_ids[i], &remap,

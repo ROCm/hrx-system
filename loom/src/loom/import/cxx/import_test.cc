@@ -595,7 +595,7 @@ TEST_F(ImportTest, EmbeddedFacadeAndExternalProviderAgree) {
         "loomcxx/buffer.h", "loomcxx/cache.h", "loomcxx/math.h",
         "loomcxx/predicate.h", "loomcxx/scalar.h", "loomcxx/view.h",
         "loomcxx/encoding_type.h", "loomcxx/index.h", "loomcxx/shape.h",
-        "loomcxx/target.h", "loomcxx/target/amdgpu.h"}) {
+        "loomcxx/target.h", "loomcxx/target/amdgpu.h", "loomcxx/template.h"}) {
     auto contents = loom::cxx_import::builtin_include(name);
     ASSERT_TRUE(contents.has_value());
     headers_[std::string("/edited/") + name] = *contents;
@@ -638,6 +638,33 @@ TEST_F(ImportTest, StandardFloatFacadeNeedsOnlyOneHeader) {
   EXPECT_EQ(Print(), embedded);
   EXPECT_EQ(source_requests_.size(), 1u);
   EXPECT_EQ(source_requests_.at("/numeric/stdfloat"), 1);
+}
+
+TEST_F(ImportTest, TemplateFacadeNeedsOnlyOneHeader) {
+  auto contents = loom::cxx_import::builtin_include("loomcxx/template.h");
+  if (!contents) {
+    GTEST_SKIP() << "Embedded includes are disabled";
+  }
+  const auto source = IREE_SV(
+      "#include <loomcxx/template.h>\n#include <loomcxx/template.h>\n"
+      "LOOM_TEMPLATE_DECL(\"test.transform\") unsigned transform(unsigned);\n"
+      "unsigned entry(unsigned value) { "
+      "return loom::template_apply<transform>(value); }\n");
+  IREE_ASSERT_OK(Import(source));
+  ASSERT_NE(module_, nullptr);
+  auto embedded = Print();
+
+  headers_["/templates/loomcxx/template.h"] = *contents;
+  const iree_string_view_t path = IREE_SV("/templates");
+  options_.include_paths = &path;
+  options_.include_path_count = 1;
+  options_.source_provider = {ProvideSource, this};
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_NO_BUILTIN_INCLUDES;
+  IREE_ASSERT_OK(Import(source));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(Print(), embedded);
+  EXPECT_EQ(source_requests_.size(), 1u);
+  EXPECT_EQ(source_requests_.at("/templates/loomcxx/template.h"), 1);
 }
 
 }  // namespace

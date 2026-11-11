@@ -104,14 +104,15 @@ typedef struct loom_value_fact_vector_prefix_mask_t {
 } loom_value_fact_vector_prefix_mask_t;
 
 // Address-layout summary kind carried by encoding facts.
-typedef enum loom_value_fact_address_layout_kind_e {
+enum loom_value_fact_address_layout_kind_e {
   // No usable address-layout summary is known.
   LOOM_VALUE_FACT_ADDRESS_LAYOUT_UNKNOWN = 0,
   // Dense row-major layout. The consuming shaped type supplies rank/extents.
   LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE = 1,
   // Explicit per-axis element strides.
   LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED = 2,
-} loom_value_fact_address_layout_kind_t;
+};
+typedef uint8_t loom_value_fact_address_layout_kind_t;
 
 // Summary of an address-layout encoding's logical-to-physical map.
 typedef struct loom_value_fact_address_layout_t {
@@ -121,6 +122,14 @@ typedef struct loom_value_fact_address_layout_t {
   // Number of stride facts in strides, at most LOOM_TYPE_MAX_RANK. Dense
   // layouts leave this zero because rank comes from the consuming shaped type.
   uint8_t rank;
+
+  // Context-local family identity, or zero when only addressing properties
+  // are known. Layout properties alone do not identify an encoding family.
+  loom_encoding_family_id_t family_id;
+
+  // One-based complete static layout specification, or zero when unknown.
+  // Retained separately from the enclosing physical storage specification.
+  uint16_t static_spec_encoding_id;
 
   // Borrowed per-axis element-stride facts for strided layouts. Query results
   // point into the owning fact table.
@@ -378,6 +387,10 @@ typedef struct loom_value_fact_encoding_summary_t {
   // One-based static encoding spec ID when a complete static encoding is known.
   // Zero means no exact static replacement is known.
   uint16_t static_spec_encoding_id;
+
+  // Context-local encoding family identity, or zero when unknown. A family
+  // remains known when its parameters vary or have only partial facts.
+  loom_encoding_family_id_t family_id;
 
   // Address-layout facts when this encoding directly is a layout or composes a
   // physical storage encoding with a known layout.

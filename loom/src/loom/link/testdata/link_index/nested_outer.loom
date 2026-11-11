@@ -1,0 +1,20 @@
+target.generic<reference> @outer_target
+
+template.decl @outer() -> (index)
+
+template.decl @inner() -> (index)
+
+template.def<@outer> requires [#target.subgroup.size<32>] priority(40) @outer_before() -> (index) {
+  %result = index.constant -1 : index
+  template.return %result : index
+}
+
+template.def<@outer> target(@outer_target) requires [#target.subgroup.size<64>] priority(20) @outer_selected() -> (index) {
+  %result = template.apply<@inner>() : () -> (index)
+  template.return %result : index
+}
+
+template.def<@outer> requires [#target.subgroup.size<16>] priority(30) @outer_after() -> (index) {
+  %result = index.constant -2 : index
+  template.return %result : index
+}

@@ -157,12 +157,7 @@ template.def<@qwen.q4.matmul> public priority(10) @fast(%arg0: i32) -> (i32) {
       FindProvider(qwen, IREE_SV("fast"));
   ASSERT_NE(fast, nullptr);
   EXPECT_EQ(fast->kind, LOOM_TEMPLATE_PROVIDER_KIND_DEF);
-  EXPECT_EQ(fast->func_facts->visibility, LOOM_TEMPLATE_VISIBILITY_PUBLIC);
   EXPECT_TRUE(fast->has_body);
-  EXPECT_EQ(fast->func_facts->calling_convention, 0);
-  EXPECT_EQ(fast->func_facts->effect_contract, 0);
-  EXPECT_EQ(fast->func_facts->temperature, 0);
-  EXPECT_EQ(fast->func_facts->inline_policy, 0);
   EXPECT_EQ(fast->priority, 10);
   ASSERT_EQ(fast->argument_count, 1u);
   ASSERT_EQ(fast->result_count, 1u);
@@ -177,7 +172,6 @@ template.def<@qwen.q4.matmul> public priority(10) @fast(%arg0: i32) -> (i32) {
       FindProvider(qwen, IREE_SV("asm_impl"));
   ASSERT_NE(asm_impl, nullptr);
   EXPECT_EQ(asm_impl->kind, LOOM_TEMPLATE_PROVIDER_KIND_UKERNEL);
-  EXPECT_NE(asm_impl->func_facts->visibility, LOOM_TEMPLATE_VISIBILITY_PUBLIC);
   EXPECT_FALSE(asm_impl->has_body);
   EXPECT_EQ(asm_impl->priority, 5);
 
@@ -195,12 +189,94 @@ template.def<@qwen.q4.matmul> public priority(10) @fast(%arg0: i32) -> (i32) {
   ASSERT_EQ(other.count, 1u);
   EXPECT_TRUE(
       iree_string_view_equal(other.providers[0].name, IREE_SV("other")));
-  EXPECT_EQ(other.providers[0].func_facts->visibility,
-            LOOM_TEMPLATE_VISIBILITY_PUBLIC);
 
   loom_template_provider_slice_t missing =
       loom_template_provider_catalog_lookup(&catalog_, loom_symbol_ref_null());
   EXPECT_EQ(missing.count, 0u);
+}
+
+TEST_F(TemplateProviderCatalogTest,
+       PreservesExternalGroupsAndMixedSourceOrder) {
+  ModulePtr module = ParseModule(R"(
+template.decl @a(%value: i32) -> (i32)
+template.decl @b(%value: i32) -> (i32)
+)");
+  const loom_symbol_ref_t families[] = {
+      {.module_id = 0, .symbol_id = FindSymbol(module.get(), IREE_SV("a"))},
+      {.module_id = 0, .symbol_id = FindSymbol(module.get(), IREE_SV("b"))},
+  };
+  const char* orders[] = {"aabb", "bbaa", "abab", "baba", "abba", "baab"};
+  for (bool has_local : {false, true}) {
+    SCOPED_TRACE(has_local);
+    if (has_local) {
+      AddUkernelProvider(module.get(), IREE_SV("a"), IREE_SV("local.a"), 3);
+      AddUkernelProvider(module.get(), IREE_SV("b"), IREE_SV("local.b"), 7);
+    }
+    for (size_t order_index = 0; order_index < IREE_ARRAYSIZE(orders);
+         ++order_index) {
+      const char* order = orders[order_index];
+      SCOPED_TRACE(order);
+      loom_template_provider_summary_t external[4] = {};
+      for (size_t i = 0; i < IREE_ARRAYSIZE(external); ++i) {
+        const loom_template_provider_contract_t contract = {
+            .kind = LOOM_TEMPLATE_PROVIDER_KIND_UKERNEL,
+            .argument_count = 1,
+            .result_count = 1,
+            .name = IREE_SV("external"),
+            .priority = (int64_t)i,
+        };
+        IREE_ASSERT_OK(loom_template_provider_contract_bind_family(
+            &contract, module.get(), families[order[i] - 'a'],
+            loom_symbol_ref_null(), i, &external[i]));
+      }
+      IREE_ASSERT_OK(loom_template_provider_catalog_build(
+          &catalog_, module.get(), &fact_table_, external,
+          IREE_ARRAYSIZE(external)));
+      EXPECT_EQ(catalog_.provider_count, has_local ? 6u : 4u);
+      if (!has_local && order_index < 2) {
+        // Both ascending and descending family order already form a catalog.
+        EXPECT_EQ(catalog_.providers, external);
+      } else {
+        EXPECT_NE(catalog_.providers, external);
+      }
+      for (size_t family_index = 0; family_index < IREE_ARRAYSIZE(families);
+           ++family_index) {
+        const auto providers = loom_template_provider_catalog_lookup(
+            &catalog_, families[family_index]);
+        ASSERT_EQ(providers.count, has_local ? 3u : 2u);
+        size_t position = 0;
+        if (has_local) {
+          EXPECT_EQ(providers.providers[position++].origin_ordinal,
+                    IREE_HOST_SIZE_MAX);
+        }
+        for (size_t i = 0; i < IREE_ARRAYSIZE(external); ++i) {
+          if (order[i] == 'a' + family_index) {
+            const auto& provider = providers.providers[position++];
+            EXPECT_EQ(provider.origin_ordinal, i);
+            EXPECT_EQ(provider.priority, (int64_t)i);
+            EXPECT_EQ(provider.family.symbol_id,
+                      families[family_index].symbol_id);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_F(TemplateProviderCatalogTest, EmptyExternalCatalogRetainsNoProviders) {
+  ModulePtr module = ParseModule(R"(
+template.decl @empty(%value: i32) -> (i32)
+)");
+  IREE_ASSERT_OK(loom_template_provider_catalog_build(
+      &catalog_, module.get(), &fact_table_, nullptr, 0));
+  EXPECT_EQ(catalog_.provider_count, 0u);
+  EXPECT_EQ(catalog_.providers, nullptr);
+  const auto providers = loom_template_provider_catalog_lookup(
+      &catalog_, {
+                     .module_id = 0,
+                     .symbol_id = FindSymbol(module.get(), IREE_SV("empty")),
+                 });
+  EXPECT_EQ(providers.count, 0u);
 }
 
 TEST_F(TemplateProviderCatalogTest, RebuildDropsErasedProvider) {
@@ -298,7 +374,7 @@ template.def<@demo.contract> priority(1) @fallback(%arg0: i32) -> (i32) {
 }
 
 TEST_F(TemplateProviderCatalogTest,
-       BindsProviderMetadataToExistingFamilySignature) {
+       BindsProviderWithoutCopyingSourcePredicates) {
   ModulePtr source = ParseModule(R"(
 test.target<low_core> @source.gfx11
 template.decl @source.family(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>)
@@ -331,37 +407,22 @@ template.decl @target.family(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]x
   loom_template_provider_summary_t bound = {};
   IREE_ASSERT_OK(loom_template_provider_summary_bind_family(
       &source_provider, target.get(), target_family, target_target,
-      /*origin_ordinal=*/123, &analysis_arena_, &bound));
+      /*origin_ordinal=*/123, &bound));
 
   EXPECT_EQ(target->values.count, target_value_count_before);
   EXPECT_EQ(bound.module, target.get());
   EXPECT_FALSE(loom_symbol_ref_is_valid(bound.symbol));
-  EXPECT_FALSE(loom_func_like_isa(bound.function));
-  EXPECT_EQ(bound.func_facts, nullptr);
   EXPECT_EQ(bound.origin_ordinal, 123u);
   EXPECT_EQ(bound.family.symbol_id, target_family.symbol_id);
-  EXPECT_TRUE(
-      iree_string_view_equal(bound.family_name, IREE_SV("target.family")));
   EXPECT_EQ(bound.target_symbol.symbol_id, target_target.symbol_id);
   EXPECT_EQ(bound.target_facts, source_provider.target_facts);
 
   ASSERT_EQ(bound.argument_count, 2u);
   ASSERT_EQ(bound.result_count, 1u);
-  EXPECT_LT(bound.argument_ids[0], target_value_count_before);
-  EXPECT_NE(bound.argument_ids[0], source_provider.argument_ids[0]);
-  const loom_type_t bound_argument_type =
-      loom_module_value_type(bound.module, bound.argument_ids[1]);
-  const loom_type_t bound_result_type =
-      loom_module_value_type(bound.module, bound.result_ids[0]);
-  ASSERT_TRUE(loom_type_is_tensor(bound_argument_type));
-  EXPECT_EQ(loom_type_dim_value_id_at(bound_argument_type, 0),
-            bound.argument_ids[0]);
-  ASSERT_TRUE(loom_type_is_tensor(bound_result_type));
-  EXPECT_EQ(loom_type_dim_value_id_at(bound_result_type, 0),
-            bound.argument_ids[0]);
-  EXPECT_TRUE(loom_type_equal(
-      loom_module_value_type(target.get(), bound.argument_ids[1]),
-      bound_argument_type));
+  EXPECT_FALSE(bound.predicates_use_ordinals);
+  EXPECT_EQ(bound.argument_ids, source_provider.argument_ids);
+  EXPECT_EQ(bound.result_ids, source_provider.result_ids);
+  EXPECT_EQ(bound.predicates, source_provider.predicates);
 
   ASSERT_EQ(bound.predicate_count, 1u);
   ASSERT_NE(bound.predicates, nullptr);

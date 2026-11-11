@@ -119,6 +119,7 @@ _ADAPTER_ONLY_SCENARIOS = [
     "numeric/vector/float_partial_load_reductions.loom",
     "numeric/vector/constants.loom",
     "numeric/vector/concatenation.loom",
+    "numeric/vector/coordinates.loom",
     "numeric/vector/dynamic_windows.loom",
     "numeric/vector/f32.loom",
     "numeric/vector/floating.loom",
@@ -137,6 +138,7 @@ _ADAPTER_ONLY_SCENARIOS = [
     "numeric/vector/packed/narrowing.loom",
     "numeric/vector/packed/selection.loom",
     "numeric/vector/reductions.loom",
+    "numeric/vector/refinement.loom",
     "numeric/vector/selection.loom",
 ]
 

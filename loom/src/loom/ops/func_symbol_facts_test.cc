@@ -136,7 +136,6 @@ func.def public device @semantic() {
   EXPECT_EQ(facts->temperature, 0);
   EXPECT_EQ(facts->inline_policy, 0);
   EXPECT_FALSE(loom_symbol_ref_is_valid(facts->template_family));
-  EXPECT_TRUE(iree_string_view_is_empty(facts->template_family_name));
   EXPECT_EQ(facts->priority, 0);
   EXPECT_EQ(facts->predicate_count, 0);
   EXPECT_EQ(facts->argument_count, 0);
@@ -165,8 +164,6 @@ template.def<@qwen.q4.matmul> public device pure hot requires [#target.subgroup.
   EXPECT_EQ(facts->temperature, 1);
   EXPECT_EQ(facts->inline_policy, 0);
   ASSERT_TRUE(loom_symbol_ref_is_valid(facts->template_family));
-  EXPECT_TRUE(iree_string_view_equal(facts->template_family_name,
-                                     IREE_SV("qwen.q4.matmul")));
   EXPECT_EQ(facts->template_family.symbol_id,
             FindSymbol(module.get(), IREE_SV("qwen.q4.matmul")));
   EXPECT_EQ(facts->priority, 7);
@@ -208,7 +205,6 @@ template.decl @qwen.routed_down(%arg0: i32) -> (i32)
   EXPECT_FALSE(facts->has_body);
   EXPECT_FALSE(facts->imports);
   EXPECT_FALSE(loom_symbol_ref_is_valid(facts->template_family));
-  EXPECT_TRUE(iree_string_view_is_empty(facts->template_family_name));
   EXPECT_EQ(facts->priority, 0);
   EXPECT_EQ(facts->argument_count, 1);
   EXPECT_EQ(facts->result_count, 1);

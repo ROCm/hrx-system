@@ -190,6 +190,8 @@ loom_corpus_test(
             "numeric/integer/arithmetic.loom",
             "numeric/integer/division.loom",
             "numeric/integer/widening.loom",
+            "numeric/vector/coordinates.loom",
+            "numeric/vector/refinement.loom",
         ],
     },
     xfails = {

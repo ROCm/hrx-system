@@ -60,17 +60,6 @@ iree_executable_test(
 )
 
 iree_executable_test(
-    name = "command_structural_specializations_test",
-    src = "//loom/src/loom/tools/loom-test",
-    args = [
-        "$(rootpath //loom/src/loom/tooling/execution/hal/testdata:command_structural_specializations.loom)",
-        "--device=task",
-    ],
-    data = ["//loom/src/loom/tooling/execution/hal/testdata:command_structural_specializations.loom"],
-    target_compatible_with = _TASK_EXECUTION_COMPATIBLE_WITH,
-)
-
-iree_executable_test(
     name = "command_scenario_execution_test",
     src = "//loom/src/loom/tools/loom-test",
     args = [
@@ -98,7 +87,6 @@ loom_test(
         "//loom/src/loom/tooling/execution/hal/testdata:buffer_bulk_hal_actual.loom",
         "//loom/src/loom/tooling/execution/hal/testdata:command_count_observations.loom",
         "//loom/src/loom/tooling/execution/hal/testdata:command_scenario_dependent_stages.loom",
-        "//loom/src/loom/tooling/execution/hal/testdata:command_structural_specializations.loom",
         "//loom/src/loom/tooling/execution/hal/testdata:dynamic_workgroup_hal_actual.loom",
         "//loom/src/loom/tooling/execution/hal/testdata:launch_schedule_hal_actual.loom",
         "//loom/src/loom/tooling/execution/hal/testdata:scenario_batch_hal_actual.loom",

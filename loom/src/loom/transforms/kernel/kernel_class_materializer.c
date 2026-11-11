@@ -17,6 +17,7 @@
 #include "loom/rewrite/module_projection.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/transforms/symbol/template_rewrite.h"
+#include "loom/util/adaptive_sort.h"
 #include "loom/util/predicate_facts.h"
 
 void loom_kernel_class_product_deinitialize(
@@ -425,6 +426,18 @@ static iree_status_t loom_kernel_class_materialize_shape_values(
   return iree_ok_status();
 }
 
+static bool loom_kernel_class_trace_precedes(
+    const loom_kernel_class_trace_t* traces,
+    const loom_kernel_class_trace_id_t* lhs,
+    const loom_kernel_class_trace_id_t* rhs) {
+  return traces[*lhs].decision_ordinal < traces[*rhs].decision_ordinal;
+}
+
+LOOM_DEFINE_ADAPTIVE_SORT_WITH_CONTEXT(loom_kernel_class_sort_trace_ids,
+                                       loom_kernel_class_trace_id_t,
+                                       const loom_kernel_class_trace_t*,
+                                       loom_kernel_class_trace_precedes)
+
 iree_status_t loom_kernel_class_materialize(
     const loom_kernel_class_classifier_t* classifier,
     const loom_kernel_class_collection_t* collection,
@@ -465,15 +478,26 @@ iree_status_t loom_kernel_class_materialize(
     IREE_ASSERT(trace->action_ordinal < decision->model->providers.count);
     IREE_ASSERT(collection->decision_results[trace->decision_ordinal].state ==
                 LOOM_KERNEL_CLASS_DECISION_ACCEPTED);
-    const uint32_t projection_ordinal = --trace_cursor;
-    operation_projections[projection_ordinal].source_op =
-        decision->demand->apply_op;
-    operation_projections[projection_ordinal].target_op = NULL;
-    selected_trace_ids[projection_ordinal] = trace_id;
+    selected_trace_ids[--trace_cursor] = trace_id;
 
     trace_id = trace->parent_trace_id;
   }
   IREE_ASSERT(!iree_status_is_ok(status) || trace_cursor == 0);
+
+  if (iree_status_is_ok(status)) {
+    // The clone observer consumes source-order projections. Classification
+    // order may reserve required decisions before admitting optional ones.
+    loom_kernel_class_sort_trace_ids(collection->traces, selected_trace_ids,
+                                     collection->accepted_decision_count);
+    for (uint32_t i = 0; i < collection->accepted_decision_count; ++i) {
+      const loom_kernel_class_trace_t* trace =
+          &collection->traces[selected_trace_ids[i]];
+      operation_projections[i] = (loom_ir_remap_op_projection_t){
+          .source_op =
+              classifier->decisions[trace->decision_ordinal].application,
+      };
+    }
+  }
 
   loom_ir_module_projection_t module_projection = {0};
   loom_module_t* target_module = NULL;

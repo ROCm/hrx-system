@@ -14,13 +14,27 @@
 #include "loom/format/bytecode/index.h"
 #include "loom/format/bytecode/reader/attribute.h"
 #include "loom/format/bytecode/reader/decoder.h"
-#include "loom/format/bytecode/reader/selected_projection.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/util/ordinal_map.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Identity domains requiring memoization during selective materialization.
+//
+// Strings are projected directly through the output interner and registered
+// operations resolve directly through the context. Every other source-table
+// identity receives an entry only when reached.
+typedef enum loom_bytecode_selected_projection_domain_e {
+  LOOM_BYTECODE_SELECTED_PROJECTION_DOMAIN_SYMBOL_NAME = 0,
+  LOOM_BYTECODE_SELECTED_PROJECTION_DOMAIN_SOURCE = 1,
+  LOOM_BYTECODE_SELECTED_PROJECTION_DOMAIN_ENCODING = 2,
+  LOOM_BYTECODE_SELECTED_PROJECTION_DOMAIN_TYPE = 3,
+  LOOM_BYTECODE_SELECTED_PROJECTION_DOMAIN_LOCATION = 4,
+  LOOM_BYTECODE_SELECTED_PROJECTION_DOMAIN_COUNT = 5,
+} loom_bytecode_selected_projection_domain_t;
 
 // One shared-table identity waiting to be materialized.
 typedef enum loom_bytecode_selected_table_kind_e {
@@ -81,7 +95,7 @@ typedef struct loom_bytecode_selected_table_materializer_t {
   // Retained projections and worklist storage, independent of fact checkpoints.
   iree_arena_allocator_t retained_arena;
   // Reached source identity to compact output identity map.
-  loom_bytecode_selected_projection_t projection;
+  loom_ordinal_map_t projection;
   // Number of distinct source names reached by this materializer. Equality
   // with the output source count proves every output name is already reached,
   // so another source from the validated unique input can append directly.

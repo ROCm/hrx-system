@@ -43,9 +43,9 @@ void loom_link_template_candidate_loader_free(
 //
 // The plan's existing reachability bitmap identifies providers already present
 // in |materialization|. Each remaining candidate borrows its source-owned
-// applicability facts while using the already-linked family signature in
-// materialization->module. This never adds values, symbols, types, or
-// operations to the materialized module. The returned summaries belong to
+// predicate coordinates and applicability facts, binding only family and target
+// symbols into materialization->module. This never adds values, symbols, types,
+// or operations to the materialized module. The returned summaries belong to
 // |arena| and are suitable as the external catalog overlay for one selection
 // query.
 iree_status_t loom_link_template_candidate_loader_load(
