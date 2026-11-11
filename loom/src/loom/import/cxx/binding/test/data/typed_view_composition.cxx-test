@@ -55,11 +55,11 @@ kernel.def @typed_view_static_layouts() {
   %34 = func.call readonly @read_view___loom__type__view___loom__type__shape_3__8___const_float____loom__type__encoding_0__2__(%dense_source_layout, %dense_source) : (encoding<layout>, view<3x8xf32, %dense_source_layout>) -> (f32)
   %100 = index.constant 0 : offset
   %43 = buffer.view %output[%100] : buffer -> view<1xf32>
-  view.store %34, %43[0] : f32, view<1xf32>
+  view.store<root_in_bounds> %34, %43[0] : f32, view<1xf32>
   %44 = func.call readonly @read_view___loom__type__view___loom__type__shape_18446744073709551615__8___const_float____loom__type__encoding_0__2__(%strided_source_dim0, %strided_source_layout, %strided_source) : (index, encoding<layout>, view<[%strided_source_dim0]x8xf32, %strided_source_layout>) -> (f32)
   %99 = index.constant 4 : offset
   %53 = buffer.view %output[%99] : buffer -> view<1xf32>
-  view.store %44, %53[0] : f32, view<1xf32>
+  view.store<root_in_bounds> %44, %53[0] : f32, view<1xf32>
   kernel.return
 }
 
@@ -269,7 +269,7 @@ kernel.def @typed_view_loop() {
   %cell, %cell_layout = view.subview %selected$121[%106, %106] : view<[%selected_dim0$120]x7xi32, %layout> -> view<1x1xi32, %cell_layout>
   %92 = view.load %cell[%106, %106] : view<1x1xi32, %cell_layout> -> i32
   %101 = buffer.view %output[%109] : buffer -> view<1xi32>
-  view.store %92, %101[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %92, %101[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -331,6 +331,6 @@ kernel.def @typed_storage_rank3() {
   %40 = scalar.assume %35 [range(%35, 0, 9223372036854775807)] : i64
   %41 = index.cast %40 : i64 to offset
   %42 = buffer.view %output[%41] : buffer -> view<1xf8E4M3>
-  view.store %33, %42[0] : f8E4M3, view<1xf8E4M3>
+  view.store<root_in_bounds> %33, %42[0] : f8E4M3, view<1xf8E4M3>
   kernel.return
 }

@@ -177,7 +177,7 @@ func.def @rounds___State_unsigned_int_0(%state_first$48: i32, %state_second: i32
   %60 = scalar.assume %59 [range(%59, 0, 9223372036854775807)] : i64
   %61 = index.cast %60 : i64 to offset
   %62 = buffer.view %keys[%61] : buffer -> view<1xi32>
-  %63 = view.load %62[0] : view<1xi32> -> i32
+  %63 = view.load<root_in_bounds> %62[0] : view<1xi32> -> i32
   %state_first$64 = scalar.addi %state_first$48, %63 : i32
   func.return %state_first$64, %state_second : i32, i32
 }
@@ -187,7 +187,7 @@ func.def @rounds___State_unsigned_int_1(%state_first$65: i32, %state_second: i32
   %77 = scalar.assume %75 [range(%75, 0, 9223372036854775807)] : i64
   %78 = index.cast %77 : i64 to offset
   %79 = buffer.view %keys[%78] : buffer -> view<1xi32>
-  %80 = view.load %79[0] : view<1xi32> -> i32
+  %80 = view.load<root_in_bounds> %79[0] : view<1xi32> -> i32
   %state_first$81 = scalar.addi %state_first$65, %80 : i32
   func.return %state_first$81, %state_second : i32, i32
 }
@@ -197,7 +197,7 @@ func.def @rounds___State_unsigned_int_3(%state_first$82: i32, %state_second: i32
   %94 = scalar.assume %92 [range(%92, 0, 9223372036854775807)] : i64
   %95 = index.cast %94 : i64 to offset
   %96 = buffer.view %keys[%95] : buffer -> view<1xi32>
-  %97 = view.load %96[0] : view<1xi32> -> i32
+  %97 = view.load<root_in_bounds> %96[0] : view<1xi32> -> i32
   %state_first$98 = scalar.addi %state_first$82, %97 : i32
   func.return %state_first$98, %state_second : i32, i32
 }
@@ -209,7 +209,7 @@ func.def @rounds___State_unsigned_int_4(%state_first$99: i32, %state_second: i32
   %111 = scalar.assume %110 [range(%110, 0, 9223372036854775807)] : i64
   %112 = index.cast %111 : i64 to offset
   %113 = buffer.view %keys[%112] : buffer -> view<1xi32>
-  %114 = view.load %113[0] : view<1xi32> -> i32
+  %114 = view.load<root_in_bounds> %113[0] : view<1xi32> -> i32
   %state_first$115 = scalar.addi %state_first$99, %114 : i32
   func.return %state_first$115, %state_second : i32, i32
 }
@@ -221,7 +221,7 @@ func.def @rounds___State_unsigned_int_20(%state_first$116: i32, %state_second: i
   %128 = scalar.assume %127 [range(%127, 0, 9223372036854775807)] : i64
   %129 = index.cast %128 : i64 to offset
   %130 = buffer.view %keys[%129] : buffer -> view<1xi32>
-  %131 = view.load %130[0] : view<1xi32> -> i32
+  %131 = view.load<root_in_bounds> %130[0] : view<1xi32> -> i32
   %state_first$132 = scalar.addi %state_first$116, %131 : i32
   func.return %state_first$132, %state_second : i32, i32
 }
@@ -231,7 +231,7 @@ func.def @rounds___State_unsigned_int_21(%state_first$133: i32, %state_second: i
   %145 = scalar.assume %143 [range(%143, 0, 9223372036854775807)] : i64
   %146 = index.cast %145 : i64 to offset
   %147 = buffer.view %keys[%146] : buffer -> view<1xi32>
-  %148 = view.load %147[0] : view<1xi32> -> i32
+  %148 = view.load<root_in_bounds> %147[0] : view<1xi32> -> i32
   %state_first$149 = scalar.addi %state_first$133, %148 : i32
   func.return %state_first$149, %state_second : i32, i32
 }
@@ -328,7 +328,7 @@ func.def @rounds___State_unsigned_int_20(%state_first$36: i32, %state_second: i3
   %48 = scalar.assume %47 [range(%47, 0, 9223372036854775807)] : i64
   %49 = index.cast %48 : i64 to offset
   %50 = buffer.view %keys[%49] : buffer -> view<1xi32>
-  %51 = view.load %50[0] : view<1xi32> -> i32
+  %51 = view.load<root_in_bounds> %50[0] : view<1xi32> -> i32
   %state_first$52 = scalar.addi %state_first$36, %51 : i32
   func.return %state_first$52, %state_second : i32, i32
 }
@@ -338,7 +338,7 @@ func.def @rounds___State_unsigned_int_21(%state_first$53: i32, %state_second: i3
   %65 = scalar.assume %63 [range(%63, 0, 9223372036854775807)] : i64
   %66 = index.cast %65 : i64 to offset
   %67 = buffer.view %keys[%66] : buffer -> view<1xi32>
-  %68 = view.load %67[0] : view<1xi32> -> i32
+  %68 = view.load<root_in_bounds> %67[0] : view<1xi32> -> i32
   %state_first$69 = scalar.addi %state_first$53, %68 : i32
   func.return %state_first$69, %state_second : i32, i32
 }

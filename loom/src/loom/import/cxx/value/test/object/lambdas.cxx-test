@@ -95,10 +95,10 @@ func.def @operator_call_value_2(%this_value: i32) -> (i32, i32) {
 
 func.def @operator_call_value_3(%this_value: buffer, %this_value_byte_offset: offset, %amount: i32) {
   %48 = buffer.view %this_value[%this_value_byte_offset] : buffer -> view<1xi32>
-  %49 = view.load %48[0] : view<1xi32> -> i32
+  %49 = view.load<root_in_bounds> %48[0] : view<1xi32> -> i32
   %50 = scalar.addi %49, %amount : i32
   %51 = buffer.view %this_value[%this_value_byte_offset] : buffer -> view<1xi32>
-  view.store %50, %51[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %50, %51[0] : i32, view<1xi32>
   func.return
 }
 
@@ -134,10 +134,10 @@ func.def public @reference_init_capture(%value: i32) {
 
 func.def @operator_call_value(%this_alias: buffer, %this_alias_byte_offset: offset, %amount: i32) {
   %9 = buffer.view %this_alias[%this_alias_byte_offset] : buffer -> view<1xi32>
-  %10 = view.load %9[0] : view<1xi32> -> i32
+  %10 = view.load<root_in_bounds> %9[0] : view<1xi32> -> i32
   %11 = scalar.addi %10, %amount : i32
   %12 = buffer.view %this_alias[%this_alias_byte_offset] : buffer -> view<1xi32>
-  view.store %11, %12[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %11, %12[0] : i32, view<1xi32>
   func.return
 }
 
@@ -185,7 +185,7 @@ func.def @Owner__operator_call_value(%this___this: buffer, %this___this_byte_off
   %22 = index.constant 0 : offset
   %23 = index.add %this___this_byte_offset, %22 : offset
   %24 = buffer.view %this___this[%23] : buffer -> view<1xi32>
-  %value = view.load %24[0] : view<1xi32> -> i32
+  %value = view.load<root_in_bounds> %24[0] : view<1xi32> -> i32
   %26 = scalar.addi %21, %value : i32
   %27 = scalar.addi %26, %input : i32
   func.return %27 : i32
@@ -226,11 +226,11 @@ func.def @operator_call_value(%this_value: i32, %input: i32) -> (i32) {
 
 func.def @operator_call_value_1(%this_value: buffer, %this_value_byte_offset: offset) {
   %15 = buffer.view %this_value[%this_value_byte_offset] : buffer -> view<1xi32>
-  %16 = view.load %15[0] : view<1xi32> -> i32
+  %16 = view.load<root_in_bounds> %15[0] : view<1xi32> -> i32
   %17 = scalar.constant 1 : i32
   %18 = scalar.addi %16, %17 : i32
   %19 = buffer.view %this_value[%this_value_byte_offset] : buffer -> view<1xi32>
-  view.store %18, %19[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %18, %19[0] : i32, view<1xi32>
   func.return
 }
 
@@ -312,7 +312,7 @@ func.def @apply_0__lambda_auto__type_param_0__0___const_(%function_sum: buffer, 
 
 func.def @operator_call_int_value(%this_sum: buffer, %this_sum_byte_offset: offset, %this_input: buffer, %this_input_byte_offset: offset, %this_index: buffer, %this_index_byte_offset: offset, %value: i32) {
   %28 = buffer.view %this_index[%this_index_byte_offset] : buffer -> view<1xi32>
-  %index = view.load %28[0] : view<1xi32> -> i32
+  %index = view.load<root_in_bounds> %28[0] : view<1xi32> -> i32
   %30 = scalar.addi %index, %value : i32
   %31 = scalar.extsi %30 : i32 to i64
   %32 = scalar.constant 4 : i64
@@ -322,12 +322,12 @@ func.def @operator_call_int_value(%this_sum: buffer, %this_sum_byte_offset: offs
   %36 = scalar.assume %35 [range(%35, 0, 9223372036854775807)] : i64
   %37 = index.cast %36 : i64 to offset
   %38 = buffer.view %this_input[%37] : buffer -> view<1xi32>
-  %39 = view.load %38[0] : view<1xi32> -> i32
+  %39 = view.load<root_in_bounds> %38[0] : view<1xi32> -> i32
   %40 = buffer.view %this_sum[%this_sum_byte_offset] : buffer -> view<1xi32>
-  %41 = view.load %40[0] : view<1xi32> -> i32
+  %41 = view.load<root_in_bounds> %40[0] : view<1xi32> -> i32
   %42 = scalar.addi %41, %39 : i32
   %43 = buffer.view %this_sum[%this_sum_byte_offset] : buffer -> view<1xi32>
-  view.store %42, %43[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %42, %43[0] : i32, view<1xi32>
   func.return
 }
 

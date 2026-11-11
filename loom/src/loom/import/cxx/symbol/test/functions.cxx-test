@@ -19,7 +19,7 @@ func.def @helper(%p: buffer, %p_byte_offset: offset) {
   %11 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
   %12 = index.cast %11 : i64 to offset
   %13 = buffer.view %p[%12] : buffer -> view<1xf32>
-  view.store %4, %13[0] : f32, view<1xf32>
+  view.store<root_in_bounds> %4, %13[0] : f32, view<1xf32>
   func.return
 }
 
@@ -200,14 +200,14 @@ func.def public @retained_calls(%input: buffer, %input_byte_offset: offset, %sum
   %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
   %20 = index.cast %19 : i64 to offset
   %21 = buffer.view %sums[%20] : buffer -> view<1xi32>
-  view.store %13, %21[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %13, %21[0] : i32, view<1xi32>
   %22 = scalar.addi %first_mixed, %second_mixed : i32
   %26 = index.cast %mixed_byte_offset : offset to i64
   %27 = scalar.addi %26, %51 : i64
   %28 = scalar.assume %27 [range(%27, 0, 9223372036854775807)] : i64
   %29 = index.cast %28 : i64 to offset
   %30 = buffer.view %mixed[%29] : buffer -> view<1xi32>
-  view.store %22, %30[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %22, %30[0] : i32, view<1xi32>
   func.return
 }
 
@@ -220,7 +220,7 @@ func.def noinline @update(%input: buffer, %input_byte_offset: offset, %index: i3
   %42 = scalar.assume %41 [range(%41, 0, 9223372036854775807)] : i64
   %43 = index.cast %42 : i64 to offset
   %44 = buffer.view %input[%43] : buffer -> view<1xi32>
-  %value = view.load %44[0] : view<1xi32> -> i32
+  %value = view.load<root_in_bounds> %44[0] : view<1xi32> -> i32
   %46 = scalar.addi %value, %bias : i32
   %47 = scalar.xori %value, %bias : i32
   func.return %46, %47 : i32, i32

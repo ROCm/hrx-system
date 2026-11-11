@@ -142,7 +142,7 @@ func.def public @pair_sum(%input: buffer, %input_byte_offset: offset) -> (f32) {
   %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
   %10 = index.cast %9 : i64 to offset
   %11 = buffer.view %input[%10] : buffer -> view<1xbf16>
-  %12 = view.load %11[0] : view<1xbf16> -> bf16
+  %12 = view.load<root_in_bounds> %11[0] : view<1xbf16> -> bf16
   %13 = scalar.extf %12 : bf16 to f32
   %14 = scalar.constant 1 : i32
   %15 = scalar.extsi %14 : i32 to i64
@@ -153,7 +153,7 @@ func.def public @pair_sum(%input: buffer, %input_byte_offset: offset) -> (f32) {
   %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
   %21 = index.cast %20 : i64 to offset
   %22 = buffer.view %input[%21] : buffer -> view<1xbf16>
-  %23 = view.load %22[0] : view<1xbf16> -> bf16
+  %23 = view.load<root_in_bounds> %22[0] : view<1xbf16> -> bf16
   %24 = scalar.extf %23 : bf16 to f32
   %25 = scalar.addf %13, %24 : f32
   func.return %25 : f32

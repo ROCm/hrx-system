@@ -29,21 +29,21 @@ void write(Record* output, Record value) { *output = value; }
 // ----
 func.def public @read(%input: buffer, %input_byte_offset: offset) -> (i32, i32) {
   %6 = buffer.view %input[%input_byte_offset] : buffer -> view<1xi32>
-  %7 = view.load %6[0] : view<1xi32> -> i32
+  %7 = view.load<root_in_bounds> %6[0] : view<1xi32> -> i32
   %8 = index.constant 4 : offset
   %9 = index.add %input_byte_offset, %8 : offset
   %10 = buffer.view %input[%9] : buffer -> view<1xi32>
-  %11 = view.load %10[0] : view<1xi32> -> i32
+  %11 = view.load<root_in_bounds> %10[0] : view<1xi32> -> i32
   func.return %7, %11 : i32, i32
 }
 
 func.def public @write(%output: buffer, %output_byte_offset: offset, %value_first: i32, %value_second: i32) {
   %18 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
-  view.store %value_first, %18[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %value_first, %18[0] : i32, view<1xi32>
   %19 = index.constant 4 : offset
   %20 = index.add %output_byte_offset, %19 : offset
   %21 = buffer.view %output[%20] : buffer -> view<1xi32>
-  view.store %value_second, %21[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %value_second, %21[0] : i32, view<1xi32>
   func.return
 }
 
@@ -91,11 +91,11 @@ func.def public @clipped(%source: buffer, %source_byte_offset: offset, %skipped:
   %14 = scalar.assume %12 [range(%12, 0, 9223372036854775807)] : i64
   %15 = index.cast %14 : i64 to offset
   %18 = buffer.view %source[%15] : buffer -> view<1xi32>
-  %19 = view.load %18[0] : view<1xi32> -> i32
+  %19 = view.load<root_in_bounds> %18[0] : view<1xi32> -> i32
   %20 = index.constant 4 : offset
   %21 = index.add %15, %20 : offset
   %22 = buffer.view %source[%21] : buffer -> view<1xi32>
-  %23 = view.load %22[0] : view<1xi32> -> i32
+  %23 = view.load<root_in_bounds> %22[0] : view<1xi32> -> i32
   %157 = scalar.muli %skipped, %23 : i32
   %171 = scalar.addi %19, %157 : i32
   func.return %171 : i32
@@ -213,29 +213,29 @@ func.def public @snapshots(%records: buffer, %records_byte_offset: offset, %inde
   %12 = scalar.assume %11 [range(%11, 0, 9223372036854775807)] : i64
   %13 = index.cast %12 : i64 to offset
   %16 = buffer.view %records[%13] : buffer -> view<1xi32>
-  %17 = view.load %16[0] : view<1xi32> -> i32
+  %17 = view.load<root_in_bounds> %16[0] : view<1xi32> -> i32
   %18 = index.constant 4 : offset
   %19 = index.add %13, %18 : offset
   %20 = buffer.view %records[%19] : buffer -> view<1xi32>
-  %21 = view.load %20[0] : view<1xi32> -> i32
+  %21 = view.load<root_in_bounds> %20[0] : view<1xi32> -> i32
   %42 = scalar.constant 17 : i32
   %54 = scalar.addi %21, %42 : i32
   %89 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
   %90 = index.cast %89 : i64 to offset
   %93 = buffer.view %records[%90] : buffer -> view<1xi32>
-  view.store %17, %93[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %17, %93[0] : i32, view<1xi32>
   %95 = index.add %90, %18 : offset
   %96 = buffer.view %records[%95] : buffer -> view<1xi32>
-  view.store %54, %96[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %54, %96[0] : i32, view<1xi32>
   %111 = scalar.constant 8 : i64
   %102 = scalar.addi %89, %111 : i64
   %103 = scalar.assume %102 [range(%102, 0, 9223372036854775807)] : i64
   %104 = index.cast %103 : i64 to offset
   %107 = buffer.view %records[%104] : buffer -> view<1xi32>
-  view.store %17, %107[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %17, %107[0] : i32, view<1xi32>
   %109 = index.add %104, %18 : offset
   %110 = buffer.view %records[%109] : buffer -> view<1xi32>
-  view.store %21, %110[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %21, %110[0] : i32, view<1xi32>
   func.return
 }
 
@@ -666,7 +666,7 @@ func.def public @nested_layout(%value: buffer, %value_byte_offset: offset, %inde
   %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
   %20 = index.cast %19 : i64 to offset
   %21 = buffer.view %value[%20] : buffer -> view<1xi32>
-  view.store %3, %21[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %3, %21[0] : i32, view<1xi32>
   %22 = scalar.constant 19 : i32
   %23 = index.constant 16 : offset
   %commands_byte_offset = index.add %value_byte_offset, %23 : offset
@@ -682,7 +682,7 @@ func.def public @nested_layout(%value: buffer, %value_byte_offset: offset, %inde
   %40 = scalar.assume %39 [range(%39, 0, 9223372036854775807)] : i64
   %41 = index.cast %40 : i64 to offset
   %42 = buffer.view %value[%41] : buffer -> view<1xi32>
-  view.store %22, %42[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %22, %42[0] : i32, view<1xi32>
   %72 = scalar.constant -7 : i16
   %47 = index.constant 32 : offset
   %narrow_byte_offset = index.add %value_byte_offset, %47 : offset
@@ -693,7 +693,7 @@ func.def public @nested_layout(%value: buffer, %value_byte_offset: offset, %inde
   %54 = scalar.assume %53 [range(%53, 0, 9223372036854775807)] : i64
   %55 = index.cast %54 : i64 to offset
   %56 = buffer.view %value[%55] : buffer -> view<1xi16>
-  view.store %72, %56[0] : i16, view<1xi16>
+  view.store<root_in_bounds> %72, %56[0] : i16, view<1xi16>
   %58 = index.constant 36 : offset
   %flags_byte_offset = index.add %value_byte_offset, %58 : offset
   %63 = index.cast %flags_byte_offset : offset to i64
@@ -702,7 +702,7 @@ func.def public @nested_layout(%value: buffer, %value_byte_offset: offset, %inde
   %66 = index.cast %65 : i64 to offset
   %67 = buffer.view %value[%66] : buffer -> view<1xi8>
   %69 = scalar.constant 1 : i8
-  view.store %69, %67[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %69, %67[0] : i8, view<1xi8>
   func.return
 }
 
@@ -734,27 +734,27 @@ kernel.def @array_records_kernel() {
   %10 = index.constant 8 : offset
   %224 = index.constant 0 : offset
   %24 = buffer.view %input[%224] : buffer -> view<1xi32>
-  %25 = view.load %24[0] : view<1xi32> -> i32
+  %25 = view.load<root_in_bounds> %24[0] : view<1xi32> -> i32
   %223 = index.constant 4 : offset
   %28 = buffer.view %input[%223] : buffer -> view<1xi32>
-  %29 = view.load %28[0] : view<1xi32> -> i32
+  %29 = view.load<root_in_bounds> %28[0] : view<1xi32> -> i32
   %66 = buffer.view %input[%10] : buffer -> view<1xi32>
-  %67 = view.load %66[0] : view<1xi32> -> i32
+  %67 = view.load<root_in_bounds> %66[0] : view<1xi32> -> i32
   %68 = scalar.constant 1 : i32
   %69 = scalar.andi %67, %68 : i32
   %changed = func.call @change(%25, %29, %69) : (i32, i32, i32) -> (i32)
   %71 = scalar.constant 5 : i32
   %85 = scalar.addi %25, %71 : i32
   %106 = buffer.view %output[%224] : buffer -> view<1xi32>
-  view.store %85, %106[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %85, %106[0] : i32, view<1xi32>
   %109 = buffer.view %output[%223] : buffer -> view<1xi32>
-  view.store %29, %109[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %29, %109[0] : i32, view<1xi32>
   %128 = buffer.view %output[%10] : buffer -> view<1xi32>
-  view.store %changed, %128[0] : i32, view<1xi32>
-  %148 = view.load %28[0] : view<1xi32> -> i32
+  view.store<root_in_bounds> %changed, %128[0] : i32, view<1xi32>
+  %148 = view.load<root_in_bounds> %28[0] : view<1xi32> -> i32
   %210 = index.constant 12 : offset
   %167 = buffer.view %output[%210] : buffer -> view<1xi32>
-  view.store %148, %167[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %148, %167[0] : i32, view<1xi32>
   kernel.return
 }
 

@@ -205,7 +205,7 @@ func.def @select_unsigned_int(%value: i32) -> (i32) {
 
 func.def @select____unsigned_int(%value: buffer, %value_byte_offset: offset) -> (i32) {
   %69 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
-  %70 = view.load %69[0] : view<1xi32> -> i32
+  %70 = view.load<root_in_bounds> %69[0] : view<1xi32> -> i32
   %71 = scalar.constant 17 : i32
   %72 = scalar.addi %70, %71 : i32
   func.return %72 : i32

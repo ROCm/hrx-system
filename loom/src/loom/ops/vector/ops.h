@@ -1356,6 +1356,7 @@ LOOM_DEFINE_OPERAND(loom_vector_atomic_cmpxchg_view, 2)
 LOOM_DEFINE_OPERAND(loom_vector_atomic_cmpxchg_offsets, 3)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_vector_atomic_cmpxchg_indices, 4)
 LOOM_DEFINE_RESULT(loom_vector_atomic_cmpxchg_old, 0)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_atomic_cmpxchg_memory_flags)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_atomic_cmpxchg_success_ordering, 0, loom_atomic_ordering_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_atomic_cmpxchg_failure_ordering, 1, loom_atomic_ordering_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_atomic_cmpxchg_scope, 2, loom_atomic_scope_t)
@@ -1370,6 +1371,7 @@ typedef uint32_t loom_vector_atomic_cmpxchg_build_flags_t;
 iree_status_t loom_vector_atomic_cmpxchg_build(
     loom_builder_t* builder,
     loom_vector_atomic_cmpxchg_build_flags_t build_flags,
+    uint8_t instance_flags,
     loom_may_consume loom_value_id_t expected,
     loom_may_consume loom_value_id_t replacement,
     loom_may_consume loom_value_id_t view,

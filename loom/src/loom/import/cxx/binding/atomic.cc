@@ -53,6 +53,28 @@ void read_selectors(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
   }
 }
 
+loom_memory_access_flags_t read_memory_access(cxx::TranslationUnit& unit,
+                                              Diagnostics& diagnostics,
+                                              cxx::FunctionSymbol* function,
+                                              size_t argument_index,
+                                              cxx::AST* owner) {
+  auto arguments = function->templateArguments();
+  if (argument_index >= arguments.size()) {
+    return 0;
+  }
+  auto value = cxx::template_argument_value(arguments[argument_index]);
+  if (!value) {
+    return 0;
+  }
+  auto* number = std::get_if<cxx::ConstInt>(&*value);
+  if (!number || number->isNegative() ||
+      (number->toUWide() != 0 &&
+       number->toUWide() != LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS)) {
+    diagnostics.reject(unit, owner, "unknown memory access contract");
+  }
+  return static_cast<loom_memory_access_flags_t>(number->toUIntMax());
+}
+
 void require_ordering(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
                       cxx::AST* owner, const loom_op_vtable_t* operation,
                       loom_diagnostic_field_ref_t field, uint8_t ordering) {
@@ -145,6 +167,8 @@ std::optional<AtomicIntrinsic> AtomicIntrinsic::resolve(
   std::array<uint8_t, 3> selectors;
   read_selectors(unit, diagnostics, function, attribute, owner,
                  std::span(selectors).first(selector_count));
+  const loom_memory_access_flags_t memory_flags =
+      read_memory_access(unit, diagnostics, function, selector_count, owner);
   auto kind = LOOM_ATOMIC_KIND_XCHGI;
   auto ordering = LOOM_ATOMIC_ORDERING_RELAXED;
   auto failure_ordering = LOOM_ATOMIC_ORDERING_RELAXED;
@@ -262,8 +286,8 @@ std::optional<AtomicIntrinsic> AtomicIntrinsic::resolve(
                        "destination element type");
   }
   return AtomicIntrinsic(operation, element_type, types.get(element, owner),
-                         kind, ordering, failure_ordering, scope, source_view,
-                         unsigned_index_mask);
+                         kind, ordering, failure_ordering, scope, memory_flags,
+                         source_view, unsigned_index_mask);
 }
 
 std::optional<AtomicBuiltin> AtomicBuiltin::resolve(
@@ -401,36 +425,39 @@ std::optional<Value> AtomicIntrinsic::call(std::span<const Value> arguments,
                             element_type_, owner);
     view = access.view;
   }
+  const loom_memory_access_flags_t memory_flags =
+      memory_flags_ |
+      (source_view_ ? 0 : LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS);
   loom_op_t* op;
   switch (operation_) {
     case Operation::Load:
       check(loom_view_atomic_load_build(
-          builder, 0, view, dynamic_indices, dynamic_index_count,
+          builder, 0, memory_flags, view, dynamic_indices, dynamic_index_count,
           static_indices.data(), static_index_count, ordering_, scope_, 0, 0,
           type_, location, &op));
       return Value(loom_op_results(op)[0]);
     case Operation::Store:
       check(loom_view_atomic_store_build(
-          builder, 0, arguments[0].ssa(), view, dynamic_indices,
+          builder, 0, memory_flags, arguments[0].ssa(), view, dynamic_indices,
           dynamic_index_count, static_indices.data(), static_index_count,
           ordering_, scope_, 0, 0, location, &op));
       return std::nullopt;
     case Operation::Rmw:
       check(loom_view_atomic_rmw_build(
-          builder, 0, kind_, /*instance_flags=*/0, arguments[0].ssa(), view,
+          builder, 0, kind_, memory_flags, arguments[0].ssa(), view,
           dynamic_indices, dynamic_index_count, static_indices.data(),
           static_index_count, ordering_, scope_, 0, 0, type_, location, &op));
       return Value(loom_op_results(op)[0]);
     case Operation::Reduce:
       check(loom_view_atomic_reduce_build(
-          builder, 0, kind_, /*instance_flags=*/0, arguments[0].ssa(), view,
+          builder, 0, kind_, memory_flags, arguments[0].ssa(), view,
           dynamic_indices, dynamic_index_count, static_indices.data(),
           static_index_count, ordering_, scope_, 0, 0, location, &op));
       return std::nullopt;
     case Operation::CompareExchange:
       check(loom_view_atomic_cmpxchg_build(
-          builder, 0, arguments[0].ssa(), arguments[1].ssa(), view,
-          dynamic_indices, dynamic_index_count, static_indices.data(),
+          builder, 0, memory_flags, arguments[0].ssa(), arguments[1].ssa(),
+          view, dynamic_indices, dynamic_index_count, static_indices.data(),
           static_index_count, ordering_, failure_ordering_, scope_, 0, 0, type_,
           location, &op));
       return Value(loom_op_results(op)[0]);
@@ -518,7 +545,8 @@ bool AtomicIntrinsic::equivalent(const AtomicIntrinsic& other) const {
          element_type_ == other.element_type_ && kind_ == other.kind_ &&
          ordering_ == other.ordering_ &&
          failure_ordering_ == other.failure_ordering_ &&
-         scope_ == other.scope_ && source_view_ == other.source_view_ &&
+         scope_ == other.scope_ && memory_flags_ == other.memory_flags_ &&
+         source_view_ == other.source_view_ &&
          unsigned_index_mask_ == other.unsigned_index_mask_;
 }
 

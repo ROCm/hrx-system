@@ -982,13 +982,13 @@ TEST_P(AtomicStorageStabilityTest, AcquisitionInterferesWithSharedStorage) {
   loom_op_t* atomic = nullptr;
   if (kind == LOOM_OP_VIEW_ATOMIC_LOAD) {
     IREE_ASSERT_OK(loom_view_atomic_load_build(
-        &builder_, 0, token, nullptr, 0, indices, 1, ordering, scope, 0, 0,
-        loom_type_scalar(LOOM_SCALAR_TYPE_I32), LOOM_LOCATION_UNKNOWN,
-        &atomic));
+        &builder_, 0, /*instance_flags=*/0, token, nullptr, 0, indices, 1,
+        ordering, scope, 0, 0, loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+        LOOM_LOCATION_UNKNOWN, &atomic));
   } else if (kind == LOOM_OP_VIEW_ATOMIC_STORE) {
     IREE_ASSERT_OK(loom_view_atomic_store_build(
-        &builder_, 0, value, token, nullptr, 0, indices, 1, ordering, scope, 0,
-        0, LOOM_LOCATION_UNKNOWN, &atomic));
+        &builder_, 0, /*instance_flags=*/0, value, token, nullptr, 0, indices,
+        1, ordering, scope, 0, 0, LOOM_LOCATION_UNKNOWN, &atomic));
   } else {
     IREE_ASSERT_OK(loom_view_atomic_rmw_build(
         &builder_, 0, LOOM_ATOMIC_KIND_ADDI, /*instance_flags=*/0, value, token,
@@ -1057,9 +1057,10 @@ TEST_P(CompareExchangeStorageStabilityTest, AcquiringOrderingsInterfere) {
   const int64_t indices[] = {0};
   loom_op_t* atomic = nullptr;
   IREE_ASSERT_OK(loom_view_atomic_cmpxchg_build(
-      &builder_, 0, expected, replacement, token, nullptr, 0, indices, 1,
-      success_ordering, failure_ordering, LOOM_ATOMIC_SCOPE_DEVICE, 0, 0,
-      loom_type_scalar(LOOM_SCALAR_TYPE_I32), LOOM_LOCATION_UNKNOWN, &atomic));
+      &builder_, 0, /*instance_flags=*/0, expected, replacement, token, nullptr,
+      0, indices, 1, success_ordering, failure_ordering,
+      LOOM_ATOMIC_SCOPE_DEVICE, 0, 0, loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+      LOOM_LOCATION_UNKNOWN, &atomic));
 
   loom_value_fact_table_t facts = {};
   ComputeFacts(&facts);

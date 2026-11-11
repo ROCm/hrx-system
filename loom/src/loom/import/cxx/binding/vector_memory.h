@@ -8,6 +8,7 @@
 #define LOOM_IMPORT_CXX_BINDING_VECTOR_MEMORY_H_
 
 #include <cxx/attributes.h>
+#include <cxx/symbols_fwd.h>
 #include <cxx/types_fwd.h>
 
 #include <cstdint>
@@ -18,6 +19,7 @@
 #include "loom/import/cxx/source/source.h"
 #include "loom/import/cxx/value/representation.h"
 #include "loom/import/cxx/value/types.h"
+#include "loom/ops/op_defs.h"
 
 namespace loom::cxx_import {
 
@@ -34,7 +36,7 @@ class VectorMemoryIntrinsic {
   // no value; malformed recognized declarations diagnose at |owner|.
   static std::optional<VectorMemoryIntrinsic> resolve(
       cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
-      const cxx::FunctionType* signature, const cxx::Attribute& attribute,
+      cxx::FunctionSymbol* function, const cxx::Attribute& attribute,
       cxx::AST* owner);
 
   // Emits the admitted operation. A store has no result.
@@ -80,6 +82,8 @@ class VectorMemoryIntrinsic {
   loom_type_t predicate_type_ = {};
   // Unsigned source interpretations in the full-rank origin record.
   uint16_t origin_unsigned_mask_ = 0;
+  // Explicit physical-root proof selected by the source specialization.
+  loom_memory_access_flags_t memory_flags_ = 0;
 };
 
 }  // namespace loom::cxx_import

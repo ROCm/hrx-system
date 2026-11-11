@@ -88,12 +88,12 @@ func.def public @selected_access(%input: buffer, %input_byte_offset: offset, %ou
   %70 = scalar.assume %69 [range(%69, 0, 9223372036854775807)] : i64
   %71 = index.cast %70 : i64 to offset
   %72 = buffer.view %input[%71] : buffer -> view<1xi32>
-  %73 = view.load %72[0] : view<1xi32> -> i32
+  %73 = view.load<root_in_bounds> %72[0] : view<1xi32> -> i32
   %78 = index.cast %result_byte_offset : offset to i64
   %80 = scalar.assume %78 [range(%78, 0, 9223372036854775807)] : i64
   %81 = index.cast %80 : i64 to offset
   %82 = buffer.view %output[%81] : buffer -> view<1xi32>
-  view.store %73, %82[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %73, %82[0] : i32, view<1xi32>
   %117 = scalar.cmpi eq, %displacement, %153 : i64
   %159 = scf.if %117 -> (offset) {
     scf.yield %selected_byte_offset : offset
@@ -106,25 +106,25 @@ func.def public @selected_access(%input: buffer, %input_byte_offset: offset, %ou
     scf.yield %125 : offset
   }
   %85 = buffer.view %input[%159] : buffer -> view<1xi32>
-  %86 = view.load %85[0] : view<1xi32> -> i32
+  %86 = view.load<root_in_bounds> %85[0] : view<1xi32> -> i32
   %146 = scalar.constant 4 : i64
   %92 = scalar.addi %80, %146 : i64
   %93 = scalar.assume %92 [range(%92, 0, 9223372036854775807)] : i64
   %94 = index.cast %93 : i64 to offset
   %95 = buffer.view %output[%94] : buffer -> view<1xi32>
-  view.store %86, %95[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %86, %95[0] : i32, view<1xi32>
   %145 = scalar.constant 8 : i64
   %100 = index.cast %base_byte_offset : offset to i64
   %101 = scalar.addi %100, %145 : i64
   %102 = scalar.assume %101 [range(%101, 0, 9223372036854775807)] : i64
   %103 = index.cast %102 : i64 to offset
   %104 = buffer.view %input[%103] : buffer -> view<1xi32>
-  %105 = view.load %104[0] : view<1xi32> -> i32
+  %105 = view.load<root_in_bounds> %104[0] : view<1xi32> -> i32
   %111 = scalar.addi %80, %145 : i64
   %112 = scalar.assume %111 [range(%111, 0, 9223372036854775807)] : i64
   %113 = index.cast %112 : i64 to offset
   %114 = buffer.view %output[%113] : buffer -> view<1xi32>
-  view.store %105, %114[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %105, %114[0] : i32, view<1xi32>
   func.return
 }
 
@@ -211,7 +211,7 @@ func.def public @cursor_loops(%base: buffer, %base_byte_offset: offset, %result:
       scf.yield %196 : offset
     }
     %37 = buffer.view %base[%219] : buffer -> view<1xi32>
-    %38 = view.load %37[0] : view<1xi32> -> i32
+    %38 = view.load<root_in_bounds> %37[0] : view<1xi32> -> i32
     %total$39 = scalar.addi %total$227, %38 : i32
     %214 = scalar.constant 4 : i64
     %44 = index.cast %cursor_byte_offset$228 : offset to i64
@@ -226,15 +226,15 @@ func.def public @cursor_loops(%base: buffer, %base_byte_offset: offset, %result:
   %54 = scalar.assume %53 [range(%53, 0, 9223372036854775807)] : i64
   %55 = index.cast %54 : i64 to offset
   %56 = buffer.view %result[%55] : buffer -> view<1xi32>
-  view.store %total$229, %56[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %total$229, %56[0] : i32, view<1xi32>
   %57 = buffer.view %base[%cursor_byte_offset$230] : buffer -> view<1xi32>
-  %58 = view.load %57[0] : view<1xi32> -> i32
+  %58 = view.load<root_in_bounds> %57[0] : view<1xi32> -> i32
   %212 = scalar.constant 16 : i64
   %64 = scalar.addi %52, %212 : i64
   %65 = scalar.assume %64 [range(%64, 0, 9223372036854775807)] : i64
   %66 = index.cast %65 : i64 to offset
   %67 = buffer.view %result[%66] : buffer -> view<1xi32>
-  view.store %58, %67[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %58, %67[0] : i32, view<1xi32>
   %cursor$78, %cursor_byte_offset$79, %total$80, %index$81 = scf.while(%cursor = %base : buffer, %cursor_byte_offset = %cursor_byte_offset$230 : offset, %total = %total$21 : i32, %index = %total$21 : i32) -> (buffer, offset, i32, i32) {
     %82 = scalar.cmpi ult, %index, %count : i32
     scf.condition %82, %cursor, %cursor_byte_offset, %total, %index : i1, buffer, offset, i32, i32
@@ -245,7 +245,7 @@ func.def public @cursor_loops(%base: buffer, %base_byte_offset: offset, %result:
     %89 = scalar.assume %221 [range(%221, 0, 9223372036854775807)] : i64
     %cursor_byte_offset$90 = index.cast %89 : i64 to offset
     %91 = buffer.view %cursor[%cursor_byte_offset$90] : buffer -> view<1xi32>
-    %92 = view.load %91[0] : view<1xi32> -> i32
+    %92 = view.load<root_in_bounds> %91[0] : view<1xi32> -> i32
     %total$93 = scalar.addi %total$76, %92 : i32
     %94 = scalar.constant 1 : i32
     %index$95 = scalar.addi %index$77, %94 : i32
@@ -256,15 +256,15 @@ func.def public @cursor_loops(%base: buffer, %base_byte_offset: offset, %result:
   %102 = scalar.assume %101 [range(%101, 0, 9223372036854775807)] : i64
   %103 = index.cast %102 : i64 to offset
   %104 = buffer.view %result[%103] : buffer -> view<1xi32>
-  view.store %total$80, %104[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %total$80, %104[0] : i32, view<1xi32>
   %105 = buffer.view %cursor$78[%cursor_byte_offset$79] : buffer -> view<1xi32>
-  %106 = view.load %105[0] : view<1xi32> -> i32
+  %106 = view.load<root_in_bounds> %105[0] : view<1xi32> -> i32
   %209 = scalar.constant 24 : i64
   %112 = scalar.addi %52, %209 : i64
   %113 = scalar.assume %112 [range(%112, 0, 9223372036854775807)] : i64
   %114 = index.cast %113 : i64 to offset
   %115 = buffer.view %result[%114] : buffer -> view<1xi32>
-  view.store %106, %115[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %106, %115[0] : i32, view<1xi32>
   %cursor$123, %cursor_byte_offset$124, %index$125 = scf.while(%cursor = %cursor$78 : buffer, %cursor_byte_offset$118 = %cursor_byte_offset$79 : offset, %index$119 = %total$21 : i32) -> (buffer, offset, i32) {
     %208 = scalar.constant 4 : i64
     %130 = index.cast %cursor_byte_offset$118 : offset to i64
@@ -279,37 +279,37 @@ func.def public @cursor_loops(%base: buffer, %base_byte_offset: offset, %result:
     scf.yield %cursor, %cursor_byte_offset, %index : buffer, offset, i32
   }
   %137 = buffer.view %cursor$123[%cursor_byte_offset$124] : buffer -> view<1xi32>
-  %138 = view.load %137[0] : view<1xi32> -> i32
+  %138 = view.load<root_in_bounds> %137[0] : view<1xi32> -> i32
   %207 = scalar.constant 28 : i64
   %144 = scalar.addi %52, %207 : i64
   %145 = scalar.assume %144 [range(%144, 0, 9223372036854775807)] : i64
   %146 = index.cast %145 : i64 to offset
   %147 = buffer.view %result[%146] : buffer -> view<1xi32>
-  view.store %138, %147[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %138, %147[0] : i32, view<1xi32>
   %152 = index.cast %cursor_byte_offset$124 : offset to i64
   %224 = scalar.constant -4 : i64
   %225 = scalar.addi %152, %224 : i64
   %154 = scalar.assume %225 [range(%225, 0, 9223372036854775807)] : i64
   %cursor_byte_offset$155 = index.cast %154 : i64 to offset
   %156 = buffer.view %cursor$123[%cursor_byte_offset$155] : buffer -> view<1xi32>
-  %157 = view.load %156[0] : view<1xi32> -> i32
+  %157 = view.load<root_in_bounds> %156[0] : view<1xi32> -> i32
   %205 = scalar.constant 32 : i64
   %163 = scalar.addi %52, %205 : i64
   %164 = scalar.assume %163 [range(%163, 0, 9223372036854775807)] : i64
   %165 = index.cast %164 : i64 to offset
   %166 = buffer.view %result[%165] : buffer -> view<1xi32>
-  view.store %157, %166[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %157, %166[0] : i32, view<1xi32>
   %171 = index.cast %cursor_byte_offset$155 : offset to i64
   %223 = scalar.addi %171, %224 : i64
   %173 = scalar.assume %223 [range(%223, 0, 9223372036854775807)] : i64
   %174 = index.cast %173 : i64 to offset
   %175 = buffer.view %cursor$123[%174] : buffer -> view<1xi32>
-  %176 = view.load %175[0] : view<1xi32> -> i32
+  %176 = view.load<root_in_bounds> %175[0] : view<1xi32> -> i32
   %203 = scalar.constant 36 : i64
   %182 = scalar.addi %52, %203 : i64
   %183 = scalar.assume %182 [range(%182, 0, 9223372036854775807)] : i64
   %184 = index.cast %183 : i64 to offset
   %185 = buffer.view %result[%184] : buffer -> view<1xi32>
-  view.store %176, %185[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %176, %185[0] : i32, view<1xi32>
   func.return
 }

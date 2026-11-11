@@ -7,7 +7,7 @@ func.def public @entry(%output: buffer, %output_byte_offset: offset, %first: i32
   %3 = vector.constanti [0, 1, 2, 3] : vector<4xi32>
   %4 = vector.insert %first into %3[0] : i32, vector<4xi32>
   %5 = buffer.view %output[%output_byte_offset] : buffer -> view<4xi32>
-  vector.store %4, %5[0] : vector<4xi32>, view<4xi32>
+  vector.store<root_in_bounds> %4, %5[0] : vector<4xi32>, view<4xi32>
   func.return
 }
 
@@ -55,7 +55,7 @@ void entry(volatile UInt4* output) { *output = {}; }
 func.def public @entry(%output: buffer, %output_byte_offset: offset) {
   %2 = vector.constanti [0, 0, 0, 0] : vector<4xi32>
   %3 = buffer.view %output[%output_byte_offset] : buffer -> view<4xi32>
-  vector.store<volatile> %2, %3[0] : vector<4xi32>, view<4xi32>
+  vector.store<volatile|root_in_bounds> %2, %3[0] : vector<4xi32>, view<4xi32>
   func.return
 }
 
@@ -140,7 +140,7 @@ func.def public @assign(%first: i32, %output: buffer, %output_byte_offset: offse
   %19 = vector.from_elements %6, %10, %14, %18 : vector<4xi32>
   %20, %21 = func.call @destination(%trace, %trace_byte_offset, %output, %output_byte_offset) : (buffer, offset, buffer, offset) -> (buffer, offset)
   %22 = buffer.view %20[%21] : buffer -> view<4xi32>
-  vector.store %19, %22[0] : vector<4xi32>, view<4xi32>
+  vector.store<root_in_bounds> %19, %22[0] : vector<4xi32>, view<4xi32>
   func.return
 }
 

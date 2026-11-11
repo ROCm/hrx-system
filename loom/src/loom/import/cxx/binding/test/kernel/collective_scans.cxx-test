@@ -42,7 +42,7 @@ kernel.def @scan_u32() {
   %24 = scalar.assume %104 [range(%104, 0, 9223372036854775807)] : i64
   %25 = index.cast %24 : i64 to offset
   %26 = buffer.view %input[%25] : buffer -> view<1xi32>
-  %value = view.load %26[0] : view<1xi32> -> i32
+  %value = view.load<root_in_bounds> %26[0] : view<1xi32> -> i32
   %28 = kernel.workgroup.scan<addi> %value {direction = forward, mode = inclusive} : i32
   %29 = scalar.constant 5 : i32
   %30 = scalar.muli %item, %29 : i32
@@ -52,7 +52,7 @@ kernel.def @scan_u32() {
   %38 = scalar.assume %102 [range(%102, 0, 9223372036854775807)] : i64
   %39 = index.cast %38 : i64 to offset
   %40 = buffer.view %output[%39] : buffer -> view<1xi32>
-  view.store %28, %40[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %28, %40[0] : i32, view<1xi32>
   %41 = kernel.workgroup.scan<addi> %value {direction = forward, mode = exclusive} : i32
   %44 = scalar.constant 2 : i32
   %45 = scalar.addi %30, %44 : i32
@@ -61,7 +61,7 @@ kernel.def @scan_u32() {
   %51 = scalar.assume %100 [range(%100, 0, 9223372036854775807)] : i64
   %52 = index.cast %51 : i64 to offset
   %53 = buffer.view %output[%52] : buffer -> view<1xi32>
-  view.store %41, %53[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %41, %53[0] : i32, view<1xi32>
   %54 = kernel.workgroup.scan<addi> %value {direction = reverse, mode = inclusive} : i32
   %57 = scalar.constant 3 : i32
   %58 = scalar.addi %30, %57 : i32
@@ -70,7 +70,7 @@ kernel.def @scan_u32() {
   %64 = scalar.assume %98 [range(%98, 0, 9223372036854775807)] : i64
   %65 = index.cast %64 : i64 to offset
   %66 = buffer.view %output[%65] : buffer -> view<1xi32>
-  view.store %54, %66[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %54, %66[0] : i32, view<1xi32>
   %67 = kernel.workgroup.scan<addi> %value {direction = reverse, mode = exclusive} : i32
   %70 = scalar.constant 4 : i32
   %71 = scalar.addi %30, %70 : i32
@@ -79,7 +79,7 @@ kernel.def @scan_u32() {
   %77 = scalar.assume %96 [range(%96, 0, 9223372036854775807)] : i64
   %78 = index.cast %77 : i64 to offset
   %79 = buffer.view %output[%78] : buffer -> view<1xi32>
-  view.store %67, %79[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %67, %79[0] : i32, view<1xi32>
   %80 = kernel.workgroup.reduce<addi> %value : i32
   %84 = scalar.addi %30, %29 : i32
   %85 = scalar.extui %84 : i32 to i64
@@ -87,7 +87,7 @@ kernel.def @scan_u32() {
   %90 = scalar.assume %94 [range(%94, 0, 9223372036854775807)] : i64
   %91 = index.cast %90 : i64 to offset
   %92 = buffer.view %output[%91] : buffer -> view<1xi32>
-  view.store %80, %92[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %80, %92[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -136,7 +136,7 @@ kernel.def @scan_u64() {
   %24 = scalar.assume %104 [range(%104, 0, 9223372036854775807)] : i64
   %25 = index.cast %24 : i64 to offset
   %26 = buffer.view %input[%25] : buffer -> view<1xi64>
-  %value = view.load %26[0] : view<1xi64> -> i64
+  %value = view.load<root_in_bounds> %26[0] : view<1xi64> -> i64
   %28 = kernel.workgroup.scan<addi> %value {direction = forward, mode = inclusive} : i64
   %29 = scalar.constant 5 : i32
   %30 = scalar.muli %item, %29 : i32
@@ -146,7 +146,7 @@ kernel.def @scan_u64() {
   %38 = scalar.assume %102 [range(%102, 0, 9223372036854775807)] : i64
   %39 = index.cast %38 : i64 to offset
   %40 = buffer.view %output[%39] : buffer -> view<1xi64>
-  view.store %28, %40[0] : i64, view<1xi64>
+  view.store<root_in_bounds> %28, %40[0] : i64, view<1xi64>
   %41 = kernel.workgroup.scan<addi> %value {direction = forward, mode = exclusive} : i64
   %44 = scalar.constant 2 : i32
   %45 = scalar.addi %30, %44 : i32
@@ -155,7 +155,7 @@ kernel.def @scan_u64() {
   %51 = scalar.assume %100 [range(%100, 0, 9223372036854775807)] : i64
   %52 = index.cast %51 : i64 to offset
   %53 = buffer.view %output[%52] : buffer -> view<1xi64>
-  view.store %41, %53[0] : i64, view<1xi64>
+  view.store<root_in_bounds> %41, %53[0] : i64, view<1xi64>
   %54 = kernel.workgroup.scan<addi> %value {direction = reverse, mode = inclusive} : i64
   %57 = scalar.constant 3 : i32
   %58 = scalar.addi %30, %57 : i32
@@ -164,7 +164,7 @@ kernel.def @scan_u64() {
   %64 = scalar.assume %98 [range(%98, 0, 9223372036854775807)] : i64
   %65 = index.cast %64 : i64 to offset
   %66 = buffer.view %output[%65] : buffer -> view<1xi64>
-  view.store %54, %66[0] : i64, view<1xi64>
+  view.store<root_in_bounds> %54, %66[0] : i64, view<1xi64>
   %67 = kernel.workgroup.scan<addi> %value {direction = reverse, mode = exclusive} : i64
   %70 = scalar.constant 4 : i32
   %71 = scalar.addi %30, %70 : i32
@@ -173,7 +173,7 @@ kernel.def @scan_u64() {
   %77 = scalar.assume %96 [range(%96, 0, 9223372036854775807)] : i64
   %78 = index.cast %77 : i64 to offset
   %79 = buffer.view %output[%78] : buffer -> view<1xi64>
-  view.store %67, %79[0] : i64, view<1xi64>
+  view.store<root_in_bounds> %67, %79[0] : i64, view<1xi64>
   %80 = kernel.workgroup.reduce<addi> %value : i64
   %84 = scalar.addi %30, %29 : i32
   %85 = scalar.extui %84 : i32 to i64
@@ -181,7 +181,7 @@ kernel.def @scan_u64() {
   %90 = scalar.assume %94 [range(%94, 0, 9223372036854775807)] : i64
   %91 = index.cast %90 : i64 to offset
   %92 = buffer.view %output[%91] : buffer -> view<1xi64>
-  view.store %80, %92[0] : i64, view<1xi64>
+  view.store<root_in_bounds> %80, %92[0] : i64, view<1xi64>
   kernel.return
 }
 
@@ -230,7 +230,7 @@ kernel.def @scan_f32() {
   %24 = scalar.assume %104 [range(%104, 0, 9223372036854775807)] : i64
   %25 = index.cast %24 : i64 to offset
   %26 = buffer.view %input[%25] : buffer -> view<1xf32>
-  %value = view.load %26[0] : view<1xf32> -> f32
+  %value = view.load<root_in_bounds> %26[0] : view<1xf32> -> f32
   %28 = kernel.workgroup.scan<addf> %value {direction = forward, mode = inclusive} : f32
   %29 = scalar.constant 5 : i32
   %30 = scalar.muli %item, %29 : i32
@@ -240,7 +240,7 @@ kernel.def @scan_f32() {
   %38 = scalar.assume %102 [range(%102, 0, 9223372036854775807)] : i64
   %39 = index.cast %38 : i64 to offset
   %40 = buffer.view %output[%39] : buffer -> view<1xf32>
-  view.store %28, %40[0] : f32, view<1xf32>
+  view.store<root_in_bounds> %28, %40[0] : f32, view<1xf32>
   %41 = kernel.workgroup.scan<addf> %value {direction = forward, mode = exclusive} : f32
   %44 = scalar.constant 2 : i32
   %45 = scalar.addi %30, %44 : i32
@@ -249,7 +249,7 @@ kernel.def @scan_f32() {
   %51 = scalar.assume %100 [range(%100, 0, 9223372036854775807)] : i64
   %52 = index.cast %51 : i64 to offset
   %53 = buffer.view %output[%52] : buffer -> view<1xf32>
-  view.store %41, %53[0] : f32, view<1xf32>
+  view.store<root_in_bounds> %41, %53[0] : f32, view<1xf32>
   %54 = kernel.workgroup.scan<addf> %value {direction = reverse, mode = inclusive} : f32
   %57 = scalar.constant 3 : i32
   %58 = scalar.addi %30, %57 : i32
@@ -258,7 +258,7 @@ kernel.def @scan_f32() {
   %64 = scalar.assume %98 [range(%98, 0, 9223372036854775807)] : i64
   %65 = index.cast %64 : i64 to offset
   %66 = buffer.view %output[%65] : buffer -> view<1xf32>
-  view.store %54, %66[0] : f32, view<1xf32>
+  view.store<root_in_bounds> %54, %66[0] : f32, view<1xf32>
   %67 = kernel.workgroup.scan<addf> %value {direction = reverse, mode = exclusive} : f32
   %70 = scalar.constant 4 : i32
   %71 = scalar.addi %30, %70 : i32
@@ -267,7 +267,7 @@ kernel.def @scan_f32() {
   %77 = scalar.assume %96 [range(%96, 0, 9223372036854775807)] : i64
   %78 = index.cast %77 : i64 to offset
   %79 = buffer.view %output[%78] : buffer -> view<1xf32>
-  view.store %67, %79[0] : f32, view<1xf32>
+  view.store<root_in_bounds> %67, %79[0] : f32, view<1xf32>
   %80 = kernel.workgroup.reduce<addf> %value : f32
   %84 = scalar.addi %30, %29 : i32
   %85 = scalar.extui %84 : i32 to i64
@@ -275,6 +275,6 @@ kernel.def @scan_f32() {
   %90 = scalar.assume %94 [range(%94, 0, 9223372036854775807)] : i64
   %91 = index.cast %90 : i64 to offset
   %92 = buffer.view %output[%91] : buffer -> view<1xf32>
-  view.store %80, %92[0] : f32, view<1xf32>
+  view.store<root_in_bounds> %80, %92[0] : f32, view<1xf32>
   kernel.return
 }

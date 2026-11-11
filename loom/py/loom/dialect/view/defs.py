@@ -18,7 +18,7 @@ from loom.assembly import (
     TemplateParamFlags,
     TypeOf,
 )
-from loom.dialect.atomic import AtomicKind, AtomicLoadOrdering, AtomicMemoryFlags, AtomicOrdering, AtomicScope, AtomicStoreOrdering
+from loom.dialect.atomic import AtomicAccessFlags, AtomicKind, AtomicLoadOrdering, AtomicMemoryFlags, AtomicOrdering, AtomicScope, AtomicStoreOrdering
 from loom.dialect.cache import CacheScope, CacheTemporal
 from loom.dialect.memory import MemoryAccessFlags
 from loom.dsl import (
@@ -376,6 +376,7 @@ def _atomic_memory_attrs() -> list[AttrDef]:
 
 def _atomic_cmpxchg_memory_attrs() -> list[AttrDef]:
     return [
+        AttrDef("memory_flags", ATTR_TYPE_FLAGS, optional=True, enum_def=AtomicAccessFlags),
         AttrDef(
             "success_ordering",
             ATTR_TYPE_ENUM,
@@ -515,6 +516,7 @@ view_atomic_cmpxchg = Op(
     verify="loom_view_atomic_cmpxchg_verify",
     facts="loom_view_atomic_observation_facts",
     format=[
+        Flags("memory_flags"),
         Ref("expected"),
         COMMA,
         Ref("replacement"),
@@ -582,6 +584,7 @@ view_prefetch = Op(
 
 def _atomic_load_store_attrs(ordering: EnumDef) -> list[AttrDef]:
     return [
+        AttrDef("memory_flags", ATTR_TYPE_FLAGS, optional=True, enum_def=AtomicAccessFlags),
         AttrDef("ordering", ATTR_TYPE_ENUM, enum_def=ordering, doc="Required atomic memory ordering."),
         AttrDef("scope", ATTR_TYPE_ENUM, enum_def=AtomicScope, doc="Required atomic synchronization scope."),
         *_indexed_memory_attrs(),
@@ -611,7 +614,7 @@ view_atomic_load = Op(
     effective_traits="loom_view_atomic_load_effective_traits",
     verify="loom_view_atomic_load_verify",
     facts="loom_view_atomic_observation_facts",
-    format=[Ref("view"), IndexList("indices", "static_indices"), AttrDict(), COLON, TypeOf("view"), ARROW, ResultType("result")],
+    format=[Flags("memory_flags"), Ref("view"), IndexList("indices", "static_indices"), AttrDict(), COLON, TypeOf("view"), ARROW, ResultType("result")],
     examples=[
         "%generation = view.atomic.load %progress[0] {ordering = acquire, scope = system} : view<1xi32> -> i32",
     ],
@@ -640,7 +643,7 @@ view_atomic_store = Op(
     interfaces=[CachePolicyInterface(), _memory_access_interface(value="value", atomic_ordering="ordering", atomic_scope="scope")],
     effective_traits="loom_view_atomic_store_effective_traits",
     verify="loom_view_atomic_store_verify",
-    format=[Ref("value"), COMMA, Ref("view"), IndexList("indices", "static_indices"), AttrDict(), COLON, TypeOf("value"), COMMA, TypeOf("view")],
+    format=[Flags("memory_flags"), Ref("value"), COMMA, Ref("view"), IndexList("indices", "static_indices"), AttrDict(), COLON, TypeOf("value"), COMMA, TypeOf("view")],
     examples=[
         "view.atomic.store %generation, %progress[0] {ordering = release, scope = system} : i32, view<1xi32>",
     ],

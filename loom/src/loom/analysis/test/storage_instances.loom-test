@@ -364,6 +364,41 @@ storage: accessed=yes single_instance=yes
 
 // ====
 
+// A rendezvous before the first access retires the previous shared instance.
+// Merely defining the new root and view does not access their storage.
+kernel.def @test() {
+  %c1 = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%output: buffer) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %value = scalar.constant 7 : i32
+  %lane = kernel.workitem.id<x> : index
+  %leader = index.cmp eq, %lane, %c0 : index
+  %output_view = buffer.view %output[%origin] : buffer -> view<32xi32>
+  scf.for %i = [%c0 to %c8 step %c1] {
+    %storage = buffer.alloca<workgroup> align(16) %bytes : buffer
+    %slot = buffer.view %storage[%origin] : buffer -> view<32xi32>
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    view.store %value, %slot[%lane] : i32, view<32xi32>
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %loaded = view.load %slot[0] : view<32xi32> -> i32
+    scf.if %leader {
+      view.store %loaded, %output_view[%i] : i32, view<32xi32>
+    }
+  }
+  kernel.return
+}
+
+// ----
+storage: accessed=yes single_instance=yes
+
+// ====
+
 // A faster invocation can reuse shared bytes before a slower invocation finishes.
 func.def @test(%value: i32) {
   %origin = index.constant 0 : offset

@@ -34,7 +34,7 @@ func.def public @decode(%blocks: buffer, %blocks_byte_offset: offset, %block: i3
   %31 = scalar.assume %30 [range(%30, 0, 9223372036854775807)] : i64
   %32 = index.cast %31 : i64 to offset
   %33 = buffer.view %blocks[%32] : buffer -> view<1xi8>
-  %34 = view.load %33[0] : view<1xi8> -> i8
+  %34 = view.load<root_in_bounds> %33[0] : view<1xi8> -> i8
   %35 = scalar.extui %34 : i8 to i32
   %36 = scalar.addi %16, %35 : i32
   func.return %36 : i32
@@ -47,7 +47,7 @@ func.def @read(%values: buffer, %values_byte_offset: offset, %index: i32) -> (i3
   %46 = scalar.assume %45 [range(%45, 0, 9223372036854775807)] : i64
   %47 = index.cast %46 : i64 to offset
   %48 = buffer.view %values[%47] : buffer -> view<1xi8>
-  %49 = view.load %48[0] : view<1xi8> -> i8
+  %49 = view.load<root_in_bounds> %48[0] : view<1xi8> -> i8
   %50 = scalar.extui %49 : i8 to i32
   func.return %50 : i32
 }
@@ -110,7 +110,7 @@ func.def public @element(%matrices: buffer, %matrices_byte_offset: offset, %matr
   %49 = scalar.assume %48 [range(%48, 0, 9223372036854775807)] : i64
   %50 = index.cast %49 : i64 to offset
   %51 = buffer.view %matrices[%50] : buffer -> view<1xi16>
-  %52 = view.load %51[0] : view<1xi16> -> i16
+  %52 = view.load<root_in_bounds> %51[0] : view<1xi16> -> i16
   func.return %52 : i16
 }
 
@@ -130,7 +130,7 @@ func.def public @update(%rows: buffer, %rows_byte_offset: offset, %row: i32, %co
   %70 = scalar.assume %69 [range(%69, 0, 9223372036854775807)] : i64
   %71 = index.cast %70 : i64 to offset
   %72 = buffer.view %rows[%71] : buffer -> view<1xi16>
-  view.store %value, %72[0] : i16, view<1xi16>
+  view.store<root_in_bounds> %value, %72[0] : i16, view<1xi16>
   func.return
 }
 
@@ -173,10 +173,10 @@ func.def public @update(%batches: buffer, %batches_byte_offset: offset, %batch: 
   %30 = scalar.assume %29 [range(%29, 0, 9223372036854775807)] : i64
   %31 = index.cast %30 : i64 to offset
   %32 = buffer.view %batches[%31] : buffer -> view<4xf32>
-  %33 = vector.load %32[0] : view<4xf32> -> vector<4xf32>
+  %33 = vector.load<root_in_bounds> %32[0] : view<4xf32> -> vector<4xf32>
   %34 = vector.addf %33, %24 : vector<4xf32>
-  vector.store %34, %32[0] : vector<4xf32>, view<4xf32>
-  %43 = vector.load %32[0] : view<4xf32> -> vector<4xf32>
+  vector.store<root_in_bounds> %34, %32[0] : vector<4xf32>, view<4xf32>
+  %43 = vector.load<root_in_bounds> %32[0] : view<4xf32> -> vector<4xf32>
   func.return %43 : vector<4xf32>
 }
 
@@ -208,11 +208,11 @@ func.def public @update(%records: buffer, %records_byte_offset: offset, %record:
   %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
   %20 = index.cast %19 : i64 to offset
   %21 = buffer.view %records[%20] : buffer -> view<1xi32>
-  %previous = view.load<volatile> %21[0] : view<1xi32> -> i32
+  %previous = view.load<volatile|root_in_bounds> %21[0] : view<1xi32> -> i32
   %23 = scalar.constant 1 : i32
   %24 = scalar.addi %previous, %23 : i32
-  view.store<volatile> %24, %21[0] : i32, view<1xi32>
-  %42 = view.load<volatile> %21[0] : view<1xi32> -> i32
+  view.store<volatile|root_in_bounds> %24, %21[0] : i32, view<1xi32>
+  %42 = view.load<volatile|root_in_bounds> %21[0] : view<1xi32> -> i32
   %43 = scalar.addi %previous, %42 : i32
   func.return %43 : i32
 }
@@ -263,7 +263,7 @@ kernel.def @shared_rows() {
   %45 = scalar.assume %53 [range(%53, 0, 9223372036854775807)] : i64
   %46 = index.cast %45 : i64 to offset
   %47 = buffer.view %output[%46] : buffer -> view<1xi32>
-  view.store %39, %47[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %39, %47[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -344,10 +344,10 @@ kernel.def @shared_records() {
   %96 = scalar.assume %133 [range(%133, 0, 9223372036854775807)] : i64
   %97 = index.cast %96 : i64 to offset
   %98 = buffer.view %output[%97] : buffer -> view<1xi32>
-  view.store %90, %98[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %90, %98[0] : i32, view<1xi32>
   %118 = view.load %64[0] : view<1xf32> -> f32
   %126 = buffer.view %values[%97] : buffer -> view<1xf32>
-  view.store %118, %126[0] : f32, view<1xf32>
+  view.store<root_in_bounds> %118, %126[0] : f32, view<1xf32>
   kernel.return
 }
 

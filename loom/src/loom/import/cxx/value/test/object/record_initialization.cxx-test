@@ -411,13 +411,13 @@ func.def public @initialized_value(%seed: i32) -> (i32) {
 
 func.def @initialize_pair(%seed: i32, %output: buffer, %output_byte_offset: offset) {
   %33 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
-  view.store %seed, %33[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %seed, %33[0] : i32, view<1xi32>
   %34 = scalar.constant 1 : i32
   %35 = scalar.addi %seed, %34 : i32
   %36 = index.constant 4 : offset
   %37 = index.add %output_byte_offset, %36 : offset
   %38 = buffer.view %output[%37] : buffer -> view<1xi32>
-  view.store %35, %38[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %35, %38[0] : i32, view<1xi32>
   func.return
 }
 

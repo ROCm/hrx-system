@@ -1356,6 +1356,13 @@ std::optional<size_t> Functions::reference_return_parameter(
   return analysis ? analysis->reference_return_parameter() : std::nullopt;
 }
 
+std::span<const size_t> Functions::selected_reference_return_parameters(
+    cxx::FunctionSymbol* symbol) const {
+  auto* analysis = control_flow(symbol);
+  return analysis ? analysis->selected_reference_return_parameters()
+                  : std::span<const size_t>{};
+}
+
 std::span<cxx::Symbol* const> Functions::receiver_writes(
     cxx::FunctionSymbol* symbol) const {
   if (symbol->isDestructor()) {
@@ -1438,6 +1445,9 @@ BoundSignature Functions::bind_callable_signature(
       unit_.typeTraits().is_reference(signature->returnType());
   const bool returns_parameter_alias =
       returns_reference && reference_return_parameter(symbol).has_value();
+  const bool returns_selected_parameter_alias =
+      returns_reference &&
+      !selected_reference_return_parameters(symbol).empty();
   const bool returns_receiver_alias =
       returns_reference && receiver &&
       receiver->abi == ImplicitObjectABI::Value &&
@@ -1489,11 +1499,13 @@ BoundSignature Functions::bind_callable_signature(
   }
   size_t ordinary_result_count = 0;
   if (has_ordinary_result) {
-    auto* result_type =
-        returns_reference
-            ? unit_.typeTraits().add_pointer(
-                  unit_.typeTraits().remove_reference(signature->returnType()))
-            : signature->returnType();
+    const cxx::Type* result_type = signature->returnType();
+    if (returns_selected_parameter_alias) {
+      result_type = unit_.control()->getUnsignedIntType();
+    } else if (returns_reference) {
+      result_type = unit_.typeTraits().add_pointer(
+          unit_.typeTraits().remove_reference(result_type));
+    }
     sources.push_back(result_type);
     ordinary_result_count =
         types.partition(result_type, source).component_count;

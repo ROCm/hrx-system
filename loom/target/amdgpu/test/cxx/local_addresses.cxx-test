@@ -20,21 +20,19 @@ low.kernel.def target<amdgpu.rdna3.core> abi_layout({constant_count = 0, direct_
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %70 = storage {byte_alignment = 8, byte_length = 16} : low.storage<private>
-  %lhs_view = storage_address %70 : low.storage<private> -> reg<amdgpu.vgpr>
-  %76 = v_lshlrev_b32_src0_inline %lane, 3
-  %77 = global_load_b64_saddr %76, %input
-  %78 = v_mov_b32 0
-  scratch_store_b64_vaddr %78, %77
-  %rhs_view = storage_address %70 {offset = 8} : low.storage<private> -> reg<amdgpu.vgpr>
-  %81 = v_mov_b32 1072693248
-  %82 = concat(%78, %81) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  scratch_store_b64_vaddr %78, %82 {offset = 8}
-  %lhs = scratch_load_b64_vaddr %78
-  %rhs = scratch_load_b64_vaddr %78 {offset = 8}
-  %88 = v_cmp_lt_f64 %lhs, %rhs
-  %89 = v_cndmask_b32 %lhs_view, %rhs_view, %88
-  %90 = scratch_load_b64_vaddr %89
-  global_store_b64_saddr %76, %90, %output
+  %62 = v_lshlrev_b32_src0_inline %lane, 3
+  %lhs = global_load_b64_saddr %62, %input
+  %64 = v_mov_b32 0
+  %65 = v_mov_b32 1072693248
+  %rhs = concat(%64, %65) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %67 = v_cmp_lt_f64 %lhs, %rhs
+  %70 = v_cndmask_b32_src0_lit_src1_inline %67 {imm32 = 1, true_value = 0}
+  %71 = v_cmp_eq_i32_src1_inline %70 {rhs = 0}
+  %73 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %74 = v_cndmask_b32 %73, %64, %71
+  %76 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %77 = v_cndmask_b32 %76, %65, %71
+  %78 = concat(%74, %77) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %62, %78, %output
   return
 }

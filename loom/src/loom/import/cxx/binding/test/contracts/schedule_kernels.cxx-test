@@ -51,7 +51,7 @@ func.def public linkonce device inline @sum(%input: buffer, %input_byte_offset: 
     %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
     %28 = index.cast %27 : i64 to offset
     %29 = buffer.view %input[%28] : buffer -> view<1xi32>
-    %30 = view.load %29[0] : view<1xi32> -> i32
+    %30 = view.load<root_in_bounds> %29[0] : view<1xi32> -> i32
     %total$31 = scalar.addi %total$17, %30 : i32
     scf.yield %total$31 : i32
   }
@@ -76,7 +76,7 @@ kernel.def @scheduled_sum_unroll_1_depth_1() {
     %64 = scalar.assume %74 [range(%74, 0, 9223372036854775807)] : i64
     %65 = index.cast %64 : i64 to offset
     %66 = buffer.view %output[%65] : buffer -> view<1xi32>
-    view.store %58, %66[0] : i32, view<1xi32>
+    view.store<root_in_bounds> %58, %66[0] : i32, view<1xi32>
   }
   kernel.return
 }
@@ -135,7 +135,7 @@ func.def public linkonce device inline @sum(%input: buffer, %input_byte_offset: 
     %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
     %28 = index.cast %27 : i64 to offset
     %29 = buffer.view %input[%28] : buffer -> view<1xi32>
-    %30 = view.load %29[0] : view<1xi32> -> i32
+    %30 = view.load<root_in_bounds> %29[0] : view<1xi32> -> i32
     %total$31 = scalar.addi %total$17, %30 : i32
     scf.yield %total$31 : i32
   }
@@ -161,7 +161,7 @@ kernel.def @scheduled_sum_unroll_1_depth_2() {
     %64 = scalar.assume %74 [range(%74, 0, 9223372036854775807)] : i64
     %65 = index.cast %64 : i64 to offset
     %66 = buffer.view %output[%65] : buffer -> view<1xi32>
-    view.store %58, %66[0] : i32, view<1xi32>
+    view.store<root_in_bounds> %58, %66[0] : i32, view<1xi32>
   }
   kernel.return
 }
@@ -220,7 +220,7 @@ func.def public linkonce device inline @sum(%input: buffer, %input_byte_offset: 
     %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
     %28 = index.cast %27 : i64 to offset
     %29 = buffer.view %input[%28] : buffer -> view<1xi32>
-    %30 = view.load %29[0] : view<1xi32> -> i32
+    %30 = view.load<root_in_bounds> %29[0] : view<1xi32> -> i32
     %total$31 = scalar.addi %total$17, %30 : i32
     scf.yield %total$31 : i32
   }
@@ -246,7 +246,7 @@ kernel.def @scheduled_sum_unroll_3_depth_1() {
     %64 = scalar.assume %74 [range(%74, 0, 9223372036854775807)] : i64
     %65 = index.cast %64 : i64 to offset
     %66 = buffer.view %output[%65] : buffer -> view<1xi32>
-    view.store %58, %66[0] : i32, view<1xi32>
+    view.store<root_in_bounds> %58, %66[0] : i32, view<1xi32>
   }
   kernel.return
 }
@@ -305,7 +305,7 @@ func.def public linkonce device inline @sum(%input: buffer, %input_byte_offset: 
     %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
     %28 = index.cast %27 : i64 to offset
     %29 = buffer.view %input[%28] : buffer -> view<1xi32>
-    %30 = view.load %29[0] : view<1xi32> -> i32
+    %30 = view.load<root_in_bounds> %29[0] : view<1xi32> -> i32
     %total$31 = scalar.addi %total$17, %30 : i32
     scf.yield %total$31 : i32
   }
@@ -331,7 +331,7 @@ kernel.def @scheduled_sum_unroll_3_depth_2() {
     %64 = scalar.assume %74 [range(%74, 0, 9223372036854775807)] : i64
     %65 = index.cast %64 : i64 to offset
     %66 = buffer.view %output[%65] : buffer -> view<1xi32>
-    view.store %58, %66[0] : i32, view<1xi32>
+    view.store<root_in_bounds> %58, %66[0] : i32, view<1xi32>
   }
   kernel.return
 }

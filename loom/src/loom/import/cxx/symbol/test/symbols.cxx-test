@@ -364,7 +364,7 @@ kernel.def @library.dispatch() {
   %16 = scalar.assume %15 [range(%15, 0, 9223372036854775807)] : i64
   %17 = index.cast %16 : i64 to offset
   %18 = buffer.view %input[%17] : buffer -> view<1xi32>
-  %19 = view.load %18[0] : view<1xi32> -> i32
+  %19 = view.load<root_in_bounds> %18[0] : view<1xi32> -> i32
   %20 = func.call pure @arithmetic.mix(%19) : (i32) -> (i32)
   %21 = scalar.constant 0 : i32
   %22 = scalar.extui %21 : i32 to i64
@@ -375,7 +375,7 @@ kernel.def @library.dispatch() {
   %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
   %28 = index.cast %27 : i64 to offset
   %29 = buffer.view %output[%28] : buffer -> view<1xi32>
-  view.store %20, %29[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %20, %29[0] : i32, view<1xi32>
   kernel.return
 }
 

@@ -23,7 +23,7 @@ func.def public @guarded(%input: buffer, %input_byte_offset: offset, %length: i3
     %14 = scalar.assume %13 [range(%13, 0, 9223372036854775807)] : i64
     %15 = index.cast %14 : i64 to offset
     %16 = buffer.view %input[%15] : buffer -> view<1xi32>
-    %17 = view.load %16[0] : view<1xi32> -> i32
+    %17 = view.load<root_in_bounds> %16[0] : view<1xi32> -> i32
     scf.yield %17 : i32
   }
   func.return %6 : i32
@@ -186,7 +186,7 @@ func.def public @store(%output: buffer, %output_byte_offset: offset) {
   %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
   %10 = index.cast %9 : i64 to offset
   %11 = buffer.view %output[%10] : buffer -> view<1xi32>
-  view.store %2, %11[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %2, %11[0] : i32, view<1xi32>
   func.return
 }
 
@@ -204,7 +204,7 @@ func.def public @effect(%output: buffer, %output_byte_offset: offset, %choose: i
     %22 = scalar.assume %21 [range(%21, 0, 9223372036854775807)] : i64
     %23 = index.cast %22 : i64 to offset
     %24 = buffer.view %output[%23] : buffer -> view<1xi32>
-    view.store %15, %24[0] : i32, view<1xi32>
+    view.store<root_in_bounds> %15, %24[0] : i32, view<1xi32>
   }
   func.return
 }

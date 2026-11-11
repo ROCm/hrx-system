@@ -7,7 +7,7 @@ int read_previous(const int* pointer) { return pointer[-1]; }
 // ----
 func.def public @read(%pointer: buffer, %pointer_byte_offset: offset) -> (i32) {
   %3 = buffer.view %pointer[%pointer_byte_offset] : buffer -> view<1xi32>
-  %4 = view.load %3[0] : view<1xi32> -> i32
+  %4 = view.load<root_in_bounds> %3[0] : view<1xi32> -> i32
   func.return %4 : i32
 }
 
@@ -16,7 +16,7 @@ func.def public @read_zero(%pointer: buffer, %pointer_byte_offset: offset) -> (i
   %14 = scalar.assume %12 [range(%12, 0, 9223372036854775807)] : i64
   %15 = index.cast %14 : i64 to offset
   %16 = buffer.view %pointer[%15] : buffer -> view<1xi32>
-  %17 = view.load %16[0] : view<1xi32> -> i32
+  %17 = view.load<root_in_bounds> %16[0] : view<1xi32> -> i32
   func.return %17 : i32
 }
 
@@ -27,7 +27,7 @@ func.def public @read_next(%pointer: buffer, %pointer_byte_offset: offset) -> (i
   %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
   %28 = index.cast %27 : i64 to offset
   %29 = buffer.view %pointer[%28] : buffer -> view<1xi32>
-  %30 = view.load %29[0] : view<1xi32> -> i32
+  %30 = view.load<root_in_bounds> %29[0] : view<1xi32> -> i32
   func.return %30 : i32
 }
 
@@ -38,7 +38,7 @@ func.def public @read_previous(%pointer: buffer, %pointer_byte_offset: offset) -
   %42 = scalar.assume %41 [range(%41, 0, 9223372036854775807)] : i64
   %43 = index.cast %42 : i64 to offset
   %44 = buffer.view %pointer[%43] : buffer -> view<1xi32>
-  %45 = view.load %44[0] : view<1xi32> -> i32
+  %45 = view.load<root_in_bounds> %44[0] : view<1xi32> -> i32
   func.return %45 : i32
 }
 
@@ -62,7 +62,7 @@ func.def public @read_at(%pointer: buffer, %pointer_byte_offset: offset, %index:
   %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
   %10 = index.cast %9 : i64 to offset
   %11 = buffer.view %pointer[%10] : buffer -> view<1xi32>
-  %12 = view.load %11[0] : view<1xi32> -> i32
+  %12 = view.load<root_in_bounds> %11[0] : view<1xi32> -> i32
   func.return %12 : i32
 }
 
@@ -75,8 +75,8 @@ func.def public @exchange(%pointer: buffer, %pointer_byte_offset: offset, %index
   %23 = scalar.assume %22 [range(%22, 0, 9223372036854775807)] : i64
   %24 = index.cast %23 : i64 to offset
   %25 = buffer.view %pointer[%24] : buffer -> view<1xi32>
-  %previous = view.load %25[0] : view<1xi32> -> i32
-  view.store %replacement, %25[0] : i32, view<1xi32>
+  %previous = view.load<root_in_bounds> %25[0] : view<1xi32> -> i32
+  view.store<root_in_bounds> %replacement, %25[0] : i32, view<1xi32>
   func.return %previous : i32
 }
 
@@ -98,7 +98,7 @@ func.def public @read_member(%pointer: buffer, %pointer_byte_offset: offset) -> 
   %3 = index.constant 4 : offset
   %4 = index.add %pointer_byte_offset, %3 : offset
   %5 = buffer.view %pointer[%4] : buffer -> view<1xi32>
-  %second = view.load %5[0] : view<1xi32> -> i32
+  %second = view.load<root_in_bounds> %5[0] : view<1xi32> -> i32
   func.return %second : i32
 }
 
@@ -119,6 +119,40 @@ func.def @load_next(%pointer: buffer, %pointer_byte_offset: offset) -> (i32) {
   %28 = scalar.assume %27 [range(%27, 0, 9223372036854775807)] : i64
   %29 = index.cast %28 : i64 to offset
   %30 = buffer.view %pointer[%29] : buffer -> view<1xi32>
-  %31 = view.load %30[0] : view<1xi32> -> i32
+  %31 = view.load<root_in_bounds> %30[0] : view<1xi32> -> i32
   func.return %31 : i32
+}
+
+// ====
+// RUN: emit source-low @local_pointer_bounds target=amdgpu:gfx90a output=low
+// A dynamic helper subscript preserves the source allocation-root bounds
+// promise through its pointer ABI. After inlining, memory planning combines the
+// promise with the caller's finite local allocation before target lowering.
+static int select_local(const int* values, int index) {
+  return values[index];
+}
+static int forward_local(const int* values, int index) {
+  return select_local(values, index);
+}
+int local_pointer_bounds(int index) {
+  int values[4] = {3, 5, 7, 11};
+  return forward_local(values, index);
+}
+
+// ----
+low.func.def public target<amdgpu.cdna2.core> abi(hal_kernel) @local_pointer_bounds(%index: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %37 = storage {byte_alignment = 4, byte_length = 16} : low.storage<private>
+  %40 = v_mov_b32 3
+  %41 = v_mov_b32 0
+  scratch_store_dword_vaddr %41, %40
+  %43 = v_mov_b32 5
+  scratch_store_dword_vaddr %41, %43 {offset = 4}
+  %46 = v_mov_b32 7
+  scratch_store_dword_vaddr %41, %46 {offset = 8}
+  %49 = v_mov_b32 11
+  scratch_store_dword_vaddr %41, %49 {offset = 12}
+  %58 = v_mov_b32_copy %index
+  %59 = v_lshlrev_b32_src0_inline %58, 2
+  %60 = scratch_load_dword_vaddr %59 : reg<amdgpu.vgpr>
+  return %60
 }

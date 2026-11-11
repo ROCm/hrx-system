@@ -162,7 +162,7 @@ func.def public @mutable_bound(%input: buffer, %input_byte_offset: offset, %star
     %23 = scalar.assume %22 [range(%22, 0, 9223372036854775807)] : i64
     %24 = index.cast %23 : i64 to offset
     %25 = buffer.view %input[%24] : buffer -> view<1xi32>
-    %26 = view.load %25[0] : view<1xi32> -> i32
+    %26 = view.load<root_in_bounds> %25[0] : view<1xi32> -> i32
     %total$27 = scalar.addi %total$10, %26 : i32
     %28 = scalar.constant 1 : i32
     %index$29 = scalar.addi %index$11, %28 : i32

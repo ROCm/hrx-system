@@ -98,17 +98,17 @@ kernel.def @register_lookup() {
   scf.for %i = [%50 to %15 step %16] {
     %18 = index.cast %i : offset to i32
     %27 = buffer.view %table[%50] : buffer -> view<16xi32>
-    %28 = vector.load %27[0] : view<16xi32> -> vector<16xi32>
+    %28 = vector.load<root_in_bounds> %27[0] : view<16xi32> -> vector<16xi32>
     %29 = scalar.extui %18 : i32 to i64
     %53 = scalar.constant 4 : i64
     %54 = scalar.shli %29, %53 : i64
     %34 = scalar.assume %54 [range(%54, 0, 9223372036854775807)] : i64
     %35 = index.cast %34 : i64 to offset
     %36 = buffer.view %indices[%35] : buffer -> view<4xi32>
-    %37 = vector.load %36[0] : view<4xi32> -> vector<4xi32>
+    %37 = vector.load<root_in_bounds> %36[0] : view<4xi32> -> vector<4xi32>
     %38 = vector.table.lookup %28[%37] : vector<16xi32>, vector<4xi32> -> vector<4xi32>
     %46 = buffer.view %output[%35] : buffer -> view<4xi32>
-    vector.store %38, %46[0] : vector<4xi32>, view<4xi32>
+    vector.store<root_in_bounds> %38, %46[0] : vector<4xi32>, view<4xi32>
   }
   kernel.return
 }
@@ -141,17 +141,17 @@ kernel.def @register_lookup_float() {
   scf.for %i = [%50 to %15 step %16] {
     %18 = index.cast %i : offset to i32
     %27 = buffer.view %table[%50] : buffer -> view<16xf32>
-    %28 = vector.load %27[0] : view<16xf32> -> vector<16xf32>
+    %28 = vector.load<root_in_bounds> %27[0] : view<16xf32> -> vector<16xf32>
     %29 = scalar.extui %18 : i32 to i64
     %53 = scalar.constant 4 : i64
     %54 = scalar.shli %29, %53 : i64
     %34 = scalar.assume %54 [range(%54, 0, 9223372036854775807)] : i64
     %35 = index.cast %34 : i64 to offset
     %36 = buffer.view %indices[%35] : buffer -> view<4xi32>
-    %37 = vector.load %36[0] : view<4xi32> -> vector<4xi32>
+    %37 = vector.load<root_in_bounds> %36[0] : view<4xi32> -> vector<4xi32>
     %38 = vector.table.lookup %28[%37] : vector<16xf32>, vector<4xi32> -> vector<4xf32>
     %46 = buffer.view %output[%35] : buffer -> view<4xf32>
-    vector.store %38, %46[0] : vector<4xf32>, view<4xf32>
+    vector.store<root_in_bounds> %38, %46[0] : vector<4xf32>, view<4xf32>
   }
   kernel.return
 }
@@ -197,11 +197,11 @@ kernel.def @mixed_dot() {
     %26 = scalar.assume %127 [range(%127, 0, 9223372036854775807)] : i64
     %27 = index.cast %26 : i64 to offset
     %28 = buffer.view %lhs[%27] : buffer -> view<16xi8>
-    %a = vector.load %28[0] : view<16xi8> -> vector<16xi8>
+    %a = vector.load<root_in_bounds> %28[0] : view<16xi8> -> vector<16xi8>
     %37 = buffer.view %rhs[%27] : buffer -> view<16xi8>
-    %b = vector.load %37[0] : view<16xi8> -> vector<16xi8>
+    %b = vector.load<root_in_bounds> %37[0] : view<16xi8> -> vector<16xi8>
     %46 = buffer.view %acc[%27] : buffer -> view<4xi32>
-    %initial = vector.load %46[0] : view<4xi32> -> vector<4xi32>
+    %initial = vector.load<root_in_bounds> %46[0] : view<4xi32> -> vector<4xi32>
     %48 = vector.dot4i<s8s8> %a, %b, %initial : vector<16xi8>, vector<16xi8>, vector<4xi32>
     %120 = scalar.constant 2 : i32
     %121 = scalar.shli %20, %120 : i32
@@ -210,7 +210,7 @@ kernel.def @mixed_dot() {
     %56 = scalar.assume %119 [range(%119, 0, 9223372036854775807)] : i64
     %57 = index.cast %56 : i64 to offset
     %58 = buffer.view %output[%57] : buffer -> view<4xi32>
-    vector.store %48, %58[0] : vector<4xi32>, view<4xi32>
+    vector.store<root_in_bounds> %48, %58[0] : vector<4xi32>, view<4xi32>
     %59 = vector.dot4i<u8s8> %a, %b, %initial : vector<16xi8>, vector<16xi8>, vector<4xi32>
     %62 = scalar.constant 1 : i32
     %63 = scalar.addi %121, %62 : i32
@@ -219,7 +219,7 @@ kernel.def @mixed_dot() {
     %69 = scalar.assume %115 [range(%115, 0, 9223372036854775807)] : i64
     %70 = index.cast %69 : i64 to offset
     %71 = buffer.view %output[%70] : buffer -> view<4xi32>
-    vector.store %59, %71[0] : vector<4xi32>, view<4xi32>
+    vector.store<root_in_bounds> %59, %71[0] : vector<4xi32>, view<4xi32>
     %72 = vector.dot4i<s8u8> %a, %b, %initial : vector<16xi8>, vector<16xi8>, vector<4xi32>
     %76 = scalar.addi %121, %120 : i32
     %77 = scalar.extui %76 : i32 to i64
@@ -227,7 +227,7 @@ kernel.def @mixed_dot() {
     %82 = scalar.assume %111 [range(%111, 0, 9223372036854775807)] : i64
     %83 = index.cast %82 : i64 to offset
     %84 = buffer.view %output[%83] : buffer -> view<4xi32>
-    vector.store %72, %84[0] : vector<4xi32>, view<4xi32>
+    vector.store<root_in_bounds> %72, %84[0] : vector<4xi32>, view<4xi32>
     %85 = vector.dot4i<u8u8> %a, %b, %initial : vector<16xi8>, vector<16xi8>, vector<4xi32>
     %88 = scalar.constant 3 : i32
     %89 = scalar.addi %121, %88 : i32
@@ -236,7 +236,7 @@ kernel.def @mixed_dot() {
     %95 = scalar.assume %107 [range(%107, 0, 9223372036854775807)] : i64
     %96 = index.cast %95 : i64 to offset
     %97 = buffer.view %output[%96] : buffer -> view<4xi32>
-    vector.store %85, %97[0] : vector<4xi32>, view<4xi32>
+    vector.store<root_in_bounds> %85, %97[0] : vector<4xi32>, view<4xi32>
   }
   kernel.return
 }

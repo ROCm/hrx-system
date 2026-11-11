@@ -6,7 +6,9 @@
 
 #include "loom/import/cxx/binding/vector_memory.h"
 
+#include <cxx/const_value.h>
 #include <cxx/names.h>
+#include <cxx/symbols.h>
 #include <cxx/types.h>
 
 #include <algorithm>
@@ -85,6 +87,28 @@ loom_value_id_t view_component(Value value) {
   return value.components().back();
 }
 
+loom_memory_access_flags_t memory_access_flags(cxx::TranslationUnit& unit,
+                                               Diagnostics& diagnostics,
+                                               cxx::FunctionSymbol* function,
+                                               size_t argument_index,
+                                               cxx::AST* owner) {
+  auto arguments = function->templateArguments();
+  if (argument_index >= arguments.size()) {
+    return 0;
+  }
+  auto value = cxx::template_argument_value(arguments[argument_index]);
+  if (!value) {
+    return 0;
+  }
+  auto* number = std::get_if<cxx::ConstInt>(&*value);
+  if (!number || number->isNegative() ||
+      (number->toUWide() != 0 &&
+       number->toUWide() != LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS)) {
+    diagnostics.reject(unit, owner, "unknown memory access contract");
+  }
+  return static_cast<loom_memory_access_flags_t>(number->toUIntMax());
+}
+
 }  // namespace
 
 std::optional<VectorMemoryIntrinsic::Operation>
@@ -128,7 +152,7 @@ bool VectorMemoryIntrinsic::has_mask() const {
 
 std::optional<VectorMemoryIntrinsic> VectorMemoryIntrinsic::resolve(
     cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
-    const cxx::FunctionType* signature, const cxx::Attribute& attribute,
+    cxx::FunctionSymbol* function, const cxx::Attribute& attribute,
     cxx::AST* owner) {
   if (attribute.arguments.empty()) {
     return std::nullopt;
@@ -137,6 +161,7 @@ std::optional<VectorMemoryIntrinsic> VectorMemoryIntrinsic::resolve(
   if (!operation) {
     return std::nullopt;
   }
+  auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
   if (attribute.arguments.size() != 1 || signature->isVariadic()) {
     diagnostics.reject(unit, owner,
                        "vector memory operations accept one operation name "
@@ -145,6 +170,11 @@ std::optional<VectorMemoryIntrinsic> VectorMemoryIntrinsic::resolve(
 
   auto parameters = signature->parameterTypes();
   VectorMemoryIntrinsic result(*operation);
+  if (*operation == Operation::Load || *operation == Operation::Store) {
+    result.memory_flags_ =
+        memory_access_flags(unit, diagnostics, function,
+                            *operation == Operation::Load ? 1 : 0, owner);
+  }
   size_t view_index;
   size_t origin_index;
   size_t mask_index = 0;
@@ -314,10 +344,10 @@ std::optional<Value> VectorMemoryIntrinsic::call(
   };
   switch (operation_) {
     case Operation::Load:
-      check(loom_vector_load_build(builder, 0, view_->access_flags, view,
-                                   indices.data(), origin.size(),
-                                   static_indices.data(), origin.size(), 0, 0,
-                                   vector_type, location, &op));
+      check(loom_vector_load_build(
+          builder, 0, view_->access_flags | memory_flags_, view, indices.data(),
+          origin.size(), static_indices.data(), origin.size(), 0, 0,
+          vector_type, location, &op));
       if (!semantic_vector_) {
         return Value(loom_op_results(op)[0]);
       }
@@ -328,10 +358,10 @@ std::optional<Value> VectorMemoryIntrinsic::call(
                            std::span<const loom_value_id_t>(components)
                                .first(dimensions.size() + 1));
     case Operation::Store:
-      check(loom_vector_store_build(builder, 0, view_->access_flags,
-                                    vector_value(0), view, indices.data(),
-                                    origin.size(), static_indices.data(),
-                                    origin.size(), 0, 0, location, &op));
+      check(loom_vector_store_build(
+          builder, 0, view_->access_flags | memory_flags_, vector_value(0),
+          view, indices.data(), origin.size(), static_indices.data(),
+          origin.size(), 0, 0, location, &op));
       return std::nullopt;
     case Operation::LoadMask:
     case Operation::LoadExpand: {
@@ -367,6 +397,7 @@ bool VectorMemoryIntrinsic::equivalent(
          semantic_vector_ == other.semantic_vector_ &&
          dimensions_index_ == other.dimensions_index_ &&
          (!has_mask() || loom_type_equal(mask_type_, other.mask_type_)) &&
+         memory_flags_ == other.memory_flags_ &&
          origin_unsigned_mask_ == other.origin_unsigned_mask_;
 }
 

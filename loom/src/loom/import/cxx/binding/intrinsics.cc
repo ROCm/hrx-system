@@ -316,12 +316,12 @@ Intrinsics::Binding Intrinsics::resolve(cxx::FunctionSymbol* function,
                                            attribute, owner)) {
     return *fence;
   }
-  if (auto view = ViewIntrinsic::resolve(unit_, diagnostics_, types_, signature,
+  if (auto view = ViewIntrinsic::resolve(unit_, diagnostics_, types_, function,
                                          attribute, owner)) {
     return *view;
   }
   if (auto memory = VectorMemoryIntrinsic::resolve(
-          unit_, diagnostics_, types_, signature, attribute, owner)) {
+          unit_, diagnostics_, types_, function, attribute, owner)) {
     return *memory;
   }
   if (auto shuffle = SubgroupShuffleIntrinsic::resolve(

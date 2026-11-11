@@ -6,6 +6,7 @@
 
 #include "loom/import/cxx/binding/view.h"
 
+#include <cxx/const_value.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
 #include <cxx/types.h>
@@ -64,6 +65,28 @@ const ViewPartition& require_view(cxx::TranslationUnit& unit,
     diagnostics.reject(unit, owner, "view operation requires a view value");
   }
   return static_cast<const ViewPartition&>(partition);
+}
+
+loom_memory_access_flags_t memory_access_flags(cxx::TranslationUnit& unit,
+                                               Diagnostics& diagnostics,
+                                               cxx::FunctionSymbol* function,
+                                               size_t argument_index,
+                                               cxx::AST* owner) {
+  auto arguments = function->templateArguments();
+  if (argument_index >= arguments.size()) {
+    return 0;
+  }
+  auto value = cxx::template_argument_value(arguments[argument_index]);
+  if (!value) {
+    return 0;
+  }
+  auto* number = std::get_if<cxx::ConstInt>(&*value);
+  if (!number || number->isNegative() ||
+      (number->toUWide() != 0 &&
+       number->toUWide() != LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS)) {
+    diagnostics.reject(unit, owner, "unknown memory access contract");
+  }
+  return static_cast<loom_memory_access_flags_t>(number->toUIntMax());
 }
 
 size_t dynamic_extent_count(const ViewPartition& view) {
@@ -182,7 +205,7 @@ std::optional<ViewIntrinsic::Operation> ViewIntrinsic::parse_operation(
 
 std::optional<ViewIntrinsic> ViewIntrinsic::resolve(
     cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
-    const cxx::FunctionType* signature, const cxx::Attribute& attribute,
+    cxx::FunctionSymbol* function, const cxx::Attribute& attribute,
     cxx::AST* owner) {
   if (attribute.arguments.empty()) {
     return std::nullopt;
@@ -191,6 +214,7 @@ std::optional<ViewIntrinsic> ViewIntrinsic::resolve(
   if (!selected) {
     return std::nullopt;
   }
+  auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
   if (attribute.arguments.size() != 1 || signature->isVariadic()) {
     diagnostics.reject(unit, owner,
                        "view operations accept one operation name and a fixed "
@@ -211,6 +235,10 @@ std::optional<ViewIntrinsic> ViewIntrinsic::resolve(
   };
 
   ViewIntrinsic result(*selected);
+  if (*selected == Operation::Load || *selected == Operation::Store) {
+    result.memory_flags_ =
+        memory_access_flags(unit, diagnostics, function, 0, owner);
+  }
   switch (*selected) {
     case Operation::LayoutDense: {
       require_count(0);
@@ -532,8 +560,9 @@ std::optional<Value> ViewIntrinsic::call(std::span<const Value> arguments,
             builder, location);
       }
       check(loom_view_load_build(
-          builder, 0, source_view_->access_flags, view_component(arguments[0]),
-          indices.data(), source_view_->extents.size(), static_indices.data(),
+          builder, 0, source_view_->access_flags | memory_flags_,
+          view_component(arguments[0]), indices.data(),
+          source_view_->extents.size(), static_indices.data(),
           source_view_->extents.size(), 0, 0, scalar_result_, location, &op));
       return Value(loom_op_results(op)[0]);
     }
@@ -549,8 +578,8 @@ std::optional<Value> ViewIntrinsic::call(std::span<const Value> arguments,
             builder, location);
       }
       check(loom_view_store_build(
-          builder, 0, source_view_->access_flags, arguments[0].ssa(),
-          view_component(arguments[1]), indices.data(),
+          builder, 0, source_view_->access_flags | memory_flags_,
+          arguments[0].ssa(), view_component(arguments[1]), indices.data(),
           source_view_->extents.size(), static_indices.data(),
           source_view_->extents.size(), 0, 0, location, &op));
       return std::nullopt;
@@ -571,6 +600,7 @@ bool ViewIntrinsic::equivalent(const ViewIntrinsic& other) const {
          unsigned_argument_mask_ == other.unsigned_argument_mask_ &&
          unsigned_dimension_mask_ == other.unsigned_dimension_mask_ &&
          unsigned_origin_mask_ == other.unsigned_origin_mask_ &&
+         memory_flags_ == other.memory_flags_ &&
          loom_type_equal(scalar_result_, other.scalar_result_);
 }
 

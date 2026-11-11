@@ -416,7 +416,7 @@ func.def public @store(%bits: i32, %output: buffer, %output_byte_offset: offset)
   %5 = vector.bitcast %bytes : vector<4xi8> to vector<1xf32>
   %6 = vector.extract %5[0] : vector<1xf32> -> f32
   %7 = buffer.view %output[%output_byte_offset] : buffer -> view<1xf32>
-  view.store %6, %7[0] : f32, view<1xf32>
+  view.store<root_in_bounds> %6, %7[0] : f32, view<1xf32>
   func.return
 }
 
@@ -432,7 +432,7 @@ unsigned load(const float* input) {
 // ----
 func.def public @load(%input: buffer, %input_byte_offset: offset) -> (i32) {
   %3 = buffer.view %input[%input_byte_offset] : buffer -> view<1xf32>
-  %4 = view.load %3[0] : view<1xf32> -> f32
+  %4 = view.load<root_in_bounds> %3[0] : view<1xf32> -> f32
   %5 = vector.from_elements %4 : vector<1xf32>
   %bytes = vector.bitcast %5 : vector<1xf32> to vector<4xi8>
   %7 = vector.bitcast %bytes : vector<4xi8> to vector<1xi32>
@@ -456,6 +456,6 @@ func.def public @store(%bits: i64, %output: buffer, %output_byte_offset: offset)
   %5 = vector.bitcast %words : vector<2xi32> to vector<1xf64>
   %6 = vector.extract %5[0] : vector<1xf64> -> f64
   %7 = buffer.view %output[%output_byte_offset] : buffer -> view<1xf64>
-  view.store %6, %7[0] : f64, view<1xf64>
+  view.store<root_in_bounds> %6, %7[0] : f64, view<1xf64>
   func.return
 }

@@ -38,6 +38,9 @@ struct StorageAccess {
   loom_value_id_t view;
   // Full-rank dynamic array index, absent for a scalar pointer projection.
   std::optional<loom_value_id_t> index;
+  // Whether this access relies on the source's defined-access promise because
+  // its allocation extent is unavailable in the current function.
+  bool root_bounds_promised = false;
 };
 
 struct StorageAllocation {
@@ -193,10 +196,11 @@ class Storage {
 
  private:
   // Publishes the defined-source dereference range for a compiler-owned
-  // allocation. External buffer roots have no importer-owned extent and pass
-  // through unchanged.
-  Pointer constrain_access(Pointer pointer, int64_t access_bytes,
-                           cxx::AST* owner);
+  // allocation. Returns no value when the current function has no exact root
+  // extent and the access must instead retain the source bounds promise.
+  std::optional<Pointer> constrain_known_access(Pointer pointer,
+                                                int64_t access_bytes,
+                                                cxx::AST* owner);
   // Copies producer-owned storage facts to a root refinement.
   void inherit_root_facts(loom_value_id_t source, loom_value_id_t result);
   // Records one fixed allocation after its producer and source layout have

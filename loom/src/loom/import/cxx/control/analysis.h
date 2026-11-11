@@ -349,12 +349,13 @@ class ControlFlow final : private cxx::ASTVisitor {
   }
   // Exact source parameter aliased by every reference return, when one exists.
   // Callers can reuse that evaluated argument instead of inventing a result.
-  std::optional<size_t> reference_return_parameter() const {
-    if (reference_return_ != ReferenceReturn::Parameter) {
-      return std::nullopt;
-    }
-    return reference_return_parameter_;
-  }
+  std::optional<size_t> reference_return_parameter() const;
+  // Finite parameter-origin set selected by a reference return. Two or more
+  // origins use an ordinal result instead of inventing a pointer carrier.
+  std::span<const size_t> selected_reference_return_parameters() const;
+  // Selector index for one direct parameter leaf of a selected return.
+  std::optional<size_t> selected_reference_return_index(
+      cxx::ExpressionAST* expression) const;
   // Whether this reached call must materialize a self-reference result as
   // durable storage for a caller-side identity use.
   bool call_result_requires_storage(cxx::AST* call) const {
@@ -387,6 +388,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   struct TemporaryDestructionFacts;
   struct ReferenceIdentityFacts;
   struct ReferenceWriteFacts;
+  struct SelectedReferenceReturnFacts;
 
   struct PointerReferenceCapture {
     // Synthesized closure field carrying either the referent value or storage
@@ -562,6 +564,9 @@ class ControlFlow final : private cxx::ASTVisitor {
                                                    ControlFlow& callee);
   std::optional<Destination> classify_destination(
       cxx::ExpressionAST* expression);
+  bool collect_reference_return_parameters(cxx::ExpressionAST* expression,
+                                           std::vector<size_t>& ordinals);
+  std::span<const size_t> reference_return_parameters() const;
   bool classify_storage(cxx::ExpressionAST* expression) const;
   bool is_captured_object_field(cxx::Symbol* field) const;
   cxx::Symbol* object_owner(cxx::ExpressionAST* expression) const;
@@ -662,8 +667,12 @@ class ControlFlow final : private cxx::ASTVisitor {
   bool observes_pointer_captures_ = false;
   // Common origin of every runtime reference return seen in the body.
   ReferenceReturn reference_return_ = ReferenceReturn::None;
-  // Source ordinal retained when every reference return aliases one parameter.
-  size_t reference_return_parameter_ = 0;
+  // Source ordinal retained by the allocation-free single-parameter case.
+  size_t reference_return_parameter_ = SIZE_MAX;
+  // Sparse multi-origin return facts. Ordinary functions and exact aliases do
+  // not retain selected-return containers after analysis.
+  std::unique_ptr<SelectedReferenceReturnFacts>
+      selected_reference_return_facts_;
   // Nested lvalue ownership and transitive component offsets computed once.
   std::unordered_map<cxx::ExpressionAST*, Destination> destinations_;
   // Memory record objects and member projections, including nested fields.

@@ -29,20 +29,20 @@ func.def public @vector_depth(%previous_words: buffer, %previous_words_byte_offs
     %18 = scalar.assume %17 [range(%17, 0, 9223372036854775807)] : i64
     %19 = index.cast %18 : i64 to offset
     %20 = buffer.view %previous_words[%19] : buffer -> view<16xi32>
-    %21 = vector.load %20[0] : view<16xi32> -> vector<16xi32>
+    %21 = vector.load<root_in_bounds> %20[0] : view<16xi32> -> vector<16xi32>
     %25 = index.cast %depth_words_byte_offset : offset to i64
     %26 = scalar.addi %25, %56 : i64
     %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
     %28 = index.cast %27 : i64 to offset
     %29 = buffer.view %depth_words[%28] : buffer -> view<16xi32>
-    %30 = vector.load %29[0] : view<16xi32> -> vector<16xi32>
+    %30 = vector.load<root_in_bounds> %29[0] : view<16xi32> -> vector<16xi32>
     %31 = func.call pure @depth16(%21, %30) : (vector<16xi32>, vector<16xi32>) -> (vector<16xi32>)
     %35 = index.cast %output_words_byte_offset : offset to i64
     %36 = scalar.addi %35, %56 : i64
     %37 = scalar.assume %36 [range(%36, 0, 9223372036854775807)] : i64
     %38 = index.cast %37 : i64 to offset
     %39 = buffer.view %output_words[%38] : buffer -> view<16xi32>
-    vector.store %31, %39[0] : vector<16xi32>, view<16xi32>
+    vector.store<root_in_bounds> %31, %39[0] : vector<16xi32>, view<16xi32>
   }
   func.return
 }
@@ -103,14 +103,14 @@ func.def public @vector_depth_span(%previous: buffer, %previous_byte_offset: off
     %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
     %28 = index.cast %27 : i64 to offset
     %29 = buffer.view %previous[%28] : buffer -> view<16xi32>
-    %30 = vector.load %29[0] : view<16xi32> -> vector<16xi32>
+    %30 = vector.load<root_in_bounds> %29[0] : view<16xi32> -> vector<16xi32>
     %31 = func.call pure @depth16(%30, %depths) : (vector<16xi32>, vector<16xi32>) -> (vector<16xi32>)
     %35 = index.cast %output_byte_offset : offset to i64
     %36 = scalar.addi %35, %91 : i64
     %37 = scalar.assume %36 [range(%36, 0, 9223372036854775807)] : i64
     %38 = index.cast %37 : i64 to offset
     %39 = buffer.view %output[%38] : buffer -> view<16xi32>
-    vector.store %31, %39[0] : vector<16xi32>, view<16xi32>
+    vector.store<root_in_bounds> %31, %39[0] : vector<16xi32>, view<16xi32>
     %87 = scalar.shli %step, %98 : i32
     %depth$42 = scalar.addi %depth$15, %87 : i32
     scf.yield %depth$42 : i32
@@ -128,7 +128,7 @@ func.def public @vector_depth_span(%previous: buffer, %previous_byte_offset: off
     %57 = scalar.assume %56 [range(%56, 0, 9223372036854775807)] : i64
     %58 = index.cast %57 : i64 to offset
     %59 = buffer.view %previous[%58] : buffer -> view<1xi32>
-    %60 = view.load %59[0] : view<1xi32> -> i32
+    %60 = view.load<root_in_bounds> %59[0] : view<1xi32> -> i32
     %61 = scalar.constant 65535 : i32
     %62 = scalar.andi %60, %61 : i32
     %63 = scalar.constant -65536 : i32
@@ -139,7 +139,7 @@ func.def public @vector_depth_span(%previous: buffer, %previous_byte_offset: off
     %71 = scalar.assume %70 [range(%70, 0, 9223372036854775807)] : i64
     %72 = index.cast %71 : i64 to offset
     %73 = buffer.view %output[%72] : buffer -> view<1xi32>
-    view.store %65, %73[0] : i32, view<1xi32>
+    view.store<root_in_bounds> %65, %73[0] : i32, view<1xi32>
     %depth$74 = scalar.addi %depth$49, %step : i32
     scf.yield %depth$74 : i32
   }
@@ -191,25 +191,25 @@ func.def public @copy_blocks(%input: buffer, %input_byte_offset: offset, %output
   %10 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
   %11 = index.cast %10 : i64 to offset
   %12 = buffer.view %input[%11] : buffer -> view<1xi32>
-  %count$13 = view.load %12[0] : view<1xi32> -> i32
+  %count$13 = view.load<root_in_bounds> %12[0] : view<1xi32> -> i32
   %105 = scalar.constant 4 : i64
   %19 = scalar.addi %10, %105 : i64
   %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
   %21 = index.cast %20 : i64 to offset
   %22 = buffer.view %input[%21] : buffer -> view<1xi32>
-  %source_stride$23 = view.load %22[0] : view<1xi32> -> i32
+  %source_stride$23 = view.load<root_in_bounds> %22[0] : view<1xi32> -> i32
   %104 = scalar.constant 8 : i64
   %29 = scalar.addi %10, %104 : i64
   %30 = scalar.assume %29 [range(%29, 0, 9223372036854775807)] : i64
   %31 = index.cast %30 : i64 to offset
   %32 = buffer.view %input[%31] : buffer -> view<1xi32>
-  %destination_stride$33 = view.load %32[0] : view<1xi32> -> i32
+  %destination_stride$33 = view.load<root_in_bounds> %32[0] : view<1xi32> -> i32
   %103 = scalar.constant 12 : i64
   %39 = scalar.addi %10, %103 : i64
   %40 = scalar.assume %39 [range(%39, 0, 9223372036854775807)] : i64
   %41 = index.cast %40 : i64 to offset
   %42 = buffer.view %input[%41] : buffer -> view<1xi32>
-  %destination_origin$43 = view.load %42[0] : view<1xi32> -> i32
+  %destination_origin$43 = view.load<root_in_bounds> %42[0] : view<1xi32> -> i32
   %count$44 = scalar.assume %count$13 [range(%count$13, 0, 20)] : i32
   %source_stride$45 = scalar.assume %source_stride$23 [range(%source_stride$23, 0, 3)] : i32
   %destination_stride$46 = scalar.assume %destination_stride$33 [range(%destination_stride$33, 0, 2)] : i32
@@ -232,7 +232,7 @@ func.def public @copy_blocks(%input: buffer, %input_byte_offset: offset, %output
     %69 = scalar.assume %68 [range(%68, 0, 9223372036854775807)] : i64
     %70 = index.cast %69 : i64 to offset
     %71 = buffer.view %output[%70] : buffer -> view<16xi32>
-    vector.store %guard, %71[0] : vector<16xi32>, view<16xi32>
+    vector.store<root_in_bounds> %guard, %71[0] : vector<16xi32>, view<16xi32>
   }
   %74 = index.cast %count$44 : i32 to offset
   scf.for %block$76 = [%101 to %74 step %61] {
@@ -247,7 +247,7 @@ func.def public @copy_blocks(%input: buffer, %input_byte_offset: offset, %output
     %85 = scalar.assume %84 [range(%84, 0, 9223372036854775807)] : i64
     %86 = index.cast %85 : i64 to offset
     %87 = buffer.view %input[%86] : buffer -> view<16xi32>
-    %88 = vector.load %87[0] : view<16xi32> -> vector<16xi32>
+    %88 = vector.load<root_in_bounds> %87[0] : view<16xi32> -> vector<16xi32>
     %89 = scalar.muli %block$78, %destination_stride$46 : i32
     %90 = scalar.addi %89, %destination_origin$47 : i32
     %91 = scalar.extui %90 : i32 to i64
@@ -257,7 +257,7 @@ func.def public @copy_blocks(%input: buffer, %input_byte_offset: offset, %output
     %96 = scalar.assume %95 [range(%95, 0, 9223372036854775807)] : i64
     %97 = index.cast %96 : i64 to offset
     %98 = buffer.view %output[%97] : buffer -> view<16xi32>
-    vector.store %88, %98[0] : vector<16xi32>, view<16xi32>
+    vector.store<root_in_bounds> %88, %98[0] : vector<16xi32>, view<16xi32>
   }
   func.return
 }

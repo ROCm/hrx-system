@@ -54,7 +54,7 @@ float read_advanced(float* data) {
 func.def public @read_advanced(%data: buffer, %data_byte_offset: offset) -> (f32) {
   %3, %4 = func.call pure @advance(%data, %data_byte_offset) : (buffer, offset) -> (buffer, offset)
   %5 = buffer.view %3[%4] : buffer -> view<1xf32>
-  %6 = view.load %5[0] : view<1xf32> -> f32
+  %6 = view.load<root_in_bounds> %5[0] : view<1xf32> -> f32
   func.return %6 : f32
 }
 
@@ -121,7 +121,7 @@ func.def @even(%pair: buffer, %pair_byte_offset: offset, %count: i32) {
     %24 = index.constant 0 : offset
     %25 = index.add %pair_byte_offset, %24 : offset
     %26 = buffer.view %pair[%25] : buffer -> view<1xi32>
-    view.store %23, %26[0] : i32, view<1xi32>
+    view.store<root_in_bounds> %23, %26[0] : i32, view<1xi32>
   }
   func.return
 }
@@ -164,7 +164,7 @@ func.def @store(%output: buffer, %output_byte_offset: offset, %state_length$7: i
   %15 = scalar.assume %14 [range(%14, 0, 9223372036854775807)] : i64
   %16 = index.cast %15 : i64 to offset
   %17 = buffer.view %output[%16] : buffer -> view<1xi32>
-  view.store %state_length$7, %17[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %state_length$7, %17[0] : i32, view<1xi32>
   func.return %state_length$9 : i32
 }
 
@@ -450,9 +450,9 @@ func.def public @selected_pointer(%choose: i1, %first: buffer, %first_byte_offse
     scf.yield %13, %14 : buffer, offset
   }
   %23 = buffer.view %17[%18] : buffer -> view<1xi32>
-  %24 = view.load %23[0] : view<1xi32> -> i32
+  %24 = view.load<root_in_bounds> %23[0] : view<1xi32> -> i32
   %25 = buffer.view %21[%22] : buffer -> view<1xi32>
-  %26 = view.load %25[0] : view<1xi32> -> i32
+  %26 = view.load<root_in_bounds> %25[0] : view<1xi32> -> i32
   %27 = scalar.addi %24, %26 : i32
   func.return %27 : i32
 }

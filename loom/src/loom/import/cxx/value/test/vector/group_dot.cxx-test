@@ -170,11 +170,11 @@ kernel.def @mxfp4_decode_dot() {
   %activations = buffer.assume.noalias %16 : buffer
   %output = buffer.assume.noalias %3 : buffer
   %21 = buffer.view %payload[%payload_byte_offset] : buffer -> view<4xi32>
-  %22 = vector.load %21[0] : view<4xi32> -> vector<4xi32>
+  %22 = vector.load<root_in_bounds> %21[0] : view<4xi32> -> vector<4xi32>
   %23 = buffer.view %scale[%payload_byte_offset] : buffer -> view<1xi32>
-  %24 = vector.load %23[0] : view<1xi32> -> vector<1xi32>
+  %24 = vector.load<root_in_bounds> %23[0] : view<1xi32> -> vector<1xi32>
   %25 = buffer.view %activations[%payload_byte_offset] : buffer -> view<32xbf16>
-  %26 = vector.load %25[0] : view<32xbf16> -> vector<32xbf16>
+  %26 = vector.load<root_in_bounds> %25[0] : view<32xbf16> -> vector<32xbf16>
   %schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=32, payload_packing=little_endian_nibbles, payload_registers=4, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   %weights = vector.decode %22 using %schema {scale = %24 : vector<1xi32>} : vector<4xi32>, encoding<schema> -> vector<32xbf16>
   %partial$39 = vector.splatf 0.0 : vector<16xf32>
@@ -182,7 +182,7 @@ kernel.def @mxfp4_decode_dot() {
   %37 = scalar.constant 0.0 : f32
   %38 = vector.reduce<addf> %partial$36, %37 : vector<16xf32>, f32
   %28 = buffer.view %output[%payload_byte_offset] : buffer -> view<1xf32>
-  view.store %38, %28[0] : f32, view<1xf32>
+  view.store<root_in_bounds> %38, %28[0] : f32, view<1xf32>
   kernel.return
 }
 
@@ -242,11 +242,11 @@ kernel.def @mxfp8_decode_dot() {
   %activations = buffer.assume.noalias %16 : buffer
   %output = buffer.assume.noalias %3 : buffer
   %21 = buffer.view %payload[%payload_byte_offset] : buffer -> view<32xf8E4M3>
-  %22 = vector.load %21[0] : view<32xf8E4M3> -> vector<32xf8E4M3>
+  %22 = vector.load<root_in_bounds> %21[0] : view<32xf8E4M3> -> vector<32xf8E4M3>
   %23 = buffer.view %scale[%payload_byte_offset] : buffer -> view<1xi32>
-  %24 = vector.load %23[0] : view<1xi32> -> vector<1xi32>
+  %24 = vector.load<root_in_bounds> %23[0] : view<1xi32> -> vector<1xi32>
   %25 = buffer.view %activations[%payload_byte_offset] : buffer -> view<32xbf16>
-  %26 = vector.load %25[0] : view<32xbf16> -> vector<32xbf16>
+  %26 = vector.load<root_in_bounds> %25[0] : view<32xbf16> -> vector<32xbf16>
   %schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=32, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %weights = vector.decode %22 using %schema {scale = %24 : vector<1xi32>} : vector<32xf8E4M3>, encoding<schema> -> vector<32xbf16>
   %partial$39 = vector.splatf 0.0 : vector<16xf32>
@@ -254,7 +254,7 @@ kernel.def @mxfp8_decode_dot() {
   %37 = scalar.constant 0.0 : f32
   %38 = vector.reduce<addf> %partial$36, %37 : vector<16xf32>, f32
   %28 = buffer.view %output[%payload_byte_offset] : buffer -> view<1xf32>
-  view.store %38, %28[0] : f32, view<1xf32>
+  view.store<root_in_bounds> %38, %28[0] : f32, view<1xf32>
   kernel.return
 }
 
@@ -309,13 +309,13 @@ kernel.def @mxfp4_group_bits() {
   %output = buffer.assume.noalias %15 : buffer
   %schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=64, payload_packing=little_endian_nibbles, payload_registers=8, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   %19 = buffer.view %payload[%payload_byte_offset] : buffer -> view<8xi32>
-  %20 = vector.load %19[0] : view<8xi32> -> vector<8xi32>
+  %20 = vector.load<root_in_bounds> %19[0] : view<8xi32> -> vector<8xi32>
   %21 = buffer.view %scale[%payload_byte_offset] : buffer -> view<1xi32>
-  %22 = vector.load %21[0] : view<1xi32> -> vector<1xi32>
+  %22 = vector.load<root_in_bounds> %21[0] : view<1xi32> -> vector<1xi32>
   %weights = vector.decode %20 using %schema {scale = %22 : vector<1xi32>} : vector<8xi32>, encoding<schema> -> vector<64xbf16>
   %24 = vector.bitcast %weights : vector<64xbf16> to vector<32xi32>
   %25 = buffer.view %output[%payload_byte_offset] : buffer -> view<32xi32>
-  vector.store %24, %25[0] : vector<32xi32>, view<32xi32>
+  vector.store<root_in_bounds> %24, %25[0] : vector<32xi32>, view<32xi32>
   kernel.return
 }
 
@@ -371,13 +371,13 @@ kernel.def @mxfp8_group_bits() {
   %output = buffer.assume.noalias %15 : buffer
   %schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=64, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %19 = buffer.view %payload[%payload_byte_offset] : buffer -> view<64xf8E4M3>
-  %20 = vector.load %19[0] : view<64xf8E4M3> -> vector<64xf8E4M3>
+  %20 = vector.load<root_in_bounds> %19[0] : view<64xf8E4M3> -> vector<64xf8E4M3>
   %21 = buffer.view %scale[%payload_byte_offset] : buffer -> view<1xi32>
-  %22 = vector.load %21[0] : view<1xi32> -> vector<1xi32>
+  %22 = vector.load<root_in_bounds> %21[0] : view<1xi32> -> vector<1xi32>
   %weights = vector.decode %20 using %schema {scale = %22 : vector<1xi32>} : vector<64xf8E4M3>, encoding<schema> -> vector<64xbf16>
   %24 = vector.bitcast %weights : vector<64xbf16> to vector<32xi32>
   %25 = buffer.view %output[%payload_byte_offset] : buffer -> view<32xi32>
-  vector.store %24, %25[0] : vector<32xi32>, view<32xi32>
+  vector.store<root_in_bounds> %24, %25[0] : vector<32xi32>, view<32xi32>
   kernel.return
 }
 
@@ -446,16 +446,16 @@ kernel.def @decode_dot() {
   %activations_high = buffer.assume.noalias %22 : buffer
   %output = buffer.assume.noalias %4 : buffer
   %27 = buffer.view %table[%table_byte_offset] : buffer -> view<16xi8>
-  %28 = vector.load %27[0] : view<16xi8> -> vector<16xi8>
+  %28 = vector.load<root_in_bounds> %27[0] : view<16xi8> -> vector<16xi8>
   %29 = buffer.view %packed[%table_byte_offset] : buffer -> view<16xi8>
-  %30 = vector.load %29[0] : view<16xi8> -> vector<16xi8>
+  %30 = vector.load<root_in_bounds> %29[0] : view<16xi8> -> vector<16xi8>
   %31 = buffer.view %activations_low[%table_byte_offset] : buffer -> view<16xbf16>
-  %32 = vector.load %31[0] : view<16xbf16> -> vector<16xbf16>
+  %32 = vector.load<root_in_bounds> %31[0] : view<16xbf16> -> vector<16xbf16>
   %33 = buffer.view %activations_high[%table_byte_offset] : buffer -> view<16xbf16>
-  %34 = vector.load %33[0] : view<16xbf16> -> vector<16xbf16>
+  %34 = vector.load<root_in_bounds> %33[0] : view<16xbf16> -> vector<16xbf16>
   %35 = func.call pure @packed_group_dot(%28, %30, %32, %34, %scale, %seed) : (vector<16xi8>, vector<16xi8>, vector<16xbf16>, vector<16xbf16>, f32, f32) -> (f32)
   %36 = buffer.view %output[%table_byte_offset] : buffer -> view<1xf32>
-  view.store %35, %36[0] : f32, view<1xf32>
+  view.store<root_in_bounds> %35, %36[0] : f32, view<1xf32>
   kernel.return
 }
 

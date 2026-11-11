@@ -8,6 +8,7 @@
 #define LOOM_IMPORT_CXX_BINDING_VIEW_H_
 
 #include <cxx/attributes.h>
+#include <cxx/symbols_fwd.h>
 #include <cxx/types_fwd.h>
 
 #include <cstdint>
@@ -35,10 +36,12 @@ class ViewIntrinsic {
 
   // Resolves a concrete specialization. Unknown operation names return no
   // value; malformed recognized declarations diagnose at |owner|.
-  static std::optional<ViewIntrinsic> resolve(
-      cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
-      const cxx::FunctionType* signature, const cxx::Attribute& attribute,
-      cxx::AST* owner);
+  static std::optional<ViewIntrinsic> resolve(cxx::TranslationUnit& unit,
+                                              Diagnostics& diagnostics,
+                                              Types& types,
+                                              cxx::FunctionSymbol* function,
+                                              const cxx::Attribute& attribute,
+                                              cxx::AST* owner);
 
   // Emits the admitted operation. Value absence is the result of a handled
   // void store, not an unrecognized intrinsic.
@@ -87,6 +90,8 @@ class ViewIntrinsic {
   uint16_t unsigned_origin_mask_ = 0;
   // Native scalar result for view.load.
   loom_type_t scalar_result_ = {};
+  // Explicit physical-root proof selected by the source specialization.
+  loom_memory_access_flags_t memory_flags_ = 0;
 };
 
 }  // namespace loom::cxx_import

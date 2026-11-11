@@ -62,7 +62,7 @@ void write(loom::type::buffer<unsigned char> input, loom::type::offset input_byt
   auto v3 = call_result.value0;
   loom::type::offset v4 = call_result.value1;
   auto v5 = loom::buffer::view<1>(loom::buffer::cast<unsigned>(v3), v4, {});
-  loom::view::store(7u, v5, 0);
+  loom::view::store<loom::memory_access::root_in_bounds>(7u, v5, 0);
   return;
 }
 

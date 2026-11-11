@@ -12,13 +12,13 @@ func.def public @store(%bits: i32, %output: buffer, %output_byte_offset: offset)
   %3 = vector.from_elements %bits : vector<1xi32>
   %4 = vector.bitcast %3 : vector<1xi32> to vector<4xf8E4M3>
   %5 = buffer.view %output[%output_byte_offset] : buffer -> view<4xf8E4M3>
-  vector.store %4, %5[0] : vector<4xf8E4M3>, view<4xf8E4M3>
+  vector.store<root_in_bounds> %4, %5[0] : vector<4xf8E4M3>, view<4xf8E4M3>
   func.return
 }
 
 func.def public @load(%input: buffer, %input_byte_offset: offset) -> (i32) {
   %9 = buffer.view %input[%input_byte_offset] : buffer -> view<4xf8E4M3>
-  %10 = vector.load %9[0] : view<4xf8E4M3> -> vector<4xf8E4M3>
+  %10 = vector.load<root_in_bounds> %9[0] : view<4xf8E4M3> -> vector<4xf8E4M3>
   %11 = vector.bitcast %10 : vector<4xf8E4M3> to vector<1xi32>
   %12 = vector.extract %11[0] : vector<1xi32> -> i32
   func.return %12 : i32
@@ -58,13 +58,13 @@ func.def public @store(%bits: i32, %output: buffer, %output_byte_offset: offset)
   %3 = vector.from_elements %bits : vector<1xi32>
   %4 = vector.bitcast %3 : vector<1xi32> to vector<4xf8E5M2>
   %5 = buffer.view %output[%output_byte_offset] : buffer -> view<4xf8E5M2>
-  vector.store %4, %5[0] : vector<4xf8E5M2>, view<4xf8E5M2>
+  vector.store<root_in_bounds> %4, %5[0] : vector<4xf8E5M2>, view<4xf8E5M2>
   func.return
 }
 
 func.def public @load(%input: buffer, %input_byte_offset: offset) -> (i32) {
   %9 = buffer.view %input[%input_byte_offset] : buffer -> view<4xf8E5M2>
-  %10 = vector.load %9[0] : view<4xf8E5M2> -> vector<4xf8E5M2>
+  %10 = vector.load<root_in_bounds> %9[0] : view<4xf8E5M2> -> vector<4xf8E5M2>
   %11 = vector.bitcast %10 : vector<4xf8E5M2> to vector<1xi32>
   %12 = vector.extract %11[0] : vector<1xi32> -> i32
   func.return %12 : i32
@@ -105,13 +105,13 @@ func.def public @store(%bits: i32, %output: buffer, %output_byte_offset: offset)
   %3 = vector.from_elements %bits : vector<1xi32>
   %4 = vector.bitcast %3 : vector<1xi32> to vector<2xf16>
   %5 = buffer.view %output[%output_byte_offset] : buffer -> view<2xf16>
-  vector.store %4, %5[0] : vector<2xf16>, view<2xf16>
+  vector.store<root_in_bounds> %4, %5[0] : vector<2xf16>, view<2xf16>
   func.return
 }
 
 func.def public @load(%input: buffer, %input_byte_offset: offset) -> (i32) {
   %9 = buffer.view %input[%input_byte_offset] : buffer -> view<2xf16>
-  %10 = vector.load %9[0] : view<2xf16> -> vector<2xf16>
+  %10 = vector.load<root_in_bounds> %9[0] : view<2xf16> -> vector<2xf16>
   %11 = vector.bitcast %10 : vector<2xf16> to vector<1xi32>
   %12 = vector.extract %11[0] : vector<1xi32> -> i32
   func.return %12 : i32
@@ -149,13 +149,13 @@ func.def public @store(%bits: i32, %output: buffer, %output_byte_offset: offset)
   %3 = vector.from_elements %bits : vector<1xi32>
   %4 = vector.bitcast %3 : vector<1xi32> to vector<2xbf16>
   %5 = buffer.view %output[%output_byte_offset] : buffer -> view<2xbf16>
-  vector.store %4, %5[0] : vector<2xbf16>, view<2xbf16>
+  vector.store<root_in_bounds> %4, %5[0] : vector<2xbf16>, view<2xbf16>
   func.return
 }
 
 func.def public @load(%input: buffer, %input_byte_offset: offset) -> (i32) {
   %9 = buffer.view %input[%input_byte_offset] : buffer -> view<2xbf16>
-  %10 = vector.load %9[0] : view<2xbf16> -> vector<2xbf16>
+  %10 = vector.load<root_in_bounds> %9[0] : view<2xbf16> -> vector<2xbf16>
   %11 = vector.bitcast %10 : vector<2xbf16> to vector<1xi32>
   %12 = vector.extract %11[0] : vector<1xi32> -> i32
   func.return %12 : i32
@@ -192,13 +192,13 @@ unsigned load(const Payload* input) {
 func.def public @store(%bits: i32, %output: buffer, %output_byte_offset: offset) {
   %3 = scalar.bitcast %bits : i32 to f32
   %4 = buffer.view %output[%output_byte_offset] : buffer -> view<1xf32>
-  view.store %3, %4[0] : f32, view<1xf32>
+  view.store<root_in_bounds> %3, %4[0] : f32, view<1xf32>
   func.return
 }
 
 func.def public @load(%input: buffer, %input_byte_offset: offset) -> (i32) {
   %8 = buffer.view %input[%input_byte_offset] : buffer -> view<1xf32>
-  %9 = view.load %8[0] : view<1xf32> -> f32
+  %9 = view.load<root_in_bounds> %8[0] : view<1xf32> -> f32
   %10 = scalar.bitcast %9 : f32 to i32
   func.return %10 : i32
 }
@@ -233,13 +233,13 @@ func.def public @store(%bits: i64, %output: buffer, %output_byte_offset: offset)
   %3 = vector.from_elements %bits : vector<1xi64>
   %4 = vector.bitcast %3 : vector<1xi64> to vector<2xf32>
   %5 = buffer.view %output[%output_byte_offset] : buffer -> view<2xf32>
-  vector.store %4, %5[0] : vector<2xf32>, view<2xf32>
+  vector.store<root_in_bounds> %4, %5[0] : vector<2xf32>, view<2xf32>
   func.return
 }
 
 func.def public @load(%input: buffer, %input_byte_offset: offset) -> (i64) {
   %9 = buffer.view %input[%input_byte_offset] : buffer -> view<2xf32>
-  %10 = vector.load %9[0] : view<2xf32> -> vector<2xf32>
+  %10 = vector.load<root_in_bounds> %9[0] : view<2xf32> -> vector<2xf32>
   %11 = vector.bitcast %10 : vector<2xf32> to vector<1xi64>
   %12 = vector.extract %11[0] : vector<1xi64> -> i64
   func.return %12 : i64
@@ -276,13 +276,13 @@ unsigned long long load(const Payload* input) {
 func.def public @store(%bits: i64, %output: buffer, %output_byte_offset: offset) {
   %3 = scalar.bitcast %bits : i64 to f64
   %4 = buffer.view %output[%output_byte_offset] : buffer -> view<1xf64>
-  view.store %3, %4[0] : f64, view<1xf64>
+  view.store<root_in_bounds> %3, %4[0] : f64, view<1xf64>
   func.return
 }
 
 func.def public @load(%input: buffer, %input_byte_offset: offset) -> (i64) {
   %8 = buffer.view %input[%input_byte_offset] : buffer -> view<1xf64>
-  %9 = view.load %8[0] : view<1xf64> -> f64
+  %9 = view.load<root_in_bounds> %8[0] : view<1xf64> -> f64
   %10 = scalar.bitcast %9 : f64 to i64
   func.return %10 : i64
 }

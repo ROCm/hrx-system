@@ -8,6 +8,7 @@
 
 from dataclasses import replace
 
+from loom.dialect.memory import MemoryAccessFlags
 from loom.dsl import EnumCase, EnumDef
 
 AtomicKind = EnumDef(
@@ -39,6 +40,7 @@ AtomicKind = EnumDef(
 AtomicMemoryFlags = EnumDef(
     "AtomicMemoryFlags",
     [
+        MemoryAccessFlags.case("root_in_bounds"),
         EnumCase(
             "noftz",
             2,
@@ -51,10 +53,17 @@ AtomicMemoryFlags = EnumDef(
             ),
         ),
     ],
-    doc="Explicit numerical requirements for atomic memory updates.",
+    doc="Semantic requirements for atomic memory updates.",
     c_type="loom_memory_access_flags_t",
     c_const_prefix="LOOM_MEMORY_ACCESS_FLAG",
     c_include="loom/ops/op_defs.h",
+)
+
+AtomicAccessFlags = replace(
+    AtomicMemoryFlags,
+    name="AtomicAccessFlags",
+    cases=(AtomicMemoryFlags.case("root_in_bounds"),),
+    doc="Source address promises shared by all atomic memory accesses.",
 )
 
 AtomicOrdering = EnumDef(

@@ -85,69 +85,69 @@ func.def @sequence_8_9_int(%destination: buffer, %destination_byte_offset: offse
   %passed$17 = scalar.constant 0 : i32
   %125 = scalar.constant -4 : i32
   %21 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi32>
-  %22 = view.atomic.rmw<xchgi> %125, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %22 = view.atomic.rmw<xchgi, root_in_bounds> %125, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
   %23 = scalar.constant 37 : i32
   %24 = scalar.cmpi eq, %22, %23 : i32
   %passed$124 = scalar.constant 1 : i32
   %passed$136 = scf.select %24, %passed$124, %passed$17 : i32
   %28 = scalar.constant 3 : i32
-  %30 = view.atomic.rmw<addi> %28, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %30 = view.atomic.rmw<addi, root_in_bounds> %28, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
   %34 = scalar.cmpi eq, %30, %125 : i32
   %passed$37 = scalar.ori %passed$136, %maximum : i32
   %passed$135 = scf.select %34, %passed$37, %passed$136 : i32
-  %40 = view.atomic.rmw<subi> %maximum, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %40 = view.atomic.rmw<subi, root_in_bounds> %maximum, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
   %122 = scalar.constant -1 : i32
   %44 = scalar.cmpi eq, %40, %122 : i32
   %46 = scalar.constant 4 : i32
   %passed$47 = scalar.ori %passed$135, %46 : i32
   %passed$134 = scf.select %44, %passed$47, %passed$135 : i32
   %48 = scalar.constant 15 : i32
-  %50 = view.atomic.rmw<andi> %48, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %50 = view.atomic.rmw<andi, root_in_bounds> %48, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
   %121 = scalar.constant -3 : i32
   %54 = scalar.cmpi eq, %50, %121 : i32
   %56 = scalar.constant 8 : i32
   %passed$57 = scalar.ori %passed$134, %56 : i32
   %passed$133 = scf.select %54, %passed$57, %passed$134 : i32
   %58 = scalar.constant 16 : i32
-  %60 = view.atomic.rmw<ori> %58, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %60 = view.atomic.rmw<ori, root_in_bounds> %58, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
   %61 = scalar.constant 13 : i32
   %62 = scalar.cmpi eq, %60, %61 : i32
   %passed$65 = scalar.ori %passed$133, %58 : i32
   %passed$132 = scf.select %62, %passed$65, %passed$133 : i32
-  %68 = view.atomic.rmw<xori> %28, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %68 = view.atomic.rmw<xori, root_in_bounds> %28, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
   %69 = scalar.constant 29 : i32
   %70 = scalar.cmpi eq, %68, %69 : i32
   %72 = scalar.constant 32 : i32
   %passed$73 = scalar.ori %passed$132, %72 : i32
   %passed$131 = scf.select %70, %passed$73, %passed$132 : i32
-  %78 = view.atomic.rmw<minsi> %minimum, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %78 = view.atomic.rmw<minsi, root_in_bounds> %minimum, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
   %79 = scalar.constant 30 : i32
   %80 = scalar.cmpi eq, %78, %79 : i32
   %82 = scalar.constant 64 : i32
   %passed$83 = scalar.ori %passed$131, %82 : i32
   %passed$130 = scf.select %80, %passed$83, %passed$131 : i32
-  %86 = view.atomic.rmw<maxsi> %maximum, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %86 = view.atomic.rmw<maxsi, root_in_bounds> %maximum, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
   %87 = scalar.cmpi eq, %86, %minimum : i32
   %89 = scalar.constant 128 : i32
   %passed$90 = scalar.ori %passed$130, %89 : i32
   %passed$129 = scf.select %87, %passed$90, %passed$130 : i32
-  view.atomic.reduce<maxsi> %maximum, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32>
+  view.atomic.reduce<maxsi, root_in_bounds> %maximum, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32>
   %92 = scalar.constant 7 : i32
-  %94 = view.atomic.cmpxchg %maximum, %92, %21[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i32, view<1xi32> -> i32
+  %94 = view.atomic.cmpxchg<root_in_bounds> %maximum, %92, %21[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i32, view<1xi32> -> i32
   %95 = scalar.cmpi eq, %94, %maximum : i32
   %97 = scalar.constant 256 : i32
   %passed$98 = scalar.ori %passed$129, %97 : i32
   %passed$128 = scf.select %95, %passed$98, %passed$129 : i32
   %99 = scalar.constant 5 : i32
   %100 = scalar.constant 11 : i32
-  %102 = view.atomic.cmpxchg %99, %100, %21[0] {failure_ordering = relaxed, scope = device, success_ordering = acquire} : i32, view<1xi32> -> i32
+  %102 = view.atomic.cmpxchg<root_in_bounds> %99, %100, %21[0] {failure_ordering = relaxed, scope = device, success_ordering = acquire} : i32, view<1xi32> -> i32
   %104 = scalar.cmpi eq, %102, %92 : i32
   %106 = scalar.constant 512 : i32
   %passed$107 = scalar.ori %passed$128, %106 : i32
   %passed$127 = scf.select %104, %passed$107, %passed$128 : i32
-  view.atomic.reduce<addi> %99, %21[0] {ordering = release, scope = device} : i32, view<1xi32>
+  view.atomic.reduce<addi, root_in_bounds> %99, %21[0] {ordering = release, scope = device} : i32, view<1xi32>
   %110 = scalar.constant 12 : i32
-  %113 = view.atomic.cmpxchg %110, %61, %21[0] {failure_ordering = seq_cst, scope = device, success_ordering = seq_cst} : i32, view<1xi32> -> i32
+  %113 = view.atomic.cmpxchg<root_in_bounds> %110, %61, %21[0] {failure_ordering = seq_cst, scope = device, success_ordering = seq_cst} : i32, view<1xi32> -> i32
   %115 = scalar.cmpi eq, %113, %110 : i32
   %117 = scalar.constant 1024 : i32
   %passed$118 = scalar.ori %passed$127, %117 : i32
@@ -243,69 +243,69 @@ func.def @sequence_10_11_unsigned_int(%destination: buffer, %destination_byte_of
   %passed$17 = scalar.constant 0 : i32
   %125 = scalar.constant -4 : i32
   %21 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi32>
-  %22 = view.atomic.rmw<xchgi> %125, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %22 = view.atomic.rmw<xchgi, root_in_bounds> %125, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
   %23 = scalar.constant 37 : i32
   %24 = scalar.cmpi eq, %22, %23 : i32
   %passed$124 = scalar.constant 1 : i32
   %passed$136 = scf.select %24, %passed$124, %passed$17 : i32
   %28 = scalar.constant 3 : i32
-  %30 = view.atomic.rmw<addi> %28, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %30 = view.atomic.rmw<addi, root_in_bounds> %28, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
   %34 = scalar.cmpi eq, %30, %125 : i32
   %36 = scalar.constant 2 : i32
   %passed$37 = scalar.ori %passed$136, %36 : i32
   %passed$135 = scf.select %34, %passed$37, %passed$136 : i32
-  %40 = view.atomic.rmw<subi> %36, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %40 = view.atomic.rmw<subi, root_in_bounds> %36, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
   %122 = scalar.constant -1 : i32
   %44 = scalar.cmpi eq, %40, %122 : i32
   %46 = scalar.constant 4 : i32
   %passed$47 = scalar.ori %passed$135, %46 : i32
   %passed$134 = scf.select %44, %passed$47, %passed$135 : i32
   %48 = scalar.constant 15 : i32
-  %50 = view.atomic.rmw<andi> %48, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %50 = view.atomic.rmw<andi, root_in_bounds> %48, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
   %121 = scalar.constant -3 : i32
   %54 = scalar.cmpi eq, %50, %121 : i32
   %56 = scalar.constant 8 : i32
   %passed$57 = scalar.ori %passed$134, %56 : i32
   %passed$133 = scf.select %54, %passed$57, %passed$134 : i32
   %58 = scalar.constant 16 : i32
-  %60 = view.atomic.rmw<ori> %58, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %60 = view.atomic.rmw<ori, root_in_bounds> %58, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
   %61 = scalar.constant 13 : i32
   %62 = scalar.cmpi eq, %60, %61 : i32
   %passed$65 = scalar.ori %passed$133, %58 : i32
   %passed$132 = scf.select %62, %passed$65, %passed$133 : i32
-  %68 = view.atomic.rmw<xori> %28, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %68 = view.atomic.rmw<xori, root_in_bounds> %28, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
   %69 = scalar.constant 29 : i32
   %70 = scalar.cmpi eq, %68, %69 : i32
   %72 = scalar.constant 32 : i32
   %passed$73 = scalar.ori %passed$132, %72 : i32
   %passed$131 = scf.select %70, %passed$73, %passed$132 : i32
-  %78 = view.atomic.rmw<minui> %maximum, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %78 = view.atomic.rmw<minui, root_in_bounds> %maximum, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
   %80 = scalar.cmpi eq, %78, %minimum : i32
   %82 = scalar.constant 64 : i32
   %passed$83 = scalar.ori %passed$131, %82 : i32
   %passed$130 = scf.select %80, %passed$83, %passed$131 : i32
-  %86 = view.atomic.rmw<maxui> %36, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %86 = view.atomic.rmw<maxui, root_in_bounds> %36, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
   %87 = scalar.cmpi eq, %86, %minimum : i32
   %89 = scalar.constant 128 : i32
   %passed$90 = scalar.ori %passed$130, %89 : i32
   %passed$129 = scf.select %87, %passed$90, %passed$130 : i32
-  view.atomic.reduce<maxui> %maximum, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32>
+  view.atomic.reduce<maxui, root_in_bounds> %maximum, %21[0] {ordering = relaxed, scope = device} : i32, view<1xi32>
   %92 = scalar.constant 7 : i32
-  %94 = view.atomic.cmpxchg %maximum, %92, %21[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i32, view<1xi32> -> i32
+  %94 = view.atomic.cmpxchg<root_in_bounds> %maximum, %92, %21[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i32, view<1xi32> -> i32
   %95 = scalar.cmpi eq, %94, %maximum : i32
   %97 = scalar.constant 256 : i32
   %passed$98 = scalar.ori %passed$129, %97 : i32
   %passed$128 = scf.select %95, %passed$98, %passed$129 : i32
   %99 = scalar.constant 5 : i32
   %100 = scalar.constant 11 : i32
-  %102 = view.atomic.cmpxchg %99, %100, %21[0] {failure_ordering = relaxed, scope = device, success_ordering = acquire} : i32, view<1xi32> -> i32
+  %102 = view.atomic.cmpxchg<root_in_bounds> %99, %100, %21[0] {failure_ordering = relaxed, scope = device, success_ordering = acquire} : i32, view<1xi32> -> i32
   %104 = scalar.cmpi eq, %102, %92 : i32
   %106 = scalar.constant 512 : i32
   %passed$107 = scalar.ori %passed$128, %106 : i32
   %passed$127 = scf.select %104, %passed$107, %passed$128 : i32
-  view.atomic.reduce<addi> %99, %21[0] {ordering = release, scope = device} : i32, view<1xi32>
+  view.atomic.reduce<addi, root_in_bounds> %99, %21[0] {ordering = release, scope = device} : i32, view<1xi32>
   %110 = scalar.constant 12 : i32
-  %113 = view.atomic.cmpxchg %110, %61, %21[0] {failure_ordering = seq_cst, scope = device, success_ordering = seq_cst} : i32, view<1xi32> -> i32
+  %113 = view.atomic.cmpxchg<root_in_bounds> %110, %61, %21[0] {failure_ordering = seq_cst, scope = device, success_ordering = seq_cst} : i32, view<1xi32> -> i32
   %115 = scalar.cmpi eq, %113, %110 : i32
   %117 = scalar.constant 1024 : i32
   %passed$118 = scalar.ori %passed$127, %117 : i32
@@ -401,71 +401,71 @@ func.def @sequence_8_9_long_long(%destination: buffer, %destination_byte_offset:
   %passed$17 = scalar.constant 0 : i32
   %166 = scalar.constant -4 : i64
   %22 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi64>
-  %23 = view.atomic.rmw<xchgi> %166, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
+  %23 = view.atomic.rmw<xchgi, root_in_bounds> %166, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
   %165 = scalar.constant 37 : i64
   %26 = scalar.cmpi eq, %23, %165 : i64
   %passed$164 = scalar.constant 1 : i32
   %passed$177 = scf.select %26, %passed$164, %passed$17 : i32
   %163 = scalar.constant 3 : i64
-  %33 = view.atomic.rmw<addi> %163, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
+  %33 = view.atomic.rmw<addi, root_in_bounds> %163, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
   %38 = scalar.cmpi eq, %33, %166 : i64
   %40 = scalar.constant 2 : i32
   %passed$41 = scalar.ori %passed$177, %40 : i32
   %passed$176 = scf.select %38, %passed$41, %passed$177 : i32
-  %45 = view.atomic.rmw<subi> %maximum, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
+  %45 = view.atomic.rmw<subi, root_in_bounds> %maximum, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
   %160 = scalar.constant -1 : i64
   %50 = scalar.cmpi eq, %45, %160 : i64
   %52 = scalar.constant 4 : i32
   %passed$53 = scalar.ori %passed$176, %52 : i32
   %passed$175 = scf.select %50, %passed$53, %passed$176 : i32
   %159 = scalar.constant 15 : i64
-  %57 = view.atomic.rmw<andi> %159, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
+  %57 = view.atomic.rmw<andi, root_in_bounds> %159, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
   %158 = scalar.constant -3 : i64
   %62 = scalar.cmpi eq, %57, %158 : i64
   %64 = scalar.constant 8 : i32
   %passed$65 = scalar.ori %passed$175, %64 : i32
   %passed$174 = scf.select %62, %passed$65, %passed$175 : i32
   %157 = scalar.constant 16 : i64
-  %69 = view.atomic.rmw<ori> %157, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
+  %69 = view.atomic.rmw<ori, root_in_bounds> %157, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
   %156 = scalar.constant 13 : i64
   %72 = scalar.cmpi eq, %69, %156 : i64
   %74 = scalar.constant 16 : i32
   %passed$75 = scalar.ori %passed$174, %74 : i32
   %passed$173 = scf.select %72, %passed$75, %passed$174 : i32
-  %79 = view.atomic.rmw<xori> %163, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
+  %79 = view.atomic.rmw<xori, root_in_bounds> %163, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
   %154 = scalar.constant 29 : i64
   %82 = scalar.cmpi eq, %79, %154 : i64
   %84 = scalar.constant 32 : i32
   %passed$85 = scalar.ori %passed$173, %84 : i32
   %passed$172 = scf.select %82, %passed$85, %passed$173 : i32
-  %91 = view.atomic.rmw<minsi> %minimum, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
+  %91 = view.atomic.rmw<minsi, root_in_bounds> %minimum, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
   %152 = scalar.constant 30 : i64
   %94 = scalar.cmpi eq, %91, %152 : i64
   %96 = scalar.constant 64 : i32
   %passed$97 = scalar.ori %passed$172, %96 : i32
   %passed$171 = scf.select %94, %passed$97, %passed$172 : i32
-  %101 = view.atomic.rmw<maxsi> %maximum, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
+  %101 = view.atomic.rmw<maxsi, root_in_bounds> %maximum, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
   %102 = scalar.cmpi eq, %101, %minimum : i64
   %104 = scalar.constant 128 : i32
   %passed$105 = scalar.ori %passed$171, %104 : i32
   %passed$170 = scf.select %102, %passed$105, %passed$171 : i32
-  view.atomic.reduce<maxsi> %maximum, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64>
+  view.atomic.reduce<maxsi, root_in_bounds> %maximum, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64>
   %150 = scalar.constant 7 : i64
-  %110 = view.atomic.cmpxchg %maximum, %150, %22[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i64, view<1xi64> -> i64
+  %110 = view.atomic.cmpxchg<root_in_bounds> %maximum, %150, %22[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i64, view<1xi64> -> i64
   %111 = scalar.cmpi eq, %110, %maximum : i64
   %113 = scalar.constant 256 : i32
   %passed$114 = scalar.ori %passed$170, %113 : i32
   %passed$169 = scf.select %111, %passed$114, %passed$170 : i32
   %149 = scalar.constant 5 : i64
   %148 = scalar.constant 11 : i64
-  %120 = view.atomic.cmpxchg %149, %148, %22[0] {failure_ordering = relaxed, scope = device, success_ordering = acquire} : i64, view<1xi64> -> i64
+  %120 = view.atomic.cmpxchg<root_in_bounds> %149, %148, %22[0] {failure_ordering = relaxed, scope = device, success_ordering = acquire} : i64, view<1xi64> -> i64
   %123 = scalar.cmpi eq, %120, %150 : i64
   %125 = scalar.constant 512 : i32
   %passed$126 = scalar.ori %passed$169, %125 : i32
   %passed$168 = scf.select %123, %passed$126, %passed$169 : i32
-  view.atomic.reduce<addi> %149, %22[0] {ordering = release, scope = device} : i64, view<1xi64>
+  view.atomic.reduce<addi, root_in_bounds> %149, %22[0] {ordering = release, scope = device} : i64, view<1xi64>
   %145 = scalar.constant 12 : i64
-  %135 = view.atomic.cmpxchg %145, %156, %22[0] {failure_ordering = seq_cst, scope = device, success_ordering = seq_cst} : i64, view<1xi64> -> i64
+  %135 = view.atomic.cmpxchg<root_in_bounds> %145, %156, %22[0] {failure_ordering = seq_cst, scope = device, success_ordering = seq_cst} : i64, view<1xi64> -> i64
   %138 = scalar.cmpi eq, %135, %145 : i64
   %140 = scalar.constant 1024 : i32
   %passed$141 = scalar.ori %passed$168, %140 : i32
@@ -561,71 +561,71 @@ func.def @sequence_10_11_unsigned_long_long(%destination: buffer, %destination_b
   %passed$17 = scalar.constant 0 : i32
   %166 = scalar.constant -4 : i64
   %22 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi64>
-  %23 = view.atomic.rmw<xchgi> %166, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
+  %23 = view.atomic.rmw<xchgi, root_in_bounds> %166, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
   %165 = scalar.constant 37 : i64
   %26 = scalar.cmpi eq, %23, %165 : i64
   %passed$164 = scalar.constant 1 : i32
   %passed$177 = scf.select %26, %passed$164, %passed$17 : i32
   %163 = scalar.constant 3 : i64
-  %33 = view.atomic.rmw<addi> %163, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
+  %33 = view.atomic.rmw<addi, root_in_bounds> %163, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
   %38 = scalar.cmpi eq, %33, %166 : i64
   %40 = scalar.constant 2 : i32
   %passed$41 = scalar.ori %passed$177, %40 : i32
   %passed$176 = scf.select %38, %passed$41, %passed$177 : i32
   %161 = scalar.constant 2 : i64
-  %45 = view.atomic.rmw<subi> %161, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
+  %45 = view.atomic.rmw<subi, root_in_bounds> %161, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
   %160 = scalar.constant -1 : i64
   %50 = scalar.cmpi eq, %45, %160 : i64
   %52 = scalar.constant 4 : i32
   %passed$53 = scalar.ori %passed$176, %52 : i32
   %passed$175 = scf.select %50, %passed$53, %passed$176 : i32
   %159 = scalar.constant 15 : i64
-  %57 = view.atomic.rmw<andi> %159, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
+  %57 = view.atomic.rmw<andi, root_in_bounds> %159, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
   %158 = scalar.constant -3 : i64
   %62 = scalar.cmpi eq, %57, %158 : i64
   %64 = scalar.constant 8 : i32
   %passed$65 = scalar.ori %passed$175, %64 : i32
   %passed$174 = scf.select %62, %passed$65, %passed$175 : i32
   %157 = scalar.constant 16 : i64
-  %69 = view.atomic.rmw<ori> %157, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
+  %69 = view.atomic.rmw<ori, root_in_bounds> %157, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
   %156 = scalar.constant 13 : i64
   %72 = scalar.cmpi eq, %69, %156 : i64
   %74 = scalar.constant 16 : i32
   %passed$75 = scalar.ori %passed$174, %74 : i32
   %passed$173 = scf.select %72, %passed$75, %passed$174 : i32
-  %79 = view.atomic.rmw<xori> %163, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
+  %79 = view.atomic.rmw<xori, root_in_bounds> %163, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
   %154 = scalar.constant 29 : i64
   %82 = scalar.cmpi eq, %79, %154 : i64
   %84 = scalar.constant 32 : i32
   %passed$85 = scalar.ori %passed$173, %84 : i32
   %passed$172 = scf.select %82, %passed$85, %passed$173 : i32
-  %91 = view.atomic.rmw<minui> %maximum, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
+  %91 = view.atomic.rmw<minui, root_in_bounds> %maximum, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
   %94 = scalar.cmpi eq, %91, %minimum : i64
   %96 = scalar.constant 64 : i32
   %passed$97 = scalar.ori %passed$172, %96 : i32
   %passed$171 = scf.select %94, %passed$97, %passed$172 : i32
-  %101 = view.atomic.rmw<maxui> %161, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
+  %101 = view.atomic.rmw<maxui, root_in_bounds> %161, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
   %102 = scalar.cmpi eq, %101, %minimum : i64
   %104 = scalar.constant 128 : i32
   %passed$105 = scalar.ori %passed$171, %104 : i32
   %passed$170 = scf.select %102, %passed$105, %passed$171 : i32
-  view.atomic.reduce<maxui> %maximum, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64>
+  view.atomic.reduce<maxui, root_in_bounds> %maximum, %22[0] {ordering = relaxed, scope = device} : i64, view<1xi64>
   %150 = scalar.constant 7 : i64
-  %110 = view.atomic.cmpxchg %maximum, %150, %22[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i64, view<1xi64> -> i64
+  %110 = view.atomic.cmpxchg<root_in_bounds> %maximum, %150, %22[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i64, view<1xi64> -> i64
   %111 = scalar.cmpi eq, %110, %maximum : i64
   %113 = scalar.constant 256 : i32
   %passed$114 = scalar.ori %passed$170, %113 : i32
   %passed$169 = scf.select %111, %passed$114, %passed$170 : i32
   %149 = scalar.constant 5 : i64
   %148 = scalar.constant 11 : i64
-  %120 = view.atomic.cmpxchg %149, %148, %22[0] {failure_ordering = relaxed, scope = device, success_ordering = acquire} : i64, view<1xi64> -> i64
+  %120 = view.atomic.cmpxchg<root_in_bounds> %149, %148, %22[0] {failure_ordering = relaxed, scope = device, success_ordering = acquire} : i64, view<1xi64> -> i64
   %123 = scalar.cmpi eq, %120, %150 : i64
   %125 = scalar.constant 512 : i32
   %passed$126 = scalar.ori %passed$169, %125 : i32
   %passed$168 = scf.select %123, %passed$126, %passed$169 : i32
-  view.atomic.reduce<addi> %149, %22[0] {ordering = release, scope = device} : i64, view<1xi64>
+  view.atomic.reduce<addi, root_in_bounds> %149, %22[0] {ordering = release, scope = device} : i64, view<1xi64>
   %145 = scalar.constant 12 : i64
-  %135 = view.atomic.cmpxchg %145, %156, %22[0] {failure_ordering = seq_cst, scope = device, success_ordering = seq_cst} : i64, view<1xi64> -> i64
+  %135 = view.atomic.cmpxchg<root_in_bounds> %145, %156, %22[0] {failure_ordering = seq_cst, scope = device, success_ordering = seq_cst} : i64, view<1xi64> -> i64
   %138 = scalar.cmpi eq, %135, %145 : i64
   %140 = scalar.constant 1024 : i32
   %passed$141 = scalar.ori %passed$168, %140 : i32

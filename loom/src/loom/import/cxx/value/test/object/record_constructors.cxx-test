@@ -391,7 +391,7 @@ func.def public @move_helper_scalar(%value: i32) -> (i32) {
 
 func.def public @move_helper_pointer(%value: buffer, %value_byte_offset: offset) -> (i32) {
   %92 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
-  %93 = view.load %92[0] : view<1xi32> -> i32
+  %93 = view.load<root_in_bounds> %92[0] : view<1xi32> -> i32
   func.return %93 : i32
 }
 
@@ -422,7 +422,7 @@ func.def public @move_scalar(%value: i32) -> (i32) {
 
 func.def public @move_pointer(%value: buffer, %value_byte_offset: offset) -> (i32) {
   %5 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
-  %6 = view.load %5[0] : view<1xi32> -> i32
+  %6 = view.load<root_in_bounds> %5[0] : view<1xi32> -> i32
   func.return %6 : i32
 }
 
@@ -464,14 +464,14 @@ func.def inline @Direct__Direct_storage(%this: buffer, %this_byte_offset: offset
   %16 = scalar.constant 1 : i32
   %17 = scalar.addi %seed, %16 : i32
   %18 = buffer.view %this[%15] : buffer -> view<1xi32>
-  view.store %17, %18[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %17, %18[0] : i32, view<1xi32>
   %19 = scalar.constant 2 : i32
   %20 = index.constant 0 : offset
   %21 = index.add %this_byte_offset, %20 : offset
   %22 = buffer.view %this[%21] : buffer -> view<1xi32>
-  %23 = view.load %22[0] : view<1xi32> -> i32
+  %23 = view.load<root_in_bounds> %22[0] : view<1xi32> -> i32
   %24 = scalar.addi %23, %19 : i32
-  view.store %24, %22[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %24, %22[0] : i32, view<1xi32>
   func.return
 }
 
@@ -518,11 +518,11 @@ kernel.def @scale() {
   %59 = scalar.constant 1.0 : f64
   %90 = index.constant 0 : offset
   %70 = buffer.view %coefficients_storage[%90] : buffer -> view<1xf64>
-  view.store %59, %70[0] : f64, view<1xf64>
+  view.store<root_in_bounds> %59, %70[0] : f64, view<1xf64>
   %71 = scalar.constant 2.0 : f64
   %89 = index.constant 8 : offset
   %82 = buffer.view %coefficients_storage[%89] : buffer -> view<1xf64>
-  view.store %71, %82[0] : f64, view<1xf64>
+  view.store<root_in_bounds> %71, %82[0] : f64, view<1xf64>
   %27 = scalar.constant 1 : i32
   %28 = scalar.andi %i, %27 : i32
   %29 = scalar.extsi %28 : i32 to i64
@@ -538,10 +538,10 @@ kernel.def @scale() {
   %44 = scalar.assume %86 [range(%86, 0, 9223372036854775807)] : i64
   %45 = index.cast %44 : i64 to offset
   %46 = buffer.view %input[%45] : buffer -> view<1xf64>
-  %47 = view.load %46[0] : view<1xf64> -> f64
+  %47 = view.load<root_in_bounds> %46[0] : view<1xf64> -> f64
   %48 = scalar.mulf %38, %47 : f64
   %56 = buffer.view %output[%45] : buffer -> view<1xf64>
-  view.store %48, %56[0] : f64, view<1xf64>
+  view.store<root_in_bounds> %48, %56[0] : f64, view<1xf64>
   kernel.return
 }
 
@@ -738,7 +738,7 @@ func.def public @pointer_observation() -> (i32) {
   %kPointerValue_storage = global.load @kPointerValue : buffer
   %kPointerValue_storage_byte_offset = index.constant 0 : offset
   %20 = buffer.view %kPointerValue_storage[%kPointerValue_storage_byte_offset] : buffer -> view<1xi32>
-  %21 = view.load %20[0] : view<1xi32> -> i32
+  %21 = view.load<root_in_bounds> %20[0] : view<1xi32> -> i32
   func.return %21 : i32
 }
 

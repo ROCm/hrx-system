@@ -584,7 +584,8 @@ TEST_F(ImportTest, EmbeddedFacadeAndExternalProviderAgree) {
   EXPECT_NE(embedded.find("kernel.def @entry"), std::string::npos);
   EXPECT_NE(embedded.find("scalar.expf<afn>"), std::string::npos);
   EXPECT_NE(embedded.find("kernel.subgroup.shuffle"), std::string::npos);
-  EXPECT_NE(embedded.find("view.atomic.rmw<addi>"), std::string::npos);
+  EXPECT_NE(embedded.find("view.atomic.rmw<addi, root_in_bounds>"),
+            std::string::npos);
 
   // The provider borrows the same immutable source bytes under an external
   // include root; preprocessing and binding resolution remain identical.

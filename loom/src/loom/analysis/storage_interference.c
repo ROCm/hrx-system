@@ -66,11 +66,16 @@ typedef struct loom_storage_interference_lifetime_scratch_t {
 typedef struct loom_storage_interference_footprint_t {
   // Memory access and asynchronous completion operations for this root.
   const loom_op_t** operations;
+  // First access anchor in the allocation block, or UINT64_MAX when absent.
+  uint64_t first_access_ordinal;
   // Number of initialized operations.
-  iree_host_size_t operation_count;
+  uint32_t operation_count;
   // Allocated operation pointer capacity.
-  iree_host_size_t operation_capacity;
+  uint32_t operation_capacity;
 } loom_storage_interference_footprint_t;
+
+static_assert(sizeof(loom_storage_interference_footprint_t) == 24,
+              "storage footprints must remain compact");
 
 typedef struct loom_storage_interference_entry_t {
   // Root, provenance completeness, and instance-lifetime proof bits.
@@ -82,6 +87,9 @@ typedef struct loom_storage_interference_entry_t {
   // Complete operation footprint for an allocation root.
   loom_storage_interference_footprint_t footprint;
 } loom_storage_interference_entry_t;
+
+static_assert(sizeof(loom_storage_interference_entry_t) == 40,
+              "storage entries must remain compact per local value");
 
 typedef struct loom_storage_interference_edge_t {
   // Destination local value ordinal receiving the source provenance.
@@ -260,23 +268,46 @@ static iree_status_t loom_storage_interference_propagate_memberships(
   return iree_ok_status();
 }
 
+static bool loom_storage_interference_project_to_region(
+    const loom_op_t* operation, const loom_region_t* target_region,
+    const loom_op_t** out_anchor);
+
 static iree_status_t loom_storage_interference_append_footprint_operation(
-    loom_storage_interference_t* analysis,
-    loom_storage_interference_entry_t* entry, const loom_op_t* operation) {
+    loom_storage_interference_t* analysis, loom_value_ordinal_t root_ordinal,
+    const loom_op_t* operation) {
+  loom_storage_interference_entry_t* entry = &analysis->entries[root_ordinal];
+  if (analysis->workgroup_barrier_count != 0 &&
+      entry->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP &&
+      iree_any_bit_set(entry->flags,
+                       LOOM_STORAGE_INTERFERENCE_ENTRY_REPEATED)) {
+    const loom_value_t* root = loom_module_value(
+        analysis->module, analysis->value_domain->value_ids[root_ordinal]);
+    const loom_op_t* allocation_op = loom_value_def_op(root);
+    const loom_op_t* access_anchor = NULL;
+    if (!loom_storage_interference_project_to_region(
+            operation, allocation_op->parent_block->parent_region,
+            &access_anchor)) {
+      entry->footprint.first_access_ordinal = allocation_op->block_ordinal;
+    } else if (access_anchor->parent_block == allocation_op->parent_block) {
+      entry->footprint.first_access_ordinal = iree_min(
+          entry->footprint.first_access_ordinal, access_anchor->block_ordinal);
+    }
+  }
   for (iree_host_size_t i = 0; i < entry->footprint.operation_count; ++i) {
     if (entry->footprint.operations[i] == operation) {
       return iree_ok_status();
     }
   }
   if (entry->footprint.operation_count >= entry->footprint.operation_capacity) {
-    IREE_RETURN_IF_ERROR(
-        iree_arena_grow_array(analysis->arena, entry->footprint.operation_count,
-                              entry->footprint.operation_capacity == 0
-                                  ? 8
-                                  : entry->footprint.operation_capacity * 2,
-                              sizeof(*entry->footprint.operations),
-                              &entry->footprint.operation_capacity,
-                              (void**)&entry->footprint.operations));
+    const uint32_t new_capacity = entry->footprint.operation_capacity == 0
+                                      ? 8
+                                      : entry->footprint.operation_capacity * 2;
+    iree_host_size_t grown_capacity = 0;
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        analysis->arena, entry->footprint.operation_count, new_capacity,
+        sizeof(*entry->footprint.operations), &grown_capacity,
+        (void**)&entry->footprint.operations));
+    entry->footprint.operation_capacity = (uint32_t)grown_capacity;
   }
   entry->footprint.operations[entry->footprint.operation_count++] = operation;
   return iree_ok_status();
@@ -372,11 +403,11 @@ static iree_status_t loom_storage_interference_record_value_accesses(
       accesses_repeated_root |= iree_any_bit_set(
           entry->flags, LOOM_STORAGE_INTERFERENCE_ENTRY_REPEATED);
       IREE_RETURN_IF_ERROR(loom_storage_interference_append_footprint_operation(
-          analysis, entry, user_op));
+          analysis, membership->root_ordinal, user_op));
       if (completion_op) {
         IREE_RETURN_IF_ERROR(
             loom_storage_interference_append_footprint_operation(
-                analysis, entry, completion_op));
+                analysis, membership->root_ordinal, completion_op));
       }
     }
     if (completion_op && accesses_repeated_root) {
@@ -693,9 +724,9 @@ static iree_status_t loom_storage_interference_prove_single_instances(
             ~LOOM_STORAGE_INTERFERENCE_ENTRY_SINGLE_INSTANCE;
       }
     }
-    // Both retained operation tables use the same source preorder. Matching
-    // that subsequence consumes the walk's barrier qualification without
-    // reclassifying control or looking up operation pointers in another index.
+    // The retained barrier table is a subsequence of this source-preorder walk.
+    // Match it directly instead of reclassifying control or searching for each
+    // barrier in an operation index.
     if (barrier_index < analysis->workgroup_barrier_count &&
         point->op == analysis->workgroup_barriers[barrier_index].op) {
       const loom_storage_interference_barrier_t* barrier =
@@ -714,14 +745,20 @@ static iree_status_t loom_storage_interference_prove_single_instances(
         const loom_value_ordinal_t root = workgroup_roots[j];
         const loom_value_t* value = loom_module_value(
             analysis->module, analysis->value_domain->value_ids[root]);
-        const loom_block_t* allocation_block =
-            loom_value_def_op(value)->parent_block;
-        if (live_counts[root] == 0) {
-          if (allocation_block == barrier_block) {
-            analysis->entries[root].flags |=
-                LOOM_STORAGE_INTERFERENCE_ENTRY_WORKGROUP_CUT;
-          }
-        } else if (is_cfg_barrier &&
+        const loom_op_t* allocation_op = loom_value_def_op(value);
+        const loom_block_t* allocation_block = allocation_op->parent_block;
+        bool is_leading_cut = false;
+        if (live_counts[root] != 0 && allocation_block == barrier_block &&
+            allocation_op->block_ordinal < point->op->block_ordinal) {
+          is_leading_cut =
+              point->op->block_ordinal <
+              analysis->entries[root].footprint.first_access_ordinal;
+        }
+        if (allocation_block == barrier_block &&
+            (live_counts[root] == 0 || is_leading_cut)) {
+          analysis->entries[root].flags |=
+              LOOM_STORAGE_INTERFERENCE_ENTRY_WORKGROUP_CUT;
+        } else if (live_counts[root] != 0 && is_cfg_barrier &&
                    allocation_block->parent_region == cfg->graph.region &&
                    cfg->graph.blocks[allocation_block->region_index]
                        .component_is_cyclic) {
@@ -814,6 +851,7 @@ static iree_status_t loom_storage_interference_initialize_values(
             .flags = LOOM_STORAGE_INTERFERENCE_ENTRY_ROOT |
                      LOOM_STORAGE_INTERFERENCE_ENTRY_COMPLETE,
             .memory_space = loom_buffer_alloca_memory_space(defining_op),
+            .footprint = {.first_access_ordinal = UINT64_MAX},
         };
         analysis->entries[value_ordinal].flags |=
             loom_value_fact_table_block_may_repeat(analysis->fact_table,

@@ -52,7 +52,7 @@ kernel.def @initialize_weights() {
   %39 = scalar.assume %45 [range(%45, 0, 9223372036854775807)] : i64
   %40 = index.cast %39 : i64 to offset
   %41 = buffer.view %weights[%40] : buffer -> view<4xf16>
-  vector.store %33, %41[0] : vector<4xf16>, view<4xf16>
+  vector.store<root_in_bounds> %33, %41[0] : vector<4xf16>, view<4xf16>
   kernel.return
 }
 
@@ -74,11 +74,11 @@ kernel.def @initialize_indices() {
   %8 = scalar.constant 1 : i32
   %29 = index.constant 0 : offset
   %17 = buffer.view %indices[%29] : buffer -> view<1xi32>
-  view.store %8, %17[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %8, %17[0] : i32, view<1xi32>
   %18 = scalar.constant 0 : i32
   %28 = index.constant 4 : offset
   %27 = buffer.view %indices[%28] : buffer -> view<1xi32>
-  view.store %18, %27[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %18, %27[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -130,7 +130,7 @@ kernel.def @check_rows() {
   %33 = scalar.assume %55 [range(%55, 0, 9223372036854775807)] : i64
   %34 = index.cast %33 : i64 to offset
   %35 = buffer.view %output[%34] : buffer -> view<1xf32>
-  %36 = view.load %35[0] : view<1xf32> -> f32
+  %36 = view.load<root_in_bounds> %35[0] : view<1xf32> -> f32
   %37 = scalar.cmpf oeq, %36, %expected$56 : f32
   %40 = scalar.constant 0 : i32
   %53 = scf.select %37, %19, %40 : i32
@@ -139,6 +139,6 @@ kernel.def @check_rows() {
   %46 = scalar.assume %52 [range(%52, 0, 9223372036854775807)] : i64
   %47 = index.cast %46 : i64 to offset
   %48 = buffer.view %matches[%47] : buffer -> view<1xi32>
-  view.store %53, %48[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %53, %48[0] : i32, view<1xi32>
   kernel.return
 }

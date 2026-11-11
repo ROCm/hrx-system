@@ -65,6 +65,7 @@ TEST_F(StorageTest, MemberProjectionRetainsRootAndNestedSourceOffsets) {
                 producer(loom_op_operands(offset)[1]))),
             4);
   auto access = storage.dereference(field, value_field->type(), owner);
+  EXPECT_FALSE(access.root_bounds_promised);
   EXPECT_EQ(loom_buffer_view_buffer(producer(access.view)), field.pointer.root);
   auto* access_origin =
       producer(loom_buffer_view_byte_offset(producer(access.view)));
@@ -138,6 +139,41 @@ TEST_F(StorageTest, AdmitsExistingRootsAsFixedSourceObjects) {
   ASSERT_EQ(predicates.count, 1u);
   EXPECT_EQ(predicates.predicate_list[0].args[1], 0);
   EXPECT_EQ(predicates.predicate_list[0].args[2], 3);
+}
+
+TEST_F(StorageTest, DefinedAccessesPromiseRootBoundsWithoutExtentQueries) {
+  Locations locations(source_.unit(), source_.diagnostics(), module_);
+  Scalars scalars(source_.unit(), source_.diagnostics(), types_, locations,
+                  builder_);
+  Storage storage(source_.unit(), source_.diagnostics(), types_, scalars,
+                  locations, builder_);
+  auto* owner = source_.unit().ast();
+  auto byte_length = scalars.integer(64, LOOM_SCALAR_TYPE_OFFSET);
+  loom_op_t* root_op;
+  IREE_ASSERT_OK(loom_buffer_alloca_build(
+      &builder_, 0, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, LOOM_VALUE_ID_INVALID,
+      4, byte_length, loom_type_buffer(), LOOM_LOCATION_UNKNOWN, &root_op));
+  auto pointer = storage.root(loom_buffer_alloca_result(root_op), owner);
+
+  auto* integer = source_.unit().control()->getIntType();
+  auto access = storage.dereference(storage.project(pointer, integer, owner),
+                                    integer, owner);
+  EXPECT_TRUE(access.root_bounds_promised);
+
+  auto value = storage.load(access, integer, owner);
+  auto* load = producer(value);
+  ASSERT_TRUE(loom_view_load_isa(load));
+  EXPECT_EQ(loom_view_load_memory_flags(load),
+            LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS);
+  storage.store(access, value, integer, owner);
+  auto* store = loom_block_const_last_op(loom_module_block(module_));
+  ASSERT_TRUE(loom_view_store_isa(store));
+  EXPECT_EQ(loom_view_store_memory_flags(store),
+            LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS);
+
+  for (auto* op = loom_module_block(module_)->first_op; op; op = op->next_op) {
+    EXPECT_FALSE(loom_buffer_length_isa(op));
+  }
 }
 
 TEST_F(StorageTest, AggregateArraysRetainByteFootprints) {

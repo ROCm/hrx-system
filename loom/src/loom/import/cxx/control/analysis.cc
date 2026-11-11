@@ -70,6 +70,16 @@ struct ControlFlow::ReferenceWriteFacts {
   std::unordered_map<cxx::AST*, Result> results;
 };
 
+struct ControlFlow::SelectedReferenceReturnFacts {
+  // Parameter symbol to source ordinal during analysis and selected-result
+  // index after finalization. SIZE_MAX denotes an unselected parameter.
+  std::unordered_map<cxx::Symbol*, size_t> parameter_indices;
+  // Candidate source ordinals in first-return encounter order.
+  std::vector<size_t> parameters;
+  // Whether an address-observing caller requires durable pointer transport.
+  bool requires_storage = false;
+};
+
 namespace {
 
 ReferenceProjection compose_projection(ReferenceProjection parent,
@@ -314,6 +324,32 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
     }
   }
   accept(body);
+  if (reference_return_ == ReferenceReturn::Parameter) {
+    if (selected_reference_return_facts_) {
+      auto& facts = *selected_reference_return_facts_;
+      std::vector<size_t> selected_indices(function_->parameters().size(),
+                                           SIZE_MAX);
+      std::vector<size_t> unique;
+      unique.reserve(facts.parameters.size());
+      for (size_t ordinal : facts.parameters) {
+        auto& index = selected_indices[ordinal];
+        if (index != SIZE_MAX) {
+          continue;
+        }
+        index = unique.size();
+        unique.push_back(ordinal);
+      }
+      facts.parameters = std::move(unique);
+      IREE_ASSERT(facts.parameters.size() > 1);
+      for (auto& [parameter, index] : facts.parameter_indices) {
+        index = selected_indices[index];
+      }
+    } else {
+      IREE_ASSERT(reference_return_parameter_ != SIZE_MAX);
+    }
+  } else {
+    selected_reference_return_facts_.reset();
+  }
   temporary_origins_.finish();
   retain_temporary_destructions();
   construction_.finish_function();
@@ -326,6 +362,33 @@ const Destruction* ControlFlow::automatic_destruction(
 }
 
 ControlFlow::~ControlFlow() = default;
+
+std::optional<size_t> ControlFlow::reference_return_parameter() const {
+  return reference_return_ == ReferenceReturn::Parameter &&
+                 !selected_reference_return_facts_
+             ? std::optional(reference_return_parameter_)
+             : std::nullopt;
+}
+
+std::span<const size_t> ControlFlow::selected_reference_return_parameters()
+    const {
+  return reference_return_ == ReferenceReturn::Parameter &&
+                 selected_reference_return_facts_ &&
+                 !selected_reference_return_facts_->requires_storage
+             ? std::span<const size_t>{selected_reference_return_facts_
+                                           ->parameters}
+             : std::span<const size_t>{};
+}
+
+std::span<const size_t> ControlFlow::reference_return_parameters() const {
+  if (reference_return_ != ReferenceReturn::Parameter) {
+    return {};
+  }
+  return selected_reference_return_facts_
+             ? std::span<const size_t>{selected_reference_return_facts_
+                                           ->parameters}
+             : std::span<const size_t>{&reference_return_parameter_, 1};
+}
 
 std::optional<Destination> ControlFlow::destination(
     cxx::ExpressionAST* expression) const {
@@ -376,6 +439,25 @@ bool ControlFlow::reference_requires_storage(cxx::Symbol* binding) const {
 
 bool ControlFlow::reference_written(cxx::Symbol* parameter) const {
   return written_references_.contains(parameter);
+}
+
+std::optional<size_t> ControlFlow::selected_reference_return_index(
+    cxx::ExpressionAST* expression) const {
+  if (!selected_reference_return_facts_) {
+    return std::nullopt;
+  }
+  expression = unwrap_object_identity(unit_, expression);
+  auto returned = destination(expression);
+  if (!returned || returned->member || returned->component_offset != 0) {
+    return std::nullopt;
+  }
+  auto found = selected_reference_return_facts_->parameter_indices.find(
+      returned->binding);
+  if (found == selected_reference_return_facts_->parameter_indices.end() ||
+      found->second == SIZE_MAX) {
+    return std::nullopt;
+  }
+  return found->second;
 }
 
 bool ControlFlow::argument_requires_storage(const CallArgument& argument,
@@ -1052,6 +1134,69 @@ void ControlFlow::visit(cxx::UnaryExpressionAST* ast) {
   }
 }
 
+bool ControlFlow::collect_reference_return_parameters(
+    cxx::ExpressionAST* expression, std::vector<size_t>& ordinals) {
+  expression = unwrap_object_identity(unit_, expression);
+  if (auto* conditional =
+          cxx::ast_cast<cxx::ConditionalExpressionAST>(expression);
+      conditional &&
+      expression->valueCategory != cxx::ValueCategory::kPrValue) {
+    const size_t ordinal_mark = ordinals.size();
+    if (collect_reference_return_parameters(conditional->iftrueExpression,
+                                            ordinals) &&
+        collect_reference_return_parameters(conditional->iffalseExpression,
+                                            ordinals)) {
+      return true;
+    }
+    ordinals.resize(ordinal_mark);
+    return false;
+  }
+
+  auto returned = classify_destination(expression);
+  if (!returned || returned->member || returned->component_offset != 0) {
+    return false;
+  }
+  auto parameters = function_->parameters();
+  if (!selected_reference_return_facts_ &&
+      reference_return_parameter_ != SIZE_MAX &&
+      parameters[reference_return_parameter_] == returned->binding) {
+    ordinals.push_back(reference_return_parameter_);
+    return true;
+  }
+  if (!selected_reference_return_facts_) {
+    auto found = std::ranges::find(parameters, returned->binding);
+    if (found == parameters.end() ||
+        !unit_.typeTraits().is_reference((*found)->type())) {
+      return false;
+    }
+    const size_t ordinal = static_cast<size_t>(found - parameters.begin());
+    if (reference_return_parameter_ == SIZE_MAX) {
+      reference_return_parameter_ = ordinal;
+      ordinals.push_back(ordinal);
+      return true;
+    }
+
+    auto facts = std::make_unique<SelectedReferenceReturnFacts>();
+    auto& parameter_indices = facts->parameter_indices;
+    parameter_indices.reserve(parameters.size());
+    for (size_t parameter_ordinal = 0; parameter_ordinal < parameters.size();
+         ++parameter_ordinal) {
+      parameter_indices.emplace(parameters[parameter_ordinal],
+                                parameter_ordinal);
+    }
+    facts->parameters.push_back(reference_return_parameter_);
+    selected_reference_return_facts_ = std::move(facts);
+  }
+  auto found = selected_reference_return_facts_->parameter_indices.find(
+      returned->binding);
+  if (found == selected_reference_return_facts_->parameter_indices.end() ||
+      !unit_.typeTraits().is_reference(returned->binding->type())) {
+    return false;
+  }
+  ordinals.push_back(found->second);
+  return true;
+}
+
 void ControlFlow::visit(cxx::ReturnStatementAST* ast) {
   cxx::ASTVisitor::visit(ast);
   auto* signature = function_
@@ -1066,31 +1211,30 @@ void ControlFlow::visit(cxx::ReturnStatementAST* ast) {
     return;
   }
 
-  auto parameters = function_->parameters();
-  std::optional<size_t> parameter_ordinal;
-  auto returned =
-      classify_destination(unwrap_object_identity(unit_, ast->expression));
-  if (returned && !returned->member && returned->component_offset == 0) {
-    auto found = std::ranges::find(parameters, returned->binding);
-    if (found != parameters.end() &&
-        unit_.typeTraits().is_reference((*found)->type())) {
-      parameter_ordinal = static_cast<size_t>(found - parameters.begin());
-    }
+  if (reference_return_ == ReferenceReturn::Storage) {
+    require_identity(ast->expression);
+    return;
   }
 
+  auto parameters = function_->parameters();
+  std::vector<size_t> parameter_ordinals;
+  const bool returns_parameters =
+      collect_reference_return_parameters(ast->expression, parameter_ordinals);
   ReferenceReturn incoming = ReferenceReturn::Storage;
   if (is_current_object(unit_, ast->expression)) {
     incoming = ReferenceReturn::CurrentReceiver;
-  } else if (parameter_ordinal) {
+  } else if (returns_parameters) {
     incoming = ReferenceReturn::Parameter;
   }
   auto require_storage = [&](ReferenceReturn origin,
-                             std::optional<size_t> ordinal,
+                             std::span<const size_t> ordinals,
                              cxx::ExpressionAST* expression) {
     if (origin == ReferenceReturn::CurrentReceiver) {
       receiver_requires_storage_ = true;
     } else if (origin == ReferenceReturn::Parameter) {
-      require_reference_storage(parameters[*ordinal]);
+      for (size_t ordinal : ordinals) {
+        require_reference_storage(parameters[ordinal]);
+      }
     } else if (origin == ReferenceReturn::Storage && expression) {
       require_identity(expression);
     }
@@ -1098,29 +1242,30 @@ void ControlFlow::visit(cxx::ReturnStatementAST* ast) {
 
   if (reference_return_ == ReferenceReturn::None) {
     reference_return_ = incoming;
-    if (parameter_ordinal) {
-      reference_return_parameter_ = *parameter_ordinal;
+    if (incoming == ReferenceReturn::Parameter &&
+        selected_reference_return_facts_) {
+      selected_reference_return_facts_->parameters =
+          std::move(parameter_ordinals);
     }
     if (incoming == ReferenceReturn::Storage) {
-      require_storage(incoming, std::nullopt, ast->expression);
+      require_storage(incoming, {}, ast->expression);
+      selected_reference_return_facts_.reset();
     }
     return;
   }
-  const bool same_origin = reference_return_ == incoming &&
-                           (incoming != ReferenceReturn::Parameter ||
-                            reference_return_parameter_ == *parameter_ordinal);
-  if (same_origin) {
-    if (incoming == ReferenceReturn::Storage) {
-      require_storage(incoming, std::nullopt, ast->expression);
+  if (reference_return_ == incoming) {
+    if (incoming == ReferenceReturn::Parameter &&
+        selected_reference_return_facts_) {
+      auto& parameters = selected_reference_return_facts_->parameters;
+      parameters.insert(parameters.end(), parameter_ordinals.begin(),
+                        parameter_ordinals.end());
     }
     return;
   }
-  auto previous_ordinal = reference_return_ == ReferenceReturn::Parameter
-                              ? std::optional(reference_return_parameter_)
-                              : std::nullopt;
-  require_storage(reference_return_, previous_ordinal, nullptr);
-  require_storage(incoming, parameter_ordinal, ast->expression);
+  require_storage(reference_return_, reference_return_parameters(), nullptr);
+  require_storage(incoming, parameter_ordinals, ast->expression);
   reference_return_ = ReferenceReturn::Storage;
+  selected_reference_return_facts_.reset();
 }
 
 void ControlFlow::visit(cxx::CallExpressionAST* ast) {
@@ -2342,14 +2487,22 @@ bool ControlFlow::retain_reference_result_identity(const DirectCall& call,
   // parameter or its receiver. Outer call edges can compare nested aliases
   // without traversing either function body again. The selected storage ABI is
   // retained separately so another reference call can transport it directly.
-  bool result_storage = callee.reference_return_ == ReferenceReturn::Storage;
+  bool result_storage =
+      callee.reference_return_ == ReferenceReturn::Storage ||
+      (callee.selected_reference_return_facts_ &&
+       callee.selected_reference_return_facts_->requires_storage);
   std::vector<ObjectInterval> result_intervals;
-  if (auto ordinal = callee.reference_return_parameter();
-      ordinal && *ordinal < call.arguments.size()) {
+  if (callee.reference_return_ == ReferenceReturn::Parameter) {
     auto parameters = callee.function_->parameters();
-    result_storage = callee.reference_requires_storage(parameters[*ordinal]) ||
-                     argument_requires_storage(call.arguments[*ordinal]);
-    append_intervals(call.arguments[*ordinal], result_intervals);
+    for (size_t ordinal : callee.reference_return_parameters()) {
+      if (ordinal >= call.arguments.size()) {
+        continue;
+      }
+      result_storage |=
+          callee.reference_requires_storage(parameters[ordinal]) ||
+          argument_requires_storage(call.arguments[ordinal]);
+      append_intervals(call.arguments[ordinal], result_intervals);
+    }
   } else if (callee.returns_current_receiver_reference()) {
     result_storage =
         (call.current_receiver && receiver_requires_storage_) ||
@@ -2501,6 +2654,17 @@ CallPropagation ControlFlow::propagate_call(const DirectCall& call,
                        callee_changed;
       caller_changed =
           require_identity(call.arguments[*ordinal]) || caller_changed;
+    } else if (callee.selected_reference_return_facts_) {
+      auto& facts = *callee.selected_reference_return_facts_;
+      callee_changed = !facts.requires_storage || callee_changed;
+      facts.requires_storage = true;
+      for (size_t ordinal : facts.parameters) {
+        callee_changed =
+            callee.require_reference_storage(parameters[ordinal]) ||
+            callee_changed;
+        caller_changed =
+            require_identity(call.arguments[ordinal]) || caller_changed;
+      }
     }
   }
   const ReferenceWriteFacts::Result* result_write = nullptr;
@@ -2518,6 +2682,13 @@ CallPropagation ControlFlow::propagate_call(const DirectCall& call,
             record_projected_write(call.arguments[*ordinal], write.owners,
                                    projection.range, projection.effect) ||
             caller_changed;
+      } else if (callee.reference_return_ == ReferenceReturn::Parameter) {
+        for (size_t ordinal : callee.reference_return_parameters()) {
+          caller_changed =
+              record_projected_write(call.arguments[ordinal], write.owners,
+                                     projection.range, projection.effect) ||
+              caller_changed;
+        }
       } else if (call.function->isImplicitObjectMemberFunction() &&
                  callee.returns_current_receiver_reference()) {
         if (call.current_receiver) {

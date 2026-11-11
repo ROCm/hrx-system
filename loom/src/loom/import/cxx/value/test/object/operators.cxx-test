@@ -408,7 +408,7 @@ kernel.def @accumulate_pairs() {
   %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
   %20 = index.cast %19 : i64 to offset
   %21 = buffer.view %input[%20] : buffer -> view<1xi32>
-  %value_x = view.load %21[0] : view<1xi32> -> i32
+  %value_x = view.load<root_in_bounds> %21[0] : view<1xi32> -> i32
   %23 = scalar.constant 1 : i32
   %24 = scalar.addi %base, %23 : i32
   %25 = scalar.extui %24 : i32 to i64
@@ -419,7 +419,7 @@ kernel.def @accumulate_pairs() {
   %30 = scalar.assume %29 [range(%29, 0, 9223372036854775807)] : i64
   %31 = index.cast %30 : i64 to offset
   %32 = buffer.view %input[%31] : buffer -> view<1xi32>
-  %value_y = view.load %32[0] : view<1xi32> -> i32
+  %value_y = view.load<root_in_bounds> %32[0] : view<1xi32> -> i32
   %bias_x = scalar.constant 1 : i32
   %bias_y = scalar.constant 2 : i32
   %36 = scalar.constant 3 : i32
@@ -433,7 +433,7 @@ kernel.def @accumulate_pairs() {
   %46 = scalar.assume %45 [range(%45, 0, 9223372036854775807)] : i64
   %47 = index.cast %46 : i64 to offset
   %48 = buffer.view %output[%47] : buffer -> view<1xi32>
-  view.store %result_x, %48[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %result_x, %48[0] : i32, view<1xi32>
   %49 = scalar.constant 1 : i32
   %50 = scalar.addi %base, %49 : i32
   %51 = scalar.extui %50 : i32 to i64
@@ -444,7 +444,7 @@ kernel.def @accumulate_pairs() {
   %56 = scalar.assume %55 [range(%55, 0, 9223372036854775807)] : i64
   %57 = index.cast %56 : i64 to offset
   %58 = buffer.view %output[%57] : buffer -> view<1xi32>
-  view.store %result_y, %58[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %result_y, %58[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -491,6 +491,64 @@ func.def @TemporaryObserved__bump_value(%this_value: i32, %this_observed: buffer
 
 func.def inline @TemporaryObserved___TemporaryObserved_value(%this_value: i32, %this_observed: buffer, %this_observed_byte_offset: offset) {
   %18 = buffer.view %this_observed[%this_observed_byte_offset] : buffer -> view<1xi32>
-  view.store %this_value, %18[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %this_value, %18[0] : i32, view<1xi32>
   func.return
+}
+
+// ====
+// RUN: roundtrip
+// INPUT: cxx root=selected_operator_result
+// Overloaded calls use the same finite-origin result contract as ordinary
+// calls and preserve the selected caller destination for mutation.
+struct ReferenceSelector {
+  bool invert;
+
+  unsigned& operator()(bool condition, unsigned& left, unsigned& right) const {
+    return condition != invert ? left : right;
+  }
+};
+
+unsigned selected_operator_result(bool condition, unsigned left,
+                                  unsigned right, unsigned replacement) {
+  ReferenceSelector selector{false};
+  selector(condition, left, right) = replacement;
+  return left * 10u + right;
+}
+
+// ----
+func.def public @selected_operator_result(%condition: i1, %left$1: i32, %right$2: i32, %replacement: i32) -> (i32) {
+  %selector_invert = scalar.constant 0 : i1
+  %6 = func.call pure @ReferenceSelector__operator_call_value(%selector_invert, %condition, %left$1, %right$2) : (i1, i1, i32, i32) -> (i32)
+  %7 = scalar.constant 0 : i32
+  %8 = scalar.cmpi eq, %6, %7 : i32
+  %left$9 = scf.if %8 -> (i32) {
+    scf.yield %replacement : i32
+  } else {
+    scf.yield %left$1 : i32
+  }
+  %10 = scalar.constant 0 : i32
+  %11 = scalar.cmpi eq, %6, %10 : i32
+  %right$12 = scf.if %11 -> (i32) {
+    scf.yield %right$2 : i32
+  } else {
+    scf.yield %replacement : i32
+  }
+  %13 = scalar.constant 10 : i32
+  %14 = scalar.muli %left$9, %13 : i32
+  %15 = scalar.addi %14, %right$12 : i32
+  func.return %15 : i32
+}
+
+func.def @ReferenceSelector__operator_call_value(%this_invert: i1, %condition: i1, %left: i32, %right: i32) -> (i32) {
+  %21 = scalar.extui %condition : i1 to i32
+  %22 = scalar.extui %this_invert : i1 to i32
+  %23 = scalar.cmpi ne, %21, %22 : i32
+  %26 = scf.if %23 -> (i32) {
+    %24 = scalar.constant 0 : i32
+    scf.yield %24 : i32
+  } else {
+    %25 = scalar.constant 1 : i32
+    scf.yield %25 : i32
+  }
+  func.return %26 : i32
 }

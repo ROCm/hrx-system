@@ -385,7 +385,7 @@ func.def public @code_units(%position$0: i32) -> (i32) {
   %10 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
   %11 = index.cast %10 : i64 to offset
   %12 = buffer.view %3[%11] : buffer -> view<1xi8>
-  %13 = view.load %12[0] : view<1xi8> -> i8
+  %13 = view.load<root_in_bounds> %12[0] : view<1xi8> -> i8
   %14 = scalar.extui %13 : i8 to i32
   %15 = buffer.constant align(1) utf8("é\u0000") : buffer
   %16 = index.constant 0 : offset
@@ -468,7 +468,7 @@ func.def public @literal_aliases() -> (i32) {
   %15 = scalar.assume %14 [range(%14, 0, 9223372036854775807)] : i64
   %16 = index.cast %15 : i64 to offset
   %17 = buffer.view %escaped[%16] : buffer -> view<1xi8>
-  %18 = view.load %17[0] : view<1xi8> -> i8
+  %18 = view.load<root_in_bounds> %17[0] : view<1xi8> -> i8
   %19 = scalar.extsi %18 : i8 to i32
   %51 = index.constant 1 : index
   %24 = view.load %5[%51] : view<4xi8> -> i8

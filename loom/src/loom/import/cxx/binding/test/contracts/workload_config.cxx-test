@@ -51,7 +51,7 @@ kernel.def @transform(%item_count: i32, %row_count: i32) {
   %33 = scalar.assume %32 [range(%32, 0, 9223372036854775807)] : i64
   %34 = index.cast %33 : i64 to offset
   %35 = buffer.view %output[%34] : buffer -> view<1xf32>
-  view.store %25, %35[0] : f32, view<1xf32>
+  view.store<root_in_bounds> %25, %35[0] : f32, view<1xf32>
   kernel.return
 }
 
@@ -295,7 +295,7 @@ kernel.def @configured_copy(%item_count: i32) {
     %42 = scalar.assume %41 [range(%41, 0, 9223372036854775807)] : i64
     %43 = index.cast %42 : i64 to offset
     %44 = buffer.view %input[%43] : buffer -> view<1xf32>
-    %45 = view.load %44[0] : view<1xf32> -> f32
+    %45 = view.load<root_in_bounds> %44[0] : view<1xf32> -> f32
     %46 = scalar.extui %item : i32 to i64
     %47 = scalar.constant 4 : i64
     %48 = scalar.muli %46, %47 : i64
@@ -304,7 +304,7 @@ kernel.def @configured_copy(%item_count: i32) {
     %51 = scalar.assume %50 [range(%50, 0, 9223372036854775807)] : i64
     %52 = index.cast %51 : i64 to offset
     %53 = buffer.view %output[%52] : buffer -> view<1xf32>
-    view.store %45, %53[0] : f32, view<1xf32>
+    view.store<root_in_bounds> %45, %53[0] : f32, view<1xf32>
   }
   kernel.return
 }
@@ -384,7 +384,7 @@ kernel.def @configured_template_unsigned_int(%item_count: i32) {
   %30 = scalar.assume %29 [range(%29, 0, 9223372036854775807)] : i64
   %31 = index.cast %30 : i64 to offset
   %32 = buffer.view %output[%31] : buffer -> view<1xi32>
-  view.store %23, %32[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %23, %32[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -415,7 +415,7 @@ kernel.def @indirect(%counts: buffer, %counts_byte_offset: offset) {
   %8 = scalar.assume %7 [range(%7, 0, 9223372036854775807)] : i64
   %9 = index.cast %8 : i64 to offset
   %10 = buffer.view %counts[%9] : buffer -> view<1xi32>
-  %11 = view.load %10[0] : view<1xi32> -> i32
+  %11 = view.load<root_in_bounds> %10[0] : view<1xi32> -> i32
   %12 = scalar.constant 1 : i32
   %13 = scalar.constant 1 : i32
   %14 = scalar.constant 64 : i32
@@ -591,7 +591,7 @@ func.def public linkonce inline @read_count(%use_left: i1, %left: buffer, %left_
   %23 = scalar.assume %22 [range(%22, 0, 9223372036854775807)] : i64
   %24 = index.cast %23 : i64 to offset
   %25 = buffer.view %15[%24] : buffer -> view<1xi32>
-  %26 = view.load %25[0] : view<1xi32> -> i32
+  %26 = view.load<root_in_bounds> %25[0] : view<1xi32> -> i32
   func.return %26 : i32
 }
 
@@ -703,9 +703,9 @@ kernel.def @configured_copy(%item_count: i32) {
     %48 = scalar.assume %75 [range(%75, 0, 9223372036854775807)] : i64
     %49 = index.cast %48 : i64 to offset
     %50 = buffer.view %input[%49] : buffer -> view<1xf32>
-    %51 = view.load %50[0] : view<1xf32> -> f32
+    %51 = view.load<root_in_bounds> %50[0] : view<1xf32> -> f32
     %59 = buffer.view %output[%49] : buffer -> view<1xf32>
-    view.store %51, %59[0] : f32, view<1xf32>
+    view.store<root_in_bounds> %51, %59[0] : f32, view<1xf32>
   }
   kernel.return
 }

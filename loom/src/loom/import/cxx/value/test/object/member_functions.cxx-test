@@ -200,7 +200,7 @@ func.def @Stored__read_storage(%this: buffer, %this_byte_offset: offset) -> (i32
   %18 = index.constant 0 : offset
   %19 = index.add %this_byte_offset, %18 : offset
   %20 = buffer.view %this[%19] : buffer -> view<1xi32>
-  %value = view.load %20[0] : view<1xi32> -> i32
+  %value = view.load<root_in_bounds> %20[0] : view<1xi32> -> i32
   func.return %value : i32
 }
 
@@ -208,7 +208,7 @@ func.def @Stored__observe_storage(%this: buffer, %this_byte_offset: offset) -> (
   %25 = index.constant 0 : offset
   %26 = index.add %this_byte_offset, %25 : offset
   %27 = buffer.view %this[%26] : buffer -> view<1xi32>
-  %value = view.load<volatile> %27[0] : view<1xi32> -> i32
+  %value = view.load<volatile|root_in_bounds> %27[0] : view<1xi32> -> i32
   func.return %value : i32
 }
 
@@ -216,9 +216,9 @@ func.def @Stored__bump_storage(%this: buffer, %this_byte_offset: offset, %amount
   %32 = index.constant 0 : offset
   %33 = index.add %this_byte_offset, %32 : offset
   %34 = buffer.view %this[%33] : buffer -> view<1xi32>
-  %35 = view.load %34[0] : view<1xi32> -> i32
+  %35 = view.load<root_in_bounds> %34[0] : view<1xi32> -> i32
   %36 = scalar.addi %35, %amount : i32
-  view.store %36, %34[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %36, %34[0] : i32, view<1xi32>
   func.return
 }
 
@@ -275,9 +275,9 @@ func.def @Dual__bump_storage(%this: buffer, %this_byte_offset: offset, %amount: 
   %30 = index.constant 0 : offset
   %31 = index.add %this_byte_offset, %30 : offset
   %32 = buffer.view %this[%31] : buffer -> view<1xi32>
-  %33 = view.load %32[0] : view<1xi32> -> i32
+  %33 = view.load<root_in_bounds> %32[0] : view<1xi32> -> i32
   %34 = scalar.addi %33, %amount : i32
-  view.store %34, %32[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %34, %32[0] : i32, view<1xi32>
   func.return
 }
 
@@ -289,7 +289,7 @@ func.def @Dual__read_storage(%this: buffer, %this_byte_offset: offset) -> (i32) 
   %40 = index.constant 0 : offset
   %41 = index.add %this_byte_offset, %40 : offset
   %42 = buffer.view %this[%41] : buffer -> view<1xi32>
-  %value = view.load %42[0] : view<1xi32> -> i32
+  %value = view.load<root_in_bounds> %42[0] : view<1xi32> -> i32
   func.return %value : i32
 }
 
@@ -479,28 +479,28 @@ func.def public @overlapping_receiver(%value_first$0: i32, %value_second$1: i32)
 
 func.def @AliasedReceiver__mix_storage(%this: buffer, %this_byte_offset: offset, %selected$30: buffer, %selected_byte_offset: offset) {
   %32 = buffer.view %selected$30[%selected_byte_offset] : buffer -> view<1xi32>
-  %33 = view.load %32[0] : view<1xi32> -> i32
+  %33 = view.load<root_in_bounds> %32[0] : view<1xi32> -> i32
   %34 = scalar.constant 1 : i32
   %35 = scalar.addi %33, %34 : i32
   %36 = buffer.view %selected$30[%selected_byte_offset] : buffer -> view<1xi32>
-  view.store %35, %36[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %35, %36[0] : i32, view<1xi32>
   %37 = buffer.view %selected$30[%selected_byte_offset] : buffer -> view<1xi32>
-  %selected$38 = view.load %37[0] : view<1xi32> -> i32
+  %selected$38 = view.load<root_in_bounds> %37[0] : view<1xi32> -> i32
   %39 = index.constant 0 : offset
   %40 = index.add %this_byte_offset, %39 : offset
   %41 = buffer.view %this[%40] : buffer -> view<1xi32>
-  %42 = view.load %41[0] : view<1xi32> -> i32
+  %42 = view.load<root_in_bounds> %41[0] : view<1xi32> -> i32
   %43 = scalar.addi %42, %selected$38 : i32
-  view.store %43, %41[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %43, %41[0] : i32, view<1xi32>
   %44 = index.constant 0 : offset
   %45 = index.add %this_byte_offset, %44 : offset
   %46 = buffer.view %this[%45] : buffer -> view<1xi32>
-  %first = view.load %46[0] : view<1xi32> -> i32
+  %first = view.load<root_in_bounds> %46[0] : view<1xi32> -> i32
   %48 = buffer.view %selected$30[%selected_byte_offset] : buffer -> view<1xi32>
-  %49 = view.load %48[0] : view<1xi32> -> i32
+  %49 = view.load<root_in_bounds> %48[0] : view<1xi32> -> i32
   %50 = scalar.addi %49, %first : i32
   %51 = buffer.view %selected$30[%selected_byte_offset] : buffer -> view<1xi32>
-  view.store %50, %51[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %50, %51[0] : i32, view<1xi32>
   func.return
 }
 
@@ -563,19 +563,19 @@ func.def @CurrentReceiverAlias__self_storage(%this: buffer, %this_byte_offset: o
 
 func.def @CurrentReceiverAlias__update_storage(%this: buffer, %this_byte_offset: offset, %selected$40: buffer, %selected_byte_offset: offset) {
   %42 = buffer.view %selected$40[%selected_byte_offset] : buffer -> view<1xi32>
-  %43 = view.load %42[0] : view<1xi32> -> i32
+  %43 = view.load<root_in_bounds> %42[0] : view<1xi32> -> i32
   %44 = scalar.constant 1 : i32
   %45 = scalar.addi %43, %44 : i32
-  view.store %45, %42[0] : i32, view<1xi32>
-  %selected$48 = view.load %42[0] : view<1xi32> -> i32
+  view.store<root_in_bounds> %45, %42[0] : i32, view<1xi32>
+  %selected$48 = view.load<root_in_bounds> %42[0] : view<1xi32> -> i32
   %51 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
-  %52 = view.load %51[0] : view<1xi32> -> i32
+  %52 = view.load<root_in_bounds> %51[0] : view<1xi32> -> i32
   %53 = scalar.addi %52, %selected$48 : i32
-  view.store %53, %51[0] : i32, view<1xi32>
-  %first = view.load %51[0] : view<1xi32> -> i32
-  %59 = view.load %42[0] : view<1xi32> -> i32
+  view.store<root_in_bounds> %53, %51[0] : i32, view<1xi32>
+  %first = view.load<root_in_bounds> %51[0] : view<1xi32> -> i32
+  %59 = view.load<root_in_bounds> %42[0] : view<1xi32> -> i32
   %60 = scalar.addi %59, %first : i32
-  view.store %60, %42[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %60, %42[0] : i32, view<1xi32>
   func.return
 }
 

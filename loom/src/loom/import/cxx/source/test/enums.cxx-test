@@ -109,7 +109,7 @@ func.def public @load_next(%values: buffer, %values_byte_offset: offset) -> (i8)
   %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
   %20 = index.cast %19 : i64 to offset
   %21 = buffer.view %values[%20] : buffer -> view<1xi8>
-  %22 = view.load %21[0] : view<1xi8> -> i8
+  %22 = view.load<root_in_bounds> %21[0] : view<1xi8> -> i8
   func.return %22 : i8
 }
 
@@ -120,7 +120,7 @@ func.def public @store_next(%values: buffer, %values_byte_offset: offset, %value
   %32 = scalar.assume %31 [range(%31, 0, 9223372036854775807)] : i64
   %33 = index.cast %32 : i64 to offset
   %34 = buffer.view %values[%33] : buffer -> view<1xi8>
-  view.store %value, %34[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %value, %34[0] : i8, view<1xi8>
   func.return
 }
 

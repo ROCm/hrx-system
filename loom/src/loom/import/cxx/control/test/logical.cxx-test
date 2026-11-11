@@ -80,7 +80,7 @@ func.def public @guarded(%input: buffer, %input_byte_offset: offset, %index: i32
     %12 = scalar.assume %11 [range(%11, 0, 9223372036854775807)] : i64
     %13 = index.cast %12 : i64 to offset
     %14 = buffer.view %input[%13] : buffer -> view<1xi32>
-    %15 = view.load %14[0] : view<1xi32> -> i32
+    %15 = view.load<root_in_bounds> %14[0] : view<1xi32> -> i32
     %16 = scalar.constant 0 : i32
     %17 = scalar.cmpi ne, %15, %16 : i32
     scf.yield %17 : i1
@@ -114,7 +114,7 @@ func.def public @scan(%input: buffer, %input_byte_offset: offset, %length: i32) 
       %15 = scalar.assume %14 [range(%14, 0, 9223372036854775807)] : i64
       %16 = index.cast %15 : i64 to offset
       %17 = buffer.view %input[%16] : buffer -> view<1xi32>
-      %18 = view.load %17[0] : view<1xi32> -> i32
+      %18 = view.load<root_in_bounds> %17[0] : view<1xi32> -> i32
       %19 = scalar.constant 0 : i32
       %20 = scalar.cmpi ne, %18, %19 : i32
       scf.yield %20 : i1
@@ -383,7 +383,7 @@ func.def public @guarded_call(%input: buffer, %input_byte_offset: offset, %index
     %13 = scalar.assume %12 [range(%12, 0, 9223372036854775807)] : i64
     %14 = index.cast %13 : i64 to offset
     %15 = buffer.view %input[%14] : buffer -> view<1xi32>
-    %16 = view.load %15[0] : view<1xi32> -> i32
+    %16 = view.load<root_in_bounds> %15[0] : view<1xi32> -> i32
     %17 = func.call @record(%7, %16) : (i32, i32) -> (i32)
     %18 = scalar.constant 0 : i32
     %19 = scalar.cmpi ne, %17, %18 : i32
@@ -418,7 +418,7 @@ func.def public @guarded_disjunction(%input: buffer, %input_byte_offset: offset,
     %13 = scalar.assume %12 [range(%12, 0, 9223372036854775807)] : i64
     %14 = index.cast %13 : i64 to offset
     %15 = buffer.view %input[%14] : buffer -> view<1xi32>
-    %16 = view.load %15[0] : view<1xi32> -> i32
+    %16 = view.load<root_in_bounds> %15[0] : view<1xi32> -> i32
     %17 = func.call @record(%7, %16) : (i32, i32) -> (i32)
     %18 = scalar.constant 0 : i32
     %19 = scalar.cmpi ne, %17, %18 : i32

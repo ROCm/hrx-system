@@ -231,10 +231,10 @@ Float4 entry(const Int4* input, int* index) {
 // ----
 func.def public @entry(%input: buffer, %input_byte_offset: offset, %index: buffer, %index_byte_offset: offset) -> (vector<4xf32>) {
   %5 = buffer.view %index[%index_byte_offset] : buffer -> view<1xi32>
-  %6 = view.load %5[0] : view<1xi32> -> i32
+  %6 = view.load<root_in_bounds> %5[0] : view<1xi32> -> i32
   %7 = scalar.constant 1 : i32
   %8 = scalar.addi %6, %7 : i32
-  view.store %8, %5[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %8, %5[0] : i32, view<1xi32>
   %9 = scalar.extsi %6 : i32 to i64
   %10 = scalar.constant 16 : i64
   %11 = scalar.muli %9, %10 : i64
@@ -243,7 +243,7 @@ func.def public @entry(%input: buffer, %input_byte_offset: offset, %index: buffe
   %14 = scalar.assume %13 [range(%13, 0, 9223372036854775807)] : i64
   %15 = index.cast %14 : i64 to offset
   %16 = buffer.view %input[%15] : buffer -> view<4xi32>
-  %17 = vector.load %16[0] : view<4xi32> -> vector<4xi32>
+  %17 = vector.load<root_in_bounds> %16[0] : view<4xi32> -> vector<4xi32>
   %18 = vector.sitofp %17 : vector<4xi32> to vector<4xf32>
   func.return %18 : vector<4xf32>
 }

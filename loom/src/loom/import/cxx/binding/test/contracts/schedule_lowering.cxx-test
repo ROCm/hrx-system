@@ -40,7 +40,7 @@ func.def public @serial_find(%values: buffer, %values_byte_offset: offset, %coun
     %35 = scalar.assume %34 [range(%34, 0, 9223372036854775807)] : i64
     %36 = index.cast %35 : i64 to offset
     %37 = buffer.view %values[%36] : buffer -> view<1xi32>
-    %38 = view.load %37[0] : view<1xi32> -> i32
+    %38 = view.load<root_in_bounds> %37[0] : view<1xi32> -> i32
     %39 = scalar.constant 0 : i32
     %40 = scalar.cmpi slt, %38, %39 : i32
     scf.if %40 {
@@ -62,7 +62,7 @@ func.def public @serial_find(%values: buffer, %values_byte_offset: offset, %coun
       %51 = scalar.assume %50 [range(%50, 0, 9223372036854775807)] : i64
       %52 = index.cast %51 : i64 to offset
       %53 = buffer.view %values[%52] : buffer -> view<1xi32>
-      %54 = view.load %53[0] : view<1xi32> -> i32
+      %54 = view.load<root_in_bounds> %53[0] : view<1xi32> -> i32
       %55 = scalar.constant 0 : i32
       %56 = scalar.cmpi slt, %54, %55 : i32
       scf.if %56 {

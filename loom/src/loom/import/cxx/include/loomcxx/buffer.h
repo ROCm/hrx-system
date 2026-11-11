@@ -76,6 +76,14 @@ enum class memory_space {
   generic = 7,
 };
 
+// Source-level proof attached to one memory access. Ordinary accesses carry no
+// additional physical-root promise. root_in_bounds states that the complete
+// access lies within its allocation root; logical view bounds remain checked.
+enum class memory_access {
+  none = 0,
+  root_in_bounds = 8,
+};
+
 namespace buffer {
 
 // Recovers the zero-origin Loom buffer root carried by a source pointer. The

@@ -44,8 +44,19 @@ MemoryAccessFlags = EnumDef(
                 "atomicity, synchronization, or a cache-coherence guarantee."
             ),
         ),
+        EnumCase(
+            "root_in_bounds",
+            8,
+            doc=(
+                "Promise that the complete physical access lies within its "
+                "allocation root. Logical view indices must still be proven "
+                "in bounds. This carries a source-language access contract "
+                "through opaque pointer transport and has no target execution "
+                "semantics."
+            ),
+        ),
     ],
-    doc="Execution-semantics modifiers shared by scalar and vector memory accesses.",
+    doc="Semantic modifiers shared by scalar and vector memory accesses.",
     c_type="loom_memory_access_flags_t",
     c_const_prefix="LOOM_MEMORY_ACCESS_FLAG",
     c_include="loom/ops/op_defs.h",

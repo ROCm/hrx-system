@@ -23,7 +23,7 @@ func.def public @entry(%output: buffer, %output_byte_offset: offset, %input: buf
     %16 = scalar.assume %15 [range(%15, 0, 9223372036854775807)] : i64
     %17 = index.cast %16 : i64 to offset
     %18 = buffer.view %input[%17] : buffer -> view<1xi32>
-    %19 = view.load %18[0] : view<1xi32> -> i32
+    %19 = view.load<root_in_bounds> %18[0] : view<1xi32> -> i32
     %20 = scalar.extui %10 : i32 to i64
     %21 = scalar.constant 4 : i64
     %22 = scalar.muli %20, %21 : i64
@@ -32,7 +32,7 @@ func.def public @entry(%output: buffer, %output_byte_offset: offset, %input: buf
     %25 = scalar.assume %24 [range(%24, 0, 9223372036854775807)] : i64
     %26 = index.cast %25 : i64 to offset
     %27 = buffer.view %output[%26] : buffer -> view<1xi32>
-    view.store %19, %27[0] : i32, view<1xi32>
+    view.store<root_in_bounds> %19, %27[0] : i32, view<1xi32>
   }
   func.return
 }

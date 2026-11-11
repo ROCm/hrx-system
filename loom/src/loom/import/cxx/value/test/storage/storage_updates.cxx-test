@@ -14,9 +14,9 @@ func.def public @update(%words: buffer, %words_byte_offset: offset, %index: i32,
   %10 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
   %11 = index.cast %10 : i64 to offset
   %12 = buffer.view %words[%11] : buffer -> view<1xi32>
-  %13 = view.load %12[0] : view<1xi32> -> i32
+  %13 = view.load<root_in_bounds> %12[0] : view<1xi32> -> i32
   %14 = scalar.ori %13, %mask : i32
-  view.store %14, %12[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %14, %12[0] : i32, view<1xi32>
   func.return %14 : i32
 }
 
@@ -39,9 +39,9 @@ func.def public @update(%words: buffer, %words_byte_offset: offset, %index$2: i3
   %14 = scalar.assume %13 [range(%13, 0, 9223372036854775807)] : i64
   %15 = index.cast %14 : i64 to offset
   %16 = buffer.view %words[%15] : buffer -> view<1xi32>
-  %17 = view.load %16[0] : view<1xi32> -> i32
+  %17 = view.load<root_in_bounds> %16[0] : view<1xi32> -> i32
   %result = scalar.ori %17, %mask : i32
-  view.store %result, %16[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %result, %16[0] : i32, view<1xi32>
   %20 = scalar.addi %index$6, %result : i32
   %21 = scalar.addi %20, %5 : i32
   func.return %21 : i32
@@ -62,17 +62,17 @@ func.def public @update(%words: buffer, %words_byte_offset$1: offset) -> (i32) {
   %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
   %words_byte_offset$10 = index.cast %9 : i64 to offset
   %11 = buffer.view %words[%words_byte_offset$1] : buffer -> view<1xi32>
-  %previous = view.load %11[0] : view<1xi32> -> i32
+  %previous = view.load<root_in_bounds> %11[0] : view<1xi32> -> i32
   %13 = scalar.constant 1 : i32
   %14 = scalar.addi %previous, %13 : i32
-  view.store %14, %11[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %14, %11[0] : i32, view<1xi32>
   %19 = index.cast %words_byte_offset$10 : offset to i64
   %21 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
   %22 = index.cast %21 : i64 to offset
   %23 = buffer.view %words[%22] : buffer -> view<1xi32>
-  %24 = view.load %23[0] : view<1xi32> -> i32
+  %24 = view.load<root_in_bounds> %23[0] : view<1xi32> -> i32
   %26 = scalar.addi %24, %13 : i32
-  view.store %26, %23[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %26, %23[0] : i32, view<1xi32>
   %27 = scalar.addi %previous, %26 : i32
   func.return %27 : i32
 }
@@ -91,21 +91,21 @@ func.def public @update(%bytes: buffer, %bytes_byte_offset: offset, %signed_byte
   %12 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
   %13 = index.cast %12 : i64 to offset
   %14 = buffer.view %bytes[%13] : buffer -> view<1xi8>
-  %15 = view.load %14[0] : view<1xi8> -> i8
+  %15 = view.load<root_in_bounds> %14[0] : view<1xi8> -> i8
   %16 = scalar.extui %15 : i8 to i32
   %17 = scalar.addi %16, %amount : i32
   %18 = scalar.trunci %17 : i32 to i8
-  view.store %18, %14[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %18, %14[0] : i8, view<1xi8>
   %first = scalar.extui %18 : i8 to i32
   %24 = index.cast %signed_bytes_byte_offset : offset to i64
   %26 = scalar.assume %24 [range(%24, 0, 9223372036854775807)] : i64
   %27 = index.cast %26 : i64 to offset
   %28 = buffer.view %signed_bytes[%27] : buffer -> view<1xi8>
-  %29 = view.load %28[0] : view<1xi8> -> i8
+  %29 = view.load<root_in_bounds> %28[0] : view<1xi8> -> i8
   %30 = scalar.extsi %29 : i8 to i32
   %31 = scalar.divsi %30, %amount : i32
   %32 = scalar.trunci %31 : i32 to i8
-  view.store %32, %28[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %32, %28[0] : i8, view<1xi8>
   %second = scalar.extsi %32 : i8 to i32
   %34 = scalar.addi %first, %second : i32
   func.return %34 : i32
@@ -119,9 +119,9 @@ Words update(volatile Words* words, Words mask) { return *words ^= mask; }
 // ----
 func.def public @update(%words: buffer, %words_byte_offset: offset, %mask: vector<4xi32>) -> (vector<4xi32>) {
   %4 = buffer.view %words[%words_byte_offset] : buffer -> view<4xi32>
-  %5 = vector.load<volatile> %4[0] : view<4xi32> -> vector<4xi32>
+  %5 = vector.load<volatile|root_in_bounds> %4[0] : view<4xi32> -> vector<4xi32>
   %6 = vector.xori %5, %mask : vector<4xi32>
-  vector.store<volatile> %6, %4[0] : vector<4xi32>, view<4xi32>
+  vector.store<volatile|root_in_bounds> %6, %4[0] : vector<4xi32>, view<4xi32>
   func.return %6 : vector<4xi32>
 }
 
@@ -166,7 +166,7 @@ kernel.def @update() {
   %35 = scalar.assume %39 [range(%39, 0, 9223372036854775807)] : i64
   %36 = index.cast %35 : i64 to offset
   %37 = buffer.view %output[%36] : buffer -> view<1xi32>
-  view.store %29, %37[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %29, %37[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -209,7 +209,7 @@ kernel.def @update() {
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %20 = view.load %slot_view[0] : view<1xi32> -> i32
   %29 = buffer.view %output[%slot_storage_byte_offset] : buffer -> view<1xi32>
-  view.store %20, %29[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %20, %29[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -241,7 +241,7 @@ kernel.def @update() {
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %slot = vector.load %slot_view[0] : view<4xi32> -> vector<4xi32>
   %22 = buffer.view %output[%slot_storage_byte_offset] : buffer -> view<4xi32>
-  vector.store %slot, %22[0] : vector<4xi32>, view<4xi32>
+  vector.store<root_in_bounds> %slot, %22[0] : vector<4xi32>, view<4xi32>
   kernel.return
 }
 
@@ -274,21 +274,21 @@ void update(volatile unsigned* words, unsigned mask) {
 // ----
 func.def public @update(%words: buffer, %words_byte_offset: offset, %mask: i32) {
   %3 = buffer.view %words[%words_byte_offset] : buffer -> view<1xi32>
-  %4 = view.load<volatile> %3[0] : view<1xi32> -> i32
+  %4 = view.load<volatile|root_in_bounds> %3[0] : view<1xi32> -> i32
   %5 = scalar.ori %4, %mask : i32
-  view.store<volatile> %5, %3[0] : i32, view<1xi32>
+  view.store<volatile|root_in_bounds> %5, %3[0] : i32, view<1xi32>
   %10 = index.cast %words_byte_offset : offset to i64
   %12 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
   %13 = index.cast %12 : i64 to offset
   %14 = buffer.view %words[%13] : buffer -> view<1xi32>
-  %15 = view.load<volatile> %14[0] : view<1xi32> -> i32
+  %15 = view.load<volatile|root_in_bounds> %14[0] : view<1xi32> -> i32
   %16 = scalar.constant 1 : i32
   %17 = scalar.addi %15, %16 : i32
-  view.store<volatile> %17, %14[0] : i32, view<1xi32>
-  %19 = view.load<volatile> %3[0] : view<1xi32> -> i32
+  view.store<volatile|root_in_bounds> %17, %14[0] : i32, view<1xi32>
+  %19 = view.load<volatile|root_in_bounds> %3[0] : view<1xi32> -> i32
   %22 = scalar.constant -1 : i32
   %23 = scalar.addi %19, %22 : i32
-  view.store<volatile> %23, %3[0] : i32, view<1xi32>
+  view.store<volatile|root_in_bounds> %23, %3[0] : i32, view<1xi32>
   func.return
 }
 
@@ -302,11 +302,11 @@ unsigned update(unsigned char* bytes, unsigned amount) {
 // ----
 func.def public source_signature(#func.abi.c.signature<arguments = [0, 1], results = [1], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @update(%bytes: buffer, %bytes_byte_offset: offset, %amount: i32) -> (i32) {
   %4 = buffer.view %bytes[%bytes_byte_offset] : buffer -> view<1xi8>
-  %5 = view.load %4[0] : view<1xi8> -> i8
+  %5 = view.load<root_in_bounds> %4[0] : view<1xi8> -> i8
   %6 = scalar.extui %5 : i8 to i32
   %7 = scalar.addi %6, %amount : i32
   %8 = scalar.trunci %7 : i32 to i8
-  view.store %8, %4[0] : i8, view<1xi8>
+  view.store<root_in_bounds> %8, %4[0] : i8, view<1xi8>
   %9 = scalar.extui %8 : i8 to i32
   func.return %9 : i32
 }
