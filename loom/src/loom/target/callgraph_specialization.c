@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "loom/analysis/symbol_facts.h"
+#include "loom/analysis/symbol_liveness.h"
 #include "loom/analysis/symbol_references.h"
 #include "loom/codegen/low/loop_execution.h"
 #include "loom/codegen/low/memory_access.h"
@@ -218,8 +219,12 @@ typedef struct loom_target_callgraph_state_t {
   // Typed pass statistics storage.
   loom_target_callgraph_specialization_statistics_t* statistics;
 
-  // Post-authoring symbol reference snapshot.
+  // Symbol reference snapshot before this specialization iteration.
   loom_symbol_reference_table_t references;
+
+  // Definitions reachable from unexpanded template providers. Their source
+  // bodies remain available for applications in other target contexts.
+  loom_symbol_liveness_t deferred_definitions;
 
   // Lazy symbol-fact cache valid until materialization begins.
   loom_symbol_fact_table_t fact_table;
@@ -271,6 +276,9 @@ typedef struct loom_target_callgraph_state_t {
 
   // True while every reachable edge has a valid materialization plan.
   bool plan_valid;
+
+  // True when the snapshot contains providers whose bodies may expand later.
+  bool has_template_providers;
 } loom_target_callgraph_state_t;
 
 static iree_status_t loom_target_callgraph_initialize_state(
@@ -715,7 +723,10 @@ static bool loom_target_callgraph_call_requires_exact_context(
   const loom_call_like_kind_t kind = loom_call_like_kind(call);
   if (kind == LOOM_CALL_LIKE_KIND_LOW_INVOKE ||
       kind == LOOM_CALL_LIKE_KIND_LOW_INTERNAL) {
-    return true;
+    // Projected worker contexts are provisional until outlining retains an
+    // invocation identity. Reuse equivalent versions while those contexts
+    // are rebuilt; retained callers still require their exact native ABI.
+    return caller_context->version_owned;
   }
   if (kind != LOOM_CALL_LIKE_KIND_SEMANTIC ||
       caller_context->resolved_target.provider == NULL ||
@@ -870,6 +881,13 @@ static iree_status_t loom_target_callgraph_seed_authored_roots(
       continue;
     }
     const loom_symbol_t* symbol = &state->module->symbols.entries[symbol_id];
+    if (loom_symbol_implements(symbol,
+                               LOOM_SYMBOL_INTERFACE_TEMPLATE_PROVIDER)) {
+      // Provider targets filter applicability; they do not bind the body to an
+      // artifact context before expansion into a selected caller.
+      state->has_template_providers = true;
+      continue;
+    }
     if (!loom_func_like_isa(
             loom_func_like_cast(state->module, symbol->defining_op))) {
       continue;
@@ -1089,7 +1107,12 @@ static iree_status_t loom_target_callgraph_prepare_materializations(
     loom_target_callgraph_row_t* row = &state->rows[row_id];
     loom_target_callgraph_symbol_t* info =
         &state->symbols[row->source_symbol_id];
-    if (row_id == info->original_row_id) {
+    const bool preserve_definition =
+        info->module_internal && row->existing_version == NULL &&
+        row->context->resolved_target.facts != NULL &&
+        loom_symbol_liveness_is_live(&state->deferred_definitions,
+                                     row->source_symbol_id);
+    if (row_id == info->original_row_id && !preserve_definition) {
       const loom_string_id_t name_id =
           state->module->symbols.entries[row->source_symbol_id].name_id;
       row->concrete_name =
@@ -1364,6 +1387,16 @@ static iree_status_t loom_target_callgraph_publish_versions(
   return iree_ok_status();
 }
 
+static bool loom_target_callgraph_is_deferred_root(
+    void* user_data, const loom_module_t* module, loom_symbol_id_t symbol_id,
+    const loom_symbol_t* symbol) {
+  (void)user_data;
+  (void)module;
+  (void)symbol_id;
+  return loom_symbol_implements(symbol,
+                                LOOM_SYMBOL_INTERFACE_TEMPLATE_PROVIDER);
+}
+
 iree_status_t loom_target_callgraph_specialization_run(loom_pass_t* pass,
                                                        loom_module_t* module) {
   const loom_target_pass_capability_t* capability =
@@ -1405,6 +1438,14 @@ iree_status_t loom_target_callgraph_specialization_run(loom_pass_t* pass,
   IREE_RETURN_IF_ERROR(loom_target_callgraph_plan_reachable_rows(&state));
   if (!state.plan_valid) {
     return iree_ok_status();
+  }
+  if (state.has_template_providers) {
+    const loom_symbol_liveness_options_t options = {
+        .root_query = loom_target_callgraph_is_deferred_root,
+    };
+    IREE_RETURN_IF_ERROR(
+        loom_symbol_liveness_compute(module, &state.references, &options,
+                                     pass->arena, &state.deferred_definitions));
   }
   IREE_RETURN_IF_ERROR(loom_target_callgraph_prepare_materializations(&state));
   if (!state.plan_valid) {

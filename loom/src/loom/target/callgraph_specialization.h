@@ -25,6 +25,8 @@ const loom_pass_info_t* loom_target_callgraph_specialization_pass_info(void);
 // Independently executing regions supply the context of calls within them;
 // construction and worker calls can specialize the same private helper
 // separately.
+// Unexpanded template providers preserve generic copies of their dependencies;
+// provider targets govern applicability, not an artifact's execution context.
 iree_status_t loom_target_callgraph_specialization_run(loom_pass_t* pass,
                                                        loom_module_t* module);
 

@@ -24,11 +24,8 @@ low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signa
 }
 
 low.func.def noinline target<x86.avx2.core> @add_i32(%value: reg<x86.gpr32>, %delta: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
-  %wide_value = movzx.gpr64.gpr32 %value
-  %wide_delta = movzx.gpr64.gpr32 %delta
-  %26 = copy %wide_value : reg<x86.gpr64> -> reg<x86.gpr64>
-  %sum = add.gpr64 %26, %wide_delta
-  %result = mov.trunc.gpr32.gpr64 %sum
+  %25 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %result = add.gpr32 %25, %delta
   return %result
 }
 

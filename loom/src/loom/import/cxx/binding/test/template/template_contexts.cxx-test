@@ -1,0 +1,47 @@
+// RUN: emit source-low output=low
+#include <loomcxx/template.h>
+#include <loomcxx/target.h>
+
+struct [[loom::target("test.target")]] Target {
+  const char* kind;
+  unsigned long long subgroup_size;
+};
+constexpr Target narrow{"low_core", 32};
+constexpr Target wide{"low_core", 64};
+
+LOOM_TEMPLATE_DECL("library.width") unsigned width();
+
+LOOM_TEMPLATE_DEF(width)
+unsigned width32() [[loom::where(loom::target::subgroup::size() == 32u)]] { return 32; }
+
+LOOM_TEMPLATE_DEF(width)
+unsigned width64() [[loom::where(loom::target::subgroup::size() == 64u)]] { return 64; }
+
+[[loom::noinline]] static unsigned add_width(unsigned value) { return value + width(); }
+static unsigned forward(unsigned value) { return add_width(value); }
+
+[[loom::target(narrow)]] unsigned first(unsigned value) { return forward(value); }
+[[loom::target(wide)]] unsigned second(unsigned value) { return forward(value); }
+
+// ----
+low.func.def public target<test.low.core>(@narrow) abi(object_function) @first(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %29 = low.func.call pure @add_width(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  return %29
+}
+
+low.func.def public target<test.low.core>(@wide) abi(object_function) @second(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %32 = low.func.call pure @add_width_spec0(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  return %32
+}
+
+low.func.def noinline target<test.low.core> @add_width(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %35 = test.const.i32 32
+  %36 = test.add.i32 %value, %35
+  return %36
+}
+
+low.func.def noinline target<test.low.core> @add_width_spec0(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %39 = test.const.i32 64
+  %40 = test.add.i32 %value, %39
+  return %40
+}

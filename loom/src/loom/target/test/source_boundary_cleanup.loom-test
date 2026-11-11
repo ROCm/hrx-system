@@ -27,8 +27,8 @@ func.def public target(@target) @empty_count(%enabled: i1) -> (i32) {
 
 // ----
 low.func.def noinline target<test.low.core> @optional_count(%enabled: reg<test.i32>) -> (reg<test.i32>) asm {
-  %c0 = test.const.i32 0
-  return %c0
+  %result = test.const.i32 0
+  return %result
 }
 
 low.func.def public target<test.low.core>(@target) abi(object_function) @empty_count(%enabled: reg<test.i32>) -> (reg<test.i32>) asm {
@@ -64,8 +64,8 @@ func.def public target(@target) @empty_extent(%enabled: i1) -> (index) {
 
 // ----
 low.func.def noinline target<test.low.core> @optional_extent(%enabled: reg<test.i32>) -> (reg<test.i32>) asm {
-  %c0 = test.const.i32 0
-  return %c0
+  %result = test.const.i32 0
+  return %result
 }
 
 low.func.def public target<test.low.core>(@target) abi(object_function) @empty_extent(%enabled: reg<test.i32>) -> (reg<test.i32>) asm {

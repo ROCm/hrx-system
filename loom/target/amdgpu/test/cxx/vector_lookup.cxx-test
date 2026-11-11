@@ -30,24 +30,24 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direc
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %codebook = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %97 = v_mov_b32 252645135
-  %98 = v_lshlrev_b32_src0_inline %position, 2
-  %99 = global_load_b32_saddr %98, %input
-  %indices = v_and_b32 %99, %97
-  %101 = s_mov_b32 0
-  %102 = s_load_dwordx4 %codebook, %101
-  %103 = slice %102[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %104 = slice %102[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %105 = slice %102[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %106 = slice %102[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %107 = v_and_b32_lit %indices, 117901063
-  %108 = v_perm_b32 %104, %103, %107
-  %109 = v_perm_b32 %106, %105, %107
-  %110 = v_and_b32_lit %indices, 134744072
-  %111 = v_lshrrev_b32_src0_inline %110, 1
-  %112 = v_or_b32_lit %111, 50462976
-  %113 = v_perm_b32 %109, %108, %112
-  global_store_b32_saddr %98, %113, %output
+  %99 = v_mov_b32 252645135
+  %100 = v_lshlrev_b32_src0_inline %position, 2
+  %101 = global_load_b32_saddr %100, %input
+  %indices = v_and_b32 %101, %99
+  %103 = s_mov_b32 0
+  %104 = s_load_dwordx4 %codebook, %103
+  %105 = slice %104[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %106 = slice %104[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %107 = slice %104[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %108 = slice %104[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %109 = v_and_b32_lit %indices, 117901063
+  %110 = v_perm_b32 %106, %105, %109
+  %111 = v_perm_b32 %108, %107, %109
+  %112 = v_and_b32_lit %indices, 134744072
+  %113 = v_lshrrev_b32_src0_inline %112, 1
+  %114 = v_or_b32_lit %113, 50462976
+  %115 = v_perm_b32 %111, %110, %114
+  global_store_b32_saddr %100, %115, %output
   return
 }
 
@@ -125,23 +125,23 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direc
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %codebook = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %93 = v_lshlrev_b32_src0_inline %position, 2
-  %94 = global_load_b32_saddr %93, %input
-  %95 = v_lshrrev_b32_src0_inline %94, 4
-  %indices = v_and_b32_lit %95, 252645135
-  %97 = v_mov_b32 0
-  %98 = global_load_b128_saddr %97, %codebook
-  %99 = slice %98[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %100 = slice %98[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %101 = slice %98[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %102 = slice %98[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %103 = v_and_b32_lit %indices, 117901063
-  %104 = v_perm_b32 %100, %99, %103
-  %105 = v_perm_b32 %102, %101, %103
-  %106 = v_and_b32_lit %indices, 134744072
-  %107 = v_lshrrev_b32_src0_inline %106, 1
-  %108 = v_or_b32_lit %107, 50462976
-  %109 = v_perm_b32 %105, %104, %108
-  global_store_b32_saddr %93, %109, %output
+  %95 = v_lshlrev_b32_src0_inline %position, 2
+  %96 = global_load_b32_saddr %95, %input
+  %97 = v_lshrrev_b32_src0_inline %96, 4
+  %indices = v_and_b32_lit %97, 252645135
+  %99 = v_mov_b32 0
+  %100 = global_load_b128_saddr %99, %codebook
+  %101 = slice %100[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %102 = slice %100[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %103 = slice %100[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %104 = slice %100[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %105 = v_and_b32_lit %indices, 117901063
+  %106 = v_perm_b32 %102, %101, %105
+  %107 = v_perm_b32 %104, %103, %105
+  %108 = v_and_b32_lit %indices, 134744072
+  %109 = v_lshrrev_b32_src0_inline %108, 1
+  %110 = v_or_b32_lit %109, 50462976
+  %111 = v_perm_b32 %107, %106, %110
+  global_store_b32_saddr %95, %111, %output
   return
 }
