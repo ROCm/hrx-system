@@ -140,7 +140,10 @@ amdf_cts_test_suite(
         "pm4_sdma_finite_test.cc",
         "pm4_sdma_streaming_test.cc",
         "pm4_sdma_test.cc",
-    ],
+    ] + select({
+        "@platforms//os:linux": ["cross_process_progress_linux_test.cc"],
+        "//conditions:default": [],
+    }),
     target_compatible_with = _RECIPES_TEST_COMPATIBILITY,
     visibility = ["//visibility:public"],
     deps = [
@@ -167,7 +170,19 @@ amdf_cts_test_suite(
         "//libamdf/cts/util:observation",
         "//libamdf/cts/util:wait",
         "//third_party:google_test",
-    ],
+    ] + select({
+        "@platforms//os:linux": [
+            "//build_tools/bazel:dl",
+            "//libamdf/cts/gpu/aql/queue:publication",
+            "//libamdf/cts/gpu/kernels:byte_copy_unaligned",
+            "//libamdf/cts/gpu/kernels:byte_copy_unaligned_kernels",
+            "//libamdf/cts/gpu/kernels:cross_process_progress",
+            "//libamdf/cts/gpu/kernels:cross_process_progress_kernels",
+            "//libamdf/cts/util:device_cache",
+            "//libamdf/cts/util:provider_headers",
+        ],
+        "//conditions:default": [],
+    }),
 )
 
 amdf_cts_test_suite(

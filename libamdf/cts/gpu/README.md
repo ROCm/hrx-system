@@ -144,6 +144,15 @@ same corpus, dynamic loading, requirements and resource group. For example,
 The [qualification invocation](qualification.md#required-witnesses-and-deployment-identity)
 adds an exact endpoint ID, required case names and an expected compiler target.
 
+The [cross-process progress recipe](recipes/cross-process-progress.md) keeps a
+fresh second process alive from native activation through a guarded 1 MiB
+readback on the parent's already-active device. Linux RDNA exercises both its
+PM4 DMA and AQL byte-copy paths; Linux CDNA exercises AQL without inventing a
+PM4 requirement. The same binary, endpoint, finite shader, SYSTEM backing, and
+oracle are shared across carriers. Framed lifecycle states replace elapsed-time
+coordination, and the shader's fixed ceiling preserves progress when activation
+is legitimately serialized behind accepted compute.
+
 The manual lifecycle corpus has ordinary PM4/SDMA cases that copy between
 exact-access attachments on the cached device, observe both complete pages
 before retirement, and release their queue before its backing. SDMA uses the

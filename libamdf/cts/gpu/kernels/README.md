@@ -160,6 +160,17 @@ register counts. There is no runtime ELF parser or descriptor patching.
 
 ### Private memory, geometry and transfers
 
+[cross_process_progress.loom](cross_process_progress.loom) runs one workitem
+through an exact integer recurrence while acquiring a host release request from
+coherent SYSTEM memory. It publishes startup independently, records its final
+iteration and value, and writes that value into the later bulk-readback
+payload. The [typed ABI](cross_process_progress.h) preserves guards around the
+control fields and defines the host oracle constants. The fixed iteration
+ceiling is a progress boundary for native implementations that serialize a
+second process's activation; it is not a duration oracle. The
+[composed PM4/AQL case](../recipes/cross-process-progress.md) owns process
+lifecycle, carrier completion, transfer, and full-backing validation.
+
 [device_sdma.loom](device_sdma.loom) generates SDMA COPY/FENCE packets from one
 running workitem. Source page, destination slot and length depend on the
 previous copied payload. The [caller](../recipes/device_sdma_test.cc) supplies
