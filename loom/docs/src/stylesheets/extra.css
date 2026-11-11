@@ -26,6 +26,29 @@
   border-radius: 0.2rem;
 }
 
+.md-typeset .loom-target-matrix table:not([class]) {
+  display: table;
+  width: 100%;
+  font-size: 0.67rem;
+}
+
+.loom-target-matrix .md-typeset__table {
+  display: block;
+}
+
+.md-typeset .loom-target-matrix table:not([class]) :is(th, td) {
+  padding: 0.7em 0.8em;
+}
+
+.md-typeset .loom-target-matrix :is(th, td):first-child {
+  width: 29%;
+  min-width: 11rem;
+}
+
+.loom-target-matrix td:first-child code {
+  font-size: 0.85em;
+}
+
 .loom-landing {
   --loom-panel: #0d1526;
   --loom-text: #f4f5ff;
@@ -474,6 +497,15 @@
 }
 
 @media (max-width: 44em) {
+  .md-typeset .loom-target-matrix :is(th, td):first-child {
+    position: sticky;
+    left: 0;
+    width: 9rem;
+    min-width: 9rem;
+    background: var(--md-default-bg-color);
+    box-shadow: 1px 0 var(--md-default-fg-color--lightest);
+  }
+
   .loom-intro {
     padding: 1.1rem;
   }

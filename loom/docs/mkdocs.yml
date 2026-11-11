@@ -121,6 +121,7 @@ nav:
           - Connect model clients: serving/workflows/connect-model-clients.md
           - Develop models on a live server: serving/workflows/live-model-development.md
   - Targets:
+      - Target support: targets/index.md
       - Resident pipelines on XDNA: targets/xdna-pipelines.md
   - Reference:
       - Reference map: reference/index.md
