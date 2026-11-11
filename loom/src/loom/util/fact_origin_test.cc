@@ -808,6 +808,79 @@ TEST_F(FactOriginTest, ExactScalarCastOriginsFlattenThroughAliases) {
       &table_, module_, loom_index_cast_result(unsigned_cast), &origin));
 }
 
+TEST_F(FactOriginTest, IntegerCastPublicationRetargetsAndWithdraws) {
+  const auto byte_type = loom_type_scalar(LOOM_SCALAR_TYPE_I8);
+  const auto offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
+  loom_op_t* narrow = nullptr;
+  IREE_ASSERT_OK(loom_index_cast_build(&rewriter_.builder, inputs_[4],
+                                       index_type_, byte_type,
+                                       LOOM_LOCATION_UNKNOWN, &narrow));
+  const auto byte = loom_index_cast_result(narrow);
+  loom_op_t* widen = nullptr;
+  IREE_ASSERT_OK(loom_index_cast_build(&rewriter_.builder, byte, byte_type,
+                                       offset_type, LOOM_LOCATION_UNKNOWN,
+                                       &widen));
+  const auto wide = loom_index_cast_result(widen);
+  auto cast = loom_value_fact_table_query_integer_cast(&table_, wide);
+  EXPECT_EQ(cast.immediate.source_value_id, byte);
+  EXPECT_EQ(cast.composed.source_value_id, inputs_[4]);
+  EXPECT_EQ(cast.composed.kind, LOOM_INTEGER_CAST_UNSIGNED);
+  EXPECT_EQ(cast.composed.bit_count, 8);
+
+  IREE_ASSERT_OK(loom_rewriter_set_operand(&rewriter_, narrow, 0, inputs_[5]));
+  EXPECT_TRUE(Compute(widen));
+  cast = loom_value_fact_table_query_integer_cast(&table_, wide);
+  EXPECT_EQ(cast.composed.source_value_id, inputs_[5]);
+
+  loom_op_t* constant = nullptr;
+  IREE_ASSERT_OK(loom_index_constant_build(&rewriter_.builder, loom_attr_i64(5),
+                                           index_type_, LOOM_LOCATION_UNKNOWN,
+                                           &constant));
+  IREE_ASSERT_OK(loom_rewriter_set_operand(
+      &rewriter_, narrow, 0, loom_index_constant_result(constant)));
+  EXPECT_EQ(loom_value_fact_table_query_integer_cast(&table_, byte)
+                .immediate.bit_count,
+            0);
+  EXPECT_TRUE(Compute(widen));
+  EXPECT_EQ(loom_value_fact_table_query_integer_cast(&table_, wide)
+                .immediate.bit_count,
+            0);
+
+  IREE_ASSERT_OK(loom_rewriter_set_operand(&rewriter_, narrow, 0, inputs_[4]));
+  EXPECT_TRUE(Compute(widen));
+  cast = loom_value_fact_table_query_integer_cast(&table_, wide);
+  EXPECT_EQ(cast.composed.source_value_id, inputs_[4]);
+  const auto bytes = arena_.used_allocation_size;
+  EXPECT_FALSE(Compute(narrow));
+  EXPECT_FALSE(Compute(widen));
+  EXPECT_EQ(arena_.used_allocation_size, bytes);
+}
+
+TEST_F(FactOriginTest, NumericQueryDoesNotPublishIntegerCasts) {
+  const auto byte_type = loom_type_scalar(LOOM_SCALAR_TYPE_I8);
+  loom_op_t* narrow = nullptr;
+  IREE_ASSERT_OK(loom_index_cast_build(&rewriter_.builder, inputs_[4],
+                                       index_type_, byte_type,
+                                       LOOM_LOCATION_UNKNOWN, &narrow));
+  const auto result = loom_index_cast_result(narrow);
+  loom_value_fact_table_clear_origins(&table_, result);
+  const auto input = loom_value_facts_unknown();
+  loom_value_facts_t output;
+  loom_fact_context_t query = table_.context;
+  ASSERT_EQ(query.publication, nullptr);
+  IREE_ASSERT_OK(loom_op_vtable(module_, narrow)
+                     ->infer_facts(&query, module_, narrow, &input, &output));
+  EXPECT_EQ(output.range_lo, INT8_MIN);
+  EXPECT_EQ(output.range_hi, INT8_MAX);
+  EXPECT_EQ(loom_value_fact_table_query_integer_cast(&table_, result)
+                .immediate.bit_count,
+            0);
+  EXPECT_TRUE(Compute(narrow));
+  EXPECT_EQ(loom_value_fact_table_query_integer_cast(&table_, result)
+                .immediate.bit_count,
+            8);
+}
+
 TEST_F(FactOriginTest, CyclicPublicationRefreshesOutsideMaterialization) {
   const auto function =
       loom_func_like_cast(module_, rewriter_.builder.ip.parent_op);

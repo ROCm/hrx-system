@@ -70,6 +70,7 @@ typedef struct loom_value_fact_vector_partitions_t
     loom_value_fact_vector_partitions_t;
 typedef struct loom_value_fact_integer_relations_t
     loom_value_fact_integer_relations_t;
+typedef struct loom_value_fact_integer_casts_t loom_value_fact_integer_casts_t;
 typedef struct loom_condition_edge_projection_t
     loom_condition_edge_projection_t;
 typedef struct loom_cfg_graph_t loom_cfg_graph_t;
@@ -272,6 +273,10 @@ struct loom_value_fact_table_t {
   // storage is allocated lazily in the transient arena; scopes without
   // retained relations leave this NULL.
   loom_value_fact_integer_relations_t* integer_relations;
+
+  // Sparse interpretations for conversions that can change numeric value.
+  // Allocated only when inferred and released with the populated scope.
+  loom_value_fact_integer_casts_t* integer_casts;
 
   // Region execution context and optional CFG structure retained by the fact
   // owner. Entries and buckets have transient scope lifetime.

@@ -6,6 +6,28 @@
 
 #include "loom/ops/index/cast.h"
 
+bool loom_index_cast_payload_interpretation(loom_scalar_type_t input_type,
+                                            loom_scalar_type_t result_type,
+                                            loom_integer_cast_kind_t* out_kind,
+                                            uint8_t* out_bit_count) {
+  loom_scalar_type_t payload_type;
+  if (loom_scalar_type_is_integer(result_type)) {
+    payload_type = result_type;
+  } else if (loom_scalar_type_is_integer(input_type) &&
+             (result_type == LOOM_SCALAR_TYPE_INDEX ||
+              input_type != LOOM_SCALAR_TYPE_I64)) {
+    payload_type = input_type;
+  } else {
+    return false;
+  }
+  *out_kind = payload_type == LOOM_SCALAR_TYPE_I1 ||
+                      result_type == LOOM_SCALAR_TYPE_OFFSET
+                  ? LOOM_INTEGER_CAST_UNSIGNED
+                  : LOOM_INTEGER_CAST_SIGNED;
+  *out_bit_count = (uint8_t)loom_scalar_type_bitwidth(payload_type);
+  return true;
+}
+
 static bool loom_index_cast_to_offset_zero_extends_source(
     loom_scalar_type_t input_type, loom_scalar_type_t result_type,
     int32_t input_bitwidth) {

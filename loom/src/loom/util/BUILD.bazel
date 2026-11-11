@@ -310,6 +310,7 @@ loom_cc_test(
 loom_cc_library(
     name = "fact_table_api",
     hdrs = [
+        "fact_cast.h",
         "fact_extensions.h",
         "fact_identity.h",
         "fact_layout.h",
@@ -360,6 +361,7 @@ loom_cc_library(
 loom_cc_library(
     name = "fact_table",
     srcs = [
+        "fact_cast.c",
         "fact_cfg.c",
         "fact_extensions.c",
         "fact_identity.c",
@@ -378,6 +380,7 @@ loom_cc_library(
         "reference_transfer.c",
     ],
     hdrs = [
+        "fact_cast.h",
         "fact_cfg.h",
         "fact_extensions.h",
         "fact_identity.h",
@@ -490,6 +493,18 @@ loom_cc_test(
     srcs = ["fact_snapshot_test.cc"],
     deps = [
         ":fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "fact_cast_test",
+    srcs = ["fact_cast_test.cc"],
+    deps = [
+        ":fact_table",
+        "//loom/src/loom/ir:facts",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "loom/ir/ir.h"
+#include "loom/util/fact_cast.h"
 #include "loom/util/fact_layout.h"
 
 #ifdef __cplusplus
@@ -28,6 +29,7 @@ enum loom_value_fact_origin_bits_t {
   LOOM_VALUE_FACT_ORIGIN_CONTEXTUAL_QUERY = 1u << 4,
   LOOM_VALUE_FACT_ORIGIN_LAYOUT = 1u << 5,
   LOOM_VALUE_FACT_ORIGIN_EXACT_SCALAR = 1u << 6,
+  LOOM_VALUE_FACT_ORIGIN_INTEGER_CAST = 1u << 7,
 };
 
 // One ordinary operation's complete origin publication. Definitions replace
@@ -161,6 +163,8 @@ typedef struct loom_value_fact_origin_snapshot_t {
   loom_value_fact_contextual_query_origin_t contextual_query;
   // Immutable exact layout recipe, valid until scope clear.
   loom_value_fact_layout_origin_t layout_origin;
+  // Exact integer payload interpretations, including their transitive source.
+  loom_value_fact_integer_cast_t integer_cast;
 } loom_value_fact_origin_snapshot_t;
 
 // Captures every origin family, including absent proofs. The snapshot remains

@@ -7,6 +7,7 @@
 #include "loom/analysis/symbolic_integer_cast.h"
 
 #include "loom/ir/module.h"
+#include "loom/ops/index/cast.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
 
@@ -34,28 +35,17 @@ bool loom_symbolic_integer_cast_from_op(const loom_module_t* module,
           loom_module_value_type(module, loom_op_const_operands(op)[0]));
       const loom_scalar_type_t result_type = loom_type_element_type(
           loom_module_value_type(module, loom_op_const_results(op)[0]));
-      const bool input_is_fixed = loom_scalar_type_set_contains(
-          LOOM_SCALAR_TYPE_SET_INTEGER, input_type);
-      const bool result_is_fixed = loom_scalar_type_set_contains(
-          LOOM_SCALAR_TYPE_SET_INTEGER, result_type);
-      if (input_is_fixed && result_type == LOOM_SCALAR_TYPE_OFFSET &&
-          input_type != LOOM_SCALAR_TYPE_I64) {
-        payload_type = input_type;
-        kind = LOOM_INTEGER_CAST_UNSIGNED;
-      } else if (input_is_fixed && result_type == LOOM_SCALAR_TYPE_INDEX) {
-        payload_type = input_type;
-        kind = input_type == LOOM_SCALAR_TYPE_I1 ? LOOM_INTEGER_CAST_UNSIGNED
-                                                 : LOOM_INTEGER_CAST_SIGNED;
-      } else if ((input_type == LOOM_SCALAR_TYPE_INDEX ||
-                  input_type == LOOM_SCALAR_TYPE_OFFSET) &&
-                 result_is_fixed) {
-        payload_type = result_type;
-        kind = result_type == LOOM_SCALAR_TYPE_I1 ? LOOM_INTEGER_CAST_UNSIGNED
-                                                  : LOOM_INTEGER_CAST_SIGNED;
-      } else {
+      uint8_t bit_count;
+      if (!loom_index_cast_payload_interpretation(input_type, result_type,
+                                                  &kind, &bit_count)) {
         return false;
       }
-      break;
+      *out_cast = (loom_integer_cast_t){
+          .source_value_id = loom_op_const_operands(op)[0],
+          .bit_count = bit_count,
+          .kind = kind,
+      };
+      return true;
     }
     default:
       return false;
