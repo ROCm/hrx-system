@@ -308,8 +308,8 @@ TEST_F(SymbolicProofLifetimeTest, BorrowedRecordsSurviveBranchExpansion) {
       loom_symbolic_projection_equal(summaries[0].projection, &projection));
   EXPECT_EQ(summaries[1].integer_cast->source_value_id,
             integer_cast.source_value_id);
-  EXPECT_TRUE(loom_symbolic_integer_cast_same_interpretation(
-      summaries[1].integer_cast, &integer_cast));
+  EXPECT_TRUE(loom_integer_cast_same_interpretation(summaries[1].integer_cast,
+                                                    &integer_cast));
   EXPECT_EQ(loom_symbolic_expr_lookup_product(&expression_context_, values[2]),
             product_record);
   EXPECT_EQ(product_record->scale, product_snapshot.scale);

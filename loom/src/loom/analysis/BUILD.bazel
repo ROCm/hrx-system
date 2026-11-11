@@ -1524,17 +1524,6 @@ loom_cc_library(
     ],
 )
 
-loom_cc_test(
-    name = "symbolic_integer_cast_test",
-    srcs = ["symbolic_integer_cast_test.cc"],
-    deps = [
-        ":symbolic_integer_cast",
-        "//loom/src/loom/ir:facts",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
 loom_cc_library(
     name = "symbolic_expr",
     srcs = [

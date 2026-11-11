@@ -63,7 +63,7 @@ typedef struct loom_symbolic_expr_materialization_t
 typedef struct loom_symbolic_congruence_t loom_symbolic_congruence_t;
 typedef struct loom_symbolic_projection_t loom_symbolic_projection_t;
 typedef struct loom_symbolic_product_t loom_symbolic_product_t;
-typedef struct loom_symbolic_integer_cast_t loom_symbolic_integer_cast_t;
+typedef struct loom_integer_cast_t loom_integer_cast_t;
 typedef struct loom_cfg_value_identity_table_t loom_cfg_value_identity_table_t;
 // A single coefficient times an SSA value.
 typedef struct loom_symbolic_term_t {
@@ -136,7 +136,7 @@ typedef struct loom_symbolic_expr_summary_t {
 
   // Optional exact signed or unsigned interpretation of source payload bits.
   // Materialized expression terms remain unchanged.
-  const loom_symbolic_integer_cast_t* integer_cast;
+  const loom_integer_cast_t* integer_cast;
 } loom_symbolic_expr_summary_t;
 
 // Memoized condition-refined facts for one SSA value. This state is owned by
@@ -230,7 +230,7 @@ typedef struct loom_symbolic_expr_context_t {
   // not numeric identities allocate records; their memo slots retain indices.
   struct {
     // Arena-owned records; growth preserves previously returned summaries.
-    loom_symbolic_integer_cast_t* values;
+    loom_integer_cast_t* values;
     // Number of records populated in the current epoch.
     iree_host_size_t count;
     // Allocated record count, retained across context resets.
@@ -319,7 +319,7 @@ const loom_symbolic_projection_t* loom_symbolic_expr_lookup_projection(
 // Returns the retained integer-cast function for |value_id|, or NULL when the
 // value has no such proof in the current context epoch. Does not expand source
 // IR or allocate storage.
-const loom_symbolic_integer_cast_t* loom_symbolic_expr_lookup_integer_cast(
+const loom_integer_cast_t* loom_symbolic_expr_lookup_integer_cast(
     const loom_symbolic_expr_context_t* context, loom_value_id_t value_id);
 
 // Returns the exact product retained for a canonical expression term, or NULL

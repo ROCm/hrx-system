@@ -112,9 +112,9 @@ typedef struct loom_conditioned_value_facts_cast_t {
   // Result whose conversion semantics are retained.
   loom_value_id_t value;
   // Exact interpretation of the source payload.
-  loom_symbolic_integer_cast_t cast;
+  loom_integer_cast_t cast;
   // Transitive interpretation composed once during immutable construction.
-  loom_symbolic_integer_cast_t composed;
+  loom_integer_cast_t composed;
 } loom_conditioned_value_facts_cast_t;
 
 typedef struct loom_conditioned_value_facts_cast_key_t {
@@ -146,7 +146,7 @@ static uint32_t loom_conditioned_value_facts_lookup_cast(
 
 static iree_status_t loom_conditioned_value_facts_collect_cast(
     loom_conditioned_value_facts_t* state, const loom_op_t* op) {
-  loom_symbolic_integer_cast_t cast;
+  loom_integer_cast_t cast;
   if (!loom_symbolic_integer_cast_from_op(state->module, op, &cast)) {
     return iree_ok_status();
   }
@@ -187,7 +187,7 @@ static iree_status_t loom_conditioned_value_facts_compose_casts(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       &state->arena, state->cast_index.count, sizeof(*path), (void**)&path));
   for (uint32_t i = 0; i < state->cast_index.count; ++i) {
-    loom_symbolic_integer_cast_t* cast = &state->casts[i].cast;
+    loom_integer_cast_t* cast = &state->casts[i].cast;
     cast->source_value_id = loom_cfg_value_identity_table_lookup(
         &state->identities, cast->source_value_id);
   }
@@ -207,10 +207,9 @@ static iree_status_t loom_conditioned_value_facts_compose_casts(
       const uint32_t parent = loom_conditioned_value_facts_lookup_cast(
           state, row->cast.source_value_id);
       if (parent != UINT32_MAX && parent != ordinal) {
-        row->composed = loom_symbolic_integer_cast_compose(
+        row->composed = loom_integer_cast_compose(
             state->casts[parent].composed,
-            (loom_symbolic_integer_cast_kind_t)row->cast.kind,
-            row->cast.bit_count);
+            (loom_integer_cast_kind_t)row->cast.kind, row->cast.bit_count);
       }
     }
   }
@@ -506,17 +505,17 @@ static void loom_conditioned_value_facts_refine_canonical_value(
 static loom_value_id_t loom_conditioned_value_facts_refine_cast(
     const loom_conditioned_value_facts_t* state,
     const loom_conditioned_value_facts_region_t* entry,
-    const loom_value_fact_table_t* table,
-    const loom_symbolic_integer_cast_t* cast, loom_value_facts_t* inout_facts) {
+    const loom_value_fact_table_t* table, const loom_integer_cast_t* cast,
+    loom_value_facts_t* inout_facts) {
   loom_value_facts_t source_facts =
       loom_value_fact_table_lookup(table, cast->source_value_id);
   loom_conditioned_value_facts_refine_canonical_value(
       state, entry, table, cast->source_value_id, &source_facts);
   const loom_value_facts_t transferred =
-      loom_symbolic_integer_cast_apply(cast, source_facts);
+      loom_integer_cast_apply(cast, source_facts);
   loom_conditioned_value_facts_apply_active_refinement(&transferred,
                                                        inout_facts);
-  return loom_symbolic_integer_cast_is_identity(cast, source_facts)
+  return loom_integer_cast_is_identity(cast, source_facts)
              ? cast->source_value_id
              : LOOM_VALUE_ID_INVALID;
 }
