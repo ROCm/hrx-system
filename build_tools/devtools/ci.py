@@ -711,6 +711,14 @@ def repository_configure_step() -> CiStep:
     )
 
 
+def repository_device_build_options(amdgpu_target_selector: str) -> tuple[str, ...]:
+    if not os.environ.get("HRX_ROCM_ROOT"):
+        raise ValueError("repository device compilation requires HRX_ROCM_ROOT")
+    return (
+        runtime_configure.NATIVE_AMDGPU_TARGETS_FLAG + "=" + amdgpu_target_selector,
+    )
+
+
 def repository_build_steps(
     amdgpu_target_selector: str | None = None,
     compilation_mode: str | None = None,
@@ -720,19 +728,17 @@ def repository_build_steps(
     if compilation_mode is not None:
         options += (f"--compilation_mode={compilation_mode}",)
     if amdgpu_target_selector is not None:
-        if not os.environ.get("HRX_ROCM_ROOT"):
-            raise ValueError("repository device compilation requires HRX_ROCM_ROOT")
         targets += ci_config.BAZEL_REPOSITORY_DEVICE_TARGETS
-        options += (
-            runtime_configure.NATIVE_AMDGPU_TARGETS_FLAG + "=" + amdgpu_target_selector,
-        )
+        options += repository_device_build_options(amdgpu_target_selector)
     return [
         repository_configure_step(),
         bazel_build_step("Build repository", targets, bazel_options=options),
     ]
 
 
-def repository_integration_steps() -> list[CiStep]:
+def repository_integration_steps(
+    amdgpu_target_selector: str | None = None,
+) -> list[CiStep]:
     platform_coverage = platform_coverage_enabled()
     test_tag_filters = ci_config.CPU_RESOURCE_TAG_EXCLUDES
     test_language_filters: tuple[str, ...] = ()
@@ -741,7 +747,7 @@ def repository_integration_steps() -> list[CiStep]:
         # platform lane owns portable Python and corpus scenario coverage.
         test_tag_filters += ("-loom-corpus",)
         test_language_filters = ci_config.PYTHON_TEST_BAZEL_LANGUAGE_EXCLUSIONS
-    return [
+    steps = [
         repository_configure_step(),
         bazel_test_step(
             "Test repository",
@@ -750,7 +756,29 @@ def repository_integration_steps() -> list[CiStep]:
             test_language_filters=test_language_filters,
             bazel_options=ci_config.REPOSITORY_BAZEL_OPTIONS,
         ),
+        # Resource filters deliberately omit tests that cannot execute on this
+        # host. Build the complete graph after the selected tests so those
+        # targets and standalone products still retain Windows compiler
+        # coverage in the same output base.
+        bazel_build_step(
+            "Build repository",
+            ("//...",),
+            bazel_options=ci_config.REPOSITORY_BUILD_BAZEL_OPTIONS,
+        ),
     ]
+    if amdgpu_target_selector is not None:
+        # The device probe is manual and needs an explicit target selector.
+        # Keep that setting off the complete repository build so the preceding
+        # test and build phases retain one reusable host configuration.
+        steps.append(
+            bazel_build_step(
+                "Build repository AMDGPU device probe",
+                ci_config.BAZEL_REPOSITORY_DEVICE_TARGETS,
+                bazel_options=ci_config.REPOSITORY_BUILD_BAZEL_OPTIONS
+                + repository_device_build_options(amdgpu_target_selector),
+            )
+        )
+    return steps
 
 
 def shared_tool_bazel_step(
@@ -1538,6 +1566,7 @@ def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
         "amdgpu",
         "amdgpu-native",
         "repository-build",
+        "repository-integration",
     )
     accepts_amdgpu_target = (
         bazel_target_group in amdgpu_target_bazel_groups
@@ -1545,8 +1574,7 @@ def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
     )
     if args.amdgpu_target is not None and not accepts_amdgpu_target:
         raise ValueError(
-            "--amdgpu-target is only supported for AMDGPU and "
-            "repository-build CI commands"
+            "--amdgpu-target is only supported for AMDGPU and repository CI commands"
         )
     if args.loom_importer is not None and bazel_target_group != "amdgpu":
         raise ValueError(
@@ -1611,7 +1639,7 @@ def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
             raise ValueError(
                 "--target is not supported by the repository-wide integration command"
             )
-        return repository_integration_steps()
+        return repository_integration_steps(args.amdgpu_target)
     if bazel_target in ("repository-shared-tools", "cpu-shared-tools"):
         if args.target:
             raise ValueError("--target is not supported by shared-tool CI commands")
