@@ -801,6 +801,36 @@ The `LOOM_INLINE` facade macro combines `[[loom::inline]]` with the ordinary
 C++ `inline` keyword for header helpers. Direct attributes remain available
 when linkage and placement need separate control.
 
+For a large helper called from several places, `loom::noinline` preserves a
+callable boundary instead of copying its loops into every caller:
+
+```cpp
+[[loom::noinline]] static float advance(float value, const int* counts, unsigned phase) {
+  for (int iteration = 0; iteration < counts[phase & 15u]; ++iteration) {
+    value = value * 1.001f + 0.5f;
+  }
+  return value;
+}
+
+float integrate(float value, const int* counts) {
+  value = advance(value, counts, 0u);
+  return advance(value, counts, 1u);
+}
+```
+
+AMDGPU retains explicitly annotated helpers and expands unannotated helpers.
+Its retained helpers may contain loops and branches, but must be leaves after
+inlining: a kernel can call a helper, while a retained helper cannot call
+another retained helper. Subordinate helpers can use `loom::inline` to compose
+into the retained body. Unsupported boundaries diagnose instead of silently
+discarding `loom::noinline`.
+
+The shared inlining budgets apply where the selected target permits optional
+inlining. They do not override a target's required expansion or an authored
+`loom::inline` / `loom::noinline` contract. The
+[function guide](../../../../docs/src/guide/functions-and-control.md#function-modifiers-state-contracts)
+describes those budgets and custom pass options.
+
 ## Translation-unit and runtime imports
 
 A called namespace-scope prototype becomes an ordinary High `func.decl` when
