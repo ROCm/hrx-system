@@ -8,7 +8,8 @@
 
 // Inline public predicates consume these stable semantic bits, not native
 // cache encodings. The remaining effects pass through unchanged to HAL.
-static_assert(IREE_HAL_MEMORY_EFFECT_UNSUPPORTED == (UINT32_C(1) << 31),
+static_assert((uint32_t)IREE_HAL_MEMORY_EFFECT_UNSUPPORTED ==
+                  (UINT32_C(1) << 31),
               "unsupported effect encoding must match the inline predicate");
 static_assert(IREE_HAL_MEMORY_EFFECT_RESOURCE_MASK == UINT32_C(0x3C),
               "resource effect encoding must match the inline predicate");
