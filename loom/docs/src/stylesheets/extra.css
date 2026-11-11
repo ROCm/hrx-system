@@ -180,25 +180,6 @@
   text-align: center;
 }
 
-.loom-scope {
-  margin: 1.5rem auto 2rem;
-  max-width: 50rem;
-}
-
-.loom-scope .md-typeset__table {
-  display: block;
-}
-
-.loom-scope table:not([class]) {
-  display: table;
-  width: 100%;
-  font-size: 0.75rem;
-}
-
-.loom-scope th:first-child {
-  width: 30%;
-}
-
 .loom-section > p,
 .loom-section > h2 {
   max-width: var(--loom-reading-width);

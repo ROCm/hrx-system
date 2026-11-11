@@ -64,20 +64,6 @@ drivers.
 
 <p class="loom-authorship">This project has been engineered with the assistance of agents.</p>
 
-<div class="loom-scope" markdown>
-
-| Layer | What it provides |
-| --- | --- |
-| **Loom language and compiler** | Reusable programs, command schedules, and kernels, specialized and compiled ahead of time or just in time. |
-| **Runtime and hardware abstraction** | Asynchronous execution, memory, and data movement on CPUs, AMD GPUs, AMD XDNA NPUs, and Vulkan devices. |
-| **Model and kernel libraries** | A growing source library of model implementations, kernels, and shared math in [hrx-loom-library](https://github.com/ROCm/hrx-loom-library). |
-| **Loom services and loom-serve** | Model hosting, compatible request batching, residency management, and HTTP APIs. |
-
-Your application supplies its interface, tools, and behavior. These layers run
-the computation underneath it.
-
-</div>
-
 <section class="loom-section" markdown>
 
 ## Quickstart
