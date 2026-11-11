@@ -3072,7 +3072,12 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
     return dst_status;
   }
 
+  // A CPU mapping does not make a device allocation a host-copy destination.
+  // On unified memory, CPU writes can make cache-resident GPU reads much
+  // slower than reads after a native upload. Keep device uploads on the queue;
+  // actual host and managed allocations retain their direct host copy.
   if (!stream && dst_ref.buffer->host_ptr &&
+      dst_ref.buffer->memory_kind != IREE_HAL_STREAMING_MEMORY_KIND_DEVICE &&
       iree_all_bits_set((iree_hal_memory_type_t)dst_ref.buffer->memory_type,
                         IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
                             IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {

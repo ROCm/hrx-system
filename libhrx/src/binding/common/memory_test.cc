@@ -643,6 +643,31 @@ TEST_F(CpuStreamingMemoryTest,
   EXPECT_EQ(host_callbacks_.thread, nullptr);
 }
 
+TEST_F(CpuStreamingMemoryTest,
+       SynchronousMappedDeviceUploadUsesNativeTransfer) {
+  constexpr size_t kLength = 64;
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
+      context_, kLength, IREE_HAL_STREAMING_MEMORY_FLAG_NONE, &buffer_));
+  ASSERT_NE(buffer_->host_ptr, nullptr);
+  std::memset(buffer_->host_ptr, 0xcd, kLength);
+  const std::array<uint8_t, 7> source = {1, 19, 3, 67, 5, 241, 7};
+  InjectedFlushQueue queue = {};
+  auto* original = context_->queue;
+  InitializeInjectedFlushQueue(original, &queue);
+  context_->queue = &queue.base;
+  auto status = iree_hal_streaming_memcpy_host_to_device(
+      context_, iree_hal_streaming_buffer_device_pointer(buffer_) + 3,
+      source.data(), source.size(), nullptr);
+  context_->queue = original;
+  iree_hal_queue_release(&queue.base);
+  IREE_ASSERT_OK(status);
+  EXPECT_EQ(queue.upload_source, source.data());
+  const auto* bytes = static_cast<const uint8_t*>(buffer_->host_ptr);
+  for (size_t i = 0; i < kLength; ++i) {
+    EXPECT_EQ(bytes[i], i >= 3 && i < 3 + source.size() ? source[i - 3] : 0xcd);
+  }
+}
+
 TEST_F(CpuStreamingMemoryTest, PageableUploadBorrowsSourceWithoutContextLock) {
   constexpr size_t kLength = 1024 * 1024 + 123;
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(

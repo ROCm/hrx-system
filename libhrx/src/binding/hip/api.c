@@ -7323,6 +7323,7 @@ static hipError_t iree_hip_try_cross_context_h2d(
   }
   *out_handled = true;
   if (dst_ref.buffer->host_ptr &&
+      dst_ref.buffer->memory_kind != IREE_HAL_STREAMING_MEMORY_KIND_DEVICE &&
       iree_all_bits_set((iree_hal_memory_type_t)dst_ref.buffer->memory_type,
                         IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
                             IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
