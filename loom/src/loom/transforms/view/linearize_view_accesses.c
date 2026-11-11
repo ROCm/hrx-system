@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "iree/base/internal/math.h"
+#include "loom/ir/context.h"
 #include "loom/ir/intern_table.h"
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
@@ -627,9 +628,16 @@ static iree_status_t loom_linearize_view_accesses_get_linear_view(
   } else if (layout->encoding_role == LOOM_ENCODING_ROLE_PHYSICAL_STORAGE) {
     const loom_value_fact_encoding_summary_t linear_summary = {
         .role = LOOM_ENCODING_ROLE_PHYSICAL_STORAGE,
+        .family_id = loom_context_resolve_encoding_name(
+                         context->module->context, IREE_SV("encoding.storage"))
+                         .family_id,
         .address_layout =
             {
                 .kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE,
+                .family_id = loom_context_resolve_encoding_name(
+                                 context->module->context,
+                                 IREE_SV("encoding.layout.dense"))
+                                 .family_id,
             },
         .storage_schema =
             {

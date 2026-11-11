@@ -32,6 +32,7 @@ loom_check_test_suite(
         "refine_boundary_returns.loom-test",
         "refine_dependent_boundaries.loom-test",
         "refine_dependent_forwarding.loom-test",
+        "refine_encoding_identity.loom-test",
         "symbol_dce.loom-test",
         "template_application.loom-test",
         "template_cfg_relations.loom-test",

@@ -178,15 +178,20 @@ TEST_F(AnalysisTypeSpecializationTest, CanonicalizesExactEncodingCandidates) {
   DefineFacts(1, loom_value_facts_exact_i64(16));
   const loom_value_facts_t stride = loom_value_facts_exact_i64(4);
   for (bool dense : {false, true}) {
+    const auto family = loom_context_resolve_encoding_name(
+        module_->context, dense ? IREE_SV("encoding.layout.dense")
+                                : IREE_SV("encoding.layout.strided"));
     loom_value_fact_encoding_summary_t summary = {
         .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
         .static_spec_encoding_id = 0,
+        .family_id = family.family_id,
         .address_layout =
             {
                 .kind = static_cast<loom_value_fact_address_layout_kind_t>(
                     dense ? LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE
                           : LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED),
                 .rank = static_cast<uint8_t>(dense ? 0 : 1),
+                .family_id = family.family_id,
                 .strides = dense ? nullptr : &stride,
             },
     };

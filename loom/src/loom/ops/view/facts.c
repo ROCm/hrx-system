@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/encoding/roles.h"
 #include "loom/ops/encoding/storage.h"
@@ -139,6 +140,14 @@ static iree_status_t loom_view_subview_capture_physical_encoding(
   } else {
     *out_address_layout = (loom_value_fact_address_layout_t){0};
   }
+  // The co-result captures element strides independently of the source
+  // family's identity; dense source extents become explicit strides here.
+  if (out_address_layout->kind == LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED) {
+    out_address_layout->family_id =
+        loom_context_resolve_encoding_name(module->context,
+                                           IREE_SV("encoding.layout.strided"))
+            .family_id;
+  }
 
   IREE_RETURN_IF_ERROR(loom_view_subview_capture_layout_origin(
       context, module, source_type, source_layout.kind, result_value_id));
@@ -151,6 +160,14 @@ static iree_status_t loom_view_subview_capture_physical_encoding(
       .address_layout = *out_address_layout,
       .storage_schema = storage_schema,
   };
+  if (summary.role == LOOM_ENCODING_ROLE_ADDRESS_LAYOUT) {
+    summary.family_id = out_address_layout->family_id;
+  } else if (summary.role == LOOM_ENCODING_ROLE_PHYSICAL_STORAGE &&
+             out_address_layout->family_id != LOOM_ENCODING_FAMILY_ID_INVALID) {
+    summary.family_id = loom_context_resolve_encoding_name(
+                            module->context, IREE_SV("encoding.storage"))
+                            .family_id;
+  }
   return loom_value_facts_make_encoding_summary(context, summary, out_facts);
 }
 
