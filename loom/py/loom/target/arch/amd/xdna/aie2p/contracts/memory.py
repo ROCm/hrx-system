@@ -1798,6 +1798,42 @@ def _matrix_fragment_store_rules() -> tuple[DescriptorRule, ...]:
 AIE2P_VIEW_CARRIER_RULES = _view_carrier_rules()
 
 
+AIE2P_BUFFER_VALUE_RULES: tuple[DescriptorRule, ...] = (
+    DescriptorRule(
+        source_op=buffer.buffer_null,
+        emit=(
+            EmitDescriptorOp(
+                descriptor=_descriptor("amd.xdna.aie2p.constant.i32.short"),
+                results={"dst": ValueRef.temporary("zero")},
+                result_types={"dst": _I32},
+                immediates={"i": 0},
+                form=DescriptorEmitForm.CONST,
+            ),
+            EmitRegisterCopy(
+                source=ValueRef.temporary("zero"),
+                result=ValueRef.result("result"),
+            ),
+        ),
+    ),
+    DescriptorRule(
+        source_op=buffer.buffer_compare_null,
+        emit=(
+            EmitRegisterCopy(
+                source=ValueRef.operand("buffer"),
+                result=ValueRef.temporary("address"),
+                result_type=_I32,
+            ),
+            EmitDescriptorOp(
+                descriptor=_descriptor("amd.xdna.aie2p.cmp.eqz.i32"),
+                operands={"s0": ValueRef.temporary("address")},
+                results={"d0": ValueRef.result("result")},
+                form=DescriptorEmitForm.OP,
+            ),
+        ),
+    ),
+)
+
+
 AIE2P_MEMORY_RULES: tuple[DescriptorRule, ...] = (
     *_raw_buffer_memory_rules(),
     *_matrix_fragment_store_rules(),

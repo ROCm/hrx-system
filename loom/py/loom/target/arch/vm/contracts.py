@@ -1209,9 +1209,9 @@ VM_CORE_CONTRACT_FRAGMENT = ContractFragment(
     + tuple(_buffer_cases())
     + (RecipeRule(source_op=global_load),)
     + tuple(_view_cases())
-    + (
+    + tuple(
         DescriptorRule(
-            source_op=ref.ref_null,
+            source_op=source_op,
             emit=(
                 EmitDescriptorOp(
                     descriptor=_DESCRIPTORS[REF_NULL.opcode],
@@ -1219,18 +1219,27 @@ VM_CORE_CONTRACT_FRAGMENT = ContractFragment(
                     results={"destination_r8": ValueRef.result("result")},
                 ),
             ),
-        ),
+        )
+        for source_op in (ref.ref_null, buffer.buffer_null)
+    )
+    + tuple(
         DescriptorRule(
-            source_op=ref.ref_compare_null,
+            source_op=source_op,
             emit=(
                 EmitDescriptorOp(
                     descriptor=_DESCRIPTORS[REF_COMPARE_NULL.opcode],
                     form=DescriptorEmitForm.OP,
-                    operands={"source_r8": ValueRef.operand("value")},
+                    operands={"source_r8": ValueRef.operand(operand)},
                     results={"destination_v8": ValueRef.result("result")},
                 ),
             ),
-        ),
+        )
+        for source_op, operand in (
+            (ref.ref_compare_null, "value"),
+            (buffer.buffer_compare_null, "buffer"),
+        )
+    )
+    + (
         DescriptorRule(
             source_op=ref.ref_compare_eq,
             emit=(

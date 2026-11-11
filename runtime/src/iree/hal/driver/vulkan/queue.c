@@ -8622,13 +8622,6 @@ static iree_status_t iree_hal_vulkan_queue_resolve_dispatch_bda_binding(
   IREE_RETURN_IF_ERROR(iree_hal_buffer_calculate_range(
       /*base_offset=*/0, iree_hal_buffer_byte_length(binding->buffer),
       binding->offset, binding->length, &binding_offset, &binding_length));
-  if (binding_length == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Vulkan queue_dispatch binding %" PRIhsz
-                            " resolved to an empty buffer range",
-                            binding_ordinal);
-  }
-
   VkDeviceAddress buffer_address = 0;
   IREE_RETURN_IF_ERROR(
       iree_hal_vulkan_buffer_device_address(binding->buffer, &buffer_address));

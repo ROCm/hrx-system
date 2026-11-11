@@ -45,7 +45,8 @@ typedef struct loom_wasm_host_module_t {
 
 // One complete caller-owned allocation root transferred around a call.
 typedef struct loom_wasm_host_memory_region_t {
-  // Address assigned to the first root byte in the nested module memory.
+  // Nonzero address of the first root byte in the nested module memory.
+  // Zero is reserved for a null buffer, including for empty storage roots.
   uint32_t address;
   // Mutable root storage in the caller's WebAssembly memory.
   uint8_t* data;

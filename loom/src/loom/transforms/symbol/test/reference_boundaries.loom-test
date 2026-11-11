@@ -108,3 +108,61 @@ func.def public @mixed_records(%external: buffer) -> (offset, offset) {
   %external_length = func.call pure @record_length(%external) : (buffer) -> (offset)
   func.return %local_length, %external_length : offset, offset
 }
+
+// ====
+
+// A nullable result keeps its dynamic identity across a retained call. The
+// caller's nonnull argument must not replace the helper's optional result.
+func.def noinline @optional_record(%input: buffer, %use: i1) -> (buffer) {
+  %empty = buffer.null : buffer
+  %selected = scf.select %use, %input, %empty : buffer
+  func.return %selected : buffer
+}
+
+func.def public @optional_result(%use: i1) -> (buffer, i1) {
+  %storage = buffer.constant bytes("01020304") : buffer
+  %selected = func.call @optional_record(%storage, %use) : (buffer, i1) -> (buffer)
+  %missing = buffer.compare.null %selected : buffer
+  func.return %selected, %missing : buffer, i1
+}
+
+// ----
+func.def noinline @optional_record(%input: buffer, %use: i1) -> (buffer) {
+  %empty = buffer.null : buffer
+  %selected = scf.select %use, %input, %empty : buffer
+  func.return %selected : buffer
+}
+
+func.def public @optional_result(%use: i1) -> (buffer, i1) {
+  %storage = buffer.constant bytes("01020304") : buffer
+  %selected = func.call pure @optional_record(%storage, %use) : (buffer, i1) -> (buffer)
+  %missing = buffer.compare.null %selected : buffer
+  func.return %selected, %missing : buffer, i1
+}
+
+// ====
+
+// Distinct real callers prove nonnull without proving a shared root identity.
+func.def noinline @is_missing(%input: buffer) -> (i1) {
+  %missing = buffer.compare.null %input : buffer
+  func.return %missing : i1
+}
+
+func.def public @nonnull_callers() -> (i1, i1) {
+  %first = buffer.constant bytes("") : buffer
+  %second = buffer.constant bytes("01020304") : buffer
+  %a = func.call @is_missing(%first) : (buffer) -> (i1)
+  %b = func.call @is_missing(%second) : (buffer) -> (i1)
+  func.return %a, %b : i1, i1
+}
+
+// ----
+func.def noinline @is_missing() {
+  func.return
+}
+
+func.def public @nonnull_callers() -> (i1, i1) {
+  %10 = scalar.constant false : i1
+  %11 = scalar.constant false : i1
+  func.return %10, %11 : i1, i1
+}

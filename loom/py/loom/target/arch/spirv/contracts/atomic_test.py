@@ -33,6 +33,7 @@ def _atomic_rules() -> tuple[DescriptorRule, ...]:
         contract_case
         for contract_case in SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT.cases
         if isinstance(contract_case, DescriptorRule)
+        and contract_case.descriptor is not None
         and contract_case.descriptor.key.startswith("spirv.atomic.")
     )
 

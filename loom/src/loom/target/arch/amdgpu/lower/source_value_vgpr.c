@@ -149,8 +149,22 @@ bool loom_amdgpu_source_value_facts_prefer_vgpr(
   if (loom_amdgpu_type_is_i1(source_type)) {
     return false;
   }
-  return loom_value_facts_is_lane_varying(
-      loom_value_fact_table_lookup(fact_table, source_value_id));
+  const loom_value_facts_t facts =
+      loom_value_fact_table_lookup(fact_table, source_value_id);
+  if (loom_value_facts_is_lane_varying(facts)) {
+    return true;
+  }
+  if (loom_type_is_buffer(source_type)) {
+    loom_value_fact_buffer_reference_t reference = {0};
+    if (loom_value_facts_query_buffer_reference(&fact_table->context, facts,
+                                                &reference)) {
+      // Segment addresses retain their physical VGPR carrier even when the
+      // addressed storage is shared uniformly by the workgroup.
+      return reference.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE ||
+             reference.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP;
+    }
+  }
+  return false;
 }
 
 static bool loom_amdgpu_source_value_known_distribution_facts(
@@ -258,6 +272,9 @@ static_assert(IREE_ARRAYSIZE(kAmdgpuScfSourceProducerFlags) ==
 
 static const loom_amdgpu_source_producer_flags_t
     kAmdgpuBufferSourceProducerFlags[LOOM_OP_BUFFER_COUNT_] = {
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_BUFFER_COMPARE_NULL)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE |
+            LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE_SUPPORTS_SGPR_BOOL,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_BUFFER_LOAD_I8_U)] =
             LOOM_AMDGPU_SOURCE_PRODUCER_MEMORY_ACCESS,
 };

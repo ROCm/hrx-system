@@ -582,7 +582,8 @@ static iree_status_t loom_wasm_testbench_execute_call(
   iree_status_t status = iree_ok_status();
   const bool has_memory = iree_any_bit_set(
       product->host_module.flags, LOOM_WASM_HOST_MODULE_FLAG_HAS_MEMORY);
-  uint64_t next_address = 0;
+  // Address zero represents a null buffer in the Wasm embedding ABI.
+  uint64_t next_address = LOOM_WASM_TESTBENCH_ROOT_ALIGNMENT;
   uint32_t mapped_count = 0;
   for (uint32_t i = 0; i < product->root_count && iree_status_is_ok(status);
        ++i) {

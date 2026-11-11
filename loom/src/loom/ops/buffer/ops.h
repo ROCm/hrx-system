@@ -38,7 +38,9 @@ enum {
   LOOM_OP_BUFFER_CONSTANT = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 14),
   LOOM_OP_BUFFER_ALLOCA_INIT = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 15),
   LOOM_OP_BUFFER_DUPLICATE = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 16),
-  LOOM_OP_BUFFER_COUNT_ = 17,
+  LOOM_OP_BUFFER_NULL = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 17),
+  LOOM_OP_BUFFER_COMPARE_NULL = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 18),
+  LOOM_OP_BUFFER_COUNT_ = 19,
 };
 
 // LOOM_OP_BUFFER_ALLOCA: Create a fixed-frame scratch buffer root in an allocatable memory space. Each execution produces a distinct storage identity; identical allocas must not be commoned. The byte length is the requested physical byte count for the execution. Targets requiring a static frame reserve its proven finite non-negative maximum. base_alignment is the minimum byte alignment of the root storage base. Target lowering determines which allocatable spaces are legal for the containing program kind. The execution frame owns the allocation; the result borrows that storage and has no explicit release obligation. An explicit pool selects the backing allocation resource; memory_space remains an access requirement that resource must satisfy. The pool is borrowed and does not extend the allocation lifetime. Omitting it uses the containing execution's allocation resource for that space, which must be unambiguous before materialization. Lowering cannot replace an explicit pool with an ambient allocation resource.
@@ -398,6 +400,37 @@ iree_status_t loom_buffer_duplicate_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_value_duplication_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+
+// LOOM_OP_BUFFER_NULL: Produce the null buffer, which identifies no storage. The result has zero byte length, allocates nothing, and carries no release obligation. It may be selected, passed, returned, and tested for null, but cannot back a memory access. Null is distinct from every allocated buffer, including zero-length storage. Its physical representation is target and memory-space dependent; it is not an integer address.
+// %empty = buffer.null : buffer
+LOOM_DEFINE_ISA(loom_buffer_null_isa, LOOM_OP_BUFFER_NULL)
+LOOM_DEFINE_RESULT(loom_buffer_null_result, 0)
+iree_status_t loom_buffer_null_build(
+    loom_builder_t* builder,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_buffer_null_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+
+// LOOM_OP_BUFFER_COMPARE_NULL: Test whether a buffer is null. Returns true exactly when the operand identifies no storage, independently of its byte length. The query does not access memory or change ownership.
+// %missing = buffer.compare.null %input : buffer
+LOOM_DEFINE_ISA(loom_buffer_compare_null_isa, LOOM_OP_BUFFER_COMPARE_NULL)
+LOOM_DEFINE_OPERAND(loom_buffer_compare_null_buffer, 0)
+LOOM_DEFINE_RESULT(loom_buffer_compare_null_result, 0)
+iree_status_t loom_buffer_compare_null_build(
+    loom_builder_t* builder,
+    loom_value_id_t buffer,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_buffer_compare_null_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,

@@ -1552,10 +1552,10 @@ static iree_status_t iree_hal_vulkan_command_buffer_resolve_bda_binding_slot(
       iree_hal_make_indirect_buffer_ref(buffer_slot, /*offset=*/0,
                                         IREE_HAL_WHOLE_BUFFER),
       &resolved_ref));
-  if (!resolved_ref.buffer || resolved_ref.length == 0) {
+  if (!resolved_ref.buffer) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "Vulkan BDA binding table slot %u resolved to an empty buffer range",
+        "Vulkan BDA binding table slot %u resolved to a null buffer",
         buffer_slot);
   }
 
@@ -1652,13 +1652,6 @@ static iree_status_t iree_hal_vulkan_command_buffer_resolve_bda_ref(
     IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_resolve_buffer_ref(
         binding_table, buffer_ref, usage, &resolved_ref));
     resolved_length = resolved_ref.length;
-    if (resolved_ref.length == 0) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "Vulkan command buffer %.*s resolved to an empty buffer range",
-          (int)usage.size, usage.data);
-    }
-
     VkDeviceAddress buffer_address = 0;
     iree_status_t address_status = iree_hal_vulkan_buffer_device_address(
         resolved_ref.buffer, &buffer_address);
@@ -1690,12 +1683,8 @@ static iree_status_t iree_hal_vulkan_command_buffer_resolve_bda_ref(
     }
     device_address = buffer_address + resolved_ref.offset;
   }
-  if (resolved_length == 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Vulkan command buffer %.*s resolved to an empty buffer range",
-        (int)usage.size, usage.data);
-  }
+  // A live zero-length range still has a device address. Consumers enforce
+  // their required access extent; resolving an address does not access bytes.
   if (resolved_length > UINT64_MAX - device_address) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "Vulkan command buffer %.*s device range overflows",

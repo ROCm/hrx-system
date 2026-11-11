@@ -1,0 +1,138 @@
+// Null is a value, not an allocation or a zero-length storage root. Optional
+// inputs pass through helpers, selections, and loop-carried references.
+func.def @optional_buffer(%input: buffer, %use: i1) -> (buffer) {
+  %empty = buffer.null : buffer
+  %selected = scf.select %use, %input, %empty : buffer
+  func.return %selected : buffer
+}
+
+func.def @optional_byte(%input: buffer, %fallback: i32) -> (i32) {
+  %missing = buffer.compare.null %input : buffer
+  %value = scf.if %missing -> (i32) {
+    scf.yield %fallback : i32
+  } else {
+    %origin = index.constant 0 : offset
+    %byte = buffer.load.i8.u %input[%origin]
+    scf.yield %byte : i32
+  }
+  func.return %value : i32
+}
+
+func.def @nullable_buffer_observations(%ordinals: buffer, %input: buffer, %identity_storage: buffer, %output: buffer) {
+  %control_origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  scf.for %row = [%begin to %end step %step] {
+    %controls = buffer.view %ordinals[%control_origin] : buffer -> view<8xi32>
+    %ordinal_word = view.load %controls[%row] : view<8xi32> -> i32
+    %ordinal = index.cast %ordinal_word : i32 to index
+    %trial = index.assume %ordinal [range(%ordinal, 0, 7)] : index
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c2 = index.constant 2 : index
+    %parity = index.rem %trial, %c2 : index
+    %use = index.cmp ne, %parity, %c0 : index
+    %selected = func.call @optional_buffer(%input, %use) : (buffer, i1) -> (buffer)
+    %missing = buffer.compare.null %selected : buffer
+    %missing_word = scalar.extui %missing : i1 to i32
+    %fallback = scalar.constant 219 : i32
+    %value = func.call @optional_byte(%selected, %fallback) : (buffer, i32) -> (i32)
+
+    // A loop rotates a real root and null, including zero iterations. The
+    // final guarded read must follow the complete selected reference.
+    %empty = buffer.null : buffer
+    %rotated, %other = scf.for %i = [%c0 to %trial step %c1](%current = %input : buffer, %next = %empty : buffer) -> (buffer, buffer) {
+      scf.yield %next, %current : buffer, buffer
+    }
+    %rotated_value = func.call @optional_byte(%rotated, %fallback) : (buffer, i32) -> (i32)
+    // Real storage still has an identity, including empty external storage.
+    %selected_empty = func.call @optional_buffer(%identity_storage, %use) : (buffer, i1) -> (buffer)
+    %empty_missing = buffer.compare.null %selected_empty : buffer
+    %empty_missing_word = scalar.extui %empty_missing : i1 to i32
+    %storage_missing = buffer.compare.null %identity_storage : buffer
+    %storage_missing_word = scalar.extui %storage_missing : i1 to i32
+    %origin = index.constant 0 : offset
+    %results = buffer.view %output[%origin] : buffer -> view<8x5xi32>
+    view.store %missing_word, %results[%row, 0] : i32, view<8x5xi32>
+    view.store %value, %results[%row, 1] : i32, view<8x5xi32>
+    view.store %rotated_value, %results[%row, 2] : i32, view<8x5xi32>
+    view.store %empty_missing_word, %results[%row, 3] : i32, view<8x5xi32>
+    view.store %storage_missing_word, %results[%row, 4] : i32, view<8x5xi32>
+  }
+  func.return
+}
+
+// The oracle uses only parity and an unconditional valid read, with no null
+// construction, predicate, pointer selection, or pointer-carrying loop.
+func.def @nullable_buffer_oracle(%ordinals: buffer, %input: buffer, %identity_storage: buffer, %output: buffer) {
+  %control_origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  scf.for %row = [%begin to %end step %step] {
+    %controls = buffer.view %ordinals[%control_origin] : buffer -> view<8xi32>
+    %ordinal_word = view.load %controls[%row] : view<8xi32> -> i32
+    %c0 = scalar.constant 0 : i32
+    %c1 = scalar.constant 1 : i32
+    %parity = scalar.andi %ordinal_word, %c1 : i32
+    %odd = scalar.cmpi ne, %parity, %c0 : i32
+    %missing = scalar.xori %parity, %c1 : i32
+    %origin = index.constant 0 : offset
+    %byte = buffer.load.i8.u %input[%origin]
+    %fallback = scalar.constant 219 : i32
+    %value = scf.select %odd, %byte, %fallback : i32
+    %rotated = scf.select %odd, %fallback, %byte : i32
+    %results = buffer.view %output[%origin] : buffer -> view<8x5xi32>
+    view.store %missing, %results[%row, 0] : i32, view<8x5xi32>
+    view.store %value, %results[%row, 1] : i32, view<8x5xi32>
+    view.store %rotated, %results[%row, 2] : i32, view<8x5xi32>
+    view.store %missing, %results[%row, 3] : i32, view<8x5xi32>
+    view.store %c0, %results[%row, 4] : i32, view<8x5xi32>
+  }
+  func.return
+}
+
+check.scenario @nullable_buffer_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %ordinals = check.generate.iota offset(0) step(1) : tensor<8xi32>
+    %input = check.generate.fill value(37) : tensor<1xi8>
+    %empty_storage = check.generate.fill value(0) : tensor<0xi8>
+    %output = check.generate.fill value(-1) : tensor<8x5xi32>
+    check.compare<@nullable_buffer_observations, @nullable_buffer_oracle>(%ordinals, %input, %empty_storage, %output) : (tensor<8xi32>, tensor<1xi8>, tensor<0xi8>, tensor<8x5xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<8x5xi32>
+    }
+  }
+  check.return
+}
+
+// The same nullable flow over private storage exercises segment pointers and
+// SRAM addresses independently of the external-buffer transport convention.
+func.def @nullable_local_observations(%ordinals: buffer, %input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<1xi32>
+  %word = view.load %source[0] : view<1xi32> -> i32
+  %extent = index.constant 4 : offset
+  %storage = buffer.alloca<private> align(4) %extent : buffer
+  buffer.store.i8 %word, %storage[%origin]
+  func.call @nullable_buffer_observations(%ordinals, %storage, %storage, %output) : (buffer, buffer, buffer, buffer)
+  func.return
+}
+
+func.def @nullable_local_oracle(%ordinals: buffer, %input: buffer, %output: buffer) {
+  // The oracle never reads its third argument; it expects nonnull identity.
+  func.call @nullable_buffer_oracle(%ordinals, %input, %input, %output) : (buffer, buffer, buffer, buffer)
+  func.return
+}
+
+check.scenario @nullable_local_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %ordinals = check.generate.iota offset(0) step(1) : tensor<8xi32>
+    %input = check.generate.fill value(37) : tensor<1xi32>
+    %output = check.generate.fill value(-1) : tensor<8x5xi32>
+    check.compare<@nullable_local_observations, @nullable_local_oracle>(%ordinals, %input, %output) : (tensor<8xi32>, tensor<1xi32>, tensor<8x5xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<8x5xi32>
+    }
+  }
+  check.return
+}

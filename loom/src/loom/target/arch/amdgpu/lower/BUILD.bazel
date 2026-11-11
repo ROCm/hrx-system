@@ -516,6 +516,11 @@ loom_cc_test(
 )
 
 loom_check_test(
+    name = "buffer_null_test",
+    src = "buffer_null_test.loom-test",
+)
+
+loom_check_test(
     name = "control_operands_test",
     src = "control_operands_test.loom-test",
 )

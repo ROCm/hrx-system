@@ -1606,6 +1606,28 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
         ),
         _buffer_load_i8_u_rule(),
         _buffer_store_i8_rule(),
+        DescriptorRule(
+            source_op=buffer.buffer_null,
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=_descriptor("wasm.i32.const"),
+                    results={"dst": ValueRef.result("result")},
+                    immediates={"i32_value": 0},
+                    form=DescriptorEmitForm.CONST,
+                ),
+            ),
+        ),
+        DescriptorRule(
+            source_op=buffer.buffer_compare_null,
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=_descriptor("wasm.i32.eqz"),
+                    operands={"input": ValueRef.operand("buffer")},
+                    results={"dst": ValueRef.result("result")},
+                    form=DescriptorEmitForm.OP,
+                ),
+            ),
+        ),
         *_integer_sign_rules(_I32, "i32", 31),
         *_integer_sign_rules(_I64, "i64", 63),
         # These modular operations depend only on the logical low bits. Keep

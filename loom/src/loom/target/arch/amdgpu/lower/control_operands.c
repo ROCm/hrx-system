@@ -7,6 +7,7 @@
 #include "loom/target/arch/amdgpu/lower/control_operands.h"
 
 #include "loom/ir/module.h"
+#include "loom/target/arch/amdgpu/lower/buffer.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/materializers.h"
 #include "loom/target/arch/amdgpu/lower/topology.h"
@@ -29,6 +30,14 @@ iree_status_t loom_amdgpu_prepare_control_operand(
       context, required_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
   const loom_type_t actual_type =
       loom_low_lower_value_binding_type(context, source_value);
+  if (loom_type_is_buffer(source_type) &&
+      loom_amdgpu_buffer_is_null(context, source_value)) {
+    // A non-null recipe records semantic rematerialization instead of a
+    // bit-preserving register move. The receiving type owns its null encoding.
+    static const uint8_t kNullBufferRecipe = 0;
+    *out_plan = &kNullBufferRecipe;
+    return iree_ok_status();
+  }
   if (requires_sgpr && loom_type_is_scalar(source_type) &&
       !loom_amdgpu_type_is_i1(source_type) &&
       loom_amdgpu_low_type_is_register_class(context, actual_type,
@@ -64,6 +73,10 @@ iree_status_t loom_amdgpu_emit_control_operand(
   *out_low_value_id = low_value_id;
   const loom_type_t source_type = loom_module_value_type(
       loom_low_lower_context_module(context), source_value_id);
+  if (loom_type_is_buffer(source_type) && plan != NULL) {
+    return loom_amdgpu_emit_buffer_null(context, source_terminator,
+                                        required_low_type, out_low_value_id);
+  }
   const bool requires_vgpr = loom_amdgpu_low_type_is_register_class(
       context, required_low_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
   const bool requires_sgpr = loom_amdgpu_low_type_is_register_class(

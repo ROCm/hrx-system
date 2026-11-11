@@ -168,7 +168,7 @@ enum loom_amdgpu_i1_compare_flag_bits_e {
 typedef struct loom_amdgpu_i1_compare_values_t {
   // First source operand of the comparison.
   loom_value_id_t lhs;
-  // Second source operand of the comparison.
+  // Second source operand, or the first again for a unary predicate.
   loom_value_id_t rhs;
   // Placement constraints implied by the comparison operation.
   loom_amdgpu_i1_compare_flags_t flags;
@@ -185,12 +185,13 @@ static bool loom_amdgpu_i1_compare_values(
       loom_amdgpu_source_producer_flags(source_op->kind);
   if (!iree_any_bit_set(producer_flags,
                         LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE) ||
-      source_op->operand_count != 2 || source_op->result_count != 1) {
+      (source_op->operand_count != 1 && source_op->operand_count != 2) ||
+      source_op->result_count != 1) {
     return false;
   }
   const loom_value_id_t* operands = loom_op_const_operands(source_op);
   out_values->lhs = operands[0];
-  out_values->rhs = operands[1];
+  out_values->rhs = operands[source_op->operand_count - 1];
   if (iree_any_bit_set(
           producer_flags,
           LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE_SUPPORTS_SGPR_BOOL)) {

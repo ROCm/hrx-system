@@ -165,6 +165,7 @@ loom_corpus_test(
             "memory/address/logical_shift_loop.loom",
             "memory/address/uniform_loads.loom",
             "memory/buffer/boundaries.loom",
+            "memory/buffer/null.loom",
             "memory/buffer/packing.loom",
             "memory/buffer/selection.loom",
             "memory/view/bitcast.loom",
