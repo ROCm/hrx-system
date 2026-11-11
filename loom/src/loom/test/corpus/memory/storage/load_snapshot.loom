@@ -337,3 +337,69 @@ check.scenario @captured_partial_vector_values {
   }
   check.return
 }
+
+// Entry snapshots may be selected against direct arguments before a later
+// acquisition. Both integer and floating payloads cross the conditional join;
+// subsequent reads must continue to observe the synchronized memory.
+kernel.def @conditional_entry_snapshots() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%use_memory: index, %host_integer: i32, %host_float: f32, %integers: buffer, %floats: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %integer_data = buffer.view %integers[%base] : buffer -> view<1024xi32>
+  %float_data = buffer.view %floats[%base] : buffer -> view<1024xf32>
+  %destination = buffer.view %output[%base] : buffer -> view<4xi32>
+  %c0 = index.constant 0 : index
+  %condition = index.cmp ne, %use_memory, %c0 : index
+  %integer, %floating = scf.if %condition -> (i32, f32) {
+    %integer_value = view.load %integer_data[0] : view<1024xi32> -> i32
+    %float_value = view.load %float_data[0] : view<1024xf32> -> f32
+    scf.yield %integer_value, %float_value : i32, f32
+  } else {
+    scf.yield %host_integer, %host_float : i32, f32
+  }
+  kernel.barrier<global> scope(workgroup) ordering(acq_rel)
+  %after_integer = view.load %integer_data[0] : view<1024xi32> -> i32
+  %after_float = view.load %float_data[0] : view<1024xf32> -> f32
+  %float_bits = scalar.bitcast %floating : f32 to i32
+  %after_bits = scalar.bitcast %after_float : f32 to i32
+  view.store %integer, %destination[0] : i32, view<4xi32>
+  view.store %float_bits, %destination[1] : i32, view<4xi32>
+  view.store %after_integer, %destination[2] : i32, view<4xi32>
+  view.store %after_bits, %destination[3] : i32, view<4xi32>
+  kernel.return
+}
+
+func.def @conditional_entry_snapshots_oracle(%use_memory: index, %host_integer: i32, %host_float: f32, %integers: buffer, %floats: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %integer_data = buffer.view %integers[%base] : buffer -> view<1024xi32>
+  %float_data = buffer.view %floats[%base] : buffer -> view<1024xf32>
+  %destination = buffer.view %output[%base] : buffer -> view<4xi32>
+  %device_integer = view.load %integer_data[0] : view<1024xi32> -> i32
+  %device_float = view.load %float_data[0] : view<1024xf32> -> f32
+  %c0 = index.constant 0 : index
+  %condition = index.cmp ne, %use_memory, %c0 : index
+  %integer = scf.select %condition, %device_integer, %host_integer : i32
+  %floating = scf.select %condition, %device_float, %host_float : f32
+  %float_bits = scalar.bitcast %floating : f32 to i32
+  %after_bits = scalar.bitcast %device_float : f32 to i32
+  view.store %integer, %destination[0] : i32, view<4xi32>
+  view.store %float_bits, %destination[1] : i32, view<4xi32>
+  view.store %device_integer, %destination[2] : i32, view<4xi32>
+  view.store %after_bits, %destination[3] : i32, view<4xi32>
+  func.return
+}
+
+check.scenario @conditional_entry_snapshot_values {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %host_integer = check.literal value(-17) : i32
+    %host_float = check.literal value(-2.5) : f32
+    %integers = check.generate.fill value(123) : tensor<1024xi32>
+    %floats = check.generate.fill value(1.75) : tensor<1024xf32>
+    %output = check.generate.fill value(-1) : tensor<4xi32>
+    check.compare<@conditional_entry_snapshots, @conditional_entry_snapshots_oracle>(%trial, %host_integer, %host_float, %integers, %floats, %output) : (index, i32, f32, tensor<1024xi32>, tensor<1024xf32>, tensor<4xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<4xi32>
+    }
+  }
+  check.return
+}

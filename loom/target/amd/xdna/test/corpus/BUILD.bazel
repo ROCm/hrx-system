@@ -59,6 +59,7 @@ loom_corpus_test(
             "memory/packed/transport.loom:@packed_word_transport_all_bits": "XDNA/051",
             "memory/packed/transport.loom:@strided_byte_packet_values": "XDNA/051",
             "memory/storage/load_snapshot.loom:@computed_snapshot_across_barrier_values": "XDNA/051",
+            "memory/storage/load_snapshot.loom:@conditional_entry_snapshot_values": "XDNA/051",
             "memory/storage/load_snapshot.loom:@extract_inside_loop_values": "XDNA/051",
             "numeric/conversion/bfloat_rounding.loom:@bfloat_rounding_all_bins": "XDNA/051",
             "numeric/conversion/bfloat_rounding.loom:@finite_bfloat_product_rounding": "XDNA/051",

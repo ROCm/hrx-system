@@ -23,8 +23,8 @@ typedef struct loom_low_lower_visibility_access_t
 // Target cost and capability facts for deferring cache visibility to reads.
 // A zero invocation count leaves acquisition at its ordinary target recipe.
 // An enabled provider implements required visibility on every physical packet
-// of a scalar global or generic 32-bit read, independently of advisory cache
-// policies.
+// of a scalar global or generic 32-bit read that may observe acquired writes,
+// independently of advisory cache policies.
 typedef struct loom_low_lower_visibility_model_t {
   // Invocations sharing a native read issue group.
   uint32_t invocation_count;
@@ -58,11 +58,12 @@ iree_status_t loom_low_lower_visibility_observe(
     loom_low_lower_visibility_builder_t* builder, const loom_op_t* op);
 
 // Selects a complete function-wide realization. A non-thread result requires
-// that scope on every mutable global or generic payload read, including reads
-// before an acquire and through aliases. This conservative closure covers
-// joins and loop backedges without weakening any path's obligation. Thread
-// scope keeps the ordinary eager recipe. Completion and release ordering are
-// unchanged.
+// that scope on every mutable global or generic payload read unless retained
+// analysis proves it observes unchanged kernel-entry contents. Kernel entry
+// supplies visibility for that prefix; ordinary callable entry does not.
+// All other reads retain the scope, including aliases and loop backedges.
+// Thread scope keeps the ordinary eager recipe. Completion and release
+// ordering are unchanged.
 iree_status_t loom_low_lower_visibility_select(
     loom_low_lower_context_t* context,
     const loom_low_lower_visibility_builder_t* builder,
