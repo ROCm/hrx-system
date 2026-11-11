@@ -8,8 +8,11 @@
 
 #include <array>
 #include <cstring>
+#include <semaphore>
 #include <vector>
 
+#include "iree/async/event.h"
+#include "iree/base/threading/processor.h"
 #include "iree/hal/driver/amd/gpu/completion.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -24,6 +27,7 @@ class FeedbackTest : public ::testing::Test {
     feedback_.context = &context_;
     feedback_.device_id = IREE_SV("rdna");
     feedback_.control = &control_;
+    feedback_.notification_value = &notification_value_;
     feedback_.ring = ring_.data();
     control_.ring_capacity = ring_.size();
     iree_hal_amd_gpu_source_context_registry_initialize(iree_allocator_system(),
@@ -90,6 +94,9 @@ class FeedbackTest : public ::testing::Test {
               event->payload.data)
               ->status_code);
     }
+    if (self.published_) {
+      self.published_->release();
+    }
   }
   void RegisterSiteZero() {
     std::array<uint8_t, 80> sites = {};
@@ -141,8 +148,10 @@ class FeedbackTest : public ::testing::Test {
   iree_hal_amd_gpu_context_t context_ = {};
   // Production consumer; the test supplies bytes at its producer boundary.
   iree_hal_amd_gpu_feedback_t feedback_ = {};
-  // Native shared control layout, exercised synchronously by this fixture.
+  // Native shared control layout written at the GPU producer boundary.
   iree_hal_amd_gpu_feedback_control_t control_ = {};
+  // Native signal value advanced by GPU producers after publishing a report.
+  iree_atomic_int64_t notification_value_ = IREE_ATOMIC_VAR_INIT(0);
   // Report storage with enough records to cross the live-drain budget.
   alignas(64) std::array<uint8_t, 16384> ring_ = {};
   // Device-owned metadata independent of packet storage and executable
@@ -160,7 +169,65 @@ class FeedbackTest : public ::testing::Test {
   std::vector<uint64_t> tsan_sites_;
   // Channel errors, distinct from authored diagnostic events.
   std::vector<iree_status_code_t> failures_;
+  // Optional acknowledgement after the event sink has copied its payload.
+  std::binary_semaphore* published_ = nullptr;
 };
+
+TEST_F(FeedbackTest, NotificationInterruptsIndependentPendingWork) {
+  // Prepare the packet before publication. The reservation and notification
+  // stores below are the release edges used by the real device producer.
+  Packet(0);
+  std::binary_semaphore published{0};
+  published_ = &published;
+  struct PendingSource {
+    // Unchanged native work on an independent queue.
+    iree_atomic_int32_t word = IREE_ATOMIC_VAR_INIT(0);
+    // Initial retirement opens the active observation budget.
+    bool first_round = true;
+  } pending;
+  iree_hal_amd_gpu_completion_source_t sources[] = {
+      {
+          .fn =
+              +[](void* user_data, amdf_status_t,
+                  iree_hal_amd_gpu_completion_scope_t*,
+                  iree_hal_amd_gpu_completion_wait_t* wait,
+                  iree_hal_amd_gpu_completion_copy_t*) {
+                auto* pending = static_cast<PendingSource*>(user_data);
+                *wait = {
+                    .address = &pending->word,
+                    .value = 0,
+                    .pending = true,
+                };
+                const bool ready = pending->first_round;
+                pending->first_round = false;
+                return ready;
+              },
+          .user_data = &pending,
+      },
+      {.fn = iree_hal_amd_gpu_feedback_poll, .user_data = &feedback_},
+  };
+  IREE_ASSERT_OK(iree_async_event_native_initialize(&context_.kernel_event));
+  iree_hal_amd_gpu_completion_t completion = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, IREE_ARRAYSIZE(sources), sources, IREE_DURATION_INFINITE, {},
+      iree_allocator_system(), &completion));
+  // Only coherent observation can set lifecycle state before this test stops
+  // the worker; all source snapshots precede that transition.
+  while (!iree_atomic_load(&completion.state, iree_memory_order_acquire)) {
+    iree_processor_yield();
+  }
+  iree_atomic_store((iree_atomic_int64_t*)&control_.reservation_head, 128,
+                    iree_memory_order_release);
+  iree_atomic_store(&notification_value_, INT64_C(1) << 40,
+                    iree_memory_order_release);
+  published.acquire();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion));
+  iree_async_event_native_deinitialize(&context_.kernel_event);
+  published_ = nullptr;
+  EXPECT_EQ(reports_.size(), 1u);
+  EXPECT_EQ(control_.read_tail, 128u);
+  EXPECT_EQ(iree_atomic_load(&pending.word, iree_memory_order_relaxed), 0);
+}
 
 TEST_F(FeedbackTest, TsanReportsPreserveBothAccessesAndWorkitemCoordinates) {
   auto* packet = TsanPacket(0);

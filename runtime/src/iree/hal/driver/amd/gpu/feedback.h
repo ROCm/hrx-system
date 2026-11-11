@@ -115,6 +115,8 @@ typedef struct iree_hal_amd_gpu_feedback_t {
   amdf_memory_reservation_t* reservation;
   // Host control pointer within control_memory.
   iree_hal_amd_gpu_feedback_control_t* control;
+  // Borrowed coherent host notification counter within control_memory.
+  iree_atomic_int64_t* notification_value;
   // Host base of the twice-mapped ring, independent of its device address.
   uint8_t* ring;
   // Immutable device-global values, specialized with each source context.

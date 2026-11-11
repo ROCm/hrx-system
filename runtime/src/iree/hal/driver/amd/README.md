@@ -108,12 +108,20 @@ for the workers and shared proactor; GPU-local memory node IDs are not CPU
 NUMA node IDs.
 
 `completion_spin_ns` bounds active completion observation after actual progress
-(default 100,000 ns). While actively waiting, the existing retirement worker
-reads coherent USER queue completion words; a change resumes authoritative
-source drains. At expiry it parks on the native event, with no periodic wakeups.
-Setting zero parks immediately. KERNEL queues continue to use native events and
-status queries. This trades a bounded CPU tail after the last completion for
-lower latency between dependent operations; it does not alter process power
+(default 1,000,000,000 ns, or one second). While work remains pending, the
+existing retirement worker reads coherent USER queue completion words; a change
+resumes authoritative source drains. Actual completion progress renews the
+budget. At expiry, or when no coherent work remains pending, the worker parks
+on the native event, with no periodic wakeups. Setting zero parks immediately;
+device creation with `completion_wait_flags=NONE` also disables observation
+even when the URI specifies a nonzero budget.
+
+Active observation reduces completion wake-up latency between dependent GPU
+operations, at the cost of occupying a CPU core while polling. It can improve
+request throughput and energy per request, but long GPU operations may consume
+more CPU without completing faster. Idle devices can sleep. KERNEL queues,
+including the Windows native submission path, retain native events and status
+queries and do not use this budget. The setting does not alter process power
 policy, add a thread, or change submission and retirement ordering.
 
 Each materialized device retains the fabric independently. Releasing the

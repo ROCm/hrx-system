@@ -312,13 +312,15 @@ class QueueTest : public ::testing::Test {
     }
   }
 
-  void Poll(amdf_status_t status = AMDF_STATUS_OK,
-            iree_hal_amd_gpu_completion_copy_t* out_copy = nullptr) {
+  iree_hal_amd_gpu_completion_wait_t Poll(
+      amdf_status_t status = AMDF_STATUS_OK,
+      iree_hal_amd_gpu_completion_copy_t* out_copy = nullptr) {
     auto source = iree_hal_amd_gpu_sdma_native_queue_completion_source(queue_);
     iree_hal_amd_gpu_completion_wait_t wait = {};
     iree_hal_amd_gpu_completion_t completion = {};
     iree_slim_mutex_initialize(&completion.drain_mutex);
     auto poll = [&](amdf_status_t status) {
+      wait = {};
       iree_slim_mutex_lock(&completion.drain_mutex);
       iree_hal_amd_gpu_completion_scope_t scope = {
           .completion = &completion,
@@ -334,7 +336,8 @@ class QueueTest : public ::testing::Test {
     while (poll(status) && !(out_copy && out_copy->fn)) {
     }
     iree_slim_mutex_deinitialize(&completion.drain_mutex);
-    EXPECT_EQ(wait.address, nullptr);
+    EXPECT_FALSE(wait.pending);
+    return wait;
   }
 
   // Native API dependencies, immutable after construction.
@@ -425,6 +428,9 @@ TEST_F(QueueTest,
 TEST_F(QueueTest, KernelRetirementOwnsCapacityAndCommandBytes) {
   capacity_ = 2;
   ASSERT_NO_FATAL_FAILURE(Allocate());
+  const auto idle = Poll();
+  EXPECT_EQ(idle.address, nullptr);
+  EXPECT_FALSE(idle.pending);
   std::array<Submission, 3> copies;
   for (auto& copy : copies) {
     iree_hal_amd_gpu_sdma_native_queue_submit(queue_, &copy.operation);
@@ -489,9 +495,17 @@ TEST_F(QueueTest, MetadataProgressesPastExhaustedNativeCapacity) {
 
 TEST_F(QueueTest, UserAcceptanceFollowsReleaseAndPrecedesIndexCommitment) {
   ASSERT_NO_FATAL_FAILURE(Allocate(AMDF_QUEUE_PUBLICATION_MODE_USER));
+  const auto idle = Poll();
+  ASSERT_NE(idle.address, nullptr);
+  EXPECT_TRUE(idle.is_64_bit);
+  EXPECT_FALSE(idle.pending);
   Submission submission;
   submission.native_frontier = &user_.write_index;
   iree_hal_amd_gpu_sdma_native_queue_submit(queue_, &submission.operation);
+  EXPECT_NE(
+      iree_atomic_load(static_cast<const iree_atomic_int64_t*>(idle.address),
+                       iree_memory_order_acquire),
+      idle.value);
   EXPECT_EQ(submission.acceptances, 1u);
   EXPECT_EQ(submission.observed_frontier, 0u);
   EXPECT_EQ(user_.flush_count, 1u);
