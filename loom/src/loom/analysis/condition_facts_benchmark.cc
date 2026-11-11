@@ -352,6 +352,7 @@ enum class NestedValueMode {
   kNone,
   kScalarAliases,
   kCastAliases,
+  kIntegerCasts,
 };
 
 class NestedStructuredBranchFactsBenchmark {
@@ -442,6 +443,20 @@ class NestedStructuredBranchFactsBenchmark {
             &builder, loom_index_assume_results(alias).values[0], converted,
             index, LOOM_LOCATION_UNKNOWN, &sum));
       }
+      if (mode_ == NestedValueMode::kIntegerCasts) {
+        const auto byte_type = loom_type_scalar(LOOM_SCALAR_TYPE_I8);
+        loom_op_t* narrow = nullptr;
+        IREE_CHECK_OK(loom_scalar_trunci_build(&builder, input, i32, byte_type,
+                                               LOOM_LOCATION_UNKNOWN, &narrow));
+        loom_op_t* widen = nullptr;
+        IREE_CHECK_OK(loom_scalar_extui_build(
+            &builder, loom_scalar_trunci_result(narrow), byte_type, i32,
+            LOOM_LOCATION_UNKNOWN, &widen));
+        loom_op_t* observed = nullptr;
+        IREE_CHECK_OK(
+            loom_scalar_cttzi_build(&builder, loom_scalar_extui_result(widen),
+                                    i32, LOOM_LOCATION_UNKNOWN, &observed));
+      }
       loom_op_t* bound = nullptr;
       IREE_CHECK_OK(loom_scalar_constant_build(&builder, loom_attr_i64(i), i32,
                                                LOOM_LOCATION_UNKNOWN, &bound));
@@ -505,6 +520,8 @@ class NestedStructuredBranchFactsBenchmark {
     state.counters["branch_depth"] = (double)depth_;
     state.counters["cast_aliases"] =
         mode_ == NestedValueMode::kCastAliases ? 1.0 : 0.0;
+    state.counters["integer_casts"] =
+        mode_ == NestedValueMode::kIntegerCasts ? 1.0 : 0.0;
     state.counters["scalar_aliases"] =
         mode_ == NestedValueMode::kScalarAliases ? 1.0 : 0.0;
     state.counters["pool_system_allocation_bytes"] =
@@ -588,6 +605,32 @@ static void BM_AcquireConditionedNestedStructuredCastAliasFacts(
   state.SetItemsProcessed(state.iterations() * state.range(0));
 }
 BENCHMARK(BM_AcquireConditionedNestedStructuredCastAliasFacts)
+    ->Apply(StructuredBranchDepths);
+
+static void BM_AcquireOrdinaryNestedStructuredIntegerCasts(
+    benchmark::State& state) {
+  NestedStructuredBranchFactsBenchmark fixture(state.range(0),
+                                               NestedValueMode::kIntegerCasts);
+  for (auto _ : state) {
+    fixture.Acquire(LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION);
+  }
+  fixture.SetCounters(state);
+  state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+BENCHMARK(BM_AcquireOrdinaryNestedStructuredIntegerCasts)
+    ->Apply(StructuredBranchDepths);
+
+static void BM_AcquireConditionedNestedStructuredIntegerCasts(
+    benchmark::State& state) {
+  NestedStructuredBranchFactsBenchmark fixture(state.range(0),
+                                               NestedValueMode::kIntegerCasts);
+  for (auto _ : state) {
+    fixture.Acquire(LOOM_PASS_VALUE_FACT_SCOPE_CONDITIONED_FUNCTION);
+  }
+  fixture.SetCounters(state);
+  state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+BENCHMARK(BM_AcquireConditionedNestedStructuredIntegerCasts)
     ->Apply(StructuredBranchDepths);
 
 }  // namespace

@@ -125,11 +125,8 @@ func.def target(@target) @wide_index_i32(%value: i64) -> (i64) {
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @wide_index_i32(%bounded: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
-  %word = slice %bounded[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %10 = s_ashr_i32_rhs_inline %word, 31
-  %result = concat(%word, %10) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  return %result
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @wide_index_i32(%nonnegative: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+  return %nonnegative
 }
 
 // ====
