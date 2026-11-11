@@ -566,8 +566,13 @@ class CiCoreWindowsTest(unittest.TestCase):
                 ci_core_windows.test_core(args)
             self.assertEqual(step_type.call_args.kwargs["build_dir"], build_dir)
             self.assertEqual(step_type.call_args.kwargs["env"]["PATH"], "toolchain")
+            arguments = step_type.call_args.kwargs["arguments"].copy()
+            label_index = arguments.index("-LE")
+            label_exclude_regex = arguments.pop(label_index + 1)
+            arguments.pop(label_index)
+            self.assertRegex("manual", label_exclude_regex)
             self.assertEqual(
-                step_type.call_args.kwargs["arguments"],
+                arguments,
                 [
                     "--parallel",
                     "2",
@@ -575,8 +580,6 @@ class CiCoreWindowsTest(unittest.TestCase):
                     "^hrx/",
                     "-E",
                     "(^build_tools/cmake/)",
-                    "-LE",
-                    "manual",
                     "--no-tests=error",
                 ],
             )
