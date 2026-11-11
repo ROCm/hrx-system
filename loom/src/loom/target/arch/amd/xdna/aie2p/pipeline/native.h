@@ -79,6 +79,10 @@ typedef struct loom_aie2p_native_channel_t {
   // First logical user of the physical pair, responsible for startup seeds.
   // Compatible serial users reuse the restored pair without reseeding it.
   bool initializes_locks;
+  // Serial aliases require different initial free-credit counts. Configuration
+  // starts both locks at zero; each construction establishes its own values
+  // after the previous users join and before any fresh user starts.
+  bool initializes_on_entry;
   // Single cursor owner and slot movement in each direction.
   struct {
     // Strand advancing the read cursor.

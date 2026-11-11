@@ -1,30 +1,35 @@
-// Eight private constructions exceed a compute tile's semaphore bank if each
-// retains its own pair. Their serial lifetimes share one pair; the root ring
-// stays live throughout both epochs and must retain a distinct pair.
+// Eight private constructions with capacities 1..8 fill their entire rings
+// and leave every record unread. Their serial lifetimes share one pair whose
+// credits change on entry. The root ring stays live throughout both epochs
+// and must retain a distinct pair.
 aie2p.target<array> @device
 
-pipeline.def @consume_record() run(%input: channel<tile<16xi32>>, %output: buffer, %record: index) {
-  %capacity = index.constant 1 : index
+pipeline.def @consume_record() run(%input: channel<tile<16xi32>>, %output: buffer, %record: index, %capacity: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
   %origin = index.constant 0 : offset
   %record_bytes = index.constant 64 : offset
   %memory = pipeline.memory<workgroup>[0, 2] : pool
-  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %record_bytes : buffer
-  %slots = buffer.view %storage[%origin] : buffer -> view<1x16xi32>
-  %channel = channel.bind<fifo> %slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %storage_bytes = index.scale %capacity, %record_bytes : index, offset -> offset
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %storage_bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<[%capacity]x16xi32>
+  %channel = channel.bind<fifo> %slots, %capacity : view<[%capacity]x16xi32>, index -> channel<tile<16xi32>>
   pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
     %input_read, %source = channel.acquire %input : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
-    %write, %destination = channel.reserve %channel : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
     %values = vector.load %source[0] : view<16xi32> -> vector<16xi32>
     %biases = vector.splati 7 : vector<16xi32>
     %adjusted = vector.addi %values, %biases : vector<16xi32>
-    vector.store %adjusted, %destination[0] : vector<16xi32>, view<16xi32>
     channel.release %input_read : read<tile<16xi32>>
     %offset = index.scale %record, %record_bytes : index, offset -> offset
     %external = buffer.view %output[%offset] : buffer -> view<16xi32>
-    %copy = kernel.async.copy %destination to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
-    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
-    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
-    channel.publish %write : write<tile<16xi32>>
+    scf.for %slot = [%begin to %capacity step %step] {
+      %write, %destination = channel.reserve %channel : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      vector.store %adjusted, %destination[0] : vector<16xi32>, view<16xi32>
+      %copy = kernel.async.copy %destination to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+      %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+      channel.publish %write : write<tile<16xi32>>
+    }
   }
 }
 
@@ -63,7 +68,8 @@ pipeline.def<kernel> public retain target(@device) @entry() run(%input_argument:
       %base = index.mul %epoch, %phases : index
       scf.for %phase = [%begin to %phases step %step] unroll {
         %record = index.add %base, %phase : index
-        pipeline.compose @consume_record(%incoming, %output, %record) : (channel<tile<16xi32>>, buffer, index)
+        %slots = index.add %phase, %step : index
+        pipeline.compose @consume_record(%incoming, %output, %record, %slots) : (channel<tile<16xi32>>, buffer, index, index)
       }
     }
   }

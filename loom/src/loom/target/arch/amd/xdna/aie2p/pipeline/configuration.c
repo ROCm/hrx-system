@@ -1072,7 +1072,9 @@ iree_status_t loom_aie2p_native_emit_configuration(
         context->pool_tiles[channel->pool_index]->coordinate;
     IREE_RETURN_IF_ERROR(loom_aie2p_native_config_set_lock(
         &config, tile, channel->free_lock,
-        loom_aie2p_native_initial_credits(context, channel)));
+        channel->initializes_on_entry
+            ? 0
+            : loom_aie2p_native_initial_credits(context, channel)));
     IREE_RETURN_IF_ERROR(loom_aie2p_native_config_set_lock(
         &config, tile, channel->ready_lock, 0));
   }

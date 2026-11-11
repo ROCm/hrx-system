@@ -11,19 +11,20 @@
 typedef struct loom_aie2p_native_credit_action_t {
   // Next private protocol restored on the same engine at this boundary.
   struct loom_aie2p_native_credit_action_t* next;
-  // Physical protocol whose original construction is ending.
+  // Physical protocol whose construction is entering or ending.
   const loom_aie2p_native_channel_t* channel;
   // Writer's admitted aperture for exact residual retirement, otherwise NULL.
   const loom_aie2p_native_channel_access_t* access;
   // Exact unread records to reclaim; unused for quiescent restoration.
   uint32_t residual;
+  // Boundary at which this action establishes or retires private credits.
+  loom_aie2p_native_credit_phase_t phase;
 } loom_aie2p_native_credit_action_t;
 
 typedef struct loom_aie2p_native_credit_engine_t {
-  // Exact residuals retired after this engine's old-lifetime writers finish.
-  loom_aie2p_native_credit_action_t* residuals;
-  // Protocols restored after all old users finish.
-  loom_aie2p_native_credit_action_t* resets;
+  // Selected actions at each construction boundary, in emission order.
+  loom_aie2p_native_credit_action_t*
+      actions[LOOM_AIE2P_NATIVE_CREDIT_PHASE_COUNT];
 } loom_aie2p_native_credit_engine_t;
 
 struct loom_aie2p_native_credit_scope_t {
@@ -33,6 +34,8 @@ struct loom_aie2p_native_credit_scope_t {
   loom_aie2p_native_credit_action_t* pending;
   // All participants must rendezvous before any selected reset begins.
   bool quiescence;
+  // All participants wait for fresh capacities before entering this child.
+  bool initializes;
 };
 
 uint32_t loom_aie2p_native_initial_credits(
@@ -105,11 +108,13 @@ iree_status_t loom_aie2p_native_select_credits(
     const loom_aie2p_native_channel_t* channel = &context->channels[i];
     const iree_host_size_t boundary =
         boundaries[invocations->channels[i].invocation->ordinal];
-    if (boundary == IREE_HOST_SIZE_MAX || channel->balance.balanced) {
+    if (boundary == IREE_HOST_SIZE_MAX ||
+        (channel->balance.balanced && !channel->initializes_on_entry)) {
       continue;
     }
     uint32_t residual = 0;
     const bool exact =
+        !channel->initializes_on_entry &&
         loom_aie2p_native_credit_residual(context, invocations, i, &residual);
     if (exact && !residual) {
       continue;
@@ -130,8 +135,12 @@ iree_status_t loom_aie2p_native_select_credits(
       memset(scope->engines, 0, engine_count * sizeof(*scope->engines));
     }
     const iree_host_size_t worker = channel->cursor.writer.worker;
+    const loom_aie2p_native_credit_phase_t phase =
+        channel->initializes_on_entry ? LOOM_AIE2P_NATIVE_CREDIT_INITIALIZE
+        : exact                       ? LOOM_AIE2P_NATIVE_CREDIT_RETIRE
+                                      : LOOM_AIE2P_NATIVE_CREDIT_RESET;
     loom_aie2p_native_credit_action_t** actions =
-        exact ? &scope->engines[context->core_engines[worker]].residuals
+        exact ? &scope->engines[context->core_engines[worker]].actions[phase]
               : &scope->pending;
     loom_aie2p_native_credit_action_t* action = NULL;
     IREE_RETURN_IF_ERROR(
@@ -139,6 +148,7 @@ iree_status_t loom_aie2p_native_select_credits(
     *action = (loom_aie2p_native_credit_action_t){
         .next = *actions,
         .channel = channel,
+        .phase = phase,
         .access =
             exact ? &context->workers[worker]
                          .channels
@@ -146,7 +156,8 @@ iree_status_t loom_aie2p_native_select_credits(
                   : NULL,
         .residual = residual};
     *actions = action;
-    scope->quiescence |= !exact;
+    scope->quiescence |= !exact && !channel->initializes_on_entry;
+    scope->initializes |= channel->initializes_on_entry;
     *out_control_count += exact ? 0 : 2;
   }
   return iree_ok_status();
@@ -209,8 +220,8 @@ iree_status_t loom_aie2p_native_route_credits(
       scope->pending = action->next;
       loom_aie2p_native_credit_engine_t* engine =
           &scope->engines[context->core_engines[worker]];
-      action->next = engine->resets;
-      engine->resets = action;
+      action->next = engine->actions[action->phase];
+      engine->actions[action->phase] = action;
     }
   }
   *out_valid = true;
@@ -222,6 +233,13 @@ bool loom_aie2p_native_credits_require_quiescence(
     const loom_pipeline_invocation_t* child) {
   return context->credit_scopes &&
          context->credit_scopes[child->ordinal].quiescence;
+}
+
+bool loom_aie2p_native_credits_require_initialization(
+    const loom_aie2p_native_context_t* context,
+    const loom_pipeline_invocation_t* child) {
+  return context->credit_scopes &&
+         context->credit_scopes[child->ordinal].initializes;
 }
 
 static iree_status_t loom_aie2p_native_reset_credits(
@@ -289,15 +307,14 @@ static iree_status_t loom_aie2p_native_retire_credits(
 iree_status_t loom_aie2p_native_emit_credits(
     loom_aie2p_native_context_t* context, loom_builder_t* builder,
     iree_host_size_t engine, const loom_pipeline_invocation_t* child,
-    bool quiescent) {
+    loom_aie2p_native_credit_phase_t phase) {
   if (!context->credit_scopes ||
       !context->credit_scopes[child->ordinal].engines) {
     return iree_ok_status();
   }
   const loom_aie2p_native_credit_engine_t* row =
       &context->credit_scopes[child->ordinal].engines[engine];
-  const loom_aie2p_native_credit_action_t* actions =
-      quiescent ? row->resets : row->residuals;
+  const loom_aie2p_native_credit_action_t* actions = row->actions[phase];
   if (!actions) {
     return iree_ok_status();
   }
@@ -312,7 +329,7 @@ iree_status_t loom_aie2p_native_emit_credits(
                                                 &symbol, &function));
   for (const loom_aie2p_native_credit_action_t* action = actions; action;
        action = action->next) {
-    if (quiescent) {
+    if (phase != LOOM_AIE2P_NATIVE_CREDIT_RETIRE) {
       IREE_RETURN_IF_ERROR(loom_aie2p_native_reset_credits(
           context, &helper, controller, action->channel));
     } else {
