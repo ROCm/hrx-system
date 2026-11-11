@@ -37,8 +37,7 @@ low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = 
   %30 = vpbroadcastq.ymm %29
   %31 = vpcmpeqd.ones.ymm
   %32 = vpcmpeqq.ymm %input, %24
-  %33 = vpcmpeqq.ymm %input, %input
-  %34 = vpxor.ymm %32, %33
+  %34 = vpxor.ymm %32, %31
   %35 = vpblendvb.ymm %24, %30, %34
   %sign = vpblendvb.ymm %35, %31, %26
   return %negative, %absolute, %sign
