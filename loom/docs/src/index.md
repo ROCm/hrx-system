@@ -100,8 +100,10 @@ loom-fetch huggingface:loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom
 <pre class="loom-terminal-output no-copy" markdown="0"><code>...
 Qwen/Qwen2.5-0.5B-Instruct/model.json</code></pre>
 
+<p class="loom-terminal-caption">Use the printed path, or just its directory:</p>
+
 ```sh
-loom-serve --model=Qwen/Qwen2.5-0.5B-Instruct/model.json --device=amdgpu
+loom-serve --model=Qwen/Qwen2.5-0.5B-Instruct --device=amdgpu
 ```
 
 <pre class="loom-terminal-output no-copy" markdown="0"><code>...

@@ -14,7 +14,7 @@ the `hf` extra, fetch Moonshine Streaming Tiny and start it on an AMD GPU:
 
 ```sh
 loom-fetch https://raw.githubusercontent.com/ROCm/hrx-loom-library/4317508bf5adb251a284ea8dc4e5a24a11bd1c17/model/moonshine-ai/moonshine-streaming-tiny/model.json --preset=streaming --output=./moonshine
-loom-serve --device=amdgpu --workers=4 --listen=127.0.0.1:8080 --model=./moonshine/model.json
+loom-serve --device=amdgpu --workers=4 --listen=127.0.0.1:8080 --model=./moonshine
 ```
 
 </div>
