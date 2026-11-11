@@ -110,9 +110,10 @@ iree_status_t loom_value_fact_integer_relations_define_upper_bounds(
     loom_symbolic_integer_relation_t relation,
     const loom_value_facts_t* value_facts, bool* inout_changed);
 
-// Propagates inherited alias relations and retains signed predicates declared
-// by a value-identity operation. All result plans are completed before any
-// result relation is published.
+// Propagates inherited alias relations and retains signed consequences of a
+// value-identity operation's predicates. Unsigned order contributes only when
+// scoped numeric facts and the predicate place both values in one sign
+// partition. All result plans are completed before any relation is published.
 iree_status_t loom_value_fact_integer_relations_propagate_origins(
     loom_value_fact_table_t* table, const loom_module_t* module,
     const loom_op_t* op, loom_trait_flags_t traits, bool* inout_changed);

@@ -19,6 +19,18 @@
 #include "loom/util/fact_relation.h"
 #include "loom/util/fact_vector_partition.h"
 
+loom_value_id_t loom_value_fact_table_lookup_inference_value(
+    const loom_value_fact_table_t* table, loom_value_id_t value,
+    loom_value_facts_t* out_facts) {
+  *out_facts = loom_value_fact_table_lookup(table, value);
+  if (table->context.publication && table->context.refine_operands.value_fn) {
+    return table->context.refine_operands.value_fn(
+        table->context.refine_operands.user_data, table,
+        table->context.publication->op, value, out_facts);
+  }
+  return loom_value_fact_table_query_numeric_identity(table, value);
+}
+
 //===----------------------------------------------------------------------===//
 // Capacity management
 //===----------------------------------------------------------------------===//

@@ -148,9 +148,9 @@ struct loom_fact_context_t {
   // return descriptor->fact_domain here.
   loom_value_fact_type_domain_resolver_callback_t resolve_type_domain;
 
-  // Optional immutable operand scope supplied by the owning analysis during
-  // a complete solve. Refinement changes the scratch operands, not the global
-  // facts of values defined outside the guarded operation.
+  // Optional immutable inference scope supplied by the owning analysis during
+  // a complete solve. Refinement changes scratch facts for operand and
+  // predicate references, not global facts of values outside the operation.
   struct {
     // Borrowed state that outlives the solve.
     void* user_data;
@@ -160,6 +160,13 @@ struct loom_fact_context_t {
                                  const loom_value_fact_table_t* table,
                                  const loom_op_t* op,
                                  loom_value_facts_t* operand_facts);
+    // Refines one additional SSA reference in the same immutable operation
+    // scope and returns its numeric representative without changing shared
+    // operand scratch or the referenced value's definition-time facts.
+    loom_value_id_t (*value_fn)(void* user_data,
+                                const loom_value_fact_table_t* table,
+                                const loom_op_t* op, loom_value_id_t value,
+                                loom_value_facts_t* facts);
   } refine_operands;
 
   // Stack-owned result publication during a complete inference callback.
@@ -633,6 +640,14 @@ static inline loom_value_facts_t loom_value_fact_table_lookup(
   }
   return *entry;
 }
+
+// Resolves a referenced value in the active inference operation's scope.
+// Returns its numeric representative and writes the scoped numeric facts.
+// Outside a complete inference publication this is a definition-time lookup.
+// Numeric representatives may have different types; they are not SSA rewrites.
+loom_value_id_t loom_value_fact_table_lookup_inference_value(
+    const loom_value_fact_table_t* table, loom_value_id_t value,
+    loom_value_facts_t* out_facts);
 
 // Returns a shaped type's maximum element count from its static dimensions and
 // indexed dynamic-extent facts. UINT64_MAX denotes an unavailable or

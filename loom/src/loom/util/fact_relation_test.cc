@@ -1171,6 +1171,71 @@ TEST_F(FactRelationTest, UnsignedRelationDoesNotEnterSignedStore) {
   EXPECT_EQ(table_.integer_relations, nullptr);
 }
 
+TEST_F(FactRelationTest, UnsignedOrderRetainsOnlyJustifiedSignedConsequences) {
+  const loom_predicate_kind_t predicates[] = {
+      LOOM_PREDICATE_ULT, LOOM_PREDICATE_ULE, LOOM_PREDICATE_UGT,
+      LOOM_PREDICATE_UGE};
+  const loom_symbolic_integer_relation_t relations[] = {
+      LOOM_SYMBOLIC_INTEGER_RELATION_LT, LOOM_SYMBOLIC_INTEGER_RELATION_LE,
+      LOOM_SYMBOLIC_INTEGER_RELATION_GT, LOOM_SYMBOLIC_INTEGER_RELATION_GE};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(predicates); ++i) {
+    for (const auto facts :
+         {loom_value_facts_make(0, 63, 1), loom_value_facts_make(-64, -1, 1),
+          loom_value_facts_make(-64, 63, 1)}) {
+      for (bool tuple : {false, true}) {
+        SCOPED_TRACE(::testing::Message()
+                     << "predicate=" << predicates[i]
+                     << " lower=" << facts.range_lo
+                     << " upper=" << facts.range_hi << " tuple=" << tuple);
+        const auto lhs = DefineValue(type_);
+        const auto rhs = DefineValue(type_);
+        IREE_ASSERT_OK(loom_value_fact_table_define(&table_, lhs, facts));
+        IREE_ASSERT_OK(loom_value_fact_table_define(&table_, rhs, facts));
+        loom_op_t* assume = nullptr;
+        IREE_ASSERT_OK(
+            BuildAssume(tuple ? std::vector<loom_value_id_t>{lhs, rhs}
+                              : std::vector<loom_value_id_t>{lhs},
+                        {RelationPredicate(predicates[i], lhs, rhs)}, &assume));
+        IREE_ASSERT_OK(
+            loom_value_fact_table_compute_op(&table_, module_, assume));
+        const auto result = loom_index_assume_results(assume);
+        const auto counterpart = tuple ? result.values[1] : rhs;
+        const auto expected =
+            facts.range_lo < 0 && facts.range_hi >= 0
+                ? LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL
+                : loom_symbolic_integer_relation_outcomes(relations[i]);
+        EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(
+                      &table_, result.values[0], counterpart),
+                  expected);
+        EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(
+                      &table_, counterpart, result.values[0]),
+                  loom_integer_order_outcomes_swap(expected));
+        EXPECT_EQ(
+            loom_value_fact_table_query_signed_integer_order(&table_, lhs, rhs),
+            LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL);
+      }
+    }
+  }
+}
+
+TEST_F(FactRelationTest, UnsignedOrderUsesItsCompleteNumericConjunction) {
+  loom_op_t* assume = nullptr;
+  IREE_ASSERT_OK(BuildAssume(
+      {inputs_[0], inputs_[1]},
+      {LiteralPredicate(LOOM_PREDICATE_GE, inputs_[0], 0),
+       LiteralPredicate(LOOM_PREDICATE_GE, inputs_[1], 0),
+       RelationPredicate(LOOM_PREDICATE_ULT, inputs_[0], inputs_[1])},
+      &assume));
+  IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, assume));
+  const auto results = loom_index_assume_results(assume);
+  EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(
+                &table_, results.values[0], results.values[1]),
+            LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS);
+  EXPECT_EQ(loom_value_fact_table_query_signed_integer_order(
+                &table_, inputs_[0], inputs_[1]),
+            LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL);
+}
+
 TEST_F(FactRelationTest, FloatEqualityDoesNotEnterSignedStore) {
   const loom_type_t f32_type = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
   const loom_value_id_t lhs = DefineValue(f32_type);
