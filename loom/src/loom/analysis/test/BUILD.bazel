@@ -17,5 +17,6 @@ loom_check_test_suite(
         "storage_globals.loom-test",
         "storage_instances.loom-test",
         "storage_interference.loom-test",
+        "transitive_predicates.loom-test",
     ],
 )

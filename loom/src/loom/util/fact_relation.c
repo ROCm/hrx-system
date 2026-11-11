@@ -563,46 +563,62 @@ static iree_status_t loom_value_fact_relation_union_roots(
       source.excluded_literal_equal, &inout_target->excluded_literal_equal);
 }
 
-// Composes upper or inclusive lower bounds by sharing the endpoint's
-// exclusion sets. Rebuilding each counterpart independently would retain a
-// quadratic number of intermediate sets for a chain of nested bounds.
+// Composes order constraints by sharing the endpoint's exclusion sets.
+// Rebuilding each counterpart independently would retain a quadratic number
+// of intermediate sets for a chain of nested bounds or predicate aliases.
 static iree_status_t loom_value_fact_relation_add_bound(
     loom_value_fact_table_t* table, loom_value_fact_relation_roots_t* roots,
     loom_value_id_t bound, loom_integer_order_outcome_bits_t outcomes) {
   const loom_value_fact_relation_roots_t endpoint =
       loom_value_fact_integer_relations_snapshot(table, bound);
-  if (loom_value_fact_relation_roots_empty(endpoint)) {
+  if (loom_value_fact_relation_roots_empty(endpoint) || outcomes == 0) {
     return loom_value_fact_relation_add_exclusions(
         table, roots, outcomes,
         loom_value_fact_table_query_numeric_identity(table, bound));
   }
-  loom_value_fact_relation_root_t strictly_greater = 0;
-  IREE_RETURN_IF_ERROR(loom_value_fact_relation_root_intersection(
-      table, endpoint.excluded[LOOM_INTEGER_ORDER_OUTCOME_LESS],
-      endpoint.excluded[LOOM_INTEGER_ORDER_OUTCOME_EQUAL], &strictly_greater));
-  loom_value_fact_relation_root_t contradictory = 0;
-  IREE_RETURN_IF_ERROR(loom_value_fact_relation_root_intersection(
-      table, strictly_greater,
-      endpoint.excluded[LOOM_INTEGER_ORDER_OUTCOME_GREATER], &contradictory));
-  const loom_value_fact_relation_root_t not_greater =
-      endpoint.excluded[LOOM_INTEGER_ORDER_OUTCOME_GREATER];
-  const loom_value_fact_relation_root_t not_less =
-      endpoint.excluded[LOOM_INTEGER_ORDER_OUTCOME_LESS];
-  loom_value_fact_relation_roots_t composed;
-  if (outcomes & LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS) {
-    loom_value_fact_relation_root_t excludes_equal = not_greater;
-    if (outcomes & LOOM_INTEGER_ORDER_OUTCOME_BIT_EQUAL) {
-      IREE_RETURN_IF_ERROR(loom_value_fact_relation_root_intersection(
-          table, endpoint.excluded[LOOM_INTEGER_ORDER_OUTCOME_EQUAL],
-          not_greater, &excludes_equal));
-    }
-    composed = (loom_value_fact_relation_roots_t){
-        .excluded = {contradictory, excludes_equal, not_greater},
-    };
+  loom_value_fact_relation_roots_t composed = {0};
+  if (outcomes == LOOM_INTEGER_ORDER_OUTCOME_BIT_EQUAL) {
+    composed = endpoint;
   } else {
-    composed = (loom_value_fact_relation_roots_t){
-        .excluded = {not_less, strictly_greater, contradictory},
-    };
+    const loom_value_fact_relation_root_t not_equal =
+        endpoint.excluded[LOOM_INTEGER_ORDER_OUTCOME_EQUAL];
+    const loom_value_fact_relation_root_t not_greater =
+        endpoint.excluded[LOOM_INTEGER_ORDER_OUTCOME_GREATER];
+    const loom_value_fact_relation_root_t not_less =
+        endpoint.excluded[LOOM_INTEGER_ORDER_OUTCOME_LESS];
+    loom_value_fact_relation_root_t strictly_greater = 0;
+    IREE_RETURN_IF_ERROR(loom_value_fact_relation_root_intersection(
+        table, not_less, not_equal, &strictly_greater));
+    loom_value_fact_relation_root_t contradictory = 0;
+    IREE_RETURN_IF_ERROR(loom_value_fact_relation_root_intersection(
+        table, strictly_greater, not_greater, &contradictory));
+    if (!(outcomes & LOOM_INTEGER_ORDER_OUTCOME_BIT_GREATER)) {
+      loom_value_fact_relation_root_t excludes_equal = not_greater;
+      if (outcomes & LOOM_INTEGER_ORDER_OUTCOME_BIT_EQUAL) {
+        IREE_RETURN_IF_ERROR(loom_value_fact_relation_root_intersection(
+            table, not_equal, not_greater, &excludes_equal));
+      }
+      composed = (loom_value_fact_relation_roots_t){
+          .excluded = {contradictory, excludes_equal, not_greater},
+      };
+    } else if (!(outcomes & LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS)) {
+      composed = (loom_value_fact_relation_roots_t){
+          .excluded = {not_less,
+                       outcomes & LOOM_INTEGER_ORDER_OUTCOME_BIT_EQUAL
+                           ? strictly_greater
+                           : not_less,
+                       contradictory},
+      };
+    } else {
+      loom_value_fact_relation_root_t excludes_equal = contradictory;
+      if (!(outcomes & LOOM_INTEGER_ORDER_OUTCOME_BIT_EQUAL)) {
+        IREE_RETURN_IF_ERROR(loom_value_fact_relation_root_intersection(
+            table, not_less, not_greater, &excludes_equal));
+      }
+      composed = (loom_value_fact_relation_roots_t){
+          .excluded = {contradictory, excludes_equal, contradictory},
+      };
+    }
   }
   IREE_RETURN_IF_ERROR(
       loom_value_fact_relation_union_roots(table, composed, roots));
@@ -1206,21 +1222,21 @@ static iree_status_t loom_value_fact_relation_plan_add(
       loom_symbolic_integer_relation_outcomes(relation) &
       loom_value_fact_table_query_signed_integer_order(table, lhs, rhs);
   if (lhs_is_alias) {
-    IREE_RETURN_IF_ERROR(loom_value_fact_relation_add_exclusions(
-        table, &plan->locals[lhs_ordinal], outcomes, rhs_identity));
-    if (scoped_rhs != rhs_identity) {
-      IREE_RETURN_IF_ERROR(loom_value_fact_relation_add_exclusions(
-          table, &plan->locals[lhs_ordinal], outcomes, scoped_rhs));
+    IREE_RETURN_IF_ERROR(loom_value_fact_relation_add_bound(
+        table, &plan->locals[lhs_ordinal], rhs, outcomes));
+    if (scoped_rhs != rhs_identity && scoped_rhs != rhs) {
+      IREE_RETURN_IF_ERROR(loom_value_fact_relation_add_bound(
+          table, &plan->locals[lhs_ordinal], scoped_rhs, outcomes));
     }
   }
   if (rhs_is_alias) {
-    IREE_RETURN_IF_ERROR(loom_value_fact_relation_add_exclusions(
-        table, &plan->locals[rhs_ordinal],
-        loom_integer_order_outcomes_swap(outcomes), lhs_identity));
-    if (scoped_lhs != lhs_identity) {
-      IREE_RETURN_IF_ERROR(loom_value_fact_relation_add_exclusions(
-          table, &plan->locals[rhs_ordinal],
-          loom_integer_order_outcomes_swap(outcomes), scoped_lhs));
+    IREE_RETURN_IF_ERROR(loom_value_fact_relation_add_bound(
+        table, &plan->locals[rhs_ordinal], lhs,
+        loom_integer_order_outcomes_swap(outcomes)));
+    if (scoped_lhs != lhs_identity && scoped_lhs != lhs) {
+      IREE_RETURN_IF_ERROR(loom_value_fact_relation_add_bound(
+          table, &plan->locals[rhs_ordinal], scoped_lhs,
+          loom_integer_order_outcomes_swap(outcomes)));
     }
   }
   return iree_ok_status();
