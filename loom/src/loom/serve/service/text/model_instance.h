@@ -9,6 +9,7 @@
 
 #include "loom/serve/service/text/bank.h"
 #include "loom/serve/service/text/control.h"
+#include "loom/serve/service/text/group_exchange.h"
 #include "loom/serve/service/text/media_epoch.h"
 #include "loom/serve/service/text/model.h"
 #include "loom/serve/service/text/source.h"
@@ -40,6 +41,7 @@ struct loom_serve_text_model_t {
   loom_serve_device_t* device_owner;
   // Borrowed storage and residency owner, independent of execution placement.
   loom_serve_pool_t* pool;
+  loom_serve_pool_t* exchange_pool;
   // Native execution device borrowed from device_owner.
   iree_hal_device_t* device;
   // Semaphore namespace borrowed from device_owner.
@@ -54,6 +56,12 @@ struct loom_serve_text_model_t {
   iree_hal_command_buffer_mode_t command_mode;
   // Shared source index and compiler for this model residency.
   loom_serve_jit_t* jit;
+  struct {
+    iree_host_size_t count;
+    struct loom_serve_text_lane_t* lanes;
+    uint32_t* stages;
+    loom_serve_jit_t** catalogs;
+  } placement;
   // Checkpoint domains owning stable parameter reservations across all stages.
   loom_serve_text_parameters_t parameters;
   // Owned physical parameter group, outliving borrowing invocation residencies.
@@ -123,6 +131,12 @@ struct loom_serve_text_model_t {
     // Allocation request backing each bank's private workspace.
     iree_hal_pool_reservation_request_t workspace;
     loom_serve_execution_group_t* pending;
+    // Source descriptor v3 resident producer/consumer and exchange ranges.
+    struct loom_serve_text_resident_binding_t* transport;
+    iree_host_size_t transport_count;
+    bool continuous;
+    loom_serve_text_group_exchange_t* exchange;
+    iree_hal_buffer_t* shared_storage;
     iree_host_size_t row_index;
     uint32_t known_count;
     bool selects;

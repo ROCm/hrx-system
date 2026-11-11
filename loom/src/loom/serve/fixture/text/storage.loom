@@ -13,7 +13,7 @@ func.def @allocation(%records: buffer, %slot: index, %bytes: i64, %clear: i64) {
 // Drafting adds epoch-sized feedback, row-dense draft cache planes and a draft
 // page table shaped like the target table. Like real drafters without retained
 // hidden rows, it declares no carry.
-func.def public @fixture_storage(%maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64, %draft: i64) -> (buffer, buffer, buffer, buffer, buffer) {
+func.def public @fixture_storage(%maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64, %draft: i64, %ffn_flag: i64) -> (buffer, buffer, buffer, buffer, buffer) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -57,7 +57,16 @@ func.def public @fixture_storage(%maximum: i64, %span_capacity: i64, %context: i
   scf.for %i = [%c0 to %allocation_count step %c1] {
     func.call @allocation(%allocations, %i, %c0_i64, %c0_i64) : (buffer, index, i64, i64)
   }
-  %residual_bytes = scalar.muli %span_capacity, %c4_i64 : i64
+  %hidden_bytes = scalar.muli %span_capacity, %c4_i64 : i64
+  %ffn = scalar.cmpi ne, %ffn_flag, %c0_i64 : i64
+  %three = scalar.constant 3 : i64
+  %planes = scf.select %ffn, %three, %c1_i64 : i64
+  %plane_bytes = scalar.muli %hidden_bytes, %planes : i64
+  %resident_flag = scalar.constant 2 : i64
+  %resident = scalar.cmpi eq, %ffn_flag, %resident_flag : i64
+  %exchange_bytes = scalar.constant 4096 : i64
+  %resident_bytes = scalar.addi %plane_bytes, %exchange_bytes : i64
+  %residual_bytes = scf.select %resident, %resident_bytes, %plane_bytes : i64
   %header_bytes = scalar.constant 16 : i64
   %record_bytes = scalar.constant 36 : i64
   %plan_bytes = scalar.muli %span_capacity, %record_bytes : i64

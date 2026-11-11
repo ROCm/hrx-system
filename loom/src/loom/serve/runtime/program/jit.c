@@ -143,6 +143,7 @@ struct loom_serve_jit_stage_t {
   iree_allocator_t host_allocator;
   // Borrowed host pool, outliving this stage and its synchronous recordings.
   iree_arena_block_pool_t* block_pool;
+  const iree_hal_queue_family_t* queue_family;
   // Borrowed direct launch contract, owned by the sole executable below.
   loom_serve_dispatch_t* dispatch;
   // Retained contiguous command image shared with the compilation product.
@@ -950,6 +951,7 @@ static iree_status_t loom_serve_jit_job_allocate_stage(
   iree_atomic_ref_count_init(&stage->ref_count);
   stage->host_allocator = jit->host_allocator;
   stage->block_pool = loom_serve_host_block_pool(jit->compilation.host);
+  stage->queue_family = iree_hal_queue_family(jit->dispatch);
   job->stage = stage;
   if (job->direct_dispatch) {
     return iree_ok_status();
@@ -1715,6 +1717,11 @@ loom_serve_dispatch_t* loom_serve_jit_stage_dispatch(
   return stage->dispatch;
 }
 
+const iree_hal_queue_family_t* loom_serve_jit_stage_queue_family(
+    const loom_serve_jit_stage_t* stage) {
+  return stage->queue_family;
+}
+
 iree_status_t loom_serve_jit_stage_record(
     const loom_serve_jit_stage_t* stage,
     const iree_hal_queue_family_t* queue_family,
@@ -1722,7 +1729,13 @@ iree_status_t loom_serve_jit_stage_record(
     const loom_cmd_program_command_range_t* range,
     iree_hal_buffer_t* const* fixed_buffers,
     iree_hal_command_buffer_t** out_command) {
+  *out_command = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
+  if (queue_family != stage->queue_family || stage->dispatch) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "command stage requires its compiled queue family");
+  }
   const iree_host_size_t fixed_buffer_count =
       stage->program.requirements.fixed_buffer_count;
   iree_arena_allocator_t arena;

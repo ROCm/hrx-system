@@ -267,7 +267,9 @@ iree_status_t loom_serve_device_group_create_pool(
     const loom_serve_pool_options_t* options, loom_serve_pool_t** out_pool) {
   *out_pool = NULL;
   if (!binding.name.size || !binding.device_mask ||
-      binding.device_mask >> group->device_count) {
+      binding.device_mask >> group->device_count ||
+      (options->uncached_device_mask & ~binding.device_mask) ||
+      (options->uncached_device_mask && !options->uncached)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "pool needs a name and nonempty group membership");
   }
@@ -288,6 +290,12 @@ iree_status_t loom_serve_device_group_create_pool(
   iree_hal_pool_family_access_t
       families[2 * IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT];
   iree_hal_pool_scope_t scope = {.families = families};
+  if (options->uncached) {
+    scope.host = (iree_hal_pool_host_access_t){
+        .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+        .modes = IREE_HAL_MAPPING_MODE_PERSISTENT,
+    };
+  }
   iree_hal_queue_t* allocation_queue = NULL;
   loom_serve_pool_options_t pool_options = *options;
   for (iree_host_size_t i = 0; i < group->device_count; ++i) {
@@ -295,6 +303,10 @@ iree_status_t loom_serve_device_group_create_pool(
       continue;
     }
     loom_serve_device_t* device = &group->devices[i];
+    const bool uncached =
+        options->uncached &&
+        (!options->uncached_device_mask ||
+         (options->uncached_device_mask & (UINT64_C(1) << i)));
     if (!allocation_queue) {
       allocation_queue = device->transfer;
     }
@@ -308,10 +320,27 @@ iree_status_t loom_serve_device_group_create_pool(
         .usage = IREE_HAL_BUFFER_USAGE_STORAGE |
                  IREE_HAL_BUFFER_USAGE_TRANSFER |
                  IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS,
+        .requirements =
+            uncached
+                ? (iree_all_bits_set(
+                       iree_hal_queue_family_spec(dispatch)->flags,
+                       IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_HOST_MEMORY_BARRIERS)
+                       ? IREE_HAL_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST
+                       : IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED)
+                : 0,
     };
     if (dispatch != transfer) {
       families[scope.family_count++] = (iree_hal_pool_family_access_t){
-          .family = transfer, .usage = IREE_HAL_BUFFER_USAGE_TRANSFER};
+          .family = transfer,
+          .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+          .requirements =
+              uncached
+                  ? (iree_all_bits_set(
+                         iree_hal_queue_family_spec(transfer)->flags,
+                         IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_HOST_MEMORY_BARRIERS)
+                         ? IREE_HAL_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST
+                         : IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED)
+                  : 0};
     }
     const iree_hal_device_sanitizer_spec_t* sanitizer =
         iree_hal_device_spec_sanitizer(iree_hal_device_spec(device->handle));
@@ -386,6 +415,11 @@ iree_string_view_list_t loom_serve_device_group_names(
 
 iree_string_view_t loom_serve_device_name(const loom_serve_device_t* device) {
   return device->name;
+}
+
+loom_serve_device_group_t* loom_serve_device_owner_group(
+    const loom_serve_device_t* device) {
+  return device->owner;
 }
 
 loom_serve_device_t* loom_serve_device_group_at(

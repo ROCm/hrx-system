@@ -119,6 +119,11 @@ typedef struct loom_serve_text_options_t {
   loom_serve_text_mode_t mode;
   // Explicit program inputs and local base, borrowed through load completion.
   loom_serve_sources_t sources;
+  // Exact preparation roots mapped to logical names in the owning device
+  // group. Nonempty native options override the selected v2 card mapping.
+  // All selected devices must be consumers of the supplied storage pool.
+  loom_model_device_placement_list_t device_placement;
+  iree_string_view_t exchange_pool;
   // Maximum input count specialized into isolated prefill.
   iree_host_size_t prefill_capacity;
   // Logical attention-position ceiling per row, not a pooled reservation.

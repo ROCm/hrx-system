@@ -345,6 +345,23 @@
         },
         "config": {
           "$ref": "#/$defs/config"
+        },
+        "exchange_pool": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Logical deployment pool for continuous cross-device exchange and secondary parameters."
+        },
+        "device_placement": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Exact preparation stage roots mapped to logical names in the deployment device inventory. The wildcard * supplies the default. Each command root compiles and executes on one device."
         }
       },
       "additionalProperties": false

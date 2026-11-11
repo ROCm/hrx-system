@@ -210,6 +210,10 @@ const loom_cmd_program_t* loom_serve_jit_stage_program(
 loom_serve_dispatch_t* loom_serve_jit_stage_dispatch(
     const loom_serve_jit_stage_t* stage);
 
+// Exact loader family selected for this stage's roots and native artifacts.
+const iree_hal_queue_family_t* loom_serve_jit_stage_queue_family(
+    const loom_serve_jit_stage_t* stage);
+
 // Records the compiled stage after the model has allocated its fixed parameter
 // roots. The command retains executables and buffers, independently of stage.
 // NULL range records the whole program; otherwise it selects complete barrier

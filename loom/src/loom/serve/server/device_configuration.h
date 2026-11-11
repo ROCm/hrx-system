@@ -41,7 +41,9 @@ typedef struct loom_serve_device_configuration_t {
 // Parses independent nonempty "devices" and "pools" maps. Device entries
 // contain a HAL "uri". Pool entries name a nonempty "devices" array and support
 // pool_backing, weight_slab_bytes, state_slab_bytes, memory_bytes,
-// workspace_idle_ms, parameter_idle_ms, and placement. Placement is an optional
+// workspace_idle_ms, parameter_idle_ms, placement and an uncached boolean.
+// Uncached access is qualified for every consuming family before allocation.
+// Placement is an optional
 // object containing exactly one selector: {"device":"key"} names a device's
 // allocation domain, or {"host_numa":N} names an OS NUMA node. Device keys
 // resolve independently of consumer membership; the sealed group later resolves

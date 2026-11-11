@@ -49,13 +49,14 @@ typedef struct loom_serve_device_configuration_fields_t {
   // Decoder owning storage for string values in one device or pool entry.
   loom_serve_device_configuration_parser_t* parser;
   // Decoded strings or raw JSON values; null data marks omission.
-  iree_string_view_t values[8];
+  iree_string_view_t values[10];
 } loom_serve_device_configuration_fields_t;
 
 static const char* const loom_serve_device_configuration_field_names[] = {
     "devices",           "pool_backing", "weight_slab_bytes",
     "state_slab_bytes",  "memory_bytes", "workspace_idle_ms",
-    "parameter_idle_ms", "placement"};
+    "parameter_idle_ms", "placement",    "uncached",
+    "uncached_devices"};
 
 static iree_status_t loom_serve_device_configuration_field(
     void* self, iree_string_view_t key, iree_json_value_type_t type,
@@ -74,10 +75,13 @@ static iree_status_t loom_serve_device_configuration_field(
                             key.data);
   }
   const bool type_allowed =
-      (type == IREE_JSON_VALUE_TYPE_ARRAY && i == 0) ||
+      (type == IREE_JSON_VALUE_TYPE_ARRAY && (i == 0 || i == 9)) ||
       (type == IREE_JSON_VALUE_TYPE_STRING && i > 0 && i < 5) ||
       (type == IREE_JSON_VALUE_TYPE_NUMBER && i >= 2 && i < 7) ||
-      (type == IREE_JSON_VALUE_TYPE_OBJECT && i == 7);
+      (type == IREE_JSON_VALUE_TYPE_OBJECT && i == 7) ||
+      ((type == IREE_JSON_VALUE_TYPE_TRUE ||
+        type == IREE_JSON_VALUE_TYPE_FALSE) &&
+       i == 8);
   if (fields->values[i].data || !type_allowed) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "duplicate or wrongly typed pool field '%s'",
@@ -284,6 +288,18 @@ static iree_status_t loom_serve_device_configuration_pool(
   }
   pool.binding.device_mask = members.mask;
   loom_serve_pool_options_t* options = &pool.options;
+  options->uncached = iree_string_view_equal(fields.values[8], IREE_SV("true"));
+  if (fields.values[9].data) {
+    loom_serve_device_configuration_members_t live = {.parser = parser};
+    IREE_RETURN_IF_ERROR(iree_json_enumerate_array_typed(
+        fields.values[9], loom_serve_device_configuration_member, &live));
+    if (!options->uncached || !live.mask || (live.mask & ~members.mask)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "uncached_devices requires uncached:true and "
+                              "a nonempty subset of pool devices");
+    }
+    options->uncached_device_mask = live.mask;
+  }
   if (fields.values[7].data) {
     loom_serve_device_configuration_placement_t placement = {.parser = parser};
     IREE_RETURN_IF_ERROR(

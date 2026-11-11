@@ -269,12 +269,16 @@ loom_cc_library(
 loom_cc_library(
     name = "device_group_tests",
     testonly = True,
-    srcs = ["device_group_test.cc"],
+    srcs = [
+        "device_group_test.cc",
+        "model_instance.h",
+    ],
     target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
     deps = [
         ":model",
         ":source_service_fixture",
         "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/execution:execution_testing",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
@@ -665,6 +669,7 @@ loom_cc_library(
         "capacity.c",
         "control.c",
         "epoch_plan.c",
+        "group_exchange.c",
         "media_epoch.c",
         "model.c",
         "model_instance.h",
@@ -684,6 +689,7 @@ loom_cc_library(
         "bank.h",
         "control.h",
         "epoch_plan.h",
+        "group_exchange.h",
         "media_epoch.h",
         "media_input.h",
         "model.h",

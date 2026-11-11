@@ -536,6 +536,34 @@ static iree_status_t loom_model_config_append(
   return iree_ok_status();
 }
 
+static iree_status_t loom_model_device_placement(
+    const loom_model_json_object_t* programs, uint32_t schema_version,
+    loom_model_device_placement_list_t* out_placement) {
+  loom_model_json_object_t object;
+  IREE_RETURN_IF_ERROR(loom_model_object_field(programs, "device_placement",
+                                               false, NULL, &object));
+  if (loom_model_field(programs, IREE_SV("device_placement")) &&
+      schema_version != 2) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "device placement requires model schema version 2");
+  }
+  loom_model_device_placement_t* values = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      &programs->card->arena, object.count, sizeof(*values), (void**)&values));
+  for (iree_host_size_t i = 0; i < object.count; ++i) {
+    const loom_model_json_field_t* field = &object.fields[i];
+    if (field->type != IREE_JSON_VALUE_TYPE_STRING) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "device placement values must be device names");
+    }
+    values[i].root = field->key;
+    IREE_RETURN_IF_ERROR(
+        loom_model_string(programs->card, field->value, &values[i].device));
+  }
+  *out_placement = (loom_model_device_placement_list_t){object.count, values};
+  return iree_ok_status();
+}
+
 static iree_status_t loom_model_config(const loom_model_json_object_t* programs,
                                        const loom_model_json_object_t* variant,
                                        iree_string_view_t* out_config) {
@@ -923,9 +951,18 @@ static iree_status_t loom_model_select(loom_model_card_t* card,
       loom_model_choose(&program_sets, programs_name, "program set",
                         &selection->selector.programs, &programs_json));
   loom_model_json_object_t programs;
-  IREE_RETURN_IF_ERROR(
-      loom_model_object(card, programs_json,
-                        "origin directory inputs libraries config", &programs));
+  IREE_RETURN_IF_ERROR(loom_model_object(
+      card, programs_json,
+      "origin directory inputs libraries config device_placement exchange_pool", &programs));
+  IREE_RETURN_IF_ERROR(loom_model_device_placement(
+      &programs, selection->schema_version, &selection->device_placement));
+  IREE_RETURN_IF_ERROR(loom_model_string_field(
+      &programs, "exchange_pool", false, &selection->exchange_pool));
+  if (loom_model_field(&programs, IREE_SV("exchange_pool")) &&
+      (selection->schema_version < 2 || !selection->exchange_pool.size)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "exchange_pool requires schema version 2 and a name");
+  }
   IREE_RETURN_IF_ERROR(loom_model_string_field(&programs, "directory", false,
                                                &selection->directory));
   if (!selection->directory.size) {

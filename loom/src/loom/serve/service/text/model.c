@@ -52,6 +52,168 @@ typedef enum loom_serve_text_load_phase_e {
   TEXT_LOAD_COMPLETE,
 } loom_serve_text_load_phase_t;
 
+typedef struct loom_serve_text_lane_t {
+  loom_serve_device_t* device;
+  loom_serve_jit_t* jit;
+  loom_serve_execution_t* execution;
+  loom_serve_compilation_report_t compilation;
+} loom_serve_text_lane_t;
+
+static iree_status_t loom_serve_text_prepare_placement(
+    loom_serve_text_model_t* model, const loom_serve_text_options_t* options) {
+  loom_model_device_placement_list_t placement = options->device_placement;
+  if (!placement.count && options->sources.card) {
+    placement =
+        loom_model_card_selection(options->sources.card)->device_placement;
+  }
+  if (!placement.count) {
+    if (options->exchange_pool.size ||
+        (options->sources.card &&
+         loom_model_card_selection(options->sources.card)->exchange_pool.size)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "exchange pool requires device placement");
+    }
+    return iree_ok_status();
+  }
+  if (!placement.values || placement.count > model->stage_count + 1) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid stage device placement table");
+  }
+  loom_serve_device_group_t* group =
+      loom_serve_device_owner_group(model->device_owner);
+  const iree_host_size_t device_count = loom_serve_device_group_count(group);
+  const iree_host_size_t capacity =
+      iree_min(device_count, LOOM_SERVE_GROUP_MAX_LANES);
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      model->host_allocator, capacity, sizeof(*model->placement.lanes),
+      (void**)&model->placement.lanes));
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      model->host_allocator, model->stage_count,
+      sizeof(*model->placement.stages), (void**)&model->placement.stages));
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      model->host_allocator, model->stage_count,
+      sizeof(*model->placement.catalogs), (void**)&model->placement.catalogs));
+  model->placement.lanes[0].device = model->device_owner;
+  model->placement.lanes[0].jit = model->jit;
+  model->placement.count = 1;
+  uint64_t pool_mask = 0;
+  const loom_serve_pool_binding_t* bindings =
+      loom_serve_device_group_pool_bindings(group);
+  for (iree_host_size_t i = 0; i < loom_serve_device_group_pool_count(group);
+       ++i) {
+    if (loom_serve_device_group_pool_at(group, i) == model->pool) {
+      pool_mask = bindings[i].device_mask;
+    }
+  }
+  iree_string_view_t exchange_name = options->exchange_pool;
+  if (!exchange_name.size && options->sources.card) {
+    exchange_name = loom_model_card_selection(options->sources.card)->exchange_pool;
+  }
+  if (exchange_name.size) {
+    for (iree_host_size_t i = 0; i < loom_serve_device_group_pool_count(group); ++i) {
+      if (iree_string_view_equal(bindings[i].name, exchange_name)) {
+        model->exchange_pool = loom_serve_device_group_pool_at(group, i);
+        pool_mask |= bindings[i].device_mask;
+        break;
+      }
+    }
+    if (!model->exchange_pool) {
+      return iree_make_status(IREE_STATUS_NOT_FOUND,
+                              "declared exchange pool is absent");
+    }
+  }
+  for (iree_host_size_t p = 0; p < placement.count; ++p) {
+    const loom_model_device_placement_t* entry = &placement.values[p];
+    if (!entry->root.size || !entry->device.size) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "placement requires root and device names");
+    }
+    for (iree_host_size_t q = 0; q < p; ++q) {
+      if (iree_string_view_equal(entry->root, placement.values[q].root)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "duplicate placement root");
+      }
+    }
+    bool found = iree_string_view_equal(entry->root, IREE_SV("*"));
+    for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
+      found |= iree_string_view_equal(
+          entry->root,
+          loom_serve_preparation_stage(model->source.preparation, i)->root);
+    }
+    if (!found) {
+      return iree_make_status(
+          IREE_STATUS_NOT_FOUND,
+          "placement root '%.*s' is not a preparation stage",
+          (int)entry->root.size, entry->root.data);
+    }
+    iree_host_size_t device_index = 0;
+    for (; device_index < device_count; ++device_index) {
+      if (iree_string_view_equal(
+              entry->device, loom_serve_device_name(loom_serve_device_group_at(
+                                 group, device_index)))) {
+        break;
+      }
+    }
+    if (device_index == device_count ||
+        !(pool_mask & (UINT64_C(1) << device_index))) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "placement device '%.*s' is absent or outside the model pool",
+          (int)entry->device.size, entry->device.data);
+    }
+  }
+  for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
+    const iree_string_view_t root =
+        loom_serve_preparation_stage(model->source.preparation, i)->root;
+    iree_string_view_t device_name =
+        loom_serve_device_name(model->device_owner);
+    for (iree_host_size_t p = 0; p < placement.count; ++p) {
+      if (iree_string_view_equal(placement.values[p].root, IREE_SV("*"))) {
+        device_name = placement.values[p].device;
+      }
+    }
+    for (iree_host_size_t p = 0; p < placement.count; ++p) {
+      if (iree_string_view_equal(placement.values[p].root, root)) {
+        device_name = placement.values[p].device;
+      }
+    }
+    loom_serve_device_t* device = NULL;
+    for (iree_host_size_t d = 0; d < device_count; ++d) {
+      loom_serve_device_t* candidate = loom_serve_device_group_at(group, d);
+      if (iree_string_view_equal(device_name,
+                                 loom_serve_device_name(candidate))) {
+        device = candidate;
+      }
+    }
+    iree_host_size_t lane = 0;
+    while (lane < model->placement.count &&
+           model->placement.lanes[lane].device != device) {
+      ++lane;
+    }
+    if (lane == model->placement.count) {
+      if (lane == capacity) {
+        return iree_make_status(
+            IREE_STATUS_RESOURCE_EXHAUSTED,
+            "model placement exceeds eight execution lanes");
+      }
+      model->placement.lanes[lane].device = device;
+      ++model->placement.count;
+    }
+    model->placement.stages[i] = (uint32_t)lane;
+  }
+  for (iree_host_size_t i = 1; i < model->placement.count; ++i) {
+    loom_serve_text_lane_t* lane = &model->placement.lanes[i];
+    IREE_RETURN_IF_ERROR(loom_serve_device_create_jit(
+        lane->device, &options->sources, &options->kernel_sanitizer,
+        &lane->compilation, &lane->jit));
+  }
+  for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
+    model->placement.catalogs[i] =
+        model->placement.lanes[model->placement.stages[i]].jit;
+  }
+  return iree_ok_status();
+}
+
 struct loom_serve_text_load_t {
   // Private bootstrap task; final release publishes completion to the owner.
   loomc_task_t task;
@@ -203,7 +365,7 @@ static iree_status_t loom_serve_text_load_prepare(
       model->host_allocator, stage_count, sizeof(*model->stages),
       (void**)&model->stages));
   model->stage_count = stage_count;
-  return iree_ok_status();
+  return loom_serve_text_prepare_placement(model, options);
 }
 
 static void loom_serve_text_load_execute(loomc_task_t* task,
@@ -262,6 +424,12 @@ static void loom_serve_text_load_layout(void* user_data, iree_host_size_t index,
 static void loom_serve_text_load_compiled(void* user_data, iree_status_t status,
                                           loom_serve_stage_set_t* compiled) {
   loom_serve_text_load_t* load = user_data;
+  for (iree_host_size_t i = 1; i < load->model->placement.count; ++i) {
+    loom_serve_compilation_report_t report = {0};
+    loom_serve_jit_report_snapshot(load->model->placement.lanes[i].jit,
+                                   &report);
+    loom_serve_jit_report_merge(load->model->jit, &report);
+  }
   for (iree_host_size_t i = 0; i < compiled->count; ++i) {
     load->model->stages[i].compiled = compiled->values[i];
     compiled->values[i] = NULL;
@@ -284,6 +452,20 @@ static void loom_serve_text_load_ready(void* user_data,
 static iree_status_t loom_serve_text_load_bind(loom_serve_text_model_t* model) {
   IREE_RETURN_IF_ERROR(loom_serve_device_create_execution(
       model->device_owner, model->pool, &model->execution));
+  for (iree_host_size_t i = 1; i < model->placement.count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_serve_device_create_execution(
+        model->placement.lanes[i].device,
+        model->exchange_pool ? model->exchange_pool : model->pool,
+        &model->placement.lanes[i].execution));
+  }
+  for (iree_host_size_t i = 0;
+       model->placement.stages && i < model->stage_count; ++i) {
+    const uint32_t lane = model->placement.stages[i];
+    model->stages[i].execution =
+        lane ? model->placement.lanes[lane].execution : NULL;
+    model->stages[i].parameter_pool =
+        lane && model->exchange_pool ? model->exchange_pool : model->pool;
+  }
   IREE_RETURN_IF_ERROR(loom_serve_text_stages_bind(
       model->device_owner, model->pool, model->source.preparation,
       model->source.shared_stage_count, model->stage_count, model->stages,
@@ -550,9 +732,17 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
         iree_slim_mutex_lock(&load->event.mutex);
         load->event.stages_compiling = true;
         iree_slim_mutex_unlock(&load->event.mutex);
-        status = loom_serve_stage_set_compile_catalog_async(
-            model->jit, model->source.preparation, loom_serve_text_load_layout,
-            loom_serve_text_load_compiled, load, load->host_allocator);
+        status =
+            model->placement.catalogs
+                ? loom_serve_stage_set_compile_placed_async(
+                      model->placement.catalogs, model->source.preparation,
+                      loom_serve_text_load_layout,
+                      loom_serve_text_load_compiled, load, load->host_allocator)
+                : loom_serve_stage_set_compile_catalog_async(
+                      model->jit, model->source.preparation,
+                      loom_serve_text_load_layout,
+                      loom_serve_text_load_compiled, load,
+                      load->host_allocator);
         submitted = iree_status_is_ok(status);
         if (!submitted) {
           iree_slim_mutex_lock(&load->event.mutex);
@@ -755,6 +945,12 @@ void loom_serve_text_model_retire(loom_serve_text_model_t* model,
     loom_serve_execution_set_retirement_observer(model->execution, wake,
                                                  user_data);
   }
+  for (iree_host_size_t i = 1; i < model->placement.count; ++i) {
+    if (model->placement.lanes[i].execution) {
+      loom_serve_execution_set_retirement_observer(
+          model->placement.lanes[i].execution, wake, user_data);
+    }
+  }
   for (iree_host_size_t i = 0; i < model->parameters.count; ++i) {
     loom_serve_weights_set_retirement_observer(model->parameters.plans[i], wake,
                                                user_data);
@@ -784,6 +980,12 @@ bool loom_serve_text_model_is_retired(loom_serve_text_model_t* model) {
   bool retired =
       !loom_serve_text_warmup_is_pending(model->warmup) &&
       (!model->execution || loom_serve_execution_is_retired(model->execution));
+  for (iree_host_size_t i = 1; i < model->placement.count; ++i) {
+    if (model->placement.lanes[i].execution) {
+      retired &=
+          loom_serve_execution_is_retired(model->placement.lanes[i].execution);
+    }
+  }
   for (iree_host_size_t i = 0; i < model->parameters.count; ++i) {
     retired &= loom_serve_weights_is_retired(model->parameters.plans[i]);
   }
@@ -826,6 +1028,8 @@ iree_status_t loom_serve_text_model_free_retired(
   iree_allocator_free(model->host_allocator, model->parameters.plans);
   iree_allocator_free(model->host_allocator, model->parameters.sources);
   loom_serve_execution_group_free(model->prefill_group.pending);
+  loom_serve_text_group_exchange_free(model->prefill_group.exchange);
+  iree_allocator_free(model->host_allocator, model->prefill_group.transport);
   for (iree_host_size_t i = 0; i < 2; ++i) {
     loom_serve_text_bank_deinitialize(&model->banks[i]);
   }
@@ -841,6 +1045,13 @@ iree_status_t loom_serve_text_model_free_retired(
   iree_allocator_free(model->host_allocator, model->invocation.row_indices);
   iree_allocator_free(model->host_allocator, model->checkpoints);
   loom_serve_execution_release(model->execution);
+  for (iree_host_size_t i = 1; i < model->placement.count; ++i) {
+    loom_serve_execution_release(model->placement.lanes[i].execution);
+    loom_serve_jit_release(model->placement.lanes[i].jit);
+  }
+  iree_allocator_free(model->host_allocator, model->placement.lanes);
+  iree_allocator_free(model->host_allocator, model->placement.stages);
+  iree_allocator_free(model->host_allocator, model->placement.catalogs);
   loom_serve_text_source_deinitialize(&model->source);
   iree_allocator_free(model->host_allocator, model);
   return warmup_status;
@@ -855,6 +1066,13 @@ iree_status_t loom_serve_text_model_free(loom_serve_text_model_t* model) {
   iree_status_t status = model->execution
                              ? loom_serve_execution_drain(model->execution)
                              : iree_ok_status();
+  for (iree_host_size_t i = 1; i < model->placement.count; ++i) {
+    if (model->placement.lanes[i].execution) {
+      status = iree_status_join(
+          status,
+          loom_serve_execution_drain(model->placement.lanes[i].execution));
+    }
+  }
   for (iree_host_size_t i = 0; i < model->parameters.count; ++i) {
     status = iree_status_join(status, loom_serve_weights_await_retirement(
                                           model->parameters.plans[i]));
@@ -877,6 +1095,11 @@ iree_status_t loom_serve_text_model_compile_variant_async(
     loom_serve_text_model_t* model, const loom_serve_sources_t* sources,
     const loomc_sanitizer_options_t* sanitizer,
     loom_serve_variant_completion_fn_t completion, void* user_data) {
+  if (model->placement.count > 1) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "multi-device variants require per-lane recompilation");
+  }
   return loom_serve_text_variant_compile_async(
       model, model->device_owner, model->source.preparation,
       model->source.shared_stage_count, model->stage_count, model->stages,

@@ -104,6 +104,10 @@ iree_string_view_list_t loom_serve_device_group_names(
 // Application key, distinct from the HAL identity or hardware display name.
 iree_string_view_t loom_serve_device_name(const loom_serve_device_t* device);
 
+// Borrowed application inventory containing this execution record.
+loom_serve_device_group_t* loom_serve_device_owner_group(
+    const loom_serve_device_t* device);
+
 // Borrows a record through group destruction. device_index is a caller-resolved
 // ordinal less than the group's count.
 loom_serve_device_t* loom_serve_device_group_at(

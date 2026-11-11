@@ -12,15 +12,32 @@
 extern "C" {
 #endif
 
+typedef struct loom_serve_text_resident_binding_t {
+  uint32_t producer;
+  uint32_t consumer;
+  uint64_t request_offset;
+  uint64_t response_offset;
+  uint64_t generations;
+} loom_serve_text_resident_binding_t;
+
 // Publishes source-owned state mapping after complete A+B growth.
 iree_status_t loom_serve_text_model_publish_state_bindings(
     loom_serve_text_model_t* model);
 
 // Source ABI text_prefill_group_v1:
 //   text_prefill_group_plan_v1(state) -> descriptor
-//     LE u32 header {version=1, shape_count, layer_count, resource_abi};
-//     followed by stage IDs [shape][layer][prefix,ffn,residual]. UINT32_MAX
-//     omits FFN/residual. Prefix publishes all shared state required by B.
+//     LE u32 header {version, shape_count, layer_count, resource_abi}.
+//     Version 1 has stage IDs [shape][layer][prefix,ffn,residual] and preserves
+//     total leaf ordering. Version 2 has eight phases from plan.h and explicit
+//     FFN/down fork/join edges. UINT32_MAX omits optional phases. Version 2
+//     may omit every phase of a shape to keep it on ordinary execution;
+//     selection requires both shapes to have a complete grouped implementation.
+//     requires residual and a merge for each secondary producer. Prefix
+//     publishes all shared state required by B and packs the FFN input.
+//     Concurrent producers write disjoint persistent output ranges. Reflected
+//     temporary workspace is private to each bank/lane and cannot carry values
+//     between commands. Merge owns activation/down-input packing, and residual
+//     owns source-defined captures after both down outputs are available.
 //     Resource ABI 1 supplies the six ordinary packed roots; ABI 2 additionally
 //     supplies the six draft roots in ordinary epoch order. Absent optional
 //     carry, draft cache and draft page table roots are bound as null and
@@ -37,6 +54,26 @@ iree_status_t loom_serve_text_model_publish_state_bindings(
 //     group result is published. Source must not require mid-group host reads.
 // Storage extents come from the source's existing packed storage declaration.
 // The model owner freezes the complete A+B page map before group submission.
+// Version 3 uses the twelve resident phases in plan.h. After its stage table
+// comes LE u32 transport_count, then transport_count 24-byte records:
+// {u32 producer_stage, u32 consumer_stage, u64 request_offset,
+// u64 response_offset}. Offsets address each bank's features root. Each
+// producer is a one-generation resident command using the six native bindings
+// A/B/C/request/response/scales; command parameter reflection owns B/scales.
+// Ranges follow group_exchange.h, are distinct per live producer and may not
+// alias semantic tensors. Consumers run on another lane and consume the whole
+// payload. Serving appends ACK after consumption and a producer terminal join
+// before returning the consumer's ordinal to the plan. Descriptor replacement
+// cannot change transport geometry. The deployment pool requires uncached
+// device access and persistent host mapping, qualified before model load.
+// Version 4 retains the twelve phases but moves resident commands out of the
+// stage table. Its transport records are {u32 lifetime_stage, u32 generations,
+// u64 request_offset, u64 response_offset}, relative to bank A's features.
+// Each lifetime is submitted once after packet upload, independently of GPU
+// leaves, and joined after all consumers. Seven-resource leaves append bank
+// A's features to the ordinary six roots. Source owns GPU generation publish,
+// response polling, consumption and final ACK; the host owns RUN/ABORT and
+// terminal drain. No per-generation HAL readiness or ACK is submitted.
 //
 // Called during linking after source and native stages are ready. Resolves the
 // explicit text_prefill_group_v1 exports and reserves both banks before

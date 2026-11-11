@@ -194,6 +194,72 @@ TEST_F(GroupTextServiceTest, UnequalPairPublishesOnceThenDecodesGoldenTokens) {
   }
 }
 
+class PairCommandTextServiceTest : public GroupTextServiceTest {
+ protected:
+  bool NeedsStandaloneModel() const override { return false; }
+
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(GroupTextServiceTest::SetUp());
+    prepare_ = iree::testing::MakeTempFilePath("pair_prepare", ".loom");
+    ASSERT_NO_FATAL_FAILURE(EditNativeProvider(
+        directory_ + "/prepare.loom", prepare_,
+        "utf8(\"group_prefix\")", "utf8(\"group_pair\")"));
+    auto options = ModelOptions();
+    options.sources.prepare = iree_make_cstring_view(prepare_.c_str());
+    IREE_ASSERT_OK(loom_serve_text_model_allocate(
+        device_, storage_owner_, &options, host_allocator_, &model_));
+  }
+
+  std::string prepare_;
+};
+
+TEST_F(PairCommandTextServiceTest, BothBanksConsumeOnceAndPublishTogether) {
+  ASSERT_EQ(model_->stage_bindings[2].binding_count, TEXT_GROUP_PAIR_ARITY);
+  PairResult actual;
+  ASSERT_NO_FATAL_FAILURE(RunPair(model_, 0, &actual));
+  EXPECT_EQ(actual.token, Expected().token);
+  uint32_t recurrence = 0;
+  for (int32_t token : {0, 1, 2, 0, 1}) {
+    recurrence = (5 * recurrence + token + 2) % 97;
+  }
+  EXPECT_EQ(actual.recurrence, recurrence);
+  EXPECT_EQ(loom_serve_text_row_position(loom_serve_text_model_row(model_, 0)),
+            5u);
+}
+
+TEST_F(PairCommandTextServiceTest, EncoderSelectsAPreparedStageBeforeSubmission) {
+  const std::string control =
+      iree::testing::MakeTempFilePath("pair_control", ".loom");
+  ASSERT_NO_FATAL_FAILURE(EditNativeProvider(
+      directory_ + "/control.loom", control,
+      "config.def @fixture.dynamic_group = false",
+      "config.def @fixture.dynamic_group = true"));
+  auto options = ModelOptions();
+  options.sources.prepare = iree_make_cstring_view(prepare_.c_str());
+  options.sources.control = iree_make_cstring_view(control.c_str());
+  loom_serve_text_model_t* dynamic = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_model_allocate(
+      device_, storage_owner_, &options, host_allocator_, &dynamic));
+  const auto release = [](loom_serve_text_model_t* model) {
+    IREE_EXPECT_OK(loom_serve_text_model_free(model));
+  };
+  std::unique_ptr<loom_serve_text_model_t, decltype(release)> owner(dynamic,
+                                                                 release);
+  PairResult actual;
+  ASSERT_NO_FATAL_FAILURE(RunPair(dynamic, 0, &actual));
+  EXPECT_EQ(actual.token, Expected().token);
+  std::vector<uint32_t> stages;
+  IREE_ASSERT_OK(loom_serve_execution_plan_encode(
+      dynamic->execution_plan, 2, 1,
+      [](void* self, uint32_t bank, uint32_t stage) {
+        static_cast<std::vector<uint32_t>*>(self)->push_back(stage);
+        return iree_ok_status();
+      },
+      &stages));
+  ASSERT_FALSE(stages.empty());
+  EXPECT_EQ(stages.front(), 0u);
+}
+
 TEST_F(GroupTextServiceTest, RejectsInvalidPairsBeforeEnqueue) {
   const int32_t tokens[] = {0, 1, 2};
   loom_serve_text_span_t a = {
@@ -226,6 +292,26 @@ TEST_F(GroupTextServiceTest, RejectsInvalidPairsBeforeEnqueue) {
             before.values[0]);
   EXPECT_EQ(loom_serve_text_row_position(loom_serve_text_model_row(model_, 0)),
             0u);
+}
+
+TEST_F(GroupTextServiceTest, ExchangePoolRequiresDeclaredPlacementAndInventory) {
+  auto options = ModelOptions();
+  options.exchange_pool = IREE_SV("absent");
+  loom_serve_text_model_t* candidate = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                       loom_serve_text_model_allocate(
+                           device_, storage_owner_, &options, host_allocator_,
+                           &candidate));
+  EXPECT_EQ(candidate, nullptr);
+  const auto names = loom_serve_device_group_names(group_);
+  const loom_model_device_placement_t placement[] = {
+      {IREE_SV("*"), names.values[0]}};
+  options.device_placement = {IREE_ARRAYSIZE(placement), placement};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
+                       loom_serve_text_model_allocate(
+                           device_, storage_owner_, &options, host_allocator_,
+                           &candidate));
+  EXPECT_EQ(candidate, nullptr);
 }
 
 TEST_F(GroupTextServiceTest, SequentialAndSingleModelsHaveIndependentSettings) {

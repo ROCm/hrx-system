@@ -168,6 +168,21 @@ TEST_F(ConfigurationTest, DeploymentOwnsItsPresetSelection) {
   EXPECT_EQ(model_.name.data, nullptr);
 }
 
+TEST_F(ConfigurationTest, CardDefaultPlacementSelectsPrimaryGroupDevice) {
+  auto json = Card("text");
+  json.replace(json.find("schema_version\":1") + 16, 1, "2");
+  json.insert(json.find("\"libraries\":[]") + 14,
+              R"(,"device_placement":{"*":"gpu","projection":"npu"})");
+  IREE_ASSERT_OK(Load(json));
+  json.assign(json.size(), 'x');
+  EXPECT_EQ(String(model_.device), "gpu");
+  iree_string_view_t names[] = {IREE_SV("npu"), IREE_SV("gpu")};
+  iree_host_size_t selected = IREE_HOST_SIZE_MAX;
+  IREE_ASSERT_OK(loom_serve_model_configuration_resolve_device(
+      &model_, {2, names}, &selected));
+  EXPECT_EQ(selected, 1u);
+}
+
 TEST_F(ConfigurationTest, DirectCardRetainsLazyImageContractAndDefaults) {
   auto json = Card("text");
   json.insert(json.find("\"version\":1"),

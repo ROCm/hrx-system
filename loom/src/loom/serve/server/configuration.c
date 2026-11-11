@@ -524,6 +524,30 @@ static iree_status_t loom_serve_model_configuration_definition_parse(
     if (!fields[DEFINITION_KIND].value.data) {
       fields[DEFINITION_KIND].value = selection->kind;
     }
+    if (selection->device_placement.count &&
+        !iree_string_view_equal(selection->kind, IREE_SV("text")) &&
+        !iree_string_view_equal(selection->kind, IREE_SV("sequence"))) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "device placement is supported by text and sequence services");
+    }
+    if (!model->device.size) {
+      for (iree_host_size_t i = 0; i < selection->device_placement.count; ++i) {
+        const loom_model_device_placement_t* placement =
+            &selection->device_placement.values[i];
+        if (!iree_string_view_equal(placement->root, IREE_SV("*"))) {
+          continue;
+        }
+        char* device = NULL;
+        IREE_RETURN_IF_ERROR(iree_allocator_clone(
+            host_allocator,
+            iree_make_const_byte_span(placement->device.data,
+                                      placement->device.size),
+            (void**)&device));
+        model->device = iree_make_string_view(device, placement->device.size);
+        break;
+      }
+    }
     loom_serve_model_configuration_field_t defaults[IREE_ARRAYSIZE(fields)];
     memcpy(defaults, fields, sizeof(fields));
     for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(defaults); ++i) {

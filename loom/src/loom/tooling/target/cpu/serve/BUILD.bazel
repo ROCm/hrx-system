@@ -1336,7 +1336,10 @@ loom_cc_test(
 
 loom_cc_test(
     name = "source_text_device_group_test",
-    data = TEXT_SOURCES,
+    data = TEXT_SOURCES + [
+        "//loom/src/loom/serve/fixture/text:native.card.json",
+        "//loom/src/loom/serve/fixture/text:service.loom",
+    ],
     env = {
         "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
     },
@@ -1640,7 +1643,7 @@ loom_cc_test(
     ],
     args = [
         "--weight_sources=$(rootpath //loom/src/loom/serve/runtime/parameter/testdata/weights:stages.loom)",
-        "--gtest_filter=Streaming/*:Backing/WeightPackingTest.InvocationWorkingSet*:Pressure/*",
+        "--gtest_filter=Streaming/*:Backing/WeightPackingTest.InvocationWorkingSet*:Backing/WeightsTest.IndependentlyPackedRoots*:Pressure/*",
         "--executable_sources=$(rootpath //loom/src/loom/serve/service/testdata/executables:prepare.loom)",
     ],
     data = [

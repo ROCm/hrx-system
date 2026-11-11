@@ -32,9 +32,11 @@ enum {
 // Resource arities of text stages, excluding the reflected workspace. Ordinary
 // runner stages use at most TEXT_STAGE_ARITY resources; resource ABI 2 prefill
 // group leaves bind exactly TEXT_GROUP_DRAFT_ARITY packed and draft roots.
+// Pair commands bind six roots per bank followed by bank A's exchange root.
 enum {
   TEXT_STAGE_ARITY = 7,
   TEXT_GROUP_DRAFT_ARITY = 12,
+  TEXT_GROUP_PAIR_ARITY = 13,
 };
 
 enum loom_serve_text_state_flag_bits_e {

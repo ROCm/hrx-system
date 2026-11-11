@@ -70,7 +70,8 @@ static iree_status_t loom_serve_text_check_layouts(
     const uint32_t arity = binding_count - has_workspace;
     if (program->parameter_roots.count != roots ||
         declaration->parameter_count != roots || binding_count < 1 ||
-        (arity > TEXT_STAGE_ARITY && arity != TEXT_GROUP_DRAFT_ARITY) ||
+        (arity > TEXT_STAGE_ARITY && arity != TEXT_GROUP_DRAFT_ARITY &&
+         arity != TEXT_GROUP_PAIR_ARITY) ||
         (program->requirements.transient.binding_index != UINT32_MAX &&
          program->requirements.transient.binding_index != binding_count - 1) ||
         program->requirements.launch_counts.required_byte_length != 0) {
@@ -179,12 +180,21 @@ iree_status_t loom_serve_text_stages_bind(
          domain < parameters->count && iree_status_is_ok(status); ++domain) {
       iree_host_size_t root_index = 0;
       iree_host_size_t count = 0;
+      loom_serve_pool_t* domain_pool = NULL;
       for (iree_host_size_t i = 0; i < stage_count; ++i) {
         const loom_cmd_program_t* program = &stages[i].program;
         for (uint32_t r = 0; r < program->parameter_roots.count; ++r) {
           if (domains[root_index++] != domain) {
             continue;
           }
+          loom_serve_pool_t* consumer_pool =
+              stages[i].parameter_pool ? stages[i].parameter_pool : pool;
+          if (domain_pool && domain_pool != consumer_pool) {
+            status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                      "checkpoint domain spans distinct pools");
+            break;
+          }
+          domain_pool = consumer_pool;
           const loom_cmd_program_parameter_root_t root =
               loom_cmd_program_parameter_root_at(program, r);
           roots[count++] = (loom_serve_weight_root_t){
@@ -194,13 +204,14 @@ iree_status_t loom_serve_text_stages_bind(
           };
         }
       }
+      if (!iree_status_is_ok(status)) break;
       status = loom_serve_weights_allocate(
           loom_serve_device_handle(device),
           loom_serve_device_transfer_queue(device),
           loom_serve_device_dispatch_queue(device),
-          loom_serve_pool_storage(pool), loom_serve_pool_memory(pool),
-          loom_serve_pool_weight_geometry(pool), NULL,
-          loom_serve_pool_workspace(pool), domain == 0 ? shared_count : 0,
+          loom_serve_pool_storage(domain_pool), loom_serve_pool_memory(domain_pool),
+          loom_serve_pool_weight_geometry(domain_pool), NULL,
+          loom_serve_pool_workspace(domain_pool), domain == 0 ? shared_count : 0,
           count, roots, host_allocator, &parameters->plans[domain]);
     }
   }
@@ -311,8 +322,10 @@ static void loom_serve_text_record_execute(loomc_task_t* base,
     }
     loom_serve_text_stage_t* stage = &job->stages[index];
     task->status = loom_serve_jit_stage_record(
-        stage->compiled, job->queue_family, job->mode, NULL,
-        stage->fixed_buffers, &stage->command);
+        stage->compiled,
+        stage->execution ? loom_serve_jit_stage_queue_family(stage->compiled)
+                         : job->queue_family,
+        job->mode, NULL, stage->fixed_buffers, &stage->command);
   }
   if (!iree_status_is_ok(task->status)) {
     iree_atomic_store(&job->next_index, job->stage_count,
@@ -382,5 +395,6 @@ loom_serve_stage_t loom_serve_text_stage_binding(
       .binding_count = requirements->rebindable_binding_count -
                        (requirements->transient.required_byte_length != 0),
       .transient = requirements->transient,
+      .execution = stage->execution,
   };
 }
