@@ -263,6 +263,31 @@ device program.
 Distinct providers tied at the best priority are ambiguous. File order,
 library order, and symbol spelling never become accidental tie breakers.
 
+### Staged inputs reach provider predicates
+
+A kernel-scoped pipeline's leading specialization arguments become known from
+the launching command. They participate before final provider selection,
+including through ordinary computations in the kernel source:
+
+```loom
+%width_limit = index.constant 6 : index
+%supported = index.cmp slt, %tile_width, %width_limit : index
+%result = template.apply<@reduce_tile>(%supported, %columns, %input) : (i1, index, view<32xi32>) -> (i32)
+```
+
+Here `%tile_width` is a leading specialization argument of the enclosing
+`pipeline.def<kernel>`. A provider with `where [eq(%supported, 1)]` is applicable
+when a command launches that pipeline with a tile width of four or five. The
+family does not need a fallback just because the pipeline was originally
+declared with an unbound width. A launch with width eight fails selection if
+the family has no other applicable provider.
+
+Staged schemas, layouts, storage encodings, vectors, and buffer literals follow
+the same rule: binding exposes their facts before evaluating the declared
+provider constraints. This does not change the types of ordinary calls or
+choose a provider from the requested result type. The family contract and
+explicit input requirements determine selection.
+
 ## Requirements filter; they do not manufacture facts
 
 A target requirement states when a provider is valid:
