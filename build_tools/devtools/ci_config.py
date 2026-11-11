@@ -159,6 +159,11 @@ REPOSITORY_BAZEL_OPTIONS = (
     "--//build_tools/vulkan/config:enabled=true",
     "--//build_tools/d3d12/config:enabled=true",
 )
+REPOSITORY_BUILD_BAZEL_OPTIONS = REPOSITORY_BAZEL_OPTIONS + (
+    # Build every target, but leave executable runfiles lazy unless a local
+    # build action needs them. Integration lanes own executable coverage.
+    "--nobuild_runfile_links",
+)
 NON_CPU_HAL_DRIVER_CTEST_REGEX = r"^iree/hal/driver/(amdgpu|vulkan|webgpu)/"
 
 AMDF_BAZEL_TARGETS = ("//libamdf/...",)

@@ -136,6 +136,11 @@ worktree's configured defaults:
 python build_tools/devtools/ci.py iree-bazel-repository-build --compilation-mode opt
 ```
 
+This build compiles every platform-compatible target but leaves finished
+executable runfiles lazy. Bazel still materializes runfiles required by local
+build actions; execution and runfiles coverage remain with the integration
+lanes.
+
 ## Hardware and test admission
 
 Every `iree-run-requirement=...` declared by a test must be available. A test

@@ -716,7 +716,7 @@ def repository_build_steps(
     compilation_mode: str | None = None,
 ) -> list[CiStep]:
     targets = ("//...",)
-    options = ci_config.REPOSITORY_BAZEL_OPTIONS
+    options = ci_config.REPOSITORY_BUILD_BAZEL_OPTIONS
     if compilation_mode is not None:
         options += (f"--compilation_mode={compilation_mode}",)
     if amdgpu_target_selector is not None:

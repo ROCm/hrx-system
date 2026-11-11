@@ -1014,6 +1014,8 @@ class CiTest(unittest.TestCase):
         self.assertIn(f"-DIREE_ROCM_PATH={rocm_root}", configure_step.argv)
         build_step = steps[-1]
         self.assertEqual(build_step.argv[-1], "//...")
+        self.assertIn("--nobuild_runfile_links", build_step.argv)
+        self.assertNotIn("--nobuild_runfile_links", configure_step.argv)
         self.assertFalse(any(arg.startswith("-//") for arg in build_step.argv))
         self.assertFalse(any(step.name.startswith("Test") for step in steps))
 
