@@ -152,8 +152,8 @@ static void BM_EmplaceLaunch(benchmark::State& state) {
       &kernel, iree_allocator_system(), &layout));
   std::vector<uint8_t> constants(
       native ? layout->native_byte_length : layout->constant_byte_length, 0x5a);
-  const uint64_t binding = UINT64_C(0x12340000);
-  const iree_hal_amd_gpu_kernarg_inputs_t inputs = {
+  uint64_t binding = UINT64_C(0x12340000);
+  iree_hal_amd_gpu_kernarg_inputs_t inputs = {
       .block_count = {8192, 1, 1},
       .group_size = {256, 1, 1},
       .grid_dimensions = 1,
