@@ -43,8 +43,8 @@ def main(importer: str, runner: str, source_path: str, checks_path: str) -> None
             label + ": " + executed.stdout.decode() + executed.stderr.decode()
         )
         report = json.loads(executed.stdout)
-        assert report["case_count"] == 6, report
-        assert report["sample_count"] == 6, report
+        assert report["case_count"] == 8, report
+        assert report["sample_count"] == 8, report
         assert report["skipped_case_count"] == 0, report
         assert report["planning_issue_count"] == 0, report
         assert (
@@ -52,9 +52,9 @@ def main(importer: str, runner: str, source_path: str, checks_path: str) -> None
                 sample["expectations"]["expectation_count"]
                 for sample in report["samples"]
             )
-            == 25
+            == 31
         ), report
-        sys.stdout.write(f"{label}: 6 control-flow cases, 25 expectations passed\n")
+        sys.stdout.write(f"{label}: 8 control-flow cases, 31 expectations passed\n")
 
 
 if __name__ == "__main__":

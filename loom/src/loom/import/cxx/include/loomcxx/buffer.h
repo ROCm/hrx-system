@@ -86,6 +86,18 @@ enum class memory_access {
 
 namespace buffer {
 
+// Constructs absent storage without allocating or exposing a native address.
+template <class T>
+[[loom::op("buffer.null")]] loom::type::buffer<T> null();
+
+namespace compare {
+
+// Tests identity. Valid storage with zero length is nonnull.
+template <class T>
+[[loom::op("buffer.compare.null")]] bool null(loom::type::buffer<T> source);
+
+}  // namespace compare
+
 // Recovers the zero-origin Loom buffer root carried by a source pointer. The
 // pointer expression is evaluated normally; its interior byte origin is not
 // part of the returned root value.

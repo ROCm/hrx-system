@@ -1,0 +1,56 @@
+// RUN: emit cxx
+// REQUIRES: loom-export-cxx
+#include <loomcxx/buffer.h>
+
+using Buffer = loom::type::buffer<const int>;
+Buffer optional(Buffer input, bool use) {
+  return use ? input : loom::buffer::null<const int>();
+}
+bool missing(Buffer input) { return loom::buffer::compare::null(input); }
+int guarded(const int* input) { return input ? input[0] : 7; }
+// ----
+#include <loomcxx/numeric.h>
+#include <loomcxx/predicate.h>
+#include <loomcxx/view.h>
+
+[[loom::symbol("optional")]]
+loom::type::buffer<unsigned char> optional(loom::type::buffer<unsigned char> input, bool use);
+
+[[loom::symbol("missing")]]
+bool missing(loom::type::buffer<unsigned char> input);
+
+[[loom::symbol("guarded")]]
+unsigned guarded(loom::type::buffer<unsigned> input, loom::type::offset input_byte_offset);
+
+[[loom::symbol("optional")]]
+loom::type::buffer<unsigned char> optional(loom::type::buffer<unsigned char> input, bool use) {
+  loom::type::buffer<unsigned char> v3;
+  if (use) {
+    v3 = input;
+  } else {
+    auto v4 = loom::buffer::null<unsigned char>();
+    v3 = v4;
+  }
+  return v3;
+}
+
+[[loom::symbol("missing")]]
+bool missing(loom::type::buffer<unsigned char> input) {
+  bool v7 = loom::buffer::compare::null(input);
+  return v7;
+}
+
+[[loom::symbol("guarded")]]
+unsigned guarded(loom::type::buffer<unsigned> input, loom::type::offset input_byte_offset) {
+  bool v11 = loom::buffer::compare::null(loom::buffer::cast<unsigned char>(input));
+  unsigned v14{};
+  if (v11 ^ 1) {
+    unsigned long long v20 = loom::offset::cast<unsigned long long>(input_byte_offset) + (loom::convert<long long>(0) * 4ull);
+    loom::assume(v20 <= 9223372036854775807ull);
+    auto v23 = loom::buffer::view<1>(loom::buffer::cast<const unsigned>(input), loom::offset::cast(v20), {});
+    v14 = loom::view::load<loom::memory_access::root_in_bounds>(v23, 0);
+  } else {
+    v14 = 7u;
+  }
+  return v14;
+}

@@ -75,7 +75,8 @@ bool BufferIntrinsic::supports(std::string_view name) {
          name == "buffer.alloca" || name == "buffer.assume.alignment" ||
          name == "buffer.assume.noalias" ||
          name == "buffer.assume.memory_space" || name == "buffer.cast" ||
-         name == "buffer.root";
+         name == "buffer.root" || name == "buffer.null" ||
+         name == "buffer.compare.null";
 }
 
 std::optional<BufferIntrinsic> BufferIntrinsic::resolve(
@@ -90,6 +91,31 @@ std::optional<BufferIntrinsic> BufferIntrinsic::resolve(
   auto parameters = signature->parameterTypes();
   auto* result = cxx::type_cast<cxx::PointerType>(
       types.unqualified(signature->returnType()));
+  if (name == "buffer.null" || name == "buffer.compare.null") {
+    const bool construct = name == "buffer.null";
+    if (attribute.arguments.size() != 1 || signature->isVariadic() ||
+        parameters.size() != (construct ? 0u : 1u)) {
+      diagnostics.reject(
+          unit, owner,
+          std::string(name) + (construct
+                                   ? " requires no operands"
+                                   : " requires one typed buffer operand"));
+    }
+    const auto& partition = types.partition(
+        construct ? signature->returnType() : parameters[0], owner);
+    if (partition.kind != ValueKind::Buffer ||
+        (!construct && types.unqualified(signature->returnType())->kind() !=
+                           cxx::TypeKind::kBool)) {
+      diagnostics.reject(
+          unit, owner,
+          std::string(name) +
+              (construct ? " requires a typed buffer result"
+                         : " requires a typed buffer operand and bool result"));
+    }
+    return BufferIntrinsic(
+        construct ? Operation::Null : Operation::CompareNull,
+        construct ? &static_cast<const BufferPartition&>(partition) : nullptr);
+  }
   if (name == "buffer.cast" || name == "buffer.root") {
     if (attribute.arguments.size() != 1 || signature->isVariadic() ||
         parameters.size() != 1) {
@@ -377,6 +403,13 @@ std::optional<BufferIntrinsic> BufferIntrinsic::resolve(
 
 Value BufferIntrinsic::call(std::span<const Value> arguments, ValueArena& arena,
                             Storage& storage, cxx::AST* owner) const {
+  if (operation_ == Operation::Null) {
+    auto root = storage.null_root(owner);
+    return arena.capture(*result_buffer_, {&root, 1});
+  }
+  if (operation_ == Operation::CompareNull) {
+    return storage.compare_null(arguments[0].ssa(), true, owner);
+  }
   if (operation_ == Operation::Cast) {
     return arena.capture(*result_buffer_, arguments[0].components());
   }

@@ -73,6 +73,14 @@ class Storage {
   // Forms a zero-origin source pointer for a kernel buffer binding. The buffer
   // already carries any admitted parameter contracts.
   Pointer root(loom_value_id_t buffer, cxx::AST* owner);
+  // Constructs absent storage with zero byte origin. Null owns no allocation.
+  Pointer null(cxx::AST* owner);
+  // Constructs the opaque null root for source-level typed buffer values.
+  loom_value_id_t null_root(cxx::AST* owner);
+  // Tests the root's null identity without observing its extent or contents.
+  // The caller has already evaluated the source pointer expression.
+  loom_value_id_t compare_null(loom_value_id_t root, bool equal,
+                               cxx::AST* owner);
   // Refines an opaque pointer origin to the configured source pointer width.
   // The allocation root remains independent; this only publishes the range
   // every valid source pointer representation already satisfies.

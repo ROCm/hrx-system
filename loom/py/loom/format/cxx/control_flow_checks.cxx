@@ -73,3 +73,21 @@ LOOM_CHECK_CASE(views_and_pointer_offsets) {
   loom::check::expect_equal(first_pointer, 30u);
   loom::check::expect_equal(second_pointer, 200u);
 }
+
+LOOM_CHECK_CASE(nullable_pointer_transport) {
+  const auto absent = observe_nullable(false, 0u);
+  const auto present = observe_nullable(true, 0u);
+  const auto swapped = observe_nullable(true, 1u);
+  const auto restored = observe_nullable(true, 2u);
+  loom::check::expect_equal(absent, 7u);
+  loom::check::expect_equal(present, 41u);
+  loom::check::expect_equal(swapped, 7u);
+  loom::check::expect_equal(restored, 41u);
+}
+
+LOOM_CHECK_CASE(null_comparison_preserves_effects) {
+  const auto absent = observe_null_effect(false);
+  const auto present = observe_null_effect(true);
+  loom::check::expect_equal(absent, 101u);
+  loom::check::expect_equal(present, 100u);
+}

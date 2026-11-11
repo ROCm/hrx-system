@@ -39,6 +39,12 @@ std::optional<ObjectRepresentation> object_representation(
 std::optional<cxx::ConstValue> scalar_constant(cxx::TranslationUnit& unit,
                                                cxx::ExpressionAST* expression);
 
+// Whether an already evaluated source expression denotes null. This includes
+// nullptr_t expressions, retained constexpr pointers, and converted zero
+// constants. It does not establish that evaluating the expression is pure.
+bool null_pointer_expression(cxx::TranslationUnit& unit,
+                             cxx::ExpressionAST* expression);
+
 // Evaluates the pure integer grammar used by source bounds. Source conversions
 // and arithmetic widths are preserved by cxx. Calls, overloaded operations,
 // mutation, and runtime or volatile reads are excluded even in unselected arms.

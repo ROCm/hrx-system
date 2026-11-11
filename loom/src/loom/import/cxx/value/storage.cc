@@ -46,6 +46,31 @@ Pointer Storage::root(loom_value_id_t buffer, cxx::AST* owner) {
   return {buffer, byte_offset};
 }
 
+Pointer Storage::null(cxx::AST* owner) { return root(null_root(owner), owner); }
+
+loom_value_id_t Storage::null_root(cxx::AST* owner) {
+  loom_op_t* op;
+  check(loom_buffer_null_build(&builder_, loom_type_buffer(),
+                               locations_.get(owner), &op));
+  return loom_buffer_null_result(op);
+}
+
+loom_value_id_t Storage::compare_null(loom_value_id_t root, bool equal,
+                                      cxx::AST* owner) {
+  auto source = locations_.get(owner);
+  loom_op_t* op;
+  check(loom_buffer_compare_null_build(&builder_, root, source, &op));
+  auto predicate = loom_buffer_compare_null_result(op);
+  if (equal) {
+    return predicate;
+  }
+  auto one = scalars_.integer(1, LOOM_SCALAR_TYPE_I1, source);
+  check(loom_scalar_xori_build(&builder_, predicate, one,
+                               loom_type_scalar(LOOM_SCALAR_TYPE_I1), source,
+                               &op));
+  return loom_op_results(op)[0];
+}
+
 Pointer Storage::constrain_origin(Pointer pointer, cxx::AST* owner) {
   if (unit_.control()->memoryLayout()->sizeOfPointer() != 4) {
     return pointer;

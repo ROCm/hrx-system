@@ -153,6 +153,67 @@ std::optional<cxx::ConstValue> scalar_constant(cxx::TranslationUnit& unit,
   return PureConstant(unit, ConstantDomain::Scalar).evaluate(expression);
 }
 
+bool null_pointer_expression(cxx::TranslationUnit& unit,
+                             cxx::ExpressionAST* expression) {
+  auto traits = unit.typeTraits();
+  for (;;) {
+    if (traits.is_null_pointer(expression->type)) {
+      return true;
+    }
+    if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(expression)) {
+      expression = nested->expression;
+      continue;
+    }
+    if (!traits.is_pointer(expression->type)) {
+      auto value = scalar_constant(unit, expression);
+      auto* integer = value ? std::get_if<cxx::ConstInt>(&*value) : nullptr;
+      return integer && integer->isZero();
+    }
+    if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression);
+        cast && !cast->conversionFunction) {
+      expression = cast->expression;
+      continue;
+    }
+    if (auto* cast = cxx::ast_cast<cxx::CastExpressionAST>(expression)) {
+      expression = cast->expression;
+      continue;
+    }
+    if (auto* cast = cxx::ast_cast<cxx::CppCastExpressionAST>(expression)) {
+      expression = cast->expression;
+      continue;
+    }
+    if (auto* construction =
+            cxx::ast_cast<cxx::TypeConstructionAST>(expression)) {
+      if (!construction->expressionList) {
+        return true;
+      }
+      expression = construction->expressionList->value;
+      continue;
+    }
+    if (auto* construction =
+            cxx::ast_cast<cxx::BracedTypeConstructionAST>(expression)) {
+      auto* elements = construction->bracedInitList->expressionList;
+      if (!elements) {
+        return true;
+      }
+      expression = elements->value;
+      continue;
+    }
+    const cxx::ConstValue* value = nullptr;
+    if (auto* constant = cxx::ast_cast<cxx::ConstExpressionAST>(expression)) {
+      value = constant->constValue ? &*constant->constValue : nullptr;
+    } else if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
+      auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(id->symbol);
+      if (variable && variable->constValue() &&
+          (variable->isConstexpr() || traits.is_const(variable->type()))) {
+        value = &*variable->constValue();
+      }
+    }
+    auto* integer = value ? std::get_if<cxx::ConstInt>(value) : nullptr;
+    return integer && integer->isZero();
+  }
+}
+
 std::optional<std::intmax_t> integer_constant(cxx::TranslationUnit& unit,
                                               cxx::ExpressionAST* expression) {
   auto evaluated =

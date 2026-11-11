@@ -317,7 +317,15 @@ Value Initialization::materialize_constant(const cxx::ConstValue& value,
   if (traits.is_arithmetic(type) || traits.is_enum(type)) {
     return Value(scalars_.constant(value, type, owner));
   }
-
+  if (traits.is_pointer(type) || traits.is_null_pointer(type)) {
+    auto* integer = std::get_if<cxx::ConstInt>(&value);
+    if (!integer || !integer->isZero()) {
+      diagnostics_.reject(unit_, owner,
+                          "constant pointer requires null or an addressable "
+                          "source object");
+    }
+    return storage_.null(owner);
+  }
   if (types_.native_vector(type)) {
     auto* retained = std::get_if<std::shared_ptr<cxx::InitializerList>>(&value);
     if (!retained || !*retained) {
@@ -447,6 +455,9 @@ Value Initialization::zero(const cxx::Type* type, cxx::AST* owner) {
     return arena_.capture(*record, components);
   }
   const auto& partition = types_.partition(type, owner);
+  if (partition.kind == ValueKind::Pointer) {
+    return storage_.null(owner);
+  }
   auto output = types_.get(type, owner);
   if (partition.kind != ValueKind::SSA ||
       loom_type_kind(output) != LOOM_TYPE_SCALAR) {
@@ -801,10 +812,12 @@ Value Initialization::from_elements(const cxx::Type* type,
   if (elements && !elements->next) {
     return evaluation_.convert(elements->value, type, owner);
   }
-  if (elements || loom_type_kind(output) != LOOM_TYPE_SCALAR) {
+  if (elements || (loom_type_kind(output) != LOOM_TYPE_SCALAR &&
+                   partition.kind != ValueKind::Pointer)) {
     diagnostics_.reject(
         unit_, owner,
-        "value initialization requires a scalar, vector or admitted record");
+        "value initialization requires a scalar, vector, pointer or admitted "
+        "record");
   }
   return zero(type, owner);
 }
