@@ -84,22 +84,51 @@ the computation underneath it.
 
 With an [activated Python 3.12+ environment](getting-started/acquiring-loom.md),
 try [loom-fun's Qwen2.5 0.5B Instruct](https://huggingface.co/loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom)
-on an AMD GPU. Run the first three commands in one terminal, then send the
-request from another while the server stays running. These commands use a
-POSIX shell.
+on an AMD GPU. Fetch the model and start the server, then send a request from
+another terminal. These commands use a POSIX shell.
 
 <div class="loom-quickstart" markdown>
+<div class="loom-terminal" markdown>
+
+<p class="loom-terminal-label">Terminal 1 <span>Start the server</span></p>
 
 ```sh
 pip install 'hrx-loom[hf]'
-loom-fetch https://huggingface.co/loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom/resolve/main/model.json --output=qwen
-loom-serve --model=qwen/model.json --device=amdgpu --memory_bytes=5000000000
-curl -f localhost:8080/v1/chat/completions --json '{"model":"Qwen/Qwen2.5-0.5B-Instruct","messages":[{"role":"user","content":"Hi!"}]}'
+loom-fetch huggingface:loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom
 ```
 
+<pre class="loom-terminal-output no-copy" markdown="0"><code>...
+Qwen/Qwen2.5-0.5B-Instruct/model.json</code></pre>
+
+```sh
+loom-serve --model=Qwen/Qwen2.5-0.5B-Instruct/model.json --device=amdgpu
+```
+
+<pre class="loom-terminal-output no-copy" markdown="0"><code>...
+{"event":"ready","address":"127.0.0.1:8080","models":1}</code></pre>
+
+</div>
+<div class="loom-terminal" markdown>
+
+<p class="loom-terminal-label">Terminal 2 <span>Send a request</span></p>
+
+```sh
+curl -fsS localhost:8080/v1/chat/completions \
+  --json '{"model":"Qwen/Qwen2.5-0.5B-Instruct",
+           "messages":[{"role":"user","content":"Hi!"}]}'
+```
+
+<p class="loom-terminal-caption">Example response, excerpted</p>
+<pre class="loom-terminal-output no-copy" markdown="0"><code>"message": {
+  "role": "assistant",
+  "content": "Hello! How can I help you today?"
+}</code></pre>
+
+</div>
 </div>
 
-The reply is in `choices[0].message.content`. The
+Leave the server running while you use it. The reply is in
+`choices[0].message.content`. The
 [fetch and serve guide](serving/workflows/fetch-and-serve.md) covers model
 selection, startup status, and other requests. Each model package describes
 the hardware and configuration it supports.
