@@ -6,10 +6,122 @@
 
 #include "iree/hal/driver/amd/gpu/queue/backing.h"
 
+#include <array>
+
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
 namespace {
+
+class ArgumentMemoryTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    context_.api = &api_;
+    control_.scope = reinterpret_cast<amdf_memory_scope_t*>(this);
+    control_.access_count = 1;
+    control_.accesses = &control_access_;
+    control_.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
+    control_.host_access =
+        AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
+    control_access_.device = reinterpret_cast<amdf_device_t*>(this);
+    control_access_.requirements.access = AMDF_MEMORY_ACCESS_READ |
+                                          AMDF_MEMORY_ACCESS_WRITE |
+                                          AMDF_MEMORY_ACCESS_EXECUTE;
+    control_access_.requirements.flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+                                         AMDF_MEMORY_FLAG_HOST_COHERENT |
+                                         AMDF_MEMORY_FLAG_QUEUE_STORAGE;
+    for (uint32_t i = 0; i < profiles_.size(); ++i) {
+      profiles_[i] = {
+          .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+          .structure_size = sizeof(amdf_memory_profile_t),
+          .ordinal = i,
+          .roles = AMDF_MEMORY_PROFILE_ROLE_CREATE |
+                   AMDF_MEMORY_PROFILE_ROLE_HOST_MAP,
+          .supported_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+          .host_mapping = {.properties = AMDF_HOST_MEMORY_PROPERTY_WRITE_BACK},
+      };
+    }
+    profiles_[0].guaranteed_flags = AMDF_MEMORY_FLAG_DEVICE_UNCACHED;
+    profiles_[1].roles = AMDF_MEMORY_PROFILE_ROLE_REGISTER;
+    control_.profile = profiles_[0];
+    api_.memory_scope_query_info = [](amdf_memory_scope_t*,
+                                      amdf_memory_scope_info_t* info) {
+      info->memory_profile_count = 3;
+      return AMDF_STATUS_OK;
+    };
+    api_.memory_scope_query_device_profile =
+        [](amdf_memory_scope_t* scope, uint32_t ordinal, uint32_t count,
+           const amdf_memory_device_access_t* accesses,
+           amdf_memory_profile_t* profile, amdf_memory_access_capabilities_t*) {
+          auto* self = reinterpret_cast<ArgumentMemoryTest*>(scope);
+          EXPECT_EQ(count, 1u);
+          EXPECT_EQ(accesses[0].device, self->control_access_.device);
+          EXPECT_EQ(
+              accesses[0].requirements.flags,
+              AMDF_MEMORY_FLAG_DEVICE_ADDRESS | AMDF_MEMORY_FLAG_HOST_COHERENT);
+          EXPECT_EQ(accesses[0].requirements.access,
+                    AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE);
+          if (ordinal == self->fail_ordinal_) {
+            return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
+          }
+          if (ordinal == self->unsupported_ordinal_) {
+            return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+          }
+          *profile = self->profiles_[ordinal];
+          return AMDF_STATUS_OK;
+        };
+  }
+
+  iree_status_t Select() {
+    return iree_hal_amd_gpu_argument_memory_select(&context_, &control_,
+                                                   &access_, &selected_);
+  }
+
+  amdf_api_t api_ = {};
+  iree_hal_amd_gpu_context_t context_ = {};
+  amdf_memory_device_access_t control_access_ = {}, access_ = {};
+  iree_hal_amd_fabric_memory_options_t control_ = {}, selected_ = {};
+  std::array<amdf_memory_profile_t, 3> profiles_;
+  uint32_t fail_ordinal_ = UINT32_MAX;
+  uint32_t unsupported_ordinal_ = UINT32_MAX;
+};
+
+TEST_F(ArgumentMemoryTest, SelectsCachedOwnedBackingWithoutChangingControl) {
+  IREE_ASSERT_OK(Select());
+  EXPECT_EQ(selected_.profile.ordinal, 2u);
+  EXPECT_EQ(selected_.accesses, &access_);
+  EXPECT_EQ(selected_.required_flags, control_.required_flags);
+  EXPECT_EQ(selected_.host_access, control_.host_access);
+  EXPECT_EQ(control_.profile.ordinal, 0u);
+  EXPECT_NE(control_access_.requirements.flags & AMDF_MEMORY_FLAG_QUEUE_STORAGE,
+            0u);
+}
+
+TEST_F(ArgumentMemoryTest, RetainsControlPolicyWhenCachedBackingIsUnavailable) {
+  unsupported_ordinal_ = 2;
+  IREE_ASSERT_OK(Select());
+  EXPECT_EQ(selected_.profile.ordinal, control_.profile.ordinal);
+  EXPECT_EQ(selected_.accesses, control_.accesses);
+}
+
+TEST_F(ArgumentMemoryTest, RejectsUnmappedOrWriteCombinedCandidates) {
+  profiles_[2].host_mapping.properties = 0;
+  IREE_ASSERT_OK(Select());
+  EXPECT_EQ(selected_.profile.ordinal, control_.profile.ordinal);
+  profiles_[2].host_mapping.properties = AMDF_HOST_MEMORY_PROPERTY_WRITE_BACK;
+  profiles_[2].supported_flags = 0;
+  IREE_ASSERT_OK(Select());
+  EXPECT_EQ(selected_.profile.ordinal, control_.profile.ordinal);
+}
+
+TEST_F(ArgumentMemoryTest, PropagatesDiscoveryFailureWithoutPublishingOutputs) {
+  fail_ordinal_ = 1;
+  selected_.profile.ordinal = 91;
+  access_.requirements.flags = 17;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, Select());
+  EXPECT_EQ(selected_.profile.ordinal, 91u);
+  EXPECT_EQ(access_.requirements.flags, 17u);
+}
 
 // Only native capability discovery and backing ownership are dependencies.
 // Production construction owns admission, acquisition, address capture, and

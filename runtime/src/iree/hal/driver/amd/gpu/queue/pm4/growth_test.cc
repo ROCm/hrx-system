@@ -91,6 +91,7 @@ class GrowthTest : public ::testing::Test {
         *out_release_info = {};
       }
       auto* self = reinterpret_cast<GrowthTest*>(scope);
+      self->last_profile_ = info->memory_profile_ordinal;
       ++self->allocations_;
       if (self->hold_.exchange(false)) {
         self->entered_.release();
@@ -182,6 +183,9 @@ class GrowthTest : public ::testing::Test {
     iree_hal_amd_gpu_signal_cache_initialize(&publication_, 0, &signals_);
     growth_.context = &context_;
     growth_.memory = &memory_;
+    argument_memory_ = memory_;
+    argument_memory_.profile.ordinal = 13;
+    growth_.argument_memory = &argument_memory_;
     growth_.scratch_memory = &scratch_memory_;
     growth_.scratch_profile = &scratch_profile_;
     growth_.captures = &captures_;
@@ -477,6 +481,8 @@ class GrowthTest : public ::testing::Test {
   iree_hal_amd_gpu_publisher_t publisher_ = {};
   // Exact cold acquisition state under test.
   iree_hal_amd_gpu_pm4_growth_context_t growth_ = {};
+  iree_hal_amd_fabric_memory_options_t argument_memory_ = {};
+  uint32_t last_profile_ = 0;
   // Signal cells across all completed native backing blocks.
   iree_hal_amd_gpu_signal_cache_t signals_ = {};
   // Device deferred publication owner.
@@ -795,6 +801,7 @@ TEST_F(GrowthTest, CoalescedArgumentsDoNotOwnTheReadyPublisher) {
   hold_ = true;
   Park(IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS);
   entered_.acquire();
+  EXPECT_EQ(last_profile_, argument_memory_.profile.ordinal);
   Park(IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS);
   EXPECT_EQ(allocations_, 1u);
   EXPECT_EQ(completed_, 0u);
@@ -821,6 +828,7 @@ TEST_F(GrowthTest, CoalescedSignalsAreInitializedOnlyAfterNativeCompletion) {
   hold_ = true;
   Park(IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SIGNALS);
   entered_.acquire();
+  EXPECT_EQ(last_profile_, memory_.profile.ordinal);
   for (uint32_t i = 1; i < 64; ++i) {
     Park(IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SIGNALS);
   }

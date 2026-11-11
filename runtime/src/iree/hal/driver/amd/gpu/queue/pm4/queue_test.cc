@@ -261,6 +261,7 @@ class KernelQueueTest : public MemoryBackendTest {
           .publication_mode = AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
           .command_byte_capacity = 4096,
           .memory = &memory_,
+          .argument_memory = &memory_,
           .publication = &publication_,
           .retirement_capacity = 4,
           .argument_capacity = 4096,

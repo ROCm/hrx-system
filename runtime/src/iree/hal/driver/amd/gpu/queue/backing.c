@@ -219,6 +219,58 @@ iree_status_t iree_hal_amd_gpu_backing_allocate(
   return iree_hal_amd_gpu_backing_query_address(context, memory, out_address);
 }
 
+iree_status_t iree_hal_amd_gpu_argument_memory_select(
+    const iree_hal_amd_gpu_context_t* context,
+    const iree_hal_amd_fabric_memory_options_t* control,
+    amdf_memory_device_access_t* access,
+    iree_hal_amd_fabric_memory_options_t* out_options) {
+  amdf_memory_device_access_t argument_access = control->accesses[0];
+  // Arguments are published before dispatch and retired after their final
+  // reader. They are not concurrently polled native queue control cells.
+  argument_access.requirements.flags &= ~AMDF_MEMORY_FLAG_QUEUE_STORAGE;
+  argument_access.requirements.access =
+      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
+  amdf_memory_scope_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
+      .structure_size = sizeof(info),
+  };
+  IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
+      context->api->memory_scope_query_info(control->scope, &info),
+      "memory_scope_query_info"));
+  iree_hal_amd_fabric_memory_options_t selected = *control;
+  for (uint32_t i = 0; i < info.memory_profile_count; ++i) {
+    amdf_memory_profile_t profile = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+        .structure_size = sizeof(profile),
+    };
+    amdf_memory_access_capabilities_t capabilities = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
+        .structure_size = sizeof(capabilities),
+    };
+    amdf_status_t status = context->api->memory_scope_query_device_profile(
+        control->scope, i, 1, &argument_access, &profile, &capabilities);
+    if (status == amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
+        status, "memory_scope_query_device_profile"));
+    if (iree_all_bits_set(profile.roles,
+                          AMDF_MEMORY_PROFILE_ROLE_CREATE |
+                              AMDF_MEMORY_PROFILE_ROLE_HOST_MAP) &&
+        iree_all_bits_set(profile.supported_flags, control->required_flags) &&
+        !(profile.guaranteed_flags & AMDF_MEMORY_FLAG_DEVICE_UNCACHED) &&
+        iree_all_bits_set(profile.host_mapping.properties,
+                          AMDF_HOST_MEMORY_PROPERTY_WRITE_BACK)) {
+      selected.profile = profile;
+      *access = argument_access;
+      selected.accesses = access;
+      break;
+    }
+  }
+  *out_options = selected;
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_amd_gpu_argument_storage_prepare(
     uint64_t capacity, iree_allocator_t host_allocator,
     iree_hal_amd_gpu_argument_storage_t** out_storage) {

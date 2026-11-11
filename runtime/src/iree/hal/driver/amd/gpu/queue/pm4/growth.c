@@ -219,10 +219,10 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_begin(
           &growth->backing.arguments);
       if (iree_status_is_ok(status)) {
         memory = &growth->backing.arguments->memory;
-        growth->backing.request =
-            (iree_hal_amd_fabric_memory_request_t){.options = context->memory,
-                                                   .byte_length = capacity,
-                                                   .alignment = capacity};
+        growth->backing.request = (iree_hal_amd_fabric_memory_request_t){
+            .options = context->argument_memory,
+            .byte_length = capacity,
+            .alignment = capacity};
         context->arguments = growth;
       }
     } else if (kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SCRATCH) {

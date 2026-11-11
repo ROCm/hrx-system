@@ -215,6 +215,9 @@ typedef struct iree_hal_amd_gpu_device_t {
     amdf_memory_device_access_t access;
     // Qualified coherent system backing for native control and placed images.
     iree_hal_amd_fabric_memory_options_t control;
+    // Shader-readable argument generations have no native control-cell role.
+    amdf_memory_device_access_t argument_access;
+    iree_hal_amd_fabric_memory_options_t arguments;
     // Device access facts qualified by the control profile.
     struct {
       // Native permissions that cannot be withheld from GPU allocations.
@@ -1258,6 +1261,11 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_gpu_device_prepare_control(device);
   }
+  if (iree_status_is_ok(status) && !aql) {
+    status = iree_hal_amd_gpu_argument_memory_select(
+        context, &device->memory.control, &device->memory.argument_access,
+        &device->memory.arguments);
+  }
   if (iree_status_is_ok(status)) {
     status = iree_async_proactor_pool_acquire_for_node(
         create_params->proactor_pool, options->host_numa_node,
@@ -1363,6 +1371,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
                                      : 64 * 1024,
       .memory = &device->memory.control,
       .scratch_memory = &device->scratch.memory,
+      .argument_memory = &device->memory.arguments,
       .programs = aql ? NULL : &device->programs.pm4,
       .scratch_profile = device->scratch.profile,
       .publication = &device->publication,

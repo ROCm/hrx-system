@@ -208,6 +208,17 @@ iree_status_t iree_hal_amd_gpu_backing_allocate(
     uint64_t alignment, iree_hal_amd_fabric_memory_t* memory,
     uint64_t* out_address);
 
+// Selects host-coherent GPU-cached argument backing without the native queue
+// storage requirement. Queries capabilities only, before queues are created.
+// Falls back to the admitted control policy if no cached profile is available.
+// |access| owns the selected access descriptor and must outlive |out_options|.
+// Control options and both outputs remain unchanged on failure.
+iree_status_t iree_hal_amd_gpu_argument_memory_select(
+    const iree_hal_amd_gpu_context_t* context,
+    const iree_hal_amd_fabric_memory_options_t* control,
+    amdf_memory_device_access_t* access,
+    iree_hal_amd_fabric_memory_options_t* out_options);
+
 // Allocates only host ownership and the native release descriptor. The caller
 // acquires storage->memory asynchronously, then initializes its address and
 // monotonic extent on the publication owner. Failure returns NULL storage.
