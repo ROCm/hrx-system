@@ -103,16 +103,42 @@ void loom_kernel_request_preparation_free(
 iree_string_view_list_t loom_kernel_request_preparation_config_keys(
     const loom_kernel_request_preparation_t* preparation);
 
+// Builds compact bound projections borrowing the immutable preparation. The
+// temporary bound module and construction facts retire before returning.
+iree_status_t loom_kernel_request_preparation_bind(
+    const loom_kernel_request_preparation_t* preparation,
+    const loom_module_t* site_module,
+    const loom_kernel_specialization_value_t* values,
+    iree_arena_allocator_t* arena,
+    loom_kernel_class_classifier_t* out_classifier);
+
+// Optional retained-plan owner for one synchronous publication. Acquired plans
+// remain immutable and live until release; invocation state stays in scratch.
+typedef struct loom_kernel_request_plan_provider_t {
+  // Acquires one plan for an already captured exact tuple.
+  iree_status_t (*acquire)(
+      void* user_data, const loom_module_t* site_module,
+      const loom_kernel_specialization_value_t* values, uint16_t value_count,
+      iree_arena_allocator_t* scratch_arena,
+      const loom_kernel_class_classifier_t** out_classifier, void** out_lease);
+  // Releases an acquired lease after collection and every callback finish.
+  void (*release)(void* user_data, void* lease);
+  // Publication-live cache and source owner.
+  void* user_data;
+} loom_kernel_request_plan_provider_t;
+
 // Collects invocation-local classes and publishes them from an immutable
 // source. Concurrent calls use distinct scratch arenas and independently owned
 // sinks. The returned site map uses |scratch_arena| and retains no preparation
-// state or site literals; failure leaves it NULL.
+// state or site literals; failure leaves it NULL. An empty |plans| provider
+// uses one-shot binding with the same applicability and collection semantics.
 iree_status_t loom_kernel_request_preparation_publish(
     const loom_kernel_request_preparation_t* preparation,
     const loom_module_t* site_module, const loom_kernel_class_site_t* sites,
     iree_host_size_t site_count,
     const loom_kernel_class_collection_options_t* collection_options,
-    loom_kernel_request_sink_t sink, iree_arena_allocator_t* scratch_arena,
+    loom_kernel_request_plan_provider_t plans, loom_kernel_request_sink_t sink,
+    iree_arena_allocator_t* scratch_arena,
     const loom_decision_class_ordinal_t** out_site_classes);
 
 // Allocates an invocation-local producer over an immutable provider index.

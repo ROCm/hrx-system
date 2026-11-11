@@ -17,9 +17,9 @@ extern "C" {
 #endif
 
 /// Concurrent command compiler retaining a frozen index and prepared native
-/// sources. Each invocation supplies its own workspace, roots, configuration,
-/// targets, and publication sink. Published products and requests own their
-/// contents independently of the compiler.
+/// sources and staged plans. Each invocation supplies its own workspace, roots,
+/// configuration, targets, and publication sink. Published products and
+/// requests own their contents independently of the compiler.
 typedef struct loomc_cmd_compiler_t loomc_cmd_compiler_t;
 
 /// Command compiler storage policy.
@@ -34,12 +34,12 @@ typedef struct loomc_cmd_compiler_options_t {
   /// Extension chain; currently must be NULL.
   const void* next;
 
-  /// Maximum retained source bytes, including allocation tracking and unused
-  /// arena capacity. Zero disables retention. This excludes the frozen index,
-  /// shared target profiles, the fixed source-lookup table, active private
-  /// preparations, and underlying allocator fragmentation.
-  /// Oversized sources and misses that cannot displace an idle source compile
-  /// normally without retention. Passing NULL options selects 64 MiB.
+  /// Maximum retained source and staged-plan bytes, including tracking and
+  /// unused arena capacity. Zero disables retention. This excludes the frozen
+  /// index, shared target profiles, the fixed source-lookup table, active
+  /// private preparations, and underlying allocator fragmentation. Oversized
+  /// entries and misses that cannot displace idle entries compile normally
+  /// without retention. Passing NULL options selects 64 MiB.
   loomc_host_size_t retained_byte_limit;
 } loomc_cmd_compiler_options_t;
 
@@ -67,7 +67,8 @@ LOOMC_API_EXPORT loomc_status_t loomc_cmd_compiler_create(
 LOOMC_API_EXPORT void loomc_cmd_compiler_retain(loomc_cmd_compiler_t* compiler);
 
 /// Releases a compiler. Passing NULL is allowed. Thread-safe. The final release
-/// destroys prepared sources before releasing their source index and context.
+/// destroys staged plans and prepared sources before releasing their index and
+/// context.
 ///
 /// @param compiler Compiler reference to release, or `NULL`.
 LOOMC_API_EXPORT void loomc_cmd_compiler_release(

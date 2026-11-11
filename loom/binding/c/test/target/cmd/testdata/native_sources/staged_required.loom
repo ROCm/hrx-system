@@ -1,0 +1,56 @@
+// All tuple groups must have an applicable provider before any callback.
+template.decl @staged_required_choose(%matches: i1, %columns: index, %input: view<32xi32>) -> (i32)
+
+pipeline.def<kernel> @staged_required_classified(%width: index) run(%columns: index, %input: view<32xi32>, %output: view<1xi32>) {
+  %width_limit = index.constant 6 : index
+  %matches = index.cmp slt, %width, %width_limit : index
+  pipeline.strand<cooperative> workers([0], [1], [1]) {
+    %result = template.apply<@staged_required_choose>(%matches, %columns, %input) : (i1, index, view<32xi32>) -> (i32)
+    %thread = kernel.workitem.id<x> : index
+    %c0 = index.constant 0 : index
+    %first = index.cmp eq, %thread, %c0 : index
+    scf.if %first {
+      view.store %result, %output[0] : i32, view<1xi32>
+    }
+  }
+}
+
+command.def public @staged_required_interleaved() launch(%input_storage: buffer, %output0_storage: buffer, %output1_storage: buffer, %output2_storage: buffer, %output3_storage: buffer, %output4_storage: buffer) {
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<32xi32>
+  %output0 = buffer.view %output0_storage[%base] : buffer -> view<1xi32>
+  %output1 = buffer.view %output1_storage[%base] : buffer -> view<1xi32>
+  %output2 = buffer.view %output2_storage[%base] : buffer -> view<1xi32>
+  %output3 = buffer.view %output3_storage[%base] : buffer -> view<1xi32>
+  %output4 = buffer.view %output4_storage[%base] : buffer -> view<1xi32>
+  %width4 = index.constant 4 : index
+  %width5 = index.constant 5 : index
+  %columns16 = index.constant 16 : index
+  %columns32 = index.constant 32 : index
+  kernel.launch @staged_required_classified[%width4](%columns16, %input, %output0) : [index](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_required_classified[%width5](%columns32, %input, %output1) : [index](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_required_classified[%width4](%columns32, %input, %output2) : [index](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_required_classified[%width5](%columns16, %input, %output3) : [index](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_required_classified[%width4](%columns16, %input, %output4) : [index](index, view<32xi32>, view<1xi32>)
+  command.return
+}
+
+command.def public @staged_required_invalid() launch(%input_storage: buffer, %output0_storage: buffer, %output1_storage: buffer, %output2_storage: buffer, %output3_storage: buffer, %output4_storage: buffer) {
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<32xi32>
+  %output0 = buffer.view %output0_storage[%base] : buffer -> view<1xi32>
+  %output1 = buffer.view %output1_storage[%base] : buffer -> view<1xi32>
+  %output2 = buffer.view %output2_storage[%base] : buffer -> view<1xi32>
+  %output3 = buffer.view %output3_storage[%base] : buffer -> view<1xi32>
+  %output4 = buffer.view %output4_storage[%base] : buffer -> view<1xi32>
+  %width4 = index.constant 4 : index
+  %width5 = index.constant 8 : index
+  %columns16 = index.constant 16 : index
+  %columns32 = index.constant 32 : index
+  kernel.launch @staged_required_classified[%width4](%columns16, %input, %output0) : [index](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_required_classified[%width5](%columns32, %input, %output1) : [index](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_required_classified[%width4](%columns32, %input, %output2) : [index](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_required_classified[%width5](%columns16, %input, %output3) : [index](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_required_classified[%width4](%columns16, %input, %output4) : [index](index, view<32xi32>, view<1xi32>)
+  command.return
+}

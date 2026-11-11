@@ -103,6 +103,23 @@ ordinal, and invokes `loomc_task_execute` exactly once for every accepted task.
 The application does not link `loomc/task_pool.h`, `loomc/task_queue.h`, or the
 IREE task runtime in that configuration.
 
+The reusable `loomc_cmd_compiler_t` also avoids repeating source preparation
+and staged-input analysis when later commands reuse a kernel. Different staged
+tuples share one prepared source; each retained tuple keeps only its compact
+selection plan. Repeated launches still produce independently owned requests.
+
+`loomc_cmd_compiler_options_t::retained_byte_limit` bounds prepared sources and
+staged plans together, including their allocation tracking and unused arena
+capacity. Passing `NULL` options selects 64 MiB; an explicit zero disables
+retention. An oversized entry, or an entry that cannot displace idle storage,
+compiles without being retained. The limit excludes the frozen source index,
+shared target profiles, fixed lookup storage, active private preparations, and
+allocator fragmentation, so it is not a total compiler memory limit.
+
+This compiler-owned preparation storage is separate from the application's
+compiled-artifact cache described below. It preserves the same generated
+requests and selection diagnostics when retention is disabled.
+
 ## Publish compile requests while building the command
 
 Pass a `loomc_request_sink_t` when building the selected command roots:

@@ -23,7 +23,7 @@
 #include "loom/ops/kernel/ops.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/tooling/context/context.h"
-#include "loom/transforms/kernel/kernel_class_classifier.h"
+#include "loom/transforms/kernel/kernel_class_collection.h"
 #include "loom/transforms/kernel/kernel_class_materializer.h"
 #include "loom/transforms/symbol/template_decision_model.h"
 #include "loom/util/fact_table.h"

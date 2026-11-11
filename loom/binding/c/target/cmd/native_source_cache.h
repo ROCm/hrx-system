@@ -10,7 +10,7 @@
 #include "loom/binding/c/src/link_materialization.h"
 #include "loom/transforms/kernel/kernel_request_producer.h"
 
-// Completed native source preparations over one exact immutable provider index.
+// Completed source preparations and compact staged plans over one exact index.
 // The owner keeps the index/context alive until all synchronous calls return.
 typedef struct loomc_cmd_native_source_cache_t loomc_cmd_native_source_cache_t;
 

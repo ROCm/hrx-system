@@ -4,8 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/transforms/kernel/kernel_class_classifier.h"
-
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -22,6 +21,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/tooling/context/context.h"
+#include "loom/transforms/kernel/kernel_class_collection.h"
 #include "loom/verify/verify.h"
 
 namespace loom {
@@ -967,6 +967,141 @@ TEST_F(KernelClassClassifierTest, UnavailableDecisionsRetainTheirStructure) {
                           loom_kernel_class_classifier_collect(
                               fixture.classifier(), nullptr, fixture.sites(), 4,
                               &options, &analysis_arena_, &collection));
+  }
+}
+
+// Every tuple owns at least one class. Source shapes and required decisions in
+// a later tuple must reserve their additional classes before an earlier tuple
+// can spend the shared budget on optional provider specialization.
+TEST_F(KernelClassClassifierTest, TupleGroupsReserveOneSharedClassBudget) {
+  enum class Requirement {
+    kRequiredDecision,
+    kSourceShape,
+    kGenericShape,
+    kGenericShapeAfterOptional
+  };
+  struct Case {
+    // How the second group requires or can release structural classes.
+    Requirement requirement;
+    // Smallest budget admitting both complete groups.
+    uint16_t minimum;
+    // Largest observed quotient after all optional decisions are admitted.
+    uint16_t maximum;
+  };
+  constexpr Case cases[] = {
+      {Requirement::kRequiredDecision, 3, 4},
+      {Requirement::kSourceShape, 5, 6},
+      {Requirement::kGenericShape, 4, 5},
+      {Requirement::kGenericShapeAfterOptional, 4, 6},
+  };
+  for (const auto& test : cases) {
+    for (bool reverse : {false, true}) {
+      for (uint16_t limit = test.minimum - 1; limit <= 8; ++limit) {
+        SCOPED_TRACE(static_cast<int>(test.requirement));
+        SCOPED_TRACE(reverse);
+        SCOPED_TRACE(limit);
+        ManualBinaryClassifier optional(/*has_generic_residual=*/true);
+        ManualBinaryClassifier required(test.requirement !=
+                                        Requirement::kRequiredDecision);
+        IREE_ASSERT_OK(optional.InitializeSites(&analysis_arena_));
+        IREE_ASSERT_OK(required.InitializeSites(&analysis_arena_));
+        const loom_kernel_class_shape_t scalar[2] = {};
+        const uint32_t dimensions[] = {0, 1};
+        const loom_kernel_class_shape_t shapes[] = {
+            {}, {.projections = dimensions, .count = 2}};
+        optional.classifier()->decision_count = 1;
+        optional.decisions()[0].action_shapes = scalar;
+        switch (test.requirement) {
+          case Requirement::kRequiredDecision:
+            required.classifier()->decision_count = 1;
+            required.decisions()[0].action_shapes = scalar;
+            break;
+          case Requirement::kSourceShape:
+            required.classifier()->decision_count = 0;
+            required.classifier()->has_shape_requirements = true;
+            required.classifier()->shape = shapes[1];
+            break;
+          case Requirement::kGenericShape:
+          case Requirement::kGenericShapeAfterOptional:
+            required.classifier()->has_shape_requirements = true;
+            required.decisions()[0].action_shapes = scalar;
+            required.decisions()[1].action_shapes = shapes;
+            required.decisions()[1].residual_shape = shapes[1];
+            required.decisions()[1].can_reduce_structure = true;
+            if (test.requirement == Requirement::kGenericShape) {
+              required.decisions()[0] = required.decisions()[1];
+              required.classifier()->decision_count = 1;
+            }
+            break;
+        }
+        loom_kernel_class_group_t groups[] = {
+            {
+                .classifier = optional.classifier(),
+                .sites = optional.sites(),
+                .site_count = 4,
+            },
+            {
+                .classifier = required.classifier(),
+                .sites = required.sites(),
+                .site_count = 4,
+            },
+        };
+        if (reverse) {
+          std::swap(groups[0], groups[1]);
+        }
+        auto options = loom_kernel_class_collection_options_default();
+        options.class_limit = limit;
+        loom_kernel_class_collection_t collections[2] = {};
+        iree_status_t status = loom_kernel_class_collect_groups(
+            groups, IREE_ARRAYSIZE(groups), nullptr, &options, &analysis_arena_,
+            collections);
+        if (limit < test.minimum) {
+          EXPECT_TRUE(iree_status_is_resource_exhausted(status));
+          iree_status_ignore(status);
+          for (const auto& collection : collections) {
+            EXPECT_EQ(collection.class_count, 0u);
+            EXPECT_EQ(collection.site_classes, nullptr);
+          }
+          continue;
+        }
+        IREE_ASSERT_OK(status);
+        // Source-order admission does not revisit earlier optional decisions
+        // after a later provider releases its generic structural reservation.
+        const uint16_t expected =
+            test.requirement == Requirement::kGenericShape && !reverse &&
+                    limit == 5
+                ? 4
+                : std::min(limit, test.maximum);
+        EXPECT_EQ(collections[0].class_count + collections[1].class_count,
+                  expected);
+        const auto& a = collections[reverse ? 1 : 0];
+        const auto& b = collections[reverse ? 0 : 1];
+        EXPECT_EQ(a.site_classes[0], a.site_classes[1]);
+        EXPECT_EQ(a.site_classes[2], a.site_classes[3]);
+        EXPECT_EQ(a.site_classes[0] == a.site_classes[2], a.class_count == 1);
+        if (test.requirement == Requirement::kRequiredDecision) {
+          EXPECT_EQ(b.site_classes[0], b.site_classes[1]);
+          EXPECT_EQ(b.site_classes[2], b.site_classes[3]);
+          EXPECT_NE(b.site_classes[0], b.site_classes[2]);
+        } else if (b.class_count == 3) {
+          EXPECT_EQ(b.site_classes[1], b.site_classes[3]);
+          EXPECT_NE(b.site_classes[0], b.site_classes[2]);
+        } else if (b.class_count == 4) {
+          for (unsigned i = 0; i < 4; ++i) {
+            for (unsigned j = 0; j < i; ++j) {
+              EXPECT_NE(b.site_classes[i], b.site_classes[j]);
+            }
+          }
+        }
+        for (const auto& collection : collections) {
+          iree_host_size_t members = 0;
+          for (uint16_t i = 0; i < collection.class_count; ++i) {
+            members += collection.classes[i].member_count;
+          }
+          EXPECT_EQ(members, 4u);
+        }
+      }
+    }
   }
 }
 
