@@ -1344,7 +1344,7 @@ typedef struct loom_kernel_class_refinement_t {
 } loom_kernel_class_refinement_t;
 
 typedef struct loom_kernel_class_candidate_t {
-  // Observed structural refinements; NULL when no shape tracking is needed.
+  // Observed structural refinements; NULL when parent bindings are unchanged.
   loom_kernel_class_refinement_t* groups;
   // Number of complete prefix classes, including their structural variants.
   uint32_t count;
@@ -1367,7 +1367,8 @@ static iree_status_t loom_kernel_class_refine(
     loom_kernel_class_candidate_t* candidate) {
   *candidate =
       (loom_kernel_class_candidate_t){.fits = true, .publishable = true};
-  uint32_t capacity = partition->class_limit;
+  uint32_t capacity =
+      (uint32_t)iree_min(partition->site_count, partition->class_limit);
   if (evaluate) {
     loom_decision_class_partition_begin(partition,
                                         decision->model->program.choice_count);
@@ -1450,19 +1451,13 @@ static iree_status_t loom_kernel_class_refine(
         (loom_kernel_class_shape_t){.projections = projections, .count = count};
     maximum_values = iree_max(maximum_values, count);
   }
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      scratch, maximum_values ? capacity : pair_count,
-      sizeof(*candidate->groups), (void**)&candidate->groups));
   if (!maximum_values) {
     candidate->count = pair_count;
-    for (uint32_t pair = 0; pair < pair_count; ++pair) {
-      candidate->groups[pair] = (loom_kernel_class_refinement_t){
-          .parent = partition->candidate_parent_classes[pair],
-          .action = partition->candidate_outcomes[pair],
-          .pair = pair};
-    }
     return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(scratch, capacity,
+                                                 sizeof(*candidate->groups),
+                                                 (void**)&candidate->groups));
   uint32_t* direct_classes = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       scratch, pair_count, sizeof(*direct_classes), (void**)&direct_classes));
@@ -1552,7 +1547,7 @@ static iree_status_t loom_kernel_class_commit(
     iree_host_size_t* trace_capacity,
     loom_decision_class_partition_t* partition, iree_arena_allocator_t* arena,
     iree_arena_allocator_t* scratch) {
-  if (!candidate->groups) {
+  if (!current_bindings) {
     if (candidate->count > UINT32_MAX - *trace_count) {
       return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                               "kernel class trace table exceeds uint32_t");
@@ -1592,7 +1587,17 @@ static iree_status_t loom_kernel_class_commit(
       scratch, candidate->count, sizeof(*new_traces), (void**)&new_traces));
   uint32_t added = 0;
   for (uint32_t i = 0; i < candidate->count; ++i) {
-    const loom_kernel_class_refinement_t* group = &candidate->groups[i];
+    loom_kernel_class_refinement_t unchanged;
+    const loom_kernel_class_refinement_t* group;
+    if (candidate->groups) {
+      group = &candidate->groups[i];
+    } else {
+      unchanged = (loom_kernel_class_refinement_t){
+          .parent = partition->candidate_parent_classes[i],
+          .action = partition->candidate_outcomes[i],
+      };
+      group = &unchanged;
+    }
     const loom_kernel_class_shape_binding_t* parent =
         current_bindings[group->parent];
     if (group->count == 0) {
@@ -1679,6 +1684,8 @@ static iree_status_t loom_kernel_class_collect(
   if (!site_count) {
     return iree_ok_status();
   }
+  const uint32_t capacity =
+      (uint32_t)iree_min(site_count, options->class_limit);
   loom_decision_class_partition_t partition;
   IREE_RETURN_IF_ERROR(loom_decision_class_partition_initialize(
       site_count, options->class_limit,
@@ -1697,18 +1704,16 @@ static iree_status_t loom_kernel_class_collect(
   loom_kernel_class_trace_id_t *trace_ids = NULL, *next_trace_ids = NULL;
   if (classifier->has_shape_requirements) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, options->class_limit, sizeof(*bindings), (void**)&bindings));
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, options->class_limit,
-                                                   sizeof(*next_bindings),
-                                                   (void**)&next_bindings));
-    memset(bindings, 0, options->class_limit * sizeof(*bindings));
+        arena, capacity, sizeof(*bindings), (void**)&bindings));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, capacity, sizeof(*next_bindings), (void**)&next_bindings));
+    memset(bindings, 0, capacity * sizeof(*bindings));
   }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, options->class_limit, sizeof(*trace_ids), (void**)&trace_ids));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, options->class_limit,
-                                                 sizeof(*next_trace_ids),
-                                                 (void**)&next_trace_ids));
-  memset(trace_ids, 0xFF, options->class_limit * sizeof(*trace_ids));
+      arena, capacity, sizeof(*trace_ids), (void**)&trace_ids));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, capacity, sizeof(*next_trace_ids), (void**)&next_trace_ids));
+  memset(trace_ids, 0xFF, capacity * sizeof(*trace_ids));
   loom_kernel_class_decision_result_t* results = NULL;
   IREE_RETURN_IF_ERROR(loom_kernel_class_allocate_array(
       arena, classifier->decision_count, sizeof(*results), (void**)&results));
@@ -1723,7 +1728,7 @@ static iree_status_t loom_kernel_class_collect(
   uint32_t trace_count = 0, accepted = 0, skipped = 0;
   iree_host_size_t trace_capacity = 0;
   loom_kernel_class_residual_t residual = {.overflow_decision = UINT32_MAX};
-  uint32_t bucket_count = loom_kernel_class_bucket_count(options->class_limit);
+  uint32_t bucket_count = loom_kernel_class_bucket_count(capacity);
   uint64_t* completion_buckets = NULL;
   // Common and unavailable bodies cannot be deferred to optional admission.
   loom_value_set_id_t common_values = 0;

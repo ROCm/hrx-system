@@ -560,6 +560,62 @@ TEST_F(KernelClassClassifierTest,
 }
 
 TEST_F(KernelClassClassifierTest,
+       RepeatedShapesPreserveBindingsAndShareDecisionTraces) {
+  constexpr uint32_t kDecisionCount = 32;
+  ManualBinaryClassifier fixture(/*has_generic_residual=*/true);
+  IREE_ASSERT_OK(fixture.InitializeSites(&analysis_arena_));
+  const uint32_t width = 1;
+  const loom_kernel_class_shape_t shapes[] = {
+      {.projections = &width, .count = 1},
+      {.projections = &width, .count = 1},
+  };
+  fixture.classifier()->has_shape_requirements = true;
+  fixture.decisions()[0].action_shapes = shapes;
+  fixture.decisions()[0].residual_shape = shapes[0];
+  std::vector<loom_kernel_class_decision_t> decisions(kDecisionCount,
+                                                      fixture.decisions()[0]);
+  fixture.classifier()->decisions = decisions.data();
+  fixture.classifier()->decision_count = decisions.size();
+
+  for (bool source_shape : {false, true}) {
+    fixture.classifier()->shape =
+        source_shape ? shapes[0] : loom_kernel_class_shape_t{};
+    for (uint16_t site_count : {2, 4}) {
+      for (uint16_t class_limit : {site_count, uint16_t{128}}) {
+        auto options = loom_kernel_class_collection_options_default();
+        options.class_limit = class_limit;
+        loom_kernel_class_collection_t collection = {};
+        IREE_ASSERT_OK(loom_kernel_class_classifier_collect(
+            fixture.classifier(), nullptr, fixture.sites(), site_count,
+            &options, &analysis_arena_, &collection));
+        ASSERT_EQ(collection.class_count, site_count);
+        EXPECT_EQ(collection.accepted_decision_count, kDecisionCount);
+        EXPECT_EQ(collection.trace_count, site_count / 2 * kDecisionCount);
+        for (uint16_t site = 0; site < site_count; ++site) {
+          const auto& entry = collection.classes[collection.site_classes[site]];
+          ASSERT_EQ(entry.shape_value_count, 1u);
+          EXPECT_EQ(entry.shape_values[0].projection, width);
+          EXPECT_TRUE(loom_value_facts_is_exact(entry.shape_values[0].facts));
+          EXPECT_EQ(entry.shape_values[0].facts.range_lo, site % 2);
+          const auto& peer =
+              collection.classes[collection.site_classes[site ^ 1]];
+          EXPECT_EQ(entry.trace_id, peer.trace_id);
+          auto trace_id = entry.trace_id;
+          for (uint32_t ordinal = kDecisionCount; ordinal != 0; --ordinal) {
+            ASSERT_NE(trace_id, LOOM_KERNEL_CLASS_TRACE_ID_INVALID);
+            const auto& trace = collection.traces[trace_id];
+            EXPECT_EQ(trace.decision_ordinal, ordinal - 1);
+            EXPECT_EQ(trace.action_ordinal, site < 2 ? 1u : 0u);
+            trace_id = trace.parent_trace_id;
+          }
+          EXPECT_EQ(trace_id, LOOM_KERNEL_CLASS_TRACE_ID_INVALID);
+        }
+      }
+    }
+  }
+}
+
+TEST_F(KernelClassClassifierTest,
        ClassLimitRetainsGenericResidualWithoutAliasingClasses) {
   ManualBinaryClassifier fixture(/*has_generic_residual=*/true);
   IREE_ASSERT_OK(fixture.InitializeSites(&analysis_arena_));
