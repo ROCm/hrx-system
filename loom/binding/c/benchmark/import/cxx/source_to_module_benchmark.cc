@@ -269,6 +269,65 @@ void SelectedRecord(::benchmark::State& state) {
   SourceToModule(state, &input);
 }
 
+// Keep source construction outside the timed importer. A semantic array read
+// exercises ordinal planning and sparse writeback across increasing extents.
+void SelectedArray(::benchmark::State& state) {
+  const auto count = static_cast<size_t>(state.range(0));
+  std::string source =
+      "struct Item { unsigned* data; unsigned value; }; unsigned update("
+      "unsigned* data, unsigned selector, unsigned next) { Item items[" +
+      std::to_string(count) + "] = {";
+  for (size_t index = 0; index < count; ++index) {
+    if (index) {
+      source += ",";
+    }
+    source += "{data," + std::to_string(index) + "u}";
+  }
+  source +=
+      "}; items[selector].value += next; return items[selector].value + "
+      "items[" +
+      std::to_string(count - 1) + "].value;}";
+  const SourceToModuleInput input = {SourceLanguage::kCxx, source.c_str(),
+                                     nullptr, nullptr};
+  SourceToModule(state, &input);
+}
+
+// Keep source construction outside the timed importer. The accessor and its
+// forwarding helper force each retained element origin through two ordinary
+// reference-result boundaries before one selected-field writeback.
+void ProjectedReferenceArray(::benchmark::State& state) {
+  const auto count = static_cast<size_t>(state.range(0));
+  std::string source =
+      "struct Item { unsigned* data; unsigned value; }; struct Items { Item "
+      "values[" +
+      std::to_string(count) +
+      "]; [[loom::noinline]] Item& at(unsigned index) { return "
+      "values[index]; }}; [[loom::noinline]] static Item& forward(Items& "
+      "items, "
+      "unsigned index) { return items.at(index); } unsigned update(unsigned* "
+      "data, unsigned selector, unsigned next) { Items items{{";
+  for (size_t index = 0; index < count; ++index) {
+    if (index) {
+      source += ",";
+    }
+    source += "{data," + std::to_string(index) + "u}";
+  }
+  source +=
+      "}}; Item& selected = forward(items, selector); selected.value = next; "
+      "return ";
+  for (size_t index = 0; index < count; ++index) {
+    if (index) {
+      source += "+";
+    }
+    source += std::to_string(index + 1) + "u * items.values[" +
+              std::to_string(index) + "].value";
+  }
+  source += ";}";
+  const SourceToModuleInput input = {SourceLanguage::kCxx, source.c_str(),
+                                     nullptr, nullptr};
+  SourceToModule(state, &input);
+}
+
 void SourceToPreamble(::benchmark::State& state,
                       const SourceToModuleInput* source) {
   RunCompileBenchmarkDirect(state, CreateSourceToModuleScenario, source);
@@ -438,6 +497,16 @@ BENCHMARK_CAPTURE(SourceToModule, AggregateRecord, &kAggregateRecord)
 BENCHMARK_CAPTURE(SourceToModule, UserConstructor, &kUserConstructor)
     ->Unit(::benchmark::kMicrosecond);
 BENCHMARK(SelectedRecord)
+    ->Arg(2)
+    ->Arg(8)
+    ->Arg(32)
+    ->Unit(::benchmark::kMicrosecond);
+BENCHMARK(SelectedArray)
+    ->Arg(2)
+    ->Arg(8)
+    ->Arg(32)
+    ->Unit(::benchmark::kMicrosecond);
+BENCHMARK(ProjectedReferenceArray)
     ->Arg(2)
     ->Arg(8)
     ->Arg(32)

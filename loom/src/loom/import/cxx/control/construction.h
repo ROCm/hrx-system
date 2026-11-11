@@ -86,6 +86,16 @@ class Construction {
     std::vector<Destination> destinations;
   };
 
+  // Classifies actual mappings selected on every source path. Overlapping
+  // formal components remain definite only when every alternative names the
+  // same caller identity and offset.
+  static void classify_definite_arguments(std::span<Argument> arguments);
+  // Classifies indirect assignment destinations selected on every source
+  // path. Overlapping source components remain definite only when every
+  // alternative names the same complete destination interval.
+  static void classify_definite_destinations(
+      std::span<Destination> destinations);
+
   const State& state() const { return current_; }
   void restore(State state) { current_ = state; }
   State join(State left, State right);

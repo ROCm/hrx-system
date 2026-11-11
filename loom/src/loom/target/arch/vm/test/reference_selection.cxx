@@ -18,6 +18,9 @@ static Payload make(unsigned value) {
   if (value == 22u) {
     return loom::buffer::root(loom::buffer::constant("\x16"));
   }
+  if (value == 44u) {
+    return loom::buffer::root(loom::buffer::constant("\x2c"));
+  }
   return loom::buffer::root(loom::buffer::constant("\x21"));
 }
 
@@ -357,4 +360,215 @@ unsigned selected_destruction(bool choose, unsigned observation) {
     return total;
   }
   return observation == 1u ? snapshot : during_lifetime;
+}
+
+// Arrays containing semantic members remain value partitions. Dynamic
+// selection may replace one element while saved values and unselected elements
+// retain their independent payloads.
+unsigned selected_array(unsigned choice) {
+  Cell values[3] = {{make(11u)}, {make(12u)}, {make(22u)}};
+  Cell& selected = choice[values];
+  const auto snapshot = selected.payload;
+  replace(selected, make(44u));
+  return read(values[0].payload) + 100u * read(values[1].payload) +
+         10000u * read(values[2].payload) + 1000000u * read(snapshot);
+}
+
+// Nested dynamic subscripts form one row-major source selection. Mutation and
+// subsequent observations use that same retained identity.
+unsigned selected_array_matrix(unsigned row, unsigned column) {
+  Cell values[2][2] = {
+      {{make(11u)}, {make(12u)}},
+      {{make(22u)}, {make(33u)}},
+  };
+  Cell& selected = values[row][column];
+  const auto snapshot = selected.payload;
+  replace(selected, make(44u));
+  return read(values[0][0].payload) + 100u * read(values[0][1].payload) +
+         10000u * read(values[1][0].payload) +
+         1000000u * read(values[1][1].payload) + 100000000u * read(snapshot);
+}
+
+struct ReferenceArray {
+  // Semantic records selected by the reference-returning accessor.
+  Cell values[3];
+
+  [[loom::noinline]] Cell& operator[](unsigned index) { return values[index]; }
+  [[loom::noinline]] const Cell& edge(bool first) const {
+    if (first) {
+      return values[0];
+    }
+    return values[2];
+  }
+};
+
+static ReferenceArray initial_reference_array() {
+  return {{{make(11u)}, {make(12u)}, {make(22u)}}};
+}
+
+static ReferenceArray replacement_reference_array() {
+  return {{{make(44u)}, {make(33u)}, {make(12u)}}};
+}
+
+[[loom::noinline]] static Cell& forward_array_reference(ReferenceArray& array,
+                                                        unsigned index) {
+  return array[index];
+}
+
+[[loom::noinline]] static Cell& forward_array_reference_again(
+    ReferenceArray& array, unsigned index) {
+  return forward_array_reference(array, index);
+}
+
+[[loom::noinline]] static Cell& first_array_reference_with_effect(
+    ReferenceArray& array, unsigned& calls) {
+  ++calls;
+  return array.values[0];
+}
+
+[[loom::noinline]] static Cell& forward_first_array_reference_with_effect(
+    ReferenceArray& array, unsigned& calls) {
+  return first_array_reference_with_effect(array, calls);
+}
+
+// A reference returned through two ordinary calls remains attached to the
+// selected subobject when its complete owner is replaced. Both aliases observe
+// the replacement, while the copied payload retains the original value.
+unsigned returned_array_reference(unsigned index, unsigned observation) {
+  auto array = initial_reference_array();
+  Cell& selected = forward_array_reference_again(array, index);
+  Cell& alias = array[index];
+  const Payload& watched = selected.payload;
+  const auto snapshot = selected.payload;
+  selected.payload = make(33u);
+  array = replacement_reference_array();
+  alias.payload = make(22u);
+  if (observation == 0u) {
+    return read(array.values[0].payload);
+  }
+  if (observation == 1u) {
+    return read(array.values[1].payload);
+  }
+  if (observation == 2u) {
+    return read(array.values[2].payload);
+  }
+  if (observation == 3u) {
+    return read(watched);
+  }
+  if (observation == 4u) {
+    return read(snapshot);
+  }
+  return read(selected.payload);
+}
+
+unsigned returned_array_edge(bool first) {
+  auto array = initial_reference_array();
+  return read(array.edge(first).payload);
+}
+
+struct WideReferenceArray {
+  // Nine origins cross the bounded linear canonicalization threshold.
+  Cell values[9];
+
+  [[loom::noinline]] const Cell& operator[](unsigned index) const {
+    return values[index];
+  }
+};
+
+unsigned returned_wide_const_array_reference(unsigned index) {
+  const auto first = loom::buffer::root(loom::buffer::constant("\x01"));
+  const auto second = loom::buffer::root(loom::buffer::constant("\x02"));
+  const auto third = loom::buffer::root(loom::buffer::constant("\x03"));
+  const auto fourth = loom::buffer::root(loom::buffer::constant("\x04"));
+  const auto fifth = loom::buffer::root(loom::buffer::constant("\x05"));
+  const auto sixth = loom::buffer::root(loom::buffer::constant("\x06"));
+  const auto seventh = loom::buffer::root(loom::buffer::constant("\x07"));
+  const auto eighth = loom::buffer::root(loom::buffer::constant("\x08"));
+  const auto ninth = loom::buffer::root(loom::buffer::constant("\x09"));
+  const WideReferenceArray array{{{first},
+                                  {second},
+                                  {third},
+                                  {fourth},
+                                  {fifth},
+                                  {sixth},
+                                  {seventh},
+                                  {eighth},
+                                  {ninth}}};
+  return read(array[index].payload);
+}
+
+unsigned returned_exact_reference_effect() {
+  auto array = initial_reference_array();
+  unsigned calls = 0u;
+  const auto payload =
+      forward_first_array_reference_with_effect(array, calls).payload;
+  return 100u * calls + read(payload);
+}
+
+struct ReferencePair {
+  // First complete semantic record selected through the pair reference.
+  Cell first;
+  // Second complete semantic record selected through the pair reference.
+  Cell second;
+};
+
+[[loom::noinline]] static Cell& mixed_reference_origin(bool direct, Cell& cell,
+                                                       ReferencePair& pair) {
+  if (direct) {
+    return cell;
+  }
+  return pair.second;
+}
+
+[[loom::noinline]] static Cell& select_pair_reference(bool first,
+                                                      ReferencePair& pair) {
+  return first ? pair.first : pair.second;
+}
+
+[[loom::noinline]] static Cell& forward_selected_pair_reference(
+    bool first_pair, bool first_field, ReferencePair& left,
+    ReferencePair& right) {
+  return select_pair_reference(first_field, first_pair ? left : right);
+}
+
+unsigned returned_mixed_reference(bool direct) {
+  Cell cell{make(11u)};
+  ReferencePair pair{{make(12u)}, {make(22u)}};
+  return read(mixed_reference_origin(direct, cell, pair).payload);
+}
+
+unsigned returned_nested_reference(bool first_pair, bool first_field) {
+  ReferencePair left{{make(11u)}, {make(12u)}};
+  ReferencePair right{{make(22u)}, {make(33u)}};
+  Cell& selected =
+      forward_selected_pair_reference(first_pair, first_field, left, right);
+  selected.payload = make(44u);
+  return read(left.first.payload) + 100u * read(left.second.payload) +
+         10000u * read(right.first.payload) +
+         1000000u * read(right.second.payload);
+}
+
+struct StoredScalars {
+  // Neighbor preceding the stored return candidate.
+  unsigned first;
+  // Stored subobject competing with an automatic reference candidate.
+  unsigned second;
+};
+
+[[loom::noinline]] static unsigned& mixed_storage_reference(bool stored,
+                                                            StoredScalars& pair,
+                                                            unsigned& value) {
+  return stored ? pair.second : value;
+}
+
+// One selected reference spans two source representations. Taking the pair's
+// address gives that candidate storage identity; the automatic scalar must
+// share the callee's uniform storage result without losing writeback.
+unsigned returned_mixed_storage_reference(bool stored) {
+  StoredScalars pair{11u, 12u};
+  StoredScalars* pointer = &pair;
+  unsigned value = 22u;
+  unsigned& selected = mixed_storage_reference(stored, *pointer, value);
+  selected = 44u;
+  return pair.first + 100u * pair.second + 10000u * value;
 }

@@ -42,10 +42,30 @@ struct ControlFlow::TemporaryDestructionFacts {
 };
 
 struct ControlFlow::ReferenceIdentityFacts {
+  struct IntervalHash {
+    size_t operator()(const ObjectInterval& interval) const {
+      auto mix = [](size_t hash, size_t value) {
+        return hash ^
+               (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
+      };
+      size_t hash = reinterpret_cast<uintptr_t>(interval.binding);
+      hash = mix(hash, interval.begin);
+      hash = mix(hash, interval.end);
+      return mix(hash, interval.reference_offset);
+    }
+  };
+
+  struct Result {
+    // Exact automatic-object intervals in stable source encounter order.
+    std::vector<ObjectInterval> intervals;
+    // Wide fixed-point canonicalization index, absent for small results.
+    std::unique_ptr<std::unordered_set<ObjectInterval, IntervalHash>> index;
+  };
+
   // Sparse member-slice vectors referenced directly by retained call edges.
   std::vector<std::unique_ptr<std::vector<ObjectInterval>>> argument_slices;
-  // Exact automatic-object intervals supplied by a reference-returning call.
-  std::unordered_map<cxx::AST*, std::vector<ObjectInterval>> results;
+  // Exact automatic-object results and their optional wide analysis indices.
+  std::unordered_map<cxx::AST*, Result> results;
   // Calls whose selected callable ABI produces durable storage.
   std::unordered_set<cxx::AST*> storage_results;
 };
@@ -70,17 +90,102 @@ struct ControlFlow::ReferenceWriteFacts {
   std::unordered_map<cxx::AST*, Result> results;
 };
 
-struct ControlFlow::SelectedReferenceReturnFacts {
-  // Parameter symbol to source ordinal during analysis and selected-result
-  // index after finalization. SIZE_MAX denotes an unselected parameter.
-  std::unordered_map<cxx::Symbol*, size_t> parameter_indices;
-  // Candidate source ordinals in first-return encounter order.
-  std::vector<size_t> parameters;
-  // Whether an address-observing caller requires durable pointer transport.
+struct ControlFlow::ProjectedReferenceReturnFacts {
+  struct OriginHash {
+    size_t operator()(const ReferenceResultOrigin& origin) const {
+      auto mix = [](size_t hash, size_t value) {
+        return hash ^
+               (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
+      };
+      size_t hash = origin.owner_ordinal;
+      hash = mix(hash, reinterpret_cast<uintptr_t>(origin.projection.type));
+      hash =
+          mix(hash, reinterpret_cast<uintptr_t>(origin.projection.partition));
+      return mix(hash, origin.projection.component_offset);
+    }
+  };
+
+  struct Selection {
+    // Canonical origin indices in source selection order.
+    std::vector<size_t> origins;
+    // Callee origins already translated through this call. SIZE_MAX denotes a
+    // direct source selection that does not participate in propagation.
+    size_t propagated_origin_count = SIZE_MAX;
+  };
+
+  // Possible caller-owned subobjects in source selection order.
+  std::vector<ReferenceResultOrigin> origins;
+  // Canonicalization index created only after the bounded linear prefix.
+  std::unordered_map<ReferenceResultOrigin, size_t, OriginHash> origin_indices;
+  // Source leaves indexing their possible origins and propagation progress.
+  // A forwarded call can gain origins over several fixed-point iterations
+  // without moving other leaves.
+  std::unordered_map<cxx::AST*, Selection> selections;
+  // Whole-parameter leaves promoted into a mixed projected result.
+  std::unordered_map<cxx::Symbol*, size_t> complete_parameter_indices;
+  // Whole current-object leaf promoted into a mixed projected result.
+  size_t complete_receiver_index = SIZE_MAX;
+  // Reference parameters indexed once when a projected origin needs them.
+  std::unordered_map<cxx::Symbol*, size_t> parameter_ordinals;
+  // Direct receiver fields indexed once with their complete component offset.
+  std::unordered_map<cxx::Symbol*, size_t> receiver_offsets;
+  // Whether the wide parameter index has been populated.
+  bool parameter_ordinals_indexed = false;
+  // Whether the wide receiver-field index has been populated.
+  bool receiver_offsets_indexed = false;
+  // Parameter ordinals that own at least one projected result candidate.
+  std::vector<bool> parameter_has_origin;
+  // Parameters with a candidate smaller than their storage ABI carrier.
+  std::unordered_set<cxx::Symbol*> partial_parameter_origins;
+  // Whether a result candidate is smaller than the storage receiver.
+  bool has_partial_receiver_origin = false;
+  // Whether every origin must use durable pointer transport.
   bool requires_storage = false;
 };
 
 namespace {
+
+// Small reference sets dominate ordinary source calls. Keep them inline while
+// bounding the linear prefix before switching large sets to hashed lookup.
+constexpr size_t kLinearCanonicalizationThreshold = 8;
+
+// Most projected origins translate through one complete argument owner. Keep
+// that result inline and spill only when the argument itself has several
+// possible identities.
+struct TranslatedReferenceOrigins {
+  void append(ReferenceResultOrigin origin) {
+    if (!single && multiple.empty()) {
+      single = std::move(origin);
+      return;
+    }
+    if (multiple.empty()) {
+      multiple.reserve(4);
+      multiple.push_back(std::move(*single));
+      single.reset();
+    }
+    multiple.push_back(std::move(origin));
+  }
+
+  void invalidate() {
+    valid = false;
+    single.reset();
+    multiple.clear();
+  }
+
+  bool empty() const { return !single && multiple.empty(); }
+
+  std::span<ReferenceResultOrigin> values() {
+    return single ? std::span<ReferenceResultOrigin>{&*single, 1}
+                  : std::span<ReferenceResultOrigin>{multiple};
+  }
+
+  // Whether every visited interval maps to one complete caller-owned origin.
+  bool valid = true;
+  // Allocation-free ordinary result, absent after spilling or invalidation.
+  std::optional<ReferenceResultOrigin> single;
+  // Multiple concrete origins retained only for an actually selected argument.
+  std::vector<ReferenceResultOrigin> multiple;
+};
 
 ReferenceProjection compose_projection(ReferenceProjection parent,
                                        ReferenceProjection child) {
@@ -325,30 +430,10 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
   }
   accept(body);
   if (reference_return_ == ReferenceReturn::Parameter) {
-    if (selected_reference_return_facts_) {
-      auto& facts = *selected_reference_return_facts_;
-      std::vector<size_t> selected_indices(function_->parameters().size(),
-                                           SIZE_MAX);
-      std::vector<size_t> unique;
-      unique.reserve(facts.parameters.size());
-      for (size_t ordinal : facts.parameters) {
-        auto& index = selected_indices[ordinal];
-        if (index != SIZE_MAX) {
-          continue;
-        }
-        index = unique.size();
-        unique.push_back(ordinal);
-      }
-      facts.parameters = std::move(unique);
-      IREE_ASSERT(facts.parameters.size() > 1);
-      for (auto& [parameter, index] : facts.parameter_indices) {
-        index = selected_indices[index];
-      }
-    } else {
-      IREE_ASSERT(reference_return_parameter_ != SIZE_MAX);
-    }
-  } else {
-    selected_reference_return_facts_.reset();
+    IREE_ASSERT(reference_return_parameter_ != SIZE_MAX);
+  }
+  if (reference_return_ != ReferenceReturn::Projected) {
+    projected_reference_return_facts_.reset();
   }
   temporary_origins_.finish();
   retain_temporary_destructions();
@@ -364,30 +449,29 @@ const Destruction* ControlFlow::automatic_destruction(
 ControlFlow::~ControlFlow() = default;
 
 std::optional<size_t> ControlFlow::reference_return_parameter() const {
-  return reference_return_ == ReferenceReturn::Parameter &&
-                 !selected_reference_return_facts_
+  return reference_return_ == ReferenceReturn::Parameter
              ? std::optional(reference_return_parameter_)
              : std::nullopt;
 }
 
-std::span<const size_t> ControlFlow::selected_reference_return_parameters()
-    const {
-  return reference_return_ == ReferenceReturn::Parameter &&
-                 selected_reference_return_facts_ &&
-                 !selected_reference_return_facts_->requires_storage
-             ? std::span<const size_t>{selected_reference_return_facts_
-                                           ->parameters}
-             : std::span<const size_t>{};
+std::span<const ReferenceResultOrigin>
+ControlFlow::projected_reference_return_origins(bool value_receiver) const {
+  if (reference_return_ != ReferenceReturn::Projected ||
+      !projected_reference_return_facts_) {
+    return {};
+  }
+  const auto& facts = *projected_reference_return_facts_;
+  if (facts.requires_storage ||
+      (!value_receiver && facts.has_partial_receiver_origin)) {
+    return {};
+  }
+  return facts.origins;
 }
 
 std::span<const size_t> ControlFlow::reference_return_parameters() const {
-  if (reference_return_ != ReferenceReturn::Parameter) {
-    return {};
-  }
-  return selected_reference_return_facts_
-             ? std::span<const size_t>{selected_reference_return_facts_
-                                           ->parameters}
-             : std::span<const size_t>{&reference_return_parameter_, 1};
+  return reference_return_ == ReferenceReturn::Parameter
+             ? std::span<const size_t>{&reference_return_parameter_, 1}
+             : std::span<const size_t>{};
 }
 
 std::optional<Destination> ControlFlow::destination(
@@ -441,23 +525,235 @@ bool ControlFlow::reference_written(cxx::Symbol* parameter) const {
   return written_references_.contains(parameter);
 }
 
-std::optional<size_t> ControlFlow::selected_reference_return_index(
+std::span<const size_t> ControlFlow::projected_reference_return_indices(
     cxx::ExpressionAST* expression) const {
-  if (!selected_reference_return_facts_) {
-    return std::nullopt;
+  if (!projected_reference_return_facts_) {
+    return {};
   }
   expression = unwrap_object_identity(unit_, expression);
+  auto found = projected_reference_return_facts_->selections.find(expression);
+  if (found != projected_reference_return_facts_->selections.end()) {
+    return found->second.origins;
+  }
+  if (projected_reference_return_facts_->complete_receiver_index != SIZE_MAX &&
+      is_current_object(unit_, expression)) {
+    return {&projected_reference_return_facts_->complete_receiver_index, 1};
+  }
   auto returned = destination(expression);
   if (!returned || returned->member || returned->component_offset != 0) {
+    return {};
+  }
+  auto parameter =
+      projected_reference_return_facts_->complete_parameter_indices.find(
+          returned->binding);
+  return parameter == projected_reference_return_facts_
+                          ->complete_parameter_indices.end()
+             ? std::span<const size_t>{}
+             : std::span<const size_t>{&parameter->second, 1};
+}
+
+std::pair<size_t, bool> ControlFlow::retain_projected_reference_origin(
+    ProjectedReferenceReturnFacts& facts, ReferenceResultOrigin origin) {
+  size_t retained_index = SIZE_MAX;
+  bool inserted = false;
+  if (facts.origin_indices.empty()) {
+    auto found = std::ranges::find(facts.origins, origin);
+    if (found != facts.origins.end()) {
+      return {static_cast<size_t>(found - facts.origins.begin()), false};
+    }
+    if (facts.origins.size() < kLinearCanonicalizationThreshold) {
+      retained_index = facts.origins.size();
+      inserted = true;
+    } else {
+      facts.origin_indices.reserve(
+          std::max(facts.origins.size() + 1, facts.origins.capacity()));
+      for (size_t index = 0; index < facts.origins.size(); ++index) {
+        facts.origin_indices.emplace(facts.origins[index], index);
+      }
+    }
+  }
+  if (retained_index == SIZE_MAX) {
+    auto retained =
+        facts.origin_indices.try_emplace(origin, facts.origins.size());
+    retained_index = retained.first->second;
+    inserted = retained.second;
+  }
+  if (inserted) {
+    facts.origins.push_back(std::move(origin));
+    const auto& retained = facts.origins.back();
+    if (retained.owner_ordinal == ReferenceResultOrigin::kReceiver) {
+      const bool partial = retained.projection.component_offset != 0 ||
+                           retained.projection.partition != receiver_partition_;
+      facts.has_partial_receiver_origin |= partial;
+      if (facts.requires_storage) {
+        receiver_requires_storage_ = true;
+      }
+    } else {
+      auto parameters = function_->parameters();
+      auto* parameter = parameters[retained.owner_ordinal];
+      if (facts.parameter_has_origin.empty()) {
+        facts.parameter_has_origin.resize(parameters.size());
+      }
+      facts.parameter_has_origin[retained.owner_ordinal] = true;
+      auto* type = types_.unqualified_value(parameter->type());
+      const bool partial =
+          retained.projection.component_offset != 0 ||
+          retained.projection.partition !=
+              &types_.partition(type, function_->declaration());
+      if (partial) {
+        facts.partial_parameter_origins.insert(parameter);
+      }
+      if (facts.requires_storage) {
+        storage_references_.insert(parameter);
+      } else if (partial && reference_uses_storage_abi(parameter)) {
+        promote_projected_reference_storage(facts);
+      }
+    }
+  }
+  return {retained_index, inserted};
+}
+
+bool ControlFlow::promote_projected_reference_storage(
+    ProjectedReferenceReturnFacts& facts) {
+  if (facts.requires_storage) {
+    return false;
+  }
+  facts.requires_storage = true;
+  auto parameters = function_->parameters();
+  for (const auto& origin : facts.origins) {
+    if (origin.owner_ordinal == ReferenceResultOrigin::kReceiver) {
+      receiver_requires_storage_ = true;
+    } else {
+      storage_references_.insert(parameters[origin.owner_ordinal]);
+    }
+  }
+  for (const auto& [expression, selection] : facts.selections) {
+    if (selection.propagated_origin_count != SIZE_MAX) {
+      identity_call_results_.insert(expression);
+    }
+  }
+  return true;
+}
+
+bool ControlFlow::reference_uses_storage_abi(cxx::Symbol* parameter) const {
+  auto traits = unit_.typeTraits();
+  auto* object_type = traits.remove_reference(parameter->type());
+  return reference_requires_storage(parameter) ||
+         traits.is_volatile(object_type) || traits.is_array(object_type);
+}
+
+std::optional<std::pair<size_t, size_t>> ControlFlow::projected_reference_owner(
+    ProjectedReferenceReturnFacts& facts, cxx::Symbol* binding) {
+  auto parameters = function_->parameters();
+  if (parameters.size() <= kLinearCanonicalizationThreshold) {
+    auto parameter = std::ranges::find(parameters, binding);
+    if (parameter != parameters.end() &&
+        unit_.typeTraits().is_reference((*parameter)->type())) {
+      return std::pair{static_cast<size_t>(parameter - parameters.begin()),
+                       size_t{0}};
+    }
+  } else {
+    if (!facts.parameter_ordinals_indexed) {
+      facts.parameter_ordinals.reserve(parameters.size());
+      for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
+        if (unit_.typeTraits().is_reference(parameters[ordinal]->type())) {
+          facts.parameter_ordinals.emplace(parameters[ordinal], ordinal);
+        }
+      }
+      facts.parameter_ordinals_indexed = true;
+    }
+    if (auto parameter = facts.parameter_ordinals.find(binding);
+        parameter != facts.parameter_ordinals.end()) {
+      return std::pair{parameter->second, size_t{0}};
+    }
+  }
+
+  if (!receiver_partition_) {
     return std::nullopt;
   }
-  auto found = selected_reference_return_facts_->parameter_indices.find(
-      returned->binding);
-  if (found == selected_reference_return_facts_->parameter_indices.end() ||
-      found->second == SIZE_MAX) {
-    return std::nullopt;
+  const auto& members = receiver_partition_->members;
+  if (members.size() <= kLinearCanonicalizationThreshold) {
+    auto receiver =
+        std::ranges::find(members, binding, &SubobjectPartition::source);
+    if (receiver == members.end()) {
+      return std::nullopt;
+    }
+    return std::pair{ReferenceResultOrigin::kReceiver,
+                     receiver->component_offset};
   }
-  return found->second;
+  if (!facts.receiver_offsets_indexed) {
+    facts.receiver_offsets.reserve(members.size());
+    for (const auto& member : members) {
+      facts.receiver_offsets.emplace(member.source, member.component_offset);
+    }
+    facts.receiver_offsets_indexed = true;
+  }
+  if (auto receiver = facts.receiver_offsets.find(binding);
+      receiver != facts.receiver_offsets.end()) {
+    return std::pair{ReferenceResultOrigin::kReceiver, receiver->second};
+  }
+  return std::nullopt;
+}
+
+void ControlFlow::merge_projected_reference_returns(
+    ProjectedReferenceReturnFacts& target,
+    ProjectedReferenceReturnFacts source) {
+  std::vector<size_t> remapped_indices;
+  remapped_indices.reserve(source.origins.size());
+  for (auto& origin : source.origins) {
+    remapped_indices.push_back(
+        retain_projected_reference_origin(target, std::move(origin)).first);
+  }
+  for (auto& [expression, selection] : source.selections) {
+    for (size_t& index : selection.origins) {
+      index = remapped_indices[index];
+    }
+    const bool propagated = selection.propagated_origin_count != SIZE_MAX;
+    target.selections.emplace(expression, std::move(selection));
+    if (target.requires_storage && propagated) {
+      identity_call_results_.insert(expression);
+    }
+  }
+  for (const auto& [parameter, index] : source.complete_parameter_indices) {
+    target.complete_parameter_indices.insert_or_assign(parameter,
+                                                       remapped_indices[index]);
+  }
+  if (source.complete_receiver_index != SIZE_MAX) {
+    target.complete_receiver_index =
+        remapped_indices[source.complete_receiver_index];
+  }
+  if (source.requires_storage) {
+    promote_projected_reference_storage(target);
+  }
+}
+
+void ControlFlow::retain_complete_parameter_reference_origins(
+    ProjectedReferenceReturnFacts& facts, std::span<const size_t> ordinals) {
+  auto parameters = function_->parameters();
+  for (size_t ordinal : ordinals) {
+    auto* type = types_.unqualified_value(parameters[ordinal]->type());
+    const size_t index =
+        retain_projected_reference_origin(
+            facts,
+            {ordinal,
+             {type, &types_.partition(type, function_->declaration()), 0}})
+            .first;
+    facts.complete_parameter_indices.insert_or_assign(parameters[ordinal],
+                                                      index);
+  }
+}
+
+void ControlFlow::retain_complete_receiver_reference_origin(
+    ProjectedReferenceReturnFacts& facts) {
+  auto* object_type = implicit_object_type(unit_, function_);
+  auto* type = object_type ? types_.unqualified(object_type) : nullptr;
+  const auto* record =
+      type ? types_.record(type, function_->declaration()) : nullptr;
+  IREE_ASSERT(record);
+  facts.complete_receiver_index =
+      retain_projected_reference_origin(
+          facts, {ReferenceResultOrigin::kReceiver, {type, record, 0}})
+          .first;
 }
 
 bool ControlFlow::argument_requires_storage(const CallArgument& argument,
@@ -505,7 +801,15 @@ bool ControlFlow::argument_requires_storage(const CallArgument& argument,
 }
 
 bool ControlFlow::require_reference_storage(cxx::Symbol* parameter) {
-  return storage_references_.insert(parameter).second;
+  bool changed = storage_references_.insert(parameter).second;
+  if (changed && projected_reference_return_facts_ &&
+      projected_reference_return_facts_->partial_parameter_origins.contains(
+          parameter)) {
+    changed = promote_projected_reference_storage(
+                  *projected_reference_return_facts_) ||
+              changed;
+  }
+  return changed;
 }
 
 bool ControlFlow::storage_backed(cxx::MemberExpressionAST* expression) const {
@@ -662,11 +966,13 @@ void ControlFlow::postVisit(cxx::AST* ast) {
     }
     if (owner) {
       object_owners_.emplace(expression, owner);
-      // The resolved frontend can retain an array operand directly on builtin
-      // subscripts instead of inserting an explicit decay cast. Evaluating an
-      // array lvalue borrows its storage in either spelling.
+      // Ordinary source arrays borrow their storage even when the frontend
+      // retains the array operand directly on a builtin subscript. Arrays
+      // containing values without a C++ object-storage representation instead
+      // keep their element components until an operation observes an address.
       if (!reference_member && expression->type &&
-          unit_.typeTraits().is_array(expression->type)) {
+          unit_.typeTraits().is_array(expression->type) &&
+          !types_.requires_value_transport(expression->type)) {
         require_address(owner);
       }
     }
@@ -1135,17 +1441,29 @@ void ControlFlow::visit(cxx::UnaryExpressionAST* ast) {
 }
 
 bool ControlFlow::collect_reference_return_parameters(
-    cxx::ExpressionAST* expression, std::vector<size_t>& ordinals) {
+    cxx::ExpressionAST* expression, std::vector<size_t>& ordinals,
+    std::unordered_map<cxx::Symbol*, size_t>* parameter_indices) {
   expression = unwrap_object_identity(unit_, expression);
   if (auto* conditional =
           cxx::ast_cast<cxx::ConditionalExpressionAST>(expression);
       conditional &&
       expression->valueCategory != cxx::ValueCategory::kPrValue) {
+    std::unordered_map<cxx::Symbol*, size_t> local_indices;
+    if (!parameter_indices) {
+      auto parameters = function_->parameters();
+      if (parameters.size() > kLinearCanonicalizationThreshold) {
+        local_indices.reserve(parameters.size());
+        for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
+          local_indices.emplace(parameters[ordinal], ordinal);
+        }
+        parameter_indices = &local_indices;
+      }
+    }
     const size_t ordinal_mark = ordinals.size();
     if (collect_reference_return_parameters(conditional->iftrueExpression,
-                                            ordinals) &&
+                                            ordinals, parameter_indices) &&
         collect_reference_return_parameters(conditional->iffalseExpression,
-                                            ordinals)) {
+                                            ordinals, parameter_indices)) {
       return true;
     }
     ordinals.resize(ordinal_mark);
@@ -1157,43 +1475,157 @@ bool ControlFlow::collect_reference_return_parameters(
     return false;
   }
   auto parameters = function_->parameters();
-  if (!selected_reference_return_facts_ &&
-      reference_return_parameter_ != SIZE_MAX &&
-      parameters[reference_return_parameter_] == returned->binding) {
-    ordinals.push_back(reference_return_parameter_);
-    return true;
+  size_t ordinal = SIZE_MAX;
+  if (parameter_indices) {
+    auto found = parameter_indices->find(returned->binding);
+    if (found != parameter_indices->end()) {
+      ordinal = found->second;
+    }
+  } else if (auto found = std::ranges::find(parameters, returned->binding);
+             found != parameters.end()) {
+    ordinal = static_cast<size_t>(found - parameters.begin());
   }
-  if (!selected_reference_return_facts_) {
-    auto found = std::ranges::find(parameters, returned->binding);
-    if (found == parameters.end() ||
-        !unit_.typeTraits().is_reference((*found)->type())) {
-      return false;
-    }
-    const size_t ordinal = static_cast<size_t>(found - parameters.begin());
-    if (reference_return_parameter_ == SIZE_MAX) {
-      reference_return_parameter_ = ordinal;
-      ordinals.push_back(ordinal);
-      return true;
-    }
-
-    auto facts = std::make_unique<SelectedReferenceReturnFacts>();
-    auto& parameter_indices = facts->parameter_indices;
-    parameter_indices.reserve(parameters.size());
-    for (size_t parameter_ordinal = 0; parameter_ordinal < parameters.size();
-         ++parameter_ordinal) {
-      parameter_indices.emplace(parameters[parameter_ordinal],
-                                parameter_ordinal);
-    }
-    facts->parameters.push_back(reference_return_parameter_);
-    selected_reference_return_facts_ = std::move(facts);
-  }
-  auto found = selected_reference_return_facts_->parameter_indices.find(
-      returned->binding);
-  if (found == selected_reference_return_facts_->parameter_indices.end() ||
+  if (ordinal == SIZE_MAX ||
       !unit_.typeTraits().is_reference(returned->binding->type())) {
     return false;
   }
-  ordinals.push_back(found->second);
+  ordinals.push_back(ordinal);
+  return true;
+}
+
+bool ControlFlow::collect_projected_reference_return(
+    cxx::ExpressionAST* expression, ProjectedReferenceReturnFacts& facts) {
+  expression = unwrap_object_identity(unit_, expression);
+  if (auto* conditional =
+          cxx::ast_cast<cxx::ConditionalExpressionAST>(expression);
+      conditional &&
+      expression->valueCategory != cxx::ValueCategory::kPrValue) {
+    return collect_projected_reference_return(conditional->iftrueExpression,
+                                              facts) &&
+           collect_projected_reference_return(conditional->iffalseExpression,
+                                              facts);
+  }
+
+  auto origin =
+      [&](Destination destination, const cxx::Type* type,
+          const Partition* partition,
+          size_t component_offset) -> std::optional<ReferenceResultOrigin> {
+    auto owner = projected_reference_owner(facts, destination.binding);
+    if (!owner) {
+      return std::nullopt;
+    }
+    return ReferenceResultOrigin{
+        owner->first, {type, partition, owner->second + component_offset}};
+  };
+  auto append = [&](cxx::ExpressionAST* source, ReferenceResultOrigin value) {
+    const size_t index =
+        retain_projected_reference_origin(facts, std::move(value)).first;
+    facts.selections[source].origins.push_back(index);
+  };
+
+  if (is_current_object(unit_, expression)) {
+    auto* object_type = implicit_object_type(unit_, function_);
+    const auto* type = object_type ? types_.unqualified(object_type) : nullptr;
+    const auto* record = type ? types_.record(type, expression) : nullptr;
+    if (!record) {
+      return false;
+    }
+    append(expression, {ReferenceResultOrigin::kReceiver, {type, record, 0}});
+    return true;
+  }
+
+  if (auto returned = classify_destination(expression)) {
+    const auto* type = types_.unqualified_value(expression->type);
+    const auto* partition = returned->member
+                                ? returned->member
+                                : &types_.partition(type, expression);
+    auto value = origin(*returned, type, partition, returned->component_offset);
+    if (value) {
+      append(expression, *value);
+      return true;
+    }
+  }
+
+  auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(expression);
+  auto traits = unit_.typeTraits();
+  if (!subscript || subscript->symbol) {
+    bool reference_call = false;
+    if (subscript && subscript->symbol) {
+      auto* signature =
+          cxx::type_cast<cxx::FunctionType>(subscript->symbol->type());
+      reference_call =
+          signature && traits.is_reference(signature->returnType());
+    } else if (auto call = direct_operator_call(expression)) {
+      auto* signature =
+          cxx::type_cast<cxx::FunctionType>(call->function->type());
+      reference_call =
+          signature && traits.is_reference(signature->returnType());
+    } else if (auto* call = cxx::ast_cast<cxx::CallExpressionAST>(expression)) {
+      auto* function = direct_callee(call);
+      auto* signature =
+          function ? cxx::type_cast<cxx::FunctionType>(function->type())
+                   : nullptr;
+      reference_call =
+          signature && traits.is_reference(signature->returnType());
+    }
+    if (reference_call) {
+      auto selection = facts.selections.try_emplace(expression).first;
+      selection->second.propagated_origin_count = 0;
+      if (facts.requires_storage) {
+        identity_call_results_.insert(expression);
+      }
+    }
+    return reference_call;
+  }
+  auto* base_type = traits.remove_reference(subscript->baseExpression->type);
+  auto* index_type = traits.remove_reference(subscript->indexExpression->type);
+  cxx::ExpressionAST* array_expression = nullptr;
+  cxx::ExpressionAST* index_expression = nullptr;
+  if (traits.is_array(base_type)) {
+    array_expression = subscript->baseExpression;
+    index_expression = subscript->indexExpression;
+  } else if (traits.is_array(index_type)) {
+    array_expression = subscript->indexExpression;
+    index_expression = subscript->baseExpression;
+  } else {
+    return false;
+  }
+  auto* array_type = traits.remove_reference(array_expression->type);
+  if (!types_.requires_value_transport(array_type)) {
+    return false;
+  }
+  auto target = classify_destination(array_expression);
+  const auto* array = types_.array(array_type, expression);
+  if (!target || !array || !array->source->size()) {
+    return false;
+  }
+
+  const size_t base_offset = target->component_offset;
+  const size_t element_count = array->element->component_count;
+  const auto* element_type = array->source->elementType();
+  cxx::ASTInterpreter interpreter(&unit_);
+  auto constant = interpreter.evaluate(index_expression);
+  auto* integer = constant ? std::get_if<cxx::ConstInt>(&*constant) : nullptr;
+  if (integer && !integer->isNegative() &&
+      integer->toUWide() <
+          static_cast<cxx::ConstInt::UWide>(array->source->size())) {
+    auto value = origin(*target, element_type, array->element,
+                        base_offset + integer->toUIntMax() * element_count);
+    if (value) {
+      append(expression, *value);
+    }
+    return value.has_value();
+  }
+  facts.origins.reserve(facts.origins.size() + array->source->size());
+  facts.selections[expression].origins.reserve(array->source->size());
+  for (size_t index = 0; index < array->source->size(); ++index) {
+    auto value = origin(*target, element_type, array->element,
+                        base_offset + index * element_count);
+    if (!value) {
+      return false;
+    }
+    append(expression, *value);
+  }
   return true;
 }
 
@@ -1217,20 +1649,60 @@ void ControlFlow::visit(cxx::ReturnStatementAST* ast) {
   }
 
   auto parameters = function_->parameters();
+  const bool returns_current_receiver =
+      is_current_object(unit_, ast->expression);
   std::vector<size_t> parameter_ordinals;
   const bool returns_parameters =
+      !returns_current_receiver &&
       collect_reference_return_parameters(ast->expression, parameter_ordinals);
+  ProjectedReferenceReturnFacts projected_origins;
+  const bool returns_projection =
+      !returns_current_receiver && !returns_parameters &&
+      collect_projected_reference_return(ast->expression, projected_origins);
   ReferenceReturn incoming = ReferenceReturn::Storage;
-  if (is_current_object(unit_, ast->expression)) {
+  size_t incoming_parameter = SIZE_MAX;
+  if (returns_current_receiver) {
     incoming = ReferenceReturn::CurrentReceiver;
+  } else if (returns_projection) {
+    incoming = ReferenceReturn::Projected;
   } else if (returns_parameters) {
-    incoming = ReferenceReturn::Parameter;
+    incoming_parameter = parameter_ordinals.front();
+    const bool common_parameter = std::ranges::all_of(
+        parameter_ordinals,
+        [&](size_t ordinal) { return ordinal == incoming_parameter; });
+    if (common_parameter) {
+      incoming = ReferenceReturn::Parameter;
+    } else {
+      incoming = ReferenceReturn::Projected;
+      retain_complete_parameter_reference_origins(projected_origins,
+                                                  parameter_ordinals);
+    }
   }
   auto require_storage = [&](ReferenceReturn origin,
                              std::span<const size_t> ordinals,
+                             const ProjectedReferenceReturnFacts* projected,
                              cxx::ExpressionAST* expression) {
     if (origin == ReferenceReturn::CurrentReceiver) {
       receiver_requires_storage_ = true;
+    } else if (origin == ReferenceReturn::Projected) {
+      if (!projected) {
+        if (expression) {
+          require_identity(expression);
+        }
+        return;
+      }
+      for (const auto& origin : projected->origins) {
+        if (origin.owner_ordinal == ReferenceResultOrigin::kReceiver) {
+          receiver_requires_storage_ = true;
+        } else {
+          require_reference_storage(parameters[origin.owner_ordinal]);
+        }
+      }
+      for (const auto& [expression, selection] : projected->selections) {
+        if (selection.propagated_origin_count != SIZE_MAX) {
+          identity_call_results_.insert(expression);
+        }
+      }
     } else if (origin == ReferenceReturn::Parameter) {
       for (size_t ordinal : ordinals) {
         require_reference_storage(parameters[ordinal]);
@@ -1242,30 +1714,66 @@ void ControlFlow::visit(cxx::ReturnStatementAST* ast) {
 
   if (reference_return_ == ReferenceReturn::None) {
     reference_return_ = incoming;
-    if (incoming == ReferenceReturn::Parameter &&
-        selected_reference_return_facts_) {
-      selected_reference_return_facts_->parameters =
-          std::move(parameter_ordinals);
-    }
-    if (incoming == ReferenceReturn::Storage) {
-      require_storage(incoming, {}, ast->expression);
-      selected_reference_return_facts_.reset();
+    if (incoming == ReferenceReturn::Parameter) {
+      reference_return_parameter_ = incoming_parameter;
+    } else if (incoming == ReferenceReturn::Storage) {
+      require_storage(incoming, {}, nullptr, ast->expression);
+      projected_reference_return_facts_.reset();
+    } else if (incoming == ReferenceReturn::Projected) {
+      projected_reference_return_facts_ =
+          std::make_unique<ProjectedReferenceReturnFacts>(
+              std::move(projected_origins));
     }
     return;
   }
   if (reference_return_ == incoming) {
-    if (incoming == ReferenceReturn::Parameter &&
-        selected_reference_return_facts_) {
-      auto& parameters = selected_reference_return_facts_->parameters;
-      parameters.insert(parameters.end(), parameter_ordinals.begin(),
-                        parameter_ordinals.end());
+    if (incoming == ReferenceReturn::Parameter) {
+      if (reference_return_parameter_ == incoming_parameter) {
+        return;
+      }
+    } else if (incoming == ReferenceReturn::Projected) {
+      merge_projected_reference_returns(*projected_reference_return_facts_,
+                                        std::move(projected_origins));
+      return;
+    } else {
+      return;
     }
+  }
+
+  auto value_return = [](ReferenceReturn kind) {
+    return kind == ReferenceReturn::CurrentReceiver ||
+           kind == ReferenceReturn::Parameter ||
+           kind == ReferenceReturn::Projected;
+  };
+  if (value_return(reference_return_) && value_return(incoming)) {
+    auto facts = reference_return_ == ReferenceReturn::Projected
+                     ? std::move(projected_reference_return_facts_)
+                     : std::make_unique<ProjectedReferenceReturnFacts>();
+    if (reference_return_ == ReferenceReturn::CurrentReceiver) {
+      retain_complete_receiver_reference_origin(*facts);
+    } else if (reference_return_ == ReferenceReturn::Parameter) {
+      retain_complete_parameter_reference_origins(
+          *facts, reference_return_parameters());
+    }
+    if (incoming == ReferenceReturn::CurrentReceiver) {
+      retain_complete_receiver_reference_origin(*facts);
+    } else if (incoming == ReferenceReturn::Parameter) {
+      retain_complete_parameter_reference_origins(*facts, parameter_ordinals);
+    } else {
+      merge_projected_reference_returns(*facts, std::move(projected_origins));
+    }
+    reference_return_ = ReferenceReturn::Projected;
+    reference_return_parameter_ = SIZE_MAX;
+    projected_reference_return_facts_ = std::move(facts);
     return;
   }
-  require_storage(reference_return_, reference_return_parameters(), nullptr);
-  require_storage(incoming, parameter_ordinals, ast->expression);
+
+  require_storage(reference_return_, reference_return_parameters(),
+                  projected_reference_return_facts_.get(), nullptr);
+  require_storage(incoming, parameter_ordinals, &projected_origins,
+                  ast->expression);
   reference_return_ = ReferenceReturn::Storage;
-  selected_reference_return_facts_.reset();
+  projected_reference_return_facts_.reset();
 }
 
 void ControlFlow::visit(cxx::CallExpressionAST* ast) {
@@ -1358,9 +1866,17 @@ void ControlFlow::visit(cxx::SubscriptExpressionAST* ast) {
   auto* base_type = traits.remove_reference(ast->baseExpression->type);
   auto* index_type = traits.remove_reference(ast->indexExpression->type);
   if (traits.is_array(base_type)) {
-    require_identity(ast->baseExpression);
+    if (types_.requires_value_transport(base_type)) {
+      retain_destination(ast->baseExpression);
+    } else {
+      require_identity(ast->baseExpression);
+    }
   } else if (traits.is_array(index_type)) {
-    require_identity(ast->indexExpression);
+    if (types_.requires_value_transport(index_type)) {
+      retain_destination(ast->indexExpression);
+    } else {
+      require_identity(ast->indexExpression);
+    }
   }
 }
 
@@ -1903,11 +2419,22 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
       }
       return;
     }
-    argument.inherent_storage = true;
     if (traits.is_array(base_type)) {
+      if (types_.requires_value_transport(base_type)) {
+        collect_identity(subscript->baseExpression, argument);
+        return;
+      }
+      argument.inherent_storage = true;
       collect_identity(subscript->baseExpression, argument);
     } else if (traits.is_array(index_type)) {
+      if (types_.requires_value_transport(index_type)) {
+        collect_identity(subscript->indexExpression, argument);
+        return;
+      }
+      argument.inherent_storage = true;
       collect_identity(subscript->indexExpression, argument);
+    } else {
+      argument.inherent_storage = true;
     }
     return;
   }
@@ -1961,7 +2488,9 @@ void ControlFlow::retain_automatic_storage(cxx::VariableSymbol* variable,
   auto traits = unit_.typeTraits();
   if (!traits.is_reference(variable->type()) &&
       ((!initializer && !types_.requires_value_transport(variable->type())) ||
-       record_constructor_call || traits.is_array(variable->type()) ||
+       record_constructor_call ||
+       (traits.is_array(variable->type()) &&
+        !types_.requires_value_transport(variable->type())) ||
        traits.is_volatile(variable->type()))) {
     binding_storage_[variable].automatic_storage = true;
   }
@@ -2436,18 +2965,10 @@ void ControlFlow::visit_intervals(const CallArgument& argument,
       continue;
     }
     const auto selected = compose_projection(reference.projection, projection);
-    for (const auto& interval : found->second) {
+    for (const auto& interval : found->second.intervals) {
       visit(interval, selected);
     }
   }
-}
-
-void ControlFlow::append_intervals(
-    const CallArgument& argument,
-    std::vector<ObjectInterval>& intervals) const {
-  visit_intervals(argument, {}, [&](ObjectInterval interval) {
-    append_interval(intervals, interval);
-  });
 }
 
 bool ControlFlow::identities_overlap(const CallArgument& left,
@@ -2495,6 +3016,126 @@ bool ControlFlow::references_current_receiver_field(
   return references_field;
 }
 
+bool ControlFlow::propagate_projected_reference_return(
+    const DirectCall& call, const ControlFlow& callee) {
+  if (reference_return_ != ReferenceReturn::Projected ||
+      !projected_reference_return_facts_) {
+    return false;
+  }
+  auto selection =
+      projected_reference_return_facts_->selections.find(call.source);
+  if (selection == projected_reference_return_facts_->selections.end()) {
+    return false;
+  }
+  auto& facts = *projected_reference_return_facts_;
+  auto& propagated_count = selection->second.propagated_origin_count;
+  IREE_ASSERT(propagated_count != SIZE_MAX);
+  bool changed = false;
+  auto select_storage = [&] {
+    changed = promote_projected_reference_storage(facts) || changed;
+  };
+  if (callee.reference_return_ == ReferenceReturn::Storage ||
+      (callee.projected_reference_return_facts_ &&
+       callee.projected_reference_return_facts_->requires_storage)) {
+    select_storage();
+    return changed;
+  }
+
+  auto translate_argument =
+      [&](const CallArgument& argument,
+          const ReferenceResultOrigin& source) -> TranslatedReferenceOrigins {
+    TranslatedReferenceOrigins translated;
+    visit_intervals(argument,
+                    {source.projection.component_offset,
+                     source.projection.partition->component_count},
+                    [&](ObjectInterval interval) {
+                      if (!translated.valid) {
+                        return;
+                      }
+                      if (interval.reference_offset != 0 ||
+                          (interval.end != ObjectInterval::kWholeObjectEnd &&
+                           interval.end - interval.begin !=
+                               source.projection.partition->component_count)) {
+                        translated.valid = false;
+                        return;
+                      }
+                      auto owner =
+                          projected_reference_owner(facts, interval.binding);
+                      if (owner) {
+                        translated.append({owner->first,
+                                           {source.projection.type,
+                                            source.projection.partition,
+                                            owner->second + interval.begin}});
+                        return;
+                      }
+                      translated.valid = false;
+                    });
+    if (!translated.valid) {
+      translated.invalidate();
+    }
+    return translated;
+  };
+  size_t source_count = 0;
+  auto append = [&](const ReferenceResultOrigin& source) {
+    if (source_count++ < propagated_count) {
+      return;
+    }
+    TranslatedReferenceOrigins translated;
+    if (source.owner_ordinal == ReferenceResultOrigin::kReceiver) {
+      if (call.current_receiver) {
+        translated.append(source);
+      } else if (call.receiver) {
+        translated = translate_argument(*call.receiver, source);
+      }
+    } else if (source.owner_ordinal < call.arguments.size()) {
+      translated =
+          translate_argument(call.arguments[source.owner_ordinal], source);
+    }
+    if (translated.empty()) {
+      select_storage();
+      return;
+    }
+    for (auto& origin : translated.values()) {
+      const size_t index =
+          retain_projected_reference_origin(facts, std::move(origin)).first;
+      selection->second.origins.push_back(index);
+      // The selection itself is fixed-point state even when another leaf
+      // already retained the same canonical origin.
+      changed = true;
+    }
+  };
+
+  if (callee.reference_return_ == ReferenceReturn::Projected) {
+    selection->second.origins.reserve(
+        callee.projected_reference_return_facts_->origins.size());
+    for (const auto& origin :
+         callee.projected_reference_return_facts_->origins) {
+      append(origin);
+    }
+  } else if (callee.reference_return_ == ReferenceReturn::Parameter) {
+    auto parameters = callee.function_->parameters();
+    selection->second.origins.reserve(
+        callee.reference_return_parameters().size());
+    for (size_t ordinal : callee.reference_return_parameters()) {
+      auto* type = callee.types_.unqualified_value(parameters[ordinal]->type());
+      append({ordinal, {type, &callee.types_.partition(type, call.source), 0}});
+    }
+  } else if (callee.returns_current_receiver_reference()) {
+    auto* object_type = implicit_object_type(callee.unit_, callee.function_);
+    auto* record =
+        object_type ? callee.types_.record(
+                          callee.types_.unqualified(object_type), call.source)
+                    : nullptr;
+    if (record) {
+      selection->second.origins.reserve(1);
+      append({ReferenceResultOrigin::kReceiver,
+              {callee.types_.unqualified(object_type), record, 0}});
+    }
+  }
+  propagated_count = source_count;
+  return changed;
+}
+
 bool ControlFlow::retain_reference_result_identity(const DirectCall& call,
                                                    const ControlFlow& callee) {
   // Retain an exact automatic origin whenever every return aliases one
@@ -2503,9 +3144,48 @@ bool ControlFlow::retain_reference_result_identity(const DirectCall& call,
   // retained separately so another reference call can transport it directly.
   bool result_storage =
       callee.reference_return_ == ReferenceReturn::Storage ||
-      (callee.selected_reference_return_facts_ &&
-       callee.selected_reference_return_facts_->requires_storage);
-  std::vector<ObjectInterval> result_intervals;
+      (callee.projected_reference_return_facts_ &&
+       callee.projected_reference_return_facts_->requires_storage);
+  bool changed = false;
+  ReferenceIdentityFacts::Result* retained_result = nullptr;
+  const size_t expected_interval_count =
+      callee.projected_reference_return_facts_
+          ? callee.projected_reference_return_facts_->origins.size()
+          : size_t{1};
+  auto append_result_interval = [&](ObjectInterval interval) {
+    if (interval.begin == interval.end &&
+        interval.end != ObjectInterval::kWholeObjectEnd) {
+      return;
+    }
+    if (!reference_identity_facts_) {
+      reference_identity_facts_ = std::make_unique<ReferenceIdentityFacts>();
+    }
+    if (!retained_result) {
+      retained_result = &reference_identity_facts_->results[call.source];
+    }
+    auto& retained_intervals = retained_result->intervals;
+    if (!retained_result->index &&
+        retained_intervals.size() < kLinearCanonicalizationThreshold) {
+      if (std::ranges::find(retained_intervals, interval) ==
+          retained_intervals.end()) {
+        retained_intervals.push_back(interval);
+        changed = true;
+      }
+      return;
+    }
+    if (!retained_result->index) {
+      retained_result->index = std::make_unique<std::unordered_set<
+          ObjectInterval, ReferenceIdentityFacts::IntervalHash>>();
+      retained_result->index->reserve(
+          std::max(retained_intervals.size() + 1, expected_interval_count));
+      retained_result->index->insert(retained_intervals.begin(),
+                                     retained_intervals.end());
+    }
+    if (retained_result->index->insert(interval).second) {
+      retained_intervals.push_back(interval);
+      changed = true;
+    }
+  };
   if (callee.reference_return_ == ReferenceReturn::Parameter) {
     auto parameters = callee.function_->parameters();
     for (size_t ordinal : callee.reference_return_parameters()) {
@@ -2515,7 +3195,7 @@ bool ControlFlow::retain_reference_result_identity(const DirectCall& call,
       result_storage |=
           callee.reference_requires_storage(parameters[ordinal]) ||
           argument_requires_storage(call.arguments[ordinal]);
-      append_intervals(call.arguments[ordinal], result_intervals);
+      visit_intervals(call.arguments[ordinal], {}, append_result_interval);
     }
   } else if (callee.returns_current_receiver_reference()) {
     result_storage =
@@ -2530,33 +3210,67 @@ bool ControlFlow::retain_reference_result_identity(const DirectCall& call,
               : nullptr;
       if (record) {
         for (const auto& member : record->members) {
-          append_interval(result_intervals,
-                          {member.source, 0, member.partition->component_count,
-                           member.component_offset});
+          append_result_interval({member.source, 0,
+                                  member.partition->component_count,
+                                  member.component_offset});
         }
       }
     } else if (call.receiver) {
-      append_intervals(*call.receiver, result_intervals);
+      visit_intervals(*call.receiver, {}, append_result_interval);
+    }
+  } else if (callee.reference_return_ == ReferenceReturn::Projected) {
+    auto callee_parameters = callee.function_->parameters();
+    for (const auto& origin :
+         callee.projected_reference_return_facts_->origins) {
+      ReferenceProjection projection{
+          origin.projection.component_offset,
+          origin.projection.partition->component_count};
+      if (origin.owner_ordinal == ReferenceResultOrigin::kReceiver &&
+          call.current_receiver) {
+        result_storage |=
+            callee.receiver_requires_storage_ || receiver_requires_storage_;
+        auto* object_type = implicit_object_type(unit_, function_);
+        auto* record =
+            object_type
+                ? types_.record(types_.unqualified(object_type), call.source)
+                : nullptr;
+        if (!record) {
+          continue;
+        }
+        for (const auto& member : record->members) {
+          auto projected = project_interval(
+              {member.source, 0, member.partition->component_count,
+               member.component_offset},
+              projection);
+          if (projected) {
+            append_result_interval(*projected);
+          }
+        }
+        continue;
+      }
+      const CallArgument* source = nullptr;
+      if (origin.owner_ordinal == ReferenceResultOrigin::kReceiver) {
+        result_storage |=
+            callee.receiver_requires_storage_ || call.storage_receiver;
+        source = call.receiver ? &*call.receiver : nullptr;
+      } else if (origin.owner_ordinal < call.arguments.size()) {
+        result_storage |= callee.reference_requires_storage(
+            callee_parameters[origin.owner_ordinal]);
+        source = &call.arguments[origin.owner_ordinal];
+      }
+      if (source) {
+        result_storage |= argument_requires_storage(*source);
+        visit_intervals(*source, projection, append_result_interval);
+      }
     }
   }
-  bool changed = false;
   if (result_storage) {
     if (!reference_identity_facts_) {
       reference_identity_facts_ = std::make_unique<ReferenceIdentityFacts>();
     }
     changed =
-        reference_identity_facts_->storage_results.insert(call.source).second;
-  }
-  if (result_intervals.empty()) {
-    return changed;
-  }
-
-  if (!reference_identity_facts_) {
-    reference_identity_facts_ = std::make_unique<ReferenceIdentityFacts>();
-  }
-  auto& retained = reference_identity_facts_->results[call.source];
-  for (const auto& interval : result_intervals) {
-    changed = append_interval(retained, interval) || changed;
+        reference_identity_facts_->storage_results.insert(call.source).second ||
+        changed;
   }
   return changed;
 }
@@ -2633,9 +3347,12 @@ CallPropagation ControlFlow::propagate_overlapping_references(
 
 CallPropagation ControlFlow::propagate_call(const DirectCall& call,
                                             ControlFlow& callee) {
-  bool caller_changed = false;
+  bool caller_changed = propagate_projected_reference_return(call, callee);
   bool callee_changed = false;
   auto parameters = callee.function_->parameters();
+  const bool storage_receiver_result =
+      call.storage_receiver && callee.projected_reference_return_facts_ &&
+      callee.projected_reference_return_facts_->has_partial_receiver_origin;
   for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
     auto* parameter = parameters[ordinal];
     if (!unit_.typeTraits().is_reference(parameter->type()) ||
@@ -2643,6 +3360,14 @@ CallPropagation ControlFlow::propagate_call(const DirectCall& call,
       continue;
     }
     const auto& argument = call.arguments[ordinal];
+    if (storage_receiver_result &&
+        ordinal < callee.projected_reference_return_facts_->parameter_has_origin
+                      .size() &&
+        callee.projected_reference_return_facts_
+            ->parameter_has_origin[ordinal]) {
+      callee_changed =
+          callee.require_reference_storage(parameter) || callee_changed;
+    }
     if (argument_requires_storage(argument, StorageDemand::Identity)) {
       callee_changed =
           callee.require_reference_storage(parameter) || callee_changed;
@@ -2668,16 +3393,26 @@ CallPropagation ControlFlow::propagate_call(const DirectCall& call,
                        callee_changed;
       caller_changed =
           require_identity(call.arguments[*ordinal]) || caller_changed;
-    } else if (callee.selected_reference_return_facts_) {
-      auto& facts = *callee.selected_reference_return_facts_;
-      callee_changed = !facts.requires_storage || callee_changed;
-      facts.requires_storage = true;
-      for (size_t ordinal : facts.parameters) {
-        callee_changed =
-            callee.require_reference_storage(parameters[ordinal]) ||
-            callee_changed;
-        caller_changed =
-            require_identity(call.arguments[ordinal]) || caller_changed;
+    } else if (callee.projected_reference_return_facts_) {
+      auto& facts = *callee.projected_reference_return_facts_;
+      callee_changed =
+          callee.promote_projected_reference_storage(facts) || callee_changed;
+      for (const auto& origin : facts.origins) {
+        if (origin.owner_ordinal == ReferenceResultOrigin::kReceiver) {
+          if (call.current_receiver) {
+            caller_changed = !receiver_requires_storage_ || caller_changed;
+            receiver_requires_storage_ = true;
+          } else if (!call.storage_receiver && call.receiver) {
+            caller_changed = require_identity(*call.receiver) || caller_changed;
+          }
+        } else if (origin.owner_ordinal < call.arguments.size()) {
+          callee_changed = callee.require_reference_storage(
+                               parameters[origin.owner_ordinal]) ||
+                           callee_changed;
+          caller_changed =
+              require_identity(call.arguments[origin.owner_ordinal]) ||
+              caller_changed;
+        }
       }
     }
   }
@@ -2703,31 +3438,53 @@ CallPropagation ControlFlow::propagate_call(const DirectCall& call,
                                      projection.range, projection.effect) ||
               caller_changed;
         }
-      } else if (call.function->isImplicitObjectMemberFunction() &&
-                 callee.returns_current_receiver_reference()) {
-        if (call.current_receiver) {
-          const auto* record = types_.record(
-              types_.unqualified(implicit_object_type(unit_, function_)),
-              call.source);
-          for (const auto& member : record->members) {
-            if (project_interval(
-                    {member.source, 0, member.partition->component_count,
-                     member.component_offset},
-                    projection.range)) {
-              caller_changed =
-                  record_scoped_write(member.source, write.owners) ||
-                  caller_changed;
-              if (projection.effect == WriteEffect::Callable) {
+      } else if (callee.reference_return_ == ReferenceReturn::Projected ||
+                 (call.function->isImplicitObjectMemberFunction() &&
+                  callee.returns_current_receiver_reference())) {
+        auto record_receiver_projection = [&](ReferenceProjection range) {
+          if (call.current_receiver) {
+            const auto* record = types_.record(
+                types_.unqualified(implicit_object_type(unit_, function_)),
+                call.source);
+            for (const auto& member : record->members) {
+              if (project_interval(
+                      {member.source, 0, member.partition->component_count,
+                       member.component_offset},
+                      range)) {
                 caller_changed =
-                    add_receiver_write(member.source) || caller_changed;
+                    record_scoped_write(member.source, write.owners) ||
+                    caller_changed;
+                if (projection.effect == WriteEffect::Callable) {
+                  caller_changed =
+                      add_receiver_write(member.source) || caller_changed;
+                }
               }
             }
+          } else if (!call.storage_receiver && call.receiver) {
+            caller_changed =
+                record_projected_write(*call.receiver, write.owners, range,
+                                       projection.effect) ||
+                caller_changed;
           }
-        } else if (!call.storage_receiver && call.receiver) {
-          caller_changed =
-              record_projected_write(*call.receiver, write.owners,
-                                     projection.range, projection.effect) ||
-              caller_changed;
+        };
+        if (callee.reference_return_ == ReferenceReturn::Projected) {
+          for (const auto& origin :
+               callee.projected_reference_return_facts_->origins) {
+            auto range = compose_projection(
+                {origin.projection.component_offset,
+                 origin.projection.partition->component_count},
+                projection.range);
+            if (origin.owner_ordinal == ReferenceResultOrigin::kReceiver) {
+              record_receiver_projection(range);
+            } else if (origin.owner_ordinal < call.arguments.size()) {
+              caller_changed = record_projected_write(
+                                   call.arguments[origin.owner_ordinal],
+                                   write.owners, range, projection.effect) ||
+                               caller_changed;
+            }
+          }
+        } else {
+          record_receiver_projection(projection.range);
         }
       }
     }
@@ -2798,19 +3555,7 @@ void ControlFlow::bind_field_calls(
            interval.reference_offset,
            true});
     });
-    for (auto& destination : assignment.destinations) {
-      destination.definite =
-          std::ranges::all_of(assignment.destinations, [&](const auto& other) {
-            const auto end = destination.source_offset + destination.range.end -
-                             destination.range.begin;
-            const auto other_end =
-                other.source_offset + other.range.end - other.range.begin;
-            return end <= other.source_offset ||
-                   other_end <= destination.source_offset ||
-                   (destination.binding == other.binding &&
-                    destination.range == other.range);
-          });
-    }
+    Construction::classify_definite_destinations(assignment.destinations);
     std::erase_if(assignment.destinations, [&](const auto& destination) {
       return !construction_.declared(destination.binding);
     });
@@ -2837,17 +3582,8 @@ void ControlFlow::bind_field_calls(
       });
       // A selected reference may name several objects. A returned field is
       // definite only for intervals with one source identity on every path.
-      for (size_t i = first; i < invocation.arguments.size(); ++i) {
-        for (size_t j = first; j < i; ++j) {
-          auto& left = invocation.arguments[i];
-          auto& right = invocation.arguments[j];
-          if (left.formal.begin < right.formal.end &&
-              right.formal.begin < left.formal.end &&
-              (left.binding != right.binding || left.offset != right.offset)) {
-            left.definite = right.definite = false;
-          }
-        }
-      }
+      Construction::classify_definite_arguments(
+          std::span(invocation.arguments).subspan(first));
       // A choice between a tracked object and an already initialized value is
       // still conditional. Remove nonparticipating identities only after they
       // have constrained definite assignment of the tracked alternatives.
@@ -2953,6 +3689,21 @@ bool ControlFlow::propagate_field_inputs() {
 }
 
 void ControlFlow::finalize_callable_effects() {
+  if (reference_identity_facts_) {
+    for (auto& entry : reference_identity_facts_->results) {
+      entry.second.index.reset();
+    }
+  }
+  if (projected_reference_return_facts_) {
+    auto& facts = *projected_reference_return_facts_;
+    facts.origin_indices = {};
+    facts.parameter_ordinals = {};
+    facts.receiver_offsets = {};
+    facts.parameter_ordinals_indexed = false;
+    facts.receiver_offsets_indexed = false;
+    facts.parameter_has_origin = {};
+    facts.partial_parameter_origins = {};
+  }
   auto* record = function_
                      ? cxx::symbol_cast<cxx::ClassSymbol>(function_->parent())
                      : nullptr;

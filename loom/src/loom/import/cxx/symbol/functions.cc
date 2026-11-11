@@ -1356,11 +1356,13 @@ std::optional<size_t> Functions::reference_return_parameter(
   return analysis ? analysis->reference_return_parameter() : std::nullopt;
 }
 
-std::span<const size_t> Functions::selected_reference_return_parameters(
-    cxx::FunctionSymbol* symbol) const {
+std::span<const ReferenceResultOrigin>
+Functions::projected_reference_return_origins(
+    cxx::FunctionSymbol* symbol, ImplicitObjectABI receiver_abi) const {
   auto* analysis = control_flow(symbol);
-  return analysis ? analysis->selected_reference_return_parameters()
-                  : std::span<const size_t>{};
+  return analysis ? analysis->projected_reference_return_origins(
+                        receiver_abi == ImplicitObjectABI::Value)
+                  : std::span<const ReferenceResultOrigin>{};
 }
 
 std::span<cxx::Symbol* const> Functions::receiver_writes(
@@ -1445,15 +1447,19 @@ BoundSignature Functions::bind_callable_signature(
       unit_.typeTraits().is_reference(signature->returnType());
   const bool returns_parameter_alias =
       returns_reference && reference_return_parameter(symbol).has_value();
-  const bool returns_selected_parameter_alias =
-      returns_reference &&
-      !selected_reference_return_parameters(symbol).empty();
+  const auto projected_reference_origins = projected_reference_return_origins(
+      symbol, receiver ? receiver->abi : ImplicitObjectABI::None);
+  const bool returns_projected_reference =
+      returns_reference && !projected_reference_origins.empty();
   const bool returns_receiver_alias =
       returns_reference && receiver &&
       receiver->abi == ImplicitObjectABI::Value &&
       returns_current_receiver_reference(symbol);
-  const bool has_ordinary_result =
-      !returns_void && !returns_receiver_alias && !returns_parameter_alias;
+  const bool returns_exact_projection =
+      returns_projected_reference && projected_reference_origins.size() == 1;
+  const bool has_ordinary_result = !returns_void && !returns_receiver_alias &&
+                                   !returns_parameter_alias &&
+                                   !returns_exact_projection;
   sources.reserve(receiver.has_value() + parameters.size() +
                   has_ordinary_result + references.size() +
                   (receiver ? receiver->written_fields.size() : 0));
@@ -1500,7 +1506,7 @@ BoundSignature Functions::bind_callable_signature(
   size_t ordinary_result_count = 0;
   if (has_ordinary_result) {
     const cxx::Type* result_type = signature->returnType();
-    if (returns_selected_parameter_alias) {
+    if (returns_projected_reference) {
       result_type = unit_.control()->getUnsignedIntType();
     } else if (returns_reference) {
       result_type = unit_.typeTraits().add_pointer(

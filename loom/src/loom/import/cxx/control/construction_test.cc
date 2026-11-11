@@ -288,5 +288,57 @@ TEST_F(ConstructionTest, ResolvedAssignmentsRetainTheirSourcePosition) {
   EXPECT_TRUE(construction.parameter(result_)->outputs.contains({1, 2}));
 }
 
+TEST_F(ConstructionTest, ArgumentChoicesClassifyOverlappingIdentities) {
+  std::vector<Construction::Argument> arguments = {
+      {result_, 0, {0, 2}, nullptr, false, false},
+      {result_, 0, {0, 2}, nullptr, false, false},
+      {temporary_, 0, {2, 3}, nullptr, false, false},
+  };
+  Construction::classify_definite_arguments(arguments);
+  EXPECT_TRUE(arguments[0].definite);
+  EXPECT_TRUE(arguments[1].definite);
+  EXPECT_TRUE(arguments[2].definite);
+
+  arguments.push_back({temporary_, 0, {1, 2}, nullptr, true, false});
+  Construction::classify_definite_arguments(arguments);
+  EXPECT_FALSE(arguments[0].definite);
+  EXPECT_FALSE(arguments[1].definite);
+  EXPECT_TRUE(arguments[2].definite);
+  EXPECT_FALSE(arguments[3].definite);
+}
+
+TEST_F(ConstructionTest, WideArgumentChoicesUseEndpointSweep) {
+  std::vector<Construction::Argument> arguments;
+  for (size_t index = 0; index < 9; ++index) {
+    arguments.push_back(
+        {index == 8 ? temporary_ : result_, 0, {0, 1}, nullptr, false, false});
+  }
+  arguments.push_back({temporary_, 0, {1, 2}, nullptr, false, false});
+  Construction::classify_definite_arguments(arguments);
+  for (size_t index = 0; index < 9; ++index) {
+    EXPECT_FALSE(arguments[index].definite);
+  }
+  EXPECT_TRUE(arguments[9].definite);
+}
+
+TEST_F(ConstructionTest, DestinationChoicesClassifySourceOverlap) {
+  std::vector<Construction::Destination> destinations = {
+      {result_, {0, 1}, 0, false},
+      {result_, {0, 1}, 0, false},
+      {temporary_, {0, 1}, 1, false},
+  };
+  Construction::classify_definite_destinations(destinations);
+  EXPECT_TRUE(destinations[0].definite);
+  EXPECT_TRUE(destinations[1].definite);
+  EXPECT_TRUE(destinations[2].definite);
+
+  destinations.push_back({temporary_, {0, 1}, 0, true});
+  Construction::classify_definite_destinations(destinations);
+  EXPECT_FALSE(destinations[0].definite);
+  EXPECT_FALSE(destinations[1].definite);
+  EXPECT_TRUE(destinations[2].definite);
+  EXPECT_FALSE(destinations[3].definite);
+}
+
 }  // namespace
 }  // namespace loom::cxx_import

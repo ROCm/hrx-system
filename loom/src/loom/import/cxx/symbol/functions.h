@@ -235,10 +235,10 @@ class Functions {
   // Exact source parameter aliased by every reference result, when one exists.
   std::optional<size_t> reference_return_parameter(
       cxx::FunctionSymbol* symbol) const;
-  // Finite source parameter set selected by a reference result. The callable
-  // returns an ordinal into this set instead of materializing pointer identity.
-  std::span<const size_t> selected_reference_return_parameters(
-      cxx::FunctionSymbol* symbol) const;
+  // Caller-owned subobjects selected by a projected reference result when the
+  // active callable ABI can reconstruct every origin.
+  std::span<const ReferenceResultOrigin> projected_reference_return_origins(
+      cxx::FunctionSymbol* symbol, ImplicitObjectABI receiver_abi) const;
   // Exact top-level implicit-object fields replaced by the definition.
   std::span<cxx::Symbol* const> receiver_writes(
       cxx::FunctionSymbol* symbol) const;

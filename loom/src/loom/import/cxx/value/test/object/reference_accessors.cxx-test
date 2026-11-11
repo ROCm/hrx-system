@@ -258,68 +258,58 @@ func.def public @storage_alias(%observed: buffer, %observed_byte_offset: offset,
 }
 
 func.def public @forwarded_alias(%value$27: i32) -> (i32) {
-  %29 = index.constant 4 : offset
-  %value_storage = buffer.alloca<private> align(4) %29 : buffer
-  %value_storage_byte_offset = index.constant 0 : offset
-  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
-  view.store %value$27, %value_view[0] : i32, view<1xi32>
-  %33 = scalar.constant 3 : i32
-  %34, %35 = func.call pure @forward(%value_storage, %value_storage_byte_offset) : (buffer, offset) -> (buffer, offset)
-  %36 = buffer.view %34[%35] : buffer -> view<1xi32>
-  %37 = view.load<root_in_bounds> %36[0] : view<1xi32> -> i32
-  %38 = scalar.addi %37, %33 : i32
-  %39 = buffer.view %34[%35] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %38, %39[0] : i32, view<1xi32>
-  %value$40 = view.load %value_view[0] : view<1xi32> -> i32
-  func.return %value$40 : i32
+  %29 = scalar.constant 3 : i32
+  func.call pure @forward(%value$27) : (i32)
+  %value$30 = scalar.addi %value$27, %29 : i32
+  func.return %value$30 : i32
 }
 
 func.def @at(%values: buffer, %values_byte_offset: offset, %index: i32) -> (buffer, offset) {
-  %46 = scalar.extui %index : i32 to i64
-  %47 = scalar.constant 4 : i64
-  %48 = scalar.muli %46, %47 : i64
-  %49 = index.cast %values_byte_offset : offset to i64
-  %50 = scalar.addi %49, %48 : i64
-  %51 = scalar.assume %50 [range(%50, 0, 9223372036854775807)] : i64
-  %52 = index.cast %51 : i64 to offset
-  func.return %values, %52 : buffer, offset
+  %36 = scalar.extui %index : i32 to i64
+  %37 = scalar.constant 4 : i64
+  %38 = scalar.muli %36, %37 : i64
+  %39 = index.cast %values_byte_offset : offset to i64
+  %40 = scalar.addi %39, %38 : i64
+  %41 = scalar.assume %40 [range(%40, 0, 9223372036854775807)] : i64
+  %42 = index.cast %41 : i64 to offset
+  func.return %values, %42 : buffer, offset
 }
 
 func.def @first(%values: buffer, %values_byte_offset: offset) -> (i32) {
-  %56 = scalar.constant 0 : i32
-  %57 = scalar.extsi %56 : i32 to i64
-  %58 = scalar.constant 4 : i64
-  %59 = scalar.muli %57, %58 : i64
-  %60 = index.cast %values_byte_offset : offset to i64
-  %61 = scalar.addi %60, %59 : i64
-  %62 = scalar.assume %61 [range(%61, 0, 9223372036854775807)] : i64
-  %63 = index.cast %62 : i64 to offset
-  %64 = buffer.view %values[%63] : buffer -> view<1xi32>
-  %65 = view.load<root_in_bounds> %64[0] : view<1xi32> -> i32
-  func.return %65 : i32
+  %46 = scalar.constant 0 : i32
+  %47 = scalar.extsi %46 : i32 to i64
+  %48 = scalar.constant 4 : i64
+  %49 = scalar.muli %47, %48 : i64
+  %50 = index.cast %values_byte_offset : offset to i64
+  %51 = scalar.addi %50, %49 : i64
+  %52 = scalar.assume %51 [range(%51, 0, 9223372036854775807)] : i64
+  %53 = index.cast %52 : i64 to offset
+  %54 = buffer.view %values[%53] : buffer -> view<1xi32>
+  %55 = view.load<root_in_bounds> %54[0] : view<1xi32> -> i32
+  func.return %55 : i32
 }
 
 func.def @escape(%value: buffer, %value_byte_offset: offset) {
-  %68 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
-  %69 = view.load<root_in_bounds> %68[0] : view<1xi32> -> i32
-  %70 = scalar.constant 1 : i32
-  %71 = scalar.addi %69, %70 : i32
-  view.store<root_in_bounds> %71, %68[0] : i32, view<1xi32>
+  %58 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
+  %59 = view.load<root_in_bounds> %58[0] : view<1xi32> -> i32
+  %60 = scalar.constant 1 : i32
+  %61 = scalar.addi %59, %60 : i32
+  view.store<root_in_bounds> %61, %58[0] : i32, view<1xi32>
   func.return
 }
 
-func.def @observe(%value$72: buffer, %value_byte_offset: offset) -> (i32) {
-  %75 = buffer.view %value$72[%value_byte_offset] : buffer -> view<1xi32>
-  %value$76 = view.load<volatile|root_in_bounds> %75[0] : view<1xi32> -> i32
-  func.return %value$76 : i32
+func.def @observe(%value$62: buffer, %value_byte_offset: offset) -> (i32) {
+  %65 = buffer.view %value$62[%value_byte_offset] : buffer -> view<1xi32>
+  %value$66 = view.load<volatile|root_in_bounds> %65[0] : view<1xi32> -> i32
+  func.return %value$66 : i32
 }
 
-func.def @forward(%value: buffer, %value_byte_offset: offset) -> (buffer, offset) {
-  func.call pure @identity(%value, %value_byte_offset) : (buffer, offset)
-  func.return %value, %value_byte_offset : buffer, offset
+func.def @forward(%value: i32) {
+  func.call pure @identity(%value) : (i32)
+  func.return
 }
 
-func.def @identity(%value: buffer, %value_byte_offset: offset) {
+func.def @identity(%value: i32) {
   func.return
 }
 
@@ -1010,12 +1000,16 @@ func.def @choose_written_origin(%choice: i32, %first: i32, %second: i32, %third:
       %34 = scalar.constant 1 : i32
       scf.yield %34 : i32
     }
-    %36 = scalar.constant 2 : i32
-    %37 = scalar.constant 0 : i32
-    %38 = scalar.cmpi eq, %35, %37 : i32
-    %39 = scalar.constant 1 : i32
-    %40 = scf.select %38, %39, %36 : i32
-    scf.yield %40 : i32
+    %36 = scalar.constant 0 : i32
+    %37 = scalar.cmpi eq, %35, %36 : i32
+    %38 = scf.if %37 -> (i32) {
+      %39 = scalar.constant 1 : i32
+      scf.yield %39 : i32
+    } else {
+      %40 = scalar.constant 2 : i32
+      scf.yield %40 : i32
+    }
+    scf.yield %38 : i32
   }
   func.return %29 : i32
 }

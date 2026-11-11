@@ -236,3 +236,194 @@ func.def public @update(%data: buffer, %data_byte_offset: offset, %choice: i32, 
   %36 = scalar.addi %33, %35 : i32
   func.return %36 : i32
 }
+
+// ====
+// Wide selected-reference reads use a balanced ordinal tree. The source
+// choice is evaluated once, and no read path is deeper than log2(N).
+unsigned selected_read(unsigned choice, unsigned first, unsigned second,
+                       unsigned third, unsigned fourth) {
+  unsigned& selected = choice == 0u   ? first
+                       : choice == 1u ? second
+                       : choice == 2u ? third
+                                      : fourth;
+  return selected;
+}
+
+// ----
+func.def public @selected_read(%choice: i32, %first: i32, %second: i32, %third: i32, %fourth: i32) -> (i32) {
+  %6 = scalar.constant 0 : i32
+  %7 = scalar.cmpi eq, %choice, %6 : i32
+  %22 = scf.if %7 -> (i32) {
+    %19 = scalar.constant 0 : i32
+    scf.yield %19 : i32
+  } else {
+    %8 = scalar.constant 1 : i32
+    %9 = scalar.cmpi eq, %choice, %8 : i32
+    %18 = scf.if %9 -> (i32) {
+      %15 = scalar.constant 0 : i32
+      scf.yield %15 : i32
+    } else {
+      %10 = scalar.constant 2 : i32
+      %11 = scalar.cmpi eq, %choice, %10 : i32
+      %14 = scf.if %11 -> (i32) {
+        %12 = scalar.constant 0 : i32
+        scf.yield %12 : i32
+      } else {
+        %13 = scalar.constant 1 : i32
+        scf.yield %13 : i32
+      }
+      %16 = scalar.constant 1 : i32
+      %17 = scalar.addi %14, %16 : i32
+      scf.yield %17 : i32
+    }
+    %20 = scalar.constant 1 : i32
+    %21 = scalar.addi %18, %20 : i32
+    scf.yield %21 : i32
+  }
+  %23 = scalar.constant 2 : i32
+  %24 = scalar.cmpi ult, %22, %23 : i32
+  %selected = scf.if %24 -> (i32) {
+    %26 = scalar.constant 0 : i32
+    %27 = scalar.cmpi eq, %22, %26 : i32
+    %28 = scf.if %27 -> (i32) {
+      scf.yield %first : i32
+    } else {
+      scf.yield %second : i32
+    }
+    scf.yield %28 : i32
+  } else {
+    %29 = scalar.constant 2 : i32
+    %30 = scalar.cmpi eq, %22, %29 : i32
+    %31 = scf.if %30 -> (i32) {
+      scf.yield %third : i32
+    } else {
+      scf.yield %fourth : i32
+    }
+    scf.yield %31 : i32
+  }
+  func.return %selected : i32
+}
+
+// ====
+// A reference result projects one of several semantic record elements from a
+// value-backed parameter. Forwarding the result through another call keeps the
+// pointer-bearing owner in SSA form and writes only the selected scalar field.
+struct ProjectedCell {
+  unsigned* data;
+  unsigned marker;
+};
+struct ProjectedArray {
+  ProjectedCell values[3];
+  [[loom::noinline]] ProjectedCell& operator[](unsigned index) {
+    return values[index];
+  }
+};
+[[loom::noinline]] static ProjectedCell& forward_projected_cell(
+    ProjectedArray& array, unsigned index) {
+  return array[index];
+}
+unsigned projected_call_reference(unsigned* data, unsigned index,
+                                  unsigned next) {
+  ProjectedArray array{{{data, 1u}, {data, 2u}, {data, 3u}}};
+  ProjectedCell& selected = forward_projected_cell(array, index);
+  selected.marker = next;
+  return array.values[0].marker + 10u * array.values[1].marker +
+         100u * array.values[2].marker;
+}
+
+// ----
+func.def public @projected_call_reference(%data: buffer, %data_byte_offset: offset, %index: i32, %next: i32) -> (i32) {
+  %array_values_0_marker$5 = scalar.constant 1 : i32
+  %array_values_1_marker$6 = scalar.constant 2 : i32
+  %array_values_2_marker$7 = scalar.constant 3 : i32
+  %8 = func.call pure @forward_projected_cell(%data, %data_byte_offset, %array_values_0_marker$5, %data, %data_byte_offset, %array_values_1_marker$6, %data, %data_byte_offset, %array_values_2_marker$7, %index) : (buffer, offset, i32, buffer, offset, i32, buffer, offset, i32, i32) -> (i32)
+  %9 = scalar.constant 0 : i32
+  %10 = scalar.cmpi eq, %8, %9 : i32
+  %array_values_0_marker$11 = scf.if %10 -> (i32) {
+    scf.yield %next : i32
+  } else {
+    scf.yield %array_values_0_marker$5 : i32
+  }
+  %12 = scalar.constant 1 : i32
+  %13 = scalar.cmpi eq, %8, %12 : i32
+  %array_values_1_marker$14 = scf.if %13 -> (i32) {
+    scf.yield %next : i32
+  } else {
+    scf.yield %array_values_1_marker$6 : i32
+  }
+  %15 = scalar.constant 2 : i32
+  %16 = scalar.cmpi eq, %8, %15 : i32
+  %array_values_2_marker$17 = scf.if %16 -> (i32) {
+    scf.yield %next : i32
+  } else {
+    scf.yield %array_values_2_marker$7 : i32
+  }
+  %18 = scalar.constant 0 : i32
+  %19 = scalar.constant 10 : i32
+  %20 = scalar.constant 1 : i32
+  %21 = scalar.muli %19, %array_values_1_marker$14 : i32
+  %22 = scalar.addi %array_values_0_marker$11, %21 : i32
+  %23 = scalar.constant 100 : i32
+  %24 = scalar.constant 2 : i32
+  %25 = scalar.muli %23, %array_values_2_marker$17 : i32
+  %26 = scalar.addi %22, %25 : i32
+  func.return %26 : i32
+}
+
+func.def noinline @forward_projected_cell(%array_values_0_data: buffer, %array_values_0_data_byte_offset: offset, %array_values_0_marker: i32, %array_values_1_data: buffer, %array_values_1_data_byte_offset: offset, %array_values_1_marker: i32, %array_values_2_data: buffer, %array_values_2_data_byte_offset: offset, %array_values_2_marker: i32, %index: i32) -> (i32) {
+  %38 = func.call pure @ProjectedArray__operator_subscript_value(%array_values_0_data, %array_values_0_data_byte_offset, %array_values_0_marker, %array_values_1_data, %array_values_1_data_byte_offset, %array_values_1_marker, %array_values_2_data, %array_values_2_data_byte_offset, %array_values_2_marker, %index) : (buffer, offset, i32, buffer, offset, i32, buffer, offset, i32, i32) -> (i32)
+  func.return %38 : i32
+}
+
+func.def noinline @ProjectedArray__operator_subscript_value(%this_values_0_data: buffer, %this_values_0_data_byte_offset: offset, %this_values_0_marker: i32, %this_values_1_data: buffer, %this_values_1_data_byte_offset: offset, %this_values_1_marker: i32, %this_values_2_data: buffer, %this_values_2_data_byte_offset: offset, %this_values_2_marker: i32, %index: i32) -> (i32) {
+  func.return %index : i32
+}
+
+// ====
+// A returned reference that may designate either a stored subobject or an
+// automatic value uses the storage ABI. The automatic alternative is promoted
+// once so both choices retain one uniform identity representation.
+struct StoredPair {
+  unsigned first;
+  unsigned second;
+};
+[[loom::noinline]] static unsigned& mixed_storage_reference(
+    bool stored, StoredPair& pair, unsigned& value) {
+  return stored ? pair.second : value;
+}
+unsigned mixed_storage_reference_call(StoredPair* pair, bool stored,
+                                      unsigned value, unsigned next) {
+  unsigned& selected = mixed_storage_reference(stored, *pair, value);
+  selected = next;
+  return pair->second + value;
+}
+
+// ----
+func.def public @mixed_storage_reference_call(%pair: buffer, %pair_byte_offset: offset, %stored: i1, %value$3: i32, %next: i32) -> (i32) {
+  %6 = index.constant 4 : offset
+  %value_storage = buffer.alloca<private> align(4) %6 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %value$3, %value_view[0] : i32, view<1xi32>
+  %10, %11 = func.call pure @mixed_storage_reference(%stored, %pair, %pair_byte_offset, %value_storage, %value_storage_byte_offset) : (i1, buffer, offset, buffer, offset) -> (buffer, offset)
+  %12 = buffer.view %10[%11] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %next, %12[0] : i32, view<1xi32>
+  %13 = index.constant 4 : offset
+  %14 = index.add %pair_byte_offset, %13 : offset
+  %15 = buffer.view %pair[%14] : buffer -> view<1xi32>
+  %second = view.load<root_in_bounds> %15[0] : view<1xi32> -> i32
+  %value$17 = view.load %value_view[0] : view<1xi32> -> i32
+  %18 = scalar.addi %second, %value$17 : i32
+  func.return %18 : i32
+}
+
+func.def noinline @mixed_storage_reference(%stored: i1, %pair: buffer, %pair_byte_offset: offset, %value: buffer, %value_byte_offset: offset) -> (buffer, offset) {
+  %26, %27 = scf.if %stored -> (buffer, offset) {
+    %28 = index.constant 4 : offset
+    %29 = index.add %pair_byte_offset, %28 : offset
+    scf.yield %pair, %29 : buffer, offset
+  } else {
+    scf.yield %value, %value_byte_offset : buffer, offset
+  }
+  func.return %26, %27 : buffer, offset
+}
