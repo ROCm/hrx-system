@@ -188,7 +188,7 @@ def main():
         )
         assert result.returncode == 0, result.stderr
         outputs.append(offline)
-        checks = []
+        checks = [(outputs[0], "abab")]
         for index, output in enumerate(outputs):
             deployment = output / "serve.json"
             deployment.write_text(

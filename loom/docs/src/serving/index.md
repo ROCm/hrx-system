@@ -6,7 +6,7 @@ of both. Devices are explicit process resources; model registrations have
 independent lifetimes.
 
 ```sh
-loom-serve --device=URI [--model=path/model.json ...] [options]
+loom-serve --device=URI [--model=path ...] [options]
 loom-serve --devices=devices.json [--model=path/deployment.json ...] [options]
 loom-serve --device=task --pool_backing=fixed --listen=127.0.0.1:8080
 loom-serve --flagfile=serve.flags
@@ -40,7 +40,7 @@ above remain the ordinary entry point on every platform.
 | `--device=URI` | None | Shortcut constructing device `device` and pool `pool`. Mutually exclusive with `--devices`. |
 | `--devices=path` | None | Machine-local JSON declaring named devices and independent pools with their consumer membership, memory limits, and idle policy. |
 | `--wait_mode=active\|blocking` | `active` | Completion-wait policy for every device. Overrides the machine file's `wait_mode`. Requests remain asynchronous. |
-| `--model=path` | None, repeatable | A local model card or serving deployment document; omission starts empty. |
+| `--model=path` | None, repeatable | A local model card, serving deployment document, or directory containing `model.json`; omission starts empty. |
 | `--preset=name` | Card selection | Select a preset when loading one card directly. Fetched cards retain the selection made during acquisition. |
 | `--listen=address` | `127.0.0.1:8080`, repeatable | Numeric IPv4 `host:port`, IPv6 `[host]:port`, or `unix:path`. |
 | `--workers=N` | `8` | Shared CPU workers for JIT, model scheduling and media work. |

@@ -227,6 +227,75 @@ class ServerTest(unittest.TestCase):
                     )
                 self.assertEqual(process.returncode, 0, log.read_text())
 
+    def test_model_directory_and_explicit_file_execute_from_their_own_base(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            package = directory / "model package"
+            shutil.copytree(PACKAGE, package, copy_function=shutil.copyfile)
+            document = json.loads((package / "model.json").read_text())
+            document["name"] = "explicit-file"
+            (package / "deployment.json").write_text(json.dumps(document))
+            cases = (
+                ("relative", "model package", directory, "vectors"),
+                ("absolute", str(package), directory, "vectors"),
+                ("trailing", str(package) + "/", directory, "vectors"),
+                ("current", ".", package, "vectors"),
+                (
+                    "explicit",
+                    str(package / "deployment.json"),
+                    directory,
+                    "explicit-file",
+                ),
+            )
+            for name, model_path, working_directory, model in cases:
+                with self.subTest(name=name):
+                    log = directory / f"{name}.log"
+                    with running_server(
+                        [
+                            str(SERVER),
+                            "--device=task",
+                            "--pool_backing=fixed",
+                            "--workers=1",
+                            "--listen=127.0.0.1:0",
+                            f"--model={model_path}",
+                        ],
+                        log,
+                        cwd=working_directory,
+                    ) as (process, bound_address):
+                        self.assertIsNotNone(bound_address, log.read_text())
+                        address = urlsplit(f"http://{bound_address}")
+                        result = self.post(
+                            address,
+                            "/v1/embeddings",
+                            {"model": model, "input": "ab", "dimensions": 2},
+                        )
+                        self.assertEqual(result["data"][0]["embedding"], [3, 2])
+                    self.assertEqual(process.returncode, 0, log.read_text())
+
+    def test_model_directory_requires_its_model_json_before_listening(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            package = directory / "model package"
+            package.mkdir()
+            shutil.copyfile(PACKAGE / "model.json", package / "other.json")
+            nested = package / "nested"
+            nested.mkdir()
+            shutil.copyfile(PACKAGE / "model.json", nested / "model.json")
+            for state in ("missing", "malformed"):
+                with self.subTest(state=state):
+                    if state == "malformed":
+                        (package / "model.json").write_text("{")
+                    result = subprocess.run(
+                        [str(SERVER), f"--model={package}"],
+                        capture_output=True,
+                        text=True,
+                    )
+                    self.assertNotEqual(result.returncode, 0, result.stderr)
+                    self.assertNotIn("--device is required", result.stderr)
+                    self.assertNotIn('"event":"ready"', result.stderr)
+                    if state == "missing":
+                        self.assertIn(str(package / "model.json"), result.stderr)
+
     def test_repeated_documents_share_cli_and_http_registration(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
@@ -273,7 +342,7 @@ class ServerTest(unittest.TestCase):
             )
             # Flagfile arguments keep ordinary process-CWD semantics; the model
             # document's own references instead use its containing directory.
-            (settings / "server.flags").write_text("--model=models/alpha/model.json\n")
+            (settings / "server.flags").write_text("--model=models/alpha\n")
             log = directory / "server.log"
             with running_server(
                 [
