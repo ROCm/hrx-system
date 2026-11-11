@@ -78,7 +78,7 @@ from loom.target.contracts import (
     ValueRef,
     Vector,
 )
-from loom.target.low_descriptors import DescriptorOpKind
+from loom.target.low_descriptors import ConstraintKind, DescriptorOpKind, OperandRole
 
 
 def _value_type_guard(rule: DescriptorRule, field: str):
@@ -87,6 +87,53 @@ def _value_type_guard(rule: DescriptorRule, field: str):
         for guard in rule.guards
         if guard.kind == GuardKind.VALUE_TYPE and guard.field == field
     )
+
+
+def test_all_ones_constants_cover_integer_types_and_vector_carriers() -> None:
+    for fragment, descriptor_set, expected_classes in (
+        (X86_AVX2_CONTRACT_FRAGMENT, X86_AVX2_DESCRIPTOR_SET, {"x86.xmm", "x86.ymm"}),
+        (
+            X86_AVX512_CONTRACT_FRAGMENT,
+            X86_AVX512_CORE_DESCRIPTOR_SET,
+            {"x86.xmm", "x86.ymm", "x86.zmm"},
+        ),
+    ):
+        rules = tuple(
+            rule
+            for rule in fragment.cases
+            if isinstance(rule, DescriptorRule)
+            and rule.source_op is vector.vector_splati
+            and any(
+                guard.kind is GuardKind.I64_RANGE
+                and guard.field == "value"
+                and guard.minimum == -1
+                and guard.maximum == -1
+                for guard in rule.guards
+            )
+        )
+        classes = set()
+        for rule in rules:
+            rule.validate(descriptor_set)
+            pattern = _value_type_guard(rule, "result")
+            assert set(pattern.elements) == {"i8", "i16", "i32", "i64"}
+            assert pattern.minimum_lanes == 2
+            register_class = next(
+                guard.register_class
+                for guard in rule.guards
+                if guard.kind is GuardKind.LOW_VALUE_REGISTER_CLASS
+            )
+            classes.add(register_class)
+            assert len(rule.emit) == 1
+            emit = rule.emit[0]
+            assert isinstance(emit, EmitDescriptorOp)
+            assert not emit.operands and not emit.immediates
+            assert all(o.role is OperandRole.RESULT for o in emit.descriptor.operands)
+            assert any(
+                constraint.kind is ConstraintKind.REMATERIALIZABLE
+                for constraint in emit.descriptor.constraints
+            )
+        assert classes == expected_classes
+        assert len(rules) == len(expected_classes)
 
 
 def _source_node_value_type_guard(node, field: str):

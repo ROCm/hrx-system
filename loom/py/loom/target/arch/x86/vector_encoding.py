@@ -13,6 +13,7 @@ from enum import Enum, IntEnum
 
 from loom.target.low_descriptors import (
     Descriptor,
+    EncodingFieldValue,
     ImmediateKind,
     OperandAddressMapKind,
     OperandRole,
@@ -72,6 +73,7 @@ _LOAD_BEHAVIORS = (
 
 
 VECTOR_ENCODING_FORMAT_MARKER = 1 << 15
+VECTOR_IMMEDIATE_ENCODING_FIELD = 1
 _SIMD_REG_CLASSES = frozenset(("x86.xmm", "x86.ymm", "x86.zmm"))
 _SIMD_WIDTHS = {"x86.xmm": 128, "x86.ymm": 256, "x86.zmm": 512}
 _VEX_SIMD_REGISTER_COUNT = 16
@@ -267,6 +269,8 @@ class VectorMachineInstruction:
     operands: tuple[VectorOperandShape, ...]
     immediates: tuple[VectorImmediateShape, ...]
     encodings: tuple[VectorEncoding, ...]
+    # Native immediate byte owned by the instruction rather than authored IR.
+    fixed_immediate: int | None = None
 
     def __post_init__(self) -> None:
         validate_vector_encoding_recipe(self.encoding_format_id)
@@ -281,6 +285,14 @@ class VectorMachineInstruction:
                     raise ValueError("vector instruction has overlapping variants")
                 seen.add(key)
         behavior = VectorEncodingBehavior((self.encoding_format_id >> 12) & 7)
+        if self.fixed_immediate is not None and (
+            behavior is not VectorEncodingBehavior.IMMEDIATE
+            or self.immediates
+            or not 0 <= self.fixed_immediate <= 0xFF
+        ):
+            raise ValueError(
+                "fixed immediate requires an implicit byte-immediate recipe"
+            )
         requires_evex = behavior in _MASK_BEHAVIORS or (
             behavior in _LOAD_BEHAVIORS and bool(self.encoding_format_id & (8 << 8))
         )
@@ -307,6 +319,10 @@ class VectorMachineInstruction:
         immediate_shapes = vector_descriptor_immediate_shapes(descriptor)
         if immediate_shapes != self.immediates:
             raise ValueError(f"{descriptor.key}: native immediate shape mismatch")
+        if descriptor.encoding_field_values:
+            raise ValueError(
+                f"{descriptor.key}: native binding owns fixed encoding fields"
+            )
         descriptor_bit_width = vector_descriptor_bit_width(descriptor)
         if vector_bit_width is None:
             vector_bit_width = descriptor_bit_width
@@ -340,6 +356,15 @@ class VectorMachineInstruction:
             descriptor,
             encoding_format_id=self.encoding_format_id,
             encoding_id=variants[0].encoding_id(vector_bit_width),
+            encoding_field_values=(
+                (
+                    EncodingFieldValue(
+                        VECTOR_IMMEDIATE_ENCODING_FIELD, self.fixed_immediate
+                    ),
+                )
+                if self.fixed_immediate is not None
+                else ()
+            ),
         )
 
 

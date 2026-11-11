@@ -926,6 +926,11 @@ static iree_status_t loom_x86_function_packet(
     } else {
       operands.immediate = immediate.i64;
     }
+  } else if (descriptor_layout->encoding_field_value_count) {
+    const loom_low_encoding_field_value_t* field =
+        &frame->target.descriptor_set->encoding_field_values
+             [descriptor_layout->encoding_field_value_start];
+    operands.immediate = field->value;
   }
   if (descriptor_layout->immediate_count == 2) {
     const int64_t second_immediate =

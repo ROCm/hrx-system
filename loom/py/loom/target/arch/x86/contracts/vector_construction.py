@@ -17,8 +17,8 @@ from loom.target.arch.x86.contracts.constants import (
     floating_vector_constant_bits_rule,
     floating_vector_zero_rule,
     integer_vector_constant_rule,
+    integer_vector_fixed_rule,
     integer_vector_splat_rule,
-    integer_vector_zero_rule,
 )
 from loom.target.arch.x86.contracts.rule_builders import (
     DescriptorLookup as _DescriptorLookup,
@@ -161,9 +161,10 @@ def _vector_zero_rules(
         register_class = _REGISTER_CLASSES[vector_bit_width]
         rules.extend(
             (
-                integer_vector_zero_rule(
+                integer_vector_fixed_rule(
                     integer_vector_types,
                     descriptor,
+                    value=0,
                     result_register_class=register_class,
                 ),
                 floating_vector_zero_rule(
@@ -174,6 +175,30 @@ def _vector_zero_rules(
             )
         )
     return tuple(rules)
+
+
+def _vector_ones_rules(
+    descriptor_lookup: _DescriptorLookup,
+    *,
+    descriptor_prefix: str,
+    vector_bit_widths: tuple[int, ...],
+    priority: int,
+) -> tuple[DescriptorRule, ...]:
+    types = Vector(
+        tuple(element.name for element in INTEGER_ELEMENTS),
+        minimum_lanes=2,
+        maximum_lanes=max(vector_bit_widths) // 8,
+    )
+    return tuple(
+        integer_vector_fixed_rule(
+            types,
+            descriptor_lookup(f"{descriptor_prefix}.{_REGISTER_SUFFIXES[width]}"),
+            value=-1,
+            result_register_class=_REGISTER_CLASSES[width],
+            priority=priority,
+        )
+        for width in vector_bit_widths
+    )
 
 
 def _uniform_vector_constant_rules(
@@ -1252,6 +1277,12 @@ def avx2_vector_construction_rules(
             descriptor_key_prefix="x86.avx2",
             vector_bit_widths=AVX2_VECTOR_BIT_WIDTHS,
         ),
+        *_vector_ones_rules(
+            descriptor_lookup,
+            descriptor_prefix="x86.avx2.vpcmpeqd.ones",
+            vector_bit_widths=AVX2_VECTOR_BIT_WIDTHS,
+            priority=2,
+        ),
         *_uniform_vector_constant_rules(
             descriptor_lookup,
             descriptor_key_prefix="x86.avx2",
@@ -1359,6 +1390,12 @@ def avx512_vector_construction_rules(
             descriptor_lookup,
             descriptor_key_prefix="x86.avx512",
             vector_bit_widths=AVX512_VECTOR_BIT_WIDTHS,
+        ),
+        *_vector_ones_rules(
+            descriptor_lookup,
+            descriptor_prefix="x86.avx512.vpternlogd.ones",
+            vector_bit_widths=AVX512_DIRECT_BROADCAST_VECTOR_BIT_WIDTHS,
+            priority=3,
         ),
         *_uniform_vector_constant_rules(
             descriptor_lookup,

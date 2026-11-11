@@ -92,6 +92,7 @@ from .common import (
     _scalar_float_unary_descriptor,
     _vector_float_unary_descriptor,
     _vector_lane_units,
+    _vector_ones_descriptor,
     _vector_operand,
     _vector_result,
     _vector_splat_descriptor,
@@ -956,6 +957,17 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
             key="x86.avx2.vxorps.zero.ymm",
         ),
         native.VXORPS,
+    ),
+    *(
+        _vex_descriptor(
+            _vector_ones_descriptor(
+                vector_bit_width=width,
+                key=f"x86.avx2.vpcmpeqd.ones.{suffix}",
+                mnemonic="vpcmpeqd",
+            ),
+            native.VPCMPEQD_ONES,
+        )
+        for width, suffix in ((128, "xmm"), (256, "ymm"))
     ),
     _vex_descriptor(
         Descriptor(

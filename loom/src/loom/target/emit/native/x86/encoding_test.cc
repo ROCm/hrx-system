@@ -109,6 +109,24 @@ TEST(EncodingTest, VectorRegisterPrefixesAndBehaviors) {
                        {0x62, 0x61, 0x7e, 0x48, 0x7f, 0x3e});
 }
 
+TEST(EncodingTest, AllOnesConstantsPreserveVectorRegisterDomains) {
+  loom_x86_encoding_operands_t operands = {
+      .immediate = 255,
+      .result = 15,
+  };
+  ExpectVectorEncoding(0x8000, 0x0576, operands,
+                       {0xc4, 0x41, 0x01, 0x76, 0xff});
+  ExpectVectorEncoding(0x8000, 0x4576, operands,
+                       {0xc4, 0x41, 0x05, 0x76, 0xff});
+  operands.result = 31;
+  ExpectVectorEncoding(0x9000, 0x2725, operands,
+                       {0x62, 0x03, 0x05, 0x00, 0x25, 0xff, 0xff});
+  ExpectVectorEncoding(0x9000, 0x6725, operands,
+                       {0x62, 0x03, 0x05, 0x20, 0x25, 0xff, 0xff});
+  ExpectVectorEncoding(0x9000, 0xa725, operands,
+                       {0x62, 0x03, 0x05, 0x40, 0x25, 0xff, 0xff});
+}
+
 TEST(EncodingTest, IntegerToScalarFloat) {
   loom_x86_encoding_operands_t operands = {
       .result = 1,

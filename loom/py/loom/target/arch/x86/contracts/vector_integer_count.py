@@ -76,7 +76,8 @@ class _Carrier:
     or_mnemonic: str
     xor_mnemonic: str
     read_only_load: str
-    compare_all_ones: str | None
+    # Result-only descriptor producing every physical bit without a value input.
+    all_ones_descriptor: str
 
     @property
     def register_suffix(self) -> str:
@@ -185,14 +186,11 @@ class _PackedCountRecipe:
             name,
         )
 
-    def all_ones(self, value: ValueRef) -> ValueRef:
-        if self.carrier.compare_all_ones is None:
-            return self.byte_mask(0xFF, "all_ones")
+    def all_ones(self) -> ValueRef:
         result = ValueRef.temporary("all_ones")
         self.emits.append(
             _op_emit(
-                descriptor=self.descriptor_lookup(self.carrier.compare_all_ones),
-                operands={"lhs": value, "rhs": value},
+                descriptor=self.descriptor_lookup(self.carrier.all_ones_descriptor),
                 results={"dst": result},
                 result_types={"dst": DescriptorResultType()},
             )
@@ -282,7 +280,7 @@ class _PackedCountRecipe:
             self.population_count(value, "population")
             return
 
-        all_ones = self.all_ones(value)
+        all_ones = self.all_ones()
         if kind == "trailing":
             minus_one = self.binary(
                 f"vpadd{_ELEMENT_SUFFIXES[self.element_bit_width]}",
@@ -386,15 +384,11 @@ def _avx2_predicate_complement_rule(
     register_class = avx2_predicate_register_class(representation_bit_width)
     register_suffix = register_class.removeprefix("x86.")
     ones = ValueRef.temporary("all_ones")
-    compare = descriptor_lookup(f"x86.avx2.vpcmpeqd.{register_suffix}")
+    constant = descriptor_lookup(f"x86.avx2.vpcmpeqd.ones.{register_suffix}")
     xor = descriptor_lookup(f"x86.avx2.vpxor.{register_suffix}")
     emits = (
         _op_emit(
-            descriptor=compare,
-            operands={
-                "lhs": ValueRef.operand("input"),
-                "rhs": ValueRef.operand("input"),
-            },
+            descriptor=constant,
             results={"dst": ones},
             result_types={"dst": DescriptorResultType()},
         ),
@@ -463,15 +457,14 @@ def _avx512_mask_complement_rule(
 def _avx512_zmm_predicate_complement_rule(
     source_op: Op, descriptor_lookup: Callable[[str], Descriptor]
 ) -> DescriptorRule:
-    load = descriptor_lookup("x86.avx512.vmovdqu64.rodata.zmm")
+    constant = descriptor_lookup("x86.avx512.vpternlogd.ones.zmm")
     xor = descriptor_lookup("x86.avx512.vpxord.zmm")
     ones = ValueRef.temporary("all_ones")
     emits = (
         _op_emit(
-            descriptor=load,
+            descriptor=constant,
             results={"dst": ones},
             result_types={"dst": DescriptorResultType()},
-            immediates={"data": ReadOnlyDataLiteral(bytes((0xFF,)) * 64)},
         ),
         _op_emit(
             descriptor=xor,
@@ -521,7 +514,9 @@ def avx2_vector_integer_count_rules(
                     read_only_load=(
                         f"x86.avx2.vmovdqu.rodata.{vector.descriptor_suffix}"
                     ),
-                    compare_all_ones=(f"x86.avx2.vpcmpeqd.{vector.descriptor_suffix}"),
+                    all_ones_descriptor=(
+                        f"x86.avx2.vpcmpeqd.ones.{vector.descriptor_suffix}"
+                    ),
                 ),
                 element,
                 descriptor_lookup,
@@ -556,7 +551,7 @@ def avx512_vector_integer_count_rules(
                     or_mnemonic="vpord",
                     xor_mnemonic="vpxord",
                     read_only_load="x86.avx512.vmovdqu64.rodata.zmm",
-                    compare_all_ones=None,
+                    all_ones_descriptor="x86.avx512.vpternlogd.ones.zmm",
                 ),
                 element,
                 descriptor_lookup,

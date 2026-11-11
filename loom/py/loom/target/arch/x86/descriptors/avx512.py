@@ -111,6 +111,7 @@ from .common import (
     _vector_lane_units,
     _vector_mask_compare_descriptor,
     _vector_mask_select_descriptor,
+    _vector_ones_descriptor,
     _vector_operand,
     _vector_result,
     _vector_splat_descriptor,
@@ -870,6 +871,18 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
             ),
             native.VXORPS,
             scalar=False,
+        ),
+        *(
+            _avx512_descriptor(
+                _vector_ones_descriptor(
+                    vector_bit_width=width,
+                    key=f"x86.avx512.vpternlogd.ones.{suffix}",
+                    mnemonic="vpternlogd",
+                ),
+                native.VPTERNLOGD_ONES,
+                scalar=False,
+            )
+            for width, suffix in ((128, "xmm"), (256, "ymm"), (512, "zmm"))
         ),
         *(
             _zmm_widen_descriptor(

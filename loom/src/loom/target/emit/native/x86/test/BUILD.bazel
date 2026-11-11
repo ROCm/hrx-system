@@ -32,6 +32,7 @@ loom_check_test_suite(
     name = "loom_check_file_test",
     srcs = [
         "branch_edge_coalescing.loom-test",
+        "constant_native_bytes.loom-test",
         "float_integer_native_bytes.loom-test",
         "function.loom-test",
         "integer_unary.loom-test",

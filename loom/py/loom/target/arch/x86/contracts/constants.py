@@ -30,19 +30,21 @@ _F32 = Scalar("f32")
 _F64 = Scalar("f64")
 
 
-def integer_vector_zero_rule(
+def integer_vector_fixed_rule(
     result_type: TypePattern,
     descriptor: Descriptor,
     *,
+    value: int,
     result_register_class: str | None = None,
+    priority: int = 1,
 ) -> DescriptorRule:
-    """Constructs an integer zero vector with a dependency-breaking op."""
+    """Constructs a fixed integer vector without incoming value dependencies."""
     return DescriptorRule(
         source_op=vector.vector_splati,
         descriptor=descriptor,
         guards=(
             Guard.value_type("result", result_type),
-            Guard.i64_range("value", 0, 0),
+            Guard.i64_range("value", value, value),
             *(
                 (Guard.low_value_register_class("result", result_register_class),)
                 if result_register_class is not None
@@ -56,7 +58,7 @@ def integer_vector_zero_rule(
                 form=DescriptorEmitForm.OP,
             ),
         ),
-        priority=1,
+        priority=priority,
     )
 
 
