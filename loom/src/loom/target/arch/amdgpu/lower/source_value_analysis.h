@@ -29,6 +29,15 @@ typedef struct loom_amdgpu_register_shape_t {
   uint32_t unit_count;
 } loom_amdgpu_register_shape_t;
 
+// Reads a low.invoke result's declared carrier by symbol and result ordinal.
+// Compatible AMDGPU representations preserve register classes and unit counts;
+// shared call planning owns target projection and signature compatibility.
+// Unresolved or malformed call boundaries have no shape here and are diagnosed
+// by shared call planning, before Low construction.
+bool loom_amdgpu_source_invoke_result_shape(
+    const loom_module_t* module, const loom_value_t* value,
+    loom_amdgpu_register_shape_t* out_shape);
+
 typedef uint8_t loom_amdgpu_source_value_analysis_bits_t;
 
 enum loom_amdgpu_source_value_analysis_bit_e {

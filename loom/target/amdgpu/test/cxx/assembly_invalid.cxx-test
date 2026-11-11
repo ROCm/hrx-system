@@ -31,9 +31,9 @@ Word entry(WideWord value) {
 struct [[loom::representation("amdgpu.gfx11.generic.core")]] Contract {};
 using Word = unsigned __attribute__((ext_vector_type(1)));
 // Result carriers are checked even when the inputs match.
-unsigned entry(Word value) {
-  // ERROR@+1: TARGET/074 "mapped result type reg<amdgpu.sgpr> does not match low helper '@__loom_assembly$' register type reg<amdgpu.vgpr>"
-  return loom::low::assembly<Contract, unsigned>(R"(
+unsigned long long entry(Word value) {
+  // ERROR@+1: TARGET/074 "mapped result type reg<amdgpu.vgpr x2> does not match low helper '@__loom_assembly$' register type reg<amdgpu.vgpr>"
+  return loom::low::assembly<Contract, unsigned long long>(R"(
       (%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) { return %value }
   )", value);
 }

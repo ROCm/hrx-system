@@ -1,0 +1,74 @@
+amdgpu.target<gfx11-generic> @target
+
+// The result tuple deliberately alternates scalar words, vector words, and a
+// lane mask. No source-type heuristic can substitute for this signature.
+low.func.def readonly target<amdgpu.gfx11.generic.core>(@target) @read_values(%lane: reg<amdgpu.vgpr>, %bytes: reg<amdgpu.sgpr x2>, %words: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) asm {
+  %bias = s_mov_b32 7
+  %byte = global_load_u8_saddr %lane, %bytes
+  %offset = v_lshlrev_b32_src0_inline %lane, 3
+  %word = global_load_b64_saddr %offset, %words
+  %threshold = v_mov_b32 128
+  %above = v_cmp_gt_u32 %byte, %threshold
+  return %bias, %word, %byte, %above
+}
+
+kernel.def target(@target) @consume_results() {
+  %unit = index.constant 1 : index
+  %lanes = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lanes, %unit, %unit) : index
+} launch(%bytes: buffer, %words: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %lane_i32 = index.cast %lane : index to i32
+  %bias, %word, %byte, %above = low.invoke readonly inline @read_values(%lane_i32, %bytes, %words) : (i32, buffer, buffer) -> (i32, i64, i32, i1)
+  %biased = scalar.addi %byte, %bias : i32
+  %selected = scf.select %above, %biased, %byte : i32
+  %wide = scalar.extui %selected : i32 to i64
+  %first = scalar.addi %word, %wide : i64
+  %retained_bias, %retained_word, %retained_byte, %retained_above = low.invoke readonly noinline @read_values(%lane_i32, %bytes, %words) : (i32, buffer, buffer) -> (i32, i64, i32, i1)
+  %retained_biased = scalar.addi %retained_byte, %retained_bias : i32
+  %retained_selected = scf.select %retained_above, %retained_byte, %retained_biased : i32
+  %retained_wide = scalar.extui %retained_selected : i32 to i64
+  %second = scalar.addi %retained_word, %retained_wide : i64
+  %origin = index.constant 0 : offset
+  %values = buffer.view %output[%origin] : buffer -> view<64x2xi64>
+  view.store %first, %values[%lane, 0] : i64, view<64x2xi64>
+  view.store %second, %values[%lane, 1] : i64, view<64x2xi64>
+  kernel.return
+}
+
+func.def @consume_results_oracle(%bytes: buffer, %words: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %input_bytes = buffer.view %bytes[%origin] : buffer -> view<64xi8>
+  %input_words = buffer.view %words[%origin] : buffer -> view<64xi64>
+  %values = buffer.view %output[%origin] : buffer -> view<64x2xi64>
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  %threshold = scalar.constant 128 : i64
+  %bias = scalar.constant 7 : i64
+  scf.for %lane = [%begin to %end step %step] {
+    %small = view.load %input_bytes[%lane] : view<64xi8> -> i8
+    %byte = scalar.extui %small : i8 to i64
+    %word = view.load %input_words[%lane] : view<64xi64> -> i64
+    %sum = scalar.addi %word, %byte : i64
+    %biased = scalar.addi %sum, %bias : i64
+    %above = scalar.cmpi ugt, %byte, %threshold : i64
+    %first = scf.select %above, %biased, %sum : i64
+    %second = scf.select %above, %sum, %biased : i64
+    view.store %first, %values[%lane, 0] : i64, view<64x2xi64>
+    view.store %second, %values[%lane, 1] : i64, view<64x2xi64>
+  }
+  func.return
+}
+
+check.scenario @native_results_keep_their_carriers {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %bytes = check.generate.iota offset(-128) step(4) : tensor<64xi8>
+    %words = check.generate.iota offset(4294967293) step(123457) : tensor<64xi64>
+    %output = check.generate.fill value(-1) : tensor<64x2xi64>
+    check.compare<@consume_results, @consume_results_oracle>(%bytes, %words, %output) : (tensor<64xi8>, tensor<64xi64>, tensor<64x2xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<64x2xi64>
+    }
+  }
+  check.return
+}
