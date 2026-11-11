@@ -42,15 +42,19 @@ parts of it, or take the compiler's output into your own runtime.
 <div class="loom-intro-authoring" markdown>
 
 Programs can be written in [a subset of C++](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/import/cxx/README.md)
-or an isomorphic, agent-friendly Loom IR. The compiler provides
+or an isomorphic, [agent-friendly Loom IR](getting-started/first-kernel.md#create-one-source-file).
+The compiler provides
 [structured diagnostics and reports](workflows/compile-reports.md)
 for authoring and tuning, and emits ELF, HSACO, SPIR-V, WebAssembly, and other
 [artifacts](workflows/compile-artifacts.md).
 
-Those programs can be bundled into model packages: `.loom` source or `.loombc`
-bytecode, weights, and a JSON descriptor. Model-specific code lives in those
-files. You can load a new model, edit an implementation, or share your changes
-without rebuilding the server.
+Those programs can be bundled into [model packages](serving/model-documents.md):
+`.loom` source or `.loombc` bytecode, weights, and a JSON descriptor.
+Model-specific code lives in those files. You can
+[load a new model](serving/workflows/serve-models.md),
+[edit an implementation](guide/index.md), or
+[share your changes](serving/sharing/hugging-face.md)
+[without restarting the server](serving/workflows/live-model-development.md).
 
 It runs on **Windows and Linux**; native execution needs only the OS and hardware
 drivers.
@@ -76,7 +80,35 @@ the computation underneath it.
 
 <section class="loom-section" markdown>
 
-## An application with several models
+## Quickstart
+
+With an [activated Python 3.12+ environment](getting-started/acquiring-loom.md),
+try [loom-fun's Qwen2.5 0.5B Instruct](https://huggingface.co/loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom)
+on an AMD GPU. Run the first three commands in one terminal, then send the
+request from another while the server stays running. These commands use a
+POSIX shell.
+
+<div class="loom-quickstart" markdown>
+
+```sh
+pip install 'hrx-loom[hf]'
+loom-fetch https://huggingface.co/loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom/resolve/main/model.json --output=qwen
+loom-serve --model=qwen/model.json --device=amdgpu --memory_bytes=5000000000
+curl -f localhost:8080/v1/chat/completions --json '{"model":"Qwen/Qwen2.5-0.5B-Instruct","messages":[{"role":"user","content":"Hi!"}]}'
+```
+
+</div>
+
+The reply is in `choices[0].message.content`. The
+[fetch and serve guide](serving/workflows/fetch-and-serve.md) covers model
+selection, startup status, and other requests. Each model package describes
+the hardware and configuration it supports.
+
+</section>
+
+<section class="loom-section" markdown>
+
+## A composition of models
 
 Say you're building a digital assistant. Start with speech recognition, a small
 language model, and speech synthesis. Add image understanding so it can see what

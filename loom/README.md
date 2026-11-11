@@ -16,8 +16,7 @@ use, model serving, kernel authoring, and embedding through `loomc`.
 Use Python 3.12 or newer. The first release targets recent Linux x86-64 and
 Windows 11 x86-64; the [installation guide](docs/src/getting-started/acquiring-loom.md)
 defines system runtime prerequisites and development-wheel installation.
-The first PyPI release is pending. Once published, an activated Python virtual
-environment can install the complete SDK with:
+An activated Python virtual environment can install the complete SDK with:
 
 ```sh
 python -m pip install 'hrx-loom[hf]'

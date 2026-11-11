@@ -216,6 +216,16 @@
   line-height: 1.75;
 }
 
+.loom-quickstart {
+  max-width: 59rem;
+  margin: 1rem auto;
+}
+
+.loom-quickstart pre > code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .md-typeset .loom-diagram {
   width: 100%;
   max-width: 50rem;
