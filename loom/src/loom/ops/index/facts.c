@@ -265,7 +265,7 @@ static iree_status_t loom_index_publish_remainder_bound(
   const loom_value_id_t divisor =
       loom_value_facts_is_non_negative(operand_facts[0]) &&
               loom_value_facts_is_positive(operand_facts[1])
-          ? loom_index_andi_rhs(op)
+          ? loom_op_const_operands(op)[1]
           : LOOM_VALUE_ID_INVALID;
   const loom_value_id_t* numeric_operands =
       context->publication->numeric_operands;

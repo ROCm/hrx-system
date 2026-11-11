@@ -142,43 +142,55 @@ func.def target(@test_target) @vector_combined(%lhs: vector<2xi32>, %rhs: vector
 test.target<low_core> @test_target
 
 func.def target(@test_target) @narrow_combined(%lhs: i16, %rhs: i16) -> (i16, i16) {
-  %31 = scalar.extui %lhs : i16 to i32
-  %32 = scalar.constant 16 : i32
-  %33 = scalar.shli %31, %32 : i32
-  %34 = scalar.shrsi %33, %32 : i32
-  %27 = scalar.extui %rhs : i16 to i32
-  %28 = scalar.constant 16 : i32
-  %29 = scalar.shli %27, %28 : i32
-  %30 = scalar.shrsi %29, %28 : i32
-  %24 = scalar.divsi %34, %30 : i32
-  %25 = scalar.muli %24, %30 : i32
-  %26 = scalar.subi %34, %25 : i32
+  %42 = scalar.extui %lhs : i16 to i32
+  %43 = scalar.constant 16 : i32
+  %44 = scalar.shli %42, %43 : i32
+  %45 = scalar.shrsi %44, %43 : i32
+  %38 = scalar.extui %rhs : i16 to i32
+  %39 = scalar.constant 16 : i32
+  %40 = scalar.shli %38, %39 : i32
+  %41 = scalar.shrsi %40, %39 : i32
+  %24 = scalar.divsi %45, %41 : i32
+  %25 = scalar.muli %24, %41 : i32
+  %26 = scalar.subi %45, %25 : i32
+  %27 = scalar.constant 31 : i32
+  %28 = scalar.shrsi %41, %27 : i32
+  %29 = scalar.xori %41, %28 : i32
+  %30 = scalar.subi %29, %28 : i32
+  %31 = scalar.constant 1 : i32
+  %32 = scalar.subi %30, %31 : i32
+  %33 = scalar.assume %32 [ge(%32, 0), ult(%32, %30)] : i32
+  %36 = scalar.constant 0 : i32
+  %37 = scalar.subi %36, %33 : i32
+  %35 = scalar.assume %26 [range(%26, %37, %33)] : i32
   %quotient = scalar.trunci %24 : i32 to i16
-  %remainder = scalar.trunci %26 : i32 to i16
+  %remainder = scalar.trunci %35 : i32 to i16
   func.return %quotient, %remainder : i16, i16
 }
 
 func.def target(@test_target) @index_combined(%lhs: index, %rhs: index) -> (index, index) {
   %quotient = index.div %lhs, %rhs : index
-  %36 = index.mul %quotient, %rhs : index
-  %remainder = index.sub %lhs, %36 : index
+  %47 = index.mul %quotient, %rhs : index
+  %remainder = index.sub %lhs, %47 : index
   func.return %quotient, %remainder : index, index
 }
 
 func.def target(@test_target) @vector_combined(%lhs: vector<2xi32>, %rhs: vector<2xi32>) -> (vector<2xi32>, vector<2xi32>) {
-  %38 = vector.extract %lhs[0] : vector<2xi32> -> i32
-  %39 = vector.extract %rhs[0] : vector<2xi32> -> i32
-  %55 = scalar.divui %38, %39 : i32
-  %56 = scalar.muli %55, %39 : i32
-  %57 = scalar.subi %38, %56 : i32
-  %42 = vector.extract %lhs[1] : vector<2xi32> -> i32
-  %43 = vector.extract %rhs[1] : vector<2xi32> -> i32
-  %52 = scalar.divui %42, %43 : i32
-  %53 = scalar.muli %52, %43 : i32
-  %54 = scalar.subi %42, %53 : i32
-  %50 = vector.splat %55 : vector<2xi32>
-  %quotient = vector.insert %52 into %50[1] : i32, vector<2xi32>
-  %48 = vector.splat %57 : vector<2xi32>
-  %remainder = vector.insert %54 into %48[1] : i32, vector<2xi32>
+  %49 = vector.extract %lhs[0] : vector<2xi32> -> i32
+  %50 = vector.extract %rhs[0] : vector<2xi32> -> i32
+  %67 = scalar.divui %49, %50 : i32
+  %68 = scalar.muli %67, %50 : i32
+  %69 = scalar.subi %49, %68 : i32
+  %70 = scalar.assume %69 [ult(%69, %50)] : i32
+  %53 = vector.extract %lhs[1] : vector<2xi32> -> i32
+  %54 = vector.extract %rhs[1] : vector<2xi32> -> i32
+  %63 = scalar.divui %53, %54 : i32
+  %64 = scalar.muli %63, %54 : i32
+  %65 = scalar.subi %53, %64 : i32
+  %66 = scalar.assume %65 [ult(%65, %54)] : i32
+  %61 = vector.splat %67 : vector<2xi32>
+  %quotient = vector.insert %63 into %61[1] : i32, vector<2xi32>
+  %59 = vector.splat %70 : vector<2xi32>
+  %remainder = vector.insert %66 into %59[1] : i32, vector<2xi32>
   func.return %quotient, %remainder : vector<2xi32>, vector<2xi32>
 }

@@ -228,7 +228,7 @@ static iree_status_t loom_scalar_publish_remainder_bound(
   // Both signed and unsigned remainders are below a positive divisor for
   // every dividend. The bound belongs to this result's defining scope.
   const loom_value_id_t divisor = loom_value_facts_is_positive(operand_facts[1])
-                                      ? loom_scalar_andi_rhs(op)
+                                      ? loom_op_const_operands(op)[1]
                                       : LOOM_VALUE_ID_INVALID;
   const loom_value_id_t* numeric_operands =
       context->publication->numeric_operands;

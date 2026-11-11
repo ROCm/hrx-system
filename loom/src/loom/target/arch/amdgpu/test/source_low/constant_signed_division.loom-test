@@ -153,24 +153,24 @@ func.def target(@target) @narrow_signed_division(%byte: i8, %halfword: i16) -> (
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @narrow_signed_division(%byte: reg<amdgpu.vgpr>, %halfword: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %44 = v_bfe_i32_offset_width_inline %byte {offset = 0, width = 8}
-  %46 = v_mov_b32 1431655765
-  %47 = v_mul_hi_i32 %44, %46
-  %48 = v_sub_nc_u32 %47, %44
-  %49 = v_ashrrev_i32_src0_inline %48, 1
-  %50 = v_lshrrev_b32_src0_inline %49, 31
-  %byte_quotient = v_add_u32 %49, %50
-  %52 = v_mov_b32 4294967293
-  %53 = v_mul_lo_u32 %byte_quotient, %52
-  %byte_remainder = v_sub_nc_u32 %44, %53
-  %55 = v_bfe_i32_offset_width_inline %halfword {offset = 0, width = 16}
-  %57 = v_mov_b32 1717986919
-  %58 = v_mul_hi_i32 %55, %57
-  %59 = v_ashrrev_i32_src0_inline %58, 1
-  %60 = v_lshrrev_b32_src0_inline %59, 31
-  %halfword_quotient = v_add_u32 %59, %60
-  %62 = v_mov_b32 5
-  %63 = v_mul_lo_u32 %halfword_quotient, %62
-  %halfword_remainder = v_sub_nc_u32 %55, %63
+  %56 = v_bfe_i32_offset_width_inline %byte {offset = 0, width = 8}
+  %58 = v_mov_b32 1431655765
+  %59 = v_mul_hi_i32 %56, %58
+  %60 = v_sub_nc_u32 %59, %56
+  %61 = v_ashrrev_i32_src0_inline %60, 1
+  %62 = v_lshrrev_b32_src0_inline %61, 31
+  %byte_quotient = v_add_u32 %61, %62
+  %64 = v_mov_b32 4294967293
+  %65 = v_mul_lo_u32 %byte_quotient, %64
+  %byte_remainder = v_sub_nc_u32 %56, %65
+  %67 = v_bfe_i32_offset_width_inline %halfword {offset = 0, width = 16}
+  %69 = v_mov_b32 1717986919
+  %70 = v_mul_hi_i32 %67, %69
+  %71 = v_ashrrev_i32_src0_inline %70, 1
+  %72 = v_lshrrev_b32_src0_inline %71, 31
+  %halfword_quotient = v_add_u32 %71, %72
+  %74 = v_mov_b32 5
+  %75 = v_mul_lo_u32 %halfword_quotient, %74
+  %halfword_remainder = v_sub_nc_u32 %67, %75
   return %byte_quotient, %byte_remainder, %halfword_quotient, %halfword_remainder
 }

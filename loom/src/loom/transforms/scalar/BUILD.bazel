@@ -60,18 +60,31 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "division_refinement",
+    srcs = ["division_refinement.c"],
+    hdrs = ["division_refinement.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:headers",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/util:predicate_facts",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "target_legalization",
     srcs = ["target_legalization.c"],
     hdrs = ["target_legalization.h"],
     deps = [
         ":combine_patterns",
+        ":division_refinement",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/scf",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:legalization",
         "//loom/src/loom/util:numeric_format",
-        "//loom/src/loom/util:predicate_facts",
         "//runtime/src/iree/base",
     ],
 )
@@ -81,6 +94,7 @@ loom_cc_library(
     srcs = ["wide_division_legalization.c"],
     hdrs = ["wide_division_legalization.h"],
     deps = [
+        ":division_refinement",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/scalar",

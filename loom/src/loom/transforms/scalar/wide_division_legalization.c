@@ -12,6 +12,7 @@
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
+#include "loom/transforms/scalar/division_refinement.h"
 #include "loom/util/fact_table.h"
 #include "loom/util/predicate_facts.h"
 
@@ -882,33 +883,6 @@ static iree_status_t loom_scalar_wide_division_build_general(
   return iree_ok_status();
 }
 
-static iree_status_t loom_scalar_wide_division_apply_sign(
-    loom_builder_t* builder, loom_value_id_t value, loom_value_id_t sign,
-    loom_location_id_t location, loom_value_id_t* out_value) {
-  const loom_type_t type = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
-  loom_op_t* xor_op = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_scalar_xori_build(builder, value, sign, type, location, &xor_op));
-  return loom_scalar_wide_division_build_binary(
-      builder, LOOM_SCALAR_WIDE_DIVISION_BINARY_SUB,
-      loom_scalar_xori_result(xor_op), sign, type, location, out_value);
-}
-
-static iree_status_t loom_scalar_wide_division_magnitude(
-    loom_builder_t* builder, loom_value_id_t value, loom_location_id_t location,
-    loom_value_id_t* out_sign, loom_value_id_t* out_magnitude) {
-  const loom_type_t type = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
-  loom_value_id_t shift = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_build_constant(
-      builder, 63, LOOM_SCALAR_TYPE_I64, location, &shift));
-  loom_op_t* sign_op = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_scalar_shrsi_build(builder, value, shift, type, location, &sign_op));
-  *out_sign = loom_scalar_shrsi_result(sign_op);
-  return loom_scalar_wide_division_apply_sign(builder, value, *out_sign,
-                                              location, out_magnitude);
-}
-
 static iree_status_t loom_scalar_wide_division_build_results(
     loom_builder_t* builder, const loom_scalar_wide_division_match_t* match,
     loom_location_id_t location, loom_value_id_t* out_results) {
@@ -925,10 +899,12 @@ static iree_status_t loom_scalar_wide_division_build_results(
   loom_value_id_t dividend_sign = LOOM_VALUE_ID_INVALID;
   loom_value_id_t divisor_sign = LOOM_VALUE_ID_INVALID;
   if (match->is_signed) {
-    IREE_RETURN_IF_ERROR(loom_scalar_wide_division_magnitude(
-        builder, dividend, location, &dividend_sign, &dividend));
-    IREE_RETURN_IF_ERROR(loom_scalar_wide_division_magnitude(
-        builder, divisor, location, &divisor_sign, &divisor));
+    IREE_RETURN_IF_ERROR(loom_scalar_division_build_magnitude(
+        builder, dividend, loom_type_scalar(LOOM_SCALAR_TYPE_I64), location,
+        &dividend_sign, &dividend));
+    IREE_RETURN_IF_ERROR(loom_scalar_division_build_magnitude(
+        builder, divisor, loom_type_scalar(LOOM_SCALAR_TYPE_I64), location,
+        &divisor_sign, &divisor));
   }
   loom_value_id_t quotient = LOOM_VALUE_ID_INVALID;
   loom_value_id_t remainder = LOOM_VALUE_ID_INVALID;
@@ -954,19 +930,39 @@ static iree_status_t loom_scalar_wide_division_build_results(
         builder, dividend, divisor, location, &quotient,
         has_remainder ? &remainder : NULL));
   }
+  IREE_RETURN_IF_ERROR(loom_scalar_division_refine_unsigned_results(
+      builder, dividend, divisor, loom_type_scalar(LOOM_SCALAR_TYPE_I64),
+      match->is_signed, location, has_quotient ? &quotient : NULL,
+      has_remainder ? &remainder : NULL));
   if (match->is_signed) {
     if (has_quotient) {
       loom_op_t* quotient_sign_op = NULL;
       IREE_RETURN_IF_ERROR(loom_scalar_xori_build(
           builder, dividend_sign, divisor_sign,
           loom_type_scalar(LOOM_SCALAR_TYPE_I64), location, &quotient_sign_op));
-      IREE_RETURN_IF_ERROR(loom_scalar_wide_division_apply_sign(
+      IREE_RETURN_IF_ERROR(loom_scalar_division_apply_sign(
           builder, quotient, loom_scalar_xori_result(quotient_sign_op),
-          location, &quotient));
+          loom_type_scalar(LOOM_SCALAR_TYPE_I64), location, &quotient));
     }
     if (has_remainder) {
-      IREE_RETURN_IF_ERROR(loom_scalar_wide_division_apply_sign(
-          builder, remainder, dividend_sign, location, &remainder));
+      const loom_value_id_t magnitude = remainder;
+      IREE_RETURN_IF_ERROR(loom_scalar_division_apply_sign(
+          builder, magnitude, dividend_sign,
+          loom_type_scalar(LOOM_SCALAR_TYPE_I64), location, &remainder));
+      // Restoring either sign cannot exceed the nonnegative magnitude. Keep
+      // its divisor bound usable even when the dividend's sign is unknown.
+      const loom_predicate_t predicate = {
+          .kind = LOOM_PREDICATE_LE,
+          .arg_count = 2,
+          .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+          .args = {remainder, magnitude},
+      };
+      const loom_type_t type = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
+      loom_op_t* assumption = NULL;
+      IREE_RETURN_IF_ERROR(loom_scalar_assume_build(builder, &remainder, 1,
+                                                    &predicate, 1, &type, 1,
+                                                    location, &assumption));
+      remainder = loom_op_const_results(assumption)[0];
     }
   }
   uint32_t result_count = 0;
@@ -992,6 +988,12 @@ static iree_status_t loom_scalar_wide_division_publish_result(
   IREE_RETURN_IF_ERROR(loom_scalar_wide_division_build_assume_range(
       builder, extended, 0, (int64_t)match->divisor_maximum - 1, i64_type,
       location, &extended));
+  loom_value_id_t divisor = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_cast_input_to_i64(
+      builder, match->divisor, match->source_type, location, &divisor));
+  IREE_RETURN_IF_ERROR(loom_scalar_division_refine_unsigned_results(
+      builder, LOOM_VALUE_ID_INVALID, divisor, i64_type,
+      /*signed_magnitudes=*/false, location, NULL, &extended));
   if (loom_type_element_type(match->source_type) == LOOM_SCALAR_TYPE_I64) {
     *out_result = extended;
     return iree_ok_status();
