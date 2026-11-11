@@ -1,0 +1,21 @@
+diff --git a/btest.c b/btest.c
+--- a/btest.c
++++ b/btest.c
+@@ -52 +52,7 @@
+-static int test1 (void) __attribute__ ((noinline, noclone, optnone, unused));
++#if defined (__clang__)
++#define TEST_OPTNONE __attribute__ ((optnone))
++#else
++#define TEST_OPTNONE
++#endif
++
++static int test1 (void) __attribute__ ((noinline, noclone, unused)) TEST_OPTNONE;
+@@ -166 +172 @@
+-static int test3 (void) __attribute__ ((noinline, noclone, optnone, unused));
++static int test3 (void) __attribute__ ((noinline, noclone, unused)) TEST_OPTNONE;
+diff --git a/testlib.h b/testlib.h
+--- a/testlib.h
++++ b/testlib.h
+@@ -84 +84 @@
+-  const char *name;
++  char *name;

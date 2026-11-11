@@ -15,6 +15,7 @@ exports_files([
     "ignore_nonruntime_symbols.patch",
     "iterative_function_scopes.patch",
     "libbacktrace.BUILD.bazel",
+    "portable_test_warnings.patch",
     "threaded_cache_reads.patch",
     "zero_size_vectors.patch",
 ])

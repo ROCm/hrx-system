@@ -13,6 +13,7 @@ package(default_visibility = ["//visibility:private"])
 
 exports_files([
     "c_new_handler.patch",
+    "guarded_page_gcc_warning.patch",
     "mimalloc.BUILD.bazel",
 ])
 
