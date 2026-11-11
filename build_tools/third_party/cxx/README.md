@@ -5,7 +5,7 @@ changes live in the maintained fork rather than as patches in this directory:
 
 - Upstream: <https://github.com/robertoraggi/cplusplus>
 - Maintained fork: <https://github.com/benvanik/cplusplus>
-- Current stack: [`hrx-upstream/111-instantiated-subobject-paths`](https://github.com/benvanik/cplusplus/commits/hrx-upstream/111-instantiated-subobject-paths/)
+- Current stack: [`hrx-upstream/112-dependent-template-qualifiers`](https://github.com/benvanik/cplusplus/commits/hrx-upstream/112-dependent-template-qualifiers/)
 
 `../deps.MODULE.bazel` owns the archive commit and checksum. The generated root
 `MODULE.cmake.lock` carries the same identity for CMake. `cxx.BUILD.bazel` and
