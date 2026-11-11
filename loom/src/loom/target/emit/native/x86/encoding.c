@@ -571,6 +571,11 @@ void loom_x86_encode_instruction(
       if ((uint64_t)operands->immediate <= UINT32_MAX) {
         encoding_id &= ~LOOM_X86_ENCODING_REX_W;
         width_flags = 0;
+      } else if (width_flags && operands->immediate >= INT32_MIN &&
+                 operands->immediate < 0) {
+        loom_x86_encode_registers(instruction, 0xc7 | width_flags, 0, result);
+        loom_x86_encode_integer(instruction, operands->immediate, 4);
+        break;
       }
       loom_x86_encode_prefix(instruction, encoding_id, 0, result, 0, 0);
       loom_x86_encode_opcode(instruction, (uint8_t)encoding_id + (result & 7));
