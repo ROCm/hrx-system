@@ -862,8 +862,8 @@ func.def public @vector_observation(%seed: i32) -> (i32) {
 global.rodata.def @kPointerValue = align(4) bytes("1f000000")
 
 // ====
-// Binding the converted object to an addressed reference preserves its selected
-// constructor, just as named construction and value-reference passing do.
+// A nonescaping pointer through an addressed reference preserves the selected
+// constructor without forcing the converted object into storage.
 struct Doubled {
   // The constructor transforms its argument before publishing this field.
   double value;
@@ -876,21 +876,21 @@ double named(double value) { Doubled converted(value); return addressed(converte
 double unaddressed(double value) { return projected(value); }
 // ----
 func.def public @implicit(%value: f64) -> (f64) {
-  %48 = scalar.constant 2.0 : f64
-  %49 = scalar.mulf %value, %48 : f64
-  func.return %49 : f64
+  %22 = scalar.constant 2.0 : f64
+  %23 = scalar.mulf %value, %22 : f64
+  func.return %23 : f64
 }
 
 func.def public @named(%value: f64) -> (f64) {
-  %39 = scalar.constant 2.0 : f64
-  %40 = scalar.mulf %value, %39 : f64
-  func.return %40 : f64
+  %20 = scalar.constant 2.0 : f64
+  %converted_value = scalar.mulf %value, %20 : f64
+  func.return %converted_value : f64
 }
 
 func.def public @unaddressed(%value: f64) -> (f64) {
-  %32 = scalar.constant 2.0 : f64
-  %33 = scalar.mulf %value, %32 : f64
-  func.return %33 : f64
+  %16 = scalar.constant 2.0 : f64
+  %17 = scalar.mulf %value, %16 : f64
+  func.return %17 : f64
 }
 
 // ====
@@ -907,8 +907,8 @@ func.def public @widen(%value: f32) -> (f64) {
 }
 
 func.def public @narrow(%value: i32) -> (i32) {
-  %12 = scalar.trunci %value : i32 to i8
-  %30 = scalar.extui %12 : i8 to i32
+  %15 = scalar.trunci %value : i32 to i8
+  %30 = scalar.extui %15 : i8 to i32
   func.return %30 : i32
 }
 
@@ -933,18 +933,18 @@ unsigned indexed(Number value, unsigned index) { return read(value[index]); }
 unsigned mutate(unsigned seed) { Alias alias{seed}; increment(alias); return alias.value; }
 // ----
 func.def public @converted(%value_value: i32) -> (i32) {
-  %31 = scalar.constant 3 : i32
-  %32 = scalar.muli %value_value, %31 : i32
-  func.return %32 : i32
+  %34 = scalar.constant 3 : i32
+  %35 = scalar.muli %value_value, %34 : i32
+  func.return %35 : i32
 }
 
 func.def public @indexed(%value_value: i32, %index: i32) -> (i32) {
-  %36 = scalar.addi %value_value, %index : i32
-  func.return %36 : i32
+  %39 = scalar.addi %value_value, %index : i32
+  func.return %39 : i32
 }
 
 func.def public @mutate(%seed: i32) -> (i32) {
-  %39 = scalar.constant 1 : i32
-  %value = scalar.addi %seed, %39 : i32
+  %42 = scalar.constant 1 : i32
+  %value = scalar.addi %seed, %42 : i32
   func.return %value : i32
 }

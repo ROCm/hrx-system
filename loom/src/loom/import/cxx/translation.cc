@@ -1423,6 +1423,7 @@ class Translator final : private Initialization::Evaluation {
     immutable_storage_.clear();
     immutable_preamble_end_ = nullptr;
     references_.clear();
+    pointer_aliases_.clear();
     receivers_.clear();
     value_arena_.reset();
     size_t argument_index = 0;
@@ -1750,6 +1751,11 @@ class Translator final : private Initialization::Evaluation {
                            cxx::ExpressionAST* initializer,
                            ConstexprContract constexpr_contract,
                            cxx::AST* owner) {
+    if (auto* referent = control_->pointer_alias(variable)) {
+      pointer_aliases_.emplace(
+          variable, reference_lvalue(referent, owner, LvalueAccess::Read));
+      return;
+    }
     if (unit_.typeTraits().is_reference(variable->type())) {
       if (!initializer) {
         fail(owner, "reference locals require an initializer");
@@ -2073,6 +2079,16 @@ class Translator final : private Initialization::Evaluation {
     auto* pointer = cxx::type_cast<cxx::PointerType>(types_.unqualified(type));
     return storage_.project(value.pointer(),
                             pointer ? pointer->elementType() : type, owner);
+  }
+
+  const Lvalue* pointer_alias_lvalue(cxx::ExpressionAST* expression) const {
+    auto* source =
+        cxx::ast_cast<cxx::IdExpressionAST>(unwrap_expression(expression));
+    if (!source) {
+      return nullptr;
+    }
+    auto found = pointer_aliases_.find(source->symbol);
+    return found == pointer_aliases_.end() ? nullptr : &found->second;
   }
 
   StorageProjection pointer_expression(cxx::ExpressionAST* ast) {
@@ -2441,6 +2457,24 @@ class Translator final : private Initialization::Evaluation {
   };
 
   enum class LvalueAccess { Read, Write };
+
+  std::optional<Lvalue> pointer_alias_member_lvalue(
+      cxx::MemberExpressionAST* member, cxx::AST* owner, LvalueAccess access) {
+    if (member->accessOp != cxx::TokenKind::T_MINUS_GREATER ||
+        member->vectorComponentKind != cxx::VectorComponentKind::kNone) {
+      return std::nullopt;
+    }
+    auto* alias = pointer_alias_lvalue(member->baseExpression);
+    if (!alias) {
+      return std::nullopt;
+    }
+    if (access == LvalueAccess::Write) {
+      types_.require_mutable(member->type, owner);
+    }
+    return alias->project(
+        types_.selection(member->symbol, member->subobjectPath, member),
+        member->type, storage_, owner);
+  }
 
   ObjectLvalue object_destination(
       cxx::ExpressionAST* expression, cxx::AST* owner,
@@ -2866,6 +2900,21 @@ class Translator final : private Initialization::Evaluation {
                      LvalueAccess access = LvalueAccess::Write,
                      bool preserve_identity = false) {
     auto* projected = unwrap_object_identity(unit_, expression);
+    if (auto* dereference = cxx::ast_cast<cxx::UnaryExpressionAST>(projected);
+        dereference && !dereference->symbol &&
+        dereference->op == cxx::TokenKind::T_STAR) {
+      if (auto* alias = pointer_alias_lvalue(dereference->expression)) {
+        if (access == LvalueAccess::Write) {
+          types_.require_mutable(projected->type, owner);
+        }
+        return *alias;
+      }
+    }
+    if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(projected)) {
+      if (auto alias = pointer_alias_member_lvalue(member, owner, access)) {
+        return std::move(*alias);
+      }
+    }
     if (unit_.typeTraits().is_class(projected->type) &&
         is_current_object(unit_, projected)) {
       if (access == LvalueAccess::Write) {
@@ -5906,6 +5955,10 @@ class Translator final : private Initialization::Evaluation {
         return name(selected_receiver_value(*selected, field->type(), ast),
                     cxx::to_string(field->name()));
       }
+      if (auto alias =
+              pointer_alias_member_lvalue(member, ast, LvalueAccess::Read)) {
+        return name(read(*alias, ast), cxx::to_string(member->symbol->name()));
+      }
       auto* base = cxx::ast_cast<cxx::IdExpressionAST>(member->baseExpression);
       if (is_semantic_array_element(member->baseExpression)) {
         return name(read(destination(member, ast, LvalueAccess::Read), ast),
@@ -6120,6 +6173,9 @@ class Translator final : private Initialization::Evaluation {
         return object_address(unary->expression).pointer;
       }
       if (unary->op == cxx::TokenKind::T_STAR) {
+        if (auto* alias = pointer_alias_lvalue(unary->expression)) {
+          return read(*alias, ast);
+        }
         return load(ast);
       }
       if (unary->op != cxx::TokenKind::T_PLUS &&
@@ -8280,6 +8336,9 @@ class Translator final : private Initialization::Evaluation {
   // rebind. Storage references therefore preserve their root and byte offset
   // without re-evaluating a source address expression.
   std::unordered_map<cxx::Symbol*, Lvalue> references_;
+  // Nonescaping local pointers retain their evaluated semantic lvalue rather
+  // than forcing the referent through a physical object representation.
+  std::unordered_map<cxx::Symbol*, Lvalue> pointer_aliases_;
   // Lexical current objects share bindings and retain construction completion.
   ReceiverScopes receivers_{values_};
   // Launch configurations not owned by the ordinary reachable-call analysis

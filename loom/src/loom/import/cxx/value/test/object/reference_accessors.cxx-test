@@ -43,7 +43,8 @@ func.def public @local_alias(%value$0: i32, %values$1: vector<4xi32>, %lane: i32
 
 // ====
 // Lexical references retain exact nested SSA destinations and observe later
-// whole-object replacements. An identity escape makes the same owner physical.
+// whole-object replacements. A nonescaping pointer to the same destination
+// remains an SSA alias instead of making the owner physical.
 struct Pair {
   unsigned first;
   unsigned second;
@@ -62,7 +63,7 @@ unsigned member_references(unsigned first, unsigned second) {
   pair.second += scalar;
   return scalar * 100u + observed;
 }
-unsigned escaped_member_reference(unsigned input) {
+unsigned aliased_member_reference(unsigned input) {
   Pair value{input, 2u};
   unsigned& alias = value.first;
   unsigned* pointer = &alias;
@@ -83,36 +84,11 @@ func.def public @member_references(%first: i32, %second: i32) -> (i32) {
   func.return %10 : i32
 }
 
-func.def public @escaped_member_reference(%input: i32) -> (i32) {
-  %13 = index.constant 8 : offset
-  %value_storage = buffer.alloca<private> align(4) %13 : buffer
-  %value_storage_byte_offset = index.constant 0 : offset
-  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<8xi8>
-  %17 = index.constant 0 : offset
-  %18 = index.add %value_storage_byte_offset, %17 : offset
-  %19 = index.assume %18 [range(%18, 0, 4)] : offset
-  %20 = buffer.view %value_storage[%19] : buffer -> view<1xi32>
-  view.store %input, %20[0] : i32, view<1xi32>
-  %21 = index.constant 4 : offset
-  %22 = index.add %value_storage_byte_offset, %21 : offset
-  %23 = scalar.constant 2 : i32
-  %24 = index.assume %22 [range(%22, 0, 4)] : offset
-  %25 = buffer.view %value_storage[%24] : buffer -> view<1xi32>
-  view.store %23, %25[0] : i32, view<1xi32>
-  %26 = index.constant 0 : offset
-  %pointer_byte_offset = index.add %value_storage_byte_offset, %26 : offset
-  %28 = index.assume %pointer_byte_offset [range(%pointer_byte_offset, 0, 4)] : offset
-  %29 = buffer.view %value_storage[%28] : buffer -> view<1xi32>
-  %30 = view.load %29[0] : view<1xi32> -> i32
-  %31 = scalar.constant 1 : i32
-  %32 = scalar.addi %30, %31 : i32
-  view.store %32, %29[0] : i32, view<1xi32>
-  %33 = index.constant 0 : offset
-  %34 = index.add %value_storage_byte_offset, %33 : offset
-  %35 = index.assume %34 [range(%34, 0, 4)] : offset
-  %36 = buffer.view %value_storage[%35] : buffer -> view<1xi32>
-  %first = view.load %36[0] : view<1xi32> -> i32
-  func.return %first : i32
+func.def public @aliased_member_reference(%input: i32) -> (i32) {
+  %value_second = scalar.constant 2 : i32
+  %14 = scalar.constant 1 : i32
+  %value_first = scalar.addi %input, %14 : i32
+  func.return %value_first : i32
 }
 
 // ====
@@ -1114,8 +1090,8 @@ func.def @choose_volatile(%first: i1, %left: buffer, %left_byte_offset: offset, 
 }
 
 // ====
-// Observing the returned address deliberately selects the durable pointer ABI;
-// an ordinal result is used only while source identity remains abstract.
+// A nonescaping pointer can mutate a runtime-selected reference while the
+// selected identity remains an abstract ordinal.
 static unsigned& choose_address(bool first, unsigned& left, unsigned& right) {
   return first ? left : right;
 }
@@ -1128,33 +1104,41 @@ unsigned address_selected_result(bool first, unsigned left, unsigned right) {
 
 // ----
 func.def public @address_selected_result(%first: i1, %left$1: i32, %right$2: i32) -> (i32) {
-  %4 = index.constant 4 : offset
-  %left_storage = buffer.alloca<private> align(4) %4 : buffer
-  %left_storage_byte_offset = index.constant 0 : offset
-  %left_view = buffer.view %left_storage[%left_storage_byte_offset] : buffer -> view<1xi32>
-  view.store %left$1, %left_view[0] : i32, view<1xi32>
-  %8 = index.constant 4 : offset
-  %right_storage = buffer.alloca<private> align(4) %8 : buffer
-  %right_storage_byte_offset = index.constant 0 : offset
-  %right_view = buffer.view %right_storage[%right_storage_byte_offset] : buffer -> view<1xi32>
-  view.store %right$2, %right_view[0] : i32, view<1xi32>
-  %selected, %selected_byte_offset = func.call pure @choose_address(%first, %left_storage, %left_storage_byte_offset, %right_storage, %right_storage_byte_offset) : (i1, buffer, offset, buffer, offset) -> (buffer, offset)
-  %14 = buffer.view %selected[%selected_byte_offset] : buffer -> view<1xi32>
-  %15 = view.load<root_in_bounds> %14[0] : view<1xi32> -> i32
-  %16 = scalar.constant 1 : i32
-  %17 = scalar.addi %15, %16 : i32
-  view.store<root_in_bounds> %17, %14[0] : i32, view<1xi32>
-  %left$18 = view.load %left_view[0] : view<1xi32> -> i32
-  %right$19 = view.load %right_view[0] : view<1xi32> -> i32
-  %20 = scalar.addi %left$18, %right$19 : i32
-  func.return %20 : i32
+  %4 = func.call pure @choose_address(%first, %left$1, %right$2) : (i1, i32, i32) -> (i32)
+  %5 = scalar.constant 0 : i32
+  %6 = scalar.cmpi eq, %4, %5 : i32
+  %7 = scf.if %6 -> (i32) {
+    scf.yield %left$1 : i32
+  } else {
+    scf.yield %right$2 : i32
+  }
+  %8 = scalar.constant 1 : i32
+  %9 = scalar.addi %7, %8 : i32
+  %10 = scalar.constant 0 : i32
+  %11 = scalar.cmpi eq, %4, %10 : i32
+  %left$12 = scf.if %11 -> (i32) {
+    scf.yield %9 : i32
+  } else {
+    scf.yield %left$1 : i32
+  }
+  %13 = scalar.constant 0 : i32
+  %14 = scalar.cmpi eq, %4, %13 : i32
+  %right$15 = scf.if %14 -> (i32) {
+    scf.yield %right$2 : i32
+  } else {
+    scf.yield %9 : i32
+  }
+  %16 = scalar.addi %left$12, %right$15 : i32
+  func.return %16 : i32
 }
 
-func.def @choose_address(%first: i1, %left: buffer, %left_byte_offset: offset, %right: buffer, %right_byte_offset: offset) -> (buffer, offset) {
-  %28, %29 = scf.if %first -> (buffer, offset) {
-    scf.yield %left, %left_byte_offset : buffer, offset
+func.def @choose_address(%first: i1, %left: i32, %right: i32) -> (i32) {
+  %23 = scf.if %first -> (i32) {
+    %21 = scalar.constant 0 : i32
+    scf.yield %21 : i32
   } else {
-    scf.yield %right, %right_byte_offset : buffer, offset
+    %22 = scalar.constant 1 : i32
+    scf.yield %22 : i32
   }
-  func.return %28, %29 : buffer, offset
+  func.return %23 : i32
 }

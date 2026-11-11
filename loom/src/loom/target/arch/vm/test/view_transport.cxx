@@ -229,3 +229,26 @@ unsigned constructed_reference_identity(unsigned initial, unsigned updated) {
   box.value = updated;
   return iterator.read();
 }
+
+struct CapturedPointerAliasBox {
+  unsigned lower;
+  unsigned upper;
+};
+
+[[loom::noinline]] static unsigned captured_pointer_alias_lower(
+    const CapturedPointerAliasBox& box) {
+  const CapturedPointerAliasBox* pointer = &box;
+  return pointer->lower;
+}
+
+// A nonescaping local pointer can select a field from a native record without
+// forcing the neighboring semantic view in the closure into object storage.
+unsigned captured_pointer_alias(unsigned lower) {
+  auto view = loom::buffer::view<loom::type::dynamic>(
+      loom::buffer::constant("\x0b\x0c\x0d"), {3u});
+  CapturedPointerAliasBox box{lower, 4u};
+  auto callable = [=] {
+    return loom::view::load(view, 1u) + captured_pointer_alias_lower(box);
+  };
+  return callable();
+}

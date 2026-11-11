@@ -429,6 +429,12 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
     }
   }
   accept(body);
+  for (auto& entry : pointer_aliases_) {
+    auto& alias = entry.second;
+    if (!alias.transparent) {
+      require_identity(alias.identity);
+    }
+  }
   if (reference_return_ == ReferenceReturn::Parameter) {
     IREE_ASSERT(reference_return_parameter_ != SIZE_MAX);
   }
@@ -813,9 +819,24 @@ bool ControlFlow::require_reference_storage(cxx::Symbol* parameter) {
 }
 
 bool ControlFlow::storage_backed(cxx::MemberExpressionAST* expression) const {
+  if (expression->accessOp == cxx::TokenKind::T_MINUS_GREATER) {
+    auto* base = cxx::ast_cast<cxx::IdExpressionAST>(
+        unwrap_expression(expression->baseExpression));
+    if (base && pointer_alias(base->symbol)) {
+      return false;
+    }
+  }
   auto* owner = object_owner(expression);
   return storage_expressions_.contains(expression) ||
          (owner && storage_backed(owner));
+}
+
+cxx::ExpressionAST* ControlFlow::pointer_alias(cxx::Symbol* binding) const {
+  auto found = pointer_aliases_.find(binding);
+  return found != pointer_aliases_.end() && found->second.transparent &&
+                 !argument_requires_storage(found->second.identity)
+             ? found->second.referent
+             : nullptr;
 }
 
 cxx::Symbol* ControlFlow::object_owner(cxx::ExpressionAST* expression) const {
@@ -950,6 +971,13 @@ void ControlFlow::postVisit(cxx::AST* ast) {
       }
     } else if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
       record_member_binding_read(expression);
+      if (!pointer_aliases_.empty()) {
+        if (auto found = pointer_aliases_.find(id->symbol);
+            found != pointer_aliases_.end() &&
+            pointer_alias_use_ != id->symbol) {
+          found->second.transparent = false;
+        }
+      }
       if (observes_pointer_captures_ && expression != pointer_value_read_) {
         retain_pointer_capture_identity(id->symbol);
       }
@@ -1422,13 +1450,43 @@ void ControlFlow::visit(cxx::PostIncrExpressionAST* ast) {
 }
 
 void ControlFlow::visit(cxx::UnaryExpressionAST* ast) {
+  auto* alias_binding = [&]() -> cxx::Symbol* {
+    if (ast->symbol || ast->op != cxx::TokenKind::T_STAR) {
+      return nullptr;
+    }
+    auto* source =
+        cxx::ast_cast<cxx::IdExpressionAST>(unwrap_expression(ast->expression));
+    return source && !pointer_aliases_.empty() &&
+                   pointer_aliases_.contains(source->symbol)
+               ? source->symbol
+               : nullptr;
+  }();
+  auto* saved_alias_use = pointer_alias_use_;
+  if (alias_binding) {
+    pointer_alias_use_ = alias_binding;
+  }
   cxx::ASTVisitor::visit(ast);
+  pointer_alias_use_ = saved_alias_use;
   if (auto call = direct_operator_call(ast)) {
     retain_call(*call, ast);
     return;
   }
   if (!ast->symbol && ast->op == cxx::TokenKind::T_AMP) {
-    require_identity(ast->expression);
+    if (ast != pointer_alias_initializer_) {
+      if (auto* dereference = cxx::ast_cast<cxx::UnaryExpressionAST>(
+              unwrap_expression(ast->expression));
+          dereference && !dereference->symbol &&
+          dereference->op == cxx::TokenKind::T_STAR) {
+        if (auto* source = cxx::ast_cast<cxx::IdExpressionAST>(
+                unwrap_expression(dereference->expression))) {
+          if (auto found = pointer_aliases_.find(source->symbol);
+              found != pointer_aliases_.end()) {
+            found->second.transparent = false;
+          }
+        }
+      }
+      require_identity(ast->expression);
+    }
   }
   if (ast->op == cxx::TokenKind::T_PLUS_PLUS ||
       ast->op == cxx::TokenKind::T_MINUS_MINUS) {
@@ -1438,6 +1496,26 @@ void ControlFlow::visit(cxx::UnaryExpressionAST* ast) {
       require_identity(ast->expression);
     }
   }
+}
+
+void ControlFlow::visit(cxx::MemberExpressionAST* ast) {
+  cxx::Symbol* alias_binding = nullptr;
+  auto* field = cxx::symbol_cast<cxx::FieldSymbol>(ast->symbol);
+  if (!pointer_aliases_.empty() &&
+      ast->accessOp == cxx::TokenKind::T_MINUS_GREATER && field &&
+      !unit_.typeTraits().is_array(field->type())) {
+    if (auto* source = cxx::ast_cast<cxx::IdExpressionAST>(
+            unwrap_expression(ast->baseExpression));
+        source && pointer_aliases_.contains(source->symbol)) {
+      alias_binding = source->symbol;
+    }
+  }
+  auto* saved_alias_use = pointer_alias_use_;
+  if (alias_binding) {
+    pointer_alias_use_ = alias_binding;
+  }
+  cxx::ASTVisitor::visit(ast);
+  pointer_alias_use_ = saved_alias_use;
 }
 
 bool ControlFlow::collect_reference_return_parameters(
@@ -2081,6 +2159,9 @@ void ControlFlow::record_parameter_read(cxx::ExpressionAST* expression) {
   // initializer beneath its frontend conversion (including semantic handles).
   cxx::Initializer initializer(expression);
   auto* value = initializer.singleExpression();
+  if (value && !pointer_aliases_.empty() && record_pointer_alias_read(value)) {
+    return;
+  }
   if (auto* list = cxx::ast_cast<cxx::BracedInitListAST>(expression)) {
     record_copy_read(list->type, list->expressionList);
     return;
@@ -2096,6 +2177,46 @@ void ControlFlow::record_parameter_read(cxx::ExpressionAST* expression) {
         selected->binding, selected->component_offset,
         selected->member ? selected->member->component_count : SIZE_MAX);
   }
+}
+
+bool ControlFlow::record_pointer_alias_read(cxx::ExpressionAST* expression) {
+  expression = unwrap_object_identity(unit_, expression);
+  cxx::ExpressionAST* pointer = nullptr;
+  ReferenceProjection projection;
+  if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression);
+      member && member->accessOp == cxx::TokenKind::T_MINUS_GREATER) {
+    auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
+    if (!field) {
+      return false;
+    }
+    pointer = member->baseExpression;
+    const auto selected =
+        types_.selection(field, member->subobjectPath, member);
+    projection = {selected.component_offset,
+                  selected.partition->component_count};
+  } else if (auto* dereference =
+                 cxx::ast_cast<cxx::UnaryExpressionAST>(expression);
+             dereference && !dereference->symbol &&
+             dereference->op == cxx::TokenKind::T_STAR) {
+    pointer = dereference->expression;
+  } else {
+    return false;
+  }
+  auto* source =
+      cxx::ast_cast<cxx::IdExpressionAST>(unwrap_expression(pointer));
+  auto found =
+      source ? pointer_aliases_.find(source->symbol) : pointer_aliases_.end();
+  if (found == pointer_aliases_.end() || !found->second.transparent) {
+    return false;
+  }
+  visit_intervals(
+      found->second.identity, projection, [&](ObjectInterval interval) {
+        construction_.read(interval.binding, interval.begin,
+                           interval.end == ObjectInterval::kWholeObjectEnd
+                               ? SIZE_MAX
+                               : interval.end - interval.begin);
+      });
+  return true;
 }
 
 void ControlFlow::record_copy_read(const cxx::Type* type,
@@ -2367,6 +2488,23 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
       argument.inherent_storage = true;
       return;
     }
+    if (field && member->accessOp == cxx::TokenKind::T_MINUS_GREATER) {
+      auto* base = cxx::ast_cast<cxx::IdExpressionAST>(
+          unwrap_expression(member->baseExpression));
+      if (base) {
+        auto found = pointer_aliases_.find(base->symbol);
+        if (found != pointer_aliases_.end() && found->second.transparent) {
+          const auto selected =
+              types_.selection(field, member->subobjectPath, member);
+          append_identity(
+              found->second.identity, argument,
+              compose_projection({selected.component_offset,
+                                  selected.partition->component_count},
+                                 projection));
+          return;
+        }
+      }
+    }
     if (member->accessOp == cxx::TokenKind::T_MINUS_GREATER ||
         storage_expressions_.contains(member)) {
       argument.inherent_storage = true;
@@ -2452,6 +2590,15 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
   }
   if (auto* unary = cxx::ast_cast<cxx::UnaryExpressionAST>(expression)) {
     if (!unary->symbol && unary->op == cxx::TokenKind::T_STAR) {
+      auto* source = cxx::ast_cast<cxx::IdExpressionAST>(
+          unwrap_expression(unary->expression));
+      if (source) {
+        auto found = pointer_aliases_.find(source->symbol);
+        if (found != pointer_aliases_.end() && found->second.transparent) {
+          append_identity(found->second.identity, argument, projection);
+          return;
+        }
+      }
       argument.inherent_storage = true;
       return;
     }
@@ -3747,6 +3894,7 @@ void ControlFlow::finalize_callable_effects() {
 
 void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
   auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(ast->symbol);
+  auto* saved_pointer_alias_initializer = pointer_alias_initializer_;
   if (variable && variable->isStatic()) {
     static_locals_.push_back(ast);
   }
@@ -3759,8 +3907,27 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
             variable->type(), conversion->conversionFunction, ast)) {
       bound_constructor_conversions_.insert(conversion);
     }
+    if (ast->initializer && unit_.typeTraits().is_pointer(variable->type()) &&
+        !unit_.typeTraits().is_volatile(variable->type())) {
+      auto* initialized = cxx::Initializer(ast->initializer).singleExpression();
+      auto* address = cxx::ast_cast<cxx::UnaryExpressionAST>(
+          initialized ? unwrap_expression(initialized) : nullptr);
+      if (address && !address->symbol && address->op == cxx::TokenKind::T_AMP &&
+          !unit_.typeTraits().is_array(address->expression->type)) {
+        auto identity = retain_call_argument(address->expression);
+        if (!identity.inherent_storage &&
+            (identity.current_receiver || !identity.identity_bindings.empty() ||
+             identity.identity_intervals ||
+             !identity.reference_calls.empty())) {
+          pointer_alias_initializer_ = address;
+          pointer_aliases_.emplace(
+              variable, PointerAlias{address->expression, std::move(identity)});
+        }
+      }
+    }
   }
   cxx::ASTVisitor::visit(ast);
+  pointer_alias_initializer_ = saved_pointer_alias_initializer;
   if (variable) {
     if (!unit_.typeTraits().is_reference(variable->type()) &&
         ast->initializer) {

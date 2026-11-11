@@ -35,6 +35,7 @@ loom_check_test_suite(
         "offsetof.cxx-test",
         "offsetof_roundtrip.cxx-test",
         "operators.cxx-test",
+        "pointer_aliases.cxx-test",
         "record_arrays.cxx-test",
         "record_constructors.cxx-test",
         "record_initialization.cxx-test",

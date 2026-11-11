@@ -267,6 +267,10 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Whether this member projects existing memory instead of an SSA record.
   // Object identity is propagated from visited children once during analysis.
   bool storage_backed(cxx::MemberExpressionAST* expression) const;
+  // Referent of a local pointer whose only evaluated uses dereference the
+  // pointer without observing its pointer value. The translator can retain
+  // the already evaluated source lvalue instead of inventing object storage.
+  cxx::ExpressionAST* pointer_alias(cxx::Symbol* binding) const;
   // Null retains ordinary while semantics; a result permits scf.for lowering.
   const CountedLoop* counted(cxx::ForStatementAST* loop) const;
   // Retained lexical clauses for a supported runtime switch. Construction
@@ -494,6 +498,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   void visit(cxx::CompoundAssignmentExpressionAST* ast) override;
   void visit(cxx::PostIncrExpressionAST* ast) override;
   void visit(cxx::UnaryExpressionAST* ast) override;
+  void visit(cxx::MemberExpressionAST* ast) override;
   void visit(cxx::ReturnStatementAST* ast) override;
   void visit(cxx::CallExpressionAST* ast) override;
   void visit(cxx::LambdaExpressionAST* ast) override;
@@ -525,6 +530,7 @@ class ControlFlow final : private cxx::ASTVisitor {
       const CallArgument& argument,
       StorageDemand demand = StorageDemand::Representation) const;
   void record_parameter_read(cxx::ExpressionAST* expression);
+  bool record_pointer_alias_read(cxx::ExpressionAST* expression);
   void record_copy_read(const cxx::Type* type,
                         cxx::List<cxx::ExpressionAST*>* arguments);
   void record_parameter_assignment(cxx::ExpressionAST* expression);
@@ -673,6 +679,21 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Reference locals retain their initializer facts once. Later identity and
   // effect queries consume these facts without following initializer ASTs.
   std::unordered_map<cxx::Symbol*, ReferenceAlias> reference_aliases_;
+  struct PointerAlias {
+    // Source lvalue evaluated once by the pointer initializer.
+    cxx::ExpressionAST* referent;
+    // Canonical identity retained if a later use observes the pointer value.
+    CallArgument identity;
+    // False once any use needs an actual pointer representation.
+    bool transparent = true;
+  };
+  // Local address initializers remain aliases only while every pointer use is
+  // a direct dereference or data-member selection.
+  std::unordered_map<cxx::Symbol*, PointerAlias> pointer_aliases_;
+  // Address expression deferred while its declarator candidate is visited.
+  cxx::UnaryExpressionAST* pointer_alias_initializer_ = nullptr;
+  // Candidate binding consumed by the currently traversed transparent use.
+  cxx::Symbol* pointer_alias_use_ = nullptr;
   // Reference parameters requiring buffer-plus-offset transport.
   std::unordered_set<cxx::Symbol*> storage_references_;
   // Reference parameters whose referents may be modified.

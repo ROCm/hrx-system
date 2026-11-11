@@ -112,3 +112,8 @@ LOOM_CHECK_CASE(constructor_preserves_referent_identity) {
   const auto result = constructed_reference_identity(7u, 42u);
   loom::check::expect_equal(result, 42u);
 }
+
+LOOM_CHECK_CASE(captured_pointer_alias_preserves_semantic_view) {
+  const auto result = captured_pointer_alias(30u);
+  loom::check::expect_equal(result, 42u);
+}

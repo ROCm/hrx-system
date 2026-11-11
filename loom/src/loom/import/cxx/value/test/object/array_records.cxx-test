@@ -48,7 +48,7 @@ func.def public @write(%output: buffer, %output_byte_offset: offset, %value_firs
 }
 
 // ====
-// Both an object pointer and a member pointer retain the parameter's identity.
+// Nonescaping object and member pointers retain the parameter's SSA identity.
 struct Record { unsigned first, second; };
 unsigned address(Record value) {
   auto* object = &value;
@@ -59,10 +59,10 @@ unsigned address(Record value) {
 
 // ----
 func.def public @address(%value_first: i32, %value_second: i32) -> (i32) {
-  %17 = scalar.constant 3 : i32
-  %38 = scalar.addi %value_second, %value_first : i32
-  %39 = scalar.addi %38, %17 : i32
-  func.return %39 : i32
+  %3 = scalar.constant 3 : i32
+  %6 = scalar.addi %value_second, %value_first : i32
+  %7 = scalar.addi %6, %3 : i32
+  func.return %7 : i32
 }
 
 // ====
