@@ -49,6 +49,45 @@ command.def public @target() launch(%weights: buffer, %output: buffer) {
   command.return
 }
 
+kernel.def @consume_packed() {
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  kernel.launch.config workgroups(%c8, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%a: view<8xi32>, %b: view<8xi32>, %raw: view<8xi32>, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %element = kernel.workgroup.id<x> : index
+  %destination = buffer.view %output[%origin] : buffer -> view<8xi32>
+  %av = view.load %a[%element] : view<8xi32> -> i32
+  %bv = view.load %b[%element] : view<8xi32> -> i32
+  %rv = view.load %raw[%element] : view<8xi32> -> i32
+  %ab = scalar.addi %av, %bv : i32
+  %sum = scalar.addi %ab, %rv : i32
+  view.store %sum, %destination[%element] : i32, view<8xi32>
+  kernel.return
+}
+
+command.def public @packing_reference() launch(%weights: buffer, %output: buffer) {
+  %a = command.parameter %weights, "a" : view<8xi32>
+  %b = command.parameter %weights, "b" : view<8xi32>
+  %raw = command.parameter %weights, "raw" : view<8xi32>
+  kernel.launch @consume_packed(%a, %b, %raw, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
+  command.return
+}
+
+command.def public @repacked() launch(%weights: buffer, %output: buffer) {
+  %raw = command.parameter %weights, "raw" : view<8xi32>
+  %b = command.parameter %weights, "b" : view<8xi32>
+  %a = command.parameter %weights, "a" : view<8xi32>
+  kernel.launch @consume_packed(%raw, %b, %a, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
+  command.return
+}
+
+command.def public @packing_subset() launch(%weights: buffer, %output: buffer) {
+  %raw = command.parameter %weights, "raw" : view<8xi32>
+  kernel.launch @consume_packed(%raw, %raw, %raw, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
+  command.return
+}
+
 command.def public @auxiliary() launch(%shared: buffer, %private: buffer, %output: buffer) {
   %a = command.parameter %shared, "a" : view<8xi32>
   %d = command.parameter %private, "d" : view<8xi32>

@@ -208,9 +208,10 @@ struct loom_serve_weights_t {
 
 static const loom_serve_weight_span_t* loom_serve_weight_find(
     iree_host_size_t count, const loom_serve_weight_span_t* spans,
-    iree_string_view_t key) {
+    iree_host_size_t storage_index, iree_string_view_t key) {
   for (iree_host_size_t i = 0; i < count; ++i) {
-    if (iree_string_view_equal(spans[i].parameter.key, key)) {
+    if (spans[i].storage_index == storage_index &&
+        iree_string_view_equal(spans[i].parameter.key, key)) {
       return &spans[i];
     }
   }
@@ -224,9 +225,7 @@ typedef struct loom_serve_weight_root_binding_t {
   iree_hal_buffer_range_t range;
 } loom_serve_weight_root_binding_t;
 
-// Resolves root sharing before submitting any I/O. Only newly allocated roots
-// append spans, so tensors shared by multiple stages are read and prepared
-// exactly once.
+// Reuses translated layouts before I/O; independently packed roots own copies.
 static iree_status_t loom_serve_weight_resolve_root(
     loom_serve_weights_t* weights, const loom_cmd_program_t* program,
     loom_cmd_program_parameter_root_t root, iree_host_size_t* span_count,
@@ -234,45 +233,59 @@ static iree_status_t loom_serve_weight_resolve_root(
     iree_hal_pool_reservation_request_t* requests,
     loom_serve_weight_root_binding_t* out_binding) {
   const iree_host_size_t prior_count = *span_count;
-  const loom_serve_weight_span_t* shared = NULL;
-  iree_device_size_t origin = 0;
-  iree_host_size_t count = 0;
+  loom_cmd_program_parameter_t first = {0};
+  bool has_parameter = false;
   for (uint32_t i = 0; i < program->parameters.count; ++i) {
     const loom_cmd_program_parameter_t parameter =
         loom_cmd_program_parameter_at(program, i);
     if (parameter.fixed_buffer_index != root.fixed_buffer_index) {
       continue;
     }
-    const loom_serve_weight_span_t* existing =
-        loom_serve_weight_find(prior_count, spans, parameter.key);
-    if (!count++) {
-      shared = existing;
-      if (shared) {
-        if (shared->parameter.byte_offset < parameter.byte_offset) {
-          return iree_make_status(
-              IREE_STATUS_INVALID_ARGUMENT,
-              "shared parameter root begins before storage");
-        }
-        origin = shared->parameter.byte_offset - parameter.byte_offset;
-      }
-    }
-    if ((existing != NULL) != (shared != NULL) ||
-        (existing &&
-         (existing->storage_index != shared->storage_index ||
-          existing->parameter.byte_offset != origin + parameter.byte_offset ||
-          existing->parameter.byte_length != parameter.byte_length))) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "parameter root cannot share existing placement");
-    }
+    first = parameter;
+    has_parameter = true;
+    break;
   }
-  if (!count) {
+  if (!has_parameter) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "empty model parameter root");
   }
-  if (shared) {
-    *out_binding = (loom_serve_weight_root_binding_t){
-        shared->storage_index, {origin, root.required_byte_length}};
-    return iree_ok_status();
+  for (iree_host_size_t candidate = 0; candidate < prior_count; ++candidate) {
+    const loom_serve_weight_span_t* shared = &spans[candidate];
+    if (!iree_string_view_equal(shared->parameter.key, first.key) ||
+        shared->parameter.byte_offset < first.byte_offset) {
+      continue;
+    }
+    const iree_device_size_t origin =
+        shared->parameter.byte_offset - first.byte_offset;
+    const iree_hal_pool_reservation_request_t request =
+        requests[shared->storage_index];
+    if (request.min_alignment < root.minimum_alignment ||
+        origin > request.allocation_size ||
+        root.required_byte_length > request.allocation_size - origin ||
+        (root.minimum_alignment && origin % root.minimum_alignment)) {
+      continue;
+    }
+    bool compatible = true;
+    for (uint32_t i = 0; i < program->parameters.count; ++i) {
+      const loom_cmd_program_parameter_t parameter =
+          loom_cmd_program_parameter_at(program, i);
+      if (parameter.fixed_buffer_index != root.fixed_buffer_index) {
+        continue;
+      }
+      const loom_serve_weight_span_t* existing = loom_serve_weight_find(
+          prior_count, spans, shared->storage_index, parameter.key);
+      if (!existing ||
+          existing->parameter.byte_offset != origin + parameter.byte_offset ||
+          existing->parameter.byte_length != parameter.byte_length) {
+        compatible = false;
+        break;
+      }
+    }
+    if (compatible) {
+      *out_binding = (loom_serve_weight_root_binding_t){
+          shared->storage_index, {origin, root.required_byte_length}};
+      return iree_ok_status();
+    }
   }
   const iree_host_size_t storage_index = weights->storage_count++;
   requests[storage_index] = iree_hal_make_pool_reservation_request(
