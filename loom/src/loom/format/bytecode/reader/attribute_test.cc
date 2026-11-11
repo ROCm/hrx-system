@@ -583,24 +583,26 @@ TEST_F(BytecodeAttributeTest, ScopedShapesBindDimensionsAndEncodingByRole) {
                    << "kind=" << carrier.kind << " rank=" << +rank);
       const bool has_encoding =
           carrier.kind != LOOM_TYPE_GROUP && carrier.kind != LOOM_TYPE_VECTOR;
-      std::vector<uint8_t> data = {1, 0, 1, carrier.wire_kind};
+      // At most ten header/root bytes and two bytes per dimension.
+      uint8_t data[10 + 2 * LOOM_TYPE_MAX_RANK] = {1, 0, 1, carrier.wire_kind};
+      iree_host_size_t data_length = 4;
       if (carrier.kind != LOOM_TYPE_GROUP) {
-        data.push_back(LOOM_SCALAR_TYPE_F32);
+        data[data_length++] = LOOM_SCALAR_TYPE_F32;
       }
-      data.push_back(rank);
+      data[data_length++] = rank;
       if (carrier.kind != LOOM_TYPE_GROUP) {
-        data.insert(data.end(), {uint8_t(has_encoding ? 2 : 0),
-                                 uint8_t(has_encoding ? 2 : 0)});
+        data[data_length++] = has_encoding ? 2 : 0;
+        data[data_length++] = has_encoding ? 2 : 0;
       }
       if (carrier.kind == LOOM_TYPE_VIEW) {
-        data.push_back(1);
+        data[data_length++] = 1;
       }
       for (uint8_t axis = 0; axis < rank; ++axis) {
-        data.push_back((axis % 3) != 1);
-        data.push_back(axis % 3 == 0 ? 0 : axis % 3 == 1 ? 31 : 2);
+        data[data_length++] = (axis % 3) != 1;
+        data[data_length++] = axis % 3 == 0 ? 0 : axis % 3 == 1 ? 31 : 2;
       }
-      data.push_back(1);  // Root is the first completed node.
-      data[1] = uint8_t(data.size() - 2);
+      data[data_length++] = 1;  // Root is the first completed node.
+      data[1] = uint8_t(data_length - 2);
       iree_arena_allocator_t scope_arena;
       iree_arena_initialize(&block_pool_, &scope_arena);
       loom_bytecode_type_bindings_t bindings = {.arena = &scope_arena};
@@ -611,11 +613,12 @@ TEST_F(BytecodeAttributeTest, ScopedShapesBindDimensionsAndEncodingByRole) {
           .bindings = &bindings,
       };
       auto materializer = MakeMaterializer();
-      auto cursor = MakeCursor(data.data(), data.size());
+      auto cursor = MakeCursor(data, data_length);
       loom_attribute_t attr = loom_attr_absent();
       IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
           &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0, &scope,
           &attr));
+      EXPECT_EQ(cursor.cursor.position, data_length);
       iree_arena_deinitialize(&scope_arena);
       iree_arena_reset(&scratch_arena_);
       iree_arena_block_pool_trim(&block_pool_);

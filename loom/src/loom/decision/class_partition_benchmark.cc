@@ -83,15 +83,7 @@ void BM_RefineClasses(benchmark::State& state) { Run(state, false); }
 
 void BM_CollectClasses(benchmark::State& state) { Run(state, true); }
 
-void Arguments(benchmark::internal::Benchmark* benchmark) {
-  for (int64_t sites : {2, 128, 4096}) {
-    for (int64_t outcomes : {2, 64, 4098}) {
-      benchmark->Args({sites, outcomes});
-    }
-  }
-}
-
-BENCHMARK(BM_RefineClasses)->Apply(Arguments);
-BENCHMARK(BM_CollectClasses)->Apply(Arguments);
+BENCHMARK(BM_RefineClasses)->ArgsProduct({{2, 128, 4096}, {2, 64, 4098}});
+BENCHMARK(BM_CollectClasses)->ArgsProduct({{2, 128, 4096}, {2, 64, 4098}});
 
 }  // namespace
