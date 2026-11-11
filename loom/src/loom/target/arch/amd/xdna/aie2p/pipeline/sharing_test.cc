@@ -14,6 +14,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/pass/types.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/payload.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
 
 namespace {
@@ -51,6 +52,11 @@ class Aie2pSharingTest
     batch_.record_count = 1;
     distribution_.source = &batch_;
     distribution_.path = &path_;
+    payload_source_.class_count = 1;
+    payload_.source = &payload_source_;
+    payload_.distribution_only = true;
+    payload_.distribution_path_count = 1;
+    path_.payloads = &payload_pointer_;
     path_.first = path_.geometries = &distribution_;
     distribution_.repetitions = 2;
     distribution_.sender.channel = &channels_[0];
@@ -114,6 +120,12 @@ class Aie2pSharingTest
   loom_aie2p_native_distribution_t distribution_ = {};
   // Physical route retained independently of child geometry.
   loom_aie2p_native_distribution_path_t path_ = {};
+  // One receiver class belongs exclusively to this distribution path.
+  loom_aie2p_native_payload_source_t payload_source_ = {};
+  // Retained physical framing eligibility consumed by grant selection.
+  loom_aie2p_native_payload_class_t payload_ = {};
+  // Logical class zero's physical correspondence.
+  loom_aie2p_native_payload_class_t* payload_pointer_ = &payload_;
   // Independently publishing destination.
   loom_aie2p_native_distribution_endpoint_t receiver_ = {};
   // Existing compute reader needing refill control traffic.
@@ -128,6 +140,21 @@ TEST_P(Aie2pSharingTest, StartupOnlyStreamsDoNotAllocateSharingState) {
   worker_.refills = nullptr;
   IREE_ASSERT_OK(loom_aie2p_native_prepare_sharing(&context_, &realization_));
   EXPECT_EQ(context_.deliveries, nullptr);
+}
+
+TEST_P(Aie2pSharingTest, OtherTransportUsersKeepTheirOwnFraming) {
+  payload_.distribution_only = false;
+  Prepare(false);
+}
+
+TEST_P(Aie2pSharingTest, DistinctDestinationClassesCannotShareOneGrant) {
+  payload_source_.class_count = 2;
+  Prepare(false);
+}
+
+TEST_P(Aie2pSharingTest, IndependentPathsNeedIndependentAdmission) {
+  payload_.distribution_path_count = 2;
+  Prepare(false);
 }
 
 TEST_P(Aie2pSharingTest, RepeatedDeliveryRequiresExactReceiverReturns) {

@@ -49,6 +49,7 @@ TEST_P(Aie2pRouteTest, SharedSourceUsesOneLaneAndRetainsPacketPrefixes) {
       EXPECT_EQ(edge.coordinate.row, first_row + hop);
       EXPECT_EQ(edge.destination_port, LOOM_XDNA_STREAM_PORT_NORTH);
       EXPECT_EQ(edge.destination_channel, 0);
+      EXPECT_FALSE(edge.dma_destination);
     }
     const auto& endpoint = routing.routes[routing.route_count - 1];
     EXPECT_EQ(endpoint.coordinate.row, rows[branch]);
@@ -56,6 +57,7 @@ TEST_P(Aie2pRouteTest, SharedSourceUsesOneLaneAndRetainsPacketPrefixes) {
     EXPECT_EQ(endpoint.source_channel, 0);
     EXPECT_EQ(endpoint.destination_port, LOOM_XDNA_STREAM_PORT_DMA);
     EXPECT_EQ(endpoint.destination_channel, 0);
+    EXPECT_TRUE(endpoint.dma_destination);
     frontier = rows[branch] > frontier ? rows[branch] : frontier;
   }
   for (uint16_t row = source.row; row < 5; ++row) {
@@ -69,6 +71,33 @@ TEST_P(Aie2pRouteTest, SharedSourceUsesOneLaneAndRetainsPacketPrefixes) {
   for (size_t i = 0; i < counts.size(); ++i) {
     EXPECT_EQ(routing.tile_route_counts[i], counts[i]);
   }
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&blocks);
+}
+
+TEST_P(Aie2pRouteTest, CrossColumnEgressTurnsOnTheShimRow) {
+  iree_arena_block_pool_t blocks;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&blocks, &arena);
+  loom_aie2p_array_route_builder_t routing;
+  IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
+      loom_xdna_npu2_array_family(), 1, 16, &arena, &routing));
+  const auto [source_row, packet] = GetParam();
+  ASSERT_TRUE(loom_aie2p_array_route_stream(
+      &routing, 0, 0, {0, static_cast<uint16_t>(source_row)},
+      LOOM_XDNA_STREAM_PORT_DMA, 0, {1, 0}, LOOM_XDNA_STREAM_PORT_DMA, 0,
+      packet));
+  ASSERT_EQ(routing.route_count, source_row + 3);
+  for (size_t i = 0; i < routing.route_count; ++i) {
+    const auto& edge = routing.routes[i];
+    if (edge.destination_port == LOOM_XDNA_STREAM_PORT_EAST) {
+      EXPECT_EQ(edge.coordinate.row, 0);
+    }
+  }
+  EXPECT_EQ(routing.routes[source_row].destination_port,
+            LOOM_XDNA_STREAM_PORT_EAST);
+  EXPECT_TRUE(routing.routes[routing.route_count - 2].dma_destination);
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&blocks);
 }

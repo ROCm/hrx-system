@@ -14,6 +14,8 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_queues.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/payload.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/sharing.h"
 #include "loom/target/arch/amd/xdna/array/facts.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
@@ -302,21 +304,32 @@ class DistributionPathTest
     return workers_[Worker(stream)].distribution_plan->batches[0].distribution;
   }
 
-  const loom_aie2p_native_distribution_t* SelectPrepared(size_t stream) {
+  void PlanPayloads() {
+    for (size_t stream = 0; stream < kStreams; ++stream) {
+      const auto* plan = workers_[Worker(stream)].distribution_plan;
+      if (!plan) {
+        continue;
+      }
+      for (auto* demand = plan->geometries; demand;
+           demand = demand->next_demand) {
+        demand->sender.engine = queues_[stream];
+        for (size_t i = 0; i < demand->receiver_count; ++i) {
+          demand->receivers[i].engine = queues_[stream];
+        }
+      }
+    }
+    bool valid = false;
+    IREE_ASSERT_OK(
+        loom_aie2p_native_form_payloads(&context_, &realization_, &valid));
+    ASSERT_TRUE(valid);
+  }
+
+  const loom_aie2p_native_distribution_t* Select(size_t stream) {
     bool valid = false;
     IREE_EXPECT_OK(loom_aie2p_native_select_worker_distributions(
         &context_, &realization_, Worker(stream), &next_source_, &valid));
     EXPECT_TRUE(valid);
     return workers_[Worker(stream)].distributions;
-  }
-
-  const loom_aie2p_native_distribution_t* Select(size_t stream,
-                                                 uint32_t records = 2,
-                                                 size_t receivers = 1,
-                                                 bool packet = false,
-                                                 bool repeat_first = false) {
-    Form(stream, records, receivers, packet, repeat_first);
-    return SelectPrepared(stream);
   }
 
   void CheckCompleteDemandFormation(bool packet) {
@@ -334,17 +347,50 @@ class DistributionPathTest
     }
     EXPECT_EQ(context_.routing.route_count, 0u);
     for (const auto* tile : pools_) {
-      EXPECT_EQ(tile->next_mm2s, 0);
-      EXPECT_EQ(tile->next_s2mm, 0);
+      EXPECT_EQ(tile->mm2s_count, 0);
+      EXPECT_EQ(tile->s2mm_count, 0);
       EXPECT_EQ(tile->descriptor_counts[0], 0);
       EXPECT_EQ(tile->descriptor_counts[1], 0);
     }
+    const auto none = IREE_HOST_SIZE_MAX;
+    const loom_pipeline_lifetime_t nodes[] = {
+        {LOOM_PIPELINE_LIFETIME_CONCURRENT, 0, none, 1, none},
+        {LOOM_PIPELINE_LIFETIME_OWNER, 0, 0, none, 2},
+        {LOOM_PIPELINE_LIFETIME_SERIAL, 0, 0, 3, none},
+        {LOOM_PIPELINE_LIFETIME_OWNER, 1, 2, none, 4},
+        {LOOM_PIPELINE_LIFETIME_OWNER, 2, 2, none, 5},
+        {LOOM_PIPELINE_LIFETIME_OWNER, 3, 2, none, none},
+    };
+    const iree_host_size_t owners[] = {1, 3, 4, 5};
+    realization_.invocations.lifetimes = {.nodes = nodes,
+                                          .count = IREE_ARRAYSIZE(nodes),
+                                          .owners = owners,
+                                          .has_serial = true};
+    bool valid = false;
+    iree_host_size_t distribution_workers[kStreams];
     for (size_t i = 0; i < kStreams; ++i) {
-      EXPECT_NE(SelectPrepared(i), nullptr);
+      distribution_workers[i] = Worker(i);
     }
-    EXPECT_EQ(pools_[0]->next_mm2s, 2);
-    EXPECT_EQ(pools_[1]->next_s2mm, 2);
-    EXPECT_EQ(pools_[2]->next_s2mm, 2);
+    IREE_ASSERT_OK(loom_aie2p_native_assign_dma_queues(
+        &context_, &realization_, distribution_workers, kStreams, &valid));
+    ASSERT_TRUE(valid);
+    EXPECT_EQ(pools_[0]->mm2s_count, 2);
+    EXPECT_EQ(pools_[1]->s2mm_count, 2);
+    EXPECT_EQ(pools_[2]->s2mm_count, 2);
+    IREE_ASSERT_OK(
+        loom_aie2p_native_form_payloads(&context_, &realization_, &valid));
+    ASSERT_TRUE(valid);
+    for (size_t i = 0; i < kStreams; ++i) {
+      auto* demand =
+          workers_[Worker(i)].distribution_plan->batches[0].distribution;
+      EXPECT_EQ(demand->sender.engine, i % 2);
+      for (size_t j = 0; j < 2; ++j) {
+        EXPECT_EQ(demand->receivers[j].engine, i % 2);
+      }
+      IREE_ASSERT_OK(loom_aie2p_native_select_worker_distributions(
+          &context_, &realization_, Worker(i), &next_source_, &valid));
+      ASSERT_TRUE(valid);
+    }
     EXPECT_GT(context_.routing.route_count, 0u);
   }
 
@@ -378,6 +424,8 @@ class DistributionPathTest
   std::array<iree_host_size_t, kWorkers> distribution_engines_ = {};
   // Their representative transport workers.
   std::array<iree_host_size_t, kStreams> representatives_ = {};
+  // Explicit assigned queues for path-interning tests independent of layout.
+  std::array<uint8_t, kStreams> queues_ = {0, 1, 0, 1, 0, 1};
   // Transport declarations referenced by retained plans.
   std::array<loom_pipeline_resource_strand_t, kStreams> strands_ = {};
   // Logical channel sources, in identity-address order.
@@ -411,11 +459,15 @@ class DistributionPathTest
 };
 
 TEST_P(DistributionPathTest, FreshChannelsReuseRetiredQueuesAndRoutes) {
-  const auto* first = Select(0, 4);
+  Form(0, 4);
+  Form(2, 2);
+  Form(4, 6);
+  PlanPayloads();
+  const auto* first = Select(0);
   ASSERT_NE(first, nullptr);
   const auto route_count = context_.routing.route_count;
-  const auto* tail = Select(2, 2);
-  const auto* final = Select(4, 6);
+  const auto* tail = Select(2);
+  const auto* final = Select(4);
   ASSERT_NE(tail, nullptr);
   ASSERT_NE(final, nullptr);
   EXPECT_EQ(first->path, tail->path);
@@ -423,8 +475,6 @@ TEST_P(DistributionPathTest, FreshChannelsReuseRetiredQueuesAndRoutes) {
   EXPECT_NE(first->sender.channel, tail->sender.channel);
   EXPECT_NE(first->receivers[0].channel, tail->receivers[0].channel);
   EXPECT_EQ(context_.routing.route_count, route_count);
-  EXPECT_EQ(pools_[0]->next_mm2s, 1);
-  EXPECT_EQ(pools_[1]->next_s2mm, 1);
   EXPECT_EQ(first->repetitions, 4u);
   EXPECT_EQ(tail->repetitions, 2u);
   EXPECT_NE(first->sender.sequence.words[0][0],
@@ -432,6 +482,10 @@ TEST_P(DistributionPathTest, FreshChannelsReuseRetiredQueuesAndRoutes) {
 }
 
 TEST_P(DistributionPathTest, SimultaneousStreamsKeepIndependentPaths) {
+  for (size_t i = 0; i < 4; ++i) {
+    Form(i);
+  }
+  PlanPayloads();
   const auto* first = Select(0);
   const auto* second = Select(1);
   ASSERT_NE(first, nullptr);
@@ -444,8 +498,22 @@ TEST_P(DistributionPathTest, SimultaneousStreamsKeepIndependentPaths) {
   EXPECT_NE(later_first->path, later_second->path);
   EXPECT_EQ(first->path, later_first->path);
   EXPECT_EQ(second->path, later_second->path);
-  EXPECT_EQ(pools_[0]->next_mm2s, 2);
-  EXPECT_EQ(pools_[1]->next_s2mm, 2);
+}
+
+TEST_P(DistributionPathTest, ChangedQueueAssignmentsKeepDistinctPaths) {
+  Form(0);
+  Form(2);
+  queues_[2] = 1;
+  PlanPayloads();
+  const auto* first = Select(0);
+  const auto* second = Select(2);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  EXPECT_NE(first->path, second->path);
+  EXPECT_EQ(first->sender.engine, 0);
+  EXPECT_EQ(second->sender.engine, 1);
+  EXPECT_EQ(first->receivers[0].engine, 0);
+  EXPECT_EQ(second->receivers[0].engine, 1);
 }
 
 TEST_P(DistributionPathTest, CircuitDemandPrecedesPhysicalAllocation) {
@@ -461,38 +529,40 @@ TEST_P(DistributionPathTest, PacketItinerariesRetainNewDestinationClasses) {
   const auto* second = Form(2, 1, 2, true, true);
   ASSERT_NE(first, nullptr);
   ASSERT_NE(second, nullptr);
-  ASSERT_EQ(first->path, second->path);
-  ASSERT_EQ(first->path->packet_count, 2);
+  ASSERT_NE(first->path, second->path);
+  ASSERT_EQ(first->path->packet_count, 1);
+  ASSERT_EQ(second->path->packet_count, 2);
   const auto& first_program =
       workers_[Worker(0)].distribution_plan->batches[0].packet_program;
   const auto& second_program =
       workers_[Worker(2)].distribution_plan->batches[0].packet_program;
   ASSERT_EQ(first_program.range_count, 1);
   EXPECT_EQ(first_program.task_count, 1);
-  EXPECT_EQ(first_program.first_packet, 0);
-  EXPECT_EQ(first_program.packet_count, 1);
   EXPECT_EQ(first_program.ranges[0].first, 0u);
   EXPECT_EQ(first_program.ranges[0].count, 1u);
   EXPECT_EQ(first_program.ranges[0].packet, 0);
   ASSERT_EQ(second_program.range_count, 2);
-  EXPECT_EQ(second_program.first_packet, 1);
-  EXPECT_EQ(second_program.packet_count, 1);
   EXPECT_EQ(second_program.ranges[0].packet, 0);
   EXPECT_EQ(second_program.ranges[1].packet, 1);
   EXPECT_EQ(context_.routing.route_count, 0u);
-  EXPECT_EQ(pools_[0]->next_mm2s, 0);
+  EXPECT_EQ(pools_[0]->mm2s_count, 0);
   EXPECT_EQ(pools_[0]->descriptor_counts[0], 0);
 
-  ASSERT_NE(SelectPrepared(0), nullptr);
+  PlanPayloads();
+  ASSERT_NE(Select(0), nullptr);
   const auto first_routes = context_.routing.route_count;
   EXPECT_GT(first_routes, 0u);
-  ASSERT_NE(SelectPrepared(2), nullptr);
+  ASSERT_NE(Select(2), nullptr);
   EXPECT_GT(context_.routing.route_count, first_routes);
   EXPECT_EQ(first->sender.sequence.descriptor_count, 1);
   EXPECT_EQ(second->sender.sequence.descriptor_count, 2);
 }
 
 TEST_P(DistributionPathTest, EarlierSelectionSweepCannotReuseItsOwnPath) {
+  Form(0);
+  Form(1);
+  Form(2);
+  PlanPayloads();
   const auto* first = Select(0);
   const auto* later = Select(2);
   ASSERT_NE(first, nullptr);
@@ -504,8 +574,12 @@ TEST_P(DistributionPathTest, EarlierSelectionSweepCannotReuseItsOwnPath) {
 }
 
 TEST_P(DistributionPathTest, ImportedEndpointsKeepResidentPaths) {
-  const auto* first = Select(0);
   channel_owners_[2 * 3 + 1].invocation = &constructions_[0];
+  Form(0);
+  Form(2);
+  queues_[2] = 1;
+  PlanPayloads();
+  const auto* first = Select(0);
   const auto* imported = Select(2);
   ASSERT_NE(first, nullptr);
   ASSERT_NE(imported, nullptr);
@@ -513,8 +587,12 @@ TEST_P(DistributionPathTest, ImportedEndpointsKeepResidentPaths) {
 }
 
 TEST_P(DistributionPathTest, IndependentControllersKeepIndependentPaths) {
-  const auto* first = Select(0);
   core_engines_[Producer(2)] = 3;
+  Form(0);
+  Form(2);
+  queues_[2] = 1;
+  PlanPayloads();
+  const auto* first = Select(0);
   const auto* independent = Select(2);
   ASSERT_NE(first, nullptr);
   ASSERT_NE(independent, nullptr);
@@ -522,8 +600,12 @@ TEST_P(DistributionPathTest, IndependentControllersKeepIndependentPaths) {
 }
 
 TEST_P(DistributionPathTest, DifferentDestinationsKeepIndependentRoutes) {
-  const auto* first = Select(0);
   channels_[7].pool_index = 2;
+  Form(0);
+  Form(2);
+  queues_[2] = 1;
+  PlanPayloads();
+  const auto* first = Select(0);
   const auto* different = Select(2);
   ASSERT_NE(first, nullptr);
   ASSERT_NE(different, nullptr);
@@ -531,35 +613,45 @@ TEST_P(DistributionPathTest, DifferentDestinationsKeepIndependentRoutes) {
 }
 
 TEST_P(DistributionPathTest, CircuitAndPacketProgramsKeepSeparateFraming) {
-  const auto* circuit = Select(0, 1);
-  const auto* packet = Select(2, 1, 1, true);
+  Form(0, 1);
+  Form(2, 1, 1, true);
+  queues_[2] = 1;
+  PlanPayloads();
+  const auto* circuit = Select(0);
+  const auto* packet = Select(2);
   ASSERT_NE(circuit, nullptr);
   ASSERT_NE(packet, nullptr);
   EXPECT_NE(circuit->path, packet->path);
 }
 
 TEST_P(DistributionPathTest, PacketClassesNameReceiversAcrossFreshChannels) {
-  const auto* first = Select(0, 1, 2, true);
+  Form(0, 1, 2, true);
+  Form(2, 1, 2, true);
+  const auto* selective_demand = Form(4, 1, 2, true, true);
+  PlanPayloads();
+  const auto* selective_payload = selective_demand->path->payloads[1];
+  const auto* first = Select(0);
   ASSERT_NE(first, nullptr);
   const auto route_count = context_.routing.route_count;
-  const auto* second = Select(2, 1, 2, true);
+  const auto* second = Select(2);
   ASSERT_NE(second, nullptr);
   EXPECT_EQ(first->path, second->path);
   EXPECT_EQ(first->path->packet_count, 1);
   EXPECT_EQ(context_.routing.route_count, route_count);
-  const auto* selective = Select(4, 1, 2, true, true);
+  const auto* selective = Select(4);
   ASSERT_NE(selective, nullptr);
   EXPECT_EQ(first->path, selective->path);
-  EXPECT_EQ(first->path->packet_count, 2);
+  EXPECT_EQ(selective_payload->packet, 1);
+  EXPECT_EQ(first->path->payloads[0]->source->class_count, 2);
   EXPECT_EQ(selective->sender.sequence.descriptor_count, 2);
-  EXPECT_EQ(pools_[0]->next_mm2s, 1);
-  EXPECT_EQ(pools_[1]->next_s2mm, 1);
-  EXPECT_EQ(pools_[2]->next_s2mm, 1);
 }
 
 TEST_P(DistributionPathTest, EveryGeometryOwnsItsReceiverGrant) {
-  const auto* first = Select(0, 4);
-  const auto* second = Select(2, 2);
+  Form(0, 4);
+  Form(2, 2);
+  PlanPayloads();
+  const auto* first = Select(0);
+  const auto* second = Select(2);
   ASSERT_NE(first, nullptr);
   ASSERT_NE(second, nullptr);
   workers_[Producer(0)].channels.remote_count = 1;
@@ -594,9 +686,12 @@ TEST_P(DistributionPathTest, EveryGeometryOwnsItsReceiverGrant) {
 }
 
 TEST_P(DistributionPathTest, EveryGeometryMustSupportSharedFraming) {
-  const auto* first = Select(0, 4);
   sources_[6].capacity = 2;
-  const auto* second = Select(2, 2);
+  Form(0, 4);
+  Form(2, 2);
+  PlanPayloads();
+  const auto* first = Select(0);
+  const auto* second = Select(2);
   ASSERT_NE(first, nullptr);
   ASSERT_NE(second, nullptr);
   ASSERT_EQ(first->path, second->path);

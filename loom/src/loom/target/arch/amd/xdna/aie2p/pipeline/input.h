@@ -39,6 +39,8 @@ typedef struct loom_aie2p_native_input_phase_t {
   const loom_aie2p_native_channel_t* destination;
   // Local DMA receiver and its startup window.
   loom_aie2p_native_distribution_endpoint_t receiver;
+  // Physical sender's destination class, independent of the source phase.
+  struct loom_aie2p_native_payload_class_t* payload;
   // Immutable shim descriptor for this source address period.
   uint16_t descriptor;
   // Shim executions for one complete source address period.
@@ -63,7 +65,7 @@ typedef struct loom_aie2p_native_input_path_t {
   const struct loom_aie2p_native_input_t* last;
   // Physical shim serving the stable caller buffers.
   loom_aie2p_native_tile_t* shim;
-  // Memory-to-stream engine shared by all phases; UINT8_MAX before selection.
+  // Memory-to-stream engine shared by all phases; UINT8_MAX before layout.
   uint8_t input_engine;
   // Selected core-to-shim control packet class.
   uint8_t control_packet;
@@ -113,11 +115,9 @@ iree_status_t loom_aie2p_native_select_input(
     const loom_pipeline_realization_t* realization, iree_host_size_t worker,
     bool* out_eligible);
 
-// Retains input queue demand and compatible paths before physical selection.
-iree_status_t loom_aie2p_native_form_input(
-    loom_aie2p_native_context_t* context,
-    const loom_pipeline_realization_t* realization,
-    loom_aie2p_native_input_t* input);
+// Retains occurrence-owned input queue demand before lifetime assignment.
+iree_status_t loom_aie2p_native_form_input(loom_aie2p_native_context_t* context,
+                                           loom_aie2p_native_input_t* input);
 
 // Allocates descriptors and routes from the retained source geometry and its
 // invocation controller.

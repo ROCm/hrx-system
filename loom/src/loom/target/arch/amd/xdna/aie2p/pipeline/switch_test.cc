@@ -64,11 +64,10 @@ class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
     ASSERT_TRUE(loom_aie2p_array_route_stream(
         &context_.routing, index, index, coordinate_, source, source_channel,
         coordinate_, destination, destination_channel, packet != UINT8_MAX));
-    ASSERT_EQ(context_.routing.route_count, index + 1);
-    if (routes_.size() <= index) {
-      routes_.resize(index + 1);
+    routes_.resize(context_.routing.route_count);
+    for (size_t i = index; i < context_.routing.route_count; ++i) {
+      routes_[i] = {&context_.routing.routes[i], packet, UINT32_MAX};
     }
-    routes_[index] = {&context_.routing.routes[index], packet, UINT32_MAX};
   }
 
   void Build(bool expected_valid, size_t expected_switches = 1) {
@@ -650,18 +649,21 @@ TEST_P(Aie2pSwitchTest, OnlyDmaPayloadEndpointsRemovePacketHeaders) {
   const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
                           ? LOOM_XDNA_STREAM_PORT_DMA
                           : LOOM_XDNA_STREAM_PORT_SOUTH;
-  const bool payload = GetParam() != LOOM_XDNA_TILE_KIND_SHIM_NOC;
-  const auto endpoint =
-      payload ? LOOM_XDNA_STREAM_PORT_DMA : LOOM_XDNA_STREAM_PORT_TILE_CONTROL;
-  AddRoute(source, 0, endpoint, 0, 1);
+  AddRoute(source, 0, LOOM_XDNA_STREAM_PORT_DMA, 0, 1);
+  const bool shim = GetParam() == LOOM_XDNA_TILE_KIND_SHIM_NOC;
+  const auto& endpoint =
+      context_.routing.routes[context_.routing.route_count - (shim ? 2 : 1)];
+  EXPECT_TRUE(endpoint.dma_destination);
+  const uint16_t dma =
+      Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER, endpoint.destination_port,
+              endpoint.destination_channel);
   AddRoute(source, 0, LOOM_XDNA_STREAM_PORT_NORTH, 0, 1);
   ASSERT_NO_FATAL_FAILURE(Build(true));
-  const uint16_t dma = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER, endpoint, 0);
   const uint16_t north = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
                                  LOOM_XDNA_STREAM_PORT_NORTH, 0);
   EXPECT_EQ(PacketDestinations(source, 0, 1), (1u << dma) | (1u << north));
   EXPECT_EQ(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, dma) & (1u << 7),
-            payload ? 1u << 7 : 0u);
+            1u << 7);
   EXPECT_EQ(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north) & (1u << 7), 0u);
 }
 

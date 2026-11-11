@@ -385,6 +385,9 @@ typedef struct loom_aie2p_array_route_plan_t {
   loom_xdna_stream_port_t destination_port;
   // Destination channel ordinal within destination_port.
   uint8_t destination_channel;
+  // This stream-switch output delivers payload to DMA, directly or through
+  // the shim demultiplexer. Packet mode removes its header at this edge.
+  bool dma_destination;
 } loom_aie2p_array_route_plan_t;
 
 // Packet resources owned by the completion endpoint on one used shim.

@@ -8,6 +8,7 @@
 
 #include "iree/base/internal/math.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/payload.h"
 
 uint8_t loom_aie2p_native_delivery_packet(
     loom_aie2p_native_delivery_t* delivery, uint32_t occupied,
@@ -108,6 +109,11 @@ iree_status_t loom_aie2p_native_prepare_sharing(
          first; first = first->next) {
       loom_aie2p_native_distribution_path_t* path = first->path;
       if (path->first != first || !path->routes.count) {
+        continue;
+      }
+      const loom_aie2p_native_payload_class_t* payload = path->payloads[0];
+      if (!payload->distribution_only || payload->source->class_count != 1 ||
+          payload->distribution_path_count != 1) {
         continue;
       }
       bool eligible = true;

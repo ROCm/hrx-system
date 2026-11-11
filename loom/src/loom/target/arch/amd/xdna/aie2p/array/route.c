@@ -140,6 +140,9 @@ static void loom_aie2p_array_append_route(
       .source_channel = source_channel,
       .destination_port = destination_port,
       .destination_channel = destination_channel,
+      .dma_destination =
+          switch_kind == LOOM_AIE2P_ARRAY_SWITCH_KIND_STREAM_SWITCH &&
+          destination_port == LOOM_XDNA_STREAM_PORT_DMA,
   };
   ++builder->tile_route_counts[coordinate.column * builder->family->row_count +
                                coordinate.row];
@@ -461,6 +464,7 @@ bool loom_aie2p_array_route_egress(
                                    false, NULL)) {
     return false;
   }
+  builder->routes[builder->route_count - 1].dma_destination = true;
   loom_aie2p_array_append_route(builder, channel_index, shim_coordinate,
                                 LOOM_AIE2P_ARRAY_SWITCH_KIND_SHIM_MUX,
                                 LOOM_XDNA_STREAM_PORT_NORTH, shim_link_channel,
@@ -490,10 +494,14 @@ bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
     *root = loom_aie2p_array_create_route_node(builder, source, source_port,
                                                source_channel);
   }
+  const bool shim_dma = destination_kind == LOOM_XDNA_TILE_KIND_SHIM_NOC &&
+                        destination_port == LOOM_XDNA_STREAM_PORT_DMA;
+  // External writes turn on the shim row, preserving compute-row lanes for
+  // payloads and controls that terminate within the array.
   // SRAM switches have only north/south links. Cross-column traffic turns on
   // the receiving core's row, or on the first compute row for SRAM-to-SRAM
   // copies. These are switch hops, not additional DMA or core execution.
-  uint16_t horizontal_row = source.row;
+  uint16_t horizontal_row = shim_dma ? destination.row : source.row;
   if (source.column != destination.column &&
       loom_xdna_array_tile_facts(builder->family, source)->kind ==
           LOOM_XDNA_TILE_KIND_MEMORY) {
@@ -505,8 +513,6 @@ bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
                   ->first_row
             : destination.row;
   }
-  const bool shim_dma = destination_kind == LOOM_XDNA_TILE_KIND_SHIM_NOC &&
-                        destination_port == LOOM_XDNA_STREAM_PORT_DMA;
   const uint8_t shim_channel =
       shim_dma
           ? loom_aie2p_array_dma_stream_channel(
@@ -521,6 +527,7 @@ bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
     return false;
   }
   if (shim_dma) {
+    builder->routes[builder->route_count - 1].dma_destination = true;
     loom_aie2p_array_append_route(
         builder, channel_index, destination,
         LOOM_AIE2P_ARRAY_SWITCH_KIND_SHIM_MUX, LOOM_XDNA_STREAM_PORT_NORTH,

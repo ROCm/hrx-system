@@ -477,7 +477,7 @@ iree_status_t loom_aie2p_native_switches_build(
           loom_aie2p_native_packet_component(state->masters, first);
     }
     group->masters |= UINT32_C(1) << master;
-    if (edge->destination_port == LOOM_XDNA_STREAM_PORT_DMA) {
+    if (edge->dma_destination) {
       state->drop_headers |= UINT32_C(1) << master;
     }
     state->desired->banks[LOOM_AIE2P_NATIVE_SWITCH_BANK_SLAVES].words[slave] =

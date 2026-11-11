@@ -42,7 +42,6 @@ class EndpointStorageTest
     tile_->memory_layout = tile_->coordinate.row == 1
                                ? &loom_aie2p_sram_memory
                                : &loom_aie2p_compute_memory;
-    tile_->next_mm2s = tile_->next_s2mm = std::get<1>(GetParam());
     pools_[0] = tile_;
     context_.pool_tiles = pools_.data();
     context_.channels = channels_.data();
@@ -89,8 +88,8 @@ class EndpointStorageTest
     IREE_EXPECT_OK(loom_aie2p_native_select_channel_endpoint(
         &context_, &invocations_, &children_[child], &channel,
         std::get<2>(GetParam()), repetitions, 1, reserved_tasks,
-        endpoint && share_queue ? &endpoints_[0] : nullptr, &channel,
-        &endpoints_[endpoint], &reason, &valid));
+        static_cast<uint8_t>(std::get<1>(GetParam()) ^ (share_queue ? 0 : 1)),
+        &channel, &endpoints_[endpoint], &reason, &valid));
     EXPECT_TRUE(valid) << std::string(reason.data, reason.size);
     return valid;
   }
@@ -252,11 +251,6 @@ TEST_P(EndpointStorageTest, SharedQueueRetainsEachChildsRefillOwnership) {
   EXPECT_NE(workers_[1].refills, workers_[2].refills);
   EXPECT_NE(workers_[1].refills->queues->final_task,
             workers_[2].refills->queues->final_task);
-  const uint8_t next_engine =
-      std::get<2>(GetParam()) == LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM
-          ? tile_->next_mm2s
-          : tile_->next_s2mm;
-  EXPECT_EQ(next_engine, std::get<1>(GetParam()) + 1);
 }
 
 TEST_P(EndpointStorageTest, ImportedAndDifferentControllerStateRemainResident) {
@@ -273,7 +267,6 @@ TEST_P(EndpointStorageTest, ImportedAndDifferentControllerStateRemainResident) {
 TEST_P(EndpointStorageTest, QueueIdentityDoesNotDefineDescriptorOwnership) {
   ASSERT_TRUE(Select(0, 1, 1, 4));
   // Distinct compute queues share one bank; distinct SRAM parities do not.
-  tile_->next_mm2s = tile_->next_s2mm = std::get<1>(GetParam()) ^ 1;
   ASSERT_TRUE(Select(1, 2, 2, 4, false));
   EXPECT_NE(endpoints_[0].engine, endpoints_[1].engine);
   if (tile_->coordinate.row == 1) {

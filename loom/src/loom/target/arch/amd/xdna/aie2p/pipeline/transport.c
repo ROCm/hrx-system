@@ -9,9 +9,11 @@
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/credits.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/distribution.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_queues.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_resources.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/input.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/payload.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/sharing.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/sram.h"
@@ -445,33 +447,8 @@ static iree_status_t loom_aie2p_native_select_transfer_path(
   loom_aie2p_native_worker_t* worker = &context->workers[i];
   loom_aie2p_native_tile_t* local_tile = path->local;
   loom_aie2p_native_tile_t* shim = path->shim;
-  const bool ingress = path->ingress;
   const bool configuration =
       worker->execution == LOOM_AIE2P_NATIVE_EXECUTION_CONFIGURATION;
-  uint8_t* local_engine =
-      ingress ? &local_tile->next_s2mm : &local_tile->next_mm2s;
-  uint8_t* shim_engine = ingress ? &shim->next_mm2s : &shim->next_s2mm;
-  // A full descriptor bank cannot serve any additional engine of that
-  // parity. Keep allocation within a bank that still has storage.
-  while (*local_engine < local_tile->facts->dma.channel_count_per_direction) {
-    uint16_t descriptor_base, descriptor_count;
-    const uint16_t* used = loom_aie2p_native_descriptor_bank(
-        local_tile, *local_engine, &descriptor_base, &descriptor_count);
-    if (*used < descriptor_count) {
-      break;
-    }
-    ++*local_engine;
-  }
-  if (*local_engine == local_tile->facts->dma.channel_count_per_direction ||
-      *shim_engine == shim->facts->dma.channel_count_per_direction ||
-      (!ingress && resource_owner->has_egress && !configuration)) {
-    return loom_aie2p_native_reject(
-        context, op,
-        IREE_SV("an independent DMA engine pair and one external "
-                "completion stream per worker"));
-  }
-  path->local_engine = (*local_engine)++;
-  path->shim_engine = (*shim_engine)++;
   // A borrowed payload lane fixes SRAM passthrough to the shim. Reserve
   // that constrained control continuation before the external DMA path,
   // whose SRAM source can select any remaining southbound lane.
@@ -489,23 +466,17 @@ static iree_status_t loom_aie2p_native_select_transfer_path(
     *packets[k] =
         resource_owner->control_packets[destinations[k] - context->tiles];
   }
-  const iree_host_size_t route_first = context->routing.route_count;
-  const uint32_t route = (*next_source)++;
-  const bool routed =
-      ingress
-          ? loom_aie2p_array_route_ingress(
-                &context->routing, route, route, shim->coordinate,
-                path->shim_engine, local_tile->coordinate, path->local_engine)
-          : loom_aie2p_array_route_egress(
-                &context->routing, route, route, local_tile->coordinate,
-                path->local_engine, shim->coordinate, path->shim_engine);
+  bool routed = false;
+  IREE_RETURN_IF_ERROR(loom_aie2p_native_route_payload(
+      context, path->payload, op, next_source, &routed));
   if (!routed) {
-    return loom_aie2p_native_reject(context, op,
-                                    IREE_SV("available payload stream links"));
+    return iree_ok_status();
   }
-  loom_aie2p_native_route_label(context, route_first, UINT8_MAX, UINT32_MAX);
   if (path->completion_tokens) {
-    resource_owner->has_egress |= !ingress;
+    if (!configuration && next_controller[shim->coordinate.column] == 32) {
+      return loom_aie2p_native_reject(
+          context, op, IREE_SV("available external-completion packet IDs"));
+    }
     path->completion_packet =
         configuration ? 0 : next_controller[shim->coordinate.column]++;
     if (!loom_aie2p_native_packet_route(
@@ -559,14 +530,6 @@ static iree_status_t loom_aie2p_native_form_worker_transfers(
     *out_valid = true;
     return iree_ok_status();
   }
-  // Ordered occurrences on one core share its finite engines, routes, and
-  // descriptor banks. The common execution plan has already proved that their
-  // complete lifetimes do not overlap; source groups retain their own tasks.
-  loom_aie2p_native_worker_t* resource_owner =
-      worker->execution == LOOM_AIE2P_NATIVE_EXECUTION_CORE
-          ? &context
-                 ->workers[context->execution.workers[context->core_engines[i]]]
-          : worker;
   const bool configuration =
       worker->execution == LOOM_AIE2P_NATIVE_EXECUTION_CONFIGURATION;
   const bool autonomous = worker->execution == LOOM_AIE2P_NATIVE_EXECUTION_DMA;
@@ -574,13 +537,7 @@ static iree_status_t loom_aie2p_native_form_worker_transfers(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, tile_count * 2, sizeof(*queues), (void**)&queues));
   memset(queues, 0, tile_count * 2 * sizeof(*queues));
-  if (!resource_owner->paths_by_tile) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, tile_count * 2, sizeof(*resource_owner->paths_by_tile),
-        (void**)&resource_owner->paths_by_tile));
-    memset(resource_owner->paths_by_tile, 0,
-           tile_count * 2 * sizeof(*resource_owner->paths_by_tile));
-  }
+  loom_aie2p_native_dma_path_t** path_tail = &worker->transfer_paths;
   iree_host_size_t transport_step = 0;
   loom_aie2p_native_transfer_t** tail = &worker->transfers;
   loom_aie2p_native_transfer_task_t** task_tail = &worker->transfer_tasks;
@@ -716,14 +673,10 @@ static iree_status_t loom_aie2p_native_form_worker_transfers(
       const iree_host_size_t local_index = local_tile - context->tiles;
       loom_aie2p_native_queue_t* queue =
           &queues[local_index * 2 + (ingress ? 0 : 1)];
-      loom_aie2p_native_dma_path_t** shared_path =
-          &resource_owner->paths_by_tile[local_index * 2 + (ingress ? 0 : 1)];
-      queue->path = *shared_path;
       if (!queue->path) {
         IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, sizeof(*queue->path),
                                                  (void**)&queue->path));
         *queue->path = (loom_aie2p_native_dma_path_t){
-            .next = resource_owner->paths,
             .local = local_tile,
             .shim = shim,
             .local_engine = UINT8_MAX,
@@ -733,8 +686,9 @@ static iree_status_t loom_aie2p_native_form_worker_transfers(
                     ? 2
                     : (ingress ? 0 : 1),
             .ingress = ingress};
-        resource_owner->paths = queue->path;
-        *shared_path = queue->path;
+        *path_tail = queue->path;
+        path_tail = &queue->path->next_demand;
+        context->dma_queue_count += 2;
       }
       if (!queue->capacity) {
         queue->capacity = iree_min(local_tile->facts->dma.task_queue_depth,
@@ -936,18 +890,39 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
   }
   // Path requests follow issue order. Descriptor requests follow the retained
   // group-close order, after every path used by that group has been selected.
-  for (const loom_aie2p_native_transfer_t* transfer = worker->transfers;
-       transfer; transfer = transfer->next) {
+  for (loom_aie2p_native_transfer_t* transfer = worker->transfers; transfer;
+       transfer = transfer->next) {
     loom_aie2p_native_dma_path_t* path = transfer->task->path;
-    if (path->local_engine == UINT8_MAX) {
-      bool valid;
-      IREE_RETURN_IF_ERROR(loom_aie2p_native_select_transfer_path(
-          context, realization, i, resource_owner, path,
-          transfer->source->request.op, next_source, next_controller, &valid));
-      if (!valid) {
-        return iree_ok_status();
+    loom_aie2p_native_frame_payload(path->payload, path->ingress
+                                                       ? transfer->shim_words
+                                                       : transfer->local_words);
+    if (!path->selected) {
+      for (loom_aie2p_native_dma_path_t* candidate = resource_owner->paths;
+           candidate; candidate = candidate->next) {
+        if (candidate->local == path->local && candidate->shim == path->shim &&
+            candidate->local_engine == path->local_engine &&
+            candidate->shim_engine == path->shim_engine &&
+            candidate->ingress == path->ingress &&
+            candidate->completion_tokens == path->completion_tokens) {
+          path->selected = candidate;
+          break;
+        }
+      }
+      if (!path->selected) {
+        bool valid;
+        IREE_RETURN_IF_ERROR(loom_aie2p_native_select_transfer_path(
+            context, realization, i, resource_owner, path,
+            transfer->source->request.op, next_source, next_controller,
+            &valid));
+        if (!valid) {
+          return iree_ok_status();
+        }
+        path->selected = path;
+        path->next = resource_owner->paths;
+        resource_owner->paths = path;
       }
     }
+    transfer->task->path = path->selected;
     for (loom_aie2p_native_transfer_task_t* task = transfer->closed_tasks; task;
          task = task->group_next) {
       bool valid;
@@ -1063,8 +1038,7 @@ iree_status_t loom_aie2p_native_select_transfers(
       continue;
     }
     if (context->workers[i].input) {
-      status = loom_aie2p_native_form_input(context, realization,
-                                            context->workers[i].input);
+      status = loom_aie2p_native_form_input(context, context->workers[i].input);
       continue;
     }
     loom_pipeline_worker_t* source = &realization->workers[i];
@@ -1196,6 +1170,13 @@ iree_status_t loom_aie2p_native_select_transfers(
       ordered_distributions |= context->workers[i].distribution_phases != NULL;
     }
   }
+  if (iree_status_is_ok(status) && valid) {
+    status = loom_aie2p_native_assign_dma_queues(
+        context, realization, distribution_order, distribution_count, &valid);
+  }
+  if (iree_status_is_ok(status) && valid) {
+    status = loom_aie2p_native_form_payloads(context, realization, &valid);
+  }
   for (iree_host_size_t i = 0;
        iree_status_is_ok(status) && valid && i < distribution_count; ++i) {
     status = loom_aie2p_native_select_worker_distributions(
@@ -1223,6 +1204,9 @@ iree_status_t loom_aie2p_native_select_transfers(
   if (iree_status_is_ok(status) && valid && ordered_distributions) {
     status = loom_aie2p_native_bind_distribution_phases(context, realization,
                                                         &valid);
+  }
+  if (iree_status_is_ok(status) && valid) {
+    loom_aie2p_native_select_dma_controllers(context, realization);
   }
   for (iree_host_size_t i = 0; iree_status_is_ok(status) && valid &&
                                i < realization->invocations.worker_count;
