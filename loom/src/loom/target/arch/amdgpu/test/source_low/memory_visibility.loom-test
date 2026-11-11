@@ -1,7 +1,7 @@
-// RUN: with-checks emit source-low target=amdgpu:gfx1151 output=low
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
 
-// Acquisition applies through aliases. Immutable data remains cacheable while
-// both mutable reads receive visibility, including the read before the fence.
+// Acquisition applies through aliases. The kernel-entry read and immutable
+// data remain cacheable; the read after the fence observes acquired writes.
 kernel.def @acquire_with_alias_and_constant() {
   %unit = index.constant 1 : index
   %width = index.constant 32 : index
@@ -14,7 +14,7 @@ kernel.def @acquire_with_alias_and_constant() {
   %lookup = buffer.view %aligned[%base] : buffer -> view<1xi32>
   %destination = buffer.view %output[%base] : buffer -> view<32xi32>
   %lane = kernel.workitem.id<x> : index
-  %before = view.load %data[%lane] : view<1024xi32> -> i32
+  %before = view.load %data[0] : view<1024xi32> -> i32
   buffer.fence scope(system) ordering(acquire)
   %alias = view.subview %data[0] : view<1024xi32> -> view<32xi32>
   %after = view.load %alias[%lane] : view<32xi32> -> i32
@@ -26,14 +26,29 @@ kernel.def @acquire_with_alias_and_constant() {
 }
 
 // ----
-CHECK: %before = global_load_* {glc = 1}
-CHECK: %after = global_load_* {glc = 1}
-CHECK: %scale = s_load_dword *
-CHECK: s_waitcnt {vmcnt = 0}
-CHECK: s_waitcnt_vscnt {vscnt = 0}
-CHECK-NOT: buffer_gl*_inv
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @acquire_with_alias_and_constant() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %data = resource<hal_binding> {extent = 4096, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %lookup = resource<hal_binding> {extent = 4, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination = resource<hal_binding> {extent = 128, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %22 = s_mov_b32 0
+  %before = s_load_dword %data, %22
+  s_waitcnt {lgkmcnt = 0}
+  s_waitcnt_vscnt {vscnt = 0}
+  s_waitcnt {vmcnt = 0}
+  %24 = v_lshlrev_b32_src0_inline %lane, 2
+  %after = global_load_b32_saddr %24, %data {glc = 1}
+  %scale = s_load_dword %lookup, %22
+  %28 = v_mov_b32_copy %before
+  %pair = v_add_u32 %28, %after
+  %30 = v_mov_b32_copy %scale
+  %result = v_mul_lo_u32 %pair, %30
+  global_store_b32_saddr %24, %result, %destination
+  return
+}
 
 // ====
+// RUN: with-checks emit source-low target=amdgpu:gfx1151 output=low
 
 // Two passes through a bounded 4-KiB payload retain caching. The loop counts
 // and view extent select eager acquisition before individual loads are planned.
@@ -72,6 +87,8 @@ CHECK: %value = global_load_b32_saddr *
 CHECK-NOT: * {glc = 1}
 
 // ====
+
+// RUN: with-checks emit source-low target=amdgpu:gfx1151 output=low
 
 // An unmodeled read shape keeps the complete eager recipe for the function.
 kernel.def @wide_payload_after_acquire() {

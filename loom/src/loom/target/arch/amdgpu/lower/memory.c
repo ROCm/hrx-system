@@ -899,9 +899,14 @@ bool loom_amdgpu_memory_access_plan_select(
 
   loom_low_source_memory_operation_kind_t kind =
       selected_source->operation_kind;
+  // Kernel entry already establishes visibility for unchanged entry data.
+  // Later acquisitions cannot impose a new cache obligation on those reads;
+  // their retained proof excludes prior writes, acquisitions, and backedges.
   if (kind == LOOM_MEMORY_ACCESS_OPERATION_LOAD &&
       (selected_source->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL ||
-       selected_source->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC)) {
+       selected_source->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC) &&
+      !(selected_source->reads_entry_contents &&
+        loom_kernel_def_isa(source_function.op))) {
     selected_source->read_visibility_scope = read_visibility_scope;
   }
   const bool is_atomic = kind == LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_LOAD ||
