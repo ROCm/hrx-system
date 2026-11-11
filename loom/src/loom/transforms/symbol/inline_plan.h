@@ -70,6 +70,7 @@ typedef enum loom_inline_blocker_e {
   LOOM_INLINE_BLOCKER_LOW_ENTRY_RESOURCE = 17,
   LOOM_INLINE_BLOCKER_LOW_LOCKED_NESTED_REGION = 18,
   LOOM_INLINE_BLOCKER_CALLER_REGION_NOT_CFG_CAPABLE = 19,
+  LOOM_INLINE_BLOCKER_COUNT,
 } loom_inline_blocker_t;
 
 typedef struct loom_inline_symbol_info_t {
@@ -90,6 +91,8 @@ typedef struct loom_inline_symbol_info_t {
   bool body_has_callable_exit;
   // Whether the expanded body still depends on its inherited target context.
   bool body_is_contextual;
+  // Cached Low-body blocker plus one; zero means the body is not inventoried.
+  uint8_t body_preflight;
 } loom_inline_symbol_info_t;
 
 typedef struct loom_inline_profitability_symbol_t {

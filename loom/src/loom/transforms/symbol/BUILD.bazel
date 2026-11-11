@@ -233,11 +233,13 @@ loom_cc_library(
     srcs = [
         "inline_callables.c",
         "inline_execution.c",
+        "inline_preflight.c",
     ],
     hdrs = [
         "inline_callables.h",
         "inline_execution.h",
         "inline_plan.h",
+        "inline_preflight.h",
     ],
     deps = [
         ":inline_profitability",
