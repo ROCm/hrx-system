@@ -127,6 +127,11 @@ def direct_vector_family_rules(
                         source_op=source_ops[family.source_operation],
                         descriptor=descriptor,
                         guards=(
+                            *(
+                                (Guard.descriptor_available(descriptor),)
+                                if descriptor.feature_mask_words
+                                else ()
+                            ),
                             *_typed_guards(
                                 ("lhs", "rhs", "result"), carrier.value_type
                             ),

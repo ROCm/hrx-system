@@ -43,6 +43,11 @@ def integer_vector_fixed_rule(
         source_op=vector.vector_splati,
         descriptor=descriptor,
         guards=(
+            *(
+                (Guard.descriptor_available(descriptor),)
+                if descriptor.feature_mask_words
+                else ()
+            ),
             Guard.value_type("result", result_type),
             Guard.i64_range("value", value, value),
             *(

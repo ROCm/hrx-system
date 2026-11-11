@@ -114,6 +114,8 @@ def test_all_ones_constants_cover_integer_types_and_vector_carriers() -> None:
         classes = set()
         for rule in rules:
             rule.validate(descriptor_set)
+            if rule.descriptor.feature_mask_words:
+                assert Guard.descriptor_available(rule.descriptor) in rule.guards
             pattern = _value_type_guard(rule, "result")
             assert set(pattern.elements) == {"i8", "i16", "i32", "i64"}
             assert pattern.minimum_lanes == 1
@@ -1723,6 +1725,12 @@ def test_avx512_arithmetic_covers_every_native_family() -> None:
     }
     assert actual_direct == expected_direct
     assert len(actual_direct) == len(expected_direct)
+    for rule in rules:
+        if (
+            rule.descriptor.key in direct_descriptor_keys
+            and rule.descriptor.feature_mask_words
+        ):
+            assert Guard.descriptor_available(rule.descriptor) in rule.guards
 
     expected_fma = {
         (
