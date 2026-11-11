@@ -13,6 +13,7 @@
 #include "loom/transforms/conversion/chain.h"
 #include "loom/transforms/scalar/narrowing.h"
 #include "loom/util/fact_table.h"
+#include "loom/util/predicate_facts.h"
 
 static loom_conversion_kind_t loom_scalar_combine_conversion_kind(
     const loom_op_t* op) {
@@ -132,6 +133,49 @@ static iree_status_t loom_scalar_combine_replace_with_conversion(
   return iree_ok_status();
 }
 
+static iree_status_t loom_scalar_combine_numeric_identity(
+    loom_op_t* op, loom_rewriter_t* rewriter, loom_conversion_kind_t outer_kind,
+    bool* out_changed) {
+  if (outer_kind != LOOM_CONVERSION_EXTSI &&
+      outer_kind != LOOM_CONVERSION_EXTUI &&
+      outer_kind != LOOM_CONVERSION_TRUNCI) {
+    return iree_ok_status();
+  }
+  const loom_value_id_t outer_input = loom_op_const_operands(op)[0];
+  const loom_value_id_t result = loom_op_const_results(op)[0];
+  const loom_value_id_t origin = loom_value_fact_table_query_numeric_identity(
+      rewriter->fact_table, result);
+  if (origin != result &&
+      loom_type_equal(loom_module_value_type(rewriter->module, result),
+                      loom_module_value_type(rewriter->module, origin))) {
+    // Numeric identity survives predicate carriers between conversions. Retain
+    // the input's scoped information while returning the same-typed origin.
+    const loom_type_t type = loom_module_value_type(rewriter->module, result);
+    loom_predicate_t
+        predicates[LOOM_VALUE_FACT_INTEGER_REFINEMENT_CAPACITY + 1];
+    uint16_t count = loom_value_facts_export_integer_refinements(
+        origin, loom_rewriter_value_facts(rewriter, origin),
+        loom_rewriter_value_facts(rewriter, result), predicates,
+        LOOM_VALUE_FACT_INTEGER_REFINEMENT_CAPACITY);
+    predicates[count++] = (loom_predicate_t){
+        .kind = LOOM_PREDICATE_EQ,
+        .arg_count = 2,
+        .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+        .args = {origin, outer_input},
+    };
+    loom_builder_set_before(&rewriter->builder, op);
+    loom_op_t* assume = NULL;
+    IREE_RETURN_IF_ERROR(loom_scalar_assume_build(&rewriter->builder, &origin,
+                                                  1, predicates, count, &type,
+                                                  1, op->location, &assume));
+    IREE_RETURN_IF_ERROR(loom_scalar_combine_replace_with_value(
+        rewriter, op, loom_scalar_assume_results(assume).values[0]));
+    *out_changed = true;
+    return iree_ok_status();
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_scalar_combine_conversion(loom_op_t* op,
                                              loom_rewriter_t* rewriter,
                                              bool allow_bitfield,
@@ -144,7 +188,8 @@ iree_status_t loom_scalar_combine_conversion(loom_op_t* op,
   loom_op_t* defining_op =
       loom_rewriter_value_defining_op(rewriter, outer_input);
   if (defining_op == NULL) {
-    return iree_ok_status();
+    return loom_scalar_combine_numeric_identity(op, rewriter, outer_kind,
+                                                out_changed);
   }
 
   const loom_conversion_kind_t inner_kind =
@@ -175,10 +220,14 @@ iree_status_t loom_scalar_combine_conversion(loom_op_t* op,
   }
   if (match.candidate == LOOM_CONVERSION_NONE) {
     if (outer_kind == LOOM_CONVERSION_TRUNCI) {
-      return loom_scalar_narrowing_truncate(rewriter, op, defining_op,
-                                            out_changed);
+      IREE_RETURN_IF_ERROR(loom_scalar_narrowing_truncate(
+          rewriter, op, defining_op, out_changed));
+      if (*out_changed) {
+        return iree_ok_status();
+      }
     }
-    return iree_ok_status();
+    return loom_scalar_combine_numeric_identity(op, rewriter, outer_kind,
+                                                out_changed);
   }
   if (iree_any_bit_set(match.flags, LOOM_CONVERSION_CHAIN_FLAG_NON_NEGATIVE) &&
       !loom_value_facts_is_non_negative(

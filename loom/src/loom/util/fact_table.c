@@ -351,6 +351,7 @@ void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table) {
   table->regions.has_structured_summaries = false;
   table->regions.has_independent_targets = false;
   table->layout_origins = NULL;
+  table->integer_casts = NULL;
   table->vector_partitions = NULL;
   table->select_dependencies.index = NULL;
   table->select_dependencies.pages = NULL;

@@ -377,8 +377,7 @@ TEST_F(SymbolicExprTest,
         EXPECT_EQ(summary.integer_cast->source_value_id, source);
         EXPECT_EQ(summary.integer_cast->bit_count,
                   loom_scalar_type_bitwidth(test_case.payload_type));
-        EXPECT_EQ(summary.integer_cast->kind,
-                  LOOM_SYMBOLIC_INTEGER_CAST_UNSIGNED);
+        EXPECT_EQ(summary.integer_cast->kind, LOOM_INTEGER_CAST_UNSIGNED);
       }
     }
   }
@@ -457,14 +456,14 @@ TEST_F(SymbolicExprTest,
   };
   for (const auto& test_case : cases) {
     SCOPED_TRACE(static_cast<int>(test_case.payload_type));
-    for (const loom_symbolic_integer_cast_kind_t kind : {
-             LOOM_SYMBOLIC_INTEGER_CAST_SIGNED,
-             LOOM_SYMBOLIC_INTEGER_CAST_UNSIGNED,
+    for (const loom_integer_cast_kind_t kind : {
+             LOOM_INTEGER_CAST_SIGNED,
+             LOOM_INTEGER_CAST_UNSIGNED,
          }) {
       SCOPED_TRACE(static_cast<int>(kind));
       for (bool representable : {true, false}) {
         SCOPED_TRACE(representable);
-        const bool is_unsigned = kind == LOOM_SYMBOLIC_INTEGER_CAST_UNSIGNED;
+        const bool is_unsigned = kind == LOOM_INTEGER_CAST_UNSIGNED;
         loom_value_id_t source = DefineI64Value();
         DefineFacts(source, loom_value_facts_make(
                                 is_unsigned ? 0 : test_case.signed_minimum,
@@ -544,9 +543,9 @@ TEST_F(SymbolicExprTest,
   for (const auto& test_case : cases) {
     SCOPED_TRACE(static_cast<int>(test_case.intermediate_type));
     SCOPED_TRACE(static_cast<int>(test_case.payload_type));
-    for (const loom_symbolic_integer_cast_kind_t kind : {
-             LOOM_SYMBOLIC_INTEGER_CAST_SIGNED,
-             LOOM_SYMBOLIC_INTEGER_CAST_UNSIGNED,
+    for (const loom_integer_cast_kind_t kind : {
+             LOOM_INTEGER_CAST_SIGNED,
+             LOOM_INTEGER_CAST_UNSIGNED,
          }) {
       SCOPED_TRACE(static_cast<int>(kind));
       int64_t signed_minimum = 0;
@@ -557,7 +556,7 @@ TEST_F(SymbolicExprTest,
           loom_scalar_type_bitwidth(test_case.intermediate_type);
       const int64_t unsigned_maximum =
           (INT64_C(1) << intermediate_bit_count) - 1;
-      const bool is_unsigned = kind == LOOM_SYMBOLIC_INTEGER_CAST_UNSIGNED;
+      const bool is_unsigned = kind == LOOM_INTEGER_CAST_UNSIGNED;
       const loom_value_id_t source = DefineI64Value();
       DefineFacts(source,
                   loom_value_facts_make(

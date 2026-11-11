@@ -109,16 +109,28 @@ loom_cc_library(
         "facts_extrema.c",
         "facts_modular.c",
         "float_facts.c",
+        "integer_cast.c",
     ],
     hdrs = [
         "facts.h",
         "float_facts.h",
+        "integer_cast.h",
     ],
     deps = [
         ":types",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/math",
+    ],
+)
+
+loom_cc_test(
+    name = "integer_cast_test",
+    srcs = ["integer_cast_test.cc"],
+    deps = [
+        ":facts",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

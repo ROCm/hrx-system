@@ -1,0 +1,220 @@
+// RUN: pass combine,canonicalize
+
+// The extension is also returned outside the guard, so it cannot be moved
+// into the branch. Only guarded uses acquire the positive byte's bounds.
+func.def @shared_unsigned_extension(%input: i8) -> (i64, i64, i64) {
+  %wide = scalar.extui %input : i8 to i64
+  %c0 = scalar.constant 0 : i8
+  %limit = scalar.constant 16 : i8
+  %positive = scalar.cmpi sgt, %input, %c0 : i8
+  %small = scalar.cmpi sle, %input, %limit : i8
+  %valid = scalar.andi %positive, %small : i1
+  %lower, %upper = scf.if %valid -> (i64, i64) {
+    %lo = test.fact_range_lo %wide : i64 -> i64
+    %hi = test.fact_range_hi %wide : i64 -> i64
+    scf.yield %lo, %hi : i64, i64
+  } else {
+    %lo = test.fact_range_lo %wide : i64 -> i64
+    %hi = test.fact_range_hi %wide : i64 -> i64
+    scf.yield %lo, %hi : i64, i64
+  }
+  func.return %wide, %lower, %upper : i64, i64, i64
+}
+
+// ----
+func.def @shared_unsigned_extension(%input: i8) -> (i64, i64, i64) {
+  %wide = scalar.extui %input : i8 to i64
+  %c0 = scalar.constant 0 : i8
+  %limit = scalar.constant 16 : i8
+  %positive = scalar.cmpi sgt, %input, %c0 : i8
+  %small = scalar.cmpi sle, %input, %limit : i8
+  %valid = scalar.andi %positive, %small : i1
+  %lo$20 = scalar.constant 1 : i64
+  %hi$19 = scalar.constant 16 : i64
+  %lo$18 = scalar.constant 0 : i64
+  %hi$17 = scalar.constant 255 : i64
+  %lower = scf.select %valid, %lo$20, %lo$18 : i64
+  %upper = scf.select %valid, %hi$19, %hi$17 : i64
+  func.return %wide, %lower, %upper : i64, i64, i64
+}
+
+// ====
+
+// A condition on an intermediate payload constrains a composed narrowing and
+// unsigned extension, without walking the conversion chain at the use.
+func.def @intermediate_payload(%input: i64) -> (i64, i64, i64) {
+  %half = scalar.trunci %input : i64 to i16
+  %byte = scalar.trunci %half : i16 to i8
+  %wide = scalar.extui %byte : i8 to i64
+  %c0 = scalar.constant 0 : i16
+  %limit = scalar.constant 16 : i16
+  %positive = scalar.cmpi sgt, %half, %c0 : i16
+  %small = scalar.cmpi sle, %half, %limit : i16
+  %valid = scalar.andi %positive, %small : i1
+  %lower, %upper = scf.if %valid -> (i64, i64) {
+    %lo = test.fact_range_lo %wide : i64 -> i64
+    %hi = test.fact_range_hi %wide : i64 -> i64
+    scf.yield %lo, %hi : i64, i64
+  } else {
+    %lo = test.fact_range_lo %wide : i64 -> i64
+    %hi = test.fact_range_hi %wide : i64 -> i64
+    scf.yield %lo, %hi : i64, i64
+  }
+  func.return %wide, %lower, %upper : i64, i64, i64
+}
+
+// ----
+func.def @intermediate_payload(%input: i64) -> (i64, i64, i64) {
+  %half = scalar.trunci %input : i64 to i16
+  %byte = scalar.trunci %input : i64 to i8
+  %wide = scalar.extui %byte : i8 to i64
+  %c0 = scalar.constant 0 : i16
+  %limit = scalar.constant 16 : i16
+  %positive = scalar.cmpi sgt, %half, %c0 : i16
+  %small = scalar.cmpi sle, %half, %limit : i16
+  %valid = scalar.andi %positive, %small : i1
+  %lo$22 = scalar.constant 1 : i64
+  %hi$21 = scalar.constant 16 : i64
+  %lo$20 = scalar.constant 0 : i64
+  %hi$19 = scalar.constant 255 : i64
+  %lower = scf.select %valid, %lo$22, %lo$20 : i64
+  %upper = scf.select %valid, %hi$21, %hi$19 : i64
+  func.return %wide, %lower, %upper : i64, i64, i64
+}
+
+// ====
+
+// A narrow payload cannot establish the discarded high bits of a wider one.
+func.def @truncation_is_not_invertible(%input: i64) -> (i64, i64) {
+  %half = scalar.trunci %input : i64 to i16
+  %byte = scalar.trunci %input : i64 to i8
+  %wide = scalar.extui %half : i16 to i64
+  %c1 = scalar.constant 1 : i8
+  %selected = scalar.cmpi eq, %byte, %c1 : i8
+  %upper = scf.if %selected -> (i64) {
+    %hi = test.fact_range_hi %wide : i64 -> i64
+    scf.yield %hi : i64
+  } else {
+    %hi = test.fact_range_hi %wide : i64 -> i64
+    scf.yield %hi : i64
+  }
+  func.return %wide, %upper : i64, i64
+}
+
+// ----
+func.def @truncation_is_not_invertible(%input: i64) -> (i64, i64) {
+  %half = scalar.trunci %input : i64 to i16
+  %wide = scalar.extui %half : i16 to i64
+  %upper = scalar.constant 65535 : i64
+  func.return %wide, %upper : i64, i64
+}
+
+// ====
+
+// Numeric equality holds for a signed narrowing only inside its representable
+// interval. The sibling branch and the returned conversion remain unchanged.
+func.def @signed_narrowing(%input: i64) -> (i8, i64, i64) {
+  %byte = scalar.trunci %input : i64 to i8
+  %begin = scalar.constant -7 : i64
+  %end = scalar.constant 9 : i64
+  %above = scalar.cmpi sge, %input, %begin : i64
+  %below = scalar.cmpi sle, %input, %end : i64
+  %valid = scalar.andi %above, %below : i1
+  %lower, %upper = scf.if %valid -> (i64, i64) {
+    %lo = test.fact_range_lo %byte : i8 -> i64
+    %hi = test.fact_range_hi %byte : i8 -> i64
+    scf.yield %lo, %hi : i64, i64
+  } else {
+    %lo = test.fact_range_lo %byte : i8 -> i64
+    %hi = test.fact_range_hi %byte : i8 -> i64
+    scf.yield %lo, %hi : i64, i64
+  }
+  func.return %byte, %lower, %upper : i8, i64, i64
+}
+
+// ----
+func.def @signed_narrowing(%input: i64) -> (i8, i64, i64) {
+  %byte = scalar.trunci %input : i64 to i8
+  %begin = scalar.constant -7 : i64
+  %end = scalar.constant 9 : i64
+  %above = scalar.cmpi sge, %input, %begin : i64
+  %below = scalar.cmpi sle, %input, %end : i64
+  %valid = scalar.andi %above, %below : i1
+  %lo$20 = scalar.constant -7 : i64
+  %hi$19 = scalar.constant 9 : i64
+  %lo$18 = scalar.constant -128 : i64
+  %hi$17 = scalar.constant 127 : i64
+  %lower = scf.select %valid, %lo$20, %lo$18 : i64
+  %upper = scf.select %valid, %hi$19, %hi$17 : i64
+  func.return %byte, %lower, %upper : i8, i64, i64
+}
+
+// ====
+
+// A wider unsigned interpretation of a signed payload must keep its width.
+// Negative halfwords do not imply negative zero-extended word results.
+func.def @unsigned_sign_extension(%input: i8) -> (i64, i64, i64) {
+  %half = scalar.extsi %input : i8 to i16
+  %wide = scalar.extui %half : i16 to i64
+  %c0 = scalar.constant 0 : i8
+  %negative = scalar.cmpi slt, %input, %c0 : i8
+  %lower, %upper = scf.if %negative -> (i64, i64) {
+    %lo = test.fact_range_lo %wide : i64 -> i64
+    %hi = test.fact_range_hi %wide : i64 -> i64
+    scf.yield %lo, %hi : i64, i64
+  } else {
+    %lo = test.fact_range_lo %wide : i64 -> i64
+    %hi = test.fact_range_hi %wide : i64 -> i64
+    scf.yield %lo, %hi : i64, i64
+  }
+  func.return %wide, %lower, %upper : i64, i64, i64
+}
+
+// ----
+func.def @unsigned_sign_extension(%input: i8) -> (i64, i64, i64) {
+  %half = scalar.extsi %input : i8 to i16
+  %wide = scalar.extui %half : i16 to i64
+  %lower = scalar.constant 0 : i64
+  %upper = scalar.constant 65535 : i64
+  func.return %wide, %lower, %upper : i64, i64, i64
+}
+
+// ====
+
+// Address payloads follow the same numeric identity contract. Offset's
+// unsigned byte interpretation is lossless on the positive branch only.
+func.def @offset_extension(%input: i8) -> (offset, i64, i64) {
+  %address = index.cast %input : i8 to offset
+  %c0 = scalar.constant 0 : i8
+  %limit = scalar.constant 16 : i8
+  %positive = scalar.cmpi sgt, %input, %c0 : i8
+  %small = scalar.cmpi sle, %input, %limit : i8
+  %valid = scalar.andi %positive, %small : i1
+  %lower, %upper = scf.if %valid -> (i64, i64) {
+    %lo = test.fact_range_lo %address : offset -> i64
+    %hi = test.fact_range_hi %address : offset -> i64
+    scf.yield %lo, %hi : i64, i64
+  } else {
+    %lo = test.fact_range_lo %address : offset -> i64
+    %hi = test.fact_range_hi %address : offset -> i64
+    scf.yield %lo, %hi : i64, i64
+  }
+  func.return %address, %lower, %upper : offset, i64, i64
+}
+
+// ----
+func.def @offset_extension(%input: i8) -> (offset, i64, i64) {
+  %address = index.cast %input : i8 to offset
+  %c0 = scalar.constant 0 : i8
+  %limit = scalar.constant 16 : i8
+  %positive = scalar.cmpi sgt, %input, %c0 : i8
+  %small = scalar.cmpi sle, %input, %limit : i8
+  %valid = scalar.andi %positive, %small : i1
+  %lo$20 = scalar.constant 1 : i64
+  %hi$19 = scalar.constant 16 : i64
+  %lo$18 = scalar.constant 0 : i64
+  %hi$17 = scalar.constant 255 : i64
+  %lower = scf.select %valid, %lo$20, %lo$18 : i64
+  %upper = scf.select %valid, %hi$19, %hi$17 : i64
+  func.return %address, %lower, %upper : offset, i64, i64
+}

@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/analysis/symbolic_integer_cast.h"
+#include "loom/ir/integer_cast.h"
 
 #include <cstdint>
 
@@ -22,16 +22,15 @@ static uint64_t Interpret(uint64_t value, uint8_t width, bool is_unsigned) {
                                                                 : value | ~mask;
 }
 
-static uint64_t Evaluate(const loom_symbolic_integer_cast_t& cast,
-                         uint64_t value) {
-  value = Interpret(value, cast.bit_count,
-                    cast.kind == LOOM_SYMBOLIC_INTEGER_CAST_UNSIGNED);
-  return cast.kind == LOOM_SYMBOLIC_INTEGER_CAST_SIGNED_THEN_UNSIGNED
+static uint64_t Evaluate(const loom_integer_cast_t& cast, uint64_t value) {
+  value =
+      Interpret(value, cast.bit_count, cast.kind == LOOM_INTEGER_CAST_UNSIGNED);
+  return cast.kind == LOOM_INTEGER_CAST_SIGNED_THEN_UNSIGNED
              ? Interpret(value, cast.unsigned_bit_count, true)
              : value;
 }
 
-static loom_symbolic_integer_cast_t Cast(uint8_t width, bool is_unsigned) {
+static loom_integer_cast_t Cast(uint8_t width, bool is_unsigned) {
   return {
       .source_value_id = 7,
       .bit_count = width,
@@ -40,7 +39,7 @@ static loom_symbolic_integer_cast_t Cast(uint8_t width, bool is_unsigned) {
   };
 }
 
-TEST(SymbolicIntegerCastTest, ThreeCastCompositionMatchesBitwiseOracle) {
+TEST(IntegerCastTest, ThreeCastCompositionMatchesBitwiseOracle) {
   const uint8_t widths[] = {1, 8, 16, 32, 64};
   const int64_t boundaries[] = {
       INT64_MIN, INT64_MIN + 1, INT32_MIN - INT64_C(1), INT32_MIN,
@@ -51,13 +50,11 @@ TEST(SymbolicIntegerCastTest, ThreeCastCompositionMatchesBitwiseOracle) {
         for (uint8_t kinds = 0; kinds < 8; ++kinds) {
           SCOPED_TRACE(::testing::Message() << +first << "/" << +second << "/"
                                             << +third << " kinds=" << +kinds);
-          auto cast = loom_symbolic_integer_cast_compose(
+          auto cast = loom_integer_cast_compose(
               Cast(first, kinds & 1),
-              static_cast<loom_symbolic_integer_cast_kind_t>((kinds >> 1) & 1),
-              second);
-          cast = loom_symbolic_integer_cast_compose(
-              cast,
-              static_cast<loom_symbolic_integer_cast_kind_t>((kinds >> 2) & 1),
+              static_cast<loom_integer_cast_kind_t>((kinds >> 1) & 1), second);
+          cast = loom_integer_cast_compose(
+              cast, static_cast<loom_integer_cast_kind_t>((kinds >> 2) & 1),
               third);
           EXPECT_EQ(cast.source_value_id, 7u);
           for (int sample = -256; sample < 264; ++sample) {
@@ -70,11 +67,10 @@ TEST(SymbolicIntegerCastTest, ThreeCastCompositionMatchesBitwiseOracle) {
             ASSERT_EQ(Evaluate(cast, source), expected) << source;
             // The fact domain has signed 64-bit endpoints. Unsigned results
             // above INT64_MAX need not have an exact numeric representation.
-            if (cast.kind != LOOM_SYMBOLIC_INTEGER_CAST_SIGNED &&
-                expected > INT64_MAX) {
+            if (cast.kind != LOOM_INTEGER_CAST_SIGNED && expected > INT64_MAX) {
               continue;
             }
-            const auto facts = loom_symbolic_integer_cast_apply(
+            const auto facts = loom_integer_cast_apply(
                 &cast, loom_value_facts_exact_i64(source));
             ASSERT_EQ(facts.range_lo, static_cast<int64_t>(expected)) << source;
             ASSERT_EQ(facts.range_hi, static_cast<int64_t>(expected)) << source;
@@ -85,24 +81,23 @@ TEST(SymbolicIntegerCastTest, ThreeCastCompositionMatchesBitwiseOracle) {
   }
 }
 
-TEST(SymbolicIntegerCastTest, IntervalTransferContainsEveryConcreteResult) {
+TEST(IntegerCastTest, IntervalTransferContainsEveryConcreteResult) {
   for (uint8_t first : {1, 8, 16, 32, 64}) {
     for (uint8_t second : {1, 8, 16, 32, 64}) {
       for (uint8_t kinds = 0; kinds < 4; ++kinds) {
-        const auto cast = loom_symbolic_integer_cast_compose(
+        const auto cast = loom_integer_cast_compose(
             Cast(first, kinds & 1),
-            static_cast<loom_symbolic_integer_cast_kind_t>(kinds >> 1), second);
+            static_cast<loom_integer_cast_kind_t>(kinds >> 1), second);
         for (int64_t lower = -272; lower <= 256; lower += 16) {
           const int64_t upper = lower + 31;
-          const auto facts = loom_symbolic_integer_cast_apply(
+          const auto facts = loom_integer_cast_apply(
               &cast, loom_value_facts_make(lower, upper, 1));
-          const bool identity = loom_symbolic_integer_cast_is_identity(
+          const bool identity = loom_integer_cast_is_identity(
               &cast, loom_value_facts_make(lower, upper, 1));
           for (int64_t source = lower; source <= upper; ++source) {
             const uint64_t bits = Interpret(Interpret(source, first, kinds & 1),
                                             second, kinds & 2);
-            if (cast.kind != LOOM_SYMBOLIC_INTEGER_CAST_SIGNED &&
-                bits > INT64_MAX) {
+            if (cast.kind != LOOM_INTEGER_CAST_SIGNED && bits > INT64_MAX) {
               EXPECT_FALSE(identity);
               continue;
             }
@@ -119,50 +114,48 @@ TEST(SymbolicIntegerCastTest, IntervalTransferContainsEveryConcreteResult) {
   }
 }
 
-TEST(SymbolicIntegerCastTest, SignedPayloadNeedsItsUnsignedExtensionWidth) {
+TEST(IntegerCastTest, SignedPayloadNeedsItsUnsignedExtensionWidth) {
   const auto byte = Cast(8, false);
-  const auto halfword = loom_symbolic_integer_cast_compose(
-      byte, LOOM_SYMBOLIC_INTEGER_CAST_UNSIGNED, 16);
-  const auto word = loom_symbolic_integer_cast_compose(
-      byte, LOOM_SYMBOLIC_INTEGER_CAST_UNSIGNED, 32);
-  EXPECT_EQ(halfword.kind, LOOM_SYMBOLIC_INTEGER_CAST_SIGNED_THEN_UNSIGNED);
+  const auto halfword =
+      loom_integer_cast_compose(byte, LOOM_INTEGER_CAST_UNSIGNED, 16);
+  const auto word =
+      loom_integer_cast_compose(byte, LOOM_INTEGER_CAST_UNSIGNED, 32);
+  EXPECT_EQ(halfword.kind, LOOM_INTEGER_CAST_SIGNED_THEN_UNSIGNED);
   EXPECT_EQ(halfword.bit_count, 8);
   EXPECT_EQ(halfword.unsigned_bit_count, 16);
   EXPECT_EQ(Evaluate(halfword, -1), 65535u);
   EXPECT_EQ(Evaluate(word, -1), UINT32_MAX);
-  EXPECT_FALSE(
-      loom_symbolic_integer_cast_same_interpretation(&halfword, &word));
-  const auto widened = loom_symbolic_integer_cast_compose(
-      halfword, LOOM_SYMBOLIC_INTEGER_CAST_SIGNED, 32);
-  EXPECT_TRUE(
-      loom_symbolic_integer_cast_same_interpretation(&halfword, &widened));
-  const auto narrowed = loom_symbolic_integer_cast_compose(
-      halfword, LOOM_SYMBOLIC_INTEGER_CAST_SIGNED, 16);
-  EXPECT_TRUE(loom_symbolic_integer_cast_same_interpretation(&byte, &narrowed));
+  EXPECT_FALSE(loom_integer_cast_same_interpretation(&halfword, &word));
+  const auto widened =
+      loom_integer_cast_compose(halfword, LOOM_INTEGER_CAST_SIGNED, 32);
+  EXPECT_TRUE(loom_integer_cast_same_interpretation(&halfword, &widened));
+  const auto narrowed =
+      loom_integer_cast_compose(halfword, LOOM_INTEGER_CAST_SIGNED, 16);
+  EXPECT_TRUE(loom_integer_cast_same_interpretation(&byte, &narrowed));
 }
 
-TEST(SymbolicIntegerCastTest, IdentityRequiresTheCompleteSourceIntervalToFit) {
+TEST(IntegerCastTest, IdentityRequiresTheCompleteSourceIntervalToFit) {
   for (uint8_t width : {1, 8, 16, 32}) {
     const int64_t sign = INT64_C(1) << (width - 1);
     const auto signed_cast = Cast(width, false);
     const auto unsigned_cast = Cast(width, true);
-    const auto mixed_cast = loom_symbolic_integer_cast_compose(
-        signed_cast, LOOM_SYMBOLIC_INTEGER_CAST_UNSIGNED, 64);
-    EXPECT_TRUE(loom_symbolic_integer_cast_is_identity(
+    const auto mixed_cast =
+        loom_integer_cast_compose(signed_cast, LOOM_INTEGER_CAST_UNSIGNED, 64);
+    EXPECT_TRUE(loom_integer_cast_is_identity(
         &signed_cast, loom_value_facts_make(-sign, sign - 1, 1)));
-    EXPECT_FALSE(loom_symbolic_integer_cast_is_identity(
+    EXPECT_FALSE(loom_integer_cast_is_identity(
         &signed_cast, loom_value_facts_make(-sign, sign, 1)));
-    EXPECT_FALSE(loom_symbolic_integer_cast_is_identity(
+    EXPECT_FALSE(loom_integer_cast_is_identity(
         &signed_cast, loom_value_facts_make(-sign - 1, sign - 1, 1)));
-    EXPECT_TRUE(loom_symbolic_integer_cast_is_identity(
+    EXPECT_TRUE(loom_integer_cast_is_identity(
         &unsigned_cast, loom_value_facts_make(0, 2 * sign - 1, 1)));
-    EXPECT_FALSE(loom_symbolic_integer_cast_is_identity(
+    EXPECT_FALSE(loom_integer_cast_is_identity(
         &unsigned_cast, loom_value_facts_make(-1, 2 * sign - 1, 1)));
-    EXPECT_FALSE(loom_symbolic_integer_cast_is_identity(
+    EXPECT_FALSE(loom_integer_cast_is_identity(
         &unsigned_cast, loom_value_facts_make(0, 2 * sign, 1)));
-    EXPECT_TRUE(loom_symbolic_integer_cast_is_identity(
+    EXPECT_TRUE(loom_integer_cast_is_identity(
         &mixed_cast, loom_value_facts_make(0, sign - 1, 1)));
-    EXPECT_FALSE(loom_symbolic_integer_cast_is_identity(
+    EXPECT_FALSE(loom_integer_cast_is_identity(
         &mixed_cast, loom_value_facts_make(-1, sign - 1, 1)));
   }
 }

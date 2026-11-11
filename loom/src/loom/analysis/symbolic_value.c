@@ -588,12 +588,12 @@ static iree_status_t loom_symbolic_integer_cast_values_match(
     loom_symbolic_expr_context_t* context, loom_value_id_t left_value,
     loom_value_id_t right_value, bool* out_match) {
   *out_match = false;
-  const loom_symbolic_integer_cast_t* left_cast =
+  const loom_integer_cast_t* left_cast =
       loom_symbolic_expr_lookup_integer_cast(context, left_value);
-  const loom_symbolic_integer_cast_t* right_cast =
+  const loom_integer_cast_t* right_cast =
       loom_symbolic_expr_lookup_integer_cast(context, right_value);
   if (!left_cast || !right_cast ||
-      !loom_symbolic_integer_cast_same_interpretation(left_cast, right_cast)) {
+      !loom_integer_cast_same_interpretation(left_cast, right_cast)) {
     return iree_ok_status();
   }
   if (left_cast->source_value_id == right_cast->source_value_id) {

@@ -454,3 +454,107 @@ func.def @conversion_identity_does_not_escape(%input: i8, %bits: i32) {
   }
   func.return
 }
+
+// ====
+
+// A forwarded block argument introduces a CFG identity between conversions.
+// The retained byte interpretation must compose with the later unsigned one,
+// including its wrapped range, without refining uses after the guarded region.
+func.def @forwarded_cast_chain(%input: i64) {
+  %byte = scalar.trunci %input : i64 to i8
+  cfg.br ^payload(%byte: i8)
+^payload(%forwarded: i8):
+  %signed = scalar.extsi %forwarded : i8 to i16
+  %mixed = scalar.extui %signed : i16 to i32
+  %lower = scalar.constant 256 : i64
+  %upper = scalar.constant 258 : i64
+  %above = scalar.cmpi sge, %input, %lower : i64
+  %below = scalar.cmpi sle, %input, %upper : i64
+  %valid = scalar.andi %above, %below : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %high = test.fact_range_hi %mixed : i32 -> i64
+    %count = index.cast %high : i64 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  %nonzero = test.fact_non_zero %mixed : i32 -> i1
+  %outside_count = index.cast %nonzero : i1 to index
+  scf.for %outside = [%begin to %outside_count step %step] unroll {
+    test.use %outside : index
+  }
+  func.return
+}
+
+// ----
+func.def @forwarded_cast_chain(%input: i64) {
+  %byte = scalar.trunci %input : i64 to i8
+  cfg.br ^payload(%byte: i8)
+^payload(%forwarded: i8):
+  %lower = scalar.constant 256 : i64
+  %upper = scalar.constant 258 : i64
+  %above = scalar.cmpi sge, %input, %lower : i64
+  %below = scalar.cmpi sle, %input, %upper : i64
+  %valid = scalar.andi %above, %below : i1
+  scf.if %valid {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+    %iteration_1 = index.constant 1 : index
+    test.use %iteration_1 : index
+  }
+  func.return
+}
+
+// ====
+
+// Different incoming payloads cannot be unified with one guarded source.
+func.def @merged_payloads(%input: i64, %other: i8, %choose: i1) {
+  %byte = scalar.trunci %input : i64 to i8
+  cfg.cond_br %choose, ^first, ^second
+^first:
+  cfg.br ^payload(%byte: i8)
+^second:
+  cfg.br ^payload(%other: i8)
+^payload(%forwarded: i8):
+  %unsigned = scalar.extui %forwarded : i8 to i32
+  %c0 = scalar.constant 0 : i64
+  %limit = scalar.constant 2 : i64
+  %positive = scalar.cmpi sgt, %input, %c0 : i64
+  %small = scalar.cmpi sle, %input, %limit : i64
+  %valid = scalar.andi %positive, %small : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %high = test.fact_range_hi %unsigned : i32 -> i64
+    %full_byte = scalar.constant 255 : i64
+    %unrefined = scalar.cmpi eq, %high, %full_byte : i64
+    %count = index.cast %unrefined : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @merged_payloads(%input: i64, %other: i8, %choose: i1) {
+  %byte = scalar.trunci %input : i64 to i8
+  cfg.cond_br %choose, ^first, ^second
+^first:
+  cfg.br ^payload(%byte: i8)
+^second:
+  cfg.br ^payload(%other: i8)
+^payload(%forwarded: i8):
+  %c0 = scalar.constant 0 : i64
+  %limit = scalar.constant 2 : i64
+  %positive = scalar.cmpi sgt, %input, %c0 : i64
+  %small = scalar.cmpi sle, %input, %limit : i64
+  %valid = scalar.andi %positive, %small : i1
+  scf.if %valid {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}

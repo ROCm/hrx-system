@@ -95,8 +95,19 @@ iree_status_t loom_index_cast_facts(loom_fact_context_t* context,
       input_scalar_type, result_scalar_type, operand_facts[0]);
   const bool preserves_value = loom_index_cast_transfer_preserves_value(
       input_scalar_type, result_scalar_type, operand_facts[0]);
-  return loom_value_fact_table_define_operand_identity(
-      context, 0, preserves_value ? 0 : -1);
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_define_operand_identity(
+      context, 0, preserves_value ? 0 : -1));
+  if (preserves_value) {
+    return iree_ok_status();
+  }
+  loom_integer_cast_kind_t kind;
+  uint8_t bit_count;
+  if (!loom_index_cast_payload_interpretation(
+          input_scalar_type, result_scalar_type, &kind, &bit_count)) {
+    return iree_ok_status();
+  }
+  return loom_value_fact_table_define_operand_cast(context, 0, 0, kind,
+                                                   bit_count);
 }
 
 iree_status_t loom_index_assume_facts(loom_fact_context_t* context,

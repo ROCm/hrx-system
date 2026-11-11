@@ -171,3 +171,79 @@ func.def @scoped_round_trip(%source: i32, %active: i1) -> (i32, i32) {
   %outside = scalar.extsi %outside_byte : i8 to i32
   func.return %source, %outside : i32, i32
 }
+
+// ====
+
+// RUN: pass combine,dce,canonicalize
+
+// An intervening predicate is additional information, not a reason to keep
+// the round trip. Its nonzero fact survives replacing the extension.
+func.def @predicate_between_conversions(%source: i32) -> (i32, i1) {
+  %bounded = scalar.assume %source [range(%source, -16, 16)] : i32
+  %byte = scalar.trunci %bounded : i32 to i8
+  %nonzero = scalar.assume %byte [ne(%byte, 0)] : i8
+  %wide = scalar.extsi %nonzero : i8 to i32
+  %c0 = scalar.constant 0 : i32
+  %is_zero = scalar.cmpi eq, %wide, %c0 : i32
+  func.return %wide, %is_zero : i32, i1
+}
+
+// ----
+func.def @predicate_between_conversions(%source: i32) -> (i32, i1) {
+  %bounded = scalar.assume %source [range(%source, -16, 16)] : i32
+  %byte = scalar.trunci %bounded : i32 to i8
+  %nonzero = scalar.assume %byte [ne(%byte, 0)] : i8
+  %10 = scalar.assume %source [range(%source, -16, 16), ne(%source, 0), eq(%source, %nonzero)] : i32
+  %is_zero = scalar.constant false : i1
+  func.return %10, %is_zero : i32, i1
+}
+
+// ====
+
+// RUN: pass combine,dce,canonicalize
+
+// Interior literal exclusions are not expressible by an interval. Returning
+// the numeric origin must retain those relational facts as well.
+func.def @excluded_literal_between_conversions(%source: i32) -> (i32, i1) {
+  %bounded = scalar.assume %source [range(%source, 0, 16)] : i32
+  %byte = scalar.trunci %bounded : i32 to i8
+  %excluded = scalar.assume %byte [ne(%byte, 7)] : i8
+  %wide = scalar.extui %excluded : i8 to i32
+  %c7 = scalar.constant 7 : i32
+  %is_seven = scalar.cmpi eq, %wide, %c7 : i32
+  func.return %wide, %is_seven : i32, i1
+}
+
+// ----
+func.def @excluded_literal_between_conversions(%source: i32) -> (i32, i1) {
+  %bounded = scalar.assume %source [range(%source, 0, 16)] : i32
+  %byte = scalar.trunci %bounded : i32 to i8
+  %excluded = scalar.assume %byte [ne(%byte, 7)] : i8
+  %10 = scalar.assume %source [range(%source, 0, 16), eq(%source, %excluded)] : i32
+  %is_seven = scalar.constant false : i1
+  func.return %10, %is_seven : i32, i1
+}
+
+// ====
+
+// RUN: pass combine,dce,canonicalize
+
+// A final truncation can use the same numeric identity proof as extension.
+// The wider alias's interior exclusion must remain observable afterward.
+func.def @predicate_before_truncation(%source: i8) -> (i8, i1) {
+  %wide = scalar.extsi %source : i8 to i32
+  %excluded = scalar.assume %wide [ne(%wide, 7)] : i32
+  %narrow = scalar.trunci %excluded : i32 to i8
+  %c7 = scalar.constant 7 : i8
+  %is_seven = scalar.cmpi eq, %narrow, %c7 : i8
+  func.return %narrow, %is_seven : i8, i1
+}
+
+// ----
+func.def @predicate_before_truncation(%source: i8) -> (i8, i1) {
+  %wide = scalar.extsi %source : i8 to i32
+  %excluded = scalar.assume %wide [ne(%wide, 7)] : i32
+  %9 = scalar.assume %source [eq(%source, %excluded)] : i8
+  %is_seven = scalar.constant false : i1
+  func.return %9, %is_seven : i8, i1
+}
