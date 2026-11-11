@@ -369,11 +369,9 @@ static iree_status_t loom_cfg_simplify_thread_fact_known_branches(
         !loom_cfg_simplify_can_skip_block_prefix(state, block, terminator)) {
       continue;
     }
-    const loom_value_fact_uniform_scope_t decision_scope = iree_min(
+    const loom_value_fact_uniform_scope_t decision_scope =
         loom_value_facts_uniform_scope(loom_value_fact_table_lookup(
-            state->fact_table, loom_cfg_cond_br_condition(terminator))),
-        loom_value_facts_uniform_scope(loom_value_fact_control_execution(
-            structure->control, block_index)));
+            state->fact_table, loom_cfg_cond_br_condition(terminator)));
 
     const loom_cfg_edge_index_span_t predecessor_edges =
         loom_cfg_graph_predecessor_edges(graph, block_index);
@@ -397,7 +395,8 @@ static iree_status_t loom_cfg_simplify_thread_fact_known_branches(
           predecessor_index == block_index) {
         continue;
       }
-      // A partial predecessor must rejoin before a more uniform decision.
+      // A partial predecessor must rejoin before a more uniform selector,
+      // even when that decision itself executes under partial participation.
       // Bypassing it splits one collective control owner into overlapping
       // paths and loses the participation proof needed by its successors.
       if (decision_scope != LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE) {
