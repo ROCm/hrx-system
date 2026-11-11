@@ -66,7 +66,32 @@ iree_status_t loom_aie2p_native_select_collectives(
         const iree_host_size_t index = loom_pipeline_invocations_channel_index(
             &realization->invocations, &scope->blocks[b][i].channel->identity);
         loom_aie2p_native_channel_t* channel = &context->channels[index];
-        const uint32_t worker = channel->cursor.reader.worker;
+        const loom_aie2p_native_tile_t* owner =
+            context->pool_tiles[channel->pool_index];
+        const iree_host_size_t owner_engine = owner - context->tiles;
+        uint32_t worker = channel->cursor.reader.worker;
+        const loom_xdna_address_window_t* window = NULL;
+        // A collectively consumed FIFO need not have an ordinary read site.
+        // Assign its cursor to a participant with a visible storage aperture,
+        // preferring the storage owner so broadcasting needs no extra relay.
+        if (worker == UINT32_MAX) {
+          if (participants->workers[owner_engine] != IREE_HOST_SIZE_MAX) {
+            worker = (uint32_t)participants->workers[owner_engine];
+          } else {
+            for (iree_host_size_t e = 0; e < execution->engine_count; ++e) {
+              if (participants->workers[e] == IREE_HOST_SIZE_MAX) {
+                continue;
+              }
+              window = loom_xdna_array_load_window(context->family,
+                                                   context->tiles[e].coordinate,
+                                                   owner->coordinate);
+              if (window) {
+                worker = (uint32_t)participants->workers[e];
+                break;
+              }
+            }
+          }
+        }
         if (worker == UINT32_MAX ||
             context->core_engines[worker] == IREE_HOST_SIZE_MAX ||
             participants->workers[context->core_engines[worker]] ==
@@ -96,18 +121,17 @@ iree_status_t loom_aie2p_native_select_collectives(
               &capacity, (void**)&context->collectives));
         }
         const iree_host_size_t reader = context->core_engines[worker];
-        const loom_aie2p_native_tile_t* owner =
-            context->pool_tiles[channel->pool_index];
-        const loom_xdna_address_window_t* window = loom_xdna_array_load_window(
-            context->family, context->workers[worker].tile->coordinate,
-            owner->coordinate);
+        if (!window) {
+          window = loom_xdna_array_load_window(
+              context->family, context->workers[worker].tile->coordinate,
+              owner->coordinate);
+        }
         if (!window) {
           return loom_aie2p_native_reject(
               context, step->operation,
               IREE_SV(
                   "collective storage visible to its admitted FIFO reader"));
         }
-        const iree_host_size_t owner_engine = owner - context->tiles;
         const iree_host_size_t relay =
             participants->workers[owner_engine] != IREE_HOST_SIZE_MAX
                 ? owner_engine
@@ -128,9 +152,10 @@ iree_status_t loom_aie2p_native_select_collectives(
                 .address = window->base + channel->byte_offset,
                 .ready_lock = window->lock_selector_base + channel->ready_lock,
                 .free_lock = window->lock_selector_base + channel->free_lock};
-        // The collective and ordinary child consume successive records on
-        // the same engine. Their cursor belongs to the shared entry frame.
+        // All collective and ordinary reads advance one cursor on this engine.
+        // Its state belongs to the shared entry frame across child calls.
         channel->cursor.reader.shared = true;
+        channel->cursor.reader.worker = worker;
         channel->cursor.reader.advances = channel->source->capacity > 1;
       }
     }
