@@ -1,8 +1,8 @@
 # Copyright 2026 The IREE Authors
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-site_name: Loom Programming Guide
-site_description: Author, specialize, test, benchmark, and embed Loom programs.
+site_name: Loom
+site_description: A language, compiler, and runtime for CPUs, GPUs, and NPUs. Build and host programmable models with Loom.
 site_url: https://rocm.github.io/hrx-system/loom/
 repo_url: https://github.com/ROCm/hrx-system
 repo_name: ROCm/hrx-system

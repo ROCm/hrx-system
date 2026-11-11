@@ -574,14 +574,14 @@ def add_root_commands(subparsers: argparse._SubParsersAction) -> None:
         subparsers,
         "docs",
         command_help=help_text.root_command_help("docs"),
-        help="Build or serve the Loom programming guide.",
+        help="Build or serve the Loom documentation.",
     )
     add_common_options(docs_parser)
     add_tool_environment_options(docs_parser)
     docs_subparsers = docs_parser.add_subparsers(dest="docs_command", required=True)
 
     docs_build_parser = docs_subparsers.add_parser(
-        "build", help="Build the Loom programming guide."
+        "build", help="Build the Loom documentation."
     )
     add_common_options(docs_build_parser)
     add_tool_environment_options(docs_build_parser)
@@ -595,7 +595,7 @@ def add_root_commands(subparsers: argparse._SubParsersAction) -> None:
     docs_build_parser.set_defaults(handler=handle_docs)
 
     docs_serve_parser = docs_subparsers.add_parser(
-        "serve", help="Serve the Loom programming guide with live reload."
+        "serve", help="Serve the Loom documentation with live reload."
     )
     add_common_options(docs_serve_parser)
     add_tool_environment_options(docs_serve_parser)

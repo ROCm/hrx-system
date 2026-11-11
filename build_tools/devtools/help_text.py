@@ -73,7 +73,7 @@ tool environment.""",
         )
     if command == "docs":
         return CommandHelp(
-            description="Build or serve the Loom programming guide.",
+            description="Build or serve the Loom documentation.",
             epilog="""Examples:
   python dev.py setup --docs
   python dev.py docs build
@@ -83,7 +83,7 @@ tool environment.""",
 
 The documentation toolchain is an optional, hash-locked part of the managed
 repository environment. Install it with `python dev.py setup --docs` before
-building or serving the guide.""",
+building or serving the site.""",
         )
     return CommandHelp(description=f"Run {command}.")
 

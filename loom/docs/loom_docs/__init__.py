@@ -4,4 +4,4 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Loom programming guide build extensions."""
+"""Loom documentation build extensions."""

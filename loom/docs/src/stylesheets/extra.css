@@ -9,8 +9,6 @@
   --md-accent-fg-color: #c74775;
   --md-default-bg-color: #ffffff;
   --md-typeset-a-color: #604092;
-  --loom-gradient-start: #7048a8;
-  --loom-gradient-end: #d34871;
 }
 
 [data-md-color-scheme="slate"] {
@@ -18,51 +16,6 @@
   --md-accent-fg-color: #ff709f;
   --md-default-bg-color: #111016;
   --md-typeset-a-color: #d6b3ff;
-  --loom-gradient-start: #a078d5;
-  --loom-gradient-end: #ff709f;
-}
-
-.loom-hero {
-  margin: 0 0 2rem;
-  padding: clamp(1.5rem, 4vw, 3.25rem);
-  overflow: hidden;
-  color: #fff;
-  background:
-    radial-gradient(circle at 90% 10%, rgb(255 255 255 / 18%), transparent 30%),
-    linear-gradient(135deg, var(--loom-gradient-start), var(--loom-gradient-end));
-  border-radius: 0.8rem;
-  box-shadow: 0 1rem 2.5rem rgb(30 18 42 / 20%);
-}
-
-.loom-hero h2 {
-  margin-top: 0;
-  color: inherit;
-  font-size: clamp(1.8rem, 5vw, 3rem);
-  line-height: 1.08;
-}
-
-.loom-hero p {
-  max-width: 50rem;
-  font-size: 1.05rem;
-}
-
-.loom-hero .md-button {
-  margin-top: 0.5rem;
-  margin-right: 0.4rem;
-  color: #fff;
-  border-color: rgb(255 255 255 / 78%);
-}
-
-.loom-hero .md-button:is(:focus, :hover) {
-  color: #211a2d;
-  background: #fff;
-  border-color: #fff;
-}
-
-.loom-hero .md-button--primary {
-  color: #211a2d;
-  background: #fff;
-  border-color: #fff;
 }
 
 .md-typeset .grid.cards > ul > li {
@@ -71,4 +24,508 @@
 
 .md-typeset code {
   border-radius: 0.2rem;
+}
+
+.loom-landing {
+  --loom-panel: #0d1526;
+  --loom-text: #f4f5ff;
+  --loom-muted: #b6c6df;
+  --loom-line: #455777;
+  --loom-reading-width: 42rem;
+}
+
+.loom-intro {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(11rem, 0.33fr);
+  grid-template-areas: "copy facts" "authoring facts";
+  gap: 0 2rem;
+  padding: clamp(1.2rem, 3vw, 2.25rem);
+  color: var(--loom-text);
+  background:
+    radial-gradient(ellipse at 100% 0, #35254f, transparent 60%),
+    var(--loom-panel);
+  border-radius: 0.65rem;
+  border-top: 0.2rem solid #ab8cfa;
+}
+
+.md-typeset .loom-intro h1 {
+  margin: 0.45rem 0 0.7rem;
+  color: var(--loom-text);
+  font-size: clamp(2.6rem, 5vw, 3.6rem);
+  font-weight: 750;
+  letter-spacing: -0.055em;
+  line-height: 1;
+}
+
+.loom-preview {
+  color: #d3bfff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.loom-intro p {
+  line-height: 1.6;
+}
+
+.loom-intro-copy {
+  grid-area: copy;
+}
+
+.loom-intro-copy > p:first-child {
+  margin-top: 0;
+}
+
+.loom-intro-authoring {
+  grid-area: authoring;
+}
+
+.loom-intro-authoring > p:last-child {
+  margin-bottom: 0;
+  color: var(--loom-muted);
+}
+
+.loom-intro a {
+  color: #dcc7ff;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.loom-intro a:is(:focus, :hover) {
+  color: #fff;
+}
+
+.loom-intro code,
+.loom-diagram code {
+  color: inherit;
+  background: rgb(255 255 255 / 9%);
+}
+
+.loom-intro .md-button {
+  margin: 0.2rem 0.35rem 0.2rem 0;
+  padding: 0.5em 1em;
+  color: var(--loom-text);
+  border-color: #b6a0d3;
+  border-radius: 0.25rem;
+  text-decoration: none;
+}
+
+.loom-intro .md-button--primary,
+.loom-intro .md-button:is(:focus, :hover) {
+  color: var(--loom-panel);
+  background: #fff;
+  border-color: #fff;
+}
+
+.loom-facts {
+  grid-area: facts;
+  align-self: center;
+  padding-left: 1.5rem;
+  border-left: 1px solid #665279;
+}
+
+.md-typeset .loom-facts dl,
+.md-typeset .loom-facts dt,
+.md-typeset .loom-facts dd {
+  margin: 0;
+}
+
+.loom-facts dt {
+  color: #f1eaff;
+  font-size: 1.4rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.md-typeset .loom-facts dd {
+  margin-top: 0.4rem;
+  color: var(--loom-muted);
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+.loom-facts dl > div + div {
+  margin-top: 1.5rem;
+}
+
+.loom-scope {
+  margin: 1.5rem auto 2rem;
+  max-width: 50rem;
+}
+
+.loom-scope .md-typeset__table {
+  display: block;
+}
+
+.loom-scope table:not([class]) {
+  display: table;
+  width: 100%;
+  font-size: 0.75rem;
+}
+
+.loom-scope th:first-child {
+  width: 30%;
+}
+
+.loom-section > p,
+.loom-section > h2 {
+  max-width: var(--loom-reading-width);
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.md-typeset .loom-section > h2 {
+  margin-top: 2.5rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.loom-section > p {
+  line-height: 1.75;
+}
+
+.md-typeset .loom-diagram {
+  width: 100%;
+  max-width: 50rem;
+  margin: 1.7rem auto;
+  padding: clamp(0.85rem, 2.5vw, 1.5rem);
+  color: var(--loom-text);
+  background: var(--loom-panel);
+  border: 1px solid var(--loom-line);
+  border-radius: 0.65rem;
+  font-size: 0.78rem;
+  text-align: left;
+}
+
+.loom-diagram strong,
+.loom-diagram span {
+  display: block;
+}
+
+.loom-diagram strong {
+  font-size: 0.95rem;
+}
+
+.loom-diagram span {
+  margin-top: 0.3rem;
+  color: var(--loom-muted);
+  font-size: 0.7rem;
+}
+
+.loom-node {
+  padding: 0.85rem 1rem;
+  background: #1b2940;
+  border: 1px solid var(--loom-line);
+  border-radius: 0.4rem;
+}
+
+.loom-clients {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 1rem;
+}
+
+.loom-diagram .loom-request-path {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  color: var(--loom-muted);
+  font-size: 0.7rem;
+}
+
+.loom-request-path span,
+.loom-flow-arrow {
+  margin: 0;
+  color: var(--loom-muted);
+  font-size: 1.5rem;
+  line-height: 1.7;
+  text-align: center;
+}
+
+.loom-host {
+  padding: 1rem;
+  background: linear-gradient(135deg, #37275d, #202039);
+  border: 1px solid #987ac9;
+  border-radius: 0.5rem;
+}
+
+.loom-host-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.loom-host-heading strong,
+.loom-compiler > strong {
+  font-size: 1.2rem;
+}
+
+.loom-host-heading span {
+  margin: 0;
+  color: #dfd3f1;
+}
+
+.loom-host > p {
+  margin: 0.5rem 0 1rem;
+  color: #c4b4dd;
+  font-size: 0.7rem;
+}
+
+.md-typeset ul.loom-models,
+.md-typeset ul.loom-devices {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.md-typeset ul.loom-models > li,
+.md-typeset ul.loom-devices > li {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0.75rem 0.4rem;
+  border: 1px solid;
+  border-radius: 0.35rem;
+  text-align: center;
+}
+
+.md-typeset ul.loom-models > li {
+  background: #202b42;
+  border-color: #665983;
+}
+
+.md-typeset ul.loom-models > .loom-add-model {
+  color: #eadcff;
+  background: #30294b;
+  border-color: #b79bdc;
+  border-style: dashed;
+}
+
+.loom-shared {
+  margin-top: 1rem;
+  padding: 0.8rem 1rem;
+  background: #163149;
+  border: 1px solid #3c6685;
+  border-radius: 0.35rem;
+}
+
+.loom-shared span {
+  color: #b6cce0;
+}
+
+.loom-cpu {
+  color: #ffd58c;
+  background: #332b1d;
+  border-color: #a67e35;
+}
+
+.loom-gpu {
+  color: #ffa8c4;
+  background: #352334;
+  border-color: #a6587b;
+}
+
+.loom-npu {
+  color: #79e6d9;
+  background: #153839;
+  border-color: #318d88;
+}
+
+.loom-vulkan {
+  color: #a5ceff;
+  background: #1c304b;
+  border-color: #4f7ba9;
+}
+
+.loom-wasm {
+  color: #d3bfff;
+  background: #29243b;
+  border-color: #796595;
+}
+
+.loom-compile-flow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1.8rem minmax(0, 1.05fr) 1.8rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.loom-source-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  color: var(--loom-muted);
+  font-size: 0.65rem;
+}
+
+.loom-source-link span {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.loom-library {
+  margin-top: 1rem;
+  background: #153439;
+  border-color: #377879;
+}
+
+.loom-compiler {
+  padding: 1rem;
+  background: linear-gradient(135deg, #7048c6, #443572);
+  border: 1px solid #ab8cfa;
+  border-radius: 0.5rem;
+}
+
+.loom-compiler > span {
+  color: #f1eaff;
+}
+
+.loom-compiler .loom-compiler-programs {
+  margin-top: 0.6rem;
+  color: #e5d9f8;
+  font-size: 0.65rem;
+}
+
+.loom-codegen {
+  margin: 1rem 0;
+  padding: 0.65rem;
+  background: #342454;
+  border-radius: 0.3rem;
+  text-align: center;
+  font-weight: 700;
+}
+
+.loom-specialization {
+  padding-top: 0.7rem;
+  border-top: 1px solid #ab8cfa;
+}
+
+.loom-specialization strong {
+  font-size: 0.72rem;
+}
+
+.loom-specialization span {
+  color: #e5d9f8;
+  font-size: 0.65rem;
+}
+
+.md-typeset .loom-artifacts {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.loom-artifacts > div {
+  padding: 0.5rem 0.8rem;
+  border: 1px solid;
+  border-left-width: 0.2rem;
+  border-radius: 0.35rem;
+}
+
+.loom-artifacts dt {
+  font-size: 0.6rem;
+  font-weight: 700;
+}
+
+.md-typeset .loom-artifacts dd {
+  margin: 0.15rem 0 0;
+  color: var(--loom-text);
+}
+
+.md-typeset .loom-diagram figcaption {
+  max-width: none;
+  margin: 1rem 0 0;
+  color: var(--loom-muted);
+  font-size: 0.65rem;
+  font-style: normal;
+  text-align: left;
+}
+
+@media (max-width: 60em) {
+  .loom-intro {
+    grid-template-columns: 1fr;
+    grid-template-areas: "copy" "facts" "authoring";
+    gap: 1.25rem;
+  }
+
+  .loom-facts {
+    padding: 1.25rem 0 0;
+    border-left: 0;
+    border-top: 1px solid #665279;
+  }
+
+  .loom-facts dl {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    column-gap: 1.25rem;
+  }
+
+  .loom-facts dl > div + div {
+    margin-top: 0;
+  }
+}
+
+@media (max-width: 44em) {
+  .loom-intro {
+    padding: 1.1rem;
+  }
+
+  .loom-facts dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+  }
+
+  .loom-facts dl > div:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .loom-facts dt {
+    font-size: 1.2rem;
+  }
+
+  .loom-clients,
+  .loom-compile-flow {
+    grid-template-columns: 1fr;
+  }
+
+  .loom-host {
+    padding: 0.75rem;
+  }
+
+  .loom-host-heading {
+    gap: 0.2rem;
+  }
+
+  .md-typeset ul.loom-models,
+  .md-typeset ul.loom-devices,
+  .md-typeset .loom-artifacts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .loom-across {
+    transform: rotate(90deg);
+  }
+
+  .loom-artifacts > div:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media print {
+  .loom-intro,
+  .loom-diagram {
+    print-color-adjust: exact;
+  }
+
+  .loom-diagram {
+    break-inside: avoid;
+  }
 }
