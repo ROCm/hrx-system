@@ -296,10 +296,10 @@ class HipGraphMemoryApiTest : public ::testing::Test {
     *out_pointer = allocation.dptr;
   }
 
-  void HoldStreamAtGate() {
+  void HoldStreamAtGate(hipStream_t stream = nullptr) {
     gate_.pending = true;
     ASSERT_EQ(hipSuccess, api_.launch_host(
-                              stream_,
+                              stream ? stream : stream_,
                               +[](void* argument) {
                                 auto* gate = static_cast<StreamGate*>(argument);
                                 gate->entered.release();
@@ -446,6 +446,85 @@ class HipGraphMemoryApiTest : public ::testing::Test {
 
 hrx::hip::testing::HipDso HipGraphMemoryApiTest::dso_;
 HipGraphApi HipGraphMemoryApiTest::api_;
+
+TEST_F(HipGraphMemoryApiTest,
+       UnlaunchedExecutableDestructionIgnoresPendingWork) {
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
+  HoldStreamAtGate();
+  ASSERT_FALSE(HasFatalFailure());
+
+  ASSERT_EQ(hipSuccess, api_.executable_destroy(executable_));
+  executable_ = nullptr;
+  EXPECT_EQ(hipErrorNotReady, api_.stream_query(stream_));
+}
+
+TEST_F(HipGraphMemoryApiTest, ExecutableDestructionIgnoresLaterStreamWork) {
+  hipHostNodeParams host = {.fn = Increment, .userData = &callbacks_[0]};
+  hipGraphNode_t node = nullptr;
+  ASSERT_EQ(hipSuccess, api_.add_host(&node, graph_, nullptr, 0, &host));
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  HoldStreamAtGate();
+  ASSERT_FALSE(HasFatalFailure());
+
+  // The executable owns its launch point, not the stream's current tail.
+  ASSERT_EQ(hipSuccess, api_.executable_destroy(executable_));
+  executable_ = nullptr;
+  EXPECT_EQ(1, callbacks_[0]);
+  EXPECT_EQ(hipErrorNotReady, api_.stream_query(stream_));
+}
+
+TEST_F(HipGraphMemoryApiTest, ExecutableDestructionIgnoresIndependentContexts) {
+  hipHostNodeParams host = {.fn = Increment, .userData = &callbacks_[0]};
+  hipGraphNode_t node = nullptr;
+  ASSERT_EQ(hipSuccess, api_.add_host(&node, graph_, nullptr, 0, &host));
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+
+  // Both contexts borrow the suite's one native device. Only their timelines
+  // differ; graph destruction must not join the other context's gated work.
+  int ordinal = -1;
+  ASSERT_EQ(hipSuccess, api_.get_device(&ordinal));
+  ASSERT_EQ(hipSuccess, api_.create_context(&remote_context_, 0, ordinal));
+  ASSERT_EQ(hipSuccess,
+            api_.stream_create(&other_stream_, hipStreamNonBlocking));
+  HoldStreamAtGate(other_stream_);
+  ASSERT_FALSE(HasFatalFailure());
+  ASSERT_EQ(hipSuccess, api_.set_context(primary_context_));
+
+  ASSERT_EQ(hipSuccess, api_.executable_destroy(executable_));
+  executable_ = nullptr;
+  EXPECT_EQ(1, callbacks_[0]);
+  EXPECT_EQ(hipErrorNotReady, api_.stream_query(other_stream_));
+}
+
+TEST_F(HipGraphMemoryApiTest,
+       ExecutableDestructionJoinsPendingUpdatedLaunches) {
+  hipHostNodeParams host = {.fn = Increment, .userData = &callbacks_[0]};
+  hipGraphNode_t node = nullptr;
+  ASSERT_EQ(hipSuccess, api_.add_host(&node, graph_, nullptr, 0, &host));
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
+  ASSERT_EQ(hipSuccess,
+            api_.stream_create(&other_stream_, hipStreamNonBlocking));
+  HoldStreamAtGate();
+  ASSERT_FALSE(HasFatalFailure());
+  ASSERT_EQ(hipSuccess, api_.launch(executable_, stream_));
+  host.userData = &callbacks_[1];
+  ASSERT_EQ(hipSuccess, api_.set_executable_host(executable_, node, &host));
+  ASSERT_EQ(hipSuccess, api_.launch(executable_, other_stream_));
+  EXPECT_EQ(hipErrorNotReady, api_.stream_query(other_stream_));
+  ASSERT_EQ(hipSuccess, api_.graph_destroy(graph_));
+  graph_ = nullptr;
+
+  ReleaseStreamGate();
+  ASSERT_EQ(hipSuccess, api_.executable_destroy(executable_));
+  executable_ = nullptr;
+  EXPECT_EQ(callbacks_, (std::array<int, 3>{1, 1, 0}));
+  EXPECT_EQ(hipSuccess, api_.stream_query(stream_));
+  EXPECT_EQ(hipSuccess, api_.stream_query(other_stream_));
+}
 
 TEST_F(HipGraphMemoryApiTest, PendingContiguousCopiesOwnTheirStaging) {
   CheckPendingStagedCopyUpdates(false);

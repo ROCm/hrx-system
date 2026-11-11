@@ -739,12 +739,21 @@ iree_status_t iree_hal_streaming_graph_exec_destroy_handle(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
   }
   exec->is_destroyed = true;
-  iree_hal_streaming_context_t* context = exec->context;
-  iree_hal_streaming_context_retain(context);
+  iree_hal_semaphore_t* semaphore = exec->last_launch.semaphore;
+  const uint64_t value = exec->last_launch.value;
   iree_slim_mutex_unlock(&exec->mutex);
 
-  iree_status_t status = iree_hal_streaming_context_synchronize_all();
-  iree_hal_streaming_context_release(context);
+  // Replays carry the previous launch into their dependencies, and the final
+  // signal joins every graph partition. This point therefore covers every
+  // accepted launch, including work compiled before a parameter update. Later
+  // stream operations and independent contexts are outside this lifetime.
+  // The executable owns the semaphore and context throughout the unlocked wait.
+  iree_status_t status = iree_ok_status();
+  if (semaphore) {
+    status = iree_hal_semaphore_wait(
+        semaphore, value, iree_infinite_timeout(),
+        iree_hal_streaming_context_wait_flags(exec->context));
+  }
   if (!iree_status_is_ok(status)) {
     iree_slim_mutex_lock(&exec->mutex);
     exec->is_destroyed = false;

@@ -19587,7 +19587,8 @@ static hipError_t iree_hip_resolve_graph_exec(
 // Synchronization: This operation is synchronous.
 //
 // Destruction behavior:
-// - Waits for any pending executions to complete.
+// - Waits for this executable's pending executions to complete.
+// - Does not join independent work or later operations on its launch streams.
 // - Releases all resources associated with executable.
 // - Handle becomes invalid after destruction.
 // - Does not affect source graph used for instantiation.
@@ -19598,7 +19599,6 @@ static hipError_t iree_hip_resolve_graph_exec(
 // - Multiple executables can exist from same graph.
 //
 // Warning: Using a destroyed executable results in undefined behavior.
-// Ensure no launches are pending before destruction.
 //
 // See also: hipGraphInstantiate, hipGraphDestroy, hipGraphLaunch.
 HIPAPI hipError_t hipGraphExecDestroy(hipGraphExec_t graphExec) {
