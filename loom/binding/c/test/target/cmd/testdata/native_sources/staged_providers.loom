@@ -1,0 +1,24 @@
+// Providers live separately from command sources so preparation must retain
+// the complete external catalog before staged values establish applicability.
+template.decl @staged_choose(%matches: i1, %columns: index, %input: view<32xi32>) -> (i32)
+
+template.def<@staged_choose> priority(10) @staged_matching(%matches: i1, %columns: index, %input: view<32xi32>) -> (i32) where [eq(%matches, 1)] {
+  %values = vector.load %input[0] : view<32xi32> -> vector<[%columns]xi32>
+  %c0 = scalar.constant 0 : i32
+  %result = vector.reduce<addi> %values, %c0 : vector<[%columns]xi32>, i32
+  template.return %result : i32
+}
+
+template.def<@staged_choose> @staged_other(%matches: i1, %columns: index, %input: view<32xi32>) -> (i32) {
+  %result = scalar.constant 8 : i32
+  template.return %result : i32
+}
+
+template.decl @staged_required_choose(%matches: i1, %columns: index, %input: view<32xi32>) -> (i32)
+
+template.def<@staged_required_choose> priority(10) @staged_required_matching(%matches: i1, %columns: index, %input: view<32xi32>) -> (i32) where [eq(%matches, 1)] {
+  %values = vector.load %input[0] : view<32xi32> -> vector<[%columns]xi32>
+  %c0 = scalar.constant 0 : i32
+  %value = vector.reduce<addi> %values, %c0 : vector<[%columns]xi32>, i32
+  template.return %value : i32
+}

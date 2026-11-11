@@ -1,0 +1,261 @@
+// Literal families exercise cross-module identity and retained plan ownership.
+template.decl @staged_choose(%matches: i1, %columns: index, %input: view<32xi32>) -> (i32)
+
+pipeline.def<kernel> @staged_scalar(%value: index) run(%columns: index, %input: view<32xi32>, %output: view<1xi32>) {
+  %matching_value = index.constant 4 : index
+  %matches = index.cmp eq, %value, %matching_value : index
+  %result = template.apply<@staged_choose>(%matches, %columns, %input) : (i1, index, view<32xi32>) -> (i32)
+  pipeline.strand<cooperative> workers([0], [1], [1]) {
+    view.store %result, %output[0] : i32, view<1xi32>
+  }
+}
+
+command.def public @staged_scalar_match() launch(%input_storage: buffer, %output16_storage: buffer, %output32_storage: buffer) {
+  %value = index.constant 4 : index
+  %columns16 = index.constant 16 : index
+  %columns32 = index.constant 32 : index
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<32xi32>
+  %output16 = buffer.view %output16_storage[%base] : buffer -> view<1xi32>
+  %output32 = buffer.view %output32_storage[%base] : buffer -> view<1xi32>
+  kernel.launch @staged_scalar[%value](%columns16, %input, %output16) : [index](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_scalar[%value](%columns32, %input, %output32) : [index](index, view<32xi32>, view<1xi32>)
+  command.return
+}
+
+command.def public @staged_scalar_other() launch(%input_storage: buffer, %output16_storage: buffer, %output32_storage: buffer) {
+  %value = index.constant 8 : index
+  %columns16 = index.constant 16 : index
+  %columns32 = index.constant 32 : index
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<32xi32>
+  %output16 = buffer.view %output16_storage[%base] : buffer -> view<1xi32>
+  %output32 = buffer.view %output32_storage[%base] : buffer -> view<1xi32>
+  kernel.launch @staged_scalar[%value](%columns16, %input, %output16) : [index](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_scalar[%value](%columns32, %input, %output32) : [index](index, view<32xi32>, view<1xi32>)
+  command.return
+}
+
+pipeline.def<kernel> @staged_collision(%value: index) run(%columns: index, %input: view<32xi32>, %output: view<1xi32>) {
+  %expected = index.constant 1724915559227727183 : index
+  %matches = index.cmp eq, %value, %expected : index
+  %result = template.apply<@staged_choose>(%matches, %columns, %input) : (i1, index, view<32xi32>) -> (i32)
+  pipeline.strand<cooperative> workers([0], [1], [1]) {
+    view.store %result, %output[0] : i32, view<1xi32>
+  }
+}
+
+command.def public @staged_collision_match() launch(%input_storage: buffer, %output16_storage: buffer, %output32_storage: buffer) {
+  %value = index.constant 1724915559227727183 : index
+  %columns16 = index.constant 16 : index
+  %columns32 = index.constant 32 : index
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<32xi32>
+  %output16 = buffer.view %output16_storage[%base] : buffer -> view<1xi32>
+  %output32 = buffer.view %output32_storage[%base] : buffer -> view<1xi32>
+  kernel.launch @staged_collision[%value](%columns16, %input, %output16) : [index](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_collision[%value](%columns32, %input, %output32) : [index](index, view<32xi32>, view<1xi32>)
+  command.return
+}
+
+command.def public @staged_collision_other() launch(%input_storage: buffer, %output16_storage: buffer, %output32_storage: buffer) {
+  %value = index.constant 3844235512610326073 : index
+  %columns16 = index.constant 16 : index
+  %columns32 = index.constant 32 : index
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<32xi32>
+  %output16 = buffer.view %output16_storage[%base] : buffer -> view<1xi32>
+  %output32 = buffer.view %output32_storage[%base] : buffer -> view<1xi32>
+  kernel.launch @staged_collision[%value](%columns16, %input, %output16) : [index](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_collision[%value](%columns32, %input, %output32) : [index](index, view<32xi32>, view<1xi32>)
+  command.return
+}
+
+pipeline.def<kernel> @staged_schema(%value: encoding<schema>) run(%columns: index, %input: view<32xi32>, %output: view<1xi32>) {
+  %matches = encoding.isa<#encoding.u4<affine=scale_only, payload_elements=32, payload_registers=4>> %value : encoding<schema>
+  %result = template.apply<@staged_choose>(%matches, %columns, %input) : (i1, index, view<32xi32>) -> (i32)
+  pipeline.strand<cooperative> workers([0], [1], [1]) {
+    view.store %result, %output[0] : i32, view<1xi32>
+  }
+}
+
+command.def public @staged_schema_match() launch(%input_storage: buffer, %output16_storage: buffer, %output32_storage: buffer) {
+  %value = encoding.define #encoding.u4<affine=scale_only, payload_elements=32, payload_registers=4> : encoding<schema>
+  %columns16 = index.constant 16 : index
+  %columns32 = index.constant 32 : index
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<32xi32>
+  %output16 = buffer.view %output16_storage[%base] : buffer -> view<1xi32>
+  %output32 = buffer.view %output32_storage[%base] : buffer -> view<1xi32>
+  kernel.launch @staged_schema[%value](%columns16, %input, %output16) : [encoding<schema>](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_schema[%value](%columns32, %input, %output32) : [encoding<schema>](index, view<32xi32>, view<1xi32>)
+  command.return
+}
+
+command.def public @staged_schema_other() launch(%input_storage: buffer, %output16_storage: buffer, %output32_storage: buffer) {
+  %value = encoding.define #encoding.u8<affine=scale_only, payload_elements=32, payload_registers=8> : encoding<schema>
+  %columns16 = index.constant 16 : index
+  %columns32 = index.constant 32 : index
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<32xi32>
+  %output16 = buffer.view %output16_storage[%base] : buffer -> view<1xi32>
+  %output32 = buffer.view %output32_storage[%base] : buffer -> view<1xi32>
+  kernel.launch @staged_schema[%value](%columns16, %input, %output16) : [encoding<schema>](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_schema[%value](%columns32, %input, %output32) : [encoding<schema>](index, view<32xi32>, view<1xi32>)
+  command.return
+}
+
+pipeline.def<kernel> @staged_storage(%value: encoding<storage>) run(%columns: index, %input: view<32xi32>, %output: view<1xi32>) {
+  %matches = encoding.isa<#encoding.storage<layout=#encoding.layout.dense, schema=#encoding.u4<affine=scale_only, payload_elements=32, payload_registers=4>>> %value : encoding<storage>
+  %result = template.apply<@staged_choose>(%matches, %columns, %input) : (i1, index, view<32xi32>) -> (i32)
+  pipeline.strand<cooperative> workers([0], [1], [1]) {
+    view.store %result, %output[0] : i32, view<1xi32>
+  }
+}
+
+command.def public @staged_storage_match() launch(%input_storage: buffer, %output16_storage: buffer, %output32_storage: buffer) {
+  %value = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.u4<affine=scale_only, payload_elements=32, payload_registers=4>> : encoding<storage>
+  %columns16 = index.constant 16 : index
+  %columns32 = index.constant 32 : index
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<32xi32>
+  %output16 = buffer.view %output16_storage[%base] : buffer -> view<1xi32>
+  %output32 = buffer.view %output32_storage[%base] : buffer -> view<1xi32>
+  kernel.launch @staged_storage[%value](%columns16, %input, %output16) : [encoding<storage>](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_storage[%value](%columns32, %input, %output32) : [encoding<storage>](index, view<32xi32>, view<1xi32>)
+  command.return
+}
+
+command.def public @staged_storage_other() launch(%input_storage: buffer, %output16_storage: buffer, %output32_storage: buffer) {
+  %value = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.u8<affine=scale_only, payload_elements=32, payload_registers=8>> : encoding<storage>
+  %columns16 = index.constant 16 : index
+  %columns32 = index.constant 32 : index
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<32xi32>
+  %output16 = buffer.view %output16_storage[%base] : buffer -> view<1xi32>
+  %output32 = buffer.view %output32_storage[%base] : buffer -> view<1xi32>
+  kernel.launch @staged_storage[%value](%columns16, %input, %output16) : [encoding<storage>](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_storage[%value](%columns32, %input, %output32) : [encoding<storage>](index, view<32xi32>, view<1xi32>)
+  command.return
+}
+
+pipeline.def<kernel> @staged_layout(%value: encoding<layout>) run(%columns: index, %input: view<32xi32>, %output: view<1xi32>) {
+  %matches = encoding.isa<#encoding.layout.strided<strides=[4, 1]>> %value : encoding<layout>
+  %result = template.apply<@staged_choose>(%matches, %columns, %input) : (i1, index, view<32xi32>) -> (i32)
+  pipeline.strand<cooperative> workers([0], [1], [1]) {
+    view.store %result, %output[0] : i32, view<1xi32>
+  }
+}
+
+command.def public @staged_layout_match() launch(%input_storage: buffer, %output16_storage: buffer, %output32_storage: buffer) {
+  %value = encoding.layout.strided [4, 1] : encoding<layout>
+  %columns16 = index.constant 16 : index
+  %columns32 = index.constant 32 : index
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<32xi32>
+  %output16 = buffer.view %output16_storage[%base] : buffer -> view<1xi32>
+  %output32 = buffer.view %output32_storage[%base] : buffer -> view<1xi32>
+  kernel.launch @staged_layout[%value](%columns16, %input, %output16) : [encoding<layout>](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_layout[%value](%columns32, %input, %output32) : [encoding<layout>](index, view<32xi32>, view<1xi32>)
+  command.return
+}
+
+command.def public @staged_layout_other() launch(%input_storage: buffer, %output16_storage: buffer, %output32_storage: buffer) {
+  %value = encoding.layout.strided [8, 1] : encoding<layout>
+  %columns16 = index.constant 16 : index
+  %columns32 = index.constant 32 : index
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<32xi32>
+  %output16 = buffer.view %output16_storage[%base] : buffer -> view<1xi32>
+  %output32 = buffer.view %output32_storage[%base] : buffer -> view<1xi32>
+  kernel.launch @staged_layout[%value](%columns16, %input, %output16) : [encoding<layout>](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_layout[%value](%columns32, %input, %output32) : [encoding<layout>](index, view<32xi32>, view<1xi32>)
+  command.return
+}
+
+pipeline.def<kernel> @staged_vector(%value: vector<4xi32>) run(%columns: index, %input: view<32xi32>, %output: view<1xi32>) {
+  %head = vector.extract %value[0] : vector<4xi32> -> i32
+  %matching_value = scalar.constant 4 : i32
+  %matches = scalar.cmpi eq, %head, %matching_value : i32
+  %result = template.apply<@staged_choose>(%matches, %columns, %input) : (i1, index, view<32xi32>) -> (i32)
+  pipeline.strand<cooperative> workers([0], [1], [1]) {
+    view.store %result, %output[0] : i32, view<1xi32>
+  }
+}
+
+command.def public @staged_vector_match() launch(%input_storage: buffer, %output16_storage: buffer, %output32_storage: buffer) {
+  %value = vector.constanti [4, 1, 2, 3] : vector<4xi32>
+  %columns16 = index.constant 16 : index
+  %columns32 = index.constant 32 : index
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<32xi32>
+  %output16 = buffer.view %output16_storage[%base] : buffer -> view<1xi32>
+  %output32 = buffer.view %output32_storage[%base] : buffer -> view<1xi32>
+  kernel.launch @staged_vector[%value](%columns16, %input, %output16) : [vector<4xi32>](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_vector[%value](%columns32, %input, %output32) : [vector<4xi32>](index, view<32xi32>, view<1xi32>)
+  command.return
+}
+
+command.def public @staged_vector_other() launch(%input_storage: buffer, %output16_storage: buffer, %output32_storage: buffer) {
+  %value = vector.constanti [8, 1, 2, 3] : vector<4xi32>
+  %columns16 = index.constant 16 : index
+  %columns32 = index.constant 32 : index
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<32xi32>
+  %output16 = buffer.view %output16_storage[%base] : buffer -> view<1xi32>
+  %output32 = buffer.view %output32_storage[%base] : buffer -> view<1xi32>
+  kernel.launch @staged_vector[%value](%columns16, %input, %output16) : [vector<4xi32>](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_vector[%value](%columns32, %input, %output32) : [vector<4xi32>](index, view<32xi32>, view<1xi32>)
+  command.return
+}
+
+pipeline.def<kernel> @staged_buffer(%value: buffer) run(%columns: index, %input: view<32xi32>, %output: view<1xi32>) {
+  %length = buffer.length %value
+  %expected = index.constant 32 : offset
+  %matches = index.cmp eq, %length, %expected : offset
+  %result = template.apply<@staged_choose>(%matches, %columns, %input) : (i1, index, view<32xi32>) -> (i32)
+  pipeline.strand<cooperative> workers([0], [1], [1]) {
+    view.store %result, %output[0] : i32, view<1xi32>
+  }
+}
+
+command.def public @staged_buffer_match() launch(%input_storage: buffer, %output16_storage: buffer, %output32_storage: buffer) {
+  %value = buffer.constant align(16) utf8("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") : buffer
+  %columns16 = index.constant 16 : index
+  %columns32 = index.constant 32 : index
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<32xi32>
+  %output16 = buffer.view %output16_storage[%base] : buffer -> view<1xi32>
+  %output32 = buffer.view %output32_storage[%base] : buffer -> view<1xi32>
+  kernel.launch @staged_buffer[%value](%columns16, %input, %output16) : [buffer](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_buffer[%value](%columns32, %input, %output32) : [buffer](index, view<32xi32>, view<1xi32>)
+  command.return
+}
+
+command.def public @staged_buffer_other() launch(%input_storage: buffer, %output16_storage: buffer, %output32_storage: buffer) {
+  %value = buffer.constant align(16) utf8("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb") : buffer
+  %columns16 = index.constant 16 : index
+  %columns32 = index.constant 32 : index
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<32xi32>
+  %output16 = buffer.view %output16_storage[%base] : buffer -> view<1xi32>
+  %output32 = buffer.view %output32_storage[%base] : buffer -> view<1xi32>
+  kernel.launch @staged_buffer[%value](%columns16, %input, %output16) : [buffer](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_buffer[%value](%columns32, %input, %output32) : [buffer](index, view<32xi32>, view<1xi32>)
+  command.return
+}
+
+config.def @staged_value = 4 : index
+
+command.def public @staged_scalar_configured() launch(%input_storage: buffer, %output16_storage: buffer, %output32_storage: buffer) {
+  %value = config.get @staged_value : index
+  %columns16 = index.constant 16 : index
+  %columns32 = index.constant 32 : index
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<32xi32>
+  %output16 = buffer.view %output16_storage[%base] : buffer -> view<1xi32>
+  %output32 = buffer.view %output32_storage[%base] : buffer -> view<1xi32>
+  kernel.launch @staged_scalar[%value](%columns16, %input, %output16) : [index](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_scalar[%value](%columns32, %input, %output32) : [index](index, view<32xi32>, view<1xi32>)
+  command.return
+}

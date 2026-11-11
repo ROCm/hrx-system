@@ -34,6 +34,37 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "kernel_specialization_key",
+    srcs = ["kernel_specialization_key.c"],
+    hdrs = ["kernel_specialization_key.h"],
+    deps = [
+        ":kernel_specialization",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:ordinal_map",
+        "//loom/src/loom/util:segmented_storage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "kernel_specialization_key_test",
+    srcs = ["kernel_specialization_key_test.cc"],
+    deps = [
+        ":kernel_specialization_key",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/encoding",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/vector",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_test(
     name = "kernel_specialization_test",
     srcs = ["kernel_specialization_test.cc"],
@@ -235,8 +266,10 @@ loom_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/ops/target",
+        "//loom/src/loom/rewrite:module_projection",
         "//loom/src/loom/transforms/symbol:template_decision_model",
         "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:segmented_storage",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",

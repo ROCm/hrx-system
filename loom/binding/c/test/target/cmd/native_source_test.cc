@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <array>
+#include <barrier>
 #include <condition_variable>
 #include <cstring>
 #include <mutex>
@@ -60,11 +62,43 @@ class CompilerAllocator {
     failure_countdown_ = count;
   }
 
+  // Pause retirement of an existing retained allocation, excluding construction
+  // scratch allocated after this snapshot. Other compiler calls remain live.
+  void PauseRetirement() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    paused_allocations_ = live_;
+    retirement_waiting_ = false;
+    retirement_released_ = false;
+  }
+
+  void WaitForRetirement() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    condition_.wait(lock, [&] { return retirement_waiting_; });
+  }
+
+  void ResumeRetirement() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    retirement_released_ = true;
+    condition_.notify_all();
+  }
+
  private:
   static loomc_status_t Control(void* self, loomc_allocator_command_t command,
                                 const void* params, void** inout_ptr) {
     auto* tracker = static_cast<CompilerAllocator*>(self);
     std::unique_lock<std::mutex> lock(tracker->mutex_);
+    if (command == LOOMC_ALLOCATOR_COMMAND_TRIM) {
+      const auto backing = loomc_allocator_system();
+      return backing.ctl(backing.self, command, params, inout_ptr);
+    }
+    if (command == LOOMC_ALLOCATOR_COMMAND_FREE &&
+        tracker->paused_allocations_.contains(*inout_ptr)) {
+      tracker->paused_allocations_.clear();
+      tracker->retirement_waiting_ = true;
+      tracker->condition_.notify_all();
+      tracker->condition_.wait(lock,
+                               [&] { return tracker->retirement_released_; });
+    }
     if (command != LOOMC_ALLOCATOR_COMMAND_FREE &&
         tracker->failure_countdown_ != LOOMC_HOST_SIZE_MAX) {
       if (tracker->failure_countdown_ == 0) {
@@ -119,6 +153,12 @@ class CompilerAllocator {
   size_t arrivals_remaining_ = 0;
   // Allocations preceding a single injected failure, or MAX when disabled.
   size_t failure_countdown_ = LOOMC_HOST_SIZE_MAX;
+  // Allocations live when retirement was armed; later scratch is excluded.
+  std::unordered_map<void*, size_t> paused_allocations_;
+  // True when an actual retained allocation has entered destruction.
+  bool retirement_waiting_ = false;
+  // Allows the paused deallocation to complete after competing publication.
+  bool retirement_released_ = false;
 };
 
 struct Output {
@@ -597,6 +637,311 @@ TEST_P(NativeSourceTest, AllocationFailuresReleasePartialPreparations) {
                   RequestBytes(baseline, ordinal));
       }
     }
+  }
+}
+
+struct StagedRoots {
+  // Staged tuple whose provider requires two structural classes.
+  const char* matching;
+  // Different tuple choosing one structurally generic class.
+  const char* other;
+};
+
+constexpr StagedRoots kStagedRoots[] = {
+    {"staged_scalar_match", "staged_scalar_other"},
+    {"staged_schema_match", "staged_schema_other"},
+    {"staged_storage_match", "staged_storage_other"},
+    {"staged_layout_match", "staged_layout_other"},
+    {"staged_vector_match", "staged_vector_other"},
+    {"staged_buffer_match", "staged_buffer_other"},
+    {"staged_collision_match", "staged_collision_other"},
+};
+
+TEST_P(NativeSourceTest, StagedPlansPreserveOutputAndIndependentOwnership) {
+  for (const auto& roots : kStagedRoots) {
+    SCOPED_TRACE(roots.matching);
+    std::array<std::vector<std::string>, 2> expected;
+    for (size_t byte_limit : {size_t{0}, size_t{1}, size_t{64 * 1024 * 1024}}) {
+      ResetCompiler(byte_limit);
+      const size_t owner_bytes = allocator_.live_bytes();
+      for (unsigned round = 0; round < 2; ++round) {
+        const size_t allocations = allocator_.allocations();
+        for (unsigned variant = 0; variant < 2; ++variant) {
+          Output output;
+          LOOMC_ASSERT_OK(Build("{}", &output, 0, {}, nullptr,
+                                variant ? roots.other : roots.matching));
+          ExpectSucceeded(output, variant ? 1 : 2);
+          std::vector<std::string> bytes;
+          for (size_t i = 0; i < output.requests.size(); ++i) {
+            bytes.push_back(RequestBytes(output, i));
+          }
+          if (byte_limit == 0 && round == 0) {
+            expected[variant] = bytes;
+          } else {
+            EXPECT_EQ(bytes, expected[variant]);
+          }
+        }
+        if (byte_limit <= 1) {
+          EXPECT_EQ(allocator_.live_bytes(), owner_bytes);
+        } else if (round != 0) {
+          EXPECT_EQ(allocator_.allocations(), allocations);
+        }
+      }
+      Output surviving;
+      LOOMC_ASSERT_OK(Build("{}", &surviving, 0, {}, nullptr, roots.matching));
+      compiler_.reset();
+      EXPECT_EQ(allocator_.live_bytes(), 0u);
+      ASSERT_EQ(surviving.requests.size(), expected[0].size());
+      for (size_t i = 0; i < surviving.requests.size(); ++i) {
+        EXPECT_EQ(RequestBytes(surviving, i), expected[0][i]);
+      }
+    }
+  }
+}
+
+TEST_P(NativeSourceTest, RequiredStagedProvidersCloseBeforePublication) {
+  for (size_t limit : {size_t{0}, size_t{64 * 1024 * 1024}}) {
+    ResetCompiler(limit);
+    Output first;
+    LOOMC_ASSERT_OK(
+        Build("{}", &first, 0, {}, nullptr, "staged_required_interleaved"));
+    ExpectSucceeded(first, 4);
+    Output rejected;
+    EXPECT_EQ(loomc_status_consume_code(Build("{}", &rejected, 0, {}, nullptr,
+                                              "staged_required_invalid")),
+              LOOMC_STATUS_NOT_FOUND);
+    EXPECT_EQ(rejected.product, nullptr);
+    EXPECT_TRUE(rejected.requests.empty());
+    Output again;
+    LOOMC_ASSERT_OK(
+        Build("{}", &again, 0, {}, nullptr, "staged_required_interleaved"));
+    ExpectSucceeded(again, 4);
+    compiler_.reset();
+    EXPECT_EQ(allocator_.live_bytes(), 0u);
+    for (size_t i = 0; i < first.requests.size(); ++i) {
+      EXPECT_EQ(RequestBytes(first, i), RequestBytes(again, i));
+    }
+  }
+}
+
+TEST_P(NativeSourceTest, PlanLeasesSurviveCallbacksAndDetachedDestruction) {
+  // Exercise shared sources, nested payloads, a real hash collision, and two
+  // independent source owners competing for the same byte budget.
+  const StagedRoots cases[] = {
+      kStagedRoots[0],
+      kStagedRoots[2],
+      kStagedRoots[6],
+      {"staged_scalar_match", "staged_layout_other"},
+  };
+  for (const auto& roots : cases) {
+    SCOPED_TRACE(roots.matching);
+    size_t one_entry = 0;
+    std::array<std::vector<std::string>, 2> expected;
+    for (unsigned variant = 0; variant < 2; ++variant) {
+      ResetCompiler(64 * 1024 * 1024);
+      const size_t owner_bytes = allocator_.live_bytes();
+      Output output;
+      LOOMC_ASSERT_OK(Build("{}", &output, 0, {}, nullptr,
+                            variant ? roots.other : roots.matching));
+      ExpectSucceeded(output, variant ? 1 : 2);
+      one_entry = std::max(one_entry, allocator_.live_bytes() - owner_bytes);
+      for (size_t i = 0; i < output.requests.size(); ++i) {
+        expected[variant].push_back(RequestBytes(output, i));
+      }
+    }
+    ResetCompiler(one_entry);
+    const size_t owner_bytes = allocator_.live_bytes();
+    Output first;
+    LOOMC_ASSERT_OK(Build("{}", &first, 0, {}, nullptr, roots.matching));
+    std::barrier<> gate(2);
+    struct HeldCallback {
+      // Explicit callback entry/release rendezvous with the competing caller.
+      std::barrier<>* gate;
+      // Transferred requests kept past the callback and source lifetime.
+      Output* output;
+    };
+    Output held_output;
+    HeldCallback held{&gate, &held_output};
+    const loomc_request_sink_t sink = {
+        .publish = [](void* user_data,
+                      loomc_request_t* request) -> loomc_status_t {
+          auto* held = static_cast<HeldCallback*>(user_data);
+          if (held->output->requests.empty()) {
+            held->gate->arrive_and_wait();
+            held->gate->arrive_and_wait();
+          }
+          return Capture(held->output, request);
+        },
+        .user_data = &held,
+    };
+    auto workspace = CreateWorkspace();
+    std::thread worker([&] {
+      LOOMC_EXPECT_OK(
+          Build("{}", &held_output, 0, sink, workspace.get(), roots.matching));
+    });
+    gate.arrive_and_wait();
+    Output competing;
+    LOOMC_EXPECT_OK(Build("{}", &competing, 0, {}, nullptr, roots.other));
+    ExpectSucceeded(competing);
+    const auto calls = allocator_.allocations();
+    Output hit;
+    LOOMC_EXPECT_OK(Build("{}", &hit, 0, {}, nullptr, roots.matching));
+    EXPECT_EQ(allocator_.allocations(), calls);
+    gate.arrive_and_wait();
+    worker.join();
+    ExpectSucceeded(held_output, 2);
+    EXPECT_LE(allocator_.live_bytes(), owner_bytes + one_entry);
+
+    allocator_.PauseRetirement();
+    std::thread retiring([&] {
+      LOOMC_EXPECT_OK(
+          Build("{}", &competing, 0, {}, workspace.get(), roots.other));
+    });
+    allocator_.WaitForRetirement();
+    LOOMC_EXPECT_OK(Build("{}", &hit, 0, {}, nullptr, roots.matching));
+    ExpectSucceeded(hit, 2);
+    allocator_.ResumeRetirement();
+    retiring.join();
+    ExpectSucceeded(competing);
+    EXPECT_LE(allocator_.live_bytes(), owner_bytes + one_entry);
+    compiler_.reset();
+    EXPECT_EQ(allocator_.live_bytes(), 0u);
+    for (size_t i = 0; i < expected[0].size(); ++i) {
+      EXPECT_EQ(RequestBytes(held_output, i), expected[0][i]);
+      EXPECT_EQ(RequestBytes(hit, i), expected[0][i]);
+    }
+    EXPECT_EQ(RequestBytes(competing), expected[1][0]);
+  }
+}
+
+TEST_P(NativeSourceTest, ConcurrentPlanBuildersRetainOneWinner) {
+  for (const auto& roots : kStagedRoots) {
+    SCOPED_TRACE(roots.matching);
+    ResetCompiler(64 * 1024 * 1024);
+    Output matching;
+    LOOMC_ASSERT_OK(Build("{}", &matching, 0, {}, nullptr, roots.matching));
+    Output baseline;
+    LOOMC_ASSERT_OK(Build("{}", &baseline, 0, {}, nullptr, roots.other));
+    const size_t expected_bytes = allocator_.live_bytes();
+    ResetCompiler(64 * 1024 * 1024);
+    LOOMC_ASSERT_OK(Build("{}", &matching, 0, {}, nullptr, roots.matching));
+    allocator_.JoinNextAllocations(4);
+    std::array<Output, 4> results;
+    std::vector<std::thread> workers;
+    for (auto& result : results) {
+      workers.emplace_back([&, output = &result] {
+        auto workspace = CreateWorkspace();
+        LOOMC_EXPECT_OK(
+            Build("{}", output, 0, {}, workspace.get(), roots.other));
+        for (unsigned i = 0; i < 8; ++i) {
+          Output warm;
+          const bool match = i % 2 == 0;
+          LOOMC_EXPECT_OK(Build("{}", &warm, 0, {}, workspace.get(),
+                                match ? roots.matching : roots.other));
+          ExpectSucceeded(warm, match ? 2 : 1);
+          EXPECT_EQ(RequestBytes(warm),
+                    RequestBytes(match ? matching : baseline));
+        }
+      });
+    }
+    for (auto& worker : workers) {
+      worker.join();
+    }
+    EXPECT_EQ(allocator_.live_bytes(), expected_bytes);
+    for (const auto& output : results) {
+      ExpectSucceeded(output);
+      EXPECT_EQ(RequestBytes(output), RequestBytes(baseline));
+    }
+  }
+}
+
+TEST_P(NativeSourceTest, FailedPlanConstructionAndSinkLeaveReusableSource) {
+  for (const auto& roots :
+       {kStagedRoots[0], kStagedRoots[2], kStagedRoots[6]}) {
+    SCOPED_TRACE(roots.matching);
+    ResetCompiler(64 * 1024 * 1024);
+    Output matching;
+    LOOMC_ASSERT_OK(Build("{}", &matching, 0, {}, nullptr, roots.matching));
+    const size_t initial_allocations = allocator_.allocations();
+    Output baseline;
+    LOOMC_ASSERT_OK(Build("{}", &baseline, 0, {}, nullptr, roots.other));
+    const size_t allocations = allocator_.allocations() - initial_allocations;
+    ASSERT_GT(allocations, 0u);
+    for (size_t failure = 0; failure < allocations; ++failure) {
+      SCOPED_TRACE(failure);
+      ResetCompiler(64 * 1024 * 1024);
+      LOOMC_ASSERT_OK(Build("{}", &matching, 0, {}, nullptr, roots.matching));
+      const size_t retained_bytes = allocator_.live_bytes();
+      allocator_.FailAfter(failure);
+      Output failed;
+      EXPECT_EQ(loomc_status_consume_code(
+                    Build("{}", &failed, 0, {}, nullptr, roots.other)),
+                LOOMC_STATUS_RESOURCE_EXHAUSTED);
+      EXPECT_EQ(failed.product, nullptr);
+      EXPECT_TRUE(failed.requests.empty());
+      EXPECT_EQ(allocator_.live_bytes(), retained_bytes);
+      Output retry;
+      LOOMC_ASSERT_OK(Build("{}", &retry, 0, {}, nullptr, roots.other));
+      ExpectSucceeded(retry);
+      EXPECT_EQ(RequestBytes(retry), RequestBytes(baseline));
+    }
+    Output failed;
+    const loomc_request_sink_t sink = {
+        .publish = [](void*, loomc_request_t* request) -> loomc_status_t {
+          loomc_request_release(request);
+          return loomc_make_status(LOOMC_STATUS_ABORTED,
+                                   "publication rejected");
+        },
+    };
+    EXPECT_EQ(loomc_status_consume_code(
+                  Build("{}", &failed, 0, sink, nullptr, roots.matching)),
+              LOOMC_STATUS_ABORTED);
+    EXPECT_EQ(failed.product, nullptr);
+    const size_t calls = allocator_.allocations();
+    Output retry;
+    LOOMC_ASSERT_OK(Build("{}", &retry, 0, {}, nullptr, roots.matching));
+    ExpectSucceeded(retry, 2);
+    EXPECT_EQ(allocator_.allocations(), calls);
+    EXPECT_EQ(RequestBytes(retry), RequestBytes(matching));
+  }
+}
+
+TEST_P(NativeSourceTest, PlanIndexRemainsExactAcrossRepeatedBoundedEviction) {
+  constexpr size_t kValueCount = 64;
+  std::array<std::string, kValueCount> expected;
+  const size_t owner_bytes = allocator_.live_bytes();
+  size_t eight_plans = 0;
+  for (size_t value = 0; value < kValueCount; ++value) {
+    Output output;
+    const auto json = "{\"staged_value\":" + std::to_string(value) + "}";
+    LOOMC_ASSERT_OK(Build(json.c_str(), &output, 0, {}, nullptr,
+                          "staged_scalar_configured"));
+    ExpectSucceeded(output, value == 4 ? 2 : 1);
+    expected[value] = RequestBytes(output);
+    if (value == 7) {
+      eight_plans = allocator_.live_bytes() - owner_bytes;
+    }
+  }
+  const size_t calls = allocator_.allocations();
+  for (size_t value = 0; value < kValueCount; ++value) {
+    Output output;
+    const auto json = "{\"staged_value\":" + std::to_string(value) + "}";
+    LOOMC_ASSERT_OK(Build(json.c_str(), &output, 0, {}, nullptr,
+                          "staged_scalar_configured"));
+    EXPECT_EQ(RequestBytes(output), expected[value]);
+  }
+  EXPECT_EQ(allocator_.allocations(), calls);
+  ResetCompiler(eight_plans);
+  const size_t fixed_bytes = allocator_.live_bytes();
+  for (size_t i = 0; i < 2 * kValueCount; ++i) {
+    // Visit every key in a different order than its hash-bit insertion path.
+    const size_t value = (i * 37) % kValueCount;
+    Output output;
+    const auto json = "{\"staged_value\":" + std::to_string(value) + "}";
+    LOOMC_ASSERT_OK(Build(json.c_str(), &output, 0, {}, nullptr,
+                          "staged_scalar_configured"));
+    EXPECT_EQ(RequestBytes(output), expected[value]);
+    EXPECT_LE(allocator_.live_bytes(), fixed_bytes + eight_plans);
   }
 }
 

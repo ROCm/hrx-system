@@ -19,8 +19,10 @@
 #include "loom/ops/op_defs.h"
 #include "loom/ops/target/facts.h"
 #include "loom/ops/type_registry.h"
+#include "loom/rewrite/module_projection.h"
 #include "loom/transforms/symbol/template_decision_model.h"
 #include "loom/util/fact_table.h"
+#include "loom/util/segmented_storage.h"
 
 struct loom_kernel_request_source_t {
   // Callback-live boundary classifier over the materialized source module.
@@ -29,6 +31,9 @@ struct loom_kernel_request_source_t {
   // Invocation-local classes and accepted decisions, borrowed during
   // publication.
   const loom_kernel_class_collection_t* collection;
+
+  // Publication-wide ordinal of this tuple group's first class.
+  uint32_t class_base;
 };
 
 struct loom_kernel_request_producer_t {
@@ -60,6 +65,10 @@ struct loom_kernel_request_preparation_t {
 
   // Read-only boundary classifier shared by concurrent class collections.
   loom_kernel_class_classifier_t classifier;
+
+  // Complete provider models retained before staged inputs establish
+  // applicability.
+  loom_template_decision_model_catalog_t models;
 
   // Unique names of config symbols selected by the successful source closure.
   iree_string_view_list_t config_keys;
@@ -131,6 +140,7 @@ static iree_status_t loom_kernel_request_source_prepare(
     iree_host_size_t source_symbol_ordinal,
     iree_arena_allocator_t* scratch_arena,
     loom_kernel_class_classifier_t* out_classifier,
+    loom_template_decision_model_catalog_t* out_models,
     loom_link_index_materialization_t* out_materialization) {
   *out_classifier = (loom_kernel_class_classifier_t){0};
   *out_materialization = (loom_link_index_materialization_t){0};
@@ -243,6 +253,7 @@ static iree_status_t loom_kernel_request_source_prepare(
   }
 
   if (iree_status_is_ok(status)) {
+    *out_models = decision_models;
     *out_materialization = materialization;
     materialization = (loom_link_index_materialization_t){0};
   }
@@ -256,16 +267,273 @@ iree_status_t loom_kernel_request_materialize(
     iree_allocator_t allocator, loom_kernel_class_product_t* out_product) {
   IREE_ASSERT_ARGUMENT(request);
   IREE_ASSERT_ARGUMENT(request->source);
-  IREE_ASSERT_LT(request->class_ordinal,
+  IREE_ASSERT_LT(request->class_ordinal - request->source->class_base,
                  request->source->collection->class_count);
   IREE_ASSERT_ARGUMENT(block_pool);
   IREE_ASSERT_ARGUMENT(out_product);
   return loom_kernel_class_materialize(
       request->source->classifier, request->source->collection,
-      request->class_ordinal, block_pool, allocator, out_product);
+      request->class_ordinal - request->source->class_base, block_pool,
+      allocator, out_product);
 }
 
-static iree_status_t loom_kernel_request_source_publish(
+// Invocation-local translation of immutable models through an exact module
+// clone. Compiled predicates and ranking are shared; no provider is
+// re-discovered.
+static iree_status_t loom_kernel_request_project_models(
+    const loom_template_decision_model_catalog_t* source,
+    const loom_ir_module_projection_t* projection,
+    iree_arena_allocator_t* arena,
+    loom_template_decision_model_catalog_t* target) {
+  *target = *source;
+  target->module = projection->target_module;
+  loom_template_decision_model_t* models = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, source->model_count, sizeof(*models), (void**)&models));
+  target->models = models;
+  for (iree_host_size_t i = 0; i < source->model_count; ++i) {
+    const loom_template_decision_model_t* original = &source->models[i];
+    loom_template_decision_model_t* model = &models[i];
+    *model = *original;
+    model->module = target->module;
+    model->family = loom_ir_module_projection_target_symbol(
+        projection, original->family.symbol_id);
+    loom_template_provider_summary_t* providers = NULL;
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(arena, original->providers.count,
+                                  sizeof(*providers), (void**)&providers));
+    model->providers.providers = providers;
+    for (iree_host_size_t j = 0; j < original->providers.count; ++j) {
+      const loom_template_provider_summary_t* provider =
+          &original->providers.providers[j];
+      providers[j] = *provider;
+      providers[j].module = target->module;
+      providers[j].family = model->family;
+      if (loom_symbol_ref_is_valid(provider->symbol) &&
+          provider->symbol.module_id == 0) {
+        providers[j].symbol = loom_ir_module_projection_target_symbol(
+            projection, provider->symbol.symbol_id);
+      }
+      if (loom_symbol_ref_is_valid(provider->target_symbol) &&
+          provider->target_symbol.module_id == 0) {
+        providers[j].target_symbol = loom_ir_module_projection_target_symbol(
+            projection, provider->target_symbol.symbol_id);
+      }
+    }
+    if (original->program.feature_count) {
+      loom_template_decision_feature_t* features = NULL;
+      IREE_RETURN_IF_ERROR(
+          iree_arena_allocate_array(arena, original->program.feature_count,
+                                    sizeof(*features), (void**)&features));
+      model->features = features;
+      for (uint32_t j = 0; j < original->program.feature_count; ++j) {
+        features[j] = original->features[j];
+        if (features[j].kind ==
+                LOOM_TEMPLATE_DECISION_FEATURE_TARGET_IDENTITY &&
+            features[j].value.target_identity.module == source->module) {
+          features[j].value.target_identity.module = target->module;
+          const loom_symbol_ref_t symbol =
+              features[j].value.target_identity.target_symbol;
+          if (loom_symbol_ref_is_valid(symbol) && symbol.module_id == 0) {
+            features[j].value.target_identity.target_symbol =
+                loom_ir_module_projection_target_symbol(projection,
+                                                        symbol.symbol_id);
+          }
+        }
+      }
+    }
+  }
+  return iree_ok_status();
+}
+
+// Clone-produced correspondence returns bound projections to the shared source.
+typedef struct {
+  // Source identities in pooled segments indexed by dense cloned value ID.
+  // Erased source IDs do not reserve holes in this clone-owned domain.
+  loom_segmented_storage_t source_values;
+  // Invocation-owned backing for observed correspondence only.
+  iree_arena_allocator_t* arena;
+} loom_kernel_request_correspondence_t;
+
+enum { LOOM_KERNEL_REQUEST_CORRESPONDENCE_SEGMENT_COUNT = 256 };
+
+static iree_status_t loom_kernel_request_record_value(
+    loom_kernel_request_correspondence_t* correspondence,
+    loom_value_id_t source, loom_value_id_t target) {
+  const uint32_t segment_index =
+      target / LOOM_KERNEL_REQUEST_CORRESPONDENCE_SEGMENT_COUNT;
+  while (correspondence->source_values.segment_count <= segment_index) {
+    void* segment = NULL;
+    IREE_RETURN_IF_ERROR(loom_segmented_storage_append(
+        &correspondence->source_values, correspondence->arena, &segment));
+    memset(segment, 0xFF, correspondence->source_values.segment_size);
+  }
+  loom_value_id_t* segment = loom_segmented_storage_segment(
+      &correspondence->source_values, segment_index);
+  segment[target % LOOM_KERNEL_REQUEST_CORRESPONDENCE_SEGMENT_COUNT] = source;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_kernel_request_record_values(void* user_data,
+                                                       const loom_op_t* source,
+                                                       loom_op_t* target) {
+  loom_kernel_request_correspondence_t* correspondence = user_data;
+  for (uint16_t i = 0; i < source->region_count; ++i) {
+    const loom_region_t* source_region = loom_op_regions(source)[i];
+    const loom_region_t* target_region = loom_op_regions(target)[i];
+    for (uint16_t j = 0; j < source_region->block_count; ++j) {
+      const loom_block_t* source_block =
+          loom_region_const_block(source_region, j);
+      const loom_block_t* target_block =
+          loom_region_const_block(target_region, j);
+      for (uint16_t k = 0; k < source_block->arg_count; ++k) {
+        IREE_RETURN_IF_ERROR(loom_kernel_request_record_value(
+            correspondence, source_block->arg_ids[k],
+            target_block->arg_ids[k]));
+      }
+    }
+  }
+  for (uint16_t i = 0; i < source->result_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_kernel_request_record_value(
+        correspondence, loom_op_const_results(source)[i],
+        loom_op_const_results(target)[i]));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_kernel_request_bind_classifier(
+    const loom_kernel_class_classifier_t* common,
+    const loom_template_decision_model_catalog_t* common_models,
+    const loom_module_t* site_module,
+    const loom_kernel_specialization_value_t* tuple,
+    iree_arena_allocator_t* arena, iree_arena_allocator_t* temporary,
+    loom_module_t** out_bound, loom_kernel_class_classifier_t* out_classifier) {
+  const uint16_t prefix_count = common->specialization_count;
+  loom_kernel_request_correspondence_t correspondence = {.arena = temporary};
+  loom_segmented_storage_initialize(
+      LOOM_KERNEL_REQUEST_CORRESPONDENCE_SEGMENT_COUNT *
+          sizeof(loom_value_id_t),
+      iree_alignof(loom_value_id_t), &correspondence.source_values);
+  loom_ir_remap_op_projection_t* applications = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(temporary, common->decision_count,
+                                sizeof(*applications), (void**)&applications));
+  for (uint32_t i = 0; i < common->decision_count; ++i) {
+    applications[i] = (loom_ir_remap_op_projection_t){
+        .source_op = common->decisions[i].application};
+  }
+  const loom_ir_module_clone_options_t clone_options = {
+      .clone_observer = {.fn = loom_kernel_request_record_values,
+                         .user_data = &correspondence},
+      .operations = {.entries = applications, .count = common->decision_count},
+  };
+  loom_ir_module_projection_t projection = {0};
+  IREE_RETURN_IF_ERROR(loom_ir_module_clone(
+      common->module, &clone_options, temporary->block_pool, temporary,
+      temporary->block_pool->block_allocator, &projection, out_bound));
+  loom_module_t* bound = *out_bound;
+  const iree_host_size_t cloned_value_count = bound->values.count;
+  const loom_func_like_t kernel = loom_func_like_cast(
+      bound, bound->symbols.entries[common->kernel_symbol_id].defining_op);
+  loom_rewriter_t rewriter = {0};
+  loom_rewriter_initialize(&rewriter, bound, temporary);
+  iree_status_t status = loom_kernel_specializations_apply(
+      site_module, tuple, prefix_count, kernel, &rewriter, temporary);
+  loom_rewriter_deinitialize(&rewriter);
+  IREE_RETURN_IF_ERROR(status);
+  loom_symbol_reference_table_t references = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_symbol_reference_table_build(bound, temporary, &references));
+  loom_symbol_fact_table_t symbol_facts = {0};
+  loom_symbol_fact_table_initialize(&symbol_facts, temporary);
+  loom_template_decision_model_catalog_t models = {0};
+  IREE_RETURN_IF_ERROR(loom_kernel_request_project_models(
+      common_models, &projection, temporary, &models));
+  loom_template_applicability_target_t target = {0};
+  IREE_RETURN_IF_ERROR(loom_kernel_request_resolve_target(
+      bound, kernel, &symbol_facts, &target));
+  loom_value_fact_table_t facts = {0};
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_initialize(&facts, temporary, 0));
+  loom_type_registry_configure_fact_context(&facts.context);
+  facts.context.target_facts = target.facts;
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_compute(&facts, bound, kernel));
+  loom_symbolic_expr_context_t expressions = {0};
+  loom_symbolic_expr_context_initialize(bound, NULL, &facts, temporary,
+                                        &expressions);
+  IREE_RETURN_IF_ERROR(loom_kernel_class_classifier_build(
+      bound, common->kernel_symbol_id, &references, &models, &facts,
+      &expressions, &target, arena, out_classifier));
+  IREE_ASSERT(out_classifier->decision_count == common->decision_count);
+  for (uint32_t i = 0; i < common->decision_count; ++i) {
+    loom_kernel_class_decision_t* decision =
+        (loom_kernel_class_decision_t*)&out_classifier->decisions[i];
+    IREE_ASSERT(decision->application == applications[i].target_op);
+    IREE_ASSERT(decision->model->providers.count ==
+                common->decisions[i].model->providers.count);
+    decision->application = common->decisions[i].application;
+    decision->model = common->decisions[i].model;
+  }
+  for (uint32_t i = 0; i < out_classifier->projection_count; ++i) {
+    loom_kernel_class_projection_t* value =
+        (loom_kernel_class_projection_t*)&out_classifier->projections[i];
+    loom_value_id_t original = LOOM_VALUE_ID_INVALID;
+    if (value->source_value_id < cloned_value_count) {
+      const loom_value_id_t* segment = loom_segmented_storage_const_segment(
+          &correspondence.source_values,
+          value->source_value_id /
+              LOOM_KERNEL_REQUEST_CORRESPONDENCE_SEGMENT_COUNT);
+      original = segment[value->source_value_id %
+                         LOOM_KERNEL_REQUEST_CORRESPONDENCE_SEGMENT_COUNT];
+    }
+    // Binding creates constants and identity views, never a new affine source.
+    // Every materialized affine projection must refer back to a cloned value.
+    IREE_ASSERT(value->kind != LOOM_KERNEL_CLASS_PROJECTION_AFFINE ||
+                original != LOOM_VALUE_ID_INVALID);
+    value->source_value_id = original;
+    for (uint16_t j = 0; j < value->term_count; ++j) {
+      ((loom_kernel_class_projection_term_t*)value->terms)[j]
+          .argument_ordinal += prefix_count;
+    }
+  }
+  loom_value_facts_t* argument_facts = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, common->kernel_argument_count, sizeof(*argument_facts),
+      (void**)&argument_facts));
+  memcpy(argument_facts, common->argument_facts,
+         prefix_count * sizeof(*argument_facts));
+  memcpy(argument_facts + prefix_count, out_classifier->argument_facts,
+         out_classifier->kernel_argument_count * sizeof(*argument_facts));
+  out_classifier->argument_facts = argument_facts;
+  out_classifier->module = common->module;
+  out_classifier->kernel_symbol_id = common->kernel_symbol_id;
+  out_classifier->kernel_argument_count = common->kernel_argument_count;
+  out_classifier->specialization_count = prefix_count;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_kernel_request_bind(
+    const loom_kernel_class_classifier_t* common,
+    const loom_template_decision_model_catalog_t* common_models,
+    const loom_module_t* site_module,
+    const loom_kernel_specialization_value_t* tuple,
+    iree_arena_allocator_t* arena, iree_host_size_t construction_block_size,
+    loom_kernel_class_classifier_t* out_classifier) {
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(construction_block_size,
+                                   arena->block_pool->block_allocator, &pool);
+  iree_arena_allocator_t temporary;
+  iree_arena_initialize(&pool, &temporary);
+  loom_module_t* bound = NULL;
+  iree_status_t status = loom_kernel_request_bind_classifier(
+      common, common_models, site_module, tuple, arena, &temporary, &bound,
+      out_classifier);
+  loom_module_free(bound);
+  iree_arena_deinitialize(&temporary);
+  iree_arena_block_pool_deinitialize(&pool);
+  return status;
+}
+
+static iree_status_t loom_kernel_request_source_publish_direct(
     const loom_kernel_class_classifier_t* classifier,
     iree_host_size_t source_symbol_ordinal, const loom_module_t* site_module,
     const loom_kernel_class_site_t* sites, iree_host_size_t site_count,
@@ -308,6 +576,149 @@ static iree_status_t loom_kernel_request_source_publish(
   return status;
 }
 
+static iree_status_t loom_kernel_request_source_publish(
+    const loom_kernel_class_classifier_t* classifier,
+    const loom_template_decision_model_catalog_t* models,
+    iree_host_size_t source_symbol_ordinal, const loom_module_t* site_module,
+    const loom_kernel_class_site_t* sites, iree_host_size_t site_count,
+    const loom_kernel_class_collection_options_t* options,
+    loom_kernel_request_plan_provider_t plans, loom_kernel_request_sink_t sink,
+    iree_arena_allocator_t* arena,
+    const loom_decision_class_ordinal_t** out_site_classes) {
+  // Without decisions or structural requirements, binding cannot change class
+  // applicability. The ordinary collector already partitions exact tuples.
+  if (!classifier->specialization_count ||
+      (!classifier->decision_count && !classifier->has_shape_requirements)) {
+    return loom_kernel_request_source_publish_direct(
+        classifier, source_symbol_ordinal, site_module, sites, site_count,
+        options, sink, arena, out_site_classes);
+  }
+  *out_site_classes = NULL;
+  loom_decision_class_partition_t partition = {0};
+  IREE_RETURN_IF_ERROR(loom_decision_class_partition_initialize(
+      site_count, options->class_limit, 1, arena, &partition));
+  const loom_kernel_specialization_value_t** tuples = NULL;
+  IREE_RETURN_IF_ERROR(loom_kernel_specializations_collect(
+      site_module, sites, classifier->specialization_count, &partition, arena,
+      &tuples));
+  const uint32_t group_count = partition.class_count;
+  loom_kernel_class_group_t* groups = NULL;
+  loom_kernel_class_classifier_t* classifiers = NULL;
+  loom_kernel_class_collection_t* collections = NULL;
+  iree_host_size_t* offsets = NULL;
+  iree_host_size_t* positions = NULL;
+  iree_host_size_t* original_sites = NULL;
+  loom_kernel_class_site_t* grouped_sites = NULL;
+  loom_decision_class_ordinal_t* site_classes = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, group_count, sizeof(*groups), (void**)&groups));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, group_count, sizeof(*classifiers), (void**)&classifiers));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, group_count, sizeof(*collections), (void**)&collections));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, group_count + 1, sizeof(*offsets), (void**)&offsets));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, group_count, sizeof(*positions), (void**)&positions));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, site_count, sizeof(*original_sites), (void**)&original_sites));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, site_count, sizeof(*grouped_sites), (void**)&grouped_sites));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, site_count, sizeof(*site_classes), (void**)&site_classes));
+  memset(offsets, 0, (group_count + 1) * sizeof(*offsets));
+  for (iree_host_size_t site = 0; site < site_count; ++site) {
+    ++offsets[partition.site_classes[site] + 1];
+  }
+  for (uint32_t group = 0; group < group_count; ++group) {
+    offsets[group + 1] += offsets[group];
+  }
+  memcpy(positions, offsets, group_count * sizeof(*positions));
+  for (iree_host_size_t site = 0; site < site_count; ++site) {
+    const iree_host_size_t position = positions[partition.site_classes[site]]++;
+    grouped_sites[position] = sites[site];
+    original_sites[position] = site;
+  }
+  void** leases = NULL;
+  if (plans.acquire) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, group_count, sizeof(*leases), (void**)&leases));
+  }
+  uint32_t acquired_count = 0;
+  iree_status_t status = iree_ok_status();
+  for (uint32_t group = 0; group < group_count && iree_status_is_ok(status);
+       ++group) {
+    const loom_kernel_specialization_value_t* tuple =
+        tuples[original_sites[offsets[group]]];
+    if (plans.acquire) {
+      const loom_kernel_class_classifier_t* retained = NULL;
+      status = plans.acquire(plans.user_data, site_module, tuple,
+                             classifier->specialization_count, arena, &retained,
+                             &leases[group]);
+      if (iree_status_is_ok(status)) {
+        classifiers[group] = *retained;
+        ++acquired_count;
+      }
+    } else {
+      status = loom_kernel_request_bind(
+          classifier, models, site_module, tuple, arena,
+          arena->block_pool->total_block_size, &classifiers[group]);
+    }
+    if (iree_status_is_ok(status)) {
+      // Tuple grouping is invocation state. This shallow view borrows immutable
+      // retained payload; the shared classifier itself is never modified.
+      classifiers[group].specialization_count = 0;
+      groups[group] = (loom_kernel_class_group_t){
+          .classifier = &classifiers[group],
+          .sites = grouped_sites + offsets[group],
+          .site_count = offsets[group + 1] - offsets[group],
+      };
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_kernel_class_collect_groups(groups, group_count, site_module,
+                                              options, arena, collections);
+  }
+  uint32_t class_base = 0;
+  for (uint32_t group = 0; group < group_count && iree_status_is_ok(status);
+       ++group) {
+    classifiers[group].specialization_count = classifier->specialization_count;
+    loom_kernel_class_collection_t* collection = &collections[group];
+    const loom_kernel_request_source_t source = {
+        .classifier = &classifiers[group],
+        .collection = collection,
+        .class_base = class_base,
+    };
+    const loom_kernel_specialization_value_t* tuple =
+        tuples[original_sites[offsets[group]]];
+    for (uint32_t ordinal = 0;
+         ordinal < collection->class_count && iree_status_is_ok(status);
+         ++ordinal) {
+      ((loom_kernel_class_t*)collection->classes)[ordinal].specializations =
+          tuple;
+      const loom_kernel_request_t request = {
+          .source_symbol_ordinal = source_symbol_ordinal,
+          .class_ordinal = class_base + ordinal,
+          .member_count = collection->classes[ordinal].member_count,
+          .source = &source,
+      };
+      status = sink.publish(sink.user_data, &request);
+    }
+    for (iree_host_size_t site = 0; site < groups[group].site_count; ++site) {
+      site_classes[original_sites[offsets[group] + site]] =
+          class_base + collection->site_classes[site];
+    }
+    class_base += collection->class_count;
+  }
+  for (uint32_t group = 0; group < acquired_count; ++group) {
+    plans.release(plans.user_data, leases[group]);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_site_classes = site_classes;
+  }
+  return status;
+}
+
 iree_status_t loom_kernel_request_producer_publish(
     loom_kernel_request_producer_t* producer,
     const loom_link_plan_materialization_environment_t* environment,
@@ -318,14 +729,17 @@ iree_status_t loom_kernel_request_producer_publish(
     const loom_decision_class_ordinal_t** out_site_classes) {
   *out_site_classes = NULL;
   loom_kernel_class_classifier_t classifier = {0};
+  loom_template_decision_model_catalog_t models = {0};
   loom_link_index_materialization_t materialization = {0};
   iree_status_t status = loom_kernel_request_source_prepare(
       producer, environment, source_symbol_ordinal, scratch_arena, &classifier,
-      &materialization);
+      &models, &materialization);
   if (iree_status_is_ok(status)) {
     status = loom_kernel_request_source_publish(
-        &classifier, source_symbol_ordinal, site_module, sites, site_count,
-        collection_options, sink, scratch_arena, out_site_classes);
+        &classifier, &models, source_symbol_ordinal, site_module, sites,
+        site_count, collection_options,
+        (loom_kernel_request_plan_provider_t){0}, sink, scratch_arena,
+        out_site_classes);
   }
   loom_link_index_materialization_deinitialize(&materialization);
   return status;
@@ -409,7 +823,8 @@ iree_status_t loom_kernel_request_preparation_allocate(
   if (iree_status_is_ok(status)) {
     status = loom_kernel_request_source_prepare(
         preparation->producer, environment, source_symbol_ordinal,
-        &preparation->arena, &preparation->classifier, &materialization);
+        &preparation->arena, &preparation->classifier, &preparation->models,
+        &materialization);
   }
   if (iree_status_is_ok(status)) {
     status = loom_kernel_request_preparation_capture_config_keys(
@@ -443,15 +858,27 @@ iree_string_view_list_t loom_kernel_request_preparation_config_keys(
   return preparation->config_keys;
 }
 
+iree_status_t loom_kernel_request_preparation_bind(
+    const loom_kernel_request_preparation_t* preparation,
+    const loom_module_t* site_module,
+    const loom_kernel_specialization_value_t* values,
+    iree_arena_allocator_t* arena,
+    loom_kernel_class_classifier_t* out_classifier) {
+  return loom_kernel_request_bind(
+      &preparation->classifier, &preparation->models, site_module, values,
+      arena, preparation->arena.block_pool->total_block_size, out_classifier);
+}
+
 iree_status_t loom_kernel_request_preparation_publish(
     const loom_kernel_request_preparation_t* preparation,
     const loom_module_t* site_module, const loom_kernel_class_site_t* sites,
     iree_host_size_t site_count,
     const loom_kernel_class_collection_options_t* collection_options,
-    loom_kernel_request_sink_t sink, iree_arena_allocator_t* scratch_arena,
+    loom_kernel_request_plan_provider_t plans, loom_kernel_request_sink_t sink,
+    iree_arena_allocator_t* scratch_arena,
     const loom_decision_class_ordinal_t** out_site_classes) {
   return loom_kernel_request_source_publish(
-      &preparation->classifier, preparation->source_symbol_ordinal, site_module,
-      sites, site_count, collection_options, sink, scratch_arena,
-      out_site_classes);
+      &preparation->classifier, &preparation->models,
+      preparation->source_symbol_ordinal, site_module, sites, site_count,
+      collection_options, plans, sink, scratch_arena, out_site_classes);
 }
