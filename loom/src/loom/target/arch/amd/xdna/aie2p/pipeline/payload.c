@@ -56,8 +56,7 @@ static iree_status_t loom_aie2p_native_intern_payload(
   if (!source) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate(context->pass->arena,
                                              sizeof(*source), (void**)&source));
-    *source = (loom_aie2p_native_payload_source_t){.endpoint = sender,
-                                                   .route = UINT32_MAX};
+    *source = (loom_aie2p_native_payload_source_t){.endpoint = sender};
     inventory->sources[slot] = *inventory->tail = source;
     inventory->tail = &source->next;
   }
@@ -237,18 +236,13 @@ iree_status_t loom_aie2p_native_route_payload(
     return iree_ok_status();
   }
   loom_aie2p_native_payload_source_t* source = payload->source;
-  if (source->route == UINT32_MAX) {
-    // The first destination owns the tree identity. A separate identity would
-    // exceed the route inventory's one source slot per destination demand.
-    source->route = *next_source;
-  }
   payload->route_first = context->routing.route_count;
   for (iree_host_size_t i = 0; i < payload->destination_count; ++i) {
     const loom_aie2p_native_payload_endpoint_t* destination =
         &payload->destinations[i];
     const iree_host_size_t first = context->routing.route_count;
     if (!loom_aie2p_array_route_stream(
-            &context->routing, (*next_source)++, source->route,
+            &context->routing, (*next_source)++, &source->tree,
             source->endpoint.tile->coordinate, LOOM_XDNA_STREAM_PORT_DMA,
             source->endpoint.engine, destination->tile->coordinate,
             LOOM_XDNA_STREAM_PORT_DMA, destination->engine, source->framed)) {

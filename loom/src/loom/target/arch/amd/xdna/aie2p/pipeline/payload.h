@@ -55,8 +55,8 @@ typedef struct loom_aie2p_native_payload_source_t {
   loom_aie2p_native_payload_class_t* classes;
   // Number of destination sets, bounded by the hardware packet ID space.
   uint8_t class_count;
-  // Canonical routing tree identity, UINT32_MAX before first realization.
-  uint32_t route;
+  // Sender-owned physical prefixes, independent of destination route labels.
+  loom_aie2p_array_route_tree_t tree;
   // Packet framing is required by any source use or receiver fan-in.
   bool framed;
 } loom_aie2p_native_payload_source_t;

@@ -266,7 +266,7 @@ class DistributionPathTest
       source_workers_[Worker(i)].transport.batch_count = 1;
     }
     IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
-        context_.family, 128, routes_.size(), &arena_, &context_.routing));
+        context_.family, routes_.size(), &arena_, &context_.routing));
     context_.routes = routes_.data();
   }
 

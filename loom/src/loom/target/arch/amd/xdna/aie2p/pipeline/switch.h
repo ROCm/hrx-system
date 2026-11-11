@@ -7,7 +7,7 @@
 #ifndef LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_PIPELINE_SWITCH_H_
 #define LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_PIPELINE_SWITCH_H_
 
-#include "loom/target/arch/amd/xdna/aie2p/array/plan.h"
+#include "loom/target/arch/amd/xdna/aie2p/array/route.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,8 +18,8 @@ struct loom_aie2p_native_context_t;
 // Complete endpoint ownership for one compiler-generated control stream.
 // Commands, replies, and collective words retain their framing on circuits.
 typedef struct loom_aie2p_native_control_source_t {
-  // Canonical physical source tree, or UINT32_MAX before its first route.
-  uint32_t route;
+  // Source-owned physical prefixes, independent of destination route labels.
+  loom_aie2p_array_route_tree_t tree;
   // Sole owned endpoint, or UINT32_MAX for multiple/external destinations
   // or any route borrowing payload lanes.
   uint32_t destination;

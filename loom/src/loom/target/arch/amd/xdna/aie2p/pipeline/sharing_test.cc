@@ -70,9 +70,10 @@ class Aie2pSharingTest
     worker_.refills = &refill_;
     realization_.invocations.worker_count = 1;
     IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
-        context_.family, 1, 8, &arena_, &context_.routing));
+        context_.family, 8, &arena_, &context_.routing));
+    loom_aie2p_array_route_tree_t tree = {};
     ASSERT_TRUE(loom_aie2p_array_route_workers(
-        &context_.routing, 0, 0, tiles_[sender_index_].coordinate, 0,
+        &context_.routing, 0, &tree, tiles_[sender_index_].coordinate, 0,
         tiles_[receiver_index_].coordinate, 0, false));
     path_.routes.count = context_.routing.route_count;
     for (size_t i = 0; i < context_.routing.route_count; ++i) {

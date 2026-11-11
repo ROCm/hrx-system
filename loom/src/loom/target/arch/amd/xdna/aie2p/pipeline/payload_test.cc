@@ -124,27 +124,30 @@ TEST_F(PayloadTest, ReceiverFanInFramesEveryPhysicalSender) {
   }
 }
 
-TEST_F(PayloadTest, DestinationsOwnTheirRoutingIdentityBudget) {
+TEST_F(PayloadTest, SourceOwnsPrefixesIndependentlyOfRouteLabels) {
   Ordinary(0, 2, true);
   Ordinary(1, 3, true);
   Form();
-  // Two destinations share a physical sender. The route inventory budgets
-  // one identity per destination, including the canonical prefix-tree root.
+  // Two destinations share one physical sender. Large destination labels
+  // cannot select a prefix root or consume additional root-table capacity.
   IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
-      context_.family, 2, 16, &arena_, &context_.routing));
+      context_.family, 16, &arena_, &context_.routing));
   loom_aie2p_native_route_t routes[16] = {};
   context_.routes = routes;
-  uint32_t next_source = 0;
+  uint32_t next_source = 1000;
+  loom_aie2p_array_route_node_t* root = nullptr;
   for (size_t i = 0; i < 2; ++i) {
     bool valid = false;
     IREE_ASSERT_OK(loom_aie2p_native_route_payload(
         &context_, paths_[i].payload, nullptr, &next_source, &valid));
     ASSERT_TRUE(valid);
-    EXPECT_EQ(next_source, i + 1);
-    EXPECT_EQ(paths_[i].payload->source->route, 0u);
+    EXPECT_EQ(next_source, 1001 + i);
+    EXPECT_NE(paths_[i].payload->source->tree.root, nullptr);
+    if (i == 0) {
+      root = paths_[i].payload->source->tree.root;
+    }
+    EXPECT_EQ(paths_[i].payload->source->tree.root, root);
   }
-  EXPECT_NE(context_.routing.prefixes.roots[0], IREE_HOST_SIZE_MAX);
-  EXPECT_EQ(context_.routing.prefixes.roots[1], IREE_HOST_SIZE_MAX);
   const auto& terminal = routes[context_.routing.route_count - 1];
   EXPECT_EQ(terminal.edge->coordinate.row, 3);
   EXPECT_TRUE(terminal.edge->dma_destination);

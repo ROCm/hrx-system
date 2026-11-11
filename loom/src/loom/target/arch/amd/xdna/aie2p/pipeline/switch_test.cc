@@ -49,7 +49,7 @@ class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
     }
     // Include all 32 packet IDs and their multicast branches.
     IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
-        context_.family, 128, 128, &arena_, &context_.routing));
+        context_.family, 128, &arena_, &context_.routing));
   }
 
   void TearDown() override {
@@ -61,8 +61,9 @@ class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
                 loom_xdna_stream_port_t destination,
                 uint8_t destination_channel, uint8_t packet) {
     const auto index = static_cast<uint32_t>(context_.routing.route_count);
+    loom_aie2p_array_route_tree_t tree = {};
     ASSERT_TRUE(loom_aie2p_array_route_stream(
-        &context_.routing, index, index, coordinate_, source, source_channel,
+        &context_.routing, index, &tree, coordinate_, source, source_channel,
         coordinate_, destination, destination_channel, packet != UINT8_MAX));
     routes_.resize(context_.routing.route_count);
     for (size_t i = index; i < context_.routing.route_count; ++i) {
@@ -158,7 +159,7 @@ class Aie2pControlSwitchTest : public Aie2pSwitchTest {
   void SetUp() override {
     Initialize(LOOM_XDNA_TILE_KIND_COMPUTE);
     const size_t endpoint_count = tiles_.size() * 2;
-    sources_.resize(endpoint_count, {UINT32_MAX, UINT32_MAX});
+    sources_.resize(endpoint_count);
     destinations_.resize(endpoint_count, UINT32_MAX);
     context_.control_sources = sources_.data();
     context_.control_destination_sources = destinations_.data();
@@ -183,10 +184,11 @@ class Aie2pControlSwitchTest : public Aie2pSwitchTest {
     for (uint32_t i = 0; i < count; ++i) {
       const size_t first = context_.routing.route_count;
       const uint32_t source = next_source_++;
+      loom_aie2p_array_route_tree_t tree = {};
       // The first DMA path carries packets; the others occupy the remaining
       // southbound lanes without sharing them with control traffic.
       ASSERT_TRUE(loom_aie2p_array_route_workers(&context_.routing, source,
-                                                 source, sources[i], engines[i],
+                                                 &tree, sources[i], engines[i],
                                                  {0, 1}, i, i == 0));
       loom_aie2p_native_route_label(&context_, first, i == 0 ? 16 : UINT8_MAX,
                                     UINT32_MAX);

@@ -147,8 +147,7 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
                     2 +
                 (destination_port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL)
           : UINT32_MAX;
-  if (control->route == UINT32_MAX) {
-    control->route = index;
+  if (!control->tree.root) {
     control->destination = destination_index;
   } else if (control->destination != destination_index) {
     control->destination = UINT32_MAX;
@@ -163,10 +162,10 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
   }
   const bool routed =
       delivery ? loom_aie2p_array_route_control(&context->routing, index,
-                                                control->route, source,
+                                                &control->tree, source,
                                                 destination, &delivery->sharing)
                : loom_aie2p_array_route_stream(
-                     &context->routing, index, control->route, source,
+                     &context->routing, index, &control->tree, source,
                      source_port, 0, destination, destination_port, 0, true);
   if (!routed) {
     return false;
@@ -1097,7 +1096,7 @@ iree_status_t loom_aie2p_native_select_transfers(
       source_count *
       (context->family->column_count + context->family->row_count + 2);
   IREE_RETURN_IF_ERROR(loom_aie2p_array_route_builder_initialize(
-      context->family, source_count, route_capacity, arena, &context->routing));
+      context->family, route_capacity, arena, &context->routing));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, route_capacity,
                                                  sizeof(*context->routes),
                                                  (void**)&context->routes));
@@ -1107,7 +1106,7 @@ iree_status_t loom_aie2p_native_select_transfers(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, control_source_count, sizeof(*context->control_sources),
       (void**)&context->control_sources));
-  memset(context->control_sources, 0xff,
+  memset(context->control_sources, 0,
          control_source_count * sizeof(*context->control_sources));
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(arena, control_source_count,
