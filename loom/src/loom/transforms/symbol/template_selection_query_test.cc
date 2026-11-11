@@ -6,6 +6,7 @@
 
 #include <initializer_list>
 #include <string>
+#include <vector>
 
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
@@ -45,6 +46,7 @@ class TemplateSelectionQueryTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    external_sources_.clear();
     iree_arena_deinitialize(&arena_);
     loom_context_deinitialize(&context_);
     iree_arena_block_pool_deinitialize(&block_pool_);
@@ -82,15 +84,18 @@ class TemplateSelectionQueryTest : public ::testing::Test {
   loom_template_provider_summary_t ExternalizeProvider(
       loom_module_t* module, iree_string_view_t family_name,
       iree_string_view_t provider_name, iree_host_size_t origin_ordinal) {
+    // A native library keeps its source definitions alive independently of
+    // the product module receiving its family and target bindings.
+    ModulePtr source = ParseModule(PrintModule(module).c_str());
     loom_symbol_fact_table_t fact_table = {};
     loom_symbol_fact_table_initialize(&fact_table, &arena_);
     loom_template_provider_catalog_t local_catalog = {};
     loom_template_provider_catalog_initialize(&local_catalog, &arena_);
     IREE_CHECK_OK(loom_template_provider_catalog_build_local(
-        &local_catalog, module, &fact_table));
+        &local_catalog, source.get(), &fact_table));
     const loom_symbol_ref_t family = {
         .module_id = 0,
-        .symbol_id = FindSymbol(module, family_name),
+        .symbol_id = FindSymbol(source.get(), family_name),
     };
     const loom_template_provider_slice_t providers =
         loom_template_provider_catalog_lookup(&local_catalog, family);
@@ -102,9 +107,15 @@ class TemplateSelectionQueryTest : public ::testing::Test {
       }
     }
     IREE_ASSERT(selected != nullptr);
-    loom_template_provider_summary_t external = *selected;
-    external.symbol = loom_symbol_ref_null();
-    external.origin_ordinal = origin_ordinal;
+    loom_template_provider_summary_t external = {};
+    const loom_symbol_ref_t target_family = {
+        .module_id = 0,
+        .symbol_id = FindSymbol(module, family_name),
+    };
+    IREE_CHECK_OK(loom_template_provider_summary_bind_family(
+        selected, module, target_family, loom_symbol_ref_null(), origin_ordinal,
+        &external));
+    external_sources_.push_back(std::move(source));
 
     const loom_symbol_id_t provider_symbol_id =
         FindSymbol(module, provider_name);
@@ -146,6 +157,8 @@ class TemplateSelectionQueryTest : public ::testing::Test {
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
   iree_arena_allocator_t arena_;
+  // Native library modules borrowed by external provider summaries.
+  std::vector<ModulePtr> external_sources_;
 };
 
 TEST_F(TemplateSelectionQueryTest, SelectsExplicitRootWithoutMutation) {

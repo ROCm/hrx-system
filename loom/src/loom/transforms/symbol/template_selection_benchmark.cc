@@ -69,10 +69,24 @@ struct TemplateSelectionSourceOptions {
   // True to place an exact call inside each provider whose requirement only
   // becomes provable after substituting the entry's more precise argument.
   bool deferred_exact_call = false;
+
+  // Signature width, with the constrained value in the final position.
+  uint32_t argument_count = 1;
 };
 
 std::string BuildSource(const TemplateSelectionSourceOptions& options) {
   std::string source;
+  std::string parameters;
+  std::string operands;
+  std::string operand_types;
+  for (uint32_t i = 1; i < options.argument_count; ++i) {
+    parameters += "%unused_" + std::to_string(i) + ": index, ";
+    operands += "%value, ";
+    operand_types += "index, ";
+  }
+  parameters += "%value: index";
+  operands += "%value";
+  operand_types += "index";
   const bool structured =
       options.control_flow == TemplateSelectionControlFlow::kStructured;
   const bool cfg = options.control_flow == TemplateSelectionControlFlow::kCfg;
@@ -81,7 +95,8 @@ std::string BuildSource(const TemplateSelectionSourceOptions& options) {
         "test.target<low_core> @benchmark_target {subgroup_size = 32}\n\n");
   }
   if (options.provider_count != 0) {
-    source.append("template.decl @benchmark.choose(%value: index) -> (index)");
+    source.append("template.decl @benchmark.choose(" + parameters +
+                  ") -> (index)");
     if (options.constrained) {
       source.append(" where [ge(%value, -1)]");
     }
@@ -104,7 +119,7 @@ std::string BuildSource(const TemplateSelectionSourceOptions& options) {
         options.reverse_priorities ? i + 1 : options.provider_count - i));
     source.append(") @provider_");
     source.append(std::to_string(i));
-    source.append("(%value: index) -> (index)");
+    source.append("(" + parameters + ") -> (index)");
     if (options.constrained) {
       source.append(" where [ge(%value, 0), multiple_of(%value, 16)]");
     }
@@ -158,9 +173,8 @@ std::string BuildSource(const TemplateSelectionSourceOptions& options) {
   for (uint32_t i = 0; i < options.site_count; ++i) {
     source.append(structured ? "    %result_" : "  %result_");
     source.append(std::to_string(i));
-    source.append(
-        " = template.apply<@benchmark.choose>(%value) : (index) -> "
-        "(index)\n");
+    source.append(" = template.apply<@benchmark.choose>(" + operands + ") : (" +
+                  operand_types + ") -> (index)\n");
   }
   if (structured) {
     source.append("    scf.yield %result_");
@@ -440,6 +454,22 @@ BENCHMARK(BM_TemplateDecisionModelBuild)
     ->Args({128, 0, 1})
     ->Args({4096, 0, 0})
     ->Args({4096, 0, 1});
+
+void BM_TemplateDecisionSignatureBuild(benchmark::State& state) {
+  TemplateSelectionSourceOptions options;
+  options.provider_count = static_cast<uint32_t>(state.range(0));
+  options.argument_count = static_cast<uint32_t>(state.range(1));
+  options.site_count = 1;
+  options.constrained = true;
+  TemplateSelectionFixture fixture(options);
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(fixture.BuildModels());
+  }
+  state.SetItemsProcessed(state.iterations() * options.provider_count);
+}
+BENCHMARK(BM_TemplateDecisionSignatureBuild)
+    ->ArgNames({"providers", "arguments"})
+    ->ArgsProduct({{1, 64}, {1, 16, 64, 256}});
 
 void BM_TemplateDecisionFactRequirements(benchmark::State& state) {
   constexpr uint32_t kProviderCount = 4096;

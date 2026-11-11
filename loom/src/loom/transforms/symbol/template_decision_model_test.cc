@@ -29,6 +29,7 @@
 #include "loom/ops/test/ops.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/util/fact_table.h"
+#include "loom/verify/verify.h"
 
 namespace loom {
 namespace {
@@ -394,6 +395,83 @@ class TemplateDecisionModelTest : public ::testing::Test {
   loom_context_t context_;
   iree_arena_allocator_t analysis_arena_;
 };
+
+TEST_F(TemplateDecisionModelTest, PreservesWideDependentSignatureCoordinates) {
+  std::string parameters = "%input: tensor<[%extent]xi32>";
+  std::string operands = "%input";
+  std::string types = "tensor<[%extent]xi32>";
+  for (uint32_t i = 1; i < 64; ++i) {
+    parameters += ", %v" + std::to_string(i) + ": index";
+    operands += ", %v" + std::to_string(i);
+    types += ", index";
+  }
+  parameters += ", %extent: index";
+  operands += ", %extent";
+  types += ", index";
+  const std::string results = " -> (%first: index, %second: index)";
+  const std::string source =
+      "template.decl @family(" + parameters + ")" + results +
+      " where [eq(%extent, %v32)]\n"
+      "template.def<@family> priority(10) @body(" +
+      parameters + ")" + results +
+      " where [eq(%v63, %extent), eq(%second, %v32)] {\n"
+      "  template.return %extent, %v32 : index, index\n}\n"
+      "template.ukernel<@family> priority(1) @declaration(" +
+      parameters + ")" + results +
+      " where [eq(%v1, %extent), eq(%first, %v32)]\n"
+      "func.def public @entry(" +
+      parameters +
+      ") -> (index, index) {\n"
+      "  %first, %second = template.apply<@family>(" +
+      operands + ") : (" + types +
+      ") -> (index, index)\n"
+      "  func.return %first, %second : index, index\n}\n";
+  ModulePtr module =
+      ParseModule(iree_make_string_view(source.data(), source.size()));
+  loom_verify_options_t verify_options = {};
+  verify_options.sink.fn = loom_diagnostic_stderr_sink;
+  loom_verify_result_t verify_result = {};
+  IREE_ASSERT_OK(
+      loom_verify_module(module.get(), &verify_options, &verify_result));
+  ASSERT_EQ(verify_result.error_count, 0u);
+
+  loom_symbol_fact_table_t symbol_facts = {};
+  loom_symbol_fact_table_initialize(&symbol_facts, &analysis_arena_);
+  loom_template_provider_catalog_t providers = {};
+  loom_template_provider_catalog_initialize(&providers, &analysis_arena_);
+  IREE_ASSERT_OK(loom_template_provider_catalog_build_local(
+      &providers, module.get(), &symbol_facts));
+  loom_symbol_reference_table_t references = {};
+  IREE_ASSERT_OK(loom_symbol_reference_table_build(
+      module.get(), &analysis_arena_, &references));
+  loom_template_decision_model_catalog_t models = {};
+  IREE_ASSERT_OK(loom_template_decision_model_catalog_build(
+      module.get(), &symbol_facts, &references, &providers, &analysis_arena_,
+      &models));
+  ASSERT_EQ(models.model_count, 1u);
+  const auto& program = models.models[0].program;
+  ASSERT_EQ(program.predicate_count, 5u);
+  const std::array<std::array<loom_decision_program_operand_ref_t, 2>, 5>
+      expected = {{
+          {loom_decision_program_argument_ref(64),
+           loom_decision_program_argument_ref(32)},
+          {loom_decision_program_argument_ref(63),
+           loom_decision_program_argument_ref(64)},
+          {loom_decision_program_result_ref(1),
+           loom_decision_program_argument_ref(32)},
+          {loom_decision_program_argument_ref(1),
+           loom_decision_program_argument_ref(64)},
+          {loom_decision_program_result_ref(0),
+           loom_decision_program_argument_ref(32)},
+      }};
+  for (size_t i = 0; i < expected.size(); ++i) {
+    SCOPED_TRACE(i);
+    EXPECT_EQ(program.predicates[i].kind, LOOM_PREDICATE_EQ);
+    ASSERT_EQ(program.predicates[i].operand_count, 2u);
+    EXPECT_EQ(program.predicates[i].operands[0], expected[i][0]);
+    EXPECT_EQ(program.predicates[i].operands[1], expected[i][1]);
+  }
+}
 
 loom_value_facts_t RandomFacts(std::mt19937_64& random) {
   switch (random() % 4) {

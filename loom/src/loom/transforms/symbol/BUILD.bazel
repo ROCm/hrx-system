@@ -72,6 +72,7 @@ loom_cc_test(
         "//loom/src/loom/ops/test",
         "//loom/src/loom/testing:module_ptr",
         "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/verify",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
