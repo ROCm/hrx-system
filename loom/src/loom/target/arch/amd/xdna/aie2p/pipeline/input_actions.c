@@ -208,7 +208,7 @@ iree_status_t loom_aie2p_native_prepare_input(
         input->path->input_engine, LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM,
         owner->control_packets[shim], owner->control_replies[shim]));
     const iree_host_size_t count =
-        input->shared_receiver ? 1 : input->source->phase_count;
+        input->window_capacity ? 1 : input->source->phase_count;
     for (iree_host_size_t i = 0; i < count; ++i) {
       const loom_aie2p_native_distribution_endpoint_t* receiver =
           &input->phases[i].receiver;

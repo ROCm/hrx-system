@@ -1059,8 +1059,12 @@ iree_status_t loom_aie2p_native_select_transfers(
                                i < realization->invocations.worker_count;
        ++i) {
     if (context->workers[i].execution ==
-            LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION ||
-        context->workers[i].input) {
+        LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION) {
+      continue;
+    }
+    if (context->workers[i].input) {
+      status = loom_aie2p_native_form_input(context, realization,
+                                            context->workers[i].input);
       continue;
     }
     loom_pipeline_worker_t* source = &realization->workers[i];
@@ -1143,6 +1147,11 @@ iree_status_t loom_aie2p_native_select_transfers(
                                            (void**)&next_controller));
   memset(next_controller, 1, context->family->column_count);
   bool ordered_distributions = false;
+  iree_host_size_t distribution_count = 0;
+  iree_host_size_t* distribution_order;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, realization->invocations.worker_count, sizeof(*distribution_order),
+      (void**)&distribution_order));
   for (iree_host_size_t i = 0; i < realization->invocations.worker_count; ++i) {
     if (context->workers[i].execution !=
         LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION) {
@@ -1164,8 +1173,9 @@ iree_status_t loom_aie2p_native_select_transfers(
         &realization->workers[i].transport;
     for (iree_host_size_t j = 0; j < transport->batch_count; ++j) {
       if (transport->batches[j].records->release) {
-        status = loom_aie2p_native_select_worker_distributions(
-            context, realization, i, &next_source, &valid);
+        status = loom_aie2p_native_form_worker_distributions(
+            context, realization, i, &valid);
+        distribution_order[distribution_count++] = i;
         ordered_distributions |=
             context->workers[i].distribution_phases != NULL;
         break;
@@ -1177,14 +1187,19 @@ iree_status_t loom_aie2p_native_select_transfers(
        ++i) {
     if (context->workers[i].execution ==
         LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION) {
-      if (context->workers[i].distributions ||
-          context->workers[i].distribution_phases) {
+      if (context->workers[i].distribution_plan) {
         continue;
       }
-      status = loom_aie2p_native_select_worker_distributions(
-          context, realization, i, &next_source, &valid);
+      status = loom_aie2p_native_form_worker_distributions(context, realization,
+                                                           i, &valid);
+      distribution_order[distribution_count++] = i;
       ordered_distributions |= context->workers[i].distribution_phases != NULL;
     }
+  }
+  for (iree_host_size_t i = 0;
+       iree_status_is_ok(status) && valid && i < distribution_count; ++i) {
+    status = loom_aie2p_native_select_worker_distributions(
+        context, realization, distribution_order[i], &next_source, &valid);
   }
   if (iree_status_is_ok(status) && valid) {
     status = loom_aie2p_native_prepare_sharing(context, realization);

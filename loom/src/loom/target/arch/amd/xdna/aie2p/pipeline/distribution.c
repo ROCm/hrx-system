@@ -802,10 +802,10 @@ static iree_status_t loom_aie2p_native_distribution_refills(
   return iree_ok_status();
 }
 
-iree_status_t loom_aie2p_native_select_worker_distributions(
+iree_status_t loom_aie2p_native_form_worker_distributions(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization,
-    iree_host_size_t worker_index, uint32_t* next_source, bool* out_valid) {
+    iree_host_size_t worker_index, bool* out_valid) {
   *out_valid = false;
   const loom_pipeline_worker_t* source = &realization->workers[worker_index];
   loom_aie2p_native_worker_t* worker = &context->workers[worker_index];
@@ -816,6 +816,14 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
       &context
            ->workers[context->distribution_execution
                          .workers[context->distribution_engines[worker_index]]];
+  loom_aie2p_native_distribution_plan_t* plan;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      context->pass->arena,
+      sizeof(*plan) + source->transport.batch_count * sizeof(*plan->batches),
+      (void**)&plan));
+  *plan = (loom_aie2p_native_distribution_plan_t){
+      .batches = (loom_aie2p_native_distribution_batch_t*)(plan + 1)};
+  worker->distribution_plan = plan;
   loom_aie2p_native_distribution_t** tail = &owner->distributions;
   while (*tail) {
     tail = &(*tail)->next;
@@ -846,20 +854,12 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
                  cohort->transfers * batch->record_count;
     }
   }
-  uint32_t* queued_tasks = NULL;
-  if (child && !packet_program) {
-    const iree_host_size_t endpoint_count =
-        source->transport.batches[0].records->destination_count + 1;
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        context->pass->arena, endpoint_count, sizeof(*queued_tasks),
-        (void**)&queued_tasks));
-    memset(queued_tasks, 0, endpoint_count * sizeof(*queued_tasks));
-  }
   uint32_t* windows = NULL;
   if (!packet_program && (!ordered || child)) {
     IREE_RETURN_IF_ERROR(loom_aie2p_native_distribution_windows(
         context, realization, &source->transport, &windows));
   }
+  plan->windows = windows;
   loom_aie2p_native_distribution_t* first_phase = NULL;
   for (iree_host_size_t i = 0; i < source->transport.batch_count; ++i) {
     const loom_pipeline_transport_batch_t* batch =
@@ -870,6 +870,8 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
                                   cohort->admission->channel);
     const uint32_t repetitions =
         (uint32_t)(cohort->transfers * batch->record_count);
+    loom_aie2p_native_distribution_batch_t* selected = &plan->batches[i];
+    *selected = (loom_aie2p_native_distribution_batch_t){0};
     loom_aie2p_native_distribution_t* path = ordered   ? owner->distributions
                                              : windows ? first_phase
                                                        : NULL;
@@ -935,6 +937,13 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
                       context, realization, cohort->destinations[j].channel)};
         }
       }
+      distribution->sender.channel = source_channel;
+      distribution->sender.tile =
+          context->pool_tiles[source_channel->pool_index];
+      for (iree_host_size_t j = 0; j < distribution->receiver_count; ++j) {
+        distribution->receivers[j].tile =
+            context->pool_tiles[distribution->receivers[j].channel->pool_index];
+      }
       const iree_host_size_t controller =
           loom_aie2p_native_distribution_controller(
               context, &realization->invocations, distribution, source_channel);
@@ -971,6 +980,76 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
       }
       distribution->next_geometry = distribution->path->geometries;
       distribution->path->geometries = distribution;
+      selected->creates_geometry = true;
+      selected->shared = path;
+      selected->packet_totals = totals;
+      selected->copy_receivers = copy_receivers;
+      *tail = distribution;
+      tail = &distribution->next;
+    }
+    selected->distribution = distribution;
+    if (windows && !first_phase) {
+      first_phase = distribution;
+    }
+    if (ordered) {
+      loom_aie2p_native_distribution_phase_t* phase;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(context->pass->arena,
+                                               sizeof(*phase), (void**)&phase));
+      *phase = (loom_aie2p_native_distribution_phase_t){
+          .previous = previous_phase,
+          .source = batch,
+          .distribution = distribution};
+      *phase_tail = phase;
+      phase_tail = &phase->next;
+      previous_phase = phase;
+    }
+  }
+  *out_valid = true;
+  return iree_ok_status();
+}
+
+iree_status_t loom_aie2p_native_select_worker_distributions(
+    loom_aie2p_native_context_t* context,
+    const loom_pipeline_realization_t* realization,
+    iree_host_size_t worker_index, uint32_t* next_source, bool* out_valid) {
+  *out_valid = false;
+  const loom_pipeline_worker_t* source = &realization->workers[worker_index];
+  const loom_aie2p_native_distribution_plan_t* plan =
+      context->workers[worker_index].distribution_plan;
+  const loom_pipeline_invocation_t* invocation =
+      realization->invocations.workers[worker_index].invocation;
+  const bool child = invocation->ordinal != 0;
+  const loom_aie2p_native_worker_t* owner =
+      &context
+           ->workers[context->distribution_execution
+                         .workers[context->distribution_engines[worker_index]]];
+  const bool packet_program = owner->distribution_packets;
+  uint32_t* queued_tasks = NULL;
+  if (child && !packet_program) {
+    const iree_host_size_t endpoint_count =
+        source->transport.batches[0].records->destination_count + 1;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        context->pass->arena, endpoint_count, sizeof(*queued_tasks),
+        (void**)&queued_tasks));
+    memset(queued_tasks, 0, endpoint_count * sizeof(*queued_tasks));
+  }
+  const uint32_t* windows = plan->windows;
+  loom_aie2p_native_distribution_t* first_phase = NULL;
+  for (iree_host_size_t i = 0; i < source->transport.batch_count; ++i) {
+    const loom_aie2p_native_distribution_batch_t* selected = &plan->batches[i];
+    loom_aie2p_native_distribution_t* distribution = selected->distribution;
+    loom_aie2p_native_distribution_t* path = selected->shared;
+    const loom_pipeline_transport_batch_t* batch =
+        &source->transport.batches[i];
+    const loom_pipeline_transport_cohort_t* cohort = batch->records;
+    const loom_aie2p_native_channel_t* source_channel =
+        distribution->sender.channel;
+    const bool ordered = distribution->ordered;
+    const uint32_t repetitions =
+        (uint32_t)(cohort->transfers * batch->record_count);
+    const uint32_t* totals = selected->packet_totals;
+    const uint32_t* copy_receivers = selected->copy_receivers;
+    if (selected->creates_geometry) {
       if (packet_program) {
         bool valid = false;
         IREE_RETURN_IF_ERROR(loom_aie2p_native_select_packet_distribution(
@@ -1073,8 +1152,6 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
               context->routing.route_count - route_begin;
         }
       }
-      *tail = distribution;
-      tail = &distribution->next;
     }
     if (queued_tasks) {
       for (iree_host_size_t j = 0; j <= distribution->receiver_count; ++j) {
@@ -1097,18 +1174,6 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
         IREE_RETURN_IF_ERROR(loom_aie2p_native_distribution_refills(
             context, &source->transport, windows, first_phase, distribution));
       }
-    }
-    if (ordered) {
-      loom_aie2p_native_distribution_phase_t* phase;
-      IREE_RETURN_IF_ERROR(iree_arena_allocate(context->pass->arena,
-                                               sizeof(*phase), (void**)&phase));
-      *phase = (loom_aie2p_native_distribution_phase_t){
-          .previous = previous_phase,
-          .source = batch,
-          .distribution = distribution};
-      *phase_tail = phase;
-      phase_tail = &phase->next;
-      previous_phase = phase;
     }
   }
   *out_valid = true;

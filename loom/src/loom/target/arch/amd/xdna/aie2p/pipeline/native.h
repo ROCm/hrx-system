@@ -496,6 +496,28 @@ typedef struct loom_aie2p_native_distribution_t {
   uint32_t grant_reader;
 } loom_aie2p_native_distribution_t;
 
+// One retained source batch awaiting physical descriptor and route selection.
+typedef struct loom_aie2p_native_distribution_batch_t {
+  // Canonical geometry supplying this batch's source and receiver endpoints.
+  loom_aie2p_native_distribution_t* distribution;
+  // Earlier geometry supplying a compatible path, or NULL for a new path.
+  loom_aie2p_native_distribution_t* shared;
+  // Channel-indexed transfer totals for a packet program, otherwise NULL.
+  uint32_t* packet_totals;
+  // Receiver ordinal for each retained packet copy, otherwise NULL.
+  uint32_t* copy_receivers;
+  // This occurrence owns physical selection of its canonical geometry.
+  bool creates_geometry;
+} loom_aie2p_native_distribution_batch_t;
+
+// Complete distribution demand before any physical queue is allocated.
+typedef struct loom_aie2p_native_distribution_plan_t {
+  // Batch requests indexed by the common transport plan's batch ordinal.
+  loom_aie2p_native_distribution_batch_t* batches;
+  // Sender/receiver admission windows, or NULL for complete finite programs.
+  uint32_t* windows;
+} loom_aie2p_native_distribution_plan_t;
+
 // One ordered use of an immutable distribution geometry. The controller's
 // full-batch publication supplies the existing source readiness boundary.
 typedef struct loom_aie2p_native_distribution_phase_t {
@@ -635,6 +657,8 @@ typedef struct loom_aie2p_native_worker_t {
   loom_aie2p_native_dma_completion_t* dma_completions;
   // Immutable geometries owned by the representative distribution engine.
   loom_aie2p_native_distribution_t* distributions;
+  // Retained batch demand before descriptor and route selection.
+  loom_aie2p_native_distribution_plan_t* distribution_plan;
   // Ordered uses driven by controller publications; NULL for autonomous paths.
   loom_aie2p_native_distribution_phase_t* distribution_phases;
   // Child endpoints started and retired around this core's local worker call.

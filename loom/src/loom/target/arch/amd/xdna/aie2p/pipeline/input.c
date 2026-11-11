@@ -236,7 +236,7 @@ static loom_aie2p_native_input_path_t* loom_aie2p_native_find_input_path(
     const loom_aie2p_native_input_t* first = path->first;
     const loom_aie2p_native_input_t* last = path->last;
     if (path->shim != shim ||
-        first->shared_receiver != input->shared_receiver ||
+        (first->window_capacity != 0) != (input->window_capacity != 0) ||
         first->source->phase_count != input->source->phase_count ||
         last->controller == input->controller ||
         invocations->workers[last->controller].invocation != last->invocation ||
@@ -247,7 +247,7 @@ static loom_aie2p_native_input_path_t* loom_aie2p_native_find_input_path(
     bool same_receivers = true;
     for (iree_host_size_t i = 0; i < input->source->phase_count; ++i) {
       same_receivers &=
-          first->phases[i].receiver.tile ==
+          context->pool_tiles[first->phases[i].destination->pool_index] ==
           context->pool_tiles[input->phases[i].destination->pool_index];
     }
     if (same_receivers) {
@@ -255,6 +255,36 @@ static loom_aie2p_native_input_path_t* loom_aie2p_native_find_input_path(
     }
   }
   return NULL;
+}
+
+iree_status_t loom_aie2p_native_form_input(
+    loom_aie2p_native_context_t* context,
+    const loom_pipeline_realization_t* realization,
+    loom_aie2p_native_input_t* input) {
+  loom_aie2p_native_tile_t* shim =
+      &context->tiles[context->workers[input->worker].tile->coordinate.column *
+                      context->family->row_count];
+  loom_aie2p_native_worker_t* owner =
+      &context->workers[context->execution
+                            .workers[context->core_engines[input->controller]]];
+  input->window_capacity =
+      loom_aie2p_native_input_receive_window(context, input);
+  loom_aie2p_native_input_path_t* path = loom_aie2p_native_find_input_path(
+      context, &realization->invocations, owner, shim, input);
+  if (!path) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate(context->pass->arena,
+                                             sizeof(*path), (void**)&path));
+    *path = (loom_aie2p_native_input_path_t){
+        .next = owner->input_paths,
+        .first = input,
+        .shim = shim,
+        .input_engine = UINT8_MAX,
+    };
+    owner->input_paths = path;
+  }
+  input->path = path;
+  path->last = input;
+  return iree_ok_status();
 }
 
 iree_status_t loom_aie2p_native_route_input(
@@ -271,19 +301,16 @@ iree_status_t loom_aie2p_native_route_input(
   loom_aie2p_native_worker_t* owner =
       &context->workers[context->execution
                             .workers[context->core_engines[input->controller]]];
-  const uint32_t window =
-      loom_aie2p_native_input_receive_window(context, input);
-  input->shared_receiver = window != 0;
-  loom_aie2p_native_input_path_t* path = loom_aie2p_native_find_input_path(
-      context, &realization->invocations, owner, shim, input);
-  const bool shared_path = path != NULL;
+  const uint32_t window = input->window_capacity;
+  loom_aie2p_native_input_path_t* path = input->path;
+  const bool shared_path = path->first != input;
   const loom_xdna_dma_facts_t* dma = &shim->facts->dma;
   const uint64_t descriptors = input->source->phase_count;
   uint16_t descriptor_base, descriptor_count;
   uint16_t* used = loom_aie2p_native_descriptor_bank(
-      shim, path ? path->input_engine : shim->next_mm2s, &descriptor_base,
-      &descriptor_count);
-  if ((!path && shim->next_mm2s == dma->channel_count_per_direction) ||
+      shim, shared_path ? path->input_engine : shim->next_mm2s,
+      &descriptor_base, &descriptor_count);
+  if ((!shared_path && shim->next_mm2s == dma->channel_count_per_direction) ||
       descriptors > descriptor_count - *used ||
       input->source->phase_count > dma->task_queue_depth) {
     return loom_aie2p_native_reject(
@@ -292,16 +319,8 @@ iree_status_t loom_aie2p_native_route_input(
   }
   const uint64_t origin = (uint64_t)shim->coordinate.column
                           << context->family->column_shift;
-  if (!path) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate(context->pass->arena,
-                                             sizeof(*path), (void**)&path));
-    *path = (loom_aie2p_native_input_path_t){
-        .next = owner->input_paths,
-        .first = input,
-        .shim = shim,
-        .input_engine = shim->next_mm2s++,
-    };
-    owner->input_paths = path;
+  if (!shared_path) {
+    path->input_engine = shim->next_mm2s++;
     const uint16_t engine = path->input_engine;
     path->input_queue =
         (uint32_t)(loom_xdna_register_field_address(
@@ -310,8 +329,6 @@ iree_status_t loom_aie2p_native_route_input(
                        shim->coordinate, &engine) -
                    origin);
   }
-  input->path = path;
-  path->last = input;
   iree_string_view_t reason;
   bool receivers_valid = false;
   IREE_RETURN_IF_ERROR(loom_aie2p_native_input_receivers(
@@ -350,7 +367,7 @@ iree_status_t loom_aie2p_native_route_input(
             LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD2_ENABLE_PACKET, 1) |
         loom_xdna_register_field_encode(
             LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD2_PACKET_ID,
-            input->shared_receiver ? 0 : i);
+            input->window_capacity ? 0 : i);
     phase->descriptor = descriptor_base + *used;
     ++*used;
     const uint64_t span =
@@ -392,7 +409,7 @@ iree_status_t loom_aie2p_native_route_input(
     }
     IREE_RETURN_IF_ERROR(loom_aie2p_native_input_descriptor(
         context, shim, phase->descriptor, binding, offset, span, phase->words));
-    if (!shared_path && (!input->shared_receiver || !i) &&
+    if (!shared_path && (!input->window_capacity || !i) &&
         !loom_aie2p_native_input_route(
             context, next_source, canonical, shim->coordinate,
             LOOM_XDNA_STREAM_PORT_DMA, path->input_engine,

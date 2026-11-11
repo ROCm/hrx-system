@@ -273,11 +273,11 @@ class DistributionPathTest
     iree_arena_block_pool_deinitialize(&blocks_);
   }
 
-  const loom_aie2p_native_distribution_t* Select(size_t stream,
-                                                 uint32_t records = 2,
-                                                 size_t receivers = 1,
-                                                 bool packet = false,
-                                                 bool repeat_first = false) {
+  const loom_aie2p_native_distribution_t* Form(size_t stream,
+                                               uint32_t records = 2,
+                                               size_t receivers = 1,
+                                               bool packet = false,
+                                               bool repeat_first = false) {
     workers_[Worker(stream)].distribution_packets = packet;
     auto& cohort = cohorts_[stream];
     cohort.destination_count = receivers + (repeat_first ? 1 : 0);
@@ -296,10 +296,56 @@ class DistributionPathTest
       cursor.exact_admissions = true;
     }
     bool valid = false;
+    IREE_EXPECT_OK(loom_aie2p_native_form_worker_distributions(
+        &context_, &realization_, Worker(stream), &valid));
+    EXPECT_TRUE(valid);
+    return workers_[Worker(stream)].distribution_plan->batches[0].distribution;
+  }
+
+  const loom_aie2p_native_distribution_t* SelectPrepared(size_t stream) {
+    bool valid = false;
     IREE_EXPECT_OK(loom_aie2p_native_select_worker_distributions(
         &context_, &realization_, Worker(stream), &next_source_, &valid));
     EXPECT_TRUE(valid);
     return workers_[Worker(stream)].distributions;
+  }
+
+  const loom_aie2p_native_distribution_t* Select(size_t stream,
+                                                 uint32_t records = 2,
+                                                 size_t receivers = 1,
+                                                 bool packet = false,
+                                                 bool repeat_first = false) {
+    Form(stream, records, receivers, packet, repeat_first);
+    return SelectPrepared(stream);
+  }
+
+  void CheckCompleteDemandFormation(bool packet) {
+    for (size_t i = 0; i < kStreams; ++i) {
+      const auto* distribution = Form(i, 2, 2, packet);
+      ASSERT_NE(distribution, nullptr);
+      EXPECT_EQ(distribution->sender.channel, &channels_[i * 3]);
+      EXPECT_EQ(distribution->sender.tile, pools_[0]);
+      ASSERT_EQ(distribution->receiver_count, 2u);
+      for (size_t j = 0; j < 2; ++j) {
+        EXPECT_EQ(distribution->receivers[j].channel,
+                  &channels_[i * 3 + j + 1]);
+        EXPECT_EQ(distribution->receivers[j].tile, pools_[j + 1]);
+      }
+    }
+    EXPECT_EQ(context_.routing.route_count, 0u);
+    for (const auto* tile : pools_) {
+      EXPECT_EQ(tile->next_mm2s, 0);
+      EXPECT_EQ(tile->next_s2mm, 0);
+      EXPECT_EQ(tile->descriptor_counts[0], 0);
+      EXPECT_EQ(tile->descriptor_counts[1], 0);
+    }
+    for (size_t i = 0; i < kStreams; ++i) {
+      EXPECT_NE(SelectPrepared(i), nullptr);
+    }
+    EXPECT_EQ(pools_[0]->next_mm2s, 2);
+    EXPECT_EQ(pools_[1]->next_s2mm, 2);
+    EXPECT_EQ(pools_[2]->next_s2mm, 2);
+    EXPECT_GT(context_.routing.route_count, 0u);
   }
 
   // Selection-owned temporary memory.
@@ -400,6 +446,14 @@ TEST_P(DistributionPathTest, SimultaneousStreamsKeepIndependentPaths) {
   EXPECT_EQ(second->path, later_second->path);
   EXPECT_EQ(pools_[0]->next_mm2s, 2);
   EXPECT_EQ(pools_[1]->next_s2mm, 2);
+}
+
+TEST_P(DistributionPathTest, CircuitDemandPrecedesPhysicalAllocation) {
+  CheckCompleteDemandFormation(false);
+}
+
+TEST_P(DistributionPathTest, PacketDemandPrecedesPhysicalAllocation) {
+  CheckCompleteDemandFormation(true);
 }
 
 TEST_P(DistributionPathTest, EarlierSelectionSweepCannotReuseItsOwnPath) {

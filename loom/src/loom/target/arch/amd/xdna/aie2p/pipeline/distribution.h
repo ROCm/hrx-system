@@ -43,7 +43,14 @@ loom_aie2p_native_distribution_t* loom_aie2p_native_reusable_distribution(
     const loom_pipeline_transport_t* transport,
     const loom_pipeline_transport_batch_t* batch, uint32_t repetitions);
 
-// Selects on-chip copy programs before transfer and configuration emission.
+// Forms batch geometries, endpoint correspondence, and path compatibility
+// without assigning physical queues, descriptors, or routes.
+iree_status_t loom_aie2p_native_form_worker_distributions(
+    loom_aie2p_native_context_t* context,
+    const loom_pipeline_realization_t* realization,
+    iree_host_size_t worker_index, bool* out_valid);
+
+// Selects physical resources for the retained on-chip copy programs.
 iree_status_t loom_aie2p_native_select_worker_distributions(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization,

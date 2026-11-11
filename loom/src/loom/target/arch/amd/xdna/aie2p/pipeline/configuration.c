@@ -331,7 +331,7 @@ static iree_status_t loom_aie2p_native_config_transfers(
       for (iree_host_size_t j = 0; j < input->source->phase_count; ++j) {
         const loom_aie2p_native_distribution_endpoint_t* receiver =
             &input->phases[j].receiver;
-        if (input == input->path->first && (!input->shared_receiver || !j)) {
+        if (input == input->path->first && (!input->window_capacity || !j)) {
           IREE_RETURN_IF_ERROR(
               loom_aie2p_native_config_reset_distribution_endpoint(
                   config, receiver, LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY));
@@ -1194,7 +1194,7 @@ iree_status_t loom_aie2p_native_emit_configuration(
           &config, input->path->shim, input->path->input_engine,
           LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM));
       const iree_host_size_t queue_count =
-          input->shared_receiver ? 1 : input->source->phase_count;
+          input->window_capacity ? 1 : input->source->phase_count;
       for (iree_host_size_t j = 0; j < queue_count; ++j) {
         IREE_RETURN_IF_ERROR(
             loom_aie2p_native_config_wait_distribution_endpoint(
