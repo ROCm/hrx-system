@@ -207,7 +207,7 @@ TEST_F(GraphBarrierTest, AdditionalDependencyEdgeBarriersLikeInlineEdge) {
   EXPECT_EQ(command_buffer_.barrier_count, 1u);
 }
 
-TEST_F(GraphBarrierTest, BarrierUsesRetireIssueAndAllMemoryScopes) {
+TEST_F(GraphBarrierTest, InternalBarrierUsesDeviceMemoryScopes) {
   TestNode a(0, {});
   TestNode b(1, {a.get()});
   EXPECT_FALSE(Record(a));
@@ -218,12 +218,14 @@ TEST_F(GraphBarrierTest, BarrierUsesRetireIssueAndAllMemoryScopes) {
             IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE);
   EXPECT_EQ(command_buffer_.flags, IREE_HAL_BARRIER_FLAG_NONE);
   EXPECT_EQ(command_buffer_.memory_barrier_count, 1u);
-  EXPECT_EQ(
-      command_buffer_.memory_barrier.source_scope,
-      IREE_HAL_ACCESS_SCOPE_MEMORY_READ | IREE_HAL_ACCESS_SCOPE_MEMORY_WRITE);
-  EXPECT_EQ(
-      command_buffer_.memory_barrier.target_scope,
-      IREE_HAL_ACCESS_SCOPE_MEMORY_READ | IREE_HAL_ACCESS_SCOPE_MEMORY_WRITE);
+  const iree_hal_access_scope_t device_access =
+      IREE_HAL_ACCESS_SCOPE_CONSTANT_READ |
+      IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+      IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE;
+  EXPECT_EQ(command_buffer_.memory_barrier.source_scope, device_access);
+  EXPECT_EQ(command_buffer_.memory_barrier.target_scope, device_access);
   EXPECT_EQ(command_buffer_.buffer_barrier_count, 0u);
 }
 

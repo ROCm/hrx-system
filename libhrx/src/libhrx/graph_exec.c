@@ -223,11 +223,18 @@ iree_status_t hrx_graph_record_node_barrier(
   }
 
   if (has_hazard) {
+    // Every operation in a recorded partition executes on this device. Host
+    // calls and other partitions cross the system-scope entry/exit barriers;
+    // dependencies within the partition only order device memory accesses.
+    const iree_hal_access_scope_t device_access =
+        IREE_HAL_ACCESS_SCOPE_CONSTANT_READ |
+        IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+        IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+        IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+        IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE;
     const iree_hal_memory_barrier_t memory_barrier = {
-        .source_scope = IREE_HAL_ACCESS_SCOPE_MEMORY_READ |
-                        IREE_HAL_ACCESS_SCOPE_MEMORY_WRITE,
-        .target_scope = IREE_HAL_ACCESS_SCOPE_MEMORY_READ |
-                        IREE_HAL_ACCESS_SCOPE_MEMORY_WRITE,
+        .source_scope = device_access,
+        .target_scope = device_access,
     };
     const iree_hal_barrier_t execution_barrier = {
         .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
