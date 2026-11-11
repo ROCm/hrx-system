@@ -266,10 +266,14 @@ jobs:
           # Retain the manylinux glibc floor while exercising current GCC diagnostics.
           yum install -y \
             "gcc-toolset-${GCC_TOOLSET}-binutils" \
+            "gcc-toolset-${GCC_TOOLSET}-binutils-gold" \
             "gcc-toolset-${GCC_TOOLSET}-gcc" \
             "gcc-toolset-${GCC_TOOLSET}-gcc-c++" \
             "gcc-toolset-${GCC_TOOLSET}-libatomic-devel"
           toolset_root="/opt/rh/gcc-toolset-${GCC_TOOLSET}/root"
+          # rules_cc prefers gold when lld is absent. Keep it in the selected
+          # toolset so detection cannot fall back to the image's older linker.
+          "${toolset_root}/usr/bin/ld.gold" --version
           echo "${toolset_root}/usr/bin" >> "$GITHUB_PATH"
           # Replace the image's older toolset library paths as well as its compiler.
           {
