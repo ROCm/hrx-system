@@ -2315,19 +2315,47 @@ class Translator final : private Initialization::Evaluation {
                            unit_.control()->getBoolType(), owner);
   }
 
-  Value dispatch_selection(const SelectedLvalue& selected, cxx::AST* owner,
-                           const std::function<Value(size_t)>& operation,
-                           size_t ordinal = 0) {
-    if (ordinal + 1 == selected.alternatives.size()) {
-      return operation(ordinal);
+  loom_value_id_t selection_before(const SelectedLvalue& selected,
+                                   size_t ordinal, cxx::AST* owner) {
+    auto* ordinal_type = unit_.control()->getUnsignedIntType();
+    auto expected =
+        scalars_.integer(ordinal, LOOM_SCALAR_TYPE_I32, locations_.get(owner));
+    return scalars_.binary(cxx::TokenKind::T_LESS, selected.selector, expected,
+                           ordinal_type, unit_.control()->getBoolType(), owner);
+  }
+
+  Value dispatch_selection_range(const SelectedLvalue& selected,
+                                 cxx::AST* owner,
+                                 const std::function<Value(size_t)>& operation,
+                                 size_t begin, size_t end) {
+    IREE_ASSERT_LT(begin, end);
+    if (begin + 1 == end) {
+      return operation(begin);
     }
+    if (end - begin <= 3) {
+      return selected_value(
+          selection_condition(selected, begin, owner),
+          types_.unqualified_value(selected.type), owner, [&](size_t arm) {
+            return arm == 0 ? operation(begin)
+                            : dispatch_selection_range(
+                                  selected, owner, operation, begin + 1, end);
+          });
+    }
+    const size_t midpoint = begin + (end - begin) / 2;
     return selected_value(
-        selection_condition(selected, ordinal, owner),
+        selection_before(selected, midpoint, owner),
         types_.unqualified_value(selected.type), owner, [&](size_t arm) {
-          return arm == 0 ? operation(ordinal)
-                          : dispatch_selection(selected, owner, operation,
-                                               ordinal + 1);
+          return arm == 0 ? dispatch_selection_range(selected, owner, operation,
+                                                     begin, midpoint)
+                          : dispatch_selection_range(selected, owner, operation,
+                                                     midpoint, end);
         });
+  }
+
+  Value dispatch_selection(const SelectedLvalue& selected, cxx::AST* owner,
+                           const std::function<Value(size_t)>& operation) {
+    return dispatch_selection_range(selected, owner, operation, 0,
+                                    selected.alternatives.size());
   }
 
   // Result of one ordinary source call. Exact reference aliases retain the

@@ -236,3 +236,70 @@ func.def public @update(%data: buffer, %data_byte_offset: offset, %choice: i32, 
   %36 = scalar.addi %33, %35 : i32
   func.return %36 : i32
 }
+
+// ====
+// Wide selected-reference reads use a balanced ordinal tree. The source
+// choice is evaluated once, and no read path is deeper than log2(N).
+unsigned selected_read(unsigned choice, unsigned first, unsigned second,
+                       unsigned third, unsigned fourth) {
+  unsigned& selected = choice == 0u   ? first
+                       : choice == 1u ? second
+                       : choice == 2u ? third
+                                      : fourth;
+  return selected;
+}
+
+// ----
+func.def public @selected_read(%choice: i32, %first: i32, %second: i32, %third: i32, %fourth: i32) -> (i32) {
+  %6 = scalar.constant 0 : i32
+  %7 = scalar.cmpi eq, %choice, %6 : i32
+  %22 = scf.if %7 -> (i32) {
+    %19 = scalar.constant 0 : i32
+    scf.yield %19 : i32
+  } else {
+    %8 = scalar.constant 1 : i32
+    %9 = scalar.cmpi eq, %choice, %8 : i32
+    %18 = scf.if %9 -> (i32) {
+      %15 = scalar.constant 0 : i32
+      scf.yield %15 : i32
+    } else {
+      %10 = scalar.constant 2 : i32
+      %11 = scalar.cmpi eq, %choice, %10 : i32
+      %14 = scf.if %11 -> (i32) {
+        %12 = scalar.constant 0 : i32
+        scf.yield %12 : i32
+      } else {
+        %13 = scalar.constant 1 : i32
+        scf.yield %13 : i32
+      }
+      %16 = scalar.constant 1 : i32
+      %17 = scalar.addi %14, %16 : i32
+      scf.yield %17 : i32
+    }
+    %20 = scalar.constant 1 : i32
+    %21 = scalar.addi %18, %20 : i32
+    scf.yield %21 : i32
+  }
+  %23 = scalar.constant 2 : i32
+  %24 = scalar.cmpi ult, %22, %23 : i32
+  %selected = scf.if %24 -> (i32) {
+    %26 = scalar.constant 0 : i32
+    %27 = scalar.cmpi eq, %22, %26 : i32
+    %28 = scf.if %27 -> (i32) {
+      scf.yield %first : i32
+    } else {
+      scf.yield %second : i32
+    }
+    scf.yield %28 : i32
+  } else {
+    %29 = scalar.constant 2 : i32
+    %30 = scalar.cmpi eq, %22, %29 : i32
+    %31 = scf.if %30 -> (i32) {
+      scf.yield %third : i32
+    } else {
+      scf.yield %fourth : i32
+    }
+    scf.yield %31 : i32
+  }
+  func.return %selected : i32
+}
