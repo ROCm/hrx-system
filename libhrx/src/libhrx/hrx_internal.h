@@ -224,47 +224,19 @@ static_assert(HRX_MAP_WRITE == IREE_HAL_MEMORY_ACCESS_WRITE,
 // Internal types backing opaque handles
 //===----------------------------------------------------------------------===//
 
-#define HRX_MAX_DEVICES 64
-
 // Status payload (allocated on error, NULL = OK).
 typedef struct hrx_status_s {
   hrx_status_code_t code;
   char* message;
 } hrx_status_s;
 
-// Allocator (wraps iree_hal_allocator_t, owned by device).
-typedef struct hrx_allocator_s {
-  iree_atomic_ref_count_t ref_count;
-  iree_hal_allocator_t* hal_allocator;
-  hrx_device_t device;
-} hrx_allocator_s;
-
-// Device instance.
-typedef struct hrx_device_s {
-  iree_atomic_ref_count_t ref_count;
-  hrx_accelerator_type_t type;
-  int ordinal;
-  iree_hal_device_t* hal_device;
-  // Device-owned HRX handles in family-major provisioned queue order.
-  hrx_queue_s* queues;
-  // Provisioned compute queue used by device-scoped memory and executable
-  // compatibility APIs. Borrowed from |hal_device|.
-  iree_hal_queue_t* dispatch_queue;
-  iree_hal_device_group_t* hal_device_group;
-  // Shared native backing and retention coordination for public memory pools.
-  hrx_mem_pool_backing_t mem_pool_backing;
-  bool profiling_active;
-  hrx_allocator_s allocator;           // Inline, owned by device.
-  hrx_buffer_table_t buffer_table;     // Device-pointer-to-buffer lookup.
-  iree_arena_block_pool_t block_pool;  // Shared arena pool for graphs.
-  char name[128];
-  char architecture[64];
-} hrx_device_s;
-
 // Timeline semaphore.
 typedef struct hrx_semaphore_s {
+  // References to the wrapper, which owns its dependencies once.
   iree_atomic_ref_count_t ref_count;
+  // Retained native timeline.
   iree_hal_semaphore_t* hal_semaphore;
+  // Retained device keeping the timeline's group and services alive.
   hrx_device_t device;
 } hrx_semaphore_s;
 
@@ -366,7 +338,9 @@ typedef struct hrx_graph_edge_t {
 } hrx_graph_edge_t;
 
 typedef struct hrx_graph_s {
+  // References to this template, including instantiated executables.
   iree_atomic_ref_count_t ref_count;
+  // Retained device providing the graph arena and captured native resources.
   hrx_device_t device;
 
   iree_arena_allocator_t arena;
@@ -485,70 +459,24 @@ iree_status_t hrx_graph_exec_instantiate_locked(
     hrx_graph_exec_t exec, hrx_graph_node_block_t* node_blocks,
     iree_host_size_t node_count);
 
-// Memory pool (stream-ordered memory management).
-typedef struct hrx_mem_pool_s {
-  // References held by public handles and bounded allocations.
-  iree_atomic_ref_count_t ref_count;
-
-  // Retained device owning the cache shared by compatible public pools.
-  hrx_device_t device;
-
-  // HIP/CUDA-style creation properties used for attribute queries.
-  hrx_mem_pool_props_t props;
-
-  // TLSF HAL pool serving suballocated and dedicated ordinary backing.
-  iree_hal_pool_t* hal_pool;
-
-  // Embedded request linked into the device's shared retention policy.
-  hrx_mem_pool_retention_t retention;
-
-  // Bytes charged to the immutable |props.max_size| allocation limit.
-  size_t allocation_budget_current;
-
-  // HIP/CUDA release threshold attribute in bytes.
-  uint64_t release_threshold;
-
-  // Allocations that have retained the HAL pool but have not reserved from it.
-  uint32_t inflight_allocation_count;
-
-  // True when internal dependency insertion is allowed for reuse.
-  bool reuse_allow_internal_dependencies;
-
-  // True when event dependencies are honored for reuse.
-  bool reuse_follow_event_dependencies;
-
-  // True when opportunistic reuse is allowed.
-  bool reuse_allow_opportunistic;
-
-  // Current backing borrowed by this child, excluding shared idle storage.
-  uint64_t reserved_mem_current;
-
-  // Peak backing borrowed by this child, including padding and fragmentation.
-  uint64_t reserved_mem_high;
-
-  // Current backing bytes charged to live allocations.
-  uint64_t used_mem_current;
-
-  // Peak backing bytes charged to live allocations.
-  uint64_t used_mem_high;
-
-  // Platform-native pool handle, if one is imported or exported.
-  void* platform_handle;
-
-  // Guards mutable pool attributes and lazy HAL pool creation.
-  iree_slim_mutex_t mutex;
-} hrx_mem_pool_s;
-
 // Timeline fence wrapper.
 typedef struct hrx_fence_s {
+  // References to the wrapper, which owns its dependencies once.
   iree_atomic_ref_count_t ref_count;
+  // Retained native fence owning the timepoint values and native semaphores.
   iree_hal_fence_t* hal_fence;
+  // The allocation continues with hrx_semaphore_t owners[hal_fence->capacity],
+  // in native timepoint order. These keep each device group and runtime alive.
 } hrx_fence_s;
 
 // Buffer view wrapper.
 typedef struct hrx_buffer_view_s {
+  // References to the view, which owns its dependencies once.
   iree_atomic_ref_count_t ref_count;
+  // Retained native shape and encoding metadata.
   iree_hal_buffer_view_t* hal_buffer_view;
+  // Retained allocation owner, including its pool and device group.
+  hrx_buffer_t buffer;
 } hrx_buffer_view_s;
 
 // HAL executable wrapper for direct queue/stream dispatch.
@@ -567,39 +495,6 @@ typedef struct hrx_executable_s {
 } hrx_executable_s;
 
 typedef struct iree_async_proactor_pool_t iree_async_proactor_pool_t;
-
-//===----------------------------------------------------------------------===//
-// Global state
-//===----------------------------------------------------------------------===//
-
-typedef struct hrx_cpu_state_t {
-  hrx_device_s devices[HRX_MAX_DEVICES];
-  int device_count;
-  bool initialized;
-  iree_hal_driver_t* driver;
-} hrx_cpu_state_t;
-
-typedef struct hrx_gpu_state_t {
-  hrx_device_s devices[HRX_MAX_DEVICES];
-  int device_count;
-  bool initialized;
-  iree_hal_driver_t* driver;
-} hrx_gpu_state_t;
-
-typedef struct hrx_shared_state_t {
-  iree_async_proactor_pool_t* proactor_pool;
-  iree_allocator_t host_allocator;
-  int init_count;
-  bool shared_initialized;
-} hrx_shared_state_t;
-
-// Access global state (defined in runtime.c).
-hrx_shared_state_t* hrx_get_shared_state(void);
-hrx_gpu_state_t* hrx_get_gpu_state(void);
-hrx_cpu_state_t* hrx_get_cpu_state(void);
-
-// Ensure shared infrastructure is created (idempotent).
-hrx_status_t hrx_ensure_shared_state(void);
 
 // Returns whether a topology edge can provide read/write access to the
 // non-coherent allocation surface used for ordinary device allocations.

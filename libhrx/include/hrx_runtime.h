@@ -4,164 +4,25 @@
 #ifndef HRX_RUNTIME_H_
 #define HRX_RUNTIME_H_
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include "hrx_memory.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 //===----------------------------------------------------------------------===//
-// Export macros
-//===----------------------------------------------------------------------===//
-
-#if defined(_WIN32) && defined(HRX_BUILDING_SHARED)
-#define HRX_API __declspec(dllexport)
-#elif defined(_WIN32) && !defined(HRX_STATIC)
-#define HRX_API __declspec(dllimport)
-#elif defined(HRX_BUILDING_SHARED)
-#define HRX_API __attribute__((visibility("default")))
-#elif defined(HRX_STATIC)
-#define HRX_API
-#else
-#define HRX_API
-#endif
-
-//===----------------------------------------------------------------------===//
-// Host allocator (type + system getter only — functions after Status)
-//
-// Two-word value type, layout-compatible with iree_allocator_t.
-// Used for host-side memory allocation (not device memory).
-// hrx_host_allocator_system() returns the process-wide system allocator,
-// backed by mimalloc when available.
-//===----------------------------------------------------------------------===//
-
-typedef struct hrx_host_allocator_t {
-  void* self;
-  void* ctl;
-} hrx_host_allocator_t;
-
-// Returns the process-wide system allocator. Valid as soon as libhrx is loaded
-// (no hrx_*_initialize() required).
-HRX_API hrx_host_allocator_t hrx_host_allocator_system(void);
-
-//===----------------------------------------------------------------------===//
-// Version
-//===----------------------------------------------------------------------===//
-
-#define HRX_VERSION_MAJOR 0
-#define HRX_VERSION_MINOR 1
-#define HRX_VERSION_PATCH 0
-
-HRX_API void hrx_runtime_version(int* major, int* minor, int* patch);
-
-//===----------------------------------------------------------------------===//
-// Status
-//
-// Values match iree_status_code_t. Verified by static_assert in
-// implementation.
-//===----------------------------------------------------------------------===//
-
-typedef enum hrx_status_code_t {
-  HRX_STATUS_OK = 0,
-  HRX_STATUS_CANCELLED = 1,
-  HRX_STATUS_UNKNOWN = 2,
-  HRX_STATUS_INVALID_ARGUMENT = 3,
-  HRX_STATUS_DEADLINE_EXCEEDED = 4,
-  HRX_STATUS_NOT_FOUND = 5,
-  HRX_STATUS_ALREADY_EXISTS = 6,
-  HRX_STATUS_PERMISSION_DENIED = 7,
-  HRX_STATUS_OUT_OF_MEMORY = 8,  // IREE: RESOURCE_EXHAUSTED
-  HRX_STATUS_FAILED_PRECONDITION = 9,
-  HRX_STATUS_ABORTED = 10,
-  HRX_STATUS_OUT_OF_RANGE = 11,
-  HRX_STATUS_UNIMPLEMENTED = 12,
-  HRX_STATUS_INTERNAL = 13,
-  HRX_STATUS_UNAVAILABLE = 14,
-  HRX_STATUS_DATA_LOSS = 15,
-} hrx_status_code_t;
-
-// Status is an opaque pointer. NULL = OK, non-NULL = error with payload.
-typedef struct hrx_status_s* hrx_status_t;
-
-static inline bool hrx_status_is_ok(hrx_status_t status) {
-  return status == NULL;
-}
-
-static inline hrx_status_t hrx_ok_status(void) { return NULL; }
-
-HRX_API hrx_status_t hrx_make_status(hrx_status_code_t code,
-                                     const char* message);
-
-HRX_API hrx_status_code_t hrx_status_code(hrx_status_t status);
-
-HRX_API hrx_status_t hrx_status_to_string(hrx_status_t status,
-                                          char** out_message,
-                                          size_t* out_length);
-
-HRX_API void hrx_status_free_message(char* message);
-
-HRX_API void hrx_status_ignore(hrx_status_t status);
-
-//===----------------------------------------------------------------------===//
-// Host allocator functions
-//===----------------------------------------------------------------------===//
-
-// Allocates zeroed memory.
-HRX_API hrx_status_t hrx_host_allocator_malloc(hrx_host_allocator_t allocator,
-                                               size_t byte_length,
-                                               void** out_ptr);
-
-// Allocates uninitialized memory. Only use when immediately overwriting.
-HRX_API hrx_status_t hrx_host_allocator_malloc_uninitialized(
-    hrx_host_allocator_t allocator, size_t byte_length, void** out_ptr);
-
-// Reallocates to |byte_length|. Extended bytes are undefined.
-HRX_API hrx_status_t hrx_host_allocator_realloc(hrx_host_allocator_t allocator,
-                                                size_t byte_length,
-                                                void** inout_ptr);
-
-// Duplicates a byte block.
-HRX_API hrx_status_t hrx_host_allocator_clone(hrx_host_allocator_t allocator,
-                                              const void* src,
-                                              size_t byte_length,
-                                              void** out_ptr);
-
-// Frees memory. NULL is a no-op.
-HRX_API void hrx_host_allocator_free(hrx_host_allocator_t allocator, void* ptr);
-
-// Allocates zeroed, aligned memory. The byte at |offset| within the
-// allocation will be aligned to at least |min_alignment|.
-HRX_API hrx_status_t hrx_host_allocator_malloc_aligned(
-    hrx_host_allocator_t allocator, size_t byte_length, size_t min_alignment,
-    size_t offset, void** out_ptr);
-
-// Reallocates aligned memory.
-HRX_API hrx_status_t hrx_host_allocator_realloc_aligned(
-    hrx_host_allocator_t allocator, size_t byte_length, size_t min_alignment,
-    size_t offset, void** inout_ptr);
-
-// Frees memory from hrx_host_allocator_malloc_aligned. NULL is a no-op.
-HRX_API void hrx_host_allocator_free_aligned(hrx_host_allocator_t allocator,
-                                             void* ptr);
-
-//===----------------------------------------------------------------------===//
 // Opaque handle types
 //===----------------------------------------------------------------------===//
 
-typedef struct hrx_device_s* hrx_device_t;
 typedef struct hrx_queue_s* hrx_queue_t;
 typedef struct hrx_allocator_s* hrx_allocator_t;
 typedef struct hrx_semaphore_s* hrx_semaphore_t;
 typedef struct hrx_stream_s* hrx_stream_t;
-typedef struct hrx_buffer_s* hrx_buffer_t;
 typedef struct hrx_fence_s* hrx_fence_t;
 typedef struct hrx_buffer_view_s* hrx_buffer_view_t;
 typedef struct hrx_executable_s* hrx_executable_t;
 typedef struct hrx_physical_memory_s* hrx_physical_memory_t;
 typedef struct hrx_event_s* hrx_event_t;
-typedef struct hrx_mem_pool_s* hrx_mem_pool_t;
 typedef struct hrx_graph_s* hrx_graph_t;
 typedef struct hrx_graph_exec_s* hrx_graph_exec_t;
 typedef struct hrx_graph_node_s* hrx_graph_node_t;
@@ -172,71 +33,6 @@ typedef struct hrx_graph_node_s* hrx_graph_node_t;
 // All values match their IREE counterparts. Verified by static_assert
 // in the implementation. Bitfield types use typedef + #define.
 //===----------------------------------------------------------------------===//
-
-typedef enum hrx_accelerator_type_t {
-  HRX_ACCELERATOR_GPU = 0,
-  HRX_ACCELERATOR_CPU = 1,
-} hrx_accelerator_type_t;
-
-typedef enum hrx_device_property_t {
-  HRX_DEVICE_PROPERTY_NAME = 0,
-  HRX_DEVICE_PROPERTY_ARCHITECTURE,
-  HRX_DEVICE_PROPERTY_TOTAL_MEMORY,
-  HRX_DEVICE_PROPERTY_COMPUTE_UNITS,
-  HRX_DEVICE_PROPERTY_MAX_WORKGROUP_SIZE,
-  HRX_DEVICE_PROPERTY_WARP_SIZE,
-  HRX_DEVICE_PROPERTY_MAX_SHARED_MEMORY,
-  HRX_DEVICE_PROPERTY_CLOCK_RATE,
-  HRX_DEVICE_PROPERTY_PCI_BUS_ID,
-} hrx_device_property_t;
-
-// Memory type bitfield. Values match iree_hal_memory_type_t.
-typedef uint32_t hrx_memory_type_t;
-#define HRX_MEMORY_TYPE_NONE 0x00000000u
-#define HRX_MEMORY_TYPE_OPTIMAL 0x00000001u
-#define HRX_MEMORY_TYPE_HOST_VISIBLE 0x00000002u
-#define HRX_MEMORY_TYPE_HOST_COHERENT 0x00000004u
-#define HRX_MEMORY_TYPE_HOST_CACHED 0x00000008u
-#define HRX_MEMORY_TYPE_HOST_LOCAL 0x00000042u
-#define HRX_MEMORY_TYPE_DEVICE_VISIBLE 0x00000010u
-#define HRX_MEMORY_TYPE_DEVICE_LOCAL 0x00000030u
-#define HRX_MEMORY_TYPE_DEVICE_UNCACHED 0x00000080u
-
-// Memory access bitfield. Values match iree_hal_memory_access_t.
-typedef uint16_t hrx_memory_access_t;
-#define HRX_MEMORY_ACCESS_NONE 0x00
-#define HRX_MEMORY_ACCESS_READ 0x01
-#define HRX_MEMORY_ACCESS_WRITE 0x02
-#define HRX_MEMORY_ACCESS_ALL 0x03
-
-// Buffer usage bitfield. Transfer, storage, and host-mapping values match HAL.
-typedef uint32_t hrx_buffer_usage_t;
-#define HRX_BUFFER_USAGE_NONE 0x00000000u
-#define HRX_BUFFER_USAGE_TRANSFER_SOURCE 0x00000001u
-#define HRX_BUFFER_USAGE_TRANSFER_TARGET 0x00000002u
-#define HRX_BUFFER_USAGE_TRANSFER 0x00000003u
-#define HRX_BUFFER_USAGE_STORAGE_READ 0x00000400u
-#define HRX_BUFFER_USAGE_STORAGE_WRITE 0x00000800u
-#define HRX_BUFFER_USAGE_STORAGE 0x00000C00u
-#define HRX_BUFFER_USAGE_MAPPING_SCOPED 0x01000000u
-#define HRX_BUFFER_USAGE_MAPPING_PERSISTENT 0x02000000u
-// Owned backing prepared for explicit virtual-address mappings throughout the
-// device's sealed group. The ordinary buffer address remains usable. Source
-// construction fails if that complete access set is unsupported.
-// Callers retain the backing until every alias is detached and all accesses
-// have completed. Host-pointer import cannot provide this capability.
-#define HRX_BUFFER_USAGE_MAPPING_SOURCE 0x04000000u
-#define HRX_BUFFER_USAGE_DEFAULT 0x00000C03u
-
-// Operation flags for hrx_buffer_map. READ/WRITE are permissions; DISCARD
-// and MAY_ALIAS apply only to the requested mapping.
-typedef uint16_t hrx_map_flags_t;
-#define HRX_MAP_READ HRX_MEMORY_ACCESS_READ
-#define HRX_MAP_WRITE HRX_MEMORY_ACCESS_WRITE
-// Prior contents of the mapped range may be discarded. Implies WRITE.
-#define HRX_MAP_DISCARD 0x04
-// Mapped accesses may alias other concurrent accesses; supplies no ordering.
-#define HRX_MAP_MAY_ALIAS 0x08
 
 // Dispatch flags (hrx-specific, no IREE equivalent).
 typedef enum hrx_dispatch_flags_t {
@@ -259,24 +55,6 @@ typedef struct hrx_semaphore_list_t {
   uint64_t* values;
   size_t count;
 } hrx_semaphore_list_t;
-
-// Borrowed string storage valid only for the duration documented by the
-// containing API.
-typedef struct hrx_string_view_t {
-  // Borrowed string data; not necessarily NUL terminated.
-  const char* data;
-  // String length in bytes.
-  size_t size;
-} hrx_string_view_t;
-
-// Borrowed byte storage valid only for the duration documented by the
-// containing API.
-typedef struct hrx_const_byte_span_t {
-  // Borrowed byte data, or NULL when |data_length| is zero.
-  const void* data;
-  // Byte length of |data|.
-  size_t data_length;
-} hrx_const_byte_span_t;
 
 // Buffer parameters for allocator operations.
 typedef struct hrx_buffer_params_t {
@@ -302,243 +80,13 @@ typedef struct hrx_executable_export_info_t {
 } hrx_executable_export_info_t;
 
 //===----------------------------------------------------------------------===//
-// Device events
-//===----------------------------------------------------------------------===//
-
-#define HRX_DEVICE_EVENT_ABI_VERSION_0 0u
-#define HRX_DEVICE_ASAN_REPORT_ABI_VERSION_0 0u
-#define HRX_DEVICE_PRINTF_EVENT_ABI_VERSION_0 0u
-
-typedef uint32_t hrx_device_event_type_t;
-enum hrx_device_event_type_bits_t {
-  HRX_DEVICE_EVENT_TYPE_NONE = 0u,
-  HRX_DEVICE_EVENT_TYPE_DRIVER_FAILURE = 1u,
-  HRX_DEVICE_EVENT_TYPE_ASAN_REPORT = 2u,
-  HRX_DEVICE_EVENT_TYPE_UBSAN_REPORT = 3u,
-  HRX_DEVICE_EVENT_TYPE_PRINTF = 4u,
-  HRX_DEVICE_EVENT_TYPE_HOST_CALL = 5u,
-  HRX_DEVICE_EVENT_TYPE_USER = 0x8000u,
-};
-
-typedef uint32_t hrx_device_event_severity_t;
-enum hrx_device_event_severity_bits_t {
-  HRX_DEVICE_EVENT_SEVERITY_TRACE = 0u,
-  HRX_DEVICE_EVENT_SEVERITY_INFO = 1u,
-  HRX_DEVICE_EVENT_SEVERITY_WARNING = 2u,
-  HRX_DEVICE_EVENT_SEVERITY_ERROR = 3u,
-  HRX_DEVICE_EVENT_SEVERITY_FATAL = 4u,
-};
-
-typedef uint64_t hrx_device_event_flags_t;
-enum hrx_device_event_flag_bits_t {
-  HRX_DEVICE_EVENT_FLAG_NONE = 0u,
-};
-
-// Source attribution for a device event.
-typedef struct hrx_device_event_source_t {
-  // Stable device identifier string when available.
-  hrx_string_view_t device_id;
-  // Driver name such as "amd", "task", "vulkan", or "webgpu".
-  hrx_string_view_t driver_id;
-  // Physical device ordinal, or UINT32_MAX when not applicable.
-  uint32_t physical_device_ordinal;
-  // Queue ordinal, or UINT32_MAX when not applicable.
-  uint32_t queue_ordinal;
-  // Backend-assigned executable identifier, or 0 when not applicable.
-  uint64_t executable_id;
-  // Executable export ordinal, or UINT32_MAX when not applicable.
-  uint32_t export_ordinal;
-} hrx_device_event_source_t;
-
-// Device event envelope passed to hrx_device_event_sink_t callbacks.
-//
-// Events and referenced payload storage are borrowed and valid only for the
-// duration of the sink callback. Sinks retaining event data must copy it.
-typedef struct hrx_device_event_t {
-  // Size of this record in bytes.
-  uint32_t record_length;
-  // ABI version of this event envelope.
-  uint32_t abi_version;
-  // Concrete event family.
-  hrx_device_event_type_t type;
-  // Producer-assigned severity.
-  hrx_device_event_severity_t severity;
-  // Event-family flags.
-  hrx_device_event_flags_t flags;
-  // Monotonic producer sequence when available, or 0.
-  uint64_t sequence;
-  // Host timestamp in nanoseconds when available, or 0.
-  uint64_t host_time_ns;
-  // Source attribution for the event producer.
-  hrx_device_event_source_t source;
-  // Event-family payload selected by |type|.
-  hrx_const_byte_span_t payload;
-  // Optional backend-native payload for advanced tools.
-  hrx_const_byte_span_t implementation_payload;
-} hrx_device_event_t;
-
-// Device printf stream classification.
-typedef uint32_t hrx_device_printf_stream_t;
-enum hrx_device_printf_stream_bits_t {
-  HRX_DEVICE_PRINTF_STREAM_DEFAULT = 0u,
-  HRX_DEVICE_PRINTF_STREAM_STDOUT = 1u,
-  HRX_DEVICE_PRINTF_STREAM_STDERR = 2u,
-};
-
-typedef uint32_t hrx_device_printf_flags_t;
-enum hrx_device_printf_flag_bits_t {
-  HRX_DEVICE_PRINTF_FLAG_NONE = 0u,
-};
-
-// Device printf payload.
-typedef struct hrx_device_printf_event_t {
-  // Size of this record in bytes.
-  uint32_t record_length;
-  // ABI version of this printf payload.
-  uint32_t abi_version;
-  // Stream hint for the output.
-  hrx_device_printf_stream_t stream;
-  // Printf event flags.
-  hrx_device_printf_flags_t flags;
-  // Format string identifier, or 0 when |text| is already formatted.
-  uint64_t format_id;
-  // Borrowed already-formatted text when available.
-  hrx_string_view_t text;
-  // Borrowed encoded arguments when available.
-  hrx_const_byte_span_t arguments;
-} hrx_device_printf_event_t;
-
-typedef uint32_t hrx_device_asan_access_kind_t;
-enum hrx_device_asan_access_kind_bits_t {
-  HRX_DEVICE_ASAN_ACCESS_KIND_UNKNOWN = 0u,
-  HRX_DEVICE_ASAN_ACCESS_KIND_READ = 1u,
-  HRX_DEVICE_ASAN_ACCESS_KIND_WRITE = 2u,
-  HRX_DEVICE_ASAN_ACCESS_KIND_ATOMIC = 3u,
-};
-
-typedef uint32_t hrx_device_asan_report_flags_t;
-enum hrx_device_asan_report_flag_bits_t {
-  HRX_DEVICE_ASAN_REPORT_FLAG_NONE = 0u,
-};
-
-// Address-sanitizer report payload.
-typedef struct hrx_device_asan_report_t {
-  // Size of this record in bytes.
-  uint32_t record_length;
-  // ABI version of this report payload.
-  uint32_t abi_version;
-  // Instrumented access kind that triggered the report.
-  hrx_device_asan_access_kind_t access_kind;
-  // ASAN report flags.
-  hrx_device_asan_report_flags_t flags;
-  // Application address that failed the ASAN check.
-  uint64_t fault_address;
-  // Access size in bytes.
-  uint64_t access_length;
-  // Compiler-assigned instrumentation site identifier.
-  uint64_t site_id;
-  // Shadow address consulted by the check, or 0 when unavailable.
-  uint64_t shadow_address;
-  // Shadow value observed by the check, or 0 when unavailable.
-  uint64_t shadow_value;
-  // Workgroup id that produced the report.
-  uint32_t workgroup_id[3];
-  // Workitem id that produced the report.
-  uint32_t workitem_id[3];
-  // Device-visible dispatch packet pointer, or 0 when unavailable.
-  uint64_t source_dispatch_ptr;
-} hrx_device_asan_report_t;
-
-typedef void (*hrx_device_event_sink_fn_t)(void* user_data,
-                                           const hrx_device_event_t* event);
-
-// Value-type event sink copied into HRX devices at creation time.
-typedef struct hrx_device_event_sink_t {
-  // Callback receiving one complete event.
-  hrx_device_event_sink_fn_t fn;
-  // Opaque application-owned callback data.
-  void* user_data;
-} hrx_device_event_sink_t;
-
-static inline void hrx_device_event_sink_discard_callback(
-    void* user_data, const hrx_device_event_t* event) {
-  (void)user_data;
-  (void)event;
-}
-
-static inline hrx_device_event_sink_t hrx_device_event_sink_discard(void) {
-  hrx_device_event_sink_t sink;
-  sink.fn = hrx_device_event_sink_discard_callback;
-  sink.user_data = NULL;
-  return sink;
-}
-
-// Sets the process-wide sink used by subsequently created HRX devices.
-//
-// The sink must be set before any accelerator is initialized. Device-event
-// callbacks may run on driver-owned service, callback, or completion threads.
-// Sink implementations must not call back into the originating device or
-// submit/wait/destroy work from the callback; slow processing should copy the
-// event into application-owned storage and return.
-HRX_API hrx_status_t
-hrx_runtime_set_device_event_sink(hrx_device_event_sink_t sink);
-
-//===----------------------------------------------------------------------===//
-// GPU accelerator lifecycle
-//===----------------------------------------------------------------------===//
-
-// Initializes GPU execution resources. Initialization and shutdown are
-// externally serialized with other accelerator lifecycle operations. A failed
-// initialization releases its execution resources and may be retried.
-//
-// Native driver connections have process lifetime. HRX_GPU_DRIVER is read for
-// each initialization; HAL visibility settings are captured when the selected
-// driver is first created. Device selection and execution options are applied
-// to each new execution lifetime. The HRX shared library remains loaded after
-// GPU initialization; static embedders must keep the implementation available
-// for the process lifetime.
-HRX_API hrx_status_t hrx_gpu_initialize(uint32_t flags);
-
-// Releases GPU devices, queues, and their host workers. The application
-// releases device resources and joins threads using HRX before calling
-// shutdown. Native connections remain owned by HRX so subsequent initialization
-// can reuse the operating system's process binding. CPU execution remains
-// available if active.
-HRX_API hrx_status_t hrx_gpu_shutdown(void);
-HRX_API hrx_status_t hrx_gpu_device_count(int* count);
-HRX_API hrx_status_t hrx_gpu_device_get(int index, hrx_device_t* device);
-
-//===----------------------------------------------------------------------===//
-// CPU accelerator lifecycle
-//===----------------------------------------------------------------------===//
-
-HRX_API hrx_status_t hrx_cpu_initialize(uint32_t flags);
-HRX_API hrx_status_t hrx_cpu_shutdown(void);
-HRX_API hrx_status_t hrx_cpu_device_count(int* count);
-HRX_API hrx_status_t hrx_cpu_device_get(int index, hrx_device_t* device);
-
-//===----------------------------------------------------------------------===//
-// Device operations (generic, works for any accelerator type)
-//===----------------------------------------------------------------------===//
-
-HRX_API hrx_status_t hrx_device_get_property(hrx_device_t device,
-                                             hrx_device_property_t prop,
-                                             void* value, size_t value_size);
-
-HRX_API hrx_status_t hrx_device_get_type(hrx_device_t device,
-                                         hrx_accelerator_type_t* type);
-
-HRX_API void hrx_device_retain(hrx_device_t device);
-HRX_API void hrx_device_release(hrx_device_t device);
-
-//===----------------------------------------------------------------------===//
 // Exact queues
 //
 // A queue identifies one execution queue within a device, not a selection mask
 // or a virtual stream. Queue references do not retain their parent device.
-// Release acquired/retained queue references before releasing the device or
-// shutting down its accelerator. Completion is established with semaphores;
-// releasing a queue is not a submission wait.
+// Release acquired/retained queue references before releasing the device or its
+// containing group. Completion is established with semaphores; releasing a
+// queue is not a submission wait.
 //===----------------------------------------------------------------------===//
 
 typedef uint32_t hrx_queue_role_flags_t;
@@ -782,26 +330,6 @@ HRX_API hrx_status_t hrx_buffer_allocate(hrx_stream_t stream, size_t size,
                                          hrx_buffer_usage_t usage,
                                          hrx_buffer_t* buffer);
 
-HRX_API void hrx_buffer_retain(hrx_buffer_t buffer);
-HRX_API void hrx_buffer_release(hrx_buffer_t buffer);
-
-HRX_API hrx_status_t hrx_buffer_map(hrx_buffer_t buffer, hrx_map_flags_t flags,
-                                    size_t offset, size_t size,
-                                    void** mapped_ptr);
-
-HRX_API hrx_status_t hrx_buffer_unmap(hrx_buffer_t buffer);
-
-// Returns the whole-buffer native address for its HRX device using the prepared
-// program binding. This does not map the buffer or alter an active scoped
-// mapping. Unscoped legacy buffers use native address export. The caller
-// completes allocation prerequisites and retains the buffer while using the
-// address. On failure the output is NULL and the address-access error is
-// returned.
-HRX_API hrx_status_t hrx_buffer_get_device_ptr(hrx_buffer_t buffer,
-                                               void** device_ptr);
-
-HRX_API hrx_status_t hrx_buffer_get_size(hrx_buffer_t buffer, size_t* size);
-
 //===----------------------------------------------------------------------===//
 // Synchronous data transfer
 //
@@ -817,6 +345,110 @@ HRX_API hrx_status_t hrx_synchronous_h2d(hrx_queue_t queue,
 HRX_API hrx_status_t hrx_synchronous_d2h(hrx_queue_t queue, hrx_buffer_t src,
                                          size_t src_offset, void* host_dst,
                                          size_t size);
+
+//===----------------------------------------------------------------------===//
+// Execution and memory barriers
+//===----------------------------------------------------------------------===//
+
+// Concrete logical buffer range; the buffer owner remains live through use.
+typedef struct hrx_buffer_ref_t {
+  // Borrowed buffer handle.
+  hrx_buffer_t buffer;
+  // First byte relative to the buffer.
+  size_t offset;
+  // Number of bytes accessed.
+  size_t length;
+} hrx_buffer_ref_t;
+
+typedef uint32_t hrx_execution_stage_t;
+#define HRX_EXECUTION_STAGE_COMMAND_ISSUE (1u << 0)
+#define HRX_EXECUTION_STAGE_COMMAND_PROCESS (1u << 1)
+#define HRX_EXECUTION_STAGE_DISPATCH (1u << 2)
+#define HRX_EXECUTION_STAGE_TRANSFER (1u << 3)
+#define HRX_EXECUTION_STAGE_COMMAND_RETIRE (1u << 4)
+#define HRX_EXECUTION_STAGE_HOST (1u << 5)
+#define HRX_EXECUTION_STAGE_ATOMIC (1u << 6)
+
+typedef uint32_t hrx_access_scope_t;
+#define HRX_ACCESS_SCOPE_INDIRECT_COMMAND_READ (1u << 0)
+#define HRX_ACCESS_SCOPE_CONSTANT_READ (1u << 1)
+#define HRX_ACCESS_SCOPE_DISPATCH_READ (1u << 2)
+#define HRX_ACCESS_SCOPE_DISPATCH_WRITE (1u << 3)
+#define HRX_ACCESS_SCOPE_TRANSFER_READ (1u << 4)
+#define HRX_ACCESS_SCOPE_TRANSFER_WRITE (1u << 5)
+#define HRX_ACCESS_SCOPE_HOST_READ (1u << 6)
+#define HRX_ACCESS_SCOPE_HOST_WRITE (1u << 7)
+#define HRX_ACCESS_SCOPE_MEMORY_READ (1u << 8)
+#define HRX_ACCESS_SCOPE_MEMORY_WRITE (1u << 9)
+#define HRX_ACCESS_SCOPE_ATOMIC_READ (1u << 10)
+#define HRX_ACCESS_SCOPE_ATOMIC_WRITE (1u << 11)
+
+// Explicit minimum system visibility, independent of prepared pool queries.
+typedef uint64_t hrx_barrier_flags_t;
+#define HRX_BARRIER_FLAG_NONE UINT64_C(0)
+#define HRX_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE (UINT64_C(1) << 0)
+#define HRX_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE (UINT64_C(1) << 1)
+
+typedef struct hrx_memory_barrier_t {
+  // Earlier accesses included in the dependency.
+  hrx_access_scope_t source_scope;
+  // Later accesses included in the dependency.
+  hrx_access_scope_t target_scope;
+} hrx_memory_barrier_t;
+
+typedef struct hrx_buffer_barrier_t {
+  // Earlier accesses to the logical range.
+  hrx_access_scope_t source_scope;
+  // Later accesses to the logical range.
+  hrx_access_scope_t target_scope;
+  // Concrete range retained under the enclosing operation's resource policy.
+  hrx_buffer_ref_t buffer_ref;
+  // Borrowed prepared resource actions, or NULL for a local access dependency.
+  const hrx_memory_transition_recipe_t* recipe;
+} hrx_buffer_barrier_t;
+
+// One local dependency. Prepared effects can be combined across buffers at
+// this boundary; required resource recipes accompany their concrete ranges.
+// An empty effect does not remove stage/access ordering. Program-only effects
+// cannot execute on a queue, and host actions require a family supporting them.
+typedef struct hrx_barrier_t {
+  // Earlier local stages; zero contributes no source execution dependency.
+  hrx_execution_stage_t source_stage_mask;
+  // Later local stages; zero contributes no target execution dependency.
+  hrx_execution_stage_t target_stage_mask;
+  // Explicit minimum global cache semantics.
+  hrx_barrier_flags_t flags;
+  // Combined prepared local visibility actions.
+  hrx_memory_effects_t effects;
+  // Number of global access dependencies.
+  size_t memory_barrier_count;
+  // Borrowed global access dependencies, captured during the call.
+  const hrx_memory_barrier_t* memory_barriers;
+  // Number of ranged access dependencies.
+  size_t buffer_barrier_count;
+  // Borrowed ranges and recipes, captured during the call.
+  const hrx_buffer_barrier_t* buffer_barriers;
+} hrx_barrier_t;
+
+typedef struct hrx_barrier_list_t {
+  // Number of records. Zero explicitly requests no extra payload barriers.
+  size_t count;
+  // Borrowed records; may be NULL when count is zero.
+  const hrx_barrier_t* values;
+} hrx_barrier_list_t;
+
+// Waits -> before barriers -> operation -> after barriers -> signals.
+// A NULL wrapper or boundary retains conservative system visibility. A supplied
+// list replaces that boundary's defaults; an empty list requests no extra
+// payload barriers. Mandatory native control publication stays intact.
+// Barriers do not establish dependencies between submissions, publish unrelated
+// host mappings, or make an unsupported topology relationship usable.
+typedef struct hrx_queue_barriers_t {
+  // After waits and before the operation; NULL retains safe defaults.
+  const hrx_barrier_list_t* before;
+  // After the complete operation and before signals; NULL retains defaults.
+  const hrx_barrier_list_t* after;
+} hrx_queue_barriers_t;
 
 //===----------------------------------------------------------------------===//
 // Stream operations (batched via pending command buffer)
@@ -846,19 +478,44 @@ HRX_API hrx_status_t hrx_stream_update_buffer(hrx_stream_t stream,
 // join any stream timeline, select another queue, or implicitly flush a stream.
 //===----------------------------------------------------------------------===//
 
+// Allocates the entire batch from the explicit pool after waits, without a
+// host join. At least one signal is required. Returned handles retain their
+// native pool and group; addresses and contents become usable at the allocation
+// signal. Record dependent work with those prerequisites, and wait before host
+// address/mapping access. Synchronous failure schedules nothing and clears all
+// output handles; asynchronous failure fails the signal semaphores.
+HRX_API hrx_status_t hrx_queue_alloca(
+    hrx_queue_t queue, const hrx_semaphore_list_t* waits,
+    const hrx_semaphore_list_t* signals, hrx_mem_pool_t pool,
+    size_t request_count, const hrx_pool_reservation_request_t* requests,
+    hrx_buffer_t* out_buffers);
+
+// Ends the allocation epochs for roots from one pool after waits. Signals
+// include target-visible release and return to the pool with causal history.
+// Handles are borrowed and not consumed. Synchronous failure leaves every
+// epoch live. The caller retains owners until the operation is terminal.
+HRX_API hrx_status_t hrx_queue_dealloca(hrx_queue_t queue,
+                                        const hrx_semaphore_list_t* waits,
+                                        const hrx_semaphore_list_t* signals,
+                                        size_t buffer_count,
+                                        const hrx_buffer_t* buffers);
+
 HRX_API hrx_status_t hrx_queue_fill(
     hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
     const hrx_semaphore_list_t* signal_semaphores, hrx_buffer_t buffer,
-    size_t offset, size_t size, const void* pattern, size_t pattern_size);
+    size_t offset, size_t size, const void* pattern, size_t pattern_size,
+    const hrx_queue_barriers_t* barriers);
 
-HRX_API hrx_status_t hrx_queue_copy(
-    hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
-    const hrx_semaphore_list_t* signal_semaphores, hrx_buffer_t src,
-    size_t src_offset, hrx_buffer_t dst, size_t dst_offset, size_t size);
+HRX_API hrx_status_t
+hrx_queue_copy(hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
+               const hrx_semaphore_list_t* signal_semaphores, hrx_buffer_t src,
+               size_t src_offset, hrx_buffer_t dst, size_t dst_offset,
+               size_t size, const hrx_queue_barriers_t* barriers);
 
 HRX_API hrx_status_t hrx_queue_barrier(
     hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
-    const hrx_semaphore_list_t* signal_semaphores);
+    const hrx_semaphore_list_t* signal_semaphores,
+    const hrx_queue_barriers_t* barriers);
 
 // Dispatch config for kernel launch.
 typedef struct hrx_dispatch_config_t {
@@ -867,19 +524,13 @@ typedef struct hrx_dispatch_config_t {
   uint32_t subgroup_size;
 } hrx_dispatch_config_t;
 
-// Buffer binding reference for dispatch.
-typedef struct hrx_buffer_ref_t {
-  hrx_buffer_t buffer;
-  size_t offset;
-  size_t length;
-} hrx_buffer_ref_t;
-
 HRX_API hrx_status_t hrx_queue_dispatch(
     hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
     const hrx_semaphore_list_t* signal_semaphores, hrx_executable_t executable,
     uint32_t export_ordinal, const hrx_dispatch_config_t* config,
     const void* constants, size_t constants_size,
-    const hrx_buffer_ref_t* bindings, size_t binding_count, uint32_t flags);
+    const hrx_buffer_ref_t* bindings, size_t binding_count,
+    const hrx_queue_barriers_t* barriers, uint32_t flags);
 
 HRX_API hrx_status_t hrx_stream_dispatch(
     hrx_stream_t stream, hrx_executable_t executable, uint32_t export_ordinal,
@@ -895,7 +546,12 @@ HRX_API hrx_status_t hrx_queue_host_call(
     const hrx_semaphore_list_t* signal_semaphores, hrx_host_call_fn_t callback,
     void* user_data);
 
-HRX_API hrx_status_t hrx_stream_execution_barrier(hrx_stream_t stream);
+// Records one local barrier in the stream's pending command buffer. NULL keeps
+// the convenience of a full local read/write dependency. Explicit descriptors
+// carry prepared visibility and ranged recipes without a submission or host
+// wait.
+HRX_API hrx_status_t hrx_stream_barrier(hrx_stream_t stream,
+                                        const hrx_barrier_t* barrier);
 
 //===----------------------------------------------------------------------===//
 // Direct executables
@@ -937,6 +593,9 @@ HRX_API hrx_status_t hrx_executable_lookup_export_by_name(
 // Fences
 //===----------------------------------------------------------------------===//
 
+// Creates a fence holding up to |capacity| unique timeline semaphores. Inserted
+// semaphores and their device groups remain alive until the fence is released.
+// Mutation requires exclusive access and no outstanding use of the fence.
 HRX_API hrx_status_t hrx_fence_create(size_t capacity, hrx_fence_t* fence);
 
 HRX_API hrx_status_t hrx_fence_create_at(hrx_semaphore_t semaphore,
@@ -949,6 +608,8 @@ HRX_API hrx_status_t hrx_fence_insert(hrx_fence_t fence,
                                       hrx_semaphore_t semaphore,
                                       uint64_t value);
 
+// Inserts each timepoint from |from_fence|, retaining its owner independently.
+// If capacity is exceeded, timepoints inserted before the failure remain.
 HRX_API hrx_status_t hrx_fence_extend(hrx_fence_t into_fence,
                                       hrx_fence_t from_fence);
 
@@ -981,6 +642,8 @@ typedef uint32_t hrx_encoding_type_t;
 #define HRX_ENCODING_TYPE_OPAQUE 0u
 #define HRX_ENCODING_TYPE_DENSE_ROW_MAJOR 1u
 
+// Creates shape and encoding metadata retaining |buffer| and its allocation
+// owners. The caller may release its buffer reference after creating the view.
 HRX_API hrx_status_t hrx_buffer_view_create(hrx_buffer_t buffer,
                                             size_t shape_rank,
                                             const int64_t* shape,
@@ -997,215 +660,6 @@ HRX_API hrx_status_t hrx_buffer_view_rank(hrx_buffer_view_t buffer_view,
 
 HRX_API hrx_status_t hrx_buffer_view_dim(hrx_buffer_view_t buffer_view,
                                          size_t dim, int64_t* value);
-
-//===----------------------------------------------------------------------===//
-// Virtual buffers and mapping
-//===----------------------------------------------------------------------===//
-
-// Access site selected within a device's sealed group.
-typedef enum hrx_memory_site_t {
-  HRX_MEMORY_SITE_HOST = 0,
-  HRX_MEMORY_SITE_QUEUE = 1,
-  HRX_MEMORY_SITE_PROGRAM = 2,
-} hrx_memory_site_t;
-
-// Borrowed process-local scope token. Its device group must remain live.
-// A zero-initialized token selects every admitted reservation projection.
-typedef struct hrx_memory_scope_t {
-  // Opaque group identity; never dereferenced by callers.
-  const void* domain;
-  // Opaque coordinate within the group.
-  uint32_t id;
-} hrx_memory_scope_t;
-
-// Resolves the public host scope in the device's sealed group for reuse in
-// mapping descriptors. No queue is required.
-HRX_API hrx_status_t hrx_device_query_host_memory_scope(
-    hrx_device_t device, hrx_memory_scope_t* out_scope);
-
-// Resolves the QUEUE or PROGRAM site of the exact family for reuse in mapping
-// descriptors. Family ordinals come from device queue-family discovery; an
-// existing queue supplies its ordinal through hrx_queue_get_family_ordinal.
-// This query neither requires a provisioned queue nor acquires one. HOST uses
-// hrx_device_query_host_memory_scope instead.
-HRX_API hrx_status_t hrx_device_query_queue_family_memory_scope(
-    hrx_device_t device, uint32_t family_ordinal, hrx_memory_site_t site,
-    hrx_memory_scope_t* out_scope);
-
-// Complete simultaneous access to one address reservation. All families of
-// every listed device participate. Devices must belong to the same sealed
-// group; the arrays are borrowed only for query/construction. Host access
-// describes the virtual views and does not select physical backing placement.
-typedef struct hrx_virtual_buffer_scope_t {
-  // Nonzero number of distinct participating devices.
-  size_t device_count;
-  // Devices whose first entry supplies the stable buffer's device identity.
-  const hrx_device_t* devices;
-  // Required public host mapping access, or NONE for execution-only addresses.
-  hrx_memory_access_t host_access;
-} hrx_virtual_buffer_scope_t;
-
-// One ordinary allocation class that may back a virtual reservation. Preparing
-// its metadata does not allocate physical payload or change its placement.
-typedef struct hrx_virtual_buffer_source_t {
-  // Device whose allocator supplies this class, in the reservation's group.
-  hrx_device_t device;
-  // Memory type passed to MAPPING_SOURCE allocations from this device.
-  hrx_memory_type_t memory_type;
-} hrx_virtual_buffer_source_t;
-
-// Accepted backing classes, borrowed only during query/construction. The
-// reservation captures cache obligations and atomic guarantees per site/pair
-// from the classes serving those sites. Device-only backing can serve GPU
-// projections alongside shared backing serving CPU and GPU projections. Later
-// mappings preserve this fixed contract and cover all sites sharing the
-// selected native page tables, including for classes not listed here.
-typedef struct hrx_virtual_buffer_sources_t {
-  // Nonzero number of accepted allocation classes.
-  size_t source_count;
-  // Explicit physical owners and memory types, independent of virtual access.
-  const hrx_virtual_buffer_source_t* sources;
-} hrx_virtual_buffer_sources_t;
-
-// Caller-declared prior state. No installed-source table is maintained by HRX.
-typedef enum hrx_memory_mapping_operation_t {
-  // Replaces one homogeneous prior-source interval, including a hole.
-  // A NULL source clears it; previous_source identifies the old backing.
-  HRX_MEMORY_MAPPING_OPERATION_REPLACE = 0,
-  // Binds a non-NULL source into an interval the caller knows is unbound.
-  HRX_MEMORY_MAPPING_OPERATION_BIND = 1,
-  // Removes a binding; requires previous_source, NULL source, and NONE access.
-  HRX_MEMORY_MAPPING_OPERATION_UNBIND = 2,
-  // Changes permissions, supplying the currently installed source and offset.
-  HRX_MEMORY_MAPPING_OPERATION_PROTECT = 3,
-} hrx_memory_mapping_operation_t;
-
-// Explicit address constraints; zero leaves native address equality
-// unconstrained.
-typedef uint32_t hrx_virtual_buffer_flags_t;
-#define HRX_VIRTUAL_BUFFER_FLAG_NONE 0u
-// Every admitted host and program binding uses the same numeric base address.
-// Host access still requires an explicit host_access in the reservation scope.
-#define HRX_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS (1u << 0)
-
-typedef struct hrx_virtual_buffer_capabilities_t {
-  // Largest address interval in bytes; zero means the scope is unsupported.
-  size_t max_byte_length;
-  // Required reservation length multiple and minimum base alignment.
-  size_t reservation_granularity;
-  // Smallest independently replaceable destination offset/length unit.
-  size_t mapping_granularity;
-  // Largest supported power-of-two minimum base alignment.
-  size_t max_alignment;
-  // Supported operations, with bit N corresponding to mapping operation N.
-  uint32_t operations;
-  // Address constraints supported across the complete simultaneous scope.
-  hrx_virtual_buffer_flags_t supported_flags;
-} hrx_virtual_buffer_capabilities_t;
-
-// Cold query: prepares the allocation source metadata without acquiring
-// addresses or physical payload. Unsupported address geometry returns OK with
-// zero capabilities; source preparation, invalid scope, and native failures
-// propagate.
-HRX_API hrx_status_t hrx_virtual_buffer_query_capabilities(
-    hrx_virtual_buffer_scope_t scope, hrx_virtual_buffer_sources_t sources,
-    hrx_virtual_buffer_capabilities_t* out_capabilities);
-
-typedef struct hrx_virtual_buffer_options_t {
-  // Nonzero virtual buffer length in bytes.
-  size_t byte_length;
-  // Minimum power-of-two base alignment; zero selects the native minimum.
-  size_t min_alignment;
-  // Minimum power-of-two mapping unit; zero selects the native minimum.
-  size_t mapping_granularity;
-  // Required address constraints; zero preserves independent native policy.
-  hrx_virtual_buffer_flags_t flags;
-} hrx_virtual_buffer_options_t;
-
-// Reserves addresses without physical payload and returns one owned ordinary
-// buffer reference. On failure the output is NULL. Buffer references and views
-// keep addresses live; installed backing remains independently caller-owned.
-HRX_API hrx_status_t hrx_virtual_buffer_create(
-    hrx_virtual_buffer_scope_t scope, hrx_virtual_buffer_sources_t sources,
-    const hrx_virtual_buffer_options_t* options, hrx_buffer_t* out_buffer);
-
-typedef struct hrx_virtual_buffer_info_t {
-  // Visible byte zero in the native target's mapping coordinates, in bytes.
-  size_t mapping_byte_offset;
-  // Achieved independently replaceable mapping unit, in bytes.
-  size_t mapping_granularity;
-  // Supported operations, with bit N corresponding to mapping operation N.
-  uint32_t operations;
-  // Number of native page-table projections owned by the root buffer.
-  uint32_t projection_count;
-} hrx_virtual_buffer_info_t;
-
-// Queries achieved geometry after any asynchronous allocation has committed.
-HRX_API hrx_status_t hrx_virtual_buffer_query_info(
-    hrx_buffer_t buffer, hrx_virtual_buffer_info_t* out_info);
-
-// Resolves one concrete scope to a native page-table projection. Equal IDs on
-// the same native root share mapping state. An all-sites scope is not concrete.
-HRX_API hrx_status_t hrx_virtual_buffer_resolve_projection(
-    hrx_buffer_t buffer, hrx_memory_scope_t scope, uint32_t* out_projection);
-
-// Removes all mappings at the selected scope without releasing addresses. The
-// buffer must cover the complete native target. The caller has completed all
-// affected execution and accepted mapping work and serializes mutation. This
-// cold call may wait for native removal, including after partial mapping
-// failure. It preserves any earlier failure; only success certifies backing
-// reuse, subject to other aliases and users. A zero scope selects all admitted
-// sites.
-HRX_API hrx_status_t hrx_virtual_buffer_detach(hrx_buffer_t buffer,
-                                               hrx_memory_scope_t scope);
-
-typedef uint32_t hrx_memory_mapping_source_flags_t;
-// Each binding must cover the entire native allocation at source offset zero.
-// Suballocating such storage does not make its pieces independently mappable.
-#define HRX_MEMORY_MAPPING_SOURCE_FLAG_WHOLE_ALLOCATION (1u << 0)
-
-typedef struct hrx_memory_mapping_requirements_t {
-  // Required native source offset/length granule; zero means no prepared
-  // source.
-  size_t minimum_granularity;
-  // Preferred physical allocation multiple, at least the minimum granularity.
-  size_t recommended_granularity;
-  // Additional native restrictions, including whole-allocation-only mappings.
-  hrx_memory_mapping_source_flags_t flags;
-} hrx_memory_mapping_requirements_t;
-
-// Queries the ordinary MAPPING_SOURCE allocation class without allocating
-// payload. Use its granularity with allocator or stream buffer allocation.
-// Native source construction/query failures propagate, including unsupported
-// memory classes.
-HRX_API hrx_status_t hrx_allocator_query_mapping_requirements(
-    hrx_allocator_t allocator, hrx_memory_type_t memory_type,
-    hrx_memory_mapping_requirements_t* out_requirements);
-
-typedef struct hrx_memory_mapping_t {
-  // Borrowed virtual target buffer or view.
-  hrx_buffer_t target;
-  // Prepared scope token; zero selects all admitted projections.
-  hrx_memory_scope_t scope;
-  // Byte offset within the stable reservation view.
-  size_t target_offset;
-  // Nonzero mapping length satisfying both source and destination granularity.
-  size_t byte_length;
-  // Ordinary prepared backing, or NULL for removal.
-  hrx_buffer_t source;
-  // Byte offset within source; zero when source is NULL.
-  size_t source_offset;
-  // Required permissions, including NONE for revocation or an inaccessible
-  // bind.
-  hrx_memory_access_t access;
-  // Caller-declared operation and prior binding state.
-  hrx_memory_mapping_operation_t operation;
-  // Borrowed prior backing for REPLACE or UNBIND, or NULL for a hole.
-  // BIND and PROTECT require NULL; PROTECT uses source as the prior backing.
-  hrx_buffer_t previous_source;
-  // Byte offset within previous_source; zero when previous_source is NULL.
-  size_t previous_source_offset;
-} hrx_memory_mapping_t;
 
 typedef uint64_t hrx_queue_map_flags_t;
 #define HRX_QUEUE_MAP_FLAG_NONE 0ull
@@ -1383,81 +837,6 @@ HRX_API hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream,
 HRX_API hrx_status_t hrx_stream_copy_d2h(hrx_stream_t stream, hrx_buffer_t src,
                                          size_t src_offset, void* host_dst,
                                          size_t size);
-
-//===----------------------------------------------------------------------===//
-// Memory pools (stream-ordered memory management)
-//===----------------------------------------------------------------------===//
-
-typedef enum hrx_mem_pool_attr_t {
-  HRX_MEM_POOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES = 0,
-  HRX_MEM_POOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES = 1,
-  HRX_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC = 2,
-  // Retained-byte floor contributed to the device's shared backing cache.
-  // Compatible pools share storage, so their floors combine by maximum.
-  HRX_MEM_POOL_ATTR_RELEASE_THRESHOLD = 3,
-  // Bytes borrowed by this pool, including padding and fragmentation. Empty
-  // slabs return to the device cache and cease to be charged to this pool;
-  // shared idle storage is not counted again for every potential borrower.
-  HRX_MEM_POOL_ATTR_RESERVED_MEM_CURRENT = 4,
-  // Peak bytes borrowed by this pool. Writing zero resets the watermark.
-  HRX_MEM_POOL_ATTR_RESERVED_MEM_HIGH = 5,
-  HRX_MEM_POOL_ATTR_USED_MEM_CURRENT = 6,
-  HRX_MEM_POOL_ATTR_USED_MEM_HIGH = 7,
-} hrx_mem_pool_attr_t;
-
-typedef struct hrx_mem_pool_props_t {
-  // Platform allocation-handle types requested when the pool was created.
-  uint32_t alloc_handle_type;
-  // Platform location type for the pool's backing storage.
-  uint32_t location_type;
-  // Platform device ordinal for the pool's backing storage.
-  int location_id;
-  // Maximum live reservation bytes, or zero when the pool is unbounded.
-  size_t max_size;
-} hrx_mem_pool_props_t;
-
-HRX_API hrx_status_t hrx_mem_pool_create(hrx_device_t device,
-                                         const hrx_mem_pool_props_t* props,
-                                         hrx_mem_pool_t* out_pool);
-HRX_API void hrx_mem_pool_retain(hrx_mem_pool_t pool);
-HRX_API void hrx_mem_pool_release(hrx_mem_pool_t pool);
-HRX_API hrx_status_t hrx_mem_pool_get_attribute(hrx_mem_pool_t pool,
-                                                hrx_mem_pool_attr_t attr,
-                                                uint64_t* out_value);
-HRX_API hrx_status_t hrx_mem_pool_set_attribute(hrx_mem_pool_t pool,
-                                                hrx_mem_pool_attr_t attr,
-                                                uint64_t value);
-// Returns unused child backing and trims the shared device cache, preserving
-// |min_bytes_to_keep| and every other pool's current retention request. This
-// replaces this pool's floor until an attribute update or automatic release
-// applies its configured threshold again. It does not allocate missing bytes.
-HRX_API hrx_status_t hrx_mem_pool_trim(hrx_mem_pool_t pool,
-                                       size_t min_bytes_to_keep);
-
-// Returns unused child backing and applies the configured release threshold to
-// the device's shared cache, preserving other pools' retention requests. This
-// is intended for stream-ordered free completion paths. Reclamation runs on
-// the memory owner without waiting here; statistics converge after queued
-// whole-slab returns and the ordered cache sweep complete.
-HRX_API hrx_status_t hrx_mem_pool_release_unused(hrx_mem_pool_t pool);
-
-// Records a logical allocation backed by |pool|. Logical usage is distinct
-// from physical TLSF reservations, which can remain retained for later
-// stream-ordered reuse.
-HRX_API void hrx_mem_pool_record_logical_allocation(hrx_mem_pool_t pool,
-                                                    size_t size);
-
-// Records retirement of a logical allocation backed by |pool|. The physical
-// reservation remains owned by its buffer until that buffer is released or
-// reused.
-HRX_API void hrx_mem_pool_record_logical_free(hrx_mem_pool_t pool, size_t size);
-
-// Allocates a buffer with at least 256-byte alignment and the device access
-// permissions captured by |pool|. The returned buffer owns the allocation and
-// remains valid independently of the public |pool| handle.
-HRX_API hrx_status_t hrx_mem_pool_allocate_buffer(hrx_mem_pool_t pool,
-                                                  size_t size,
-                                                  hrx_buffer_t* buffer);
 
 //===----------------------------------------------------------------------===//
 // Graphs (CUDA/HIP-style execution graphs)

@@ -6,7 +6,10 @@
 
 #include <stdlib.h>
 
+#include "barrier.h"
+#include "device_group.h"
 #include "hrx_internal.h"
+#include "mem_pool.h"
 
 // Number of semaphore wrappers converted without a transient allocation.
 #define HRX_INLINE_QUEUE_SEMAPHORES 16
@@ -104,6 +107,145 @@ static iree_status_t hrx_hal_semaphore_lists_initialize(
     hrx_hal_semaphore_lists_deinitialize(out_lists);
   }
   return status;
+}
+
+// Finite-pool allocations preserve the HRX backing owner in the existing
+// final-release attachment. Ordinary growing pools need no extra attachment.
+static void hrx_pool_buffer_release_backing(void* user_data,
+                                            size_t byte_length) {
+  (void)byte_length;
+  hrx_buffer_release((hrx_buffer_t)user_data);
+}
+
+hrx_status_t hrx_queue_alloca(hrx_queue_t queue,
+                              const hrx_semaphore_list_t* waits,
+                              const hrx_semaphore_list_t* signals,
+                              hrx_mem_pool_t pool, size_t request_count,
+                              const hrx_pool_reservation_request_t* requests,
+                              hrx_buffer_t* out_buffers) {
+  if (!request_count || !out_buffers) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "invalid allocation outputs");
+  }
+  size_t scratch_size = 0;
+  if (!iree_host_size_checked_mul(request_count,
+                                  sizeof(iree_hal_pool_reservation_request_t) +
+                                      sizeof(iree_hal_buffer_t*),
+                                  &scratch_size)) {
+    return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                           "allocation batch is too large");
+  }
+  memset(out_buffers, 0, request_count * sizeof(*out_buffers));
+  if (!queue || !pool || !requests || queue->device->group != pool->group) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "invalid allocation group, pool, or batch");
+  }
+  hrx_hal_semaphore_lists_t lists;
+  iree_status_t status =
+      hrx_hal_semaphore_lists_initialize(waits, signals, &lists);
+  if (!iree_status_is_ok(status)) {
+    return hrx_status_from_iree(status);
+  }
+  iree_hal_pool_reservation_request_t inline_requests[8];
+  iree_hal_buffer_t* inline_buffers[8];
+  iree_hal_pool_reservation_request_t* hal_requests = inline_requests;
+  iree_hal_buffer_t** hal_buffers = inline_buffers;
+  void* scratch = NULL;
+  if (request_count > IREE_ARRAYSIZE(inline_requests)) {
+    status =
+        iree_allocator_malloc(iree_allocator_system(), scratch_size, &scratch);
+    if (iree_status_is_ok(status)) {
+      hal_requests = scratch;
+      hal_buffers = (iree_hal_buffer_t**)(hal_requests + request_count);
+    }
+  }
+  size_t prepared_count = 0;
+  for (size_t i = 0; i < request_count && iree_status_is_ok(status); ++i) {
+    if (!requests[i].allocation_size ||
+        requests[i].allocation_size > SIZE_MAX) {
+      status =
+          iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                           "allocation size must fit a nonempty HRX buffer");
+    } else {
+      hal_requests[i] = (iree_hal_pool_reservation_request_t){
+          requests[i].allocation_size, requests[i].min_alignment};
+      // All fallible HRX ownership preparation happens before native
+      // acceptance.
+      status = hrx_buffer_create_from_hal(NULL, pool->group, pool->memory_type,
+                                          (size_t)requests[i].allocation_size,
+                                          NULL, &out_buffers[i]);
+      if (iree_status_is_ok(status)) {
+        hrx_buffer_t buffer = out_buffers[i];
+        buffer->hal_pool = pool->hal_pool;
+        iree_hal_pool_retain(pool->hal_pool);
+        if (pool->backing_buffer) {
+          hrx_buffer_retain(pool->backing_buffer);
+          buffer->release_user_data = pool->backing_buffer;
+          buffer->release_callback = hrx_pool_buffer_release_backing;
+        }
+        ++prepared_count;
+      }
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_queue_alloca(queue->hal_queue, lists.wait.list,
+                                   lists.signal.list, pool->hal_pool,
+                                   request_count, hal_requests, hal_buffers);
+  }
+  for (size_t i = 0; i < prepared_count; ++i) {
+    if (iree_status_is_ok(status)) {
+      out_buffers[i]->hal_buffer = hal_buffers[i];
+    } else {
+      hrx_buffer_release(out_buffers[i]);
+      out_buffers[i] = NULL;
+    }
+  }
+  iree_allocator_free(iree_allocator_system(), scratch);
+  hrx_hal_semaphore_lists_deinitialize(&lists);
+  return hrx_status_from_iree(status);
+}
+
+hrx_status_t hrx_queue_dealloca(hrx_queue_t queue,
+                                const hrx_semaphore_list_t* waits,
+                                const hrx_semaphore_list_t* signals,
+                                size_t buffer_count,
+                                const hrx_buffer_t* buffers) {
+  if (!queue || !buffer_count || !buffers) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "invalid deallocation batch");
+  }
+  hrx_hal_semaphore_lists_t lists;
+  iree_status_t status =
+      hrx_hal_semaphore_lists_initialize(waits, signals, &lists);
+  if (!iree_status_is_ok(status)) {
+    return hrx_status_from_iree(status);
+  }
+  iree_hal_buffer_t* inline_buffers[8];
+  iree_hal_buffer_t** hal_buffers = inline_buffers;
+  if (buffer_count > IREE_ARRAYSIZE(inline_buffers)) {
+    status =
+        iree_allocator_malloc_array(iree_allocator_system(), buffer_count,
+                                    sizeof(*hal_buffers), (void**)&hal_buffers);
+  }
+  for (size_t i = 0; i < buffer_count && iree_status_is_ok(status); ++i) {
+    if (!buffers[i] || buffers[i]->group != queue->device->group ||
+        !buffers[i]->hal_buffer || !buffers[i]->hal_pool) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "buffer %zu is not a group allocation root", i);
+    } else {
+      hal_buffers[i] = buffers[i]->hal_buffer;
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_queue_dealloca(queue->hal_queue, lists.wait.list,
+                                lists.signal.list, buffer_count, hal_buffers);
+  }
+  if (hal_buffers != inline_buffers) {
+    iree_allocator_free(iree_allocator_system(), hal_buffers);
+  }
+  hrx_hal_semaphore_lists_deinitialize(&lists);
+  return hrx_status_from_iree(status);
 }
 
 hrx_status_t hrx_queue_map(hrx_queue_t queue,
@@ -204,7 +346,8 @@ hrx_status_t hrx_queue_fill(hrx_queue_t queue,
                             const hrx_semaphore_list_t* wait_semaphores,
                             const hrx_semaphore_list_t* signal_semaphores,
                             hrx_buffer_t buffer, size_t offset, size_t size,
-                            const void* pattern, size_t pattern_size) {
+                            const void* pattern, size_t pattern_size,
+                            const hrx_queue_barriers_t* barriers) {
   HRX_TRACE_ZONE_BEGIN(z0, "hrx_queue_fill");
   HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
   if (!queue || !buffer || !pattern) {
@@ -226,11 +369,21 @@ hrx_status_t hrx_queue_fill(hrx_queue_t queue,
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
-  status = iree_hal_queue_fill(
-      queue->hal_queue, semaphore_lists.wait.list, semaphore_lists.signal.list,
-      buffer->hal_buffer, (iree_device_size_t)offset, (iree_device_size_t)size,
-      pattern, (iree_host_size_t)pattern_size, /*barriers=*/NULL,
-      IREE_HAL_FILL_FLAG_NONE);
+  hrx_barrier_storage_t storage;
+  if (barriers) {
+    status = hrx_barrier_storage_initialize(barriers, &storage);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_queue_fill(
+        queue->hal_queue, semaphore_lists.wait.list,
+        semaphore_lists.signal.list, buffer->hal_buffer,
+        (iree_device_size_t)offset, (iree_device_size_t)size, pattern,
+        (iree_host_size_t)pattern_size, barriers ? &storage.barriers : NULL,
+        IREE_HAL_FILL_FLAG_NONE);
+  }
+  if (barriers) {
+    hrx_barrier_storage_deinitialize(&storage);
+  }
   hrx_hal_semaphore_lists_deinitialize(&semaphore_lists);
   HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
 }
@@ -239,7 +392,8 @@ hrx_status_t hrx_queue_copy(hrx_queue_t queue,
                             const hrx_semaphore_list_t* wait_semaphores,
                             const hrx_semaphore_list_t* signal_semaphores,
                             hrx_buffer_t src, size_t src_offset,
-                            hrx_buffer_t dst, size_t dst_offset, size_t size) {
+                            hrx_buffer_t dst, size_t dst_offset, size_t size,
+                            const hrx_queue_barriers_t* barriers) {
   HRX_TRACE_ZONE_BEGIN(z0, "hrx_queue_copy");
   HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
   if (!queue || !src || !dst) {
@@ -260,18 +414,29 @@ hrx_status_t hrx_queue_copy(hrx_queue_t queue,
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
-  status = iree_hal_queue_copy(
-      queue->hal_queue, semaphore_lists.wait.list, semaphore_lists.signal.list,
-      src->hal_buffer, (iree_device_size_t)src_offset, dst->hal_buffer,
-      (iree_device_size_t)dst_offset, (iree_device_size_t)size,
-      /*barriers=*/NULL, IREE_HAL_COPY_FLAG_NONE);
+  hrx_barrier_storage_t storage;
+  if (barriers) {
+    status = hrx_barrier_storage_initialize(barriers, &storage);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_queue_copy(
+        queue->hal_queue, semaphore_lists.wait.list,
+        semaphore_lists.signal.list, src->hal_buffer,
+        (iree_device_size_t)src_offset, dst->hal_buffer,
+        (iree_device_size_t)dst_offset, (iree_device_size_t)size,
+        barriers ? &storage.barriers : NULL, IREE_HAL_COPY_FLAG_NONE);
+  }
+  if (barriers) {
+    hrx_barrier_storage_deinitialize(&storage);
+  }
   hrx_hal_semaphore_lists_deinitialize(&semaphore_lists);
   HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
 }
 
 hrx_status_t hrx_queue_barrier(hrx_queue_t queue,
                                const hrx_semaphore_list_t* wait_semaphores,
-                               const hrx_semaphore_list_t* signal_semaphores) {
+                               const hrx_semaphore_list_t* signal_semaphores,
+                               const hrx_queue_barriers_t* barriers) {
   HRX_TRACE_ZONE_BEGIN(z0, "hrx_queue_barrier");
   if (!queue) {
     HRX_RETURN_AND_END_ZONE(
@@ -285,9 +450,19 @@ hrx_status_t hrx_queue_barrier(hrx_queue_t queue,
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
-  status = iree_hal_queue_barrier(
-      queue->hal_queue, semaphore_lists.wait.list, semaphore_lists.signal.list,
-      /*barriers=*/NULL, IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+  hrx_barrier_storage_t storage;
+  if (barriers) {
+    status = hrx_barrier_storage_initialize(barriers, &storage);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_queue_barrier(queue->hal_queue, semaphore_lists.wait.list,
+                                    semaphore_lists.signal.list,
+                                    barriers ? &storage.barriers : NULL,
+                                    IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+  }
+  if (barriers) {
+    hrx_barrier_storage_deinitialize(&storage);
+  }
   hrx_hal_semaphore_lists_deinitialize(&semaphore_lists);
   HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
 }
@@ -297,7 +472,8 @@ hrx_status_t hrx_queue_dispatch(
     const hrx_semaphore_list_t* signal_semaphores, hrx_executable_t executable,
     uint32_t export_ordinal, const hrx_dispatch_config_t* config,
     const void* constants, size_t constants_size,
-    const hrx_buffer_ref_t* bindings, size_t binding_count, uint32_t flags) {
+    const hrx_buffer_ref_t* bindings, size_t binding_count,
+    const hrx_queue_barriers_t* barriers, uint32_t flags) {
   HRX_TRACE_ZONE_BEGIN(z0, "hrx_queue_dispatch");
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, export_ordinal);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, binding_count);
@@ -334,21 +510,28 @@ hrx_status_t hrx_queue_dispatch(
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
-  iree_hal_buffer_ref_t* hal_bindings = NULL;
-  if (binding_count > 0) {
-    hal_bindings = (iree_hal_buffer_ref_t*)calloc(
-        binding_count, sizeof(iree_hal_buffer_ref_t));
-    if (!hal_bindings) {
+  // Binding translation lives only through native acceptance. Ordinary
+  // dispatches need no temporary allocation; larger public lists remain valid.
+  iree_hal_buffer_ref_t inline_bindings[16];
+  iree_hal_buffer_ref_t* hal_bindings = inline_bindings;
+  void* binding_storage = NULL;
+  if (binding_count > IREE_ARRAYSIZE(inline_bindings)) {
+    iree_host_size_t storage_size = 0;
+    if (!iree_host_size_checked_mul(binding_count, sizeof(*hal_bindings),
+                                    &storage_size)) {
       HRX_RETURN_AND_END_ZONE(
-          z0, hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
-                              "failed to allocate dispatch bindings"));
+          z0, hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                              "dispatch binding storage overflows"));
     }
-    for (size_t i = 0; i < binding_count; ++i) {
-      if (!bindings[i].buffer) {
-        free(hal_bindings);
-        HRX_RETURN_AND_END_ZONE(z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                                                    "binding buffer is NULL"));
-      }
+    status = iree_allocator_malloc_uninitialized(
+        iree_allocator_system(), storage_size, &binding_storage);
+    hal_bindings = binding_storage;
+  }
+  for (size_t i = 0; i < binding_count && iree_status_is_ok(status); ++i) {
+    if (!bindings[i].buffer) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "binding buffer is NULL");
+    } else {
       hal_bindings[i] =
           iree_hal_make_buffer_ref(bindings[i].buffer->hal_buffer,
                                    (iree_device_size_t)bindings[i].offset,
@@ -357,41 +540,52 @@ hrx_status_t hrx_queue_dispatch(
   }
 
   hrx_hal_semaphore_lists_t semaphore_lists;
-  status = hrx_hal_semaphore_lists_initialize(
-      wait_semaphores, signal_semaphores, &semaphore_lists);
-  if (!iree_status_is_ok(status)) {
-    free(hal_bindings);
-    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
+  if (iree_status_is_ok(status)) {
+    status = hrx_hal_semaphore_lists_initialize(
+        wait_semaphores, signal_semaphores, &semaphore_lists);
   }
+  if (iree_status_is_ok(status)) {
+    iree_hal_dispatch_config_t hal_config = {
+        .workgroup_size =
+            {
+                config->workgroup_size[0],
+                config->workgroup_size[1],
+                config->workgroup_size[2],
+            },
+        .workgroup_count =
+            {
+                config->workgroup_count[0],
+                config->workgroup_count[1],
+                config->workgroup_count[2],
+            },
+    };
+    iree_const_byte_span_t hal_constants =
+        iree_make_const_byte_span((const uint8_t*)constants, constants_size);
+    iree_hal_buffer_ref_list_t hal_binding_list = {
+        .count = (iree_host_size_t)binding_count,
+        .values = hal_bindings,
+    };
 
-  iree_hal_dispatch_config_t hal_config = {
-      .workgroup_size =
-          {
-              config->workgroup_size[0],
-              config->workgroup_size[1],
-              config->workgroup_size[2],
-          },
-      .workgroup_count =
-          {
-              config->workgroup_count[0],
-              config->workgroup_count[1],
-              config->workgroup_count[2],
-          },
-  };
-  iree_const_byte_span_t hal_constants =
-      iree_make_const_byte_span((const uint8_t*)constants, constants_size);
-  iree_hal_buffer_ref_list_t hal_binding_list = {
-      .count = (iree_host_size_t)binding_count,
-      .values = hal_bindings,
-  };
-
-  status = iree_hal_queue_dispatch(
-      queue->hal_queue, semaphore_lists.wait.list, semaphore_lists.signal.list,
-      executable->hal_executable,
-      iree_hal_executable_function_from_index(export_ordinal), hal_config,
-      hal_constants, hal_binding_list, /*barriers=*/NULL, hal_flags);
-  free(hal_bindings);
-  hrx_hal_semaphore_lists_deinitialize(&semaphore_lists);
+    hrx_barrier_storage_t storage;
+    if (barriers) {
+      status = hrx_barrier_storage_initialize(barriers, &storage);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_queue_dispatch(
+          queue->hal_queue, semaphore_lists.wait.list,
+          semaphore_lists.signal.list, executable->hal_executable,
+          iree_hal_executable_function_from_index(export_ordinal), hal_config,
+          hal_constants, hal_binding_list, barriers ? &storage.barriers : NULL,
+          hal_flags);
+    }
+    if (barriers) {
+      hrx_barrier_storage_deinitialize(&storage);
+    }
+    hrx_hal_semaphore_lists_deinitialize(&semaphore_lists);
+  }
+  if (binding_storage) {
+    iree_allocator_free(iree_allocator_system(), binding_storage);
+  }
   HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
 }
 

@@ -10,6 +10,8 @@
 #include <string>
 #include <vector>
 
+#include "common/device.h"
+#include "common/init.h"
 #include "hrx_internal.h"
 #include "iree/base/api.h"
 #include "iree/hal/profile_schema.h"
@@ -20,7 +22,7 @@
 
 namespace {
 
-class RuntimeProfileGpuTest : public testing::Test {
+class StreamingProfileGpuTest : public testing::Test {
  protected:
   void SetUp() override {
     if (const char* value = std::getenv("HRX_PROFILE_FILE")) {
@@ -32,10 +34,10 @@ class RuntimeProfileGpuTest : public testing::Test {
     ASSERT_TRUE(profile_file_);
     ASSERT_EQ(setenv("HRX_PROFILE_FILE", profile_file_.path().c_str(), 1), 0);
     ASSERT_EQ(setenv("HRX_PROFILE_MODE", "queue", 1), 0);
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_gpu_initialize(0)));
-    initialized_ = true;
-    hrx_device_t device = nullptr;
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_gpu_device_get(0, &device)));
+    const iree_hal_streaming_init_options_t options = {};
+    IREE_ASSERT_OK(
+        iree_hal_streaming_init_global(&options, iree_allocator_system()));
+    hrx_device_t device = iree_hal_streaming_device_entry(0)->hrx_device;
     hrx_queue_t queue = nullptr;
     for (uint32_t i = 0; !queue && i < hrx_device_queue_family_count(device);
          ++i) {
@@ -63,9 +65,7 @@ class RuntimeProfileGpuTest : public testing::Test {
     hrx_buffer_release(buffer_);
     hrx_event_release(event_);
     hrx_stream_release(stream_);
-    if (initialized_) {
-      IREE_EXPECT_OK(hrx_status_to_iree(hrx_gpu_shutdown()));
-    }
+    iree_hal_streaming_cleanup_global();
     EXPECT_EQ(old_file_ ? setenv("HRX_PROFILE_FILE", old_file_->c_str(), 1)
                         : unsetenv("HRX_PROFILE_FILE"),
               0);
@@ -136,8 +136,6 @@ class RuntimeProfileGpuTest : public testing::Test {
   std::optional<std::string> old_mode_;
   // Capture retained in the test's artifact directory.
   iree::testing::TempFilePath profile_file_{"hrx_queue", ".ireeprof"};
-  // Successful initialization requires matching shutdown.
-  bool initialized_ = false;
   // Stream owning the tested execution sequence.
   hrx_stream_t stream_ = nullptr;
   // Event reused for explicit event-completion boundaries.
@@ -150,7 +148,7 @@ class RuntimeProfileGpuTest : public testing::Test {
   std::streamoff capture_length_ = 0;
 };
 
-TEST_F(RuntimeProfileGpuTest, SynchronizationDrainsLongRunningQueueCapture) {
+TEST_F(StreamingProfileGpuTest, SynchronizationDrainsLongRunningQueueCapture) {
   // Exceeds the native producer's bounded ring without accumulating in-flight
   // work. Each boundary must drain output while the session remains active.
   for (uint32_t i = 0; i < 5000; ++i) {

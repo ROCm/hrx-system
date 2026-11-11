@@ -39,8 +39,6 @@ void hrx_semaphore_retain(hrx_semaphore_t semaphore) {
   if (!semaphore) {
     return;
   }
-  iree_hal_semaphore_retain(semaphore->hal_semaphore);
-  hrx_device_retain(semaphore->device);
   iree_atomic_ref_count_inc(&semaphore->ref_count);
 }
 
@@ -48,11 +46,12 @@ void hrx_semaphore_release(hrx_semaphore_t semaphore) {
   if (!semaphore) {
     return;
   }
+  if (iree_atomic_ref_count_dec(&semaphore->ref_count) != 1) {
+    return;
+  }
   iree_hal_semaphore_release(semaphore->hal_semaphore);
   hrx_device_release(semaphore->device);
-  if (iree_atomic_ref_count_dec(&semaphore->ref_count) == 1) {
-    free(semaphore);
-  }
+  free(semaphore);
 }
 
 hrx_status_t hrx_semaphore_query(hrx_semaphore_t semaphore, uint64_t* value) {

@@ -1,6 +1,7 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
 #include <vector>
@@ -118,17 +119,63 @@ TEST_CASE_METHOD(HrxTestFixture,
   const hrx_semaphore_list_t waits = {&resources.completion, &wait_value, 1};
   const hrx_semaphore_list_t signals = {&resources.completion, &signal_value,
                                         1};
+  const hrx_barrier_list_t malformed = {.count = 1};
+  const hrx_queue_barriers_t invalid = {.before = &malformed};
+  hrx_status_t rejected =
+      hrx().queue_barrier(resources.queue, nullptr, &signals, &invalid);
+  REQUIRE(hrx().status_code(rejected) == HRX_STATUS_INVALID_ARGUMENT);
+  hrx().status_ignore(rejected);
+  uint64_t observed = UINT64_MAX;
+  REQUIRE_OK(hrx().semaphore_query(resources.completion, &observed));
+  REQUIRE(observed == 0);
+
+  // Each independently tracked block contributes its own dependency. Eight
+  // records exercise descriptor capture beyond the common inline capacity.
+  const hrx_memory_barrier_t memory = {
+      .source_scope = HRX_ACCESS_SCOPE_TRANSFER_WRITE,
+      .target_scope = HRX_ACCESS_SCOPE_TRANSFER_READ,
+  };
+  std::array<hrx_buffer_barrier_t, 8> ranges = {};
+  std::array<hrx_barrier_t, 8> releases = {};
+  std::array<hrx_barrier_t, 8> acquires = {};
+  for (size_t i = 0; i < ranges.size(); ++i) {
+    ranges[i] = {
+        .source_scope = HRX_ACCESS_SCOPE_TRANSFER_WRITE,
+        .target_scope = HRX_ACCESS_SCOPE_TRANSFER_READ,
+        .buffer_ref = {resources.source, i * (kByteLength / ranges.size()),
+                       kByteLength / ranges.size()},
+    };
+    releases[i] = {
+        .source_stage_mask = HRX_EXECUTION_STAGE_TRANSFER,
+        .flags = HRX_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+        .memory_barrier_count = 1,
+        .memory_barriers = &memory,
+        .buffer_barrier_count = 1,
+        .buffer_barriers = &ranges[i],
+    };
+    acquires[i] = releases[i];
+    acquires[i].source_stage_mask = 0;
+    acquires[i].target_stage_mask = HRX_EXECUTION_STAGE_TRANSFER;
+    acquires[i].flags = HRX_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE;
+  }
+  const hrx_barrier_list_t empty = {};
+  const hrx_barrier_list_t release_list = {releases.size(), releases.data()};
+  const hrx_barrier_list_t acquire_list = {acquires.size(), acquires.data()};
+  const hrx_queue_barriers_t fill_barriers = {&empty, &release_list};
+  const hrx_queue_barriers_t copy_barriers = {&acquire_list, nullptr};
+  const hrx_queue_barriers_t empty_barriers = {&empty, &empty};
   REQUIRE_OK(hrx().queue_fill(resources.queue, nullptr, &signals,
                               resources.source, 0, kByteLength, &pattern,
-                              sizeof(pattern)));
+                              sizeof(pattern), &fill_barriers));
   resources.completion_value = signal_value;
   wait_value = signal_value++;
   REQUIRE_OK(hrx().queue_copy(transfer_queue_, &waits, &signals,
                               resources.source, 0, resources.target, 0,
-                              kByteLength));
+                              kByteLength, &copy_barriers));
   resources.completion_value = signal_value;
   wait_value = signal_value++;
-  REQUIRE_OK(hrx().queue_barrier(resources.queue, &waits, &signals));
+  REQUIRE_OK(
+      hrx().queue_barrier(resources.queue, &waits, &signals, &empty_barriers));
   resources.completion_value = signal_value;
   REQUIRE_OK(
       hrx().semaphore_wait(resources.completion, signal_value, UINT64_MAX));
@@ -190,7 +237,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Queue fill signals completion semaphore",
 
   REQUIRE_OK(hrx().queue_fill(transfer_queue_, nullptr, &signal_list, buf, 0,
                               kWordCount * sizeof(uint32_t), &kPattern,
-                              sizeof(kPattern)));
+                              sizeof(kPattern), nullptr));
   REQUIRE_OK(hrx().semaphore_wait(done, 1, UINT64_MAX));
 
   std::vector<uint32_t> readback(kWordCount);
@@ -238,7 +285,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Queue copy signals completion semaphore",
   };
 
   REQUIRE_OK(hrx().queue_copy(transfer_queue_, nullptr, &signal_list, src, 0,
-                              dst, 0, kByteCount));
+                              dst, 0, kByteCount, nullptr));
   REQUIRE_OK(hrx().semaphore_wait(done, 1, UINT64_MAX));
 
   std::vector<uint8_t> readback(kByteCount);

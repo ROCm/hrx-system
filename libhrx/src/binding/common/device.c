@@ -328,21 +328,21 @@ static iree_status_t iree_hal_streaming_device_ensure_default_mem_pool_locked(
                             "device registry not initialized");
   }
 
-  hrx_mem_pool_t default_mem_pool = NULL;
+  iree_hal_streaming_mem_pool_t* default_mem_pool = NULL;
   if (!device->default_mem_pool) {
-    hrx_mem_pool_props_t props = {
+    iree_hal_streaming_mem_pool_props_t props = {
         .alloc_handle_type = 0,
         .location_type = 1,  // device
         .location_id = (int)device->ordinal,
     };
-    IREE_RETURN_IF_ERROR(HRX_CALL(
-        hrx_mem_pool_create(device->hrx_device, &props, &default_mem_pool)));
+    IREE_RETURN_IF_ERROR(iree_hal_streaming_mem_pool_create(
+        device->hrx_device, &props, &default_mem_pool));
     device->default_mem_pool = default_mem_pool;
   }
 
   if (!device->current_mem_pool) {
     device->current_mem_pool = device->default_mem_pool;
-    hrx_mem_pool_retain(device->current_mem_pool);
+    iree_hal_streaming_mem_pool_retain(device->current_mem_pool);
   }
   return iree_ok_status();
 }
@@ -390,11 +390,11 @@ static iree_status_t iree_hal_streaming_device_create_primary_context_locked(
 
   iree_hal_streaming_context_release(context);
   if (!had_current_mem_pool) {
-    hrx_mem_pool_release(device->current_mem_pool);
+    iree_hal_streaming_mem_pool_release(device->current_mem_pool);
     device->current_mem_pool = NULL;
   }
   if (!had_default_mem_pool) {
-    hrx_mem_pool_release(device->default_mem_pool);
+    iree_hal_streaming_mem_pool_release(device->default_mem_pool);
     device->default_mem_pool = NULL;
   }
   return status;
@@ -479,9 +479,9 @@ iree_status_t iree_hal_streaming_device_release_primary_context(
       iree_hal_streaming_context_release(retained_context);
       device->primary_context = NULL;
 
-      hrx_mem_pool_release(device->current_mem_pool);
+      iree_hal_streaming_mem_pool_release(device->current_mem_pool);
       device->current_mem_pool = NULL;
-      hrx_mem_pool_release(device->default_mem_pool);
+      iree_hal_streaming_mem_pool_release(device->default_mem_pool);
       device->default_mem_pool = NULL;
     }
 

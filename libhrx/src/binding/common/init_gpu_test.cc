@@ -4,41 +4,56 @@
 #include "common/device.h"
 #include "common/init.h"
 #include "hrx_internal.h"
+#include "hrx_runtime_cxx.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
 namespace {
 
-struct RejectingRegistryAllocator {
-  // Native devices already published when binding storage is requested.
-  int activated_device_count = 0;
+struct FailingFrontendAllocator {
+  // Fail before activation, or at the first allocation after group creation.
+  bool after_activation = false;
+  // Number of allocations refused at the selected construction boundary.
+  size_t failure_count = 0;
 
   static iree_status_t Control(void* self, iree_allocator_command_t command,
                                const void* params, void** inout_pointer) {
-    if (command == IREE_ALLOCATOR_COMMAND_FREE) {
-      const auto allocator = iree_allocator_system();
-      return allocator.ctl(allocator.self, command, params, inout_pointer);
+    auto* allocator = static_cast<FailingFrontendAllocator*>(self);
+    auto* registry = iree_hal_streaming_device_registry();
+    if (command != IREE_ALLOCATOR_COMMAND_FREE &&
+        (!allocator->after_activation || (registry && registry->group))) {
+      ++allocator->failure_count;
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "caller cannot allocate frontend metadata");
     }
-    auto* allocator = static_cast<RejectingRegistryAllocator*>(self);
-    IREE_RETURN_IF_ERROR(hrx_status_to_iree(
-        hrx_gpu_device_count(&allocator->activated_device_count)));
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "caller cannot allocate the binding registry");
+    const auto system_allocator = iree_allocator_system();
+    return system_allocator.ctl(system_allocator.self, command, params,
+                                inout_pointer);
   }
 };
 
 class StreamingInitializationTest : public testing::Test {
  protected:
   void SetUp() override {
-    hrx_status_t status = hrx_cpu_initialize(0);
-    cpu_initialized_ = hrx_status_is_ok(status);
-    IREE_ASSERT_OK(hrx_status_to_iree(status));
+    const hrx_runtime_options_t options = {
+        .event_sink =
+            {
+                .fn = RecordEvent,
+                .user_data = &native_event_count_,
+            },
+    };
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_runtime_create(
+        &options, hrx_host_allocator_system(), runtime_.for_output())));
+    const hrx_device_create_params_t params = {.uri = "task://"};
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_device_group_create(runtime_, 1, &params, group_.for_output())));
   }
 
-  void TearDown() override {
-    iree_hal_streaming_cleanup_global();
-    if (cpu_initialized_) {
-      IREE_EXPECT_OK(hrx_status_to_iree(hrx_cpu_shutdown()));
+  void TearDown() override { iree_hal_streaming_cleanup_global(); }
+
+  static void RecordEvent(void* self, const hrx_device_event_t* event) {
+    if (event->type == HRX_DEVICE_EVENT_TYPE_USER) {
+      ++*static_cast<size_t*>(self);
     }
   }
 
@@ -47,62 +62,125 @@ class StreamingInitializationTest : public testing::Test {
                                          iree_allocator_t host_allocator,
                                          iree_host_size_t* device_count,
                                          iree_hal_device_info_t* device_infos) {
-    ++*static_cast<int*>(self);
+    ++*static_cast<size_t*>(self);
     *device_count = *device_count ? 1 : 0;
     return iree_ok_status();
   }
 
-  // CPU lifetime retained across GPU initialization failures and shutdown.
-  bool cpu_initialized_ = false;
+  // Native owners survive every frontend construction and teardown below.
+  hrx::runtime::runtime_ptr runtime_;
+  // Independent task device and its execution resources.
+  hrx::runtime::device_group_ptr group_;
+  // Application events delivered only through the native runtime's sink.
+  size_t native_event_count_ = 0;
+  // Compatibility events delivered only through the frontend's sink.
+  size_t frontend_event_count_ = 0;
 };
 
-TEST_F(StreamingInitializationTest,
-       NativeActivationRollbackKeepsRetryPossible) {
-  auto* proactor_pool = hrx_runtime_proactor_pool();
-  ASSERT_NE(proactor_pool, nullptr);
+TEST_F(StreamingInitializationTest, FailureAndTeardownPreserveNativeRuntime) {
+  hrx_device_t native_device = hrx_device_group_get_device(group_, 0);
+  auto* native_proactors = hrx_device_proactor_pool(native_device);
+  size_t selection_count = 0;
+  const iree_hal_streaming_init_options_t options = {
+      .runtime =
+          {
+              .event_sink =
+                  {
+                      .fn = RecordEvent,
+                      .user_data = &frontend_event_count_,
+                  },
+          },
+      .devices =
+          {
+              .device_selector =
+                  {
+                      .self = &selection_count,
+                      .select = SelectFirstDevice,
+                  },
+          },
+  };
   {
-    RejectingRegistryAllocator allocator;
-    const hrx_gpu_initialize_options_t options = {};
+    FailingFrontendAllocator allocator;
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         iree_hal_streaming_init_global(
             &options,
-            iree_allocator_t{&allocator, RejectingRegistryAllocator::Control}));
-    ASSERT_GT(allocator.activated_device_count, 0);
+            iree_allocator_t{&allocator, FailingFrontendAllocator::Control}));
+    EXPECT_EQ(allocator.failure_count, 1u);
+    EXPECT_EQ(selection_count, 0u);
     EXPECT_EQ(iree_hal_streaming_device_registry(), nullptr);
-    int count = 0;
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
-                          hrx_status_to_iree(hrx_gpu_device_count(&count)));
-    EXPECT_EQ(hrx_runtime_proactor_pool(), proactor_pool);
+  }
+  {
+    // Native activation succeeds, then compatibility metadata allocation fails.
+    // Cleanup must finish before the failed caller's allocator goes away.
+    FailingFrontendAllocator allocator = {.after_activation = true};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        iree_hal_streaming_init_global(
+            &options,
+            iree_allocator_t{&allocator, FailingFrontendAllocator::Control}));
+    EXPECT_EQ(allocator.failure_count, 1u);
+    EXPECT_EQ(selection_count, 1u);
+    EXPECT_EQ(iree_hal_streaming_device_registry(), nullptr);
   }
 
-  // The failed caller's allocator and selection state need not survive retry.
-  // Each generation supplies its own callback and releases all device state.
-  for (int generation = 0; generation < 3; ++generation) {
-    SCOPED_TRACE(generation);
-    int selection_count = 0;
-    const hrx_gpu_initialize_options_t options = {
-        .device_selector =
-            {
-                .self = &selection_count,
-                .select = SelectFirstDevice,
-            },
-    };
-    IREE_ASSERT_OK(
-        iree_hal_streaming_init_global(&options, iree_allocator_system()));
-    EXPECT_EQ(selection_count, 1);
-    int count = 0;
-    IREE_EXPECT_OK(hrx_status_to_iree(hrx_gpu_device_count(&count)));
-    EXPECT_EQ(count, 1);
-    iree_hal_streaming_cleanup_global();
-    EXPECT_EQ(iree_hal_streaming_device_registry(), nullptr);
-    EXPECT_EQ(hrx_runtime_proactor_pool(), proactor_pool);
-    IREE_EXPECT_OK(hrx_status_to_iree(hrx_cpu_device_count(&count)));
-    EXPECT_GT(count, 0);
+  // Retry supplies a new allocator and owns its own successful GPU lifetime.
+  IREE_ASSERT_OK(
+      iree_hal_streaming_init_global(&options, iree_allocator_system()));
+  auto* registry = iree_hal_streaming_device_registry();
+  ASSERT_NE(registry, nullptr);
+  EXPECT_EQ(selection_count, 2u);
+  EXPECT_EQ(registry->device_count, 1u);
+  EXPECT_NE(registry->runtime, runtime_.get());
+  EXPECT_NE(registry->group, group_.get());
+  EXPECT_NE(hrx_device_proactor_pool(registry->devices[0].hrx_device),
+            native_proactors);
+  EXPECT_EQ(hrx_device_get_device_group(registry->devices[0].hrx_device),
+            registry->group);
+
+  iree_hal_device_event_t event = iree_hal_device_event_default();
+  event.type = IREE_HAL_DEVICE_EVENT_TYPE_USER;
+  iree_hal_device_event_sink_publish(
+      hrx_device_hal_event_sink(registry->devices[0].hrx_device), &event);
+  EXPECT_EQ(frontend_event_count_, 1u);
+  EXPECT_EQ(native_event_count_, 0u);
+  iree_hal_streaming_cleanup_global();
+  EXPECT_EQ(iree_hal_streaming_device_registry(), nullptr);
+  EXPECT_EQ(hrx_device_proactor_pool(native_device), native_proactors);
+  iree_hal_device_event_sink_publish(hrx_device_hal_event_sink(native_device),
+                                     &event);
+  EXPECT_EQ(frontend_event_count_, 1u);
+  EXPECT_EQ(native_event_count_, 1u);
+
+  // Native execution and host-visible results remain usable after HIP teardown.
+  hrx::runtime::buffer_ptr buffer;
+  const hrx_buffer_params_t buffer_params = {
+      .type = HRX_MEMORY_TYPE_HOST_LOCAL,
+      .access = HRX_MEMORY_ACCESS_ALL,
+      .usage = HRX_BUFFER_USAGE_DEFAULT,
+  };
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_allocator_allocate_buffer(hrx_device_allocator(native_device),
+                                    buffer_params, 256, buffer.for_output())));
+  hrx::runtime::semaphore_ptr semaphore;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_semaphore_create(native_device, 0, semaphore.for_output())));
+  hrx_semaphore_t signal = semaphore;
+  uint64_t value = 1;
+  const hrx_semaphore_list_t signals = {&signal, &value, 1};
+  const uint32_t pattern = 0x12345678;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_queue_fill(
+      hrx_device_get_queue(native_device, 0, 0), nullptr, &signals, buffer, 0,
+      256, &pattern, sizeof(pattern), nullptr)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_semaphore_wait(semaphore, value, UINT64_MAX)));
+  void* data = nullptr;
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_buffer_map(buffer, HRX_MAP_READ, 0, 256, &data)));
+  for (size_t i = 0; i < 64; ++i) {
+    EXPECT_EQ(static_cast<uint32_t*>(data)[i], pattern);
   }
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_cpu_shutdown()));
-  cpu_initialized_ = false;
-  EXPECT_EQ(hrx_runtime_proactor_pool(), nullptr);
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_unmap(buffer)));
 }
 
 }  // namespace

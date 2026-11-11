@@ -5,6 +5,7 @@
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
+#include <vector>
 
 #include "hrx_test_fixture.hpp"
 
@@ -13,52 +14,155 @@ namespace {
 class VirtualMemoryResources {
  public:
   explicit VirtualMemoryResources(hrx_device_t device)
-      : queue(FindProvisionedQueue(device, HRX_QUEUE_ROLE_TRANSFER)) {}
+      : device(device),
+        group(hrx().device_get_device_group(device)),
+        queue(FindProvisionedQueue(device, HRX_QUEUE_ROLE_TRANSFER)) {}
 
   ~VirtualMemoryResources() {
+    bool retired = true;
+    if (completion_value) {
+      hrx_status_t status =
+          hrx().semaphore_wait(completion, completion_value, UINT64_MAX);
+      retired = hrx_status_is_ok(status);
+      ReportHrxTestFailure("retire virtual memory work", status);
+    }
     if (host_mapped) {
-      hrx_status_t status = hrx().buffer_unmap(reservation);
-      CHECK(hrx_status_is_ok(status));
-      hrx().status_ignore(status);
+      ReportHrxTestFailure("unmap virtual buffer",
+                           hrx().buffer_unmap(reservation));
     }
     bool detached = true;
     if (reservation) {
       hrx_status_t status = hrx().virtual_buffer_detach(reservation, {});
       detached = hrx_status_is_ok(status);
-      CHECK(detached);
-      hrx().status_ignore(status);
+      ReportHrxTestFailure("detach virtual buffer", status);
       hrx().buffer_release(reservation);
     }
-    // Failed removal cannot authorize recycling possibly mapped backing.
-    if (detached) {
+    // A failed completion or removal cannot authorize recycling mapped backing.
+    if (retired && detached) {
       for (auto source : sources) {
         hrx().buffer_release(source);
       }
     }
+    for (auto pool : pools) {
+      hrx().mem_pool_release(pool);
+    }
     hrx().semaphore_release(completion);
   }
 
-  void Map(size_t count, const hrx_memory_mapping_t* mappings) {
-    ++completion_value;
-    const hrx_semaphore_list_t signals = {
-        .semaphores = &completion,
-        .values = &completion_value,
-        .count = 1,
+  void Initialize() {
+    hrx_accelerator_type_t type;
+    REQUIRE_OK(hrx().device_get_type(device, &type));
+    const auto interface = type == HRX_ACCELERATOR_CPU
+                               ? HRX_BUFFER_INTERFACE_HOST
+                               : HRX_BUFFER_INTERFACE_DEVICE_ADDRESS;
+    for (uint32_t ordinal = 0;
+         ordinal < hrx().device_queue_family_count(device); ++ordinal) {
+      hrx_queue_family_info_t info;
+      REQUIRE_OK(hrx().device_query_queue_family(device, ordinal, &info));
+      hrx_buffer_usage_t usage = 0;
+      if (info.roles & HRX_QUEUE_ROLE_TRANSFER) {
+        usage |= HRX_BUFFER_USAGE_TRANSFER;
+      }
+      if (info.roles & HRX_QUEUE_ROLE_DISPATCH) {
+        usage |= HRX_BUFFER_USAGE_DISPATCH;
+      }
+      families.push_back({
+          .device = device,
+          .family_ordinal = ordinal,
+          .usage = usage,
+          .interfaces = HRX_BUFFER_INTERFACE_BIT(interface),
+      });
+    }
+    REQUIRE_OK(hrx().semaphore_create(device, 0, &completion));
+  }
+
+  hrx_pool_scope_t Scope(bool host_access = false) const {
+    hrx_pool_scope_t scope = {
+        .family_count = families.size(),
+        .families = families.data(),
     };
-    REQUIRE_OK(hrx().queue_map(queue, nullptr, &signals, count, mappings,
-                               HRX_QUEUE_MAP_FLAG_NONE));
+    if (host_access) {
+      scope.host = {
+          .access = HRX_MEMORY_ACCESS_ALL,
+          .modes = HRX_MAPPING_MODE_SCOPED | HRX_MAPPING_MODE_PERSISTENT,
+      };
+    }
+    return scope;
+  }
+
+  void AddSource(bool host) {
+    auto source_families = families;
+    for (auto& family : source_families) {
+      family.interfaces |=
+          HRX_BUFFER_INTERFACE_BIT(HRX_BUFFER_INTERFACE_MAPPING_SOURCE);
+      if (host) {
+        family.requirements |= HRX_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST;
+      }
+    }
+    auto scope = Scope(host);
+    scope.families = source_families.data();
+    hrx_slab_pool_options_t options = {};
+    if (!host) {
+      for (size_t i = 0; i < hrx().device_group_topology_node_count(group);
+           ++i) {
+        hrx_topology_node_t node;
+        REQUIRE_OK(hrx().device_group_query_topology_node(group, i, &node));
+        if (node.kind == HRX_TOPOLOGY_NODE_KIND_PHYSICAL_DEVICE &&
+            hrx().device_group_get_device(group, node.device_ordinal) ==
+                device) {
+          options.placement = {HRX_POOL_PLACEMENT_PREFERRED, node.ordinal};
+          break;
+        }
+      }
+    }
+    REQUIRE(source_count < pools.size());
+    REQUIRE_OK(
+        hrx().slab_pool_create(group, scope, &options, &pools[source_count]));
+    ++source_count;
+  }
+
+  hrx_virtual_buffer_sources_t Accepted() const {
+    return {source_count, pools.data()};
+  }
+
+  void Allocate(size_t index, size_t size) {
+    uint64_t next_value = completion_value + 1;
+    const hrx_semaphore_list_t signals = {&completion, &next_value, 1};
+    const hrx_pool_reservation_request_t request = {size, 0};
+    REQUIRE_OK(hrx().queue_alloca(queue, nullptr, &signals, pools[index], 1,
+                                  &request, &sources[index]));
+    completion_value = next_value;
     REQUIRE_OK(hrx().semaphore_wait(completion, completion_value, UINT64_MAX));
   }
 
+  void Map(size_t count, const hrx_memory_mapping_t* mappings) {
+    uint64_t next_value = completion_value + 1;
+    const hrx_semaphore_list_t signals = {&completion, &next_value, 1};
+    REQUIRE_OK(hrx().queue_map(queue, nullptr, &signals, count, mappings,
+                               HRX_QUEUE_MAP_FLAG_NONE));
+    completion_value = next_value;
+    REQUIRE_OK(hrx().semaphore_wait(completion, completion_value, UINT64_MAX));
+  }
+
+  // Borrowed device and its sealed owner retained by the process fixture.
+  hrx_device_t device;
+  // Borrowed sealed owner for both reservation and backing construction.
+  hrx_device_group_t group;
   // Borrowed execution queue whose device outlives these resources.
   hrx_queue_t queue;
+  // Exact execution sites, borrowed by construction calls only.
+  std::vector<hrx_pool_family_access_t> families;
   // Ordinary virtual buffer retaining the address interval.
   hrx_buffer_t reservation = nullptr;
+  // Explicit source pools retained independently of their captured contracts.
+  std::array<hrx_mem_pool_t, 2> pools = {};
+  // Number of populated source pools.
+  size_t source_count = 0;
   // Ordinary prepared backing retained until checked removal succeeds.
   std::array<hrx_buffer_t, 2> sources = {};
-  // Completion for synchronous test observation of each mapping batch.
+  // Completion for synchronous test observation of each accepted operation.
   hrx_semaphore_t completion = nullptr;
-  // Last submitted completion value.
+  // Last successfully accepted signal, including allocation and mapping.
   uint64_t completion_value = 0;
   // Whether the reservation has a live scoped public host mapping.
   bool host_mapped = false;
@@ -68,18 +172,16 @@ class VirtualMemoryResources {
 
 TEST_CASE_METHOD(HrxTestFixture, "query reservation capabilities",
                  "[virtual_memory][query]") {
-  const hrx_virtual_buffer_scope_t scope = {
-      .device_count = 1,
-      .devices = &device_,
-  };
-  const hrx_virtual_buffer_source_t source_class = {
-      .device = device_,
-      .memory_type = (is_cpu() ? HRX_MEMORY_TYPE_HOST_LOCAL
-                               : HRX_MEMORY_TYPE_DEVICE_LOCAL),
-  };
+  VirtualMemoryResources resources(device_);
+  resources.Initialize();
+  resources.AddSource(is_cpu());
+  const auto scope = resources.Scope();
   hrx_virtual_buffer_capabilities_t capabilities;
-  REQUIRE_OK(hrx().virtual_buffer_query_capabilities(scope, {1, &source_class},
-                                                     &capabilities));
+  REQUIRE_OK(hrx().virtual_buffer_query_capabilities(
+      resources.group, scope, resources.Accepted(), &capabilities));
+  hrx_pool_stats_t stats;
+  hrx().mem_pool_query_stats(resources.pools[0], &stats);
+  CHECK(stats.reserve_count == 0);
   if (capabilities.max_byte_length) {
     CHECK(capabilities.reservation_granularity > 0);
     CHECK(capabilities.mapping_granularity > 0);
@@ -89,8 +191,8 @@ TEST_CASE_METHOD(HrxTestFixture, "query reservation capabilities",
   } else {
     const hrx_virtual_buffer_options_t options = {.byte_length = 65536};
     hrx_buffer_t reservation = nullptr;
-    hrx_status_t status = hrx().virtual_buffer_create(scope, {1, &source_class},
-                                                      &options, &reservation);
+    hrx_status_t status = hrx().virtual_buffer_create(
+        resources.group, scope, resources.Accepted(), &options, &reservation);
     CHECK(!hrx_status_is_ok(status));
     CHECK(reservation == nullptr);
     hrx().status_ignore(status);
@@ -100,46 +202,31 @@ TEST_CASE_METHOD(HrxTestFixture, "query reservation capabilities",
 TEST_CASE_METHOD(HrxTestFixture,
                  "batched virtual aliases share ordinary backing",
                  "[virtual_memory][lifecycle]") {
-  const hrx_virtual_buffer_scope_t scope = {
-      .device_count = 1,
-      .devices = &device_,
-  };
-  const hrx_virtual_buffer_source_t source_class = {
-      .device = device_,
-      .memory_type = (is_cpu() ? HRX_MEMORY_TYPE_HOST_LOCAL
-                               : HRX_MEMORY_TYPE_DEVICE_LOCAL),
-  };
+  VirtualMemoryResources resources(device_);
+  resources.Initialize();
+  resources.AddSource(is_cpu());
+  const auto scope = resources.Scope();
   hrx_virtual_buffer_capabilities_t capabilities;
-  REQUIRE_OK(hrx().virtual_buffer_query_capabilities(scope, {1, &source_class},
-                                                     &capabilities));
+  REQUIRE_OK(hrx().virtual_buffer_query_capabilities(
+      resources.group, scope, resources.Accepted(), &capabilities));
   if (!capabilities.max_byte_length) {
     SKIP("The selected device has no virtual buffer backend.");
   }
-  const hrx_memory_type_t memory_type =
-      is_cpu() ? HRX_MEMORY_TYPE_HOST_LOCAL : HRX_MEMORY_TYPE_DEVICE_LOCAL;
-  hrx_memory_mapping_requirements_t requirements;
-  REQUIRE_OK(hrx().allocator_query_mapping_requirements(
-      hrx().device_allocator(device_), memory_type, &requirements));
+  const auto requirements =
+      hrx().mem_pool_query_mapping_requirements(resources.pools[0]);
   const size_t unit = std::max({capabilities.reservation_granularity,
                                 capabilities.mapping_granularity,
                                 requirements.recommended_granularity});
   REQUIRE(unit > 0);
-  VirtualMemoryResources resources(device_);
   const hrx_virtual_buffer_options_t options = {
       .byte_length = 2 * unit,
       .min_alignment = unit,
       .mapping_granularity = unit,
   };
-  REQUIRE_OK(hrx().virtual_buffer_create(scope, {1, &source_class}, &options,
+  REQUIRE_OK(hrx().virtual_buffer_create(resources.group, scope,
+                                         resources.Accepted(), &options,
                                          &resources.reservation));
-  const hrx_buffer_params_t params = {
-      .type = memory_type,
-      .access = HRX_MEMORY_ACCESS_ALL,
-      .usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SOURCE,
-  };
-  REQUIRE_OK(hrx().allocator_allocate_buffer(
-      hrx().device_allocator(device_), params, unit, &resources.sources[0]));
-  REQUIRE_OK(hrx().semaphore_create(device_, 0, &resources.completion));
+  resources.Allocate(0, unit);
   std::array<hrx_memory_mapping_t, 2> mappings;
   for (size_t i = 0; i < mappings.size(); ++i) {
     mappings[i] = {
@@ -187,49 +274,34 @@ TEST_CASE_METHOD(HrxTestFixture,
 TEST_CASE_METHOD(HrxTestFixture,
                  "common host and program aliases share one pointer",
                  "[virtual_memory][common_address]") {
-  const hrx_virtual_buffer_scope_t scope = {
-      .device_count = 1,
-      .devices = &device_,
-      .host_access = HRX_MEMORY_ACCESS_ALL,
-  };
-  const hrx_virtual_buffer_source_t source_class = {
-      .device = device_,
-      .memory_type = HRX_MEMORY_TYPE_HOST_LOCAL,
-  };
+  VirtualMemoryResources resources(device_);
+  resources.Initialize();
+  resources.AddSource(true);
+  const auto scope = resources.Scope(true);
   hrx_virtual_buffer_capabilities_t capabilities;
-  REQUIRE_OK(hrx().virtual_buffer_query_capabilities(scope, {1, &source_class},
-                                                     &capabilities));
+  REQUIRE_OK(hrx().virtual_buffer_query_capabilities(
+      resources.group, scope, resources.Accepted(), &capabilities));
   if (!capabilities.max_byte_length ||
       !(capabilities.supported_flags &
         HRX_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS)) {
     SKIP("The selected scope cannot share host and program addresses.");
   }
-  const hrx_memory_type_t memory_type =
-      HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_HOST_COHERENT;
-  hrx_memory_mapping_requirements_t requirements;
-  REQUIRE_OK(hrx().allocator_query_mapping_requirements(
-      hrx().device_allocator(device_), memory_type, &requirements));
+  const auto requirements =
+      hrx().mem_pool_query_mapping_requirements(resources.pools[0]);
   const size_t unit = std::max({capabilities.reservation_granularity,
                                 capabilities.mapping_granularity,
                                 requirements.recommended_granularity});
   REQUIRE(unit > 0);
-  VirtualMemoryResources resources(device_);
   const hrx_virtual_buffer_options_t options = {
       .byte_length = 2 * unit,
       .min_alignment = unit,
       .mapping_granularity = unit,
       .flags = HRX_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
   };
-  REQUIRE_OK(hrx().virtual_buffer_create(scope, {1, &source_class}, &options,
+  REQUIRE_OK(hrx().virtual_buffer_create(resources.group, scope,
+                                         resources.Accepted(), &options,
                                          &resources.reservation));
-  const hrx_buffer_params_t params = {
-      .type = memory_type,
-      .access = HRX_MEMORY_ACCESS_ALL,
-      .usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SOURCE,
-  };
-  REQUIRE_OK(hrx().allocator_allocate_buffer(
-      hrx().device_allocator(device_), params, unit, &resources.sources[0]));
-  REQUIRE_OK(hrx().semaphore_create(device_, 0, &resources.completion));
+  resources.Allocate(0, unit);
   std::array<hrx_memory_mapping_t, 2> mappings;
   for (size_t i = 0; i < mappings.size(); ++i) {
     mappings[i] = {
@@ -242,15 +314,25 @@ TEST_CASE_METHOD(HrxTestFixture,
     };
   }
   resources.Map(mappings.size(), mappings.data());
-  void* program_address = nullptr;
+  hrx_memory_scope_t program_scope;
+  REQUIRE_OK(hrx().device_query_queue_family_memory_scope(
+      device_, hrx().queue_get_family_ordinal(transfer_queue_),
+      HRX_MEMORY_SITE_PROGRAM, &program_scope));
+  hrx_accelerator_type_t accelerator_type;
+  REQUIRE_OK(hrx().device_get_type(device_, &accelerator_type));
+  uint64_t program_address = 0;
   REQUIRE_OK(
-      hrx().buffer_get_device_ptr(resources.reservation, &program_address));
+      hrx().buffer_query_address(resources.reservation, program_scope,
+                                 accelerator_type == HRX_ACCELERATOR_CPU
+                                     ? HRX_BUFFER_INTERFACE_HOST
+                                     : HRX_BUFFER_INTERFACE_DEVICE_ADDRESS,
+                                 &program_address));
   void* host_address = nullptr;
   REQUIRE_OK(hrx().buffer_map(resources.reservation,
                               HRX_MAP_READ | HRX_MAP_WRITE | HRX_MAP_MAY_ALIAS,
                               0, 2 * unit, &host_address));
   resources.host_mapped = true;
-  REQUIRE(host_address == program_address);
+  REQUIRE(reinterpret_cast<uintptr_t>(host_address) == program_address);
   const std::array<uint32_t, 4> expected = {11, 17, 29, 47};
   std::memcpy(host_address, expected.data(), sizeof(expected));
   std::array<uint32_t, 4> observed = {};
@@ -268,58 +350,36 @@ TEST_CASE_METHOD(HrxTestFixture,
 TEST_CASE_METHOD(HrxTestFixture,
                  "mixed backing preserves scoped host and device access",
                  "[virtual_memory][mixed_backing]") {
-  const hrx_virtual_buffer_scope_t scope = {
-      .device_count = 1,
-      .devices = &device_,
-      .host_access = HRX_MEMORY_ACCESS_ALL,
-  };
-  const std::array<hrx_virtual_buffer_source_t, 2> sources = {{
-      {
-          .device = device_,
-          .memory_type = is_cpu() ? HRX_MEMORY_TYPE_HOST_LOCAL
-                                  : HRX_MEMORY_TYPE_DEVICE_LOCAL,
-      },
-      {
-          .device = device_,
-          .memory_type = HRX_MEMORY_TYPE_HOST_LOCAL,
-      },
-  }};
-  const hrx_virtual_buffer_sources_t accepted = {sources.size(),
-                                                 sources.data()};
+  VirtualMemoryResources resources(device_);
+  resources.Initialize();
+  resources.AddSource(is_cpu());
+  resources.AddSource(true);
+  const auto scope = resources.Scope(true);
+  const auto accepted = resources.Accepted();
   hrx_virtual_buffer_capabilities_t capabilities;
-  REQUIRE_OK(
-      hrx().virtual_buffer_query_capabilities(scope, accepted, &capabilities));
+  REQUIRE_OK(hrx().virtual_buffer_query_capabilities(resources.group, scope,
+                                                     accepted, &capabilities));
   if (!capabilities.max_byte_length) {
     SKIP("The selected scope cannot map both declared backing classes.");
   }
   size_t unit = std::max(capabilities.reservation_granularity,
                          capabilities.mapping_granularity);
-  for (const auto& source : sources) {
-    hrx_memory_mapping_requirements_t requirements;
-    REQUIRE_OK(hrx().allocator_query_mapping_requirements(
-        hrx().device_allocator(source.device), source.memory_type,
-        &requirements));
+  for (size_t i = 0; i < resources.source_count; ++i) {
+    const auto requirements =
+        hrx().mem_pool_query_mapping_requirements(resources.pools[i]);
     unit = std::max(unit, requirements.recommended_granularity);
   }
   REQUIRE(unit > 0);
-  VirtualMemoryResources resources(device_);
   const hrx_virtual_buffer_options_t options = {
       .byte_length = 3 * unit,
       .min_alignment = unit,
       .mapping_granularity = unit,
   };
-  REQUIRE_OK(hrx().virtual_buffer_create(scope, accepted, &options,
-                                         &resources.reservation));
-  for (size_t i = 0; i < sources.size(); ++i) {
-    const hrx_buffer_params_t params = {
-        .type = sources[i].memory_type,
-        .access = HRX_MEMORY_ACCESS_ALL,
-        .usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SOURCE,
-    };
-    REQUIRE_OK(hrx().allocator_allocate_buffer(
-        hrx().device_allocator(device_), params, unit, &resources.sources[i]));
+  REQUIRE_OK(hrx().virtual_buffer_create(resources.group, scope, accepted,
+                                         &options, &resources.reservation));
+  for (size_t i = 0; i < resources.source_count; ++i) {
+    resources.Allocate(i, unit);
   }
-  REQUIRE_OK(hrx().semaphore_create(device_, 0, &resources.completion));
   hrx_memory_scope_t device_scope;
   const hrx_queue_t dispatch_queue =
       FindProvisionedQueue(device_, HRX_QUEUE_ROLE_DISPATCH);
@@ -346,15 +406,16 @@ TEST_CASE_METHOD(HrxTestFixture,
   resources.host_mapped = true;
   const std::array<uint32_t, 4> expected = {41, 43, 47, 53};
   std::memcpy(host_address, expected.data(), sizeof(expected));
-  ++resources.completion_value;
+  uint64_t copy_value = resources.completion_value + 1;
   const hrx_semaphore_list_t signals = {
       .semaphores = &resources.completion,
-      .values = &resources.completion_value,
+      .values = &copy_value,
       .count = 1,
   };
-  REQUIRE_OK(hrx().queue_copy(transfer_queue_, nullptr, &signals,
-                              resources.reservation, 2 * unit,
-                              resources.reservation, 0, sizeof(expected)));
+  REQUIRE_OK(hrx().queue_copy(
+      transfer_queue_, nullptr, &signals, resources.reservation, 2 * unit,
+      resources.reservation, 0, sizeof(expected), nullptr));
+  resources.completion_value = copy_value;
   REQUIRE_OK(hrx().semaphore_wait(resources.completion,
                                   resources.completion_value, UINT64_MAX));
   std::array<uint32_t, 4> observed = {};

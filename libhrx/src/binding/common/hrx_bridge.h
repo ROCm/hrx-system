@@ -59,7 +59,7 @@ static inline iree_status_t hrx_to_iree_status(hrx_status_t s) {
 // HRX_CALL: wrap hrx API calls for use with IREE error macros
 //
 // Usage:
-//   IREE_RETURN_IF_ERROR(HRX_CALL(hrx_gpu_initialize(0)));
+//   IREE_RETURN_IF_ERROR(HRX_CALL(hrx_semaphore_signal(semaphore, value)));
 //   IREE_RETURN_IF_ERROR(HRX_CALL(hrx_semaphore_create(dev, 0, &sem)));
 //===----------------------------------------------------------------------===//
 

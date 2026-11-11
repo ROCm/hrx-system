@@ -26,6 +26,7 @@ from pathlib import Path, PurePosixPath
 from typing import Callable, Iterable
 
 from build_tools.devtools import ctest as ctest_dev
+from build_tools.devtools import run_requirements
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -923,8 +924,20 @@ def ctest_arguments(args: argparse.Namespace) -> list[str]:
         arguments.extend(["-E", ctest_exclude_regex])
     if args.ctest_label_regex:
         arguments.extend(["-L", args.ctest_label_regex])
-    if args.ctest_label_exclude_regex:
-        arguments.extend(["-LE", args.ctest_label_exclude_regex])
+    # A positive label selects a test family, not all hardware it requires.
+    # These source CI jobs provide CPU execution and optionally one AMD GPU;
+    # other requirements, including an NPU or peer GPUs, remain unavailable.
+    available_resources = (
+        ("libamdf.resource.amd_gpu", "runtime.resource.amd_gpu")
+        if getattr(args, "gpu", False)
+        else ()
+    )
+    label_exclude_regex = combine_ctest_exclude_regex(
+        args.ctest_label_exclude_regex,
+        run_requirements.ctest_exclusion_regex(available_resources),
+    )
+    if label_exclude_regex:
+        arguments.extend(["-LE", label_exclude_regex])
     return arguments
 
 

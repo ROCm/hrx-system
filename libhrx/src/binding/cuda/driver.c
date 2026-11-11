@@ -85,27 +85,27 @@ iree_cuda_graph_instantiate_flags_to_internal(unsigned long long cuda_flags) {
   return flags;
 }
 
-static hrx_mem_pool_attr_t iree_cuda_mempool_attr_to_hrx(
+static iree_hal_streaming_mem_pool_attr_t iree_cuda_mempool_attr_to_streaming(
     CUmemPool_attribute attr) {
   switch (attr) {
     case CU_MEMPOOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES:
-      return HRX_MEM_POOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES;
+      return IREE_HAL_STREAMING_MEM_POOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES;
     case CU_MEMPOOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC:
-      return HRX_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC;
+      return IREE_HAL_STREAMING_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC;
     case CU_MEMPOOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES:
-      return HRX_MEM_POOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES;
+      return IREE_HAL_STREAMING_MEM_POOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES;
     case CU_MEMPOOL_ATTR_RELEASE_THRESHOLD:
-      return HRX_MEM_POOL_ATTR_RELEASE_THRESHOLD;
+      return IREE_HAL_STREAMING_MEM_POOL_ATTR_RELEASE_THRESHOLD;
     case CU_MEMPOOL_ATTR_RESERVED_MEM_CURRENT:
-      return HRX_MEM_POOL_ATTR_RESERVED_MEM_CURRENT;
+      return IREE_HAL_STREAMING_MEM_POOL_ATTR_RESERVED_MEM_CURRENT;
     case CU_MEMPOOL_ATTR_RESERVED_MEM_HIGH:
-      return HRX_MEM_POOL_ATTR_RESERVED_MEM_HIGH;
+      return IREE_HAL_STREAMING_MEM_POOL_ATTR_RESERVED_MEM_HIGH;
     case CU_MEMPOOL_ATTR_USED_MEM_CURRENT:
-      return HRX_MEM_POOL_ATTR_USED_MEM_CURRENT;
+      return IREE_HAL_STREAMING_MEM_POOL_ATTR_USED_MEM_CURRENT;
     case CU_MEMPOOL_ATTR_USED_MEM_HIGH:
-      return HRX_MEM_POOL_ATTR_USED_MEM_HIGH;
+      return IREE_HAL_STREAMING_MEM_POOL_ATTR_USED_MEM_HIGH;
     default:
-      return HRX_MEM_POOL_ATTR_RESERVED_MEM_CURRENT;
+      return IREE_HAL_STREAMING_MEM_POOL_ATTR_RESERVED_MEM_CURRENT;
   }
 }
 
@@ -228,7 +228,7 @@ static CUresult iree_event_record_status_to_cu_result(iree_status_t status) {
 
 CUDAAPI CUresult cuInit(unsigned int Flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  const hrx_gpu_initialize_options_t options = {0};
+  const iree_hal_streaming_init_options_t options = {0};
   iree_status_t status =
       iree_hal_streaming_init_global(&options, iree_allocator_system());
   CUresult result = iree_status_to_cu_result(status);
@@ -1057,9 +1057,9 @@ CUDAAPI CUresult cuDevicePrimaryCtxReset(CUdevice dev) {
     device->primary_context = NULL;
 
     // Also clear memory pools.
-    hrx_mem_pool_release(device->current_mem_pool);
+    iree_hal_streaming_mem_pool_release(device->current_mem_pool);
     device->current_mem_pool = NULL;
-    hrx_mem_pool_release(device->default_mem_pool);
+    iree_hal_streaming_mem_pool_release(device->default_mem_pool);
     device->default_mem_pool = NULL;
 
     iree_slim_mutex_unlock(&device->primary_context_mutex);
@@ -3912,7 +3912,7 @@ CUDAAPI CUresult cuMemPoolCreate(CUmemoryPool* pool,
     return CUDA_ERROR_NOT_INITIALIZED;
   }
 
-  hrx_mem_pool_props_t props = {
+  iree_hal_streaming_mem_pool_props_t props = {
       .alloc_handle_type =
           iree_cuda_mem_handle_type_to_uint(poolProps->handleTypes),
       .location_type =
@@ -3920,9 +3920,9 @@ CUDAAPI CUresult cuMemPoolCreate(CUmemoryPool* pool,
       .location_id = poolProps->location.id,
   };
 
-  hrx_mem_pool_t mem_pool = NULL;
-  iree_status_t status = HRX_CALL(hrx_mem_pool_create(
-      context->device_entry->hrx_device, &props, &mem_pool));
+  iree_hal_streaming_mem_pool_t* mem_pool = NULL;
+  iree_status_t status = iree_hal_streaming_mem_pool_create(
+      context->device_entry->hrx_device, &props, &mem_pool);
 
   if (iree_status_is_ok(status)) {
     *pool = (CUmemoryPool)mem_pool;
@@ -3940,7 +3940,7 @@ CUDAAPI CUresult cuMemPoolDestroy(CUmemoryPool pool) {
     return CUDA_ERROR_INVALID_VALUE;
   }
 
-  hrx_mem_pool_release((hrx_mem_pool_t)pool);
+  iree_hal_streaming_mem_pool_release((iree_hal_streaming_mem_pool_t*)pool);
   IREE_TRACE_ZONE_END(z0);
   return CUDA_SUCCESS;
 }
@@ -3968,9 +3968,10 @@ CUDAAPI CUresult cuMemPoolSetAttribute(CUmemoryPool pool,
       return CUDA_ERROR_INVALID_VALUE;
   }
 
-  hrx_mem_pool_attr_t hrx_attr = iree_cuda_mempool_attr_to_hrx(attr);
-  iree_status_t status = HRX_CALL(
-      hrx_mem_pool_set_attribute((hrx_mem_pool_t)pool, hrx_attr, attr_value));
+  iree_hal_streaming_mem_pool_attr_t pool_attr =
+      iree_cuda_mempool_attr_to_streaming(attr);
+  iree_status_t status = iree_hal_streaming_mem_pool_set_attribute(
+      (iree_hal_streaming_mem_pool_t*)pool, pool_attr, attr_value);
 
   CUresult result = iree_status_to_cu_result(status);
   IREE_TRACE_ZONE_END(z0);
@@ -3986,9 +3987,10 @@ CUDAAPI CUresult cuMemPoolGetAttribute(CUmemoryPool pool,
   }
 
   uint64_t attr_value = 0;
-  hrx_mem_pool_attr_t hrx_attr = iree_cuda_mempool_attr_to_hrx(attr);
-  iree_status_t status = HRX_CALL(
-      hrx_mem_pool_get_attribute((hrx_mem_pool_t)pool, hrx_attr, &attr_value));
+  iree_hal_streaming_mem_pool_attr_t pool_attr =
+      iree_cuda_mempool_attr_to_streaming(attr);
+  iree_status_t status = iree_hal_streaming_mem_pool_get_attribute(
+      (iree_hal_streaming_mem_pool_t*)pool, pool_attr, &attr_value);
 
   if (iree_status_is_ok(status)) {
     switch (attr) {
@@ -4038,8 +4040,8 @@ CUDAAPI CUresult cuMemPoolTrimTo(CUmemoryPool pool, size_t minBytesToKeep) {
     return CUDA_ERROR_INVALID_VALUE;
   }
 
-  iree_status_t status =
-      HRX_CALL(hrx_mem_pool_trim((hrx_mem_pool_t)pool, minBytesToKeep));
+  iree_status_t status = iree_hal_streaming_mem_pool_trim(
+      (iree_hal_streaming_mem_pool_t*)pool, minBytesToKeep);
 
   CUresult result = iree_status_to_cu_result(status);
   IREE_TRACE_ZONE_END(z0);
@@ -4088,7 +4090,8 @@ CUDAAPI CUresult cuDeviceSetMemPool(CUdevice dev, CUmemoryPool pool) {
     return CUDA_ERROR_INVALID_DEVICE;
   }
 
-  iree_hal_streaming_device_set_mem_pool(device, (hrx_mem_pool_t)pool);
+  iree_hal_streaming_device_set_mem_pool(device,
+                                         (iree_hal_streaming_mem_pool_t*)pool);
   IREE_TRACE_ZONE_END(z0);
   return CUDA_SUCCESS;
 }

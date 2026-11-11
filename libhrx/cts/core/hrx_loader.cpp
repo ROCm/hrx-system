@@ -114,14 +114,45 @@ void HrxLoader::load(const std::string& path) {
   LOAD_FULL(status_free_message, hrx_status_free_message);
   LOAD_FULL(status_ignore, hrx_status_ignore);
 
-  LOAD(gpu_initialize);
-  LOAD(gpu_shutdown);
-  LOAD(gpu_device_count);
-  LOAD(gpu_device_get);
-  LOAD(cpu_initialize);
-  LOAD(cpu_shutdown);
-  LOAD(cpu_device_count);
-  LOAD(cpu_device_get);
+  LOAD(runtime_create);
+  LOAD(runtime_retain);
+  LOAD(runtime_release);
+  LOAD(runtime_query_available_devices);
+  LOAD(device_group_create);
+  LOAD(device_group_retain);
+  LOAD(device_group_release);
+  LOAD(device_group_device_count);
+  LOAD(device_group_get_device);
+  LOAD(device_get_device_group);
+
+  LOAD(slab_pool_create);
+  LOAD(slab_cache_create);
+  LOAD(tlsf_pool_query_backing_request);
+  LOAD(fixed_block_pool_query_backing_request);
+  LOAD(tlsf_pool_create);
+  LOAD(fixed_block_pool_create);
+  LOAD(tlsf_pool_create_from_buffer);
+  LOAD(fixed_block_pool_create_from_buffer);
+  LOAD(mem_pool_retain);
+  LOAD(mem_pool_release);
+  LOAD(mem_pool_get_device_group);
+  LOAD(mem_pool_trim);
+  LOAD(mem_pool_query_capabilities);
+  LOAD(mem_pool_query_host_access);
+  LOAD(mem_pool_query_atomic_operations);
+  LOAD(mem_pool_query_zero_compute_atomic_operations);
+  LOAD(buffer_query_atomic_operations);
+  LOAD(buffer_query_zero_compute_atomic_operations);
+  LOAD(mem_pool_query_stats);
+  LOAD(mem_pool_transition_table);
+  LOAD(buffer_transition_table);
+  LOAD(memory_transition_prepare_pair);
+  LOAD(memory_transition_recipe);
+  LOAD(buffer_mapping_memory_barrier);
+  LOAD(device_group_topology_node_count);
+  LOAD(device_group_query_topology_node);
+  LOAD(queue_alloca);
+  LOAD(queue_dealloca);
 
   LOAD(device_get_property);
   LOAD(device_get_type);
@@ -160,7 +191,7 @@ void HrxLoader::load(const std::string& path) {
   LOAD(stream_get_timeline_position);
   LOAD(stream_wait_on);
   LOAD(stream_dispatch);
-  LOAD(stream_execution_barrier);
+  LOAD(stream_barrier);
 
   LOAD(device_allocator);
   LOAD(allocator_retain);
@@ -173,7 +204,7 @@ void HrxLoader::load(const std::string& path) {
   LOAD(buffer_release);
   LOAD(buffer_map);
   LOAD(buffer_unmap);
-  LOAD(buffer_get_device_ptr);
+  LOAD(buffer_query_address);
   LOAD(buffer_get_size);
 
   LOAD(synchronous_h2d);
@@ -241,16 +272,8 @@ void HrxLoader::load(const std::string& path) {
   LOAD(virtual_buffer_query_info);
   LOAD(virtual_buffer_resolve_projection);
   LOAD(virtual_buffer_detach);
-  LOAD(allocator_query_mapping_requirements);
+  LOAD(mem_pool_query_mapping_requirements);
   LOAD(queue_map);
-
-  LOAD(mem_pool_create);
-  LOAD(mem_pool_retain);
-  LOAD(mem_pool_release);
-  LOAD(mem_pool_get_attribute);
-  LOAD(mem_pool_set_attribute);
-  LOAD(mem_pool_trim);
-  LOAD(mem_pool_allocate_buffer);
 
 #undef LOAD
 #undef LOAD_FULL

@@ -81,15 +81,25 @@ static void PauseFinalObserverFinish(void* user_data) {
 
 class StreamValueWaitObserverTest : public ::testing::Test {
  protected:
+  // Owns the task device and its runtime through fixture cleanup.
+  hrx_device_group_t group_ = nullptr;
+
   void SetUp() override {
-    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_initialize(/*flags=*/0)));
-    hrx_device_t hrx_device = nullptr;
-    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_device_get(/*index=*/0, &hrx_device)));
+    hrx_runtime_t runtime = nullptr;
+    IREE_ASSERT_OK(HRX_CALL(
+        hrx_runtime_create(nullptr, hrx_host_allocator_system(), &runtime)));
+    const hrx_device_create_params_t params = {.uri = "task://"};
+    hrx_status_t status = hrx_device_group_create(runtime, 1, &params, &group_);
+    hrx_runtime_release(runtime);
+    IREE_ASSERT_OK(HRX_CALL(status));
+    hrx_device_t hrx_device = hrx_device_group_get_device(group_, 0);
     device_ = hrx_device_hal(hrx_device);
     ASSERT_NE(nullptr, device_);
     primary_queue_ = iree_hal_device_queue(device_, /*family_ordinal=*/0,
                                            /*queue_ordinal=*/0);
     ASSERT_NE(nullptr, primary_queue_);
+    device_entry_.hrx_device = hrx_device;
+    context_.device_entry = &device_entry_;
     context_.device = device_;
     context_.host_allocator = iree_allocator_system();
     iree_hal_streaming_value_wait_lanes_initialize(&context_);
@@ -100,7 +110,8 @@ class StreamValueWaitObserverTest : public ::testing::Test {
     if (context_initialized_) {
       iree_hal_streaming_value_wait_lanes_deinitialize(&context_);
     }
-    IREE_EXPECT_OK(HRX_CALL(hrx_cpu_shutdown()));
+    hrx_device_group_release(group_);
+    group_ = nullptr;
   }
 
   iree_hal_streaming_value_wait_lane_t* CreateLane() {
@@ -178,6 +189,8 @@ class StreamValueWaitObserverTest : public ::testing::Test {
         &condition, iree_infinite_timeout()));
   }
 
+  // Frontend device owner, borrowed by the context for runtime services.
+  iree_hal_streaming_device_t device_entry_ = {};
   iree_hal_streaming_context_t context_ = {};
   iree_hal_device_t* device_ = nullptr;
   iree_hal_queue_t* primary_queue_ = nullptr;
@@ -439,10 +452,18 @@ TEST_F(StreamValueWaitObserverTest,
 
 class StreamQueueLeaseTest : public ::testing::Test {
  protected:
+  // Owns the task device and its runtime through fixture cleanup.
+  hrx_device_group_t group_ = nullptr;
+
   void SetUp() override {
-    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_initialize(0)));
-    hrx_device_t device = nullptr;
-    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_device_get(0, &device)));
+    hrx_runtime_t runtime = nullptr;
+    IREE_ASSERT_OK(HRX_CALL(
+        hrx_runtime_create(nullptr, hrx_host_allocator_system(), &runtime)));
+    const hrx_device_create_params_t params = {.uri = "task://"};
+    hrx_status_t status = hrx_device_group_create(runtime, 1, &params, &group_);
+    hrx_runtime_release(runtime);
+    IREE_ASSERT_OK(HRX_CALL(status));
+    hrx_device_t device = hrx_device_group_get_device(group_, 0);
     device_entry_.hrx_device = device;
     device_entry_.hal_device = hrx_device_hal(device);
     iree_slim_mutex_initialize(&device_entry_.primary_context_mutex);
@@ -480,7 +501,8 @@ class StreamQueueLeaseTest : public ::testing::Test {
     iree_arena_block_pool_deinitialize(&device_entry_.block_pool);
     iree_slim_mutex_deinitialize(&device_entry_.graph_memory_mutex);
     iree_slim_mutex_deinitialize(&device_entry_.primary_context_mutex);
-    IREE_EXPECT_OK(HRX_CALL(hrx_cpu_shutdown()));
+    hrx_device_group_release(group_);
+    group_ = nullptr;
   }
 
   iree_hal_streaming_stream_t* CreateStream() {

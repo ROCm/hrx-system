@@ -109,7 +109,16 @@ class HrxBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             quote=False,
         )
         srcs_block = self._convert_srcs_block(srcs)
-        copts_block = self._convert_string_list_block("COPTS", copts, sort=False)
+        cxxopts = self.select(
+            {
+                "//build_tools/bazel:cc_compiler_clang_cl": [],
+                "//build_tools/bazel:cc_compiler_msvc": [],
+                "//conditions:default": ["-fexceptions"],
+            }
+        ) + (kwargs.get("cxxopts") or [])
+        copts_block, platform_copts_block = self._convert_compile_options(
+            "hrx_cts_" + name, copts, kwargs.get("conlyopts"), cxxopts
+        )
         defines_block = self._convert_string_list_block("DEFINES", defines)
         data_block = self._convert_data_list_block(
             ["//libhrx/src/libhrx:hrx"] + (data or [])
@@ -135,6 +144,8 @@ class HrxBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         )
         target_compatible_with = kwargs.get("target_compatible_with")
         self._emit_platform_guard_begin(target_compatible_with)
+        if platform_copts_block:
+            self._converter.body += platform_copts_block
         if platform_deps_block:
             self._converter.body += platform_deps_block
         labels_block = self._convert_string_list_block("LABELS", tags)

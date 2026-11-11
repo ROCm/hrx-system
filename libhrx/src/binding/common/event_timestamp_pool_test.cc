@@ -231,15 +231,24 @@ TEST_F(EventTimestampPoolTest, SlotsHeldByASecondReferenceAreNotRecycled) {
 // HAL contract; which driver implements the semaphore is deliberately hidden.
 class EventTimestampPoolPendingTest : public EventTimestampPoolTest {
  protected:
+  // Owns the task device and its runtime through fixture cleanup.
+  inline static hrx_device_group_t group_ = nullptr;
+
   static void SetUpTestSuite() {
-    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_initialize(/*flags=*/0)));
-    hrx_device_t hrx_device = nullptr;
-    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_device_get(/*index=*/0, &hrx_device)));
+    hrx_runtime_t runtime = nullptr;
+    IREE_ASSERT_OK(HRX_CALL(
+        hrx_runtime_create(nullptr, hrx_host_allocator_system(), &runtime)));
+    const hrx_device_create_params_t params = {.uri = "task://"};
+    hrx_status_t status = hrx_device_group_create(runtime, 1, &params, &group_);
+    hrx_runtime_release(runtime);
+    IREE_ASSERT_OK(HRX_CALL(status));
+    hrx_device_t hrx_device = hrx_device_group_get_device(group_, 0);
     device_ = hrx_device_hal(hrx_device);
   }
   static void TearDownTestSuite() {
     device_ = nullptr;
-    IREE_EXPECT_OK(HRX_CALL(hrx_cpu_shutdown()));
+    hrx_device_group_release(group_);
+    group_ = nullptr;
   }
 
   void SetUp() override {

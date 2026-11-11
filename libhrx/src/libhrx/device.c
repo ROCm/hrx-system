@@ -8,7 +8,100 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "device_group.h"
 #include "hrx_internal.h"
+
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_MEMORY_SITE_HOST, IREE_HAL_MEMORY_SITE_HOST,
+                           "memory sites must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_MEMORY_SITE_QUEUE, IREE_HAL_MEMORY_SITE_QUEUE,
+                           "memory sites must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_MEMORY_SITE_PROGRAM,
+                           IREE_HAL_MEMORY_SITE_PROGRAM,
+                           "memory sites must match HAL");
+
+iree_status_t hrx_device_initialize(hrx_device_group_t group, size_t index,
+                                    hrx_accelerator_type_t type,
+                                    hrx_device_t device) {
+  device->group = group;
+  device->type = type;
+  device->ordinal = (int)index;
+  device->hal_device_group = group->hal_group;
+  device->hal_device = iree_hal_device_group_device_at(group->hal_group, index);
+  device->allocator.device = device;
+  device->allocator.hal_allocator =
+      iree_hal_device_allocator(device->hal_device);
+  iree_hal_allocator_retain(device->allocator.hal_allocator);
+  hrx_mem_pool_backing_initialize(&device->mem_pool_backing);
+  hrx_buffer_table_initialize(&device->buffer_table);
+  iree_arena_block_pool_initialize(32 * 1024, group->runtime->host_allocator,
+                                   &device->block_pool);
+
+  const iree_hal_device_spec_t* spec = iree_hal_device_spec(device->hal_device);
+  const iree_hal_device_identity_spec_t* identity =
+      iree_hal_device_spec_identity(spec);
+  iree_string_view_t name = identity->display_name;
+  if (iree_string_view_is_empty(name)) {
+    name = identity->logical_device_id;
+  }
+  const size_t name_length = iree_min(name.size, sizeof(device->name) - 1);
+  memcpy(device->name, name.data, name_length);
+  device->name[name_length] = 0;
+
+  const iree_hal_device_queue_spec_t* queues =
+      iree_hal_device_spec_queues(spec);
+  for (uint32_t i = 0; i < queues->family_count; ++i) {
+    if (queues->families[i].provisioned_queue_count &&
+        iree_any_bit_set(queues->families[i].role_flags,
+                         IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH)) {
+      device->dispatch_queue = iree_hal_device_queue(device->hal_device, i, 0);
+      break;
+    }
+  }
+  if (!device->dispatch_queue) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "device has no provisioned dispatch queue");
+  }
+  if (type == HRX_ACCELERATOR_CPU) {
+    memcpy(device->architecture, "host", sizeof("host"));
+  } else {
+    const uint32_t family = iree_hal_queue_family_ordinal(
+        iree_hal_queue_family(device->dispatch_queue));
+    const iree_hal_executable_target_selection_t selection = {
+        .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
+        .physical_device_affinity =
+            queues->families[family].physical_device_affinity,
+    };
+    const iree_hal_executable_target_selection_result_t selected =
+        iree_hal_device_spec_select_executable_target(spec, &selection);
+    if (selected.outcome !=
+        IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED) {
+      return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                              "device has no unique exact executable target");
+    }
+    const iree_string_view_t key = selected.target->target_key;
+    if (key.size >= sizeof(device->architecture)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "executable target key exceeds device storage");
+    }
+    memcpy(device->architecture, key.data, key.size);
+    device->architecture[key.size] = 0;
+  }
+  return hrx_device_initialize_queues(device);
+}
+
+void hrx_device_deinitialize(hrx_device_t device) {
+  hrx_device_report_failure(device, hrx_device_profile_end(device));
+  hrx_device_deinitialize_queues(device);
+  hrx_buffer_table_deinitialize(&device->buffer_table);
+  iree_arena_block_pool_deinitialize(&device->block_pool);
+  hrx_mem_pool_backing_deinitialize(&device->mem_pool_backing);
+  iree_hal_allocator_release(device->allocator.hal_allocator);
+}
+
+void hrx_device_report_failure(hrx_device_t device, iree_status_t status) {
+  hrx_runtime_report_failure(device->group->runtime, device->hal_device,
+                             status);
+}
 
 iree_hal_device_t* hrx_device_hal(hrx_device_t device) {
   return device ? device->hal_device : NULL;
@@ -32,8 +125,8 @@ hrx_status_t hrx_device_query_total_memory_from_spec(
   const iree_hal_device_memory_spec_t* memory =
       iree_hal_device_spec_memory(iree_hal_device_spec(device->hal_device));
   const iree_hal_memory_type_t locality =
-      device->type == HRX_ACCELERATOR_GPU ? IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL
-                                          : IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
+      device->type == HRX_ACCELERATOR_CPU ? IREE_HAL_MEMORY_TYPE_HOST_LOCAL
+                                          : IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   iree_device_size_t total = 0;
   bool known = false;
   for (iree_host_size_t h = 0; h < memory->heap_count; ++h) {
@@ -176,32 +269,22 @@ hrx_status_t hrx_device_get_type(hrx_device_t device,
   return hrx_ok_status();
 }
 
+hrx_device_group_t hrx_device_get_device_group(hrx_device_t device) {
+  return device ? device->group : NULL;
+}
+
 void hrx_device_retain(hrx_device_t device) {
   if (!device) {
     return;
   }
-  iree_hal_device_retain(device->hal_device);
-  iree_hal_device_group_retain(device->hal_device_group);
-  iree_atomic_ref_count_inc(&device->ref_count);
+  hrx_device_group_retain(device->group);
 }
 
 void hrx_device_release(hrx_device_t device) {
   if (!device) {
     return;
   }
-  iree_hal_device_t* hal_device = device->hal_device;
-  iree_hal_device_group_t* hal_device_group = device->hal_device_group;
-  if (iree_atomic_ref_count_dec(&device->ref_count) == 1) {
-    hrx_device_deinitialize_queues(device);
-    hrx_mem_pool_backing_deinitialize(&device->mem_pool_backing);
-    iree_hal_allocator_release(device->allocator.hal_allocator);
-    device->allocator.hal_allocator = NULL;
-    device->dispatch_queue = NULL;
-    device->hal_device = NULL;
-    device->hal_device_group = NULL;
-  }
-  iree_hal_device_group_release(hal_device_group);
-  iree_hal_device_release(hal_device);
+  hrx_device_group_release(device->group);
 }
 
 hrx_status_t hrx_device_memory_info(hrx_device_t device, size_t* free_bytes,
@@ -254,4 +337,49 @@ hrx_status_t hrx_device_can_access_peer(hrx_device_t device_a,
       iree_hal_device_topology_query_edge(topology_info_a, topology_info_b);
   *can_access = hrx_topology_edge_supports_peer_access(edge);
   return hrx_ok_status();
+}
+
+hrx_status_t hrx_device_query_host_memory_scope(hrx_device_t device,
+                                                hrx_memory_scope_t* out_scope) {
+  if (!device || !out_scope) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "memory scope device or output is NULL");
+  }
+  *out_scope = (hrx_memory_scope_t){0};
+  iree_hal_memory_scope_t hal_scope;
+  iree_status_t status = iree_hal_device_group_resolve_memory_scope(
+      device->hal_device_group,
+      (iree_hal_memory_site_t){.kind = IREE_HAL_MEMORY_SITE_HOST}, &hal_scope);
+  if (iree_status_is_ok(status)) {
+    *out_scope = (hrx_memory_scope_t){hal_scope.domain, hal_scope.id};
+  }
+  return hrx_status_from_iree(status);
+}
+
+hrx_status_t hrx_device_query_queue_family_memory_scope(
+    hrx_device_t device, uint32_t family_ordinal, hrx_memory_site_t site,
+    hrx_memory_scope_t* out_scope) {
+  if (!device || !out_scope ||
+      (site != HRX_MEMORY_SITE_QUEUE && site != HRX_MEMORY_SITE_PROGRAM)) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "invalid memory scope device, site or output");
+  }
+  *out_scope = (hrx_memory_scope_t){0};
+  const iree_hal_queue_family_t* family =
+      iree_hal_device_queue_family(device->hal_device, family_ordinal);
+  if (!family) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "invalid memory scope queue family");
+  }
+  const iree_hal_memory_site_t hal_site = {
+      .kind = (iree_hal_memory_site_kind_t)site,
+      .family = family,
+  };
+  iree_hal_memory_scope_t hal_scope;
+  iree_status_t status = iree_hal_device_group_resolve_memory_scope(
+      device->hal_device_group, hal_site, &hal_scope);
+  if (iree_status_is_ok(status)) {
+    *out_scope = (hrx_memory_scope_t){hal_scope.domain, hal_scope.id};
+  }
+  return hrx_status_from_iree(status);
 }

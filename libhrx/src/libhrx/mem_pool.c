@@ -1,102 +1,187 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
-//
-// Memory pool implementation. Wraps IREE HAL pools to provide stream-ordered
-// memory-management policy. Pool lifecycle, allocation, and attribute
-// management are implemented here; async alloc/free sequencing remains in the
-// binding layer because it requires stream host callback support.
 
 #include "mem_pool.h"
 
-#include <stdlib.h>
-#include <string.h>
-
+#include "buffer.h"
+#include "device_group.h"
 #include "hrx_internal.h"
+#include "iree/hal/memory/fixed_block_pool.h"
+#include "iree/hal/memory/slab_cache.h"
+#include "iree/hal/memory/tlsf_pool.h"
 
-static void hrx_mem_pool_refresh_stats_locked(hrx_mem_pool_t pool) {
-  iree_hal_pool_stats_t backing_stats = {0};
-  if (pool->hal_pool) {
-    iree_hal_pool_query_stats(pool->hal_pool, &backing_stats);
-  }
-  const uint64_t previous_reserved_mem_current = pool->reserved_mem_current;
-  pool->reserved_mem_current = backing_stats.bytes_committed;
-  if (pool->reserved_mem_current > previous_reserved_mem_current) {
-    pool->reserved_mem_high =
-        iree_max(pool->reserved_mem_high, pool->reserved_mem_current);
-  }
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS,
+                           IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_BUFFER_USAGE_DISPATCH_UNIFORM_READ,
+                           IREE_HAL_BUFFER_USAGE_DISPATCH_UNIFORM_READ,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_BUFFER_USAGE_DISPATCH_IMAGE_READ,
+                           IREE_HAL_BUFFER_USAGE_DISPATCH_IMAGE_READ,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_BUFFER_USAGE_DISPATCH_IMAGE_WRITE,
+                           IREE_HAL_BUFFER_USAGE_DISPATCH_IMAGE_WRITE,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_BUFFER_USAGE_DISPATCH_IMAGE,
+                           IREE_HAL_BUFFER_USAGE_DISPATCH_IMAGE,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_BUFFER_USAGE_DISPATCH,
+                           IREE_HAL_BUFFER_USAGE_DISPATCH,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_MAPPING_MODE_SCOPED,
+                           IREE_HAL_MAPPING_MODE_SCOPED,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_MAPPING_MODE_PERSISTENT,
+                           IREE_HAL_MAPPING_MODE_PERSISTENT,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_HOST_MEMORY_PROPERTY_READ_CACHED,
+                           IREE_HAL_HOST_MEMORY_PROPERTY_READ_CACHED,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_HOST_MEMORY_PROPERTY_READ_UNCACHED,
+                           IREE_HAL_HOST_MEMORY_PROPERTY_READ_UNCACHED,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_HOST_MEMORY_PROPERTY_WRITE_BACK,
+                           IREE_HAL_HOST_MEMORY_PROPERTY_WRITE_BACK,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_HOST_MEMORY_PROPERTY_WRITE_COMBINED,
+                           IREE_HAL_HOST_MEMORY_PROPERTY_WRITE_COMBINED,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_ATOMIC_OPERATION_FLAG_WAIT,
+                           IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_ATOMIC_OPERATION_FLAG_STORE,
+                           IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_ATOMIC_OPERATION_FLAG_RMW_ADD,
+                           IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_ATOMIC_OPERATION_FLAG_RMW_SUBTRACT,
+                           IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_SUBTRACT,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_ATOMIC_OPERATION_FLAG_RMW_AND,
+                           IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_AND,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_ATOMIC_OPERATION_FLAG_RMW_OR,
+                           IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_OR,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_ATOMIC_OPERATION_FLAG_RMW_XOR,
+                           IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_XOR,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST,
+                           IREE_HAL_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_POOL_ACCESS_REQUIRE_UNCACHED,
+                           IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_POOL_TRIM_FLAG_NONE,
+                           IREE_HAL_POOL_TRIM_FLAG_NONE,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_POOL_TRIM_FLAG_ALL, IREE_HAL_POOL_TRIM_FLAG_ALL,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_POOL_TRIM_FLAG_EXCESS,
+                           IREE_HAL_POOL_TRIM_FLAG_EXCESS,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_POOL_PLACEMENT_AUTOMATIC,
+                           IREE_HAL_POOL_PLACEMENT_AUTOMATIC,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_POOL_PLACEMENT_PREFERRED,
+                           IREE_HAL_POOL_PLACEMENT_PREFERRED,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_POOL_PLACEMENT_REQUIRED,
+                           IREE_HAL_POOL_PLACEMENT_REQUIRED,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_EXTERNAL_STORAGE_TYPE_NONE,
+                           IREE_HAL_EXTERNAL_STORAGE_TYPE_NONE,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_EXTERNAL_STORAGE_TYPE_HOST_POINTER,
+                           IREE_HAL_EXTERNAL_STORAGE_TYPE_HOST_POINTER,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_EXTERNAL_STORAGE_TYPE_DEVICE_ADDRESS,
+                           IREE_HAL_EXTERNAL_STORAGE_TYPE_DEVICE_ADDRESS,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_EXTERNAL_STORAGE_TYPE_DMA_BUF_FD,
+                           IREE_HAL_EXTERNAL_STORAGE_TYPE_DMA_BUF_FD,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_EXTERNAL_STORAGE_TYPE_OPAQUE_FD,
+                           IREE_HAL_EXTERNAL_STORAGE_TYPE_OPAQUE_FD,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_EXTERNAL_STORAGE_TYPE_VULKAN_OPAQUE_WIN32,
+                           IREE_HAL_EXTERNAL_STORAGE_TYPE_VULKAN_OPAQUE_WIN32,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_EXTERNAL_STORAGE_TYPE_D3D12_RESOURCE,
+                           IREE_HAL_EXTERNAL_STORAGE_TYPE_D3D12_RESOURCE,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_SLAB_POOL_OWNED_ENABLED,
+                           IREE_HAL_SLAB_POOL_OWNED_ENABLED,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_SLAB_POOL_IMPORT_ONLY,
+                           IREE_HAL_SLAB_POOL_IMPORT_ONLY,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_ASAN_POOL_MODE_DISABLED,
+                           IREE_HAL_ASAN_POOL_MODE_DISABLED,
+                           "memory vocabulary must match HAL");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_ASAN_POOL_MODE_SHADOW,
+                           IREE_HAL_ASAN_POOL_MODE_SHADOW,
+                           "memory vocabulary must match HAL");
+
+static iree_hal_atomic_operation_capabilities_t hrx_atomic_to_hal(
+    hrx_atomic_operation_capabilities_t value) {
+  return (iree_hal_atomic_operation_capabilities_t){
+      value.device_scope_32, value.device_scope_64, value.system_scope_32,
+      value.system_scope_64};
 }
 
-// Detaches an idle child after all reservation epochs have retired. The caller
-// holds |pool->mutex| and releases the returned reference after unlocking.
-static iree_hal_pool_t* hrx_mem_pool_take_idle_hal_pool_locked(
-    hrx_mem_pool_t pool) {
-  if (!pool->hal_pool || pool->inflight_allocation_count != 0) {
-    return NULL;
-  }
-  iree_hal_pool_stats_t stats = {0};
-  iree_hal_pool_query_stats(pool->hal_pool, &stats);
-  if (stats.bytes_reserved != 0 || pool->allocation_budget_current != 0) {
-    return NULL;
-  }
-  iree_hal_pool_t* hal_pool = pool->hal_pool;
-  pool->hal_pool = NULL;
-  pool->reserved_mem_current = 0;
-  return hal_pool;
+static hrx_atomic_operation_capabilities_t hrx_atomic_from_hal(
+    iree_hal_atomic_operation_capabilities_t value) {
+  return (hrx_atomic_operation_capabilities_t){
+      value.device_scope_32, value.device_scope_64, value.system_scope_32,
+      value.system_scope_64};
 }
 
-static iree_status_t hrx_mem_pool_ensure_hal_pool_locked(hrx_mem_pool_t pool) {
-  if (pool->hal_pool) {
-    return iree_ok_status();
-  }
-  return hrx_mem_pool_backing_create_pool(pool->device, &pool->hal_pool);
+static iree_hal_pool_host_access_t hrx_pool_host_access_to_hal(
+    hrx_pool_host_access_t value) {
+  return (iree_hal_pool_host_access_t){
+      .access = value.access,
+      .modes = value.modes,
+      .properties = value.properties,
+      .atomics = hrx_atomic_to_hal(value.atomics),
+  };
 }
 
-//===----------------------------------------------------------------------===//
-// Lifecycle
-//===----------------------------------------------------------------------===//
-
-hrx_status_t hrx_mem_pool_create(hrx_device_t device,
-                                 const hrx_mem_pool_props_t* props,
-                                 hrx_mem_pool_t* out_pool) {
-  if (!device || !props || !out_pool) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "device, props, or out_pool is NULL");
-  }
-
-  hrx_mem_pool_s* pool = (hrx_mem_pool_s*)calloc(1, sizeof(hrx_mem_pool_s));
-  if (!pool) {
-    return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
-                           "failed to allocate mem pool");
-  }
-
-  iree_atomic_ref_count_init(&pool->ref_count);
-  pool->device = device;
-  hrx_device_retain(pool->device);
-  pool->props = *props;
-  pool->release_threshold = 0;
-  pool->inflight_allocation_count = 0;
-  pool->reuse_allow_internal_dependencies = true;
-  pool->reuse_follow_event_dependencies = true;
-  pool->reuse_allow_opportunistic = true;
-  pool->reserved_mem_current = 0;
-  pool->reserved_mem_high = 0;
-  pool->used_mem_current = 0;
-  pool->used_mem_high = 0;
-  pool->platform_handle = NULL;
-  iree_slim_mutex_initialize(&pool->mutex);
-  hrx_mem_pool_backing_attach(&device->mem_pool_backing, &pool->retention);
-
-  *out_pool = pool;
-  return hrx_ok_status();
+static iree_hal_asan_pool_options_t hrx_asan_pool_options_to_hal(
+    hrx_asan_pool_options_t value) {
+  return (iree_hal_asan_pool_options_t){
+      .mode = (iree_hal_asan_pool_mode_t)value.mode,
+      .shadow_granule_size = value.shadow_granule_size,
+      .redzone_size = value.redzone_size,
+      .backing_alignment = value.backing_alignment,
+      .quarantine_size = value.quarantine_size,
+  };
 }
 
-static void hrx_mem_pool_destroy(hrx_mem_pool_s* pool) {
-  iree_hal_pool_release(pool->hal_pool);
-  hrx_mem_pool_backing_detach(&pool->device->mem_pool_backing,
-                              &pool->retention);
-  hrx_device_release(pool->device);
-  iree_slim_mutex_deinitialize(&pool->mutex);
-  free(pool);
+// Takes the native constructor's reference on success or failure.
+static iree_status_t hrx_mem_pool_wrap(iree_hal_pool_t* hal_pool,
+                                       hrx_device_group_t group,
+                                       hrx_buffer_t backing_buffer,
+                                       hrx_mem_pool_t* out_pool) {
+  hrx_mem_pool_t pool = NULL;
+  iree_status_t status = iree_allocator_malloc(group->runtime->host_allocator,
+                                               sizeof(*pool), (void**)&pool);
+  if (iree_status_is_ok(status)) {
+    iree_atomic_ref_count_init(&pool->ref_count);
+    pool->hal_pool = hal_pool;
+    pool->group = group;
+    hrx_device_group_retain(group);
+    pool->backing_buffer = backing_buffer;
+    hrx_buffer_retain(backing_buffer);
+    iree_hal_pool_capabilities_t capabilities;
+    iree_hal_pool_query_capabilities(hal_pool, &capabilities);
+    pool->memory_type = capabilities.memory_type;
+    *out_pool = pool;
+  } else {
+    iree_hal_pool_release(hal_pool);
+  }
+  return status;
 }
 
 void hrx_mem_pool_retain(hrx_mem_pool_t pool) {
@@ -106,318 +191,478 @@ void hrx_mem_pool_retain(hrx_mem_pool_t pool) {
 }
 
 void hrx_mem_pool_release(hrx_mem_pool_t pool) {
-  if (pool && iree_atomic_ref_count_dec(&pool->ref_count) == 1) {
-    hrx_mem_pool_destroy(pool);
-  }
-}
-
-//===----------------------------------------------------------------------===//
-// Attributes
-//===----------------------------------------------------------------------===//
-
-hrx_status_t hrx_mem_pool_get_attribute(hrx_mem_pool_t pool,
-                                        hrx_mem_pool_attr_t attr,
-                                        uint64_t* out_value) {
-  if (!pool || !out_value) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "pool or out_value is NULL");
-  }
-  *out_value = 0;
-
-  iree_slim_mutex_lock(&pool->mutex);
-  hrx_mem_pool_refresh_stats_locked(pool);
-
-  hrx_status_t status = hrx_ok_status();
-  switch (attr) {
-    case HRX_MEM_POOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES:
-      *out_value = pool->reuse_follow_event_dependencies ? 1 : 0;
-      break;
-    case HRX_MEM_POOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES:
-      *out_value = pool->reuse_allow_internal_dependencies ? 1 : 0;
-      break;
-    case HRX_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC:
-      *out_value = pool->reuse_allow_opportunistic ? 1 : 0;
-      break;
-    case HRX_MEM_POOL_ATTR_RELEASE_THRESHOLD:
-      *out_value = pool->release_threshold;
-      break;
-    case HRX_MEM_POOL_ATTR_RESERVED_MEM_CURRENT:
-      *out_value = pool->reserved_mem_current;
-      break;
-    case HRX_MEM_POOL_ATTR_RESERVED_MEM_HIGH:
-      *out_value = pool->reserved_mem_high;
-      break;
-    case HRX_MEM_POOL_ATTR_USED_MEM_CURRENT:
-      *out_value = pool->used_mem_current;
-      break;
-    case HRX_MEM_POOL_ATTR_USED_MEM_HIGH:
-      *out_value = pool->used_mem_high;
-      break;
-    default:
-      status = hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                               "invalid memory pool attribute");
-      break;
-  }
-
-  iree_slim_mutex_unlock(&pool->mutex);
-  return status;
-}
-
-hrx_status_t hrx_mem_pool_set_attribute(hrx_mem_pool_t pool,
-                                        hrx_mem_pool_attr_t attr,
-                                        uint64_t value) {
   if (!pool) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "pool is NULL");
-  }
-
-  iree_slim_mutex_lock(&pool->mutex);
-
-  hrx_status_t status = hrx_ok_status();
-  switch (attr) {
-    case HRX_MEM_POOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES:
-      pool->reuse_follow_event_dependencies = value != 0;
-      break;
-    case HRX_MEM_POOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES:
-      pool->reuse_allow_internal_dependencies = value != 0;
-      break;
-    case HRX_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC:
-      pool->reuse_allow_opportunistic = value != 0;
-      break;
-    case HRX_MEM_POOL_ATTR_RELEASE_THRESHOLD:
-      pool->release_threshold = value;
-      hrx_mem_pool_backing_set_retention(&pool->device->mem_pool_backing,
-                                         &pool->retention, value);
-      break;
-    case HRX_MEM_POOL_ATTR_RESERVED_MEM_HIGH:
-      if (value != 0) {
-        status = hrx_make_status(
-            HRX_STATUS_INVALID_ARGUMENT,
-            "reserved memory high watermark must reset to zero");
-      } else {
-        pool->reserved_mem_high = 0;
-      }
-      break;
-    case HRX_MEM_POOL_ATTR_USED_MEM_HIGH:
-      if (value != 0) {
-        status =
-            hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "used memory high watermark must reset to zero");
-      } else {
-        pool->used_mem_high = 0;
-      }
-      break;
-    default:
-      status = hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                               "invalid or read-only memory pool attribute");
-      break;
-  }
-
-  iree_slim_mutex_unlock(&pool->mutex);
-  return status;
-}
-
-//===----------------------------------------------------------------------===//
-// Trim
-//===----------------------------------------------------------------------===//
-
-hrx_status_t hrx_mem_pool_trim(hrx_mem_pool_t pool, size_t min_bytes_to_keep) {
-  if (!pool) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "pool is NULL");
-  }
-  iree_hal_pool_t* idle_hal_pool = NULL;
-  iree_slim_mutex_lock(&pool->mutex);
-  if (pool->hal_pool) {
-    iree_hal_pool_trim(pool->hal_pool, IREE_HAL_POOL_TRIM_FLAG_EXCESS, 0);
-  }
-  hrx_mem_pool_backing_trim(&pool->device->mem_pool_backing, &pool->retention,
-                            min_bytes_to_keep);
-  hrx_mem_pool_refresh_stats_locked(pool);
-  if (min_bytes_to_keep == 0) {
-    idle_hal_pool = hrx_mem_pool_take_idle_hal_pool_locked(pool);
-  }
-  iree_slim_mutex_unlock(&pool->mutex);
-  iree_hal_pool_release(idle_hal_pool);
-  return hrx_ok_status();
-}
-
-hrx_status_t hrx_mem_pool_release_unused(hrx_mem_pool_t pool) {
-  if (!pool) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "pool is NULL");
-  }
-  iree_slim_mutex_lock(&pool->mutex);
-  if (pool->hal_pool) {
-    iree_hal_pool_trim(pool->hal_pool, IREE_HAL_POOL_TRIM_FLAG_EXCESS, 0);
-  }
-  hrx_mem_pool_backing_trim(&pool->device->mem_pool_backing, &pool->retention,
-                            pool->release_threshold);
-  hrx_mem_pool_refresh_stats_locked(pool);
-  iree_slim_mutex_unlock(&pool->mutex);
-  // Completion callbacks publish reclamation but retain the pool objects.
-  // Destroying an empty stack here would join cold maintenance on the caller.
-  return hrx_ok_status();
-}
-
-void hrx_mem_pool_record_logical_allocation(hrx_mem_pool_t pool, size_t size) {
-  if (!pool || size == 0) {
     return;
   }
-
-  iree_slim_mutex_lock(&pool->mutex);
-  if (size >= UINT64_MAX - pool->used_mem_current) {
-    pool->used_mem_current = UINT64_MAX;
-  } else {
-    pool->used_mem_current += size;
-  }
-  pool->used_mem_high = iree_max(pool->used_mem_high, pool->used_mem_current);
-  iree_slim_mutex_unlock(&pool->mutex);
-}
-
-void hrx_mem_pool_record_logical_free(hrx_mem_pool_t pool, size_t size) {
-  if (!pool || size == 0) {
+  if (iree_atomic_ref_count_dec(&pool->ref_count) != 1) {
     return;
   }
-
-  iree_slim_mutex_lock(&pool->mutex);
-  IREE_ASSERT(pool->used_mem_current >= size);
-  pool->used_mem_current -= size;
-  iree_slim_mutex_unlock(&pool->mutex);
+  hrx_device_group_t group = pool->group;
+  iree_hal_pool_release(pool->hal_pool);
+  hrx_buffer_release(pool->backing_buffer);
+  iree_allocator_free(group->runtime->host_allocator, pool);
+  hrx_device_group_release(group);
 }
 
-void hrx_mem_pool_release_allocation_budget(hrx_mem_pool_t pool, size_t size) {
-  if (!pool || size == 0) {
-    return;
-  }
-
-  iree_slim_mutex_lock(&pool->mutex);
-  IREE_ASSERT(pool->allocation_budget_current >= size);
-  pool->allocation_budget_current -= size;
-  iree_slim_mutex_unlock(&pool->mutex);
+hrx_device_group_t hrx_mem_pool_get_device_group(hrx_mem_pool_t pool) {
+  return pool ? pool->group : NULL;
 }
 
-//===----------------------------------------------------------------------===//
-// Allocation
-//===----------------------------------------------------------------------===//
-
-static iree_status_t hrx_mem_pool_allocate_hal_buffer(
-    hrx_mem_pool_t pool, iree_device_size_t size,
-    iree_hal_pool_t** out_hal_pool, iree_hal_buffer_t** out_buffer) {
-  IREE_ASSERT_ARGUMENT(out_hal_pool);
-  IREE_ASSERT_ARGUMENT(out_buffer);
-  *out_hal_pool = NULL;
-  *out_buffer = NULL;
-  if (!pool) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "pool is NULL");
-  }
-  if (size == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "allocation size must be > 0");
-  }
-
-  iree_slim_mutex_lock(&pool->mutex);
-  iree_status_t status = iree_ok_status();
-  if (pool->props.max_size != 0) {
-    if (pool->allocation_budget_current > pool->props.max_size ||
-        size > pool->props.max_size - pool->allocation_budget_current) {
-      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                "memory pool allocation exceeds max size");
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    status = hrx_mem_pool_ensure_hal_pool_locked(pool);
-  }
-  iree_hal_pool_t* hal_pool = NULL;
-  if (iree_status_is_ok(status)) {
-    if (pool->props.max_size != 0) {
-      pool->allocation_budget_current += size;
-    }
-    hal_pool = pool->hal_pool;
-    iree_hal_pool_retain(hal_pool);
-    ++pool->inflight_allocation_count;
-  }
-  iree_slim_mutex_unlock(&pool->mutex);
-  if (!iree_status_is_ok(status)) {
-    return status;
-  }
-
-  const iree_hal_pool_reservation_request_t request = {
-      .allocation_size = size,
+static iree_hal_external_storage_class_t hrx_storage_class_to_hal(
+    hrx_external_storage_class_t value) {
+  return (iree_hal_external_storage_class_t){
+      .type = (iree_hal_external_storage_type_t)value.type,
+      .provenance = {value.provenance[0], value.provenance[1]},
   };
-  status = iree_hal_pool_allocate_buffer(hal_pool, request,
-                                         iree_immediate_timeout(), out_buffer);
-  if (!iree_status_is_ok(status) &&
-      iree_status_code(status) == IREE_STATUS_DEADLINE_EXCEEDED) {
-    iree_status_free(status);
-    status = iree_make_status(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        "memory pool has no immediately reusable capacity for allocation");
-  }
-  iree_slim_mutex_lock(&pool->mutex);
-  --pool->inflight_allocation_count;
-  if (!iree_status_is_ok(status) && pool->props.max_size != 0) {
-    IREE_ASSERT(pool->allocation_budget_current >= size);
-    pool->allocation_budget_current -= size;
-  }
-  if (iree_status_is_ok(status)) {
-    hrx_mem_pool_refresh_stats_locked(pool);
-  }
-  iree_slim_mutex_unlock(&pool->mutex);
+}
 
+// Public counted-array validation and size accounting precede native route
+// qualification. Translation scratch exists only during source construction.
+static iree_status_t hrx_pool_count_exports(hrx_pool_export_classes_t exports,
+                                            size_t* inout_count) {
+  if ((exports.class_count && !exports.classes) ||
+      !iree_host_size_checked_add(*inout_count, exports.class_count,
+                                  inout_count)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid external storage class array");
+  }
+  return iree_ok_status();
+}
+
+static iree_hal_pool_export_classes_t hrx_pool_copy_exports(
+    hrx_pool_export_classes_t exports,
+    iree_hal_external_storage_class_t** cursor) {
+  iree_hal_pool_export_classes_t result = {exports.class_count, *cursor};
+  for (size_t i = 0; i < exports.class_count; ++i) {
+    *(*cursor)++ = hrx_storage_class_to_hal(exports.classes[i]);
+  }
+  return result;
+}
+
+iree_status_t hrx_mem_pool_prepare_scope(
+    hrx_device_group_t group, hrx_pool_scope_t scope,
+    iree_hal_pool_family_access_t* out_families,
+    iree_hal_pool_scope_t* out_scope) {
+  *out_scope = (iree_hal_pool_scope_t){0};
+  iree_status_t status = iree_ok_status();
+  for (size_t i = 0; i < scope.family_count && iree_status_is_ok(status); ++i) {
+    const hrx_pool_family_access_t* access = &scope.families[i];
+    const iree_hal_queue_family_t* family =
+        access->device && access->device->group == group
+            ? iree_hal_device_queue_family(access->device->hal_device,
+                                           access->family_ordinal)
+            : NULL;
+    if (!family) {
+      status =
+          iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                           "pool family %zu is not in the sealed group", i);
+    } else {
+      out_families[i] = (iree_hal_pool_family_access_t){
+          .family = family,
+          .usage = access->usage,
+          .interfaces = access->interfaces,
+          .requirements = access->requirements,
+          .atomics = {.queue = hrx_atomic_to_hal(access->atomics.queue),
+                      .queue_zero_compute =
+                          hrx_atomic_to_hal(access->atomics.queue_zero_compute),
+                      .program = hrx_atomic_to_hal(access->atomics.program)},
+      };
+    }
+  }
   if (iree_status_is_ok(status)) {
-    *out_hal_pool = hal_pool;
-  } else {
-    iree_hal_pool_release(hal_pool);
+    *out_scope = (iree_hal_pool_scope_t){
+        .family_count = scope.family_count,
+        .families = out_families,
+        .host = hrx_pool_host_access_to_hal(scope.host),
+    };
   }
   return status;
 }
 
-hrx_status_t hrx_mem_pool_allocate_buffer(hrx_mem_pool_t pool, size_t size,
-                                          hrx_buffer_t* buffer) {
-  HRX_TRACE_ZONE_BEGIN(z0, "hrx_mem_pool_allocate_buffer");
-  HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
-  if (!buffer) {
-    HRX_RETURN_AND_END_ZONE(
-        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "buffer is NULL"));
+hrx_status_t hrx_slab_pool_create(hrx_device_group_t group,
+                                  hrx_pool_scope_t scope,
+                                  const hrx_slab_pool_options_t* options,
+                                  hrx_mem_pool_t* out_pool) {
+  if (!out_pool) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "output is NULL");
   }
-  *buffer = NULL;
-  if (!pool) {
-    HRX_RETURN_AND_END_ZONE(
-        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "pool is NULL"));
+  *out_pool = NULL;
+  if (!group || (scope.family_count && !scope.families)) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "invalid group or pool scope");
   }
-
-  iree_hal_pool_t* hal_pool = NULL;
-  iree_hal_buffer_t* hal_buffer = NULL;
-  iree_status_t status = hrx_mem_pool_allocate_hal_buffer(
-      pool, (iree_device_size_t)size, &hal_pool, &hal_buffer);
+  const hrx_slab_pool_options_t defaults = {0};
+  if (!options) {
+    options = &defaults;
+  }
+  if (options->imports.class_count && !options->imports.classes) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "invalid import class array");
+  }
+  size_t export_count = 0;
+  iree_status_t status =
+      hrx_pool_count_exports(options->owned.exports, &export_count);
+  for (size_t i = 0;
+       i < options->imports.class_count && iree_status_is_ok(status); ++i) {
+    status = hrx_pool_count_exports(options->imports.classes[i].exports,
+                                    &export_count);
+  }
   if (!iree_status_is_ok(status)) {
-    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
+    return hrx_status_from_iree(status);
   }
-
-  hrx_buffer_t new_buffer = NULL;
-  status = iree_allocator_malloc(iree_allocator_system(), sizeof(hrx_buffer_s),
-                                 (void**)&new_buffer);
-  if (!iree_status_is_ok(status)) {
-    iree_hal_buffer_release(hal_buffer);
-    iree_hal_pool_release(hal_pool);
-    if (pool->props.max_size != 0) {
-      hrx_mem_pool_release_allocation_budget(pool, size);
+  iree_allocator_t allocator = group->runtime->host_allocator;
+  iree_hal_pool_family_access_t inline_families[8];
+  iree_hal_pool_family_access_t* families = inline_families;
+  iree_hal_pool_import_class_t* imports = NULL;
+  iree_hal_external_storage_class_t* exports = NULL;
+  if (scope.family_count > IREE_ARRAYSIZE(inline_families)) {
+    status = iree_allocator_malloc_array(allocator, scope.family_count,
+                                         sizeof(*families), (void**)&families);
+  }
+  if (iree_status_is_ok(status) && options->imports.class_count) {
+    status =
+        iree_allocator_malloc_array(allocator, options->imports.class_count,
+                                    sizeof(*imports), (void**)&imports);
+  }
+  if (iree_status_is_ok(status) && export_count) {
+    status = iree_allocator_malloc_array(allocator, export_count,
+                                         sizeof(*exports), (void**)&exports);
+  }
+  iree_hal_pool_scope_t hal_scope;
+  if (iree_status_is_ok(status)) {
+    status = hrx_mem_pool_prepare_scope(group, scope, families, &hal_scope);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_hal_external_storage_class_t* cursor = exports;
+    iree_hal_slab_pool_options_t hal_options = {
+        .placement = {(iree_hal_pool_placement_mode_t)options->placement.mode,
+                      options->placement.node},
+        .owned = {.mode = (iree_hal_slab_pool_owned_mode_t)options->owned.mode,
+                  .exports =
+                      hrx_pool_copy_exports(options->owned.exports, &cursor)},
+        .imports = {options->imports.class_count, imports},
+        .preferences = {.host = hrx_pool_host_access_to_hal(
+                            options->preferences.host)},
+        .trace_name = iree_make_cstring_view(options->trace_name),
+    };
+    for (size_t i = 0; i < options->imports.class_count; ++i) {
+      imports[i] = (iree_hal_pool_import_class_t){
+          .storage_class = hrx_storage_class_to_hal(
+              options->imports.classes[i].storage_class),
+          .exports = hrx_pool_copy_exports(options->imports.classes[i].exports,
+                                           &cursor),
+      };
     }
-    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
+    iree_hal_pool_t* hal_pool = NULL;
+    status = iree_hal_slab_pool_create(group->hal_group, hal_scope,
+                                       &hal_options, allocator, &hal_pool);
+    if (iree_status_is_ok(status)) {
+      status = hrx_mem_pool_wrap(hal_pool, group, NULL, out_pool);
+    }
   }
+  iree_allocator_free(allocator, exports);
+  iree_allocator_free(allocator, imports);
+  if (families != inline_families) {
+    iree_allocator_free(allocator, families);
+  }
+  return hrx_status_from_iree(status);
+}
 
-  memset(new_buffer, 0, sizeof(*new_buffer));
-  iree_atomic_ref_count_init(&new_buffer->ref_count);
-  new_buffer->hal_buffer = hal_buffer;
-  new_buffer->hal_pool = hal_pool;
-  new_buffer->device = pool->device;
-  hrx_device_retain(new_buffer->device);
-  new_buffer->mem_type =
-      (hrx_memory_type_t)iree_hal_buffer_memory_type(hal_buffer);
-  new_buffer->size = size;
-  if (pool->props.max_size != 0) {
-    hrx_mem_pool_retain(pool);
-    new_buffer->allocation_budget_pool = pool;
-    new_buffer->allocation_budget_size = size;
+hrx_status_t hrx_slab_cache_create(hrx_mem_pool_t backing,
+                                   const hrx_slab_cache_options_t* options,
+                                   hrx_mem_pool_t* out_pool) {
+  if (!out_pool) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "output is NULL");
   }
-  *buffer = new_buffer;
-  HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
+  *out_pool = NULL;
+  if (!backing || !options) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "backing or options is NULL");
+  }
+  const iree_hal_slab_cache_options_t hal_options = {
+      .slab = {options->slab.allocation_size, options->slab.min_alignment},
+      .minimum_cached_size = options->minimum_cached_size,
+      .max_count = options->max_count,
+      .trace_name = iree_make_cstring_view(options->trace_name),
+  };
+  iree_hal_pool_t* hal_pool = NULL;
+  iree_status_t status = iree_hal_slab_cache_create(
+      backing->hal_pool, &hal_options, backing->group->runtime->host_allocator,
+      &hal_pool);
+  if (iree_status_is_ok(status)) {
+    status = hrx_mem_pool_wrap(hal_pool, backing->group,
+                               backing->backing_buffer, out_pool);
+  }
+  return hrx_status_from_iree(status);
+}
+
+static iree_hal_tlsf_pool_options_t hrx_tlsf_pool_options_to_hal(
+    const hrx_tlsf_pool_options_t* options) {
+  return (iree_hal_tlsf_pool_options_t){
+      .tlsf_options = {.range_length = options->slab_size,
+                       .alignment =
+                           options->alignment ? options->alignment : 16,
+                       .initial_block_capacity =
+                           options->initial_block_capacity,
+                       .frontier_capacity = options->frontier_capacity},
+      .max_suballocation_size = options->max_suballocation_size,
+      .asan = hrx_asan_pool_options_to_hal(options->asan),
+      .budget_limit = options->budget_limit,
+      .trace_name = iree_make_cstring_view(options->trace_name),
+  };
+}
+
+static iree_hal_fixed_block_pool_options_t hrx_fixed_block_pool_options_to_hal(
+    const hrx_fixed_block_pool_options_t* options) {
+  return (iree_hal_fixed_block_pool_options_t){
+      .block_size = options->block_size,
+      .blocks_per_slab = options->blocks_per_slab,
+      .frontier_capacity = options->frontier_capacity,
+      .alignment = options->alignment,
+      .asan = hrx_asan_pool_options_to_hal(options->asan),
+      .budget_limit = options->budget_limit,
+      .trace_name = iree_make_cstring_view(options->trace_name),
+  };
+}
+
+hrx_status_t hrx_tlsf_pool_query_backing_request(
+    hrx_mem_pool_t backing, const hrx_tlsf_pool_options_t* options,
+    hrx_pool_reservation_request_t* out_request) {
+  if (!out_request) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "output is NULL");
+  }
+  *out_request = (hrx_pool_reservation_request_t){0};
+  if (!backing || !options) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "backing or options is NULL");
+  }
+  const iree_hal_tlsf_pool_options_t hal_options =
+      hrx_tlsf_pool_options_to_hal(options);
+  iree_hal_pool_reservation_request_t request;
+  iree_status_t status = iree_hal_tlsf_pool_query_backing_request(
+      backing->hal_pool, &hal_options, &request);
+  if (iree_status_is_ok(status)) {
+    *out_request = (hrx_pool_reservation_request_t){request.allocation_size,
+                                                    request.min_alignment};
+  }
+  return hrx_status_from_iree(status);
+}
+
+hrx_status_t hrx_tlsf_pool_create(hrx_mem_pool_t backing,
+                                  const hrx_tlsf_pool_options_t* options,
+                                  hrx_mem_pool_t* out_pool) {
+  if (!out_pool) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "output is NULL");
+  }
+  *out_pool = NULL;
+  if (!backing || !options) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "backing or options is NULL");
+  }
+  const iree_hal_tlsf_pool_options_t hal_options =
+      hrx_tlsf_pool_options_to_hal(options);
+  iree_hal_pool_t* hal_pool = NULL;
+  iree_status_t status = iree_hal_tlsf_pool_create(
+      backing->hal_pool, &hal_options, backing->group->runtime->host_allocator,
+      &hal_pool);
+  if (iree_status_is_ok(status)) {
+    status = hrx_mem_pool_wrap(hal_pool, backing->group,
+                               backing->backing_buffer, out_pool);
+  }
+  return hrx_status_from_iree(status);
+}
+
+hrx_status_t hrx_tlsf_pool_create_from_buffer(
+    hrx_buffer_t buffer, uint64_t offset, uint64_t length,
+    const hrx_tlsf_pool_options_t* options, hrx_mem_pool_t* out_pool) {
+  if (!out_pool) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "output is NULL");
+  }
+  *out_pool = NULL;
+  if (!buffer || !buffer->hal_buffer || !buffer->group || !options) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "invalid backing buffer or options");
+  }
+  const iree_hal_tlsf_pool_options_t hal_options =
+      hrx_tlsf_pool_options_to_hal(options);
+  iree_hal_pool_t* hal_pool = NULL;
+  iree_status_t status = iree_hal_tlsf_pool_create_from_buffer(
+      buffer->hal_buffer, offset, length, &hal_options,
+      buffer->group->runtime->host_allocator, &hal_pool);
+  if (iree_status_is_ok(status)) {
+    status = hrx_mem_pool_wrap(hal_pool, buffer->group, buffer, out_pool);
+  }
+  return hrx_status_from_iree(status);
+}
+
+hrx_status_t hrx_fixed_block_pool_query_backing_request(
+    hrx_mem_pool_t backing, const hrx_fixed_block_pool_options_t* options,
+    hrx_pool_reservation_request_t* out_request) {
+  if (!out_request) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "output is NULL");
+  }
+  *out_request = (hrx_pool_reservation_request_t){0};
+  if (!backing || !options) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "backing or options is NULL");
+  }
+  const iree_hal_fixed_block_pool_options_t hal_options =
+      hrx_fixed_block_pool_options_to_hal(options);
+  iree_hal_pool_reservation_request_t request;
+  iree_status_t status = iree_hal_fixed_block_pool_query_backing_request(
+      backing->hal_pool, &hal_options, &request);
+  if (iree_status_is_ok(status)) {
+    *out_request = (hrx_pool_reservation_request_t){request.allocation_size,
+                                                    request.min_alignment};
+  }
+  return hrx_status_from_iree(status);
+}
+
+hrx_status_t hrx_fixed_block_pool_create(
+    hrx_mem_pool_t backing, const hrx_fixed_block_pool_options_t* options,
+    hrx_mem_pool_t* out_pool) {
+  if (!out_pool) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "output is NULL");
+  }
+  *out_pool = NULL;
+  if (!backing || !options) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "backing or options is NULL");
+  }
+  const iree_hal_fixed_block_pool_options_t hal_options =
+      hrx_fixed_block_pool_options_to_hal(options);
+  iree_hal_pool_t* hal_pool = NULL;
+  iree_status_t status = iree_hal_fixed_block_pool_create(
+      backing->hal_pool, &hal_options, backing->group->runtime->host_allocator,
+      &hal_pool);
+  if (iree_status_is_ok(status)) {
+    status = hrx_mem_pool_wrap(hal_pool, backing->group,
+                               backing->backing_buffer, out_pool);
+  }
+  return hrx_status_from_iree(status);
+}
+
+hrx_status_t hrx_fixed_block_pool_create_from_buffer(
+    hrx_buffer_t buffer, uint64_t offset, uint64_t length,
+    const hrx_fixed_block_pool_options_t* options, hrx_mem_pool_t* out_pool) {
+  if (!out_pool) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "output is NULL");
+  }
+  *out_pool = NULL;
+  if (!buffer || !buffer->hal_buffer || !buffer->group || !options) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "invalid backing buffer or options");
+  }
+  const iree_hal_fixed_block_pool_options_t hal_options =
+      hrx_fixed_block_pool_options_to_hal(options);
+  iree_hal_pool_t* hal_pool = NULL;
+  iree_status_t status = iree_hal_fixed_block_pool_create_from_buffer(
+      buffer->hal_buffer, offset, length, &hal_options,
+      buffer->group->runtime->host_allocator, &hal_pool);
+  if (iree_status_is_ok(status)) {
+    status = hrx_mem_pool_wrap(hal_pool, buffer->group, buffer, out_pool);
+  }
+  return hrx_status_from_iree(status);
+}
+
+void hrx_mem_pool_trim(hrx_mem_pool_t pool, uint64_t min_bytes_to_keep,
+                       hrx_pool_trim_flags_t flags) {
+  if (pool) {
+    iree_hal_pool_trim(pool->hal_pool, flags, min_bytes_to_keep);
+  }
+}
+
+void hrx_mem_pool_query_capabilities(
+    hrx_mem_pool_t pool, hrx_pool_capabilities_t* out_capabilities) {
+  iree_hal_pool_capabilities_t value;
+  iree_hal_pool_query_capabilities(pool->hal_pool, &value);
+  *out_capabilities = (hrx_pool_capabilities_t){
+      .placement = {(hrx_pool_placement_mode_t)value.placement.mode,
+                    value.placement.node},
+      .memory_type = value.memory_type,
+      .allowed_access = value.allowed_access,
+      .supported_usage = value.supported_usage,
+      .min_allocation_size = value.min_allocation_size,
+      .max_allocation_size = value.max_allocation_size,
+      .max_allocation_alignment = value.max_allocation_alignment,
+      .maintenance_alignment = value.maintenance_alignment,
+  };
+}
+
+hrx_pool_host_access_t hrx_mem_pool_query_host_access(hrx_mem_pool_t pool) {
+  iree_hal_pool_host_access_t value =
+      iree_hal_pool_query_host_access(pool->hal_pool);
+  return (hrx_pool_host_access_t){
+      .access = value.access,
+      .modes = value.modes,
+      .properties = value.properties,
+      .atomics = hrx_atomic_from_hal(value.atomics),
+  };
+}
+
+hrx_atomic_operation_capabilities_t hrx_mem_pool_query_atomic_operations(
+    hrx_mem_pool_t pool, hrx_memory_scope_t scope) {
+  return hrx_atomic_from_hal(iree_hal_pool_query_atomic_operations(
+      pool->hal_pool, (iree_hal_memory_scope_t){scope.domain, scope.id}));
+}
+
+hrx_atomic_operation_capabilities_t
+hrx_mem_pool_query_zero_compute_atomic_operations(hrx_mem_pool_t pool,
+                                                  hrx_memory_scope_t scope) {
+  return hrx_atomic_from_hal(iree_hal_pool_query_zero_compute_atomic_operations(
+      pool->hal_pool, (iree_hal_memory_scope_t){scope.domain, scope.id}));
+}
+
+hrx_atomic_operation_capabilities_t hrx_buffer_query_atomic_operations(
+    hrx_buffer_t buffer, hrx_memory_scope_t scope) {
+  return hrx_atomic_from_hal(iree_hal_buffer_query_atomic_operations(
+      buffer->hal_buffer, (iree_hal_memory_scope_t){scope.domain, scope.id}));
+}
+
+hrx_atomic_operation_capabilities_t
+hrx_buffer_query_zero_compute_atomic_operations(hrx_buffer_t buffer,
+                                                hrx_memory_scope_t scope) {
+  return hrx_atomic_from_hal(
+      iree_hal_buffer_query_zero_compute_atomic_operations(
+          buffer->hal_buffer,
+          (iree_hal_memory_scope_t){scope.domain, scope.id}));
+}
+
+void hrx_mem_pool_query_stats(hrx_mem_pool_t pool,
+                              hrx_pool_stats_t* out_stats) {
+  iree_hal_pool_stats_t value;
+  iree_hal_pool_query_stats(pool->hal_pool, &value);
+  *out_stats = (hrx_pool_stats_t){
+      .bytes_reserved = value.bytes_reserved,
+      .bytes_free = value.bytes_free,
+      .bytes_quarantined = value.bytes_quarantined,
+      .bytes_committed = value.bytes_committed,
+      .bytes_abandoned = value.bytes_abandoned,
+      .budget_limit = value.budget_limit,
+      .reservation_count = value.reservation_count,
+      .slab_count = value.slab_count,
+      .reserve_count = value.reserve_count,
+      .release_count = value.release_count,
+      .reuse_count = value.reuse_count,
+      .reuse_miss_count = value.reuse_miss_count,
+      .fresh_count = value.fresh_count,
+      .exhausted_count = value.exhausted_count,
+      .over_budget_count = value.over_budget_count,
+      .wait_count = value.wait_count,
+      .quarantine_eviction_count = value.quarantine_eviction_count,
+  };
+}
+
+hrx_memory_mapping_requirements_t hrx_mem_pool_query_mapping_requirements(
+    hrx_mem_pool_t pool) {
+  if (!pool) {
+    return (hrx_memory_mapping_requirements_t){0};
+  }
+  const iree_hal_pool_mapping_requirements_t requirements =
+      iree_hal_pool_query_mapping_requirements(pool->hal_pool);
+  return (hrx_memory_mapping_requirements_t){
+      .minimum_granularity = (size_t)requirements.minimum_granularity,
+      .recommended_granularity = (size_t)requirements.recommended_granularity,
+      .flags = requirements.flags,
+  };
 }

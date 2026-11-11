@@ -9,9 +9,11 @@ the AMD GPU targets enabled in the build and selected against the actual device.
 
 | Surface | Tests | Behavior exercised |
 |---------|-------|--------------------|
-| Runtime and devices | `lifecycle`, `status`, `device` | Initialization, shutdown, status ownership, device properties, and synchronization |
+| Runtime and devices | `lifecycle`, `status`, `device`, `group` | Explicit runtime/group ownership, passive discovery, shared CPU/GPU pools, device properties, and synchronization |
+| Heterogeneous execution | `heterogeneous` | Shared CPU/GPU/NPU storage, NPU arithmetic, cross-device queue dependencies, deferred allocation, backing reuse, and trim |
 | Allocation and ownership | `allocator`, `host_allocator`, `memory`, `refcount` | Borrowed allocators, host imports, stream-ordered allocation, mapping, and retain/release |
-| Queues and streams | `queue_ops`, `stream`, `stream_ops`, `semaphore` | Host calls, fills, copies, updates, execution barriers, timeline signals, and completion |
+| Prepared transitions | `group`, `heterogeneous`, `memory_transition_test` | Borrowed pool/buffer contracts, scope-pair qualification, prepared queue barriers, and explicit host maintenance across a GPU copy with mappings held open |
+| Queues and streams | `queue_ops`, `stream`, `stream_ops`, `semaphore` | Host calls, fills, copies, updates, execution and visibility barriers, timeline signals, and completion |
 | Transfers | `transfer` | Host/device copies, stream ordering, numerical output, and range rejection |
 | Executables | `executable` | Loading configured HSACO, function lookup, dispatch, and exact output |
 | Virtual memory | `virtual_memory`, `virtual_memory_gpu` | Scope-qualified capabilities, batched mapping, aliases, permissions, and backing ownership |
@@ -38,11 +40,50 @@ separate from ordinary dispatch qualification.
 
 ## Selecting the runtime and device
 
-HRX tests default to `cpu:0`. `HRX_CTS_DEVICE=gpu:0` selects a GPU for the shared
-HRX harness; `--hrx-device` overrides it. HIP tests select GPUs through the HIP
-frontend and do not use `HRX_CTS_DEVICE`.
+The shared HRX harness owns one explicit runtime and device group for its test
+process. `--hrx-device` accepts a HAL URI, such as `task://`, `rdna://0`, or
+`xdna://0`. `HRX_CTS_DEVICE` supplies the same selection when the argument is
+absent. The harness also accepts `cpu:N` and `gpu:N` as ordinal-selection
+shorthands and defaults to `cpu:0`. Tests that own their complete group lifecycle,
+such as the mixed CPU/GPU pool test, use `none` for the harness device.
 
-`HRX_GPU_DRIVER` selects the GPU implementation for either API:
+Native applications discover URI/name metadata with
+`hrx_runtime_query_available_devices`, then select their devices through
+`hrx_device_group_create`. Discovery does not create HAL devices or task workers.
+Groups retain their runtime, and runtime events remain observable through final
+synchronous group destruction. There is no global CPU or GPU initialization API.
+
+The `group` target defaults to a task CPU producer and the first GPU consumer.
+`HRX_CTS_GROUP_PRODUCER` and `HRX_CTS_GROUP_CONSUMER` select exact participant
+URIs, allowing the same shared-backing, mapped-access, reuse, and trim checks to
+run across two GPUs. Host access has its own scope; neither participant needs
+to execute on the CPU. The selected devices must admit the test's shared,
+host-visible memory contract.
+
+The `heterogeneous` target constructs one task CPU, AMD GPU, and XDNA NPU group.
+CPU fills feed an NPU multiply, GPU copies move the result, and a CPU copy makes
+the final output available for inspection. All operations use public HRX entry
+points, with semaphore edges between devices and no intervening host waits.
+A host gate holds the first allocation pending until its consumers are queued.
+The test releases its application runtime/group references while dependent
+resources remain live, returns storage after its last use, reuses it through a
+sibling pool, and trims the shared source. Runtime errors during final teardown
+fail the process as well as errors during execution.
+
+This target requires both GPU and NPU hardware and uses the committed NPU
+arithmetic fixtures for the supported execution profiles. It qualifies output,
+ownership, and ordering with both HAL's conservative visibility defaults and
+explicit prepared barriers. The recorder prepares scope pairs once, combines
+effects from the participating buffers, and supplies any required resource
+recipes with their concrete ranges. NULL queue boundaries retain default
+visibility; supplied empty lists request no optional payload barriers. Neither
+changes semaphore dependencies or mandatory native control publication.
+Cross-device waits may require host admission; passing this test does not imply
+that the devices exchange every dependency entirely through firmware.
+
+HIP tests select GPUs through the frontend and do not use `HRX_CTS_DEVICE`.
+`HRX_GPU_DRIVER` selects the frontend implementation and the harness's `gpu:N`
+namespace; exact native HRX URIs select their driver directly:
 
 | Value | Implementation |
 |-------|----------------|
@@ -70,9 +111,11 @@ to describe the HIP error enum, so `hipErrorNotInitialized` still maps to
 Successful initialization and queries with all devices explicitly hidden remain
 quiet.
 
-Initialization creates execution resources for every selected GPU, even when the
-caller only requests a device count. On the native AMD GPU backend this includes
-an SDMA transfer queue where the device exposes that queue family. These queues
+HIP initialization creates execution resources for every selected GPU, even when
+the caller only requests a device count. Native HRX discovery is passive and
+creates execution resources only when the caller constructs a group. On the
+native AMD GPU backend this includes an SDMA transfer queue where the device
+exposes that queue family. These queues
 come from a finite pool shared with other processes, with some slots reserved by
 the kernel. Consequently there is no portable fixed process-concurrency limit:
 the selected devices, driver, and other users determine available capacity.
@@ -109,6 +152,16 @@ iree-bazel-test --config=asan --test_env=HRX_GPU_DRIVER=amdgpu \
   //libhrx/cts/tests/hip:hip_module_execution_test \
   //libhrx/cts/tests/hip:hip_stream_progress_test \
   //libhrx/cts/tests/hip:hip_profile_test
+
+# Public HRX execution through one shared CPU/GPU/NPU group.
+iree-bazel-test --config=asan \
+  //libhrx/cts/tests/device:hrx_cts_heterogeneous
+
+# Shared backing across two selected GPUs on a runner exposing both devices.
+iree-bazel-test --config=asan \
+  --test_env=HRX_CTS_GROUP_PRODUCER=amdgpu://0 \
+  --test_env=HRX_CTS_GROUP_CONSUMER=amdgpu://1 \
+  //libhrx/cts/tests/device:hrx_cts_group
 ```
 
 GPU targets declare their hardware requirements and need a compatible runner.
@@ -117,6 +170,21 @@ HRX tests also cover Windows. With CMake, `LIBHRX_BUILD_CTS=ON` includes the CTS
 in the configured build, and CTest discovers its tests.
 
 ## Submission measurements
+
+`//libhrx/cts/tests/executable:queue_benchmark` compares public HRX queue calls
+with direct HAL calls using the same group, queue, executable, buffers, pool,
+and semaphore. `Fill` and `Dispatch` retain default visibility; `PreparedFill`
+and `PreparedDispatch` use the same prepared acquire/release effects and concrete
+ranges on both paths. Native descriptors are prepared once, so the difference
+includes HRX's per-call translation. `TransitionQuery` measures the cached
+scope-pair lookup separately. Static linkage is identified in the output.
+
+`Submit` excludes final completion, and `Complete` includes it. Burst rows
+report time per batch; divide by the batch size to compare per-operation costs.
+Allocation rows include both acquire and return submissions, with final
+completion and handle release excluded from `Submit`. Source acquisition/byte
+counters and provisioned queue counts expose backing growth and queue inventory.
+Every queue row verifies changing kernel/fill output outside timing.
 
 `//libhrx/cts/tests/hip:hip_dispatch_benchmark` measures public HIP direct launches
 and captured graphs with a reused runtime, module, and stream. Its output labels

@@ -9,6 +9,7 @@
 #include "common/memory.h"
 #include "common/stream.h"
 #include "common/stream_queue.h"
+#include "common/virtual_buffer.h"
 #include "libhrx/src/libhrx/hrx_internal.h"
 
 // Cached storage remains an ordinary queue allocation. Its last unmap point
@@ -97,13 +98,14 @@ iree_status_t iree_hal_streaming_graph_allocation_create(
     void** out_pointer) {
   *out_allocation = NULL;
   *out_pointer = NULL;
-  const hrx_virtual_buffer_scope_t scope = {device_count, devices, 0};
-  const hrx_virtual_buffer_source_t source = {
+  const iree_hal_streaming_virtual_buffer_scope_t scope = {device_count,
+                                                           devices, 0};
+  const iree_hal_streaming_virtual_buffer_source_t source = {
       .device = devices[0], .memory_type = HRX_MEMORY_TYPE_DEVICE_LOCAL};
-  const hrx_virtual_buffer_sources_t sources = {1, &source};
+  const iree_hal_streaming_virtual_buffer_sources_t sources = {1, &source};
   hrx_virtual_buffer_capabilities_t capabilities;
-  IREE_RETURN_IF_ERROR(HRX_CALL(
-      hrx_virtual_buffer_query_capabilities(scope, sources, &capabilities)));
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_virtual_buffer_query_capabilities(
+      scope, sources, &capabilities));
   if (!capabilities.mapping_granularity ||
       !(capabilities.supported_flags &
         HRX_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS)) {
@@ -124,8 +126,8 @@ iree_status_t iree_hal_streaming_graph_allocation_create(
       .mapping_granularity = capabilities.mapping_granularity,
       .flags = HRX_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
   };
-  IREE_RETURN_IF_ERROR(HRX_CALL(
-      hrx_virtual_buffer_create(scope, sources, &options, &reservation)));
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_virtual_buffer_create(
+      scope, sources, &options, &reservation));
 
   iree_hal_streaming_graph_allocation_t* allocation = NULL;
   iree_status_t status = iree_allocator_malloc(

@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <array>
 #include <cstdint>
 #include <initializer_list>
 
@@ -182,6 +183,65 @@ TEST_F(HipMemoryPoolApiTest, DefaultPoolHandlesAreBorrowed) {
     ASSERT_EQ(hipSuccess, get_pool(&selected_pool, &location, type));
     EXPECT_EQ(pool, selected_pool);
   }
+}
+
+TEST_F(HipMemoryPoolApiTest, BoundedAllocationOutlivesPoolHandle) {
+  const auto set_attribute =
+      library_.Resolve<decltype(&hipMemPoolSetAttribute)>(
+          "hipMemPoolSetAttribute");
+  const auto get_attribute =
+      library_.Resolve<decltype(&hipMemPoolGetAttribute)>(
+          "hipMemPoolGetAttribute");
+  const auto copy =
+      library_.Resolve<decltype(&hipMemcpyAsync)>("hipMemcpyAsync");
+  const auto free_async =
+      library_.Resolve<decltype(&hipFreeAsync)>("hipFreeAsync");
+  const auto synchronize =
+      library_.Resolve<decltype(&hipStreamSynchronize)>("hipStreamSynchronize");
+  ASSERT_NE(nullptr, set_attribute);
+  ASSERT_NE(nullptr, get_attribute);
+  ASSERT_NE(nullptr, copy);
+  ASSERT_NE(nullptr, free_async);
+  ASSERT_NE(nullptr, synchronize);
+
+  hipMemPoolProps properties = {.allocType = hipMemAllocationTypePinned};
+  properties.location.type = hipMemLocationTypeDevice;
+  properties.location.id = device_;
+  properties.maxSize = 1025;
+  hipMemPool_t pool = nullptr;
+  ASSERT_EQ(hipSuccess, api_.mem_pool_create(&pool, &properties));
+  // Return the allocation at its free point instead of retaining it for an
+  // opportunistic request after this public pool handle has been destroyed.
+  int allow_opportunistic = 0;
+  ASSERT_EQ(hipSuccess,
+            set_attribute(pool, hipMemPoolAttrReuseAllowOpportunistic,
+                          &allow_opportunistic));
+
+  void* allocation = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.malloc_from_pool_async(&allocation, 1025, pool, stream_));
+  uint64_t used_bytes = 0;
+  ASSERT_EQ(hipSuccess,
+            get_attribute(pool, hipMemPoolAttrUsedMemCurrent, &used_bytes));
+  EXPECT_EQ(1025u, used_bytes);
+  void* rejected = nullptr;
+  EXPECT_EQ(hipErrorOutOfMemory,
+            api_.malloc_from_pool_async(&rejected, 1, pool, stream_));
+  EXPECT_EQ(nullptr, rejected);
+
+  ASSERT_EQ(hipSuccess, api_.mem_pool_destroy(pool));
+  std::array<uint8_t, 1025> input;
+  for (size_t i = 0; i < input.size(); ++i) {
+    input[i] = (i * 37) & 0xFF;
+  }
+  std::array<uint8_t, 1025> output = {};
+  ASSERT_EQ(hipSuccess, copy(allocation, input.data(), input.size(),
+                             hipMemcpyHostToDevice, stream_));
+  ASSERT_EQ(hipSuccess, copy(output.data(), allocation, output.size(),
+                             hipMemcpyDeviceToHost, stream_));
+  ASSERT_EQ(hipSuccess, free_async(allocation, stream_));
+  ASSERT_EQ(hipSuccess, synchronize(stream_));
+  EXPECT_EQ(input, output);
 }
 
 TEST_F(HipMemoryPoolApiTest, GraphAllocationReleasesSelectedPool) {

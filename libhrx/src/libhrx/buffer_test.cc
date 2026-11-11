@@ -13,87 +13,40 @@ namespace {
 
 class CpuBufferTest : public ::testing::Test {
  protected:
+  // Owns the task device and its runtime through fixture cleanup.
+  hrx_device_group_t group_ = nullptr;
+
   void SetUp() override {
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_cpu_initialize(/*flags=*/0)));
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_cpu_device_get(0, &device_)));
+    hrx_runtime_t runtime = nullptr;
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_runtime_create(nullptr, hrx_host_allocator_system(), &runtime)));
+    const hrx_device_create_params_t params = {.uri = "task://"};
+    hrx_status_t status = hrx_device_group_create(runtime, 1, &params, &group_);
+    hrx_runtime_release(runtime);
+    IREE_ASSERT_OK(hrx_status_to_iree(status));
+    device_ = hrx_device_group_get_device(group_, 0);
     IREE_ASSERT_OK(hrx_status_to_iree(
         hrx_stream_create(hrx_device_get_queue(device_, 0, 0), 0, &stream_)));
+    IREE_ASSERT_OK(
+        hrx_status_to_iree(hrx_device_query_queue_family_memory_scope(
+            device_,
+            hrx_queue_get_family_ordinal(hrx_device_get_queue(device_, 0, 0)),
+            HRX_MEMORY_SITE_PROGRAM, &program_scope_)));
   }
 
   void TearDown() override {
     hrx_stream_release(stream_);
-    IREE_EXPECT_OK(hrx_status_to_iree(hrx_cpu_shutdown()));
+    hrx_device_group_release(group_);
+    group_ = nullptr;
   }
 
-  // CPU device borrowed from the initialized runtime.
+  // Exact prepared program scope, independent of any allocation owner.
+  hrx_memory_scope_t program_scope_ = {};
+  // CPU device borrowed from the fixture group.
   hrx_device_t device_ = nullptr;
   // Stream providing real allocation and transfer ordering.
   hrx_stream_t stream_ = nullptr;
 };
-
-TEST_F(CpuBufferTest,
-       NativeAddressesPreserveScopedMappingsAndImportedContents) {
-  const iree_hal_buffer_usage_t usages[] = {
-      IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |
-          IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT,
-      IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
-  };
-  for (iree_hal_buffer_usage_t usage : usages) {
-    alignas(64) uint8_t storage[64];
-    for (size_t i = 0; i < sizeof(storage); ++i) {
-      storage[i] = i;
-    }
-    iree_hal_buffer_t* root = nullptr;
-    IREE_ASSERT_OK(iree_hal_heap_buffer_wrap(
-        iree_hal_buffer_placement_undefined(), IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
-        IREE_HAL_MEMORY_ACCESS_ALL, usage, sizeof(storage),
-        iree_make_byte_span(storage, sizeof(storage)),
-        iree_hal_buffer_release_callback_null(), iree_allocator_system(),
-        &root));
-    iree_hal_buffer_t* view = nullptr;
-    IREE_ASSERT_OK(
-        iree_hal_buffer_subspan(root, 13, 23, iree_allocator_system(), &view));
-    hrx_buffer_t buffer = nullptr;
-    IREE_ASSERT_OK(hrx_buffer_create_from_hal(
-        view, device_, HRX_MEMORY_TYPE_HOST_LOCAL, 23, nullptr, &buffer));
-    iree_hal_buffer_release(view);
-    iree_hal_buffer_release(root);
-
-    // Cover no mapping, an interior read-only mapping, and a whole-buffer map.
-    // None of these states can change native export permissions or its base.
-    for (int mapping_case = 0; mapping_case < 3; ++mapping_case) {
-      const size_t map_offset = mapping_case == 1 ? 5 : 0;
-      const size_t map_length = mapping_case == 1 ? 7 : 23;
-      if (mapping_case != 0) {
-        void* mapped_pointer = nullptr;
-        IREE_ASSERT_OK(hrx_status_to_iree(
-            hrx_buffer_map(buffer, HRX_MAP_READ | HRX_MAP_MAY_ALIAS, map_offset,
-                           map_length, &mapped_pointer)));
-        EXPECT_EQ(storage + 13 + map_offset, mapped_pointer);
-      }
-      const iree_hal_buffer_mapping_t mapping = buffer->mapping;
-      for (int query = 0; query < 2; ++query) {
-        void* pointer = storage;
-        iree_status_t status =
-            hrx_status_to_iree(hrx_buffer_get_device_ptr(buffer, &pointer));
-        if (usage & IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT) {
-          IREE_ASSERT_OK(status);
-          EXPECT_EQ(storage + 13, pointer);
-        } else {
-          IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED, status);
-          EXPECT_EQ(nullptr, pointer);
-        }
-        EXPECT_EQ(mapping_case != 0, buffer->is_mapped);
-        EXPECT_EQ(0, memcmp(&mapping, &buffer->mapping, sizeof(mapping)));
-      }
-      IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_unmap(buffer)));
-    }
-    hrx_buffer_release(buffer);
-    for (size_t i = 0; i < sizeof(storage); ++i) {
-      EXPECT_EQ(i, storage[i]);
-    }
-  }
-}
 
 TEST_F(CpuBufferTest,
        AllocatedNativeAddressSurvivesScopedMapAndStreamTransfer) {
@@ -108,17 +61,19 @@ TEST_F(CpuBufferTest,
       stream_, buffer, 0, 64, &pattern, sizeof(pattern))));
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
 
-  void* device_pointer = nullptr;
-  IREE_ASSERT_OK(
-      hrx_status_to_iree(hrx_buffer_get_device_ptr(buffer, &device_pointer)));
+  uint64_t device_pointer = 0;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_query_address(
+      buffer, program_scope_, HRX_BUFFER_INTERFACE_HOST, &device_pointer)));
   void* mapped_pointer = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_map(
       buffer, HRX_MAP_WRITE | HRX_MAP_MAY_ALIAS, 13, 23, &mapped_pointer)));
-  EXPECT_EQ(static_cast<uint8_t*>(device_pointer) + 13, mapped_pointer);
+  EXPECT_EQ(
+      reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(device_pointer)) + 13,
+      mapped_pointer);
   memset(mapped_pointer, 0xA7, 23);
-  void* repeated_pointer = nullptr;
-  IREE_ASSERT_OK(
-      hrx_status_to_iree(hrx_buffer_get_device_ptr(buffer, &repeated_pointer)));
+  uint64_t repeated_pointer = 0;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_query_address(
+      buffer, program_scope_, HRX_BUFFER_INTERFACE_HOST, &repeated_pointer)));
   EXPECT_EQ(device_pointer, repeated_pointer);
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_unmap(buffer)));
 
@@ -163,14 +118,17 @@ TEST_F(CpuBufferTest, PublicConstructionPreservesNativePointerAccess) {
             hrx_synchronous_h2d(hrx_device_get_queue(device_, 0, 0), storage,
                                 buffer, 0, sizeof(storage))));
       }
-      void* pointer = nullptr;
-      IREE_ASSERT_OK(
-          hrx_status_to_iree(hrx_buffer_get_device_ptr(buffer, &pointer)));
-      ASSERT_NE(pointer, nullptr);
+      uint64_t pointer = 0;
+      IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_query_address(
+          buffer, program_scope_, HRX_BUFFER_INTERFACE_HOST, &pointer)));
+      ASSERT_NE(pointer, 0u);
       EXPECT_FALSE(buffer->is_mapped);
-      EXPECT_EQ(0, memcmp(pointer, storage, sizeof(storage)));
+      EXPECT_EQ(
+          0,
+          memcmp(reinterpret_cast<const void*>(static_cast<uintptr_t>(pointer)),
+                 storage, sizeof(storage)));
       if (construction == 2) {
-        EXPECT_EQ(pointer, storage);
+        EXPECT_EQ(pointer, reinterpret_cast<uintptr_t>(storage));
       }
 
       void* mapped_pointer = nullptr;
@@ -178,12 +136,15 @@ TEST_F(CpuBufferTest, PublicConstructionPreservesNativePointerAccess) {
         IREE_ASSERT_OK(hrx_status_to_iree(
             hrx_buffer_map(buffer, HRX_MAP_READ | HRX_MAP_MAY_ALIAS, 13, 23,
                            &mapped_pointer)));
-        EXPECT_EQ(static_cast<uint8_t*>(pointer) + 13, mapped_pointer);
+        EXPECT_EQ(
+            reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(pointer)) + 13,
+            mapped_pointer);
       }
       const iree_hal_buffer_mapping_t mapping = buffer->mapping;
-      void* repeated_pointer = nullptr;
-      IREE_ASSERT_OK(hrx_status_to_iree(
-          hrx_buffer_get_device_ptr(buffer, &repeated_pointer)));
+      uint64_t repeated_pointer = 0;
+      IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_query_address(
+          buffer, program_scope_, HRX_BUFFER_INTERFACE_HOST,
+          &repeated_pointer)));
       EXPECT_EQ(pointer, repeated_pointer);
       EXPECT_EQ(0, memcmp(&mapping, &buffer->mapping, sizeof(mapping)));
       IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_unmap(buffer)));
@@ -199,6 +160,63 @@ TEST_F(CpuBufferTest, PublicConstructionPreservesNativePointerAccess) {
       }
     }
   }
+}
+
+TEST_F(CpuBufferTest, AddressesRequireAnExactPreparedScopeAndInterface) {
+  hrx_buffer_t buffer = nullptr;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_buffer_allocate(stream_, 64, HRX_MEMORY_TYPE_HOST_LOCAL,
+                          HRX_BUFFER_USAGE_DEFAULT, &buffer)));
+  // Keep a real second domain live; a forged pointer cannot establish whether
+  // the query incorrectly follows an allocation's implicit owner instead.
+  hrx_runtime_t runtime = nullptr;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_runtime_create(nullptr, hrx_host_allocator_system(), &runtime)));
+  const hrx_device_create_params_t params = {.uri = "task://"};
+  hrx_device_group_t group = nullptr;
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_device_group_create(runtime, 1, &params, &group)));
+  hrx_memory_scope_t foreign_scope;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_device_query_queue_family_memory_scope(
+      hrx_device_group_get_device(group, 0), 0, HRX_MEMORY_SITE_PROGRAM,
+      &foreign_scope)));
+  for (const auto scope :
+       {hrx_memory_scope_t{}, foreign_scope,
+        hrx_memory_scope_t{program_scope_.domain, UINT32_MAX}}) {
+    uint64_t address = UINT64_MAX;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        hrx_status_to_iree(hrx_buffer_query_address(
+            buffer, scope, HRX_BUFFER_INTERFACE_HOST, &address)));
+    EXPECT_EQ(0u, address);
+  }
+  for (auto type :
+       {HRX_BUFFER_INTERFACE_DEVICE_ADDRESS, HRX_BUFFER_INTERFACE_XDNA_SHIM_DMA,
+        HRX_BUFFER_INTERFACE_XDNA_FIRMWARE}) {
+    uint64_t address = UINT64_MAX;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
+                          hrx_status_to_iree(hrx_buffer_query_address(
+                              buffer, program_scope_, type, &address)));
+    EXPECT_EQ(0u, address);
+  }
+  for (auto type :
+       {HRX_BUFFER_INTERFACE_VULKAN_BUFFER, HRX_BUFFER_INTERFACE_RDMA,
+        HRX_BUFFER_INTERFACE_REGISTERED_IO, HRX_BUFFER_INTERFACE_REMOTE,
+        HRX_BUFFER_INTERFACE_WEBGPU_BUFFER, HRX_BUFFER_INTERFACE_MAPPING_SOURCE,
+        static_cast<hrx_buffer_interface_t>(UINT16_MAX)}) {
+    uint64_t address = UINT64_MAX;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          hrx_status_to_iree(hrx_buffer_query_address(
+                              buffer, program_scope_, type, &address)));
+    EXPECT_EQ(0u, address);
+  }
+  hrx_device_group_release(group);
+  hrx_runtime_release(runtime);
+  uint64_t address = 0;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_query_address(
+      buffer, program_scope_, HRX_BUFFER_INTERFACE_HOST, &address)));
+  EXPECT_NE(0u, address);
+  hrx_buffer_release(buffer);
 }
 
 TEST_F(CpuBufferTest, HostUnregisterPreservesRegistrationsAcrossIndexGrowth) {
@@ -239,35 +257,6 @@ TEST_F(CpuBufferTest, HostUnregisterPreservesRegistrationsAcrossIndexGrowth) {
       }
     }
   }
-}
-
-TEST_F(CpuBufferTest, HostRegistrationAddressOutlivesRegistryEntry) {
-  uint8_t storage[64] = {};
-  IREE_ASSERT_OK(hrx_status_to_iree(
-      hrx_host_memory_register(device_, storage, sizeof(storage), 0)));
-  hrx_buffer_t buffer = nullptr;
-  size_t offset = 0;
-  IREE_ASSERT_OK(hrx_status_to_iree(
-      hrx_buffer_lookup(device_, storage + 13, &buffer, &offset)));
-  EXPECT_EQ(13u, offset);
-  hrx_buffer_retain(buffer);
-  IREE_ASSERT_OK(
-      hrx_status_to_iree(hrx_host_memory_unregister(device_, storage)));
-  void* device_pointer = nullptr;
-  IREE_ASSERT_OK(
-      hrx_status_to_iree(hrx_buffer_get_device_ptr(buffer, &device_pointer)));
-  EXPECT_EQ(storage, device_pointer);
-  void* mapped_pointer = storage;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_UNAVAILABLE,
-      hrx_status_to_iree(hrx_buffer_map(buffer, HRX_MAP_READ, 0,
-                                        sizeof(storage), &mapped_pointer)));
-  EXPECT_EQ(nullptr, mapped_pointer);
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_unmap(buffer)));
-  IREE_ASSERT_OK(
-      hrx_status_to_iree(hrx_buffer_get_device_ptr(buffer, &device_pointer)));
-  EXPECT_EQ(storage, device_pointer);
-  hrx_buffer_release(buffer);
 }
 
 TEST_F(CpuBufferTest, PreparedBackingAliasesRemainOrdinaryStreamBuffers) {
@@ -348,7 +337,7 @@ TEST_F(CpuBufferTest, PreparedBackingAliasesRemainOrdinaryStreamBuffers) {
           semaphore, value, iree_infinite_timeout(), /*flags=*/0));
 
       hrx_buffer_t alias = nullptr;
-      IREE_ASSERT_OK(hrx_buffer_create_from_hal((reservation), device_,
+      IREE_ASSERT_OK(hrx_buffer_create_from_hal((reservation), device_->group,
                                                 HRX_MEMORY_TYPE_HOST_LOCAL,
                                                 size, nullptr, &alias));
       const uint8_t update = 0xA7;

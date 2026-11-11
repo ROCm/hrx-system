@@ -225,8 +225,14 @@ class CiCoreLinuxTest(unittest.TestCase):
         step_type.assert_called_once()
         step_args = step_type.call_args.kwargs
         self.assertEqual(step_args["build_dir"], build_dir)
+        arguments = step_args["arguments"].copy()
+        label_index = arguments.index("-LE")
+        label_exclude_regex = arguments.pop(label_index + 1)
+        arguments.pop(label_index)
+        self.assertRegex("manual", label_exclude_regex)
+        self.assertRegex("runtime-resource=amd-gpu", label_exclude_regex)
         self.assertEqual(
-            step_args["arguments"],
+            arguments,
             [
                 "--parallel",
                 "3",
@@ -234,8 +240,6 @@ class CiCoreLinuxTest(unittest.TestCase):
                 "^iree/",
                 "-E",
                 "(^build_tools/cmake/)|(excluded)",
-                "-LE",
-                "runtime-resource=|manual",
                 "--no-tests=error",
             ],
         )
