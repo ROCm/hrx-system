@@ -786,9 +786,11 @@ TEST_P(NativeSourceTest, PlanLeasesSurviveCallbacksAndDetachedDestruction) {
     const auto calls = allocator_.allocations();
     Output hit;
     LOOMC_EXPECT_OK(Build("{}", &hit, 0, {}, nullptr, roots.matching));
-    EXPECT_EQ(allocator_.allocations(), calls);
+    const bool reused = allocator_.allocations() == calls;
     gate.arrive_and_wait();
     worker.join();
+    // Establish actual retention before waiting for its retirement below.
+    ASSERT_TRUE(reused);
     ExpectSucceeded(held_output, 2);
     EXPECT_LE(allocator_.live_bytes(), owner_bytes + one_entry);
 

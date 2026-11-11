@@ -607,8 +607,15 @@ static iree_status_t loomc_cmd_plan_prepare(
         publication->source->entry.owned_bytes;
     const iree_host_size_t available = cache->byte_limit - source_bytes;
     if (plan->entry.owned_bytes <= available) {
+      // The current arena head is already charged, so its unused aligned
+      // prefix can hold a key even when no new allocation fits the budget.
+      // Otherwise refuse oversized payloads before independently copying them.
+      const iree_host_size_t head_capacity =
+          plan->entry.arena.block_bytes_remaining &
+          ~(iree_host_size_t)(iree_max_align_t - 1);
       status = loom_kernel_specialization_key_capture(
-          query, available, &plan->entry.arena, &plan->key);
+          query, iree_max(head_capacity, available - plan->entry.owned_bytes),
+          &plan->entry.arena, &plan->key);
       plan->hash = loom_kernel_specialization_query_hash(query);
     }
   }
