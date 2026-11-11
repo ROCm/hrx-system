@@ -26,7 +26,10 @@ hrx_cts_test(
     args = ["--hrx-device=none"],
     resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
     tags = AMD_GPU_CTS_TAGS,
-    target_compatible_with = select(AMDGPU_CTS_COMPATIBILITY_CONDITIONS),
+    target_compatible_with = select(AMDGPU_CTS_COMPATIBILITY_CONDITIONS) + select({
+        "//runtime/config/hal:driver_task": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
 )
 
 hrx_cts_test(

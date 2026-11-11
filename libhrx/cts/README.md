@@ -53,6 +53,13 @@ Native applications discover URI/name metadata with
 Groups retain their runtime, and runtime events remain observable through final
 synchronous group destruction. There is no global CPU or GPU initialization API.
 
+The `group` target defaults to a task CPU producer and the first GPU consumer.
+`HRX_CTS_GROUP_PRODUCER` and `HRX_CTS_GROUP_CONSUMER` select exact participant
+URIs, allowing the same shared-backing, mapped-access, reuse, and trim checks to
+run across two GPUs. Host access has its own scope; neither participant needs
+to execute on the CPU. The selected devices must admit the test's shared,
+host-visible memory contract.
+
 The `heterogeneous` target constructs one task CPU, AMD GPU, and XDNA NPU group.
 CPU fills feed an NPU multiply, GPU copies move the result, and a CPU copy makes
 the final output available for inspection. All operations use public HRX entry
@@ -149,6 +156,12 @@ iree-bazel-test --config=asan --test_env=HRX_GPU_DRIVER=amdgpu \
 # Public HRX execution through one shared CPU/GPU/NPU group.
 iree-bazel-test --config=asan \
   //libhrx/cts/tests/device:hrx_cts_heterogeneous
+
+# Shared backing across two selected GPUs on a runner exposing both devices.
+iree-bazel-test --config=asan \
+  --test_env=HRX_CTS_GROUP_PRODUCER=amdgpu://0 \
+  --test_env=HRX_CTS_GROUP_CONSUMER=amdgpu://1 \
+  //libhrx/cts/tests/device:hrx_cts_group
 ```
 
 GPU targets declare their hardware requirements and need a compatible runner.
