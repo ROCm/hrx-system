@@ -521,10 +521,10 @@ static loom_value_id_t loom_conditioned_value_facts_refine_cast(
              : LOOM_VALUE_ID_INVALID;
 }
 
-static const loom_value_id_t* loom_conditioned_value_facts_refine_operands(
-    void* user_data, const loom_value_fact_table_t* table, const loom_op_t* op,
-    loom_value_facts_t* operands) {
-  loom_conditioned_value_facts_t* state = user_data;
+static const loom_conditioned_value_facts_region_t*
+loom_conditioned_value_facts_enter_operation(
+    loom_conditioned_value_facts_t* state, const loom_value_fact_table_t* table,
+    const loom_op_t* op) {
   const loom_region_t* region = op->parent_block->parent_region;
   const iree_host_size_t bucket =
       loom_conditioned_value_facts_bucket(state, region);
@@ -532,73 +532,94 @@ static const loom_value_id_t* loom_conditioned_value_facts_refine_operands(
   while (entry && entry->region != region) {
     entry = entry->next_bucket;
   }
-  // Projected configuration regions lie outside the function body domain.
-  if (!entry) {
-    return loom_op_const_operands(op);
-  }
-  if (state->local_condition_scope_count) {
+  if (entry && state->local_condition_scope_count) {
     loom_conditioned_value_facts_transition_local_scope(
         state, &entry->local_scopes[op->parent_block->region_index], table);
   }
-  if (!op->operand_count) {
-    return loom_op_const_operands(op);
-  }
-  const loom_value_id_t* values = loom_op_const_operands(op);
-  for (uint16_t i = 0; i < op->operand_count; ++i) {
-    const loom_value_id_t canonical =
-        loom_cfg_value_identity_table_lookup(&state->identities, values[i]);
-    loom_conditioned_value_facts_refine_canonical_value(
-        state, entry, table, canonical, &operands[i]);
-    if (state->numeric_operands) {
-      state->numeric_operands[i] = canonical;
+  return entry;
+}
+
+static loom_value_id_t loom_conditioned_value_facts_refine_reference(
+    loom_conditioned_value_facts_t* state,
+    const loom_conditioned_value_facts_region_t* entry,
+    const loom_value_fact_table_t* table, loom_value_id_t value,
+    loom_value_facts_t* facts) {
+  const loom_value_id_t canonical =
+      loom_cfg_value_identity_table_lookup(&state->identities, value);
+  loom_conditioned_value_facts_refine_canonical_value(state, entry, table,
+                                                      canonical, facts);
+  loom_value_id_t representative = canonical;
+  const uint32_t ordinal =
+      loom_conditioned_value_facts_lookup_cast(state, canonical);
+  if (ordinal != UINT32_MAX) {
+    const loom_conditioned_value_facts_cast_t* row = &state->casts[ordinal];
+    loom_value_id_t numeric = loom_conditioned_value_facts_refine_cast(
+        state, entry, table, &row->cast, facts);
+    if (numeric != LOOM_VALUE_ID_INVALID) {
+      representative = numeric;
     }
-    const uint32_t ordinal =
-        loom_conditioned_value_facts_lookup_cast(state, canonical);
-    if (ordinal != UINT32_MAX) {
-      const loom_conditioned_value_facts_cast_t* row = &state->casts[ordinal];
-      loom_value_id_t numeric = loom_conditioned_value_facts_refine_cast(
-          state, entry, table, &row->cast, &operands[i]);
+    if (row->composed.source_value_id != row->cast.source_value_id) {
+      numeric = loom_conditioned_value_facts_refine_cast(state, entry, table,
+                                                         &row->composed, facts);
       if (numeric != LOOM_VALUE_ID_INVALID) {
-        state->numeric_operands[i] = numeric;
-      }
-      if (row->composed.source_value_id != row->cast.source_value_id) {
-        numeric = loom_conditioned_value_facts_refine_cast(
-            state, entry, table, &row->composed, &operands[i]);
-        if (numeric != LOOM_VALUE_ID_INVALID) {
-          state->numeric_operands[i] = numeric;
-        }
+        representative = numeric;
       }
     }
   }
   if (!table->exact_scalar_origins.entries) {
-    return state->numeric_operands ? state->numeric_operands : values;
+    return representative;
+  }
+  // The producer retains the transitive origin. Every SSA reference observes
+  // that origin in its use scope, including references inside predicates.
+  loom_value_fact_exact_scalar_origin_t origin;
+  if (!loom_value_fact_table_query_exact_scalar_origin(table, state->module,
+                                                       canonical, &origin)) {
+    return representative;
+  }
+  const loom_value_id_t source = loom_cfg_value_identity_table_lookup(
+      &state->identities, origin.source_value_id);
+  loom_value_facts_t source_facts = loom_value_fact_table_lookup(table, source);
+  loom_conditioned_value_facts_refine_canonical_value(state, entry, table,
+                                                      source, &source_facts);
+  const loom_scalar_type_t source_type =
+      loom_type_element_type(loom_module_value_type(state->module, source));
+  const loom_scalar_type_t result_type =
+      loom_type_element_type(loom_module_value_type(state->module, canonical));
+  const loom_value_facts_t transferred =
+      loom_index_cast_transfer_facts(source_type, result_type, source_facts);
+  loom_conditioned_value_facts_apply_active_refinement(&transferred, facts);
+  return representative;
+}
+
+static loom_value_id_t loom_conditioned_value_facts_refine_value(
+    void* user_data, const loom_value_fact_table_t* table, const loom_op_t* op,
+    loom_value_id_t value, loom_value_facts_t* facts) {
+  loom_conditioned_value_facts_t* state = user_data;
+  const loom_conditioned_value_facts_region_t* entry =
+      loom_conditioned_value_facts_enter_operation(state, table, op);
+  return entry ? loom_conditioned_value_facts_refine_reference(
+                     state, entry, table, value, facts)
+               : value;
+}
+
+static const loom_value_id_t* loom_conditioned_value_facts_refine_operands(
+    void* user_data, const loom_value_fact_table_t* table, const loom_op_t* op,
+    loom_value_facts_t* operands) {
+  loom_conditioned_value_facts_t* state = user_data;
+  const loom_conditioned_value_facts_region_t* entry =
+      loom_conditioned_value_facts_enter_operation(state, table, op);
+  const loom_value_id_t* values = loom_op_const_operands(op);
+  // Projected configuration regions lie outside the function body domain.
+  if (!entry) {
+    return values;
   }
   for (uint16_t i = 0; i < op->operand_count; ++i) {
-    const loom_value_id_t canonical =
-        loom_cfg_value_identity_table_lookup(&state->identities, values[i]);
-    // Value-preserving scalar conversions retain their source so a guard on
-    // the source can refine the represented value without rediscovering its
-    // producer chain from every use. The retained relation is transitively
-    // flattened by the cast producer, keeping this lookup bounded.
-    loom_value_fact_exact_scalar_origin_t origin;
-    if (!loom_value_fact_table_query_exact_scalar_origin(table, state->module,
-                                                         canonical, &origin)) {
-      continue;
+    const loom_value_id_t numeric =
+        loom_conditioned_value_facts_refine_reference(state, entry, table,
+                                                      values[i], &operands[i]);
+    if (state->numeric_operands) {
+      state->numeric_operands[i] = numeric;
     }
-    const loom_value_id_t source = loom_cfg_value_identity_table_lookup(
-        &state->identities, origin.source_value_id);
-    loom_value_facts_t source_facts =
-        loom_value_fact_table_lookup(table, source);
-    loom_conditioned_value_facts_refine_canonical_value(state, entry, table,
-                                                        source, &source_facts);
-    const loom_scalar_type_t source_type =
-        loom_type_element_type(loom_module_value_type(state->module, source));
-    const loom_scalar_type_t result_type = loom_type_element_type(
-        loom_module_value_type(state->module, canonical));
-    const loom_value_facts_t transferred =
-        loom_index_cast_transfer_facts(source_type, result_type, source_facts);
-    loom_conditioned_value_facts_apply_active_refinement(&transferred,
-                                                         &operands[i]);
   }
   return state->numeric_operands ? state->numeric_operands : values;
 }
@@ -815,9 +836,12 @@ static iree_status_t loom_conditioned_value_facts_solve(
   state->table->context.refine_operands.user_data = state;
   state->table->context.refine_operands.fn =
       loom_conditioned_value_facts_refine_operands;
+  state->table->context.refine_operands.value_fn =
+      loom_conditioned_value_facts_refine_value;
   iree_status_t status =
       loom_value_fact_table_compute(state->table, state->module, function);
   state->table->context.refine_operands.fn = NULL;
+  state->table->context.refine_operands.value_fn = NULL;
   state->table->context.refine_operands.user_data = NULL;
   return status;
 }

@@ -73,8 +73,8 @@ func.def @bounded_feedback() -> (i32) {
   %result = scf.for %iv = [%start to %end step %step](%carried = %initial : i32) -> (i32) {
     %below = scalar.cmpi slt, %carried, %limit : i32
     %advance = scalar.addi %carried, %increment : i32
-    %17 = scf.select %below, %advance, %carried : i32
-    %next = scalar.assume %17 [range(%17, -2147483647, 2147483647)] : i32
+    %18 = scf.select %below, %advance, %carried : i32
+    %next = scalar.assume %18 [range(%18, -2147483647, 2147483647)] : i32
     scf.yield %next : i32
   }
   func.return %result : i32

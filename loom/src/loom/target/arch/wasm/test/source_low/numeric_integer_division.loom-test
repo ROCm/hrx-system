@@ -11,11 +11,11 @@ func.def @integer_division_i32(%dividend: i32, %divisor: i32) -> (i32, i32, i32,
 // ----
 low.func.def target<wasm.core.simd128> abi(wasm_function) @integer_division_i32(%dividend: reg<wasm.i32>, %divisor: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
   %signed_quotient = i32.div_s %dividend, %divisor
-  %27 = i32.mul %signed_quotient, %divisor
-  %signed_remainder = i32.sub %dividend, %27
+  %39 = i32.mul %signed_quotient, %divisor
+  %signed_remainder = i32.sub %dividend, %39
   %unsigned_quotient = i32.div_u %dividend, %divisor
-  %30 = i32.mul %unsigned_quotient, %divisor
-  %unsigned_remainder = i32.sub %dividend, %30
+  %42 = i32.mul %unsigned_quotient, %divisor
+  %unsigned_remainder = i32.sub %dividend, %42
   return %signed_quotient, %signed_remainder, %unsigned_quotient, %unsigned_remainder
 }
 
@@ -32,10 +32,10 @@ func.def @integer_division_i64(%dividend: i64, %divisor: i64) -> (i64, i64, i64,
 // ----
 low.func.def target<wasm.core.simd128> abi(wasm_function) @integer_division_i64(%dividend: reg<wasm.i64>, %divisor: reg<wasm.i64>) -> (reg<wasm.i64>, reg<wasm.i64>, reg<wasm.i64>, reg<wasm.i64>) asm {
   %signed_quotient = i64.div_s %dividend, %divisor
-  %27 = i64.mul %signed_quotient, %divisor
-  %signed_remainder = i64.sub %dividend, %27
+  %39 = i64.mul %signed_quotient, %divisor
+  %signed_remainder = i64.sub %dividend, %39
   %unsigned_quotient = i64.div_u %dividend, %divisor
-  %30 = i64.mul %unsigned_quotient, %divisor
-  %unsigned_remainder = i64.sub %dividend, %30
+  %42 = i64.mul %unsigned_quotient, %divisor
+  %unsigned_remainder = i64.sub %dividend, %42
   return %signed_quotient, %signed_remainder, %unsigned_quotient, %unsigned_remainder
 }

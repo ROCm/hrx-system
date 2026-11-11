@@ -412,7 +412,7 @@ func.def target(@target) @reconstructed_ui32_remainder(%input: buffer, %bits_inp
   %quotient = scalar.divui %bits, %divisor : i32
   %15 = scalar.muli %quotient, %divisor : i32
   %16 = scalar.subi %bits, %15 : i32
-  %remainder = scalar.assume %16 [range(%16, 0, 7), lt(%16, %divisor)] : i32
+  %remainder = scalar.assume %16 [range(%16, 0, 7), ult(%16, %divisor)] : i32
   %extent = index.cast %divisor : i32 to index
   %coordinate = index.cast %remainder : i32 to index
   %base = index.constant 0 : offset
@@ -471,7 +471,7 @@ func.def target(@target) @reconstructed_ui16_remainder(%input: buffer, %bits: i1
   %19 = scalar.divui %13, %14 : i32
   %20 = scalar.muli %19, %14 : i32
   %21 = scalar.subi %13, %20 : i32
-  %22 = scalar.assume %21 [range(%21, 0, 7), lt(%21, %14)] : i32
+  %22 = scalar.assume %21 [range(%21, 0, 7), ult(%21, %14)] : i32
   %quotient = scalar.trunci %19 : i32 to i16
   %remainder = scalar.trunci %22 : i32 to i16
   %extent = index.cast %divisor : i16 to index

@@ -19,13 +19,14 @@
 #include "loom/util/fact_table.h"
 #include "loom/util/predicate_facts.h"
 
-#define LOOM_INDEX_BINARY_FACTS(name, transfer_fn)                       \
+#define LOOM_INDEX_BINARY_FACTS(name, transfer_fn, neutral, symmetric)   \
   iree_status_t name(loom_fact_context_t* context,                       \
                      const loom_module_t* module, const loom_op_t* op,   \
                      const loom_value_facts_t* operand_facts,            \
                      loom_value_facts_t* result_facts) {                 \
     transfer_fn(&operand_facts[0], &operand_facts[1], &result_facts[0]); \
-    return iree_ok_status();                                             \
+    return loom_value_fact_table_define_binary_identity(                 \
+        context, operand_facts, neutral, symmetric);                     \
   }
 
 iree_status_t loom_index_constant_facts(loom_fact_context_t* context,
@@ -92,14 +93,10 @@ iree_status_t loom_index_cast_facts(loom_fact_context_t* context,
 
   result_facts[0] = loom_index_cast_transfer_facts(
       input_scalar_type, result_scalar_type, operand_facts[0]);
-  if (!context->publication) {
-    return iree_ok_status();
-  }
   const bool preserves_value = loom_index_cast_transfer_preserves_value(
       input_scalar_type, result_scalar_type, operand_facts[0]);
-  return loom_value_fact_table_define_numeric_identity(
-      context->table, loom_index_cast_result(op),
-      preserves_value ? loom_index_cast_input(op) : LOOM_VALUE_ID_INVALID);
+  return loom_value_fact_table_define_operand_identity(
+      context, 0, preserves_value ? 0 : -1);
 }
 
 iree_status_t loom_index_assume_facts(loom_fact_context_t* context,
@@ -139,7 +136,8 @@ iree_status_t loom_index_add_facts(loom_fact_context_t* context,
                                    loom_value_facts_t* result_facts) {
   loom_value_facts_addi(&operand_facts[0], &operand_facts[1], &result_facts[0]);
   loom_index_wrap_offset_result_facts(context, module, op, &result_facts[0]);
-  return iree_ok_status();
+  return loom_value_fact_table_define_binary_identity(context, operand_facts, 0,
+                                                      true);
 }
 
 iree_status_t loom_index_sub_facts(loom_fact_context_t* context,
@@ -179,10 +177,11 @@ iree_status_t loom_index_sub_facts(loom_fact_context_t* context,
   }
   loom_value_facts_recompute_flags(&result_facts[0]);
   loom_index_wrap_offset_result_facts(context, module, op, &result_facts[0]);
-  return iree_ok_status();
+  return loom_value_fact_table_define_binary_identity(context, operand_facts, 0,
+                                                      false);
 }
 
-LOOM_INDEX_BINARY_FACTS(loom_index_mul_facts, loom_value_facts_muli)
+LOOM_INDEX_BINARY_FACTS(loom_index_mul_facts, loom_value_facts_muli, 1, true)
 iree_status_t loom_index_scale_facts(loom_fact_context_t* context,
                                      const loom_module_t* module,
                                      const loom_op_t* op,
@@ -190,7 +189,26 @@ iree_status_t loom_index_scale_facts(loom_fact_context_t* context,
                                      loom_value_facts_t* result_facts) {
   loom_value_facts_muli(&operand_facts[0], &operand_facts[1], &result_facts[0]);
   loom_index_wrap_offset_result_facts(context, module, op, &result_facts[0]);
-  return iree_ok_status();
+  int32_t operand_ordinal = -1;
+  if (loom_value_facts_is_exact(operand_facts[1]) &&
+      operand_facts[1].range_lo == 1) {
+    int32_t bit_count =
+        loom_index_target_carrier_bitwidth(context, LOOM_SCALAR_TYPE_OFFSET);
+    if (bit_count == 0) {
+      bit_count = 64;
+    }
+    // Scaling enters the unsigned byte-offset domain. A unit stride does
+    // not preserve a logical coordinate that wraps in that carrier.
+    if (bit_count > 0 && loom_value_facts_unsigned_wrap_is_identity(
+                             operand_facts[0], (uint8_t)bit_count)) {
+      operand_ordinal = 0;
+    }
+  } else if (loom_value_facts_is_exact(operand_facts[0]) &&
+             operand_facts[0].range_lo == 1) {
+    operand_ordinal = 1;
+  }
+  return loom_value_fact_table_define_operand_identity(context, 0,
+                                                       operand_ordinal);
 }
 
 static void loom_index_div_result_facts(const loom_value_facts_t* operand_facts,
@@ -220,7 +238,8 @@ iree_status_t loom_index_div_facts(loom_fact_context_t* context,
                                    const loom_value_facts_t* operand_facts,
                                    loom_value_facts_t* result_facts) {
   loom_index_div_result_facts(operand_facts, &result_facts[0]);
-  return iree_ok_status();
+  return loom_value_fact_table_define_binary_identity(context, operand_facts, 1,
+                                                      false);
 }
 
 static void loom_index_rem_result_facts(const loom_value_facts_t* operand_facts,
@@ -246,7 +265,7 @@ static iree_status_t loom_index_publish_remainder_bound(
   const loom_value_id_t divisor =
       loom_value_facts_is_non_negative(operand_facts[0]) &&
               loom_value_facts_is_positive(operand_facts[1])
-          ? loom_index_andi_rhs(op)
+          ? loom_op_const_operands(op)[1]
           : LOOM_VALUE_ID_INVALID;
   const loom_value_id_t* numeric_operands =
       context->publication->numeric_operands;
@@ -274,6 +293,8 @@ iree_status_t loom_index_divrem_facts(loom_fact_context_t* context,
                                       loom_value_facts_t* result_facts) {
   loom_index_div_result_facts(operand_facts, &result_facts[0]);
   loom_index_rem_result_facts(operand_facts, &result_facts[1]);
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_define_binary_identity(
+      context, operand_facts, 1, false));
   return loom_index_publish_remainder_bound(context, op, 1, operand_facts,
                                             result_facts);
 }
@@ -338,6 +359,13 @@ iree_status_t loom_index_andi_facts(loom_fact_context_t* context,
                                     const loom_value_facts_t* operand_facts,
                                     loom_value_facts_t* result_facts) {
   loom_value_facts_andi(&operand_facts[0], &operand_facts[1], result_facts);
+  if ((loom_value_facts_is_exact(operand_facts[0]) &&
+       operand_facts[0].range_lo == -1) ||
+      (loom_value_facts_is_exact(operand_facts[1]) &&
+       operand_facts[1].range_lo == -1)) {
+    return loom_value_fact_table_define_binary_identity(context, operand_facts,
+                                                        -1, true);
+  }
   if (!context->publication) {
     return iree_ok_status();
   }
@@ -355,10 +383,11 @@ iree_status_t loom_index_andi_facts(loom_fact_context_t* context,
       IREE_ARRAYSIZE(upper_bounds), LOOM_SYMBOLIC_INTEGER_RELATION_LE,
       result_facts, context->publication->changed);
 }
-LOOM_INDEX_BINARY_FACTS(loom_index_ori_facts, loom_value_facts_ori)
-LOOM_INDEX_BINARY_FACTS(loom_index_xori_facts, loom_value_facts_xori)
-LOOM_INDEX_BINARY_FACTS(loom_index_shli_facts, loom_value_facts_shli)
-LOOM_INDEX_BINARY_FACTS(loom_index_shrsi_facts, loom_value_facts_shrsi)
+LOOM_INDEX_BINARY_FACTS(loom_index_ori_facts, loom_value_facts_ori, 0, true)
+LOOM_INDEX_BINARY_FACTS(loom_index_xori_facts, loom_value_facts_xori, 0, true)
+LOOM_INDEX_BINARY_FACTS(loom_index_shli_facts, loom_value_facts_shli, 0, false)
+LOOM_INDEX_BINARY_FACTS(loom_index_shrsi_facts, loom_value_facts_shrsi, 0,
+                        false)
 iree_status_t loom_index_shrui_facts(loom_fact_context_t* context,
                                      const loom_module_t* module,
                                      const loom_op_t* op,
@@ -373,18 +402,25 @@ iree_status_t loom_index_shrui_facts(loom_fact_context_t* context,
     bit_count = 64;
   }
   if (bit_count <= 0) {
-    result_facts[0] = loom_value_facts_unknown();
-    loom_value_facts_propagate_binary_distribution(
-        operand_facts[0], operand_facts[1], &result_facts[0]);
-    return iree_ok_status();
+    if (loom_value_facts_is_exact(operand_facts[1]) &&
+        operand_facts[1].range_lo == 0) {
+      result_facts[0] = operand_facts[0];
+    } else {
+      result_facts[0] = loom_value_facts_unknown();
+      loom_value_facts_propagate_binary_distribution(
+          operand_facts[0], operand_facts[1], &result_facts[0]);
+    }
+    return loom_value_fact_table_define_binary_identity(context, operand_facts,
+                                                        0, false);
   }
   loom_value_facts_shrui(&operand_facts[0], &operand_facts[1], bit_count,
                          &result_facts[0]);
-  return iree_ok_status();
+  return loom_value_fact_table_define_binary_identity(context, operand_facts, 0,
+                                                      false);
 }
 
 static iree_status_t loom_index_rotate_facts(
-    const loom_fact_context_t* context, const loom_value_facts_t* operand_facts,
+    loom_fact_context_t* context, const loom_value_facts_t* operand_facts,
     bool rotate_left, loom_value_facts_t* result_facts) {
   int32_t bitwidth =
       loom_index_target_carrier_bitwidth(context, LOOM_SCALAR_TYPE_INDEX);
@@ -395,7 +431,16 @@ static iree_status_t loom_index_rotate_facts(
     loom_value_facts_rotri(&operand_facts[0], &operand_facts[1], bitwidth,
                            &result_facts[0]);
   }
-  return iree_ok_status();
+  int64_t count = 0;
+  const bool preserves_value =
+      loom_value_facts_as_exact_i64(operand_facts[1], &count) &&
+      (bitwidth > 0 ? ((uint64_t)count & (uint64_t)(bitwidth - 1)) == 0
+                    : count == 0);
+  if (preserves_value) {
+    result_facts[0] = operand_facts[0];
+  }
+  return loom_value_fact_table_define_operand_identity(
+      context, 0, preserves_value ? 0 : -1);
 }
 
 iree_status_t loom_index_rotli_facts(loom_fact_context_t* context,

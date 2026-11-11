@@ -250,12 +250,24 @@ iree_status_t loom_value_fact_table_define_exact_scalar_origin(
     loom_value_fact_table_t* table, loom_value_id_t value_id,
     loom_value_fact_exact_scalar_origin_t origin);
 
-// Publishes a proved numeric identity across scalar representations. Retains
-// the canonical exact origin and inherits source-local integer relations.
-// INVALID source withdraws both products when a conversion can change value.
-iree_status_t loom_value_fact_table_define_numeric_identity(
-    loom_value_fact_table_t* table, loom_value_id_t value_id,
-    loom_value_id_t source_value_id);
+// Publishes that one result equals an operand in the active inference scope.
+// Retains the scoped numeric representative and the actual operand's local
+// integer relations. These are numeric identities, not SSA substitutions.
+// A negative operand ordinal withdraws both products. Without an active
+// publication this is a numeric-only inference call and publishes nothing.
+iree_status_t loom_value_fact_table_define_operand_identity(
+    loom_fact_context_t* context, uint16_t result_ordinal,
+    int32_t operand_ordinal);
+
+// Publishes an operand identity for a binary operation with the specified
+// right neutral element, or either neutral operand when symmetric. The caller
+// supplies the operation's mathematical identity and already-interpreted
+// operand facts. Result ordinal zero also covers the arithmetic result of
+// carry/borrow and quotient/remainder. Even an exact operand can carry a
+// relation to a dynamic bound, independently of its numeric interval.
+iree_status_t loom_value_fact_table_define_binary_identity(
+    loom_fact_context_t* context, const loom_value_facts_t* operand_facts,
+    int64_t neutral, bool symmetric);
 
 // Returns the exact scalar value source for |value_id|. The query validates
 // that both values are scalar; their representation types may differ.

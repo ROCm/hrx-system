@@ -519,7 +519,7 @@ bool loom_value_fact_table_carrier_implies_predicate(
   return false;
 }
 
-static bool loom_value_fact_alias_map_resolve(
+static void loom_value_fact_alias_map_resolve(
     const loom_value_fact_table_t* table,
     const loom_value_fact_ordinal_map_t* alias_map,
     const loom_value_facts_t* alias_facts, loom_value_id_t value_id,
@@ -540,9 +540,9 @@ static bool loom_value_fact_alias_map_resolve(
       *out_alias_ordinal = alias_ordinal;
     }
     *out_facts = alias_facts[alias_ordinal];
-    return true;
+    return;
   }
-  return loom_value_fact_table_try_lookup(table, value_id, out_facts);
+  loom_value_fact_table_lookup_inference_value(table, value_id, out_facts);
 }
 
 static void loom_value_fact_alias_map_refine_relation(
@@ -555,13 +555,11 @@ static void loom_value_fact_alias_map_refine_relation(
   uint16_t rhs_ordinal = 0;
   loom_value_facts_t lhs_facts = loom_value_facts_unknown();
   loom_value_facts_t rhs_facts = loom_value_facts_unknown();
-  if (!loom_value_fact_alias_map_resolve(table, alias_map, inout_facts, lhs,
-                                         &lhs_is_alias, &lhs_ordinal,
-                                         &lhs_facts) ||
-      !loom_value_fact_alias_map_resolve(table, alias_map, inout_facts, rhs,
-                                         &rhs_is_alias, &rhs_ordinal,
-                                         &rhs_facts) ||
-      (!lhs_is_alias && !rhs_is_alias) ||
+  loom_value_fact_alias_map_resolve(table, alias_map, inout_facts, lhs,
+                                    &lhs_is_alias, &lhs_ordinal, &lhs_facts);
+  loom_value_fact_alias_map_resolve(table, alias_map, inout_facts, rhs,
+                                    &rhs_is_alias, &rhs_ordinal, &rhs_facts);
+  if ((!lhs_is_alias && !rhs_is_alias) ||
       loom_value_facts_is_float(lhs_facts) ||
       loom_value_facts_is_float(rhs_facts)) {
     return;
@@ -604,13 +602,10 @@ static void loom_value_fact_table_apply_alias_predicates_with_map(
         continue;
       }
       loom_value_facts_t argument_facts = loom_value_facts_unknown();
-      if (!loom_value_fact_alias_map_resolve(
-              table, alias_map, inout_facts,
-              (loom_value_id_t)resolved_predicate.args[argument_index],
-              /*out_is_alias=*/NULL, /*out_alias_ordinal=*/NULL,
-              &argument_facts)) {
-        continue;
-      }
+      loom_value_fact_alias_map_resolve(
+          table, alias_map, inout_facts,
+          (loom_value_id_t)resolved_predicate.args[argument_index],
+          /*out_is_alias=*/NULL, /*out_alias_ordinal=*/NULL, &argument_facts);
       int64_t exact_value = 0;
       if (!loom_value_facts_as_exact_i64(argument_facts, &exact_value)) {
         continue;
