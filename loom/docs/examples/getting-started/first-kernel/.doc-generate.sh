@@ -6,8 +6,8 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 # Runs the hardware-independent portion of the public quickstart, verifies its
-# products, and stages the exact source and Bazel declaration included by the
-# page.
+# products, and stages both source forms and the Bazel declaration included by
+# the page.
 
 set -euo pipefail
 
@@ -22,7 +22,9 @@ if [[ "$#" -gt 1 ]]; then
 fi
 
 loom_example_configure_inputs \
+  --config=loom-importer-cxx \
   tool:loom-format \
+  tool:loom-import-cxx \
   tool:loom-compile \
   tool:loom-benchmark
 
@@ -45,11 +47,17 @@ grep -Fq '"benchmark":"saxpy_f32_64k"' \
   "${artifact_root}/saxpy-plan.json"
 grep -Fq '"element_count":65536' "${artifact_root}/saxpy-plan.json"
 test -s "${artifact_root}/saxpy.hsaco"
+grep -Fq '"benchmark":"saxpy_f32_64k"' \
+  "${artifact_root}/saxpy-cxx-plan.json"
+grep -Fq '"case":"saxpy_f32_65536"' "${artifact_root}/saxpy-cxx-plan.json"
+test -s "${artifact_root}/saxpy-cxx.hsaco"
 
 cp -- "${source_file}" "${output_dir}/saxpy.loom"
+cp -- "${script_dir}/saxpy.cxx" "${output_dir}/saxpy.cxx"
 cp -- "${build_file}" "${output_dir}/BUILD.bazel"
 
 printf 'Generated documentation snippets:\n'
 printf '  %s\n' \
   "${output_dir}/saxpy.loom" \
+  "${output_dir}/saxpy.cxx" \
   "${output_dir}/BUILD.bazel"

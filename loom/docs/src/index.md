@@ -41,7 +41,7 @@ parts of it, or take the compiler's output into your own runtime.
 
 <div class="loom-intro-authoring" markdown>
 
-Programs can be written in [a subset of C++](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/import/cxx/README.md)
+Programs can be written in [a subset of C++](getting-started/first-kernel.md#write-the-same-kernel-in-cpp)
 or an isomorphic, [agent-friendly Loom IR](getting-started/first-kernel.md#create-one-source-file).
 The compiler provides
 [structured diagnostics and reports](workflows/compile-reports.md)

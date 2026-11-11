@@ -34,10 +34,12 @@ mkdir -p -- "${output_dir}"
 output_dir="$(cd -- "${output_dir}" && pwd -P)"
 
 loom_format="${LOOM_FORMAT:-loom-format}"
+loom_import_cxx="${LOOM_IMPORT_CXX:-loom-import-cxx}"
 loom_compile="${LOOM_COMPILE:-loom-compile}"
 loom_benchmark="${LOOM_BENCHMARK:-loom-benchmark}"
 
 loom_example_require_tool "${loom_format}"
+loom_example_require_tool "${loom_import_cxx}"
 loom_example_require_tool "${loom_compile}"
 loom_example_require_tool "${loom_benchmark}"
 
@@ -51,44 +53,58 @@ cd -- "${script_dir}"
 loom_example_section "Check the authored source"
 loom_example_run_tool loom-format "${loom_format}" --check saxpy.loom
 
-loom_example_section "Plan the named benchmark workload"
-loom_example_run_tool loom-benchmark "${loom_benchmark}" \
-  saxpy.loom \
-  --benchmark=@saxpy_f32_64k \
-  --dry-run \
-  --output="${output_dir}/saxpy-plan.json"
+loom_example_section "Import the same kernel from C++"
+loom_example_run_tool loom-import-cxx "${loom_import_cxx}" \
+  saxpy.cxx --output="${output_dir}/saxpy-cxx.loom"
+loom_example_run_tool loom-format "${loom_format}" \
+  --check "${output_dir}/saxpy-cxx.loom"
 
-loom_example_section "Compile the deployment kernel for ${target}"
-loom_example_run_tool loom-compile "${loom_compile}" \
-  saxpy.loom \
-  --format="${LOOM_EXAMPLE_FORMAT}" \
-  --target="amdgpu:${LOOM_EXAMPLE_TARGET}" \
-  --root=@saxpy_f32 \
-  --output="${output_dir}/saxpy.hsaco"
+for source_file in saxpy.loom "${output_dir}/saxpy-cxx.loom"; do
+  source_name="${source_file##*/}"
+  source_name="${source_name%.loom}"
 
-if [[ -z "${mode}" ]]; then
-  loom_example_section "Execute every correctness sample on AMDGPU"
-  printf '  $ loom-test saxpy.loom --device=amdgpu > %q\n' \
-    "${output_dir}/saxpy-test.json"
-  "${loom_test}" saxpy.loom --device=amdgpu \
-    >"${output_dir}/saxpy-test.json"
-
-  loom_example_section "Benchmark the proven 64K workload"
+  loom_example_section "Plan the named benchmark workload in ${source_name}"
   loom_example_run_tool loom-benchmark "${loom_benchmark}" \
-    saxpy.loom \
-    --device=amdgpu \
+    "${source_file}" \
     --benchmark=@saxpy_f32_64k \
-    --measure=dispatch_complete \
-    --batch-size=64 \
-    --output="${output_dir}/saxpy-benchmark.json"
-fi
+    --dry-run \
+    --output="${output_dir}/${source_name}-plan.json"
+
+  loom_example_section "Compile ${source_name} for ${target}"
+  loom_example_run_tool loom-compile "${loom_compile}" \
+    "${source_file}" \
+    --format="${LOOM_EXAMPLE_FORMAT}" \
+    --target="amdgpu:${LOOM_EXAMPLE_TARGET}" \
+    --root=@saxpy_f32 \
+    --output="${output_dir}/${source_name}.hsaco"
+
+  if [[ -z "${mode}" ]]; then
+    loom_example_section "Execute every correctness sample in ${source_name}"
+    printf '  $ loom-test %q --device=amdgpu > %q\n' \
+      "${source_file}" "${output_dir}/${source_name}-test.json"
+    "${loom_test}" "${source_file}" --device=amdgpu \
+      >"${output_dir}/${source_name}-test.json"
+
+    loom_example_section "Benchmark the proven 64K workload in ${source_name}"
+    loom_example_run_tool loom-benchmark "${loom_benchmark}" \
+      "${source_file}" \
+      --device=amdgpu \
+      --benchmark=@saxpy_f32_64k \
+      --measure=dispatch_complete \
+      --batch-size=64 \
+      --output="${output_dir}/${source_name}-benchmark.json"
+  fi
+done
 
 loom_example_section "Artifacts"
-printf '  %s\n' \
-  "${output_dir}/saxpy-plan.json" \
-  "${output_dir}/saxpy.hsaco"
-if [[ -z "${mode}" ]]; then
+printf '  %s\n' "${output_dir}/saxpy-cxx.loom"
+for source_name in saxpy saxpy-cxx; do
   printf '  %s\n' \
-    "${output_dir}/saxpy-test.json" \
-    "${output_dir}/saxpy-benchmark.json"
-fi
+    "${output_dir}/${source_name}-plan.json" \
+    "${output_dir}/${source_name}.hsaco"
+  if [[ -z "${mode}" ]]; then
+    printf '  %s\n' \
+      "${output_dir}/${source_name}-test.json" \
+      "${output_dir}/${source_name}-benchmark.json"
+  fi
+done
