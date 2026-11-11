@@ -120,6 +120,8 @@ class KernelClassClassifierTest : public ::testing::Test {
         module.get(), kernel_symbol_id, &references, &decision_models,
         &kernel_facts, &expression_context, &kernel_target, &analysis_arena_,
         out_classifier));
+    // Construction scratch may retire before the classifier is queried.
+    iree_arena_block_pool_trim(&block_pool_);
     return module;
   }
 

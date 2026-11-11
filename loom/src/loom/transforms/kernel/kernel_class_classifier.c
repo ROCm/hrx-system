@@ -612,7 +612,7 @@ static iree_status_t loom_kernel_class_classifier_build_impl(
 
   loom_value_id_t* referenced_value_ids = NULL;
   IREE_RETURN_IF_ERROR(loom_kernel_class_allocate_array(
-      arena, value_reference_count, sizeof(*referenced_value_ids),
+      scratch_arena, value_reference_count, sizeof(*referenced_value_ids),
       (void**)&referenced_value_ids));
   iree_host_size_t referenced_value_count = 0;
   for (uint32_t i = 0; i < out_classifier->shape.count; ++i) {
@@ -740,8 +740,8 @@ static iree_status_t loom_kernel_class_classifier_build_impl(
   }
 
   loom_value_id_t* binding_values = NULL;
-  // Reference discovery is complete, so its storage now owns each decision's
-  // compact projection-ordinal slices for the classifier lifetime.
+  // Reuse discovery scratch to pack each decision's unique projection ordinals.
+  // The occurrence-sized allocation retires after its compact prefix is copied.
   uint32_t* decision_projection_ordinals = referenced_value_ids;
   loom_decision_truth_t* feature_outcomes = NULL;
   loom_kernel_class_action_t* actions = NULL;
@@ -894,6 +894,24 @@ static iree_status_t loom_kernel_class_classifier_build_impl(
   IREE_ASSERT(projection_cursor <= value_reference_count);
   IREE_ASSERT(feature_cursor == feature_count);
   IREE_ASSERT(action_cursor == action_count);
+
+  uint32_t* retained_projection_ordinals = NULL;
+  IREE_RETURN_IF_ERROR(loom_kernel_class_allocate_array(
+      arena, projection_cursor, sizeof(*retained_projection_ordinals),
+      (void**)&retained_projection_ordinals));
+  if (projection_cursor != 0) {
+    memcpy(retained_projection_ordinals, decision_projection_ordinals,
+           projection_cursor * sizeof(*retained_projection_ordinals));
+  }
+  projection_cursor = 0;
+  for (uint32_t i = 0; i < decision_count; ++i) {
+    loom_kernel_class_decision_t* decision = &decisions[i];
+    decision->projection_ordinals =
+        decision->projection_count != 0
+            ? retained_projection_ordinals + projection_cursor
+            : NULL;
+    projection_cursor += decision->projection_count;
+  }
   return iree_ok_status();
 }
 
