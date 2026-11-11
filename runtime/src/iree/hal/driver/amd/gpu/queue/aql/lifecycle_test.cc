@@ -194,7 +194,7 @@ class AqlLifecycleTest : public ::testing::Test {
     iree_hal_amd_gpu_aql_scratch_initialize(
         &queue_.growth, queue_.storage.queue, nullptr, &queue_.scratch);
   }
-  bool Poll() {
+  bool Poll(iree_hal_amd_gpu_completion_wait_t* out_wait = nullptr) {
     auto source = iree_hal_amd_gpu_aql_queue_completion_source(&queue_.base);
     iree_slim_mutex_lock(&completion_.drain_mutex);
     iree_hal_amd_gpu_completion_scope_t scope = {
@@ -207,6 +207,9 @@ class AqlLifecycleTest : public ::testing::Test {
         source.fn(source.user_data, AMDF_STATUS_OK, &scope, &wait, nullptr);
     EXPECT_FALSE(iree_hal_amd_gpu_completion_scope_finish(&scope));
     iree_slim_mutex_unlock(&completion_.drain_mutex);
+    if (out_wait) {
+      *out_wait = wait;
+    }
     return progressed;
   }
   void ExpectFrontier(uint64_t value, bool expected) {
@@ -434,9 +437,24 @@ TEST_F(AqlLifecycleTest, PublicationFailureRetiresWithoutSignalingSuccess) {
 }
 
 TEST_F(AqlLifecycleTest, ShaderFailureWaitsForIssuedCompletion) {
+  EnableNativeCompletion();
+  iree_hal_amd_gpu_completion_wait_t idle = {};
+  EXPECT_FALSE(Poll(&idle));
+  ASSERT_NE(idle.address, nullptr);
+  EXPECT_TRUE(idle.is_64_bit);
+  EXPECT_FALSE(idle.pending);
   Capture();
+  // Publication becomes visible through the idle source's retained hint.
+  EXPECT_NE(
+      iree_atomic_load(static_cast<const iree_atomic_int64_t*>(idle.address),
+                       iree_memory_order_acquire),
+      idle.value);
   FailFeedback();
-  EXPECT_FALSE(Poll());
+  iree_hal_amd_gpu_completion_wait_t pending = {};
+  EXPECT_FALSE(Poll(&pending));
+  ASSERT_NE(pending.address, nullptr);
+  EXPECT_TRUE(pending.pending);
+  EXPECT_EQ(pending.is_64_bit, true);
   EXPECT_GT(diagnostics_, 0u);
   ExpectPending();
   ExpectFrontier(1, false);

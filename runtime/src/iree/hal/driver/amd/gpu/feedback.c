@@ -200,6 +200,7 @@ iree_status_t iree_hal_amd_gpu_feedback_initialize(
     out_feedback->control->flags = 1;
     // Native USER signal: kind, value, mailbox, and event ID at ABI offsets.
     uint8_t* signal = out_feedback->control_memory.contents.data + 64;
+    out_feedback->notification_value = (iree_atomic_int64_t*)(signal + 8);
     iree_unaligned_store_le_u64(signal, 1);
     iree_unaligned_store_le_u64(signal + 16,
                                 context->event_info.mailbox_address);
@@ -533,8 +534,19 @@ bool iree_hal_amd_gpu_feedback_poll(
     iree_hal_amd_gpu_completion_scope_t* scope,
     iree_hal_amd_gpu_completion_wait_t* out_wait,
     iree_hal_amd_gpu_completion_copy_t* out_copy) {
-  return amdf_status_is_ok(wait_status) &&
-         iree_hal_amd_gpu_feedback_drain_packets(user_data, 64);
+  if (!amdf_status_is_ok(wait_status)) {
+    return false;
+  }
+  iree_hal_amd_gpu_feedback_t* feedback = user_data;
+  // Snapshot before draining so a report arriving during the drain cannot be
+  // hidden by a newer notification value. Reports never keep an idle worker
+  // polling; native notification wakes it when no GPU source is active.
+  *out_wait = (iree_hal_amd_gpu_completion_wait_t){
+      .address = feedback->notification_value,
+      .value = iree_atomic_load(feedback->notification_value,
+                                iree_memory_order_acquire),
+      .is_64_bit = true};
+  return iree_hal_amd_gpu_feedback_drain_packets(feedback, 64);
 }
 
 void iree_hal_amd_gpu_feedback_drain(iree_hal_amd_gpu_feedback_t* feedback) {

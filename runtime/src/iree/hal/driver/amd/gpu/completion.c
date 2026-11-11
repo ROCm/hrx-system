@@ -247,7 +247,7 @@ static bool iree_hal_amd_gpu_completion_drain(
       }
     }
     if (out_has_wait) {
-      *out_has_wait |= wait.address != NULL;
+      *out_has_wait |= wait.pending;
     }
     if ((!copy || !copy->fn) &&
         iree_hal_amd_gpu_completion_scope_finish(&scope)) {
@@ -357,7 +357,7 @@ static bool iree_hal_amd_gpu_completion_end_observation(
 // performs only coherent loads here, never callbacks, locks, or native queries.
 static bool iree_hal_amd_gpu_completion_observe(
     iree_hal_amd_gpu_completion_t* completion, iree_time_t deadline,
-    bool has_callouts) {
+    int64_t wake_epoch, bool has_callouts) {
   const int32_t observing_state =
       IREE_HAL_AMD_GPU_COMPLETION_BORROWING_SOURCES |
       (has_callouts ? IREE_HAL_AMD_GPU_COMPLETION_WAITING_FOR_CALLOUT : 0);
@@ -366,12 +366,21 @@ static bool iree_hal_amd_gpu_completion_observe(
   while ((iree_atomic_load(&completion->state, iree_memory_order_relaxed) &
           ~IREE_HAL_AMD_GPU_COMPLETION_JOINING_CALLOUT) == observing_state &&
          iree_time_now() < deadline) {
+    if (iree_atomic_load(&completion->context->wake_epoch,
+                         iree_memory_order_acquire) != wake_epoch) {
+      return true;
+    }
     for (iree_host_size_t i = 0; i < completion->source_count; ++i) {
       const iree_hal_amd_gpu_completion_wait_t* wait =
           &completion->sources[i].wait;
       if (wait->address) {
-        if (iree_atomic_load(wait->address, iree_memory_order_acquire) !=
-            wait->value) {
+        const int64_t value =
+            wait->is_64_bit
+                ? iree_atomic_load((const iree_atomic_int64_t*)wait->address,
+                                   iree_memory_order_acquire)
+                : iree_atomic_load((const iree_atomic_int32_t*)wait->address,
+                                   iree_memory_order_acquire);
+        if (value != wait->value) {
           return true;
         }
       }
@@ -402,6 +411,10 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
     iree_hal_amd_gpu_completion_copy_t copy = {0};
     iree_hal_amd_gpu_completion_scope_t copy_scope = {0};
     bool ready = false;
+    // A host wake during the drain must remain visible to observation even
+    // when its native event arrives after the source was already inspected.
+    const int64_t wake_epoch =
+        iree_atomic_load(&context->wake_epoch, iree_memory_order_acquire);
     if (!(state & IREE_HAL_AMD_GPU_COMPLETION_REPLACING_SOURCES)) {
       ready = iree_hal_amd_gpu_completion_drain(
           completion, AMDF_STATUS_OK, IREE_HAL_AMD_GPU_COMPLETION_CALLER_WORKER,
@@ -444,7 +457,7 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
     iree_slim_mutex_unlock(&completion->drain_mutex);
     if (observe) {
       const bool changed = iree_hal_amd_gpu_completion_observe(
-          completion, spin_deadline, has_callouts);
+          completion, spin_deadline, wake_epoch, has_callouts);
       const bool callout_returned =
           iree_hal_amd_gpu_completion_end_observation(completion, has_callouts);
       if (changed || callout_returned) {
@@ -512,7 +525,7 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
 }
 
 iree_status_t iree_hal_amd_gpu_completion_initialize(
-    const iree_hal_amd_gpu_context_t* context, iree_host_size_t source_count,
+    iree_hal_amd_gpu_context_t* context, iree_host_size_t source_count,
     iree_hal_amd_gpu_completion_source_t* sources, iree_duration_t spin_ns,
     iree_thread_affinity_t affinity, iree_allocator_t host_allocator,
     iree_hal_amd_gpu_completion_t* out_completion) {
@@ -642,7 +655,7 @@ amdf_status_t iree_hal_amd_gpu_completion_request_stop(
   if (!iree_any_bit_set(previous, IREE_HAL_AMD_GPU_COMPLETION_STOPPED)) {
     // A failed wake preserves the join obligation. Retrying must signal again
     // even when a previous call has already published STOP_REQUESTED.
-    const iree_hal_amd_gpu_context_t* context = completion->context;
+    iree_hal_amd_gpu_context_t* context = completion->context;
     return iree_hal_amd_gpu_context_signal(context);
   }
   return AMDF_STATUS_OK;

@@ -371,7 +371,8 @@ iree_status_t iree_hal_amd_gpu_context_prepare_completion(
 }
 
 amdf_status_t iree_hal_amd_gpu_context_signal(
-    const iree_hal_amd_gpu_context_t* context) {
+    iree_hal_amd_gpu_context_t* context) {
+  iree_atomic_fetch_add(&context->wake_epoch, 1, iree_memory_order_release);
   if (context->event) {
     return context->gpu->event_signal(context->event);
   }

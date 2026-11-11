@@ -49,6 +49,9 @@ typedef struct iree_hal_amd_gpu_context_t {
   iree_async_event_native_t kernel_event;
   // Borrowed native destination dominated by kernel_event.
   amdf_native_event_t kernel_notification;
+  // Host wake generation, observed before source draining and during coherent
+  // waits so native event signaling also interrupts an active observer.
+  iree_atomic_int64_t wake_epoch;
   // Physical identity and native family count captured at opening.
   amdf_endpoint_info_t endpoint_info;
   // Cached endpoint attachment node, or UINT32_MAX when not reported.
@@ -227,7 +230,7 @@ amdf_status_t iree_hal_amd_gpu_context_deinitialize_completion(
 // Signals the shared completion observer without allocating or advancing any
 // completion frontier. The caller retains context through the final access.
 amdf_status_t iree_hal_amd_gpu_context_signal(
-    const iree_hal_amd_gpu_context_t* context);
+    iree_hal_amd_gpu_context_t* context);
 
 // Releases an idle owner after all queue removals, notification tails, host
 // event calls/waits, backing and worker uses have joined. Joins outstanding

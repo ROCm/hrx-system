@@ -565,12 +565,20 @@ static bool iree_hal_amd_gpu_sdma_native_queue_poll(
     iree_hal_amd_gpu_completion_wait_t* out_wait,
     iree_hal_amd_gpu_completion_copy_t* out_copy) {
   iree_hal_amd_gpu_sdma_native_queue_t* queue = user_data;
-  // Other engines share the observer. An idle command source performs no RMW
-  // and supplies no active-wait hint merely because a PM4 queue woke up. A
-  // later publication signals the persistent native event when it completes.
+  // Other engines share the observer. Passive publication observation notices
+  // this queue becoming active without keeping an idle device awake or adding
+  // a publisher-side wake operation.
+  const uint64_t published =
+      (uint64_t)iree_atomic_load(&queue->published, iree_memory_order_acquire);
   if (amdf_status_is_ok(wait_status) &&
-      iree_atomic_load(&queue->published, iree_memory_order_acquire) ==
-          iree_atomic_load(&queue->retired, iree_memory_order_relaxed)) {
+      published == (uint64_t)iree_atomic_load(&queue->retired,
+                                              iree_memory_order_relaxed)) {
+    if (!queue->kernel.queue) {
+      *out_wait =
+          (iree_hal_amd_gpu_completion_wait_t){.address = &queue->published,
+                                               .value = (int64_t)published,
+                                               .is_64_bit = true};
+    }
     return false;
   }
   if (!queue->kernel.queue && amdf_status_is_ok(wait_status) &&
@@ -578,6 +586,7 @@ static bool iree_hal_amd_gpu_sdma_native_queue_poll(
     out_wait->address = queue->completion;
     out_wait->value =
         (int32_t)iree_atomic_load(&queue->retired, iree_memory_order_relaxed);
+    out_wait->pending = true;
   }
   int32_t expected = 0;
   if (!iree_atomic_compare_exchange_strong(
@@ -597,9 +606,19 @@ static bool iree_hal_amd_gpu_sdma_native_queue_poll(
   }
   out_wait->value =
       (int32_t)iree_atomic_load(&queue->retired, iree_memory_order_relaxed);
-  if (iree_atomic_load(&queue->retired, iree_memory_order_relaxed) ==
-      iree_atomic_load(&queue->published, iree_memory_order_acquire)) {
-    out_wait->address = NULL;
+  out_wait->pending = out_wait->address != NULL;
+  const int64_t retired =
+      iree_atomic_load(&queue->retired, iree_memory_order_relaxed);
+  const int64_t next_published =
+      iree_atomic_load(&queue->published, iree_memory_order_acquire);
+  if (retired == next_published) {
+    *out_wait = (iree_hal_amd_gpu_completion_wait_t){0};
+    if (!queue->kernel.queue) {
+      *out_wait =
+          (iree_hal_amd_gpu_completion_wait_t){.address = &queue->published,
+                                               .value = next_published,
+                                               .is_64_bit = true};
+    }
   }
   return progress;
 }

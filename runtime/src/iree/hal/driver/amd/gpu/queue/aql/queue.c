@@ -856,9 +856,11 @@ static bool iree_hal_amd_gpu_aql_retire(
     iree_hal_amd_gpu_aql_submission_t* submission = action->submission;
     if (iree_atomic_load((iree_atomic_int64_t*)action->signal->host_value,
                          iree_memory_order_acquire) != 0) {
-      out_wait->address = (iree_atomic_int32_t*)action->signal->host_value;
+      out_wait->address = action->signal->host_value;
       out_wait->value = 1;
       out_wait->signal = action->signal;
+      out_wait->is_64_bit = true;
+      out_wait->pending = true;
       break;
     }
     iree_status_code_t code;
@@ -939,6 +941,12 @@ static bool iree_hal_amd_gpu_aql_retire(
   if (position != initial && iree_atomic_exchange(&queue->completed.waiting, 0,
                                                   iree_memory_order_acq_rel)) {
     iree_hal_amd_gpu_aql_capacity_available(queue);
+  }
+  if (position == published) {
+    *out_wait =
+        (iree_hal_amd_gpu_completion_wait_t){.address = &queue->producer.count,
+                                             .value = (int64_t)published,
+                                             .is_64_bit = true};
   }
   return position != initial;
 }

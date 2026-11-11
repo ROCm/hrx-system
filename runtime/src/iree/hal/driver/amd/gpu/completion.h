@@ -37,20 +37,28 @@ typedef struct iree_hal_amd_gpu_retirement_callback_t {
   void* user_data;
 } iree_hal_amd_gpu_retirement_callback_t;
 
-// A coherent host word whose change may retire already-published work. Idle
-// sources leave this empty and rely on native completion events. This is only
-// a wake hint: the source still establishes native retirement before releasing
-// resources. No driver call or MMIO read is permitted to observe this word.
+// A coherent host word whose change requests another source drain. Pending
+// work keeps observation active; passive publication and notification hints
+// are observed only while another source has pending work. When all sources
+// are idle, the worker parks on the native event. This is only a wake hint:
+// the source still establishes retirement before releasing resources. No
+// driver call or MMIO read is permitted to observe this word.
 typedef struct iree_hal_amd_gpu_completion_wait_t {
-  // Borrowed CPU-cacheable atomic word, or NULL for event-only observation.
+  // Borrowed CPU-cacheable 32- or 64-bit atomic word, or NULL for event-only
+  // observation. Width is selected by is_64_bit.
   // Storage belongs to signal when supplied; otherwise it remains live until
   // source replacement or worker join, including across helper callbacks.
-  const iree_atomic_int32_t* address;
+  const void* address;
   // Last consumed value. A change requests another authoritative source drain.
-  int32_t value;
+  int64_t value;
   // Optional borrowed signal owning the word. The worker retains it under the
   // drain mutex before observing, preventing reuse or trim during those reads.
   struct iree_hal_amd_gpu_signal_t* signal;
+  // Word width; false selects a signed 32-bit load, true a signed 64-bit load.
+  bool is_64_bit;
+  // Outstanding work that warrants active observation. Passive hints do not
+  // keep an otherwise idle worker awake.
+  bool pending;
 } iree_hal_amd_gpu_completion_wait_t;
 
 // One bounded CPU copy of already-retired staging bytes. Only the completion
@@ -113,7 +121,7 @@ typedef struct iree_hal_amd_gpu_completion_source_t {
 // The embedding owner joins accepted work before stopping this worker.
 typedef struct iree_hal_amd_gpu_completion_t {
   // Borrowed context whose event and API table outlive the worker join.
-  const iree_hal_amd_gpu_context_t* context;
+  iree_hal_amd_gpu_context_t* context;
   // Number of sources, stable under drain_mutex and coherent observation.
   iree_host_size_t source_count;
   // Borrowed contiguous array; active callbacks can outlive a table
@@ -192,7 +200,7 @@ bool iree_hal_amd_gpu_completion_try_drain(
 // this returns. Allocation and thread startup are cold, fallible operations.
 // Failure runs no callback and leaves out_completion safe to deinitialize.
 iree_status_t iree_hal_amd_gpu_completion_initialize(
-    const iree_hal_amd_gpu_context_t* context, iree_host_size_t source_count,
+    iree_hal_amd_gpu_context_t* context, iree_host_size_t source_count,
     iree_hal_amd_gpu_completion_source_t* sources, iree_duration_t spin_ns,
     iree_thread_affinity_t affinity, iree_allocator_t host_allocator,
     iree_hal_amd_gpu_completion_t* out_completion);

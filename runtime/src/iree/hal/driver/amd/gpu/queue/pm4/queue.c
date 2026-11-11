@@ -2191,15 +2191,20 @@ static bool iree_hal_amd_gpu_pm4_retire(
       return true;
     }
   }
-  if (!queue->kernel && position != published && !waiting_for_producer) {
-    // Observe already-published work without touching the publisher's count
-    // on every active-wait iteration. An idle queue waits on the native event;
-    // a later publication signals that event when it completes. Capacity credit
-    // prevents record reuse until this consumer advances it.
+  if (!queue->kernel && position == published) {
+    // A publication on this idle queue must interrupt observation of other
+    // queues. This passive hint alone never keeps the worker awake.
+    *out_wait =
+        (iree_hal_amd_gpu_completion_wait_t){.address = &queue->producer.count,
+                                             .value = (int64_t)published,
+                                             .is_64_bit = true};
+  } else if (!queue->kernel && !waiting_for_producer) {
+    // Capacity credit prevents record reuse until this consumer advances it.
     out_wait->address =
         &queue->retirement.records[position & queue->retirement.capacity_mask]
              .generation;
     out_wait->value = (int32_t)(position >> queue->retirement.capacity_shift);
+    out_wait->pending = true;
   }
   // A later source can retire this source's native producer. One more round
   // after actual progress joins those causal payload lifetimes without a
