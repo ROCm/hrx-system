@@ -280,12 +280,19 @@ static inline bool hrx_graph_node_is_recordable(
 }
 
 typedef struct hrx_graph_kernel_node_attrs_internal_t {
+  // Executable retained by the graph's node resource set.
   iree_hal_executable_t* executable;
+  // Export selected from |executable|.
   uint32_t export_ordinal;
+  // Number of workgroups along each axis.
   uint32_t grid_dim[3];
+  // Number of work items per workgroup along each axis.
   uint32_t block_dim[3];
-  uint32_t shared_memory_bytes;
+  // Validated HAL dispatch flags, translated when the node is inserted.
+  iree_hal_dispatch_flags_t flags;
+  // Argument bytes copied into the graph arena.
   iree_const_byte_span_t constants;
+  // References copied into the graph arena; the resource set retains buffers.
   iree_hal_buffer_ref_list_t bindings;
 } hrx_graph_kernel_node_attrs_internal_t;
 

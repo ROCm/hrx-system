@@ -5,6 +5,8 @@
 #include <vector>
 
 #include "hrx_internal.h"
+#include "iree/hal/driver/task/executable/executable.h"
+#include "iree/hal/driver/task/executable/library/abi.h"
 #include "iree/hal/testing/mock_device.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -363,5 +365,153 @@ TEST_F(GraphExecSemaphoreTest,
     iree_hal_semaphore_release(semaphore);
   }
 }
+
+// A normal task executable may receive pointers in its constant bytes without
+// changing to a custom argument ABI or declaring any buffer bindings.
+struct KernelArguments {
+  // Fixture-owned result storage, valid until stream completion.
+  uint32_t* result;
+  // Value the dispatch writes to |result|.
+  uint32_t value;
+};
+
+static int WriteResult(
+    const iree_hal_executable_environment_v0_t* environment,
+    const iree_hal_executable_dispatch_state_v0_t* dispatch_state,
+    const iree_hal_executable_workgroup_state_v0_t* workgroup_state) {
+  KernelArguments arguments;
+  memcpy(&arguments, dispatch_state->constants.data, sizeof(arguments));
+  *arguments.result = arguments.value;
+  return 0;
+}
+
+class GraphKernelTest : public GraphExecSemaphoreTest,
+                        public ::testing::WithParamInterface<uint32_t> {
+ protected:
+  void SetUp() override {
+    GraphExecSemaphoreTest::SetUp();
+    ASSERT_FALSE(HasFatalFailure());
+    const auto queue = hrx_device_get_queue(device_, 0, 0);
+    static const iree_hal_task_executable_vtable_t vtable = {
+        .base =
+            {
+                .destroy =
+                    [](iree_hal_executable_t* executable) {
+                      iree_hal_task_executable_deinitialize(
+                          iree_hal_task_executable_cast(executable));
+                    },
+            },
+        .issue_call =
+            [](iree_hal_task_executable_t* executable, iree_host_size_t ordinal,
+               const iree_hal_executable_dispatch_state_v0_t* state,
+               const iree_hal_executable_workgroup_state_v0_t* group,
+               uint32_t worker_id) {
+              WriteResult(&executable->environment, state, group);
+              return iree_ok_status();
+            },
+    };
+    iree_hal_task_executable_initialize(iree_hal_queue_family(queue->hal_queue),
+                                        &vtable, iree_allocator_system(),
+                                        &task_executable_);
+    task_executable_.dispatch_attrs = &dispatch_attrs_;
+    task_executable_.dispatch_ptrs = &dispatch_;
+    task_executable_.export_count = 1;
+    executable_.hal_executable = &task_executable_.base;
+    executable_.device = device_;
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_create(queue, 0, &stream_)));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_create(device_, 0, &graph_)));
+  }
+
+  void TearDown() override {
+    if (stream_) {
+      IREE_EXPECT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+    }
+    hrx_graph_exec_release(exec_);
+    hrx_graph_release(graph_);
+    hrx_stream_release(stream_);
+    iree_hal_executable_release(executable_.hal_executable);
+    GraphExecSemaphoreTest::TearDown();
+  }
+
+  hrx_graph_kernel_node_attrs_t KernelAttrs(uint32_t flags) {
+    return {
+        .executable = &executable_,
+        .config = {{1, 1, 1}, {1, 1, 1}, 0},
+        .constants = &arguments_,
+        .constants_size = sizeof(arguments_),
+        .flags = flags,
+    };
+  }
+
+  // Fixture-owned native executable; graph capture retains its HAL resource.
+  iree_hal_task_executable_t task_executable_ = {};
+  // Borrowed HRX view used to exercise public recording without a file loader.
+  hrx_executable_s executable_ = {};
+  // Normal task ABI: constants only, with no buffer bindings.
+  const iree_hal_executable_dispatch_attrs_v0_t dispatch_attrs_ = {
+      .constant_byte_length = sizeof(KernelArguments),
+  };
+  // Entry point baked into the task command buffer at recording time.
+  const iree_hal_executable_dispatch_v0_t dispatch_ = WriteResult;
+  // Host result observed only after the stream completes.
+  uint32_t result_ = 0;
+  // Arguments copied by graph insertion; their pointee remains fixture-owned.
+  KernelArguments arguments_ = {&result_, 0x12345678u};
+  // Owned stream used for both immediate work and graph replay.
+  hrx_stream_t stream_ = nullptr;
+  // Owned graph template.
+  hrx_graph_t graph_ = nullptr;
+  // Owned instantiated graph, released after stream completion.
+  hrx_graph_exec_t exec_ = nullptr;
+};
+
+TEST_P(GraphKernelTest, ConstantsWithoutBindingsUseNormalArguments) {
+  auto attrs = KernelAttrs(GetParam());
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_dispatch(
+      stream_, attrs.executable, attrs.export_ordinal, &attrs.config,
+      attrs.constants, attrs.constants_size, nullptr, 0, attrs.flags)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  EXPECT_EQ(result_, arguments_.value);
+
+  result_ = 0;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_add_kernel_node(graph_, nullptr, 0, &attrs, nullptr)));
+  // The graph snapshots constants, just as immediate recording does.
+  const uint32_t expected = arguments_.value;
+  arguments_.value = 0;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_instantiate(graph_, hrx_stream_get_queue(stream_), 0, &exec_)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  EXPECT_EQ(result_, expected);
+}
+
+TEST_P(GraphKernelTest, CustomArgumentsRemainAnExplicitBackendRequirement) {
+  auto attrs =
+      KernelAttrs(GetParam() | HRX_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS);
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_add_kernel_node(graph_, nullptr, 0, &attrs, nullptr)));
+  // Task dispatch does not support custom arguments; preserve that contract
+  // rather than silently treating custom argument bytes as task ABI constants.
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
+                        hrx_status_to_iree(hrx_graph_instantiate(
+                            graph_, hrx_stream_get_queue(stream_), 0, &exec_)));
+  EXPECT_EQ(exec_, nullptr);
+}
+
+TEST_P(GraphKernelTest, UnsupportedFlagsLeaveTheGraphUnchanged) {
+  auto attrs = KernelAttrs(GetParam() | (1u << 31));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        hrx_status_to_iree(hrx_graph_add_kernel_node(
+                            graph_, nullptr, 0, &attrs, nullptr)));
+  size_t node_count = 0;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_size(graph_, &node_count)));
+  EXPECT_EQ(node_count, 0u);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    DispatchFlags, GraphKernelTest,
+    ::testing::Values(HRX_DISPATCH_FLAG_NONE,
+                      HRX_DISPATCH_FLAG_ALLOW_INLINE_EXECUTION));
 
 }  // namespace

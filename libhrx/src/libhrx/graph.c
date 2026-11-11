@@ -275,6 +275,13 @@ hrx_status_t hrx_graph_add_kernel_node(
   IREE_ASSERT_ARGUMENT(attrs->executable);
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  iree_hal_dispatch_flags_t hal_flags = IREE_HAL_DISPATCH_FLAG_NONE;
+  hrx_status_t flag_status =
+      hrx_iree_dispatch_flags_from_hrx(attrs->flags, &hal_flags);
+  if (!hrx_status_is_ok(flag_status)) {
+    HRX_RETURN_AND_END_ZONE(z0, flag_status);
+  }
+
   const iree_host_size_t constants_size =
       iree_host_align(attrs->constants_size, iree_max_align_t);
   const iree_host_size_t bindings_size = iree_host_align(
@@ -297,7 +304,7 @@ hrx_status_t hrx_graph_add_kernel_node(
   k->export_ordinal = attrs->export_ordinal;
   memcpy(k->grid_dim, attrs->config.workgroup_count, sizeof(k->grid_dim));
   memcpy(k->block_dim, attrs->config.workgroup_size, sizeof(k->block_dim));
-  k->shared_memory_bytes = 0;
+  k->flags = hal_flags;
 
   void* constants_copy = extra_data;
   if (attrs->constants_size > 0 && attrs->constants) {

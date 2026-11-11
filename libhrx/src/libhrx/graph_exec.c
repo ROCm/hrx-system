@@ -300,16 +300,11 @@ static iree_status_t hrx_graph_record_partition(
                                attrs->block_dim[2]},
             .workgroup_count = {attrs->grid_dim[0], attrs->grid_dim[1],
                                 attrs->grid_dim[2]},
-            .dynamic_workgroup_local_memory = attrs->shared_memory_bytes,
         };
-        const iree_hal_dispatch_flags_t flags =
-            attrs->bindings.count
-                ? IREE_HAL_DISPATCH_FLAG_NONE
-                : IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS;
         status = iree_hal_command_buffer_dispatch(
             command_buffer, attrs->executable,
             iree_hal_executable_function_from_index(attrs->export_ordinal),
-            config, attrs->constants, attrs->bindings, flags);
+            config, attrs->constants, attrs->bindings, attrs->flags);
         break;
       }
       case HRX_GRAPH_NODE_TYPE_INTERNAL_MEMCPY: {
