@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-name: LibHRX GPU
+name: LibHRX
 
 on:
   workflow_dispatch:
@@ -53,7 +53,7 @@ permissions:
 
 jobs:
   bazel_linux_gpu:
-    name: Bazel / LibHRX / Linux x86-64 / Clang / Fastbuild / AMD ${{ matrix.name }}
+    name: Bazel / Linux x86-64 / Clang / Fastbuild / AMD ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix:
