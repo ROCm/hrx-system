@@ -1361,6 +1361,24 @@ TEST_F(KfdUserQueueTest,
         }
         return status;
       };
+  // Activation observes every final word, including packet bodies, rather than
+  // relying on a later host-side check of the returned queue.
+  native_api_.queue_create = [](void* user_data, amdf_gpu_umd_device_t* device,
+                                kfd_ioctl_create_queue_args* arguments) {
+    auto* state = static_cast<FakeNativeState*>(user_data);
+    const auto& ring = state->buffers[0];
+    EXPECT_EQ(arguments->ring_base_address, ring.device_address);
+    EXPECT_EQ(arguments->ring_size, ring.byte_length);
+    const auto* words = reinterpret_cast<const uint32_t*>(ring.storage.data());
+    for (size_t i = 0; i < ring.byte_length / sizeof(uint32_t); ++i) {
+      const uint32_t expected =
+          arguments->queue_type == KFD_IOC_QUEUE_TYPE_COMPUTE_AQL && i % 16 == 0
+              ? 1u
+              : 0u;
+      EXPECT_EQ(words[i], expected) << i;
+    }
+    return FakeNativeState::QueueCreate(user_data, device, arguments);
+  };
   const struct {
     // Packet language whose native initialization is exercised.
     amdf_queue_command_type_t command_type;
@@ -1368,17 +1386,20 @@ TEST_F(KfdUserQueueTest,
     uint32_t context_count;
     // Native debugger payload extent shared by all context headers.
     uint32_t debug_byte_length;
+    // Requested ring extent, or zero for the target default.
+    uint64_t ring_byte_length;
   } cases[] = {
-      {AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, 1, 2048},
-      {AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, 2, 4096},
-      {AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, 1, 2048},
-      {AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, 8, 20480},
-      {AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA, 0, 0},
+      {AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, 1, 2048, 0},
+      {AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, 2, 4096, 65536},
+      {AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, 1, 2048, 4096},
+      {AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, 8, 20480, 32768},
+      {AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA, 0, 0, 8192},
   };
   const auto initial_topology = device_.topology;
   for (const auto& test_case : cases) {
     SCOPED_TRACE(test_case.command_type);
     SCOPED_TRACE(test_case.context_count);
+    SCOPED_TRACE(test_case.ring_byte_length);
     native_state_.Reset();
     device_.topology = initial_topology;
     if (test_case.context_count == 8) {
@@ -1388,18 +1409,12 @@ TEST_F(KfdUserQueueTest,
       device_.topology.gc_ip = {12, 1, 0, true};
       device_.topology.properties.topology.xcc_count = 2;
     }
-    ASSERT_NO_FATAL_FAILURE(CreateQueue(test_case.command_type));
+    auto create_info = MakeCreateInfo(test_case.command_type);
+    create_info.ring_byte_length = test_case.ring_byte_length;
+    ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create_info, &queue_,
+                                             &queue_result_),
+              AMDF_STATUS_OK);
     const auto& create = native_state_.observed_create;
-    const auto* ring = reinterpret_cast<const uint32_t*>(
-        native_state_.buffers[0].storage.data());
-    for (size_t i = 0; i < create.ring_size / sizeof(uint32_t); ++i) {
-      const uint32_t expected =
-          test_case.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL &&
-                  i % 16 == 0
-              ? 1u
-              : 0u;
-      ASSERT_EQ(ring[i], expected) << i;
-    }
     ASSERT_NO_FATAL_FAILURE(MapQueue());
     EXPECT_EQ(amdf_atomic_uint64_load_acquire(ReadIndex()), 0u);
     EXPECT_EQ(amdf_atomic_uint64_load_acquire(WriteIndex()), 0u);
