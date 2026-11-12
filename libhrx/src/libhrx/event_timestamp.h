@@ -69,10 +69,11 @@ typedef struct hrx_event_timestamp_slab_t hrx_event_timestamp_slab_t;
 
 // Pool of device timestamp slots owned by a device or binding context.
 // Thread-safe once initialized: the lists and slabs are guarded by |mutex|,
-// and the allocators are constant from initialize onward. Initialization and
-// teardown are exclusive to the owner, so neither takes the mutex.
+// and the host allocator is constant from initialize onward. Initialization
+// and teardown are exclusive to the owner, so neither takes the mutex.
 typedef struct hrx_event_timestamp_pool_t {
-  // Explicit coherent host-visible source, retained for the pool lifetime.
+  // Coherent host-visible source, retained once installed under |mutex|.
+  // NULL until the owner supplies its lazily constructed source.
   iree_hal_pool_t* memory_pool;
   // Allocator the host-side slab and slot records come from.
   iree_allocator_t host_allocator;
@@ -93,11 +94,18 @@ typedef struct hrx_event_timestamp_pool_t {
   iree_host_size_t next_slab_slot_count;
 } hrx_event_timestamp_pool_t;
 
-// Initializes |out_pool| against |memory_pool|, which is retained. No
-// device memory is allocated until the first slot is acquired.
+// Initializes |out_pool| against |memory_pool|, which is retained. A NULL
+// source must be installed before acquiring slots. No device memory is
+// allocated until the first slot is acquired.
 void hrx_event_timestamp_pool_initialize(iree_hal_pool_t* memory_pool,
                                          iree_allocator_t host_allocator,
                                          hrx_event_timestamp_pool_t* out_pool);
+
+// Installs the owner's coherent host-visible source if none is installed.
+// Repeated calls supply the same source and are harmless. No payload is
+// allocated here; source construction occurs outside the timestamp pool lock.
+void hrx_event_timestamp_pool_set_source(hrx_event_timestamp_pool_t* pool,
+                                         iree_hal_pool_t* memory_pool);
 
 // Releases every slab and slot record owned by |pool|. A slot whose device
 // write is still outstanding does not block this: dropping the pool's
@@ -141,6 +149,14 @@ iree_hal_buffer_t* hrx_event_timestamp_slot_buffer(
 // multiple of 8.
 iree_device_size_t hrx_event_timestamp_slot_offset(
     const hrx_event_timestamp_slot_t* slot);
+
+// Reads two completed tick slots from the same populated clock domain and
+// converts their interval. Only a successful read writes |out_ms|. The caller
+// establishes completion and clock compatibility before accessing either slot.
+iree_status_t hrx_event_timestamp_elapsed_ms(
+    hrx_event_timestamp_domain_t domain,
+    const hrx_event_timestamp_slot_t* start,
+    const hrx_event_timestamp_slot_t* stop, float* out_ms);
 
 #ifdef __cplusplus
 }  // extern "C"

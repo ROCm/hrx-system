@@ -58,7 +58,69 @@ struct StreamGraphResources {
   hrx_graph_exec_t executable = nullptr;
 };
 
+struct StreamTimingResources {
+  ~StreamTimingResources() {
+    // Stream release joins accepted writes before caller-owned storage dies.
+    hrx().stream_release(stream);
+    hrx().event_release(stop);
+    hrx().event_release(start);
+    hrx().buffer_release(buffer);
+  }
+
+  // Exact dispatch queue timeline containing the timed fill.
+  hrx_stream_t stream = nullptr;
+  // Queue timestamp preceding the fill.
+  hrx_event_t start = nullptr;
+  // Queue timestamp following the fill.
+  hrx_event_t stop = nullptr;
+  // Caller-owned allocation kept through completion.
+  hrx_buffer_t buffer = nullptr;
+};
+
 }  // namespace
+
+TEST_CASE_METHOD(HrxTestFixture, "Events time completed queue work",
+                 "[stream][event]") {
+  StreamTimingResources resources;
+  hrx_queue_t queue = FindProvisionedQueue(
+      device_, HRX_QUEUE_ROLE_DISPATCH | HRX_QUEUE_ROLE_TRANSFER);
+  REQUIRE_OK(hrx().stream_create(queue, 0, &resources.stream));
+  REQUIRE_OK(
+      hrx().event_create(device_, HRX_EVENT_FLAG_NONE, &resources.start));
+  REQUIRE_OK(hrx().event_create(device_, HRX_EVENT_FLAG_NONE, &resources.stop));
+  std::array<uint32_t, 64> output = {};
+  REQUIRE_OK(hrx().buffer_allocate(
+      resources.stream, sizeof(output), HRX_MEMORY_TYPE_DEVICE_LOCAL,
+      HRX_BUFFER_USAGE_DEFAULT, &resources.buffer));
+  const uint32_t pattern = 0xAABBCCDD;
+  for (int iteration = 0; iteration < 3; ++iteration) {
+    REQUIRE_OK(hrx().event_record(resources.start, resources.stream));
+    REQUIRE_OK(hrx().stream_fill_buffer(resources.stream, resources.buffer, 0,
+                                        sizeof(output), &pattern,
+                                        sizeof(pattern)));
+    REQUIRE_OK(hrx().event_record(resources.stop, resources.stream));
+    REQUIRE_OK(hrx().event_synchronize(resources.stop));
+    float milliseconds = -1.0f;
+    REQUIRE_OK(hrx().event_elapsed_time(resources.start, resources.stop,
+                                        &milliseconds));
+    REQUIRE(milliseconds >= 0.0f);
+    float reversed = 1.0f;
+    REQUIRE_OK(
+        hrx().event_elapsed_time(resources.stop, resources.start, &reversed));
+    REQUIRE(reversed == -milliseconds);
+    REQUIRE_OK(hrx().synchronous_d2h(queue, resources.buffer, 0, output.data(),
+                                     sizeof(output)));
+    for (uint32_t value : output) {
+      REQUIRE(value == pattern);
+    }
+  }
+  hrx().stream_release(resources.stream);
+  resources.stream = nullptr;
+  float milliseconds = -1.0f;
+  REQUIRE_OK(
+      hrx().event_elapsed_time(resources.start, resources.stop, &milliseconds));
+  REQUIRE(milliseconds >= 0.0f);
+}
 
 TEST_CASE_METHOD(HrxTestFixture, "Stream create and release", "[stream]") {
   hrx_stream_t stream = nullptr;

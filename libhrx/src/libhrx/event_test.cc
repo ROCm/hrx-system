@@ -57,6 +57,13 @@ class EventTest : public ::testing::Test {
         device_, HRX_EVENT_FLAG_DISABLE_TIMING, event_.for_output())));
   }
 
+  EventPtr CreateTimedEvent() {
+    EventPtr event;
+    IREE_EXPECT_OK(hrx_status_to_iree(
+        hrx_event_create(device_, HRX_EVENT_FLAG_NONE, event.for_output())));
+    return event;
+  }
+
   // Runtime-owned Task device shared by every case.
   static hrx_device_t device_;
   // Independent exact queues with distinct logical timelines.
@@ -287,6 +294,142 @@ TEST_F(EventTest, CompletedEventSurvivesItsRecordingStream) {
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(event_.get())));
 }
 
+TEST_F(EventTest, TimingFollowsExecutionOrderInsteadOfRecordingOrder) {
+  auto start = CreateTimedEvent();
+  auto stop = CreateTimedEvent();
+  hrx::runtime::semaphore_ptr gate;
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_semaphore_create(device_, 0, gate.for_output())));
+  {
+    SignalOnExit signal{gate.get()};
+    IREE_ASSERT_OK(
+        hrx_status_to_iree(hrx_stream_wait_on(first_.get(), {gate.get(), 1})));
+    IREE_ASSERT_OK(
+        hrx_status_to_iree(hrx_event_record(start.get(), first_.get())));
+    IREE_ASSERT_OK(
+        hrx_status_to_iree(hrx_event_record(stop.get(), second_.get())));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(stop.get())));
+    float milliseconds = 123.0f;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                          hrx_status_to_iree(hrx_event_elapsed_time(
+                              start.get(), stop.get(), &milliseconds)));
+    EXPECT_EQ(milliseconds, 123.0f);
+  }
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(start.get())));
+  float milliseconds = 0.0f;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_event_elapsed_time(start.get(), stop.get(), &milliseconds)));
+  // Stop executed while start was gated, despite their host recording order.
+  EXPECT_LT(milliseconds, 0.0f);
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_event_elapsed_time(stop.get(), start.get(), &milliseconds)));
+  EXPECT_GT(milliseconds, 0.0f);
+}
+
+TEST_F(EventTest, PendingOldTimestampCannotOverwriteAReplacement) {
+  auto event = CreateTimedEvent();
+  auto stop = CreateTimedEvent();
+  hrx::runtime::semaphore_ptr gate;
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_semaphore_create(device_, 0, gate.for_output())));
+  float replacement_interval = 0.0f;
+  {
+    SignalOnExit signal{gate.get()};
+    IREE_ASSERT_OK(
+        hrx_status_to_iree(hrx_stream_wait_on(first_.get(), {gate.get(), 1})));
+    IREE_ASSERT_OK(
+        hrx_status_to_iree(hrx_event_record(event.get(), first_.get())));
+    IREE_ASSERT_OK(
+        hrx_status_to_iree(hrx_event_record(event.get(), second_.get())));
+    IREE_ASSERT_OK(
+        hrx_status_to_iree(hrx_event_record(stop.get(), second_.get())));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(stop.get())));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_elapsed_time(
+        event.get(), stop.get(), &replacement_interval)));
+    EXPECT_GE(replacement_interval, 0.0f);
+  }
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(first_.get())));
+  float retired_interval = 0.0f;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_event_elapsed_time(event.get(), stop.get(), &retired_interval)));
+  EXPECT_EQ(retired_interval, replacement_interval);
+}
+
+TEST_F(EventTest, RejectedTimestampPreservesTheAcceptedPointAndTick) {
+  auto event = CreateTimedEvent();
+  auto stop = CreateTimedEvent();
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_event_record(event.get(), first_.get())));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_event_record(stop.get(), first_.get())));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(stop.get())));
+  float previous_interval = 0.0f;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_event_elapsed_time(event.get(), stop.get(), &previous_interval)));
+  hrx_timeline_point_t before;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_stream_get_timeline_position(second_.get(), &before)));
+
+  static const iree_hal_queue_vtable_t vtable = {
+      .destroy = [](iree_hal_queue_t*) {},
+      .timestamp =
+          [](iree_hal_queue_t*, iree_hal_semaphore_list_t,
+             iree_hal_semaphore_list_t, iree_hal_buffer_t*, iree_device_size_t,
+             const iree_hal_queue_barriers_t*, iree_hal_timestamp_flags_t) {
+            return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                    "submission storage exhausted");
+          },
+  };
+  iree_hal_queue_t rejected_queue;
+  iree_hal_queue_params_t params;
+  iree_hal_queue_params_initialize(&params);
+  iree_hal_queue_t* native_queue = second_.get()->hal_queue;
+  iree_hal_queue_initialize(iree_hal_queue_family(native_queue), &params,
+                            &vtable, &rejected_queue);
+  second_.get()->hal_queue = &rejected_queue;
+  hrx_status_t status = hrx_event_record(event.get(), second_.get());
+  second_.get()->hal_queue = native_queue;
+  iree_hal_queue_release(&rejected_queue);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        hrx_status_to_iree(status));
+  hrx_timeline_point_t after;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_stream_get_timeline_position(second_.get(), &after)));
+  EXPECT_EQ(after.value, before.value);
+  EXPECT_EQ(after.semaphore, before.semaphore);
+  if (after.value != before.value) {
+    iree_hal_semaphore_fail(after.semaphore->hal_semaphore,
+                            iree_make_status(IREE_STATUS_ABORTED));
+    return;
+  }
+  float current_interval = 0.0f;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_event_elapsed_time(event.get(), stop.get(), &current_interval)));
+  EXPECT_EQ(current_interval, previous_interval);
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_event_record(event.get(), second_.get())));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(event.get())));
+}
+
+TEST_F(EventTest, UntimedAndUnrecordedEventsHaveNoElapsedTime) {
+  auto start = CreateTimedEvent();
+  auto stop = CreateTimedEvent();
+  float milliseconds = 123.0f;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        hrx_status_to_iree(hrx_event_elapsed_time(
+                            start.get(), stop.get(), &milliseconds)));
+  EXPECT_EQ(milliseconds, 123.0f);
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_event_record(event_.get(), first_.get())));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_event_record(stop.get(), first_.get())));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(stop.get())));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        hrx_status_to_iree(hrx_event_elapsed_time(
+                            event_.get(), stop.get(), &milliseconds)));
+  EXPECT_EQ(milliseconds, 123.0f);
+}
+
 TEST(EventLifecycleTest, UnrecordedEventRetainsItsCreationDevice) {
   hrx_runtime_t runtime = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(
@@ -302,6 +445,57 @@ TEST(EventLifecycleTest, UnrecordedEventRetainsItsCreationDevice) {
   hrx_device_group_release(group);
   IREE_ASSERT_OK(hrx_status_to_iree(status));
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(event.get())));
+}
+
+TEST(EventLifecycleTest, TimedEventsRetainTheRecordingDeviceAndItsClock) {
+  hrx::runtime::runtime_ptr runtime;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_runtime_create(
+      nullptr, hrx_host_allocator_system(), runtime.for_output())));
+  const hrx_device_create_params_t params = {.uri = "task://"};
+  hrx::runtime::device_group_ptr creation_group;
+  hrx::runtime::device_group_ptr recording_group;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_device_group_create(
+      runtime.get(), 1, &params, creation_group.for_output())));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_device_group_create(
+      runtime.get(), 1, &params, recording_group.for_output())));
+  hrx_device_t creation_device =
+      hrx_device_group_get_device(creation_group.get(), 0);
+  hrx_device_t recording_device =
+      hrx_device_group_get_device(recording_group.get(), 0);
+  EventPtr start;
+  EventPtr stop;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_create(
+      creation_device, HRX_EVENT_FLAG_NONE, start.for_output())));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_create(
+      creation_device, HRX_EVENT_FLAG_NONE, stop.for_output())));
+  hrx::runtime::stream_ptr creation_stream;
+  hrx::runtime::stream_ptr recording_stream;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_stream_create(hrx_device_get_queue(creation_device, 0, 0), 0,
+                        creation_stream.for_output())));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_stream_create(hrx_device_get_queue(recording_device, 0, 0), 0,
+                        recording_stream.for_output())));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_event_record(start.get(), creation_stream.get())));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_event_record(stop.get(), recording_stream.get())));
+  float milliseconds = 123.0f;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        hrx_status_to_iree(hrx_event_elapsed_time(
+                            start.get(), stop.get(), &milliseconds)));
+  EXPECT_EQ(milliseconds, 123.0f);
+  // Replacement follows the recording family, not the event's creation device.
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_event_record(start.get(), recording_stream.get())));
+  creation_stream.reset();
+  recording_stream.reset();
+  creation_group.reset();
+  recording_group.reset();
+  runtime.reset();
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_event_elapsed_time(stop.get(), start.get(), &milliseconds)));
+  EXPECT_GE(milliseconds, 0.0f);
 }
 
 }  // namespace

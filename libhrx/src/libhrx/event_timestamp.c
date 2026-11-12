@@ -107,6 +107,16 @@ void hrx_event_timestamp_pool_initialize(iree_hal_pool_t* memory_pool,
   out_pool->next_slab_slot_count = HRX_EVENT_TIMESTAMP_INITIAL_SLOT_COUNT;
 }
 
+void hrx_event_timestamp_pool_set_source(hrx_event_timestamp_pool_t* pool,
+                                         iree_hal_pool_t* memory_pool) {
+  iree_slim_mutex_lock(&pool->mutex);
+  if (!pool->memory_pool) {
+    pool->memory_pool = memory_pool;
+    iree_hal_pool_retain(memory_pool);
+  }
+  iree_slim_mutex_unlock(&pool->mutex);
+}
+
 void hrx_event_timestamp_pool_deinitialize(hrx_event_timestamp_pool_t* pool) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -325,4 +335,21 @@ iree_hal_buffer_t* hrx_event_timestamp_slot_buffer(
 iree_device_size_t hrx_event_timestamp_slot_offset(
     const hrx_event_timestamp_slot_t* slot) {
   return slot->offset;
+}
+
+iree_status_t hrx_event_timestamp_elapsed_ms(
+    hrx_event_timestamp_domain_t domain,
+    const hrx_event_timestamp_slot_t* start,
+    const hrx_event_timestamp_slot_t* stop, float* out_ms) {
+  uint64_t start_tick = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_map_read(
+      hrx_event_timestamp_slot_buffer(start),
+      hrx_event_timestamp_slot_offset(start), &start_tick, sizeof(start_tick)));
+  uint64_t stop_tick = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_map_read(
+      hrx_event_timestamp_slot_buffer(stop),
+      hrx_event_timestamp_slot_offset(stop), &stop_tick, sizeof(stop_tick)));
+  *out_ms =
+      hrx_event_timestamp_domain_elapsed_ms(domain, start_tick, stop_tick);
+  return iree_ok_status();
 }

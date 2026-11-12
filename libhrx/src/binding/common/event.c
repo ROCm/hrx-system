@@ -618,29 +618,6 @@ iree_status_t iree_hal_streaming_event_synchronize(
   return status;
 }
 
-// Reads the ticks the reached records |start_point| and |stop_point| captured
-// and converts the interval between them with |domain|, writing |*out_ms| only
-// when both reads succeed. Both points must name a tick slot, which the caller
-// establishes before querying either record.
-static iree_status_t iree_hal_streaming_recorded_point_pair_elapsed_ms(
-    hrx_event_timestamp_domain_t domain,
-    const iree_hal_streaming_recorded_point_t* start_point,
-    const iree_hal_streaming_recorded_point_t* stop_point, float* out_ms) {
-  uint64_t start_tick = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_map_read(
-      hrx_event_timestamp_slot_buffer(start_point->timestamp_slot),
-      hrx_event_timestamp_slot_offset(start_point->timestamp_slot), &start_tick,
-      sizeof(start_tick)));
-  uint64_t stop_tick = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_map_read(
-      hrx_event_timestamp_slot_buffer(stop_point->timestamp_slot),
-      hrx_event_timestamp_slot_offset(stop_point->timestamp_slot), &stop_tick,
-      sizeof(stop_tick)));
-  *out_ms =
-      hrx_event_timestamp_domain_elapsed_ms(domain, start_tick, stop_tick);
-  return iree_ok_status();
-}
-
 iree_status_t iree_hal_streaming_event_elapsed_time(
     float* ms, iree_hal_streaming_event_t* start,
     iree_hal_streaming_event_t* stop,
@@ -709,8 +686,9 @@ iree_status_t iree_hal_streaming_event_elapsed_time(
         // only on a stream of its own event's context, and both bindings
         // refuse a pair whose events come from different contexts before it
         // reaches here, so both ticks were captured in that domain.
-        status = iree_hal_streaming_recorded_point_pair_elapsed_ms(
-            start->context->timestamp_domain, &start_point, &stop_point, ms);
+        status = hrx_event_timestamp_elapsed_ms(
+            start->context->timestamp_domain, start_point.timestamp_slot,
+            stop_point.timestamp_slot, ms);
         if (iree_status_is_ok(status)) {
           *out_timing = IREE_HAL_STREAMING_EVENT_TIMING_MEASURED;
         }

@@ -157,6 +157,16 @@ class HrxLoader {
   decltype(&hrx_stream_dispatch) stream_dispatch;
   decltype(&hrx_stream_barrier) stream_barrier;
 
+  // Event snapshots and queue timestamps.
+  decltype(&hrx_event_create) event_create;
+  decltype(&hrx_event_retain) event_retain;
+  decltype(&hrx_event_release) event_release;
+  decltype(&hrx_event_record) event_record;
+  decltype(&hrx_event_query) event_query;
+  decltype(&hrx_event_synchronize) event_synchronize;
+  decltype(&hrx_event_elapsed_time) event_elapsed_time;
+  decltype(&hrx_stream_wait_event) stream_wait_event;
+
   // Allocator.
   decltype(&hrx_device_allocator) device_allocator;
   decltype(&hrx_allocator_retain) allocator_retain;
