@@ -50,8 +50,8 @@ typedef struct iree_hal_amd_gpu_pm4_command_program_t {
   uint32_t argument_length;
   // Bounded confirmed-write extent, or zero for the shader fixup path.
   uint16_t fixup_word_count;
-  // Recording clears this for invocation-private writes; sealing also requires
-  // a small address-only repair plan that remains valid after first use.
+  // Recording excludes changing native inputs and invocation-private writes;
+  // sealing also requires external addresses that remain valid after first use.
   bool invariant_fixups;
   // Number of public dispatch IDs consumed by one complete execution.
   uint32_t dispatch_count;

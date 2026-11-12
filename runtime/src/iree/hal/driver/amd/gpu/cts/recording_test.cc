@@ -413,6 +413,7 @@ TEST_P(GpuNativeRecordingSizeTest,
   EXPECT_LE(invocation.program->value_count, 5u);
   EXPECT_LE(invocation.program->argument_length, 104u);
   EXPECT_EQ(invocation.program->dispatch_count, count);
+  EXPECT_FALSE(invocation.program->invariant_fixups);
   EXPECT_LE(invocation.program->entry.word_count, 0xfffffu);
   if (count == 65536) {
     EXPECT_GT(invocation.program->resident.byte_length, 0xfffffu * 4);
