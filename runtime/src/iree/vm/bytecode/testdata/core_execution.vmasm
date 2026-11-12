@@ -42,6 +42,7 @@ vm.module core(0.0) {
     string @string39 = "yield_mixed_right"
     string @string40 = "yield_mixed_right_indirect"
     string @string41 = "swap_borrowed_refs"
+    string @string42 = "positions"
   }
 
   section ref_types alignment(8) {
@@ -64,6 +65,7 @@ vm.module core(0.0) {
     signature @signature10 (i64, ref(@ref_type0), ref(@ref_type0)) -> (ref(@ref_type0))
     signature @signature11 (ref(@ref_type0), ref(@ref_type0)) -> (ref(@ref_type0))
     signature @signature12 (ref(@ref_type0), ref(@ref_type0)) -> (ref(@ref_type0), ref(@ref_type0))
+    signature @signature13 (ref(@ref_type0), i64, ref(@ref_type0), i64) -> (i32, i32)
   }
 
   section callable_types alignment(8) {
@@ -79,8 +81,9 @@ vm.module core(0.0) {
     callable @callable9 flags([yieldable]) depth(0) : @signature11
     callable @callable10 flags([]) depth(0) : @signature12
     callable @callable11 flags([]) depth(0) : @signature10
-    callable @callable12 flags([]) depth(0) : @signature6
-    callable @callable13 flags([]) depth(0) : @signature7
+    callable @callable12 flags([]) depth(0) : @signature13
+    callable @callable13 flags([]) depth(0) : @signature6
+    callable @callable14 flags([]) depth(0) : @signature7
   }
 
   section imports alignment(8) {
@@ -95,8 +98,8 @@ vm.module core(0.0) {
     export @export1 name(@string1) : @callable8 = @function5
     export @export2 name(@string2) : @callable8 = @function4
     export @export3 name(@string3) : @callable8 = @function15
-    export @export4 name(@string4) : @callable13 = @function19
-    export @export5 name(@string5) : @callable12 = @function17
+    export @export4 name(@string4) : @callable14 = @function19
+    export @export5 name(@string5) : @callable13 = @function17
     export @export6 name(@string6) : @callable5 = @function7
     export @export7 name(@string7) : @callable4 = @function10
     export @export8 name(@string8) : @callable5 = @function8
@@ -107,16 +110,17 @@ vm.module core(0.0) {
     export @export13 name(@string13) : @callable0 = @function0
     export @export14 name(@string14) : @callable1 = @function2
     export @export15 name(@string15) : @callable7 = @function23
-    export @export16 name(@string16) : @callable3 = @function1
-    export @export17 name(@string36) : @callable11 = @function24
-    export @export18 name(@string41) : @callable10 = @function31
-    export @export19 name(@string17) : @callable1 = @function21
-    export @export20 name(@string37) : @callable9 = @function25
-    export @export21 name(@string38) : @callable9 = @function26
-    export @export22 name(@string39) : @callable9 = @function27
-    export @export23 name(@string40) : @callable9 = @function28
-    export @export24 name(@string18) : @callable2 = @function11
-    export @export25 name(@string19) : @callable6 = @function12
+    export @export16 name(@string42) : @callable12 = @function33
+    export @export17 name(@string16) : @callable3 = @function1
+    export @export18 name(@string36) : @callable11 = @function24
+    export @export19 name(@string41) : @callable10 = @function31
+    export @export20 name(@string17) : @callable1 = @function21
+    export @export21 name(@string37) : @callable9 = @function25
+    export @export22 name(@string38) : @callable9 = @function26
+    export @export23 name(@string39) : @callable9 = @function27
+    export @export24 name(@string40) : @callable9 = @function28
+    export @export25 name(@string18) : @callable2 = @function11
+    export @export26 name(@string19) : @callable6 = @function12
   }
 
   section functions alignment(8) {
@@ -232,14 +236,14 @@ vm.module core(0.0) {
       control.call @import1 {direct_ref_move_mask = 0x0000}
       control.return
     }
-    func @function16 : @callable12 flags([]) frame(local_bytes = 0, value_registers = 17, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function16 : @callable13 flags([]) frame(local_bytes = 0, value_registers = 17, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0) {
     ^bb0:
       control.block
       %v16 = value.abi.argument.load 0
       value.abi.result.store %v16, 0
       control.return
     }
-    func @function17 : @callable12 flags([has_call]) frame(local_bytes = 16, value_registers = 17, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function17 : @callable13 flags([has_call]) frame(local_bytes = 16, value_registers = 17, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0) {
     ^bb0:
       control.block
       %v16 = value.abi.argument.load 0
@@ -249,14 +253,14 @@ vm.module core(0.0) {
       value.abi.result.store %v16, 0
       control.return
     }
-    func @function18 : @callable13 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 17, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function18 : @callable14 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 17, function_registers = 0, local_refs = 0, local_functions = 0) {
     ^bb0:
       control.block
       %r16 = ref.abi.argument.load.move 0
       ref.abi.result.store.move %r16, 0
       control.return
     }
-    func @function19 : @callable13 flags([has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 17, function_registers = 0, local_refs = 2, local_functions = 0) {
+    func @function19 : @callable14 flags([has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 17, function_registers = 0, local_refs = 2, local_functions = 0) {
     ^bb0:
       control.block
       %r16 = ref.abi.argument.load.move 0
@@ -421,6 +425,14 @@ vm.module core(0.0) {
       %r1 = ref.move %r2
       control.return
     }
+    func @function33 : @callable12 flags([]) frame(local_bytes = 0, value_registers = 3, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      %v2 = buffer.compare.address %r0, %v0, %r1, %v1 {predicate = eq}
+      %v1 = buffer.compare.address %r0, %v0, %r1, %v1 {predicate = ne}
+      %v0 = value.copy %v2
+      control.return
+    }
   }
 
   section globals alignment(8) {
@@ -442,7 +454,7 @@ vm.module core(0.0) {
   section presentation alignment(8) {
     export @export13 documentation(@string22) authored_type(@string24) {
     }
-    export @export16 documentation(@string23) authored_type(@string25) {
+    export @export17 documentation(@string23) authored_type(@string25) {
       field name(@string26) authored_type(@string27)
       field name(@string28) authored_type(@string27)
       field name(@string29) authored_type(@string30)
@@ -453,7 +465,7 @@ vm.module core(0.0) {
     module {
       metadata @string31 : utf8 = "lo\x00om"
     }
-    export @export16 {
+    export @export17 {
       metadata @string32 : utf8 = "execution-test"
     }
   }

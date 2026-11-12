@@ -249,6 +249,8 @@ vm.module core(0.0) {
       buffer.fill %r0, %v0, %v0, %v0 {pattern_width = 1}
       buffer.copy %r0, %v0, %r0, %v0, %v0
       %v0 = buffer.compare %r0, %v0, %r0, %v0, %v0
+      %v0 = buffer.compare.address %r0, %v0, %r0, %v0 {predicate = eq}
+      %v0 = buffer.compare.address %r0, %v0, %r0, %v0 {predicate = ne}
       buffer.copy.rodata %r0, %v0, @rodata0+0, %v0
       %r0 = buffer.rodata.load @rodata0
       control.return
