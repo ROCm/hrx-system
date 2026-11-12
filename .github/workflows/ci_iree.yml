@@ -874,7 +874,8 @@ jobs:
           retention-days: 7
 
   cmake_linux:
-    name: CMake / Linux x86-64 / Clang / RelWithDebInfo / Repository Build
+    name: Loom / CMake / Linux x86-64 / Clang / RelWithDebInfo
+    if: github.event_name != 'push'
     concurrency:
       group: iree-cmake-linux-repository-build-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true
@@ -949,6 +950,7 @@ jobs:
 
   cmake_windows_cross:
     name: Loom / CMake / Windows x86-64 (via Linux) / Clang CL / RelWithDebInfo
+    if: github.event_name != 'push'
     concurrency:
       group: iree-cmake-windows-cross-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true
@@ -1083,78 +1085,3 @@ jobs:
             grep -F 'Name: loomc_compile_module' >/dev/null
           "$LLVM_ROOT/bin/llvm-readobj" --needed-libs "$product_dir/loom-compile.exe" |
             grep -F 'loomc.dll' >/dev/null
-
-  cmake_windows:
-    name: CMake / Windows x86-64 / MSVC / RelWithDebInfo / Repository Build
-    concurrency:
-      group: iree-cmake-windows-repository-build-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
-      cancel-in-progress: true
-    runs-on: azure-windows-scale-rocm
-    timeout-minutes: 60
-    env:
-      CMAKE_BUILD_PARALLEL_LEVEL: 40
-      HRX_ARTIFACT_SET: core
-      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}\build\iree-cmake-windows\downloads
-      HRX_OUTPUT_DIR: ${{ github.workspace }}\build\iree-cmake-windows
-      HRX_RELEASE_TYPE: nightly
-      HRX_ROCM_ROOT: ${{ github.workspace }}\build\iree-cmake-windows\rocm-root
-      IREE_CI_PYTHON: python
-      IREE_CI_FAILURE_ARTIFACT_DIR: ${{ github.workspace }}\build\windows-build-failures-${{ github.run_id }}-${{ github.run_attempt }}
-      PIP_CACHE_DIR: ${{ github.workspace }}\build\iree-cmake-windows\caches\pip
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: "3.12"
-
-      - name: Install developer tools
-        shell: powershell
-        run: |
-          python --version
-          python dev.py cmake setup --venv
-          "$PWD\.venv\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Run IREE CMake CI
-        id: iree_cmake_ci
-        shell: powershell
-        run: |
-          Get-CimInstance Win32_ComputerSystem -ErrorAction Stop |
-            Format-List Manufacturer, Model, NumberOfProcessors, NumberOfLogicalProcessors, TotalPhysicalMemory
-          Get-CimInstance Win32_Processor -ErrorAction Stop |
-            Format-Table Name, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed -AutoSize
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          $installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if ($LASTEXITCODE -ne 0 -or -not $installation) { throw 'Visual Studio C++ tools discovery failed.' }
-          Import-Module (Join-Path $installation 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll')
-          Enter-VsDevShell -VsInstallPath $installation -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
-          if ($env:VSCMD_ARG_TGT_ARCH -ne 'x64') { throw 'Visual Studio x64 developer environment was not initialized.' }
-          $env:CC = 'cl.exe'
-          $env:CXX = 'cl.exe'
-          $env:AR = 'lib.exe'
-          python build_tools/devtools/ci.py iree-cmake-repository-build --keep-going
-          exit $LASTEXITCODE
-
-      - name: Upload Windows build failure evidence
-        if: ${{ always() && steps.iree_cmake_ci.outcome == 'failure' }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: windows-build-failures-iree-cmake-repository-build-attempt-${{ github.run_attempt }}
-          path: ${{ env.IREE_CI_FAILURE_ARTIFACT_DIR }}
-          if-no-files-found: warn
-          retention-days: 7
-
-      - name: Upload failed test results
-        if: ${{ always() && steps.iree_cmake_ci.outcome == 'failure' }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ctest-results-windows-iree-cmake-repository-build-attempt-${{ github.run_attempt }}
-          path: |
-            build/ci/**/Testing/Temporary/
-            build/ci/**/test_tmpdir/**/test.xml
-          if-no-files-found: warn
-          retention-days: 7

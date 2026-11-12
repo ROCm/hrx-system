@@ -8,10 +8,11 @@ name: HRX / CMake
 
 on:
   workflow_dispatch:
-  # Retain pull_request only while qualifying this new postsubmit workflow.
-  # Native PR coverage remains in the product workflows until these jobs pass.
-  pull_request:
-    paths: &cmake_paths
+  push:
+    branches:
+      - main
+      - main-staging
+    paths:
       - ".bazelrc"
       - ".bazelrc.configured"
       - ".github/scripts/**"
@@ -30,14 +31,9 @@ on:
       - "libhrx/**"
       - "third_party/**"
       - "tools/**"
-  push:
-    branches:
-      - main
-      - main-staging
-    paths: *cmake_paths
 
 concurrency:
-  group: hrx-cmake-${{ github.event.pull_request.number || github.ref }}
+  group: hrx-cmake-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
