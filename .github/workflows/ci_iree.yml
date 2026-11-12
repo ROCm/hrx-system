@@ -125,9 +125,9 @@ jobs:
             host_ar: ar
             host_cc: gcc
             host_cxx: g++
-          - name: MSVC / Fastbuild / Product Slice
+          - name: MSVC / Fastbuild
             kind: windows_msvc
-            command: iree-bazel-windows-msvc-slice
+            command: iree-bazel-windows-msvc
             platform: Windows x86-64 (via Linux)
             runner: az-linux-scale-rocm-default-prod
             host_ar: ar
@@ -456,14 +456,14 @@ jobs:
             "${target_args[@]}" "${importer_args[@]}" "${scope_args[@]}" "${result_args[@]}" "${compilation_args[@]}" \
             --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles" "${failure_args[@]}"
 
-      - name: Build Windows products with MSVC
+      - name: Compile Windows artifacts with MSVC
         if: matrix.kind == 'windows_msvc'
         id: msvc_bazel_ci
         run: |
           python3 dev.py bazel configure
           mkdir -p "$RUNNER_TEMP/bazel-profiles"
           bazel build \
-            --profile="$RUNNER_TEMP/bazel-profiles/windows-msvc-slice.json.gz" \
+            --profile="$RUNNER_TEMP/bazel-profiles/windows-msvc.json.gz" \
             --action_env=WINEARCH \
             --action_env=WINEPREFIX \
             --config=windows-x86_64 \
