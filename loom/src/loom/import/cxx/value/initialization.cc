@@ -120,6 +120,27 @@ void for_each_subobject_initializer(cxx::TranslationUnit& unit,
   }
 }
 
+// Without a selected element constructor, a synthesized member clause wraps
+// the whole array default in parentheses. Keep its original list so each
+// element initializes in place and later clauses see the completed prefix.
+// Constructor arguments can also carry default wrappers, but apply separately
+// to every array element instead of initializing the complete array.
+cxx::ExpressionAST* array_initializer(cxx::ExpressionAST* initializer,
+                                      cxx::FunctionSymbol* constructor) {
+  if (constructor) {
+    return initializer;
+  }
+  auto* paren = cxx::ast_cast<cxx::ParenInitializerAST>(initializer);
+  auto* elements = paren ? paren->expressionList : nullptr;
+  if (elements && !elements->next) {
+    if (auto* clause = cxx::ast_cast<cxx::DefaultInitializerExpressionAST>(
+            elements->value)) {
+      return cxx::Initializer(clause->expression).clause();
+    }
+  }
+  return initializer;
+}
+
 }  // namespace
 
 loom_string_id_t Initialization::zero_name(loom_scalar_type_t scalar_type) {
@@ -153,12 +174,31 @@ Value Initialization::value(const cxx::Type* type,
     initializer = conversion->expression;
   }
   type = types_.unqualified(type);
-  if (unit_.typeTraits().is_array(type) && evaluation_.array_copy(owner)) {
-    auto allocation =
-        storage_.allocate(type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, owner);
-    auto destination = storage_.project(allocation.pointer, type, owner);
-    object(destination, type, initializer, constructor, owner);
-    return objects_.load(destination, type, owner);
+  if (unit_.typeTraits().is_array(type)) {
+    initializer = array_initializer(initializer, constructor);
+    if (unit_.typeTraits().is_char_type(
+            unit_.typeTraits().get_element_type(type))) {
+      if (auto* string = string_initializer(initializer)) {
+        const auto* array = types_.array(type, owner);
+        auto* element_type = array->source->elementType();
+        std::vector<loom_value_id_t> components;
+        components.reserve(array->component_count);
+        for (size_t index = 0; index < array->source->size(); ++index) {
+          const int64_t code_unit =
+              index < string->charCount() ? string->charAt(index) : 0;
+          components.push_back(scalars_.constant(cxx::ConstValue{code_unit},
+                                                 element_type, owner));
+        }
+        return arena_.capture(*array, components);
+      }
+    }
+    if (evaluation_.array_copy(owner)) {
+      auto allocation = storage_.allocate(
+          type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, owner);
+      auto destination = storage_.project(allocation.pointer, type, owner);
+      object(destination, type, initializer, constructor, owner);
+      return objects_.load(destination, type, owner);
+    }
   }
   cxx::List<cxx::ExpressionAST*>* elements = nullptr;
   cxx::VariableSymbol* implicit_element = nullptr;
@@ -863,6 +903,7 @@ void Initialization::object(StorageProjection destination,
                             cxx::FunctionSymbol* constructor, cxx::AST* owner,
                             bool retained) {
   if (unit_.typeTraits().is_array(type)) {
+    initializer = array_initializer(initializer, constructor);
     if (auto* copy = evaluation_.array_copy(owner)) {
       auto source = evaluation_.reference(copy->source, owner);
       copy_array(destination, type,

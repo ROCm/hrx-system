@@ -13,6 +13,7 @@ namespace loom::cxx_import {
 Value::Value(const Partition& partition,
              std::span<const loom_value_id_t> components)
     : partition_(&partition) {
+  IREE_ASSERT_EQ(components.size(), partition.component_count);
   if (partition.component_count <= 2) {
     std::copy(components.begin(), components.end(), storage_.inline_values);
   } else {

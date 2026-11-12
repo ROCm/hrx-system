@@ -629,3 +629,260 @@ func.def public @selected(%choice: i32) -> (i32) {
   %92 = scalar.addi %89, %91 : i32
   func.return %92 : i32
 }
+
+// ====
+// RUN: pass inline-callables,canonicalize,cse,promote-private-fragments,canonicalize,cse,dce
+// A default member clause initializes the complete array in both synthesized
+// and user constructors. An explicit member initializer replaces that default.
+struct ZeroArray {
+  // Scalar initialized before the array.
+  int bias = 7;
+  // Empty default list supplies all three zero elements.
+  int values[3] = {};
+};
+struct UserArray {
+  // Explicitly initialized constructor input.
+  int bias;
+  // Default used only when no explicit member initializer is present.
+  int values[3] = {1, 2, 3};
+  UserArray(int input) : bias(input) {}
+  UserArray() : UserArray(5) {}
+};
+struct OverrideArray {
+  // Default used only when no explicit member initializer is present.
+  int values[3] = {1, 2, 3};
+  OverrideArray(int input) : values{input, 9} {}
+};
+int default_array_zero(int input) {
+  ZeroArray value;
+  value.bias = input;
+  return value.bias + value.values[2];
+}
+int default_array_user(int input) {
+  UserArray value(input);
+  return value.bias + value.values[2];
+}
+int default_array_delegate() {
+  UserArray value;
+  return value.bias + value.values[1];
+}
+int default_array_override(int input) {
+  OverrideArray value(input);
+  return value.values[0] + value.values[1] + value.values[2];
+}
+
+// Nested and partial defaults preserve source order and element types. Const
+// qualification does not change the initialized array's component structure.
+using Words = unsigned __attribute__((ext_vector_type(2)));
+struct Element {
+  // Aggregate payload inside an array element.
+  unsigned value;
+};
+struct Defaults {
+  // Each array clause advances this completed member once.
+  unsigned seed = 3;
+  // Nested lists retain their own zero-filled tails.
+  unsigned values[2][3] = {{++seed, ++seed}, {++seed}};
+  // Observes all side effects from the preceding array.
+  unsigned final = seed;
+};
+struct TypedArrays {
+  // Native vector elements remain vectors in the value partition.
+  Words vectors[2] = {{1, 2}, {3, 4}};
+  // Record elements retain their aggregate member partition.
+  Element records[2] = {{5}, {6}};
+};
+struct ConstantArray {
+  // Constructor-provided input for the following member default.
+  unsigned seed;
+  // Const elements include the omitted zero-initialized tail.
+  const unsigned values[3] = {seed, seed + 1};
+  ConstantArray(unsigned input) : seed(input) {}
+};
+Defaults nested_defaults() { return Defaults(); }
+TypedArrays typed_defaults() { return TypedArrays(); }
+unsigned const_defaults(unsigned input) {
+  ConstantArray value(input);
+  return value.values[0] + value.values[1] + value.values[2];
+}
+
+// Default initialization writes the actual array destination. Later elements
+// read its completed prefix, and the enclosing constructor sees the result.
+struct Prefix {
+  // Constructor-provided input for the following member default.
+  unsigned seed;
+  // Each element reads the preceding initialized destination.
+  unsigned values[3] = {seed, values[0] + 2, values[1] + 3};
+  // Observes the completed array from the next member initializer.
+  unsigned last = values[2];
+  Prefix(unsigned input) : seed(input) {}
+};
+unsigned default_prefix(unsigned input) {
+  Prefix value(input);
+  return value.last;
+}
+struct Observed {
+  // Construction and the final read use a volatile destination.
+  unsigned values[2] = {7, values[0] + 2};
+  Observed() = default;
+};
+unsigned volatile_defaults() {
+  volatile Observed value;
+  return value.values[1];
+}
+struct Label {
+  // String initialization includes the terminating zero.
+  char text[4] = "abc";
+};
+unsigned string_default() { Label value; return value.text[1]; }
+// ----
+func.def public @default_array_zero(%input: i32) -> (i32) {
+  func.return %input : i32
+}
+
+func.def public @default_array_user(%input: i32) -> (i32) {
+  %443 = scalar.constant 3 : i32
+  %73 = scalar.addi %input, %443 : i32
+  func.return %73 : i32
+}
+
+func.def public @default_array_delegate() -> (i32) {
+  %464 = scalar.constant 7 : i32
+  func.return %464 : i32
+}
+
+func.def public @default_array_override(%input: i32) -> (i32) {
+  %336 = scalar.constant 9 : i32
+  %130 = scalar.addi %input, %336 : i32
+  func.return %130 : i32
+}
+
+func.def public @nested_defaults() -> (i32, i32, i32, i32, i32, i32, i32, i32) {
+  %seed$473 = scalar.constant 4 : i32
+  %seed$472 = scalar.constant 5 : i32
+  %zero$i32 = scalar.constant 0 : i32
+  %seed$471 = scalar.constant 6 : i32
+  func.return %seed$471, %seed$473, %seed$472, %zero$i32, %seed$471, %zero$i32, %zero$i32, %seed$471 : i32, i32, i32, i32, i32, i32, i32, i32
+}
+
+func.def public @typed_defaults() -> (vector<2xi32>, vector<2xi32>, i32, i32) {
+  %179 = vector.constanti [1, 2] : vector<2xi32>
+  %180 = vector.constanti [3, 4] : vector<2xi32>
+  %181 = scalar.constant 5 : i32
+  %182 = scalar.constant 6 : i32
+  func.return %179, %180, %181, %182 : vector<2xi32>, vector<2xi32>, i32, i32
+}
+
+func.def public @const_defaults(%input: i32) -> (i32) {
+  %361 = scalar.constant 1 : i32
+  %483 = scalar.addi %input, %input : i32
+  %484 = scalar.addi %483, %361 : i32
+  func.return %484 : i32
+}
+
+func.def public @default_prefix(%input: i32) -> (i32) {
+  %495 = scalar.constant 5 : i32
+  %496 = scalar.addi %input, %495 : i32
+  func.return %496 : i32
+}
+
+func.def public @volatile_defaults() -> (i32) {
+  %242 = index.constant 8 : offset
+  %value_storage = buffer.alloca<private> align(4) %242 : buffer
+  %248 = scalar.constant 7 : i32
+  %500 = index.constant 0 : offset
+  %250 = buffer.view %value_storage[%500] : buffer -> view<1xi32>
+  view.store<volatile> %248, %250[0] : i32, view<1xi32>
+  %265 = view.load %250[0] : view<1xi32> -> i32
+  %266 = scalar.constant 2 : i32
+  %267 = scalar.addi %265, %266 : i32
+  %498 = index.constant 4 : offset
+  %269 = buffer.view %value_storage[%498] : buffer -> view<1xi32>
+  view.store<volatile> %267, %269[0] : i32, view<1xi32>
+  %282 = view.load<volatile> %269[0] : view<1xi32> -> i32
+  func.return %282 : i32
+}
+
+func.def public @string_default() -> (i32) {
+  %284 = index.constant 4 : offset
+  %value_storage = buffer.alloca<private> align(1) %284 : buffer
+  %502 = index.constant 0 : offset
+  %290 = buffer.constant align(1) utf8("abc\u0000") : buffer
+  buffer.copy %290[%502], %value_storage[%502], %284
+  %501 = index.constant 1 : offset
+  %304 = buffer.view %value_storage[%501] : buffer -> view<1xi8>
+  %305 = view.load %304[0] : view<1xi8> -> i8
+  %306 = scalar.extsi %305 : i8 to i32
+  func.return %306 : i32
+}
+
+// ====
+// INPUT: cxx data-model=lp64
+// String initialization creates array elements, not a pointer to the literal.
+// Embedded zeros, encoded code units, and zero-filled tails retain their types.
+struct Text {
+  // Embedded zero does not truncate the following character.
+  char narrow[4] = "A\0B";
+  // Signed and unsigned byte arrays preserve the same source bit pattern.
+  signed char signed_bytes[3] = "\xff";
+  // The array's signedness affects uses, not its initialized bits.
+  unsigned char unsigned_bytes[3] = "\xff";
+  // Const qualification preserves the character-array shape.
+  const char fixed[3] = "pq";
+  // UTF-8 stores both bytes of the multibyte character, then pads the tail.
+  char8_t utf8[4] = u8"\u00e9";
+  // UTF-16 stores the surrogate pair as two separate code units.
+  char16_t utf16[4] = u"\U0001f642";
+  // UTF-32 stores one code unit for the same character.
+  char32_t utf32[3] = U"\U0001f642";
+  // The source data model determines the width of wide characters.
+  wchar_t wide[3] = L"\u03bb";
+};
+Text string_value_defaults() { return Text(); }
+struct Aggregate {
+  // Explicit aggregate clauses use the same complete-array initialization.
+  char text[4];
+};
+Aggregate aggregate_string() { return {"xy"}; }
+// ----
+func.def public @string_value_defaults() -> (i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i16, i16, i16, i16, i32, i32, i32, i32, i32, i32) {
+  %54 = scalar.constant 65 : i8
+  %55 = scalar.constant 0 : i8
+  %56 = scalar.constant 66 : i8
+  %58 = scalar.constant -1 : i8
+  %64 = scalar.constant 112 : i8
+  %65 = scalar.constant 113 : i8
+  %67 = scalar.constant -61 : i8
+  %68 = scalar.constant -87 : i8
+  %71 = scalar.constant -10179 : i16
+  %72 = scalar.constant -8638 : i16
+  %73 = scalar.constant 0 : i16
+  %75 = scalar.constant 128578 : i32
+  %76 = scalar.constant 0 : i32
+  %78 = scalar.constant 955 : i32
+  func.return %54, %55, %56, %55, %58, %55, %55, %58, %55, %55, %64, %65, %55, %67, %68, %55, %55, %71, %72, %73, %73, %75, %76, %76, %78, %76, %76 : i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i16, i16, i16, i16, i32, i32, i32, i32, i32, i32
+}
+
+func.def public @aggregate_string() -> (i8, i8, i8, i8) {
+  %85 = scalar.constant 120 : i8
+  %86 = scalar.constant 121 : i8
+  %87 = scalar.constant 0 : i8
+  func.return %85, %86, %87, %87 : i8, i8, i8, i8
+}
+
+// ====
+// INPUT: cxx data-model=llp64
+// A wide string follows the 16-bit wchar_t source model without truncating
+// a supplementary character into one element.
+struct Text {
+  // Two code units followed by the terminator and one padded element.
+  wchar_t text[4] = L"\U0001f642";
+};
+Text wide_string_value() { return Text(); }
+// ----
+func.def public @wide_string_value() -> (i16, i16, i16, i16) {
+  %8 = scalar.constant -10179 : i16
+  %9 = scalar.constant -8638 : i16
+  %10 = scalar.constant 0 : i16
+  func.return %8, %9, %10, %10 : i16, i16, i16, i16
+}
