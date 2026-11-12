@@ -448,7 +448,10 @@ iree_status_t iree_hal_streaming_memcpy_peer(
 
 // Outside capture, registered sources and small pageable snapshots remain
 // asynchronous when a stream is supplied. Large pageable sources stay borrowed
-// through a blocking transfer. NULL-stream copies complete on the caller.
+// through a blocking transfer. Device endpoints may belong to another context;
+// copies preserve the supplied stream's order. Endpoints on a different native
+// device use a blocking transfer in that order. NULL-stream copies join the
+// calling and owning contexts and complete on the caller.
 iree_status_t iree_hal_streaming_memcpy_host_to_device(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
     const void* src, iree_device_size_t size,
@@ -456,7 +459,8 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
 
 // Outside capture, registered host destinations remain asynchronous when a
 // stream is supplied. Unregistered host destinations and NULL-stream copies
-// complete on the caller.
+// complete on the caller. Device endpoint ownership and stream ordering follow
+// the same contract as host-to-device copies above.
 iree_status_t iree_hal_streaming_memcpy_device_to_host(
     iree_hal_streaming_context_t* context, void* dst,
     iree_hal_streaming_deviceptr_t src, iree_device_size_t size,
