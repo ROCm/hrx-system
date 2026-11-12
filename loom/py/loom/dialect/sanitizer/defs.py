@@ -410,7 +410,7 @@ sanitizer_assert_layout = Op(
     traits=[OBSERVABLE_EFFECT, REFINABLE_RESULT_TYPE_REFS, FACT_IDENTITY],
     facts="loom_sanitizer_assert_layout_facts",
     type_transfer="loom_sanitizer_assert_layout_type_transfer",
-    verify="loom_sanitizer_assert_layout_verify",
+    verify="loom_value_refinement_verify",
     format=[
         Ref("view"),
         COLON,

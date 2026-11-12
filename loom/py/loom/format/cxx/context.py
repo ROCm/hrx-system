@@ -29,6 +29,7 @@ from loom.ir import (
     Block,
     BufferType,
     DialectType,
+    DynamicDim,
     DynamicEncoding,
     Module,
     Operation,
@@ -1292,6 +1293,16 @@ class CxxRenderContext:
             return f"loom::convert<{expected_type}>({expression})"
         return expression
 
+    def dynamic_dimensions(self, value_type: ShapedType) -> str:
+        """Spells the explicit index record for a constructor's result shape."""
+
+        values = [
+            self.expression(dimension.value_id)
+            for dimension in value_type.dims
+            if isinstance(dimension, DynamicDim) and dimension.value_id is not None
+        ]
+        return "loom::type::indices{" + ", ".join(values) + "}" if values else "{}"
+
     def dynamic_view_encoding_expression(
         self, operation: Operation, value_type: ShapedType
     ) -> str:
@@ -1301,12 +1312,7 @@ class CxxRenderContext:
         if not isinstance(encoding, DynamicEncoding):
             raise CxxRenderError(operation, "view does not have a dynamic encoding")
         definition = self.definitions.get(encoding.value_id)
-        if definition is None:
-            raise CxxRenderError(
-                operation,
-                "view encoding value is not defined in the projected scope",
-            )
-        if definition.name == "encoding.layout.dense":
+        if definition is not None and definition.name == "encoding.layout.dense":
             return f"loom::encoding::layout::dense<{value_type.rank}>()"
         return self.expression(encoding.value_id)
 

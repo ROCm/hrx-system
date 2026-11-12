@@ -201,7 +201,8 @@ def render_preamble(
     if uses_numeric_conversion:
         headers.add("loomcxx/numeric.h")
     uses_vector_header = any(
-        element == "i1" or len(dims) != 1 for element, dims, _signed in vector_aliases
+        element in {"i1", "index", "offset"} or len(dims) != 1 or -1 in dims
+        for element, dims, _signed in vector_aliases
     ) or bool(
         operation_names
         & {
@@ -231,6 +232,7 @@ def render_preamble(
             "vector.load",
             "vector.mma",
             "vector.reduce",
+            "vector.refine",
             "vector.select",
             "vector.slice",
             "vector.store",
@@ -273,7 +275,7 @@ def render_preamble(
         vector_aliases.items(), key=lambda item: item[1]
     ):
         base = SCALAR_CPP_TYPES[element]
-        if element.startswith("i") and not signed:
+        if element.startswith("i") and element != "index" and not signed:
             base = {
                 "i8": "unsigned char",
                 "i16": "unsigned short",
@@ -281,10 +283,13 @@ def render_preamble(
                 "i64": "unsigned long long",
                 "i1": "bool",
             }[element]
-        if len(dims) == 1 and element != "i1":
+        if len(dims) == 1 and dims[0] >= 0 and element not in {"i1", "index", "offset"}:
             definition = f"{base} __attribute__((ext_vector_type({dims[0]})))"
         else:
-            dimensions = ", ".join(str(dimension) for dimension in dims)
+            dimensions = ", ".join(
+                str(dimension) if dimension >= 0 else "loom::type::dynamic"
+                for dimension in dims
+            )
             definition = f"loom::type::vector<loom::type::shape<{dimensions}>, {base}>"
         preamble.append(f"using {alias} = {definition};")
     if vector_aliases:

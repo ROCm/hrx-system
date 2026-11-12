@@ -27,7 +27,7 @@ func.def @decomposition_exponent_width(%input: vector<4xbf16>) {
 // vector.refine may relate dynamic extents or narrow one to a static extent,
 // but it cannot assert an obvious static shape contradiction.
 func.def @refine_static_dimension_mismatch(%source: vector<4xf32>) {
-  // ERROR@+1: SHAPE/001 "source static dimension" "4" "result static dimension" "8"
+  // ERROR@+1: SHAPE/008 "source dimension 0 has size 4" "result requires size 8"
   %refined = vector.refine %source : vector<4xf32> -> vector<8xf32>
   func.return
 }

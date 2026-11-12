@@ -128,6 +128,24 @@ ERR_SHAPE_007 = ErrorDef(
     ),
 )
 
+# ERR_SHAPE_008: A refinement contradicts a static dimension.
+ERR_SHAPE_008 = ErrorDef(
+    domain=ErrorDomain.SHAPE,
+    code=8,
+    severity=Severity.ERROR,
+    summary="Refinement contradicts a static dimension.",
+    message=(
+        "source dimension {axis} has size {source_size}, but the refined "
+        "result requires size {result_size}"
+    ),
+    params=(
+        ErrorParam("axis", ParamKind.U32),
+        ErrorParam("source_size", ParamKind.I64),
+        ErrorParam("result_size", ParamKind.I64),
+    ),
+    fix_hint="A refinement preserves the size of every logical dimension",
+)
+
 ALL_SHAPE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SHAPE_001,
     ERR_SHAPE_002,
@@ -136,4 +154,5 @@ ALL_SHAPE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SHAPE_005,
     ERR_SHAPE_006,
     ERR_SHAPE_007,
+    ERR_SHAPE_008,
 )

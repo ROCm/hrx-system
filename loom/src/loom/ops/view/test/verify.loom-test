@@ -205,7 +205,7 @@ func.def @subview_allows_redundant_capture(%source: view<4x8xf32>) {
 func.def @refine_static_dimension_mismatch(%buffer: buffer, %offset: offset) {
   %layout = encoding.layout.dense : encoding<layout>
   %source = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
-  // ERROR@+1: SHAPE/001 "source static dimension" "4" "result static dimension" "8"
+  // ERROR@+1: SHAPE/008 "source dimension 0 has size 4" "result requires size 8"
   %refined = view.refine %source : view<4xf32, %layout> -> view<8xf32, %layout>
   func.return
 }

@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Executes authored control flow before and after public C++ projection."""
+"""Executes authored programs before and after public C++ projection."""
 
 import json
 import subprocess
@@ -26,7 +26,14 @@ def import_source(importer: str, source: bytes) -> bytes:
     return result.stdout
 
 
-def main(importer: str, runner: str, source_path: str, checks_path: str) -> None:
+def main(
+    importer: str,
+    runner: str,
+    source_path: str,
+    checks_path: str,
+    cases: str,
+    expectations: str,
+) -> None:
     source = Path(source_path).read_bytes()
     checks = Path(checks_path).read_bytes()
     original = import_source(importer, source)
@@ -43,18 +50,16 @@ def main(importer: str, runner: str, source_path: str, checks_path: str) -> None
             label + ": " + executed.stdout.decode() + executed.stderr.decode()
         )
         report = json.loads(executed.stdout)
-        assert report["case_count"] == 8, report
-        assert report["sample_count"] == 8, report
+        assert report["case_count"] == int(cases), report
+        assert report["sample_count"] == int(cases), report
         assert report["skipped_case_count"] == 0, report
         assert report["planning_issue_count"] == 0, report
-        assert (
-            sum(
-                sample["expectations"]["expectation_count"]
-                for sample in report["samples"]
-            )
-            == 31
-        ), report
-        sys.stdout.write(f"{label}: 8 control-flow cases, 31 expectations passed\n")
+        assert sum(
+            sample["expectations"]["expectation_count"] for sample in report["samples"]
+        ) == int(expectations), report
+        sys.stdout.write(
+            f"{label}: {cases} cases, {expectations} expectations passed\n"
+        )
 
 
 if __name__ == "__main__":

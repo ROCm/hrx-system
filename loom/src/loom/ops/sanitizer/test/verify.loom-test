@@ -294,7 +294,23 @@ func.def @layout_native_dense_result(%m: index, %layout: encoding<layout>, %view
 // ====
 
 func.def @layout_static_dimension_mismatch(%layout: encoding<layout>, %view: view<4xf32, %layout>) -> (view<8xf32, %layout>) {
-  // ERROR@+1: SHAPE/001 "source static dimension" "4" "result static dimension" "8"
+  // ERROR@+1: SHAPE/008 "source dimension 0 has size 4" "result requires size 8"
   %checked = sanitizer.assert.layout %view : view<4xf32, %layout> -> view<8xf32, %layout>
   func.return %checked : view<8xf32, %layout>
+}
+
+// ====
+
+func.def @layout_rank_mismatch(%view: view<4xf32>) {
+  // ERROR@+1: SHAPE/001
+  %checked = sanitizer.assert.layout %view : view<4xf32> -> view<1x4xf32>
+  func.return
+}
+
+// ====
+
+func.def @layout_element_mismatch(%view: view<4xf32>) {
+  // ERROR@+1: TYPE/002
+  %checked = sanitizer.assert.layout %view : view<4xf32> -> view<4xi32>
+  func.return
 }

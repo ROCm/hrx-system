@@ -84,6 +84,7 @@ class CxxCommandRenderer(CxxExpressionRenderer):
         if not isinstance(value_type, ShapedType) or value_type.type_kind not in {
             TypeKind.TILE,
             TypeKind.VIEW,
+            TypeKind.VECTOR,
         }:
             return ()
         dependencies: list[int] = []

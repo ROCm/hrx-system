@@ -89,6 +89,15 @@ indices(Values...) -> indices<sizeof...(Values)>;
 
 }  // namespace loom::type
 
+namespace loom::detail {
+
+// Explicit dimensions for a shaped source carrier's dependent result axes.
+template <class Carrier>
+using shape_dimensions =
+    loom::type::indices<Carrier::shape_type::dynamic_count>;
+
+}  // namespace loom::detail
+
 namespace loom::index {
 
 // Converts a non-Boolean C++ integer to Loom's target-independent index type.

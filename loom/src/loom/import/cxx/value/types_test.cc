@@ -234,6 +234,21 @@ TEST_F(TypesWithModuleTest, ProjectsPipelinePayloadAndHandleFamilies) {
   EXPECT_EQ(loom_type_dim_static_size_at(tile_types[2], 1), 8);
   EXPECT_EQ(loom_type_encoding_value_id(tile_types[2]), 12u);
 
+  // Both direct operation construction and flattened signatures enforce the
+  // encoding representation limit before narrowing a module-local identity.
+  const loom_value_id_t maximum_dependencies[] = {11, UINT16_MAX};
+  auto maximum_tile =
+      dynamic_tile.bind_type(maximum_dependencies, tile_storage);
+  EXPECT_EQ(loom_type_encoding_value_id(maximum_tile), UINT16_MAX);
+  const loom_value_id_t overflowing_dependencies[] = {11, UINT16_MAX + 1u};
+  try {
+    dynamic_tile.bind_type(overflowing_dependencies, tile_storage);
+    FAIL() << "encoding identity was truncated";
+  } catch (StatusError& error) {
+    iree::Status status(error.release());
+    EXPECT_EQ(status.code(), iree::StatusCode::kResourceExhausted);
+  }
+
   std::vector<loom_type_t> static_channel_types;
   types.append(source_type("StaticChannel"), owner, static_channel_types);
   ASSERT_EQ(static_channel_types.size(), 1u);
@@ -594,6 +609,21 @@ TEST(TypesTest, ViewPartitionsPreservePlainAndEncodedSourceTypes) {
   EXPECT_EQ(loom_type_dim_static_size_at(plane_types[2], 1), 32);
   EXPECT_TRUE(loom_type_has_ssa_encoding(plane_types[2]));
   EXPECT_EQ(loom_type_encoding_value_id(plane_types[2]), 12u);
+
+  const auto& plane_partition = static_cast<const ViewPartition&>(plane);
+  const loom_value_id_t maximum_dependencies[] = {11, UINT16_MAX};
+  auto maximum_view =
+      plane_partition.bind_type(maximum_dependencies, plane_storage);
+  EXPECT_EQ(loom_type_encoding_value_id(maximum_view), UINT16_MAX);
+  const loom_value_id_t overflowing_dependencies[] = {11, UINT16_MAX + 1u};
+  EXPECT_THROW(
+      plane_partition.bind_type(overflowing_dependencies, plane_storage),
+      StatusError);
+  const loom_value_id_t overflowing_ids[] = {11, UINT16_MAX + 1u,
+                                             UINT16_MAX + 2u};
+  EXPECT_THROW(types.append_bound(source_type("Plane"), owner, overflowing_ids,
+                                  plane_storage, plane_types),
+               StatusError);
 
   const auto& volume = types.partition(source_type("Volume"), owner);
   EXPECT_EQ(volume.kind, ValueKind::View);

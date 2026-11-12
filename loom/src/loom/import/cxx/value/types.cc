@@ -87,6 +87,12 @@ loom_type_t make_encoded_shaped_type(loom_type_kind_t kind,
                                      BoundTypeStorage& storage) {
   auto result = make_shaped_type(kind, element, dimensions, storage);
   if (encoding) {
+    if (*encoding > UINT16_MAX) {
+      check(iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "encoding value ID %u exceeds the shaped type limit of %u", *encoding,
+          UINT16_MAX));
+    }
     result.encoding_id = static_cast<uint16_t>(*encoding);
     result.encoding_flags = LOOM_ENCODING_FLAG_SSA;
   }
@@ -182,7 +188,6 @@ loom_type_t TilePartition::bind_type(
   std::optional<loom_value_id_t> encoding_value;
   if (encoding) {
     encoding_value = dependencies[dependency++];
-    IREE_ASSERT_LE(*encoding_value, UINT16_MAX);
   }
   IREE_ASSERT_EQ(dependency, dependencies.size());
   return make_encoded_shaped_type(
@@ -259,7 +264,6 @@ loom_type_t ViewPartition::bind_type(
   std::optional<loom_value_id_t> encoding_value;
   if (encoding) {
     encoding_value = dependencies[dependency++];
-    IREE_ASSERT_LE(*encoding_value, UINT16_MAX);
   }
   IREE_ASSERT_EQ(dependency, dependencies.size());
   return make_encoded_shaped_type(
@@ -850,6 +854,12 @@ const TilePartition* Types::tile(const cxx::ClassType* input, cxx::AST* owner) {
                           "tile encoding must be void or a Loom encoding type");
     }
     tile_encoding = &static_cast<const EncodingPartition&>(admitted_encoding);
+    if ((tile_encoding->role == LOOM_ENCODING_ROLE_ADDRESS_LAYOUT ||
+         tile_encoding->role == LOOM_ENCODING_ROLE_PHYSICAL_STORAGE) &&
+        tile_encoding->rank != extents.size()) {
+      diagnostics_.reject(unit_, owner,
+                          "tile address encoding must have the same rank");
+    }
   }
   size_t dynamic_count = 0;
   for (auto extent : extents) {
@@ -1836,11 +1846,6 @@ void Types::append_bound(const cxx::Type* input, cxx::AST* owner,
         }
       }
       if (tile.encoding) {
-        if (identities[dependency] > UINT16_MAX) {
-          diagnostics_.reject(
-              unit_, owner,
-              "tile encoding identity exceeds Loom's current type capacity");
-        }
         output.push_back(loom_type_encoding_with_role(tile.encoding->role));
         ++dependency;
       }
@@ -1870,12 +1875,6 @@ void Types::append_bound(const cxx::Type* input, cxx::AST* owner,
         }
       }
       if (payload.encoding) {
-        if (identities[dependency] > UINT16_MAX) {
-          diagnostics_.reject(
-              unit_, owner,
-              "channel payload encoding identity exceeds Loom's current type "
-              "capacity");
-        }
         output.push_back(loom_type_encoding_with_role(payload.encoding->role));
         ++dependency;
       }
@@ -1966,11 +1965,6 @@ void Types::append_bound(const cxx::Type* input, cxx::AST* owner,
         }
       }
       if (view.encoding) {
-        if (identities[component] > UINT16_MAX) {
-          diagnostics_.reject(
-              unit_, owner,
-              "view encoding identity exceeds Loom's current type capacity");
-        }
         output.push_back(loom_type_encoding_with_role(view.encoding->role));
         ++component;
       }

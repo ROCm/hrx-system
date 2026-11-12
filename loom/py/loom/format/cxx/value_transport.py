@@ -33,6 +33,12 @@ from loom.ir import (
 # View copies and ordinary value uses carry the same information implicitly.
 _CONSTRUCTOR_COMPONENTS = {
     "buffer.view": (True, True),
+    "vector.refine": (True, False),
+    "view.refine": (True, True),
+    "tile.refine": (True, True),
+    "vector.load": (True, False),
+    "vector.splat": (True, False),
+    "vector.slice": (True, False),
     "view.subview": (True, False),
     "command.parameter": (True, True),
     "channel.bind": (False, True),
@@ -53,6 +59,10 @@ def _constructor_operands(module: Module, operation: Operation) -> Iterable[int]
             if isinstance(dimension, DynamicDim) and dimension.value_id is not None:
                 yield dimension.value_id
     if encoding and isinstance(value_type.encoding, DynamicEncoding):
+        if operation.name in {"view.refine", "tile.refine"}:
+            source_type = module.values[operation.operands[0]].type
+            if value_type.encoding == source_type.encoding:
+                return
         yield value_type.encoding.value_id
 
 

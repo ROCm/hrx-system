@@ -167,7 +167,9 @@ void Intrinsics::declaration(cxx::FunctionSymbol* function,
       // Concrete specialization owns source type and template-argument
       // validation. Retain the complete descriptor until those are known.
     } else if (selected->arguments.size() != 1 ||
-               (!ViewIntrinsic::supports(selected->arguments[0]->name()) &&
+               (!RefinementIntrinsic::supports(
+                    selected->arguments[0]->name()) &&
+                !ViewIntrinsic::supports(selected->arguments[0]->name()) &&
                 !VectorMemoryIntrinsic::supports(
                     selected->arguments[0]->name()) &&
                 !AddressIntrinsic::supports(selected->arguments[0]->name()) &&
@@ -332,6 +334,10 @@ Intrinsics::Binding Intrinsics::resolve(cxx::FunctionSymbol* function,
   if (auto fence = FenceIntrinsic::resolve(unit_, diagnostics_, function,
                                            attribute, owner)) {
     return *fence;
+  }
+  if (auto refinement = RefinementIntrinsic::resolve(
+          unit_, diagnostics_, types_, function, attribute, owner)) {
+    return *refinement;
   }
   if (auto view = ViewIntrinsic::resolve(unit_, diagnostics_, types_, function,
                                          attribute, owner)) {
@@ -576,6 +582,9 @@ IntrinsicCallResult Intrinsics::call(const Binding& admitted,
   }
   if (auto* channel = std::get_if<ChannelIntrinsic>(binding)) {
     return {channel->call(arguments, arena, builder, location)};
+  }
+  if (auto* refinement = std::get_if<RefinementIntrinsic>(binding)) {
+    return {refinement->call(arguments, arena, builder, location)};
   }
   if (auto* view = std::get_if<ViewIntrinsic>(binding)) {
     return {view->call(arguments, types_, arena, storage, owner, builder,

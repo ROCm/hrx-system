@@ -34,6 +34,7 @@
 #include "loom/import/cxx/binding/numeric_conversion.h"
 #include "loom/import/cxx/binding/pipeline.h"
 #include "loom/import/cxx/binding/pipeline_contracts.h"
+#include "loom/import/cxx/binding/refinement.h"
 #include "loom/import/cxx/binding/scalar_bindings.h"
 #include "loom/import/cxx/binding/shaped.h"
 #include "loom/import/cxx/binding/target.h"
@@ -93,15 +94,15 @@ class Intrinsics {
     }
   };
   using Binding = std::variant<
-      ScalarBinding, ShapedIntrinsic, EncodingIntrinsic, DecodeIntrinsic,
-      FragmentIntrinsic, BufferIntrinsic, ViewIntrinsic, ChannelIntrinsic,
-      VectorArithmeticIntrinsic, VectorMemoryIntrinsic, AsyncIntrinsic,
-      AtomicIntrinsic, FenceIntrinsic, KernelCollectiveIntrinsic,
-      SubgroupShuffleIntrinsic, BarrierIntrinsic, TargetIntrinsic,
-      AssemblyIntrinsic, TemplateApplyIntrinsic, CheckIntrinsic,
-      KernelLaunchIntrinsic, CommandLaunchIntrinsic, CommandParameterIntrinsic,
-      PipelineMemoryIntrinsic, PipelineComposeIntrinsic, AddressIntrinsic,
-      NumericConversionIntrinsic>;
+      ScalarBinding, ShapedIntrinsic, RefinementIntrinsic, EncodingIntrinsic,
+      DecodeIntrinsic, FragmentIntrinsic, BufferIntrinsic, ViewIntrinsic,
+      ChannelIntrinsic, VectorArithmeticIntrinsic, VectorMemoryIntrinsic,
+      AsyncIntrinsic, AtomicIntrinsic, FenceIntrinsic,
+      KernelCollectiveIntrinsic, SubgroupShuffleIntrinsic, BarrierIntrinsic,
+      TargetIntrinsic, AssemblyIntrinsic, TemplateApplyIntrinsic,
+      CheckIntrinsic, KernelLaunchIntrinsic, CommandLaunchIntrinsic,
+      CommandParameterIntrinsic, PipelineMemoryIntrinsic,
+      PipelineComposeIntrinsic, AddressIntrinsic, NumericConversionIntrinsic>;
 
   Intrinsics(cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
              Scalars& scalars, Vectors& vectors, Locations& locations,

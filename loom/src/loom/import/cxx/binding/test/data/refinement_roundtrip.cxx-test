@@ -1,0 +1,95 @@
+// RUN: emit cxx roundtrip
+// REQUIRES: loom-export-cxx
+// Result dimensions remain explicit, and dependent argument groups roundtrip.
+#include <loomcxx/vector.h>
+using Matrix = loom::type::vector<loom::type::shape<4, 8>, short>;
+using Rows = loom::type::vector<loom::type::shape<loom::type::dynamic, 8>, short>;
+using Flat = short __attribute__((ext_vector_type(32)));
+
+Rows expose(Matrix input, loom::type::index rows) {
+  return loom::vector::refine<Rows>(input, {rows});
+}
+
+Flat flatten(Rows input) {
+  return loom::vector::bitcast<Flat>(loom::vector::refine<Matrix>(input));
+}
+// ----
+#include <loomcxx/vector.h>
+
+using UInt16x32 = unsigned short __attribute__((ext_vector_type(32)));
+using UInt16x4x8 = loom::type::vector<loom::type::shape<4, 8>, unsigned short>;
+using UInt16xDynamicx8 = loom::type::vector<loom::type::shape<loom::type::dynamic, 8>, unsigned short>;
+
+[[loom::symbol("expose")]]
+UInt16xDynamicx8 expose(UInt16x4x8 input, loom::type::index rows);
+
+[[loom::symbol("flatten")]]
+UInt16x32 flatten(UInt16xDynamicx8 input);
+
+[[loom::symbol("expose")]]
+UInt16xDynamicx8 expose(UInt16x4x8 input, loom::type::index rows) {
+  UInt16xDynamicx8 v4 = loom::vector::refine<UInt16xDynamicx8>(input, loom::type::indices{rows});
+  return v4;
+}
+
+[[loom::symbol("flatten")]]
+UInt16x32 flatten(UInt16xDynamicx8 input) {
+  UInt16x4x8 v8 = loom::vector::refine<UInt16x4x8>(input);
+  return loom::vector::bitcast<UInt16x32>(v8);
+}
+
+// ====
+// RUN: emit cxx roundtrip
+// Address-domain and predicate vectors always use semantic carriers.
+#include <loomcxx/vector.h>
+
+template <class T>
+using Dynamic = loom::type::vector<loom::type::shape<loom::type::dynamic>, T>;
+template <class T>
+using Fixed = loom::type::vector<loom::type::shape<4>, T>;
+
+Fixed<loom::type::index> logical_indices(Dynamic<loom::type::index> input) {
+  return loom::vector::refine<Fixed<loom::type::index>>(input);
+}
+Fixed<loom::type::offset> physical_offsets(Dynamic<loom::type::offset> input) {
+  return loom::vector::refine<Fixed<loom::type::offset>>(input);
+}
+Fixed<bool> predicates(Dynamic<bool> input) {
+  return loom::vector::refine<Fixed<bool>>(input);
+}
+// ----
+#include <loomcxx/vector.h>
+
+using Boolx4 = loom::type::vector<loom::type::shape<4>, bool>;
+using BoolxDynamic = loom::type::vector<loom::type::shape<loom::type::dynamic>, bool>;
+using Indexx4 = loom::type::vector<loom::type::shape<4>, loom::type::index>;
+using IndexxDynamic = loom::type::vector<loom::type::shape<loom::type::dynamic>, loom::type::index>;
+using Offsetx4 = loom::type::vector<loom::type::shape<4>, loom::type::offset>;
+using OffsetxDynamic = loom::type::vector<loom::type::shape<loom::type::dynamic>, loom::type::offset>;
+
+[[loom::symbol("logical_indices")]]
+Indexx4 logical_indices(IndexxDynamic input);
+
+[[loom::symbol("physical_offsets")]]
+Offsetx4 physical_offsets(OffsetxDynamic input);
+
+[[loom::symbol("predicates")]]
+Boolx4 predicates(BoolxDynamic input);
+
+[[loom::symbol("logical_indices")]]
+Indexx4 logical_indices(IndexxDynamic input) {
+  Indexx4 v3 = loom::vector::refine<Indexx4>(input);
+  return v3;
+}
+
+[[loom::symbol("physical_offsets")]]
+Offsetx4 physical_offsets(OffsetxDynamic input) {
+  Offsetx4 v7 = loom::vector::refine<Offsetx4>(input);
+  return v7;
+}
+
+[[loom::symbol("predicates")]]
+Boolx4 predicates(BoolxDynamic input) {
+  Boolx4 v11 = loom::vector::refine<Boolx4>(input);
+  return v11;
+}
