@@ -14,6 +14,7 @@
 #include "common/memory.h"
 #include "common/module.h"
 #include "common/stream_value.h"
+#include "iree/base/internal/math.h"
 
 //===----------------------------------------------------------------------===//
 // iree_hal_streaming_graph_t (template)
@@ -2075,6 +2076,49 @@ iree_status_t iree_hal_streaming_graph_set_batch_mem_op_node_params(
   return iree_ok_status();
 }
 
+// Returns the first repeated pair, or |count| if every pair is unique.
+// Endpoints have already passed membership validation. The unpublished edge
+// allocation supplies at least three pointer-sized slots per pair; rounding
+// down to a power of two leaves the table less than two-thirds full on both 32-
+// and 64-bit hosts. Slots hold request ordinals plus one, so zero terminates a
+// collision chain.
+static iree_host_size_t iree_hal_streaming_graph_find_duplicate_dependency(
+    iree_hal_streaming_graph_node_t* const* from_nodes,
+    iree_hal_streaming_graph_node_t* const* to_nodes, iree_host_size_t count,
+    iree_host_size_t storage_size, void* storage) {
+  static_assert(
+      sizeof(iree_hal_streaming_graph_edge_t) >= 3 * sizeof(iree_host_size_t),
+      "edge storage must leave empty duplicate-index slots");
+  const iree_host_size_t slot_count =
+      (iree_host_size_t)1 << iree_math_floor_log2_u64(storage_size /
+                                                      sizeof(iree_host_size_t));
+  const iree_host_size_t slot_mask = slot_count - 1;
+  iree_host_size_t* slots = storage;
+  memset(slots, 0, slot_count * sizeof(*slots));
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    // Mix both dense node indices so chains and either fan direction distribute
+    // across the table independently of caller insertion order.
+    uint64_t hash =
+        ((uint64_t)from_nodes[i]->node_index << 32) | to_nodes[i]->node_index;
+    hash ^= hash >> 33;
+    hash *= 0xff51afd7ed558ccdull;
+    hash ^= hash >> 33;
+    hash *= 0xc4ceb9fe1a85ec53ull;
+    hash ^= hash >> 33;
+    iree_host_size_t slot = (iree_host_size_t)hash & slot_mask;
+    while (slots[slot]) {
+      const iree_host_size_t previous = slots[slot] - 1;
+      if (from_nodes[previous] == from_nodes[i] &&
+          to_nodes[previous] == to_nodes[i]) {
+        return i;
+      }
+      slot = (slot + 1) & slot_mask;
+    }
+    slots[slot] = i + 1;
+  }
+  return count;
+}
+
 iree_status_t iree_hal_streaming_graph_add_dependencies(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** from_nodes,
@@ -2117,14 +2161,6 @@ iree_status_t iree_hal_streaming_graph_add_dependencies(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "duplicate dependency at index %" PRIhsz, i);
     }
-    for (iree_host_size_t j = 0; j < i; ++j) {
-      if (from_nodes[j] == from_node && to_nodes[j] == to_node) {
-        IREE_TRACE_ZONE_END(z0);
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "duplicate dependency within request at index %" PRIhsz, i);
-      }
-    }
   }
 
   iree_host_size_t new_edge_count = 0;
@@ -2137,12 +2173,28 @@ iree_status_t iree_hal_streaming_graph_add_dependencies(
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "graph dependency batch size overflow");
   }
-  // Publish only after the complete batch has storage. A failed allocation
-  // leaves the graph's topology unchanged and the request can be retried.
+  // Validate the batch using its destination storage before publishing it. A
+  // rejected batch rewinds the arena, retaining neither edges nor scratch.
+  iree_arena_checkpoint_t checkpoint;
+  if (count > 1) {
+    checkpoint = iree_arena_checkpoint_save(&graph->arena);
+  }
   iree_hal_streaming_graph_edge_t* edges = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(graph->arena_allocator, allocation_size,
-                                (void**)&edges));
+      z0, iree_arena_allocate(&graph->arena, allocation_size, (void**)&edges));
+  if (count > 1) {
+    const iree_host_size_t duplicate_index =
+        iree_hal_streaming_graph_find_duplicate_dependency(
+            from_nodes, to_nodes, count, allocation_size, edges);
+    if (IREE_UNLIKELY(duplicate_index != count)) {
+      iree_arena_checkpoint_restore(&checkpoint);
+      IREE_TRACE_ZONE_END(z0);
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "duplicate dependency within request at index %" PRIhsz,
+          duplicate_index);
+    }
+  }
   for (iree_host_size_t i = 0; i < count; ++i) {
     edges[i].from = from_nodes[i];
     edges[i].to = to_nodes[i];
