@@ -1,9 +1,12 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <numeric>
+#include <random>
 #include <vector>
 
 #include "benchmark/benchmark.h"
@@ -85,8 +88,8 @@ GraphApi& Api() {
   return api;
 }
 
-enum class Topology { kIndependent, kChain, kFanIn };
-enum class Edges { kEmbedded, kBatch, kSingle };
+enum class Topology { kIndependent, kChain, kFanIn, kFanOut };
+enum class Edges { kEmbedded, kBatch, kBatchReverse, kBatchShuffled, kSingle };
 enum class Operation { kConstruct, kClone, kRoots };
 
 class GraphInput {
@@ -97,7 +100,16 @@ class GraphInput {
         nodes_(count),
         from_(topology == Topology::kIndependent ? 0 : count - 1),
         to_(from_.size()),
-        roots_(count) {}
+        roots_(count),
+        edge_order_(from_.size()) {
+    std::iota(edge_order_.begin(), edge_order_.end(), size_t{0});
+    if (edges == Edges::kBatchReverse) {
+      std::reverse(edge_order_.begin(), edge_order_.end());
+    } else if (edges == Edges::kBatchShuffled) {
+      std::mt19937 random(0);
+      std::shuffle(edge_order_.begin(), edge_order_.end(), random);
+    }
+  }
 
   hipGraph_t Build() {
     auto& api = Api();
@@ -113,16 +125,22 @@ class GraphInput {
         } else if (topology_ == Topology::kFanIn && i + 1 == nodes_.size()) {
           dependencies = nodes_.data();
           dependency_count = i;
+        } else if (topology_ == Topology::kFanOut && i) {
+          dependencies = nodes_.data();
+          dependency_count = 1;
         }
       }
       Check(api.add_empty(&nodes_[i], graph, dependencies, dependency_count));
     }
     if (edges_ != Edges::kEmbedded) {
       for (size_t i = 0; i < from_.size(); ++i) {
-        from_[i] = nodes_[i];
-        to_[i] = topology_ == Topology::kChain ? nodes_[i + 1] : nodes_.back();
+        const size_t edge_index = edge_order_[i];
+        from_[i] = topology_ == Topology::kFanOut ? nodes_.front()
+                                                  : nodes_[edge_index];
+        to_[i] = topology_ == Topology::kFanIn ? nodes_.back()
+                                               : nodes_[edge_index + 1];
       }
-      if (edges_ == Edges::kBatch) {
+      if (edges_ != Edges::kSingle) {
         Check(api.add_dependencies(graph, from_.data(), to_.data(),
                                    from_.size()));
       } else {
@@ -141,9 +159,10 @@ class GraphInput {
     size_t edge_count = 0;
     Check(Api().get_edges(graph, nullptr, nullptr, &edge_count));
     Require(edge_count == from_.size(), "graph edge count mismatch");
-    const size_t expected_roots = topology_ == Topology::kChain
-                                      ? 1
-                                      : nodes_.size() - (edge_count ? 1 : 0);
+    const size_t expected_roots =
+        topology_ == Topology::kChain || topology_ == Topology::kFanOut
+            ? 1
+            : nodes_.size() - (edge_count ? 1 : 0);
     Require(QueryRoots(graph) == expected_roots, "graph root count mismatch");
   }
 
@@ -168,6 +187,8 @@ class GraphInput {
   std::vector<hipGraphNode_t> to_;
   // Caller-owned root-query result array, allocated outside timing.
   std::vector<hipGraphNode_t> roots_;
+  // Fixed insertion permutation, prepared outside timing for every topology.
+  std::vector<size_t> edge_order_;
 };
 
 template <Operation operation, Topology topology, Edges edges>
@@ -227,6 +248,22 @@ GRAPH_TEMPLATE_OPERATIONS(Chain, Single);
 GRAPH_TEMPLATE_OPERATIONS(FanIn, Embedded);
 GRAPH_TEMPLATE_OPERATIONS(FanIn, Batch);
 GRAPH_TEMPLATE_OPERATIONS(FanIn, Single);
+GRAPH_TEMPLATE_OPERATIONS(FanOut, Embedded);
+GRAPH_TEMPLATE_OPERATIONS(FanOut, Batch);
+GRAPH_TEMPLATE_OPERATIONS(FanOut, Single);
+
+#define GRAPH_TEMPLATE_BATCH_ORDER(topology, edges)     \
+  GRAPH_TEMPLATE_BENCHMARK(Construct, topology, edges); \
+  GRAPH_TEMPLATE_BENCHMARK(Clone, topology, edges)
+
+GRAPH_TEMPLATE_BATCH_ORDER(Chain, BatchReverse);
+GRAPH_TEMPLATE_BATCH_ORDER(Chain, BatchShuffled);
+GRAPH_TEMPLATE_BATCH_ORDER(FanIn, BatchReverse);
+GRAPH_TEMPLATE_BATCH_ORDER(FanIn, BatchShuffled);
+GRAPH_TEMPLATE_BATCH_ORDER(FanOut, BatchReverse);
+GRAPH_TEMPLATE_BATCH_ORDER(FanOut, BatchShuffled);
+
+#undef GRAPH_TEMPLATE_BATCH_ORDER
 
 #undef GRAPH_TEMPLATE_OPERATIONS
 #undef GRAPH_TEMPLATE_BENCHMARK
