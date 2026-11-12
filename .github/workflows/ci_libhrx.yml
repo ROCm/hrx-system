@@ -61,7 +61,7 @@ permissions:
 
 jobs:
   cmake_linux:
-    name: LibHRX / CMake / Linux x86-64 / Clang / RelWithDebInfo
+    name: CMake / Linux x86-64 / Clang / RelWithDebInfo
     if: github.event_name != 'push'
     concurrency:
       group: libhrx-cmake-linux-${{ (github.event_name == 'push' && github.ref) || github.run_id }}

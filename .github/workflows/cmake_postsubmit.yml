@@ -42,7 +42,7 @@ permissions:
 
 jobs:
   cmake_linux_clang:
-    name: HRX / CMake / Linux x86-64 / Clang / RelWithDebInfo
+    name: Linux x86-64 / Clang / RelWithDebInfo
     runs-on: az-linux-scale-rocm-default-prod
     timeout-minutes: 30
     container:
@@ -147,7 +147,7 @@ jobs:
           retention-days: 7
 
   cmake_linux_gcc:
-    name: HRX / CMake / Linux x86-64 / GCC / RelWithDebInfo
+    name: Linux x86-64 / GCC / RelWithDebInfo
     runs-on: az-linux-scale-rocm-default-prod
     timeout-minutes: 30
     container:
@@ -161,7 +161,7 @@ jobs:
     steps: *cmake_linux_steps
 
   cmake_windows_clang_cl:
-    name: HRX / CMake / Windows x86-64 / Clang CL / RelWithDebInfo
+    name: Windows x86-64 / Clang CL / RelWithDebInfo
     runs-on: azure-windows-scale-rocm
     timeout-minutes: 60
     env:
@@ -313,7 +313,7 @@ jobs:
           retention-days: 7
 
   cmake_windows_msvc:
-    name: HRX / CMake / Windows x86-64 / MSVC / RelWithDebInfo
+    name: Windows x86-64 / MSVC / RelWithDebInfo
     runs-on: azure-windows-scale-rocm
     timeout-minutes: 60
     env:
@@ -325,7 +325,7 @@ jobs:
     steps: *cmake_windows_steps
 
   cmake_macos_apple_clang:
-    name: HRX / CMake / macOS arm64 / Apple Clang / RelWithDebInfo
+    name: macOS arm64 / Apple Clang / RelWithDebInfo
     runs-on: macos-15
     timeout-minutes: 60
     env:

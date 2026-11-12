@@ -874,7 +874,7 @@ jobs:
           retention-days: 7
 
   cmake_linux:
-    name: Loom / CMake / Linux x86-64 / Clang / RelWithDebInfo
+    name: CMake / Linux x86-64 / Clang / RelWithDebInfo
     if: github.event_name != 'push'
     concurrency:
       group: iree-cmake-linux-repository-build-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
@@ -949,7 +949,7 @@ jobs:
           retention-days: 7
 
   cmake_windows_cross:
-    name: Loom / CMake / Windows x86-64 (via Linux) / Clang CL / RelWithDebInfo
+    name: CMake / Windows x86-64 (via Linux) / Clang CL / RelWithDebInfo
     if: github.event_name != 'push'
     concurrency:
       group: iree-cmake-windows-cross-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
