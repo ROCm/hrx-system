@@ -67,6 +67,8 @@ typedef struct loom_low_cse_value_identities_t {
   const loom_low_descriptor_set_t* descriptor_set;
   // Scratch arena owning every table generation.
   iree_arena_allocator_t* arena;
+  // Last immutable result-type representation hashed during this invocation.
+  loom_expression_hash_cache_t hash_cache;
   // Open-addressed aliases; values absent from the table identify themselves.
   loom_low_cse_value_identity_slot_t* value_slots;
   // Number of populated aliases.
@@ -263,13 +265,15 @@ static uint32_t loom_low_cse_expression_hash(
     bool is_idempotent_state_update, bool has_private_consumption) {
   if (has_private_consumption) {
     return loom_expression_hash_with_value_identity(
-        module, op, loom_low_cse_private_copy_identity, identities);
+        module, op, loom_low_cse_private_copy_identity, identities,
+        &identities->hash_cache);
   }
   if (!is_idempotent_state_update) {
-    return loom_expression_hash(module, op);
+    return loom_expression_hash(module, op, &identities->hash_cache);
   }
   return loom_expression_hash_with_value_identity(
-      module, op, loom_low_cse_value_identity, identities);
+      module, op, loom_low_cse_value_identity, identities,
+      &identities->hash_cache);
 }
 
 static iree_status_t loom_low_cse_constructor_slots_reserve(
@@ -369,7 +373,8 @@ static iree_status_t loom_low_cse_observe_structural_identity(
 
   IREE_ASSERT_EQ(op->result_count, 1, "Low slice/concat must have one result");
   const uint32_t hash = loom_expression_hash_with_value_identity(
-      module, op, loom_low_cse_value_identity, identities);
+      module, op, loom_low_cse_value_identity, identities,
+      &identities->hash_cache);
   const loom_op_t* existing =
       loom_low_cse_find_constructor(module, identities, op, hash);
   if (existing) {
@@ -557,6 +562,7 @@ static iree_status_t loom_low_cse_region(
       .user_data = &value_identities,
       .equal = loom_low_cse_expression_equal,
   };
+  loom_expression_hash_cache_initialize(&value_identities.hash_cache);
   const bool has_idempotent_state_updates =
       iree_any_bit_set(descriptor_set->flags,
                        LOOM_LOW_DESCRIPTOR_SET_FLAG_IDEMPOTENT_STATE_UPDATES);

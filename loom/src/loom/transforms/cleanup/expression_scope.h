@@ -111,15 +111,28 @@ iree_status_t loom_expression_walk_next(loom_expression_walk_t* walk,
 const loom_dominance_info_t* loom_expression_walk_dominance_info(
     const loom_expression_walk_t* walk);
 
+// One invocation's most recently hashed immutable type representation.
+typedef struct loom_expression_hash_cache_t {
+  // Exact by-value representation; pointer-backed payloads remain immutable.
+  loom_type_t type;
+  // Content hash for |type|, independent of its storage representation.
+  uint32_t type_hash;
+} loom_expression_hash_cache_t;
+
+// Initializes the cache with the absence-of-type representation and its hash.
+void loom_expression_hash_cache_initialize(loom_expression_hash_cache_t* cache);
+
 // Hashes regionless operations by their exact SSA structural identity.
-uint32_t loom_expression_hash(const loom_module_t* module, const loom_op_t* op);
+uint32_t loom_expression_hash(const loom_module_t* module, const loom_op_t* op,
+                              loom_expression_hash_cache_t* cache);
 
 // Hashes regionless operations after replacing each operand with the
 // caller-indexed semantic value identity. All non-operand structure remains
 // exact. |value_identity| must be paired with the matching equality helper.
 uint32_t loom_expression_hash_with_value_identity(
     const loom_module_t* module, const loom_op_t* op,
-    loom_expression_value_identity_fn_t value_identity, void* user_data);
+    loom_expression_value_identity_fn_t value_identity, void* user_data,
+    loom_expression_hash_cache_t* cache);
 
 // Compares regionless operations by kind, exact SSA operands, result types,
 // attribute contents, operand segments, and instance flags.

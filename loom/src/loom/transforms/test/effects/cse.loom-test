@@ -444,3 +444,27 @@ func.def @rearm_outer_reads(%condition: i1, %buffer: buffer, %offset: offset, %v
   %after = view.load %view[0] : view<1xi32, %layout> -> i32
   func.return %before, %middle, %after, %value_twice : i32, i32, i32, i32
 }
+
+// ====
+
+// Sharing one result type's hash must preserve shape distinctions and remain
+// exact when the traversal switches between inline and out-of-line shapes.
+// RUN: pass cse
+func.def @interleaved_result_shapes(%value: i32) -> (vector<2xi32>, vector<3xi32>, vector<2xi32>, vector<2x3x4xi32>, vector<2x3x5xi32>, vector<2x3x4xi32>) {
+  %pair = vector.splat %value : vector<2xi32>
+  %triple = vector.splat %value : vector<3xi32>
+  %same_pair = vector.splat %value : vector<2xi32>
+  %volume = vector.splat %value : vector<2x3x4xi32>
+  %other_volume = vector.splat %value : vector<2x3x5xi32>
+  %same_volume = vector.splat %value : vector<2x3x4xi32>
+  func.return %pair, %triple, %same_pair, %volume, %other_volume, %same_volume : vector<2xi32>, vector<3xi32>, vector<2xi32>, vector<2x3x4xi32>, vector<2x3x5xi32>, vector<2x3x4xi32>
+}
+
+// ----
+func.def @interleaved_result_shapes(%value: i32) -> (vector<2xi32>, vector<3xi32>, vector<2xi32>, vector<2x3x4xi32>, vector<2x3x5xi32>, vector<2x3x4xi32>) {
+  %pair = vector.splat %value : vector<2xi32>
+  %triple = vector.splat %value : vector<3xi32>
+  %volume = vector.splat %value : vector<2x3x4xi32>
+  %other_volume = vector.splat %value : vector<2x3x5xi32>
+  func.return %pair, %triple, %pair, %volume, %other_volume, %volume : vector<2xi32>, vector<3xi32>, vector<2xi32>, vector<2x3x4xi32>, vector<2x3x5xi32>, vector<2x3x4xi32>
+}

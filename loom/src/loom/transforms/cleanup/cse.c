@@ -52,6 +52,8 @@ iree_status_t loom_cse_run(loom_pass_t* pass, loom_module_t* module,
                                       /*identity_policy=*/NULL,
                                       /*maximum_entry_count=*/0, &arena, &walk);
     loom_expression_barriers_t barriers = {0};
+    loom_expression_hash_cache_t hash_cache;
+    loom_expression_hash_cache_initialize(&hash_cache);
     while (iree_status_is_ok(status)) {
       loom_expression_cursor_t cursor;
       status = loom_expression_walk_next(walk, &cursor);
@@ -69,7 +71,8 @@ iree_status_t loom_cse_run(loom_pass_t* pass, loom_module_t* module,
       bool eliminated = false;
       if (loom_expression_op_is_reusable(module, cursor.op, cursor.traits) &&
           !loom_op_requires_source_context(module, cursor.op)) {
-        const uint32_t hash = loom_expression_hash(module, cursor.op);
+        const uint32_t hash =
+            loom_expression_hash(module, cursor.op, &hash_cache);
         const loom_expression_lookup_flags_t flags =
             iree_any_bit_set(cursor.traits, LOOM_TRAIT_PURE)
                 ? 0
