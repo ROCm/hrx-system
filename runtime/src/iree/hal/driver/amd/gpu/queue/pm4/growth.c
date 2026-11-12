@@ -161,6 +161,9 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_begin(
     case IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_TRANSFERS:
       pending = context->transfers;
       break;
+    case IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SAMPLES:
+      pending = context->samples;
+      break;
     case IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SIGNALS:
       pending = context->signals;
       break;
@@ -217,7 +220,8 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_begin(
   } else {
     iree_hal_amd_fabric_memory_t* memory = NULL;
     if (kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS ||
-        kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_TRANSFERS) {
+        kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_TRANSFERS ||
+        kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SAMPLES) {
       status = iree_hal_amd_gpu_byte_storage_prepare(
           capacity, context->captures->host_allocator, &growth->backing.bytes);
       if (iree_status_is_ok(status)) {
@@ -230,6 +234,8 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_begin(
             .alignment = capacity};
         if (kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS) {
           context->arguments = growth;
+        } else if (kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SAMPLES) {
+          context->samples = growth;
         } else {
           context->transfers = growth;
         }
@@ -293,8 +299,11 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_end(
   switch (entry->kind) {
     case IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS:
     case IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_TRANSFERS:
+    case IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SAMPLES:
       if (entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS) {
         context->arguments = NULL;
+      } else if (entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SAMPLES) {
+        context->samples = NULL;
       } else {
         context->transfers = NULL;
       }

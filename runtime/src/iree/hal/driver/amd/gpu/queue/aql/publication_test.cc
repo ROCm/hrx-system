@@ -12,8 +12,10 @@
 #include <vector>
 
 #include "iree/async/proactor_platform.h"
+#include "iree/hal/cts/util/profile_test_util.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/signal.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/state.h"
+#include "iree/hal/driver/amd/gpu/queue/sample_storage.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -101,7 +103,26 @@ class AqlPublicationTest
       iree_hal_amd_gpu_signal_block_deinitialize(&signals.block);
       iree_hal_amd_gpu_signal_pool_deinitialize(&signals.cache.pool);
     }
+    IREE_EXPECT_OK(iree_hal_amd_gpu_profile_end(queue_.profile));
     iree_async_proactor_release(proactor_);
+  }
+
+  iree_hal_amd_gpu_profile_operation_t BeginProfile() {
+    iree::hal::cts::TestProfileSinkInitialize(&sink_);
+    const iree_hal_device_profiling_options_t options = {
+        .data_families = IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS |
+                         IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS,
+        .sink = iree::hal::cts::TestProfileSinkAsBase(&sink_),
+    };
+    IREE_CHECK_OK(iree_hal_amd_gpu_profile_begin(
+        &options, 1, 2, 1000000, iree_allocator_system(), &queue_.profile));
+    iree_hal_amd_gpu_profile_operation_t operation;
+    iree_hal_amd_gpu_profile_operation_initialize(
+        queue_.profile, 0, IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DISPATCH, 0, 0, 1,
+        &operation);
+    operation.completion.count = 1;
+    operation.completion.sample_stride = sizeof(iree_hal_amd_gpu_aql_signal_t);
+    return operation;
   }
 
   iree_hal_semaphore_t* Semaphore() {
@@ -145,6 +166,8 @@ class AqlPublicationTest
            (uint64_t{packets_[packet].words[word + 1]} << 32);
   }
 
+  // Real bounded profile stream used by timestamped publication.
+  iree::hal::cts::TestProfileSink sink_;
   // Real host timeline infrastructure.
   iree_async_proactor_t* proactor_ = nullptr;
   // Native signal-domain identity, shared by both queues.
@@ -319,6 +342,85 @@ TEST_P(AqlPublicationTest, FullTransferStorageLeavesLaunchArgumentsAvailable) {
   EXPECT_EQ(
       std::memcmp(argument_bytes.data() + 32, launch_arguments.data(), 32), 0);
   EXPECT_EQ(payload, source);
+}
+
+TEST_P(AqlPublicationTest, FullSamplesLeaveLaunchArgumentsAvailable) {
+  auto operation = BeginProfile();
+  std::array<uint8_t, 64> argument_bytes = {};
+  arguments_.memory.contents =
+      iree_make_byte_span(argument_bytes.data(), argument_bytes.size());
+  arguments_.address = 0x7000;
+  arguments_.capacity = argument_bytes.size();
+  std::array<uint8_t, 32> constants;
+  constants.fill(0xA5);
+  layout_.byte_length = constants.size();
+  request_.constants =
+      iree_make_const_byte_span(constants.data(), constants.size());
+  iree_hal_amd_gpu_aql_signal_t sample = {};
+  iree_hal_amd_gpu_byte_storage_t generation = {};
+  generation.memory.contents = iree_make_byte_span(&sample, sizeof(sample));
+  generation.address = 0xABCD00009000;
+  generation.capacity = sizeof(sample);
+  iree_hal_amd_gpu_sample_storage_t samples = {.current = &generation};
+  queue_.samples = &samples;
+  iree_hal_amd_gpu_aql_submission_t* submission = nullptr;
+  iree_status_t status = iree_ok_status();
+  ASSERT_EQ(
+      iree_hal_amd_gpu_aql_publish(&queue_, &request_, 0, nullptr, {}, {}, 0, 0,
+                                   nullptr, &operation, &submission, &status),
+      IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE);
+  IREE_ASSERT_OK(status);
+  ASSERT_NE(submission, nullptr);
+  EXPECT_EQ(arguments_.end, 32u);
+  EXPECT_EQ(generation.end, sizeof(sample));
+  EXPECT_EQ(PacketAddress(0, 10), arguments_.address);
+  EXPECT_EQ(PacketAddress(0, 14), generation.address);
+  EXPECT_EQ(PacketAddress(1, 14), issued_[0].signal->device_address);
+  EXPECT_EQ(sample.value, 1u);
+  const auto* completion =
+      &iree_hal_amd_gpu_aql_submission_profile(submission)->completion;
+  EXPECT_EQ(completion->samples,
+            reinterpret_cast<const iree_hal_amd_gpu_profile_sample_t*>(
+                &sample.start_timestamp));
+  EXPECT_EQ(completion->samples_end, sizeof(sample));
+
+  submission = nullptr;
+  EXPECT_EQ(
+      iree_hal_amd_gpu_aql_publish(&queue_, &request_, 0, nullptr, {}, {}, 0, 0,
+                                   nullptr, &operation, &submission, &status),
+      IREE_HAL_AMD_GPU_AQL_PUBLISH_CAPACITY);
+  IREE_ASSERT_OK(status);
+  EXPECT_EQ(submission, nullptr);
+  EXPECT_EQ(arguments_.end, 32u);
+  EXPECT_EQ(generation.end, sizeof(sample));
+  std::vector<iree_hal_amd_gpu_aql_wait_t> waits;
+  Publish(Semaphore(), waits);
+  EXPECT_EQ(arguments_.end, 64u);
+  EXPECT_EQ(generation.end, sizeof(sample));
+  EXPECT_EQ(PacketAddress(2, 10), arguments_.address + 32);
+  EXPECT_EQ(std::memcmp(argument_bytes.data() + 32, constants.data(), 32), 0);
+}
+
+TEST_P(AqlPublicationTest, EmptyDispatchKeepsMetadataWithoutNativeSamples) {
+  auto operation = BeginProfile();
+  request_.geometry.workgroup_count[0] = 0;
+  iree_hal_amd_gpu_aql_submission_t* submission = nullptr;
+  iree_status_t status = iree_ok_status();
+  ASSERT_EQ(
+      iree_hal_amd_gpu_aql_publish(&queue_, &request_, 0, nullptr, {}, {}, 0, 0,
+                                   nullptr, &operation, &submission, &status),
+      IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE);
+  IREE_ASSERT_OK(status);
+  ASSERT_NE(submission, nullptr);
+  EXPECT_EQ(arguments_.end, 0u);
+  EXPECT_EQ(queue_.producer.ring.reserved, 1u);
+  EXPECT_EQ(
+      iree_hal_amd_gpu_aql_submission_profile(submission)->completion.samples,
+      nullptr);
+  EXPECT_EQ(iree_hal_amd_gpu_aql_submission_profile(submission)
+                ->completion.samples_end,
+            0u);
+  EXPECT_EQ(PacketAddress(0, 14), issued_[0].signal->device_address);
 }
 
 INSTANTIATE_TEST_SUITE_P(NativeDependencies, AqlPublicationTest,

@@ -61,6 +61,8 @@ typedef struct iree_hal_amd_gpu_pm4_growth_context_t {
   iree_hal_amd_gpu_pm4_growth_t* arguments;
   // One coalesced transfer acquisition, or NULL without pending growth.
   iree_hal_amd_gpu_pm4_growth_t* transfers;
+  // Coalesced profiling sample acquisition or NULL.
+  iree_hal_amd_gpu_pm4_growth_t* samples;
   // One coalesced signal acquisition, or NULL without pending growth.
   iree_hal_amd_gpu_pm4_growth_t* signals;
   // One coalesced scratch acquisition, or NULL without pending growth.

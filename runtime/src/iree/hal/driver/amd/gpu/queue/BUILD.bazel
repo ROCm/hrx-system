@@ -480,6 +480,29 @@ iree_runtime_cc_benchmark(
 )
 
 iree_runtime_cc_library(
+    name = "sample_storage",
+    srcs = ["sample_storage.c"],
+    hdrs = ["sample_storage.h"],
+    deps = [
+        ":backing",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/hal/driver/amd/fabric:memory",
+        "//runtime/src/iree/hal/driver/amd/gpu:context",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "sample_storage_test",
+    srcs = ["sample_storage_test.cc"],
+    deps = [
+        ":sample_storage",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "capture_pool",
     srcs = ["capture_pool.c"],
     hdrs = ["capture_pool.h"],

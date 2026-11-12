@@ -166,6 +166,9 @@ static amdf_status_t iree_hal_amd_gpu_pm4_cleanup(
   }
   queue->kernel = NULL;
   iree_hal_amd_gpu_grid_storage_deinitialize(queue->context, &queue->grid);
+  iree_hal_amd_gpu_sample_storage_free(queue->context, queue->host_allocator,
+                                       queue->samples);
+  queue->samples = NULL;
   iree_hal_amd_gpu_pm4_scratch_trim(queue->context, UINT64_MAX,
                                     &queue->producer.scratch);
   iree_atomic_store(&queue->options.signals->waiting, 0,

@@ -214,6 +214,7 @@ class GrowthTest : public ::testing::Test {
     iree_hal_amd_gpu_publication_deinitialize(&publication_);
     EXPECT_EQ(growth_.arguments, nullptr);
     EXPECT_EQ(growth_.transfers, nullptr);
+    EXPECT_EQ(growth_.samples, nullptr);
     EXPECT_EQ(growth_.signals, nullptr);
     EXPECT_EQ(growth_.scratch, nullptr);
     EXPECT_EQ(
@@ -807,39 +808,47 @@ TEST_F(ProgramGrowthTest,
   }
 }
 
-TEST_F(GrowthTest, TransferAndArgumentCohortsHaveIndependentNativeResults) {
+TEST_F(GrowthTest, ByteOwnersHaveIndependentNativeResults) {
   uint32_t completed = 0;
   uint32_t failed = 0;
-  for (auto kind : {IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS,
-                    IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_TRANSFERS}) {
-    SCOPED_TRACE(kind);
-    const auto other = kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS
-                           ? IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_TRANSFERS
-                           : IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS;
-    hold_ = true;
-    fail_ = true;
-    Park(kind);
-    entered_.acquire();
-    Park(kind);
-    Park(other);
-    Park(other);
-    EXPECT_NE(growth_.arguments, nullptr);
-    EXPECT_NE(growth_.transfers, nullptr);
-    EXPECT_NE(growth_.arguments, growth_.transfers);
-    EXPECT_TRUE(iree_hal_amd_gpu_publisher_is_idle(&publisher_));
-    resume_.release();
-    for (uint32_t i = 0; i < 4; ++i) {
-      consumed_.acquire();
+  const std::array kinds = {IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS,
+                            IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_TRANSFERS,
+                            IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SAMPLES};
+  for (auto kind : kinds) {
+    for (auto other : kinds) {
+      if (kind == other) {
+        continue;
+      }
+      SCOPED_TRACE(kind);
+      SCOPED_TRACE(other);
+      hold_ = true;
+      fail_ = true;
+      Park(kind);
+      entered_.acquire();
+      Park(kind);
+      Park(other);
+      Park(other);
+      const std::array owners = {growth_.arguments, growth_.transfers,
+                                 growth_.samples};
+      for (size_t i = 0; i < kinds.size(); ++i) {
+        EXPECT_EQ(owners[i] != nullptr, kinds[i] == kind || kinds[i] == other);
+      }
+      EXPECT_TRUE(iree_hal_amd_gpu_publisher_is_idle(&publisher_));
+      resume_.release();
+      for (uint32_t i = 0; i < 4; ++i) {
+        consumed_.acquire();
+      }
+      iree_hal_amd_gpu_context_join_memory(&context_);
+      JoinPublication();
+      completed += 4;
+      failed += 2;
+      EXPECT_EQ(completed_, completed);
+      EXPECT_EQ(failed_, failed);
+      EXPECT_EQ(growth_.arguments, nullptr);
+      EXPECT_EQ(growth_.transfers, nullptr);
+      EXPECT_EQ(growth_.samples, nullptr);
+      EXPECT_EQ(live_, 0u);
     }
-    iree_hal_amd_gpu_context_join_memory(&context_);
-    JoinPublication();
-    completed += 4;
-    failed += 2;
-    EXPECT_EQ(completed_, completed);
-    EXPECT_EQ(failed_, failed);
-    EXPECT_EQ(growth_.arguments, nullptr);
-    EXPECT_EQ(growth_.transfers, nullptr);
-    EXPECT_EQ(live_, 0u);
   }
 }
 

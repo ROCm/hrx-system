@@ -28,6 +28,7 @@
 #include "iree/hal/driver/amd/gpu/queue/pm4/retirement.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/submission.h"
 #include "iree/hal/driver/amd/gpu/queue/program.h"
+#include "iree/hal/driver/amd/gpu/queue/sample_storage.h"
 #include "iree/hal/driver/amd/gpu/queue/transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/user_queue.h"
 #include "iree/hal/driver/amd/status.h"
@@ -143,6 +144,8 @@ struct iree_hal_amd_gpu_pm4_queue_t {
       iree_atomic_int32_t closed;
   // Sticky raw native failure; failure never supplies reclamation credit.
   iree_atomic_int64_t native_failure;
+  // Timestamp-session native owner, independent of launch argument capacity.
+  iree_hal_amd_gpu_sample_storage_t* samples;
   // Tracker associations shared by cold waits on this queue.
   iree_alignas(iree_hardware_destructive_interference_size)
       iree_async_semaphore_wait_context_t wait_context;

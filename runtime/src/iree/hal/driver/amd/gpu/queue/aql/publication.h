@@ -25,6 +25,7 @@ typedef enum iree_hal_amd_gpu_aql_publish_result_e {
   IREE_HAL_AMD_GPU_AQL_PUBLISH_PROGRAM,
   IREE_HAL_AMD_GPU_AQL_PUBLISH_ARGUMENTS,
   IREE_HAL_AMD_GPU_AQL_PUBLISH_TRANSFERS,
+  IREE_HAL_AMD_GPU_AQL_PUBLISH_SAMPLES,
   IREE_HAL_AMD_GPU_AQL_PUBLISH_SIGNALS,
 } iree_hal_amd_gpu_aql_publish_result_t;
 
@@ -32,14 +33,14 @@ typedef enum iree_hal_amd_gpu_aql_publish_result_e {
 enum { IREE_HAL_AMD_GPU_AQL_CONTROL_BYTE_LENGTH = 48 };
 
 // Exact argument extent needed before ring reservation, including optional
-// cooperative control data and profiling samples.
+// cooperative control data.
 uint64_t iree_hal_amd_gpu_aql_argument_length(
     const iree_hal_amd_gpu_aql_dispatch_request_t* request,
-    uint32_t grid_length, bool sampled);
+    uint32_t grid_length);
 
 // Exact upload extent for the current recorded-command chunk.
 uint64_t iree_hal_amd_gpu_aql_execute_argument_length(
-    const iree_hal_amd_gpu_aql_command_invocation_t* invocation, bool sampled);
+    const iree_hal_amd_gpu_aql_command_invocation_t* invocation);
 
 // Publishes a prepared direct dispatch or empty barrier with its retained
 // dependency ownership. Only successful acceptance advances ring and argument
