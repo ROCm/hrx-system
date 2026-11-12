@@ -1,0 +1,51 @@
+// RUN: verify
+// Long double may be evaluated by the frontend but has no High scalar type.
+// ERROR@+1: LOWERING/059 "unsupported C++ type: long double"
+double entry() { return __builtin_infl(); }
+
+// ====
+// ERROR@+1: LOWERING/059 "unsupported C++ type: long double"
+double entry() { return __builtin_huge_vall(); }
+
+// ====
+// ERROR@+1: LOWERING/059 "unsupported C++ type: long double"
+double entry() { return __builtin_nanl("1"); }
+
+// ====
+// ERROR@+1: LOWERING/059 "NaN builtin requires a constant null-terminated integer payload string"
+float entry(const char* payload) { return __builtin_nanf(payload); }
+
+// ====
+// ERROR@+1: LOWERING/059 "NaN builtin requires a constant null-terminated integer payload string"
+double entry() { return __builtin_nan("not-an-integer"); }
+
+// ====
+constexpr char payload[] = {'1'};
+// ERROR@+1: LOWERING/059 "NaN builtin requires a constant null-terminated integer payload string"
+float entry() { return __builtin_nanf(payload); }
+
+// ====
+// Evaluating a builtin must not erase effects in its arguments.
+// ERROR@+1: LOWERING/059 "NaN builtin requires a constant null-terminated integer payload string"
+float entry(unsigned* counter) { return __builtin_nanf((++*counter, "1")); }
+
+// ====
+unsigned entry() {
+  unsigned counter = 0;
+  // ERROR@+1: LOWERING/059 "NaN builtin requires a constant null-terminated integer payload string"
+  auto value = __builtin_nanf((++counter, "1"));
+  return counter;
+}
+
+// ====
+// Signaling NaNs cannot be silently replaced with quiet NaNs.
+// ERROR@+1: LOWERING/059 "signaling NaN builtins require frontend constant evaluation support; use __builtin_bit_cast to specify the representation bits"
+float entry() { return __builtin_nansf("1"); }
+
+// ====
+// ERROR@+1: LOWERING/059 "signaling NaN builtins require frontend constant evaluation support; use __builtin_bit_cast to specify the representation bits"
+double entry() { return __builtin_nans("1"); }
+
+// ====
+// ERROR@+1: LOWERING/059 "signaling NaN builtins require frontend constant evaluation support; use __builtin_bit_cast to specify the representation bits"
+double entry() { return __builtin_nansl("1"); }

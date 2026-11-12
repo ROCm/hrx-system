@@ -18,6 +18,8 @@
 
 namespace loom::cxx_import {
 
+class Diagnostics;
+
 // Exact source-ABI object bytes, independent of frontend constant storage.
 struct ObjectRepresentation {
   // Complete initialized byte extent, including terminators and zero fill.
@@ -38,6 +40,14 @@ std::optional<ObjectRepresentation> object_representation(
 // Unsigned payloads retain all bits, including values above INTMAX_MAX.
 std::optional<cxx::ConstValue> scalar_constant(cxx::TranslationUnit& unit,
                                                cxx::ExpressionAST* expression);
+
+// Evaluates the infinity, huge-value, and quiet-NaN builtins in their source
+// types. NaN payloads must be constant strings; evaluation failures and
+// unsupported signaling NaNs diagnose at the call. Other builtin families
+// return no value without attempting evaluation.
+std::optional<cxx::ConstValue> floating_builtin_constant(
+    cxx::TranslationUnit& unit, Diagnostics& diagnostics,
+    cxx::CallExpressionAST* call);
 
 // Whether an already evaluated source expression denotes null. This includes
 // nullptr_t expressions, retained constexpr pointers, and converted zero

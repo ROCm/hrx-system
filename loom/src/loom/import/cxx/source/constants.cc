@@ -10,12 +10,14 @@
 #include <cxx/ast_interpreter.h>
 #include <cxx/ast_visitor.h>
 #include <cxx/literals.h>
+#include <cxx/names.h>
 #include <cxx/symbols.h>
 #include <cxx/translation_unit.h>
 
 #include <utility>
 
 #include "iree/base/internal/unicode.h"
+#include "loom/import/cxx/source/frontend.h"
 
 namespace loom::cxx_import {
 namespace {
@@ -151,6 +153,47 @@ std::optional<ObjectRepresentation> object_representation(
 std::optional<cxx::ConstValue> scalar_constant(cxx::TranslationUnit& unit,
                                                cxx::ExpressionAST* expression) {
   return PureConstant(unit, ConstantDomain::Scalar).evaluate(expression);
+}
+
+std::optional<cxx::ConstValue> floating_builtin_constant(
+    cxx::TranslationUnit& unit, Diagnostics& diagnostics,
+    cxx::CallExpressionAST* call) {
+  auto* base = call->baseExpression;
+  while (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(base)) {
+    base = nested->expression;
+  }
+  auto* callee = cxx::ast_cast<cxx::IdExpressionAST>(base);
+  using Builtin = cxx::BuiltinFunctionKind;
+  switch (cxx::resolveBuiltinFunctionKind(callee)) {
+    case Builtin::T___BUILTIN_INF:
+    case Builtin::T___BUILTIN_INFF:
+    case Builtin::T___BUILTIN_INFL:
+    case Builtin::T___BUILTIN_HUGE_VAL:
+    case Builtin::T___BUILTIN_HUGE_VALF:
+    case Builtin::T___BUILTIN_HUGE_VALL:
+    case Builtin::T___BUILTIN_NAN:
+    case Builtin::T___BUILTIN_NANF:
+    case Builtin::T___BUILTIN_NANL:
+      break;
+    case Builtin::T___BUILTIN_NANS:
+    case Builtin::T___BUILTIN_NANSF:
+    case Builtin::T___BUILTIN_NANSL:
+      diagnostics.reject(unit, call,
+                         "signaling NaN builtins require frontend constant "
+                         "evaluation support; use __builtin_bit_cast to "
+                         "specify the representation bits");
+    default:
+      return std::nullopt;
+  }
+  cxx::ASTInterpreter interpreter(&unit);
+  auto value = interpreter.evaluate(call);
+  if (!value) {
+    diagnostics.reject(
+        unit, call,
+        "NaN builtin requires a constant null-terminated integer payload "
+        "string");
+  }
+  return value;
 }
 
 bool null_pointer_expression(cxx::TranslationUnit& unit,

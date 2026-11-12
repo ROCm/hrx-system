@@ -13,7 +13,8 @@ assertions when acceptance is the contract.
 | Precision at the arithmetic result | `narrow_float_subtraction`, `rounding` |
 | Intrinsic result fields and exponent output arguments | `exponent` |
 | Math permissions and lexical scope | `fastmath`, `scalar_templates`, `logarithms`, `reciprocal` |
-| Value and object representation bits | `bitcast`, `bitcast_payloads`, `bitcast_folding`, `constexpr_bitcast`, `nan_payloads` |
+| Value and object representation bits | `bitcast`, `bitcast_payloads`, `bitcast_folding`, `constexpr_bitcast` |
+| Infinity/huge-value builtins, NaN payloads, and their source admission | `floating_constants`, `floating_constants_invalid` |
 
 For example, testing `input++` requires the expected call operand to be the old
 value and later uses to receive the updated value. A test of narrow subtraction
