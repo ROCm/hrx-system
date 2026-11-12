@@ -31,19 +31,29 @@ typedef struct iree_hal_amd_gpu_aql_program_block_t {
   } dispatches;
 } iree_hal_amd_gpu_aql_program_block_t;
 
+// Bounds on publisher-stack preparation selected while sealing a recording.
+enum {
+  IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_BYTES = 8192,
+  IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_FIXUPS = 256,
+  IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_VALUES =
+      IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_FIXUPS + 1,
+};
+
 // Bounded native packets and any invocation-varying private data. The byte
 // template and fixup table follow in the same host allocation. Immutable
 // arguments may instead have a fixed device placement baked into the packets.
 typedef struct iree_hal_amd_gpu_aql_host_template_t {
-  // Complete packet/private-data extent. Zero-fixup templates are read directly
-  // by the publisher; others are copied into invocation-private storage.
+  // Complete host packet/private-data extent. Zero-fixup templates are read
+  // directly; mutable templates are prepared in publisher-owned CPU storage.
   uint32_t byte_length;
+  // Beginning of private GPU-read data; only the suffix needs native storage.
+  uint32_t data_offset;
   // Required power-of-two alignment of the invocation's upload address.
   uint32_t alignment;
   // Independent DWORD replacements applied after resolving unique inputs.
   // Zero means no invocation upload or dense input table is needed.
   uint32_t fixup_count;
-  // Immutable fixup-table offset, also the invocation's dense-value offset.
+  // Immutable fixup-table offset in the host allocation.
   uint32_t fixup_offset;
 } iree_hal_amd_gpu_aql_host_template_t;
 
@@ -137,12 +147,15 @@ void iree_hal_amd_gpu_aql_command_invocation_deinitialize(
     iree_hal_amd_gpu_aql_command_invocation_t* invocation);
 
 // Resolves unique input values once after upload address commitment. A bounded
-// host template is copied and patched into that invocation-private upload;
-// resident programs receive a dense value table for native fixup execution.
+// host template is patched in host_contents and only its private-data suffix is
+// copied to upload; resident programs receive a dense native fixup value table.
+// host_contents has HOST_TEMPLATE_MAX_BYTES bytes for a mutable host template
+// and is NULL for a resident program. Its caller keeps it through publication.
 // The publisher borrows zero-fixup host templates directly and omits this call.
 iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
     const iree_hal_amd_gpu_aql_command_invocation_t* invocation,
-    uint32_t queue_ordinal, uint64_t upload_address, void* upload);
+    uint32_t queue_ordinal, uint64_t upload_address, void* upload,
+    void* host_contents);
 
 #ifdef __cplusplus
 }  // extern "C"

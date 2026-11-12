@@ -17,6 +17,7 @@
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/driver/amd/gpu/cts/test_device.h"
 #include "iree/hal/driver/amd/gpu/cts/testdata.h"
+#include "iree/hal/driver/amd/gpu/executable.h"
 #include "iree/hal/driver/amd/gpu/image/hip_images.h"
 #include "iree/hal/driver/amd/gpu/image/hsaco.h"
 #include "iree/hal/driver/amd/gpu/kernarg.h"
@@ -890,10 +891,26 @@ TEST_P(GpuNativeDispatchTest,
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
     IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
     if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
-      const auto* program =
-          iree_hal_amd_gpu_aql_command_buffer_program(recording);
+      auto* program = iree_hal_amd_gpu_aql_command_buffer_program(recording);
       EXPECT_EQ(program->host_template != nullptr, count <= 32);
       EXPECT_EQ(program->resident.pool == nullptr, count <= 32);
+      if (program->host_template) {
+        const iree_hal_amd_gpu_aql_function_t* native_function = nullptr;
+        IREE_ASSERT_OK(iree_hal_amd_gpu_executable_lookup_aql_for_queue(
+            executable, function, 0, &native_function));
+        const auto* layout = native_function->base.kernarg;
+        const uint64_t expected_bytes =
+            (count - 1) *
+                iree_align_uint64(layout->byte_length, layout->alignment) +
+            layout->byte_length;
+        // Packet preparation and dense CPU fixup values consume no GPU bytes.
+        const iree_hal_amd_gpu_aql_command_invocation_t invocation = {
+            .program = program,
+        };
+        EXPECT_EQ(iree_hal_amd_gpu_aql_execute_argument_length(&invocation),
+                  expected_bytes);
+        EXPECT_EQ(program->host_template->data_offset, count * 64u);
+      }
       uint32_t dispatch_index = 0;
       for (uint32_t i = 0; i < program->block_count; ++i) {
         const auto& block = program->blocks[i];

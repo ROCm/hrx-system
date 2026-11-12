@@ -599,21 +599,25 @@ uint64_t iree_hal_amd_gpu_aql_execute_argument_length(
     const iree_hal_amd_gpu_aql_command_invocation_t* invocation) {
   const iree_hal_amd_gpu_aql_host_template_t* host_template =
       invocation->program->host_template;
-  if (host_template && !host_template->fixup_count) {
-    return 0;
+  if (host_template) {
+    return host_template->byte_length - host_template->data_offset;
   }
-  uint64_t length = host_template
-                        ? host_template->fixup_offset +
-                              (uint64_t)invocation->program->value_count * 8
-                    : invocation->block_ordinal
+  uint64_t length = invocation->block_ordinal
                         ? sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t)
                         : sizeof(iree_hal_amd_gpu_aql_program_arguments_t) +
                               (uint64_t)invocation->program->value_count * 8;
-  if (!host_template && invocation->program->profile) {
+  if (invocation->program->profile) {
     length += sizeof(iree_hal_amd_gpu_aql_materialize_profile_arguments_t) -
               sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t);
   }
   return length;
+}
+
+uint64_t iree_hal_amd_gpu_aql_execute_argument_alignment(
+    const iree_hal_amd_gpu_aql_command_invocation_t* invocation) {
+  const iree_hal_amd_gpu_aql_host_template_t* host_template =
+      invocation->program->host_template;
+  return host_template ? iree_max(host_template->alignment, 8u) : 8;
 }
 
 // Keep bounded host patch/copy loops outside the resident publication path.
@@ -641,9 +645,11 @@ iree_hal_amd_gpu_aql_publish_host_template(
       block.packet_count, packets);
 }
 
-iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_execute(
+static IREE_ATTRIBUTE_NOINLINE iree_hal_amd_gpu_aql_publish_result_t
+iree_hal_amd_gpu_aql_publish_execute_prepared(
     iree_hal_amd_gpu_aql_queue_t* queue,
-    iree_hal_amd_gpu_aql_submission_t* submission, iree_status_t* out_status) {
+    iree_hal_amd_gpu_aql_submission_t* submission, void* host_contents,
+    iree_status_t* out_status) {
   const uint64_t position = (uint64_t)iree_atomic_load(
       &queue->producer.count, iree_memory_order_relaxed);
   if (position - (uint64_t)iree_atomic_load(&queue->completed.count,
@@ -667,7 +673,7 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_execute(
   const iree_hal_amd_gpu_aql_publish_result_t argument_result =
       iree_hal_amd_gpu_aql_arguments(
           queue, argument_length,
-          host_template ? iree_max(host_template->alignment, 8u) : 8,
+          iree_hal_amd_gpu_aql_execute_argument_alignment(invocation),
           &argument_offset, &argument_end);
   if (argument_result != IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE) {
     return argument_result;
@@ -732,13 +738,14 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_execute(
     }
   }
   iree_hal_amd_gpu_byte_storage_t* arguments = queue->producer.arguments;
-  void* upload = argument_length
-                     ? arguments->memory.contents.data + argument_offset
-                     : (void*)(host_template + 1);
-  if (first && argument_length) {
+  void* upload = arguments->memory.contents.data + argument_offset;
+  const void* packets = host_contents
+                            ? host_contents
+                            : (host_template ? host_template + 1 : NULL);
+  if (first && (argument_length || host_contents)) {
     *out_status = iree_hal_amd_gpu_aql_command_invocation_write(
         invocation, queue->options.queue_ordinal,
-        arguments->address + argument_offset, upload);
+        arguments->address + argument_offset, upload, host_contents);
     if (!iree_status_is_ok(*out_status)) {
       return IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE;
     }
@@ -800,11 +807,11 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_execute(
     if (IREE_UNLIKELY(host_template)) {
       if (block.packet_count == block.dispatches.count) {
         publication_status = iree_hal_amd_gpu_aql_publish_host_template(
-            queue, invocation->program, packet_position, upload, sample_address,
-            samples);
+            queue, invocation->program, packet_position, packets,
+            sample_address, samples);
       } else {
         publication_status = iree_hal_amd_gpu_aql_program_emit_host(
-            block.packet_count, upload, ring, &queue->storage, packet_position,
+            block.packet_count, packets, ring, &queue->storage, packet_position,
             sample_address, samples);
       }
     } else {
@@ -830,6 +837,30 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_execute(
   iree_hal_amd_gpu_aql_publish_notify(queue, publication_status);
   return terminal ? IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE
                   : IREE_HAL_AMD_GPU_AQL_PUBLISH_MORE;
+}
+
+// Only mutable host templates need this bounded CPU preparation extent. It is
+// borrowed synchronously by the exclusive publisher and never exposed to GPU
+// readers or retained by retirement. Other replay paths keep their small stack.
+static IREE_ATTRIBUTE_NOINLINE iree_hal_amd_gpu_aql_publish_result_t
+iree_hal_amd_gpu_aql_publish_execute_host(
+    iree_hal_amd_gpu_aql_queue_t* queue,
+    iree_hal_amd_gpu_aql_submission_t* submission, iree_status_t* out_status) {
+  uint8_t contents[IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_BYTES];
+  return iree_hal_amd_gpu_aql_publish_execute_prepared(queue, submission,
+                                                       contents, out_status);
+}
+
+iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_execute(
+    iree_hal_amd_gpu_aql_queue_t* queue,
+    iree_hal_amd_gpu_aql_submission_t* submission, iree_status_t* out_status) {
+  const iree_hal_amd_gpu_aql_host_template_t* host_template =
+      submission->execute.program->host_template;
+  return host_template && host_template->fixup_count
+             ? iree_hal_amd_gpu_aql_publish_execute_host(queue, submission,
+                                                         out_status)
+             : iree_hal_amd_gpu_aql_publish_execute_prepared(queue, submission,
+                                                             NULL, out_status);
 }
 
 iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_transfer(

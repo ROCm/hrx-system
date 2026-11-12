@@ -320,6 +320,7 @@ iree_runtime_cc_library(
         ":program",
         ":transfer",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:memory_copy",
         "//runtime/src/iree/hal/driver/amd/gpu:executable",
         "//runtime/src/iree/hal/driver/amd/gpu:profile",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:control",

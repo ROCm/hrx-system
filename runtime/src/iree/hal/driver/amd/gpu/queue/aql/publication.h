@@ -49,6 +49,11 @@ uint64_t iree_hal_amd_gpu_aql_argument_length(
 uint64_t iree_hal_amd_gpu_aql_execute_argument_length(
     const iree_hal_amd_gpu_aql_command_invocation_t* invocation);
 
+// Native address alignment shared by reservation and backing growth. It can
+// exceed the byte extent when host preparation leaves only a small payload.
+uint64_t iree_hal_amd_gpu_aql_execute_argument_alignment(
+    const iree_hal_amd_gpu_aql_command_invocation_t* invocation);
+
 // Publishes a prepared direct dispatch or empty barrier with its retained
 // dependency ownership. Only successful acceptance advances ring and argument
 // credit. On acceptance, the retirement record takes the returned capture.

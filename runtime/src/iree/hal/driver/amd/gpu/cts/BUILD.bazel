@@ -495,6 +495,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:pool_test_util",
         "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/driver/amd/gpu:executable",
         "//runtime/src/iree/hal/driver/amd/gpu:kernarg",
         "//runtime/src/iree/hal/driver/amd/gpu/image:hip_images",
         "//runtime/src/iree/hal/driver/amd/gpu/image:hsaco",

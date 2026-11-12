@@ -538,8 +538,10 @@ static void iree_hal_amd_gpu_aql_process_submission(
               ? IREE_HAL_AMD_GPU_AQL_TRANSFER_ARGUMENT_LENGTH
           : submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_CONTROL
               ? sizeof(iree_hal_amd_gpu_control_program_arguments_t)
-          : execute ? iree_hal_amd_gpu_aql_execute_argument_length(
-                          &submission->execute)
+          : execute ? iree_max(iree_hal_amd_gpu_aql_execute_argument_length(
+                                   &submission->execute),
+                               iree_hal_amd_gpu_aql_execute_argument_alignment(
+                                   &submission->execute))
                     : iree_max(iree_hal_amd_gpu_aql_argument_length(
                                    request,
                                    queue->grid.memory
