@@ -257,8 +257,8 @@ static uint32_t loom_type_hash_mix_sequence(uint32_t hash,
 uint32_t loom_type_hash(loom_type_t type) {
   uint32_t hash = loom_structural_hash_initialize();
   hash = loom_structural_hash_mix_u32(hash, type.header);
-  hash = loom_structural_hash_mix_u16(hash, type.encoding_id);
-  hash = loom_structural_hash_mix_u16(hash, type.encoding_flags);
+  hash = loom_structural_hash_mix_u32(
+      hash, (uint32_t)type.encoding_id | ((uint32_t)type.encoding_flags << 16));
 
   loom_type_kind_t kind = loom_type_kind(type);
   if (!loom_type_kind_is_valid(kind)) {

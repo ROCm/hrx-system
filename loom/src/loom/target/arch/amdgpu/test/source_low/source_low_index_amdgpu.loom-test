@@ -696,9 +696,8 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_c
   %equal = s_cmp_eq_u64 %positive, %23
   %45 = slice %positive[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %44 = slice %positive[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %28 = s_ashr_i32_rhs_inline %signed, 31
   %33 = s_xor_b32_lit %44, 2147483648
-  %34 = s_xor_b32_lit %28, 2147483648
+  %34 = s_xor_b32_lit %22, 2147483648
   %35 = s_cmp_lt_u32 %45, %signed
   %36, %less = s_subb_u32 %33, %34, %35
   %38 = s_mov_b32 1

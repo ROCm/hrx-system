@@ -10,8 +10,10 @@ from dataclasses import replace
 
 import pytest
 
-from loom.gen.target.low import validation
+from loom.gen.target.low import compiler, validation
+from loom.gen.target.low.compiled import DescriptorAllowlist
 from loom.target.low_descriptors import (
+    AsmForm,
     Constraint,
     ConstraintKind,
     DescriptorFlag,
@@ -28,6 +30,7 @@ from loom.target.test.descriptors import (
     TEST_LOW_CORE_DESCRIPTOR_SET,
     TEST_LOW_STATE_ASSIGN_I32_DESCRIPTOR,
     TEST_LOW_STATE_ASSIGN_I32_IMMEDIATE_DESCRIPTOR,
+    TEST_LOW_STATE_SAMPLE_I32_DESCRIPTOR,
     TEST_LOW_STATE_UPDATE_I32_DESCRIPTOR,
 )
 
@@ -81,6 +84,78 @@ def test_execution_mask_is_not_an_arbitrary_state_annotation() -> None:
 
 
 _STATE_CLASSES = {register_class.name: register_class for register_class in TEST_LOW_CORE_DESCRIPTOR_SET.reg_classes}
+
+
+@pytest.mark.parametrize("allowlisted", [False, True])
+@pytest.mark.parametrize(
+    ("reader_role", "schedule_only", "unobserved"),
+    [
+        (None, False, True),
+        (OperandRole.OPERAND, False, True),
+        (OperandRole.PREDICATE, False, True),
+        (OperandRole.RESOURCE, False, True),
+        (OperandRole.IMPLICIT, False, False),
+        (OperandRole.RESULT, False, False),
+        (OperandRole.IMPLICIT, True, False),
+    ],
+)
+def test_clobber_projection_distinguishes_hidden_and_ssa_reads(reader_role, schedule_only: bool, unobserved: bool, allowlisted: bool) -> None:
+    state = TEST_LOW_STATE_SAMPLE_I32_DESCRIPTOR.operands[-1]
+    write = replace(state, flags=(OperandFlag.IMPLICIT, OperandFlag.STATE_WRITE))
+    writer = replace(TEST_LOW_ADD_I32_DESCRIPTOR, operands=(*TEST_LOW_ADD_I32_DESCRIPTOR.operands, write))
+    descriptors = [writer]
+    if reader_role is not None:
+        read = replace(state, role=reader_role, flags=(*state.flags, OperandFlag.SCHEDULE_ONLY_STATE) if schedule_only else state.flags)
+        result = TEST_LOW_STATE_SAMPLE_I32_DESCRIPTOR.operands[0]
+        is_result = reader_role is OperandRole.RESULT
+        is_input = validation.operand_role_is_packet_input(reader_role)
+        descriptors.append(
+            replace(
+                TEST_LOW_STATE_SAMPLE_I32_DESCRIPTOR,
+                operands=(read, result) if is_result else (result, read),
+                asm_forms=(AsmForm(results=(read.field_name, result.field_name) if is_result else (result.field_name,), operands=(read.field_name,) if is_input else ()),),
+            )
+        )
+    compiled = compiler.compile_descriptor_set(
+        replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=tuple(descriptors)),
+        DescriptorAllowlist(keys=(writer.key,)) if allowlisted else None,
+    )
+    flags = compiled.descriptors[0].operands[-1].flags
+    assert OperandFlag.STATE_WRITE in flags
+    assert (OperandFlag.UNOBSERVED_STATE_WRITE in flags) is unobserved
+    assert compiled.descriptor_rows[0]["value_state_operand_count"] == (0 if unobserved else 1)
+
+
+@pytest.mark.parametrize(
+    ("written_class", "read_class", "unobserved"),
+    [
+        ("test.special", "test.schedule_state", True),
+        ("test.alias32", "test.alias64", False),
+        ("test.alias.state", "test.alias64", False),
+        ("test.fixed.r0", "test.explicit32", False),
+        ("test.fixed.r0", "test.spillable.fixed.r0", False),
+        ("test.recolor.state", "test.recolor32", False),
+        ("test.fixed.r0", "test.fixed.r2", True),
+    ],
+)
+def test_hidden_read_protects_aliased_storage_outside_selected_view(written_class: str, read_class: str, unobserved: bool) -> None:
+    state = TEST_LOW_STATE_SAMPLE_I32_DESCRIPTOR.operands[-1]
+    write = replace(state, reg_alts=(RegClassAlt(written_class),), flags=(OperandFlag.IMPLICIT, OperandFlag.STATE_WRITE))
+    writer = replace(TEST_LOW_ADD_I32_DESCRIPTOR, operands=(*TEST_LOW_ADD_I32_DESCRIPTOR.operands, write))
+    reader = replace(TEST_LOW_STATE_SAMPLE_I32_DESCRIPTOR, operands=(TEST_LOW_STATE_SAMPLE_I32_DESCRIPTOR.operands[0], replace(state, reg_alts=(RegClassAlt(read_class),))))
+    compiled = compiler.compile_descriptor_set(
+        replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(writer, reader)),
+        DescriptorAllowlist(keys=(writer.key,)),
+    )
+    assert (OperandFlag.UNOBSERVED_STATE_WRITE in compiled.descriptors[0].operands[-1].flags) is unobserved
+
+
+def test_explicit_state_result_keeps_its_write_without_hidden_readers() -> None:
+    state = replace(TEST_LOW_STATE_SAMPLE_I32_DESCRIPTOR.operands[-1], role=OperandRole.RESULT, flags=(OperandFlag.IMPLICIT, OperandFlag.STATE_WRITE))
+    writer = replace(TEST_LOW_STATE_SAMPLE_I32_DESCRIPTOR, operands=(state,), asm_forms=(AsmForm(results=(state.field_name,)),))
+    compiled = compiler.compile_descriptor_set(replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(writer,)))
+    assert compiled.descriptors[0].operands[0].flags == state.flags
+    assert compiled.descriptor_rows[0]["value_state_operand_count"] == 1
 
 
 def test_state_assignment_accepts_explicit_values_and_immediates() -> None:

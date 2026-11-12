@@ -67,8 +67,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @uniform
   %146, %147 = s_addc_u32 %107, %17, %145
   %154, %155 = s_add_co_u32 %144, %131
   %156, %157 = s_addc_u32 %146, %17, %155
-  %160 = s_ashr_i64 %value, %72
-  %161 = s_and_b64 %160, %99
+  %161 = s_and_b64 %73, %99
   %164 = slice %161[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %165 = slice %161[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %166, %167 = s_sub_co_u32 %154, %164

@@ -27,9 +27,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @rectangle(%row: 
   %46 = global_load_u8_saddr %44, %43 {offset = 2}
   %47 = v_lshlrev_b32_src0_inline %46, 16
   %48 = v_or_b32 %45, %47
-  %49 = s_lshl_b32_rhs_inline %row, 3
-  %50 = s_add_u32 %column, %49
-  %54, %55 = s_add_co_u32 %36, %50
+  %54, %55 = s_add_co_u32 %36, %35
   %56, %57 = s_addc_u32 %37, %38, %55
   %58 = concat(%54, %56) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %60 = global_load_u16_saddr %44, %58 {offset = 8}
@@ -83,18 +81,15 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @cropped_planes(%
   %51, %52 = s_addc_u32 %47, %48, %50
   %53 = concat(%49, %51) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %54 = global_load_b64_saddr %44, %53 {offset = 32}
-  %56 = s_lshl_b32_rhs_inline %row, 3
-  %60, %61 = s_add_co_u32 %46, %56
+  %60, %61 = s_add_co_u32 %46, %45
   %62, %63 = s_addc_u32 %47, %48, %61
   %64 = concat(%60, %62) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %65 = global_load_b64_saddr %44, %64 {offset = 40}
-  %67 = s_lshl_b32_rhs_inline %row, 3
-  %71, %72 = s_add_co_u32 %46, %67
+  %71, %72 = s_add_co_u32 %46, %45
   %73, %74 = s_addc_u32 %47, %48, %72
   %75 = concat(%71, %73) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %76 = global_load_b64_saddr %44, %75 {offset = 64}
-  %78 = s_lshl_b32_rhs_inline %row, 3
-  %82, %83 = s_add_co_u32 %46, %78
+  %82, %83 = s_add_co_u32 %46, %45
   %84, %85 = s_addc_u32 %47, %48, %83
   %86 = concat(%82, %84) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %87 = global_load_b64_saddr %44, %86 {offset = 72}

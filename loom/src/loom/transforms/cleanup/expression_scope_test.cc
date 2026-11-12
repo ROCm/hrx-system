@@ -162,7 +162,9 @@ TEST_F(ExpressionScopeTest,
 
   auto cursor = Next(outer);
   const uint32_t outer_epoch = cursor.epoch;
-  const uint32_t hash = loom_expression_hash(module_, outer);
+  loom_expression_hash_cache_t hash_cache;
+  loom_expression_hash_cache_initialize(&hash_cache);
+  const uint32_t hash = loom_expression_hash(module_, outer, &hash_cache);
   loom_expression_scope_insert(&cursor,
                                loom_expression_scope_probe(&cursor, hash, 0),
                                {outer, hash, cursor.epoch});

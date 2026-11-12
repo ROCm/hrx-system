@@ -34,8 +34,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @uniform
   %42 = s_mul_hi_i32 %value, %41
   %43 = s_lshr_b32_rhs_inline %42, 31
   %quotient_positive_three = s_add_u32 %42, %43
-  %47 = s_add_u32 %37, %value
-  %48 = s_ashr_i32_rhs_inline %47, 1
+  %48 = s_ashr_i32_rhs_inline %38, 1
   %49 = s_lshr_b32_rhs_inline %48, 31
   %quotient_positive_four = s_add_u32 %48, %49
   %51 = s_mov_b32 1717986919

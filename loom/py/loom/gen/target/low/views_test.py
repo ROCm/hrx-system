@@ -60,7 +60,12 @@ def test_descriptor_layout_pool_preserves_all_compiled_spans() -> None:
             count = source[f"{span}_count"]
             expected.extend((f".{span}_start = {source[f'{span}_start'] if count else 0},", f".{span}_count = {count},"))
         expected.extend(
-            (f".encoding_format_id = {descriptor.encoding_format_id},", f".minimum_packet_operand_count = {source['minimum_packet_operand_count']},", f".op_kind = {descriptor.op_kind.c_name},")
+            (
+                f".encoding_format_id = {descriptor.encoding_format_id},",
+                f".minimum_packet_operand_count = {source['minimum_packet_operand_count']},",
+                f".op_kind = {descriptor.op_kind.c_name},",
+                f".flags = {'LOOM_LOW_DESCRIPTOR_LAYOUT_FLAG_VALUE_STATE' if source['value_state_operand_count'] else '0'},",
+            )
         )
         assert layouts[index] == tuple(expected)
 

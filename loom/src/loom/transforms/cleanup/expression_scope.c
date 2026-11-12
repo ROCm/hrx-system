@@ -19,6 +19,12 @@
 // Expression identity
 //===----------------------------------------------------------------------===//
 
+void loom_expression_hash_cache_initialize(
+    loom_expression_hash_cache_t* cache) {
+  *cache = (loom_expression_hash_cache_t){0};
+  cache->type_hash = loom_type_hash(cache->type);
+}
+
 // Computes a content-aware hash for an op based on its kind, operands,
 // result types, attributes, and instance flags. Uses loom_attribute_hash
 // for each attribute so pointer-valued attribute kinds (I64_ARRAY,
@@ -28,10 +34,14 @@
 // different result types from the same operands.
 uint32_t loom_expression_hash_with_value_identity(
     const loom_module_t* module, const loom_op_t* op,
-    loom_expression_value_identity_fn_t value_identity, void* user_data) {
+    loom_expression_value_identity_fn_t value_identity, void* user_data,
+    loom_expression_hash_cache_t* cache) {
   uint32_t hash = loom_structural_hash_initialize();
-  hash = loom_structural_hash_mix_u16(hash, op->kind);
-  hash = loom_structural_hash_mix_u16(hash, op->operand_count);
+  hash = loom_structural_hash_mix_u32(
+      hash, (uint32_t)op->kind | ((uint32_t)op->operand_count << 16));
+  hash = loom_structural_hash_mix_u32(
+      hash, (uint32_t)op->result_count | ((uint32_t)op->attribute_count << 16) |
+                ((uint32_t)op->instance_flags << 24));
   const loom_value_id_t* operands = loom_op_const_operands(op);
   for (uint16_t i = 0; i < op->operand_count; ++i) {
     const loom_value_id_t identity =
@@ -48,14 +58,16 @@ uint32_t loom_expression_hash_with_value_identity(
     }
   }
   const loom_value_id_t* results = loom_op_results((loom_op_t*)op);
-  hash = loom_structural_hash_mix_u16(hash, op->result_count);
   for (uint16_t i = 0; i < op->result_count; ++i) {
     if (results[i] != LOOM_VALUE_ID_INVALID) {
       loom_type_t type = loom_module_value_type(module, results[i]);
-      hash = loom_structural_hash_mix_u32(hash, loom_type_hash(type));
+      if (memcmp(&type, &cache->type, sizeof(type)) != 0) {
+        cache->type = type;
+        cache->type_hash = loom_type_hash(type);
+      }
+      hash = loom_structural_hash_mix_u32(hash, cache->type_hash);
     }
   }
-  hash = loom_structural_hash_mix_u8(hash, op->attribute_count);
   if (op->attribute_count > 0) {
     const loom_attribute_t* attrs = loom_op_attrs((loom_op_t*)op);
     for (uint8_t i = 0; i < op->attribute_count; ++i) {
@@ -63,14 +75,13 @@ uint32_t loom_expression_hash_with_value_identity(
       hash = loom_structural_hash_mix_u32(hash, attribute_hash);
     }
   }
-  hash = loom_structural_hash_mix_u8(hash, op->instance_flags);
   return loom_structural_hash_finalize(hash);
 }
 
-uint32_t loom_expression_hash(const loom_module_t* module,
-                              const loom_op_t* op) {
+uint32_t loom_expression_hash(const loom_module_t* module, const loom_op_t* op,
+                              loom_expression_hash_cache_t* cache) {
   return loom_expression_hash_with_value_identity(
-      module, op, /*value_identity=*/NULL, /*user_data=*/NULL);
+      module, op, /*value_identity=*/NULL, /*user_data=*/NULL, cache);
 }
 
 // Structural equality: two ops are CSE-equivalent if they have the

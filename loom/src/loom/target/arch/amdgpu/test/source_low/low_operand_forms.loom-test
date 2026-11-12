@@ -415,8 +415,7 @@ amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @sop2_rhs_inline_add_cses_write_only_scc_state(%position: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
   %sum0 = s_add_u32_rhs_inline %position, 3
-  %sum1 = s_add_u32_rhs_inline %position, 3
-  return %sum0, %sum1
+  return %sum0, %sum0
 }
 
 // ====

@@ -390,6 +390,8 @@ static uint32_t loom_attribute_hash_impl(const loom_attribute_t* attr,
   uint32_t hash = loom_structural_hash_initialize();
   hash = loom_structural_hash_mix_u8(hash, attr->kind);
   switch ((loom_attr_kind_t)attr->kind) {
+    case LOOM_ATTR_ABSENT:
+      break;
     case LOOM_ATTR_STRING_ARRAY:
       hash = loom_structural_hash_mix_u16(hash, attr->count);
       if (attr->count != 0 && attr->string_ids != NULL) {
@@ -495,14 +497,23 @@ static uint32_t loom_attribute_hash_impl(const loom_attribute_t* attr,
         hash = loom_structural_hash_mix_u32(hash, element_hash);
       }
       break;
-    default:
-      hash =
-          loom_structural_hash_mix_bytes(hash, attr, sizeof(loom_attribute_t));
+    default: {
+      uint32_t words[4];
+      memcpy(words, attr, sizeof(words));
+      hash = loom_structural_hash_initialize();
+      for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(words); ++i) {
+        hash = loom_structural_hash_mix_u32(hash, words[i]);
+      }
       break;
+    }
   }
   return loom_structural_hash_finalize(hash);
 }
 
 uint32_t loom_attribute_hash(const loom_attribute_t* attr) {
+  if (attr->kind == LOOM_ATTR_ABSENT) {
+    return loom_structural_hash_finalize(loom_structural_hash_mix_u8(
+        loom_structural_hash_initialize(), LOOM_ATTR_ABSENT));
+  }
   return loom_attribute_hash_impl(attr, 0);
 }

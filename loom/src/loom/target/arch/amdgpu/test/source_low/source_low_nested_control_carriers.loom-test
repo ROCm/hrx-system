@@ -67,8 +67,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %c3 = s_mov_b32 3
   %53 = s_lshl_b32_rhs_inline %source$46, 2
   %position = s_load_dword %metadata_view, %53 {offset = 256}
-  %55 = s_lshl_b32_rhs_inline %source$46, 2
-  %begin = s_load_dword %metadata_view, %55
+  %begin = s_load_dword %metadata_view, %53
   %bounded = s_sub_u32 %source$46, %begin
   %absolute = s_add_u32 %position, %bounded
   %exists = s_cmp_ge_i32 %absolute, %c0
@@ -77,8 +76,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %current = s_cmp_ge_i32 %bounded, %c0
   low.cond_br %current, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
-  %61 = s_lshl_b32_rhs_inline %source$46, 2
-  %value$62 = s_load_dword %input_view, %61
+  %value$62 = s_load_dword %input_view, %53
   low.br ^_bb4(%value$62: reg<amdgpu.sgpr>)
 ^_bb3:
   %source$63 = s_add_u32 %bounded, %c3
@@ -94,10 +92,9 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %narrow = s_mul_i32 %raw, %67
   %69 = v_mov_b32_copy %narrow
   %70 = v_mov_b32 0
-  %71 = s_lshl_b32_rhs_inline %source$46, 2
   %72 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %73 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %75, %76 = s_add_co_u32 %72, %71
+  %75, %76 = s_add_co_u32 %72, %53
   %77, %78 = s_addc_u32 %73, %c0, %76
   %79 = concat(%75, %77) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   global_store_b32_saddr %70, %69, %79

@@ -3731,8 +3731,8 @@ static uint32_t loom_topological_type_hash(
   const loom_type_t type = context->type;
   uint32_t hash = loom_structural_hash_initialize();
   hash = loom_structural_hash_mix_u32(hash, type.header);
-  hash = loom_structural_hash_mix_u16(hash, type.encoding_id);
-  hash = loom_structural_hash_mix_u16(hash, type.encoding_flags);
+  hash = loom_structural_hash_mix_u32(
+      hash, (uint32_t)type.encoding_id | ((uint32_t)type.encoding_flags << 16));
 
   switch (loom_type_kind(type)) {
     case LOOM_TYPE_FUNCTION: {

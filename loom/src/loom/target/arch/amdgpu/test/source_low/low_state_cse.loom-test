@@ -172,3 +172,73 @@ low.func.def target<amdgpu.rdna3.core>(@target) @exec_reads_at_joins(%condition:
   %unchanged = s_cmp_eq_u64 %next_active, %next_active
   return %next_active
 }
+
+// ====
+// Discarded condition clobbers do not prevent reusing scalar values. Explicit
+// condition results remain distinct even when their comparisons are identical.
+// RUN: pass low-cse
+
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @scalar_values_across_condition_lifetimes(%value: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %unsigned_byte = s_bfe_u32_lit %value, 524288
+  %signed_byte = s_bfe_i32_lit %value, 524288
+  %first_condition = s_cmp_lt_u32 %value, %limit
+  %first_selected = s_cselect_b32 %unsigned_byte, %limit, %first_condition
+  %same_unsigned = s_bfe_u32_lit %value, 524288
+  %same_signed = s_bfe_i32_lit %value, 524288
+  %next_condition = s_cmp_lt_u32 %value, %limit
+  %next_selected = s_cselect_b32 %same_unsigned, %limit, %next_condition
+  %sum = s_add_u32 %same_unsigned, %limit
+  %same_sum = s_add_u32 %same_unsigned, %limit
+  return %unsigned_byte, %same_unsigned, %signed_byte, %same_signed, %first_selected, %next_selected, %same_sum
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @scalar_values_across_condition_lifetimes(%value: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %unsigned_byte = s_bfe_u32_lit %value, 524288
+  %signed_byte = s_bfe_i32_lit %value, 524288
+  %first_condition = s_cmp_lt_u32 %value, %limit
+  %first_selected = s_cselect_b32 %unsigned_byte, %limit, %first_condition
+  %next_condition = s_cmp_lt_u32 %value, %limit
+  %next_selected = s_cselect_b32 %unsigned_byte, %limit, %next_condition
+  %sum = s_add_u32 %unsigned_byte, %limit
+  return %unsigned_byte, %unsigned_byte, %signed_byte, %signed_byte, %first_selected, %next_selected, %sum
+}
+
+// ====
+// Discarded condition clobbers do not prevent reusing scalar values. Explicit
+// condition results remain distinct even when their comparisons are identical.
+// RUN: pass low-cse
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @scalar_values_across_condition_lifetimes(%value: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %unsigned_byte = s_bfe_u32_lit %value, 524288
+  %signed_byte = s_bfe_i32_lit %value, 524288
+  %first_condition = s_cmp_lt_u32 %value, %limit
+  %first_selected = s_cselect_b32 %unsigned_byte, %limit, %first_condition
+  %same_unsigned = s_bfe_u32_lit %value, 524288
+  %same_signed = s_bfe_i32_lit %value, 524288
+  %next_condition = s_cmp_lt_u32 %value, %limit
+  %next_selected = s_cselect_b32 %same_unsigned, %limit, %next_condition
+  %sum = s_add_u32 %same_unsigned, %limit
+  %same_sum = s_add_u32 %same_unsigned, %limit
+  return %unsigned_byte, %same_unsigned, %signed_byte, %same_signed, %first_selected, %next_selected, %same_sum
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @scalar_values_across_condition_lifetimes(%value: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %unsigned_byte = s_bfe_u32_lit %value, 524288
+  %signed_byte = s_bfe_i32_lit %value, 524288
+  %first_condition = s_cmp_lt_u32 %value, %limit
+  %first_selected = s_cselect_b32 %unsigned_byte, %limit, %first_condition
+  %next_condition = s_cmp_lt_u32 %value, %limit
+  %next_selected = s_cselect_b32 %unsigned_byte, %limit, %next_condition
+  %sum = s_add_u32 %unsigned_byte, %limit
+  return %unsigned_byte, %unsigned_byte, %signed_byte, %signed_byte, %first_selected, %next_selected, %sum
+}

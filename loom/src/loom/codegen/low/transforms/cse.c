@@ -67,6 +67,8 @@ typedef struct loom_low_cse_value_identities_t {
   const loom_low_descriptor_set_t* descriptor_set;
   // Scratch arena owning every table generation.
   iree_arena_allocator_t* arena;
+  // Last immutable result-type representation hashed during this invocation.
+  loom_expression_hash_cache_t hash_cache;
   // Open-addressed aliases; values absent from the table identify themselves.
   loom_low_cse_value_identity_slot_t* value_slots;
   // Number of populated aliases.
@@ -263,13 +265,15 @@ static uint32_t loom_low_cse_expression_hash(
     bool is_idempotent_state_update, bool has_private_consumption) {
   if (has_private_consumption) {
     return loom_expression_hash_with_value_identity(
-        module, op, loom_low_cse_private_copy_identity, identities);
+        module, op, loom_low_cse_private_copy_identity, identities,
+        &identities->hash_cache);
   }
   if (!is_idempotent_state_update) {
-    return loom_expression_hash(module, op);
+    return loom_expression_hash(module, op, &identities->hash_cache);
   }
   return loom_expression_hash_with_value_identity(
-      module, op, loom_low_cse_value_identity, identities);
+      module, op, loom_low_cse_value_identity, identities,
+      &identities->hash_cache);
 }
 
 static iree_status_t loom_low_cse_constructor_slots_reserve(
@@ -369,7 +373,8 @@ static iree_status_t loom_low_cse_observe_structural_identity(
 
   IREE_ASSERT_EQ(op->result_count, 1, "Low slice/concat must have one result");
   const uint32_t hash = loom_expression_hash_with_value_identity(
-      module, op, loom_low_cse_value_identity, identities);
+      module, op, loom_low_cse_value_identity, identities,
+      &identities->hash_cache);
   const loom_op_t* existing =
       loom_low_cse_find_constructor(module, identities, op, hash);
   if (existing) {
@@ -443,23 +448,29 @@ static loom_low_cse_packet_identity_t loom_low_cse_analyze_packet(
     return identity;
   }
 
-  // Descriptor semantics permit removing only the repeated state effect. SSA
-  // results still obey the shared identity and ownership eligibility rules.
-  const bool can_reuse_assignment =
-      loom_low_cse_can_reuse_assignment(cursor, is_assignment);
   const loom_low_descriptor_t* descriptor = packet->descriptor;
   const bool is_idempotent_update = iree_any_bit_set(
       descriptor->flags, LOOM_LOW_DESCRIPTOR_FLAG_IDEMPOTENT_STATE_UPDATE);
   if (is_idempotent_update) {
     identity.flags |= LOOM_LOW_CSE_PACKET_FLAG_IDEMPOTENT_UPDATE;
   }
+  if (!iree_any_bit_set(
+          loom_low_descriptor_layout(descriptor_set, descriptor)->flags,
+          LOOM_LOW_DESCRIPTOR_LAYOUT_FLAG_VALUE_STATE)) {
+    return identity;
+  }
+  // Descriptor semantics permit removing only the repeated state effect. SSA
+  // results still obey the shared identity and ownership eligibility rules.
+  const bool can_reuse_assignment =
+      loom_low_cse_can_reuse_assignment(cursor, is_assignment);
   bool assignment_matches = can_reuse_assignment;
   loom_op_t* assignment = NULL;
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
     const loom_low_operand_t* operand =
         loom_low_descriptor_operand(descriptor_set, descriptor, i);
     if (iree_any_bit_set(operand->flags,
-                         LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE)) {
+                         LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE |
+                             LOOM_LOW_OPERAND_FLAG_UNOBSERVED_STATE_WRITE)) {
       continue;
     }
     const loom_low_operand_flags_t state_flags =
@@ -507,17 +518,15 @@ static loom_low_cse_packet_identity_t loom_low_cse_analyze_packet(
   return identity;
 }
 
-// Commits the state effects of one retained packet. All writes advance hidden
-// read epochs. Only replacement and non-idempotent writes invalidate a prior
-// idempotent update; every non-assignment write invalidates exact assignments.
+// Commits the writes of one retained packet identified by analyze_packet.
+// All writes advance hidden read epochs. Only replacement and non-idempotent
+// writes invalidate a prior idempotent update; every non-assignment write
+// invalidates exact assignments.
 static void loom_low_cse_commit_packet(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_expression_cursor_t* cursor,
     const loom_low_descriptor_packet_t* packet, bool is_assignment,
     const loom_op_t* boundary, loom_low_cse_state_class_t* state_classes) {
-  if (packet->kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
-    return;
-  }
   const loom_low_descriptor_t* descriptor = packet->descriptor;
   const bool is_idempotent_update = iree_any_bit_set(
       descriptor->flags, LOOM_LOW_DESCRIPTOR_FLAG_IDEMPOTENT_STATE_UPDATE);
@@ -528,7 +537,8 @@ static void loom_low_cse_commit_packet(
         loom_low_descriptor_operand(descriptor_set, descriptor, i);
     if (!iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_STATE_WRITE) ||
         iree_any_bit_set(operand->flags,
-                         LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE)) {
+                         LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE |
+                             LOOM_LOW_OPERAND_FLAG_UNOBSERVED_STATE_WRITE)) {
       continue;
     }
     const uint16_t class_id =
@@ -557,6 +567,7 @@ static iree_status_t loom_low_cse_region(
       .user_data = &value_identities,
       .equal = loom_low_cse_expression_equal,
   };
+  loom_expression_hash_cache_initialize(&value_identities.hash_cache);
   const bool has_idempotent_state_updates =
       iree_any_bit_set(descriptor_set->flags,
                        LOOM_LOW_DESCRIPTOR_SET_FLAG_IDEMPOTENT_STATE_UPDATES);
@@ -664,8 +675,11 @@ static iree_status_t loom_low_cse_region(
     if (eliminated || !iree_status_is_ok(status)) {
       continue;
     }
-    loom_low_cse_commit_packet(descriptor_set, &cursor, &packet, is_assignment,
-                               assignment_boundary, state_classes);
+    if (writes_state) {
+      loom_low_cse_commit_packet(descriptor_set, &cursor, &packet,
+                                 is_assignment, assignment_boundary,
+                                 state_classes);
+    }
     if (has_idempotent_state_updates) {
       status = loom_low_cse_observe_structural_identity(module, cursor.op,
                                                         &value_identities);

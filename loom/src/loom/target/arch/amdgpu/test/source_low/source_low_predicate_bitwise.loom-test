@@ -135,12 +135,9 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @mixed_sgpr_predi
   %82 = slice %77[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %84 = s_cselect_b32 %82, %48, %78
   %xor_left = concat(%81, %84) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %87 = s_xor_b64 %mask, %58
   %88 = s_cmp_lg_i32_src1_inline %xor_right_bool {rhs = 0}
-  %89 = slice %87[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %91 = s_cselect_b32 %89, %46, %88
-  %92 = slice %87[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %94 = s_cselect_b32 %92, %48, %88
+  %91 = s_cselect_b32 %79, %46, %88
+  %94 = s_cselect_b32 %82, %48, %88
   %xor_right = concat(%91, %94) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %96 = v_mov_b32_copy %limit
   %and_left_result = v_cndmask_b32 %96, %lane, %and_left

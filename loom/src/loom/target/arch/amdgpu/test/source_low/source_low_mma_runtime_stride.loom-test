@@ -410,20 +410,19 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 1
   %55 = v_add_u32_rhs_tied %42, %53
   global_store_b32_saddr %55, %16, %output_view
   global_store_b32_saddr %39, %25, %output_view
-  %58 = s_lshl_b32_rhs_inline %34, 1
-  %59 = v_add_u32 %58, %39
+  %59 = v_add_u32 %42, %39
   global_store_b32_saddr %59, %25, %output_view
-  %61 = v_add_u32_rhs_tied %58, %59
+  %61 = v_add_u32_rhs_tied %42, %59
   global_store_b32_saddr %61, %25, %output_view
-  %63 = v_add_u32_rhs_tied %58, %61
+  %63 = v_add_u32_rhs_tied %42, %61
   global_store_b32_saddr %63, %25, %output_view
-  %65 = v_add_u32_rhs_tied %58, %63
+  %65 = v_add_u32_rhs_tied %42, %63
   global_store_b32_saddr %65, %25, %output_view
-  %67 = v_add_u32_rhs_tied %58, %65
+  %67 = v_add_u32_rhs_tied %42, %65
   global_store_b32_saddr %67, %25, %output_view
-  %69 = v_add_u32_rhs_tied %58, %67
+  %69 = v_add_u32_rhs_tied %42, %67
   global_store_b32_saddr %69, %25, %output_view
-  %71 = v_add_u32_rhs_tied %58, %69
+  %71 = v_add_u32_rhs_tied %42, %69
   global_store_b32_saddr %71, %25, %output_view
   return
 }

@@ -44,11 +44,8 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direc
   %61, %62 = s_addc_u32 %56, %58, %60
   %63 = concat(%59, %61) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %first = global_load_b32_saddr %52, %63
-  %67 = s_lshl_b64 %tile, %53
-  %70 = slice %67[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %71 = slice %67[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %72, %73 = s_add_co_u32 %55, %70
-  %74, %75 = s_addc_u32 %56, %71, %73
+  %72, %73 = s_add_co_u32 %55, %57
+  %74, %75 = s_addc_u32 %56, %58, %73
   %76 = concat(%72, %74) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %second = global_load_b32_saddr %52, %76 {offset = 512}
   %sum = v_add_u32 %first, %second

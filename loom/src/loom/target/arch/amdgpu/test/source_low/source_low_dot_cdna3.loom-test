@@ -100,8 +100,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @bf16_score_gath
   %33, %34 = s_addc_u32 %29, %30, %32
   %35 = concat(%31, %33) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %36 = global_load_d16_b16_saddr %26, %35 : reg<amdgpu.vgpr>
-  %38 = s_lshl_b32_rhs_inline %token_offset, 1
-  %42, %43 = s_add_co_u32 %28, %38
+  %42, %43 = s_add_co_u32 %28, %27
   %44, %45 = s_addc_u32 %29, %30, %43
   %46 = concat(%42, %44) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %47 = global_load_d16_b16_saddr %26, %46 {offset = 14} : reg<amdgpu.vgpr>
