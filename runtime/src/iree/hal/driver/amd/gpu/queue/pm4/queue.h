@@ -44,10 +44,12 @@ typedef struct iree_hal_amd_gpu_pm4_queue_options_t {
   amdf_queue_publication_modes_t publication_mode;
   // Power-of-two command storage capacity in bytes.
   uint64_t command_byte_capacity;
-  // Borrowed native control/argument policy. It contains exactly this context's
+  // Borrowed native control policy. It contains exactly this context's
   // device at access ordinal zero, with coherent host read/write and GPU
   // access. All pointed-to storage remains live through final queue cleanup.
   const iree_hal_amd_fabric_memory_options_t* memory;
+  // Borrowed cached ABI policy, including GPU-written indirect hidden fields.
+  const iree_hal_amd_fabric_memory_options_t* argument_memory;
   // Borrowed coherent read/write policy for explicit host transfer payloads.
   const iree_hal_amd_fabric_memory_options_t* transfer_memory;
   // Borrowed read/write resident policy for lazy private storage, no host map.

@@ -235,7 +235,9 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_begin(
       if (iree_status_is_ok(status)) {
         memory = &growth->backing.bytes->memory;
         growth->backing.request = (iree_hal_amd_fabric_memory_request_t){
-            .options = kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_TRANSFERS
+            .options = kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS
+                           ? context->argument_memory
+                       : kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_TRANSFERS
                            ? context->transfer_memory
                        : kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_VALUES
                            ? context->input_memory

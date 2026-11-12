@@ -56,7 +56,7 @@ class InputMemoryTest : public ::testing::Test {
            amdf_memory_access_capabilities_t* capabilities) {
           auto* self = reinterpret_cast<InputMemoryTest*>(scope);
           EXPECT_EQ(count, 1u);
-          EXPECT_EQ(access->requirements.access, AMDF_MEMORY_ACCESS_READ);
+          EXPECT_EQ(access->requirements.access, self->device_access_);
           EXPECT_EQ(
               access->requirements.flags,
               AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS);
@@ -80,7 +80,8 @@ class InputMemoryTest : public ::testing::Test {
   }
 
   iree_status_t Initialize() {
-    return iree_hal_amd_gpu_input_memory_initialize(&context_, 1, &memory_);
+    return iree_hal_amd_gpu_input_memory_initialize(&context_, 1,
+                                                    device_access_, &memory_);
   }
 
   // Real selector input, with native discovery as its only substituted service.
@@ -99,6 +100,8 @@ class InputMemoryTest : public ::testing::Test {
   amdf_memory_pair_info_t pair_ = {};
   // Native visibility discovery result.
   amdf_status_t pair_status_ = AMDF_STATUS_OK;
+  // Device writes are needed only for ABI fields patched by indirect dispatch.
+  amdf_memory_access_t device_access_ = AMDF_MEMORY_ACCESS_READ;
   // Selected persistent policy, published only after full qualification.
   iree_hal_amd_gpu_input_memory_t memory_ = {};
 };
@@ -117,6 +120,24 @@ TEST_F(InputMemoryTest, SkipsNonWriteBackHostMapping) {
   profiles_[0].host_mapping.properties = AMDF_HOST_MEMORY_PROPERTY_READ_CACHED;
   IREE_ASSERT_OK(Initialize());
   EXPECT_EQ(memory_.options.profile.ordinal, 1u);
+}
+
+TEST_F(InputMemoryTest, WritableAbiKeepsTheSameHostPublicationContract) {
+  device_access_ |= AMDF_MEMORY_ACCESS_WRITE;
+  IREE_ASSERT_OK(Initialize());
+  EXPECT_EQ(memory_.access.requirements.access,
+            AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE);
+  EXPECT_EQ(memory_.options.host_access, AMDF_MEMORY_MAP_FLAG_WRITE);
+}
+
+TEST_F(InputMemoryTest, RejectsHostReadOnlyProfiles) {
+  profiles_[0].host_mapping.supported_access = AMDF_MEMORY_MAP_FLAG_READ;
+  IREE_ASSERT_OK(Initialize());
+  EXPECT_EQ(memory_.options.profile.ordinal, 1u);
+  profiles_[1].host_mapping.supported_access = AMDF_MEMORY_MAP_FLAG_READ;
+  memory_ = {};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE, Initialize());
+  EXPECT_EQ(memory_.options.scope, nullptr);
 }
 
 TEST_F(InputMemoryTest, CoherentShadersNeedNoQueueOperation) {

@@ -148,8 +148,8 @@ void iree_hal_amd_gpu_pm4_abandon(iree_hal_amd_gpu_pm4_queue_t* queue,
 static iree_status_t iree_hal_amd_gpu_pm4_prepare_arguments(
     iree_hal_amd_gpu_pm4_queue_t* queue, uint64_t capacity) {
   return iree_hal_amd_gpu_byte_storage_allocate(
-      queue->context, queue->options.memory, capacity, 0, queue->host_allocator,
-      &queue->producer.arguments);
+      queue->context, queue->options.argument_memory, capacity, 0,
+      queue->host_allocator, &queue->producer.arguments);
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_prepare_signals(
@@ -1977,6 +1977,7 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_create(
   queue->growth = (iree_hal_amd_gpu_pm4_growth_context_t){
       .context = context,
       .memory = options->memory,
+      .argument_memory = options->argument_memory,
       .transfer_memory = options->transfer_memory,
       .input_memory = &options->programs->inputs.options,
       .scratch_memory = options->scratch_memory,

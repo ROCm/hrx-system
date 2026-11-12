@@ -21,7 +21,8 @@ iree_status_t iree_hal_amd_gpu_pm4_program_pool_initialize(
           AMDF_MEMORY_ACCESS_EXECUTE,
       host_allocator, &out_pool->storage));
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_input_memory_initialize(
-      context, native_family_ordinal, &out_pool->inputs));
+      context, native_family_ordinal, AMDF_MEMORY_ACCESS_READ,
+      &out_pool->inputs));
   iree_hal_amd_gpu_gfxip_version_t gfxip = {
       context->target_info.gfx_ip.major, context->target_info.gfx_ip.minor,
       context->target_info.gfx_ip.stepping};

@@ -23,7 +23,9 @@
 #include "iree/hal/driver/amd/gpu/kernarg.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/command_buffer.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/publication.h"
+#include "iree/hal/driver/amd/gpu/queue/aql/state.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/command_buffer.h"
+#include "iree/hal/driver/amd/gpu/queue/pm4/state.h"
 #include "iree/hal/slab_pool.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -794,6 +796,32 @@ TEST_P(GpuNativeDispatchTest,
   if (HasFatalFailure() || IsSkipped()) {
     return;
   }
+  const auto check_arguments = [&]() {
+    for (uint32_t i = 0; i < GetParam().queue_count; ++i) {
+      const auto* storage =
+          command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+              ? reinterpret_cast<iree_hal_amd_gpu_aql_queue_t*>(queues_[i])
+                    ->producer.arguments
+              : reinterpret_cast<iree_hal_amd_gpu_pm4_queue_t*>(queues_[i])
+                    ->producer.arguments;
+      ASSERT_NE(storage, nullptr);
+      EXPECT_EQ(storage->memory.host_access, AMDF_MEMORY_MAP_FLAG_WRITE);
+      EXPECT_TRUE(storage->memory.host_properties &
+                  IREE_HAL_HOST_MEMORY_PROPERTY_WRITE_BACK);
+      amdf_memory_access_info_t info = {
+          .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
+          .structure_size = sizeof(info),
+      };
+      ASSERT_EQ(fabric_->api->memory_query_access_info(storage->memory.handle,
+                                                       0, &info),
+                AMDF_STATUS_OK);
+      EXPECT_EQ(info.access,
+                AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE);
+      EXPECT_FALSE(info.flags & AMDF_MEMORY_FLAG_DEVICE_UNCACHED);
+      EXPECT_TRUE(info.flags & AMDF_MEMORY_FLAG_HOST_COHERENT);
+    }
+  };
+  check_arguments();
   const auto* family = iree_hal_queue_family(queues_[0]);
   const iree_hal_pool_family_access_t access = {
       .family = family,
@@ -976,6 +1004,8 @@ TEST_P(GpuNativeDispatchTest,
         EXPECT_EQ(value, 7 + count * (count + 1) / 2);
       }
       IREE_ASSERT_OK(iree_hal_device_trim(device_));
+      // The eight-byte initial capacity forces real native argument growth.
+      check_arguments();
     }
     recording_owner.reset();
   }
@@ -1198,16 +1228,20 @@ void GpuNativeDispatchTest::RunControlOrdering(ControlKind kind,
     if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
       const auto* program =
           iree_hal_amd_gpu_aql_command_buffer_program(recording);
-      ASSERT_NE(program->host_template, nullptr);
       ASSERT_EQ(program->block_count, 1u);
       const bool timestamp = kind == ControlKind::kTimestamp;
       const bool shader = !timestamp && !zero_compute;
+      // Only actual helper ABI belongs in transient arguments. Native IBs and
+      // timestamp write-drain scratch stay with their resident invocation.
+      EXPECT_EQ(program->host_template != nullptr, shader);
       const bool standalone_release = dispatch && !ordered;
       EXPECT_EQ(program->blocks[0].packet_count,
                 1u + dispatch + standalone_release);
       const auto* packets =
           reinterpret_cast<const iree_hal_amd_gpu_aql_packet_t*>(
-              program->host_template + 1);
+              program->host_template
+                  ? reinterpret_cast<const uint8_t*>(program->host_template + 1)
+                  : program->resident.contents.data);
       if (dispatch) {
         EXPECT_EQ(packets[before_dispatch].words[0] & 0xFFFFu,
                   IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH);

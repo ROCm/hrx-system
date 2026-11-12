@@ -230,7 +230,9 @@ iree_status_t iree_hal_amd_gpu_aql_growth_begin(
       if (iree_status_is_ok(status)) {
         memory = &growth->backing.bytes->memory;
         growth->backing.request = (iree_hal_amd_fabric_memory_request_t){
-            .options = kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFERS
+            .options = kind == IREE_HAL_AMD_GPU_AQL_ENTRY_ARGUMENTS
+                           ? context->argument_memory
+                       : kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFERS
                            ? context->transfer_memory
                        : kind == IREE_HAL_AMD_GPU_AQL_ENTRY_VALUES
                            ? context->input_memory

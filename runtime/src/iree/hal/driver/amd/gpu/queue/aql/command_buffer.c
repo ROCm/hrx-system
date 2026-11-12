@@ -44,8 +44,9 @@ typedef struct iree_hal_amd_gpu_aql_command_buffer_t {
   // The last payload begins after all earlier payloads have completed, so its
   // release fence can cover their writes without an additional native packet.
   bool last_ordered;
-  // Indirect dispatch headers are published by the GPU after reading counts.
-  bool requires_device_publication;
+  // GPU-mutated state, native commands, and payloads stay in resident
+  // instances.
+  bool requires_resident_storage;
   // Posted clock destinations and invocation-private write-drain scratch.
   iree_hal_amd_gpu_timestamp_writes_t timestamps;
   // Last clock carrier, extendible only while no native bytes follow it.
@@ -353,7 +354,7 @@ static iree_status_t iree_hal_amd_gpu_aql_command_end(
     // Direct dispatch sequences admit a larger bounded host template. Immutable
     // arguments stay resident, so only packet bytes consume that copy budget.
     // Mutable arguments/fixups retain their dispatch and combined-byte limits.
-    // Native control packets retain the smaller packet/private-data bound.
+    // Scalar control/blit helpers retain the smaller packet/ABI bound.
     const bool direct = buffer->program->block_count == 1 &&
                         buffer->program->blocks[0].packet_count ==
                             buffer->program->dispatch_count;
@@ -362,7 +363,7 @@ static iree_status_t iree_hal_amd_gpu_aql_command_end(
                            (buffer->pool->storage.resident.host_access &
                             AMDF_MEMORY_MAP_FLAG_WRITE);
     if (buffer->program->block_count == 1 &&
-        !buffer->requires_device_publication &&
+        !buffer->requires_resident_storage &&
         buffer->program->value_count <=
             IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_VALUES &&
         ((length <= 512 &&
@@ -507,11 +508,8 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
             executable, token, &geometry, flags));
     buffer->program->required_features |=
         IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH;
-    if (!buffer->pool->grid_sync) {
-      // Grid barriers mutate shader-atomic state. Keep that state in each
-      // resident instance instead of copying it to the host control upload.
-      buffer->requires_device_publication = true;
-    }
+    // Grid state is independent of the user and initializer kernel ABI.
+    buffer->requires_resident_storage = true;
   }
   const bool indirect = iree_hal_dispatch_uses_indirect_parameters(flags);
   const bool external_arguments =
@@ -662,7 +660,7 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
         buffer, offset + initialize_grid * 64 + 40, 0, patch_offset,
         IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA));
     target->words[0] = IREE_HAL_AMD_GPU_AQL_HEADER_INVALID;
-    buffer->requires_device_publication = true;
+    buffer->requires_resident_storage = true;
   }
   iree_hal_amd_gpu_aql_program_block_t* block =
       &buffer->program->blocks[buffer->program->block_count - 1];
@@ -730,6 +728,7 @@ static iree_status_t iree_hal_amd_gpu_aql_command_transfer(
   }
   uint32_t update_offset = 0;
   if (update) {
+    buffer->requires_resident_storage = true;
     void* bytes = NULL;
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
         &buffer->recording, (uint32_t)length, 1, &update_offset, &bytes));
@@ -978,6 +977,7 @@ static iree_status_t iree_hal_amd_gpu_aql_command_control(
   } else {
     const uint32_t xcc_count =
         buffer->pool->storage.context->target_info.topology.xcc_count;
+    buffer->requires_resident_storage = true;
     predicate_words = xcc_count > 1 ? 2 : 0;
     const uint32_t body_words = iree_hal_amd_gpu_control_word_count(command);
     word_count = predicate_words + body_words;

@@ -181,6 +181,8 @@ class GrowthTest : public ::testing::Test {
     transfer_memory_.profile.ordinal = 1;
     input_memory_ = memory_;
     input_memory_.profile.ordinal = 2;
+    argument_memory_ = memory_;
+    argument_memory_.profile.ordinal = 3;
     scratch_memory_ = memory_;
     scratch_memory_.host_access = 0;
     iree_hal_amd_gpu_capture_pool_initialize(4096, iree_allocator_system(),
@@ -189,6 +191,7 @@ class GrowthTest : public ::testing::Test {
     iree_hal_amd_gpu_signal_cache_initialize(&publication_, 0, &signals_);
     growth_.context = &context_;
     growth_.memory = &memory_;
+    growth_.argument_memory = &argument_memory_;
     growth_.transfer_memory = &transfer_memory_;
     growth_.input_memory = &input_memory_;
     growth_.scratch_memory = &scratch_memory_;
@@ -346,6 +349,8 @@ class GrowthTest : public ::testing::Test {
             entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_TRANSFERS;
         const uint32_t profile_ordinal =
             transfer ? transfer_memory_.profile.ordinal
+            : entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS
+                ? argument_memory_.profile.ordinal
             : entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_VALUES
                 ? input_memory_.profile.ordinal
                 : memory_.profile.ordinal;
@@ -489,6 +494,8 @@ class GrowthTest : public ::testing::Test {
   iree_hal_amd_fabric_memory_options_t transfer_memory_ = {};
   // Independent cached profile for shader-read replay values.
   iree_hal_amd_fabric_memory_options_t input_memory_ = {};
+  // Independent cached profile for actual ABI records.
+  iree_hal_amd_fabric_memory_options_t argument_memory_ = {};
   // Physical scratch policy with no host mapping request.
   iree_hal_amd_fabric_memory_options_t scratch_memory_ = {};
   // Two native shader engines, each with 32 resident wave slots.

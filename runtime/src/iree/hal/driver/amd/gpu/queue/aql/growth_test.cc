@@ -57,11 +57,14 @@ class GrowthTest
     memory_.profile.allocation.minimum_alignment = 8;
     memory_.profile.allocation.byte_length_granularity = 8;
     memory_.profile.allocation.maximum_byte_length = UINT32_MAX;
+    argument_memory_ = memory_;
+    argument_memory_.profile.ordinal = 1;
     iree_hal_amd_gpu_capture_pool_initialize(4096, iree_allocator_system(),
                                              &captures_);
     iree_hal_amd_gpu_publisher_initialize(&publisher_);
     growth_.context = &context_;
     growth_.memory = &memory_;
+    growth_.argument_memory = &argument_memory_;
     growth_.input_memory = &memory_;
     growth_.captures = &captures_;
     growth_.publisher = &publisher_;
@@ -121,6 +124,8 @@ class GrowthTest
   iree_hal_amd_gpu_context_t context_ = {};
   // Prepared control-memory policy borrowed by acquisition.
   iree_hal_amd_fabric_memory_options_t memory_ = {};
+  // Independent cached profile for actual ABI records.
+  iree_hal_amd_fabric_memory_options_t argument_memory_ = {};
   // Reusable production capture storage.
   iree_hal_amd_gpu_capture_pool_t captures_ = {};
   // Exact queue's caller and deferred publication ownership.
@@ -145,6 +150,8 @@ TEST_P(GrowthTest, ByteAcquisitionReturnsTheCompleteWaitingCohort) {
   IREE_ASSERT_OK(iree_hal_amd_gpu_aql_growth_begin(&growth_, kind, last, 4096));
   iree_hal_amd_gpu_context_join_memory(&context_);
   EXPECT_EQ(native_.create_count, 1);
+  EXPECT_EQ(native_.created_profile_ordinal,
+            kind == IREE_HAL_AMD_GPU_AQL_ENTRY_ARGUMENTS ? 1u : 0u);
   auto* entry = iree_hal_amd_gpu_publisher_next(&publisher_);
   ASSERT_NE(entry, nullptr);
   auto* result_entry =
@@ -191,6 +198,10 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple((UINT64_C(1) << 48) - 4088, IREE_STATUS_OK,
                         IREE_HAL_AMD_GPU_AQL_ENTRY_VALUES),
         std::make_tuple(UINT64_C(0x10000), IREE_STATUS_RESOURCE_EXHAUSTED,
-                        IREE_HAL_AMD_GPU_AQL_ENTRY_VALUES)));
+                        IREE_HAL_AMD_GPU_AQL_ENTRY_VALUES),
+        std::make_tuple((UINT64_C(1) << 48) - 4088, IREE_STATUS_OK,
+                        IREE_HAL_AMD_GPU_AQL_ENTRY_ARGUMENTS),
+        std::make_tuple(UINT64_C(0x10000), IREE_STATUS_RESOURCE_EXHAUSTED,
+                        IREE_HAL_AMD_GPU_AQL_ENTRY_ARGUMENTS)));
 
 }  // namespace

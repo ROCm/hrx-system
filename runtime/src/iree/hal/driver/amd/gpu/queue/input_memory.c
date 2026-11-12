@@ -10,11 +10,12 @@
 
 iree_status_t iree_hal_amd_gpu_input_memory_initialize(
     const iree_hal_amd_gpu_context_t* context, uint32_t family_ordinal,
+    amdf_memory_access_t device_access,
     iree_hal_amd_gpu_input_memory_t* out_memory) {
   const amdf_memory_device_access_t access = {
       .device = context->device,
       .requirements = {
-          .access = AMDF_MEMORY_ACCESS_READ,
+          .access = device_access,
           .flags =
               AMDF_MEMORY_FLAG_DEVICE_ADDRESS | AMDF_MEMORY_FLAG_HOST_COHERENT,
           .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU}};
@@ -24,7 +25,7 @@ iree_status_t iree_hal_amd_gpu_input_memory_initialize(
   IREE_RETURN_IF_ERROR(
       IREE_HAL_AMD_STATUS_FROM_AMDF(context->api->memory_scope_query_info(
                                         context->fabric->system_scope, &info),
-                                    "memory_scope_query_info(replay inputs)"));
+                                    "memory_scope_query_info(shader inputs)"));
   iree_hal_amd_fabric_memory_options_t options = {
       .scope = context->fabric->system_scope,
       .access_count = 1,
@@ -48,7 +49,7 @@ iree_status_t iree_hal_amd_gpu_input_memory_initialize(
       continue;
     }
     status = IREE_HAL_AMD_STATUS_FROM_AMDF(
-        native_status, "memory_scope_query_device_profile(replay inputs)");
+        native_status, "memory_scope_query_device_profile(shader inputs)");
     if (!iree_status_is_ok(status) ||
         !amdf_status_is_ok(profile.availability) ||
         !iree_all_bits_set(profile.roles,
@@ -85,7 +86,7 @@ iree_status_t iree_hal_amd_gpu_input_memory_initialize(
       continue;
     }
     status = IREE_HAL_AMD_STATUS_FROM_AMDF(
-        native_status, "memory_scope_query_pair_info(replay inputs)");
+        native_status, "memory_scope_query_pair_info(shader inputs)");
     const amdf_queue_family_info_t* family = &context->families[family_ordinal];
     if (iree_status_is_ok(status) &&
         iree_any_bit_set(pair.flags,

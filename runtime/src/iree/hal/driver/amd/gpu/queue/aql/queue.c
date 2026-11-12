@@ -1829,6 +1829,7 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
   queue->growth = (iree_hal_amd_gpu_aql_growth_context_t){
       .context = context,
       .memory = options->memory,
+      .argument_memory = options->argument_memory,
       .transfer_memory = options->transfer_memory,
       .input_memory = &options->programs->inputs.options,
       .captures = &queue->captures,
@@ -1918,7 +1919,7 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
           &queue->growth, queue->storage.queue, options->scratch_memory,
           &queue->scratch);
       status = iree_hal_amd_gpu_byte_storage_allocate(
-          context, options->memory, options->argument_capacity, 0,
+          context, options->argument_memory, options->argument_capacity, 0,
           host_allocator, &queue->producer.arguments);
     }
   }

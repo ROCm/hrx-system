@@ -26,8 +26,10 @@ typedef struct iree_hal_amd_gpu_pm4_growth_t iree_hal_amd_gpu_pm4_growth_t;
 typedef struct iree_hal_amd_gpu_pm4_growth_context_t {
   // Borrowed native owner, joined before destroying this context.
   iree_hal_amd_gpu_context_t* context;
-  // Borrowed immutable coherent argument/signal memory policy.
+  // Borrowed immutable coherent control/signal memory policy.
   const iree_hal_amd_fabric_memory_options_t* memory;
+  // Borrowed cached ABI policy, identical to initial argument allocation.
+  const iree_hal_amd_fabric_memory_options_t* argument_memory;
   // Borrowed read/write transfer policy, independent of native control.
   const iree_hal_amd_fabric_memory_options_t* transfer_memory;
   // Borrowed CPU-write/shader-read replay value policy.
