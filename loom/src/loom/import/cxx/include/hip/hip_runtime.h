@@ -25,7 +25,6 @@
 #define warpSize (::loom::kernel::subgroup::size())
 #define __syncthreads() ::loom::kernel::workgroup::barrier()
 #define __builtin_assume(condition) ::loom::assume(condition)
-#define __builtin_inff() ::loom::infinity()
 #define __builtin_amdgcn_rcpf(value) ::loom::reciprocal(value)
 
 [[loom::device, loom::inline]] static inline float __shfl_xor(

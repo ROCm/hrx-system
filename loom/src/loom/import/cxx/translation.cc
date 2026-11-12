@@ -5629,6 +5629,9 @@ class Translator final : private Initialization::Evaluation {
   }
 
   std::optional<IntrinsicCallResult> builtin(cxx::CallExpressionAST* call) {
+    if (auto value = floating_builtin_constant(unit_, diagnostics_, call)) {
+      return IntrinsicCallResult{constant(*value, call)};
+    }
     if (cxx::resolveBuiltinFunctionKind(
             cxx::ast_cast<cxx::IdExpressionAST>(call->baseExpression)) ==
         cxx::BuiltinFunctionKind::T___BUILTIN_UNREACHABLE) {

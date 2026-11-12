@@ -251,6 +251,7 @@ loom_cc_library(
     cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [
+        ":frontend",
         "//runtime/src/iree/base/internal:unicode",
         "//third_party:cxx_parser",
     ],

@@ -151,6 +151,28 @@ lexical scope with no results, so they cannot update enclosing automatic values,
 return from the function, or exit an enclosing loop. The same attribute in a
 command program retains its command dependency semantics.
 
+## Floating constants
+
+`__builtin_inf()` and `__builtin_huge_val()` produce positive `f64` infinity;
+their `f` forms produce `f32` infinity. They work in ordinary expressions,
+templates, and constant evaluation, with or without the HIP facade:
+
+```cpp
+double infinity() { return __builtin_inf(); }
+float negative_infinity() { return -__builtin_inff(); }
+```
+
+`__builtin_nan()` and `__builtin_nanf()` preserve quiet-NaN payload bits from a
+constant integer string, including a string reached through a constexpr array
+or pointer. Runtime or side-effecting payload expressions receive a source
+diagnostic. Signaling-NaN builtin evaluation is not implemented by the frontend;
+an explicit `__builtin_bit_cast` can express those representation bits.
+
+The `l` forms participate in frontend constant evaluation. Runtime `long double`
+values have no High scalar representation and receive the same unsupported-type
+diagnostic as other uses of `long double`. A constexpr conversion to `float` or
+`double` produces a supported runtime constant.
+
 ## Explicit 16-bit floating-point types
 
 `<stdfloat>` provides `std::float16_t` (IEEE FP16) and `std::bfloat16_t` (BF16).
