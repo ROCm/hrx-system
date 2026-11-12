@@ -220,6 +220,29 @@ TEST_P(BarrierTest, LocalShaderDependenciesStayInsideShaderCaches) {
   }
 }
 
+TEST_P(BarrierTest, OneSidedAccessScopesRetainTheirFence) {
+  for (auto scope :
+       {IREE_HAL_ACCESS_SCOPE_CONSTANT_READ,
+        IREE_HAL_ACCESS_SCOPE_DISPATCH_READ,
+        IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+        IREE_HAL_ACCESS_SCOPE_TRANSFER_READ,
+        IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE, IREE_HAL_ACCESS_SCOPE_ATOMIC_READ,
+        IREE_HAL_ACCESS_SCOPE_ATOMIC_WRITE}) {
+    SCOPED_TRACE(scope);
+    const auto release = Access(scope, 0);
+    EXPECT_EQ(release.release_cache_control, GetParam().shader);
+    EXPECT_EQ(release.acquire_cache_control, 0u);
+    EXPECT_EQ(release.execution, scope & (IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                                          IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE)
+                                     ? 3u
+                                     : 1u);
+    const auto acquire = Access(0, scope);
+    EXPECT_EQ(acquire.release_cache_control, 0u);
+    EXPECT_EQ(acquire.acquire_cache_control, GetParam().shader);
+    EXPECT_EQ(acquire.execution, 0u);
+  }
+}
+
 TEST_P(BarrierTest, CommandProcessorCrossingsIncludeReadReadDirtyHistory) {
   for (auto cp : {IREE_HAL_ACCESS_SCOPE_INDIRECT_COMMAND_READ,
                   IREE_HAL_ACCESS_SCOPE_ATOMIC_READ,
