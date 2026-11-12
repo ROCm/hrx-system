@@ -368,6 +368,8 @@ class DistributionPathTest
         .owners = owners,
         .has_serial = true,
     };
+    IREE_ASSERT_OK(loom_pipeline_lifetimes_index(
+        &arena_, &realization_.invocations.lifetimes));
     bool valid = false;
     iree_host_size_t distribution_workers[kStreams];
     for (size_t i = 0; i < kStreams; ++i) {

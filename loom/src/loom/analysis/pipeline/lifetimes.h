@@ -38,6 +38,15 @@ typedef struct loom_pipeline_lifetime_t {
   iree_host_size_t next_sibling;
 } loom_pipeline_lifetime_t;
 
+typedef struct loom_pipeline_lifetime_ancestry_t {
+  // Depth-first ordinal; every subtree occupies one contiguous interval.
+  iree_host_size_t preorder;
+  // Number of nodes in this subtree, including its root.
+  iree_host_size_t subtree_count;
+  // Highest ancestor reached through largest-subtree child edges.
+  iree_host_size_t chain_head;
+} loom_pipeline_lifetime_ancestry_t;
+
 typedef struct loom_pipeline_lifetimes_t {
   // Parent-before-child tree derived once from retained construction control.
   const loom_pipeline_lifetime_t* nodes;
@@ -45,9 +54,23 @@ typedef struct loom_pipeline_lifetimes_t {
   iree_host_size_t count;
   // OWNER node indexed by the complete graph's construction ordinal.
   const iree_host_size_t* owners;
+  // Indexed ancestry owned by lifetime construction, one entry per node.
+  const loom_pipeline_lifetime_ancestry_t* ancestry;
   // Whether any serial scope can establish reusable construction lifetimes.
   bool has_serial;
 } loom_pipeline_lifetimes_t;
+
+// Indexes the completed parent-before-child tree in linear time and space.
+// Retained ancestry lets resource projections discard unary paths without
+// walking those paths again for each resource pool.
+iree_status_t loom_pipeline_lifetimes_index(
+    iree_arena_allocator_t* arena, loom_pipeline_lifetimes_t* lifetimes);
+
+// Finds the nearest common ancestor in O(log(node count)) time, independently
+// of source nesting depth. Both nodes belong to this indexed lifetime tree.
+iree_host_size_t loom_pipeline_lifetimes_common_ancestor(
+    const loom_pipeline_lifetimes_t* lifetimes, iree_host_size_t first,
+    iree_host_size_t second);
 
 // Retains the coexistence structure of the bound construction graph.
 // Independent compositions and independent serial scopes may coexist with each

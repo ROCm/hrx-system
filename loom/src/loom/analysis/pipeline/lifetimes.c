@@ -8,6 +8,64 @@
 
 #include "loom/analysis/pipeline/invocations.h"
 
+iree_status_t loom_pipeline_lifetimes_index(
+    iree_arena_allocator_t* arena, loom_pipeline_lifetimes_t* lifetimes) {
+  loom_pipeline_lifetime_ancestry_t* ancestry = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, lifetimes->count, sizeof(*ancestry), (void**)&ancestry));
+  const loom_pipeline_lifetime_t* nodes = lifetimes->nodes;
+  for (iree_host_size_t i = 0; i < lifetimes->count; ++i) {
+    ancestry[i] = (loom_pipeline_lifetime_ancestry_t){.subtree_count = 1,
+                                                      .chain_head = i};
+  }
+  for (iree_host_size_t i = lifetimes->count; --i > 0;) {
+    ancestry[nodes[i].parent].subtree_count += ancestry[i].subtree_count;
+  }
+  for (iree_host_size_t i = 0; i < lifetimes->count; ++i) {
+    iree_host_size_t largest = nodes[i].first_child;
+    if (largest == IREE_HOST_SIZE_MAX) {
+      continue;
+    }
+    for (iree_host_size_t child = nodes[largest].next_sibling;
+         child != IREE_HOST_SIZE_MAX; child = nodes[child].next_sibling) {
+      if (ancestry[child].subtree_count > ancestry[largest].subtree_count) {
+        largest = child;
+      }
+    }
+    ancestry[largest].chain_head = ancestry[i].chain_head;
+  }
+  iree_host_size_t node = 0;
+  for (iree_host_size_t preorder = 0; preorder < lifetimes->count; ++preorder) {
+    ancestry[node].preorder = preorder;
+    if (nodes[node].first_child != IREE_HOST_SIZE_MAX) {
+      node = nodes[node].first_child;
+    } else {
+      while (node && nodes[node].next_sibling == IREE_HOST_SIZE_MAX) {
+        node = nodes[node].parent;
+      }
+      node = nodes[node].next_sibling;
+    }
+  }
+  lifetimes->ancestry = ancestry;
+  return iree_ok_status();
+}
+
+iree_host_size_t loom_pipeline_lifetimes_common_ancestor(
+    const loom_pipeline_lifetimes_t* lifetimes, iree_host_size_t first,
+    iree_host_size_t second) {
+  const loom_pipeline_lifetime_ancestry_t* ancestry = lifetimes->ancestry;
+  while (ancestry[first].chain_head != ancestry[second].chain_head) {
+    const iree_host_size_t first_head = ancestry[first].chain_head;
+    const iree_host_size_t second_head = ancestry[second].chain_head;
+    if (ancestry[first_head].preorder > ancestry[second_head].preorder) {
+      first = lifetimes->nodes[first_head].parent;
+    } else {
+      second = lifetimes->nodes[second_head].parent;
+    }
+  }
+  return ancestry[first].preorder < ancestry[second].preorder ? first : second;
+}
+
 typedef struct loom_pipeline_lifetime_pending_t {
   // Node awaiting expansion in the parent-before-child worklist.
   iree_host_size_t node;
@@ -138,5 +196,5 @@ iree_status_t loom_pipeline_lifetimes_build(
                                   .count = builder.count,
                                   .owners = builder.owners,
                                   .has_serial = builder.has_serial};
-  return iree_ok_status();
+  return loom_pipeline_lifetimes_index(arena, out_lifetimes);
 }
