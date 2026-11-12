@@ -126,29 +126,28 @@ func.def @bf16x4_insert_dynamic(%values: vector<4xbf16>, %value: bf16, %lane: in
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @bf16x4_insert_dynamic(%values: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %lane: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @bf16x4_insert_dynamic(%values: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %lane: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
   %9 = v_and_b32_lit %value, 65535
-  %10 = v_mov_b32_copy %lane
-  %11 = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %12 = v_and_b32_lit %11, 4294901760
-  %13 = v_or_b32 %12, %9
-  %14 = v_cmp_eq_i32_src1_inline %10 {rhs = 0}
-  %15 = v_cndmask_b32 %11, %13, %14
-  %16 = v_and_b32_lit %11, 65535
-  %17 = v_lshlrev_b32_src0_inline %9, 16
-  %18 = v_or_b32 %16, %17
-  %19 = v_cmp_eq_i32_src1_inline %10 {rhs = 1}
-  %20 = v_cndmask_b32 %15, %18, %19
-  %21 = slice %values[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %22 = v_and_b32_lit %21, 4294901760
-  %23 = v_or_b32 %22, %9
-  %24 = v_cmp_eq_i32_src1_inline %10 {rhs = 2}
-  %25 = v_cndmask_b32 %21, %23, %24
-  %26 = v_and_b32_lit %21, 65535
-  %28 = v_or_b32 %26, %17
-  %29 = v_cmp_eq_i32_src1_inline %10 {rhs = 3}
-  %30 = v_cndmask_b32 %25, %28, %29
-  %updated = concat(%20, %30) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %10 = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %11 = v_and_b32_lit %10, 4294901760
+  %12 = v_or_b32 %11, %9
+  %13 = v_cmp_eq_i32_src1_inline %lane {rhs = 0}
+  %14 = v_cndmask_b32 %10, %12, %13
+  %15 = v_and_b32_lit %10, 65535
+  %16 = v_lshlrev_b32_src0_inline %9, 16
+  %17 = v_or_b32 %15, %16
+  %18 = v_cmp_eq_i32_src1_inline %lane {rhs = 1}
+  %19 = v_cndmask_b32 %14, %17, %18
+  %20 = slice %values[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %21 = v_and_b32_lit %20, 4294901760
+  %22 = v_or_b32 %21, %9
+  %23 = v_cmp_eq_i32_src1_inline %lane {rhs = 2}
+  %24 = v_cndmask_b32 %20, %22, %23
+  %25 = v_and_b32_lit %20, 65535
+  %27 = v_or_b32 %25, %16
+  %28 = v_cmp_eq_i32_src1_inline %lane {rhs = 3}
+  %29 = v_cndmask_b32 %24, %27, %28
+  %updated = concat(%19, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %updated
 }
 

@@ -2,17 +2,30 @@
 
 amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @scalar_ctlzi_i32_sgpr(%input: i32) -> (i32) {
+kernel.def target(@target) @scalar_ctlzi_i32_sgpr() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%input: i32, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi32>
   %result = scalar.ctlzi %input : i32
-  func.return %result : i32
+  view.store %result, %result_view_0[%fixture_lane] : i32, view<64xi32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_ctlzi_i32_sgpr(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
-  %5 = s_clz_i32_u32 %input
-  %6 = s_mov_b32 32
-  %result = s_min_u32 %5, %6
-  return %result
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "input"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @scalar_ctlzi_i32_sgpr(%input: reg<amdgpu.sgpr>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %result_view_0 = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %11 = s_clz_i32_u32 %input
+  %12 = s_mov_b32 32
+  %result = s_min_u32 %11, %12
+  %14 = v_mov_b32_copy %result
+  %15 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_b32_saddr %15, %14, %result_view_0
+  return
 }
 
 // ====
@@ -38,47 +51,75 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_
 
 amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @scalar_ctlzi_i64_sgpr(%input: i64) -> (i64) {
+kernel.def target(@target) @scalar_ctlzi_i64_sgpr() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%input: i64, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi64>
   %result = scalar.ctlzi %input : i64
-  func.return %result : i64
+  view.store %result, %result_view_0[%fixture_lane] : i64, view<64xi64>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_ctlzi_i64_sgpr(%input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
-  %5 = slice %input[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %6 = slice %input[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %7 = s_clz_i32_u32 %5
-  %8 = s_clz_i32_u32 %6
-  %9 = s_mov_b32 32
-  %10 = s_min_u32 %8, %9
-  %11 = s_add_u32_rhs_inline %10, 32
-  %12 = s_min_u32 %7, %11
-  %13 = s_mov_b32 0
-  %result = concat(%12, %13) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  return %result
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "input"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [8], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @scalar_ctlzi_i64_sgpr(%input: reg<amdgpu.sgpr x2>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %result_view_0 = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %11 = slice %input[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %12 = slice %input[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %13 = s_clz_i32_u32 %11
+  %14 = s_clz_i32_u32 %12
+  %15 = s_mov_b32 32
+  %16 = s_min_u32 %14, %15
+  %17 = s_add_u32_rhs_inline %16, 32
+  %18 = s_min_u32 %13, %17
+  %19 = s_mov_b32 0
+  %22 = v_mov_b32_copy %18
+  %24 = v_mov_b32_copy %19
+  %25 = concat(%22, %24) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %26 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  global_store_b64_saddr %26, %25, %result_view_0
+  return
 }
 
 // ====
 
 amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @scalar_ctlzi_i64_sgpr_nonzero(%input: i64) -> (i64) {
+kernel.def target(@target) @scalar_ctlzi_i64_sgpr_nonzero() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%input: i64, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi64>
   %nonzero = scalar.assume %input [ne(%input, 0)] : i64
   %result = scalar.ctlzi %nonzero : i64
-  func.return %result : i64
+  view.store %result, %result_view_0[%fixture_lane] : i64, view<64xi64>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_ctlzi_i64_sgpr_nonzero(%nonzero: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
-  %6 = slice %nonzero[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %7 = slice %nonzero[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %8 = s_clz_i32_u32 %6
-  %9 = s_clz_i32_u32 %7
-  %10 = s_add_u32_rhs_inline %9, 32
-  %11 = s_min_u32 %8, %10
-  %12 = s_mov_b32 0
-  %result = concat(%11, %12) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  return %result
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "input"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [8], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @scalar_ctlzi_i64_sgpr_nonzero(%nonzero: reg<amdgpu.sgpr x2>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %result_view_0 = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %12 = slice %nonzero[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %13 = slice %nonzero[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %14 = s_clz_i32_u32 %12
+  %15 = s_clz_i32_u32 %13
+  %16 = s_add_u32_rhs_inline %15, 32
+  %17 = s_min_u32 %14, %16
+  %18 = s_mov_b32 0
+  %21 = v_mov_b32_copy %17
+  %23 = v_mov_b32_copy %18
+  %24 = concat(%21, %23) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %25 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  global_store_b64_saddr %25, %24, %result_view_0
+  return
 }
 
 // ====
@@ -118,13 +159,12 @@ func.def target(@target) @scalar_ctlzi_i32_cdna3(%uniform: i32, %inputs: vector<
 }
 
 // ----
-low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @scalar_ctlzi_i32_cdna3(%uniform: reg<amdgpu.sgpr>, %inputs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.sgpr>, reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @scalar_ctlzi_i32_cdna3(%uniform: reg<amdgpu.vgpr>, %inputs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %varying = slice %inputs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %12 = s_flbit_i32_b32 %uniform
-  %13 = s_mov_b32 32
-  %uniform_result = s_min_u32 %12, %13
+  %12 = v_ffbh_u32 %uniform
+  %13 = v_mov_b32 32
+  %uniform_result = v_min_u32 %12, %13
   %15 = v_ffbh_u32 %varying
-  %16 = v_mov_b32 32
-  %varying_result = v_min_u32 %15, %16
+  %varying_result = v_min_u32 %15, %13
   return %uniform_result, %varying_result
 }

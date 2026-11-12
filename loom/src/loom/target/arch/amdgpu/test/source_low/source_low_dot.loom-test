@@ -177,7 +177,16 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @bf16_dot2f(%lhs:
 
 // ====
 
-func.def @f32_uniform_smem_vector_operands(%lhs: vector<4xf32>, %weights: buffer) -> (f32) {
+kernel.def @f32_uniform_smem_vector_operands() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%lhs_buffer: buffer, %weights: buffer, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %lhs_view = buffer.view %lhs_buffer[%fixture_base] : buffer -> view<64x4xf32>
+  %lhs = vector.load %lhs_view[%fixture_lane, 0] : view<64x4xf32> -> vector<4xf32>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xf32>
   %base = index.constant 0 : offset
   %weights_global = buffer.assume.memory_space<global> %weights : buffer
   %weights_noalias = buffer.assume.noalias %weights_global : buffer
@@ -187,30 +196,38 @@ func.def @f32_uniform_smem_vector_operands(%lhs: vector<4xf32>, %weights: buffer
   %bias = vector.extract %bias_vector[0] : vector<4xf32> -> f32
   %scaled = vector.mulf %lhs, %rhs : vector<4xf32>
   %dot = vector.dotf %scaled, %rhs, %bias : vector<4xf32>, vector<4xf32>, f32
-  func.return %dot : f32
+  view.store %dot, %result_view_0[%fixture_lane] : f32, view<64xf32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @f32_uniform_smem_vector_operands(%lhs: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm {
-  %weights_view = resource<hal_binding> {extent = 32, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %19 = s_mov_b32 0
-  %rhs = s_load_dwordx4 %weights_view, %19
-  %bias = s_load_dword %weights_view, %19 {offset = 16}
-  %23 = slice %rhs[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %24 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %25 = v_mul_f32 %23, %24
-  %26 = slice %rhs[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %27 = slice %lhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %28 = v_mul_f32 %26, %27
-  %29 = slice %rhs[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %30 = slice %lhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %31 = v_mul_f32 %29, %30
-  %32 = slice %rhs[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %33 = slice %lhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %34 = v_mul_f32 %32, %33
-  %38 = v_fma_f32 %25, %23, %bias
-  %41 = v_fma_f32 %28, %26, %38
-  %44 = v_fma_f32 %31, %29, %41
-  %dot = v_fma_f32 %34, %32, %44
-  return %dot
+low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_uniform_smem_vector_operands() asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %lhs_view = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %weights_view = resource<hal_binding> {extent = 32, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %31 = s_mov_b32 0
+  %rhs = s_load_dwordx4 %weights_view, %31
+  %bias = s_load_dword %weights_view, %31 {offset = 16}
+  %35 = v_lshlrev_b32_src0_inline %fixture_lane, 4
+  %lhs = global_load_b128_saddr %35, %lhs_view
+  %37 = slice %rhs[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %38 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %39 = v_mul_f32 %37, %38
+  %40 = slice %rhs[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %41 = slice %lhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %42 = v_mul_f32 %40, %41
+  %43 = slice %rhs[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %44 = slice %lhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %45 = v_mul_f32 %43, %44
+  %46 = slice %rhs[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %47 = slice %lhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %48 = v_mul_f32 %46, %47
+  %52 = v_fma_f32 %39, %37, %bias
+  %55 = v_fma_f32 %42, %40, %52
+  %58 = v_fma_f32 %45, %43, %55
+  %dot = v_fma_f32 %48, %46, %58
+  %62 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_b32_saddr %62, %dot, %result_view_0
+  return
 }

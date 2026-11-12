@@ -245,7 +245,7 @@ iree_status_t loom_amdgpu_lookup_or_materialize_integer_operand(
     IREE_RETURN_IF_ERROR(loom_amdgpu_make_sgpr_range_type(
         context, loom_low_register_type_unit_count(carrier_type),
         &scalar_type));
-    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_scalar_carrier(
+    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_numeric_carrier(
         context, source_op, low_value, scalar_type, &low_value));
   }
   const loom_type_t source_type = loom_module_value_type(module, source_value);

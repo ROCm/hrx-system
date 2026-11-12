@@ -16,10 +16,16 @@ func.def @packet_alias(%input: buffer, %replacement: i8) -> (i8, i32) {
 // ----
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @packet_alias(%replacement: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %words = resource<hal_binding> {extent = 128, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %14 = v_mov_b32 0
-  global_store_b8_saddr %14, %replacement, %words {offset = 81}
-  %byte = global_load_u8_saddr %14, %words {offset = 76}
-  %word = global_load_b32_saddr %14, %words {offset = 80}
+  %14 = slice %words[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %15 = slice %words[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %16 = v_mov_b32_copy %14
+  %17 = v_mov_b32_copy %15
+  %18 = concat(%16, %17) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b8_vaddr %18, %replacement {offset = 81}
+  %23 = concat(%16, %17) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %byte = global_load_u8_vaddr %23 {offset = 76}
+  %29 = concat(%16, %17) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %word = global_load_b32_vaddr %29 {offset = 80}
   return %byte, %word
 }
 
@@ -39,19 +45,18 @@ func.def @selected_packet_alias(%input: buffer, %condition: i1) -> (i8) {
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @selected_packet_alias(%condition: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @selected_packet_alias(%condition: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %bytes = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %20 = s_mov_b32 76
-  %21 = s_mov_b32 96
-  %22 = s_cmp_lg_i32_src1_inline %condition {rhs = 0}
-  %packet_offset = s_cselect_b32 %20, %21, %22
+  %22 = v_mov_b32_copy %20
+  %packet_offset = v_cndmask_b32_src0_lit %22, %condition, 96
   %24 = v_mov_b32 0
   %25 = slice %bytes[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %26 = slice %bytes[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %27 = s_mov_b32 0
-  %28, %29 = s_add_co_u32 %25, %packet_offset
-  %30, %31 = s_addc_u32 %26, %27, %29
-  %32 = concat(%28, %30) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %byte = global_load_u8_saddr %24, %32 {offset = 5}
+  %27, %28 = v_add_co_u32 %25, %packet_offset
+  %29 = v_mov_b32_copy %26
+  %30, %31 = v_add_co_ci_u32 %29, %24, %28
+  %32 = concat(%27, %30) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %byte = global_load_u8_vaddr %32 {offset = 5}
   return %byte
 }

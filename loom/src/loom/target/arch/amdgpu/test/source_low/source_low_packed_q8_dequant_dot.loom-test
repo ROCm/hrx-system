@@ -179,11 +179,11 @@ func.def @q8_packed_word_scalar_extract_dequant_dot4(%packed: i32, %scale: f16, 
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @q8_packed_word_scalar_extract_dequant_dot4(%packed: reg<amdgpu.sgpr>, %scale: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %q0_i32 = s_bfe_i32_lit %packed, 524288
-  %q1_i32 = s_bfe_i32_lit %packed, 524296
-  %q2_i32 = s_bfe_i32_lit %packed, 524304
-  %q3_i32 = s_bfe_i32_lit %packed, 524312
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @q8_packed_word_scalar_extract_dequant_dot4(%packed: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %q0_i32 = v_bfe_i32_offset_width_inline %packed {offset = 0, width = 8}
+  %q1_i32 = v_bfe_i32_offset_width_inline %packed {offset = 8, width = 8}
+  %q2_i32 = v_bfe_i32_offset_width_inline %packed {offset = 16, width = 8}
+  %q3_i32 = v_ashrrev_i32_src0_inline %packed, 24
   %q0_f32 = v_cvt_f32_i32 %q0_i32
   %q1_f32 = v_cvt_f32_i32 %q1_i32
   %q2_f32 = v_cvt_f32_i32 %q2_i32

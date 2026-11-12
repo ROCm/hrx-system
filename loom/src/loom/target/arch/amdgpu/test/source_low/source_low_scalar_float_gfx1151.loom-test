@@ -2,7 +2,19 @@
 
 amdgpu.target<gfx1151> @target
 
-func.def target(@target) @scalar_float_uniform(%lhs_i32: i32, %rhs_i32: i32) -> (f32, f32, f32, f32, i32, i32) {
+kernel.def target(@target) @scalar_float_uniform() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%lhs_i32: i32, %rhs_i32: i32, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer, %result_buffer_3: buffer, %result_buffer_4: buffer, %result_buffer_5: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xf32>
+  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xf32>
+  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xf32>
+  %result_view_3 = buffer.view %result_buffer_3[%fixture_base] : buffer -> view<64xf32>
+  %result_view_4 = buffer.view %result_buffer_4[%fixture_base] : buffer -> view<64xi32>
+  %result_view_5 = buffer.view %result_buffer_5[%fixture_base] : buffer -> view<64xi32>
   %lhs = scalar.sitofp %lhs_i32 : i32 to f32
   %rhs = scalar.uitofp %rhs_i32 : i32 to f32
   %sum = scalar.addf %lhs, %rhs : f32
@@ -22,22 +34,35 @@ func.def target(@target) @scalar_float_uniform(%lhs_i32: i32, %rhs_i32: i32) -> 
   %selected = scf.select %condition, %ceil, %floor : f32
   %signed = scalar.fptosi %rounded : f32 to i32
   %unsigned = scalar.fptoui %truncated : f32 to i32
-  func.return %selected, %rounded, %truncated, %sum_from_f16, %signed, %unsigned : f32, f32, f32, f32, i32, i32
+  view.store %selected, %result_view_0[%fixture_lane] : f32, view<64xf32>
+  view.store %rounded, %result_view_1[%fixture_lane] : f32, view<64xf32>
+  view.store %truncated, %result_view_2[%fixture_lane] : f32, view<64xf32>
+  view.store %sum_from_f16, %result_view_3[%fixture_lane] : f32, view<64xf32>
+  view.store %signed, %result_view_4[%fixture_lane] : i32, view<64xi32>
+  view.store %unsigned, %result_view_5[%fixture_lane] : i32, view<64xi32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @scalar_float_uniform(%lhs_i32: reg<amdgpu.sgpr>, %rhs_i32: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "lhs_i32", arg1 = "rhs_i32"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 8, resource_count = 6, resource_offsets = [8, 16, 24, 32, 40, 48], resource_parameter_indices = [2, 3, 4, 5, 6, 7], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @scalar_float_uniform(%lhs_i32: reg<amdgpu.sgpr>, %rhs_i32: reg<amdgpu.sgpr>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %result_view_0 = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_1 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_2 = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_3 = resource<hal_binding> {extent = 256, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_4 = resource<hal_binding> {extent = 256, index = 4, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_5 = resource<hal_binding> {extent = 256, index = 5, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %lhs = s_cvt_f32_i32 %lhs_i32
   %rhs = s_cvt_f32_u32 %rhs_i32
   %sum = s_add_f32 %lhs, %rhs
   %difference = s_sub_f32 %sum, %lhs
   %product = s_mul_f32 %sum, %difference
-  %40 = s_max_f32 %product, %product
-  %41 = s_max_f32 %sum, %sum
-  %minimum = s_min_f32 %40, %41
-  %43 = s_max_f32 %minimum, %minimum
-  %44 = s_max_f32 %difference, %difference
-  %maximum = s_max_f32 %43, %44
+  %51 = s_max_f32 %product, %product
+  %52 = s_max_f32 %sum, %sum
+  %minimum = s_min_f32 %51, %52
+  %54 = s_max_f32 %minimum, %minimum
+  %55 = s_max_f32 %difference, %difference
+  %maximum = s_max_f32 %54, %55
   %ceil = s_ceil_f32 %maximum
   %floor = s_floor_f32 %maximum
   %rounded = s_rndne_f32 %maximum
@@ -50,7 +75,20 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @scalar_float_
   %selected = s_cselect_b32 %ceil, %floor, %condition
   %signed = s_cvt_i32_f32 %rounded
   %unsigned = s_cvt_u32_f32 %truncated
-  return %selected, %rounded, %truncated, %sum_from_f16, %signed, %unsigned
+  %69 = v_mov_b32_copy %selected
+  %70 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_b32_saddr %70, %69, %result_view_0
+  %71 = v_mov_b32_copy %rounded
+  global_store_b32_saddr %70, %71, %result_view_1
+  %73 = v_mov_b32_copy %truncated
+  global_store_b32_saddr %70, %73, %result_view_2
+  %75 = v_mov_b32_copy %sum_from_f16
+  global_store_b32_saddr %70, %75, %result_view_3
+  %77 = v_mov_b32_copy %signed
+  global_store_b32_saddr %70, %77, %result_view_4
+  %79 = v_mov_b32_copy %unsigned
+  global_store_b32_saddr %70, %79, %result_view_5
+  return
 }
 
 // ====
@@ -82,9 +120,9 @@ func.def target(@target) @scalar_half_return(%input: i32) -> (f16) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @scalar_half_return(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
-  %half = s_cvt_f16_f32 %value
-  %7 = s_bfe_u32_lit_low16 %half
+low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @scalar_half_return(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %half = v_cvt_f16_f32 %value
+  %7 = v_bfe_u32_offset_0_width_inline_low16 %half
   return %7
 }
 
@@ -103,13 +141,13 @@ func.def target(@target) @scalar_half_select(%lhs: i32, %rhs: i32) -> (f16) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @scalar_half_select(%lhs_float: reg<amdgpu.sgpr>, %rhs_float: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
-  %lhs_half = s_cvt_f16_f32 %lhs_float
-  %rhs_half = s_cvt_f16_f32 %rhs_float
-  %condition = s_cmp_lt_i32 %lhs_float, %rhs_float
-  %15 = s_bfe_u32_lit_low16 %lhs_half
-  %16 = s_bfe_u32_lit_low16 %rhs_half
-  %result = s_cselect_b32 %15, %16, %condition
+low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @scalar_half_select(%lhs_float: reg<amdgpu.vgpr>, %rhs_float: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %lhs_half = v_cvt_f16_f32 %lhs_float
+  %rhs_half = v_cvt_f16_f32 %rhs_float
+  %condition = v_cmp_lt_i32 %lhs_float, %rhs_float
+  %15 = v_bfe_u32_offset_0_width_inline_low16 %lhs_half
+  %16 = v_bfe_u32_offset_0_width_inline_low16 %rhs_half
+  %result = v_cndmask_b32 %16, %15, %condition
   return %result
 }
 
@@ -130,20 +168,24 @@ func.def target(@target) @scalar_half_loop(%input: i32, %count: index) -> (f16) 
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @scalar_half_loop(%value: reg<amdgpu.sgpr>, %count: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %initial = s_cvt_f16_f32 %value
+low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @scalar_half_loop(%value: reg<amdgpu.vgpr>, %count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %initial = v_cvt_f16_f32 %value
   %begin = s_mov_b32 0
   %step = s_mov_b32 1
-  %25 = v_bfe_u32_offset_0_width_inline_low16 %initial
-  low.br ^_bb1(%begin: reg<amdgpu.sgpr>, %25: reg<amdgpu.vgpr>)
-^_bb1(%iteration: reg<amdgpu.sgpr>, %carried: reg<amdgpu.vgpr>):
-  %26 = s_cmp_lt_i32 %iteration, %count
-  low.cond_br %26, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+  %27 = v_mov_b32_copy %begin
+  %28 = v_bfe_u32_offset_0_width_inline_low16 %initial
+  %30 = s_mov_b64_exec_read
+  low.br ^_bb1(%27: reg<amdgpu.vgpr>, %28: reg<amdgpu.vgpr>)
+^_bb1(%iteration: reg<amdgpu.vgpr>, %carried: reg<amdgpu.vgpr>):
+  %29 = v_cmp_lt_i32 %iteration, %count
+  %31, %32 = s_and_saveexec_b64 %29
+  low.cond_br %32, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
-  %next = v_add_f16 %carried, %25
-  %29 = s_add_u32 %iteration, %step
-  %30 = v_bfe_u32_offset_0_width_inline_low16 %next
-  low.br ^_bb1(%29: reg<amdgpu.sgpr>, %30: reg<amdgpu.vgpr>)
+  %next = v_add_f16 %carried, %initial
+  %34 = v_add_u32 %step, %iteration
+  %35 = v_bfe_u32_offset_0_width_inline_low16 %next
+  low.br ^_bb1(%34: reg<amdgpu.vgpr>, %35: reg<amdgpu.vgpr>)
 ^_bb3:
+  s_mov_b64_exec %30
   return %carried
 }

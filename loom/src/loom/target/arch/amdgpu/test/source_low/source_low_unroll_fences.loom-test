@@ -50,22 +50,22 @@ low.kernel.def target<amdgpu.rdna3_5.core>(@target) abi_layout({constant_count =
   %payloads = resource<hal_binding> {extent = 32, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {extent = 4, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   low.schedule.fence
-  %59 = v_mov_b32_copy %bias
-  %consumed = v_add_f32 %initial, %59
+  %consumed = s_add_f32 %initial, %bias
   low.schedule.fence
-  %61 = s_mov_b32 0
-  %bounded = s_load_dword %ids, %61
-  %63 = s_lshl_b32_rhs_inline %bounded, 2
-  %payload = s_load_dword %payloads, %63
-  %next = v_add_f32 %payload, %consumed
+  %60 = s_mov_b32 0
+  %bounded = s_load_dword %ids, %60
+  %62 = s_lshl_b32_rhs_inline %bounded, 2
+  %payload = s_load_dword %payloads, %62
+  %next = s_add_f32 %consumed, %payload
   low.schedule.fence
-  %consumed_1 = v_add_f32 %bias, %next
+  %consumed_1 = s_add_f32 %next, %bias
   low.schedule.fence
-  %bounded_1 = s_load_dword %ids, %61 {offset = 4}
-  %69 = s_lshl_b32_rhs_inline %bounded_1, 2
-  %payload_1 = s_load_dword %payloads, %69
-  %next_1 = v_add_f32 %payload_1, %consumed_1
+  %bounded_1 = s_load_dword %ids, %60 {offset = 4}
+  %68 = s_lshl_b32_rhs_inline %bounded_1, 2
+  %payload_1 = s_load_dword %payloads, %68
+  %next_1 = s_add_f32 %consumed_1, %payload_1
+  %71 = v_mov_b32_copy %next_1
   %72 = v_mov_b32 0
-  global_store_b32_saddr %72, %next_1, %output
+  global_store_b32_saddr %72, %71, %output
   return
 }

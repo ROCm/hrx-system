@@ -30,6 +30,19 @@
 
 static int loom_amdgpu_source_value_analysis_state_key;
 
+bool loom_amdgpu_source_value_is_entry_argument(const loom_module_t* module,
+                                                loom_value_id_t value_id) {
+  const loom_value_t* value = loom_module_value(module, value_id);
+  if (!loom_value_is_block_arg(value)) {
+    return false;
+  }
+  const loom_block_t* block = loom_value_def_block(value);
+  const loom_region_t* region = block->parent_region;
+  return block == loom_region_const_entry_block(region) &&
+         region == loom_func_like_body(
+                       loom_func_like_const_cast(module, region->parent_op));
+}
+
 bool loom_amdgpu_source_invoke_result_shape(
     const loom_module_t* module, const loom_value_t* value,
     loom_amdgpu_register_shape_t* out_shape) {

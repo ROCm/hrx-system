@@ -6,17 +6,16 @@ func.def @scalar_half(%input: f16, %power: i32) -> (f16, i32, f16) {
 }
 
 // ----
-low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @scalar_half(%input: reg<amdgpu.vgpr>, %power: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @scalar_half(%input: reg<amdgpu.vgpr>, %power: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %fraction = v_frexp_mant_f16 %input
   %14 = v_frexp_exp_i16_f16 %input
   %exponent = v_bfe_i32_offset_0_width_inline_low16 %14
-  %16 = v_mov_b32_copy %power
-  %17 = v_max_i32_lit %16, 4294967232
-  %18 = v_min_i32_src0_inline %17, 64
-  %scaled = v_ldexp_f16 %input, %18
-  %20 = v_bfe_u32_offset_0_width_inline_low16 %fraction
-  %21 = v_bfe_u32_offset_0_width_inline_low16 %scaled
-  return %20, %exponent, %21
+  %16 = v_max_i32_lit %power, 4294967232
+  %17 = v_min_i32_src0_inline %16, 64
+  %scaled = v_ldexp_f16 %input, %17
+  %19 = v_bfe_u32_offset_0_width_inline_low16 %fraction
+  %20 = v_bfe_u32_offset_0_width_inline_low16 %scaled
+  return %19, %exponent, %20
 }
 
 // ====
@@ -29,7 +28,7 @@ func.def @scalar_single(%input: f32, %power: i32) -> (f32, i32, f32) {
 }
 
 // ----
-low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @scalar_single(%input: reg<amdgpu.vgpr>, %power: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @scalar_single(%input: reg<amdgpu.vgpr>, %power: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %fraction = v_frexp_mant_f32 %input
   %exponent = v_frexp_exp_i32_f32 %input
   %scaled = v_ldexp_f32 %input, %power
@@ -46,7 +45,7 @@ func.def @scalar_double(%input: f64, %power: i32) -> (f64, i32, f64) {
 }
 
 // ----
-low.func.def target<amdgpu.cdna2.core> abi(hal_kernel) @scalar_double(%input: reg<amdgpu.vgpr x2>, %power: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.cdna2.core> abi(hal_kernel) @scalar_double(%input: reg<amdgpu.vgpr x2>, %power: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
   %fraction = v_frexp_mant_f64 %input
   %exponent = v_frexp_exp_i32_f64 %input
   %scaled = v_ldexp_f64 %input, %power
@@ -158,15 +157,27 @@ low.func.def target<amdgpu.rdna3.core> abi(hal_kernel) @packed_half_tail(%input:
 // ====
 // RUN: emit source-low target=amdgpu:gfx90a output=low
 // Both uniform operands still obey the one-scalar-source packet limit.
-func.def @scale_uniform(%bits: i64, %power: i32) -> (f64) {
+kernel.def @scale_uniform() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%bits: i64, %power: i32, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xf64>
   %input = scalar.bitcast %bits : i64 to f64
   %scaled = scalar.ldexpf %input, %power : f64, i32
-  func.return %scaled : f64
+  view.store %scaled, %result_view_0[%fixture_lane] : f64, view<64xf64>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.cdna2.core> abi(hal_kernel) @scale_uniform(%input: reg<amdgpu.sgpr x2>, %power: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x2>) asm {
-  %8 = v_mov_b32_copy %power
-  %scaled = v_ldexp_f64 %input, %8
-  return %scaled
+low.kernel.def target<amdgpu.cdna2.core> abi_layout({constant_count = 3, direct_arg_count = 2, direct_arg_names = {arg0 = "bits", arg1 = "power"}, direct_arg_offsets = [0, 8], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [8, 4], parameter_count = 3, resource_count = 1, resource_offsets = [16], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @scale_uniform(%input: reg<amdgpu.sgpr x2>, %power: reg<amdgpu.sgpr>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %result_view_0 = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %14 = v_mov_b32_copy %power
+  %scaled = v_ldexp_f64 %input, %14
+  %16 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  global_store_dwordx2_saddr %16, %scaled, %result_view_0
+  return
 }

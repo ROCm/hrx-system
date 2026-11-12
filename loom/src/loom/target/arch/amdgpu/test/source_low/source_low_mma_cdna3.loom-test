@@ -1295,28 +1295,32 @@ func.def target(@target) @bf16_mfma_unrolled_accumulator_bank(%lhs_data: vector<
 }
 
 // ----
-low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @bf16_mfma_unrolled_accumulator_bank(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %initial: reg<amdgpu.vgpr x16>, %tiles: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @bf16_mfma_unrolled_accumulator_bank(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %initial: reg<amdgpu.vgpr x16>, %tiles: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm {
   %c0 = s_mov_b32 0
   %c1 = s_mov_b32 1
   %initial_slot_0 = slice %initial[0] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x4>
   %initial_slot_1 = slice %initial[4] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x4>
   %initial_slot_2 = slice %initial[8] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x4>
   %initial_slot_3 = slice %initial[12] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x4>
-  low.br ^_bb1(%c0: reg<amdgpu.sgpr>, %initial_slot_0: reg<amdgpu.vgpr x4>, %initial_slot_1: reg<amdgpu.vgpr x4>, %initial_slot_2: reg<amdgpu.vgpr x4>, %initial_slot_3: reg<amdgpu.vgpr x4>)
-^_bb1(%tile: reg<amdgpu.sgpr>, %accumulator$115: reg<amdgpu.vgpr x4>, %accumulator_1$116: reg<amdgpu.vgpr x4>, %accumulator$117: reg<amdgpu.vgpr x4>, %accumulator_1$118: reg<amdgpu.vgpr x4>):
-  %125 = s_cmp_lt_i32 %tile, %tiles
-  low.cond_br %125, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+  %130 = v_mov_b32_copy %c0
+  %132 = s_mov_b64_exec_read
+  low.br ^_bb1(%130: reg<amdgpu.vgpr>, %initial_slot_0: reg<amdgpu.vgpr x4>, %initial_slot_1: reg<amdgpu.vgpr x4>, %initial_slot_2: reg<amdgpu.vgpr x4>, %initial_slot_3: reg<amdgpu.vgpr x4>)
+^_bb1(%tile: reg<amdgpu.vgpr>, %accumulator$115: reg<amdgpu.vgpr x4>, %accumulator_1$116: reg<amdgpu.vgpr x4>, %accumulator$117: reg<amdgpu.vgpr x4>, %accumulator_1$118: reg<amdgpu.vgpr x4>):
+  %131 = v_cmp_lt_i32 %tile, %tiles
+  %133, %134 = s_and_saveexec_b64 %131
+  low.cond_br %134, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
-  %126 = copy %accumulator$115 : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
-  %next$127 = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %126
-  %128 = copy %accumulator_1$116 : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
-  %next_1$129 = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %128
-  %130 = copy %accumulator$117 : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
-  %next$131 = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %130
-  %132 = copy %accumulator_1$118 : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
-  %next_1$133 = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %132
-  %134 = s_add_u32 %tile, %c1
-  low.br ^_bb1(%134: reg<amdgpu.sgpr>, %next$127: reg<amdgpu.vgpr x4>, %next_1$129: reg<amdgpu.vgpr x4>, %next$131: reg<amdgpu.vgpr x4>, %next_1$133: reg<amdgpu.vgpr x4>)
+  %135 = copy %accumulator$115 : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %next$136 = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %135
+  %137 = copy %accumulator_1$116 : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %next_1$138 = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %137
+  %139 = copy %accumulator$117 : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %next$140 = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %139
+  %141 = copy %accumulator_1$118 : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %next_1$142 = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %141
+  %143 = v_add_u32 %c1, %tile
+  low.br ^_bb1(%143: reg<amdgpu.vgpr>, %next$136: reg<amdgpu.vgpr x4>, %next_1$138: reg<amdgpu.vgpr x4>, %next$140: reg<amdgpu.vgpr x4>, %next_1$142: reg<amdgpu.vgpr x4>)
 ^_bb3:
+  s_mov_b64_exec %132
   return %accumulator$115, %accumulator_1$116, %accumulator$117, %accumulator_1$118
 }

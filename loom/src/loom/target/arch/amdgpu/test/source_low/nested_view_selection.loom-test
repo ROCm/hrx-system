@@ -21,51 +21,100 @@ func.def @derived_selection(%first: buffer, %second: buffer, %third: buffer, %po
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @derived_selection(%position: reg<amdgpu.sgpr>, %select_first: reg<amdgpu.sgpr>, %select_pair: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @derived_selection(%position: reg<amdgpu.vgpr>, %select_first: reg<amdgpu.sgpr x2>, %select_pair: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %first_aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %second_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %third_aligned = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %base0 = s_mov_b32 4
   %base1 = s_mov_b32 8
   %base2 = s_mov_b32 12
-  %53 = s_mov_b32 0
-  %54 = s_cmp_lg_i32 %select_first, %53
-  low.cond_br %54, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+  %61, %62 = s_and_saveexec_b64 %select_first
+  low.cond_br %62, ^_bb1, ^_bb8 : reg<amdgpu.scc>
 ^_bb1:
-  %84 = slice %first_aligned[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %85 = slice %first_aligned[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  low.br ^_bb3(%84: reg<amdgpu.sgpr>, %85: reg<amdgpu.sgpr>, %base0: reg<amdgpu.sgpr>)
+  %75 = slice %first_aligned[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %76 = v_mov_b32_copy %75
+  %77 = slice %first_aligned[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %78 = v_mov_b32_copy %77
+  %79 = concat(%76, %78) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %80 = v_mov_b32_copy %base0
+  low.br ^_bb7(%79: reg<amdgpu.vgpr x2>, %80: reg<amdgpu.vgpr>)
+^_bb7(%pair_root$47: reg<amdgpu.vgpr x2>, %pair_offset$48: reg<amdgpu.vgpr>):
+  %74 = s_andn2_b64_exec %61, %select_first
+  low.cond_br %74, ^_bb2, ^_bb9 : reg<amdgpu.scc>
 ^_bb2:
-  %86 = slice %second_aligned[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %87 = slice %second_aligned[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  low.br ^_bb3(%86: reg<amdgpu.sgpr>, %87: reg<amdgpu.sgpr>, %base1: reg<amdgpu.sgpr>)
-^_bb3(%82: reg<amdgpu.sgpr>, %83: reg<amdgpu.sgpr>, %pair_offset: reg<amdgpu.sgpr>):
-  %56 = concat(%position, %53) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %57 = s_mov_b32 2
-  %61 = s_lshl_b64 %56, %57
-  %62 = slice %61[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %63 = s_add_u32 %pair_offset, %62
-  %65 = s_cmp_lg_i32 %select_pair, %53
-  low.cond_br %65, ^_bb4, ^_bb5 : reg<amdgpu.scc>
+  %81 = slice %second_aligned[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %82 = v_mov_b32_copy %81
+  %83 = slice %second_aligned[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %84 = v_mov_b32_copy %83
+  %86 = v_mov_b32_copy %base1
+  s_mov_b64_exec %61
+  %67 = slice %pair_root$47[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %68 = v_cndmask_b32 %82, %67, %select_first
+  %70 = slice %pair_root$47[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %71 = v_cndmask_b32 %84, %70, %select_first
+  %72 = concat(%68, %71) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %73 = v_cndmask_b32 %86, %pair_offset$48, %select_first
+  low.br ^_bb3(%72: reg<amdgpu.vgpr x2>, %73: reg<amdgpu.vgpr>)
+^_bb3(%pair_root$43: reg<amdgpu.vgpr x2>, %pair_offset$44: reg<amdgpu.vgpr>):
+  %87 = v_mov_b32 0
+  %88 = concat(%position, %87) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %89 = s_mov_b32 2
+  %93 = v_lshlrev_b64 %89, %88
+  %94 = slice %93[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %95 = v_add_u32 %pair_offset$44, %94
+  %96, %97 = s_and_saveexec_b64 %select_pair
+  low.cond_br %97, ^_bb4, ^_bb11 : reg<amdgpu.scc>
 ^_bb4:
-  low.br ^_bb6(%82: reg<amdgpu.sgpr>, %83: reg<amdgpu.sgpr>, %63: reg<amdgpu.sgpr>)
+  %131 = slice %pair_root$43[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %132 = slice %pair_root$43[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  low.br ^_bb10(%131: reg<amdgpu.vgpr>, %132: reg<amdgpu.vgpr>, %95: reg<amdgpu.vgpr>)
+^_bb10(%129: reg<amdgpu.vgpr>, %130: reg<amdgpu.vgpr>, %selected_offset$52: reg<amdgpu.vgpr>):
+  %109 = s_andn2_b64_exec %96, %select_pair
+  low.cond_br %109, ^_bb5, ^_bb12 : reg<amdgpu.scc>
 ^_bb5:
-  %80 = slice %third_aligned[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %81 = slice %third_aligned[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  low.br ^_bb6(%80: reg<amdgpu.sgpr>, %81: reg<amdgpu.sgpr>, %base2: reg<amdgpu.sgpr>)
-^_bb6(%76: reg<amdgpu.sgpr>, %77: reg<amdgpu.sgpr>, %selected_offset: reg<amdgpu.sgpr>):
-  %66 = v_mov_b32 0
-  %70, %71 = s_add_co_u32 %76, %selected_offset
-  %72, %73 = s_addc_u32 %77, %53, %71
-  %74 = concat(%70, %72) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %value = global_load_b32_saddr %66, %74
+  %110 = slice %third_aligned[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %111 = v_mov_b32_copy %110
+  %112 = slice %third_aligned[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %113 = v_mov_b32_copy %112
+  %115 = v_mov_b32_copy %base2
+  s_mov_b64_exec %96
+  %103 = v_cndmask_b32 %111, %129, %select_pair
+  %106 = v_cndmask_b32 %113, %130, %select_pair
+  %108 = v_cndmask_b32 %115, %selected_offset$52, %select_pair
+  low.br ^_bb6(%103: reg<amdgpu.vgpr>, %106: reg<amdgpu.vgpr>, %108: reg<amdgpu.vgpr>)
+^_bb6(%125: reg<amdgpu.vgpr>, %126: reg<amdgpu.vgpr>, %selected_offset$46: reg<amdgpu.vgpr>):
+  %118 = v_mov_b32 0
+  %119, %120 = v_add_co_u32 %125, %selected_offset$46
+  %121, %122 = v_add_co_ci_u32 %126, %118, %120
+  %123 = concat(%119, %121) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %value = global_load_b32_vaddr %123
   return %value
+^_bb8:
+  s_mov_b64_exec %61
+  %63 = v_mov_b32 0
+  %64 = concat(%63, %63) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.br ^_bb7(%64: reg<amdgpu.vgpr x2>, %63: reg<amdgpu.vgpr>)
+^_bb9:
+  s_mov_b64_exec %61
+  low.br ^_bb3(%pair_root$47: reg<amdgpu.vgpr x2>, %pair_offset$48: reg<amdgpu.vgpr>)
+^_bb11:
+  s_mov_b64_exec %96
+  %98 = v_mov_b32 0
+  low.br ^_bb10(%98: reg<amdgpu.vgpr>, %98: reg<amdgpu.vgpr>, %98: reg<amdgpu.vgpr>)
+^_bb12:
+  s_mov_b64_exec %96
+  low.br ^_bb6(%129: reg<amdgpu.vgpr>, %130: reg<amdgpu.vgpr>, %selected_offset$52: reg<amdgpu.vgpr>)
 }
 
 // ====
 
 // Nested selections compose with structured side effects and explicit CFG.
-func.def @selection_with_side_effects(%first: buffer, %second: buffer, %third: buffer, %select_first: i1, %select_pair: i1, %enter: i1, %side: i1, %initial: i32) -> (i32) {
+kernel.def @selection_with_side_effects() {
+  %launch_unit = index.constant 1 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_unit, %launch_unit, %launch_unit) : index
+} launch(%first: buffer, %second: buffer, %third: buffer, %select_first: i1, %select_pair: i1, %enter: i1, %side: i1, %initial: i32, %result_buffer_0: buffer) {
+  %result_base = index.constant 0 : offset
+  %result_view_0 = buffer.view %result_buffer_0[%result_base] : buffer -> view<1xi32>
   %base = index.constant 0 : offset
   %first_aligned = buffer.assume.alignment %first {minimum_alignment = 4} : buffer
   %second_aligned = buffer.assume.alignment %second {minimum_alignment = 4} : buffer
@@ -84,46 +133,69 @@ func.def @selection_with_side_effects(%first: buffer, %second: buffer, %third: b
 ^consumer:
   %selected = scf.select %select_pair, %pair, %third_view : view<1xi32>
   %result = view.load %selected[0] : view<1xi32> -> i32
-  func.return %result : i32
+  view.store %result, %result_view_0[0] : i32, view<1xi32>
+  kernel.return
 ^exit:
-  func.return %initial : i32
+  view.store %initial, %result_view_0[0] : i32, view<1xi32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @selection_with_side_effects(%select_first: reg<amdgpu.sgpr>, %select_pair: reg<amdgpu.sgpr>, %enter: reg<amdgpu.sgpr>, %side: reg<amdgpu.sgpr>, %initial: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 5, direct_arg_count = 5, direct_arg_names = {arg0 = "select_first", arg1 = "select_pair", arg2 = "enter", arg3 = "side", arg4 = "initial"}, direct_arg_offsets = [24, 28, 32, 36, 40], direct_arg_parameter_indices = [3, 4, 5, 6, 7], direct_arg_payload_sizes = [1, 1, 1, 1, 4], direct_arg_sizes = [4, 4, 4, 4, 4], parameter_count = 9, resource_count = 4, resource_offsets = [0, 8, 16, 48], resource_parameter_indices = [0, 1, 2, 8], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @selection_with_side_effects(%select_first$33: reg<amdgpu.sgpr>, %select_pair$34: reg<amdgpu.sgpr>, %enter$35: reg<amdgpu.sgpr>, %side$36: reg<amdgpu.sgpr>, %initial: reg<amdgpu.sgpr>) asm {
   %first_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %second_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %third_view = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %41 = s_mov_b32 0
-  %42 = s_cmp_lg_i32 %enter, %41
-  low.cond_br %42, ^producer, ^exit : reg<amdgpu.scc>
+  %result_view_0 = resource<hal_binding> {extent = 4, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %select_first$44 = s_bfe_u32_lit %select_first$33, 524288
+  %select_pair$45 = s_bfe_u32_lit %select_pair$34, 524288
+  %enter$46 = s_bfe_u32_lit %enter$35, 524288
+  %side$47 = s_bfe_u32_lit %side$36, 524288
+  %48 = s_mov_b32 0
+  %49 = s_cmp_lg_i32 %enter$46, %48
+  low.cond_br %49, ^producer, ^exit : reg<amdgpu.scc>
 ^producer:
-  %43 = v_mov_b32_copy %initial
-  %44 = v_mov_b32 0
-  global_store_b32_saddr %44, %43, %third_view
-  %46 = s_cmp_lg_i32 %side, %41
-  low.cond_br %46, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+  %50 = v_mov_b32_copy %initial
+  %51 = v_mov_b32 0
+  global_store_b32_saddr %51, %50, %third_view
+  %53 = s_cmp_lg_i32 %side$47, %48
+  low.cond_br %53, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
-  global_store_b32_saddr %44, %43, %first_view
+  global_store_b32_saddr %51, %50, %first_view
   low.br ^_bb3
 ^_bb3:
-  %50 = s_cmp_lg_i32 %select_first, %41
-  low.cond_br %50, ^_bb4, ^_bb5 : reg<amdgpu.scc>
+  %57 = s_cmp_lg_i32 %select_first$44, %48
+  low.cond_br %57, ^_bb4, ^_bb5 : reg<amdgpu.scc>
 ^_bb4:
-  low.br ^_bb6(%first_view: reg<amdgpu.sgpr x2>)
+  %58 = slice %first_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %59 = v_mov_b32_copy %58
+  %60 = slice %first_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %61 = v_mov_b32_copy %60
+  low.br ^_bb6(%59: reg<amdgpu.vgpr>, %61: reg<amdgpu.vgpr>)
 ^_bb5:
-  low.br ^_bb6(%second_aligned: reg<amdgpu.sgpr x2>)
-^_bb6(%pair_root: reg<amdgpu.sgpr x2>):
-  %52 = s_cmp_lg_i32 %select_pair, %41
-  low.cond_br %52, ^_bb7, ^_bb8 : reg<amdgpu.scc>
+  %63 = slice %second_aligned[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %64 = v_mov_b32_copy %63
+  %65 = slice %second_aligned[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %66 = v_mov_b32_copy %65
+  low.br ^_bb6(%64: reg<amdgpu.vgpr>, %66: reg<amdgpu.vgpr>)
+^_bb6(%86: reg<amdgpu.vgpr>, %87: reg<amdgpu.vgpr>):
+  %69 = s_cmp_lg_i32 %select_pair$45, %48
+  low.cond_br %69, ^_bb7, ^_bb8 : reg<amdgpu.scc>
 ^_bb7:
-  low.br ^_bb9(%pair_root: reg<amdgpu.sgpr x2>)
+  low.br ^_bb9(%86: reg<amdgpu.vgpr>, %87: reg<amdgpu.vgpr>)
 ^_bb8:
-  low.br ^_bb9(%third_view: reg<amdgpu.sgpr x2>)
-^_bb9(%selected: reg<amdgpu.sgpr x2>):
-  %result = global_load_b32_saddr %44, %selected
-  return %result
+  %70 = slice %third_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %71 = v_mov_b32_copy %70
+  %72 = slice %third_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %73 = v_mov_b32_copy %72
+  low.br ^_bb9(%71: reg<amdgpu.vgpr>, %73: reg<amdgpu.vgpr>)
+^_bb9(%82: reg<amdgpu.vgpr>, %83: reg<amdgpu.vgpr>):
+  %77 = concat(%82, %83) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %result = global_load_b32_vaddr %77
+  global_store_b32_saddr %51, %result, %result_view_0
+  return
 ^exit:
-  %55 = v_mov_b32_copy %initial
-  return %55
+  %80 = v_mov_b32_copy %initial
+  %81 = v_mov_b32 0
+  global_store_b32_saddr %81, %80, %result_view_0
+  return
 }

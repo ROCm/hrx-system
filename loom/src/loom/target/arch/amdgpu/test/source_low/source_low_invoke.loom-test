@@ -171,7 +171,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@caller_target) abi(hal_kernel) @target
 // and indices without giving low.invoke an interprocedural fact environment.
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@target) @bounded_identity(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) where [multiple_of(%value, 16)] asm {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @bounded_identity(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) where [multiple_of(%value, 16)] asm {
   return %value
 }
 
@@ -181,9 +181,9 @@ func.def target(@target) @scalar_argument_contract(%value: index) -> (index) whe
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_argument_contract(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) where [range(%value, 1, 1024), multiple_of(%value, 16)] asm {
-  %7 = low.assume %value [multiple_of(%value, 16)] : reg<amdgpu.sgpr>
-  %9 = copy %7 : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_argument_contract(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) where [range(%value, 1, 1024), multiple_of(%value, 16)] asm {
+  %7 = low.assume %value [multiple_of(%value, 16)] : reg<amdgpu.vgpr>
+  %9 = copy %7 : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
   return %9
 }
 
@@ -365,25 +365,37 @@ low.func.def target<amdgpu.rdna3.core>(@target) @mask_word(%condition: reg<amdgp
   return %result
 }
 
-func.def target(@target) @uniform_helper_mask(%value: index) -> (vector<1xi32>) {
+kernel.def target(@target) @uniform_helper_mask() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: index, %output: buffer) {
   %c0 = index.constant 0 : index
-  %condition = index.cmp slt, %value, %c0 : index
+  %condition = index.cmp sgt, %value, %c0 : index
   %result = low.invoke @mask_word(%condition) : (i1) -> (vector<1xi32>)
-  func.return %result : vector<1xi32>
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<64xi32>
+  vector.store %result, %view[%lane] : vector<1xi32>, view<64xi32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @uniform_helper_mask(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %c0$12 = s_mov_b32 0
-  %condition = s_cmp_lt_i32 %value, %c0$12
-  %14 = s_mov_b64_exec_read
-  %15 = slice %14[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %16 = slice %14[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %18 = s_cselect_b32 %15, %c0$12, %condition
-  %19 = s_cselect_b32 %16, %c0$12, %condition
-  %20 = concat(%18, %19) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_helper_mask(%value: reg<amdgpu.sgpr>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %c0$18 = s_mov_b32 0
+  %condition = s_cmp_gt_i32 %value, %c0$18
+  %20 = s_mov_b64_exec_read
+  %21 = slice %20[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %22 = slice %20[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %24 = s_cselect_b32 %21, %c0$18, %condition
+  %25 = s_cselect_b32 %22, %c0$18, %condition
+  %26 = concat(%24, %25) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %c0$2 = v_mov_b32 0
   %c1 = v_mov_b32 1
-  %result = v_cndmask_b32 %c0$2, %c1, %20
-  return %result
+  %result = v_cndmask_b32 %c0$2, %c1, %26
+  %28 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %28, %result, %view
+  return
 }

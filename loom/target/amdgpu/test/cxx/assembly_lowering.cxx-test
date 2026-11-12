@@ -37,11 +37,9 @@ unsigned pack(unsigned even, unsigned odd) {
 }
 
 // ----
-low.func.def public target<amdgpu.rdna3_5.core>(@__loom_target_context_0_0) abi(hal_kernel) @pack(%even: reg<amdgpu.sgpr>, %odd: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %3 = v_mov_b32_copy %even
-  %4 = v_mov_b32_copy %odd
+low.func.def public target<amdgpu.rdna3_5.core>(@__loom_target_context_0_0) abi(hal_kernel) @pack(%even: reg<amdgpu.vgpr>, %odd: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %selector = s_mov_b32 84148480
-  %packed = v_perm_b32 %4, %3, %selector
+  %packed = v_perm_b32 %odd, %even, %selector
   return %packed
 }
 

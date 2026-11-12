@@ -2,31 +2,43 @@
 
 amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @i32_uniform_vector_bitcast(%input: buffer) -> (vector<4xf32>) {
+kernel.def target(@target) @i32_uniform_vector_bitcast() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%input: buffer, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64x4xf32>
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
   %input_noalias = buffer.assume.noalias %input_global : buffer
   %input_view = buffer.view %input_noalias[%base] : buffer -> view<4xi32>
   %loaded = vector.load %input_view[0] : view<4xi32> -> vector<4xi32>
   %floats = vector.bitcast %loaded : vector<4xi32> to vector<4xf32>
-  func.return %floats : vector<4xf32>
+  vector.store %floats, %result_view_0[%fixture_lane, 0] : vector<4xf32>, view<64x4xf32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_uniform_vector_bitcast() -> (reg<amdgpu.vgpr x4>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @i32_uniform_vector_bitcast() asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %10 = s_mov_b32 0
-  %loaded = s_load_dwordx4 %input_view, %10
-  %12 = slice %loaded[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %13 = v_mov_b32_copy %12
-  %14 = slice %loaded[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %15 = v_mov_b32_copy %14
-  %16 = slice %loaded[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %17 = v_mov_b32_copy %16
-  %18 = slice %loaded[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %19 = v_mov_b32_copy %18
-  %floats = concat(%13, %15, %17, %19) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  return %floats
+  %result_view_0 = resource<hal_binding> {extent = 1024, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %19 = s_mov_b32 0
+  %loaded = s_load_dwordx4 %input_view, %19
+  %21 = slice %loaded[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %22 = v_mov_b32_copy %21
+  %23 = slice %loaded[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %24 = v_mov_b32_copy %23
+  %25 = slice %loaded[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %26 = v_mov_b32_copy %25
+  %27 = slice %loaded[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %28 = v_mov_b32_copy %27
+  %floats = concat(%22, %24, %26, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %30 = v_lshlrev_b32_src0_inline %fixture_lane, 4
+  global_store_b128_saddr %30, %floats, %result_view_0
+  return
 }
 
 // ====

@@ -79,24 +79,28 @@ func.def target(@target) @while_carries_bitcast_vgpr(%pattern: f64, %mask: i64, 
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @while_carries_bitcast_vgpr(%bits: reg<amdgpu.vgpr x2>, %mask: reg<amdgpu.sgpr x2>, %iteration_count: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @while_carries_bitcast_vgpr(%bits: reg<amdgpu.vgpr x2>, %mask: reg<amdgpu.vgpr x2>, %iteration_count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
   %c0 = s_mov_b32 0
   %c1 = s_mov_b32 1
-  low.br ^_bb1(%c0: reg<amdgpu.sgpr>, %bits: reg<amdgpu.vgpr x2>)
-^_bb1(%i: reg<amdgpu.sgpr>, %state: reg<amdgpu.vgpr x2>):
-  %37 = s_cmp_lt_i32 %i, %iteration_count
-  low.cond_br %37, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+  %39 = v_mov_b32_copy %c0
+  %41 = s_mov_b64_exec_read
+  low.br ^_bb1(%39: reg<amdgpu.vgpr>, %bits: reg<amdgpu.vgpr x2>)
+^_bb1(%i: reg<amdgpu.vgpr>, %state: reg<amdgpu.vgpr x2>):
+  %40 = v_cmp_lt_i32 %i, %iteration_count
+  %42, %43 = s_and_saveexec_b64 %40
+  low.cond_br %43, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
-  %38 = slice %mask[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %39 = slice %state[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %40 = v_xor_b32 %38, %39
-  %41 = slice %mask[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %42 = slice %state[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %43 = v_xor_b32 %41, %42
-  %next_state = concat(%40, %43) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %45 = s_add_u32 %i, %c1
-  low.br ^_bb1(%45: reg<amdgpu.sgpr>, %next_state: reg<amdgpu.vgpr x2>)
+  %44 = slice %state[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %45 = slice %mask[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %46 = v_xor_b32 %44, %45
+  %47 = slice %state[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %48 = slice %mask[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %49 = v_xor_b32 %47, %48
+  %next_state = concat(%46, %49) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %51 = v_add_u32 %c1, %i
+  low.br ^_bb1(%51: reg<amdgpu.vgpr>, %next_state: reg<amdgpu.vgpr x2>)
 ^_bb3:
+  s_mov_b64_exec %41
   return %state
 }
 
@@ -122,35 +126,38 @@ func.def target(@target) @while_carries_nested_divergent_select(%values: vector<
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @while_carries_nested_divergent_select(%values: reg<amdgpu.vgpr x2>, %iteration_count: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @while_carries_nested_divergent_select(%values: reg<amdgpu.vgpr x2>, %iteration_count: reg<amdgpu.vgpr>, %limit: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %c0 = s_mov_b32 0
   %c1 = s_mov_b32 1
   %less = v_cmp_lt_i32 %lane, %limit
   %selected = v_cndmask_b32_src0_lit_src1_inline %less {imm32 = 0, true_value = 1}
-  %46 = v_mov_b32 1
-  %next_order = v_sub_nc_u32 %46, %selected
-  %48 = v_mov_b32 0
-  low.br ^_bb1(%c0: reg<amdgpu.sgpr>, %48: reg<amdgpu.vgpr>)
-^_bb1(%i: reg<amdgpu.sgpr>, %final_order: reg<amdgpu.vgpr>):
-  %49 = s_cmp_lt_i32 %i, %iteration_count
-  low.cond_br %49, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+  %48 = v_mov_b32 1
+  %next_order = v_sub_nc_u32 %48, %selected
+  %50 = v_mov_b32_copy %c0
+  %51 = v_mov_b32 0
+  %53 = s_mov_b64_exec_read
+  low.br ^_bb1(%50: reg<amdgpu.vgpr>, %51: reg<amdgpu.vgpr>)
+^_bb1(%i: reg<amdgpu.vgpr>, %final_order: reg<amdgpu.vgpr>):
+  %52 = v_cmp_lt_i32 %i, %iteration_count
+  %54, %55 = s_and_saveexec_b64 %52
+  low.cond_br %55, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
-  %50 = s_add_u32 %i, %c1
-  low.br ^_bb1(%50: reg<amdgpu.sgpr>, %next_order: reg<amdgpu.vgpr>)
+  %56 = v_add_u32 %c1, %i
+  low.br ^_bb1(%56: reg<amdgpu.vgpr>, %next_order: reg<amdgpu.vgpr>)
 ^_bb3:
+  s_mov_b64_exec %53
   return %final_order
 }
 
 // ====
 
-// RUN: with-checks emit source-low output=low
+// RUN: emit source-low output=low
 
 amdgpu.target<gfx9-4-generic> @target
 
-// The late vector select makes %choose a native mask and thereby forces
-// %final_value through the scalar select into VGPR. The loop placement cycle
-// must not retain the provisional SGPR answer observed at its backedge.
+// An unproven loop bound requires per-lane state regardless of whether its
+// exits feed scalar or vector selects.
 func.def target(@target) @loop_carrier_late_vgpr_demand(%seed: i32, %count: i32, %true_vector: vector<2xi32>, %false_vector: vector<2xi32>) -> (i32, vector<2xi32>) {
   %c0 = scalar.constant 0 : i32
   %c1 = scalar.constant 1 : i32
@@ -172,13 +179,37 @@ func.def target(@target) @loop_carrier_late_vgpr_demand(%seed: i32, %count: i32,
 }
 
 // ----
-CHECK: low.func.def *@loop_carrier_late_vgpr_demand(* -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
-CHECK: low.br ^*(%c0: reg<amdgpu.sgpr>, *: reg<amdgpu.vgpr>)
-CHECK: ^*(%i: reg<amdgpu.sgpr>, %value: reg<amdgpu.vgpr>):
-CHECK: %incremented = v_add_u32 %value, *
-CHECK: %next_value = v_cndmask_b32 *
-CHECK: * = s_add_u32 %i, %c1
-CHECK: low.br ^*(*: reg<amdgpu.sgpr>, %next_value: reg<amdgpu.vgpr>)
+low.func.def target<amdgpu.gfx9_4.generic.core>(@target) abi(hal_kernel) @loop_carrier_late_vgpr_demand(%seed: reg<amdgpu.vgpr>, %count: reg<amdgpu.vgpr>, %true_vector: reg<amdgpu.vgpr x2>, %false_vector: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
+  %choose = v_cmp_ne_i32_src1_inline %count {rhs = 0}
+  %c0 = s_mov_b32 0
+  %c1 = s_mov_b32 1
+  %50 = v_mov_b32_copy %c0
+  %52 = s_mov_b64_exec_read
+  low.br ^_bb1(%50: reg<amdgpu.vgpr>, %seed: reg<amdgpu.vgpr>)
+^_bb1(%i: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>):
+  %51 = v_cmp_lt_i32 %i, %count
+  %53, %54 = s_and_saveexec_b64 %51
+  low.cond_br %54, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %parity = v_and_b32_src0_inline %i, 1
+  %odd = v_cmp_ne_i32_src1_inline %parity {rhs = 0}
+  %57 = v_mov_b32 1
+  %incremented = v_add_u32 %value, %57
+  %next_value = v_cndmask_b32 %incremented, %value, %odd
+  %60 = v_add_u32 %c1, %i
+  low.br ^_bb1(%60: reg<amdgpu.vgpr>, %next_value: reg<amdgpu.vgpr>)
+^_bb3:
+  s_mov_b64_exec %52
+  %selected_value = v_cndmask_b32 %seed, %value, %choose
+  %62 = slice %true_vector[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %63 = slice %false_vector[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %64 = v_cndmask_b32 %63, %62, %choose
+  %65 = slice %true_vector[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %66 = slice %false_vector[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %67 = v_cndmask_b32 %66, %65, %choose
+  %selected_vector = concat(%64, %67) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %selected_value, %selected_vector
+}
 
 // ====
 

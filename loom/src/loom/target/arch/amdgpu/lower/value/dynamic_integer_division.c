@@ -301,7 +301,7 @@ static iree_status_t loom_amdgpu_initialize_division_reciprocal(
       loom_low_lower_context_descriptor_set(context)->stable_id,
       plan->register_class_id, 1);
   loom_value_id_t divisor = loom_low_lower_lookup_value(context, plan->rhs);
-  IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_scalar_carrier(
+  IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_numeric_carrier(
       context, source_op, divisor, word_type, &divisor));
   if (loom_amdgpu_integer_division_domain(source_op) ==
       LOOM_AMDGPU_INTEGER_DIVISION_DOMAIN_SIGNED) {
@@ -368,9 +368,9 @@ iree_status_t loom_amdgpu_lower_dynamic_u32_division(
     const loom_type_t required_type = loom_low_register_type(
         loom_low_lower_context_descriptor_set(context)->stable_id,
         plan->register_class_id, 1);
-    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_scalar_carrier(
+    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_numeric_carrier(
         context, source_op, dividend, required_type, &dividend));
-    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_scalar_carrier(
+    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_numeric_carrier(
         context, source_op, divisor, required_type, &divisor));
   } else if (plan->register_class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_vgpr_b32(

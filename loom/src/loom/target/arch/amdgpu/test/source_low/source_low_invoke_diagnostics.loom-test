@@ -75,7 +75,7 @@ func.def target(@target) @contradicted_precondition() -> (index) {
 
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@target) @ordered_pair(%lower: reg<amdgpu.sgpr>, %upper: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) where [le(%lower, %upper)] asm {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @ordered_pair(%lower: reg<amdgpu.vgpr>, %upper: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) where [le(%lower, %upper)] asm {
   return %lower, %upper
 }
 
@@ -87,10 +87,10 @@ func.def target(@target) @proven_relational_precondition(%lower: index, %upper: 
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @proven_relational_precondition(%lower: reg<amdgpu.sgpr>, %upper: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) where [lt(%lower, %upper)] asm {
-  %14, %15 = low.assume %lower, %upper [le(%lower, %upper)] : reg<amdgpu.sgpr>, reg<amdgpu.sgpr>
-  %18 = copy %14 : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
-  %19 = copy %15 : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @proven_relational_precondition(%lower: reg<amdgpu.vgpr>, %upper: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) where [lt(%lower, %upper)] asm {
+  %14, %15 = low.assume %lower, %upper [le(%lower, %upper)] : reg<amdgpu.vgpr>, reg<amdgpu.vgpr>
+  %18 = copy %14 : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
+  %19 = copy %15 : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
   return %18, %19
 }
 
@@ -165,12 +165,28 @@ func.def target(@target) @varying_helper_argument(%value: vector<1xi32>) -> (vec
 
 amdgpu.target<gfx1100> @target
 
+low.func.def target<amdgpu.rdna3.core>(@target) @scalar_input(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %result = v_mov_b32_copy %value
+  return %result
+}
+
+// A scalar source type does not prove that every lane supplies the same value.
+func.def target(@target) @unknown_scalar_argument(%value: i32) -> (i32) {
+  // ERROR@+1: TARGET/074 {callee_name="scalar_input", value_kind="operand", actual_type="reg<amdgpu.vgpr>", expected_type="reg<amdgpu.sgpr>"}
+  %result = low.invoke @scalar_input(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
 low.func.def target<amdgpu.rdna3.core>(@target) @packet_input(%value: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   return %value
 }
 
 func.def target(@target) @wrong_address_width(%value: index) -> (vector<4xi32>) {
-  // ERROR@+1: TARGET/074 {callee_name="packet_input", value_kind="operand", actual_type="reg<amdgpu.sgpr>", expected_type="reg<amdgpu.vgpr x4>"}
+  // ERROR@+1: TARGET/074 {callee_name="packet_input", value_kind="operand", actual_type="reg<amdgpu.vgpr>", expected_type="reg<amdgpu.vgpr x4>"}
   %result = low.invoke @packet_input(%value) : (index) -> (vector<4xi32>)
   func.return %result : vector<4xi32>
 }

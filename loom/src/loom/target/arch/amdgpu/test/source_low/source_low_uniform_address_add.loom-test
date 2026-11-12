@@ -2,42 +2,76 @@
 
 amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @uniform_lhs(%values: vector<2xi32>, %step: index) -> (i32) {
+kernel.def target(@target) @uniform_lhs() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%values_buffer: buffer, %step: index, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %values_view = buffer.view %values_buffer[%fixture_base] : buffer -> view<64x2xi32>
+  %values = vector.load %values_view[%fixture_lane, 0] : view<64x2xi32> -> vector<2xi32>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi32>
   %value = vector.extract %values[0] : vector<2xi32> -> i32
   %position = index.cast %value : i32 to index
   %next = index.add %step, %position : index
   %result = index.cast %next : index to i32
-  func.return %result : i32
+  view.store %result, %result_view_0[%fixture_lane] : i32, view<64xi32>
+  kernel.return
 }
 
 // ----
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @uniform_lhs(%values: reg<amdgpu.vgpr x2>, %step: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "step"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_lhs(%step: reg<amdgpu.sgpr>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %values_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %18 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  %values = global_load_b64_saddr %18, %values_view
   %position = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %result = v_add_u32 %step, %position
-  return %result
+  %22 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_b32_saddr %22, %result, %result_view_0
+  return
 }
 
 // ====
 
 amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @uniform_rhs(%values: vector<2xi32>, %step: index) -> (i32) {
+kernel.def target(@target) @uniform_rhs() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%values_buffer: buffer, %step: index, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %values_view = buffer.view %values_buffer[%fixture_base] : buffer -> view<64x2xi32>
+  %values = vector.load %values_view[%fixture_lane, 0] : view<64x2xi32> -> vector<2xi32>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi32>
   %value = vector.extract %values[0] : vector<2xi32> -> i32
   %position = index.cast %value : i32 to index
   %next = index.add %position, %step : index
   %result = index.cast %next : index to i32
-  func.return %result : i32
+  view.store %result, %result_view_0[%fixture_lane] : i32, view<64xi32>
+  kernel.return
 }
 
 // ----
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @uniform_rhs(%values: reg<amdgpu.vgpr x2>, %step: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "step"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_rhs(%step: reg<amdgpu.sgpr>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %values_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %18 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  %values = global_load_b64_saddr %18, %values_view
   %position = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %result = v_add_u32 %step, %position
-  return %result
+  %22 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_b32_saddr %22, %result, %result_view_0
+  return
 }
 
 // ====
@@ -124,10 +158,10 @@ func.def target(@target) @bounded_offset_lhs(%values: vector<2xi64>, %wide_step:
 // ----
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bounded_offset_lhs(%values: reg<amdgpu.vgpr x4>, %step: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bounded_offset_lhs(%values: reg<amdgpu.vgpr x4>, %step: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %position = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
   %bounded_position = slice %position[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %15 = slice %step[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %15 = slice %step[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %result = v_add_u32 %15, %bounded_position
   return %result
 }
@@ -150,11 +184,11 @@ func.def target(@target) @bounded_offset_rhs(%values: vector<2xi64>, %wide_step:
 // ----
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bounded_offset_rhs(%values: reg<amdgpu.vgpr x4>, %step: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bounded_offset_rhs(%values: reg<amdgpu.vgpr x4>, %step: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %position = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
   %bounded_position = slice %position[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %15 = slice %step[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %result = v_add_u32 %15, %bounded_position
+  %15 = slice %step[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %result = v_add_u32 %bounded_position, %15
   return %result
 }
 
@@ -162,17 +196,37 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bounded
 
 amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @uniform_result(%position: index, %step: index) -> (index) {
+kernel.def target(@target) @uniform_result() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%position: index, %step: index, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi64>
   %result = index.add %position, %step : index
-  func.return %result : index
+  %result_storage_0 = index.cast %result : index to i64
+  view.store %result_storage_0, %result_view_0[%fixture_lane] : i64, view<64xi64>
+  kernel.return
 }
 
 // ----
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @uniform_result(%position: reg<amdgpu.sgpr>, %step: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "position", arg1 = "step"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 3, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_result(%position: reg<amdgpu.sgpr>, %step: reg<amdgpu.sgpr>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %result_view_0 = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %result = s_add_u32 %position, %step
-  return %result
+  %15 = s_ashr_i32_rhs_inline %result, 31
+  %result_storage_0 = concat(%result, %15) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %17 = slice %result_storage_0[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %18 = v_mov_b32_copy %17
+  %19 = slice %result_storage_0[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %20 = v_mov_b32_copy %19
+  %21 = concat(%18, %20) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %22 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  global_store_b64_saddr %22, %21, %result_view_0
+  return
 }
 
 // ====
@@ -214,9 +268,8 @@ func.def target(@target) @ordered_subtraction(%values: vector<2xi32>, %step: ind
 // ----
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @ordered_subtraction(%values: reg<amdgpu.vgpr x2>, %step: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @ordered_subtraction(%values: reg<amdgpu.vgpr x2>, %step: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %position = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %11 = v_mov_b32_copy %step
-  %result = v_sub_nc_u32 %position, %11
+  %result = v_sub_nc_u32 %position, %step
   return %result
 }

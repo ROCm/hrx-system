@@ -48,11 +48,11 @@ func.def @convert_to_f64(%signed32: i32, %unsigned32: i32, %signed64: i64, %unsi
 }
 
 // ----
-low.func.def target<amdgpu.rdna3.core> abi(hal_kernel) @convert_to_f64(%signed32: reg<amdgpu.sgpr>, %unsigned32: reg<amdgpu.sgpr>, %signed64: reg<amdgpu.sgpr x2>, %unsigned64: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.rdna3.core> abi(hal_kernel) @convert_to_f64(%signed32: reg<amdgpu.vgpr>, %unsigned32: reg<amdgpu.vgpr>, %signed64: reg<amdgpu.vgpr x2>, %unsigned64: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
   %signed32_result = v_cvt_f64_i32 %signed32
   %unsigned32_result = v_cvt_f64_u32 %unsigned32
-  %22 = slice %signed64[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %23 = slice %signed64[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %22 = slice %signed64[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %23 = slice %signed64[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %24 = v_cvt_f64_u32 %22
   %25 = v_cvt_f64_i32 %23
   %26 = v_mov_b32 0
@@ -60,8 +60,8 @@ low.func.def target<amdgpu.rdna3.core> abi(hal_kernel) @convert_to_f64(%signed32
   %28 = concat(%26, %27) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   %29 = v_mul_f64 %25, %28
   %signed64_result = v_add_f64 %29, %24
-  %31 = slice %unsigned64[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %32 = slice %unsigned64[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %31 = slice %unsigned64[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %32 = slice %unsigned64[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %33 = v_cvt_f64_u32 %31
   %34 = v_cvt_f64_u32 %32
   %37 = concat(%26, %27) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>

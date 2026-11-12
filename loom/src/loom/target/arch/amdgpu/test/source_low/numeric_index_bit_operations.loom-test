@@ -2,31 +2,80 @@
 
 amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @uniform_index_bits(%input: index, %amount: index) -> (index, index, index, index, index) {
+kernel.def target(@target) @uniform_index_bits() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%input: index, %amount: index, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer, %result_buffer_3: buffer, %result_buffer_4: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi64>
+  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi64>
+  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xi64>
+  %result_view_3 = buffer.view %result_buffer_3[%fixture_base] : buffer -> view<64xi64>
+  %result_view_4 = buffer.view %result_buffer_4[%fixture_base] : buffer -> view<64xi64>
   %left = index.rotli %input, %amount : index
   %right = index.rotri %input, %amount : index
   %leading = index.ctlzi %input : index
   %trailing = index.cttzi %input : index
   %population = index.ctpopi %input : index
-  func.return %left, %right, %leading, %trailing, %population : index, index, index, index, index
+  %result_storage_0 = index.cast %left : index to i64
+  view.store %result_storage_0, %result_view_0[%fixture_lane] : i64, view<64xi64>
+  %result_storage_1 = index.cast %right : index to i64
+  view.store %result_storage_1, %result_view_1[%fixture_lane] : i64, view<64xi64>
+  %result_storage_2 = index.cast %leading : index to i64
+  view.store %result_storage_2, %result_view_2[%fixture_lane] : i64, view<64xi64>
+  %result_storage_3 = index.cast %trailing : index to i64
+  view.store %result_storage_3, %result_view_3[%fixture_lane] : i64, view<64xi64>
+  %result_storage_4 = index.cast %population : index to i64
+  view.store %result_storage_4, %result_view_4[%fixture_lane] : i64, view<64xi64>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @uniform_index_bits(%input: reg<amdgpu.sgpr>, %amount: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
-  %19 = s_mov_b32 32
-  %20 = s_sub_u32 %19, %amount
-  %21 = s_lshl_b32 %input, %amount
-  %22 = s_lshr_b32 %input, %20
-  %left = s_or_b32 %21, %22
-  %26 = s_lshr_b32 %input, %amount
-  %27 = s_lshl_b32 %input, %20
-  %right = s_or_b32 %26, %27
-  %29 = s_clz_i32_u32 %input
-  %leading = s_min_u32 %29, %19
-  %32 = s_ctz_i32_b32 %input
-  %trailing = s_min_u32 %32, %19
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "input", arg1 = "amount"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 7, resource_count = 5, resource_offsets = [8, 16, 24, 32, 40], resource_parameter_indices = [2, 3, 4, 5, 6], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_index_bits(%input: reg<amdgpu.sgpr>, %amount: reg<amdgpu.sgpr>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %result_view_0 = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_1 = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_2 = resource<hal_binding> {extent = 512, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_3 = resource<hal_binding> {extent = 512, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_4 = resource<hal_binding> {extent = 512, index = 4, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %34 = s_mov_b32 32
+  %35 = s_sub_u32 %34, %amount
+  %36 = s_lshl_b32 %input, %amount
+  %37 = s_lshr_b32 %input, %35
+  %left = s_or_b32 %36, %37
+  %41 = s_lshr_b32 %input, %amount
+  %42 = s_lshl_b32 %input, %35
+  %right = s_or_b32 %41, %42
+  %44 = s_clz_i32_u32 %input
+  %leading = s_min_u32 %44, %34
+  %47 = s_ctz_i32_b32 %input
+  %trailing = s_min_u32 %47, %34
   %population = s_bcnt1_i32_b32 %input
-  return %left, %right, %leading, %trailing, %population
+  %51 = s_ashr_i32_rhs_inline %left, 31
+  %54 = v_mov_b32_copy %left
+  %56 = v_mov_b32_copy %51
+  %57 = concat(%54, %56) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %58 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  global_store_b64_saddr %58, %57, %result_view_0
+  %59 = s_ashr_i32_rhs_inline %right, 31
+  %62 = v_mov_b32_copy %right
+  %64 = v_mov_b32_copy %59
+  %65 = concat(%62, %64) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %58, %65, %result_view_1
+  %67 = s_mov_b32 0
+  %70 = v_mov_b32_copy %leading
+  %72 = v_mov_b32_copy %67
+  %73 = concat(%70, %72) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %58, %73, %result_view_2
+  %78 = v_mov_b32_copy %trailing
+  %81 = concat(%78, %72) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %58, %81, %result_view_3
+  %86 = v_mov_b32_copy %population
+  %89 = concat(%86, %72) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %58, %89, %result_view_4
+  return
 }
 
 // ====
@@ -45,18 +94,17 @@ func.def target(@target) @varying_index_bits(%inputs: vector<2xi32>, %amount: in
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @varying_index_bits(%inputs: reg<amdgpu.vgpr x2>, %amount: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @varying_index_bits(%inputs: reg<amdgpu.vgpr x2>, %amount: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %input = slice %inputs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %22 = v_mov_b32 0
-  %23 = v_mov_b32_copy %amount
-  %24 = v_sub_nc_u32 %22, %23
-  %left = v_alignbit_b32 %input, %input, %24
-  %right = v_alignbit_b32 %input, %input, %23
-  %28 = v_clz_i32_u32 %input
-  %29 = v_mov_b32 32
-  %leading = v_min_u32 %28, %29
-  %31 = v_ctz_i32_b32 %input
-  %trailing = v_min_u32 %31, %29
+  %23 = v_sub_nc_u32 %22, %amount
+  %left = v_alignbit_b32 %input, %input, %23
+  %right = v_alignbit_b32 %input, %input, %amount
+  %26 = v_clz_i32_u32 %input
+  %27 = v_mov_b32 32
+  %leading = v_min_u32 %26, %27
+  %29 = v_ctz_i32_b32 %input
+  %trailing = v_min_u32 %29, %27
   %population = v_bcnt_u32_b32_src1_zero %input
   return %left, %right, %leading, %trailing, %population
 }
@@ -76,17 +124,16 @@ func.def target(@target) @cdna_index_counts(%input: index, %inputs: vector<2xi32
 }
 
 // ----
-low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @cdna_index_counts(%input: reg<amdgpu.sgpr>, %inputs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @cdna_index_counts(%input: reg<amdgpu.vgpr>, %inputs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %varying = slice %inputs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %19 = s_flbit_i32_b32 %input
-  %20 = s_mov_b32 32
-  %leading = s_min_u32 %19, %20
-  %22 = s_ff1_i32_b32 %input
-  %trailing = s_min_u32 %22, %20
+  %19 = v_ffbh_u32 %input
+  %20 = v_mov_b32 32
+  %leading = v_min_u32 %19, %20
+  %22 = v_ffbl_b32 %input
+  %trailing = v_min_u32 %22, %20
   %25 = v_ffbh_u32 %varying
-  %26 = v_mov_b32 32
-  %varying_leading = v_min_u32 %25, %26
+  %varying_leading = v_min_u32 %25, %20
   %28 = v_ffbl_b32 %varying
-  %varying_trailing = v_min_u32 %28, %26
+  %varying_trailing = v_min_u32 %28, %20
   return %leading, %trailing, %varying_leading, %varying_trailing
 }

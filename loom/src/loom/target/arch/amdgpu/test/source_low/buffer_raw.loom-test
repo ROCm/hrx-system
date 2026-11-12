@@ -9,26 +9,27 @@ func.def target(@target) @raw_byte_roundtrip(%source: buffer, %source_offset: of
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @raw_byte_roundtrip(%source_offset: reg<amdgpu.sgpr x2>, %target_offset: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @raw_byte_roundtrip(%source_offset: reg<amdgpu.vgpr x2>, %target_offset: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %target = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %11 = v_mov_b32 0
-  %12 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %13 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %14 = slice %source_offset[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %15 = slice %source_offset[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %16, %17 = s_add_co_u32 %12, %14
-  %18, %19 = s_addc_u32 %13, %15, %17
-  %20 = concat(%16, %18) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %byte = global_load_u8_saddr %11, %20
-  %23 = slice %target[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %24 = slice %target[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %25 = slice %target_offset[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %26 = slice %target_offset[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %27, %28 = s_add_co_u32 %23, %25
-  %29, %30 = s_addc_u32 %24, %26, %28
-  %31 = concat(%27, %29) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  global_store_b8_saddr %11, %byte, %31
+  %11 = slice %source_offset[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %12 = slice %source_offset[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %13 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %14 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %15, %16 = v_add_co_u32 %13, %11
+  %17 = v_mov_b32_copy %14
+  %18, %19 = v_add_co_ci_u32 %17, %12, %16
+  %20 = concat(%15, %18) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %byte = global_load_u8_vaddr %20
+  %22 = slice %target_offset[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %23 = slice %target_offset[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %24 = slice %target[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %25 = slice %target[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26, %27 = v_add_co_u32 %24, %22
+  %28 = v_mov_b32_copy %25
+  %29, %30 = v_add_co_ci_u32 %28, %23, %27
+  %31 = concat(%26, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b8_vaddr %31, %byte
   return %byte
 }
 
@@ -46,12 +47,11 @@ func.def target(@target) @raw_byte_workgroup(%value: i32) -> (i32) {
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @raw_byte_workgroup(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @raw_byte_workgroup(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %8 = storage {byte_alignment = 1, byte_length = 4} : low.storage<workgroup>
-  %10 = v_mov_b32_copy %value
-  %11 = v_mov_b32 0
-  ds_write_b8 %11, %10 {offset = 1}
-  %byte = ds_read_u8 %11 {offset = 1}
+  %10 = v_mov_b32 0
+  ds_write_b8 %10, %value {offset = 1}
+  %byte = ds_read_u8 %10 {offset = 1}
   return %byte
 }
 
@@ -69,11 +69,10 @@ func.def target(@target) @raw_byte_private(%value: i32) -> (i32) {
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @raw_byte_private(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @raw_byte_private(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %8 = storage {byte_alignment = 1, byte_length = 4} : low.storage<private>
-  %10 = v_mov_b32_copy %value
-  %11 = v_mov_b32 0
-  scratch_store_b8_vaddr %11, %10 {offset = 1}
-  %byte = scratch_load_u8_vaddr %11 {offset = 1}
+  %10 = v_mov_b32 0
+  scratch_store_b8_vaddr %10, %value {offset = 1}
+  %byte = scratch_load_u8_vaddr %10 {offset = 1}
   return %byte
 }

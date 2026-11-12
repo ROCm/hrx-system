@@ -15,15 +15,14 @@ func.def @narrow_integer_float(%flag: i1, %byte: i8, %halfword: i16, %halfwords:
 }
 
 // ----
-low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @narrow_integer_float(%flag: reg<amdgpu.sgpr>, %byte: reg<amdgpu.vgpr>, %halfword: reg<amdgpu.vgpr>, %halfwords: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm {
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @narrow_integer_float(%flag: reg<amdgpu.sgpr x2>, %byte: reg<amdgpu.vgpr>, %halfword: reg<amdgpu.vgpr>, %halfwords: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm {
   %78 = s_mov_b32 4294967295
   %79 = s_mov_b32 0
-  %80 = s_cmp_lg_i32_src1_inline %flag {rhs = 0}
-  %81 = s_cselect_b32 %78, %79, %80
+  %80 = v_mov_b32_copy %78
+  %81 = v_cndmask_b32_src0_inline %80, %flag {false_value = 0}
   %signed_flag_f32 = v_cvt_f32_i32 %81
-  %83 = s_mov_b32 1
-  %84 = s_cmp_lg_i32_src1_inline %flag {rhs = 0}
-  %85 = s_cselect_b32 %83, %79, %84
+  %84 = v_mov_b32_copy %79
+  %85 = v_cndmask_b32_src1_inline %84, %flag {true_value = 1}
   %unsigned_flag_f32 = v_cvt_f32_u32 %85
   %signed_flag_f64 = v_cvt_f64_i32 %81
   %unsigned_flag_f64 = v_cvt_f64_u32 %85

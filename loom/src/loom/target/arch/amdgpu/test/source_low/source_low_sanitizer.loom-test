@@ -487,7 +487,7 @@ func.def target(@target) @sanitizer_trap_terminates_returning_func(%input: buffe
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @sanitizer_trap_terminates_returning_func(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @sanitizer_trap_terminates_returning_func(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %input_view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %9 = s_mov_b64_symbol {symbol = @iree_asan_config}
   %10 = s_load_dwordx2_offset_only %9 {offset = 16}

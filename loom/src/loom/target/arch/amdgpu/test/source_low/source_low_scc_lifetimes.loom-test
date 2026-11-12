@@ -14,15 +14,11 @@ func.def target(@target) @select_nested_scalar(%x: i32, %y: i32, %zero: i32, %tw
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @select_nested_scalar(%x: reg<amdgpu.sgpr>, %y: reg<amdgpu.sgpr>, %zero: reg<amdgpu.sgpr>, %two: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>, %middle: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
-  %20 = s_cmp_eq_i32 %x, %zero
-  %21 = s_mov_b32 0
-  %22 = s_mov_b32 1
-  %use_lhs = s_cselect_b32 %22, %21, %20
-  %use_rhs = s_cmp_eq_i32 %y, %two
-  %middle_or_rhs = s_cselect_b32 %rhs, %middle, %use_rhs
-  %26 = s_cmp_lg_i32_src1_inline %use_lhs {rhs = 0}
-  %selected = s_cselect_b32 %lhs, %middle_or_rhs, %26
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @select_nested_scalar(%x: reg<amdgpu.vgpr>, %y: reg<amdgpu.vgpr>, %zero: reg<amdgpu.vgpr>, %two: reg<amdgpu.vgpr>, %lhs: reg<amdgpu.vgpr>, %middle: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %use_lhs = v_cmp_eq_i32 %x, %zero
+  %use_rhs = v_cmp_eq_i32 %y, %two
+  %middle_or_rhs = v_cndmask_b32 %middle, %rhs, %use_rhs
+  %selected = v_cndmask_b32 %middle_or_rhs, %lhs, %use_lhs
   return %selected
 }
 

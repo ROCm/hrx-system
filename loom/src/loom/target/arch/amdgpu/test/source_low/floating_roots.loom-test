@@ -79,10 +79,10 @@ func.def @widened_roots(%half: f16, %brain: bf16, %integer: i32) -> (f32, f32, f
 }
 
 // ----
-low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @widened_roots(%half: reg<amdgpu.vgpr>, %brain: reg<amdgpu.vgpr>, %integer: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @widened_roots(%half: reg<amdgpu.vgpr>, %brain: reg<amdgpu.vgpr>, %integer: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %half_wide = v_cvt_f32_f16 %half
   %brain_wide = v_lshlrev_b32_src0_16_low16 %brain
-  %integer_wide = s_cvt_f32_i32 %integer
+  %integer_wide = v_cvt_f32_i32 %integer
   %half_root = v_sqrt_f32 %half_wide
   %22 = s_mov_b32 144
   %23 = v_cmp_class_f32 %brain_wide, %22

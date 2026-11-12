@@ -28,37 +28,53 @@ amdgpu.target<gfx1100> @target {subgroup_size = 32}
 
 low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "condition"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_payload_sizes = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @construct_argument_masks(%condition$13: reg<amdgpu.sgpr>) asm {
   %view = resource<hal_binding> {extent = 24, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %15 = s_mov_b64_exec_read
-  %16 = slice %15[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %17 = slice %15[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %18 = s_mov_b32 0
-  %19 = s_bfe_u32_lit %condition$13, 524288
-  %20 = s_cmp_lg_i32_src1_inline %19 {rhs = 0}
-  %21 = s_cselect_b32 %16, %18, %20
-  %22 = s_cselect_b32 %17, %18, %20
-  %condition$23 = concat(%21, %22) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %condition$15 = s_bfe_u32_lit %condition$13, 524288
+  %18 = s_cmp_lg_i32_src1_inline %condition$15 {rhs = 0}
+  %19 = s_mov_b64_exec_read
+  %20 = slice %19[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %21 = slice %19[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %22 = s_mov_b32 0
+  %23 = s_cselect_b32 %20, %22, %18
+  %24 = s_cselect_b32 %21, %22, %18
+  %25 = concat(%23, %24) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %26 = s_mov_b64_exec_read
-  %inverse = s_xor_b64 %condition$23, %26
-  %constructed = concat(%condition$23, %inverse, %condition$23) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x6>
-  %splat = concat(%condition$23, %condition$23, %condition$23) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x6>
-  %38 = slice %constructed[0] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr x2>
-  %39 = v_cndmask_b32_src0_lit_src1_inline %38 {imm32 = 0, true_value = 1}
-  %40 = slice %constructed[2] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr x2>
-  %41 = v_cndmask_b32_src0_lit_src1_inline %40 {imm32 = 0, true_value = 1}
-  %42 = slice %constructed[4] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr x2>
-  %43 = v_cndmask_b32_src0_lit_src1_inline %42 {imm32 = 0, true_value = 1}
-  %selected = concat(%39, %41, %43) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
-  %45 = slice %splat[0] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr x2>
-  %46 = v_cndmask_b32_src0_lit_src1_inline %45 {imm32 = 0, true_value = 1}
-  %47 = slice %splat[2] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr x2>
-  %48 = v_cndmask_b32_src0_lit_src1_inline %47 {imm32 = 0, true_value = 1}
-  %49 = slice %splat[4] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr x2>
-  %50 = v_cndmask_b32_src0_lit_src1_inline %49 {imm32 = 0, true_value = 1}
-  %repeated = concat(%46, %48, %50) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
-  %52 = v_mov_b32 0
-  global_store_b96_saddr %52, %selected, %view
-  %53 = v_mov_b32 0
-  global_store_b96_saddr %53, %repeated, %view {offset = 12}
+  %inverse = s_xor_b64 %25, %26
+  %28 = s_cmp_lg_i32_src1_inline %condition$15 {rhs = 0}
+  %29 = s_mov_b64_exec_read
+  %30 = slice %29[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %31 = slice %29[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %32 = s_mov_b32 0
+  %33 = s_cselect_b32 %30, %32, %28
+  %34 = s_cselect_b32 %31, %32, %28
+  %35 = concat(%33, %34) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %constructed = concat(%35, %inverse, %35) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x6>
+  %37 = s_cmp_lg_i32_src1_inline %condition$15 {rhs = 0}
+  %38 = s_mov_b64_exec_read
+  %39 = slice %38[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %40 = slice %38[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %41 = s_mov_b32 0
+  %42 = s_cselect_b32 %39, %41, %37
+  %43 = s_cselect_b32 %40, %41, %37
+  %44 = concat(%42, %43) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %splat = concat(%44, %44, %44) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x6>
+  %54 = slice %constructed[0] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr x2>
+  %55 = v_cndmask_b32_src0_lit_src1_inline %54 {imm32 = 0, true_value = 1}
+  %56 = slice %constructed[2] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr x2>
+  %57 = v_cndmask_b32_src0_lit_src1_inline %56 {imm32 = 0, true_value = 1}
+  %58 = slice %constructed[4] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr x2>
+  %59 = v_cndmask_b32_src0_lit_src1_inline %58 {imm32 = 0, true_value = 1}
+  %selected = concat(%55, %57, %59) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
+  %61 = slice %splat[0] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr x2>
+  %62 = v_cndmask_b32_src0_lit_src1_inline %61 {imm32 = 0, true_value = 1}
+  %63 = slice %splat[2] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr x2>
+  %64 = v_cndmask_b32_src0_lit_src1_inline %63 {imm32 = 0, true_value = 1}
+  %65 = slice %splat[4] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr x2>
+  %66 = v_cndmask_b32_src0_lit_src1_inline %65 {imm32 = 0, true_value = 1}
+  %repeated = concat(%62, %64, %66) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
+  %68 = v_mov_b32 0
+  global_store_b96_saddr %68, %selected, %view
+  %69 = v_mov_b32 0
+  global_store_b96_saddr %69, %repeated, %view {offset = 12}
   return
 }
 

@@ -958,7 +958,7 @@ iree_status_t loom_amdgpu_select_scf_select_plan(
 
   const bool condition_is_mask = loom_amdgpu_low_type_is_register_class_count(
       context, condition_low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2);
-  if (!condition_is_mask) {
+  if (!condition_is_mask && !condition_is_scc && !condition_is_sgpr_bool) {
     return iree_ok_status();
   }
 
@@ -1599,9 +1599,9 @@ iree_status_t loom_amdgpu_lower_select(
       IREE_RETURN_IF_ERROR(loom_amdgpu_slice_lane_if_needed(
           context, source_op, low_false_value, lane_count, i, lane_type,
           &lane_false_value));
-      IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_scalar_carrier(
+      IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_numeric_carrier(
           context, source_op, lane_true_value, lane_type, &lane_true_value));
-      IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_scalar_carrier(
+      IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_numeric_carrier(
           context, source_op, lane_false_value, lane_type, &lane_false_value));
       if (lane_true_value == lane_false_value) {
         lane_results[i] = lane_true_value;
@@ -1626,6 +1626,11 @@ iree_status_t loom_amdgpu_lower_select(
 
   loom_type_t lane_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &lane_type));
+  if (plan->condition_kind == LOOM_AMDGPU_SELECT_CONDITION_KIND_SCALAR_MASK) {
+    // Uniform truth selects vector payloads through a mask at this use.
+    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_native_i1_mask(
+        context, source_op, low_condition, &low_condition));
+  }
   loom_type_t mask_lane_type = loom_type_none();
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_make_sgpr_range_type(context, 2, &mask_lane_type));

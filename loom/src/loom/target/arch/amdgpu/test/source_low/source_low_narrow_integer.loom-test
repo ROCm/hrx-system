@@ -283,20 +283,19 @@ func.def target(@target) @i8x4_extract_dynamic(%bytes: vector<4xi8>, %lane_index
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_extract_dynamic(%bytes: reg<amdgpu.vgpr>, %lane_index: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %7 = v_mov_b32_copy %lane_index
-  %8 = v_mov_b32 1
-  %9 = v_cmp_eq_i32 %7, %8
-  %10 = v_lshrrev_b32_src0_inline %bytes, 8
-  %11 = v_cndmask_b32 %bytes, %10, %9
-  %12 = v_mov_b32 2
-  %13 = v_cmp_eq_i32 %7, %12
-  %14 = v_lshrrev_b32_src0_inline %bytes, 16
-  %15 = v_cndmask_b32 %11, %14, %13
-  %16 = v_mov_b32 3
-  %17 = v_cmp_eq_i32 %7, %16
-  %18 = v_lshrrev_b32_src0_inline %bytes, 24
-  %lane = v_cndmask_b32 %15, %18, %17
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_extract_dynamic(%bytes: reg<amdgpu.vgpr>, %lane_index: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %7 = v_mov_b32 1
+  %8 = v_cmp_eq_i32 %lane_index, %7
+  %9 = v_lshrrev_b32_src0_inline %bytes, 8
+  %10 = v_cndmask_b32 %bytes, %9, %8
+  %11 = v_mov_b32 2
+  %12 = v_cmp_eq_i32 %lane_index, %11
+  %13 = v_lshrrev_b32_src0_inline %bytes, 16
+  %14 = v_cndmask_b32 %10, %13, %12
+  %15 = v_mov_b32 3
+  %16 = v_cmp_eq_i32 %lane_index, %15
+  %17 = v_lshrrev_b32_src0_inline %bytes, 24
+  %lane = v_cndmask_b32 %14, %17, %16
   return %lane
 }
 
@@ -394,29 +393,28 @@ func.def target(@target) @i8x4_insert_dynamic(%bytes: vector<4xi8>, %lane: index
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_insert_dynamic(%bytes: reg<amdgpu.vgpr>, %lane: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_insert_dynamic(%bytes: reg<amdgpu.vgpr>, %lane: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %value = v_mov_b32 7
   %9 = v_and_b32_lit %value, 255
-  %10 = v_mov_b32_copy %lane
-  %11 = v_and_b32_lit %bytes, 4294967040
-  %12 = v_or_b32 %11, %9
-  %13 = v_cmp_eq_i32_src1_inline %10 {rhs = 0}
-  %14 = v_cndmask_b32 %bytes, %12, %13
-  %15 = v_and_b32_lit %bytes, 4294902015
-  %16 = v_lshlrev_b32_src0_inline %9, 8
-  %17 = v_or_b32 %15, %16
-  %18 = v_cmp_eq_i32_src1_inline %10 {rhs = 1}
-  %19 = v_cndmask_b32 %14, %17, %18
-  %20 = v_and_b32_lit %bytes, 4278255615
-  %21 = v_lshlrev_b32_src0_inline %9, 16
-  %22 = v_or_b32 %20, %21
-  %23 = v_cmp_eq_i32_src1_inline %10 {rhs = 2}
-  %24 = v_cndmask_b32 %19, %22, %23
-  %25 = v_and_b32_lit %bytes, 16777215
-  %26 = v_lshlrev_b32_src0_inline %9, 24
-  %27 = v_or_b32 %25, %26
-  %28 = v_cmp_eq_i32_src1_inline %10 {rhs = 3}
-  %updated = v_cndmask_b32 %24, %27, %28
+  %10 = v_and_b32_lit %bytes, 4294967040
+  %11 = v_or_b32 %10, %9
+  %12 = v_cmp_eq_i32_src1_inline %lane {rhs = 0}
+  %13 = v_cndmask_b32 %bytes, %11, %12
+  %14 = v_and_b32_lit %bytes, 4294902015
+  %15 = v_lshlrev_b32_src0_inline %9, 8
+  %16 = v_or_b32 %14, %15
+  %17 = v_cmp_eq_i32_src1_inline %lane {rhs = 1}
+  %18 = v_cndmask_b32 %13, %16, %17
+  %19 = v_and_b32_lit %bytes, 4278255615
+  %20 = v_lshlrev_b32_src0_inline %9, 16
+  %21 = v_or_b32 %19, %20
+  %22 = v_cmp_eq_i32_src1_inline %lane {rhs = 2}
+  %23 = v_cndmask_b32 %18, %21, %22
+  %24 = v_and_b32_lit %bytes, 16777215
+  %25 = v_lshlrev_b32_src0_inline %9, 24
+  %26 = v_or_b32 %24, %25
+  %27 = v_cmp_eq_i32_src1_inline %lane {rhs = 3}
+  %updated = v_cndmask_b32 %23, %26, %27
   return %updated
 }
 
@@ -453,29 +451,28 @@ func.def target(@target) @i16x4_insert_dynamic(%words: vector<4xi16>, %value: i1
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_insert_dynamic(%words: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %lane: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_insert_dynamic(%words: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %lane: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
   %9 = v_and_b32_lit %value, 65535
-  %10 = v_mov_b32_copy %lane
-  %11 = slice %words[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %12 = v_and_b32_lit %11, 4294901760
-  %13 = v_or_b32 %12, %9
-  %14 = v_cmp_eq_i32_src1_inline %10 {rhs = 0}
-  %15 = v_cndmask_b32 %11, %13, %14
-  %16 = v_and_b32_lit %11, 65535
-  %17 = v_lshlrev_b32_src0_inline %9, 16
-  %18 = v_or_b32 %16, %17
-  %19 = v_cmp_eq_i32_src1_inline %10 {rhs = 1}
-  %20 = v_cndmask_b32 %15, %18, %19
-  %21 = slice %words[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %22 = v_and_b32_lit %21, 4294901760
-  %23 = v_or_b32 %22, %9
-  %24 = v_cmp_eq_i32_src1_inline %10 {rhs = 2}
-  %25 = v_cndmask_b32 %21, %23, %24
-  %26 = v_and_b32_lit %21, 65535
-  %28 = v_or_b32 %26, %17
-  %29 = v_cmp_eq_i32_src1_inline %10 {rhs = 3}
-  %30 = v_cndmask_b32 %25, %28, %29
-  %updated = concat(%20, %30) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %10 = slice %words[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %11 = v_and_b32_lit %10, 4294901760
+  %12 = v_or_b32 %11, %9
+  %13 = v_cmp_eq_i32_src1_inline %lane {rhs = 0}
+  %14 = v_cndmask_b32 %10, %12, %13
+  %15 = v_and_b32_lit %10, 65535
+  %16 = v_lshlrev_b32_src0_inline %9, 16
+  %17 = v_or_b32 %15, %16
+  %18 = v_cmp_eq_i32_src1_inline %lane {rhs = 1}
+  %19 = v_cndmask_b32 %14, %17, %18
+  %20 = slice %words[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %21 = v_and_b32_lit %20, 4294901760
+  %22 = v_or_b32 %21, %9
+  %23 = v_cmp_eq_i32_src1_inline %lane {rhs = 2}
+  %24 = v_cndmask_b32 %20, %22, %23
+  %25 = v_and_b32_lit %20, 65535
+  %27 = v_or_b32 %25, %16
+  %28 = v_cmp_eq_i32_src1_inline %lane {rhs = 3}
+  %29 = v_cndmask_b32 %24, %27, %28
+  %updated = concat(%19, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %updated
 }
 

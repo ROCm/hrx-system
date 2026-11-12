@@ -1,23 +1,50 @@
 // RUN: emit source-low target=amdgpu:gfx1151 output=low
 
-func.def @select_f8e4m3_uniform(%choice: i32, %left: f8E4M3, %right: f8E4M3) -> (f8E4M3, f8E4M3, f8E4M3) {
+kernel.def @select_f8e4m3_uniform() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%choice: i32, %left_buffer: buffer, %right_buffer: buffer, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %left_view = buffer.view %left_buffer[%fixture_base] : buffer -> view<64xf8E4M3>
+  %left = view.load %left_view[%fixture_lane] : view<64xf8E4M3> -> f8E4M3
+  %right_view = buffer.view %right_buffer[%fixture_base] : buffer -> view<64xf8E4M3>
+  %right = view.load %right_view[%fixture_lane] : view<64xf8E4M3> -> f8E4M3
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xf8E4M3>
+  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xf8E4M3>
+  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xf8E4M3>
   %threshold = scalar.constant 0 : i32
   %condition = scalar.cmpi ne, %choice, %threshold : i32
   %replacement = scalar.constant 1.0 : f8E4M3
   %selected = scf.select %condition, %left, %right : f8E4M3
   %right_constant = scf.select %condition, %left, %replacement : f8E4M3
   %left_constant = scf.select %condition, %replacement, %right : f8E4M3
-  func.return %selected, %right_constant, %left_constant : f8E4M3, f8E4M3, f8E4M3
+  view.store %selected, %result_view_0[%fixture_lane] : f8E4M3, view<64xf8E4M3>
+  view.store %right_constant, %result_view_1[%fixture_lane] : f8E4M3, view<64xf8E4M3>
+  view.store %left_constant, %result_view_2[%fixture_lane] : f8E4M3, view<64xf8E4M3>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @select_f8e4m3_uniform(%choice: reg<amdgpu.sgpr>, %left: reg<amdgpu.vgpr>, %right: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "choice"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 6, resource_count = 5, resource_offsets = [8, 16, 24, 32, 40], resource_parameter_indices = [1, 2, 3, 4, 5], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @select_f8e4m3_uniform(%choice: reg<amdgpu.sgpr>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %left_view = resource<hal_binding> {extent = 64, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %right_view = resource<hal_binding> {extent = 64, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 64, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_1 = resource<hal_binding> {extent = 64, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_2 = resource<hal_binding> {extent = 64, index = 4, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %left = global_load_i8_saddr %fixture_lane, %left_view
+  %right = global_load_i8_saddr %fixture_lane, %right_view
   %condition = v_cmp_ne_i32_src1_inline %choice {rhs = 0}
   %replacement = v_mov_b32 56
   %selected = v_cndmask_b32 %right, %left, %condition
   %right_constant = v_cndmask_b32 %replacement, %left, %condition
   %left_constant = v_cndmask_b32 %right, %replacement, %condition
-  return %selected, %right_constant, %left_constant
+  global_store_b8_saddr %fixture_lane, %selected, %result_view_0
+  global_store_b8_saddr %fixture_lane, %right_constant, %result_view_1
+  global_store_b8_saddr %fixture_lane, %left_constant, %result_view_2
+  return
 }
 
 // ====
@@ -46,24 +73,51 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @select_f8e4m3_divergen
 
 // ====
 
-func.def @select_f8e5m2_uniform(%choice: i32, %left: f8E5M2, %right: f8E5M2) -> (f8E5M2, f8E5M2, f8E5M2) {
+kernel.def @select_f8e5m2_uniform() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%choice: i32, %left_buffer: buffer, %right_buffer: buffer, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %left_view = buffer.view %left_buffer[%fixture_base] : buffer -> view<64xf8E5M2>
+  %left = view.load %left_view[%fixture_lane] : view<64xf8E5M2> -> f8E5M2
+  %right_view = buffer.view %right_buffer[%fixture_base] : buffer -> view<64xf8E5M2>
+  %right = view.load %right_view[%fixture_lane] : view<64xf8E5M2> -> f8E5M2
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xf8E5M2>
+  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xf8E5M2>
+  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xf8E5M2>
   %threshold = scalar.constant 0 : i32
   %condition = scalar.cmpi ne, %choice, %threshold : i32
   %replacement = scalar.constant 1.0 : f8E5M2
   %selected = scf.select %condition, %left, %right : f8E5M2
   %right_constant = scf.select %condition, %left, %replacement : f8E5M2
   %left_constant = scf.select %condition, %replacement, %right : f8E5M2
-  func.return %selected, %right_constant, %left_constant : f8E5M2, f8E5M2, f8E5M2
+  view.store %selected, %result_view_0[%fixture_lane] : f8E5M2, view<64xf8E5M2>
+  view.store %right_constant, %result_view_1[%fixture_lane] : f8E5M2, view<64xf8E5M2>
+  view.store %left_constant, %result_view_2[%fixture_lane] : f8E5M2, view<64xf8E5M2>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @select_f8e5m2_uniform(%choice: reg<amdgpu.sgpr>, %left: reg<amdgpu.vgpr>, %right: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "choice"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 6, resource_count = 5, resource_offsets = [8, 16, 24, 32, 40], resource_parameter_indices = [1, 2, 3, 4, 5], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @select_f8e5m2_uniform(%choice: reg<amdgpu.sgpr>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %left_view = resource<hal_binding> {extent = 64, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %right_view = resource<hal_binding> {extent = 64, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 64, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_1 = resource<hal_binding> {extent = 64, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_2 = resource<hal_binding> {extent = 64, index = 4, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %left = global_load_i8_saddr %fixture_lane, %left_view
+  %right = global_load_i8_saddr %fixture_lane, %right_view
   %condition = v_cmp_ne_i32_src1_inline %choice {rhs = 0}
   %replacement = v_mov_b32 60
   %selected = v_cndmask_b32 %right, %left, %condition
   %right_constant = v_cndmask_b32 %replacement, %left, %condition
   %left_constant = v_cndmask_b32 %right, %replacement, %condition
-  return %selected, %right_constant, %left_constant
+  global_store_b8_saddr %fixture_lane, %selected, %result_view_0
+  global_store_b8_saddr %fixture_lane, %right_constant, %result_view_1
+  global_store_b8_saddr %fixture_lane, %left_constant, %result_view_2
+  return
 }
 
 // ====

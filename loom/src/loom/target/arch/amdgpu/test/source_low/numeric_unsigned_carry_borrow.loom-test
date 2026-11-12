@@ -7,16 +7,10 @@ func.def @carry_borrow_i1(%lhs: i1, %rhs: i1) -> (i1, i1, i1, i1) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @carry_borrow_i1(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.scc>, reg<amdgpu.scc>, reg<amdgpu.scc>, reg<amdgpu.scc>) asm {
-  %20 = s_mov_b32 0
-  %21 = s_xor_b32 %lhs, %rhs
-  %sum = s_cmp_lg_i32 %21, %20
-  %24 = s_and_b32 %lhs, %rhs
-  %carry = s_cmp_lg_i32 %24, %20
-  %27 = s_mov_b32 1
-  %28 = s_cselect_b32 %27, %20, %sum
-  %29 = s_and_b32 %rhs, %28
-  %borrow = s_cmp_lg_i32 %29, %20
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @carry_borrow_i1(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+  %sum = s_xor_b64 %lhs, %rhs
+  %carry = s_and_b64 %lhs, %rhs
+  %borrow = s_and_b64 %rhs, %sum
   return %sum, %carry, %sum, %borrow
 }
 
@@ -59,9 +53,9 @@ func.def @carry_borrow_i32(%lhs: i32, %rhs: i32) -> (i32, i1, i32, i1) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @carry_borrow_i32(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.scc>, reg<amdgpu.sgpr>, reg<amdgpu.scc>) asm {
-  %sum, %carry = s_add_co_u32 %lhs, %rhs
-  %difference, %borrow = s_sub_co_u32 %lhs, %rhs
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @carry_borrow_i32(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) asm {
+  %sum, %carry = v_add_co_u32 %lhs, %rhs
+  %difference, %borrow = v_sub_co_u32 %lhs, %rhs
   return %sum, %carry, %difference, %borrow
 }
 
@@ -76,17 +70,17 @@ func.def @carry_borrow_i64(%lhs: i64, %rhs: i64) -> (i64, i1, i64, i1) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @carry_borrow_i64(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.scc>, reg<amdgpu.sgpr x2>, reg<amdgpu.scc>) asm {
-  %16 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %17 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %18 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %19 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %20, %21 = s_add_co_u32 %16, %18
-  %22, %carry = s_addc_u32 %17, %19, %21
-  %sum = concat(%20, %22) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %29, %30 = s_sub_co_u32 %16, %18
-  %31, %borrow = s_subb_u32 %17, %19, %30
-  %difference = concat(%29, %31) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @carry_borrow_i64(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.sgpr x2>) asm {
+  %16 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %17 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %18 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %19 = slice %rhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %20, %21 = v_add_co_u32 %16, %18
+  %22, %carry = v_add_co_ci_u32 %17, %19, %21
+  %sum = concat(%20, %22) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %29, %30 = v_sub_co_u32 %16, %18
+  %31, %borrow = v_sub_co_ci_u32 %17, %19, %30
+  %difference = concat(%29, %31) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %sum, %carry, %difference, %borrow
 }
 
@@ -154,15 +148,10 @@ func.def @add_with_input_carry_i32(%lhs: i32, %rhs: i32, %carry_input: i32) -> (
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @add_with_input_carry_i32(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %carry_input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
-  %partial, %lhs_rhs_carry = s_add_co_u32 %lhs, %rhs
-  %sum, %input_carry = s_add_co_u32 %partial, %carry_input
-  %23 = s_mov_b32 0
-  %24 = s_mov_b32 1
-  %25 = s_cselect_b32 %24, %23, %lhs_rhs_carry
-  %26 = s_cselect_b32 %24, %23, %input_carry
-  %27 = s_or_b32 %25, %26
-  %carry = s_cmp_lg_i32 %27, %23
-  %carry_word = s_cselect_b32 %24, %23, %carry
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @add_with_input_carry_i32(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %carry_input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %partial, %lhs_rhs_carry = v_add_co_u32 %lhs, %rhs
+  %sum, %input_carry = v_add_co_u32 %partial, %carry_input
+  %carry = s_or_b64 %lhs_rhs_carry, %input_carry
+  %carry_word = v_cndmask_b32_src0_lit_src1_inline %carry {imm32 = 0, true_value = 1}
   return %sum, %carry_word
 }

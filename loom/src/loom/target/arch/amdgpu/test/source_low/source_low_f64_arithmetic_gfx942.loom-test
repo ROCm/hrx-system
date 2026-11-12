@@ -71,7 +71,7 @@ func.def @convert_f64(%signed: i32, %unsigned: i32) -> (f64, f64) {
 }
 
 // ----
-low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @convert_f64(%signed: reg<amdgpu.sgpr>, %unsigned: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @convert_f64(%signed: reg<amdgpu.vgpr>, %unsigned: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
   %s = v_cvt_f64_i32 %signed
   %u = v_cvt_f64_u32 %unsigned
   return %s, %u
@@ -120,9 +120,9 @@ func.def @unsigned_i64_to_f64(%bits: i64) -> (f64) {
 }
 
 // ----
-low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @unsigned_i64_to_f64(%bits: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
-  %5 = slice %bits[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %6 = slice %bits[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @unsigned_i64_to_f64(%bits: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  %5 = slice %bits[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %6 = slice %bits[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %7 = v_cvt_f64_u32 %5
   %8 = v_cvt_f64_u32 %6
   %9 = v_mov_b32 0
@@ -141,9 +141,9 @@ func.def @signed_i64_to_f64(%bits: i64) -> (f64) {
 }
 
 // ----
-low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @signed_i64_to_f64(%bits: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
-  %5 = slice %bits[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %6 = slice %bits[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @signed_i64_to_f64(%bits: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  %5 = slice %bits[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %6 = slice %bits[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %7 = v_cvt_f64_u32 %5
   %8 = v_cvt_f64_i32 %6
   %9 = v_mov_b32 0

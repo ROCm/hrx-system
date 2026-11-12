@@ -140,7 +140,7 @@ int local_pointer_bounds(int index) {
 }
 
 // ----
-low.func.def public target<amdgpu.cdna2.core> abi(hal_kernel) @local_pointer_bounds(%index: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def public target<amdgpu.cdna2.core> abi(hal_kernel) @local_pointer_bounds(%index: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %37 = storage {byte_alignment = 4, byte_length = 16} : low.storage<private>
   %40 = v_mov_b32 3
   %41 = v_mov_b32 0
@@ -151,8 +151,7 @@ low.func.def public target<amdgpu.cdna2.core> abi(hal_kernel) @local_pointer_bou
   scratch_store_dword_vaddr %41, %46 {offset = 8}
   %49 = v_mov_b32 11
   scratch_store_dword_vaddr %41, %49 {offset = 12}
-  %58 = v_mov_b32_copy %index
-  %59 = v_lshlrev_b32_src0_inline %58, 2
-  %60 = scratch_load_dword_vaddr %59 : reg<amdgpu.vgpr>
-  return %60
+  %58 = v_lshlrev_b32_src0_inline %index, 2
+  %59 = scratch_load_dword_vaddr %58 : reg<amdgpu.vgpr>
+  return %59
 }

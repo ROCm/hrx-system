@@ -12,27 +12,28 @@ func.def @wide_subview_selection(%input: buffer, %byte_base0: offset, %condition
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @wide_subview_selection(%byte_base: reg<amdgpu.sgpr x2>, %condition: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @wide_subview_selection(%byte_base: reg<amdgpu.vgpr x2>, %condition: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %selected = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %20 = s_mov_b32 4
-  %21 = s_mov_b32 0
-  %23 = slice %byte_base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %24 = slice %byte_base[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %27, %28 = s_add_co_u32 %23, %20
-  %29, %30 = s_addc_u32 %24, %21, %28
-  %32 = s_mov_b32 8
-  %39, %40 = s_add_co_u32 %23, %32
-  %41, %42 = s_addc_u32 %24, %21, %40
-  %44 = s_cmp_lg_i32_src1_inline %condition {rhs = 0}
-  %47 = s_cselect_b32 %27, %39, %44
-  %50 = s_cselect_b32 %29, %41, %44
-  %52 = v_mov_b32 0
-  %53 = slice %selected[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %54 = slice %selected[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %57, %58 = s_add_co_u32 %53, %47
-  %59, %60 = s_addc_u32 %54, %50, %58
-  %61 = concat(%57, %59) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %value = global_load_b32_saddr %52, %61
+  %21 = v_mov_b32_copy %20
+  %22 = v_mov_b32 0
+  %24 = slice %byte_base[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %25 = slice %byte_base[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %28, %29 = v_add_co_u32 %24, %21
+  %30, %31 = v_add_co_ci_u32 %25, %22, %29
+  %33 = s_mov_b32 8
+  %34 = v_mov_b32_copy %33
+  %41, %42 = v_add_co_u32 %24, %34
+  %43, %44 = v_add_co_ci_u32 %25, %22, %42
+  %48 = v_cndmask_b32 %41, %28, %condition
+  %51 = v_cndmask_b32 %43, %30, %condition
+  %55 = slice %selected[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %56 = slice %selected[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %57, %58 = v_add_co_u32 %55, %48
+  %59 = v_mov_b32_copy %56
+  %60, %61 = v_add_co_ci_u32 %59, %51, %58
+  %62 = concat(%57, %60) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %value = global_load_b32_vaddr %62
   return %value
 }
 
@@ -51,29 +52,48 @@ func.def @distinct_root_selection(%first: buffer, %second: buffer, %condition: i
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @distinct_root_selection(%condition: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @distinct_root_selection(%condition: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %first_aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %second_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %first_offset = s_mov_b32 4
   %second_offset = s_mov_b32 8
-  %25 = s_mov_b32 0
-  %26 = s_cmp_lg_i32 %condition, %25
-  low.cond_br %26, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+  %29, %30 = s_and_saveexec_b64 %condition
+  low.cond_br %30, ^_bb1, ^_bb5 : reg<amdgpu.scc>
 ^_bb1:
-  %39 = slice %first_aligned[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %40 = slice %first_aligned[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  low.br ^_bb3(%39: reg<amdgpu.sgpr>, %40: reg<amdgpu.sgpr>, %first_offset: reg<amdgpu.sgpr>)
+  %43 = slice %first_aligned[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %44 = v_mov_b32_copy %43
+  %45 = slice %first_aligned[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %46 = v_mov_b32_copy %45
+  %48 = v_mov_b32_copy %first_offset
+  low.br ^_bb4(%44: reg<amdgpu.vgpr>, %46: reg<amdgpu.vgpr>, %48: reg<amdgpu.vgpr>)
+^_bb4(%68: reg<amdgpu.vgpr>, %69: reg<amdgpu.vgpr>, %selected_offset$22: reg<amdgpu.vgpr>):
+  %42 = s_andn2_b64_exec %29, %condition
+  low.cond_br %42, ^_bb2, ^_bb6 : reg<amdgpu.scc>
 ^_bb2:
-  %41 = slice %second_aligned[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %42 = slice %second_aligned[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  low.br ^_bb3(%41: reg<amdgpu.sgpr>, %42: reg<amdgpu.sgpr>, %second_offset: reg<amdgpu.sgpr>)
-^_bb3(%37: reg<amdgpu.sgpr>, %38: reg<amdgpu.sgpr>, %selected_offset: reg<amdgpu.sgpr>):
-  %27 = v_mov_b32 0
-  %31, %32 = s_add_co_u32 %37, %selected_offset
-  %33, %34 = s_addc_u32 %38, %25, %32
-  %35 = concat(%31, %33) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %value = global_load_b32_saddr %27, %35
+  %49 = slice %second_aligned[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %50 = v_mov_b32_copy %49
+  %51 = slice %second_aligned[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %52 = v_mov_b32_copy %51
+  %54 = v_mov_b32_copy %second_offset
+  s_mov_b64_exec %29
+  %36 = v_cndmask_b32 %50, %68, %condition
+  %39 = v_cndmask_b32 %52, %69, %condition
+  %41 = v_cndmask_b32 %54, %selected_offset$22, %condition
+  low.br ^_bb3(%36: reg<amdgpu.vgpr>, %39: reg<amdgpu.vgpr>, %41: reg<amdgpu.vgpr>)
+^_bb3(%64: reg<amdgpu.vgpr>, %65: reg<amdgpu.vgpr>, %selected_offset$20: reg<amdgpu.vgpr>):
+  %57 = v_mov_b32 0
+  %58, %59 = v_add_co_u32 %64, %selected_offset$20
+  %60, %61 = v_add_co_ci_u32 %65, %57, %59
+  %62 = concat(%58, %60) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %value = global_load_b32_vaddr %62
   return %value
+^_bb5:
+  s_mov_b64_exec %29
+  %31 = v_mov_b32 0
+  low.br ^_bb4(%31: reg<amdgpu.vgpr>, %31: reg<amdgpu.vgpr>, %31: reg<amdgpu.vgpr>)
+^_bb6:
+  s_mov_b64_exec %29
+  low.br ^_bb3(%68: reg<amdgpu.vgpr>, %69: reg<amdgpu.vgpr>, %selected_offset$22: reg<amdgpu.vgpr>)
 }
 
 // ====
@@ -101,16 +121,16 @@ func.def @nested_dynamic_view_refinement(%input: buffer, %extent_input: index, %
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @nested_dynamic_view_refinement(%extent: reg<amdgpu.sgpr>, %position: reg<amdgpu.sgpr>, %condition: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @nested_dynamic_view_refinement(%extent: reg<amdgpu.vgpr>, %position: reg<amdgpu.vgpr>, %condition: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %25 = v_mov_b32 0
-  %26 = s_lshl_b32_rhs_inline %position, 2
+  %25 = v_lshlrev_b32_src0_inline %position, 2
+  %26 = v_lshrrev_b32_src0_inline %position, 30
   %27 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %28 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %29 = s_mov_b32 0
-  %30, %31 = s_add_co_u32 %27, %26
-  %32, %33 = s_addc_u32 %28, %29, %31
-  %34 = concat(%30, %32) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %result = global_load_b32_saddr %25, %34
+  %29, %30 = v_add_co_u32 %27, %25
+  %31 = v_mov_b32_copy %28
+  %32, %33 = v_add_co_ci_u32 %31, %26, %30
+  %34 = concat(%29, %32) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %result = global_load_b32_vaddr %34
   return %result
 }

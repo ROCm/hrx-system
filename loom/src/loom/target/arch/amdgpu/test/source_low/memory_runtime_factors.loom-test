@@ -15,12 +15,19 @@ func.def @varying_coordinate_scalar_pitch(%input: buffer, %coordinates: vector<2
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @varying_coordinate_scalar_pitch(%coordinates: reg<amdgpu.vgpr x2>, %pitch: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @varying_coordinate_scalar_pitch(%coordinates: reg<amdgpu.vgpr x2>, %pitch: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %coordinate = slice %coordinates[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %18 = v_mul_lo_u32 %pitch, %coordinate
+  %18 = v_mul_lo_u32 %coordinate, %pitch
   %19 = v_lshlrev_b32_src0_inline %18, 2
-  %value = global_load_b32_saddr %19, %view
+  %20 = v_mov_b32 0
+  %21 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %22 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %23, %24 = v_add_co_u32 %21, %19
+  %25 = v_mov_b32_copy %22
+  %26, %27 = v_add_co_ci_u32 %25, %20, %24
+  %28 = concat(%23, %26) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %value = global_load_b32_vaddr %28
   return %value
 }
 
@@ -41,12 +48,19 @@ func.def @scalar_coordinate_varying_pitch(%input: buffer, %coordinate_input: ind
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @scalar_coordinate_varying_pitch(%coordinate: reg<amdgpu.sgpr>, %pitches: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @scalar_coordinate_varying_pitch(%coordinate: reg<amdgpu.vgpr>, %pitches: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %pitch = slice %pitches[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %18 = v_mul_lo_u32 %coordinate, %pitch
   %19 = v_lshlrev_b32_src0_inline %18, 2
-  %value = global_load_b32_saddr %19, %view
+  %20 = v_mov_b32 0
+  %21 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %22 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %23, %24 = v_add_co_u32 %21, %19
+  %25 = v_mov_b32_copy %22
+  %26, %27 = v_add_co_ci_u32 %25, %20, %24
+  %28 = concat(%23, %26) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %value = global_load_b32_vaddr %28
   return %value
 }
 
@@ -76,7 +90,14 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @varying_wide_factors(%
   %pitch = slice %factors[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %21 = v_mul_lo_u32 %coordinate, %pitch
   %22 = v_lshlrev_b32_src0_inline %21, 2
-  %value = global_load_b32_saddr %22, %view
+  %23 = v_mov_b32 0
+  %24 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %25 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26, %27 = v_add_co_u32 %24, %22
+  %28 = v_mov_b32_copy %25
+  %29, %30 = v_add_co_ci_u32 %28, %23, %27
+  %31 = concat(%26, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %value = global_load_b32_vaddr %31
   return %value
 }
 
@@ -100,10 +121,10 @@ func.def @flat_multiple_scalar_factors(%input: buffer, %coordinates: vector<2xi3
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @flat_multiple_scalar_factors(%coordinates: reg<amdgpu.vgpr x2>, %origins: reg<amdgpu.vgpr x4>, %rows: reg<amdgpu.sgpr>, %columns_wide: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @flat_multiple_scalar_factors(%coordinates: reg<amdgpu.vgpr x2>, %origins: reg<amdgpu.vgpr x4>, %rows: reg<amdgpu.vgpr>, %columns_wide: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %coordinate = slice %coordinates[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %columns = slice %columns_wide[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %columns = slice %columns_wide[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %46 = slice %origins[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %45 = slice %origins[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %28 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -111,8 +132,8 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @flat_multiple_scalar_f
   %30, %31 = v_add_co_u32 %28, %46
   %32 = v_mov_b32_copy %29
   %33, %34 = v_add_co_ci_u32 %32, %45, %31
-  %35 = v_mul_lo_u32 %rows, %coordinate
-  %36 = v_mul_lo_u32 %columns, %35
+  %35 = v_mul_lo_u32 %coordinate, %rows
+  %36 = v_mul_lo_u32 %35, %columns
   %37 = v_lshlrev_b32_src0_inline %36, 2
   %38 = v_mov_b32 0
   %39, %40 = v_add_co_u32 %30, %37
@@ -170,16 +191,22 @@ func.def @varying_predicate_coordinate(%input: buffer, %conditions: vector<2xi32
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @varying_predicate_coordinate(%conditions: reg<amdgpu.vgpr x2>, %pitch: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @varying_predicate_coordinate(%conditions: reg<amdgpu.vgpr x2>, %pitch: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %condition = slice %conditions[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %predicate = v_cmp_ne_i32_src1_inline %condition {rhs = 0}
   %20 = v_mov_b32 0
   %21 = v_mov_b32 1
   %coordinate = v_cndmask_b32 %20, %21, %predicate
-  %23 = v_mul_lo_u32 %pitch, %coordinate
+  %23 = v_mul_lo_u32 %coordinate, %pitch
   %24 = v_lshlrev_b32_src0_inline %23, 2
-  %value = global_load_b32_saddr %24, %view
+  %26 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %27 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %28, %29 = v_add_co_u32 %26, %24
+  %30 = v_mov_b32_copy %27
+  %31, %32 = v_add_co_ci_u32 %30, %20, %29
+  %33 = concat(%28, %31) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %value = global_load_b32_vaddr %33
   return %value
 }
 
@@ -202,15 +229,21 @@ func.def @scalar_predicate_coordinate(%input: buffer, %condition: i32, %pitches:
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @scalar_predicate_coordinate(%condition: reg<amdgpu.sgpr>, %pitches: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @scalar_predicate_coordinate(%condition: reg<amdgpu.vgpr>, %pitches: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %c0 = s_mov_b32 0
-  %predicate = s_cmp_lg_i32 %condition, %c0
-  %22 = s_mov_b32 1
-  %coordinate = s_cselect_b32 %22, %c0, %predicate
+  %predicate = v_cmp_ne_i32_src1_inline %condition {rhs = 0}
+  %20 = v_mov_b32 0
+  %21 = v_mov_b32 1
+  %coordinate = v_cndmask_b32 %20, %21, %predicate
   %pitch = slice %pitches[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %25 = v_mul_lo_u32 %coordinate, %pitch
-  %26 = v_lshlrev_b32_src0_inline %25, 2
-  %value = global_load_b32_saddr %26, %view
+  %24 = v_mul_lo_u32 %coordinate, %pitch
+  %25 = v_lshlrev_b32_src0_inline %24, 2
+  %27 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %28 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %29, %30 = v_add_co_u32 %27, %25
+  %31 = v_mov_b32_copy %28
+  %32, %33 = v_add_co_ci_u32 %31, %20, %30
+  %34 = concat(%29, %32) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %value = global_load_b32_vaddr %34
   return %value
 }

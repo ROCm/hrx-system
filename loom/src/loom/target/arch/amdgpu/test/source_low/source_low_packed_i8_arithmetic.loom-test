@@ -46,7 +46,7 @@ func.def @i8x4_select_addi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %fal
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8x4_select_addi(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>, %bias: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8x4_select_addi(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>, %bias: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %condition = v_cmp_lt_i32 %lhs, %rhs
   %selected = v_cndmask_b32 %false_value, %true_value, %condition
   %19 = v_and_b32_lit %selected, 2139062143
@@ -73,21 +73,34 @@ func.def @i8x4_cfg_arg_addi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %fa
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8x4_cfg_arg_addi(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>, %bias: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %condition = s_cmp_lt_i32 %lhs, %rhs
-  low.cond_br %condition, ^then, ^else : reg<amdgpu.scc>
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8x4_cfg_arg_addi(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>, %bias: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %condition = v_cmp_lt_i32 %lhs, %rhs
+  %19, %20 = s_and_saveexec_b64 %condition
+  low.cond_br %20, ^then, ^_bb5 : reg<amdgpu.scc>
 ^then:
-  low.br ^join(%true_value: reg<amdgpu.vgpr>)
+  low.br ^_bb4(%true_value: reg<amdgpu.vgpr>)
+^_bb4(%selected$16: reg<amdgpu.vgpr>):
+  %23 = s_andn2_b64_exec %19, %condition
+  low.cond_br %23, ^else, ^_bb6 : reg<amdgpu.scc>
 ^else:
-  low.br ^join(%false_value: reg<amdgpu.vgpr>)
-^join(%selected: reg<amdgpu.vgpr>):
-  %17 = v_and_b32_lit %selected, 2139062143
-  %18 = v_and_b32_lit %bias, 2139062143
-  %19 = v_add_u32 %17, %18
-  %20 = v_xor_b32 %selected, %bias
-  %21 = v_and_b32_lit %20, 2155905152
-  %result = v_xor_b32 %19, %21
+  s_mov_b64_exec %19
+  %22 = v_cndmask_b32 %false_value, %selected$16, %condition
+  low.br ^join(%22: reg<amdgpu.vgpr>)
+^join(%selected$15: reg<amdgpu.vgpr>):
+  %24 = v_and_b32_lit %selected$15, 2139062143
+  %25 = v_and_b32_lit %bias, 2139062143
+  %26 = v_add_u32 %24, %25
+  %27 = v_xor_b32 %selected$15, %bias
+  %28 = v_and_b32_lit %27, 2155905152
+  %result = v_xor_b32 %26, %28
   return %result
+^_bb5:
+  s_mov_b64_exec %19
+  %21 = v_mov_b32 0
+  low.br ^_bb4(%21: reg<amdgpu.vgpr>)
+^_bb6:
+  s_mov_b64_exec %19
+  low.br ^join(%selected$16: reg<amdgpu.vgpr>)
 }
 
 // ====

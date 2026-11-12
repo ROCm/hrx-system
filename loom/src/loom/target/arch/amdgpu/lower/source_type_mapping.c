@@ -264,6 +264,19 @@ static bool loom_amdgpu_source_scalar_value_register_shape(
           module, fact_table, source_value_id, source_type)) {
     out_shape->unit_count = 2;
   }
+  if (loom_amdgpu_source_value_is_entry_argument(module, source_value_id)) {
+    const bool uniform = fact_table && loom_value_facts_is_subgroup_uniform(
+                                           loom_value_fact_table_lookup(
+                                               fact_table, source_value_id));
+    if (mapping->policy == LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_I1) {
+      *out_shape = loom_amdgpu_register_shape(LOOM_AMDGPU_REG_CLASS_ID_SGPR,
+                                              uniform ? 1 : 2);
+    } else {
+      out_shape->class_id = uniform ? LOOM_AMDGPU_REG_CLASS_ID_SGPR
+                                    : LOOM_AMDGPU_REG_CLASS_ID_VGPR;
+    }
+    return true;
+  }
   // Native numeric results already have a declared bank. Keep the source
   // payload width so call validation still rejects incompatible signatures.
   loom_amdgpu_register_shape_t native_shape = {0};
@@ -319,6 +332,15 @@ static bool loom_amdgpu_source_vector_value_register_shape(
                        LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_SGPR_MASK)) {
     *out_shape = loom_amdgpu_register_shape(LOOM_AMDGPU_REG_CLASS_ID_SGPR,
                                             vector_storage.register_count);
+    return true;
+  }
+  if (loom_amdgpu_source_value_is_entry_argument(module, source_value_id)) {
+    const bool uniform = fact_table && loom_value_facts_is_subgroup_uniform(
+                                           loom_value_fact_table_lookup(
+                                               fact_table, source_value_id));
+    *out_shape = loom_amdgpu_register_shape(
+        uniform ? LOOM_AMDGPU_REG_CLASS_ID_SGPR : LOOM_AMDGPU_REG_CLASS_ID_VGPR,
+        vector_storage.register_count);
     return true;
   }
   loom_amdgpu_register_shape_t native_shape = {0};
@@ -393,6 +415,10 @@ static bool loom_amdgpu_source_buffer_value_register_shape(
 static bool loom_amdgpu_source_value_register_shape_needs_analysis(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     loom_value_id_t source_value_id, loom_type_t source_type) {
+  if (loom_amdgpu_source_value_is_entry_argument(module, source_value_id) &&
+      (loom_type_is_scalar(source_type) || loom_type_is_vector(source_type))) {
+    return false;
+  }
   // Varying non-predicate facts settle the use-sensitive bank preference
   // without source or memory analysis. Width, storage, and representation
   // belong to the mapping below; uniform or unknown facts do not prove a bank.

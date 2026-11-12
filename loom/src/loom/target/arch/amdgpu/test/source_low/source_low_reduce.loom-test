@@ -16,16 +16,25 @@ func.def @i32_reduce_add(%input: buffer, %output: buffer) {
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32_reduce_add() asm {
   %input_view = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {extent = 4, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %12 = v_mov_b32 0
-  %loaded = global_load_b128_saddr %12, %input_view
-  %14 = slice %loaded[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %15 = slice %loaded[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %16 = v_add_u32 %14, %15
-  %17 = slice %loaded[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %18 = v_add_u32 %16, %17
-  %19 = slice %loaded[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %stored = v_add_u32 %18, %19
-  global_store_b32_saddr %12, %stored, %output_view
+  %12 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %13 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %14 = v_mov_b32_copy %12
+  %15 = v_mov_b32_copy %13
+  %16 = concat(%14, %15) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %loaded = global_load_b128_vaddr %16
+  %18 = slice %loaded[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %19 = slice %loaded[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %20 = v_add_u32 %18, %19
+  %21 = slice %loaded[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %22 = v_add_u32 %20, %21
+  %23 = slice %loaded[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %stored = v_add_u32 %22, %23
+  %25 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %27 = v_mov_b32_copy %25
+  %28 = v_mov_b32_copy %26
+  %29 = concat(%27, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b32_vaddr %29, %stored
   return
 }
 
@@ -47,17 +56,26 @@ func.def @f32_reduce_add(%input: buffer, %output: buffer) {
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @f32_reduce_add() asm {
   %input_view = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {extent = 4, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %12 = v_mov_b32 0
-  %loaded = global_load_b128_saddr %12, %input_view
-  %14 = slice %loaded[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %15 = v_add_f32_lit %14, 0
-  %16 = slice %loaded[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %17 = v_add_f32 %15, %16
-  %18 = slice %loaded[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %19 = v_add_f32 %17, %18
-  %20 = slice %loaded[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %stored = v_add_f32 %19, %20
-  global_store_b32_saddr %12, %stored, %output_view
+  %12 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %13 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %14 = v_mov_b32_copy %12
+  %15 = v_mov_b32_copy %13
+  %16 = concat(%14, %15) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %loaded = global_load_b128_vaddr %16
+  %18 = slice %loaded[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %19 = v_add_f32_lit %18, 0
+  %20 = slice %loaded[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %21 = v_add_f32 %19, %20
+  %22 = slice %loaded[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %23 = v_add_f32 %21, %22
+  %24 = slice %loaded[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %stored = v_add_f32 %23, %24
+  %26 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %27 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %28 = v_mov_b32_copy %26
+  %29 = v_mov_b32_copy %27
+  %30 = concat(%28, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b32_vaddr %30, %stored
   return
 }
 
@@ -79,16 +97,25 @@ func.def @f32_reduce_add_fastmath(%input: buffer, %output: buffer) {
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @f32_reduce_add_fastmath() asm {
   %input_view = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {extent = 4, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %12 = v_mov_b32 0
-  %loaded = global_load_b128_saddr %12, %input_view
-  %14 = slice %loaded[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %15 = slice %loaded[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %16 = slice %loaded[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %17 = slice %loaded[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %18 = v_add_f32 %14, %15
-  %19 = v_add_f32 %16, %17
-  %stored = v_add_f32 %18, %19
-  global_store_b32_saddr %12, %stored, %output_view
+  %12 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %13 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %14 = v_mov_b32_copy %12
+  %15 = v_mov_b32_copy %13
+  %16 = concat(%14, %15) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %loaded = global_load_b128_vaddr %16
+  %18 = slice %loaded[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %19 = slice %loaded[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %20 = slice %loaded[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %21 = slice %loaded[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %22 = v_add_f32 %18, %19
+  %23 = v_add_f32 %20, %21
+  %stored = v_add_f32 %22, %23
+  %25 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %27 = v_mov_b32_copy %25
+  %28 = v_mov_b32_copy %26
+  %29 = concat(%27, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b32_vaddr %29, %stored
   return
 }
 
@@ -210,16 +237,25 @@ func.def @i32_configured_width_sum(%input: buffer, %output: buffer) {
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32_configured_width_sum() asm {
   %input_view = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {extent = 4, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %16 = v_mov_b32 0
-  %loaded = global_load_b128_saddr %16, %input_view
-  %18 = slice %loaded[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %19 = slice %loaded[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %20 = v_add_u32 %18, %19
-  %21 = slice %loaded[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %22 = v_add_u32 %20, %21
-  %23 = slice %loaded[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %stored = v_add_u32 %22, %23
-  global_store_b32_saddr %16, %stored, %output_view
+  %16 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %17 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %18 = v_mov_b32_copy %16
+  %19 = v_mov_b32_copy %17
+  %20 = concat(%18, %19) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %loaded = global_load_b128_vaddr %20
+  %22 = slice %loaded[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %23 = slice %loaded[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %24 = v_add_u32 %22, %23
+  %25 = slice %loaded[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %26 = v_add_u32 %24, %25
+  %27 = slice %loaded[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %stored = v_add_u32 %26, %27
+  %29 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %30 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %31 = v_mov_b32_copy %29
+  %32 = v_mov_b32_copy %30
+  %33 = concat(%31, %32) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b32_vaddr %33, %stored
   return
 }
 
@@ -274,35 +310,34 @@ func.def @i32x3_reduce_combining_kinds(%values: vector<3xi32>, %init: i32) -> (i
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32x3_reduce_combining_kinds(%values: reg<amdgpu.vgpr x3>, %init: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %28 = v_mov_b32_copy %init
-  %29 = slice %values[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
-  %30 = v_mul_lo_u32 %28, %29
-  %31 = slice %values[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
-  %32 = v_mul_lo_u32 %30, %31
-  %33 = slice %values[2] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
-  %product = v_mul_lo_u32 %32, %33
-  %37 = v_min_i32 %28, %29
-  %39 = v_min_i32 %37, %31
-  %signed_minimum = v_min_i32 %39, %33
-  %44 = v_max_i32 %28, %29
-  %46 = v_max_i32 %44, %31
-  %signed_maximum = v_max_i32 %46, %33
-  %51 = v_min_u32 %28, %29
-  %53 = v_min_u32 %51, %31
-  %unsigned_minimum = v_min_u32 %53, %33
-  %58 = v_max_u32 %28, %29
-  %60 = v_max_u32 %58, %31
-  %unsigned_maximum = v_max_u32 %60, %33
-  %65 = v_and_b32 %28, %29
-  %67 = v_and_b32 %65, %31
-  %bitwise_and = v_and_b32 %67, %33
-  %72 = v_or_b32 %28, %29
-  %74 = v_or_b32 %72, %31
-  %bitwise_or = v_or_b32 %74, %33
-  %79 = v_xor_b32 %28, %29
-  %81 = v_xor_b32 %79, %31
-  %bitwise_xor = v_xor_b32 %81, %33
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32x3_reduce_combining_kinds(%values: reg<amdgpu.vgpr x3>, %init: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %28 = slice %values[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %29 = v_mul_lo_u32 %init, %28
+  %30 = slice %values[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %31 = v_mul_lo_u32 %29, %30
+  %32 = slice %values[2] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %product = v_mul_lo_u32 %31, %32
+  %35 = v_min_i32 %init, %28
+  %37 = v_min_i32 %35, %30
+  %signed_minimum = v_min_i32 %37, %32
+  %41 = v_max_i32 %init, %28
+  %43 = v_max_i32 %41, %30
+  %signed_maximum = v_max_i32 %43, %32
+  %47 = v_min_u32 %init, %28
+  %49 = v_min_u32 %47, %30
+  %unsigned_minimum = v_min_u32 %49, %32
+  %53 = v_max_u32 %init, %28
+  %55 = v_max_u32 %53, %30
+  %unsigned_maximum = v_max_u32 %55, %32
+  %59 = v_and_b32 %init, %28
+  %61 = v_and_b32 %59, %30
+  %bitwise_and = v_and_b32 %61, %32
+  %65 = v_or_b32 %init, %28
+  %67 = v_or_b32 %65, %30
+  %bitwise_or = v_or_b32 %67, %32
+  %71 = v_xor_b32 %init, %28
+  %73 = v_xor_b32 %71, %30
+  %bitwise_xor = v_xor_b32 %73, %32
   return %product, %signed_minimum, %signed_maximum, %unsigned_minimum, %unsigned_maximum, %bitwise_and, %bitwise_or, %bitwise_xor
 }
 

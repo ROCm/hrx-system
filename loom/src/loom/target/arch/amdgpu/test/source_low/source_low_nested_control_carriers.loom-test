@@ -206,10 +206,17 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @loop_ex
   low.cond_br %34, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
   %35 = v_lshlrev_b32_src0_inline %bounded_lane, 2
-  %value = global_load_b32_saddr<volatile> %35, %source
+  %36 = v_lshrrev_b32_src0_inline %bounded_lane, 30
+  %37 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %38 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %39, %40 = v_add_co_u32 %37, %35
+  %41 = v_mov_b32_copy %38
+  %42, %43 = v_add_co_ci_u32 %41, %36, %40
+  %44 = concat(%39, %42) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %value = global_load_b32_vaddr<volatile> %44
   %next = v_add_u32 %total, %value
-  %38 = s_add_u32 %iteration, %step
-  low.br ^_bb1(%38: reg<amdgpu.sgpr>, %next: reg<amdgpu.vgpr>)
+  %47 = s_add_u32 %iteration, %step
+  low.br ^_bb1(%47: reg<amdgpu.sgpr>, %next: reg<amdgpu.vgpr>)
 ^_bb3:
   return %total
 }

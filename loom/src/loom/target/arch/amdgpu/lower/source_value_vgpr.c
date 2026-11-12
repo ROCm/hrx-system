@@ -141,7 +141,7 @@ static bool loom_amdgpu_source_value_naturally_prefers_vgpr(
 bool loom_amdgpu_source_value_facts_prefer_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     loom_value_id_t source_value_id) {
-  if (fact_table == NULL || source_value_id >= module->values.count) {
+  if (source_value_id >= module->values.count) {
     return false;
   }
   const loom_type_t source_type =
@@ -150,11 +150,14 @@ bool loom_amdgpu_source_value_facts_prefer_vgpr(
     return false;
   }
   const loom_value_facts_t facts =
-      loom_value_fact_table_lookup(fact_table, source_value_id);
-  if (loom_value_facts_is_lane_varying(facts)) {
+      fact_table ? loom_value_fact_table_lookup(fact_table, source_value_id)
+                 : loom_value_facts_unknown();
+  if (loom_value_facts_is_lane_varying(facts) ||
+      (loom_value_is_block_arg(loom_module_value(module, source_value_id)) &&
+       !loom_value_facts_is_subgroup_uniform(facts))) {
     return true;
   }
-  if (loom_type_is_buffer(source_type)) {
+  if (loom_type_is_buffer(source_type) && fact_table != NULL) {
     loom_value_fact_buffer_reference_t reference = {0};
     if (loom_value_facts_query_buffer_reference(&fact_table->context, facts,
                                                 &reference)) {
@@ -987,6 +990,15 @@ static bool loom_amdgpu_source_value_prefers_vgpr_impl(
   const loom_type_t source_type =
       loom_module_value_type(module, source_value_id);
   const loom_value_t* value = loom_module_value(module, source_value_id);
+  if (loom_amdgpu_source_value_is_entry_argument(module, source_value_id) &&
+      (loom_type_is_scalar(source_type) || loom_type_is_vector(source_type))) {
+    if (loom_type_element_type(source_type) == LOOM_SCALAR_TYPE_I1) {
+      return false;
+    }
+    return !fact_table ||
+           !loom_value_facts_is_subgroup_uniform(
+               loom_value_fact_table_lookup(fact_table, source_value_id));
+  }
   loom_amdgpu_register_shape_t native_shape = {0};
   if (loom_amdgpu_source_invoke_result_shape(module, value, &native_shape)) {
     return native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR;

@@ -174,9 +174,14 @@ low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @store_scalar_fl
   %14 = v_cndmask_b32 %12, %input, %13
   %e4 = v_cvt_pk_fp8_f32_low %14, %14
   %e5 = v_cvt_pk_bf8_f32_low %input, %input
-  %20 = v_mov_b32 0
-  global_store_b8_saddr %20, %e4, %e5_view
-  global_store_b8_saddr %20, %e5, %e5_view {offset = 1}
+  %20 = slice %e5_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %21 = slice %e5_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %22 = v_mov_b32_copy %20
+  %23 = v_mov_b32_copy %21
+  %24 = concat(%22, %23) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b8_vaddr %24, %e4
+  %29 = concat(%22, %23) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b8_vaddr %29, %e5 {offset = 1}
   return
 }
 

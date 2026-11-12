@@ -1,8 +1,13 @@
-// RUN: with-checks emit source-low target=amdgpu:gfx1151 output=low
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
 
 // A preheader access materializes row*16+column. The loop adds a varying
 // element while preserving that exact invariant sum across the access boundary.
-func.def @shared_loop_origin(%input: buffer, %row: index, %column: index) -> (i32) {
+kernel.def @shared_loop_origin() {
+  %launch_unit = index.constant 1 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_unit, %launch_unit, %launch_unit) : index
+} launch(%input: buffer, %row: index, %column: index, %result_buffer_0: buffer) {
+  %result_base = index.constant 0 : offset
+  %result_view_0 = buffer.view %result_buffer_0[%result_base] : buffer -> view<1xi32>
   %bounded_row = index.assume %row [range(%row, 0, 7)] : index
   %bounded_column = index.assume %column [range(%column, 0, 7)] : index
   %stride = index.constant 16 : index
@@ -19,19 +24,55 @@ func.def @shared_loop_origin(%input: buffer, %row: index, %column: index) -> (i3
     %next = scalar.addi %total, %value : i32
     scf.yield %next : i32
   }
-  func.return %sum : i32
+  view.store %sum, %result_view_0[0] : i32, view<1xi32>
+  kernel.return
 }
 
 // ----
-CHECK: %origin = s_add_u32 *
-CHECK: * = s_lshl_b32_rhs_inline %origin, 2
-CHECK: %value = global_load_b32_saddr *
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "row", arg1 = "column"}, direct_arg_offsets = [8, 12], direct_arg_parameter_indices = [1, 2], direct_arg_sizes = [4, 4], parameter_count = 4, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 3], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @shared_loop_origin(%bounded_row: reg<amdgpu.sgpr>, %bounded_column: reg<amdgpu.sgpr>) asm {
+  %data = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 4, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %36 = v_mov_b32_copy %bounded_row
+  %37 = v_mov_b32_copy %bounded_column
+  %38 = v_lshl_add_u32_shift_imm %36, %37, 4
+  %39 = v_lshlrev_b32_src0_inline %38, 2
+  %stride = s_mov_b32 16
+  %41 = s_mul_i32 %bounded_row, %stride
+  %origin = s_add_u32 %41, %bounded_column
+  %43 = s_lshl_b32_rhs_inline %origin, 2
+  %first = s_load_dword %data, %43
+  %begin = s_mov_b32 0
+  %end = s_mov_b32 4
+  %step = s_mov_b32 1
+  low.br ^_bb1(%begin: reg<amdgpu.sgpr>, %first: reg<amdgpu.sgpr>, %39: reg<amdgpu.vgpr>)
+^_bb1(%iteration: reg<amdgpu.sgpr>, %total: reg<amdgpu.sgpr>, %33: reg<amdgpu.vgpr>):
+  %48 = s_cmp_lt_i32 %iteration, %end
+  low.cond_br %48, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %value = global_load_b32_saddr %33, %data
+  %50 = v_add_u32_src0_inline %33, 4
+  %51 = v_mov_b32_copy %total
+  %next = v_add_u32 %51, %value
+  %53 = s_add_u32 %iteration, %step
+  %54 = v_readfirstlane_b32 %next
+  low.br ^_bb1(%53: reg<amdgpu.sgpr>, %54: reg<amdgpu.sgpr>, %50: reg<amdgpu.vgpr>)
+^_bb3:
+  %55 = v_mov_b32_copy %total
+  %56 = v_mov_b32 0
+  global_store_b32_saddr %56, %55, %result_view_0
+  return
+}
 
 // ====
 
 // Both accesses have the same dynamic byte sum but distinct static offsets.
 // Retaining the index must preserve its element-to-byte conversion exactly.
-func.def @shared_static_suffix(%input: buffer, %row: index, %column: index) -> (i32) {
+kernel.def @shared_static_suffix() {
+  %launch_unit = index.constant 1 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_unit, %launch_unit, %launch_unit) : index
+} launch(%input: buffer, %row: index, %column: index, %result_buffer_0: buffer) {
+  %result_base = index.constant 0 : offset
+  %result_view_0 = buffer.view %result_buffer_0[%result_base] : buffer -> view<1xi32>
   %bounded_row = index.assume %row [range(%row, 0, 7)] : index
   %bounded_column = index.assume %column [range(%column, 0, 7)] : index
   %stride = index.constant 16 : index
@@ -43,19 +84,37 @@ func.def @shared_static_suffix(%input: buffer, %row: index, %column: index) -> (
   %first = view.load %data[%origin] : view<128xi32> -> i32
   %second = view.load %data[%later] : view<128xi32> -> i32
   %sum = scalar.addi %first, %second : i32
-  func.return %sum : i32
+  view.store %sum, %result_view_0[0] : i32, view<1xi32>
+  kernel.return
 }
 
 // ----
-CHECK: %origin = s_add_u32 *
-CHECK: %second = global_load_b32_saddr * {offset = 32}
-CHECK: %sum = v_add_u32 %first, %second
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "row", arg1 = "column"}, direct_arg_offsets = [8, 12], direct_arg_parameter_indices = [1, 2], direct_arg_sizes = [4, 4], parameter_count = 4, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 3], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @shared_static_suffix(%bounded_row: reg<amdgpu.sgpr>, %bounded_column: reg<amdgpu.sgpr>) asm {
+  %data = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 4, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %stride = s_mov_b32 16
+  %23 = s_mul_i32 %bounded_row, %stride
+  %origin = s_add_u32 %23, %bounded_column
+  %25 = s_lshl_b32_rhs_inline %origin, 2
+  %first = s_load_dword %data, %25
+  %second = s_load_dword %data, %25 {offset = 32}
+  %sum = s_add_u32 %first, %second
+  %30 = v_mov_b32_copy %sum
+  %31 = v_mov_b32 0
+  global_store_b32_saddr %31, %30, %result_view_0
+  return
+}
 
 // ====
 
 // Equal canonical terms in sibling branches do not make a branch-local SSA
 // realization available in the other branch.
-func.def @sibling_origins(%input: buffer, %row: index, %column: index, %condition: i1) -> (i32) {
+kernel.def @sibling_origins() {
+  %launch_unit = index.constant 1 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_unit, %launch_unit, %launch_unit) : index
+} launch(%input: buffer, %row: index, %column: index, %condition: i1, %result_buffer_0: buffer) {
+  %result_base = index.constant 0 : offset
+  %result_view_0 = buffer.view %result_buffer_0[%result_base] : buffer -> view<1xi32>
   %bounded_row = index.assume %row [range(%row, 0, 7)] : index
   %bounded_column = index.assume %column [range(%column, 0, 7)] : index
   %stride = index.constant 16 : index
@@ -73,19 +132,63 @@ func.def @sibling_origins(%input: buffer, %row: index, %column: index, %conditio
     %right = view.load<volatile> %data[%later] : view<128xi32> -> i32
     scf.yield %right : i32
   }
-  func.return %result : i32
+  view.store %result, %result_view_0[0] : i32, view<1xi32>
+  kernel.return
 }
 
 // ----
-CHECK: * = s_lshl_b32_rhs_inline %bounded_row, 6
-CHECK: %left = global_load_b32_saddr<volatile> *
-CHECK: %right = global_load_b32_saddr<volatile> * {offset = 32}
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 3, direct_arg_count = 3, direct_arg_names = {arg0 = "row", arg1 = "column", arg2 = "condition"}, direct_arg_offsets = [8, 12, 16], direct_arg_parameter_indices = [1, 2, 3], direct_arg_payload_sizes = [4, 4, 1], direct_arg_sizes = [4, 4, 4], parameter_count = 5, resource_count = 2, resource_offsets = [0, 24], resource_parameter_indices = [0, 4], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @sibling_origins(%bounded_row: reg<amdgpu.sgpr>, %bounded_column: reg<amdgpu.sgpr>, %condition$23: reg<amdgpu.sgpr>) asm {
+  %data = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 4, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %condition$27 = s_bfe_u32_lit %condition$23, 524288
+  %stride = s_mov_b32 16
+  %29 = s_mov_b32 0
+  %30 = s_cmp_lg_i32 %condition$27, %29
+  low.cond_br %30, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+^_bb1:
+  %31 = s_mul_i32 %bounded_row, %stride
+  %left_origin = s_add_u32 %31, %bounded_column
+  %33 = v_mov_b32 0
+  %34 = s_lshl_b32_rhs_inline %left_origin, 2
+  %35 = slice %data[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %36 = slice %data[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %38, %39 = s_add_co_u32 %35, %34
+  %40, %41 = s_addc_u32 %36, %29, %39
+  %42 = concat(%38, %40) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %left = global_load_b32_saddr<volatile> %33, %42
+  %49, %50 = s_add_co_u32 %35, %34
+  %51, %52 = s_addc_u32 %36, %29, %50
+  %53 = concat(%49, %51) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b32_saddr<volatile> %33, %left, %53
+  low.br ^_bb3(%left: reg<amdgpu.vgpr>)
+^_bb2:
+  %54 = v_mov_b32 0
+  %55 = s_lshl_b32_rhs_inline %bounded_row, 6
+  %56 = s_lshl_b32_rhs_inline %bounded_column, 2
+  %57 = s_add_u32 %55, %56
+  %58 = slice %data[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %59 = slice %data[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %61, %62 = s_add_co_u32 %58, %57
+  %63, %64 = s_addc_u32 %59, %29, %62
+  %65 = concat(%61, %63) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %right = global_load_b32_saddr<volatile> %54, %65 {offset = 32}
+  low.br ^_bb3(%right: reg<amdgpu.vgpr>)
+^_bb3(%result: reg<amdgpu.vgpr>):
+  %67 = v_mov_b32 0
+  global_store_b32_saddr %67, %result, %result_view_0
+  return
+}
 
 // ====
 
 // An enclosing address component remains available through nested scopes and
 // after both loops exit. Volatile accesses keep every observation in the IR.
-func.def @nested_scoped_origin(%input: buffer, %row: index, %column: index) -> (i32) {
+kernel.def @nested_scoped_origin() {
+  %launch_unit = index.constant 1 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_unit, %launch_unit, %launch_unit) : index
+} launch(%input: buffer, %row: index, %column: index, %result_buffer_0: buffer) {
+  %result_base = index.constant 0 : offset
+  %result_view_0 = buffer.view %result_buffer_0[%result_base] : buffer -> view<1xi32>
   %bounded_row = index.assume %row [range(%row, 0, 7)] : index
   %bounded_column = index.assume %column [range(%column, 0, 7)] : index
   %stride = index.constant 16 : index
@@ -106,11 +209,57 @@ func.def @nested_scoped_origin(%input: buffer, %row: index, %column: index) -> (
   }
   %last = view.load<volatile> %data[%later] : view<128xi32> -> i32
   %result = scalar.addi %first, %last : i32
-  func.return %result : i32
+  view.store %result, %result_view_0[0] : i32, view<1xi32>
+  kernel.return
 }
 
 // ----
-CHECK: %origin = s_add_u32 *
-CHECK: %value = global_load_b32_saddr<volatile> * {offset = 32}
-CHECK: %last = global_load_b32_saddr<volatile> * {offset = 32}
-CHECK-NOT: * = s_lshl_b32_rhs_inline %bounded_row, 6
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "row", arg1 = "column"}, direct_arg_offsets = [8, 12], direct_arg_parameter_indices = [1, 2], direct_arg_sizes = [4, 4], parameter_count = 4, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 3], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @nested_scoped_origin(%bounded_row: reg<amdgpu.sgpr>, %bounded_column: reg<amdgpu.sgpr>) asm {
+  %data = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 4, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %stride = s_mov_b32 16
+  %39 = s_mul_i32 %bounded_row, %stride
+  %origin = s_add_u32 %39, %bounded_column
+  %41 = v_mov_b32 0
+  %42 = s_lshl_b32_rhs_inline %origin, 2
+  %43 = slice %data[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %44 = slice %data[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %45 = s_mov_b32 0
+  %46, %47 = s_add_co_u32 %43, %42
+  %48, %49 = s_addc_u32 %44, %45, %47
+  %50 = concat(%46, %48) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %first = global_load_b32_saddr<volatile> %41, %50
+  %end = s_mov_b32 4
+  %step = s_mov_b32 1
+  low.br ^_bb1(%45: reg<amdgpu.sgpr>)
+^_bb1(%outer: reg<amdgpu.sgpr>):
+  %55 = s_cmp_lt_i32 %outer, %end
+  low.cond_br %55, ^_bb2, ^_bb6 : reg<amdgpu.scc>
+^_bb2:
+  low.br ^_bb3(%45: reg<amdgpu.sgpr>)
+^_bb3(%inner: reg<amdgpu.sgpr>):
+  %56 = s_cmp_lt_i32 %inner, %end
+  low.cond_br %56, ^_bb4, ^_bb5 : reg<amdgpu.scc>
+^_bb4:
+  %62, %63 = s_add_co_u32 %43, %42
+  %64, %65 = s_addc_u32 %44, %45, %63
+  %66 = concat(%62, %64) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %value = global_load_b32_saddr<volatile> %41, %66 {offset = 32}
+  %73, %74 = s_add_co_u32 %43, %42
+  %75, %76 = s_addc_u32 %44, %45, %74
+  %77 = concat(%73, %75) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b32_saddr<volatile> %41, %value, %77 {offset = 32}
+  %78 = s_add_u32 %inner, %step
+  low.br ^_bb3(%78: reg<amdgpu.sgpr>)
+^_bb5:
+  %79 = s_add_u32 %outer, %step
+  low.br ^_bb1(%79: reg<amdgpu.sgpr>)
+^_bb6:
+  %85, %86 = s_add_co_u32 %43, %42
+  %87, %88 = s_addc_u32 %44, %45, %86
+  %89 = concat(%85, %87) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %last = global_load_b32_saddr<volatile> %41, %89 {offset = 32}
+  %result = v_add_u32 %first, %last
+  global_store_b32_saddr %41, %result, %result_view_0
+  return
+}

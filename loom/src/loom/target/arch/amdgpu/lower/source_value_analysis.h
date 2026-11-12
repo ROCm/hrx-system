@@ -38,6 +38,11 @@ bool loom_amdgpu_source_invoke_result_shape(
     const loom_module_t* module, const loom_value_t* value,
     loom_amdgpu_register_shape_t* out_shape);
 
+// Identifies the FuncLike body arguments whose representation is a callable
+// contract. Local control-flow arguments have no callable ABI.
+bool loom_amdgpu_source_value_is_entry_argument(const loom_module_t* module,
+                                                loom_value_id_t value_id);
+
 typedef uint8_t loom_amdgpu_source_value_analysis_bits_t;
 
 enum loom_amdgpu_source_value_analysis_bit_e {

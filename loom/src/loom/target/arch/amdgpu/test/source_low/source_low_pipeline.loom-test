@@ -124,8 +124,8 @@ func.def target(@target) @module_output_prints_low_asm(%lhs: i32, %rhs: i32) -> 
 // ----
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@__loom_target_context_0_0) abi(hal_kernel) @module_output_prints_low_asm(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
-  %product = s_mul_i32 %lhs, %rhs
+low.func.def target<amdgpu.gfx11.generic.core>(@__loom_target_context_0_0) abi(hal_kernel) @module_output_prints_low_asm(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %product = v_mul_lo_u32 %lhs, %rhs
   return %product
 }
 
@@ -169,29 +169,41 @@ func.def target(@target) @diagnostics_observe_only_live_operations(%lhs: f32, %r
 
 amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @module_static_buffer_descriptor(%input: buffer) -> (vector<4xi32>) {
+kernel.def target(@target) @module_static_buffer_descriptor() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%input: buffer, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64x4xi32>
   %base = index.constant 0 : offset
   %descriptor_input = buffer.assume.memory_space<descriptor> %input : buffer
   %input_view = buffer.view %descriptor_input[%base] : buffer -> view<4xi32>
   %loaded = vector.load %input_view[0] : view<4xi32> -> vector<4xi32>
-  func.return %loaded : vector<4xi32>
+  vector.store %loaded, %result_view_0[%fixture_lane, 0] : vector<4xi32>, view<64x4xi32>
+  kernel.return
 }
 
 // ----
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@__loom_target_context_0_0) abi(hal_kernel) @module_static_buffer_descriptor() -> (reg<amdgpu.vgpr x4>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@__loom_target_context_0_0) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @module_static_buffer_descriptor() asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %2 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %3 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %4 = s_mov_b32 65535
-  %5 = s_and_b32 %3, %4
-  %6 = concat(%2, %5) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %7 = s_mov_b32 16
-  %8 = s_mov_b32 822173696
-  %9 = concat(%6, %7, %8) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  %loaded = buffer_load_b128_off_zero %9
-  return %loaded
+  %result_view_0 = resource<hal_binding> {extent = 1024, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %3 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %4 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %5 = s_mov_b32 65535
+  %6 = s_and_b32 %4, %5
+  %7 = concat(%3, %6) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %8 = s_mov_b32 16
+  %9 = s_mov_b32 822173696
+  %10 = concat(%7, %8, %9) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %loaded = buffer_load_b128_off_zero %10
+  %12 = v_lshlrev_b32_src0_inline %fixture_lane, 4
+  global_store_b128_saddr %12, %loaded, %result_view_0
+  return
 }
 
 amdgpu.target<gfx11-generic> @__loom_target_context_0_0 {subgroup_size = 32}
@@ -201,31 +213,43 @@ amdgpu.target<gfx11-generic> @__loom_target_context_0_0 {subgroup_size = 32}
 
 amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @module_dynamic_buffer_descriptor(%input: buffer, %count_i32: i32) -> (i32) {
+kernel.def target(@target) @module_dynamic_buffer_descriptor() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%input: buffer, %count_i32: i32, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi32>
   %base = index.constant 0 : offset
   %descriptor_input = buffer.assume.memory_space<descriptor> %input : buffer
   %count0 = index.cast %count_i32 : i32 to index
   %count = index.assume %count0 [range(%count0, 1, 1024)] : index
   %input_view = buffer.view %descriptor_input[%base] : buffer -> view<[%count]xi32>
   %loaded = view.load %input_view[0] : view<[%count]xi32> -> i32
-  func.return %loaded : i32
+  view.store %loaded, %result_view_0[%fixture_lane] : i32, view<64xi32>
+  kernel.return
 }
 
 // ----
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@__loom_target_context_0_0) abi(hal_kernel) @module_dynamic_buffer_descriptor(%count: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@__loom_target_context_0_0) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "count_i32"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @module_dynamic_buffer_descriptor(%count: reg<amdgpu.sgpr>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %3 = s_lshl_b32_rhs_inline %count, 2
-  %4 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %5 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %6 = s_mov_b32 65535
-  %7 = s_and_b32 %5, %6
-  %8 = concat(%4, %7) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %9 = s_mov_b32 822173696
-  %10 = concat(%8, %3, %9) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  %loaded = buffer_load_dword_off_zero %10
-  return %loaded
+  %result_view_0 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %4 = s_lshl_b32_rhs_inline %count, 2
+  %5 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %6 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %7 = s_mov_b32 65535
+  %8 = s_and_b32 %6, %7
+  %9 = concat(%5, %8) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %10 = s_mov_b32 822173696
+  %11 = concat(%9, %4, %10) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %loaded = buffer_load_dword_off_zero %11
+  %13 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_b32_saddr %13, %loaded, %result_view_0
+  return
 }
 
 amdgpu.target<gfx11-generic> @__loom_target_context_0_0 {subgroup_size = 32}
@@ -235,29 +259,41 @@ amdgpu.target<gfx11-generic> @__loom_target_context_0_0 {subgroup_size = 32}
 
 amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @module_descriptor_diagnostics(%input: buffer) -> (vector<4xi32>) {
+kernel.def target(@target) @module_descriptor_diagnostics() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%input: buffer, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64x4xi32>
   %base = index.constant 0 : offset
   %descriptor_input = buffer.assume.memory_space<descriptor> %input : buffer
   %input_view = buffer.view %descriptor_input[%base] : buffer -> view<4xi32>
   %loaded = vector.load %input_view[0] : view<4xi32> -> vector<4xi32>
-  func.return %loaded : vector<4xi32>
+  vector.store %loaded, %result_view_0[%fixture_lane, 0] : vector<4xi32>, view<64x4xi32>
+  kernel.return
 }
 
 // ----
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@__loom_target_context_0_0) abi(hal_kernel) @module_descriptor_diagnostics() -> (reg<amdgpu.vgpr x4>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@__loom_target_context_0_0) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @module_descriptor_diagnostics() asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %2 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %3 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %4 = s_mov_b32 65535
-  %5 = s_and_b32 %3, %4
-  %6 = concat(%2, %5) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %7 = s_mov_b32 16
-  %8 = s_mov_b32 822173696
-  %9 = concat(%6, %7, %8) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  %loaded = buffer_load_b128_off_zero %9
-  return %loaded
+  %result_view_0 = resource<hal_binding> {extent = 1024, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %3 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %4 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %5 = s_mov_b32 65535
+  %6 = s_and_b32 %4, %5
+  %7 = concat(%3, %6) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %8 = s_mov_b32 16
+  %9 = s_mov_b32 822173696
+  %10 = concat(%7, %8, %9) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %loaded = buffer_load_b128_off_zero %10
+  %12 = v_lshlrev_b32_src0_inline %fixture_lane, 4
+  global_store_b128_saddr %12, %loaded, %result_view_0
+  return
 }
 
 amdgpu.target<gfx11-generic> @__loom_target_context_0_0 {subgroup_size = 32}

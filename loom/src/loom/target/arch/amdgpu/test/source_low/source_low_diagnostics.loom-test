@@ -232,17 +232,17 @@ func.def target(@target) @dynamic_scaled_index_large_extent_flat_load(%input: bu
 // ----
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dynamic_scaled_index_large_extent_flat_load(%bounded_index: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dynamic_scaled_index_large_extent_flat_load(%bounded_index: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %input_view = resource<hal_binding> {extent = 4294967296, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %10 = v_mov_b32 0
-  %11 = s_lshl_b32_rhs_inline %bounded_index, 2
+  %10 = v_lshlrev_b32_src0_inline %bounded_index, 2
+  %11 = v_lshrrev_b32_src0_inline %bounded_index, 30
   %12 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %13 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %14 = s_mov_b32 0
-  %15, %16 = s_add_co_u32 %12, %11
-  %17, %18 = s_addc_u32 %13, %14, %16
-  %19 = concat(%15, %17) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %loaded = global_load_b32_saddr %10, %19
+  %14, %15 = v_add_co_u32 %12, %10
+  %16 = v_mov_b32_copy %13
+  %17, %18 = v_add_co_ci_u32 %16, %11, %15
+  %19 = concat(%14, %17) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %loaded = global_load_b32_vaddr %19
   return %loaded
 }
 
@@ -250,13 +250,19 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dynamic
 
 amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @dynamic_view_base_b128_alignment_rejected(%input: buffer, %offset: offset) -> (vector<4xi32>) {
+kernel.def target(@target) @dynamic_view_base_b128_alignment_rejected() {
+  %launch_unit = index.constant 1 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_unit, %launch_unit, %launch_unit) : index
+} launch(%input: buffer, %offset: offset, %result_buffer_0: buffer) {
+  %result_base = index.constant 0 : offset
+  %result_view_0 = buffer.view %result_buffer_0[%result_base] : buffer -> view<4xi32>
   %base = index.assume %offset [range(%offset, 0, 4096)] : offset
   %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
   %input_view = buffer.view %input_descriptor[%base] : buffer -> view<4xi32>
   // ERROR@+1: AMDGPU/023 {constraint_key="memory_access.b128_dynamic_alignment"}
   %loaded = vector.load %input_view[0] : view<4xi32> -> vector<4xi32>
-  func.return %loaded : vector<4xi32>
+  vector.store %loaded, %result_view_0[0] : vector<4xi32>, view<4xi32>
+  kernel.return
 }
 
 // ====

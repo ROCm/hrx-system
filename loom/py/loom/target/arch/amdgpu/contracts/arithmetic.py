@@ -58,6 +58,7 @@ from loom.target.contracts import (
     DescriptorRule,
     EmitDescriptorOp,
     EmitRegisterConcat,
+    EmitRegisterCopy,
     EmitRegisterSlice,
     Guard,
     GuardDiagnostic,
@@ -1555,6 +1556,17 @@ def _vector_16bit_float_conversion_recipe_rules() -> tuple[RecipeRule, ...]:
     )
 
 
+def _vector_bitfield_register_input(field: str) -> EmitRegisterCopy:
+    # Bitfield sources and results have equal payload widths. Prepare vector
+    # operands once before the per-lane sequence, preserving scalar inputs at
+    # descriptor slots that accept them directly.
+    return EmitRegisterCopy(
+        source=ValueRef.operand(field),
+        result=ValueRef.temporary(f"{field}_registers"),
+        result_type=ValueRef.result("result"),
+    )
+
+
 def _vector_bitfield_extract_alias_rule(source_op: Op) -> ValueAliasRule:
     return ValueAliasRule(
         source_op=source_op,
@@ -1623,7 +1635,9 @@ def _vector_bitfield_extractu_offset0_inline_rule(width: int) -> DescriptorRule:
         emit=(
             EmitDescriptorOp(
                 descriptor=descriptor,
-                operands={"rhs": ValueRef.operand("source")},
+                operands={
+                    "rhs": _materialized_operand("source", REGISTERS_VGPR_MATERIALIZER)
+                },
                 results={"dst": ValueRef.result("result")},
                 immediates={"imm32": _bitfield_low_mask(width)},
                 form=DescriptorEmitForm.PER_LANE,
@@ -1650,7 +1664,9 @@ def _vector_bitfield_extractu_offset0_literal_rule() -> DescriptorRule:
         emit=(
             EmitDescriptorOp(
                 descriptor=descriptor,
-                operands={"rhs": ValueRef.operand("source")},
+                operands={
+                    "rhs": _materialized_operand("source", REGISTERS_VGPR_MATERIALIZER)
+                },
                 results={"dst": ValueRef.result("result")},
                 immediates={"imm32": AttrProject.i64_low_bit_mask("width")},
                 form=DescriptorEmitForm.PER_LANE,
@@ -1677,9 +1693,10 @@ def _vector_bitfield_extractu_shift_inline_mask_rule(width: int) -> DescriptorRu
             Guard.descriptor_available(mask),
         ),
         emit=(
+            _vector_bitfield_register_input("source"),
             EmitDescriptorOp(
                 descriptor=shift,
-                operands={"value": ValueRef.operand("source")},
+                operands={"value": ValueRef.temporary("source_registers")},
                 results={"dst": ValueRef.temporary("shifted")},
                 result_types={"dst": ValueRef.result("result")},
                 immediates={"imm32": AttrProject.direct("offset")},
@@ -1714,9 +1731,10 @@ def _vector_bitfield_extractu_shift_literal_mask_rule() -> DescriptorRule:
             Guard.descriptor_available(mask),
         ),
         emit=(
+            _vector_bitfield_register_input("source"),
             EmitDescriptorOp(
                 descriptor=shift,
-                operands={"value": ValueRef.operand("source")},
+                operands={"value": ValueRef.temporary("source_registers")},
                 results={"dst": ValueRef.temporary("shifted")},
                 result_types={"dst": ValueRef.result("result")},
                 immediates={"imm32": AttrProject.direct("offset")},
@@ -1750,7 +1768,11 @@ def _vector_bitfield_extract_top_aligned_rule(
         emit=(
             EmitDescriptorOp(
                 descriptor=descriptor,
-                operands={"value": ValueRef.operand("source")},
+                operands={
+                    "value": _materialized_operand(
+                        "source", REGISTERS_VGPR_MATERIALIZER
+                    )
+                },
                 results={"dst": ValueRef.result("result")},
                 immediates={"imm32": AttrProject.direct("offset")},
                 form=DescriptorEmitForm.PER_LANE,
@@ -1777,9 +1799,10 @@ def _vector_bitfield_extracts_shift_rule() -> DescriptorRule:
             Guard.descriptor_available(shift_right),
         ),
         emit=(
+            _vector_bitfield_register_input("source"),
             EmitDescriptorOp(
                 descriptor=shift_left,
-                operands={"value": ValueRef.operand("source")},
+                operands={"value": ValueRef.temporary("source_registers")},
                 results={"dst": ValueRef.temporary("shifted_left")},
                 result_types={"dst": ValueRef.result("result")},
                 immediates={
@@ -1849,6 +1872,7 @@ def _vector_bitfield_insert_bfi_offset0_rule() -> DescriptorRule:
                 results={"dst": ValueRef.result("result")},
                 immediates={"imm32": AttrProject.i64_low_bit_mask("width")},
                 form=DescriptorEmitForm.PER_LANE,
+                operand_materialization=DescriptorOperandMaterialization.TARGET,
             ),
         ),
     )
@@ -1872,9 +1896,10 @@ def _vector_bitfield_insert_bfi_shift_rule() -> DescriptorRule:
             Guard.descriptor_available(insert),
         ),
         emit=(
+            _vector_bitfield_register_input("field"),
             EmitDescriptorOp(
                 descriptor=shift,
-                operands={"value": ValueRef.operand("field")},
+                operands={"value": ValueRef.temporary("field_registers")},
                 results={"dst": ValueRef.temporary("shifted_field")},
                 result_types={"dst": ValueRef.result("result")},
                 immediates={"imm32": AttrProject.direct("offset")},
@@ -1894,6 +1919,7 @@ def _vector_bitfield_insert_bfi_shift_rule() -> DescriptorRule:
                     )
                 },
                 form=DescriptorEmitForm.PER_LANE_SEQUENCE,
+                operand_materialization=DescriptorOperandMaterialization.TARGET,
             ),
         ),
     )
@@ -1952,9 +1978,11 @@ def _vector_bitfield_insert_fallback_rule(
             Guard.descriptor_available(merge),
         ),
         emit=(
+            _vector_bitfield_register_input("field"),
+            _vector_bitfield_register_input("base"),
             EmitDescriptorOp(
                 descriptor=field_mask,
-                operands={"rhs": ValueRef.operand("field")},
+                operands={"rhs": ValueRef.temporary("field_registers")},
                 results={"dst": ValueRef.temporary("field_low_bits")},
                 result_types={"dst": ValueRef.result("result")},
                 immediates={
@@ -1967,7 +1995,7 @@ def _vector_bitfield_insert_fallback_rule(
             *shift_emit,
             EmitDescriptorOp(
                 descriptor=clear_base,
-                operands={"rhs": ValueRef.operand("base")},
+                operands={"rhs": ValueRef.temporary("base_registers")},
                 results={"dst": ValueRef.temporary("cleared_base")},
                 result_types={"dst": ValueRef.result("result")},
                 immediates={

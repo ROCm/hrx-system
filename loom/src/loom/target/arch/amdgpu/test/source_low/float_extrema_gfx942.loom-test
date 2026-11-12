@@ -23,21 +23,37 @@ low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @float_extrema_f32(%lhs: 
 
 // ====
 
-func.def @float_extrema_uniform(%lhs_bits: i32, %rhs_bits: i32) -> (f32, f32) {
+kernel.def @float_extrema_uniform() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%lhs_bits: i32, %rhs_bits: i32, %result_buffer_0: buffer, %result_buffer_1: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xf32>
+  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xf32>
   %lhs = scalar.bitcast %lhs_bits : i32 to f32
   %rhs = scalar.bitcast %rhs_bits : i32 to f32
   %minimum = scalar.minnumf %lhs, %rhs : f32
   %maximum = scalar.maxnumf %lhs, %rhs : f32
-  func.return %minimum, %maximum : f32, f32
+  view.store %minimum, %result_view_0[%fixture_lane] : f32, view<64xf32>
+  view.store %maximum, %result_view_1[%fixture_lane] : f32, view<64xf32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @float_extrema_uniform(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %12 = v_mov_b32_copy %lhs
-  %14 = v_max_f32 %12, %12
-  %15 = v_mov_b32_copy %rhs
-  %17 = v_max_f32 %15, %15
-  %minimum = v_min_f32 %14, %17
-  %maximum = v_max_f32 %14, %17
-  return %minimum, %maximum
+low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "lhs_bits", arg1 = "rhs_bits"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 4, resource_count = 2, resource_offsets = [8, 16], resource_parameter_indices = [2, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @float_extrema_uniform(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %result_view_0 = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_1 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %19 = v_mov_b32_copy %lhs
+  %21 = v_max_f32 %19, %19
+  %22 = v_mov_b32_copy %rhs
+  %24 = v_max_f32 %22, %22
+  %minimum = v_min_f32 %21, %24
+  %maximum = v_max_f32 %21, %24
+  %33 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_dword_saddr %33, %minimum, %result_view_0
+  global_store_dword_saddr %33, %maximum, %result_view_1
+  return
 }

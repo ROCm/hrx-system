@@ -1,4 +1,4 @@
-// RUN: with-checks emit source-low target=amdgpu:gfx1151 output=low
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
 
 // Mixed widths, unused parameters, raw stores and independent widening uses
 // exercise the direct argument ABI without changing narrow payload bits.
@@ -51,13 +51,137 @@ kernel.def @narrow_float_arguments() {
 }
 
 // ----
-CHECK: low.kernel.def * direct_arg_offsets = [0, 4, 8, 12, 20, 24], * direct_arg_payload_sizes = [1, 2, 1, 8, 2, 2], direct_arg_sizes = [4, 4, 4, 8, 4, 4], * @narrow_float_arguments(%e4: reg<amdgpu.sgpr>, %unused: reg<amdgpu.sgpr>, %e5: reg<amdgpu.sgpr>, %marker: reg<amdgpu.sgpr x2>, %half: reg<amdgpu.sgpr>, %brain: reg<amdgpu.sgpr>) asm {
-CHECK: %* = v_mov_b32_copy %half
-CHECK: %* = v_mov_b32_copy %brain
-CHECK: %half_f32 = v_cvt_f32_f16 %*
-CHECK: %brain_f32 = v_lshlrev_b32_src0_16_low16 %*
-CHECK: %half_f64 = v_cvt_f64_f32 %half_f32
-CHECK: %brain_f64 = v_cvt_f64_f32 %brain_f32
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 7, direct_arg_count = 6, direct_arg_names = {arg0 = "e4", arg1 = "unused", arg2 = "e5", arg3 = "marker", arg4 = "half", arg5 = "brain"}, direct_arg_offsets = [0, 4, 8, 12, 20, 24], direct_arg_parameter_indices = [0, 1, 2, 3, 4, 5], direct_arg_payload_sizes = [1, 2, 1, 8, 2, 2], direct_arg_sizes = [4, 4, 4, 8, 4, 4], parameter_count = 7, resource_count = 1, resource_offsets = [32], resource_parameter_indices = [6], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @narrow_float_arguments(%e4: reg<amdgpu.sgpr>, %unused: reg<amdgpu.sgpr>, %e5: reg<amdgpu.sgpr>, %marker: reg<amdgpu.sgpr x2>, %half: reg<amdgpu.sgpr>, %brain: reg<amdgpu.sgpr>) asm {
+  %marker_view = resource<hal_binding> {extent = 72, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %372 = v_mov_b32_copy %e4
+  %373 = v_mov_b32 0
+  global_store_b8_saddr %373, %372, %marker_view
+  %374 = v_mov_b32_copy %e5
+  global_store_b8_saddr %373, %374, %marker_view {offset = 1}
+  %376 = v_mov_b32_copy %half
+  global_store_short_saddr %373, %376, %marker_view {offset = 2}
+  %378 = v_mov_b32_copy %brain
+  global_store_short_saddr %373, %378, %marker_view {offset = 4}
+  %381 = v_and_b32_lit %372, 255
+  %382 = v_and_b32_lit %381, 128
+  %384 = v_lshlrev_b32_src0_inline %382, 8
+  %386 = v_and_b32_lit %381, 120
+  %387 = v_lshrrev_b32_src0_inline %386, 3
+  %388 = v_and_b32_src0_inline %381, 7
+  %389 = v_mov_b32 8
+  %390 = v_add_u32 %387, %389
+  %392 = v_lshlrev_b32_src0_inline %390, 10
+  %393 = v_lshlrev_b32_src0_inline %388, 7
+  %394 = v_or_b32 %384, %392
+  %395 = v_or_b32 %394, %393
+  %398 = v_and_b32_src0_inline %388, 2
+  %399 = v_cmp_ne_i32_src1_inline %398 {rhs = 0}
+  %401 = v_cndmask_b32_src0_lit_src1_inline %399 {imm32 = 0, true_value = 1}
+  %402 = v_and_b32_src0_inline %388, 4
+  %403 = v_cmp_ne_i32_src1_inline %402 {rhs = 0}
+  %404 = v_cndmask_b32_src1_inline %401, %403 {true_value = 2}
+  %406 = v_mov_b32 6
+  %407 = v_add_u32 %404, %406
+  %408 = v_lshlrev_b32_src0_inline %407, 10
+  %409 = v_mov_b32 10
+  %410 = v_sub_nc_u32 %409, %404
+  %411 = v_lshlrev_b32 %410, %388
+  %412 = v_and_b32_lit %411, 1023
+  %413 = v_or_b32 %384, %408
+  %414 = v_or_b32 %413, %412
+  %415 = v_cmp_eq_i32_src1_inline %388 {rhs = 0}
+  %416 = v_cndmask_b32 %414, %384, %415
+  %417 = v_cmp_eq_i32_src1_inline %387 {rhs = 0}
+  %418 = v_cndmask_b32 %395, %416, %417
+  %419 = v_cmp_eq_i32_src1_inline %387 {rhs = 15}
+  %421 = v_cmp_eq_i32_src1_inline %388 {rhs = 7}
+  %424 = s_and_b64 %419, %421
+  %e4_half = v_cndmask_b32_src1_lit %418, %424, 32256
+  global_store_short_saddr %373, %e4_half, %marker_view {offset = 8}
+  %428 = v_and_b32_lit %374, 255
+  %429 = v_and_b32_lit %428, 128
+  %430 = v_lshlrev_b32_src0_inline %429, 8
+  %431 = v_and_b32_lit %428, 124
+  %432 = v_lshrrev_b32_src0_inline %431, 2
+  %433 = v_and_b32_src0_inline %428, 3
+  %434 = v_lshlrev_b32_src0_inline %432, 10
+  %435 = v_lshlrev_b32_src0_inline %433, 8
+  %436 = v_or_b32 %430, %434
+  %437 = v_or_b32 %436, %435
+  %438 = v_or_b32 %430, %435
+  %439 = v_cmp_eq_i32_src1_inline %432 {rhs = 0}
+  %440 = v_cndmask_b32 %437, %438, %439
+  %441 = v_cmp_eq_i32_src1_inline %432 {rhs = 31}
+  %442 = v_or_b32_lit %430, 31744
+  %443 = v_cmp_eq_i32_src1_inline %433 {rhs = 0}
+  %444 = v_cndmask_b32_src0_lit %442, %443, 32256
+  %e5_half = v_cndmask_b32 %440, %444, %441
+  global_store_short_saddr %373, %e5_half, %marker_view {offset = 10}
+  %447 = v_lshlrev_b32_src0_inline %382, 24
+  %448 = v_mov_b32 120
+  %449 = v_add_u32 %387, %448
+  %451 = v_lshlrev_b32_src0_inline %449, 23
+  %452 = v_lshlrev_b32_src0_inline %388, 20
+  %453 = v_or_b32 %447, %451
+  %454 = v_or_b32 %453, %452
+  %456 = v_mov_b32 118
+  %457 = v_add_u32 %404, %456
+  %458 = v_lshlrev_b32_src0_inline %457, 23
+  %459 = v_mov_b32 23
+  %460 = v_sub_nc_u32 %459, %404
+  %461 = v_lshlrev_b32 %460, %388
+  %462 = v_and_b32_lit %461, 8388607
+  %463 = v_or_b32 %447, %458
+  %464 = v_or_b32 %463, %462
+  %465 = v_cndmask_b32 %464, %447, %415
+  %466 = v_cndmask_b32 %454, %465, %417
+  %e4_f32 = v_cndmask_b32_src1_lit %466, %424, 2143289344
+  global_store_b32_saddr %373, %e4_f32, %marker_view {offset = 16}
+  %470 = v_lshlrev_b32_src0_inline %429, 24
+  %472 = v_mov_b32 112
+  %473 = v_add_u32 %432, %472
+  %474 = v_lshlrev_b32_src0_inline %473, 23
+  %475 = v_lshlrev_b32_src0_inline %433, 21
+  %476 = v_or_b32 %470, %474
+  %477 = v_or_b32 %476, %475
+  %478 = v_and_b32_src0_inline %433, 2
+  %479 = v_cmp_ne_i32_src1_inline %478 {rhs = 0}
+  %480 = v_cndmask_b32_src0_lit_src1_inline %479 {imm32 = 0, true_value = 1}
+  %482 = v_mov_b32 111
+  %483 = v_add_u32 %480, %482
+  %484 = v_lshlrev_b32_src0_inline %483, 23
+  %486 = v_sub_nc_u32 %459, %480
+  %487 = v_lshlrev_b32 %486, %433
+  %488 = v_and_b32_lit %487, 8388607
+  %489 = v_or_b32 %470, %484
+  %490 = v_or_b32 %489, %488
+  %491 = v_cndmask_b32 %490, %470, %443
+  %492 = v_cndmask_b32 %477, %491, %439
+  %493 = v_or_b32_lit %470, 2139095040
+  %494 = v_cndmask_b32_src0_lit %493, %443, 2143289344
+  %e5_f32 = v_cndmask_b32 %492, %494, %441
+  global_store_b32_saddr %373, %e5_f32, %marker_view {offset = 20}
+  %half_f32 = s_cvt_f32_f16 %half
+  %498 = v_mov_b32_copy %half_f32
+  global_store_b32_saddr %373, %498, %marker_view {offset = 24}
+  %brain_f32 = v_lshlrev_b32_src0_16_low16 %378
+  global_store_b32_saddr %373, %brain_f32, %marker_view {offset = 28}
+  %e4_f64 = v_cvt_f64_f32 %e4_f32
+  global_store_b64_saddr %373, %e4_f64, %marker_view {offset = 32}
+  %e5_f64 = v_cvt_f64_f32 %e5_f32
+  global_store_b64_saddr %373, %e5_f64, %marker_view {offset = 40}
+  %half_f64 = v_cvt_f64_f32 %half_f32
+  global_store_b64_saddr %373, %half_f64, %marker_view {offset = 48}
+  %brain_f64 = v_cvt_f64_f32 %brain_f32
+  global_store_b64_saddr %373, %brain_f64, %marker_view {offset = 56}
+  %511 = slice %marker[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %512 = v_mov_b32_copy %511
+  %513 = slice %marker[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %514 = v_mov_b32_copy %513
+  %515 = concat(%512, %514) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %373, %515, %marker_view {offset = 64}
+  return
+}
 
 // ====
 
@@ -114,10 +238,163 @@ kernel.def @narrow_argument_bitcasts() {
 }
 
 // ----
-CHECK: low.kernel.def * direct_arg_offsets = [0, 4, 8, 12, 20, 24], * direct_arg_payload_sizes = [1, 2, 1, 8, 2, 2], direct_arg_sizes = [4, 4, 4, 8, 4, 4], * @narrow_argument_bitcasts(%e4: reg<amdgpu.sgpr>, %unused: reg<amdgpu.sgpr>, %e5: reg<amdgpu.sgpr>, %marker: reg<amdgpu.sgpr x2>, %half: reg<amdgpu.sgpr>, %brain: reg<amdgpu.sgpr>) asm {
-CHECK: %* = v_mov_b32_copy %half
-CHECK: %* = v_mov_b32_copy %brain
-CHECK: %half_f32 = v_cvt_f32_f16 %*
-CHECK: %brain_f32 = v_lshlrev_b32_src0_16_low16 %*
-CHECK: %half_f64 = v_cvt_f64_f32 %half_f32
-CHECK: %brain_f64 = v_cvt_f64_f32 %brain_f32
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 7, direct_arg_count = 6, direct_arg_names = {arg0 = "e4_bits", arg1 = "unused", arg2 = "e5_bits", arg3 = "marker", arg4 = "half_bits", arg5 = "brain_bits"}, direct_arg_offsets = [0, 4, 8, 12, 20, 24], direct_arg_parameter_indices = [0, 1, 2, 3, 4, 5], direct_arg_payload_sizes = [1, 2, 1, 8, 2, 2], direct_arg_sizes = [4, 4, 4, 8, 4, 4], parameter_count = 7, resource_count = 1, resource_offsets = [32], resource_parameter_indices = [6], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @narrow_argument_bitcasts(%e4: reg<amdgpu.sgpr>, %unused: reg<amdgpu.sgpr>, %e5: reg<amdgpu.sgpr>, %marker: reg<amdgpu.sgpr x2>, %half: reg<amdgpu.sgpr>, %brain: reg<amdgpu.sgpr>) asm {
+  %marker_view = resource<hal_binding> {extent = 72, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %376 = v_mov_b32_copy %e4
+  %377 = v_mov_b32 0
+  global_store_b8_saddr %377, %376, %marker_view
+  %378 = v_mov_b32_copy %e5
+  global_store_b8_saddr %377, %378, %marker_view {offset = 1}
+  %380 = v_mov_b32_copy %half
+  global_store_short_saddr %377, %380, %marker_view {offset = 2}
+  %382 = v_mov_b32_copy %brain
+  global_store_short_saddr %377, %382, %marker_view {offset = 4}
+  %384 = s_bfe_u32_lit %e4, 524288
+  %385 = s_and_b32_lit %384, 128
+  %386 = s_mov_b32 8
+  %387 = s_lshl_b32 %385, %386
+  %388 = s_mov_b32 120
+  %389 = s_and_b32_lit %384, 120
+  %390 = s_mov_b32 3
+  %391 = s_lshr_b32 %389, %390
+  %392 = s_mov_b32 7
+  %393 = s_and_b32_rhs_inline %384, 7
+  %394 = s_add_u32 %391, %386
+  %395 = s_mov_b32 10
+  %396 = s_lshl_b32 %394, %395
+  %397 = s_lshl_b32 %393, %392
+  %398 = s_or_b32 %387, %396
+  %399 = s_or_b32 %398, %397
+  %400 = s_mov_b32 0
+  %401 = s_mov_b32 2
+  %402 = s_and_b32_rhs_inline %393, 2
+  %403 = s_cmp_lg_i32 %402, %400
+  %404 = s_mov_b32 1
+  %405 = s_cselect_b32 %404, %400, %403
+  %406 = s_and_b32_rhs_inline %393, 4
+  %407 = s_cmp_lg_i32 %406, %400
+  %408 = s_cselect_b32 %401, %405, %407
+  %409 = s_mov_b32 6
+  %410 = s_add_u32 %408, %409
+  %411 = s_lshl_b32 %410, %395
+  %412 = s_sub_u32 %395, %408
+  %413 = s_lshl_b32 %393, %412
+  %414 = s_and_b32_lit %413, 1023
+  %415 = s_or_b32 %387, %411
+  %416 = s_or_b32 %415, %414
+  %417 = s_cmp_eq_i32 %393, %400
+  %418 = s_cselect_b32 %387, %416, %417
+  %419 = s_cmp_eq_i32 %391, %400
+  %420 = s_cselect_b32 %418, %399, %419
+  %421 = s_mov_b32 15
+  %422 = s_cmp_eq_i32 %391, %421
+  %425 = s_cselect_b32 %404, %400, %422
+  %426 = s_mov_b32 32256
+  %427 = s_cmp_eq_i32 %393, %392
+  %429 = s_cmp_lg_i32 %400, %400
+  %432 = s_cselect_b32 %404, %400, %427
+  %435 = s_cselect_b32 %404, %400, %429
+  %436 = s_cmp_lg_i32_src1_inline %425 {rhs = 0}
+  %437 = s_cselect_b32 %432, %435, %436
+  %438 = s_cmp_lg_i32_src1_inline %437 {rhs = 0}
+  %e4_half = s_cselect_b32 %426, %420, %438
+  %440 = v_mov_b32_copy %e4_half
+  global_store_short_saddr %377, %440, %marker_view {offset = 8}
+  %442 = s_bfe_u32_lit %e5, 524288
+  %443 = s_and_b32_lit %442, 128
+  %444 = s_lshl_b32 %443, %386
+  %445 = s_and_b32_lit %442, 124
+  %446 = s_lshr_b32 %445, %401
+  %447 = s_and_b32_rhs_inline %442, 3
+  %448 = s_lshl_b32 %446, %395
+  %449 = s_lshl_b32 %447, %386
+  %450 = s_or_b32 %444, %448
+  %451 = s_or_b32 %450, %449
+  %452 = s_or_b32 %444, %449
+  %453 = s_cmp_eq_i32 %446, %400
+  %456 = s_cselect_b32 %404, %400, %453
+  %457 = s_cmp_lg_i32_src1_inline %456 {rhs = 0}
+  %458 = s_cselect_b32 %452, %451, %457
+  %459 = s_mov_b32 31
+  %460 = s_cmp_eq_i32 %446, %459
+  %463 = s_cselect_b32 %404, %400, %460
+  %464 = s_or_b32_lit %444, 31744
+  %465 = s_cmp_eq_i32 %447, %400
+  %466 = s_cselect_b32 %464, %426, %465
+  %467 = s_cmp_lg_i32_src1_inline %463 {rhs = 0}
+  %e5_half = s_cselect_b32 %466, %458, %467
+  %469 = v_mov_b32_copy %e5_half
+  global_store_short_saddr %377, %469, %marker_view {offset = 10}
+  %471 = s_mov_b32 24
+  %472 = s_lshl_b32 %385, %471
+  %473 = s_add_u32 %391, %388
+  %474 = s_mov_b32 23
+  %475 = s_lshl_b32 %473, %474
+  %476 = s_mov_b32 20
+  %477 = s_lshl_b32 %393, %476
+  %478 = s_or_b32 %472, %475
+  %479 = s_or_b32 %478, %477
+  %480 = s_mov_b32 118
+  %481 = s_add_u32 %408, %480
+  %482 = s_lshl_b32 %481, %474
+  %483 = s_sub_u32 %474, %408
+  %484 = s_lshl_b32 %393, %483
+  %485 = s_and_b32_lit %484, 8388607
+  %486 = s_or_b32 %472, %482
+  %487 = s_or_b32 %486, %485
+  %488 = s_cselect_b32 %472, %487, %417
+  %489 = s_cselect_b32 %488, %479, %419
+  %490 = s_mov_b32 2143289344
+  %491 = s_cmp_lg_i32_src1_inline %437 {rhs = 0}
+  %e4_f32 = s_cselect_b32 %490, %489, %491
+  %493 = v_mov_b32_copy %e4_f32
+  global_store_b32_saddr %377, %493, %marker_view {offset = 16}
+  %495 = s_lshl_b32 %443, %471
+  %496 = s_mov_b32 112
+  %497 = s_add_u32 %446, %496
+  %498 = s_lshl_b32 %497, %474
+  %499 = s_mov_b32 21
+  %500 = s_lshl_b32 %447, %499
+  %501 = s_or_b32 %495, %498
+  %502 = s_or_b32 %501, %500
+  %503 = s_and_b32_rhs_inline %447, 2
+  %504 = s_cmp_lg_i32 %503, %400
+  %505 = s_cselect_b32 %404, %400, %504
+  %506 = s_mov_b32 111
+  %507 = s_add_u32 %505, %506
+  %508 = s_lshl_b32 %507, %474
+  %509 = s_sub_u32 %474, %505
+  %510 = s_lshl_b32 %447, %509
+  %511 = s_and_b32_lit %510, 8388607
+  %512 = s_or_b32 %495, %508
+  %513 = s_or_b32 %512, %511
+  %514 = s_cselect_b32 %495, %513, %465
+  %515 = s_cmp_lg_i32_src1_inline %456 {rhs = 0}
+  %516 = s_cselect_b32 %514, %502, %515
+  %517 = s_or_b32_lit %495, 2139095040
+  %518 = s_cselect_b32 %517, %490, %465
+  %519 = s_cmp_lg_i32_src1_inline %463 {rhs = 0}
+  %e5_f32 = s_cselect_b32 %518, %516, %519
+  %521 = v_mov_b32_copy %e5_f32
+  global_store_b32_saddr %377, %521, %marker_view {offset = 20}
+  %half_f32 = s_cvt_f32_f16 %half
+  %524 = v_mov_b32_copy %half_f32
+  global_store_b32_saddr %377, %524, %marker_view {offset = 24}
+  %brain_f32 = v_lshlrev_b32_src0_16_low16 %382
+  global_store_b32_saddr %377, %brain_f32, %marker_view {offset = 28}
+  %e4_f64 = v_cvt_f64_f32 %e4_f32
+  global_store_b64_saddr %377, %e4_f64, %marker_view {offset = 32}
+  %e5_f64 = v_cvt_f64_f32 %e5_f32
+  global_store_b64_saddr %377, %e5_f64, %marker_view {offset = 40}
+  %half_f64 = v_cvt_f64_f32 %half_f32
+  global_store_b64_saddr %377, %half_f64, %marker_view {offset = 48}
+  %brain_f64 = v_cvt_f64_f32 %brain_f32
+  global_store_b64_saddr %377, %brain_f64, %marker_view {offset = 56}
+  %537 = slice %marker[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %538 = v_mov_b32_copy %537
+  %539 = slice %marker[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %540 = v_mov_b32_copy %539
+  %541 = concat(%538, %540) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %377, %541, %marker_view {offset = 64}
+  return
+}

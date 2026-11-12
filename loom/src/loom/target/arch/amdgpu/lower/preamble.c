@@ -230,7 +230,7 @@ typedef struct loom_amdgpu_preamble_count_source_t {
 iree_status_t loom_amdgpu_preamble_bind_query_result(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t source_result, loom_value_id_t low_result) {
-  IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_scalar_carrier(
+  IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_numeric_carrier(
       context, source_op, low_result,
       loom_low_lower_value_binding_type(context, source_result), &low_result));
   return loom_low_lower_bind_value(context, source_result, low_result);

@@ -583,17 +583,16 @@ func.def target(@target) @i64x2_dynamic_extract_scalar(%values: vector<2xi64>, %
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i64x2_dynamic_extract_scalar(%values: reg<amdgpu.vgpr x4>, %index: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i64x2_dynamic_extract_scalar(%values: reg<amdgpu.vgpr x4>, %index: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
   %7 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %8 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %9 = v_mov_b32_copy %index
-  %10 = v_mov_b32 1
-  %11 = v_cmp_eq_i32 %9, %10
-  %12 = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %13 = v_cndmask_b32 %7, %12, %11
-  %14 = slice %values[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %15 = v_cndmask_b32 %8, %14, %11
-  %lane = concat(%13, %15) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %9 = v_mov_b32 1
+  %10 = v_cmp_eq_i32 %index, %9
+  %11 = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %12 = v_cndmask_b32 %7, %11, %10
+  %13 = slice %values[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %14 = v_cndmask_b32 %8, %13, %10
+  %lane = concat(%12, %14) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %lane
 }
 
