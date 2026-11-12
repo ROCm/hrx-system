@@ -383,12 +383,12 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_file(
     submission->before.execution |=
         IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE |
         IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
-    submission->before.cache_control |= profile->command_processor_bypasses_l2
-                                            ? profile->release
-                                            : profile->shader;
-    submission->after.cache_control |= profile->command_processor_bypasses_l2
-                                           ? profile->acquire
-                                           : profile->shader;
+    submission->before.release_cache_control |=
+        profile->command_processor_bypasses_l2 ? profile->release
+                                               : profile->shader;
+    submission->after.acquire_cache_control |=
+        profile->command_processor_bypasses_l2 ? profile->acquire
+                                               : profile->shader;
   }
   *out_submission = submission;
   return iree_ok_status();

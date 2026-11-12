@@ -403,7 +403,10 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_barrier(
   const iree_hal_barrier_list_t list = {.count = 1, .values = barrier};
   const iree_hal_amd_gpu_pm4_barrier_t prepared =
       iree_hal_amd_gpu_pm4_barrier_prepare(&buffer->profile, &list);
-  buffer->pending_barrier.cache_control |= prepared.cache_control;
+  buffer->pending_barrier.release_cache_control |=
+      prepared.release_cache_control;
+  buffer->pending_barrier.acquire_cache_control |=
+      prepared.acquire_cache_control;
   buffer->pending_barrier.execution |= prepared.execution;
   return iree_ok_status();
 }
@@ -743,7 +746,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
   }
   const bool prepare_packet = function->packet && indirect_parameters;
   if (prepare_packet) {
-    buffer->pending_barrier.cache_control |=
+    buffer->pending_barrier.acquire_cache_control |=
         buffer->profile.command_processor_bypasses_l2 ? buffer->profile.acquire
                                                       : buffer->profile.shader;
   }
@@ -753,7 +756,8 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
     // generation must not touch that arena until prior shaders have finished.
     buffer->pending_barrier.execution |=
         IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE;
-    buffer->pending_barrier.cache_control |= buffer->profile.shader;
+    buffer->pending_barrier.release_cache_control |= buffer->profile.shader;
+    buffer->pending_barrier.acquire_cache_control |= buffer->profile.shader;
   }
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_flush_barrier(buffer));
   iree_hal_amd_gpu_pm4_dispatch_storage_t storage =

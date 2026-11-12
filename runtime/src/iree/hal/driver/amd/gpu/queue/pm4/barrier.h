@@ -46,8 +46,11 @@ enum iree_hal_amd_gpu_pm4_barrier_execution_bits_e {
 // requests no optional payload work. Mandatory instruction publication and
 // control-memory ordering belong to their owners and remain independent.
 typedef struct iree_hal_amd_gpu_pm4_barrier_t {
-  // Target-specific ACQUIRE_MEM GCR fields, excluding instruction invalidation.
-  uint32_t cache_control;
+  // Release-directed ACQUIRE_MEM GCR fields; excludes instruction invalidation.
+  uint32_t release_cache_control;
+  // Acquire-directed ACQUIRE_MEM GCR fields, including instruction
+  // invalidation.
+  uint32_t acquire_cache_control;
   // Local engines that must complete before the cache action or later commands.
   uint32_t execution;
 } iree_hal_amd_gpu_pm4_barrier_t;
@@ -81,32 +84,45 @@ static inline uint32_t iree_hal_amd_gpu_pm4_barrier_word_count(
          ((barrier.execution & IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA)
               ? 7u
               : 0u) +
-         (barrier.cache_control ? 8u : 0u);
+         ((barrier.release_cache_control | barrier.acquire_cache_control) ? 8u
+                                                                          : 0u);
 }
 
 // Emits local execution joins followed by a synchronous cache action. The
 // caller owns sufficient command storage and has established external waits.
 // Native instruction publication can be combined by ORing GLI_INV=1 into a
-// local copy's cache_control immediately before this ordinary emission.
+// local copy's acquire_cache_control immediately before this ordinary emission.
 uint32_t* iree_hal_amd_gpu_pm4_barrier_emit(
     uint32_t* words, iree_hal_amd_gpu_pm4_barrier_t barrier);
 
 // DWORD count for a completion tail, excluding its final RELEASE_MEM.
 static inline uint32_t iree_hal_amd_gpu_pm4_barrier_tail_word_count(
     iree_hal_amd_gpu_pm4_barrier_t barrier) {
-  return (barrier.cache_control ? 10u : 0u) +
+  return (barrier.acquire_cache_control ? 10u : 0u) +
          ((barrier.execution & IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA)
               ? 7u
               : 0u);
 }
 
-// Joins producers and completes payload cache actions before the caller's
-// cache-free RELEASE_MEM publishes completion. Keeping cache work in the MEC
-// avoids asynchronous end-of-pipe GCR latency and makes it complete before a
-// following FIFO publication. When no cache work is requested, RELEASE_MEM
-// supplies the compute join; CP DMA still requires its independent join.
+// DWORD count for joining a cache-bearing completion RELEASE_MEM before a
+// distinct retirement RELEASE_MEM. No wait is required when retirement is the
+// only completion or when cache work completed synchronously in the tail.
+static inline uint32_t iree_hal_amd_gpu_pm4_barrier_completion_wait_word_count(
+    iree_hal_amd_gpu_pm4_barrier_t barrier, bool split_completion) {
+  return split_completion && barrier.release_cache_control &&
+                 !barrier.acquire_cache_control
+             ? 7u
+             : 0u;
+}
+
+// Joins producers and prepares the caller's completion RELEASE_MEM. Acquire or
+// mixed cache actions complete synchronously after a compute join and return
+// zero release control. Release-only cache actions are converted to unshifted
+// RELEASE_MEM fields in |out_release_cache_control|; the completion supplies
+// their compute join. CP DMA always requires its independent join.
 uint32_t* iree_hal_amd_gpu_pm4_barrier_emit_tail(
-    uint32_t* words, iree_hal_amd_gpu_pm4_barrier_t barrier);
+    uint32_t* words, iree_hal_amd_gpu_pm4_barrier_t barrier,
+    uint32_t* out_release_cache_control);
 
 #ifdef __cplusplus
 }  // extern "C"

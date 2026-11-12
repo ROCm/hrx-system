@@ -87,13 +87,13 @@ static void iree_hal_amd_gpu_pm4_file_add_effects(
   iree_hal_amd_gpu_pm4_barrier_t* barrier = value;
   if (effects.bits & (IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM |
                       IREE_HAL_MEMORY_EFFECT_RANGE_RELEASE_TO_SYSTEM)) {
-    barrier->cache_control |= queue->options.barriers.release;
+    barrier->release_cache_control |= queue->options.barriers.release;
     barrier->execution |= IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE |
                           IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
   }
   if (effects.bits & (IREE_HAL_MEMORY_EFFECT_GLOBAL_ACQUIRE_FROM_SYSTEM |
                       IREE_HAL_MEMORY_EFFECT_RANGE_ACQUIRE_FROM_SYSTEM)) {
-    barrier->cache_control |= queue->options.barriers.acquire;
+    barrier->acquire_cache_control |= queue->options.barriers.acquire;
   }
 }
 
@@ -359,13 +359,21 @@ iree_hal_amd_gpu_pm4_publish_commit(
       .consumed_arguments = argument_end,
       .download = download,
   };
-  words = iree_hal_amd_gpu_pm4_barrier_emit_tail(words, after);
+  uint32_t release_cache_control = 0;
+  words = iree_hal_amd_gpu_pm4_barrier_emit_tail(words, after,
+                                                 &release_cache_control);
   if (submission->signal) {
     words = iree_hal_amd_gpu_pm4_emit_release32(
-        words, 0, submission->signal->device_address, 1);
+        words, release_cache_control, submission->signal->device_address, 1);
+    if (release_cache_control) {
+      words = iree_hal_amd_gpu_pm4_emit_wait32(
+          words, submission->signal->device_address, 1, UINT32_MAX,
+          IREE_HAL_AMD_GPU_PM4_COMPARISON_EQUAL);
+      release_cache_control = 0;
+    }
   }
-  words = iree_hal_amd_gpu_pm4_retirement_emit(words, &queue->retirement,
-                                               position, action, 0);
+  words = iree_hal_amd_gpu_pm4_retirement_emit(
+      words, &queue->retirement, position, action, release_cache_control);
   if (queue->kernel) {
     if (entry_word_count) {
       // The resident IB chains into this fixed 32-DWORD continuation. Root
@@ -477,18 +485,19 @@ iree_hal_amd_gpu_pm4_publish_transfer(
   // Every preceding publication drains its own CP DMA before retirement.
   before.execution &= ~IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
   if (program) {
-    before.cache_control |= 1u;  // Publish resident builtin instructions.
+    // Publish resident builtin instructions.
+    before.acquire_cache_control |= 1u;
   }
   if (chunk.staging_length > chunk.download.length) {
     // Host-written transport bytes need visibility even with empty payload
     // barriers. This is the same mandatory publication as native kernargs.
-    before.cache_control |= queue->options.barriers.acquire;
+    before.acquire_cache_control |= queue->options.barriers.acquire;
   }
   iree_hal_amd_gpu_pm4_barrier_t after =
       terminal ? submission->after : (iree_hal_amd_gpu_pm4_barrier_t){0};
   after.execution |= IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
   if (chunk.download.length) {
-    after.cache_control |= queue->options.barriers.release;
+    after.release_cache_control |= queue->options.barriers.release;
   }
   bool native_signal = false;
   for (iree_host_size_t i = 0;
@@ -502,6 +511,8 @@ iree_hal_amd_gpu_pm4_publish_transfer(
       wait_words + chunk.word_count +
       iree_hal_amd_gpu_pm4_barrier_word_count(before) +
       iree_hal_amd_gpu_pm4_barrier_tail_word_count(after) +
+      iree_hal_amd_gpu_pm4_barrier_completion_wait_word_count(after,
+                                                              native_signal) +
       (native_signal ? 8 : 0) + 14 + (queue->kernel ? 0 : 8);
   iree_hal_amd_gpu_pm4_ring_t candidate = queue->producer.ring;
   iree_hal_amd_gpu_pm4_ring_reservation_t reservation;
@@ -605,10 +616,13 @@ iree_hal_amd_gpu_pm4_publish_execute(
         iree_hal_amd_gpu_semaphore_isa(submission->signals.semaphores[i]);
   }
   const iree_hal_amd_gpu_pm4_barrier_t after = {
-      .cache_control = sample_length ? queue->options.barriers.release : 0,
+      .release_cache_control =
+          sample_length ? queue->options.barriers.release : 0,
   };
   const uint32_t tail_words =
       iree_hal_amd_gpu_pm4_barrier_tail_word_count(after) +
+      iree_hal_amd_gpu_pm4_barrier_completion_wait_word_count(after,
+                                                              native_signal) +
       (native_signal ? 8 : 0) + 14;
   uint32_t root_padding = 0;
   if (queue->kernel) {
@@ -887,7 +901,7 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
   iree_hal_amd_gpu_pm4_barrier_t after = request->after;
   after.execution &= ~IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
   if (sample_length) {
-    after.cache_control |= queue->options.barriers.release;
+    after.release_cache_control |= queue->options.barriers.release;
   }
   if (dispatch) {
     if (cooperative) {
@@ -899,11 +913,12 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
     }
     // Instruction upload and host argument publication remain mandatory even
     // when the caller supplies an empty optional payload boundary.
-    before.cache_control |= 1u | queue->options.barriers.acquire;
+    before.acquire_cache_control |= 1u | queue->options.barriers.acquire;
     if (function->launch.requirements &
         IREE_HAL_AMD_GPU_PM4_LAUNCH_REQUIREMENT_TSAN) {
       before.execution |= IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE;
-      before.cache_control |= queue->options.barriers.shader;
+      before.release_cache_control |= queue->options.barriers.shader;
+      before.acquire_cache_control |= queue->options.barriers.shader;
     }
   }
   const uint16_t indirect_copy_count =
@@ -937,6 +952,8 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
       (sample_length ? 16 : 0) +
       iree_hal_amd_gpu_pm4_barrier_word_count(before) +
       iree_hal_amd_gpu_pm4_barrier_tail_word_count(after) +
+      iree_hal_amd_gpu_pm4_barrier_completion_wait_word_count(after,
+                                                              native_signal) +
       (native_signal ? 8 : 0) + 14 + (queue->kernel ? 0 : 8);
   iree_hal_amd_gpu_pm4_ring_t candidate = queue->producer.ring;
   iree_hal_amd_gpu_pm4_ring_reservation_t reservation;
@@ -1155,7 +1172,7 @@ iree_hal_amd_gpu_pm4_publish_control(
           : 0,
       &before, &after);
   if (program) {
-    before.cache_control |= queue->options.barriers.shader;
+    before.acquire_cache_control |= queue->options.barriers.shader;
   }
   // Every earlier publication joins its own DMA before leaving the CP.
   before.execution &= ~IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
@@ -1172,6 +1189,8 @@ iree_hal_amd_gpu_pm4_publish_control(
            : iree_hal_amd_gpu_control_word_count(submission->control.command)) +
       iree_hal_amd_gpu_pm4_barrier_word_count(before) +
       iree_hal_amd_gpu_pm4_barrier_tail_word_count(after) +
+      iree_hal_amd_gpu_pm4_barrier_completion_wait_word_count(after,
+                                                              native_signal) +
       (native_signal ? 8 : 0) + 14 + (queue->kernel ? 0 : 8);
   iree_hal_amd_gpu_pm4_ring_t candidate = queue->producer.ring;
   iree_hal_amd_gpu_pm4_ring_reservation_t reservation;

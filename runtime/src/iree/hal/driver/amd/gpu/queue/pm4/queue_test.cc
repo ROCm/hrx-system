@@ -228,6 +228,8 @@ class KernelQueueTest : public MemoryBackendTest {
         &context_, AMDF_QUEUE_PUBLICATION_MODE_KERNEL));
     IREE_ASSERT_OK(
         iree_hal_amd_gpu_context_prepare_memory(&context_, UINT32_MAX));
+    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_barrier_profile_initialize(
+        {12, 0, 1}, &barrier_profile_));
     iree_notification_initialize(&publication_.notification);
     iree_slim_mutex_initialize(&completion_.drain_mutex);
     access_ = {
@@ -262,6 +264,7 @@ class KernelQueueTest : public MemoryBackendTest {
           .command_byte_capacity = 4096,
           .memory = &memory_,
           .publication = &publication_,
+          .barriers = barrier_profile_,
           .retirement_capacity = 4,
           .argument_capacity = 4096,
           .capture_block_size = 4096,
@@ -373,6 +376,9 @@ class KernelQueueTest : public MemoryBackendTest {
             EXPECT_EQ(length, 7u);
             EXPECT_EQ(words[cursor + 6], 0u);
             break;
+          case 0x58:  // ACQUIRE_MEM completes synchronous cache work.
+            EXPECT_EQ(length, 8u);
+            break;
           case 0x49:  // RELEASE_MEM publishes the signal or record generation.
             iree_atomic_store(
                 reinterpret_cast<iree_atomic_int32_t*>(address(3)),
@@ -402,6 +408,8 @@ class KernelQueueTest : public MemoryBackendTest {
   iree_hal_amd_gpu_context_t context_ = {};
   // Qualified coherent control-storage access.
   amdf_memory_device_access_t access_ = {};
+  // Exact gfx12 cache encoding used by both real queue instances.
+  iree_hal_amd_gpu_pm4_barrier_profile_t barrier_profile_ = {};
   // Captured native backing profile, retained through queue cleanup.
   iree_hal_amd_fabric_memory_options_t memory_ = {};
   // Production typed publisher, started for synchronous metadata installation.
@@ -467,6 +475,76 @@ TEST_F(KernelQueueTest, MetadataPreservesBusyCommandAndItsCausalFrontier) {
     IREE_EXPECT_OK(iree_hal_semaphore_query(semaphore, &value));
     EXPECT_EQ(value, one);
   }
+}
+
+TEST_F(KernelQueueTest, ReleaseOnlyCompletionPreservesEachObserver) {
+  const iree_hal_barrier_list_t empty = {};
+  const iree_hal_barrier_t release = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+  };
+  const iree_hal_barrier_list_t after = {1, &release};
+  const iree_hal_queue_barriers_t barriers = {&empty, &after};
+
+  const auto expect_packets =
+      [&](const amdf_gpu_kernel_command_t& command,
+          const std::vector<uint32_t>& expected_opcodes,
+          const std::vector<uint32_t>& expected_releases, bool expect_wait) {
+        const uint32_t* words = Words(command);
+        std::vector<uint32_t> opcodes;
+        std::vector<uint32_t> release_cache_controls;
+        uint64_t signal_address = 0;
+        uint64_t wait_address = 0;
+        for (size_t cursor = 0; cursor < command.byte_length / 4;) {
+          const uint32_t length = ((words[cursor] >> 16) & 0x3fff) + 2;
+          ASSERT_LE(cursor + length, command.byte_length / 4);
+          const uint32_t opcode = (words[cursor] >> 8) & 255;
+          if (opcode != 0x10) {
+            opcodes.push_back(opcode);
+          }
+          if (opcode == 0x49) {
+            release_cache_controls.push_back(words[cursor + 1] >> 12);
+            if (!signal_address) {
+              signal_address = uint64_t(words[cursor + 3]) |
+                               (uint64_t(words[cursor + 4]) << 32);
+            }
+          } else if (opcode == 0x3c) {
+            wait_address = uint64_t(words[cursor + 2]) |
+                           (uint64_t(words[cursor + 3]) << 32);
+            EXPECT_EQ(words[cursor + 4], 1u);
+            EXPECT_EQ(words[cursor + 5], UINT32_MAX);
+          }
+          cursor += length;
+        }
+        EXPECT_EQ(opcodes, expected_opcodes);
+        EXPECT_EQ(release_cache_controls, expected_releases);
+        EXPECT_EQ(wait_address, expect_wait ? signal_address : 0u);
+      };
+
+  auto completion = Semaphore();
+  iree_hal_semaphore_t* completion_handle = completion;
+  uint64_t one = 1;
+  IREE_ASSERT_OK(iree_hal_queue_barrier(
+      queues_[0], {}, {1, &completion_handle, &one}, &barriers, 0));
+  Publish(0);
+
+  ASSERT_EQ(native_queues_[0].commands.size(), 1u);
+  expect_packets(native_queues_[0].commands.back(), {0x49, 0x3c, 0x37, 0x49},
+                 {0x1600, 0}, true);
+
+  ASSERT_NO_FATAL_FAILURE(Execute(0));
+  Poll(0);
+  uint64_t value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(completion, &value));
+  EXPECT_EQ(value, one);
+
+  IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[0], {}, {}, &barriers, 0));
+  Publish(0);
+  ASSERT_EQ(native_queues_[0].commands.size(), 2u);
+  expect_packets(native_queues_[0].commands.back(), {0x37, 0x49}, {0x1600},
+                 false);
+  ASSERT_NO_FATAL_FAILURE(Execute(0));
+  Poll(0);
 }
 
 TEST_F(KernelQueueTest, FailureReleasesCapacityWaitersBeforeNativeRetirement) {
