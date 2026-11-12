@@ -703,6 +703,56 @@ TEST(FloatFacts, AppliesIndependentConversionSubnormalPermissions) {
   ExpectFloatRange(LOOM_SCALAR_TYPE_F32, result, -0x1p-23, -0.0);
 }
 
+TEST(FloatFacts, ConversionUsesTheSourceFormatsMinimumMagnitude) {
+  struct Case {
+    // Source format whose entire value domain is converted.
+    loom_scalar_type_t source_type;
+    // Destinations whose normal range contains every nonzero source value.
+    loom_scalar_type_set_t normal_destinations;
+  };
+  const Case cases[] = {
+      {LOOM_SCALAR_TYPE_F8E4M3,
+       LOOM_SCALAR_TYPE_SET_F8E5M2 | LOOM_SCALAR_TYPE_SET_F16 |
+           LOOM_SCALAR_TYPE_SET_BF16 | LOOM_SCALAR_TYPE_SET_F32 |
+           LOOM_SCALAR_TYPE_SET_F64},
+      {LOOM_SCALAR_TYPE_F8E5M2, LOOM_SCALAR_TYPE_SET_BF16 |
+                                    LOOM_SCALAR_TYPE_SET_F32 |
+                                    LOOM_SCALAR_TYPE_SET_F64},
+      {LOOM_SCALAR_TYPE_F16, LOOM_SCALAR_TYPE_SET_BF16 |
+                                 LOOM_SCALAR_TYPE_SET_F32 |
+                                 LOOM_SCALAR_TYPE_SET_F64},
+      {LOOM_SCALAR_TYPE_BF16, LOOM_SCALAR_TYPE_SET_F64},
+      {LOOM_SCALAR_TYPE_F32, LOOM_SCALAR_TYPE_SET_F64},
+      {LOOM_SCALAR_TYPE_F64, LOOM_SCALAR_TYPE_SET_NONE},
+  };
+  for (const Case& test_case : cases) {
+    SCOPED_TRACE(loom_scalar_type_name(test_case.source_type));
+    for (loom_scalar_type_t result_type = LOOM_SCALAR_TYPE_F8E4M3;
+         result_type <= LOOM_SCALAR_TYPE_F64; ++result_type) {
+      SCOPED_TRACE(loom_scalar_type_name(result_type));
+      for (const loom_value_facts_t input :
+           {loom_value_facts_unknown(),
+            loom_value_facts_make_float_range(test_case.source_type, -1.0,
+                                              1.0)}) {
+        for (bool flush_input : {false, true}) {
+          for (bool flush_result : {false, true}) {
+            const loom_float_conversion_policy_t policy = {
+                .may_flush_input_subnormal = flush_input,
+                .may_flush_result_subnormal = flush_result,
+            };
+            loom_value_facts_t result;
+            loom_value_facts_eval_float_conversion(
+                test_case.source_type, result_type, policy, &input, &result);
+            EXPECT_EQ(loom_value_facts_is_not_subnormal(result),
+                      loom_scalar_type_set_contains(
+                          test_case.normal_destinations, result_type));
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST(FloatFacts, ConversionFlushingPreservesRepresentableFormats) {
   const loom_float_conversion_policy_t strict = {0};
   for (loom_scalar_type_t source_type = LOOM_SCALAR_TYPE_F8E4M3;

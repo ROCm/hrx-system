@@ -42,6 +42,7 @@ from loom.target.arch.amdgpu.contracts.packed_i8 import (
     packed_i8_logical_shift_rules,
     packed_i8_sub_rules,
 )
+from loom.target.arch.amdgpu.contracts.roots import root_rules
 from loom.target.arch.amdgpu.descriptors import (
     AMDGPU_SOURCE_INLINE_F32_VALUES,
     build_amdgpu_contract_descriptor_set,
@@ -165,6 +166,7 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.v_sqrt_f64",
     "amdgpu.v_rsq_f64",
     *EXPONENT_DESCRIPTOR_KEYS,
+    "amdgpu.v_cmp_class_f32",
     "amdgpu.v_cmp_class_f64",
     "amdgpu.v_cmp_olt_f64",
     "amdgpu.v_cvt_f64_i32",
@@ -2498,137 +2500,6 @@ def _divf_exact_rule(source_op: Op, type_pattern: TypePattern) -> DescriptorRule
     )
 
 
-def _sqrtf_exact_f64_rule() -> DescriptorRule:
-    # OCML's MATH_SQRT uses the compiler builtin. Match LLVM AMDGPU's
-    # lowerFSQRTF64 in llvm/lib/Target/AMDGPU/SIISelLowering.cpp: Goldschmidt
-    # refinement, including its final rounding step.
-    # V_SQRT_F64 alone has only approximate precision, even without fastmath.
-    # Scaling below 2^-767 keeps the fused residuals out of the subnormal range.
-    descriptors = {
-        name: _descriptor(f"amdgpu.{name}")
-        for name in (
-            "s_mov_b32",
-            "v_mov_b32",
-            "v_cmp_olt_f64",
-            "v_cndmask_b32",
-            "v_ldexp_f64",
-            "v_rsq_f64",
-            "v_mul_f64",
-            "v_fma_f64",
-            "v_fma_f64.neg_a",
-            "v_cmp_class_f64",
-        )
-    }
-    source = ValueRef.operand("input", materializer=REGISTERS_VGPR_MATERIALIZER.name)
-    temp = ValueRef.temporary
-    emit: list[ContractEmit] = []
-
-    def instruction(
-        name: str, result: str, *, role: str = "dst", **operands: ValueRef
-    ) -> ValueRef:
-        value = temp(result)
-        emit.append(
-            EmitDescriptorOp(
-                descriptor=descriptors[name],
-                operands=operands,
-                results={role: value},
-                result_types={role: DescriptorResultType()},
-            )
-        )
-        return value
-
-    def constant(name: str, bits: int, *, move: str = "v_mov_b32") -> ValueRef:
-        value = temp(name)
-        emit.append(
-            EmitDescriptorOp(
-                descriptor=descriptors[move],
-                immediates={"imm32": bits},
-                results={"dst": value},
-                result_types={"dst": DescriptorResultType()},
-            )
-        )
-        return value
-
-    zero = constant("zero", 0)
-    threshold_high = constant("threshold_high", 0x10000000)
-    half_high = constant("half_high", 0x3FE00000)
-    for name, high in (("threshold", threshold_high), ("half", half_high)):
-        emit.append(
-            EmitRegisterConcat(
-                sources=(zero, high),
-                result=temp(name),
-                result_type=ValueRef.result("result"),
-            )
-        )
-    scaling = instruction(
-        "v_cmp_olt_f64", "scaling", role="mask", lhs=source, rhs=temp("threshold")
-    )
-    up = constant("up", 256)
-    up_exponent = instruction(
-        "v_cndmask_b32", "up_exponent", false_value=zero, true_value=up, mask=scaling
-    )
-    x = instruction("v_ldexp_f64", "scaled_input", input=source, exponent=up_exponent)
-    y = instruction("v_rsq_f64", "reciprocal_root", input=x)
-    s0 = instruction("v_mul_f64", "s0", lhs=x, rhs=y)
-    h0 = instruction("v_mul_f64", "h0", lhs=y, rhs=temp("half"))
-    r0 = instruction("v_fma_f64.neg_a", "r0", a=h0, b=s0, c=temp("half"))
-    h1 = instruction("v_fma_f64", "h1", a=h0, b=r0, c=h0)
-    s1 = instruction("v_fma_f64", "s1", a=s0, b=r0, c=s0)
-    d0 = instruction("v_fma_f64.neg_a", "d0", a=s1, b=s1, c=x)
-    s2 = instruction("v_fma_f64", "s2", a=d0, b=h1, c=s1)
-    d1 = instruction("v_fma_f64.neg_a", "d1", a=s2, b=s2, c=x)
-    rounded = instruction("v_fma_f64", "rounded", a=d1, b=h1, c=s2)
-    down = constant("down", 0xFFFFFF80)  # signed exponent -128
-    down_exponent = instruction(
-        "v_cndmask_b32",
-        "down_exponent",
-        false_value=zero,
-        true_value=down,
-        mask=scaling,
-    )
-    root = instruction("v_ldexp_f64", "root", input=rounded, exponent=down_exponent)
-    classes = constant("classes", 0x260, move="s_mov_b32")  # -0, +0, +infinity
-    special = instruction(
-        "v_cmp_class_f64", "special", role="mask", input=x, classes=classes
-    )
-    selected = []
-    for unit in range(2):
-        for name, value in (("root", root), ("input", x)):
-            emit.append(
-                EmitRegisterSlice(
-                    source=value,
-                    result=temp(f"{name}_{unit}"),
-                    unit_offset=unit,
-                    unit_count=1,
-                )
-            )
-        selected.append(
-            instruction(
-                "v_cndmask_b32",
-                f"selected_{unit}",
-                false_value=temp(f"root_{unit}"),
-                true_value=temp(f"input_{unit}"),
-                mask=special,
-            )
-        )
-    emit.append(EmitRegisterConcat(sources=selected, result=ValueRef.result("result")))
-    return DescriptorRule(
-        source_op=scalar_math.scalar_sqrtf,
-        descriptor=descriptors["v_rsq_f64"],
-        report_key=_report_key(scalar_math.scalar_sqrtf, "exact_f64"),
-        guards=(
-            *_typed_guards(("input", "result"), _F64),
-            Guard.instance_flags_has_none("fastmath", "afn"),
-            Guard.value_materializable("input", REGISTERS_VGPR_MATERIALIZER.name),
-            *(
-                Guard.descriptor_available(descriptor)
-                for descriptor in descriptors.values()
-            ),
-        ),
-        emit=tuple(emit),
-    )
-
-
 def _divf_f64_rule(
     source_op: Op, type_pattern: TypePattern, *, allow_reciprocal: bool
 ) -> DescriptorRule:
@@ -4900,14 +4771,6 @@ def _rules() -> tuple[ContractCase, ...]:
                 report_key=_report_key(vector.vector_roundevenf, "rndne"),
             ),
             _unary_rule(vector.vector_truncf, _VEC_F32_STATIC, "amdgpu.v_trunc_f32"),
-            _unary_rule(vector.vector_sqrtf, _VEC_F32_STATIC, "amdgpu.v_sqrt_f32"),
-            _unary_rule(
-                vector.vector_rsqrtf,
-                _VEC_F32_STATIC,
-                "amdgpu.v_rsq_f32",
-                extra_guards=(Guard.instance_flags_has_all("fastmath", "afn"),),
-                report_key=_report_key(vector.vector_rsqrtf, "afn_f32"),
-            ),
         )
     )
     for source_op, descriptor_key in (
@@ -5234,29 +5097,7 @@ def _rules() -> tuple[ContractCase, ...]:
             ),
             _unary_rule(scalar_math.scalar_truncf, _F32, "amdgpu.v_trunc_f32"),
             _unary_rule(scalar_math.scalar_truncf, _F64, "amdgpu.v_trunc_f64"),
-            _unary_rule(scalar_math.scalar_sqrtf, _F32, "amdgpu.v_sqrt_f32"),
-            _unary_rule(
-                scalar_math.scalar_rsqrtf,
-                _F32,
-                "amdgpu.v_rsq_f32",
-                extra_guards=(Guard.instance_flags_has_all("fastmath", "afn"),),
-                report_key=_report_key(scalar_math.scalar_rsqrtf, "afn_f32"),
-            ),
-            _unary_rule(
-                scalar_math.scalar_sqrtf,
-                _F64,
-                "amdgpu.v_sqrt_f64",
-                extra_guards=(Guard.instance_flags_has_all("fastmath", "afn"),),
-                report_key=_report_key(scalar_math.scalar_sqrtf, "afn_f64"),
-            ),
-            _unary_rule(
-                scalar_math.scalar_rsqrtf,
-                _F64,
-                "amdgpu.v_rsq_f64",
-                extra_guards=(Guard.instance_flags_has_all("fastmath", "afn"),),
-                report_key=_report_key(scalar_math.scalar_rsqrtf, "afn_f64"),
-            ),
-            _sqrtf_exact_f64_rule(),
+            *root_rules(_DESCRIPTOR_SET),
             _cast_rule(
                 scalar_conversion.scalar_extf,
                 _F16,
