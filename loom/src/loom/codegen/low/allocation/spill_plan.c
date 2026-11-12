@@ -175,8 +175,8 @@ typedef struct loom_low_spill_materialization_slice_group_t {
   uint32_t target_cursor;
   // Number of slice uses in this group.
   uint32_t slice_count;
-  // Dense source-body block index shared by the slice uses.
-  uint16_t block_index;
+  // Dense block/call scope shared by the slice uses.
+  iree_host_size_t scope_index;
   // True when one full reload replaces the independent narrow reloads.
   bool use_full_reload;
 } loom_low_spill_materialization_slice_group_t;
@@ -223,9 +223,9 @@ typedef struct loom_low_spill_materialization_plan_builder_t {
   loom_low_spill_materialization_branch_payload_t* branch_payloads;
   // Number of records in |branch_payloads|.
   uint32_t branch_payload_count;
-  // Reused group index plus one indexed by source-body block.
-  uint32_t* slice_group_indices_plus_one_by_block;
-  // Reused slice groups bounded by selected-value uses and body blocks.
+  // Reused group index plus one indexed by block/call scope.
+  uint32_t* slice_group_indices_plus_one_by_scope;
+  // Reused slice groups bounded by selected-value uses and reload scopes.
   loom_low_spill_materialization_slice_group_t* slice_groups;
 } loom_low_spill_materialization_plan_builder_t;
 
@@ -590,7 +590,8 @@ static iree_status_t loom_low_spill_materialization_initialize_values(
         sizeof(*builder->generated_uses), (void**)&builder->generated_uses));
   }
   const iree_host_size_t slice_group_capacity = iree_min(
-      (iree_host_size_t)maximum_initial_use_count, builder->body->block_count);
+      (iree_host_size_t)maximum_initial_use_count,
+      builder->body->block_count + builder->table->call_boundaries.count);
   if (slice_group_capacity != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         &builder->scratch_arena, slice_group_capacity,
@@ -646,17 +647,19 @@ static bool loom_low_spill_materialization_try_slice_use(
     const loom_low_spill_materialization_plan_builder_t* builder,
     const loom_low_allocation_assignment_t* assignment,
     const loom_low_allocation_spill_plan_t* spill_plan, loom_use_t source_use,
-    loom_op_t** out_slice_op, uint16_t* out_block_index,
+    loom_op_t** out_slice_op, iree_host_size_t* out_scope_index,
     uint32_t* out_reload_byte_size) {
   loom_op_t* slice_op = loom_use_user_op(source_use);
   if (!loom_low_allocation_spill_plan_slice_reload_byte_size(
           builder->table->module, assignment, spill_plan->byte_size, slice_op,
           out_reload_byte_size) ||
       !loom_region_try_block_index(builder->body, slice_op->parent_block,
-                                   out_block_index)) {
+                                   NULL)) {
     return false;
   }
   *out_slice_op = slice_op;
+  *out_scope_index =
+      loom_low_call_boundary_scope(&builder->table->call_boundaries, slice_op);
   return true;
 }
 
@@ -680,21 +683,21 @@ static void loom_low_spill_materialization_prepare_slice_groups(
   for (uint32_t i = 0; i < value->use_count; ++i) {
     loom_op_t* slice_op = NULL;
     uint32_t reload_byte_size = 0;
-    uint16_t block_index = 0;
+    iree_host_size_t scope_index = 0;
     if (!loom_low_spill_materialization_try_slice_use(
             builder, assignment, spill_plan, source_uses[i], &slice_op,
-            &block_index, &reload_byte_size)) {
+            &scope_index, &reload_byte_size)) {
       continue;
     }
     uint32_t group_index =
-        builder->slice_group_indices_plus_one_by_block[block_index];
+        builder->slice_group_indices_plus_one_by_scope[scope_index];
     if (group_index == 0) {
       group_index = (*out_group_count)++;
-      builder->slice_group_indices_plus_one_by_block[block_index] =
+      builder->slice_group_indices_plus_one_by_scope[scope_index] =
           group_index + 1;
       builder->slice_groups[group_index] =
           (loom_low_spill_materialization_slice_group_t){
-              .block_index = block_index,
+              .scope_index = scope_index,
               .first_slice_op = slice_op,
           };
     } else {
@@ -790,14 +793,14 @@ static void loom_low_spill_materialization_append_reloads(
       continue;
     }
     loom_op_t* slice_op = NULL;
-    uint16_t block_index = 0;
+    iree_host_size_t scope_index = 0;
     uint32_t reload_byte_size = 0;
     uint32_t group_index = UINT32_MAX;
     if (can_slice && loom_low_spill_materialization_try_slice_use(
                          builder, assignment, spill_plan, source_uses[i],
-                         &slice_op, &block_index, &reload_byte_size)) {
+                         &slice_op, &scope_index, &reload_byte_size)) {
       const uint32_t group_index_plus_one =
-          builder->slice_group_indices_plus_one_by_block[block_index];
+          builder->slice_group_indices_plus_one_by_scope[scope_index];
       IREE_ASSERT_NE(group_index_plus_one, 0u);
       group_index = group_index_plus_one - 1;
     }
@@ -871,7 +874,7 @@ static void loom_low_spill_materialization_append_reloads(
       IREE_ASSERT_EQ(group->target_cursor,
                      group->target_start + group->slice_count);
     }
-    builder->slice_group_indices_plus_one_by_block[group->block_index] = 0;
+    builder->slice_group_indices_plus_one_by_scope[group->scope_index] = 0;
   }
 }
 
@@ -1444,14 +1447,16 @@ IREE_ATTRIBUTE_NOINLINE iree_status_t loom_low_spill_materialization_plan_build(
     status = loom_low_spill_materialization_initialize_values(&builder);
   }
   if (iree_status_is_ok(status) && builder.body->block_count != 0) {
+    const iree_host_size_t scope_count =
+        builder.body->block_count + table->call_boundaries.count;
     status = iree_arena_allocate_array(
-        &builder.scratch_arena, builder.body->block_count,
-        sizeof(*builder.slice_group_indices_plus_one_by_block),
-        (void**)&builder.slice_group_indices_plus_one_by_block);
+        &builder.scratch_arena, scope_count,
+        sizeof(*builder.slice_group_indices_plus_one_by_scope),
+        (void**)&builder.slice_group_indices_plus_one_by_scope);
     if (iree_status_is_ok(status)) {
-      memset(builder.slice_group_indices_plus_one_by_block, 0,
-             builder.body->block_count *
-                 sizeof(*builder.slice_group_indices_plus_one_by_block));
+      memset(
+          builder.slice_group_indices_plus_one_by_scope, 0,
+          scope_count * sizeof(*builder.slice_group_indices_plus_one_by_scope));
     }
   }
   if (iree_status_is_ok(status)) {
@@ -1495,22 +1500,27 @@ static bool loom_low_allocation_spill_plan_use_is_removed_block_arg_edge(
 }
 
 typedef struct loom_low_allocation_spill_plan_slice_group_t {
-  // Sum of narrow reload bytes for this value's slice uses in the block.
+  // Sum of narrow reload bytes for this value's slice uses in the scope.
   uint64_t narrow_reload_bytes;
   // Number of slice uses; zero marks an untouched row.
   uint32_t slice_count;
-  // Next touched block, or UINT16_MAX at the end of the current query's list.
-  uint16_t next_block_index;
+  // Next touched scope, or IREE_HOST_SIZE_MAX at the end of the query.
+  iree_host_size_t next_scope_index;
 } loom_low_allocation_spill_plan_slice_group_t;
 
 iree_status_t loom_low_allocation_spill_plan_traffic_workspace_initialize(
-    const loom_region_t* body, iree_arena_allocator_t* arena,
+    const loom_region_t* body,
+    const loom_low_call_boundary_index_t* call_boundaries,
+    iree_arena_allocator_t* arena,
     loom_low_allocation_spill_plan_traffic_workspace_t* out_workspace) {
+  out_workspace->call_boundaries = *call_boundaries;
+  const iree_host_size_t scope_count =
+      body->block_count + call_boundaries->count;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, body->block_count, sizeof(*out_workspace->slice_groups_by_block),
-      (void**)&out_workspace->slice_groups_by_block));
-  memset(out_workspace->slice_groups_by_block, 0,
-         body->block_count * sizeof(*out_workspace->slice_groups_by_block));
+      arena, scope_count, sizeof(*out_workspace->slice_groups_by_scope),
+      (void**)&out_workspace->slice_groups_by_scope));
+  memset(out_workspace->slice_groups_by_scope, 0,
+         scope_count * sizeof(*out_workspace->slice_groups_by_scope));
   return iree_ok_status();
 }
 
@@ -1523,7 +1533,7 @@ static void loom_low_allocation_spill_plan_value_reload_traffic(
     uint32_t* out_reload_count, uint64_t* out_reload_bytes,
     bool* out_has_narrow_uses) {
   *out_has_narrow_uses = false;
-  uint16_t first_touched_block_index = UINT16_MAX;
+  iree_host_size_t first_touched_scope_index = IREE_HOST_SIZE_MAX;
 
   const loom_block_t* block = NULL;
   uint16_t arg_index = 0;
@@ -1555,28 +1565,28 @@ static void loom_low_allocation_spill_plan_value_reload_traffic(
                               assignment->unit_count;
     }
 
-    uint16_t use_block_index = 0;
     if (!is_slice_reload || !can_group_slices ||
-        !loom_region_try_block_index(body, user_op->parent_block,
-                                     &use_block_index)) {
+        !loom_region_try_block_index(body, user_op->parent_block, NULL)) {
       ++reload_count;
       reload_bytes += is_slice_reload ? reload_byte_size : spill_byte_size;
       continue;
     }
 
+    const iree_host_size_t scope_index =
+        loom_low_call_boundary_scope(&workspace->call_boundaries, user_op);
     loom_low_allocation_spill_plan_slice_group_t* group =
-        &workspace->slice_groups_by_block[use_block_index];
+        &workspace->slice_groups_by_scope[scope_index];
     if (group->slice_count == 0) {
-      group->next_block_index = first_touched_block_index;
-      first_touched_block_index = use_block_index;
+      group->next_scope_index = first_touched_scope_index;
+      first_touched_scope_index = scope_index;
     }
     ++group->slice_count;
     group->narrow_reload_bytes += reload_byte_size;
   }
 
-  while (first_touched_block_index != UINT16_MAX) {
+  while (first_touched_scope_index != IREE_HOST_SIZE_MAX) {
     loom_low_allocation_spill_plan_slice_group_t* group =
-        &workspace->slice_groups_by_block[first_touched_block_index];
+        &workspace->slice_groups_by_scope[first_touched_scope_index];
     if (loom_low_allocation_spill_plan_use_full_slice_reload(
             group->slice_count, group->narrow_reload_bytes, spill_byte_size)) {
       ++reload_count;
@@ -1585,7 +1595,7 @@ static void loom_low_allocation_spill_plan_value_reload_traffic(
       reload_count += group->slice_count;
       reload_bytes += group->narrow_reload_bytes;
     }
-    first_touched_block_index = group->next_block_index;
+    first_touched_scope_index = group->next_scope_index;
     *group = (loom_low_allocation_spill_plan_slice_group_t){0};
   }
   *out_reload_count = reload_count;

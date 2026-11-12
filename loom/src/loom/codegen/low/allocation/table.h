@@ -15,6 +15,7 @@
 #include "loom/codegen/low/allocation/move.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/descriptors.h"
+#include "loom/codegen/low/function_requirements.h"
 #include "loom/codegen/low/placement.h"
 #include "loom/codegen/low/register_requirements.h"
 #include "loom/codegen/low/storage_layout.h"
@@ -330,6 +331,8 @@ typedef struct loom_low_allocation_table_t {
   const loom_low_storage_transport_t* storage_transport;
   // Packed authored storage layout for the immutable function snapshot.
   loom_low_storage_layout_t storage_layout;
+  // Immutable source call boundaries shared with spill planning.
+  loom_low_call_boundary_index_t call_boundaries;
   // Liveness analysis that produced the allocated intervals.
   loom_liveness_analysis_t liveness;
   // Borrowed structural register requirements in the liveness value domain.

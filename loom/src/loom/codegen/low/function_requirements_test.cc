@@ -280,6 +280,15 @@ TEST_F(LowFunctionRequirementsTest, CollectsStorageAcrossBlocks) {
   BuildReturn(&right_builder);
 
   const auto requirements = Analyze(function);
+  EXPECT_EQ(loom_low_call_boundary_scope(&requirements.call_boundaries,
+                                         stack_address),
+            0u);
+  EXPECT_EQ(loom_low_call_boundary_scope(&requirements.call_boundaries,
+                                         later_address),
+            1u);
+  EXPECT_EQ(loom_low_call_boundary_scope(&requirements.call_boundaries,
+                                         loom_block_const_last_op(right)),
+            2u);
   EXPECT_EQ(requirements.node_count, 8u);
   EXPECT_EQ(requirements.return_count, 2u);
   EXPECT_EQ(requirements.storage_address_count, 2u);
@@ -298,6 +307,8 @@ TEST_F(LowFunctionRequirementsTest, EmptyInterface) {
   const auto requirements = Analyze(function);
   EXPECT_EQ(requirements.resource_count, 0u);
   EXPECT_EQ(requirements.resources, nullptr);
+  EXPECT_EQ(requirements.call_boundaries.count, 0u);
+  EXPECT_EQ(requirements.call_boundaries.calls, nullptr);
   EXPECT_EQ(requirements.storage_layout.record_count, 0u);
   EXPECT_EQ(requirements.read_only_data.count, 0u);
   EXPECT_EQ(requirements.read_only_data.values, nullptr);
@@ -475,9 +486,50 @@ TEST_F(LowFunctionRequirementsTest, RetainsUniqueDirectCalleesInCallOrder) {
       first_first_call = call;
     }
   }
-  BuildReturn(&builder);
+  loom_block_t* exit = nullptr;
+  IREE_ASSERT_OK(
+      loom_region_append_block(module_, loom_low_func_def_body(entry), &exit));
+  loom_op_t* branch = nullptr;
+  IREE_ASSERT_OK(loom_low_br_build(&builder, exit, /*args=*/nullptr,
+                                   /*args_count=*/0, LOOM_LOCATION_UNKNOWN,
+                                   &branch));
+  loom_builder_t exit_builder = BlockBuilder(entry, exit);
+  BuildReturn(&exit_builder);
 
   const auto requirements = Analyze(entry);
+  ASSERT_EQ(requirements.call_boundaries.count, 3u);
+  EXPECT_EQ(loom_low_call_boundary_scope(&requirements.call_boundaries,
+                                         first_second_call),
+            0u);
+  EXPECT_EQ(loom_low_call_boundary_scope(&requirements.call_boundaries,
+                                         first_first_call),
+            1u);
+  EXPECT_EQ(loom_low_call_boundary_scope(&requirements.call_boundaries, branch),
+            3u);
+  EXPECT_EQ(loom_low_call_boundary_scope(&requirements.call_boundaries,
+                                         loom_block_const_last_op(exit)),
+            4u);
+
+  // Model a valid dense label range. Preparing the body can insert ordinary
+  // operations and relabel calls without changing their relative order.
+  first_second_call->block_ordinal = 1;
+  first_first_call->block_ordinal = 2;
+  first_first_call->next_op->block_ordinal = 100;
+  branch->block_ordinal = 200;
+  loom_builder_set_before(&builder, first_first_call);
+  loom_op_t* storage = nullptr;
+  IREE_ASSERT_OK(loom_low_storage_reserve_build(
+      &builder, /*byte_length=*/4, /*byte_alignment=*/4,
+      loom_type_storage(LOOM_STORAGE_SPACE_PRIVATE), LOOM_LOCATION_UNKNOWN,
+      &storage));
+  EXPECT_NE(first_first_call->block_ordinal, 2u);
+  EXPECT_EQ(
+      loom_low_call_boundary_scope(&requirements.call_boundaries, storage), 1u);
+  EXPECT_EQ(loom_low_call_boundary_scope(&requirements.call_boundaries,
+                                         first_first_call),
+            1u);
+  EXPECT_EQ(loom_low_call_boundary_scope(&requirements.call_boundaries, branch),
+            3u);
   ASSERT_EQ(requirements.direct_callees.count, 2u);
   EXPECT_EQ(requirements.direct_callees.values[0].symbol.symbol_id,
             second_ref.symbol_id);

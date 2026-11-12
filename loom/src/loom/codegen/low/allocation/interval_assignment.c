@@ -1776,7 +1776,8 @@ loom_low_allocation_interval_assignment_initialize_spill_traffic_cache(
         };
   }
   return loom_low_allocation_spill_plan_traffic_workspace_initialize(
-      state->context->function_cfg_graph->region, state->scratch_arena,
+      state->context->function_cfg_graph->region,
+      &state->context->call_boundaries, state->scratch_arena,
       &state->spill_traffic_workspace);
 }
 
