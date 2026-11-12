@@ -135,7 +135,7 @@ typedef struct loom_bytecode_wire_signed_enum_set_t {
 } loom_bytecode_wire_signed_enum_set_t;
 
 // Reads and validates one attribute wire-kind tag.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
 loom_bytecode_attribute_read_kind(loom_bytecode_reader_decoder_t* decoder,
                                   loom_bytecode_reader_cursor_t* cursor,
                                   loom_bytecode_attr_kind_t* out_kind) {

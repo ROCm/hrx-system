@@ -43,6 +43,39 @@ cc_toolchain(
     toolchain_config = ":configuration",
 )
 
+windows_cross_toolchain_config(
+    name = "msvc_configuration",
+    abi_libc_version = "msvcrt",
+    abi_version = "msvc",
+    compiler = "msvc-cl",
+    cpu = "x64_windows",
+    default_compile_flags = [
+        "/Z7",
+        "/X",
+    ],
+    host_system_name = "x86_64-unknown-linux-gnu",
+    msvc_cl_path = "msvc-cl",
+    msvc_lib_path = "msvc-lib",
+    msvc_link_path = "msvc-link",
+    msvc_ml_path = "msvc-ml64",
+    target_libc = "msvcrt",
+    target_system_name = "x86_64-pc-windows-msvc",
+    toolchain_identifier = "cross-msvc-feature-test",
+)
+
+cc_toolchain(
+    name = "msvc_compiler",
+    all_files = ":empty",
+    ar_files = ":empty",
+    as_files = ":empty",
+    compiler_files = ":empty",
+    dwp_files = ":empty",
+    linker_files = ":empty",
+    objcopy_files = ":empty",
+    strip_files = ":empty",
+    toolchain_config = ":msvc_configuration",
+)
+
 toolchain_config_test_suite(name = "toolchain_config_tests")
 
 cc_toolchain_config(

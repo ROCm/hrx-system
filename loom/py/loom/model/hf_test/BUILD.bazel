@@ -64,6 +64,7 @@ iree_py_library(
     testonly = True,
     srcs = ["hub.py"],
     tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = ["@platforms//os:linux"],
     visibility = ["//loom/src/loom/tooling/target/cpu/serve:__pkg__"],
     deps = [
         "//loom/py/loom/model:fetch_hf",

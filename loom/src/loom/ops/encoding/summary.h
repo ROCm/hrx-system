@@ -85,8 +85,7 @@ void loom_encoding_resolve_nested_static_summaries(
 // Initializes one resolved family summary from generated constants and lets
 // the family callback augment parameterized or composed facts. This stays
 // inline because it is on every encoding fact/query path.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline void
-loom_encoding_summarize_resolved(
+static IREE_ATTRIBUTE_ALWAYS_INLINE void loom_encoding_summarize_resolved(
     const loom_encoding_vtable_t* vtable,
     const loom_encoding_family_summary_request_t* request,
     loom_encoding_family_summary_t* out_summary) {
@@ -119,7 +118,7 @@ loom_encoding_summarize_resolved(
 
 // Resolves nested physical-storage composition only when selected by the
 // family callback.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline void
+static IREE_ATTRIBUTE_ALWAYS_INLINE void
 loom_encoding_resolve_nested_static_summaries_if_needed(
     const loom_encoding_family_summary_request_t* request,
     loom_encoding_family_summary_t* summary) {
@@ -140,7 +139,7 @@ void loom_encoding_summarize_verified_static(
 // Summarizes a verified encoding.define operation using its analyzed operand
 // facts. |operand_facts| may be NULL when the selected family does not compose
 // operand summaries.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline void
+static IREE_ATTRIBUTE_ALWAYS_INLINE void
 loom_encoding_summarize_verified_define(
     const loom_encoding_vtable_t* vtable, const loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,

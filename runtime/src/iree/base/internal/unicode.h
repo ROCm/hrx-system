@@ -51,8 +51,8 @@ extern "C" {
 //     uint32_t codepoint = iree_unicode_utf8_decode(text, &position);
 //     // process codepoint...
 //   }
-static IREE_ATTRIBUTE_ALWAYS_INLINE inline uint32_t iree_unicode_utf8_decode(
-    iree_string_view_t text, iree_host_size_t* position) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE uint32_t
+iree_unicode_utf8_decode(iree_string_view_t text, iree_host_size_t* position) {
   if (*position >= text.size) {
     return IREE_UNICODE_REPLACEMENT_CHAR;
   }
@@ -320,7 +320,7 @@ iree_unicode_category_t iree_unicode_category_lookup(uint32_t codepoint);
 extern const uint8_t iree_unicode_latin1_categories[128];
 
 // Returns the general category of |codepoint|.
-static IREE_ATTRIBUTE_ALWAYS_INLINE inline iree_unicode_category_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_unicode_category_t
 iree_unicode_category(uint32_t codepoint) {
   // Fast path for ASCII.
   if (codepoint < 0x80) {
@@ -436,7 +436,7 @@ bool iree_unicode_whitespace_lookup(uint32_t codepoint);
 
 // Returns true if |codepoint| has the White_Space property.
 // This is a derived property that includes more than just the Z category.
-static IREE_ATTRIBUTE_ALWAYS_INLINE inline bool iree_unicode_is_whitespace(
+static IREE_ATTRIBUTE_ALWAYS_INLINE bool iree_unicode_is_whitespace(
     uint32_t codepoint) {
   if (codepoint == ' ' || codepoint == '\t' || codepoint == '\n' ||
       codepoint == '\r' || codepoint == '\f' || codepoint == '\v') {

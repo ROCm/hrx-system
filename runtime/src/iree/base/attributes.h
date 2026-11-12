@@ -146,14 +146,15 @@
 // Requests inlining even when the normal heuristics would decline it, or
 // prevents inlining. A compiler may still decline an impossible inline request.
 // Place these annotations before the return type, not after the parameter list.
-// Keep inline and linkage specifiers explicit for portable declarations.
+// The always-inline annotation supplies the inline specifier; keep only the
+// linkage specifier explicit at each declaration.
 #if IREE_HAVE_ATTRIBUTE(always_inline) || \
     (defined(__GNUC__) && !defined(__clang__))
-#define IREE_ATTRIBUTE_ALWAYS_INLINE __attribute__((always_inline))
+#define IREE_ATTRIBUTE_ALWAYS_INLINE inline __attribute__((always_inline))
 #elif defined(_MSC_VER)
 #define IREE_ATTRIBUTE_ALWAYS_INLINE __forceinline
 #else
-#define IREE_ATTRIBUTE_ALWAYS_INLINE
+#define IREE_ATTRIBUTE_ALWAYS_INLINE inline
 #endif  // IREE_HAVE_ATTRIBUTE(always_inline)
 
 #if IREE_HAVE_ATTRIBUTE(noinline) || (defined(__GNUC__) && !defined(__clang__))

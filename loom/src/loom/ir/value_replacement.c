@@ -141,9 +141,9 @@ static bool loom_remap_value(const loom_type_remap_context_t* context,
 // Immediate payloads
 //===----------------------------------------------------------------------===//
 
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t loom_remap_leaf_type(
-    loom_type_remap_context_t* context, loom_type_t* type, bool* out_changed,
-    bool* out_representable) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
+loom_remap_leaf_type(loom_type_remap_context_t* context, loom_type_t* type,
+                     bool* out_changed, bool* out_representable) {
   bool changed = false;
   *out_changed = false;
   *out_representable = true;

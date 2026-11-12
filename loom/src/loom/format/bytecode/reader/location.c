@@ -57,7 +57,7 @@ static iree_status_t loom_bytecode_location_table_begin(
 
 // Inline the grammar so index/validation callers erase native construction when
 // their output is absent, instead of paying for a runtime materialization mode.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
 loom_bytecode_location_decode_entry(
     loom_bytecode_location_validator_t* validator,
     loom_bytecode_location_table_t* table, iree_host_size_t index,

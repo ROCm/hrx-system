@@ -29,6 +29,85 @@ unset LD_PRELOAD LD_AUDIT
 exec "$tool_root/bin/{tool}" "$@"
 """
 
+_MISSING_LLVM_ML = """#!/bin/sh
+echo 'The selected clang-cl Windows toolchain requires LLVM_ROOT/bin/llvm-ml.' >&2
+exit 1
+"""
+
+_MSVC_ENV = """#!/usr/bin/env bash
+tool_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# Bazel may expose the sandbox working directory as /proc/self/cwd. Windows
+# child processes cannot reuse that process-relative alias, so enter its
+# physical path before exposing relative action inputs and outputs to Wine.
+cd "$(pwd -P)"
+BINDIR="$tool_root/msvc/bin"
+export PATH="$tool_root/tools:$PATH"
+windows_tool_root="z:${tool_root//\\//\\\\}"
+export INCLUDE="$windows_tool_root\\include\\crt;$windows_tool_root\\include\\ucrt;$windows_tool_root\\include\\shared;$windows_tool_root\\include\\um;$windows_tool_root\\include\\winrt;$windows_tool_root\\include\\cppwinrt"
+export LIB="$windows_tool_root\\lib\\crt;$windows_tool_root\\lib\\ucrt;$windows_tool_root\\lib\\um"
+export LIBPATH="$LIB"
+# MSVC stubs such as lib.exe find neighboring tools through the Windows PATH.
+export WINEPATH="${BINDIR//\\//\\\\}"
+: "${HOME:?Linux-hosted MSVC requires HOME to identify the Wine user.}"
+: "${WINEPREFIX:?Linux-hosted MSVC requires WINEPREFIX to name a user-owned directory.}"
+export WINEPREFIX
+for prefix_file in .update-timestamp system.reg user.reg; do
+  if [[ ! -s "$WINEPREFIX/$prefix_file" ]]; then
+    echo "MSVC Wine prefix $WINEPREFIX is missing $prefix_file; run .github/scripts/setup_windows_msvc.sh first." >&2
+    exit 1
+  fi
+done
+# Distro Wine server paths outlive individual compiler actions. Do not let a
+# Bazel-supplied per-action temporary directory redirect that shared state.
+unset TMPDIR
+export WINEDLLOVERRIDES="vcruntime140=n;vcruntime140_1=n"
+# A persistent server started by setup must outlive Bazel's action process
+# groups. Concurrent actions that lazily create an action-owned server can
+# return success without executing cl.exe, so reject that state explicitly.
+# Wine returns 2 when the existing server is already persistent.
+(
+  if ! "$tool_root/tools/flock" 9; then
+    echo "Could not lock the MSVC Wine prefix at $WINEPREFIX." >&2
+    exit 1
+  fi
+  "$tool_root/tools/wineserver" -p 9>&- >/dev/null 2>&1
+  wineserver_status=$?
+  if [[ "$wineserver_status" -eq 0 ]]; then
+    "$tool_root/tools/wineserver" -k 9>&- >/dev/null 2>&1
+    echo "MSVC Wine server is not running; run .github/scripts/setup_windows_msvc.sh first." >&2
+    exit 1
+  elif [[ "$wineserver_status" -ne 2 ]]; then
+    echo "Could not query the MSVC Wine server (status $wineserver_status)." >&2
+    exit "$wineserver_status"
+  fi
+) 9>"$WINEPREFIX/.hrx-msvc-wineserver.lock"
+server_setup_status=$?
+if [[ "$server_setup_status" -ne 0 ]]; then
+  exit "$server_setup_status"
+fi
+"""
+
+_MISSING_MSVC_WRAPPER = """#!/bin/sh
+echo 'Linux-hosted MSVC requires MSVC_WINE_ROOT; run .github/scripts/setup_windows_msvc.sh and export its output path.' >&2
+exit 1
+"""
+
+_MSVC_DUMPBIN_WRAPPER = """#!/usr/bin/env bash
+. "$(dirname "$0")/msvcenv.sh"
+"$(dirname "$0")/wine-msvc.sh" "$BINDIR/dumpbin.exe" "$@"
+"""
+
+_MSVC_CL_WRAPPER = """#!/usr/bin/env bash
+set -o pipefail
+working_directory="$(pwd -P)"
+"$(dirname "$0")/msvc-cl-upstream" "$@" | sed "s|$working_directory/||g"
+pipeline_status=("${PIPESTATUS[@]}")
+if [[ "${pipeline_status[0]}" -ne 0 ]]; then
+  exit "${pipeline_status[0]}"
+fi
+exit "${pipeline_status[1]}"
+"""
+
 def _required_path(repository_ctx, path):
     path = repository_ctx.path(path)
     if not path.exists:
@@ -67,8 +146,15 @@ def _windows_toolchain_repository_impl(repository_ctx):
     sdk_root = _required_path(repository_ctx, sdk_root)
     artifacts = {}
     for tool in _TOOLS:
-        artifacts[tool] = _required_path(repository_ctx, llvm_root.get_child("bin", tool))
-        repository_ctx.symlink(artifacts[tool], "bin/" + tool)
+        tool_path = llvm_root.get_child("bin", tool)
+        if tool == "llvm-ml" and not tool_path.exists:
+            # Genuine MSVC supplies ml64.exe. Keep the parallel clang-cl
+            # toolchain definable, but fail clearly if it is selected for a
+            # MASM action with an LLVM distribution that omits llvm-ml.
+            repository_ctx.file("bin/" + tool, _MISSING_LLVM_ML, executable = True)
+        else:
+            artifacts[tool] = _required_path(repository_ctx, tool_path)
+            repository_ctx.symlink(artifacts[tool], "bin/" + tool)
         repository_ctx.file("tools/" + tool, _WRAPPER.replace("{tool}", tool), executable = True)
 
     libraries = resolve_elf_dynamic_library_closure(repository_ctx, artifacts)
@@ -84,15 +170,20 @@ def _windows_toolchain_repository_impl(repository_ctx):
         fail("Could not query LLVM resource directory:\n" + resource_result.stderr)
     resource_root = _required_path(repository_ctx, resource_result.stdout.strip())
     _project(repository_ctx, resource_root.get_child("include"), "resource/include")
-    _project(
-        repository_ctx,
-        resource_root.get_child("lib", "windows", "clang_rt.builtins-x86_64.lib"),
-        "runtime/clang_rt.builtins-x86_64.lib",
-    )
 
     runtime_root = repository_ctx.getenv("WINDOWS_COMPILER_RT_ROOT")
     if runtime_root:
         runtime_root = _required_path(repository_ctx, runtime_root)
+    builtins_path = resource_root.get_child("lib", "windows", "clang_rt.builtins-x86_64.lib")
+    if not builtins_path.exists and runtime_root:
+        builtins_path = runtime_root.get_child("clang_rt.builtins-x86_64.lib")
+    _project(
+        repository_ctx,
+        builtins_path,
+        "runtime/clang_rt.builtins-x86_64.lib",
+    )
+
+    if runtime_root:
         for name in [
             "clang_rt.asan_dynamic-x86_64.dll",
             "clang_rt.asan_dynamic-x86_64.lib",
@@ -110,6 +201,46 @@ def _windows_toolchain_repository_impl(repository_ctx):
     _project(repository_ctx, crt_root.get_child("lib", "x64"), "lib/crt")
     for component in ["ucrt", "um"]:
         _project(repository_ctx, sdk_library_root.get_child(component, "x64"), "lib/" + component)
+
+    msvc_root = repository_ctx.getenv("MSVC_WINE_ROOT")
+    if msvc_root:
+        wine = repository_ctx.which("wine64") or repository_ctx.which("wine")
+        if not wine:
+            system_wine64 = repository_ctx.path("/usr/lib/wine/wine64")
+            if system_wine64.exists:
+                wine = system_wine64
+        if not wine:
+            fail("Linux-hosted MSVC requires a Wine64 loader when MSVC_WINE_ROOT is set. Install wine64 or place wine64 or wine on PATH.")
+        wineserver = repository_ctx.which("wineserver")
+        if not wineserver:
+            system_wineserver64 = repository_ctx.path("/usr/lib/wine/wineserver64")
+            if system_wineserver64.exists:
+                wineserver = system_wineserver64
+        if not wineserver:
+            fail("Linux-hosted MSVC requires wineserver on PATH beside the Wine64 loader.")
+        flock = repository_ctx.which("flock")
+        if not flock:
+            fail("Linux-hosted MSVC requires flock on PATH to coordinate Wine server startup.")
+        msvc_root = _required_path(repository_ctx, msvc_root)
+        msvc_version_root = _version_directory(repository_ctx, msvc_root.get_child("VC", "Tools", "MSVC"))
+        _project(repository_ctx, msvc_version_root.get_child("bin", "Hostx64", "x64"), "msvc/bin")
+        _project(repository_ctx, wine, "tools/wine64")
+        _project(repository_ctx, wineserver, "tools/wineserver")
+        _project(repository_ctx, flock, "tools/flock")
+        for source, destination in {
+            "cl": "msvc-cl-upstream",
+            "lib": "msvc-lib",
+            "link": "msvc-link",
+            "ml64": "msvc-ml64",
+            "wine-msvc.sh": "wine-msvc.sh",
+        }.items():
+            _project(repository_ctx, msvc_root.get_child("wrappers", source), "tools/" + destination)
+        repository_ctx.file("tools/msvc-cl", _MSVC_CL_WRAPPER, executable = True)
+        repository_ctx.file("tools/msvc-dumpbin", _MSVC_DUMPBIN_WRAPPER, executable = True)
+    else:
+        for destination in ["flock", "msvc-cl", "msvc-cl-upstream", "msvc-dumpbin", "msvc-lib", "msvc-link", "msvc-ml64", "wine-msvc.sh", "wine64", "wineserver"]:
+            repository_ctx.file("tools/" + destination, _MISSING_MSVC_WRAPPER, executable = True)
+    repository_ctx.file("tools/msvcenv.sh", _MSVC_ENV, executable = True)
 
     repository_ctx.file("BUILD.bazel", """
 load({toolchain_bzl}, "windows_cross_toolchain")

@@ -160,11 +160,9 @@ typedef struct iree_struct_field_t {
 //   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
 //       sizeof(header_t), &total,
 //       IREE_STRUCT_ARRAY_FIELD(num_states, 256, uint16_t, &trans_offset)));
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t
-iree_struct_layout_calculate(iree_host_size_t base_size,
-                             const iree_struct_field_t* fields,
-                             iree_host_size_t field_count,
-                             iree_host_size_t* out_total) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t iree_struct_layout_calculate(
+    iree_host_size_t base_size, const iree_struct_field_t* fields,
+    iree_host_size_t field_count, iree_host_size_t* out_total) {
   iree_host_size_t total = base_size;
   for (iree_host_size_t i = 0; i < field_count; ++i) {
     const iree_struct_field_t* field = &fields[i];

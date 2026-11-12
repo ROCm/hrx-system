@@ -435,7 +435,7 @@ static void iree_hal_cmd_block_processor_profile_reset_dispatches(
   }
 }
 
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline bool
+static IREE_ATTRIBUTE_ALWAYS_INLINE bool
 iree_hal_cmd_block_processor_profile_records_regions(
     const iree_hal_cmd_block_processor_context_t* context) {
   return context->profile.command_region.events_enabled;

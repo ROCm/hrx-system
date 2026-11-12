@@ -32,7 +32,7 @@
 extern "C" {
 #endif  // __cplusplus
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE void iree_processor_yield(void) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE void iree_processor_yield(void) {
 #if defined(IREE_COMPILER_MSVC_COMPAT)
 
 #if defined(IREE_ARCH_X86_32) || defined(IREE_ARCH_X86_64)

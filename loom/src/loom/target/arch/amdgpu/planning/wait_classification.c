@@ -742,7 +742,7 @@ static void loom_amdgpu_wait_classification_classify_vmem_suffixes(
 
 // Classification has one hot caller. Preserve its caller specialization while
 // retaining an external definition for ordinary non-LTO builds.
-IREE_ATTRIBUTE_ALWAYS_INLINE extern inline iree_status_t
+extern IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
 loom_amdgpu_wait_classification_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,

@@ -9,7 +9,7 @@
 // suffix. All width selection happens in the C preprocessor; generated machine
 // code has no runtime width branch.
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE IREE_VM_BYTECODE_FLOAT_TYPE
+static IREE_ATTRIBUTE_ALWAYS_INLINE IREE_VM_BYTECODE_FLOAT_TYPE
 IREE_VM_BYTECODE_FLOAT_PRIVATE(from_bits)(
     IREE_VM_BYTECODE_FLOAT_BITS_TYPE bits) {
   IREE_VM_BYTECODE_FLOAT_TYPE value = IREE_VM_BYTECODE_FLOAT_LITERAL(0.0);
@@ -17,28 +17,28 @@ IREE_VM_BYTECODE_FLOAT_PRIVATE(from_bits)(
   return value;
 }
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE IREE_VM_BYTECODE_FLOAT_BITS_TYPE
+static IREE_ATTRIBUTE_ALWAYS_INLINE IREE_VM_BYTECODE_FLOAT_BITS_TYPE
 IREE_VM_BYTECODE_FLOAT_PRIVATE(to_bits)(IREE_VM_BYTECODE_FLOAT_TYPE value) {
   IREE_VM_BYTECODE_FLOAT_BITS_TYPE bits = 0;
   memcpy(&bits, &value, sizeof(bits));
   return bits;
 }
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE bool IREE_VM_BYTECODE_FLOAT_PRIVATE(
-    is_nan)(IREE_VM_BYTECODE_FLOAT_BITS_TYPE bits) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE bool IREE_VM_BYTECODE_FLOAT_PRIVATE(is_nan)(
+    IREE_VM_BYTECODE_FLOAT_BITS_TYPE bits) {
   return (bits & IREE_VM_BYTECODE_FLOAT_MAGNITUDE_MASK) >
          IREE_VM_BYTECODE_FLOAT_INFINITY_BITS;
 }
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE bool IREE_VM_BYTECODE_FLOAT_PRIVATE(
+static IREE_ATTRIBUTE_ALWAYS_INLINE bool IREE_VM_BYTECODE_FLOAT_PRIVATE(
     is_zero)(IREE_VM_BYTECODE_FLOAT_BITS_TYPE bits) {
   return (bits & IREE_VM_BYTECODE_FLOAT_MAGNITUDE_MASK) == 0;
 }
 
 #define IREE_VM_BYTECODE_DEFINE_FLOAT_BINARY(name, expression)                 \
-  static inline IREE_ATTRIBUTE_ALWAYS_INLINE void                              \
-  IREE_VM_BYTECODE_FLOAT_EXECUTE(name)(                                        \
-      const IREE_VM_BYTECODE_FLOAT_RECORD(name) * record, uint64_t* values) {  \
+  static IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(     \
+      name)(const IREE_VM_BYTECODE_FLOAT_RECORD(name) * record,                \
+            uint64_t* values) {                                                \
     const IREE_VM_BYTECODE_FLOAT_TYPE lhs = IREE_VM_BYTECODE_FLOAT_PRIVATE(    \
         from_bits)((IREE_VM_BYTECODE_FLOAT_BITS_TYPE)values[record->left_v8]); \
     const IREE_VM_BYTECODE_FLOAT_TYPE rhs =                                    \
@@ -56,22 +56,22 @@ IREE_VM_BYTECODE_DEFINE_FLOAT_BINARY(rem, IREE_VM_BYTECODE_FLOAT_FMOD(lhs, rhs))
 
 #undef IREE_VM_BYTECODE_DEFINE_FLOAT_BINARY
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
-    neg)(const IREE_VM_BYTECODE_FLOAT_RECORD(neg) * record, uint64_t* values) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(neg)(
+    const IREE_VM_BYTECODE_FLOAT_RECORD(neg) * record, uint64_t* values) {
   const IREE_VM_BYTECODE_FLOAT_BITS_TYPE source =
       (IREE_VM_BYTECODE_FLOAT_BITS_TYPE)values[record->source_v8];
   values[record->destination_v8] = source ^ IREE_VM_BYTECODE_FLOAT_SIGN_MASK;
 }
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
-    abs)(const IREE_VM_BYTECODE_FLOAT_RECORD(abs) * record, uint64_t* values) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(abs)(
+    const IREE_VM_BYTECODE_FLOAT_RECORD(abs) * record, uint64_t* values) {
   const IREE_VM_BYTECODE_FLOAT_BITS_TYPE source =
       (IREE_VM_BYTECODE_FLOAT_BITS_TYPE)values[record->source_v8];
   values[record->destination_v8] =
       source & IREE_VM_BYTECODE_FLOAT_MAGNITUDE_MASK;
 }
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE IREE_VM_BYTECODE_FLOAT_BITS_TYPE
+static IREE_ATTRIBUTE_ALWAYS_INLINE IREE_VM_BYTECODE_FLOAT_BITS_TYPE
 IREE_VM_BYTECODE_FLOAT_BITS(minmax)(IREE_VM_BYTECODE_FLOAT_BITS_TYPE lhs_bits,
                                     IREE_VM_BYTECODE_FLOAT_BITS_TYPE rhs_bits,
                                     uint8_t selector) {
@@ -97,9 +97,8 @@ IREE_VM_BYTECODE_FLOAT_BITS(minmax)(IREE_VM_BYTECODE_FLOAT_BITS_TYPE lhs_bits,
                          : (lhs < rhs ? lhs_bits : rhs_bits);
 }
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
-    minmax)(const IREE_VM_BYTECODE_FLOAT_RECORD(minmax) * record,
-            uint64_t* values) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(minmax)(
+    const IREE_VM_BYTECODE_FLOAT_RECORD(minmax) * record, uint64_t* values) {
   const IREE_VM_BYTECODE_FLOAT_BITS_TYPE lhs =
       (IREE_VM_BYTECODE_FLOAT_BITS_TYPE)values[record->left_v8];
   const IREE_VM_BYTECODE_FLOAT_BITS_TYPE rhs =
@@ -108,7 +107,7 @@ static inline IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
       IREE_VM_BYTECODE_FLOAT_BITS(minmax)(lhs, rhs, record->selector_u8);
 }
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE bool IREE_VM_BYTECODE_FLOAT_PRIVATE(
+static IREE_ATTRIBUTE_ALWAYS_INLINE bool IREE_VM_BYTECODE_FLOAT_PRIVATE(
     compare_relation)(uint8_t relation, IREE_VM_BYTECODE_FLOAT_TYPE lhs,
                       IREE_VM_BYTECODE_FLOAT_TYPE rhs) {
   switch (relation) {
@@ -127,7 +126,7 @@ static inline IREE_ATTRIBUTE_ALWAYS_INLINE bool IREE_VM_BYTECODE_FLOAT_PRIVATE(
   }
 }
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t IREE_VM_BYTECODE_FLOAT_BITS(
+static IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t IREE_VM_BYTECODE_FLOAT_BITS(
     compare)(IREE_VM_BYTECODE_FLOAT_BITS_TYPE lhs_bits,
              IREE_VM_BYTECODE_FLOAT_BITS_TYPE rhs_bits, uint8_t predicate) {
   const bool ordered = !IREE_VM_BYTECODE_FLOAT_PRIVATE(is_nan)(lhs_bits) &&
@@ -149,7 +148,7 @@ static inline IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t IREE_VM_BYTECODE_FLOAT_BITS(
       IREE_VM_BYTECODE_FLOAT_PRIVATE(from_bits)(rhs_bits));
 }
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
+static IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
     compare)(const IREE_VM_BYTECODE_FLOAT_RECORD(compare) * record,
              uint64_t* values) {
   const IREE_VM_BYTECODE_FLOAT_BITS_TYPE lhs =
@@ -160,7 +159,7 @@ static inline IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
       IREE_VM_BYTECODE_FLOAT_BITS(compare)(lhs, rhs, record->predicate_u8);
 }
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t IREE_VM_BYTECODE_FLOAT_BITS(
+static IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t IREE_VM_BYTECODE_FLOAT_BITS(
     classify)(IREE_VM_BYTECODE_FLOAT_BITS_TYPE bits, uint8_t selector) {
   const IREE_VM_BYTECODE_FLOAT_BITS_TYPE magnitude =
       bits & IREE_VM_BYTECODE_FLOAT_MAGNITUDE_MASK;
@@ -173,7 +172,7 @@ static inline IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t IREE_VM_BYTECODE_FLOAT_BITS(
   return magnitude < IREE_VM_BYTECODE_FLOAT_INFINITY_BITS;
 }
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
+static IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
     classify)(const IREE_VM_BYTECODE_FLOAT_RECORD(classify) * record,
               uint64_t* values) {
   const IREE_VM_BYTECODE_FLOAT_BITS_TYPE source =
@@ -182,7 +181,7 @@ static inline IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
       IREE_VM_BYTECODE_FLOAT_BITS(classify)(source, record->selector_u8);
 }
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE IREE_VM_BYTECODE_FLOAT_BITS_TYPE
+static IREE_ATTRIBUTE_ALWAYS_INLINE IREE_VM_BYTECODE_FLOAT_BITS_TYPE
 IREE_VM_BYTECODE_FLOAT_BITS(clamp)(IREE_VM_BYTECODE_FLOAT_BITS_TYPE value_bits,
                                    IREE_VM_BYTECODE_FLOAT_BITS_TYPE lower_bits,
                                    IREE_VM_BYTECODE_FLOAT_BITS_TYPE upper_bits,
@@ -215,9 +214,8 @@ IREE_VM_BYTECODE_FLOAT_BITS(clamp)(IREE_VM_BYTECODE_FLOAT_BITS_TYPE value_bits,
                                              minimum_selector);
 }
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
-    clamp)(const IREE_VM_BYTECODE_FLOAT_RECORD(clamp) * record,
-           uint64_t* values) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(clamp)(
+    const IREE_VM_BYTECODE_FLOAT_RECORD(clamp) * record, uint64_t* values) {
   const IREE_VM_BYTECODE_FLOAT_BITS_TYPE value =
       (IREE_VM_BYTECODE_FLOAT_BITS_TYPE)values[record->value_v8];
   const IREE_VM_BYTECODE_FLOAT_BITS_TYPE lower =
@@ -228,7 +226,7 @@ static inline IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
       IREE_VM_BYTECODE_FLOAT_BITS(clamp)(value, lower, upper, record->mode_u8);
 }
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
+static IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
     copysign)(const IREE_VM_BYTECODE_FLOAT_RECORD(copysign) * record,
               uint64_t* values) {
   const IREE_VM_BYTECODE_FLOAT_BITS_TYPE lhs =
@@ -240,9 +238,8 @@ static inline IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
       (rhs & IREE_VM_BYTECODE_FLOAT_SIGN_MASK);
 }
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
-    frexp)(const IREE_VM_BYTECODE_FLOAT_RECORD(frexp) * record,
-           uint64_t* values) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(frexp)(
+    const IREE_VM_BYTECODE_FLOAT_RECORD(frexp) * record, uint64_t* values) {
   const IREE_VM_BYTECODE_FLOAT_TYPE source = IREE_VM_BYTECODE_FLOAT_PRIVATE(
       from_bits)((IREE_VM_BYTECODE_FLOAT_BITS_TYPE)values[record->source_v8]);
   int32_t exponent = 0;
@@ -253,9 +250,8 @@ static inline IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
   values[record->exponent_v8] = (uint32_t)exponent;
 }
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
-    ldexp)(const IREE_VM_BYTECODE_FLOAT_RECORD(ldexp) * record,
-           uint64_t* values) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(ldexp)(
+    const IREE_VM_BYTECODE_FLOAT_RECORD(ldexp) * record, uint64_t* values) {
   const IREE_VM_BYTECODE_FLOAT_TYPE source = IREE_VM_BYTECODE_FLOAT_PRIVATE(
       from_bits)((IREE_VM_BYTECODE_FLOAT_BITS_TYPE)values[record->source_v8]);
   const int32_t exponent = (int32_t)(uint32_t)values[record->exponent_v8];
@@ -263,7 +259,7 @@ static inline IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
       IREE_VM_BYTECODE_FLOAT_LDEXP(source, exponent));
 }
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
+static IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
     math_unary)(const IREE_VM_BYTECODE_FLOAT_RECORD(math_unary) * record,
                 uint64_t* values) {
   values[record->destination_v8] = IREE_VM_BYTECODE_FLOAT_MATH(unary)(
@@ -271,7 +267,7 @@ static inline IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
       (IREE_VM_BYTECODE_FLOAT_BITS_TYPE)values[record->source_v8]);
 }
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
+static IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
     math_binary)(const IREE_VM_BYTECODE_FLOAT_RECORD(math_binary) * record,
                  uint64_t* values) {
   values[record->destination_v8] = IREE_VM_BYTECODE_FLOAT_MATH(binary)(
@@ -280,8 +276,8 @@ static inline IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
       (IREE_VM_BYTECODE_FLOAT_BITS_TYPE)values[record->right_v8]);
 }
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(
-    fma)(const IREE_VM_BYTECODE_FLOAT_RECORD(fma) * record, uint64_t* values) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE void IREE_VM_BYTECODE_FLOAT_EXECUTE(fma)(
+    const IREE_VM_BYTECODE_FLOAT_RECORD(fma) * record, uint64_t* values) {
   const IREE_VM_BYTECODE_FLOAT_TYPE a = IREE_VM_BYTECODE_FLOAT_PRIVATE(
       from_bits)((IREE_VM_BYTECODE_FLOAT_BITS_TYPE)values[record->a_v8]);
   const IREE_VM_BYTECODE_FLOAT_TYPE b = IREE_VM_BYTECODE_FLOAT_PRIVATE(

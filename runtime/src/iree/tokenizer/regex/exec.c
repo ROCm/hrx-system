@@ -32,7 +32,7 @@
 //   This function maps codepoints to CATEGORY pseudo-bytes only.
 //   Exact codepoint range matching (e.g., [一-龥]) is handled separately
 //   through the DFA's range checking mechanism, not through pseudo-bytes.
-static IREE_ATTRIBUTE_ALWAYS_INLINE inline uint8_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE uint8_t
 iree_tokenizer_regex_codepoint_to_byte(uint32_t codepoint) {
   // ASCII bytes pass through directly.
   if (codepoint < 0x80) {
@@ -110,10 +110,9 @@ static inline bool iree_tokenizer_regex_shorthand_matches(
 // Checks if the lookahead condition at an accepting state should reject the
 // match. Returns true if the match should be rejected (negative lookahead
 // matched), false if the match should be accepted.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline bool
-iree_tokenizer_regex_lookahead_rejects(const iree_tokenizer_regex_dfa_t* dfa,
-                                       uint16_t state,
-                                       uint32_t next_codepoint) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE bool iree_tokenizer_regex_lookahead_rejects(
+    const iree_tokenizer_regex_dfa_t* dfa, uint16_t state,
+    uint32_t next_codepoint) {
   if (!dfa->lookahead) {
     return false;
   }

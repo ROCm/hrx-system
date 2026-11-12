@@ -184,3 +184,109 @@ jobs:
           python3 dev.py bazel test
           --test_tag_filters=-runtime-resource=amd-gpu
           --keep_going //libhrx/...
+
+  bazel_windows_msvc:
+    name: Bazel / Windows x86-64 (via Linux) / MSVC / Fastbuild
+    if: github.event_name != 'push'
+    concurrency:
+      group: libhrx-bazel-windows-msvc-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
+      cancel-in-progress: true
+    runs-on: az-linux-scale-rocm-default-prod
+    timeout-minutes: 30
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+    defaults:
+      run:
+        shell: bash
+    env:
+      AR: ${{ github.workspace }}/build/libhrx-bazel-msvc/rocm-root/lib/llvm/bin/llvm-ar
+      CC: ${{ github.workspace }}/build/libhrx-bazel-msvc/rocm-root/lib/llvm/bin/clang
+      CXX: ${{ github.workspace }}/build/libhrx-bazel-msvc/rocm-root/lib/llvm/bin/clang++
+      HRX_ARTIFACT_SET: core
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/libhrx-bazel-msvc/downloads
+      HRX_OUTPUT_DIR: ${{ github.workspace }}/build/libhrx-bazel-msvc
+      HRX_PYTHON: ${{ github.workspace }}/build/libhrx-bazel-msvc/python/bin/python3
+      HRX_RELEASE_TYPE: nightly
+      HRX_ROCM_ROOT: ${{ github.workspace }}/build/libhrx-bazel-msvc/rocm-root
+      LLVM_ROOT: ${{ github.workspace }}/build/libhrx-bazel-msvc/rocm-root/lib/llvm
+      MSVC_WINE_ROOT: ${{ github.workspace }}/build/libhrx-bazel-msvc/msvc-wine
+      PIP_CACHE_DIR: ${{ github.workspace }}/build/libhrx-bazel-msvc/caches/pip
+      WINDOWS_COMPILER_RT_ROOT: ${{ github.workspace }}/build/libhrx-bazel-msvc/windows-toolchain/compiler-rt
+      WINDOWS_CROSS_ROOT: ${{ github.workspace }}/build/libhrx-bazel-msvc/windows-toolchain
+      WINSDK_ROOT: ${{ github.workspace }}/build/libhrx-bazel-msvc/windows-toolchain/sdk
+      WINEARCH: win64
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Adjust git config
+        run: git config --global --add safe.directory "$PWD"
+
+      - name: Configure build environment
+        run: echo "WINEPREFIX=${RUNNER_TEMP}/msvc-wine-prefix" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Fetch ROCm toolchain
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
+
+      - name: Install Wine host tools
+        run: |
+          apt_options=(-o Acquire::ForceIPv4=true -o Acquire::Retries=3)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install --yes --no-install-recommends \
+            p7zip-full wine64
+
+      - name: Restore Windows SDK inputs
+        id: windows_toolchain
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.WINDOWS_CROSS_ROOT }}
+          key: windows-cross-${{ hashFiles('.github/scripts/setup_windows_cross.sh', '.github/scripts/windows-sdk-channel.json', 'build_tools/ci/windows_stl_asan.py') }}
+
+      - name: Prepare Windows SDK inputs
+        if: steps.windows_toolchain.outputs.cache-hit != 'true'
+        run: bash .github/scripts/setup_windows_cross.sh
+
+      - name: Prepare genuine MSVC tools
+        run: bash .github/scripts/setup_windows_msvc.sh
+
+      - name: Install Bazel host tools
+        run: |
+          python3 --version
+          python3 dev.py bazel setup --venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Check tool versions
+        run: |
+          bazel --version
+          bash .github/scripts/check_host_toolchain.sh --expect-rocm
+          bash .github/scripts/check_rocm_device_toolchain.sh
+          test -d "${HRX_ROCM_ROOT}/include"
+
+      - name: Configure LibHRX Bazel
+        run: |
+          python3 dev.py bazel configure \
+            -DIREE_HAL_DRIVER_AMDGPU=OFF \
+            -DIREE_HAL_DRIVER_AMD_GPU=ON \
+            -DIREE_HAL_DRIVER_AMD_XDNA=OFF \
+            -DAMDF_BUILD=ON \
+            -DIREE_ROCM_PATH="${HRX_ROCM_ROOT}" \
+            -DIREE_ROCM_DEPENDENCY_MODE=package
+          {
+            echo "startup --output_base=${RUNNER_TEMP}/b"
+            echo 'build --config=windows-x86_64'
+            echo 'build --config=windows-msvc'
+          } >> .bazelrc.local
+
+      - name: Build LibHRX with MSVC
+        run: >-
+          iree-bazel-build
+          --keep_going
+          --nobuild_runfile_links
+          //libhrx/...

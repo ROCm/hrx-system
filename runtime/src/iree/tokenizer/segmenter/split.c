@@ -274,7 +274,7 @@ iree_tokenizer_split_handle_contiguous(iree_host_size_t gap_start,
 //===----------------------------------------------------------------------===//
 
 // Dispatches to the appropriate behavior handler.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_tokenizer_split_match_result_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_tokenizer_split_match_result_t
 iree_tokenizer_split_handle_match(
     iree_tokenizer_regex_split_behavior_t behavior, iree_host_size_t gap_start,
     iree_host_size_t gap_end, iree_host_size_t match_start,

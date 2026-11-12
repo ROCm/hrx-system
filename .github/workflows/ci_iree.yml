@@ -67,7 +67,7 @@ permissions:
 
 jobs:
   bazel_linux:
-    name: Bazel / Linux x86-64 / ${{ matrix.name }}
+    name: Bazel / ${{ matrix.platform || 'Linux x86-64' }} / ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix:
@@ -125,6 +125,12 @@ jobs:
             host_ar: ar
             host_cc: gcc
             host_cxx: g++
+          - name: MSVC / Fastbuild / Repository Build
+            kind: windows_msvc
+            command: iree-bazel-repository-build
+            platform: Windows x86-64 (via Linux)
+            runner: az-linux-scale-rocm-default-prod
+            host_toolchain: rocm
           - name: GCC / Fastbuild / AMD gfx120x Vulkan
             kind: vulkan
             command: iree-bazel-vulkan
@@ -192,7 +198,7 @@ jobs:
             target_selector: gfx942
             container_options: *amdgpu_container_options
     concurrency:
-      group: iree-bazel-linux-${{ matrix.command }}-${{ matrix.target_selector }}-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
+      group: iree-bazel-linux-${{ matrix.kind }}-${{ matrix.command }}-${{ matrix.target_selector }}-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true
     runs-on: ${{ matrix.runner }}
     continue-on-error: ${{ matrix.optional || false }}
@@ -201,7 +207,7 @@ jobs:
       run:
         shell: bash
     container:
-      image: ${{ matrix.command == 'iree-bazel-repository-build' && 'ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421' || 'ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98' }}
+      image: ${{ matrix.command == 'iree-bazel-repository-build' && matrix.kind != 'windows_msvc' && 'ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421' || 'ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98' }}
       options: ${{ matrix.container_options || '' }}
     env:
       IREE_CI_PLATFORM_COVERAGE: ${{ matrix.platform_coverage && '1' || '0' }}
@@ -234,6 +240,17 @@ jobs:
             echo "HRX_ROCM_ROOT=${output_dir}/rocm-root"
             echo "PIP_CACHE_DIR=${output_dir}/caches/pip"
           } >> "$GITHUB_ENV"
+          if [[ "${{ matrix.kind }}" == windows_msvc ]]; then
+            {
+              echo "LLVM_ROOT=${output_dir}/rocm-root/lib/llvm"
+              echo "WINDOWS_CROSS_ROOT=${output_dir}/windows-toolchain"
+              echo "WINDOWS_COMPILER_RT_ROOT=${output_dir}/windows-toolchain/compiler-rt"
+              echo "WINSDK_ROOT=${output_dir}/windows-toolchain/sdk"
+              echo "MSVC_WINE_ROOT=${output_dir}/msvc-wine"
+              echo "WINEARCH=win64"
+              echo "WINEPREFIX=${RUNNER_TEMP}/msvc-wine-prefix"
+            } >> "$GITHUB_ENV"
+          fi
           case "${{ matrix.kind }}/${{ matrix.host_toolchain }}" in
             amdgpu/*|*/rocm)
               {
@@ -295,7 +312,7 @@ jobs:
           dpkg-query -W gcc g++ libvulkan1 mesa-vulkan-drivers vulkan-tools
 
       - name: Set up Python
-        if: matrix.command != 'iree-bazel-repository-build'
+        if: matrix.command != 'iree-bazel-repository-build' || matrix.kind == 'windows_msvc'
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
@@ -316,6 +333,30 @@ jobs:
         if: matrix.kind != 'vulkan'
         run: bash .github/scripts/fetch_rocm_toolchain.sh
 
+      - name: Install Wine host tools
+        if: matrix.kind == 'windows_msvc'
+        run: |
+          apt_options=(-o Acquire::ForceIPv4=true -o Acquire::Retries=3)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install --yes --no-install-recommends \
+            p7zip-full wine64
+
+      - name: Restore Windows SDK inputs
+        if: matrix.kind == 'windows_msvc'
+        id: windows_toolchain
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.WINDOWS_CROSS_ROOT }}
+          key: windows-cross-${{ hashFiles('.github/scripts/setup_windows_cross.sh', '.github/scripts/windows-sdk-channel.json', 'build_tools/ci/windows_stl_asan.py') }}
+
+      - name: Prepare Windows SDK inputs
+        if: matrix.kind == 'windows_msvc' && steps.windows_toolchain.outputs.cache-hit != 'true'
+        run: bash .github/scripts/setup_windows_cross.sh
+
+      - name: Prepare genuine MSVC tools
+        if: matrix.kind == 'windows_msvc'
+        run: bash .github/scripts/setup_windows_msvc.sh
+
       - name: Check Vulkan hardware environment
         if: matrix.kind == 'vulkan'
         timeout-minutes: 1
@@ -325,6 +366,14 @@ jobs:
         run: |
           python3 --version
           python3 dev.py bazel setup --venv
+          if [[ "${{ matrix.kind }}" == windows_msvc ]]; then
+            {
+              # Keep Wine-visible generated paths below MSVC's path limits.
+              echo "startup --output_base=${RUNNER_TEMP}/b"
+              echo 'build --config=windows-x86_64'
+              echo 'build --config=windows-msvc'
+            } >> .bazelrc.local
+          fi
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Check Bazel sandbox environment
@@ -337,7 +386,7 @@ jobs:
           "$sandbox" -W "$execution_root" -- /bin/true
 
       - name: Check tool versions
-        if: matrix.kind == 'cpu' || matrix.kind == 'vulkan' || matrix.kind == 'amdgpu'
+        if: matrix.kind == 'cpu' || matrix.kind == 'vulkan' || matrix.kind == 'amdgpu' || matrix.kind == 'windows_msvc'
         run: |
           bazel --version
           if [[ "${{ matrix.kind }}" == vulkan ]]; then
@@ -353,6 +402,20 @@ jobs:
             bash .github/scripts/check_rocm_device_toolchain.sh
             test -d "${HRX_ROCM_ROOT}/include"
           fi
+          if [[ "${{ matrix.kind }}" == windows_msvc ]]; then
+            compiler_dir="$(find "$MSVC_WINE_ROOT/VC/Tools/MSVC" -mindepth 1 -maxdepth 1 -type d -print -quit)/bin/Hostx64/x64"
+            wine_executable=/usr/lib/wine/wine64
+            test -x "$wine_executable"
+            version_source="$RUNNER_TEMP/msvc-version.c"
+            version_object="$RUNNER_TEMP/msvc-version.obj"
+            printf 'int msvc_version_probe(void) { return 0; }\n' > "$version_source"
+            version_source_windows="z:${version_source//\//\\}"
+            version_object_windows="z:${version_object//\//\\}"
+            WINEDEBUG=-all WINEPATH="${compiler_dir//\//\\}" \
+              "$wine_executable" "$compiler_dir/cl.exe" /nologo /Bv /c \
+              "$version_source_windows" "/Fo$version_object_windows"
+            test -s "$version_object"
+          fi
 
       - name: Report ROCm environment
         if: matrix.kind == 'amdgpu'
@@ -363,7 +426,7 @@ jobs:
           --amdgpu-target "${{ matrix.target_selector }}"
 
       - name: Run IREE Bazel CI
-        if: matrix.kind == 'cpu' || matrix.kind == 'vulkan' || matrix.kind == 'amdgpu'
+        if: matrix.kind == 'cpu' || matrix.kind == 'vulkan' || matrix.kind == 'amdgpu' || matrix.kind == 'windows_msvc'
         id: iree_bazel_ci
         shell: bash
         env:
@@ -400,7 +463,7 @@ jobs:
             result_args=(--bazel-test-results-dir "${RUNNER_TEMP}/repository-test-results-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")
           fi
           failure_args=()
-          if [[ "$IREE_CI_KIND" == cpu ]]; then
+          if [[ "$IREE_CI_KIND" == cpu || "$IREE_CI_KIND" == windows_msvc ]]; then
             failure_args=(--keep-going)
           fi
           python3 build_tools/devtools/ci.py "$IREE_CI_COMMAND" \
@@ -408,7 +471,7 @@ jobs:
             --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles" "${failure_args[@]}"
 
       - name: Capture accelerator kernel errors
-        if: ${{ always() && matrix.kind != 'cpu' && (steps.iree_bazel_ci.outcome == 'failure' || steps.iree_bazel_ci.outcome == 'cancelled') }}
+        if: ${{ always() && (matrix.kind == 'vulkan' || matrix.kind == 'amdgpu') && (steps.iree_bazel_ci.outcome == 'failure' || steps.iree_bazel_ci.outcome == 'cancelled') }}
         run: |
           date -u
           uname -a
@@ -419,7 +482,7 @@ jobs:
         if: ${{ always() && steps.iree_bazel_ci.outcome != 'skipped' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: bazel-profiles-${{ matrix.command }}-${{ matrix.target_selector || 'host' }}-attempt-${{ github.run_attempt }}
+          name: bazel-profiles-${{ matrix.kind }}-${{ matrix.command }}-${{ matrix.target_selector || 'host' }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/bazel-profiles/
           if-no-files-found: warn
           compression-level: 0
@@ -495,11 +558,6 @@ jobs:
             platform_coverage: true
             runner: azure-windows-scale-rocm
             target_selector: gfx11-generic
-          - name: MSVC / Fastbuild / Repository Build
-            kind: repository
-            command: iree-bazel-repository-build
-            host_toolchain: msvc
-            runner: azure-windows-scale-rocm
           - name: Clang CL / Fastbuild / Shared Tools
             kind: repository
             command: iree-bazel-repository-shared-tools
@@ -688,21 +746,10 @@ jobs:
             }
           }
           if ("${{ matrix.kind }}" -eq "repository") {
-            if ("${{ matrix.host_toolchain }}" -eq "clang-cl") {
-              # The platform lane's Python and shell tests materialize large
-              # runfiles trees. Limit their concurrent filesystem work while
-              # preserving the full build-action pool.
-              "test --local_test_jobs=20" |
-                Out-File -FilePath .bazelrc.local -Encoding ascii -Append
-            } elseif ("${{ matrix.host_toolchain }}" -eq "msvc") {
-              # MSVC repository tests need process-launch headroom; bound test
-              # actions independently while builds retain the full pool.
-              "test --local_test_jobs=35" |
-                Out-File -FilePath .bazelrc.local -Encoding ascii -Append
-            }
-          }
-          if ("${{ matrix.host_toolchain }}" -eq "msvc") {
-            "build --config=windows-msvc" |
+            # The platform lane's Python and shell tests materialize large
+            # runfiles trees. Limit their concurrent filesystem work while
+            # preserving the full build-action pool.
+            "test --local_test_jobs=20" |
               Out-File -FilePath .bazelrc.local -Encoding ascii -Append
           }
           python --version
@@ -752,20 +799,14 @@ jobs:
           Import-Module (Join-Path $installation 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll')
           Enter-VsDevShell -VsInstallPath $installation -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
           if ($env:VSCMD_ARG_TGT_ARCH -ne 'x64') { throw 'Visual Studio x64 developer environment was not initialized.' }
-          if ("${{ matrix.host_toolchain }}" -eq 'msvc') {
-            $env:CC = 'cl.exe'
-            $env:CXX = 'cl.exe'
-            $env:AR = 'lib.exe'
-          } else {
-            foreach ($tool in @('clang-cl.exe', 'lld-link.exe', 'llvm-lib.exe')) {
-              if (-not (Test-Path -LiteralPath (Join-Path $env:BAZEL_LLVM "bin\$tool") -PathType Leaf)) {
-                throw "Missing LLVM tool: $tool"
-              }
+          foreach ($tool in @('clang-cl.exe', 'lld-link.exe', 'llvm-lib.exe')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $env:BAZEL_LLVM "bin\$tool") -PathType Leaf)) {
+              throw "Missing LLVM tool: $tool"
             }
-            $env:CC = Join-Path $env:BAZEL_LLVM 'bin\clang-cl.exe'
-            $env:CXX = $env:CC
-            $env:AR = Join-Path $env:BAZEL_LLVM 'bin\llvm-lib.exe'
           }
+          $env:CC = Join-Path $env:BAZEL_LLVM 'bin\clang-cl.exe'
+          $env:CXX = $env:CC
+          $env:AR = Join-Path $env:BAZEL_LLVM 'bin\llvm-lib.exe'
           $resultArgs = @()
           if ('${{ matrix.command }}' -ne 'iree-bazel-repository-build') {
             $repositoryResultsDir = Join-Path $env:RUNNER_TEMP "repository-test-results-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"

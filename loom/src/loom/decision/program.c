@@ -14,7 +14,7 @@ typedef struct loom_decision_program_conjunction_result_t {
   loom_decision_program_constraint_ref_t decisive_constraint;
 } loom_decision_program_conjunction_result_t;
 
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline void
+static IREE_ATTRIBUTE_ALWAYS_INLINE void
 loom_decision_program_resolve_table_operand(
     const loom_decision_program_t* program,
     const loom_decision_program_binding_t* binding,
@@ -40,7 +40,7 @@ loom_decision_program_resolve_table_operand(
   };
 }
 
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline void
+static IREE_ATTRIBUTE_ALWAYS_INLINE void
 loom_decision_program_resolve_indexed_operand(
     const loom_decision_program_t* program,
     const loom_decision_program_indexed_binding_t* binding,
@@ -65,7 +65,7 @@ loom_decision_program_resolve_indexed_operand(
   };
 }
 
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_decision_truth_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE loom_decision_truth_t
 loom_decision_program_finish_predicate(
     const loom_decision_predicate_operand_t operands[3],
     loom_decision_program_predicate_refiner_t predicate_refiner,
@@ -114,7 +114,7 @@ loom_decision_program_evaluate_table_predicate(
                                                 predicate->kind);
 }
 
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_decision_truth_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE loom_decision_truth_t
 loom_decision_program_evaluate_indexed_predicate(
     const loom_decision_program_t* program,
     const loom_decision_program_indexed_binding_t* binding,
@@ -150,7 +150,7 @@ loom_decision_program_evaluate_indexed_predicate(
                                                 predicate->kind);
 }
 
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_decision_program_conjunction_result_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE loom_decision_program_conjunction_result_t
 loom_decision_program_evaluate_conjunction(
     const loom_decision_program_t* program,
     const loom_decision_program_binding_t* table_binding,
@@ -211,10 +211,9 @@ loom_decision_program_evaluate_conjunction(
   return result;
 }
 
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline void
-loom_decision_program_append_live(uint32_t action_ordinal,
-                                  uint32_t* live_action_ordinals,
-                                  uint32_t* live_action_count) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE void loom_decision_program_append_live(
+    uint32_t action_ordinal, uint32_t* live_action_ordinals,
+    uint32_t* live_action_count) {
   if (live_action_ordinals != NULL) {
     live_action_ordinals[*live_action_count] = action_ordinal;
   }
@@ -241,8 +240,7 @@ static void loom_decision_program_preserve_all_choices(
   }
 }
 
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline void
-loom_decision_program_evaluate_impl(
+static IREE_ATTRIBUTE_ALWAYS_INLINE void loom_decision_program_evaluate_impl(
     const loom_decision_program_t* program,
     const loom_decision_program_binding_t* table_binding,
     const loom_decision_program_indexed_binding_t* indexed_binding,

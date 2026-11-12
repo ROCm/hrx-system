@@ -34,7 +34,7 @@ static iree_status_t loom_bytecode_source_trivia_read_header(
   return iree_ok_status();
 }
 
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
 loom_bytecode_source_trivia_read_comment(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint16_t comment_index,

@@ -6,7 +6,7 @@
 
 """Optional, exact-build compiler/runtime sharing for LoomC tools."""
 
-load("@rules_cc//cc:find_cc_toolchain.bzl", "find_cc_toolchain", "use_cc_toolchain")
+load("@rules_cc//cc:find_cc_toolchain.bzl", "CC_TOOLCHAIN_TYPE", "find_cc_toolchain", "use_cc_toolchain")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("//build_tools/bazel:cc_opts.bzl", "cc_opts")
@@ -32,8 +32,17 @@ def _exports_impl(ctx):
     inputs = depset(inputs)
     output = ctx.actions.declare_file(ctx.label.name + ".def")
     args = ctx.actions.args()
+    execution_requirements = {}
+    tool_inputs = depset()
+    use_default_shell_env = False
     if toolchain.compiler == "msvc-cl":
-        args.add("--dumpbin", ctx.var["DUMPBIN"])
+        dumpbin = ctx.toolchains[CC_TOOLCHAIN_TYPE].dumpbin
+        if not dumpbin.executable:
+            fail("The selected MSVC toolchain does not provide dumpbin")
+        args.add("--dumpbin", dumpbin.executable)
+        execution_requirements = {requirement: "" for requirement in dumpbin.execution_requirements}
+        tool_inputs = dumpbin.files
+        use_default_shell_env = dumpbin.use_default_shell_env
     else:
         args.add("--nm", toolchain.nm_executable)
     args.add("--output", output)
@@ -44,10 +53,12 @@ def _exports_impl(ctx):
     ctx.actions.run(
         executable = ctx.executable._generator,
         arguments = [args],
-        inputs = depset(transitive = [inputs, toolchain.all_files]),
+        execution_requirements = execution_requirements,
+        inputs = depset(transitive = [inputs, tool_inputs, toolchain.all_files]),
         outputs = [output],
         mnemonic = "LoomCExports",
         progress_message = "Collecting shared exports for %{label}",
+        use_default_shell_env = use_default_shell_env,
     )
     return [DefaultInfo(files = depset([output]))]
 

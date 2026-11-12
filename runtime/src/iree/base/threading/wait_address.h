@@ -52,14 +52,14 @@ static inline void iree_wait_address_wake_all(iree_atomic_int32_t* address) {
 // Callers must always re-check their full predicate after this returns:
 // wakeups may be spurious and timeout does not imply the predicate is still
 // false.
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_code_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_code_t
 iree_wait_address_wait_int32(iree_atomic_int32_t* address,
                              int32_t expected_value, iree_time_t deadline_ns) {
   return iree_futex_wait((void*)address, (uint32_t)expected_value, deadline_ns);
 }
 
 // Wakes all threads waiting on |address| through iree_wait_address_wait_int32.
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE void iree_wait_address_wake_all(
+static IREE_ATTRIBUTE_ALWAYS_INLINE void iree_wait_address_wake_all(
     iree_atomic_int32_t* address) {
   iree_futex_wake((void*)address, IREE_ALL_WAITERS);
 }
