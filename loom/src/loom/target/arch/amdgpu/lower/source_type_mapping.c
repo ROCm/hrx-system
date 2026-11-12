@@ -549,9 +549,7 @@ loom_value_fact_flags_t loom_amdgpu_native_result_distribution(
   const uint16_t register_class = loom_low_register_type_class_id(native_type);
   if (register_class == LOOM_AMDGPU_REG_CLASS_ID_SCC ||
       (register_class == LOOM_AMDGPU_REG_CLASS_ID_SGPR &&
-       !(loom_type_element_type(source_type) == LOOM_SCALAR_TYPE_I1 &&
-         (loom_type_is_vector(source_type) ||
-          loom_low_register_type_unit_count(native_type) == 2)))) {
+       !loom_amdgpu_native_type_is_lane_mask(source_type, native_type))) {
     return LOOM_VALUE_FACT_SUBGROUP_UNIFORM;
   }
   return LOOM_VALUE_FACT_LANE_VARYING;

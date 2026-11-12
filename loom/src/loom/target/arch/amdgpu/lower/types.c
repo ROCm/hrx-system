@@ -37,6 +37,15 @@ bool loom_amdgpu_type_is_i1(loom_type_t type) {
          loom_type_element_type(type) == LOOM_SCALAR_TYPE_I1;
 }
 
+bool loom_amdgpu_native_type_is_lane_mask(loom_type_t source_type,
+                                          loom_type_t native_type) {
+  return loom_low_register_type_class_id(native_type) ==
+             LOOM_AMDGPU_REG_CLASS_ID_SGPR &&
+         loom_type_element_type(source_type) == LOOM_SCALAR_TYPE_I1 &&
+         (loom_type_is_vector(source_type) ||
+          loom_low_register_type_unit_count(native_type) == 2);
+}
+
 uint32_t loom_amdgpu_integer_scalar_type_bit_count(
     loom_scalar_type_t scalar_type) {
   if (!loom_scalar_type_set_contains(LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD,

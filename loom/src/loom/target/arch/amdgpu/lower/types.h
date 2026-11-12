@@ -41,6 +41,11 @@ bool loom_amdgpu_type_is_i8(loom_type_t type);
 // Returns true when the source type is a scalar i1.
 bool loom_amdgpu_type_is_i1(loom_type_t type);
 
+// Returns true when a logical predicate uses one lane-mask pair per element.
+// Numeric SGPR pairs and one-word scalar truth values are not lane masks.
+bool loom_amdgpu_native_type_is_lane_mask(loom_type_t source_type,
+                                          loom_type_t native_type);
+
 // Returns the bit count for i8/i16/i32/i64 scalar payloads, or zero when the
 // scalar type is not an ordinary integer payload.
 uint32_t loom_amdgpu_integer_scalar_type_bit_count(

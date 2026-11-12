@@ -20,7 +20,9 @@
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
 typedef struct loom_amdgpu_zero_placeholder_t {
+  // Low storage shape shared by inactive placeholders.
   loom_type_t type;
+  // Reusable zero value with that storage shape.
   loom_value_id_t value;
 } loom_amdgpu_zero_placeholder_t;
 
@@ -93,14 +95,15 @@ static iree_status_t loom_amdgpu_emit_loop_capture_branch(
     const loom_type_t value_type =
         loom_module_value_type(module, retained_value);
     if (payload_args[i] == retained_value ||
-        !loom_amdgpu_low_type_is_native_i1_mask(context, value_type)) {
+        !loom_amdgpu_control_argument_is_lane_mask(context, plan->capture_block,
+                                                   i)) {
       capture_args[i] = payload_args[i];
       continue;
     }
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_masked_merge_value(
-        context, source_op, plan->saved_exec,
-        (loom_amdgpu_mask_merge_constants_t){0}, retained_value,
-        payload_args[i], payload_update_mask, value_type, &capture_args[i]));
+        context, source_op, plan->saved_exec, 0, retained_value,
+        payload_args[i], payload_update_mask, /*inout_uniform_condition=*/NULL,
+        value_type, &capture_args[i]));
   }
   capture_args[plan->capture_value_count] = repeat_mask;
   uint16_t private_index = plan->capture_value_count + 1;
@@ -182,8 +185,8 @@ static iree_status_t loom_amdgpu_emit_loop_capture_branch(
   loom_op_t* branch_op = NULL;
   bool can_identity_payload = identity_payload && payload_count != 0;
   for (uint16_t i = 0; i < payload_count && can_identity_payload; ++i) {
-    can_identity_payload = !loom_amdgpu_low_type_is_native_i1_mask(
-        context, loom_module_value_type(module, payload_args[i]));
+    can_identity_payload = !loom_amdgpu_control_argument_is_lane_mask(
+        context, plan->capture_block, i);
   }
   uint16_t identity_start = 0;
   uint16_t identity_count = can_identity_payload ? payload_count : 0;
@@ -448,6 +451,7 @@ static iree_status_t loom_amdgpu_emit_loop_exit_region_merge_blocks(
         (void**)&merged_args);
   }
   loom_module_t* module = loom_low_lower_context_module(context);
+  loom_value_id_t uniform_condition = LOOM_VALUE_ID_INVALID;
   for (uint16_t i = 0;
        i < plan->source_merge_arg_count && iree_status_is_ok(status); ++i) {
     const loom_value_id_t clean_value = loom_block_arg_id(dispatch, i);
@@ -456,11 +460,15 @@ static iree_status_t loom_amdgpu_emit_loop_exit_region_merge_blocks(
         plan->clean_successor_index == 0 ? exit_value : clean_value;
     const loom_value_id_t true_value =
         plan->clean_successor_index == 0 ? clean_value : exit_value;
+    const loom_amdgpu_mask_merge_flags_t flags =
+        plan->merge_flags ? plan->merge_flags[i] : 0;
+    const loom_value_id_t participating_lanes =
+        iree_any_bit_set(flags, LOOM_AMDGPU_MASK_MERGE_UNIFORM)
+            ? survivors
+            : plan->saved_exec;
     status = loom_amdgpu_emit_masked_merge_value(
-        context, plan->source_op, plan->saved_exec,
-        plan->merge_constants ? plan->merge_constants[i]
-                              : (loom_amdgpu_mask_merge_constants_t){0},
-        false_value, true_value, plan->source_condition,
+        context, plan->source_op, participating_lanes, flags, false_value,
+        true_value, plan->source_condition, &uniform_condition,
         loom_module_value_type(module, clean_value), &merged_args[i]);
   }
   for (uint16_t i = plan->source_merge_arg_count; i < plan->merge_arg_count;
@@ -1057,9 +1065,10 @@ static iree_status_t loom_amdgpu_emit_loop_entry_capture_branch(
       args[i] = local_mask;
     }
     if (args[i] == LOOM_VALUE_ID_INVALID && i < plan->capture_value_count &&
-        loom_amdgpu_low_type_is_native_i1_mask(context, type)) {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_zero_native_i1_mask(
-          context, source_op, type, &args[i]));
+        loom_amdgpu_control_argument_is_lane_mask(context, plan->capture_block,
+                                                  i)) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_zero_merge_value(context, source_op,
+                                                             type, &args[i]));
     }
     if (args[i] != LOOM_VALUE_ID_INVALID) {
       continue;
