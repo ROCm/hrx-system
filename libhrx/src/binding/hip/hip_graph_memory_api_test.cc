@@ -4,9 +4,11 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <semaphore>
+#include <vector>
 
 #include "binding/hip/api.h"
 #include "binding/hip/hip_dso_test_util.h"
@@ -99,6 +101,16 @@ struct HipGraphApi {
   decltype(&hipGraphDestroyNode) destroy_node = nullptr;
   // Adds public dependencies after node construction.
   decltype(&hipGraphAddDependencies) add_dependencies = nullptr;
+  // Removes a validated batch of public dependencies atomically.
+  decltype(&hipGraphRemoveDependencies) remove_dependencies = nullptr;
+  // Enumerates public predecessor/destination pairs.
+  decltype(&hipGraphGetEdges) get_edges = nullptr;
+  // Enumerates nodes without public predecessors.
+  decltype(&hipGraphGetRootNodes) get_roots = nullptr;
+  // Enumerates one node's public predecessors.
+  decltype(&hipGraphNodeGetDependencies) get_dependencies = nullptr;
+  // Enumerates nodes depending on one public predecessor.
+  decltype(&hipGraphNodeGetDependentNodes) get_dependents = nullptr;
   // Begins recording operations issued through the streaming copy API.
   decltype(&hipStreamBeginCapture) begin_capture = nullptr;
   // Begins a capture that extends an existing graph frontier.
@@ -178,6 +190,11 @@ class HipGraphMemoryApiTest : public ::testing::Test {
     RESOLVE(get_node_type, "hipGraphNodeGetType");
     RESOLVE(destroy_node, "hipGraphDestroyNode");
     RESOLVE(add_dependencies, "hipGraphAddDependencies");
+    RESOLVE(remove_dependencies, "hipGraphRemoveDependencies");
+    RESOLVE(get_edges, "hipGraphGetEdges");
+    RESOLVE(get_roots, "hipGraphGetRootNodes");
+    RESOLVE(get_dependencies, "hipGraphNodeGetDependencies");
+    RESOLVE(get_dependents, "hipGraphNodeGetDependentNodes");
     RESOLVE(begin_capture, "hipStreamBeginCapture");
     RESOLVE(begin_capture_to_graph, "hipStreamBeginCaptureToGraph");
     RESOLVE(end_capture, "hipStreamEndCapture");
@@ -1473,6 +1490,112 @@ TEST_F(HipGraphMemoryApiTest, StagedCopiesFollowPublicEnableAndDeletion) {
   }
 }
 
+TEST_F(HipGraphMemoryApiTest, DependencyQueriesFollowMutationAndCloning) {
+  std::array<hipGraphNode_t, 5> nodes = {};
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    ASSERT_EQ(hipSuccess,
+              api_.add_empty(&nodes[i], graph_, i == 2 ? &nodes[0] : nullptr,
+                             i == 2 ? 1 : 0));
+  }
+  const hipGraphNode_t from[] = {nodes[1], nodes[2], nodes[0]};
+  const hipGraphNode_t to[] = {nodes[2], nodes[3], nodes[4]};
+  ASSERT_EQ(hipSuccess, api_.add_dependencies(graph_, from, to, 3));
+  ASSERT_EQ(hipSuccess, api_.graph_clone(&clone_, graph_));
+
+  const auto check = [&](hipGraph_t graph,
+                         const std::array<hipGraphNode_t, 5>& handles) {
+    size_t count = 0;
+    ASSERT_EQ(hipSuccess, api_.get_edges(graph, nullptr, nullptr, &count));
+    ASSERT_EQ(4u, count);
+    std::array<hipGraphNode_t, 6> sources;
+    std::array<hipGraphNode_t, 6> targets;
+    sources.fill(handles[0]);
+    targets.fill(handles[0]);
+    count = sources.size();
+    ASSERT_EQ(hipSuccess,
+              api_.get_edges(graph, sources.data(), targets.data(), &count));
+    EXPECT_EQ(4u, count);
+    const std::vector<std::pair<hipGraphNode_t, hipGraphNode_t>> expected = {
+        {handles[0], handles[2]},
+        {handles[1], handles[2]},
+        {handles[2], handles[3]},
+        {handles[0], handles[4]}};
+    std::vector<std::pair<hipGraphNode_t, hipGraphNode_t>> actual;
+    for (size_t i = 0; i < count; ++i) {
+      actual.emplace_back(sources[i], targets[i]);
+    }
+    EXPECT_TRUE(std::is_permutation(actual.begin(), actual.end(),
+                                    expected.begin(), expected.end()));
+    for (size_t i = count; i < sources.size(); ++i) {
+      EXPECT_EQ(nullptr, sources[i]);
+      EXPECT_EQ(nullptr, targets[i]);
+    }
+    // A short output reports/fills only its capacity, without overwriting the
+    // adjacent sentinel. Query ordering is not part of the API contract.
+    sources.fill(handles[0]);
+    targets.fill(handles[0]);
+    count = 1;
+    ASSERT_EQ(hipSuccess,
+              api_.get_edges(graph, sources.data(), targets.data(), &count));
+    EXPECT_EQ(1u, count);
+    EXPECT_NE(expected.end(),
+              std::find(expected.begin(), expected.end(),
+                        std::make_pair(sources[0], targets[0])));
+    EXPECT_EQ(handles[0], sources[1]);
+    EXPECT_EQ(handles[0], targets[1]);
+
+    count = sources.size();
+    ASSERT_EQ(hipSuccess, api_.get_roots(graph, sources.data(), &count));
+    ASSERT_EQ(2u, count);
+    EXPECT_TRUE((sources[0] == handles[0] && sources[1] == handles[1]) ||
+                (sources[0] == handles[1] && sources[1] == handles[0]));
+    for (size_t i = count; i < sources.size(); ++i) {
+      EXPECT_EQ(nullptr, sources[i]);
+    }
+    count = sources.size();
+    ASSERT_EQ(hipSuccess,
+              api_.get_dependencies(handles[2], sources.data(), &count));
+    ASSERT_EQ(2u, count);
+    EXPECT_TRUE((sources[0] == handles[0] && sources[1] == handles[1]) ||
+                (sources[0] == handles[1] && sources[1] == handles[0]));
+    EXPECT_EQ(nullptr, sources[count]);
+    count = sources.size();
+    ASSERT_EQ(hipSuccess,
+              api_.get_dependents(handles[0], sources.data(), &count));
+    ASSERT_EQ(2u, count);
+    EXPECT_TRUE((sources[0] == handles[2] && sources[1] == handles[4]) ||
+                (sources[0] == handles[4] && sources[1] == handles[2]));
+    EXPECT_EQ(nullptr, sources[count]);
+  };
+  check(graph_, nodes);
+  ASSERT_FALSE(HasFatalFailure());
+  std::array<hipGraphNode_t, 5> clones;
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    ASSERT_EQ(hipSuccess, api_.find_clone_node(&clones[i], nodes[i], clone_));
+  }
+  // The second pair is absent: the first must remain untouched on rejection.
+  const hipGraphNode_t invalid_from[] = {nodes[1], nodes[3]};
+  const hipGraphNode_t invalid_to[] = {nodes[2], nodes[4]};
+  EXPECT_EQ(hipErrorInvalidValue,
+            api_.remove_dependencies(graph_, invalid_from, invalid_to, 2));
+  check(graph_, nodes);
+  ASSERT_FALSE(HasFatalFailure());
+  // Remove both embedded and added edges, then delete a node with incoming and
+  // outgoing added edges. Neither operation can change the clone's topology.
+  const hipGraphNode_t removed_from[] = {nodes[0], nodes[1]};
+  const hipGraphNode_t removed_to[] = {nodes[2], nodes[2]};
+  ASSERT_EQ(hipSuccess,
+            api_.remove_dependencies(graph_, removed_from, removed_to, 2));
+  ASSERT_EQ(hipSuccess, api_.add_dependencies(graph_, &nodes[1], &nodes[2], 1));
+  ASSERT_EQ(hipSuccess, api_.destroy_node(nodes[2]));
+  size_t count = 0;
+  ASSERT_EQ(hipSuccess, api_.get_edges(graph_, nullptr, nullptr, &count));
+  EXPECT_EQ(1u, count);
+  ASSERT_EQ(hipSuccess, api_.get_roots(graph_, nullptr, &count));
+  EXPECT_EQ(3u, count);
+  check(clone_, clones);
+}
+
 TEST_F(HipGraphMemoryApiTest,
        AddedCopyDependenciesBracketHostPreparationAndCompletion) {
   ASSERT_EQ(hipSuccess, api_.allocate(&device_, source_.size()));
@@ -1503,10 +1626,33 @@ TEST_F(HipGraphMemoryApiTest,
   const hipGraphNode_t from[] = {producer, download};
   const hipGraphNode_t to[] = {upload, consumer};
   ASSERT_EQ(hipSuccess, api_.add_dependencies(graph_, from, to, 2));
+  hipGraphNode_t root = nullptr;
+  size_t root_count = 1;
+  ASSERT_EQ(hipSuccess, api_.get_roots(graph_, &root, &root_count));
+  EXPECT_EQ(producer, root);
+  size_t edge_count = 0;
+  ASSERT_EQ(hipSuccess, api_.get_edges(graph_, nullptr, nullptr, &edge_count));
+  EXPECT_EQ(3u, edge_count);
   ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
-  Replay();
-  ASSERT_FALSE(HasFatalFailure());
-  EXPECT_EQ(observed_, replacement_);
+  ASSERT_EQ(hipSuccess, api_.graph_clone(&clone_, graph_));
+
+  // Both snapshots keep their edges and copy helpers when source mutation
+  // removes nodes and renumbers the remaining handles.
+  ASSERT_EQ(hipSuccess, api_.destroy_node(producer));
+  ASSERT_EQ(hipSuccess, api_.destroy_node(upload));
+  ASSERT_EQ(hipSuccess, api_.instantiate(&sibling_, clone_, 0));
+  ASSERT_EQ(hipSuccess, api_.graph_destroy(graph_));
+  graph_ = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_destroy(clone_));
+  clone_ = nullptr;
+  for (auto executable : {executable_, sibling_}) {
+    source_.fill(0);
+    destination_.fill(0);
+    observed_.fill(0);
+    Replay(executable);
+    ASSERT_FALSE(HasFatalFailure());
+    EXPECT_EQ(observed_, replacement_);
+  }
 }
 
 TEST_F(HipGraphMemoryApiTest, CapturedCopiesSharePublicEnableAndDeletion) {

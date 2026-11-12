@@ -71,6 +71,11 @@ struct NativeGraph {
   static constexpr auto kNodeType = HRX_GRAPH_NODE_TYPE_INTERNAL_MEMSET;
   static constexpr auto kHostType = HRX_GRAPH_NODE_TYPE_INTERNAL_HOST_CALL;
 
+  static void Link(Edge* edge, Node* from, Node* to, Edge** head) {
+    *edge = {.next = *head, .from = from, .to = to};
+    *head = edge;
+  }
+
   static iree_status_t Analyze(Block* block, Edge* edges,
                                iree_arena_allocator_t* arena,
                                Schedule* out_schedule) {
@@ -82,17 +87,22 @@ struct NativeGraph {
 struct BindingGraph {
   using Node = iree_hal_streaming_graph_node_t;
   using Block = iree_hal_streaming_node_block_t;
-  using Edge = iree_hal_streaming_graph_edge_t;
+  using Edge = iree_hal_streaming_graph_dependency_t;
   using Schedule = hrx_graph_schedule_t;
   static constexpr auto kNodeType = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMSET;
   static constexpr auto kHostType =
       IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL;
 
-  static iree_status_t Analyze(Block* block, Edge* edges,
+  static void Link(Edge* edge, Node* from, Node* to, Edge**) {
+    *edge = {.next = to->additional_dependencies, .from = from};
+    to->additional_dependencies = edge;
+  }
+
+  static iree_status_t Analyze(Block* block, Edge*,
                                iree_arena_allocator_t* arena,
                                Schedule* out_schedule) {
     return iree_hal_streaming_graph_schedule_nodes(
-        block, block->count, nullptr, 0, edges, arena, out_schedule);
+        block, block->count, nullptr, 0, nullptr, arena, out_schedule);
   }
 };
 
@@ -137,8 +147,7 @@ class GraphInput {
         Edge* added = nullptr;
         IREE_CHECK_OK(iree_arena_allocate(&arena_, sizeof(*added),
                                           reinterpret_cast<void**>(&added)));
-        *added = {.next = edges_, .from = from, .to = to};
-        edges_ = added;
+        Graph::Link(added, from, to, &edges_);
       }
     }
   }
@@ -164,7 +173,8 @@ class GraphInput {
   iree_arena_allocator_t arena_;
   // Original creation order accepted by the frontend analyzer.
   Block* block_ = nullptr;
-  // Edges attached after node creation, in the frontend's linked-list format.
+  // Native HRX's graph-wide edges; the binding keeps edges on destination
+  // nodes.
   Edge* edges_ = nullptr;
 };
 

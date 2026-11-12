@@ -21653,7 +21653,6 @@ HIPAPI hipError_t hipGraphAddDependencies(hipGraph_t graph,
 
 // Removes dependencies between nodes in a graph.
 static bool iree_hip_graph_dependency_pair_exists(
-    iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t* from_node,
     iree_hal_streaming_graph_node_t* to_node) {
   for (uint32_t i = 0; i < to_node->dependency_count; ++i) {
@@ -21661,9 +21660,10 @@ static bool iree_hip_graph_dependency_pair_exists(
       return true;
     }
   }
-  for (iree_hal_streaming_graph_edge_t* edge = graph->additional_edges; edge;
-       edge = edge->next) {
-    if (edge->from == from_node && edge->to == to_node) {
+  for (const iree_hal_streaming_graph_dependency_t* edge =
+           to_node->additional_dependencies;
+       edge; edge = edge->next) {
+    if (edge->from == from_node) {
       return true;
     }
   }
@@ -21685,10 +21685,11 @@ static void iree_hip_graph_remove_dependency_pair(
     return;
   }
 
-  iree_hal_streaming_graph_edge_t** next_edge = &graph->additional_edges;
+  iree_hal_streaming_graph_dependency_t** next_edge =
+      &to_node->additional_dependencies;
   while (*next_edge) {
-    iree_hal_streaming_graph_edge_t* edge = *next_edge;
-    if (edge->from == from_node && edge->to == to_node) {
+    iree_hal_streaming_graph_dependency_t* edge = *next_edge;
+    if (edge->from == from_node) {
       *next_edge = edge->next;
       --graph->additional_edge_count;
       return;
@@ -21720,8 +21721,7 @@ HIPAPI hipError_t hipGraphRemoveDependencies(hipGraph_t graph,
         (iree_hal_streaming_graph_node_t*)to[i];
     if (!from_node || !to_node || from_node->graph != stream_graph ||
         to_node->graph != stream_graph ||
-        !iree_hip_graph_dependency_pair_exists(stream_graph, from_node,
-                                               to_node)) {
+        !iree_hip_graph_dependency_pair_exists(from_node, to_node)) {
       HIP_RETURN_ERROR(hipErrorInvalidValue);
     }
   }
@@ -21766,20 +21766,21 @@ HIPAPI hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from,
         }
         ++edge_count;
       }
-    }
-  }
 
-  for (iree_hal_streaming_graph_edge_t* edge = stream_graph->additional_edges;
-       edge; edge = edge->next) {
-    if (iree_hip_graph_edge_is_hidden(edge->from, edge->to)) {
-      continue;
+      for (const iree_hal_streaming_graph_dependency_t* edge =
+               node->additional_dependencies;
+           edge; edge = edge->next) {
+        if (iree_hip_graph_edge_is_hidden(edge->from, node)) {
+          continue;
+        }
+        if (copied_count < capacity) {
+          from[copied_count] = (hipGraphNode_t)edge->from;
+          to[copied_count] = (hipGraphNode_t)node;
+          ++copied_count;
+        }
+        ++edge_count;
+      }
     }
-    if (copied_count < capacity) {
-      from[copied_count] = (hipGraphNode_t)edge->from;
-      to[copied_count] = (hipGraphNode_t)edge->to;
-      ++copied_count;
-    }
-    ++edge_count;
   }
 
   if (!from) {
@@ -21792,6 +21793,31 @@ HIPAPI hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from,
     *numEdges = edge_count;
   }
   HIP_RETURN_ERROR(hipSuccess);
+}
+
+// Copy helpers are the only hidden nodes. Without them, dependency presence
+// alone determines roots; no predecessor handle or flag needs to be read.
+static bool iree_hip_graph_node_is_root(
+    const iree_hal_streaming_graph_node_t* node, bool has_copy_helpers) {
+  if (!has_copy_helpers) {
+    return node->dependency_count == 0 && !node->additional_dependencies;
+  }
+  if (iree_hip_graph_node_is_hidden(node)) {
+    return false;
+  }
+  for (uint32_t i = 0; i < node->dependency_count; ++i) {
+    if (!iree_hip_graph_node_is_hidden(node->dependencies[i])) {
+      return false;
+    }
+  }
+  for (const iree_hal_streaming_graph_dependency_t* dependency =
+           node->additional_dependencies;
+       dependency; dependency = dependency->next) {
+    if (!iree_hip_graph_node_is_hidden(dependency->from)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // Gets root nodes (nodes with no dependencies) in a graph.
@@ -21807,59 +21833,22 @@ HIPAPI hipError_t hipGraphGetRootNodes(hipGraph_t graph,
 
   iree_hal_streaming_graph_t* stream_graph = (iree_hal_streaming_graph_t*)graph;
 
-  // Iterate through all nodes to find those with no incoming dependencies.
-  // A node is a root if:
-  // 1. It has no embedded dependencies (node->dependency_count == 0)
-  // 2. It has no incoming additional edges
-
-  // Build a set of nodes that have incoming edges from additional_edges.
-  // For simplicity, we use a linear search approach for small graphs.
+  const bool has_copy_helpers = stream_graph->copy_helper_count != 0;
   const size_t capacity = pRootNodes ? *pNumRootNodes : 0;
   size_t root_count = 0;
   size_t copied_count = 0;
-
-  iree_hal_streaming_node_block_t* block = stream_graph->node_blocks;
-  while (block) {
+  for (iree_hal_streaming_node_block_t* block = stream_graph->node_blocks;
+       block; block = block->next) {
     for (size_t i = 0; i < block->count; ++i) {
       iree_hal_streaming_graph_node_t* node = block->nodes[i];
-      if (iree_hip_graph_node_is_hidden(node)) {
+      if (!iree_hip_graph_node_is_root(node, has_copy_helpers)) {
         continue;
       }
-
-      // Check if node has any embedded dependencies.
-      bool has_embedded_dependency = false;
-      for (uint32_t j = 0; j < node->dependency_count; ++j) {
-        if (!iree_hip_graph_edge_is_hidden(node->dependencies[j], node)) {
-          has_embedded_dependency = true;
-          break;
-        }
+      if (copied_count < capacity) {
+        pRootNodes[copied_count++] = (hipGraphNode_t)node;
       }
-      if (has_embedded_dependency) {
-        continue;
-      }
-
-      // Check if node has any incoming additional edges.
-      bool has_incoming_edge = false;
-      iree_hal_streaming_graph_edge_t* edge = stream_graph->additional_edges;
-      while (edge) {
-        if (edge->to == node &&
-            !iree_hip_graph_edge_is_hidden(edge->from, edge->to)) {
-          has_incoming_edge = true;
-          break;
-        }
-        edge = edge->next;
-      }
-
-      if (!has_incoming_edge) {
-        // This is a root node.
-        if (copied_count < capacity) {
-          pRootNodes[copied_count] = (hipGraphNode_t)node;
-          ++copied_count;
-        }
-        ++root_count;
-      }
+      ++root_count;
     }
-    block = block->next;
   }
 
   // If pRootNodes is NULL, just return the count.
@@ -21907,12 +21896,10 @@ HIPAPI hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node,
     }
     ++dependency_count;
   }
-  for (iree_hal_streaming_graph_edge_t* edge = graph->additional_edges; edge;
-       edge = edge->next) {
-    if (edge->to != stream_node) {
-      continue;
-    }
-    if (iree_hip_graph_edge_is_hidden(edge->from, edge->to)) {
+  for (const iree_hal_streaming_graph_dependency_t* edge =
+           stream_node->additional_dependencies;
+       edge; edge = edge->next) {
+    if (iree_hip_graph_edge_is_hidden(edge->from, stream_node)) {
       continue;
     }
     if (copied_count < capacity) {
@@ -21973,21 +21960,23 @@ HIPAPI hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node,
         ++dependent_count;
         break;
       }
+
+      for (const iree_hal_streaming_graph_dependency_t* edge =
+               candidate->additional_dependencies;
+           edge; edge = edge->next) {
+        if (edge->from != stream_node) {
+          continue;
+        }
+        if (iree_hip_graph_edge_is_hidden(edge->from, candidate)) {
+          continue;
+        }
+        if (copied_count < capacity) {
+          pDependentNodes[copied_count] = (hipGraphNode_t)candidate;
+          ++copied_count;
+        }
+        ++dependent_count;
+      }
     }
-  }
-  for (iree_hal_streaming_graph_edge_t* edge = graph->additional_edges; edge;
-       edge = edge->next) {
-    if (edge->from != stream_node) {
-      continue;
-    }
-    if (iree_hip_graph_edge_is_hidden(edge->from, edge->to)) {
-      continue;
-    }
-    if (copied_count < capacity) {
-      pDependentNodes[copied_count] = (hipGraphNode_t)edge->to;
-      ++copied_count;
-    }
-    ++dependent_count;
   }
 
   if (!pDependentNodes) {
@@ -22238,22 +22227,23 @@ static int iree_hip_graph_debug_write_dot_graph(
           return -1;
         }
       }
-    }
-  }
 
-  for (iree_hal_streaming_graph_edge_t* edge = graph->additional_edges; edge;
-       edge = edge->next) {
-    if (iree_hip_graph_edge_is_hidden(edge->from, edge->to)) {
-      continue;
-    }
-    if (fprintf(file,
-                "    \"graph_%llu_node_%llu\" -> "
-                "\"graph_%llu_node_%llu\";\n",
-                (unsigned long long)edge->from->graph->debug_id,
-                (unsigned long long)edge->from->debug_id,
-                (unsigned long long)edge->to->graph->debug_id,
-                (unsigned long long)edge->to->debug_id) < 0) {
-      return -1;
+      for (const iree_hal_streaming_graph_dependency_t* edge =
+               node->additional_dependencies;
+           edge; edge = edge->next) {
+        if (iree_hip_graph_edge_is_hidden(edge->from, node)) {
+          continue;
+        }
+        if (fprintf(file,
+                    "    \"graph_%llu_node_%llu\" -> "
+                    "\"graph_%llu_node_%llu\";\n",
+                    (unsigned long long)edge->from->graph->debug_id,
+                    (unsigned long long)edge->from->debug_id,
+                    (unsigned long long)node->graph->debug_id,
+                    (unsigned long long)node->debug_id) < 0) {
+          return -1;
+        }
+      }
     }
   }
 

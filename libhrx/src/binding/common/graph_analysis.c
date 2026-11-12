@@ -43,7 +43,7 @@ static iree_status_t iree_hal_streaming_graph_extend_copy_dependency(
 iree_status_t iree_hal_streaming_graph_schedule_copy_dependencies(
     iree_hal_streaming_graph_t* graph, iree_arena_allocator_t* arena,
     iree_hal_streaming_graph_edge_t** out_edges) {
-  *out_edges = graph->additional_edges;
+  *out_edges = NULL;
   if (graph->copy_helper_count == 0) {
     return iree_ok_status();
   }
@@ -58,12 +58,14 @@ iree_status_t iree_hal_streaming_graph_schedule_copy_dependencies(
         status = iree_hal_streaming_graph_extend_copy_dependency(
             node->dependencies[j], node, arena, out_edges);
       }
+      for (const iree_hal_streaming_graph_dependency_t* dependency =
+               node->additional_dependencies;
+           dependency && iree_status_is_ok(status);
+           dependency = dependency->next) {
+        status = iree_hal_streaming_graph_extend_copy_dependency(
+            dependency->from, node, arena, out_edges);
+      }
     }
-  }
-  for (iree_hal_streaming_graph_edge_t* edge = graph->additional_edges;
-       edge && iree_status_is_ok(status); edge = edge->next) {
-    status = iree_hal_streaming_graph_extend_copy_dependency(
-        edge->from, edge->to, arena, out_edges);
   }
   return status;
 }
@@ -71,8 +73,8 @@ iree_status_t iree_hal_streaming_graph_schedule_copy_dependencies(
 iree_status_t iree_hal_streaming_graph_schedule_nodes(
     iree_hal_streaming_node_block_t* node_blocks, iree_host_size_t node_count,
     const uint8_t* disabled_nodes, iree_host_size_t disabled_node_count,
-    iree_hal_streaming_graph_edge_t* additional_edges,
-    iree_arena_allocator_t* arena, hrx_graph_schedule_t* out_schedule) {
+    iree_hal_streaming_graph_edge_t* extra_edges, iree_arena_allocator_t* arena,
+    hrx_graph_schedule_t* out_schedule) {
   hrx_graph_analysis_t analysis;
   IREE_RETURN_IF_ERROR(
       hrx_graph_analysis_initialize(node_count, arena, &analysis));
@@ -85,6 +87,12 @@ iree_status_t iree_hal_streaming_graph_schedule_nodes(
       analysis.sources[index] = node;
       analysis.offsets[index + 1] = node->dependency_count;
       edge_count += node->dependency_count;
+      for (const iree_hal_streaming_graph_dependency_t* dependency =
+               node->additional_dependencies;
+           dependency; dependency = dependency->next) {
+        ++analysis.offsets[index + 1];
+        ++edge_count;
+      }
       const iree_hal_streaming_graph_node_t* operation =
           node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL &&
                   node->attrs.host.copy_node
@@ -106,7 +114,7 @@ iree_status_t iree_hal_streaming_graph_schedule_nodes(
       }
     }
   }
-  for (const iree_hal_streaming_graph_edge_t* edge = additional_edges; edge;
+  for (const iree_hal_streaming_graph_edge_t* edge = extra_edges; edge;
        edge = edge->next) {
     ++analysis.offsets[edge->to->node_index + 1];
     ++edge_count;
@@ -125,8 +133,14 @@ iree_status_t iree_hal_streaming_graph_schedule_nodes(
           node->dependencies[j]->node_index;
       is_topologically_ordered &= node->dependencies[j]->node_index < i;
     }
+    for (const iree_hal_streaming_graph_dependency_t* dependency =
+             node->additional_dependencies;
+         dependency; dependency = dependency->next) {
+      analysis.dependencies[analysis.order[i]++] = dependency->from->node_index;
+      is_topologically_ordered &= dependency->from->node_index < i;
+    }
   }
-  for (const iree_hal_streaming_graph_edge_t* edge = additional_edges; edge;
+  for (const iree_hal_streaming_graph_edge_t* edge = extra_edges; edge;
        edge = edge->next) {
     analysis.dependencies[analysis.order[edge->to->node_index]++] =
         edge->from->node_index;
