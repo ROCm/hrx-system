@@ -29,12 +29,15 @@ enum hrx_graph_analysis_node_flags_e {
 // linearize their source nodes, classify them, and count incoming edges in
 // offsets[node + 1]. allocate_dependencies converts those counts into ranges
 // and initializes order as write cursors. Frontends then append each source
-// ordinal to dependencies[order[target]++]. analyze consumes the sealed ranges.
+// ordinal to dependencies[order[target]++], retaining whether every source
+// precedes its target. analyze consumes the sealed ranges and that order proof.
 // Node identities and dependency counts fit uint32_t; no runtime graph state
 // or reference ownership is created here.
 typedef struct hrx_graph_analysis_t {
   // Number of dense source-node ordinals.
   uint32_t node_count;
+  // Every dependency source precedes its target, established while normalizing.
+  bool is_topologically_ordered;
   // Borrowed frontend payloads, never dereferenced by analysis.
   void** sources;
   // Incoming dependency offsets with a final sentinel (node_count + 1).

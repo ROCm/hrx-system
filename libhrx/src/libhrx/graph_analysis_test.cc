@@ -44,9 +44,12 @@ class GraphAnalysisTest : public ::testing::Test {
     }
     IREE_RETURN_IF_ERROR(
         hrx_graph_analysis_allocate_dependencies(&analysis, &arena_));
+    bool is_topologically_ordered = true;
     for (auto [from, to] : edges) {
       analysis.dependencies[analysis.order[to]++] = from;
+      is_topologically_ordered &= from < to;
     }
+    analysis.is_topologically_ordered = is_topologically_ordered;
     return hrx_graph_analyze(&analysis, &arena_, &schedule_);
   }
 

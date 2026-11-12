@@ -641,6 +641,7 @@ iree_status_t hrx_graph_schedule_nodes(hrx_graph_node_block_t* node_blocks,
   }
   IREE_RETURN_IF_ERROR(
       hrx_graph_analysis_allocate_dependencies(&analysis, arena));
+  bool is_topologically_ordered = true;
   for (uint32_t i = 0; iree_status_is_ok(status) && i < analysis.node_count;
        ++i) {
     const hrx_graph_node_s* node = analysis.sources[i];
@@ -654,6 +655,7 @@ iree_status_t hrx_graph_schedule_nodes(hrx_graph_node_block_t* node_blocks,
                              "dependency node does not belong to the graph");
       } else {
         analysis.dependencies[analysis.order[i]++] = predecessor->node_index;
+        is_topologically_ordered &= predecessor->node_index < i;
       }
     }
   }
@@ -661,7 +663,9 @@ iree_status_t hrx_graph_schedule_nodes(hrx_graph_node_block_t* node_blocks,
        iree_status_is_ok(status) && edge; edge = edge->next) {
     analysis.dependencies[analysis.order[edge->to->node_index]++] =
         edge->from->node_index;
+    is_topologically_ordered &= edge->from->node_index < edge->to->node_index;
   }
+  analysis.is_topologically_ordered = is_topologically_ordered;
   if (iree_status_is_ok(status)) {
     status = hrx_graph_analyze(&analysis, arena, out_schedule);
   }

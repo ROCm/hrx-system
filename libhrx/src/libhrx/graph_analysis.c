@@ -80,15 +80,10 @@ static iree_status_t hrx_graph_topological_sort(hrx_graph_analysis_t* analysis,
                                                 iree_arena_allocator_t* arena,
                                                 const uint32_t** out_ranks) {
   const uint32_t count = analysis->node_count;
-  bool sorted = true;
-  for (uint32_t node = 0; node < count; ++node) {
-    analysis->order[node] = node;
-    for (uint32_t e = analysis->offsets[node];
-         sorted && e < analysis->offsets[node + 1]; ++e) {
-      sorted = analysis->dependencies[e] < node;
+  if (analysis->is_topologically_ordered) {
+    for (uint32_t node = 0; node < count; ++node) {
+      analysis->order[node] = node;
     }
-  }
-  if (sorted) {
     *out_ranks = analysis->order;
     return iree_ok_status();
   }

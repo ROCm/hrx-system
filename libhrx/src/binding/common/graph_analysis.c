@@ -117,17 +117,21 @@ iree_status_t iree_hal_streaming_graph_schedule_nodes(
   }
   IREE_RETURN_IF_ERROR(
       hrx_graph_analysis_allocate_dependencies(&analysis, arena));
+  bool is_topologically_ordered = true;
   for (uint32_t i = 0; i < analysis.node_count; ++i) {
     const iree_hal_streaming_graph_node_t* node = analysis.sources[i];
     for (uint32_t j = 0; j < node->dependency_count; ++j) {
       analysis.dependencies[analysis.order[i]++] =
           node->dependencies[j]->node_index;
+      is_topologically_ordered &= node->dependencies[j]->node_index < i;
     }
   }
   for (const iree_hal_streaming_graph_edge_t* edge = additional_edges; edge;
        edge = edge->next) {
     analysis.dependencies[analysis.order[edge->to->node_index]++] =
         edge->from->node_index;
+    is_topologically_ordered &= edge->from->node_index < edge->to->node_index;
   }
+  analysis.is_topologically_ordered = is_topologically_ordered;
   return hrx_graph_analyze(&analysis, arena, out_schedule);
 }
