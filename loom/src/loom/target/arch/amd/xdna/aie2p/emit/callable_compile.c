@@ -6,12 +6,9 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/emit/callable_compile.h"
 
-#include <stdlib.h>
-
 #include "loom/ir/module.h"
 #include "loom/target/arch/amd/xdna/aie2p/call_abi.h"
-#include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
-#include "loom/target/registers.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/call_clobbers.h"
 
 typedef struct loom_aie2p_callable_builder_t {
   // ABI carriers for arguments followed by results.
@@ -20,11 +17,7 @@ typedef struct loom_aie2p_callable_builder_t {
   uint16_t argument_count;
   // Number of result carriers following the arguments.
   uint16_t result_count;
-  // Physical registers overwritten by the helper and its ABI transport.
-  loom_low_call_clobber_t* clobbers;
-  // Number of distinct physical-register clobber records.
-  iree_host_size_t clobber_count;
-  // Immutable call contract borrowing the carriers and clobbers above.
+  // Immutable call contract borrowing arena-owned carriers and clobbers.
   loom_low_call_contract_t call_contract;
   // Native object paired with this exact register contract.
   loom_aie2p_leaf_contribution_t contribution;
@@ -58,130 +51,10 @@ static iree_status_t loom_aie2p_callable_prepare_abi(
   callable->call_contract = (loom_low_call_contract_t){
       .arguments = callable->locations,
       .argument_count = callable->argument_count,
-      .results = callable->locations + callable->argument_count,
+      .results = callable->result_count != 0
+                     ? callable->locations + callable->argument_count
+                     : NULL,
       .result_count = callable->result_count,
-  };
-  return iree_ok_status();
-}
-
-static iree_host_size_t loom_aie2p_callable_clobber_count(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_aie2p_leaf_realization_t* realization) {
-  iree_host_size_t count = 0;
-  for (uint16_t class_id = 0; class_id < descriptor_set->reg_class_count;
-       ++class_id) {
-    const loom_low_reg_class_t* reg_class =
-        &descriptor_set->reg_classes[class_id];
-    if (!loom_low_reg_class_uses_explicit_physical_registers(reg_class)) {
-      continue;
-    }
-    for (uint16_t i = 0; i < reg_class->allocatable_count; ++i) {
-      const uint16_t physical_register =
-          loom_low_descriptor_set_physical_register_candidate(descriptor_set,
-                                                              class_id, i);
-      count +=
-          loom_aie2p_leaf_may_write_register(realization, physical_register);
-    }
-  }
-  return count;
-}
-
-static iree_host_size_t loom_aie2p_callable_transport_clobber_count(
-    const loom_aie2p_callable_builder_t* callable) {
-  iree_host_size_t count = 0;
-  const iree_host_size_t location_count =
-      (iree_host_size_t)callable->argument_count + callable->result_count;
-  for (iree_host_size_t i = 0; i < location_count; ++i) {
-    count += callable->locations[i].location_kind ==
-             LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  }
-  return count;
-}
-
-static int loom_aie2p_callable_compare_clobbers(const void* lhs_ptr,
-                                                const void* rhs_ptr) {
-  const loom_low_call_clobber_t* lhs = lhs_ptr;
-  const loom_low_call_clobber_t* rhs = rhs_ptr;
-  if (lhs->location != rhs->location) {
-    return lhs->location < rhs->location ? -1 : 1;
-  }
-  if (lhs->register_class != rhs->register_class) {
-    return lhs->register_class < rhs->register_class ? -1 : 1;
-  }
-  return 0;
-}
-
-static iree_status_t loom_aie2p_callable_prepare_clobbers(
-    const loom_low_descriptor_set_t* descriptor_set,
-    iree_arena_allocator_t* arena, loom_aie2p_callable_builder_t* callable) {
-  const iree_host_size_t clobber_capacity =
-      loom_aie2p_callable_clobber_count(descriptor_set,
-                                        &callable->contribution.realization) +
-      loom_aie2p_callable_transport_clobber_count(callable);
-  if (clobber_capacity != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, clobber_capacity, sizeof(*callable->clobbers),
-        (void**)&callable->clobbers));
-  }
-  iree_host_size_t clobber_index = 0;
-  for (uint16_t class_id = 0; class_id < descriptor_set->reg_class_count;
-       ++class_id) {
-    const loom_low_reg_class_t* reg_class =
-        &descriptor_set->reg_classes[class_id];
-    if (!loom_low_reg_class_uses_explicit_physical_registers(reg_class)) {
-      continue;
-    }
-    for (uint16_t i = 0; i < reg_class->allocatable_count; ++i) {
-      const uint16_t physical_register =
-          loom_low_descriptor_set_physical_register_candidate(descriptor_set,
-                                                              class_id, i);
-      if (!loom_aie2p_leaf_may_write_register(
-              &callable->contribution.realization, physical_register)) {
-        continue;
-      }
-      callable->clobbers[clobber_index++] = (loom_low_call_clobber_t){
-          .register_class = class_id,
-          .location = physical_register,
-          .count = 1,
-      };
-    }
-  }
-  // Argument transport overwrites ABI carriers before the helper starts, and
-  // result transport overwrites them before caller values resume. These writes
-  // belong to the call boundary rather than the helper body.
-  const iree_host_size_t location_count =
-      (iree_host_size_t)callable->argument_count + callable->result_count;
-  for (iree_host_size_t i = 0; i < location_count; ++i) {
-    const loom_low_allocation_abi_location_t* location =
-        &callable->locations[i];
-    if (location->location_kind !=
-        LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
-      continue;
-    }
-    callable->clobbers[clobber_index++] = (loom_low_call_clobber_t){
-        .register_class = location->descriptor_reg_class_id,
-        .location = location->location_base,
-        .count = 1,
-    };
-  }
-  IREE_ASSERT_EQ(clobber_index, clobber_capacity);
-  if (clobber_index != 0) {
-    qsort(callable->clobbers, clobber_index, sizeof(*callable->clobbers),
-          loom_aie2p_callable_compare_clobbers);
-  }
-  callable->clobber_count = 0;
-  for (iree_host_size_t i = 0; i < clobber_index; ++i) {
-    if (callable->clobber_count != 0 &&
-        loom_aie2p_callable_compare_clobbers(
-            &callable->clobbers[callable->clobber_count - 1],
-            &callable->clobbers[i]) == 0) {
-      continue;
-    }
-    callable->clobbers[callable->clobber_count++] = callable->clobbers[i];
-  }
-  callable->call_contract.clobbers = (loom_low_call_clobber_list_t){
-      .values = callable->clobbers,
-      .count = callable->clobber_count,
   };
   return iree_ok_status();
 }
@@ -189,8 +62,8 @@ static iree_status_t loom_aie2p_callable_prepare_clobbers(
 iree_status_t loom_aie2p_callable_compile(
     loom_module_t* module, loom_op_t* function_op,
     const loom_aie2p_leaf_compile_options_t* options,
-    iree_arena_allocator_t* arena, bool* out_compiled,
-    loom_aie2p_callable_t* out_callable) {
+    loom_symbol_ref_array_t direct_callees, iree_arena_allocator_t* arena,
+    bool* out_compiled, loom_aie2p_callable_t* out_callable) {
   *out_compiled = false;
   *out_callable = (loom_aie2p_callable_t){0};
   loom_aie2p_callable_builder_t builder = {0};
@@ -211,10 +84,19 @@ iree_status_t loom_aie2p_callable_compile(
   if (!compiled) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_aie2p_callable_prepare_clobbers(
-      loom_aie2p_core_descriptor_set(), arena, &builder));
+  const loom_aie2p_physical_register_id_t restored_register =
+      options->return_address.kind == LOOM_AIE2P_RETURN_ADDRESS_FRAME
+          ? options->return_address.shadow_register
+          : LOOM_AIE2P_PHYSICAL_REGISTER_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_aie2p_call_clobbers_build(
+      builder.contribution.realization.register_writes, restored_register,
+      &builder.call_contract, direct_callees, options->call_contracts, arena,
+      &builder.call_contract.clobbers));
   *out_callable = (loom_aie2p_callable_t){
       .call_contract = builder.call_contract,
+      .stack_byte_length =
+          builder.contribution.realization.stack_frame_byte_length +
+          options->callee_stack_byte_length,
       .contribution = builder.contribution,
   };
   *out_compiled = true;

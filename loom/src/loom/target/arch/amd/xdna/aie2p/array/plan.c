@@ -435,7 +435,7 @@ static iree_status_t loom_aie2p_array_extract_worker(
     return iree_ok_status();
   }
   bool helpers_admitted = false;
-  IREE_RETURN_IF_ERROR(loom_aie2p_program_source_admit_direct_helpers(
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_source_admit_helpers(
       builder->program_sources, source, &helpers_admitted));
   if (!helpers_admitted) {
     builder->valid = false;

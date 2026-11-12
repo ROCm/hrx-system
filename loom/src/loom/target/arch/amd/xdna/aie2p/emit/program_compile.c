@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "iree/base/checked_math.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
@@ -80,18 +81,6 @@ iree_status_t loom_aie2p_program_compiler_allocate(
   return iree_ok_status();
 }
 
-static iree_status_t loom_aie2p_program_call_contract_validate(
-    void* user_data, loom_symbol_ref_t callee) {
-  const loom_aie2p_program_compiler_t* context = user_data;
-  if (callee.module_id == 0 &&
-      callee.symbol_id < context->module->symbols.count &&
-      context->helpers_by_symbol[callee.symbol_id] != NULL) {
-    return iree_ok_status();
-  }
-  return iree_make_status(IREE_STATUS_NOT_FOUND,
-                          "AIE2P direct call has no compiled local helper");
-}
-
 static const loom_low_call_contract_t* loom_aie2p_program_call_contract_query(
     void* user_data, loom_symbol_ref_t callee) {
   const loom_aie2p_program_compiler_t* context = user_data;
@@ -105,37 +94,75 @@ static const loom_low_call_contract_t* loom_aie2p_program_call_contract_query(
 static iree_status_t loom_aie2p_program_compose_report(
     const loom_aie2p_program_compiler_t* compiler,
     const loom_op_t* entry_function_op,
-    loom_aie2p_program_helper_list_t direct_helpers,
+    loom_aie2p_program_helper_list_t helpers,
     const loom_aie2p_program_object_t* program,
+    iree_arena_allocator_t* scratch_arena,
     loom_target_compile_report_t* report) {
   const loom_symbol_ref_t entry_ref =
       loom_low_func_def_callee(entry_function_op);
+  loom_target_compile_report_function_merge_options_t* invocations = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(scratch_arena, compiler->module->symbols.count,
+                                sizeof(*invocations), (void**)&invocations));
+  // Initialize incoming counts from the root. The retained callee-first order
+  // lets the reverse pass propagate each completed caller total along its
+  // indexed direct edges, including diamonds and repeated call sites.
+  for (iree_host_size_t i = 0; i < helpers.count; ++i) {
+    const loom_symbol_ref_t helper = helpers.values[i].function;
+    const loom_target_compile_report_call_edge_t* edge =
+        loom_target_compile_report_find_call_edge(report, entry_ref, helper);
+    invocations[helper.symbol_id] =
+        (loom_target_compile_report_function_merge_options_t){
+            .invocation_count = edge != NULL ? edge->dynamic_call_count : 0,
+            .has_exact_invocation_count =
+                edge == NULL ||
+                iree_all_bits_set(
+                    edge->flags,
+                    LOOM_TARGET_COMPILE_REPORT_CALL_EDGE_DYNAMIC_COUNT),
+        };
+  }
   uint64_t emitted_instruction_count = report->emitted_instruction_count;
   uint64_t emitted_code_byte_count = report->emitted_code_byte_count;
   loom_target_compile_report_emission_breakdown_t emission_breakdown =
       report->emission_breakdown;
   loom_target_compile_report_static_instruction_mix_t static_mix =
       report->static_instruction_mix;
-  for (iree_host_size_t i = 0; i < direct_helpers.count; ++i) {
-    const loom_symbol_ref_t helper_ref = direct_helpers.values[i].function;
+  for (iree_host_size_t remaining = helpers.count; remaining != 0;
+       --remaining) {
+    const iree_host_size_t i = remaining - 1;
+    const loom_symbol_ref_t helper_ref = helpers.values[i].function;
     const loom_aie2p_callable_t* helper =
         compiler->helpers_by_symbol[helper_ref.symbol_id];
     IREE_ASSERT(helper != NULL);
     const loom_target_compile_report_t* helper_report =
         compiler->helper_reports_by_symbol[helper_ref.symbol_id];
     IREE_ASSERT(helper_report != NULL);
-    const loom_target_compile_report_call_edge_t* call_edge =
-        loom_target_compile_report_find_call_edge(report, entry_ref,
-                                                  helper_ref);
-    IREE_ASSERT(call_edge != NULL);
-    const loom_target_compile_report_function_merge_options_t merge_options = {
-        .invocation_count = call_edge->dynamic_call_count,
-        .has_exact_invocation_count = iree_all_bits_set(
-            call_edge->flags,
-            LOOM_TARGET_COMPILE_REPORT_CALL_EDGE_DYNAMIC_COUNT),
-    };
+    const loom_target_compile_report_function_merge_options_t invocation =
+        invocations[helper_ref.symbol_id];
+    const loom_symbol_ref_array_t callees = helpers.values[i].direct_callees;
+    for (iree_host_size_t j = 0; j < callees.count; ++j) {
+      const loom_target_compile_report_call_edge_t* edge =
+          loom_target_compile_report_find_call_edge(helper_report, helper_ref,
+                                                    callees.values[j]);
+      IREE_ASSERT(edge != NULL);
+      loom_target_compile_report_function_merge_options_t* callee =
+          &invocations[callees.values[j].symbol_id];
+      uint64_t count = 0;
+      const bool edge_exact = iree_all_bits_set(
+          edge->flags, LOOM_TARGET_COMPILE_REPORT_CALL_EDGE_DYNAMIC_COUNT);
+      const bool known_zero = (invocation.has_exact_invocation_count &&
+                               invocation.invocation_count == 0) ||
+                              (edge_exact && edge->dynamic_call_count == 0);
+      callee->has_exact_invocation_count &=
+          known_zero ||
+          (invocation.has_exact_invocation_count && edge_exact &&
+           iree_checked_mul_u64(invocation.invocation_count,
+                                edge->dynamic_call_count, &count) &&
+           iree_checked_add_u64(callee->invocation_count, count,
+                                &callee->invocation_count));
+    }
     IREE_RETURN_IF_ERROR(loom_target_compile_report_merge_function_evidence(
-        report, helper_report, &merge_options));
+        report, helper_report, &invocation));
     if (program->canonical_indices[i + 1] != i + 1) {
       continue;
     }
@@ -203,7 +230,7 @@ static iree_status_t loom_aie2p_program_bind_data(
 
 static iree_status_t loom_aie2p_program_compile_impl(
     loom_aie2p_program_compiler_t* compiler, loom_op_t* entry_function_op,
-    bool may_return, loom_aie2p_program_helper_list_t direct_helpers,
+    bool may_return, loom_aie2p_program_helper_list_t helpers,
     const loom_low_read_only_data_set_t* program_data,
     const loom_aie2p_leaf_compile_options_t* entry_options,
     iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
@@ -257,11 +284,11 @@ static iree_status_t loom_aie2p_program_compile_impl(
     }
   }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      scratch_arena, direct_helpers.count + 1, sizeof(*contributions),
+      scratch_arena, helpers.count + 1, sizeof(*contributions),
       (void**)&contributions));
 
-  for (iree_host_size_t i = 0; i < direct_helpers.count; ++i) {
-    const loom_aie2p_program_helper_t* helper_input = &direct_helpers.values[i];
+  for (iree_host_size_t i = 0; i < helpers.count; ++i) {
+    const loom_aie2p_program_helper_t* helper_input = &helpers.values[i];
     const loom_symbol_ref_t helper_ref = helper_input->function;
     IREE_ASSERT_EQ(helper_ref.module_id, 0u);
     IREE_ASSERT_LT(helper_ref.symbol_id, module->symbols.count);
@@ -289,11 +316,33 @@ static iree_status_t loom_aie2p_program_compile_impl(
       helper_report_ptr->requested_detail_flags =
           compiler->requested_detail_flags;
     }
+    uint64_t callee_stack_byte_length = 0;
+    for (iree_host_size_t j = 0; j < helper_input->direct_callees.count; ++j) {
+      const loom_aie2p_callable_t* callee =
+          compiler->helpers_by_symbol[helper_input->direct_callees.values[j]
+                                          .symbol_id];
+      callee_stack_byte_length =
+          iree_max(callee_stack_byte_length, callee->stack_byte_length);
+    }
     const loom_aie2p_leaf_compile_options_t helper_options = {
         .function_target_facts = helper_input->function_target_facts,
         .memory_accesses = helper_input->memory_accesses,
         .loop_execution = helper_input->loop_execution,
         .descriptor_registry = entry_options->descriptor_registry,
+        .call_contracts =
+            {
+                .query = loom_aie2p_program_call_contract_query,
+                .user_data = compiler,
+            },
+        .callee_stack_byte_length = callee_stack_byte_length,
+        .return_address =
+            {
+                .kind = helper_input->may_return &&
+                                helper_input->direct_callees.count != 0
+                            ? LOOM_AIE2P_RETURN_ADDRESS_FRAME
+                            : LOOM_AIE2P_RETURN_ADDRESS_NONE,
+                .shadow_register = link_shadow_register,
+            },
         .allocation_reserved_ranges = helper_reservations,
         .allocation_reserved_range_count =
             LOOM_AIE2P_PROGRAM_HELPER_RESERVATION_COUNT,
@@ -302,8 +351,8 @@ static iree_status_t loom_aie2p_program_compile_impl(
     };
     bool helper_compiled = false;
     iree_status_t status = loom_aie2p_callable_compile(
-        module, symbol->defining_op, &helper_options, arena, &helper_compiled,
-        helper);
+        module, symbol->defining_op, &helper_options,
+        helper_input->direct_callees, arena, &helper_compiled, helper);
     if (helper_report_ptr != NULL) {
       if (!helper_compiled) {
         status = iree_status_join(
@@ -324,7 +373,6 @@ static iree_status_t loom_aie2p_program_compile_impl(
 
   loom_aie2p_leaf_compile_options_t resolved_entry_options = *entry_options;
   resolved_entry_options.call_contracts = (loom_low_call_contract_provider_t){
-      .validate = loom_aie2p_program_call_contract_validate,
       .query = loom_aie2p_program_call_contract_query,
       .user_data = compiler,
   };
@@ -345,10 +393,11 @@ static iree_status_t loom_aie2p_program_compile_impl(
     resolved_entry_options.allocation_reserved_range_count =
         entry_reservation_count;
   }
-  for (iree_host_size_t i = 1; i <= direct_helpers.count; ++i) {
-    resolved_entry_options.callee_stack_byte_length =
-        iree_max(resolved_entry_options.callee_stack_byte_length,
-                 contributions[i].realization.stack_frame_byte_length);
+  for (iree_host_size_t i = 1; i <= helpers.count; ++i) {
+    resolved_entry_options.callee_stack_byte_length = iree_max(
+        resolved_entry_options.callee_stack_byte_length,
+        compiler->helpers_by_symbol[helpers.values[i - 1].function.symbol_id]
+            ->stack_byte_length);
   }
   resolved_entry_options.return_address = (loom_aie2p_return_address_t){
       .kind = may_return ? LOOM_AIE2P_RETURN_ADDRESS_REGISTER
@@ -367,11 +416,11 @@ static iree_status_t loom_aie2p_program_compile_impl(
       loom_aie2p_program_bind_data(module, program_data, scratch_arena, &data));
   loom_aie2p_program_object_t program = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_program_object_merge(
-      contributions, direct_helpers.count + 1, data, program_data->count, arena,
+      contributions, helpers.count + 1, data, program_data->count, arena,
       scratch_arena, &program));
   if (entry_options->compile_report != NULL) {
     IREE_RETURN_IF_ERROR(loom_aie2p_program_compose_report(
-        compiler, entry_function_op, direct_helpers, &program,
+        compiler, entry_function_op, helpers, &program, scratch_arena,
         entry_options->compile_report));
   }
   bool capacity_admitted = false;
@@ -389,7 +438,7 @@ static iree_status_t loom_aie2p_program_compile_impl(
 
 iree_status_t loom_aie2p_program_compile(
     loom_aie2p_program_compiler_t* compiler, loom_op_t* entry_function_op,
-    bool may_return, loom_aie2p_program_helper_list_t direct_helpers,
+    bool may_return, loom_aie2p_program_helper_list_t helpers,
     const loom_low_read_only_data_set_t* program_data,
     const loom_aie2p_leaf_compile_options_t* entry_options, bool* out_compiled,
     loom_aie2p_leaf_contribution_t* out_contribution) {
@@ -417,7 +466,7 @@ iree_status_t loom_aie2p_program_compile(
       .fn = loom_aie2p_program_emit_diagnostic,
       .user_data = &diagnostics,
   };
-  if (direct_helpers.count == 0) {
+  if (helpers.count == 0) {
     return loom_aie2p_leaf_compile(compiler->module, entry_function_op,
                                    &options, arena, out_compiled,
                                    out_contribution);
@@ -425,8 +474,8 @@ iree_status_t loom_aie2p_program_compile(
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(arena->block_pool, &scratch_arena);
   const iree_status_t status = loom_aie2p_program_compile_impl(
-      compiler, entry_function_op, may_return, direct_helpers, program_data,
-      &options, arena, &scratch_arena, out_compiled, out_contribution);
+      compiler, entry_function_op, may_return, helpers, program_data, &options,
+      arena, &scratch_arena, out_compiled, out_contribution);
   iree_arena_deinitialize(&scratch_arena);
   return status;
 }

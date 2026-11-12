@@ -18,13 +18,16 @@ extern "C" {
 typedef struct loom_aie2p_callable_t {
   // Arena-owned argument/result carriers and exact physical-register clobbers.
   loom_low_call_contract_t call_contract;
+  // Maximum stack bytes live during this function, including nested callees.
+  uint64_t stack_byte_length;
   // Detached code, relocations, and storage facts for that register contract.
   loom_aie2p_leaf_contribution_t contribution;
 } loom_aie2p_callable_t;
 
 // Compiles one admitted module-internal helper into a detached native result.
 // Source admission has established its supported scalar/pointer signature and
-// absence of child calls, resource imports, and authored mutable storage.
+// absence of resource imports and authored mutable storage. The retained
+// direct callee contracts are complete before this function is compiled.
 // |options| supplies target/source facts, ABI register reservations, and
 // optional reporting. This boundary supplies argument/result locations and
 // caller-owned stack semantics; allocation repair may mutate |module| during
@@ -39,8 +42,8 @@ typedef struct loom_aie2p_callable_t {
 iree_status_t loom_aie2p_callable_compile(
     loom_module_t* module, loom_op_t* function_op,
     const loom_aie2p_leaf_compile_options_t* options,
-    iree_arena_allocator_t* arena, bool* out_compiled,
-    loom_aie2p_callable_t* out_callable);
+    loom_symbol_ref_array_t direct_callees, iree_arena_allocator_t* arena,
+    bool* out_compiled, loom_aie2p_callable_t* out_callable);
 
 #ifdef __cplusplus
 }  // extern "C"

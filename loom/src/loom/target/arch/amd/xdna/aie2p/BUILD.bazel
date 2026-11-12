@@ -241,6 +241,7 @@ loom_cc_library(
     hdrs = ["program_source.h"],
     visibility = ["//loom/src/loom/target/arch/amd/xdna/aie2p:implementation"],
     deps = [
+        "//loom/src/loom/analysis:scc",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:function_requirements",

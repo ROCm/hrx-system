@@ -19,6 +19,10 @@ extern "C" {
 typedef struct loom_aie2p_program_clone_function_t {
   // Module-local symbol naming the cloned core definition.
   loom_symbol_ref_t entry;
+  // Direct edges translated from the retained source inventory.
+  loom_symbol_ref_array_t direct_callees;
+  // Whether any source exit returns to the caller.
+  bool may_return;
   // Invocation target facts borrowed from the immutable source version.
   const loom_target_facts_t* function_target_facts;
   // Module-owned memory proofs translated to cloned operations.

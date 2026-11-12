@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Direct-helper closure compilation for one AIE2P tile program.
+// Retained-call closure compilation for one AIE2P tile program.
 
 #ifndef LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_EMIT_PROGRAM_COMPILE_H_
 #define LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_EMIT_PROGRAM_COMPILE_H_
@@ -16,10 +16,14 @@
 extern "C" {
 #endif
 
-// Producer-retained inputs for one direct native helper.
+// Producer-retained inputs for one reachable native helper.
 typedef struct loom_aie2p_program_helper_t {
-  // Module-local helper definition called by the entry function.
+  // Module-local helper definition reachable from the entry function.
   loom_symbol_ref_t function;
+  // Direct callee edges projected into this private module.
+  loom_symbol_ref_array_t direct_callees;
+  // Whether any source exit returns to the caller.
+  bool may_return;
   // Invocation-refined target facts owned by the helper's function version.
   const loom_target_facts_t* function_target_facts;
   // Source memory proofs bound to the helper's current operations.
@@ -29,7 +33,7 @@ typedef struct loom_aie2p_program_helper_t {
 } loom_aie2p_program_helper_t;
 
 typedef struct loom_aie2p_program_helper_list_t {
-  // Direct helpers in producer-retained call inventory order.
+  // Unique reachable helpers in producer-retained callee-first order.
   const loom_aie2p_program_helper_t* values;
   // Number of records in |values|.
   iree_host_size_t count;
@@ -52,11 +56,12 @@ iree_status_t loom_aie2p_program_compiler_allocate(
     const loom_target_compile_report_t* report_template,
     loom_aie2p_program_compiler_t** out_compiler);
 
-// Compiles |entry_function_op| and its producer-retained direct,
-// nonrecursive, module-internal helper callees into one tile contribution.
+// Compiles |entry_function_op| and its producer-retained acyclic,
+// module-internal helper closure into one tile contribution.
 // Helpers use scalar and pointer register ABI values, may reference immutable
-// data, and have passed source admission for imports, authored mutable storage,
-// and child calls. Compiler-generated frames borrow the entry-owned stack.
+// data, and have passed source admission for imports and authored storage.
+// Compiler-generated frames borrow the entry-owned stack, whose capacity
+// covers the maximum live descendant path.
 // |program_data| is the admitted union of entry and helper definitions in this
 // module. Its order agrees with the caller's physical placement plan.
 // Call-free entries retain the exact ordinary leaf compilation path and ignore
@@ -65,7 +70,7 @@ iree_status_t loom_aie2p_program_compiler_allocate(
 // Only returning entries need to preserve their incoming link across calls.
 iree_status_t loom_aie2p_program_compile(
     loom_aie2p_program_compiler_t* compiler, loom_op_t* entry_function_op,
-    bool may_return, loom_aie2p_program_helper_list_t direct_helpers,
+    bool may_return, loom_aie2p_program_helper_list_t helpers,
     const loom_low_read_only_data_set_t* program_data,
     const loom_aie2p_leaf_compile_options_t* entry_options, bool* out_compiled,
     loom_aie2p_leaf_contribution_t* out_contribution);

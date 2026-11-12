@@ -57,7 +57,7 @@ static iree_status_t loom_aie2p_program_object_resolve_calls(
   return iree_ok_status();
 }
 
-// Direct helpers are module-internal leaves whose addresses are used only by
+// Helpers are module-internal functions whose addresses are used only by
 // calls and their own branches. Distinct symbols can therefore share a physical
 // body when its bytes and relocations agree. Symbol names remain distinct;
 // imported and data names must agree because they identify distinct objects.

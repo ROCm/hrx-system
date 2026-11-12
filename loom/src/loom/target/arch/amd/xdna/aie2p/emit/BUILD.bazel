@@ -50,6 +50,7 @@ loom_check_test_suite(
         "program_data.loom-test",
         "program_link_lifetime.loom-test",
         "program_report.loom-test",
+        "program_stack.loom-test",
     ],
     target_compatible_with = _XDNA_IMAGE_COMPATIBLE_WITH,
 )
@@ -317,15 +318,28 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "call_clobbers",
+    srcs = ["call_clobbers.c"],
+    hdrs = ["call_clobbers.h"],
+    deps = [
+        "//loom/src/loom/codegen/low/allocation:call",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/machine",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "callable_compile",
     srcs = ["callable_compile.c"],
     hdrs = ["callable_compile.h"],
     deps = [
+        ":call_clobbers",
         ":leaf_compile",
         "//loom/src/loom/ir",
-        "//loom/src/loom/target:registers",
         "//loom/src/loom/target/arch/amd/xdna/aie2p:call_abi",
-        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -349,6 +363,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amd/xdna/aie2p/machine",
         "//loom/src/loom/target/reporting:report",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
@@ -581,6 +596,17 @@ loom_cc_test(
         ":relocation",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/encoding",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "call_clobbers_test",
+    srcs = ["call_clobbers_test.cc"],
+    deps = [
+        ":call_clobbers",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
