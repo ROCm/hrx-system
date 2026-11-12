@@ -52,7 +52,7 @@ iree_hal_amd_gpu_pm4_publish_accepted(
   }
   if (submission->profiled) {
     if (queue->kernel) {
-      iree_hal_amd_gpu_sample_storage_accept(queue->samples);
+      iree_hal_amd_gpu_byte_storage_pool_accept(queue->samples);
     }
     iree_hal_amd_gpu_profile_operation_record(
         queue->profile, iree_hal_amd_gpu_pm4_submission_profile(submission),
@@ -142,7 +142,7 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_kernel(
       kernel->rollback.storage->end = kernel->rollback.bytes;
     }
     kernel->pending.byte_length = 0;
-    iree_hal_amd_gpu_sample_storage_rollback(queue->samples);
+    iree_hal_amd_gpu_byte_storage_pool_rollback(queue->samples);
     iree_hal_amd_gpu_pm4_abandon(
         queue, iree_hal_amd_gpu_pm4_retirement_submission(action),
         IREE_HAL_AMD_STATUS_FROM_AMDF(status, "gpu.kernel_queue_submit"));
@@ -426,11 +426,11 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
   }
   uint64_t sample_offset = 0, sample_end = 0;
   if (sample_length) {
-    const iree_hal_amd_gpu_sample_reservation_t sample =
-        iree_hal_amd_gpu_sample_storage_reserve(queue->samples, sample_length,
-                                                8, &sample_offset, &sample_end);
-    if (sample != IREE_HAL_AMD_GPU_SAMPLE_RESERVED) {
-      return sample == IREE_HAL_AMD_GPU_SAMPLE_GROW
+    const iree_hal_amd_gpu_byte_reservation_t sample =
+        iree_hal_amd_gpu_byte_storage_pool_reserve(
+            queue->samples, sample_length, 8, &sample_offset, &sample_end);
+    if (sample != IREE_HAL_AMD_GPU_BYTE_RESERVED) {
+      return sample == IREE_HAL_AMD_GPU_BYTE_GROW
                  ? IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_SAMPLES
                  : IREE_HAL_AMD_GPU_PM4_PUBLICATION_CAPACITY;
     }
@@ -525,8 +525,8 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
     profile->completion.samples =
         (void*)(queue->samples->current->memory.contents.data + sample_offset);
     profile->completion.samples_end = sample_end;
-    iree_hal_amd_gpu_sample_storage_commit(queue->samples, sample_end,
-                                           queue->kernel != NULL);
+    iree_hal_amd_gpu_byte_storage_pool_commit(queue->samples, sample_end,
+                                              queue->kernel != NULL);
   }
   queue->producer.ring.reserved_words = candidate.reserved_words;
   queue->producer.dispatch_count = dispatch_id + command->dispatch_count;
@@ -584,11 +584,11 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_dispatch(
                                      : 0;
   uint64_t sample_offset = 0, sample_end = 0;
   if (sample_length) {
-    const iree_hal_amd_gpu_sample_reservation_t sample =
-        iree_hal_amd_gpu_sample_storage_reserve(queue->samples, sample_length,
-                                                8, &sample_offset, &sample_end);
-    if (sample != IREE_HAL_AMD_GPU_SAMPLE_RESERVED) {
-      return sample == IREE_HAL_AMD_GPU_SAMPLE_GROW
+    const iree_hal_amd_gpu_byte_reservation_t sample =
+        iree_hal_amd_gpu_byte_storage_pool_reserve(
+            queue->samples, sample_length, 8, &sample_offset, &sample_end);
+    if (sample != IREE_HAL_AMD_GPU_BYTE_RESERVED) {
+      return sample == IREE_HAL_AMD_GPU_BYTE_GROW
                  ? IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_SAMPLES
                  : IREE_HAL_AMD_GPU_PM4_PUBLICATION_CAPACITY;
     }
@@ -837,8 +837,8 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_dispatch(
           (void*)(queue->samples->current->memory.contents.data +
                   sample_offset);
       profile->completion.samples_end = sample_end;
-      iree_hal_amd_gpu_sample_storage_commit(queue->samples, sample_end,
-                                             queue->kernel != NULL);
+      iree_hal_amd_gpu_byte_storage_pool_commit(queue->samples, sample_end,
+                                                queue->kernel != NULL);
       words = iree_hal_amd_gpu_pm4_emit_compute_flush(words);
       words = iree_hal_amd_gpu_pm4_emit_clock(words, sample_address, true);
     }

@@ -182,7 +182,7 @@ static void iree_hal_amd_gpu_pm4_trim_generations(
 
 static void iree_hal_amd_gpu_pm4_trim_storage(
     iree_hal_amd_gpu_pm4_queue_t* queue) {
-  iree_hal_amd_gpu_sample_storage_trim(queue->context, queue->samples);
+  iree_hal_amd_gpu_byte_storage_pool_trim(queue->context, queue->samples);
   iree_hal_amd_gpu_capture_pool_trim(&queue->captures);
   iree_hal_amd_gpu_pm4_trim_generations(
       queue->context,
@@ -240,15 +240,15 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_set_profile(
   }
   const bool enabled = iree_hal_amd_gpu_profile_timestamps_dispatches(profile);
   if (enabled && !queue->samples && iree_status_is_ok(status)) {
-    status = iree_hal_amd_gpu_sample_storage_allocate(
+    status = iree_hal_amd_gpu_byte_storage_pool_allocate(
         queue->context, queue->options.memory,
         (uint64_t)queue->options.retirement_capacity *
             sizeof(iree_hal_amd_gpu_profile_sample_t),
         queue->host_allocator, &queue->samples);
   }
   if (!enabled && iree_status_is_ok(status)) {
-    iree_hal_amd_gpu_sample_storage_free(queue->context, queue->host_allocator,
-                                         queue->samples);
+    iree_hal_amd_gpu_byte_storage_pool_free(
+        queue->context, queue->host_allocator, queue->samples);
     queue->samples = NULL;
   }
   queue->profile = iree_status_is_ok(status) ? profile : NULL;
@@ -340,7 +340,7 @@ static iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish(
         queue->kernel->rollback.storage->end = queue->kernel->rollback.bytes;
       }
       queue->kernel->pending.byte_length = 0;
-      iree_hal_amd_gpu_sample_storage_rollback(queue->samples);
+      iree_hal_amd_gpu_byte_storage_pool_rollback(queue->samples);
     }
     iree_hal_amd_gpu_pm4_abandon(queue, submission, failure);
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;
@@ -960,8 +960,9 @@ iree_hal_amd_gpu_pm4_process_entry(iree_hal_amd_gpu_pm4_queue_t* queue,
       if (result.bytes && packets) {
         queue->packets = result.bytes;
       } else if (result.bytes && samples) {
-        iree_hal_amd_gpu_sample_storage_install(queue->samples, result.bytes);
-        iree_hal_amd_gpu_sample_storage_trim(queue->context, queue->samples);
+        iree_hal_amd_gpu_byte_storage_pool_install(queue->samples,
+                                                   result.bytes);
+        iree_hal_amd_gpu_byte_storage_pool_trim(queue->context, queue->samples);
       } else if (result.bytes) {
         if (*current) {
           if (*last) {
@@ -1280,7 +1281,7 @@ static bool iree_hal_amd_gpu_pm4_retire(
             iree_hal_amd_gpu_pm4_submission_profile(submission);
         iree_hal_amd_gpu_profile_operation_complete(queue->profile, operation,
                                                     &operation->completion);
-        iree_hal_amd_gpu_sample_storage_retire(
+        iree_hal_amd_gpu_byte_storage_pool_retire(
             queue->samples, operation->completion.samples_end);
       }
       iree_hal_amd_gpu_pm4_submission_release_payload(submission);

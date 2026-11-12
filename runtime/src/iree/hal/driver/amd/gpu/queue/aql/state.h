@@ -18,11 +18,11 @@
 #include "iree/hal/driver/amd/gpu/queue/aql/scratch.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/buffer.h"
+#include "iree/hal/driver/amd/gpu/queue/byte_storage_pool.h"
 #include "iree/hal/driver/amd/gpu/queue/file_transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/host_call.h"
 #include "iree/hal/driver/amd/gpu/queue/host_wait.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/commands.h"
-#include "iree/hal/driver/amd/gpu/queue/sample_storage.h"
 #include "iree/hal/driver/amd/gpu/queue/user_queue.h"
 #include "iree/hal/driver/amd/status.h"
 
@@ -99,7 +99,7 @@ struct iree_hal_amd_gpu_aql_queue_t {
   // Device-owned optional session, changed only with idle queues.
   iree_hal_amd_gpu_profile_t* profile;
   // Timestamp-session native owner, independent of launch argument capacity.
-  iree_hal_amd_gpu_sample_storage_t* samples;
+  iree_hal_amd_gpu_byte_storage_pool_t* samples;
   // Fixed sidecar extent computed at construction.
   iree_host_size_t pending_size;
   // Native backing acquisition, independent of execution publication.

@@ -480,9 +480,9 @@ iree_runtime_cc_benchmark(
 )
 
 iree_runtime_cc_library(
-    name = "sample_storage",
-    srcs = ["sample_storage.c"],
-    hdrs = ["sample_storage.h"],
+    name = "byte_storage_pool",
+    srcs = ["byte_storage_pool.c"],
+    hdrs = ["byte_storage_pool.h"],
     deps = [
         ":backing",
         "//runtime/src/iree/base",
@@ -493,10 +493,10 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_test(
-    name = "sample_storage_test",
-    srcs = ["sample_storage_test.cc"],
+    name = "byte_storage_pool_test",
+    srcs = ["byte_storage_pool_test.cc"],
     deps = [
-        ":sample_storage",
+        ":byte_storage_pool",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

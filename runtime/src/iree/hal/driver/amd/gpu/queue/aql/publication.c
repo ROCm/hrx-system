@@ -249,12 +249,12 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
   }
   uint64_t sample_offset = 0, sample_end = 0;
   if (sampled) {
-    const iree_hal_amd_gpu_sample_reservation_t reservation =
-        iree_hal_amd_gpu_sample_storage_reserve(
+    const iree_hal_amd_gpu_byte_reservation_t reservation =
+        iree_hal_amd_gpu_byte_storage_pool_reserve(
             queue->samples, sizeof(iree_hal_amd_gpu_aql_signal_t), 64,
             &sample_offset, &sample_end);
-    if (reservation != IREE_HAL_AMD_GPU_SAMPLE_RESERVED) {
-      return reservation == IREE_HAL_AMD_GPU_SAMPLE_GROW
+    if (reservation != IREE_HAL_AMD_GPU_BYTE_RESERVED) {
+      return reservation == IREE_HAL_AMD_GPU_BYTE_GROW
                  ? IREE_HAL_AMD_GPU_AQL_PUBLISH_SAMPLES
                  : IREE_HAL_AMD_GPU_AQL_PUBLISH_CAPACITY;
     }
@@ -376,7 +376,8 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
     completion->samples = (const void*)&sample->start_timestamp;
     completion->samples_end = sample_end;
     sample_address = samples->address + sample_offset;
-    iree_hal_amd_gpu_sample_storage_commit(queue->samples, sample_end, false);
+    iree_hal_amd_gpu_byte_storage_pool_commit(queue->samples, sample_end,
+                                              false);
   }
   // Prepare the terminal packet before a retirement slot can be consumed.
   // A ready request may borrow the same capture which native retirement frees.
@@ -682,14 +683,14 @@ iree_hal_amd_gpu_aql_publish_execute_prepared(
       invocation->program->blocks[invocation->block_ordinal];
   uint64_t sample_offset = 0, sample_end = 0;
   if (sampled && block.dispatches.count) {
-    const iree_hal_amd_gpu_sample_reservation_t reservation =
-        iree_hal_amd_gpu_sample_storage_reserve(
+    const iree_hal_amd_gpu_byte_reservation_t reservation =
+        iree_hal_amd_gpu_byte_storage_pool_reserve(
             queue->samples,
             (uint64_t)block.dispatches.count *
                 sizeof(iree_hal_amd_gpu_aql_signal_t),
             64, &sample_offset, &sample_end);
-    if (reservation != IREE_HAL_AMD_GPU_SAMPLE_RESERVED) {
-      return reservation == IREE_HAL_AMD_GPU_SAMPLE_GROW
+    if (reservation != IREE_HAL_AMD_GPU_BYTE_RESERVED) {
+      return reservation == IREE_HAL_AMD_GPU_BYTE_GROW
                  ? IREE_HAL_AMD_GPU_AQL_PUBLISH_SAMPLES
                  : IREE_HAL_AMD_GPU_AQL_PUBLISH_CAPACITY;
     }
@@ -792,7 +793,8 @@ iree_hal_amd_gpu_aql_publish_execute_prepared(
       completion->samples_end = sample_end;
       sample_address = storage->address + sample_offset;
       samples = (void*)(storage->memory.contents.data + sample_offset);
-      iree_hal_amd_gpu_sample_storage_commit(queue->samples, sample_end, false);
+      iree_hal_amd_gpu_byte_storage_pool_commit(queue->samples, sample_end,
+                                                false);
     }
   }
   ++invocation->block_ordinal;

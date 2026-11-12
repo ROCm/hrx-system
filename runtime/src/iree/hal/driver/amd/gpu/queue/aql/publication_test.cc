@@ -15,7 +15,7 @@
 #include "iree/hal/cts/util/profile_test_util.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/signal.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/state.h"
-#include "iree/hal/driver/amd/gpu/queue/sample_storage.h"
+#include "iree/hal/driver/amd/gpu/queue/byte_storage_pool.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -526,7 +526,7 @@ TEST_P(AqlPublicationTest, FullSamplesLeaveLaunchArgumentsAvailable) {
   generation.memory.contents = iree_make_byte_span(&sample, sizeof(sample));
   generation.address = 0xABCD00009000;
   generation.capacity = sizeof(sample);
-  iree_hal_amd_gpu_sample_storage_t samples = {.current = &generation};
+  iree_hal_amd_gpu_byte_storage_pool_t samples = {.current = &generation};
   queue_.samples = &samples;
   iree_hal_amd_gpu_aql_submission_t* submission = nullptr;
   iree_status_t status = iree_ok_status();

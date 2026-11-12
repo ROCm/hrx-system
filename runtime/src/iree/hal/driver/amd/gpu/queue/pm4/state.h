@@ -14,6 +14,7 @@
 #include "iree/hal/driver/amd/gpu/dispatch.h"
 #include "iree/hal/driver/amd/gpu/executable.h"
 #include "iree/hal/driver/amd/gpu/queue/buffer.h"
+#include "iree/hal/driver/amd/gpu/queue/byte_storage_pool.h"
 #include "iree/hal/driver/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/driver/amd/gpu/queue/file_transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/host_call.h"
@@ -28,7 +29,6 @@
 #include "iree/hal/driver/amd/gpu/queue/pm4/retirement.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/submission.h"
 #include "iree/hal/driver/amd/gpu/queue/program.h"
-#include "iree/hal/driver/amd/gpu/queue/sample_storage.h"
 #include "iree/hal/driver/amd/gpu/queue/transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/user_queue.h"
 #include "iree/hal/driver/amd/status.h"
@@ -138,7 +138,7 @@ struct iree_hal_amd_gpu_pm4_queue_t {
   // Sticky raw native failure; failure never supplies reclamation credit.
   iree_atomic_int64_t native_failure;
   // Timestamp-session native owner, independent of launch argument capacity.
-  iree_hal_amd_gpu_sample_storage_t* samples;
+  iree_hal_amd_gpu_byte_storage_pool_t* samples;
   // Lazy shader-readable packets, one per retirement slot; native shutdown
   // precedes release. Slot credit supplies all reuse ordering.
   iree_hal_amd_gpu_byte_storage_t* packets;

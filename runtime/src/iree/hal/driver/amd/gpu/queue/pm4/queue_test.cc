@@ -16,8 +16,8 @@
 #include "iree/hal/cts/util/profile_test_util.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/driver/amd/fabric/memory_backend_test_base.h"
+#include "iree/hal/driver/amd/gpu/queue/byte_storage_pool.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/state.h"
-#include "iree/hal/driver/amd/gpu/queue/sample_storage.h"
 #include "iree/hal/driver/amd/gpu/queue/semaphore.h"
 #include "iree/testing/gtest.h"
 
