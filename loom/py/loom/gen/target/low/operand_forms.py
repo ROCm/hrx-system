@@ -16,6 +16,7 @@ from loom.target.low_descriptors import (
     LOW_DESCRIPTOR_SET_ORDINAL_NONE,
     ConstraintKind,
     Descriptor,
+    DescriptorOpKind,
     OperandForm,
     OperandFormImmediateAction,
     OperandFormMatchKind,
@@ -69,6 +70,8 @@ def _compile_operand_form(
 
     replacement_ordinal = descriptor_ordinals[operand_form.replacement_descriptor]
     replacement = selected_descriptors[replacement_ordinal]
+    if descriptor.op_kind is not DescriptorOpKind.OP or replacement.op_kind not in (DescriptorOpKind.OP, DescriptorOpKind.CONST):
+        raise ValueError(f"descriptor '{descriptor.key}' operand form must replace low.op with low.op or low.const")
 
     # Replacements preserve the packet's retained memory proof at each effect
     # ordinal. Timing events may change with the encoding; semantic effects may

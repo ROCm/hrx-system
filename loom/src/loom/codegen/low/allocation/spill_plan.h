@@ -332,6 +332,13 @@ iree_status_t loom_low_allocation_spill_plan_traffic(
     loom_low_allocation_spill_plan_traffic_workspace_t* workspace,
     loom_low_allocation_spill_plan_traffic_t* out_traffic);
 
+// Predicts memory bytes after reconstruction using retained producer flags.
+// Victim selection and complete allocation comparisons use the same cost;
+// the underlying traffic record remains available for spill materialization.
+uint64_t loom_low_allocation_spill_plan_traffic_cost(
+    const loom_low_allocation_spill_plan_traffic_t* traffic,
+    uint8_t rematerialization_flags);
+
 // Appends the spill materialization plan for |assignment| using its previously
 // computed |traffic|. The traffic fact must describe the same assignment and
 // memory width retained by |reg_class|.

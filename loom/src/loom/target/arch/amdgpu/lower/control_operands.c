@@ -193,6 +193,13 @@ iree_status_t loom_amdgpu_materialize_structural_operand(
         context, source_op, low_value_id, out_low_value_id);
   }
   if (!requires_vgpr) {
+    if (loom_amdgpu_low_type_is_register_class(context, required_low_type,
+                                               LOOM_AMDGPU_REG_CLASS_ID_SGPR) &&
+        loom_low_register_type_unit_count(required_low_type) == 1) {
+      return loom_amdgpu_materialize_low_scalar_carrier(
+          context, source_op, low_value_id, required_low_type,
+          out_low_value_id);
+    }
     return iree_ok_status();
   }
   return loom_amdgpu_materialize_full_low_vgpr_b32_registers(

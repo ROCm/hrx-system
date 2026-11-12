@@ -10,8 +10,8 @@
 
 #include "iree/base/internal/math.h"
 #include "loom/codegen/low/allocation/live_range.h"
+#include "loom/codegen/low/allocation/spill_plan.h"
 #include "loom/codegen/low/allocation/storage.h"
-#include "loom/codegen/low/rematerialization_facts.h"
 #include "loom/ir/module.h"
 
 iree_status_t loom_low_allocation_spill_search_assignment_capacity(
@@ -62,16 +62,8 @@ loom_low_allocation_spill_search_assignment_spill_traffic_cost(
         capacity->spill_unit_bits, context->spill_traffic_workspace, &traffic));
     context->spill_traffic_by_value_ordinal[value_ordinal] = traffic;
   }
-  if (!traffic.has_narrow_uses &&
-      iree_all_bits_set(context->rematerialization_flags[value_ordinal],
-                        LOOM_LOW_REMATERIALIZATION_VALUE_CLOSED |
-                            LOOM_LOW_REMATERIALIZATION_VALUE_STABLE_CAPTURE)) {
-    // Stable whole-value users can initialize a closed recipe without memory
-    // traffic. Ownership-sensitive and narrow uses retain the original value.
-    return iree_ok_status();
-  }
-  *out_cost =
-      iree_math_saturating_add_u64(traffic.store_bytes, traffic.reload_bytes);
+  *out_cost = loom_low_allocation_spill_plan_traffic_cost(
+      &traffic, context->rematerialization_flags[value_ordinal]);
   return iree_ok_status();
 }
 

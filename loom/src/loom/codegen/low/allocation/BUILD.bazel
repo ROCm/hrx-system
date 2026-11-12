@@ -357,8 +357,8 @@ loom_cc_library(
     deps = [
         ":live_range",
         ":search",
+        ":spill_plan",
         ":storage",
-        "//loom/src/loom/codegen/low:rematerialization_facts",
         "//loom/src/loom/ir",
         "//runtime/src/iree/base/internal",
     ],
@@ -520,6 +520,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:function",
         "//loom/src/loom/codegen/low:function_requirements",
         "//loom/src/loom/codegen/low:register_parts",
+        "//loom/src/loom/codegen/low:rematerialization_facts",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:registers",
@@ -559,6 +560,7 @@ loom_cc_test(
     srcs = ["spill_plan_test.cc"],
     deps = [
         ":spill_plan",
+        "//loom/src/loom/codegen/low:rematerialization_facts",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

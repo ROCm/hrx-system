@@ -13,6 +13,7 @@
 #include "loom/codegen/low/allocation/spill_storage.h"
 #include "loom/codegen/low/function.h"
 #include "loom/codegen/low/register_parts.h"
+#include "loom/codegen/low/rematerialization_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/registers.h"
@@ -1668,6 +1669,21 @@ static iree_status_t loom_low_allocation_spill_plan_traffic_for_layout(
       .reload_bytes = reload_bytes,
   };
   return iree_ok_status();
+}
+
+uint64_t loom_low_allocation_spill_plan_traffic_cost(
+    const loom_low_allocation_spill_plan_traffic_t* traffic,
+    uint8_t rematerialization_flags) {
+  if (!traffic->has_narrow_uses &&
+      iree_all_bits_set(rematerialization_flags,
+                        LOOM_LOW_REMATERIALIZATION_VALUE_CLOSED |
+                            LOOM_LOW_REMATERIALIZATION_VALUE_STABLE_CAPTURE)) {
+    // Stable whole-value users can initialize a closed recipe without memory
+    // traffic. Ownership-sensitive and narrow uses retain the original value.
+    return 0;
+  }
+  return iree_math_saturating_add_u64(traffic->store_bytes,
+                                      traffic->reload_bytes);
 }
 
 iree_status_t loom_low_allocation_spill_plan_traffic(

@@ -10,6 +10,7 @@
 
 #include "loom/codegen/low/builder.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/arch/amdgpu/lower/bitpack.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
@@ -736,6 +737,15 @@ iree_status_t loom_amdgpu_materialize_low_scalar_carrier(
 
   const loom_module_t* module = loom_low_lower_context_module(context);
   loom_type_t actual_type = loom_module_value_type(module, *out_low_value_id);
+  if (loom_low_register_type_unit_count(actual_type) == 1 &&
+      loom_amdgpu_low_value_defines_register_low16(context, low_value_id)) {
+    // Structural carriers define a complete word even when the producer only
+    // writes a halfword. Normalize before either transport or bank conversion.
+    IREE_RETURN_IF_ERROR(loom_amdgpu_extract_register_bitfield(
+        context, source_op, low_value_id, 0, 16,
+        LOOM_AMDGPU_BITFIELD_EXTRACT_MODE_ZERO_EXTEND, actual_type,
+        out_low_value_id));
+  }
   if (loom_type_equal(actual_type, required_low_type)) {
     return iree_ok_status();
   }

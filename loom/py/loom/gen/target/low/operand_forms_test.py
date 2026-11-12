@@ -12,6 +12,7 @@ from loom.gen.target.low import compiler
 from loom.target.low_descriptors import (
     Constraint,
     ConstraintKind,
+    DescriptorOpKind,
     MemorySpace,
     OperandForm,
     OperandFormImmediateAction,
@@ -21,10 +22,46 @@ from loom.target.low_descriptors import (
 )
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_I32_DESCRIPTOR,
+    TEST_LOW_CONST_I32_DESCRIPTOR,
     TEST_LOW_CORE_DESCRIPTOR_SET,
     TEST_LOW_INCREMENT_I32_DESCRIPTOR,
     TEST_LOW_LOAD_V4I32_DESCRIPTOR,
+    TEST_LOW_NATIVE_COND_BR_I32_DESCRIPTOR,
 )
+
+
+def test_operand_form_can_replace_register_input_with_constant_packet() -> None:
+    replacement = TEST_LOW_CONST_I32_DESCRIPTOR
+    source = replace(
+        TEST_LOW_INCREMENT_I32_DESCRIPTOR,
+        immediates=(),
+        asm_forms=(),
+        operand_forms=(
+            OperandForm(
+                replacement_descriptor=replacement.key,
+                matches=(OperandFormMatch("value", OperandFormMatchKind.ALL_EQUAL_EXACT_I64),),
+                immediate_action=OperandFormImmediateAction.SET_MATCHED_I64,
+                immediate_field="i32_value",
+                immediate_source_operand="value",
+            ),
+        ),
+    )
+    compiled = compiler.compile_descriptor_set(replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(source, replacement)))
+    (form,) = compiled.operand_forms
+    assert compiled.descriptors[form.replacement_descriptor_ordinal].op_kind is DescriptorOpKind.CONST
+    assert form.operand_map_count == 0
+    assert form.immediate_action is OperandFormImmediateAction.SET_MATCHED_I64
+
+
+def test_operand_form_cannot_replace_structural_branch_packet() -> None:
+    replacement = TEST_LOW_NATIVE_COND_BR_I32_DESCRIPTOR
+    source = replace(
+        replacement,
+        key="test.branch.source",
+        operand_forms=(OperandForm(replacement_descriptor=replacement.key, matches=(OperandFormMatch("lhs", OperandFormMatchKind.ALL_EQUAL_I64, 0),)),),
+    )
+    with pytest.raises(ValueError, match=r"must replace low\.op with low\.op or low\.const"):
+        compiler.compile_descriptor_set(replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(source, replacement)))
 
 
 def _commutative_form_descriptors(*, narrow: bool = False):
