@@ -379,7 +379,8 @@ independent:
 
 | Build host | Destination/compiler | Configs |
 | --- | --- | --- |
-| Linux | Windows x86-64, clang-cl | `--config=windows-x86_64` |
+| Linux | Windows x86-64, clang-cl (default) | `--config=windows-x86_64` |
+| Linux | Windows x86-64, MSVC | `--config=windows-x86_64 --config=windows-msvc` |
 | Windows x64 | Native, clang-cl (default) | None |
 | Windows x64 | Native, MSVC | `--config=windows-msvc` |
 | Linux or macOS | macOS arm64 | `--config=macos-arm64` |
@@ -391,8 +392,8 @@ builds infer their destination from the host, so adding a matching destination
 config is optional.
 For example, a native MSVC build needs only `--config=windows-msvc`; adding
 `--config=windows-x86_64` produces the same selection in either flag order.
-`windows-clang-cl` explicitly selects the default Windows compiler. MSVC requires
-a Windows build host; Linux-to-Windows builds use clang-cl. macOS destinations
+`windows-clang-cl` explicitly selects the default Windows compiler. Linux uses
+clang-cl by default and can run genuine MSVC through Wine. macOS destinations
 use Xcode/Command Line Tools on a Mac and LLVM on Linux.
 
 Build-time generators retain the host toolchain and remain executable on the
@@ -545,6 +546,37 @@ iree-bazel-build --config=windows-x86_64 //tools:iree-dump-cpuinfo
 iree-bazel-build --config=windows-x86_64 -c dbg \
   //runtime/src/iree/base/testing:dynamic_library_test
 iree-bazel-build --config=windows-x86_64 -c opt //tools:iree-dump-cpuinfo
+```
+
+To compile with genuine MSVC instead of clang-cl, install a complete 64-bit Wine
+runtime, `wineserver`, `flock`, `7z`, `curl`, and `tar`. The checked-in setup
+scripts acquire the pinned Windows target inputs and x64 MSVC compiler package
+into user-owned cache directories:
+
+```bash
+export LLVM_ROOT=/path/to/llvm
+export WINDOWS_CROSS_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/hrx/windows-cross"
+export WINSDK_ROOT="$WINDOWS_CROSS_ROOT/sdk"
+export WINDOWS_COMPILER_RT_ROOT="$WINDOWS_CROSS_ROOT/compiler-rt"
+export MSVC_WINE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/hrx/msvc"
+export WINEARCH=win64
+export WINEPREFIX="${XDG_CACHE_HOME:-$HOME/.cache}/hrx/msvc-wine-prefix"
+
+.github/scripts/setup_windows_cross.sh
+.github/scripts/setup_windows_msvc.sh
+```
+
+These acquisition scripts accept the Microsoft package licenses on the caller's
+behalf. Review them before running them when the compiler and SDK are not already
+installed. MSVC setup initializes the prefix without a display and disables the
+unused Mono, Gecko, and menu integration components. Compiler actions require
+that initialized prefix, retain its Wine server, and coordinate concurrent
+processes through it. Build any Windows artifact with both the destination and
+compiler configs:
+
+```bash
+iree-bazel-build --config=windows-x86_64 --config=windows-msvc \
+  //loom/src/loom/tools/loom-compile
 ```
 
 Debug and fastbuild outputs include PDBs. Cross-built DLLs declare exports with

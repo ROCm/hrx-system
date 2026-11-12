@@ -133,7 +133,8 @@ def _test_cross_msvc_impl(env, target):
     command = target[_CommandInfo]
     env.expect.that_str(command.compiler_id).equals("msvc-cl")
     env.expect.that_str(command.compiler).equals("build_tools/windows/test/msvc-cl")
-    env.expect.that_collection(command.compiler_requirements).contains("resources:msvc_wine:1")
+    env.expect.that_collection(command.compiler_requirements).contains("no-sandbox")
+    env.expect.that_collection(command.compiler_requirements).contains("no-remote-exec")
     for flag in ["/O2", "/Z7", "/X"]:
         env.expect.that_collection(command.arguments).contains(flag)
     env.expect.that_collection(command.arguments).not_contains("/clang:-O3")

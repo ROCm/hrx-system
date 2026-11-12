@@ -126,10 +126,6 @@ build:windows-msvc --//build_tools/windows:compiler=msvc
 build:windows-msvc --action_env=HOME
 build:windows-msvc --action_env=WINEARCH
 build:windows-msvc --action_env=WINEPREFIX
-# A single Wine prefix cannot reliably sustain one MSVC process per logical
-# host CPU. Preserve full concurrency for non-MSVC actions while bounding the
-# Wine-backed tools through their dedicated execution resource.
-build:windows-msvc --local_resources=msvc_wine=HOST_CPUS*.2
 
 # Retain failed action arguments, environment, and parameter-file paths for
 # Windows diagnostics before subsequent CI phases can replace the inputs.

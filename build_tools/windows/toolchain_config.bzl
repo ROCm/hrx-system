@@ -119,9 +119,12 @@ def _configuration_impl(ctx):
     tool_paths = base.tool_paths
     include_directories = base.cxx_builtin_include_directories
     if ctx.attr.cross_compile and base.compiler == "msvc-cl":
-        # Identical high-fanout builds through one Wine prefix can randomly
-        # return success without an object. Give Wine-backed tools their own
-        # scheduling resource so unrelated host actions retain full parallelism.
+        # Wine clients rendezvous with the prefix's persistent wineserver over
+        # a user-owned socket below /tmp. Bazel's hermetic /tmp hides that
+        # socket from linux-sandbox, causing each action to create an isolated
+        # server and breaking cl.exe's handoff to c1.dll. Keep Wine-backed
+        # actions on the host and unsandboxed while retaining local and remote
+        # cache reuse.
         action_configs = [action_config(
             action_name = action.action_name,
             enabled = action.enabled,
@@ -130,7 +133,10 @@ def _configuration_impl(ctx):
             tools = [tool(
                 path = item.path,
                 tool = item.tool,
-                execution_requirements = item.execution_requirements + ["resources:msvc_wine:1"],
+                execution_requirements = item.execution_requirements + [
+                    "no-sandbox",
+                    "no-remote-exec",
+                ],
                 with_features = item.with_features,
             ) for item in action.tools],
         ) for action in action_configs]
