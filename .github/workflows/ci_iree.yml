@@ -1009,6 +1009,14 @@ jobs:
         if: steps.toolchain.outputs.cache-hit != 'true'
         run: bash .github/scripts/setup_windows_cross.sh
 
+      - name: Select matching Windows compiler runtime
+        run: |
+          test "$("$LLVM_ROOT/bin/clang" -dumpversion)" = 22.1.8
+          resource_dir="$("$LLVM_ROOT/bin/clang" -print-resource-dir)"
+          sudo install -D \
+            "$WINDOWS_COMPILER_RT_ROOT/clang_rt.builtins-x86_64.lib" \
+            "$resource_dir/lib/windows/clang_rt.builtins-x86_64.lib"
+
       - name: Build current host generators
         run: |
           bazel build --config=loom-sdk --config=opt \
