@@ -1367,6 +1367,11 @@ class BuildFileFunctions(
     ):
         if self._should_skip_target(tags=tags):
             return
+        # CMake language enablement establishes directory-scoped compiler
+        # rules consumed during generation. A generated package function would
+        # discard those rules when it returns, leaving Objective-C targets
+        # without compile and archive commands.
+        self._converter.requires_native_scope = True
         self._emit_platform_guard_begin(target_compatible_with)
         self._converter.body += "enable_language(OBJC)\n"
         for sources, option in ((srcs, "-fobjc-arc"), (non_arc_srcs, "-fno-objc-arc")):
