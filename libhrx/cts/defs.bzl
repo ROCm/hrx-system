@@ -11,7 +11,7 @@ load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
 AMD_GPU_CTS_RESOURCE_GROUP = GPU_DEVICE_RESOURCE_GROUP
 
 AMD_GPU_CTS_TAGS = [
-    "iree-run-requirement=runtime.resource.amd_gpu",
+    "iree-run-requirement=libamdf.resource.amd_gpu",
     "runtime-resource=amd-gpu",
 ]
 

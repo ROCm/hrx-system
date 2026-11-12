@@ -34,7 +34,10 @@ CTEST_RESOURCE_LABEL_EXCLUDE_REGEX = "runtime-resource="
 BAZEL_TESTS = bazel_test_selection.TestSuite(
     name=PROJECT_NAME,
     targets=("//libhrx/...",),
-    excluded_tags=("iree-run-requirement=runtime.resource.amd_gpu",),
+    excluded_tags=(
+        "iree-run-requirement=libamdf.resource.amd_gpu",
+        "iree-run-requirement=runtime.resource.amd_gpu",
+    ),
 )
 
 

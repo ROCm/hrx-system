@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
+load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
 load(
     "//libhrx/build_tools/bazel:cc.bzl",
     "hrx_cc_benchmark",
@@ -177,9 +178,9 @@ hrx_cc_test(
     name = "init_profile_gpu_test",
     srcs = ["init_profile_gpu_test.cc"],
     env = {"HRX_GPU_DRIVER": "amdgpu"},
-    resource_group = "iree-hal-drivers-amdgpu-tests",
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = [
-        "iree-run-requirement=runtime.resource.amd_gpu",
+        "iree-run-requirement=libamdf.resource.amd_gpu",
         "runtime-resource=amd-gpu",
     ],
     target_compatible_with = ["@platforms//os:linux"] + select({
@@ -202,9 +203,9 @@ hrx_cc_test(
     name = "init_gpu_test",
     srcs = ["init_gpu_test.cc"],
     env = {"HRX_GPU_DRIVER": "amdgpu"},
-    resource_group = "iree-hal-drivers-amdgpu-tests",
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = [
-        "iree-run-requirement=runtime.resource.amd_gpu",
+        "iree-run-requirement=libamdf.resource.amd_gpu",
         "runtime-resource=amd-gpu",
     ],
     target_compatible_with = select({
@@ -436,9 +437,9 @@ hrx_cc_test(
     name = "mem_pool_backing_gpu_test",
     srcs = ["mem_pool_backing_test.cc"],
     env = {"HRX_TEST_DEVICE_URI": "amdgpu://0"},
-    resource_group = "iree-hal-drivers-amdgpu-tests",
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = [
-        "iree-run-requirement=runtime.resource.amd_gpu",
+        "iree-run-requirement=libamdf.resource.amd_gpu",
         "runtime-resource=amd-gpu",
     ],
     deps = [

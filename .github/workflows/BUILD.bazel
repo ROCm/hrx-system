@@ -14,6 +14,7 @@ exports_files([
     "build_loom_sdk_artifacts.yml",
     "ci_iree.yml",
     "ci_libhrx.yml",
+    "ci_libhrx_gpu.yml",
     "presubmit.yml",
     "test_core_linux_gpu.yml",
     "test_core_linux_gpu_source.yml",
