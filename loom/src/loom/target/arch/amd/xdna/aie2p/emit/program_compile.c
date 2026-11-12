@@ -350,8 +350,11 @@ static iree_status_t loom_aie2p_program_compile_impl(
         iree_max(resolved_entry_options.callee_stack_byte_length,
                  contributions[i].realization.stack_frame_byte_length);
   }
-  resolved_entry_options.preserve_link_register = may_return;
-  resolved_entry_options.link_shadow_register = link_shadow_register;
+  resolved_entry_options.return_address = (loom_aie2p_return_address_t){
+      .kind = may_return ? LOOM_AIE2P_RETURN_ADDRESS_REGISTER
+                         : LOOM_AIE2P_RETURN_ADDRESS_NONE,
+      .shadow_register = link_shadow_register,
+  };
   bool entry_compiled = false;
   IREE_RETURN_IF_ERROR(loom_aie2p_leaf_compile(
       module, entry_function_op, &resolved_entry_options, arena,

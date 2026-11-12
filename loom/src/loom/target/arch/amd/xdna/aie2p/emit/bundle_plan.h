@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/frame.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/function_envelope.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/leaf_program.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/stack_frame.h"
 
@@ -24,11 +25,8 @@ typedef struct loom_aie2p_bundle_plan_options_t {
   loom_aie2p_stack_frame_t stack;
   // Structured diagnostics for final-frame semantic rejection.
   iree_diagnostic_emitter_t diagnostic_emitter;
-  // Whether this entry program preserves its incoming link register across
-  // direct helper calls.
-  bool preserve_link_register;
-  // Reserved scalar register holding the entry link while preservation is on.
-  loom_aie2p_physical_register_id_t link_shadow_register;
+  // Incoming-link and caller-shadow preservation across nested native calls.
+  loom_aie2p_return_address_t return_address;
 } loom_aie2p_bundle_plan_options_t;
 
 // Plans physical bundles for one successful, spill-free AIE2P Low frame. A

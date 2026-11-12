@@ -40,6 +40,8 @@ enum loom_aie2p_planned_slot_flag_bits_e {
   LOOM_AIE2P_PLANNED_SLOT_FLAG_HARDWARE_LOOP_SETUP = 1u << 5,
   // Slot initializes SP from the worker's final physical stack placement.
   LOOM_AIE2P_PLANNED_SLOT_FLAG_STACK_INITIALIZATION = 1u << 6,
+  // Slot transfers the ABI-owned link shadow to or from its frame word.
+  LOOM_AIE2P_PLANNED_SLOT_FLAG_LINK_SHADOW_STORAGE = 1u << 7,
 };
 typedef uint16_t loom_aie2p_planned_slot_flags_t;
 

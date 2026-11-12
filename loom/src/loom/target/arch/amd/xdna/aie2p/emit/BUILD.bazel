@@ -146,6 +146,18 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "function_envelope",
+    srcs = ["function_envelope.c"],
+    hdrs = ["function_envelope.h"],
+    deps = [
+        ":bundle_alignment",
+        ":bundle_encoding",
+        ":stack_frame",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
+    ],
+)
+
+loom_cc_library(
     name = "bundle_plan",
     srcs = ["bundle_plan.c"],
     hdrs = ["bundle_plan.h"],
@@ -153,6 +165,7 @@ loom_cc_library(
         ":bundle_alignment",
         ":bundle_analysis",
         ":bundle_encoding",
+        ":function_envelope",
         ":leaf_plan_metadata",
         ":leaf_program",
         ":stack_frame",
@@ -266,6 +279,7 @@ loom_cc_library(
     visibility = ["//loom/src/loom/target/arch/amd/xdna/aie2p:implementation"],
     deps = [
         ":bundle_plan",
+        ":function_envelope",
         ":leaf_object",
         ":program_capacity",
         ":spill",
@@ -534,9 +548,23 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "function_envelope_test",
+    srcs = ["function_envelope_test.cc"],
+    deps = [
+        ":function_envelope",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/encoding",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/machine",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "stack_frame_test",
     srcs = ["stack_frame_test.cc"],
     deps = [
+        ":function_envelope",
         ":stack_frame",
         "//loom/src/loom/codegen/low:storage_layout",
         "//runtime/src/iree/base/internal:arena",

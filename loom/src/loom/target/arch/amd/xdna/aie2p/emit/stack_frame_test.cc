@@ -10,6 +10,7 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/function_envelope.h"
 
 namespace loom {
 namespace {
@@ -90,6 +91,49 @@ TEST(Aie2pStackFrameTest, PreservesSlotDepthsAcrossRepairAndRecompilation) {
     EXPECT_EQ(helper.storage_layout.records[i].reservation.byte_offset,
               worker.storage_layout.records[i].reservation.byte_offset);
   }
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&pool);
+}
+
+TEST(Aie2pStackFrameTest, ReturnShadowStaysSeparateFromAppendedSpills) {
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&pool, &arena);
+  loom_aie2p_stack_layout_t layout = {
+      .arena = &arena,
+      .byte_length = LOOM_AIE2P_RETURN_ADDRESS_FRAME_BYTES,
+  };
+  std::array<loom_low_storage_layout_record_t, 2> records = {};
+  loom_low_storage_layout_t source = {.records = records.data()};
+  IREE_ASSERT_OK(loom_low_storage_layout_pack_reservation(
+      LOOM_STORAGE_SPACE_STACK, 4, 4, &source.space_sizes,
+      &records[0].reservation));
+  source.record_count = 1;
+  IREE_ASSERT_OK(loom_aie2p_stack_layout_extend(&source, &layout));
+  EXPECT_EQ(layout.depths[0], 8u);
+
+  uint64_t depth = 0;
+  IREE_ASSERT_OK(loom_aie2p_stack_layout_append(LOOM_STORAGE_SPACE_STACK, 64,
+                                                64, &layout, &depth));
+  EXPECT_EQ(depth, 128u);
+  IREE_ASSERT_OK(loom_low_storage_layout_pack_reservation(
+      LOOM_STORAGE_SPACE_STACK, 64, 64, &source.space_sizes,
+      &records[1].reservation));
+  source.record_count = 2;
+  bool accepted = false;
+  loom_aie2p_stack_frame_t frame;
+  IREE_ASSERT_OK(loom_aie2p_stack_frame_build(
+      nullptr, nullptr, &source, &layout, /*callee_byte_length=*/64,
+      /*is_helper=*/true, {}, &accepted, &frame));
+  ASSERT_TRUE(accepted);
+  EXPECT_EQ(frame.byte_length, 128u);
+  EXPECT_EQ(frame.storage.byte_length, 0u);
+  EXPECT_EQ(frame.storage_layout.records[0].reservation.byte_offset, 120u);
+  EXPECT_EQ(frame.storage_layout.records[1].reservation.byte_offset, 0u);
+  // SP-4 belongs to the return shadow even after the larger spill grew the
+  // frame. The first scalar spill remains at SP-8, and the vector at SP-128.
+  EXPECT_EQ(frame.byte_length - LOOM_AIE2P_RETURN_ADDRESS_FRAME_BYTES, 124u);
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&pool);
 }
