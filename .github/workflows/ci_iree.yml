@@ -947,6 +947,131 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  cmake_windows_cross:
+    name: Loom / CMake / Windows x86-64 (via Linux) / Clang CL / RelWithDebInfo
+    concurrency:
+      group: iree-cmake-windows-cross-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
+      cancel-in-progress: true
+    runs-on: az-linux-scale-rocm-default-prod
+    timeout-minutes: 15
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+    defaults:
+      run:
+        shell: bash
+    env:
+      LLVM_APT_VERSION: "1:22.1.8~++20260714014902+ca7933e47d3a-1~exp1~20260714135019.80"
+      LLVM_ROOT: /usr/lib/llvm-22
+      WINDOWS_CROSS_ROOT: ${{ github.workspace }}/build/iree-cmake-windows/toolchain
+      WINSDK_ROOT: ${{ github.workspace }}/build/iree-cmake-windows/toolchain/sdk
+      WINDOWS_COMPILER_RT_ROOT: ${{ github.workspace }}/build/iree-cmake-windows/toolchain/compiler-rt
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Configure workspace
+        run: |
+          git config --global --add safe.directory "$PWD"
+          echo "$PWD/build/iree-cmake-windows/host-tools" >> "$GITHUB_PATH"
+          echo "$LLVM_ROOT/bin" >> "$GITHUB_PATH"
+
+      - name: Install compiler and build tools
+        run: |
+          llvm_key_path=.github/scripts/llvm_snapshot_archive_key.asc
+          echo "8b2a587ffd672c4687e7581dad4b2f6c1bb2ad6b480cd9771ba2ff48e0b8c75d  $llvm_key_path" | sha256sum --check
+          sudo install -m 644 "$llvm_key_path" /usr/share/keyrings/llvm.asc
+          echo 'deb [signed-by=/usr/share/keyrings/llvm.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main' | sudo tee /etc/apt/sources.list.d/llvm.list
+          apt_options=(-o Acquire::ForceIPv4=true -o Acquire::Retries=3)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install --yes --no-install-recommends \
+            "clang-22=$LLVM_APT_VERSION" "lld-22=$LLVM_APT_VERSION" \
+            "llvm-22=$LLVM_APT_VERSION" "libclang-rt-22-dev=$LLVM_APT_VERSION" \
+            g++-13 p7zip-full python3-venv
+          python3 dev.py cmake setup --venv
+          python3 build_tools/devtools/install.py bazelisk \
+            --bin-dir build/iree-cmake-windows/host-tools
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Restore Windows SDK inputs
+        id: toolchain
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.WINDOWS_CROSS_ROOT }}
+          key: windows-cross-${{ hashFiles('.github/scripts/setup_windows_cross.sh', '.github/scripts/windows-sdk-channel.json', 'build_tools/ci/windows_stl_asan.py') }}
+
+      - name: Prepare Windows SDK inputs
+        if: steps.toolchain.outputs.cache-hit != 'true'
+        run: bash .github/scripts/setup_windows_cross.sh
+
+      - name: Build current host generators
+        run: |
+          bazel build --config=loom-sdk --config=opt \
+            --//loom/config/import:enable=cxx \
+            --//loom/config/import/cxx:embed_includes=true \
+            --cxxopt=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13 \
+            --linkopt=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13 \
+            //build_tools/embed_data:embed_data \
+            //loom/src/loom/tools/loom-compile \
+            //loom/src/loom/tools/loom-import-cxx \
+            //loom/src/loom/tools/loom-link
+          host_tools="$PWD/build/iree-cmake-windows/host-tools"
+          install -m 0755 bazel-bin/build_tools/embed_data/embed_data \
+            "$host_tools/iree-c-embed-data"
+          install -m 0755 bazel-bin/loom/src/loom/tools/loom-compile/loom-compile \
+            "$host_tools/loom-compile"
+          install -m 0755 bazel-bin/loom/src/loom/tools/loom-import-cxx/loom-import-cxx \
+            "$host_tools/loom-import-cxx"
+          install -m 0755 bazel-bin/loom/src/loom/tools/loom-link/loom-link \
+            "$host_tools/loom-link"
+
+      - name: Configure Windows Loom products
+        run: |
+          python3 dev.py \
+            --cmake-build-dir build/iree-cmake-windows/build \
+            cmake configure \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/build_tools/windows/clang_cl_cross_toolchain.cmake" \
+            -DAMDF_BUILD=ON \
+            -DIREE_BUILD_BENCHMARKS=OFF \
+            -DIREE_BUILD_TESTS=OFF \
+            -DIREE_HAL_DRIVER_AMD=ON \
+            -DIREE_HAL_DRIVER_AMD_GPU=ON \
+            -DIREE_HAL_DRIVER_AMD_XDNA=ON \
+            -DIREE_HAL_DRIVER_AMDGPU=OFF \
+            -DIREE_HAL_DRIVER_TASK=ON \
+            -DIREE_HAL_DRIVER_VULKAN=OFF \
+            -DIREE_HAL_DRIVER_WEBGPU=OFF \
+            -DIREE_HOST_BIN_DIR="$PWD/build/iree-cmake-windows/host-tools" \
+            -DLOOM_BUILD=ON \
+            -DLOOM_IMPORT_CXX=ON \
+            -DLOOM_LINK_SHARED_TOOLS=ON \
+            -DLOOM_SERVE_AUDIO_CODECS= \
+            -DLOOM_SERVE_IMAGE_INPUT=OFF \
+            -DLOOM_TARGET_DEFAULT=ON \
+            -DLIBHRX_BUILD=OFF
+
+      - name: Build Windows Loom products
+        run: |
+          python3 dev.py \
+            --cmake-build-dir build/iree-cmake-windows/build \
+            cmake build loom-compile loom-import-cxx loom-link loom-run --parallel
+
+      - name: Inspect Windows product closure
+        run: |
+          product_dir=build/iree-cmake-windows/build/bin
+          for product in iree.dll loomc.dll loom-compile.exe loom-import-cxx.exe loom-link.exe loom-run.exe; do
+            "$LLVM_ROOT/bin/llvm-readobj" --file-headers "$product_dir/$product" |
+              grep -F 'Machine: IMAGE_FILE_MACHINE_AMD64' >/dev/null
+          done
+          "$LLVM_ROOT/bin/llvm-readobj" --coff-exports "$product_dir/iree.dll" |
+            grep -F 'Name: iree_hal_device_destroy' >/dev/null
+          "$LLVM_ROOT/bin/llvm-readobj" --coff-exports "$product_dir/loomc.dll" |
+            grep -F 'Name: loomc_compile_module' >/dev/null
+          "$LLVM_ROOT/bin/llvm-readobj" --needed-libs "$product_dir/loom-compile.exe" |
+            grep -F 'loomc.dll' >/dev/null
+
   cmake_windows:
     name: CMake / Windows x86-64 / MSVC / RelWithDebInfo / Repository Build
     concurrency:
