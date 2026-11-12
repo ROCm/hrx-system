@@ -378,6 +378,12 @@ class Translator final : private Initialization::Evaluation {
 
   Value convert(cxx::ExpressionAST* input_ast, const cxx::Type* output_type,
                 cxx::AST* owner) override {
+    if (unit_.typeTraits().is_array(output_type) &&
+        unit_.typeTraits().is_char_type(
+            unit_.typeTraits().get_element_type(output_type)) &&
+        string_initializer(input_ast)) {
+      return initialization_.value(output_type, input_ast, nullptr, owner);
+    }
     auto value = expression(input_ast);
     if (value.is_address()) {
       auto input_domain =

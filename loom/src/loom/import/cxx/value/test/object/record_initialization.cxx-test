@@ -815,3 +815,74 @@ func.def public @string_default() -> (i32) {
   %306 = scalar.extsi %305 : i8 to i32
   func.return %306 : i32
 }
+
+// ====
+// INPUT: cxx data-model=lp64
+// String initialization creates array elements, not a pointer to the literal.
+// Embedded zeros, encoded code units, and zero-filled tails retain their types.
+struct Text {
+  // Embedded zero does not truncate the following character.
+  char narrow[4] = "A\0B";
+  // Signed and unsigned byte arrays preserve the same source bit pattern.
+  signed char signed_bytes[3] = "\xff";
+  // The array's signedness affects uses, not its initialized bits.
+  unsigned char unsigned_bytes[3] = "\xff";
+  // Const qualification preserves the character-array shape.
+  const char fixed[3] = "pq";
+  // UTF-8 stores both bytes of the multibyte character, then pads the tail.
+  char8_t utf8[4] = u8"\u00e9";
+  // UTF-16 stores the surrogate pair as two separate code units.
+  char16_t utf16[4] = u"\U0001f642";
+  // UTF-32 stores one code unit for the same character.
+  char32_t utf32[3] = U"\U0001f642";
+  // The source data model determines the width of wide characters.
+  wchar_t wide[3] = L"\u03bb";
+};
+Text string_value_defaults() { return Text(); }
+struct Aggregate {
+  // Explicit aggregate clauses use the same complete-array initialization.
+  char text[4];
+};
+Aggregate aggregate_string() { return {"xy"}; }
+// ----
+func.def public @string_value_defaults() -> (i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i16, i16, i16, i16, i32, i32, i32, i32, i32, i32) {
+  %54 = scalar.constant 65 : i8
+  %55 = scalar.constant 0 : i8
+  %56 = scalar.constant 66 : i8
+  %58 = scalar.constant -1 : i8
+  %64 = scalar.constant 112 : i8
+  %65 = scalar.constant 113 : i8
+  %67 = scalar.constant -61 : i8
+  %68 = scalar.constant -87 : i8
+  %71 = scalar.constant -10179 : i16
+  %72 = scalar.constant -8638 : i16
+  %73 = scalar.constant 0 : i16
+  %75 = scalar.constant 128578 : i32
+  %76 = scalar.constant 0 : i32
+  %78 = scalar.constant 955 : i32
+  func.return %54, %55, %56, %55, %58, %55, %55, %58, %55, %55, %64, %65, %55, %67, %68, %55, %55, %71, %72, %73, %73, %75, %76, %76, %78, %76, %76 : i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i8, i16, i16, i16, i16, i32, i32, i32, i32, i32, i32
+}
+
+func.def public @aggregate_string() -> (i8, i8, i8, i8) {
+  %85 = scalar.constant 120 : i8
+  %86 = scalar.constant 121 : i8
+  %87 = scalar.constant 0 : i8
+  func.return %85, %86, %87, %87 : i8, i8, i8, i8
+}
+
+// ====
+// INPUT: cxx data-model=llp64
+// A wide string follows the 16-bit wchar_t source model without truncating
+// a supplementary character into one element.
+struct Text {
+  // Two code units followed by the terminator and one padded element.
+  wchar_t text[4] = L"\U0001f642";
+};
+Text wide_string_value() { return Text(); }
+// ----
+func.def public @wide_string_value() -> (i16, i16, i16, i16) {
+  %8 = scalar.constant -10179 : i16
+  %9 = scalar.constant -8638 : i16
+  %10 = scalar.constant 0 : i16
+  func.return %8, %9, %10, %10 : i16, i16, i16, i16
+}

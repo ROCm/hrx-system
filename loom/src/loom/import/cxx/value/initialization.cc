@@ -176,6 +176,22 @@ Value Initialization::value(const cxx::Type* type,
   type = types_.unqualified(type);
   if (unit_.typeTraits().is_array(type)) {
     initializer = array_initializer(initializer, constructor);
+    if (unit_.typeTraits().is_char_type(
+            unit_.typeTraits().get_element_type(type))) {
+      if (auto* string = string_initializer(initializer)) {
+        const auto* array = types_.array(type, owner);
+        auto* element_type = array->source->elementType();
+        std::vector<loom_value_id_t> components;
+        components.reserve(array->component_count);
+        for (size_t index = 0; index < array->source->size(); ++index) {
+          const int64_t code_unit =
+              index < string->charCount() ? string->charAt(index) : 0;
+          components.push_back(scalars_.constant(cxx::ConstValue{code_unit},
+                                                 element_type, owner));
+        }
+        return arena_.capture(*array, components);
+      }
+    }
     if (evaluation_.array_copy(owner)) {
       auto allocation = storage_.allocate(
           type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, owner);
