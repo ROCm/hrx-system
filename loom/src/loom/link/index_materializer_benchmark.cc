@@ -39,10 +39,12 @@ enum class TemplateProviderContractShape {
   kDependentView,
   kExtentPredicate,
   kEncodingPredicate,
+  kDeclaredExtent,
+  kDeclaredEncoding,
 };
 
 struct TemplateContractSource {
-  // Exact signature shared by the family and every provider.
+  // Family signature establishing the common argument coordinates.
   const char* parameters;
   // Root operands supplied to each application.
   const char* operands;
@@ -58,6 +60,8 @@ struct TemplateContractSource {
   const char* provider_conditions;
   // Whether selection also compares target identity and a typed requirement.
   bool has_target;
+  // Provider signature when it adds input requirements to the family.
+  const char* provider_parameters = nullptr;
 };
 
 static constexpr TemplateContractSource kContractSources[] = {
@@ -125,6 +129,41 @@ static constexpr TemplateContractSource kContractSources[] = {
                       "view<2x[%width]xi8, %storage>\n",
         .provider_conditions = " where [eq(%matches, 1), eq(%width, 18)]",
         .has_target = false,
+    },
+    {
+        .parameters = "%value: i32, %width: index, %input: view<[%width]xf32>",
+        .operands = "%value, %width, %input",
+        .operand_types = "i32, index, view<16xf32>",
+        .root_parameters = "%value: i32, %input: view<16xf32>",
+        .root_conditions = "",
+        .root_setup = "  %width = index.constant 16 : index\n",
+        .provider_conditions = "",
+        .has_target = false,
+        .provider_parameters =
+            "%value: i32, %width: index, %input: view<16xf32>",
+    },
+    {
+        .parameters =
+            "%value: i32, %width: index, %storage: encoding<storage>, "
+            "%input: view<2x[%width]xi8, %storage>",
+        .operands = "%value, %width, %storage, %input",
+        .operand_types = "i32, index, encoding<storage>, "
+                         "view<2x[%width]xi8, %storage>",
+        .root_parameters = "%value: i32, %buffer: buffer",
+        .root_conditions = "",
+        .root_setup = "  %width = index.constant 18 : index\n"
+                      "  %storage = encoding.define #encoding.storage<"
+                      "layout=#encoding.layout.dense, schema=#ggml.q4_0> : "
+                      "encoding<storage>\n"
+                      "  %offset = index.constant 0 : offset\n"
+                      "  %input = buffer.view %buffer[%offset] : buffer -> "
+                      "view<2x[%width]xi8, %storage>\n",
+        .provider_conditions = "",
+        .has_target = false,
+        .provider_parameters =
+            "%value: i32, %width: index, %storage: encoding<storage>, "
+            "%input: view<2x18xi8, #encoding.storage<"
+            "layout=#encoding.layout.dense, schema=#ggml.q4_0>>",
     },
 };
 
@@ -333,7 +372,10 @@ class TemplateCatalogFixture {
       source.append(std::to_string(i + 1));
       source.append(") @");
       source.append(name);
-      source.append(std::string("(") + contract().parameters + ") -> (i32)" +
+      const char* parameters = contract().provider_parameters
+                                   ? contract().provider_parameters
+                                   : contract().parameters;
+      source.append(std::string("(") + parameters + ") -> (i32)" +
                     contract().provider_conditions +
                     " {\n  template.return %value : i32\n}\n\n");
     }
@@ -584,6 +626,12 @@ BENCHMARK_TEMPLATE(BM_IndexBuild_TypedTemplate,
 BENCHMARK_TEMPLATE(BM_IndexBuild_TypedTemplate,
                    TemplateProviderContractShape::kEncodingPredicate)
     ->Apply(TypedCatalogScales);
+BENCHMARK_TEMPLATE(BM_IndexBuild_TypedTemplate,
+                   TemplateProviderContractShape::kDeclaredExtent)
+    ->Apply(TypedCatalogScales);
+BENCHMARK_TEMPLATE(BM_IndexBuild_TypedTemplate,
+                   TemplateProviderContractShape::kDeclaredEncoding)
+    ->Apply(TypedCatalogScales);
 
 BENCHMARK(BM_IndexMaterialize_SelectOneTemplate)
     ->Apply(CatalogScales)
@@ -624,6 +672,22 @@ BENCHMARK_CAPTURE(BM_IndexMaterialize_TypedTemplate<
     ->Apply(TypedCatalogScales);
 BENCHMARK_CAPTURE(BM_IndexMaterialize_TypedTemplate<
                       TemplateProviderContractShape::kEncodingPredicate>,
+                  Native, TemplateProviderRepresentation::kMaterialized)
+    ->Apply(TypedCatalogScales);
+BENCHMARK_CAPTURE(BM_IndexMaterialize_TypedTemplate<
+                      TemplateProviderContractShape::kDeclaredExtent>,
+                  Bytecode, TemplateProviderRepresentation::kBytecode)
+    ->Apply(TypedCatalogScales);
+BENCHMARK_CAPTURE(BM_IndexMaterialize_TypedTemplate<
+                      TemplateProviderContractShape::kDeclaredExtent>,
+                  Native, TemplateProviderRepresentation::kMaterialized)
+    ->Apply(TypedCatalogScales);
+BENCHMARK_CAPTURE(BM_IndexMaterialize_TypedTemplate<
+                      TemplateProviderContractShape::kDeclaredEncoding>,
+                  Bytecode, TemplateProviderRepresentation::kBytecode)
+    ->Apply(TypedCatalogScales);
+BENCHMARK_CAPTURE(BM_IndexMaterialize_TypedTemplate<
+                      TemplateProviderContractShape::kDeclaredEncoding>,
                   Native, TemplateProviderRepresentation::kMaterialized)
     ->Apply(TypedCatalogScales);
 
