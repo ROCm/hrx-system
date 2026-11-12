@@ -221,6 +221,7 @@ class HrxLoader {
   decltype(&hrx_graph_instantiate) graph_instantiate;
   decltype(&hrx_graph_exec_release) graph_exec_release;
   decltype(&hrx_graph_exec_launch) graph_exec_launch;
+  decltype(&hrx_graph_exec_update) graph_exec_update;
 
   // Fences.
   decltype(&hrx_fence_create) fence_create;
