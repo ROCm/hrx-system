@@ -134,8 +134,8 @@ iree_status_t loom_aie2p_worker_binary(loom_aie2p_worker_builder_t* context,
 
 iree_status_t loom_aie2p_worker_external_address(
     loom_aie2p_worker_builder_t* code, loom_builder_t* builder,
-    loom_value_id_t base, loom_value_id_t offset, loom_value_id_t* out_low,
-    loom_value_id_t* out_high) {
+    loom_value_id_t base, loom_value_id_t offset, uint32_t descriptor_high_bits,
+    loom_value_id_t* out_low, loom_value_id_t* out_high) {
   loom_value_id_t low, high;
   for (unsigned i = 0; i < 2; ++i) {
     const loom_named_attr_t displacement = {.name_id = code->displacement_name,
@@ -152,8 +152,17 @@ iree_status_t loom_aie2p_worker_external_address(
   IREE_RETURN_IF_ERROR(loom_aie2p_worker_binary(
       code, builder, AIE2P_CORE_DESCRIPTOR_REF_CMP_ULT_I32, *out_low, low,
       &carry));
-  return loom_aie2p_worker_binary(
-      code, builder, AIE2P_CORE_DESCRIPTOR_REF_ADD_I32, high, carry, out_high);
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_binary(
+      code, builder, AIE2P_CORE_DESCRIPTOR_REF_ADD_I32, high, carry, out_high));
+  if (descriptor_high_bits) {
+    loom_value_id_t fields;
+    IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
+        code, builder, (int32_t)descriptor_high_bits, &fields));
+    IREE_RETURN_IF_ERROR(loom_aie2p_worker_binary(
+        code, builder, AIE2P_CORE_DESCRIPTOR_REF_ADD_I32, *out_high, fields,
+        out_high));
+  }
+  return iree_ok_status();
 }
 
 iree_status_t loom_aie2p_worker_return(loom_builder_t* builder,

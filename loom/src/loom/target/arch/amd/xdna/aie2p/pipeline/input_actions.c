@@ -107,16 +107,8 @@ static iree_status_t loom_aie2p_native_input_prepare_origins(
         NULL, 0, loom_make_named_attr_slice(&address, 1), &code->address_type,
         &base));
     IREE_RETURN_IF_ERROR(loom_aie2p_worker_external_address(
-        code, &builder, base, arguments[argument++], &words[0], &words[1]));
-    if (phase->words[2]) {
-      // Packet fields occupy bits above the physical address's high portion.
-      loom_value_id_t packet;
-      IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
-          code, &builder, (int32_t)phase->words[2], &packet));
-      IREE_RETURN_IF_ERROR(loom_aie2p_worker_binary(
-          code, &builder, AIE2P_CORE_DESCRIPTOR_REF_ADD_I32, words[1], packet,
-          &words[1]));
-    }
+        code, &builder, base, arguments[argument++], phase->words[2], &words[0],
+        &words[1]));
     IREE_RETURN_IF_ERROR(loom_aie2p_worker_control_write(
         code, &builder, input->path->control_packet, phase->address_register,
         words, 2));
