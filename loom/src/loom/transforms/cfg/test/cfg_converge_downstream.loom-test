@@ -1,0 +1,373 @@
+// RUN: pass cfg-converge,cfg-converge
+
+// Nonleaders skip the shared column loop, but parallel rows enter it through
+// the other mode arm. Both paths keep the same outer iteration and latch.
+func.def @continue_before_shared_loop(%serial: i1, %leader: i1, %next_row: i1, %next_column: i1, %value: i32) {
+  cfg.br ^row
+^row:
+  cfg.cond_br %next_row, ^mode, ^exit
+^mode:
+  cfg.cond_br %serial, ^guard, ^parallel
+^guard:
+  cfg.cond_br %leader, ^serial_entry, ^latch
+^serial_entry:
+  cfg.br ^shared(%value: i32)
+^parallel:
+  test.use %value : i32
+  cfg.br ^shared(%value: i32)
+^shared(%initial: i32):
+  test.use %initial : i32
+  cfg.br ^column
+^column:
+  cfg.cond_br %next_column, ^body, ^complete
+^body:
+  test.use %initial : i32
+  cfg.br ^column
+^complete:
+  cfg.br ^latch
+^latch:
+  test.use %value : i32
+  cfg.br ^row
+^exit:
+  func.return
+}
+
+// A downstream return block has a payload on both active and bypass paths.
+func.def @return_payload(%outer: i1, %inner: i1, %left: f32, %right: f32) -> (f32) {
+  cfg.cond_br %outer, ^guard, ^other
+^guard:
+  cfg.cond_br %inner, ^reject, ^prefix
+^reject:
+  test.use %left : f32
+  cfg.br ^end(%left: f32)
+^prefix:
+  test.use %right : f32
+  cfg.br ^body(%right: f32)
+^other:
+  cfg.br ^body(%left: f32)
+^body(%value: f32):
+  test.use %value : f32
+  cfg.br ^end(%value: f32)
+^end(%result: f32):
+  func.return %result : f32
+}
+
+// A shared inner-loop header keeps its recurrence edges and original argument.
+func.def @shared_loop_header(%outer: i1, %inner: i1, %repeat: i1, %seed: i32) -> (i32) {
+  cfg.cond_br %outer, ^guard, ^other
+^guard:
+  cfg.cond_br %inner, ^prefix, ^reject
+^prefix:
+  test.use %seed : i32
+  cfg.br ^header(%seed: i32)
+^reject:
+  %bad = scalar.constant -1 : i32
+  cfg.br ^end(%bad: i32)
+^other:
+  cfg.br ^header(%seed: i32)
+^header(%iteration: i32):
+  cfg.cond_br %repeat, ^latch, ^complete
+^latch:
+  %increment = scalar.constant 1 : i32
+  %next = scalar.addi %iteration, %increment : i32
+  test.use %next : i32
+  cfg.br ^header(%next: i32)
+^complete:
+  cfg.br ^end(%iteration: i32)
+^end(%result: i32):
+  func.return %result : i32
+}
+
+// Payload arguments retain their identity even when used in dependent types.
+func.def @dependent_use(%outer: i1, %inner: i1, %extent: index, %seed: f32) {
+  cfg.cond_br %outer, ^guard, ^other
+^guard:
+  cfg.cond_br %inner, ^prefix, ^end
+^prefix:
+  test.use %seed : f32
+  cfg.br ^body(%extent: index, %seed: f32)
+^other:
+  cfg.br ^body(%extent: index, %seed: f32)
+^body(%size: index, %value: f32):
+  %vector = vector.splat %value : vector<[%size]xf32>
+  test.use %vector : vector<[%size]xf32>
+  cfg.br ^end
+^end:
+  func.return
+}
+
+// An opaque payload has no ordinary inactive constant.
+func.def @opaque_payload(%outer: i1, %inner: i1, %input: view<1xi32>) {
+  cfg.cond_br %outer, ^guard, ^other
+^guard:
+  cfg.cond_br %inner, ^prefix, ^end
+^prefix:
+  test.use %input : view<1xi32>
+  cfg.br ^body(%input: view<1xi32>)
+^other:
+  cfg.br ^body(%input: view<1xi32>)
+^body(%view: view<1xi32>):
+  test.use %view : view<1xi32>
+  cfg.br ^end
+^end:
+  func.return
+}
+
+// Ordinary nested control has no externally shared frontier to factor.
+func.def @nested(%outer: i1, %inner: i1, %value: i32) {
+  cfg.cond_br %outer, ^guard, ^end
+^guard:
+  cfg.cond_br %inner, ^prefix, ^end
+^prefix:
+  test.use %value : i32
+  cfg.br ^body
+^body:
+  test.use %value : i32
+  cfg.br ^end
+^end:
+  func.return
+}
+
+// Two independent frontiers in one function retain disjoint incoming edges.
+func.def @independent_frontiers(%first: i1, %second: i1, %left: i1, %right: i1, %value: i32) {
+  cfg.cond_br %first, ^left_guard, ^left_other
+^left_guard:
+  cfg.cond_br %left, ^left_prefix, ^middle
+^left_prefix:
+  test.use %value : i32
+  cfg.br ^left_shared(%value: i32)
+^left_other:
+  cfg.br ^left_shared(%value: i32)
+^left_shared(%left_value: i32):
+  test.use %left_value : i32
+  cfg.br ^middle
+^middle:
+  cfg.cond_br %second, ^right_guard, ^right_other
+^right_guard:
+  cfg.cond_br %right, ^right_prefix, ^exit
+^right_prefix:
+  test.use %value : i32
+  cfg.br ^right_shared(%value: i32)
+^right_other:
+  cfg.br ^right_shared(%value: i32)
+^right_shared(%right_value: i32):
+  test.use %right_value : i32
+  cfg.br ^exit
+^exit:
+  func.return
+}
+
+// ----
+func.def @continue_before_shared_loop(%serial: i1, %leader: i1, %next_row: i1, %next_column: i1, %value: i32) {
+  cfg.br ^row
+^row:
+  cfg.cond_br %next_row, ^mode, ^exit
+^mode:
+  cfg.cond_br %serial, ^guard, ^parallel
+^guard:
+  cfg.cond_br %leader, ^serial_entry, ^_bb6
+^serial_entry:
+  %46 = scalar.constant true : i1
+  cfg.br ^_bb7(%46: i1, %value: i32)
+^parallel:
+  test.use %value : i32
+  %47 = scalar.constant true : i1
+  cfg.br ^_bb7(%47: i1, %value: i32)
+^_bb6:
+  %48 = scalar.constant false : i1
+  %49 = scalar.constant 0 : i32
+  cfg.br ^_bb7(%48: i1, %49: i32)
+^_bb7(%44: i1, %45: i32):
+  cfg.cond_br %44, ^_bb8, ^latch
+^_bb8:
+  cfg.br ^shared(%45: i32)
+^shared(%initial: i32):
+  test.use %initial : i32
+  cfg.br ^column
+^column:
+  cfg.cond_br %next_column, ^body, ^complete
+^body:
+  test.use %initial : i32
+  cfg.br ^column
+^complete:
+  cfg.br ^latch
+^latch:
+  test.use %value : i32
+  cfg.br ^row
+^exit:
+  func.return
+}
+
+func.def @return_payload(%outer: i1, %inner: i1, %left: f32, %right: f32) -> (f32) {
+  cfg.cond_br %outer, ^guard, ^other
+^guard:
+  cfg.cond_br %inner, ^reject, ^prefix
+^reject:
+  test.use %left : f32
+  %57 = scalar.constant false : i1
+  %58 = scalar.constant 0.0 : f32
+  cfg.br ^_bb5(%57: i1, %58: f32, %left: f32)
+^prefix:
+  test.use %right : f32
+  %53 = scalar.constant true : i1
+  %54 = scalar.constant 0.0 : f32
+  cfg.br ^_bb5(%53: i1, %right: f32, %54: f32)
+^other:
+  %55 = scalar.constant true : i1
+  %56 = scalar.constant 0.0 : f32
+  cfg.br ^_bb5(%55: i1, %left: f32, %56: f32)
+^_bb5(%50: i1, %51: f32, %52: f32):
+  cfg.cond_br %50, ^_bb6, ^_bb8
+^_bb6:
+  cfg.br ^body(%51: f32)
+^body(%value: f32):
+  test.use %value : f32
+  cfg.br ^end(%value: f32)
+^_bb8:
+  cfg.br ^end(%52: f32)
+^end(%result: f32):
+  func.return %result : f32
+}
+
+func.def @shared_loop_header(%outer: i1, %inner: i1, %repeat: i1, %seed: i32) -> (i32) {
+  cfg.cond_br %outer, ^guard, ^other
+^guard:
+  cfg.cond_br %inner, ^prefix, ^reject
+^prefix:
+  test.use %seed : i32
+  %62 = scalar.constant true : i1
+  %63 = scalar.constant 0 : i32
+  cfg.br ^_bb5(%62: i1, %seed: i32, %63: i32)
+^reject:
+  %bad = scalar.constant -1 : i32
+  %66 = scalar.constant false : i1
+  %67 = scalar.constant 0 : i32
+  cfg.br ^_bb5(%66: i1, %67: i32, %bad: i32)
+^other:
+  %64 = scalar.constant true : i1
+  %65 = scalar.constant 0 : i32
+  cfg.br ^_bb5(%64: i1, %seed: i32, %65: i32)
+^_bb5(%59: i1, %60: i32, %61: i32):
+  cfg.cond_br %59, ^_bb6, ^_bb10
+^_bb6:
+  cfg.br ^header(%60: i32)
+^header(%iteration: i32):
+  cfg.cond_br %repeat, ^latch, ^complete
+^latch:
+  %increment = scalar.constant 1 : i32
+  %next = scalar.addi %iteration, %increment : i32
+  test.use %next : i32
+  cfg.br ^header(%next: i32)
+^complete:
+  cfg.br ^end(%iteration: i32)
+^_bb10:
+  cfg.br ^end(%61: i32)
+^end(%result: i32):
+  func.return %result : i32
+}
+
+func.def @dependent_use(%outer: i1, %inner: i1, %extent: index, %seed: f32) {
+  cfg.cond_br %outer, ^guard, ^other
+^guard:
+  cfg.cond_br %inner, ^prefix, ^_bb4
+^prefix:
+  test.use %seed : f32
+  %71 = scalar.constant true : i1
+  cfg.br ^_bb5(%71: i1, %extent: index, %seed: f32)
+^other:
+  %72 = scalar.constant true : i1
+  cfg.br ^_bb5(%72: i1, %extent: index, %seed: f32)
+^_bb4:
+  %73 = scalar.constant false : i1
+  %74 = index.constant 0 : index
+  %75 = scalar.constant 0.0 : f32
+  cfg.br ^_bb5(%73: i1, %74: index, %75: f32)
+^_bb5(%68: i1, %69: index, %70: f32):
+  cfg.cond_br %68, ^_bb6, ^end
+^_bb6:
+  cfg.br ^body(%69: index, %70: f32)
+^body(%size: index, %value: f32):
+  %vector = vector.splat %value : vector<[%size]xf32>
+  test.use %vector : vector<[%size]xf32>
+  cfg.br ^end
+^end:
+  func.return
+}
+
+func.def @opaque_payload(%outer: i1, %inner: i1, %input: view<1xi32>) {
+  cfg.cond_br %outer, ^guard, ^other
+^guard:
+  cfg.cond_br %inner, ^prefix, ^end
+^prefix:
+  test.use %input : view<1xi32>
+  cfg.br ^body(%input: view<1xi32>)
+^other:
+  cfg.br ^body(%input: view<1xi32>)
+^body(%view: view<1xi32>):
+  test.use %view : view<1xi32>
+  cfg.br ^end
+^end:
+  func.return
+}
+
+func.def @nested(%outer: i1, %inner: i1, %value: i32) {
+  cfg.cond_br %outer, ^guard, ^end
+^guard:
+  cfg.cond_br %inner, ^prefix, ^end
+^prefix:
+  test.use %value : i32
+  cfg.br ^body
+^body:
+  test.use %value : i32
+  cfg.br ^end
+^end:
+  func.return
+}
+
+func.def @independent_frontiers(%first: i1, %second: i1, %left: i1, %right: i1, %value: i32) {
+  cfg.cond_br %first, ^left_guard, ^left_other
+^left_guard:
+  cfg.cond_br %left, ^left_prefix, ^_bb4
+^left_prefix:
+  test.use %value : i32
+  %78 = scalar.constant true : i1
+  cfg.br ^_bb5(%78: i1, %value: i32)
+^left_other:
+  %79 = scalar.constant true : i1
+  cfg.br ^_bb5(%79: i1, %value: i32)
+^_bb4:
+  %80 = scalar.constant false : i1
+  %81 = scalar.constant 0 : i32
+  cfg.br ^_bb5(%80: i1, %81: i32)
+^_bb5(%76: i1, %77: i32):
+  cfg.cond_br %76, ^_bb6, ^middle
+^_bb6:
+  cfg.br ^left_shared(%77: i32)
+^left_shared(%left_value: i32):
+  test.use %left_value : i32
+  cfg.br ^middle
+^middle:
+  cfg.cond_br %second, ^right_guard, ^right_other
+^right_guard:
+  cfg.cond_br %right, ^right_prefix, ^_bb12
+^right_prefix:
+  test.use %value : i32
+  %84 = scalar.constant true : i1
+  cfg.br ^_bb13(%84: i1, %value: i32)
+^right_other:
+  %85 = scalar.constant true : i1
+  cfg.br ^_bb13(%85: i1, %value: i32)
+^_bb12:
+  %86 = scalar.constant false : i1
+  %87 = scalar.constant 0 : i32
+  cfg.br ^_bb13(%86: i1, %87: i32)
+^_bb13(%82: i1, %83: i32):
+  cfg.cond_br %82, ^_bb14, ^exit
+^_bb14:
+  cfg.br ^right_shared(%83: i32)
+^right_shared(%right_value: i32):
+  test.use %right_value : i32
+  cfg.br ^exit
+^exit:
+  func.return
+}

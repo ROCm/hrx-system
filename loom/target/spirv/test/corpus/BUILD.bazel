@@ -171,6 +171,7 @@ _SCENARIO_EXCLUDES = {
 }
 
 _ALL_PROFILE_XFAILS = {
+    "control/branch/convergence.loom:@return_convergence": "TARGET/033",
     # These static profiles do not promise exact floating comparison controls.
     "control/schedule/ordered_read_ahead.loom:@ordered_guarded_else_depth_2": "TARGET/003",
     "control/schedule/ordered_read_ahead.loom:@ordered_guarded_else_depth_3": "TARGET/003",
@@ -475,6 +476,7 @@ _ALL_ROOTS_XFAIL = [
 ]
 
 _SPIRV_EXECUTION_XFAILS = {
+    "control/branch/convergence.loom:@return_convergence_values": "TARGET/033",
     # Native fragment loads require 16-byte alignment; this source proves four.
     "control/branch/guards.loom:@selected_fragment_scale_values": "TARGET/050",
     "control/branch/structured.loom:@structured_branch_values": "TARGET/001",

@@ -343,6 +343,12 @@ static iree_status_t loom_spirv_map_argument(
       .abi_type = loom_type_none(),
       .body_type = loom_type_none(),
   };
+  // Internal callees inherit target facts without the entry-point export ABI.
+  // Their numeric ABI cannot inherit the caller's storage pointer plan.
+  if (bundle->export_plan->abi_kind == LOOM_TARGET_ABI_UNKNOWN &&
+      !loom_type_is_scalar(source_type) && !loom_type_is_vector(source_type)) {
+    return iree_ok_status();
+  }
   if (loom_type_equal(source_type, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX))) {
     // Address-domain ABI slots follow the source value's required carrier.
     // HAL reflection records that slot width for parameter packing.

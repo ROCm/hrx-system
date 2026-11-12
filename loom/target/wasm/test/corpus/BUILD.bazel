@@ -12,6 +12,7 @@ package(default_visibility = ["//visibility:public"])
 
 _KERNEL_SOURCES = [
     "control/branch/cfg.loom",
+    "control/branch/convergence.loom",
     "control/branch/effects.loom",
     "control/branch/guards.loom",
     "control/branch/half.loom",
@@ -126,6 +127,7 @@ _KERNEL_SOURCES = [
 
 _SCENARIO_KERNEL_SOURCES = [
     "control/branch/cfg.loom",
+    "control/branch/convergence.loom",
     "control/branch/effects.loom",
     "control/branch/guards.loom",
     "control/branch/half.loom",
