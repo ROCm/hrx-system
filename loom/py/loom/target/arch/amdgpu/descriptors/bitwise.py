@@ -13,6 +13,46 @@ from __future__ import annotations
 from .common import *
 
 
+def _s_bfe_low16_overlay(
+    literal: AmdgpuDescriptorOverlay,
+) -> AmdgpuDescriptorOverlay:
+    """Refines a scalar literal BFE to a defined low-halfword input."""
+    result, source = literal.operands
+    return replace(
+        literal,
+        descriptor_key=f"{literal.descriptor_key}_low16",
+        semantic_tag=f"{literal.semantic_tag}.low16_to_full32",
+        operands=(
+            result,
+            replace(
+                source,
+                descriptor_operand=_sgpr_operand(
+                    "value", register_part=_REG_PART_SGPR_LOW16
+                ),
+                size_exception_reason=_D16_PARTIAL_REGISTER_SIZE_REASON,
+            ),
+        ),
+        asm_forms=_asm(
+            mnemonic=f"{literal.mnemonic}_lit_low16",
+            native_assembly_mnemonic=literal.mnemonic,
+            results=("dst",),
+            operands=("value",),
+            immediates=("imm32",),
+        ),
+        # Control bits 4:0 select offset, and bits 22:16 select width.
+        # Multiples of 2^16 through 16*2^16 select only the defined low half.
+        immediates=(
+            replace(
+                literal.immediates[0],
+                flags=(ImmediateFlag.DEFAULT_VALUE,),
+                value_step=1 << 16,
+                unsigned_max=16 << 16,
+                default_value=16 << 16,
+            ),
+        ),
+    )
+
+
 def _s_bcnt1_i32_overlay(
     source_bit_count: int, encoding_condition: str
 ) -> AmdgpuDescriptorOverlay:
@@ -194,5 +234,6 @@ def _v_alignbit_b32_overlay() -> AmdgpuDescriptorOverlay:
 __all__ = (
     "_integer_bit_count_overlays",
     "_rdna_integer_bit_count_overlays",
+    "_s_bfe_low16_overlay",
     "_v_alignbit_b32_overlay",
 )

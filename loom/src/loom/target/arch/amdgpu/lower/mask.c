@@ -1599,6 +1599,10 @@ iree_status_t loom_amdgpu_lower_select(
       IREE_RETURN_IF_ERROR(loom_amdgpu_slice_lane_if_needed(
           context, source_op, low_false_value, lane_count, i, lane_type,
           &lane_false_value));
+      IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_scalar_carrier(
+          context, source_op, lane_true_value, lane_type, &lane_true_value));
+      IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_scalar_carrier(
+          context, source_op, lane_false_value, lane_type, &lane_false_value));
       if (lane_true_value == lane_false_value) {
         lane_results[i] = lane_true_value;
         continue;

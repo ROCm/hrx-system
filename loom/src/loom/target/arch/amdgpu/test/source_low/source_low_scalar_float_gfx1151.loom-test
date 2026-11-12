@@ -69,3 +69,81 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @scalar_float_
   %result = v_cndmask_b32 %rhs, %lhs, %condition
   return %result
 }
+
+// ====
+
+amdgpu.target<gfx1151> @target
+
+// A halfword writer must define the whole carrier before returning it.
+func.def target(@target) @scalar_half_return(%input: i32) -> (f16) {
+  %value = scalar.bitcast %input : i32 to f32
+  %half = scalar.fptrunc %value : f32 to f16
+  func.return %half : f16
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @scalar_half_return(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %half = s_cvt_f16_f32 %value
+  %7 = s_bfe_u32_lit_low16 %half
+  return %7
+}
+
+// ====
+
+amdgpu.target<gfx1151> @target
+
+func.def target(@target) @scalar_half_select(%lhs: i32, %rhs: i32) -> (f16) {
+  %lhs_float = scalar.bitcast %lhs : i32 to f32
+  %rhs_float = scalar.bitcast %rhs : i32 to f32
+  %lhs_half = scalar.fptrunc %lhs_float : f32 to f16
+  %rhs_half = scalar.fptrunc %rhs_float : f32 to f16
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %result = scf.select %condition, %lhs_half, %rhs_half : f16
+  func.return %result : f16
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @scalar_half_select(%lhs_float: reg<amdgpu.sgpr>, %rhs_float: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %lhs_half = s_cvt_f16_f32 %lhs_float
+  %rhs_half = s_cvt_f16_f32 %rhs_float
+  %condition = s_cmp_lt_i32 %lhs_float, %rhs_float
+  %15 = s_bfe_u32_lit_low16 %lhs_half
+  %16 = s_bfe_u32_lit_low16 %rhs_half
+  %result = s_cselect_b32 %15, %16, %condition
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1151> @target
+
+func.def target(@target) @scalar_half_loop(%input: i32, %count: index) -> (f16) {
+  %value = scalar.bitcast %input : i32 to f32
+  %initial = scalar.fptrunc %value : f32 to f16
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %result = scf.for %iteration = [%begin to %count step %step](%carried = %initial : f16) -> (f16) {
+    %next = scalar.addf %carried, %initial : f16
+    scf.yield %next : f16
+  }
+  func.return %result : f16
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @scalar_half_loop(%value: reg<amdgpu.sgpr>, %count: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %initial = s_cvt_f16_f32 %value
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
+  %25 = v_bfe_u32_offset_0_width_inline_low16 %initial
+  low.br ^_bb1(%begin: reg<amdgpu.sgpr>, %25: reg<amdgpu.vgpr>)
+^_bb1(%iteration: reg<amdgpu.sgpr>, %carried: reg<amdgpu.vgpr>):
+  %26 = s_cmp_lt_i32 %iteration, %count
+  low.cond_br %26, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %next = v_add_f16 %carried, %25
+  %29 = s_add_u32 %iteration, %step
+  %30 = v_bfe_u32_offset_0_width_inline_low16 %next
+  low.br ^_bb1(%29: reg<amdgpu.sgpr>, %30: reg<amdgpu.vgpr>)
+^_bb3:
+  return %carried
+}

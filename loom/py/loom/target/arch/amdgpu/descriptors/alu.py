@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from .bitwise import _v_alignbit_b32_overlay
+from .bitwise import _s_bfe_low16_overlay, _v_alignbit_b32_overlay
 from .common import *
 
 _SDWA_DST_UNUSED_IMMEDIATE = Immediate(
@@ -2801,6 +2801,10 @@ def _integer_bitwise_shift_overlays(
         _s_bfe_b32_literal_overlay(is_signed=False),
         _s_bfe_b32_overlay(is_signed=True),
         _s_bfe_b32_literal_overlay(is_signed=True),
+        *(
+            _s_bfe_low16_overlay(_s_bfe_b32_literal_overlay(is_signed=signed))
+            for signed in (False, True)
+        ),
         _v_and_b32_overlay(),
         _v_and_b32_src0_inline_overlay(),
         _v_and_b32_literal_overlay(),
