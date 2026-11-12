@@ -119,15 +119,20 @@ def _windows_toolchain_repository_impl(repository_ctx):
         fail("Could not query LLVM resource directory:\n" + resource_result.stderr)
     resource_root = _required_path(repository_ctx, resource_result.stdout.strip())
     _project(repository_ctx, resource_root.get_child("include"), "resource/include")
-    _project(
-        repository_ctx,
-        resource_root.get_child("lib", "windows", "clang_rt.builtins-x86_64.lib"),
-        "runtime/clang_rt.builtins-x86_64.lib",
-    )
 
     runtime_root = repository_ctx.getenv("WINDOWS_COMPILER_RT_ROOT")
     if runtime_root:
         runtime_root = _required_path(repository_ctx, runtime_root)
+    builtins_path = resource_root.get_child("lib", "windows", "clang_rt.builtins-x86_64.lib")
+    if not builtins_path.exists and runtime_root:
+        builtins_path = runtime_root.get_child("clang_rt.builtins-x86_64.lib")
+    _project(
+        repository_ctx,
+        builtins_path,
+        "runtime/clang_rt.builtins-x86_64.lib",
+    )
+
+    if runtime_root:
         for name in [
             "clang_rt.asan_dynamic-x86_64.dll",
             "clang_rt.asan_dynamic-x86_64.lib",

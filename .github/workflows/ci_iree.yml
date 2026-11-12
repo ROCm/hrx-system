@@ -246,6 +246,7 @@ jobs:
             {
               echo "LLVM_ROOT=${output_dir}/rocm-root/lib/llvm"
               echo "WINDOWS_CROSS_ROOT=${output_dir}/windows-toolchain"
+              echo "WINDOWS_COMPILER_RT_ROOT=${output_dir}/windows-toolchain/compiler-rt"
               echo "WINSDK_ROOT=${output_dir}/windows-toolchain/sdk"
               echo "MSVC_WINE_ROOT=${output_dir}/msvc-wine"
               echo "WINEARCH=win64"
