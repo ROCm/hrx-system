@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cstdint>
 #include <limits>
+#include <semaphore>
 #include <set>
 #include <thread>
 #include <vector>
@@ -204,16 +205,29 @@ SlotAddress AddressOf(const hrx_event_timestamp_slot_t* slot) {
                      hrx_event_timestamp_slot_offset(slot)};
 }
 
+struct AllocationGate {
+  // Announces entry into the held allocation call.
+  std::binary_semaphore entered{0};
+  // Permits the allocation to continue after independent pool work completes.
+  std::binary_semaphore resume{0};
+};
+
 // Forwards to the system allocator and counts the allocations it serves.
 struct CountingAllocator {
   // Number of allocation requests served by this fixture.
   std::atomic<int64_t> allocation_count{0};
+  // Optional single allocation held until its gate is released by the test.
+  std::atomic<AllocationGate*> next_gate{nullptr};
 
   static iree_status_t Control(void* self, iree_allocator_command_t command,
                                const void* params, void** inout_ptr) {
     auto* counter = static_cast<CountingAllocator*>(self);
     if (command != IREE_ALLOCATOR_COMMAND_FREE) {
       counter->allocation_count.fetch_add(1, std::memory_order_relaxed);
+      if (auto* gate = counter->next_gate.exchange(nullptr)) {
+        gate->entered.release();
+        gate->resume.acquire();
+      }
     }
     const iree_allocator_t system = iree_allocator_system();
     return system.ctl(system.self, command, params, inout_ptr);
@@ -349,6 +363,35 @@ TEST_F(EventTimestampPoolTest, ReleasedSlotsAreRecycled) {
   EXPECT_EQ(first_addresses, AddressesOf(second))
       << "the pool grew instead of reusing slots that were handed back";
   for (auto* slot : second) {
+    hrx_event_timestamp_slot_release(slot, nullptr, 0);
+  }
+}
+
+TEST_F(EventTimestampPoolTest, GrowthDoesNotBlockReleaseOrWarmReuse) {
+  auto* first = Acquire();
+  const size_t capacity =
+      iree_hal_buffer_byte_length(hrx_event_timestamp_slot_buffer(first)) /
+      sizeof(uint64_t);
+  auto held = AcquireMany(capacity - 1);
+  AllocationGate gate;
+  counter_.next_gate.store(&gate);
+  hrx_event_timestamp_slot_t* grown = nullptr;
+  std::thread grow([&] { grown = Acquire(); });
+  gate.entered.acquire();
+
+  const SlotAddress first_address = AddressOf(first);
+  hrx_event_timestamp_slot_release(first, nullptr, 0);
+  const int64_t allocations_before_reuse = AllocationCount();
+  auto* recycled = Acquire();
+  EXPECT_TRUE(AddressOf(recycled) == first_address);
+  EXPECT_EQ(AllocationCount(), allocations_before_reuse);
+  hrx_event_timestamp_slot_release(recycled, nullptr, 0);
+
+  // Both the return and reuse finished before the native allocation resumed.
+  gate.resume.release();
+  grow.join();
+  hrx_event_timestamp_slot_release(grown, nullptr, 0);
+  for (auto* slot : held) {
     hrx_event_timestamp_slot_release(slot, nullptr, 0);
   }
 }

@@ -73,11 +73,11 @@ struct hrx_event_timestamp_slot_t {
   // Byte offset of this slot's tick within the slab buffer. Always a multiple
   // of 8.
   iree_device_size_t offset;
-  // Next slot on whichever pool list holds this slot, NULL at the tail.
-  // Written only under the pool mutex and meaningless while the slot is held.
+  // Next slot on a pool or detached retirement list, NULL at the tail.
+  // Mutated under the pool mutex or by the exclusive detached-list owner.
   hrx_event_timestamp_slot_t* next;
   // Semaphore whose |retire_value| retires the device write outstanding
-  // against this slot, retained. NULL unless the slot is on the pending list.
+  // against this slot, retained. NULL unless the slot awaits retirement.
   iree_hal_semaphore_t* retire_semaphore;
   // Payload value of |retire_semaphore| that retires the outstanding write.
   uint64_t retire_value;
@@ -168,10 +168,12 @@ void hrx_event_timestamp_pool_deinitialize(hrx_event_timestamp_pool_t* pool) {
   IREE_TRACE_ZONE_END(z0);
 }
 
-// Allocates a slab of |slot_count| slots and pushes every one of its slots onto
-// the pool free list. Called with |pool->mutex| held.
-static iree_status_t hrx_event_timestamp_pool_grow(
-    hrx_event_timestamp_pool_t* pool, iree_host_size_t slot_count) {
+// Constructs a private slab without holding the pool mutex. The acquiring
+// thread publishes all of its slots together after allocation succeeds.
+static iree_status_t hrx_event_timestamp_slab_allocate(
+    hrx_event_timestamp_pool_t* pool, iree_host_size_t slot_count,
+    hrx_event_timestamp_slab_t** out_slab) {
+  *out_slab = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   hrx_event_timestamp_slab_t* slab = NULL;
@@ -197,57 +199,21 @@ static iree_status_t hrx_event_timestamp_pool_grow(
   }
 
   slab->pool = pool;
-  slab->next = pool->slabs;
+  slab->next = NULL;
   slab->buffer = buffer;
   slab->slot_count = slot_count;
-  pool->slabs = slab;
-
-  // Reversed so the free list hands out ascending offsets, keeping slots for
-  // records made together on the same few cache lines.
-  for (iree_host_size_t i = slot_count; i > 0; --i) {
-    hrx_event_timestamp_slot_t* slot = &slab->slots[i - 1];
+  for (iree_host_size_t i = 0; i < slot_count; ++i) {
+    hrx_event_timestamp_slot_t* slot = &slab->slots[i];
     slot->slab = slab;
-    slot->offset = (iree_device_size_t)(i - 1) * HRX_EVENT_TIMESTAMP_SLOT_SIZE;
+    slot->offset = (iree_device_size_t)i * HRX_EVENT_TIMESTAMP_SLOT_SIZE;
     iree_atomic_ref_count_init_value(&slot->ref_count, 0);
     slot->retire_semaphore = NULL;
     slot->retire_value = 0;
-    slot->next = pool->free_slots;
-    pool->free_slots = slot;
+    slot->next = i + 1 < slot_count ? &slab->slots[i + 1] : NULL;
   }
-
+  *out_slab = slab;
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
-}
-
-// Moves every pending slot whose device write has retired onto the free list.
-// Called with |pool->mutex| held. A failed public semaphore does not prove that
-// an accepted device write has stopped. Its slot remains pending until
-// teardown.
-static void hrx_event_timestamp_pool_drain_pending(
-    hrx_event_timestamp_pool_t* pool) {
-  hrx_event_timestamp_slot_t* slot = pool->pending_slots;
-  hrx_event_timestamp_slot_t* still_pending = NULL;
-  while (slot != NULL) {
-    hrx_event_timestamp_slot_t* next = slot->next;
-    uint64_t current_value = 0;
-    iree_status_t status =
-        iree_hal_semaphore_query(slot->retire_semaphore, &current_value);
-    const bool write_retired =
-        iree_status_is_ok(status) && current_value >= slot->retire_value;
-    iree_status_ignore(status);
-    if (write_retired) {
-      iree_hal_semaphore_release(slot->retire_semaphore);
-      slot->retire_semaphore = NULL;
-      slot->retire_value = 0;
-      slot->next = pool->free_slots;
-      pool->free_slots = slot;
-    } else {
-      slot->next = still_pending;
-      still_pending = slot;
-    }
-    slot = next;
-  }
-  pool->pending_slots = still_pending;
 }
 
 iree_status_t hrx_event_timestamp_pool_acquire(
@@ -255,18 +221,62 @@ iree_status_t hrx_event_timestamp_pool_acquire(
   *out_slot = NULL;
   iree_slim_mutex_lock(&pool->mutex);
 
-  iree_status_t status = iree_ok_status();
-  if (pool->free_slots == NULL) {
-    // Recover slots whose writes have retired since they were released before
-    // asking the device for more memory.
-    hrx_event_timestamp_pool_drain_pending(pool);
+  if (!pool->free_slots && pool->pending_slots) {
+    // Detach zero-reference slots while checking their native completion
+    // points. Other threads can return and reuse slots throughout the queries.
+    hrx_event_timestamp_slot_t* pending = pool->pending_slots;
+    pool->pending_slots = NULL;
+    iree_slim_mutex_unlock(&pool->mutex);
+    hrx_event_timestamp_slot_t* ready = NULL;
+    hrx_event_timestamp_slot_t** ready_tail = &ready;
+    hrx_event_timestamp_slot_t* still_pending = NULL;
+    hrx_event_timestamp_slot_t** pending_tail = &still_pending;
+    while (pending) {
+      hrx_event_timestamp_slot_t* slot = pending;
+      pending = slot->next;
+      uint64_t current_value = 0;
+      iree_status_t status =
+          iree_hal_semaphore_query(slot->retire_semaphore, &current_value);
+      const bool write_retired =
+          iree_status_is_ok(status) && current_value >= slot->retire_value;
+      iree_status_ignore(status);
+      if (write_retired) {
+        iree_hal_semaphore_release(slot->retire_semaphore);
+        slot->retire_semaphore = NULL;
+        slot->retire_value = 0;
+        *ready_tail = slot;
+        ready_tail = &slot->next;
+      } else {
+        // A failed semaphore does not prove retirement of an accepted write.
+        *pending_tail = slot;
+        pending_tail = &slot->next;
+      }
+    }
+    iree_slim_mutex_lock(&pool->mutex);
+    *ready_tail = pool->free_slots;
+    pool->free_slots = ready;
+    *pending_tail = pool->pending_slots;
+    pool->pending_slots = still_pending;
   }
-  if (pool->free_slots == NULL) {
+
+  iree_status_t status = iree_ok_status();
+  if (!pool->free_slots) {
     const iree_host_size_t slot_count = pool->next_slab_slot_count;
-    status = hrx_event_timestamp_pool_grow(pool, slot_count);
-    if (iree_status_is_ok(status) &&
-        slot_count < HRX_EVENT_TIMESTAMP_MAX_SLOT_COUNT) {
-      pool->next_slab_slot_count = slot_count * 2;
+    iree_slim_mutex_unlock(&pool->mutex);
+    hrx_event_timestamp_slab_t* slab = NULL;
+    status = hrx_event_timestamp_slab_allocate(pool, slot_count, &slab);
+    iree_slim_mutex_lock(&pool->mutex);
+    if (iree_status_is_ok(status)) {
+      // Concurrent misses may each build a slab. Keep every completed slab
+      // reusable; neither growth nor a stalled query prevents warm recycling.
+      slab->next = pool->slabs;
+      pool->slabs = slab;
+      slab->slots[slot_count - 1].next = pool->free_slots;
+      pool->free_slots = &slab->slots[0];
+      if (slot_count == pool->next_slab_slot_count &&
+          slot_count < HRX_EVENT_TIMESTAMP_MAX_SLOT_COUNT) {
+        pool->next_slab_slot_count = slot_count * 2;
+      }
     }
   }
   if (iree_status_is_ok(status)) {
@@ -298,7 +308,6 @@ void hrx_event_timestamp_slot_release(hrx_event_timestamp_slot_t* slot,
   }
 
   hrx_event_timestamp_pool_t* pool = slot->slab->pool;
-  iree_slim_mutex_lock(&pool->mutex);
 
   // Queried here so the common already-retired case skips the pending list
   // rather than making the next acquire pay for the query.
@@ -311,6 +320,7 @@ void hrx_event_timestamp_slot_release(hrx_event_timestamp_slot_t* slot,
     iree_status_ignore(status);
   }
 
+  iree_slim_mutex_lock(&pool->mutex);
   if (write_retired) {
     slot->retire_semaphore = NULL;
     slot->retire_value = 0;

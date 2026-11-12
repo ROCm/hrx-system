@@ -68,19 +68,20 @@ typedef struct hrx_event_timestamp_slot_t hrx_event_timestamp_slot_t;
 typedef struct hrx_event_timestamp_slab_t hrx_event_timestamp_slab_t;
 
 // Pool of device timestamp slots owned by a device or binding context.
-// Thread-safe once initialized: the lists and slabs are guarded by |mutex|,
-// and the host allocator is constant from initialize onward. Initialization
-// and teardown are exclusive to the owner, so neither takes the mutex.
+// Thread-safe once initialized: the lists and slabs are guarded by |mutex|.
+// Native allocations and completion queries run outside the lock. The host
+// allocator is constant from initialize onward. Initialization and teardown
+// are exclusive to the owner, so neither takes the mutex.
 typedef struct hrx_event_timestamp_pool_t {
   // Coherent host-visible source, retained once installed under |mutex|.
   // NULL until the owner supplies its lazily constructed source.
   iree_hal_pool_t* memory_pool;
   // Allocator the host-side slab and slot records come from.
   iree_allocator_t host_allocator;
-  // Guards every field below, and each slot record's list linkage and
-  // retirement condition. A slot's reference count is not among them: it is
-  // atomic so a reader can take a reference under the event mutex the record's
-  // point is published behind without nesting this one underneath it.
+  // Guards source installation and the lists below. Detached zero-reference
+  // slots belong exclusively to the thread checking their retirement points.
+  // A slot's reference count is atomic so a point reader need not take this
+  // lock while retaining a slot.
   iree_slim_mutex_t mutex;
   // Head of the slab list. Slabs are released only at deinitialize, so a slot's
   // storage never moves while it is in use.
