@@ -369,6 +369,28 @@ static bool amdf_gpu_kfd_user_queue_select_plan(
   return false;
 }
 
+// Native plans provide page-aligned storage in complete 64-byte blocks.
+// Initialize final packet bytes before activation, without reading the mapping
+// or zeroing an AQL header before replacing it with INVALID.
+static void amdf_gpu_kfd_user_queue_initialize_ring(
+    const amdf_gpu_umd_user_queue_t* queue) {
+  // AQL type 1 is INVALID; zero would admit a vendor packet.
+  const uint32_t primary_header = queue->plan.aql.xcc_count ? 1u : 0u;
+  uint64_t first_word = 0;
+  memcpy(&first_word, &primary_header, sizeof(primary_header));
+  const size_t primary_begin = queue->plan.ring.primary_byte_offset;
+  const size_t primary_end =
+      primary_begin + queue->plan.ring.primary_byte_length;
+  volatile uint64_t* words = (volatile uint64_t*)queue->ring.host_pointer;
+  for (size_t offset = 0; offset < queue->plan.ring.storage.byte_length;
+       offset += 64, words += 8) {
+    words[0] = offset >= primary_begin && offset < primary_end ? first_word : 0;
+    for (uint32_t i = 1; i < 8; ++i) {
+      words[i] = 0;
+    }
+  }
+}
+
 amdf_status_t amdf_gpu_umd_user_queue_create(
     amdf_gpu_umd_device_t* device,
     const amdf_gpu_umd_user_queue_create_info_t* create_info,
@@ -445,7 +467,7 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
         &queue->retirement_flush_trigger);
   }
   if (amdf_status_is_ok(status)) {
-    memset(queue->ring.host_pointer, 0, queue->plan.ring.storage.byte_length);
+    amdf_gpu_kfd_user_queue_initialize_ring(queue);
     memset(queue->control.host_pointer, 0,
            queue->plan.control.storage.byte_length);
   }
@@ -487,11 +509,6 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
     inactive_signal->event_mailbox_address =
         create_info->inactive_event.mailbox_address;
     inactive_signal->event_id = create_info->inactive_event.interrupt_context;
-    for (size_t offset = 0; offset < queue->plan.ring.primary_byte_length;
-         offset += 64) {
-      // Zero is a vendor packet, not an empty AQL slot.
-      *(uint32_t*)((uint8_t*)queue->ring.host_pointer + offset) = 1;
-    }
   }
 
   // AQL INVALID headers must reach the ring before native queue activation.
