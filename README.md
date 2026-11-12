@@ -6,10 +6,17 @@ support, and `loom-serve`: an inference engine that hosts multiple models and
 modalities together. The pieces can be embedded independently, from compiling
 one program for an existing runtime to running a shared model server.
 
+> [!TIP]
+> **To run models or troubleshoot a model, start at [loom-dev](https://loom-fun.github.io/loom-dev/).**
+> [Loom skills](https://github.com/loom-fun/loom-skills) help your agent set up,
+> run, and adapt models; the [Loom docs](https://rocm.github.io/hrx-system/loom/)
+> cover installation, serving, and authoring.
+>
+> `hrx-system` is the engineering repository for Loom's compiler, runtime, and tools.
+
 **[Documentation](https://rocm.github.io/hrx-system/loom/) ·
 [Get the SDK](https://rocm.github.io/hrx-system/loom/getting-started/acquiring-loom/) ·
-[Build from source](BUILDING.md) ·
-[Community landing page](https://loom-fun.github.io/loom-dev/)**
+[Build from source](BUILDING.md)**
 
 > [!NOTE]
 > This is a tech preview. Interfaces and target coverage are evolving; see the
@@ -68,11 +75,9 @@ the implementation in this repository.
 ## Build on it
 
 The [Loom library](https://github.com/ROCm/hrx-loom-library) is the home for
-reusable model programs, kernels, and their tests.
-[HRX solutions](https://github.com/ROCm/hrx-solutions) provides worked applications
-and integration examples. Community efforts such as
+reusable model programs, kernels, and their tests. Community efforts such as
 [loom-fun's models](https://huggingface.co/loom-fun) and
-[authoring skills](https://loom-fun.github.io/loom-skills/) show how that corpus
+[authoring skills](https://github.com/loom-fun/loom-skills) show how that corpus
 can grow independently of the compiler and server.
 
 For changes to the core, start with [Building](BUILDING.md) and

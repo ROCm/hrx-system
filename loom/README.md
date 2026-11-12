@@ -6,10 +6,16 @@ in Loom IR, linked with reusable libraries, and specialized for the target and
 workload. The SDK brings that compiler together with execution libraries, tests,
 benchmarks, and a multi-model inference server.
 
-The [documentation site](https://rocm.github.io/hrx-system/loom/) introduces the
-project and covers installed use. The [repository overview](../README.md) maps
-the full system. This page is the entry point for working with Loom's source
-and embedding its components.
+> [!TIP]
+> **To run models or troubleshoot a model, start at [loom-dev](https://loom-fun.github.io/loom-dev/).**
+> [Loom skills](https://github.com/loom-fun/loom-skills) help your agent set up,
+> run, and adapt models; the [Loom docs](https://rocm.github.io/hrx-system/loom/)
+> cover installation, serving, and authoring.
+>
+> `hrx-system` is the engineering repository for Loom's compiler, runtime, and tools.
+
+The [repository overview](../README.md) maps the compiler, services, and execution
+libraries across the monorepo.
 
 ## Choose an entry point
 
