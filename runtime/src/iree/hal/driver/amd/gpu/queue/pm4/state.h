@@ -253,6 +253,24 @@ static_assert(
         iree_hardware_destructive_interference_size,
     "completion credit and enrollment occupy one observer cache line");
 
+// Reports an issued failure without granting completion or release credit.
+// Consumes status; the capture remains live through its native pieces.
+void iree_hal_amd_gpu_pm4_fail_submission(
+    iree_hal_amd_gpu_pm4_queue_t* queue,
+    iree_hal_amd_gpu_pm4_submission_t* submission, iree_status_t status);
+
+// Rejects an unpublished capture and releases its final host ownership.
+// Consumes status and submission; previously accepted pieces retain their refs.
+void iree_hal_amd_gpu_pm4_abandon(iree_hal_amd_gpu_pm4_queue_t* queue,
+                                  iree_hal_amd_gpu_pm4_submission_t* submission,
+                                  iree_status_t status);
+
+// Latches a native failure, closes acceptance, and schedules failure fanout.
+// Neither publication nor native failure grants reclamation credit.
+void iree_hal_amd_gpu_pm4_fail_native(iree_hal_amd_gpu_pm4_queue_t* queue,
+                                      amdf_status_t status,
+                                      const char* operation);
+
 // Frees joined queue metadata after the device releases native ownership.
 void iree_hal_amd_gpu_pm4_queue_destroy(iree_hal_queue_t* queue);
 

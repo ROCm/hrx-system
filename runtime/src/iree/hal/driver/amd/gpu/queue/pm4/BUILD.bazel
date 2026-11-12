@@ -520,9 +520,11 @@ iree_runtime_cc_library(
     name = "queue",
     srcs = [
         "lifecycle.c",
+        "publication.c",
         "queue.c",
     ],
     hdrs = [
+        "publication.h",
         "queue.h",
         "state.h",
     ],
