@@ -1,0 +1,96 @@
+// RUN: pass select-templates
+
+template.decl @demo.predicate_fallback(%m: index) -> (index)
+
+template.def<@demo.predicate_fallback> priority(10) @aligned(%m: index) -> (index) where [multiple_of(%m, 16)] {
+  template.return %m : index
+}
+
+template.def<@demo.predicate_fallback> priority(1) @fallback(%m: index) -> (index) {
+  template.return %m : index
+}
+
+func.def public @entry() -> (index) {
+  %n = index.constant 15 : index
+  %result = template.apply<@demo.predicate_fallback>(%n) : (index) -> (index)
+  func.return %result : index
+}
+
+// ----
+template.decl @demo.predicate_fallback(%m: index) -> (index)
+
+template.def<@demo.predicate_fallback> priority(1) @fallback(%m: index) -> (index) {
+  template.return %m : index
+}
+
+func.def public @entry() -> (index) {
+  %n = index.constant 15 : index
+  %result = template.call @fallback(%n) : (index) -> (index)
+  func.return %result : index
+}
+
+// ====
+
+// RUN: pass select-templates{mode=final}
+
+template.decl @demo.condition_fallback(%value: i32) -> (i32)
+
+template.def<@demo.condition_fallback> requires [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+template.def<@demo.condition_fallback> priority(1) @fallback(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.condition_fallback>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+template.decl @demo.condition_fallback(%value: i32) -> (i32)
+
+template.def<@demo.condition_fallback> priority(1) @fallback(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = template.call @fallback(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// RUN: pass select-templates{mode=final}
+
+test.target<low_core> @low_core
+
+template.decl @demo.identity_fallback(%value: i32) -> (i32)
+
+template.def<@demo.identity_fallback> target(@low_core) priority(10) @targeted(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+template.def<@demo.identity_fallback> priority(1) @fallback(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.identity_fallback>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<low_core> @low_core
+
+template.decl @demo.identity_fallback(%value: i32) -> (i32)
+
+template.def<@demo.identity_fallback> priority(1) @fallback(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = template.call @fallback(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
