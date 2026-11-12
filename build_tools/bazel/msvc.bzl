@@ -41,11 +41,16 @@ def _iree_msvc_masm_object_impl(ctx):
     arguments.add_all(masm_toolchain.arguments)
     arguments.add("/Fo" + object_file.path)
     arguments.add(source_file.path)
-    environment = cc_common.get_environment_variables(
+
+    # Custom actions do not inherit --action_env when an explicit environment
+    # is supplied. Preserve that declared environment before adding the
+    # selected C/C++ toolchain variables.
+    environment = dict(ctx.configuration.default_shell_env)
+    environment.update(cc_common.get_environment_variables(
         action_name = ASSEMBLE_ACTION_NAME,
         feature_configuration = feature_configuration,
         variables = compile_variables,
-    )
+    ))
 
     ctx.actions.run(
         arguments = [arguments],
