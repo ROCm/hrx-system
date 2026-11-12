@@ -1,0 +1,213 @@
+// RUN: pass select-templates{mode=final,rewrite=inline},canonicalize,symbol-dce
+#include <loomcxx/template.h>
+#include <loomcxx/view.h>
+namespace t = loom::type;
+using Family = t::view<t::shape<t::dynamic, 8, t::dynamic>, const float>;
+using Fixed = t::view<t::shape<4, 8, 6>, const float>;
+LOOM_TEMPLATE_DECL("input.read") float read(Family value);
+LOOM_TEMPLATE_DEF(read)
+float read_fixed(Fixed value) { return loom::view::load(value, 3u, 7u, 5u); }
+float entry(Fixed value) { return loom::template_apply<read>(value); }
+
+// ----
+func.def public @entry(%value: view<4x8x6xf32>) -> (f32) {
+  %26 = index.constant 3 : index
+  %25 = index.constant 7 : index
+  %24 = index.constant 5 : index
+  %22 = view.load %value[%26, %25, %24] : view<4x8x6xf32> -> f32
+  func.return %22 : f32
+}
+
+// ====
+// RUN: pass select-templates{mode=final,rewrite=inline},canonicalize,symbol-dce
+#include <loomcxx/template.h>
+#include <loomcxx/view.h>
+namespace t = loom::type;
+using Fixed = t::view<t::shape<16>, const float>;
+using Dynamic = t::view<t::shape<t::dynamic>, const float>;
+LOOM_TEMPLATE_DECL("input.read") float read(Fixed value);
+LOOM_TEMPLATE_DEF(read)
+float read_dynamic(Dynamic value) { return loom::view::load(value, 15u); }
+float entry(Fixed value) { return loom::template_apply<read>(value); }
+
+// ----
+func.def public @entry(%value: view<16xf32>) -> (f32) {
+  %14 = index.constant 15 : index
+  %12 = view.load %value[%14] : view<16xf32> -> f32
+  func.return %12 : f32
+}
+
+// ====
+// RUN: pass select-templates{mode=final,rewrite=inline},canonicalize,symbol-dce
+#include <loomcxx/template.h>
+#include <loomcxx/view.h>
+namespace t = loom::type;
+using Layout = t::encoding<loom::encoding::role::layout, 1>;
+using Family = t::view<t::shape<t::dynamic>, const float, Layout>;
+using Fixed = t::view<t::shape<16>, const float>;
+LOOM_TEMPLATE_DECL("input.read") float read(Family value);
+LOOM_TEMPLATE_DEF(read)
+float read_dense(Fixed value) { return loom::view::load(value, 15u); }
+float entry(Fixed value) { return loom::template_apply<read>(value); }
+
+// ----
+func.def public @entry(%value: view<16xf32>) -> (f32) {
+  %18 = index.constant 15 : index
+  %16 = view.load %value[%18] : view<16xf32> -> f32
+  func.return %16 : f32
+}
+
+// ====
+// RUN: pass select-templates{mode=final,rewrite=inline},canonicalize,symbol-dce
+#include <loomcxx/template.h>
+#include <loomcxx/view.h>
+namespace t = loom::type;
+using Layout = t::encoding<loom::encoding::role::layout, 1>;
+using Family = t::view<t::shape<16>, const float>;
+using Dynamic = t::view<t::shape<t::dynamic>, const float, Layout>;
+LOOM_TEMPLATE_DECL("input.read") float read(Family value);
+LOOM_TEMPLATE_DEF(read)
+float read_dynamic(Dynamic value) { return loom::view::load(value, 15u); }
+float entry(Family value) { return loom::template_apply<read>(value); }
+
+// ----
+func.def public @entry(%value: view<16xf32>) -> (f32) {
+  %15 = index.constant 15 : index
+  %13 = view.load %value[%15] : view<16xf32> -> f32
+  func.return %13 : f32
+}
+
+// ====
+// RUN: pass select-templates{mode=final,rewrite=inline},canonicalize,symbol-dce
+#include <loomcxx/template.h>
+#include <loomcxx/vector.h>
+namespace t = loom::type;
+using Dynamic = t::vector<t::shape<t::dynamic>, float>;
+using Fixed = float __attribute__((ext_vector_type(4)));
+LOOM_TEMPLATE_DECL("input.reduce") float reduce(Dynamic value);
+LOOM_TEMPLATE_DEF(reduce)
+float reduce_four(Fixed value) { return value[0] + value[3]; }
+float entry(Fixed value) { return loom::template_apply<reduce>(value); }
+
+// ----
+func.def public @entry(%value: vector<4xf32>) -> (f32) {
+  %19 = vector.extract %value[0] : vector<4xf32> -> f32
+  %18 = vector.extract %value[3] : vector<4xf32> -> f32
+  %16 = scalar.addf %19, %18 : f32
+  func.return %16 : f32
+}
+
+// ====
+// RUN: pass select-templates{mode=final,rewrite=inline},canonicalize,symbol-dce
+#include <loomcxx/template.h>
+#include <loomcxx/pipeline.h>
+namespace t = loom::type;
+using Dynamic = t::tile<t::shape<t::dynamic, 4, t::dynamic>, float>;
+using Fixed = t::tile<t::shape<2, 4, 8>, float>;
+LOOM_TEMPLATE_DECL("input.classify") int classify(Dynamic value);
+LOOM_TEMPLATE_DEF(classify)
+int classify_fixed(Fixed value) { return 248; }
+int entry(Fixed value) { return loom::template_apply<classify>(value); }
+
+// ----
+func.def public @entry(%value: tile<2x4x8xf32>) -> (i32) {
+  %13 = scalar.constant 248 : i32
+  func.return %13 : i32
+}
+
+// ====
+// RUN: pass select-templates{mode=final,rewrite=inline},canonicalize,symbol-dce
+#include <loomcxx/template.h>
+#include <loomcxx/check.h>
+namespace t = loom::type;
+using Dynamic = t::tensor<t::shape<t::dynamic>, float>;
+using Fixed = t::tensor<t::shape<16>, float>;
+LOOM_TEMPLATE_DECL("input.classify") int classify(Dynamic value);
+LOOM_TEMPLATE_DEF(classify)
+int classify_fixed(Fixed value) { return 16; }
+int entry(Fixed value) { return loom::template_apply<classify>(value); }
+
+// ----
+func.def public @entry(%value: tensor<16xf32>) -> (i32) {
+  %10 = scalar.constant 16 : i32
+  func.return %10 : i32
+}
+
+// ====
+// RUN: format bytecode
+// The result owns its dependent coordinates; input selection does not supply them.
+#include <loomcxx/template.h>
+#include <loomcxx/view.h>
+namespace t = loom::type;
+using Dynamic = t::view<t::shape<t::dynamic>, float>;
+using Fixed = t::view<t::shape<16>, float>;
+LOOM_TEMPLATE_DECL("input.forward") Dynamic forward(Dynamic input, Dynamic output);
+LOOM_TEMPLATE_DEF(forward)
+Dynamic forward_fixed(Fixed input, Dynamic output) { return output; }
+Dynamic entry(Fixed input, Dynamic output) {
+  return loom::template_apply<forward>(input, output);
+}
+
+// ----
+func.def public @entry(%input: view<16xf32>, %output_dim0: index, %output: view<[%output_dim0]xf32>) -> (%3: index, view<[%3]xf32>) {
+  %5 = index.constant 16 : index
+  %6, %7 = template.apply<@input.forward>(%5, %input, %output_dim0, %output) : (index, view<16xf32>, index, view<[%output_dim0]xf32>) -> (index, view<[%6]xf32>)
+  func.return %6, %7 : index, view<[%6]xf32>
+}
+
+template.decl @input.forward(%8: index, %9: view<[%8]xf32>, %10: index, %11: view<[%10]xf32>) -> (%12: index, view<[%12]xf32>)
+
+template.def<@input.forward> @forward_fixed(%14: index, %input: view<16xf32>, %output_dim0: index, %output: view<[%output_dim0]xf32>) -> (%18: index, view<[%18]xf32>) {
+  template.return %output_dim0, %output : index, view<[%output_dim0]xf32>
+}
+
+// ====
+// RUN: pass select-templates{mode=final,rewrite=inline},canonicalize,symbol-dce
+// Scalar predicates retain source coordinates beside differently flattened inputs.
+#include <loomcxx/template.h>
+#include <loomcxx/predicate.h>
+#include <loomcxx/view.h>
+namespace t = loom::type;
+using Dynamic = t::view<t::shape<t::dynamic>, float>;
+using Fixed = t::view<t::shape<16>, float>;
+LOOM_TEMPLATE_DECL("input.choose") unsigned choose(Dynamic value, unsigned selector);
+LOOM_TEMPLATE_DEF(choose)
+unsigned choose_four(Fixed value, unsigned selector)
+    [[loom::where(selector == 4u)]] { return 14u; }
+LOOM_TEMPLATE_DEF(choose)
+unsigned choose_two(Fixed value, unsigned selector)
+    [[loom::where(selector == 2u)]] { return 12u; }
+unsigned entry(Fixed value) { return loom::template_apply<choose>(value, 4u); }
+
+// ----
+func.def public @entry(%value: view<16xf32>) -> (i32) {
+  %13 = scalar.constant 14 : i32
+  func.return %13 : i32
+}
+
+// ====
+// RUN: pass select-templates{mode=final,rewrite=inline},canonicalize,symbol-dce
+// Strided[1] shares dense addresses but remains a distinct encoding identity.
+#include <loomcxx/template.h>
+#include <loomcxx/view.h>
+namespace t = loom::type;
+using Layout = t::encoding<loom::encoding::role::layout, 1>;
+using Dynamic = t::view<t::shape<t::dynamic>, float, Layout>;
+using Fixed = t::view<t::shape<16>, float, Layout>;
+using Dense = t::view<t::shape<16>, float>;
+LOOM_TEMPLATE_DECL("input.choose") unsigned choose(Dynamic value);
+LOOM_TEMPLATE_DEF(choose)
+[[loom::priority(10)]] unsigned choose_dense(Dense value) { return 13u; }
+LOOM_TEMPLATE_DEF(choose)
+unsigned choose_layout(Fixed value) { return 7u; }
+unsigned entry(t::buffer<float> buffer) {
+  auto layout = loom::encoding::layout::strided(1u);
+  auto value = loom::buffer::view<16>(buffer, {}, layout);
+  return loom::template_apply<choose>(value);
+}
+
+// ----
+func.def public @entry(%buffer: buffer) -> (i32) {
+  %23 = scalar.constant 7 : i32
+  func.return %23 : i32
+}

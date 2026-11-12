@@ -77,8 +77,10 @@ void loom_link_bytecode_template_contract_reader_initialize(
 // Returns a provider contract borrowing retained metadata and cached
 // projections. The value itself needs no persistent allocation. Its referenced
 // data remains valid for the reader lifetime, including across subsequent
-// projections. The caller provides one zero-initialized projection per reached
-// provider and reuses it only with the same source symbol and reader.
+// projections. Reached providers with target or requires attributes need one
+// zero-initialized projection reused only with the same source symbol and
+// reader. Providers without those attributes accept NULL projection storage,
+// as their complete contract is already retained in metadata.
 iree_status_t loom_link_bytecode_template_contract_reader_load(
     loom_link_bytecode_template_contract_reader_t* reader,
     uint32_t source_symbol_ordinal,

@@ -296,6 +296,27 @@ loom_cc_test(
     ],
 )
 
+loom_cc_library(
+    name = "input_contract",
+    srcs = ["input_contract.c"],
+    hdrs = ["input_contract.h"],
+    deps = [
+        ":builders",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "input_contract_test",
+    srcs = ["input_contract_test.cc"],
+    deps = [
+        ":builders",
+        ":input_contract",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_test(
     name = "type_refinement_test",
     srcs = ["type_refinement_test.cc"],

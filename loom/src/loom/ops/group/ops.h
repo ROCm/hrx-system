@@ -20,8 +20,9 @@ extern "C" {
 
 enum {
   LOOM_OP_GROUP_CREATE = LOOM_OP_KIND(LOOM_DIALECT_GROUP, 0),
-  LOOM_OP_GROUP_DUPLICATE = LOOM_OP_KIND(LOOM_DIALECT_GROUP, 1),
-  LOOM_OP_GROUP_COUNT_ = 2,
+  LOOM_OP_GROUP_REFINE = LOOM_OP_KIND(LOOM_DIALECT_GROUP, 1),
+  LOOM_OP_GROUP_DUPLICATE = LOOM_OP_KIND(LOOM_DIALECT_GROUP, 2),
+  LOOM_OP_GROUP_COUNT_ = 3,
 };
 
 // LOOM_OP_GROUP_CREATE: Create a distinct rank-one communication domain with SSA-defined cardinality. The result identifies participants; it contains no participant values, channels, or physical resources.
@@ -36,6 +37,30 @@ iree_status_t loom_group_create_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_group_create_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_GROUP_REFINE: Assert more precise shape information for the same participant domain. Source and result describe the same value and ownership identity; this operation performs no conversion or copy.
+// %refined = group.refine %source : group<[%count]> -> group<16>
+LOOM_DEFINE_ISA(loom_group_refine_isa, LOOM_OP_GROUP_REFINE)
+LOOM_DEFINE_OPERAND(loom_group_refine_source, 0)
+LOOM_DEFINE_RESULT(loom_group_refine_result, 0)
+iree_status_t loom_group_refine_build(
+    loom_builder_t* builder,
+    loom_may_consume loom_value_id_t source,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_value_refinement_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
+iree_status_t loom_value_refinement_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+iree_status_t loom_value_refinement_type_transfer(
+    loom_type_transfer_context_t* context,
+    const loom_module_t* module, loom_op_t* op);
+iree_status_t loom_value_refinement_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 

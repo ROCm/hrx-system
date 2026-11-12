@@ -31,16 +31,6 @@ typedef struct loom_bytecode_attribute_impl_scope_t {
   bool completed_types;
 } loom_bytecode_attribute_impl_scope_t;
 
-static iree_status_t loom_bytecode_attribute_impl_type_parameter_invalid(
-    loom_bytecode_attribute_policy_materializer_t* materializer,
-    loom_bytecode_reader_cursor_t* cursor) {
-  return loom_bytecode_reader_emit_invalid_field(
-      materializer->decoder, cursor->range_name, IREE_SV("type"), 0,
-      IREE_SV("parameters"),
-      loom_bytecode_reader_cursor_absolute_position(cursor),
-      IREE_SV("type_parameters_do_not_match_the_family_descriptor"));
-}
-
 static iree_status_t loom_bytecode_attribute_impl_source_string(
     loom_bytecode_attribute_policy_materializer_t* materializer,
     uint64_t source_string_id, iree_string_view_t field_name, uint64_t offset,
@@ -770,57 +760,36 @@ static iree_status_t loom_bytecode_attribute_impl_decode_type_slots(
     const loom_bytecode_attribute_impl_scope_t* scope,
     const loom_parameterized_type_descriptor_t** out_descriptor,
     loom_attribute_t** out_parameters) {
-  const uint64_t offset = loom_bytecode_reader_cursor_absolute_position(cursor);
-  uint64_t family = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(materializer->decoder,
-                                                         cursor, &family));
-  iree_string_view_t name = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_bytecode_attribute_impl_source_string(
-      materializer, family, IREE_SV("type_family"), offset, &name));
-  const loom_type_descriptor_t* family_descriptor =
-      loom_type_registry_lookup(materializer->context, name);
-  if (!family_descriptor || !family_descriptor->parameterized) {
-    return loom_bytecode_attribute_impl_type_parameter_invalid(materializer,
-                                                               cursor);
-  }
-  const loom_parameterized_type_descriptor_t* descriptor =
-      family_descriptor->parameterized;
-  uint64_t count = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_bytecode_reader_read_uvarint(materializer->decoder, cursor, &count));
-  if (count > descriptor->parameter_count) {
-    return loom_bytecode_attribute_impl_type_parameter_invalid(materializer,
-                                                               cursor);
-  }
+  loom_bytecode_type_parameters_t source;
+  IREE_RETURN_IF_ERROR(loom_bytecode_type_parameters_begin(
+      materializer->decoder, cursor, materializer->context,
+      LOOM_BYTECODE_ATTRIBUTE_TABLES(materializer)->strings.values,
+      LOOM_BYTECODE_ATTRIBUTE_TABLES(materializer)->strings.count,
+      /*type_id=*/0, &source));
   loom_attribute_t* parameters = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      materializer->scratch_arena, descriptor->parameter_count,
+      materializer->scratch_arena, source.descriptor->parameter_count,
       sizeof(*parameters), (void**)&parameters));
-  memset(parameters, 0, descriptor->parameter_count * sizeof(*parameters));
-  uint8_t next = 0;
-  for (uint64_t i = 0; i < count; ++i) {
-    uint64_t parameter_name = 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-        materializer->decoder, cursor, &parameter_name));
-    IREE_RETURN_IF_ERROR(loom_bytecode_attribute_impl_source_string(
-        materializer, parameter_name, IREE_SV("type_parameter"), offset,
-        &name));
-    const uint8_t slot = loom_bytecode_attribute_find_parameter_index(
-        descriptor->parameter_descriptors, descriptor->parameter_count, name,
-        next);
-    if (slot == LOOM_ATTR_INDEX_NONE) {
-      return loom_bytecode_attribute_impl_type_parameter_invalid(materializer,
-                                                                 cursor);
-    }
-    next = slot + 1;
+  memset(parameters, 0,
+         source.descriptor->parameter_count * sizeof(*parameters));
+  for (uint8_t i = 0; i < source.present_count; ++i) {
+    uint8_t slot = 0;
+    IREE_RETURN_IF_ERROR(loom_bytecode_type_parameters_next(
+        materializer->decoder, cursor, &source, &slot));
     loom_bytecode_attr_kind_t kind;
     IREE_RETURN_IF_ERROR(loom_bytecode_attribute_read_kind(
         materializer->decoder, cursor, &kind));
+    const loom_attr_descriptor_t* descriptor =
+        &source.descriptor->parameter_descriptors[slot];
+    IREE_RETURN_IF_ERROR(loom_bytecode_attribute_validate_kind(
+        materializer->decoder, cursor, descriptor, kind));
     IREE_RETURN_IF_ERROR(loom_bytecode_attribute_impl_decode_at_depth(
-        materializer, cursor, &descriptor->parameter_descriptors[slot], kind,
-        available_type_count, scope, 0, &parameters[slot]));
+        materializer, cursor, descriptor, kind, available_type_count, scope, 0,
+        &parameters[slot]));
   }
-  *out_descriptor = descriptor;
+  IREE_RETURN_IF_ERROR(loom_bytecode_type_parameters_finish(
+      materializer->decoder, cursor, &source));
+  *out_descriptor = source.descriptor;
   *out_parameters = parameters;
   return iree_ok_status();
 }

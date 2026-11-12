@@ -113,8 +113,8 @@ low.func.def public target<x86.avx2.core> abi(object_function) @return_subview(%
   %17 = imul.gpr64 %16, %15
   %18 = copy %origin : reg<x86.gpr64> -> reg<x86.gpr64>
   %19 = add.gpr64 %18, %17
-  %refined = lea.add_scale %storage, %19 {disp32 = 4, scale = 1}
-  return %refined
+  %inner = lea.add_scale %storage, %19 {disp32 = 4, scale = 1}
+  return %inner
 }
 
 // ====

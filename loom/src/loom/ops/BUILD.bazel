@@ -13,6 +13,7 @@ load(
     "loom_cc_test",
     "loom_generated_source_family",
 )
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -100,6 +101,32 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "value_refinement",
+    srcs = ["value_refinement.c"],
+    hdrs = ["value_refinement.h"],
+    deps = [
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/rewrite:type_propagation",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_check_test(
+    name = "value_refinement_verification",
+    src = "value_refinement.loom-test",
+)
+
+loom_check_test(
+    name = "value_refinement_canonicalize",
+    src = "value_refinement_canonicalize.loom-test",
+)
+
 # Complete operation support. Native constructors can select :builders without
 # the erasure, result/block removal, or bulk replacement implementation.
 loom_cc_library_group(
@@ -164,6 +191,7 @@ loom_cc_library(
         ":op_defs",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ir:input_contract",
         "//loom/src/loom/target:condition",
         "//loom/src/loom/target:types",
         "//runtime/src/iree/base",

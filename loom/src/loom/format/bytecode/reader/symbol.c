@@ -9,6 +9,7 @@
 #include "loom/error/error_catalog.h"
 #include "loom/format/bytecode/index.h"
 #include "loom/format/bytecode/reader/attribute.h"
+#include "loom/format/bytecode/reader/input_projection.h"
 #include "loom/format/bytecode/reader/reference_binding.h"
 #include "loom/format/bytecode/reader/source_trivia.h"
 #include "loom/format/bytecode/reader/symbol_schema.h"
@@ -251,9 +252,10 @@ static iree_status_t loom_bytecode_reader_validate_symbol_definition_flags(
       IREE_SV("symbol_definition_flags_must_match_defining_op_contract"));
 }
 
-static iree_status_t loom_bytecode_reader_skip_value_def(
-    loom_bytecode_symbol_validator_t* reader,
-    loom_bytecode_reader_cursor_t* cursor) {
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t
+loom_bytecode_reader_value_def_type(loom_bytecode_symbol_validator_t* reader,
+                                    loom_bytecode_reader_cursor_t* cursor,
+                                    uint64_t* out_type_id) {
   uint64_t name_offset = loom_bytecode_reader_cursor_absolute_position(cursor);
   uint64_t name_id = 0;
   uint64_t type_id = 0;
@@ -271,6 +273,16 @@ static iree_status_t loom_bytecode_reader_skip_value_def(
   }
   IREE_RETURN_IF_ERROR(loom_bytecode_symbol_validate_type_ref(
       &reader->decoder, &reader->view, type_id, name_offset));
+  *out_type_id = type_id;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_bytecode_reader_skip_value_def(
+    loom_bytecode_symbol_validator_t* reader,
+    loom_bytecode_reader_cursor_t* cursor) {
+  uint64_t type_id = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_bytecode_reader_value_def_type(reader, cursor, &type_id));
   return loom_bytecode_skip_type_bindings(&reader->decoder, cursor);
 }
 
@@ -654,6 +666,9 @@ typedef struct loom_bytecode_symbol_table_t {
   // Arena owning retained symbol metadata, or NULL during validation-only
   // reads.
   iree_arena_allocator_t* retained_arena;
+  // Admission-only template input projection, absent during validation-only
+  // reads.
+  loom_bytecode_input_projection_t* input_projection;
   // Import offset-table state.
   struct {
     // Number of entries.
@@ -1076,9 +1091,42 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
       IREE_RETURN_IF_ERROR(
           loom_bytecode_reader_skip_value_def(reader, &table->cursor));
     }
-    for (uint64_t i = 0; i < arg_count; ++i) {
-      IREE_RETURN_IF_ERROR(
-          loom_bytecode_reader_skip_value_def(reader, &table->cursor));
+    const loom_bytecode_attribute_ssa_validation_scope_t attribute_ssa_scope = {
+        .symbol_name = unused_name,
+        .value_count = workload_arg_count + arg_count + result_count,
+    };
+    const bool project_inputs = table->input_projection &&
+                                (kind == LOOM_BYTECODE_SYMBOL_TEMPLATE_DECL ||
+                                 kind == LOOM_BYTECODE_SYMBOL_TEMPLATE_DEF ||
+                                 kind == LOOM_BYTECODE_SYMBOL_TEMPLATE_UKERNEL);
+    if (project_inputs) {
+      // Input types may name any argument, including a later one, but cannot
+      // depend on a result. Result co-dependencies belong to the output scheme
+      // and must never enter a pre-selection input requirement.
+      const loom_bytecode_attribute_ssa_validation_scope_t input_ssa_scope = {
+          .symbol_name = unused_name,
+          .value_count = arg_count,
+      };
+      loom_bytecode_input_projection_begin_signature(table->input_projection);
+      for (uint64_t i = 0; i < arg_count; ++i) {
+        uint64_t type_id = 0;
+        IREE_RETURN_IF_ERROR(loom_bytecode_reader_value_def_type(
+            reader, &table->cursor, &type_id));
+        uint32_t shape_id = 0;
+        IREE_RETURN_IF_ERROR(loom_bytecode_input_projection_read(
+            table->input_projection, &table->cursor, type_id, &input_ssa_scope,
+            &shape_id));
+        IREE_RETURN_IF_ERROR(loom_bytecode_input_projection_add_argument(
+            table->input_projection, (uint16_t)i, shape_id));
+      }
+      IREE_RETURN_IF_ERROR(loom_bytecode_input_projection_end_signature(
+          table->input_projection, (uint32_t)symbol_index,
+          &symbol_metadata->input_contract_ordinal_plus_one));
+    } else {
+      for (uint64_t i = 0; i < arg_count; ++i) {
+        IREE_RETURN_IF_ERROR(
+            loom_bytecode_reader_skip_value_def(reader, &table->cursor));
+      }
     }
     uint64_t actual_tied_result_count = 0;
     for (uint64_t i = 0; i < result_count; ++i) {
@@ -1119,10 +1167,6 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
     symbol_metadata->tied_result_count = (uint16_t)tied_result_count;
     loom_bytecode_attribute_validator_t attribute_validator =
         loom_bytecode_symbol_attribute_validator(reader);
-    const loom_bytecode_attribute_ssa_validation_scope_t attribute_ssa_scope = {
-        .symbol_name = unused_name,
-        .value_count = workload_arg_count + arg_count + result_count,
-    };
     IREE_RETURN_IF_ERROR(loom_bytecode_attribute_retain_predicate_list_ssa(
         &attribute_validator, &table->cursor, &attribute_ssa_scope,
         table->retained_arena, &symbol_metadata->predicates,
@@ -1277,6 +1321,11 @@ iree_status_t loom_bytecode_symbols_index(
     table.region_payloads = out_metadata->region_payloads;
   }
   table.retained_arena = retained_arena;
+  loom_bytecode_input_projection_t input_projection;
+  loom_bytecode_input_projection_initialize(
+      &validator->decoder, validator->context, &validator->view,
+      out_metadata->types.entries, validator->arena, &input_projection);
+  table.input_projection = &input_projection;
   if (out_metadata->strings.count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         retained_arena, out_metadata->strings.count,
@@ -1321,5 +1370,7 @@ iree_status_t loom_bytecode_symbols_index(
           (uint32_t)symbol_index;
     }
   }
-  return loom_bytecode_symbols_finish(validator, &table);
+  IREE_RETURN_IF_ERROR(loom_bytecode_symbols_finish(validator, &table));
+  return loom_bytecode_input_projection_finish_module(
+      &input_projection, retained_arena, out_metadata);
 }

@@ -307,6 +307,7 @@ __all__ = [
     "cast_op",
     "comparison_op",
     "value_duplication_op",
+    "value_refinement_op",
 ]
 
 
@@ -7299,6 +7300,40 @@ class Op:
 # ============================================================================
 # These reduce boilerplate for common op patterns. They produce Op
 # instances — no class hierarchies, no metaclasses.
+
+
+def value_refinement_op(
+    name: str,
+    *,
+    group: Dialect,
+    carrier: TypeConstraint,
+    doc: str,
+    facts: str = "loom_value_refinement_facts",
+    examples: list[str] | tuple[str, ...] = (),
+) -> Op:
+    """Declare an explicit shape/encoding assertion preserving value identity."""
+    from loom.assembly import ARROW, COLON, Ref, ResultType, TypeOf
+
+    constraints = [RanksMatch("source", "result")]
+    if carrier != GROUP:
+        constraints.insert(0, SameElementType("source", "result"))
+    return Op(
+        name,
+        group=group,
+        doc=doc,
+        operands=[Operand("source", carrier, doc="Value to refine.")],
+        results=[
+            Result("result", carrier, doc="Same value with refined type information.")
+        ],
+        constraints=constraints,
+        traits=[PURE, REFINABLE_RESULT_TYPE_REFS, FACT_IDENTITY],
+        verify="loom_value_refinement_verify",
+        facts=facts,
+        type_transfer="loom_value_refinement_type_transfer",
+        canonicalize="loom_value_refinement_canonicalize",
+        format=[Ref("source"), COLON, TypeOf("source"), ARROW, ResultType("result")],
+        examples=examples,
+    )
 
 
 def value_duplication_op(

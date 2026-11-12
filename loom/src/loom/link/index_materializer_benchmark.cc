@@ -36,6 +36,135 @@ static void CheckStatus(iree_status_t status) {
 enum class TemplateProviderContractShape {
   kPriorityOnly,
   kComplete,
+  kDependentView,
+  kExtentPredicate,
+  kEncodingPredicate,
+  kDeclaredExtent,
+  kDeclaredEncoding,
+};
+
+struct TemplateContractSource {
+  // Family signature establishing the common argument coordinates.
+  const char* parameters;
+  // Root operands supplied to each application.
+  const char* operands;
+  // Exact application operand types after binding signature dependencies.
+  const char* operand_types;
+  // Public root signature before explicit dependent-view construction.
+  const char* root_parameters;
+  // Root preconditions proving the provider's scalar predicates.
+  const char* root_conditions;
+  // Ordinary source operations constructing the application inputs.
+  const char* root_setup;
+  // Explicit applicability predicates authored on each provider.
+  const char* provider_conditions;
+  // Whether selection also compares target identity and a typed requirement.
+  bool has_target;
+  // Provider signature when it adds input requirements to the family.
+  const char* provider_parameters = nullptr;
+};
+
+static constexpr TemplateContractSource kContractSources[] = {
+    {
+        .parameters = "%value: i32",
+        .operands = "%value",
+        .operand_types = "i32",
+        .root_parameters = "%value: i32",
+        .root_conditions = "",
+        .root_setup = "",
+        .provider_conditions = "",
+        .has_target = false,
+    },
+    {
+        .parameters = "%value: i32",
+        .operands = "%value",
+        .operand_types = "i32",
+        .root_parameters = "%value: i32",
+        .root_conditions = " where [range(%value, 32, 32)]",
+        .root_setup = "",
+        .provider_conditions = " where [multiple_of(%value, 16)]",
+        .has_target = true,
+    },
+    {
+        .parameters = "%value: i32, %width: index, %input: view<[%width]xf32>",
+        .operands = "%value, %width, %input",
+        .operand_types = "i32, index, view<[%width]xf32>",
+        .root_parameters =
+            "%value: i32, %width: index, %input: view<[%width]xf32>",
+        .root_conditions = "",
+        .root_setup = "",
+        .provider_conditions = "",
+        .has_target = false,
+    },
+    {
+        .parameters = "%value: i32, %width: index, %input: view<[%width]xf32>",
+        .operands = "%value, %width, %input",
+        .operand_types = "i32, index, view<[%width]xf32>",
+        .root_parameters = "%value: i32, %source: view<16xf32>",
+        .root_conditions = "",
+        .root_setup = "  %width = index.constant 16 : index\n"
+                      "  %input = view.refine %source : view<16xf32> -> "
+                      "view<[%width]xf32>\n",
+        .provider_conditions = " where [eq(%width, 16)]",
+        .has_target = false,
+    },
+    {
+        .parameters = "%value: i32, %matches: i1, %width: index, "
+                      "%storage: encoding<storage>, "
+                      "%input: view<2x[%width]xi8, %storage>",
+        .operands = "%value, %matches, %width, %storage, %input",
+        .operand_types = "i32, i1, index, encoding<storage>, "
+                         "view<2x[%width]xi8, %storage>",
+        .root_parameters = "%value: i32, %buffer: buffer",
+        .root_conditions = "",
+        .root_setup = "  %width = index.constant 18 : index\n"
+                      "  %storage = encoding.define #encoding.storage<"
+                      "layout=#encoding.layout.dense, schema=#ggml.q4_0> : "
+                      "encoding<storage>\n"
+                      "  %matches = encoding.isa<#encoding.storage<"
+                      "layout=#encoding.layout.dense, schema=#ggml.q4_0>> "
+                      "%storage : encoding<storage>\n"
+                      "  %offset = index.constant 0 : offset\n"
+                      "  %input = buffer.view %buffer[%offset] : buffer -> "
+                      "view<2x[%width]xi8, %storage>\n",
+        .provider_conditions = " where [eq(%matches, 1), eq(%width, 18)]",
+        .has_target = false,
+    },
+    {
+        .parameters = "%value: i32, %width: index, %input: view<[%width]xf32>",
+        .operands = "%value, %width, %input",
+        .operand_types = "i32, index, view<16xf32>",
+        .root_parameters = "%value: i32, %input: view<16xf32>",
+        .root_conditions = "",
+        .root_setup = "  %width = index.constant 16 : index\n",
+        .provider_conditions = "",
+        .has_target = false,
+        .provider_parameters =
+            "%value: i32, %width: index, %input: view<16xf32>",
+    },
+    {
+        .parameters =
+            "%value: i32, %width: index, %storage: encoding<storage>, "
+            "%input: view<2x[%width]xi8, %storage>",
+        .operands = "%value, %width, %storage, %input",
+        .operand_types = "i32, index, encoding<storage>, "
+                         "view<2x[%width]xi8, %storage>",
+        .root_parameters = "%value: i32, %buffer: buffer",
+        .root_conditions = "",
+        .root_setup = "  %width = index.constant 18 : index\n"
+                      "  %storage = encoding.define #encoding.storage<"
+                      "layout=#encoding.layout.dense, schema=#ggml.q4_0> : "
+                      "encoding<storage>\n"
+                      "  %offset = index.constant 0 : offset\n"
+                      "  %input = buffer.view %buffer[%offset] : buffer -> "
+                      "view<2x[%width]xi8, %storage>\n",
+        .provider_conditions = "",
+        .has_target = false,
+        .provider_parameters =
+            "%value: i32, %width: index, %storage: encoding<storage>, "
+            "%input: view<2x18xi8, #encoding.storage<"
+            "layout=#encoding.layout.dense, schema=#ggml.q4_0>>",
+    },
 };
 
 enum class TemplateProviderRepresentation {
@@ -66,32 +195,7 @@ class TemplateCatalogFixture {
         ParseModule(BuildLibrarySource(), IREE_SV("library.loom"));
     library_bytecode_ = WriteModule(library_module_);
 
-    CheckStatus(loom_link_module_index_allocate(
-        &context_, &block_pool_, iree_allocator_system(), &index_));
-    const loom_link_module_index_add_options_t root_options = {
-        .provider_name = IREE_SV("root"),
-        .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
-    };
-    CheckStatus(loom_link_module_index_add_materialized(
-        index_, root_module_, &root_options,
-        /*out_provider_ordinal=*/nullptr));
-    const loom_link_module_index_add_options_t library_options = {
-        .provider_name = IREE_SV("library"),
-        .role = LOOM_LINK_PROVIDER_ROLE_LIBRARY,
-    };
-    if (representation == TemplateProviderRepresentation::kMaterialized) {
-      CheckStatus(loom_link_module_index_add_materialized(
-          index_, library_module_, &library_options,
-          /*out_provider_ordinal=*/nullptr));
-    } else {
-      CheckStatus(loom_link_module_index_add_bytecode(
-          index_,
-          iree_make_const_byte_span(library_bytecode_.data(),
-                                    library_bytecode_.size()),
-          IREE_SV("library.loombc"), /*index_options=*/nullptr,
-          &library_options,
-          /*out_provider_ordinal=*/nullptr));
-    }
+    index_ = BuildIndex(representation);
 
     const loom_link_module_index_module_t* library =
         loom_link_module_index_module_at(index_, 1);
@@ -123,6 +227,39 @@ class TemplateCatalogFixture {
     loom_module_free(root_module_);
     loom_context_deinitialize(&context_);
     iree_arena_block_pool_deinitialize(&block_pool_);
+  }
+
+  loom_link_module_index_t* BuildIndex(
+      TemplateProviderRepresentation representation) {
+    loom_link_module_index_t* index = nullptr;
+    CheckStatus(loom_link_module_index_allocate(
+        &context_, &block_pool_, iree_allocator_system(), &index));
+    const loom_link_module_index_add_options_t root_options = {
+        .provider_name = IREE_SV("root"),
+        .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
+    };
+    CheckStatus(loom_link_module_index_add_materialized(
+        index, root_module_, &root_options,
+        /*out_provider_ordinal=*/nullptr));
+    const loom_link_module_index_add_options_t library_options = {
+        .provider_name = IREE_SV("library"),
+        .role = LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+    };
+    if (representation == TemplateProviderRepresentation::kMaterialized) {
+      CheckStatus(loom_link_module_index_add_materialized(
+          index, library_module_, &library_options,
+          /*out_provider_ordinal=*/nullptr));
+    } else {
+      CheckStatus(loom_link_module_index_add_bytecode(
+          index,
+          iree_make_const_byte_span(library_bytecode_.data(),
+                                    library_bytecode_.size()),
+          IREE_SV("library.loombc"), /*index_options=*/nullptr,
+          &library_options,
+          /*out_provider_ordinal=*/nullptr));
+    }
+
+    return index;
   }
 
   loom_link_index_materialization_t Materialize() {
@@ -188,32 +325,29 @@ class TemplateCatalogFixture {
   std::string BuildFamilyDeclarations() const {
     std::string source;
     for (uint32_t i = 0; i < family_count_; ++i) {
-      source.append("template.decl @" + FamilyName(i) +
-                    "(%value: i32) -> (i32)\n");
+      source.append("template.decl @" + FamilyName(i) + "(" +
+                    contract().parameters + ") -> (i32)\n");
     }
     return source;
   }
 
   std::string BuildRootSource() const {
-    const bool constrained =
-        contract_shape_ == TemplateProviderContractShape::kComplete;
-    std::string source = constrained
+    std::string source = contract().has_target
                              ? "target.generic<reference> @request_target "
                                "{subgroup_size = 64}\n"
                              : "";
     source.append(BuildFamilyDeclarations());
     source.append("func.def public ");
-    if (constrained) {
+    if (contract().has_target) {
       source.append("target(@request_target) ");
     }
-    source.append("@entry(%value: i32) -> (i32)");
-    if (constrained) {
-      source.append(" where [range(%value, 32, 32)]");
-    }
-    source.append(" {\n");
+    source.append(std::string("@entry(") + contract().root_parameters +
+                  ") -> (i32)" + contract().root_conditions + " {\n" +
+                  contract().root_setup);
     for (uint32_t i = 0; i < family_count_; ++i) {
       source.append("  %result_" + std::to_string(i) + " = template.apply<@" +
-                    FamilyName(i) + ">(%value) : (i32) -> (i32)\n");
+                    FamilyName(i) + ">(" + contract().operands + ") : (" +
+                    contract().operand_types + ") -> (i32)\n");
     }
     source.append("  func.return %result_" + std::to_string(family_count_ - 1) +
                   " : i32\n}\n");
@@ -222,7 +356,7 @@ class TemplateCatalogFixture {
 
   std::string BuildLibrarySource() const {
     std::string source = BuildFamilyDeclarations();
-    if (contract_shape_ == TemplateProviderContractShape::kComplete) {
+    if (contract().has_target) {
       source.insert(0, "target.generic<reference> @provider_target\n\n");
     }
     source.reserve(source.size() + provider_count_ * 260u +
@@ -230,7 +364,7 @@ class TemplateCatalogFixture {
     for (uint32_t i = 0; i < provider_count_; ++i) {
       const std::string name = ProviderName(i);
       source.append("template.def<@" + FamilyName(i % family_count_) + "> ");
-      if (contract_shape_ == TemplateProviderContractShape::kComplete) {
+      if (contract().has_target) {
         source.append(
             "target(@provider_target) requires [#target.subgroup.size<64>] ");
       }
@@ -238,17 +372,12 @@ class TemplateCatalogFixture {
       source.append(std::to_string(i + 1));
       source.append(") @");
       source.append(name);
-      if (contract_shape_ == TemplateProviderContractShape::kComplete) {
-        source.append(
-            "(%value: i32) -> (i32) where [multiple_of(%value, 16)] {\n"
-            "  template.return %value : i32\n"
-            "}\n\n");
-        continue;
-      }
-      source.append(
-          "(%value: i32) -> (i32) {\n"
-          "  template.return %value : i32\n"
-          "}\n\n");
+      const char* parameters = contract().provider_parameters
+                                   ? contract().provider_parameters
+                                   : contract().parameters;
+      source.append(std::string("(") + parameters + ") -> (i32)" +
+                    contract().provider_conditions +
+                    " {\n  template.return %value : i32\n}\n\n");
     }
     for (uint32_t i = 0; i < unrelated_symbol_count_; ++i) {
       source.append("func.def @unrelated_");
@@ -279,6 +408,10 @@ class TemplateCatalogFixture {
       std::abort();
     }
     return module;
+  }
+
+  const TemplateContractSource& contract() const {
+    return kContractSources[static_cast<size_t>(contract_shape_)];
   }
 
   loom_module_t* ParseModule(const char* source, iree_string_view_t filename) {
@@ -431,6 +564,75 @@ static void CatalogScales(benchmark::Benchmark* benchmark) {
   benchmark->Arg(1)->Arg(16)->Arg(64)->Arg(512)->Arg(4096);
 }
 
+template <TemplateProviderContractShape Shape>
+static void BM_IndexBuild_TypedTemplate(benchmark::State& state) {
+  TemplateCatalogFixture fixture(static_cast<uint32_t>(state.range(0)), Shape,
+                                 static_cast<uint32_t>(state.range(1)));
+  // Warm the shared block pool, while every measured iteration validates the
+  // serialized library and constructs a fresh index owned by that iteration.
+  loom_link_module_index_free(
+      fixture.BuildIndex(TemplateProviderRepresentation::kBytecode));
+  const auto before = fixture.PoolStatistics();
+  iree_host_size_t type_count = 0;
+  for (auto _ : state) {
+    auto* index = fixture.BuildIndex(TemplateProviderRepresentation::kBytecode);
+    type_count = loom_link_module_index_provider_at(index, 1)
+                     ->bytecode.metadata.modules[0]
+                     .types.count;
+    benchmark::DoNotOptimize(index);
+    loom_link_module_index_free(index);
+  }
+  const auto after = fixture.PoolStatistics();
+  state.counters["providers"] = static_cast<double>(state.range(0));
+  state.counters["unrelated_symbols"] = static_cast<double>(state.range(1));
+  state.counters["library_bytecode_bytes"] =
+      static_cast<double>(fixture.library_byte_count());
+  state.counters["library_types"] = static_cast<double>(type_count);
+  state.counters["oversized_allocations_per_index"] =
+      static_cast<double>(after.oversized_allocation_count -
+                          before.oversized_allocation_count) /
+      state.iterations();
+  state.counters["oversized_bytes_per_index"] =
+      static_cast<double>(after.oversized_allocation_bytes -
+                          before.oversized_allocation_bytes) /
+      state.iterations();
+  state.counters["pool_system_allocations_per_index"] =
+      static_cast<double>(after.block_system_allocation_count -
+                          before.block_system_allocation_count) /
+      state.iterations();
+}
+
+template <TemplateProviderContractShape Shape>
+static void BM_IndexMaterialize_TypedTemplate(
+    benchmark::State& state, TemplateProviderRepresentation representation) {
+  RunTemplateSelectionBenchmark(state, static_cast<uint32_t>(state.range(0)),
+                                Shape, static_cast<uint32_t>(state.range(1)),
+                                /*family_count=*/1, representation);
+}
+
+static void TypedCatalogScales(benchmark::Benchmark* benchmark) {
+  benchmark->ArgNames({"providers", "unrelated"})
+      ->Args({1, 0})
+      ->Args({4096, 0})
+      ->Args({1, 16384});
+}
+
+BENCHMARK_TEMPLATE(BM_IndexBuild_TypedTemplate,
+                   TemplateProviderContractShape::kDependentView)
+    ->Apply(TypedCatalogScales);
+BENCHMARK_TEMPLATE(BM_IndexBuild_TypedTemplate,
+                   TemplateProviderContractShape::kExtentPredicate)
+    ->Apply(TypedCatalogScales);
+BENCHMARK_TEMPLATE(BM_IndexBuild_TypedTemplate,
+                   TemplateProviderContractShape::kEncodingPredicate)
+    ->Apply(TypedCatalogScales);
+BENCHMARK_TEMPLATE(BM_IndexBuild_TypedTemplate,
+                   TemplateProviderContractShape::kDeclaredExtent)
+    ->Apply(TypedCatalogScales);
+BENCHMARK_TEMPLATE(BM_IndexBuild_TypedTemplate,
+                   TemplateProviderContractShape::kDeclaredEncoding)
+    ->Apply(TypedCatalogScales);
+
 BENCHMARK(BM_IndexMaterialize_SelectOneTemplate)
     ->Apply(CatalogScales)
     ->Complexity(benchmark::oN);
@@ -447,6 +649,47 @@ BENCHMARK(BM_IndexMaterialize_SelectTemplateFamilies)
     ->Arg(512)
     ->Arg(4096);
 BENCHMARK(BM_IndexMaterialize_SelectMaterializedTemplates)->Arg(1)->Arg(4096);
+
+BENCHMARK_CAPTURE(BM_IndexMaterialize_TypedTemplate<
+                      TemplateProviderContractShape::kDependentView>,
+                  Bytecode, TemplateProviderRepresentation::kBytecode)
+    ->Apply(TypedCatalogScales);
+BENCHMARK_CAPTURE(BM_IndexMaterialize_TypedTemplate<
+                      TemplateProviderContractShape::kDependentView>,
+                  Native, TemplateProviderRepresentation::kMaterialized)
+    ->Apply(TypedCatalogScales);
+BENCHMARK_CAPTURE(BM_IndexMaterialize_TypedTemplate<
+                      TemplateProviderContractShape::kExtentPredicate>,
+                  Bytecode, TemplateProviderRepresentation::kBytecode)
+    ->Apply(TypedCatalogScales);
+BENCHMARK_CAPTURE(BM_IndexMaterialize_TypedTemplate<
+                      TemplateProviderContractShape::kExtentPredicate>,
+                  Native, TemplateProviderRepresentation::kMaterialized)
+    ->Apply(TypedCatalogScales);
+BENCHMARK_CAPTURE(BM_IndexMaterialize_TypedTemplate<
+                      TemplateProviderContractShape::kEncodingPredicate>,
+                  Bytecode, TemplateProviderRepresentation::kBytecode)
+    ->Apply(TypedCatalogScales);
+BENCHMARK_CAPTURE(BM_IndexMaterialize_TypedTemplate<
+                      TemplateProviderContractShape::kEncodingPredicate>,
+                  Native, TemplateProviderRepresentation::kMaterialized)
+    ->Apply(TypedCatalogScales);
+BENCHMARK_CAPTURE(BM_IndexMaterialize_TypedTemplate<
+                      TemplateProviderContractShape::kDeclaredExtent>,
+                  Bytecode, TemplateProviderRepresentation::kBytecode)
+    ->Apply(TypedCatalogScales);
+BENCHMARK_CAPTURE(BM_IndexMaterialize_TypedTemplate<
+                      TemplateProviderContractShape::kDeclaredExtent>,
+                  Native, TemplateProviderRepresentation::kMaterialized)
+    ->Apply(TypedCatalogScales);
+BENCHMARK_CAPTURE(BM_IndexMaterialize_TypedTemplate<
+                      TemplateProviderContractShape::kDeclaredEncoding>,
+                  Bytecode, TemplateProviderRepresentation::kBytecode)
+    ->Apply(TypedCatalogScales);
+BENCHMARK_CAPTURE(BM_IndexMaterialize_TypedTemplate<
+                      TemplateProviderContractShape::kDeclaredEncoding>,
+                  Native, TemplateProviderRepresentation::kMaterialized)
+    ->Apply(TypedCatalogScales);
 
 }  // namespace
 

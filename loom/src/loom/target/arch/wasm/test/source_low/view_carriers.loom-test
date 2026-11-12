@@ -107,8 +107,8 @@ low.func.def public target<wasm.core.simd128> abi(wasm_function) @return_subview
   %17 = i32.mul %position, %15
   %18 = i32.add %origin, %17
   %19 = i32.add %15, %18
-  %refined = i32.add %storage, %19
-  return %refined
+  %inner = i32.add %storage, %19
+  return %inner
 }
 
 // ====

@@ -67,7 +67,6 @@ from loom.dsl import (
     ELEMENTWISE,
     ENCODING_SCHEMA,
     ENCODING_TRANSFORM,
-    FACT_IDENTITY,
     FLOAT_ELEMENT,
     I1_ELEMENT,
     IDEMPOTENT,
@@ -119,7 +118,6 @@ from loom.dsl import (
     OpPhase,
     PackedPayloadBitCountMatchesStorage,
     PositiveBitWidthAttr,
-    RanksMatch,
     Reads,
     ReadWrites,
     Result,
@@ -134,6 +132,7 @@ from loom.dsl import (
     ValueCountMatchesStaticElementCount,
     Writes,
     value_duplication_op,
+    value_refinement_op,
 )
 
 # ============================================================================
@@ -624,7 +623,7 @@ vector_empty = Op(
     eager_execution_cost=1,
 )
 
-vector_refine = Op(
+vector_refine = value_refinement_op(
     "vector.refine",
     group=vector_ops,
     doc=(
@@ -633,23 +632,7 @@ vector_refine = Op(
         "that dynamic and static extents in the source and result describe "
         "the same lane grid."
     ),
-    operands=[Operand("source", VECTOR, doc="Source vector to refine.")],
-    results=[Result("result", VECTOR, doc="Same vector with refined shape information.")],
-    constraints=[
-        SameElementType("source", "result"),
-        RanksMatch("source", "result"),
-    ],
-    traits=[PURE, REFINABLE_RESULT_TYPE_REFS, FACT_IDENTITY],
-    verify="loom_vector_refine_verify",
-    facts="loom_vector_refine_facts",
-    type_transfer="loom_vector_refine_type_transfer",
-    format=[
-        Ref("source"),
-        COLON,
-        TypeOf("source"),
-        ARROW,
-        ResultType("result"),
-    ],
+    carrier=VECTOR,
     examples=[
         "%refined = vector.refine %source : vector<[%m]xf32> -> vector<[%n]xf32>",
     ],

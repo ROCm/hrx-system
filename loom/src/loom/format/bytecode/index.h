@@ -21,6 +21,7 @@
 #include "loom/format/bytecode/module_summary.h"
 #include "loom/ir/attribute_schema.h"
 #include "loom/ir/context.h"
+#include "loom/ir/input_contract.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -172,6 +173,8 @@ typedef struct loom_bytecode_symbol_metadata_t {
   uint32_t first_region_payload_index;
   // Number of independently bounded root-region payloads.
   uint8_t region_payload_count;
+  // Module input contract ordinal plus one, or zero without extra obligations.
+  uint32_t input_contract_ordinal_plus_one;
 } loom_bytecode_symbol_metadata_t;
 
 // Dependency and abstract-provider slices owned by one SYMBOLS ordinal.
@@ -248,6 +251,10 @@ typedef struct loom_bytecode_module_metadata_t {
   iree_host_size_t symbol_count;
   // Arena-owned symbol metadata array.
   loom_bytecode_symbol_metadata_t* symbols;
+  // Unique retained template input contracts, shared by equivalent providers.
+  const loom_input_contract_t** input_contracts;
+  // Number of entries in input_contracts.
+  iree_host_size_t input_contract_count;
   // Number of independently bounded root-region payloads.
   iree_host_size_t region_payload_count;
   // Arena-owned payload metadata in symbol and declared region-slot order.

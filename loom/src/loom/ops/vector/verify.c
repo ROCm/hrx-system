@@ -114,42 +114,6 @@ static iree_status_t loom_vector_emit_result_constraint(
                           IREE_ARRAYSIZE(params));
 }
 
-iree_status_t loom_vector_refine_verify(const loom_module_t* module,
-                                        const loom_op_t* op,
-                                        iree_diagnostic_emitter_t emitter) {
-  loom_type_t source_type =
-      loom_module_value_type(module, loom_vector_refine_source(op));
-  loom_type_t result_type =
-      loom_module_value_type(module, loom_vector_refine_result(op));
-  if (!loom_type_is_vector(source_type) || !loom_type_is_vector(result_type) ||
-      !loom_type_rank_equals(source_type, result_type)) {
-    return iree_ok_status();
-  }
-
-  uint8_t rank = loom_type_rank(source_type);
-  for (uint8_t axis = 0; axis < rank; ++axis) {
-    if (loom_type_dim_is_dynamic_at(source_type, axis) ||
-        loom_type_dim_is_dynamic_at(result_type, axis)) {
-      continue;
-    }
-    int64_t source_size = loom_type_dim_static_size_at(source_type, axis);
-    int64_t result_size = loom_type_dim_static_size_at(result_type, axis);
-    if (source_size == result_size) {
-      continue;
-    }
-
-    loom_diagnostic_param_t params[] = {
-        loom_param_string(IREE_SV("source static dimension")),
-        loom_param_i64(source_size),
-        loom_param_string(IREE_SV("result static dimension")),
-        loom_param_i64(result_size),
-    };
-    return loom_vector_emit(emitter, op, LOOM_ERR_SHAPE_001, params,
-                            IREE_ARRAYSIZE(params));
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_vector_emit_result_code_capacity(
     iree_diagnostic_emitter_t emitter, const loom_op_t* op,
     iree_string_view_t result_name, loom_type_t actual_type,

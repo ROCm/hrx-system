@@ -123,6 +123,18 @@ typedef struct loom_kernel_class_shape_t {
   uint32_t count;
 } loom_kernel_class_shape_t;
 
+// Scalar equality for an input dimension not resolved by source facts.
+typedef struct loom_kernel_class_input_t {
+  // Literal operands, used only where the parallel projection is invalid.
+  int64_t constants[2];
+  // Scalar projection ordinals, or UINT32_MAX for a literal operand.
+  uint32_t projections[2];
+} loom_kernel_class_input_t;
+
+// Feature outcomes below this value are loom_decision_truth_t values. Larger
+// values index the decision's compact input query array after subtraction.
+enum { LOOM_KERNEL_CLASS_FEATURE_INPUT_BASE = 3 };
+
 // Immutable boundary form of one template application decision.
 typedef struct loom_kernel_class_decision_t {
   // Source application, retained directly without reference-analysis storage.
@@ -140,8 +152,14 @@ typedef struct loom_kernel_class_decision_t {
   // Unique projection ordinals evaluated for this decision.
   const uint32_t* projection_ordinals;
 
-  // Pre-resolved contextual feature outcomes in model-local order.
-  const loom_decision_truth_t* feature_outcomes;
+  // Source truth values or encoded input-query indices in model-local order.
+  const uint32_t* feature_outcomes;
+
+  // Unresolved dimensional equalities over the shared scalar projections.
+  const loom_kernel_class_input_t* inputs;
+
+  // Number of unresolved dimension queries.
+  uint32_t input_count;
 
   // Publication metadata indexed by provider action ordinal.
   const loom_kernel_class_action_t* actions;

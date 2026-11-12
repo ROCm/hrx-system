@@ -44,6 +44,99 @@ typedef struct loom_bytecode_scoped_shape_t {
   uint8_t access_alignment;
 } loom_bytecode_scoped_shape_t;
 
+// Ordered descriptor parameters shared by static and scoped type readers.
+// The owning reader decodes each value before advancing to the next name.
+typedef struct loom_bytecode_type_parameters_t {
+  // Registered family selected by the source spelling.
+  const loom_parameterized_type_descriptor_t* descriptor;
+  // Borrowed source strings used by the remaining parameter names.
+  const iree_string_view_t* strings;
+  // Number of source strings available to parameter references.
+  iree_host_size_t string_count;
+  // Position of the declared parameter count, for missing-parameter errors.
+  uint64_t count_offset;
+  // Source type ordinal, or zero for a scope-local type, for diagnostics.
+  loom_type_id_t type_id;
+  // Number of name/value pairs declared in the source payload.
+  uint8_t present_count;
+  // First descriptor slot not yet consumed by an ordered parameter name.
+  uint8_t next_parameter_index;
+  // A required slot skipped before a later present parameter.
+  bool missing_required_parameter;
+} loom_bytecode_type_parameters_t;
+
+// Reads the registered family and bounded present-parameter count.
+iree_status_t loom_bytecode_type_parameters_begin(
+    loom_bytecode_reader_decoder_t* decoder,
+    loom_bytecode_reader_cursor_t* cursor, loom_context_t* context,
+    const iree_string_view_t* strings, iree_host_size_t string_count,
+    loom_type_id_t type_id, loom_bytecode_type_parameters_t* out_parameters);
+
+// Diagnoses an invalid source name reference or a name outside the remaining
+// descriptor suffix. Kept off the per-parameter decoding path.
+IREE_ATTRIBUTE_COLD iree_status_t loom_bytecode_type_parameters_reject_name(
+    loom_bytecode_reader_decoder_t* decoder,
+    const loom_bytecode_reader_cursor_t* cursor,
+    const loom_bytecode_type_parameters_t* parameters, uint64_t name_id,
+    uint64_t offset);
+
+// Reads the next ordered name and returns its descriptor slot. The owning
+// reader consumes the associated attribute kind and value afterward.
+static inline iree_status_t loom_bytecode_type_parameters_next(
+    loom_bytecode_reader_decoder_t* decoder,
+    loom_bytecode_reader_cursor_t* cursor,
+    loom_bytecode_type_parameters_t* parameters, uint8_t* out_index) {
+  const uint64_t offset = loom_bytecode_reader_cursor_absolute_position(cursor);
+  uint64_t name_id = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_bytecode_reader_read_uvarint_inline(decoder, cursor, &name_id));
+  if (name_id < parameters->string_count) {
+    const iree_string_view_t name = parameters->strings[name_id];
+    const loom_parameterized_type_descriptor_t* descriptor =
+        parameters->descriptor;
+    for (; parameters->next_parameter_index < descriptor->parameter_count;
+         ++parameters->next_parameter_index) {
+      const loom_attr_descriptor_t* candidate =
+          &descriptor->parameter_descriptors[parameters->next_parameter_index];
+      if (iree_string_view_equal(loom_attr_descriptor_name(candidate), name)) {
+        *out_index = parameters->next_parameter_index++;
+        return iree_ok_status();
+      }
+      parameters->missing_required_parameter |=
+          !iree_any_bit_set(candidate->flags, LOOM_ATTR_OPTIONAL);
+    }
+  }
+  return loom_bytecode_type_parameters_reject_name(decoder, cursor, parameters,
+                                                   name_id, offset);
+}
+
+// Diagnoses a required parameter absent from the decoded source slots.
+IREE_ATTRIBUTE_COLD iree_status_t loom_bytecode_type_parameters_reject_missing(
+    loom_bytecode_reader_decoder_t* decoder,
+    const loom_bytecode_reader_cursor_t* cursor,
+    const loom_bytecode_type_parameters_t* parameters);
+
+// Checks required slots after every present value has been consumed, preserving
+// malformed-value precedence over missing-parameter diagnostics.
+static inline iree_status_t loom_bytecode_type_parameters_finish(
+    loom_bytecode_reader_decoder_t* decoder,
+    const loom_bytecode_reader_cursor_t* cursor,
+    const loom_bytecode_type_parameters_t* parameters) {
+  bool missing_required = parameters->missing_required_parameter;
+  const loom_parameterized_type_descriptor_t* descriptor =
+      parameters->descriptor;
+  for (uint8_t i = parameters->next_parameter_index;
+       i < descriptor->parameter_count; ++i) {
+    missing_required |= !iree_any_bit_set(
+        descriptor->parameter_descriptors[i].flags, LOOM_ATTR_OPTIONAL);
+  }
+  if (missing_required) {
+    return loom_bytecode_type_parameters_reject_missing(decoder, cursor,
+                                                        parameters);
+  }
+  return iree_ok_status();
+}
+
 // State required to materialize a validated type plan into a module.
 typedef struct loom_bytecode_type_materializer_t {
   // Bounded decoder and structured diagnostic state.
@@ -91,6 +184,24 @@ iree_status_t loom_bytecode_type_read_structural_header(
 iree_status_t loom_bytecode_type_emit_invalid_scoped_record(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, iree_string_view_t reason);
+
+// Validates a static type ordinal or a prior completed scope-local node.
+static inline iree_status_t loom_bytecode_type_validate_completed_reference(
+    loom_bytecode_reader_decoder_t* decoder,
+    loom_bytecode_reader_cursor_t* cursor, uint64_t reference,
+    iree_host_size_t static_count, uint64_t completed_count) {
+  const uint64_t ordinal = reference >> 1;
+  if (reference & 1) {
+    if (ordinal >= completed_count) {
+      return loom_bytecode_type_emit_invalid_scoped_record(
+          decoder, cursor, IREE_SV("incomplete_child"));
+    }
+  } else if (ordinal >= static_count) {
+    return loom_bytecode_type_emit_invalid_scoped_record(
+        decoder, cursor, IREE_SV("unknown_static_type"));
+  }
+  return iree_ok_status();
+}
 
 // Opens the bounded extension following a type reference. Static references
 // return an empty cursor without entering the scoped decoder. Otherwise the

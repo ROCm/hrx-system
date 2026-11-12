@@ -184,6 +184,19 @@ iree_status_t loom_function_call_argument_type_matches(
     loom_function_call_argument_match_flags_t flags, bool* out_matches) {
   *out_matches = false;
   if (iree_any_bit_set(
+          flags, LOOM_FUNCTION_CALL_ARGUMENT_MATCH_FLAG_TEMPLATE_INPUTS) &&
+      loom_type_has_dimensions(actual_type) &&
+      loom_type_has_dimensions(expected_type)) {
+    *out_matches =
+        loom_type_kind(actual_type) == loom_type_kind(expected_type) &&
+        loom_type_element_type(actual_type) ==
+            loom_type_element_type(expected_type) &&
+        loom_type_rank(actual_type) == loom_type_rank(expected_type) &&
+        loom_type_view_alignment_override(actual_type) ==
+            loom_type_view_alignment_override(expected_type);
+    return iree_ok_status();
+  }
+  if (iree_any_bit_set(
           flags,
           LOOM_FUNCTION_CALL_ARGUMENT_MATCH_FLAG_ALLOW_BUFFER_MATERIALIZATION)) {
     const loom_type_kind_t actual_kind = loom_type_kind(actual_type);
@@ -234,6 +247,13 @@ loom_function_contract_verify_boundary_types_with_lookup(
         (actual_kind == LOOM_TYPE_TENSOR || actual_kind == LOOM_TYPE_VIEW) &&
         loom_type_kind(expected_type) == LOOM_TYPE_BUFFER) {
       equal = true;
+    } else if (iree_any_bit_set(
+                   boundary->argument_match_flags,
+                   LOOM_FUNCTION_CALL_ARGUMENT_MATCH_FLAG_TEMPLATE_INPUTS) &&
+               loom_type_has_dimensions(expected_type)) {
+      status = loom_function_call_argument_type_matches(
+          module, actual_type, expected_type, remap,
+          boundary->argument_match_flags, &equal);
     } else {
       status = loom_function_contract_types_equal_after_remap(
           module, &type_lookup, remap, expected_type, actual_type, &equal);
@@ -486,6 +506,8 @@ static iree_status_t loom_function_provider_family_contract_verify(
       .result_count = op->result_count,
       .argument_field_kind = LOOM_DIAGNOSTIC_FIELD_NONE,
       .result_field_kind = LOOM_DIAGNOSTIC_FIELD_RESULT,
+      .argument_match_flags =
+          LOOM_FUNCTION_CALL_ARGUMENT_MATCH_FLAG_TEMPLATE_INPUTS,
       .argument_prefix = "implementation argument",
       .result_prefix = "implementation result",
   };

@@ -205,10 +205,12 @@ loom_cc_test(
 loom_cc_library(
     name = "module_index",
     srcs = [
+        "input_contracts.c",
         "module_index.c",
         "symbol_facet.c",
     ],
     hdrs = [
+        "input_contracts.h",
         "module_index.h",
         "symbol_facet.h",
     ],
@@ -219,6 +221,7 @@ loom_cc_library(
         "//loom/src/loom/format/bytecode:index_reader",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ir:input_contract",
         "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -381,8 +384,14 @@ loom_cc_library(
 
 loom_cc_library(
     name = "template_candidate_loader",
-    srcs = ["template_candidate_loader.c"],
-    hdrs = ["template_candidate_loader.h"],
+    srcs = [
+        "template_candidate_loader.c",
+        "template_input_binding.c",
+    ],
+    hdrs = [
+        "template_candidate_loader.h",
+        "template_input_binding.h",
+    ],
     deps = [
         ":bytecode_template_contract",
         ":module_index",
@@ -390,8 +399,11 @@ loom_cc_library(
         ":planner",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/analysis:template_provider_catalog",
+        "//loom/src/loom/format/bytecode:function_projection_reader",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/rewrite:remap",
         "//loom/src/loom/util:segmented_storage",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -414,6 +426,26 @@ loom_cc_library(
         "//loom/src/loom/transforms/symbol:template_selection",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "template_input_binding_test",
+    srcs = ["template_input_binding_test.cc"],
+    deps = [
+        ":index_materializer",
+        ":module_index",
+        ":planner",
+        "//loom/src/loom/format/bytecode:writer",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

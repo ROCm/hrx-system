@@ -64,3 +64,51 @@ unsigned entry(unsigned value) {
   // ERROR@+1: LOWERING/059 "template.apply family requires a LOOM_TEMPLATE_DECL declaration"
   return loom::template_apply<loom::template_apply<family, unsigned>>(selected);
 }
+
+// ====
+#include <loomcxx/template.h>
+#include <loomcxx/vector.h>
+namespace t = loom::type;
+using Dynamic = t::view<t::shape<t::dynamic>, float>;
+using Actual = t::view<t::shape<4, 4>, float>;
+LOOM_TEMPLATE_DECL("input.read") float read(Dynamic value);
+float entry(Actual value) {
+  // ERROR@+1: LOWERING/059 "template.apply argument type must match its family"
+  return loom::template_apply<read>(value);
+}
+
+// ====
+#include <loomcxx/template.h>
+#include <loomcxx/vector.h>
+namespace t = loom::type;
+using Dynamic = t::view<t::shape<t::dynamic>, float>;
+using Actual = t::view<t::shape<16>, int>;
+LOOM_TEMPLATE_DECL("input.read") float read(Dynamic value);
+float entry(Actual value) {
+  // ERROR@+1: LOWERING/059 "template.apply argument type must match its family"
+  return loom::template_apply<read>(value);
+}
+
+// ====
+#include <loomcxx/template.h>
+#include <loomcxx/vector.h>
+namespace t = loom::type;
+using Dynamic = t::view<t::shape<t::dynamic>, float>;
+using Actual = t::view<t::shape<16>, const float>;
+LOOM_TEMPLATE_DECL("input.read") float read(Dynamic value);
+float entry(Actual value) {
+  // ERROR@+1: LOWERING/059 "template.apply argument type must match its family"
+  return loom::template_apply<read>(value);
+}
+
+// ====
+#include <loomcxx/template.h>
+#include <loomcxx/vector.h>
+namespace t = loom::type;
+using Dynamic = t::view<t::shape<t::dynamic>, float>;
+using Actual = t::vector<t::shape<16>, float>;
+LOOM_TEMPLATE_DECL("input.read") float read(Dynamic value);
+float entry(Actual value) {
+  // ERROR@+1: LOWERING/059 "template.apply argument type must match its family"
+  return loom::template_apply<read>(value);
+}

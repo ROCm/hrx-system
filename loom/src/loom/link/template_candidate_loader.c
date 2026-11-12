@@ -13,17 +13,26 @@
 #include "loom/ir/module.h"
 #include "loom/ir/structural_hash.h"
 #include "loom/link/bytecode_template_contract.h"
+#include "loom/link/template_input_binding.h"
 #include "loom/ops/func_symbol_facts.h"
+#include "loom/ops/op_defs.h"
 #include "loom/util/segmented_storage.h"
 
 typedef struct loom_link_template_candidate_module_t {
   // Indexed source module described by this cache.
   const loom_link_module_index_module_t* source_module;
 
+  // Immutable index providing native source input requirements.
+  const loom_link_module_index_t* index;
+
   // Representation-specific candidate source state.
   union {
     // State derived from an already-materialized source module.
     struct {
+      // Borrowed source input requirements injected into symbol facts.
+      loom_func_input_contract_source_t inputs;
+      // Stable resource entry retained for the fact table lifetime.
+      loom_symbol_fact_resource_t input_resource;
       // Cached source-module symbol facts.
       loom_symbol_fact_table_t fact_table;
       // Source-module provider summaries.
@@ -204,14 +213,40 @@ static void loom_link_template_candidate_initialize_bytecode_module(
       &cache->source.bytecode.contracts);
 }
 
+static const loom_input_contract_t* loom_link_template_candidate_source_inputs(
+    const void* self, loom_symbol_id_t symbol_id) {
+  const loom_link_template_candidate_module_t* cache = self;
+  const loom_link_module_index_symbol_t* symbol =
+      loom_link_module_index_symbol_at(
+          cache->index, cache->source_module->symbol_start_ordinal + symbol_id);
+  return symbol->input_contract_ordinal_plus_one
+             ? cache->source_module
+                   ->input_contracts[symbol->input_contract_ordinal_plus_one -
+                                     1]
+             : NULL;
+}
+
 static iree_status_t
 loom_link_template_candidate_initialize_materialized_module(
     loom_link_template_candidate_loader_t* loader,
     loom_link_template_candidate_module_t* cache) {
   const loom_module_t* module = cache->source_module->materialized_module;
   IREE_ASSERT(module != NULL);
-  loom_symbol_fact_table_initialize(&cache->source.materialized.fact_table,
-                                    &loader->arena);
+  cache->index = loader->index;
+  cache->source.materialized.inputs = (loom_func_input_contract_source_t){
+      .self = cache,
+      .lookup = loom_link_template_candidate_source_inputs,
+  };
+  cache->source.materialized.input_resource = (loom_symbol_fact_resource_t){
+      .key = &loom_func_input_contract_resource_key,
+      .value = &cache->source.materialized.inputs,
+  };
+  const loom_symbol_fact_table_options_t options = {
+      .resources = {.values = &cache->source.materialized.input_resource,
+                    .count = 1},
+  };
+  loom_symbol_fact_table_initialize_with_options(
+      &cache->source.materialized.fact_table, &options, &loader->arena);
   loom_template_provider_catalog_initialize(&cache->source.materialized.catalog,
                                             &loader->arena);
   IREE_RETURN_IF_ERROR(loom_template_provider_catalog_build_local(
@@ -290,54 +325,6 @@ loom_link_template_candidate_materialized_summary(
   return summary;
 }
 
-static bool loom_link_template_candidate_lookup_linked_global(
-    const loom_link_template_candidate_loader_t* loader,
-    const loom_link_plan_materialization_t* materialization,
-    const loom_link_module_index_symbol_t* source_symbol,
-    loom_symbol_ref_t* out_target_ref) {
-  const loom_link_module_index_symbol_t* candidate =
-      loom_link_module_index_lookup_global(loader->index, source_symbol->name);
-  while (candidate != NULL) {
-    const loom_symbol_ref_t target_ref =
-        materialization->target_symbols.values[candidate->ordinal];
-    if (loom_symbol_ref_is_valid(target_ref)) {
-      *out_target_ref = target_ref;
-      return true;
-    }
-    candidate =
-        loom_link_module_index_next_global_duplicate(loader->index, candidate);
-  }
-  return false;
-}
-
-static loom_symbol_ref_t loom_link_template_candidate_lookup_linked_symbol(
-    const loom_link_template_candidate_loader_t* loader,
-    const loom_link_module_index_module_t* source_module,
-    const loom_link_plan_materialization_t* materialization,
-    uint32_t source_symbol_ordinal) {
-  loom_symbol_ref_t target_ref = loom_symbol_ref_null();
-  if (source_symbol_ordinal == UINT32_MAX) {
-    return target_ref;
-  }
-  IREE_ASSERT(source_symbol_ordinal < source_module->symbol_count);
-  const iree_host_size_t source_ordinal =
-      source_module->symbol_start_ordinal + source_symbol_ordinal;
-  IREE_ASSERT(source_ordinal < materialization->target_symbols.count);
-  target_ref = materialization->target_symbols.values[source_ordinal];
-  if (loom_symbol_ref_is_valid(target_ref)) {
-    return target_ref;
-  }
-
-  const loom_link_module_index_symbol_t* source_symbol =
-      loom_link_module_index_symbol_at(loader->index, source_ordinal);
-  IREE_ASSERT(source_symbol != NULL);
-  if (source_symbol->identity == LOOM_LINK_SYMBOL_IDENTITY_GLOBAL) {
-    (void)loom_link_template_candidate_lookup_linked_global(
-        loader, materialization, source_symbol, &target_ref);
-  }
-  return target_ref;
-}
-
 static iree_status_t loom_link_template_candidate_capacity(
     const loom_link_template_candidate_loader_t* loader,
     const loom_link_plan_t* plan, iree_host_size_t* out_capacity) {
@@ -395,10 +382,11 @@ void loom_link_template_candidate_loader_free(
   iree_allocator_free(allocator, loader);
 }
 
-iree_status_t loom_link_template_candidate_loader_load(
+static iree_status_t loom_link_template_candidate_loader_load_impl(
     loom_link_template_candidate_loader_t* loader, const loom_link_plan_t* plan,
     loom_link_plan_materialization_t* materialization,
     iree_arena_allocator_t* arena,
+    loom_link_template_input_binding_t* input_binding,
     loom_template_provider_slice_t* out_candidates) {
   IREE_ASSERT_ARGUMENT(loader);
   IREE_ASSERT_ARGUMENT(plan);
@@ -434,6 +422,13 @@ iree_status_t loom_link_template_candidate_loader_load(
     const loom_symbol_ref_t target_family =
         materialization->target_template_families.values[family_ordinal];
     IREE_ASSERT(loom_symbol_ref_is_valid(target_family));
+    const loom_func_like_t target_function = loom_func_like_cast(
+        materialization->module,
+        materialization->module->symbols.entries[target_family.symbol_id]
+            .defining_op);
+    uint16_t argument_count = 0;
+    loom_func_like_arg_ids(target_function, &argument_count);
+    const uint16_t result_count = target_function.op->result_count;
 
     loom_link_bytecode_template_provider_projection_t** projections = NULL;
     iree_host_size_t provider_index = 0;
@@ -442,6 +437,8 @@ iree_status_t loom_link_template_candidate_loader_load(
             loader->index, family->providers.first_symbol_ordinal);
     while (provider != NULL) {
       if (!loom_link_plan_contains_symbol(plan, provider->ordinal)) {
+        loom_template_provider_summary_t* candidate =
+            &candidates[candidate_count];
         const loom_link_module_index_module_t* source_module =
             loom_link_module_index_symbol_module(loader->index, provider);
         IREE_ASSERT(source_module != NULL);
@@ -453,17 +450,16 @@ iree_status_t loom_link_template_candidate_loader_load(
               loom_link_template_candidate_materialized_summary(cache,
                                                                 provider);
           const loom_symbol_ref_t target_symbol =
-              loom_link_template_candidate_lookup_linked_symbol(
-                  loader, source_module, materialization,
+              loom_link_plan_materialization_lookup_symbol(
+                  loader->index, source_module, materialization,
                   loom_symbol_ref_is_valid(source_summary->target_symbol)
                       ? source_summary->target_symbol.symbol_id
                       : UINT32_MAX);
-          IREE_RETURN_IF_ERROR(loom_template_provider_summary_bind_family(
+          loom_template_provider_summary_bind_family(
               source_summary, materialization->module, target_family,
-              target_symbol, provider->ordinal,
-              &candidates[candidate_count++]));
+              target_symbol, provider->ordinal, candidate);
         } else {
-          if (!projections) {
+          if (!projections && family->requires_bytecode_projection) {
             IREE_RETURN_IF_ERROR(
                 loom_link_template_candidate_family_projections(loader, family,
                                                                 &projections));
@@ -472,21 +468,31 @@ iree_status_t loom_link_template_candidate_loader_load(
           IREE_RETURN_IF_ERROR(loom_link_bytecode_template_contract_reader_load(
               &cache->source.bytecode.contracts,
               (uint32_t)provider->module_symbol_ordinal,
-              &projections
-                  [provider_index /
-                   LOOM_LINK_TEMPLATE_CANDIDATE_PROJECTION_SEGMENT_CAPACITY]
-                  [provider_index %
-                   LOOM_LINK_TEMPLATE_CANDIDATE_PROJECTION_SEGMENT_CAPACITY],
+              projections
+                  ? &projections
+                        [provider_index /
+                         LOOM_LINK_TEMPLATE_CANDIDATE_PROJECTION_SEGMENT_CAPACITY]
+                        [provider_index %
+                         LOOM_LINK_TEMPLATE_CANDIDATE_PROJECTION_SEGMENT_CAPACITY]
+                  : NULL,
               &contract));
           const loom_symbol_ref_t target_symbol =
-              loom_link_template_candidate_lookup_linked_symbol(
-                  loader, source_module, materialization,
+              loom_link_plan_materialization_lookup_symbol(
+                  loader->index, source_module, materialization,
                   contract.target_symbol_ordinal);
-          IREE_RETURN_IF_ERROR(loom_template_provider_contract_bind_family(
+          loom_template_provider_contract_bind_family(
               &contract.provider, materialization->module, target_family,
-              target_symbol, provider->ordinal,
-              &candidates[candidate_count++]));
+              target_symbol, provider->ordinal, candidate);
         }
+        IREE_RETURN_IF_ERROR(loom_link_template_input_bind(
+            input_binding, provider, &candidate->input_contract));
+        if (candidate->argument_count != argument_count ||
+            candidate->result_count != result_count) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "provider signature does not match its bound template family");
+        }
+        ++candidate_count;
       }
       ++provider_index;
       provider = loom_link_module_index_next_template_provider(loader->index,
@@ -499,4 +505,20 @@ iree_status_t loom_link_template_candidate_loader_load(
       .count = candidate_count,
   };
   return iree_ok_status();
+}
+
+iree_status_t loom_link_template_candidate_loader_load(
+    loom_link_template_candidate_loader_t* loader, const loom_link_plan_t* plan,
+    loom_link_plan_materialization_t* materialization,
+    iree_arena_allocator_t* arena,
+    loom_template_provider_slice_t* out_candidates) {
+  loom_link_template_input_binding_t inputs = {
+      .index = loader->index,
+      .materialization = materialization,
+      .arena = arena,
+  };
+  const iree_status_t status = loom_link_template_candidate_loader_load_impl(
+      loader, plan, materialization, arena, &inputs, out_candidates);
+  loom_link_template_input_binding_deinitialize(&inputs);
+  return status;
 }

@@ -49,6 +49,7 @@
 #include "loom/import/cxx/binding/schedule_region.h"
 #include "loom/import/cxx/binding/target_definitions.h"
 #include "loom/import/cxx/binding/template_definitions.h"
+#include "loom/import/cxx/binding/template_inputs.h"
 #include "loom/import/cxx/check.h"
 #include "loom/import/cxx/control/analysis.h"
 #include "loom/import/cxx/control/regions.h"
@@ -1526,14 +1527,25 @@ class Translator final : private Initialization::Evaluation {
                             partition.kind == ValueKind::Pointer;
       // Only pointers change representation at kernel entry: the ABI supplies
       // one buffer, and source pointer transport adds its zero byte origin.
+      const auto& incoming_partition =
+          defined.template_family
+              ? types_.partition(cxx::type_cast<cxx::FunctionType>(
+                                     defined.template_family->type())
+                                     ->parameterTypes()[parameter_index],
+                                 defined.source)
+              : (kernel_pointer ? kSSAPartition : partition);
       auto value =
           defined.staged_signature
               ? staged_region_value(
                     region, *defined.staged_signature,
                     defined.staged_signature->parameters[parameter_index],
                     partition)
-              : region_value(region, argument_index,
-                             kernel_pointer ? kSSAPartition : partition);
+              : region_value(region, argument_index, incoming_partition);
+      if (defined.template_family) {
+        value = bind_template_input(value, value_type, types_, value_arena_,
+                                    defined.source, &builder_,
+                                    locations_.get(defined.source));
+      }
       if (kernel_pointer) {
         auto buffer = value.ssa();
         if (!defined.parameter_contracts.empty()) {

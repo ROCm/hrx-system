@@ -19,9 +19,34 @@ extern "C" {
 #endif
 
 enum {
-  LOOM_OP_TENSOR_DUPLICATE = LOOM_OP_KIND(LOOM_DIALECT_TENSOR, 0),
-  LOOM_OP_TENSOR_COUNT_ = 1,
+  LOOM_OP_TENSOR_REFINE = LOOM_OP_KIND(LOOM_DIALECT_TENSOR, 0),
+  LOOM_OP_TENSOR_DUPLICATE = LOOM_OP_KIND(LOOM_DIALECT_TENSOR, 1),
+  LOOM_OP_TENSOR_COUNT_ = 2,
 };
+
+// LOOM_OP_TENSOR_REFINE: Assert more precise shape and encoding information for the same tensor elements. Source and result describe the same value and ownership identity; this operation performs no conversion or copy.
+// %refined = tensor.refine %source : tensor<[%count]xf32> -> tensor<16xf32>
+LOOM_DEFINE_ISA(loom_tensor_refine_isa, LOOM_OP_TENSOR_REFINE)
+LOOM_DEFINE_OPERAND(loom_tensor_refine_source, 0)
+LOOM_DEFINE_RESULT(loom_tensor_refine_result, 0)
+iree_status_t loom_tensor_refine_build(
+    loom_builder_t* builder,
+    loom_may_consume loom_value_id_t source,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_value_refinement_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
+iree_status_t loom_value_refinement_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+iree_status_t loom_value_refinement_type_transfer(
+    loom_type_transfer_context_t* context,
+    const loom_module_t* module, loom_op_t* op);
+iree_status_t loom_value_refinement_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_TENSOR_DUPLICATE: Create another local owner of a tensor and its dependent dimensions or encoding. The duplicate carries the same elements through a distinct SSA ownership identity.
 // %copy_m, %copy = tensor.duplicate %m, %source : index, tensor<[%copy_m]xf32>

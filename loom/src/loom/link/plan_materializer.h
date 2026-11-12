@@ -85,6 +85,15 @@ typedef struct loom_link_plan_materialization_t {
   } target_kernel_configurations;
 } loom_link_plan_materialization_t;
 
+// Returns the linked identity of a source symbol, including an equivalent
+// global declaration selected through another source module. Unselected
+// private symbols and UINT32_MAX return a null reference.
+loom_symbol_ref_t loom_link_plan_materialization_lookup_symbol(
+    const loom_link_module_index_t* index,
+    const loom_link_module_index_module_t* source_module,
+    const loom_link_plan_materialization_t* materialization,
+    uint32_t source_symbol_ordinal);
+
 // Materializes |plan| through the incremental linker.
 //
 // Bytecode bodies are decoded only for symbols selected by the plan. The

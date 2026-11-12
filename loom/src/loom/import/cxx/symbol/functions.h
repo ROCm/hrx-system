@@ -151,6 +151,8 @@ struct FunctionBody {
   const ControlFlow* control;
   // Source/native argument permutation for a staged callable body.
   const StagedSignatureProjection* staged_signature = nullptr;
+  // Family owning native argument groups when provider source shapes differ.
+  const cxx::FunctionSymbol* template_family = nullptr;
 };
 
 // Native definition and any source-owned launch configuration body that must

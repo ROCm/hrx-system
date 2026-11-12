@@ -105,13 +105,22 @@ static iree_status_t loom_encoding_intern_exact_address_layout(
     loom_module_t* module, loom_value_fact_address_layout_t layout,
     uint16_t* out_encoding_id) {
   *out_encoding_id = 0;
-  if (layout.kind == LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE) {
+  if (layout.static_spec_encoding_id != 0) {
+    *out_encoding_id = layout.static_spec_encoding_id;
+    return iree_ok_status();
+  }
+  const loom_encoding_vtable_t* family =
+      loom_context_resolve_encoding_vtable(module->context, layout.family_id);
+  if (!family) {
+    return iree_ok_status();
+  }
+  if (family->descriptor == &loom_encoding_layout_dense_family_descriptor) {
     return loom_encoding_intern_family(
         module, &loom_encoding_layout_dense_family_descriptor,
         /*attributes=*/NULL, /*attribute_count=*/0, out_encoding_id);
   }
-  if (layout.kind != LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED ||
-      layout.rank > LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK) {
+  if (family->descriptor != &loom_encoding_layout_strided_family_descriptor ||
+      layout.kind != LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED) {
     return iree_ok_status();
   }
 
@@ -148,6 +157,12 @@ iree_status_t loom_encoding_intern_exact_summary(
   }
   if (summary->role != LOOM_ENCODING_ROLE_PHYSICAL_STORAGE ||
       summary->storage_schema.static_spec_encoding_id == 0) {
+    return iree_ok_status();
+  }
+  const loom_encoding_vtable_t* family =
+      loom_context_resolve_encoding_vtable(module->context, summary->family_id);
+  if (!family ||
+      family->descriptor != &loom_encoding_storage_family_descriptor) {
     return iree_ok_status();
   }
 

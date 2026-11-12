@@ -474,7 +474,6 @@ command.def public @root() launch(%count_storage: buffer, %first_output: buffer,
   bool has_same_root = false;
   bool has_buffer_view = false;
   bool has_subview = false;
-  bool has_refine = false;
   bool has_bitcast = false;
   loom_block_t* body_block =
       loom_region_entry_block(loom_kernel_def_body(generated_kernel));
@@ -492,7 +491,6 @@ command.def public @root() launch(%count_storage: buffer, %first_output: buffer,
     has_same_root |= loom_buffer_assume_same_root_isa(body_op);
     has_buffer_view |= loom_buffer_view_isa(body_op);
     has_subview |= loom_view_subview_isa(body_op);
-    has_refine |= loom_view_refine_isa(body_op);
     has_bitcast |= loom_view_bitcast_isa(body_op);
   }
   EXPECT_EQ(load_count, 4u);
@@ -503,7 +501,6 @@ command.def public @root() launch(%count_storage: buffer, %first_output: buffer,
   EXPECT_TRUE(has_same_root);
   EXPECT_TRUE(has_buffer_view);
   EXPECT_TRUE(has_subview);
-  EXPECT_TRUE(has_refine);
   EXPECT_TRUE(has_bitcast);
 
   ASSERT_EQ(plan.root_count, 1u);

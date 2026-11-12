@@ -140,6 +140,7 @@ loom_generated_cc_library(
         "//loom/src/loom/ops:cache",
         "//loom/src/loom/ops:combining",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:value_refinement",
         "//loom/src/loom/ops/encoding",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/index:cast",

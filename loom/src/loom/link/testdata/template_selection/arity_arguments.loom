@@ -1,0 +1,5 @@
+template.decl @candidate(%value: i32, %extra: i32) -> (i32)
+
+template.def<@candidate> @provider(%value: i32, %extra: i32) -> (i32) {
+  template.return %value : i32
+}

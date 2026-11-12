@@ -22,6 +22,23 @@ extern "C" {
 // every incoming value shares them.
 extern const loom_value_fact_domain_t loom_encoding_fact_domain;
 
+// Knowledge of a complete encoding identity, distinct from shared geometry or
+// partial schema properties.
+typedef enum loom_encoding_match_result_e {
+  LOOM_ENCODING_MATCH_RESULT_UNKNOWN = 0,
+  LOOM_ENCODING_MATCH_RESULT_FALSE = 1,
+  LOOM_ENCODING_MATCH_RESULT_TRUE = 2,
+} loom_encoding_match_result_t;
+
+// Matches retained encoding facts against a verified complete static spec.
+// Every encoding ID in |summary| and |required_id| belongs to |module|. The
+// required_id zero denotes the native dense representation. The
+// query allocates nothing and neither interns an encoding nor inspects SSA
+// producers. Unknown family identity or incomplete parameters remain unknown.
+loom_encoding_match_result_t loom_encoding_match_spec(
+    const loom_module_t* module, loom_value_fact_encoding_summary_t summary,
+    uint16_t required_id);
+
 // Builds exact value facts for a verified static encoding specification.
 // |result_type| supplies the role carried by the SSA value.
 iree_status_t loom_encoding_static_value_facts(loom_fact_context_t* context,

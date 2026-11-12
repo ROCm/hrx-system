@@ -111,6 +111,7 @@ loom_cc_library(
         ":module_summary",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ir:input_contract",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -184,6 +185,22 @@ loom_cc_test(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/cfg",
         "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "input_contract_test",
+    srcs = ["input_contract_test.cc"],
+    deps = [
+        ":index",
+        ":index_reader",
+        ":writer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/template",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:stream",
         "//runtime/src/iree/testing:gtest",

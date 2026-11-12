@@ -29,6 +29,9 @@ enum loom_template_decision_feature_kind_e {
 
   // One resolved typed target condition.
   LOOM_TEMPLATE_DECISION_FEATURE_TARGET_CONDITION = 1,
+
+  // Declared dimension or complete encoding requirement on actual inputs.
+  LOOM_TEMPLATE_DECISION_FEATURE_INPUT = 2,
 };
 
 // One contextual feature referenced by a generic decision program.
@@ -53,6 +56,9 @@ typedef struct loom_template_decision_feature_t {
       const loom_target_facts_t* target_facts;
     } target_identity;
 
+    // Input requirement in application argument coordinates.
+    loom_input_requirement_t input;
+
     // Borrowed resolved target condition.
     const loom_target_condition_t* target_condition;
   } value;
@@ -66,6 +72,9 @@ enum loom_template_decision_model_flag_bits_e {
 
   // At least one target condition can project a lexical query predicate.
   LOOM_TEMPLATE_DECISION_MODEL_FLAG_HAS_PROJECTABLE_TARGET_CONDITIONS = 1u << 1,
+
+  // Input types may depend on scalar or encoding facts.
+  LOOM_TEMPLATE_DECISION_MODEL_FLAG_HAS_INPUTS = 1u << 2,
 };
 
 // One demanded template family's immutable ranked decision model.

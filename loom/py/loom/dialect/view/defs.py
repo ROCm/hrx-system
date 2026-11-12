@@ -27,7 +27,6 @@ from loom.dsl import (
     ATTR_TYPE_FLAGS,
     ATTR_TYPE_I64_ARRAY,
     BYTE_PATTERN_SCALAR,
-    FACT_IDENTITY,
     HINT,
     INDEX,
     OBSERVABLE_EFFECT,
@@ -56,6 +55,7 @@ from loom.dsl import (
     TotalBitCountEqual,
     Writes,
     value_duplication_op,
+    value_refinement_op,
 )
 
 # ============================================================================
@@ -225,7 +225,7 @@ view_subview = Op(
 # view.refine — type/fact refinement for an existing view
 # ============================================================================
 
-view_refine = Op(
+view_refine = value_refinement_op(
     name="view.refine",
     group=view_ops,
     doc=(
@@ -235,23 +235,8 @@ view_refine = Op(
         "requirements. An alignment qualifier changes the requirement of "
         "subsequent executed accesses, not an unconditional address fact."
     ),
-    operands=[Operand("source", VIEW, doc="Source view to refine.")],
-    results=[Result("result", VIEW, doc="Same view with refined type information.")],
-    constraints=[
-        SameElementType("source", "result"),
-        RanksMatch("source", "result"),
-    ],
-    traits=[PURE, REFINABLE_RESULT_TYPE_REFS, FACT_IDENTITY],
-    verify="loom_view_refine_verify",
+    carrier=VIEW,
     facts="loom_view_reinterpret_facts",
-    type_transfer="loom_view_refine_type_transfer",
-    format=[
-        Ref("source"),
-        COLON,
-        TypeOf("source"),
-        ARROW,
-        ResultType("result"),
-    ],
     examples=[
         "%refined = view.refine %view : view<[%M]xf32, %layout> -> view<16xf32>",
     ],

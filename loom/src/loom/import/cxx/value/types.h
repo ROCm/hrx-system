@@ -152,6 +152,11 @@ class BoundTypeStorage {
   BoundTypeStorage(BoundTypeStorage&&) = default;
   BoundTypeStorage& operator=(BoundTypeStorage&&) = default;
 
+  // Rebuilds only a shaped type's dimensions while preserving its carrier,
+  // element, alignment, and complete encoding attachment.
+  loom_type_t with_dimensions(loom_type_t type,
+                              std::span<const uint64_t> dimensions);
+
   // Retains one bounded dimension sequence and returns stable contiguous
   // storage. The sequence must have rank in [3, LOOM_TYPE_MAX_RANK].
   const loom_overflow_dim_t* retain_dimensions(

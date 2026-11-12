@@ -54,8 +54,9 @@ class TemplateDefinitions {
   // Providers in deterministic first-declaration order.
   std::span<const Provider> providers() const { return providers_; }
 
-  // Validates the completed provider classification and its exact C++ family
-  // signature. Called after the declaration walk has reconciled all attributes.
+  // Validates the completed provider classification, template input carriers,
+  // and exact result signature. Called after the declaration walk has
+  // reconciled all attributes.
   void validate(const Provider& provider, cxx::FunctionSymbol* family,
                 Types& types) const;
 

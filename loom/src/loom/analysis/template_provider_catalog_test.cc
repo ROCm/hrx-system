@@ -13,6 +13,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/template/ops.h"
@@ -161,11 +162,13 @@ template.def<@qwen.q4.matmul> public priority(10) @fast(%arg0: i32) -> (i32) {
   EXPECT_EQ(fast->priority, 10);
   ASSERT_EQ(fast->argument_count, 1u);
   ASSERT_EQ(fast->result_count, 1u);
-  EXPECT_TRUE(loom_type_equal(
-      loom_module_value_type(fast->module, fast->argument_ids[0]),
-      loom_type_scalar(LOOM_SCALAR_TYPE_I32)));
   EXPECT_TRUE(
-      loom_type_equal(loom_module_value_type(fast->module, fast->result_ids[0]),
+      loom_type_equal(loom_module_value_type(
+                          fast->module, fast->source_function->argument_ids[0]),
+                      loom_type_scalar(LOOM_SCALAR_TYPE_I32)));
+  EXPECT_TRUE(
+      loom_type_equal(loom_module_value_type(
+                          fast->module, fast->source_function->result_ids[0]),
                       loom_type_scalar(LOOM_SCALAR_TYPE_I32)));
 
   const loom_template_provider_summary_t* asm_impl =
@@ -225,9 +228,9 @@ template.decl @b(%value: i32) -> (i32)
             .name = IREE_SV("external"),
             .priority = (int64_t)i,
         };
-        IREE_ASSERT_OK(loom_template_provider_contract_bind_family(
+        loom_template_provider_contract_bind_family(
             &contract, module.get(), families[order[i] - 'a'],
-            loom_symbol_ref_null(), i, &external[i]));
+            loom_symbol_ref_null(), i, &external[i]);
       }
       IREE_ASSERT_OK(loom_template_provider_catalog_build(
           &catalog_, module.get(), &fact_table_, external,
@@ -405,9 +408,9 @@ template.decl @target.family(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]x
   };
   const iree_host_size_t target_value_count_before = target->values.count;
   loom_template_provider_summary_t bound = {};
-  IREE_ASSERT_OK(loom_template_provider_summary_bind_family(
-      &source_provider, target.get(), target_family, target_target,
-      /*origin_ordinal=*/123, &bound));
+  loom_template_provider_summary_bind_family(&source_provider, target.get(),
+                                             target_family, target_target,
+                                             /*origin_ordinal=*/123, &bound);
 
   EXPECT_EQ(target->values.count, target_value_count_before);
   EXPECT_EQ(bound.module, target.get());
@@ -420,8 +423,10 @@ template.decl @target.family(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]x
   ASSERT_EQ(bound.argument_count, 2u);
   ASSERT_EQ(bound.result_count, 1u);
   EXPECT_FALSE(bound.predicates_use_ordinals);
-  EXPECT_EQ(bound.argument_ids, source_provider.argument_ids);
-  EXPECT_EQ(bound.result_ids, source_provider.result_ids);
+  EXPECT_EQ(bound.source_function->argument_ids,
+            source_provider.source_function->argument_ids);
+  EXPECT_EQ(bound.source_function->result_ids,
+            source_provider.source_function->result_ids);
   EXPECT_EQ(bound.predicates, source_provider.predicates);
 
   ASSERT_EQ(bound.predicate_count, 1u);
@@ -429,7 +434,7 @@ template.decl @target.family(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]x
   EXPECT_EQ(bound.predicates[0].kind, LOOM_PREDICATE_MULTIPLE_OF);
   EXPECT_EQ(bound.predicates[0].arg_tags[0], LOOM_PRED_ARG_VALUE);
   EXPECT_EQ((loom_value_id_t)bound.predicates[0].args[0],
-            bound.argument_ids[0]);
+            bound.source_function->argument_ids[0]);
   EXPECT_EQ(bound.predicates[0].arg_tags[1], LOOM_PRED_ARG_CONST);
   EXPECT_EQ(bound.predicates[0].args[1], 16);
 

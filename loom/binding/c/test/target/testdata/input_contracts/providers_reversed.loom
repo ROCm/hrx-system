@@ -1,0 +1,25 @@
+template.decl @load(%n: index, %layout: encoding<storage>, %input: view<2x[%n]xi8, %layout>) -> (i32)
+
+template.def<@load> @strided_q4(%n: index, %layout: encoding<storage>, %input: view<2x18xi8, #encoding.storage<layout=#encoding.layout.strided<strides=[18, 1]>, schema=#ggml.q4_0>>) -> (i32) {
+  %loaded = view.load %input[1, 0] : view<2x18xi8, #encoding.storage<layout=#encoding.layout.strided<strides=[18, 1]>, schema=#ggml.q4_0>> -> i8
+  %result = scalar.extsi %loaded : i8 to i32
+  template.return %result : i32
+}
+
+template.def<@load> @padded_q4(%n: index, %layout: encoding<storage>, %input: view<2x18xi8, #encoding.storage<layout=#encoding.layout.strided<strides=[26, 1]>, schema=#ggml.q4_0>>) -> (i32) {
+  %loaded = view.load %input[1, 0] : view<2x18xi8, #encoding.storage<layout=#encoding.layout.strided<strides=[26, 1]>, schema=#ggml.q4_0>> -> i8
+  %result = scalar.extsi %loaded : i8 to i32
+  template.return %result : i32
+}
+
+template.def<@load> @dense_q8(%n: index, %layout: encoding<storage>, %input: view<2x34xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q8_0>>) -> (i32) {
+  %loaded = view.load %input[1, 0] : view<2x34xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q8_0>> -> i8
+  %result = scalar.extsi %loaded : i8 to i32
+  template.return %result : i32
+}
+
+template.def<@load> @dense_q4(%n: index, %layout: encoding<storage>, %input: view<2x18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) -> (i32) {
+  %loaded = view.load %input[1, 0] : view<2x18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>> -> i8
+  %result = scalar.extsi %loaded : i8 to i32
+  template.return %result : i32
+}

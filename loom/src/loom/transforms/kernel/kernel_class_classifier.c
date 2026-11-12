@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/base/internal/math.h"
+#include "loom/ir/input_contract.h"
 #include "loom/ir/structural_hash.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/template/ops.h"
@@ -224,6 +225,7 @@ static loom_decision_truth_t loom_kernel_class_truth_from_feasibility(
 
 static loom_decision_truth_t loom_kernel_class_resolve_feature(
     const loom_template_decision_model_t* model, uint32_t feature_ordinal,
+    const loom_op_t* application,
     const loom_template_applicability_target_t* kernel_target,
     const loom_template_applicability_facts_t* kernel_application_facts) {
   const loom_template_decision_feature_t* feature =
@@ -235,6 +237,10 @@ static loom_decision_truth_t loom_kernel_class_resolve_feature(
               model->module, feature->value.target_identity.module,
               feature->value.target_identity.target_symbol,
               feature->value.target_identity.target_facts, kernel_target));
+    case LOOM_TEMPLATE_DECISION_FEATURE_INPUT:
+      return loom_template_applicability_evaluate_input(
+          model->module, loom_op_const_operands(application),
+          &feature->value.input, kernel_application_facts);
     case LOOM_TEMPLATE_DECISION_FEATURE_TARGET_CONDITION:
       return loom_kernel_class_truth_from_feasibility(
           loom_template_applicability_evaluate_target_condition(
@@ -247,9 +253,10 @@ static loom_decision_truth_t loom_kernel_class_resolve_feature(
 
 static loom_decision_truth_t loom_kernel_class_evaluate_feature(
     void* user_data, uint32_t feature_ordinal) {
-  const loom_decision_truth_t* outcomes =
-      (const loom_decision_truth_t*)user_data;
-  return outcomes[feature_ordinal];
+  const uint32_t outcome = ((const uint32_t*)user_data)[feature_ordinal];
+  return outcome < LOOM_KERNEL_CLASS_FEATURE_INPUT_BASE
+             ? (loom_decision_truth_t)outcome
+             : LOOM_DECISION_TRUTH_UNKNOWN;
 }
 
 static loom_decision_program_feature_evaluator_t
@@ -548,6 +555,7 @@ static iree_status_t loom_kernel_class_classifier_build_impl(
   iree_host_size_t value_reference_count = out_classifier->shape.count;
   iree_host_size_t binding_value_count = 0;
   iree_host_size_t feature_count = 0;
+  iree_host_size_t maximum_input_count = 0;
   iree_host_size_t action_count = 0;
   demand_id = kernel_references.first_template_demand_id;
   while (demand_id != LOOM_TEMPLATE_DEMAND_ID_INVALID) {
@@ -599,6 +607,11 @@ static iree_status_t loom_kernel_class_classifier_build_impl(
     }
     binding_value_count += arguments.count + results.count;
     feature_count += model->program.feature_count;
+    for (uint32_t j = 0; j < model->program.feature_count; ++j) {
+      maximum_input_count +=
+          model->features[j].kind == LOOM_TEMPLATE_DECISION_FEATURE_INPUT &&
+          model->features[j].value.input.axis != UINT8_MAX;
+    }
     if (!iree_host_size_checked_add(action_count, model->program.choice_count,
                                     &action_count)) {
       return iree_make_status(
@@ -609,6 +622,68 @@ static iree_status_t loom_kernel_class_classifier_build_impl(
         out_classifier->maximum_provider_count, model->program.choice_count);
   }
   IREE_ASSERT(decision_ordinal == 0);
+
+  // Resolve features once. Only unresolved dimension equalities need launch
+  // queries; constant outcomes retain their existing decision truth values.
+  uint32_t* feature_outcomes = NULL;
+  IREE_RETURN_IF_ERROR(loom_kernel_class_allocate_array(
+      arena, feature_count, sizeof(*feature_outcomes),
+      (void**)&feature_outcomes));
+  loom_kernel_class_input_t* input_scratch = NULL;
+  IREE_RETURN_IF_ERROR(loom_kernel_class_allocate_array(
+      scratch_arena, maximum_input_count, sizeof(*input_scratch),
+      (void**)&input_scratch));
+  const loom_template_applicability_facts_t kernel_application_facts = {
+      .values = kernel_facts,
+  };
+  iree_host_size_t input_count = 0;
+  iree_host_size_t feature_cursor = 0;
+  for (uint32_t i = 0; i < decision_count; ++i) {
+    loom_kernel_class_decision_t* decision = &decisions[i];
+    decision->feature_outcomes = decision->model->program.feature_count
+                                     ? feature_outcomes + feature_cursor
+                                     : NULL;
+    for (uint32_t j = 0; j < decision->model->program.feature_count; ++j) {
+      uint32_t outcome = loom_kernel_class_resolve_feature(
+          decision->model, j, decision->application, kernel_target,
+          &kernel_application_facts);
+      const loom_template_decision_feature_t* feature =
+          &decision->model->features[j];
+      if (outcome == LOOM_DECISION_TRUTH_UNKNOWN &&
+          feature->kind == LOOM_TEMPLATE_DECISION_FEATURE_INPUT &&
+          feature->value.input.axis != UINT8_MAX) {
+        const loom_predicate_t predicate =
+            loom_input_requirement_dimension_predicate(
+                module, loom_op_const_operands(decision->application),
+                &feature->value.input);
+        if (predicate.arg_tags[0] != LOOM_PRED_ARG_NONE) {
+          loom_kernel_class_input_t* input = &input_scratch[input_count++];
+          for (uint8_t k = 0; k < 2; ++k) {
+            const bool is_value = predicate.arg_tags[k] == LOOM_PRED_ARG_VALUE;
+            input->projections[k] =
+                is_value ? (uint32_t)predicate.args[k] : UINT32_MAX;
+            input->constants[k] = is_value ? 0 : predicate.args[k];
+            value_reference_count += is_value;
+          }
+          outcome =
+              LOOM_KERNEL_CLASS_FEATURE_INPUT_BASE + decision->input_count++;
+        }
+      }
+      feature_outcomes[feature_cursor++] = outcome;
+    }
+  }
+  loom_kernel_class_input_t* inputs = NULL;
+  IREE_RETURN_IF_ERROR(loom_kernel_class_allocate_array(
+      arena, input_count, sizeof(*inputs), (void**)&inputs));
+  if (input_count) {
+    memcpy(inputs, input_scratch, input_count * sizeof(*inputs));
+  }
+  iree_host_size_t input_cursor = 0;
+  for (uint32_t i = 0; i < decision_count; ++i) {
+    decisions[i].inputs =
+        decisions[i].input_count ? inputs + input_cursor : NULL;
+    input_cursor += decisions[i].input_count;
+  }
 
   loom_value_id_t* referenced_value_ids = NULL;
   IREE_RETURN_IF_ERROR(loom_kernel_class_allocate_array(
@@ -627,6 +702,15 @@ static iree_status_t loom_kernel_class_classifier_build_impl(
       }
     }
     const loom_kernel_class_decision_t* decision = &decisions[i];
+    for (uint32_t j = 0; j < decision->input_count; ++j) {
+      for (uint8_t k = 0; k < 2; ++k) {
+        if (decision->inputs[j].projections[k] != UINT32_MAX) {
+          referenced_value_ids[referenced_value_count++] =
+              decision->inputs[j].projections[k];
+        }
+      }
+    }
+
     for (uint32_t j = 0; j < decision->model->program.predicate_count; ++j) {
       const loom_decision_program_predicate_t* predicate =
           &decision->model->program.predicates[j];
@@ -743,26 +827,19 @@ static iree_status_t loom_kernel_class_classifier_build_impl(
   // Reuse discovery scratch to pack each decision's unique projection ordinals.
   // The occurrence-sized allocation retires after its compact prefix is copied.
   uint32_t* decision_projection_ordinals = referenced_value_ids;
-  loom_decision_truth_t* feature_outcomes = NULL;
   loom_kernel_class_action_t* actions = NULL;
   IREE_RETURN_IF_ERROR(loom_kernel_class_allocate_array(
       arena, binding_value_count, sizeof(*binding_values),
       (void**)&binding_values));
-  IREE_RETURN_IF_ERROR(loom_kernel_class_allocate_array(
-      arena, feature_count, sizeof(*feature_outcomes),
-      (void**)&feature_outcomes));
   IREE_RETURN_IF_ERROR(loom_kernel_class_allocate_array(
       arena, action_count, sizeof(*actions), (void**)&actions));
   if (binding_value_count > 0) {
     memset(binding_values, 0xFF, binding_value_count * sizeof(*binding_values));
   }
 
-  const loom_template_applicability_facts_t kernel_application_facts = {
-      .values = kernel_facts,
-  };
   iree_host_size_t binding_cursor = 0;
   iree_host_size_t projection_cursor = 0;
-  iree_host_size_t feature_cursor = 0;
+  feature_cursor = 0;
   iree_host_size_t action_cursor = 0;
   uint32_t* live_actions = NULL;
   for (uint32_t i = 0; i < decision_count; ++i) {
@@ -834,6 +911,24 @@ static iree_status_t loom_kernel_class_classifier_build_impl(
             projection_ordinal;
       }
     }
+    for (uint32_t j = 0; j < decision->input_count; ++j) {
+      loom_kernel_class_input_t* input =
+          (loom_kernel_class_input_t*)&decision->inputs[j];
+      for (uint8_t k = 0; k < 2; ++k) {
+        if (input->projections[k] == UINT32_MAX) {
+          continue;
+        }
+        uint32_t ordinal;
+        const loom_kernel_class_projection_t* projection =
+            loom_kernel_class_lookup_projection(
+                projections, projection_count, input->projections[k], &ordinal);
+        input->projections[k] = ordinal;
+        has_unprojectable_input |=
+            projection->kind == LOOM_KERNEL_CLASS_PROJECTION_STATIC_FACTS;
+        decision_projection_ordinals[projection_cursor +
+                                     raw_projection_count++] = ordinal;
+      }
+    }
     loom_kernel_class_sort_projection_ordinals(projection_ordinal_slice,
                                                raw_projection_count);
     uint32_t unique_projection_count = 0;
@@ -849,10 +944,13 @@ static iree_status_t loom_kernel_class_classifier_build_impl(
 
     bool has_unresolved_target = false;
     for (uint32_t j = 0; j < decision->model->program.feature_count; ++j) {
-      const loom_decision_truth_t outcome = loom_kernel_class_resolve_feature(
-          decision->model, j, kernel_target, &kernel_application_facts);
-      feature_outcomes[feature_cursor++] = outcome;
-      has_unresolved_target |= outcome == LOOM_DECISION_TRUTH_UNKNOWN;
+      const uint32_t outcome = feature_outcomes[feature_cursor++];
+      if (decision->model->features[j].kind ==
+          LOOM_TEMPLATE_DECISION_FEATURE_INPUT) {
+        has_unprojectable_input |= outcome == LOOM_DECISION_TRUTH_UNKNOWN;
+      } else {
+        has_unresolved_target |= outcome == LOOM_DECISION_TRUTH_UNKNOWN;
+      }
     }
 
     const loom_value_slice_t source_arguments =

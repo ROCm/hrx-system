@@ -157,8 +157,8 @@ static iree_status_t loom_template_provider_catalog_populate_local(
         .result_count = facts->result_count,
         .name = facts->name,
         .priority = facts->priority,
-        .argument_ids = facts->argument_ids,
-        .result_ids = facts->result_ids,
+        .source_function = facts,
+        .input_contract = loom_func_symbol_input_contract(facts),
         .predicates = facts->predicates,
         .predicate_count = facts->predicate_count,
         .target_conditions = facts->target_conditions,
@@ -321,37 +321,7 @@ iree_status_t loom_template_provider_catalog_build_local(
                                               /*external_provider_count=*/0);
 }
 
-static iree_status_t loom_template_provider_validate_family_binding(
-    const loom_module_t* target_module, loom_symbol_ref_t target_family,
-    uint16_t expected_argument_count, uint16_t expected_result_count) {
-  if (!loom_symbol_ref_is_valid(target_family) ||
-      target_family.module_id != 0 ||
-      target_family.symbol_id >= target_module->symbols.count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "bound template family is invalid");
-  }
-
-  const loom_symbol_t* family_symbol =
-      &target_module->symbols.entries[target_family.symbol_id];
-  const loom_func_like_t family =
-      loom_func_like_cast(target_module, family_symbol->defining_op);
-  if (!loom_func_like_isa(family)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "bound template family is not function-like");
-  }
-  uint16_t argument_count = 0;
-  loom_func_like_arg_ids(family, &argument_count);
-  const uint16_t result_count = family.op->result_count;
-  if (argument_count != expected_argument_count ||
-      result_count != expected_result_count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "provider signature does not match its bound template family");
-  }
-  return iree_ok_status();
-}
-
-iree_status_t loom_template_provider_summary_bind_family(
+void loom_template_provider_summary_bind_family(
     const loom_template_provider_summary_t* source,
     const loom_module_t* target_module, loom_symbol_ref_t target_family,
     loom_symbol_ref_t target_symbol, iree_host_size_t origin_ordinal,
@@ -360,10 +330,6 @@ iree_status_t loom_template_provider_summary_bind_family(
   IREE_ASSERT_ARGUMENT(source->module);
   IREE_ASSERT_ARGUMENT(target_module);
   IREE_ASSERT_ARGUMENT(out_provider);
-  *out_provider = (loom_template_provider_summary_t){0};
-  IREE_RETURN_IF_ERROR(loom_template_provider_validate_family_binding(
-      target_module, target_family, source->argument_count,
-      source->result_count));
 
   *out_provider = *source;
   out_provider->module = target_module;
@@ -371,10 +337,9 @@ iree_status_t loom_template_provider_summary_bind_family(
   out_provider->target_symbol = target_symbol;
   out_provider->origin_ordinal = origin_ordinal;
   out_provider->family = target_family;
-  return iree_ok_status();
 }
 
-iree_status_t loom_template_provider_contract_bind_family(
+void loom_template_provider_contract_bind_family(
     const loom_template_provider_contract_t* contract,
     const loom_module_t* target_module, loom_symbol_ref_t target_family,
     loom_symbol_ref_t target_symbol, iree_host_size_t origin_ordinal,
@@ -382,11 +347,7 @@ iree_status_t loom_template_provider_contract_bind_family(
   IREE_ASSERT_ARGUMENT(contract);
   IREE_ASSERT_ARGUMENT(target_module);
   IREE_ASSERT_ARGUMENT(out_provider);
-  *out_provider = (loom_template_provider_summary_t){0};
 
-  IREE_RETURN_IF_ERROR(loom_template_provider_validate_family_binding(
-      target_module, target_family, contract->argument_count,
-      contract->result_count));
   *out_provider = (loom_template_provider_summary_t){
       .module = target_module,
       .kind = contract->kind,
@@ -403,11 +364,11 @@ iree_status_t loom_template_provider_contract_bind_family(
       .target_condition_count = contract->target_condition_count,
       .name = contract->name,
       .priority = contract->priority,
+      .input_contract = contract->input_contract,
       .predicates = contract->predicates,
       .target_conditions = contract->target_conditions,
       .target_facts = contract->target_facts,
   };
-  return iree_ok_status();
 }
 
 loom_template_provider_slice_t loom_template_provider_catalog_lookup(

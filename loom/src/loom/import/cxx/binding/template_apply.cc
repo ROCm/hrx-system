@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "loom/import/cxx/binding/function_contracts.h"
+#include "loom/import/cxx/binding/template_inputs.h"
 #include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/symbol/names.h"
@@ -119,8 +120,8 @@ TemplateApplyIntrinsic TemplateApplyIntrinsic::bind_application(
                        "template.apply result type must match its family");
   }
   for (size_t i = 0; i < parameters.size(); ++i) {
-    if (types.unqualified(parameters[i]) !=
-        types.unqualified(family_->parameter_types[i])) {
+    if (!template_input_compatible(types, family_->parameter_types[i],
+                                   parameters[i], owner)) {
       diagnostics.reject(unit, owner,
                          "template.apply argument type must match its family");
     }
@@ -191,8 +192,9 @@ std::optional<Value> TemplateApplyIntrinsic::call(
 
   std::vector<loom_value_id_t> operands;
   operands.reserve(family_->argument_component_count);
-  for (const auto argument : arguments) {
-    argument.append_to(operands);
+  for (size_t i = 0; i < arguments.size(); ++i) {
+    append_template_input(arguments[i], family_->parameter_types[i], types,
+                          owner, builder, location, operands);
   }
 
   BoundSignature results;

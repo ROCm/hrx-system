@@ -248,7 +248,9 @@ template.def<@guide.scale> priority(1) @portable_scale(%tile_size: index, %value
 An explicitly supplied library makes providers visible. For every reachable
 apply, specialization evaluates candidates in this order:
 
-1. Family symbol and exact operand/result types must match.
+1. The family must match. Ordinary types, shaped carrier kinds, element types,
+   ranks, and view alignment stay exact; declared input dimensions and complete
+   encodings must be proven. Result types follow the family contract exactly.
 2. Calling context and any explicit target identity must be compatible.
 3. Value predicates in `where` must be proven at the application site.
 4. Typed target requirements in `requires` must be proven by the active
@@ -262,6 +264,85 @@ device program.
 
 Distinct providers tied at the best priority are ambiguous. File order,
 library order, and symbol spelling never become accidental tie breakers.
+
+### Input shapes are requirements
+
+A provider can specialize the shape declared by its family. Here `@last16`
+requires a sixteen-element view; the generic provider accepts the family's
+input extent:
+
+```loom
+template.decl @last(%n: index, %input: view<[%n]xf32>) -> (f32)
+
+template.def<@last> priority(20) @last16(%n: index, %input: view<16xf32>) -> (f32) {
+  %value = view.load %input[15] : view<16xf32> -> f32
+  template.return %value : f32
+}
+
+template.def<@last> priority(1) @last_dynamic(%n: index, %input: view<[%n]xf32>) -> (f32) {
+  %one = index.constant 1 : index
+  %position = index.sub %n, %one : index
+  %value = view.load %input[%position] : view<[%n]xf32> -> f32
+  template.return %value : f32
+}
+
+func.def public @read_last(%input: view<16xf32>) -> (f32) {
+  %n = index.constant 16 : index
+  %value = template.apply<@last>(%n, %input) : (index, view<16xf32>) -> (f32)
+  func.return %value : f32
+}
+```
+
+The application selects `@last16`. A dynamic view can select the same provider
+when its extent is proven to be sixteen, including inside a branch that
+establishes that equality. The family requirement still applies: `%n` must
+agree with the actual view's extent before any provider is eligible. A fallback
+cannot repair an invalid family application.
+
+This rule applies to `group`, `tensor`, `tile`, `vector`, and `view` inputs.
+Selection makes any necessary shape change explicit with the corresponding
+`*.refine` operation before an exactly typed call. A refinement preserves the
+value and its storage; it does not allocate, copy, or reshape data. Ordinary
+`func.call` typing remains exact.
+
+### Complete encodings select storage-specific implementations
+
+An encoding-bearing family can accept several complete representations while
+each provider names the representation it implements:
+
+```loom
+template.decl @first(%layout: encoding<layout>, %input: view<16xf32, %layout>) -> (f32)
+
+template.def<@first> priority(20) @first_dense(%layout: encoding<layout>, %input: view<16xf32>) -> (f32) {
+  %value = view.load %input[0] : view<16xf32> -> f32
+  template.return %value : f32
+}
+
+template.def<@first> priority(1) @first_encoded(%layout: encoding<layout>, %input: view<16xf32, %layout>) -> (f32) {
+  %value = view.load %input[0] : view<16xf32, %layout> -> f32
+  template.return %value : f32
+}
+
+func.def public @read_dense(%input: view<16xf32>) -> (f32) {
+  %layout = encoding.define #encoding.layout.dense : encoding<layout>
+  %value = template.apply<@first>(%layout, %input) : (encoding<layout>, view<16xf32>) -> (f32)
+  func.return %value : f32
+}
+```
+
+The omitted encoding on `@first_dense` means native dense representation.
+A provider can instead name a complete static encoding, including a strided
+layout, a GGML schema, or a storage composition such as
+`#encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>`.
+Matching preserves the complete identity: a one-dimensional strided layout
+with stride one has the same addresses as dense storage but remains a distinct
+encoding. A custom encoding exposing dense geometry likewise retains its own
+identity. Converting representations requires explicit operations.
+
+Input requirements determine applicability. The requested result type never
+selects a provider, and a provider's results must satisfy its family's exact
+result contract. Dependent results and separate extent/encoding co-results
+retain their ordinary binding rules.
 
 ### Staged inputs reach provider predicates
 

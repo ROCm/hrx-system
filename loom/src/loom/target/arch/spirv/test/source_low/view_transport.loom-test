@@ -77,20 +77,10 @@ func.def @nested_dynamic_view_refinement(%input: buffer, %extent_input: index, %
 
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @nested_dynamic_view_refinement(%aligned: reg<spirv.ptr.storage_buffer>, %extent: reg<spirv.id : index>, %position: reg<spirv.id : index>, %condition: reg<spirv.id : i1>) -> (reg<spirv.id : i32>) asm {
-  %result = low.scf.if %condition -> (reg<spirv.id : i32>) {
-    %23 = OpSConvert.i32.offset64 %position
-    %24 = OpConstant.offset64 4
-    %25 = OpIMul.offset64 %23, %24
-    %26 = OpPtrAccessChain.storage_buffer.i32.byte_offset %aligned, %25
-    %value = OpLoad.storage_buffer.i32 %26
-    low.scf.yield %value : reg<spirv.id : i32>
-  } else {
-    %28 = OpSConvert.i32.offset64 %position
-    %29 = OpConstant.offset64 4
-    %30 = OpIMul.offset64 %28, %29
-    %31 = OpPtrAccessChain.storage_buffer.i32.byte_offset %aligned, %30
-    %value = OpLoad.storage_buffer.i32 %31
-    low.scf.yield %value : reg<spirv.id : i32>
-  }
+  %25 = OpSConvert.i32.offset64 %position
+  %26 = OpConstant.offset64 4
+  %27 = OpIMul.offset64 %25, %26
+  %28 = OpPtrAccessChain.storage_buffer.i32.byte_offset %aligned, %27
+  %result = OpLoad.storage_buffer.i32 %28
   return %result
 }

@@ -16,6 +16,14 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Carries newly proven scalar identities into shaped operand types using
+// explicit carrier refinements. Non-shaped operands and unaffected types are
+// unchanged. The caller separately replaces direct scalar operands.
+iree_status_t loom_template_rewrite_assumed_inputs(
+    loom_rewriter_t* rewriter, const loom_op_t* application,
+    const loom_value_id_t* source_values, const loom_value_id_t* assumed_values,
+    uint16_t value_count, loom_value_id_t* operands);
+
 // Rewrites |apply_op| as an exact template.call to |callee|.
 //
 // |operands| must contain one replacement for every application operand. The

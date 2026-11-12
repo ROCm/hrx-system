@@ -1848,12 +1848,52 @@ auto apply_family(Value value) {
 
 The family declaration determines the result type, including record components
 and dependent view extents or encodings. Arguments retain their deduced source
-types and must match the family; the explicit helper does not perform ordinary
-C++ argument conversions. Arguments are evaluated once. The template header
-also supplies `LOOM_TEMPLATE_DECL` and `LOOM_TEMPLATE_DEF` independently of the
-kernel facade.
+types. Matching can use declared input dimensions and complete encodings; the
+explicit helper does not perform ordinary C++ argument conversions. Arguments
+are evaluated once. The template header also supplies `LOOM_TEMPLATE_DECL` and
+`LOOM_TEMPLATE_DEF` independently of the kernel facade.
 
-The provider signature must exactly match its family after C++ type resolution.
+Shaped provider inputs keep the family's carrier kind, rank, element type,
+qualifiers, and encoding role, while dimensions and complete encodings can add
+applicability requirements. Results and other source types remain exact. For
+example, a family with dynamic outer dimensions can select a fixed-shape body:
+
+```cpp
+#include <loomcxx/template.h>
+#include <loomcxx/view.h>
+
+namespace t = loom::type;
+using Dynamic = t::view<t::shape<t::dynamic, 8, t::dynamic>, const float>;
+using Fixed = t::view<t::shape<4, 8, 6>, const float>;
+
+LOOM_TEMPLATE_DECL("guide.read_corner") float read_corner(Dynamic value);
+
+LOOM_TEMPLATE_DEF(read_corner)
+float read_fixed_corner(Fixed value) {
+  return loom::view::load(value, 3u, 7u, 5u);
+}
+
+float entry(Fixed value) {
+  return loom::template_apply<read_corner>(value);
+}
+```
+
+The explicit application carries the actual view and its extents into Loom;
+selection proves the provider's `4x8x6` requirement. The provider body receives
+its declared fixed shape. Calling `read_corner(value)` directly still follows
+ordinary C++ overload resolution, which can reject differing source types
+before Loom template matching runs. `template_apply` is the explicit spelling
+for that matching boundary. Its result type always comes from the family;
+assignment context does not choose a provider.
+
+The same transport supports tensors, tiles, semantic vectors, native C++
+vectors, and encoding-bearing views/tiles. A plain view has native dense layout
+and can satisfy a layout-bearing family; it cannot invent a missing storage
+schema. Complete encoding identity is preserved even when two encodings expose
+the same addresses. Dynamic extents and encoding components occupy the family's
+stable argument coordinates, so scalar `where` clauses retain their meaning
+when a provider has a more specific shape.
+
 The family also owns the calling convention: a `LOOM_DEVICE LOOM_TEMPLATE_DECL`
 declaration makes every provider device code without repeating `LOOM_DEVICE`.
 Provider declarations and definitions may repeat the same family, target and

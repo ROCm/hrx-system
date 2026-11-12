@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/base/internal/math.h"
+#include "loom/decision/predicate.h"
 #include "loom/ir/structural_hash.h"
 #include "loom/util/adaptive_sort.h"
 
@@ -22,23 +23,32 @@ static iree_status_t loom_kernel_class_allocate_array(
   return iree_arena_allocate_array(arena, count, element_size, out_values);
 }
 
+typedef struct loom_kernel_class_feature_context_t {
+  // Immutable decision with its source outcomes and projected input queries.
+  const loom_kernel_class_decision_t* decision;
+  // Current launch site's facts in classifier projection order.
+  const loom_value_facts_t* facts;
+} loom_kernel_class_feature_context_t;
+
 static loom_decision_truth_t loom_kernel_class_evaluate_feature(
     void* user_data, uint32_t feature_ordinal) {
-  const loom_decision_truth_t* outcomes =
-      (const loom_decision_truth_t*)user_data;
-  return outcomes[feature_ordinal];
-}
-
-static loom_decision_program_feature_evaluator_t
-loom_kernel_class_feature_evaluator(
-    const loom_kernel_class_decision_t* decision) {
-  if (decision->model->program.feature_count == 0) {
-    return (loom_decision_program_feature_evaluator_t){0};
+  const loom_kernel_class_feature_context_t* context = user_data;
+  const uint32_t outcome = context->decision->feature_outcomes[feature_ordinal];
+  if (outcome < LOOM_KERNEL_CLASS_FEATURE_INPUT_BASE) {
+    return (loom_decision_truth_t)outcome;
   }
-  return (loom_decision_program_feature_evaluator_t){
-      .fn = loom_kernel_class_evaluate_feature,
-      .user_data = (void*)decision->feature_outcomes,
-  };
+  const loom_kernel_class_input_t* input =
+      &context->decision
+           ->inputs[outcome - LOOM_KERNEL_CLASS_FEATURE_INPUT_BASE];
+  loom_decision_predicate_operand_t operands[3] = {0};
+  for (uint8_t i = 0; i < 2; ++i) {
+    const uint32_t projection = input->projections[i];
+    operands[i].identity = projection;
+    operands[i].facts = projection == UINT32_MAX
+                            ? loom_value_facts_exact_i64(input->constants[i])
+                            : context->facts[projection];
+  }
+  return loom_decision_predicate_evaluate(LOOM_PREDICATE_EQ, operands);
 }
 
 static iree_status_t loom_kernel_class_shape_values(
@@ -534,11 +544,18 @@ static iree_status_t loom_kernel_class_refine(
           .facts = projection_facts,
           .argument_values = decision->argument_values,
           .result_values = decision->result_values};
+      const loom_kernel_class_feature_context_t feature_context = {
+          .decision = decision,
+          .facts = projection_facts,
+      };
+      const loom_decision_program_feature_evaluator_t feature_evaluator = {
+          .fn = loom_kernel_class_evaluate_feature,
+          .user_data = (void*)&feature_context,
+      };
       loom_decision_program_result_t result;
       uint32_t live_count;
       loom_decision_program_evaluate_indexed(
-          &decision->model->program, &binding,
-          loom_kernel_class_feature_evaluator(decision),
+          &decision->model->program, &binding, feature_evaluator,
           loom_decision_program_predicate_refiner_empty(),
           LOOM_DECISION_PROGRAM_SELECT_PROVEN, NULL, &live_count, &result);
       if (result.kind != LOOM_DECISION_PROGRAM_RESULT_SELECTED) {

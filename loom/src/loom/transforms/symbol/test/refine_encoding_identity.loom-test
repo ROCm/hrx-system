@@ -1,0 +1,30 @@
+// RUN: pass refine-boundaries
+
+// Dense addressing alone cannot replace the caller's encoding family with
+// builtin dense. Keep the SSA attachment through return and call refinement.
+func.def @make_view(%buffer: buffer, %layout: encoding<layout>) -> (view<4xf32, %layout>) {
+  %offset = index.constant 0 : offset
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
+  func.return %view : view<4xf32, %layout>
+}
+
+func.def public @forward_dense_geometry(%buffer: buffer, %layout: encoding<layout>) {
+  %dense = encoding.layout.assume.dense %layout : encoding<layout>
+  %view = func.call @make_view(%buffer, %dense) : (buffer, encoding<layout>) -> (view<4xf32, %dense>)
+  test.use %view : view<4xf32, %dense>
+  func.return
+}
+
+// ----
+func.def @make_view(%buffer: buffer, %layout: encoding<layout>) -> (view<4xf32, %layout>) {
+  %offset = index.constant 0 : offset
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
+  func.return %view : view<4xf32, %layout>
+}
+
+func.def public @forward_dense_geometry(%buffer: buffer, %layout: encoding<layout>) {
+  %dense = encoding.layout.assume.dense %layout : encoding<layout>
+  %view = func.call pure @make_view(%buffer, %dense) : (buffer, encoding<layout>) -> (view<4xf32, %dense>)
+  test.use %view : view<4xf32, %dense>
+  func.return
+}

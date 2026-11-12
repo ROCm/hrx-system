@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <cstring>
+
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/context.h"
@@ -11,6 +13,7 @@
 #include "loom/ops/encoding/facts.h"
 #include "loom/ops/encoding/families.h"
 #include "loom/ops/encoding/ops.h"
+#include "loom/ops/encoding/storage.h"
 #include "loom/ops/encoding/summary.h"
 #include "loom/ops/type_registry.h"
 
@@ -32,6 +35,17 @@ static const loom_encoding_vtable_t kCustomLayoutVtable = {
     .summarize = SummarizeCustomLayout,
 };
 
+// A distinct storage family may expose the same layout and schema components.
+static const loom_encoding_family_descriptor_t kCustomStorageDescriptor = [] {
+  auto descriptor = loom_encoding_storage_family_descriptor;
+  descriptor.name = LOOM_BSTRING_REF(12, "test.storage");
+  return descriptor;
+}();
+static const loom_encoding_vtable_t kCustomStorageVtable = {
+    .descriptor = &kCustomStorageDescriptor,
+    .summarize = loom_encoding_storage_summarize,
+};
+
 class EncodingIdentityTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -45,6 +59,8 @@ class EncodingIdentityTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_context_register_builtin_encoding_vtables(&context_));
     IREE_ASSERT_OK(
         loom_context_register_encoding_vtable(&context_, &kCustomLayoutVtable));
+    IREE_ASSERT_OK(loom_context_register_encoding_vtable(
+        &context_, &kCustomStorageVtable));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("identity"), &pool_,
                                         nullptr, iree_allocator_system(),
@@ -117,6 +133,26 @@ class EncodingIdentityTest : public ::testing::Test {
   loom_value_fact_table_t facts_;
 };
 
+TEST_F(EncodingIdentityTest, NativeDenseRequiresCompleteBuiltinIdentity) {
+  for (const char* name : {"encoding.layout.dense", "test.layout"}) {
+    const uint16_t spec = AddSpec(iree_make_cstring_view(name));
+    loom_value_facts_t defined;
+    Define(spec, LOOM_ENCODING_ROLE_ADDRESS_LAYOUT, &defined);
+    loom_value_fact_encoding_summary_t summary;
+    ASSERT_TRUE(loom_value_facts_query_encoding_summary(&facts_.context,
+                                                        defined, &summary));
+    EXPECT_EQ(loom_encoding_match_spec(module_, summary, 0),
+              std::strcmp(name, "encoding.layout.dense") == 0
+                  ? LOOM_ENCODING_MATCH_RESULT_TRUE
+                  : LOOM_ENCODING_MATCH_RESULT_FALSE);
+  }
+  const loom_value_fact_encoding_summary_t geometry_only = {
+      .address_layout = {.kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE},
+  };
+  EXPECT_EQ(loom_encoding_match_spec(module_, geometry_only, 0),
+            LOOM_ENCODING_MATCH_RESULT_UNKNOWN);
+}
+
 TEST_F(EncodingIdentityTest, DenseAssumptionPreservesCustomIdentity) {
   const uint16_t custom = AddSpec(IREE_SV("test.layout"));
   const uint16_t dense = AddSpec(IREE_SV("encoding.layout.dense"));
@@ -161,6 +197,10 @@ TEST_F(EncodingIdentityTest, CommonAddressingDoesNotProveCommonFamily) {
   EXPECT_TRUE(loom_value_facts_equal(
       Query(loom_encoding_define_result(custom_value), joined, dense),
       loom_value_facts_make(0, 1, 1)));
+  uint16_t replacement = 0;
+  IREE_ASSERT_OK(
+      loom_encoding_intern_exact_summary(module_, &summary, &replacement));
+  EXPECT_EQ(replacement, 0);
 }
 
 TEST_F(EncodingIdentityTest, CompositionRetainsCustomLayoutIdentity) {
@@ -198,6 +238,58 @@ TEST_F(EncodingIdentityTest, CompositionRetainsCustomLayoutIdentity) {
                                      loom_value_facts_exact_i64(1)));
   EXPECT_TRUE(loom_value_facts_equal(Query(value, storage_facts, different),
                                      loom_value_facts_exact_i64(0)));
+  loom_value_fact_encoding_summary_t summary;
+  ASSERT_TRUE(loom_value_facts_query_encoding_summary(&facts_.context,
+                                                      storage_facts, &summary));
+  uint16_t replacement = 0;
+  IREE_ASSERT_OK(
+      loom_encoding_intern_exact_summary(module_, &summary, &replacement));
+  EXPECT_EQ(replacement, exact);
+}
+
+TEST_F(EncodingIdentityTest, CommonComponentsDoNotProveCommonStorageFamily) {
+  const uint16_t dense = AddSpec(IREE_SV("encoding.layout.dense"));
+  const uint16_t schema = AddSpec(IREE_SV("ggml.q4_0"));
+  const loom_named_attr_t attributes[] = {
+      EncodingParameter(IREE_SV("layout"), dense),
+      EncodingParameter(IREE_SV("schema"), schema),
+  };
+  const uint16_t builtin = AddSpec(IREE_SV("encoding.storage"), attributes, 2);
+  const uint16_t custom = AddSpec(IREE_SV("test.storage"), attributes, 2);
+  loom_value_facts_t builtin_facts;
+  loom_value_facts_t custom_facts;
+  Define(builtin, LOOM_ENCODING_ROLE_PHYSICAL_STORAGE, &builtin_facts);
+  Define(custom, LOOM_ENCODING_ROLE_PHYSICAL_STORAGE, &custom_facts);
+  loom_value_facts_t joined;
+  IREE_ASSERT_OK(loom_value_fact_table_meet_for_type(
+      &facts_, module_,
+      loom_type_encoding_with_role(LOOM_ENCODING_ROLE_PHYSICAL_STORAGE),
+      &facts_, builtin_facts, &facts_, custom_facts, &joined));
+  loom_value_fact_encoding_summary_t summary;
+  ASSERT_TRUE(loom_value_facts_query_encoding_summary(&facts_.context, joined,
+                                                      &summary));
+  EXPECT_EQ(summary.family_id, LOOM_ENCODING_FAMILY_ID_INVALID);
+  EXPECT_EQ(summary.address_layout.static_spec_encoding_id, dense);
+  EXPECT_EQ(summary.storage_schema.static_spec_encoding_id, schema);
+  EXPECT_EQ(loom_encoding_match_spec(module_, summary, builtin),
+            LOOM_ENCODING_MATCH_RESULT_UNKNOWN);
+  EXPECT_EQ(loom_encoding_match_spec(module_, summary, custom),
+            LOOM_ENCODING_MATCH_RESULT_UNKNOWN);
+  uint16_t replacement = 0;
+  IREE_ASSERT_OK(
+      loom_encoding_intern_exact_summary(module_, &summary, &replacement));
+  EXPECT_EQ(replacement, 0);
+
+  // Complete custom storage remains materializable without reconstruction.
+  ASSERT_TRUE(loom_value_facts_query_encoding_summary(&facts_.context,
+                                                      custom_facts, &summary));
+  EXPECT_EQ(loom_encoding_match_spec(module_, summary, custom),
+            LOOM_ENCODING_MATCH_RESULT_TRUE);
+  EXPECT_EQ(loom_encoding_match_spec(module_, summary, builtin),
+            LOOM_ENCODING_MATCH_RESULT_FALSE);
+  IREE_ASSERT_OK(
+      loom_encoding_intern_exact_summary(module_, &summary, &replacement));
+  EXPECT_EQ(replacement, custom);
 }
 
 TEST_F(EncodingIdentityTest, IdentityFieldsSurviveInterningAndTransfer) {

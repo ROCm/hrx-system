@@ -282,8 +282,7 @@ iree_status_t loom_kernel_request_materialize(
 // re-discovered.
 static iree_status_t loom_kernel_request_project_models(
     const loom_template_decision_model_catalog_t* source,
-    const loom_ir_module_projection_t* projection,
-    iree_arena_allocator_t* arena,
+    loom_ir_module_projection_t* projection, iree_arena_allocator_t* arena,
     loom_template_decision_model_catalog_t* target) {
   *target = *source;
   target->module = projection->target_module;
@@ -328,6 +327,17 @@ static iree_status_t loom_kernel_request_project_models(
       model->features = features;
       for (uint32_t j = 0; j < original->program.feature_count; ++j) {
         features[j] = original->features[j];
+        if (features[j].kind == LOOM_TEMPLATE_DECISION_FEATURE_INPUT &&
+            features[j].value.input.axis == UINT8_MAX &&
+            !features[j].value.input.expected_is_argument &&
+            features[j].value.input.expected) {
+          uint16_t encoding;
+          IREE_RETURN_IF_ERROR(loom_ir_remap_encoding_id(
+              &projection->remap, (uint16_t)features[j].value.input.expected,
+              &encoding));
+          features[j].value.input.expected = encoding;
+        }
+
         if (features[j].kind ==
                 LOOM_TEMPLATE_DECISION_FEATURE_TARGET_IDENTITY &&
             features[j].value.target_identity.module == source->module) {

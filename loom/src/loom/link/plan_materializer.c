@@ -601,3 +601,50 @@ iree_status_t loom_link_plan_materialize(
   iree_arena_deinitialize(&scratch_arena);
   return status;
 }
+
+static bool loom_link_plan_materialization_lookup_global(
+    const loom_link_module_index_t* index,
+    const loom_link_plan_materialization_t* materialization,
+    const loom_link_module_index_symbol_t* source_symbol,
+    loom_symbol_ref_t* out_target_ref) {
+  const loom_link_module_index_symbol_t* candidate =
+      loom_link_module_index_lookup_global(index, source_symbol->name);
+  while (candidate != NULL) {
+    const loom_symbol_ref_t target_ref =
+        materialization->target_symbols.values[candidate->ordinal];
+    if (loom_symbol_ref_is_valid(target_ref)) {
+      *out_target_ref = target_ref;
+      return true;
+    }
+    candidate = loom_link_module_index_next_global_duplicate(index, candidate);
+  }
+  return false;
+}
+
+loom_symbol_ref_t loom_link_plan_materialization_lookup_symbol(
+    const loom_link_module_index_t* index,
+    const loom_link_module_index_module_t* source_module,
+    const loom_link_plan_materialization_t* materialization,
+    uint32_t source_symbol_ordinal) {
+  loom_symbol_ref_t target_ref = loom_symbol_ref_null();
+  if (source_symbol_ordinal == UINT32_MAX) {
+    return target_ref;
+  }
+  IREE_ASSERT(source_symbol_ordinal < source_module->symbol_count);
+  const iree_host_size_t source_ordinal =
+      source_module->symbol_start_ordinal + source_symbol_ordinal;
+  IREE_ASSERT(source_ordinal < materialization->target_symbols.count);
+  target_ref = materialization->target_symbols.values[source_ordinal];
+  if (loom_symbol_ref_is_valid(target_ref)) {
+    return target_ref;
+  }
+
+  const loom_link_module_index_symbol_t* source_symbol =
+      loom_link_module_index_symbol_at(index, source_ordinal);
+  IREE_ASSERT(source_symbol != NULL);
+  if (source_symbol->identity == LOOM_LINK_SYMBOL_IDENTITY_GLOBAL) {
+    (void)loom_link_plan_materialization_lookup_global(
+        index, materialization, source_symbol, &target_ref);
+  }
+  return target_ref;
+}

@@ -444,6 +444,11 @@ iree_status_t loom_link_bytecode_template_contract_reader_load(
               .predicate_count = symbol->predicate_count,
               .name = symbol->name,
               .priority = (int64_t)symbol->priority,
+              .input_contract =
+                  symbol->input_contract_ordinal_plus_one
+                      ? reader->metadata->input_contracts
+                            [symbol->input_contract_ordinal_plus_one - 1]
+                      : NULL,
               .predicates = symbol->predicates,
           },
       .target_symbol_ordinal = UINT32_MAX,

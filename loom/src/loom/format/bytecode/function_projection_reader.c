@@ -160,3 +160,10 @@ iree_status_t loom_bytecode_function_projection_reader_materialize_region(
       LOOM_BYTECODE_REGION_MATERIALIZATION_FLAG_BIND_ENTRY_ARGUMENTS,
       predefined_values, predefined_value_count, low_descriptor_set);
 }
+
+iree_status_t loom_bytecode_function_projection_reader_import_encoding(
+    loom_bytecode_function_projection_reader_t* reader,
+    uint16_t source_encoding_id, uint16_t* out_encoding_id) {
+  return loom_bytecode_selected_table_materialize_encoding(
+      &reader->tables, source_encoding_id, out_encoding_id);
+}

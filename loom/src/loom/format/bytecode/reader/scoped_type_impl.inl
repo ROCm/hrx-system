@@ -13,18 +13,14 @@ iree_status_t LOOM_BYTECODE_TYPE_PROJECT_COMPLETED(
     loom_bytecode_reader_cursor_t* cursor,
     const loom_bytecode_attribute_ssa_materialization_scope_t* scope,
     uint64_t reference, loom_type_id_t* out_type) {
+  IREE_RETURN_IF_ERROR(loom_bytecode_type_validate_completed_reference(
+      materializer->decoder, cursor, reference,
+      LOOM_BYTECODE_ATTRIBUTE_TABLES(materializer)->types.count,
+      scope->bindings->count));
   const uint64_t ordinal = reference >> 1;
   if (reference & 1) {
-    if (ordinal >= scope->bindings->count) {
-      return loom_bytecode_type_emit_invalid_scoped_record(
-          materializer->decoder, cursor, IREE_SV("incomplete_child"));
-    }
     *out_type = scope->bindings->entries[ordinal].type;
     return iree_ok_status();
-  }
-  if (ordinal >= LOOM_BYTECODE_ATTRIBUTE_TABLES(materializer)->types.count) {
-    return loom_bytecode_type_emit_invalid_scoped_record(
-        materializer->decoder, cursor, IREE_SV("unknown_static_type"));
   }
 #if LOOM_BYTECODE_ATTRIBUTE_SELECTED
   return loom_bytecode_selected_table_materialize_type(materializer, ordinal,

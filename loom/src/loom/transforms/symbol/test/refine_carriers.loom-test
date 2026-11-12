@@ -1,0 +1,93 @@
+// RUN: pass inline-callables
+
+// Two callers exercise cloning and consuming the helper. The assertion has
+// explicit semantics before and after either form of materialization.
+func.def inline @require_tensor(%extent: index, %source: tensor<[%extent]xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) -> (tensor<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) {
+  %refined = tensor.refine %source : tensor<[%extent]xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>> -> tensor<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>
+  func.return %refined : tensor<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>
+}
+
+func.def public @first(%extent: index, %source: tensor<[%extent]xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) -> (tensor<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) {
+  %result = func.call @require_tensor(%extent, %source) : (index, tensor<[%extent]xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) -> (tensor<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>)
+  func.return %result : tensor<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>
+}
+
+func.def public @second(%extent: index, %source: tensor<[%extent]xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) -> (tensor<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) {
+  %result = func.call @require_tensor(%extent, %source) : (index, tensor<[%extent]xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) -> (tensor<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>)
+  func.return %result : tensor<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>
+}
+
+// ----
+func.def public @first(%extent: index, %source: tensor<[%extent]xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) -> (tensor<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) {
+  %refined = tensor.refine %source : tensor<[%extent]xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>> -> tensor<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>
+  func.return %refined : tensor<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>
+}
+
+func.def public @second(%extent: index, %source: tensor<[%extent]xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) -> (tensor<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) {
+  %refined = tensor.refine %source : tensor<[%extent]xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>> -> tensor<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>
+  func.return %refined : tensor<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>
+}
+
+// ====
+
+// RUN: pass inline-callables
+
+// Two callers exercise cloning and consuming the helper. The assertion has
+// explicit semantics before and after either form of materialization.
+func.def inline @require_tile(%extent: index, %source: tile<[%extent]xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) -> (tile<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) {
+  %refined = tile.refine %source : tile<[%extent]xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>> -> tile<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>
+  func.return %refined : tile<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>
+}
+
+func.def public @first(%extent: index, %source: tile<[%extent]xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) -> (tile<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) {
+  %result = func.call @require_tile(%extent, %source) : (index, tile<[%extent]xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) -> (tile<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>)
+  func.return %result : tile<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>
+}
+
+func.def public @second(%extent: index, %source: tile<[%extent]xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) -> (tile<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) {
+  %result = func.call @require_tile(%extent, %source) : (index, tile<[%extent]xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) -> (tile<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>)
+  func.return %result : tile<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>
+}
+
+// ----
+func.def public @first(%extent: index, %source: tile<[%extent]xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) -> (tile<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) {
+  %refined = tile.refine %source : tile<[%extent]xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>> -> tile<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>
+  func.return %refined : tile<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>
+}
+
+func.def public @second(%extent: index, %source: tile<[%extent]xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) -> (tile<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>) {
+  %refined = tile.refine %source : tile<[%extent]xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>> -> tile<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>
+  func.return %refined : tile<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>
+}
+
+// ====
+
+// RUN: pass inline-callables
+
+// Two callers exercise cloning and consuming the helper. The assertion has
+// explicit semantics before and after either form of materialization.
+func.def inline @require_group(%extent: index, %source: group<[%extent]>) -> (group<18>) {
+  %refined = group.refine %source : group<[%extent]> -> group<18>
+  func.return %refined : group<18>
+}
+
+func.def public @first(%extent: index, %source: group<[%extent]>) -> (group<18>) {
+  %result = func.call @require_group(%extent, %source) : (index, group<[%extent]>) -> (group<18>)
+  func.return %result : group<18>
+}
+
+func.def public @second(%extent: index, %source: group<[%extent]>) -> (group<18>) {
+  %result = func.call @require_group(%extent, %source) : (index, group<[%extent]>) -> (group<18>)
+  func.return %result : group<18>
+}
+
+// ----
+func.def public @first(%extent: index, %source: group<[%extent]>) -> (group<18>) {
+  %refined = group.refine %source : group<[%extent]> -> group<18>
+  func.return %refined : group<18>
+}
+
+func.def public @second(%extent: index, %source: group<[%extent]>) -> (group<18>) {
+  %refined = group.refine %source : group<[%extent]> -> group<18>
+  func.return %refined : group<18>
+}
