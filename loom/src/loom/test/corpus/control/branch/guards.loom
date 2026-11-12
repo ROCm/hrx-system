@@ -754,3 +754,166 @@ check.scenario @partial_uniform_indexing_values {
   }
   check.return
 }
+
+// A skipped mode and a lane-dependent loop share the publication path. The
+// inner mask must restore before that path, including when its body is empty.
+kernel.def @mode_guarded_updates() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %configuration: index) {
+  %mode_count = scalar.constant 3 : i32
+  %code = index.cast %configuration : index to i32
+  %mode = scalar.remui %code, %mode_count : i32
+  %count_integer = scalar.divui %code, %mode_count : i32
+  %count = index.cast %count_integer : i32 to index
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %batch_count = index.constant 2 : index
+  %batch_stride = index.constant 768 : offset
+  %status_offset = index.constant 64 : index
+  %done_offset = index.constant 128 : index
+  %c0 = scalar.constant 0 : i32
+  %nested_mode = scalar.constant 2 : i32
+  %published = scalar.constant 3 : i32
+  %done = scalar.constant 7 : i32
+  %yes = scalar.constant true : i1
+  %no = scalar.constant false : i1
+  %lane = kernel.workitem.id<x> : index
+  %values = buffer.view %input[%base] : buffer -> view<64xi32>
+  %status_index = index.add %lane, %status_offset : index
+  %done_index = index.add %lane, %done_offset : index
+  scf.for %batch = [%begin to %batch_count step %step] {
+    %address = index.scale %batch, %batch_stride : index, offset -> offset
+    %results = buffer.view %output[%address] : buffer -> view<192xi32>
+    %reset = scalar.cmpi eq, %mode, %c0 : i32
+    %publish = scf.if %reset -> (i1) {
+      view.store %c0, %results[%status_index] : i32, view<192xi32>
+      %empty = index.cmp eq, %count, %begin : index
+      %continue_update = scf.if %empty -> (i1) {
+        scf.yield %no : i1
+      } else {
+        %value = view.load %values[%lane] : view<64xi32> -> i32
+        view.store %value, %results[%lane] : i32, view<192xi32>
+        scf.yield %yes : i1
+      }
+      scf.yield %continue_update : i1
+    } else {
+      %nested = scalar.cmpi eq, %mode, %nested_mode : i32
+      %execute = scf.if %nested -> (i1) {
+        %value = view.load %values[%lane] : view<64xi32> -> i32
+        %positive = scalar.cmpi sgt, %value, %c0 : i32
+        scf.yield %positive : i1
+      } else {
+        scf.yield %nested : i1
+      }
+      scf.if %execute {
+        %value = view.load %values[%lane] : view<64xi32> -> i32
+        scf.for %column = [%begin to %count step %step] {
+          scf.for %row = [%begin to %count step %step] {
+            %in_triangle = index.cmp ule, %row, %column : index
+            scf.if %in_triangle {
+              %previous = view.load %results[%lane] : view<192xi32> -> i32
+              %next = scalar.addi %previous, %value : i32
+              view.store %next, %results[%lane] : i32, view<192xi32>
+            }
+          }
+        }
+      }
+      scf.yield %yes : i1
+    }
+    scf.if %publish {
+      view.store %published, %results[%status_index] : i32, view<192xi32>
+    }
+    view.store %done, %results[%done_index] : i32, view<192xi32>
+  }
+  kernel.return
+}
+
+// Count the triangular updates directly, independently of the subject's
+// nested loops and the continue predicate carried across its mode branches.
+func.def @mode_guarded_updates_oracle(%input: buffer, %output: buffer, %configuration: index) {
+  %mode_count = scalar.constant 3 : i32
+  %code = index.cast %configuration : index to i32
+  %mode = scalar.remui %code, %mode_count : i32
+  %count_integer = scalar.divui %code, %mode_count : i32
+  %count = index.cast %count_integer : i32 to index
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %width = index.constant 64 : index
+  %step = index.constant 1 : index
+  %batch_count = index.constant 2 : index
+  %batch_stride = index.constant 768 : offset
+  %status_offset = index.constant 64 : index
+  %done_offset = index.constant 128 : index
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %published = scalar.constant 3 : i32
+  %done = scalar.constant 7 : i32
+  %values = buffer.view %input[%base] : buffer -> view<64xi32>
+  %length = index.cast %count : index to i32
+  %successor = scalar.addi %length, %c1 : i32
+  %product = scalar.muli %length, %successor : i32
+  %updates = scalar.divui %product, %c2 : i32
+  %reset = scalar.cmpi eq, %mode, %c0 : i32
+  %nested = scalar.cmpi eq, %mode, %c2 : i32
+  %nonempty = index.cmp ne, %count, %begin : index
+  %copy = scalar.andi %reset, %nonempty : i1
+  %empty_reset = scalar.xori %reset, %copy : i1
+  %status = scf.select %empty_reset, %c0, %published : i32
+  scf.for %batch = [%begin to %batch_count step %step] {
+    %address = index.scale %batch, %batch_stride : index, offset -> offset
+    %results = buffer.view %output[%address] : buffer -> view<192xi32>
+    scf.for %lane = [%begin to %width step %step] {
+      %value = view.load %values[%lane] : view<64xi32> -> i32
+      %previous = view.load %results[%lane] : view<192xi32> -> i32
+      %positive = scalar.cmpi sgt, %value, %c0 : i32
+      %accumulate = scalar.andi %nested, %positive : i1
+      %delta = scalar.muli %value, %updates : i32
+      %accumulated = scalar.addi %previous, %delta : i32
+      %kept = scf.select %accumulate, %accumulated, %previous : i32
+      %result = scf.select %copy, %value, %kept : i32
+      %status_index = index.add %lane, %status_offset : index
+      %done_index = index.add %lane, %done_offset : index
+      view.store %result, %results[%lane] : i32, view<192xi32>
+      view.store %status, %results[%status_index] : i32, view<192xi32>
+      view.store %done, %results[%done_index] : i32, view<192xi32>
+    }
+  }
+  func.return
+}
+
+check.scenario @mode_guarded_update_values {
+  // Three modes, zero through three loop iterations, and empty/full/mixed
+  // inner masks. The surrounding storage also detects unintended stores.
+  check.trial[12](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-95) step(1) : tensor<64xi32>
+    %storage = check.generate.fill value(-123) : tensor<416xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<416xi32> -> tensor<384xi32>
+    check.compare<@mode_guarded_updates, @mode_guarded_updates_oracle>(%input, %output, %trial) : (tensor<64xi32>, tensor<384xi32>, index) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<416xi32>
+    }
+  }
+  check.trial[12](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-31) step(1) : tensor<64xi32>
+    %storage = check.generate.fill value(-123) : tensor<416xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<416xi32> -> tensor<384xi32>
+    check.compare<@mode_guarded_updates, @mode_guarded_updates_oracle>(%input, %output, %trial) : (tensor<64xi32>, tensor<384xi32>, index) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<416xi32>
+    }
+  }
+  check.trial[12](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(33) step(1) : tensor<64xi32>
+    %storage = check.generate.fill value(-123) : tensor<416xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<416xi32> -> tensor<384xi32>
+    check.compare<@mode_guarded_updates, @mode_guarded_updates_oracle>(%input, %output, %trial) : (tensor<64xi32>, tensor<384xi32>, index) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<416xi32>
+    }
+  }
+  check.return
+}

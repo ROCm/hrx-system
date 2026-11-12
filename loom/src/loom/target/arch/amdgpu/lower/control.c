@@ -191,10 +191,11 @@ static iree_status_t loom_amdgpu_emit_sgpr_bool_cond_branch(
 }
 
 static bool loom_amdgpu_try_false_passthrough_continuation(
-    const loom_cfg_graph_t* graph, loom_block_t* false_dest,
+    const loom_value_fact_cfg_region_t* facts, const loom_op_t* source_op,
     loom_block_t** out_continuation, const loom_op_t** out_false_terminator) {
   *out_continuation = NULL;
   *out_false_terminator = NULL;
+  loom_block_t* false_dest = loom_cfg_cond_br_false_dest(source_op);
   if (false_dest->arg_count != 0 || false_dest->op_count != 1) {
     return false;
   }
@@ -206,11 +207,22 @@ static bool loom_amdgpu_try_false_passthrough_continuation(
   if (continuation == false_dest) {
     return false;
   }
+  // An enclosing bypass may also enter this forwarding block. If the true
+  // region joins there too, its mask must restore before those paths meet.
+  // A true region already exiting beyond the block can still bypass just the
+  // guard's false edge, without claiming the shared block's outgoing edge.
+  if (!loom_cfg_dominance_block_dominates(&facts->dominance,
+                                          source_op->parent_block->region_index,
+                                          false_dest->region_index) &&
+      facts->regions.blocks[loom_cfg_cond_br_true_dest(source_op)->region_index]
+              .continuation_index != continuation->region_index) {
+    return false;
+  }
   // A reconvergence block immediately before a loop header is the loop's
   // structural entry gateway. Bypassing it would skip any target-owned loop
   // entry interposition installed on its outgoing edge.
-  if (graph->blocks[false_dest->region_index].predecessor_count > 1 &&
-      graph->blocks[continuation->region_index].is_dfs_backedge_target) {
+  if (facts->graph.blocks[false_dest->region_index].predecessor_count > 1 &&
+      facts->graph.blocks[continuation->region_index].is_dfs_backedge_target) {
     return false;
   }
   *out_continuation = continuation;
@@ -229,8 +241,8 @@ static iree_status_t loom_amdgpu_analyze_then_masked_region(
   loom_block_t* passthrough = NULL;
   const loom_value_fact_cfg_region_t* facts =
       loom_low_lower_context_cfg(context);
-  loom_amdgpu_try_false_passthrough_continuation(
-      &facts->graph, false_destination, &passthrough, &false_terminator);
+  loom_amdgpu_try_false_passthrough_continuation(facts, source_op, &passthrough,
+                                                 &false_terminator);
   if (passthrough) {
     continuation = passthrough;
   }
@@ -586,8 +598,7 @@ static iree_status_t loom_amdgpu_prepare_exec_mask_branch(
   loom_block_t* passthrough_continuation = NULL;
   const loom_op_t* passthrough_terminator = NULL;
   bool has_false_passthrough = loom_amdgpu_try_false_passthrough_continuation(
-      &facts->graph, loom_cfg_cond_br_false_dest(source_op),
-      &passthrough_continuation, &passthrough_terminator);
+      facts, source_op, &passthrough_continuation, &passthrough_terminator);
   bool false_path_is_direct_passthrough = false;
   if (has_false_passthrough) {
     const uint16_t false_entry =
