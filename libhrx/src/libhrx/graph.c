@@ -156,7 +156,6 @@ hrx_status_t hrx_graph_create(hrx_device_t device, uint32_t flags,
   graph->additional_edges = NULL;
   graph->additional_edge_count = 0;
   graph->flags = flags;
-  iree_slim_mutex_initialize(&graph->mutex);
 
   iree_status_t status = iree_hal_resource_set_allocate(
       &device->block_pool, &graph->node_resource_set);
@@ -174,7 +173,6 @@ static void hrx_graph_destroy(hrx_graph_s* graph) {
 
   iree_hal_resource_set_free(graph->node_resource_set);
   iree_arena_deinitialize(&graph->arena);
-  iree_slim_mutex_deinitialize(&graph->mutex);
   hrx_device_release(graph->device);
   iree_allocator_free(iree_allocator_system(), graph);
 
@@ -602,100 +600,6 @@ hrx_status_t hrx_graph_add_dependencies(hrx_graph_t graph,
 
   IREE_TRACE_ZONE_END(z0);
   return hrx_ok_status();
-}
-
-//===----------------------------------------------------------------------===//
-// Instantiation
-//===----------------------------------------------------------------------===//
-
-hrx_status_t hrx_graph_instantiate(hrx_graph_t graph, hrx_queue_t queue,
-                                   uint32_t flags, hrx_graph_exec_t* out_exec) {
-  if (!out_exec) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "graph executable output is NULL");
-  }
-  *out_exec = NULL;
-  if (!graph || !queue || graph->device != queue->device) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "graph and queue must belong to the same device");
-  }
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  hrx_graph_exec_s* exec = NULL;
-  HRX_RETURN_AND_END_ZONE_IF_IREE_ERROR(
-      z0, iree_allocator_malloc(iree_allocator_system(), sizeof(*exec),
-                                (void**)&exec));
-
-  iree_atomic_ref_count_init(&exec->ref_count);
-  exec->queue_family = iree_hal_queue_family(queue->hal_queue);
-  exec->graph = graph;
-  hrx_graph_retain(graph);
-  iree_arena_initialize(&graph->device->block_pool, &exec->arena_allocator);
-  exec->blocks = NULL;
-  exec->block_count = 0;
-  exec->semaphores = NULL;
-  exec->semaphore_count = 0;
-  exec->launch_generation = 0;
-  exec->last_launch_semaphore = NULL;
-  exec->last_launch_value = 0;
-  exec->resource_set = NULL;
-  exec->flags = flags;
-  iree_slim_mutex_initialize(&exec->mutex);
-
-  iree_status_t status = iree_hal_resource_set_allocate(
-      &graph->device->block_pool, &exec->resource_set);
-
-  if (iree_status_is_ok(status)) {
-    iree_slim_mutex_lock(&graph->mutex);
-    status = hrx_graph_exec_instantiate_locked(exec, graph->node_blocks,
-                                               graph->node_count);
-    iree_slim_mutex_unlock(&graph->mutex);
-  }
-
-  if (iree_status_is_ok(status)) {
-    *out_exec = exec;
-  } else {
-    hrx_graph_exec_release(exec);
-  }
-
-  IREE_TRACE_ZONE_END(z0);
-  return hrx_status_from_iree(status);
-}
-
-//===----------------------------------------------------------------------===//
-// Graph exec lifecycle
-//===----------------------------------------------------------------------===//
-
-static void hrx_graph_exec_destroy(hrx_graph_exec_s* exec) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_hal_semaphore_release(exec->last_launch_semaphore);
-  iree_hal_resource_set_free(exec->resource_set);
-  iree_arena_deinitialize(&exec->arena_allocator);
-  hrx_graph_release(exec->graph);
-  iree_slim_mutex_deinitialize(&exec->mutex);
-  iree_allocator_free(iree_allocator_system(), exec);
-
-  IREE_TRACE_ZONE_END(z0);
-}
-
-void hrx_graph_exec_retain(hrx_graph_exec_t exec) {
-  if (exec) {
-    iree_atomic_ref_count_inc(&exec->ref_count);
-  }
-}
-
-void hrx_graph_exec_release(hrx_graph_exec_t exec) {
-  if (exec && iree_atomic_ref_count_dec(&exec->ref_count) == 1) {
-    hrx_graph_exec_destroy(exec);
-  }
-}
-
-hrx_status_t hrx_graph_exec_update(hrx_graph_exec_t exec, hrx_graph_t graph) {
-  IREE_ASSERT_ARGUMENT(exec);
-  IREE_ASSERT_ARGUMENT(graph);
-  return hrx_make_status(HRX_STATUS_UNIMPLEMENTED,
-                         "graph update not yet implemented");
 }
 
 //===----------------------------------------------------------------------===//

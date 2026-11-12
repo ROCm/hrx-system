@@ -248,6 +248,7 @@ void HrxLoader::load(const std::string& path) {
   LOAD(graph_instantiate);
   LOAD(graph_exec_release);
   LOAD(graph_exec_launch);
+  LOAD(graph_exec_update);
 
   LOAD(fence_create);
   LOAD(fence_create_at);

@@ -309,6 +309,72 @@ TEST_F(GraphOrderingTest, EmptyGraphPreservesStreamPosition) {
   EXPECT_EQ(streams_[0]->timepoint, position);
 }
 
+TEST_F(GraphOrderingTest, EmptyReplacementPreservesAcceptedCrossStreamWork) {
+  AddFills(17);
+  Instantiate();
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, streams_[0])));
+  const uint64_t prior_completion = streams_[0]->timepoint;
+  hrx_graph_release(graph_);
+  graph_ = nullptr;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_create(device_, 0, &graph_)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_update(exec_, graph_)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, streams_[0])));
+  ASSERT_EQ(queue_.submissions.size(), 3u);
+  EXPECT_EQ(streams_[0]->timepoint, prior_completion);
+
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_stream_wait_on(streams_[1], {gate_, 1})));
+  const uint64_t stream_entry = streams_[1]->timepoint;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, streams_[1])));
+  ASSERT_EQ(queue_.submissions.size(), 5u);
+  const auto& join = *queue_.submissions.back();
+  EXPECT_EQ(join.command_buffer, nullptr);
+  EXPECT_FALSE(join.default_barriers);
+  ASSERT_EQ(join.waits.count, 2u);
+  EXPECT_EQ(join.waits.semaphores[0], streams_[0]->semaphore->hal_semaphore);
+  EXPECT_EQ(join.waits.payload_values[0], prior_completion);
+  EXPECT_EQ(join.waits.semaphores[1], streams_[1]->semaphore->hal_semaphore);
+  EXPECT_EQ(join.waits.payload_values[1], stream_entry);
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, streams_[1])));
+  EXPECT_EQ(queue_.submissions.size(), 5u);
+
+  SubmitReverse();
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_semaphore_signal(gate_, 1)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(streams_[1])));
+  VerifyContents(17);
+}
+
+TEST_F(GraphOrderingTest, ReplacementChangesTopologyWithoutResettingOrdering) {
+  AddFills(17);
+  Instantiate();
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, streams_[0])));
+  const uint64_t prior_completion = streams_[0]->timepoint;
+  hrx_graph_release(graph_);
+  graph_ = nullptr;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_create(device_, 0, &graph_)));
+  AddFills(64);
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_update(exec_, graph_)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, streams_[1])));
+  ASSERT_EQ(queue_.submissions.size(), 12u);
+  for (size_t i = 3; i < 11; ++i) {
+    const auto& operation = *queue_.submissions[i];
+    ASSERT_EQ(operation.waits.count, 1u);
+    EXPECT_EQ(operation.waits.semaphores[0],
+              streams_[0]->semaphore->hal_semaphore);
+    EXPECT_EQ(operation.waits.payload_values[0], prior_completion);
+    EXPECT_EQ(operation.signals.payload_values[0], 2u);
+  }
+  // Native accepted work alone owns both recordings now. Forward consumers
+  // first so a broken edge cannot be hidden by FIFO host submission.
+  hrx_graph_release(graph_);
+  graph_ = nullptr;
+  hrx_graph_exec_release(exec_);
+  exec_ = nullptr;
+  SubmitReverse();
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(streams_[1])));
+  VerifyContents(64);
+}
+
 TEST_F(GraphOrderingTest, QueuedReplaysReserveDistinctGenerations) {
   AddFills(64);
   Instantiate();

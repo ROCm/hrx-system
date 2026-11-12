@@ -129,10 +129,67 @@ class HrxRuntime {
       Check(api_.synchronous_h2d(transfer_queue_, values_.data(), buffer_, 0,
                                  count * sizeof(uint32_t)));
     }
-    Check(api_.graph_create(device_, 0, &graph_));
+    value_bias_ = 0;
+    BuildGraph(count, 0, &graph_);
+    Check(api_.graph_instantiate(graph_, dispatch_queue_, 0, &executable_));
+  }
+
+  void PrepareUpdate() { BuildGraph(values_.size(), 1, &replacement_); }
+
+  void Update() {
+    const uint32_t next_bias = value_bias_ ^ 1;
+    Check(
+        api_.graph_exec_update(executable_, next_bias ? replacement_ : graph_));
+    value_bias_ = next_bias;
+  }
+
+  void Reinstantiate() {
+    hrx_graph_exec_t executable = nullptr;
+    Check(api_.graph_instantiate(graph_, dispatch_queue_, 0, &executable));
+    api_.graph_exec_release(executable_);
+    executable_ = executable;
+  }
+
+  void Launch() { Check(api_.graph_exec_launch(executable_, stream_)); }
+  void Wait() { Check(api_.stream_synchronize(stream_)); }
+
+  void Verify() {
+    if (mapped_) {
+      std::copy_n(mapped_, values_.size(), values_.begin());
+    } else {
+      Check(api_.synchronous_d2h(transfer_queue_, buffer_, 0, values_.data(),
+                                 values_.size() * sizeof(uint32_t)));
+    }
+    for (size_t i = 0; i < values_.size(); ++i) {
+      Require(values_[i] == kOutputBase + i + value_bias_,
+              "HRX graph output mismatch");
+    }
+  }
+
+  void Reset() {
+    Wait();
+    api_.graph_exec_release(executable_);
+    api_.graph_release(graph_);
+    api_.graph_release(replacement_);
+    if (mapped_) {
+      Check(api_.buffer_unmap(buffer_));
+    }
+    api_.buffer_release(buffer_);
+    executable_ = nullptr;
+    graph_ = nullptr;
+    replacement_ = nullptr;
+    buffer_ = nullptr;
+    mapped_ = nullptr;
+  }
+
+  const std::string& label() const { return label_; }
+
+ private:
+  void BuildGraph(size_t count, uint32_t value_bias, hrx_graph_t* out_graph) {
+    Check(api_.graph_create(device_, 0, out_graph));
     hrx_graph_node_t previous = nullptr;
     for (uint32_t i = 0; i < count; ++i) {
-      const uint32_t value = kOutputBase + i;
+      const uint32_t value = kOutputBase + i + value_bias;
       const hrx_buffer_ref_t binding = {buffer_, i * sizeof(uint32_t),
                                         sizeof(uint32_t)};
       const hrx_graph_kernel_node_attrs_t attrs = {
@@ -149,45 +206,13 @@ class HrxRuntime {
           HRX_DISPATCH_FLAG_NONE,
       };
       hrx_graph_node_t node = nullptr;
-      Check(api_.graph_add_kernel_node(graph_, previous ? &previous : nullptr,
+      Check(api_.graph_add_kernel_node(*out_graph,
+                                       previous ? &previous : nullptr,
                                        previous ? 1 : 0, &attrs, &node));
       previous = node;
     }
-    Check(api_.graph_instantiate(graph_, dispatch_queue_, 0, &executable_));
   }
 
-  void Launch() { Check(api_.graph_exec_launch(executable_, stream_)); }
-  void Wait() { Check(api_.stream_synchronize(stream_)); }
-
-  void Verify() {
-    if (mapped_) {
-      std::copy_n(mapped_, values_.size(), values_.begin());
-    } else {
-      Check(api_.synchronous_d2h(transfer_queue_, buffer_, 0, values_.data(),
-                                 values_.size() * sizeof(uint32_t)));
-    }
-    for (size_t i = 0; i < values_.size(); ++i) {
-      Require(values_[i] == kOutputBase + i, "HRX graph output mismatch");
-    }
-  }
-
-  void Reset() {
-    Wait();
-    api_.graph_exec_release(executable_);
-    api_.graph_release(graph_);
-    if (mapped_) {
-      Check(api_.buffer_unmap(buffer_));
-    }
-    api_.buffer_release(buffer_);
-    executable_ = nullptr;
-    graph_ = nullptr;
-    buffer_ = nullptr;
-    mapped_ = nullptr;
-  }
-
-  const std::string& label() const { return label_; }
-
- private:
   // Public entry points from the exact HRX DSO being measured.
   HrxLoader& api_;
   // Explicit runtime and native-device owner shared across all rows.
@@ -208,6 +233,10 @@ class HrxRuntime {
   hrx_executable_export_info_t info_ = {};
   // Row-local graph retained through its last completion.
   hrx_graph_t graph_ = nullptr;
+  // Second template with changed constants for alternating updates.
+  hrx_graph_t replacement_ = nullptr;
+  // Value adjustment written by the currently installed template.
+  uint32_t value_bias_ = 0;
   // Instantiated graph reused throughout one row.
   hrx_graph_exec_t executable_ = nullptr;
   // One output word per node in the selected memory class.
@@ -249,6 +278,10 @@ class HipRuntime {
         "hipStreamCreateWithFlags")(&stream_, hipStreamNonBlocking));
     launch_ = Resolve<decltype(&hipGraphLaunch)>("hipGraphLaunch");
     wait_ = Resolve<decltype(&hipStreamSynchronize)>("hipStreamSynchronize");
+    update_ = Resolve<decltype(&hipGraphExecUpdate)>("hipGraphExecUpdate");
+    instantiate_ =
+        Resolve<decltype(&hipGraphInstantiate)>("hipGraphInstantiate");
+    destroy_ = Resolve<decltype(&hipGraphExecDestroy)>("hipGraphExecDestroy");
   }
 
   ~HipRuntime() {
@@ -285,21 +318,28 @@ class HipRuntime {
                                                        count * sizeof(uint32_t),
                                                        hipMemcpyHostToDevice));
     }
-    Check(Resolve<decltype(&hipStreamBeginCapture)>("hipStreamBeginCapture")(
-        stream_, hipStreamCaptureModeGlobal));
-    const auto dispatch =
-        Resolve<decltype(&hipModuleLaunchKernel)>("hipModuleLaunchKernel");
-    for (uint32_t i = 0; i < count; ++i) {
-      uint32_t value = kOutputBase + i;
-      void* output = static_cast<uint32_t*>(device_output_) + i;
-      void* arguments[] = {&output, &value};
-      Check(dispatch(function_, 1, 1, 1, 1, 1, 1, 0, stream_, arguments,
-                     nullptr));
-    }
-    Check(Resolve<decltype(&hipStreamEndCapture)>("hipStreamEndCapture")(
-        stream_, &graph_));
-    Check(Resolve<decltype(&hipGraphInstantiate)>("hipGraphInstantiate")(
-        &executable_, graph_, nullptr, nullptr, 0));
+    value_bias_ = 0;
+    BuildGraph(count, 0, &graph_);
+    Check(instantiate_(&executable_, graph_, nullptr, nullptr, 0));
+  }
+
+  void PrepareUpdate() { BuildGraph(values_.size(), 1, &replacement_); }
+
+  void Update() {
+    const uint32_t next_bias = value_bias_ ^ 1;
+    hipGraphNode_t error_node = nullptr;
+    hipGraphExecUpdateResult result;
+    Check(update_(executable_, next_bias ? replacement_ : graph_, &error_node,
+                  &result));
+    Require(result == hipGraphExecUpdateSuccess, "graph replacement rejected");
+    value_bias_ = next_bias;
+  }
+
+  void Reinstantiate() {
+    hipGraphExec_t executable = nullptr;
+    Check(instantiate_(&executable, graph_, nullptr, nullptr, 0));
+    Check(destroy_(executable_));
+    executable_ = executable;
   }
 
   void Launch() { Check(launch_(executable_, stream_)); }
@@ -315,15 +355,20 @@ class HipRuntime {
           hipMemcpyDeviceToHost));
     }
     for (size_t i = 0; i < values_.size(); ++i) {
-      Require(values_[i] == kOutputBase + i, "HIP graph output mismatch");
+      Require(values_[i] == kOutputBase + i + value_bias_,
+              "HIP graph output mismatch");
     }
   }
 
   void Reset() {
     Wait();
-    Check(Resolve<decltype(&hipGraphExecDestroy)>("hipGraphExecDestroy")(
-        executable_));
+    Check(destroy_(executable_));
     Check(Resolve<decltype(&hipGraphDestroy)>("hipGraphDestroy")(graph_));
+    if (replacement_) {
+      Check(
+          Resolve<decltype(&hipGraphDestroy)>("hipGraphDestroy")(replacement_));
+      replacement_ = nullptr;
+    }
     if (host_) {
       Check(Resolve<decltype(&hipFreeHost)>("hipFreeHost")(output_));
     } else {
@@ -334,6 +379,22 @@ class HipRuntime {
   const std::string& label() const { return label_; }
 
  private:
+  void BuildGraph(size_t count, uint32_t value_bias, hipGraph_t* out_graph) {
+    Check(Resolve<decltype(&hipStreamBeginCapture)>("hipStreamBeginCapture")(
+        stream_, hipStreamCaptureModeGlobal));
+    const auto dispatch =
+        Resolve<decltype(&hipModuleLaunchKernel)>("hipModuleLaunchKernel");
+    for (uint32_t i = 0; i < count; ++i) {
+      uint32_t value = kOutputBase + i + value_bias;
+      void* output = static_cast<uint32_t*>(device_output_) + i;
+      void* arguments[] = {&output, &value};
+      Check(dispatch(function_, 1, 1, 1, 1, 1, 1, 0, stream_, arguments,
+                     nullptr));
+    }
+    Check(Resolve<decltype(&hipStreamEndCapture)>("hipStreamEndCapture")(
+        stream_, out_graph));
+  }
+
   // Exact selected HIP implementation; symbols resolve only through this DSO.
   HrxDynamicLibrary library_;
   // Persistent code object and reflected finite store function.
@@ -344,6 +405,10 @@ class HipRuntime {
   hipStream_t stream_ = nullptr;
   // Row-local captured graph.
   hipGraph_t graph_ = nullptr;
+  // Second captured template with different scalar values.
+  hipGraph_t replacement_ = nullptr;
+  // Value adjustment written by the currently installed template.
+  uint32_t value_bias_ = 0;
   // Replayed graph executable.
   hipGraphExec_t executable_ = nullptr;
   // Output allocation, coherent host memory or device-local storage.
@@ -358,6 +423,12 @@ class HipRuntime {
   decltype(&hipGraphLaunch) launch_ = nullptr;
   // Cached public stream-completion entry point.
   decltype(&hipStreamSynchronize) wait_ = nullptr;
+  // Cached graph replacement entry point, with symbol lookup outside timing.
+  decltype(&hipGraphExecUpdate) update_ = nullptr;
+  // Cached constructor measured by the instantiation rows.
+  decltype(&hipGraphInstantiate) instantiate_ = nullptr;
+  // Cached destructor included when replacing an instantiated executable.
+  decltype(&hipGraphExecDestroy) destroy_ = nullptr;
   // Architecture, PCI identity, and wait policy included in every result.
   std::string label_;
 };
@@ -414,6 +485,111 @@ void Graph(benchmark::State& state) {
   }
 }
 
+// Measures preparation separately from enqueue and completion. Graph templates
+// already exist; instantiation includes release of the previous executable.
+template <typename Runtime, bool Update>
+void RunGraphEdit(benchmark::State& state) {
+  auto& runtime = GetRuntime<Runtime>();
+  const size_t node_count = state.range(0);
+  const bool host = state.range(1) != 0;
+  runtime.Prepare(node_count, host);
+  if constexpr (Update) {
+    runtime.PrepareUpdate();
+  }
+  state.SetLabel(runtime.label() +
+                 (host ? " output=host-coherent" : " output=device-local"));
+  for (auto _ : state) {
+    if constexpr (Update) {
+      runtime.Update();
+    } else {
+      runtime.Reinstantiate();
+    }
+    state.PauseTiming();
+    runtime.Launch();
+    runtime.Wait();
+    runtime.Verify();
+    state.ResumeTiming();
+  }
+  runtime.Reset();
+  state.counters["nodes"] = static_cast<double>(node_count);
+  state.SetItemsProcessed(state.iterations());
+}
+
+template <bool Update>
+void GraphEdit(benchmark::State& state) {
+  const std::string runtime = FLAG_graph_runtime;
+  if (runtime == "hrx") {
+    RunGraphEdit<HrxRuntime, Update>(state);
+  } else {
+    Require(runtime == "hip" || runtime == "rocm", "unknown --graph_runtime");
+    RunGraphEdit<HipRuntime, Update>(state);
+  }
+}
+
+// Keeps a bounded window of launches, each consuming a different recording.
+// UpdateSubmit excludes the final join; UpdateComplete includes it. Neither
+// waits on the host between replacement and the next enqueue within a batch.
+template <typename Runtime, bool IncludeCompletion>
+void RunGraphUpdate(benchmark::State& state) {
+  auto& runtime = GetRuntime<Runtime>();
+  const size_t node_count = state.range(0);
+  const size_t launch_count = state.range(1);
+  const bool host = state.range(2) != 0;
+  runtime.Prepare(node_count, host);
+  runtime.PrepareUpdate();
+  state.SetLabel(runtime.label() +
+                 (host ? " output=host-coherent" : " output=device-local"));
+  for (auto _ : state) {
+    for (size_t i = 0; i < launch_count; ++i) {
+      runtime.Update();
+      runtime.Launch();
+    }
+    if constexpr (!IncludeCompletion) {
+      state.PauseTiming();
+    }
+    runtime.Wait();
+    if constexpr (!IncludeCompletion) {
+      state.ResumeTiming();
+    }
+  }
+  runtime.Verify();
+  runtime.Reset();
+  state.counters["launches"] =
+      benchmark::Counter(static_cast<double>(launch_count),
+                         benchmark::Counter::kIsIterationInvariant);
+  state.counters["nodes"] = static_cast<double>(node_count);
+  state.SetItemsProcessed(state.iterations() * launch_count);
+}
+
+template <bool IncludeCompletion>
+void GraphUpdate(benchmark::State& state) {
+  const std::string runtime = FLAG_graph_runtime;
+  if (runtime == "hrx") {
+    RunGraphUpdate<HrxRuntime, IncludeCompletion>(state);
+  } else {
+    Require(runtime == "hip" || runtime == "rocm", "unknown --graph_runtime");
+    RunGraphUpdate<HipRuntime, IncludeCompletion>(state);
+  }
+}
+
+void GraphEditArguments(benchmark::Benchmark* benchmark) {
+  for (int host : {0, 1}) {
+    for (int count : {1, 32, 256}) {
+      benchmark->Args({count, host});
+    }
+  }
+}
+
+void GraphUpdateArguments(benchmark::Benchmark* benchmark) {
+  for (int host : {0, 1}) {
+    for (int count : {1, 32, 256}) {
+      for (int batch : {1, 8}) {
+        benchmark->Args({count, batch, host});
+      }
+    }
+  }
+}
+
 void GraphArguments(benchmark::Benchmark* benchmark) {
   for (int host : {0, 1}) {
     for (int count : {1, 2, 4, 8, 16, 32, 256}) {
@@ -433,6 +609,31 @@ BENCHMARK_TEMPLATE(Graph, false)
 BENCHMARK_TEMPLATE(Graph, true)
     ->Name("Graph/Complete")
     ->Apply(GraphArguments)
+    ->ArgNames({"nodes", "batch", "host"})
+    ->UseRealTime()
+    ->Unit(benchmark::kNanosecond);
+
+BENCHMARK_TEMPLATE(GraphEdit, false)
+    ->Name("Graph/Instantiate")
+    ->Apply(GraphEditArguments)
+    ->ArgNames({"nodes", "host"})
+    ->UseRealTime()
+    ->Unit(benchmark::kNanosecond);
+BENCHMARK_TEMPLATE(GraphEdit, true)
+    ->Name("Graph/Update")
+    ->Apply(GraphEditArguments)
+    ->ArgNames({"nodes", "host"})
+    ->UseRealTime()
+    ->Unit(benchmark::kNanosecond);
+BENCHMARK_TEMPLATE(GraphUpdate, false)
+    ->Name("Graph/UpdateSubmit")
+    ->Apply(GraphUpdateArguments)
+    ->ArgNames({"nodes", "batch", "host"})
+    ->UseRealTime()
+    ->Unit(benchmark::kNanosecond);
+BENCHMARK_TEMPLATE(GraphUpdate, true)
+    ->Name("Graph/UpdateComplete")
+    ->Apply(GraphUpdateArguments)
     ->ArgNames({"nodes", "batch", "host"})
     ->UseRealTime()
     ->Unit(benchmark::kNanosecond);

@@ -934,6 +934,8 @@ typedef struct hrx_graph_host_call_node_attrs_t {
   void* user_data;
 } hrx_graph_host_call_node_attrs_t;
 
+// Creates a mutable graph template. Mutation requires external serialization
+// with graph queries, instantiation, and updates that consume the template.
 HRX_API hrx_status_t hrx_graph_create(hrx_device_t device, uint32_t flags,
                                       hrx_graph_t* out_graph);
 HRX_API void hrx_graph_retain(hrx_graph_t graph);
@@ -988,6 +990,24 @@ HRX_API void hrx_graph_exec_release(hrx_graph_exec_t exec);
 // be reused. Failure does not establish device retirement.
 HRX_API hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec,
                                            hrx_stream_t stream);
+// Replaces the graph used by subsequent launches of |exec|. The replacement
+// must belong to the same device and be valid for its recording family. It may
+// have different nodes and dependencies. Mutation of the source graph requires
+// external serialization with this call, as with graph instantiation.
+//
+// Preparation is synchronous and may allocate and record commands. It does not
+// wait for earlier launches; launches can keep using the installed recording
+// during preparation. Publication is atomic with launch: each launch uses one
+// complete recording. Failure leaves the installed recording unchanged.
+//
+// Replays remain ordered after the executable's last accepted launch, including
+// across streams and updates to empty graphs. Updating does not signal a stream
+// or create a new timeline. Concurrent updates to one executable are
+// serialized; updates to different executables are independent.
+//
+// Recorded argument bytes and explicit HAL resources are captured. Application
+// callback state, allocation pools, allocation epochs, and pointers embedded in
+// arguments remain the application's responsibility through completion.
 HRX_API hrx_status_t hrx_graph_exec_update(hrx_graph_exec_t exec,
                                            hrx_graph_t graph);
 

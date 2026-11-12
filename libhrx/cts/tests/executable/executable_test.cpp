@@ -76,6 +76,10 @@ class GraphVisibilityTest : public HrxTestFixture {
   }
 
   ~GraphVisibilityTest() {
+    if (gate_) {
+      ReportHrxTestFailure("Release pending graph work",
+                           hrx().semaphore_signal(gate_, 1));
+    }
     if (other_stream_) {
       ReportHrxTestFailure("Other stream graph completion",
                            hrx().stream_synchronize(other_stream_));
@@ -93,6 +97,23 @@ class GraphVisibilityTest : public HrxTestFixture {
     hrx().stream_release(stream_);
     hrx().stream_release(other_stream_);
     hrx().executable_release(executable_);
+    hrx().semaphore_release(gate_);
+  }
+
+  void CreateOtherStream() {
+    const uint32_t family_ordinal =
+        hrx().queue_get_family_ordinal(hrx().stream_get_queue(stream_));
+    hrx_queue_family_info_t family;
+    REQUIRE_OK(
+        hrx().device_query_queue_family(device_, family_ordinal, &family));
+    if (!family.supports_acquisition) {
+      SKIP("compute queue family does not support acquiring another queue");
+    }
+    hrx_queue_t queue = nullptr;
+    REQUIRE_OK(hrx().queue_acquire(device_, family_ordinal, nullptr, &queue));
+    hrx_status_t status = hrx().stream_create(queue, 0, &other_stream_);
+    hrx().queue_release(queue);
+    REQUIRE_OK(status);
   }
 
   hrx_graph_node_t AddTransform(size_t input_word, size_t output_word,
@@ -138,6 +159,8 @@ class GraphVisibilityTest : public HrxTestFixture {
   hrx_stream_t stream_ = nullptr;
   // Optional independent stream exercising executable reuse across timelines.
   hrx_stream_t other_stream_ = nullptr;
+  // Optional host-controlled dependency, released before teardown joins work.
+  hrx_semaphore_t gate_ = nullptr;
   // Coherent host allocation retained through all replays.
   hrx_buffer_t buffer_ = nullptr;
   // Persistent mapping, kept live until after the last host observation.
@@ -457,19 +480,7 @@ TEST_CASE_METHOD(GraphVisibilityTest,
   const size_t width = GENERATE(size_t{17}, size_t{64});
   const bool cross_stream = GENERATE(false, true);
   if (cross_stream) {
-    const uint32_t family_ordinal =
-        hrx().queue_get_family_ordinal(hrx().stream_get_queue(stream_));
-    hrx_queue_family_info_t family;
-    REQUIRE_OK(
-        hrx().device_query_queue_family(device_, family_ordinal, &family));
-    if (!family.supports_acquisition) {
-      SKIP("compute queue family does not support acquiring another queue");
-    }
-    hrx_queue_t queue = nullptr;
-    REQUIRE_OK(hrx().queue_acquire(device_, family_ordinal, nullptr, &queue));
-    hrx_status_t status = hrx().stream_create(queue, 0, &other_stream_);
-    hrx().queue_release(queue);
-    REQUIRE_OK(status);
+    CreateOtherStream();
   }
   std::array<uint32_t, kWordCount> expected;
   for (size_t i = 0; i < kWordCount; ++i) {
@@ -494,6 +505,46 @@ TEST_CASE_METHOD(GraphVisibilityTest,
     CAPTURE(width, cross_stream, i);
     REQUIRE(words_[i] == expected[i]);
   }
+}
+
+TEST_CASE_METHOD(GraphVisibilityTest,
+                 "graph_update_preserves_pending_dispatches") {
+  Initialize();
+  const bool cross_stream = GENERATE(false, true);
+  if (cross_stream) {
+    CreateOtherStream();
+  }
+  std::fill_n(words_, kWordCount, 0u);
+  words_[0] = 13;
+  AddTransform(0, 64);
+  REQUIRE_OK(hrx().graph_instantiate(graph_, hrx().stream_get_queue(stream_), 0,
+                                     &exec_));
+  REQUIRE_OK(hrx().semaphore_create(device_, 0, &gate_));
+  REQUIRE_OK(hrx().stream_wait_on(stream_, {gate_, 1}));
+  REQUIRE_OK(hrx().graph_exec_launch(exec_, stream_));
+
+  hrx().graph_release(graph_);
+  graph_ = nullptr;
+  REQUIRE_OK(hrx().graph_create(device_, 0, &graph_));
+  AddTransform(64, 128);
+  REQUIRE_OK(hrx().graph_exec_update(exec_, graph_));
+  auto consumer = cross_stream ? other_stream_ : stream_;
+  REQUIRE_OK(hrx().graph_exec_launch(exec_, consumer));
+
+  // Only accepted native command buffers retain code and recorded arguments
+  // before releasing the producer. The output allocation remains caller-owned.
+  hrx().graph_exec_release(exec_);
+  exec_ = nullptr;
+  hrx().graph_release(graph_);
+  graph_ = nullptr;
+  hrx().executable_release(executable_);
+  executable_ = nullptr;
+  REQUIRE_OK(hrx().semaphore_signal(gate_, 1));
+  hrx().semaphore_release(gate_);
+  gate_ = nullptr;
+  REQUIRE_OK(hrx().stream_synchronize(consumer));
+  CHECK(words_[64] == 13 * 3 + 7);
+  CHECK(words_[128] == (13 * 3 + 7) * 3 + 7);
 }
 
 TEST_CASE_METHOD(GraphVisibilityTest,
