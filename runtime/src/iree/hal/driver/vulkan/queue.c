@@ -4586,16 +4586,29 @@ static iree_status_t iree_hal_vulkan_queue_record_transfer_native(
             queue, submission, operation, descriptor_pool,
             &descriptor_set_cursor, &scratch_used);
         break;
-      case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE: {
+      case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
+      case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD: {
+        const bool is_upload =
+            operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
+        iree_hal_buffer_t* target_buffer =
+            is_upload ? operation->upload.target_buffer
+                      : operation->update.target_buffer;
+        const iree_device_size_t target_offset =
+            is_upload ? operation->upload.target_offset
+                      : operation->update.target_offset;
+        const iree_device_size_t length =
+            is_upload ? operation->upload.length : operation->update.length;
+        const void* source = is_upload ? operation->upload.source
+                                       : operation->update.source_buffer;
+        const iree_host_size_t source_offset =
+            is_upload ? 0 : operation->update.source_offset;
         iree_hal_vulkan_queue_resolved_transfer_buffer_t target = {0};
         status = iree_hal_vulkan_queue_resolve_transfer_buffer(
-            operation->update.target_buffer, operation->update.target_offset,
-            &target);
+            target_buffer, target_offset, &target);
         if (iree_status_is_ok(status)) {
           status = iree_hal_vulkan_queue_record_update_chunks(
               queue, submission->native_command_buffer, target.handle,
-              target.offset, (VkDeviceSize)operation->update.length,
-              operation->update.source_buffer, operation->update.source_offset);
+              target.offset, (VkDeviceSize)length, source, source_offset);
         }
         break;
       }
@@ -7655,16 +7668,27 @@ static iree_status_t iree_hal_vulkan_transfer_select_strategy(
       *out_strategy = IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE;
       return iree_ok_status();
     }
-    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE: {
-      if (!iree_hal_vulkan_queue_buffer_has_recordable_backing(
-              operation->update.target_buffer)) {
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD: {
+      // Both sources are readable at submission. An upload may be captured
+      // into the native command buffer while its destination waits remain.
+      const bool is_upload =
+          operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
+      iree_hal_buffer_t* target_buffer = is_upload
+                                             ? operation->upload.target_buffer
+                                             : operation->update.target_buffer;
+      const iree_device_size_t target_offset =
+          is_upload ? operation->upload.target_offset
+                    : operation->update.target_offset;
+      const iree_device_size_t length =
+          is_upload ? operation->upload.length : operation->update.length;
+      if (!iree_hal_vulkan_queue_buffer_has_recordable_backing(target_buffer)) {
         *out_strategy = IREE_HAL_VULKAN_TRANSFER_STRATEGY_PENDING;
         return iree_ok_status();
       }
       bool can_record_native = false;
       IREE_RETURN_IF_ERROR(iree_hal_vulkan_queue_can_record_update_native(
-          operation->update.target_buffer, operation->update.target_offset,
-          operation->update.length, &can_record_native));
+          target_buffer, target_offset, length, &can_record_native));
       *out_strategy = can_record_native
                           ? IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE
                           : IREE_HAL_VULKAN_TRANSFER_STRATEGY_STAGED_UPLOAD;
@@ -7678,10 +7702,6 @@ static iree_status_t iree_hal_vulkan_transfer_select_strategy(
                       operation->copy.target_buffer)
               ? IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE
               : IREE_HAL_VULKAN_TRANSFER_STRATEGY_PENDING;
-      return iree_ok_status();
-    }
-    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD: {
-      *out_strategy = IREE_HAL_VULKAN_TRANSFER_STRATEGY_STAGED_UPLOAD;
       return iree_ok_status();
     }
     case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD: {

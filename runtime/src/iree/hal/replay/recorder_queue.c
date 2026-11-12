@@ -391,7 +391,6 @@ static iree_status_t iree_hal_replay_recorder_queue_analyze_transfer(
         if (operation->upload.length == 0) {
           break;
         }
-        can_record &= wait_semaphore_list.count == 0;
         can_record &= iree_hal_replay_recorder_queue_has_captured_buffer(
             queue->recorder, operation->upload.target_buffer);
         operation_data_length = (iree_host_size_t)operation->upload.length;
