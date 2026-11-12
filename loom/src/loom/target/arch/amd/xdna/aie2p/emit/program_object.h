@@ -37,14 +37,17 @@ typedef struct loom_aie2p_program_object_t {
 } loom_aie2p_program_object_t;
 
 // Joins an entry contribution followed by its reachable helper contributions.
+// Source admission and native emission establish a nonempty complete closure
+// of uniquely named functions with the same target and ABI. Each contribution
+// retains its entry symbol and executable section; assembly trusts these facts.
 //
 // All executable fragments are normalized into the entry's code section. The
 // entry remains first. Helpers with identical code and relocations share
 // one body while retaining their symbols; placement of distinct bodies
 // minimizes alignment padding with otherwise stable order. Ordinary
 // contribution assembly performs the final aligned concatenation. Direct-call
-// imports are resolved to exactly one helper entry. Helpers must be
-// module-internal functions reached only by direct calls, without observable
+// imports bind through an index of the retained function entries. Helpers must
+// be module-internal functions reached only by direct calls, without observable
 // code address identity. Immutable references participate in body equivalence.
 // |data| lists the complete program's unique definitions and bank constraints;
 // each definition contributes one section even when multiple functions use it.

@@ -58,7 +58,7 @@ typedef struct loom_aie2p_leaf_compile_options_t {
   iree_host_size_t allocation_reserved_range_count;
   // Whether this function borrows the caller's stack rather than owning it.
   bool is_helper;
-  // Largest admitted direct-helper frame, charged to the entry's stack domain.
+  // Maximum live descendant stack bytes, excluding this function's own frame.
   uint64_t callee_stack_byte_length;
   // Incoming-link and caller-shadow preservation across nested native calls.
   loom_aie2p_return_address_t return_address;
