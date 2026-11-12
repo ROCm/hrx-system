@@ -67,7 +67,7 @@ permissions:
 
 jobs:
   bazel_linux:
-    name: Bazel / Linux x86-64 / ${{ matrix.name }}
+    name: Bazel / ${{ matrix.platform || 'Linux x86-64' }} / ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix:
@@ -125,6 +125,14 @@ jobs:
             host_ar: ar
             host_cc: gcc
             host_cxx: g++
+          - name: MSVC / Fastbuild / Product Slice
+            kind: windows_msvc
+            command: iree-bazel-windows-msvc-slice
+            platform: Windows x86-64 (via Linux)
+            runner: az-linux-scale-rocm-default-prod
+            host_ar: ar
+            host_cc: clang
+            host_cxx: clang++
           - name: GCC / Fastbuild / AMD gfx120x Vulkan
             kind: vulkan
             command: iree-bazel-vulkan
@@ -234,6 +242,14 @@ jobs:
             echo "HRX_ROCM_ROOT=${output_dir}/rocm-root"
             echo "PIP_CACHE_DIR=${output_dir}/caches/pip"
           } >> "$GITHUB_ENV"
+          if [[ "${{ matrix.kind }}" == windows_msvc ]]; then
+            {
+              echo "LLVM_ROOT=${output_dir}/rocm-root/lib/llvm"
+              echo "WINDOWS_CROSS_ROOT=${output_dir}/windows-toolchain"
+              echo "WINSDK_ROOT=${output_dir}/windows-toolchain/sdk"
+              echo "MSVC_WINE_ROOT=${output_dir}/msvc-wine"
+            } >> "$GITHUB_ENV"
+          fi
           case "${{ matrix.kind }}/${{ matrix.host_toolchain }}" in
             amdgpu/*|*/rocm)
               {
@@ -316,6 +332,33 @@ jobs:
         if: matrix.kind != 'vulkan'
         run: bash .github/scripts/fetch_rocm_toolchain.sh
 
+      - name: Install Wine host tools
+        if: matrix.kind == 'windows_msvc'
+        run: |
+          apt_options=(-o Acquire::ForceIPv4=true -o Acquire::Retries=3)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install --yes --no-install-recommends \
+            p7zip-full wine wine64 winbind
+
+      - name: Restore Windows SDK inputs
+        if: matrix.kind == 'windows_msvc'
+        id: windows_toolchain
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.WINDOWS_CROSS_ROOT }}
+          key: windows-cross-${{ hashFiles('.github/scripts/setup_windows_cross.sh', '.github/scripts/windows-sdk-channel.json', 'build_tools/ci/windows_stl_asan.py') }}
+
+      - name: Prepare Windows SDK inputs
+        if: matrix.kind == 'windows_msvc' && steps.windows_toolchain.outputs.cache-hit != 'true'
+        run: bash .github/scripts/setup_windows_cross.sh
+
+      - name: Prepare genuine MSVC tools
+        if: matrix.kind == 'windows_msvc'
+        run: |
+          bash .github/scripts/setup_windows_msvc.sh
+          WINEPREFIX=/tmp/hrx-msvc-wine wineboot --init
+          WINEPREFIX=/tmp/hrx-msvc-wine wineserver -p
+
       - name: Check Vulkan hardware environment
         if: matrix.kind == 'vulkan'
         timeout-minutes: 1
@@ -337,7 +380,7 @@ jobs:
           "$sandbox" -W "$execution_root" -- /bin/true
 
       - name: Check tool versions
-        if: matrix.kind == 'cpu' || matrix.kind == 'vulkan' || matrix.kind == 'amdgpu'
+        if: matrix.kind == 'cpu' || matrix.kind == 'vulkan' || matrix.kind == 'amdgpu' || matrix.kind == 'windows_msvc'
         run: |
           bazel --version
           if [[ "${{ matrix.kind }}" == vulkan ]]; then
@@ -352,6 +395,12 @@ jobs:
             bash .github/scripts/check_host_toolchain.sh "${expect_rocm[@]}"
             bash .github/scripts/check_rocm_device_toolchain.sh
             test -d "${HRX_ROCM_ROOT}/include"
+          fi
+          if [[ "${{ matrix.kind }}" == windows_msvc ]]; then
+            compiler_dir="$(find "$MSVC_WINE_ROOT/VC/Tools/MSVC" -mindepth 1 -maxdepth 1 -type d -print -quit)/bin/Hostx64/x64"
+            wine_executable="$(command -v wine64 || command -v wine)"
+            WINEDEBUG=-all WINEPATH="z:$compiler_dir" WINEPREFIX=/tmp/hrx-msvc-wine \
+              "$wine_executable" "$compiler_dir/cl.exe" /Bv
           fi
 
       - name: Report ROCm environment
@@ -407,6 +456,30 @@ jobs:
             "${target_args[@]}" "${importer_args[@]}" "${scope_args[@]}" "${result_args[@]}" "${compilation_args[@]}" \
             --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles" "${failure_args[@]}"
 
+      - name: Build Windows products with MSVC
+        if: matrix.kind == 'windows_msvc'
+        id: msvc_bazel_ci
+        run: |
+          python3 dev.py bazel configure
+          mkdir -p "$RUNNER_TEMP/bazel-profiles"
+          bazel build \
+            --profile="$RUNNER_TEMP/bazel-profiles/windows-msvc-slice.json.gz" \
+            --config=windows-x86_64 \
+            --config=windows-msvc \
+            --//loom/config:shared_tools \
+            //loom/src/loom/tools/loom-compile \
+            //runtime/src/iree/hal/driver/task/executable/elf/arch:x86_64_msvc_abi_bridge
+          executable=bazel-bin/loom/src/loom/tools/loom-compile/loom-compile.exe
+          test -s "$executable"
+          "$LLVM_ROOT/bin/llvm-readobj" --file-headers "$executable" | \
+            grep -F 'Machine: IMAGE_FILE_MACHINE_AMD64' >/dev/null
+          mapfile -t shared_libraries < <(find -L bazel-bin/loom/binding/c -type f -name '*.dll' -print)
+          test "${#shared_libraries[@]}" -ge 2
+          for library in "${shared_libraries[@]}"; do
+            "$LLVM_ROOT/bin/llvm-readobj" --file-headers "$library" | \
+              grep -F 'Machine: IMAGE_FILE_MACHINE_AMD64' >/dev/null
+          done
+
       - name: Capture accelerator kernel errors
         if: ${{ always() && matrix.kind != 'cpu' && (steps.iree_bazel_ci.outcome == 'failure' || steps.iree_bazel_ci.outcome == 'cancelled') }}
         run: |
@@ -416,7 +489,7 @@ jobs:
 
       - name: Upload Bazel profiles
         continue-on-error: true
-        if: ${{ always() && steps.iree_bazel_ci.outcome != 'skipped' }}
+        if: ${{ always() && (steps.iree_bazel_ci.outcome != 'skipped' || steps.msvc_bazel_ci.outcome != 'skipped') }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bazel-profiles-${{ matrix.command }}-${{ matrix.target_selector || 'host' }}-attempt-${{ github.run_attempt }}
