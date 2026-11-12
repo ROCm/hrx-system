@@ -36,7 +36,8 @@ export INCLUDE="z:$tool_root/include/crt;z:$tool_root/include/ucrt;z:$tool_root/
 export LIB="z:$tool_root/lib/crt;z:$tool_root/lib/ucrt;z:$tool_root/lib/um"
 export LIBPATH="$LIB"
 export WINEPATH="z:$BINDIR"
-export WINEPREFIX="${WINEPREFIX:-/tmp/hrx-msvc-wine}"
+: "${WINEPREFIX:?Linux-hosted MSVC requires WINEPREFIX to name a user-owned directory.}"
+export WINEPREFIX
 export WINEDLLOVERRIDES="vcruntime140=n;vcruntime140_1=n"
 """
 

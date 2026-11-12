@@ -248,6 +248,8 @@ jobs:
               echo "WINDOWS_CROSS_ROOT=${output_dir}/windows-toolchain"
               echo "WINSDK_ROOT=${output_dir}/windows-toolchain/sdk"
               echo "MSVC_WINE_ROOT=${output_dir}/msvc-wine"
+              echo "WINEARCH=win64"
+              echo "WINEPREFIX=${RUNNER_TEMP}/msvc-wine-prefix"
             } >> "$GITHUB_ENV"
           fi
           case "${{ matrix.kind }}/${{ matrix.host_toolchain }}" in
@@ -356,8 +358,8 @@ jobs:
         if: matrix.kind == 'windows_msvc'
         run: |
           bash .github/scripts/setup_windows_msvc.sh
-          WINEPREFIX=/tmp/hrx-msvc-wine wineboot --init
-          WINEPREFIX=/tmp/hrx-msvc-wine wineserver -p
+          WINEDEBUG=-all wineboot --init
+          WINEDEBUG=-all wineserver -p
 
       - name: Check Vulkan hardware environment
         if: matrix.kind == 'vulkan'
@@ -399,7 +401,7 @@ jobs:
           if [[ "${{ matrix.kind }}" == windows_msvc ]]; then
             compiler_dir="$(find "$MSVC_WINE_ROOT/VC/Tools/MSVC" -mindepth 1 -maxdepth 1 -type d -print -quit)/bin/Hostx64/x64"
             wine_executable="$(command -v wine64 || command -v wine)"
-            WINEDEBUG=-all WINEPATH="z:$compiler_dir" WINEPREFIX=/tmp/hrx-msvc-wine \
+            WINEDEBUG=-all WINEPATH="z:$compiler_dir" \
               "$wine_executable" "$compiler_dir/cl.exe" /Bv
           fi
 
@@ -464,6 +466,8 @@ jobs:
           mkdir -p "$RUNNER_TEMP/bazel-profiles"
           bazel build \
             --profile="$RUNNER_TEMP/bazel-profiles/windows-msvc-slice.json.gz" \
+            --action_env=WINEARCH \
+            --action_env=WINEPREFIX \
             --config=windows-x86_64 \
             --config=windows-msvc \
             --//loom/config:shared_tools \
