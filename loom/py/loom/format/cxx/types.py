@@ -156,10 +156,11 @@ class CxxTypes:
                 None, "dynamic view encoding does not reference an encoding value"
             )
         role = encoding_type.role.name.lower()
+        rank = value_type.rank if role in {"layout", "storage"} else 0
         return (
             shape,
             element,
-            f"loom::type::encoding<loom::encoding::role::{role}, {value_type.rank}>",
+            f"loom::type::encoding<loom::encoding::role::{role}, {rank}>",
         )
 
     def view(self, value_type: ShapedType, signed: bool, *, const: bool = False) -> str:

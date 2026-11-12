@@ -33,7 +33,10 @@ namespace loom::type {
 // Loom IR. Each dynamic dimension and optional encoding travel with the value
 // through functions, records, and structured control flow.
 template <class Shape, class T, class Encoding = void>
-class [[loom::type("tile")]] tile {};
+class [[loom::type("tile")]] tile {
+ public:
+  using shape_type = Shape;
+};
 
 // A borrowed allocation resource selected for one enclosing invocation.
 class [[loom::type("pool")]] pool {};
@@ -54,6 +57,32 @@ template <class Payload>
 class [[loom::type("write")]] write {};
 
 }  // namespace loom::type
+
+namespace loom::tile {
+
+// Asserts Result's shape or encoding for the same logical tile. An omitted
+// encoding on an encoded Result retains the source encoding. Explicit
+// replacements assert identity; they do not convert, repack, or insert a
+// runtime check. Incorrect assertions make the program invalid.
+template <class Result, class Source>
+[[loom::op("tile.refine")]] Result refine(Source source);
+
+template <class Result, class Source>
+[[loom::op("tile.refine")]] Result refine(
+    Source source, loom::detail::shape_dimensions<Result> dimensions);
+
+template <class Result, class Source, loom::encoding::role Role,
+          loom::type::size_type Rank>
+[[loom::op("tile.refine")]] Result refine(
+    Source source, loom::type::encoding<Role, Rank> encoding);
+
+template <class Result, class Source, loom::encoding::role Role,
+          loom::type::size_type Rank>
+[[loom::op("tile.refine")]] Result refine(
+    Source source, loom::detail::shape_dimensions<Result> dimensions,
+    loom::type::encoding<Role, Rank> encoding);
+
+}  // namespace loom::tile
 
 namespace loom::detail {
 

@@ -75,17 +75,23 @@ class RefinementIntrinsic {
   bool equivalent(const RefinementIntrinsic& other) const {
     return result_.partition == other.result_.partition &&
            loom_type_equal(result_.native_type, other.result_.native_type) &&
-           dynamic_count_ == other.dynamic_count_;
+           dynamic_count_ == other.dynamic_count_ &&
+           explicit_encoding_ == other.explicit_encoding_;
   }
 
  private:
-  RefinementIntrinsic(ShapedSignature result, size_t dynamic_count)
-      : result_(result), dynamic_count_(dynamic_count) {}
+  RefinementIntrinsic(ShapedSignature result, size_t dynamic_count,
+                      bool explicit_encoding)
+      : result_(result),
+        dynamic_count_(dynamic_count),
+        explicit_encoding_(explicit_encoding) {}
 
   // Exact result carrier and its source-owned extent/encoding declarations.
   ShapedSignature result_;
   // Number of explicitly supplied index-domain result extents.
   size_t dynamic_count_;
+  // Whether the caller replaces the encoding instead of retaining the source's.
+  bool explicit_encoding_;
 };
 
 }  // namespace loom::cxx_import

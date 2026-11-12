@@ -1483,6 +1483,74 @@ accepts only layout or storage because either must own its address mapping;
 runtime scales, zero points and codebooks stay explicit operands of the decode
 or matrix operation that consumes them.
 
+## Explicit shape assertions
+
+A helper that consumes a fixed packet can be called from shape-parameterized
+code with an explicit assertion at the boundary:
+
+```cpp
+#include <loomcxx/vector.h>
+
+using Packet = unsigned __attribute__((ext_vector_type(4)));
+using Values = loom::type::vector<
+    loom::type::shape<loom::type::dynamic>, unsigned>;
+
+[[loom::inline]] unsigned sum_packet(Packet packet) {
+  return packet[0] + packet[1] + packet[2] + packet[3];
+}
+
+// The caller guarantees that values contains exactly four lanes.
+[[loom::inline]] unsigned sum_four(Values values) {
+  return sum_packet(loom::vector::refine<Packet>(values));
+}
+
+[[loom::inline]] Values expose_packet(Packet packet, loom::type::index width) {
+  return loom::vector::refine<Values>(packet, {width});
+}
+```
+
+`refine<Result>` asserts a different shape description of the same value. It
+preserves rank and the exact source element type; it does not change element
+bits, reorder lanes, allocate storage, or insert a runtime check. Contradictory
+static extents diagnose. A dynamic assertion is the caller's responsibility:
+`sum_four` requires four lanes, and `expose_packet` requires `width == 4`.
+An incorrect assertion makes the program invalid. Ordinary function calls
+continue to require exact types; facts do not insert these assertions implicitly.
+
+A dependent result supplies one `loom::type::index` per dynamic axis, in axis
+order, with no entry for a static axis. Native rank-one vectors and rank-generic
+semantic vectors can cross this boundary. Explicitly refining a dependent vector
+to a static grid also permits the existing `loom::vector::bitcast<Result>` when
+its source and result have equal total bit counts. Bitcasting remains a separate
+operation with a separate representation contract.
+
+Views expose the same assertion through `loom::view::refine<Result>`:
+
+```cpp
+using Layout = loom::type::encoding<loom::encoding::role::layout, 2>;
+using Rows = loom::type::view<
+    loom::type::shape<loom::type::dynamic, 32>, const float, Layout>;
+using Block = loom::type::view<loom::type::shape<4, 32>, const float, Layout>;
+
+Block four_rows(Rows source) {
+  return loom::view::refine<Block>(source);
+}
+```
+
+This preserves the borrowed allocation, byte origin, access qualifiers, and the
+encoding already carried by `source`. An explicit final encoding argument
+asserts a replacement encoding identity; it never repacks storage. An unencoded
+result asserts the ordinary unencoded representation. Every asserted shape and
+mapping must describe the same elements. Refinement cannot cast away `const`
+or `volatile`.
+
+`<loomcxx/pipeline.h>` exposes `loom::tile::refine<Result>` with the same explicit
+dimensions and optional encoding argument for logical tiles. Layout/storage
+encodings carry the tile rank; schema/transform encodings have rank zero.
+Dependent vectors, views, and tiles keep their dimensions and attached encodings
+through ordinary helpers and structured control flow. C++ export/reimport
+preserves these explicit assertions and whole-value transport.
+
 ## Integer bit counts
 
 `<loomcxx/scalar.h>` exposes `ctlzi`, `cttzi`, and `ctpopi` for non-boolean

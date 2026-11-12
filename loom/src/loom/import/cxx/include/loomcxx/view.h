@@ -20,6 +20,10 @@ namespace loom::type {
 // and sizeof real C++ semantics.
 template <class Shape, class T, class Encoding = void>
 class [[loom::type("view")]] view {
+ public:
+  using shape_type = Shape;
+
+ private:
   // Borrowed base pointer retained by ordinary source-language copies.
   T* data_;
   // Source object storage preserving all logical extents.
@@ -51,15 +55,11 @@ struct dimensions<0> {};
 
 template <loom::type::size_type... Extents>
 using view_dimensions =
-    dimensions<(loom::type::size_type{0} + ... +
-                (Extents == loom::type::dynamic ? loom::type::size_type{1}
-                                                : loom::type::size_type{0}))>;
+    dimensions<loom::type::shape<Extents...>::dynamic_count>;
 
 template <loom::type::size_type... Extents>
-using view_index_dimensions = loom::type::indices<(
-    loom::type::size_type{0} + ... +
-    (Extents == loom::type::dynamic ? loom::type::size_type{1}
-                                    : loom::type::size_type{0}))>;
+using view_index_dimensions =
+    loom::type::indices<loom::type::shape<Extents...>::dynamic_count>;
 
 }  // namespace loom::detail
 
@@ -179,6 +179,29 @@ view(loom::type::buffer<T> data, loom::type::offset byte_offset,
 }  // namespace loom::buffer
 
 namespace loom::view {
+
+// Asserts Result's shape while preserving borrowed storage and access rights.
+// An encoded Result retains the source encoding unless a replacement is
+// supplied. An unencoded Result asserts ordinary unencoded addressing. No copy,
+// repack, or runtime check occurs; incorrect assertions make the program
+// invalid.
+template <class Result, class Source>
+[[loom::op("view.refine")]] Result refine(Source source);
+
+template <class Result, class Source>
+[[loom::op("view.refine")]] Result refine(
+    Source source, loom::detail::shape_dimensions<Result> dimensions);
+
+template <class Result, class Source, loom::encoding::role Role,
+          loom::type::size_type Rank>
+[[loom::op("view.refine")]] Result refine(
+    Source source, loom::type::encoding<Role, Rank> encoding);
+
+template <class Result, class Source, loom::encoding::role Role,
+          loom::type::size_type Rank>
+[[loom::op("view.refine")]] Result refine(
+    Source source, loom::detail::shape_dimensions<Result> dimensions,
+    loom::type::encoding<Role, Rank> encoding);
 
 // Forms a subview with an explicitly selected result extent pattern.
 template <loom::type::size_type... Extents, class T,

@@ -30,7 +30,10 @@ namespace loom::type {
 // spelling for static rank-one values; this type retains dependent dimensions
 // through functions, records, templates, and structured control flow.
 template <class Shape, class T>
-class [[loom::type("vector")]] vector {};
+class [[loom::type("vector")]] vector {
+ public:
+  using shape_type = Shape;
+};
 
 // Lanewise arithmetic preserves Shape and T. For dependent shapes, binary
 // results retain the left value's dynamic dimensions and assert that the right
@@ -98,10 +101,8 @@ struct vector_traits<loom::type::vector<loom::type::shape<Extents...>, T>> {
   // Number of logical axes, including those with dependent extents.
   static constexpr loom::type::size_type rank = sizeof...(Extents);
   using element_type = T;
-  using dimensions_type = loom::type::indices<(
-      loom::type::size_type{0} + ... +
-      (Extents == loom::type::dynamic ? loom::type::size_type{1}
-                                      : loom::type::size_type{0}))>;
+  using dimensions_type =
+      loom::type::indices<loom::type::shape<Extents...>::dynamic_count>;
 };
 
 template <class Vector>

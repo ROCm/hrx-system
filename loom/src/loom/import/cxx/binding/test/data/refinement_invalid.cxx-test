@@ -36,7 +36,7 @@ struct Dimensions { unsigned count; };
 #include <loomcxx/vector.h>
 using Source = loom::type::vector<loom::type::shape<4>, float>;
 using Result = loom::type::vector<loom::type::shape<loom::type::dynamic>, float>;
-// ERROR@+1: LOWERING/059 "refinement requires the source, one index record for dependent result dimensions, and its result encoding"
+// ERROR@+1: LOWERING/059 "refinement requires the source, one index record for dependent result dimensions, and at most one result encoding"
 [[loom::op("vector.refine")]] Result invalid(Source);
 
 // ====
@@ -48,3 +48,46 @@ Result invalid(Source source) {
   // ERROR@+1: SHAPE/008 "source dimension 0 has size 4, but the refined result requires size 3"
   return loom::vector::refine<Result>(source);
 }
+
+// ====
+// Refinement preserves view access rights instead of casting away const.
+#include <loomcxx/view.h>
+using Source = loom::type::view<loom::type::shape<4>, const float>;
+using Result = loom::type::view<loom::type::shape<4>, float>;
+// ERROR@+1: LOWERING/059 "refinement must preserve the carrier, element type, access qualifiers, and rank"
+[[loom::op("view.refine")]] Result invalid(Source);
+
+// ====
+// Volatile observation requirements also remain exact.
+#include <loomcxx/view.h>
+using Source = loom::type::view<loom::type::shape<4>, volatile float>;
+using Result = loom::type::view<loom::type::shape<4>, float>;
+// ERROR@+1: LOWERING/059 "refinement must preserve the carrier, element type, access qualifiers, and rank"
+[[loom::op("view.refine")]] Result invalid(Source);
+
+// ====
+// Adding an encoding requires the actual encoding value, not a default.
+#include <loomcxx/view.h>
+using Layout = loom::type::encoding<loom::encoding::role::layout, 1>;
+using Source = loom::type::view<loom::type::shape<4>, float>;
+using Result = loom::type::view<loom::type::shape<4>, float, Layout>;
+// ERROR@+1: LOWERING/059 "refinement must supply a result encoding when the source does not carry the same encoding role and rank"
+[[loom::op("view.refine")]] Result invalid(Source);
+
+// ====
+// Explicit encodings must match the result's role and source rank.
+#include <loomcxx/pipeline.h>
+using Layout = loom::type::encoding<loom::encoding::role::layout, 2>;
+using Storage = loom::type::encoding<loom::encoding::role::storage, 2>;
+using Source = loom::type::tile<loom::type::shape<4, 8>, float>;
+using Result = loom::type::tile<loom::type::shape<4, 8>, float, Layout>;
+// ERROR@+1: LOWERING/059 "refinement encoding must match the result carrier"
+[[loom::op("tile.refine")]] Result invalid(Source, Storage);
+
+// ====
+// Tile address layouts describe exactly the tile's logical axes.
+#include <loomcxx/pipeline.h>
+using Layout = loom::type::encoding<loom::encoding::role::layout, 3>;
+using Source = loom::type::tile<loom::type::shape<4, 8>, float, Layout>;
+// ERROR@+1: LOWERING/059 "tile address encoding must have the same rank"
+[[loom::op("tile.refine")]] Source invalid(Source);

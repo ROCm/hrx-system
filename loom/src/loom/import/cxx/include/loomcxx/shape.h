@@ -20,6 +20,9 @@ template <size_type... Extents>
 struct [[loom::type("shape")]] shape {
   // Number of logical axes.
   static constexpr size_type rank = sizeof...(Extents);
+  // Number of explicit runtime extents, in logical axis order.
+  static constexpr size_type dynamic_count =
+      (size_type{0} + ... + (Extents == dynamic ? size_type{1} : size_type{0}));
 };
 
 }  // namespace loom::type

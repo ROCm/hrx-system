@@ -854,6 +854,12 @@ const TilePartition* Types::tile(const cxx::ClassType* input, cxx::AST* owner) {
                           "tile encoding must be void or a Loom encoding type");
     }
     tile_encoding = &static_cast<const EncodingPartition&>(admitted_encoding);
+    if ((tile_encoding->role == LOOM_ENCODING_ROLE_ADDRESS_LAYOUT ||
+         tile_encoding->role == LOOM_ENCODING_ROLE_PHYSICAL_STORAGE) &&
+        tile_encoding->rank != extents.size()) {
+      diagnostics_.reject(unit_, owner,
+                          "tile address encoding must have the same rank");
+    }
   }
   size_t dynamic_count = 0;
   for (auto extent : extents) {

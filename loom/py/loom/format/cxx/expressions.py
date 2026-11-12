@@ -22,6 +22,7 @@ from loom.ir import (
     I1,
     I32,
     BufferType,
+    DynamicEncoding,
     EncodingInstance,
     Operation,
     Predicate,
@@ -1516,18 +1517,6 @@ class CxxExpressionRenderer(CxxRenderContext):
             return ("static_indices",)
         if name == "vector.insert":
             return self._render_vector_insert(operation)
-        if name == "vector.refine":
-            result = operation.results[0]
-            value_type = self.module.values[result].type
-            arguments = [self.expression(operation.operands[0])]
-            if not value_type.is_all_static:
-                arguments.append(self.dynamic_dimensions(value_type))
-            self._declare(
-                result,
-                f"loom::vector::refine<{self.cpp_type(result)}>"
-                f"({', '.join(arguments)})",
-            )
-            return ()
         if name == "vector.splat":
             result = operation.results[0]
             value_type = self.module.values[result].type
@@ -1637,6 +1626,26 @@ class CxxExpressionRenderer(CxxRenderContext):
 
     def _render_simple(self, operation: Operation) -> tuple[str, ...] | None:
         name = operation.name
+        if name in {"vector.refine", "view.refine", "tile.refine"}:
+            result = operation.results[0]
+            source = operation.operands[0]
+            value_type = self.module.values[result].type
+            arguments = [self.expression(source)]
+            if not value_type.is_all_static:
+                arguments.append(self.dynamic_dimensions(value_type))
+            if (
+                isinstance(value_type.encoding, DynamicEncoding)
+                and value_type.encoding != self.module.values[source].type.encoding
+            ):
+                arguments.append(
+                    self.dynamic_view_encoding_expression(operation, value_type)
+                )
+            self._declare(
+                result,
+                f"loom::{name.replace('.', '::')}<{self.cpp_type(result)}>"
+                f"({', '.join(arguments)})",
+            )
+            return ()
         if name in {"scalar.constant", "index.constant"}:
             result = operation.results[0]
             self.expressions[result] = self._literal(

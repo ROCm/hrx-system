@@ -1312,12 +1312,7 @@ class CxxRenderContext:
         if not isinstance(encoding, DynamicEncoding):
             raise CxxRenderError(operation, "view does not have a dynamic encoding")
         definition = self.definitions.get(encoding.value_id)
-        if definition is None:
-            raise CxxRenderError(
-                operation,
-                "view encoding value is not defined in the projected scope",
-            )
-        if definition.name == "encoding.layout.dense":
+        if definition is not None and definition.name == "encoding.layout.dense":
             return f"loom::encoding::layout::dense<{value_type.rank}>()"
         return self.expression(encoding.value_id)
 

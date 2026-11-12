@@ -195,3 +195,30 @@ iree_py_test(
     ]),
     deps = [":cxx"],
 )
+
+iree_py_test(
+    name = "view_refinement_execution_test",
+    size = "small",
+    srcs = ["source_roundtrip_execution_test.py"],
+    args = [
+        "$(rootpath //loom/src/loom/tools/loom-import-cxx)",
+        "$(rootpath //loom/src/loom/tools/loom-test)",
+        "$(rootpath view_refinement.cxx)",
+        "$(rootpath view_refinement_checks.cxx)",
+        "2",
+        "7",
+    ],
+    data = [
+        "view_refinement.cxx",
+        "view_refinement_checks.cxx",
+        "//loom/src/loom/tools/loom-import-cxx",
+        "//loom/src/loom/tools/loom-test",
+    ],
+    main = "source_roundtrip_execution_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/execute:vm_iree_vm",
+    ]),
+    deps = [":cxx"],
+)

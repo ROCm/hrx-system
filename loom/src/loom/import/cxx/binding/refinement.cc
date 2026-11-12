@@ -151,9 +151,6 @@ std::optional<loom_type_kind_t> refinement_kind(std::string_view name) {
   if (name == "tile.refine") {
     return LOOM_TYPE_TILE;
   }
-  if (name == "tensor.refine") {
-    return LOOM_TYPE_TENSOR;
-  }
   return std::nullopt;
 }
 
@@ -192,24 +189,32 @@ std::optional<RefinementIntrinsic> RefinementIntrinsic::resolve(
   }
   const size_t dynamic_count =
       result->partition->component_count - 1 - (result->encoding ? 1 : 0);
-  const size_t expected =
-      1 + (dynamic_count ? 1 : 0) + (result->encoding ? 1 : 0);
-  if (parameters.size() != expected) {
+  const size_t required = 1 + (dynamic_count ? 1 : 0);
+  const bool explicit_encoding =
+      result->encoding && parameters.size() == required + 1;
+  if (parameters.size() != required + (explicit_encoding ? 1 : 0)) {
     diagnostics.reject(unit, owner,
                        "refinement requires the source, one index record for "
-                       "dependent result dimensions, and its result encoding");
+                       "dependent result dimensions, and at most one result "
+                       "encoding");
   }
   if (dynamic_count) {
     require_logical_index_record(unit, diagnostics, types, parameters[1],
                                  dynamic_count, owner,
                                  "refinement result dimensions");
   }
-  if (result->encoding &&
+  if (explicit_encoding &&
       &types.partition(parameters.back(), owner) != result->encoding) {
     diagnostics.reject(unit, owner,
                        "refinement encoding must match the result carrier");
   }
-  return RefinementIntrinsic(*result, dynamic_count);
+  if (result->encoding && !explicit_encoding &&
+      source->encoding != result->encoding) {
+    diagnostics.reject(unit, owner,
+                       "refinement must supply a result encoding when the "
+                       "source does not carry the same encoding role and rank");
+  }
+  return RefinementIntrinsic(*result, dynamic_count, explicit_encoding);
 }
 
 Value RefinementIntrinsic::call(std::span<const Value> arguments,
@@ -221,14 +226,16 @@ Value RefinementIntrinsic::call(std::span<const Value> arguments,
     std::copy(dimensions.begin(), dimensions.end(), components.begin());
   }
   const size_t dependency_count = result_.partition->component_count - 1;
+  const auto source = arguments[0].components();
   if (result_.encoding) {
-    components[dynamic_count_] = arguments.back().ssa();
+    components[dynamic_count_] =
+        explicit_encoding_ ? arguments.back().ssa() : source[source.size() - 2];
   }
   auto dependencies = std::span(components).first(dependency_count);
   BoundTypeStorage storage;
   const auto type = result_.bind_type(dependencies, storage);
   components[dependency_count] =
-      refine_value(arguments[0].components().back(), type, builder, location);
+      refine_value(source.back(), type, builder, location);
   return arena.capture(*result_.partition,
                        std::span(components).first(dependency_count + 1));
 }
