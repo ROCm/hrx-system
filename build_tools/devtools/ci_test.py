@@ -1137,6 +1137,7 @@ class CiTest(unittest.TestCase):
             ["Configure CMake", "Build repository", "Test repository smoke"],
         )
         configure_step = steps[0]
+        self.assertIn("-DLIBHRX_BUILD=OFF", configure_step.argv)
         self.assertIn("-DLOOM_TARGET_DEFAULT=OFF", configure_step.argv)
         for _driver, define in ci.CMAKE_HAL_DRIVER_DEFINES:
             self.assertIn(f"-D{define}=ON", configure_step.argv)
@@ -1174,6 +1175,36 @@ class CiTest(unittest.TestCase):
                 for arg in smoke_step.argv
             )
         )
+
+    def test_cmake_hrx_repository_build_includes_all_products(self):
+        args = ci.parse_arguments(["hrx-cmake-repository-build"])
+
+        steps = ci.steps_from_args(args)
+
+        self.assertEqual(
+            [step.name for step in steps],
+            ["Configure CMake", "Build repository", "Test repository smoke"],
+        )
+        self.assertIn("-DLIBHRX_BUILD=ON", steps[0].argv)
+        self.assertTrue(
+            any(
+                "libhrx/cts/tests/status/hrx_cts_status" in arg for arg in steps[2].argv
+            )
+        )
+
+    def test_cmake_hrx_repository_build_respects_macos_product_support(self):
+        args = ci.parse_arguments(["hrx-cmake-repository-build"])
+
+        with mock.patch.object(ci.sys, "platform", "darwin"):
+            steps = ci.steps_from_args(args)
+
+        configure_step = steps[0]
+        self.assertIn("-DLIBHRX_BUILD=ON", configure_step.argv)
+        self.assertIn("-DLIBHRX_BUILD_HIP_BINDING=OFF", configure_step.argv)
+        self.assertIn("-DAMDF_BUILD=OFF", configure_step.argv)
+        self.assertIn("-DIREE_HAL_DRIVER_TASK=ON", configure_step.argv)
+        for driver, define in ci.CMAKE_HAL_DRIVER_DEFINES:
+            self.assertIn(f"-D{define}=OFF", configure_step.argv, driver)
 
     def test_cmake_configure_rejects_partial_loom_capability_selection(self):
         with self.assertRaisesRegex(ValueError, "requires architecture"):

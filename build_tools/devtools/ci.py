@@ -110,6 +110,7 @@ BAZEL_COMMANDS = {
     "iree-bazel-vulkan": ("vulkan", None),
 }
 CMAKE_COMMANDS = {
+    "hrx-cmake-repository-build": ("hrx-repository-build", None),
     "iree-cmake-xdna": ("xdna", None),
     "iree-cmake-xdna-asan": ("xdna", "asan"),
     "iree-cmake-cpu": ("cpu", None),
@@ -538,6 +539,7 @@ def cmake_configure_step(
     amdgpu_device_binary_mode: str = "source",
     sanitizer: str | None = None,
     build_tests: bool | None = None,
+    build_libhrx: bool = False,
     extra_options: tuple[str, ...] = (),
 ) -> CiStep:
     enabled_driver_set = validate_enabled_drivers(enabled_drivers)
@@ -564,7 +566,7 @@ def cmake_configure_step(
         f"-DIREE_BUILD_TESTS={'ON' if tests_enabled else 'OFF'}",
         f"-DIREE_BUILD_BENCHMARKS={'ON' if tests_enabled else 'OFF'}",
         "-DIREE_ENABLE_LIBBACKTRACE=OFF",
-        "-DLIBHRX_BUILD=OFF",
+        f"-DLIBHRX_BUILD={'ON' if build_libhrx else 'OFF'}",
         "-DIREE_ENABLE_VULKAN=OFF",
         "-DIREE_ENABLE_D3D12=OFF",
         *codec_options("cmake"),
@@ -1258,27 +1260,48 @@ def cmake_shared_tool_steps(command_name: str) -> list[CiStep]:
     ]
 
 
-def cmake_repository_build_steps(command_name: str) -> list[CiStep]:
+def cmake_repository_build_steps(
+    command_name: str, *, build_libhrx: bool = False
+) -> list[CiStep]:
+    enabled_drivers = REPOSITORY_BUILD_HAL_DRIVERS
+    extra_options = (
+        "-DIREE_HAL_DRIVER_TASK=ON",
+        "-DIREE_ENABLE_VULKAN=ON",
+        "-DIREE_ENABLE_D3D12=ON",
+    )
+    if build_libhrx and sys.platform == "darwin":
+        # LibAMDF providers are supported on Linux and Windows. The macOS
+        # repository build still covers the portable runtime, Loom, and LibHRX
+        # products without inventing an unavailable AMD device provider.
+        enabled_drivers = ("task",)
+        extra_options = (
+            "-DAMDF_BUILD=OFF",
+            "-DIREE_HAL_DRIVER_TASK=ON",
+            "-DLIBHRX_BUILD_HIP_BINDING=OFF",
+        )
+    smoke_regexes = (
+        ci_config.CMAKE_HRX_REPOSITORY_SMOKE_CTEST_REGEXES
+        if build_libhrx
+        else ci_config.CMAKE_REPOSITORY_SMOKE_CTEST_REGEXES
+    )
     return [
         cmake_configure_step(
             command_name,
-            enabled_drivers=REPOSITORY_BUILD_HAL_DRIVERS,
+            enabled_drivers=enabled_drivers,
             enabled_loom_architectures=REPOSITORY_BUILD_LOOM_ARCHITECTURES,
             enabled_loom_artifact_formats=REPOSITORY_BUILD_LOOM_ARTIFACT_FORMATS,
             enabled_loom_execution_substrates=REPOSITORY_BUILD_LOOM_EXECUTION_SUBSTRATES,
             enabled_loom_importers=REPOSITORY_BUILD_LOOM_IMPORTERS,
             amdgpu_target_selector=None,
             amdgpu_device_binary_mode="prebuilt",
-            extra_options=(
-                "-DIREE_ENABLE_VULKAN=ON",
-                "-DIREE_ENABLE_D3D12=ON",
-            ),
+            build_libhrx=build_libhrx,
+            extra_options=extra_options,
         ),
         cmake_build_step(command_name, "Build repository"),
         cmake_test_step(
             command_name,
             "Test repository smoke",
-            regex=combine_ctest_regex(*ci_config.CMAKE_REPOSITORY_SMOKE_CTEST_REGEXES),
+            regex=combine_ctest_regex(*smoke_regexes),
             label_exclude_regex=combine_ctest_regex(
                 ci_config.CTEST_RESOURCE_LABEL_EXCLUDE_REGEX,
                 ci_config.CTEST_MANUAL_LABEL_EXCLUDE_REGEX,
@@ -1502,6 +1525,10 @@ def cmake_target_steps(
         if sanitizer is not None:
             raise ValueError("CMake repository builds do not support sanitizers")
         return cmake_repository_build_steps(command_name)
+    if target_group == "hrx-repository-build":
+        if sanitizer is not None:
+            raise ValueError("CMake repository builds do not support sanitizers")
+        return cmake_repository_build_steps(command_name, build_libhrx=True)
     if target_group == "amdgpu":
         return cmake_amdgpu_steps(command_name, sanitizer, amdgpu_target_selector)
     if target_group == "xdna":
