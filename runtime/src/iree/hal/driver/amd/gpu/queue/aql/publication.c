@@ -57,7 +57,7 @@ uint64_t iree_hal_amd_gpu_aql_argument_length(
 static iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_arguments(
     iree_hal_amd_gpu_aql_queue_t* queue, uint64_t length, uint64_t alignment,
     uint64_t* out_offset, uint64_t* out_end) {
-  iree_hal_amd_gpu_argument_storage_t* storage = queue->producer.arguments;
+  iree_hal_amd_gpu_byte_storage_t* storage = queue->producer.arguments;
   *out_offset = 0;
   *out_end = storage->end;
   if (!length) {
@@ -231,7 +231,7 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
                          ? 8u
                          : 1u)
           : 1;
-  iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
+  iree_hal_amd_gpu_byte_storage_t* arguments = queue->producer.arguments;
   uint64_t argument_offset = 0, argument_end = 0;
   const iree_hal_amd_gpu_aql_publish_result_t argument_result =
       iree_hal_amd_gpu_aql_arguments(queue, argument_length, argument_alignment,
@@ -488,7 +488,7 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_control(
       return IREE_HAL_AMD_GPU_AQL_PUBLISH_CAPACITY;
     }
   }
-  iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
+  iree_hal_amd_gpu_byte_storage_t* arguments = queue->producer.arguments;
   const uint64_t address = arguments->address + offset;
   if (!program && address > (UINT64_C(1) << 48) - argument_length) {
     status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -710,7 +710,7 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_execute(
       return IREE_HAL_AMD_GPU_AQL_PUBLISH_CAPACITY;
     }
   }
-  iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
+  iree_hal_amd_gpu_byte_storage_t* arguments = queue->producer.arguments;
   void* upload = arguments->memory.contents.data + argument_offset;
   if (first) {
     *out_status = iree_hal_amd_gpu_aql_command_invocation_write(
@@ -830,7 +830,7 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_transfer(
   }
   iree_hal_amd_gpu_transfer_t* transfer = &submission->transfer.capture;
   const bool first = !transfer->cursor.index && !transfer->cursor.offset;
-  iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
+  iree_hal_amd_gpu_byte_storage_t* arguments = queue->producer.arguments;
   const uint64_t length = iree_hal_amd_gpu_aql_transfer_argument_length(
       transfer, arguments->capacity);
   uint64_t offset = 0, end = 0;

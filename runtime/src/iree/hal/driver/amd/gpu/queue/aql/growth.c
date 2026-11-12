@@ -41,7 +41,7 @@ struct iree_hal_amd_gpu_aql_growth_t {
       iree_hal_amd_gpu_memory_acquire_t acquire;
       union {
         // Owned argument generation for GROW_ARGUMENTS.
-        iree_hal_amd_gpu_argument_storage_t* arguments;
+        iree_hal_amd_gpu_byte_storage_t* arguments;
         // Owned signal generation for GROW_SIGNALS.
         iree_hal_amd_gpu_signal_storage_t* signals;
       };
@@ -209,7 +209,7 @@ iree_status_t iree_hal_amd_gpu_aql_growth_begin(
   } else {
     iree_hal_amd_fabric_memory_t* memory = NULL;
     if (kind == IREE_HAL_AMD_GPU_AQL_ENTRY_ARGUMENTS) {
-      status = iree_hal_amd_gpu_argument_storage_prepare(
+      status = iree_hal_amd_gpu_byte_storage_prepare(
           capacity, context->captures->host_allocator,
           &growth->backing.arguments);
       if (iree_status_is_ok(status)) {
@@ -266,14 +266,14 @@ iree_status_t iree_hal_amd_gpu_aql_growth_end(
     case IREE_HAL_AMD_GPU_AQL_ENTRY_ARGUMENTS:
       context->arguments = NULL;
       if (iree_status_is_ok(status)) {
-        status = iree_hal_amd_gpu_argument_storage_initialize(
+        status = iree_hal_amd_gpu_byte_storage_initialize(
             context->context, argument_begin, growth->backing.arguments);
       }
       if (iree_status_is_ok(status)) {
         out_result->arguments = growth->backing.arguments;
       } else {
-        iree_hal_amd_gpu_argument_storage_free(context->context,
-                                               growth->backing.arguments);
+        iree_hal_amd_gpu_byte_storage_free(context->context,
+                                           growth->backing.arguments);
       }
       break;
     case IREE_HAL_AMD_GPU_AQL_ENTRY_SIGNALS:

@@ -103,9 +103,9 @@ struct iree_hal_amd_gpu_aql_queue_t {
     // Native slot credit and write-only packet/doorbell operands.
     iree_hal_amd_gpu_aql_ring_t ring;
     // Current argument generation.
-    iree_hal_amd_gpu_argument_storage_t* arguments;
+    iree_hal_amd_gpu_byte_storage_t* arguments;
     // Replaced generations, newest first; visited only at explicit trim.
-    iree_hal_amd_gpu_argument_storage_t* retired_arguments;
+    iree_hal_amd_gpu_byte_storage_t* retired_arguments;
     // Dense immutable-domain causal prefix, updated only at acceptance.
     uint64_t* frontier;
     // Frontier width captured at construction.

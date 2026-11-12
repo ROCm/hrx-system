@@ -145,7 +145,7 @@ static void iree_hal_amd_gpu_pm4_abandon(
 
 static iree_status_t iree_hal_amd_gpu_pm4_prepare_arguments(
     iree_hal_amd_gpu_pm4_queue_t* queue, uint64_t capacity) {
-  return iree_hal_amd_gpu_argument_storage_allocate(
+  return iree_hal_amd_gpu_byte_storage_allocate(
       queue->context, queue->options.memory, capacity, 0, queue->host_allocator,
       &queue->producer.arguments);
 }
@@ -170,10 +170,10 @@ static void iree_hal_amd_gpu_pm4_trim_arguments(
       &queue->completed.arguments, iree_memory_order_acquire);
   while (queue->producer.retired_arguments &&
          queue->producer.retired_arguments->end <= completed) {
-    iree_hal_amd_gpu_argument_storage_t* storage =
+    iree_hal_amd_gpu_byte_storage_t* storage =
         queue->producer.retired_arguments;
     queue->producer.retired_arguments = storage->next;
-    iree_hal_amd_gpu_argument_storage_free(queue->context, storage);
+    iree_hal_amd_gpu_byte_storage_free(queue->context, storage);
   }
   if (!queue->producer.retired_arguments) {
     queue->producer.retired_arguments_tail = NULL;
@@ -412,7 +412,7 @@ iree_hal_amd_gpu_pm4_publish_transfer(
     iree_hal_amd_gpu_pm4_submission_t* submission, uint64_t position) {
   iree_hal_amd_gpu_transfer_t* transfer = &submission->transfer;
   const bool first = !transfer->cursor.index && !transfer->cursor.offset;
-  iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
+  iree_hal_amd_gpu_byte_storage_t* arguments = queue->producer.arguments;
   // Independent copies can overlap on shaders. Scalar copies keep their
   // compact DMA packet; incompatible program views and rings too small for
   // one shader argument record retain the queue path without extra backing.
@@ -567,7 +567,7 @@ iree_hal_amd_gpu_pm4_publish_execute(
                                                profile->completion.sample_stride
                                          : 0;
   const uint64_t argument_length = command->argument_length + sample_length;
-  iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
+  iree_hal_amd_gpu_byte_storage_t* arguments = queue->producer.arguments;
   if (argument_length > arguments->capacity) {
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_ARGUMENTS;
   }
@@ -863,7 +863,7 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
       sample_length ? iree_align_uint64(argument_storage.length, 8) : 0;
   const uint64_t argument_length =
       sample_length ? sample_offset + sample_length : argument_storage.length;
-  iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
+  iree_hal_amd_gpu_byte_storage_t* arguments = queue->producer.arguments;
   uint64_t argument_offset = 0;
   uint64_t argument_end = arguments->end;
   uint64_t argument_address = 0;
@@ -1138,7 +1138,7 @@ iree_hal_amd_gpu_pm4_publish_control(
   const bool program = iree_hal_amd_gpu_control_uses_program(
       queue->base.queue_family, submission->control.target.buffer,
       submission->control.command);
-  iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
+  iree_hal_amd_gpu_byte_storage_t* arguments = queue->producer.arguments;
   uint64_t argument_offset = 0, argument_end = arguments->end;
   if (program) {
     const uint64_t length =
@@ -1845,8 +1845,7 @@ iree_hal_amd_gpu_pm4_process_entry(iree_hal_amd_gpu_pm4_queue_t* queue,
         entry, queue->producer.arguments->end, &result);
     if (iree_status_is_ok(status)) {
       if (result.arguments) {
-        iree_hal_amd_gpu_argument_storage_t* previous =
-            queue->producer.arguments;
+        iree_hal_amd_gpu_byte_storage_t* previous = queue->producer.arguments;
         if (queue->producer.retired_arguments_tail) {
           queue->producer.retired_arguments_tail->next = previous;
         } else {

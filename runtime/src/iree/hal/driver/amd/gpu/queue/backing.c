@@ -219,11 +219,11 @@ iree_status_t iree_hal_amd_gpu_backing_allocate(
   return iree_hal_amd_gpu_backing_query_address(context, memory, out_address);
 }
 
-iree_status_t iree_hal_amd_gpu_argument_storage_prepare(
+iree_status_t iree_hal_amd_gpu_byte_storage_prepare(
     uint64_t capacity, iree_allocator_t host_allocator,
-    iree_hal_amd_gpu_argument_storage_t** out_storage) {
+    iree_hal_amd_gpu_byte_storage_t** out_storage) {
   *out_storage = NULL;
-  iree_hal_amd_gpu_argument_storage_t* storage = NULL;
+  iree_hal_amd_gpu_byte_storage_t* storage = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*storage),
                                              (void**)&storage));
   storage->host_allocator = host_allocator;
@@ -232,9 +232,9 @@ iree_status_t iree_hal_amd_gpu_argument_storage_prepare(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_amd_gpu_argument_storage_initialize(
+iree_status_t iree_hal_amd_gpu_byte_storage_initialize(
     iree_hal_amd_gpu_context_t* context, uint64_t begin,
-    iree_hal_amd_gpu_argument_storage_t* storage) {
+    iree_hal_amd_gpu_byte_storage_t* storage) {
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_backing_query_address(
       context, &storage->memory, &storage->address));
   storage->begin = begin;
@@ -242,43 +242,41 @@ iree_status_t iree_hal_amd_gpu_argument_storage_initialize(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_amd_gpu_argument_storage_allocate(
+iree_status_t iree_hal_amd_gpu_byte_storage_allocate(
     iree_hal_amd_gpu_context_t* context,
     const iree_hal_amd_fabric_memory_options_t* options, uint64_t capacity,
     uint64_t begin, iree_allocator_t host_allocator,
-    iree_hal_amd_gpu_argument_storage_t** out_storage) {
+    iree_hal_amd_gpu_byte_storage_t** out_storage) {
   *out_storage = NULL;
-  iree_hal_amd_gpu_argument_storage_t* storage = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_argument_storage_prepare(
+  iree_hal_amd_gpu_byte_storage_t* storage = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_byte_storage_prepare(
       capacity, host_allocator, &storage));
   iree_status_t status = iree_hal_amd_fabric_memory_allocate(
       context->api, options, capacity, capacity, context->event_sink,
       &storage->memory, NULL);
   if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_amd_gpu_argument_storage_initialize(context, begin, storage);
+    status = iree_hal_amd_gpu_byte_storage_initialize(context, begin, storage);
   }
   if (iree_status_is_ok(status)) {
     *out_storage = storage;
   } else {
-    iree_hal_amd_gpu_argument_storage_free(context, storage);
+    iree_hal_amd_gpu_byte_storage_free(context, storage);
   }
   return status;
 }
 
-static void iree_hal_amd_gpu_argument_storage_released(void* user_data) {
-  iree_hal_amd_gpu_argument_storage_t* storage = user_data;
+static void iree_hal_amd_gpu_byte_storage_released(void* user_data) {
+  iree_hal_amd_gpu_byte_storage_t* storage = user_data;
   iree_allocator_free(storage->host_allocator, storage);
 }
 
-void iree_hal_amd_gpu_argument_storage_free(
+void iree_hal_amd_gpu_byte_storage_free(
     iree_hal_amd_gpu_context_t* context,
-    iree_hal_amd_gpu_argument_storage_t* storage) {
+    iree_hal_amd_gpu_byte_storage_t* storage) {
   iree_hal_amd_gpu_context_release_memory(
       context, 1, &storage->memory,
       (iree_hal_amd_fabric_memory_release_callback_t){
-          .fn = iree_hal_amd_gpu_argument_storage_released,
-          .user_data = storage},
+          .fn = iree_hal_amd_gpu_byte_storage_released, .user_data = storage},
       &storage->release);
 }
 

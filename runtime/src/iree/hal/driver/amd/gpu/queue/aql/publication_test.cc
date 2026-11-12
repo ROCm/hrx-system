@@ -165,7 +165,7 @@ class AqlPublicationTest
   // Native notification destination.
   uint64_t doorbell_ = 0;
   // Zero-argument native function needs no argument backing.
-  iree_hal_amd_gpu_argument_storage_t arguments_ = {};
+  iree_hal_amd_gpu_byte_storage_t arguments_ = {};
   // Queue's accepted causal prefix.
   std::array<uint64_t, 2> frontier_ = {};
   // Immutable zero-scratch function metadata.

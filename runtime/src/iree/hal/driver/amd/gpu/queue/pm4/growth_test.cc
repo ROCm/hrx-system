@@ -339,7 +339,7 @@ class GrowthTest : public ::testing::Test {
             EXPECT_EQ(result.arguments->begin, 123456u);
             EXPECT_EQ(result.arguments->end, 123456u);
             EXPECT_EQ(result.arguments->capacity, 4096u);
-            iree_hal_amd_gpu_argument_storage_free(&context_, result.arguments);
+            iree_hal_amd_gpu_byte_storage_free(&context_, result.arguments);
           }
           if (result.signals) {
             // A caller may still be preparing this block's wider table. The

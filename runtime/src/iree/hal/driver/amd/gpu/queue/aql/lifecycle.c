@@ -149,7 +149,7 @@ amdf_status_t iree_hal_amd_gpu_aql_queue_shutdown(iree_hal_queue_t* base) {
   iree_atomic_store(&queue->options.signals->waiting, 0,
                     iree_memory_order_release);
   iree_hal_amd_gpu_signal_cache_trim(queue->context, 0, queue->options.signals);
-  iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
+  iree_hal_amd_gpu_byte_storage_t* arguments = queue->producer.arguments;
   if (arguments) {
     arguments->next = queue->producer.retired_arguments;
   } else {
@@ -157,8 +157,8 @@ amdf_status_t iree_hal_amd_gpu_aql_queue_shutdown(iree_hal_queue_t* base) {
   }
   queue->producer.arguments = queue->producer.retired_arguments = NULL;
   while (arguments) {
-    iree_hal_amd_gpu_argument_storage_t* next = arguments->next;
-    iree_hal_amd_gpu_argument_storage_free(queue->context, arguments);
+    iree_hal_amd_gpu_byte_storage_t* next = arguments->next;
+    iree_hal_amd_gpu_byte_storage_free(queue->context, arguments);
     arguments = next;
   }
   return AMDF_STATUS_OK;

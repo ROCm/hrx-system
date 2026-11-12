@@ -619,13 +619,12 @@ static void iree_hal_amd_gpu_aql_trim_storage(
     iree_hal_amd_gpu_aql_queue_t* queue) {
   const uint64_t consumed = (uint64_t)iree_atomic_load(
       &queue->completed.arguments, iree_memory_order_acquire);
-  iree_hal_amd_gpu_argument_storage_t** link =
-      &queue->producer.retired_arguments;
+  iree_hal_amd_gpu_byte_storage_t** link = &queue->producer.retired_arguments;
   while (*link) {
-    iree_hal_amd_gpu_argument_storage_t* storage = *link;
+    iree_hal_amd_gpu_byte_storage_t* storage = *link;
     if (storage->end <= consumed) {
       *link = storage->next;
-      iree_hal_amd_gpu_argument_storage_free(queue->context, storage);
+      iree_hal_amd_gpu_byte_storage_free(queue->context, storage);
     } else {
       link = &storage->next;
     }
@@ -1810,7 +1809,7 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
       iree_hal_amd_gpu_aql_scratch_initialize(
           &queue->growth, queue->storage.queue, options->scratch_memory,
           &queue->scratch);
-      status = iree_hal_amd_gpu_argument_storage_allocate(
+      status = iree_hal_amd_gpu_byte_storage_allocate(
           context, options->memory, options->argument_capacity, 0,
           host_allocator, &queue->producer.arguments);
     }

@@ -428,7 +428,7 @@ static amdf_status_t iree_hal_amd_gpu_sdma_queue_shutdown(
     return status;
   }
   queue->native = NULL;
-  iree_hal_amd_gpu_argument_storage_free(queue->context, queue->staging);
+  iree_hal_amd_gpu_byte_storage_free(queue->context, queue->staging);
   queue->staging = NULL;
   return AMDF_STATUS_OK;
 }
@@ -538,7 +538,7 @@ iree_status_t iree_hal_amd_gpu_sdma_queue_create(
     status = iree_hal_amd_gpu_sdma_prepare_signals(queue);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_amd_gpu_argument_storage_allocate(
+    status = iree_hal_amd_gpu_byte_storage_allocate(
         context, options->memory,
         (uint64_t)options->staging_capacity *
             IREE_HAL_AMD_GPU_SDMA_RETIREMENT_CAPACITY,

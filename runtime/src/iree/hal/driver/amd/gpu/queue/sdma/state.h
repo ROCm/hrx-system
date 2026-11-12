@@ -66,7 +66,7 @@ struct iree_hal_amd_gpu_sdma_queue_t {
   // Shared CPU capture pool; ordinary calls allocate no native storage.
   iree_hal_amd_gpu_capture_pool_t captures;
   // Coherent fixed staging, partitioned by native retirement slot.
-  iree_hal_amd_gpu_argument_storage_t* staging;
+  iree_hal_amd_gpu_byte_storage_t* staging;
   // Matching fixed command/retirement metadata.
   iree_hal_amd_gpu_sdma_span_t spans[IREE_HAL_AMD_GPU_SDMA_RETIREMENT_CAPACITY];
   // Exact shared file executor; file ownership creates no execution queue.

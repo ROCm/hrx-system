@@ -81,7 +81,7 @@ typedef struct iree_hal_amd_gpu_aql_growth_result_t {
   // Last capture for constant-time requeue, or NULL for an empty cohort.
   iree_hal_amd_gpu_publication_entry_t* last;
   // Acquired argument generation, or NULL for another kind/failure.
-  iree_hal_amd_gpu_argument_storage_t* arguments;
+  iree_hal_amd_gpu_byte_storage_t* arguments;
   // Acquired signal generation, or NULL for another kind/failure.
   iree_hal_amd_gpu_signal_storage_t* signals;
 } iree_hal_amd_gpu_aql_growth_result_t;

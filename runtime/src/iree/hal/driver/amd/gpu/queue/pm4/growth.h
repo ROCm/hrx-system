@@ -94,7 +94,7 @@ typedef struct iree_hal_amd_gpu_pm4_growth_result_t {
   // Last waiting capture with a NULL next link, or NULL for an empty cohort.
   iree_hal_amd_gpu_publication_entry_t* last;
   // Owned acquired arguments, or NULL for another kind or failure.
-  iree_hal_amd_gpu_argument_storage_t* arguments;
+  iree_hal_amd_gpu_byte_storage_t* arguments;
   // Owned acquired scratch generation, or NULL for another kind or failure.
   iree_hal_amd_gpu_pm4_scratch_storage_t* scratch;
   // Owned acquired signal block, or NULL for another kind or failure.

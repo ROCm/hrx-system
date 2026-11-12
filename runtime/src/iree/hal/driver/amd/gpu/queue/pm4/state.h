@@ -171,11 +171,11 @@ struct iree_hal_amd_gpu_pm4_queue_t {
     // Write-only 64-bit MMIO doorbell.
     volatile uint64_t* doorbell;
     // Current argument generation, owned by the publisher.
-    iree_hal_amd_gpu_argument_storage_t* arguments;
+    iree_hal_amd_gpu_byte_storage_t* arguments;
     // Replaced generations ordered by their final consumed byte position.
-    iree_hal_amd_gpu_argument_storage_t* retired_arguments;
+    iree_hal_amd_gpu_byte_storage_t* retired_arguments;
     // Constant-time append boundary; NULL when no generation awaits retirement.
-    iree_hal_amd_gpu_argument_storage_t* retired_arguments_tail;
+    iree_hal_amd_gpu_byte_storage_t* retired_arguments_tail;
     // Accepted native publication count, release-published for completion.
     iree_atomic_int64_t count;
     // Next native dispatch ID, independent of publication chunk boundaries.
