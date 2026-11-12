@@ -21,6 +21,7 @@
 #include <variant>
 #include <vector>
 
+#include "iree/base/internal/arena.h"
 #include "loom/import/cxx/control/construction.h"
 #include "loom/import/cxx/lifetime/destruction.h"
 #include "loom/import/cxx/lifetime/origins.h"
@@ -408,7 +409,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   }
   // Propagates reference and receiver facts in both directions across one
   // retained call edge.
-  CallPropagation propagate_call(const DirectCall& call, ControlFlow& callee);
+  CallPropagation propagate_call(const DirectCall& call, ControlFlow& callee,
+                                 iree_arena_allocator_t* scratch_arena);
   // Adds identity-observing capture uses from this concrete call operator to
   // the shared result. Uninstantiated template patterns are never analyzed.
   void collect_pointer_capture_identities(
@@ -602,13 +604,12 @@ class ControlFlow final : private cxx::ASTVisitor {
   template <typename Visitor>
   void visit_intervals(const CallArgument& argument,
                        ReferenceProjection projection, Visitor&& visitor) const;
-  bool identities_overlap(const CallArgument& left,
-                          const CallArgument& right) const;
   bool references_current_receiver_field(const CallArgument& argument) const;
   bool retain_reference_result_identity(const DirectCall& call,
                                         const ControlFlow& callee);
-  CallPropagation propagate_overlapping_references(const DirectCall& call,
-                                                   ControlFlow& callee);
+  CallPropagation propagate_overlapping_references(
+      const DirectCall& call, ControlFlow& callee,
+      iree_arena_allocator_t* scratch_arena);
   std::optional<Destination> classify_destination(
       cxx::ExpressionAST* expression);
   std::optional<Destination> classify_materialized_destination(

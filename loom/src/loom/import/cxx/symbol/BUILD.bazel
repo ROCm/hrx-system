@@ -97,6 +97,7 @@ loom_cc_library(
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/pipeline",
         "//loom/src/loom/ops/template",
+        "//runtime/src/iree/base/internal:arena",
         "//third_party:cxx_parser",
     ],
 )

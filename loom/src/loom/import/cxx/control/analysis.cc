@@ -25,8 +25,10 @@
 #include <string_view>
 #include <utility>
 
+#include "loom/import/cxx/control/call_aliases.h"
 #include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/constants.h"
+#include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/source/objects.h"
 
@@ -3145,42 +3147,6 @@ void ControlFlow::visit_intervals(const CallArgument& argument,
   }
 }
 
-bool ControlFlow::identities_overlap(const CallArgument& left,
-                                     const CallArgument& right) const {
-  bool overlaps = false;
-  visit_intervals(left, {}, [&](ObjectInterval left_interval) {
-    visit_intervals(right, {}, [&](ObjectInterval right_interval) {
-      overlaps =
-          overlaps || (left_interval.binding == right_interval.binding &&
-                       (left_interval.end == ObjectInterval::kWholeObjectEnd ||
-                        right_interval.end == ObjectInterval::kWholeObjectEnd ||
-                        (left_interval.begin < right_interval.end &&
-                         right_interval.begin < left_interval.end)));
-    });
-  });
-  if (overlaps) {
-    return true;
-  }
-
-  auto has_unresolved_identity = [&](const CallArgument& argument) {
-    return std::ranges::any_of(
-        argument.reference_calls, [&](const ReferenceCall& reference) {
-          return !reference_identity_facts_ ||
-                 !reference_identity_facts_->results.contains(reference.call);
-        });
-  };
-  const bool left_has_identity =
-      left.inherent_storage || left.current_receiver ||
-      !left.identity_bindings.empty() || left.identity_intervals ||
-      !left.reference_calls.empty();
-  const bool right_has_identity =
-      right.inherent_storage || right.current_receiver ||
-      !right.identity_bindings.empty() || right.identity_intervals ||
-      !right.reference_calls.empty();
-  return (has_unresolved_identity(left) && right_has_identity) ||
-         (has_unresolved_identity(right) && left_has_identity);
-}
-
 bool ControlFlow::references_current_receiver_field(
     const CallArgument& argument) const {
   bool references_field = false;
@@ -3450,10 +3416,19 @@ bool ControlFlow::retain_reference_result_identity(const DirectCall& call,
 }
 
 CallPropagation ControlFlow::propagate_overlapping_references(
-    const DirectCall& call, ControlFlow& callee) {
+    const DirectCall& call, ControlFlow& callee,
+    iree_arena_allocator_t* scratch_arena) {
   bool caller_changed = false;
   bool callee_changed = false;
   auto parameters = callee.function_->parameters();
+  const bool member_call = call.function->isImplicitObjectMemberFunction();
+  const bool receiver_mutable =
+      member_call && !callee.receiver_writes().empty();
+  const bool indexed_receiver =
+      member_call && !call.current_receiver && call.receiver.has_value();
+  auto reference_parameter = [&](cxx::Symbol* parameter) {
+    return unit_.typeTraits().is_reference(parameter->type());
+  };
   auto select_storage = [&](size_t ordinal) {
     auto* parameter = parameters[ordinal];
     callee_changed =
@@ -3467,50 +3442,125 @@ CallPropagation ControlFlow::propagate_overlapping_references(
   // identity so reads and writes observe the source language's aliasing order.
   const size_t parameter_count =
       std::min(parameters.size(), call.arguments.size());
-  for (size_t first = 0; first < parameter_count; ++first) {
-    if (!unit_.typeTraits().is_reference(parameters[first]->type())) {
-      continue;
+  size_t reference_count = 0;
+  size_t written_count = 0;
+  for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
+    if (reference_parameter(parameters[ordinal])) {
+      ++reference_count;
+      written_count += callee.reference_written(parameters[ordinal]);
     }
-    for (size_t second = first + 1; second < parameter_count; ++second) {
-      if (!unit_.typeTraits().is_reference(parameters[second]->type()) ||
-          (!callee.reference_written(parameters[first]) &&
-           !callee.reference_written(parameters[second])) ||
-          !identities_overlap(call.arguments[first], call.arguments[second])) {
-        continue;
+  }
+  const size_t alias_count = reference_count + indexed_receiver;
+  written_count += indexed_receiver && receiver_mutable;
+  auto has_unresolved_identity = [&](const CallArgument& argument) {
+    return std::ranges::any_of(
+        argument.reference_calls, [&](const ReferenceCall& reference) {
+          return !reference_identity_facts_ ||
+                 !reference_identity_facts_->results.contains(reference.call);
+        });
+  };
+  bool indexed_receiver_overlap = false;
+  if (alias_count > 1 && written_count) {
+    iree_arena_reset(scratch_arena);
+    CallAliasParameter* alias_parameters = nullptr;
+    check(iree_arena_allocate_array_aligned(
+        scratch_arena, alias_count, sizeof(*alias_parameters),
+        alignof(CallAliasParameter),
+        reinterpret_cast<void**>(&alias_parameters)));
+    size_t alias_index = 0;
+    size_t interval_count = 0;
+    auto retain_alias = [&](const CallArgument& argument, bool written) {
+      alias_parameters[alias_index++] = {
+          .written = written,
+          .has_identity =
+              argument.inherent_storage || argument.current_receiver ||
+              !argument.identity_bindings.empty() ||
+              argument.identity_intervals || !argument.reference_calls.empty(),
+          .unresolved_identity = has_unresolved_identity(argument),
+      };
+      visit_intervals(argument, {}, [&](ObjectInterval) { ++interval_count; });
+    };
+    for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
+      if (reference_parameter(parameters[ordinal])) {
+        retain_alias(call.arguments[ordinal],
+                     callee.reference_written(parameters[ordinal]));
       }
-      select_storage(first);
-      select_storage(second);
+    }
+    if (indexed_receiver) {
+      retain_alias(*call.receiver, receiver_mutable);
+    }
+    CallAliasInterval* alias_intervals = nullptr;
+    if (interval_count) {
+      check(iree_arena_allocate_array_aligned(
+          scratch_arena, interval_count, sizeof(*alias_intervals),
+          alignof(CallAliasInterval),
+          reinterpret_cast<void**>(&alias_intervals)));
+    }
+    size_t interval_index = 0;
+    alias_index = 0;
+    auto retain_intervals = [&](const CallArgument& argument) {
+      const size_t owner = alias_index++;
+      visit_intervals(argument, {}, [&](ObjectInterval interval) {
+        alias_intervals[interval_index++] = {interval.binding, interval.begin,
+                                             interval.end, owner};
+      });
+    };
+    for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
+      if (reference_parameter(parameters[ordinal])) {
+        retain_intervals(call.arguments[ordinal]);
+      }
+    }
+    if (indexed_receiver) {
+      retain_intervals(*call.receiver);
+    }
+    std::span<const uint8_t> storage_aliases;
+    check(CallAliases({alias_parameters, alias_count},
+                      {alias_intervals, interval_count})
+              .select_storage(scratch_arena, &storage_aliases));
+    alias_index = 0;
+    for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
+      if (reference_parameter(parameters[ordinal])) {
+        if (storage_aliases[alias_index]) {
+          select_storage(ordinal);
+        }
+        ++alias_index;
+      }
+    }
+    if (indexed_receiver) {
+      indexed_receiver_overlap = storage_aliases[alias_index];
     }
   }
 
-  if (!call.function->isImplicitObjectMemberFunction()) {
+  if (!member_call) {
     return {caller_changed, callee_changed};
   }
-  const bool receiver_mutable = !callee.receiver_writes().empty();
+  if (indexed_receiver_overlap) {
+    const bool receiver_already_storage =
+        call.storage_receiver || argument_requires_storage(*call.receiver);
+    if (!receiver_already_storage && !callee.receiver_requires_storage_) {
+      callee.receiver_requires_storage_ = true;
+      callee_changed = true;
+    }
+  }
+  if (!call.current_receiver) {
+    return {caller_changed, callee_changed};
+  }
   for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
     auto* parameter = parameters[ordinal];
     const auto& argument = call.arguments[ordinal];
-    if (!unit_.typeTraits().is_reference(parameter->type()) ||
+    if (!reference_parameter(parameter) ||
         (!receiver_mutable && !callee.reference_written(parameter))) {
       continue;
     }
-    bool receiver_overlap = false;
-    if (call.current_receiver) {
-      receiver_overlap = argument.current_receiver ||
-                         references_current_receiver_field(argument);
-    } else if (call.receiver) {
-      receiver_overlap = identities_overlap(*call.receiver, argument);
-    }
+    const bool receiver_overlap = argument.current_receiver ||
+                                  references_current_receiver_field(argument);
     if (!receiver_overlap) {
       continue;
     }
 
     select_storage(ordinal);
     const bool receiver_already_storage =
-        call.storage_receiver ||
-        (call.current_receiver
-             ? receiver_requires_storage_
-             : call.receiver && argument_requires_storage(*call.receiver));
+        call.storage_receiver || receiver_requires_storage_;
     if (!receiver_already_storage && !callee.receiver_requires_storage_) {
       callee.receiver_requires_storage_ = true;
       callee_changed = true;
@@ -3519,8 +3569,9 @@ CallPropagation ControlFlow::propagate_overlapping_references(
   return {caller_changed, callee_changed};
 }
 
-CallPropagation ControlFlow::propagate_call(const DirectCall& call,
-                                            ControlFlow& callee) {
+CallPropagation ControlFlow::propagate_call(
+    const DirectCall& call, ControlFlow& callee,
+    iree_arena_allocator_t* scratch_arena) {
   bool caller_changed = propagate_projected_reference_return(call, callee);
   bool callee_changed = false;
   auto parameters = callee.function_->parameters();
@@ -3557,7 +3608,8 @@ CallPropagation ControlFlow::propagate_call(const DirectCall& call,
   }
   caller_changed =
       retain_reference_result_identity(call, callee) || caller_changed;
-  auto overlap_changes = propagate_overlapping_references(call, callee);
+  auto overlap_changes =
+      propagate_overlapping_references(call, callee, scratch_arena);
   caller_changed = overlap_changes.caller_changed || caller_changed;
   callee_changed = overlap_changes.callee_changed || callee_changed;
 

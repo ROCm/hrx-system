@@ -45,6 +45,17 @@
 namespace loom::cxx_import {
 namespace {
 
+struct AnalysisScratch {
+  // Transient wide call-edge indexing reset only when another indexed edge
+  // needs the shared block-pool storage.
+  iree_arena_allocator_t arena;
+
+  explicit AnalysisScratch(iree_arena_block_pool_t* block_pool) {
+    iree_arena_initialize(block_pool, &arena);
+  }
+  ~AnalysisScratch() { iree_arena_deinitialize(&arena); }
+};
+
 std::string_view private_operator_name(cxx::FunctionSymbol* function) {
   auto* operator_id = cxx::name_cast<cxx::OperatorId>(function->name());
   if (!operator_id) {
@@ -394,13 +405,15 @@ void Functions::analyze(Types& types) {
       }
     }
   };
+  AnalysisScratch scratch(module_->arena.block_pool);
   auto propagate_calls = [&] {
     while (!pending_calls.empty()) {
       const size_t index = pending_calls.front();
       pending_calls.pop_front();
       queued[index] = false;
       const auto& edge = analyzed_calls[index];
-      auto changed = edge.caller->propagate_call(*edge.call, *edge.callee);
+      auto changed =
+          edge.caller->propagate_call(*edge.call, *edge.callee, &scratch.arena);
       if (changed.caller_changed) {
         enqueue_incident(edge.caller);
       }
