@@ -45,6 +45,7 @@ iree_hal_amd_gpu_pm4_publish_accepted(
         &invocation->program->resident, invocation->instance,
         queue->options.queue_ordinal, position + 1);
     invocation->published = true;
+    iree_hal_amd_gpu_byte_storage_pool_accept(&queue->values);
   }
   if (submission->signal) {
     iree_hal_amd_gpu_signal_publish_frontier(
@@ -143,6 +144,7 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_kernel(
     }
     kernel->pending.byte_length = 0;
     iree_hal_amd_gpu_byte_storage_pool_rollback(queue->samples);
+    iree_hal_amd_gpu_byte_storage_pool_rollback(&queue->values);
     iree_hal_amd_gpu_pm4_abandon(
         queue, iree_hal_amd_gpu_pm4_retirement_submission(action),
         IREE_HAL_AMD_STATUS_FROM_AMDF(status, "gpu.kernel_queue_submit"));
@@ -404,7 +406,8 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
   const uint64_t sample_length = profile ? (uint64_t)profile->completion.count *
                                                profile->completion.sample_stride
                                          : 0;
-  const uint64_t argument_length = command->argument_length;
+  const uint64_t argument_length =
+      sizeof(iree_hal_amd_gpu_pm4_program_arguments_t);
   iree_hal_amd_gpu_byte_storage_t* arguments = queue->producer.arguments;
   if (argument_length > arguments->capacity) {
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_ARGUMENTS;
@@ -451,6 +454,21 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
                                    ? 0
                                    : program->fixup_count;
   const uint32_t fixup_word_count = fixup_count ? command->fixup_word_count : 0;
+  uint64_t values_offset = 0, values_end = 0;
+  const bool shader_fixup = fixup_count && !fixup_word_count;
+  if (shader_fixup) {
+    const iree_hal_amd_gpu_byte_reservation_t reservation =
+        iree_hal_amd_gpu_byte_storage_pool_reserve(
+            &queue->values, (uint64_t)command->value_count * 8, 8,
+            &values_offset, &values_end);
+    if (reservation != IREE_HAL_AMD_GPU_BYTE_RESERVED) {
+      return reservation == IREE_HAL_AMD_GPU_BYTE_GROW
+                 ? IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_VALUES
+                 : IREE_HAL_AMD_GPU_PM4_PUBLICATION_CAPACITY;
+    }
+  }
+  const uint64_t values_address =
+      shader_fixup ? queue->values.current->address + values_offset : 0;
   const uint32_t program_words = iree_hal_amd_gpu_pm4_program_word_count(
       program, instance, &queue->options.barriers, fixup_count,
       fixup_word_count);
@@ -514,13 +532,23 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
   if (fixup_count) {
     iree_status_t status = iree_hal_amd_gpu_pm4_command_invocation_write(
         invocation, queue->options.queue_ordinal, dispatch_id, continuation,
-        sample_address, upload, fixup_words);
+        sample_address,
+        shader_fixup ? (void*)(queue->values.current->memory.contents.data +
+                               values_offset)
+                     : NULL,
+        fixup_words);
     if (!iree_status_is_ok(status)) {
       iree_hal_amd_gpu_pm4_abandon(queue, submission, status);
       return IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;
     }
   }
   arguments->end = start + argument_length;
+  queue->issued[position & queue->retirement.capacity_mask].consumed_values =
+      values_end;
+  if (values_end) {
+    iree_hal_amd_gpu_byte_storage_pool_commit(&queue->values, values_end,
+                                              queue->kernel != NULL);
+  }
   if (sample_length) {
     profile->completion.samples =
         (void*)(queue->samples->current->memory.contents.data + sample_offset);
@@ -542,8 +570,8 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
                                             scratch_words);
   words = iree_hal_amd_gpu_pm4_program_emit(
       program, instance, command->entry, &queue->options.barriers,
-      arguments->address + offset, (void*)upload, fixup_count, fixup_word_count,
-      fixup_words, root_padding, words);
+      arguments->address + offset, values_address, (void*)upload, fixup_count,
+      fixup_word_count, fixup_words, root_padding, words);
   return iree_hal_amd_gpu_pm4_publish_commit(
       queue, submission, position, &reservation, body_words, entry_words, words,
       after, arguments->end, (iree_hal_amd_gpu_download_t){0}, true);

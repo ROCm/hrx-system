@@ -84,6 +84,8 @@ typedef struct iree_hal_amd_gpu_pm4_retirement_slot_t {
     // Transfer payload prefix reusable after native access and the host copy.
     // Transfer captures always use the pool, leaving inline storage available.
     uint64_t consumed_transfers;
+    // Replay-only value prefix, returned after the consuming native invocation.
+    uint64_t consumed_values;
   };
 } iree_hal_amd_gpu_pm4_retirement_slot_t;
 static_assert(sizeof(iree_hal_amd_gpu_pm4_retirement_slot_t) == 512,
@@ -249,6 +251,8 @@ struct iree_hal_amd_gpu_pm4_queue_t {
   // Fixed host actions and inline captures parallel to native slots.
   // GPU-carried pointers name these actions directly on normal retirement.
   iree_hal_amd_gpu_pm4_retirement_slot_t* issued;
+  // GPU fixup values with initial capacity acquired during queue construction.
+  iree_hal_amd_gpu_byte_storage_pool_t values;
 };
 
 static_assert(

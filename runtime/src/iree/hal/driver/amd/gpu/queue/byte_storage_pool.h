@@ -30,6 +30,12 @@ typedef struct iree_hal_amd_gpu_byte_storage_pool_t {
   uint64_t pending_begin;
 } iree_hal_amd_gpu_byte_storage_pool_t;
 
+// The caller joins acquisition callbacks and last readers before releasing
+// native generations. Also accepts a zeroed owner after failed construction.
+void iree_hal_amd_gpu_byte_storage_pool_deinitialize(
+    iree_hal_amd_gpu_context_t* context,
+    iree_hal_amd_gpu_byte_storage_pool_t* storage);
+
 // Cold setup prepares a power-of-two byte window with the caller's policy.
 // Owner destruction joins native acquisitions and every last-reader return.
 // Native releases use the existing allocation domain.
@@ -49,7 +55,8 @@ typedef enum iree_hal_amd_gpu_byte_reservation_e {
 } iree_hal_amd_gpu_byte_reservation_t;
 
 // Calculates a contiguous reservation without changing publication state.
-// Length and alignment come from the consumer's trusted layout.
+// The initial generation is acquired during cold setup. Length and alignment
+// come from the consumer's trusted layout.
 iree_hal_amd_gpu_byte_reservation_t iree_hal_amd_gpu_byte_storage_pool_reserve(
     iree_hal_amd_gpu_byte_storage_pool_t* storage, uint64_t length,
     uint64_t alignment, uint64_t* out_offset, uint64_t* out_end);

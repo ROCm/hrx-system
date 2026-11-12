@@ -910,6 +910,15 @@ TEST_P(GpuNativeDispatchTest,
         EXPECT_EQ(iree_hal_amd_gpu_aql_execute_argument_length(&invocation),
                   expected_bytes);
         EXPECT_EQ(program->host_template->data_offset, count * 64u);
+      } else {
+        iree_hal_amd_gpu_aql_command_invocation_t invocation = {
+            .program = program,
+        };
+        EXPECT_EQ(iree_hal_amd_gpu_aql_execute_argument_length(&invocation),
+                  sizeof(iree_hal_amd_gpu_aql_program_arguments_t));
+        invocation.block_ordinal = 1;
+        EXPECT_EQ(iree_hal_amd_gpu_aql_execute_argument_length(&invocation),
+                  sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t));
       }
       uint32_t dispatch_index = 0;
       for (uint32_t i = 0; i < program->block_count; ++i) {

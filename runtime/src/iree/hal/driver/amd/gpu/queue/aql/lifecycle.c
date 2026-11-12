@@ -153,6 +153,8 @@ amdf_status_t iree_hal_amd_gpu_aql_queue_shutdown(iree_hal_queue_t* base) {
   iree_hal_amd_gpu_byte_storage_pool_free(queue->context, queue->host_allocator,
                                           queue->samples);
   queue->samples = NULL;
+  iree_hal_amd_gpu_byte_storage_pool_deinitialize(queue->context,
+                                                  &queue->values);
   if (queue->commands) {
     iree_hal_amd_gpu_byte_storage_free(queue->context, queue->commands);
     queue->commands = NULL;

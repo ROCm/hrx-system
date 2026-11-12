@@ -77,8 +77,8 @@ TEST_P(ProgramTest, NativeEntryPublishesItsActualProducers) {
   std::array<uint32_t, 128> words;
   words.fill(0xDEADBEEF);
   auto* end = iree_hal_amd_gpu_pm4_program_emit(
-      &program, &instance, entry, &profile, kArgumentAddress, &arguments,
-      program.fixup_count, fixup_word_count, fixup_words, padding,
+      &program, &instance, entry, &profile, kArgumentAddress, 0x900008,
+      &arguments, program.fixup_count, fixup_word_count, fixup_words, padding,
       words.data());
   ASSERT_EQ(end - words.data(), count + padding);
   ASSERT_LT(count + padding, words.size());
@@ -86,7 +86,7 @@ TEST_P(ProgramTest, NativeEntryPublishesItsActualProducers) {
   if (fixups && !packets) {
     EXPECT_EQ(arguments.fixup.entries,
               program.upload_address + program.fixup_offset);
-    EXPECT_EQ(arguments.fixup.values, kArgumentAddress + sizeof(arguments));
+    EXPECT_EQ(arguments.fixup.values, 0x900008u);
     EXPECT_EQ(arguments.fixup.target, instance.address);
     EXPECT_EQ(arguments.fixup.entry_count, program.fixup_count);
   } else {
@@ -173,7 +173,7 @@ TEST(ProgramReplayTest, PreservedAddressesNeedNoRepairOrReaderJoin) {
     std::array<uint32_t, 13> words;
     words.fill(0xDEADBEEF);
     auto* end = iree_hal_amd_gpu_pm4_program_emit(&program, &instance, entry,
-                                                  &profile, 0, nullptr, 0, 0,
+                                                  &profile, 0, 0, nullptr, 0, 0,
                                                   nullptr, 0, words.data());
     EXPECT_EQ(end - words.data(), iree_hal_amd_gpu_pm4_program_word_count(
                                       &program, &instance, &profile, 0, 0));

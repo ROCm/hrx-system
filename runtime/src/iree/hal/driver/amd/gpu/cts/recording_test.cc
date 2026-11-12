@@ -411,7 +411,6 @@ TEST_P(GpuNativeRecordingSizeTest,
   // One buffer input, plus at most one executable base, serves every dispatch.
   // The same bound holds across native block boundaries in large recordings.
   EXPECT_LE(invocation.program->value_count, 5u);
-  EXPECT_LE(invocation.program->argument_length, 104u);
   EXPECT_EQ(invocation.program->dispatch_count, count);
   EXPECT_FALSE(invocation.program->invariant_fixups);
   EXPECT_LE(invocation.program->entry.word_count, 0xfffffu);
@@ -1428,7 +1427,6 @@ TEST_P(GpuCommandBufferTest, SealedBlockPipelinesWithoutHostReplay) {
   EXPECT_EQ(invocation.program->dispatch_count, 0u);
   EXPECT_EQ(invocation.program->operation_count, GetParam() ? 1u : 0u);
   EXPECT_EQ(invocation.program->value_count, 3u);
-  EXPECT_EQ(invocation.program->argument_length, 88u);
   iree_hal_amd_gpu_pm4_command_invocation_deinitialize(&invocation);
 
   iree_hal_semaphore_t* done = nullptr;

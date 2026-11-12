@@ -18,8 +18,9 @@ namespace {
 
 // Only native backing is substituted. Real captures, native acquisition, and
 // result publication remain under the caller's exclusive publisher ownership.
-class GrowthTest : public ::testing::TestWithParam<
-                       std::tuple<uint64_t, iree_status_code_t>> {
+class GrowthTest
+    : public ::testing::TestWithParam<std::tuple<
+          uint64_t, iree_status_code_t, iree_hal_amd_gpu_aql_entry_kind_t>> {
  protected:
   void SetUp() override {
     native_.user_data = this;
@@ -61,6 +62,7 @@ class GrowthTest : public ::testing::TestWithParam<
     iree_hal_amd_gpu_publisher_initialize(&publisher_);
     growth_.context = &context_;
     growth_.memory = &memory_;
+    growth_.input_memory = &memory_;
     growth_.captures = &captures_;
     growth_.publisher = &publisher_;
     growth_.publication = &publication_;
@@ -133,21 +135,21 @@ class GrowthTest : public ::testing::TestWithParam<
   std::counting_semaphore<> idle_{0};
 };
 
-TEST_P(GrowthTest, CommandAcquisitionReturnsTheCompleteWaitingCohort) {
+TEST_P(GrowthTest, ByteAcquisitionReturnsTheCompleteWaitingCohort) {
+  const auto kind = std::get<2>(GetParam());
   ASSERT_TRUE(iree_hal_amd_gpu_publisher_try_acquire(&publisher_));
   auto* first = Capture();
   auto* last = Capture();
-  IREE_ASSERT_OK(iree_hal_amd_gpu_aql_growth_begin(
-      &growth_, IREE_HAL_AMD_GPU_AQL_ENTRY_COMMANDS, first, 4096));
-  IREE_ASSERT_OK(iree_hal_amd_gpu_aql_growth_begin(
-      &growth_, IREE_HAL_AMD_GPU_AQL_ENTRY_COMMANDS, last, 4096));
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_aql_growth_begin(&growth_, kind, first, 4096));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_aql_growth_begin(&growth_, kind, last, 4096));
   iree_hal_amd_gpu_context_join_memory(&context_);
   EXPECT_EQ(native_.create_count, 1);
   auto* entry = iree_hal_amd_gpu_publisher_next(&publisher_);
   ASSERT_NE(entry, nullptr);
   auto* result_entry =
       iree_containerof(entry, iree_hal_amd_gpu_aql_entry_t, publication);
-  EXPECT_EQ(result_entry->kind, IREE_HAL_AMD_GPU_AQL_ENTRY_COMMANDS);
+  EXPECT_EQ(result_entry->kind, kind);
   iree_hal_amd_gpu_aql_growth_result_t result;
   const auto expected = std::get<1>(GetParam());
   IREE_EXPECT_STATUS_IS(
@@ -180,8 +182,15 @@ TEST_P(GrowthTest, CommandAcquisitionReturnsTheCompleteWaitingCohort) {
 INSTANTIATE_TEST_SUITE_P(
     NativeResults, GrowthTest,
     ::testing::Values(
-        std::make_tuple((UINT64_C(1) << 48) - 4096, IREE_STATUS_OK),
-        std::make_tuple((UINT64_C(1) << 48) - 4088, IREE_STATUS_OUT_OF_RANGE),
-        std::make_tuple(UINT64_C(0x10000), IREE_STATUS_RESOURCE_EXHAUSTED)));
+        std::make_tuple((UINT64_C(1) << 48) - 4096, IREE_STATUS_OK,
+                        IREE_HAL_AMD_GPU_AQL_ENTRY_COMMANDS),
+        std::make_tuple((UINT64_C(1) << 48) - 4088, IREE_STATUS_OUT_OF_RANGE,
+                        IREE_HAL_AMD_GPU_AQL_ENTRY_COMMANDS),
+        std::make_tuple(UINT64_C(0x10000), IREE_STATUS_RESOURCE_EXHAUSTED,
+                        IREE_HAL_AMD_GPU_AQL_ENTRY_COMMANDS),
+        std::make_tuple((UINT64_C(1) << 48) - 4088, IREE_STATUS_OK,
+                        IREE_HAL_AMD_GPU_AQL_ENTRY_VALUES),
+        std::make_tuple(UINT64_C(0x10000), IREE_STATUS_RESOURCE_EXHAUSTED,
+                        IREE_HAL_AMD_GPU_AQL_ENTRY_VALUES)));
 
 }  // namespace

@@ -348,9 +348,6 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_end(
   }
   buffer->program->value_count =
       buffer->inputs.count + iree_hal_amd_gpu_pm4_command_first_input(buffer);
-  buffer->program->argument_length =
-      sizeof(iree_hal_amd_gpu_pm4_program_arguments_t) +
-      buffer->program->value_count * 8;
   iree_hal_amd_gpu_command_inputs_seal(&buffer->inputs);
   iree_status_t status =
       iree_hal_amd_gpu_pm4_command_seal(buffer, (uint32_t)length);
@@ -1085,14 +1082,14 @@ void iree_hal_amd_gpu_pm4_command_invocation_deinitialize(
 iree_status_t iree_hal_amd_gpu_pm4_command_invocation_write(
     const iree_hal_amd_gpu_pm4_command_invocation_t* invocation,
     uint32_t queue_ordinal, uint64_t dispatch_id, uint64_t continuation,
-    uint64_t profile_address, void* upload, uint32_t* out_fixup_words) {
+    uint64_t profile_address, uint64_t* values, uint32_t* out_fixup_words) {
   const iree_hal_amd_gpu_pm4_command_buffer_t* buffer =
       (const void*)invocation->command_buffer;
   uint64_t local_values[IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_VALUE_CAPACITY];
   const bool packets = buffer->program->fixup_word_count != 0;
-  uint64_t* values =
-      packets ? local_values
-              : (void*)((iree_hal_amd_gpu_pm4_program_arguments_t*)upload + 1);
+  if (packets) {
+    values = local_values;
+  }
   values[IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE] = invocation->instance->address;
   values[IREE_HAL_AMD_GPU_PM4_VALUE_DISPATCH_ID] = dispatch_id;
   values[IREE_HAL_AMD_GPU_PM4_VALUE_CONTINUATION] = continuation;

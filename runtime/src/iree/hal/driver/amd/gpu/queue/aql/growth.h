@@ -26,6 +26,8 @@ typedef struct iree_hal_amd_gpu_aql_growth_context_t {
   const iree_hal_amd_fabric_memory_options_t* memory;
   // Borrowed read/write transfer policy, independent of native control.
   const iree_hal_amd_fabric_memory_options_t* transfer_memory;
+  // Borrowed CPU-write/shader-read replay value policy.
+  const iree_hal_amd_fabric_memory_options_t* input_memory;
   // Reusable cold request records.
   iree_hal_amd_gpu_capture_pool_t* captures;
   // Exact queue publication ownership and ready FIFO.
@@ -48,6 +50,8 @@ typedef struct iree_hal_amd_gpu_aql_growth_context_t {
   iree_hal_amd_gpu_aql_growth_t* transfers;
   // Coalesced profiling sample acquisition or NULL.
   iree_hal_amd_gpu_aql_growth_t* samples;
+  // Coalesced replay value-table acquisition or NULL.
+  iree_hal_amd_gpu_aql_growth_t* values;
   // Coalesced first indirect-command allocation or NULL.
   iree_hal_amd_gpu_aql_growth_t* commands;
   // Coalesced signal acquisition or NULL.

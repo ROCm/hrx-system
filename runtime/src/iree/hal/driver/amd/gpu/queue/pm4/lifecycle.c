@@ -169,6 +169,8 @@ static amdf_status_t iree_hal_amd_gpu_pm4_cleanup(
   iree_hal_amd_gpu_byte_storage_pool_free(queue->context, queue->host_allocator,
                                           queue->samples);
   queue->samples = NULL;
+  iree_hal_amd_gpu_byte_storage_pool_deinitialize(queue->context,
+                                                  &queue->values);
   if (queue->packets) {
     iree_hal_amd_gpu_byte_storage_free(queue->context, queue->packets);
     queue->packets = NULL;

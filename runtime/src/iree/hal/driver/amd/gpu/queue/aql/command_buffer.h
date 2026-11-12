@@ -148,14 +148,15 @@ void iree_hal_amd_gpu_aql_command_invocation_deinitialize(
 
 // Resolves unique input values once after upload address commitment. A bounded
 // host template is patched in host_contents and only its private-data suffix is
-// copied to upload; resident programs receive a dense native fixup value table.
+// copied to upload; resident programs write their separate dense values
+// mapping. values is NULL when the resident instance needs no fixups.
 // host_contents has HOST_TEMPLATE_MAX_BYTES bytes for a mutable host template
 // and is NULL for a resident program. Its caller keeps it through publication.
 // The publisher borrows zero-fixup host templates directly and omits this call.
 iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
     const iree_hal_amd_gpu_aql_command_invocation_t* invocation,
     uint32_t queue_ordinal, uint64_t upload_address, void* upload,
-    void* host_contents);
+    void* host_contents, uint64_t* values);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -179,6 +179,8 @@ class GrowthTest : public ::testing::Test {
     memory_.profile.allocation.maximum_byte_length = UINT32_MAX;
     transfer_memory_ = memory_;
     transfer_memory_.profile.ordinal = 1;
+    input_memory_ = memory_;
+    input_memory_.profile.ordinal = 2;
     scratch_memory_ = memory_;
     scratch_memory_.host_access = 0;
     iree_hal_amd_gpu_capture_pool_initialize(4096, iree_allocator_system(),
@@ -188,6 +190,7 @@ class GrowthTest : public ::testing::Test {
     growth_.context = &context_;
     growth_.memory = &memory_;
     growth_.transfer_memory = &transfer_memory_;
+    growth_.input_memory = &input_memory_;
     growth_.scratch_memory = &scratch_memory_;
     growth_.scratch_profile = &scratch_profile_;
     growth_.captures = &captures_;
@@ -341,6 +344,11 @@ class GrowthTest : public ::testing::Test {
       } else if (entry->kind >= IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS) {
         const bool transfer =
             entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_TRANSFERS;
+        const uint32_t profile_ordinal =
+            transfer ? transfer_memory_.profile.ordinal
+            : entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_VALUES
+                ? input_memory_.profile.ordinal
+                : memory_.profile.ordinal;
         iree_hal_amd_gpu_pm4_growth_result_t result;
         iree::Status status =
             iree_hal_amd_gpu_pm4_growth_end(entry, 123456, &result);
@@ -351,9 +359,7 @@ class GrowthTest : public ::testing::Test {
             EXPECT_EQ(result.bytes->capacity, 4096u);
             const auto* memory =
                 reinterpret_cast<const Memory*>(result.bytes->memory.handle);
-            EXPECT_EQ(memory->profile_ordinal,
-                      transfer ? transfer_memory_.profile.ordinal
-                               : memory_.profile.ordinal);
+            EXPECT_EQ(memory->profile_ordinal, profile_ordinal);
             iree_hal_amd_gpu_byte_storage_free(&context_, result.bytes);
           }
           if (result.signals) {
@@ -481,6 +487,8 @@ class GrowthTest : public ::testing::Test {
   iree_hal_amd_fabric_memory_options_t memory_ = {};
   // Independent profile selected for host transfer payloads.
   iree_hal_amd_fabric_memory_options_t transfer_memory_ = {};
+  // Independent cached profile for shader-read replay values.
+  iree_hal_amd_fabric_memory_options_t input_memory_ = {};
   // Physical scratch policy with no host mapping request.
   iree_hal_amd_fabric_memory_options_t scratch_memory_ = {};
   // Two native shader engines, each with 32 resident wave slots.
@@ -577,6 +585,8 @@ class ProgramGrowthTest : public GrowthTest {
                                      AMDF_MEMORY_FLAG_DEVICE_LOCAL;
           profile->host_mapping.supported_access =
               AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
+          profile->host_mapping.properties =
+              AMDF_HOST_MEMORY_PROPERTY_WRITE_BACK;
           profile->allocation.minimum_alignment = 256;
           profile->allocation.byte_length_granularity = 256;
           profile->allocation.maximum_byte_length = UINT32_MAX;
@@ -585,6 +595,7 @@ class ProgramGrowthTest : public GrowthTest {
     api_.memory_scope_query_pair_info =
         [](amdf_memory_scope_t*, const amdf_memory_profile_pair_query_t*,
            amdf_memory_pair_info_t* pair) {
+          pair->flags = AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE;
           pair->release.kind = AMDF_CACHE_TRANSITION_KIND_NONE;
           pair->acquire.kind = AMDF_CACHE_TRANSITION_KIND_NONE;
           return AMDF_STATUS_OK;
@@ -814,6 +825,7 @@ TEST_F(GrowthTest, ByteOwnersHaveIndependentNativeResults) {
   const std::array kinds = {IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS,
                             IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_TRANSFERS,
                             IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SAMPLES,
+                            IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_VALUES,
                             IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_PACKETS};
   for (auto kind : kinds) {
     for (auto other : kinds) {
@@ -830,7 +842,8 @@ TEST_F(GrowthTest, ByteOwnersHaveIndependentNativeResults) {
       Park(other);
       Park(other);
       const std::array owners = {growth_.arguments, growth_.transfers,
-                                 growth_.samples, growth_.packets};
+                                 growth_.samples, growth_.values,
+                                 growth_.packets};
       for (size_t i = 0; i < kinds.size(); ++i) {
         EXPECT_EQ(owners[i] != nullptr, kinds[i] == kind || kinds[i] == other);
       }
@@ -848,6 +861,7 @@ TEST_F(GrowthTest, ByteOwnersHaveIndependentNativeResults) {
       EXPECT_EQ(growth_.arguments, nullptr);
       EXPECT_EQ(growth_.transfers, nullptr);
       EXPECT_EQ(growth_.samples, nullptr);
+      EXPECT_EQ(growth_.values, nullptr);
       EXPECT_EQ(growth_.packets, nullptr);
       EXPECT_EQ(live_, 0u);
     }

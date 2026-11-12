@@ -31,14 +31,23 @@ void iree_hal_amd_gpu_byte_storage_pool_free(
   if (!storage) {
     return;
   }
-  storage->current->next = storage->retired;
+  iree_hal_amd_gpu_byte_storage_pool_deinitialize(context, storage);
+  iree_allocator_free(host_allocator, storage);
+}
+
+void iree_hal_amd_gpu_byte_storage_pool_deinitialize(
+    iree_hal_amd_gpu_context_t* context,
+    iree_hal_amd_gpu_byte_storage_pool_t* storage) {
+  if (storage->current) {
+    storage->current->next = storage->retired;
+  }
   for (iree_hal_amd_gpu_byte_storage_t* generation = storage->current;
        generation;) {
     iree_hal_amd_gpu_byte_storage_t* next = generation->next;
     iree_hal_amd_gpu_byte_storage_free(context, generation);
     generation = next;
   }
-  iree_allocator_free(host_allocator, storage);
+  *storage = (iree_hal_amd_gpu_byte_storage_pool_t){0};
 }
 
 iree_hal_amd_gpu_byte_reservation_t iree_hal_amd_gpu_byte_storage_pool_reserve(

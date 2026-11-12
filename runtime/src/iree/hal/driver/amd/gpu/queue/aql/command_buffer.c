@@ -902,7 +902,7 @@ iree_hal_amd_gpu_aql_command_invocation_write_host(
 iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
     const iree_hal_amd_gpu_aql_command_invocation_t* invocation,
     uint32_t queue_ordinal, uint64_t upload_address, void* upload,
-    void* host_contents) {
+    void* host_contents, uint64_t* values) {
   const iree_hal_amd_gpu_aql_command_buffer_t* buffer =
       (const void*)invocation->command_buffer;
   const iree_hal_amd_gpu_aql_command_program_t* program = invocation->program;
@@ -922,13 +922,10 @@ iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
     return iree_hal_amd_gpu_aql_command_invocation_write_host(
         invocation, queue_ordinal, upload_address, upload, host_contents);
   }
-  const uint64_t values_offset =
-      sizeof(iree_hal_amd_gpu_aql_program_arguments_t) +
-      (program->profile
-           ? sizeof(iree_hal_amd_gpu_aql_materialize_profile_arguments_t) -
-                 sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t)
-           : 0);
-  uint64_t* values = (void*)((uint8_t*)upload + values_offset);
+  // An already repaired immutable instance needs no value table.
+  if (!values) {
+    return iree_ok_status();
+  }
   values[0] = address;
   return iree_hal_amd_gpu_command_inputs_write(
       &buffer->inputs, invocation->bindings, queue_ordinal, values + 1);

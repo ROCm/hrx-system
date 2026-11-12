@@ -183,6 +183,7 @@ static void iree_hal_amd_gpu_pm4_trim_generations(
 static void iree_hal_amd_gpu_pm4_trim_storage(
     iree_hal_amd_gpu_pm4_queue_t* queue) {
   iree_hal_amd_gpu_byte_storage_pool_trim(queue->context, queue->samples);
+  iree_hal_amd_gpu_byte_storage_pool_trim(queue->context, &queue->values);
   iree_hal_amd_gpu_capture_pool_trim(&queue->captures);
   iree_hal_amd_gpu_pm4_trim_generations(
       queue->context,
@@ -341,6 +342,7 @@ static iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish(
       }
       queue->kernel->pending.byte_length = 0;
       iree_hal_amd_gpu_byte_storage_pool_rollback(queue->samples);
+      iree_hal_amd_gpu_byte_storage_pool_rollback(&queue->values);
     }
     iree_hal_amd_gpu_pm4_abandon(queue, submission, failure);
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;
@@ -793,7 +795,7 @@ iree_hal_amd_gpu_pm4_process_submission(
     kind = IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS;
     uint64_t required = 0;
     if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_EXECUTE) {
-      required = submission->execute.program->argument_length;
+      required = sizeof(iree_hal_amd_gpu_pm4_program_arguments_t);
     } else if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_CONTROL) {
       required = sizeof(iree_hal_amd_gpu_control_program_arguments_t);
     } else {
@@ -806,6 +808,12 @@ iree_hal_amd_gpu_pm4_process_submission(
     while (capacity < required) {
       capacity *= 2;
     }
+  } else if (result == IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_VALUES) {
+    kind = IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_VALUES;
+    capacity =
+        iree_max((uint64_t)queue->options.argument_capacity,
+                 iree_math_round_up_to_pow2_u64(
+                     (uint64_t)submission->execute.program->value_count * 8));
   } else if (result == IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_SAMPLES) {
     kind = IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SAMPLES;
     const iree_hal_amd_gpu_profile_operation_t* profile =
@@ -941,9 +949,11 @@ iree_hal_amd_gpu_pm4_process_entry(iree_hal_amd_gpu_pm4_queue_t* queue,
     const bool transfers =
         entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_TRANSFERS;
     const bool samples = entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SAMPLES;
+    const bool values = entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_VALUES;
     const bool packets = entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_PACKETS;
     iree_hal_amd_gpu_byte_storage_t** current =
         packets     ? &queue->packets
+        : values    ? &queue->values.current
         : samples   ? &queue->samples->current
         : transfers ? &queue->producer.transfers.current
                     : &queue->producer.arguments;
@@ -959,10 +969,11 @@ iree_hal_amd_gpu_pm4_process_entry(iree_hal_amd_gpu_pm4_queue_t* queue,
     if (iree_status_is_ok(status)) {
       if (result.bytes && packets) {
         queue->packets = result.bytes;
-      } else if (result.bytes && samples) {
-        iree_hal_amd_gpu_byte_storage_pool_install(queue->samples,
-                                                   result.bytes);
-        iree_hal_amd_gpu_byte_storage_pool_trim(queue->context, queue->samples);
+      } else if (result.bytes && (samples || values)) {
+        iree_hal_amd_gpu_byte_storage_pool_t* storage =
+            values ? &queue->values : queue->samples;
+        iree_hal_amd_gpu_byte_storage_pool_install(storage, result.bytes);
+        iree_hal_amd_gpu_byte_storage_pool_trim(queue->context, storage);
       } else if (result.bytes) {
         if (*current) {
           if (*last) {
@@ -1273,6 +1284,12 @@ static bool iree_hal_amd_gpu_pm4_retire(
           queue->issued[position & queue->retirement.capacity_mask]
               .consumed_transfers,
           iree_memory_order_release);
+    }
+    if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_EXECUTE) {
+      iree_hal_amd_gpu_byte_storage_pool_retire(
+          &queue->values,
+          queue->issued[position & queue->retirement.capacity_mask]
+              .consumed_values);
     }
     IREE_TRACE_ZONE_BEGIN_NAMED(z0, "iree_hal_amd_gpu_pm4_retire");
     if (terminal) {
@@ -1792,6 +1809,10 @@ static iree_status_t iree_hal_amd_gpu_pm4_prepare_native(
       control_address, queue->options.retirement_capacity, &queue->retirement);
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_prepare_arguments(
       queue, queue->options.argument_capacity));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_byte_storage_allocate(
+      queue->context, &queue->options.programs->inputs.options,
+      queue->options.argument_capacity, 0, queue->host_allocator,
+      &queue->values.current));
   return iree_hal_amd_gpu_pm4_prepare_signals(queue);
 }
 
@@ -1957,6 +1978,7 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_create(
       .context = context,
       .memory = options->memory,
       .transfer_memory = options->transfer_memory,
+      .input_memory = &options->programs->inputs.options,
       .scratch_memory = options->scratch_memory,
       .scratch_profile = &queue->producer.scratch.profile,
       .captures = &queue->captures,

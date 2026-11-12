@@ -46,8 +46,6 @@ typedef struct iree_hal_amd_gpu_pm4_command_program_t {
   iree_hal_amd_gpu_pm4_program_block_t entry;
   // Dense uint64_t inputs resolved once per invocation.
   uint32_t value_count;
-  // Complete invocation upload: copy/fixup kernargs followed by input values.
-  uint32_t argument_length;
   // Bounded confirmed-write extent, or zero for the shader fixup path.
   uint16_t fixup_word_count;
   // Recording excludes changing native inputs and invocation-private writes;
@@ -108,13 +106,13 @@ void iree_hal_amd_gpu_pm4_command_invocation_deinitialize(
     iree_hal_amd_gpu_pm4_command_invocation_t* invocation);
 
 // Resolves the dense input vector after dependencies commit backing addresses.
-// The shader path writes following program_arguments_t. A bounded packet plan
-// instead keeps values on the CPU and fills out_fixup_words; it never reads
-// the upload mapping. Program emission fills the upload header.
+// The shader path writes its separate values mapping. A bounded packet plan
+// keeps values on the CPU and fills out_fixup_words; its values mapping is
+// NULL. Program emission independently fills actual builtin ABI arguments.
 iree_status_t iree_hal_amd_gpu_pm4_command_invocation_write(
     const iree_hal_amd_gpu_pm4_command_invocation_t* invocation,
     uint32_t queue_ordinal, uint64_t dispatch_id, uint64_t continuation,
-    uint64_t profile_address, void* upload, uint32_t* out_fixup_words);
+    uint64_t profile_address, uint64_t* values, uint32_t* out_fixup_words);
 
 #ifdef __cplusplus
 }  // extern "C"

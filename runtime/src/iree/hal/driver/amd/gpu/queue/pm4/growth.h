@@ -30,6 +30,8 @@ typedef struct iree_hal_amd_gpu_pm4_growth_context_t {
   const iree_hal_amd_fabric_memory_options_t* memory;
   // Borrowed read/write transfer policy, independent of native control.
   const iree_hal_amd_fabric_memory_options_t* transfer_memory;
+  // Borrowed CPU-write/shader-read replay value policy.
+  const iree_hal_amd_fabric_memory_options_t* input_memory;
   // Borrowed physical-local read/write scratch policy, with no host mapping.
   const iree_hal_amd_fabric_memory_options_t* scratch_memory;
   // Borrowed exact publisher's immutable scratch slot geometry.
@@ -63,6 +65,8 @@ typedef struct iree_hal_amd_gpu_pm4_growth_context_t {
   iree_hal_amd_gpu_pm4_growth_t* transfers;
   // Coalesced profiling sample acquisition or NULL.
   iree_hal_amd_gpu_pm4_growth_t* samples;
+  // Coalesced replay value-table acquisition or NULL.
+  iree_hal_amd_gpu_pm4_growth_t* values;
   // One coalesced dispatch-packet backing acquisition, or NULL.
   iree_hal_amd_gpu_pm4_growth_t* packets;
   // One coalesced signal acquisition, or NULL without pending growth.

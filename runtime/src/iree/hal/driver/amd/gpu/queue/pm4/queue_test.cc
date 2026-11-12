@@ -275,6 +275,7 @@ class KernelQueueTest : public MemoryBackendTest {
     };
 
     transfer_memory_ = memory_;
+    programs_.inputs.options = memory_;
     for (uint32_t i = 0; i < queues_.size(); ++i) {
       iree_hal_amd_gpu_signal_cache_initialize(&publication_, i, &signals_[i]);
       const iree_hal_amd_gpu_pm4_queue_options_t options = {
@@ -286,6 +287,7 @@ class KernelQueueTest : public MemoryBackendTest {
           .command_byte_capacity = 4096,
           .memory = &memory_,
           .transfer_memory = &transfer_memory_,
+          .programs = &programs_,
           .publication = &publication_,
           .barriers = barrier_profile_,
           .retirement_capacity = 4,
@@ -502,6 +504,8 @@ class KernelQueueTest : public MemoryBackendTest {
   iree_hal_amd_fabric_memory_options_t memory_ = {};
   // Independent explicit-payload policy, borrowed through native retirement.
   iree_hal_amd_fabric_memory_options_t transfer_memory_ = {};
+  // Borrowed input policy; these control-only queues execute no builtin shader.
+  iree_hal_amd_gpu_pm4_program_pool_t programs_ = {};
   // Production typed publisher, started for synchronous metadata installation.
   iree_hal_amd_gpu_publication_t publication_ = {};
   // Existing native retirement ownership and scope synchronization.
