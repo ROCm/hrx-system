@@ -11,35 +11,11 @@
 #include "common/graph.h"
 #include "common/stream.h"
 #include "common/stream_queue.h"
-#include "iree/base/internal/math.h"
 #include "libhrx/src/libhrx/runtime.h"
 
 //===----------------------------------------------------------------------===//
 // Event management
 //===----------------------------------------------------------------------===//
-
-iree_hal_streaming_timestamp_domain_t iree_hal_streaming_query_timestamp_domain(
-    const iree_hal_queue_family_spec_t* family) {
-  const iree_hal_streaming_timestamp_domain_t none = {0};
-  if (!family) {
-    return none;
-  }
-  // Every context record uses a queue from this family. Unrelated compute or
-  // transfer families need not share its clock, but this family must identify
-  // one physical device so all of its records can be compared.
-  if (iree_math_count_ones_u64(family->physical_device_affinity) != 1) {
-    return none;
-  }
-  if (family->timestamp_frequency_hz == 0 ||
-      family->timestamp_valid_bits == 0 || family->timestamp_valid_bits > 64) {
-    return none;
-  }
-  const iree_hal_streaming_timestamp_domain_t domain = {
-      .frequency_hz = family->timestamp_frequency_hz,
-      .valid_bits = family->timestamp_valid_bits,
-  };
-  return domain;
-}
 
 iree_status_t iree_hal_streaming_event_create(
     iree_hal_streaming_context_t* context,
@@ -124,7 +100,7 @@ void iree_hal_streaming_event_acquire_recorded_point(
   iree_slim_mutex_lock(&event->mutex);
   *out_point = event->recorded_point;
   iree_hal_semaphore_retain(out_point->semaphore);
-  iree_hal_streaming_event_timestamp_slot_retain(out_point->timestamp_slot);
+  hrx_event_timestamp_slot_retain(out_point->timestamp_slot);
   iree_slim_mutex_unlock(&event->mutex);
 }
 
@@ -133,8 +109,8 @@ void iree_hal_streaming_event_release_recorded_point(
   // Released before the semaphore: the slot's retirement condition is the
   // point's own semaphore payload, so the pool reads it while this reference
   // still holds the semaphore up.
-  iree_hal_streaming_event_timestamp_slot_release(
-      point->timestamp_slot, point->semaphore, point->value);
+  hrx_event_timestamp_slot_release(point->timestamp_slot, point->semaphore,
+                                   point->value);
   iree_hal_semaphore_release(point->semaphore);
   *point = (iree_hal_streaming_recorded_point_t){0};
 }
@@ -446,10 +422,10 @@ iree_status_t iree_hal_streaming_event_enqueue_record(
       context->timestamp_domain.frequency_hz != 0 &&
       !(event->flags & IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING);
 
-  iree_hal_streaming_event_timestamp_slot_t* slot = NULL;
+  hrx_event_timestamp_slot_t* slot = NULL;
   if (captures_tick) {
-    IREE_RETURN_IF_ERROR(iree_hal_streaming_event_timestamp_pool_acquire(
-        &context->timestamp_pool, &slot));
+    IREE_RETURN_IF_ERROR(
+        hrx_event_timestamp_pool_acquire(&context->timestamp_pool, &slot));
   }
 
   // An untimed event publishes only its semaphore timepoint. Explicitly empty
@@ -462,11 +438,11 @@ iree_status_t iree_hal_streaming_event_enqueue_record(
       &empty_barrier_list,
   };
   const iree_status_t status =
-      slot ? iree_hal_queue_timestamp(
-                 queue, wait_semaphores, signal_semaphores,
-                 iree_hal_streaming_event_timestamp_slot_buffer(slot),
-                 iree_hal_streaming_event_timestamp_slot_offset(slot),
-                 /*barriers=*/NULL, IREE_HAL_TIMESTAMP_FLAG_NONE)
+      slot ? iree_hal_queue_timestamp(queue, wait_semaphores, signal_semaphores,
+                                      hrx_event_timestamp_slot_buffer(slot),
+                                      hrx_event_timestamp_slot_offset(slot),
+                                      /*barriers=*/NULL,
+                                      IREE_HAL_TIMESTAMP_FLAG_NONE)
            : iree_hal_queue_barrier(queue, wait_semaphores, signal_semaphores,
                                     &empty_barriers,
                                     IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
@@ -474,7 +450,7 @@ iree_status_t iree_hal_streaming_event_enqueue_record(
     // A rejected enqueue leaves no write outstanding against the slot, which
     // only this path can say; every other release names the point's own
     // retirement condition.
-    iree_hal_streaming_event_timestamp_slot_release(slot, NULL, 0);
+    hrx_event_timestamp_slot_release(slot, NULL, 0);
     return status;
   }
 
@@ -642,50 +618,26 @@ iree_status_t iree_hal_streaming_event_synchronize(
   return status;
 }
 
-float iree_hal_streaming_timestamp_domain_elapsed_ms(
-    iree_hal_streaming_timestamp_domain_t domain, uint64_t start_tick,
-    uint64_t stop_tick) {
-  const uint64_t mask = domain.valid_bits == 64
-                            ? UINT64_MAX
-                            : ((1ull << domain.valid_bits) - 1ull);
-  const uint64_t delta = (stop_tick - start_tick) & mask;
-  // The counter's top bit, derived from the mask so it is defined at every
-  // width the domain can carry, including none: there the mask takes the pair
-  // to zero, which sits below this.
-  const uint64_t sign_bit = (mask >> 1) + 1ull;
-  // Formed as a double because the scaling below is floating point and the
-  // result is a float. The offset itself fits int64_t at every width the
-  // domain can carry: for delta >= sign_bit, mask - delta is at most
-  // INT64_MAX, so -(mask - delta) - 1 bottoms out at exactly INT64_MIN.
-  const double signed_delta =
-      delta >= sign_bit ? -(double)(mask - delta) - 1.0 : (double)delta;
-  return (float)(signed_delta * 1000.0 / (double)domain.frequency_hz);
-}
-
 // Reads the ticks the reached records |start_point| and |stop_point| captured
 // and converts the interval between them with |domain|, writing |*out_ms| only
 // when both reads succeed. Both points must name a tick slot, which the caller
 // establishes before querying either record.
 static iree_status_t iree_hal_streaming_recorded_point_pair_elapsed_ms(
-    iree_hal_streaming_timestamp_domain_t domain,
+    hrx_event_timestamp_domain_t domain,
     const iree_hal_streaming_recorded_point_t* start_point,
     const iree_hal_streaming_recorded_point_t* stop_point, float* out_ms) {
   uint64_t start_tick = 0;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_buffer_map_read(iree_hal_streaming_event_timestamp_slot_buffer(
-                                   start_point->timestamp_slot),
-                               iree_hal_streaming_event_timestamp_slot_offset(
-                                   start_point->timestamp_slot),
-                               &start_tick, sizeof(start_tick)));
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_map_read(
+      hrx_event_timestamp_slot_buffer(start_point->timestamp_slot),
+      hrx_event_timestamp_slot_offset(start_point->timestamp_slot), &start_tick,
+      sizeof(start_tick)));
   uint64_t stop_tick = 0;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_buffer_map_read(iree_hal_streaming_event_timestamp_slot_buffer(
-                                   stop_point->timestamp_slot),
-                               iree_hal_streaming_event_timestamp_slot_offset(
-                                   stop_point->timestamp_slot),
-                               &stop_tick, sizeof(stop_tick)));
-  *out_ms = iree_hal_streaming_timestamp_domain_elapsed_ms(domain, start_tick,
-                                                           stop_tick);
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_map_read(
+      hrx_event_timestamp_slot_buffer(stop_point->timestamp_slot),
+      hrx_event_timestamp_slot_offset(stop_point->timestamp_slot), &stop_tick,
+      sizeof(stop_tick)));
+  *out_ms =
+      hrx_event_timestamp_domain_elapsed_ms(domain, start_tick, stop_tick);
   return iree_ok_status();
 }
 

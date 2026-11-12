@@ -28,6 +28,7 @@ HRX_SRCS = [
     "device.c",
     "device_group.c",
     "event.c",
+    "event_timestamp.c",
     "executable.c",
     "fence.c",
     "graph.c",
@@ -53,6 +54,7 @@ HRX_HDRS = [
     "buffer_table.h",
     "device.h",
     "device_group.h",
+    "event_timestamp.h",
     "hrx_internal.h",
     "mem_pool.h",
     "mem_pool_backing.h",
@@ -153,6 +155,19 @@ hrx_cc_shared_library(
     ] + HRX_AMDGPU_COPTS + HRX_SHARED_VISIBILITY_COPTS,
     includes = HRX_INCLUDES,
     deps = HRX_DEPS,
+)
+
+hrx_cc_test(
+    name = "event_timestamp_test",
+    srcs = ["event_timestamp_test.cc"],
+    deps = [
+        ":hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/memory:heap_pool",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )
 
 hrx_cc_test(

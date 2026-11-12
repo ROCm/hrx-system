@@ -96,7 +96,6 @@ hrx_cc_library(
         "device.c",
         "direct_transfer.c",
         "event.c",
-        "event_timestamp_pool.c",
         "fat_binary.c",
         "graph.c",
         "graph_analysis.c",
@@ -124,7 +123,6 @@ hrx_cc_library(
         "device.h",
         "direct_transfer.h",
         "event.h",
-        "event_timestamp_pool.h",
         "fat_binary.h",
         "graph.h",
         "graph_memory.h",
@@ -387,20 +385,6 @@ hrx_cc_test(
     deps = [
         ":common",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-hrx_cc_test(
-    name = "event_timestamp_pool_test",
-    srcs = ["event_timestamp_pool_test.cc"],
-    deps = [
-        ":common",
-        "//libhrx/src/libhrx:hrx_static",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/memory:heap_pool",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
