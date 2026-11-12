@@ -172,20 +172,6 @@ static bool loom_spirv_source_vector_carrier_supported(
              source_type);
 }
 
-static bool loom_spirv_source_function_vector_carrier_supported(
-    void* user_data, const loom_target_facts_t* target_facts,
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    loom_value_id_t value_id, loom_type_t source_type) {
-  (void)user_data;
-  (void)target_facts;
-  (void)module;
-  (void)fact_table;
-  (void)value_id;
-  (void)source_type;
-  // Callable imports and exits have no vector ABI, including matrix fragments.
-  return false;
-}
-
 static iree_status_t loom_spirv_map_type(void* user_data,
                                          loom_low_lower_context_t* context,
                                          const loom_op_t* source_op,
@@ -251,9 +237,6 @@ static iree_status_t loom_spirv_map_value(void* user_data,
     }
   }
   if (loom_type_is_vector(source_type)) {
-    if (loom_low_lower_source_op_is_callable_exit(context, source_op)) {
-      return iree_ok_status();
-    }
     loom_vector_fragment_fact_t fragment = {0};
     const loom_value_fact_table_t* fact_table =
         loom_low_lower_context_fact_table(context);
@@ -355,10 +338,6 @@ static iree_status_t loom_spirv_map_argument(
     };
     return iree_ok_status();
   }
-  if (loom_type_is_vector(source_type)) {
-    return iree_ok_status();
-  }
-
   *out_argument = (loom_low_lower_abi_argument_t){
       .kind = LOOM_LOW_LOWER_ABI_ARGUMENT_DIRECT,
       .abi_type = loom_type_none(),
@@ -370,8 +349,9 @@ static iree_status_t loom_spirv_map_argument(
     return loom_spirv_map_index_value(context, source_argument_id,
                                       &out_argument->abi_type);
   }
-  return loom_spirv_map_type(user_data, context, source_function_op,
-                             source_type, &out_argument->abi_type);
+  return loom_spirv_map_value(user_data, context, source_function_op,
+                              source_argument_id, source_type,
+                              &out_argument->abi_type);
 }
 
 static iree_status_t loom_spirv_map_abi_layout(
@@ -576,8 +556,7 @@ static const loom_low_lower_policy_t kSpirvLowLowerPolicy = {
     .source_vector_carrier_supported =
         {.fn = loom_spirv_source_vector_carrier_supported, .user_data = NULL},
     .source_function_vector_carrier_supported =
-        {.fn = loom_spirv_source_function_vector_carrier_supported,
-         .user_data = NULL},
+        {.fn = loom_spirv_source_vector_carrier_supported, .user_data = NULL},
     .map_abi_layout = {.fn = loom_spirv_map_abi_layout, .user_data = NULL},
     .map_type = {.fn = loom_spirv_map_type, .user_data = NULL},
     .map_value = {.fn = loom_spirv_map_value, .user_data = NULL},

@@ -11,6 +11,7 @@
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/target/arch/spirv/call_boundary.h"
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
 #include "loom/target/arch/spirv/features.h"
 #include "loom/target/arch/spirv/value_types.h"
@@ -507,6 +508,18 @@ static iree_status_t loom_spirv_legalize_bfloat_collective(
 }
 
 static const loom_target_legalizer_rule_t kSpirvLegalizerRules[] = {
+    {
+        .root_kind = LOOM_OP_FUNC_CALL,
+        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REWRITE_LEGAL,
+        .match = loom_spirv_match_call_boundary,
+        .legalize = loom_spirv_legalize_call_boundary,
+    },
+    {
+        .root_kind = LOOM_OP_FUNC_RETURN,
+        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REWRITE_LEGAL,
+        .match = loom_spirv_match_call_boundary,
+        .legalize = loom_spirv_legalize_call_boundary,
+    },
     {
         .root_kind = LOOM_OP_KERNEL_SUBGROUP_REDUCE,
         .first_operand_element_types = LOOM_SCALAR_TYPE_SET_BF16,

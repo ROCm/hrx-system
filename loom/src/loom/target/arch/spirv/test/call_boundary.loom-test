@@ -1,0 +1,111 @@
+// RUN: pass target=spirv:vulkan1.3+bda specialize-target-callgraph,target-legalize{mode=complete}
+
+// Fragment arguments cannot use the ordinary vector callable signature, even
+// when every caller agrees on one role and shape.
+func.def public @entry(%value: f16) -> (vector<4xf16>) {
+  %dimension = index.constant 16 : index
+  %values = vector.splat %value : vector<4xf16>
+  %lhs = vector.fragment<lhs> %values shape [%dimension, %dimension] : vector<4xf16>
+  // ERROR@+1: SPIRV/033 {op_name="func.call", callee_name="identity", source_type="vector<4xf16>"}
+  %result = func.call @identity(%lhs) : (vector<4xf16>) -> (vector<4xf16>)
+  func.return %result : vector<4xf16>
+}
+
+func.def noinline @identity(%value: vector<4xf16>) -> (vector<4xf16>) {
+  func.return %value : vector<4xf16>
+}
+
+// ====
+
+// A cost-policy decision to retain a helper follows the same contract as an
+// explicit noinline. Right-hand fragments have the same boundary restriction.
+func.def public @entry(%value: f16) -> (vector<4xf16>) {
+  %dimension = index.constant 16 : index
+  %values = vector.splat %value : vector<4xf16>
+  %rhs = vector.fragment<rhs> %values shape [%dimension, %dimension] : vector<4xf16>
+  // ERROR@+1: SPIRV/033 {op_name="func.call", callee_name="identity", source_type="vector<4xf16>"}
+  %right = func.call @identity(%rhs) : (vector<4xf16>) -> (vector<4xf16>)
+  func.return %right : vector<4xf16>
+}
+
+func.def cold @identity(%value: vector<4xf16>) -> (vector<4xf16>) {
+  func.return %value : vector<4xf16>
+}
+
+// ====
+
+// A helper producing its own fragment must be rejected at its return even
+// when none of its arguments carry a matrix interpretation.
+func.def public noinline @make_initializer(%value: f32) -> (vector<4xf32>) {
+  %dimension = index.constant 16 : index
+  %values = vector.splat %value : vector<4xf32>
+  %initial = vector.fragment<init> %values shape [%dimension, %dimension] : vector<4xf32>
+  // ERROR@+1: SPIRV/033 {op_name="func.return", callee_name="make_initializer", source_type="vector<4xf32>"}
+  func.return %initial : vector<4xf32>
+}
+
+// ====
+
+// The boundary rejection does not require exact static shape facts. Grouped
+// fragments and unknown dimensions have the same opaque-value contract.
+func.def public noinline @make_result(%value: f32, %dimension: index) -> (vector<4xf32>) {
+  %blocks = index.constant 1 : index
+  %values = vector.splat %value : vector<4xf32>
+  %result = vector.fragment<result> %values shape [blocks(%blocks), %dimension, %dimension] : vector<4xf32>
+  // ERROR@+1: SPIRV/033 {op_name="func.return", callee_name="make_result", source_type="vector<4xf32>"}
+  func.return %result : vector<4xf32>
+}
+
+// ====
+
+// A structured early return is checked at its nested function terminator.
+func.def public noinline @early_initializer(%done: i1, %value: f32) -> (vector<4xf32>) {
+  %dimension = index.constant 16 : index
+  %values = vector.splat %value : vector<4xf32>
+  func.exit %done : i1 {
+    %initial = vector.fragment<init> %values shape [%dimension, %dimension] : vector<4xf32>
+    // ERROR@+1: SPIRV/033 {op_name="func.return", callee_name="early_initializer", source_type="vector<4xf32>"}
+    func.return %initial : vector<4xf32>
+  }
+  func.return %values : vector<4xf32>
+}
+
+// ====
+
+// RUN: pass target=spirv:vulkan1.3+bda specialize-target-callgraph,source-to-low{control-flow=structured-low}
+
+// Direct source-to-Low has the same contract even when target legalization
+// and boundary projection have not run.
+func.def public noinline @make_initializer(%value: f32) -> (vector<4xf32>) {
+  %dimension = index.constant 16 : index
+  %values = vector.splat %value : vector<4xf32>
+  %initial = vector.fragment<init> %values shape [%dimension, %dimension] : vector<4xf32>
+  // ERROR@+1: SPIRV/033 {op_name="func.return", callee_name="make_initializer", source_type="vector<4xf32>"}
+  func.return %initial : vector<4xf32>
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=COOPERATIVE_MATRIX_KHR
+
+// The complete pipeline rejects a wide fragment before ordinary-vector
+// boundary projection can destroy its cooperative-matrix interpretation.
+kernel.def @retained_fragment() {
+  %c1 = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%width, %c1, %c1) : index
+} launch(%output: buffer, %value: f32) {
+  %dimension = index.constant 16 : index
+  %origin = index.constant 0 : offset
+  %destination = buffer.view %output[%origin] : buffer -> view<16x16xf32>
+  %values = vector.splat %value : vector<8xf32>
+  %initial = vector.fragment<init> %values shape [%dimension, %dimension] : vector<8xf32>
+  // ERROR@+1: SPIRV/033 {op_name="func.call", callee_name="identity", source_type="vector<8xf32>"}
+  %result = func.call @identity(%initial) : (vector<8xf32>) -> (vector<8xf32>)
+  vector.fragment.store<result> %result, %destination[0, 0] shape [%dimension, %dimension] : vector<8xf32>, view<16x16xf32>
+  kernel.return
+}
+
+func.def noinline @identity(%value: vector<8xf32>) -> (vector<8xf32>) {
+  func.return %value : vector<8xf32>
+}

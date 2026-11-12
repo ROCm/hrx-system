@@ -486,6 +486,29 @@ ERR_SPIRV_032 = ErrorDef(
     fix_hint="Rewrite the recursive helper as structured iteration",
 )
 
+# ERR_SPIRV_033: An opaque matrix fragment crosses a retained source callable.
+ERR_SPIRV_033 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=33,
+    severity=Severity.ERROR,
+    summary="Opaque matrix fragment crosses a retained SPIR-V call boundary.",
+    message=(
+        "'{op_name}' crosses the retained boundary of '@{callee_name}' with "
+        "an opaque cooperative-matrix fragment spelled as {source_type}; "
+        "the source vector signature does not describe its SPIR-V matrix role "
+        "and shape"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("callee_name", ParamKind.STRING),
+        ErrorParam("source_type", ParamKind.TYPE),
+    ),
+    fix_hint=(
+        "Inline the fragment helper (remove conflicting noinline), or keep "
+        "fragment construction, computation, and storage inside the helper"
+    ),
+)
+
 ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_005,
     ERR_SPIRV_006,
@@ -512,4 +535,5 @@ ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_030,
     ERR_SPIRV_031,
     ERR_SPIRV_032,
+    ERR_SPIRV_033,
 )
