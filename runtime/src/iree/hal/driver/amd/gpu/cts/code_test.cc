@@ -255,10 +255,13 @@ class CodeTest : public iree::hal::amd::gpu::cts::GpuNativeTest,
     words = iree_hal_amd_gpu_pm4_emit_dispatch_direct(
         words, workgroup_count, launch.dispatch_initiator);
     const iree_hal_amd_gpu_pm4_barrier_t release = {
-        .cache_control = barriers_.release,
+        .release_cache_control = barriers_.release,
     };
-    words = iree_hal_amd_gpu_pm4_barrier_emit_tail(words, release);
-    words = iree_hal_amd_gpu_pm4_emit_release64(words, 0, control_address_, 0);
+    uint32_t release_cache_control = 0;
+    words = iree_hal_amd_gpu_pm4_barrier_emit_tail(words, release,
+                                                   &release_cache_control);
+    words = iree_hal_amd_gpu_pm4_emit_release64(words, release_cache_control,
+                                                control_address_, 0);
     if (!kernel_) {
       words = iree_hal_amd_gpu_pm4_emit_notify32(
           words, 0, context_->event_info.mailbox_address,

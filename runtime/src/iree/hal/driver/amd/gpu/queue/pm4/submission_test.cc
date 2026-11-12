@@ -603,8 +603,10 @@ TEST_P(SubmissionTest, OversizedCaptureUsesCompleteOwnedStorage) {
           constants.size());
   EXPECT_EQ(iree_hal_amd_gpu_pm4_submission_tail_storage(capture).data_length,
             0u);
-  EXPECT_EQ(capture->before.cache_control, 0u);
-  EXPECT_EQ(capture->after.cache_control, 0u);
+  EXPECT_EQ(capture->before.release_cache_control, 0u);
+  EXPECT_EQ(capture->before.acquire_cache_control, 0u);
+  EXPECT_EQ(capture->after.release_cache_control, 0u);
+  EXPECT_EQ(capture->after.acquire_cache_control, 0u);
   constants.assign(constants.size(), 0xAB);
   for (iree_host_size_t i = 0; i < capture->dispatch.constants.data_length;
        ++i) {
@@ -823,7 +825,7 @@ TEST_P(SubmissionTest, FileCopiesPreserveShaderAndCommandProcessorVisibility) {
       // Empty caller boundaries cannot erase the implementation's CP edge.
       // Nonempty boundaries are merged, including instruction invalidation.
       const iree_hal_amd_gpu_pm4_barrier_t requested = {
-          .cache_control = GetParam() ? 1u : 0u,
+          .acquire_cache_control = GetParam() ? 1u : 0u,
       };
       FileRetirement owner;
       iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
@@ -832,13 +834,15 @@ TEST_P(SubmissionTest, FileCopiesPreserveShaderAndCommandProcessorVisibility) {
           owner.callback(), &capture));
       EXPECT_EQ(capture->entry.kind, IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER);
       EXPECT_FALSE(capture->transfer.program_accessible);
-      EXPECT_EQ(capture->before.cache_control,
-                test_case.before | requested.cache_control);
+      EXPECT_EQ(capture->before.release_cache_control, test_case.before);
+      EXPECT_EQ(capture->before.acquire_cache_control,
+                requested.acquire_cache_control);
       EXPECT_EQ(capture->before.execution,
                 IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE |
                     IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA);
-      EXPECT_EQ(capture->after.cache_control,
-                test_case.after | requested.cache_control);
+      EXPECT_EQ(capture->after.release_cache_control, 0u);
+      EXPECT_EQ(capture->after.acquire_cache_control,
+                test_case.after | requested.acquire_cache_control);
       EXPECT_EQ(capture->after.execution, 0u);
       iree_hal_amd_gpu_pm4_submission_release_payload(capture);
       iree_hal_amd_gpu_pm4_submission_release(capture);
@@ -851,15 +855,23 @@ TEST_P(SubmissionTest, FileCopiesPreserveShaderAndCommandProcessorVisibility) {
 TEST_P(SubmissionTest, FileRetirementTransfersTheFinalPublicationReference) {
   FileRetirement owner;
   iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
-  const iree_hal_amd_gpu_pm4_barrier_t before = {.cache_control = 17};
-  const iree_hal_amd_gpu_pm4_barrier_t after = {.cache_control = 29};
+  const iree_hal_amd_gpu_pm4_barrier_t before = {
+      .release_cache_control = 17,
+      .acquire_cache_control = 19,
+  };
+  const iree_hal_amd_gpu_pm4_barrier_t after = {
+      .release_cache_control = 29,
+      .acquire_cache_control = 31,
+  };
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_file(
       &pool_, nullptr, &profile_, &before, &after, owner.callback(), &capture));
   EXPECT_EQ(capture->entry.kind, IREE_HAL_AMD_GPU_PM4_ENTRY_BARRIER);
   EXPECT_EQ(capture->signals.count, 0u);
   EXPECT_EQ(capture->signal, nullptr);
-  EXPECT_EQ(capture->before.cache_control, 17u);
-  EXPECT_EQ(capture->after.cache_control, 29u);
+  EXPECT_EQ(capture->before.release_cache_control, 17u);
+  EXPECT_EQ(capture->before.acquire_cache_control, 19u);
+  EXPECT_EQ(capture->after.release_cache_control, 29u);
+  EXPECT_EQ(capture->after.acquire_cache_control, 31u);
   const auto tail = iree_hal_amd_gpu_pm4_submission_tail_storage(capture);
   std::memset(tail.data, 0xA5, tail.data_length);
   // Each nonterminal piece has a reference in addition to the unpublished

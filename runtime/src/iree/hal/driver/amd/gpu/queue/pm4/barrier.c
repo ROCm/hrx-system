@@ -83,10 +83,11 @@ void iree_hal_amd_gpu_pm4_barrier_control(
   const bool system = (flags & IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE) ||
                       (!program && profile->command_processor_bypasses_l2);
   if (flags & IREE_HAL_ATOMIC_FLAG_RELEASE) {
-    before->cache_control |= system ? profile->release : profile->shader;
+    before->release_cache_control |=
+        system ? profile->release : profile->shader;
   }
   if (flags & IREE_HAL_ATOMIC_FLAG_ACQUIRE) {
-    after->cache_control |= system ? profile->acquire : profile->shader;
+    after->acquire_cache_control |= system ? profile->acquire : profile->shader;
   }
 }
 
@@ -95,7 +96,8 @@ iree_hal_amd_gpu_pm4_barrier_t iree_hal_amd_gpu_pm4_barrier_prepare(
     const iree_hal_barrier_list_t* barriers) {
   if (!barriers) {
     return (iree_hal_amd_gpu_pm4_barrier_t){
-        .cache_control = profile->acquire | profile->release,
+        .release_cache_control = profile->release,
+        .acquire_cache_control = profile->acquire,
         .execution = IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE |
                      IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA,
     };
@@ -141,8 +143,11 @@ iree_hal_amd_gpu_pm4_barrier_t iree_hal_amd_gpu_pm4_barrier_prepare(
     const iree_hal_access_scope_t external =
         IREE_HAL_ACCESS_SCOPE_HOST_READ | IREE_HAL_ACCESS_SCOPE_HOST_WRITE |
         IREE_HAL_ACCESS_SCOPE_MEMORY_READ | IREE_HAL_ACCESS_SCOPE_MEMORY_WRITE;
-    if (source && target && ((source | target) & shader)) {
-      result.cache_control |= profile->shader;
+    if (source && target && (source & shader)) {
+      result.release_cache_control |= profile->shader;
+    }
+    if (source && target && (target & shader)) {
+      result.acquire_cache_control |= profile->shader;
     }
     if ((source & external) ||
         (profile->command_processor_bypasses_l2 &&
@@ -157,10 +162,10 @@ iree_hal_amd_gpu_pm4_barrier_t iree_hal_amd_gpu_pm4_barrier_prepare(
       flags |= IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE;
     }
     if (flags & IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE) {
-      result.cache_control |= profile->release;
+      result.release_cache_control |= profile->release;
     }
     if (flags & IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE) {
-      result.cache_control |= profile->acquire;
+      result.acquire_cache_control |= profile->acquire;
     }
     iree_hal_execution_stage_t stages = barrier->source_stage_mask;
     if (!stages && (source || flags)) {
@@ -187,19 +192,43 @@ uint32_t* iree_hal_amd_gpu_pm4_barrier_emit(
   if (barrier.execution & IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA) {
     words = iree_hal_amd_gpu_pm4_emit_dma_flush(words);
   }
-  if (barrier.cache_control) {
-    words = iree_hal_amd_gpu_pm4_emit_acquire(words, barrier.cache_control);
+  const uint32_t cache_control =
+      barrier.release_cache_control | barrier.acquire_cache_control;
+  if (cache_control) {
+    words = iree_hal_amd_gpu_pm4_emit_acquire(words, cache_control);
   }
   return words;
 }
 
 uint32_t* iree_hal_amd_gpu_pm4_barrier_emit_tail(
-    uint32_t* words, iree_hal_amd_gpu_pm4_barrier_t barrier) {
-  // The completion release always joins compute. Synchronous cache work must
-  // perform that join first, including for visibility-only payload records.
-  barrier.execution &= ~IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE;
-  if (barrier.cache_control) {
-    barrier.execution |= IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE;
+    uint32_t* words, iree_hal_amd_gpu_pm4_barrier_t barrier,
+    uint32_t* out_release_cache_control) {
+  // Acquire work must complete synchronously before completion publication.
+  // Include release work in the same action so mixed barriers retain their
+  // established release-before-publication behavior without reversing the
+  // two cache directions around an asynchronous release.
+  if (barrier.acquire_cache_control) {
+    words = iree_hal_amd_gpu_pm4_emit_compute_flush(words);
   }
-  return iree_hal_amd_gpu_pm4_barrier_emit(words, barrier);
+  if (barrier.execution & IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA) {
+    words = iree_hal_amd_gpu_pm4_emit_dma_flush(words);
+  }
+  if (barrier.acquire_cache_control) {
+    words = iree_hal_amd_gpu_pm4_emit_acquire(
+        words, barrier.release_cache_control | barrier.acquire_cache_control);
+    *out_release_cache_control = 0;
+    return words;
+  }
+
+  // RELEASE_MEM has no instruction invalidation field. All instruction
+  // publication is acquire-directed and therefore took the synchronous path.
+  IREE_ASSERT(!(barrier.release_cache_control & 3u));
+  const uint32_t acquire = barrier.release_cache_control;
+  // GCR's middle fields retain their relative order in the release layout.
+  // Low metadata/scope bits, lower writeback, and scalar invalidation move
+  // separately. These mappings also preserve GFX12.5's repurposed fields.
+  *out_release_cache_control =
+      ((acquire >> 4) & 3u) | ((acquire >> 6) & 0xffcu) |
+      ((acquire & (1u << 6)) << 6) | ((acquire & (1u << 7)) << 11);
+  return words;
 }
