@@ -7859,6 +7859,12 @@ def _v_mov_b32_copy_overlay() -> AmdgpuDescriptorOverlay:
             results=("dst",),
             operands=("src",),
         ),
+        operand_forms=(
+            _literal_operand_form(
+                replacement_descriptor="amdgpu.v_mov_b32",
+                source_operand="src",
+            ),
+        ),
         flags=(DescriptorFlag.DEAD_REMOVABLE, DescriptorFlag.SAFE_TO_SPECULATE),
     )
 

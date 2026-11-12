@@ -14,11 +14,33 @@ from loom.target.arch.amdgpu.descriptors.api import (
 )
 from loom.target.low_descriptors import (
     ConstraintKind,
+    DescriptorOpKind,
     EffectKind,
     OperandAddressMapKind,
+    OperandFormImmediateAction,
+    OperandFormMatchKind,
     OperandRole,
     RegClassAlt,
 )
+
+
+@pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)
+def test_word_copy_selects_constant_packet_from_exact_payload(target: str) -> None:
+    overlays = {
+        overlay.descriptor_key: overlay
+        for overlay in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[target].overlay_rows()
+    }
+    copy = overlays["amdgpu.v_mov_b32_copy"]
+    literal = overlays["amdgpu.v_mov_b32"]
+    (form,) = copy.operand_forms
+    assert form.replacement_descriptor == literal.descriptor_key
+    assert literal.op_kind is DescriptorOpKind.CONST
+    assert form.immediate_action is OperandFormImmediateAction.SET_MATCHED_I64
+    assert form.immediate_field == "imm32"
+    assert form.immediate_source_operand == "src"
+    (match,) = form.matches
+    assert match.source_operand == "src"
+    assert match.match_kind is OperandFormMatchKind.ALL_EQUAL_EXACT_I64
 
 
 @pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)

@@ -833,3 +833,121 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @sopk_local_workgroup_sc
   %result = s_mulk_i32 %coordinate_copy, 7
   return %result
 }
+
+// ====
+
+// Literal forms preserve the entire word, including signed and high-bit values.
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @copy_exact_words(%unknown: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %zero = s_mov_b32 0
+  %negative = s_mov_b32 4294967289
+  %high = s_mov_b32 2147483648
+  %zero_copy = v_mov_b32_copy %zero
+  %negative_copy = v_mov_b32_copy %negative
+  %high_copy = v_mov_b32_copy %high
+  %unknown_copy = v_mov_b32_copy %unknown
+  return %zero_copy, %negative_copy, %high_copy, %unknown_copy
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @copy_exact_words(%unknown: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %zero_copy = v_mov_b32 0
+  %negative_copy = v_mov_b32 4294967289
+  %high_copy = v_mov_b32 2147483648
+  %unknown_copy = v_mov_b32_copy %unknown
+  return %zero_copy, %negative_copy, %high_copy, %unknown_copy
+}
+
+// ====
+
+// The form consumes the join's retained fact, not the source constant's identity.
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @copy_joined_constant(%condition: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %value = s_mov_b32 255
+  low.cond_br %condition, ^left, ^right : reg<amdgpu.sgpr>
+^left:
+  low.br ^join(%value: reg<amdgpu.sgpr>)
+^right:
+  low.br ^join(%value: reg<amdgpu.sgpr>)
+^join(%joined: reg<amdgpu.sgpr>):
+  %result = v_mov_b32_copy %joined
+  return %result
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @copy_joined_constant(%condition: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %value = s_mov_b32 255
+  low.cond_br %condition, ^left, ^right : reg<amdgpu.sgpr>
+^left:
+  low.br ^join(%value: reg<amdgpu.sgpr>)
+^right:
+  low.br ^join(%value: reg<amdgpu.sgpr>)
+^join(%joined: reg<amdgpu.sgpr>):
+  %result = v_mov_b32 255
+  return %result
+}
+
+// ====
+
+// Literal forms preserve the entire word, including signed and high-bit values.
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @copy_exact_words(%unknown: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %zero = s_mov_b32 0
+  %negative = s_mov_b32 4294967289
+  %high = s_mov_b32 2147483648
+  %zero_copy = v_mov_b32_copy %zero
+  %negative_copy = v_mov_b32_copy %negative
+  %high_copy = v_mov_b32_copy %high
+  %unknown_copy = v_mov_b32_copy %unknown
+  return %zero_copy, %negative_copy, %high_copy, %unknown_copy
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @copy_exact_words(%unknown: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %zero_copy = v_mov_b32 0
+  %negative_copy = v_mov_b32 4294967289
+  %high_copy = v_mov_b32 2147483648
+  %unknown_copy = v_mov_b32_copy %unknown
+  return %zero_copy, %negative_copy, %high_copy, %unknown_copy
+}
+
+// ====
+
+// The form consumes the join's retained fact, not the source constant's identity.
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @copy_joined_constant(%condition: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %value = s_mov_b32 255
+  low.cond_br %condition, ^left, ^right : reg<amdgpu.sgpr>
+^left:
+  low.br ^join(%value: reg<amdgpu.sgpr>)
+^right:
+  low.br ^join(%value: reg<amdgpu.sgpr>)
+^join(%joined: reg<amdgpu.sgpr>):
+  %result = v_mov_b32_copy %joined
+  return %result
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @copy_joined_constant(%condition: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %value = s_mov_b32 255
+  low.cond_br %condition, ^left, ^right : reg<amdgpu.sgpr>
+^left:
+  low.br ^join(%value: reg<amdgpu.sgpr>)
+^right:
+  low.br ^join(%value: reg<amdgpu.sgpr>)
+^join(%joined: reg<amdgpu.sgpr>):
+  %result = v_mov_b32 255
+  return %result
+}
