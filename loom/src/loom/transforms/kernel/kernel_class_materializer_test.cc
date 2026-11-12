@@ -20,12 +20,14 @@
 #include "loom/format/bytecode/writer.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
+#include "loom/ir/input_contract.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/template/ops.h"
+#include "loom/ops/view/ops.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/tooling/context/context.h"
 #include "loom/transforms/symbol/template_selection.h"
@@ -508,9 +510,31 @@ kernel.def @classified() {
   iree_arena_deinitialize(&arena);
 }
 
-TEST_F(KernelClassMaterializerTest,
+class KernelClassInputMaterializerTest
+    : public KernelClassMaterializerTest,
+      public ::testing::WithParamInterface<bool> {};
+
+TEST_P(KernelClassInputMaterializerTest,
        PublishesExternalProviderSelectionAsGenericRequest) {
-  const iree_string_view_t source = IREE_SV(R"(
+  const bool shaped = GetParam();
+  const iree_string_view_t source = shaped ? IREE_SV(R"(
+template.decl @external.family(%n: index, %value: view<[%n]xf32>)
+
+template.def<@external.family> priority(1) @fallback(%n: index, %value: view<[%n]xf32>) {
+  template.return
+}
+
+kernel.def @classified() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%n: index, %buffer: buffer) {
+  %zero = index.constant 0 : offset
+  %value = buffer.view %buffer[%zero] : buffer -> view<[%n]xf32>
+  template.apply<@external.family>(%n, %value) : (index, view<[%n]xf32>) -> ()
+  kernel.return
+}
+)")
+                                           : IREE_SV(R"(
 template.decl @external.family(%n: index)
 
 template.def<@external.family> priority(1) @fallback(%n: index) {
@@ -543,16 +567,36 @@ kernel.def @classified() {
       .reserved = {},
       .args = {0, 128},
   };
+  alignas(loom_input_contract_t) const struct {
+    // One retained shape requirement in the contract's trailing storage.
+    uint32_t count;
+    // Canonical contract padding.
+    uint32_t reserved;
+    // External provider's fixed width, independent of its scalar predicates.
+    loom_input_requirement_t requirement;
+  } input = {
+      .count = 1,
+      .reserved = 0,
+      .requirement =
+          {
+              .argument = 1,
+              .axis = 0,
+              .expected = 256,
+          },
+  };
   const loom_template_provider_contract_t external_contract = {
       .kind = LOOM_TEMPLATE_PROVIDER_KIND_DEF,
       .has_body = true,
-      .argument_count = 1,
+      .argument_count = static_cast<uint16_t>(shaped ? 2 : 1),
       .result_count = 0,
-      .predicate_count = 1,
+      .predicate_count = static_cast<uint16_t>(shaped ? 0 : 1),
       .target_condition_count = 0,
       .name = IREE_SV("external"),
       .priority = 10,
-      .predicates = &external_predicate,
+      .input_contract =
+          shaped ? reinterpret_cast<const loom_input_contract_t*>(&input)
+                 : nullptr,
+      .predicates = shaped ? nullptr : &external_predicate,
   };
   const loom_symbol_ref_t family = {
       .module_id = 0,
@@ -597,16 +641,17 @@ kernel.def @classified() {
       &kernel_facts, &expression_context, &kernel_target, &analysis_arena,
       &classifier));
   ASSERT_EQ(classifier.decision_count, 1u);
+  EXPECT_EQ(classifier.decisions[0].input_count, shaped ? 1u : 0u);
 
   loom_value_fact_table_t site_facts = {};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&site_facts, &analysis_arena,
                                                   /*capacity=*/1));
   IREE_ASSERT_OK(loom_value_fact_table_define(&site_facts, 0,
                                               loom_value_facts_exact_i64(256)));
-  const loom_value_id_t site_argument_value = 0;
+  const loom_value_id_t site_arguments[] = {0, LOOM_VALUE_ID_INVALID};
   const loom_kernel_class_site_t site = {
       .facts = &site_facts,
-      .argument_values = &site_argument_value,
+      .argument_values = site_arguments,
   };
   const loom_kernel_class_collection_options_t collection_options =
       loom_kernel_class_collection_options_default();
@@ -658,11 +703,19 @@ kernel.def @classified() {
   ASSERT_NE(apply_op, nullptr);
   const loom_value_slice_t apply_operands =
       loom_template_apply_operands(apply_op);
-  ASSERT_EQ(apply_operands.count, 1u);
+  ASSERT_EQ(apply_operands.count, shaped ? 2u : 1u);
   const loom_value_t* refined_operand =
       loom_module_value(class_module, apply_operands.values[0]);
   ASSERT_FALSE(loom_value_is_block_arg(refined_operand));
   EXPECT_EQ(loom_value_def_op(refined_operand), assume_op);
+  if (shaped) {
+    const auto* view = loom_value_def_op(
+        loom_module_value(class_module, apply_operands.values[1]));
+    ASSERT_TRUE(loom_view_refine_isa(view));
+    const auto type =
+        loom_module_value_type(class_module, apply_operands.values[1]);
+    EXPECT_EQ(loom_type_dim_value_id_at(type, 0), apply_operands.values[0]);
+  }
 
   // The ordinary request survives serialization independently of every
   // classifier input and selects the same external provider when linked into
@@ -706,6 +759,9 @@ kernel.def @classified() {
   EXPECT_EQ(query_result.unresolved_site_count, 0u);
   iree_arena_deinitialize(&query_arena);
 }
+
+INSTANTIATE_TEST_SUITE_P(ScalarAndShape, KernelClassInputMaterializerTest,
+                         ::testing::Bool());
 
 }  // namespace
 }  // namespace loom

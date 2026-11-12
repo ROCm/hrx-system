@@ -979,6 +979,124 @@ TEST_P(KernelRequestProducerTest, CapturesClosedEncodingConstructors) {
   }
 }
 
+TEST_P(KernelRequestProducerTest, SelectsShapesAfterBindingCompleteEncodings) {
+  for (bool use_bytecode : {false, true}) {
+    SCOPED_TRACE(use_bytecode);
+    std::string source = R"(
+template.decl @select(%n: index, %layout: encoding<layout>, %input: view<[%n]xf32, %layout>)
+)";
+    // Reverse declaration order makes source encoding IDs differ from the order
+    // in which launch tuples and their bound modules encounter the layouts.
+    for (int variant = 3; variant >= 0; --variant) {
+      const std::string layout = variant / 2 == 0
+                                     ? "#encoding.layout.dense"
+                                     : "#encoding.layout.strided<strides=[1]>";
+      const std::string extent = variant % 2 == 0 ? "16" : "32";
+      source += "template.def<@select> @selected" + std::to_string(variant) +
+                "(%n: index, %layout: encoding<layout>, %input: view<" +
+                extent + "xf32, " + layout + ">) { template.return }\n";
+    }
+    source +=
+        (GetParam()
+             ? "target.decl @device\npipeline.def<kernel> target(@device) "
+             : "pipeline.def<kernel> ");
+    source +=
+        R"(@classified(%layout: encoding<layout>) run(%n: index, %buffer: buffer) {
+  %zero = index.constant 0 : offset
+  %input = buffer.view %buffer[%zero] : buffer -> view<[%n]xf32, %layout>
+  template.apply<@select>(%n, %layout, %input) : (index, encoding<layout>, view<[%n]xf32, %layout>)
+  pipeline.finish
+}
+func.def @sites(%buffer: buffer) {
+  %dense = encoding.layout.dense : encoding<layout>
+  %strided = encoding.layout.strided [1] : encoding<layout>
+  %small = index.constant 16 : index
+  %large = index.constant 32 : index
+  func.return
+}
+)";
+    auto source_module = ParseText(source);
+    ASSERT_NE(source_module, nullptr);
+    auto bytecode = WriteModule(source_module.get());
+    auto index = CreateIndex();
+    const auto source_ordinal =
+        use_bytecode
+            ? AddBytecodeSource(index.get(), bytecode, source_module.get())
+            : AddMaterializedSource(index.get(), source_module.get());
+    auto producer = CreateProducer(index.get());
+    iree_arena_allocator_t arena;
+    iree_arena_initialize(&block_pool_, &arena);
+    const auto function = loom_func_like_cast(
+        source_module.get(),
+        source_module->symbols
+            .entries[FindSymbol(source_module.get(), IREE_SV("sites"))]
+            .defining_op);
+    auto* block = loom_region_entry_block(loom_func_like_body(function));
+    loom_value_fact_table_t facts = {};
+    IREE_ASSERT_OK(loom_value_fact_table_initialize(&facts, &arena, 0));
+    IREE_ASSERT_OK(
+        loom_value_fact_table_compute(&facts, source_module.get(), function));
+    loom_value_id_t constants[4];
+    auto* literal = block->first_op;
+    for (auto& value : constants) {
+      value = loom_op_const_results(literal)[0];
+      literal = literal->next_op;
+    }
+    loom_value_id_t arguments[5][3];
+    loom_kernel_class_site_t sites[5];
+    for (unsigned i = 0; i < 5; ++i) {
+      arguments[i][0] = constants[(i % 4) / 2];
+      arguments[i][1] = constants[2 + i % 2];
+      arguments[i][2] = block->arg_ids[0];
+      sites[i] = {.facts = &facts, .argument_values = arguments[i]};
+    }
+    RequestCapture capture = {.block_pool = &block_pool_};
+    const auto environment = MaterializationEnvironment();
+    const auto options = loom_kernel_class_collection_options_default();
+    const loom_decision_class_ordinal_t* site_classes = nullptr;
+    IREE_ASSERT_OK(loom_kernel_request_producer_publish(
+        producer.get(), &environment, source_ordinal, source_module.get(),
+        sites, std::size(sites), &options,
+        {.publish = CaptureRequest, .user_data = &capture}, &arena,
+        &site_classes));
+    ASSERT_EQ(capture.requests.size(), 4u);
+    EXPECT_EQ(site_classes[0], site_classes[4]);
+    unsigned expected[4];
+    for (unsigned i = 0; i < 4; ++i) {
+      expected[site_classes[i]] = i;
+    }
+    producer.reset();
+    index.reset();
+    source_module.reset();
+    bytecode.clear();
+    iree_arena_deinitialize(&arena);
+    for (auto& request : capture.requests) {
+      auto* module = request.product.module;
+      Verify(module);
+      const auto kernel = loom_func_like_cast(
+          module, module->symbols.entries[request.product.kernel.symbol_id]
+                      .defining_op);
+      const auto* body = loom_region_entry_block(loom_func_like_body(kernel));
+      size_t call_count = 0;
+      for (const auto* op = body->first_op; op; op = op->next_op) {
+        EXPECT_FALSE(loom_template_apply_isa(op));
+        if (!loom_template_call_isa(op)) {
+          continue;
+        }
+        ++call_count;
+        const auto callee = loom_template_call_callee(op);
+        const auto name = loom_string_table_get(
+            &module->strings,
+            module->symbols.entries[callee.symbol_id].name_id);
+        EXPECT_EQ(std::string(name.data, name.size),
+                  "selected" + std::to_string(expected[request.class_ordinal]));
+      }
+      EXPECT_EQ(call_count, 1u);
+      loom_kernel_class_product_deinitialize(&request.product);
+    }
+  }
+}
+
 TEST_P(KernelRequestProducerTest, RejectsDynamicEncodingCaptures) {
   for (bool storage : {false, true}) {
     const std::string type = storage ? "encoding<storage>" : "encoding<layout>";

@@ -31,6 +31,42 @@ static const loom_template_refine_fn_t loom_template_input_refiners[] = {
     [LOOM_TYPE_VIEW] = loom_view_refine_build,
 };
 
+iree_status_t loom_template_rewrite_assumed_inputs(
+    loom_rewriter_t* rewriter, const loom_op_t* application,
+    const loom_value_id_t* source_values, const loom_value_id_t* assumed_values,
+    uint16_t value_count, loom_value_id_t* operands) {
+  loom_ir_remap_t remap;
+  bool initialized = false;
+  for (uint16_t i = 0; i < application->operand_count; ++i) {
+    const loom_type_t type =
+        loom_module_value_type(rewriter->module, operands[i]);
+    if (!loom_type_has_dimensions(type) ||
+        !loom_type_may_reference_values(type)) {
+      continue;
+    }
+    if (!initialized) {
+      const loom_ir_remap_options_t options = {.allow_unmapped_values = true};
+      IREE_RETURN_IF_ERROR(
+          loom_ir_remap_initialize(rewriter->module, rewriter->module,
+                                   rewriter->arena, &options, &remap));
+      IREE_RETURN_IF_ERROR(loom_ir_remap_map_values(
+          &remap, source_values, assumed_values, value_count));
+      initialized = true;
+    }
+    loom_type_t refined_type;
+    IREE_RETURN_IF_ERROR(loom_ir_remap_type(&remap, type, &refined_type));
+    if (loom_type_equal(type, refined_type)) {
+      continue;
+    }
+    loom_op_t* refined;
+    IREE_RETURN_IF_ERROR(loom_template_input_refiners[loom_type_kind(type)](
+        &rewriter->builder, operands[i], refined_type, application->location,
+        &refined));
+    operands[i] = loom_op_results(refined)[0];
+  }
+  return iree_ok_status();
+}
+
 // Selection proved these input contracts. Preserve ordinary exact call typing
 // with explicit carrier refinements; already-exact applications allocate none.
 static iree_status_t loom_template_rewrite_inputs(

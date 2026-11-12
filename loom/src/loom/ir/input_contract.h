@@ -9,6 +9,7 @@
 #ifndef LOOM_IR_INPUT_CONTRACT_H_
 #define LOOM_IR_INPUT_CONTRACT_H_
 
+#include "loom/ir/attribute.h"
 #include "loom/ir/types.h"
 
 #ifdef __cplusplus
@@ -76,6 +77,13 @@ uint32_t loom_input_shape_requirements(const loom_input_shape_t* shape,
                                        const loom_input_shape_t* inherited,
                                        uint16_t argument,
                                        loom_input_requirement_t* output);
+
+// Resolves a dimension requirement to an equality over actual input identities
+// and literal extents. An unbound actual dimension yields a NONE operand.
+// The requirement's axis is a dimension, never the encoding sentinel.
+loom_predicate_t loom_input_requirement_dimension_predicate(
+    const loom_module_t* module, const loom_value_id_t* arguments,
+    const loom_input_requirement_t* requirement);
 
 // Projects verified native signature inputs into the same source coordinates
 // used by indexed libraries. |inherited_arguments| is the family's argument

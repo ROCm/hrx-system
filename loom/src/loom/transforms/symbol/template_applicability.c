@@ -431,25 +431,17 @@ loom_decision_truth_t loom_template_applicability_evaluate_input(
         module, type.encoding_id, loom_type_has_ssa_encoding(type), expected,
         requirement->expected_is_argument, facts);
   }
+  const loom_predicate_t predicate = loom_input_requirement_dimension_predicate(
+      module, arguments, requirement);
   loom_decision_predicate_operand_t operands[3];
-  loom_template_predicate_arg_initialize(&operands[0]);
-  loom_template_predicate_arg_initialize(&operands[1]);
-  if (loom_type_dim_is_dynamic_at(type, requirement->axis)) {
-    const loom_value_id_t dimension =
-        loom_type_dim_value_id_at(type, requirement->axis);
-    if (dimension != LOOM_VALUE_ID_INVALID) {
+  for (uint8_t i = 0; i < 2; ++i) {
+    loom_template_predicate_arg_initialize(&operands[i]);
+    if (predicate.arg_tags[i] == LOOM_PRED_ARG_VALUE) {
       loom_template_applicability_resolve_application_value_arg(
-          module, facts, dimension, &operands[0]);
+          module, facts, (loom_value_id_t)predicate.args[i], &operands[i]);
+    } else if (predicate.arg_tags[i] == LOOM_PRED_ARG_CONST) {
+      operands[i].facts = loom_value_facts_exact_i64(predicate.args[i]);
     }
-  } else {
-    operands[0].facts = loom_value_facts_exact_i64(
-        loom_type_dim_static_size_at(type, requirement->axis));
-  }
-  if (requirement->expected_is_argument) {
-    loom_template_applicability_resolve_application_value_arg(
-        module, facts, arguments[requirement->expected], &operands[1]);
-  } else {
-    operands[1].facts = loom_value_facts_exact_i64(requirement->expected);
   }
   return loom_template_applicability_refine_predicate(facts, LOOM_PREDICATE_EQ,
                                                       operands);

@@ -133,3 +133,29 @@ uint32_t loom_input_contract_project(const loom_module_t* module,
   }
   return count;
 }
+
+loom_predicate_t loom_input_requirement_dimension_predicate(
+    const loom_module_t* module, const loom_value_id_t* arguments,
+    const loom_input_requirement_t* requirement) {
+  const loom_type_t type =
+      loom_module_value_type(module, arguments[requirement->argument]);
+  loom_predicate_t predicate = {.kind = LOOM_PREDICATE_EQ, .arg_count = 2};
+  if (loom_type_dim_is_dynamic_at(type, requirement->axis)) {
+    const loom_value_id_t dimension =
+        loom_type_dim_value_id_at(type, requirement->axis);
+    if (dimension != LOOM_VALUE_ID_INVALID) {
+      predicate.arg_tags[0] = LOOM_PRED_ARG_VALUE;
+      predicate.args[0] = dimension;
+    }
+  } else {
+    predicate.arg_tags[0] = LOOM_PRED_ARG_CONST;
+    predicate.args[0] = loom_type_dim_static_size_at(type, requirement->axis);
+  }
+  predicate.arg_tags[1] = requirement->expected_is_argument
+                              ? LOOM_PRED_ARG_VALUE
+                              : LOOM_PRED_ARG_CONST;
+  predicate.args[1] = requirement->expected_is_argument
+                          ? arguments[requirement->expected]
+                          : (int64_t)requirement->expected;
+  return predicate;
+}
