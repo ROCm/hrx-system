@@ -48,6 +48,8 @@ typedef struct iree_hal_amd_gpu_aql_growth_context_t {
   iree_hal_amd_gpu_aql_growth_t* transfers;
   // Coalesced profiling sample acquisition or NULL.
   iree_hal_amd_gpu_aql_growth_t* samples;
+  // Coalesced first indirect-command allocation or NULL.
+  iree_hal_amd_gpu_aql_growth_t* commands;
   // Coalesced signal acquisition or NULL.
   iree_hal_amd_gpu_aql_growth_t* signals;
   // Native result owners, including results with an empty waiting cohort.

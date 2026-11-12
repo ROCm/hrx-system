@@ -222,13 +222,15 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
       dispatch && operation && operation->completion.sample_stride;
   const bool cooperative =
       dispatch && (request->flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE);
+  if (cooperative && queue->grid.memory && !queue->commands) {
+    return IREE_HAL_AMD_GPU_AQL_PUBLISH_COMMANDS;
+  }
   const uint64_t argument_length =
-      dispatch
-          ? iree_hal_amd_gpu_aql_argument_length(
-                request, cooperative && queue->grid.memory
-                             ? IREE_HAL_AMD_GPU_AQL_GRID_SYNC_COMMAND_LENGTH
-                             : sizeof(iree_hal_amd_gpu_grid_sync_t))
-          : 0;
+      dispatch ? iree_hal_amd_gpu_aql_argument_length(
+                     request, cooperative && queue->grid.memory
+                                  ? 0
+                                  : sizeof(iree_hal_amd_gpu_grid_sync_t))
+               : 0;
   const uint64_t argument_alignment =
       dispatch
           ? iree_max(layout->alignment,
@@ -259,13 +261,6 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
   }
   uint64_t argument_address =
       argument_length ? arguments->address + argument_offset : 0;
-  if (cooperative && queue->grid.memory &&
-      argument_address > (UINT64_C(1) << 48) - argument_length) {
-    *out_status = iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "cooperative grid initialization exceeds AQL IB addressing");
-    return IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE;
-  }
   const bool prefix = dispatch && (before & (3u << 11));
   const bool suffix = !dispatch || sampled || (after & (3u << 9));
   const uint32_t packet_count = (counts.native_count + 4) / 5 + prefix +
@@ -336,27 +331,31 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
   }
   iree_hal_amd_gpu_aql_packet_t grid_packet;
   if (cooperative) {
-    const uint64_t grid_offset = iree_align_uint64(
-        indirect ? iree_align_uint64(kernarg_length, 8) +
-                       sizeof(iree_hal_amd_gpu_aql_indirect_arguments_t)
-                 : kernarg_length,
-        8);
-    const uint64_t upload_address =
-        arguments->address + argument_offset + grid_offset;
-    void* grid_upload =
-        arguments->memory.contents.data + argument_offset + grid_offset;
     if (queue->grid.memory) {
+      const uint64_t command_offset =
+          (position & (queue->options.retirement_capacity - 1)) *
+          IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE;
       iree_hal_amd_gpu_grid_sync_t grid;
       iree_hal_amd_gpu_dispatch_emplace_grid_sync(
           layout, &request->geometry, queue->grid.address,
           arguments->memory.contents.data + argument_offset, &grid);
       grid_packet = iree_hal_amd_gpu_aql_grid_sync_write_packet(
           queue->context->target_info.topology.xcc_count, queue->grid.address,
-          &grid, upload_address, grid_upload);
+          &grid, queue->commands->address + command_offset,
+          (void*)(queue->commands->memory.contents.data + command_offset));
     } else {
+      const uint64_t grid_offset = iree_align_uint64(
+          indirect ? iree_align_uint64(kernarg_length, 8) +
+                         sizeof(iree_hal_amd_gpu_aql_indirect_arguments_t)
+                   : kernarg_length,
+          8);
+      const uint64_t upload_address =
+          arguments->address + argument_offset + grid_offset;
       iree_hal_amd_gpu_dispatch_emplace_grid_sync(
           layout, &request->geometry, upload_address,
-          arguments->memory.contents.data + argument_offset, grid_upload);
+          arguments->memory.contents.data + argument_offset,
+          (void*)(arguments->memory.contents.data + argument_offset +
+                  grid_offset));
       grid_packet = iree_hal_amd_gpu_aql_grid_sync_packet(
           queue->options.programs->grid_sync, upload_address);
     }
@@ -489,9 +488,11 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_control(
   const bool program = iree_hal_amd_gpu_control_uses_program(
       queue->base.queue_family, submission->control.target.buffer,
       submission->control.command);
+  if (!program && !queue->commands) {
+    return IREE_HAL_AMD_GPU_AQL_PUBLISH_COMMANDS;
+  }
   const uint32_t argument_length =
-      program ? sizeof(iree_hal_amd_gpu_control_program_arguments_t)
-              : IREE_HAL_AMD_GPU_AQL_CONTROL_BYTE_LENGTH;
+      program ? sizeof(iree_hal_amd_gpu_control_program_arguments_t) : 0;
   uint64_t offset = 0, end = 0;
   const iree_hal_amd_gpu_aql_publish_result_t argument_result =
       iree_hal_amd_gpu_aql_arguments(queue, argument_length, 8, &offset, &end);
@@ -511,15 +512,6 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_control(
     }
   }
   iree_hal_amd_gpu_byte_storage_t* arguments = queue->producer.arguments;
-  const uint64_t address = arguments->address + offset;
-  if (!program && address > (UINT64_C(1) << 48) - argument_length) {
-    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AQL indirect buffer exceeds 48-bit addressing");
-  }
-  if (!iree_status_is_ok(status)) {
-    *out_status = status;
-    return IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE;
-  }
   iree_hal_amd_gpu_signal_t* signal = iree_hal_amd_gpu_signal_pool_try_acquire(
       &queue->options.signals->pool, 1);
   if (!signal) {
@@ -539,16 +531,21 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_control(
     packet = iree_hal_amd_gpu_aql_control_program_packet(
         queue->options.programs->control[iree_hal_amd_gpu_control_program_index(
             submission->control.command)],
-        address, header, completion);
+        arguments->address + offset, header, completion);
   } else {
-    uint32_t* words = (void*)(arguments->memory.contents.data + offset);
+    const uint64_t command_offset =
+        (position & (queue->options.retirement_capacity - 1)) *
+        IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE;
+    uint32_t* words =
+        (void*)(queue->commands->memory.contents.data + command_offset);
     uint32_t* cursor = iree_hal_amd_gpu_aql_emit_single_executor(
         words, queue->context->target_info.topology.xcc_count,
         iree_hal_amd_gpu_control_word_count(submission->control.command));
     cursor = iree_hal_amd_gpu_control_emit(cursor, target,
                                            submission->control.command);
     packet = iree_hal_amd_gpu_aql_packet_indirect_buffer(
-        header, address, (uint32_t)(cursor - words), completion);
+        header, queue->commands->address + command_offset,
+        (uint32_t)(cursor - words), completion);
   }
   uint64_t packet_position = 0;
   const bool reserved = iree_hal_amd_gpu_aql_ring_try_reserve(

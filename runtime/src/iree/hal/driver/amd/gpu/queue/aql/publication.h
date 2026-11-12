@@ -7,6 +7,7 @@
 #ifndef IREE_HAL_DRIVER_AMD_GPU_QUEUE_AQL_PUBLICATION_H_
 #define IREE_HAL_DRIVER_AMD_GPU_QUEUE_AQL_PUBLICATION_H_
 
+#include "iree/hal/driver/amd/gpu/queue/aql/dispatch.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/submission.h"
 
 #ifdef __cplusplus
@@ -26,14 +27,19 @@ typedef enum iree_hal_amd_gpu_aql_publish_result_e {
   IREE_HAL_AMD_GPU_AQL_PUBLISH_ARGUMENTS,
   IREE_HAL_AMD_GPU_AQL_PUBLISH_TRANSFERS,
   IREE_HAL_AMD_GPU_AQL_PUBLISH_SAMPLES,
+  IREE_HAL_AMD_GPU_AQL_PUBLISH_COMMANDS,
   IREE_HAL_AMD_GPU_AQL_PUBLISH_SIGNALS,
 } iree_hal_amd_gpu_aql_publish_result_t;
 
-// At most nine scalar DWORDs plus the two-DWORD virtual-XCC predicate.
-enum { IREE_HAL_AMD_GPU_AQL_CONTROL_BYTE_LENGTH = 48 };
+// One direct IB per native retirement slot. Grid initialization is the largest;
+// scalar commands need at most nine DWORDs plus a two-DWORD XCC predicate.
+enum {
+  IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE =
+      IREE_HAL_AMD_GPU_AQL_GRID_SYNC_COMMAND_LENGTH,
+};
 
 // Exact argument extent needed before ring reservation, including optional
-// cooperative control data.
+// GWS initialization arguments.
 uint64_t iree_hal_amd_gpu_aql_argument_length(
     const iree_hal_amd_gpu_aql_dispatch_request_t* request,
     uint32_t grid_length);

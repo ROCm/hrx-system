@@ -412,6 +412,22 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_test(
+    name = "growth_test",
+    srcs = ["growth_test.cc"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":growth",
+        "//runtime/src/iree/hal/driver/amd/fabric:memory_backend_test_base",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue:backing",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_runtime_cc_library(
     name = "scratch",
     srcs = ["scratch.c"],
@@ -443,6 +459,7 @@ iree_runtime_cc_library(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
+        ":dispatch",
         ":growth",
         ":program",
         ":ring",

@@ -179,6 +179,8 @@ struct iree_hal_amd_gpu_aql_queue_t {
   bool feedback_failure_delivered;
   // Host metadata parallel to the finite native execution credit.
   iree_hal_amd_gpu_aql_retirement_t* issued;
+  // Lazy indirect-command slots indexed by retirement, live until native stop.
+  iree_hal_amd_gpu_byte_storage_t* commands;
 };
 
 // Frees joined queue metadata after the device releases native ownership.
