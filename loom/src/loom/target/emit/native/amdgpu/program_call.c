@@ -200,7 +200,7 @@ static iree_status_t loom_amdgpu_program_callable_prepare_abi_side(
   for (uint16_t i = 0; i < value_count; ++i) {
     const loom_type_t type = loom_module_value_type(module, values[i]);
     loom_amdgpu_call_abi_requirements_t next_requirements = requirements;
-    if (!loom_amdgpu_call_abi_add_low_type(descriptor_set, type,
+    if (!loom_amdgpu_call_abi_add_low_type(descriptor_set->stable_id, type,
                                            &next_requirements)) {
       IREE_RETURN_IF_ERROR(loom_amdgpu_program_callable_emit_unsupported_abi(
           module, function_op, side, i, type, requirements,

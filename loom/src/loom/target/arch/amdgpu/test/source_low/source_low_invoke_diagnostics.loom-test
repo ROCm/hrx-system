@@ -130,13 +130,13 @@ func.def target(@target) @wrong_result_type(%value: vector<1xi32>) -> (vector<1x
 amdgpu.target<gfx11-generic> @target
 
 low.func.def target<amdgpu.gfx11.generic.core>(@target) @cycle_a(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  // ERROR@+1: LOWERING/044 {op_name="low.func.call", phase_name="inline-callables", callee_name="cycle_b", failure_code="required_cycle"}
+  // ERROR@+1: LOWERING/044 {op_name="low.func.call", phase_name="inline-callables", callee_name="cycle_b", failure_code="native_call_cycle"}
   %result = low.func.call @cycle_b(%value) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
   return %result
 }
 
 low.func.def target<amdgpu.gfx11.generic.core>(@target) @cycle_b(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  // ERROR@+1: LOWERING/044 {op_name="low.func.call", phase_name="inline-callables", callee_name="cycle_a", failure_code="required_cycle"}
+  // ERROR@+1: LOWERING/044 {op_name="low.func.call", phase_name="inline-callables", callee_name="cycle_a", failure_code="native_call_cycle"}
   %result = low.func.call @cycle_a(%value) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
   return %result
 }

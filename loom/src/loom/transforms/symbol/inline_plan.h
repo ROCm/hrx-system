@@ -70,6 +70,11 @@ typedef enum loom_inline_blocker_e {
   LOOM_INLINE_BLOCKER_LOW_ENTRY_RESOURCE = 17,
   LOOM_INLINE_BLOCKER_LOW_LOCKED_NESTED_REGION = 18,
   LOOM_INLINE_BLOCKER_CALLER_REGION_NOT_CFG_CAPABLE = 19,
+  LOOM_INLINE_BLOCKER_TARGET_REQUIRES_LEAF,
+  LOOM_INLINE_BLOCKER_NATIVE_CALL_CYCLE,
+  LOOM_INLINE_BLOCKER_NATIVE_CALLEE_RESOURCES,
+  LOOM_INLINE_BLOCKER_NATIVE_CALLEE_STORAGE,
+  LOOM_INLINE_BLOCKER_COUNT,
 } loom_inline_blocker_t;
 
 typedef struct loom_inline_symbol_info_t {
@@ -85,11 +90,24 @@ typedef struct loom_inline_symbol_info_t {
   uint32_t planned_call_removals;
   // Whether the function body remains linear after its required call closure
   // is flattened in callee-before-caller order.
-  bool body_will_be_linear;
+  uint8_t body_will_be_linear : 1;
   // Whether this symbol directly owns a func.exit operation.
-  bool body_has_callable_exit;
+  uint8_t body_has_callable_exit : 1;
   // Whether the expanded body still depends on its inherited target context.
-  bool body_is_contextual;
+  uint8_t body_is_contextual : 1;
+  // An explicit retained edge requires this body and its expansions to be
+  // leaves.
+  uint8_t requires_leaf_body : 1;
+  // The selected expansion of this body still contains a native call.
+  uint8_t body_has_retained_call : 1;
+  // The selected Low body contains an explicit entry resource.
+  uint8_t body_has_resources : 1;
+  // The selected Low body contains an explicit storage reservation.
+  uint8_t body_has_storage : 1;
+  // A selected reservation contributes nonempty workgroup storage.
+  uint8_t body_has_workgroup_storage : 1;
+  // Cached Low-body blocker plus one; zero means the body is not inventoried.
+  uint8_t body_preflight;
 } loom_inline_symbol_info_t;
 
 typedef struct loom_inline_profitability_symbol_t {
@@ -106,7 +124,7 @@ typedef struct loom_inline_profitability_symbol_t {
 typedef struct loom_inline_plan_entry_t {
   // Stable ordinal assigned in reference occurrence order.
   uint32_t ordinal;
-  // Next required-inline entry with the same source symbol.
+  // Next call entry with the same source symbol.
   uint32_t next_graph_from_source;
   // Next required-inline entry executed in the same SCC component.
   uint32_t next_required_in_component;
@@ -121,11 +139,11 @@ typedef struct loom_inline_plan_entry_t {
   // Function-like interface for the target definition.
   loom_func_like_t callee;
   // Inline policy read from the callee symbol definition.
-  loom_inline_policy_t callee_policy;
+  uint8_t callee_policy;
   // Inline policy read from the call site.
-  loom_inline_policy_t call_policy;
+  uint8_t call_policy;
   // Effective edge inline policy after conflict resolution.
-  loom_inline_policy_t effective_policy;
+  uint8_t effective_policy;
   // Temperature hint read from the callee symbol definition.
   uint8_t callee_temperature;
   // Temperature hint read from the call site.
@@ -134,6 +152,8 @@ typedef struct loom_inline_plan_entry_t {
   uint8_t effective_temperature;
   // Planned loom_inline_plan_action_t, packed with the temperature hints.
   uint8_t action;
+  // Resolved loom_target_call_policy_t constraints for this boundary.
+  uint8_t target_policy;
   // Stable blocker code for ACTION_ERROR.
   loom_inline_blocker_t blocker;
   // Call-site execution context retained by the reference producer.
@@ -170,7 +190,11 @@ struct loom_inline_callables_plan_t {
   uint32_t entry_count;
   // Number of unresolved optional call entries.
   uint32_t candidate_count;
-  // First required or optional plan entry for each source symbol.
+  // Whether any retained boundary constrains the callee's expanded body.
+  bool has_native_constraints;
+  // At least one authored retained boundary fixes a leaf body.
+  bool has_required_leaf_body;
+  // First call entry for each source symbol.
   uint32_t* first_graph_by_source;
   // Lazily allocated optional-inline summaries indexed by symbol id.
   loom_inline_profitability_symbol_t* profitability_symbols;

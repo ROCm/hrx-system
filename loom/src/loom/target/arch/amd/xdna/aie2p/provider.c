@@ -10,6 +10,7 @@
 #include "loom/pass/builder.h"
 #include "loom/target/arch/amd/xdna/aie2p/call_abi.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/configuration_descriptors.h"
+#include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/low_registry.h"
 #include "loom/target/arch/amd/xdna/aie2p/facts.h"
 #include "loom/target/arch/amd/xdna/aie2p/legalization.h"
@@ -120,11 +121,9 @@ static loom_target_call_policy_t loom_aie2p_select_call_policy(
     const loom_resolved_target_t* resolved_target, const loom_module_t* module,
     loom_call_like_kind_t kind, loom_call_like_t call,
     loom_func_like_t callee) {
-  (void)call;
   if ((kind != LOOM_CALL_LIKE_KIND_SEMANTIC &&
        kind != LOOM_CALL_LIKE_KIND_LOW_INTERNAL) ||
       !module || !loom_func_like_isa(callee) ||
-      loom_func_like_inline_policy(callee) != LOOM_INLINE_POLICY_NOINLINE ||
       !loom_func_like_is_module_internal(callee) ||
       !loom_func_like_body(callee)) {
     return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
@@ -132,8 +131,13 @@ static loom_target_call_policy_t loom_aie2p_select_call_policy(
   // Configuration calls must expand before physical materialization. Semantic
   // array-strand helpers can retain calls until worker outlining selects the
   // core contract and its native ABI.
-  if (resolved_target->facts->storage.config.contract_set.stable_id ==
-      AIE2P_CONFIGURATION_DESCRIPTOR_SET_ID) {
+  const uint64_t contract_id =
+      resolved_target->facts->storage.config.contract_set.stable_id;
+  const bool explicit_noinline =
+      loom_func_like_inline_policy(callee) == LOOM_INLINE_POLICY_NOINLINE ||
+      loom_call_like_inline_policy(call) == LOOM_INLINE_POLICY_NOINLINE;
+  if (contract_id == AIE2P_CONFIGURATION_DESCRIPTOR_SET_ID ||
+      (contract_id != AIE2P_CORE_DESCRIPTOR_SET_ID && !explicit_noinline)) {
     return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
   }
 
@@ -147,12 +151,10 @@ static loom_target_call_policy_t loom_aie2p_select_call_policy(
         kind == LOOM_CALL_LIKE_KIND_SEMANTIC
             ? loom_aie2p_call_abi_add_source_type(type, &argument_requirements)
             : loom_aie2p_call_abi_add_low_type(type, &argument_requirements);
-    if (!supported) {
+    if (!supported ||
+        !loom_aie2p_call_abi_requirements_fit(argument_requirements)) {
       return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
     }
-  }
-  if (!loom_aie2p_call_abi_requirements_fit(argument_requirements)) {
-    return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
   }
 
   loom_aie2p_call_abi_requirements_t result_requirements = {0};
@@ -163,13 +165,16 @@ static loom_target_call_policy_t loom_aie2p_select_call_policy(
         kind == LOOM_CALL_LIKE_KIND_SEMANTIC
             ? loom_aie2p_call_abi_add_source_type(type, &result_requirements)
             : loom_aie2p_call_abi_add_low_type(type, &result_requirements);
-    if (!supported) {
+    if (!supported ||
+        !loom_aie2p_call_abi_requirements_fit(result_requirements)) {
       return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
     }
   }
-  return loom_aie2p_call_abi_requirements_fit(result_requirements)
-             ? LOOM_TARGET_CALL_POLICY_DIRECT
-             : LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
+  return LOOM_TARGET_CALL_POLICY_REQUIRE_LEAF |
+         (kind == LOOM_CALL_LIKE_KIND_LOW_INTERNAL
+              ? LOOM_TARGET_CALL_POLICY_NO_RESOURCES |
+                    LOOM_TARGET_CALL_POLICY_NO_STORAGE
+              : 0);
 }
 
 static iree_status_t loom_aie2p_provider_contribute_pipeline(

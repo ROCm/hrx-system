@@ -200,6 +200,7 @@ _TargetKind = EnumDef(
         EnumCase("low_core", 1, doc="Generic target-low test core."),
         EnumCase("quirky", 2, doc="Synthetic edge-case target."),
         EnumCase("device", 3, doc="Device environment containing low_core workers."),
+        EnumCase("low_leaf", 4, doc="Core with a leaf-only native callable ABI."),
     ],
     doc="Synthetic target kind for target-like interface tests.",
     c_type="loom_test_target_kind_t",

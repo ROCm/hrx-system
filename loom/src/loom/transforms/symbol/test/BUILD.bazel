@@ -22,6 +22,8 @@ loom_check_test_suite(
         "inline_closure_refinement.loom-test",
         "inline_command_programs.loom-test",
         "inline_dependent_types.loom-test",
+        "inline_leaf_calls.loom-test",
+        "inline_leaf_diagnostics.loom-test",
         "inline_profitability.loom-test",
         "inline_target_context.loom-test",
         "inline_worker_policy.loom-test",

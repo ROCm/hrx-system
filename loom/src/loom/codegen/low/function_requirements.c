@@ -13,6 +13,27 @@
 #include "loom/codegen/low/representation_binding.h"
 #include "loom/ops/low/ops.h"
 
+iree_host_size_t loom_low_call_boundary_scope(
+    const loom_low_call_boundary_index_t* index, const loom_op_t* op) {
+  const uint16_t block_index = loom_block_region_index(op->parent_block);
+  iree_host_size_t begin = 0;
+  iree_host_size_t end = index->count;
+  while (begin < end) {
+    const iree_host_size_t middle = begin + (end - begin) / 2;
+    const loom_op_t* call = index->calls[middle];
+    const uint16_t call_block_index =
+        loom_block_region_index(call->parent_block);
+    if (call_block_index < block_index ||
+        (call_block_index == block_index &&
+         call->block_ordinal < op->block_ordinal)) {
+      begin = middle + 1;
+    } else {
+      end = middle;
+    }
+  }
+  return block_index + begin;
+}
+
 typedef struct loom_low_direct_callee_builder_t {
   loom_low_direct_callee_requirement_t* values;
   iree_host_size_t count;
@@ -169,6 +190,8 @@ static iree_status_t loom_low_function_requirements_build_impl(
   iree_host_size_t resource_capacity = 0;
   loom_low_read_only_data_builder_t read_only_data_builder = {0};
   loom_low_direct_callee_builder_t direct_callee_builder = {0};
+  const loom_op_t** calls = NULL;
+  iree_host_size_t call_capacity = 0;
   loom_low_storage_layout_builder_t storage_builder;
   loom_low_storage_layout_builder_initialize(&storage_builder);
   const loom_block_t* entry_block = loom_region_const_entry_block(body);
@@ -219,6 +242,15 @@ static iree_status_t loom_low_function_requirements_build_impl(
           ++out_requirements->borrow_count;
           break;
         case LOOM_OP_LOW_FUNC_CALL: {
+          const iree_host_size_t minimum_capacity =
+              out_requirements->call_boundaries.count + 1;
+          if (minimum_capacity > call_capacity) {
+            IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+                arena, out_requirements->call_boundaries.count,
+                iree_max(minimum_capacity, 4u), sizeof(*calls), &call_capacity,
+                (void**)&calls));
+          }
+          calls[out_requirements->call_boundaries.count++] = op;
           IREE_RETURN_IF_ERROR(
               loom_low_function_requirements_append_direct_callee(
                   loom_low_func_call_callee(op), op, arena, scratch_arena,
@@ -234,6 +266,7 @@ static iree_status_t loom_low_function_requirements_build_impl(
     }
   }
   out_requirements->resources = resources;
+  out_requirements->call_boundaries.calls = calls;
   out_requirements->read_only_data =
       loom_low_read_only_data_builder_finish(&read_only_data_builder);
   out_requirements->direct_callees =

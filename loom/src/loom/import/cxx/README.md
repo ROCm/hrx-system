@@ -801,6 +801,43 @@ The `LOOM_INLINE` facade macro combines `[[loom::inline]]` with the ordinary
 C++ `inline` keyword for header helpers. Direct attributes remain available
 when linkage and placement need separate control.
 
+For a large helper called from several places, `loom::noinline` preserves a
+callable boundary instead of copying its loops into every caller:
+
+```cpp
+[[loom::noinline]] static float advance(float value, const int* counts, unsigned phase) {
+  for (int iteration = 0; iteration < counts[phase & 15u]; ++iteration) {
+    value = value * 1.001f + 0.5f;
+  }
+  return value;
+}
+
+float integrate(float value, const int* counts) {
+  value = advance(value, counts, 0u);
+  return advance(value, counts, 1u);
+}
+```
+
+Unannotated helpers participate in the shared size budget, including on AMDGPU
+and AIE2P cores. Large or frequently called helpers can remain shared without
+annotations. The compiler keeps those decisions compatible with the target:
+oversized physical argument lists and unsupported helper storage force
+expansion. `loom::noinline` instead diagnoses an incompatible boundary.
+
+AMDGPU and AIE2P native helpers may contain loops and branches, but must be
+leaves after inlining. In a chain `kernel → outer → inner`, the compiler can
+expand `outer` and retain `inner`, or expand `inner` and retain `outer`.
+`loom::noinline` on `outer` selects the second choice; another `loom::noinline`
+on `inner` makes that graph invalid. No subordinate annotation is needed for
+ordinary helpers. AIE2P array construction and configuration still expand
+calls where realization needs their effects in the enclosing program.
+
+The shared inlining budgets apply where the selected target permits optional
+inlining. They do not override a target's required expansion or an authored
+`loom::inline` / `loom::noinline` contract. The
+[function guide](../../../../docs/src/guide/functions-and-control.md#function-modifiers-state-contracts)
+describes those budgets and custom pass options.
+
 ## Translation-unit and runtime imports
 
 A called namespace-scope prototype becomes an ordinary High `func.decl` when

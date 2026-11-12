@@ -290,6 +290,7 @@ loom_cc_library(
         "//loom/src/loom/pass:builder",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:configuration",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:registry",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/lower",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/ops",

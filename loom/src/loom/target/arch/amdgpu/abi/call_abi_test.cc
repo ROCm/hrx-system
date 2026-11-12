@@ -105,12 +105,12 @@ TEST(AmdgpuCallAbiTest, ClassifiesFixedStateRegisterFamilies) {
 TEST(AmdgpuCallAbiTest, ClassifiesSgprAndVgprRanges) {
   loom_amdgpu_call_abi_requirements_t requirements = {};
   EXPECT_TRUE(loom_amdgpu_call_abi_add_low_type(
-      &kDescriptorSet,
+      kDescriptorSetId,
       loom_low_register_type(kDescriptorSetId, LOOM_AMDGPU_REG_CLASS_ID_SGPR,
                              2),
       &requirements));
   EXPECT_TRUE(loom_amdgpu_call_abi_add_low_type(
-      &kDescriptorSet,
+      kDescriptorSetId,
       loom_low_register_type(kDescriptorSetId, LOOM_AMDGPU_REG_CLASS_ID_VGPR,
                              4),
       &requirements));
@@ -121,12 +121,12 @@ TEST(AmdgpuCallAbiTest, ClassifiesSgprAndVgprRanges) {
 TEST(AmdgpuCallAbiTest, RejectsForeignAndSpecialRegisterCarriers) {
   loom_amdgpu_call_abi_requirements_t requirements = {};
   EXPECT_FALSE(loom_amdgpu_call_abi_add_low_type(
-      &kDescriptorSet,
+      kDescriptorSetId,
       loom_low_register_type(kDescriptorSetId + 1,
                              LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1),
       &requirements));
   EXPECT_FALSE(loom_amdgpu_call_abi_add_low_type(
-      &kDescriptorSet,
+      kDescriptorSetId,
       loom_low_register_type(kDescriptorSetId, LOOM_AMDGPU_REG_CLASS_ID_EXEC,
                              1),
       &requirements));

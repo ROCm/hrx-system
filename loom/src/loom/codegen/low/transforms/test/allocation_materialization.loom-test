@@ -1877,3 +1877,69 @@ low.func.def target<test.low.core>(@target) @shared_reload_with_live_scalar(%blo
   %out = test.add.i32 %sum2, %pressure
   return %out
 }
+
+// ====
+
+// Sharing reloads cannot recreate the register lifetime across a call.
+// RUN: with-low-asm pass low-materialize-allocation{budgets=test.i32=9}
+
+test.target<low_core> @test_target
+
+low.func.def noinline target<test.low.core>(@test_target) @boundary() asm {
+  return
+}
+
+low.func.def target<test.low.core>(@test_target) @call_separated_slice_reloads(%blocker: reg<test.i32>, %wide: reg<test.i32 x8>) -> (reg<test.i32>) asm {
+  %temporary = test.add.i32 %blocker, %blocker
+  %pressure = test.add.i32 %blocker, %temporary
+  %wide0 = slice %wide[0] : reg<test.i32 x8> -> reg<test.i32>
+  %wide1 = slice %wide[1] : reg<test.i32 x8> -> reg<test.i32>
+  %sum0 = test.add.i32 %wide0, %wide1
+  %wide2 = slice %wide[2] : reg<test.i32 x8> -> reg<test.i32>
+  %sum1 = test.add.i32 %sum0, %wide2
+  %wide3 = slice %wide[3] : reg<test.i32 x8> -> reg<test.i32>
+  %sum2 = test.add.i32 %sum1, %wide3
+  low.func.call @boundary() : ()
+  %wide4 = slice %wide[4] : reg<test.i32 x8> -> reg<test.i32>
+  %sum3 = test.add.i32 %sum2, %wide4
+  %wide5 = slice %wide[5] : reg<test.i32 x8> -> reg<test.i32>
+  %sum4 = test.add.i32 %sum3, %wide5
+  %wide6 = slice %wide[6] : reg<test.i32 x8> -> reg<test.i32>
+  %sum5 = test.add.i32 %sum4, %wide6
+  %wide7 = slice %wide[7] : reg<test.i32 x8> -> reg<test.i32>
+  %sum6 = test.add.i32 %sum5, %wide7
+  %result = test.add.i32 %sum6, %pressure
+  return %result
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def noinline target<test.low.core>(@test_target) @boundary() asm {
+  return
+}
+
+low.func.def target<test.low.core>(@test_target) @call_separated_slice_reloads(%blocker: reg<test.i32>, %wide: reg<test.i32 x8>) -> (reg<test.i32>) asm {
+  %call_separated_slice_reloads_spill_storage_0 = storage {byte_alignment = 16, byte_length = 32} : low.storage<private>
+  low.spill %wide, %call_separated_slice_reloads_spill_storage_0 : reg<test.i32 x8>, low.storage<private>
+  %temporary = test.add.i32 %blocker, %blocker
+  %pressure = test.add.i32 %blocker, %temporary
+  %22 = low.reload %call_separated_slice_reloads_spill_storage_0 : low.storage<private> -> reg<test.i32>
+  %23 = low.reload %call_separated_slice_reloads_spill_storage_0 {offset = 4} : low.storage<private> -> reg<test.i32>
+  %sum0 = test.add.i32 %22, %23
+  %24 = low.reload %call_separated_slice_reloads_spill_storage_0 {offset = 8} : low.storage<private> -> reg<test.i32>
+  %sum1 = test.add.i32 %sum0, %24
+  %25 = low.reload %call_separated_slice_reloads_spill_storage_0 {offset = 12} : low.storage<private> -> reg<test.i32>
+  %sum2 = test.add.i32 %sum1, %25
+  low.func.call @boundary() : ()
+  %26 = low.reload %call_separated_slice_reloads_spill_storage_0 {offset = 16} : low.storage<private> -> reg<test.i32>
+  %sum3 = test.add.i32 %sum2, %26
+  %27 = low.reload %call_separated_slice_reloads_spill_storage_0 {offset = 20} : low.storage<private> -> reg<test.i32>
+  %sum4 = test.add.i32 %sum3, %27
+  %28 = low.reload %call_separated_slice_reloads_spill_storage_0 {offset = 24} : low.storage<private> -> reg<test.i32>
+  %sum5 = test.add.i32 %sum4, %28
+  %29 = low.reload %call_separated_slice_reloads_spill_storage_0 {offset = 28} : low.storage<private> -> reg<test.i32>
+  %sum6 = test.add.i32 %sum5, %29
+  %result = test.add.i32 %sum6, %pressure
+  return %result
+}

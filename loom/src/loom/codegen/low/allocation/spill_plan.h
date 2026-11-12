@@ -39,8 +39,10 @@ typedef struct loom_low_allocation_spill_plan_traffic_t {
 // Reusable traffic-query scratch for one immutable function CFG. Contents are
 // empty between queries; storage belongs to the allocation attempt's arena.
 typedef struct loom_low_allocation_spill_plan_traffic_workspace_t {
-  // Slice-use totals and touched-list links, indexed by region block index.
-  struct loom_low_allocation_spill_plan_slice_group_t* slice_groups_by_block;
+  // Source call boundaries borrowed from the owning function snapshot.
+  loom_low_call_boundary_index_t call_boundaries;
+  // Slice-use totals and touched-list links, indexed by block/call scope.
+  struct loom_low_allocation_spill_plan_slice_group_t* slice_groups_by_scope;
 } loom_low_allocation_spill_plan_traffic_workspace_t;
 
 // Reference to an original SSA value or a value produced by an earlier spill
@@ -92,7 +94,7 @@ typedef enum loom_low_spill_materialization_action_kind_e {
   LOOM_LOW_SPILL_MATERIALIZATION_ACTION_OPERAND_RELOAD = 2,
   // Reload one addressable slice and erase the original slice operation.
   LOOM_LOW_SPILL_MATERIALIZATION_ACTION_NARROW_SLICE_RELOAD = 3,
-  // Reload a complete spilled value shared by a block-local slice group.
+  // Reload a complete spilled value shared by a call-free slice group.
   LOOM_LOW_SPILL_MATERIALIZATION_ACTION_SHARED_SLICE_RELOAD = 4,
   // Remove one current predecessor payload from its branch.
   LOOM_LOW_SPILL_MATERIALIZATION_ACTION_REMOVE_BRANCH_ARGUMENT = 5,
@@ -287,7 +289,7 @@ bool loom_low_allocation_spill_plan_slice_reload_byte_size(
     uint32_t spill_byte_size, const loom_op_t* use_op,
     uint32_t* out_reload_byte_size);
 
-// Returns true when a block-local slice group should share one full reload.
+// Returns true when a call-free slice group should share one full reload.
 bool loom_low_allocation_spill_plan_use_full_slice_reload(
     uint32_t slice_count, uint64_t narrow_reload_bytes,
     uint32_t spill_byte_size);
@@ -314,7 +316,9 @@ iree_status_t loom_low_spill_materialization_plan_build(
 // Allocates traffic-query scratch once for |body|. Call when spill selection
 // first becomes necessary, using the owning allocation attempt's scratch arena.
 iree_status_t loom_low_allocation_spill_plan_traffic_workspace_initialize(
-    const loom_region_t* body, iree_arena_allocator_t* arena,
+    const loom_region_t* body,
+    const loom_low_call_boundary_index_t* call_boundaries,
+    iree_arena_allocator_t* arena,
     loom_low_allocation_spill_plan_traffic_workspace_t* out_workspace);
 
 // Computes the predicted memory traffic for spilling |assignment| using

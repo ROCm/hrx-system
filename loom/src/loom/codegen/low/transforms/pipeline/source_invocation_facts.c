@@ -177,9 +177,10 @@ static iree_status_t loom_low_source_invocation_collect_call(
       loom_call_like_inline_policy(call) == LOOM_INLINE_POLICY_INLINE ||
       loom_func_like_inline_policy(callee->source) ==
           LOOM_INLINE_POLICY_INLINE ||
-      loom_target_provider_select_call_policy(
-          &version->resolved_target, work->module, LOOM_CALL_LIKE_KIND_SEMANTIC,
-          call, callee->source) != LOOM_TARGET_CALL_POLICY_DIRECT) {
+      iree_any_bit_set(loom_target_provider_select_call_policy(
+                           &version->resolved_target, work->module,
+                           LOOM_CALL_LIKE_KIND_SEMANTIC, call, callee->source),
+                       LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE)) {
     return iree_ok_status();
   }
   ((uint8_t*)work->facts->direct_call_targets)[callee_symbol.symbol_id] = 1;

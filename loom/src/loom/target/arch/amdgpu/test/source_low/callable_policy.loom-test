@@ -123,13 +123,13 @@ func.def public target(@target) @owned_view_result() -> (i32) {
 amdgpu.target<gfx11-generic> @target
 
 func.def @cycle_a(%value: i32) -> (i32) {
-  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="cycle_b", failure_code="required_cycle"}
+  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="cycle_b", failure_code="native_call_cycle"}
   %result = func.call @cycle_b(%value) : (i32) -> (i32)
   func.return %result : i32
 }
 
 func.def @cycle_b(%value: i32) -> (i32) {
-  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="cycle_a", failure_code="required_cycle"}
+  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="cycle_a", failure_code="native_call_cycle"}
   %result = func.call @cycle_a(%value) : (i32) -> (i32)
   func.return %result : i32
 }

@@ -33,6 +33,23 @@ typedef struct loom_low_direct_callee_requirement_list_t {
   iree_host_size_t count;
 } loom_low_direct_callee_requirement_list_t;
 
+// Calls partition each source block into independent reload scopes.
+// A shared reload cannot span a call that may clobber its register carrier.
+typedef struct loom_low_call_boundary_index_t {
+  // Borrowed calls in block/operation order. Preparation may insert non-call
+  // operations and relabel positions while preserving this call order.
+  // NULL for call-free bodies.
+  const loom_op_t* const* calls;
+  // Number of calls, including repeated calls to the same callee.
+  iree_host_size_t count;
+} loom_low_call_boundary_index_t;
+
+// Returns the dense block/call scope containing |op|. The operation belongs
+// directly to the indexed body. Scope count is body block count plus calls;
+// call operands belong to the scope immediately preceding their call.
+iree_host_size_t loom_low_call_boundary_scope(
+    const loom_low_call_boundary_index_t* index, const loom_op_t* op);
+
 // Requirements available before scheduling, allocation, or native emission.
 //
 // Resource operations borrow the source function. Storage records belong to
@@ -57,6 +74,8 @@ typedef struct loom_low_function_requirements_t {
   loom_low_read_only_data_set_t read_only_data;
   // Direct Low callees in first-call order, with duplicate calls collapsed.
   loom_low_direct_callee_requirement_list_t direct_callees;
+  // Source call boundaries retained for spill traffic and materialization.
+  loom_low_call_boundary_index_t call_boundaries;
   // Number of operations in the immediate function body.
   iree_host_size_t node_count;
   // Number of Low returns that transfer control back to a caller.

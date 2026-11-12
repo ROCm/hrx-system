@@ -122,6 +122,20 @@ instead of cloning its body, but it still must fit the budget: a call boundary
 can contain register pressure even when removing it would not duplicate code.
 Required `inline` calls and target-required calls do not consume either budget.
 
+Target-required expansion takes precedence over this cost policy. AMDGPU and
+AIE2P core helpers use the same budgets, with leaf-only native call boundaries.
+For `entry → outer → inner`, the compiler can retain `inner` and expand `outer`,
+or expand `inner` and retain `outer`. An authored `noinline` on `outer` requires
+its subordinate calls to expand; two nested `noinline` boundaries cannot satisfy
+these targets' callable contracts and produce a diagnostic.
+
+Automatic calls also expand when their physical arguments or results exceed
+the native register banks, or when the helper owns storage that its target
+cannot support at a call boundary. These decisions use the selected Low types.
+An authored `noinline` makes an incompatible boundary an error. AIE2P array
+construction and configuration calls still expand where realization requires
+their effects in the enclosing program.
+
 Custom pipelines can tune the two optional classes independently:
 
 ```text
@@ -144,11 +158,12 @@ stronger contract.
 [`low.invoke`](../reference/dialects/low/ops/invoke.md) lets a source function
 delegate part of its device implementation to an authored `low.func.def`.
 A helper can express a target instruction sequence while indexing, launch
-geometry, and the surrounding algorithm remain in source IR. On AMDGPU and
-x86, the compiler inlines these helpers before emission, and their instructions
-normally participate in scheduling and register allocation with the caller.
-The call's inline policy follows the same rules as other callable boundaries;
-`noinline` is rejected on targets that require Low calls to inline.
+geometry, and the surrounding algorithm remain in source IR. When the boundary
+is inlined, the helper's instructions participate in scheduling and register
+allocation with the caller. A retained boundary uses the selected target's
+callable ABI and keeps the helper as a separate function. The call's inline
+policy follows the same rules as other callable boundaries; `noinline` is
+rejected when the target cannot retain that boundary.
 
 The call site retains source types while the helper signature uses target-Low
 register types. Physical register classes are carrier-only: source semantic

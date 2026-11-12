@@ -152,3 +152,64 @@ check.scenario @call_values {
   }
   check.return
 }
+
+// Cold automatic boundaries expose a nested graph without requiring an ABI
+// that supports native recursion or nested helper activations.
+func.def cold @advance_rounds(%initial: i32, %rounds: index) -> (i32) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %multiplier = scalar.constant 5 : i32
+  %bias = scalar.constant 3 : i32
+  %result = scf.for %round = [%c0 to %rounds step %c1](%value = %initial : i32) -> (i32) {
+    %scaled = scalar.muli %value, %multiplier : i32
+    %next = scalar.addi %scaled, %bias : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+func.def cold @advance_twice(%initial: i32, %rounds: index) -> (i32) {
+  %first = func.call @advance_rounds(%initial, %rounds) : (i32, index) -> (i32)
+  %second = func.call @advance_rounds(%first, %rounds) : (i32, index) -> (i32)
+  func.return %second : i32
+}
+
+func.def @nested_observations(%bits: i64, %rounds: index, %output: buffer) {
+  %initial = scalar.trunci %bits : i64 to i32
+  %result = func.call @advance_twice(%initial, %rounds) : (i32, index) -> (i32)
+  %origin = index.constant 0 : offset
+  %view = buffer.view %output[%origin] : buffer -> view<1xi32>
+  view.store %result, %view[0] : i32, view<1xi32>
+  func.return
+}
+
+// One flat loop is an independent oracle for the composition of two helpers.
+func.def @nested_oracle(%bits: i64, %rounds: index, %output: buffer) {
+  %initial = scalar.trunci %bits : i64 to i32
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %count = index.add %rounds, %rounds : index
+  %bias = scalar.constant 3 : i32
+  %result = scf.for %round = [%c0 to %count step %c1](%value = %initial : i32) -> (i32) {
+    %doubled = scalar.addi %value, %value : i32
+    %quadrupled = scalar.addi %doubled, %doubled : i32
+    %scaled = scalar.addi %quadrupled, %value : i32
+    %next = scalar.addi %scaled, %bias : i32
+    scf.yield %next : i32
+  }
+  %origin = index.constant 0 : offset
+  %view = buffer.view %output[%origin] : buffer -> view<1xi32>
+  view.store %result, %view[0] : i32, view<1xi32>
+  func.return
+}
+
+check.scenario @nested_automatic_calls {
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %bits = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %output = check.generate.fill value(0) : tensor<1xi32>
+    check.compare<@nested_observations, @nested_oracle>(%bits, %trial, %output) : (i64, index, tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<1xi32>
+    }
+  }
+  check.return
+}

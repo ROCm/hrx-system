@@ -69,6 +69,7 @@ iree_cli_test(
 loom_check_test_suite(
     name = "loom_check_test",
     srcs = [
+        "call_policy.loom-test",
         "configuration_calls.loom-test",
         "configuration_contracts.loom-test",
         "configuration_entry.loom-test",

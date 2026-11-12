@@ -75,6 +75,8 @@ typedef struct loom_low_allocation_interval_assignment_context_t {
   // Structural register requirements borrowed from the immutable function
   // model.
   const loom_low_register_requirement_t* register_requirements;
+  // Source call boundaries from the immutable function requirements.
+  loom_low_call_boundary_index_t call_boundaries;
   // Optional final schedule defining |liveness|'s top-level operation order.
   const struct loom_low_schedule_table_t* schedule;
   // Function-local placement relations over |liveness|.
