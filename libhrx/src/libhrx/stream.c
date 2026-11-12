@@ -143,11 +143,12 @@ hrx_status_t hrx_stream_flush(hrx_stream_t stream) {
     HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
   }
 
-  // End the command buffer recording.
-  iree_status_t status = iree_hal_command_buffer_end(stream->pending_cb);
-  if (!iree_status_is_ok(status)) {
-    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
-  }
+  // Ending a one-shot recording consumes it even if sealing or submission
+  // fails. It cannot remain available for appending commands or ending again.
+  iree_hal_command_buffer_t* command_buffer = stream->pending_cb;
+  stream->pending_cb = NULL;
+  stream->has_pending_work = false;
+  iree_status_t status = iree_hal_command_buffer_end(command_buffer);
 
   // Build wait/signal semaphore lists.
   // Wait on current timepoint, signal next.
@@ -169,18 +170,17 @@ hrx_status_t hrx_stream_flush(hrx_stream_t stream) {
 
   iree_hal_buffer_binding_table_t binding_table =
       iree_hal_buffer_binding_table_empty();
-  status = iree_hal_queue_execute(stream->hal_queue, wait_list, signal_list,
-                                  stream->pending_cb, binding_table,
-                                  IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
-  if (!iree_status_is_ok(status)) {
-    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_queue_execute(stream->hal_queue, wait_list, signal_list,
+                                    command_buffer, binding_table,
+                                    IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
+  }
+  if (iree_status_is_ok(status)) {
+    stream->timepoint = signal_value;
   }
 
-  stream->timepoint = signal_value;
-  iree_hal_command_buffer_release(stream->pending_cb);
-  stream->pending_cb = NULL;
-  stream->has_pending_work = false;
-  HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
+  iree_hal_command_buffer_release(command_buffer);
+  HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
 }
 
 hrx_status_t hrx_stream_synchronize(hrx_stream_t stream) {

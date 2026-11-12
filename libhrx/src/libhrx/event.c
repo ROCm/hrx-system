@@ -3,8 +3,8 @@
 //
 // Event implementation. An event marks a point in a stream's execution
 // timeline. Cross-stream synchronization is achieved by recording an event
-// on one stream and waiting for it on another. Each event owns a dedicated
-// semaphore that is signaled when the recorded stream timepoint completes.
+// on one stream and waiting for it on another. Each record retains a snapshot
+// of the recording stream's accepted timeline point.
 
 #include <stdlib.h>
 
@@ -31,14 +31,8 @@ hrx_status_t hrx_event_create(hrx_device_t device, hrx_event_flags_t flags,
   event->flags = flags;
   event->signal_value = 0;
   event->device = device;
+  hrx_device_retain(device);
   event->record_time_ns = 0;
-
-  hrx_status_t status =
-      hrx_semaphore_create(device, /*initial_value=*/0, &event->semaphore);
-  if (!hrx_status_is_ok(status)) {
-    free(event);
-    return status;
-  }
 
   *out_event = event;
   return hrx_ok_status();
@@ -57,6 +51,7 @@ void hrx_event_release(hrx_event_t event) {
   }
   if (iree_atomic_ref_count_dec(&event->ref_count) == 1) {
     hrx_semaphore_release(event->semaphore);
+    hrx_device_release(event->device);
     free(event);
   }
 }
@@ -71,65 +66,52 @@ hrx_status_t hrx_event_record(hrx_event_t event, hrx_stream_t stream) {
                            "event or stream is NULL");
   }
 
-  // Flush pending work so it's submitted before the barrier.
+  // Submit the pending recording before naming its accepted completion point.
   hrx_status_t status = hrx_stream_flush(stream);
   if (!hrx_status_is_ok(status)) {
     return status;
   }
 
-  if (IREE_UNLIKELY(stream->timepoint >= IREE_HAL_SEMAPHORE_MAX_VALUE ||
-                    event->signal_value >= IREE_HAL_SEMAPHORE_MAX_VALUE)) {
-    return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
-                           "stream or event timeline value exhausted");
+  const bool timing_enabled = !(event->flags & HRX_EVENT_FLAG_DISABLE_TIMING);
+  if (timing_enabled) {
+    if (IREE_UNLIKELY(stream->timepoint >= IREE_HAL_SEMAPHORE_MAX_VALUE)) {
+      return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                             "stream timeline value exhausted");
+    }
+    iree_hal_semaphore_t* semaphore = stream->semaphore->hal_semaphore;
+    uint64_t wait_value = stream->timepoint;
+    uint64_t signal_value = wait_value + 1;
+    const iree_hal_semaphore_list_t waits = {
+        .count = wait_value > 0 ? 1 : 0,
+        .semaphores = &semaphore,
+        .payload_values = &wait_value,
+    };
+    const iree_hal_semaphore_list_t signals = {
+        .count = 1,
+        .semaphores = &semaphore,
+        .payload_values = &signal_value,
+    };
+    const iree_hal_barrier_list_t empty_list = {0};
+    const iree_hal_queue_barriers_t empty_barriers = {&empty_list, &empty_list};
+    iree_status_t iree_status = iree_hal_queue_barrier(
+        stream->hal_queue, waits, signals, &empty_barriers,
+        IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+    if (!iree_status_is_ok(iree_status)) {
+      return hrx_status_from_iree(iree_status);
+    }
+    stream->timepoint = signal_value;
   }
 
-  // Each timeline has its own next value. Successive event producers must
-  // remain ordered even when they come from independent stream queues.
-  iree_hal_semaphore_t* wait_semaphores[2];
-  uint64_t wait_values[2];
-  iree_host_size_t wait_count = 0;
-  if (stream->timepoint) {
-    wait_semaphores[wait_count] = stream->semaphore->hal_semaphore;
-    wait_values[wait_count++] = stream->timepoint;
+  // Re-recording observes the new producer without ordering it after the old
+  // one. Already-enqueued waits retain their own semaphore/value snapshots.
+  if (event->semaphore != stream->semaphore) {
+    hrx_semaphore_t previous_semaphore = event->semaphore;
+    event->semaphore = stream->semaphore;
+    hrx_semaphore_retain(event->semaphore);
+    hrx_semaphore_release(previous_semaphore);
   }
-  if (event->signal_value) {
-    wait_semaphores[wait_count] = event->semaphore->hal_semaphore;
-    wait_values[wait_count++] = event->signal_value;
-  }
-  const iree_hal_semaphore_list_t wait_list = {
-      .count = wait_count,
-      .semaphores = wait_semaphores,
-      .payload_values = wait_values,
-  };
-
-  iree_hal_semaphore_t* signal_semaphores[] = {stream->semaphore->hal_semaphore,
-                                               event->semaphore->hal_semaphore};
-  uint64_t signal_values[] = {stream->timepoint + 1, event->signal_value + 1};
-  const iree_hal_semaphore_list_t signal_list = {
-      .count = 2,
-      .semaphores = signal_semaphores,
-      .payload_values = signal_values,
-  };
-
-  // Event recording publishes only semaphore timepoints. Explicitly empty
-  // boundaries keep this on the queue's empty-barrier path; NULL would request
-  // conservative payload visibility and may serialize otherwise independent
-  // streams sharing one native queue.
-  const iree_hal_barrier_list_t empty_barrier_list = {0};
-  const iree_hal_queue_barriers_t empty_barriers = {
-      &empty_barrier_list,
-      &empty_barrier_list,
-  };
-  iree_status_t iree_status =
-      iree_hal_queue_barrier(stream->hal_queue, wait_list, signal_list,
-                             &empty_barriers, IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
-  if (!iree_status_is_ok(iree_status)) {
-    return hrx_status_from_iree(iree_status);
-  }
-
-  stream->timepoint = signal_values[0];
-  event->signal_value = signal_values[1];
-  event->record_time_ns = (int64_t)iree_time_now();
+  event->signal_value = stream->timepoint;
+  event->record_time_ns = timing_enabled ? (int64_t)iree_time_now() : 0;
   return hrx_ok_status();
 }
 
@@ -141,6 +123,11 @@ hrx_status_t hrx_event_query(hrx_event_t event, bool* complete) {
   if (!event || !complete) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                            "event or complete is NULL");
+  }
+
+  if (event->signal_value == 0) {
+    *complete = true;
+    return hrx_ok_status();
   }
 
   uint64_t current = 0;
@@ -157,8 +144,11 @@ hrx_status_t hrx_event_synchronize(hrx_event_t event) {
   if (!event) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "event is NULL");
   }
-  iree_status_t status = hrx_status_to_iree(
-      hrx_semaphore_wait(event->semaphore, event->signal_value, UINT64_MAX));
+  iree_status_t status = iree_ok_status();
+  if (event->signal_value > 0) {
+    status = hrx_status_to_iree(
+        hrx_semaphore_wait(event->semaphore, event->signal_value, UINT64_MAX));
+  }
   return hrx_status_from_iree(
       iree_status_join(status, hrx_runtime_profile_flush(event->device)));
 }
@@ -219,6 +209,10 @@ hrx_status_t hrx_stream_wait_event(hrx_stream_t stream, hrx_event_t event) {
   if (!stream || !event) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                            "stream or event is NULL");
+  }
+
+  if (event->signal_value == 0) {
+    return hrx_ok_status();
   }
 
   const hrx_timeline_point_t position = {
