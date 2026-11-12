@@ -82,7 +82,7 @@ class HipMemoryInteropApiTest : public testing::Test {
 
   void TearDown() override {
     if (ready_) {
-      callback_.release.release();
+      ReleaseCallback();
       EXPECT_EQ(hipSuccess, synchronize_());
       if (graph_executable_) {
         EXPECT_EQ(hipSuccess, graph_exec_destroy_(graph_executable_));
@@ -95,6 +95,14 @@ class HipMemoryInteropApiTest : public testing::Test {
       }
       if (callback_stream_) {
         EXPECT_EQ(hipSuccess, stream_destroy_(callback_stream_));
+      }
+      if (copy_context_) {
+        if (host_memory_) {
+          EXPECT_EQ(hipSuccess, free_host_(host_memory_));
+          host_memory_ = nullptr;
+        }
+        EXPECT_EQ(hipSuccess, set_context_(allocation_context_));
+        EXPECT_EQ(hipSuccess, destroy_context_(copy_context_));
       }
       if (device_memory_) {
         EXPECT_EQ(hipSuccess, free_(device_memory_));
@@ -112,7 +120,39 @@ class HipMemoryInteropApiTest : public testing::Test {
     auto* fixture = static_cast<HipMemoryInteropApiTest*>(user_data);
     fixture->callback_.entered.release();
     fixture->callback_.release.acquire();
+    if (fixture->callback_.initialize_size) {
+      std::memset(fixture->host_memory_, 0x7B,
+                  fixture->callback_.initialize_size);
+    }
     fixture->callback_.returned.store(true, std::memory_order_release);
+  }
+
+  void ReleaseCallback() {
+    if (!callback_.released) {
+      callback_.released = true;
+      callback_.release.release();
+    }
+  }
+
+  void CreateCopyContext() {
+    const auto get_device =
+        dso_.Resolve<decltype(&hipGetDevice)>("hipGetDevice");
+    const auto get_context =
+        dso_.Resolve<decltype(&hipCtxGetCurrent)>("hipCtxGetCurrent");
+    const auto create_context =
+        dso_.Resolve<decltype(&hipCtxCreate)>("hipCtxCreate");
+    set_context_ =
+        dso_.Resolve<decltype(&hipCtxSetCurrent)>("hipCtxSetCurrent");
+    destroy_context_ = dso_.Resolve<decltype(&hipCtxDestroy)>("hipCtxDestroy");
+    ASSERT_NE(get_device, nullptr);
+    ASSERT_NE(get_context, nullptr);
+    ASSERT_NE(create_context, nullptr);
+    ASSERT_NE(set_context_, nullptr);
+    ASSERT_NE(destroy_context_, nullptr);
+    hipDevice_t device = 0;
+    ASSERT_EQ(hipSuccess, get_device(&device));
+    ASSERT_EQ(hipSuccess, get_context(&allocation_context_));
+    ASSERT_EQ(hipSuccess, create_context(&copy_context_, 0, device));
   }
 
   void CheckHostRange(void* host_pointer, bool expect_common_address) {
@@ -171,6 +211,15 @@ class HipMemoryInteropApiTest : public testing::Test {
   hipStream_t copy_stream_ = nullptr;
   // Distinct nonblocking stream carrying the held application callback.
   hipStream_t callback_stream_ = nullptr;
+  // Borrowed primary context owning the test's device allocation.
+  hipCtx_t allocation_context_ = nullptr;
+  // Compatibility context sharing the native device, released after its
+  // streams.
+  hipCtx_t copy_context_ = nullptr;
+  // Restores the primary context before freeing its device allocation.
+  decltype(&hipCtxSetCurrent) set_context_ = nullptr;
+  // Releases only the compatibility context, without cycling the native device.
+  decltype(&hipCtxDestroy) destroy_context_ = nullptr;
   // Captured native transfers, retained until all launches complete.
   hipGraph_t graph_ = nullptr;
   // Compiled capture released before its template and memory owners.
@@ -181,8 +230,12 @@ class HipMemoryInteropApiTest : public testing::Test {
     std::binary_semaphore entered{0};
     // Lets the held callback return on every exit from the test body.
     std::binary_semaphore release{0};
-    // True only after the test's teardown has released the callback.
+    // True after the test or teardown has released the callback.
     std::atomic<bool> returned{false};
+    // Prevents duplicate releases on early test exits.
+    bool released = false;
+    // Registered input bytes produced before the callback completes, or zero.
+    size_t initialize_size = 0;
   } callback_;
   // Allocates ordinary device memory.
   decltype(&hipMalloc) allocate_ = nullptr;
@@ -424,6 +477,133 @@ TEST_F(HipMemoryInteropApiTest,
     EXPECT_EQ(0, std::memcmp(input, owned_output, kLength));
     EXPECT_EQ(0, std::memcmp(input, storage_.data(), kLength));
     EXPECT_EQ(0xcd, storage_.back());
+  }
+}
+
+// The allocation belongs to the primary context, but the producer, upload,
+// and download belong to a second context's stream on the same native device.
+// Registered input remains borrowed until the callback has produced its bytes.
+TEST_F(HipMemoryInteropApiTest, CrossContextCopiesPreserveStreamOrder) {
+  constexpr size_t kLength = 257;
+  constexpr size_t kOffset = 13;
+  constexpr size_t kAllocationSize = kLength + 2 * kOffset;
+  const auto copy_async =
+      dso_.Resolve<decltype(&hipMemcpyAsync)>("hipMemcpyAsync");
+  const auto create_stream =
+      dso_.Resolve<decltype(&hipStreamCreateWithPriority)>(
+          "hipStreamCreateWithPriority");
+  const auto synchronize_stream =
+      dso_.Resolve<decltype(&hipStreamSynchronize)>("hipStreamSynchronize");
+  const auto launch_callback =
+      dso_.Resolve<decltype(&hipLaunchHostFunc)>("hipLaunchHostFunc");
+  ASSERT_NE(copy_async, nullptr);
+  ASSERT_NE(create_stream, nullptr);
+  ASSERT_NE(synchronize_stream, nullptr);
+  ASSERT_NE(launch_callback, nullptr);
+
+  ASSERT_EQ(hipSuccess, allocate_(&device_memory_, kAllocationSize));
+  std::array<uint8_t, kAllocationSize> expected;
+  expected.fill(0xCD);
+  ASSERT_EQ(hipSuccess, copy_(device_memory_, expected.data(), expected.size(),
+                              hipMemcpyHostToDevice));
+  ASSERT_NO_FATAL_FAILURE(CreateCopyContext());
+  ASSERT_EQ(hipSuccess,
+            allocate_host_(&host_memory_, 2 * kLength, hipHostMallocMapped));
+  auto* input = static_cast<uint8_t*>(host_memory_);
+  auto* output = input + kLength;
+  std::memset(host_memory_, 0x11, 2 * kLength);
+  // A separate priority keeps the held callback off the allocation context's
+  // primary queue. Queue FIFO ordering cannot mask a missing stream dependency.
+  ASSERT_EQ(hipSuccess, create_stream(&copy_stream_, hipStreamNonBlocking, -1));
+  callback_.initialize_size = kLength;
+  ASSERT_EQ(hipSuccess, launch_callback(copy_stream_, HoldCallback, this));
+  callback_.entered.acquire();
+
+  auto* target = static_cast<uint8_t*>(device_memory_) + kOffset;
+  ASSERT_EQ(hipSuccess, copy_async(target, input, kLength,
+                                   hipMemcpyHostToDevice, copy_stream_));
+  ASSERT_EQ(hipSuccess, copy_async(output, target, kLength,
+                                   hipMemcpyDeviceToHost, copy_stream_));
+  EXPECT_FALSE(callback_.returned.load(std::memory_order_acquire));
+  ReleaseCallback();
+  ASSERT_EQ(hipSuccess, synchronize_stream(copy_stream_));
+  for (size_t i = 0; i < kLength; ++i) {
+    EXPECT_EQ(output[i], 0x7B) << i;
+  }
+
+  std::array<uint8_t, kAllocationSize> actual;
+  ASSERT_EQ(hipSuccess, copy_(actual.data(), device_memory_, actual.size(),
+                              hipMemcpyDeviceToHost));
+  std::memset(expected.data() + kOffset, 0x7B, kLength);
+  EXPECT_EQ(actual, expected);
+}
+
+TEST_F(HipMemoryInteropApiTest,
+       CrossContextCopiesProgressPastUnrelatedOwnerWork) {
+  constexpr size_t kLength = 257;
+  const auto copy_async =
+      dso_.Resolve<decltype(&hipMemcpyAsync)>("hipMemcpyAsync");
+  const auto create_stream =
+      dso_.Resolve<decltype(&hipStreamCreateWithPriority)>(
+          "hipStreamCreateWithPriority");
+  const auto synchronize_stream =
+      dso_.Resolve<decltype(&hipStreamSynchronize)>("hipStreamSynchronize");
+  const auto launch_callback =
+      dso_.Resolve<decltype(&hipLaunchHostFunc)>("hipLaunchHostFunc");
+  ASSERT_NE(copy_async, nullptr);
+  ASSERT_NE(create_stream, nullptr);
+  ASSERT_NE(synchronize_stream, nullptr);
+  ASSERT_NE(launch_callback, nullptr);
+  ASSERT_EQ(hipSuccess, allocate_(&device_memory_, kLength));
+  ASSERT_EQ(hipSuccess,
+            create_stream(&callback_stream_, hipStreamNonBlocking, -1));
+  ASSERT_NO_FATAL_FAILURE(CreateCopyContext());
+  ASSERT_EQ(hipSuccess, create_stream(&copy_stream_, hipStreamNonBlocking, 0));
+  ASSERT_EQ(hipSuccess,
+            allocate_host_(&host_memory_, 2 * kLength, hipHostMallocMapped));
+  auto* input = static_cast<uint8_t*>(host_memory_);
+  auto* output = input + kLength;
+  std::memset(input, 0x41, kLength);
+  std::memset(output, 0xCD, kLength);
+
+  ASSERT_EQ(hipSuccess, launch_callback(callback_stream_, HoldCallback, this));
+  callback_.entered.acquire();
+  ASSERT_EQ(hipSuccess, copy_async(device_memory_, input, kLength,
+                                   hipMemcpyHostToDevice, copy_stream_));
+  ASSERT_EQ(hipSuccess, copy_async(output, device_memory_, kLength,
+                                   hipMemcpyDeviceToHost, copy_stream_));
+  ASSERT_EQ(hipSuccess, synchronize_stream(copy_stream_));
+  EXPECT_FALSE(callback_.returned.load(std::memory_order_acquire));
+  EXPECT_EQ(0, std::memcmp(input, output, kLength));
+}
+
+TEST_F(HipMemoryInteropApiTest, HostAndManagedUploadsPreserveMappedBytes) {
+  constexpr size_t kLength = 257;
+  constexpr size_t kOffset = 13;
+  constexpr size_t kAllocationSize = kLength + 2 * kOffset;
+  const auto allocate_managed =
+      dso_.Resolve<decltype(&hipMallocManaged)>("hipMallocManaged");
+  ASSERT_NE(allocate_managed, nullptr);
+  ASSERT_EQ(hipSuccess, allocate_host_(&host_memory_, kAllocationSize,
+                                       hipHostMallocMapped));
+  ASSERT_EQ(hipSuccess, allocate_managed(&device_memory_, kAllocationSize,
+                                         hipMemAttachGlobal));
+  for (void* allocation : {host_memory_, device_memory_}) {
+    SCOPED_TRACE(allocation == host_memory_ ? "host" : "managed");
+    auto* bytes = static_cast<uint8_t*>(allocation);
+    std::memset(bytes, 0xCD, kAllocationSize);
+    std::array<uint8_t, kLength> input;
+    for (size_t i = 0; i < input.size(); ++i) {
+      input[i] = static_cast<uint8_t>(3 + 17 * i);
+    }
+    ASSERT_EQ(hipSuccess, copy_(bytes + kOffset, input.data(), input.size(),
+                                hipMemcpyHostToDevice));
+    for (size_t i = 0; i < kAllocationSize; ++i) {
+      EXPECT_EQ(bytes[i], i >= kOffset && i < kOffset + kLength
+                              ? input[i - kOffset]
+                              : 0xCD)
+          << i;
+    }
   }
 }
 

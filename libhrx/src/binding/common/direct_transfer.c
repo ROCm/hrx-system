@@ -264,3 +264,37 @@ iree_status_t iree_hal_streaming_direct_transfer_and_wait(
   iree_hal_semaphore_release(completion_semaphore);
   return status;
 }
+
+typedef struct iree_hal_streaming_context_transfer_t {
+  // Context owning the transfer queue, borrowed through this blocking call.
+  iree_hal_streaming_context_t* context;
+  // Number of descriptors in |operations|.
+  iree_host_size_t operation_count;
+  // Transfer descriptors and payloads borrowed through this blocking call.
+  const iree_hal_transfer_operation_t* operations;
+} iree_hal_streaming_context_transfer_t;
+
+static iree_status_t iree_hal_streaming_context_transfer_execute(
+    void* user_data) {
+  iree_hal_streaming_context_transfer_t* transfer =
+      (iree_hal_streaming_context_transfer_t*)user_data;
+  return iree_hal_streaming_direct_transfer_context_and_wait(
+      transfer->context, transfer->operation_count, transfer->operations);
+}
+
+iree_status_t iree_hal_streaming_direct_transfer_on_context_and_wait(
+    iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream,
+    iree_host_size_t operation_count,
+    const iree_hal_transfer_operation_t* operations) {
+  if (context->device == stream->context->device) {
+    return iree_hal_streaming_direct_transfer_and_wait(stream, operation_count,
+                                                       operations);
+  }
+  iree_hal_streaming_context_transfer_t transfer = {
+      .context = context,
+      .operation_count = operation_count,
+      .operations = operations,
+  };
+  return iree_hal_streaming_execute_host_operation(
+      stream, iree_hal_streaming_context_transfer_execute, &transfer);
+}

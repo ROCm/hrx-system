@@ -7296,129 +7296,6 @@ static hipError_t iree_hip_memcpy_peer_staged(
     iree_hal_streaming_context_t* src_context, const void* src,
     size_t size_bytes, iree_hal_streaming_stream_t* stream);
 
-static hipError_t iree_hip_try_cross_context_h2d(
-    iree_hal_streaming_context_t* context, void* dst, const void* src,
-    size_t size, bool* out_handled) {
-  *out_handled = false;
-  iree_hal_streaming_buffer_ref_t current_ref;
-  iree_status_t status = iree_hal_streaming_memory_lookup_range(
-      context, (iree_hal_streaming_deviceptr_t)(uintptr_t)dst, size,
-      &current_ref);
-  if (iree_status_is_ok(status)) {
-    return hipSuccess;
-  }
-  if (iree_status_code(status) != IREE_STATUS_NOT_FOUND) {
-    return iree_status_to_hip_result(status);
-  }
-  iree_status_ignore(status);
-
-  iree_hal_streaming_context_t* owner_context = NULL;
-  iree_hal_streaming_buffer_ref_t dst_ref;
-  status = iree_hal_streaming_memory_lookup_range_across_contexts(
-      (iree_hal_streaming_deviceptr_t)(uintptr_t)dst, size, &owner_context,
-      &dst_ref);
-  if (!iree_status_is_ok(status)) {
-    iree_status_ignore(status);
-    return hipSuccess;
-  }
-  *out_handled = true;
-  if (dst_ref.buffer->host_ptr &&
-      dst_ref.buffer->memory_kind != IREE_HAL_STREAMING_MEMORY_KIND_DEVICE &&
-      iree_all_bits_set((iree_hal_memory_type_t)dst_ref.buffer->memory_type,
-                        IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-                            IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
-    iree_status_t sync_status = iree_hal_streaming_context_synchronize_all();
-    if (iree_status_is_ok(sync_status)) {
-      memcpy((uint8_t*)dst_ref.buffer->host_ptr + dst_ref.offset, src, size);
-    }
-    iree_hal_streaming_context_release(owner_context);
-    return iree_status_to_hip_result(sync_status);
-  }
-  if (dst_ref.buffer->memory_kind == IREE_HAL_STREAMING_MEMORY_KIND_MANAGED) {
-    if (!dst_ref.buffer->host_ptr) {
-      iree_hal_streaming_context_release(owner_context);
-      return hipErrorInvalidValue;
-    }
-    iree_status_t sync_status = iree_hal_streaming_context_synchronize_all();
-    if (iree_status_is_ok(sync_status)) {
-      memcpy((uint8_t*)dst_ref.buffer->host_ptr + dst_ref.offset, src, size);
-    }
-    iree_hal_streaming_context_release(owner_context);
-    return iree_status_to_hip_result(sync_status);
-  }
-
-  iree_status_t transfer_status =
-      iree_hal_streaming_context_synchronize(owner_context);
-  if (iree_status_is_ok(transfer_status)) {
-    transfer_status = iree_hal_streaming_direct_transfer_h2d(
-        owner_context, src, dst_ref.buffer->buffer, dst_ref.offset, size);
-  }
-  iree_hal_streaming_context_release(owner_context);
-  return iree_status_to_hip_result(transfer_status);
-}
-
-static hipError_t iree_hip_try_cross_context_d2h(
-    iree_hal_streaming_context_t* context, void* dst, const void* src,
-    size_t size, bool* out_handled) {
-  *out_handled = false;
-  iree_hal_streaming_buffer_ref_t current_ref;
-  iree_status_t status = iree_hal_streaming_memory_lookup_range(
-      context, (iree_hal_streaming_deviceptr_t)(uintptr_t)src, size,
-      &current_ref);
-  if (iree_status_is_ok(status)) {
-    return hipSuccess;
-  }
-  if (iree_status_code(status) != IREE_STATUS_NOT_FOUND) {
-    return iree_status_to_hip_result(status);
-  }
-  iree_status_ignore(status);
-
-  iree_hal_streaming_context_t* owner_context = NULL;
-  iree_hal_streaming_buffer_ref_t src_ref;
-  status = iree_hal_streaming_memory_lookup_range_across_contexts(
-      (iree_hal_streaming_deviceptr_t)(uintptr_t)src, size, &owner_context,
-      &src_ref);
-  if (!iree_status_is_ok(status)) {
-    iree_status_ignore(status);
-    return hipSuccess;
-  }
-  *out_handled = true;
-  if (src_ref.buffer->host_ptr &&
-      iree_all_bits_set((iree_hal_memory_type_t)src_ref.buffer->memory_type,
-                        IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-                            IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
-    iree_status_t sync_status = iree_hal_streaming_context_synchronize_all();
-    if (iree_status_is_ok(sync_status)) {
-      memcpy(dst, (const uint8_t*)src_ref.buffer->host_ptr + src_ref.offset,
-             size);
-    }
-    iree_hal_streaming_context_release(owner_context);
-    return iree_status_to_hip_result(sync_status);
-  }
-  if (src_ref.buffer->memory_kind == IREE_HAL_STREAMING_MEMORY_KIND_MANAGED) {
-    if (!src_ref.buffer->host_ptr) {
-      iree_hal_streaming_context_release(owner_context);
-      return hipErrorInvalidValue;
-    }
-    iree_status_t sync_status = iree_hal_streaming_context_synchronize_all();
-    if (iree_status_is_ok(sync_status)) {
-      memcpy(dst, (const uint8_t*)src_ref.buffer->host_ptr + src_ref.offset,
-             size);
-    }
-    iree_hal_streaming_context_release(owner_context);
-    return iree_status_to_hip_result(sync_status);
-  }
-
-  iree_status_t transfer_status =
-      iree_hal_streaming_context_synchronize(owner_context);
-  if (iree_status_is_ok(transfer_status)) {
-    transfer_status = iree_hal_streaming_direct_transfer_d2h(
-        owner_context, src_ref.buffer->buffer, src_ref.offset, dst, size);
-  }
-  iree_hal_streaming_context_release(owner_context);
-  return iree_status_to_hip_result(transfer_status);
-}
-
 static hipError_t iree_hip_lookup_memcpy_range_with_owner(
     iree_hal_streaming_context_t* context, const void* ptr, size_t size,
     iree_hal_streaming_context_t** out_owner_context,
@@ -7601,13 +7478,7 @@ HIPAPI hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes,
 
   bool handled = false;
   hipError_t special_result = hipSuccess;
-  if (kind == hipMemcpyHostToDevice) {
-    special_result =
-        iree_hip_try_cross_context_h2d(context, dst, src, sizeBytes, &handled);
-  } else if (kind == hipMemcpyDeviceToHost) {
-    special_result =
-        iree_hip_try_cross_context_d2h(context, dst, src, sizeBytes, &handled);
-  } else if (kind == hipMemcpyDeviceToDevice) {
+  if (kind == hipMemcpyDeviceToDevice) {
     special_result =
         iree_hip_try_managed_d2d(context, dst, src, sizeBytes, &handled);
   }
@@ -7619,18 +7490,12 @@ HIPAPI hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes,
   iree_status_t status = iree_ok_status();
   switch (kind) {
     case hipMemcpyHostToDevice:
-      status = iree_hal_streaming_context_synchronize(context);
-      if (iree_status_is_ok(status)) {
-        status = iree_hal_streaming_memcpy_host_to_device(
-            context, (iree_hal_streaming_deviceptr_t)dst, src, sizeBytes, NULL);
-      }
+      status = iree_hal_streaming_memcpy_host_to_device(
+          context, (iree_hal_streaming_deviceptr_t)dst, src, sizeBytes, NULL);
       break;
     case hipMemcpyDeviceToHost:
-      status = iree_hal_streaming_context_synchronize(context);
-      if (iree_status_is_ok(status)) {
-        status = iree_hal_streaming_memcpy_device_to_host(
-            context, dst, (iree_hal_streaming_deviceptr_t)src, sizeBytes, NULL);
-      }
+      status = iree_hal_streaming_memcpy_device_to_host(
+          context, dst, (iree_hal_streaming_deviceptr_t)src, sizeBytes, NULL);
       break;
     case hipMemcpyDeviceToDevice:
       status = iree_hal_streaming_context_synchronize(context);
@@ -7819,13 +7684,7 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
   if (stream_capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
     bool handled = false;
     hipError_t special_result = hipSuccess;
-    if (kind == hipMemcpyHostToDevice) {
-      special_result = iree_hip_try_cross_context_h2d(context, dst, src,
-                                                      sizeBytes, &handled);
-    } else if (kind == hipMemcpyDeviceToHost) {
-      special_result = iree_hip_try_cross_context_d2h(context, dst, src,
-                                                      sizeBytes, &handled);
-    } else if (kind == hipMemcpyDeviceToDevice) {
+    if (kind == hipMemcpyDeviceToDevice) {
       special_result =
           iree_hip_try_managed_d2d(context, dst, src, sizeBytes, &handled);
     }
