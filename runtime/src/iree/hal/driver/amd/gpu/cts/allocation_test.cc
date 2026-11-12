@@ -833,6 +833,9 @@ class GpuNativeRecordingProgressTest
 TEST_P(GpuNativeRecordingProgressTest,
        SealingAndExecutionCompleteWhileAllocationIsHeld) {
   using iree::hal::cts::Ref;
+  const uint32_t pattern = 0x1234CAFE;
+  // Nine native payloads exceed the bounded host template's eight packets.
+  constexpr uint32_t kFillCount = 9;
   const auto request = iree_hal_make_pool_reservation_request(4096, 4);
   uint64_t one = 1, two = 2;
   Ref<iree_hal_buffer_t> output, pending;
@@ -853,9 +856,6 @@ TEST_P(GpuNativeRecordingProgressTest,
         iree_hal_queue_family(queues_[1]), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
         IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0, recording.out()));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
-    const uint32_t pattern = 0x1234CAFE;
-    // Nine native payloads exceed the bounded host template's eight packets.
-    constexpr uint32_t kFillCount = 9;
     for (uint32_t i = 0; i < kFillCount; ++i) {
       IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
           recording, iree_hal_make_buffer_ref(output, i * 4, 4), &pattern,
@@ -877,25 +877,27 @@ TEST_P(GpuNativeRecordingProgressTest,
     }
     IREE_ASSERT_OK(iree_hal_queue_execute(
         queues_[1], {}, {1, &semaphores_[1], &one}, recording, {}, 0));
-    std::array<uint32_t, kFillCount> observed = {};
-    const iree_hal_transfer_operation_t download = {
-        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
-        .download =
-            {
-                .source_buffer = output,
-                .target = observed.data(),
-                .length = sizeof(observed),
-            },
-    };
-    IREE_ASSERT_OK(iree_hal_queue_transfer(
-        queues_[1], {1, &semaphores_[1], &one}, {1, &semaphores_[2], &one}, 1,
-        &download, nullptr));
-    Wait(semaphores_[2]);
-    for (uint32_t value : observed) {
-      EXPECT_EQ(value, pattern);
-    }
+    Wait(semaphores_[1]);
   }
   Wait(semaphores_[3]);
+  // Verification transport may acquire its own native payload backing.
+  std::array<uint32_t, kFillCount> observed = {};
+  const iree_hal_transfer_operation_t download = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+      .download =
+          {
+              .source_buffer = output,
+              .target = observed.data(),
+              .length = sizeof(observed),
+          },
+  };
+  IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[1], {1, &semaphores_[1], &one},
+                                         {1, &semaphores_[2], &one}, 1,
+                                         &download, nullptr));
+  Wait(semaphores_[2]);
+  for (uint32_t value : observed) {
+    EXPECT_EQ(value, pattern);
+  }
   iree_hal_buffer_t* buffers[] = {output, pending};
   IREE_ASSERT_OK(iree_hal_queue_dealloca(queues_[1], {1, &semaphores_[2], &one},
                                          {1, &semaphores_[2], &two},
@@ -1143,6 +1145,7 @@ TEST_F(GpuNativeMemoryProgressTest,
 TEST_F(GpuNativeMemoryProgressTest,
        RecycledStorageAndGpuConsumerCompleteWhileAllocationIsHeld) {
   using iree::hal::cts::Ref;
+  const uint32_t pattern = 0xCAFE1234;
   Ref<iree_hal_pool_t> finite_pool;
   CreateFinitePool(1, finite_pool.out());
   if (HasFatalFailure()) {
@@ -1159,7 +1162,7 @@ TEST_F(GpuNativeMemoryProgressTest,
       iree_hal_buffer_native_binding(first, slot_).device_address;
   ASSERT_NE(address, 0u);
 
-  Ref<iree_hal_buffer_t> cold;
+  Ref<iree_hal_buffer_t> cold, reused;
   {
     iree::hal::amd::gpu::cts::NativeMemoryGate::Hold hold(&memory_gate_);
     IREE_ASSERT_OK(iree_hal_queue_alloca(queues_[0], {},
@@ -1173,7 +1176,6 @@ TEST_F(GpuNativeMemoryProgressTest,
     IREE_ASSERT_OK(
         iree_hal_queue_dealloca(queues_[0], {1, &semaphores_[0], &one},
                                 {1, &semaphores_[0], &two}, 1, &first_handle));
-    Ref<iree_hal_buffer_t> reused;
     IREE_ASSERT_OK(iree_hal_queue_alloca(
         queues_[1], {1, &semaphores_[0], &two}, {1, &semaphores_[1], &one},
         finite_pool, 1, &request, reused.out()));
@@ -1181,33 +1183,34 @@ TEST_F(GpuNativeMemoryProgressTest,
     EXPECT_EQ(iree_hal_buffer_native_binding(reused, slot_).device_address,
               address);
 
-    const uint32_t pattern = 0xCAFE1234;
     IREE_ASSERT_OK(iree_hal_queue_fill(
         queues_[1], {1, &semaphores_[1], &one}, {1, &semaphores_[1], &two},
         reused, 0, sizeof(pattern), &pattern, sizeof(pattern), nullptr, 0));
-    uint32_t observed = 0;
-    const iree_hal_transfer_operation_t download = {
-        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
-        .download =
-            {
-                .source_buffer = reused,
-                .target = &observed,
-                .length = sizeof(observed),
-            },
-    };
-    IREE_ASSERT_OK(iree_hal_queue_transfer(
-        queues_[0], {1, &semaphores_[1], &two}, {1, &semaphores_[2], &one}, 1,
-        &download, nullptr));
-    Wait(semaphores_[2]);
-    EXPECT_EQ(observed, pattern);
-
-    iree_hal_buffer_t* reused_handle = reused;
-    IREE_ASSERT_OK(iree_hal_queue_dealloca(
-        queues_[1], {1, &semaphores_[2], &one}, {1, &semaphores_[1], &three}, 1,
-        &reused_handle));
-    Wait(semaphores_[1], three);
+    Wait(semaphores_[1], two);
   }
   Wait(semaphores_[3]);
+  // Verification transport may acquire its own native payload backing.
+  uint32_t observed = 0;
+  const iree_hal_transfer_operation_t download = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+      .download =
+          {
+              .source_buffer = reused,
+              .target = &observed,
+              .length = sizeof(observed),
+          },
+  };
+  IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], {1, &semaphores_[1], &two},
+                                         {1, &semaphores_[2], &one}, 1,
+                                         &download, nullptr));
+  Wait(semaphores_[2]);
+  EXPECT_EQ(observed, pattern);
+
+  iree_hal_buffer_t* reused_handle = reused;
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(queues_[1], {1, &semaphores_[2], &one},
+                                         {1, &semaphores_[1], &three}, 1,
+                                         &reused_handle));
+  Wait(semaphores_[1], three);
   iree_hal_buffer_t* cold_handle = cold;
   IREE_ASSERT_OK(iree_hal_queue_dealloca(queues_[0], {1, &semaphores_[3], &one},
                                          {1, &semaphores_[3], &two}, 1,
@@ -1218,6 +1221,7 @@ TEST_F(GpuNativeMemoryProgressTest,
 TEST_F(GpuNativeMemoryProgressTest,
        MappingAndGpuConsumerOvertakeRemainingAllocationBatch) {
   using iree::hal::cts::Ref;
+  const uint32_t pattern = 0xC0FFEE42;
   const iree_hal_pool_family_access_t access = {
       .family = iree_hal_queue_family(queues_[0]),
       .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
@@ -1287,19 +1291,20 @@ TEST_F(GpuNativeMemoryProgressTest,
     // Native mapping must have overtaken slab two. Its public completion and
     // GPU consumers cannot need any further turn on the held allocation owner.
     Wait(semaphores_[0]);
-    const uint32_t pattern = 0xC0FFEE42;
     IREE_ASSERT_OK(iree_hal_queue_fill(queues_[1], {1, &semaphores_[0], &one},
                                        {1, &semaphores_[1], &one}, reservation,
                                        0, sizeof(pattern), &pattern,
                                        sizeof(pattern), nullptr, 0));
-    uint32_t observed = 0;
-    IREE_ASSERT_OK(iree_hal_queue_download(
-        queues_[0], {1, &semaphores_[1], &one}, {1, &semaphores_[2], &one},
-        reservation, 0, &observed, sizeof(observed), nullptr));
-    Wait(semaphores_[2]);
-    EXPECT_EQ(observed, pattern);
+    Wait(semaphores_[1]);
   }
   Wait(semaphores_[3]);
+  // Verification transport may acquire its own native payload backing.
+  uint32_t observed = 0;
+  IREE_ASSERT_OK(iree_hal_queue_download(
+      queues_[0], {1, &semaphores_[1], &one}, {1, &semaphores_[2], &one},
+      reservation, 0, &observed, sizeof(observed), nullptr));
+  Wait(semaphores_[2]);
+  EXPECT_EQ(observed, pattern);
   IREE_ASSERT_OK(iree_hal_queue_dealloca(queues_[0], {1, &semaphores_[3], &one},
                                          {1, &semaphores_[3], &two},
                                          cold.size(), cold.data()));

@@ -17,12 +17,13 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Argument generations are FIFO by publication, including alignment and wrap.
-// A replaced generation is released only after its final byte position has
-// retired. Native readers of signals have a separate lifetime below.
-typedef struct iree_hal_amd_gpu_argument_storage_t {
+// Each byte-storage owner orders its generations by publication, including
+// alignment and wrap. The caller selects the memory policy and releases a
+// replaced generation only after its final reader retires. Signal references
+// have a separate lifetime below.
+typedef struct iree_hal_amd_gpu_byte_storage_t {
   // Older generation, or NULL at the end of the cold cleanup list.
-  struct iree_hal_amd_gpu_argument_storage_t* next;
+  struct iree_hal_amd_gpu_byte_storage_t* next;
   // Native storage and persistent host view.
   iree_hal_amd_fabric_memory_t memory;
   // Address of byte zero in this queue's native domain.
@@ -37,7 +38,7 @@ typedef struct iree_hal_amd_gpu_argument_storage_t {
   iree_hal_amd_gpu_memory_release_t release;
   // Host allocator owning this metadata through native release completion.
   iree_allocator_t host_allocator;
-} iree_hal_amd_gpu_argument_storage_t;
+} iree_hal_amd_gpu_byte_storage_t;
 
 // One device-only grid record for ordered direct cooperative dispatches. The
 // command processor initializes it after the preceding grid completes; shaders
@@ -211,28 +212,28 @@ iree_status_t iree_hal_amd_gpu_backing_allocate(
 // Allocates only host ownership and the native release descriptor. The caller
 // acquires storage->memory asynchronously, then initializes its address and
 // monotonic extent on the publication owner. Failure returns NULL storage.
-iree_status_t iree_hal_amd_gpu_argument_storage_prepare(
+iree_status_t iree_hal_amd_gpu_byte_storage_prepare(
     uint64_t capacity, iree_allocator_t host_allocator,
-    iree_hal_amd_gpu_argument_storage_t** out_storage);
-iree_status_t iree_hal_amd_gpu_argument_storage_initialize(
+    iree_hal_amd_gpu_byte_storage_t** out_storage);
+iree_status_t iree_hal_amd_gpu_byte_storage_initialize(
     iree_hal_amd_gpu_context_t* context, uint64_t begin,
-    iree_hal_amd_gpu_argument_storage_t* storage);
+    iree_hal_amd_gpu_byte_storage_t* storage);
 
 // Allocates an independent generation at the admitted monotonic begin position.
 // The caller links and retires generations by their final reserved byte extent.
 // Success returns the unique owner; failure leaves out_storage NULL.
-iree_status_t iree_hal_amd_gpu_argument_storage_allocate(
+iree_status_t iree_hal_amd_gpu_byte_storage_allocate(
     iree_hal_amd_gpu_context_t* context,
     const iree_hal_amd_fabric_memory_options_t* options, uint64_t capacity,
     uint64_t begin, iree_allocator_t host_allocator,
-    iree_hal_amd_gpu_argument_storage_t** out_storage);
+    iree_hal_amd_gpu_byte_storage_t** out_storage);
 
 // Transfers a retired or partially acquired generation to native release.
 // List ownership and the exact consumed-byte proof stay with the queue. This
 // performs no native call or wait, and storage cannot be accessed afterward.
-void iree_hal_amd_gpu_argument_storage_free(
+void iree_hal_amd_gpu_byte_storage_free(
     iree_hal_amd_gpu_context_t* context,
-    iree_hal_amd_gpu_argument_storage_t* storage);
+    iree_hal_amd_gpu_byte_storage_t* storage);
 
 // Prepares host metadata and release ownership without acquiring native cells.
 // After typed acquisition fills storage->memory, the protocol initializes its

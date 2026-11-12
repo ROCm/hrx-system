@@ -1786,8 +1786,9 @@ PROFILE_CASE(ProfileCaptureBurstLatency, kSampledSubmit, kActive, 2);
 
 static void BM_Transfer(benchmark::State& state,
                         iree_hal_transfer_operation_type_t type,
-                        Barriers barriers, Timing timing) {
-  NativeQueue queue;
+                        Barriers barriers, Timing timing,
+                        amdf_queue_command_type_t command_type) {
+  NativeQueue queue(command_type);
   if (!queue.Initialize(state)) {
     return;
   }
@@ -1818,24 +1819,36 @@ static void BM_Transfer(benchmark::State& state,
       queue.allocation_count() - allocations_before;
 }
 
-#define TRANSFER_CASE(name, kind, barriers, timing)          \
-  BENCHMARK_CAPTURE(BM_Transfer, name,                       \
-                    IREE_HAL_TRANSFER_OPERATION_TYPE_##kind, \
-                    Barriers::barriers, Timing::timing)      \
-      ->Arg(1)                                               \
-      ->Arg(32)                                              \
-      ->Iterations(200)                                      \
+#define TRANSFER_CASE(name, kind, barriers, timing, protocol) \
+  BENCHMARK_CAPTURE(BM_Transfer, name,                        \
+                    IREE_HAL_TRANSFER_OPERATION_TYPE_##kind,  \
+                    Barriers::barriers, Timing::timing,       \
+                    AMDF_QUEUE_COMMAND_TYPE_GPU_##protocol)   \
+      ->Arg(1)                                                \
+      ->Arg(32)                                               \
+      ->Iterations(200)                                       \
       ->UseRealTime()
-TRANSFER_CASE(FillDefaultSubmit, FILL, kDefault, kSubmit);
-TRANSFER_CASE(FillEmptySubmit, FILL, kExplicitEmpty, kSubmit);
-TRANSFER_CASE(CopyDefaultSubmit, COPY, kDefault, kSubmit);
-TRANSFER_CASE(CopyEmptySubmit, COPY, kExplicitEmpty, kSubmit);
-TRANSFER_CASE(UpdateDefaultSubmit, UPDATE, kDefault, kSubmit);
-TRANSFER_CASE(UpdateEmptySubmit, UPDATE, kExplicitEmpty, kSubmit);
-TRANSFER_CASE(UploadDefaultSubmit, UPLOAD, kDefault, kSubmit);
-TRANSFER_CASE(DownloadDefaultSubmit, DOWNLOAD, kDefault, kSubmit);
-TRANSFER_CASE(UploadDefaultCompletion, UPLOAD, kDefault, kCompletion);
-TRANSFER_CASE(DownloadDefaultCompletion, DOWNLOAD, kDefault, kCompletion);
+TRANSFER_CASE(FillDefaultSubmit, FILL, kDefault, kSubmit, PM4);
+TRANSFER_CASE(FillEmptySubmit, FILL, kExplicitEmpty, kSubmit, PM4);
+TRANSFER_CASE(CopyDefaultSubmit, COPY, kDefault, kSubmit, PM4);
+TRANSFER_CASE(CopyEmptySubmit, COPY, kExplicitEmpty, kSubmit, PM4);
+TRANSFER_CASE(UpdateDefaultSubmit, UPDATE, kDefault, kSubmit, PM4);
+TRANSFER_CASE(UpdateEmptySubmit, UPDATE, kExplicitEmpty, kSubmit, PM4);
+TRANSFER_CASE(UploadDefaultSubmit, UPLOAD, kDefault, kSubmit, PM4);
+TRANSFER_CASE(DownloadDefaultSubmit, DOWNLOAD, kDefault, kSubmit, PM4);
+TRANSFER_CASE(UploadDefaultCompletion, UPLOAD, kDefault, kCompletion, PM4);
+TRANSFER_CASE(DownloadDefaultCompletion, DOWNLOAD, kDefault, kCompletion, PM4);
+TRANSFER_CASE(AqlFillDefaultSubmit, FILL, kDefault, kSubmit, AQL);
+TRANSFER_CASE(AqlFillEmptySubmit, FILL, kExplicitEmpty, kSubmit, AQL);
+TRANSFER_CASE(AqlCopyDefaultSubmit, COPY, kDefault, kSubmit, AQL);
+TRANSFER_CASE(AqlCopyEmptySubmit, COPY, kExplicitEmpty, kSubmit, AQL);
+TRANSFER_CASE(AqlUpdateDefaultSubmit, UPDATE, kDefault, kSubmit, AQL);
+TRANSFER_CASE(AqlUpdateEmptySubmit, UPDATE, kExplicitEmpty, kSubmit, AQL);
+TRANSFER_CASE(AqlUploadDefaultSubmit, UPLOAD, kDefault, kSubmit, AQL);
+TRANSFER_CASE(AqlDownloadDefaultSubmit, DOWNLOAD, kDefault, kSubmit, AQL);
+TRANSFER_CASE(AqlUploadDefaultCompletion, UPLOAD, kDefault, kCompletion, AQL);
+TRANSFER_CASE(AqlDownloadDefaultCompletion, DOWNLOAD, kDefault, kCompletion,
+              AQL);
 #undef TRANSFER_CASE
 
 // A file staging window and a larger borrowed host allocation exercise the
@@ -1843,9 +1856,10 @@ TRANSFER_CASE(DownloadDefaultCompletion, DOWNLOAD, kDefault, kCompletion);
 // both device workers are included in process CPU time. There is no extra
 // queue barrier between the measured operation and its completion wait.
 static void BM_BulkTransfer(benchmark::State& state,
-                            iree_hal_transfer_operation_type_t type) {
+                            iree_hal_transfer_operation_type_t type,
+                            amdf_queue_command_type_t command_type) {
   const size_t length = state.range(0);
-  NativeQueue queue;
+  NativeQueue queue(command_type);
   if (!queue.Initialize(state, 1, length)) {
     return;
   }
@@ -1888,17 +1902,21 @@ static void BM_BulkTransfer(benchmark::State& state,
       state.iterations();
 }
 
-#define BULK_TRANSFER_CASE(name, kind)                       \
+#define BULK_TRANSFER_CASE(name, kind, protocol)             \
   BENCHMARK_CAPTURE(BM_BulkTransfer, name,                   \
-                    IREE_HAL_TRANSFER_OPERATION_TYPE_##kind) \
+                    IREE_HAL_TRANSFER_OPERATION_TYPE_##kind, \
+                    AMDF_QUEUE_COMMAND_TYPE_GPU_##protocol)  \
       ->Arg(1024 * 1024)                                     \
       ->Arg(32 * 1024 * 1024)                                \
       ->Iterations(8)                                        \
       ->MeasureProcessCPUTime()                              \
       ->UseRealTime()
-BULK_TRANSFER_CASE(Upload, UPLOAD);
-BULK_TRANSFER_CASE(Update, UPDATE);
-BULK_TRANSFER_CASE(Download, DOWNLOAD);
+BULK_TRANSFER_CASE(Upload, UPLOAD, PM4);
+BULK_TRANSFER_CASE(Update, UPDATE, PM4);
+BULK_TRANSFER_CASE(Download, DOWNLOAD, PM4);
+BULK_TRANSFER_CASE(AqlUpload, UPLOAD, AQL);
+BULK_TRANSFER_CASE(AqlUpdate, UPDATE, AQL);
+BULK_TRANSFER_CASE(AqlDownload, DOWNLOAD, AQL);
 #undef BULK_TRANSFER_CASE
 
 // Persistent callers share one actual queue without a caller-side mutex.

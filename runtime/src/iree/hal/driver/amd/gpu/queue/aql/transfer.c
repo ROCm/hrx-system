@@ -8,11 +8,9 @@
 
 #include "iree/hal/driver/amd/gpu/queue/buffer.h"
 
-uint64_t iree_hal_amd_gpu_aql_transfer_argument_length(
+uint64_t iree_hal_amd_gpu_aql_transfer_staging_length(
     const iree_hal_amd_gpu_transfer_t* transfer, uint64_t capacity) {
-  const uint64_t arguments = IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_PACKETS *
-                             sizeof(iree_hal_amd_gpu_blit_arguments_t);
-  const uint64_t length = arguments + transfer->staging_capacity;
+  const uint64_t length = transfer->staging_capacity;
   if (length > capacity) {
     return length;
   }
@@ -22,15 +20,14 @@ uint64_t iree_hal_amd_gpu_aql_transfer_argument_length(
             transfer->staging_capacity) {
       return length;
     }
-    return iree_min(length, iree_max(arguments + 8, capacity / 2));
+    return iree_min(length, iree_max(8, capacity / 2));
   }
   const uint64_t count = iree_min(transfer->count - transfer->cursor.index,
                                   IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_PACKETS);
-  const uint64_t window = iree_max(
-      arguments + 8,
-      iree_min(capacity / 2,
-               arguments + IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_DOWNLOAD_LENGTH));
-  return iree_min(arguments + count * transfer->staging_capacity, window);
+  const uint64_t window =
+      iree_max(8, iree_min(capacity / 2,
+                           IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_DOWNLOAD_LENGTH));
+  return iree_min(count * transfer->staging_capacity, window);
 }
 
 iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_transfer_packet(
@@ -48,14 +45,13 @@ iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_transfer_packet(
 
 iree_status_t iree_hal_amd_gpu_aql_transfer_prepare_chunk(
     const iree_hal_amd_gpu_transfer_t* transfer, uint64_t kernel,
-    uint32_t packet_capacity, iree_byte_span_t upload, uint64_t upload_address,
+    uint32_t packet_capacity, iree_byte_span_t argument_storage,
+    uint64_t argument_address, iree_byte_span_t staging,
+    uint64_t staging_address,
     iree_hal_amd_gpu_aql_transfer_chunk_t* out_chunk) {
   *out_chunk = (iree_hal_amd_gpu_aql_transfer_chunk_t){
       .next = transfer->cursor,
   };
-  const uint32_t staging_offset =
-      packet_capacity * sizeof(iree_hal_amd_gpu_blit_arguments_t);
-  uint32_t staging_length = 0;
   iree_status_t status = iree_ok_status();
   while (out_chunk->next.index < transfer->count &&
          out_chunk->packet_count < packet_capacity &&
@@ -77,9 +73,8 @@ iree_status_t iree_hal_amd_gpu_aql_transfer_prepare_chunk(
         .fill = fill,
     };
     if (!copy && !fill) {
-      arguments.length =
-          iree_min(arguments.length,
-                   upload.data_length - staging_offset - staging_length);
+      arguments.length = iree_min(
+          arguments.length, staging.data_length - out_chunk->staging_length);
       if (!arguments.length) {
         break;
       }
@@ -96,9 +91,8 @@ iree_status_t iree_hal_amd_gpu_aql_transfer_prepare_chunk(
     }
     if (iree_status_is_ok(status)) {
       if (!copy && !fill) {
-        uint8_t* bytes = upload.data + staging_offset + staging_length;
-        const uint64_t address =
-            upload_address + staging_offset + staging_length;
+        uint8_t* bytes = staging.data + out_chunk->staging_length;
+        const uint64_t address = staging_address + out_chunk->staging_length;
         if (download) {
           arguments.target = address;
           if (!out_chunk->download.length) {
@@ -114,14 +108,15 @@ iree_status_t iree_hal_amd_gpu_aql_transfer_prepare_chunk(
           memcpy(bytes, (const uint8_t*)operation->source.host + offset,
                  arguments.length);
         }
-        staging_length += (uint32_t)arguments.length;
+        out_chunk->staging_length += (uint32_t)arguments.length;
       }
       const uint32_t argument_offset =
           out_chunk->packet_count * sizeof(arguments);
-      memcpy(upload.data + argument_offset, &arguments, sizeof(arguments));
+      memcpy(argument_storage.data + argument_offset, &arguments,
+             sizeof(arguments));
       out_chunk->packets[out_chunk->packet_count++] =
           iree_hal_amd_gpu_aql_transfer_packet(
-              kernel, upload_address + argument_offset, arguments.length, 0);
+              kernel, argument_address + argument_offset, arguments.length, 0);
       out_chunk->next.offset += arguments.length;
       if (out_chunk->next.offset == operation->length) {
         ++out_chunk->next.index;
@@ -130,8 +125,6 @@ iree_status_t iree_hal_amd_gpu_aql_transfer_prepare_chunk(
     }
   }
   out_chunk->argument_length =
-      staging_length
-          ? staging_offset + staging_length
-          : out_chunk->packet_count * sizeof(iree_hal_amd_gpu_blit_arguments_t);
+      out_chunk->packet_count * sizeof(iree_hal_amd_gpu_blit_arguments_t);
   return status;
 }

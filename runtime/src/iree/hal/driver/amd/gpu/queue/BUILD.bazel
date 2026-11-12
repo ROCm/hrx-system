@@ -127,6 +127,41 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "transfer_memory",
+    srcs = ["transfer_memory.c"],
+    hdrs = ["transfer_memory.h"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/driver/amd:status",
+        "//runtime/src/iree/hal/driver/amd/fabric:memory",
+        "//runtime/src/iree/hal/driver/amd/gpu:context",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "transfer_memory_test",
+    srcs = ["transfer_memory_test.cc"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":transfer_memory",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/driver/amd/fabric",
+        "//runtime/src/iree/hal/driver/amd/gpu:context",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "transfer",
     srcs = ["transfer.c"],
     hdrs = ["transfer.h"],

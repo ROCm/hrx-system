@@ -100,8 +100,11 @@ class Pm4LifecycleTest : public ::testing::Test {
     iree_async_proactor_release(proactor_);
     iree_slim_mutex_deinitialize(&completion_.drain_mutex);
   }
-  void Capture(bool partial = false,
+  enum class CaptureKind { Dispatch, PartialTransfer, Download };
+
+  void Capture(CaptureKind kind = CaptureKind::Dispatch,
                iree_hal_semaphore_t* second_signal = nullptr) {
+    const bool partial = kind == CaptureKind::PartialTransfer;
     iree_hal_semaphore_t* signal_semaphores[] = {semaphore_, second_signal};
     uint64_t signal_values[] = {signal_value_, signal_value_};
     const iree_hal_semaphore_list_t signals = {
@@ -123,7 +126,7 @@ class Pm4LifecycleTest : public ::testing::Test {
           iree_allocator_system(), &buffer));
       references[i] = iree_hal_make_buffer_ref(buffer, 0, bytes_[i].size());
     }
-    if (partial) {
+    if (kind != CaptureKind::Dispatch) {
       std::array<iree_hal_transfer_operation_t, 6> operations = {};
       const uint32_t pattern = 0;
       for (size_t i = 0; i < references.size(); ++i) {
@@ -141,6 +144,17 @@ class Pm4LifecycleTest : public ::testing::Test {
                     .pattern_length = sizeof(pattern),
                 },
         };
+        if (kind == CaptureKind::Download) {
+          operations[i] = {
+              .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+              .download =
+                  {
+                      .source_buffer = references[i].buffer,
+                      .target = targets_[i].data(),
+                      .length = targets_[i].size(),
+                  },
+          };
+        }
       }
       IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_transfer(
           &queue_.captures, false, &family_, {}, signals, operations.size(),
@@ -154,7 +168,7 @@ class Pm4LifecycleTest : public ::testing::Test {
     for (auto reference : references) {
       iree_hal_buffer_release(reference.buffer);
     }
-    if (!partial) {
+    if (kind == CaptureKind::Dispatch) {
       capture_->signal =
           iree_hal_amd_gpu_signal_pool_try_acquire(&signal_pool_, 0);
       readers_[0] = capture_->signal;
@@ -171,6 +185,9 @@ class Pm4LifecycleTest : public ::testing::Test {
           .consumed_words = (i + 1) * 64,
           .consumed_arguments = (i + 1) * 128,
       };
+      if (kind != CaptureKind::Dispatch) {
+        issued_[i].consumed_transfers = (i + 1) * 4096;
+      }
     }
     iree_atomic_store(&queue_.producer.count, count, iree_memory_order_release);
     iree_atomic_store(&queue_.native_failure,
@@ -192,7 +209,8 @@ class Pm4LifecycleTest : public ::testing::Test {
     iree_hal_amd_gpu_pm4_retirement_ring_initialize(
         records_.data(), 0x2000, records_.size(), &queue_.retirement);
   }
-  bool Poll(iree_hal_amd_gpu_completion_wait_t* out_wait = nullptr) {
+  bool Poll(iree_hal_amd_gpu_completion_wait_t* out_wait = nullptr,
+            iree_hal_amd_gpu_completion_copy_t* out_copy = nullptr) {
     auto source = iree_hal_amd_gpu_pm4_queue_completion_source(&queue_.base);
     iree_slim_mutex_lock(&completion_.drain_mutex);
     iree_hal_amd_gpu_completion_scope_t scope = {
@@ -202,7 +220,7 @@ class Pm4LifecycleTest : public ::testing::Test {
     };
     iree_hal_amd_gpu_completion_wait_t wait = {};
     const bool progressed =
-        source.fn(source.user_data, AMDF_STATUS_OK, &scope, &wait, nullptr);
+        source.fn(source.user_data, AMDF_STATUS_OK, &scope, &wait, out_copy);
     EXPECT_FALSE(iree_hal_amd_gpu_completion_scope_finish(&scope));
     iree_slim_mutex_unlock(&completion_.drain_mutex);
     if (out_wait) {
@@ -324,6 +342,8 @@ class Pm4LifecycleTest : public ::testing::Test {
   std::array<iree_hal_amd_gpu_signal_t*, 4> readers_ = {};
   // Six application buffers with final-release observations.
   std::array<std::array<uint8_t, 16>, 6> bytes_ = {};
+  // Application download destinations, distinct from native payload storage.
+  std::array<std::array<uint8_t, 16>, 6> targets_ = {};
   // Stable native-address contract retained through all payload release.
   iree_hal_memory_contract_t* contract_ = nullptr;
   // One qualified address slot per buffer; cleanup never consumes the address.
@@ -346,6 +366,64 @@ class Pm4LifecycleTest : public ::testing::Test {
   // Public barrier policy consumed only when the capture is constructed.
   iree_hal_amd_gpu_pm4_barrier_profile_t profile_ = {};
 };
+
+TEST_F(Pm4LifecycleTest, DownloadCopyRetainsPayloadAndPublicCompletion) {
+  Capture(CaptureKind::Download);
+  EnableNativeCompletion();
+  // DMA downloads consume no launch arguments. This prefix already belongs
+  // to an earlier retired launch and stays usable while the host copy waits.
+  iree_atomic_store(&queue_.completed.arguments, 128,
+                    iree_memory_order_release);
+  std::array<uint8_t, 96> staging;
+  for (size_t i = 0; i < staging.size(); ++i) {
+    staging[i] = i + 1;
+  }
+  issued_[0].action.download = {
+      .source = staging.data(),
+      .operation = capture_->transfer.operations,
+      .length = staging.size(),
+  };
+  iree_hal_amd_gpu_completion_copy_t copy = {};
+  EXPECT_FALSE(Poll(nullptr, &copy));
+  EXPECT_EQ(copy.fn, nullptr);
+  native_access_ended_ = true;
+  CompletePiece(0);
+  EXPECT_FALSE(Poll(nullptr, &copy));
+  ASSERT_NE(copy.fn, nullptr);
+  EXPECT_EQ(
+      iree_atomic_load(&queue_.completed.arguments, iree_memory_order_acquire),
+      128);
+  EXPECT_EQ(
+      iree_atomic_load(&queue_.completed.transfers, iree_memory_order_acquire),
+      0);
+  EXPECT_EQ(
+      iree_atomic_load(&queue_.completed.count, iree_memory_order_acquire), 0);
+  EXPECT_EQ(destroyed_, 0u);
+  ExpectPending();
+  for (const auto& target : targets_) {
+    EXPECT_EQ(target, (std::array<uint8_t, 16>{}));
+  }
+  copy.fn(copy.user_data);
+  ExpectPending();
+  EXPECT_EQ(
+      iree_atomic_load(&queue_.completed.transfers, iree_memory_order_acquire),
+      0);
+  EXPECT_TRUE(Poll());
+  for (size_t i = 0; i < targets_.size(); ++i) {
+    for (size_t j = 0; j < targets_[i].size(); ++j) {
+      EXPECT_EQ(targets_[i][j], staging[i * 16 + j]);
+    }
+  }
+  EXPECT_EQ(
+      iree_atomic_load(&queue_.completed.transfers, iree_memory_order_acquire),
+      4096);
+  EXPECT_EQ(
+      iree_atomic_load(&queue_.completed.count, iree_memory_order_acquire), 1);
+  uint64_t value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(semaphore_, &value));
+  EXPECT_EQ(value, 1u);
+  EXPECT_EQ(destroyed_, 6u);
+}
 
 TEST_F(Pm4LifecycleTest, NativeStopPrecedesSixBufferReleases) {
   Capture();
@@ -373,7 +451,7 @@ TEST_F(Pm4LifecycleTest, NativeStopPrecedesSixBufferReleases) {
 }
 
 TEST_F(Pm4LifecycleTest, UnpublishedSuffixRetainsItsIndependentHostOwnership) {
-  Capture(true);
+  Capture(CaptureKind::PartialTransfer);
   FailIssued();
   StopAndRetire();
   EXPECT_EQ(destroyed_, 0u);
@@ -387,7 +465,7 @@ TEST_F(Pm4LifecycleTest, PublicationFailureRetiresWithoutSignalingSuccess) {
   iree_hal_semaphore_t* rejected_signal = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
       proactor_, nullptr, 0, 2, iree_allocator_system(), &rejected_signal));
-  Capture(false, rejected_signal);
+  Capture(CaptureKind::Dispatch, rejected_signal);
   EnableNativeCompletion();
   IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_publish_signal(
       semaphore_, signal_value_, readers_[0]));
@@ -474,7 +552,7 @@ TEST_F(Pm4LifecycleTest, ShaderFailureWaitsForIssuedCompletion) {
 
 TEST_F(Pm4LifecycleTest,
        ShaderFailureJoinsEveryIssuedPieceAndUnpublishedSuffix) {
-  Capture(true);
+  Capture(CaptureKind::PartialTransfer);
   FailFeedback();
   EXPECT_FALSE(Poll());
   ExpectPending();
@@ -498,7 +576,7 @@ TEST_F(Pm4LifecycleTest,
 
 TEST_F(Pm4LifecycleTest,
        ShaderFailureRetiresRejectedSuffixBeforeLastNativePiece) {
-  Capture(true);
+  Capture(CaptureKind::PartialTransfer);
   FailFeedback();
   EXPECT_FALSE(Poll());
   iree_hal_amd_gpu_pm4_submission_release(capture_);

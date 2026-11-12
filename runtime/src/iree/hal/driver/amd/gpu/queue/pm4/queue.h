@@ -48,6 +48,8 @@ typedef struct iree_hal_amd_gpu_pm4_queue_options_t {
   // device at access ordinal zero, with coherent host read/write and GPU
   // access. All pointed-to storage remains live through final queue cleanup.
   const iree_hal_amd_fabric_memory_options_t* memory;
+  // Borrowed coherent read/write policy for explicit host transfer payloads.
+  const iree_hal_amd_fabric_memory_options_t* transfer_memory;
   // Borrowed read/write resident policy for lazy private storage, no host map.
   const iree_hal_amd_fabric_memory_options_t* scratch_memory;
   // Native private-storage geometry, captured before accepting dispatches.

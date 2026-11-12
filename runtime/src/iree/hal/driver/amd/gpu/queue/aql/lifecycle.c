@@ -57,6 +57,10 @@ bool iree_hal_amd_gpu_aql_queue_retire_failed(iree_hal_queue_t* base,
         &queue->issued[position & (queue->options.retirement_capacity - 1)];
     iree_hal_amd_gpu_aql_submission_t* submission = action->submission;
     const uint64_t arguments = action->arguments;
+    if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER) {
+      iree_atomic_store(&queue->completed.transfers, action->transfer.end,
+                        iree_memory_order_release);
+    }
     if (action->terminal) {
       iree_hal_amd_gpu_aql_submission_release_payload(submission);
     }
@@ -149,17 +153,24 @@ amdf_status_t iree_hal_amd_gpu_aql_queue_shutdown(iree_hal_queue_t* base) {
   iree_atomic_store(&queue->options.signals->waiting, 0,
                     iree_memory_order_release);
   iree_hal_amd_gpu_signal_cache_trim(queue->context, 0, queue->options.signals);
-  iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
-  if (arguments) {
-    arguments->next = queue->producer.retired_arguments;
-  } else {
-    arguments = queue->producer.retired_arguments;
-  }
+  iree_hal_amd_gpu_byte_storage_t* active[] = {queue->producer.arguments,
+                                               queue->producer.transfers};
+  iree_hal_amd_gpu_byte_storage_t* retired[] = {
+      queue->producer.retired_arguments, queue->producer.retired_transfers};
   queue->producer.arguments = queue->producer.retired_arguments = NULL;
-  while (arguments) {
-    iree_hal_amd_gpu_argument_storage_t* next = arguments->next;
-    iree_hal_amd_gpu_argument_storage_free(queue->context, arguments);
-    arguments = next;
+  queue->producer.transfers = queue->producer.retired_transfers = NULL;
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(active); ++i) {
+    iree_hal_amd_gpu_byte_storage_t* storage = active[i];
+    if (storage) {
+      storage->next = retired[i];
+    } else {
+      storage = retired[i];
+    }
+    while (storage) {
+      iree_hal_amd_gpu_byte_storage_t* next = storage->next;
+      iree_hal_amd_gpu_byte_storage_free(queue->context, storage);
+      storage = next;
+    }
   }
   return AMDF_STATUS_OK;
 }

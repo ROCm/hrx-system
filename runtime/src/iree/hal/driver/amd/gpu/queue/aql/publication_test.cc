@@ -7,6 +7,7 @@
 #include "iree/hal/driver/amd/gpu/queue/aql/publication.h"
 
 #include <array>
+#include <cstring>
 #include <tuple>
 #include <vector>
 
@@ -165,7 +166,7 @@ class AqlPublicationTest
   // Native notification destination.
   uint64_t doorbell_ = 0;
   // Zero-argument native function needs no argument backing.
-  iree_hal_amd_gpu_argument_storage_t arguments_ = {};
+  iree_hal_amd_gpu_byte_storage_t arguments_ = {};
   // Queue's accepted causal prefix.
   std::array<uint64_t, 2> frontier_ = {};
   // Immutable zero-scratch function metadata.
@@ -254,6 +255,70 @@ TEST_P(AqlPublicationTest, EmitsOnlyRequiredDependenciesAndCacheBoundaries) {
   }
   EXPECT_EQ(position, queue_.producer.ring.reserved);
   EXPECT_EQ(doorbell_, position - 1);
+}
+
+TEST_P(AqlPublicationTest, FullTransferStorageLeavesLaunchArgumentsAvailable) {
+  std::array<uint8_t, 4096> source;
+  source.fill(0xA5);
+  std::array<uint8_t, 4096> payload = {};
+  std::array<uint8_t, 64> argument_bytes = {};
+  arguments_.memory.contents =
+      iree_make_byte_span(argument_bytes.data(), argument_bytes.size());
+  arguments_.address = 0x7000;
+  arguments_.capacity = argument_bytes.size();
+  iree_hal_amd_gpu_aql_program_pool_t programs = {.blit = 0x1234};
+  queue_.options.programs = &programs;
+  const iree_hal_amd_gpu_transfer_operation_t operation = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+      .source = {.host = source.data()},
+      .target = {.device = iree_hal_amd_gpu_buffer_reference_borrow(0x4000)},
+      .length = source.size(),
+  };
+  iree_hal_amd_gpu_aql_submission_t* submission = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_file(
+      &queue_.captures, &operation, 0, 0, {}, &submission));
+  iree_status_t status = iree_ok_status();
+  EXPECT_EQ(iree_hal_amd_gpu_aql_publish_transfer(&queue_, submission, &status),
+            IREE_HAL_AMD_GPU_AQL_PUBLISH_TRANSFERS);
+  IREE_ASSERT_OK(status);
+  EXPECT_EQ(arguments_.end, 0u);
+  EXPECT_EQ(queue_.producer.ring.reserved, 0u);
+
+  iree_hal_amd_gpu_byte_storage_t transfers = {};
+  transfers.memory.contents =
+      iree_make_byte_span(payload.data(), payload.size());
+  transfers.address = 0xABC000008000;
+  transfers.capacity = payload.size();
+  queue_.producer.transfers = &transfers;
+  EXPECT_EQ(iree_hal_amd_gpu_aql_publish_transfer(&queue_, submission, &status),
+            IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE);
+  IREE_ASSERT_OK(status);
+  EXPECT_EQ(payload, source);
+  EXPECT_EQ(arguments_.end, 32u);
+  EXPECT_EQ(transfers.end, 4096u);
+  EXPECT_EQ(issued_[0].arguments, 32u);
+  EXPECT_EQ(issued_[0].transfer.end, 4096u);
+  EXPECT_EQ(PacketAddress(0, 10), arguments_.address);
+  iree_hal_amd_gpu_blit_arguments_t blit;
+  std::memcpy(&blit, argument_bytes.data(), sizeof(blit));
+  EXPECT_EQ(blit.source, transfers.address);
+  EXPECT_EQ(blit.target, 0x4000u);
+  EXPECT_EQ(blit.length, source.size());
+
+  // Neither transfer completion nor payload space is required by this launch.
+  std::array<uint8_t, 32> launch_arguments;
+  launch_arguments.fill(0x5A);
+  layout_.byte_length = launch_arguments.size();
+  request_.constants = iree_make_const_byte_span(launch_arguments.data(),
+                                                 launch_arguments.size());
+  std::vector<iree_hal_amd_gpu_aql_wait_t> waits;
+  Publish(Semaphore(), waits);
+  EXPECT_EQ(arguments_.end, 64u);
+  EXPECT_EQ(transfers.end, 4096u);
+  EXPECT_EQ(PacketAddress(2, 10), arguments_.address + 32);
+  EXPECT_EQ(
+      std::memcmp(argument_bytes.data() + 32, launch_arguments.data(), 32), 0);
+  EXPECT_EQ(payload, source);
 }
 
 INSTANTIATE_TEST_SUITE_P(NativeDependencies, AqlPublicationTest,

@@ -6,12 +6,16 @@
 
 #include "iree/hal/driver/amd/gpu/queue/pm4/queue.h"
 
+#include <algorithm>
+#include <array>
 #include <cstring>
+#include <semaphore>
 #include <vector>
 
 #include "iree/async/event.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/driver/amd/fabric/memory_backend_test_base.h"
+#include "iree/hal/driver/amd/gpu/queue/pm4/state.h"
 #include "iree/hal/driver/amd/gpu/queue/semaphore.h"
 #include "iree/testing/gtest.h"
 
@@ -119,6 +123,8 @@ class KernelQueueTest : public MemoryBackendTest {
     amdf_status_t terminal_status = AMDF_STATUS_OK;
     // Independent native capacity, which may be smaller than advertised credit.
     bool busy = false;
+    // One rejected submission after capacity becomes available.
+    amdf_status_t rejection = AMDF_STATUS_OK;
   };
 
   static NativeQueue* Native(amdf_kernel_queue_t* queue) {
@@ -135,11 +141,17 @@ class KernelQueueTest : public MemoryBackendTest {
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(MemoryBackendTest::SetUp());
     native_.user_data = this;
-    native_.required_flags = 0;
+    native_.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
     native_.host_coherent = true;
     native_.queue_family_ordinals[0] = 0;
+    native_families_[0].queue_family_ordinal = 0;
     native_.address_kinds[0] = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU;
     native_.atomic_reach[0].scope_32 = AMDF_ATOMIC_SCOPE_DEVICE;
+    for (size_t i = 0; i < binding_descriptions_.size(); ++i) {
+      binding_descriptions_[i] = {IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+                                  AMDF_MEMORY_ADDRESS_GPU};
+      native_.address_kinds[i] = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU;
+    }
     native_.api.memory_query_access_info = [](amdf_memory_t*, uint32_t,
                                               amdf_memory_access_info_t* info) {
       info->flags =
@@ -181,6 +193,11 @@ class KernelQueueTest : public MemoryBackendTest {
               Words(command), Words(command) + command.byte_length / 4);
           if (native->busy) {
             return amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
+          }
+          if (!amdf_status_is_ok(native->rejection)) {
+            const amdf_status_t status = native->rejection;
+            native->rejection = AMDF_STATUS_OK;
+            return status;
           }
           native->commands.push_back(command);
           *point = native->commands.size();
@@ -251,8 +268,11 @@ class KernelQueueTest : public MemoryBackendTest {
         .profile = profile,
         .access_count = 1,
         .accesses = &access_,
+        .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
         .host_access = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
     };
+
+    transfer_memory_ = memory_;
     for (uint32_t i = 0; i < queues_.size(); ++i) {
       iree_hal_amd_gpu_signal_cache_initialize(&publication_, i, &signals_[i]);
       const iree_hal_amd_gpu_pm4_queue_options_t options = {
@@ -263,6 +283,7 @@ class KernelQueueTest : public MemoryBackendTest {
           .publication_mode = AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
           .command_byte_capacity = 4096,
           .memory = &memory_,
+          .transfer_memory = &transfer_memory_,
           .publication = &publication_,
           .barriers = barrier_profile_,
           .retirement_capacity = 4,
@@ -289,6 +310,7 @@ class KernelQueueTest : public MemoryBackendTest {
     for (auto& signals : signals_) {
       iree_hal_amd_gpu_signal_cache_deinitialize(&context_, &signals);
     }
+    transfer_pool_.reset();
     iree_hal_amd_gpu_context_deinitialize_memory(&context_);
     iree_async_event_native_deinitialize(&context_.kernel_event);
     iree_hal_amd_fabric_release(fabric_);
@@ -303,6 +325,37 @@ class KernelQueueTest : public MemoryBackendTest {
         iree::hal::amd::fabric::test_proactor(), nullptr, 0, 2, allocator_,
         semaphore.out()));
     return semaphore;
+  }
+
+  Ref<iree_hal_buffer_t> Buffer(uint64_t length) {
+    if (!transfer_pool_) {
+      IREE_CHECK_OK(
+          CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER,
+                     UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+                     transfer_pool_.out()));
+    }
+    Ref<iree_hal_buffer_t> buffer;
+    IREE_CHECK_OK(iree_hal_pool_allocate_buffer(
+        transfer_pool_, iree_hal_make_pool_reservation_request(length, 64),
+        iree_infinite_timeout(), buffer.out()));
+    iree_hal_buffer_mapping_t mapping;
+    IREE_CHECK_OK(iree_hal_buffer_map_range(
+        buffer, IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_WRITE,
+        IREE_HAL_BUFFER_MAP_FLAG_NONE, 0, length, &mapping));
+    std::memset(mapping.contents.data, 0, mapping.contents.data_length);
+    IREE_CHECK_OK(iree_hal_buffer_unmap_range(&mapping));
+    return buffer;
+  }
+
+  std::vector<uint8_t> Read(iree_hal_buffer_t* buffer, uint64_t length) {
+    iree_hal_buffer_mapping_t mapping;
+    IREE_CHECK_OK(iree_hal_buffer_map_range(
+        buffer, IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_READ,
+        IREE_HAL_BUFFER_MAP_FLAG_NONE, 0, length, &mapping));
+    std::vector<uint8_t> result(mapping.contents.data,
+                                mapping.contents.data + length);
+    IREE_CHECK_OK(iree_hal_buffer_unmap_range(&mapping));
+    return result;
   }
 
   void ExpandFrontiers() {
@@ -372,10 +425,24 @@ class KernelQueueTest : public MemoryBackendTest {
             EXPECT_EQ(length, 2u);
             EXPECT_EQ(words[cursor + 1], 0x80000407u);
             break;
-          case 0x50:  // Zero-byte DMA_DATA joins preceding DMA work.
+          case 0x50: {  // DMA_DATA or its zero-byte completion join.
             EXPECT_EQ(length, 7u);
-            EXPECT_EQ(words[cursor + 6], 0u);
+            const uint32_t byte_length = words[cursor + 6];
+            if (byte_length) {
+              if (((words[cursor + 1] >> 29) & 3) == 2) {
+                ASSERT_EQ(byte_length % 4, 0u);
+                auto* target = reinterpret_cast<uint32_t*>(address(4));
+                for (uint32_t i = 0; i < byte_length / 4; ++i) {
+                  target[i] = words[cursor + 2];
+                }
+              } else {
+                std::memcpy(reinterpret_cast<void*>(address(4)),
+                            reinterpret_cast<const void*>(address(2)),
+                            byte_length);
+              }
+            }
             break;
+          }
           case 0x58:  // ACQUIRE_MEM completes synchronous cache work.
             EXPECT_EQ(length, 8u);
             break;
@@ -412,6 +479,8 @@ class KernelQueueTest : public MemoryBackendTest {
   iree_hal_amd_gpu_pm4_barrier_profile_t barrier_profile_ = {};
   // Captured native backing profile, retained through queue cleanup.
   iree_hal_amd_fabric_memory_options_t memory_ = {};
+  // Independent explicit-payload policy, borrowed through native retirement.
+  iree_hal_amd_fabric_memory_options_t transfer_memory_ = {};
   // Production typed publisher, started for synchronous metadata installation.
   iree_hal_amd_gpu_publication_t publication_ = {};
   // Existing native retirement ownership and scope synchronization.
@@ -420,7 +489,135 @@ class KernelQueueTest : public MemoryBackendTest {
   std::array<iree_hal_amd_gpu_signal_cache_t, 2> signals_ = {};
   // Public queues under test, borrowing the fixture's device families.
   std::array<Ref<iree_hal_queue_t>, 2> queues_;
+  // Public transfer allocation owner, retained through every captured buffer.
+  Ref<iree_hal_pool_t> transfer_pool_;
 };
+
+TEST_F(KernelQueueTest, PayloadGrowthPreservesLaunchArgumentCapacity) {
+  auto buffer = Buffer(40000);
+  auto* queue =
+      reinterpret_cast<iree_hal_amd_gpu_pm4_queue_t*>(queues_[0].get());
+  auto* arguments = queue->producer.arguments;
+  ASSERT_EQ(queue->producer.transfers.current, nullptr);
+  const std::vector<uint8_t> first(11117, 0x39), second(22001, 0xA7);
+  IREE_ASSERT_OK(iree_hal_queue_update(queues_[0], {}, {}, first.data(), 0,
+                                       buffer, 0, first.size(), nullptr, 0));
+  iree_hal_amd_gpu_context_join_memory(&context_);
+  Publish(0);
+  auto* first_payload = queue->producer.transfers.current;
+  ASSERT_NE(first_payload, nullptr);
+  EXPECT_EQ(first_payload->capacity, 16384u);
+  IREE_ASSERT_OK(iree_hal_queue_update(queues_[0], {}, {}, second.data(), 0,
+                                       buffer, first.size(), second.size(),
+                                       nullptr, 0));
+  iree_hal_amd_gpu_context_join_memory(&context_);
+  Publish(0);
+  EXPECT_EQ(queue->producer.arguments, arguments);
+  EXPECT_EQ(arguments->capacity, 4096u);
+  EXPECT_EQ(arguments->end, 0u);
+  EXPECT_EQ(queue->producer.transfers.retired, first_payload);
+  EXPECT_EQ(queue->producer.transfers.current->capacity, 32768u);
+  ASSERT_NO_FATAL_FAILURE(Execute(0));
+  Poll(0);
+  std::vector<uint8_t> expected(first.size() + second.size());
+  std::copy(first.begin(), first.end(), expected.begin());
+  std::copy(second.begin(), second.end(), expected.begin() + first.size());
+  EXPECT_EQ(Read(buffer, expected.size()), expected);
+  iree_hal_amd_gpu_pm4_queue_trim(queues_[0]);
+  Publish(0);
+  EXPECT_EQ(queue->producer.transfers.retired, nullptr);
+}
+
+TEST_F(KernelQueueTest, RejectionRollsBackTheBorrowedPayloadGeneration) {
+  auto buffer = Buffer(2048);
+  auto rejected = Semaphore(), completed = Semaphore();
+  iree_hal_semaphore_t* rejected_handle = rejected;
+  iree_hal_semaphore_t* completed_handle = completed;
+  uint64_t one = 1;
+  auto* queue =
+      reinterpret_cast<iree_hal_amd_gpu_pm4_queue_t*>(queues_[0].get());
+  const std::vector<uint8_t> warm(73, 0x19), pending(17, 0x5B),
+      large(1000, 0xD7);
+  IREE_ASSERT_OK(iree_hal_queue_update(queues_[0], {}, {}, warm.data(), 0,
+                                       buffer, 0, warm.size(), nullptr, 0));
+  iree_hal_amd_gpu_context_join_memory(&context_);
+  Publish(0);
+  auto* borrowed = queue->producer.transfers.current;
+  ASSERT_NE(borrowed, nullptr);
+  ASSERT_EQ(borrowed->end, warm.size());
+  ASSERT_EQ(native_queues_[0].commands.size(), 1u);
+
+  std::binary_semaphore allocation_entered(0), resume_allocation(0);
+  native_.before_create = [&] {
+    allocation_entered.release();
+    resume_allocation.acquire();
+  };
+  IREE_EXPECT_OK(iree_hal_queue_update(
+      queues_[0], {}, {1, &completed_handle, &one}, large.data(), 0, buffer,
+      256, large.size(), nullptr, 0));
+  allocation_entered.acquire();
+  native_queues_[0].busy = true;
+  IREE_EXPECT_OK(iree_hal_queue_update(
+      queues_[0], {}, {1, &rejected_handle, &one}, pending.data(), 0, buffer,
+      80, pending.size(), nullptr, 0));
+  EXPECT_EQ(queue->kernel->rollback.storage, borrowed);
+  EXPECT_EQ(queue->kernel->rollback.bytes, warm.size());
+  EXPECT_NE(queue->kernel->pending.byte_length, 0u);
+  const uint64_t reserved_end = borrowed->end;
+  resume_allocation.release();
+  iree_hal_amd_gpu_context_join_memory(&context_);
+  native_.before_create = {};
+  Publish(0);
+  ASSERT_NE(queue->producer.transfers.current, borrowed);
+  EXPECT_EQ(queue->producer.transfers.retired, borrowed);
+  EXPECT_EQ(queue->producer.transfers.current->begin, reserved_end);
+  EXPECT_EQ(queue->kernel->rollback.storage, borrowed);
+
+  ASSERT_NO_FATAL_FAILURE(Execute(0));
+  Poll(0);
+  native_queues_[0].busy = false;
+  native_queues_[0].rejection =
+      amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
+  Publish(0);
+  EXPECT_EQ(borrowed->end, warm.size());
+  EXPECT_EQ(queue->producer.transfers.current->end,
+            reserved_end + large.size());
+  EXPECT_EQ(queue->producer.arguments->end, 0u);
+  uint64_t value = 0;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        iree_hal_semaphore_query(rejected, &value));
+  ASSERT_NO_FATAL_FAILURE(Execute(0));
+  Poll(0);
+  IREE_ASSERT_OK(iree_hal_semaphore_query(completed, &value));
+  EXPECT_EQ(value, one);
+  std::vector<uint8_t> expected(2048, 0);
+  std::copy(warm.begin(), warm.end(), expected.begin());
+  std::copy(large.begin(), large.end(), expected.begin() + 256);
+  EXPECT_EQ(Read(buffer, expected.size()), expected);
+  iree_hal_amd_gpu_pm4_queue_trim(queues_[0]);
+  Publish(0);
+  EXPECT_EQ(queue->producer.transfers.retired, nullptr);
+}
+
+TEST_F(KernelQueueTest, NarrowFillAcquiresPayloadWithoutUsingArguments) {
+  auto buffer = Buffer(16);
+  auto* queue =
+      reinterpret_cast<iree_hal_amd_gpu_pm4_queue_t*>(queues_[0].get());
+  const uint8_t pattern = 0xB5;
+  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {}, {}, buffer, 1, 9, &pattern,
+                                     sizeof(pattern), nullptr, 0));
+  iree_hal_amd_gpu_context_join_memory(&context_);
+  Publish(0);
+  ASSERT_NE(queue->producer.transfers.current, nullptr);
+  EXPECT_EQ(queue->producer.transfers.current->capacity, 8u);
+  EXPECT_EQ(queue->producer.arguments->end, 0u);
+  ASSERT_NO_FATAL_FAILURE(Execute(0));
+  Poll(0);
+  const std::vector<uint8_t> expected = {0,    0xB5, 0xB5, 0xB5, 0xB5, 0xB5,
+                                         0xB5, 0xB5, 0xB5, 0xB5, 0,    0,
+                                         0,    0,    0,    0};
+  EXPECT_EQ(Read(buffer, expected.size()), expected);
+}
 
 TEST_F(KernelQueueTest, MetadataPreservesBusyCommandAndItsCausalFrontier) {
   auto first = Semaphore(), foreign = Semaphore(), second = Semaphore(),

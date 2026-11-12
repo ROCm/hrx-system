@@ -33,15 +33,15 @@ struct iree_hal_amd_gpu_aql_growth_t {
   // Native acquisition outcome, owned until publication consumes this record.
   iree_status_t status;
   union {
-    // Ordinary argument or signal generation acquired under the queue policy.
+    // Purpose-specific byte or signal generation under the queue policy.
     struct {
       // Typed acquisition geometry, borrowed through native completion.
       iree_hal_amd_fabric_memory_request_t request;
       // Context lifetime borrow and native acquisition descriptor.
       iree_hal_amd_gpu_memory_acquire_t acquire;
       union {
-        // Owned argument generation for GROW_ARGUMENTS.
-        iree_hal_amd_gpu_argument_storage_t* arguments;
+        // Owned byte generation for argument or transfer acquisition.
+        iree_hal_amd_gpu_byte_storage_t* bytes;
         // Owned signal generation for GROW_SIGNALS.
         iree_hal_amd_gpu_signal_storage_t* signals;
       };
@@ -156,6 +156,9 @@ iree_status_t iree_hal_amd_gpu_aql_growth_begin(
     case IREE_HAL_AMD_GPU_AQL_ENTRY_ARGUMENTS:
       pending = context->arguments;
       break;
+    case IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFERS:
+      pending = context->transfers;
+      break;
     case IREE_HAL_AMD_GPU_AQL_ENTRY_SIGNALS:
       pending = context->signals;
       break;
@@ -208,17 +211,23 @@ iree_status_t iree_hal_amd_gpu_aql_growth_begin(
         program, context->queue_ordinal, completion, &growth->program);
   } else {
     iree_hal_amd_fabric_memory_t* memory = NULL;
-    if (kind == IREE_HAL_AMD_GPU_AQL_ENTRY_ARGUMENTS) {
-      status = iree_hal_amd_gpu_argument_storage_prepare(
-          capacity, context->captures->host_allocator,
-          &growth->backing.arguments);
+    if (kind == IREE_HAL_AMD_GPU_AQL_ENTRY_ARGUMENTS ||
+        kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFERS) {
+      status = iree_hal_amd_gpu_byte_storage_prepare(
+          capacity, context->captures->host_allocator, &growth->backing.bytes);
       if (iree_status_is_ok(status)) {
-        memory = &growth->backing.arguments->memory;
-        growth->backing.request =
-            (iree_hal_amd_fabric_memory_request_t){.options = context->memory,
-                                                   .byte_length = capacity,
-                                                   .alignment = capacity};
-        context->arguments = growth;
+        memory = &growth->backing.bytes->memory;
+        growth->backing.request = (iree_hal_amd_fabric_memory_request_t){
+            .options = kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFERS
+                           ? context->transfer_memory
+                           : context->memory,
+            .byte_length = capacity,
+            .alignment = capacity};
+        if (kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFERS) {
+          context->transfers = growth;
+        } else {
+          context->arguments = growth;
+        }
       }
     } else {
       status = iree_hal_amd_gpu_signal_storage_prepare(
@@ -253,7 +262,7 @@ iree_status_t iree_hal_amd_gpu_aql_growth_begin(
 }
 
 iree_status_t iree_hal_amd_gpu_aql_growth_end(
-    iree_hal_amd_gpu_aql_entry_t* entry, uint64_t argument_begin,
+    iree_hal_amd_gpu_aql_entry_t* entry, uint64_t byte_begin,
     iree_hal_amd_gpu_aql_growth_result_t* out_result) {
   iree_hal_amd_gpu_aql_growth_t* growth =
       iree_containerof(entry, iree_hal_amd_gpu_aql_growth_t, entry);
@@ -264,16 +273,21 @@ iree_status_t iree_hal_amd_gpu_aql_growth_end(
   growth->completed = true;
   switch (entry->kind) {
     case IREE_HAL_AMD_GPU_AQL_ENTRY_ARGUMENTS:
-      context->arguments = NULL;
-      if (iree_status_is_ok(status)) {
-        status = iree_hal_amd_gpu_argument_storage_initialize(
-            context->context, argument_begin, growth->backing.arguments);
+    case IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFERS:
+      if (entry->kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFERS) {
+        context->transfers = NULL;
+      } else {
+        context->arguments = NULL;
       }
       if (iree_status_is_ok(status)) {
-        out_result->arguments = growth->backing.arguments;
+        status = iree_hal_amd_gpu_byte_storage_initialize(
+            context->context, byte_begin, growth->backing.bytes);
+      }
+      if (iree_status_is_ok(status)) {
+        out_result->bytes = growth->backing.bytes;
       } else {
-        iree_hal_amd_gpu_argument_storage_free(context->context,
-                                               growth->backing.arguments);
+        iree_hal_amd_gpu_byte_storage_free(context->context,
+                                           growth->backing.bytes);
       }
       break;
     case IREE_HAL_AMD_GPU_AQL_ENTRY_SIGNALS:

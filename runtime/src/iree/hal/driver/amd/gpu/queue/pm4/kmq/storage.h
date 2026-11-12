@@ -52,8 +52,11 @@ typedef struct iree_hal_amd_gpu_pm4_kmq_storage_t {
   struct {
     // Command cursor before preparing the pending piece, including wrap.
     uint64_t words;
-    // Argument cursor before preparing the pending piece.
-    uint64_t arguments;
+    // Exact generation borrowed by the pending piece, or NULL without bytes.
+    // One piece consumes either argument storage or DMA payload, never both.
+    struct iree_hal_amd_gpu_byte_storage_t* storage;
+    // Borrowed generation's byte cursor before preparing the pending piece.
+    uint64_t bytes;
   } rollback;
   // Last accepted native point, owned by the publisher until joined cleanup.
   uint64_t last_submission;

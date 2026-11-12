@@ -45,8 +45,13 @@ typedef struct iree_hal_amd_gpu_aql_retirement_t {
   union {
     // Ready direct calls retain resources without another pool access.
     iree_alignas(8) uint8_t capture[480];
-    // Pooled transfers instead own a host copy before returning staging credit.
-    iree_hal_amd_gpu_download_t download;
+    // Transfer-only ownership leaves the ordinary inline capture unchanged.
+    struct {
+      // Payload prefix retired after native use and any host completion copy.
+      uint64_t end;
+      // Host destinations completed before returning payload credit.
+      iree_hal_amd_gpu_download_t download;
+    } transfer;
     // Recorded chunks own sample ranges independently of the shared capture.
     iree_hal_amd_gpu_profile_completion_t profile;
   };
@@ -103,9 +108,13 @@ struct iree_hal_amd_gpu_aql_queue_t {
     // Native slot credit and write-only packet/doorbell operands.
     iree_hal_amd_gpu_aql_ring_t ring;
     // Current argument generation.
-    iree_hal_amd_gpu_argument_storage_t* arguments;
+    iree_hal_amd_gpu_byte_storage_t* arguments;
     // Replaced generations, newest first; visited only at explicit trim.
-    iree_hal_amd_gpu_argument_storage_t* retired_arguments;
+    iree_hal_amd_gpu_byte_storage_t* retired_arguments;
+    // Lazily acquired host transfer payloads, independent of launch arguments.
+    iree_hal_amd_gpu_byte_storage_t* transfers;
+    // Replaced payload generations retained through their final host consumer.
+    iree_hal_amd_gpu_byte_storage_t* retired_transfers;
     // Dense immutable-domain causal prefix, updated only at acceptance.
     uint64_t* frontier;
     // Frontier width captured at construction.
@@ -120,6 +129,8 @@ struct iree_hal_amd_gpu_aql_queue_t {
         iree_atomic_int64_t count;
     // Retired argument prefix including alignment/wrap padding.
     iree_atomic_int64_t arguments;
+    // Payload prefix including completed download copies and wrap padding.
+    iree_atomic_int64_t transfers;
     // Publisher enrolled for actual completion credit.
     iree_atomic_int32_t waiting;
   } completed;

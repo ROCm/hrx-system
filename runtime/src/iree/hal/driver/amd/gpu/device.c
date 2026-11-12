@@ -43,6 +43,7 @@
 #include "iree/hal/driver/amd/gpu/queue/sdma/native_queue.h"
 #include "iree/hal/driver/amd/gpu/queue/sdma/queue.h"
 #include "iree/hal/driver/amd/gpu/queue/semaphore.h"
+#include "iree/hal/driver/amd/gpu/queue/transfer_memory.h"
 #include "iree/hal/driver/amd/gpu/target/selection.h"
 #include "iree/hal/driver/amd/status.h"
 #include "iree/hal/utils/device_spec_builder.h"
@@ -97,6 +98,8 @@ typedef struct iree_hal_amd_gpu_transfer_family_t {
   amdf_queue_publication_modes_t publication_mode;
   // Family-selected cache visibility and execution boundary recipes.
   iree_hal_amd_gpu_sdma_barrier_profile_t barriers;
+  // Exact-family placement and visibility for upload/download payloads.
+  iree_hal_amd_gpu_transfer_memory_t memory;
   // Read/write private data for reusable transfer recordings.
   iree_hal_amd_gpu_program_pool_t programs;
   // Lazy shared file I/O slots, with this family's native memory recipes.
@@ -215,6 +218,8 @@ typedef struct iree_hal_amd_gpu_device_t {
     amdf_memory_device_access_t access;
     // Qualified coherent system backing for native control and placed images.
     iree_hal_amd_fabric_memory_options_t control;
+    // Compute-family upload/download payload placement and visibility.
+    iree_hal_amd_gpu_transfer_memory_t transfers;
     // Device access facts qualified by the control profile.
     struct {
       // Native permissions that cannot be withheld from GPU allocations.
@@ -967,6 +972,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_compute_queue(
         .signals = signals,
         .command_byte_capacity = options.command_byte_capacity,
         .memory = options.memory,
+        .transfer_memory = options.transfer_memory,
         .scratch_memory = options.scratch_memory,
         .programs = &device->programs.aql,
         .publication = options.publication,
@@ -1014,6 +1020,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_transfer_queue(
                              : iree_hal_amd_gpu_pm4_signal_storage_initialize},
       .signals = signals,
       .memory = &device->memory.control,
+      .transfer_memory = &transfer->memory.options,
       .publication = &device->publication,
       .allocations = &device->memory.allocations,
       .mappings = &device->memory.mappings,
@@ -1259,6 +1266,10 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
     status = iree_hal_amd_gpu_device_prepare_control(device);
   }
   if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_gpu_transfer_memory_initialize(
+        context, family_ordinal, &device->memory.transfers);
+  }
+  if (iree_status_is_ok(status)) {
     status = iree_async_proactor_pool_acquire_for_node(
         create_params->proactor_pool, options->host_numa_node,
         &device->proactor_entry);
@@ -1305,10 +1316,14 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
        i < device->transfer_family_count && iree_status_is_ok(status); ++i) {
     iree_hal_amd_gpu_transfer_family_t* transfer =
         &device->transfer_families[i];
-    status = iree_hal_amd_gpu_program_pool_initialize(
-        context, transfer->native_ordinal, options->queue_count,
-        AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, host_allocator,
-        &transfer->programs);
+    status = iree_hal_amd_gpu_transfer_memory_initialize(
+        context, transfer->native_ordinal, &transfer->memory);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_amd_gpu_program_pool_initialize(
+          context, transfer->native_ordinal, options->queue_count,
+          AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, host_allocator,
+          &transfer->programs);
+    }
     if (iree_status_is_ok(status) && has_file_staging) {
       status = iree_hal_amd_gpu_file_staging_allocate(
           (iree_hal_device_t*)device, context, transfer->native_ordinal,
@@ -1362,6 +1377,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
                                : aql ? 2 * 1024 * 1024
                                      : 64 * 1024,
       .memory = &device->memory.control,
+      .transfer_memory = &device->memory.transfers.options,
       .scratch_memory = &device->scratch.memory,
       .programs = aql ? NULL : &device->programs.pm4,
       .scratch_profile = device->scratch.profile,

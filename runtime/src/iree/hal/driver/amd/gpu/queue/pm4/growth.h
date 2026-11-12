@@ -28,6 +28,8 @@ typedef struct iree_hal_amd_gpu_pm4_growth_context_t {
   iree_hal_amd_gpu_context_t* context;
   // Borrowed immutable coherent argument/signal memory policy.
   const iree_hal_amd_fabric_memory_options_t* memory;
+  // Borrowed read/write transfer policy, independent of native control.
+  const iree_hal_amd_fabric_memory_options_t* transfer_memory;
   // Borrowed physical-local read/write scratch policy, with no host mapping.
   const iree_hal_amd_fabric_memory_options_t* scratch_memory;
   // Borrowed exact publisher's immutable scratch slot geometry.
@@ -57,6 +59,8 @@ typedef struct iree_hal_amd_gpu_pm4_growth_context_t {
   } reuse;
   // One coalesced argument acquisition, or NULL without pending growth.
   iree_hal_amd_gpu_pm4_growth_t* arguments;
+  // One coalesced transfer acquisition, or NULL without pending growth.
+  iree_hal_amd_gpu_pm4_growth_t* transfers;
   // One coalesced signal acquisition, or NULL without pending growth.
   iree_hal_amd_gpu_pm4_growth_t* signals;
   // One coalesced scratch acquisition, or NULL without pending growth.
@@ -75,7 +79,7 @@ void iree_hal_amd_gpu_pm4_growth_process_frontiers(
 
 // Transfers a detached capture to a coalesced growth request. The caller owns
 // the queue publisher and has released any unpublished program reservation.
-// kind is a GROW variant. capacity is the admitted power-of-two argument
+// kind is a GROW variant. capacity is the admitted power-of-two byte storage
 // extent or per-wave scratch extent, and is ignored for other kinds.
 // Success parks the capture outside the ready FIFO. Failure leaves ownership
 // with the caller and starts no callback for this capture. Pending program
@@ -93,8 +97,9 @@ typedef struct iree_hal_amd_gpu_pm4_growth_result_t {
   iree_hal_amd_gpu_publication_entry_t* first;
   // Last waiting capture with a NULL next link, or NULL for an empty cohort.
   iree_hal_amd_gpu_publication_entry_t* last;
-  // Owned acquired arguments, or NULL for another kind or failure.
-  iree_hal_amd_gpu_argument_storage_t* arguments;
+  // Owned acquired argument or transfer bytes, or NULL for another
+  // kind/failure.
+  iree_hal_amd_gpu_byte_storage_t* bytes;
   // Owned acquired scratch generation, or NULL for another kind or failure.
   iree_hal_amd_gpu_pm4_scratch_storage_t* scratch;
   // Owned acquired signal block, or NULL for another kind or failure.
@@ -103,14 +108,14 @@ typedef struct iree_hal_amd_gpu_pm4_growth_result_t {
 
 // Consumes a detached completed growth entry on its exact queue publisher.
 // Initializes acquired addresses, clears the indexed pending request, and
-// returns the waiting cohort without traversing it. argument_begin comes from
-// the current generation at installation, after any intervening publication.
+// returns the waiting cohort without traversing it. byte_begin comes from the
+// selected owner's current generation after any intervening publication.
 // Consumes the native-result reference; an already-queued program reuse hint
 // independently retains its record. Partial backing is released asynchronously
 // on failure; no native allocation/free or wait runs here. Native producer
 // callbacks are joined before context/queue destruction.
 iree_status_t iree_hal_amd_gpu_pm4_growth_end(
-    iree_hal_amd_gpu_pm4_entry_t* entry, uint64_t argument_begin,
+    iree_hal_amd_gpu_pm4_entry_t* entry, uint64_t byte_begin,
     iree_hal_amd_gpu_pm4_growth_result_t* out_result);
 
 // Called with a live queue borrow by its publisher or service source.
