@@ -37,8 +37,10 @@ typedef struct iree_hal_amd_gpu_aql_queue_options_t {
   iree_hal_amd_gpu_signal_cache_t* signals;
   // Power-of-two native packet storage extent in bytes.
   uint64_t command_byte_capacity;
-  // Borrowed coherent host-readable/writable control and argument policy.
+  // Borrowed coherent host-readable/writable control policy.
   const iree_hal_amd_fabric_memory_options_t* memory;
+  // Borrowed cached ABI policy, including GPU-written indirect hidden fields.
+  const iree_hal_amd_fabric_memory_options_t* argument_memory;
   // Borrowed coherent read/write policy for explicit host transfer payloads.
   const iree_hal_amd_fabric_memory_options_t* transfer_memory;
   // Borrowed local private-storage policy with no host mapping.

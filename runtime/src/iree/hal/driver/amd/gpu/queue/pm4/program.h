@@ -10,6 +10,7 @@
 #include "iree/hal/driver/amd/gpu/code.h"
 #include "iree/hal/driver/amd/gpu/queue/blit.h"
 #include "iree/hal/driver/amd/gpu/queue/control_program.h"
+#include "iree/hal/driver/amd/gpu/queue/input_memory.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/barrier.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/launch.h"
 #include "iree/hal/driver/amd/gpu/queue/program.h"
@@ -23,6 +24,9 @@ extern "C" {
 typedef struct iree_hal_amd_gpu_pm4_program_pool_t {
   // Shared placement, causal instance ownership, and explicit trim registry.
   iree_hal_amd_gpu_program_pool_t storage;
+  // CPU-produced shader input policy, independent of executable program
+  // storage.
+  iree_hal_amd_gpu_input_memory_t inputs;
   // Owned instruction bytes shared by every recording and invocation.
   iree_hal_amd_fabric_memory_t code;
   // Optional builtin initialization backing, retired before device publication.
@@ -56,9 +60,9 @@ typedef struct iree_hal_amd_gpu_pm4_program_block_t {
   uint32_t word_count;
 } iree_hal_amd_gpu_pm4_program_block_t;
 
-// Fixed invocation header followed by the dense uint64_t input vector. The
-// queue owns this upload until native retirement; program emission initializes
-// the builtin arguments after the recorder resolves the input vector.
+// Fixed builtin ABI for one invocation. The queue owns these arguments until
+// native retirement; dense fixup values have separate storage and an explicit
+// address. Program emission writes only these actual builtin arguments.
 typedef struct iree_hal_amd_gpu_pm4_program_arguments_t {
   // Independent full-word replacements for this instance.
   iree_hal_amd_gpu_fixup_arguments_t fixup;
@@ -110,7 +114,7 @@ uint32_t* iree_hal_amd_gpu_pm4_program_emit(
     const iree_hal_amd_gpu_program_instance_t* instance,
     iree_hal_amd_gpu_pm4_program_block_t entry,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
-    uint64_t argument_address,
+    uint64_t argument_address, uint64_t values_address,
     iree_hal_amd_gpu_pm4_program_arguments_t* arguments, uint32_t fixup_count,
     uint32_t fixup_word_count, const uint32_t* fixup_words, uint32_t padding,
     uint32_t* words);

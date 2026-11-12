@@ -64,7 +64,8 @@ bool iree_hal_amd_gpu_aql_ring_try_reserve(iree_hal_amd_gpu_aql_ring_t* ring,
 
 // Copies only the body to an exclusively reserved slot, leaving its header
 // INVALID. The designated host or device publisher later writes the complete
-// header/setup DWORD. The source is disjoint immutable host storage.
+// header/setup DWORD. The source is disjoint immutable host storage. Each body
+// byte is written once, without reading native storage.
 void iree_hal_amd_gpu_aql_ring_write_body(
     const iree_hal_amd_gpu_aql_ring_t* ring, uint64_t position,
     const iree_hal_amd_gpu_aql_packet_t* packet);
@@ -91,6 +92,17 @@ amdf_status_t iree_hal_amd_gpu_aql_ring_write_packets(
     const iree_hal_amd_gpu_aql_ring_t* ring,
     const iree_hal_amd_gpu_user_queue_t* storage, uint64_t position,
     uint32_t packet_count, const iree_hal_amd_gpu_aql_packet_t* packets);
+
+// Publishes the same gated span with invocation-specific completion operands.
+// Packet i receives completion_address + i * completion_stride, or zero in
+// every packet when completion_address is zero. Immutable fields and complete
+// completion operands are written once, without reading native storage or
+// copying packets into mutable host storage. The source remains unchanged.
+amdf_status_t iree_hal_amd_gpu_aql_ring_write_packets_with_completion(
+    const iree_hal_amd_gpu_aql_ring_t* ring,
+    const iree_hal_amd_gpu_user_queue_t* storage, uint64_t position,
+    uint32_t packet_count, const iree_hal_amd_gpu_aql_packet_t* packets,
+    uint64_t completion_address, uint32_t completion_stride);
 
 // Fences host device stores and notifies the last reserved packet index.
 // Called once per accepted nonempty chunk, without reading the MMIO aperture.

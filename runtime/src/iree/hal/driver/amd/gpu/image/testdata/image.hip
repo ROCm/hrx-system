@@ -108,6 +108,10 @@ __attribute__((global)) void image_dispatch_packet(unsigned* output,
     output[19] = descriptor[0];
     output[20] = descriptor[1];
     output[21] = descriptor[2];
+    const unsigned long long arguments =
+        (unsigned long long)__builtin_amdgcn_kernarg_segment_ptr();
+    output[22] = (unsigned)arguments;
+    output[23] = (unsigned)(arguments >> 32);
   }
 }
 }

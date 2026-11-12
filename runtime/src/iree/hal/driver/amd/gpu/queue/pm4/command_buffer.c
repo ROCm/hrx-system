@@ -7,6 +7,7 @@
 #include "iree/hal/driver/amd/gpu/queue/pm4/command_buffer.h"
 
 #include "iree/base/internal/arena.h"
+#include "iree/base/internal/memory_copy.h"
 #include "iree/hal/driver/amd/gpu/executable.h"
 #include "iree/hal/driver/amd/gpu/queue/control_program.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/commands.h"
@@ -58,8 +59,10 @@ typedef struct iree_hal_amd_gpu_pm4_command_buffer_t {
   iree_hal_amd_gpu_pm4_barrier_t pending_barrier;
   // Copies recorded since the last join; drained before the program exits.
   bool pending_dma;
-  // Posted clock destinations and invocation-private write-drain scratch.
+  // Posted clock destinations awaiting a native write drain.
   iree_hal_amd_gpu_timestamp_writes_t timestamps;
+  // Private-data offset of the invocation-owned posted-write acknowledgement.
+  uint32_t timestamp_scratch_offset;
   // Blocks backing direct-resource ownership.
   iree_arena_block_pool_t resource_blocks;
   // Retained buffers/executables, or NULL for explicitly unretained recordings.
@@ -261,12 +264,12 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_seal(
   iree_hal_amd_gpu_fixup_t* device_fixups =
       (void*)(program->contents.data + program->fixup_offset);
   iree_hal_amd_gpu_recording_write(&buffer->recording.storage,
-                                   program->contents.data,
+                                   program->contents.data, 0,
                                    bounded ? packet_fixups : device_fixups);
   uint32_t fixup_word_count = 0;
   if (bounded) {
-    memcpy(device_fixups, packet_fixups,
-           program->fixup_count * sizeof(*packet_fixups));
+    iree_memcpy_write_only(device_fixups, packet_fixups,
+                           program->fixup_count * sizeof(*packet_fixups));
     fixup_word_count = iree_hal_amd_gpu_pm4_fixup_packet_word_count(
         packet_fixups, program->fixup_count);
   }
@@ -314,7 +317,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_drain_timestamps(
   iree_hal_amd_gpu_pm4_emit_write(words, 0, 1, &value);
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_fixup(
       &buffer->recording.storage, offset + 8,
-      IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE, buffer->timestamps.scratch_offset, 0,
+      IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE, buffer->timestamp_scratch_offset, 0,
       IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA |
           IREE_HAL_AMD_GPU_RECORDING_FIXUP_WIDE));
   buffer->timestamps.count = 0;
@@ -347,9 +350,6 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_end(
   }
   buffer->program->value_count =
       buffer->inputs.count + iree_hal_amd_gpu_pm4_command_first_input(buffer);
-  buffer->program->argument_length =
-      sizeof(iree_hal_amd_gpu_pm4_program_arguments_t) +
-      buffer->program->value_count * 8;
   iree_hal_amd_gpu_command_inputs_seal(&buffer->inputs);
   iree_status_t status =
       iree_hal_amd_gpu_pm4_command_seal(buffer, (uint32_t)length);
@@ -475,8 +475,14 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_control(
         &buffer->recording, iree_hal_amd_gpu_control_word_count(command),
         &offset, &words));
     if (command.kind == IREE_HAL_AMD_GPU_CONTROL_TIMESTAMP) {
+      if (!buffer->timestamps.pending) {
+        void* scratch = NULL;
+        IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
+            &buffer->recording.storage, 4, 4, &buffer->timestamp_scratch_offset,
+            &scratch));
+      }
       IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_timestamp_writes_append(
-          &buffer->recording.storage, target, &buffer->timestamps));
+          buffer->host_allocator, target, &buffer->timestamps));
       iree_hal_amd_gpu_pm4_emit_clock(words, 0, false);
     } else {
       iree_hal_amd_gpu_control_emit(words, 0, command);
@@ -800,6 +806,16 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
               IREE_HAL_AMD_GPU_RECORDING_FIXUP_WIDE));
     }
   }
+  uint32_t packet_offset = 0;
+  if (function->packet) {
+    void* packet = NULL;
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
+        &buffer->recording.storage,
+        sizeof(iree_hal_amd_gpu_pm4_dispatch_packet_t), 64, &packet_offset,
+        &packet));
+    iree_hal_amd_gpu_pm4_dispatch_emplace_packet(function, &dispatch, flags,
+                                                 packet);
+  }
   const uint32_t prepare_words =
       prepare_packet ? IREE_HAL_AMD_GPU_PM4_DISPATCH_PREPARE_WORDS : 0;
   const uint32_t launch_words = function->launch.user_data_count
@@ -886,7 +902,6 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
   const uint16_t kernarg_word =
       iree_hal_amd_gpu_pm4_launch_user_data_word_offset(
           function->launch.user_data.kernarg_pointer);
-  const uint32_t packet_offset = argument_offset + storage.packet_offset;
   uint32_t kernarg_value = IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE;
   uint64_t kernarg_displacement = argument_offset;
   if (indirect && (kernarg_word != UINT16_MAX || function->packet)) {
@@ -970,15 +985,16 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
       buffer->pending_dma = false;
     }
     if (prepare_packet) {
+      const uint32_t prepare_offset = argument_offset + storage.prepare_offset;
       IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
-          buffer, true, packet_offset + 64, parameters,
+          buffer, true, prepare_offset, parameters,
           config.workgroup_count_ref.offset, false));
       IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
-          buffer, true, packet_offset + 72, IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE,
+          buffer, true, prepare_offset + 8, IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE,
           packet_offset, true));
       IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
           buffer, false, command_offset + 24 * 4,
-          IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE, packet_offset + 64, true));
+          IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE, prepare_offset, true));
     }
   }
   const uint64_t* image_addresses =
@@ -1074,14 +1090,14 @@ void iree_hal_amd_gpu_pm4_command_invocation_deinitialize(
 iree_status_t iree_hal_amd_gpu_pm4_command_invocation_write(
     const iree_hal_amd_gpu_pm4_command_invocation_t* invocation,
     uint32_t queue_ordinal, uint64_t dispatch_id, uint64_t continuation,
-    uint64_t profile_address, void* upload, uint32_t* out_fixup_words) {
+    uint64_t profile_address, uint64_t* values, uint32_t* out_fixup_words) {
   const iree_hal_amd_gpu_pm4_command_buffer_t* buffer =
       (const void*)invocation->command_buffer;
   uint64_t local_values[IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_VALUE_CAPACITY];
   const bool packets = buffer->program->fixup_word_count != 0;
-  uint64_t* values =
-      packets ? local_values
-              : (void*)((iree_hal_amd_gpu_pm4_program_arguments_t*)upload + 1);
+  if (packets) {
+    values = local_values;
+  }
   values[IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE] = invocation->instance->address;
   values[IREE_HAL_AMD_GPU_PM4_VALUE_DISPATCH_ID] = dispatch_id;
   values[IREE_HAL_AMD_GPU_PM4_VALUE_CONTINUATION] = continuation;

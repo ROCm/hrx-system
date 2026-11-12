@@ -55,11 +55,15 @@ TEST_F(RecordingTest, NativeCommandsAndPackedArgumentsSpanIndependentChunks) {
   EXPECT_EQ(data_offset % 64, 0u);
   EXPECT_EQ(iree_hal_amd_gpu_recording_fixup_count(&recording_.storage),
             kCount * 4);
-  std::vector<uint8_t> contents(data_offset + recording_.storage.data.length,
-                                0xAA);
+  std::vector<uint8_t> contents(
+      data_offset + recording_.storage.data.length + 1, 0xAA);
   std::vector<iree_hal_amd_gpu_fixup_t> fixups(kCount * 4);
-  iree_hal_amd_gpu_recording_write(&recording_.storage, contents.data(),
+  iree_hal_amd_gpu_recording_write(&recording_.storage, contents.data(), 0,
                                    fixups.data());
+  for (uint32_t i = recording_.storage.commands.length; i < data_offset; ++i) {
+    EXPECT_EQ(contents[i], 0u) << i;
+  }
+  EXPECT_EQ(contents.back(), 0xAA);
   // Separate placements preserve section bytes and logical relocation offsets.
   // Guard bytes expose stores beyond either independently allocated section.
   std::vector<uint8_t> commands(recording_.storage.commands.length + 1, 0xAA);
@@ -67,7 +71,7 @@ TEST_F(RecordingTest, NativeCommandsAndPackedArgumentsSpanIndependentChunks) {
   std::vector<iree_hal_amd_gpu_fixup_t> separate_fixups(kCount * 4);
   iree_hal_amd_gpu_recording_write_sections(&recording_.storage,
                                             commands.data(), data.data(),
-                                            separate_fixups.data());
+                                            nullptr, 0, separate_fixups.data());
   EXPECT_EQ(memcmp(commands.data(), contents.data(), commands.size() - 1), 0);
   EXPECT_EQ(memcmp(data.data(), contents.data() + data_offset, data.size() - 1),
             0);
@@ -129,7 +133,7 @@ TEST_P(RecordingBlockTest, SuccessorEdgesPreservePacketsAndInstanceFixups) {
       iree_hal_amd_gpu_recording_data_offset(&recording_.storage) / 4);
   std::vector<iree_hal_amd_gpu_fixup_t> fixups(fixup_count);
   iree_hal_amd_gpu_recording_write(&recording_.storage,
-                                   reinterpret_cast<uint8_t*>(words.data()),
+                                   reinterpret_cast<uint8_t*>(words.data()), 0,
                                    fixups.data());
   uint32_t word_count = recording_.entry_word_count;
   for (uint32_t block = 0; block < 3; ++block) {

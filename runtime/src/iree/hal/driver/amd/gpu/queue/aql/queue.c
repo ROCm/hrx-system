@@ -508,13 +508,32 @@ static void iree_hal_amd_gpu_aql_process_submission(
                                        consumed_arguments);
   } else if (result == IREE_HAL_AMD_GPU_AQL_PUBLISH_ARGUMENTS ||
              result == IREE_HAL_AMD_GPU_AQL_PUBLISH_TRANSFERS ||
+             result == IREE_HAL_AMD_GPU_AQL_PUBLISH_SAMPLES ||
+             result == IREE_HAL_AMD_GPU_AQL_PUBLISH_VALUES ||
+             result == IREE_HAL_AMD_GPU_AQL_PUBLISH_COMMANDS ||
              result == IREE_HAL_AMD_GPU_AQL_PUBLISH_SIGNALS ||
              result == IREE_HAL_AMD_GPU_AQL_PUBLISH_PROGRAM) {
     uint64_t capacity = 0;
     const iree_hal_amd_gpu_profile_operation_t* operation =
         iree_hal_amd_gpu_aql_submission_profile(submission);
-    const bool sampled = operation && operation->completion.sample_stride;
-    if (result == IREE_HAL_AMD_GPU_AQL_PUBLISH_TRANSFERS) {
+    if (result == IREE_HAL_AMD_GPU_AQL_PUBLISH_COMMANDS) {
+      capacity = iree_math_round_up_to_pow2_u64(
+          (uint64_t)queue->options.retirement_capacity *
+          IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE);
+    } else if (result == IREE_HAL_AMD_GPU_AQL_PUBLISH_VALUES) {
+      capacity =
+          iree_max((uint64_t)queue->options.argument_capacity,
+                   iree_math_round_up_to_pow2_u64(
+                       (uint64_t)submission->execute.program->value_count * 8));
+    } else if (result == IREE_HAL_AMD_GPU_AQL_PUBLISH_SAMPLES) {
+      const uint64_t count =
+          execute ? submission->execute.program
+                        ->blocks[submission->execute.block_ordinal]
+                        .dispatches.count
+                  : operation->completion.count;
+      capacity = iree_math_round_up_to_pow2_u64(
+          count * sizeof(iree_hal_amd_gpu_aql_signal_t));
+    } else if (result == IREE_HAL_AMD_GPU_AQL_PUBLISH_TRANSFERS) {
       capacity = iree_max(UINT64_C(8),
                           iree_math_round_up_to_pow2_u64(
                               iree_hal_amd_gpu_aql_transfer_staging_length(
@@ -524,17 +543,17 @@ static void iree_hal_amd_gpu_aql_process_submission(
           submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER
               ? IREE_HAL_AMD_GPU_AQL_TRANSFER_ARGUMENT_LENGTH
           : submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_CONTROL
-              ? IREE_HAL_AMD_GPU_AQL_CONTROL_BYTE_LENGTH
-          : execute
-              ? iree_hal_amd_gpu_aql_execute_argument_length(
-                    &submission->execute, sampled)
-              : iree_max(iree_hal_amd_gpu_aql_argument_length(
-                             request,
-                             queue->grid.memory
-                                 ? IREE_HAL_AMD_GPU_AQL_GRID_SYNC_COMMAND_LENGTH
-                                 : sizeof(iree_hal_amd_gpu_grid_sync_t),
-                             sampled),
-                         request->function->base.kernarg->alignment));
+              ? sizeof(iree_hal_amd_gpu_control_program_arguments_t)
+          : execute ? iree_max(iree_hal_amd_gpu_aql_execute_argument_length(
+                                   &submission->execute),
+                               iree_hal_amd_gpu_aql_execute_argument_alignment(
+                                   &submission->execute))
+                    : iree_max(iree_hal_amd_gpu_aql_argument_length(
+                                   request,
+                                   queue->grid.memory
+                                       ? 0
+                                       : sizeof(iree_hal_amd_gpu_grid_sync_t)),
+                               request->function->base.kernarg->alignment));
     }
     status = iree_hal_amd_gpu_aql_growth_begin(
         &queue->growth,
@@ -542,6 +561,12 @@ static void iree_hal_amd_gpu_aql_process_submission(
             ? IREE_HAL_AMD_GPU_AQL_ENTRY_ARGUMENTS
         : result == IREE_HAL_AMD_GPU_AQL_PUBLISH_TRANSFERS
             ? IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFERS
+        : result == IREE_HAL_AMD_GPU_AQL_PUBLISH_VALUES
+            ? IREE_HAL_AMD_GPU_AQL_ENTRY_VALUES
+        : result == IREE_HAL_AMD_GPU_AQL_PUBLISH_SAMPLES
+            ? IREE_HAL_AMD_GPU_AQL_ENTRY_SAMPLES
+        : result == IREE_HAL_AMD_GPU_AQL_PUBLISH_COMMANDS
+            ? IREE_HAL_AMD_GPU_AQL_ENTRY_COMMANDS
         : result == IREE_HAL_AMD_GPU_AQL_PUBLISH_PROGRAM
             ? IREE_HAL_AMD_GPU_AQL_ENTRY_PROGRAM
             : IREE_HAL_AMD_GPU_AQL_ENTRY_SIGNALS,
@@ -605,6 +630,13 @@ iree_status_t iree_hal_amd_gpu_aql_queue_set_profile(
       iree_thread_yield();
     }
   }
+  if (enabled && !queue->samples && iree_status_is_ok(status)) {
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_byte_storage_pool_allocate(
+        queue->context, queue->options.memory,
+        (uint64_t)queue->options.retirement_capacity *
+            sizeof(iree_hal_amd_gpu_aql_signal_t),
+        queue->host_allocator, &queue->samples));
+  }
   // Clear borrows even if native teardown fails; the session still ends.
   queue->profile = NULL;
   queue->file_executor.profile = NULL;
@@ -625,6 +657,11 @@ iree_status_t iree_hal_amd_gpu_aql_queue_set_profile(
   if (!iree_status_is_ok(status)) {
     iree_hal_amd_gpu_aql_fail_queue(queue, iree_status_clone(status));
     return status;
+  }
+  if (!enabled) {
+    iree_hal_amd_gpu_byte_storage_pool_free(
+        queue->context, queue->host_allocator, queue->samples);
+    queue->samples = NULL;
   }
   queue->profile = profile;
   queue->file_executor.profile = profile;
@@ -653,6 +690,8 @@ static void iree_hal_amd_gpu_aql_trim_storage(
       }
     }
   }
+  iree_hal_amd_gpu_byte_storage_pool_trim(queue->context, queue->samples);
+  iree_hal_amd_gpu_byte_storage_pool_trim(queue->context, &queue->values);
   iree_hal_amd_gpu_signal_cache_trim(queue->context, 1, queue->options.signals);
   iree_hal_amd_gpu_capture_pool_trim(&queue->captures);
 }
@@ -692,20 +731,32 @@ static void iree_hal_amd_gpu_aql_process_entry(
       break;
     case IREE_HAL_AMD_GPU_AQL_ENTRY_ARGUMENTS:
     case IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFERS:
+    case IREE_HAL_AMD_GPU_AQL_ENTRY_SAMPLES:
+    case IREE_HAL_AMD_GPU_AQL_ENTRY_VALUES:
+    case IREE_HAL_AMD_GPU_AQL_ENTRY_COMMANDS:
     case IREE_HAL_AMD_GPU_AQL_ENTRY_SIGNALS:
     case IREE_HAL_AMD_GPU_AQL_ENTRY_PROGRAM: {
       const bool transfers =
           typed->kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFERS;
+      const bool samples = typed->kind == IREE_HAL_AMD_GPU_AQL_ENTRY_SAMPLES;
+      const bool values = typed->kind == IREE_HAL_AMD_GPU_AQL_ENTRY_VALUES;
+      const bool commands = typed->kind == IREE_HAL_AMD_GPU_AQL_ENTRY_COMMANDS;
       iree_hal_amd_gpu_byte_storage_t** current =
-          transfers ? &queue->producer.transfers : &queue->producer.arguments;
+          commands    ? &queue->commands
+          : values    ? &queue->values.current
+          : samples   ? &queue->samples->current
+          : transfers ? &queue->producer.transfers
+                      : &queue->producer.arguments;
       iree_hal_amd_gpu_byte_storage_t** retired =
-          transfers ? &queue->producer.retired_transfers
-                    : &queue->producer.retired_arguments;
+          values      ? &queue->values.retired
+          : samples   ? &queue->samples->retired
+          : transfers ? &queue->producer.retired_transfers
+                      : &queue->producer.retired_arguments;
       iree_hal_amd_gpu_aql_growth_result_t result;
       iree_status_t status = iree_hal_amd_gpu_aql_growth_end(
           typed, *current ? (*current)->end : 0, &result);
       if (result.bytes) {
-        if (*current) {
+        if (!commands && *current) {
           (*current)->next = *retired;
           *retired = *current;
         }
@@ -910,16 +961,24 @@ static bool iree_hal_amd_gpu_aql_retire(
       }
     }
     const uint64_t arguments = action->arguments;
-    if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER &&
-        code == IREE_STATUS_OK && action->transfer.download.length) {
-      // The GPU has consumed the blit ABI. A host copy owns only transport
-      // storage, so it cannot withhold argument capacity from new launches.
-      iree_atomic_store(&queue->completed.arguments, arguments,
-                        iree_memory_order_release);
+    // Native execution consumed the ABI. Download and profile collection retain
+    // their own storage and cannot prolong this argument generation's lifetime.
+    iree_atomic_store(&queue->completed.arguments, arguments,
+                      iree_memory_order_release);
+    if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_EXECUTE) {
+      iree_hal_amd_gpu_byte_storage_pool_retire(&queue->values,
+                                                action->execute.values_end);
+    }
+    if ((submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER &&
+         code == IREE_STATUS_OK && action->transfer.download.length) ||
+        submission->profiled) {
       if (iree_atomic_exchange(&queue->completed.waiting, 0,
                                iree_memory_order_acq_rel)) {
         iree_hal_amd_gpu_aql_capacity_available(queue);
       }
+    }
+    if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER &&
+        code == IREE_STATUS_OK && action->transfer.download.length) {
       if (out_copy) {
         *out_copy = (iree_hal_amd_gpu_completion_copy_t){
             .fn = iree_hal_amd_gpu_aql_complete_download,
@@ -932,11 +991,14 @@ static bool iree_hal_amd_gpu_aql_retire(
     if (submission->profiled) {
       const iree_hal_amd_gpu_profile_operation_t* operation =
           iree_hal_amd_gpu_aql_submission_profile(submission);
-      iree_hal_amd_gpu_profile_operation_complete(
-          queue->profile, operation,
+      const iree_hal_amd_gpu_profile_completion_t* completion =
           submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_EXECUTE
-              ? &action->profile
-              : &operation->completion);
+              ? &action->execute.profile
+              : &operation->completion;
+      iree_hal_amd_gpu_profile_operation_complete(queue->profile, operation,
+                                                  completion);
+      iree_hal_amd_gpu_byte_storage_pool_retire(queue->samples,
+                                                completion->samples_end);
     }
     if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER) {
       iree_atomic_store(&queue->completed.transfers, action->transfer.end,
@@ -977,8 +1039,6 @@ static bool iree_hal_amd_gpu_aql_retire(
     iree_hal_amd_gpu_signal_retire(action->signal, code);
     iree_hal_amd_gpu_signal_release(action->signal);
     iree_hal_amd_gpu_aql_submission_release(submission);
-    iree_atomic_store(&queue->completed.arguments, arguments,
-                      iree_memory_order_release);
     iree_atomic_store(&queue->completed.count, position + 1,
                       iree_memory_order_release);
     IREE_TRACE_ZONE_END(z0);
@@ -1769,7 +1829,9 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
   queue->growth = (iree_hal_amd_gpu_aql_growth_context_t){
       .context = context,
       .memory = options->memory,
+      .argument_memory = options->argument_memory,
       .transfer_memory = options->transfer_memory,
+      .input_memory = &options->programs->inputs.options,
       .captures = &queue->captures,
       .publisher = &queue->publisher,
       .publication = options->publication,
@@ -1857,9 +1919,14 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
           &queue->growth, queue->storage.queue, options->scratch_memory,
           &queue->scratch);
       status = iree_hal_amd_gpu_byte_storage_allocate(
-          context, options->memory, options->argument_capacity, 0,
+          context, options->argument_memory, options->argument_capacity, 0,
           host_allocator, &queue->producer.arguments);
     }
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_gpu_byte_storage_allocate(
+        context, &options->programs->inputs.options, options->argument_capacity,
+        0, host_allocator, &queue->values.current);
   }
   if (iree_status_is_ok(status)) {
     iree_hal_amd_gpu_signal_storage_t* signals = NULL;

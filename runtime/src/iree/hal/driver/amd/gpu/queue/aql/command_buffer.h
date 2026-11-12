@@ -31,17 +31,33 @@ typedef struct iree_hal_amd_gpu_aql_program_block_t {
   } dispatches;
 } iree_hal_amd_gpu_aql_program_block_t;
 
+// Bounds on publisher-stack preparation selected while sealing a recording.
+enum {
+  IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_BYTES = 8192,
+  IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_FIXUPS = 256,
+  // Retirement-owned native IB capacity for direct and bounded recorded work.
+  IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE = 256,
+  IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_VALUES =
+      IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_FIXUPS + 1,
+};
+
 // Bounded native packets and any invocation-varying private data. The byte
 // template and fixup table follow in the same host allocation. Immutable
 // arguments may instead have a fixed device placement baked into the packets.
 typedef struct iree_hal_amd_gpu_aql_host_template_t {
-  // Complete packet/private-data extent copied into each invocation.
+  // Complete host packet/private-data extent. Zero-fixup templates are read
+  // directly; mutable templates are prepared in publisher-owned CPU storage.
   uint32_t byte_length;
+  // Beginning of actual ABI bytes, published through kernarg storage.
+  uint32_t data_offset;
+  // Beginning of indirect native commands and their write-drain scratch.
+  uint32_t command_data_offset;
   // Required power-of-two alignment of the invocation's upload address.
   uint32_t alignment;
   // Independent DWORD replacements applied after resolving unique inputs.
+  // Zero means no invocation upload or dense input table is needed.
   uint32_t fixup_count;
-  // Immutable fixup-table offset, also the invocation's dense-value offset.
+  // Immutable fixup-table offset in the host allocation.
   uint32_t fixup_offset;
 } iree_hal_amd_gpu_aql_host_template_t;
 
@@ -58,7 +74,8 @@ typedef struct iree_hal_amd_gpu_aql_command_program_t {
   iree_hal_amd_gpu_profile_commands_t* profile;
   // Number of complete blocks; zero is an empty recording.
   uint32_t block_count;
-  // Unique input count including instance base at index zero.
+  // Unique inputs including instance base at zero and an optional final
+  // command-data base for bounded host preparation.
   uint32_t value_count;
   // Public dispatches, independent of internal materializer/fixup dispatches.
   uint32_t dispatch_count;
@@ -135,11 +152,17 @@ void iree_hal_amd_gpu_aql_command_invocation_deinitialize(
     iree_hal_amd_gpu_aql_command_invocation_t* invocation);
 
 // Resolves unique input values once after upload address commitment. A bounded
-// host template is copied and patched into that invocation-private upload;
-// resident programs receive a dense value table for native fixup execution.
+// host template is patched in host_contents; its actual ABI and native commands
+// are copied to their separate mappings. Resident programs write their separate
+// dense value table. values is NULL when the resident instance needs no fixups.
+// host_contents has HOST_TEMPLATE_MAX_BYTES bytes for a mutable host template
+// and is NULL for a resident program. Its caller keeps it through publication.
+// The publisher borrows zero-fixup host templates directly and omits this call.
 iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
     const iree_hal_amd_gpu_aql_command_invocation_t* invocation,
-    uint32_t queue_ordinal, uint64_t upload_address, void* upload);
+    uint32_t queue_ordinal, uint64_t upload_address, void* upload,
+    uint64_t command_address, void* commands, void* host_contents,
+    uint64_t* values);
 
 #ifdef __cplusplus
 }  // extern "C"

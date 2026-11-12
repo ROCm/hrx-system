@@ -95,7 +95,6 @@ iree_runtime_cc_library(
     srcs = ["timestamp.c"],
     hdrs = ["timestamp.h"],
     deps = [
-        ":recording",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
     ],
@@ -105,7 +104,6 @@ iree_runtime_cc_test(
     name = "timestamp_test",
     srcs = ["timestamp_test.cc"],
     deps = [
-        ":recording",
         ":timestamp",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
@@ -476,6 +474,29 @@ iree_runtime_cc_benchmark(
         ":publisher",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "byte_storage_pool",
+    srcs = ["byte_storage_pool.c"],
+    hdrs = ["byte_storage_pool.h"],
+    deps = [
+        ":backing",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/hal/driver/amd/fabric:memory",
+        "//runtime/src/iree/hal/driver/amd/gpu:context",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "byte_storage_pool_test",
+    srcs = ["byte_storage_pool_test.cc"],
+    deps = [
+        ":byte_storage_pool",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -859,6 +880,19 @@ iree_runtime_cc_library(
     deps = [
         ":fixup",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:memory_copy",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "recording_test",
+    srcs = ["recording_test.cc"],
+    deps = [
+        ":fixup",
+        ":recording",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -993,6 +1027,41 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal/driver/amd/gpu/image",
         "//runtime/src/iree/hal/driver/amd/gpu/image:hsaco",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "input_memory",
+    srcs = ["input_memory.c"],
+    hdrs = ["input_memory.h"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/driver/amd:status",
+        "//runtime/src/iree/hal/driver/amd/fabric:memory",
+        "//runtime/src/iree/hal/driver/amd/gpu:context",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "input_memory_test",
+    srcs = ["input_memory_test.cc"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":input_memory",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/driver/amd/fabric",
+        "//runtime/src/iree/hal/driver/amd/gpu:context",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

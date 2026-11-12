@@ -19,6 +19,9 @@ extern "C" {
 // cache-control fields, and resource lifetime. Writers perform no validation,
 // allocation, publication, or ownership transfer. Direct submission and
 // recording use the same encodings.
+// Native command storage is write-only: fields are assigned their final values,
+// and copied or cleared payloads use exact nonoverlapping stores. Source arrays
+// are disjoint host storage. Mapping and native visibility remain caller-owned.
 //
 // Target-specific launch and transition preparation owns register addresses and
 // control values. In particular, ACQUIRE_MEM and RELEASE_MEM use different GCR

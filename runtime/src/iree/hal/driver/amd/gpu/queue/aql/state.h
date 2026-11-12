@@ -18,6 +18,7 @@
 #include "iree/hal/driver/amd/gpu/queue/aql/scratch.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/buffer.h"
+#include "iree/hal/driver/amd/gpu/queue/byte_storage_pool.h"
 #include "iree/hal/driver/amd/gpu/queue/file_transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/host_call.h"
 #include "iree/hal/driver/amd/gpu/queue/host_wait.h"
@@ -52,8 +53,13 @@ typedef struct iree_hal_amd_gpu_aql_retirement_t {
       // Host destinations completed before returning payload credit.
       iree_hal_amd_gpu_download_t download;
     } transfer;
-    // Recorded chunks own sample ranges independently of the shared capture.
-    iree_hal_amd_gpu_profile_completion_t profile;
+    // Recorded chunks own their input and sample extents independently.
+    struct {
+      // Input prefix consumed by this chunk; zero when no fixup runs.
+      uint64_t values_end;
+      // Sample range retained through the host collector.
+      iree_hal_amd_gpu_profile_completion_t profile;
+    } execute;
   };
 } iree_hal_amd_gpu_aql_retirement_t;
 static_assert(sizeof(iree_hal_amd_gpu_aql_retirement_t) == 512,
@@ -97,6 +103,8 @@ struct iree_hal_amd_gpu_aql_queue_t {
   iree_hal_amd_gpu_file_executor_t file_executor;
   // Device-owned optional session, changed only with idle queues.
   iree_hal_amd_gpu_profile_t* profile;
+  // Timestamp-session native owner, independent of launch argument capacity.
+  iree_hal_amd_gpu_byte_storage_pool_t* samples;
   // Fixed sidecar extent computed at construction.
   iree_host_size_t pending_size;
   // Native backing acquisition, independent of execution publication.
@@ -176,6 +184,10 @@ struct iree_hal_amd_gpu_aql_queue_t {
   bool feedback_failure_delivered;
   // Host metadata parallel to the finite native execution credit.
   iree_hal_amd_gpu_aql_retirement_t* issued;
+  // Lazy indirect-command slots indexed by retirement, live until native stop.
+  iree_hal_amd_gpu_byte_storage_t* commands;
+  // GPU fixup values with initial capacity acquired during queue construction.
+  iree_hal_amd_gpu_byte_storage_pool_t values;
 };
 
 // Frees joined queue metadata after the device releases native ownership.

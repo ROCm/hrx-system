@@ -14,6 +14,7 @@
 #include "iree/hal/driver/amd/gpu/dispatch.h"
 #include "iree/hal/driver/amd/gpu/executable.h"
 #include "iree/hal/driver/amd/gpu/queue/buffer.h"
+#include "iree/hal/driver/amd/gpu/queue/byte_storage_pool.h"
 #include "iree/hal/driver/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/driver/amd/gpu/queue/file_transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/host_call.h"
@@ -83,6 +84,8 @@ typedef struct iree_hal_amd_gpu_pm4_retirement_slot_t {
     // Transfer payload prefix reusable after native access and the host copy.
     // Transfer captures always use the pool, leaving inline storage available.
     uint64_t consumed_transfers;
+    // Replay-only value prefix, returned after the consuming native invocation.
+    uint64_t consumed_values;
   };
 } iree_hal_amd_gpu_pm4_retirement_slot_t;
 static_assert(sizeof(iree_hal_amd_gpu_pm4_retirement_slot_t) == 512,
@@ -130,6 +133,17 @@ struct iree_hal_amd_gpu_pm4_queue_t {
   iree_host_size_t pending_size;
   // Typed native acquisition and coalesced waiting captures.
   iree_hal_amd_gpu_pm4_growth_context_t growth;
+  // Parent has closed public acceptance; accepted dependencies remain live.
+  // Admission facts stay separate from publication, retirement, and callbacks.
+  iree_alignas(iree_hardware_destructive_interference_size)
+      iree_atomic_int32_t closed;
+  // Sticky raw native failure; failure never supplies reclamation credit.
+  iree_atomic_int64_t native_failure;
+  // Timestamp-session native owner, independent of launch argument capacity.
+  iree_hal_amd_gpu_byte_storage_pool_t* samples;
+  // Lazy shader-readable packets, one per retirement slot; native shutdown
+  // precedes release. Slot credit supplies all reuse ordering.
+  iree_hal_amd_gpu_byte_storage_t* packets;
   // Coalesced explicit trim request, consumed under publication ownership.
   struct {
     // Stable typed record; only the first requester links it into the FIFO.
@@ -137,12 +151,6 @@ struct iree_hal_amd_gpu_pm4_queue_t {
     // One while the trim entry is enqueued or executing.
     iree_atomic_int32_t pending;
   } trim;
-  // Parent has closed public acceptance; accepted dependencies remain live.
-  // Admission facts stay separate from publication, retirement, and callbacks.
-  iree_alignas(iree_hardware_destructive_interference_size)
-      iree_atomic_int32_t closed;
-  // Sticky raw native failure; failure never supplies reclamation credit.
-  iree_atomic_int64_t native_failure;
   // Tracker associations shared by cold waits on this queue.
   iree_alignas(iree_hardware_destructive_interference_size)
       iree_async_semaphore_wait_context_t wait_context;
@@ -243,12 +251,32 @@ struct iree_hal_amd_gpu_pm4_queue_t {
   // Fixed host actions and inline captures parallel to native slots.
   // GPU-carried pointers name these actions directly on normal retirement.
   iree_hal_amd_gpu_pm4_retirement_slot_t* issued;
+  // GPU fixup values with initial capacity acquired during queue construction.
+  iree_hal_amd_gpu_byte_storage_pool_t values;
 };
 
 static_assert(
     sizeof(((iree_hal_amd_gpu_pm4_queue_t*)0)->completed) ==
         iree_hardware_destructive_interference_size,
     "completion credit and enrollment occupy one observer cache line");
+
+// Reports an issued failure without granting completion or release credit.
+// Consumes status; the capture remains live through its native pieces.
+void iree_hal_amd_gpu_pm4_fail_submission(
+    iree_hal_amd_gpu_pm4_queue_t* queue,
+    iree_hal_amd_gpu_pm4_submission_t* submission, iree_status_t status);
+
+// Rejects an unpublished capture and releases its final host ownership.
+// Consumes status and submission; previously accepted pieces retain their refs.
+void iree_hal_amd_gpu_pm4_abandon(iree_hal_amd_gpu_pm4_queue_t* queue,
+                                  iree_hal_amd_gpu_pm4_submission_t* submission,
+                                  iree_status_t status);
+
+// Latches a native failure, closes acceptance, and schedules failure fanout.
+// Neither publication nor native failure grants reclamation credit.
+void iree_hal_amd_gpu_pm4_fail_native(iree_hal_amd_gpu_pm4_queue_t* queue,
+                                      amdf_status_t status,
+                                      const char* operation);
 
 // Frees joined queue metadata after the device releases native ownership.
 void iree_hal_amd_gpu_pm4_queue_destroy(iree_hal_queue_t* queue);

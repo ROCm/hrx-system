@@ -7,22 +7,17 @@
 #include "iree/hal/driver/amd/gpu/queue/timestamp.h"
 
 iree_status_t iree_hal_amd_gpu_timestamp_writes_append(
-    iree_hal_amd_gpu_recording_t* recording, iree_hal_buffer_ref_t target,
+    iree_allocator_t allocator, iree_hal_buffer_ref_t target,
     iree_hal_amd_gpu_timestamp_writes_t* writes) {
-  if (!writes->pending) {
-    void* scratch = NULL;
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
-        recording, 4, 4, &writes->scratch_offset, &scratch));
-  }
   if (writes->count == writes->capacity) {
     if (writes->capacity > UINT32_MAX / sizeof(*writes->pending) / 2) {
       return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                               "too many pending timestamp writes");
     }
     const uint32_t capacity = writes->capacity ? writes->capacity * 2 : 4;
-    IREE_RETURN_IF_ERROR(iree_allocator_realloc(
-        recording->host_allocator, capacity * sizeof(*writes->pending),
-        (void**)&writes->pending));
+    IREE_RETURN_IF_ERROR(
+        iree_allocator_realloc(allocator, capacity * sizeof(*writes->pending),
+                               (void**)&writes->pending));
     writes->capacity = capacity;
   }
   target.length = 8;

@@ -85,6 +85,9 @@ typedef struct iree_hal_amd_gpu_profile_completion_t {
   uint32_t first;
   // Completed dispatches in this range, including metadata-only dispatches.
   uint32_t count;
+  // Native sample-storage prefix returned after host collection; zero when
+  // this range has no timestamp storage.
+  uint64_t samples_end;
 } iree_hal_amd_gpu_profile_completion_t;
 
 // Host-only command metadata retained independently of resident IB storage.
@@ -163,7 +166,7 @@ bool iree_hal_amd_gpu_profile_captures_dispatch(
     uint64_t command_buffer_id, uint32_t command_index,
     iree_string_view_t function_name);
 
-// Called before returning invocation argument-ring credit or captured resource
+// Called before returning native sample-storage credit or captured resource
 // references. Copies completed samples and immutable attribution to bounded
 // host rings, retaining only host metadata. No sink/native call or allocation.
 void iree_hal_amd_gpu_profile_operation_complete(

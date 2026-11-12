@@ -13,8 +13,10 @@
 #include <vector>
 
 #include "iree/async/event.h"
+#include "iree/hal/cts/util/profile_test_util.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/driver/amd/fabric/memory_backend_test_base.h"
+#include "iree/hal/driver/amd/gpu/queue/byte_storage_pool.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/state.h"
 #include "iree/hal/driver/amd/gpu/queue/semaphore.h"
 #include "iree/testing/gtest.h"
@@ -273,6 +275,7 @@ class KernelQueueTest : public MemoryBackendTest {
     };
 
     transfer_memory_ = memory_;
+    programs_.inputs.options = memory_;
     for (uint32_t i = 0; i < queues_.size(); ++i) {
       iree_hal_amd_gpu_signal_cache_initialize(&publication_, i, &signals_[i]);
       const iree_hal_amd_gpu_pm4_queue_options_t options = {
@@ -283,7 +286,9 @@ class KernelQueueTest : public MemoryBackendTest {
           .publication_mode = AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
           .command_byte_capacity = 4096,
           .memory = &memory_,
+          .argument_memory = &memory_,
           .transfer_memory = &transfer_memory_,
+          .programs = &programs_,
           .publication = &publication_,
           .barriers = barrier_profile_,
           .retirement_capacity = 4,
@@ -303,6 +308,7 @@ class KernelQueueTest : public MemoryBackendTest {
     for (auto& queue : queues_) {
       if (queue) {
         EXPECT_TRUE(iree_hal_amd_gpu_pm4_queue_is_idle(queue));
+        IREE_EXPECT_OK(iree_hal_amd_gpu_pm4_queue_set_profile(queue, nullptr));
         EXPECT_EQ(iree_hal_amd_gpu_pm4_queue_shutdown(queue), AMDF_STATUS_OK);
         queue.reset();
       }
@@ -310,6 +316,7 @@ class KernelQueueTest : public MemoryBackendTest {
     for (auto& signals : signals_) {
       iree_hal_amd_gpu_signal_cache_deinitialize(&context_, &signals);
     }
+    IREE_EXPECT_OK(iree_hal_amd_gpu_profile_end(profile_));
     transfer_pool_.reset();
     iree_hal_amd_gpu_context_deinitialize_memory(&context_);
     iree_async_event_native_deinitialize(&context_.kernel_event);
@@ -317,6 +324,19 @@ class KernelQueueTest : public MemoryBackendTest {
     iree_slim_mutex_deinitialize(&completion_.drain_mutex);
     iree_notification_deinitialize(&publication_.notification);
     MemoryBackendTest::TearDown();
+  }
+
+  void BeginProfile() {
+    iree::hal::cts::TestProfileSinkInitialize(&profile_sink_);
+    const iree_hal_device_profiling_options_t options = {
+        .data_families = IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS |
+                         IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS,
+        .sink = iree::hal::cts::TestProfileSinkAsBase(&profile_sink_),
+    };
+    IREE_ASSERT_OK(iree_hal_amd_gpu_profile_begin(&options, 1, 2, 1000000,
+                                                  allocator_, &profile_));
+    IREE_ASSERT_OK(
+        iree_hal_amd_gpu_pm4_queue_set_profile(queues_[0], profile_));
   }
 
   Ref<iree_hal_semaphore_t> Semaphore() {
@@ -461,6 +481,10 @@ class KernelQueueTest : public MemoryBackendTest {
     }
   }
 
+  // Real profiling session, retained through queue retirement and shutdown.
+  iree_hal_amd_gpu_profile_t* profile_ = nullptr;
+  // Host sink receiving the bounded profiling stream.
+  iree::hal::cts::TestProfileSink profile_sink_;
   // Native dependency state with independently controlled per-queue credit.
   std::array<NativeQueue, 2> native_queues_;
   // Number of native queues constructed in the fixture's stable order.
@@ -481,6 +505,8 @@ class KernelQueueTest : public MemoryBackendTest {
   iree_hal_amd_fabric_memory_options_t memory_ = {};
   // Independent explicit-payload policy, borrowed through native retirement.
   iree_hal_amd_fabric_memory_options_t transfer_memory_ = {};
+  // Borrowed input policy; these control-only queues execute no builtin shader.
+  iree_hal_amd_gpu_pm4_program_pool_t programs_ = {};
   // Production typed publisher, started for synchronous metadata installation.
   iree_hal_amd_gpu_publication_t publication_ = {};
   // Existing native retirement ownership and scope synchronization.
@@ -597,6 +623,183 @@ TEST_F(KernelQueueTest, RejectionRollsBackTheBorrowedPayloadGeneration) {
   iree_hal_amd_gpu_pm4_queue_trim(queues_[0]);
   Publish(0);
   EXPECT_EQ(queue->producer.transfers.retired, nullptr);
+}
+
+TEST_F(KernelQueueTest, PacketStorageSurvivesBusyAndRejectedDispatches) {
+  auto* queue =
+      reinterpret_cast<iree_hal_amd_gpu_pm4_queue_t*>(queues_[0].get());
+  EXPECT_EQ(queue->packets, nullptr);
+  const iree_hal_amd_gpu_metadata_kernel_t metadata = {};
+  iree_hal_amd_gpu_kernarg_layout_t layout = {
+      .byte_length = 4096,
+      .alignment = 8,
+      .native_byte_length = 4096,
+  };
+  const iree_hal_amd_gpu_pm4_dispatch_packet_info_t packet_info = {
+      .kernel_object = UINT64_C(0x123456780040),
+  };
+  iree_hal_amd_gpu_pm4_function_t function = {};
+  function.base.metadata = &metadata;
+  function.base.kernarg = &layout;
+  function.packet = &packet_info;
+  iree_hal_amd_gpu_pm4_dispatch_t dispatch = {};
+  for (uint32_t axis = 0; axis < 3; ++axis) {
+    dispatch.geometry.workgroup_size[axis] = 1;
+    dispatch.geometry.workgroup_count[axis] = 1;
+  }
+  std::array<uint8_t, 4096> arguments;
+  auto* original_arguments = queue->producer.arguments;
+  iree_hal_amd_gpu_byte_storage_t* packets = nullptr;
+  for (uint32_t iteration = 0; iteration < 5; ++iteration) {
+    SCOPED_TRACE(iteration);
+    // One accepted predecessor keeps BUSY a valid capacity response. The
+    // unaccepted shader will be rejected, so this native fixture need not
+    // simulate shader execution to exercise its real publication ownership.
+    IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[0], {}, {}, nullptr, 0));
+    native_queues_[0].busy = true;
+    const uint64_t position = (uint64_t)iree_atomic_load(
+        &queue->producer.count, iree_memory_order_acquire);
+    arguments.fill((uint8_t)(iteration + 1));
+    dispatch.geometry.workgroup_count[0] = iteration + 1;
+    auto rejected = Semaphore();
+    auto* rejected_handle = rejected.get();
+    uint64_t one = 1;
+    iree_hal_amd_gpu_pm4_submission_t* submission = nullptr;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
+        &queue->captures, false, {}, {1, &rejected_handle, &one}, nullptr,
+        &function, dispatch, {},
+        iree_make_const_byte_span(arguments.data(), arguments.size()), {},
+        &queue->options.barriers, nullptr,
+        IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS, &submission));
+    iree_hal_amd_gpu_publication_enqueue(&publication_, 0, &queue->publisher,
+                                         &submission->entry.publication);
+    Publish(0);
+    iree_hal_amd_gpu_context_join_memory(&context_);
+    Publish(0);
+    ASSERT_NE(queue->kernel->pending.byte_length, 0u);
+    ASSERT_NE(queue->packets, nullptr);
+    if (!packets) {
+      packets = queue->packets;
+    }
+    EXPECT_EQ(queue->packets, packets);
+    EXPECT_EQ(packets->capacity, 4 * 64u);
+    EXPECT_EQ(queue->producer.arguments, original_arguments);
+    EXPECT_EQ(original_arguments->capacity, arguments.size());
+    EXPECT_EQ(original_arguments->end, arguments.size());
+    EXPECT_EQ(std::memcmp(original_arguments->memory.contents.data,
+                          arguments.data(), arguments.size()),
+              0);
+    const auto* packet =
+        reinterpret_cast<const iree_hal_amd_gpu_pm4_dispatch_packet_t*>(
+            packets->memory.contents.data) +
+        (position & 3);
+    EXPECT_EQ(packet->kernarg_address, original_arguments->address);
+    EXPECT_EQ(packet->kernel_object, packet_info.kernel_object);
+    EXPECT_EQ(packet->grid_size[0], iteration + 1);
+    const auto preserved = *packet;
+    Publish(0);
+    EXPECT_EQ(std::memcmp(packet, &preserved, sizeof(preserved)), 0);
+    ASSERT_NO_FATAL_FAILURE(Execute(0));
+    Poll(0);
+    native_queues_[0].busy = false;
+    native_queues_[0].rejection =
+        amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
+    Publish(0);
+    EXPECT_EQ(queue->kernel->pending.byte_length, 0u);
+    EXPECT_EQ(original_arguments->end, 0u);
+    EXPECT_EQ(queue->packets, packets);
+    uint64_t value = 0;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                          iree_hal_semaphore_query(rejected, &value));
+    EXPECT_TRUE(iree_hal_amd_gpu_pm4_queue_is_idle(queues_[0]));
+  }
+}
+
+TEST_F(KernelQueueTest, SampleRejectionRetainsTheGenerationAcrossNativeGrowth) {
+  ASSERT_NO_FATAL_FAILURE(BeginProfile());
+  auto* queue =
+      reinterpret_cast<iree_hal_amd_gpu_pm4_queue_t*>(queues_[0].get());
+  auto* original = queue->samples->current;
+  ASSERT_EQ(original->capacity, 64u);
+  IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[0], {}, {}, nullptr, 0));
+  native_queues_[0].busy = true;
+
+  // Enter at the real deferred capture boundary with admitted function facts.
+  // Native acceptance is deliberately rejected before any shader could execute.
+  const iree_hal_amd_gpu_metadata_kernel_t metadata = {};
+  iree_hal_amd_gpu_kernarg_layout_t layout = {
+      .byte_length = 16,
+      .alignment = 8,
+  };
+  iree_hal_amd_gpu_pm4_function_t function = {};
+  function.base.metadata = &metadata;
+  function.base.kernarg = &layout;
+  iree_hal_amd_gpu_pm4_dispatch_t dispatch = {};
+  for (uint32_t i = 0; i < 3; ++i) {
+    dispatch.geometry.workgroup_size[i] = 1;
+    dispatch.geometry.workgroup_count[i] = 1;
+  }
+  const std::array<uint64_t, 2> arguments = {11, 17};
+  auto rejected = Semaphore();
+  auto* rejected_handle = rejected.get();
+  uint64_t one = 1;
+  iree_hal_amd_gpu_pm4_submission_t* submission = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
+      &queue->captures, true, {}, {1, &rejected_handle, &one}, nullptr,
+      &function, dispatch, {},
+      iree_make_const_byte_span(arguments.data(), sizeof(arguments)), {},
+      &queue->options.barriers, nullptr,
+      IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS, &submission));
+  auto* operation = iree_hal_amd_gpu_pm4_submission_profile(submission);
+  iree_hal_amd_gpu_profile_operation_initialize(
+      profile_, 0, IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DISPATCH, 0, 1, 1,
+      operation);
+  operation->completion.count = 1;
+  operation->completion.sample_stride =
+      sizeof(iree_hal_amd_gpu_profile_sample_t);
+  iree_hal_amd_gpu_publication_enqueue(&publication_, 0, &queue->publisher,
+                                       &submission->entry.publication);
+  Publish(0);
+  ASSERT_NE(queue->kernel->pending.byte_length, 0u);
+  EXPECT_EQ(original->end, 16u);
+  EXPECT_EQ(queue->producer.arguments->end, 16u);
+  EXPECT_EQ(queue->samples->pending, original);
+
+  // A separate native result is allowed to install while that command is BUSY.
+  iree_hal_amd_gpu_pm4_submission_t* waiting = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
+      &queue->captures, false, {}, {}, nullptr, nullptr, {}, {},
+      iree_const_byte_span_empty(), {}, &queue->options.barriers, nullptr, 0,
+      &waiting));
+  ASSERT_TRUE(iree_hal_amd_gpu_publisher_try_acquire(&queue->publisher));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_growth_begin(
+      &queue->growth, IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SAMPLES, waiting, 128));
+  iree_hal_amd_gpu_publisher_handoff(&queue->publisher, nullptr);
+  iree_hal_amd_gpu_context_join_memory(&context_);
+  Publish(0);
+  ASSERT_NE(queue->samples->current, original);
+  EXPECT_EQ(queue->samples->retired, original);
+  EXPECT_EQ(queue->samples->current->begin, 16u);
+  EXPECT_EQ(queue->samples->pending, original);
+
+  ASSERT_NO_FATAL_FAILURE(Execute(0));
+  Poll(0);
+  native_queues_[0].busy = false;
+  native_queues_[0].rejection =
+      amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
+  Publish(0);
+  EXPECT_EQ(original->end, 0u);
+  EXPECT_EQ(queue->samples->current->end, 16u);
+  EXPECT_EQ(queue->samples->pending, nullptr);
+  EXPECT_EQ(queue->producer.arguments->end, 0u);
+  uint64_t value = 0;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        iree_hal_semaphore_query(rejected, &value));
+  ASSERT_NO_FATAL_FAILURE(Execute(0));
+  Poll(0);
+  iree_hal_amd_gpu_pm4_queue_trim(queues_[0]);
+  Publish(0);
+  EXPECT_EQ(queue->samples->retired, nullptr);
 }
 
 TEST_F(KernelQueueTest, NarrowFillAcquiresPayloadWithoutUsingArguments) {

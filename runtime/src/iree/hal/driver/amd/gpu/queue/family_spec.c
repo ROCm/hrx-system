@@ -131,8 +131,11 @@ iree_status_t iree_hal_amd_gpu_queue_family_spec_initialize(
                ? IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_COMMAND_TIMESTAMPS |
                      IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_INDIRECT_COMMAND_TIMESTAMPS
                : 0),
+      // AQL's GWS initializer still shares its ABI with mutable grid state.
+      // PM4 cooperative state has an independent resident owner.
       .supported_queue_features =
-          compute && user_publication &&
+          native_family->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4 &&
+                  user_publication &&
                   (native_family->user_queue_capabilities &
                    AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH) &&
                   iree_hal_amd_gpu_grid_sync_select_strategy(target_version) !=

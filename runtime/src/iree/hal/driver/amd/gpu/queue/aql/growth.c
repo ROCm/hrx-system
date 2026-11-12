@@ -40,7 +40,7 @@ struct iree_hal_amd_gpu_aql_growth_t {
       // Context lifetime borrow and native acquisition descriptor.
       iree_hal_amd_gpu_memory_acquire_t acquire;
       union {
-        // Owned byte generation for argument or transfer acquisition.
+        // Owned purpose-specific byte generation.
         iree_hal_amd_gpu_byte_storage_t* bytes;
         // Owned signal generation for GROW_SIGNALS.
         iree_hal_amd_gpu_signal_storage_t* signals;
@@ -159,6 +159,15 @@ iree_status_t iree_hal_amd_gpu_aql_growth_begin(
     case IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFERS:
       pending = context->transfers;
       break;
+    case IREE_HAL_AMD_GPU_AQL_ENTRY_SAMPLES:
+      pending = context->samples;
+      break;
+    case IREE_HAL_AMD_GPU_AQL_ENTRY_VALUES:
+      pending = context->values;
+      break;
+    case IREE_HAL_AMD_GPU_AQL_ENTRY_COMMANDS:
+      pending = context->commands;
+      break;
     case IREE_HAL_AMD_GPU_AQL_ENTRY_SIGNALS:
       pending = context->signals;
       break;
@@ -212,19 +221,32 @@ iree_status_t iree_hal_amd_gpu_aql_growth_begin(
   } else {
     iree_hal_amd_fabric_memory_t* memory = NULL;
     if (kind == IREE_HAL_AMD_GPU_AQL_ENTRY_ARGUMENTS ||
-        kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFERS) {
+        kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFERS ||
+        kind == IREE_HAL_AMD_GPU_AQL_ENTRY_SAMPLES ||
+        kind == IREE_HAL_AMD_GPU_AQL_ENTRY_VALUES ||
+        kind == IREE_HAL_AMD_GPU_AQL_ENTRY_COMMANDS) {
       status = iree_hal_amd_gpu_byte_storage_prepare(
           capacity, context->captures->host_allocator, &growth->backing.bytes);
       if (iree_status_is_ok(status)) {
         memory = &growth->backing.bytes->memory;
         growth->backing.request = (iree_hal_amd_fabric_memory_request_t){
-            .options = kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFERS
+            .options = kind == IREE_HAL_AMD_GPU_AQL_ENTRY_ARGUMENTS
+                           ? context->argument_memory
+                       : kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFERS
                            ? context->transfer_memory
+                       : kind == IREE_HAL_AMD_GPU_AQL_ENTRY_VALUES
+                           ? context->input_memory
                            : context->memory,
             .byte_length = capacity,
             .alignment = capacity};
         if (kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFERS) {
           context->transfers = growth;
+        } else if (kind == IREE_HAL_AMD_GPU_AQL_ENTRY_SAMPLES) {
+          context->samples = growth;
+        } else if (kind == IREE_HAL_AMD_GPU_AQL_ENTRY_VALUES) {
+          context->values = growth;
+        } else if (kind == IREE_HAL_AMD_GPU_AQL_ENTRY_COMMANDS) {
+          context->commands = growth;
         } else {
           context->arguments = growth;
         }
@@ -274,14 +296,31 @@ iree_status_t iree_hal_amd_gpu_aql_growth_end(
   switch (entry->kind) {
     case IREE_HAL_AMD_GPU_AQL_ENTRY_ARGUMENTS:
     case IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFERS:
+    case IREE_HAL_AMD_GPU_AQL_ENTRY_SAMPLES:
+    case IREE_HAL_AMD_GPU_AQL_ENTRY_VALUES:
+    case IREE_HAL_AMD_GPU_AQL_ENTRY_COMMANDS:
       if (entry->kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFERS) {
         context->transfers = NULL;
+      } else if (entry->kind == IREE_HAL_AMD_GPU_AQL_ENTRY_SAMPLES) {
+        context->samples = NULL;
+      } else if (entry->kind == IREE_HAL_AMD_GPU_AQL_ENTRY_VALUES) {
+        context->values = NULL;
+      } else if (entry->kind == IREE_HAL_AMD_GPU_AQL_ENTRY_COMMANDS) {
+        context->commands = NULL;
       } else {
         context->arguments = NULL;
       }
       if (iree_status_is_ok(status)) {
         status = iree_hal_amd_gpu_byte_storage_initialize(
             context->context, byte_begin, growth->backing.bytes);
+      }
+      if (iree_status_is_ok(status) &&
+          entry->kind == IREE_HAL_AMD_GPU_AQL_ENTRY_COMMANDS &&
+          growth->backing.bytes->address >
+              (UINT64_C(1) << 48) - growth->backing.bytes->capacity) {
+        status =
+            iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                             "AQL indirect commands exceed 48-bit addressing");
       }
       if (iree_status_is_ok(status)) {
         out_result->bytes = growth->backing.bytes;

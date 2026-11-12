@@ -7,6 +7,7 @@
 #ifndef IREE_HAL_DRIVER_AMD_GPU_QUEUE_AQL_PUBLICATION_H_
 #define IREE_HAL_DRIVER_AMD_GPU_QUEUE_AQL_PUBLICATION_H_
 
+#include "iree/hal/driver/amd/gpu/queue/aql/dispatch.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/submission.h"
 
 #ifdef __cplusplus
@@ -25,21 +26,27 @@ typedef enum iree_hal_amd_gpu_aql_publish_result_e {
   IREE_HAL_AMD_GPU_AQL_PUBLISH_PROGRAM,
   IREE_HAL_AMD_GPU_AQL_PUBLISH_ARGUMENTS,
   IREE_HAL_AMD_GPU_AQL_PUBLISH_TRANSFERS,
+  IREE_HAL_AMD_GPU_AQL_PUBLISH_SAMPLES,
+  IREE_HAL_AMD_GPU_AQL_PUBLISH_VALUES,
+  IREE_HAL_AMD_GPU_AQL_PUBLISH_COMMANDS,
   IREE_HAL_AMD_GPU_AQL_PUBLISH_SIGNALS,
 } iree_hal_amd_gpu_aql_publish_result_t;
 
-// At most nine scalar DWORDs plus the two-DWORD virtual-XCC predicate.
-enum { IREE_HAL_AMD_GPU_AQL_CONTROL_BYTE_LENGTH = 48 };
-
 // Exact argument extent needed before ring reservation, including optional
-// cooperative control data and profiling samples.
+// GWS initialization arguments.
 uint64_t iree_hal_amd_gpu_aql_argument_length(
     const iree_hal_amd_gpu_aql_dispatch_request_t* request,
-    uint32_t grid_length, bool sampled);
+    uint32_t grid_length);
 
-// Exact upload extent for the current recorded-command chunk.
+// Exact upload extent for the current recorded-command chunk. Immutable host
+// templates need no invocation storage and return zero.
 uint64_t iree_hal_amd_gpu_aql_execute_argument_length(
-    const iree_hal_amd_gpu_aql_command_invocation_t* invocation, bool sampled);
+    const iree_hal_amd_gpu_aql_command_invocation_t* invocation);
+
+// Native address alignment shared by reservation and backing growth. It can
+// exceed the byte extent when host preparation leaves only a small payload.
+uint64_t iree_hal_amd_gpu_aql_execute_argument_alignment(
+    const iree_hal_amd_gpu_aql_command_invocation_t* invocation);
 
 // Publishes a prepared direct dispatch or empty barrier with its retained
 // dependency ownership. Only successful acceptance advances ring and argument

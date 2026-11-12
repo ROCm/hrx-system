@@ -13,13 +13,9 @@ namespace {
 
 class TimestampWritesTest : public ::testing::Test {
  protected:
-  void SetUp() override {
-    iree_hal_amd_gpu_recording_initialize(iree_allocator_system(), &recording_);
-  }
   void TearDown() override {
     iree_hal_amd_gpu_timestamp_writes_deinitialize(iree_allocator_system(),
                                                    &writes_);
-    iree_hal_amd_gpu_recording_deinitialize(&recording_);
   }
   bool Overlaps(iree_hal_buffer_ref_t range) {
     const iree_hal_buffer_barrier_t payload = {
@@ -35,15 +31,14 @@ class TimestampWritesTest : public ::testing::Test {
     };
     return iree_hal_amd_gpu_timestamp_writes_overlap(&writes_, &barrier);
   }
-  // Production append storage owns the invocation-private scratch layout.
-  iree_hal_amd_gpu_recording_t recording_ = {};
   // Recording-only pending writes under test.
   iree_hal_amd_gpu_timestamp_writes_t writes_ = {};
 };
 
 TEST_F(TimestampWritesTest, ExactSymbolicRangesAndUnresolvedAliases) {
   IREE_ASSERT_OK(iree_hal_amd_gpu_timestamp_writes_append(
-      &recording_, iree_hal_make_indirect_buffer_ref(2, 16, 128), &writes_));
+      iree_allocator_system(), iree_hal_make_indirect_buffer_ref(2, 16, 128),
+      &writes_));
   EXPECT_EQ(writes_.pending[0].length, 8u);
   EXPECT_FALSE(Overlaps(iree_hal_make_indirect_buffer_ref(2, 0, 16)));
   EXPECT_TRUE(Overlaps(iree_hal_make_indirect_buffer_ref(2, 15, 2)));
@@ -74,7 +69,8 @@ TEST_F(TimestampWritesTest, DirectSubspansAndMixedBindingIdentities) {
                              IREE_HAL_MEMORY_ACCESS_ALL,
                              IREE_HAL_BUFFER_USAGE_TRANSFER, &vtable, &subspan);
   IREE_ASSERT_OK(iree_hal_amd_gpu_timestamp_writes_append(
-      &recording_, iree_hal_make_buffer_ref(&subspan, 8, 8), &writes_));
+      iree_allocator_system(), iree_hal_make_buffer_ref(&subspan, 8, 8),
+      &writes_));
   EXPECT_TRUE(Overlaps(iree_hal_make_buffer_ref(&backing, 24, 8)));
   EXPECT_FALSE(Overlaps(iree_hal_make_buffer_ref(&backing, 32, 8)));
   EXPECT_TRUE(Overlaps(iree_hal_make_buffer_ref(&separate, 24, 8)));
@@ -86,7 +82,8 @@ TEST_F(TimestampWritesTest, DirectSubspansAndMixedBindingIdentities) {
 
 TEST_F(TimestampWritesTest, ExecutionDoesNotDeliverPayload) {
   IREE_ASSERT_OK(iree_hal_amd_gpu_timestamp_writes_append(
-      &recording_, iree_hal_make_indirect_buffer_ref(0, 0, 8), &writes_));
+      iree_allocator_system(), iree_hal_make_indirect_buffer_ref(0, 0, 8),
+      &writes_));
   const iree_hal_memory_barrier_t payload = {
       .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
       .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ,
@@ -117,7 +114,8 @@ TEST_F(TimestampWritesTest, ExecutionDoesNotDeliverPayload) {
 
 TEST_F(TimestampWritesTest, HostCacheVisibilityPreservesPayloadScope) {
   IREE_ASSERT_OK(iree_hal_amd_gpu_timestamp_writes_append(
-      &recording_, iree_hal_make_indirect_buffer_ref(0, 16, 8), &writes_));
+      iree_allocator_system(), iree_hal_make_indirect_buffer_ref(0, 16, 8),
+      &writes_));
   iree_hal_buffer_barrier_t range = {
       .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
       .target_scope = IREE_HAL_ACCESS_SCOPE_HOST_READ,
@@ -162,21 +160,23 @@ TEST_F(TimestampWritesTest, HostCacheVisibilityPreservesPayloadScope) {
   EXPECT_TRUE(iree_hal_amd_gpu_timestamp_writes_overlap(&writes_, &barrier));
 }
 
-TEST_F(TimestampWritesTest, RecordingReusesOneInvocationScratchWord) {
-  EXPECT_EQ(recording_.data.length, 0u);
+TEST_F(TimestampWritesTest, RetiredCohortReusesDestinationStorage) {
   for (uint32_t i = 0; i < 9; ++i) {
     IREE_ASSERT_OK(iree_hal_amd_gpu_timestamp_writes_append(
-        &recording_, iree_hal_make_indirect_buffer_ref(0, i * 8, 8), &writes_));
+        iree_allocator_system(), iree_hal_make_indirect_buffer_ref(0, i * 8, 8),
+        &writes_));
   }
-  EXPECT_EQ(recording_.data.length, 4u);
   EXPECT_EQ(writes_.count, 9u);
-  EXPECT_EQ(writes_.scratch_offset, 0u);
   EXPECT_TRUE(Overlaps(iree_hal_make_indirect_buffer_ref(0, 64, 8)));
+  const auto* pending = writes_.pending;
+  const auto capacity = writes_.capacity;
   writes_.count = 0;
   IREE_ASSERT_OK(iree_hal_amd_gpu_timestamp_writes_append(
-      &recording_, iree_hal_make_indirect_buffer_ref(1, 8, 8), &writes_));
-  EXPECT_EQ(recording_.data.length, 4u);
+      iree_allocator_system(), iree_hal_make_indirect_buffer_ref(1, 8, 8),
+      &writes_));
   EXPECT_EQ(writes_.count, 1u);
+  EXPECT_EQ(writes_.pending, pending);
+  EXPECT_EQ(writes_.capacity, capacity);
 }
 
 }  // namespace

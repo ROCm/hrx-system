@@ -26,10 +26,14 @@ typedef struct iree_hal_amd_gpu_pm4_growth_t iree_hal_amd_gpu_pm4_growth_t;
 typedef struct iree_hal_amd_gpu_pm4_growth_context_t {
   // Borrowed native owner, joined before destroying this context.
   iree_hal_amd_gpu_context_t* context;
-  // Borrowed immutable coherent argument/signal memory policy.
+  // Borrowed immutable coherent control/signal memory policy.
   const iree_hal_amd_fabric_memory_options_t* memory;
+  // Borrowed cached ABI policy, identical to initial argument allocation.
+  const iree_hal_amd_fabric_memory_options_t* argument_memory;
   // Borrowed read/write transfer policy, independent of native control.
   const iree_hal_amd_fabric_memory_options_t* transfer_memory;
+  // Borrowed CPU-write/shader-read replay value policy.
+  const iree_hal_amd_fabric_memory_options_t* input_memory;
   // Borrowed physical-local read/write scratch policy, with no host mapping.
   const iree_hal_amd_fabric_memory_options_t* scratch_memory;
   // Borrowed exact publisher's immutable scratch slot geometry.
@@ -61,6 +65,12 @@ typedef struct iree_hal_amd_gpu_pm4_growth_context_t {
   iree_hal_amd_gpu_pm4_growth_t* arguments;
   // One coalesced transfer acquisition, or NULL without pending growth.
   iree_hal_amd_gpu_pm4_growth_t* transfers;
+  // Coalesced profiling sample acquisition or NULL.
+  iree_hal_amd_gpu_pm4_growth_t* samples;
+  // Coalesced replay value-table acquisition or NULL.
+  iree_hal_amd_gpu_pm4_growth_t* values;
+  // One coalesced dispatch-packet backing acquisition, or NULL.
+  iree_hal_amd_gpu_pm4_growth_t* packets;
   // One coalesced signal acquisition, or NULL without pending growth.
   iree_hal_amd_gpu_pm4_growth_t* signals;
   // One coalesced scratch acquisition, or NULL without pending growth.
@@ -97,8 +107,7 @@ typedef struct iree_hal_amd_gpu_pm4_growth_result_t {
   iree_hal_amd_gpu_publication_entry_t* first;
   // Last waiting capture with a NULL next link, or NULL for an empty cohort.
   iree_hal_amd_gpu_publication_entry_t* last;
-  // Owned acquired argument or transfer bytes, or NULL for another
-  // kind/failure.
+  // Owned acquired byte backing, or NULL for another kind/failure.
   iree_hal_amd_gpu_byte_storage_t* bytes;
   // Owned acquired scratch generation, or NULL for another kind or failure.
   iree_hal_amd_gpu_pm4_scratch_storage_t* scratch;

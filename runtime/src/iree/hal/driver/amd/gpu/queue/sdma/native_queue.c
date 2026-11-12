@@ -6,6 +6,7 @@
 
 #include "iree/hal/driver/amd/gpu/queue/sdma/native_queue.h"
 
+#include "iree/base/internal/memory_copy.h"
 #include "iree/hal/driver/amd/fabric/memory_transition.h"
 #include "iree/hal/driver/amd/gpu/queue/sdma/commands.h"
 #include "iree/hal/driver/amd/gpu/queue/user_queue.h"
@@ -267,7 +268,8 @@ static bool iree_hal_amd_gpu_sdma_native_queue_try_publish(
       queue, submission, (uint32_t)(published + 1), words);
   if (amdf_status_is_ok(status) && queue->kernel.queue) {
     const uint64_t offset = index * IREE_HAL_AMD_GPU_SDMA_COMMAND_STRIDE;
-    memcpy((uint8_t*)queue->commands + offset, words, word_count * 4u);
+    iree_memcpy_write_only((uint8_t*)queue->commands + offset, words,
+                           word_count * 4u);
     const amdf_gpu_kernel_command_t command = {
         .memory = queue->memory.handle,
         .byte_offset = offset,
@@ -318,11 +320,11 @@ static bool iree_hal_amd_gpu_sdma_native_queue_try_publish(
         queue->user.position & (IREE_HAL_AMD_GPU_SDMA_RING_LENGTH - 1);
     if (offset + length > IREE_HAL_AMD_GPU_SDMA_RING_LENGTH) {
       const uint32_t padding = IREE_HAL_AMD_GPU_SDMA_RING_LENGTH - offset;
-      memset((uint8_t*)queue->commands + offset, 0, padding);
+      iree_memset_write_only((uint8_t*)queue->commands + offset, 0, padding);
       queue->user.position += padding;
       offset = 0;
     }
-    memcpy((uint8_t*)queue->commands + offset, words, length);
+    iree_memcpy_write_only((uint8_t*)queue->commands + offset, words, length);
     queue->user.position += length;
     status = iree_hal_amd_gpu_user_queue_flush(&queue->user.storage);
     if (IREE_UNLIKELY(!amdf_status_is_ok(status))) {

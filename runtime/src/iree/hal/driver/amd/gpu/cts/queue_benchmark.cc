@@ -1019,7 +1019,7 @@ static void BM_Dispatch(
   const uint64_t allocations_before = dispatch.allocation_count();
   std::vector<iree_duration_t> samples;
   if (timing == Timing::kSampledSubmit) {
-    samples.reserve(200 * count);
+    samples.reserve(static_cast<size_t>(state.max_iterations) * count);
   }
   for (auto _ : state) {
     for (size_t i = 0; i < count; ++i) {
@@ -1119,10 +1119,11 @@ AQL_DISPATCH_COMPLETION_CASE(AqlBindingsDefaultSubmissionCompletionActive,
 #undef AQL_DISPATCH_COMPLETION_CASE
 
 // Both localities execute the same direct-stream workload through acquired
-// queues. Completion stays outside submit-only timing.
-#define PLACED_DISPATCH_CASE(name, protocol, placement)              \
+// queues. Completion stays outside submit-only timing. Latency rows measure
+// individual calls without the benchmark harness's pause/resume bookkeeping.
+#define PLACED_DISPATCH_CASE(name, protocol, placement, timing)      \
   BENCHMARK_CAPTURE(BM_Dispatch, name, Arguments::kBindings,         \
-                    Barriers::kDefault, Timing::kSubmit, protocol,   \
+                    Barriers::kDefault, Timing::timing, protocol,    \
                     Completion::kBarrier, IREE_ASYNC_WAIT_FLAG_NONE, \
                     placement)                                       \
       ->Arg(1)                                                       \
@@ -1130,13 +1131,21 @@ AQL_DISPATCH_COMPLETION_CASE(AqlBindingsDefaultSubmissionCompletionActive,
       ->Iterations(200)                                              \
       ->UseRealTime()
 PLACED_DISPATCH_CASE(Pm4HostLocalSubmit, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
-                     IREE_HAL_QUEUE_PLACEMENT_HOST_LOCAL);
+                     IREE_HAL_QUEUE_PLACEMENT_HOST_LOCAL, kSubmit);
 PLACED_DISPATCH_CASE(Pm4DeviceLocalSubmit, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
-                     IREE_HAL_QUEUE_PLACEMENT_DEVICE_LOCAL);
+                     IREE_HAL_QUEUE_PLACEMENT_DEVICE_LOCAL, kSubmit);
 PLACED_DISPATCH_CASE(AqlHostLocalSubmit, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
-                     IREE_HAL_QUEUE_PLACEMENT_HOST_LOCAL);
+                     IREE_HAL_QUEUE_PLACEMENT_HOST_LOCAL, kSubmit);
 PLACED_DISPATCH_CASE(AqlDeviceLocalSubmit, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
-                     IREE_HAL_QUEUE_PLACEMENT_DEVICE_LOCAL);
+                     IREE_HAL_QUEUE_PLACEMENT_DEVICE_LOCAL, kSubmit);
+PLACED_DISPATCH_CASE(Pm4HostLocalLatency, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                     IREE_HAL_QUEUE_PLACEMENT_HOST_LOCAL, kSampledSubmit);
+PLACED_DISPATCH_CASE(Pm4DeviceLocalLatency, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                     IREE_HAL_QUEUE_PLACEMENT_DEVICE_LOCAL, kSampledSubmit);
+PLACED_DISPATCH_CASE(AqlHostLocalLatency, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
+                     IREE_HAL_QUEUE_PLACEMENT_HOST_LOCAL, kSampledSubmit);
+PLACED_DISPATCH_CASE(AqlDeviceLocalLatency, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
+                     IREE_HAL_QUEUE_PLACEMENT_DEVICE_LOCAL, kSampledSubmit);
 #undef PLACED_DISPATCH_CASE
 
 // Each event records the native queue clock and signals its own completion.
@@ -1447,10 +1456,11 @@ static void BM_Execute(
   std::vector<iree_duration_t> first_samples;
   std::vector<iree_duration_t> following_samples;
   if (timing == Timing::kSampledSubmit) {
-    samples.reserve(50 * burst_count);
+    samples.reserve(static_cast<size_t>(state.max_iterations) * burst_count);
     if (burst_count > 1) {
-      first_samples.reserve(50);
-      following_samples.reserve(50 * (burst_count - 1));
+      first_samples.reserve(state.max_iterations);
+      following_samples.reserve(static_cast<size_t>(state.max_iterations) *
+                                (burst_count - 1));
     }
   }
   for (auto _ : state) {
@@ -1634,6 +1644,7 @@ EXECUTE_BURST_CASE(TableBurstLatency, kTable, kSampledSubmit);
                     Timing::timing, Program::kDispatch, burst_count, \
                     Capture::kNone, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) \
       ->Arg(1)                                                       \
+      ->Arg(32)                                                      \
       ->Arg(100)                                                     \
       ->Arg(1000)                                                    \
       ->Arg(5000)                                                    \
@@ -1641,6 +1652,8 @@ EXECUTE_BURST_CASE(TableBurstLatency, kTable, kSampledSubmit);
       ->UseRealTime()
 AQL_EXECUTE_CASE(DirectSubmit, kDirect, kSubmit, 1);
 AQL_EXECUTE_CASE(TableSubmit, kTable, kSubmit, 1);
+AQL_EXECUTE_CASE(DirectLatency, kDirect, kSampledSubmit, 1);
+AQL_EXECUTE_CASE(TableLatency, kTable, kSampledSubmit, 1);
 AQL_EXECUTE_CASE(DirectCompletion, kDirect, kCompletion, 1);
 AQL_EXECUTE_CASE(TableCompletion, kTable, kCompletion, 1);
 AQL_EXECUTE_CASE(DirectBurstSubmit, kDirect, kSubmit, 8);
@@ -1667,10 +1680,13 @@ AQL_EXECUTE_CASE(TableBurstCompletion, kTable, kCompletion, 8);
       ->Iterations(200)                                                   \
       ->UseRealTime()
 FIXED_AQL_CASE(Submit, kSubmit, 1, kNone);
+FIXED_AQL_CASE(Latency, kSampledSubmit, 1, kNone);
 FIXED_AQL_CASE(Completion, kCompletion, 1, kNone);
 FIXED_AQL_CASE(BurstSubmit, kSubmit, 8, kNone);
+FIXED_AQL_CASE(BurstLatency, kSampledSubmit, 8, kNone);
 FIXED_AQL_CASE(BurstCompletion, kCompletion, 8, kNone);
 FIXED_AQL_CASE(ProfiledSubmit, kSubmit, 1, kActive);
+FIXED_AQL_CASE(ProfiledLatency, kSampledSubmit, 1, kActive);
 FIXED_AQL_CASE(ProfiledCompletion, kCompletion, 1, kActive);
 #undef FIXED_AQL_CASE
 

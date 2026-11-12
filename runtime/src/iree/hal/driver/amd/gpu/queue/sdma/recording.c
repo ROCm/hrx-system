@@ -145,7 +145,8 @@ iree_status_t iree_hal_amd_gpu_sdma_recording_seal(
   // Section-relative private addresses are already explicit dense-input
   // replacements. The shared append storage has no combined-image fixups.
   iree_hal_amd_gpu_recording_write_sections(
-      &recording->storage, storage + words_offset, storage + data_offset, NULL);
+      &recording->storage, storage + words_offset, storage + data_offset, NULL,
+      0, NULL);
   *out_program = (iree_hal_amd_gpu_sdma_program_t){
       .storage = storage,
       .features = recording->features,

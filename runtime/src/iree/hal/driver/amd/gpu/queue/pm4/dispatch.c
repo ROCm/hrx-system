@@ -89,13 +89,10 @@ iree_hal_amd_gpu_pm4_dispatch_storage_t iree_hal_amd_gpu_pm4_dispatch_storage(
       .length = indirect ? 0 : function->base.kernarg->byte_length,
       .alignment = indirect ? 1 : function->base.kernarg->alignment,
   };
-  if (function->packet) {
-    storage.alignment = iree_max(storage.alignment, 64u);
-    storage.packet_offset = (storage.length + 63u) & ~63u;
-    storage.length = storage.packet_offset + 64u;
-    if (iree_hal_dispatch_uses_indirect_parameters(flags)) {
-      storage.length += 16u;
-    }
+  if (function->packet && iree_hal_dispatch_uses_indirect_parameters(flags)) {
+    storage.alignment = iree_max(storage.alignment, 8u);
+    storage.prepare_offset = (storage.length + 7u) & ~7u;
+    storage.length = storage.prepare_offset + 16u;
   }
   return storage;
 }
@@ -187,7 +184,7 @@ void iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
   iree_hal_amd_gpu_dispatch_emplace_arguments(&function->base,
                                               &dispatch->geometry, constants,
                                               binding_addresses, flags, target);
-  if (function->packet) {
+  if (function->packet && iree_hal_dispatch_uses_indirect_parameters(flags)) {
     const iree_hal_amd_gpu_pm4_dispatch_storage_t storage =
         iree_hal_amd_gpu_pm4_dispatch_storage(function, flags);
     const uint32_t kernarg_length =
@@ -195,14 +192,7 @@ void iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
             ? 0
             : function->base.kernarg->byte_length;
     memset((uint8_t*)target + kernarg_length, 0,
-           storage.packet_offset - kernarg_length);
-    if (iree_hal_dispatch_uses_indirect_parameters(flags)) {
-      memset((uint8_t*)target + storage.packet_offset + 64, 0, 16);
-    }
-    iree_hal_amd_gpu_pm4_dispatch_emplace_packet(
-        function, dispatch, flags,
-        (iree_hal_amd_gpu_pm4_dispatch_packet_t*)((uint8_t*)target +
-                                                  storage.packet_offset));
+           storage.length - kernarg_length);
   }
 }
 

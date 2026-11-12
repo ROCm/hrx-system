@@ -44,6 +44,9 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
           AMDF_MEMORY_ACCESS_EXECUTE,
       host_allocator, &out_pool->storage));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_input_memory_initialize(
+      context, native_family_ordinal, AMDF_MEMORY_ACCESS_READ,
+      &out_pool->inputs));
   const iree_hal_amd_gpu_gfxip_version_t gfxip = {
       context->target_info.gfx_ip.major, context->target_info.gfx_ip.minor,
       context->target_info.gfx_ip.stepping};
@@ -227,8 +230,8 @@ amdf_status_t iree_hal_amd_gpu_aql_program_emit(
     const iree_hal_amd_gpu_program_instance_t* instance, uint32_t block_offset,
     uint32_t packet_count, iree_hal_amd_gpu_aql_ring_t* ring,
     const iree_hal_amd_gpu_user_queue_t* storage, uint64_t position,
-    uint64_t argument_address, uint64_t signal_address, void* upload,
-    iree_hal_amd_gpu_aql_program_flags_t flags) {
+    uint64_t argument_address, uint64_t values_address, uint64_t signal_address,
+    void* upload, iree_hal_amd_gpu_aql_program_flags_t flags) {
   const bool profiling = (flags & IREE_HAL_AMD_GPU_AQL_PROGRAM_PROFILE) != 0;
   iree_hal_amd_gpu_aql_packet_t prefix[3];
   uint32_t count = 0;
@@ -254,13 +257,7 @@ amdf_status_t iree_hal_amd_gpu_aql_program_emit(
     if (flags & IREE_HAL_AMD_GPU_AQL_PROGRAM_FIXUP) {
       arguments->fixup = (iree_hal_amd_gpu_fixup_arguments_t){
           .entries = source.fixups,
-          .values =
-              argument_address + sizeof(*arguments) +
-              (profiling
-                   ? sizeof(
-                         iree_hal_amd_gpu_aql_materialize_profile_arguments_t) -
-                         sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t)
-                   : 0),
+          .values = values_address,
           .target = instance->address,
           .entry_count = program->fixup_count,
       };

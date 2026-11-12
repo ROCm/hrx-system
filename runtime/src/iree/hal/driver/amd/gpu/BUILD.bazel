@@ -102,6 +102,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/driver/amd/gpu/queue:backing",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:family_spec",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:file_staging",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue:input_memory",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:membership",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:memory_mapping",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:program",

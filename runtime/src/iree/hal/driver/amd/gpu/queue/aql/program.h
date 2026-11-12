@@ -13,6 +13,7 @@
 #include "iree/hal/driver/amd/gpu/queue/aql/ring.h"
 #include "iree/hal/driver/amd/gpu/queue/blit.h"
 #include "iree/hal/driver/amd/gpu/queue/control_program.h"
+#include "iree/hal/driver/amd/gpu/queue/input_memory.h"
 #include "iree/hal/driver/amd/gpu/queue/program.h"
 #include "iree/hal/driver/amd/gpu/queue/user_queue.h"
 
@@ -25,6 +26,9 @@ extern "C" {
 typedef struct iree_hal_amd_gpu_aql_program_pool_t {
   // Shared placement, causal instance ownership, and explicit trim registry.
   iree_hal_amd_gpu_program_pool_t storage;
+  // CPU-produced shader input policy, independent of executable program
+  // storage.
+  iree_hal_amd_gpu_input_memory_t inputs;
   // One immutable descriptor/instruction allocation for all builtin kernels.
   iree_hal_amd_fabric_memory_t code;
   // Temporary initialization bytes, published before the device is exposed.
@@ -59,11 +63,9 @@ void iree_hal_amd_gpu_aql_program_pool_deinitialize(
 iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_control_program_packet(
     uint64_t kernel, uint64_t arguments, uint32_t header, uint64_t completion);
 
-// Initial invocation upload. Instrumented recordings extend materialize to
-// materialize_profile_arguments_t; the dense uint64_t value table follows
-// that complete argument record. Later chunks upload only their materializer
-// arguments. The first native chunk releases the table independently of later
-// work.
+// Initial invocation ABI. Instrumented recordings extend materialize to
+// materialize_profile_arguments_t; later chunks need only that materializer
+// ABI. The fixup value table has independent storage and a native address.
 typedef struct iree_hal_amd_gpu_aql_program_arguments_t {
   // Optional initial resident copy, including the first instance's fixups.
   iree_hal_amd_gpu_blit_arguments_t copy;
@@ -73,8 +75,8 @@ typedef struct iree_hal_amd_gpu_aql_program_arguments_t {
   iree_hal_amd_gpu_aql_materialize_arguments_t materialize;
 } iree_hal_amd_gpu_aql_program_arguments_t;
 
-// Instrumented materialization extends the last argument record by 16 bytes
-// before the value table. Ordinary invocation uploads retain their compact ABI.
+// Instrumented materialization extends the last argument record by 16 bytes.
+// Ordinary invocation uploads retain their compact ABI.
 enum iree_hal_amd_gpu_aql_program_flag_bits_e {
   IREE_HAL_AMD_GPU_AQL_PROGRAM_FIRST = 1u << 0,
   IREE_HAL_AMD_GPU_AQL_PROGRAM_INITIALIZE = 1u << 1,
@@ -113,18 +115,19 @@ amdf_status_t iree_hal_amd_gpu_aql_program_emit_host(
 
 // Emits one fully reserved block's host prelude. Resident templates are copied
 // exclusively by the GPU. upload is coherent native argument storage and its
-// value table is already written. The caller establishes ownership before
-// emission and publishes a terminal completion after the block's slots.
-// A native release failure is terminal; accepted ownership stays with the
-// caller, and the remaining headers are not published.
+// independently owned value table at values_address is already written. The
+// caller establishes ownership before emission and publishes a terminal
+// completion after the block's slots. A native release failure is terminal;
+// accepted ownership stays with the caller, and the remaining headers are not
+// published.
 amdf_status_t iree_hal_amd_gpu_aql_program_emit(
     const iree_hal_amd_gpu_aql_program_pool_t* pool,
     const iree_hal_amd_gpu_program_t* program,
     const iree_hal_amd_gpu_program_instance_t* instance, uint32_t block_offset,
     uint32_t packet_count, iree_hal_amd_gpu_aql_ring_t* ring,
     const iree_hal_amd_gpu_user_queue_t* storage, uint64_t position,
-    uint64_t argument_address, uint64_t signal_address, void* upload,
-    iree_hal_amd_gpu_aql_program_flags_t flags);
+    uint64_t argument_address, uint64_t values_address, uint64_t signal_address,
+    void* upload, iree_hal_amd_gpu_aql_program_flags_t flags);
 
 #ifdef __cplusplus
 }  // extern "C"

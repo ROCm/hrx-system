@@ -219,10 +219,11 @@ TEST_P(ProgramPreparationTest, CapturedPreparationMatchesEmittedPackets) {
       &ring, prefix + kBlockPackets + 1, &position));
   std::array<uint64_t, 32> upload = {};
   constexpr uint64_t kUploadAddress = 0x600000;
-  ASSERT_EQ(iree_hal_amd_gpu_aql_program_emit(
-                &pool, &program, &instance, 128, kBlockPackets, &ring, nullptr,
-                position, kUploadAddress, 0x700000, upload.data(), flags),
-            AMDF_STATUS_OK);
+  ASSERT_EQ(
+      iree_hal_amd_gpu_aql_program_emit(
+          &pool, &program, &instance, 128, kBlockPackets, &ring, nullptr,
+          position, kUploadAddress, 0x900008, 0x700000, upload.data(), flags),
+      AMDF_STATUS_OK);
   for (uint32_t i = 0; i < prefix; ++i) {
     const auto& packet = packets[(position + i) % packets.size()];
     EXPECT_EQ(packet.words[8], static_cast<uint32_t>(kernels[i]));
@@ -253,8 +254,7 @@ TEST_P(ProgramPreparationTest, CapturedPreparationMatchesEmittedPackets) {
               program.upload_address + program.fixup_offset);
     EXPECT_EQ(arguments->fixup.target, instance.address);
     EXPECT_EQ(arguments->fixup.entry_count, program.fixup_count);
-    EXPECT_EQ(arguments->fixup.values,
-              kUploadAddress + sizeof(*arguments) + (profiling ? 16 : 0));
+    EXPECT_EQ(arguments->fixup.values, 0x900008u);
   }
   const auto* materialize =
       first ? &arguments->materialize

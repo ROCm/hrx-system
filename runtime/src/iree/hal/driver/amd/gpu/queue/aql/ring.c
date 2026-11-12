@@ -6,6 +6,7 @@
 
 #include "iree/hal/driver/amd/gpu/queue/aql/ring.h"
 
+#include "iree/base/internal/memory_copy.h"
 #include "iree/hal/memory_scope.h"
 
 void iree_hal_amd_gpu_aql_ring_initialize(
@@ -46,7 +47,11 @@ void iree_hal_amd_gpu_aql_ring_write_body(
     const iree_hal_amd_gpu_aql_ring_t* ring, uint64_t position,
     const iree_hal_amd_gpu_aql_packet_t* packet) {
   uint32_t* words = ring->packets[position & (ring->capacity - 1)].words;
-  memcpy(words + 1, packet->words + 1, sizeof(*packet) - sizeof(uint32_t));
+  // Leave the publication gate untouched and align every vector store within
+  // the remaining cache line. The short prefix uses exact scalar stores.
+  iree_memcpy_write_only(words + 1, packet->words + 1, sizeof(uint32_t));
+  iree_memcpy_write_only(words + 2, packet->words + 2, sizeof(uint64_t));
+  iree_memcpy_write_only(words + 4, packet->words + 4, 12 * sizeof(uint32_t));
 }
 
 amdf_status_t iree_hal_amd_gpu_aql_ring_publish_header(
@@ -69,14 +74,39 @@ amdf_status_t iree_hal_amd_gpu_aql_ring_write_packets(
     const iree_hal_amd_gpu_aql_ring_t* ring,
     const iree_hal_amd_gpu_user_queue_t* storage, uint64_t position,
     uint32_t packet_count, const iree_hal_amd_gpu_aql_packet_t* packets) {
-  const uint32_t first_slot = position & (ring->capacity - 1);
-  const uint32_t first_count =
-      iree_min(packet_count, ring->capacity - first_slot);
-  memcpy(ring->packets[first_slot].words + 1, packets[0].words + 1,
-         first_count * sizeof(*packets) - sizeof(uint32_t));
-  if (first_count < packet_count) {
-    memcpy(ring->packets, packets + first_count,
-           (packet_count - first_count) * sizeof(*packets));
+  if (packet_count == 1) {
+    iree_hal_amd_gpu_aql_ring_write_body(ring, position, packets);
+  } else {
+    const uint32_t first_slot = position & (ring->capacity - 1);
+    const uint32_t first_count =
+        iree_min(packet_count, ring->capacity - first_slot);
+    iree_memcpy_write_only(ring->packets[first_slot].words + 1,
+                           packets[0].words + 1,
+                           first_count * sizeof(*packets) - sizeof(uint32_t));
+    if (first_count < packet_count) {
+      iree_memcpy_write_only(ring->packets, packets + first_count,
+                             (packet_count - first_count) * sizeof(*packets));
+    }
+  }
+  return iree_hal_amd_gpu_aql_ring_publish_header(ring, storage, position,
+                                                  packets[0].words[0]);
+}
+
+amdf_status_t iree_hal_amd_gpu_aql_ring_write_packets_with_completion(
+    const iree_hal_amd_gpu_aql_ring_t* ring,
+    const iree_hal_amd_gpu_user_queue_t* storage, uint64_t position,
+    uint32_t packet_count, const iree_hal_amd_gpu_aql_packet_t* packets,
+    uint64_t completion_address, uint32_t completion_stride) {
+  const uint32_t mask = ring->capacity - 1;
+  uint32_t* words = ring->packets[position & mask].words;
+  iree_memcpy_write_only(words + 1, packets[0].words + 1,
+                         13 * sizeof(uint32_t));
+  iree_unaligned_store_le_u64(words + 14, completion_address);
+  const uint64_t stride = completion_address ? completion_stride : 0;
+  for (uint32_t i = 1; i < packet_count; ++i) {
+    words = ring->packets[(position + i) & mask].words;
+    iree_memcpy_write_only(words, packets[i].words, 14 * sizeof(uint32_t));
+    iree_unaligned_store_le_u64(words + 14, completion_address + i * stride);
   }
   return iree_hal_amd_gpu_aql_ring_publish_header(ring, storage, position,
                                                   packets[0].words[0]);

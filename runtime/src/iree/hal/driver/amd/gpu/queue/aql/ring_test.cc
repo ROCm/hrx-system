@@ -183,39 +183,61 @@ TEST_F(RingTest, BatchReleaseSeesWholeSpanBeforeFirstHeader) {
   }
   const auto saved_source = source;
   const auto initial_packets = packets_;
-  for (amdf_status_t status :
-       {AMDF_STATUS_OK, amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST)}) {
-    for (uint32_t first = 0; first < packets_.size(); ++first) {
-      for (uint32_t count = 1; count <= packets_.size(); ++count) {
-        SCOPED_TRACE(::testing::Message() << "status=" << status << " first="
-                                          << first << " count=" << count);
-        packets_ = initial_packets;
-        ring_.reserved = ring_.consumed = first;
-        ring_.host_publish_executor = AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API;
-        uint64_t position;
-        ASSERT_TRUE(
-            iree_hal_amd_gpu_aql_ring_try_reserve(&ring_, count, &position));
-        publication = {&ring_, source.data(), position, count, status, 0};
-        EXPECT_EQ(iree_hal_amd_gpu_aql_ring_write_packets(
-                      &ring_, &storage, position, count, source.data()),
-                  status);
-        EXPECT_EQ(publication.calls, 1u);
-        EXPECT_EQ(packets_[first].words[0],
-                  amdf_status_is_ok(status)
-                      ? source[0].words[0]
-                      : IREE_HAL_AMD_GPU_AQL_HEADER_INVALID);
-        for (uint32_t i = count; i < packets_.size(); ++i) {
-          const uint32_t slot = (first + i) % packets_.size();
-          EXPECT_EQ(std::memcmp(&packets_[slot], &initial_packets[slot],
-                                sizeof(packets_[slot])),
-                    0);
+  enum class Completion { kRetained, kCleared, kReplaced };
+  for (auto completion :
+       {Completion::kRetained, Completion::kCleared, Completion::kReplaced}) {
+    const uint64_t address =
+        completion == Completion::kReplaced ? UINT64_C(0x123456780000) : 0;
+    constexpr uint32_t kStride = 128;
+    auto expected = source;
+    if (completion != Completion::kRetained) {
+      for (uint32_t i = 0; i < expected.size(); ++i) {
+        iree_unaligned_store_le_u64(expected[i].words + 14,
+                                    address ? address + i * kStride : 0);
+      }
+    }
+    for (amdf_status_t status :
+         {AMDF_STATUS_OK, amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST)}) {
+      for (uint32_t first = 0; first < packets_.size(); ++first) {
+        for (uint32_t count = 1; count <= packets_.size(); ++count) {
+          SCOPED_TRACE(::testing::Message() << "status=" << status << " first="
+                                            << first << " count=" << count);
+          packets_ = initial_packets;
+          ring_.reserved = ring_.consumed = first;
+          ring_.host_publish_executor = AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API;
+          uint64_t position;
+          ASSERT_TRUE(
+              iree_hal_amd_gpu_aql_ring_try_reserve(&ring_, count, &position));
+          publication = {&ring_, expected.data(), position, count, status, 0};
+          if (completion != Completion::kRetained) {
+            EXPECT_EQ(iree_hal_amd_gpu_aql_ring_write_packets_with_completion(
+                          &ring_, &storage, position, count, source.data(),
+                          address, kStride),
+                      status);
+          } else {
+            EXPECT_EQ(iree_hal_amd_gpu_aql_ring_write_packets(
+                          &ring_, &storage, position, count, source.data()),
+                      status);
+          }
+          EXPECT_EQ(publication.calls, 1u);
+          EXPECT_EQ(packets_[first].words[0],
+                    amdf_status_is_ok(status)
+                        ? source[0].words[0]
+                        : IREE_HAL_AMD_GPU_AQL_HEADER_INVALID);
+          for (uint32_t i = count; i < packets_.size(); ++i) {
+            const uint32_t slot = (first + i) % packets_.size();
+            EXPECT_EQ(std::memcmp(&packets_[slot], &initial_packets[slot],
+                                  sizeof(packets_[slot])),
+                      0);
+          }
+          EXPECT_EQ(
+              std::memcmp(source.data(), saved_source.data(), sizeof(source)),
+              0);
+          EXPECT_EQ(doorbell_, UINT64_MAX);
+          EXPECT_EQ(ring_.reserved, first + count);
+          EXPECT_EQ(iree_atomic_load(&write_index_, iree_memory_order_relaxed),
+                    first + count);
         }
-        EXPECT_EQ(
-            std::memcmp(source.data(), saved_source.data(), sizeof(source)), 0);
-        EXPECT_EQ(doorbell_, UINT64_MAX);
-        EXPECT_EQ(ring_.reserved, first + count);
-        EXPECT_EQ(iree_atomic_load(&write_index_, iree_memory_order_relaxed),
-                  first + count);
       }
     }
   }

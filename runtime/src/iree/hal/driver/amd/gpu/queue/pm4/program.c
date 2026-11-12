@@ -6,6 +6,7 @@
 
 #include "iree/hal/driver/amd/gpu/queue/pm4/program.h"
 
+#include "iree/base/internal/memory_copy.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/commands.h"
 #include "iree/hal/driver/amd/status.h"
 
@@ -19,6 +20,9 @@ iree_status_t iree_hal_amd_gpu_pm4_program_pool_initialize(
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
           AMDF_MEMORY_ACCESS_EXECUTE,
       host_allocator, &out_pool->storage));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_input_memory_initialize(
+      context, native_family_ordinal, AMDF_MEMORY_ACCESS_READ,
+      &out_pool->inputs));
   iree_hal_amd_gpu_gfxip_version_t gfxip = {
       context->target_info.gfx_ip.major, context->target_info.gfx_ip.minor,
       context->target_info.gfx_ip.stepping};
@@ -204,7 +208,7 @@ uint32_t* iree_hal_amd_gpu_pm4_program_emit(
     const iree_hal_amd_gpu_program_instance_t* instance,
     iree_hal_amd_gpu_pm4_program_block_t entry,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
-    uint64_t argument_address,
+    uint64_t argument_address, uint64_t values_address,
     iree_hal_amd_gpu_pm4_program_arguments_t* arguments, uint32_t fixup_count,
     uint32_t fixup_word_count, const uint32_t* fixup_words, uint32_t padding,
     uint32_t* words) {
@@ -220,7 +224,7 @@ uint32_t* iree_hal_amd_gpu_pm4_program_emit(
   if (fixup && !fixup_word_count) {
     arguments->fixup = (iree_hal_amd_gpu_fixup_arguments_t){
         .entries = source.fixups,
-        .values = argument_address + sizeof(*arguments),
+        .values = values_address,
         .target = instance->address,
         .entry_count = fixup_count,
     };
@@ -260,7 +264,8 @@ uint32_t* iree_hal_amd_gpu_pm4_program_emit(
     }
   }
   if (fixup_word_count) {
-    memcpy(words, fixup_words, fixup_word_count * sizeof(*words));
+    iree_memcpy_write_only(words, fixup_words,
+                           fixup_word_count * sizeof(*words));
     words += fixup_word_count;
     words = iree_hal_amd_gpu_pm4_emit_acquire(
         words, profile->command_processor_bypasses_l2 ? profile->acquire

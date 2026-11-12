@@ -8,7 +8,6 @@
 #define IREE_HAL_DRIVER_AMD_GPU_QUEUE_TIMESTAMP_H_
 
 #include "iree/hal/command_buffer.h"
-#include "iree/hal/driver/amd/gpu/queue/recording.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,14 +23,12 @@ typedef struct iree_hal_amd_gpu_timestamp_writes_t {
   uint32_t count;
   // Allocated destination capacity, reused across recording boundaries.
   uint32_t capacity;
-  // Private-data offset of a DWORD owned by each invocation, valid if capacity.
-  uint32_t scratch_offset;
 } iree_hal_amd_gpu_timestamp_writes_t;
 
-// Captures one destination and lazily reserves invocation-owned drain scratch.
-// The recorder retains the buffer through its ordinary command inputs.
+// Captures one destination. The protocol recorder owns drain-scratch placement
+// and retains the buffer through its ordinary command inputs.
 iree_status_t iree_hal_amd_gpu_timestamp_writes_append(
-    iree_hal_amd_gpu_recording_t* recording, iree_hal_buffer_ref_t target,
+    iree_allocator_t allocator, iree_hal_buffer_ref_t target,
     iree_hal_amd_gpu_timestamp_writes_t* writes);
 
 // Releases recording-only destinations. The native scratch remains in the
