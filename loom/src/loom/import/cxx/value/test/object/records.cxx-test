@@ -67,46 +67,40 @@ double eos_state(const double* input, unsigned index) {
 }
 // ----
 func.def public @eos_state(%input: buffer, %input_byte_offset: offset, %index: i32) -> (f64) {
-  %4 = func.call @update_eos_state_double(%input, %input_byte_offset, %index) : (buffer, offset, i32) -> (f64)
+  %4 = func.call readonly @update_eos_state_double(%input, %input_byte_offset, %index) : (buffer, offset, i32) -> (f64)
   func.return %4 : f64
 }
 
 func.def @update_eos_state_double(%input: buffer, %input_byte_offset: offset, %index: i32) -> (f64) {
-  %9 = index.constant 32 : offset
-  %state_storage = buffer.alloca<private> align(8) %9 : buffer
   %zero$f64 = scalar.constant 0.0 : f64
-  %78 = index.constant 0 : offset
-  %17 = buffer.view %state_storage[%78] : buffer -> view<1xf64>
-  view.store %zero$f64, %17[0] : f64, view<1xf64>
-  %77 = index.constant 8 : offset
-  %22 = buffer.view %state_storage[%77] : buffer -> view<1xf64>
-  view.store %zero$f64, %22[0] : f64, view<1xf64>
-  %76 = index.constant 16 : offset
-  %27 = buffer.view %state_storage[%76] : buffer -> view<1xf64>
-  view.store %zero$f64, %27[0] : f64, view<1xf64>
-  %75 = index.constant 24 : offset
-  %32 = buffer.view %state_storage[%75] : buffer -> view<1xf64>
-  view.store %zero$f64, %32[0] : f64, view<1xf64>
-  %33 = scalar.extui %index : i32 to i64
-  %73 = scalar.constant 3 : i64
-  %74 = scalar.shli %33, %73 : i64
-  %36 = index.cast %input_byte_offset : offset to i64
-  %37 = scalar.addi %36, %74 : i64
-  %38 = scalar.assume %37 [range(%37, 0, 9223372036854775807)] : i64
-  %39 = index.cast %38 : i64 to offset
-  %40 = buffer.view %input[%39] : buffer -> view<1xf64>
-  %41 = view.load<root_in_bounds> %40[0] : view<1xf64> -> f64
-  %44 = scalar.constant 3 : i32
-  %45 = scalar.andi %index, %44 : i32
-  %46 = scalar.extui %45 : i32 to i64
-  %72 = scalar.shli %46, %73 : i64
-  %51 = scalar.assume %72 [range(%72, 0, 9223372036854775807)] : i64
-  %52 = index.cast %51 : i64 to offset
-  %53 = index.assume %52 [range(%52, 0, 24)] : offset
-  %54 = buffer.view %state_storage[%53] : buffer -> view<1xf64>
-  view.store %41, %54[0] : f64, view<1xf64>
-  %68 = view.load %54[0] : view<1xf64> -> f64
-  func.return %68 : f64
+  %13 = scalar.extui %index : i32 to i64
+  %62 = scalar.constant 3 : i64
+  %63 = scalar.shli %13, %62 : i64
+  %16 = index.cast %input_byte_offset : offset to i64
+  %17 = scalar.addi %16, %63 : i64
+  %18 = scalar.assume %17 [range(%17, 0, 9223372036854775807)] : i64
+  %19 = index.cast %18 : i64 to offset
+  %20 = buffer.view %input[%19] : buffer -> view<1xf64>
+  %21 = view.load<root_in_bounds> %20[0] : view<1xf64> -> f64
+  %22 = scalar.constant 3 : i32
+  %23 = scalar.andi %index, %22 : i32
+  %24 = scalar.constant 0 : i32
+  %25 = scalar.cmpi eq, %23, %24 : i32
+  %state_xn_0 = scf.select %25, %21, %zero$f64 : f64
+  %27 = scalar.constant 1 : i32
+  %28 = scalar.cmpi eq, %23, %27 : i32
+  %state_xn_1 = scf.select %28, %21, %zero$f64 : f64
+  %30 = scalar.constant 2 : i32
+  %31 = scalar.cmpi eq, %23, %30 : i32
+  %state_xn_2 = scf.select %31, %21, %zero$f64 : f64
+  %34 = scalar.cmpi eq, %23, %22 : i32
+  %state_xn_3 = scf.select %34, %21, %zero$f64 : f64
+  %39 = scalar.cmpi ult, %23, %30 : i32
+  %55 = scf.select %39, %25, %31 : i1
+  %56 = scf.select %39, %state_xn_0, %state_xn_2 : f64
+  %57 = scf.select %39, %state_xn_1, %state_xn_3 : f64
+  %54 = scf.select %55, %56, %57 : f64
+  func.return %54 : f64
 }
 
 // ====

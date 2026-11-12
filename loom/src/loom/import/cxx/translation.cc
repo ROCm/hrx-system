@@ -235,7 +235,7 @@ class Translator final : private Initialization::Evaluation {
                              const cxx::Type* object_type) {
     receivers_.enter(record, destination, object_type);
     for (const auto& member : record.members) {
-      complete_storage_receiver_member(member.source);
+      complete_receiver_member(member.source);
     }
   }
 
@@ -344,7 +344,7 @@ class Translator final : private Initialization::Evaluation {
     receivers_.publish(field, value);
   }
 
-  void complete_storage_receiver_member(cxx::Symbol* field) override {
+  void complete_receiver_member(cxx::Symbol* field) override {
     receivers_.mark_complete(field);
   }
 
@@ -2498,7 +2498,9 @@ class Translator final : private Initialization::Evaluation {
     if (destination) {
       if (auto* field = destination->binding; receivers_.find(field)) {
         auto* active = receivers_.find(field);
-        if (!receivers_.is_complete(field)) {
+        if (!receivers_.is_complete(field) &&
+            !(active->storage &&
+              unit_.typeTraits().is_array(expression->type))) {
           fail(owner,
                "member is mutated before its initialization is complete");
         }
@@ -2519,6 +2521,11 @@ class Translator final : private Initialization::Evaluation {
         // declaration as the complete SSA owner. Ordinary references have no
         // value binding and continue to resolve through their retained lvalue.
         if (values_.contains(destination->binding)) {
+          if (unit_.typeTraits().is_array(expression->type) &&
+              values_.partition(destination->binding).kind ==
+                  ValueKind::Pointer) {
+            return {expression->type, object_address(expression)};
+          }
           return {expression->type, *destination};
         }
         if (references_.contains(destination->binding)) {
@@ -2590,47 +2597,10 @@ class Translator final : private Initialization::Evaluation {
     }
   }
 
-  struct ArraySubscriptExpressions {
-    // Source array operand, independent of the commuted i[array] spelling.
-    cxx::ExpressionAST* array;
-    // Integral source selector evaluated in its written position.
-    cxx::ExpressionAST* index;
-    // Whether the array is evaluated before the selector.
-    bool array_first;
-  };
-
-  std::optional<ArraySubscriptExpressions> array_subscript_expressions(
-      cxx::SubscriptExpressionAST* subscript) {
-    if (subscript->symbol) {
-      return std::nullopt;
-    }
-    auto traits = unit_.typeTraits();
-    auto* base_type = traits.remove_reference(subscript->baseExpression->type);
-    auto* index_type =
-        traits.remove_reference(subscript->indexExpression->type);
-    if (traits.is_array(base_type)) {
-      return ArraySubscriptExpressions{subscript->baseExpression,
-                                       subscript->indexExpression, true};
-    }
-    if (traits.is_array(index_type)) {
-      return ArraySubscriptExpressions{subscript->indexExpression,
-                                       subscript->baseExpression, false};
-    }
-    return std::nullopt;
-  }
-
-  bool is_semantic_array(cxx::ExpressionAST* expression) {
-    auto* type = unit_.typeTraits().remove_reference(expression->type);
-    return unit_.typeTraits().is_array(type) &&
-           types_.requires_value_transport(type);
-  }
-
-  bool is_semantic_array_element(cxx::ExpressionAST* expression) {
+  bool is_array_element(cxx::ExpressionAST* expression) {
     expression = unwrap_object_identity(unit_, expression);
     auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(expression);
-    auto operands =
-        subscript ? array_subscript_expressions(subscript) : std::nullopt;
-    return operands && is_semantic_array(operands->array);
+    return subscript && control_->array_subscript(subscript);
   }
 
   Lvalue project_array_element(const Lvalue& target,
@@ -2665,14 +2635,14 @@ class Translator final : private Initialization::Evaluation {
           ObjectLvalue{element_type,
                        storage_.element(*storage, array.source, index, owner)}};
     }
-    fail(owner, "semantic array element lost its retained source owner");
+    fail(owner, "array element lost its retained source owner");
   }
 
-  std::optional<Lvalue> semantic_array_element(
-      cxx::SubscriptExpressionAST* subscript, cxx::AST* owner,
-      LvalueAccess access) {
-    auto operands = array_subscript_expressions(subscript);
-    if (!operands || !is_semantic_array(operands->array)) {
+  std::optional<Lvalue> array_element(cxx::SubscriptExpressionAST* subscript,
+                                      cxx::AST* owner, LvalueAccess access,
+                                      bool preserve_identity = false) {
+    const auto* operands = control_->array_subscript(subscript);
+    if (!operands) {
       return std::nullopt;
     }
 
@@ -2686,20 +2656,36 @@ class Translator final : private Initialization::Evaluation {
       array_target = reference_lvalue(operands->array, owner, access);
     }
 
+    const auto* element_type = subscript->type;
+    if (auto* object = std::get_if<ObjectLvalue>(&array_target->projection)) {
+      if (auto* storage = std::get_if<StorageProjection>(&object->location)) {
+        if (auto* member =
+                cxx::ast_cast<cxx::MemberExpressionAST>(operands->array)) {
+          name(storage->pointer, cxx::to_string(member->symbol->name()));
+        }
+        auto traits = unit_.typeTraits();
+        if (!preserve_identity && !traits.is_class(element_type) &&
+            !traits.is_array(element_type)) {
+          return Lvalue{ObjectLvalue{
+              element_type, storage_.subscript(*storage, index_value->ssa(),
+                                               operands->array->type,
+                                               operands->index->type, owner)}};
+        }
+        return Lvalue{ObjectLvalue{
+            element_type,
+            storage_.advance(*storage, index_value->ssa(),
+                             operands->array->type, operands->index->type,
+                             cxx::TokenKind::T_PLUS, owner)}};
+      }
+    }
     auto* array = types_.array(operands->array->type, owner);
     if (!array || !array->source->size()) {
-      fail(owner, "semantic subscript requires a nonempty bounded array");
+      fail(owner, "value subscript requires a nonempty bounded array");
     }
-    auto* element_type = array->source->elementType();
-    cxx::ASTInterpreter interpreter(&unit_);
-    auto constant = interpreter.evaluate(operands->index);
-    auto* integer = constant ? std::get_if<cxx::ConstInt>(&*constant) : nullptr;
-    if (integer && !integer->isNegative() &&
-        integer->toUWide() <
-            static_cast<cxx::ConstInt::UWide>(array->source->size())) {
+    if (operands->constant_index) {
       return project_array_element(*array_target, *array,
-                                   static_cast<size_t>(integer->toUIntMax()),
-                                   element_type, owner);
+                                   *operands->constant_index, element_type,
+                                   owner);
     }
     if (array->source->size() == 1) {
       return project_array_element(*array_target, *array, 0, element_type,
@@ -2934,7 +2920,8 @@ class Translator final : private Initialization::Evaluation {
     }
     if (auto* subscript =
             cxx::ast_cast<cxx::SubscriptExpressionAST>(projected)) {
-      if (auto target = semantic_array_element(subscript, owner, access)) {
+      if (auto target =
+              array_element(subscript, owner, access, preserve_identity)) {
         return std::move(*target);
       }
     }
@@ -2971,7 +2958,7 @@ class Translator final : private Initialization::Evaluation {
         member->vectorComponentKind == cxx::VectorComponentKind::kNone &&
         ((!control_->destination(member) &&
           !control_->storage_backed(member)) ||
-         is_semantic_array_element(member->baseExpression))) {
+         is_array_element(member->baseExpression))) {
       auto base = reference_lvalue(member->baseExpression, owner, access);
       return base.project(
           types_.selection(member->symbol, member->subobjectPath, member),
@@ -5687,6 +5674,10 @@ class Translator final : private Initialization::Evaluation {
       return expression(initializer->expression);
     }
     if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(ast)) {
+      if (!cast->conversionFunction &&
+          cast->castKind == cxx::ImplicitCastKind::kArrayToPointerConversion) {
+        return pointer_expression(cast->expression).pointer;
+      }
       if (is_class_adjustment(cast)) {
         if (cast->castKind == cxx::ImplicitCastKind::kBaseToDerivedConversion) {
           return load(cast);
@@ -5979,7 +5970,7 @@ class Translator final : private Initialization::Evaluation {
         return name(read(*alias, ast), cxx::to_string(member->symbol->name()));
       }
       auto* base = cxx::ast_cast<cxx::IdExpressionAST>(member->baseExpression);
-      if (is_semantic_array_element(member->baseExpression)) {
+      if (is_array_element(member->baseExpression)) {
         return name(read(destination(member, ast, LvalueAccess::Read), ast),
                     cxx::to_string(member->symbol->name()));
       }
@@ -6265,8 +6256,7 @@ class Translator final : private Initialization::Evaluation {
         return vectors_.extract(base.ssa(), index.ssa(), base_type, index_type,
                                 ast);
       }
-      if (auto target =
-              semantic_array_element(subscript, ast, LvalueAccess::Read)) {
+      if (auto target = array_element(subscript, ast, LvalueAccess::Read)) {
         return read(*target, ast);
       }
       return load(ast);

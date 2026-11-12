@@ -50,7 +50,7 @@ unsigned pointer_binding(unsigned* input) {
 
 // ====
 unsigned array_binding(unsigned input) {
-  // ERROR@+1: LOWERING/059 "constexpr does not accept addressable bindings"
+  // ERROR@+1: LOWERING/059 "constexpr requires a scalar value binding"
   [[loom::constexpr]] const unsigned value[1] = {input};
   return value[0];
 }

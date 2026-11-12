@@ -624,6 +624,73 @@ TEST(ControlFlowTest, AutomaticObjectStorageRemainsDistinctFromAddressDemand) {
   }
 }
 
+TEST(ControlFlowTest, ArraySelectionRetainsValuesUntilAnAddressIsObserved) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct View { int* data; int values[3]; };
+    struct Box { int values[3]; };
+    void consume(const int* values);
+    int entry(int* data, unsigned index) {
+      View value{data, {1, 2, 3}};
+      Box addressed{{4, 5, 6}};
+      consume(addressed.values);
+      return value.values[index] + 1[value.values];
+    }
+  )"),
+                IREE_SV("array_selection.cxx"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body,
+                       function->symbol);
+  std::vector<cxx::Symbol*> bindings;
+  cxx::ReturnStatementAST* returned = nullptr;
+  for (auto* statement : cxx::ListView{body->statementList}) {
+    if (auto* declaration =
+            cxx::ast_cast<cxx::DeclarationStatementAST>(statement)) {
+      auto* simple =
+          cxx::ast_cast<cxx::SimpleDeclarationAST>(declaration->declaration);
+      bindings.push_back(simple->initDeclaratorList->value->symbol);
+    } else if (auto* result =
+                   cxx::ast_cast<cxx::ReturnStatementAST>(statement)) {
+      returned = result;
+    }
+  }
+  ASSERT_EQ(bindings.size(), 2u);
+  EXPECT_FALSE(analysis.storage_backed(bindings[0]));
+  EXPECT_FALSE(analysis.addressed(bindings[0]));
+  EXPECT_TRUE(analysis.storage_backed(bindings[1]));
+  EXPECT_TRUE(analysis.addressed(bindings[1]));
+
+  ASSERT_NE(returned, nullptr);
+  auto* sum = cxx::ast_cast<cxx::BinaryExpressionAST>(returned->expression);
+  ASSERT_NE(sum, nullptr);
+  auto* dynamic = cxx::ast_cast<cxx::SubscriptExpressionAST>(
+      unwrap_expression(sum->leftExpression));
+  auto* constant = cxx::ast_cast<cxx::SubscriptExpressionAST>(
+      unwrap_expression(sum->rightExpression));
+  ASSERT_NE(dynamic, nullptr);
+  ASSERT_NE(constant, nullptr);
+  auto* dynamic_selection = analysis.array_subscript(dynamic);
+  auto* constant_selection = analysis.array_subscript(constant);
+  ASSERT_NE(dynamic_selection, nullptr);
+  ASSERT_NE(constant_selection, nullptr);
+  EXPECT_TRUE(dynamic_selection->array_first);
+  EXPECT_FALSE(dynamic_selection->constant_index.has_value());
+  EXPECT_FALSE(constant_selection->array_first);
+  EXPECT_EQ(constant_selection->constant_index, 1u);
+  EXPECT_FALSE(analysis.destination(dynamic).has_value());
+  auto selected = analysis.destination(constant);
+  ASSERT_TRUE(selected.has_value());
+  EXPECT_EQ(selected->binding, bindings[0]);
+  EXPECT_EQ(selected->component_offset, 3u);
+  EXPECT_EQ(selected->member->component_count, 1u);
+}
+
 TEST(ControlFlowTest, StructuredBindingsAnalyzeTheSynthesizedDeclarationOnce) {
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);

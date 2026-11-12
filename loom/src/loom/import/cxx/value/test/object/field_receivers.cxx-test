@@ -168,83 +168,25 @@ func.def public @copied_bounds(%length: i32) -> (i32) {
   %body_first_values_0 = scalar.constant 0 : i32
   %body_first_values_1 = scalar.constant 0 : i32
   %body_first_values_2 = scalar.constant 0 : i32
-  %5 = func.call @Body__length_value(%body_first_values_0, %body_first_values_1, %body_first_values_2, %length, %length, %length) : (i32, i32, i32, i32, i32, i32) -> (i32)
+  %5 = func.call pure @Body__length_value(%body_first_values_0, %body_first_values_1, %body_first_values_2, %length, %length, %length) : (i32, i32, i32, i32, i32, i32) -> (i32)
   func.return %5 : i32
 }
 
 func.def @Body__length_value(%this_first_values_0: i32, %this_first_values_1: i32, %this_first_values_2: i32, %this_last_values_0: i32, %this_last_values_1: i32, %this_last_values_2: i32) -> (i32) {
-  %13 = index.constant 24 : offset
-  %bounds_storage = buffer.alloca<private> align(4) %13 : buffer
-  %bounds_storage_byte_offset = index.constant 0 : offset
-  %bounds_view = buffer.view %bounds_storage[%bounds_storage_byte_offset] : buffer -> view<24xi8>
-  func.call @Bounds__Bounds_storage(%bounds_storage, %bounds_storage_byte_offset, %this_first_values_0, %this_first_values_1, %this_first_values_2, %this_last_values_0, %this_last_values_1, %this_last_values_2) : (buffer, offset, i32, i32, i32, i32, i32, i32)
-  %17 = func.call readonly @Bounds__length_storage(%bounds_storage, %bounds_storage_byte_offset) : (buffer, offset) -> (i32)
-  func.return %17 : i32
+  %bounds_lower_values_0, %bounds_lower_values_1, %bounds_lower_values_2, %bounds_upper_values_0, %bounds_upper_values_1, %bounds_upper_values_2 = func.call pure @Bounds__Bounds_value(%this_first_values_0, %this_first_values_1, %this_first_values_2, %this_last_values_0, %this_last_values_1, %this_last_values_2) : (i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32)
+  %19 = func.call pure @Bounds__length_value(%bounds_lower_values_0, %bounds_upper_values_0) : (i32, i32) -> (i32)
+  func.return %19 : i32
 }
 
-func.def inline @Bounds__Bounds_storage(%this: buffer, %this_byte_offset: offset, %first_values_0: i32, %first_values_1: i32, %first_values_2: i32, %last_values_0: i32, %last_values_1: i32, %last_values_2: i32) {
-  %26 = index.constant 0 : offset
-  %27 = index.add %this_byte_offset, %26 : offset
-  %28 = index.constant 0 : offset
-  %29 = index.add %27, %28 : offset
-  %30 = buffer.view %this[%29] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %first_values_0, %30[0] : i32, view<1xi32>
-  %31 = index.constant 4 : offset
-  %32 = index.add %29, %31 : offset
-  %33 = buffer.view %this[%32] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %first_values_1, %33[0] : i32, view<1xi32>
-  %34 = index.constant 8 : offset
-  %35 = index.add %29, %34 : offset
-  %36 = buffer.view %this[%35] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %first_values_2, %36[0] : i32, view<1xi32>
-  %37 = index.constant 12 : offset
-  %38 = index.add %this_byte_offset, %37 : offset
-  %39 = index.constant 0 : offset
-  %40 = index.add %38, %39 : offset
-  %41 = buffer.view %this[%40] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %last_values_0, %41[0] : i32, view<1xi32>
-  %42 = index.constant 4 : offset
-  %43 = index.add %40, %42 : offset
-  %44 = buffer.view %this[%43] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %last_values_1, %44[0] : i32, view<1xi32>
-  %45 = index.constant 8 : offset
-  %46 = index.add %40, %45 : offset
-  %47 = buffer.view %this[%46] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %last_values_2, %47[0] : i32, view<1xi32>
-  func.return
+func.def inline @Bounds__Bounds_value(%first_values_0: i32, %first_values_1: i32, %first_values_2: i32, %last_values_0: i32, %last_values_1: i32, %last_values_2: i32) -> (i32, i32, i32, i32, i32, i32) {
+  func.return %first_values_0, %first_values_1, %first_values_2, %last_values_0, %last_values_1, %last_values_2 : i32, i32, i32, i32, i32, i32
 }
 
-func.def @Bounds__length_storage(%this: buffer, %this_byte_offset: offset) -> (i32) {
-  %51 = index.constant 12 : offset
-  %52 = index.add %this_byte_offset, %51 : offset
-  %53 = index.constant 0 : offset
-  %values_byte_offset$54 = index.add %52, %53 : offset
-  %55 = scalar.constant 0 : i32
-  %56 = scalar.extsi %55 : i32 to i64
-  %57 = scalar.constant 4 : i64
-  %58 = scalar.muli %56, %57 : i64
-  %59 = index.cast %values_byte_offset$54 : offset to i64
-  %60 = scalar.addi %59, %58 : i64
-  %61 = scalar.assume %60 [range(%60, 0, 9223372036854775807)] : i64
-  %62 = index.cast %61 : i64 to offset
-  %63 = buffer.view %this[%62] : buffer -> view<1xi32>
-  %64 = view.load<root_in_bounds> %63[0] : view<1xi32> -> i32
-  %65 = index.constant 0 : offset
-  %66 = index.add %this_byte_offset, %65 : offset
-  %67 = index.constant 0 : offset
-  %values_byte_offset$68 = index.add %66, %67 : offset
-  %69 = scalar.constant 0 : i32
-  %70 = scalar.extsi %69 : i32 to i64
-  %71 = scalar.constant 4 : i64
-  %72 = scalar.muli %70, %71 : i64
-  %73 = index.cast %values_byte_offset$68 : offset to i64
-  %74 = scalar.addi %73, %72 : i64
-  %75 = scalar.assume %74 [range(%74, 0, 9223372036854775807)] : i64
-  %76 = index.cast %75 : i64 to offset
-  %77 = buffer.view %this[%76] : buffer -> view<1xi32>
-  %78 = view.load<root_in_bounds> %77[0] : view<1xi32> -> i32
-  %79 = scalar.subi %64, %78 : i32
-  func.return %79 : i32
+func.def @Bounds__length_value(%this_lower_values_0: i32, %this_upper_values_0: i32) -> (i32) {
+  %35 = scalar.constant 0 : i32
+  %36 = scalar.constant 0 : i32
+  %37 = scalar.subi %this_upper_values_0, %this_lower_values_0 : i32
+  func.return %37 : i32
 }
 
 // ====

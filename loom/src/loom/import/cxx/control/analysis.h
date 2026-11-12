@@ -33,6 +33,19 @@ namespace loom::cxx_import {
 
 struct DirectOperatorCall;
 
+// Builtin fixed-array selection retained by the owning source traversal.
+// Subscripts preserve written evaluation order, including i[array] syntax.
+struct ArraySubscript {
+  // Source array operand, with its original qualifiers and value category.
+  cxx::ExpressionAST* array;
+  // Integral selector evaluated once at its written source position.
+  cxx::ExpressionAST* index;
+  // Whether the array precedes the selector in source evaluation order.
+  bool array_first;
+  // Known in-range element ordinal, absent for a runtime selection.
+  std::optional<size_t> constant_index;
+};
+
 // One nontrivial direct member or member-array destroyed after a complete
 // destructor's written body. Entries retain declaration order; translation
 // emits them in reverse.
@@ -265,6 +278,10 @@ class ControlFlow final : private cxx::ASTVisitor {
   // unsupported lvalue. A vector lane names its owning vector slice; whole
   // identifiers need no indexed projection record.
   std::optional<Destination> destination(cxx::ExpressionAST* expression) const;
+  // Null for pointer indexing and overloaded operators. Array selectors and
+  // constant ordinals are classified once before identity and value lowering.
+  const ArraySubscript* array_subscript(
+      cxx::SubscriptExpressionAST* expression) const;
   // Whether this member projects existing memory instead of an SSA record.
   // Object identity is propagated from visited children once during analysis.
   bool storage_backed(cxx::MemberExpressionAST* expression) const;
@@ -690,6 +707,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::unordered_map<cxx::AST*, std::vector<cxx::Symbol*>> writes_;
   // Sparse physical-representation facts indexed by source binding identity.
   std::unordered_map<cxx::Symbol*, BindingStorageFacts> binding_storage_;
+  // Object currently being initialized. Observing its partial destination
+  // requires in-place construction rather than an unbound completed value.
+  cxx::Symbol* initializing_binding_ = nullptr;
   struct ReferenceAlias {
     // Static source slice, absent when evaluation chooses between objects.
     std::optional<Destination> destination;
@@ -787,6 +807,9 @@ class ControlFlow final : private cxx::ASTVisitor {
       projected_reference_return_facts_;
   // Nested lvalue ownership and transitive component offsets computed once.
   std::unordered_map<cxx::ExpressionAST*, Destination> destinations_;
+  // Source array selectors; ordinary expressions retain no entry.
+  std::unordered_map<cxx::SubscriptExpressionAST*, ArraySubscript>
+      array_subscripts_;
   // Memory record objects and member projections, including nested fields.
   std::unordered_set<cxx::ExpressionAST*> storage_expressions_;
   // Automatic roots retained through member projections and transparent
