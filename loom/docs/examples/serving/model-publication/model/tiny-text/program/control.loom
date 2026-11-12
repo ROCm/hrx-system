@@ -395,7 +395,7 @@ func.def public @text_encode_epoch_v1(%control_state: buffer, %plan: buffer, %in
   func.return %first_count, %control_state, %transfer_begin, %transfer_length : i32, buffer, i64, i64
 }
 
-func.def public @text_publish_epoch_v1(%plan: buffer, %media_plan: buffer, %count: i32, %first_media_count: i32, %next_media_count: i32, %verified: i32, %continues: i32, %next_speculative: buffer, %ordinary: buffer, %first_results: buffer, %next_results: buffer, %progress: buffer) {
+func.def public @text_publish_epoch_v1(%control_state: buffer, %plan: buffer, %media_plan: buffer, %count: i32, %first_media_count: i32, %next_media_count: i32, %verified: i32, %continues: i32, %next_speculative: buffer, %ordinary: buffer, %first_results: buffer, %next_results: buffer, %progress: buffer) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
