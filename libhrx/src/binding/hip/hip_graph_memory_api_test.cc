@@ -1504,9 +1504,25 @@ TEST_F(HipGraphMemoryApiTest,
   const hipGraphNode_t to[] = {upload, consumer};
   ASSERT_EQ(hipSuccess, api_.add_dependencies(graph_, from, to, 2));
   ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
-  Replay();
-  ASSERT_FALSE(HasFatalFailure());
-  EXPECT_EQ(observed_, replacement_);
+  ASSERT_EQ(hipSuccess, api_.graph_clone(&clone_, graph_));
+
+  // Both snapshots keep their edges and copy helpers when source mutation
+  // removes nodes and renumbers the remaining handles.
+  ASSERT_EQ(hipSuccess, api_.destroy_node(producer));
+  ASSERT_EQ(hipSuccess, api_.destroy_node(upload));
+  ASSERT_EQ(hipSuccess, api_.instantiate(&sibling_, clone_, 0));
+  ASSERT_EQ(hipSuccess, api_.graph_destroy(graph_));
+  graph_ = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_destroy(clone_));
+  clone_ = nullptr;
+  for (auto executable : {executable_, sibling_}) {
+    source_.fill(0);
+    destination_.fill(0);
+    observed_.fill(0);
+    Replay(executable);
+    ASSERT_FALSE(HasFatalFailure());
+    EXPECT_EQ(observed_, replacement_);
+  }
 }
 
 TEST_F(HipGraphMemoryApiTest, CapturedCopiesSharePublicEnableAndDeletion) {

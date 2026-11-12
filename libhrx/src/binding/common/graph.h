@@ -347,7 +347,8 @@ typedef struct iree_hal_streaming_graph_batch_mem_op_node_attrs_t {
 // [padding to iree_max_align_t]
 // [extra_data (e.g., packed kernel arguments)]
 typedef struct iree_hal_streaming_graph_node_t {
-  // Graph that owns the node while it remains part of a graph template.
+  // Owning graph after publication, NULL after removal or construction
+  // rollback. Node storage remains valid until that graph's arena is destroyed.
   iree_hal_streaming_graph_t* graph;
   // Type of the node indicating which attribute data is valid.
   iree_hal_streaming_graph_node_type_t type;
@@ -734,11 +735,6 @@ typedef struct iree_hal_streaming_graph_t {
   // Next stable source ID assigned to graph nodes created in this template.
   uint32_t next_clone_source_node_index;
 
-  // Root nodes stored in chained blocks.
-  iree_hal_streaming_node_block_t* root_blocks;
-  iree_hal_streaming_node_block_t* current_root_block;
-  iree_host_size_t root_count;
-
   // Additional edges added after node creation via hipGraphAddDependencies.
   iree_hal_streaming_graph_edge_t* additional_edges;
   iree_host_size_t additional_edge_count;
@@ -907,8 +903,6 @@ iree_status_t iree_hal_streaming_graph_prepare_copy_staging(
 typedef struct iree_hal_streaming_graph_copy_checkpoint_t {
   // Number of nodes preceding the copy and its helpers.
   iree_host_size_t node_count;
-  // Number of root nodes preceding construction.
-  iree_host_size_t root_count;
   // Number of attached helpers preceding construction.
   iree_host_size_t helper_count;
 } iree_hal_streaming_graph_copy_checkpoint_t;
@@ -919,7 +913,6 @@ iree_hal_streaming_graph_copy_checkpoint(
     const iree_hal_streaming_graph_t* graph) {
   return (iree_hal_streaming_graph_copy_checkpoint_t){
       .node_count = graph->node_count,
-      .root_count = graph->root_count,
       .helper_count = graph->copy_helper_count,
   };
 }

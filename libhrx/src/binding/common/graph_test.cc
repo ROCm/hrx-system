@@ -654,34 +654,38 @@ struct FailOnAttemptAllocator {
 };
 
 TEST(GraphTest, NodePublicationIsFailureAtomic) {
-  FailOnAttemptAllocator allocator;
-  allocator.fail_on_allocation_attempt = 3;
-  iree_hal_streaming_graph_t graph = {
-      .arena_allocator = allocator.AsAllocator(),
-  };
+  // Reject each allocation in turn until construction succeeds. Every rejected
+  // publication leaves both the topology and logical identities unchanged.
+  for (int fail_on_attempt = 1;; ++fail_on_attempt) {
+    SCOPED_TRACE(fail_on_attempt);
+    FailOnAttemptAllocator allocator;
+    allocator.fail_on_allocation_attempt = fail_on_attempt;
+    iree_hal_streaming_graph_t graph = {
+        .arena_allocator = allocator.AsAllocator(),
+    };
+    iree_hal_streaming_graph_node_t* node = nullptr;
+    iree_status_t status =
+        iree_hal_streaming_graph_add_empty_node(&graph, nullptr, 0, &node);
+    if (iree_status_is_ok(status)) {
+      EXPECT_GT(fail_on_attempt, 1);
+      break;
+    }
+    IREE_ASSERT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+    EXPECT_EQ(nullptr, node);
+    EXPECT_EQ(0u, graph.node_count);
+    EXPECT_EQ(0u, graph.next_clone_source_node_index);
+    EXPECT_EQ(nullptr, graph.node_blocks);
+    EXPECT_EQ(nullptr, graph.current_node_block);
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_RESOURCE_EXHAUSTED,
-      iree_hal_streaming_graph_add_empty_node(&graph, /*dependencies=*/nullptr,
-                                              /*dependency_count=*/0,
-                                              /*out_node=*/nullptr));
-  EXPECT_EQ(0u, graph.node_count);
-  EXPECT_EQ(0u, graph.root_count);
-  EXPECT_EQ(0u, graph.next_clone_source_node_index);
-  EXPECT_EQ(nullptr, graph.node_blocks);
-  EXPECT_EQ(nullptr, graph.current_node_block);
-  EXPECT_EQ(nullptr, graph.root_blocks);
-  EXPECT_EQ(nullptr, graph.current_root_block);
-
-  allocator.fail_on_allocation_attempt = 0;
-  iree_hal_streaming_graph_node_t* node = nullptr;
-  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
-      &graph, /*dependencies=*/nullptr, /*dependency_count=*/0, &node));
-  ASSERT_NE(nullptr, node);
-  EXPECT_EQ(0u, node->node_index);
-  EXPECT_EQ(0u, node->clone_source_node_index);
-  EXPECT_EQ(1u, graph.node_count);
-  EXPECT_EQ(1u, graph.root_count);
+    allocator.fail_on_allocation_attempt = 0;
+    IREE_ASSERT_OK(
+        iree_hal_streaming_graph_add_empty_node(&graph, nullptr, 0, &node));
+    ASSERT_NE(nullptr, node);
+    EXPECT_EQ(&graph, node->graph);
+    EXPECT_EQ(0u, node->node_index);
+    EXPECT_EQ(0u, node->clone_source_node_index);
+    EXPECT_EQ(1u, graph.node_count);
+  }
 }
 
 TEST(GraphTest, DependencyBatchPublicationIsFailureAtomic) {
@@ -926,6 +930,139 @@ TEST(GraphTest, NodeCreationRejectsDuplicateDependenciesWithoutMutation) {
       iree_hal_streaming_graph_add_empty_node(
           state.graph(), dependencies, std::size(dependencies), nullptr));
   EXPECT_EQ(count, state.graph()->node_count);
+}
+
+TEST(GraphTest, RemovedNodesCannotRejoinThroughReusedIndices) {
+  CaptureTransactionTestState state;
+  std::array<iree_hal_streaming_graph_node_t*, 80> nodes;
+  for (auto& node : nodes) {
+    IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(state.graph(),
+                                                           nullptr, 0, &node));
+  }
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_dependencies(
+      state.graph(), &nodes[0], &nodes[64], 1));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_destroy_node(nodes[0]));
+  EXPECT_EQ(nullptr, nodes[0]->graph);
+  EXPECT_EQ(nodes[0]->node_index, nodes[1]->node_index);
+  EXPECT_EQ(0u, state.graph()->additional_edge_count);
+  const auto count = state.graph()->node_count;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_streaming_graph_add_empty_node(
+                            state.graph(), &nodes[0], 1, nullptr));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_streaming_graph_add_empty_node(
+                            state.second_graph(), &nodes[1], 1, nullptr));
+  EXPECT_EQ(0u, state.second_graph()->node_count);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_streaming_graph_add_dependencies(
+                            state.graph(), &nodes[0], &nodes[64], 1));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_streaming_graph_add_dependencies(
+                            state.graph(), &nodes[64], &nodes[0], 1));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_streaming_graph_destroy_node(nodes[0]));
+  EXPECT_EQ(count, state.graph()->node_count);
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_dependencies(
+      state.graph(), &nodes[1], &nodes[64], 1));
+  EXPECT_EQ(1u, state.graph()->additional_edge_count);
+}
+
+TEST(GraphTest, CloneFailureAndBackingReusePreserveResourceOwnership) {
+  int destroyed = 0;
+  struct Payload {
+    // Owned by the source host node and every completed or partial snapshot.
+    iree_hal_resource_t resource;
+    // Counts final destruction independently of the resource's reference count.
+    int* destroyed;
+  } payload = {{}, &destroyed};
+  static const iree_hal_resource_vtable_t vtable = {
+      .destroy =
+          +[](iree_hal_resource_t* resource) {
+            ++*reinterpret_cast<Payload*>(resource)->destroyed;
+          },
+  };
+  {
+    CaptureTransactionTestState state;
+    auto* graph = state.graph();
+    std::array<iree_hal_streaming_graph_node_t*, 4096> nodes;
+    nodes[0] = state.node();
+    IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
+        graph, nullptr, 0, +[](void*) {}, nullptr, &nodes[1]));
+    iree_hal_resource_initialize(&vtable, &payload.resource);
+    nodes[1]->attrs.host.resource = &payload.resource;
+    for (size_t i = 2; i < nodes.size(); ++i) {
+      IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(graph, nullptr, 0,
+                                                             &nodes[i]));
+    }
+    IREE_ASSERT_OK(iree_hal_streaming_graph_add_dependencies(
+        graph, nodes.data(), nodes.data() + 1, nodes.size() - 1));
+
+    struct AllocationFailure {
+      // Actual host allocator for graph headers, node maps, and arena backing.
+      iree_allocator_t delegate;
+      // Allocation ordinal rejected during the current snapshot attempt.
+      size_t fail_on_attempt;
+      // Number of allocation attempts observed during this snapshot.
+      size_t attempts = 0;
+
+      static iree_status_t Control(void* self, iree_allocator_command_t command,
+                                   const void* params, void** pointer) {
+        auto* failure = static_cast<AllocationFailure*>(self);
+        if ((command == IREE_ALLOCATOR_COMMAND_MALLOC ||
+             command == IREE_ALLOCATOR_COMMAND_CALLOC) &&
+            ++failure->attempts == failure->fail_on_attempt) {
+          return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+        }
+        return failure->delegate.ctl(failure->delegate.self, command, params,
+                                     pointer);
+      }
+    };
+    auto* pool = &state.context()->device_entry->block_pool;
+    const auto graph_allocator = graph->host_allocator;
+    const auto block_allocator = pool->block_allocator;
+    for (size_t fail_on_attempt = 1;; ++fail_on_attempt) {
+      SCOPED_TRACE(fail_on_attempt);
+      // Each attempt starts with identical backing requirements. Source blocks
+      // remain acquired; trimming only releases previously rejected snapshots.
+      iree_arena_block_pool_trim(pool);
+      AllocationFailure failure = {iree_allocator_system(), fail_on_attempt};
+      const iree_allocator_t allocator = {&failure, AllocationFailure::Control};
+      graph->host_allocator = allocator;
+      pool->block_allocator = allocator;
+      iree_hal_streaming_graph_t* clone = nullptr;
+      iree_status_t status = iree_hal_streaming_graph_clone(
+          graph, IREE_HAL_STREAMING_GRAPH_CLONE_MODE_TEMPLATE, &clone);
+      graph->host_allocator = graph_allocator;
+      pool->block_allocator = block_allocator;
+      if (iree_status_is_ok(status)) {
+        EXPECT_GT(fail_on_attempt, 1u);
+        EXPECT_EQ(nodes.size(), clone->node_count);
+        EXPECT_EQ(nodes.size() - 1, clone->additional_edge_count);
+        iree_hal_streaming_graph_release(clone);
+        break;
+      }
+      IREE_ASSERT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+      EXPECT_EQ(nullptr, clone);
+      EXPECT_EQ(0, destroyed);
+      EXPECT_EQ(nodes.size(), graph->node_count);
+      EXPECT_EQ(nodes.size() - 1, graph->additional_edge_count);
+    }
+
+    // The completed clone returned all backing to the shared pool. Repeating
+    // the same snapshot requires no fresh backing, even for a large edge set.
+    ProbedHostAllocator backing_allocator;
+    backing_allocator.fail_allocations = true;
+    pool->block_allocator = backing_allocator.AsAllocator();
+    iree_hal_streaming_graph_t* clone = nullptr;
+    iree_status_t status = iree_hal_streaming_graph_clone(
+        graph, IREE_HAL_STREAMING_GRAPH_CLONE_MODE_TEMPLATE, &clone);
+    pool->block_allocator = block_allocator;
+    IREE_ASSERT_OK(status);
+    EXPECT_EQ(0, backing_allocator.allocation_attempt_count);
+    iree_hal_streaming_graph_release(clone);
+  }
+  EXPECT_EQ(1, destroyed);
 }
 
 TEST(GraphTest, CaptureDependencyUpdatesPreserveUniqueOrderedFrontiers) {

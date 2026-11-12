@@ -672,7 +672,6 @@ TEST_F(GraphExecTest, RejectedCopyConstructionPreservesTopologyAndBacking) {
       ++rejected;
       iree_hal_streaming_graph_rollback_copy(graph, checkpoint);
       EXPECT_EQ(graph->node_count, checkpoint.node_count);
-      EXPECT_EQ(graph->root_count, checkpoint.root_count);
       EXPECT_EQ(graph->copy_helper_count, checkpoint.helper_count);
     }
     EXPECT_GE(rejected, 3u);

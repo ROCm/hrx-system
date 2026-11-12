@@ -182,9 +182,6 @@ iree_status_t iree_hal_streaming_graph_create(
       &iree_hal_streaming_next_graph_debug_id, 1, iree_memory_order_relaxed);
   graph->clone_source_graph_debug_id = 0;
   graph->next_clone_source_node_index = 0;
-  graph->root_blocks = NULL;
-  graph->current_root_block = NULL;
-  graph->root_count = 0;
   graph->additional_edges = NULL;
   graph->additional_edge_count = 0;
   graph->template_graph = NULL;
@@ -329,15 +326,6 @@ void iree_hal_streaming_graph_rollback_copy(
     }
     graph->node_count = checkpoint.node_count;
     graph->copy_helper_count = checkpoint.helper_count;
-
-    remaining = checkpoint.root_count;
-    for (iree_hal_streaming_node_block_t* block = graph->root_blocks; block;
-         block = block->next) {
-      const iree_host_size_t keep_count = iree_min(remaining, block->count);
-      remaining -= keep_count;
-      block->count = keep_count;
-    }
-    graph->root_count = checkpoint.root_count;
   }
 }
 
@@ -394,30 +382,12 @@ static void iree_hal_streaming_graph_renumber_nodes(
   }
 }
 
-static iree_hal_streaming_graph_node_t* iree_hal_streaming_graph_node_at_index(
-    const iree_hal_streaming_graph_t* graph, uint32_t node_index) {
-  iree_host_size_t skipped_count = 0;
-  for (iree_hal_streaming_node_block_t* block = graph->node_blocks; block;
-       block = block->next) {
-    if (node_index < skipped_count + block->count) {
-      return block->nodes[node_index - skipped_count];
-    }
-    skipped_count += block->count;
-  }
-  return NULL;
-}
-
 static bool iree_hal_streaming_graph_node_is_active_in_graph(
     const iree_hal_streaming_graph_t* graph,
     const iree_hal_streaming_graph_node_t* node) {
-  if (!node || node->graph != graph) {
-    return false;
-  }
-  if (node->node_index >= graph->node_count) {
-    return false;
-  }
-  return iree_hal_streaming_graph_node_at_index(graph, node->node_index) ==
-         node;
+  // Publication assigns the owner; removal and copy rollback clear it while
+  // leaving the arena-owned handle storage alive until graph destruction.
+  return node && node->graph == graph;
 }
 
 static bool iree_hal_streaming_graph_dependency_exists(
@@ -724,25 +694,15 @@ static iree_status_t iree_hal_streaming_graph_add_node(
   const bool needs_node_block =
       !graph->current_node_block ||
       graph->current_node_block->count >= graph->current_node_block->capacity;
-  const bool needs_root_block =
-      node->dependency_count == 0 &&
-      (!graph->current_root_block ||
-       graph->current_root_block->count >= graph->current_root_block->capacity);
-
-  // Reserve every block before publishing the node. Arena allocations cannot
+  // Reserve storage before publishing the node. Arena allocations cannot
   // be rolled back individually, but an allocation failure must leave all graph
   // topology and counters unchanged so a later insertion can proceed normally.
   iree_hal_streaming_node_block_t* new_node_block = NULL;
-  iree_hal_streaming_node_block_t* new_root_block = NULL;
   if (needs_node_block) {
     const iree_host_size_t block_capacity =
         graph->node_count < 64 ? 16 : 64;  // Grow block size for larger graphs.
     IREE_RETURN_IF_ERROR(iree_hal_streaming_allocate_node_block(
         graph->arena_allocator, block_capacity, &new_node_block));
-  }
-  if (needs_root_block) {
-    IREE_RETURN_IF_ERROR(iree_hal_streaming_allocate_node_block(
-        graph->arena_allocator, /*capacity=*/8, &new_root_block));
   }
 
   // Assign the logical identity only after every fallible preparation step.
@@ -763,19 +723,6 @@ static iree_status_t iree_hal_streaming_graph_add_node(
 
   graph->current_node_block->nodes[graph->current_node_block->count++] = node;
   ++graph->node_count;
-
-  if (node->dependency_count == 0) {
-    if (new_root_block) {
-      if (graph->current_root_block) {
-        graph->current_root_block->next = new_root_block;
-      } else {
-        graph->root_blocks = new_root_block;
-      }
-      graph->current_root_block = new_root_block;
-    }
-    graph->current_root_block->nodes[graph->current_root_block->count++] = node;
-    ++graph->root_count;
-  }
 
   return iree_ok_status();
 }
@@ -1061,13 +1008,38 @@ iree_status_t iree_hal_streaming_graph_clone(
     }
   }
 
-  for (iree_hal_streaming_graph_edge_t* edge = source_graph->additional_edges;
-       iree_status_is_ok(status) && edge; edge = edge->next) {
-    iree_hal_streaming_graph_node_t* from_node =
-        node_map[edge->from->node_index];
-    iree_hal_streaming_graph_node_t* to_node = node_map[edge->to->node_index];
-    status = iree_hal_streaming_graph_add_dependencies(clone_graph, &from_node,
-                                                       &to_node, 1);
+  if (iree_status_is_ok(status) && source_graph->additional_edge_count > 0) {
+    // The source owns validated topology. Remap it directly instead of asking
+    // public mutation to rediscover membership and uniqueness for every edge.
+    // Fill reusable arena blocks, including the current block's tail. One
+    // contiguous edge array would bypass the pool for large snapshots.
+    iree_hal_streaming_graph_edge_t* edge = source_graph->additional_edges;
+    iree_host_size_t remaining = source_graph->additional_edge_count;
+    while (iree_status_is_ok(status) && remaining > 0) {
+      iree_host_size_t capacity =
+          (clone_graph->arena.block_bytes_remaining & ~(iree_max_align_t - 1)) /
+          sizeof(*edge);
+      if (capacity == 0) {
+        capacity = iree_arena_block_pool_max_allocation_size(
+                       clone_graph->arena.block_pool) /
+                   sizeof(*edge);
+      }
+      const iree_host_size_t count = iree_min(remaining, capacity);
+      iree_hal_streaming_graph_edge_t* edges = NULL;
+      status = iree_arena_allocate(&clone_graph->arena, count * sizeof(*edges),
+                                   (void**)&edges);
+      if (iree_status_is_ok(status)) {
+        for (iree_host_size_t i = 0; i < count; ++i, edge = edge->next) {
+          edges[i].from = node_map[edge->from->node_index];
+          edges[i].to = node_map[edge->to->node_index];
+          edges[i].next =
+              i == 0 ? clone_graph->additional_edges : &edges[i - 1];
+        }
+        clone_graph->additional_edges = &edges[count - 1];
+        clone_graph->additional_edge_count += count;
+        remaining -= count;
+      }
+    }
   }
 
   for (iree_hal_streaming_graph_user_object_ref_t* source_ref =
@@ -2205,9 +2177,6 @@ static void iree_hal_streaming_graph_erase_node(
     }
     --graph->copy_helper_count;
   }
-  if (iree_hal_streaming_graph_remove_from_blocks(graph->root_blocks, node)) {
-    --graph->root_count;
-  }
   iree_hal_streaming_graph_node_deinitialize_attrs(node);
   node->graph = NULL;
   node->dependency_count = 0;
@@ -2215,8 +2184,7 @@ static void iree_hal_streaming_graph_erase_node(
 
 iree_status_t iree_hal_streaming_graph_destroy_node(
     iree_hal_streaming_graph_node_t* node) {
-  if (!node || !node->graph ||
-      !iree_hal_streaming_graph_node_is_active_in_graph(node->graph, node)) {
+  if (!node || !node->graph) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "node must belong to an active graph");
   }
