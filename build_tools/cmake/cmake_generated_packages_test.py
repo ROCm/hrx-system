@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import shutil
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -255,6 +256,12 @@ iree_generated_files(NAME copy GENERATOR copy_tool
             build_project(build, "fixture_logical_copy")
             self.assertEqual(output.stat().st_mtime_ns, timestamp)
             input_file.write_text("second")
+            # GNU Make compares timestamps at the filesystem's effective
+            # resolution. Keep the changed source unambiguously newer than the
+            # generated output instead of depending on test execution crossing
+            # a timestamp tick.
+            changed_time = output.stat().st_mtime_ns + 2_000_000_000
+            os.utime(input_file, ns=(changed_time, changed_time))
             build_project(build, "fixture_logical_copy")
             self.assertEqual(output.read_text(), "second")
             output.unlink()
@@ -340,7 +347,14 @@ iree_generated_files(NAME copy GENERATOR copy_tool
             check(7)
             # Source libraries precede native defaults regardless of whether
             # Ninja places the link inputs in a response file.
-            if os.environ["IREE_TEST_CMAKE_GENERATOR"].startswith("Ninja"):
+            # CMAKE_NINJA_FORCE_RESPONSE_FILE also moves archive members into a
+            # response file. Apple ar treats @file as a literal member path, so
+            # forcing that unsupported toolchain combination would fail before
+            # the final-link ordering exercised here.
+            if (
+                os.environ["IREE_TEST_CMAKE_GENERATOR"].startswith("Ninja")
+                and sys.platform != "darwin"
+            ):
                 configure_project(host, build, "-DCMAKE_NINJA_FORCE_RESPONSE_FILE=ON")
                 check(7)
                 configure_project(host, build, "-UCMAKE_NINJA_FORCE_RESPONSE_FILE")
