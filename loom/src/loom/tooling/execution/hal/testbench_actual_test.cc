@@ -182,6 +182,26 @@ static const loom_target_snapshot_t kIndex32Offset64TargetSnapshot =
 static const loom_target_snapshot_t kIndex64Offset32TargetSnapshot =
     AddressTargetSnapshot(64, 32);
 
+struct ProgressCapture {
+  // Captured phases in publication order.
+  loom_run_hal_testbench_progress_phase_t phases[4];
+  // Number of populated entries in |phases|.
+  iree_host_size_t count;
+  // Phase rejected with IREE_STATUS_ABORTED, or COUNT to accept every phase.
+  loom_run_hal_testbench_progress_phase_t rejected_phase;
+};
+
+static iree_status_t CaptureProgress(
+    void* user_data, loom_run_hal_testbench_progress_phase_t phase) {
+  auto* capture = static_cast<ProgressCapture*>(user_data);
+  if (phase == capture->rejected_phase) {
+    return iree_make_status(IREE_STATUS_ABORTED, "rejected test phase");
+  }
+  IREE_ASSERT_LT(capture->count, IREE_ARRAYSIZE(capture->phases));
+  capture->phases[capture->count++] = phase;
+  return iree_ok_status();
+}
+
 static iree_status_t InitializeFakeHalContext(
     loom_run_hal_testbench_context_t* context,
     iree_hal_queue_t* out_dispatch_queue) {
@@ -245,6 +265,39 @@ TEST_F(HalTestbenchActualTest, RequiresExplicitDevice) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       loom_run_hal_testbench_context_ensure_runtime(&context));
+
+  loom_run_hal_testbench_context_deinitialize(&context);
+}
+
+TEST_F(HalTestbenchActualTest, PublishesSynchronousExecutionProgress) {
+  loom_run_hal_testbench_context_t context = {};
+  loom_run_hal_testbench_context_initialize(
+      /*target_environment=*/nullptr, /*target_routes=*/nullptr,
+      /*target_route_count=*/0, iree_allocator_system(), &context);
+
+  IREE_ASSERT_OK(loom_run_hal_testbench_context_emit_progress(
+      &context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_STAGE));
+  ProgressCapture capture = {
+      .rejected_phase = LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_COUNT,
+  };
+  loom_run_hal_testbench_context_set_progress_sink(&context,
+                                                   {
+                                                       .fn = CaptureProgress,
+                                                       .user_data = &capture,
+                                                   });
+  IREE_ASSERT_OK(loom_run_hal_testbench_context_emit_progress(
+      &context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_STAGE));
+  IREE_ASSERT_OK(loom_run_hal_testbench_context_emit_progress(
+      &context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_DISPATCH));
+  ASSERT_EQ(capture.count, 2u);
+  EXPECT_EQ(capture.phases[0], LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_STAGE);
+  EXPECT_EQ(capture.phases[1], LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_DISPATCH);
+
+  capture.rejected_phase = LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_READBACK;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_ABORTED,
+      loom_run_hal_testbench_context_emit_progress(
+          &context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_READBACK));
 
   loom_run_hal_testbench_context_deinitialize(&context);
 }

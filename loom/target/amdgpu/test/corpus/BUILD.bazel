@@ -170,6 +170,7 @@ loom_corpus_test(
             "numeric/vector/packed/dot.loom:@packed_mixed_nibble_dot_values": "TARGET/003",
         },
     },
+    args = ["--execution-progress"],
     catalog = LOOM_CORPUS,
     execution_profiles = [
         AMD_GPU_HARDWARE_PROFILE,
