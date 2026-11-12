@@ -353,11 +353,9 @@ typedef struct hrx_graph_s {
   iree_arena_allocator_t arena;
   iree_allocator_t arena_allocator;
 
-  // HAL resources referenced by graph nodes. Released before their pools.
+  // Explicit HAL buffers and executables referenced by graph nodes. Allocation
+  // pools remain caller-owned.
   iree_hal_resource_set_t* node_resource_set;
-
-  // Allocation pools borrowed by buffers in |node_resource_set|.
-  iree_hal_resource_set_t* allocation_pool_set;
 
   hrx_graph_node_block_t* node_blocks;
   hrx_graph_node_block_t* current_node_block;

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "hrx_internal.h"
+#include "hrx_runtime_cxx.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -74,7 +75,8 @@ TEST_F(GraphBufferTest, RecordsAndInstantiatesHandleBasedCopyAndFill) {
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_instantiate(
       graph, hrx_stream_get_queue(stream_), 0, &executable)));
 
-  // The executable retains the graph and its captured buffer allocations.
+  // The executable retains the graph and its explicit buffer handles. The
+  // device owns the convenience allocation sources through fixture teardown.
   hrx_buffer_release(destination_);
   destination_ = nullptr;
   hrx_buffer_release(source_);
@@ -84,6 +86,77 @@ TEST_F(GraphBufferTest, RecordsAndInstantiatesHandleBasedCopyAndFill) {
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
   hrx_graph_exec_release(executable);
   hrx_graph_release(graph);
+}
+
+TEST_F(GraphBufferTest, RetainedGraphDoesNotExtendExplicitAllocationEpoch) {
+  hrx::runtime::mem_pool_ptr pool;
+  const hrx_fixed_block_pool_options_t options = {.block_size = 64};
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_fixed_block_pool_create_from_buffer(
+      source_, 0, 64, &options, pool.for_output())));
+  hrx::runtime::semaphore_ptr timeline;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_semaphore_create(device_, 0, timeline.for_output())));
+  hrx_semaphore_t semaphore = timeline;
+  uint64_t value = 1;
+  const hrx_semaphore_list_t point = {&semaphore, &value, 1};
+  const hrx_pool_reservation_request_t request = {64, 16};
+  hrx::runtime::buffer_ptr buffer;
+  hrx_queue_t queue = hrx_stream_get_queue(stream_);
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_queue_alloca(
+      queue, nullptr, &point, pool, 1, &request, buffer.for_output())));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_semaphore_wait(timeline, value, UINT64_MAX)));
+
+  hrx::runtime::hrx_ptr<hrx_graph_t, hrx_graph_retain, hrx_graph_release> graph;
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_graph_create(device_, 0, graph.for_output())));
+  const hrx_graph_fill_buffer_node_attrs_t fill = {
+      .dst = {buffer, 0, 64},
+      .pattern = 0xA5u,
+      .pattern_size = 1,
+  };
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_add_fill_buffer_node(graph, nullptr, 0, &fill, nullptr)));
+  hrx::runtime::hrx_ptr<hrx_graph_exec_t, hrx_graph_exec_retain,
+                        hrx_graph_exec_release>
+      executable;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_instantiate(graph, queue, 0, executable.for_output())));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_graph_exec_launch(executable, stream_)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+
+  uint8_t contents[64] = {};
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_synchronous_d2h(queue, buffer, 0, contents, sizeof(contents))));
+  for (uint8_t byte : contents) {
+    EXPECT_EQ(byte, 0xA5u);
+  }
+  hrx_buffer_t root = buffer;
+  value = 2;
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_queue_dealloca(queue, nullptr, &point, 1, &root)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_semaphore_wait(timeline, value, UINT64_MAX)));
+  buffer.reset();
+
+  // The graph still holds the old native handle, but its allocation epoch has
+  // ended. The only block is reusable without destroying that graph.
+  hrx_pool_stats_t stats;
+  hrx_mem_pool_query_stats(pool, &stats);
+  EXPECT_EQ(stats.reservation_count, 0u);
+  value = 3;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_queue_alloca(
+      queue, nullptr, &point, pool, 1, &request, buffer.for_output())));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_semaphore_wait(timeline, value, UINT64_MAX)));
+  executable.reset();
+  graph.reset();
+  hrx_mem_pool_query_stats(pool, &stats);
+  EXPECT_EQ(stats.reservation_count, 1u);
+  buffer.reset();
+  hrx_mem_pool_query_stats(pool, &stats);
+  EXPECT_EQ(stats.reservation_count, 0u);
 }
 
 TEST_F(GraphBufferTest, DependentFillThenCopyProducesExpectedContents) {

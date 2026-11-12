@@ -20,6 +20,7 @@
 #include "common/graph.h"
 #include "common/host_callback.h"
 #include "common/hrx_bridge.h"
+#include "common/mem_pool.h"
 #include "common/stream.h"
 #include "common/stream_queue.h"
 #include "iree/testing/gtest.h"
@@ -351,6 +352,37 @@ class CpuStreamingMemoryTest : public ::testing::Test {
   std::array<uint8_t, 16> registered_storage_ = {};
   iree_hal_streaming_deviceptr_t device_pointer_ = 0;
 };
+
+TEST_F(CpuStreamingMemoryTest, FrontendAllocationOwnsPublicPoolLifetime) {
+  for (size_t limit : {size_t{0}, size_t{256}}) {
+    SCOPED_TRACE(limit);
+    const iree_hal_streaming_mem_pool_props_t properties = {.max_size = limit};
+    iree_hal_streaming_mem_pool_t* raw_pool = nullptr;
+    IREE_ASSERT_OK(iree_hal_streaming_mem_pool_create(device_entry_.hrx_device,
+                                                      &properties, &raw_pool));
+    std::unique_ptr<iree_hal_streaming_mem_pool_t,
+                    decltype(&iree_hal_streaming_mem_pool_release)>
+        pool(raw_pool, iree_hal_streaming_mem_pool_release);
+    IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device_from_pool(
+        context_, pool.get(), 256, IREE_HAL_STREAMING_MEMORY_FLAG_NONE,
+        &buffer_));
+    pool.reset();
+
+    // HIP may destroy a public pool while its allocations remain live. The
+    // frontend wrapper owns the pool; the underlying HRX buffer borrows it.
+    std::array<uint8_t, 256> input;
+    input.fill(0xA5);
+    std::array<uint8_t, 256> output = {};
+    hrx_queue_t queue = hrx_device_get_queue(device_entry_.hrx_device, 0, 0);
+    IREE_ASSERT_OK(HRX_CALL(hrx_synchronous_h2d(
+        queue, input.data(), buffer_->hrx_buf, 0, input.size())));
+    IREE_ASSERT_OK(HRX_CALL(hrx_synchronous_d2h(queue, buffer_->hrx_buf, 0,
+                                                output.data(), output.size())));
+    EXPECT_EQ(output, input);
+    iree_hal_streaming_memory_release_wrapped_buffer(buffer_);
+    buffer_ = nullptr;
+  }
+}
 
 TEST_F(CpuStreamingMemoryTest, HostRegistrationAddressOutlivesRegistryEntry) {
   uint8_t storage[64] = {};

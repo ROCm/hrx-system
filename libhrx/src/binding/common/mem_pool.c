@@ -328,8 +328,7 @@ static void iree_hal_streaming_mem_pool_release_buffer(void* user_data,
 
 static iree_status_t iree_hal_streaming_mem_pool_allocate_hal_buffer(
     iree_hal_streaming_mem_pool_t* pool, iree_device_size_t size,
-    iree_hal_pool_t** out_hal_pool, iree_hal_buffer_t** out_buffer) {
-  *out_hal_pool = NULL;
+    iree_hal_buffer_t** out_buffer) {
   *out_buffer = NULL;
   if (size == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -354,7 +353,8 @@ static iree_status_t iree_hal_streaming_mem_pool_allocate_hal_buffer(
       pool->allocation_budget_current += size;
     }
     hal_pool = pool->hal_pool;
-    iree_hal_pool_retain(hal_pool);
+    // Prevent trim from detaching the child while allocation runs unlocked.
+    // A successful allocation then keeps its reservation live until release.
     ++pool->inflight_allocation_count;
   }
   iree_slim_mutex_unlock(&pool->mutex);
@@ -385,11 +385,6 @@ static iree_status_t iree_hal_streaming_mem_pool_allocate_hal_buffer(
   }
   iree_slim_mutex_unlock(&pool->mutex);
 
-  if (iree_status_is_ok(status)) {
-    *out_hal_pool = hal_pool;
-  } else {
-    iree_hal_pool_release(hal_pool);
-  }
   return status;
 }
 
@@ -408,10 +403,9 @@ iree_status_t iree_hal_streaming_mem_pool_allocate_buffer(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "pool is NULL");
   }
 
-  iree_hal_pool_t* hal_pool = NULL;
   iree_hal_buffer_t* hal_buffer = NULL;
   iree_status_t status = iree_hal_streaming_mem_pool_allocate_hal_buffer(
-      pool, (iree_device_size_t)size, &hal_pool, &hal_buffer);
+      pool, (iree_device_size_t)size, &hal_buffer);
   if (!iree_status_is_ok(status)) {
     IREE_TRACE_ZONE_END(z0);
     return status;
@@ -422,7 +416,6 @@ iree_status_t iree_hal_streaming_mem_pool_allocate_buffer(
                                  (void**)&new_buffer);
   if (!iree_status_is_ok(status)) {
     iree_hal_buffer_release(hal_buffer);
-    iree_hal_pool_release(hal_pool);
     if (pool->props.max_size != 0) {
       iree_hal_streaming_mem_pool_release_allocation_budget(pool, size);
     }
@@ -433,7 +426,6 @@ iree_status_t iree_hal_streaming_mem_pool_allocate_buffer(
   memset(new_buffer, 0, sizeof(*new_buffer));
   iree_atomic_ref_count_init(&new_buffer->ref_count);
   new_buffer->hal_buffer = hal_buffer;
-  new_buffer->hal_pool = hal_pool;
   new_buffer->group = pool->device->group;
   hrx_device_group_retain(new_buffer->group);
   new_buffer->mem_type =

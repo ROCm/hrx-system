@@ -154,8 +154,9 @@ void iree_hal_streaming_mem_pool_record_logical_free(
     iree_hal_streaming_mem_pool_t* pool, size_t size);
 
 // Allocates a buffer with at least 256-byte alignment and the device access
-// permissions captured by |pool|. The returned buffer owns the allocation and
-// remains valid independently of the public |pool| handle.
+// permissions captured by |pool|. The caller keeps |pool| alive until the
+// returned buffer is released. Frontend allocation wrappers own that reference
+// independently of the application's public pool handle.
 iree_status_t iree_hal_streaming_mem_pool_allocate_buffer(
     iree_hal_streaming_mem_pool_t* pool, size_t size, hrx_buffer_t* out_buffer);
 

@@ -123,6 +123,8 @@ HRX_API hrx_status_t hrx_device_query_queue_family_memory_scope(
     hrx_device_t device, uint32_t family_ordinal, hrx_memory_site_t site,
     hrx_memory_scope_t* out_scope);
 
+// Retains the buffer handle, not its allocation pool or an explicitly ended
+// allocation epoch. Explicit pools must outlive their buffers and all uses.
 HRX_API void hrx_buffer_retain(hrx_buffer_t buffer);
 HRX_API void hrx_buffer_release(hrx_buffer_t buffer);
 
@@ -151,6 +153,8 @@ HRX_API hrx_status_t hrx_buffer_get_size(hrx_buffer_t buffer, size_t* size);
 // Physical allocation and suballocation are separate policies. A source pool
 // qualifies access and placement once; caches retain unused whole ranges;
 // suballocators return unused ranges to their backing pool immediately.
+// Buffers borrow explicit pools. The caller keeps each pool alive until all
+// allocations, derived views, graph references, and pending uses have retired.
 
 typedef uint64_t hrx_buffer_interfaces_t;
 #define HRX_BUFFER_INTERFACE_BIT(type) (UINT64_C(1) << (type))
@@ -427,8 +431,9 @@ HRX_API hrx_status_t hrx_fixed_block_pool_create_from_buffer(
     const hrx_fixed_block_pool_options_t* options, hrx_mem_pool_t* out_pool);
 
 HRX_API void hrx_mem_pool_retain(hrx_mem_pool_t pool);
-// Final release requires retired uses. It releases only owned idle storage;
-// it does not wait for device execution or consume outstanding buffer handles.
+// Final release requires all allocations and buffer handles returned and all
+// uses retired. It does not wait for device execution or consume outstanding
+// buffer handles. Retaining a buffer or graph does not retain its source pool.
 HRX_API void hrx_mem_pool_release(hrx_mem_pool_t pool);
 // Borrowed group; all child pools and allocations retain this same owner.
 HRX_API hrx_device_group_t hrx_mem_pool_get_device_group(hrx_mem_pool_t pool);
