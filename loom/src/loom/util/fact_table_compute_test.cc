@@ -1309,12 +1309,27 @@ TEST_P(FactEntryInputTest, IndependentCarriersHaveDefinedInputFacts) {
   }
 }
 
-TEST_F(FactTableComputeTest, SingleLaneTargetMakesScalarArgumentsUniform) {
+TEST_F(FactTableComputeTest, EntryParticipationPreservesStrongerInputScopes) {
   std::vector<loom_type_t> arg_types;
   for (loom_scalar_type_t scalar_type = LOOM_SCALAR_TYPE_NONE + 1;
        scalar_type < LOOM_SCALAR_TYPE_COUNT_; ++scalar_type) {
     arg_types.push_back(loom_type_scalar(scalar_type));
   }
+  for (loom_scalar_type_t element_type :
+       {LOOM_SCALAR_TYPE_I1, LOOM_SCALAR_TYPE_I8, LOOM_SCALAR_TYPE_I32,
+        LOOM_SCALAR_TYPE_F16, LOOM_SCALAR_TYPE_F32, LOOM_SCALAR_TYPE_F64}) {
+    for (int64_t element_count : {1, 3, 8}) {
+      arg_types.push_back(
+          loom_type_shaped_1d(LOOM_TYPE_VECTOR, element_type,
+                              loom_dim_pack_static(element_count), 0));
+    }
+  }
+  arg_types.push_back(loom_type_shaped_1d(
+      LOOM_TYPE_TENSOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(4), 0));
+  arg_types.push_back(loom_type_pool());
+  arg_types.push_back(loom_type_buffer());
+  arg_types.push_back(loom_type_shaped_1d(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_I32,
+                                          loom_dim_pack_static(4), 0));
   loom_string_id_t name = LOOM_STRING_ID_INVALID;
   IREE_ASSERT_OK(
       loom_builder_intern_string(&builder_, IREE_SV("uniform"), &name));
@@ -1333,31 +1348,52 @@ TEST_F(FactTableComputeTest, SingleLaneTargetMakesScalarArgumentsUniform) {
   const loom_value_id_t index_argument = loom_region_entry_arg_id(body, 0);
   loom_value_fact_table_t inputs;
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&inputs, &arena_, 0));
-  IREE_ASSERT_OK(loom_value_fact_table_define(
-      &inputs, index_argument, loom_value_facts_make(-8, 64, 4)));
-
-  for (uint32_t subgroup_size : {0u, 1u, 32u}) {
-    SCOPED_TRACE(subgroup_size);
-    loom_value_fact_table_clear_scope(&table_);
-    IREE_ASSERT_OK(loom_value_fact_table_seed_values(
-        &table_, {&inputs, &index_argument, 1}, module_));
-    loom_target_facts_t target = {};
-    target.storage.snapshot.index_bitwidth = 32;
-    target.storage.snapshot.subgroup_size = subgroup_size;
-    table_.context.target_facts = &target;
-    IREE_ASSERT_OK(loom_value_fact_table_compute(&table_, module_, function));
-    const loom_value_facts_t index_facts =
-        loom_value_fact_table_lookup(&table_, index_argument);
-    EXPECT_EQ(index_facts.range_lo, -8);
-    EXPECT_EQ(index_facts.range_hi, 64);
-    EXPECT_EQ(index_facts.known_divisor, 4);
-    const loom_block_t* entry_block = loom_region_const_entry_block(body);
+  const loom_block_t* entry_block = loom_region_const_entry_block(body);
+  for (loom_value_fact_uniform_scope_t input_scope :
+       {LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE,
+        LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP,
+        LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP,
+        LOOM_VALUE_FACT_UNIFORM_SCOPE_CLUSTER}) {
+    SCOPED_TRACE(input_scope);
+    loom_value_fact_table_clear_scope(&inputs);
     for (uint16_t i = 0; i < entry_block->arg_count; ++i) {
-      SCOPED_TRACE(i);
-      EXPECT_EQ(
-          loom_value_facts_is_subgroup_uniform(loom_value_fact_table_lookup(
-              &table_, loom_region_entry_arg_id(body, i))),
-          subgroup_size == 1);
+      loom_value_facts_t facts = i == 0 ? loom_value_facts_make(-8, 64, 4)
+                                        : loom_value_facts_unknown();
+      loom_value_facts_mark_uniform_at_scope(&facts, input_scope);
+      IREE_ASSERT_OK(loom_value_fact_table_define(
+          &inputs, loom_block_arg_id(entry_block, i), facts));
+    }
+    for (uint32_t subgroup_size : {0u, 1u, 32u, 64u}) {
+      SCOPED_TRACE(subgroup_size);
+      loom_value_fact_table_clear_scope(&table_);
+      IREE_ASSERT_OK(loom_value_fact_table_seed_values(
+          &table_, {&inputs, entry_block->arg_ids, entry_block->arg_count},
+          module_));
+      loom_target_facts_t target = {};
+      target.storage.snapshot.index_bitwidth = 32;
+      target.storage.snapshot.subgroup_size = subgroup_size;
+      table_.context.target_facts = &target;
+      for (unsigned refresh = 0; refresh < 2; ++refresh) {
+        SCOPED_TRACE(refresh);
+        IREE_ASSERT_OK(
+            loom_value_fact_table_compute(&table_, module_, function));
+        const loom_value_facts_t index_facts =
+            loom_value_fact_table_lookup(&table_, index_argument);
+        EXPECT_EQ(index_facts.range_lo, -8);
+        EXPECT_EQ(index_facts.range_hi, 64);
+        EXPECT_EQ(index_facts.known_divisor, 4);
+        const auto expected_scope =
+            subgroup_size == 1 &&
+                    input_scope == LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE
+                ? LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP
+                : input_scope;
+        for (uint16_t i = 0; i < entry_block->arg_count; ++i) {
+          SCOPED_TRACE(i);
+          EXPECT_EQ(loom_value_facts_uniform_scope(loom_value_fact_table_lookup(
+                        &table_, loom_block_arg_id(entry_block, i))),
+                    expected_scope);
+        }
+      }
     }
   }
 }
