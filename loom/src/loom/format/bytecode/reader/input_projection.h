@@ -17,29 +17,6 @@
 extern "C" {
 #endif
 
-// One canonical source shape. Composite and nominal roots have no shape row;
-// their ordinary exact type identity remains the verifier's responsibility.
-typedef struct loom_bytecode_input_shape_t {
-  // One of the group, tensor, tile, vector, or view native type kinds.
-  uint8_t kind;
-  // Scalar element type, or NONE for a group.
-  uint8_t element_type;
-  // Number of initialized trailing dimensions.
-  uint8_t rank;
-  // Explicit view alignment override, or zero for natural alignment.
-  uint8_t access_alignment;
-  // Bit i selects a one-based signature value number in dimensions[i].
-  uint16_t dynamic_axes;
-  // None, static encoding identity, or signature SSA encoding attachment.
-  uint8_t attachment;
-  // Zeroed padding participating in canonical row comparison.
-  uint8_t reserved;
-  // Static encoding identity or zero-based signature value number.
-  uint64_t encoding_ordinal;
-  // Literal extents or source value numbers; dynamic zero is unbound.
-  uint64_t dimensions[];
-} loom_bytecode_input_shape_t;
-
 // Scratch-owned shape projection reused throughout one module's admission.
 // No IR, persistent type graph, or per-symbol storage is constructed here.
 typedef struct loom_bytecode_input_projection_t {
@@ -99,7 +76,7 @@ iree_status_t loom_bytecode_input_projection_read(
     uint32_t* out_shape_id);
 
 // Returns a previously published nonzero shape ID without allocation.
-const loom_bytecode_input_shape_t* loom_bytecode_input_projection_shape(
+const loom_input_shape_t* loom_bytecode_input_projection_shape(
     const loom_bytecode_input_projection_t* projection, uint32_t shape_id);
 
 // Records one input root after decoding its scoped extension. Non-shaped

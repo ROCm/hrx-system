@@ -111,6 +111,7 @@ loom_cc_library(
         ":module_summary",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ir:input_contract",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],

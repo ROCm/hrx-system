@@ -70,6 +70,7 @@ loom_cc_library(
         ":type_validator",
         "//loom/src/loom/format/bytecode:index",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ir:input_contract",
         "//loom/src/loom/util:ordinal_map",
         "//loom/src/loom/util:segmented_storage",
         "//runtime/src/iree/base",

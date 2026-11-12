@@ -43,10 +43,8 @@ void loom_bytecode_input_projection_initialize(
   };
   loom_ordinal_map_initialize(arena, &out_projection->static_types);
   loom_segmented_storage_initialize(
-      LOOM_BYTECODE_INPUT_SEGMENT_CAPACITY *
-          sizeof(const loom_bytecode_input_shape_t*),
-      iree_alignof(const loom_bytecode_input_shape_t*),
-      &out_projection->shapes);
+      LOOM_BYTECODE_INPUT_SEGMENT_CAPACITY * sizeof(const loom_input_shape_t*),
+      iree_alignof(const loom_input_shape_t*), &out_projection->shapes);
   loom_segmented_storage_initialize(
       LOOM_BYTECODE_INPUT_SEGMENT_CAPACITY * sizeof(uint32_t),
       iree_alignof(uint32_t), &out_projection->bindings);
@@ -70,7 +68,7 @@ void loom_bytecode_input_projection_begin_signature(
   projection->argument_count = 0;
 }
 
-const loom_bytecode_input_shape_t* loom_bytecode_input_projection_shape(
+const loom_input_shape_t* loom_bytecode_input_projection_shape(
     const loom_bytecode_input_projection_t* projection, uint32_t shape_id) {
   const uint32_t index = shape_id - 1;
   const void* const* segment = loom_segmented_storage_const_segment(
@@ -110,7 +108,7 @@ typedef struct loom_bytecode_input_shape_probe_t {
   // Canonical rows being probed.
   const loom_bytecode_input_projection_t* projection;
   // Fully initialized source key on the caller's stack.
-  const loom_bytecode_input_shape_t* shape;
+  const loom_input_shape_t* shape;
   // Exactly rank dimensions in the source decoder stack record.
   const uint64_t* dimensions;
 } loom_bytecode_input_shape_probe_t;
@@ -118,7 +116,7 @@ typedef struct loom_bytecode_input_shape_probe_t {
 static bool loom_bytecode_input_shape_equal(const void* opaque,
                                             uint32_t index) {
   const loom_bytecode_input_shape_probe_t* probe = opaque;
-  const loom_bytecode_input_shape_t* existing =
+  const loom_input_shape_t* existing =
       loom_bytecode_input_projection_shape(probe->projection, index + 1);
   return existing->rank == probe->shape->rank &&
          memcmp(existing, probe->shape, sizeof(*existing)) == 0 &&
@@ -129,7 +127,7 @@ static bool loom_bytecode_input_shape_equal(const void* opaque,
 static iree_status_t loom_bytecode_input_projection_intern(
     loom_bytecode_input_projection_t* projection, loom_type_kind_t kind,
     const loom_bytecode_scoped_shape_t* source, uint32_t* out_shape_id) {
-  const loom_bytecode_input_shape_t header = {
+  const loom_input_shape_t header = {
       .kind = (uint8_t)kind,
       .element_type = source->element_type,
       .rank = source->rank,
@@ -140,10 +138,13 @@ static iree_status_t loom_bytecode_input_projection_intern(
               ? 0
               : source->access_alignment,
       .dynamic_axes = source->dynamic_axes,
-      .attachment = source->attachment,
+      .attachment = source->attachment == LOOM_BYTECODE_ENCODING_ATTACHMENT_SSA
+                        ? LOOM_INPUT_ENCODING_ARGUMENT
+                        : (source->encoding_ordinal ? LOOM_INPUT_ENCODING_STATIC
+                                                    : LOOM_INPUT_ENCODING_NONE),
       .encoding_ordinal = source->encoding_ordinal,
   };
-  const loom_bytecode_input_shape_t* key = &header;
+  const loom_input_shape_t* key = &header;
   const iree_host_size_t length =
       sizeof(header) + source->rank * sizeof(*source->dimensions);
   uint32_t hash = loom_structural_hash_initialize();
@@ -171,7 +172,7 @@ static iree_status_t loom_bytecode_input_projection_intern(
                             "source shape identity space exhausted");
   }
   const uint32_t index = (uint32_t)projection->shape_index.count;
-  loom_bytecode_input_shape_t* shape = NULL;
+  loom_input_shape_t* shape = NULL;
   IREE_RETURN_IF_ERROR(loom_bytecode_input_projection_allocate_row(
       projection->arena, &projection->shape_index, &projection->shapes, hash,
       &probe, length, (void**)&shape));
@@ -464,7 +465,7 @@ iree_status_t loom_bytecode_input_projection_end_signature(
 // before the same producer fills it; no provisional payload copies survive.
 static uint32_t loom_bytecode_input_projection_requirements(
     const loom_bytecode_input_projection_t* projection, uint32_t signature_id,
-    uint32_t family_id, loom_bytecode_input_requirement_t* output) {
+    uint32_t family_id, loom_input_requirement_t* output) {
   if (!signature_id || signature_id == family_id) {
     return 0;
   }
@@ -475,61 +476,21 @@ static uint32_t loom_bytecode_input_projection_requirements(
   uint32_t count = 0, family_position = 0;
   for (uint32_t i = 0; i < signature->count; ++i) {
     const loom_bytecode_input_argument_t* argument = &signature->values[i];
-    const loom_bytecode_input_shape_t* shape =
+    const loom_input_shape_t* shape =
         loom_bytecode_input_projection_shape(projection, argument->shape_id);
     while (family && family_position < family->count &&
            family->values[family_position].ordinal < argument->ordinal) {
       ++family_position;
     }
-    const loom_bytecode_input_shape_t* inherited = NULL;
+    const loom_input_shape_t* inherited = NULL;
     if (family && family_position < family->count &&
         family->values[family_position].ordinal == argument->ordinal) {
       inherited = loom_bytecode_input_projection_shape(
           projection, family->values[family_position].shape_id);
-      if (shape == inherited) {
-        continue;
-      }
-      if (shape->kind != inherited->kind ||
-          shape->element_type != inherited->element_type ||
-          shape->rank != inherited->rank ||
-          shape->access_alignment != inherited->access_alignment) {
-        inherited = NULL;
-      }
     }
-    for (uint8_t axis = 0; axis < shape->rank; ++axis) {
-      const bool dynamic = (shape->dynamic_axes & (1u << axis)) != 0;
-      const uint64_t expected = shape->dimensions[axis];
-      if ((dynamic && !expected) ||
-          (inherited && expected == inherited->dimensions[axis] &&
-           ((shape->dynamic_axes ^ inherited->dynamic_axes) & (1u << axis)) ==
-               0)) {
-        continue;
-      }
-      if (output) {
-        output[count] = (loom_bytecode_input_requirement_t){
-            .argument = (uint16_t)argument->ordinal,
-            .axis = axis,
-            .expected_is_argument = dynamic,
-            .expected = dynamic ? expected - 1 : expected,
-        };
-      }
-      ++count;
-    }
-    if (shape->kind == LOOM_TYPE_GROUP || shape->kind == LOOM_TYPE_VECTOR ||
-        (inherited && shape->attachment == inherited->attachment &&
-         shape->encoding_ordinal == inherited->encoding_ordinal)) {
-      continue;
-    }
-    if (output) {
-      output[count] = (loom_bytecode_input_requirement_t){
-          .argument = (uint16_t)argument->ordinal,
-          .axis = UINT8_MAX,
-          .expected_is_argument =
-              shape->attachment == LOOM_BYTECODE_ENCODING_ATTACHMENT_SSA,
-          .expected = shape->encoding_ordinal,
-      };
-    }
-    ++count;
+    count += loom_input_shape_requirements(shape, inherited,
+                                           (uint16_t)argument->ordinal,
+                                           output ? output + count : NULL);
   }
   return count;
 }
@@ -569,10 +530,10 @@ iree_status_t loom_bytecode_input_projection_finish_module(
           sizeof(loom_bytecode_input_contract_key_t),
       iree_alignof(loom_bytecode_input_contract_key_t), &keys);
   loom_segmented_storage_t contracts;
-  loom_segmented_storage_initialize(
-      LOOM_BYTECODE_INPUT_SEGMENT_CAPACITY *
-          sizeof(const loom_bytecode_input_contract_t*),
-      iree_alignof(const loom_bytecode_input_contract_t*), &contracts);
+  loom_segmented_storage_initialize(LOOM_BYTECODE_INPUT_SEGMENT_CAPACITY *
+                                        sizeof(const loom_input_contract_t*),
+                                    iree_alignof(const loom_input_contract_t*),
+                                    &contracts);
   uint32_t contract_count = 0;
   // Providers consume source family signatures before family slots become
   // retained contract ordinals. A family reference must name a declaration.
@@ -625,7 +586,7 @@ iree_status_t loom_bytecode_input_projection_finish_module(
         const uint32_t count = loom_bytecode_input_projection_requirements(
             projection, signature_id, family_id, NULL);
         if (count) {
-          loom_bytecode_input_contract_t* contract = NULL;
+          loom_input_contract_t* contract = NULL;
           IREE_RETURN_IF_ERROR(iree_arena_allocate(
               retained_arena,
               sizeof(*contract) + count * sizeof(*contract->values),
@@ -636,7 +597,7 @@ iree_status_t loom_bytecode_input_projection_finish_module(
               projection, signature_id, family_id, contract->values);
           const uint32_t segment_index =
               contract_count / LOOM_BYTECODE_INPUT_SEGMENT_CAPACITY;
-          const loom_bytecode_input_contract_t** segment = NULL;
+          const loom_input_contract_t** segment = NULL;
           if (segment_index == contracts.segment_count) {
             IREE_RETURN_IF_ERROR(loom_segmented_storage_append(
                 &contracts, projection->arena, (void**)&segment));
@@ -687,7 +648,7 @@ iree_status_t loom_bytecode_input_projection_finish_module(
         retained_arena, contract_count, sizeof(*metadata->input_contracts),
         (void**)&metadata->input_contracts));
     for (uint32_t i = 0; i < contract_count; ++i) {
-      const loom_bytecode_input_contract_t* const* segment =
+      const loom_input_contract_t* const* segment =
           loom_segmented_storage_const_segment(
               &contracts, i / LOOM_BYTECODE_INPUT_SEGMENT_CAPACITY);
       metadata->input_contracts[i] =
