@@ -260,6 +260,49 @@ class Environment {
     Check(hrx_buffer_unmap(output_));
   }
   bool has_executable() const { return !!executable_; }
+
+  template <bool AlternateProducers>
+  void RecordEvents(benchmark::State& state) {
+    using EventPtr =
+        hrx::runtime::hrx_ptr<hrx_event_t, hrx_event_retain, hrx_event_release>;
+    constexpr size_t kStreamCount = AlternateProducers ? 2 : 1;
+    std::array<hrx::runtime::stream_ptr, kStreamCount> streams;
+    std::array<hrx_timeline_point_t, kStreamCount> points;
+    EventPtr event;
+    Check(hrx_event_create(device_, HRX_EVENT_FLAG_DISABLE_TIMING,
+                           event.for_output()));
+    // Record actual accepted producer work before measuring snapshots. Setup
+    // and final completion are outside the timed region; the measured path
+    // only names an existing point, with no pending commands to flush.
+    expected_ = 0xAABBCCDD;
+    for (size_t i = 0; i < kStreamCount; ++i) {
+      Check(hrx_stream_create(queue_, 0, streams[i].for_output()));
+      Check(hrx_stream_fill_buffer(streams[i], output_, 0, sizeof(expected_),
+                                   &expected_, sizeof(expected_)));
+      Check(hrx_stream_synchronize(streams[i]));
+      Check(hrx_stream_get_timeline_position(streams[i], &points[i]));
+    }
+    Check(hrx_event_record(event, streams[0]));
+    size_t producer = 0;
+    for (auto _ : state) {
+      Check(hrx_event_record(event, streams[producer]));
+      benchmark::DoNotOptimize(event.get());
+      if constexpr (AlternateProducers) {
+        producer ^= 1;
+      }
+    }
+    for (size_t i = 0; i < kStreamCount; ++i) {
+      hrx_timeline_point_t after;
+      Check(hrx_stream_get_timeline_position(streams[i], &after));
+      Require(after.semaphore == points[i].semaphore &&
+                  after.value == points[i].value,
+              "untimed recording added a queue operation");
+    }
+    Verify();
+    Describe(state);
+    state.SetItemsProcessed(state.iterations());
+  }
+
   void Describe(benchmark::State& state) {
     state.SetLabel(label_);
     hrx_pool_stats_t stats;
@@ -455,6 +498,11 @@ void Transition(benchmark::State& state) {
   state.SetItemsProcessed(state.iterations());
 }
 
+template <bool AlternateProducers>
+void EventRecord(benchmark::State& state) {
+  GetEnvironment().RecordEvents<AlternateProducers>(state);
+}
+
 #define QUEUE_BENCHMARK(native, operation, complete, name)          \
   BENCHMARK_TEMPLATE(Queue, native, Operation::operation, complete) \
       ->Name(name)                                                  \
@@ -500,5 +548,13 @@ BENCHMARK_TEMPLATE(Atomics, true)->Name("HAL/AtomicQuery");
 BENCHMARK_TEMPLATE(Atomics, false)->Name("HRX/AtomicQuery");
 BENCHMARK_TEMPLATE(Transition, true)->Name("HAL/TransitionQuery");
 BENCHMARK_TEMPLATE(Transition, false)->Name("HRX/TransitionQuery");
+BENCHMARK_TEMPLATE(EventRecord, false)
+    ->Name("HRX/EventRecord/SameStream")
+    ->UseRealTime()
+    ->Unit(benchmark::kNanosecond);
+BENCHMARK_TEMPLATE(EventRecord, true)
+    ->Name("HRX/EventRecord/AlternateStreams")
+    ->UseRealTime()
+    ->Unit(benchmark::kNanosecond);
 
 }  // namespace
