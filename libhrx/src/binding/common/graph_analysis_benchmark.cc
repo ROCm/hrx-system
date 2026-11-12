@@ -82,7 +82,7 @@ struct BindingGraph {
   using Node = iree_hal_streaming_graph_node_t;
   using Block = iree_hal_streaming_node_block_t;
   using Edge = iree_hal_streaming_graph_edge_t;
-  using Schedule = iree_hal_streaming_graph_schedule_t;
+  using Schedule = hrx_graph_schedule_t;
   static constexpr auto kNodeType = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMSET;
   static constexpr auto kHostType =
       IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL;
@@ -186,9 +186,12 @@ void GraphAnalysis(benchmark::State& state) {
   // Validate dependency ordering before timing and warm reusable arena blocks.
   typename Graph::Schedule schedule;
   IREE_CHECK_OK(input.Analyze(&arena, &schedule));
+  std::vector<uint32_t> ranks(count);
+  for (uint32_t i = 0; i < count; ++i) {
+    ranks[schedule.order[i]] = i;
+  }
   for (const auto& edge : edges) {
-    if (schedule.node_index_map[edge.first] >=
-        schedule.node_index_map[edge.second]) {
+    if (ranks[edge.first] >= ranks[edge.second]) {
       std::fputs("graph analysis violated a dependency\n", stderr);
       std::abort();
     }
@@ -200,7 +203,7 @@ void GraphAnalysis(benchmark::State& state) {
 
   for (auto _ : state) {
     IREE_CHECK_OK(input.Analyze(&arena, &schedule));
-    benchmark::DoNotOptimize(schedule.sorted_nodes);
+    benchmark::DoNotOptimize(schedule.order);
     benchmark::DoNotOptimize(schedule.partitions);
     iree_arena_reset(&arena);
   }

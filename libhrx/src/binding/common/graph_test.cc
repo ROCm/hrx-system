@@ -98,19 +98,22 @@ TEST(GraphTest, AddedDependenciesConstrainDetectedWorkstreams) {
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool, &arena);
-  iree_hal_streaming_graph_schedule_t schedule = {};
+  hrx_graph_schedule_t schedule = {};
   IREE_ASSERT_OK(iree_hal_streaming_graph_schedule_nodes(
       node_block.get(), kNodeCount, /*disabled_nodes=*/nullptr,
       /*disabled_node_count=*/0, edges.data(), &arena, &schedule));
 
   ASSERT_EQ(schedule.partition_count, 1u);
   ASSERT_EQ(schedule.block_count, 1u);
-  EXPECT_EQ(schedule.partitions[0].type,
-            IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_RECORDABLE);
+  EXPECT_EQ(
+      schedule.flags[schedule.order[0]] & HRX_GRAPH_ANALYSIS_NODE_KIND_MASK,
+      HRX_GRAPH_ANALYSIS_NODE_RECORDABLE);
   EXPECT_EQ(schedule.partitions[0].stream_count, 1u);
   for (uint32_t i = 0; i < kNodeCount; ++i) {
-    EXPECT_EQ(schedule.sorted_nodes[i].node->node_index, i);
-    EXPECT_EQ(schedule.sorted_nodes[i].stream_id, 0u);
+    EXPECT_EQ(schedule.order[i], i);
+    EXPECT_EQ(schedule.flags[schedule.order[i]] >>
+                  HRX_GRAPH_ANALYSIS_NODE_STREAM_SHIFT,
+              0u);
   }
 
   iree_arena_deinitialize(&arena);
@@ -137,19 +140,20 @@ TEST(GraphTest, ReorderedAddedDependencyUsesFinalWorkstreamIndex) {
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool, &arena);
-  iree_hal_streaming_graph_schedule_t schedule = {};
+  hrx_graph_schedule_t schedule = {};
   IREE_ASSERT_OK(iree_hal_streaming_graph_schedule_nodes(
       node_block.get(), kNodeCount, /*disabled_nodes=*/nullptr,
       /*disabled_node_count=*/0, &edge, &arena, &schedule));
 
-  const uint32_t source_index = schedule.node_index_map[17];
-  const uint32_t target_index = schedule.node_index_map[0];
-  ASSERT_LT(source_index, target_index);
-  EXPECT_EQ(schedule.sorted_nodes[source_index].node, node_storage[17].get());
-  EXPECT_EQ(schedule.sorted_nodes[target_index].node, node_storage[0].get());
-  ASSERT_NE(schedule.sorted_nodes[source_index].stream_id, 0u);
-  EXPECT_EQ(schedule.sorted_nodes[source_index].stream_id,
-            schedule.sorted_nodes[target_index].stream_id);
+  std::array<uint32_t, kNodeCount> ranks;
+  for (uint32_t i = 0; i < kNodeCount; ++i) {
+    ranks[schedule.order[i]] = i;
+  }
+  ASSERT_LT(ranks[17], ranks[0]);
+  EXPECT_EQ(schedule.sources[17], node_storage[17].get());
+  EXPECT_EQ(schedule.sources[0], node_storage[0].get());
+  EXPECT_EQ(schedule.flags[17] >> HRX_GRAPH_ANALYSIS_NODE_STREAM_SHIFT,
+            schedule.flags[0] >> HRX_GRAPH_ANALYSIS_NODE_STREAM_SHIFT);
 
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&block_pool);

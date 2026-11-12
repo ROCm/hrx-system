@@ -1,6 +1,7 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#include <array>
 #include <atomic>
 #include <memory>
 #include <semaphore>
@@ -11,288 +12,10 @@
 #include "hrx_runtime_cxx.h"
 #include "iree/hal/driver/task/executable/executable.h"
 #include "iree/hal/driver/task/executable/library/abi.h"
-#include "iree/hal/testing/mock_device.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
 namespace {
-
-static constexpr iree_hal_queue_priority_t kQueuePriority =
-    IREE_HAL_QUEUE_PRIORITY_NORMAL;
-static const iree_hal_queue_family_spec_t kQueueFamilySpec = [] {
-  iree_hal_queue_family_spec_t spec = {
-      .name = IREE_SV("test"),
-      .priority_count = 1,
-      .priorities = &kQueuePriority,
-      .physical_device_affinity = 1,
-      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
-                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
-                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC,
-  };
-  return spec;
-}();
-
-class TestNode {
- public:
-  TestNode(uint32_t node_index, std::vector<hrx_graph_node_s*> dependencies)
-      : storage_(new uint8_t[sizeof(hrx_graph_node_s) +
-                             dependencies.size() * sizeof(hrx_graph_node_s*)]) {
-    memset(storage_.get(), 0,
-           sizeof(hrx_graph_node_s) +
-               dependencies.size() * sizeof(hrx_graph_node_s*));
-    node_ = reinterpret_cast<hrx_graph_node_s*>(storage_.get());
-    node_->type = HRX_GRAPH_NODE_TYPE_INTERNAL_KERNEL;
-    node_->node_index = node_index;
-    node_->dependency_count = dependencies.size();
-    for (size_t i = 0; i < dependencies.size(); ++i) {
-      node_->dependencies[i] = dependencies[i];
-    }
-  }
-
-  hrx_graph_node_s* get() const { return node_; }
-
- private:
-  std::unique_ptr<uint8_t[]> storage_;
-  hrx_graph_node_s* node_ = nullptr;
-};
-
-typedef struct BarrierSpyCommandBuffer {
-  iree_hal_command_buffer_t base;
-  iree_status_code_t failure_code;
-  uint32_t barrier_count;
-  iree_hal_execution_stage_t source_stage;
-  iree_hal_execution_stage_t target_stage;
-  iree_hal_barrier_flags_t flags;
-  iree_host_size_t memory_barrier_count;
-  iree_hal_memory_barrier_t memory_barrier;
-  iree_host_size_t buffer_barrier_count;
-} BarrierSpyCommandBuffer;
-
-static void BarrierSpyDestroy(iree_hal_command_buffer_t* base_command_buffer) {}
-
-static iree_status_t BarrierSpyExecutionBarrier(
-    iree_hal_command_buffer_t* base_command_buffer,
-    const iree_hal_barrier_t* barrier) {
-  auto* command_buffer =
-      reinterpret_cast<BarrierSpyCommandBuffer*>(base_command_buffer);
-  if (command_buffer->failure_code != IREE_STATUS_OK) {
-    return iree_make_status(command_buffer->failure_code);
-  }
-  ++command_buffer->barrier_count;
-  command_buffer->source_stage = barrier->source_stage_mask;
-  command_buffer->target_stage = barrier->target_stage_mask;
-  command_buffer->flags = barrier->flags;
-  command_buffer->memory_barrier_count = barrier->memory_barrier_count;
-  if (barrier->memory_barrier_count > 0) {
-    command_buffer->memory_barrier = barrier->memory_barriers[0];
-  }
-  command_buffer->buffer_barrier_count = barrier->buffer_barrier_count;
-  return iree_ok_status();
-}
-
-static const iree_hal_command_buffer_vtable_t kBarrierSpyVtable = {
-    .destroy = BarrierSpyDestroy,
-    .begin = nullptr,
-    .end = nullptr,
-    .begin_debug_group = nullptr,
-    .end_debug_group = nullptr,
-    .barrier = BarrierSpyExecutionBarrier,
-};
-
-class GraphBarrierTest : public ::testing::Test {
- protected:
-  void SetUp() override {
-    memset(&command_buffer_, 0, sizeof(command_buffer_));
-    iree_hal_device_queue_spec_t queues = {
-        .family_count = 1,
-        .families = &kQueueFamilySpec,
-    };
-    iree_hal_device_spec_params_t spec_params = {.queues = &queues};
-    iree_hal_device_spec_t* device_spec = nullptr;
-    IREE_ASSERT_OK(iree_hal_device_spec_create(
-        &spec_params, iree_allocator_system(), &device_spec));
-    iree_hal_mock_device_options_t device_options;
-    iree_hal_mock_device_options_initialize(&device_options);
-    device_options.device_spec = device_spec;
-    iree_status_t status = iree_hal_mock_device_create(
-        &device_options, iree_allocator_system(), &device_);
-    iree_hal_device_spec_release(device_spec);
-    IREE_ASSERT_OK(status);
-    queue_family_ = iree_hal_device_queue_family(device_, 0);
-    iree_hal_command_buffer_initialize(
-        queue_family_, IREE_HAL_COMMAND_BUFFER_MODE_UNVALIDATED,
-        IREE_HAL_COMMAND_CATEGORY_ANY, /*binding_capacity=*/0,
-        /*validation_state=*/nullptr, &kBarrierSpyVtable,
-        &command_buffer_.base);
-    hrx_graph_barrier_state_reset(&state_);
-  }
-
-  void TearDown() override {
-    iree_hal_command_buffer_release(&command_buffer_.base);
-    iree_hal_device_release(device_);
-  }
-
-  bool Record(TestNode& node,
-              const hrx_graph_edge_t* additional_edges = nullptr) {
-    bool did_barrier = false;
-    IREE_EXPECT_OK(hrx_graph_record_node_barrier(
-        &state_, node.get(), additional_edges, node_index_map_,
-        node.get()->node_index, &command_buffer_.base, &did_barrier));
-    return did_barrier;
-  }
-
-  uint32_t node_index_map_[32] = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10,
-                                  11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
-                                  22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
-  hrx_graph_barrier_state_t state_;
-  // Canonical family borrowed from device_.
-  const iree_hal_queue_family_t* queue_family_ = nullptr;
-  // Device owning the canonical family used by this fixture.
-  iree_hal_device_t* device_ = nullptr;
-  BarrierSpyCommandBuffer command_buffer_;
-};
-
-TEST_F(GraphBarrierTest, SingleAndIndependentNodesDoNotBarrier) {
-  TestNode a(0, {});
-  TestNode b(1, {});
-  EXPECT_FALSE(Record(a));
-  EXPECT_FALSE(Record(b));
-  EXPECT_EQ(command_buffer_.barrier_count, 0u);
-}
-
-TEST_F(GraphBarrierTest, LinearChainBarriersBeforeEachConsumer) {
-  TestNode a(0, {});
-  TestNode b(1, {a.get()});
-  TestNode c(2, {b.get()});
-  EXPECT_FALSE(Record(a));
-  EXPECT_TRUE(Record(b));
-  EXPECT_TRUE(Record(c));
-  EXPECT_EQ(command_buffer_.barrier_count, 2u);
-}
-
-TEST_F(GraphBarrierTest, FanInEmitsExactlyOneBarrier) {
-  TestNode a(0, {});
-  TestNode b(1, {});
-  TestNode c(2, {a.get(), b.get()});
-  EXPECT_FALSE(Record(a));
-  EXPECT_FALSE(Record(b));
-  EXPECT_TRUE(Record(c));
-  EXPECT_EQ(command_buffer_.barrier_count, 1u);
-}
-
-TEST_F(GraphBarrierTest, EarlierBarrierCoversOlderProducer) {
-  TestNode a(0, {});
-  TestNode b(1, {a.get()});
-  TestNode c(2, {a.get()});
-  EXPECT_FALSE(Record(a));
-  EXPECT_TRUE(Record(b));
-  EXPECT_FALSE(Record(c));
-  EXPECT_EQ(command_buffer_.barrier_count, 1u);
-}
-
-TEST_F(GraphBarrierTest, OverflowForcesConservativeDependencyBarrier) {
-  std::vector<std::unique_ptr<TestNode>> nodes;
-  for (uint32_t i = 0; i < 9; ++i) {
-    nodes.push_back(
-        std::make_unique<TestNode>(i, std::vector<hrx_graph_node_s*>{}));
-    EXPECT_FALSE(Record(*nodes.back()));
-  }
-  TestNode consumer(9, {nodes[0]->get()});
-  EXPECT_TRUE(Record(consumer));
-  EXPECT_EQ(command_buffer_.barrier_count, 1u);
-}
-
-TEST_F(GraphBarrierTest, AdditionalDependencyEdgeBarriersLikeInlineEdge) {
-  TestNode a(0, {});
-  TestNode b(1, {});
-  hrx_graph_edge_t edge = {.next = nullptr, .from = a.get(), .to = b.get()};
-  EXPECT_FALSE(Record(a, &edge));
-  EXPECT_TRUE(Record(b, &edge));
-  EXPECT_EQ(command_buffer_.barrier_count, 1u);
-}
-
-TEST_F(GraphBarrierTest, InternalBarrierUsesDeviceMemoryScopes) {
-  TestNode a(0, {});
-  TestNode b(1, {a.get()});
-  EXPECT_FALSE(Record(a));
-  EXPECT_TRUE(Record(b));
-  EXPECT_EQ(command_buffer_.source_stage,
-            IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE);
-  EXPECT_EQ(command_buffer_.target_stage,
-            IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE);
-  EXPECT_EQ(command_buffer_.flags, IREE_HAL_BARRIER_FLAG_NONE);
-  EXPECT_EQ(command_buffer_.memory_barrier_count, 1u);
-  const iree_hal_access_scope_t device_access =
-      IREE_HAL_ACCESS_SCOPE_CONSTANT_READ |
-      IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
-      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
-      IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
-      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE;
-  EXPECT_EQ(command_buffer_.memory_barrier.source_scope, device_access);
-  EXPECT_EQ(command_buffer_.memory_barrier.target_scope, device_access);
-  EXPECT_EQ(command_buffer_.buffer_barrier_count, 0u);
-}
-
-TEST_F(GraphBarrierTest, BarrierFailureIsPropagatedAndStateIsPreserved) {
-  TestNode a(0, {});
-  TestNode b(1, {a.get()});
-  EXPECT_FALSE(Record(a));
-  command_buffer_.failure_code = IREE_STATUS_INTERNAL;
-  bool did_barrier = false;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INTERNAL,
-      hrx_graph_record_node_barrier(&state_, b.get(), nullptr, node_index_map_,
-                                    1, &command_buffer_.base, &did_barrier));
-  EXPECT_FALSE(did_barrier);
-  command_buffer_.failure_code = IREE_STATUS_OK;
-  EXPECT_TRUE(Record(b));
-}
-
-TEST(GraphScheduleTest, AdditionalDependencyStaysOnProducerWorkstream) {
-  constexpr uint32_t kNodeCount = 17;
-  std::vector<std::unique_ptr<TestNode>> nodes;
-  nodes.reserve(kNodeCount);
-  for (uint32_t i = 0; i < kNodeCount; ++i) {
-    nodes.push_back(
-        std::make_unique<TestNode>(i, std::vector<hrx_graph_node_s*>{}));
-  }
-
-  std::unique_ptr<uint8_t[]> block_storage(
-      new uint8_t[sizeof(hrx_graph_node_block_t) +
-                  kNodeCount * sizeof(hrx_graph_node_s*)]);
-  memset(
-      block_storage.get(), 0,
-      sizeof(hrx_graph_node_block_t) + kNodeCount * sizeof(hrx_graph_node_s*));
-  auto* block = reinterpret_cast<hrx_graph_node_block_t*>(block_storage.get());
-  block->capacity = kNodeCount;
-  block->count = kNodeCount;
-  for (uint32_t i = 0; i < kNodeCount; ++i) {
-    block->nodes[i] = nodes[i]->get();
-  }
-
-  hrx_graph_edge_t edge = {
-      .next = nullptr,
-      .from = nodes[0]->get(),
-      .to = nodes[16]->get(),
-  };
-  iree_arena_block_pool_t block_pool;
-  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
-  iree_arena_allocator_t arena;
-  iree_arena_initialize(&block_pool, &arena);
-
-  hrx_graph_schedule_t schedule;
-  IREE_ASSERT_OK(
-      hrx_graph_schedule_nodes(block, kNodeCount, &edge, &arena, &schedule));
-  const hrx_graph_sort_node_t& producer =
-      schedule.sorted_nodes[schedule.node_index_map[0]];
-  const hrx_graph_sort_node_t& consumer =
-      schedule.sorted_nodes[schedule.node_index_map[16]];
-  EXPECT_EQ(consumer.partition_id, producer.partition_id);
-  EXPECT_EQ(consumer.stream_id, producer.stream_id);
-
-  iree_arena_deinitialize(&arena);
-  iree_arena_block_pool_deinitialize(&block_pool);
-}
 
 // Pauses a real allocator dependency without putting a hook in the executor.
 struct AllocationGate {
@@ -433,6 +156,21 @@ TEST_F(GraphExecSemaphoreTest,
   }
 }
 
+TEST_F(GraphExecSemaphoreTest, UnrepresentableDependenciesLeaveGraphUnchanged) {
+  Graph graph;
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_graph_create(device_, 0, graph.for_output())));
+  hrx_graph_node_t dependency = nullptr;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_add_empty_node(graph, nullptr, 0, &dependency)));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        hrx_status_to_iree(hrx_graph_add_empty_node(
+                            graph, &dependency, SIZE_MAX, nullptr)));
+  size_t count = 0;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_size(graph, &count)));
+  EXPECT_EQ(count, 1u);
+}
+
 // A normal task executable may receive pointers in its constant bytes without
 // changing to a custom argument ABI or declaring any buffer bindings.
 struct KernelArguments {
@@ -440,6 +178,8 @@ struct KernelArguments {
   uint32_t* result;
   // Value the dispatch writes to |result|.
   uint32_t value;
+  // Optional earlier producer read by this dispatch.
+  const uint32_t* input = nullptr;
 };
 
 static int WriteResult(
@@ -448,7 +188,8 @@ static int WriteResult(
     const iree_hal_executable_workgroup_state_v0_t* workgroup_state) {
   KernelArguments arguments;
   memcpy(&arguments, dispatch_state->constants.data, sizeof(arguments));
-  *arguments.result = arguments.value;
+  *arguments.result =
+      (arguments.input ? *arguments.input : 0) + arguments.value;
   return 0;
 }
 
@@ -559,6 +300,8 @@ class GraphKernelTest : public GraphExecSemaphoreTest,
   const iree_hal_executable_dispatch_v0_t dispatch_ = WriteResult;
   // Host result observed only after the stream completes.
   uint32_t result_ = 0;
+  // Results carried through a device fork/join, host call, and device consumer.
+  std::array<uint32_t, 5> pipeline_results_ = {};
   // Arguments copied by graph insertion; their pointee remains fixture-owned.
   KernelArguments arguments_ = {&result_, 0x12345678u};
   // Owned stream used for both immediate work and graph replay.
@@ -588,6 +331,84 @@ TEST_P(GraphKernelTest, ConstantsWithoutBindingsUseNormalArguments) {
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
   EXPECT_EQ(result_, expected);
+}
+
+TEST_P(GraphKernelTest, ReorderedBranchesJoinAcrossHostAndDeviceOperations) {
+  // Create consumers before their producers; all edges are attached afterward.
+  hrx_graph_node_t tail = nullptr;
+  KernelArguments tail_arguments = {&pipeline_results_[4], 1,
+                                    &pipeline_results_[3]};
+  auto attrs = KernelAttrs(GetParam());
+  attrs.constants = &tail_arguments;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_add_kernel_node(graph_, nullptr, 0, &attrs, &tail)));
+  const hrx_graph_host_call_node_attrs_t host_attrs = {
+      .fn = [](void* user_data) -> hrx_status_t {
+        auto* values = static_cast<uint32_t*>(user_data);
+        values[3] = values[1] + values[2];
+        return hrx_ok_status();
+      },
+      .user_data = pipeline_results_.data(),
+  };
+  hrx_graph_node_t host = nullptr;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_add_host_call_node(graph_, nullptr, 0, &host_attrs, &host)));
+  hrx_graph_node_t branches[2] = {};
+  for (size_t i = 0; i < 2; ++i) {
+    KernelArguments arguments = {&pipeline_results_[i + 1],
+                                 static_cast<uint32_t>(17 + i * 12),
+                                 &pipeline_results_[0]};
+    attrs.constants = &arguments;
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_graph_add_kernel_node(graph_, nullptr, 0, &attrs, &branches[i])));
+  }
+  KernelArguments root_arguments = {&pipeline_results_[0], 3};
+  attrs.constants = &root_arguments;
+  hrx_graph_node_t root = nullptr;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_add_kernel_node(graph_, nullptr, 0, &attrs, &root)));
+  const hrx_graph_node_t from[] = {root, root, branches[0], branches[1], host};
+  const hrx_graph_node_t to[] = {branches[0], branches[1], host, host, tail};
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_add_dependencies(graph_, from, to, IREE_ARRAYSIZE(from))));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_instantiate(graph_, hrx_stream_get_queue(stream_), 0, &exec_)));
+  for (int replay = 0; replay < 3; ++replay) {
+    pipeline_results_.fill(0xDEADBEEFu);
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+    EXPECT_EQ(pipeline_results_, (std::array<uint32_t, 5>{3, 20, 32, 52, 53}));
+  }
+}
+
+TEST_P(GraphKernelTest, ForeignDependencyRejectsReplacement) {
+  InstantiateOriginal();
+  Graph foreign;
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_graph_create(device_, 0, foreign.for_output())));
+  hrx_graph_node_t foreign_node = nullptr;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_add_empty_node(foreign, nullptr, 0, &foreign_node)));
+  for (bool additional : {false, true}) {
+    Graph invalid;
+    IREE_ASSERT_OK(
+        hrx_status_to_iree(hrx_graph_create(device_, 0, invalid.for_output())));
+    hrx_graph_node_t node = nullptr;
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_graph_add_empty_node(invalid, additional ? nullptr : &foreign_node,
+                                 additional ? 0 : 1, &node)));
+    if (additional) {
+      IREE_ASSERT_OK(hrx_status_to_iree(
+          hrx_graph_add_dependencies(invalid, &foreign_node, &node, 1)));
+    }
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        hrx_status_to_iree(hrx_graph_exec_update(exec_, invalid)));
+    result_ = 0;
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+    EXPECT_EQ(result_, arguments_.value);
+  }
 }
 
 TEST_P(GraphKernelTest, CustomArgumentsRemainAnExplicitBackendRequirement) {
