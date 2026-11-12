@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <utility>
 #include <vector>
 
@@ -106,7 +107,7 @@ class GraphInput {
     IREE_CHECK_OK(iree_arena_allocate(&arena_,
                                       sizeof(Block) + count * sizeof(Node*),
                                       reinterpret_cast<void**>(&block_)));
-    *block_ = {};
+    std::memset(block_, 0, sizeof(*block_));
     block_->capacity = count;
     block_->count = count;
     std::vector<uint32_t> dependency_counts(count);
@@ -120,7 +121,7 @@ class GraphInput {
       IREE_CHECK_OK(iree_arena_allocate(
           &arena_, sizeof(Node) + dependency_counts[i] * sizeof(Node*),
           reinterpret_cast<void**>(&node)));
-      *node = {};
+      std::memset(node, 0, sizeof(*node));
       node->type = topology == Topology::kHostBoundaries && i % 32 == 31
                        ? Graph::kHostType
                        : Graph::kNodeType;
