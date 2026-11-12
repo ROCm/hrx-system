@@ -959,11 +959,12 @@ kernel.def @slice() {
     result = render_module(load_module(source.encode()))
 
     assert (
-        "Float32x4 dynamic = loom::vector::slice<Float32x4>(source, offset);" in result
+        "Float32x4 dynamic = loom::vector::slice<Float32x4>(source, loom::type::indices{offset});"
+        in result
     )
     assert (
         "Float32x4 static_value = loom::vector::slice<Float32x4>("
-        "source, loom::type::index{4});" in result
+        "source, {4});" in result
     )
 
 

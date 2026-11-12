@@ -33,6 +33,10 @@ from loom.ir import (
 # View copies and ordinary value uses carry the same information implicitly.
 _CONSTRUCTOR_COMPONENTS = {
     "buffer.view": (True, True),
+    "vector.refine": (True, False),
+    "vector.load": (True, False),
+    "vector.splat": (True, False),
+    "vector.slice": (True, False),
     "view.subview": (True, False),
     "command.parameter": (True, True),
     "channel.bind": (False, True),

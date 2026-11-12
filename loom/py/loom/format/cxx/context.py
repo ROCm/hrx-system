@@ -29,6 +29,7 @@ from loom.ir import (
     Block,
     BufferType,
     DialectType,
+    DynamicDim,
     DynamicEncoding,
     Module,
     Operation,
@@ -1291,6 +1292,16 @@ class CxxRenderContext:
             self.uses_numeric_conversion = True
             return f"loom::convert<{expected_type}>({expression})"
         return expression
+
+    def dynamic_dimensions(self, value_type: ShapedType) -> str:
+        """Spells the explicit index record for a constructor's result shape."""
+
+        values = [
+            self.expression(dimension.value_id)
+            for dimension in value_type.dims
+            if isinstance(dimension, DynamicDim) and dimension.value_id is not None
+        ]
+        return "loom::type::indices{" + ", ".join(values) + "}" if values else "{}"
 
     def dynamic_view_encoding_expression(
         self, operation: Operation, value_type: ShapedType

@@ -1,0 +1,71 @@
+// RUN: roundtrip
+// Dynamic, mixed-rank, and native carriers retain explicit result identities.
+#include <loomcxx/vector.h>
+
+using Dynamic = loom::type::vector<loom::type::shape<loom::type::dynamic, 8>, short>;
+using Fixed = loom::type::vector<loom::type::shape<4, 8>, short>;
+using Flat = short __attribute__((ext_vector_type(32)));
+
+Flat flatten(Dynamic source) {
+  return loom::vector::bitcast<Flat>(loom::vector::refine<Fixed>(source));
+}
+
+Dynamic expose(Fixed source, loom::type::index rows) {
+  return loom::vector::refine<Dynamic>(source, {rows});
+}
+
+// ----
+func.def public @flatten(%source_dim0: index, %source: vector<[%source_dim0]x8xi16>) -> (vector<32xi16>) {
+  %3 = vector.refine %source : vector<[%source_dim0]x8xi16> -> vector<4x8xi16>
+  %4 = vector.bitcast %3 : vector<4x8xi16> to vector<32xi16>
+  func.return %4 : vector<32xi16>
+}
+
+func.def public @expose(%source: vector<4x8xi16>, %rows: index) -> (%7: index, vector<[%7]x8xi16>) {
+  %9 = vector.refine %source : vector<4x8xi16> -> vector<[%rows]x8xi16>
+  func.return %rows, %9 : index, vector<[%rows]x8xi16>
+}
+
+// ====
+// RUN: roundtrip
+#include <loomcxx/vector.h>
+using Dynamic = loom::type::vector<loom::type::shape<loom::type::dynamic>, unsigned>;
+using Native = unsigned __attribute__((ext_vector_type(4)));
+
+Dynamic expose(Native source, loom::type::index count) {
+  return loom::vector::refine<Dynamic>(source, {count});
+}
+
+Native fixed(Dynamic source) { return loom::vector::refine<Native>(source); }
+// ----
+func.def public @expose(%source: vector<4xi32>, %count: index) -> (%2: index, vector<[%2]xi32>) {
+  %4 = vector.refine %source : vector<4xi32> -> vector<[%count]xi32>
+  func.return %count, %4 : index, vector<[%count]xi32>
+}
+
+func.def public @fixed(%source_dim0: index, %source: vector<[%source_dim0]xi32>) -> (vector<4xi32>) {
+  %8 = vector.refine %source : vector<[%source_dim0]xi32> -> vector<4xi32>
+  func.return %8 : vector<4xi32>
+}
+
+// ====
+// RUN: roundtrip
+#include <loomcxx/vector.h>
+using Dynamic = loom::type::vector<loom::type::shape<loom::type::dynamic, 2, loom::type::dynamic>, float>;
+using Fixed = loom::type::vector<loom::type::shape<3, 2, 4>, float>;
+
+Dynamic expose(Fixed source, loom::type::index planes, loom::type::index columns) {
+  return loom::vector::refine<Dynamic>(source, {planes, columns});
+}
+
+Fixed fixed(Dynamic source) { return loom::vector::refine<Fixed>(source); }
+// ----
+func.def public @expose(%source: vector<3x2x4xf32>, %planes: index, %columns: index) -> (%3: index, %4: index, vector<[%3]x2x[%4]xf32>) {
+  %6 = vector.refine %source : vector<3x2x4xf32> -> vector<[%planes]x2x[%columns]xf32>
+  func.return %planes, %columns, %6 : index, index, vector<[%planes]x2x[%columns]xf32>
+}
+
+func.def public @fixed(%source_dim0: index, %source_dim2: index, %source: vector<[%source_dim0]x2x[%source_dim2]xf32>) -> (vector<3x2x4xf32>) {
+  %11 = vector.refine %source : vector<[%source_dim0]x2x[%source_dim2]xf32> -> vector<3x2x4xf32>
+  func.return %11 : vector<3x2x4xf32>
+}

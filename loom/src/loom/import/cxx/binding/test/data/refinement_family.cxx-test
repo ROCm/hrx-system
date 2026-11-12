@@ -1,0 +1,59 @@
+// RUN: verify
+// Every admitted lane type uses the same explicit shape binding. Mechanism
+// output and contradictions are covered by the adjacent refinement fixtures.
+#include <loomcxx/vector.h>
+namespace loomt = loom::type;
+
+template <class T>
+using Dynamic = loomt::vector<loomt::shape<loomt::dynamic>, T>;
+template <class T>
+using Fixed = loomt::vector<loomt::shape<4>, T>;
+
+#define SEMANTIC(T, Name) \
+  Fixed<T> Name##_fixed(Dynamic<T> value) { \
+    return loom::vector::refine<Fixed<T>>(value); \
+  } \
+  Dynamic<T> Name##_dynamic(Fixed<T> value, loomt::index extent) { \
+    return loom::vector::refine<Dynamic<T>>(value, {extent}); \
+  }
+
+#define NATIVE(T, Name) \
+  using Name##Native = T __attribute__((ext_vector_type(4))); \
+  Name##Native Name##_native(Dynamic<T> value) { \
+    return loom::vector::refine<Name##Native>(value); \
+  } \
+  Dynamic<T> Name##_from_native(Name##Native value, loomt::index extent) { \
+    return loom::vector::refine<Dynamic<T>>(value, {extent}); \
+  }
+
+#define BOTH(T, Name) SEMANTIC(T, Name) NATIVE(T, Name)
+BOTH(signed char, i8)
+BOTH(unsigned char, u8)
+BOTH(short, i16)
+BOTH(unsigned short, u16)
+BOTH(int, i32)
+BOTH(unsigned, u32)
+BOTH(long long, i64)
+BOTH(unsigned long long, u64)
+BOTH(_Float16, f16)
+BOTH(__bf16, bf16)
+BOTH(float, f32)
+BOTH(double, f64)
+BOTH(__float8_e4m3fn, f8e4m3)
+BOTH(__float8_e5m2, f8e5m2)
+SEMANTIC(bool, predicate)
+SEMANTIC(loomt::index, logical_index)
+SEMANTIC(loomt::offset, physical_offset)
+enum class Code : unsigned short { first, last };
+SEMANTIC(Code, code)
+
+using Rank15 = loomt::vector<loomt::shape<
+    loomt::dynamic, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, loomt::dynamic>, unsigned>;
+using FixedRank15 = loomt::vector<loomt::shape<
+    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2>, unsigned>;
+FixedRank15 maximum_rank(Rank15 source) {
+  return loom::vector::refine<FixedRank15>(source);
+}
+Rank15 dependent_maximum_rank(FixedRank15 source, loomt::indices<2> extents) {
+  return loom::vector::refine<Rank15>(source, extents);
+}

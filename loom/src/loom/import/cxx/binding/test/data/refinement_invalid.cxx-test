@@ -1,0 +1,50 @@
+// RUN: verify
+// Explicit assertions cannot change the logical rank.
+#include <loomcxx/vector.h>
+using Source = loom::type::vector<loom::type::shape<4, 8>, float>;
+using Result = loom::type::vector<loom::type::shape<32>, float>;
+// ERROR@+1: LOWERING/059 "refinement must preserve the carrier, element type, access qualifiers, and rank"
+[[loom::op("vector.refine")]] Result invalid(Source);
+
+// ====
+// Explicit assertions cannot reinterpret element bits or source signedness.
+#include <loomcxx/vector.h>
+using Source = loom::type::vector<loom::type::shape<4>, int>;
+using Result = loom::type::vector<loom::type::shape<4>, unsigned>;
+// ERROR@+1: LOWERING/059 "refinement must preserve the carrier, element type, access qualifiers, and rank"
+[[loom::op("vector.refine")]] Result invalid(Source);
+
+// ====
+// The named operation must match both source and result carriers.
+#include <loomcxx/vector.h>
+using Source = loom::type::view<loom::type::shape<4>, float>;
+using Result = loom::type::vector<loom::type::shape<4>, float>;
+// ERROR@+1: LOWERING/059 "refinement must preserve the carrier, element type, access qualifiers, and rank"
+[[loom::op("vector.refine")]] Result invalid(Source);
+
+// ====
+// Dimensions stay in the logical index domain, without hidden casts.
+#include <loomcxx/vector.h>
+using Source = loom::type::vector<loom::type::shape<4>, float>;
+using Result = loom::type::vector<loom::type::shape<loom::type::dynamic>, float>;
+struct Dimensions { unsigned count; };
+// ERROR@+1: LOWERING/059 "refinement result dimensions require logical indices"
+[[loom::op("vector.refine")]] Result invalid(Source, Dimensions);
+
+// ====
+// The caller must supply every dynamic result axis explicitly.
+#include <loomcxx/vector.h>
+using Source = loom::type::vector<loom::type::shape<4>, float>;
+using Result = loom::type::vector<loom::type::shape<loom::type::dynamic>, float>;
+// ERROR@+1: LOWERING/059 "refinement requires the source, one index record for dependent result dimensions, and its result encoding"
+[[loom::op("vector.refine")]] Result invalid(Source);
+
+// ====
+// Contradictory extents use the shared IR boundary diagnostic.
+#include <loomcxx/vector.h>
+using Source = loom::type::vector<loom::type::shape<4, 8>, float>;
+using Result = loom::type::vector<loom::type::shape<3, 8>, float>;
+Result invalid(Source source) {
+  // ERROR@+1: SHAPE/008 "source dimension 0 has size 4, but the refined result requires size 3"
+  return loom::vector::refine<Result>(source);
+}

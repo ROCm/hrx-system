@@ -114,6 +114,17 @@ using vector_dimensions = typename vector_traits<Vector>::dimensions_type;
 
 namespace loom::vector {
 
+// Asserts that source describes Result's lane grid without a conversion, copy,
+// or runtime check. Rank and lane type stay exact. An incorrect dynamic shape
+// assertion makes the program invalid; contradictory static extents diagnose.
+template <class Result, class Source>
+[[loom::op("vector.refine")]] Result refine(Source source);
+
+// Supplies one native index per dynamic result axis, in source-axis order.
+template <class Result, class Source>
+[[loom::op("vector.refine")]] Result refine(
+    Source source, loom::detail::vector_dimensions<Result> dimensions);
+
 // Replicates one scalar across a semantic vector. Dimensions supplies one
 // index for each dynamic result axis in source-axis order.
 template <class Result>

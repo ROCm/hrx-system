@@ -145,12 +145,14 @@ iree_py_test(
 iree_py_test(
     name = "control_flow_execution_test",
     size = "small",
-    srcs = ["control_flow_execution_test.py"],
+    srcs = ["source_roundtrip_execution_test.py"],
     args = [
         "$(rootpath //loom/src/loom/tools/loom-import-cxx)",
         "$(rootpath //loom/src/loom/tools/loom-test)",
         "$(rootpath control_flow.cxx)",
         "$(rootpath control_flow_checks.cxx)",
+        "8",
+        "31",
     ],
     data = [
         "control_flow.cxx",
@@ -158,6 +160,34 @@ iree_py_test(
         "//loom/src/loom/tools/loom-import-cxx",
         "//loom/src/loom/tools/loom-test",
     ],
+    main = "source_roundtrip_execution_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/execute:vm_iree_vm",
+    ]),
+    deps = [":cxx"],
+)
+
+iree_py_test(
+    name = "refinement_execution_test",
+    size = "small",
+    srcs = ["source_roundtrip_execution_test.py"],
+    args = [
+        "$(rootpath //loom/src/loom/tools/loom-import-cxx)",
+        "$(rootpath //loom/src/loom/tools/loom-test)",
+        "$(rootpath refinement.cxx)",
+        "$(rootpath refinement_checks.cxx)",
+        "3",
+        "8",
+    ],
+    data = [
+        "refinement.cxx",
+        "refinement_checks.cxx",
+        "//loom/src/loom/tools/loom-import-cxx",
+        "//loom/src/loom/tools/loom-test",
+    ],
+    main = "source_roundtrip_execution_test.py",
     tags = ["skip-bazel_to_cmake"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/import:cxx",

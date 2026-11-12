@@ -17,7 +17,7 @@ from loom.format.cxx.context import (
     _strip_outer_parentheses,
 )
 from loom.format.cxx.errors import CxxRenderError
-from loom.format.cxx.types import KERNEL_COORDINATE_CPP_TYPE
+from loom.format.cxx.types import KERNEL_COORDINATE_CPP_TYPE, uses_native_vector
 from loom.ir import (
     I1,
     I32,
@@ -534,7 +534,7 @@ class CxxExpressionRenderer(CxxRenderContext):
             scalar = f"static_cast<{self.types.scalar(element, signed)}>({value})"
             if isinstance(value_type, ShapedType):
                 vector = self.types.vector(value_type, signed)
-                if value_type.rank == 1 and element != I1:
+                if uses_native_vector(value_type):
                     return f"({vector}{{}} + {scalar})"
                 return f"loom::vector::splat<{vector}>({{}}, {scalar})"
             return scalar
@@ -648,7 +648,7 @@ class CxxExpressionRenderer(CxxRenderContext):
             if (
                 (value == 0 or value == 0.0)
                 and isinstance(value_type, ShapedType)
-                and value_type.rank == 1
+                and uses_native_vector(value_type)
             ):
                 return f"{self.cpp_type(value_id)}{{}}"
         if definition is not None and definition.name in {
@@ -1244,25 +1244,23 @@ class CxxExpressionRenderer(CxxRenderContext):
 
     def _render_vector_slice(self, operation: Operation) -> tuple[str, ...]:
         resolved = self._resolved(operation)
-        offsets = self._mixed_indices(
+        offsets = self._mixed_index_record(
             resolved,
             dynamic_field="offsets",
             static_field="static_offsets",
         )
-        if len(offsets) != 1:
-            raise CxxRenderError(
-                operation,
-                "native C++ vector slicing requires one lane offset",
-            )
-        static_offsets = resolved.attr("static_offsets")
-        offset = offsets[0]
-        if static_offsets and static_offsets[0] != -(2**63):
-            offset = f"loom::type::index{{{offset}}}"
         result = resolved.value_id("result")
         source = self.expression(resolved.value_id("source"))
+        value_type = self.module.values[result].type
+        dimensions = (
+            f", {self.dynamic_dimensions(value_type)}"
+            if not value_type.is_all_static
+            else ""
+        )
         self._declare(
             result,
-            f"loom::vector::slice<{self.cpp_type(result)}>({source}, {offset})",
+            f"loom::vector::slice<{self.cpp_type(result)}>"
+            f"({source}, {offsets}{dimensions})",
         )
         return ("static_offsets",)
 
@@ -1425,8 +1423,8 @@ class CxxExpressionRenderer(CxxRenderContext):
             value = operation.attributes["value"]
             type_name = self.cpp_type(result)
             value_type = self.module.values[result].type
-            if isinstance(value_type, ShapedType) and (
-                value_type.rank > 1 or repr(value_type.element_type) == "i1"
+            if isinstance(value_type, ShapedType) and not uses_native_vector(
+                value_type
             ):
                 element = self.types.scalar(
                     value_type.element_type, result in self.signed_values
@@ -1453,9 +1451,7 @@ class CxxExpressionRenderer(CxxRenderContext):
             result = operation.results[0]
             value_type = self.module.values[result].type
             if not (
-                isinstance(value_type, ShapedType)
-                and value_type.rank == 1
-                and repr(value_type.element_type) != "i1"
+                isinstance(value_type, ShapedType) and uses_native_vector(value_type)
             ):
                 raise CxxRenderError(
                     operation,
@@ -1482,7 +1478,9 @@ class CxxExpressionRenderer(CxxRenderContext):
             )
             source_id = resolved.value_id("source")
             source_type = self.module.values[source_id].type
-            if isinstance(source_type, ShapedType) and source_type.rank > 1:
+            if isinstance(source_type, ShapedType) and not uses_native_vector(
+                source_type
+            ):
                 static_indices = resolved.attr("static_indices")
                 source = self.expression(source_id)
                 result = operation.results[0]
@@ -1518,15 +1516,28 @@ class CxxExpressionRenderer(CxxRenderContext):
             return ("static_indices",)
         if name == "vector.insert":
             return self._render_vector_insert(operation)
+        if name == "vector.refine":
+            result = operation.results[0]
+            value_type = self.module.values[result].type
+            arguments = [self.expression(operation.operands[0])]
+            if not value_type.is_all_static:
+                arguments.append(self.dynamic_dimensions(value_type))
+            self._declare(
+                result,
+                f"loom::vector::refine<{self.cpp_type(result)}>"
+                f"({', '.join(arguments)})",
+            )
+            return ()
         if name == "vector.splat":
             result = operation.results[0]
             value_type = self.module.values[result].type
             expression = self.expression(operation.operands[0])
-            if isinstance(value_type, ShapedType) and (
-                value_type.rank > 1 or repr(value_type.element_type) == "i1"
+            if isinstance(value_type, ShapedType) and not uses_native_vector(
+                value_type
             ):
                 expression = (
-                    f"loom::vector::splat<{self.cpp_type(result)}>({{}}, {expression})"
+                    f"loom::vector::splat<{self.cpp_type(result)}>"
+                    f"({self.dynamic_dimensions(value_type)}, {expression})"
                 )
             self._declare(result, expression)
             return ()
@@ -1538,7 +1549,7 @@ class CxxExpressionRenderer(CxxRenderContext):
             result_type = self.module.values[result].type
             structured = any(
                 isinstance(value_type, ShapedType)
-                and (value_type.rank > 1 or repr(value_type.element_type) == "i1")
+                and not uses_native_vector(value_type)
                 for value_type in (source_type, result_type)
             )
             self._declare(

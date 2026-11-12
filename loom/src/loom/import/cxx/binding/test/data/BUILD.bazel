@@ -23,6 +23,9 @@ loom_check_test_suite(
         "index_views.cxx-test",
         "observations.cxx-test",
         "paged_online_softmax_loop_f32.cxx-test",
+        "refinement.cxx-test",
+        "refinement_family.cxx-test",
+        "refinement_invalid.cxx-test",
         "typed_view_composition.cxx-test",
         "view_generators.cxx-test",
         "view_reference_loops.cxx-test",
@@ -60,6 +63,17 @@ loom_check_test(
 loom_check_test(
     name = "views_export_test",
     src = "views_export.cxx-test",
+    data = ["//loom/py/loom/tools:loom-export-cxx"],
+    env = {
+        "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
+    },
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_check_test(
+    name = "refinement_roundtrip_test",
+    src = "refinement_roundtrip.cxx-test",
     data = ["//loom/py/loom/tools:loom-export-cxx"],
     env = {
         "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",

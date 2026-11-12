@@ -25,6 +25,8 @@ from loom.ir import (
 )
 
 SCALAR_CPP_TYPES = {
+    "index": "loom::type::index",
+    "offset": "loom::type::offset",
     "i1": "bool",
     "i8": "signed char",
     "i16": "short",
@@ -52,6 +54,16 @@ KERNEL_COORDINATE_CPP_TYPE = "loom::kernel::coordinate"
 _CHANNEL_READ_MUTABLE_MODE = ChannelReadMode.case("mutable").value
 
 
+def uses_native_vector(value_type: ShapedType) -> bool:
+    """Whether C++ has a native vector carrier for this complete lane grid."""
+
+    return (
+        value_type.rank == 1
+        and value_type.is_all_static
+        and repr(value_type.element_type) not in {"i1", "index", "offset"}
+    )
+
+
 class CxxTypes:
     """Plans deterministic C++ carrier names for one verified module."""
 
@@ -62,11 +74,7 @@ class CxxTypes:
 
     def scalar(self, value_type: ScalarType, signed: bool = False) -> str:
         name = repr(value_type)
-        if name == "index":
-            return "loom::type::index"
-        if name == "offset":
-            return "loom::type::offset"
-        if name.startswith("i") and not signed:
+        if name in _UNSIGNED_INTEGER_TYPES and not signed:
             result = _UNSIGNED_INTEGER_TYPES.get(name)
         else:
             result = SCALAR_CPP_TYPES.get(name)
@@ -75,15 +83,9 @@ class CxxTypes:
         return result
 
     def vector(self, value_type: ShapedType, signed: bool) -> str:
-        if not value_type.is_all_static:
-            raise CxxRenderError(
-                None,
-                f"dependent vector type {value_type!r} has no native C++ carrier",
-            )
         dims = tuple(
-            dimension.size
+            dimension.size if isinstance(dimension, StaticDim) else -1
             for dimension in value_type.dims
-            if isinstance(dimension, StaticDim)
         )
         element = repr(value_type.element_type)
         key = (element, dims, signed)
@@ -91,6 +93,8 @@ class CxxTypes:
         if alias is not None:
             return alias
         prefix = {
+            "index": "Index",
+            "offset": "Offset",
             "i1": "Bool",
             "i8": "Int8" if signed else "UInt8",
             "i16": "Int16" if signed else "UInt16",
@@ -107,7 +111,13 @@ class CxxTypes:
             raise CxxRenderError(
                 None, f"vector element type {element} has no C++ spelling"
             )
-        alias = prefix + "x" + "x".join(str(dimension) for dimension in dims)
+        alias = (
+            prefix
+            + "x"
+            + "x".join(
+                str(dimension) if dimension >= 0 else "Dynamic" for dimension in dims
+            )
+        )
         self.vector_aliases[key] = alias
         return alias
 

@@ -116,9 +116,9 @@ class CxxRenderer(CxxFunctionRenderer):
             return True
         if not (
             isinstance(lhs_type, ShapedType)
-            and lhs_type.type_kind == TypeKind.VIEW
+            and lhs_type.type_kind in {TypeKind.VIEW, TypeKind.VECTOR, TypeKind.TILE}
             and isinstance(rhs_type, ShapedType)
-            and rhs_type.type_kind == TypeKind.VIEW
+            and rhs_type.type_kind == lhs_type.type_kind
         ):
             return False
 
@@ -539,9 +539,17 @@ class CxxRenderer(CxxFunctionRenderer):
             view = self.expression(resolved.value_id("view"))
             selectors = [self.cpp_type(result)]
             projected_flags = self._append_memory_access_contract(operation, selectors)
+            value_type = self.module.values[result].type
+            dimensions = (
+                f", {self.dynamic_dimensions(value_type)}"
+                if not value_type.is_all_static
+                else ""
+            )
             self._declare(
                 result,
-                "loom::vector::load<" + ", ".join(selectors) + f">({view}, {origin})",
+                "loom::vector::load<"
+                + ", ".join(selectors)
+                + f">({view}, {origin}{dimensions})",
             )
             return (
                 "static_indices",

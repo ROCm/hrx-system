@@ -11,99 +11,18 @@
 #include <array>
 #include <optional>
 
+#include "loom/import/cxx/binding/refinement.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/ir/module.h"
 #include "loom/ops/encoding/ops.h"
 #include "loom/ops/index/ops.h"
-#include "loom/ops/tensor/ops.h"
-#include "loom/ops/tile/ops.h"
-#include "loom/ops/vector/ops.h"
-#include "loom/ops/view/ops.h"
 
 namespace loom::cxx_import {
 namespace {
 
-struct InputShape {
-  // Native carrier kind; nominal aggregates remain outside shape matching.
-  loom_type_kind_t kind;
-  // Source element identity, including view access qualifiers.
-  const cxx::Type* element;
-  // Canonical rank-generic extents, or null for a tensor/native vector.
-  const ShapeExtents* extents = nullptr;
-  // Rank-one or rank-two extents for tensor and native vector carriers.
-  std::array<int64_t, 2> inline_extents = {};
-  // Logical native rank, including a tensor's vector-element lane axis.
-  size_t rank = 0;
-  // Complete encoding role, absent for native dense representation.
-  const EncodingPartition* encoding = nullptr;
-
-  int64_t extent(size_t axis) const {
-    return extents ? (*extents)[axis] : inline_extents[axis];
-  }
-};
-
-std::optional<InputShape> input_shape(Types& types, const cxx::Type* source,
-                                      cxx::AST* owner) {
-  const auto& partition = types.partition(source, owner);
-  switch (partition.kind) {
-    case ValueKind::Tile: {
-      const auto& tile = static_cast<const TilePartition&>(partition);
-      return InputShape{
-          .kind = LOOM_TYPE_TILE,
-          .element = tile.element_type,
-          .extents = &tile.extents,
-          .rank = tile.extents.size(),
-          .encoding = tile.encoding,
-      };
-    }
-    case ValueKind::View: {
-      const auto& view = static_cast<const ViewPartition&>(partition);
-      return InputShape{
-          .kind = LOOM_TYPE_VIEW,
-          .element = view.element_type,
-          .extents = &view.extents,
-          .rank = view.extents.size(),
-          .encoding = view.encoding,
-      };
-    }
-    case ValueKind::Vector: {
-      const auto& vector = static_cast<const VectorPartition&>(partition);
-      return InputShape{
-          .kind = LOOM_TYPE_VECTOR,
-          .element = vector.element_type,
-          .extents = &vector.extents,
-          .rank = vector.extents.size(),
-      };
-    }
-    case ValueKind::Tensor: {
-      const auto& tensor = static_cast<const TensorPartition&>(partition);
-      return InputShape{
-          .kind = LOOM_TYPE_TENSOR,
-          .element = tensor.element_type,
-          .inline_extents = {tensor.extent,
-                             static_cast<int64_t>(tensor.vector_lane_count)},
-          .rank = tensor.vector_lane_count ? 2u : 1u,
-      };
-    }
-    case ValueKind::SSA:
-      if (auto* vector = types.native_vector(source)) {
-        return InputShape{
-            .kind = LOOM_TYPE_VECTOR,
-            .element = vector->elementType(),
-            .inline_extents = {static_cast<int64_t>(vector->elementCount()), 0},
-            .rank = 1,
-        };
-      }
-      break;
-    default:
-      break;
-  }
-  return std::nullopt;
-}
-
 // Source admission already proved carrier, rank, element, and encoding-role
 // compatibility. Only the destination's dynamic components need transport.
-void append_dependencies(const InputShape& destination, loom_type_t actual,
+void append_dependencies(const ShapedSignature& destination, loom_type_t actual,
                          loom_builder_t* builder, loom_location_id_t location,
                          std::vector<loom_value_id_t>& operands) {
   for (size_t axis = 0; axis < destination.rank; ++axis) {
@@ -134,33 +53,6 @@ void append_dependencies(const InputShape& destination, loom_type_t actual,
   }
 }
 
-loom_value_id_t refine_input(loom_value_id_t value, loom_type_t type,
-                             loom_builder_t* builder,
-                             loom_location_id_t location) {
-  if (loom_type_equal(type, loom_module_value_type(builder->module, value))) {
-    return value;
-  }
-  loom_op_t* refined;
-  switch (loom_type_kind(type)) {
-    case LOOM_TYPE_VIEW:
-      check(loom_view_refine_build(builder, value, type, location, &refined));
-      break;
-    case LOOM_TYPE_VECTOR:
-      check(loom_vector_refine_build(builder, value, type, location, &refined));
-      break;
-    case LOOM_TYPE_TILE:
-      check(loom_tile_refine_build(builder, value, type, location, &refined));
-      break;
-    case LOOM_TYPE_TENSOR:
-      check(loom_tensor_refine_build(builder, value, type, location, &refined));
-      break;
-    default:
-      IREE_ASSERT_UNREACHABLE("admitted template input carrier");
-      IREE_BUILTIN_UNREACHABLE();
-  }
-  return loom_op_results(refined)[0];
-}
-
 }  // namespace
 
 bool template_input_compatible(Types& types, const cxx::Type* family,
@@ -168,8 +60,8 @@ bool template_input_compatible(Types& types, const cxx::Type* family,
   if (types.unqualified(family) == types.unqualified(source)) {
     return true;
   }
-  const auto required = input_shape(types, family, owner);
-  const auto actual = input_shape(types, source, owner);
+  const auto required = shaped_signature(types, family, owner);
+  const auto actual = shaped_signature(types, source, owner);
   if (!required || !actual || required->kind != actual->kind ||
       required->element != actual->element || required->rank != actual->rank) {
     return false;
@@ -190,7 +82,7 @@ void append_template_input(Value value, const cxx::Type* family, Types& types,
     value.append_to(operands);
     return;
   }
-  const auto shape = input_shape(types, family, owner);
+  const auto shape = shaped_signature(types, family, owner);
   const auto payload = value.components().back();
   append_dependencies(*shape, loom_module_value_type(builder->module, payload),
                       builder, location, operands);
@@ -205,18 +97,18 @@ Value bind_template_input(Value incoming, const cxx::Type* source, Types& types,
   if (&incoming.partition() == &partition) {
     return incoming;
   }
-  const auto shape = input_shape(types, source, owner);
+  const auto shape = shaped_signature(types, source, owner);
   const auto payload = incoming.components().back();
   std::vector<loom_value_id_t> components;
   components.reserve(partition.component_count);
   append_dependencies(*shape, loom_module_value_type(builder->module, payload),
                       builder, location, components);
   components.push_back(payload);
-  std::vector<loom_type_t> bound_types;
   BoundTypeStorage storage;
-  types.append_bound(source, owner, components, storage, bound_types);
-  components.back() =
-      refine_input(payload, bound_types.back(), builder, location);
+  const auto type = shape->bind_type(
+      std::span<const loom_value_id_t>(components).first(components.size() - 1),
+      storage);
+  components.back() = refine_value(payload, type, builder, location);
   return arena.capture(partition, components);
 }
 
@@ -250,7 +142,7 @@ BoundTemplateSignature bind_template_signature(
             result.native.identities.begin() + offset + count);
       }
     } else {
-      const auto shape = input_shape(types, source, owner);
+      const auto shape = shaped_signature(types, source, owner);
       auto& type = result.native.types[offset + count - 1];
       std::array<uint64_t, LOOM_TYPE_MAX_RANK> dimensions;
       for (size_t axis = 0; axis < shape->rank; ++axis) {
