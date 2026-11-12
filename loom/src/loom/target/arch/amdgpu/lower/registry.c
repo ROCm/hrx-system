@@ -2030,6 +2030,7 @@ static const loom_low_lower_policy_t kAmdgpuLowLowerPolicy = {
                            .user_data = NULL},
     .map_argument = {.fn = loom_amdgpu_map_argument, .user_data = NULL},
     .join_result_type = loom_amdgpu_join_result_type,
+    .native_result_distribution = loom_amdgpu_native_result_distribution,
     .map_abi_layout = {.fn = loom_amdgpu_map_abi_layout, .user_data = NULL},
     .emit_preamble = {.fn = loom_amdgpu_emit_preamble, .user_data = NULL},
     .entry_setup = {.plan = loom_amdgpu_plan_entry_setup,

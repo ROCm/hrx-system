@@ -31,14 +31,14 @@ typedef struct loom_low_source_invocation_facts_t {
   // Complete source call graph retained for dependent module planning.
   loom_call_graph_t call_graph;
   // One when the corresponding module symbol has a retained direct semantic
-  // caller after source inlining. NULL when the module has no semantic calls.
+  // caller after source inlining. NULL when the module has no source calls.
   const uint8_t* direct_call_targets;
   // Number of entries in |direct_call_targets|.
   iree_host_size_t direct_call_target_count;
 } loom_low_source_invocation_facts_t;
 
 // Computes entry, private acyclic argument, and call-result facts before source
-// lowering. Modules without semantic calls return an empty summary without
+// lowering. Modules without source calls return an empty summary without
 // allocating or walking IR; the module maintains that inventory as operations
 // mutate.
 //
@@ -49,6 +49,10 @@ typedef struct loom_low_source_invocation_facts_t {
 // recursive callees retain their declared value domains and admit lane-varying
 // arguments on targets with more than one lane per subgroup.
 // Region-declared entry uniformity requires no duplicate argument seeds.
+// Native calls publish immutable per-execution result distribution from their
+// declared carriers without analyzing or solving their bodies. The local fact
+// owner accounts for divergent temporal observations. Native and semantic call
+// discovery share the same traversal.
 // Selected functions use their exact target facts. Changed boundary summaries
 // requeue dependent functions and update retained local equations through the
 // shared incremental fact engine. Entry changes and condition-refined scopes

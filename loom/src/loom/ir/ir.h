@@ -745,10 +745,10 @@ enum loom_op_flag_bits_e {
   // non-semantic source presentation preserved across exact cloning.
   LOOM_OP_FLAG_LEADING_BLANK_LINE = 1u << 3,
 
-  // The operation implements an ordinary semantic call boundary. This is
+  // The operation implements a source-typed semantic or native call. This is
   // cached from its immutable vtable so module inventories do not resolve the
   // operation kind again as summaries are recorded and dropped.
-  LOOM_OP_FLAG_SEMANTIC_CALL = 1u << 4,
+  LOOM_OP_FLAG_SOURCE_CALL = 1u << 4,
 
   // The operation implements the generated DirectBranch interface. Cached
   // from its immutable vtable so CFG, scheduling, and emission hot paths can
@@ -2846,8 +2846,8 @@ typedef struct loom_module_t {
   // Number of live poison-materializing operations in the module.
   uint32_t poison_op_count;
 
-  // Number of live ordinary semantic call operations in the module.
-  uint32_t semantic_call_op_count;
+  // Number of live source-typed semantic or native call operations.
+  uint32_t source_call_op_count;
 
   // Number of live target-Low internal call operations in the module.
   uint32_t low_internal_call_op_count;
@@ -2858,9 +2858,9 @@ static inline bool loom_module_has_poison(const loom_module_t* module) {
   return module && module->poison_op_count != 0;
 }
 
-// Returns true when the module contains any live ordinary semantic call.
-static inline bool loom_module_has_semantic_calls(const loom_module_t* module) {
-  return module && module->semantic_call_op_count != 0;
+// Returns true when the module contains any live source-typed call.
+static inline bool loom_module_has_source_calls(const loom_module_t* module) {
+  return module && module->source_call_op_count != 0;
 }
 
 // Returns true when the module contains any live target-Low internal call.

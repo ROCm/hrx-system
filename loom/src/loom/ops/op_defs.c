@@ -300,10 +300,11 @@ loom_trait_flags_t loom_op_effective_traits(const loom_module_t* module,
 void loom_op_refresh_effective_traits(const loom_module_t* module,
                                       loom_op_t* op) {
   const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
-  op->flags &= ~(LOOM_OP_FLAG_SEMANTIC_CALL | LOOM_OP_FLAG_LOW_INTERNAL_CALL);
+  op->flags &= ~(LOOM_OP_FLAG_SOURCE_CALL | LOOM_OP_FLAG_LOW_INTERNAL_CALL);
   if (vtable && vtable->call_like) {
-    if (vtable->call_like->kind == LOOM_CALL_LIKE_KIND_SEMANTIC) {
-      op->flags |= LOOM_OP_FLAG_SEMANTIC_CALL;
+    if (vtable->call_like->kind == LOOM_CALL_LIKE_KIND_SEMANTIC ||
+        vtable->call_like->kind == LOOM_CALL_LIKE_KIND_LOW_INVOKE) {
+      op->flags |= LOOM_OP_FLAG_SOURCE_CALL;
     } else if (vtable->call_like->kind == LOOM_CALL_LIKE_KIND_LOW_INTERNAL) {
       op->flags |= LOOM_OP_FLAG_LOW_INTERNAL_CALL;
     }

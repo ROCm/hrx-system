@@ -329,6 +329,11 @@ iree_status_t loom_amdgpu_map_value(void* user_data,
 loom_type_t loom_amdgpu_join_result_type(loom_type_t source_type,
                                          loom_type_t lhs, loom_type_t rhs);
 
+// Projects a native result carrier's per-execution lane distribution. A
+// two-word SGPR logical Boolean carries lane bits, unlike an SGPR integer.
+loom_value_fact_flags_t loom_amdgpu_native_result_distribution(
+    loom_type_t source_type, loom_type_t native_type);
+
 // Maps a source value to AMDGPU descriptor register metadata for read-only
 // target contract queries.
 iree_status_t loom_amdgpu_map_contract_value(

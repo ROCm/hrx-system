@@ -640,7 +640,7 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
   loom_low_lower_call_interface_index_t call_interfaces = {0};
   const loom_low_lower_call_interface_index_t* call_interface_index = NULL;
   if (iree_status_is_ok(status) && !emitted_error_diagnostics &&
-      loom_module_has_semantic_calls(module)) {
+      loom_module_has_source_calls(module)) {
     status = loom_low_lower_call_interface_index_initialize(
         &selection_arena, module->symbols.count, &call_interfaces);
     call_interface_index = &call_interfaces;
