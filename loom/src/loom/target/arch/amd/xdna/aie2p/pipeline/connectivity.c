@@ -66,7 +66,7 @@ static loom_aie2p_native_connectivity_tile_t* loom_aie2p_connectivity_tile(
                       coordinate.row];
 }
 
-iree_status_t loom_aie2p_native_connectivity_initialize(
+iree_status_t loom_aie2p_native_connectivity_allocate(
     const loom_xdna_array_family_t* family,
     const loom_aie2p_native_switch_t* switches,
     const loom_aie2p_array_route_plan_t* routes, iree_host_size_t route_count,
@@ -413,7 +413,7 @@ static iree_status_t loom_aie2p_native_connections_verify_impl(
     const loom_aie2p_native_context_t* context) {
   loom_aie2p_native_connectivity_t* connectivity;
   iree_arena_allocator_t* arena = context->pass->arena;
-  IREE_RETURN_IF_ERROR(loom_aie2p_native_connectivity_initialize(
+  IREE_RETURN_IF_ERROR(loom_aie2p_native_connectivity_allocate(
       context->family, context->switches, context->routing.routes,
       context->routing.route_count, arena, &connectivity));
   iree_host_size_t capacity = context->control_connection_count;

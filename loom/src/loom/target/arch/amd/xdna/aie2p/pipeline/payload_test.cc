@@ -159,16 +159,14 @@ TEST_F(PayloadTest, PhasedInputAndOrdinaryIngressUseTheSamePhysicalClass) {
   loom_aie2p_native_tile_t* pools[] = {&tiles_[2]};
   context_.pool_tiles = pools;
   loom_aie2p_native_channel_t destination = {};
-  loom_pipeline_transport_input_t source = {};
-  source.phase_count = 1;
-  loom_aie2p_native_input_phase_t phase = {};
-  phase.destination = &destination;
-  loom_aie2p_native_input_path_t path = {};
-  path.shim = &tiles_[0];
-  loom_aie2p_native_input_t input = {};
-  input.source = &source;
-  input.path = &path;
-  input.phases = &phase;
+  loom_pipeline_transport_input_t source = {.phase_count = 1};
+  loom_aie2p_native_input_phase_t phase = {.destination = &destination};
+  loom_aie2p_native_input_path_t path = {.shim = &tiles_[0]};
+  loom_aie2p_native_input_t input = {
+      .source = &source,
+      .phases = &phase,
+      .path = &path,
+  };
   workers_[1].input = &input;
   Form();
   EXPECT_EQ(paths_[0].payload, phase.payload);

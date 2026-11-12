@@ -70,7 +70,7 @@ class ConnectivityTest : public ::testing::Test {
         loom_aie2p_native_switches_build(&context_, nullptr, &valid));
     ASSERT_TRUE(valid);
     ASSERT_TRUE(diagnostics_.emissions.empty());
-    IREE_ASSERT_OK(loom_aie2p_native_connectivity_initialize(
+    IREE_ASSERT_OK(loom_aie2p_native_connectivity_allocate(
         context_.family, context_.switches, context_.routing.routes,
         context_.routing.route_count, &arena_, &connectivity_));
   }

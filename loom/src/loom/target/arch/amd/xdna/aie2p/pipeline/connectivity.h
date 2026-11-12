@@ -56,11 +56,12 @@ typedef struct loom_aie2p_native_connectivity_result_t {
 typedef struct loom_aie2p_native_connectivity_t
     loom_aie2p_native_connectivity_t;
 
-// Builds an independent physical-network view from completed register banks
-// and admitted shim mux connections. The audit is separate from route selection
-// and admission. It does not inspect source IR, route-tree identities, DMA
-// descriptors, credit lifetimes, or execution time.
-iree_status_t loom_aie2p_native_connectivity_initialize(
+// Allocates an independent physical-network view from completed register banks
+// and admitted shim mux connections. All storage belongs to |arena|. The audit
+// is separate from route selection and admission. It does not inspect source
+// IR, route-tree identities, DMA descriptors, credit lifetimes, or execution
+// time.
+iree_status_t loom_aie2p_native_connectivity_allocate(
     const loom_xdna_array_family_t* family,
     const loom_aie2p_native_switch_t* switches,
     const loom_aie2p_array_route_plan_t* routes, iree_host_size_t route_count,

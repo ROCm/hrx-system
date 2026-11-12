@@ -38,10 +38,12 @@ class DmaQueuesTest : public ::testing::Test {
     context_.dma_queue_count = 6;
     realization_.invocations.workers = ownership_;
     realization_.invocations.worker_count = IREE_ARRAYSIZE(workers_);
-    realization_.invocations.lifetimes = {.nodes = nodes_,
-                                          .count = IREE_ARRAYSIZE(nodes_),
-                                          .owners = owners_,
-                                          .has_serial = true};
+    realization_.invocations.lifetimes = {
+        .nodes = nodes_,
+        .count = IREE_ARRAYSIZE(nodes_),
+        .owners = owners_,
+        .has_serial = true,
+    };
     for (size_t i = 0; i < IREE_ARRAYSIZE(workers_); ++i) {
       invocations_[i].ordinal = i;
       ownership_[i].invocation = &invocations_[i];

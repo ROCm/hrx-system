@@ -362,10 +362,12 @@ class DistributionPathTest
         {LOOM_PIPELINE_LIFETIME_OWNER, 3, 2, none, none},
     };
     const iree_host_size_t owners[] = {1, 3, 4, 5};
-    realization_.invocations.lifetimes = {.nodes = nodes,
-                                          .count = IREE_ARRAYSIZE(nodes),
-                                          .owners = owners,
-                                          .has_serial = true};
+    realization_.invocations.lifetimes = {
+        .nodes = nodes,
+        .count = IREE_ARRAYSIZE(nodes),
+        .owners = owners,
+        .has_serial = true,
+    };
     bool valid = false;
     iree_host_size_t distribution_workers[kStreams];
     for (size_t i = 0; i < kStreams; ++i) {
