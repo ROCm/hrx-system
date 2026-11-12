@@ -2959,25 +2959,34 @@ TEST_F(ParserTest, DuplicateBindingListName) {
 }
 
 TEST_F(ParserTest, DuplicateAttrDictKey) {
-  const auto& diagnostics = ParseExpectErrors(
-      "%c = test.constant 0 : f32\n"
-      "%s = test.attrs %c {alpha = 1, alpha = 2} : f32\n");
-  ASSERT_GE(diagnostics.size(), 1u);
-  ExpectError(diagnostics[0],
-              loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 20));
-  EXPECT_EQ(GetStringParam(diagnostics[0], 0), "alpha");
-  EXPECT_EQ(diagnostics[0].origin_line, 2u);
-  EXPECT_EQ(diagnostics[0].origin_column, 32u);
-  EXPECT_EQ(diagnostics[0].origin_end_column, 37u);
-  ASSERT_EQ(diagnostics[0].related_locations.size(), 1u);
-  const auto& previous_key_note = diagnostics[0].related_locations[0];
-  EXPECT_EQ(previous_key_note.label, "previously defined here");
-  EXPECT_TRUE(previous_key_note.has_source_range);
-  EXPECT_EQ(previous_key_note.source_location.provenance,
-            LOOM_SOURCE_PROVENANCE_EXACT_SOURCE);
-  EXPECT_EQ(previous_key_note.source_location.start_line, 2u);
-  EXPECT_EQ(previous_key_note.source_location.start_column, 21u);
-  EXPECT_EQ(previous_key_note.source_location.end_column, 26u);
+  for (uint32_t intervening_count : {0u, 17u, 81u}) {
+    SCOPED_TRACE(intervening_count);
+    std::string source =
+        "%c = test.constant 0 : f32\n"
+        "%s = test.attrs %c {\n"
+        "  alpha = 1,\n";
+    for (uint32_t i = intervening_count; i > 0; --i) {
+      source += "  key" + std::to_string(i) + " = 0,\n";
+    }
+    source += "  alpha = 2} : f32\n";
+    const auto& diagnostics = ParseExpectErrors(source.c_str());
+    ASSERT_GE(diagnostics.size(), 1u);
+    ExpectError(diagnostics[0],
+                loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 20));
+    EXPECT_EQ(GetStringParam(diagnostics[0], 0), "alpha");
+    EXPECT_EQ(diagnostics[0].origin_line, intervening_count + 4u);
+    EXPECT_EQ(diagnostics[0].origin_column, 3u);
+    EXPECT_EQ(diagnostics[0].origin_end_column, 8u);
+    ASSERT_EQ(diagnostics[0].related_locations.size(), 1u);
+    const auto& previous_key_note = diagnostics[0].related_locations[0];
+    EXPECT_EQ(previous_key_note.label, "previously defined here");
+    EXPECT_TRUE(previous_key_note.has_source_range);
+    EXPECT_EQ(previous_key_note.source_location.provenance,
+              LOOM_SOURCE_PROVENANCE_EXACT_SOURCE);
+    EXPECT_EQ(previous_key_note.source_location.start_line, 3u);
+    EXPECT_EQ(previous_key_note.source_location.start_column, 3u);
+    EXPECT_EQ(previous_key_note.source_location.end_column, 8u);
+  }
 }
 
 TEST_F(ParserTest, DuplicateOperandDictKey) {
