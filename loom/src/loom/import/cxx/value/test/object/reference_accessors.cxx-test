@@ -1007,44 +1007,45 @@ unsigned write_mixed_result(bool automatic, unsigned local,
 // ----
 func.def public @write_mixed_result(%automatic: i1, %local$1: i32, %memory: buffer, %memory_byte_offset: offset) -> (i32) {
   %5 = scalar.constant 3 : i32
-  %6 = buffer.view %memory[%memory_byte_offset] : buffer -> view<1xi32>
-  %7 = func.call pure @choose_mixed_origin(%automatic, %local$1, %memory, %memory_byte_offset) : (i1, i32, buffer, offset) -> (i32)
-  %8 = scalar.constant 0 : i32
-  %9 = scalar.cmpi eq, %7, %8 : i32
-  %10 = scf.if %9 -> (i32) {
+  %6 = func.call pure @choose_mixed_origin(%automatic, %local$1, %memory, %memory_byte_offset) : (i1, i32, buffer, offset) -> (i32)
+  %7 = scalar.constant 0 : i32
+  %8 = scalar.cmpi eq, %6, %7 : i32
+  %9 = scf.if %8 -> (i32) {
     scf.yield %local$1 : i32
   } else {
-    %11 = view.load<root_in_bounds> %6[0] : view<1xi32> -> i32
+    %10 = buffer.view %memory[%memory_byte_offset] : buffer -> view<1xi32>
+    %11 = view.load<root_in_bounds> %10[0] : view<1xi32> -> i32
     scf.yield %11 : i32
   }
-  %12 = scalar.addi %10, %5 : i32
+  %12 = scalar.addi %9, %5 : i32
   %13 = scalar.constant 0 : i32
-  %14 = scalar.cmpi eq, %7, %13 : i32
+  %14 = scalar.cmpi eq, %6, %13 : i32
   %local$15 = scf.if %14 -> (i32) {
     scf.yield %12 : i32
   } else {
     scf.yield %local$1 : i32
   }
   %16 = scalar.constant 1 : i32
-  %17 = scalar.cmpi eq, %7, %16 : i32
+  %17 = scalar.cmpi eq, %6, %16 : i32
   scf.if %17 {
-    view.store<root_in_bounds> %12, %6[0] : i32, view<1xi32>
+    %18 = buffer.view %memory[%memory_byte_offset] : buffer -> view<1xi32>
+    view.store<root_in_bounds> %12, %18[0] : i32, view<1xi32>
   }
-  %18 = buffer.view %memory[%memory_byte_offset] : buffer -> view<1xi32>
-  %19 = view.load<root_in_bounds> %18[0] : view<1xi32> -> i32
-  %20 = scalar.addi %local$15, %19 : i32
-  func.return %20 : i32
+  %19 = buffer.view %memory[%memory_byte_offset] : buffer -> view<1xi32>
+  %20 = view.load<root_in_bounds> %19[0] : view<1xi32> -> i32
+  %21 = scalar.addi %local$15, %20 : i32
+  func.return %21 : i32
 }
 
 func.def @choose_mixed_origin(%automatic: i1, %local: i32, %memory: buffer, %memory_byte_offset: offset) -> (i32) {
-  %28 = scf.if %automatic -> (i32) {
-    %26 = scalar.constant 0 : i32
-    scf.yield %26 : i32
-  } else {
-    %27 = scalar.constant 1 : i32
+  %29 = scf.if %automatic -> (i32) {
+    %27 = scalar.constant 0 : i32
     scf.yield %27 : i32
+  } else {
+    %28 = scalar.constant 1 : i32
+    scf.yield %28 : i32
   }
-  func.return %28 : i32
+  func.return %29 : i32
 }
 
 // ====
@@ -1063,19 +1064,19 @@ unsigned read_selected_volatile(bool first, const volatile unsigned* left,
 
 // ----
 func.def public @read_selected_volatile(%first: i1, %left: buffer, %left_byte_offset: offset, %right: buffer, %right_byte_offset: offset) -> (i32) {
-  %6 = buffer.view %left[%left_byte_offset] : buffer -> view<1xi32>
-  %7 = buffer.view %right[%right_byte_offset] : buffer -> view<1xi32>
-  %8 = func.call pure @choose_volatile(%first, %left, %left_byte_offset, %right, %right_byte_offset) : (i1, buffer, offset, buffer, offset) -> (i32)
-  %9 = scalar.constant 0 : i32
-  %10 = scalar.cmpi eq, %8, %9 : i32
-  %11 = scf.if %10 -> (i32) {
-    %12 = view.load<volatile|root_in_bounds> %6[0] : view<1xi32> -> i32
-    scf.yield %12 : i32
+  %6 = func.call pure @choose_volatile(%first, %left, %left_byte_offset, %right, %right_byte_offset) : (i1, buffer, offset, buffer, offset) -> (i32)
+  %7 = scalar.constant 0 : i32
+  %8 = scalar.cmpi eq, %6, %7 : i32
+  %9 = scf.if %8 -> (i32) {
+    %10 = buffer.view %left[%left_byte_offset] : buffer -> view<1xi32>
+    %11 = view.load<volatile|root_in_bounds> %10[0] : view<1xi32> -> i32
+    scf.yield %11 : i32
   } else {
-    %13 = view.load<volatile|root_in_bounds> %7[0] : view<1xi32> -> i32
+    %12 = buffer.view %right[%right_byte_offset] : buffer -> view<1xi32>
+    %13 = view.load<volatile|root_in_bounds> %12[0] : view<1xi32> -> i32
     scf.yield %13 : i32
   }
-  func.return %11 : i32
+  func.return %9 : i32
 }
 
 func.def @choose_volatile(%first: i1, %left: buffer, %left_byte_offset: offset, %right: buffer, %right_byte_offset: offset) -> (i32) {

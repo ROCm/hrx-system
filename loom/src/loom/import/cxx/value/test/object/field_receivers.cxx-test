@@ -246,3 +246,124 @@ func.def @Bounds__length_storage(%this: buffer, %this_byte_offset: offset) -> (i
   %79 = scalar.subi %64, %78 : i32
   func.return %79 : i32
 }
+
+// ====
+// Copying the complete receiver reads its field values without requesting
+// physical identity. Later changes to either object preserve the copy.
+struct Cursor {
+  float* pointer;
+  int length;
+  Cursor shifted(int amount) const {
+    Cursor copy = *this;
+    copy.pointer += amount;
+    copy.length -= amount;
+    return copy;
+  }
+  Cursor advance(int amount) {
+    Cursor previous = *this;
+    pointer += amount;
+    length -= amount;
+    return previous;
+  }
+};
+float copy_receiver(float* input, int amount) {
+  Cursor cursor{input, 8};
+  auto shifted = cursor.shifted(amount);
+  auto previous = cursor.advance(amount);
+  return shifted.pointer[0] + previous.pointer[0] + cursor.length;
+}
+
+// ----
+func.def public @copy_receiver(%input: buffer, %input_byte_offset: offset, %amount: i32) -> (f32) {
+  %cursor_length$4 = scalar.constant 8 : i32
+  %shifted_pointer, %shifted_pointer_byte_offset, %shifted_length = func.call pure @Cursor__shifted_value(%input, %input_byte_offset, %cursor_length$4, %amount) : (buffer, offset, i32, i32) -> (buffer, offset, i32)
+  %previous_pointer, %previous_pointer_byte_offset, %previous_length, %cursor_pointer, %cursor_pointer_byte_offset, %cursor_length$13 = func.call pure @Cursor__advance_value(%input, %input_byte_offset, %cursor_length$4, %amount) : (buffer, offset, i32, i32) -> (buffer, offset, i32, buffer, offset, i32)
+  %14 = scalar.constant 0 : i32
+  %15 = scalar.extsi %14 : i32 to i64
+  %16 = scalar.constant 4 : i64
+  %17 = scalar.muli %15, %16 : i64
+  %18 = index.cast %shifted_pointer_byte_offset : offset to i64
+  %19 = scalar.addi %18, %17 : i64
+  %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
+  %21 = index.cast %20 : i64 to offset
+  %22 = buffer.view %shifted_pointer[%21] : buffer -> view<1xf32>
+  %23 = view.load<root_in_bounds> %22[0] : view<1xf32> -> f32
+  %24 = scalar.constant 0 : i32
+  %25 = scalar.extsi %24 : i32 to i64
+  %26 = scalar.constant 4 : i64
+  %27 = scalar.muli %25, %26 : i64
+  %28 = index.cast %previous_pointer_byte_offset : offset to i64
+  %29 = scalar.addi %28, %27 : i64
+  %30 = scalar.assume %29 [range(%29, 0, 9223372036854775807)] : i64
+  %31 = index.cast %30 : i64 to offset
+  %32 = buffer.view %previous_pointer[%31] : buffer -> view<1xf32>
+  %33 = view.load<root_in_bounds> %32[0] : view<1xf32> -> f32
+  %34 = scalar.addf %23, %33 : f32
+  %35 = scalar.sitofp %cursor_length$13 : i32 to f32
+  %36 = scalar.addf %34, %35 : f32
+  func.return %36 : f32
+}
+
+func.def @Cursor__shifted_value(%this_pointer: buffer, %this_pointer_byte_offset: offset, %this_length: i32, %amount: i32) -> (buffer, offset, i32) {
+  %44 = scalar.extsi %amount : i32 to i64
+  %45 = scalar.constant 4 : i64
+  %46 = scalar.muli %44, %45 : i64
+  %47 = index.cast %this_pointer_byte_offset : offset to i64
+  %48 = scalar.addi %47, %46 : i64
+  %49 = scalar.assume %48 [range(%48, 0, 9223372036854775807)] : i64
+  %copy_pointer_byte_offset = index.cast %49 : i64 to offset
+  %copy_length = scalar.subi %this_length, %amount : i32
+  func.return %this_pointer, %copy_pointer_byte_offset, %copy_length : buffer, offset, i32
+}
+
+func.def @Cursor__advance_value(%this_pointer: buffer, %this_pointer_byte_offset: offset, %this_length: i32, %amount: i32) -> (buffer, offset, i32, buffer, offset, i32) {
+  %62 = scalar.extsi %amount : i32 to i64
+  %63 = scalar.constant 4 : i64
+  %64 = scalar.muli %62, %63 : i64
+  %65 = index.cast %this_pointer_byte_offset : offset to i64
+  %66 = scalar.addi %65, %64 : i64
+  %67 = scalar.assume %66 [range(%66, 0, 9223372036854775807)] : i64
+  %pointer_byte_offset = index.cast %67 : i64 to offset
+  %length = scalar.subi %this_length, %amount : i32
+  func.return %this_pointer, %this_pointer_byte_offset, %this_length, %this_pointer, %pointer_byte_offset, %length : buffer, offset, i32, buffer, offset, i32
+}
+
+// ====
+// A receiver already reached through storage uses the same complete-value
+// read, and copying an inherited receiver selects only its base subobject.
+struct Base {
+  int value;
+  Base copy() const { return *this; }
+};
+struct Derived : Base {
+  int extra;
+};
+int copy_storage(const Base* input) { return input->copy().value; }
+int copy_base(int value) {
+  Derived input{{value}, 7};
+  return input.copy().value;
+}
+
+// ----
+func.def public @copy_storage(%input: buffer, %input_byte_offset: offset) -> (i32) {
+  %3 = func.call readonly @Base__copy_storage(%input, %input_byte_offset) : (buffer, offset) -> (i32)
+  func.return %3 : i32
+}
+
+func.def public @copy_base(%value: i32) -> (i32) {
+  %input_extra = scalar.constant 7 : i32
+  %7 = func.call pure @Base__copy_value(%value) : (i32) -> (i32)
+  func.return %7 : i32
+}
+
+func.def @Base__copy_storage(%this: buffer, %this_byte_offset: offset) -> (i32) {
+  %11 = index.constant 0 : offset
+  %12 = index.add %this_byte_offset, %11 : offset
+  %13 = buffer.view %this[%12] : buffer -> view<1xi32>
+  %14 = view.load<root_in_bounds> %13[0] : view<1xi32> -> i32
+  func.return %14 : i32
+}
+
+func.def @Base__copy_value(%this_value: i32) -> (i32) {
+  func.return %this_value : i32
+}

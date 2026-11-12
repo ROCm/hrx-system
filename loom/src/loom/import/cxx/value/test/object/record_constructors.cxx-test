@@ -907,9 +907,9 @@ func.def public @widen(%value: f32) -> (f64) {
 }
 
 func.def public @narrow(%value: i32) -> (i32) {
-  %15 = scalar.trunci %value : i32 to i8
-  %30 = scalar.extui %15 : i8 to i32
-  func.return %30 : i32
+  %6 = scalar.trunci %value : i32 to i8
+  %12 = scalar.extui %6 : i8 to i32
+  func.return %12 : i32
 }
 
 // ====
@@ -933,18 +933,18 @@ unsigned indexed(Number value, unsigned index) { return read(value[index]); }
 unsigned mutate(unsigned seed) { Alias alias{seed}; increment(alias); return alias.value; }
 // ----
 func.def public @converted(%value_value: i32) -> (i32) {
-  %34 = scalar.constant 3 : i32
-  %35 = scalar.muli %value_value, %34 : i32
-  func.return %35 : i32
+  %16 = scalar.constant 3 : i32
+  %17 = scalar.muli %value_value, %16 : i32
+  func.return %17 : i32
 }
 
 func.def public @indexed(%value_value: i32, %index: i32) -> (i32) {
-  %39 = scalar.addi %value_value, %index : i32
-  func.return %39 : i32
+  %21 = scalar.addi %value_value, %index : i32
+  func.return %21 : i32
 }
 
 func.def public @mutate(%seed: i32) -> (i32) {
-  %42 = scalar.constant 1 : i32
-  %value = scalar.addi %seed, %42 : i32
+  %24 = scalar.constant 1 : i32
+  %value = scalar.addi %seed, %24 : i32
   func.return %value : i32
 }

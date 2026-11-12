@@ -14,3 +14,10 @@ const Owner* escape_temporary(double* input) {
   // ERROR@+1: LOWERING/059 "reference identity escaped an automatic value without addressable storage"
   return &owner;
 }
+
+// ====
+float* const* escape_pointer(float* input) {
+  float* const& pointer = input + 1;
+  // ERROR@+1: LOWERING/059 "reference identity escaped an automatic value without addressable storage"
+  return &pointer;
+}

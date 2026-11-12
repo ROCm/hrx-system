@@ -155,6 +155,11 @@ TEST(TemporaryOriginsTest, OrdinaryExpressionsRetainNoSemanticMaterialization) {
   Source source(IREE_SV(R"(
     struct Semantic { unsigned* pointer; };
     Semantic entry(unsigned* pointer) { return Semantic{pointer}; }
+    void references(unsigned* pointer) {
+      unsigned* const& direct = pointer + 1;
+      const void* const& converted = pointer + 1;
+      const auto& null = nullptr;
+    }
   )"),
                 IREE_SV("ordinary_semantic_values.cxx"), options);
   Expressions expressions(source, /*retain_materialization=*/false);
@@ -162,6 +167,44 @@ TEST(TemporaryOriginsTest, OrdinaryExpressionsRetainNoSemanticMaterialization) {
   ASSERT_EQ(expressions.constructions.size(), 1u);
   EXPECT_EQ(expressions.origins.materialization(expressions.constructions[0]),
             nullptr);
+  for (const auto& [name, initializer] : expressions.initializers) {
+    EXPECT_EQ(expressions.origins.materialization(initializer), nullptr);
+  }
+}
+
+TEST(TemporaryOriginsTest, PointerConversionsOwnTheirMaterializedValue) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    void entry(unsigned* pointer, bool choose) {
+      unsigned* const& direct = pointer + 1;
+      const unsigned* const& qualified = pointer + 1;
+      const void* const& erased = pointer + 1;
+      unsigned* const& conditional = choose ? pointer : nullptr;
+      unsigned* const& comma = (++pointer, pointer + 1);
+      const auto& null = nullptr;
+    }
+  )"),
+                IREE_SV("pointer_materializations.cxx"), options);
+  Expressions expressions(source);
+  expressions.accept(source.unit().ast());
+  for (const auto& [name, initializer] : expressions.initializers) {
+    SCOPED_TRACE(name);
+    auto* referent = cxx::Initializer(initializer)
+                         .referenceExpression(source.unit().typeTraits());
+    ASSERT_NE(referent, nullptr);
+    auto* materialization = expressions.origins.materialization(referent);
+    ASSERT_NE(materialization, nullptr);
+    EXPECT_EQ(materialization->type, referent->type);
+    EXPECT_EQ(expressions.origins.result(referent), nullptr);
+    if (name == "erased") {
+      auto* conversion =
+          cxx::ast_cast<cxx::ImplicitCastExpressionAST>(materialization);
+      ASSERT_NE(conversion, nullptr);
+      EXPECT_NE(materialization,
+                expressions.origins.materialization(conversion->expression));
+    }
+  }
 }
 
 TEST(TemporaryOriginsTest, ReferenceExtensionFollowsTheSourceLifetimeRules) {
