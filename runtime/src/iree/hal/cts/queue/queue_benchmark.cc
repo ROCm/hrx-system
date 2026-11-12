@@ -273,11 +273,15 @@ class TransferChain {
     return iree_hal_command_buffer_end(command_buffer);
   }
 
-  iree_status_t Reset() {
+  void ResetInput() {
     for (auto& value : values_) {
       value = 0;
     }
     values_[0] = ++input_;
+  }
+
+  iree_status_t Reset() {
+    ResetInput();
     return iree_hal_buffer_map_write(buffer_, 0, values_.data(),
                                      values_.size() * sizeof(uint32_t));
   }
@@ -372,6 +376,26 @@ class TransferChain {
     return status;
   }
 
+  // Keep upload, resident work, and feedback on one asynchronous dependency
+  // chain. The caller waits only for the final download.
+  iree_status_t SubmitRoundTrip(Submission submission) {
+    const auto length = values_.size() * sizeof(uint32_t);
+    uint64_t next_value = submitted_value_ + 1;
+    const iree_hal_semaphore_list_t waits = {1, &timeline_, &submitted_value_};
+    const iree_hal_semaphore_list_t signals = {1, &timeline_, &next_value};
+    IREE_RETURN_IF_ERROR(iree_hal_queue_upload(
+        queue_, waits, signals, values_.data(), buffer_, 0, length, nullptr));
+    submitted_value_ = next_value;
+    IREE_RETURN_IF_ERROR(Submit(submission));
+    next_value = submitted_value_ + 1;
+    IREE_RETURN_IF_ERROR(iree_hal_queue_download(
+        queue_, waits, signals, buffer_, 0, received_.data(), length, nullptr));
+    submitted_value_ = next_value;
+    return iree_ok_status();
+  }
+
+  iree_status_t VerifyRoundTrip() const { return VerifyContents(received_); }
+
   iree_status_t Submit(Submission submission) {
     const iree_host_size_t count = submission == Submission::kRecorded ? 1
                                    : submission == Submission::kMixed
@@ -418,17 +442,21 @@ class TransferChain {
   iree_status_t Verify() {
     IREE_RETURN_IF_ERROR(iree_hal_buffer_map_read(
         buffer_, 0, values_.data(), values_.size() * sizeof(uint32_t)));
-    for (iree_host_size_t i = 0; i < values_.size(); ++i) {
-      if (values_[i] != input_) {
+    return VerifyContents(values_);
+  }
+
+ private:
+  iree_status_t VerifyContents(const std::vector<uint32_t>& values) const {
+    for (iree_host_size_t i = 0; i < values.size(); ++i) {
+      if (values[i] != input_) {
         return iree_make_status(IREE_STATUS_DATA_LOSS,
                                 "slot %zu: expected %u, got %u", i, input_,
-                                values_[i]);
+                                values[i]);
       }
     }
     return iree_ok_status();
   }
 
- private:
   // Borrowed queue, alive with the enclosing QueueDevice.
   iree_hal_queue_t* queue_ = nullptr;
   // Optional second borrowed queue for explicit alternating dependency edges.
@@ -563,6 +591,73 @@ BENCHMARK_TEMPLATE(BM_TransferChain, Submission::kExecute, false,
     ->MeasureProcessCPUTime()
     ->UseRealTime();
 
+// File loading can leave backend-owned staging state behind. Measure complete
+// requests with that state present, retaining host/device storage across
+// cycles.
+template <Submission kSubmission>
+void BM_TransferRoundTrip(benchmark::State& state) {
+  QueueDevice device;
+  iree::Status status =
+      device.Initialize(kSubmission == Submission::kCrossQueue ? 2 : 1);
+  if (status.ok() && kSubmission == Submission::kCrossQueue &&
+      device.queue_count() < 2) {
+    state.SkipWithMessage("two transfer queues are required");
+    return;
+  }
+  TransferChain chain;
+  if (status.ok()) {
+    status = chain.Initialize(device, 0, state.range(0), kSubmission);
+  }
+  if (status.ok()) {
+    status = chain.Reset();
+  }
+  if (status.ok()) {
+    status = chain.PrimeFile(device.device());
+  }
+  if (status.ok()) {
+    chain.ResetInput();
+    status = chain.SubmitRoundTrip(kSubmission);
+  }
+  status = iree_status_join(status.release(), chain.Wait());
+  if (status.ok()) {
+    status = chain.VerifyRoundTrip();
+  }
+  if (!status.ok()) {
+    state.SkipWithError(status.ToString().c_str());
+    return;
+  }
+  state.SetLabel(device.label());
+  for (auto _ : state) {
+    state.PauseTiming();
+    chain.ResetInput();
+    state.ResumeTiming();
+    status = chain.SubmitRoundTrip(kSubmission);
+    status = iree_status_join(status.release(), chain.Wait());
+    state.PauseTiming();
+    if (status.ok()) {
+      status = chain.VerifyRoundTrip();
+    }
+    state.ResumeTiming();
+    if (!status.ok()) {
+      state.SkipWithError(status.ToString().c_str());
+      break;
+    }
+  }
+  state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+BENCHMARK_TEMPLATE(BM_TransferRoundTrip, Submission::kRecorded)
+    ->Name("TransferChain/RecordedRoundTripAfterFile")
+    ->Arg(32)
+    ->Arg(512)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+BENCHMARK_TEMPLATE(BM_TransferRoundTrip, Submission::kCrossQueue)
+    ->Name("TransferChain/CrossQueueRoundTripAfterFile")
+    ->Arg(32)
+    ->Arg(512)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+
 // Measure the complete host upload/download path with changing payloads and
 // reused host/device storage. Reset and exact verification stay outside timing.
 static void BM_HostRoundTrip(benchmark::State& state) {
@@ -605,6 +700,10 @@ static void BM_HostRoundTrip(benchmark::State& state) {
 BENCHMARK(BM_HostRoundTrip)
     ->Name("Transfer/HostRoundTrip")
     ->Arg(65536)
+    ->Arg(128)
+    ->Arg(4096)
+    ->Arg(262144)
+    ->Arg(1048576)
     ->Arg(16 * 1024 * 1024)
     ->MeasureProcessCPUTime()
     ->UseRealTime();
