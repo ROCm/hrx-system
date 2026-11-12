@@ -46,3 +46,13 @@ void write(const Record* record) { auto* values = record->values; values[0] = 7;
 void read(const loom::type::view<loom::type::shape<4, 4>, float>* view) {
   auto value = *view;
 }
+
+// ====
+// Exposing an array's address still requires storage for its complete owner.
+struct View { int* data; int values[3]; };
+static void observe(const int* values);
+void escaped(int* data) {
+  // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+  View view{data, {1, 2, 3}};
+  observe(view.values);
+}

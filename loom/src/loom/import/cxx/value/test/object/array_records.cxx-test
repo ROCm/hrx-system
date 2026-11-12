@@ -14,10 +14,10 @@ struct Command { unsigned words[2]; };
 Command adjust(Command value) { value.words[1] += 3; return value; }
 
 // ----
-func.def public @adjust(%value_words_0: i32, %value_words_1: i32) -> (i32, i32) {
-  %16 = scalar.constant 3 : i32
-  %30 = scalar.addi %value_words_1, %16 : i32
-  func.return %value_words_0, %30 : i32, i32
+func.def public @adjust(%value_words_0: i32, %value_words_1$1: i32) -> (i32, i32) {
+  %4 = scalar.constant 3 : i32
+  %value_words_1$6 = scalar.addi %value_words_1$1, %4 : i32
+  func.return %value_words_0, %value_words_1$6 : i32, i32
 }
 
 // ====
@@ -87,18 +87,18 @@ unsigned clipped(const Command* source, unsigned skipped) {
 
 // ----
 func.def public @clipped(%source: buffer, %source_byte_offset: offset, %skipped: i32) -> (i32) {
-  %12 = index.cast %source_byte_offset : offset to i64
-  %14 = scalar.assume %12 [range(%12, 0, 9223372036854775807)] : i64
-  %15 = index.cast %14 : i64 to offset
-  %18 = buffer.view %source[%15] : buffer -> view<1xi32>
-  %19 = view.load<root_in_bounds> %18[0] : view<1xi32> -> i32
-  %20 = index.constant 4 : offset
-  %21 = index.add %15, %20 : offset
-  %22 = buffer.view %source[%21] : buffer -> view<1xi32>
-  %23 = view.load<root_in_bounds> %22[0] : view<1xi32> -> i32
-  %157 = scalar.muli %skipped, %23 : i32
-  %171 = scalar.addi %19, %157 : i32
-  func.return %171 : i32
+  %8 = index.cast %source_byte_offset : offset to i64
+  %10 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %11 = index.cast %10 : i64 to offset
+  %14 = buffer.view %source[%11] : buffer -> view<1xi32>
+  %value_words_0$15 = view.load<root_in_bounds> %14[0] : view<1xi32> -> i32
+  %16 = index.constant 4 : offset
+  %17 = index.add %11, %16 : offset
+  %18 = buffer.view %source[%17] : buffer -> view<1xi32>
+  %value_words_1 = view.load<root_in_bounds> %18[0] : view<1xi32> -> i32
+  %77 = scalar.muli %skipped, %value_words_1 : i32
+  %value_words_0$79 = scalar.addi %value_words_0$15, %77 : i32
+  func.return %value_words_0$79 : i32
 }
 
 // ====
@@ -125,64 +125,50 @@ unsigned temporary(unsigned index) {
 }
 // ----
 func.def public @copies(%index: i32) -> (i32) {
-  %8 = scalar.constant 37 : i32
-  %13 = scalar.constant 41 : i32
-  %52, %53 = func.call @adjust(%8, %13, %index) : (i32, i32, i32) -> (i32, i32)
-  %90 = scalar.constant 100 : i32
-  %104 = scalar.muli %90, %53 : i32
-  %105 = scalar.addi %52, %104 : i32
-  %225 = scalar.constant 37420000 : i32
-  %226 = scalar.addi %105, %225 : i32
-  func.return %226 : i32
+  %original_words_0 = scalar.constant 37 : i32
+  %original_words_1 = scalar.constant 41 : i32
+  %result_words_0, %result_words_1 = func.call pure @adjust(%original_words_0, %original_words_1, %index) : (i32, i32, i32) -> (i32, i32)
+  %10 = scalar.constant 100 : i32
+  %12 = scalar.muli %10, %result_words_1 : i32
+  %13 = scalar.addi %result_words_0, %12 : i32
+  %69 = scalar.constant 37420000 : i32
+  %70 = scalar.addi %13, %69 : i32
+  func.return %70 : i32
 }
 
 func.def public @temporary(%index: i32) -> (i32) {
-  %140 = scalar.constant 5 : i32
-  %141 = scalar.constant 7 : i32
-  %142 = scalar.constant 1 : i32
-  %143, %144 = func.call @adjust(%140, %141, %142) : (i32, i32, i32) -> (i32, i32)
-  %145 = index.constant 8 : offset
-  %words = buffer.alloca<private> align(4) %145 : buffer
-  %230 = index.constant 0 : offset
-  %152 = buffer.view %words[%230] : buffer -> view<1xi32>
-  view.store %143, %152[0] : i32, view<1xi32>
-  %229 = index.constant 4 : offset
-  %156 = buffer.view %words[%229] : buffer -> view<1xi32>
-  view.store %144, %156[0] : i32, view<1xi32>
-  %159 = scalar.extui %index : i32 to i64
-  %227 = scalar.constant 2 : i64
-  %228 = scalar.shli %159, %227 : i64
-  %164 = scalar.assume %228 [range(%228, 0, 9223372036854775807)] : i64
-  %165 = index.cast %164 : i64 to offset
-  %166 = index.assume %165 [range(%165, 0, 4)] : offset
-  %167 = buffer.view %words[%166] : buffer -> view<1xi32>
-  %168 = view.load %167[0] : view<1xi32> -> i32
-  func.return %168 : i32
+  %24 = scalar.constant 5 : i32
+  %25 = scalar.constant 7 : i32
+  %26 = scalar.constant 1 : i32
+  %27, %28 = func.call pure @adjust(%24, %25, %26) : (i32, i32, i32) -> (i32, i32)
+  %29 = index.constant 8 : offset
+  %words = buffer.alloca<private> align(4) %29 : buffer
+  %74 = index.constant 0 : offset
+  %36 = buffer.view %words[%74] : buffer -> view<1xi32>
+  view.store %27, %36[0] : i32, view<1xi32>
+  %73 = index.constant 4 : offset
+  %40 = buffer.view %words[%73] : buffer -> view<1xi32>
+  view.store %28, %40[0] : i32, view<1xi32>
+  %43 = scalar.extui %index : i32 to i64
+  %71 = scalar.constant 2 : i64
+  %72 = scalar.shli %43, %71 : i64
+  %48 = scalar.assume %72 [range(%72, 0, 9223372036854775807)] : i64
+  %49 = index.cast %48 : i64 to offset
+  %50 = index.assume %49 [range(%49, 0, 4)] : offset
+  %51 = buffer.view %words[%50] : buffer -> view<1xi32>
+  %52 = view.load %51[0] : view<1xi32> -> i32
+  func.return %52 : i32
 }
 
-func.def @adjust(%value_words_0$169: i32, %value_words_1$170: i32, %index: i32) -> (i32, i32) {
-  %174 = index.constant 8 : offset
-  %value_storage = buffer.alloca<private> align(4) %174 : buffer
-  %236 = index.constant 0 : offset
-  %181 = buffer.view %value_storage[%236] : buffer -> view<1xi32>
-  view.store %value_words_0$169, %181[0] : i32, view<1xi32>
-  %235 = index.constant 4 : offset
-  %185 = buffer.view %value_storage[%235] : buffer -> view<1xi32>
-  view.store %value_words_1$170, %185[0] : i32, view<1xi32>
-  %186 = scalar.constant 3 : i32
-  %189 = scalar.extui %index : i32 to i64
-  %233 = scalar.constant 2 : i64
-  %234 = scalar.shli %189, %233 : i64
-  %194 = scalar.assume %234 [range(%234, 0, 9223372036854775807)] : i64
-  %195 = index.cast %194 : i64 to offset
-  %196 = index.assume %195 [range(%195, 0, 4)] : offset
-  %197 = buffer.view %value_storage[%196] : buffer -> view<1xi32>
-  %198 = view.load %197[0] : view<1xi32> -> i32
-  %199 = scalar.addi %198, %186 : i32
-  view.store %199, %197[0] : i32, view<1xi32>
-  %value_words_0$204 = view.load %181[0] : view<1xi32> -> i32
-  %value_words_1$209 = view.load %185[0] : view<1xi32> -> i32
-  func.return %value_words_0$204, %value_words_1$209 : i32, i32
+func.def @adjust(%value_words_0$53: i32, %value_words_1$54: i32, %index: i32) -> (i32, i32) {
+  %58 = scalar.constant 3 : i32
+  %59 = scalar.constant 0 : i32
+  %60 = scalar.cmpi eq, %index, %59 : i32
+  %77 = scf.select %60, %value_words_0$53, %value_words_1$54 : i32
+  %62 = scalar.addi %77, %58 : i32
+  %value_words_0$76 = scf.select %60, %62, %value_words_0$53 : i32
+  %value_words_1$75 = scf.select %60, %value_words_1$54, %62 : i32
+  func.return %value_words_0$76, %value_words_1$75 : i32, i32
 }
 
 // ====
@@ -256,56 +242,20 @@ unsigned matrix_copy(unsigned index, unsigned seed) {
 }
 // ----
 func.def public @matrix_copy(%index: i32, %seed: i32) -> (i32) {
-  %3 = index.constant 16 : offset
-  %original_storage = buffer.alloca<private> align(4) %3 : buffer
   %zero$i32 = scalar.constant 0 : i32
-  %211 = index.constant 0 : offset
-  %11 = buffer.view %original_storage[%211] : buffer -> view<1xi32>
-  view.store %zero$i32, %11[0] : i32, view<1xi32>
-  %210 = index.constant 4 : offset
-  %16 = buffer.view %original_storage[%210] : buffer -> view<1xi32>
-  view.store %zero$i32, %16[0] : i32, view<1xi32>
-  %209 = index.constant 8 : offset
-  %21 = buffer.view %original_storage[%209] : buffer -> view<1xi32>
-  view.store %zero$i32, %21[0] : i32, view<1xi32>
-  %208 = index.constant 12 : offset
-  %26 = buffer.view %original_storage[%208] : buffer -> view<1xi32>
-  view.store %zero$i32, %26[0] : i32, view<1xi32>
-  %37 = scalar.extui %index : i32 to i64
-  %206 = scalar.constant 2 : i64
-  %207 = scalar.shli %37, %206 : i64
-  %205 = scalar.constant 8 : i64
-  %204 = scalar.addi %207, %205 : i64
-  %42 = scalar.assume %204 [range(%204, 0, 9223372036854775807)] : i64
-  %43 = index.cast %42 : i64 to offset
-  %44 = index.assume %43 [range(%43, 0, 12)] : offset
-  %45 = buffer.view %original_storage[%44] : buffer -> view<1xi32>
-  view.store %seed, %45[0] : i32, view<1xi32>
-  %copy_storage = buffer.alloca<private> align(4) %3 : buffer
-  %original_values_0_0 = view.load %11[0] : view<1xi32> -> i32
-  %original_values_0_1 = view.load %16[0] : view<1xi32> -> i32
-  %original_values_1_0 = view.load %21[0] : view<1xi32> -> i32
-  %original_values_1_1 = view.load %26[0] : view<1xi32> -> i32
-  %70, %71, %72, %73 = func.call pure @forward(%original_values_0_0, %original_values_0_1, %original_values_1_0, %original_values_1_1) : (i32, i32, i32, i32) -> (i32, i32, i32, i32)
-  %77 = buffer.view %copy_storage[%211] : buffer -> view<1xi32>
-  view.store %70, %77[0] : i32, view<1xi32>
-  %81 = buffer.view %copy_storage[%210] : buffer -> view<1xi32>
-  view.store %71, %81[0] : i32, view<1xi32>
-  %85 = buffer.view %copy_storage[%209] : buffer -> view<1xi32>
-  view.store %72, %85[0] : i32, view<1xi32>
-  %89 = buffer.view %copy_storage[%208] : buffer -> view<1xi32>
-  view.store %73, %89[0] : i32, view<1xi32>
-  %90 = scalar.constant 2 : i32
-  %109 = buffer.view %copy_storage[%44] : buffer -> view<1xi32>
-  %110 = view.load %109[0] : view<1xi32> -> i32
-  %111 = scalar.addi %110, %90 : i32
-  view.store %111, %109[0] : i32, view<1xi32>
-  %131 = view.load %45[0] : view<1xi32> -> i32
-  %151 = view.load %109[0] : view<1xi32> -> i32
-  %152 = scalar.addi %131, %151 : i32
-  %173 = view.load %11[0] : view<1xi32> -> i32
-  %174 = scalar.addi %152, %173 : i32
-  func.return %174 : i32
+  %9 = scalar.cmpi eq, %index, %zero$i32 : i32
+  %original_values_1_0 = scf.select %9, %seed, %zero$i32 : i32
+  %original_values_1_1 = scf.select %9, %zero$i32, %seed : i32
+  %copy_values_0_0, %copy_values_0_1, %copy_values_1_0$16, %copy_values_1_1$17 = func.call pure @forward(%zero$i32, %zero$i32, %original_values_1_0, %original_values_1_1) : (i32, i32, i32, i32) -> (i32, i32, i32, i32)
+  %18 = scalar.constant 2 : i32
+  %54 = scf.select %9, %copy_values_1_0$16, %copy_values_1_1$17 : i32
+  %23 = scalar.addi %54, %18 : i32
+  %copy_values_1_0$53 = scf.select %9, %23, %copy_values_1_0$16 : i32
+  %copy_values_1_1$52 = scf.select %9, %copy_values_1_1$17, %23 : i32
+  %51 = scf.select %9, %original_values_1_0, %original_values_1_1 : i32
+  %50 = scf.select %9, %copy_values_1_0$53, %copy_values_1_1$52 : i32
+  %38 = scalar.addi %51, %50 : i32
+  func.return %38 : i32
 }
 
 func.def @forward(%value_values_0_0: i32, %value_values_0_1: i32, %value_values_1_0: i32, %value_values_1_1: i32) -> (i32, i32, i32, i32) {
@@ -333,70 +283,20 @@ unsigned command_copy(unsigned index, unsigned seed) {
 }
 // ----
 func.def public @command_copy(%index: i32, %seed: i32) -> (i32) {
-  %3 = index.constant 16 : offset
-  %original_storage = buffer.alloca<private> align(4) %3 : buffer
   %zero$i32 = scalar.constant 0 : i32
-  %231 = index.constant 0 : offset
-  %13 = buffer.view %original_storage[%231] : buffer -> view<1xi32>
-  view.store %zero$i32, %13[0] : i32, view<1xi32>
-  %230 = index.constant 4 : offset
-  %18 = buffer.view %original_storage[%230] : buffer -> view<1xi32>
-  view.store %zero$i32, %18[0] : i32, view<1xi32>
-  %229 = index.constant 8 : offset
-  %25 = buffer.view %original_storage[%229] : buffer -> view<1xi32>
-  view.store %zero$i32, %25[0] : i32, view<1xi32>
-  %228 = index.constant 12 : offset
-  %30 = buffer.view %original_storage[%228] : buffer -> view<1xi32>
-  view.store %zero$i32, %30[0] : i32, view<1xi32>
-  %33 = scalar.extui %index : i32 to i64
-  %226 = scalar.constant 3 : i64
-  %227 = scalar.shli %33, %226 : i64
-  %38 = scalar.assume %227 [range(%227, 0, 9223372036854775807)] : i64
-  %39 = index.cast %38 : i64 to offset
-  %225 = scalar.constant 4 : i64
-  %46 = index.cast %39 : offset to i64
-  %47 = scalar.addi %46, %225 : i64
-  %48 = scalar.assume %47 [range(%47, 0, 9223372036854775807)] : i64
-  %49 = index.cast %48 : i64 to offset
-  %50 = index.assume %49 [range(%49, 0, 12)] : offset
-  %51 = buffer.view %original_storage[%50] : buffer -> view<1xi32>
-  view.store %seed, %51[0] : i32, view<1xi32>
-  %copy_storage = buffer.alloca<private> align(4) %3 : buffer
-  %original_values_0_words_0 = view.load %13[0] : view<1xi32> -> i32
-  %original_values_0_words_1 = view.load %18[0] : view<1xi32> -> i32
-  %original_values_1_words_0 = view.load %25[0] : view<1xi32> -> i32
-  %original_values_1_words_1 = view.load %30[0] : view<1xi32> -> i32
-  %80, %81, %82, %83 = func.call pure @forward(%original_values_0_words_0, %original_values_0_words_1, %original_values_1_words_0, %original_values_1_words_1) : (i32, i32, i32, i32) -> (i32, i32, i32, i32)
-  %89 = buffer.view %copy_storage[%231] : buffer -> view<1xi32>
-  view.store %80, %89[0] : i32, view<1xi32>
-  %93 = buffer.view %copy_storage[%230] : buffer -> view<1xi32>
-  view.store %81, %93[0] : i32, view<1xi32>
-  %99 = buffer.view %copy_storage[%229] : buffer -> view<1xi32>
-  view.store %82, %99[0] : i32, view<1xi32>
-  %103 = buffer.view %copy_storage[%228] : buffer -> view<1xi32>
-  view.store %83, %103[0] : i32, view<1xi32>
-  %104 = scalar.constant 3 : i32
-  %125 = buffer.view %copy_storage[%50] : buffer -> view<1xi32>
-  %126 = view.load %125[0] : view<1xi32> -> i32
-  %127 = scalar.addi %126, %104 : i32
-  view.store %127, %125[0] : i32, view<1xi32>
-  %149 = view.load %51[0] : view<1xi32> -> i32
-  %171 = view.load %125[0] : view<1xi32> -> i32
-  %172 = scalar.addi %149, %171 : i32
-  %175 = scalar.constant 1 : i32
-  %176 = scalar.subi %175, %index : i32
-  %177 = scalar.extui %176 : i32 to i64
-  %207 = scalar.shli %177, %226 : i64
-  %182 = scalar.assume %207 [range(%207, 0, 9223372036854775807)] : i64
-  %183 = index.cast %182 : i64 to offset
-  %190 = index.cast %183 : offset to i64
-  %192 = scalar.assume %190 [range(%190, 0, 9223372036854775807)] : i64
-  %193 = index.cast %192 : i64 to offset
-  %194 = index.assume %193 [range(%193, 0, 12)] : offset
-  %195 = buffer.view %original_storage[%194] : buffer -> view<1xi32>
-  %196 = view.load %195[0] : view<1xi32> -> i32
-  %197 = scalar.addi %172, %196 : i32
-  func.return %197 : i32
+  %9 = scalar.cmpi eq, %index, %zero$i32 : i32
+  %original_values_0_words_1 = scf.select %9, %seed, %zero$i32 : i32
+  %original_values_1_words_1 = scf.select %9, %zero$i32, %seed : i32
+  %copy_values_0_words_0, %copy_values_0_words_1$15, %copy_values_1_words_0, %copy_values_1_words_1$17 = func.call pure @forward(%zero$i32, %original_values_0_words_1, %zero$i32, %original_values_1_words_1) : (i32, i32, i32, i32) -> (i32, i32, i32, i32)
+  %18 = scalar.constant 3 : i32
+  %58 = scf.select %9, %copy_values_0_words_1$15, %copy_values_1_words_1$17 : i32
+  %23 = scalar.addi %58, %18 : i32
+  %copy_values_0_words_1$57 = scf.select %9, %23, %copy_values_0_words_1$15 : i32
+  %copy_values_1_words_1$56 = scf.select %9, %copy_values_1_words_1$17, %23 : i32
+  %55 = scf.select %9, %original_values_0_words_1, %original_values_1_words_1 : i32
+  %54 = scf.select %9, %copy_values_0_words_1$57, %copy_values_1_words_1$56 : i32
+  %38 = scalar.addi %55, %54 : i32
+  func.return %38 : i32
 }
 
 func.def @forward(%value_values_0_words_0: i32, %value_values_0_words_1: i32, %value_values_1_words_0: i32, %value_values_1_words_1: i32) -> (i32, i32, i32, i32) {
@@ -424,79 +324,33 @@ unsigned narrow_copy(unsigned index) {
 }
 // ----
 func.def public @narrow_copy(%index: i32) -> (i32) {
-  %2 = index.constant 6 : offset
-  %original_storage = buffer.alloca<private> align(2) %2 : buffer
   %zero$i16 = scalar.constant 0 : i16
-  %224 = index.constant 0 : offset
-  %10 = buffer.view %original_storage[%224] : buffer -> view<1xi16>
-  view.store %zero$i16, %10[0] : i16, view<1xi16>
-  %223 = index.constant 2 : offset
-  %15 = buffer.view %original_storage[%223] : buffer -> view<1xi16>
-  view.store %zero$i16, %15[0] : i16, view<1xi16>
-  %222 = index.constant 4 : offset
-  %20 = buffer.view %original_storage[%222] : buffer -> view<1xi8>
-  %221 = scalar.constant 0 : i8
-  view.store %221, %20[0] : i8, view<1xi8>
-  %220 = index.constant 5 : offset
-  %26 = buffer.view %original_storage[%220] : buffer -> view<1xi8>
-  view.store %221, %26[0] : i8, view<1xi8>
-  %218 = scalar.constant -7 : i16
-  %34 = scalar.extui %index : i32 to i64
-  %216 = scalar.constant 1 : i64
-  %217 = scalar.shli %34, %216 : i64
-  %39 = scalar.assume %217 [range(%217, 0, 9223372036854775807)] : i64
-  %40 = index.cast %39 : i64 to offset
-  %41 = index.assume %40 [range(%40, 0, 4)] : offset
-  %42 = buffer.view %original_storage[%41] : buffer -> view<1xi16>
-  view.store %218, %42[0] : i16, view<1xi16>
-  %215 = scalar.constant 4 : i64
-  %214 = scalar.addi %34, %215 : i64
-  %51 = scalar.assume %214 [range(%214, 0, 9223372036854775807)] : i64
-  %52 = index.cast %51 : i64 to offset
-  %53 = index.assume %52 [range(%52, 0, 5)] : offset
-  %54 = buffer.view %original_storage[%53] : buffer -> view<1xi8>
-  %213 = scalar.constant 1 : i8
-  view.store %213, %54[0] : i8, view<1xi8>
-  %copy_storage = buffer.alloca<private> align(2) %2 : buffer
-  %original_narrow_0 = view.load %10[0] : view<1xi16> -> i16
-  %original_narrow_1 = view.load %15[0] : view<1xi16> -> i16
-  %74 = view.load %20[0] : view<1xi8> -> i8
-  %original_flags_0 = scalar.cmpi ne, %74, %221 : i8
-  %81 = view.load %26[0] : view<1xi8> -> i8
-  %original_flags_1 = scalar.cmpi ne, %81, %221 : i8
-  %84, %85, %86, %87 = func.call pure @forward(%original_narrow_0, %original_narrow_1, %original_flags_0, %original_flags_1) : (i16, i16, i1, i1) -> (i16, i16, i1, i1)
-  %91 = buffer.view %copy_storage[%224] : buffer -> view<1xi16>
-  view.store %84, %91[0] : i16, view<1xi16>
-  %95 = buffer.view %copy_storage[%223] : buffer -> view<1xi16>
-  view.store %85, %95[0] : i16, view<1xi16>
-  %99 = buffer.view %copy_storage[%222] : buffer -> view<1xi8>
-  %100 = scalar.extui %86 : i1 to i8
-  view.store %100, %99[0] : i8, view<1xi8>
-  %104 = buffer.view %copy_storage[%220] : buffer -> view<1xi8>
-  %105 = scalar.extui %87 : i1 to i8
-  view.store %105, %104[0] : i8, view<1xi8>
-  %106 = scalar.constant 5 : i32
-  %117 = buffer.view %copy_storage[%41] : buffer -> view<1xi16>
-  %118 = view.load %117[0] : view<1xi16> -> i16
-  %119 = scalar.extsi %118 : i16 to i32
-  %120 = scalar.addi %119, %106 : i32
-  %121 = scalar.trunci %120 : i32 to i16
-  view.store %121, %117[0] : i16, view<1xi16>
-  %133 = buffer.view %copy_storage[%53] : buffer -> view<1xi8>
-  view.store %221, %133[0] : i8, view<1xi8>
-  %146 = view.load %117[0] : view<1xi16> -> i16
-  %147 = scalar.extsi %146 : i16 to i32
-  %148 = scalar.constant 7 : i32
-  %161 = view.load %54[0] : view<1xi8> -> i8
-  %163 = scalar.cmpi ne, %161, %221 : i8
-  %164 = scalar.extui %163 : i1 to i32
-  %192 = scalar.addi %147, %164 : i32
-  %177 = view.load %133[0] : view<1xi8> -> i8
-  %179 = scalar.cmpi ne, %177, %221 : i8
-  %180 = scalar.extui %179 : i1 to i32
-  %194 = scalar.addi %192, %180 : i32
-  %195 = scalar.addi %194, %148 : i32
-  func.return %195 : i32
+  %71 = scalar.constant -7 : i16
+  %10 = scalar.constant 0 : i32
+  %11 = scalar.cmpi eq, %index, %10 : i32
+  %original_narrow_0 = scf.select %11, %71, %zero$i16 : i16
+  %original_narrow_1 = scf.select %11, %zero$i16, %71 : i16
+  %16 = scalar.constant 1 : i1
+  %original_flags_1 = scalar.xori %11, %16 : i1
+  %copy_narrow_0$23, %copy_narrow_1$24, %copy_flags_0$25, %copy_flags_1$26 = func.call pure @forward(%original_narrow_0, %original_narrow_1, %11, %original_flags_1) : (i16, i16, i1, i1) -> (i16, i16, i1, i1)
+  %27 = scalar.constant 5 : i32
+  %83 = scf.select %11, %copy_narrow_0$23, %copy_narrow_1$24 : i16
+  %31 = scalar.extsi %83 : i16 to i32
+  %32 = scalar.addi %31, %27 : i32
+  %33 = scalar.trunci %32 : i32 to i16
+  %copy_narrow_0$82 = scf.select %11, %33, %copy_narrow_0$23 : i16
+  %copy_narrow_1$81 = scf.select %11, %copy_narrow_1$24, %33 : i16
+  %40 = scalar.constant 0 : i1
+  %copy_flags_0$80 = scf.select %11, %40, %copy_flags_0$25 : i1
+  %copy_flags_1$79 = scf.select %11, %copy_flags_1$26, %40 : i1
+  %78 = scf.select %11, %copy_narrow_0$82, %copy_narrow_1$81 : i16
+  %50 = scalar.extsi %78 : i16 to i32
+  %72 = scf.select %11, %copy_flags_0$80, %copy_flags_1$79 : i1
+  %61 = scalar.extui %72 : i1 to i32
+  %90 = scalar.addi %50, %61 : i32
+  %92 = scalar.constant 8 : i32
+  %93 = scalar.addi %90, %92 : i32
+  func.return %93 : i32
 }
 
 func.def @forward(%value_narrow_0: i16, %value_narrow_1: i16, %value_flags_0: i1, %value_flags_1: i1) -> (i16, i16, i1, i1) {
@@ -517,42 +371,17 @@ unsigned constant_member(unsigned index) {
 }
 // ----
 func.def public @constant_member(%index: i32) -> (i32) {
-  %2 = index.constant 8 : offset
-  %original_storage = buffer.alloca<private> align(4) %2 : buffer
-  %8 = scalar.constant 3 : i32
-  %74 = index.constant 0 : offset
-  %10 = buffer.view %original_storage[%74] : buffer -> view<1xi32>
-  view.store %8, %10[0] : i32, view<1xi32>
-  %13 = scalar.constant 5 : i32
-  %73 = index.constant 4 : offset
-  %15 = buffer.view %original_storage[%73] : buffer -> view<1xi32>
-  view.store %13, %15[0] : i32, view<1xi32>
-  %copy_storage = buffer.alloca<private> align(4) %2 : buffer
-  %original_words_0 = view.load %10[0] : view<1xi32> -> i32
-  %original_words_1 = view.load %15[0] : view<1xi32> -> i32
-  %33 = buffer.view %copy_storage[%74] : buffer -> view<1xi32>
-  view.store %original_words_0, %33[0] : i32, view<1xi32>
-  %37 = buffer.view %copy_storage[%73] : buffer -> view<1xi32>
-  view.store %original_words_1, %37[0] : i32, view<1xi32>
-  %40 = scalar.extui %index : i32 to i64
-  %67 = scalar.constant 2 : i64
-  %68 = scalar.shli %40, %67 : i64
-  %45 = scalar.assume %68 [range(%68, 0, 9223372036854775807)] : i64
-  %46 = index.cast %45 : i64 to offset
-  %47 = index.assume %46 [range(%46, 0, 4)] : offset
-  %48 = buffer.view %copy_storage[%47] : buffer -> view<1xi32>
-  %49 = view.load %48[0] : view<1xi32> -> i32
-  %52 = scalar.constant 1 : i32
-  %53 = scalar.subi %52, %index : i32
-  %54 = scalar.extui %53 : i32 to i64
-  %66 = scalar.shli %54, %67 : i64
-  %59 = scalar.assume %66 [range(%66, 0, 9223372036854775807)] : i64
-  %60 = index.cast %59 : i64 to offset
-  %61 = index.assume %60 [range(%60, 0, 4)] : offset
-  %62 = buffer.view %original_storage[%61] : buffer -> view<1xi32>
-  %63 = view.load %62[0] : view<1xi32> -> i32
-  %64 = scalar.addi %49, %63 : i32
-  func.return %64 : i32
+  %original_words_0 = scalar.constant 3 : i32
+  %original_words_1 = scalar.constant 5 : i32
+  %4 = scalar.constant 0 : i32
+  %5 = scalar.cmpi eq, %index, %4 : i32
+  %14 = scf.select %5, %original_words_0, %original_words_1 : i32
+  %7 = scalar.constant 1 : i32
+  %8 = scalar.subi %7, %index : i32
+  %10 = scalar.cmpi eq, %8, %4 : i32
+  %13 = scf.select %10, %original_words_0, %original_words_1 : i32
+  %12 = scalar.addi %14, %13 : i32
+  func.return %12 : i32
 }
 
 // ====
@@ -576,50 +405,40 @@ unsigned vector_elements(unsigned index) {
 }
 // ----
 func.def public @vector_elements(%index: i32) -> (i32) {
-  %2 = index.constant 32 : offset
-  %original_storage = buffer.alloca<private> align(16) %2 : buffer
-  %8 = vector.constanti [1, 2, 3, 4] : vector<4xi32>
-  %133 = index.constant 0 : offset
-  %10 = buffer.view %original_storage[%133] : buffer -> view<4xi32>
-  vector.store %8, %10[0] : vector<4xi32>, view<4xi32>
-  %13 = vector.constanti [5, 6, 7, 8] : vector<4xi32>
-  %132 = index.constant 16 : offset
-  %15 = buffer.view %original_storage[%132] : buffer -> view<4xi32>
-  vector.store %13, %15[0] : vector<4xi32>, view<4xi32>
-  %copy_storage = buffer.alloca<private> align(16) %2 : buffer
-  %original_values_0 = vector.load %10[0] : view<4xi32> -> vector<4xi32>
-  %original_values_1 = vector.load %15[0] : view<4xi32> -> vector<4xi32>
-  %33 = buffer.view %copy_storage[%133] : buffer -> view<4xi32>
-  vector.store %original_values_0, %33[0] : vector<4xi32>, view<4xi32>
-  %37 = buffer.view %copy_storage[%132] : buffer -> view<4xi32>
-  vector.store %original_values_1, %37[0] : vector<4xi32>, view<4xi32>
-  %127 = vector.splati 1 : vector<4xi32>
-  %41 = scalar.extui %index : i32 to i64
-  %125 = scalar.constant 4 : i64
-  %126 = scalar.shli %41, %125 : i64
-  %46 = scalar.assume %126 [range(%126, 0, 9223372036854775807)] : i64
-  %47 = index.cast %46 : i64 to offset
-  %48 = index.assume %47 [range(%47, 0, 16)] : offset
-  %49 = buffer.view %copy_storage[%48] : buffer -> view<4xi32>
-  %50 = vector.load %49[0] : view<4xi32> -> vector<4xi32>
-  %51 = vector.addi %50, %127 : vector<4xi32>
-  vector.store %51, %49[0] : vector<4xi32>, view<4xi32>
-  %63 = vector.load %49[0] : view<4xi32> -> vector<4xi32>
-  %observed = func.call pure @forward(%63) : (vector<4xi32>) -> (vector<4xi32>)
-  %117 = view.load %10[0] : view<4xi32> -> i32
-  %array_storage = buffer.alloca<private> align(16) %2 : buffer
-  %82 = vector.constanti [11, 13, 17, 19] : vector<4xi32>
-  %84 = buffer.view %array_storage[%133] : buffer -> view<4xi32>
-  vector.store %82, %84[0] : vector<4xi32>, view<4xi32>
-  %87 = vector.constanti [23, 29, 31, 37] : vector<4xi32>
-  %89 = buffer.view %array_storage[%132] : buffer -> view<4xi32>
-  vector.store %87, %89[0] : vector<4xi32>, view<4xi32>
-  %98 = buffer.view %array_storage[%48] : buffer -> view<4xi32>
-  %116 = view.load %98[0] : view<4xi32> -> i32
-  %115 = vector.extract %observed[3] : vector<4xi32> -> i32
-  %106 = scalar.addi %115, %117 : i32
-  %110 = scalar.addi %106, %116 : i32
-  func.return %110 : i32
+  %original_values_0 = vector.constanti [1, 2, 3, 4] : vector<4xi32>
+  %original_values_1 = vector.constanti [5, 6, 7, 8] : vector<4xi32>
+  %71 = vector.splati 1 : vector<4xi32>
+  %5 = scalar.constant 0 : i32
+  %6 = scalar.cmpi eq, %index, %5 : i32
+  %70 = scf.select %6, %original_values_0, %original_values_1 : vector<4xi32>
+  %8 = vector.addi %70, %71 : vector<4xi32>
+  %copy_values_0 = scf.select %6, %8, %original_values_0 : vector<4xi32>
+  %copy_values_1 = scf.select %6, %original_values_1, %8 : vector<4xi32>
+  %67 = scf.select %6, %copy_values_0, %copy_values_1 : vector<4xi32>
+  %observed = func.call pure @forward(%67) : (vector<4xi32>) -> (vector<4xi32>)
+  %20 = index.constant 32 : offset
+  %array_storage = buffer.alloca<private> align(16) %20 : buffer
+  %24 = vector.constanti [11, 13, 17, 19] : vector<4xi32>
+  %61 = index.constant 0 : offset
+  %26 = buffer.view %array_storage[%61] : buffer -> view<4xi32>
+  vector.store %24, %26[0] : vector<4xi32>, view<4xi32>
+  %29 = vector.constanti [23, 29, 31, 37] : vector<4xi32>
+  %60 = index.constant 16 : offset
+  %31 = buffer.view %array_storage[%60] : buffer -> view<4xi32>
+  vector.store %29, %31[0] : vector<4xi32>, view<4xi32>
+  %32 = scalar.extui %index : i32 to i64
+  %65 = scalar.constant 4 : i64
+  %66 = scalar.shli %32, %65 : i64
+  %37 = scalar.assume %66 [range(%66, 0, 9223372036854775807)] : i64
+  %38 = index.cast %37 : i64 to offset
+  %39 = index.assume %38 [range(%38, 0, 16)] : offset
+  %40 = buffer.view %array_storage[%39] : buffer -> view<4xi32>
+  %64 = view.load %40[0] : view<4xi32> -> i32
+  %57 = vector.extract %observed[3] : vector<4xi32> -> i32
+  %58 = scalar.constant 1 : i32
+  %62 = scalar.addi %57, %64 : i32
+  %63 = scalar.addi %62, %58 : i32
+  func.return %63 : i32
 }
 
 func.def @forward(%value: vector<4xi32>) -> (vector<4xi32>) {
@@ -731,55 +550,43 @@ kernel.def @array_records_kernel() {
   %2 = index.constant 1 : index
   kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
 } launch(%input: buffer, %output: buffer) {
-  %10 = index.constant 8 : offset
-  %224 = index.constant 0 : offset
-  %24 = buffer.view %input[%224] : buffer -> view<1xi32>
-  %25 = view.load<root_in_bounds> %24[0] : view<1xi32> -> i32
-  %223 = index.constant 4 : offset
-  %28 = buffer.view %input[%223] : buffer -> view<1xi32>
-  %29 = view.load<root_in_bounds> %28[0] : view<1xi32> -> i32
-  %66 = buffer.view %input[%10] : buffer -> view<1xi32>
-  %67 = view.load<root_in_bounds> %66[0] : view<1xi32> -> i32
-  %68 = scalar.constant 1 : i32
-  %69 = scalar.andi %67, %68 : i32
-  %changed = func.call @change(%25, %29, %69) : (i32, i32, i32) -> (i32)
-  %71 = scalar.constant 5 : i32
-  %85 = scalar.addi %25, %71 : i32
-  %106 = buffer.view %output[%224] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %85, %106[0] : i32, view<1xi32>
-  %109 = buffer.view %output[%223] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %29, %109[0] : i32, view<1xi32>
-  %128 = buffer.view %output[%10] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %changed, %128[0] : i32, view<1xi32>
-  %148 = view.load<root_in_bounds> %28[0] : view<1xi32> -> i32
-  %210 = index.constant 12 : offset
-  %167 = buffer.view %output[%210] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %148, %167[0] : i32, view<1xi32>
+  %149 = index.constant 0 : offset
+  %20 = buffer.view %input[%149] : buffer -> view<1xi32>
+  %saved_words_0$21 = view.load<root_in_bounds> %20[0] : view<1xi32> -> i32
+  %148 = index.constant 4 : offset
+  %24 = buffer.view %input[%148] : buffer -> view<1xi32>
+  %saved_words_1 = view.load<root_in_bounds> %24[0] : view<1xi32> -> i32
+  %147 = index.constant 8 : offset
+  %44 = buffer.view %input[%147] : buffer -> view<1xi32>
+  %45 = view.load<root_in_bounds> %44[0] : view<1xi32> -> i32
+  %46 = scalar.constant 1 : i32
+  %47 = scalar.andi %45, %46 : i32
+  %changed = func.call pure @change(%saved_words_0$21, %saved_words_1, %47) : (i32, i32, i32) -> (i32)
+  %49 = scalar.constant 5 : i32
+  %saved_words_0$51 = scalar.addi %saved_words_0$21, %49 : i32
+  %62 = buffer.view %output[%149] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %saved_words_0$51, %62[0] : i32, view<1xi32>
+  %65 = buffer.view %output[%148] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %saved_words_1, %65[0] : i32, view<1xi32>
+  %84 = buffer.view %output[%147] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %changed, %84[0] : i32, view<1xi32>
+  %104 = view.load<root_in_bounds> %24[0] : view<1xi32> -> i32
+  %142 = index.constant 12 : offset
+  %123 = buffer.view %output[%142] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %104, %123[0] : i32, view<1xi32>
   kernel.return
 }
 
-func.def @change(%value_words_0: i32, %value_words_1: i32, %index: i32) -> (i32) {
-  %172 = index.constant 8 : offset
-  %value_storage = buffer.alloca<private> align(4) %172 : buffer
-  %230 = index.constant 0 : offset
-  %179 = buffer.view %value_storage[%230] : buffer -> view<1xi32>
-  view.store %value_words_0, %179[0] : i32, view<1xi32>
-  %229 = index.constant 4 : offset
-  %183 = buffer.view %value_storage[%229] : buffer -> view<1xi32>
-  view.store %value_words_1, %183[0] : i32, view<1xi32>
-  %184 = scalar.constant 3 : i32
-  %187 = scalar.extui %index : i32 to i64
-  %227 = scalar.constant 2 : i64
-  %228 = scalar.shli %187, %227 : i64
-  %192 = scalar.assume %228 [range(%228, 0, 9223372036854775807)] : i64
-  %193 = index.cast %192 : i64 to offset
-  %194 = index.assume %193 [range(%193, 0, 4)] : offset
-  %195 = buffer.view %value_storage[%194] : buffer -> view<1xi32>
-  %196 = view.load %195[0] : view<1xi32> -> i32
-  %197 = scalar.addi %196, %184 : i32
-  view.store %197, %195[0] : i32, view<1xi32>
-  %209 = view.load %195[0] : view<1xi32> -> i32
-  func.return %209 : i32
+func.def @change(%value_words_0$124: i32, %value_words_1$125: i32, %index: i32) -> (i32) {
+  %128 = scalar.constant 3 : i32
+  %129 = scalar.constant 0 : i32
+  %130 = scalar.cmpi eq, %index, %129 : i32
+  %153 = scf.select %130, %value_words_0$124, %value_words_1$125 : i32
+  %132 = scalar.addi %153, %128 : i32
+  %value_words_0$152 = scf.select %130, %132, %value_words_0$124 : i32
+  %value_words_1$151 = scf.select %130, %value_words_1$125, %132 : i32
+  %150 = scf.select %130, %value_words_0$152, %value_words_1$151 : i32
+  func.return %150 : i32
 }
 
 // ====
@@ -797,19 +604,19 @@ double composed(double input) {
 }
 // ----
 func.def public @inherited(%input: f64) -> (f64) {
-  %14 = scalar.constant 2.0 : f64
-  %24 = scalar.constant 4.0 : f64
-  %45 = scalar.mulf %input, %24 : f64
-  %59 = scalar.addf %45, %14 : f64
-  func.return %59 : f64
+  %value_Base_a_1 = scalar.constant 2.0 : f64
+  %value_scale = scalar.constant 4.0 : f64
+  %6 = scalar.mulf %input, %value_scale : f64
+  %8 = scalar.addf %6, %value_Base_a_1 : f64
+  func.return %8 : f64
 }
 
 func.def public @composed(%input: f64) -> (f64) {
-  %74 = scalar.constant 2.0 : f64
-  %84 = scalar.constant 4.0 : f64
-  %107 = scalar.mulf %input, %84 : f64
-  %123 = scalar.addf %107, %74 : f64
-  func.return %123 : f64
+  %value_base_a_1 = scalar.constant 2.0 : f64
+  %value_scale = scalar.constant 4.0 : f64
+  %15 = scalar.mulf %input, %value_scale : f64
+  %17 = scalar.addf %15, %value_base_a_1 : f64
+  func.return %17 : f64
 }
 
 // ====
@@ -886,4 +693,189 @@ func.def public @semantic_matrix(%data: buffer, %data_byte_offset: offset, %row:
   %value = scf.select %120, %108, %109 : i32
   %85 = scalar.addi %value, %items_1_0_value$113 : i32
   func.return %85 : i32
+}
+
+// ====
+// An integer array member does not force a pointer-bearing owner into storage.
+struct View { float* data; int lengths[3]; };
+float gather(float* input) {
+  View view{input, {1, 2, 3}};
+  return view.data[view.lengths[1]];
+}
+
+// ----
+func.def public @gather(%input: buffer, %input_byte_offset: offset) -> (f32) {
+  %16 = scalar.constant 8 : i64
+  %10 = index.cast %input_byte_offset : offset to i64
+  %11 = scalar.addi %10, %16 : i64
+  %12 = scalar.assume %11 [range(%11, 0, 9223372036854775807)] : i64
+  %13 = index.cast %12 : i64 to offset
+  %14 = buffer.view %input[%13] : buffer -> view<1xf32>
+  %15 = view.load<root_in_bounds> %14[0] : view<1xf32> -> f32
+  func.return %15 : f32
+}
+
+// ====
+// A read-only helper receives array components through the ordinary value ABI.
+struct Box { int lower[3]; int upper[3]; };
+[[loom::noinline]] static int length(const Box& box, int dimension) {
+  return box.upper[dimension] - box.lower[dimension];
+}
+struct Body {
+  float* data;
+  Box box;
+  void operator()(int dimension) const {
+    data[0] = static_cast<float>(length(box, dimension));
+  }
+};
+void extent(float* output, int dimension) {
+  Body body{output, {{0, 0, 0}, {4, 5, 6}}};
+  body(dimension);
+}
+
+// ----
+func.def public @extent(%output: buffer, %output_byte_offset: offset, %dimension: i32) {
+  %body_box_lower_0 = scalar.constant 0 : i32
+  %body_box_upper_0 = scalar.constant 4 : i32
+  %body_box_upper_1 = scalar.constant 5 : i32
+  %body_box_upper_2 = scalar.constant 6 : i32
+  func.call @Body__operator_call_value(%output, %output_byte_offset, %body_box_lower_0, %body_box_lower_0, %body_box_lower_0, %body_box_upper_0, %body_box_upper_1, %body_box_upper_2, %dimension) : (buffer, offset, i32, i32, i32, i32, i32, i32, i32)
+  func.return
+}
+
+func.def @Body__operator_call_value(%this_data: buffer, %this_data_byte_offset: offset, %this_box_lower_0: i32, %this_box_lower_1: i32, %this_box_lower_2: i32, %this_box_upper_0: i32, %this_box_upper_1: i32, %this_box_upper_2: i32, %dimension: i32) {
+  %18 = func.call pure @length(%this_box_lower_0, %this_box_lower_1, %this_box_lower_2, %this_box_upper_0, %this_box_upper_1, %this_box_upper_2, %dimension) : (i32, i32, i32, i32, i32, i32, i32) -> (i32)
+  %19 = scalar.sitofp %18 : i32 to f32
+  %24 = index.cast %this_data_byte_offset : offset to i64
+  %26 = scalar.assume %24 [range(%24, 0, 9223372036854775807)] : i64
+  %27 = index.cast %26 : i64 to offset
+  %28 = buffer.view %this_data[%27] : buffer -> view<1xf32>
+  view.store<root_in_bounds> %19, %28[0] : f32, view<1xf32>
+  func.return
+}
+
+func.def noinline @length(%box_lower_0: i32, %box_lower_1: i32, %box_lower_2: i32, %box_upper_0: i32, %box_upper_1: i32, %box_upper_2: i32, %dimension: i32) -> (i32) {
+  %37 = scalar.constant 0 : i32
+  %38 = scalar.cmpi eq, %dimension, %37 : i32
+  %40 = scalar.constant 1 : i32
+  %41 = scalar.cmpi eq, %dimension, %40 : i32
+  %52 = scf.select %41, %box_upper_1, %box_upper_2 : i32
+  %55 = scf.select %38, %box_upper_0, %52 : i32
+  %53 = scf.select %41, %box_lower_1, %box_lower_2 : i32
+  %54 = scf.select %38, %box_lower_0, %53 : i32
+  %49 = scalar.subi %55, %54 : i32
+  func.return %49 : i32
+}
+
+// ====
+// Selected references update the owning array, including across helper calls.
+struct View { int* data; int values[3]; };
+static int& select(View& view, unsigned index) { return index[view.values]; }
+static void increment(int& value) { value += 7; }
+int aliases(int* data, unsigned index) {
+  View view{data, {11, 13, 17}};
+  int& selected = select(view, index);
+  increment(selected);
+  return selected + view.values[0] + view.values[1] + view.values[2];
+}
+
+// ----
+func.def public @aliases(%data: buffer, %data_byte_offset: offset, %index: i32) -> (i32) {
+  %view_values_0$4 = scalar.constant 11 : i32
+  %view_values_1$5 = scalar.constant 13 : i32
+  %view_values_2$6 = scalar.constant 17 : i32
+  %7 = func.call pure @select(%data, %data_byte_offset, %view_values_0$4, %view_values_1$5, %view_values_2$6, %index) : (buffer, offset, i32, i32, i32, i32) -> (i32)
+  %8 = scalar.constant 0 : i32
+  %9 = scalar.cmpi eq, %7, %8 : i32
+  %11 = scalar.constant 1 : i32
+  %12 = scalar.cmpi eq, %7, %11 : i32
+  %49 = scf.select %12, %view_values_1$5, %view_values_2$6 : i32
+  %55 = scf.select %9, %view_values_0$4, %49 : i32
+  %14 = func.call pure @increment(%55) : (i32) -> (i32)
+  %view_values_0$54 = scf.select %9, %14, %view_values_0$4 : i32
+  %view_values_1$53 = scf.select %12, %14, %view_values_1$5 : i32
+  %21 = scalar.constant 2 : i32
+  %22 = scalar.cmpi eq, %7, %21 : i32
+  %view_values_2$52 = scf.select %22, %14, %view_values_2$6 : i32
+  %50 = scf.select %12, %view_values_1$53, %view_values_2$52 : i32
+  %selected = scf.select %9, %view_values_0$54, %50 : i32
+  %31 = scalar.addi %selected, %view_values_0$54 : i32
+  %33 = scalar.addi %31, %view_values_1$53 : i32
+  %35 = scalar.addi %33, %view_values_2$52 : i32
+  func.return %35 : i32
+}
+
+func.def @select(%view_data: buffer, %view_data_byte_offset: offset, %view_values_0: i32, %view_values_1: i32, %view_values_2: i32, %index: i32) -> (i32) {
+  func.return %index : i32
+}
+
+func.def @increment(%value$43: i32) -> (i32) {
+  %45 = scalar.constant 7 : i32
+  %value$46 = scalar.addi %value$43, %45 : i32
+  func.return %value$46 : i32
+}
+
+// ====
+// Constructor assignments initialize individual elements without reading them.
+struct View {
+  int* data;
+  int values[2];
+  View(int* pointer, int value) : data(pointer) {
+    values[0] = value;
+    values[1] = value + 1;
+  }
+};
+int constructed(int* data, int value) {
+  View view(data, value);
+  return view.values[0] + view.values[1];
+}
+
+// ----
+func.def public @constructed(%data: buffer, %data_byte_offset: offset, %value: i32) -> (i32) {
+  %view_data, %view_data_byte_offset, %view_values_0, %view_values_1 = func.call pure @View__View_value(%data, %data_byte_offset, %value) : (buffer, offset, i32) -> (buffer, offset, i32, i32)
+  %10 = scalar.addi %view_values_0, %view_values_1 : i32
+  func.return %10 : i32
+}
+
+func.def inline @View__View_value(%pointer: buffer, %pointer_byte_offset: offset, %value: i32) -> (buffer, offset, i32, i32) {
+  %19 = scalar.constant 1 : i32
+  %values_1 = scalar.addi %value, %19 : i32
+  func.return %pointer, %pointer_byte_offset, %value, %values_1 : buffer, offset, i32, i32
+}
+
+// ====
+// Nested numeric arrays retain their owner, and selectors run exactly once.
+struct Grid { int* data; int values[2][2]; };
+int nested(int* data, unsigned row, unsigned column, int next) {
+  Grid grid{data, {{1, 2}, {3, 4}}};
+  grid.values[row++][column] = next;
+  return grid.values[row - 1][column] + grid.values[1][0] + static_cast<int>(row);
+}
+
+// ----
+func.def public @nested(%data: buffer, %data_byte_offset: offset, %row: i32, %column: i32, %next: i32) -> (i32) {
+  %grid_values_0_0$6 = scalar.constant 1 : i32
+  %grid_values_0_1$7 = scalar.constant 2 : i32
+  %grid_values_1_0$8 = scalar.constant 3 : i32
+  %grid_values_1_1$9 = scalar.constant 4 : i32
+  %64 = scalar.shli %row, %grid_values_0_0$6 : i32
+  %14 = scalar.addi %64, %column : i32
+  %15 = scalar.constant 0 : i32
+  %16 = scalar.cmpi eq, %14, %15 : i32
+  %grid_values_0_0$62 = scf.select %16, %next, %grid_values_0_0$6 : i32
+  %19 = scalar.cmpi eq, %14, %grid_values_0_0$6 : i32
+  %grid_values_0_1$61 = scf.select %19, %next, %grid_values_0_1$7 : i32
+  %22 = scalar.cmpi eq, %14, %grid_values_0_1$7 : i32
+  %grid_values_1_0$60 = scf.select %22, %next, %grid_values_1_0$8 : i32
+  %25 = scalar.cmpi eq, %14, %grid_values_1_0$8 : i32
+  %grid_values_1_1$59 = scf.select %25, %next, %grid_values_1_1$9 : i32
+  %33 = scalar.cmpi ult, %14, %grid_values_0_1$7 : i32
+  %52 = scf.select %33, %16, %22 : i1
+  %53 = scf.select %33, %grid_values_0_0$62, %grid_values_1_0$60 : i32
+  %54 = scf.select %33, %grid_values_0_1$61, %grid_values_1_1$59 : i32
+  %51 = scf.select %52, %53, %54 : i32
+  %43 = scalar.addi %51, %grid_values_1_0$60 : i32
+  %57 = scalar.addi %row, %43 : i32
+  %58 = scalar.addi %57, %grid_values_0_0$6 : i32
+  func.return %58 : i32
 }

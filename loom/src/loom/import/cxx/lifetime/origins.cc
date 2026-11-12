@@ -114,6 +114,11 @@ TemporaryOrigins::Facts TemporaryOrigins::classify(
           (child.result || child.materialization)) {
         return child;
       }
+      if (retain_materialization && traits.is_pointer(cast->type)) {
+        // A converted pointer is a new value object, independent of the
+        // pointer or subobject from which the conversion reads its value.
+        break;
+      }
       return {};
     }
     case cxx::ASTKind::BinaryExpression: {
@@ -210,7 +215,9 @@ TemporaryOrigins::Facts TemporaryOrigins::classify(
   if (!expression->type ||
       expression->valueCategory != cxx::ValueCategory::kPrValue ||
       (!traits.is_class(expression->type) &&
-       !traits.is_array(expression->type))) {
+       !traits.is_array(expression->type) &&
+       (!retain_materialization ||
+        !types_.requires_value_transport(expression->type)))) {
     return {};
   }
   auto destruction = destruction_for(unit_, expression->type);

@@ -871,11 +871,11 @@ void Initialization::default_storage_record(StorageProjection destination,
       auto member_type = objects_.member_type(object_type, member.source);
       objects_.store(storage_.member(destination, member.source, owner),
                      zero(member_type, owner), member_type, owner);
-      evaluation_.complete_storage_receiver_member(member.source);
+      evaluation_.complete_receiver_member(member.source);
     }
   } else if (retained) {
     for (const auto& member : record.members) {
-      evaluation_.complete_storage_receiver_member(member.source);
+      evaluation_.complete_receiver_member(member.source);
     }
   }
 
@@ -889,7 +889,7 @@ void Initialization::default_storage_record(StorageProjection destination,
                source, initializer->constructor, initializer,
                zero_initialize || retained);
         evaluation_.finish_full_expression(mark);
-        evaluation_.complete_storage_receiver_member(field);
+        evaluation_.complete_receiver_member(field);
       });
 }
 
@@ -1084,7 +1084,7 @@ void Initialization::object(StorageProjection destination,
                  objects_.member_type(object_type, member.source), initializer,
                  nullptr, owner, false);
         }
-        evaluation_.complete_storage_receiver_member(member.source);
+        evaluation_.complete_receiver_member(member.source);
       }
       return;
     }
@@ -1128,7 +1128,7 @@ void Initialization::constructor_receiver(
     object(destination, object_type, source, delegate, initializer);
     evaluation_.finish_full_expression(mark);
     for (const auto& member : record.members) {
-      evaluation_.complete_storage_receiver_member(member.source);
+      evaluation_.complete_receiver_member(member.source);
     }
     return;
   }
@@ -1142,7 +1142,7 @@ void Initialization::constructor_receiver(
     object(storage_.member(destination, field, initializer), field_type, source,
            initializer->constructor, initializer);
     evaluation_.finish_full_expression(mark);
-    evaluation_.complete_storage_receiver_member(field);
+    evaluation_.complete_receiver_member(field);
   }
 }
 
@@ -1189,6 +1189,12 @@ void Initialization::value_constructor_receiver(
     }
     evaluation_.publish_receiver_member(field, initialized);
     evaluation_.finish_full_expression(mark);
+  }
+  // Default-initialized scalar and array members have begun their lifetimes
+  // even when no payload was supplied. Body assignments populate their
+  // retained components; reads still require those components to be defined.
+  for (const auto& member : record.members) {
+    evaluation_.complete_receiver_member(member.source);
   }
 }
 

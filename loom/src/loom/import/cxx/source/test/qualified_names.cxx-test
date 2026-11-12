@@ -125,32 +125,14 @@ int entry(int value) {
 // ----
 func.def public @entry(%value: i32) -> (i32) {
   %2 = scalar.constant 1 : i32
-  %3 = index.constant 4 : offset
-  %4 = buffer.alloca<private> align(4) %3 : buffer
-  %5 = index.constant 0 : offset
-  %6 = buffer.view %4[%5] : buffer -> view<1xi32>
-  %7 = index.assume %5 [range(%5, 0, 0)] : offset
-  %8 = buffer.view %4[%7] : buffer -> view<1xi32>
-  view.store %2, %8[0] : i32, view<1xi32>
-  %9 = index.assume %5 [range(%5, 0, 0)] : offset
-  %10 = buffer.view %4[%9] : buffer -> view<1xi32>
-  %11 = scalar.constant 2.0 : f32
-  %12 = index.constant 4 : offset
-  %13 = buffer.alloca<private> align(4) %12 : buffer
-  %14 = index.constant 0 : offset
-  %15 = buffer.view %13[%14] : buffer -> view<1xf32>
-  %16 = index.assume %14 [range(%14, 0, 0)] : offset
-  %17 = buffer.view %13[%16] : buffer -> view<1xf32>
-  view.store %11, %17[0] : f32, view<1xf32>
-  %18 = index.assume %14 [range(%14, 0, 0)] : offset
-  %19 = buffer.view %13[%18] : buffer -> view<1xf32>
+  %3 = scalar.constant 2.0 : f32
   %tuple_count = func.call pure @Tuple__Tuple___All_1_value() : () -> (i32)
-  %21 = scalar.addi %value, %tuple_count : i32
-  func.return %21 : i32
+  %5 = scalar.addi %value, %tuple_count : i32
+  func.return %5 : i32
 }
 
 func.def inline @Tuple__Tuple___All_1_value() -> (i32) {
-  %23 = scalar.constant 2 : i64
-  %24 = scalar.trunci %23 : i64 to i32
-  func.return %24 : i32
+  %7 = scalar.constant 2 : i64
+  %8 = scalar.trunci %7 : i64 to i32
+  func.return %8 : i32
 }
