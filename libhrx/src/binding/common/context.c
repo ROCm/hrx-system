@@ -145,8 +145,8 @@ iree_status_t iree_hal_streaming_context_create(
   iree_status_t status = hrx_mem_pool_backing_retain_allocation_source(
       device_entry->hrx_device, HRX_MEMORY_TYPE_HOST_LOCAL,
       HRX_BUFFER_USAGE_DEFAULT, &timestamp_memory_pool);
-  iree_hal_streaming_event_timestamp_pool_initialize(
-      timestamp_memory_pool, host_allocator, &context->timestamp_pool);
+  hrx_event_timestamp_pool_initialize(timestamp_memory_pool, host_allocator,
+                                      &context->timestamp_pool);
   iree_hal_pool_release(timestamp_memory_pool);
 
   if (iree_status_is_ok(status)) {
@@ -154,7 +154,7 @@ iree_status_t iree_hal_streaming_context_create(
                                                              &context->queue);
   }
   if (iree_status_is_ok(status)) {
-    context->timestamp_domain = iree_hal_streaming_query_timestamp_domain(
+    context->timestamp_domain = hrx_event_timestamp_domain_query(
         iree_hal_queue_family_spec(iree_hal_queue_family(context->queue)));
   }
 
@@ -330,8 +330,7 @@ static void iree_hal_streaming_context_destroy(
   // A record draws its slot from the pool of the recording event's own context
   // and every event retains that context, so reaching here means every event
   // that could hold a slot from this pool is gone and every slot is back.
-  iree_hal_streaming_event_timestamp_pool_deinitialize(
-      &context->timestamp_pool);
+  hrx_event_timestamp_pool_deinitialize(&context->timestamp_pool);
   iree_hal_streaming_value_wait_lanes_deinitialize(context);
   iree_hal_streaming_capture_admission_deinitialize(
       &context->capture_admission);

@@ -193,6 +193,15 @@ void HrxLoader::load(const std::string& path) {
   LOAD(stream_dispatch);
   LOAD(stream_barrier);
 
+  LOAD(event_create);
+  LOAD(event_retain);
+  LOAD(event_release);
+  LOAD(event_record);
+  LOAD(event_query);
+  LOAD(event_synchronize);
+  LOAD(event_elapsed_time);
+  LOAD(stream_wait_event);
+
   LOAD(device_allocator);
   LOAD(allocator_retain);
   LOAD(allocator_release);

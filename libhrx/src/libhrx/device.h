@@ -8,6 +8,7 @@
 #define LIBHRX_SRC_LIBHRX_DEVICE_H_
 
 #include "buffer_table.h"
+#include "event_timestamp.h"
 #include "hrx_runtime.h"
 #include "iree/base/internal/arena.h"
 #include "iree/hal/api.h"
@@ -43,6 +44,8 @@ typedef struct hrx_device_s {
   iree_hal_device_group_t* hal_device_group;
   // Lazy compatibility backing; explicitly constructed pools select their own.
   hrx_mem_pool_backing_t mem_pool_backing;
+  // Reusable queue timestamp slots, with backing acquired on first timed use.
+  hrx_event_timestamp_pool_t event_timestamps;
   // Whether this device participates in the group's profile session.
   bool profiling_active;
   // Inline compatibility allocator view.

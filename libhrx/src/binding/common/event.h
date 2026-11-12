@@ -11,14 +11,13 @@
 #include "iree/base/api.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/api.h"
+#include "libhrx/src/libhrx/event_timestamp.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef struct iree_hal_streaming_context_t iree_hal_streaming_context_t;
-typedef struct iree_hal_streaming_event_timestamp_slot_t
-    iree_hal_streaming_event_timestamp_slot_t;
 typedef struct iree_hal_streaming_graph_t iree_hal_streaming_graph_t;
 typedef struct iree_hal_streaming_graph_node_t iree_hal_streaming_graph_node_t;
 typedef struct iree_hal_streaming_stream_t iree_hal_streaming_stream_t;
@@ -33,18 +32,6 @@ typedef struct iree_hal_streaming_operation_timeline_t {
   // Largest value an accepted operation will signal.
   uint64_t pending_value;
 } iree_hal_streaming_operation_timeline_t;
-
-// Facts converting a pair of device ticks captured on one device into a
-// duration. Populated or zeroed as a unit: a zero |frequency_hz| means the
-// device advertises no domain whose ticks this layer can convert, and is the
-// one state in which a timing-enabled record captures no tick.
-typedef struct iree_hal_streaming_timestamp_domain_t {
-  // Ticks per second of the domain, or 0 when the device advertises none.
-  uint64_t frequency_hz;
-  // Number of low bits defined in a tick, in [1, 64]; the counter wraps at
-  // this width. Zero exactly when |frequency_hz| is zero.
-  uint32_t valid_bits;
-} iree_hal_streaming_timestamp_domain_t;
 
 typedef enum iree_hal_streaming_event_flag_bits_e {
   IREE_HAL_STREAMING_EVENT_FLAG_NONE = 0ull,
@@ -90,7 +77,7 @@ typedef struct iree_hal_streaming_recorded_point_t {
   // or NULL when the record captured no tick because timing is disabled on the
   // event or the device advertises no domain. Retained by whoever holds the
   // point; the tick is defined once |semaphore| reaches |value|.
-  iree_hal_streaming_event_timestamp_slot_t* timestamp_slot;
+  hrx_event_timestamp_slot_t* timestamp_slot;
 } iree_hal_streaming_recorded_point_t;
 
 // Event for synchronization.
@@ -163,15 +150,6 @@ typedef enum iree_hal_streaming_event_timing_e {
   // clock the two records share can measure the interval between them.
   IREE_HAL_STREAMING_EVENT_TIMING_UNSUPPORTED,
 } iree_hal_streaming_event_timing_t;
-
-// Reads the clock of the queue family used by a context's event records.
-// All context queues, including independently acquired record and stream-wait
-// queues, belong to this family. Other families do not affect comparability.
-// Returns a zeroed domain if the family has no timestamp clock or covers more
-// than one physical device. A NULL family publishes no facts.
-// Synchronization: none (reads immutable device facts).
-iree_hal_streaming_timestamp_domain_t iree_hal_streaming_query_timestamp_domain(
-    const iree_hal_queue_family_spec_t* family);
 
 // Creates an event owned by |context|.
 // Synchronization: none (creates new event).
@@ -327,25 +305,6 @@ iree_status_t iree_hal_streaming_event_record(
 // Waits until the event's last submitted record is signaled.
 iree_status_t iree_hal_streaming_event_synchronize(
     iree_hal_streaming_event_t* event);
-
-// Converts the interval between two ticks captured in |domain| to milliseconds.
-// Only the low |domain.valid_bits| of a tick are defined and the counter wraps
-// there, so the difference is reduced modulo that width; a width of 64 makes
-// the reduction the identity.
-//
-// Reading that reduced difference as a signed offset from the counter's top bit
-// is this layer's choice and not something the device facts state. It is what
-// makes a pair captured in order a positive duration and a reversed pair a
-// negative one, and what it costs is that an interval longer than half the
-// counter range reports negative: out of reach at 64 bits and 100 MHz, but 21
-// seconds on a 32-bit counter at the same rate.
-//
-// |domain| must be populated; the only caller reaches this through a record
-// that captured a tick, which a zeroed domain makes impossible.
-// Synchronization: none (pure arithmetic).
-float iree_hal_streaming_timestamp_domain_elapsed_ms(
-    iree_hal_streaming_timestamp_domain_t domain, uint64_t start_tick,
-    uint64_t stop_tick);
 
 // Measures the interval between the records |start| and |stop| name and stores
 // it in milliseconds in |*ms|. Writes |*ms| only when |*out_timing| is

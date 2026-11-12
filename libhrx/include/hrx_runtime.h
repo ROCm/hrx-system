@@ -296,6 +296,8 @@ HRX_API hrx_status_t hrx_stream_wait(hrx_stream_t stream);
 
 HRX_API hrx_status_t hrx_stream_query(hrx_stream_t stream, bool* complete);
 
+// Submits and consumes the pending one-shot recording. A rejected submission
+// leaves the accepted timeline unchanged; callers may record a new batch.
 HRX_API hrx_status_t hrx_stream_flush(hrx_stream_t stream);
 
 HRX_API hrx_status_t hrx_stream_get_semaphore(hrx_stream_t stream,
@@ -779,15 +781,29 @@ HRX_API hrx_status_t hrx_event_create(hrx_device_t device,
                                       hrx_event_t* out_event);
 HRX_API void hrx_event_retain(hrx_event_t event);
 HRX_API void hrx_event_release(hrx_event_t event);
-// Records a new event generation after the stream's prior work and the event's
-// previous generation. Records may use different streams. The event retains
-// its own timeline, not the recording stream; mutation requires external
-// serialization. A rejected recording leaves the prior event generation intact.
+// Records the completion point after prior work in |stream|. Re-recording
+// replaces the point observed by future queries and waits; already-enqueued
+// waits keep their original point. Recording alone does not order this stream
+// after earlier recordings on other streams; use hrx_stream_wait_event for
+// that dependency. Untimed records add no queue operation beyond submitting
+// pending stream commands. The event retains its point independently of the
+// stream's lifetime; mutation requires external serialization. Rejection before
+// acceptance preserves the prior point. Publication failure after acceptance
+// preserves the accepted point.
+// Timing-enabled records enqueue a timestamp on the recording stream's queue.
+// A queue family without a timestamp clock rejects timed recording; disable
+// timing for synchronization-only events on such queues.
 HRX_API hrx_status_t hrx_event_record(hrx_event_t event, hrx_stream_t stream);
 HRX_API hrx_status_t hrx_event_query(hrx_event_t event, bool* complete);
 // Waits for the recorded event and drains completed device profile records when
 // HRX_PROFILE_FILE is enabled, without waiting for unrelated streams.
 HRX_API hrx_status_t hrx_event_synchronize(hrx_event_t event);
+// Measures the signed interval between completed queue timestamps. Both events
+// must have timing enabled and be recorded in the same queue family. Reversing
+// their execution order yields a negative interval. The result uses the clock's
+// shortest signed modular difference, so intervals must be less than half its
+// wrap period. Returns UNAVAILABLE while either record is pending and leaves
+// |ms| unchanged on any failure.
 HRX_API hrx_status_t hrx_event_elapsed_time(hrx_event_t start, hrx_event_t stop,
                                             float* ms);
 HRX_API hrx_status_t hrx_stream_wait_event(hrx_stream_t stream,

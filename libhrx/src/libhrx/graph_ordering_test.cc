@@ -452,6 +452,9 @@ TEST_P(GraphStreamWaitTest, CompletedExternalWaitPreservesPendingStreamWork) {
   if (GetParam()) {
     IREE_ASSERT_OK(hrx_status_to_iree(
         hrx_event_create(device_, HRX_EVENT_FLAG_DISABLE_TIMING, &event_)));
+    const uint32_t initial = 0;
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer(
+        streams_[1], buffer_, 0, sizeof(initial), &initial, sizeof(initial))));
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_record(event_, streams_[1])));
     IREE_ASSERT_OK(queue_.Submit(0));
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(event_)));
