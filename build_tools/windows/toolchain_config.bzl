@@ -80,6 +80,17 @@ def _configuration_impl(ctx):
             )],
         ),
     ]
+    if base.compiler == "msvc-cl":
+        # This is compiler policy rather than a first-party target option:
+        # generated and external C/C++ actions use the same preprocessor.
+        additions.append(feature(
+            name = "standards_conforming_preprocessor",
+            enabled = True,
+            flag_sets = [flag_set(
+                actions = preprocessor_compile_actions,
+                flag_groups = [flag_group(flags = ["/Zc:preprocessor"])],
+            )],
+        ))
     if base.compiler == "clang-cl":
         additions.append(feature(
             name = "thin_lto_link",
