@@ -55,6 +55,7 @@ HRX_HDRS = [
     "device.h",
     "device_group.h",
     "event_timestamp.h",
+    "graph_exec.h",
     "hrx_internal.h",
     "mem_pool.h",
     "mem_pool_backing.h",

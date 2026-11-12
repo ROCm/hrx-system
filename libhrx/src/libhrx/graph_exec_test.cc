@@ -1,10 +1,14 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#include <atomic>
 #include <memory>
+#include <semaphore>
+#include <thread>
 #include <vector>
 
 #include "hrx_internal.h"
+#include "hrx_runtime_cxx.h"
 #include "iree/hal/driver/task/executable/executable.h"
 #include "iree/hal/driver/task/executable/library/abi.h"
 #include "iree/hal/testing/mock_device.h"
@@ -290,6 +294,67 @@ TEST(GraphScheduleTest, AdditionalDependencyStaysOnProducerWorkstream) {
   iree_arena_block_pool_deinitialize(&block_pool);
 }
 
+// Pauses a real allocator dependency without putting a hook in the executor.
+struct AllocationGate {
+  // Notifies the test that replacement preparation has reached allocation.
+  std::binary_semaphore entered{0};
+  // Releases that allocation after an old-recording launch has completed.
+  std::binary_semaphore resume{0};
+};
+
+// Controls only this thread's allocations through the runtime host allocator.
+// Task workers and concurrent launches continue using the underlying allocator.
+class AllocationScope {
+ public:
+  explicit AllocationScope(size_t fail_index = SIZE_MAX,
+                           AllocationGate* gate = nullptr)
+      : fail_index_(fail_index), gate_(gate) {
+    current_ = this;
+  }
+  ~AllocationScope() { current_ = nullptr; }
+  AllocationScope(const AllocationScope&) = delete;
+  AllocationScope& operator=(const AllocationScope&) = delete;
+
+  static hrx_host_allocator_t HostAllocator() {
+    const iree_allocator_t allocator = {nullptr, Control};
+    hrx_host_allocator_t result;
+    memcpy(&result, &allocator, sizeof(result));
+    return result;
+  }
+
+ private:
+  static iree_status_t Control(void*, iree_allocator_command_t command,
+                               const void* parameters, void** pointer) {
+    if (current_ && command != IREE_ALLOCATOR_COMMAND_FREE) {
+      const size_t index = current_->allocation_count_++;
+      if (index == 0 && current_->gate_) {
+        current_->gate_->entered.release();
+        current_->gate_->resume.acquire();
+      }
+      if (index == current_->fail_index_) {
+        return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+      }
+    }
+    const auto system = iree_allocator_system();
+    return system.ctl(system.self, command, parameters, pointer);
+  }
+
+  // Active test scope on this thread; null for ordinary runtime allocations.
+  static thread_local AllocationScope* current_;
+  // Allocation ordinal within this scope.
+  size_t allocation_count_ = 0;
+  // Ordinal to reject, or SIZE_MAX to keep normal behavior.
+  size_t fail_index_;
+  // Borrowed gate for the first allocation, or null for no pause.
+  AllocationGate* gate_;
+};
+thread_local AllocationScope* AllocationScope::current_ = nullptr;
+
+using Graph =
+    hrx::runtime::hrx_ptr<hrx_graph_t, hrx_graph_retain, hrx_graph_release>;
+using Semaphore = hrx::runtime::hrx_ptr<hrx_semaphore_t, hrx_semaphore_retain,
+                                        hrx_semaphore_release>;
+
 class GraphExecSemaphoreTest : public ::testing::Test {
  protected:
   // Owns the task device and its runtime through fixture cleanup.
@@ -297,8 +362,8 @@ class GraphExecSemaphoreTest : public ::testing::Test {
 
   void SetUp() override {
     hrx_runtime_t runtime = nullptr;
-    IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_runtime_create(nullptr, hrx_host_allocator_system(), &runtime)));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_runtime_create(
+        nullptr, AllocationScope::HostAllocator(), &runtime)));
     const hrx_device_create_params_t params = {.uri = "task://"};
     hrx_status_t status = hrx_device_group_create(runtime, 1, &params, &group_);
     hrx_runtime_release(runtime);
@@ -343,15 +408,15 @@ TEST_F(GraphExecSemaphoreTest,
   hrx_graph_exec_t exec = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_instantiate(
       graph, hrx_device_get_queue(device_, 0, 0), 0, &exec)));
-  ASSERT_EQ(exec->semaphore_count, 2u);
+  ASSERT_EQ(exec->recording.semaphore_count, 2u);
 
   // Take an independent reference on each semaphore so the reference counts
   // stay observable once the executable is gone.
   std::vector<iree_hal_semaphore_t*> semaphores;
-  for (uint32_t i = 0; i < exec->semaphore_count; ++i) {
-    ASSERT_NE(exec->semaphores[i], nullptr);
-    iree_hal_semaphore_retain(exec->semaphores[i]);
-    semaphores.push_back(exec->semaphores[i]);
+  for (uint32_t i = 0; i < exec->recording.semaphore_count; ++i) {
+    ASSERT_NE(exec->recording.semaphores[i], nullptr);
+    iree_hal_semaphore_retain(exec->recording.semaphores[i]);
+    semaphores.push_back(exec->recording.semaphores[i]);
   }
 
   hrx_graph_exec_release(exec);
@@ -387,6 +452,17 @@ static int WriteResult(
   return 0;
 }
 
+struct TestTaskExecutable {
+  // Ordinary Task executable consumed by the real command buffer.
+  iree_hal_task_executable_t base = {};
+  // Observes destruction even when no HRX template or executable remains.
+  std::atomic<bool> destroyed{false};
+  // Optional fixture callback exercising resource-release reentrancy.
+  void (*on_destroy)(void*) = nullptr;
+  // Borrowed state passed to |on_destroy|.
+  void* destroy_data = nullptr;
+};
+
 class GraphKernelTest : public GraphExecSemaphoreTest,
                         public ::testing::WithParamInterface<uint32_t> {
  protected:
@@ -401,6 +477,12 @@ class GraphKernelTest : public GraphExecSemaphoreTest,
                     [](iree_hal_executable_t* executable) {
                       iree_hal_task_executable_deinitialize(
                           iree_hal_task_executable_cast(executable));
+                      auto* resource =
+                          reinterpret_cast<TestTaskExecutable*>(executable);
+                      resource->destroyed.store(true);
+                      if (resource->on_destroy) {
+                        resource->on_destroy(resource->destroy_data);
+                      }
                     },
             },
         .issue_call =
@@ -414,11 +496,11 @@ class GraphKernelTest : public GraphExecSemaphoreTest,
     };
     iree_hal_task_executable_initialize(iree_hal_queue_family(queue->hal_queue),
                                         &vtable, iree_allocator_system(),
-                                        &task_executable_);
-    task_executable_.dispatch_attrs = &dispatch_attrs_;
-    task_executable_.dispatch_ptrs = &dispatch_;
-    task_executable_.export_count = 1;
-    executable_.hal_executable = &task_executable_.base;
+                                        &task_executable_.base);
+    task_executable_.base.dispatch_attrs = &dispatch_attrs_;
+    task_executable_.base.dispatch_ptrs = &dispatch_;
+    task_executable_.base.export_count = 1;
+    executable_.hal_executable = &task_executable_.base.base;
     executable_.device = device_;
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_create(queue, 0, &stream_)));
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_create(device_, 0, &graph_)));
@@ -445,8 +527,28 @@ class GraphKernelTest : public GraphExecSemaphoreTest,
     };
   }
 
+  Graph MakeKernelGraph(uint32_t* result, uint32_t value) {
+    Graph graph;
+    IREE_EXPECT_OK(
+        hrx_status_to_iree(hrx_graph_create(device_, 0, graph.for_output())));
+    KernelArguments arguments = {result, value};
+    auto attrs = KernelAttrs(GetParam());
+    attrs.constants = &arguments;
+    IREE_EXPECT_OK(hrx_status_to_iree(
+        hrx_graph_add_kernel_node(graph, nullptr, 0, &attrs, nullptr)));
+    return graph;
+  }
+
+  void InstantiateOriginal() {
+    auto attrs = KernelAttrs(GetParam());
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_graph_add_kernel_node(graph_, nullptr, 0, &attrs, nullptr)));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_instantiate(
+        graph_, hrx_stream_get_queue(stream_), 0, &exec_)));
+  }
+
   // Fixture-owned native executable; graph capture retains its HAL resource.
-  iree_hal_task_executable_t task_executable_ = {};
+  TestTaskExecutable task_executable_;
   // Borrowed HRX view used to exercise public recording without a file loader.
   hrx_executable_s executable_ = {};
   // Normal task ABI: constants only, with no buffer bindings.
@@ -509,6 +611,202 @@ TEST_P(GraphKernelTest, UnsupportedFlagsLeaveTheGraphUnchanged) {
   size_t node_count = 0;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_size(graph_, &node_count)));
   EXPECT_EQ(node_count, 0u);
+}
+
+TEST_P(GraphKernelTest, ReplacementPreservesPendingArgumentsAndResources) {
+  InstantiateOriginal();
+  Semaphore gate;
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_semaphore_create(device_, 0, gate.for_output())));
+  IREE_EXPECT_OK(hrx_status_to_iree(hrx_stream_wait_on(stream_, {gate, 1})));
+  IREE_EXPECT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
+
+  uint32_t replacement_result = 0;
+  auto replacement = MakeKernelGraph(&replacement_result, 31);
+  IREE_EXPECT_OK(hrx_status_to_iree(hrx_graph_exec_update(exec_, replacement)));
+  hrx_graph_release(graph_);
+  graph_ = nullptr;
+  replacement.reset();
+  IREE_EXPECT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
+  hrx_graph_exec_release(exec_);
+  exec_ = nullptr;
+  iree_hal_executable_release(executable_.hal_executable);
+  executable_.hal_executable = nullptr;
+  EXPECT_FALSE(task_executable_.destroyed.load());
+  EXPECT_EQ(result_, 0u);
+  EXPECT_EQ(replacement_result, 0u);
+
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_semaphore_signal(gate, 1)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  EXPECT_EQ(result_, arguments_.value);
+  EXPECT_EQ(replacement_result, 31u);
+}
+
+TEST_P(GraphKernelTest, LaunchCompletesWhileReplacementAllocationIsPaused) {
+  InstantiateOriginal();
+  auto replacement = MakeKernelGraph(&result_, 31);
+  // Retire cached scratch so the candidate must call the actual allocator.
+  iree_arena_block_pool_trim(&device_->block_pool);
+  AllocationGate gate;
+  hrx_status_t update_status = hrx_ok_status();
+  std::thread editor([&] {
+    AllocationScope scope(SIZE_MAX, &gate);
+    update_status = hrx_graph_exec_update(exec_, replacement);
+  });
+  gate.entered.acquire();
+  IREE_EXPECT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
+  IREE_EXPECT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  EXPECT_EQ(result_, arguments_.value);
+  gate.resume.release();
+  editor.join();
+  IREE_ASSERT_OK(hrx_status_to_iree(update_status));
+
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  EXPECT_EQ(result_, 31u);
+}
+
+TEST_P(GraphKernelTest, LaterEditCannotBeOverwrittenByPausedPreparation) {
+  InstantiateOriginal();
+  auto first = MakeKernelGraph(&result_, 31);
+  auto second = MakeKernelGraph(&result_, 47);
+  iree_arena_block_pool_trim(&device_->block_pool);
+  AllocationGate gate;
+  std::binary_semaphore second_entered{0};
+  hrx_status_t first_status = hrx_ok_status();
+  hrx_status_t second_status = hrx_ok_status();
+  std::thread first_editor([&] {
+    AllocationScope scope(SIZE_MAX, &gate);
+    first_status = hrx_graph_exec_update(exec_, first);
+  });
+  gate.entered.acquire();
+  std::thread second_editor([&] {
+    second_entered.release();
+    second_status = hrx_graph_exec_update(exec_, second);
+  });
+  second_entered.acquire();
+  IREE_EXPECT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
+  IREE_EXPECT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  EXPECT_EQ(result_, arguments_.value);
+  gate.resume.release();
+  first_editor.join();
+  second_editor.join();
+  IREE_EXPECT_OK(hrx_status_to_iree(first_status));
+  IREE_ASSERT_OK(hrx_status_to_iree(second_status));
+
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  EXPECT_EQ(result_, 47u);
+}
+
+TEST_P(GraphKernelTest, AllocationFailureKeepsTheInstalledRecording) {
+  InstantiateOriginal();
+  auto replacement = MakeKernelGraph(&result_, 31);
+  // Include queue operations and internal semaphores in partial construction.
+  hrx_graph_node_t dependency = nullptr;
+  const hrx_graph_host_call_node_attrs_t host = {
+      .fn = [](void*) { return hrx_ok_status(); },
+  };
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_host_call_node(
+      replacement, nullptr, 0, &host, &dependency)));
+  auto attrs = KernelAttrs(GetParam());
+  KernelArguments arguments = {&result_, 31};
+  attrs.constants = &arguments;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_add_kernel_node(replacement, &dependency, 1, &attrs, nullptr)));
+
+  size_t failure_index = 0;
+  for (;; ++failure_index) {
+    SCOPED_TRACE(failure_index);
+    iree_arena_block_pool_trim(&device_->block_pool);
+    hrx_status_t status;
+    {
+      AllocationScope scope(failure_index);
+      status = hrx_graph_exec_update(exec_, replacement);
+    }
+    if (hrx_status_is_ok(status)) {
+      break;
+    }
+    IREE_ASSERT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                          hrx_status_to_iree(status));
+    result_ = 0;
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+    EXPECT_EQ(result_, arguments_.value);
+  }
+  EXPECT_GT(failure_index, 0u);
+  RecordProperty("rejected_allocation_count", static_cast<int>(failure_index));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  EXPECT_EQ(result_, 31u);
+}
+
+TEST_P(GraphKernelTest, ResourceDestructionCanReenterLaunchAndUpdate) {
+  InstantiateOriginal();
+  Graph empty;
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_graph_create(device_, 0, empty.for_output())));
+  struct Reentry {
+    // Executable under replacement, live through the callback.
+    hrx_graph_exec_t executable;
+    // Application-owned stream.
+    hrx_stream_t stream;
+    // Empty template kept live by the test.
+    hrx_graph_t graph;
+  } reentry = {exec_, stream_, empty};
+  task_executable_.destroy_data = &reentry;
+  task_executable_.on_destroy = [](void* data) {
+    auto& reentry = *static_cast<Reentry*>(data);
+    IREE_EXPECT_OK(hrx_status_to_iree(
+        hrx_graph_exec_launch(reentry.executable, reentry.stream)));
+    IREE_EXPECT_OK(hrx_status_to_iree(
+        hrx_graph_exec_update(reentry.executable, reentry.graph)));
+  };
+  hrx_graph_release(graph_);
+  graph_ = nullptr;
+  iree_hal_executable_release(executable_.hal_executable);
+  executable_.hal_executable = nullptr;
+  EXPECT_FALSE(task_executable_.destroyed.load());
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_update(exec_, empty)));
+  EXPECT_TRUE(task_executable_.destroyed.load());
+}
+
+TEST_P(GraphKernelTest, InvalidTopologyKeepsTheInstalledRecording) {
+  InstantiateOriginal();
+  Graph cycle;
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_graph_create(device_, 0, cycle.for_output())));
+  hrx_graph_node_t first = nullptr;
+  hrx_graph_node_t second = nullptr;
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_graph_add_empty_node(cycle, nullptr, 0, &first)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_graph_add_empty_node(cycle, &first, 1, &second)));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_add_dependencies(cycle, &second, &first, 1)));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      hrx_status_to_iree(hrx_graph_exec_update(exec_, cycle)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  EXPECT_EQ(result_, arguments_.value);
+}
+
+TEST_P(GraphKernelTest, UnsupportedRecordingKeepsTheInstalledRecording) {
+  InstantiateOriginal();
+  Graph replacement;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_create(device_, 0, replacement.for_output())));
+  auto attrs =
+      KernelAttrs(GetParam() | HRX_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS);
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_add_kernel_node(replacement, nullptr, 0, &attrs, nullptr)));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNIMPLEMENTED,
+      hrx_status_to_iree(hrx_graph_exec_update(exec_, replacement)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  EXPECT_EQ(result_, arguments_.value);
 }
 
 INSTANTIATE_TEST_SUITE_P(

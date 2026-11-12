@@ -9,6 +9,7 @@
 #include "buffer.h"
 #include "buffer_table.h"
 #include "device.h"
+#include "graph_exec.h"
 #include "hrx_runtime.h"
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
@@ -371,7 +372,6 @@ typedef struct hrx_graph_s {
   iree_host_size_t additional_edge_count;
 
   uint32_t flags;
-  iree_slim_mutex_t mutex;
 } hrx_graph_s;
 
 typedef struct hrx_graph_sort_node_t {
@@ -416,37 +416,6 @@ typedef struct hrx_graph_barrier_state_t {
   uint32_t invalid : 1;
 } hrx_graph_barrier_state_t;
 
-typedef struct hrx_graph_exec_s {
-  // References to this executable and its recorded resources.
-  iree_atomic_ref_count_t ref_count;
-  // Recording family borrowed from the device retained by |graph|.
-  const iree_hal_queue_family_t* queue_family;
-  // Retained graph containing captured node data.
-  hrx_graph_t graph;
-  // Storage for immutable blocks and their semaphore indices.
-  iree_arena_allocator_t arena_allocator;
-  // Blocks in submission order, ending in a single completion producer.
-  struct hrx_graph_exec_block_t** blocks;
-  // Number of initialized entries in |blocks|.
-  uint32_t block_count;
-  // Number of internal edge semaphores.
-  uint32_t semaphore_count;
-  // Internal edge semaphores borrowed from |resource_set|.
-  iree_hal_semaphore_t** semaphores;
-  // Reserved generation, signaled once on each internal edge per launch.
-  uint64_t launch_generation;
-  // Retained completion semaphore ordering replays across different streams.
-  iree_hal_semaphore_t* last_launch_semaphore;
-  // Completion point on |last_launch_semaphore|, not an observed payload.
-  uint64_t last_launch_value;
-  // Owns recorded command buffers, buffers, and internal semaphores.
-  iree_hal_resource_set_t* resource_set;
-  // Instantiation flags supplied by the application.
-  uint32_t flags;
-  // Serializes generation reservation and submission of this executable.
-  iree_slim_mutex_t mutex;
-} hrx_graph_exec_s;
-
 // Internal graph scheduling API (implemented in graph_analysis.c).
 iree_status_t hrx_graph_schedule_nodes(hrx_graph_node_block_t* node_blocks,
                                        iree_host_size_t node_count,
@@ -460,11 +429,6 @@ iree_status_t hrx_graph_record_node_barrier(
     const hrx_graph_edge_t* additional_edges, const uint32_t* node_index_map,
     uint32_t sorted_index, iree_hal_command_buffer_t* command_buffer,
     bool* out_did_barrier);
-
-// Internal graph exec APIs (implemented in graph_exec.c).
-iree_status_t hrx_graph_exec_instantiate_locked(
-    hrx_graph_exec_t exec, hrx_graph_node_block_t* node_blocks,
-    iree_host_size_t node_count);
 
 // Timeline fence wrapper.
 typedef struct hrx_fence_s {
