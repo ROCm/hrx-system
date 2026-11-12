@@ -843,8 +843,10 @@ static bool loom_cfg_converge_downstream_select(
 // refresh. An overlapping set waits for the next snapshot.
 static iree_status_t loom_cfg_converge_plan_downstream(
     loom_rewriter_t* rewriter, const loom_value_fact_cfg_region_t* facts,
-    iree_arena_allocator_t* arena, loom_cfg_converge_downstream_t** out_plans) {
+    iree_arena_allocator_t* arena, loom_cfg_converge_downstream_t** out_plans,
+    iree_host_size_t* out_added_block_count) {
   *out_plans = NULL;
+  *out_added_block_count = 0;
   const loom_cfg_graph_t* graph = &facts->graph;
   const loom_cfg_postdominance_t* postdominance =
       &facts->control_structure.postdominance;
@@ -948,7 +950,57 @@ static iree_status_t loom_cfg_converge_plan_downstream(
       break;
     }
   }
+  *out_added_block_count = block_count - graph->block_count;
   return status;
+}
+
+// New blocks are built at the end of the region, then placed before their
+// original anchors in one stable counting pass. This preserves layout tie
+// breaks without moving and renumbering the suffix after every insertion.
+typedef struct loom_cfg_converge_placement_t {
+  // Newly appended block to insert into the final table.
+  loom_block_t* block;
+  // Original block index immediately after this insertion.
+  uint16_t anchor;
+} loom_cfg_converge_placement_t;
+
+typedef struct loom_cfg_converge_order_t {
+  // Per-original-block insertion counts, then next insertion positions.
+  uint16_t* positions;
+  // New blocks in insertion order, bounded by the selected batch's block count.
+  loom_cfg_converge_placement_t* placements;
+  // Number of populated placement records.
+  iree_host_size_t placement_count;
+  // Scratch destination table for the complete reordered region.
+  loom_block_t** blocks;
+} loom_cfg_converge_order_t;
+
+static void loom_cfg_converge_place_before(loom_cfg_converge_order_t* order,
+                                           loom_block_t* block,
+                                           const loom_block_t* anchor) {
+  order->placements[order->placement_count++] = (loom_cfg_converge_placement_t){
+      .block = block, .anchor = anchor->region_index};
+  ++order->positions[anchor->region_index];
+}
+
+static void loom_cfg_converge_finish_order(loom_cfg_converge_order_t* order,
+                                           const loom_cfg_graph_t* graph) {
+  iree_host_size_t position = 0;
+  for (iree_host_size_t i = 0; i < graph->block_count; ++i) {
+    uint16_t count = order->positions[i];
+    order->positions[i] = (uint16_t)position;
+    position += count;
+    order->blocks[position++] = (loom_block_t*)graph->blocks[i].block;
+  }
+  for (iree_host_size_t i = 0; i < order->placement_count; ++i) {
+    const loom_cfg_converge_placement_t* placement = &order->placements[i];
+    order->blocks[order->positions[placement->anchor]++] = placement->block;
+  }
+  loom_region_t* region = (loom_region_t*)graph->region;
+  for (iree_host_size_t i = 0; i < region->block_count; ++i) {
+    region->blocks[i] = order->blocks[i];
+    region->blocks[i]->region_index = (uint16_t)i;
+  }
 }
 
 // Redirects one original edge with its selected tuple and defined inactive
@@ -958,7 +1010,8 @@ static iree_status_t loom_cfg_converge_downstream_incoming(
     loom_module_t* module, loom_rewriter_t* rewriter,
     const loom_cfg_converge_downstream_t* plan, uint8_t arm,
     const loom_cfg_edge_info_t* edge, loom_block_t* join,
-    const uint16_t* offsets, loom_value_id_t* payload) {
+    const uint16_t* offsets, loom_value_id_t* payload,
+    loom_cfg_converge_order_t* order) {
   loom_builder_t* builder = &rewriter->builder;
   loom_op_t* terminator = (loom_op_t*)edge->terminator;
   bool direct = loom_cfg_br_isa(terminator);
@@ -966,8 +1019,9 @@ static iree_status_t loom_cfg_converge_downstream_incoming(
     loom_builder_set_before(builder, terminator);
   } else {
     loom_block_t* incoming = NULL;
-    IREE_RETURN_IF_ERROR(loom_region_insert_block(
-        module, join->parent_region, join->region_index, &incoming));
+    IREE_RETURN_IF_ERROR(
+        loom_region_append_block(module, join->parent_region, &incoming));
+    loom_cfg_converge_place_before(order, incoming, plan->destinations[0]);
     loom_op_successors(terminator)[edge->successor_index] = incoming;
     loom_builder_set_block(builder, incoming);
   }
@@ -1008,13 +1062,15 @@ static iree_status_t loom_cfg_converge_downstream_incoming(
 static iree_status_t loom_cfg_converge_apply_downstream(
     loom_module_t* module, loom_rewriter_t* rewriter,
     const loom_value_fact_cfg_region_t* facts, iree_arena_allocator_t* arena,
-    const loom_cfg_converge_downstream_t* plan) {
+    const loom_cfg_converge_downstream_t* plan,
+    loom_cfg_converge_order_t* order) {
   loom_region_t* region = plan->destinations[0]->parent_region;
   loom_builder_t* builder = &rewriter->builder;
   builder->ip.parent_op = plan->destinations[0]->first_op->parent_op;
+  // Appending keeps original block indices stable and avoids shifting the
+  // region pointer table once for every frontier in the batch.
   loom_block_t* join = NULL;
-  IREE_RETURN_IF_ERROR(loom_region_insert_block(
-      module, region, plan->destinations[0]->region_index, &join));
+  IREE_RETURN_IF_ERROR(loom_region_append_block(module, region, &join));
   loom_value_id_t choice = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_builder_define_block_arg(
       builder, join, loom_type_scalar(LOOM_SCALAR_TYPE_I1), &choice));
@@ -1032,14 +1088,16 @@ static iree_status_t loom_cfg_converge_apply_downstream(
           loom_module_value_type(module, destination->arg_ids[i]), &argument);
     }
     if (iree_status_is_ok(status) && destination->arg_count != 0) {
-      status = loom_region_insert_block(
-          module, region, destination->region_index, &destinations[arm]);
+      status = loom_region_append_block(module, region, &destinations[arm]);
       if (iree_status_is_ok(status)) {
         loom_builder_set_block(builder, destinations[arm]);
         loom_op_t* forwarding = NULL;
         status = loom_cfg_br_build(
             builder, destination, join->arg_ids + offsets[arm],
             destination->arg_count, plan->location, &forwarding);
+        if (arm == 1) {
+          loom_cfg_converge_place_before(order, destinations[arm], destination);
+        }
       }
     }
   }
@@ -1059,9 +1117,14 @@ static iree_status_t loom_cfg_converge_apply_downstream(
           &facts->graph.edges[plan->edges[arm].values[i]];
       if (loom_cfg_converge_downstream_edge(facts, plan, arm, edge)) {
         status = loom_cfg_converge_downstream_incoming(
-            module, rewriter, plan, arm, edge, join, offsets, payload);
+            module, rewriter, plan, arm, edge, join, offsets, payload, order);
       }
     }
+  }
+  loom_cfg_converge_place_before(order, join, plan->destinations[0]);
+  if (destinations[0] != plan->destinations[0]) {
+    loom_cfg_converge_place_before(order, destinations[0],
+                                   plan->destinations[0]);
   }
   return status;
 }
@@ -1073,12 +1136,29 @@ static iree_status_t loom_cfg_converge_factor_downstream(
   *out_changed = false;
   iree_arena_reset(arena);
   loom_cfg_converge_downstream_t* plans = NULL;
-  iree_status_t status =
-      loom_cfg_converge_plan_downstream(rewriter, facts, arena, &plans);
+  iree_host_size_t added_block_count = 0;
+  IREE_RETURN_IF_ERROR(loom_cfg_converge_plan_downstream(
+      rewriter, facts, arena, &plans, &added_block_count));
+  if (!plans) {
+    return iree_ok_status();
+  }
+  loom_cfg_converge_order_t order = {0};
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, facts->graph.block_count, sizeof(*order.positions),
+      (void**)&order.positions));
+  memset(order.positions, 0,
+         facts->graph.block_count * sizeof(*order.positions));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, added_block_count,
+                                                 sizeof(*order.placements),
+                                                 (void**)&order.placements));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, facts->graph.block_count + added_block_count,
+      sizeof(*order.blocks), (void**)&order.blocks));
+  iree_status_t status = iree_ok_status();
   for (const loom_cfg_converge_downstream_t* plan = plans;
        plan && iree_status_is_ok(status); plan = plan->next) {
     status = loom_cfg_converge_apply_downstream(module, rewriter, facts, arena,
-                                                plan);
+                                                plan, &order);
     if (iree_status_is_ok(status)) {
       loom_cfg_converge_statistics_t* statistics =
           loom_cfg_converge_statistics(pass);
@@ -1089,6 +1169,7 @@ static iree_status_t loom_cfg_converge_factor_downstream(
     }
   }
   if (iree_status_is_ok(status) && *out_changed) {
+    loom_cfg_converge_finish_order(&order, &facts->graph);
     status = loom_rewriter_refresh_cfg_facts(
         rewriter, plans->destinations[0]->parent_region);
   }
