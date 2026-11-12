@@ -118,6 +118,22 @@ def _configuration_impl(ctx):
     action_configs = base._action_configs_DO_NOT_USE
     tool_paths = base.tool_paths
     include_directories = base.cxx_builtin_include_directories
+    if ctx.attr.cross_compile and base.compiler == "msvc-cl":
+        # Identical high-fanout builds through one Wine prefix can randomly
+        # return success without an object. Give Wine-backed tools their own
+        # scheduling resource so unrelated host actions retain full parallelism.
+        action_configs = [action_config(
+            action_name = action.action_name,
+            enabled = action.enabled,
+            flag_sets = action.flag_sets,
+            implies = action.implies,
+            tools = [tool(
+                path = item.path,
+                tool = item.tool,
+                execution_requirements = item.execution_requirements + ["resources:msvc_wine:1"],
+                with_features = item.with_features,
+            ) for item in action.tools],
+        ) for action in action_configs]
     if ctx.attr.native_runtime:
         runtime = ctx.attr.native_runtime[NativeWindowsRuntimeInfo]
         if runtime.builtins:

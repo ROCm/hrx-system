@@ -21,6 +21,8 @@ _CommandInfo = provider("Expanded commands and enabled cross-toolchain capabilit
     "compiler": "Compiler action executable path.",
     # Compiler identity exported to compiler-specific project selects.
     "compiler_id": "Configured compiler identity.",
+    # Scheduler requirements attached to the selected compiler action.
+    "compiler_requirements": "Compiler action execution requirements.",
     # Whether the unsupported native-Windows export helper is disabled.
     "explicit_exports": "Automatic exports disabled.",
     # Fully expanded shared-library link arguments from the same configuration.
@@ -75,6 +77,10 @@ def _command_impl(ctx):
         split_lto = cc_common.is_enabled(feature_configuration = configuration, feature_name = "thin_lto"),
         compiler = cc_common.get_tool_for_action(feature_configuration = configuration, action_name = ACTION_NAMES.cpp_compile),
         compiler_id = compiler.compiler,
+        compiler_requirements = cc_common.get_execution_requirements(
+            feature_configuration = configuration,
+            action_name = ACTION_NAMES.cpp_compile,
+        ),
     )]
 
 _command = rule(
@@ -127,6 +133,7 @@ def _test_cross_msvc_impl(env, target):
     command = target[_CommandInfo]
     env.expect.that_str(command.compiler_id).equals("msvc-cl")
     env.expect.that_str(command.compiler).equals("build_tools/windows/test/msvc-cl")
+    env.expect.that_collection(command.compiler_requirements).contains("resources:msvc_wine:1")
     for flag in ["/O2", "/Z7", "/X"]:
         env.expect.that_collection(command.arguments).contains(flag)
     env.expect.that_collection(command.arguments).not_contains("/clang:-O3")

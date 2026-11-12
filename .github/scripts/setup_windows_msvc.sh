@@ -25,6 +25,7 @@ verify_installation() {
     "$bin_dir/lib.exe" \
     "$bin_dir/link.exe" \
     "$bin_dir/ml64.exe" \
+    "$bin_dir/pgodb140.dll" \
     "$bin_dir/1033/clui.dll" \
     "$bin_dir/1033/linkui.dll" \
     "$root/wrappers/cl" \
@@ -72,13 +73,16 @@ PY
 )
 fetch "${manifest[0]}" "${manifest[1]}" "$scratch/VisualStudio.vsman"
 
+# link.exe imports pgodb140.dll even for ordinary non-PGO links. Microsoft
+# distributes that dependency separately from the host compiler tools.
 python3 "$msvc_wine_source/vsdownload.py" \
   --accept-license \
   --manifest "$scratch/VisualStudio.vsman" \
   --with-default no \
   --architecture x64 \
   --dest "$scratch/install" \
-  Microsoft.VC.14.44.17.14.Tools.HostX64.TargetX64
+  Microsoft.VC.14.44.17.14.Tools.HostX64.TargetX64 \
+  Microsoft.VC.14.44.17.14.Premium.Tools.HostX64.TargetX64
 
 mkdir -p "$scratch/install/wrappers"
 for wrapper in cl lib link ml64 wine-msvc.sh; do

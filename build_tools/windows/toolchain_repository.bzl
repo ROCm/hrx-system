@@ -35,15 +35,25 @@ exit 1
 """
 
 _MSVC_ENV = """#!/usr/bin/env bash
-tool_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+tool_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# Bazel may expose the sandbox working directory as /proc/self/cwd. Windows
+# child processes cannot reuse that process-relative alias, so enter its
+# physical path before exposing relative action inputs and outputs to Wine.
+cd "$(pwd -P)"
 BINDIR="$tool_root/msvc/bin"
 export PATH="$tool_root/tools:$PATH"
-export INCLUDE="z:$tool_root/include/crt;z:$tool_root/include/ucrt;z:$tool_root/include/shared;z:$tool_root/include/um;z:$tool_root/include/winrt;z:$tool_root/include/cppwinrt"
-export LIB="z:$tool_root/lib/crt;z:$tool_root/lib/ucrt;z:$tool_root/lib/um"
+windows_tool_root="z:${tool_root//\\//\\\\}"
+export INCLUDE="$windows_tool_root\\include\\crt;$windows_tool_root\\include\\ucrt;$windows_tool_root\\include\\shared;$windows_tool_root\\include\\um;$windows_tool_root\\include\\winrt;$windows_tool_root\\include\\cppwinrt"
+export LIB="$windows_tool_root\\lib\\crt;$windows_tool_root\\lib\\ucrt;$windows_tool_root\\lib\\um"
 export LIBPATH="$LIB"
-export WINEPATH="z:$BINDIR"
+# MSVC stubs such as lib.exe find neighboring tools through the Windows PATH.
+export WINEPATH="${BINDIR//\\//\\\\}"
+: "${HOME:?Linux-hosted MSVC requires HOME to identify the Wine user.}"
 : "${WINEPREFIX:?Linux-hosted MSVC requires WINEPREFIX to name a user-owned directory.}"
 export WINEPREFIX
+# Distro Wine server paths outlive individual compiler actions. Do not let a
+# Bazel-supplied per-action temporary directory redirect that shared state.
+unset TMPDIR
 export WINEDLLOVERRIDES="vcruntime140=n;vcruntime140_1=n"
 """
 
@@ -55,6 +65,17 @@ exit 1
 _MSVC_DUMPBIN_WRAPPER = """#!/usr/bin/env bash
 . "$(dirname "$0")/msvcenv.sh"
 "$(dirname "$0")/wine-msvc.sh" "$BINDIR/dumpbin.exe" "$@"
+"""
+
+_MSVC_CL_WRAPPER = """#!/usr/bin/env bash
+set -o pipefail
+working_directory="$(pwd -P)"
+"$(dirname "$0")/msvc-cl-upstream" "$@" | sed "s|$working_directory/||g"
+pipeline_status=("${PIPESTATUS[@]}")
+if [[ "${pipeline_status[0]}" -ne 0 ]]; then
+  exit "${pipeline_status[0]}"
+fi
+exit "${pipeline_status[1]}"
 """
 
 def _required_path(repository_ctx, path):
@@ -165,16 +186,17 @@ def _windows_toolchain_repository_impl(repository_ctx):
         _project(repository_ctx, msvc_version_root.get_child("bin", "Hostx64", "x64"), "msvc/bin")
         _project(repository_ctx, wine, "tools/wine64")
         for source, destination in {
-            "cl": "msvc-cl",
+            "cl": "msvc-cl-upstream",
             "lib": "msvc-lib",
             "link": "msvc-link",
             "ml64": "msvc-ml64",
             "wine-msvc.sh": "wine-msvc.sh",
         }.items():
             _project(repository_ctx, msvc_root.get_child("wrappers", source), "tools/" + destination)
+        repository_ctx.file("tools/msvc-cl", _MSVC_CL_WRAPPER, executable = True)
         repository_ctx.file("tools/msvc-dumpbin", _MSVC_DUMPBIN_WRAPPER, executable = True)
     else:
-        for destination in ["msvc-cl", "msvc-dumpbin", "msvc-lib", "msvc-link", "msvc-ml64", "wine-msvc.sh", "wine64"]:
+        for destination in ["msvc-cl", "msvc-cl-upstream", "msvc-dumpbin", "msvc-lib", "msvc-link", "msvc-ml64", "wine-msvc.sh", "wine64"]:
             repository_ctx.file("tools/" + destination, _MISSING_MSVC_WRAPPER, executable = True)
     repository_ctx.file("tools/msvcenv.sh", _MSVC_ENV, executable = True)
 

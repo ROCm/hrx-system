@@ -87,6 +87,7 @@ def windows_cross_toolchain(name, repository_path, execution_architecture, msvc_
         name = "msvc_tool_files",
         srcs = native.glob(["msvc/bin/**"], allow_empty = True) + [
             "tools/msvc-cl",
+            "tools/msvc-cl-upstream",
             "tools/msvc-dumpbin",
             "tools/msvc-lib",
             "tools/msvc-link",
@@ -232,7 +233,7 @@ def windows_cross_toolchain(name, repository_path, execution_architecture, msvc_
         default_compile_flags = [
             "/Z7",
             "/X",
-        ],
+        ] + ["/I" + directory for directory in msvc_include_directories],
         default_link_flags = ["/MACHINE:X64"],
         archiver_flags = ["/MACHINE:X64"],
         dbg_mode_debug_flag = "/DEBUG",

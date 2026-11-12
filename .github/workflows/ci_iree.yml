@@ -405,7 +405,7 @@ jobs:
             printf 'int msvc_version_probe(void) { return 0; }\n' > "$version_source"
             version_source_windows="z:${version_source//\//\\}"
             version_object_windows="z:${version_object//\//\\}"
-            WINEDEBUG=-all WINEPATH="z:$compiler_dir" \
+            WINEDEBUG=-all WINEPATH="${compiler_dir//\//\\}" \
               "$wine_executable" "$compiler_dir/cl.exe" /nologo /Bv /c \
               "$version_source_windows" "/Fo$version_object_windows"
             test -s "$version_object"
@@ -472,8 +472,6 @@ jobs:
           mkdir -p "$RUNNER_TEMP/bazel-profiles"
           bazel build \
             --profile="$RUNNER_TEMP/bazel-profiles/windows-msvc.json.gz" \
-            --action_env=WINEARCH \
-            --action_env=WINEPREFIX \
             --config=windows-x86_64 \
             --config=windows-msvc \
             --//loom/config:shared_tools \
