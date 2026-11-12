@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "iree/hal/api.h"
+#include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/driver/amd/gpu/cts/test_device.h"
 #include "iree/hal/slab_pool.h"
 #include "iree/testing/gtest.h"
@@ -186,6 +187,76 @@ TEST_P(GpuNativeTimestampTest, SameFamilyTicksRemainOrderedAcrossRingReuse) {
     EXPECT_NE(output[i], UINT64_C(0xA57C99E1A57C99E1));
     if (i > 1) {
       EXPECT_GE(output[i], output[i - 1]);
+    }
+  }
+}
+
+TEST_P(GpuNativeTimestampTest, RecordedCommandsRetainBindingsAcrossSlotReuse) {
+  constexpr size_t kReplays = 65;
+  constexpr size_t kStride = 16;
+  constexpr uint64_t kGuard = UINT64_C(0xA57C99E1A57C99E1);
+  Allocate((kReplays * kStride + 2) * sizeof(uint64_t));
+  if (HasFatalFailure()) {
+    return;
+  }
+  uint64_t value = 0;
+  // Four captures exercise bounded host preparation; sixteen exercise resident
+  // GPU preparation. Both reuse one recording across two four-credit queues.
+  for (uint32_t count : {4u, 16u}) {
+    iree::hal::cts::Ref<iree_hal_command_buffer_t> recording;
+    IREE_ASSERT_OK(iree_hal_command_buffer_create(
+        iree_hal_queue_family(queues_[0]), 0,
+        IREE_HAL_COMMAND_CATEGORY_TRANSFER, 1, recording.out()));
+    IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+    for (uint32_t i = 0; i < count; ++i) {
+      IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
+          recording, IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS, 0,
+          iree_hal_make_indirect_buffer_ref(0, i * 8, 8), 0));
+    }
+    const iree_hal_barrier_t release = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+        .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+    };
+    IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+    ++value;
+    IREE_ASSERT_OK(iree_hal_queue_fill(
+        queues_[0], {}, {1, &semaphores_[2], &value}, buffer_, 0,
+        (kReplays * kStride + 2) * sizeof(uint64_t), &kGuard, 4, nullptr, 0));
+    for (size_t i = 0; i < kReplays; ++i) {
+      uint64_t previous = value++;
+      const iree_hal_buffer_binding_t binding = {
+          .buffer = buffer_,
+          .offset = (1 + i * kStride) * sizeof(uint64_t),
+          .length = count * sizeof(uint64_t),
+      };
+      IREE_ASSERT_OK(iree_hal_queue_execute(
+          queues_[i % 2], {1, &semaphores_[2], &previous},
+          {1, &semaphores_[2], &value}, recording, {1, &binding}, 0));
+    }
+    std::vector<uint64_t> output(kReplays * kStride + 2);
+    uint64_t previous = value++;
+    IREE_ASSERT_OK(iree_hal_queue_download(
+        queues_[0], {1, &semaphores_[2], &previous},
+        {1, &semaphores_[2], &value}, buffer_, 0, output.data(),
+        output.size() * sizeof(uint64_t), nullptr));
+    Wait(2, value);
+    EXPECT_EQ(output.front(), kGuard);
+    EXPECT_EQ(output.back(), kGuard);
+    uint64_t prior = 0;
+    for (size_t i = 0; i < kReplays; ++i) {
+      for (size_t j = 0; j < kStride; ++j) {
+        const uint64_t tick = output[1 + i * kStride + j];
+        if (j < count) {
+          EXPECT_GT(tick, 0u);
+          EXPECT_NE(tick, kGuard);
+          EXPECT_GE(tick, prior);
+          prior = tick;
+        } else {
+          EXPECT_EQ(tick, kGuard);
+        }
+      }
     }
   }
 }

@@ -44,18 +44,20 @@ typedef struct iree_hal_amd_gpu_aql_command_buffer_t {
   // The last payload begins after all earlier payloads have completed, so its
   // release fence can cover their writes without an additional native packet.
   bool last_ordered;
-  // GPU-mutated state, native commands, and payloads stay in resident
-  // instances.
+  // GPU-mutated packet/state bytes and captured transfer payloads stay
+  // resident.
   bool requires_resident_storage;
-  // Posted clock destinations and invocation-private write-drain scratch.
+  // Posted clock destinations awaiting a native write drain.
   iree_hal_amd_gpu_timestamp_writes_t timestamps;
+  // Command-data offset of the invocation-owned posted-write acknowledgement.
+  uint32_t timestamp_scratch_offset;
   // Last clock carrier, extendible only while no native bytes follow it.
   iree_hal_amd_gpu_aql_packet_t* timestamp_tail;
   // Optional single-XCC predicate whose span grows with the carrier body.
   uint32_t* timestamp_predicate;
   // End of the last clock's native packet in recording command coordinates.
   uint32_t timestamp_command_end;
-  // End of the last clock's native body in recording private-data coordinates.
+  // End of the last clock's native body in recording command-data coordinates.
   uint32_t timestamp_data_end;
   // First failed mutation, preventing partial native programs from sealing.
   iree_status_t recording_status;
@@ -263,12 +265,12 @@ static iree_status_t iree_hal_amd_gpu_aql_command_drain_timestamps(
   const bool append =
       buffer->timestamp_tail &&
       buffer->timestamp_command_end == buffer->recording.commands.length &&
-      buffer->timestamp_data_end == buffer->recording.data.length;
+      buffer->timestamp_data_end == buffer->recording.command_data.length;
   const uint32_t predicate_words = !append && xcc_count > 1 ? 2 : 0;
   uint32_t data_offset = 0;
   uint32_t* words = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
-      &buffer->recording, (predicate_words + 5) * 4, 4, &data_offset,
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_command_data(
+      &buffer->recording, (predicate_words + 5) * 4, &data_offset,
       (void**)&words));
   uint32_t* cursor =
       append ? words
@@ -277,9 +279,9 @@ static iree_status_t iree_hal_amd_gpu_aql_command_drain_timestamps(
   iree_hal_amd_gpu_pm4_emit_write(cursor, 0, 1, &value);
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_fixup(
       &buffer->recording, data_offset + 4 * (predicate_words + 2), 0,
-      buffer->timestamps.scratch_offset, 0,
-      IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA |
-          IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA |
+      buffer->timestamp_scratch_offset, 0,
+      IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_COMMAND_DATA |
+          IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_COMMAND_DATA |
           IREE_HAL_AMD_GPU_RECORDING_FIXUP_WIDE));
   if (append) {
     buffer->timestamp_tail->words[4] += 5;
@@ -295,7 +297,7 @@ static iree_status_t iree_hal_amd_gpu_aql_command_drain_timestamps(
         header, 0, predicate_words + 5, 0);
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_fixup(
         &buffer->recording, packet_offset + 8, 0, data_offset, 0,
-        IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA |
+        IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_COMMAND_DATA |
             IREE_HAL_AMD_GPU_RECORDING_FIXUP_WIDE));
     buffer->last_ordered = (header & IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED) != 0;
     buffer->last_header = &packet->words[0];
@@ -319,7 +321,7 @@ static iree_status_t iree_hal_amd_gpu_aql_command_write_constants(
   iree_hal_amd_gpu_fixup_t
       fixups[IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_FIXUPS];
   iree_hal_amd_gpu_recording_write_sections(&buffer->recording, commands,
-                                            contents.data, fixups);
+                                            contents.data, NULL, 0, fixups);
   // Logical fixup addends include the original command section. Only private
   // data occupies native storage, so subtract that section from the base.
   const uint64_t base =
@@ -340,9 +342,13 @@ static iree_status_t iree_hal_amd_gpu_aql_command_end(
     buffer->pending_barrier = 0;
   }
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_flush_barrier(buffer));
-  const uint64_t length = iree_align_uint64(buffer->recording.commands.length,
-                                            buffer->recording.alignment) +
-                          buffer->recording.data.length;
+  uint64_t length = iree_align_uint64(buffer->recording.commands.length,
+                                      buffer->recording.alignment) +
+                    buffer->recording.data.length;
+  if (buffer->recording.command_data.length) {
+    length =
+        iree_align_uint64(length, 4) + buffer->recording.command_data.length;
+  }
   if (length > UINT32_MAX - 15) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "resident command/data placement exceeds 4 GiB");
@@ -364,8 +370,11 @@ static iree_status_t iree_hal_amd_gpu_aql_command_end(
                             AMDF_MEMORY_MAP_FLAG_WRITE);
     if (buffer->program->block_count == 1 &&
         !buffer->requires_resident_storage &&
-        buffer->program->value_count <=
+        buffer->program->value_count +
+                (buffer->recording.command_data.length != 0) <=
             IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_VALUES &&
+        buffer->recording.command_data.length <=
+            IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE &&
         ((length <= 512 &&
           fixup_count <= 512 / sizeof(iree_hal_amd_gpu_fixup_t)) ||
          (direct &&
@@ -389,6 +398,10 @@ static iree_status_t iree_hal_amd_gpu_aql_command_end(
           .data_offset = constants ? template_length
                                    : iree_hal_amd_gpu_recording_data_offset(
                                          &buffer->recording),
+          .command_data_offset =
+              constants ? template_length
+                        : iree_hal_amd_gpu_recording_command_data_offset(
+                              &buffer->recording),
           .alignment = buffer->recording.alignment,
           .fixup_count = template_fixup_count,
           .fixup_offset = fixup_offset,
@@ -399,7 +412,10 @@ static iree_status_t iree_hal_amd_gpu_aql_command_end(
             iree_hal_amd_gpu_aql_command_write_constants(buffer, contents));
       } else {
         iree_hal_amd_gpu_recording_write(&buffer->recording, contents,
+                                         buffer->program->value_count,
                                          (void*)(contents + fixup_offset));
+        buffer->program->value_count +=
+            buffer->recording.command_data.length != 0;
       }
       if (direct) {
         // All invocation arguments precede the first header publication. One
@@ -416,7 +432,7 @@ static iree_status_t iree_hal_amd_gpu_aql_command_end(
           &buffer->pool->storage, buffer->recording.alignment, (uint32_t)length,
           fixup_count, program));
       iree_hal_amd_gpu_recording_write(
-          &buffer->recording, program->contents.data,
+          &buffer->recording, program->contents.data, 0,
           (void*)(program->contents.data + program->fixup_offset));
       IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_program_seal(program));
     }
@@ -875,15 +891,19 @@ static IREE_ATTRIBUTE_NOINLINE iree_status_t
 iree_hal_amd_gpu_aql_command_invocation_write_host(
     const iree_hal_amd_gpu_aql_command_invocation_t* invocation,
     uint32_t queue_ordinal, uint64_t upload_address, void* upload,
-    void* host_contents) {
+    uint64_t command_address, void* commands, void* host_contents) {
   const iree_hal_amd_gpu_aql_command_buffer_t* buffer =
       (const void*)invocation->command_buffer;
   const iree_hal_amd_gpu_aql_host_template_t* host_template =
       invocation->program->host_template;
   uint64_t values[IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_VALUES];
   // Relocations retain the recording's combined command/data coordinates.
-  // Only the data suffix occupies native storage for a host template.
+  // Actual ABI and native commands have independent native bases.
   values[0] = upload_address - host_template->data_offset;
+  if (host_template->command_data_offset < host_template->byte_length) {
+    values[invocation->program->value_count - 1] =
+        command_address - host_template->command_data_offset;
+  }
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_write(
       &buffer->inputs, invocation->bindings, queue_ordinal, values + 1));
   const uint8_t* contents = (const void*)(host_template + 1);
@@ -894,24 +914,32 @@ iree_hal_amd_gpu_aql_command_invocation_write_host(
                                host_contents);
   iree_memcpy_write_only(
       upload, (const uint8_t*)host_contents + host_template->data_offset,
-      host_template->byte_length - host_template->data_offset);
+      host_template->command_data_offset - host_template->data_offset);
+  if (host_template->command_data_offset < host_template->byte_length) {
+    iree_memcpy_write_only(
+        commands,
+        (const uint8_t*)host_contents + host_template->command_data_offset,
+        host_template->byte_length - host_template->command_data_offset);
+  }
   return iree_ok_status();
 }
 
 iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
     const iree_hal_amd_gpu_aql_command_invocation_t* invocation,
     uint32_t queue_ordinal, uint64_t upload_address, void* upload,
-    void* host_contents, uint64_t* values) {
+    uint64_t command_address, void* commands, void* host_contents,
+    uint64_t* values) {
   const iree_hal_amd_gpu_aql_command_buffer_t* buffer =
       (const void*)invocation->command_buffer;
   const iree_hal_amd_gpu_aql_command_program_t* program = invocation->program;
   const iree_hal_amd_gpu_aql_host_template_t* host_template =
       program->host_template;
   const uint64_t address =
-      host_template ? upload_address : invocation->instance->address;
+      host_template ? command_address : invocation->instance->address;
   const uint32_t byte_length =
-      host_template ? host_template->byte_length - host_template->data_offset
-                    : program->resident.byte_length;
+      host_template
+          ? host_template->byte_length - host_template->command_data_offset
+          : program->resident.byte_length;
   if (IREE_UNLIKELY(program->has_control) &&
       address > (UINT64_C(1) << 48) - byte_length) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -919,7 +947,8 @@ iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
   }
   if (IREE_UNLIKELY(host_template)) {
     return iree_hal_amd_gpu_aql_command_invocation_write_host(
-        invocation, queue_ordinal, upload_address, upload, host_contents);
+        invocation, queue_ordinal, upload_address, upload, command_address,
+        commands, host_contents);
   }
   // An already repaired immutable instance needs no value table.
   if (!values) {
@@ -977,16 +1006,21 @@ static iree_status_t iree_hal_amd_gpu_aql_command_control(
   } else {
     const uint32_t xcc_count =
         buffer->pool->storage.context->target_info.topology.xcc_count;
-    buffer->requires_resident_storage = true;
     predicate_words = xcc_count > 1 ? 2 : 0;
     const uint32_t body_words = iree_hal_amd_gpu_control_word_count(command);
     word_count = predicate_words + body_words;
     if (command.kind == IREE_HAL_AMD_GPU_CONTROL_TIMESTAMP) {
+      if (!buffer->timestamps.pending) {
+        void* scratch = NULL;
+        IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_command_data(
+            &buffer->recording, 4, &buffer->timestamp_scratch_offset,
+            &scratch));
+      }
       IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_timestamp_writes_append(
-          &buffer->recording, target, &buffer->timestamps));
+          buffer->host_allocator, target, &buffer->timestamps));
     }
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
-        &buffer->recording, word_count * 4, 4, &data_offset, (void**)&words));
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_command_data(
+        &buffer->recording, word_count * 4, &data_offset, (void**)&words));
     uint32_t* cursor =
         iree_hal_amd_gpu_aql_emit_single_executor(words, xcc_count, body_words);
     if (command.kind == IREE_HAL_AMD_GPU_CONTROL_TIMESTAMP) {
@@ -998,7 +1032,8 @@ static iree_status_t iree_hal_amd_gpu_aql_command_control(
         buffer,
         data_offset + 4 * (predicate_words +
                            iree_hal_amd_gpu_control_address_word(command)),
-        value, target.offset, IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA));
+        value, target.offset,
+        IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_COMMAND_DATA));
     buffer->program->has_control = true;
   }
   uint32_t packet_offset = 0;
@@ -1015,12 +1050,13 @@ static iree_status_t iree_hal_amd_gpu_aql_command_control(
                                                         0);
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
       buffer, packet_offset + (program ? 40 : 8), 0, data_offset,
-      IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA));
+      program ? IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA
+              : IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_COMMAND_DATA));
   if (command.kind == IREE_HAL_AMD_GPU_CONTROL_TIMESTAMP) {
     buffer->timestamp_tail = packet;
     buffer->timestamp_predicate = predicate_words ? &words[1] : NULL;
     buffer->timestamp_command_end = buffer->recording.commands.length;
-    buffer->timestamp_data_end = buffer->recording.data.length;
+    buffer->timestamp_data_end = buffer->recording.command_data.length;
   }
   buffer->last_ordered = !buffer->last_header ||
                          (header & IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED) != 0;

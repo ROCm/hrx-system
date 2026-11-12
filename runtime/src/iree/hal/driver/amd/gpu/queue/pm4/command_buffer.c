@@ -59,8 +59,10 @@ typedef struct iree_hal_amd_gpu_pm4_command_buffer_t {
   iree_hal_amd_gpu_pm4_barrier_t pending_barrier;
   // Copies recorded since the last join; drained before the program exits.
   bool pending_dma;
-  // Posted clock destinations and invocation-private write-drain scratch.
+  // Posted clock destinations awaiting a native write drain.
   iree_hal_amd_gpu_timestamp_writes_t timestamps;
+  // Private-data offset of the invocation-owned posted-write acknowledgement.
+  uint32_t timestamp_scratch_offset;
   // Blocks backing direct-resource ownership.
   iree_arena_block_pool_t resource_blocks;
   // Retained buffers/executables, or NULL for explicitly unretained recordings.
@@ -262,7 +264,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_seal(
   iree_hal_amd_gpu_fixup_t* device_fixups =
       (void*)(program->contents.data + program->fixup_offset);
   iree_hal_amd_gpu_recording_write(&buffer->recording.storage,
-                                   program->contents.data,
+                                   program->contents.data, 0,
                                    bounded ? packet_fixups : device_fixups);
   uint32_t fixup_word_count = 0;
   if (bounded) {
@@ -315,7 +317,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_drain_timestamps(
   iree_hal_amd_gpu_pm4_emit_write(words, 0, 1, &value);
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_fixup(
       &buffer->recording.storage, offset + 8,
-      IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE, buffer->timestamps.scratch_offset, 0,
+      IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE, buffer->timestamp_scratch_offset, 0,
       IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA |
           IREE_HAL_AMD_GPU_RECORDING_FIXUP_WIDE));
   buffer->timestamps.count = 0;
@@ -473,8 +475,14 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_control(
         &buffer->recording, iree_hal_amd_gpu_control_word_count(command),
         &offset, &words));
     if (command.kind == IREE_HAL_AMD_GPU_CONTROL_TIMESTAMP) {
+      if (!buffer->timestamps.pending) {
+        void* scratch = NULL;
+        IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
+            &buffer->recording.storage, 4, 4, &buffer->timestamp_scratch_offset,
+            &scratch));
+      }
       IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_timestamp_writes_append(
-          &buffer->recording.storage, target, &buffer->timestamps));
+          buffer->host_allocator, target, &buffer->timestamps));
       iree_hal_amd_gpu_pm4_emit_clock(words, 0, false);
     } else {
       iree_hal_amd_gpu_control_emit(words, 0, command);

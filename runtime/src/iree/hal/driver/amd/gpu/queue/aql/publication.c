@@ -601,7 +601,7 @@ uint64_t iree_hal_amd_gpu_aql_execute_argument_length(
   const iree_hal_amd_gpu_aql_host_template_t* host_template =
       invocation->program->host_template;
   if (host_template) {
-    return host_template->byte_length - host_template->data_offset;
+    return host_template->command_data_offset - host_template->data_offset;
   }
   uint64_t length = invocation->block_ordinal
                         ? sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t)
@@ -667,6 +667,12 @@ iree_hal_amd_gpu_aql_publish_execute_prepared(
   const bool sampled = operation && operation->completion.sample_stride;
   const iree_hal_amd_gpu_aql_host_template_t* host_template =
       invocation->program->host_template;
+  const bool command_data =
+      host_template &&
+      host_template->command_data_offset < host_template->byte_length;
+  if (command_data && !queue->commands) {
+    return IREE_HAL_AMD_GPU_AQL_PUBLISH_COMMANDS;
+  }
   const uint64_t argument_length =
       iree_hal_amd_gpu_aql_execute_argument_length(invocation);
   uint64_t argument_offset = 0, argument_end = 0;
@@ -757,10 +763,17 @@ iree_hal_amd_gpu_aql_publish_execute_prepared(
   const void* packets = host_contents
                             ? host_contents
                             : (host_template ? host_template + 1 : NULL);
+  const uint64_t command_offset =
+      (position & (queue->options.retirement_capacity - 1)) *
+      IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE;
   if (first && (argument_length || host_contents)) {
     *out_status = iree_hal_amd_gpu_aql_command_invocation_write(
         invocation, queue->options.queue_ordinal,
-        arguments->address + argument_offset, upload, host_contents,
+        arguments->address + argument_offset, upload,
+        command_data ? queue->commands->address + command_offset : 0,
+        command_data ? queue->commands->memory.contents.data + command_offset
+                     : NULL,
+        host_contents,
         fixup ? (void*)(queue->values.current->memory.contents.data +
                         values_offset)
               : NULL);

@@ -58,7 +58,7 @@ TEST_F(RecordingTest, NativeCommandsAndPackedArgumentsSpanIndependentChunks) {
   std::vector<uint8_t> contents(
       data_offset + recording_.storage.data.length + 1, 0xAA);
   std::vector<iree_hal_amd_gpu_fixup_t> fixups(kCount * 4);
-  iree_hal_amd_gpu_recording_write(&recording_.storage, contents.data(),
+  iree_hal_amd_gpu_recording_write(&recording_.storage, contents.data(), 0,
                                    fixups.data());
   for (uint32_t i = recording_.storage.commands.length; i < data_offset; ++i) {
     EXPECT_EQ(contents[i], 0u) << i;
@@ -71,7 +71,7 @@ TEST_F(RecordingTest, NativeCommandsAndPackedArgumentsSpanIndependentChunks) {
   std::vector<iree_hal_amd_gpu_fixup_t> separate_fixups(kCount * 4);
   iree_hal_amd_gpu_recording_write_sections(&recording_.storage,
                                             commands.data(), data.data(),
-                                            separate_fixups.data());
+                                            nullptr, 0, separate_fixups.data());
   EXPECT_EQ(memcmp(commands.data(), contents.data(), commands.size() - 1), 0);
   EXPECT_EQ(memcmp(data.data(), contents.data() + data_offset, data.size() - 1),
             0);
@@ -133,7 +133,7 @@ TEST_P(RecordingBlockTest, SuccessorEdgesPreservePacketsAndInstanceFixups) {
       iree_hal_amd_gpu_recording_data_offset(&recording_.storage) / 4);
   std::vector<iree_hal_amd_gpu_fixup_t> fixups(fixup_count);
   iree_hal_amd_gpu_recording_write(&recording_.storage,
-                                   reinterpret_cast<uint8_t*>(words.data()),
+                                   reinterpret_cast<uint8_t*>(words.data()), 0,
                                    fixups.data());
   uint32_t word_count = recording_.entry_word_count;
   for (uint32_t block = 0; block < 3; ++block) {

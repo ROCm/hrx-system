@@ -95,7 +95,6 @@ iree_runtime_cc_library(
     srcs = ["timestamp.c"],
     hdrs = ["timestamp.h"],
     deps = [
-        ":recording",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
     ],
@@ -105,7 +104,6 @@ iree_runtime_cc_test(
     name = "timestamp_test",
     srcs = ["timestamp_test.cc"],
     deps = [
-        ":recording",
         ":timestamp",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
@@ -883,6 +881,18 @@ iree_runtime_cc_library(
         ":fixup",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:memory_copy",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "recording_test",
+    srcs = ["recording_test.cc"],
+    deps = [
+        ":fixup",
+        ":recording",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

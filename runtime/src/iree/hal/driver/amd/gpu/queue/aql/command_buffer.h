@@ -35,6 +35,8 @@ typedef struct iree_hal_amd_gpu_aql_program_block_t {
 enum {
   IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_BYTES = 8192,
   IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_FIXUPS = 256,
+  // Retirement-owned native IB capacity for direct and bounded recorded work.
+  IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE = 256,
   IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_VALUES =
       IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_FIXUPS + 1,
 };
@@ -46,8 +48,10 @@ typedef struct iree_hal_amd_gpu_aql_host_template_t {
   // Complete host packet/private-data extent. Zero-fixup templates are read
   // directly; mutable templates are prepared in publisher-owned CPU storage.
   uint32_t byte_length;
-  // Beginning of private GPU-read data; only the suffix needs native storage.
+  // Beginning of actual ABI bytes, published through kernarg storage.
   uint32_t data_offset;
+  // Beginning of indirect native commands and their write-drain scratch.
+  uint32_t command_data_offset;
   // Required power-of-two alignment of the invocation's upload address.
   uint32_t alignment;
   // Independent DWORD replacements applied after resolving unique inputs.
@@ -70,7 +74,8 @@ typedef struct iree_hal_amd_gpu_aql_command_program_t {
   iree_hal_amd_gpu_profile_commands_t* profile;
   // Number of complete blocks; zero is an empty recording.
   uint32_t block_count;
-  // Unique input count including instance base at index zero.
+  // Unique inputs including instance base at zero and an optional final
+  // command-data base for bounded host preparation.
   uint32_t value_count;
   // Public dispatches, independent of internal materializer/fixup dispatches.
   uint32_t dispatch_count;
@@ -147,16 +152,17 @@ void iree_hal_amd_gpu_aql_command_invocation_deinitialize(
     iree_hal_amd_gpu_aql_command_invocation_t* invocation);
 
 // Resolves unique input values once after upload address commitment. A bounded
-// host template is patched in host_contents and only its private-data suffix is
-// copied to upload; resident programs write their separate dense values
-// mapping. values is NULL when the resident instance needs no fixups.
+// host template is patched in host_contents; its actual ABI and native commands
+// are copied to their separate mappings. Resident programs write their separate
+// dense value table. values is NULL when the resident instance needs no fixups.
 // host_contents has HOST_TEMPLATE_MAX_BYTES bytes for a mutable host template
 // and is NULL for a resident program. Its caller keeps it through publication.
 // The publisher borrows zero-fixup host templates directly and omits this call.
 iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
     const iree_hal_amd_gpu_aql_command_invocation_t* invocation,
     uint32_t queue_ordinal, uint64_t upload_address, void* upload,
-    void* host_contents, uint64_t* values);
+    uint64_t command_address, void* commands, void* host_contents,
+    uint64_t* values);
 
 #ifdef __cplusplus
 }  // extern "C"

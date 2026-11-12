@@ -1231,9 +1231,12 @@ void GpuNativeDispatchTest::RunControlOrdering(ControlKind kind,
       ASSERT_EQ(program->block_count, 1u);
       const bool timestamp = kind == ControlKind::kTimestamp;
       const bool shader = !timestamp && !zero_compute;
-      // Only actual helper ABI belongs in transient arguments. Native IBs and
-      // timestamp write-drain scratch stay with their resident invocation.
-      EXPECT_EQ(program->host_template != nullptr, shader);
+      // CPU-prepared native commands use retirement-owned command storage;
+      // only actual dispatch/helper ABI occupies the kernarg range.
+      ASSERT_NE(program->host_template, nullptr);
+      EXPECT_EQ(program->host_template->command_data_offset <
+                    program->host_template->byte_length,
+                !shader);
       const bool standalone_release = dispatch && !ordered;
       EXPECT_EQ(program->blocks[0].packet_count,
                 1u + dispatch + standalone_release);

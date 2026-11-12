@@ -32,13 +32,6 @@ typedef enum iree_hal_amd_gpu_aql_publish_result_e {
   IREE_HAL_AMD_GPU_AQL_PUBLISH_SIGNALS,
 } iree_hal_amd_gpu_aql_publish_result_t;
 
-// One direct IB per native retirement slot. Grid initialization is the largest;
-// scalar commands need at most nine DWORDs plus a two-DWORD XCC predicate.
-enum {
-  IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE =
-      IREE_HAL_AMD_GPU_AQL_GRID_SYNC_COMMAND_LENGTH,
-};
-
 // Exact argument extent needed before ring reservation, including optional
 // GWS initialization arguments.
 uint64_t iree_hal_amd_gpu_aql_argument_length(
