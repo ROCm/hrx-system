@@ -42,15 +42,11 @@ def _iree_msvc_masm_object_impl(ctx):
     arguments.add("/Fo" + object_file.path)
     arguments.add(source_file.path)
 
-    # Custom actions do not inherit --action_env when an explicit environment
-    # is supplied. Preserve that declared environment before adding the
-    # selected C/C++ toolchain variables.
-    environment = dict(ctx.configuration.default_shell_env)
-    environment.update(cc_common.get_environment_variables(
+    environment = cc_common.get_environment_variables(
         action_name = ASSEMBLE_ACTION_NAME,
         feature_configuration = feature_configuration,
         variables = compile_variables,
-    ))
+    )
 
     ctx.actions.run(
         arguments = [arguments],
@@ -63,6 +59,9 @@ def _iree_msvc_masm_object_impl(ctx):
         mnemonic = "IreeMsvcMasm",
         outputs = [object_file],
         progress_message = "Assembling MSVC object %{label}",
+        # Include execution-time --action_env values such as WINEPREFIX. Bazel
+        # overlays the explicit toolchain environment above on those values.
+        use_default_shell_env = True,
     )
     return [DefaultInfo(files = depset([object_file]))]
 
