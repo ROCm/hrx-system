@@ -66,7 +66,7 @@ export_env "HRX_ROCM_ROOT" "${HRX_ROCM_ROOT}"
 
 # Preserve explicit system toolchains while relocating paths selected from the
 # fetched ROCm root.
-for name in AR CC CXX IREE_CLANG_TIDY_LLVM_ROOT IREE_ROCM_PATH; do
+for name in AR CC CXX LLVM_ROOT IREE_CLANG_TIDY_LLVM_ROOT IREE_ROCM_PATH; do
   rebase_rocm_env_path "${name}"
 done
 

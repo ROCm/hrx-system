@@ -1828,6 +1828,7 @@ fi
                     "HRX_OUTPUT_DIR": os.fspath(output_dir),
                     "HRX_PYTHON": os.fspath(output_dir / "python/bin/python3"),
                     "HRX_ROCM_ROOT": os.fspath(rocm_root),
+                    "LLVM_ROOT": os.fspath(rocm_root / "lib/llvm"),
                     "IREE_CLANG_TIDY_LLVM_ROOT": os.fspath(rocm_root / "lib/llvm"),
                     "IREE_ROCM_PATH": os.fspath(rocm_root),
                     "PATH": f"{fake_bin}:{env['PATH']}",
@@ -1857,6 +1858,10 @@ fi
                 str(versioned_rocm_root / "lib/llvm/bin/clang++"),
             )
             self.assertNotIn("AR", exported_env)
+            self.assertEqual(
+                exported_env["LLVM_ROOT"],
+                str(versioned_rocm_root / "lib/llvm"),
+            )
             self.assertEqual(
                 exported_env["IREE_CLANG_TIDY_LLVM_ROOT"],
                 str(versioned_rocm_root / "lib/llvm"),
