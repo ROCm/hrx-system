@@ -532,6 +532,25 @@ iree_runtime_cc_test(
     ],
 )
 
+iree_runtime_cc_test(
+    name = "transfer_storage_test",
+    srcs = ["transfer_storage_test.cc"],
+    target_compatible_with = _EXECUTABLE_COMPATIBLE_WITH,
+    deps = [
+        ":code_testdata",
+        ":test_device",
+        ":testdata",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue/aql:queue",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue/pm4:queue",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_runtime_cc_library(
     name = "native_transfer_test_base",
     testonly = True,

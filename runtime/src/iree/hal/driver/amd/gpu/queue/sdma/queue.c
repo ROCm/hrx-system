@@ -539,7 +539,7 @@ iree_status_t iree_hal_amd_gpu_sdma_queue_create(
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_gpu_byte_storage_allocate(
-        context, options->memory,
+        context, options->transfer_memory,
         (uint64_t)options->staging_capacity *
             IREE_HAL_AMD_GPU_SDMA_RETIREMENT_CAPACITY,
         0, host_allocator, &queue->staging);

@@ -39,6 +39,8 @@ typedef struct iree_hal_amd_gpu_aql_queue_options_t {
   uint64_t command_byte_capacity;
   // Borrowed coherent host-readable/writable control and argument policy.
   const iree_hal_amd_fabric_memory_options_t* memory;
+  // Borrowed coherent read/write policy for explicit host transfer payloads.
+  const iree_hal_amd_fabric_memory_options_t* transfer_memory;
   // Borrowed local private-storage policy with no host mapping.
   const iree_hal_amd_fabric_memory_options_t* scratch_memory;
   // Borrowed resident placement and native builtins shared by peer queues.

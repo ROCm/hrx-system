@@ -46,7 +46,7 @@ typedef struct iree_hal_amd_gpu_pm4_retirement_t {
   iree_alignas(64) uintptr_t tagged_submission;
   // Reclaimable command prefix: USER release end or KERNEL chunk end.
   uint64_t consumed_words;
-  // Exclusive argument/staging prefix reusable after this host action.
+  // Exclusive argument prefix reusable after this host action.
   uint64_t consumed_arguments;
   // Optional bounded host copy, completed before returning staging credit.
   iree_hal_amd_gpu_download_t download;
@@ -76,9 +76,14 @@ static inline bool iree_hal_amd_gpu_pm4_retirement_is_terminal(
 typedef struct iree_hal_amd_gpu_pm4_retirement_slot_t {
   // Native retirement action, initialized without overwriting capture storage.
   iree_hal_amd_gpu_pm4_retirement_t action;
-  // Exclusively held through publication, including KERNEL capacity deferral,
-  // and final retirement. The action's alignment also aligns this span.
-  uint8_t capture[448];
+  union {
+    // Exclusively held through publication, including KERNEL capacity deferral,
+    // and final retirement. The action's alignment also aligns this span.
+    uint8_t capture[448];
+    // Transfer payload prefix reusable after native access and the host copy.
+    // Transfer captures always use the pool, leaving inline storage available.
+    uint64_t consumed_transfers;
+  };
 } iree_hal_amd_gpu_pm4_retirement_slot_t;
 static_assert(sizeof(iree_hal_amd_gpu_pm4_retirement_slot_t) == 512,
               "retirement slots have a power-of-two stride");
@@ -193,6 +198,15 @@ struct iree_hal_amd_gpu_pm4_queue_t {
     } frontier;
     // Lazy private storage; only the exact publisher mutates active ownership.
     iree_hal_amd_gpu_pm4_scratch_t scratch;
+    // DMA payload generations, independent of launch argument capacity.
+    struct {
+      // Lazily acquired current generation, or NULL before host transport.
+      iree_hal_amd_gpu_byte_storage_t* current;
+      // Replaced generations in final consumed-byte order.
+      iree_hal_amd_gpu_byte_storage_t* retired;
+      // Constant-time append boundary, or NULL when retired is empty.
+      iree_hal_amd_gpu_byte_storage_t* tail;
+    } transfers;
   } producer;
   // Native waiters leave metadata eligible under the same exclusive publisher.
   struct {
@@ -214,6 +228,8 @@ struct iree_hal_amd_gpu_pm4_queue_t {
     iree_atomic_int64_t words;
     // Last consumed argument position, including wrap/alignment.
     iree_atomic_int64_t arguments;
+    // Last consumed transfer payload position, after any host download copy.
+    iree_atomic_int64_t transfers;
     // Publisher enrolled for capacity return. Only a capacity-blocked
     // publisher writes this observer-owned line; retirement consumes it once.
     iree_atomic_int32_t waiting_for_capacity;

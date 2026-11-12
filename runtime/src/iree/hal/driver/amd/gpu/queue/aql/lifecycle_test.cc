@@ -100,7 +100,8 @@ class AqlLifecycleTest : public ::testing::Test {
     iree_slim_mutex_deinitialize(&completion_.drain_mutex);
   }
   void Capture(bool partial = false,
-               iree_hal_semaphore_t* second_signal = nullptr) {
+               iree_hal_semaphore_t* second_signal = nullptr,
+               bool downloads = false) {
     iree_hal_semaphore_t* signal_semaphores[] = {semaphore_, second_signal};
     uint64_t signal_values[] = {signal_value_, signal_value_};
     const iree_hal_semaphore_list_t signals = {
@@ -122,7 +123,7 @@ class AqlLifecycleTest : public ::testing::Test {
           iree_allocator_system(), &buffer));
       references[i] = iree_hal_make_buffer_ref(buffer, 0, bytes_[i].size());
     }
-    if (partial) {
+    if (partial || downloads) {
       std::array<iree_hal_transfer_operation_t, 6> operations = {};
       const uint32_t pattern = 0;
       for (size_t i = 0; i < references.size(); ++i) {
@@ -140,6 +141,17 @@ class AqlLifecycleTest : public ::testing::Test {
                     .pattern_length = sizeof(pattern),
                 },
         };
+        if (downloads) {
+          operations[i] = {
+              .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+              .download =
+                  {
+                      .source_buffer = references[i].buffer,
+                      .target = targets_[i].data(),
+                      .length = targets_[i].size(),
+                  },
+          };
+        }
       }
       IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_transfer(
           &queue_.captures, nullptr, &family_, {}, signals, operations.size(),
@@ -168,6 +180,9 @@ class AqlLifecycleTest : public ::testing::Test {
           .arguments = (i + 1) * 128,
           .terminal = !partial,
       };
+      if (partial || downloads) {
+        issued_[i].transfer.end = (i + 1) * 4096;
+      }
     }
     iree_atomic_store(&queue_.producer.count, count, iree_memory_order_release);
     iree_atomic_store(&queue_.failure, IREE_STATUS_ABORTED,
@@ -194,7 +209,8 @@ class AqlLifecycleTest : public ::testing::Test {
     iree_hal_amd_gpu_aql_scratch_initialize(
         &queue_.growth, queue_.storage.queue, nullptr, &queue_.scratch);
   }
-  bool Poll(iree_hal_amd_gpu_completion_wait_t* out_wait = nullptr) {
+  bool Poll(iree_hal_amd_gpu_completion_wait_t* out_wait = nullptr,
+            iree_hal_amd_gpu_completion_copy_t* out_copy = nullptr) {
     auto source = iree_hal_amd_gpu_aql_queue_completion_source(&queue_.base);
     iree_slim_mutex_lock(&completion_.drain_mutex);
     iree_hal_amd_gpu_completion_scope_t scope = {
@@ -204,7 +220,7 @@ class AqlLifecycleTest : public ::testing::Test {
     };
     iree_hal_amd_gpu_completion_wait_t wait = {};
     const bool progressed =
-        source.fn(source.user_data, AMDF_STATUS_OK, &scope, &wait, nullptr);
+        source.fn(source.user_data, AMDF_STATUS_OK, &scope, &wait, out_copy);
     EXPECT_FALSE(iree_hal_amd_gpu_completion_scope_finish(&scope));
     iree_slim_mutex_unlock(&completion_.drain_mutex);
     if (out_wait) {
@@ -323,6 +339,8 @@ class AqlLifecycleTest : public ::testing::Test {
   std::array<iree_hal_amd_gpu_signal_t*, 4> readers_ = {};
   // Six application buffers with final-release observations.
   std::array<std::array<uint8_t, 16>, 6> bytes_ = {};
+  // Application download destinations, separate from native source storage.
+  std::array<std::array<uint8_t, 16>, 6> targets_ = {};
   // Stable contract retained by the six actual HAL buffers.
   iree_hal_memory_contract_t* contract_ = nullptr;
   // One qualified address slot per buffer; no address is consumed by cleanup.
@@ -343,6 +361,64 @@ class AqlLifecycleTest : public ::testing::Test {
   // Number of buffer references whose final release has run.
   uint32_t destroyed_ = 0;
 };
+
+TEST_F(AqlLifecycleTest, DownloadCopyRetainsPayloadButReturnsArguments) {
+  Capture(false, nullptr, true);
+  EnableNativeCompletion();
+  std::array<uint8_t, 96> staging;
+  for (size_t i = 0; i < staging.size(); ++i) {
+    staging[i] = i + 1;
+  }
+  issued_[0].transfer.download = {
+      .source = staging.data(),
+      .operation = capture_->transfer.capture.operations,
+      .length = staging.size(),
+  };
+  iree_hal_amd_gpu_completion_copy_t copy = {};
+  EXPECT_FALSE(Poll(nullptr, &copy));
+  EXPECT_EQ(copy.fn, nullptr);
+  EXPECT_EQ(
+      iree_atomic_load(&queue_.completed.arguments, iree_memory_order_acquire),
+      0);
+  native_access_ended_ = true;
+  CompletePiece(0);
+  EXPECT_FALSE(Poll(nullptr, &copy));
+  ASSERT_NE(copy.fn, nullptr);
+  EXPECT_EQ(
+      iree_atomic_load(&queue_.completed.arguments, iree_memory_order_acquire),
+      128);
+  EXPECT_EQ(
+      iree_atomic_load(&queue_.completed.transfers, iree_memory_order_acquire),
+      0);
+  EXPECT_EQ(
+      iree_atomic_load(&queue_.completed.count, iree_memory_order_acquire), 0);
+  EXPECT_EQ(destroyed_, 0u);
+  ExpectPending();
+  for (const auto& target : targets_) {
+    EXPECT_EQ(target, (std::array<uint8_t, 16>{}));
+  }
+  copy.fn(copy.user_data);
+  // Completing the copy alone does not publish the operation's completion.
+  ExpectPending();
+  EXPECT_EQ(
+      iree_atomic_load(&queue_.completed.transfers, iree_memory_order_acquire),
+      0);
+  EXPECT_TRUE(Poll());
+  for (size_t i = 0; i < targets_.size(); ++i) {
+    for (size_t j = 0; j < targets_[i].size(); ++j) {
+      EXPECT_EQ(targets_[i][j], staging[i * 16 + j]);
+    }
+  }
+  EXPECT_EQ(
+      iree_atomic_load(&queue_.completed.transfers, iree_memory_order_acquire),
+      4096);
+  EXPECT_EQ(
+      iree_atomic_load(&queue_.completed.count, iree_memory_order_acquire), 1);
+  uint64_t value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(semaphore_, &value));
+  EXPECT_EQ(value, 1u);
+  EXPECT_EQ(destroyed_, 6u);
+}
 
 TEST_F(AqlLifecycleTest, NativeStopPrecedesSixBufferReleases) {
   Capture();

@@ -66,6 +66,13 @@ bool iree_hal_amd_gpu_pm4_queue_retire_failed(iree_hal_queue_t* base,
         iree_hal_amd_gpu_pm4_retirement_submission(action);
     const uint64_t words = action->consumed_words;
     const uint64_t arguments = action->consumed_arguments;
+    if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER) {
+      iree_atomic_store(
+          &queue->completed.transfers,
+          queue->issued[position & queue->retirement.capacity_mask]
+              .consumed_transfers,
+          iree_memory_order_release);
+    }
     iree_hal_amd_gpu_pm4_scratch_storage_free(queue->context, action->scratch);
     action->scratch = NULL;
     if (iree_hal_amd_gpu_pm4_retirement_is_terminal(action)) {
@@ -177,6 +184,21 @@ static amdf_status_t iree_hal_amd_gpu_pm4_cleanup(
     iree_hal_amd_gpu_byte_storage_t* next = arguments->next;
     iree_hal_amd_gpu_byte_storage_free(queue->context, arguments);
     arguments = next;
+  }
+  iree_hal_amd_gpu_byte_storage_t* transfers =
+      queue->producer.transfers.current;
+  if (transfers) {
+    transfers->next = queue->producer.transfers.retired;
+  } else {
+    transfers = queue->producer.transfers.retired;
+  }
+  queue->producer.transfers.current = NULL;
+  queue->producer.transfers.retired = NULL;
+  queue->producer.transfers.tail = NULL;
+  while (transfers) {
+    iree_hal_amd_gpu_byte_storage_t* next = transfers->next;
+    iree_hal_amd_gpu_byte_storage_free(queue->context, transfers);
+    transfers = next;
   }
   iree_hal_amd_fabric_memory_deinitialize(
       queue->context->api, queue->context->event_sink, &queue->control);

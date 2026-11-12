@@ -56,8 +56,10 @@ typedef struct iree_hal_amd_gpu_sdma_queue_options_t {
   iree_hal_amd_gpu_sdma_signal_layout_t signal_layout;
   // Device-owned native cells, retained beyond this queue's last reader.
   iree_hal_amd_gpu_signal_cache_t* signals;
-  // Coherent host/device control and staging placement.
+  // Coherent host/device native control and signal placement.
   const iree_hal_amd_fabric_memory_options_t* memory;
+  // Borrowed coherent read/write policy for explicit host transfer payloads.
+  const iree_hal_amd_fabric_memory_options_t* transfer_memory;
   // Existing device publisher; allocation callbacks only enqueue work here.
   iree_hal_amd_gpu_publication_t* publication;
   // Shared pool transaction owner.

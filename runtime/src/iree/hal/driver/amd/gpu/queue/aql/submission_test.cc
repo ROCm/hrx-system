@@ -644,7 +644,7 @@ TEST_P(AqlSubmissionTest, FileCopiesJoinFailureAndRetirement) {
     IREE_ASSERT_OK(iree_hal_amd_gpu_aql_transfer_prepare_chunk(
         &submission->transfer.capture, 0x2000, 1,
         iree_make_byte_span(arguments.data(), sizeof(arguments)), 0x3000,
-        &chunk));
+        iree_byte_span_empty(), 0, &chunk));
     EXPECT_EQ(arguments, (std::array<uint64_t, 4>{0x123456789, 0x987654321,
                                                   2 * 1024 * 1024, 0}));
     EXPECT_EQ(chunk.packet_count, 1u);

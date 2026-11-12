@@ -447,14 +447,16 @@ TEST(TransferBatchTest, ProgramCopiesRespectPacketArgumentsAndOperationBounds) {
         bytes.fill(0xCC);
         iree_hal_amd_gpu_dma_transfer_chunk_t chunk;
         std::memset(&chunk, 0xA5, sizeof(chunk));
+        uint32_t argument_length = UINT32_MAX;
         IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
             &transfer, &launch, word_capacity,
             iree_make_byte_span(bytes.data() + 1, byte_capacity),
-            UINT64_C(0xABCDEF010020), &chunk));
+            UINT64_C(0xABCDEF010020), &chunk, &argument_length));
         const size_t count = std::min(
             {size_t{2}, size_t{word_capacity / 31}, byte_capacity / 32});
         EXPECT_EQ(chunk.word_count, count * 31);
-        EXPECT_EQ(chunk.staging_length, count * 32);
+        EXPECT_EQ(argument_length, count * 32);
+        EXPECT_EQ(chunk.staging_length, 0u);
         EXPECT_EQ(chunk.next.index, count);
         EXPECT_EQ(chunk.next.offset, count ? 0u : 3u);
         EXPECT_EQ(chunk.download.length, 0u);

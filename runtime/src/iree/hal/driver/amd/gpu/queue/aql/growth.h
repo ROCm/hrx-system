@@ -24,6 +24,8 @@ typedef struct iree_hal_amd_gpu_aql_growth_context_t {
   iree_hal_amd_gpu_context_t* context;
   // Borrowed coherent control-memory policy.
   const iree_hal_amd_fabric_memory_options_t* memory;
+  // Borrowed read/write transfer policy, independent of native control.
+  const iree_hal_amd_fabric_memory_options_t* transfer_memory;
   // Reusable cold request records.
   iree_hal_amd_gpu_capture_pool_t* captures;
   // Exact queue publication ownership and ready FIFO.
@@ -42,6 +44,8 @@ typedef struct iree_hal_amd_gpu_aql_growth_context_t {
   iree_hal_amd_gpu_signal_cache_t* signal_cache;
   // Coalesced argument acquisition or NULL.
   iree_hal_amd_gpu_aql_growth_t* arguments;
+  // Coalesced transfer payload acquisition or NULL.
+  iree_hal_amd_gpu_aql_growth_t* transfers;
   // Coalesced signal acquisition or NULL.
   iree_hal_amd_gpu_aql_growth_t* signals;
   // Native result owners, including results with an empty waiting cohort.
@@ -67,9 +71,10 @@ void iree_hal_amd_gpu_aql_growth_enqueue(
     iree_hal_amd_gpu_aql_growth_context_t* context,
     iree_hal_amd_gpu_aql_entry_t* entry);
 
-// Transfers a detached submission to typed argument/signal/instance
+// Transfers a detached submission to typed argument/transfer/signal/instance
 // acquisition. capacity is the admitted power-of-two byte length for argument
-// requests. Success parks outside the ready FIFO; failure transfers nothing.
+// or transfer requests. Success parks outside the ready FIFO; failure transfers
+// nothing.
 iree_status_t iree_hal_amd_gpu_aql_growth_begin(
     iree_hal_amd_gpu_aql_growth_context_t* context,
     iree_hal_amd_gpu_aql_entry_kind_t kind,
@@ -80,8 +85,8 @@ typedef struct iree_hal_amd_gpu_aql_growth_result_t {
   iree_hal_amd_gpu_publication_entry_t* first;
   // Last capture for constant-time requeue, or NULL for an empty cohort.
   iree_hal_amd_gpu_publication_entry_t* last;
-  // Acquired argument generation, or NULL for another kind/failure.
-  iree_hal_amd_gpu_byte_storage_t* arguments;
+  // Acquired argument or transfer generation, or NULL for another kind/failure.
+  iree_hal_amd_gpu_byte_storage_t* bytes;
   // Acquired signal generation, or NULL for another kind/failure.
   iree_hal_amd_gpu_signal_storage_t* signals;
 } iree_hal_amd_gpu_aql_growth_result_t;
@@ -89,7 +94,7 @@ typedef struct iree_hal_amd_gpu_aql_growth_result_t {
 // Installs native metadata on the exact publisher and consumes the request.
 // Failure returns the cohort and asynchronously releases partial backing.
 iree_status_t iree_hal_amd_gpu_aql_growth_end(
-    iree_hal_amd_gpu_aql_entry_t* entry, uint64_t argument_begin,
+    iree_hal_amd_gpu_aql_entry_t* entry, uint64_t byte_begin,
     iree_hal_amd_gpu_aql_growth_result_t* out_result);
 
 // Called with a live queue borrow by its publisher or service source.

@@ -24,6 +24,7 @@ typedef enum iree_hal_amd_gpu_aql_publish_result_e {
   IREE_HAL_AMD_GPU_AQL_PUBLISH_CAPACITY,
   IREE_HAL_AMD_GPU_AQL_PUBLISH_PROGRAM,
   IREE_HAL_AMD_GPU_AQL_PUBLISH_ARGUMENTS,
+  IREE_HAL_AMD_GPU_AQL_PUBLISH_TRANSFERS,
   IREE_HAL_AMD_GPU_AQL_PUBLISH_SIGNALS,
 } iree_hal_amd_gpu_aql_publish_result_t;
 

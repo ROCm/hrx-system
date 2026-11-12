@@ -80,6 +80,8 @@ class GrowthTest : public ::testing::Test {
     uint64_t address;
     // Native alignment promised by this allocation dependency.
     uint64_t alignment;
+    // Exact construction policy selected by the real growth owner.
+    uint32_t profile_ordinal;
   };
 
   void SetUp() override {
@@ -105,8 +107,9 @@ class GrowthTest : public ::testing::Test {
           iree_align_uint64(self->next_address_, alignment);
       self->next_address_ =
           address + iree_align_uint64(info->byte_length, alignment);
-      auto* memory = new Memory{self, std::vector<uint8_t>(info->byte_length),
-                                address, alignment};
+      auto* memory =
+          new Memory{self, std::vector<uint8_t>(info->byte_length), address,
+                     alignment, info->memory_profile_ordinal};
       ++self->live_;
       self->native_thread_ = std::this_thread::get_id();
       *out_memory = reinterpret_cast<amdf_memory_t*>(memory);
@@ -174,6 +177,8 @@ class GrowthTest : public ::testing::Test {
     memory_.profile.allocation.minimum_alignment = 8;
     memory_.profile.allocation.byte_length_granularity = 8;
     memory_.profile.allocation.maximum_byte_length = UINT32_MAX;
+    transfer_memory_ = memory_;
+    transfer_memory_.profile.ordinal = 1;
     scratch_memory_ = memory_;
     scratch_memory_.host_access = 0;
     iree_hal_amd_gpu_capture_pool_initialize(4096, iree_allocator_system(),
@@ -182,6 +187,7 @@ class GrowthTest : public ::testing::Test {
     iree_hal_amd_gpu_signal_cache_initialize(&publication_, 0, &signals_);
     growth_.context = &context_;
     growth_.memory = &memory_;
+    growth_.transfer_memory = &transfer_memory_;
     growth_.scratch_memory = &scratch_memory_;
     growth_.scratch_profile = &scratch_profile_;
     growth_.captures = &captures_;
@@ -207,6 +213,7 @@ class GrowthTest : public ::testing::Test {
     iree_hal_amd_gpu_context_join_memory(&context_);
     iree_hal_amd_gpu_publication_deinitialize(&publication_);
     EXPECT_EQ(growth_.arguments, nullptr);
+    EXPECT_EQ(growth_.transfers, nullptr);
     EXPECT_EQ(growth_.signals, nullptr);
     EXPECT_EQ(growth_.scratch, nullptr);
     EXPECT_EQ(
@@ -331,15 +338,22 @@ class GrowthTest : public ::testing::Test {
       } else if (entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_REUSE_PROGRAM) {
         iree_hal_amd_gpu_pm4_growth_reuse_program(entry);
       } else if (entry->kind >= IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS) {
+        const bool transfer =
+            entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_TRANSFERS;
         iree_hal_amd_gpu_pm4_growth_result_t result;
         iree::Status status =
             iree_hal_amd_gpu_pm4_growth_end(entry, 123456, &result);
         if (status.ok()) {
-          if (result.arguments) {
-            EXPECT_EQ(result.arguments->begin, 123456u);
-            EXPECT_EQ(result.arguments->end, 123456u);
-            EXPECT_EQ(result.arguments->capacity, 4096u);
-            iree_hal_amd_gpu_byte_storage_free(&context_, result.arguments);
+          if (result.bytes) {
+            EXPECT_EQ(result.bytes->begin, 123456u);
+            EXPECT_EQ(result.bytes->end, 123456u);
+            EXPECT_EQ(result.bytes->capacity, 4096u);
+            const auto* memory =
+                reinterpret_cast<const Memory*>(result.bytes->memory.handle);
+            EXPECT_EQ(memory->profile_ordinal,
+                      transfer ? transfer_memory_.profile.ordinal
+                               : memory_.profile.ordinal);
+            iree_hal_amd_gpu_byte_storage_free(&context_, result.bytes);
           }
           if (result.signals) {
             // A caller may still be preparing this block's wider table. The
@@ -464,6 +478,8 @@ class GrowthTest : public ::testing::Test {
   iree_hal_amd_gpu_context_t context_ = {};
   // Coherent memory policy borrowed through each acquisition.
   iree_hal_amd_fabric_memory_options_t memory_ = {};
+  // Independent profile selected for host transfer payloads.
+  iree_hal_amd_fabric_memory_options_t transfer_memory_ = {};
   // Physical scratch policy with no host mapping request.
   iree_hal_amd_fabric_memory_options_t scratch_memory_ = {};
   // Two native shader engines, each with 32 resident wave slots.
@@ -788,6 +804,42 @@ TEST_F(ProgramGrowthTest,
   for (uint32_t i = 0; i < 128; ++i) {
     SCOPED_TRACE(i);
     ASSERT_NO_FATAL_FAILURE(ReuseDuringClone(false, false, true));
+  }
+}
+
+TEST_F(GrowthTest, TransferAndArgumentCohortsHaveIndependentNativeResults) {
+  uint32_t completed = 0;
+  uint32_t failed = 0;
+  for (auto kind : {IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS,
+                    IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_TRANSFERS}) {
+    SCOPED_TRACE(kind);
+    const auto other = kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS
+                           ? IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_TRANSFERS
+                           : IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS;
+    hold_ = true;
+    fail_ = true;
+    Park(kind);
+    entered_.acquire();
+    Park(kind);
+    Park(other);
+    Park(other);
+    EXPECT_NE(growth_.arguments, nullptr);
+    EXPECT_NE(growth_.transfers, nullptr);
+    EXPECT_NE(growth_.arguments, growth_.transfers);
+    EXPECT_TRUE(iree_hal_amd_gpu_publisher_is_idle(&publisher_));
+    resume_.release();
+    for (uint32_t i = 0; i < 4; ++i) {
+      consumed_.acquire();
+    }
+    iree_hal_amd_gpu_context_join_memory(&context_);
+    JoinPublication();
+    completed += 4;
+    failed += 2;
+    EXPECT_EQ(completed_, completed);
+    EXPECT_EQ(failed_, failed);
+    EXPECT_EQ(growth_.arguments, nullptr);
+    EXPECT_EQ(growth_.transfers, nullptr);
+    EXPECT_EQ(live_, 0u);
   }
 }
 

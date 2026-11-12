@@ -242,6 +242,8 @@ class QueueTest : public MemoryBackendTest,
         .accesses = &access_,
         .host_access = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
     };
+
+    transfer_memory_ = memory_;
     IREE_ASSERT_OK(iree_hal_amd_gpu_program_pool_initialize(
         &context_, 0, 1, AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
         allocator_, &programs_));
@@ -267,6 +269,7 @@ class QueueTest : public MemoryBackendTest,
             },
         .signals = &signals_,
         .memory = &memory_,
+        .transfer_memory = &transfer_memory_,
         .publication = &publication_,
         .allocations = &allocations_,
         .file_staging = files_,
@@ -494,6 +497,8 @@ class QueueTest : public MemoryBackendTest,
   amdf_memory_device_access_t access_ = {};
   // Coherent control and staging placement.
   iree_hal_amd_fabric_memory_options_t memory_ = {};
+  // Independent explicit-payload policy, borrowed through native retirement.
+  iree_hal_amd_fabric_memory_options_t transfer_memory_ = {};
   // Recorded private data uses the production placement registry.
   iree_hal_amd_gpu_program_pool_t programs_ = {};
   // Shared file staging belongs to the device, never to a hidden copy queue.
