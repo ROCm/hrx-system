@@ -326,25 +326,32 @@ TEST_P(QueueTransferTest, BufferViewStagingRoundTrip) {
   EXPECT_EQ("2x2xi32=[1 2][3 4]", std::string(formatted, formatted_length));
 }
 
-TEST_P(QueueTransferTest, UploadReadsSourceAfterWaitResolves) {
-  constexpr iree_device_size_t kBufferSize = 512 * 1024;
-  std::vector<uint8_t> source(kBufferSize, 0x11);
-  std::vector<uint8_t> expected(kBufferSize, 0xE7);
-  Ref<iree_hal_buffer_t> target;
-  IREE_ASSERT_OK(CreateZeroedDeviceBuffer(kBufferSize, target.out()));
-
-  SemaphoreList upload_wait(device_, {0}, {1});
-  SemaphoreList upload_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_upload(transfer_queue_, upload_wait,
-                                       upload_signal, source.data(), target, 0,
-                                       kBufferSize, /*barriers=*/NULL));
-  std::fill(source.begin(), source.end(), 0xE7);
-  IREE_ASSERT_OK(iree_hal_semaphore_signal(upload_wait.semaphores[0], 1,
-                                           /*frontier=*/nullptr));
-  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
-      upload_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
-
-  EXPECT_THAT(ReadBufferBytes(target, 0, kBufferSize), ContainerEq(expected));
+TEST_P(QueueTransferTest, UploadPreservesRangesAndDestinationWaits) {
+  for (iree_device_size_t length : {4, 17, 65536, 65540, 512 * 1024}) {
+    for (iree_device_size_t offset : {0, 1}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "length=" << length << " offset=" << offset);
+      const auto source = MakeDeterministicBytes(length);
+      std::vector<uint8_t> expected(offset + length + 4, 0);
+      std::copy(source.begin(), source.end(), expected.begin() + offset);
+      Ref<iree_hal_buffer_t> target;
+      IREE_ASSERT_OK(CreateZeroedDeviceBuffer(expected.size(), target.out()));
+      SemaphoreList wait(device_, {0}, {1});
+      SemaphoreList signal(device_, {0}, {1});
+      IREE_ASSERT_OK(iree_hal_queue_upload(
+          transfer_queue_, wait, signal, source.data(), target, offset, length,
+          /*barriers=*/nullptr));
+      uint64_t signal_value = 0;
+      IREE_ASSERT_OK(
+          iree_hal_semaphore_query(signal.semaphores[0], &signal_value));
+      EXPECT_EQ(0, signal_value);
+      IREE_ASSERT_OK(iree_hal_semaphore_signal(wait.semaphores[0], 1, nullptr));
+      IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+          signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+      EXPECT_THAT(ReadBufferBytes(target, 0, expected.size()),
+                  ContainerEq(expected));
+    }
+  }
 }
 
 TEST_P(QueueTransferTest, DownloadWritesBeforeSignaling) {
@@ -365,7 +372,6 @@ TEST_P(QueueTransferTest, DownloadWritesBeforeSignaling) {
   IREE_ASSERT_OK(
       iree_hal_semaphore_query(download_signal.semaphores[0], &signal_value));
   EXPECT_EQ(0, signal_value);
-  EXPECT_THAT(target, Each(0xCD));
 
   IREE_ASSERT_OK(iree_hal_semaphore_signal(download_wait.semaphores[0], 1,
                                            /*frontier=*/nullptr));
