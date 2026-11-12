@@ -110,6 +110,9 @@ initialize_wine_prefix() {
   if [[ -z "$wine_loader" && -x /usr/lib/wine/wine64 ]]; then
     wine_loader=/usr/lib/wine/wine64
   fi
+  if [[ -z "$wine_server" && -x /usr/lib/wine/wineserver64 ]]; then
+    wine_server=/usr/lib/wine/wineserver64
+  fi
   if [[ -z "$wine_loader" || -z "$wine_server" ]]; then
     echo "Linux-hosted MSVC requires a 64-bit Wine loader and wineserver." >&2
     return 1

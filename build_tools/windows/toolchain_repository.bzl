@@ -213,6 +213,10 @@ def _windows_toolchain_repository_impl(repository_ctx):
             fail("Linux-hosted MSVC requires a Wine64 loader when MSVC_WINE_ROOT is set. Install wine64 or place wine64 or wine on PATH.")
         wineserver = repository_ctx.which("wineserver")
         if not wineserver:
+            system_wineserver64 = repository_ctx.path("/usr/lib/wine/wineserver64")
+            if system_wineserver64.exists:
+                wineserver = system_wineserver64
+        if not wineserver:
             fail("Linux-hosted MSVC requires wineserver on PATH beside the Wine64 loader.")
         flock = repository_ctx.which("flock")
         if not flock:
