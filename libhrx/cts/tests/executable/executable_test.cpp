@@ -21,6 +21,7 @@ namespace {
 // table.
 constexpr const char* kFixtureKernelNames[] = {
     "hrx_noop",
+    "hrx_read_repeated",
     "hrx_store_output",
     "hrx_transform_padded_parameters",
     "hrx_store_exact_workitem_indices",
