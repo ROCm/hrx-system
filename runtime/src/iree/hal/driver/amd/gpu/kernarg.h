@@ -105,7 +105,7 @@ typedef struct iree_hal_amd_gpu_kernarg_layout_t {
   uint16_t binding_count;
   // Number of coalesced constant copies following the binding offsets.
   uint16_t constant_copy_count;
-  // Number of runtime input copies following the constant copies.
+  // Number of coalesced runtime input copies following the constant copies.
   uint16_t runtime_copy_count;
   // Number of coalesced device-count copies following the runtime copies.
   uint16_t indirect_copy_count;

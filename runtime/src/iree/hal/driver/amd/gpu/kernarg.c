@@ -90,6 +90,8 @@ static iree_status_t iree_hal_amd_gpu_kernarg_analyze(
   layout->byte_length = kernel->kernarg_segment_size;
   layout->alignment = kernel->kernarg_segment_alignment;
   uint32_t constant_end = UINT32_MAX;
+  uint32_t runtime_source_end = UINT32_MAX;
+  uint32_t runtime_target_end = UINT32_MAX;
   uint32_t indirect_source_end = UINT32_MAX;
   uint32_t indirect_target_end = UINT32_MAX;
   for (iree_host_size_t i = 0; i < kernel->argument_count; ++i) {
@@ -115,7 +117,12 @@ static iree_status_t iree_hal_amd_gpu_kernarg_analyze(
           IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_MULTIGRID_SYNC_ARG) {
         layout->grid_sync_offset = (uint16_t)argument->offset;
       }
-      ++layout->runtime_copy_count;
+      if (field.offset != runtime_source_end ||
+          argument->offset != runtime_target_end) {
+        ++layout->runtime_copy_count;
+      }
+      runtime_source_end = field.offset + field.size;
+      runtime_target_end = argument->offset + argument->size;
       if (kind >=
               IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_X &&
           kind <=
@@ -221,8 +228,16 @@ iree_status_t iree_hal_amd_gpu_kernarg_layout_allocate(
     if (iree_hal_amd_gpu_metadata_argument_is_hidden(kind)) {
       const iree_hal_amd_gpu_kernarg_runtime_field_t field =
           iree_hal_amd_gpu_kernarg_runtime_fields[kind];
-      runtime_copies[runtime_index++] = (iree_hal_amd_gpu_kernarg_copy_t){
-          (uint16_t)argument->offset, field.offset, field.size};
+      iree_hal_amd_gpu_kernarg_copy_t* previous =
+          runtime_index ? &runtime_copies[runtime_index - 1] : NULL;
+      if (previous &&
+          previous->source_offset + previous->length == field.offset &&
+          previous->target_offset + previous->length == argument->offset) {
+        previous->length += field.size;
+      } else {
+        runtime_copies[runtime_index++] = (iree_hal_amd_gpu_kernarg_copy_t){
+            (uint16_t)argument->offset, field.offset, field.size};
+      }
       if (kind >=
               IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_X &&
           kind <=
