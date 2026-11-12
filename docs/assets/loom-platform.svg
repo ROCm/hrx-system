@@ -1,0 +1,230 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1710" viewBox="0 0 1600 1710" role="img" aria-labelledby="title description">
+  <title id="title">Loom platform architecture</title>
+  <desc id="description">Loom services host source-defined models and use the compiler and shared execution libraries. C++ source, Loom IR text, and bytecode feed a shared compiler for AMD GPU, XDNA NPU, SPIR-V, and x86 targets. The compiler C API supports independent embedding and artifact emission. The shared runtime supplies executable loading, asynchronous execution, memory management, and CPU, AMD GPU, XDNA, and Vulkan HAL implementations. Native AMD access uses libamdf; Vulkan uses the system driver. The libhrx and HIP APIs are additional clients of the shared runtime.</desc>
+  <!--
+    Adapted from https://github.com/ROCm/hrx-solutions/blob/main/docs/assets/hrx-platform.svg
+    Copyright (c) 2026 The HRX Authors
+    SPDX-License-Identifier: MIT
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+  -->
+  <defs>
+    <linearGradient id="background" x2="1" y2="1">
+      <stop stop-color="#101b36"/>
+      <stop offset="1" stop-color="#080f20"/>
+    </linearGradient>
+    <linearGradient id="compiler" x2="1" y2="0">
+      <stop stop-color="#754bdb"/>
+      <stop offset="1" stop-color="#4e40a6"/>
+    </linearGradient>
+    <linearGradient id="runtime" x2="1" y2="0">
+      <stop stop-color="#164e92"/>
+      <stop offset="1" stop-color="#12386b"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 1 1 L 9 5 L 1 9 Z" fill="#a6b9dd"/>
+    </marker>
+    <marker id="reverse-arrow" viewBox="0 0 10 10" refX="2" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 9 1 L 1 5 L 9 9 Z" fill="#a6b9dd"/>
+    </marker>
+    <style>
+      text { font-family: 'DejaVu Sans', Arial, sans-serif; }
+      .white { fill: #f7f9ff; }
+      .muted { fill: #b3c3df; }
+      .ink { fill: #17233d; }
+      .small { font-size: 21px; }
+      .body { font-size: 24px; }
+      .label { font-size: 18px; font-weight: 700; letter-spacing: 2px; }
+      .heading { font-size: 30px; font-weight: 700; }
+      .center { text-anchor: middle; }
+      .wire { fill: none; stroke: #a6b9dd; stroke-width: 2.5; marker-end: url(#arrow); }
+      .both { marker-start: url(#reverse-arrow); }
+    </style>
+  </defs>
+
+  <!-- Opaque background keeps the illustration consistent in light and dark READMEs. -->
+  <rect width="1600" height="1710" rx="22" fill="url(#background)"/>
+  <path d="M 50 37 H 116" stroke="#f4748c" stroke-width="6"/>
+  <path d="M 124 37 H 190" stroke="#46d5c6" stroke-width="6"/>
+  <path d="M 198 37 H 264" stroke="#fac05e" stroke-width="6"/>
+  <text x="50" y="105" class="white" font-size="58" font-weight="800">Loom</text>
+  <text x="1550" y="101" text-anchor="end" class="muted label">AUTHOR · COMPILE · EXECUTE</text>
+
+  <rect x="50" y="142" width="1500" height="64" rx="8" fill="#1d2c47" stroke="#354764"/>
+  <text x="76" y="182" class="muted label">APPLICATIONS &amp; SOLUTIONS</text>
+  <text x="504" y="183" class="white body">loom-serve</text>
+  <path d="M 719 160 V 190 M 1129 160 V 190" stroke="#536482"/>
+  <text x="765" y="183" class="white body">Native applications</text>
+  <text x="1180" y="183" class="white body">HIP applications</text>
+
+  <!-- Model services use the compiler and execution foundation below. -->
+  <rect x="50" y="222" width="980" height="78" rx="8" fill="#223a56" stroke="#527a9a"/>
+  <text x="74" y="254" class="white body" font-weight="700">Loom services</text>
+  <text x="74" y="283" class="muted small">Model packages · scheduling · residency · batching</text>
+  <text x="1550" y="254" class="muted small" text-anchor="end">loom-serve adds HTTP &amp; server controls</text>
+  <path d="M 540 302 V 324" class="wire"/>
+
+  <g transform="translate(0 90)">
+  <!-- Source map in hrx-system: loom/src/loom/{import/cxx,format/bytecode,target/arch},
+       loom/binding/c, libhrx, and runtime/src/iree/hal/driver.
+       This is a platform overview; it is not a wheel payload or support matrix. -->
+  <!-- Exploded compiler: authoring forms, shared IR, transformations, native targets. -->
+  <rect x="50" y="240" width="980" height="650" rx="12" fill="#20223e" stroke="#6f61a9" stroke-width="2"/>
+  <path d="M 62 240 H 1018 Q 1030 240 1030 252 V 306 H 50 V 252 Q 50 240 62 240" fill="url(#compiler)"/>
+  <text x="74" y="282" class="white" font-size="34" font-weight="700">Loom compiler</text>
+  <text x="1006" y="280" text-anchor="end" class="white small">Embedded · ahead of time · just in time</text>
+
+  <rect x="74" y="327" width="292" height="85" rx="7" fill="#f2eaff"/>
+  <text x="220" y="362" class="ink heading center">Loom-C++</text>
+  <text x="220" y="393" class="ink small center">C++ source frontend</text>
+  <rect x="394" y="327" width="292" height="85" rx="7" fill="#e3ddff"/>
+  <text x="540" y="362" class="ink heading center">Loom IR text</text>
+  <text x="540" y="393" class="ink small center">Readable text form · .loom</text>
+  <rect x="714" y="327" width="292" height="85" rx="7" fill="#d6cdf8"/>
+  <text x="860" y="362" class="ink heading center">Loom bytecode</text>
+  <text x="860" y="393" class="ink small center">Binary form · .loombc</text>
+
+  <path d="M 220 414 V 447" class="wire"/>
+  <path d="M 540 417 V 447" class="wire both"/>
+  <path d="M 860 417 V 447" class="wire both"/>
+  <rect x="74" y="453" width="932" height="93" rx="7" fill="#c3b5ef"/>
+  <text x="98" y="490" class="ink heading">Loom IR</text>
+  <text x="98" y="522" class="ink small">Modules · functions · kernels · command programs</text>
+  <rect x="726" y="471" width="254" height="54" rx="5" fill="#442d79"/>
+  <text x="853" y="506" class="white body center" font-weight="700">High + Low</text>
+
+  <path d="M 540 548 V 573" class="wire"/>
+  <rect x="74" y="579" width="932" height="80" rx="7" fill="#9983d9"/>
+  <text x="540" y="612" class="ink heading center">Link · specialize · optimize</text>
+  <text x="540" y="643" class="ink small center">Constraints · templates · shape &amp; target facts · reusable providers</text>
+
+  <path d="M 540 661 V 686" class="wire"/>
+  <rect x="74" y="692" width="932" height="75" rx="7" fill="#6a50ac"/>
+  <text x="540" y="723" class="white heading center">Lower · schedule · allocate</text>
+  <text x="540" y="753" class="white small center">Target lowering · scheduling · register allocation</text>
+
+  <path d="M 183 769 V 795" class="wire"/>
+  <rect x="74" y="801" width="218" height="67" rx="7" fill="#f4748c"/>
+  <text x="183" y="830" class="ink center" font-size="28" font-weight="700">AMDGCN</text>
+  <text x="183" y="856" class="ink center" font-size="18">GPU code objects</text>
+  <path d="M 421 769 V 795" class="wire"/>
+  <rect x="312" y="801" width="218" height="67" rx="7" fill="#46d5c6"/>
+  <text x="421" y="830" class="ink center" font-size="28" font-weight="700">XDNA</text>
+  <text x="421" y="856" class="ink center" font-size="18">Tile &amp; array programs</text>
+  <path d="M 659 769 V 795" class="wire"/>
+  <rect x="550" y="801" width="218" height="67" rx="7" fill="#8ebdff"/>
+  <text x="659" y="830" class="ink center" font-size="28" font-weight="700">SPIR-V</text>
+  <text x="659" y="856" class="ink center" font-size="18">Vulkan shaders</text>
+  <path d="M 897 769 V 795" class="wire"/>
+  <rect x="788" y="801" width="218" height="67" rx="7" fill="#fac05e"/>
+  <text x="897" y="830" class="ink center" font-size="28" font-weight="700">x86</text>
+  <text x="897" y="856" class="ink center" font-size="18">CPU native code</text>
+
+  <!-- Side annex: compiler embedding and observation surfaces. -->
+  <rect x="1090" y="240" width="460" height="413" rx="12" fill="#282442" stroke="#9280c0" stroke-width="2"/>
+  <path d="M 1102 240 H 1538 Q 1550 240 1550 252 V 306 H 1090 V 252 Q 1090 240 1102 240" fill="#554077"/>
+  <text x="1116" y="282" class="white" font-size="32" font-weight="700">Loom-C API</text>
+  <text x="1524" y="279" text-anchor="end" class="white small">loomc</text>
+  <text x="1116" y="351" class="white body" font-weight="700">IR &amp; modules</text>
+  <text x="1116" y="383" class="muted small">Parse · compose · link · inspect</text>
+  <path d="M 1116 407 H 1524" stroke="#4c4164"/>
+  <text x="1116" y="446" class="white body" font-weight="700">Text &amp; bytecode</text>
+  <text x="1116" y="478" class="muted small">Read · write · package · cache</text>
+  <path d="M 1116 504 H 1524" stroke="#4c4164"/>
+  <text x="1116" y="544" class="white body" font-weight="700">Compilation &amp; JIT</text>
+  <text x="1116" y="576" class="muted small">Specialize · emit · embed</text>
+  <text x="1116" y="625" class="muted small">In-memory sources and artifacts</text>
+  <path d="M 1014 489 H 1082" class="wire both" stroke-dasharray="5 5"/>
+  <path d="M 1014 619 H 1082" class="wire both" stroke-dasharray="5 5"/>
+
+  <rect x="1090" y="679" width="460" height="70" rx="7" fill="#202c44" stroke="#405473"/>
+  <text x="1320" y="708" class="white body center" font-weight="700">Inspect · profile · tune</text>
+  <text x="1320" y="735" class="muted small center">Compile reports · sanitizers · benchmarks</text>
+
+  <!-- Public runtime APIs have a direct path to the execution foundation. -->
+  <text x="1090" y="783" class="muted label">RUNTIME APIS</text>
+  <rect x="1090" y="801" width="216" height="89" rx="7" fill="#8ebdff"/>
+  <text x="1198" y="837" class="ink heading center">libhrx</text>
+  <text x="1198" y="869" class="ink small center">Native HRX API</text>
+  <rect x="1330" y="801" width="220" height="89" rx="7" fill="#bed7ff"/>
+  <text x="1440" y="837" class="ink heading center">HIP API</text>
+  <text x="1440" y="869" class="ink small center">libamdhip64</text>
+
+  <!-- Compiled artifacts and API calls converge on the runtime. -->
+  <path d="M 183 871 V 920 H 897 V 871 M 421 871 V 920 M 659 871 V 920 M 540 920 V 961" fill="none" stroke="#a6b9dd" stroke-width="2.5"/>
+  <path d="M 540 943 V 966" class="wire"/>
+  <rect x="236" y="908" width="608" height="29" rx="6" fill="#101a30"/>
+  <text x="540" y="930" class="muted small center">Artifacts for your runtime or the libraries below</text>
+  <path d="M 1198 892 V 966" class="wire"/>
+  <path d="M 1440 892 V 966" class="wire"/>
+
+  <!-- Broad execution foundation: runtime services, then pluggable HAL modules. -->
+  <rect x="50" y="974" width="1500" height="366" rx="12" fill="#142d4e" stroke="#4781b6" stroke-width="2"/>
+  <path d="M 62 974 H 1538 Q 1550 974 1550 986 V 1039 H 50 V 986 Q 50 974 62 974" fill="url(#runtime)"/>
+  <text x="74" y="1018" class="white" font-size="34" font-weight="700">Shared runtime</text>
+  <text x="1526" y="1015" text-anchor="end" class="white body">Shared execution &amp; resource management</text>
+
+  <rect x="74" y="1061" width="450" height="96" rx="7" fill="#254970"/>
+  <text x="98" y="1100" class="white" font-size="27" font-weight="700">Executable loading</text>
+  <text x="98" y="1134" class="muted small">Modules · kernels · command programs</text>
+  <rect x="550" y="1061" width="500" height="96" rx="7" fill="#254970"/>
+  <text x="574" y="1100" class="white" font-size="27" font-weight="700">Asynchronous execution</text>
+  <text x="574" y="1134" class="muted small">CPU workers · queues · synchronization</text>
+  <rect x="1076" y="1061" width="450" height="96" rx="7" fill="#254970"/>
+  <text x="1100" y="1100" class="white" font-size="27" font-weight="700">Memory &amp; data movement</text>
+  <text x="1100" y="1134" class="muted small">Allocation · residency · transfers</text>
+
+  <path d="M 74 1181 H 1526" stroke="#365576"/>
+  <text x="74" y="1210" class="muted label">PLUGGABLE HARDWARE ABSTRACTION LAYER</text>
+  <rect x="74" y="1229" width="344" height="88" rx="7" fill="#f4748c"/>
+  <text x="246" y="1266" class="ink center" font-size="28" font-weight="700">AMD GPU HAL</text>
+  <text x="246" y="1299" class="ink small center">Native GPU execution</text>
+  <path d="M 246 1320 V 1448" class="wire"/>
+  <rect x="443" y="1229" width="344" height="88" rx="7" fill="#46d5c6"/>
+  <text x="615" y="1266" class="ink center" font-size="28" font-weight="700">XDNA HAL</text>
+  <text x="615" y="1299" class="ink small center">NPU execution</text>
+  <path d="M 615 1320 V 1448" class="wire"/>
+  <rect x="812" y="1229" width="344" height="88" rx="7" fill="#8ebdff"/>
+  <text x="984" y="1266" class="ink center" font-size="28" font-weight="700">Vulkan HAL</text>
+  <text x="984" y="1299" class="ink small center">SPIR-V execution</text>
+  <path d="M 984 1320 V 1448" class="wire"/>
+  <rect x="1182" y="1229" width="344" height="88" rx="7" fill="#fac05e"/>
+  <text x="1354" y="1266" class="ink center" font-size="28" font-weight="700">CPU HAL</text>
+  <text x="1354" y="1299" class="ink small center">Native CPU kernels</text>
+  <path d="M 1354 1320 V 1448" class="wire"/>
+  <!-- Native AMD backing is shared by the GPU and NPU HALs. -->
+  <rect x="74" y="1364" width="713" height="48" rx="7" fill="#243749" stroke="#71959c"/>
+  <text x="430" y="1395" class="white body center">libamdf · native AMD device access</text>
+  <rect x="812" y="1364" width="344" height="48" rx="7" fill="#1d2c47" stroke="#536482"/>
+  <text x="984" y="1395" class="white small center">System Vulkan driver</text>
+  <rect x="74" y="1455" width="344" height="86" rx="7" fill="#352031" stroke="#f4748c" stroke-width="2"/>
+  <text x="246" y="1491" fill="#f4748c" class="heading center">AMD GPUs</text>
+  <text x="246" y="1522" class="white small center">Radeon · Ryzen · Instinct</text>
+  <rect x="443" y="1455" width="344" height="86" rx="7" fill="#103938" stroke="#46d5c6" stroke-width="2"/>
+  <text x="615" y="1491" fill="#46d5c6" class="heading center">AMD NPUs</text>
+  <text x="615" y="1522" class="white small center">XDNA tile arrays</text>
+  <rect x="812" y="1455" width="344" height="86" rx="7" fill="#1b2e49" stroke="#8ebdff" stroke-width="2"/>
+  <text x="984" y="1491" fill="#8ebdff" class="heading center">Vulkan GPUs</text>
+  <text x="984" y="1522" class="white small center">AMD · Intel · NVIDIA</text>
+  <rect x="1182" y="1455" width="344" height="86" rx="7" fill="#382e1e" stroke="#fac05e" stroke-width="2"/>
+  <text x="1354" y="1491" fill="#fac05e" class="heading center">x86 CPUs</text>
+  <text x="1354" y="1522" class="white small center">Scalar · vector · matrix</text>
+  <text x="50" y="1594" class="muted" font-size="17">LOOM / HRX SYSTEM · COMPILER, SERVICES, AND EXECUTION LIBRARIES</text>
+  </g>
+</svg>
