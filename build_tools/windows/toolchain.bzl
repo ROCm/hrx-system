@@ -1,7 +1,7 @@
 # Copyright 2026 The IREE Authors
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Windows MSVC-ABI actions using a locally provisioned Linux LLVM toolchain."""
+"""Windows MSVC-ABI actions using locally provisioned Linux host tools."""
 
 load("@rules_cc//cc/toolchains:cc_toolchain.bzl", "cc_toolchain")
 load(":cc_toolchain.bzl", "windows_cc_toolchain")
@@ -22,8 +22,21 @@ def windows_cross_toolchain(name, repository_path, execution_architecture, msvc_
         srcs = native.glob(["host_dynamic_libraries/*"], allow_empty = True),
     )
     native.filegroup(
+        name = "sdk_headers",
+        srcs = native.glob(["include/**"]),
+    )
+    native.filegroup(
+        name = "headers",
+        srcs = [":sdk_headers"] + native.glob(["resource/include/**"]),
+    )
+    native.filegroup(
+        name = "libraries",
+        srcs = native.glob(["lib/**/*.lib"]),
+    )
+    native.filegroup(
         name = "compiler_files",
-        srcs = native.glob(["include/**", "resource/include/**"]) + [
+        srcs = [
+            ":headers",
             "bin/clang-cl",
             "tools/clang-cl",
             ":host_dynamic_libraries",
@@ -31,7 +44,8 @@ def windows_cross_toolchain(name, repository_path, execution_architecture, msvc_
     )
     native.filegroup(
         name = "linker_files",
-        srcs = native.glob(["lib/**/*.lib"]) + [
+        srcs = [
+            ":libraries",
             "bin/lld-link",
             "runtime/clang_rt.builtins-x86_64.lib",
             "tools/lld-link",
@@ -44,18 +58,67 @@ def windows_cross_toolchain(name, repository_path, execution_architecture, msvc_
     )
     native.filegroup(
         name = "all_files",
-        srcs = [":compiler_files", ":linker_files", ":archiver_files"] + native.glob(["bin/*", "tools/*"]),
+        srcs = [":compiler_files", ":linker_files", ":archiver_files"] + native.glob(
+            ["bin/*", "tools/*"],
+            exclude = ["tools/msvc-*", "tools/msvcenv.sh", "tools/wine-msvc.sh"],
+        ),
     )
     native.filegroup(
         name = "address_sanitizer_files",
         srcs = native.glob(["runtime/*"], allow_empty = True),
     )
+    native.filegroup(
+        name = "llvm_utility_files",
+        srcs = [
+            "bin/llvm-cov",
+            "bin/llvm-nm",
+            "bin/llvm-objcopy",
+            "bin/llvm-objdump",
+            "bin/llvm-strip",
+            "tools/llvm-cov",
+            "tools/llvm-nm",
+            "tools/llvm-objcopy",
+            "tools/llvm-objdump",
+            "tools/llvm-strip",
+            ":host_dynamic_libraries",
+        ],
+    )
+    native.filegroup(
+        name = "msvc_tool_files",
+        srcs = native.glob(["msvc/bin/*"], allow_empty = True) + [
+            "tools/msvc-cl",
+            "tools/msvc-dumpbin",
+            "tools/msvc-lib",
+            "tools/msvc-link",
+            "tools/msvc-ml64",
+            "tools/msvcenv.sh",
+            "tools/wine-msvc.sh",
+        ],
+    )
+    native.filegroup(
+        name = "msvc_compiler_files",
+        srcs = [":sdk_headers", ":msvc_tool_files"],
+    )
+    native.filegroup(
+        name = "msvc_linker_files",
+        srcs = [":libraries", ":msvc_tool_files"],
+    )
+    native.filegroup(
+        name = "msvc_all_files",
+        srcs = [
+            ":msvc_compiler_files",
+            ":msvc_linker_files",
+            ":llvm_utility_files",
+        ],
+    )
 
-    include_directories = [repository_path + "/resource/include"] + [
+    msvc_include_directories = [
         repository_path + "/include/" + component
         for component in ["crt", "ucrt", "shared", "um", "winrt", "cppwinrt"]
     ]
-    library_directories = [repository_path + "/lib/" + component for component in ["crt", "ucrt", "um"]] + [
+    include_directories = [repository_path + "/resource/include"] + msvc_include_directories
+    msvc_library_directories = [repository_path + "/lib/" + component for component in ["crt", "ucrt", "um"]]
+    library_directories = msvc_library_directories + [
         repository_path + "/runtime",
     ]
     windows_cross_toolchain_config(
@@ -132,4 +195,67 @@ def windows_cross_toolchain(name, repository_path, execution_architecture, msvc_
             Label("//build_tools/bazel:address_sanitizer_target"): [":address_sanitizer_files"],
             "//conditions:default": [],
         }),
+    )
+
+    windows_cross_toolchain_config(
+        name = "msvc_config",
+        cpu = "x64_windows",
+        compiler = "msvc-cl",
+        host_system_name = execution_architecture + "-unknown-linux-gnu",
+        target_system_name = "x86_64-pc-windows-msvc",
+        target_libc = "msvcrt",
+        abi_version = "msvc",
+        abi_libc_version = "msvcrt",
+        toolchain_identifier = "msvc_wine_windows_x86_64",
+        msvc_env_tmp = "/tmp",
+        msvc_env_path = "/usr/bin:/bin",
+        msvc_env_include = ";".join(msvc_include_directories),
+        msvc_env_lib = ";".join(msvc_library_directories),
+        msvc_cl_path = "tools/msvc-cl",
+        msvc_ml_path = "tools/msvc-ml64",
+        msvc_link_path = "tools/msvc-link",
+        msvc_lib_path = "tools/msvc-lib",
+        cxx_builtin_include_directories = msvc_include_directories,
+        tool_paths = {
+            "ar": "tools/msvc-lib",
+            "cpp": "tools/msvc-cl",
+            "dumpbin": "tools/msvc-dumpbin",
+            "gcc": "tools/msvc-cl",
+            "gcov": "tools/llvm-cov",
+            "ld": "tools/msvc-link",
+            "nm": "tools/llvm-nm",
+            "objcopy": "tools/llvm-objcopy",
+            "objdump": "tools/llvm-objdump",
+            "strip": "tools/llvm-strip",
+        },
+        default_compile_flags = [
+            "/Z7",
+            "/X",
+        ],
+        default_link_flags = ["/MACHINE:X64"],
+        archiver_flags = ["/MACHINE:X64"],
+        dbg_mode_debug_flag = "/DEBUG",
+        fastbuild_mode_debug_flag = "/DEBUG",
+        supports_parse_showincludes = True,
+    )
+    cc_toolchain(
+        name = "msvc_cc_toolchain",
+        toolchain_identifier = "msvc_wine_windows_x86_64",
+        toolchain_config = ":msvc_config",
+        all_files = ":msvc_all_files",
+        ar_files = ":msvc_tool_files",
+        as_files = ":msvc_compiler_files",
+        compiler_files = ":msvc_compiler_files",
+        dwp_files = ":empty",
+        linker_files = ":msvc_linker_files",
+        objcopy_files = ":llvm_utility_files",
+        strip_files = ":llvm_utility_files",
+        supports_param_files = 1,
+    )
+    windows_cc_toolchain(
+        name = "msvc_toolchain",
+        cc = ":msvc_cc_toolchain",
+        masm = "tools/msvc-ml64",
+        masm_arguments = ["/nologo", "/Zi", "/c"],
+        masm_files = [":msvc_tool_files"],
     )

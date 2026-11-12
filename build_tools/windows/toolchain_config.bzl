@@ -190,7 +190,7 @@ _configuration = rule(
 )
 
 def windows_cross_toolchain_config(name, **kwargs):
-    """Defines a clang-cl cross configuration without root-only rules_cc patches.
+    """Defines a Windows cross configuration without root-only rules_cc patches.
 
     Args:
       name: Name of the composed toolchain configuration target.

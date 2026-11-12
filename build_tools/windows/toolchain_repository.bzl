@@ -29,6 +29,27 @@ unset LD_PRELOAD LD_AUDIT
 exec "$tool_root/bin/{tool}" "$@"
 """
 
+_MSVC_ENV = """#!/usr/bin/env bash
+tool_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BINDIR="$tool_root/msvc/bin"
+export INCLUDE="z:$tool_root/include/crt;z:$tool_root/include/ucrt;z:$tool_root/include/shared;z:$tool_root/include/um;z:$tool_root/include/winrt;z:$tool_root/include/cppwinrt"
+export LIB="z:$tool_root/lib/crt;z:$tool_root/lib/ucrt;z:$tool_root/lib/um"
+export LIBPATH="$LIB"
+export WINEPATH="z:$BINDIR"
+export WINEPREFIX="${WINEPREFIX:-/tmp/hrx-msvc-wine}"
+export WINEDLLOVERRIDES="vcruntime140=n;vcruntime140_1=n"
+"""
+
+_MISSING_MSVC_WRAPPER = """#!/bin/sh
+echo 'Linux-hosted MSVC requires MSVC_WINE_ROOT; run .github/scripts/setup_windows_msvc.sh and export its output path.' >&2
+exit 1
+"""
+
+_MSVC_DUMPBIN_WRAPPER = """#!/usr/bin/env bash
+. "$(dirname "$0")/msvcenv.sh"
+"$(dirname "$0")/wine-msvc.sh" "$BINDIR/dumpbin.exe" "$@"
+"""
+
 def _required_path(repository_ctx, path):
     path = repository_ctx.path(path)
     if not path.exists:
@@ -110,6 +131,27 @@ def _windows_toolchain_repository_impl(repository_ctx):
     _project(repository_ctx, crt_root.get_child("lib", "x64"), "lib/crt")
     for component in ["ucrt", "um"]:
         _project(repository_ctx, sdk_library_root.get_child(component, "x64"), "lib/" + component)
+
+    msvc_root = repository_ctx.getenv("MSVC_WINE_ROOT")
+    if msvc_root:
+        if not repository_ctx.which("wine64") and not repository_ctx.which("wine"):
+            fail("Linux-hosted MSVC requires wine64 or wine on PATH when MSVC_WINE_ROOT is set.")
+        msvc_root = _required_path(repository_ctx, msvc_root)
+        msvc_version_root = _version_directory(repository_ctx, msvc_root.get_child("VC", "Tools", "MSVC"))
+        _project(repository_ctx, msvc_version_root.get_child("bin", "Hostx64", "x64"), "msvc/bin")
+        for source, destination in {
+            "cl": "msvc-cl",
+            "lib": "msvc-lib",
+            "link": "msvc-link",
+            "ml64": "msvc-ml64",
+            "wine-msvc.sh": "wine-msvc.sh",
+        }.items():
+            _project(repository_ctx, msvc_root.get_child("wrappers", source), "tools/" + destination)
+        repository_ctx.file("tools/msvc-dumpbin", _MSVC_DUMPBIN_WRAPPER, executable = True)
+    else:
+        for destination in ["msvc-cl", "msvc-dumpbin", "msvc-lib", "msvc-link", "msvc-ml64", "wine-msvc.sh"]:
+            repository_ctx.file("tools/" + destination, _MISSING_MSVC_WRAPPER, executable = True)
+    repository_ctx.file("tools/msvcenv.sh", _MSVC_ENV, executable = True)
 
     repository_ctx.file("BUILD.bazel", """
 load({toolchain_bzl}, "windows_cross_toolchain")

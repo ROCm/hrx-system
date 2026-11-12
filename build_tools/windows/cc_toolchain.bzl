@@ -173,14 +173,18 @@ def windows_toolchains():
                 toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
             )
     elif "@platforms//os:linux" in HOST_CONSTRAINTS:
-        native.toolchain(
-            name = "windows_x86_64_clang_cl",
-            exec_compatible_with = HOST_CONSTRAINTS,
-            target_compatible_with = _WINDOWS_X86_64,
-            target_settings = [":compiler_clang_cl"],
-            toolchain = "@iree_windows_toolchain//:toolchain",
-            toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
-        )
+        for compiler, implementation in [
+            ("clang_cl", "toolchain"),
+            ("msvc", "msvc_toolchain"),
+        ]:
+            native.toolchain(
+                name = "windows_x86_64_" + compiler,
+                exec_compatible_with = HOST_CONSTRAINTS,
+                target_compatible_with = _WINDOWS_X86_64,
+                target_settings = [":compiler_" + compiler],
+                toolchain = "@iree_windows_toolchain//:" + implementation,
+                toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+            )
     else:
         return
 

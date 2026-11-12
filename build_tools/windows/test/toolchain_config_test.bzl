@@ -19,6 +19,8 @@ _CommandInfo = provider("Expanded commands and enabled cross-toolchain capabilit
     "arguments": "Compile arguments.",
     # Selected compiler action tool after configuration composition.
     "compiler": "Compiler action executable path.",
+    # Compiler identity exported to compiler-specific project selects.
+    "compiler_id": "Configured compiler identity.",
     # Whether the unsupported native-Windows export helper is disabled.
     "explicit_exports": "Automatic exports disabled.",
     # Fully expanded shared-library link arguments from the same configuration.
@@ -72,6 +74,7 @@ def _command_impl(ctx):
         explicit_exports = cc_common.is_enabled(feature_configuration = configuration, feature_name = "no_windows_export_all_symbols"),
         split_lto = cc_common.is_enabled(feature_configuration = configuration, feature_name = "thin_lto"),
         compiler = cc_common.get_tool_for_action(feature_configuration = configuration, action_name = ACTION_NAMES.cpp_compile),
+        compiler_id = compiler.compiler,
     )]
 
 _command = rule(
@@ -111,6 +114,24 @@ def _test_sanitizer_impl(env, target):
     env.expect.that_collection(command.arguments).contains("/Z7")
     env.expect.that_collection(command.arguments).not_contains("/clang:-flto=thin")
     env.expect.that_collection(command.arguments).not_contains("/clang:-O3")
+
+def _test_cross_msvc(name, **kwargs):
+    _command(
+        name = name + "_subject",
+        compiler = ":msvc_compiler",
+        profile = ["fastbuild", "optimize_for_speed"],
+    )
+    analysis_test(name = name, target = name + "_subject", impl = _test_cross_msvc_impl, **kwargs)
+
+def _test_cross_msvc_impl(env, target):
+    command = target[_CommandInfo]
+    env.expect.that_str(command.compiler_id).equals("msvc-cl")
+    env.expect.that_str(command.compiler).equals("build_tools/windows/test/msvc-cl")
+    for flag in ["/O2", "/Z7", "/X"]:
+        env.expect.that_collection(command.arguments).contains(flag)
+    env.expect.that_collection(command.arguments).not_contains("/clang:-O3")
+    env.expect.that_collection(command.arguments).not_contains("/clang:-flto=thin")
+    env.expect.that_bool(command.explicit_exports).equals(True)
 
 def _test_forced_includes(name, **kwargs):
     targets = {}
@@ -220,7 +241,7 @@ def _test_native_linker_inputs_impl(env, target):
         env.expect.that_collection(link.argv).contains(builtins[0].path)
 
 def toolchain_config_test_suite(name):
-    tests = [_test_optimized, _test_sanitizer, _test_forced_includes, _test_crt_commands, _test_native_configuration, _test_native_command, _test_native_compiler_mismatch]
+    tests = [_test_optimized, _test_sanitizer, _test_cross_msvc, _test_forced_includes, _test_crt_commands, _test_native_configuration, _test_native_command, _test_native_compiler_mismatch]
     if "@platforms//os:windows" in HOST_CONSTRAINTS:
         tests.append(_test_native_linker_inputs)
     test_suite(
