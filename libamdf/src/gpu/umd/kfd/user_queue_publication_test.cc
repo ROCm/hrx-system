@@ -38,6 +38,7 @@ TEST_P(KfdQueuePlacementTest, LocalRingKeepsCoherentControlAndProducerAccess) {
   EXPECT_NE(ring_flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM, 0u);
   EXPECT_NE(ring_flags & KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC, 0u);
   EXPECT_NE(ring_flags & KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED, 0u);
+  EXPECT_NE(ring_flags & KFD_IOC_ALLOC_MEM_FLAGS_COHERENT, 0u);
   EXPECT_EQ(ring_flags & KFD_IOC_ALLOC_MEM_FLAGS_GTT, 0u);
   EXPECT_NE(native_state_.buffers[1].create_info.native_flags &
                 KFD_IOC_ALLOC_MEM_FLAGS_GTT,
@@ -45,12 +46,18 @@ TEST_P(KfdQueuePlacementTest, LocalRingKeepsCoherentControlAndProducerAccess) {
   ASSERT_EQ(
       amdf_gpu_umd_user_queue_map(queue_, nullptr, &mapping_, &mapping_result_),
       AMDF_STATUS_OK);
+  const bool header_commit = GetParam() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL;
   EXPECT_EQ(mapping_result_.host_publish_executor,
-            AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API);
-  EXPECT_EQ(mapping_result_.host_publish_fence, AMDF_HOST_CACHE_FENCE_NONE);
+            header_commit ? AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT
+                          : AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API);
+  EXPECT_EQ(mapping_result_.host_publish_fence,
+            header_commit ? AMDF_HOST_CACHE_FENCE_X86_SFENCE
+                          : AMDF_HOST_CACHE_FENCE_NONE);
   EXPECT_EQ(native_state_.host_publication.calls_before_activation, 1u);
-  ASSERT_EQ(amdf_gpu_umd_user_queue_mapping_flush(mapping_), AMDF_STATUS_OK);
-  EXPECT_EQ(native_state_.host_publication.call_count, 2u);
+  if (!header_commit) {
+    ASSERT_EQ(amdf_gpu_umd_user_queue_mapping_flush(mapping_), AMDF_STATUS_OK);
+  }
+  EXPECT_EQ(native_state_.host_publication.call_count, header_commit ? 1u : 2u);
   if (device_producer) {
     ASSERT_EQ(amdf_gpu_umd_user_queue_mapping_destroy(mapping_),
               AMDF_STATUS_OK);
@@ -112,7 +119,10 @@ TEST_P(KfdQueuePlacementTest, FailedInitialReleaseCannotActivateNativeQueue) {
   EXPECT_EQ(native_state_.LiveBufferCount(), 0u);
 }
 
-TEST_P(KfdQueuePlacementTest, FailedReleaseIsTerminalWithoutProvingRetirement) {
+class KfdQueueNativePublicationTest : public KfdQueuePlacementTest {};
+
+TEST_P(KfdQueueNativePublicationTest,
+       FailedReleaseIsTerminalWithoutProvingRetirement) {
   SelectLocalTopology();
   auto create = MakeCreateInfo(GetParam());
   create.placement = AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL;
@@ -174,6 +184,10 @@ TEST_P(KfdQueuePlacementTest, HostLocalRingNeedsNoNativeRelease) {
 INSTANTIATE_TEST_SUITE_P(Formats, KfdQueuePlacementTest,
                          ::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
                                            AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
+                                           AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA));
+
+INSTANTIATE_TEST_SUITE_P(Formats, KfdQueueNativePublicationTest,
+                         ::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
                                            AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA));
 
 }  // namespace

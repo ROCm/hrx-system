@@ -96,11 +96,10 @@ amdf_status_t amdf_gpu_umd_device_create(
     amdf_gpu_kfd_user_queue_plans_t plans;
     amdf_gpu_kfd_target_user_queue_plans_initialize(
         &device->topology, device->page_size, device->cache_line_size, &plans);
-    const amdf_queue_family_placement_info_t placement =
-        amdf_gpu_kfd_target_user_queue_placement(&device->topology,
-                                                 device->page_size);
     for (uint32_t i = 0; i < plans.count; ++i) {
-      result.queue_placements[i] = placement;
+      result.queue_placements[i] = amdf_gpu_kfd_target_user_queue_placement(
+          &device->topology, device->page_size,
+          plans.values[i].family.command_type);
     }
     *out_result = result;
     *out_device = device;
