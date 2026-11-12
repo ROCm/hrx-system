@@ -69,8 +69,10 @@ typedef struct loom_aie2p_configuration_worker_set_t {
 //     Waits until (register & mask) == value before issuing later commands.
 //     The value contains only bits selected by the mask. The wait does not
 //     modify the register and is available in initialization and invocation.
-//   write.address address, span
+//   write.address address, span, flags
 //     Writes the span's relocated runtime address as two consecutive words.
+//     Flags supply the upper 16 bits of the second word, including packet
+//     framing when writing a shim descriptor. Raw address storage uses zero.
 //   shim.descriptor address, span, length, flags, dim0, dim1, dim2, iter,
 //   control
 //     Writes eight shim DMA descriptor words with the span supplying the

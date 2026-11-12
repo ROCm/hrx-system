@@ -31,6 +31,8 @@ typedef struct loom_aie2p_native_switch_admission_t {
   loom_aie2p_native_switch_t* desired;
   // Packet-output union parents; UINT8_MAX if free, UINT8_MAX - 1 if circuit.
   uint8_t* masters;
+  // Sole input per packet output; UINT8_MAX if free, UINT8_MAX - 1 if shared.
+  uint8_t* master_inputs;
   // Packet-filter rule count per source slave, or UINT8_MAX if circuit.
   uint8_t* slaves;
   // Number of hardware packet-filter slots per source slave.
@@ -44,6 +46,8 @@ typedef struct loom_aie2p_native_switch_admission_t {
   uint16_t* first_groups;
   // DMA output masters remove packet headers before delivering payload.
   uint32_t drop_headers;
+  // Inputs carrying payload or external completion retain packet filtering.
+  uint32_t packet_inputs;
 } loom_aie2p_native_switch_admission_t;
 
 static iree_status_t loom_aie2p_native_switch_initialize(
@@ -81,7 +85,7 @@ static iree_status_t loom_aie2p_native_switch_initialize(
   }
   const iree_host_size_t byte_length =
       sizeof(*state->desired) + total_word_count * sizeof(uint32_t) +
-      word_counts[LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS] +
+      2 * word_counts[LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS] +
       word_counts[LOOM_AIE2P_NATIVE_SWITCH_BANK_SLAVES];
   IREE_RETURN_IF_ERROR(iree_arena_allocate(context->pass->arena, byte_length,
                                            (void**)&state->desired));
@@ -98,10 +102,12 @@ static iree_status_t loom_aie2p_native_switch_initialize(
     words += word_counts[i];
   }
   state->masters = (uint8_t*)words;
-  state->slaves =
+  state->master_inputs =
       state->masters + word_counts[LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS];
+  state->slaves =
+      state->master_inputs + word_counts[LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS];
   memset(state->masters, UINT8_MAX,
-         word_counts[LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS]);
+         2 * word_counts[LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS]);
   const uint32_t slave_count =
       word_counts[LOOM_AIE2P_NATIVE_SWITCH_BANK_SLAVES];
   const iree_host_size_t tile_index =
@@ -234,11 +240,61 @@ static bool loom_aie2p_native_switch_cover_input(
   return true;
 }
 
+// A control tree needs packet selection at forks and arbitration at joins,
+// but a private segment forwards all its framed words unchanged. Decide from
+// complete input classes and output ownership before assigning scarce filters
+// and arbiters. Payload inputs and external completion contracts stay packeted.
+static bool loom_aie2p_native_switch_select_circuits(
+    loom_aie2p_native_switch_admission_t* state) {
+  const uint32_t slave_count =
+      state->desired->banks[LOOM_AIE2P_NATIVE_SWITCH_BANK_SLAVES].word_count;
+  bool changed = false;
+  for (uint16_t slave = 0; slave < slave_count; ++slave) {
+    const uint16_t first = state->first_groups[slave];
+    if (first == UINT16_MAX ||
+        (state->packet_inputs & (UINT32_C(1) << slave))) {
+      continue;
+    }
+    const uint32_t destinations = state->groups[first].masters;
+    bool exclusive = true;
+    for (uint16_t i = state->groups[first].next; i != UINT16_MAX;
+         i = state->groups[i].next) {
+      exclusive &= state->groups[i].masters == destinations;
+    }
+    uint32_t masters = destinations;
+    while (masters) {
+      const uint32_t master = iree_math_count_trailing_zeros_u32(masters);
+      masters &= masters - 1;
+      exclusive &= state->master_inputs[master] == slave;
+    }
+    if (!exclusive || (destinations & state->drop_headers)) {
+      continue;
+    }
+    masters = destinations;
+    while (masters) {
+      const uint32_t master = iree_math_count_trailing_zeros_u32(masters);
+      masters &= masters - 1;
+      state->masters[master] = UINT8_MAX - 1;
+      state->desired->banks[LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS]
+          .words[master] = UINT32_C(1) << 31 | slave;
+    }
+    state->slaves[slave] = UINT8_MAX;
+    state->desired->banks[LOOM_AIE2P_NATIVE_SWITCH_BANK_SLAVES].words[slave] =
+        UINT32_C(1) << 31;
+    for (uint16_t i = first; i != UINT16_MAX; i = state->groups[i].next) {
+      state->groups[i].masters = 0;
+    }
+    state->first_groups[slave] = UINT16_MAX;
+    changed = true;
+  }
+  return changed;
+}
+
 static bool loom_aie2p_native_switch_cover_packets(
     loom_aie2p_native_switch_admission_t* state) {
   const uint32_t slave_count =
       state->desired->banks[LOOM_AIE2P_NATIVE_SWITCH_BANK_SLAVES].word_count;
-  bool compact = false;
+  bool compact = loom_aie2p_native_switch_select_circuits(state);
   for (uint16_t slave = 0; slave < slave_count; ++slave) {
     if (state->slaves[slave] == UINT8_MAX) {
       continue;
@@ -449,6 +505,16 @@ iree_status_t loom_aie2p_native_switches_build(
       return loom_aie2p_native_reject(
           context, entry,
           IREE_SV("separate circuit and packet stream-switch ports"));
+    }
+    if (selected->control_source == UINT32_MAX ||
+        (kind == LOOM_XDNA_TILE_KIND_SHIM_NOC &&
+         edge->destination_port == LOOM_XDNA_STREAM_PORT_SOUTH)) {
+      state->packet_inputs |= UINT32_C(1) << slave;
+    }
+    if (state->master_inputs[master] == UINT8_MAX) {
+      state->master_inputs[master] = (uint8_t)slave;
+    } else if (state->master_inputs[master] != slave) {
+      state->master_inputs[master] = UINT8_MAX - 1;
     }
     loom_aie2p_native_packet_group_t* group = NULL;
     uint16_t* next = &state->first_groups[slave];

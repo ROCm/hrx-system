@@ -122,8 +122,8 @@ static iree_status_t loom_aie2p_native_dma_submit_helper(
             &base));
       }
       IREE_RETURN_IF_ERROR(loom_aie2p_worker_external_address(
-          code, &builder, base, external_offset, &external_low,
-          &external_high));
+          code, &builder, base, external_offset, transfer->shim_words[2],
+          &external_low, &external_high));
     }
     if (local_dynamic) {
       const uint16_t descriptor = task->local_descriptor->sequence.descriptor +

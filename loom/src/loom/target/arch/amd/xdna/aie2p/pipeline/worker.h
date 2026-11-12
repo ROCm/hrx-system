@@ -81,12 +81,13 @@ iree_status_t loom_aie2p_worker_binary(loom_aie2p_worker_builder_t* context,
                                        loom_value_id_t rhs,
                                        loom_value_id_t* out_value);
 
-// Adds a proven 32-bit byte offset to an immutable relocated address pair.
-// The pair is loaded through this core's local aperture; carry updates high.
+// Forms a shim descriptor's address words from an immutable relocated base and
+// a proven 32-bit byte offset. Carry updates the high address portion without
+// replacing the descriptor's disjoint non-address bits in that word.
 iree_status_t loom_aie2p_worker_external_address(
     loom_aie2p_worker_builder_t* context, loom_builder_t* builder,
-    loom_value_id_t base, loom_value_id_t offset, loom_value_id_t* out_low,
-    loom_value_id_t* out_high);
+    loom_value_id_t base, loom_value_id_t offset, uint32_t descriptor_high_bits,
+    loom_value_id_t* out_low, loom_value_id_t* out_high);
 
 iree_status_t loom_aie2p_worker_return(loom_builder_t* builder,
                                        const loom_value_id_t* values,

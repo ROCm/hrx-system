@@ -414,7 +414,8 @@ static iree_status_t loom_aie2p_native_config_bind_address(
            [AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_RANGE],
       0, range, 3, loom_named_attr_slice_empty(), &config->span_type, 1, NULL,
       0, LOOM_LOCATION_UNKNOWN, &op));
-  loom_value_id_t operands[] = {LOOM_VALUE_ID_INVALID, loom_op_results(op)[0]};
+  loom_value_id_t operands[] = {LOOM_VALUE_ID_INVALID, loom_op_results(op)[0],
+                                LOOM_VALUE_ID_INVALID};
   // Constant offsets bind directly into a descriptor shared only by copies
   // with the same binding and offset.
   // Dynamic offsets load a relocated base through the worker's aperture;
@@ -434,12 +435,14 @@ static iree_status_t loom_aie2p_native_config_bind_address(
         transfer->shim_descriptor->path->shim->coordinate, &descriptor);
     IREE_RETURN_IF_ERROR(
         loom_aie2p_native_config_constant(config, address, &operands[0]));
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_config_constant(
+        config, transfer->shim_descriptor->sequence.words[j][2], &operands[2]));
     IREE_RETURN_IF_ERROR(loom_low_build_resolved_descriptor_op(
         &config->builder, config->descriptors,
         &config->descriptors->descriptors
              [AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_WRITE_ADDRESS],
-        0, operands, 2, loom_named_attr_slice_empty(), NULL, 0, NULL, 0,
-        LOOM_LOCATION_UNKNOWN, &op));
+        0, operands, IREE_ARRAYSIZE(operands), loom_named_attr_slice_empty(),
+        NULL, 0, NULL, 0, LOOM_LOCATION_UNKNOWN, &op));
   }
   return iree_ok_status();
 }
@@ -570,7 +573,7 @@ static iree_status_t loom_aie2p_native_config_bindings(
             0, range, 3, loom_named_attr_slice_empty(), &config->span_type, 1,
             NULL, 0, LOOM_LOCATION_UNKNOWN, &op));
         loom_value_id_t operands[] = {LOOM_VALUE_ID_INVALID,
-                                      loom_op_results(op)[0]};
+                                      loom_op_results(op)[0], range[1]};
         const uint64_t tile_address = (uint64_t)worker->tile->coordinate.column
                                           << context->family->column_shift |
                                       (uint64_t)worker->tile->coordinate.row
@@ -584,7 +587,8 @@ static iree_status_t loom_aie2p_native_config_bindings(
             &config->builder, config->descriptors,
             &config->descriptors->descriptors
                  [AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_WRITE_ADDRESS],
-            0, operands, 2, loom_named_attr_slice_empty(), NULL, 0, NULL, 0,
+            0, operands, IREE_ARRAYSIZE(operands),
+            loom_named_attr_slice_empty(), NULL, 0, NULL, 0,
             LOOM_LOCATION_UNKNOWN, &op));
       }
     }
