@@ -630,9 +630,13 @@ static iree_status_t loom_low_allocation_interval_assignment_record_spill(
           .budget_units =
               capacity->is_bounded ? capacity->max_units : UINT32_MAX,
       };
+  const loom_value_ordinal_t value_ordinal = loom_local_value_domain_ordinal(
+      state->context->value_domain, assignment->value_id);
   state->result.spill_traffic_bytes = iree_math_saturating_add_u64(
       state->result.spill_traffic_bytes,
-      iree_math_saturating_add_u64(traffic.store_bytes, traffic.reload_bytes));
+      loom_low_allocation_spill_plan_traffic_cost(
+          &traffic,
+          state->context->reconstruction->value_flags[value_ordinal]));
   const uint64_t* spill_traffic_exclusive_limit =
       state->context->spill_traffic_exclusive_limit;
   if (spill_traffic_exclusive_limit &&

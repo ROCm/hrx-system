@@ -149,7 +149,7 @@ typedef struct loom_low_allocation_interval_assignment_result_t {
   iree_host_size_t spill_plan_count;
   // Distinct retained-read blockers owned by this assignment attempt.
   loom_low_allocation_retained_fixed_values_t retained_fixed_values;
-  // Predicted store and reload bytes across the spill materialization plans.
+  // Predicted store and reload bytes after closed producer reconstruction.
   uint64_t spill_traffic_bytes;
   // Allocation remark records in spill-decision order. Null when no assignment
   // spills; otherwise sized to |spill_count|.

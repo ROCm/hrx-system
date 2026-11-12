@@ -8,6 +8,7 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/rematerialization_facts.h"
 
 namespace loom {
 namespace {
@@ -111,6 +112,34 @@ TEST(LowAllocationSpillPlanTest, GroupsSlicesByTrafficAndDensity) {
                   test_case.spill_byte_size),
               test_case.use_full_reload);
   }
+}
+
+TEST(LowAllocationSpillPlanTest, ChargesReconstructionWithoutMemoryTraffic) {
+  loom_low_allocation_spill_plan_traffic_t traffic = {
+      .store_count = 1,
+      .store_bytes = 4,
+      .reload_count = 34,
+      .reload_bytes = 136,
+  };
+  const uint8_t closed = LOOM_LOW_REMATERIALIZATION_VALUE_CLOSED;
+  const uint8_t stable = LOOM_LOW_REMATERIALIZATION_VALUE_STABLE_CAPTURE;
+  EXPECT_EQ(loom_low_allocation_spill_plan_traffic_cost(&traffic, 0), 140u);
+  EXPECT_EQ(loom_low_allocation_spill_plan_traffic_cost(&traffic, closed),
+            140u);
+  EXPECT_EQ(loom_low_allocation_spill_plan_traffic_cost(&traffic, stable),
+            140u);
+  EXPECT_EQ(
+      loom_low_allocation_spill_plan_traffic_cost(&traffic, closed | stable),
+      0u);
+  // A narrow observation still needs its original payload even when the
+  // complete producer can be reconstructed independently.
+  traffic.has_narrow_uses = true;
+  EXPECT_EQ(
+      loom_low_allocation_spill_plan_traffic_cost(&traffic, closed | stable),
+      140u);
+  traffic.store_bytes = UINT64_MAX - 3;
+  EXPECT_EQ(loom_low_allocation_spill_plan_traffic_cost(&traffic, 0),
+            UINT64_MAX);
 }
 
 TEST(LowAllocationSpillPlanTest, RecordsSpillRemarks) {

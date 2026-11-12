@@ -1082,6 +1082,26 @@ TEST_F(LowAllocationSearchTest,
   EXPECT_TRUE(loom_low_allocation_search_find_free_location(
       &context, &intervals[0], Capacity(/*max_units=*/8), &location_base));
   EXPECT_EQ(location_base, 3u);
+  // The repair needs a fifth register to leave four contiguous units below
+  // it. Preserving the provisional four-register tier would fragment that
+  // span and repeat the failed coloring. A complete alternative is compared
+  // only after all intervals have been placed.
+  auto packing_context = context;
+  packing_context.residency = {};
+  EXPECT_TRUE(loom_low_allocation_search_find_free_location(
+      &packing_context, &intervals[0], Capacity(/*max_units=*/8),
+      &location_base));
+  EXPECT_EQ(location_base, 4u);
+  auto residency_context = context;
+  residency_context.scalar_packing = {};
+  EXPECT_TRUE(loom_low_allocation_search_find_free_location(
+      &residency_context, &intervals[0], Capacity(/*max_units=*/8),
+      &location_base));
+  EXPECT_EQ(location_base, 0u);
+  EXPECT_TRUE(loom_low_allocation_search_find_free_location(
+      &packing_context, &intervals[0], Capacity(/*max_units=*/4),
+      &location_base));
+  EXPECT_EQ(location_base, 3u);
   context.residency = {};
 
   // The opposite packing direction is local to scalars whose own live range

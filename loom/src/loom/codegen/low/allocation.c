@@ -196,6 +196,7 @@ static iree_status_t loom_low_allocation_try_alternative_assignment(
     const loom_low_function_model_t* model,
     const loom_local_value_domain_t* value_domain,
     loom_low_allocation_search_strategy_t search_strategy,
+    loom_target_residency_view_t residency,
     iree_bitmap_t fragmentation_repair_reg_classes,
     const loom_low_allocation_numbering_analysis_t* baseline_numbering,
     const iree_arena_checkpoint_t* assignment_checkpoint,
@@ -249,7 +250,7 @@ static iree_status_t loom_low_allocation_try_alternative_assignment(
 
   loom_low_allocation_interval_assignment_result_t scratch_result = {0};
   if (iree_status_is_ok(status)) {
-    const loom_low_allocation_interval_assignment_context_t scratch_context =
+    loom_low_allocation_interval_assignment_context_t scratch_context =
         loom_low_allocation_make_interval_assignment_context(
             state, model, search_strategy, fragmentation_repair_reg_classes,
             &scratch_arena, &scratch_target_constraints,
@@ -257,6 +258,7 @@ static iree_status_t loom_low_allocation_try_alternative_assignment(
             state->target_constraints.error_count == 0
                 ? &state->interval_assignment.spill_traffic_bytes
                 : NULL);
+    scratch_context.residency = residency;
     status = loom_low_allocation_interval_assignment_build(
         &scratch_context, decision_arena, &scratch_result);
   }
@@ -967,6 +969,7 @@ static iree_status_t loom_low_allocate_function_impl(
     status = loom_low_allocation_try_alternative_assignment(
         &state, model, value_domain,
         LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_PRESSURE_EFFICIENCY,
+        state.options->residency,
         /*fragmentation_repair_reg_classes=*/(iree_bitmap_t){0},
         /*baseline_numbering=*/NULL, &interval_assignment_checkpoint,
         &decision_arena);
@@ -1018,7 +1021,7 @@ static iree_status_t loom_low_allocate_function_impl(
       status = loom_low_allocation_try_alternative_assignment(
           &state, model, value_domain,
           LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FRAGMENTATION_REPAIR,
-          repair_reg_classes, &baseline_numbering,
+          state.options->residency, repair_reg_classes, &baseline_numbering,
           &interval_assignment_checkpoint, &decision_arena);
     }
   }
@@ -1034,6 +1037,30 @@ static iree_status_t loom_low_allocate_function_impl(
     status = loom_low_allocation_try_alternative_assignment(
         &state, model, value_domain,
         LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FRAGMENTATION_REPAIR,
+        state.options->residency,
+        /*fragmentation_repair_reg_classes=*/(iree_bitmap_t){0},
+        /*baseline_numbering=*/NULL, &interval_assignment_checkpoint,
+        &decision_arena);
+  }
+  // First preserve the residency-aware packing above. If the initial snapshot
+  // still requires memory traffic, compare a packing unconstrained by
+  // provisional tiers. Repaired snapshots retain the ordinary packing policy
+  // instead of repeating whole-coloring exploration for each inserted spill.
+  // Both attempts reuse the same analyses and enforce the same hard capacity;
+  // the second may replace the first only by reducing reconstruction-aware
+  // spill traffic. A zero-traffic incumbent has nothing left to improve.
+  if (retained_location_table == NULL && iree_status_is_ok(status) &&
+      !state.options->has_allocation_repair &&
+      state.interval_assignment.has_packable_aggregates &&
+      !loom_target_residency_model_is_empty(state.options->residency.model) &&
+      ((state.target_constraints.error_count == 0 &&
+        state.interval_assignment.spill_traffic_bytes != 0) ||
+       loom_low_allocation_failure_is_present(
+           &state.target_constraints.failure))) {
+    status = loom_low_allocation_try_alternative_assignment(
+        &state, model, value_domain,
+        LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FRAGMENTATION_REPAIR,
+        /*residency=*/(loom_target_residency_view_t){0},
         /*fragmentation_repair_reg_classes=*/(iree_bitmap_t){0},
         /*baseline_numbering=*/NULL, &interval_assignment_checkpoint,
         &decision_arena);
