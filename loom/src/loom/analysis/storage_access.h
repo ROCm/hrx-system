@@ -115,6 +115,8 @@ typedef struct loom_storage_access_function_t {
   bool has_unknown_memory_access;
   // This body or a reached callee may access storage without a bounded operand.
   bool has_unbounded_memory_access;
+  // Memory spaces such accesses may read. UNKNOWN overlaps every space.
+  loom_memory_space_mask_t unbounded_read_spaces;
   // Memory spaces such accesses may invalidate. Reads and nonmemory state
   // effects contribute no bits; UNKNOWN overlaps every mutable storage space.
   loom_memory_space_mask_t unbounded_write_spaces;
@@ -140,6 +142,10 @@ typedef struct loom_storage_access_call_t {
   const loom_storage_reference_t* const* arguments;
   // The callee or a reached call may access storage without a bounded operand.
   bool has_unbounded_memory_access;
+  // Upper bound on reads not confined to the argument footprints.
+  loom_memory_space_mask_t unbounded_read_spaces;
+  // Upper bound on writes not confined to the argument footprints.
+  loom_memory_space_mask_t unbounded_write_spaces;
 } loom_storage_access_call_t;
 
 // Initializes a demand scope without traversing source or allocating storage.

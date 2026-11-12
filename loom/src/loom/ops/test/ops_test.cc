@@ -361,6 +361,40 @@ TEST_F(BuilderTest, MemoryFenceHasOrderingWithoutMemoryAccess) {
   EXPECT_FALSE(loom_region_has_memory_accesses(module_->body));
 }
 
+TEST_F(BuilderTest, ReadSpaceSummaryTracksNestedContributors) {
+  const loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_value_id_t pool = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t input = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_module_block(module_), loom_type_pool(), &pool));
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_module_block(module_), i32, &input));
+  loom_op_t* map = nullptr;
+  IREE_ASSERT_OK(loom_test_map_build(&builder_, &input, 1, i32, nullptr, 0,
+                                     LOOM_LOCATION_UNKNOWN, &map));
+  loom_region_t* body = loom_test_map_body(map);
+  const loom_builder_ip_t saved =
+      loom_builder_enter_region(&builder_, map, body);
+  loom_op_t* first = nullptr;
+  loom_op_t* second = nullptr;
+  IREE_ASSERT_OK(loom_test_read_resource_build(&builder_, pool, i32,
+                                               LOOM_LOCATION_UNKNOWN, &first));
+  IREE_ASSERT_OK(loom_test_read_resource_build(&builder_, pool, i32,
+                                               LOOM_LOCATION_UNKNOWN, &second));
+  loom_builder_restore(&builder_, saved);
+  const loom_memory_space_mask_t unknown =
+      1u << LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN;
+  EXPECT_EQ(loom_region_read_memory_spaces(body), unknown);
+  EXPECT_EQ(loom_region_read_memory_spaces(module_->body), unknown);
+  IREE_ASSERT_OK(loom_op_erase(module_, first));
+  EXPECT_EQ(loom_region_read_memory_spaces(body), unknown);
+  IREE_ASSERT_OK(loom_module_compute_uses(module_));
+  EXPECT_EQ(body->read_space_counts[LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN], 1u);
+  IREE_ASSERT_OK(loom_op_erase(module_, second));
+  EXPECT_EQ(loom_region_read_memory_spaces(body), 0);
+  EXPECT_EQ(loom_region_read_memory_spaces(module_->body), 0);
+}
+
 TEST_F(BuilderTest, DirectWriteEffectSummaryUpdatesOnErase) {
   loom_type_t pool_type = loom_type_pool();
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);

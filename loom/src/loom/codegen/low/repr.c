@@ -42,12 +42,14 @@ static bool loom_low_repr_resolve_descriptor_impl(
   }
   const loom_low_descriptor_t* descriptor =
       &descriptor_set->descriptors[ordinal];
+  loom_memory_space_mask_t read_spaces = 0;
   loom_memory_space_mask_t write_spaces = 0;
   const loom_trait_flags_t traits = loom_low_descriptor_effective_traits(
-      descriptor_set, descriptor, &write_spaces);
+      descriptor_set, descriptor, &read_spaces, &write_spaces);
   *out_value = (loom_low_repr_descriptor_value_t){
       .ordinal = ordinal,
       .effective_traits = traits,
+      .intrinsic_read_spaces = read_spaces,
       .intrinsic_write_spaces = write_spaces,
   };
   return true;

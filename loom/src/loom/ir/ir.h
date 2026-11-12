@@ -1879,6 +1879,10 @@ typedef struct loom_op_t {
   // semantics. Bit layout is dialect-specific (each flag enum defines
   // its own mask constants in the per-dialect ops.h).
   uint8_t instance_flags;
+  // Intrinsic upper bound on read memory spaces, independent of operands.
+  // Zero leaves payload reads unqualified; observations of nonmemory state
+  // contribute no memory spaces.
+  loom_memory_space_mask_t intrinsic_read_spaces;
   // Intrinsic upper bound on written memory spaces, independent of operands.
   // Zero leaves write effects unqualified. Unknown effects and fences remain
   // conservative even when an instruction also has a precise storage write.
@@ -1914,6 +1918,23 @@ typedef struct loom_op_t {
   //   uint32_t           attribute_owners[attribute_count]
   //   uint16_t           operand_segment_counts[operand_descriptor_count]
 } loom_op_t;
+
+// Projects payload reads under the supplied traits. Nonmemory observations
+// remain effectful without inventing a storage access.
+static inline loom_memory_space_mask_t loom_op_read_memory_spaces(
+    const loom_op_t* op, loom_trait_flags_t traits) {
+  if (iree_any_bit_set(traits, LOOM_TRAIT_UNKNOWN_EFFECTS)) {
+    return (loom_memory_space_mask_t)(1u
+                                      << LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN);
+  }
+  if (!iree_any_bit_set(traits, LOOM_TRAIT_READS_MEMORY)) {
+    return 0;
+  }
+  return op->intrinsic_read_spaces
+             ? op->intrinsic_read_spaces
+             : (loom_memory_space_mask_t)(1u
+                                          << LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN);
+}
 
 // Projects an operation's intrinsic write bound under the supplied traits.
 // Trait-changing rewrites use the same intrinsic instruction semantics for
@@ -2208,6 +2229,10 @@ typedef struct loom_region_t {
   // Transitive count of actual or unknown memory accesses. Unlike read/write
   // effects, this excludes ordering and observations of non-memory state.
   uint32_t memory_access_count;
+  // Transitive contributors to each read memory space. Unknown reads
+  // contribute UNKNOWN; observations of nonmemory state contribute nothing.
+  // Counts preserve the bound when the last contributor is erased.
+  uint32_t read_space_counts[LOOM_VALUE_FACT_MEMORY_SPACE_COUNT_];
   // Transitive contributors to each written memory space. Unknown writes and
   // fences contribute UNKNOWN; precise intrinsic writes contribute their
   // spaces. Counts preserve the bound when the last contributor is erased.
@@ -2227,7 +2252,7 @@ typedef struct loom_region_t {
   loom_op_t* parent_op;
 } loom_region_t;
 
-static_assert(sizeof(loom_region_t) == (IREE_PTR_SIZE == 8 ? 152 : 116),
+static_assert(sizeof(loom_region_t) == (IREE_PTR_SIZE == 8 ? 184 : 148),
               "loom_region_t must retain its pointer-width layout");
 
 // Returns the operation that owns |region|, or NULL for the module body and
@@ -2258,6 +2283,18 @@ static inline void loom_op_set_region(loom_op_t* op, uint8_t region_index,
   if (region) {
     region->parent_op = op;
   }
+}
+
+// Returns the retained union of payload reads in this region.
+static inline loom_memory_space_mask_t loom_region_read_memory_spaces(
+    const loom_region_t* region) {
+  loom_memory_space_mask_t spaces = 0;
+  for (uint32_t i = 0; i < LOOM_VALUE_FACT_MEMORY_SPACE_COUNT_; ++i) {
+    if (region->read_space_counts[i]) {
+      spaces |= (loom_memory_space_mask_t)(1u << i);
+    }
+  }
+  return spaces;
 }
 
 // Returns the retained union of write-like memory effects in this region.

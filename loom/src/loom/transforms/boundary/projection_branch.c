@@ -270,6 +270,7 @@ static iree_status_t loom_boundary_projection_apply_branch(
       &replacement));
   replacement->instance_flags = source->instance_flags;
   replacement->traits = source->traits;
+  replacement->intrinsic_read_spaces = source->intrinsic_read_spaces;
   replacement->intrinsic_write_spaces = source->intrinsic_write_spaces;
   replacement->flags |= source->flags & LOOM_OP_SOURCE_PRESENTATION_FLAG_MASK;
   memcpy(loom_op_operands(replacement), loom_op_const_operands(source),

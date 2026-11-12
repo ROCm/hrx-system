@@ -22,7 +22,7 @@ static loom_trait_flags_t ProjectEffects(const loom_low_effect_t* effects,
   descriptor_set.effect_count = effect_count;
   loom_low_descriptor_t descriptor = {};
   return loom_low_descriptor_effective_traits(&descriptor_set, &descriptor,
-                                              nullptr);
+                                              nullptr, nullptr);
 }
 
 TEST(LowDescriptorTraitsTest, EffectFreeDescriptorIsPure) {
@@ -31,7 +31,7 @@ TEST(LowDescriptorTraitsTest, EffectFreeDescriptorIsPure) {
   EXPECT_TRUE(iree_all_bits_set(traits, LOOM_TRAIT_PURE));
 }
 
-TEST(LowDescriptorTraitsTest, RetainsIntrinsicWriteSpaceFamily) {
+TEST(LowDescriptorTraitsTest, RetainsIntrinsicAccessSpaceFamily) {
   struct Case {
     // Native descriptor memory domain.
     loom_low_memory_space_t native_space;
@@ -64,12 +64,16 @@ TEST(LowDescriptorTraitsTest, RetainsIntrinsicWriteSpaceFamily) {
     };
     loom_op_t op = {};
     op.traits = loom_low_descriptor_effective_traits(
-        &set, &descriptor, &op.intrinsic_write_spaces);
+        &set, &descriptor, &op.intrinsic_read_spaces,
+        &op.intrinsic_write_spaces);
+    EXPECT_EQ(loom_op_read_memory_spaces(&op, op.traits), 0);
     EXPECT_EQ(loom_op_written_memory_spaces(&op, op.traits),
               test.source_spaces);
     effect.kind = LOOM_LOW_EFFECT_KIND_READ;
     op.traits = loom_low_descriptor_effective_traits(
-        &set, &descriptor, &op.intrinsic_write_spaces);
+        &set, &descriptor, &op.intrinsic_read_spaces,
+        &op.intrinsic_write_spaces);
+    EXPECT_EQ(loom_op_read_memory_spaces(&op, op.traits), test.source_spaces);
     EXPECT_EQ(loom_op_written_memory_spaces(&op, op.traits), 0);
   }
 }
@@ -94,8 +98,8 @@ TEST(LowDescriptorTraitsTest, WriteBoundsDoNotHideFencesOrUnknownEffects) {
       .effect_count = 2,
   };
   loom_op_t op = {};
-  op.traits = loom_low_descriptor_effective_traits(&set, &descriptor,
-                                                   &op.intrinsic_write_spaces);
+  op.traits = loom_low_descriptor_effective_traits(
+      &set, &descriptor, &op.intrinsic_read_spaces, &op.intrinsic_write_spaces);
   EXPECT_EQ(loom_op_written_memory_spaces(&op, op.traits),
             (1u << LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL) |
                 (1u << LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP));
@@ -104,7 +108,8 @@ TEST(LowDescriptorTraitsTest, WriteBoundsDoNotHideFencesOrUnknownEffects) {
         LOOM_LOW_EFFECT_KIND_BARRIER, LOOM_LOW_EFFECT_KIND_COUNTER}) {
     effects[1].kind = kind;
     op.traits = loom_low_descriptor_effective_traits(
-        &set, &descriptor, &op.intrinsic_write_spaces);
+        &set, &descriptor, &op.intrinsic_read_spaces,
+        &op.intrinsic_write_spaces);
     EXPECT_EQ(loom_op_written_memory_spaces(&op, op.traits),
               1u << LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN);
   }
@@ -233,7 +238,7 @@ TEST(LowDescriptorTraitsTest, SideEffectingTerminatorFlagsCompose) {
   };
 
   const loom_trait_flags_t traits = loom_low_descriptor_effective_traits(
-      &descriptor_set, &descriptor, nullptr);
+      &descriptor_set, &descriptor, nullptr, nullptr);
 
   EXPECT_TRUE(iree_all_bits_set(
       traits, LOOM_TRAIT_TERMINATOR | LOOM_TRAIT_UNKNOWN_EFFECTS));
@@ -253,7 +258,7 @@ TEST(LowDescriptorTraitsTest, StateAssignmentDoesNotInvalidateStorage) {
             flags | LOOM_LOW_DESCRIPTOR_FLAG_STATE_ASSIGNMENT),
     };
     const loom_trait_flags_t traits = loom_low_descriptor_effective_traits(
-        &descriptor_set, &descriptor, nullptr);
+        &descriptor_set, &descriptor, nullptr, nullptr);
     EXPECT_TRUE(loom_traits_have_observable_effects(traits));
     EXPECT_FALSE(loom_traits_may_write(traits));
     EXPECT_FALSE(loom_traits_may_access_memory(traits));
@@ -273,7 +278,7 @@ TEST(LowDescriptorTraitsTest, UniqueIdentityIsNotPureAndCannotBeCse) {
   };
 
   const loom_trait_flags_t traits = loom_low_descriptor_effective_traits(
-      &descriptor_set, &descriptor, nullptr);
+      &descriptor_set, &descriptor, nullptr, nullptr);
 
   EXPECT_TRUE(iree_all_bits_set(traits, LOOM_TRAIT_UNIQUE_IDENTITY));
   EXPECT_FALSE(iree_any_bit_set(traits, LOOM_TRAIT_PURE));
@@ -302,7 +307,7 @@ TEST(LowDescriptorTraitsTest, ImplicitStateResultOwnsLocalRegisterLifetime) {
   };
 
   const loom_trait_flags_t traits = loom_low_descriptor_effective_traits(
-      &descriptor_set, &descriptor, nullptr);
+      &descriptor_set, &descriptor, nullptr, nullptr);
 
   EXPECT_TRUE(loom_traits_has_unique_identity(traits));
   EXPECT_TRUE(loom_traits_have_storage_relation(traits));

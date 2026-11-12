@@ -90,6 +90,12 @@ bool loom_callable_effects_may_access_memory(loom_func_like_t function);
 // writes to borrowed storage do not create a resource identity.
 bool loom_callable_effects_may_create_resources(loom_func_like_t function);
 
+// Returns the retained upper bound on payload reads by a callable.
+// Definitions use their cached body summary; only a pure declaration excludes
+// reads. Nonmemory state observations contribute no memory spaces.
+loom_memory_space_mask_t loom_callable_effects_read_memory_spaces(
+    loom_func_like_t function);
+
 // Returns the retained upper bound on memory spaces invalidated by a callable.
 // Definitions use their cached body summary; pure and read-only declarations
 // exclude writes. Unknown effects and fences that can import external writes

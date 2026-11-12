@@ -500,6 +500,7 @@ static iree_status_t loom_parse_format_scoped_enum_ref(
       parsed, &parser->parser_arena, element->field_index,
       loom_attr_scoped_enum(value.ordinal)));
   parsed->effective_traits = value.effective_traits;
+  parsed->intrinsic_read_spaces = value.intrinsic_read_spaces;
   parsed->intrinsic_write_spaces = value.intrinsic_write_spaces;
   parsed->has_effective_traits = true;
   return loom_parse_format_add_field_span(

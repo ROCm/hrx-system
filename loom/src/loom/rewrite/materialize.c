@@ -496,6 +496,7 @@ static iree_status_t loom_ir_clone_op_impl(
   }
   target_op->instance_flags = source_op->instance_flags;
   target_op->traits = source_op->traits;
+  target_op->intrinsic_read_spaces = source_op->intrinsic_read_spaces;
   target_op->intrinsic_write_spaces = source_op->intrinsic_write_spaces;
   target_op->flags |= source_op->flags & LOOM_OP_SOURCE_PRESENTATION_FLAG_MASK;
   if (source_op->operand_count > 0) {

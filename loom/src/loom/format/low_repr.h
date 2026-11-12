@@ -34,6 +34,8 @@ typedef struct loom_low_repr_descriptor_value_t {
   uint32_t ordinal;
   // Effective operation traits derived from the selected descriptor row.
   loom_trait_flags_t effective_traits;
+  // Intrinsic read-space bound projected with the descriptor's traits.
+  loom_memory_space_mask_t intrinsic_read_spaces;
   // Intrinsic write-space bound projected with the descriptor's traits.
   loom_memory_space_mask_t intrinsic_write_spaces;
 } loom_low_repr_descriptor_value_t;

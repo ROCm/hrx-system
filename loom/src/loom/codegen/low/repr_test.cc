@@ -35,6 +35,7 @@ TEST(LowReprTest, StableKeysRoundTripContractLocalOrdinals) {
   ASSERT_TRUE(loom_low_repr_resolve_descriptor(
       &environment, descriptor_set, IREE_SV("test.add.i32"), &value));
   EXPECT_TRUE(iree_any_bit_set(value.effective_traits, LOOM_TRAIT_PURE));
+  EXPECT_EQ(value.intrinsic_read_spaces, 0);
   EXPECT_EQ(value.intrinsic_write_spaces, 0);
   EXPECT_TRUE(iree_string_view_equal(
       loom_low_repr_descriptor_key(&environment, descriptor_set, value.ordinal),
@@ -46,6 +47,15 @@ TEST(LowReprTest, StableKeysRoundTripContractLocalOrdinals) {
       iree_any_bit_set(value.effective_traits, LOOM_TRAIT_WRITES_MEMORY));
   EXPECT_EQ(value.intrinsic_write_spaces,
             1u << LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN);
+
+  ASSERT_TRUE(loom_low_repr_resolve_descriptor(
+      &environment, descriptor_set, IREE_SV("test.load.workgroup.v4i32"),
+      &value));
+  EXPECT_TRUE(
+      iree_any_bit_set(value.effective_traits, LOOM_TRAIT_READS_MEMORY));
+  EXPECT_EQ(value.intrinsic_read_spaces,
+            1u << LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP);
+  EXPECT_EQ(value.intrinsic_write_spaces, 0);
 
   EXPECT_FALSE(loom_low_repr_resolve_descriptor(
       &environment, descriptor_set, IREE_SV("test.missing"), &value));
