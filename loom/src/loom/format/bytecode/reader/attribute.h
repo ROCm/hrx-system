@@ -198,6 +198,15 @@ iree_status_t loom_bytecode_attribute_validate_type_parameter(
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
     iree_host_size_t available_type_count);
 
+// Validates a complete descriptor-backed scoped type without constructing IR.
+// TYPE parameters refer directly to static types or prior completed nodes;
+// predicate VALUE parameters use the signature's ordinary SSA coordinates.
+iree_status_t loom_bytecode_attribute_validate_complete_type(
+    loom_bytecode_attribute_validator_t* validator,
+    loom_bytecode_reader_cursor_t* cursor,
+    const loom_bytecode_attribute_ssa_validation_scope_t* ssa_scope,
+    uint64_t completed_type_count);
+
 // Validates an attribute whose predicate VALUE arguments are STRINGS ordinals.
 iree_status_t loom_bytecode_attribute_validate_named(
     loom_bytecode_attribute_validator_t* validator,

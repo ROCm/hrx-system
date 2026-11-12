@@ -185,6 +185,24 @@ iree_status_t loom_bytecode_type_emit_invalid_scoped_record(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, iree_string_view_t reason);
 
+// Validates a static type ordinal or a prior completed scope-local node.
+static inline iree_status_t loom_bytecode_type_validate_completed_reference(
+    loom_bytecode_reader_decoder_t* decoder,
+    loom_bytecode_reader_cursor_t* cursor, uint64_t reference,
+    iree_host_size_t static_count, uint64_t completed_count) {
+  const uint64_t ordinal = reference >> 1;
+  if (reference & 1) {
+    if (ordinal >= completed_count) {
+      return loom_bytecode_type_emit_invalid_scoped_record(
+          decoder, cursor, IREE_SV("incomplete_child"));
+    }
+  } else if (ordinal >= static_count) {
+    return loom_bytecode_type_emit_invalid_scoped_record(
+        decoder, cursor, IREE_SV("unknown_static_type"));
+  }
+  return iree_ok_status();
+}
+
 // Opens the bounded extension following a type reference. Static references
 // return an empty cursor without entering the scoped decoder. Otherwise the
 // cursor starts at the first completed-type record and borrows the input bytes.

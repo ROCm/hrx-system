@@ -100,6 +100,32 @@ typedef struct loom_bytecode_symbol_attribute_metadata_t {
   loom_bytecode_attr_kind_t kind;
 } loom_bytecode_symbol_attribute_metadata_t;
 
+// One requirement on an actual template input, in source signature coordinates.
+// Encoding identities are module-local ENCODINGS ordinals plus one; zero is
+// the native dense representation. An argument expectation is zero-based.
+typedef struct loom_bytecode_input_requirement_t {
+  // Ordinary input argument whose dimension or encoding is constrained.
+  uint16_t argument;
+  // Dimension axis, or UINT8_MAX for a complete encoding requirement.
+  uint8_t axis;
+  // True when expected names a signature argument instead of a literal.
+  bool expected_is_argument;
+  // Zeroed padding for canonical immutable rows.
+  uint32_t reserved;
+  // Literal extent, complete encoding identity, or signature argument ordinal.
+  uint64_t expected;
+} loom_bytecode_input_requirement_t;
+
+// Family input obligations, or additional obligations of a concrete provider.
+typedef struct loom_bytecode_input_contract_t {
+  // Number of immutable requirements in values.
+  uint32_t count;
+  // Zeroed padding aligning the trailing records.
+  uint32_t reserved;
+  // Requirements in input/axis order, followed by each input's encoding.
+  loom_bytecode_input_requirement_t values[];
+} loom_bytecode_input_contract_t;
+
 // Validated symbol record exposed by the bytecode index.
 typedef struct loom_bytecode_symbol_metadata_t {
   // Absolute file byte offset of the symbol entry.
@@ -172,6 +198,8 @@ typedef struct loom_bytecode_symbol_metadata_t {
   uint32_t first_region_payload_index;
   // Number of independently bounded root-region payloads.
   uint8_t region_payload_count;
+  // Module input contract ordinal plus one, or zero without extra obligations.
+  uint32_t input_contract_ordinal_plus_one;
 } loom_bytecode_symbol_metadata_t;
 
 // Dependency and abstract-provider slices owned by one SYMBOLS ordinal.
@@ -248,6 +276,10 @@ typedef struct loom_bytecode_module_metadata_t {
   iree_host_size_t symbol_count;
   // Arena-owned symbol metadata array.
   loom_bytecode_symbol_metadata_t* symbols;
+  // Unique retained template input contracts, shared by equivalent providers.
+  const loom_bytecode_input_contract_t** input_contracts;
+  // Number of entries in input_contracts.
+  iree_host_size_t input_contract_count;
   // Number of independently bounded root-region payloads.
   iree_host_size_t region_payload_count;
   // Arena-owned payload metadata in symbol and declared region-slot order.
