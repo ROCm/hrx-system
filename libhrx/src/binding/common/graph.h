@@ -340,6 +340,15 @@ typedef struct iree_hal_streaming_graph_batch_mem_op_node_attrs_t {
   hrx_buffer_t* owners;
 } iree_hal_streaming_graph_batch_mem_op_node_attrs_t;
 
+// Incoming dependency added after the destination node was constructed.
+// The destination owns the list, so each record only stores its predecessor.
+typedef struct iree_hal_streaming_graph_dependency_t {
+  // Next added dependency of the same destination node.
+  struct iree_hal_streaming_graph_dependency_t* next;
+  // Borrowed predecessor owned by the same graph.
+  iree_hal_streaming_graph_node_t* from;
+} iree_hal_streaming_graph_dependency_t;
+
 // Graph node structure.
 // Memory layout:
 // [iree_hal_streaming_graph_node_t]
@@ -353,15 +362,17 @@ typedef struct iree_hal_streaming_graph_node_t {
   // Type of the node indicating which attribute data is valid.
   iree_hal_streaming_graph_node_type_t type;
   // Flags controlling graph node visibility and behavior.
-  uint32_t flags;
+  uint8_t flags;
+  // Number of embedded dependency pointers in |dependencies|.
+  uint32_t dependency_count;
+  // Arena-owned incoming dependencies attached after node construction.
+  iree_hal_streaming_graph_dependency_t* additional_dependencies;
   // Dense index used by graph analysis while the node is active.
   uint32_t node_index;
   // Stable source node index used to find original nodes in cloned graphs.
   uint32_t clone_source_node_index;
   // Process-unique identifier used for graph debug output.
   uint64_t debug_id;
-  // Number of embedded dependency pointers in |dependencies|.
-  uint32_t dependency_count;
 
   // Node-specific data.
   union {
@@ -661,11 +672,14 @@ typedef struct iree_hal_streaming_node_block_t {
   iree_hal_streaming_graph_node_t* nodes[];
 } iree_hal_streaming_node_block_t;
 
-// Edge structure for additional dependencies added after node creation.
+// Temporary scheduling edge that augments the template's own dependencies.
 typedef struct iree_hal_streaming_graph_edge_t {
+  // Next edge in the scheduling augmentation list.
   struct iree_hal_streaming_graph_edge_t* next;
-  iree_hal_streaming_graph_node_t* from;  // Dependency (must complete first)
-  iree_hal_streaming_graph_node_t* to;    // Dependent (waits for 'from')
+  // Borrowed predecessor that must complete first.
+  iree_hal_streaming_graph_node_t* from;
+  // Borrowed dependent that waits for the predecessor.
+  iree_hal_streaming_graph_node_t* to;
 } iree_hal_streaming_graph_edge_t;
 
 typedef iree_status_t (*iree_hal_streaming_graph_user_object_retain_fn_t)(
@@ -735,8 +749,7 @@ typedef struct iree_hal_streaming_graph_t {
   // Next stable source ID assigned to graph nodes created in this template.
   uint32_t next_clone_source_node_index;
 
-  // Additional edges added after node creation via hipGraphAddDependencies.
-  iree_hal_streaming_graph_edge_t* additional_edges;
+  // Total added dependencies in the nodes' incoming lists.
   iree_host_size_t additional_edge_count;
 
   // Retained source of an executable snapshot or allocation-bearing child.
@@ -859,8 +872,8 @@ bool iree_hal_streaming_graph_exec_owns_node(
     iree_hal_streaming_graph_node_t* node);
 
 // Adds execution dependencies across complete copy operations, including their
-// host preparation/completion helpers. The returned list shares the graph's
-// immutable additional edges and allocates only new edges from |arena|.
+// host preparation/completion helpers. The returned list contains only the
+// augmentation edges allocated from |arena|; template edges remain in nodes.
 iree_status_t iree_hal_streaming_graph_schedule_copy_dependencies(
     iree_hal_streaming_graph_t* graph, iree_arena_allocator_t* arena,
     iree_hal_streaming_graph_edge_t** out_edges);
@@ -869,8 +882,8 @@ iree_status_t iree_hal_streaming_graph_schedule_copy_dependencies(
 iree_status_t iree_hal_streaming_graph_schedule_nodes(
     iree_hal_streaming_node_block_t* node_blocks, iree_host_size_t node_count,
     const uint8_t* disabled_nodes, iree_host_size_t disabled_node_count,
-    iree_hal_streaming_graph_edge_t* additional_edges,
-    iree_arena_allocator_t* arena, hrx_graph_schedule_t* out_schedule);
+    iree_hal_streaming_graph_edge_t* extra_edges, iree_arena_allocator_t* arena,
+    hrx_graph_schedule_t* out_schedule);
 
 // Checks whether |child_graph| may be the child graph of a node in
 // |parent_graph|: the two must be distinct, must belong to the same context,

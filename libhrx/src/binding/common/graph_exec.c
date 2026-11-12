@@ -1890,15 +1890,15 @@ iree_status_t iree_hal_streaming_graph_exec_compile(
       iree_hal_streaming_graph_visible_node_count(exec->graph);
   iree_arena_allocator_t arena;
   iree_arena_initialize(&exec->context->device_entry->block_pool, &arena);
-  iree_hal_streaming_graph_edge_t* additional_edges = NULL;
+  iree_hal_streaming_graph_edge_t* copy_dependencies = NULL;
   iree_status_t status = iree_hal_streaming_graph_schedule_copy_dependencies(
-      exec->graph, &arena, &additional_edges);
+      exec->graph, &arena, &copy_dependencies);
   hrx_graph_schedule_t schedule;
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_graph_schedule_nodes(
         exec->graph->node_blocks, exec->graph->node_count,
         exec->node_disabled_states, exec->node_disabled_state_count,
-        additional_edges, &arena, &schedule);
+        copy_dependencies, &arena, &schedule);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_graph_exec_compile_schedule(exec, &schedule);
@@ -2797,7 +2797,6 @@ static bool iree_hal_streaming_graph_visible_index_of_node(
 }
 
 static iree_host_size_t iree_hal_streaming_graph_visible_dependency_count(
-    const iree_hal_streaming_graph_t* graph,
     const iree_hal_streaming_graph_node_t* node) {
   iree_host_size_t dependency_count = 0;
   for (uint32_t i = 0; i < node->dependency_count; ++i) {
@@ -2805,10 +2804,10 @@ static iree_host_size_t iree_hal_streaming_graph_visible_dependency_count(
       ++dependency_count;
     }
   }
-  for (iree_hal_streaming_graph_edge_t* edge = graph->additional_edges; edge;
-       edge = edge->next) {
-    if (edge->to == node &&
-        iree_hal_streaming_graph_node_is_visible(edge->from)) {
+  for (const iree_hal_streaming_graph_dependency_t* edge =
+           node->additional_dependencies;
+       edge; edge = edge->next) {
+    if (iree_hal_streaming_graph_node_is_visible(edge->from)) {
       ++dependency_count;
     }
   }
@@ -2827,11 +2826,11 @@ static bool iree_hal_streaming_graph_has_visible_dependency(
       return true;
     }
   }
-  for (iree_hal_streaming_graph_edge_t* edge = graph->additional_edges; edge;
-       edge = edge->next) {
+  for (const iree_hal_streaming_graph_dependency_t* edge =
+           node->additional_dependencies;
+       edge; edge = edge->next) {
     iree_host_size_t visible_index = 0;
-    if (edge->to == node &&
-        iree_hal_streaming_graph_visible_index_of_node(graph, edge->from,
+    if (iree_hal_streaming_graph_visible_index_of_node(graph, edge->from,
                                                        &visible_index) &&
         visible_index == dependency_visible_index) {
       return true;
@@ -2845,8 +2844,8 @@ static bool iree_hal_streaming_graph_visible_dependencies_match(
     const iree_hal_streaming_graph_node_t* old_node,
     const iree_hal_streaming_graph_t* new_graph,
     const iree_hal_streaming_graph_node_t* new_node) {
-  if (iree_hal_streaming_graph_visible_dependency_count(old_graph, old_node) !=
-      iree_hal_streaming_graph_visible_dependency_count(new_graph, new_node)) {
+  if (iree_hal_streaming_graph_visible_dependency_count(old_node) !=
+      iree_hal_streaming_graph_visible_dependency_count(new_node)) {
     return false;
   }
   for (uint32_t i = 0; i < old_node->dependency_count; ++i) {
@@ -2861,11 +2860,9 @@ static bool iree_hal_streaming_graph_visible_dependencies_match(
       return false;
     }
   }
-  for (iree_hal_streaming_graph_edge_t* edge = old_graph->additional_edges;
+  for (const iree_hal_streaming_graph_dependency_t* edge =
+           old_node->additional_dependencies;
        edge; edge = edge->next) {
-    if (edge->to != old_node) {
-      continue;
-    }
     iree_host_size_t old_dependency_visible_index = 0;
     if (!iree_hal_streaming_graph_visible_index_of_node(
             old_graph, edge->from, &old_dependency_visible_index)) {

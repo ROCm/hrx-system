@@ -88,11 +88,10 @@ TEST(GraphTest, AddedDependenciesConstrainDetectedWorkstreams) {
     node->type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL;
   }
 
-  std::array<iree_hal_streaming_graph_edge_t, kNodeCount - 1> edges = {};
+  std::array<iree_hal_streaming_graph_dependency_t, kNodeCount - 1> edges = {};
   for (size_t i = 0; i < edges.size(); ++i) {
     edges[i].from = node_storage[i].get();
-    edges[i].to = node_storage[i + 1].get();
-    edges[i].next = i + 1 < edges.size() ? &edges[i + 1] : nullptr;
+    node_storage[i + 1].get()->additional_dependencies = &edges[i];
   }
 
   iree_arena_block_pool_t block_pool;
@@ -102,7 +101,7 @@ TEST(GraphTest, AddedDependenciesConstrainDetectedWorkstreams) {
   hrx_graph_schedule_t schedule = {};
   IREE_ASSERT_OK(iree_hal_streaming_graph_schedule_nodes(
       node_block.get(), kNodeCount, /*disabled_nodes=*/nullptr,
-      /*disabled_node_count=*/0, edges.data(), &arena, &schedule));
+      /*disabled_node_count=*/0, nullptr, &arena, &schedule));
 
   ASSERT_EQ(schedule.partition_count, 1u);
   ASSERT_EQ(schedule.block_count, 1u);
@@ -702,19 +701,20 @@ TEST(GraphTest, DependencyBatchPublicationIsFailureAtomic) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                         iree_hal_streaming_graph_add_dependencies(
                             &graph, from, to, std::size(from)));
-  EXPECT_EQ(nullptr, graph.additional_edges);
+  for (auto* node : to) {
+    EXPECT_EQ(nullptr, node->additional_dependencies);
+  }
   EXPECT_EQ(0u, graph.additional_edge_count);
   EXPECT_EQ(0u, graph.arena.used_allocation_size);
   allocator.fail_allocations = false;
   IREE_ASSERT_OK(iree_hal_streaming_graph_add_dependencies(&graph, from, to,
                                                            std::size(from)));
   ASSERT_EQ(2u, graph.additional_edge_count);
-  ASSERT_NE(nullptr, graph.additional_edges);
-  EXPECT_EQ(from[1], graph.additional_edges->from);
-  EXPECT_EQ(to[1], graph.additional_edges->to);
-  ASSERT_NE(nullptr, graph.additional_edges->next);
-  EXPECT_EQ(from[0], graph.additional_edges->next->from);
-  EXPECT_EQ(to[0], graph.additional_edges->next->to);
+  for (size_t i = 0; i < std::size(from); ++i) {
+    ASSERT_NE(nullptr, to[i]->additional_dependencies);
+    EXPECT_EQ(from[i], to[i]->additional_dependencies->from);
+    EXPECT_EQ(nullptr, to[i]->additional_dependencies->next);
+  }
   iree_arena_deinitialize(&graph.arena);
   iree_arena_block_pool_deinitialize(&block_pool);
   EXPECT_EQ(allocator.successful_allocation_count, allocator.free_count);
@@ -966,7 +966,9 @@ TEST(GraphTest, DependencyBatchOrderPreservesDuplicateValidation) {
                                 iree_hal_streaming_graph_add_dependencies(
                                     state.graph(), from, to, std::size(from)));
           EXPECT_EQ(0u, state.graph()->additional_edge_count);
-          EXPECT_EQ(nullptr, state.graph()->additional_edges);
+          for (auto* node : nodes) {
+            EXPECT_EQ(nullptr, node->additional_dependencies);
+          }
           EXPECT_EQ(used_size, state.graph()->arena.used_allocation_size);
           EXPECT_EQ(total_size, state.graph()->arena.total_allocation_size);
         }
@@ -998,7 +1000,7 @@ TEST(GraphTest, RejectedDependencyBatchesReleaseBackingBeforeRetry) {
   std::array<iree_hal_streaming_graph_node_t*, 1024> to;
   IREE_ASSERT_OK(iree_hal_streaming_graph_add_dependencies(
       graph, &nodes.front(), &nodes.back(), 1));
-  auto* original_edge = graph->additional_edges;
+  auto* original_edge = nodes.back()->additional_dependencies;
   const auto used_size = graph->arena.used_allocation_size;
   const auto total_size = graph->arena.total_allocation_size;
   // Repeated rejection spans allocations fitting in the current block, new
@@ -1016,7 +1018,7 @@ TEST(GraphTest, RejectedDependencyBatchesReleaseBackingBeforeRetry) {
                             iree_hal_streaming_graph_add_dependencies(
                                 graph, from.data(), to.data(), count));
       EXPECT_EQ(1u, graph->additional_edge_count);
-      EXPECT_EQ(original_edge, graph->additional_edges);
+      EXPECT_EQ(original_edge, nodes.back()->additional_dependencies);
       EXPECT_EQ(used_size, graph->arena.used_allocation_size);
       EXPECT_EQ(total_size, graph->arena.total_allocation_size);
     }
@@ -1030,17 +1032,14 @@ TEST(GraphTest, RejectedDependencyBatchesReleaseBackingBeforeRetry) {
   IREE_ASSERT_OK(iree_hal_streaming_graph_add_dependencies(
       graph, from.data(), to.data(), from.size()));
   EXPECT_EQ(from.size() + 1, graph->additional_edge_count);
-  auto* edge = graph->additional_edges;
-  for (size_t i = from.size(); i > 0; --i) {
+  for (size_t i = 0; i < from.size(); ++i) {
+    auto* edge = to[i]->additional_dependencies;
     ASSERT_NE(nullptr, edge);
-    EXPECT_EQ(from[i - 1], edge->from);
-    EXPECT_EQ(to[i - 1], edge->to);
-    edge = edge->next;
+    EXPECT_EQ(from[i], edge->from);
+    EXPECT_EQ(i + 1 == from.size() ? original_edge : nullptr, edge->next);
   }
-  ASSERT_EQ(original_edge, edge);
-  EXPECT_EQ(nodes.front(), edge->from);
-  EXPECT_EQ(nodes.back(), edge->to);
-  EXPECT_EQ(nullptr, edge->next);
+  EXPECT_EQ(nodes.front(), original_edge->from);
+  EXPECT_EQ(nullptr, original_edge->next);
 }
 
 TEST(GraphTest, RemovedNodesCannotRejoinThroughReusedIndices) {
@@ -1202,6 +1201,39 @@ TEST(GraphTest, CaptureDependencyUpdatesPreserveUniqueOrderedFrontiers) {
   ASSERT_EQ(2u, state.origin()->capture_dependency_count);
   EXPECT_EQ(second, state.origin()->capture_dependencies[0]);
   EXPECT_EQ(state.node(), state.origin()->capture_dependencies[1]);
+}
+
+TEST(GraphTest, CaptureJoinTraversesAddedAndEmbeddedDependencies) {
+  for (bool join : {false, true}) {
+    SCOPED_TRACE(join);
+    CaptureTransactionTestState state;
+    IREE_ASSERT_OK(state.JoinParticipantAtPrimaryNode());
+    iree_hal_streaming_graph_node_t* middle = nullptr;
+    IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+        state.graph(), nullptr, 0, &middle));
+    iree_hal_streaming_graph_node_t* terminal = nullptr;
+    IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+        state.graph(), &middle, 1, &terminal));
+    if (join) {
+      auto* predecessor = state.node();
+      IREE_ASSERT_OK(iree_hal_streaming_graph_add_dependencies(
+          state.graph(), &predecessor, &middle, 1));
+    }
+    IREE_ASSERT_OK(iree_hal_streaming_update_capture_dependencies(
+        state.origin(), &terminal, 1,
+        IREE_HAL_STREAMING_CAPTURE_DEPENDENCIES_SET));
+    // Capture-to-graph returns the caller-owned template without a retain.
+    iree_hal_streaming_graph_t* captured = nullptr;
+    iree_status_t status =
+        iree_hal_streaming_end_capture(state.origin(), &captured);
+    if (join) {
+      IREE_EXPECT_OK(status);
+      EXPECT_EQ(state.graph(), captured);
+    } else {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED, status);
+      EXPECT_EQ(nullptr, captured);
+    }
+  }
 }
 
 TEST(GraphTest, BeginCaptureToGraphNormalizesItsInitialFrontier) {
