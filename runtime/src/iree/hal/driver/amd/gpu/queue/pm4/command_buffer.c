@@ -170,7 +170,7 @@ iree_status_t iree_hal_amd_gpu_pm4_command_buffer_create(
   if (iree_status_is_ok(status)) {
     *buffer->program = (iree_hal_amd_gpu_pm4_command_program_t){
         .host_allocator = host_allocator,
-        .invariant_fixups = true,
+        .invariant_fixups = !pool->chain,
     };
     iree_atomic_ref_count_init(&buffer->program->ref_count);
   }
@@ -248,8 +248,9 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_seal(
       iree_hal_amd_gpu_recording_fixup_count(&buffer->recording.storage),
       program));
   IREE_TRACE_ZONE_BEGIN(z0);
-  const bool preserve_private_data = buffer->program->invariant_fixups;
-  buffer->program->invariant_fixups = false;
+  const bool invariant_fixups =
+      buffer->program->invariant_fixups &&
+      iree_hal_amd_gpu_command_inputs_are_fixed_addresses(&buffer->inputs);
   iree_hal_amd_gpu_fixup_t
       packet_fixups[IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_CAPACITY];
   const bool bounded =
@@ -270,22 +271,14 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_seal(
         packet_fixups, program->fixup_count);
   }
   iree_status_t status = iree_hal_amd_gpu_program_seal(program);
+  if (iree_status_is_ok(status)) {
+    buffer->program->invariant_fixups = invariant_fixups;
+  }
   if (iree_status_is_ok(status) && fixup_word_count) {
     iree_hal_amd_gpu_recording_deinitialize(&buffer->recording.storage);
     memcpy(buffer->packet_fixups, packet_fixups,
            program->fixup_count * sizeof(*packet_fixups));
     buffer->program->fixup_word_count = (uint16_t)fixup_word_count;
-    bool invariant =
-        preserve_private_data &&
-        iree_hal_amd_gpu_command_inputs_are_fixed_addresses(&buffer->inputs);
-    const uint32_t first_input =
-        iree_hal_amd_gpu_pm4_command_first_input(buffer);
-    for (uint32_t i = 0; i < program->fixup_count && invariant; ++i) {
-      const uint32_t source = packet_fixups[i].source & 0xFFFFFFu;
-      invariant = source == IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE ||
-                  source >= first_input;
-    }
-    buffer->program->invariant_fixups = invariant;
   }
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -420,6 +413,12 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_advise_buffer(
 static iree_status_t iree_hal_amd_gpu_pm4_command_pointer(
     iree_hal_amd_gpu_pm4_command_buffer_t* buffer, bool data, uint32_t offset,
     uint32_t value, uint64_t displacement, bool private_data) {
+  // Preserve the producer's source classification without reading back the
+  // device-resident fixup table. Dispatch IDs and profile samples vary per use;
+  // external input stability is established when the recording is sealed.
+  buffer->program->invariant_fixups &=
+      value == IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE ||
+      value >= iree_hal_amd_gpu_pm4_command_first_input(buffer);
   return iree_hal_amd_gpu_recording_fixup(
       &buffer->recording.storage, offset, value, displacement, 0,
       (data ? IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA : 0) |

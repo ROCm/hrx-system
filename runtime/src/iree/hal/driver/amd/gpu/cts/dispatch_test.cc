@@ -21,6 +21,7 @@
 #include "iree/hal/driver/amd/gpu/image/hsaco.h"
 #include "iree/hal/driver/amd/gpu/kernarg.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/command_buffer.h"
+#include "iree/hal/driver/amd/gpu/queue/pm4/command_buffer.h"
 #include "iree/hal/slab_pool.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -1441,6 +1442,23 @@ TEST_P(GpuNativeDispatchTest, FixedArgumentsSurviveQueuedReplayAndTrim) {
           ASSERT_GT(program->block_count, 1u);
         }
       }
+    }
+    if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4) {
+      iree_hal_amd_gpu_pm4_command_invocation_t invocation;
+      IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_command_invocation_initialize(
+          recording, {}, nullptr, 0, &invocation));
+      const auto* pool =
+          iree_containerof(invocation.program->resident.pool,
+                           iree_hal_amd_gpu_pm4_program_pool_t, storage);
+      // Table size changes the first-use repair mechanism, not the lifetime
+      // of these fixed arguments. KERNEL exits still vary per invocation.
+      EXPECT_EQ(invocation.program->invariant_fixups, !pool->chain);
+      if (dispatch_count >= 16) {
+        EXPECT_EQ(invocation.program->fixup_word_count, 0u);
+        EXPECT_GT(invocation.program->resident.fixup_count,
+                  IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_CAPACITY);
+      }
+      iree_hal_amd_gpu_pm4_command_invocation_deinitialize(&invocation);
     }
     constexpr uint32_t kReplays = 8;
     for (uint32_t epoch = 0; epoch < 2; ++epoch) {

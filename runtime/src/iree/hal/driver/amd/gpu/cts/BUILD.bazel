@@ -496,6 +496,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/driver/amd/gpu/image:hip_images",
         "//runtime/src/iree/hal/driver/amd/gpu/image:hsaco",
         "//runtime/src/iree/hal/driver/amd/gpu/queue/aql:command_buffer",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue/pm4:command_buffer",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
