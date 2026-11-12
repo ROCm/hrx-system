@@ -733,9 +733,9 @@ ERR_XDNA_047 = ErrorDef(
     domain=ErrorDomain.XDNA,
     code=47,
     severity=Severity.ERROR,
-    summary="Shim descriptor flags overlap its relocated address.",
+    summary="Configuration flags overlap their relocated address.",
     message=(
-        "shim descriptor flags {flags} set low address bits "
+        "configuration flags {flags} set low address bits "
         "reserved for the range operand"
     ),
     params=(ErrorParam("flags", ParamKind.U32),),

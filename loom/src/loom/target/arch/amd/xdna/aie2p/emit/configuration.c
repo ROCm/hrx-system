@@ -651,6 +651,13 @@ static iree_status_t loom_aie2p_configuration_phase_emit(
         const bool descriptor =
             opcode ==
             AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_SHIM_DESCRIPTOR;
+        const uint32_t flags = WORD(descriptor ? 3 : 2);
+        if (flags & 0xffff) {
+          const loom_diagnostic_param_t params[] = {loom_param_u32(flags)};
+          status = loom_aie2p_configuration_diagnose(
+              emitter, op, LOOM_ERR_XDNA_047, params, IREE_ARRAYSIZE(params));
+          continue;
+        }
         const iree_host_size_t count = descriptor ? 8 : 2;
         uint32_t* words = NULL;
         IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -661,12 +668,8 @@ static iree_status_t loom_aie2p_configuration_phase_emit(
           for (iree_host_size_t j = 2; j < 8; ++j) {
             words[j] = WORD(j + 1);
           }
-          if (words[2] & 0xffff) {
-            const loom_diagnostic_param_t params[] = {loom_param_u32(words[2])};
-            status = loom_aie2p_configuration_diagnose(
-                emitter, op, LOOM_ERR_XDNA_047, params, IREE_ARRAYSIZE(params));
-            continue;
-          }
+        } else {
+          words[1] = flags;
         }
         record.type = LOOM_AIE2P_PROGRAM_RECORD_REGISTER_BLOCK_WRITE32;
         record.value.register_block_write32 =

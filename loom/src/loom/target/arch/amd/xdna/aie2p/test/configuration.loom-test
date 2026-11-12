@@ -37,7 +37,7 @@ low.func.def target<amd.xdna.aie2p.configuration>(@configuration_target) @invoke
   %payload = range %binding, %header_length, %payload_length
   %header = range %binding, %zero, %header_length
   %header_address = constant 2588608 : reg<aie2p.config.scalar : i64>
-  write.address %header_address, %header
+  write.address %header_address, %header, %zero
   %descriptor_address = constant 118784 : reg<aie2p.config.scalar : i64>
   shim.descriptor %descriptor_address, %payload, %words, %zero, %zero, %zero, %zero, %zero, %one
   %queue = constant 119316 : reg<aie2p.config.scalar : i64>
@@ -145,8 +145,9 @@ low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @invoke() asm 
   binding.unused %last_unused
   %input_range = range %input, %origin, %extent
   %output_range = range %output, %origin, %extent
-  write.address %input_address, %input_range
-  write.address %output_address, %output_range
+  %address_flags = constant 0 : reg<aie2p.config.scalar : i64>
+  write.address %input_address, %input_range, %address_flags
+  write.address %output_address, %output_range, %address_flags
   return
 }
 

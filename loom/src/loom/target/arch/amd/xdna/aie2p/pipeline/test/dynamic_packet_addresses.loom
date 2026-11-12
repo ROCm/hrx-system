@@ -1,6 +1,7 @@
 // Serial workers reuse a shim sender for different core receivers. Its packet
 // enable and destination ID share the descriptor word with the high address.
 // One input-copy site uses inline submission; three sites share a submit body.
+// Each phase also reads a fixed tail address through configuration relocation.
 aie2p.target<array> @device
 
 func.def inline @read_record(%input: buffer, %offset: offset, %payload: view<16xi32>) -> (vector<16xi32>) {
@@ -51,6 +52,22 @@ pipeline.def @phase(%row: index, %copies: index) run(%input: buffer, %output: bu
       kernel.async.wait %completion {newer_groups = 0} : kernel.async.group
       channel.release %read : read<tile<16xi32>>
     }
+    %tail_input_offset = index.constant 1152 : offset
+    %first_core_row = index.constant 2 : index
+    %tail_output_begin = index.constant 6 : index
+    %phase_index = index.sub %row, %first_core_row : index
+    %tail_record = index.add %tail_output_begin, %phase_index : index
+    %tail_output_offset = index.scale %tail_record, %record_bytes : index, offset -> offset
+    %tail_write, %tail_payload = channel.reserve %records : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+    %tail_values = func.call @read_record(%input, %tail_input_offset, %tail_payload) : (buffer, offset, view<16xi32>) -> (vector<16xi32>)
+    vector.store %tail_values, %tail_payload[0] : vector<16xi32>, view<16xi32>
+    channel.publish %tail_write : write<tile<16xi32>>
+    %tail_read, %tail_result = channel.acquire %records : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+    %tail_destination = buffer.view %output[%tail_output_offset] : buffer -> view<16xi32>
+    %tail_outgoing = kernel.async.copy %tail_result to %tail_destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+    %tail_completion = kernel.async.group %tail_outgoing : kernel.async.token -> kernel.async.group
+    kernel.async.wait %tail_completion {newer_groups = 0} : kernel.async.group
+    channel.release %tail_read : read<tile<16xi32>>
   }
 }
 
@@ -71,8 +88,8 @@ pipeline.def<kernel> public retain target(@device) @entry() run(%input_arg: buff
 
 func.def @reference(%input: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
-  %source = buffer.view %input[%origin] : buffer -> view<18x16xi32>
-  %destination = buffer.view %output[%origin] : buffer -> view<6x16xi32>
+  %source = buffer.view %input[%origin] : buffer -> view<20x16xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<8x16xi32>
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
   %record_count = index.constant 6 : index
@@ -87,12 +104,17 @@ func.def @reference(%input: buffer, %output: buffer) {
     scf.for %word = [%begin to %word_count step %step] {
       %sum = scf.for %copy = [%begin to %copies step %step](%partial = %initial_sum : i32) -> (i32) {
         %position = index.add %source_record, %copy : index
-        %value = view.load %source[%position, %word] : view<18x16xi32> -> i32
+        %value = view.load %source[%position, %word] : view<20x16xi32> -> i32
         %next = scalar.addi %partial, %value : i32
         scf.yield %next : i32
       }
-      view.store %sum, %destination[%record, %word] : i32, view<6x16xi32>
+      view.store %sum, %destination[%record, %word] : i32, view<8x16xi32>
     }
+  }
+  scf.for %word = [%begin to %word_count step %step] {
+    %value = view.load %source[18, %word] : view<20x16xi32> -> i32
+    view.store %value, %destination[6, %word] : i32, view<8x16xi32>
+    view.store %value, %destination[7, %word] : i32, view<8x16xi32>
   }
   func.return
 }
@@ -100,13 +122,13 @@ func.def @reference(%input: buffer, %output: buffer) {
 check.scenario public @dynamic_packet_destinations {
   check.trial[3](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
-    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<320xi32>
-    %input = check.tensor.view %input_storage offset(64) : tensor<320xi32> -> tensor<288xi32>
-    %output_storage = check.generate.fill value(-9999) : tensor<128xi32>
-    %output = check.tensor.view %output_storage offset(64) : tensor<128xi32> -> tensor<96xi32>
-    check.compare<@entry, @reference>(%input, %output) : (tensor<288xi32>, tensor<96xi32>) -> () {
-      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<320xi32>
-      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<128xi32>
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<352xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<352xi32> -> tensor<320xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<160xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<160xi32> -> tensor<128xi32>
+    check.compare<@entry, @reference>(%input, %output) : (tensor<320xi32>, tensor<128xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<352xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<160xi32>
     }
   }
   check.return
