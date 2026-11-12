@@ -10,6 +10,23 @@
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/switch.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
 
+typedef struct loom_aie2p_native_payload_multicast_t {
+  // Next eligible SRAM multicast in the formation inventory.
+  struct loom_aie2p_native_payload_multicast_t* next;
+  // Physical class owning this receiver set.
+  loom_aie2p_native_payload_class_t* payload;
+  // Source-independent receiver identity, indexed by physical DMA queue.
+  uint64_t* receivers;
+  // First member with equal receivers and disjoint construction lifetimes.
+  struct loom_aie2p_native_payload_multicast_t* group;
+  // Next distinct group; populated only on its first member.
+  struct loom_aie2p_native_payload_multicast_t* next_group;
+  // Number of compatible physical senders, populated only on the first member.
+  iree_host_size_t member_count;
+  // Shared packet lanes, initialized only for groups with several senders.
+  loom_aie2p_array_route_multicast_t routes;
+} loom_aie2p_native_payload_multicast_t;
+
 typedef struct loom_aie2p_native_payload_inventory_t {
   // Dense physical queue offsets indexed by tile ordinal.
   iree_host_size_t* bases;
@@ -19,6 +36,12 @@ typedef struct loom_aie2p_native_payload_inventory_t {
   loom_aie2p_native_payload_source_t** arrivals;
   // Append position preserving the first occurrence of each sender.
   loom_aie2p_native_payload_source_t** tail;
+  // Serial constructions can reuse physical receiver queues.
+  bool has_serial;
+  // Receiver bitset length in uint64_t words.
+  iree_host_size_t receiver_words;
+  // SRAM multicast classes with source-independent receiver identities.
+  loom_aie2p_native_payload_multicast_t* multicasts;
 } loom_aie2p_native_payload_inventory_t;
 
 static uint32_t loom_aie2p_native_payload_distance(
@@ -63,8 +86,15 @@ static iree_status_t loom_aie2p_native_intern_payload(
   source->framed |= framed;
   // Canonical destination order also grows long shared prefixes before their
   // shorter branches. No transfer order changes within a receiver's stream.
+  bool compute =
+      destinations[0].tile->facts->kind == LOOM_XDNA_TILE_KIND_COMPUTE;
+  bool cross_column =
+      destinations[0].tile->coordinate.column != sender.tile->coordinate.column;
   for (iree_host_size_t i = 1; i < destination_count; ++i) {
     const loom_aie2p_native_payload_endpoint_t endpoint = destinations[i];
+    compute &= endpoint.tile->facts->kind == LOOM_XDNA_TILE_KIND_COMPUTE;
+    cross_column |=
+        endpoint.tile->coordinate.column != sender.tile->coordinate.column;
     iree_host_size_t j = i;
     while (j && loom_aie2p_native_payload_before(sender.tile, endpoint,
                                                  destinations[j - 1])) {
@@ -110,18 +140,94 @@ static iree_status_t loom_aie2p_native_intern_payload(
       .distribution_only = distribution};
   memcpy(payload->destinations, destinations,
          destination_count * sizeof(*destinations));
+  source->nonlocal_class_count += !compute || cross_column;
+  if (inventory->has_serial && distribution && compute && cross_column &&
+      destination_count > 1 &&
+      sender.tile->facts->kind == LOOM_XDNA_TILE_KIND_MEMORY) {
+    loom_aie2p_native_payload_multicast_t* multicast;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate(
+        context->pass->arena,
+        sizeof(*multicast) + inventory->receiver_words * sizeof(uint64_t),
+        (void**)&multicast));
+    *multicast = (loom_aie2p_native_payload_multicast_t){
+        .next = inventory->multicasts,
+        .payload = payload,
+        .receivers = (uint64_t*)(multicast + 1)};
+    memset(multicast->receivers, 0,
+           inventory->receiver_words * sizeof(*multicast->receivers));
+    payload->multicast = inventory->multicasts = multicast;
+  }
   *position = *out_payload = payload;
   source->framed |= source->class_count > 1;
   for (iree_host_size_t i = 0; i < destination_count; ++i) {
     const iree_host_size_t destination_slot =
         inventory->bases[destinations[i].tile - context->tiles] +
         destinations[i].engine;
+    if (payload->multicast) {
+      payload->multicast->receivers[destination_slot / 64] |=
+          UINT64_C(1) << (destination_slot % 64);
+    }
     loom_aie2p_native_payload_source_t* previous =
         inventory->arrivals[destination_slot];
     if (previous && previous != source) {
       previous->framed = source->framed = true;
     }
     inventory->arrivals[destination_slot] = source;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_aie2p_native_share_payloads(
+    loom_aie2p_native_context_t* context,
+    loom_aie2p_native_payload_inventory_t* inventory) {
+  // Queue assignment is the exclusion proof: distinct physical senders can
+  // reach the same receiver queue only in disjoint construction lifetimes.
+  // Equal complete receiver sets therefore establish both packet identity and
+  // serialization. Reallocating lifetimes here would duplicate that proof.
+  loom_aie2p_native_payload_multicast_t* groups = NULL;
+  for (loom_aie2p_native_payload_multicast_t* multicast = inventory->multicasts;
+       multicast; multicast = multicast->next) {
+    // A second nonlocal class could merge into this group's packet namespace.
+    // Local upward classes never enter its horizontal or descending links.
+    if (!multicast->payload->distribution_only ||
+        multicast->payload->source->nonlocal_class_count != 1) {
+      continue;
+    }
+    loom_aie2p_native_payload_multicast_t* group = groups;
+    while (group &&
+           memcmp(group->receivers, multicast->receivers,
+                  inventory->receiver_words * sizeof(*group->receivers))) {
+      group = group->next_group;
+    }
+    if (!group) {
+      group = multicast;
+      group->next_group = groups;
+      groups = group;
+    }
+    multicast->group = group;
+    ++group->member_count;
+  }
+  for (loom_aie2p_native_payload_multicast_t* group = groups; group;
+       group = group->next_group) {
+    if (group->member_count > 1) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_array_route_multicast_initialize(
+          &context->routing, context->pass->arena, &group->routes));
+    }
+  }
+  for (loom_aie2p_native_payload_multicast_t* multicast = inventory->multicasts;
+       multicast; multicast = multicast->next) {
+    if (!multicast->group || multicast->group->member_count < 2) {
+      continue;
+    }
+    // All merged inputs see exactly the same multicast identity. Other classes
+    // remain private to their source column and retain distinct local IDs.
+    loom_aie2p_native_payload_source_t* source = multicast->payload->source;
+    source->framed = true;
+    uint8_t packet = 1;
+    for (loom_aie2p_native_payload_class_t* payload = source->classes; payload;
+         payload = payload->next) {
+      payload->packet = payload == multicast->payload ? 0 : packet++;
+    }
   }
   return iree_ok_status();
 }
@@ -134,7 +240,8 @@ iree_status_t loom_aie2p_native_form_payloads(
       (iree_host_size_t)context->family->column_count *
       context->family->row_count;
   loom_aie2p_native_payload_inventory_t inventory = {
-      .tail = &context->payload_sources};
+      .tail = &context->payload_sources,
+      .has_serial = realization->invocations.lifetimes.has_serial};
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       context->pass->arena, tile_count, sizeof(*inventory.bases),
       (void**)&inventory.bases));
@@ -143,6 +250,7 @@ iree_status_t loom_aie2p_native_form_payloads(
     inventory.bases[i] = slots;
     slots += context->tiles[i].facts->dma.channel_count_per_direction;
   }
+  inventory.receiver_words = (slots + 63) / 64;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       context->pass->arena, slots * 2, sizeof(*inventory.sources),
       (void**)&inventory.sources));
@@ -222,6 +330,7 @@ iree_status_t loom_aie2p_native_form_payloads(
       }
     }
   }
+  IREE_RETURN_IF_ERROR(loom_aie2p_native_share_payloads(context, &inventory));
   *out_valid = true;
   return iree_ok_status();
 }
@@ -236,16 +345,30 @@ iree_status_t loom_aie2p_native_route_payload(
     return iree_ok_status();
   }
   loom_aie2p_native_payload_source_t* source = payload->source;
+  loom_aie2p_array_route_multicast_t* multicast =
+      payload->multicast && payload->multicast->group &&
+              payload->multicast->group->member_count > 1
+          ? &payload->multicast->group->routes
+          : NULL;
   payload->route_first = context->routing.route_count;
   for (iree_host_size_t i = 0; i < payload->destination_count; ++i) {
     const loom_aie2p_native_payload_endpoint_t* destination =
         &payload->destinations[i];
     const iree_host_size_t first = context->routing.route_count;
-    if (!loom_aie2p_array_route_stream(
-            &context->routing, (*next_source)++, &source->tree,
-            source->endpoint.tile->coordinate, LOOM_XDNA_STREAM_PORT_DMA,
-            source->endpoint.engine, destination->tile->coordinate,
-            LOOM_XDNA_STREAM_PORT_DMA, destination->engine, source->framed)) {
+    const uint32_t label = (*next_source)++;
+    const bool routed =
+        multicast
+            ? loom_aie2p_array_route_multicast(
+                  &context->routing, label, &source->tree,
+                  source->endpoint.tile->coordinate, source->endpoint.engine,
+                  destination->tile->coordinate, destination->engine, multicast)
+            : loom_aie2p_array_route_stream(
+                  &context->routing, label, &source->tree,
+                  source->endpoint.tile->coordinate, LOOM_XDNA_STREAM_PORT_DMA,
+                  source->endpoint.engine, destination->tile->coordinate,
+                  LOOM_XDNA_STREAM_PORT_DMA, destination->engine,
+                  source->framed);
+    if (!routed) {
       return loom_aie2p_native_reject(
           context, op, IREE_SV("available physical payload stream links"));
     }

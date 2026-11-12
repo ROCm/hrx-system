@@ -85,6 +85,14 @@ loom_test(
 )
 
 loom_test(
+    name = "multisource_execution_test",
+    srcs = ["channel_multisource.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [_XDNA_EIGHT_COLUMN_PROFILE],
+    tags = ["manual"],
+)
+
+loom_test(
     name = "staging_stress",
     srcs = ["staging_stress.loom"],
     benchmark_smoke = False,

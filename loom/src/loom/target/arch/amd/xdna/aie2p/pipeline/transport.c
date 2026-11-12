@@ -1103,9 +1103,20 @@ iree_status_t loom_aie2p_native_select_transfers(
     // ordered phases retain their own task admission and do not use refills.
     source_count += context->channels[i].progress ? 2 : 0;
   }
+  const loom_xdna_tile_facts_t* compute = loom_xdna_array_tile_kind_facts(
+      context->family, LOOM_XDNA_TILE_KIND_COMPUTE);
+  const loom_xdna_tile_facts_t* memory = loom_xdna_array_tile_kind_facts(
+      context->family, LOOM_XDNA_TILE_KIND_MEMORY);
+  // A shared SRAM multicast rises to the last compute row before descending
+  // to its receiver. Include its longest branch alongside ordinary routes.
+  const iree_host_size_t multicast_length =
+      context->family->column_count +
+      2 * (compute->first_row + compute->row_count - 1) - memory->first_row -
+      compute->first_row;
   const iree_host_size_t route_capacity =
       source_count *
-      (context->family->column_count + context->family->row_count + 2);
+      iree_max(context->family->column_count + context->family->row_count + 2,
+               multicast_length);
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, source_count, sizeof(*context->control_connections),
       (void**)&context->control_connections));

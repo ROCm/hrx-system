@@ -31,6 +31,9 @@ typedef struct loom_aie2p_native_payload_class_t {
   loom_aie2p_native_payload_endpoint_t* destinations;
   // Number of distinct receiver queues in that set.
   iree_host_size_t destination_count;
+  // Source-independent receiver identity and selected shared routes, or NULL
+  // for classes that cannot use a cross-column SRAM multicast domain.
+  struct loom_aie2p_native_payload_multicast_t* multicast;
   // Packet identity in the physical sender's namespace.
   uint8_t packet;
   // First edge in the stable route table, assigned on first realization.
@@ -55,6 +58,8 @@ typedef struct loom_aie2p_native_payload_source_t {
   loom_aie2p_native_payload_class_t* classes;
   // Number of destination sets, bounded by the hardware packet ID space.
   uint8_t class_count;
+  // Classes that cannot remain on a private upward compute-column path.
+  uint8_t nonlocal_class_count;
   // Sender-owned physical prefixes, independent of destination route labels.
   loom_aie2p_array_route_tree_t tree;
   // Packet framing is required by any source use or receiver fan-in.
@@ -62,7 +67,9 @@ typedef struct loom_aie2p_native_payload_source_t {
 } loom_aie2p_native_payload_source_t;
 
 // Interns physical source/destination identities from formed native demand.
-// Queue assignment precedes this operation; no source IR is traversed.
+// Queue assignment precedes this operation and proves that distinct senders
+// reaching the same physical receiver queue have disjoint lifetimes. Payload
+// routing consumes this proof directly; no source IR is traversed.
 iree_status_t loom_aie2p_native_form_payloads(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization, bool* out_valid);
