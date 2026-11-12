@@ -508,9 +508,12 @@ class CiTest(unittest.TestCase):
             self.assertNotIn("sha256", record)
 
     def uses_cmake_build_dir(self, step: ci.CiStep, command_name: str) -> bool:
+        build_root = Path(
+            os.environ.get("IREE_CI_CMAKE_BUILD_ROOT", ci.DEFAULT_CMAKE_CI_BUILD_ROOT)
+        )
         expected_args = (
             "--cmake-build-dir",
-            str(ci.CMAKE_CI_BUILD_ROOT / command_name),
+            str(build_root / command_name),
         )
         return any(
             step.argv[index : index + 2] == expected_args
@@ -1191,6 +1194,17 @@ class CiTest(unittest.TestCase):
                 "libhrx/cts/tests/status/hrx_cts_status" in arg for arg in steps[2].argv
             )
         )
+
+    def test_cmake_build_root_can_use_platform_storage(self):
+        with mock.patch.dict(
+            ci.os.environ, {"IREE_CI_CMAKE_BUILD_ROOT": "B:/hrx/cmake"}
+        ):
+            args = ci.parse_arguments(["hrx-cmake-repository-build"])
+            steps = ci.steps_from_args(args)
+            for step in steps:
+                self.assertTrue(
+                    self.uses_cmake_build_dir(step, "hrx-cmake-repository-build")
+                )
 
     def test_cmake_hrx_repository_build_respects_macos_product_support(self):
         args = ci.parse_arguments(["hrx-cmake-repository-build"])

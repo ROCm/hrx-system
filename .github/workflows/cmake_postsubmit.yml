@@ -1,0 +1,382 @@
+# Copyright 2026 The HRX Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+name: HRX / CMake
+
+on:
+  workflow_dispatch:
+  # Retain pull_request only while qualifying this new postsubmit workflow.
+  # Native PR coverage remains in the product workflows until these jobs pass.
+  pull_request:
+    paths: &cmake_paths
+      - ".bazelrc"
+      - ".bazelrc.configured"
+      - ".github/scripts/**"
+      - ".github/workflows/cmake_postsubmit.yml"
+      - "BUILD.bazel"
+      - "BUILDING.md"
+      - "CMakeLists.txt"
+      - "MODULE.*"
+      - "dev.py"
+      - "requirements-analysis*"
+      - "requirements-dev*"
+      - "build_tools/**"
+      - "runtime/**"
+      - "loom/**"
+      - "libamdf/**"
+      - "libhrx/**"
+      - "third_party/**"
+      - "tools/**"
+  push:
+    branches:
+      - main
+      - main-staging
+    paths: *cmake_paths
+
+concurrency:
+  group: hrx-cmake-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  cmake_linux_clang:
+    name: HRX / CMake / Linux x86-64 / Clang / RelWithDebInfo
+    runs-on: az-linux-scale-rocm-default-prod
+    timeout-minutes: 30
+    container:
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
+    defaults:
+      run:
+        shell: bash
+    env:
+      HRX_CMAKE_ARTIFACT_KEY: linux-clang
+      HRX_CMAKE_HOST_TOOLCHAIN: clang
+    steps: &cmake_linux_steps
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Configure workspace and host toolchain
+        run: |
+          mkdir -p "$HOME"
+          git config --global --add safe.directory "$PWD"
+          output_dir="${GITHUB_WORKSPACE}/build/hrx-cmake-postsubmit"
+          {
+            echo "HRX_ARTIFACT_SET=core"
+            echo "HRX_DOWNLOAD_CACHE_DIR=${output_dir}/downloads"
+            echo "HRX_OUTPUT_DIR=${output_dir}"
+            echo "HRX_PYTHON=${output_dir}/python/bin/python3"
+            echo "HRX_RELEASE_TYPE=nightly"
+            echo "HRX_ROCM_ROOT=${output_dir}/rocm-root"
+            echo "PIP_CACHE_DIR=${output_dir}/caches/pip"
+          } >> "$GITHUB_ENV"
+          case "$HRX_CMAKE_HOST_TOOLCHAIN" in
+            clang)
+              {
+                echo "AR=${output_dir}/rocm-root/lib/llvm/bin/llvm-ar"
+                echo "CC=${output_dir}/rocm-root/lib/llvm/bin/clang"
+                echo "CXX=${output_dir}/rocm-root/lib/llvm/bin/clang++"
+              } >> "$GITHUB_ENV"
+              ;;
+            gcc)
+              yum install -y \
+                gcc-toolset-15-binutils \
+                gcc-toolset-15-binutils-gold \
+                gcc-toolset-15-gcc \
+                gcc-toolset-15-gcc-c++ \
+                gcc-toolset-15-libatomic-devel
+              toolset_root=/opt/rh/gcc-toolset-15/root
+              "$toolset_root/usr/bin/ld.gold" --version
+              echo "$toolset_root/usr/bin" >> "$GITHUB_PATH"
+              {
+                echo "AR=${toolset_root}/usr/bin/ar"
+                echo "CC=${toolset_root}/usr/bin/gcc"
+                echo "CXX=${toolset_root}/usr/bin/g++"
+                echo "DEVTOOLSET_ROOTPATH=${toolset_root}"
+                echo "LIBRARY_PATH=${toolset_root}/usr/lib64:${toolset_root}/usr/lib"
+                echo "LD_LIBRARY_PATH=${toolset_root}/usr/lib64:${toolset_root}/usr/lib"
+              } >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo "Unsupported host toolchain: $HRX_CMAKE_HOST_TOOLCHAIN" >&2
+              exit 2
+              ;;
+          esac
+
+      - name: Fetch ROCm toolchain
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
+
+      - name: Install CMake host tools
+        run: |
+          python3 --version
+          python3 dev.py cmake setup --venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Check tool versions
+        run: |
+          cmake --version
+          ctest --version
+          ninja --version
+          if [[ "$HRX_CMAKE_HOST_TOOLCHAIN" == clang ]]; then
+            bash .github/scripts/check_host_toolchain.sh --expect-rocm
+          else
+            bash .github/scripts/check_host_toolchain.sh --expect-system
+            test "$("$CC" -dumpversion)" = 15
+            test "$("$CXX" -dumpversion)" = 15
+          fi
+          test -d "$HRX_ROCM_ROOT/include"
+
+      - name: Build repository and test product boundaries
+        id: cmake_ci
+        run: >-
+          python3 build_tools/devtools/ci.py
+          hrx-cmake-repository-build --keep-going
+
+      - name: Upload failed test results
+        if: ${{ always() && steps.cmake_ci.outcome == 'failure' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ctest-results-${{ env.HRX_CMAKE_ARTIFACT_KEY }}-attempt-${{ github.run_attempt }}
+          path: |
+            build/ci/**/Testing/Temporary/
+            build/ci/**/test_tmpdir/**/test.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+  cmake_linux_gcc:
+    name: HRX / CMake / Linux x86-64 / GCC / RelWithDebInfo
+    runs-on: az-linux-scale-rocm-default-prod
+    timeout-minutes: 30
+    container:
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
+    defaults:
+      run:
+        shell: bash
+    env:
+      HRX_CMAKE_ARTIFACT_KEY: linux-gcc
+      HRX_CMAKE_HOST_TOOLCHAIN: gcc
+    steps: *cmake_linux_steps
+
+  cmake_windows_clang_cl:
+    name: HRX / CMake / Windows x86-64 / Clang CL / RelWithDebInfo
+    runs-on: azure-windows-scale-rocm
+    timeout-minutes: 60
+    env:
+      HRX_ARTIFACT_SET: core
+      HRX_CMAKE_ARTIFACT_KEY: windows-clang-cl
+      HRX_CMAKE_HOST_TOOLCHAIN: clang-cl
+      HRX_RELEASE_TYPE: nightly
+      IREE_CI_PYTHON: python
+    steps: &cmake_windows_steps
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Select Windows build storage
+        shell: powershell
+        run: |
+          $drives = @(
+            Get-PSDrive -PSProvider FileSystem -ErrorAction Stop |
+              Where-Object { $_.Root -match '^[A-Za-z]:\\$' -and $null -ne $_.Free } |
+              Sort-Object Free -Descending
+          )
+          $drives |
+            Select-Object Name, Root, DisplayRoot,
+              @{Name = 'FreeGiB'; Expression = {[math]::Round($_.Free / 1GB, 1)}},
+              @{Name = 'UsedGiB'; Expression = {[math]::Round($_.Used / 1GB, 1)}} |
+            Format-Table -AutoSize
+          $preferredDrive = $drives | Where-Object Name -eq 'B' | Select-Object -First 1
+          $candidateDrives = @($preferredDrive) + @($drives | Where-Object Name -ne 'B')
+          $selectedDrive = $null
+          foreach ($drive in $candidateDrives) {
+            if (-not $drive) { continue }
+            $probe = Join-Path $drive.Root ".hrx-ci-write-probe-$PID"
+            try {
+              [IO.File]::WriteAllText($probe, '')
+              Remove-Item -LiteralPath $probe -Force
+              $selectedDrive = $drive
+              break
+            } catch {
+              Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+              Write-Warning "Skipping unwritable build volume $($drive.Root): $_"
+            }
+          }
+          if (-not $selectedDrive) { throw 'No writable filesystem volume is available for Windows build outputs.' }
+          $outputDir = Join-Path $selectedDrive.Root 'hrx\hrx-cmake-postsubmit'
+          $rocmRoot = Join-Path $env:SystemDrive 'r'
+          $environment = [ordered]@{
+            HRX_DOWNLOAD_CACHE_DIR = Join-Path $outputDir 'downloads'
+            HRX_OUTPUT_DIR = $outputDir
+            HRX_ROCM_ROOT = $rocmRoot
+            IREE_CI_CMAKE_BUILD_ROOT = Join-Path $outputDir 'build'
+            IREE_CI_FAILURE_ARTIFACT_DIR = Join-Path $outputDir 'failure-evidence'
+            PIP_CACHE_DIR = Join-Path $outputDir 'caches\pip'
+          }
+          New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+          foreach ($entry in $environment.GetEnumerator()) {
+            "$($entry.Key)=$($entry.Value)" |
+              Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+          Write-Output "Selected Windows build root $outputDir with $([math]::Round($selectedDrive.Free / 1GB, 1)) GiB free."
+
+      - name: Fetch ROCm clang-cl toolchain
+        if: env.HRX_CMAKE_HOST_TOOLCHAIN == 'clang-cl'
+        shell: powershell
+        run: |
+          python -m pip install --upgrade boto3 zstandard
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python build_tools/ci/ci_core_windows.py fetch-rocm
+          exit $LASTEXITCODE
+
+      - name: Install CMake host tools
+        shell: powershell
+        run: |
+          python --version
+          python dev.py cmake setup --venv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "$PWD\.venv\Scripts" |
+            Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build repository and test product boundaries
+        id: cmake_ci
+        shell: powershell
+        run: |
+          $computerSystem = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
+          $computerSystem |
+            Format-List Manufacturer, Model, NumberOfProcessors, NumberOfLogicalProcessors, TotalPhysicalMemory
+          $parallelism = [Math]::Min(40, [int]$computerSystem.NumberOfLogicalProcessors)
+          if ($parallelism -lt 1) { throw 'Windows host did not report any logical processors.' }
+          $env:CMAKE_BUILD_PARALLEL_LEVEL = "$parallelism"
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or -not $installation) { throw 'Visual Studio C++ tools discovery failed.' }
+          Import-Module (Join-Path $installation 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll')
+          Enter-VsDevShell -VsInstallPath $installation -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
+          if ($env:VSCMD_ARG_TGT_ARCH -ne 'x64') { throw 'Visual Studio x64 developer environment was not initialized.' }
+          if ($env:HRX_CMAKE_HOST_TOOLCHAIN -eq 'msvc') {
+            $env:CC = 'cl.exe'
+            $env:CXX = 'cl.exe'
+            $env:AR = 'lib.exe'
+          } else {
+            $llvmBin = Join-Path $env:HRX_ROCM_ROOT 'lib\llvm\bin'
+            foreach ($tool in @('clang-cl.exe', 'lld-link.exe', 'llvm-lib.exe')) {
+              if (-not (Test-Path -LiteralPath (Join-Path $llvmBin $tool) -PathType Leaf)) {
+                throw "Missing LLVM tool: $tool"
+              }
+            }
+            $env:CC = Join-Path $llvmBin 'clang-cl.exe'
+            $env:CXX = $env:CC
+            $env:AR = Join-Path $llvmBin 'llvm-lib.exe'
+          }
+          python build_tools/devtools/ci.py hrx-cmake-repository-build --keep-going
+          exit $LASTEXITCODE
+
+      - name: Report Windows build storage
+        if: always()
+        continue-on-error: true
+        shell: powershell
+        run: |
+          Get-PSDrive -PSProvider FileSystem -ErrorAction Stop |
+            Where-Object { $_.Root -match '^[A-Za-z]:\\$' -and $null -ne $_.Free } |
+            Select-Object Name, Root, DisplayRoot,
+              @{Name = 'FreeGiB'; Expression = {[math]::Round($_.Free / 1GB, 1)}},
+              @{Name = 'UsedGiB'; Expression = {[math]::Round($_.Used / 1GB, 1)}} |
+            Format-Table -AutoSize
+
+      - name: Upload Windows build failure evidence
+        if: ${{ always() && steps.cmake_ci.outcome == 'failure' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: build-failures-${{ env.HRX_CMAKE_ARTIFACT_KEY }}-attempt-${{ github.run_attempt }}
+          path: ${{ env.IREE_CI_FAILURE_ARTIFACT_DIR }}
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload failed test results
+        if: ${{ always() && steps.cmake_ci.outcome == 'failure' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ctest-results-${{ env.HRX_CMAKE_ARTIFACT_KEY }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ env.IREE_CI_CMAKE_BUILD_ROOT }}/**/Testing/Temporary/
+            ${{ env.IREE_CI_CMAKE_BUILD_ROOT }}/**/test_tmpdir/**/test.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+  cmake_windows_msvc:
+    name: HRX / CMake / Windows x86-64 / MSVC / RelWithDebInfo
+    runs-on: azure-windows-scale-rocm
+    timeout-minutes: 60
+    env:
+      HRX_ARTIFACT_SET: core
+      HRX_CMAKE_ARTIFACT_KEY: windows-msvc
+      HRX_CMAKE_HOST_TOOLCHAIN: msvc
+      HRX_RELEASE_TYPE: nightly
+      IREE_CI_PYTHON: python
+    steps: *cmake_windows_steps
+
+  cmake_macos_apple_clang:
+    name: HRX / CMake / macOS arm64 / Apple Clang / RelWithDebInfo
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      AR: ar
+      CC: clang
+      CXX: clang++
+      HRX_CMAKE_ARTIFACT_KEY: macos-apple-clang
+      IREE_CI_PYTHON: python3
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install CMake host tools
+        run: |
+          python3 --version
+          python3 dev.py cmake setup --venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Check tool versions
+        run: |
+          cmake --version
+          ctest --version
+          ninja --version
+          "$CC" --version
+          "$CXX" --version
+          uname -a
+
+      - name: Build repository and test product boundaries
+        id: cmake_ci
+        run: >-
+          python3 build_tools/devtools/ci.py
+          hrx-cmake-repository-build --keep-going
+
+      - name: Upload failed test results
+        if: ${{ always() && steps.cmake_ci.outcome == 'failure' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ctest-results-${{ env.HRX_CMAKE_ARTIFACT_KEY }}-attempt-${{ github.run_attempt }}
+          path: |
+            build/ci/**/Testing/Temporary/
+            build/ci/**/test_tmpdir/**/test.xml
+          if-no-files-found: warn
+          retention-days: 7

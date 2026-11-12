@@ -34,7 +34,7 @@ from loom.build_tools import target_presets
 from loom.build_tools.bazel import configure as loom_configure
 from runtime.build_tools.bazel import configure as runtime_configure
 
-CMAKE_CI_BUILD_ROOT = Path("build/ci")
+DEFAULT_CMAKE_CI_BUILD_ROOT = Path("build/ci")
 TSAN_SUPPRESSIONS_FILE = REPO_ROOT / "build_tools/devtools/tsan.supp"
 CMAKE_SANITIZER_OPTIONS = {
     "asan": ("-DIREE_ENABLE_ASAN=ON",),
@@ -330,7 +330,10 @@ def cmake_tests_enabled(sanitizer: str | None) -> bool:
 
 
 def cmake_dev_command(command_name: str, *args: str) -> tuple[str, ...]:
-    build_dir = CMAKE_CI_BUILD_ROOT / command_name
+    build_root = Path(
+        os.environ.get("IREE_CI_CMAKE_BUILD_ROOT", DEFAULT_CMAKE_CI_BUILD_ROOT)
+    )
+    build_dir = build_root / command_name
     return dev_command("--cmake-build-dir", str(build_dir), "cmake", *args)
 
 
