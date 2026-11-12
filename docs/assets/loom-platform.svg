@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1710" viewBox="0 0 1600 1710" role="img" aria-labelledby="title description">
-  <title id="title">Loom platform architecture</title>
+  <title id="title">HRX platform architecture</title>
   <desc id="description">Loom services host source-defined models and use the compiler and shared execution libraries. C++ source, Loom IR text, and bytecode feed a shared compiler for AMD GPU, XDNA NPU, SPIR-V, and x86 targets. The compiler C API supports independent embedding and artifact emission. The shared runtime supplies executable loading, asynchronous execution, memory management, and CPU, AMD GPU, XDNA, and Vulkan HAL implementations. Native AMD access uses libamdf; Vulkan uses the system driver. The libhrx and HIP APIs are additional clients of the shared runtime.</desc>
   <!--
     Adapted from https://github.com/ROCm/hrx-solutions/blob/main/docs/assets/hrx-platform.svg
@@ -63,7 +63,7 @@
   <path d="M 50 37 H 116" stroke="#f4748c" stroke-width="6"/>
   <path d="M 124 37 H 190" stroke="#46d5c6" stroke-width="6"/>
   <path d="M 198 37 H 264" stroke="#fac05e" stroke-width="6"/>
-  <text x="50" y="105" class="white" font-size="58" font-weight="800">Loom</text>
+  <text x="50" y="105" class="white" font-size="58" font-weight="800">HRX</text>
   <text x="1550" y="101" text-anchor="end" class="muted label">AUTHOR · COMPILE · EXECUTE</text>
 
   <rect x="50" y="142" width="1500" height="64" rx="8" fill="#1d2c47" stroke="#354764"/>
@@ -225,6 +225,6 @@
   <rect x="1182" y="1455" width="344" height="86" rx="7" fill="#382e1e" stroke="#fac05e" stroke-width="2"/>
   <text x="1354" y="1491" fill="#fac05e" class="heading center">x86 CPUs</text>
   <text x="1354" y="1522" class="white small center">Scalar · vector · matrix</text>
-  <text x="50" y="1594" class="muted" font-size="17">LOOM / HRX SYSTEM · COMPILER, SERVICES, AND EXECUTION LIBRARIES</text>
+  <text x="50" y="1594" class="muted" font-size="17">HRX SYSTEM · COMPILER, SERVICES, AND EXECUTION LIBRARIES</text>
   </g>
 </svg>

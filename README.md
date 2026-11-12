@@ -1,12 +1,14 @@
-# Loom
+# HRX System
 
 **[Documentation](https://rocm.github.io/hrx-system/loom/) ·
 [Get the SDK](https://rocm.github.io/hrx-system/loom/getting-started/acquiring-loom/) ·
 [Build from source](BUILDING.md)**
 
-Loom is a language and compiler for native programs on CPUs, GPUs, and NPUs.
+[Loom](loom/) is a language and compiler for native programs on CPUs, GPUs, and NPUs.
 Its microsecond-scale JIT, runtime, and inference server fit in a megabyte-scale
 SDK, with no LLVM or ROCm dependency.
+[LibHRX](libhrx/) is a C API for graph-based heterogeneous compute with an optional
+[HIP compatibility layer](libhrx/src/binding/hip/).
 
 This repository contains the compiler, execution libraries, native AMD device
 support, and `loom-serve`: an inference engine that hosts multiple models and
@@ -47,7 +49,7 @@ scheduling, with `loom-serve` adding HTTP endpoints and server controls. Models
 can share a process and its resources, and implementations can be changed while
 the server is running. Adding a model means supplying a program to the platform.
 
-[![Loom architecture: authoring forms and compiler, model services, compiler API, shared runtime, and CPU, AMD GPU, XDNA, and Vulkan execution paths.](docs/assets/loom-platform.svg)](docs/assets/loom-platform.svg)
+[![HRX architecture: Loom authoring forms and compiler, model services, compiler API, shared runtime, and CPU, AMD GPU, XDNA, and Vulkan execution paths.](docs/assets/loom-platform.svg)](docs/assets/loom-platform.svg)
 
 The compiler emits ELF, HSACO, SPIR-V, WebAssembly, and other artifacts. An
 application can load that output through its own runtime, or use the execution
