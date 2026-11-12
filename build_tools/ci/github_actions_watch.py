@@ -539,8 +539,6 @@ def render_snapshot(snapshot: Snapshot) -> str:
     labels = {
         triage.REPOSITORY: "FAIL",
         triage.UNKNOWN: "UNKNOWN",
-        triage.KNOWN_PRODUCT: "KNOWN",
-        triage.KNOWN_FLAKE: "FLAKE",
         triage.INFRASTRUCTURE: "INFRA",
     }
     for group in snapshot.finding_groups:
@@ -612,11 +610,7 @@ def snapshot_exit_code(snapshot: Snapshot) -> int:
         return EXIT_INCOMPLETE
     if snapshot.disposition in (triage.REPOSITORY, triage.UNKNOWN):
         return EXIT_FAILURE
-    if snapshot.disposition in (
-        triage.INFRASTRUCTURE,
-        triage.KNOWN_PRODUCT,
-        triage.KNOWN_FLAKE,
-    ):
+    if snapshot.disposition == triage.INFRASTRUCTURE:
         return EXIT_CLASSIFIED_NONREPOSITORY
     return EXIT_CLEAN
 

@@ -1957,12 +1957,14 @@ def run_step(step: CiStep, verbose: bool) -> StepResult:
                 returncode = 1
     if step.test_results is not None:
         try:
-            output_count = bazel_test_results.stage(
+            staged = bazel_test_results.stage(
                 step.test_results.build_event_path,
                 step.test_results.output_dir,
             )
             print(
-                f"[artifact] Staged {output_count} current Bazel test outputs",
+                f"[artifact] Staged {staged.output_count} current Bazel test "
+                f"outputs and a {staged.observation_byte_length}-byte BEP "
+                f"observation in {staged.observation_seconds * 1000:.1f} ms",
                 flush=True,
             )
         except bazel_test_results.BazelTestResultsError as error:

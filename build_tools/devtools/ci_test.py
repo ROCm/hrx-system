@@ -761,20 +761,28 @@ class CiTest(unittest.TestCase):
                 result_dir,
             )
             event = {
+                "id": {
+                    "testResult": {
+                        "label": "//example:test",
+                        "configuration": {"id": "configuration"},
+                        "run": 1,
+                        "shard": 1,
+                        "attempt": 1,
+                    }
+                },
                 "testResult": {
-                    "testActionOutput": [{"name": "test.xml", "uri": source.as_uri()}]
-                }
+                    "status": "PASSED",
+                    "testActionOutput": [{"name": "test.xml", "uri": source.as_uri()}],
+                },
             }
             for step, payload in zip(steps, ("first result", "second result")):
                 source.write_text(payload)
                 capture = step.test_results
                 capture.build_event_path.write_text(json.dumps(event) + "\n")
-                self.assertEqual(
-                    ci.bazel_test_results.stage(
-                        capture.build_event_path, capture.output_dir
-                    ),
-                    1,
+                result = ci.bazel_test_results.stage(
+                    capture.build_event_path, capture.output_dir
                 )
+                self.assertEqual(result.output_count, 1)
             self.assertEqual(
                 sorted(path.read_text() for path in result_dir.rglob("test.xml")),
                 ["first result", "second result"],
@@ -791,11 +799,21 @@ class CiTest(unittest.TestCase):
             event = (
                 json.dumps(
                     {
+                        "id": {
+                            "testResult": {
+                                "label": "//example:test",
+                                "configuration": {"id": "configuration"},
+                                "run": 1,
+                                "shard": 1,
+                                "attempt": 1,
+                            }
+                        },
                         "testResult": {
+                            "status": "FAILED",
                             "testActionOutput": [
                                 {"name": "test.log", "uri": source.as_uri()}
-                            ]
-                        }
+                            ],
+                        },
                     }
                 )
                 + "\n"

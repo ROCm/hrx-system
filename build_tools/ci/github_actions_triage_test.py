@@ -177,23 +177,21 @@ class GitHubActionsTriageTest(unittest.TestCase):
                 "hardware completion epoch 2 exceeds host publication epoch 1 "
                 "after submission quiescence",
                 "hrx-78tqc",
-                triage.KNOWN_PRODUCT,
             ),
             (
                 "ColdStateTransitionsPreserveWarmWaveformProgress/0 "
                 "loom_serve_device_memory_statistics(device).retained.pending_bytes "
                 "Which is: 12288",
                 "hrx-b1gxf3",
-                triage.KNOWN_FLAKE,
             ),
         )
-        for log, issue, category in cases:
+        for log, issue in cases:
             with self.subTest(issue=issue):
                 unconfirmed = self.classify(log)
                 self.assertEqual(unconfirmed.category, triage.REPOSITORY)
                 self.assertEqual(unconfirmed.issue, issue)
                 confirmed = self.classify(log, open_issues=frozenset({issue}))
-                self.assertEqual(confirmed.category, category)
+                self.assertEqual(confirmed.category, triage.REPOSITORY)
                 self.assertEqual(confirmed.issue, issue)
 
     def test_windows_application_control_precedes_reported_test_failure(self):
@@ -269,7 +267,7 @@ class GitHubActionsTriageTest(unittest.TestCase):
             input_job=input_job,
             open_issues=frozenset({"hrx-b8oh4d"}),
         )
-        self.assertEqual(confirmed.category, triage.KNOWN_FLAKE)
+        self.assertEqual(confirmed.category, triage.REPOSITORY)
         self.assertEqual(confirmed.code, "windows_generator_output_open_ebadf")
 
         for changed_job, changed_log in (
@@ -317,7 +315,7 @@ class GitHubActionsTriageTest(unittest.TestCase):
             triage.JobFinding(3, "GPU", "https://example/3", infrastructure),
         ]
         groups = triage.group_findings(findings)
-        self.assertEqual([len(group.jobs) for group in groups], [2, 1])
+        self.assertEqual([len(group.jobs) for group in groups], [1, 1, 1])
         self.assertEqual(
             triage.failure_disposition(findings),
             triage.REPOSITORY,
