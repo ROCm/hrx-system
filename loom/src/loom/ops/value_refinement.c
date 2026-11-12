@@ -10,6 +10,7 @@
 #include "loom/error/parameter.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
+#include "loom/rewrite/rewriter.h"
 #include "loom/rewrite/type_propagation.h"
 
 iree_status_t loom_value_refinement_verify(const loom_module_t* module,
@@ -74,4 +75,15 @@ iree_status_t loom_value_refinement_type_transfer(
       context, source, result_type));
   return loom_type_transfer_seed_static_structure_from_type(context, result,
                                                             source_type);
+}
+
+iree_status_t loom_value_refinement_canonicalize(loom_op_t* op,
+                                                 loom_rewriter_t* rewriter) {
+  const loom_value_id_t source = loom_op_operands(op)[0];
+  const loom_value_id_t result = loom_op_results(op)[0];
+  if (!loom_type_equal(loom_module_value_type(rewriter->module, source),
+                       loom_module_value_type(rewriter->module, result))) {
+    return iree_ok_status();
+  }
+  return loom_rewriter_replace_all_uses_and_erase(rewriter, op, &source, 1);
 }

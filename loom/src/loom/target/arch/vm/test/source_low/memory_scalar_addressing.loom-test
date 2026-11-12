@@ -169,14 +169,14 @@ func.def @scalar_subview_dynamic_index_i32(%input: buffer, %output: buffer, %bas
 }
 
 // ----
-low.func.def target<vm.core> abi(vm_function) @scalar_subview_dynamic_index_i32(%input_refined: reg<vm.ref : buffer>, %output_refined: reg<vm.ref : buffer>, %base_aligned: reg<vm.value : i64>, %element_bounded: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @scalar_subview_dynamic_index_i32(%input_subview: reg<vm.ref : buffer>, %output_subview: reg<vm.ref : buffer>, %base_aligned: reg<vm.value : i64>, %element_bounded: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
   %21 = constant.i64 4
   %22 = constant.i64 2 : reg<vm.value>
   %23 = integer.shift.left.i64 %element_bounded, %22
   %24 = integer.add.i64 %base_aligned, %23
   %25 = integer.add.i64 %24, %21
-  %loaded = buffer.load %input_refined, %25, %25, 0, "i32.x1" : reg<vm.value : i32>
-  buffer.store %output_refined, %25, %25, %loaded, 0, "i32.x1"
+  %loaded = buffer.load %input_subview, %25, %25, 0, "i32.x1" : reg<vm.value : i32>
+  buffer.store %output_subview, %25, %25, %loaded, 0, "i32.x1"
   return %loaded
 }
 

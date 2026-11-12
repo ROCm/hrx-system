@@ -145,8 +145,7 @@ func.def @refined_fragment_snapshot(%input: view<2x2xf32>, %output: view<2x2xf32
   %origin = index.constant 0 : index
   %side = index.constant 2 : index
   %captured = vector.fragment.load<result> %input[%origin, %origin] shape [%side, %side] : view<2x2xf32> -> vector<2x2xf32>
-  %dynamic = vector.refine %captured : vector<2x2xf32> -> vector<2x2xf32>
   view.store %replacement, %input[0, 0] : f32, view<2x2xf32>
-  vector.fragment.store<result> %dynamic, %output[%origin, %origin] shape [%m, %n] : vector<2x2xf32>, view<2x2xf32>
+  vector.fragment.store<result> %captured, %output[%origin, %origin] shape [%m, %n] : vector<2x2xf32>, view<2x2xf32>
   func.return
 }

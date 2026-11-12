@@ -1,0 +1,23 @@
+// RUN: pass canonicalize
+
+func.def public @identity(%n: index, %layout: encoding<layout>, %g: group<2x3x4>, %t: tensor<[%n]x8xf32>, %tile: tile<16xf32>, %v: vector<4xf32>, %view: view<[%n]xf32, %layout>) -> (group<2x3x4>, tensor<[%n]x8xf32>, tile<16xf32>, vector<4xf32>, view<[%n]xf32, %layout>) {
+  %rg = group.refine %g : group<2x3x4> -> group<2x3x4>
+  %rt = tensor.refine %t : tensor<[%n]x8xf32> -> tensor<[%n]x8xf32>
+  %rtile = tile.refine %tile : tile<16xf32> -> tile<16xf32>
+  %rv = vector.refine %v : vector<4xf32> -> vector<4xf32>
+  %rview = view.refine %view : view<[%n]xf32, %layout> -> view<[%n]xf32, %layout>
+  func.return %rg, %rt, %rtile, %rv, %rview : group<2x3x4>, tensor<[%n]x8xf32>, tile<16xf32>, vector<4xf32>, view<[%n]xf32, %layout>
+}
+
+// ----
+func.def public @identity(%n: index, %layout: encoding<layout>, %g: group<2x3x4>, %t: tensor<[%n]x8xf32>, %tile: tile<16xf32>, %v: vector<4xf32>, %view: view<[%n]xf32, %layout>) -> (group<2x3x4>, tensor<[%n]x8xf32>, tile<16xf32>, vector<4xf32>, view<[%n]xf32, %layout>) {
+  func.return %g, %t, %tile, %v, %view : group<2x3x4>, tensor<[%n]x8xf32>, tile<16xf32>, vector<4xf32>, view<[%n]xf32, %layout>
+}
+
+// ====
+// RUN: pass canonicalize
+
+func.def public @different_encoding(%source_layout: encoding<layout>, %result_layout: encoding<layout>, %view: view<16xf32, %source_layout>) -> (view<16xf32, %result_layout>) {
+  %refined = view.refine %view : view<16xf32, %source_layout> -> view<16xf32, %result_layout>
+  func.return %refined : view<16xf32, %result_layout>
+}

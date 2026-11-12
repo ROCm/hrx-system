@@ -32,6 +32,10 @@ iree_status_t loom_value_refinement_type_transfer(
     loom_type_transfer_context_t* context, const loom_module_t* module,
     loom_op_t* op);
 
+// Erases the assertion once source and result have the same exact type.
+iree_status_t loom_value_refinement_canonicalize(loom_op_t* op,
+                                                 loom_rewriter_t* rewriter);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

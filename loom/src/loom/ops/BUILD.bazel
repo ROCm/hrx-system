@@ -111,6 +111,7 @@ loom_cc_library(
         "//loom/src/loom/error:parameter",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
+        "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/rewrite:type_propagation",
         "//runtime/src/iree/base",
     ],
@@ -119,6 +120,11 @@ loom_cc_library(
 loom_check_test(
     name = "value_refinement_verification",
     src = "value_refinement.loom-test",
+)
+
+loom_check_test(
+    name = "value_refinement_canonicalize",
+    src = "value_refinement_canonicalize.loom-test",
 )
 
 # Complete operation support. Native constructors can select :builders without

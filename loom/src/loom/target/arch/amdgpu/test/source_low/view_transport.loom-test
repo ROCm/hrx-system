@@ -102,30 +102,15 @@ func.def @nested_dynamic_view_refinement(%input: buffer, %extent_input: index, %
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @nested_dynamic_view_refinement(%extent: reg<amdgpu.sgpr>, %position: reg<amdgpu.sgpr>, %condition: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %second_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %24 = s_mov_b32 0
-  %25 = s_cmp_lg_i32 %condition, %24
-  low.cond_br %25, ^_bb1, ^_bb2 : reg<amdgpu.scc>
-^_bb1:
-  %26 = v_mov_b32 0
-  %27 = s_lshl_b32_rhs_inline %position, 2
-  %28 = slice %second_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %29 = slice %second_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %31, %32 = s_add_co_u32 %28, %27
-  %33, %34 = s_addc_u32 %29, %24, %32
-  %35 = concat(%31, %33) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %value$36 = global_load_b32_saddr %26, %35
-  low.br ^_bb3(%value$36: reg<amdgpu.vgpr>)
-^_bb2:
-  %37 = v_mov_b32 0
-  %38 = s_lshl_b32_rhs_inline %position, 2
-  %39 = slice %second_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %40 = slice %second_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %42, %43 = s_add_co_u32 %39, %38
-  %44, %45 = s_addc_u32 %40, %24, %43
-  %46 = concat(%42, %44) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %value$47 = global_load_b32_saddr %37, %46
-  low.br ^_bb3(%value$47: reg<amdgpu.vgpr>)
-^_bb3(%result: reg<amdgpu.vgpr>):
+  %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %25 = v_mov_b32 0
+  %26 = s_lshl_b32_rhs_inline %position, 2
+  %27 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %28 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %29 = s_mov_b32 0
+  %30, %31 = s_add_co_u32 %27, %26
+  %32, %33 = s_addc_u32 %28, %29, %31
+  %34 = concat(%30, %32) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %result = global_load_b32_saddr %25, %34
   return %result
 }

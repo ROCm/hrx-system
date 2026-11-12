@@ -108,8 +108,8 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({sig
   %37 = add.gpr64 %36, %35
   %second_row = lea.add_scale %second, %37 {disp32 = 0, scale = 1}
   low.br ^join(%second_row: reg<x86.gpr64>)
-^join(%refined: reg<x86.gpr64>):
-  %value = mov.load.gpr32 %refined {disp32 = 0}
+^join(%selected: reg<x86.gpr64>):
+  %value = mov.load.gpr32 %selected {disp32 = 0}
   return %value
 }
 

@@ -7330,6 +7330,7 @@ def value_refinement_op(
         verify="loom_value_refinement_verify",
         facts=facts,
         type_transfer="loom_value_refinement_type_transfer",
+        canonicalize="loom_value_refinement_canonicalize",
         format=[Ref("source"), COLON, TypeOf("source"), ARROW, ResultType("result")],
         examples=examples,
     )

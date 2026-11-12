@@ -20,7 +20,7 @@ func.def @subview_nested_dynamic(%input: buffer, %output: buffer, %base: offset,
 }
 
 // ----
-low.func.def target<vm.core> abi(vm_function) @subview_nested_dynamic(%source_refined: reg<vm.ref : buffer>, %destination_inner: reg<vm.ref : buffer>, %origin: reg<vm.value : i64>, %row_bounded: reg<vm.value : i64>, %column_bounded: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @subview_nested_dynamic(%source_inner: reg<vm.ref : buffer>, %destination_inner: reg<vm.ref : buffer>, %origin: reg<vm.value : i64>, %row_bounded: reg<vm.value : i64>, %column_bounded: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
   %30 = constant.i64 76
   %31 = constant.i64 5 : reg<vm.value>
   %32 = integer.shift.left.i64 %row_bounded, %31
@@ -29,7 +29,7 @@ low.func.def target<vm.core> abi(vm_function) @subview_nested_dynamic(%source_re
   %35 = integer.shift.left.i64 %column_bounded, %34
   %36 = integer.add.i64 %33, %35
   %37 = integer.add.i64 %36, %30
-  %value = buffer.load %source_refined, %37, %37, 0, "i32.x1" : reg<vm.value : i32>
+  %value = buffer.load %source_inner, %37, %37, 0, "i32.x1" : reg<vm.value : i32>
   %39 = constant.i64 68
   %40 = integer.add.i64 %36, %39
   buffer.store %destination_inner, %40, %40, %value, 0, "i32.x1"

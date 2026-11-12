@@ -31,10 +31,9 @@ float read_dynamic(Dynamic value) { return loom::view::load(value, 15u); }
 float entry(Fixed value) { return loom::template_apply<read>(value); }
 
 // ----
-func.def public @entry(%value$0: view<16xf32>) -> (f32) {
-  %value$8 = view.refine %value$0 : view<16xf32> -> view<16xf32>
+func.def public @entry(%value: view<16xf32>) -> (f32) {
   %14 = index.constant 15 : index
-  %12 = view.load %value$8[%14] : view<16xf32> -> f32
+  %12 = view.load %value[%14] : view<16xf32> -> f32
   func.return %12 : f32
 }
 
@@ -72,10 +71,9 @@ float read_dynamic(Dynamic value) { return loom::view::load(value, 15u); }
 float entry(Family value) { return loom::template_apply<read>(value); }
 
 // ----
-func.def public @entry(%value$0: view<16xf32>) -> (f32) {
-  %value$9 = view.refine %value$0 : view<16xf32> -> view<16xf32>
+func.def public @entry(%value: view<16xf32>) -> (f32) {
   %15 = index.constant 15 : index
-  %13 = view.load %value$9[%15] : view<16xf32> -> f32
+  %13 = view.load %value[%15] : view<16xf32> -> f32
   func.return %13 : f32
 }
 

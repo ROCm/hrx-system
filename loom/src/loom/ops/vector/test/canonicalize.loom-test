@@ -42,8 +42,7 @@ func.def @refine_propagates_static_shape(%width: index, %value: i32) -> (vector<
 // ----
 func.def @refine_propagates_static_shape(%width: index, %value: i32) -> (vector<8xi32>) {
   %source = vector.splat %value : vector<8xi32>
-  %refined = vector.refine %source : vector<8xi32> -> vector<8xi32>
-  func.return %refined : vector<8xi32>
+  func.return %source : vector<8xi32>
 }
 
 // ====
