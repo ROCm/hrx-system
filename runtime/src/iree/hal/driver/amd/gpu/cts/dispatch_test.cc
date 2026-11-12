@@ -520,7 +520,7 @@ TEST_P(GpuNativeDispatchTest, DirectDispatchThroughExplicitPoolAndSealedGroup) {
 }
 
 void GpuNativeDispatchTest::RunIndirect(bool recorded) {
-  constexpr uint32_t kInvocations = 96;
+  constexpr uint32_t kInvocations = 192;
   constexpr uint32_t kOutputLength = 64 * 8 * sizeof(uint32_t);
   constexpr uint32_t kMarker = 0xA3725901;
   const std::array<std::array<uint32_t, 3>, 6> shapes = {
@@ -781,6 +781,211 @@ TEST_P(GpuNativeDispatchTest, DeviceCountsPublishArgumentsAndPacketBeforeUse) {
 TEST_P(GpuNativeDispatchTest,
        ResidentIndirectPairsCrossChunksWithDeviceCounts) {
   RunIndirect(true);
+}
+
+TEST_P(GpuNativeDispatchTest,
+       StaticCountsRetainPrivateGeometryAcrossReplayAndTrim) {
+  options_.queue.ring_byte_length = 4096;
+  options_.queue.argument_capacity = 8;
+  options_.queue.retirement_capacity = 4;
+  Create();
+  if (HasFatalFailure() || IsSkipped()) {
+    return;
+  }
+  constexpr uint32_t kInvocations = 6;
+  constexpr uint32_t kOutputLength = 64 * 8 * sizeof(uint32_t);
+  constexpr uint32_t kMarker = 0xFA120000;
+  const std::array<std::array<uint32_t, 3>, kInvocations> shapes = {
+      {{3, 2, 2}, {2, 1, 1}, {2, 3, 1}, {0, 2, 2}, {2, 0, 2}, {2, 2, 0}}};
+  const auto* family = iree_hal_queue_family(queues_[0]);
+  const iree_hal_pool_family_access_t access = {
+      .family = family,
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE |
+               IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS,
+      .interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+  };
+  iree_hal_pool_scope_t scope = {
+      .family_count = 1,
+      .families = &access,
+      .host =
+          {
+              .access =
+                  IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+              .modes = IREE_HAL_MAPPING_MODE_SCOPED,
+          },
+  };
+  iree_hal_slab_pool_options_t options;
+  iree_hal_slab_pool_options_initialize(&options);
+  Ref<iree_hal_pool_t> host_pool;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(
+      group_, scope, &options, iree_allocator_system(), host_pool.out()));
+  // Count bindings expose no host access. A real producer on the GPU writes
+  // them before each invocation's wait edge becomes ready.
+  scope.host = {};
+  Ref<iree_hal_pool_t> count_pool;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(
+      group_, scope, &options, iree_allocator_system(), count_pool.out()));
+  Ref<iree_hal_executable_t> executable;
+  IREE_ASSERT_OK(Load(executable.out()));
+  iree_hal_executable_function_t producer, consumer;
+  IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
+      executable, IREE_SV("image_counts"), &producer));
+  IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
+      executable, IREE_SV("image_geometry"), &consumer));
+  Ref<iree_hal_buffer_t> seeds, counts, output;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      host_pool, iree_hal_make_pool_reservation_request(kInvocations * 12, 4),
+      iree_infinite_timeout(), seeds.out()));
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      count_pool, iree_hal_make_pool_reservation_request(kInvocations * 12, 4),
+      iree_infinite_timeout(), counts.out()));
+  IREE_ASSERT_OK(
+      iree_hal_pool_allocate_buffer(host_pool,
+                                    iree_hal_make_pool_reservation_request(
+                                        kInvocations * 97 * kOutputLength, 4),
+                                    iree_infinite_timeout(), output.out()));
+  iree_hal_semaphore_t* gate = nullptr;
+  CreateSemaphore(&gate);
+  const auto release_gate = +[](iree_hal_semaphore_t* semaphore) {
+    iree_hal_semaphore_fail(semaphore,
+                            iree_status_from_code(IREE_STATUS_ABORTED));
+    iree_hal_semaphore_release(semaphore);
+  };
+  std::unique_ptr<iree_hal_semaphore_t, decltype(release_gate)> gate_owner(
+      gate, release_gate);
+  std::array<iree_hal_semaphore_t*, kInvocations> done = {};
+  std::vector<Ref<iree_hal_semaphore_t>> done_owners;
+  for (auto& semaphore : done) {
+    CreateSemaphore(&semaphore);
+    done_owners.emplace_back(semaphore);
+  }
+  const iree_hal_barrier_t dependency = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+  };
+  const iree_hal_barrier_t release = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+  };
+  auto config =
+      iree_hal_make_static_dispatch_config(UINT32_MAX, UINT32_MAX, UINT32_MAX);
+  config.workgroup_size[0] = 8;
+  config.workgroup_size[1] = config.workgroup_size[2] = 2;
+  config.workgroup_count_ref = iree_hal_make_indirect_buffer_ref(0, 0, 12);
+  auto producer_config = iree_hal_make_static_dispatch_config(1, 1, 1);
+  producer_config.workgroup_size[0] = 32;
+  producer_config.workgroup_size[1] = producer_config.workgroup_size[2] = 1;
+  uint64_t epoch = 0;
+  // One launch proves static descriptors cannot enter the host-template path.
+  // The larger recording crosses preparation workgroups and native ring chunks;
+  // retained profile metadata also selects instrumented materialization.
+  for (uint32_t count : {1u, 97u}) {
+    Ref<iree_hal_command_buffer_t> recording;
+    const iree_hal_command_buffer_mode_t mode =
+        count == 1 ? 0 : IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA;
+    IREE_ASSERT_OK(iree_hal_command_buffer_create(
+        family, mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH, 2, recording.out()));
+    IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+    for (uint32_t i = 0; i < count; ++i) {
+      if (i) {
+        IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &dependency));
+      }
+      const uint32_t marker = kMarker + i;
+      const auto binding = iree_hal_make_indirect_buffer_ref(
+          1, i * kOutputLength, kOutputLength);
+      IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+          recording, executable, consumer, config,
+          iree_make_const_byte_span(&marker, sizeof(marker)), {1, &binding},
+          IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS));
+    }
+    IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+    if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
+      const auto* program =
+          iree_hal_amd_gpu_aql_command_buffer_program(recording);
+      EXPECT_EQ(program->host_template, nullptr);
+      EXPECT_EQ(program->counts.count, count);
+      uint32_t packets = 0;
+      for (uint32_t i = 0; i < program->block_count; ++i) {
+        packets += program->blocks[i].packet_count;
+      }
+      EXPECT_EQ(packets, count);
+    }
+    for (uint32_t replay = 0; replay < 2; ++replay) {
+      ++epoch;
+      std::array<std::array<uint32_t, 3>, kInvocations> selected;
+      for (uint32_t i = 0; i < kInvocations; ++i) {
+        selected[i] = shapes[(i + replay) % shapes.size()];
+      }
+      IREE_ASSERT_OK(iree_hal_buffer_map_write(seeds, 0, selected.data(),
+                                               sizeof(selected)));
+      std::vector<uint32_t> actual(kInvocations * count * kOutputLength / 4, 0);
+      IREE_ASSERT_OK(iree_hal_buffer_map_write(output, 0, actual.data(),
+                                               actual.size() * 4));
+      uint64_t produced = epoch * 2 - 1, completed = epoch * 2;
+      for (uint32_t i = 0; i < kInvocations; ++i) {
+        auto* queue = queues_[i % GetParam().queue_count];
+        const std::array<iree_hal_buffer_ref_t, 2> producer_bindings = {
+            iree_hal_make_buffer_ref(counts, i * 12, 12),
+            iree_hal_make_buffer_ref(seeds, i * 12, 12)};
+        IREE_ASSERT_OK(iree_hal_queue_dispatch(
+            queue, {1, &gate, &epoch}, {1, &done[i], &produced}, executable,
+            producer, producer_config, {},
+            {producer_bindings.size(), producer_bindings.data()}, nullptr, 0));
+        std::array<iree_hal_buffer_binding_t, 2> table = {
+            {{.buffer = counts, .offset = i * 12, .length = 12},
+             {
+                 .buffer = output,
+                 .offset = i * count * kOutputLength,
+                 .length = count * kOutputLength,
+             }}};
+        IREE_ASSERT_OK(iree_hal_queue_execute(
+            queues_[(i + 1) % GetParam().queue_count], {1, &done[i], &produced},
+            {1, &done[i], &completed}, recording, {table.size(), table.data()},
+            0));
+        table.fill({});
+      }
+      if (replay == 1) {
+        recording.reset();
+      }
+      IREE_ASSERT_OK(iree_hal_semaphore_signal(gate, epoch, nullptr));
+      for (auto* semaphore : done) {
+        IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, completed,
+                                               iree_infinite_timeout(), 0));
+      }
+      IREE_ASSERT_OK(iree_hal_buffer_map_read(output, 0, actual.data(),
+                                              actual.size() * 4));
+      for (uint32_t i = 0; i < kInvocations; ++i) {
+        const auto& shape = selected[i];
+        for (uint32_t dispatch = 0; dispatch < count; ++dispatch) {
+          for (uint32_t cell = 0; cell < 64; ++cell) {
+            const bool active = cell % 4 < shape[0] &&
+                                (cell / 4) % 4 < shape[1] &&
+                                cell / 16 < shape[2];
+            const std::array<uint32_t, 8> expected =
+                active ? std::array<uint32_t, 8>{shape[0],
+                                                 shape[1],
+                                                 shape[2],
+                                                 8,
+                                                 2,
+                                                 2,
+                                                 kMarker + dispatch,
+                                                 3}
+                       : std::array<uint32_t, 8>{};
+            const size_t origin =
+                (i * count + dispatch) * kOutputLength / 4 + cell * 8;
+            for (uint32_t field = 0; field < expected.size(); ++field) {
+              EXPECT_EQ(actual[origin + field], expected[field])
+                  << epoch << ':' << i << ':' << dispatch << ':' << cell << ':'
+                  << field;
+            }
+          }
+        }
+      }
+      IREE_ASSERT_OK(iree_hal_device_trim(device_));
+    }
+  }
 }
 
 TEST_P(GpuNativeDispatchTest,

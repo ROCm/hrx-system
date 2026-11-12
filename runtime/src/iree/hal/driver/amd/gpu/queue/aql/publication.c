@@ -596,7 +596,8 @@ uint64_t iree_hal_amd_gpu_aql_execute_argument_length(
                               (uint64_t)invocation->program->value_count * 8
                     : invocation->block_ordinal
                         ? sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t)
-                        : sizeof(iree_hal_amd_gpu_aql_program_arguments_t) +
+                        : iree_hal_amd_gpu_aql_program_argument_length(
+                              invocation->program->counts, false) +
                               (uint64_t)invocation->program->value_count * 8;
   if (!host_template && invocation->program->profile) {
     length += sizeof(iree_hal_amd_gpu_aql_materialize_profile_arguments_t) -
@@ -702,10 +703,11 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_execute(
       invocation->program->blocks[invocation->block_ordinal];
   const uint32_t waits = first ? (submission->native_wait_count + 4) / 5 : 0;
   const iree_hal_amd_gpu_aql_program_flags_t program_flags =
-      (host_template ? 0
-                     : iree_hal_amd_gpu_aql_program_prepare(
-                           program, invocation->instance,
-                           invocation->program->value_count, first)) |
+      (host_template
+           ? 0
+           : iree_hal_amd_gpu_aql_program_prepare(
+                 program, invocation->instance, invocation->program->counts,
+                 invocation->program->value_count, first)) |
       (invocation->program->has_control ? IREE_HAL_AMD_GPU_AQL_PROGRAM_CONTROL
                                         : 0) |
       (invocation->program->profile ? IREE_HAL_AMD_GPU_AQL_PROGRAM_PROFILE : 0);
@@ -797,8 +799,9 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_execute(
       }
     } else {
       publication_status = iree_hal_amd_gpu_aql_program_emit(
-          queue->options.programs, program, invocation->instance, block.offset,
-          block.packet_count, ring, &queue->storage, packet_position,
+          queue->options.programs, program, invocation->instance,
+          invocation->program->counts, block.offset, block.packet_count, ring,
+          &queue->storage, packet_position,
           arguments->address + argument_offset, sample_address, upload,
           program_flags);
     }

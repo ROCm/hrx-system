@@ -59,6 +59,8 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
       {.argument_length =
            sizeof(iree_hal_amd_gpu_aql_materialize_profile_arguments_t),
        .kernel_object = &out_pool->materialize_profile},
+      {.argument_length = sizeof(iree_hal_amd_gpu_aql_count_arguments_t),
+       .kernel_object = &out_pool->counts},
       {.argument_length = sizeof(iree_hal_amd_gpu_control_program_arguments_t),
        .kernel_object = &out_pool->control[0]},
       {.argument_length = sizeof(iree_hal_amd_gpu_control_program_arguments_t),
@@ -81,12 +83,14 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
       gfxip, &builtins[3].code, &builtins[3].kernel));
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_materialize_program_query(
       gfxip, true, &builtins[4].code, &builtins[4].kernel));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_count_program_query(
+      gfxip, &builtins[5].code, &builtins[5].kernel));
   iree_status_t status = iree_ok_status();
   for (uint32_t i = 0;
        i < IREE_HAL_AMD_GPU_CONTROL_PROGRAM_COUNT && iree_status_is_ok(status);
        ++i) {
     status = iree_hal_amd_gpu_control_program_query(
-        gfxip, i, &builtins[5 + i].code, &builtins[5 + i].kernel);
+        gfxip, i, &builtins[6 + i].code, &builtins[6 + i].kernel);
   }
   IREE_RETURN_IF_ERROR(status);
   if (iree_hal_amd_gpu_grid_sync_select_strategy(gfxip) ==
@@ -157,7 +161,8 @@ void iree_hal_amd_gpu_aql_program_pool_deinitialize(
 
 iree_hal_amd_gpu_aql_program_flags_t iree_hal_amd_gpu_aql_program_prepare(
     const iree_hal_amd_gpu_program_t* program,
-    const iree_hal_amd_gpu_program_instance_t* instance, uint32_t value_count,
+    const iree_hal_amd_gpu_program_instance_t* instance,
+    iree_hal_amd_gpu_aql_count_table_t counts, uint32_t value_count,
     bool first) {
   if (!first) {
     return 0;
@@ -165,7 +170,8 @@ iree_hal_amd_gpu_aql_program_flags_t iree_hal_amd_gpu_aql_program_prepare(
   return IREE_HAL_AMD_GPU_AQL_PROGRAM_FIRST |
          (!instance->initialized ? IREE_HAL_AMD_GPU_AQL_PROGRAM_INITIALIZE
                                  : 0) |
-         (program->fixup_count && (value_count > 1 || !instance->last_epoch)
+         ((counts.count ||
+           (program->fixup_count && (value_count > 1 || !instance->last_epoch)))
               ? IREE_HAL_AMD_GPU_AQL_PROGRAM_FIXUP
               : 0);
 }
@@ -174,6 +180,18 @@ uint32_t iree_hal_amd_gpu_aql_program_prefix_count(
     iree_hal_amd_gpu_aql_program_flags_t flags) {
   return 1 + ((flags & IREE_HAL_AMD_GPU_AQL_PROGRAM_INITIALIZE) != 0) +
          ((flags & IREE_HAL_AMD_GPU_AQL_PROGRAM_FIXUP) != 0);
+}
+
+uint32_t iree_hal_amd_gpu_aql_program_argument_length(
+    iree_hal_amd_gpu_aql_count_table_t counts, bool profiling) {
+  return sizeof(iree_hal_amd_gpu_aql_program_arguments_t) +
+         (counts.count ? sizeof(iree_hal_amd_gpu_aql_count_arguments_t) -
+                             sizeof(iree_hal_amd_gpu_fixup_arguments_t)
+                       : 0) +
+         (profiling
+              ? sizeof(iree_hal_amd_gpu_aql_materialize_profile_arguments_t) -
+                    sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t)
+              : 0);
 }
 
 amdf_status_t iree_hal_amd_gpu_aql_program_emit_host(
@@ -224,7 +242,8 @@ static iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_program_dispatch(
 amdf_status_t iree_hal_amd_gpu_aql_program_emit(
     const iree_hal_amd_gpu_aql_program_pool_t* pool,
     const iree_hal_amd_gpu_program_t* program,
-    const iree_hal_amd_gpu_program_instance_t* instance, uint32_t block_offset,
+    const iree_hal_amd_gpu_program_instance_t* instance,
+    iree_hal_amd_gpu_aql_count_table_t counts, uint32_t block_offset,
     uint32_t packet_count, iree_hal_amd_gpu_aql_ring_t* ring,
     const iree_hal_amd_gpu_user_queue_t* storage, uint64_t position,
     uint64_t argument_address, uint64_t signal_address, void* upload,
@@ -255,20 +274,23 @@ amdf_status_t iree_hal_amd_gpu_aql_program_emit(
       arguments->fixup = (iree_hal_amd_gpu_fixup_arguments_t){
           .entries = source.fixups,
           .values =
-              argument_address + sizeof(*arguments) +
-              (profiling
-                   ? sizeof(
-                         iree_hal_amd_gpu_aql_materialize_profile_arguments_t) -
-                         sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t)
-                   : 0),
+              argument_address +
+              iree_hal_amd_gpu_aql_program_argument_length(counts, profiling),
           .target = instance->address,
           .entry_count = program->fixup_count,
       };
+      if (counts.count) {
+        iree_hal_amd_gpu_aql_count_arguments_t* count_arguments =
+            (void*)&arguments->fixup;
+        count_arguments->launches = source.address + counts.offset;
+        count_arguments->launch_count = counts.count;
+        count_arguments->reserved = 0;
+      }
       prefix[count++] = iree_hal_amd_gpu_aql_program_dispatch(
-          pool->fixup,
+          counts.count ? pool->counts : pool->fixup,
           argument_address +
               offsetof(iree_hal_amd_gpu_aql_program_arguments_t, fixup),
-          (program->fixup_count + 63) / 64);
+          (program->fixup_count + 63) / 64 + (counts.count + 63) / 64);
       if (flags & IREE_HAL_AMD_GPU_AQL_PROGRAM_CONTROL) {
         // Publish private IB fixups once for the entire resident program.
         // These are local packet bytes before ring publication, never a
@@ -278,9 +300,13 @@ amdf_status_t iree_hal_amd_gpu_aql_program_emit(
             IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM;
       }
     }
-    materialize = &arguments->materialize;
-    materialize_address +=
-        offsetof(iree_hal_amd_gpu_aql_program_arguments_t, materialize);
+    const uint32_t materialize_offset =
+        offsetof(iree_hal_amd_gpu_aql_program_arguments_t, materialize) +
+        (counts.count ? sizeof(iree_hal_amd_gpu_aql_count_arguments_t) -
+                            sizeof(iree_hal_amd_gpu_fixup_arguments_t)
+                      : 0);
+    materialize = (void*)((uint8_t*)upload + materialize_offset);
+    materialize_address += materialize_offset;
   }
   const uint64_t source = instance->address + block_offset;
   *materialize = (iree_hal_amd_gpu_aql_materialize_arguments_t){

@@ -13,6 +13,7 @@
 
 #include "iree/base/byte_sequence.h"
 #include "iree/hal/driver/amd/gpu/image/hsaco.h"
+#include "iree/hal/driver/amd/gpu/queue/aql/counts.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/indirect_programs.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -141,12 +142,23 @@ TEST(IndirectTest, HiddenCountsUsePreparedOffsetsAndRespectNativeOwnership) {
           EXPECT_EQ(arguments.arguments, 0x300000000u);
           EXPECT_EQ(arguments.header, 0x12345678u);
           EXPECT_EQ(arguments.reserved, 0u);
+          iree_hal_amd_gpu_aql_count_t count;
+          iree_hal_amd_gpu_aql_count_prepare(
+              layout, &geometry, flags, 0xFFFFF000u, 0xFFFFFFu,
+              UINT64_C(0x123456789ABCDEF0), 0x80000000u, &count);
+          EXPECT_EQ(count.packet_offset, 0xFFFFF000u);
+          EXPECT_EQ(count.value_index, 0xFFFFFFu);
+          EXPECT_EQ(count.count_offset, UINT64_C(0x123456789ABCDEF0));
+          EXPECT_EQ(count.argument_offset, 0x80000000u);
           for (size_t i = 0; i < 3; ++i) {
             EXPECT_EQ(arguments.workgroup_size[i], geometry.workgroup_size[i]);
             EXPECT_EQ(arguments.count_offsets[i],
                       iree_hal_dispatch_uses_indirect_arguments(flags)
                           ? UINT32_MAX
                           : expected[i]);
+            EXPECT_EQ(count.workgroup_size[i], geometry.workgroup_size[i]);
+            EXPECT_EQ(count.hidden_offsets[i],
+                      static_cast<uint16_t>(arguments.count_offsets[i]));
           }
         }
         iree_hal_amd_gpu_kernarg_layout_free(layout);

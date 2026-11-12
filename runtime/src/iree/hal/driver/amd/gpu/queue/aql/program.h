@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVER_AMD_GPU_QUEUE_AQL_PROGRAM_H_
 
 #include "iree/hal/driver/amd/gpu/code.h"
+#include "iree/hal/driver/amd/gpu/queue/aql/counts.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/indirect.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/materialize.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/ring.h"
@@ -33,6 +34,8 @@ typedef struct iree_hal_amd_gpu_aql_program_pool_t {
   uint64_t blit;
   // Native descriptor for independent complete-DWORD replacements.
   uint64_t fixup;
+  // Native descriptor combining ordinary replacements and static-count reads.
+  uint64_t counts;
   // Native descriptor for write-only packet materialization.
   uint64_t materialize;
   // Native descriptor for tagged completion operands and private samples.
@@ -59,9 +62,10 @@ void iree_hal_amd_gpu_aql_program_pool_deinitialize(
 iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_control_program_packet(
     uint64_t kernel, uint64_t arguments, uint32_t header, uint64_t completion);
 
-// Initial invocation upload. Instrumented recordings extend materialize to
-// materialize_profile_arguments_t; the dense uint64_t value table follows
-// that complete argument record. Later chunks upload only their materializer
+// Initial invocation upload. Static counts extend fixup to count_arguments_t;
+// materialize follows the complete fixup record. Instrumented recordings use
+// materialize_profile_arguments_t. The dense uint64_t value table follows
+// the complete argument records. Later chunks upload only their materializer
 // arguments. The first native chunk releases the table independently of later
 // work.
 typedef struct iree_hal_amd_gpu_aql_program_arguments_t {
@@ -72,6 +76,11 @@ typedef struct iree_hal_amd_gpu_aql_program_arguments_t {
   // First native packet block and its exact reserved ring slots.
   iree_hal_amd_gpu_aql_materialize_arguments_t materialize;
 } iree_hal_amd_gpu_aql_program_arguments_t;
+
+// Complete initial argument extent before the dense uint64_t value table.
+// Static counts and profiling each extend their owning argument record.
+uint32_t iree_hal_amd_gpu_aql_program_argument_length(
+    iree_hal_amd_gpu_aql_count_table_t counts, bool profiling);
 
 // Instrumented materialization extends the last argument record by 16 bytes
 // before the value table. Ordinary invocation uploads retain their compact ABI.
@@ -89,10 +98,12 @@ typedef uint32_t iree_hal_amd_gpu_aql_program_flags_t;
 // Captures preparation before publication changes the reserved instance's
 // writer coordinate. A value_count of one contains only the instance base:
 // those relocations remain valid after that instance's first invocation.
-// Additional inputs require replacement on every invocation.
+// Additional inputs require replacement on every invocation. Static counts
+// are gathered once per invocation from their current source values.
 iree_hal_amd_gpu_aql_program_flags_t iree_hal_amd_gpu_aql_program_prepare(
     const iree_hal_amd_gpu_program_t* program,
-    const iree_hal_amd_gpu_program_instance_t* instance, uint32_t value_count,
+    const iree_hal_amd_gpu_program_instance_t* instance,
+    iree_hal_amd_gpu_aql_count_table_t counts, uint32_t value_count,
     bool first);
 
 // Counts host-owned prelude packets; block packets and the terminal barrier
@@ -120,7 +131,8 @@ amdf_status_t iree_hal_amd_gpu_aql_program_emit_host(
 amdf_status_t iree_hal_amd_gpu_aql_program_emit(
     const iree_hal_amd_gpu_aql_program_pool_t* pool,
     const iree_hal_amd_gpu_program_t* program,
-    const iree_hal_amd_gpu_program_instance_t* instance, uint32_t block_offset,
+    const iree_hal_amd_gpu_program_instance_t* instance,
+    iree_hal_amd_gpu_aql_count_table_t counts, uint32_t block_offset,
     uint32_t packet_count, iree_hal_amd_gpu_aql_ring_t* ring,
     const iree_hal_amd_gpu_user_queue_t* storage, uint64_t position,
     uint64_t argument_address, uint64_t signal_address, void* upload,
