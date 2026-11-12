@@ -146,20 +146,20 @@ TEST_F(DispatchTest, InvocationStoragePreservesArgumentAlignmentAndOwnership) {
               iree_hal_amd_gpu_pm4_dispatch_storage(&function_, flags);
           const uint32_t kernarg_length = external ? 0 : 257;
           const uint32_t argument_alignment = external ? 1 : alignment;
-          EXPECT_EQ(storage.alignment, packet
-                                           ? std::max(argument_alignment, 64u)
+          const bool prepare = packet && parameters;
+          EXPECT_EQ(storage.alignment, prepare
+                                           ? std::max(argument_alignment, 8u)
                                            : argument_alignment);
-          EXPECT_EQ(storage.packet_offset, packet && !external ? 320u : 0u);
+          EXPECT_EQ(storage.prepare_offset, prepare && !external ? 264u : 0u);
           EXPECT_EQ(storage.length,
-                    packet ? storage.packet_offset + 64 + (parameters ? 16 : 0)
-                           : kernarg_length);
+                    prepare ? storage.prepare_offset + 16 : kernarg_length);
         }
       }
     }
   }
 }
 
-TEST_F(DispatchTest, PacketTemplatesInitializePaddingAndPreparationInputs) {
+TEST_F(DispatchTest, PreparationArgumentsExcludeShaderPackets) {
   const iree_hal_amd_gpu_pm4_dispatch_packet_info_t packet_info = {
       .kernel_object = UINT64_C(0x123456780040),
   };
@@ -187,22 +187,20 @@ TEST_F(DispatchTest, PacketTemplatesInitializePaddingAndPreparationInputs) {
         flags, bytes.data());
     if (!external) {
       EXPECT_EQ(memcmp(bytes.data(), constants.data(), constants.size()), 0);
-      for (size_t i = constants.size(); i < storage.packet_offset; ++i) {
-        EXPECT_EQ(bytes[i], 0u) << i;
-      }
     }
-    const auto* packet =
-        reinterpret_cast<const iree_hal_amd_gpu_pm4_dispatch_packet_t*>(
-            bytes.data() + storage.packet_offset);
-    EXPECT_EQ(packet->kernel_object, packet_info.kernel_object);
-    EXPECT_EQ(packet->kernarg_address, 0u);
-    EXPECT_EQ(packet->completion_signal, 0u);
-    for (size_t i = storage.packet_offset + 64; i < storage.length; ++i) {
+    for (size_t i = external ? 0 : constants.size(); i < storage.length; ++i) {
       EXPECT_EQ(bytes[i], 0u) << i;
     }
     for (size_t i = storage.length; i < bytes.size(); ++i) {
       EXPECT_EQ(bytes[i], 0xCD) << i;
     }
+    alignas(64) iree_hal_amd_gpu_pm4_dispatch_packet_t packet;
+    std::memset(&packet, 0xCD, sizeof(packet));
+    iree_hal_amd_gpu_pm4_dispatch_emplace_packet(&function_, &dispatch_, flags,
+                                                 &packet);
+    EXPECT_EQ(packet.kernel_object, packet_info.kernel_object);
+    EXPECT_EQ(packet.kernarg_address, 0u);
+    EXPECT_EQ(packet.completion_signal, 0u);
   }
 }
 

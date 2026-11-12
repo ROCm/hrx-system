@@ -66,15 +66,16 @@ typedef struct iree_hal_amd_gpu_pm4_dispatch_packet_t {
 static_assert(sizeof(iree_hal_amd_gpu_pm4_dispatch_packet_t) == 64,
               "AMDHSA dispatch packets occupy one cache line");
 
-// Captured storage geometry, independent of the invocation's native addresses.
+// Kernarg geometry, independent of the invocation's native addresses. The
+// shader-readable dispatch packet has separate retirement or invocation
+// storage.
 typedef struct iree_hal_amd_gpu_pm4_dispatch_storage_t {
-  // Complete private extent, including kernargs, packet, and preparation
-  // inputs.
+  // Native kernargs and optional two-pointer preparation arguments.
   uint32_t length;
   // Power-of-two alignment of the complete allocation.
   uint32_t alignment;
-  // Packet byte offset within the allocation; unused without a packet ABI.
-  uint32_t packet_offset;
+  // Helper argument offset; unused without indirect packet preparation.
+  uint32_t prepare_offset;
 } iree_hal_amd_gpu_pm4_dispatch_storage_t;
 
 // Queries bounded argument storage for an admitted function/argument mode.
@@ -136,10 +137,10 @@ iree_status_t iree_hal_amd_gpu_pm4_dispatch_prepare(
 
 // Writes admitted native kernargs from captured or recording-time inputs. Dense
 // arguments consume one resolved address per binding; custom direct arguments
-// preserve native explicit offsets. Hidden geometry, packet fields, and padding
-// are initialized here. External native arguments still use a private packet
-// when requested by the shader. Target covers dispatch_storage().length and
-// does not overlap the inputs. This transform cannot fail.
+// preserve native explicit offsets. Hidden geometry, helper arguments, and
+// padding are initialized here. Shader-readable packets are initialized
+// separately. Target covers dispatch_storage().length and does not overlap the
+// inputs. This transform cannot fail.
 void iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
     const iree_hal_amd_gpu_pm4_function_t* function,
     const iree_hal_amd_gpu_pm4_dispatch_t* dispatch,
@@ -157,8 +158,8 @@ void iree_hal_amd_gpu_pm4_dispatch_emplace_packet(
     iree_hal_amd_gpu_pm4_dispatch_packet_t* target);
 
 // Emits 41 DWORDs preparing one indirect packet and joining its writes before
-// the consumer's launch state is bound. The two-pointer argument block follows
-// the packet and remains owned through the consuming dispatch's retirement.
+// the consumer's launch state is bound. The two-pointer argument block is owned
+// independently of its destination packet through native retirement.
 uint32_t* iree_hal_amd_gpu_pm4_dispatch_emit_prepare(
     uint32_t* words, const iree_hal_amd_gpu_pm4_launch_t* prepare,
     uint64_t argument_address, uint32_t cache_control);

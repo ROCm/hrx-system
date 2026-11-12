@@ -800,6 +800,16 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
               IREE_HAL_AMD_GPU_RECORDING_FIXUP_WIDE));
     }
   }
+  uint32_t packet_offset = 0;
+  if (function->packet) {
+    void* packet = NULL;
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
+        &buffer->recording.storage,
+        sizeof(iree_hal_amd_gpu_pm4_dispatch_packet_t), 64, &packet_offset,
+        &packet));
+    iree_hal_amd_gpu_pm4_dispatch_emplace_packet(function, &dispatch, flags,
+                                                 packet);
+  }
   const uint32_t prepare_words =
       prepare_packet ? IREE_HAL_AMD_GPU_PM4_DISPATCH_PREPARE_WORDS : 0;
   const uint32_t launch_words = function->launch.user_data_count
@@ -886,7 +896,6 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
   const uint16_t kernarg_word =
       iree_hal_amd_gpu_pm4_launch_user_data_word_offset(
           function->launch.user_data.kernarg_pointer);
-  const uint32_t packet_offset = argument_offset + storage.packet_offset;
   uint32_t kernarg_value = IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE;
   uint64_t kernarg_displacement = argument_offset;
   if (indirect && (kernarg_word != UINT16_MAX || function->packet)) {
@@ -970,15 +979,16 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
       buffer->pending_dma = false;
     }
     if (prepare_packet) {
+      const uint32_t prepare_offset = argument_offset + storage.prepare_offset;
       IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
-          buffer, true, packet_offset + 64, parameters,
+          buffer, true, prepare_offset, parameters,
           config.workgroup_count_ref.offset, false));
       IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
-          buffer, true, packet_offset + 72, IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE,
+          buffer, true, prepare_offset + 8, IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE,
           packet_offset, true));
       IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
           buffer, false, command_offset + 24 * 4,
-          IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE, packet_offset + 64, true));
+          IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE, prepare_offset, true));
     }
   }
   const uint64_t* image_addresses =

@@ -63,6 +63,8 @@ typedef struct iree_hal_amd_gpu_pm4_growth_context_t {
   iree_hal_amd_gpu_pm4_growth_t* transfers;
   // Coalesced profiling sample acquisition or NULL.
   iree_hal_amd_gpu_pm4_growth_t* samples;
+  // One coalesced dispatch-packet backing acquisition, or NULL.
+  iree_hal_amd_gpu_pm4_growth_t* packets;
   // One coalesced signal acquisition, or NULL without pending growth.
   iree_hal_amd_gpu_pm4_growth_t* signals;
   // One coalesced scratch acquisition, or NULL without pending growth.
@@ -99,8 +101,7 @@ typedef struct iree_hal_amd_gpu_pm4_growth_result_t {
   iree_hal_amd_gpu_publication_entry_t* first;
   // Last waiting capture with a NULL next link, or NULL for an empty cohort.
   iree_hal_amd_gpu_publication_entry_t* last;
-  // Owned acquired argument or transfer bytes, or NULL for another
-  // kind/failure.
+  // Owned acquired byte backing, or NULL for another kind/failure.
   iree_hal_amd_gpu_byte_storage_t* bytes;
   // Owned acquired scratch generation, or NULL for another kind or failure.
   iree_hal_amd_gpu_pm4_scratch_storage_t* scratch;

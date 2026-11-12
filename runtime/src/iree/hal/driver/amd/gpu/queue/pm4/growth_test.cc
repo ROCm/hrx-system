@@ -813,7 +813,8 @@ TEST_F(GrowthTest, ByteOwnersHaveIndependentNativeResults) {
   uint32_t failed = 0;
   const std::array kinds = {IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS,
                             IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_TRANSFERS,
-                            IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SAMPLES};
+                            IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SAMPLES,
+                            IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_PACKETS};
   for (auto kind : kinds) {
     for (auto other : kinds) {
       if (kind == other) {
@@ -829,7 +830,7 @@ TEST_F(GrowthTest, ByteOwnersHaveIndependentNativeResults) {
       Park(other);
       Park(other);
       const std::array owners = {growth_.arguments, growth_.transfers,
-                                 growth_.samples};
+                                 growth_.samples, growth_.packets};
       for (size_t i = 0; i < kinds.size(); ++i) {
         EXPECT_EQ(owners[i] != nullptr, kinds[i] == kind || kinds[i] == other);
       }
@@ -847,6 +848,7 @@ TEST_F(GrowthTest, ByteOwnersHaveIndependentNativeResults) {
       EXPECT_EQ(growth_.arguments, nullptr);
       EXPECT_EQ(growth_.transfers, nullptr);
       EXPECT_EQ(growth_.samples, nullptr);
+      EXPECT_EQ(growth_.packets, nullptr);
       EXPECT_EQ(live_, 0u);
     }
   }

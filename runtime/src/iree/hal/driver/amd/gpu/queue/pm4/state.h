@@ -131,13 +131,6 @@ struct iree_hal_amd_gpu_pm4_queue_t {
   iree_host_size_t pending_size;
   // Typed native acquisition and coalesced waiting captures.
   iree_hal_amd_gpu_pm4_growth_context_t growth;
-  // Coalesced explicit trim request, consumed under publication ownership.
-  struct {
-    // Stable typed record; only the first requester links it into the FIFO.
-    iree_hal_amd_gpu_pm4_entry_t entry;
-    // One while the trim entry is enqueued or executing.
-    iree_atomic_int32_t pending;
-  } trim;
   // Parent has closed public acceptance; accepted dependencies remain live.
   // Admission facts stay separate from publication, retirement, and callbacks.
   iree_alignas(iree_hardware_destructive_interference_size)
@@ -146,6 +139,16 @@ struct iree_hal_amd_gpu_pm4_queue_t {
   iree_atomic_int64_t native_failure;
   // Timestamp-session native owner, independent of launch argument capacity.
   iree_hal_amd_gpu_sample_storage_t* samples;
+  // Lazy shader-readable packets, one per retirement slot; native shutdown
+  // precedes release. Slot credit supplies all reuse ordering.
+  iree_hal_amd_gpu_byte_storage_t* packets;
+  // Coalesced explicit trim request, consumed under publication ownership.
+  struct {
+    // Stable typed record; only the first requester links it into the FIFO.
+    iree_hal_amd_gpu_pm4_entry_t entry;
+    // One while the trim entry is enqueued or executing.
+    iree_atomic_int32_t pending;
+  } trim;
   // Tracker associations shared by cold waits on this queue.
   iree_alignas(iree_hardware_destructive_interference_size)
       iree_async_semaphore_wait_context_t wait_context;

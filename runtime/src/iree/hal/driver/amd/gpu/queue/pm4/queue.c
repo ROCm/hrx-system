@@ -813,6 +813,10 @@ iree_hal_amd_gpu_pm4_process_submission(
     capacity =
         iree_math_round_up_to_pow2_u64((uint64_t)profile->completion.count *
                                        profile->completion.sample_stride);
+  } else if (result == IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_PACKETS) {
+    kind = IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_PACKETS;
+    capacity = (uint64_t)queue->options.retirement_capacity *
+               sizeof(iree_hal_amd_gpu_pm4_dispatch_packet_t);
   } else if (result == IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_TRANSFERS) {
     kind = IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_TRANSFERS;
     capacity = iree_max(
@@ -937,8 +941,10 @@ iree_hal_amd_gpu_pm4_process_entry(iree_hal_amd_gpu_pm4_queue_t* queue,
     const bool transfers =
         entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_TRANSFERS;
     const bool samples = entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SAMPLES;
+    const bool packets = entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_PACKETS;
     iree_hal_amd_gpu_byte_storage_t** current =
-        samples     ? &queue->samples->current
+        packets     ? &queue->packets
+        : samples   ? &queue->samples->current
         : transfers ? &queue->producer.transfers.current
                     : &queue->producer.arguments;
     iree_hal_amd_gpu_byte_storage_t** first =
@@ -951,7 +957,9 @@ iree_hal_amd_gpu_pm4_process_entry(iree_hal_amd_gpu_pm4_queue_t* queue,
     iree_status_t status = iree_hal_amd_gpu_pm4_growth_end(
         entry, *current ? (*current)->end : 0, &result);
     if (iree_status_is_ok(status)) {
-      if (result.bytes && samples) {
+      if (result.bytes && packets) {
+        queue->packets = result.bytes;
+      } else if (result.bytes && samples) {
         iree_hal_amd_gpu_sample_storage_install(queue->samples, result.bytes);
         iree_hal_amd_gpu_sample_storage_trim(queue->context, queue->samples);
       } else if (result.bytes) {

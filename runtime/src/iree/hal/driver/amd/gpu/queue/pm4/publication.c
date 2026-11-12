@@ -569,6 +569,9 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_dispatch(
                                         IREE_HAL_DISPATCH_FLAG_COOPERATIVE);
   const bool indirect =
       iree_hal_dispatch_uses_indirect_arguments(dispatch_request->flags);
+  if (dispatch && function->packet && !queue->packets) {
+    return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_PACKETS;
+  }
   const iree_hal_amd_gpu_pm4_dispatch_storage_t argument_storage =
       dispatch ? iree_hal_amd_gpu_pm4_dispatch_storage(function,
                                                        dispatch_request->flags)
@@ -764,13 +767,18 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_dispatch(
   uint64_t packet_address = 0;
   if (dispatch && function->packet) {
     const uint64_t packet_offset =
-        argument_offset + argument_storage.packet_offset;
-    packet_address = arguments->address + packet_offset;
+        (position & queue->retirement.capacity_mask) *
+        sizeof(iree_hal_amd_gpu_pm4_dispatch_packet_t);
+    packet_address = queue->packets->address + packet_offset;
     iree_hal_amd_gpu_pm4_dispatch_packet_t* packet =
-        (void*)(arguments->memory.contents.data + packet_offset);
+        (void*)(queue->packets->memory.contents.data + packet_offset);
+    iree_hal_amd_gpu_pm4_dispatch_emplace_packet(
+        function, &dispatch_request->launch, dispatch_request->flags, packet);
     packet->kernarg_address = argument_address;
     if (prepare_packet) {
-      uint64_t* inputs = (uint64_t*)(packet + 1);
+      uint64_t* inputs =
+          (void*)(arguments->memory.contents.data + argument_offset +
+                  argument_storage.prepare_offset);
       inputs[0] = parameters_address;
       inputs[1] = packet_address;
     }
@@ -803,7 +811,9 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_dispatch(
   if (dispatch) {
     if (prepare_packet) {
       words = iree_hal_amd_gpu_pm4_dispatch_emit_prepare(
-          words, function->packet->prepare, packet_address + 64,
+          words, function->packet->prepare,
+          arguments->address + argument_offset +
+              argument_storage.prepare_offset,
           queue->options.barriers.shader);
     }
     const iree_hal_amd_gpu_pm4_launch_inputs_t inputs = {

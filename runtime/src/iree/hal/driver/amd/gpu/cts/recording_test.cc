@@ -1136,7 +1136,7 @@ TEST_P(GpuNativePacketTest, ShaderObservesCompleteInvocationOwnedPacket) {
       {{3, 2, 2}, {2, 1, 1}, {2, 3, 1}, {0, 2, 2}, {2, 0, 2}, {2, 2, 0}}};
   const size_t invocation_count = indirect_counts ? shapes.size() : 3;
   constexpr uint32_t kMarker = 0xA319D457;
-  constexpr size_t kResultLength = 22 * sizeof(uint32_t);
+  constexpr size_t kResultLength = 24 * sizeof(uint32_t);
   std::array<uint64_t, 6> external_addresses = {};
   const uint32_t zero = 0;
   CreateSemaphore(&gate_);
@@ -1351,7 +1351,7 @@ TEST_P(GpuNativePacketTest, ShaderObservesCompleteInvocationOwnedPacket) {
     const auto& actual = actual_[invocation];
     if (!shapes[invocation][0] || !shapes[invocation][1] ||
         !shapes[invocation][2]) {
-      for (size_t i = 0; i < 22; ++i) {
+      for (size_t i = 0; i < kResultLength / sizeof(uint32_t); ++i) {
         EXPECT_EQ(actual[i], 0u);
       }
       continue;
@@ -1376,8 +1376,12 @@ TEST_P(GpuNativePacketTest, ShaderObservesCompleteInvocationOwnedPacket) {
     EXPECT_EQ(address(8), kernel_object);
     EXPECT_NE(address(16), 0u);
     EXPECT_EQ(address(16) & 63u, 0u);
-    EXPECT_EQ(address(10), indirect_arguments ? external_addresses[invocation]
-                                              : address(16) - 64);
+    EXPECT_NE(address(22), 0u);
+    EXPECT_EQ(address(10), address(22));
+    EXPECT_NE(address(10), address(16));
+    if (indirect_arguments) {
+      EXPECT_EQ(address(10), external_addresses[invocation]);
+    }
     for (size_t i = 12; i < 16; ++i) {
       EXPECT_EQ(actual[i], 0u);
     }

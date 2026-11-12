@@ -40,7 +40,7 @@ struct iree_hal_amd_gpu_pm4_growth_t {
       // Context lifetime borrow and native acquisition descriptor.
       iree_hal_amd_gpu_memory_acquire_t acquire;
       union {
-        // Owned byte generation for GROW_ARGUMENTS or GROW_TRANSFERS.
+        // Owned byte backing for arguments, transfers, samples, or packets.
         iree_hal_amd_gpu_byte_storage_t* bytes;
         // Owned private-storage generation for GROW_SCRATCH.
         iree_hal_amd_gpu_pm4_scratch_storage_t* scratch;
@@ -164,6 +164,9 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_begin(
     case IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SAMPLES:
       pending = context->samples;
       break;
+    case IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_PACKETS:
+      pending = context->packets;
+      break;
     case IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SIGNALS:
       pending = context->signals;
       break;
@@ -221,7 +224,8 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_begin(
     iree_hal_amd_fabric_memory_t* memory = NULL;
     if (kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS ||
         kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_TRANSFERS ||
-        kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SAMPLES) {
+        kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SAMPLES ||
+        kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_PACKETS) {
       status = iree_hal_amd_gpu_byte_storage_prepare(
           capacity, context->captures->host_allocator, &growth->backing.bytes);
       if (iree_status_is_ok(status)) {
@@ -236,6 +240,8 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_begin(
           context->arguments = growth;
         } else if (kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SAMPLES) {
           context->samples = growth;
+        } else if (kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_PACKETS) {
+          context->packets = growth;
         } else {
           context->transfers = growth;
         }
@@ -300,10 +306,13 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_end(
     case IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS:
     case IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_TRANSFERS:
     case IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SAMPLES:
+    case IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_PACKETS:
       if (entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS) {
         context->arguments = NULL;
       } else if (entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SAMPLES) {
         context->samples = NULL;
+      } else if (entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_PACKETS) {
+        context->packets = NULL;
       } else {
         context->transfers = NULL;
       }
