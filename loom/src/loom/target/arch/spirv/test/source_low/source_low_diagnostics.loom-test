@@ -2,8 +2,8 @@
 
 spirv.target<vulkan1_3> @target
 
-// A native vector body representation does not imply a vector argument ABI.
-// ERROR@+1: TARGET/031 {actual_type="vector<4xi32>", type_constraint="vector.target_carrier"}
+// Native helper vectors do not imply a vector shader-entry argument ABI.
+// ERROR@+1: SPIRV/022 {function_name="unsupported_vector_argument", value_name="input", actual_value_type="v4s32"}
 func.def target(@target) @unsupported_vector_argument(%input: vector<4xi32>, %result: i32) -> (i32) {
   func.return %result : i32
 }
@@ -487,10 +487,9 @@ func.def target(@target) @index_shift_requires_bounded_amount(%input: index, %am
 
 spirv.target<vulkan1_3> @target
 
-// ERROR@+1: TARGET/031 {actual_type="vector<5xi32>", type_constraint="vector.target_carrier"}
+// ERROR@+1: SPIRV/016 {function_name="ordinary_vector_rejects_wide_return", actual_value_type="v4s32"}
 func.def target(@target) @ordinary_vector_rejects_wide_return() -> (vector<5xi32>) {
   %value = vector.splati 0 : vector<5xi32>
-  // ERROR@+1: TARGET/031 {actual_type="vector<5xi32>", type_constraint="vector.target_carrier"}
   func.return %value : vector<5xi32>
 }
 
@@ -498,7 +497,7 @@ func.def target(@target) @ordinary_vector_rejects_wide_return() -> (vector<5xi32
 
 spirv.target<vulkan1_3> @target
 
-// ERROR@+1: TARGET/031 {actual_type="vector<4xi32>", type_constraint="vector.target_carrier"}
+// ERROR@+1: SPIRV/016 {function_name="ordinary_vector_rejects_direct_target_result", actual_value_type="v4s32"}
 func.def target(@target) @ordinary_vector_rejects_direct_target_result(%a: i32, %b: i32, %c: i32, %d: i32) -> (vector<4xi32>) {
   %value = vector.from_elements %a, %b, %c, %d : vector<4xi32>
   func.return %value : vector<4xi32>

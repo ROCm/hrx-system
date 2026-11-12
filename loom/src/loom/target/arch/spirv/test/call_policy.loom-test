@@ -1,0 +1,114 @@
+// RUN: pass target=spirv:vulkan1.3+bda specialize-target-callgraph,canonicalize,inline-callables{policy=target},symbol-dce
+
+// Numeric helpers follow the common cost policy. Cold nested calls stay intact;
+// a small ordinary helper expands without requiring an authored inline policy.
+func.def public @entry(%value: f32) -> (f32) {
+  %first = func.call pure @twice(%value) : (f32) -> (f32)
+  %second = func.call pure @adjust(%first) : (f32) -> (f32)
+  func.return %second : f32
+}
+
+func.def cold @twice(%value: f32) -> (f32) {
+  %first = func.call pure @adjust(%value) : (f32) -> (f32)
+  %second = func.call pure @adjust(%first) : (f32) -> (f32)
+  func.return %second : f32
+}
+
+func.def cold @adjust(%value: f32) -> (f32) {
+  %c1 = scalar.constant 1.0 : f32
+  %result = func.call pure @add(%value, %c1) : (f32, f32) -> (f32)
+  func.return %result : f32
+}
+
+func.def @add(%left: f32, %right: f32) -> (f32) {
+  %result = scalar.addf %left, %right : f32
+  func.return %result : f32
+}
+
+// ----
+func.def public @entry(%value: f32) -> (f32) {
+  %first = func.call pure @twice(%value) : (f32) -> (f32)
+  %second = func.call pure @adjust(%first) : (f32) -> (f32)
+  func.return %second : f32
+}
+
+func.def cold @twice(%value: f32) -> (f32) {
+  %first = func.call pure @adjust(%value) : (f32) -> (f32)
+  %second = func.call pure @adjust(%first) : (f32) -> (f32)
+  func.return %second : f32
+}
+
+func.def cold @adjust(%value: f32) -> (f32) {
+  %c1 = scalar.constant 1.0 : f32
+  %result = scalar.addf %value, %c1 : f32
+  func.return %result : f32
+}
+
+// ====
+
+// References still expand, even when cold, so the caller's storage planner sees
+// both the allocation and its accesses. Numeric signatures alone also cannot
+// retain a helper that creates storage.
+func.def public @entry(%value: i32) -> (i32) {
+  %result = func.call @local_value(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def cold @local_value(%value: i32) -> (i32) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 4 : offset
+  %storage = buffer.alloca<workgroup> align(4) %bytes : buffer
+  %view = buffer.view %storage[%origin] : buffer -> view<1xi32>
+  view.store %value, %view[0] : i32, view<1xi32>
+  %result = func.call @read(%view) : (view<1xi32>) -> (i32)
+  func.return %result : i32
+}
+
+func.def cold @read(%input: view<1xi32>) -> (i32) {
+  %result = view.load %input[0] : view<1xi32> -> i32
+  func.return %result : i32
+}
+
+// ----
+func.def public @entry(%value: i32) -> (i32) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 4 : offset
+  %storage = buffer.alloca<workgroup> align(4) %bytes : buffer
+  %view = buffer.view %storage[%origin] : buffer -> view<1xi32>
+  view.store %value, %view[0] : i32, view<1xi32>
+  %result = view.load %view[0] : view<1xi32> -> i32
+  func.return %result : i32
+}
+
+// ====
+
+func.def public @entry(%input: buffer) -> (i32) {
+  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="read", failure_code="target_requires_inline"}
+  %result = func.call @read(%input) : (buffer) -> (i32)
+  func.return %result : i32
+}
+
+func.def noinline @read(%input: buffer) -> (i32) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  %result = view.load %view[0] : view<1xi32> -> i32
+  func.return %result : i32
+}
+
+// ====
+
+func.def public @entry(%value: i32) -> (i32) {
+  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="local_value", failure_code="target_requires_inline"}
+  %result = func.call @local_value(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def noinline @local_value(%value: i32) -> (i32) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 4 : offset
+  %storage = buffer.alloca<private> align(4) %bytes : buffer
+  %view = buffer.view %storage[%origin] : buffer -> view<1xi32>
+  view.store %value, %view[0] : i32, view<1xi32>
+  %result = view.load %view[0] : view<1xi32> -> i32
+  func.return %result : i32
+}

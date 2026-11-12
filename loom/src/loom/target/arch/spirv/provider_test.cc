@@ -216,7 +216,7 @@ TEST_F(SpirvProviderTest, VerifiesReflectedRawBdaParameterOffsetBoundary) {
   EXPECT_EQ(emission.u32_params[1], 65536u);
 }
 
-TEST_F(SpirvProviderTest, RequiresLowCallsInline) {
+TEST_F(SpirvProviderTest, RetainsLowCallsWithoutStorageOrResources) {
   EXPECT_EQ(loom_spirv_target_provider.target_fact_type,
             &loom_spirv_target_fact_type);
   ASSERT_NE(loom_spirv_target_provider.select_call_policy, nullptr);
@@ -224,7 +224,36 @@ TEST_F(SpirvProviderTest, RequiresLowCallsInline) {
   EXPECT_EQ(loom_spirv_target_provider.select_call_policy(
                 &resolved_target, nullptr, LOOM_CALL_LIKE_KIND_LOW_INTERNAL,
                 loom_call_like_t{}, loom_func_like_t{}),
-            LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE);
+            LOOM_TARGET_CALL_POLICY_NO_RESOURCES |
+                LOOM_TARGET_CALL_POLICY_NO_STORAGE);
+}
+
+TEST_F(SpirvProviderTest, AdmitsNumericSourceSignatureFamily) {
+  const loom_resolved_target_t resolved_target = {};
+  for (const char* element :
+       {"i1", "i8", "i16", "i32", "i64", "index", "offset", "f16", "bf16",
+        "f32", "f64", "f8E4M3", "f8E5M2"}) {
+    for (unsigned lanes : {0, 1, 2, 3, 4, 5, 8, 17}) {
+      const std::string type =
+          lanes ? "vector<" + std::to_string(lanes) + "x" + element + ">"
+                : std::string(element);
+      SCOPED_TRACE(type);
+      const std::string source =
+          "func.def @swap(%left: " + type + ", %right: " + type + ") -> (" +
+          type + ", " + type + ") { func.return %right, %left : " + type +
+          ", " + type + " }";
+      ModulePtr module =
+          Parse(iree_make_string_view(source.data(), source.size()));
+      const loom_symbol_ref_t symbol =
+          FindSymbolRef(module.get(), IREE_SV("swap"));
+      const loom_func_like_t function = loom_func_like_cast(
+          module.get(), module->symbols.entries[symbol.symbol_id].defining_op);
+      EXPECT_EQ(loom_spirv_target_provider.select_call_policy(
+                    &resolved_target, module.get(),
+                    LOOM_CALL_LIKE_KIND_SEMANTIC, loom_call_like_t{}, function),
+                LOOM_TARGET_CALL_POLICY_DIRECT);
+    }
+  }
 }
 
 TEST_F(SpirvProviderTest, MaterializesAuthoredRefinements) {

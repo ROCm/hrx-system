@@ -805,16 +805,16 @@ For a large helper called from several places, `loom::noinline` preserves a
 callable boundary instead of copying its loops into every caller:
 
 ```cpp
-[[loom::noinline]] static float advance(float value, const int* counts, unsigned phase) {
-  for (int iteration = 0; iteration < counts[phase & 15u]; ++iteration) {
+[[loom::noinline]] static float advance(float value, unsigned count) {
+  for (unsigned iteration = 0; iteration < count; ++iteration) {
     value = value * 1.001f + 0.5f;
   }
   return value;
 }
 
 float integrate(float value, const int* counts) {
-  value = advance(value, counts, 0u);
-  return advance(value, counts, 1u);
+  value = advance(value, counts[0]);
+  return advance(value, counts[1]);
 }
 ```
 
@@ -823,6 +823,14 @@ and AIE2P cores. Large or frequently called helpers can remain shared without
 annotations. The compiler keeps those decisions compatible with the target:
 oversized physical argument lists and unsupported helper storage force
 expansion. `loom::noinline` instead diagnoses an incompatible boundary.
+
+SPIR-V retains ordinary scalar and static-vector helpers, including nested
+calls. Buffer/view signatures and helpers that may create storage still expand
+so storage planning sees their accesses in the caller. Cooperative-matrix
+fragments must stay within one callable body: Loom template expansion and
+`[[loom::inline]]` helpers preserve their matrix roles and shapes. A fragment
+crossing a remaining call or return produces a diagnostic instead of being
+treated as an ordinary vector argument or result.
 
 AMDGPU and AIE2P native helpers may contain loops and branches, but must be
 leaves after inlining. In a chain `kernel → outer → inner`, the compiler can

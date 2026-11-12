@@ -1,0 +1,56 @@
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=FLOAT16,COOPERATIVE_MATRIX_KHR
+
+// Template composition and required inlining preserve the native A/B/result
+// types without introducing a machine-call ABI for their source vectors.
+kernel.def @matrix_product() {
+  %c1 = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%width, %c1, %c1) : index
+} launch(%output: buffer, %left: f16, %right: f16, %initial: f32) {
+  %dimension = index.constant 16 : index
+  %origin = index.constant 0 : offset
+  %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %destination = buffer.view %aligned[%origin] : buffer -> view<16x16xf32>
+  %left_values = vector.splat %left : vector<16xf16>
+  %right_values = vector.splat %right : vector<16xf16>
+  %initial_values = vector.splat %initial : vector<8xf32>
+  %lhs = vector.fragment<lhs> %left_values shape [%dimension, %dimension] : vector<16xf16>
+  %rhs = vector.fragment<rhs> %right_values shape [%dimension, %dimension] : vector<16xf16>
+  %init = vector.fragment<init> %initial_values shape [%dimension, %dimension] : vector<8xf32>
+  %result = template.apply<@product>(%lhs, %rhs, %init) : (vector<16xf16>, vector<16xf16>, vector<8xf32>) -> (vector<8xf32>)
+  vector.fragment.store<result> %result, %destination[0, 0] shape [%dimension, %dimension] : vector<8xf32>, view<16x16xf32>
+  kernel.return
+}
+
+template.decl @product(%left: vector<16xf16>, %right: vector<16xf16>, %initial: vector<8xf32>) -> (vector<8xf32>)
+
+template.def<@product> @product_impl(%left: vector<16xf16>, %right: vector<16xf16>, %initial: vector<8xf32>) -> (vector<8xf32>) {
+  %lhs = func.call @identity(%left) : (vector<16xf16>) -> (vector<16xf16>)
+  %rhs = func.call @identity(%right) : (vector<16xf16>) -> (vector<16xf16>)
+  %result = func.call @multiply(%lhs, %rhs, %initial) : (vector<16xf16>, vector<16xf16>, vector<8xf32>) -> (vector<8xf32>)
+  template.return %result : vector<8xf32>
+}
+
+func.def inline @identity(%value: vector<16xf16>) -> (vector<16xf16>) {
+  func.return %value : vector<16xf16>
+}
+
+func.def inline @multiply(%left: vector<16xf16>, %right: vector<16xf16>, %initial: vector<8xf32>) -> (vector<8xf32>) {
+  %result = vector.mma %left, %right, %initial : vector<16xf16>, vector<16xf16>, vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, f16, f16, f32) -> ()}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @matrix_product(%left: reg<spirv.id : f16>, %right: reg<spirv.id : f16>, %initial: reg<spirv.id : f32>) asm {
+  %aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %lhs = OpCompositeConstruct.cooperative.f16.16x16.lhs %left : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_a>>
+  %rhs = OpCompositeConstruct.cooperative.f16.16x16.rhs %right : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_b>>
+  %init = OpCompositeConstruct.cooperative.f32.16x16.accumulator %initial : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %result = OpCooperativeMatrixMulAddKHR.f16.16x16x16.f32.subgroup %lhs, %rhs, %init : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %44 = OpConstant.offset64 16
+  %45 = OpUConvert.offset64.u32 %44
+  %46 = OpConstant.offset64 0
+  %47 = OpPtrAccessChain.storage_buffer.f32.byte_offset %aligned, %46
+  OpCooperativeMatrixStoreKHR.accumulator.f32.16x16.subgroup.storage_buffer %47, %result, %45, 0
+  return
+}

@@ -1,6 +1,5 @@
 // RUN: emit source-low target=spirv:vulkan1.3+bda output=low control-flow=structured-low
 
-// ERROR@+1: TARGET/031 {actual_type="vector<1xi32>", type_constraint="vector.target_carrier"}
 func.def public @call_mixed_i32(%input: vector<1xi32>, %delta: i32) -> (i32, i32) {
   %value = vector.extract %input[0] : vector<1xi32> -> i32
   %mixed = func.call @add_i32(%value, %delta) : (i32, i32) -> (i32)
@@ -16,9 +15,15 @@ func.def @add_i32(%value: i32, %delta: i32) -> (i32) {
   func.return %result : i32
 }
 
+// ----
+low.func.def public target<spirv.logical.core> abi(shader_entry_point) @call_mixed_i32(%value: reg<spirv.id : i32>, %delta: reg<spirv.id : i32>) -> (reg<spirv.id : i32>, reg<spirv.id : i32>) asm {
+  %result$20 = OpIAdd %value, %delta
+  %result$21 = OpIAdd %delta, %delta
+  return %result$20, %result$21
+}
+
 // ====
 
-// ERROR@+1: TARGET/031 {actual_type="vector<1xi64>", type_constraint="vector.target_carrier"}
 func.def public @call_mixed_i64(%input: vector<1xi64>, %delta: i64) -> (i64, i64) {
   %value = vector.extract %input[0] : vector<1xi64> -> i64
   %mixed = func.call @add_i64(%value, %delta) : (i64, i64) -> (i64)
@@ -29,6 +34,13 @@ func.def public @call_mixed_i64(%input: vector<1xi64>, %delta: i64) -> (i64, i64
 func.def @add_i64(%value: i64, %delta: i64) -> (i64) {
   %result = scalar.addi %value, %delta : i64
   func.return %result : i64
+}
+
+// ----
+low.func.def public target<spirv.logical.core> abi(shader_entry_point) @call_mixed_i64(%value: reg<spirv.id : i64>, %delta: reg<spirv.id : i64>) -> (reg<spirv.id : i64>, reg<spirv.id : i64>) asm {
+  %result$16 = OpIAdd.i64 %value, %delta
+  %result$17 = OpIAdd.i64 %delta, %delta
+  return %result$16, %result$17
 }
 
 // ====
@@ -62,7 +74,6 @@ low.func.def public target<spirv.logical.core> abi(shader_entry_point) @call_vec
 
 // ====
 
-// ERROR@+1: TARGET/031 {actual_type="vector<1xi32>", type_constraint="vector.target_carrier"}
 func.def public @call_loop(%input: vector<1xi32>, %delta: i32, %count: index) -> (i32) {
   %value = vector.extract %input[0] : vector<1xi32> -> i32
   %result = func.call @repeat_add(%value, %delta, %count) : (i32, i32, index) -> (i32)
@@ -82,6 +93,17 @@ func.def @repeat_add(%value: i32, %delta: i32, %count: index) -> (i32) {
 func.def @advance_i32(%value: i32, %delta: i32) -> (i32) {
   %result = scalar.addi %value, %delta : i32
   func.return %result : i32
+}
+
+// ----
+low.func.def public target<spirv.logical.core> abi(shader_entry_point) @call_loop(%value: reg<spirv.id : i32>, %delta: reg<spirv.id : i32>, %count: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
+  %c0 = OpConstant.i32 0 : reg<spirv.id : index>
+  %c1 = OpConstant.i32 1 : reg<spirv.id : index>
+  %result = low.scf.for signed [%c0 to %count step %c1] iter_args(%value: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) do(%i: reg<spirv.id : index>, %current: reg<spirv.id : i32>) {
+    %result = OpIAdd %current, %delta
+    low.scf.yield %result : reg<spirv.id : i32>
+  }
+  return %result
 }
 
 // ====
@@ -126,3 +148,36 @@ func.def public @call_external(%value: i32) -> (i32) {
 }
 
 func.decl @increment(%value: i32) -> (%result: i32) where [eq(%result, %value)]
+
+// ====
+
+// Native vector arguments and tuple results cross the same callable boundary.
+// The caller consumes both results and retains its original vector beside them.
+func.def public @call_vector_pair(%x: f32, %y: f32, %z: f32, %scale: f32) -> (f32, f32, f32) {
+  %input = vector.from_elements %x, %y, %z : vector<3xf32>
+  %scaled, %first = func.call @scale_vector(%input, %scale) : (vector<3xf32>, f32) -> (vector<3xf32>, f32)
+  %last = vector.extract %scaled[2] : vector<3xf32> -> f32
+  %original = vector.extract %input[1] : vector<3xf32> -> f32
+  func.return %original, %last, %first : f32, f32, f32
+}
+
+func.def noinline @scale_vector(%input: vector<3xf32>, %scale: f32) -> (vector<3xf32>, f32) {
+  %scales = vector.splat %scale : vector<3xf32>
+  %scaled = vector.mulf %input, %scales : vector<3xf32>
+  %first = vector.extract %scaled[0] : vector<3xf32> -> f32
+  func.return %scaled, %first : vector<3xf32>, f32
+}
+
+// ----
+low.func.def public target<spirv.logical.core> abi(shader_entry_point) @call_vector_pair(%x: reg<spirv.id : f32>, %y: reg<spirv.id : f32>, %z: reg<spirv.id : f32>, %scale: reg<spirv.id : f32>) -> (reg<spirv.id : f32>, reg<spirv.id : f32>, reg<spirv.id : f32>) asm {
+  %input = OpCompositeConstruct.v3f32 %x, %y, %z
+  %scaled, %first = low.func.call pure @scale_vector(%input, %scale) : (reg<spirv.id : vector<3xf32>>, reg<spirv.id : f32>) -> (reg<spirv.id : vector<3xf32>>, reg<spirv.id : f32>)
+  %last = OpCompositeExtract.v3f32.f32 %scaled, 2
+  return %y, %last, %first
+}
+
+low.func.def noinline target<spirv.logical.core> @scale_vector(%input: reg<spirv.id : vector<3xf32>>, %scale: reg<spirv.id : f32>) -> (reg<spirv.id : vector<3xf32>>, reg<spirv.id : f32>) asm {
+  %scaled = OpVectorTimesScalar.v3f32 %input, %scale
+  %first = OpCompositeExtract.v3f32.f32 %scaled, 0
+  return %scaled, %first
+}
