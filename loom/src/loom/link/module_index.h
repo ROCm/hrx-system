@@ -228,6 +228,8 @@ typedef struct loom_link_module_index_symbol_t {
 typedef struct loom_link_module_index_template_family_t {
   // Dense index-wide family ordinal.
   loom_link_template_family_ordinal_t ordinal;
+  // True if any bytecode provider needs target or requires attribute decoding.
+  bool requires_bytecode_projection;
   // Indexed symbol carrying this family's private or global identity.
   iree_host_size_t identity_symbol_ordinal;
   // Borrowed family symbol name for diagnostics.

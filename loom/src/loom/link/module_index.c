@@ -633,7 +633,7 @@ static iree_status_t loom_link_index_resolve_template_family(
 static iree_status_t loom_link_index_append_template_provider(
     loom_link_module_index_t* index,
     loom_link_template_family_ordinal_t ordinal,
-    iree_host_size_t symbol_ordinal) {
+    iree_host_size_t symbol_ordinal, bool requires_bytecode_projection) {
   if (ordinal == LOOM_LINK_TEMPLATE_FAMILY_ORDINAL_INVALID) {
     return iree_ok_status();
   }
@@ -687,6 +687,7 @@ static iree_status_t loom_link_index_append_template_provider(
   }
   family->providers.last_symbol_ordinal = symbol_ordinal;
   ++family->providers.count;
+  family->requires_bytecode_projection |= requires_bytecode_projection;
   return iree_ok_status();
 }
 
@@ -1117,7 +1118,8 @@ static iree_status_t loom_link_index_project_materialized_template_families(
         index, module->symbol_start_ordinal + family.symbol_id,
         &symbol->template_family_ordinal));
     IREE_RETURN_IF_ERROR(loom_link_index_append_template_provider(
-        index, symbol->template_family_ordinal, symbol->ordinal));
+        index, symbol->template_family_ordinal, symbol->ordinal,
+        /*requires_bytecode_projection=*/false));
   }
   return iree_ok_status();
 }
@@ -1151,7 +1153,9 @@ static iree_status_t loom_link_index_project_bytecode_template_families(
             source_symbol->template_family_symbol_ordinal,
         &symbol->template_family_ordinal));
     IREE_RETURN_IF_ERROR(loom_link_index_append_template_provider(
-        index, symbol->template_family_ordinal, symbol->ordinal));
+        index, symbol->template_family_ordinal, symbol->ordinal,
+        source_symbol->template_target_attribute_ordinal_plus_one ||
+            source_symbol->template_requires_attribute_ordinal_plus_one));
   }
   return iree_ok_status();
 }

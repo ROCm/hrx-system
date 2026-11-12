@@ -463,7 +463,7 @@ iree_status_t loom_link_template_candidate_loader_load(
               target_symbol, provider->ordinal,
               &candidates[candidate_count++]));
         } else {
-          if (!projections) {
+          if (!projections && family->requires_bytecode_projection) {
             IREE_RETURN_IF_ERROR(
                 loom_link_template_candidate_family_projections(loader, family,
                                                                 &projections));
@@ -472,11 +472,13 @@ iree_status_t loom_link_template_candidate_loader_load(
           IREE_RETURN_IF_ERROR(loom_link_bytecode_template_contract_reader_load(
               &cache->source.bytecode.contracts,
               (uint32_t)provider->module_symbol_ordinal,
-              &projections
-                  [provider_index /
-                   LOOM_LINK_TEMPLATE_CANDIDATE_PROJECTION_SEGMENT_CAPACITY]
-                  [provider_index %
-                   LOOM_LINK_TEMPLATE_CANDIDATE_PROJECTION_SEGMENT_CAPACITY],
+              projections
+                  ? &projections
+                        [provider_index /
+                         LOOM_LINK_TEMPLATE_CANDIDATE_PROJECTION_SEGMENT_CAPACITY]
+                        [provider_index %
+                         LOOM_LINK_TEMPLATE_CANDIDATE_PROJECTION_SEGMENT_CAPACITY]
+                  : NULL,
               &contract));
           const loom_symbol_ref_t target_symbol =
               loom_link_template_candidate_lookup_linked_symbol(
