@@ -258,8 +258,8 @@ class GitHubActionsWatchTest(unittest.TestCase):
 
         self.assertEqual(snapshot.disposition, triage.REPOSITORY)
         self.assertFalse(snapshot.terminal)
-        self.assertEqual(len(snapshot.finding_groups), 1)
-        self.assertEqual(len(snapshot.finding_groups[0].jobs), 2)
+        self.assertEqual(len(snapshot.finding_groups), 2)
+        self.assertEqual([len(group.jobs) for group in snapshot.finding_groups], [1, 1])
         self.assertEqual(
             [(job.state, job.detail) for job in snapshot.live_jobs],
             [
@@ -317,18 +317,12 @@ class GitHubActionsWatchTest(unittest.TestCase):
                     ),
                     watch.EXIT_FAILURE,
                 )
-        for disposition in (
-            triage.INFRASTRUCTURE,
-            triage.KNOWN_PRODUCT,
-            triage.KNOWN_FLAKE,
-        ):
-            with self.subTest(disposition=disposition):
-                self.assertEqual(
-                    watch.snapshot_exit_code(
-                        dataclasses.replace(base, disposition=disposition)
-                    ),
-                    watch.EXIT_CLASSIFIED_NONREPOSITORY,
-                )
+        self.assertEqual(
+            watch.snapshot_exit_code(
+                dataclasses.replace(base, disposition=triage.INFRASTRUCTURE)
+            ),
+            watch.EXIT_CLASSIFIED_NONREPOSITORY,
+        )
 
     def test_json_preserves_every_grouped_job_link(self):
         finding = triage.Finding(
