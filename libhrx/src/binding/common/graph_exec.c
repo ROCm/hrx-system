@@ -1380,81 +1380,6 @@ static iree_status_t iree_hal_streaming_graph_create_child_graph_block(
   return status;
 }
 
-typedef struct iree_hal_streaming_node_index_set_t {
-  uint32_t values[8];
-  uint32_t count : 31;
-  uint32_t invalid : 1;
-} iree_hal_streaming_node_index_set_t;
-
-// Resets the set to empty.
-static inline void iree_hal_streaming_node_index_set_reset(
-    iree_hal_streaming_node_index_set_t* set) {
-  set->count = 0;
-  set->invalid = 0;
-}
-
-// Returns true if the |set| is invalid or |value| is present.
-static bool iree_hal_streaming_node_index_set_test_hazard(
-    const iree_hal_streaming_node_index_set_t* set, uint32_t value) {
-  if (set->invalid) {
-    return true;
-  }
-  for (uint32_t i = 0; i < set->count; ++i) {
-    if (set->values[i] == value) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// Inserts |value| into the |set|.
-// If the set has reached capacity it is set to invalid and all future tests
-// will return a hazard.
-static void iree_hal_streaming_node_index_set_insert(
-    iree_hal_streaming_node_index_set_t* set, uint32_t value) {
-  if (set->count >= IREE_ARRAYSIZE(set->values)) {
-    set->invalid = 1;
-    return;
-  }
-  set->values[set->count++] = value;
-}
-
-static bool iree_hal_streaming_graph_node_has_recorded_dependency_hazard(
-    const iree_hal_streaming_graph_node_t* node,
-    const iree_hal_streaming_graph_edge_t* additional_edges,
-    const uint32_t* node_index_map,
-    const iree_hal_streaming_node_index_set_t* barrier_index_set) {
-  for (uint32_t j = 0; j < node->dependency_count; ++j) {
-    const uint32_t dependency_sort_index =
-        node_index_map[node->dependencies[j]->node_index];
-    if (dependency_sort_index == UINT32_MAX) {
-      continue;
-    }
-    if (iree_hal_streaming_node_index_set_test_hazard(barrier_index_set,
-                                                      dependency_sort_index)) {
-      return true;
-    }
-  }
-
-  for (const iree_hal_streaming_graph_edge_t* edge = additional_edges; edge;
-       edge = edge->next) {
-    if (edge->to != node) {
-      continue;
-    }
-    const uint32_t dependency_sort_index =
-        node_index_map[edge->from->node_index];
-    if (dependency_sort_index == UINT32_MAX) {
-      continue;
-    }
-    if (iree_hal_streaming_node_index_set_test_hazard(barrier_index_set,
-                                                      dependency_sort_index)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 static iree_status_t iree_hal_streaming_graph_record_dependency_barrier(
     iree_hal_command_buffer_t* command_buffer, iree_hal_barrier_flags_t flags) {
   // A dependency orders both command execution and memory visibility. Graph
@@ -1490,11 +1415,8 @@ static iree_status_t iree_hal_streaming_graph_record_dependency_barrier(
 
 // Helper to record nodes from a partition into a command buffer.
 static iree_status_t iree_hal_streaming_graph_record_partition(
-    iree_hal_streaming_graph_exec_t* exec,
-    iree_hal_streaming_graph_sort_node_t* sorted_nodes,
-    uint32_t node_start_index, uint32_t node_count,
-    const uint32_t* node_index_map, uint8_t stream_id,
-    iree_hal_streaming_graph_edge_t* additional_edges,
+    iree_hal_streaming_graph_exec_t* exec, const hrx_graph_schedule_t* schedule,
+    uint32_t node_start_index, uint32_t node_count, uint8_t stream_id,
     iree_hal_command_buffer_t* command_buffer) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -1511,37 +1433,22 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
       z0, iree_hal_command_buffer_begin_debug_group(command_buffer, label_name,
                                                     label_color, location));
 
-  // Record nodes assigned to this stream.
-  //
-  // We use a small linear scan set to make the test for hazards faster: we have
-  // the original unsorted node indices of dependencies but not the sorted ones
-  // we'd need to index into the sorted_nodes list and this avoids needing to
-  // do that mapping.
   iree_status_t status = iree_ok_status();
-  uint32_t in_stream_count = 0;
   bool release_to_host = false;
-  iree_hal_streaming_node_index_set_t barrier_index_set;
-  iree_hal_streaming_node_index_set_reset(&barrier_index_set);
   for (uint32_t i = 0; iree_status_is_ok(status) && i < node_count; ++i) {
-    iree_hal_streaming_graph_sort_node_t* sort_node =
-        &sorted_nodes[node_start_index + i];
-    // Ignore nodes from other streams.
-    if (sort_node->stream_id != stream_id) {
+    const uint32_t index = schedule->order[node_start_index + i];
+    const uint8_t flags = schedule->flags[index];
+    if ((flags >> HRX_GRAPH_ANALYSIS_NODE_STREAM_SHIFT) != stream_id) {
       continue;
     }
-    iree_hal_streaming_graph_node_t* node = sort_node->node;
-    if (in_stream_count > 0) {
-      const bool has_dependency_hazard =
-          iree_hal_streaming_graph_node_has_recorded_dependency_hazard(
-              node, additional_edges, node_index_map, &barrier_index_set);
-      if (has_dependency_hazard) {
-        IREE_RETURN_AND_END_ZONE_IF_ERROR(
-            z0, iree_hal_streaming_graph_record_dependency_barrier(
-                    command_buffer, IREE_HAL_BARRIER_FLAG_NONE));
-        iree_hal_streaming_node_index_set_reset(&barrier_index_set);
+    iree_hal_streaming_graph_node_t* node = schedule->sources[index];
+    if (flags & HRX_GRAPH_ANALYSIS_NODE_BARRIER_BEFORE) {
+      status = iree_hal_streaming_graph_record_dependency_barrier(
+          command_buffer, IREE_HAL_BARRIER_FLAG_NONE);
+      if (!iree_status_is_ok(status)) {
+        break;
       }
     }
-    ++in_stream_count;
     switch (node->type) {
       case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL: {
         const iree_hal_streaming_graph_kernel_node_attrs_t* attrs =
@@ -1629,8 +1536,6 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
         break;
       }
     }
-    iree_hal_streaming_node_index_set_insert(&barrier_index_set,
-                                             node_index_map[node->node_index]);
   }
 
   if (iree_status_is_ok(status) && release_to_host) {
@@ -1652,32 +1557,13 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
   return status;
 }
 
-iree_status_t iree_hal_streaming_graph_exec_compile(
-    iree_hal_streaming_graph_exec_t* exec) {
-  IREE_ASSERT_ARGUMENT(exec);
-  iree_hal_streaming_node_block_t* node_blocks = exec->graph->node_blocks;
-  const iree_host_size_t node_count = exec->graph->node_count;
+static iree_status_t iree_hal_streaming_graph_exec_compile_schedule(
+    iree_hal_streaming_graph_exec_t* exec,
+    const hrx_graph_schedule_t* schedule) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  exec->instantiated_node_count = node_count;
-  exec->instantiated_visible_node_count =
-      iree_hal_streaming_graph_visible_node_count(exec->graph);
-
-  // Lower public copy dependencies to include their host helpers, then
-  // analyze and partition the complete execution graph.
-  iree_hal_streaming_graph_schedule_t schedule;
-  iree_hal_streaming_graph_edge_t* additional_edges = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_graph_schedule_copy_dependencies(
-              exec->graph, &exec->arena_allocator, &additional_edges));
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_graph_schedule_nodes(
-              node_blocks, node_count, exec->node_disabled_states,
-              exec->node_disabled_state_count, additional_edges,
-              &exec->arena_allocator, &schedule));
-
   // Allocate block array.
-  exec->block_count = schedule.block_count;
-  if (schedule.partition_count == 0) {
+  exec->block_count = schedule->block_count;
+  if (schedule->partition_count == 0) {
     exec->block_count = 0;
     exec->blocks = NULL;
     exec->semaphore_count = 0;
@@ -1687,7 +1573,7 @@ iree_status_t iree_hal_streaming_graph_exec_compile(
     return iree_ok_status();
   }
   const uint16_t final_stream_count =
-      schedule.partitions[schedule.partition_count - 1].stream_count;
+      schedule->partitions[schedule->partition_count - 1].stream_count;
   const bool needs_final_join = final_stream_count > 1;
   exec->block_count += needs_final_join ? 1 : 0;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -1699,10 +1585,10 @@ iree_status_t iree_hal_streaming_graph_exec_compile(
   // Every workstream signals a point joined by the next partition. Parallel
   // terminal workstreams also signal points joined by the completion barrier.
   const iree_host_size_t signaling_partition_count =
-      schedule.partition_count - (needs_final_join ? 0 : 1);
+      schedule->partition_count - (needs_final_join ? 0 : 1);
   uint32_t semaphore_count = 0;
   for (iree_host_size_t i = 0; i < signaling_partition_count; ++i) {
-    semaphore_count += schedule.partitions[i].stream_count;
+    semaphore_count += schedule->partitions[i].stream_count;
   }
   exec->semaphore_count = semaphore_count;
 
@@ -1747,9 +1633,8 @@ iree_status_t iree_hal_streaming_graph_exec_compile(
   // Create blocks from partitions.
   uint32_t block_index = 0;
   uint32_t semaphore_index = 0;
-  for (iree_host_size_t p = 0; p < schedule.partition_count; p++) {
-    const iree_hal_streaming_graph_partition_t* partition =
-        &schedule.partitions[p];
+  for (iree_host_size_t p = 0; p < schedule->partition_count; p++) {
+    const hrx_graph_partition_t* partition = &schedule->partitions[p];
 
     // Determine wait semaphores for chaining FROM the previous partition.
     // The first partition waits on the original submission stream timeline
@@ -1757,10 +1642,19 @@ iree_status_t iree_hal_streaming_graph_exec_compile(
     // semaphores, of which there may be several for a join operation.
     // Note that we don't allocate space for the initial semaphores as those are
     // part of the submission, not the exec object.
+    const uint32_t first_index = schedule->order[partition->start_index];
+    const uint8_t kind =
+        schedule->flags[first_index] & HRX_GRAPH_ANALYSIS_NODE_KIND_MASK;
+    iree_hal_streaming_graph_node_t* first_node =
+        schedule->sources[first_index];
+    const iree_hal_streaming_graph_node_type_t type =
+        kind == HRX_GRAPH_ANALYSIS_NODE_EMPTY
+            ? IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EMPTY
+            : first_node->type;
     uint16_t wait_semaphore_count = 0;
     if (p > 0) {
-      iree_hal_streaming_graph_partition_t* prev_partition =
-          &schedule.partitions[p - 1];
+      const hrx_graph_partition_t* prev_partition =
+          &schedule->partitions[p - 1];
       wait_semaphore_count =
           prev_partition->stream_count > 1 ? prev_partition->stream_count : 1;
     }
@@ -1772,15 +1666,12 @@ iree_status_t iree_hal_streaming_graph_exec_compile(
     // parallel final workstreams signal the compiled join instead. External
     // signals are supplied by the caller, not stored in the compiled block.
     uint16_t signal_semaphore_count = 0;
-    if (p < schedule.partition_count - 1 || needs_final_join) {
+    if (p < schedule->partition_count - 1 || needs_final_join) {
       signal_semaphore_count =
           partition->stream_count > 1 ? partition->stream_count : 1;
     }
 
-    if (partition->type == IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_RECORDABLE) {
-      // If only one node is in the partition and it's recordable, we
-      // may be able to route it to a dedicated partition type after this
-      // function is split into smaller helpers.
+    if (kind == HRX_GRAPH_ANALYSIS_NODE_RECORDABLE) {
       const uint8_t stream_count = partition->stream_count;
       const uint32_t partition_wait_semaphore_start =
           semaphore_index - wait_semaphore_count;
@@ -1809,9 +1700,8 @@ iree_status_t iree_hal_streaming_graph_exec_compile(
         // For multi-stream, records nodes filtered by stream_id.
         IREE_RETURN_AND_END_ZONE_IF_ERROR(
             z0, iree_hal_streaming_graph_record_partition(
-                    exec, schedule.sorted_nodes, partition->start_index,
-                    partition->count, schedule.node_index_map, s,
-                    additional_edges, ptrs.attrs->execute.command_buffer));
+                    exec, schedule, partition->start_index, partition->count, s,
+                    ptrs.attrs->execute.command_buffer));
 
         // Set up semaphore indices.
         if (wait_semaphore_count > 0) {
@@ -1845,21 +1735,17 @@ iree_status_t iree_hal_streaming_graph_exec_compile(
       // Set up semaphore indices.
       iree_hal_streaming_graph_block_t* block = NULL;
       iree_hal_streaming_graph_block_ptrs_t ptrs;
-      if (partition->type ==
-          IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_HOST_CALL) {
+      if (type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL) {
         // Host call gets its own block.
-        iree_hal_streaming_graph_node_t* node =
-            schedule.sorted_nodes[partition->start_index].node;
+        iree_hal_streaming_graph_node_t* node = first_node;
         IREE_RETURN_AND_END_ZONE_IF_ERROR(
             z0, iree_hal_streaming_graph_create_host_call_block(
                     exec, partition->start_index, partition->count,
                     wait_semaphore_count, signal_semaphore_count,
                     node->attrs.host.callback, node->attrs.host.user_data, node,
                     IREE_HAL_HOST_CALL_FLAG_NONE, &block, &ptrs));
-      } else if (partition->type ==
-                 IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_DISPATCH) {
-        iree_hal_streaming_graph_node_t* node =
-            schedule.sorted_nodes[partition->start_index].node;
+      } else if (type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL) {
+        iree_hal_streaming_graph_node_t* node = first_node;
         const iree_hal_streaming_graph_kernel_node_attrs_t* attrs =
             &node->attrs.kernel;
         const iree_hal_dispatch_config_t config = {
@@ -1900,22 +1786,19 @@ iree_status_t iree_hal_streaming_graph_exec_compile(
                     attrs->symbol->executable, attrs->symbol->export_ordinal,
                     config, attrs->constants, attrs->bindings, flags, &block,
                     &ptrs));
-      } else if (partition->type ==
-                 IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_GRAPH) {
-        iree_hal_streaming_graph_node_t* node =
-            schedule.sorted_nodes[partition->start_index].node;
+      } else if (type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_GRAPH) {
+        iree_hal_streaming_graph_node_t* node = first_node;
         IREE_RETURN_AND_END_ZONE_IF_ERROR(
             z0, iree_hal_streaming_graph_create_child_graph_block(
                     exec, partition->start_index, partition->count,
                     wait_semaphore_count, signal_semaphore_count,
                     node->attrs.child_graph.graph, &block, &ptrs));
       } else {
-        iree_hal_streaming_graph_node_t* node =
-            schedule.sorted_nodes[partition->start_index].node;
-        if (node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC ||
-            node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE) {
+        iree_hal_streaming_graph_node_t* node = first_node;
+        if (type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC ||
+            type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE) {
           const bool allocate =
-              node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC;
+              type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC;
           IREE_RETURN_AND_END_ZONE_IF_ERROR(
               z0,
               iree_hal_streaming_graph_block_allocate(
@@ -1940,12 +1823,10 @@ iree_status_t iree_hal_streaming_graph_exec_compile(
           IREE_RETURN_AND_END_ZONE_IF_ERROR(
               z0, iree_hal_resource_set_insert(exec->resource_set, 1,
                                                &ptrs.attrs->memory.allocation));
-        } else if (node->type ==
-                       IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD ||
-                   node->type ==
-                       IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT) {
+        } else if (type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD ||
+                   type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT) {
           const iree_hal_streaming_graph_block_type_t block_type =
-              node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD
+              type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD
                   ? IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_RECORD
                   : IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_WAIT;
           IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -2000,6 +1881,30 @@ iree_status_t iree_hal_streaming_graph_exec_compile(
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
+}
+
+iree_status_t iree_hal_streaming_graph_exec_compile(
+    iree_hal_streaming_graph_exec_t* exec) {
+  exec->instantiated_node_count = exec->graph->node_count;
+  exec->instantiated_visible_node_count =
+      iree_hal_streaming_graph_visible_node_count(exec->graph);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&exec->context->device_entry->block_pool, &arena);
+  iree_hal_streaming_graph_edge_t* additional_edges = NULL;
+  iree_status_t status = iree_hal_streaming_graph_schedule_copy_dependencies(
+      exec->graph, &arena, &additional_edges);
+  hrx_graph_schedule_t schedule;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_graph_schedule_nodes(
+        exec->graph->node_blocks, exec->graph->node_count,
+        exec->node_disabled_states, exec->node_disabled_state_count,
+        additional_edges, &arena, &schedule);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_graph_exec_compile_schedule(exec, &schedule);
+  }
+  iree_arena_deinitialize(&arena);
+  return status;
 }
 
 // Cells one chunk of the dropped-graph list holds. The first chunk lives in

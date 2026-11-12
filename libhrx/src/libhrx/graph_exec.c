@@ -156,101 +156,32 @@ static iree_status_t hrx_graph_block_allocate(
 }
 
 //===----------------------------------------------------------------------===//
-// Hazard tracking for command buffer recording
+// Dependency barriers selected by graph analysis
 //===----------------------------------------------------------------------===//
 
-void hrx_graph_barrier_state_reset(hrx_graph_barrier_state_t* state) {
-  state->count = 0;
-  state->invalid = 0;
-}
-
-static bool hrx_graph_barrier_state_test_hazard(
-    const hrx_graph_barrier_state_t* state, uint32_t value) {
-  if (state->invalid) {
-    return true;
-  }
-  for (uint32_t i = 0; i < state->count; ++i) {
-    if (state->values[i] == value) {
-      return true;
-    }
-  }
-  return false;
-}
-
-static void hrx_graph_barrier_state_insert(hrx_graph_barrier_state_t* state,
-                                           uint32_t value) {
-  if (state->count >= IREE_ARRAYSIZE(state->values)) {
-    state->invalid = 1;
-    return;
-  }
-  state->values[state->count++] = value;
-}
-
-iree_status_t hrx_graph_record_node_barrier(
-    hrx_graph_barrier_state_t* state, const hrx_graph_node_s* node,
-    const hrx_graph_edge_t* additional_edges, const uint32_t* node_index_map,
-    uint32_t sorted_index, iree_hal_command_buffer_t* command_buffer,
-    bool* out_did_barrier) {
-  IREE_ASSERT_ARGUMENT(state);
-  IREE_ASSERT_ARGUMENT(node);
-  IREE_ASSERT_ARGUMENT(node_index_map);
-  IREE_ASSERT_ARGUMENT(command_buffer);
-  IREE_ASSERT_ARGUMENT(out_did_barrier);
-  *out_did_barrier = false;
-
-  bool has_hazard = false;
-  for (uint32_t i = 0; i < node->dependency_count; ++i) {
-    const uint32_t dependency_sort_index =
-        node_index_map[node->dependencies[i]->node_index];
-    if (dependency_sort_index == UINT32_MAX) {
-      continue;
-    }
-    if (hrx_graph_barrier_state_test_hazard(state, dependency_sort_index)) {
-      has_hazard = true;
-      break;
-    }
-  }
-  for (const hrx_graph_edge_t* edge = additional_edges;
-       !has_hazard && edge != NULL; edge = edge->next) {
-    if (edge->to != node) {
-      continue;
-    }
-    const uint32_t dependency_sort_index =
-        node_index_map[edge->from->node_index];
-    if (dependency_sort_index == UINT32_MAX) {
-      continue;
-    }
-    has_hazard =
-        hrx_graph_barrier_state_test_hazard(state, dependency_sort_index);
-  }
-
-  if (has_hazard) {
-    // Every operation in a recorded partition executes on this device. Host
-    // calls and other partitions cross the system-scope entry/exit barriers;
-    // dependencies within the partition only order device memory accesses.
-    const iree_hal_access_scope_t device_access =
-        IREE_HAL_ACCESS_SCOPE_CONSTANT_READ |
-        IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
-        IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
-        IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
-        IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE;
-    const iree_hal_memory_barrier_t memory_barrier = {
-        .source_scope = device_access,
-        .target_scope = device_access,
-    };
-    const iree_hal_barrier_t execution_barrier = {
-        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
-        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
-        .memory_barrier_count = 1,
-        .memory_barriers = &memory_barrier,
-    };
-    IREE_RETURN_IF_ERROR(
-        iree_hal_command_buffer_barrier(command_buffer, &execution_barrier));
-    hrx_graph_barrier_state_reset(state);
-    *out_did_barrier = true;
-  }
-
-  hrx_graph_barrier_state_insert(state, sorted_index);
+static iree_status_t hrx_graph_record_dependency_barrier(
+    iree_hal_command_buffer_t* command_buffer) {
+  // Every operation in a recorded partition executes on this device. Host
+  // calls and other partitions cross the system-scope entry/exit barriers;
+  // dependencies within the partition only order device memory accesses.
+  const iree_hal_access_scope_t device_access =
+      IREE_HAL_ACCESS_SCOPE_CONSTANT_READ |
+      IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+      IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE;
+  const iree_hal_memory_barrier_t memory_barrier = {
+      .source_scope = device_access,
+      .target_scope = device_access,
+  };
+  const iree_hal_barrier_t execution_barrier = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+      .memory_barrier_count = 1,
+      .memory_barriers = &memory_barrier,
+  };
+  IREE_RETURN_IF_ERROR(
+      iree_hal_command_buffer_barrier(command_buffer, &execution_barrier));
   return iree_ok_status();
 }
 
@@ -259,9 +190,8 @@ iree_status_t hrx_graph_record_node_barrier(
 //===----------------------------------------------------------------------===//
 
 static iree_status_t hrx_graph_record_partition(
-    hrx_graph_sort_node_t* sorted_nodes, uint32_t node_start_index,
-    uint32_t node_count, const uint32_t* node_index_map, uint8_t stream_id,
-    const hrx_graph_edge_t* additional_edges,
+    const hrx_graph_schedule_t* schedule, uint32_t node_start_index,
+    uint32_t node_count, uint8_t stream_id,
     iree_hal_command_buffer_t* command_buffer) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -287,19 +217,19 @@ static iree_status_t hrx_graph_record_partition(
                                                     label_color, location));
 
   iree_status_t status = iree_ok_status();
-  hrx_graph_barrier_state_t barrier_state;
-  hrx_graph_barrier_state_reset(&barrier_state);
   for (uint32_t i = 0; iree_status_is_ok(status) && i < node_count; ++i) {
-    hrx_graph_sort_node_t* sort_node = &sorted_nodes[node_start_index + i];
-    if (sort_node->stream_id != stream_id) {
+    const uint32_t index = schedule->order[node_start_index + i];
+    const uint8_t flags = schedule->flags[index];
+    if ((flags >> HRX_GRAPH_ANALYSIS_NODE_STREAM_SHIFT) != stream_id) {
       continue;
     }
-    hrx_graph_node_s* node = sort_node->node;
-    bool did_barrier = false;
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, hrx_graph_record_node_barrier(
-                &barrier_state, node, additional_edges, node_index_map,
-                sort_node->sorted_index, command_buffer, &did_barrier));
+    hrx_graph_node_s* node = schedule->sources[index];
+    if (flags & HRX_GRAPH_ANALYSIS_NODE_BARRIER_BEFORE) {
+      status = hrx_graph_record_dependency_barrier(command_buffer);
+      if (!iree_status_is_ok(status)) {
+        break;
+      }
+    }
     switch (node->type) {
       case HRX_GRAPH_NODE_TYPE_INTERNAL_KERNEL: {
         const hrx_graph_kernel_node_attrs_internal_t* attrs =
@@ -363,20 +293,12 @@ static iree_status_t hrx_graph_record_partition(
 // Instantiation
 //===----------------------------------------------------------------------===//
 
-static iree_status_t hrx_graph_recording_compile(
+static iree_status_t hrx_graph_recording_compile_schedule(
     const iree_hal_queue_family_t* queue_family,
-    hrx_graph_recording_t* recording) {
+    const hrx_graph_schedule_t* schedule, hrx_graph_recording_t* recording) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  hrx_graph_schedule_t schedule;
-  hrx_graph_t graph = recording->graph;
-  hrx_graph_edge_t* additional_edges = graph->additional_edges;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, hrx_graph_schedule_nodes(graph->node_blocks, graph->node_count,
-                                   additional_edges,
-                                   &recording->arena_allocator, &schedule));
-
-  if (schedule.partition_count == 0) {
+  if (schedule->partition_count == 0) {
     recording->block_count = 0;
     recording->blocks = NULL;
     recording->semaphore_count = 0;
@@ -386,20 +308,20 @@ static iree_status_t hrx_graph_recording_compile(
   }
 
   const hrx_graph_partition_t* final_partition =
-      &schedule.partitions[schedule.partition_count - 1];
+      &schedule->partitions[schedule->partition_count - 1];
   const bool needs_final_join = final_partition->stream_count > 1;
   const iree_host_size_t signaling_partition_count =
-      schedule.partition_count - (needs_final_join ? 0 : 1);
+      schedule->partition_count - (needs_final_join ? 0 : 1);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
       iree_arena_allocate(&recording->arena_allocator,
-                          (schedule.block_count + (needs_final_join ? 1 : 0)) *
+                          (schedule->block_count + (needs_final_join ? 1 : 0)) *
                               sizeof(*recording->blocks),
                           (void**)&recording->blocks));
 
   uint32_t semaphore_count = 0;
   for (iree_host_size_t i = 0; i < signaling_partition_count; ++i) {
-    semaphore_count += schedule.partitions[i].stream_count;
+    semaphore_count += schedule->partitions[i].stream_count;
   }
   if (semaphore_count > 0) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -441,12 +363,16 @@ static iree_status_t hrx_graph_recording_compile(
   uint32_t semaphore_index = 0;
   const iree_hal_command_category_t command_categories =
       hrx_queue_family_command_categories(queue_family);
-  for (iree_host_size_t p = 0; p < schedule.partition_count; p++) {
-    const hrx_graph_partition_t* partition = &schedule.partitions[p];
+  for (iree_host_size_t p = 0; p < schedule->partition_count; p++) {
+    const hrx_graph_partition_t* partition = &schedule->partitions[p];
 
+    const uint32_t first_index = schedule->order[partition->start_index];
+    const uint8_t kind =
+        schedule->flags[first_index] & HRX_GRAPH_ANALYSIS_NODE_KIND_MASK;
     uint16_t wait_semaphore_count = 0;
     if (p > 0) {
-      hrx_graph_partition_t* prev_partition = &schedule.partitions[p - 1];
+      const hrx_graph_partition_t* prev_partition =
+          &schedule->partitions[p - 1];
       wait_semaphore_count =
           prev_partition->stream_count > 1 ? prev_partition->stream_count : 1;
     }
@@ -457,7 +383,7 @@ static iree_status_t hrx_graph_recording_compile(
           partition->stream_count > 1 ? partition->stream_count : 1;
     }
 
-    if (partition->type == HRX_GRAPH_PARTITION_TYPE_RECORDABLE) {
+    if (kind == HRX_GRAPH_ANALYSIS_NODE_RECORDABLE) {
       const uint8_t stream_count = partition->stream_count;
       const uint32_t partition_wait_semaphore_start =
           semaphore_index - wait_semaphore_count;
@@ -491,9 +417,9 @@ static iree_status_t hrx_graph_recording_compile(
         if (iree_status_is_ok(status)) {
           ptrs.attrs->execute.command_buffer = command_buffer;
           ptrs.attrs->execute.flags = IREE_HAL_QUEUE_EXECUTE_FLAG_NONE;
-          status = hrx_graph_record_partition(
-              schedule.sorted_nodes, partition->start_index, partition->count,
-              schedule.node_index_map, s, additional_edges, command_buffer);
+          status =
+              hrx_graph_record_partition(schedule, partition->start_index,
+                                         partition->count, s, command_buffer);
         }
         iree_hal_command_buffer_release(command_buffer);
         IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
@@ -521,9 +447,8 @@ static iree_status_t hrx_graph_recording_compile(
     } else {
       hrx_graph_exec_block_t* block = NULL;
       hrx_graph_block_ptrs_t ptrs;
-      if (partition->type == HRX_GRAPH_PARTITION_TYPE_HOST_CALL) {
-        hrx_graph_node_s* node =
-            schedule.sorted_nodes[partition->start_index].node;
+      if (kind == HRX_GRAPH_ANALYSIS_NODE_ISOLATED) {
+        hrx_graph_node_s* node = schedule->sources[first_index];
         IREE_RETURN_AND_END_ZONE_IF_ERROR(
             z0,
             hrx_graph_block_allocate(&recording->arena_allocator,
@@ -583,6 +508,24 @@ static iree_status_t hrx_graph_recording_compile(
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
+}
+
+static iree_status_t hrx_graph_recording_compile(
+    const iree_hal_queue_family_t* queue_family,
+    hrx_graph_recording_t* recording) {
+  hrx_graph_t graph = recording->graph;
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&graph->device->block_pool, &arena);
+  hrx_graph_schedule_t schedule;
+  iree_status_t status =
+      hrx_graph_schedule_nodes(graph->node_blocks, graph->node_count,
+                               graph->additional_edges, &arena, &schedule);
+  if (iree_status_is_ok(status)) {
+    status = hrx_graph_recording_compile_schedule(queue_family, &schedule,
+                                                  recording);
+  }
+  iree_arena_deinitialize(&arena);
+  return status;
 }
 
 //===----------------------------------------------------------------------===//

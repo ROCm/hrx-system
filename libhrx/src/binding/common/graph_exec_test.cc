@@ -760,6 +760,62 @@ TEST_F(GraphExecTest, ParallelWorkstreamsCarryBothLaunchBoundaries) {
   }
 }
 
+TEST_F(GraphExecTest, ReorderedBranchesJoinAcrossHostAndDeviceOperations) {
+  iree_hal_streaming_buffer_t* storage = nullptr;
+  iree_hal_streaming_graph_t* graph = nullptr;
+  iree_hal_streaming_graph_exec_t* executable = nullptr;
+  ScopeExit release_handles([&] {
+    IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize(stream_));
+    iree_hal_streaming_graph_exec_release(executable);
+    iree_hal_streaming_graph_release(graph);
+    iree_hal_streaming_memory_release_wrapped_buffer(storage);
+  });
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host_staging(
+      context_, 4 * sizeof(uint32_t), &storage));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &graph));
+  iree_hal_streaming_graph_node_t* tail = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_copy_ptr_node(
+      graph, nullptr, 0, storage->device_ptr + 3 * sizeof(uint32_t),
+      storage->device_ptr + 2 * sizeof(uint32_t), sizeof(uint32_t), &tail));
+  iree_hal_streaming_graph_node_t* host = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
+      graph, nullptr, 0,
+      [](void* user_data) {
+        auto* values = static_cast<uint32_t*>(user_data);
+        values[2] = values[0] + values[1];
+      },
+      storage->host_ptr, &host));
+  iree_hal_streaming_graph_node_t* branches[2] = {};
+  for (size_t i = 0; i < 2; ++i) {
+    IREE_ASSERT_OK(iree_hal_streaming_graph_add_fill_ptr_node(
+        graph, nullptr, 0, storage->device_ptr + i * sizeof(uint32_t),
+        static_cast<uint32_t>(17 + i * 12), sizeof(uint32_t), 1, &branches[i]));
+  }
+  iree_hal_streaming_graph_node_t* root = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_fill_ptr_node(
+      graph, nullptr, 0, storage->device_ptr, 0, sizeof(uint32_t), 4, &root));
+  iree_hal_streaming_graph_node_t* from[] = {root, root, branches[0],
+                                             branches[1], host};
+  iree_hal_streaming_graph_node_t* to[] = {branches[0], branches[1], host, host,
+                                           tail};
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_dependencies(
+      graph, from, to, IREE_ARRAYSIZE(from)));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &executable));
+  for (int replay = 0; replay < 3; ++replay) {
+    memset(storage->host_ptr, 0xCD, 4 * sizeof(uint32_t));
+    iree_hal_streaming_graph_exec_launch_result_t result;
+    IREE_ASSERT_OK(
+        iree_hal_streaming_graph_exec_launch(executable, stream_, &result));
+    IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+    std::array<uint32_t, 4> actual;
+    memcpy(actual.data(), storage->host_ptr, sizeof(actual));
+    EXPECT_EQ(actual, (std::array<uint32_t, 4>{17, 29, 46, 46}));
+  }
+}
+
 TEST_F(GraphExecTest,
        HostOperationFailureStopsDependentsAndPreservesOtherStreams) {
   struct Operation {

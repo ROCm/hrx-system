@@ -19,28 +19,37 @@ static iree_status_t hrx_graph_allocate_node(iree_allocator_t allocator,
     *out_extra_data = NULL;
   }
 
-  const iree_host_size_t node_size = sizeof(hrx_graph_node_s);
-  const iree_host_size_t deps_size =
-      dependency_count * sizeof(hrx_graph_node_s*);
-  iree_host_size_t total_size = node_size + deps_size;
-
-  if (extra_data_size > 0) {
-    total_size = iree_host_align(total_size, iree_max_align_t);
-    const iree_host_size_t extra_data_offset = total_size;
-    total_size += extra_data_size;
-
-    hrx_graph_node_s* node = NULL;
-    IREE_RETURN_IF_ERROR(
-        iree_allocator_malloc(allocator, total_size, (void**)&node));
-    *out_node = node;
-    if (out_extra_data) {
-      *out_extra_data = (uint8_t*)node + extra_data_offset;
+  iree_host_size_t dependencies_size = 0;
+  iree_host_size_t total_size = 0;
+  if (dependency_count > UINT32_MAX ||
+      !iree_host_size_checked_mul(dependency_count, sizeof(hrx_graph_node_s*),
+                                  &dependencies_size) ||
+      !iree_host_size_checked_add(sizeof(hrx_graph_node_s), dependencies_size,
+                                  &total_size)) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "graph node dependencies exceed addressable storage");
+  }
+  iree_host_size_t extra_data_offset = 0;
+  if (extra_data_size) {
+    if (!iree_host_size_checked_add(total_size, iree_max_align_t - 1,
+                                    &total_size)) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "graph node payload alignment overflow");
     }
-  } else {
-    hrx_graph_node_s* node = NULL;
-    IREE_RETURN_IF_ERROR(
-        iree_allocator_malloc(allocator, total_size, (void**)&node));
-    *out_node = node;
+    extra_data_offset = total_size & ~(iree_max_align_t - 1);
+    if (!iree_host_size_checked_add(extra_data_offset, extra_data_size,
+                                    &total_size)) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "graph node payload exceeds addressable storage");
+    }
+  }
+  hrx_graph_node_s* node = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(allocator, total_size, (void**)&node));
+  *out_node = node;
+  if (out_extra_data && extra_data_size) {
+    *out_extra_data = (uint8_t*)node + extra_data_offset;
   }
 
   return iree_ok_status();
@@ -65,6 +74,10 @@ static iree_status_t hrx_graph_allocate_node_block(
 
 static iree_status_t hrx_graph_add_node_internal(hrx_graph_s* graph,
                                                  hrx_graph_node_s* node) {
+  if (graph->node_count >= UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "graph node ordinals exhausted");
+  }
   node->node_index = (uint32_t)graph->node_count;
 
   if (!graph->current_node_block ||
@@ -84,26 +97,6 @@ static iree_status_t hrx_graph_add_node_internal(hrx_graph_s* graph,
 
   graph->current_node_block->nodes[graph->current_node_block->count++] = node;
   ++graph->node_count;
-
-  if (node->dependency_count == 0) {
-    if (!graph->current_root_block || graph->current_root_block->count >=
-                                          graph->current_root_block->capacity) {
-      const iree_host_size_t block_capacity = 8;
-      hrx_graph_node_block_t* new_block = NULL;
-      IREE_RETURN_IF_ERROR(hrx_graph_allocate_node_block(
-          graph->arena_allocator, block_capacity, &new_block));
-
-      if (graph->current_root_block) {
-        graph->current_root_block->next = new_block;
-      } else {
-        graph->root_blocks = new_block;
-      }
-      graph->current_root_block = new_block;
-    }
-
-    graph->current_root_block->nodes[graph->current_root_block->count++] = node;
-    ++graph->root_count;
-  }
 
   return iree_ok_status();
 }
@@ -150,9 +143,6 @@ hrx_status_t hrx_graph_create(hrx_device_t device, uint32_t flags,
   graph->node_blocks = NULL;
   graph->current_node_block = NULL;
   graph->node_count = 0;
-  graph->root_blocks = NULL;
-  graph->current_root_block = NULL;
-  graph->root_count = 0;
   graph->additional_edges = NULL;
   graph->additional_edge_count = 0;
   graph->flags = flags;
@@ -600,6 +590,86 @@ hrx_status_t hrx_graph_add_dependencies(hrx_graph_t graph,
 
   IREE_TRACE_ZONE_END(z0);
   return hrx_ok_status();
+}
+
+// Normalization is the native graph input boundary. The shared analyzer
+// receives dense, in-graph ordinals and does not repeat handle validation at
+// every phase.
+iree_status_t hrx_graph_schedule_nodes(hrx_graph_node_block_t* node_blocks,
+                                       iree_host_size_t node_count,
+                                       hrx_graph_edge_t* additional_edges,
+                                       iree_arena_allocator_t* arena,
+                                       hrx_graph_schedule_t* out_schedule) {
+  hrx_graph_analysis_t analysis;
+  IREE_RETURN_IF_ERROR(
+      hrx_graph_analysis_initialize(node_count, arena, &analysis));
+  uint64_t edge_count = 0;
+  for (hrx_graph_node_block_t* block = node_blocks; block;
+       block = block->next) {
+    for (iree_host_size_t i = 0; i < block->count; ++i) {
+      hrx_graph_node_s* node = block->nodes[i];
+      const uint32_t index = node->node_index;
+      analysis.sources[index] = node;
+      analysis.offsets[index + 1] = node->dependency_count;
+      edge_count += node->dependency_count;
+      analysis.flags[index] =
+          hrx_graph_node_is_recordable(node->type)
+              ? HRX_GRAPH_ANALYSIS_NODE_RECORDABLE
+          : node->type == HRX_GRAPH_NODE_TYPE_INTERNAL_HOST_CALL
+              ? HRX_GRAPH_ANALYSIS_NODE_ISOLATED
+              : HRX_GRAPH_ANALYSIS_NODE_EMPTY;
+    }
+  }
+  iree_status_t status = iree_ok_status();
+  for (const hrx_graph_edge_t* edge = additional_edges;
+       iree_status_is_ok(status) && edge; edge = edge->next) {
+    if (!edge->from || !edge->to || edge->from->node_index >= node_count ||
+        edge->to->node_index >= node_count ||
+        analysis.sources[edge->from->node_index] != edge->from ||
+        analysis.sources[edge->to->node_index] != edge->to) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "dependency node does not belong to the graph");
+    } else {
+      ++analysis.offsets[edge->to->node_index + 1];
+      ++edge_count;
+    }
+  }
+  IREE_RETURN_IF_ERROR(status);
+  if (edge_count > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "graph has too many dependencies");
+  }
+  IREE_RETURN_IF_ERROR(
+      hrx_graph_analysis_allocate_dependencies(&analysis, arena));
+  bool is_topologically_ordered = true;
+  for (uint32_t i = 0; iree_status_is_ok(status) && i < analysis.node_count;
+       ++i) {
+    const hrx_graph_node_s* node = analysis.sources[i];
+    for (uint32_t j = 0;
+         iree_status_is_ok(status) && j < node->dependency_count; ++j) {
+      const hrx_graph_node_s* predecessor = node->dependencies[j];
+      if (!predecessor || predecessor->node_index >= node_count ||
+          analysis.sources[predecessor->node_index] != predecessor) {
+        status =
+            iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "dependency node does not belong to the graph");
+      } else {
+        analysis.dependencies[analysis.order[i]++] = predecessor->node_index;
+        is_topologically_ordered &= predecessor->node_index < i;
+      }
+    }
+  }
+  for (const hrx_graph_edge_t* edge = additional_edges;
+       iree_status_is_ok(status) && edge; edge = edge->next) {
+    analysis.dependencies[analysis.order[edge->to->node_index]++] =
+        edge->from->node_index;
+    is_topologically_ordered &= edge->from->node_index < edge->to->node_index;
+  }
+  analysis.is_topologically_ordered = is_topologically_ordered;
+  if (iree_status_is_ok(status)) {
+    status = hrx_graph_analyze(&analysis, arena, out_schedule);
+  }
+  return status;
 }
 
 //===----------------------------------------------------------------------===//

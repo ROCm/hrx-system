@@ -55,6 +55,7 @@ HRX_HDRS = [
     "device.h",
     "device_group.h",
     "event_timestamp.h",
+    "graph_analysis.h",
     "graph_exec.h",
     "hrx_internal.h",
     "mem_pool.h",
@@ -204,7 +205,6 @@ hrx_cc_test(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/driver/task/executable",
         "//runtime/src/iree/hal/driver/task/executable/library:abi",
-        "//runtime/src/iree/hal/testing:mock_device",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -418,6 +418,18 @@ hrx_cc_test(
         ":hrx_static",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "graph_analysis_test",
+    srcs = ["graph_analysis_test.cc"],
+    deps = [
+        ":hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

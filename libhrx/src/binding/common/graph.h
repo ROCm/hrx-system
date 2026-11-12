@@ -10,6 +10,7 @@
 #include "common/host_callback.h"
 #include "common/memory.h"
 #include "common/stream.h"
+#include "graph_analysis.h"
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 
@@ -823,39 +824,6 @@ iree_status_t iree_hal_streaming_capture_join_graph(
 // was removed. Lock order: graph/session -> context stream-list -> stream.
 bool iree_hal_streaming_capture_unregister_stream(
     iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream);
-// Type of partition - determines how nodes are executed.
-enum iree_hal_streaming_graph_partition_type_e {
-  // Can go in command buffer (count 1 may also be optimizable into a queue op).
-  IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_RECORDABLE = 0,
-  // Must be separate host call.
-  IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_HOST_CALL,
-  // Must be launched as a nested executable graph.
-  IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_GRAPH,
-  // Must be submitted as a direct queue dispatch operation.
-  IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_DISPATCH,
-  // Barrier node.
-  IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_EMPTY,
-};
-typedef uint8_t iree_hal_streaming_graph_partition_type_t;
-
-// Describes a partition of nodes that can be executed together.
-typedef struct iree_hal_streaming_graph_partition_t {
-  // Index into sorted_nodes array.
-  uint32_t start_index;
-  uint32_t count;
-  iree_hal_streaming_graph_partition_type_t type;
-  // Number of independent workstreams (~1-4).
-  uint8_t stream_count;
-} iree_hal_streaming_graph_partition_t;
-
-// Chained block for growing partition arrays without reallocation.
-typedef struct iree_hal_streaming_graph_partition_block_t {
-  struct iree_hal_streaming_graph_partition_block_t* next;
-  iree_host_size_t capacity;
-  iree_host_size_t count;
-  iree_hal_streaming_graph_partition_t partitions[];
-} iree_hal_streaming_graph_partition_block_t;
-
 // Creates private execution state. Children borrow their root's stable
 // |execution_owner| identity; NULL starts a new independent executable.
 iree_status_t iree_hal_streaming_graph_exec_create(
@@ -894,44 +862,6 @@ bool iree_hal_streaming_graph_exec_owns_node(
     iree_hal_streaming_graph_exec_t* exec,
     iree_hal_streaming_graph_node_t* node);
 
-// Augmented node for sorting and partitioning.
-typedef struct iree_hal_streaming_graph_sort_node_t {
-  // Pointer to original node.
-  iree_hal_streaming_graph_node_t* node;
-  // Index in original linked list.
-  uint32_t original_index;
-  // Position in topological order.
-  uint32_t sorted_index;
-  // Maximum sorted index of all dependencies.
-  uint32_t max_dependency_index;
-  // Assigned partition ID.
-  uint32_t partition_id;
-  // For topological sort.
-  uint16_t in_degree;
-  // Cached from node->type.
-  uint8_t type;
-  // Workstream within partition (~4).
-  uint8_t stream_id;
-} iree_hal_streaming_graph_sort_node_t;
-static_assert(sizeof(iree_hal_streaming_graph_sort_node_t) <= 32,
-              "really want 2 per cache line");
-
-// A produced schedule.
-// References are into the arena used during scheduling and only valid as long
-// as it is.
-typedef struct iree_hal_streaming_graph_schedule_t {
-  // Sorted nodes with some additional information from analysis.
-  iree_hal_streaming_graph_sort_node_t* sorted_nodes;
-  // A map of original unsorted graph node_index to sorted_nodes index.
-  uint32_t* node_index_map;
-  // Partition descriptors in execution order.
-  iree_hal_streaming_graph_partition_t* partitions;
-  // Total number of partitions.
-  iree_host_size_t partition_count;
-  // Total number of blocks across all partitions.
-  iree_host_size_t block_count;
-} iree_hal_streaming_graph_schedule_t;
-
 // Adds execution dependencies across complete copy operations, including their
 // host preparation/completion helpers. The returned list shares the graph's
 // immutable additional edges and allocates only new edges from |arena|.
@@ -939,26 +869,12 @@ iree_status_t iree_hal_streaming_graph_schedule_copy_dependencies(
     iree_hal_streaming_graph_t* graph, iree_arena_allocator_t* arena,
     iree_hal_streaming_graph_edge_t** out_edges);
 
-// Unified scheduler that performs topological sorting, partitioning, and
-// workstream detection in an efficient three-phase algorithm.
-//
-// Phase 1: Linearize nodes and detect if already sorted
-// Phase 2: Topological sort if needed (with fast path)
-// Phase 3: Partition into executable blocks with workstream detection
-//
-// Returns sorted nodes array and partition descriptors with workstream info
-// allocated from the provided |arena|.
-// |out_total_block_count| is the total number of graph blocks required
-// calculated as the number of non-recordable partitions + the total number of
-// streams in all recordable partitions.
-// |additional_edges| is an optional linked list of extra dependencies added
-// after node creation (can be NULL if none).
+// Normalizes frontend classification/dependencies for shared HRX analysis.
 iree_status_t iree_hal_streaming_graph_schedule_nodes(
     iree_hal_streaming_node_block_t* node_blocks, iree_host_size_t node_count,
     const uint8_t* disabled_nodes, iree_host_size_t disabled_node_count,
     iree_hal_streaming_graph_edge_t* additional_edges,
-    iree_arena_allocator_t* arena,
-    iree_hal_streaming_graph_schedule_t* out_schedule);
+    iree_arena_allocator_t* arena, hrx_graph_schedule_t* out_schedule);
 
 // Checks whether |child_graph| may be the child graph of a node in
 // |parent_graph|: the two must be distinct, must belong to the same context,

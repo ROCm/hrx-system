@@ -9,6 +9,7 @@
 #include "buffer.h"
 #include "buffer_table.h"
 #include "device.h"
+#include "graph_analysis.h"
 #include "graph_exec.h"
 #include "hrx_runtime.h"
 #include "iree/base/api.h"
@@ -263,9 +264,6 @@ typedef struct hrx_event_s {
 // Graph internals
 //===----------------------------------------------------------------------===//
 
-// Maximum partition width, also bounding graph launch semaphore scratch.
-#define HRX_GRAPH_MAX_WORKSTREAMS 8
-
 enum hrx_graph_node_type_internal_e {
   HRX_GRAPH_NODE_TYPE_RECORDABLE_BIT = 1u << 7,
   HRX_GRAPH_NODE_TYPE_INTERNAL_EMPTY = 0,
@@ -364,71 +362,18 @@ typedef struct hrx_graph_s {
   hrx_graph_node_block_t* current_node_block;
   iree_host_size_t node_count;
 
-  hrx_graph_node_block_t* root_blocks;
-  hrx_graph_node_block_t* current_root_block;
-  iree_host_size_t root_count;
-
   hrx_graph_edge_t* additional_edges;
   iree_host_size_t additional_edge_count;
 
   uint32_t flags;
 } hrx_graph_s;
 
-typedef struct hrx_graph_sort_node_t {
-  hrx_graph_node_s* node;
-  uint32_t original_index;
-  uint32_t sorted_index;
-  uint32_t max_dependency_index;
-  uint32_t partition_id;
-  uint16_t in_degree;
-  uint8_t type;
-  uint8_t stream_id;
-} hrx_graph_sort_node_t;
-
-enum hrx_graph_partition_type_e {
-  HRX_GRAPH_PARTITION_TYPE_RECORDABLE = 0,
-  HRX_GRAPH_PARTITION_TYPE_HOST_CALL,
-  HRX_GRAPH_PARTITION_TYPE_EMPTY,
-};
-typedef uint8_t hrx_graph_partition_type_t;
-
-typedef struct hrx_graph_partition_t {
-  uint32_t start_index;
-  uint32_t count;
-  hrx_graph_partition_type_t type;
-  uint8_t stream_count;
-} hrx_graph_partition_t;
-
-typedef struct hrx_graph_schedule_t {
-  hrx_graph_sort_node_t* sorted_nodes;
-  uint32_t* node_index_map;
-  hrx_graph_partition_t* partitions;
-  iree_host_size_t partition_count;
-  iree_host_size_t block_count;
-} hrx_graph_schedule_t;
-
-// Tracks commands recorded since the most recent graph command-buffer
-// barrier. Exposed internally so the barrier planner can be tested without
-// depending on backend command scheduling behavior.
-typedef struct hrx_graph_barrier_state_t {
-  uint32_t values[8];
-  uint32_t count : 31;
-  uint32_t invalid : 1;
-} hrx_graph_barrier_state_t;
-
-// Internal graph scheduling API (implemented in graph_analysis.c).
+// Normalizes native graph dependencies for the shared indexed analyzer.
 iree_status_t hrx_graph_schedule_nodes(hrx_graph_node_block_t* node_blocks,
                                        iree_host_size_t node_count,
                                        hrx_graph_edge_t* additional_edges,
                                        iree_arena_allocator_t* arena,
                                        hrx_graph_schedule_t* out_schedule);
-
-void hrx_graph_barrier_state_reset(hrx_graph_barrier_state_t* state);
-iree_status_t hrx_graph_record_node_barrier(
-    hrx_graph_barrier_state_t* state, const hrx_graph_node_s* node,
-    const hrx_graph_edge_t* additional_edges, const uint32_t* node_index_map,
-    uint32_t sorted_index, iree_hal_command_buffer_t* command_buffer,
-    bool* out_did_barrier);
 
 // Timeline fence wrapper.
 typedef struct hrx_fence_s {
