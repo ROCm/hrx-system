@@ -59,6 +59,11 @@ void loom_runtime_execution_release(loom_runtime_execution_t* execution) {
   }
 }
 
+const iree_hal_queue_family_t* loom_runtime_execution_dispatch_family(
+    const loom_runtime_execution_t* execution) {
+  return iree_hal_queue_family(execution->binding.dispatch);
+}
+
 void loom_runtime_execution_set_retirement_observer(
     loom_runtime_execution_t* execution, void (*wake)(void* user_data),
     void* user_data) {
@@ -304,6 +309,31 @@ iree_status_t loom_runtime_execution_execute(
   iree_status_t status = iree_hal_queue_execute(
       execution->binding.dispatch, waits, signals, command_buffer, bindings,
       IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
+  if (iree_status_is_ok(status)) {
+    execution->work.submitted_value = next_value;
+    *out_value = next_value;
+  }
+  iree_slim_mutex_unlock(&execution->mutex);
+  return status;
+}
+
+iree_status_t loom_runtime_execution_timestamp(
+    loom_runtime_execution_t* execution, iree_hal_buffer_t* target,
+    iree_device_size_t offset, uint64_t* out_value) {
+  iree_slim_mutex_lock(&execution->mutex);
+  if (execution->work.submitted_value == IREE_HAL_SEMAPHORE_MAX_VALUE) {
+    iree_slim_mutex_unlock(&execution->mutex);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "execution timeline is exhausted");
+  }
+  uint64_t next_value = execution->work.submitted_value + 1;
+  const iree_hal_semaphore_list_t waits = {1, &execution->work.semaphore,
+                                           &execution->work.submitted_value};
+  const iree_hal_semaphore_list_t signals = {1, &execution->work.semaphore,
+                                             &next_value};
+  iree_status_t status = iree_hal_queue_timestamp(
+      execution->binding.dispatch, waits, signals, target, offset, NULL,
+      IREE_HAL_TIMESTAMP_FLAG_NONE);
   if (iree_status_is_ok(status)) {
     execution->work.submitted_value = next_value;
     *out_value = next_value;

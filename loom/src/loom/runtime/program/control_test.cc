@@ -249,6 +249,8 @@ class ControlTest
     };
     const iree_byte_span_t feedback[] = {
         iree_make_byte_span(outputs_[0].tokens.data(), kLengths[1]),
+        iree_make_byte_span(outputs_[0].progress.data(), kLengths[2]),
+        iree_make_byte_span(outputs_[1].progress.data(), kLengths[2]),
     };
     loom_runtime_module_options_t options = {
         .binding_capacity = 12,
@@ -259,8 +261,9 @@ class ControlTest
         &types_, execution_, options, host_allocator_, &native_module_));
     const std::string path = directory_ + "/control.loom";
     iree_const_byte_span_t image;
-    const iree_string_view_t roots[] = {IREE_SVL("step"), IREE_SVL("fork"),
-                                        IREE_SVL("dependencies")};
+    const iree_string_view_t roots[] = {
+        IREE_SVL("step"), IREE_SVL("fork"), IREE_SVL("dependencies"),
+        IREE_SVL("clock"), IREE_SVL("timed_step")};
     const loom_runtime_sources_t sources = {.base_directory = IREE_SV(".")};
     IREE_RETURN_IF_ERROR(loom_runtime_jit_compile_vm(
         loom_runtime_host_target_environment(host_), &sources,
@@ -626,7 +629,7 @@ TEST_P(ControlTest, FeedbackChecksBothExtentsAndAllowsSubranges) {
     int64_t length;
   };
   const loom_runtime_test_control_range_t invalid[] = {
-      {1, 0, 4}, {0, 0, 520}, {0, 516, 4}, {0, -1, 4}, {0, 0, -1}};
+      {3, 0, 4}, {0, 0, 520}, {0, 516, 4}, {0, -1, 4}, {0, 0, -1}};
   for (auto range : invalid) {
     iree_vm_variant_t arguments[] = {
         iree_vm_variant_from_i32(range.slot),
@@ -694,6 +697,94 @@ TEST_P(ControlTest, FeedbackChecksBothExtentsAndAllowsSubranges) {
   loom_runtime_module_bind_feedback(
       native_module_, 0,
       iree_make_byte_span(outputs_[0].tokens.data(), kLengths[1]));
+}
+
+TEST_P(ControlTest, SourceTimestampsFollowWorkAndPublishIndependentBanks) {
+  const auto* clock = iree_hal_queue_family_spec(
+      loom_runtime_execution_dispatch_family(execution_));
+  iree_vm_function_t query = {};
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(process_, IREE_SV("model"),
+                                                 IREE_SV("clock"), &query));
+  iree_vm_variant_t facts[2] = {};
+  IREE_ASSERT_OK(iree_vm_invoke(invocation_, query,
+                                iree_vm_variant_span_empty(),
+                                iree_vm_variant_span_from_array(facts)));
+  int64_t frequency = 0;
+  int32_t width = 0;
+  IREE_ASSERT_OK(iree_vm_i64_from_variant(facts[0], &frequency));
+  IREE_ASSERT_OK(iree_vm_i32_from_variant(facts[1], &width));
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(facts));
+  EXPECT_EQ(static_cast<uint64_t>(frequency), clock->timestamp_frequency_hz);
+  EXPECT_EQ(static_cast<uint32_t>(width), clock->timestamp_valid_bits);
+  if (!frequency || !width) {
+    GTEST_SKIP() << "Queue family does not advertise a timestamp clock";
+  }
+
+  uint64_t completion = 0;
+  for (size_t row = 0; row < 2; ++row) {
+    inputs_[row].control = {3, 17, 99};
+    inputs_[row].tokens[0] = 7;
+    inputs_[row].progress.fill(-12345);
+    IREE_ASSERT_OK(Upload(row, 0, 3, &completion));
+  }
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_NONE, &gate_));
+  uint64_t gate_value = 1;
+  IREE_ASSERT_OK(
+      loom_runtime_execution_barrier(execution_, {1, &gate_, &gate_value}));
+  iree_vm_function_t step = {};
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(process_, IREE_SV("model"),
+                                                 IREE_SV("timed_step"), &step));
+  for (size_t row = 0; row < 2; ++row) {
+    iree_vm_variant_t arguments[] = {
+        iree_vm_variant_from_i32(static_cast<int32_t>(row + 1)),
+        iree_vm_variant_from_i64(16),
+        iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers_[row][0]),
+        iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers_[row][1]),
+        iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers_[row][2]),
+    };
+    IREE_ASSERT_OK(InvokeFunction(
+        step, iree_vm_variant_span_from_array(arguments), &completion));
+  }
+  // Both invocations return while their device dependency remains unsatisfied.
+  // Each has two captures and one command; feedback is a separate branch.
+  const auto frontier = loom_runtime_execution_frontier(execution_);
+  EXPECT_EQ(frontier.values[0], 9u);
+  EXPECT_EQ(frontier.values[1], 2u);
+  uint64_t reached = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(frontier.semaphores[0], &reached));
+  EXPECT_LT(reached, completion);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, gate_value, nullptr));
+  IREE_ASSERT_OK(loom_runtime_execution_feedback_wait(execution_, 2));
+  for (const auto& output : outputs_) {
+    EXPECT_EQ(output.progress[0], 2);
+    EXPECT_EQ(output.progress[1], -12345);
+    EXPECT_EQ(output.progress[6], -12345);
+    EXPECT_EQ(output.progress[7], 0);
+    const uint64_t sentinel = (uint64_t{static_cast<uint32_t>(-12345)} << 32) |
+                              static_cast<uint32_t>(-12345);
+    EXPECT_NE(iree_unaligned_load_le_u64(&output.progress[2]), sentinel);
+    EXPECT_NE(iree_unaligned_load_le_u64(&output.progress[4]), sentinel);
+  }
+
+  // The first capture and command are accepted before the second capture is
+  // rejected. Rejection must not leave an unsignaled work or feedback value.
+  iree_vm_variant_t invalid[] = {
+      iree_vm_variant_from_i32(1),
+      iree_vm_variant_from_i64(kLengths[2]),
+      iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers_[0][0]),
+      iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers_[0][1]),
+      iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers_[0][2]),
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      InvokeFunction(step, iree_vm_variant_span_from_array(invalid),
+                     &completion));
+  const auto rejected = loom_runtime_execution_frontier(execution_);
+  EXPECT_EQ(rejected.values[0], frontier.values[0] + 2);
+  EXPECT_EQ(rejected.values[1], frontier.values[1]);
+  IREE_ASSERT_OK(loom_runtime_execution_drain(execution_));
 }
 
 TEST_P(ControlTest, SourceForkAndPartialFailureRetireBorrowedStorage) {

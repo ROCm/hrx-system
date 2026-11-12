@@ -6,6 +6,30 @@ func.decl import("runner") @fence(%work: i64) -> (hal.fence)
 
 func.decl import("runner") @join(%ready: hal.fence)
 
+func.decl import("runner") @timestamp(%target: hal.buffer, %offset: i64) -> (i64)
+
+func.decl import("runner") @timestamp_clock() -> (i64, i32)
+
+func.def public @clock() -> (i64, i32) {
+  %frequency, %width = func.call @timestamp_clock() : () -> (i64, i32)
+  func.return %frequency, %width : i64, i32
+}
+
+// Progress words 2..5 are reserved for this invocation's raw clock pair.
+// The final capture belongs to the feedback frontier, before any independent
+// following work. A rejected final offset leaves the earlier work accepted.
+func.def public @timed_step(%slot: i32, %finish_offset: i64, %control: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer) -> (i64) {
+  %stage = scalar.constant 0 : i32
+  %start_offset = scalar.constant 8 : i64
+  %origin = scalar.constant 0 : i64
+  %length = scalar.constant 32 : i64
+  %started = func.call @timestamp(%progress, %start_offset) : (hal.buffer, i64) -> (i64)
+  %produced = func.call @execute_3(%stage, %control, %tokens, %progress) : (i32, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+  %finished = func.call @timestamp(%progress, %finish_offset) : (hal.buffer, i64) -> (i64)
+  %published = func.call @feedback(%slot, %progress, %origin, %length) : (i32, hal.buffer, i64, i64) -> (i64)
+  func.return %finished : i64
+}
+
 // This model entry selects prepared stages without owning per-session state.
 // Its result is an accepted submission on the hosting runner's execution domain.
 func.def public @step(%initialize: i32, %control: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer) -> (i64) {

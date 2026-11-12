@@ -69,6 +69,14 @@ typedef struct loom_runtime_module_options_t {
 // completion set into subsequent model work without a CPU wait or a global
 // device barrier. A null fence represents an empty dependency set. Neither
 // operation establishes ownership of storage referenced by other operations.
+// timestamp(hal.buffer target, i64 byte_offset) -> i64 enqueues a queue-clock
+// capture on the work timeline. Its result is an accepted work value, not the
+// tick. The source owns the destination and can return samples through normal
+// feedback. timestamp_clock() -> (i64 frequency_hz, i32 valid_bits) queries the
+// immutable dispatch-family clock. Zero frequency/width means no clock is
+// advertised; an unsupported capture fails through HAL. Ticks are comparable
+// only within that family and elapsed differences wrap at valid_bits. A zero
+// captured tick is valid; successful completion establishes sample validity.
 //
 // The module retains |execution| and stage commands. Its declarations are
 // immutable. Per-invocation binding scratch lives in the process storage, so
