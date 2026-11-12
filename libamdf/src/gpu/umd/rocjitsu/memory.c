@@ -59,10 +59,12 @@ amdf_status_t amdf_rocjitsu_device_query_memory_profile(
   }
   const uint64_t maximum_length = UINT64_C(1) << 46;
   const bool local = ordinal == 1;
+  // Simulated KFD maps GTT as UC; coherent VRAM retains its CC policy.
   const amdf_memory_flags_t flags = AMDF_MEMORY_FLAG_HOST_VISIBLE |
                                     AMDF_MEMORY_FLAG_HOST_COHERENT |
                                     AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
-                                    (local ? AMDF_MEMORY_FLAG_DEVICE_LOCAL : 0);
+                                    (local ? AMDF_MEMORY_FLAG_DEVICE_LOCAL
+                                           : AMDF_MEMORY_FLAG_DEVICE_UNCACHED);
   *out_profile = (amdf_memory_native_profile_t){
       .memory_class =
           local ? AMDF_MEMORY_CLASS_LOCAL : AMDF_MEMORY_CLASS_SYSTEM,

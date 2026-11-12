@@ -49,6 +49,7 @@ amdf_cts_test_suite(
         "GpuLinuxMemoryTest.OwnsAlignedSystemMemoryAndBorrowedHostViews",
         "GpuLinuxMemoryTest.BufferedFileIoUsesOwnedSystemMemory",
         "GpuLinuxMemoryTest.HonorsExactSystemDeviceAccess",
+        "GpuLinuxMemoryTest.UncachedSystemAccessRetainsCachedHostViews",
         "GpuLinuxMemoryTest.HonorsLocalPlacementCapabilities",
     ],
     target_compatible_with = [
