@@ -755,6 +755,89 @@ def capture_resource_exhaustion(
     )
 
 
+def capture_gpu_device_loss(
+    capture: Capture, cwd: Path, output: str, started_at: dt.datetime
+) -> None:
+    """Preserves bounded native-machine evidence for a reported device loss."""
+    if not (
+        re.search(r"\bDEVICE[_ ]LOST\b", output, re.IGNORECASE)
+        or (
+            re.search(r"\bterminal_status\b", output)
+            and re.search(r"(?:Which is:|==|=)\s*9\b", output)
+        )
+    ):
+        return
+    # A failure can expose machine state established by an earlier workload.
+    # Retain one bounded lookback rather than assuming the current process
+    # initiated a reset. Raw XML preserves provider-specific payloads without
+    # teaching this collector a driver-version-specific event schema.
+    history_start = started_at.astimezone(dt.UTC) - dt.timedelta(hours=24)
+    timestamp = history_start.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    system_query = (
+        "*[System[(Level=1 or Level=2 or Level=3)"
+        f" and TimeCreated[@SystemTime >= '{timestamp}']]]"
+    )
+    capture.tool(
+        [
+            "wevtutil.exe",
+            "qe",
+            "System",
+            "/q:" + system_query,
+            "/rd:true",
+            "/c:256",
+            "/f:xml",
+            "/e:Events",
+            "/uni:true",
+        ],
+        cwd,
+        "gpu-system-events",
+    )
+    wer_query = (
+        "*[System[Provider[@Name='Windows Error Reporting'] and EventID=1001"
+        f" and TimeCreated[@SystemTime >= '{timestamp}']]]"
+    )
+    capture.tool(
+        [
+            "wevtutil.exe",
+            "qe",
+            "Application",
+            "/q:" + wer_query,
+            "/rd:true",
+            "/c:64",
+            "/f:xml",
+            "/e:Events",
+            "/uni:true",
+        ],
+        cwd,
+        "gpu-live-kernel-events",
+    )
+    capture.tool(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$ErrorActionPreference='Stop'; "
+            "$devices=@(foreach($class in @('Display','ComputeAccelerator')) { "
+            "Get-PnpDevice -Class $class -PresentOnly -ErrorAction SilentlyContinue | "
+            "Where-Object InstanceId -Like 'PCI\\VEN_1002&*' | ForEach-Object { "
+            "$properties=@(Get-PnpDeviceProperty -InstanceId $_.InstanceId "
+            "-ErrorAction SilentlyContinue -KeyName "
+            "DEVPKEY_Device_DriverVersion,DEVPKEY_Device_DriverDate,"
+            "DEVPKEY_Device_DriverInfPath | Select-Object KeyName,Data); "
+            "[PSCustomObject]@{Status=$_.Status; Class=$_.Class; "
+            "FriendlyName=$_.FriendlyName; InstanceId=$_.InstanceId; "
+            "Properties=$properties} } }); "
+            "$operatingSystem=Get-CimInstance Win32_OperatingSystem; "
+            "@{ObservedAt=[DateTime]::UtcNow.ToString('o'); "
+            "LastBootUpTime=$operatingSystem.LastBootUpTime.ToUniversalTime()."
+            "ToString('o'); Devices=$devices} | ConvertTo-Json -Depth 6",
+        ],
+        cwd,
+        "gpu-device-snapshot",
+    )
+
+
 def capture_application_crashes(
     capture: Capture, cwd: Path, build_dir: Path | None, started_at: dt.datetime
 ) -> None:
@@ -919,6 +1002,7 @@ def capture_failure(
         metadata["local_dumps"] = capture_local_dumps(capture)
         metadata["bazel_tests"] = capture_bazel_tests(capture, cwd, output)
         capture_application_crashes(capture, cwd, build_dir, started_at)
+        capture_gpu_device_loss(capture, cwd, output, started_at)
         capture_application_control(capture, cwd, output, started_at)
         capture_resource_exhaustion(capture, cwd, output, started_at)
         capture_process_images(capture, cwd, output)

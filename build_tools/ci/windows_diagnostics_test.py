@@ -1040,6 +1040,66 @@ class WindowsDiagnosticsTest(unittest.TestCase):
                         f"TimeCreated[@SystemTime >= '{timestamp}']", events["argv"][3]
                     )
 
+    def test_gpu_device_loss_captures_bounded_machine_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            capture = diagnostics.Capture(root, {})
+
+            def native_tool(argv, **kwargs):
+                kwargs["stdout"].write(
+                    b"<Events/>" if argv[0] == "wevtutil.exe" else b"{}"
+                )
+                return subprocess.CompletedProcess(argv, 0)
+
+            started_at = dt.datetime(2026, 11, 12, 20, 30, tzinfo=dt.UTC)
+            with mock.patch.object(subprocess, "run", side_effect=native_tool):
+                diagnostics.capture_gpu_device_loss(
+                    capture,
+                    root,
+                    "queue_status.terminal_status\n  Which is: 9\n",
+                    started_at,
+                )
+            self.assertEqual(
+                [tool["output"].split("-", 1)[1] for tool in capture.tools],
+                [
+                    "gpu-system-events.txt",
+                    "gpu-live-kernel-events.txt",
+                    "gpu-device-snapshot.txt",
+                ],
+            )
+            system_events, live_kernel_events, device_snapshot = capture.tools
+            self.assertEqual(
+                system_events["argv"][:3], ["wevtutil.exe", "qe", "System"]
+            )
+            self.assertIn("(Level=1 or Level=2 or Level=3)", system_events["argv"][3])
+            self.assertIn(
+                "TimeCreated[@SystemTime >= '2026-11-11T20:30:00.000Z']",
+                system_events["argv"][3],
+            )
+            self.assertIn("/c:256", system_events["argv"])
+            self.assertEqual(
+                live_kernel_events["argv"][:3],
+                ["wevtutil.exe", "qe", "Application"],
+            )
+            self.assertIn("Windows Error Reporting", live_kernel_events["argv"][3])
+            self.assertIn("EventID=1001", live_kernel_events["argv"][3])
+            self.assertIn("/c:64", live_kernel_events["argv"])
+            self.assertEqual(device_snapshot["argv"][0], "powershell.exe")
+            self.assertIn("Get-PnpDevice", device_snapshot["argv"][-1])
+            self.assertIn("DEVPKEY_Device_DriverVersion", device_snapshot["argv"][-1])
+            self.assertIn("LastBootUpTime", device_snapshot["argv"][-1])
+
+            unaffected = diagnostics.Capture(root, {})
+            with mock.patch.object(subprocess, "run") as run:
+                diagnostics.capture_gpu_device_loss(
+                    unaffected,
+                    root,
+                    "queue_status.terminal_status\n  Which is: 8\n",
+                    started_at,
+                )
+            run.assert_not_called()
+            self.assertEqual(unaffected.tools, [])
+
     @unittest.skipUnless(os.name == "nt", "requires native Windows event queries")
     def test_native_crash_query_preserves_silent_failure(self):
         with tempfile.TemporaryDirectory() as directory:
