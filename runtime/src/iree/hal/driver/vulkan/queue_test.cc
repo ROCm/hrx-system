@@ -72,7 +72,7 @@ TEST_P(VulkanQueueTest, RecordableTransferHasOneNativeCompletionPoint) {
   IREE_ASSERT_OK(CreateZeroedDeviceBuffer(256, target.out()));
   const uint32_t pattern = 0xCDCDCDCDu;
   std::vector<uint8_t> update(64, 0xEF);
-  iree_hal_transfer_operation_t operations[3] = {};
+  iree_hal_transfer_operation_t operations[4] = {};
   operations[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
   operations[0].fill.target_buffer = target;
   operations[0].fill.length = 64;
@@ -88,6 +88,11 @@ TEST_P(VulkanQueueTest, RecordableTransferHasOneNativeCompletionPoint) {
   operations[2].copy.target_buffer = target;
   operations[2].copy.target_offset = 128;
   operations[2].copy.length = 64;
+  operations[3].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
+  operations[3].upload.source = update.data();
+  operations[3].upload.target_buffer = target;
+  operations[3].upload.target_offset = 192;
+  operations[3].upload.length = 64;
 
   auto* queue = reinterpret_cast<iree_hal_vulkan_queue_t*>(transfer_queue_);
   iree_slim_mutex_lock(&queue->submission_mutex);
@@ -112,6 +117,7 @@ TEST_P(VulkanQueueTest, RecordableTransferHasOneNativeCompletionPoint) {
   std::fill_n(expected.begin(), 64, 0xCD);
   std::fill_n(expected.begin() + 64, 64, 0xEF);
   std::fill_n(expected.begin() + 128, 64, 0xAB);
+  std::fill_n(expected.begin() + 192, 64, 0xEF);
   EXPECT_EQ(ReadBufferBytes(target, 0, 256), expected);
 }
 
@@ -179,10 +185,13 @@ TEST_P(VulkanQueueTest, UnalignedFillBatchHasOneNativeCompletionPoint) {
   }
 }
 
-TEST_P(VulkanQueueTest, NativeConsumerRunsBeforeProducerRetirement) {
+TEST_P(VulkanQueueTest, UploadRunsBeforeProducerRetirement) {
   for (iree_status_code_t dependency_status :
        {IREE_STATUS_OK, IREE_STATUS_ABORTED}) {
     SCOPED_TRACE(dependency_status);
+    const auto input = MakeDeterministicBytes(64);
+    Ref<iree_hal_buffer_t> target;
+    IREE_ASSERT_OK(CreateZeroedDeviceBuffer(input.size(), target.out()));
     SemaphoreList gate(device_, {0}, {1});
     SemaphoreList producer_signals(device_, {0, 0}, {1, 1});
     SemaphoreList consumer_signals(device_, {0}, {1});
@@ -239,8 +248,9 @@ TEST_P(VulkanQueueTest, NativeConsumerRunsBeforeProducerRetirement) {
     const iree_hal_semaphore_list_t consumer_waits = {
         1, producer_signals.semaphores.data(),
         producer_signals.payload_values.data()};
-    Status consumer_status(iree_hal_vulkan_queue_submit_barrier(
-        queue, consumer_waits, consumer_signals, nullptr));
+    Status consumer_status(
+        iree_hal_queue_upload(transfer_queue_, consumer_waits, consumer_signals,
+                              input.data(), target, 0, input.size(), nullptr));
     Status availability_status;
     if (consumer_status.ok()) {
       iree_async_semaphore_t* availability = nullptr;
@@ -338,6 +348,7 @@ TEST_P(VulkanQueueTest, NativeConsumerRunsBeforeProducerRetirement) {
                                 IREE_ASYNC_WAIT_FLAG_NONE));
     }
     IREE_EXPECT_OK(consumer_status.release());
+    EXPECT_EQ(ReadBufferBytes(target, 0, input.size()), input);
   }
 }
 
