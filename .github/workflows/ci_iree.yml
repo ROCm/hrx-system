@@ -443,6 +443,29 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+      - name: Upload native BEP observations
+        timeout-minutes: 2
+        continue-on-error: true
+        if: ${{ always() && matrix.kind == 'amdgpu' && steps.iree_bazel_ci.outcome != 'skipped' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-bep-observations-${{ matrix.command }}-${{ matrix.target_selector || 'amdgpu' }}-linux-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-test-results-${{ github.run_id }}-${{ github.run_attempt }}/**/bep-observation.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload failed native BEP
+        timeout-minutes: 2
+        continue-on-error: true
+        if: ${{ always() && matrix.kind == 'amdgpu' && steps.iree_bazel_ci.outcome == 'failure' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: failed-native-bep-${{ matrix.command }}-${{ matrix.target_selector || 'amdgpu' }}-linux-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-test-results-${{ github.run_id }}-${{ github.run_attempt }}/.events/*.json
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 7
+
       - name: Preserve Vulkan reproducers on failure
         if: ${{ always() && matrix.kind == 'vulkan' && steps.iree_bazel_ci.outcome == 'failure' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
