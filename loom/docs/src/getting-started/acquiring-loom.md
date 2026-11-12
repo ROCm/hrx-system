@@ -136,8 +136,8 @@ native device-access mechanism, not Linux device-node mounts.
 
 Compiler contributors can build the tools from the
 [HRX System repository](https://github.com/ROCm/hrx-system). The repository's
-[Loom quickstart](https://github.com/ROCm/hrx-system/tree/main/loom#build-the-tools)
-tracks the source-build prerequisites and Bazel targets. The
+[source-development guide](https://github.com/ROCm/hrx-system/tree/main/loom#develop-from-source)
+links to build prerequisites and compiler examples. The
 [SDK build guide](https://github.com/ROCm/hrx-system/tree/main/loom/packaging/python)
 describes building and testing wheels through Bazel.
 

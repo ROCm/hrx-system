@@ -1,6 +1,13 @@
 # Loom
 
+**[Documentation](https://rocm.github.io/hrx-system/loom/) ·
+[Get the SDK](https://rocm.github.io/hrx-system/loom/getting-started/acquiring-loom/) ·
+[Build from source](BUILDING.md)**
+
 Loom is a language and compiler for native programs on CPUs, GPUs, and NPUs.
+Its microsecond-scale JIT, runtime, and inference server fit in a megabyte-scale
+SDK, with no LLVM or ROCm dependency.
+
 This repository contains the compiler, execution libraries, native AMD device
 support, and `loom-serve`: an inference engine that hosts multiple models and
 modalities together. The pieces can be embedded independently, from compiling
@@ -14,9 +21,7 @@ one program for an existing runtime to running a shared model server.
 >
 > `hrx-system` is the engineering repository for Loom's compiler, runtime, and tools.
 
-**[Documentation](https://rocm.github.io/hrx-system/loom/) ·
-[Get the SDK](https://rocm.github.io/hrx-system/loom/getting-started/acquiring-loom/) ·
-[Build from source](BUILDING.md)**
+<!-- Keep adjacent GitHub alerts as separate blockquotes. -->
 
 > [!NOTE]
 > This is a tech preview. Interfaces and target coverage are evolving; see the

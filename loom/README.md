@@ -1,10 +1,13 @@
 # Loom
 
 Loom is a language and embeddable compiler for functions, kernels, command
-programs, and pipelines. Programs can be written in a subset of C++ or directly
-in Loom IR, linked with reusable libraries, and specialized for the target and
-workload. The SDK brings that compiler together with execution libraries, tests,
-benchmarks, and a multi-model inference server.
+programs, and pipelines. Its microsecond-scale JIT, execution libraries, and
+multi-model inference server fit in a megabyte-scale SDK, with no LLVM or ROCm
+dependency.
+
+Programs can be written in a subset of C++ or directly in Loom IR, linked with
+reusable libraries, and specialized for the target and workload. The SDK includes
+tools for testing correctness and benchmarking the resulting programs.
 
 > [!TIP]
 > **To run models or troubleshoot a model, start at [loom-dev](https://loom-fun.github.io/loom-dev/).**
