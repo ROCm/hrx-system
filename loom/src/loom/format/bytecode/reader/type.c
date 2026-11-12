@@ -11,6 +11,7 @@
 #include "loom/error/error_catalog.h"
 #include "loom/format/bytecode/reader/attribute.h"
 #include "loom/format/bytecode/reader/module_view.h"
+#include "loom/ops/type_registry.h"
 
 iree_status_t loom_bytecode_type_decode_kind(
     loom_bytecode_reader_decoder_t* decoder, uint8_t kind_byte, uint64_t offset,
@@ -170,6 +171,113 @@ iree_status_t loom_bytecode_type_read_structural_header(
     out_plan->dependency_count = (uint32_t)parameter_count;
   }
   return iree_ok_status();
+}
+
+static iree_status_t loom_bytecode_type_parameter_name(
+    loom_bytecode_reader_decoder_t* decoder,
+    loom_bytecode_reader_cursor_t* cursor, const iree_string_view_t* strings,
+    iree_host_size_t string_count, iree_string_view_t field,
+    iree_string_view_t* out_name) {
+  const uint64_t offset = loom_bytecode_reader_cursor_absolute_position(cursor);
+  uint64_t name_id = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_bytecode_reader_read_uvarint_inline(decoder, cursor, &name_id));
+  if (name_id >= string_count) {
+    const loom_diagnostic_param_t params[] = {
+        loom_param_string(field),
+        loom_param_u64(name_id),
+        loom_param_u64(string_count),
+    };
+    return loom_bytecode_reader_emit_error(decoder, LOOM_ERR_BYTECODE_010,
+                                           params, IREE_ARRAYSIZE(params),
+                                           offset, 0);
+  }
+  *out_name = strings[name_id];
+  return iree_ok_status();
+}
+
+iree_status_t loom_bytecode_type_parameters_begin(
+    loom_bytecode_reader_decoder_t* decoder,
+    loom_bytecode_reader_cursor_t* cursor, loom_context_t* context,
+    const iree_string_view_t* strings, iree_host_size_t string_count,
+    loom_type_id_t type_id, loom_bytecode_type_parameters_t* out_parameters) {
+  const uint64_t family_offset =
+      loom_bytecode_reader_cursor_absolute_position(cursor);
+  iree_string_view_t family_name = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(loom_bytecode_type_parameter_name(
+      decoder, cursor, strings, string_count,
+      IREE_SV("parameterized_type_family"), &family_name));
+  const loom_type_descriptor_t* type_descriptor =
+      loom_type_registry_lookup(context, family_name);
+  if (!type_descriptor || !type_descriptor->parameterized) {
+    return loom_bytecode_reader_emit_invalid_field(
+        decoder, cursor->range_name, IREE_SV("type"), type_id,
+        IREE_SV("family_name"), family_offset,
+        IREE_SV("parameterized_type_family_is_not_registered"));
+  }
+  const uint64_t count_offset =
+      loom_bytecode_reader_cursor_absolute_position(cursor);
+  uint64_t present_count = 0;
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint_inline(
+      decoder, cursor, &present_count));
+  if (present_count > type_descriptor->parameterized->parameter_count) {
+    return loom_bytecode_reader_emit_count_exceeds(
+        decoder, IREE_SV("parameterized_type_parameters"), present_count,
+        type_descriptor->parameterized->parameter_count, count_offset);
+  }
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+      decoder, cursor, IREE_SV("parameterized_type_parameters"), present_count,
+      /*minimum_entry_length=*/2, /*minimum_trailing_length=*/0, count_offset));
+  *out_parameters = (loom_bytecode_type_parameters_t){
+      .descriptor = type_descriptor->parameterized,
+      .strings = strings,
+      .string_count = string_count,
+      .count_offset = count_offset,
+      .type_id = type_id,
+      .present_count = (uint8_t)present_count,
+  };
+  return iree_ok_status();
+}
+
+iree_status_t loom_bytecode_type_parameters_reject_name(
+    loom_bytecode_reader_decoder_t* decoder,
+    const loom_bytecode_reader_cursor_t* cursor,
+    const loom_bytecode_type_parameters_t* parameters, uint64_t name_id,
+    uint64_t offset) {
+  if (name_id >= parameters->string_count) {
+    const loom_diagnostic_param_t params[] = {
+        loom_param_string(IREE_SV("parameterized_type_parameter")),
+        loom_param_u64(name_id),
+        loom_param_u64(parameters->string_count),
+    };
+    return loom_bytecode_reader_emit_error(decoder, LOOM_ERR_BYTECODE_010,
+                                           params, IREE_ARRAYSIZE(params),
+                                           offset, 0);
+  }
+  const loom_parameterized_type_descriptor_t* descriptor =
+      parameters->descriptor;
+  uint8_t declared_index = LOOM_ATTR_INDEX_NONE;
+  const bool declared_before_cursor =
+      loom_attr_descriptor_find_by_name(
+          descriptor->parameter_descriptors, descriptor->parameter_count,
+          parameters->strings[name_id], &declared_index) != NULL;
+  return loom_bytecode_reader_emit_invalid_field(
+      decoder, cursor->range_name, IREE_SV("type"), parameters->type_id,
+      IREE_SV("parameter_name"), offset,
+      declared_before_cursor
+          ? IREE_SV(
+                "parameterized_type_parameters_are_not_in_declaration_order")
+          : IREE_SV("parameterized_type_parameter_is_not_declared"));
+}
+
+iree_status_t loom_bytecode_type_parameters_reject_missing(
+    loom_bytecode_reader_decoder_t* decoder,
+    const loom_bytecode_reader_cursor_t* cursor,
+    const loom_bytecode_type_parameters_t* parameters) {
+  return loom_bytecode_reader_emit_invalid_field(
+      decoder, cursor->range_name, IREE_SV("type"), parameters->type_id,
+      IREE_SV("parameter_name"), parameters->count_offset,
+      IREE_SV("parameterized_type_required_parameter_is_absent"));
 }
 
 iree_status_t loom_bytecode_type_emit_invalid_scoped_record(

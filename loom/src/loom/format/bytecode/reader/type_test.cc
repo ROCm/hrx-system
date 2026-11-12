@@ -13,6 +13,8 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/format/bytecode/format.h"
 #include "loom/format/bytecode/reader/module_view.h"
+#include "loom/format/bytecode/reader/selected_attribute.h"
+#include "loom/format/bytecode/reader/selected_tables.h"
 #include "loom/format/bytecode/reader/type_validator.h"
 #include "loom/ops/type_registry.h"
 
@@ -127,6 +129,66 @@ class BytecodeTypeTest : public ::testing::Test {
         &decoder_, &context_, &module_view_, &scratch_arena_, type_index,
         iree_make_const_byte_span(data, length), absolute_offset, out_entry,
         out_fact);
+  }
+
+  iree_status_t DecodeScopedParameters(const std::vector<uint8_t>& bytes,
+                                       bool selected,
+                                       loom_type_id_t* out_type) {
+    iree_string_view_t strings[] = {IREE_SV("wire.parameters"),
+                                    IREE_SV("first"), IREE_SV("middle"),
+                                    IREE_SV("last")};
+    loom_bytecode_reader_cursor_t cursor;
+    loom_bytecode_reader_cursor_initialize(bytes.data(), bytes.size(), 0,
+                                           IREE_SV("SCOPED_TYPES"), &cursor);
+    loom_bytecode_type_bindings_t bindings = {.arena = &scratch_arena_};
+    const loom_bytecode_attribute_ssa_materialization_scope_t scope = {
+        .symbol_name = IREE_SV("parameters"),
+        .bindings = &bindings,
+    };
+    // A genuine completed static type makes TYPE-valued negative controls
+    // valid references, isolating descriptor-kind validation.
+    loom_type_id_t scalar_type = LOOM_TYPE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_module_intern_type_id(
+        module_, loom_type_scalar(LOOM_SCALAR_TYPE_I32), &scalar_type));
+    if (selected) {
+      const uint8_t static_type[] = {LOOM_BYTECODE_TYPE_SCALAR,
+                                     LOOM_SCALAR_TYPE_I32};
+      loom_bytecode_table_entry_metadata_t type_entry = {
+          .entry_offset = 0,
+          .entry_length = sizeof(static_type),
+      };
+      const loom_bytecode_module_metadata_t metadata = {
+          .strings = {IREE_ARRAYSIZE(strings), strings},
+          .types = {1, &type_entry},
+      };
+      loom_bytecode_selected_table_materializer_t materializer;
+      loom_bytecode_selected_table_materializer_initialize(
+          &decoder_,
+          iree_make_const_byte_span(static_type, sizeof(static_type)),
+          &context_, &metadata, &scratch_arena_, module_,
+          loom_bytecode_selected_symbol_resolver_empty(), &materializer);
+      const iree_status_t status =
+          loom_bytecode_selected_attribute_decode_complete_type(
+              &materializer, &cursor, &scope, out_type);
+      loom_bytecode_selected_table_materializer_deinitialize(&materializer);
+      return status;
+    }
+    loom_bytecode_type_plan_entry_t type_entry = {
+        .completed_type = scalar_type,
+    };
+    loom_bytecode_reader_module_view_t view = {
+        .strings = {strings, IREE_ARRAYSIZE(strings)},
+        .types = {.entries = &type_entry, .count = 1},
+    };
+    loom_bytecode_attribute_materializer_t materializer = {
+        .decoder = &decoder_,
+        .context = &context_,
+        .module_view = &view,
+        .scratch_arena = &scratch_arena_,
+        .output_module = module_,
+    };
+    return loom_bytecode_attribute_decode_complete_type(&materializer, &cursor,
+                                                        &scope, out_type);
   }
 
   loom_bytecode_type_materializer_t MakeMaterializer(const uint8_t* data,
@@ -606,6 +668,84 @@ TEST_F(BytecodeTypeTest, RetentionDoesNotChangeParameterValidation) {
     data.insert(data.end(), parameters.begin(), parameters.end());
     ASSERT_NO_FATAL_FAILURE(
         CheckValidationModes(data.data(), data.size(), IREE_STATUS_DEFERRED));
+  }
+}
+
+TEST_F(BytecodeTypeTest, ScopedParameterOwnershipAndOptionalSlots) {
+  for (bool selected : {false, true}) {
+    for (bool optional : {false, true}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "selected=" << selected << " optional=" << optional);
+      std::vector<uint8_t> data = {
+          0, static_cast<uint8_t>(optional ? 3 : 2), 1, LOOM_BYTECODE_ATTR_I64,
+          2,
+      };
+      if (optional) {
+        data.insert(data.end(), {2, LOOM_BYTECODE_ATTR_I64, 3});
+      }
+      data.insert(data.end(), {3, LOOM_BYTECODE_ATTR_I64, 6});
+      loom_type_id_t type_id = LOOM_TYPE_ID_INVALID;
+      IREE_ASSERT_OK(DecodeScopedParameters(data, selected, &type_id));
+      iree_arena_reset(&scratch_arena_);
+      data.assign(data.size(), 0);
+      const loom_type_t type = loom_type_table_get(&module_->types, type_id);
+      EXPECT_EQ(loom_type_parameterized_descriptor(type),
+                &kParameterDescriptor);
+      ASSERT_EQ(loom_type_parameterized_parameter_count(type), 3);
+      const loom_attribute_t* parameters =
+          loom_type_parameterized_parameters(type);
+      EXPECT_EQ(parameters[0].kind, LOOM_ATTR_I64);
+      EXPECT_EQ(parameters[0].i64, 1);
+      EXPECT_EQ(parameters[1].kind,
+                optional ? LOOM_ATTR_I64 : LOOM_ATTR_ABSENT);
+      if (optional) {
+        EXPECT_EQ(parameters[1].i64, -2);
+      }
+      EXPECT_EQ(parameters[2].kind, LOOM_ATTR_I64);
+      EXPECT_EQ(parameters[2].i64, 3);
+    }
+  }
+  EXPECT_EQ(error_count_, 0u);
+}
+
+TEST_F(BytecodeTypeTest,
+       ScopedParameterReadersRejectTheSameMalformedContracts) {
+  const std::vector<std::vector<uint8_t>> cases = {
+      {0, 0},
+      {0, 1, 3, LOOM_BYTECODE_ATTR_I64, 2},
+      {0, 1, 1, LOOM_BYTECODE_ATTR_I64, 2},
+      {0, 2, 3, LOOM_BYTECODE_ATTR_I64, 2, 1, LOOM_BYTECODE_ATTR_I64, 2},
+      {0, 2, 1, LOOM_BYTECODE_ATTR_I64, 2, 1, LOOM_BYTECODE_ATTR_I64, 2},
+      {0, 1, 0, LOOM_BYTECODE_ATTR_I64, 2},
+      {0, 1, 4, LOOM_BYTECODE_ATTR_I64, 2},
+      {0, 2, 1, LOOM_BYTECODE_ATTR_TYPE, 0, 3, LOOM_BYTECODE_ATTR_I64, 2},
+      {0, 2, 1, LOOM_BYTECODE_ATTR_BOOL, 1, 3, LOOM_BYTECODE_ATTR_I64, 2},
+      {0, 1, 1, LOOM_BYTECODE_ATTR_COUNT, 0},
+      {0, 4},
+      {1, 0},
+      {4, 0},
+  };
+  for (const auto& data : cases) {
+    DiagnosticSnapshot first = {};
+    for (bool selected : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << "case=" << (&data - cases.data())
+                                        << " selected=" << selected);
+      error_count_ = 0;
+      diagnostic_ = {};
+      loom_type_id_t type_id = LOOM_TYPE_ID_INVALID;
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
+                            DecodeScopedParameters(data, selected, &type_id));
+      EXPECT_EQ(type_id, LOOM_TYPE_ID_INVALID);
+      EXPECT_EQ(error_count_, 1u);
+      if (!selected) {
+        first = diagnostic_;
+      } else {
+        EXPECT_EQ(diagnostic_.error, first.error);
+        EXPECT_EQ(diagnostic_.start, first.start);
+        EXPECT_EQ(diagnostic_.end, first.end);
+      }
+      iree_arena_reset(&scratch_arena_);
+    }
   }
 }
 

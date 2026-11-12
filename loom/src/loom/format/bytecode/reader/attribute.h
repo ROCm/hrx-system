@@ -152,6 +152,13 @@ loom_bytecode_attribute_read_kind(loom_bytecode_reader_decoder_t* decoder,
   return iree_ok_status();
 }
 
+// Checks a decoded wire kind against its field descriptor before consuming the
+// payload. A NULL descriptor permits any kind accepted by read_kind.
+iree_status_t loom_bytecode_attribute_validate_kind(
+    loom_bytecode_reader_decoder_t* decoder,
+    const loom_bytecode_reader_cursor_t* cursor,
+    const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind);
+
 // Reads a bounded BYTES or UTF8 payload, validating the latter's encoding.
 // The returned attribute borrows the input bytes until canonicalized.
 iree_status_t loom_bytecode_attribute_read_bytes(

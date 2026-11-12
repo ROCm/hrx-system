@@ -13,7 +13,6 @@
 #include "loom/format/bytecode/reader/module_view.h"
 #include "loom/format/bytecode/reader/reference_binding.h"
 #include "loom/format/bytecode/reader/type.h"
-#include "loom/ops/type_registry.h"
 
 #define LOOM_BYTECODE_MAX_TYPE_COUNT (UINT64_C(1) << 16)
 
@@ -75,135 +74,47 @@ static iree_status_t loom_bytecode_type_plan_validate_parameterized(
     iree_arena_allocator_t* scratch_arena,
     loom_bytecode_reader_cursor_t* cursor, loom_type_id_t type_id,
     loom_bytecode_parameterized_type_fact_t** out_fact) {
-  const uint64_t family_offset =
-      loom_bytecode_reader_cursor_absolute_position(cursor);
-  uint64_t family_name_id = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_bytecode_reader_read_uvarint(decoder, cursor, &family_name_id));
-  iree_string_view_t family_name = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_bytecode_type_plan_validate_string_ref(
-      decoder, module_view, family_name_id,
-      IREE_SV("parameterized_type_family"), family_offset, &family_name));
-  const loom_type_descriptor_t* type_descriptor =
-      loom_type_registry_lookup(context, family_name);
-  if (!type_descriptor || !type_descriptor->parameterized) {
-    return loom_bytecode_reader_emit_invalid_field(
-        decoder, IREE_SV("TYPES"), IREE_SV("type"), type_id,
-        IREE_SV("family_name"), family_offset,
-        IREE_SV("parameterized_type_family_is_not_registered"));
-  }
-  const loom_parameterized_type_descriptor_t* descriptor =
-      type_descriptor->parameterized;
-
-  const uint64_t present_count_offset =
-      loom_bytecode_reader_cursor_absolute_position(cursor);
-  uint64_t present_count = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_bytecode_reader_read_uvarint(decoder, cursor, &present_count));
-  if (present_count > descriptor->parameter_count) {
-    return loom_bytecode_reader_emit_count_exceeds(
-        decoder, IREE_SV("parameterized_type_parameters"), present_count,
-        descriptor->parameter_count, present_count_offset);
-  }
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
-      decoder, cursor, IREE_SV("parameterized_type_parameters"), present_count,
-      /*minimum_entry_length=*/2,
-      /*minimum_trailing_length=*/0, present_count_offset));
-
+  loom_bytecode_type_parameters_t parameters;
+  IREE_RETURN_IF_ERROR(loom_bytecode_type_parameters_begin(
+      decoder, cursor, context, module_view->strings.values,
+      module_view->strings.count, type_id, &parameters));
   const iree_host_size_t parameters_position = cursor->cursor.position;
   loom_bytecode_parameterized_type_fact_t* fact = NULL;
   if (out_fact) {
     iree_host_size_t allocation_size = 0;
     IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
         sizeof(loom_bytecode_parameterized_type_fact_t), &allocation_size,
-        IREE_STRUCT_FIELD_FAM((iree_host_size_t)present_count, uint8_t)));
+        IREE_STRUCT_FIELD_FAM(parameters.present_count, uint8_t)));
     IREE_RETURN_IF_ERROR(
         iree_arena_allocate(scratch_arena, allocation_size, (void**)&fact));
     *fact = (loom_bytecode_parameterized_type_fact_t){
-        .base =
-            {
-                .type_id = type_id,
-                .kind = LOOM_TYPE_PARAMETERIZED,
-            },
-        .descriptor = descriptor,
+        .base = {.type_id = type_id, .kind = LOOM_TYPE_PARAMETERIZED},
+        .descriptor = parameters.descriptor,
         .parameters_offset = cursor->absolute_offset + parameters_position,
-        .present_count = (uint8_t)present_count,
+        .present_count = parameters.present_count,
     };
   }
 
   loom_bytecode_attribute_validator_t attribute_validator =
       loom_bytecode_type_plan_attribute_validator(decoder, context,
                                                   module_view);
-  uint8_t next_parameter_index = 0;
-  bool missing_required_parameter = false;
-  for (iree_host_size_t i = 0; i < (iree_host_size_t)present_count; ++i) {
-    const uint64_t parameter_offset =
-        loom_bytecode_reader_cursor_absolute_position(cursor);
-    uint64_t parameter_name_id = 0;
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_reader_read_uvarint(decoder, cursor, &parameter_name_id));
-    iree_string_view_t parameter_name = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_bytecode_type_plan_validate_string_ref(
-        decoder, module_view, parameter_name_id,
-        IREE_SV("parameterized_type_parameter"), parameter_offset,
-        &parameter_name));
-    // Names advance monotonically through the descriptor. Record required
-    // gaps during lookup rather than recovering presence in a later scan.
-    const loom_attr_descriptor_t* parameter_descriptor = NULL;
-    for (; next_parameter_index < descriptor->parameter_count;
-         ++next_parameter_index) {
-      const loom_attr_descriptor_t* candidate =
-          &descriptor->parameter_descriptors[next_parameter_index];
-      if (iree_string_view_equal(loom_attr_descriptor_name(candidate),
-                                 parameter_name)) {
-        parameter_descriptor = candidate;
-        break;
-      }
-      missing_required_parameter |=
-          !iree_any_bit_set(candidate->flags, LOOM_ATTR_OPTIONAL);
-    }
-    if (!parameter_descriptor) {
-      uint8_t declared_parameter_index = LOOM_ATTR_INDEX_NONE;
-      const bool declared_before_cursor =
-          loom_attr_descriptor_find_by_name(
-              descriptor->parameter_descriptors, descriptor->parameter_count,
-              parameter_name, &declared_parameter_index) != NULL;
-      return loom_bytecode_reader_emit_invalid_field(
-          decoder, IREE_SV("TYPES"), IREE_SV("type"), type_id,
-          IREE_SV("parameter_name"), parameter_offset,
-          declared_before_cursor
-              ? IREE_SV("parameterized_type_parameters_are_not_in_declaration_"
-                        "order")
-              : IREE_SV("parameterized_type_parameter_is_not_declared"));
-    }
+  for (uint8_t i = 0; i < parameters.present_count; ++i) {
+    uint8_t parameter_index = 0;
+    IREE_RETURN_IF_ERROR(loom_bytecode_type_parameters_next(
+        decoder, cursor, &parameters, &parameter_index));
     if (fact) {
-      fact->parameter_indices[i] = next_parameter_index;
+      fact->parameter_indices[i] = parameter_index;
     }
-    ++next_parameter_index;
-
     loom_bytecode_attr_kind_t value_kind = LOOM_BYTECODE_ATTR_I64;
     IREE_RETURN_IF_ERROR(
         loom_bytecode_attribute_read_kind(decoder, cursor, &value_kind));
     IREE_RETURN_IF_ERROR(loom_bytecode_attribute_validate_type_parameter(
-        &attribute_validator, cursor, parameter_descriptor, value_kind,
-        type_id));
+        &attribute_validator, cursor,
+        &parameters.descriptor->parameter_descriptors[parameter_index],
+        value_kind, type_id));
   }
-
-  for (; next_parameter_index < descriptor->parameter_count;
-       ++next_parameter_index) {
-    missing_required_parameter |= !iree_any_bit_set(
-        descriptor->parameter_descriptors[next_parameter_index].flags,
-        LOOM_ATTR_OPTIONAL);
-  }
-  // Report absence only after validating every present value, preserving the
-  // wire-error precedence independently of whether construction is retained.
-  if (missing_required_parameter) {
-    return loom_bytecode_reader_emit_invalid_field(
-        decoder, IREE_SV("TYPES"), IREE_SV("type"), type_id,
-        IREE_SV("parameter_name"), present_count_offset,
-        IREE_SV("parameterized_type_required_parameter_is_absent"));
-  }
-
+  IREE_RETURN_IF_ERROR(
+      loom_bytecode_type_parameters_finish(decoder, cursor, &parameters));
   if (out_fact) {
     fact->parameters_length = cursor->cursor.position - parameters_position;
     *out_fact = fact;

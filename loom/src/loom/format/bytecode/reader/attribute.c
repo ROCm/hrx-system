@@ -12,7 +12,6 @@
 #include "loom/error/error_catalog.h"
 #include "loom/format/bytecode/reader/type.h"
 #include "loom/ir/parameterized_type.h"
-#include "loom/ops/type_registry.h"
 
 iree_status_t loom_bytecode_attribute_read_bytes(
     loom_bytecode_reader_decoder_t* decoder,
@@ -328,13 +327,10 @@ static iree_status_t loom_bytecode_attribute_retain_predicate_list(
   return iree_ok_status();
 }
 
-static iree_status_t loom_bytecode_attribute_validate_at_depth(
-    loom_bytecode_attribute_validator_t* validator,
-    loom_bytecode_reader_cursor_t* cursor,
-    const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
-    iree_host_size_t available_type_count,
-    const loom_bytecode_attribute_validation_scope_t* scope,
-    uint8_t aggregate_depth) {
+iree_status_t loom_bytecode_attribute_validate_kind(
+    loom_bytecode_reader_decoder_t* decoder,
+    const loom_bytecode_reader_cursor_t* cursor,
+    const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind) {
   // Wire kinds and native attribute kinds have independent numbering. UTF8
   // carries the BYTES payload kind with an additional validated form flag.
   static const uint8_t native_kinds[] = {
@@ -363,15 +359,26 @@ static iree_status_t loom_bytecode_attribute_validate_at_depth(
   };
   static_assert(IREE_ARRAYSIZE(native_kinds) == LOOM_BYTECODE_ATTR_COUNT,
                 "every wire kind must have a native attribute kind");
-  if (descriptor && kind < LOOM_BYTECODE_ATTR_COUNT &&
-      !loom_attr_descriptor_accepts_kind(
-          descriptor, (loom_attr_kind_t)native_kinds[kind])) {
+  if (descriptor && !loom_attr_descriptor_accepts_kind(
+                        descriptor, (loom_attr_kind_t)native_kinds[kind])) {
     return loom_bytecode_reader_emit_invalid_field(
-        validator->decoder, cursor->range_name, IREE_SV("attribute"), 0,
+        decoder, cursor->range_name, IREE_SV("attribute"), 0,
         IREE_SV("value_kind"),
         loom_bytecode_reader_cursor_absolute_position(cursor),
         IREE_SV("attribute_kind_does_not_match_its_descriptor"));
   }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_bytecode_attribute_validate_at_depth(
+    loom_bytecode_attribute_validator_t* validator,
+    loom_bytecode_reader_cursor_t* cursor,
+    const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
+    iree_host_size_t available_type_count,
+    const loom_bytecode_attribute_validation_scope_t* scope,
+    uint8_t aggregate_depth) {
+  IREE_RETURN_IF_ERROR(loom_bytecode_attribute_validate_kind(
+      validator->decoder, cursor, descriptor, kind));
   switch (kind) {
     case LOOM_BYTECODE_ATTR_I64: {
       int64_t value = 0;
