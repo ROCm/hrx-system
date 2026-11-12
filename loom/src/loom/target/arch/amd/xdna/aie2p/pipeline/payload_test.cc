@@ -359,18 +359,23 @@ class MulticastPayloadTest
       const auto* facts = tiles_[column * 6 + row].facts;
       const auto* input = loom_xdna_array_stream_port_range(
           context_.family, facts->kind, LOOM_XDNA_STREAM_DIRECTION_SLAVE, port);
+      const uint32_t slave = input->ordinal + channel;
+      const uint32_t input_word =
+          sw->banks[LOOM_AIE2P_NATIVE_SWITCH_BANK_SLAVES].words[slave];
+      ASSERT_NE(input_word & (1u << 31), 0u);
+      const bool packet_mode = (input_word & (1u << 30)) != 0;
       unsigned matches = 0;
       uint32_t filter = 0;
       for (unsigned slot = 0; slot < 4; ++slot) {
         const uint32_t word = sw->banks[LOOM_AIE2P_NATIVE_SWITCH_BANK_FILTERS]
-                                  .words[(input->ordinal + channel) * 4 + slot];
+                                  .words[slave * 4 + slot];
         const uint32_t mask = (word >> 16) & 31;
         if ((word & (1u << 8)) && ((word >> 24) & mask) == (packet & mask)) {
           ++matches;
           filter = word;
         }
       }
-      ASSERT_EQ(matches, 1u);
+      ASSERT_EQ(matches, packet_mode ? 1u : 0u);
       unsigned destinations = 0;
       for (size_t range = 0; range < context_.family->stream_port_count;
            ++range) {
@@ -382,15 +387,20 @@ class MulticastPayloadTest
         for (uint8_t lane = 0; lane < output.count; ++lane) {
           const uint32_t word = sw->banks[LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS]
                                     .words[output.ordinal + lane];
-          if (!(word & (1u << 31)) || !(word & (1u << 30)) ||
-              (word & 7) != (filter & 7) ||
-              !(word & (1u << (((filter >> 4) & 3) + 3)))) {
+          if (!(word & (1u << 31)) ||
+              ((word & (1u << 30)) != 0) != packet_mode) {
+            continue;
+          }
+          if (packet_mode ? (word & 7) != (filter & 7) ||
+                                !(word & (1u << (((filter >> 4) & 3) + 3)))
+                          : (word & 31) != slave) {
             continue;
           }
           ++destinations;
           switch (output.port) {
             case LOOM_XDNA_STREAM_PORT_DMA:
               ASSERT_LT(lane, 2);
+              EXPECT_TRUE(packet_mode);
               EXPECT_NE(word & (1u << 7), 0u) << "receiver must strip header";
               ++deliveries[(column * 6 + row) * 2 + lane];
               break;
