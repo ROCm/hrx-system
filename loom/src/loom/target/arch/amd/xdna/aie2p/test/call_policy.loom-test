@@ -1,0 +1,66 @@
+// RUN: pass specialize-target-callgraph,inline-callables{policy=target,budget=0,hot-budget=0}
+
+aie2p.target<core> @target
+
+low.func.def target<amd.xdna.aie2p.core>(@target) @scalar_and_address(%value0: reg<aie2p.er>, %value1: reg<aie2p.ep>) -> (reg<aie2p.er>, reg<aie2p.ep>) asm {
+  return %value0, %value1
+}
+
+low.func.def public target<amd.xdna.aie2p.core>(@target) @entry(%value0: reg<aie2p.er>, %value1: reg<aie2p.ep>) -> (reg<aie2p.er>, reg<aie2p.ep>) asm {
+  %result0, %result1 = low.func.call @scalar_and_address(%value0, %value1) : (reg<aie2p.er>, reg<aie2p.ep>) -> (reg<aie2p.er>, reg<aie2p.ep>)
+  return %result0, %result1
+}
+
+// ----
+aie2p.target<core> @target
+
+low.func.def target<amd.xdna.aie2p.core>(@target) @scalar_and_address(%value0: reg<aie2p.er>, %value1: reg<aie2p.ep>) -> (reg<aie2p.er>, reg<aie2p.ep>) asm {
+  return %value0, %value1
+}
+
+low.func.def public target<amd.xdna.aie2p.core>(@target) @entry(%value0: reg<aie2p.er>, %value1: reg<aie2p.ep>) -> (reg<aie2p.er>, reg<aie2p.ep>) asm {
+  %result0, %result1 = low.func.call @scalar_and_address(%value0, %value1) : (reg<aie2p.er>, reg<aie2p.ep>) -> (reg<aie2p.er>, reg<aie2p.ep>)
+  return %result0, %result1
+}
+
+// ====
+
+aie2p.target<core> @target
+
+low.func.def target<amd.xdna.aie2p.core>(@target) @vector_carrier(%value0: reg<aie2p.vec256>) -> (reg<aie2p.vec256>) asm {
+  return %value0
+}
+
+low.func.def public target<amd.xdna.aie2p.core>(@target) @entry(%value0: reg<aie2p.vec256>) -> (reg<aie2p.vec256>) asm {
+  %result0 = low.func.call @vector_carrier(%value0) : (reg<aie2p.vec256>) -> (reg<aie2p.vec256>)
+  return %result0
+}
+
+// ----
+aie2p.target<core> @target
+
+low.func.def public target<amd.xdna.aie2p.core>(@target) @entry(%value0: reg<aie2p.vec256>) -> (reg<aie2p.vec256>) asm {
+  return %value0
+}
+
+// ====
+
+aie2p.target<core> @target
+
+low.func.def target<amd.xdna.aie2p.core>(@target) @private_storage(%value0: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 16} : low.storage<private>
+  return %value0
+}
+
+low.func.def public target<amd.xdna.aie2p.core>(@target) @entry(%value0: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %result0 = low.func.call @private_storage(%value0) : (reg<aie2p.er>) -> (reg<aie2p.er>)
+  return %result0
+}
+
+// ----
+aie2p.target<core> @target
+
+low.func.def public target<amd.xdna.aie2p.core>(@target) @entry(%value0: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 16} : low.storage<private>
+  return %value0
+}

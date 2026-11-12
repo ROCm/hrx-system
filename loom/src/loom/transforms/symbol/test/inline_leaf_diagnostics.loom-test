@@ -34,3 +34,35 @@ func.def public target(@target) @entry(%value: i32) -> (i32) {
   %result = func.call @recursive(%value) : (i32) -> (i32)
   func.return %result : i32
 }
+
+// ====
+
+// A noinline promise cannot retain explicit storage on an ABI that forbids it.
+test.target<low_leaf> @target
+
+low.func.def noinline target<test.low.core>(@target) @reserve(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 16} : low.storage<private>
+  return %value
+}
+
+low.func.def public target<test.low.core>(@target) @entry(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  // ERROR@+1: LOWERING/044 {op_name="low.func.call", phase_name="inline-callables", callee_name="reserve", failure_code="native_callee_storage"}
+  %result = low.func.call @reserve(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  return %result
+}
+
+// ====
+
+// Entry resources cannot be smuggled into a retained helper.
+test.target<low_leaf> @target
+
+low.func.def noinline target<test.low.core>(@target) @resource() -> (reg<test.ptr>) asm {
+  %value = resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
+  return %value
+}
+
+low.func.def public target<test.low.core>(@target) @entry() -> (reg<test.ptr>) asm {
+  // ERROR@+1: LOWERING/044 {op_name="low.func.call", phase_name="inline-callables", callee_name="resource", failure_code="native_callee_resources"}
+  %result = low.func.call @resource() : () -> (reg<test.ptr>)
+  return %result
+}

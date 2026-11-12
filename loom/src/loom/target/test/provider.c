@@ -341,14 +341,17 @@ static loom_target_call_policy_t loom_test_select_call_policy(
     loom_call_like_kind_t kind, loom_call_like_t call,
     loom_func_like_t callee) {
   (void)module;
-  (void)kind;
   (void)call;
   (void)callee;
   switch (target->facts->selector) {
     case LOOM_TEST_TARGET_KIND_DEVICE:
       return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
     case LOOM_TEST_TARGET_KIND_LOW_LEAF:
-      return LOOM_TARGET_CALL_POLICY_REQUIRE_LEAF;
+      return LOOM_TARGET_CALL_POLICY_REQUIRE_LEAF |
+             (kind == LOOM_CALL_LIKE_KIND_LOW_INTERNAL
+                  ? LOOM_TARGET_CALL_POLICY_NO_RESOURCES |
+                        LOOM_TARGET_CALL_POLICY_NO_STORAGE
+                  : 0);
     default:
       return LOOM_TARGET_CALL_POLICY_DIRECT;
   }

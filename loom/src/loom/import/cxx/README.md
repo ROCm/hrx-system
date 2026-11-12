@@ -818,12 +818,19 @@ float integrate(float value, const int* counts) {
 }
 ```
 
-AMDGPU retains explicitly annotated helpers and expands unannotated helpers.
-Its retained helpers may contain loops and branches, but must be leaves after
-inlining: a kernel can call a helper, while a retained helper cannot call
-another retained helper. Subordinate helpers can use `loom::inline` to compose
-into the retained body. Unsupported boundaries diagnose instead of silently
-discarding `loom::noinline`.
+Unannotated helpers participate in the shared size budget, including on AMDGPU
+and AIE2P cores. Large or frequently called helpers can remain shared without
+annotations. The compiler keeps those decisions compatible with the target:
+oversized physical argument lists and unsupported helper storage force
+expansion. `loom::noinline` instead diagnoses an incompatible boundary.
+
+AMDGPU and AIE2P native helpers may contain loops and branches, but must be
+leaves after inlining. In a chain `kernel → outer → inner`, the compiler can
+expand `outer` and retain `inner`, or expand `inner` and retain `outer`.
+`loom::noinline` on `outer` selects the second choice; another `loom::noinline`
+on `inner` makes that graph invalid. No subordinate annotation is needed for
+ordinary helpers. AIE2P array construction and configuration still expand
+calls where realization needs their effects in the enclosing program.
 
 The shared inlining budgets apply where the selected target permits optional
 inlining. They do not override a target's required expansion or an authored

@@ -21,9 +21,9 @@ loom_inline_blocker_t loom_inline_preflight_site(
     const loom_inline_plan_entry_t* entry);
 
 // Inventories each Low callee at most once in the plan and returns its cached
-// body legality. The entry names a resolved callee in this plan.
+// body legality and resource/storage requirements in the symbol summary.
 loom_inline_blocker_t loom_inline_preflight_body(
-    loom_inline_callables_plan_t* state, const loom_inline_plan_entry_t* entry);
+    loom_inline_callables_plan_t* state, loom_symbol_id_t symbol_id);
 
 // Applies call-site and cached callee-body preflight together.
 loom_inline_blocker_t loom_inline_preflight_entry(

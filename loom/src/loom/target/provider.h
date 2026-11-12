@@ -85,6 +85,12 @@ typedef enum loom_target_call_policy_e {
   // A retained callee must contain no native calls after inline selection.
   // The shared planner chooses a legal cut through the call graph.
   LOOM_TARGET_CALL_POLICY_REQUIRE_LEAF = 2,
+  // A retained Low callee cannot declare entry resources.
+  LOOM_TARGET_CALL_POLICY_NO_RESOURCES = 4,
+  // A retained Low callee cannot reserve storage of any memory space.
+  LOOM_TARGET_CALL_POLICY_NO_STORAGE = 8,
+  // A retained Low callee cannot reserve nonempty workgroup storage.
+  LOOM_TARGET_CALL_POLICY_NO_WORKGROUP_STORAGE = 16,
 } loom_target_call_policy_t;
 
 // Physical carrier for lane predicates that cross loop boundaries.

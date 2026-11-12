@@ -72,6 +72,8 @@ typedef enum loom_inline_blocker_e {
   LOOM_INLINE_BLOCKER_CALLER_REGION_NOT_CFG_CAPABLE = 19,
   LOOM_INLINE_BLOCKER_TARGET_REQUIRES_LEAF,
   LOOM_INLINE_BLOCKER_NATIVE_CALL_CYCLE,
+  LOOM_INLINE_BLOCKER_NATIVE_CALLEE_RESOURCES,
+  LOOM_INLINE_BLOCKER_NATIVE_CALLEE_STORAGE,
   LOOM_INLINE_BLOCKER_COUNT,
 } loom_inline_blocker_t;
 
@@ -98,6 +100,12 @@ typedef struct loom_inline_symbol_info_t {
   uint8_t requires_leaf_body : 1;
   // The selected expansion of this body still contains a native call.
   uint8_t body_has_retained_call : 1;
+  // The selected Low body contains an explicit entry resource.
+  uint8_t body_has_resources : 1;
+  // The selected Low body contains an explicit storage reservation.
+  uint8_t body_has_storage : 1;
+  // A selected reservation contributes nonempty workgroup storage.
+  uint8_t body_has_workgroup_storage : 1;
   // Cached Low-body blocker plus one; zero means the body is not inventoried.
   uint8_t body_preflight;
 } loom_inline_symbol_info_t;
@@ -144,8 +152,8 @@ typedef struct loom_inline_plan_entry_t {
   uint8_t effective_temperature;
   // Planned loom_inline_plan_action_t, packed with the temperature hints.
   uint8_t action;
-  // The resolved caller ABI admits only leaf callees at this boundary.
-  bool requires_leaf_callee;
+  // Resolved loom_target_call_policy_t constraints for this boundary.
+  uint8_t target_policy;
   // Stable blocker code for ACTION_ERROR.
   loom_inline_blocker_t blocker;
   // Call-site execution context retained by the reference producer.
@@ -182,8 +190,8 @@ struct loom_inline_callables_plan_t {
   uint32_t entry_count;
   // Number of unresolved optional call entries.
   uint32_t candidate_count;
-  // Whether any resolved call imposes a leaf-only native boundary.
-  bool has_leaf_constraints;
+  // Whether any retained boundary constrains the callee's expanded body.
+  bool has_native_constraints;
   // At least one authored retained boundary fixes a leaf body.
   bool has_required_leaf_body;
   // First call entry for each source symbol.

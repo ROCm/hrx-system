@@ -244,3 +244,38 @@ pipeline.def public target(@target) @run(%seed: i32) run(%output: buffer) {
     view.store %result, %view[0] : i32, view<1xi32>
   }
 }
+
+// ====
+
+// RUN: pass specialize-target-callgraph,inline-callables{policy=target,budget=0,hot-budget=0}
+
+// Explicit storage follows expansions through multiple cold wrappers.
+test.target<low_leaf> @target
+
+low.func.def inline target<test.low.core>(@target) @reserve(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 16} : low.storage<private>
+  return %value
+}
+
+low.func.def cold target<test.low.core>(@target) @middle(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = low.func.call @reserve(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  return %result
+}
+
+low.func.def cold target<test.low.core>(@target) @outer(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = low.func.call @middle(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  return %result
+}
+
+low.func.def public target<test.low.core>(@target) @entry(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = low.func.call @outer(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  return %result
+}
+
+// ----
+test.target<low_leaf> @target
+
+low.func.def public target<test.low.core>(@target) @entry(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 16} : low.storage<private>
+  return %value
+}

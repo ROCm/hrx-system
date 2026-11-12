@@ -9,6 +9,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/callable_effects.h"
 #include "loom/pass/builder.h"
+#include "loom/target/arch/amdgpu/abi/call_abi.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/diagnostics/packet_diagnostics.h"
 #include "loom/target/arch/amdgpu/legalization.h"
@@ -163,8 +164,12 @@ static loom_target_call_policy_t loom_amdgpu_select_call_policy(
     loom_call_like_kind_t kind, loom_call_like_t call,
     loom_func_like_t callee) {
   (void)resolved_target;
+  (void)call;
   if (kind != LOOM_CALL_LIKE_KIND_SEMANTIC &&
       kind != LOOM_CALL_LIKE_KIND_LOW_INTERNAL) {
+    return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
+  }
+  if (!loom_func_like_body(callee)) {
     return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
   }
   if (kind == LOOM_CALL_LIKE_KIND_SEMANTIC &&
@@ -182,11 +187,41 @@ static loom_target_call_policy_t loom_amdgpu_select_call_policy(
       }
     }
   }
-  const bool explicit_noinline =
-      loom_call_like_inline_policy(call) == LOOM_INLINE_POLICY_NOINLINE ||
-      loom_func_like_inline_policy(callee) == LOOM_INLINE_POLICY_NOINLINE;
-  return explicit_noinline ? LOOM_TARGET_CALL_POLICY_REQUIRE_LEAF
-                           : LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
+  if (kind == LOOM_CALL_LIKE_KIND_SEMANTIC) {
+    return LOOM_TARGET_CALL_POLICY_REQUIRE_LEAF;
+  }
+
+  // Physical carriers are known at the Low boundary. Use the same classifier
+  // as native emission, with independent argument and result register banks.
+  // An authored generic representation can execute on a more specific target;
+  // its register types belong to the representation, not that target's config.
+  const uint64_t descriptor_set_id =
+      loom_low_descriptor_stable_id_from_key(loom_string_table_get(
+          &module->strings, loom_func_like_repr_contract(callee)));
+  loom_amdgpu_call_abi_requirements_t arguments = {0};
+  uint16_t argument_count = 0;
+  const loom_value_id_t* argument_ids =
+      loom_func_like_arg_ids(callee, &argument_count);
+  for (uint16_t i = 0; i < argument_count; ++i) {
+    if (!loom_amdgpu_call_abi_add_low_type(
+            descriptor_set_id, loom_module_value_type(module, argument_ids[i]),
+            &arguments) ||
+        !loom_amdgpu_call_abi_requirements_fit(arguments)) {
+      return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
+    }
+  }
+  loom_amdgpu_call_abi_requirements_t results = {0};
+  const loom_value_id_t* result_ids = loom_op_const_results(callee.op);
+  for (uint16_t i = 0; i < callee.op->result_count; ++i) {
+    if (!loom_amdgpu_call_abi_add_low_type(
+            descriptor_set_id, loom_module_value_type(module, result_ids[i]),
+            &results) ||
+        !loom_amdgpu_call_abi_requirements_fit(results)) {
+      return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
+    }
+  }
+  return LOOM_TARGET_CALL_POLICY_REQUIRE_LEAF |
+         LOOM_TARGET_CALL_POLICY_NO_WORKGROUP_STORAGE;
 }
 
 const loom_target_provider_t loom_amdgpu_target_provider = {

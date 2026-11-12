@@ -348,6 +348,10 @@ static iree_string_view_t loom_inline_blocker_code(
       return IREE_SV("target_requires_leaf_callee");
     case LOOM_INLINE_BLOCKER_NATIVE_CALL_CYCLE:
       return IREE_SV("native_call_cycle");
+    case LOOM_INLINE_BLOCKER_NATIVE_CALLEE_RESOURCES:
+      return IREE_SV("native_callee_resources");
+    case LOOM_INLINE_BLOCKER_NATIVE_CALLEE_STORAGE:
+      return IREE_SV("native_callee_storage");
     case LOOM_INLINE_BLOCKER_NONE:
     default:
       return IREE_SV("unknown");
@@ -596,9 +600,9 @@ static void loom_inline_resolve_entry_policy(
           ? loom_inline_target_call_policy(state, entry, call_kind, entry->call,
                                            entry->callee)
           : LOOM_TARGET_CALL_POLICY_DIRECT;
-  entry->requires_leaf_callee =
-      iree_any_bit_set(target_policy, LOOM_TARGET_CALL_POLICY_REQUIRE_LEAF);
-  state->has_leaf_constraints |= entry->requires_leaf_callee;
+  entry->target_policy = (uint8_t)target_policy;
+  state->has_native_constraints |=
+      (target_policy & ~LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE) != 0;
   const bool target_requires_inline =
       iree_any_bit_set(target_policy, LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE);
   if (target_requires_inline && (callee_noinline || call_noinline)) {
@@ -608,7 +612,8 @@ static void loom_inline_resolve_entry_policy(
   }
 
   if (callee_noinline || call_noinline) {
-    state->has_required_leaf_body |= entry->requires_leaf_callee;
+    state->has_required_leaf_body |= iree_any_bit_set(
+        entry->target_policy, LOOM_TARGET_CALL_POLICY_REQUIRE_LEAF);
     entry->effective_policy = LOOM_INLINE_POLICY_NOINLINE;
     entry->action = LOOM_INLINE_PLAN_ACTION_KEEP;
     ++state->statistics.kept_edges;
@@ -780,14 +785,15 @@ static iree_status_t loom_inline_build_plan(
 // A required expansion may wait for callable-exit normalization or target
 // specialization. Its effective policy records the eventual boundary even when
 // the current pass cannot clone the body yet.
-static void loom_inline_require_leaf_expansion(
-    loom_inline_callables_plan_t* state, loom_inline_plan_entry_t* entry) {
+static void loom_inline_require_native_expansion(
+    loom_inline_callables_plan_t* state, loom_inline_plan_entry_t* entry,
+    loom_inline_blocker_t blocker) {
   if (entry->action == LOOM_INLINE_PLAN_ACTION_ERROR ||
       entry->effective_policy == LOOM_INLINE_POLICY_INLINE) {
     return;
   }
   if (entry->effective_policy == LOOM_INLINE_POLICY_NOINLINE) {
-    loom_inline_mark_blocker(entry, LOOM_INLINE_BLOCKER_TARGET_REQUIRES_LEAF);
+    loom_inline_mark_blocker(entry, blocker);
     return;
   }
   if (entry->action == LOOM_INLINE_PLAN_ACTION_REQUIRED) {
@@ -836,7 +842,8 @@ static iree_status_t loom_inline_prepare_leaf_bodies(
   uint32_t count = 0;
   for (uint32_t i = 0; i < state->entry_count; ++i) {
     const loom_inline_plan_entry_t* entry = &state->entries[i];
-    if (entry->requires_leaf_callee &&
+    if (iree_any_bit_set(entry->target_policy,
+                         LOOM_TARGET_CALL_POLICY_REQUIRE_LEAF) &&
         entry->effective_policy == LOOM_INLINE_POLICY_NOINLINE &&
         entry->action != LOOM_INLINE_PLAN_ACTION_ERROR &&
         !state->symbols[entry->target_symbol_id].requires_leaf_body) {
@@ -856,7 +863,8 @@ static iree_status_t loom_inline_prepare_leaf_bodies(
       const loom_call_like_kind_t kind = loom_call_like_kind(entry->call);
       if (kind == LOOM_CALL_LIKE_KIND_SEMANTIC ||
           kind == LOOM_CALL_LIKE_KIND_LOW_INTERNAL) {
-        loom_inline_require_leaf_expansion(state, entry);
+        loom_inline_require_native_expansion(
+            state, entry, LOOM_INLINE_BLOCKER_TARGET_REQUIRES_LEAF);
       }
       if (entry->effective_policy == LOOM_INLINE_POLICY_INLINE &&
           !state->symbols[entry->target_symbol_id].requires_leaf_body) {
@@ -871,7 +879,7 @@ static iree_status_t loom_inline_prepare_leaf_bodies(
 // Finish the legal cut in callee-before-caller order after cost selection.
 // Expanding a non-leaf body moves its retained calls into its caller; retaining
 // the body as another native helper would require an ABI with nested calls.
-static void loom_inline_select_leaf_boundaries(
+static void loom_inline_select_native_boundaries(
     loom_inline_callables_plan_t* state) {
   for (iree_host_size_t component_index = 0;
        component_index < state->sccs.count; ++component_index) {
@@ -879,20 +887,43 @@ static void loom_inline_select_leaf_boundaries(
     for (iree_host_size_t node = 0; node < component->node_count; ++node) {
       const loom_symbol_id_t symbol_id = component->nodes[node];
       loom_inline_symbol_info_t* source = &state->symbols[symbol_id];
+      // Inventory once before propagating expansions into this body's summary.
+      // The cached blocker is for expansion; retained boundaries consume the
+      // same walk's resource and storage facts below.
+      if (source->incoming_call_count != 0) {
+        loom_inline_preflight_body(state, symbol_id);
+      }
       for (uint32_t i = state->first_graph_by_source[symbol_id];
            i != LOOM_INLINE_PLAN_ENTRY_INVALID;
            i = state->entries[i].next_graph_from_source) {
         loom_inline_plan_entry_t* entry = &state->entries[i];
         const loom_inline_symbol_info_t* target =
             &state->symbols[entry->target_symbol_id];
-        if (entry->requires_leaf_callee) {
+        if (iree_any_bit_set(entry->target_policy,
+                             LOOM_TARGET_CALL_POLICY_NO_RESOURCES) &&
+            target->body_has_resources) {
+          loom_inline_require_native_expansion(
+              state, entry, LOOM_INLINE_BLOCKER_NATIVE_CALLEE_RESOURCES);
+        }
+        if ((iree_any_bit_set(entry->target_policy,
+                              LOOM_TARGET_CALL_POLICY_NO_STORAGE) &&
+             target->body_has_storage) ||
+            (iree_any_bit_set(entry->target_policy,
+                              LOOM_TARGET_CALL_POLICY_NO_WORKGROUP_STORAGE) &&
+             target->body_has_workgroup_storage)) {
+          loom_inline_require_native_expansion(
+              state, entry, LOOM_INLINE_BLOCKER_NATIVE_CALLEE_STORAGE);
+        }
+        if (iree_any_bit_set(entry->target_policy,
+                             LOOM_TARGET_CALL_POLICY_REQUIRE_LEAF)) {
           if (component->is_cycle && entry->execution_scope == 0 &&
               state->component_by_symbol[entry->target_symbol_id] ==
                   component_index) {
             loom_inline_mark_blocker(entry,
                                      LOOM_INLINE_BLOCKER_NATIVE_CALL_CYCLE);
           } else if (target->body_has_retained_call) {
-            loom_inline_require_leaf_expansion(state, entry);
+            loom_inline_require_native_expansion(
+                state, entry, LOOM_INLINE_BLOCKER_TARGET_REQUIRES_LEAF);
           }
         }
         if (entry->execution_scope != 0) {
@@ -902,6 +933,10 @@ static void loom_inline_select_leaf_boundaries(
         if (entry->action == LOOM_INLINE_PLAN_ACTION_REQUIRED ||
             entry->effective_policy == LOOM_INLINE_POLICY_INLINE) {
           source->body_has_retained_call |= target->body_has_retained_call;
+          source->body_has_resources |= target->body_has_resources;
+          source->body_has_storage |= target->body_has_storage;
+          source->body_has_workgroup_storage |=
+              target->body_has_workgroup_storage;
         } else if (kind == LOOM_CALL_LIKE_KIND_SEMANTIC ||
                    kind == LOOM_CALL_LIKE_KIND_LOW_INTERNAL) {
           source->body_has_retained_call = true;
@@ -940,7 +975,7 @@ static iree_status_t loom_inline_visit_active_successors(
        entry_index != LOOM_INLINE_PLAN_ENTRY_INVALID;) {
     const loom_inline_plan_entry_t* entry = &state->entries[entry_index];
     const loom_call_like_kind_t kind = loom_call_like_kind(entry->call);
-    const bool native_dependency = state->has_leaf_constraints &&
+    const bool native_dependency = state->has_native_constraints &&
                                    entry->execution_scope == 0 &&
                                    (kind == LOOM_CALL_LIKE_KIND_SEMANTIC ||
                                     kind == LOOM_CALL_LIKE_KIND_LOW_INTERNAL);
@@ -1260,7 +1295,7 @@ static void loom_inline_preflight_candidates(
          entry_index = state->next_candidate_by_target[entry_index]) {
       const loom_inline_plan_entry_t* entry = &state->entries[entry_index];
       if (entry->action == LOOM_INLINE_PLAN_ACTION_CANDIDATE) {
-        body_blocker = loom_inline_preflight_body(state, entry);
+        body_blocker = loom_inline_preflight_body(state, target_symbol_id);
         break;
       }
     }
@@ -1485,7 +1520,7 @@ static iree_status_t loom_inline_select_profitable_entries(
   if (state->candidate_count != 0) {
     loom_inline_preflight_candidates(state);
   }
-  if (state->candidate_count == 0 && !state->has_leaf_constraints) {
+  if (state->candidate_count == 0 && !state->has_native_constraints) {
     return iree_ok_status();
   }
 
@@ -1649,7 +1684,7 @@ iree_status_t loom_inline_callables_plan_execute(
   // Unconstrained kept calls have no cycle or rewrite obligations. Leaf-only
   // native boundaries still require graph selection without profitability.
   if (state->statistics.required_edges == 0 && state->candidate_count == 0 &&
-      !state->has_leaf_constraints) {
+      !state->has_native_constraints) {
     return loom_inline_emit_blockers(state);
   }
   IREE_RETURN_IF_ERROR(loom_inline_compute_required_sccs(state));
@@ -1660,12 +1695,12 @@ iree_status_t loom_inline_callables_plan_execute(
   if (loom_pass_has_error_diagnostics(state->pass)) {
     return iree_ok_status();
   }
-  if (state->candidate_count != 0 || state->has_leaf_constraints) {
+  if (state->candidate_count != 0 || state->has_native_constraints) {
     const loom_scc_list_t required_sccs = state->sccs;
     IREE_RETURN_IF_ERROR(
         loom_inline_select_profitable_entries(state, &required_sccs));
-    if (state->has_leaf_constraints) {
-      loom_inline_select_leaf_boundaries(state);
+    if (state->has_native_constraints) {
+      loom_inline_select_native_boundaries(state);
       loom_inline_propagate_required_bodies(state);
     }
     loom_inline_preflight_required_entries(state);

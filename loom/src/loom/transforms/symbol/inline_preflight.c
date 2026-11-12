@@ -47,13 +47,26 @@ static loom_inline_blocker_t loom_inline_validate_call_kind(
   }
 }
 
-static loom_inline_blocker_t loom_inline_validate_low_body_op(
-    const loom_op_t* op, bool schedule_locked) {
+static void loom_inline_inspect_low_body_op(const loom_module_t* module,
+                                            const loom_op_t* op,
+                                            bool schedule_locked,
+                                            loom_inline_symbol_info_t* symbol,
+                                            loom_inline_blocker_t* blocker) {
+  loom_inline_blocker_t local_blocker = LOOM_INLINE_BLOCKER_NONE;
   if (loom_low_resource_isa(op) || loom_low_live_in_isa(op)) {
-    return LOOM_INLINE_BLOCKER_LOW_ENTRY_RESOURCE;
+    local_blocker = LOOM_INLINE_BLOCKER_LOW_ENTRY_RESOURCE;
+    symbol->body_has_resources |= loom_low_resource_isa(op);
+  } else if (schedule_locked && op->region_count != 0) {
+    local_blocker = LOOM_INLINE_BLOCKER_LOW_LOCKED_NESTED_REGION;
+  } else if (loom_low_storage_reserve_isa(op)) {
+    symbol->body_has_storage = true;
+    const loom_type_t storage_type =
+        loom_module_value_type(module, loom_low_storage_reserve_storage(op));
+    symbol->body_has_workgroup_storage |=
+        loom_type_storage_space(storage_type) == LOOM_STORAGE_SPACE_WORKGROUP;
   }
-  if (schedule_locked && op->region_count != 0) {
-    return LOOM_INLINE_BLOCKER_LOW_LOCKED_NESTED_REGION;
+  if (*blocker == LOOM_INLINE_BLOCKER_NONE) {
+    *blocker = local_blocker;
   }
   loom_region_t* const* regions = loom_op_regions(op);
   for (uint8_t region_index = 0; region_index < op->region_count;
@@ -67,15 +80,11 @@ static loom_inline_blocker_t loom_inline_validate_low_body_op(
       const loom_block_t* block = loom_region_const_block(region, block_index);
       const loom_op_t* child_op = NULL;
       loom_block_for_each_op(block, child_op) {
-        loom_inline_blocker_t blocker =
-            loom_inline_validate_low_body_op(child_op, schedule_locked);
-        if (blocker != LOOM_INLINE_BLOCKER_NONE) {
-          return blocker;
-        }
+        loom_inline_inspect_low_body_op(module, child_op, schedule_locked,
+                                        symbol, blocker);
       }
     }
   }
-  return LOOM_INLINE_BLOCKER_NONE;
 }
 
 loom_inline_blocker_t loom_inline_preflight_site(
@@ -135,47 +144,40 @@ loom_inline_blocker_t loom_inline_preflight_site(
 }
 
 static loom_inline_blocker_t loom_inline_inspect_low_body(
-    const loom_inline_plan_entry_t* entry) {
-  if (loom_call_like_kind(entry->call) != LOOM_CALL_LIKE_KIND_LOW_INTERNAL) {
+    const loom_module_t* module, loom_inline_symbol_info_t* symbol) {
+  if (!loom_low_func_def_isa(symbol->function.op)) {
     return LOOM_INLINE_BLOCKER_NONE;
   }
-  if (!loom_low_func_def_isa(entry->callee.op)) {
-    return LOOM_INLINE_BLOCKER_NONE;
-  }
-  const loom_region_t* body = loom_func_like_body(entry->callee);
+  const loom_region_t* body = loom_func_like_body(symbol->function);
   if (!body || body->block_count == 0) {
     return LOOM_INLINE_BLOCKER_NONE;
   }
-  const uint8_t allocation = loom_low_func_def_allocation(entry->callee.op);
+  loom_inline_blocker_t blocker = LOOM_INLINE_BLOCKER_NONE;
+  const uint8_t allocation = loom_low_func_def_allocation(symbol->function.op);
   if (allocation != 0 && allocation != LOOM_LOW_ALLOCATION_VIRTUAL) {
-    return LOOM_INLINE_BLOCKER_LOW_ALLOCATION;
+    blocker = LOOM_INLINE_BLOCKER_LOW_ALLOCATION;
   }
   const bool schedule_locked =
-      loom_low_func_def_schedule(entry->callee.op) == LOOM_LOW_SCHEDULE_LOCKED;
+      loom_low_func_def_schedule(symbol->function.op) ==
+      LOOM_LOW_SCHEDULE_LOCKED;
   for (uint16_t block_index = 0; block_index < body->block_count;
        ++block_index) {
     const loom_block_t* block = loom_region_const_block(body, block_index);
     const loom_op_t* body_op = NULL;
     loom_block_for_each_op(block, body_op) {
-      loom_inline_blocker_t low_blocker =
-          loom_inline_validate_low_body_op(body_op, schedule_locked);
-      if (low_blocker != LOOM_INLINE_BLOCKER_NONE) {
-        return low_blocker;
-      }
+      loom_inline_inspect_low_body_op(module, body_op, schedule_locked, symbol,
+                                      &blocker);
     }
   }
-  return LOOM_INLINE_BLOCKER_NONE;
+  return blocker;
 }
 
 loom_inline_blocker_t loom_inline_preflight_body(
-    loom_inline_callables_plan_t* state,
-    const loom_inline_plan_entry_t* entry) {
-  if (loom_call_like_kind(entry->call) != LOOM_CALL_LIKE_KIND_LOW_INTERNAL) {
-    return LOOM_INLINE_BLOCKER_NONE;
-  }
-  loom_inline_symbol_info_t* symbol = &state->symbols[entry->target_symbol_id];
+    loom_inline_callables_plan_t* state, loom_symbol_id_t symbol_id) {
+  loom_inline_symbol_info_t* symbol = &state->symbols[symbol_id];
   if (symbol->body_preflight == 0) {
-    symbol->body_preflight = (uint8_t)loom_inline_inspect_low_body(entry) + 1;
+    symbol->body_preflight =
+        (uint8_t)loom_inline_inspect_low_body(state->module, symbol) + 1;
   }
   return (loom_inline_blocker_t)(symbol->body_preflight - 1);
 }
@@ -187,5 +189,5 @@ loom_inline_blocker_t loom_inline_preflight_entry(
       loom_inline_preflight_site(state, entry);
   return site_blocker != LOOM_INLINE_BLOCKER_NONE
              ? site_blocker
-             : loom_inline_preflight_body(state, entry);
+             : loom_inline_preflight_body(state, entry->target_symbol_id);
 }

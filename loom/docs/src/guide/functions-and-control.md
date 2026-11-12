@@ -122,13 +122,19 @@ instead of cloning its body, but it still must fit the budget: a call boundary
 can contain register pressure even when removing it would not duplicate code.
 Required `inline` calls and target-required calls do not consume either budget.
 
-Target-required expansion takes precedence over this cost policy. AMDGPU's
-default policy expands unannotated helpers; explicit `noinline` retains a
-supported boundary. Its retained helpers must be leaves after inlining, so a
-kernel can call a shared helper containing loops and branches, but that helper
-cannot itself retain another call. Annotating a subordinate helper `inline`
-composes it into the retained body. A rejected `noinline` boundary is a
-diagnostic, not permission to ignore the annotation.
+Target-required expansion takes precedence over this cost policy. AMDGPU and
+AIE2P core helpers use the same budgets, with leaf-only native call boundaries.
+For `entry → outer → inner`, the compiler can retain `inner` and expand `outer`,
+or expand `inner` and retain `outer`. An authored `noinline` on `outer` requires
+its subordinate calls to expand; two nested `noinline` boundaries cannot satisfy
+these targets' callable contracts and produce a diagnostic.
+
+Automatic calls also expand when their physical arguments or results exceed
+the native register banks, or when the helper owns storage that its target
+cannot support at a call boundary. These decisions use the selected Low types.
+An authored `noinline` makes an incompatible boundary an error. AIE2P array
+construction and configuration calls still expand where realization requires
+their effects in the enclosing program.
 
 Custom pipelines can tune the two optional classes independently:
 
