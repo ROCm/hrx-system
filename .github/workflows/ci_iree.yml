@@ -130,9 +130,7 @@ jobs:
             command: iree-bazel-repository-build
             platform: Windows x86-64 (via Linux)
             runner: az-linux-scale-rocm-default-prod
-            host_ar: ar
-            host_cc: clang
-            host_cxx: clang++
+            host_toolchain: rocm
           - name: GCC / Fastbuild / AMD gfx120x Vulkan
             kind: vulkan
             command: iree-bazel-vulkan
@@ -370,6 +368,8 @@ jobs:
           python3 dev.py bazel setup --venv
           if [[ "${{ matrix.kind }}" == windows_msvc ]]; then
             {
+              # Keep Wine-visible generated paths below MSVC's path limits.
+              echo "startup --output_base=${RUNNER_TEMP}/b"
               echo 'build --config=windows-x86_64'
               echo 'build --config=windows-msvc'
             } >> .bazelrc.local
