@@ -13,6 +13,21 @@ package(
 )
 
 loom_cc_test(
+    name = "connectivity_test",
+    srcs = ["connectivity_test.cc"],
+    deps = [
+        ":native",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/array:plan",
+        "//loom/src/loom/target/arch/amd/xdna/array:facts",
+        "//loom/src/loom/testing:diagnostic_matchers",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "endpoints_test",
     srcs = ["endpoints_test.cc"],
     deps = [
@@ -131,14 +146,17 @@ loom_cc_library(
         "channels.c",
         "collective.c",
         "configuration.c",
+        "connectivity.c",
         "credits.c",
         "distribution.c",
         "dma.c",
+        "dma_queues.c",
         "dma_resources.c",
         "dma_submission.c",
         "input.c",
         "input_actions.c",
         "native.c",
+        "payload.c",
         "phases.c",
         "programs.c",
         "refill.c",
@@ -151,12 +169,15 @@ loom_cc_library(
     ],
     hdrs = [
         "channel_state.h",
+        "connectivity.h",
         "credits.h",
         "distribution.h",
+        "dma_queues.h",
         "dma_resources.h",
         "dma_submission.h",
         "input.h",
         "native.h",
+        "payload.h",
         "refill.h",
         "semaphores.h",
         "sharing.h",
@@ -223,6 +244,32 @@ loom_cc_test(
         "//loom/src/loom/analysis/pipeline:invocations",
         "//loom/src/loom/pass:types",
         "//loom/src/loom/target/arch/amd/xdna/array:facts",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "dma_queues_test",
+    srcs = ["dma_queues_test.cc"],
+    deps = [
+        ":native",
+        "//loom/src/loom/target/arch/amd/xdna/array:facts",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "payload_test",
+    srcs = ["payload_test.cc"],
+    deps = [
+        ":native",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/array:plan",
+        "//loom/src/loom/target/arch/amd/xdna/array:facts",
+        "//loom/src/loom/target/arch/amd/xdna/array:registers",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

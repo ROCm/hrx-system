@@ -79,6 +79,10 @@ typedef struct loom_aie2p_native_channel_t {
   // First logical user of the physical pair, responsible for startup seeds.
   // Compatible serial users reuse the restored pair without reseeding it.
   bool initializes_locks;
+  // Serial aliases require different initial free-credit counts. Configuration
+  // starts both locks at zero; each construction establishes its own values
+  // after the previous users join and before any fresh user starts.
+  bool initializes_on_entry;
   // Single cursor owner and slot movement in each direction.
   struct {
     // Strand advancing the read cursor.
@@ -178,10 +182,12 @@ typedef struct loom_aie2p_native_tile_t {
   // Physical distribution paths originating at this memory module, bounded
   // by its memory-to-stream engines. Logical children retain their geometry.
   struct loom_aie2p_native_distribution_path_t* distribution_paths;
-  // Next available memory-to-stream DMA engine.
-  uint8_t next_mm2s;
-  // Next available stream-to-memory DMA engine.
-  uint8_t next_s2mm;
+  // Peak memory-to-stream queue extent across construction lifetimes.
+  uint8_t mm2s_count;
+  // Peak stream-to-memory queue extent across construction lifetimes.
+  uint8_t s2mm_count;
+  // Physical queue control state, indexed by direction then assigned engine.
+  struct loom_aie2p_native_dma_control_t* dma_controls[2];
   // Whether a resident strand owns this core.
   bool has_worker;
 } loom_aie2p_native_tile_t;
@@ -190,11 +196,17 @@ typedef struct loom_aie2p_native_tile_t {
 typedef struct loom_aie2p_native_dma_path_t {
   // Next pair used by the worker.
   struct loom_aie2p_native_dma_path_t* next;
+  // Next occurrence-owned request, independent of the physical path list.
+  struct loom_aie2p_native_dma_path_t* next_demand;
+  // Interned physical path, populated after lifetime assignment.
+  struct loom_aie2p_native_dma_path_t* selected;
+  // Physical sender's destination class, assigned after queue layout.
+  struct loom_aie2p_native_payload_class_t* payload;
   // On-chip endpoint.
   loom_aie2p_native_tile_t* local;
   // External endpoint.
   loom_aie2p_native_tile_t* shim;
-  // Local direction-specific engine.
+  // Local direction-specific engine, UINT8_MAX before lifetime assignment.
   uint8_t local_engine;
   // Shim direction-specific engine.
   uint8_t shim_engine;
@@ -306,6 +318,8 @@ typedef struct loom_aie2p_native_transfer_t {
   struct loom_aie2p_native_transfer_t* task_next;
   // Physical task selected for this transfer's compatible group partition.
   loom_aie2p_native_transfer_task_t* task;
+  // Tasks whose source group closes here, in endpoint allocation order.
+  loom_aie2p_native_transfer_task_t* closed_tasks;
   // Canonical admitted copy request and its group index.
   const loom_kernel_async_transfer_t* source;
   // Wait that retires this transfer's group.
@@ -349,6 +363,8 @@ typedef struct loom_aie2p_native_transfer_t {
 struct loom_aie2p_native_transfer_task_t {
   // Next task in the worker's retained issue order.
   loom_aie2p_native_transfer_task_t* next;
+  // Next task closed at the same transfer, in tile/direction order.
+  loom_aie2p_native_transfer_task_t* group_next;
   // First transfer in this task's descriptor order.
   loom_aie2p_native_transfer_t* first_transfer;
   // Last transfer, retained while selection appends compatible members.
@@ -430,7 +446,12 @@ typedef struct loom_aie2p_native_distribution_packet_t {
 typedef struct loom_aie2p_native_distribution_path_t {
   // Next physical path originating at the same memory module.
   struct loom_aie2p_native_distribution_path_t* next;
-  // First geometry, owning initial queue reset and the physical endpoint order.
+  // Interned path for this occurrence's demand, populated after queue layout.
+  struct loom_aie2p_native_distribution_path_t* selected;
+  // Physical destination classes indexed by logical packet ID; circuit paths
+  // have exactly one entry. Demand keeps this mapping after path interning.
+  struct loom_aie2p_native_payload_class_t** payloads;
+  // First geometry, retaining the physical endpoint order.
   struct loom_aie2p_native_distribution_t* first;
   // All selected geometries, including the first, for common framing selection.
   struct loom_aie2p_native_distribution_t* geometries;
@@ -440,11 +461,9 @@ typedef struct loom_aie2p_native_distribution_path_t {
   // Admitted source-controller engine, or IREE_HOST_SIZE_MAX for resident
   // paths.
   iree_host_size_t controller_engine;
-  // Packet classes across all geometries, identified by physical receivers.
+  // Logical packet classes across this occurrence's formed geometries.
   loom_aie2p_native_distribution_packet_t* packets;
-  // Physical routing identity shared by all packet classes on this path.
-  uint32_t source_route;
-  // Number of packet identities in the physical path's class table.
+  // Number of logical packet identities mapped through payloads.
   uint8_t packet_count;
   // Exact route-edge interval produced for a uniform source's fanout.
   struct {
@@ -460,6 +479,10 @@ typedef struct loom_aie2p_native_distribution_path_t {
 typedef struct loom_aie2p_native_distribution_t {
   // Next distribution owned by the same transport strand.
   struct loom_aie2p_native_distribution_t* next;
+  // Next geometry requested by this occurrence, before physical interning.
+  struct loom_aie2p_native_distribution_t* next_demand;
+  // Interned physical geometry, populated during descriptor selection.
+  struct loom_aie2p_native_distribution_t* selected;
   // Next geometry sharing this physical path, independent of transport owner.
   struct loom_aie2p_native_distribution_t* next_geometry;
   // Static queues and routes, independent of logical channel identity.
@@ -487,6 +510,48 @@ typedef struct loom_aie2p_native_distribution_t {
   // Exact reader retained by grant eligibility; UINT32_MAX for configuration.
   uint32_t grant_reader;
 } loom_aie2p_native_distribution_t;
+
+// A contiguous source range delivered to one immutable packet class.
+typedef struct loom_aie2p_native_distribution_range_t {
+  // First source record within the retained batch.
+  uint32_t first;
+  // Consecutive records coalesced into one DMA packet.
+  uint32_t count;
+  // Index in the distribution path's retained destination-class table.
+  uint8_t packet;
+} loom_aie2p_native_distribution_range_t;
+
+// Ordered source ranges and destination classes before queue/descriptor layout.
+typedef struct loom_aie2p_native_packet_program_t {
+  // Consecutive DMA packet ranges in the source's retained copy order.
+  loom_aie2p_native_distribution_range_t* ranges;
+  // Number of source descriptors required by those ranges.
+  uint16_t range_count;
+  // Finite task publications covering the retained source admissions.
+  uint8_t task_count;
+} loom_aie2p_native_packet_program_t;
+
+// One retained source batch awaiting physical descriptor and route selection.
+typedef struct loom_aie2p_native_distribution_batch_t {
+  // Canonical geometry supplying this batch's source and receiver endpoints.
+  loom_aie2p_native_distribution_t* distribution;
+  // Channel-indexed transfer totals for a packet program, otherwise NULL.
+  uint32_t* packet_totals;
+  // Packet source program; empty for circuit or reused geometry.
+  loom_aie2p_native_packet_program_t packet_program;
+  // This occurrence owns physical selection of its canonical geometry.
+  bool creates_geometry;
+} loom_aie2p_native_distribution_batch_t;
+
+// Complete distribution demand before any physical queue is allocated.
+typedef struct loom_aie2p_native_distribution_plan_t {
+  // Occurrence-owned geometries, independent of the physical owner's list.
+  loom_aie2p_native_distribution_t* geometries;
+  // Batch requests indexed by the common transport plan's batch ordinal.
+  loom_aie2p_native_distribution_batch_t* batches;
+  // Sender/receiver admission windows, or NULL for complete finite programs.
+  uint32_t* windows;
+} loom_aie2p_native_distribution_plan_t;
 
 // One ordered use of an immutable distribution geometry. The controller's
 // full-batch publication supplies the existing source readiness boundary.
@@ -627,6 +692,8 @@ typedef struct loom_aie2p_native_worker_t {
   loom_aie2p_native_dma_completion_t* dma_completions;
   // Immutable geometries owned by the representative distribution engine.
   loom_aie2p_native_distribution_t* distributions;
+  // Retained batch demand before descriptor and route selection.
+  loom_aie2p_native_distribution_plan_t* distribution_plan;
   // Ordered uses driven by controller publications; NULL for autonomous paths.
   loom_aie2p_native_distribution_phase_t* distribution_phases;
   // Child endpoints started and retired around this core's local worker call.
@@ -637,9 +704,8 @@ typedef struct loom_aie2p_native_worker_t {
   bool distribution_packets;
   // DMA paths owned by this physical worker, shared by its ordered occurrences.
   loom_aie2p_native_dma_path_t* paths;
-  // Physical DMA paths indexed by tile and direction. The representative
-  // instruction worker owns these across its ordered child occurrences.
-  loom_aie2p_native_dma_path_t** paths_by_tile;
+  // Occurrence-owned path requests consumed by common lifetime assignment.
+  loom_aie2p_native_dma_path_t* transfer_paths;
   // Control-packet identity by destination tile, or UINT8_MAX when unassigned.
   // Routes belong to the physical core, independently of child call sites.
   uint8_t* control_packets;
@@ -650,8 +716,6 @@ typedef struct loom_aie2p_native_worker_t {
   uint32_t packet_mask;
   // Number of outgoing control packet classes selected for the physical core.
   uint8_t control_packet_count;
-  // An external-write path already owns the core's completion stream.
-  bool has_egress;
   // Phased source selected for this communication-only worker.
   struct loom_aie2p_native_input_t* input;
   // Phased sources whose admission runs in this arithmetic worker.
@@ -720,6 +784,10 @@ typedef struct loom_aie2p_native_context_t {
   loom_aie2p_native_channel_t* channels;
   // Bound workers in source strand order.
   loom_aie2p_native_worker_t* workers;
+  // Endpoint queue requests retained by the three native transport families.
+  iree_host_size_t dma_queue_count;
+  // Physical payload senders shared across all transport occurrence families.
+  struct loom_aie2p_native_payload_source_t* payload_sources;
   // Admitted core sharing and transitive participants at each phase boundary.
   loom_pipeline_execution_t execution;
   // Collective selections indexed by source scope and borrow address.
@@ -774,6 +842,10 @@ typedef struct loom_aie2p_native_context_t {
   struct loom_aie2p_native_delivery_t** deliveries;
   // Complete desired routing state for each traversed switch.
   loom_aie2p_native_switch_t* switches;
+  // Intended control deliveries retained independently of route selection.
+  struct loom_aie2p_native_control_connection_t* control_connections;
+  // Number of requested deliveries in the independent connection inventory.
+  iree_host_size_t control_connection_count;
   // Typed ordinary helper emitter.
   loom_aie2p_worker_builder_t code;
 } loom_aie2p_native_context_t;

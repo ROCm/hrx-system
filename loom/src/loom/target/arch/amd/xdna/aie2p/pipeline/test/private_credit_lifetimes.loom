@@ -109,26 +109,34 @@ pipeline.def<kernel> public retain target(@device) @concurrent_owner() run(%outp
   }
 }
 
-// A core performs arithmetic while also archiving an input in private SRAM.
-// The archive has no reader. Its exact residual uses the remote lock protocol
-// after DMA completion, without clearing or copying either payload.
-pipeline.def @sram_archive_epoch() run(%input: buffer, %output: buffer, %epoch: index) {
-  %capacity = index.constant 1 : index
+// A core performs arithmetic while also filling an unread private SRAM ring.
+// The alternating capacities share a pair; every remote entry initialization
+// must finish before DMA acquires credits, including repeated constructions.
+pipeline.def @sram_archive_epoch() run(%input: buffer, %output: buffer, %epoch: index, %capacity: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %one_slot = index.constant 1 : index
   %origin = index.constant 0 : offset
   %record_bytes = index.constant 64 : offset
   %sram = pipeline.memory<workgroup>[0, 1] : pool
-  %archive_storage = buffer.alloca<workgroup> pool(%sram) align(64) %record_bytes : buffer
-  %archive_slots = buffer.view %archive_storage[%origin] : buffer -> view<1x16xi32>
-  %archive = channel.bind<fifo> %archive_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %archive_bytes = index.scale %capacity, %record_bytes : index, offset -> offset
+  %archive_storage = buffer.alloca<workgroup> pool(%sram) align(64) %archive_bytes : buffer
+  %archive_slots = buffer.view %archive_storage[%origin] : buffer -> view<[%capacity]x16xi32>
+  %archive = channel.bind<fifo> %archive_slots, %capacity : view<[%capacity]x16xi32>, index -> channel<tile<16xi32>>
   %core = pipeline.memory<workgroup>[0, 2] : pool
   %result_storage = buffer.alloca<workgroup> pool(%core) align(64) %record_bytes : buffer
   %result_slots = buffer.view %result_storage[%origin] : buffer -> view<1x16xi32>
-  %results = channel.bind<fifo> %result_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %results = channel.bind<fifo> %result_slots, %one_slot : view<1x16xi32>, index -> channel<tile<16xi32>>
   pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
     %offset = index.scale %epoch, %record_bytes : index, offset -> offset
     %external = buffer.view %input[%offset] : buffer -> view<16xi32>
-    %archive_write, %archive_payload = channel.reserve %archive : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
-    %ingress = kernel.async.copy %external to %archive_payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+    scf.for %slot = [%begin to %capacity step %step] {
+      %archive_write, %archive_payload = channel.reserve %archive : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      %ingress = kernel.async.copy %external to %archive_payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+      %input_group = kernel.async.group %ingress : kernel.async.token -> kernel.async.group
+      kernel.async.wait %input_group {newer_groups = 0} : kernel.async.group
+      channel.publish %archive_write : write<tile<16xi32>>
+    }
     %write, %payload = channel.reserve %results : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
     %value = index.cast %epoch : index to i32
     %values = vector.splat %value : vector<16xi32>
@@ -137,10 +145,9 @@ pipeline.def @sram_archive_epoch() run(%input: buffer, %output: buffer, %epoch: 
     %read, %ready = channel.acquire %results : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
     %destination = buffer.view %output[%offset] : buffer -> view<16xi32>
     %egress = kernel.async.copy %ready to %destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
-    %output_group = kernel.async.group %ingress, %egress : kernel.async.token, kernel.async.token -> kernel.async.group
+    %output_group = kernel.async.group %egress : kernel.async.token -> kernel.async.group
     kernel.async.wait %output_group {newer_groups = 0} : kernel.async.group
     channel.release %read : read<tile<16xi32>>
-    channel.publish %archive_write : write<tile<16xi32>>
   }
 }
 
@@ -152,7 +159,21 @@ pipeline.def<kernel> public retain target(@device) @sram_archive() run(%input_ar
   %epochs = index.constant 2 : index
   pipeline.serial {
     scf.for %epoch = [%begin to %epochs step %step] {
-      pipeline.compose @sram_archive_epoch(%input, %output, %epoch) : (buffer, buffer, index)
+      pipeline.compose @sram_archive_epoch(%input, %output, %epoch, %step) : (buffer, buffer, index, index)
+    }
+  }
+}
+
+pipeline.def<kernel> public retain target(@device) @sram_mixed_archive() run(%input_arg: buffer, %output_arg: buffer) {
+  %input_unique, %output_unique = buffer.assume.noalias %input_arg, %output_arg : buffer, buffer
+  %input, %output = buffer.assume.alignment %input_unique, %output_unique {minimum_alignment = 64} : buffer, buffer
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %epochs = index.constant 2 : index
+  pipeline.serial {
+    scf.for %epoch = [%begin to %epochs step %step] {
+      pipeline.compose @sram_archive_epoch(%input, %output, %epoch, %step) : (buffer, buffer, index, index)
+      pipeline.compose @sram_archive_epoch(%input, %output, %epoch, %epochs) : (buffer, buffer, index, index)
     }
   }
 }
@@ -388,6 +409,17 @@ check.scenario public @sram_archive_credits {
     %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<64xi32>
     %input = check.tensor.view %input_storage offset(64) : tensor<64xi32> -> tensor<32xi32>
     check.compare<@sram_archive, @reference_archive>(%input, %output) : (tensor<32xi32>, tensor<32xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<64xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<64xi32>
+    }
+  }
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %output_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<64xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<64xi32> -> tensor<32xi32>
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<64xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<64xi32> -> tensor<32xi32>
+    check.compare<@sram_mixed_archive, @reference_archive>(%input, %output) : (tensor<32xi32>, tensor<32xi32>) -> () {
       check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<64xi32>
       check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<64xi32>
     }

@@ -63,7 +63,7 @@ class NativeCreditsTest : public ::testing::Test {
     iree_arena_deinitialize(&arena_);
     iree_arena_block_pool_deinitialize(&blocks_);
   }
-  void Select(bool restores, bool quiescent) {
+  void Select(bool restores, bool quiescent, bool initializes = false) {
     iree_host_size_t control_count = 0;
     IREE_ASSERT_OK(loom_aie2p_native_select_credits(&context_, &realization_,
                                                     &control_count));
@@ -73,7 +73,12 @@ class NativeCreditsTest : public ::testing::Test {
               quiescent);
     EXPECT_FALSE(loom_aie2p_native_credits_require_quiescence(
         &context_, &invocations_[0]));
-    EXPECT_EQ(control_count, quiescent ? 2u : 0u);
+    EXPECT_EQ(loom_aie2p_native_credits_require_initialization(
+                  &context_, &invocations_[1]),
+              initializes);
+    EXPECT_FALSE(loom_aie2p_native_credits_require_initialization(
+        &context_, &invocations_[0]));
+    EXPECT_EQ(control_count, quiescent || initializes ? 2u : 0u);
   }
 
   // Root, serial child, and a concurrent descendant of that child.
@@ -167,6 +172,40 @@ TEST_F(NativeCreditsTest, RetainedBatchesUsePhysicalCredits) {
   channel_.replay.credits = 1;
   EXPECT_EQ(loom_aie2p_native_initial_credits(&context_, &channel_), 1u);
   Select(true, true);
+}
+
+TEST_F(NativeCreditsTest, MixedBalancedPairInitializesBeforeEntry) {
+  channel_.initializes_on_entry = true;
+  channel_.balance.balanced = true;
+  channel_.cursor.reader.maximum_admissions = 2;
+  Select(true, false, true);
+}
+
+TEST_F(NativeCreditsTest, MixedUnreadTailNeedsNoExitRestoration) {
+  channel_.initializes_on_entry = true;
+  Select(true, false, true);
+}
+
+TEST_F(NativeCreditsTest, MixedSharedPairInitializesBeforeEntry) {
+  channel_.initializes_on_entry = true;
+  channel_.cursor.writer.shared = channel_.cursor.reader.shared = true;
+  Select(true, false, true);
+}
+
+TEST_F(NativeCreditsTest, MixedRetainedBatchInitializesPhysicalCredits) {
+  channel_.initializes_on_entry = true;
+  channel_.replay.record_count = 96;
+  channel_.replay.credits = 1;
+  EXPECT_EQ(loom_aie2p_native_initial_credits(&context_, &channel_), 1u);
+  Select(true, false, true);
+}
+
+TEST_F(NativeCreditsTest, MixedDescendantUsesItsEnclosingSerialEntry) {
+  channel_.initializes_on_entry = true;
+  protocol_.invocation = &invocations_[2];
+  occurrences_[0].invocation = &invocations_[2];
+  occurrences_[1].invocation = &invocations_[2];
+  Select(true, false, true);
 }
 
 TEST_F(NativeCreditsTest, ConfigurationReservationIsDebitedOnlyOnce) {

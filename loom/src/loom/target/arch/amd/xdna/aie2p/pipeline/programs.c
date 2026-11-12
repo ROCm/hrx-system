@@ -35,6 +35,13 @@ static iree_status_t loom_aie2p_native_program_boundary(
     const loom_pipeline_invocation_t* child, bool before,
     const loom_value_id_t* state_arguments) {
   loom_aie2p_native_context_t* context = user_data;
+  if (child && before &&
+      loom_aie2p_native_credits_require_initialization(context, child)) {
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_emit_credits(
+        context, builder, engine, child, LOOM_AIE2P_NATIVE_CREDIT_INITIALIZE));
+    IREE_RETURN_IF_ERROR(
+        loom_aie2p_native_join_boundary(context, builder, engine, scope));
+  }
   if (child && before && child->resources->channel_count) {
     IREE_RETURN_IF_ERROR(loom_aie2p_native_initialize_cursors(
         context, builder, state_arguments[0], engine, child));
@@ -52,13 +59,13 @@ static iree_status_t loom_aie2p_native_program_boundary(
     }
   }
   if (child && !before) {
-    IREE_RETURN_IF_ERROR(
-        loom_aie2p_native_emit_credits(context, builder, engine, child, false));
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_emit_credits(
+        context, builder, engine, child, LOOM_AIE2P_NATIVE_CREDIT_RETIRE));
     if (loom_aie2p_native_credits_require_quiescence(context, child)) {
       IREE_RETURN_IF_ERROR(
           loom_aie2p_native_join_boundary(context, builder, engine, scope));
-      IREE_RETURN_IF_ERROR(loom_aie2p_native_emit_credits(context, builder,
-                                                          engine, child, true));
+      IREE_RETURN_IF_ERROR(loom_aie2p_native_emit_credits(
+          context, builder, engine, child, LOOM_AIE2P_NATIVE_CREDIT_RESET));
     }
   }
   // Every scope participant joins, including engines absent from this child.

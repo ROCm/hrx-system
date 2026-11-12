@@ -71,6 +71,7 @@ loom_test(
     srcs = [
         "child_cursors.loom",
         "collective_cursors.loom",
+        "collective_readers.loom",
         "concurrent_distribution.loom",
         "conditional_admission.loom",
         "finite_ingress.loom",

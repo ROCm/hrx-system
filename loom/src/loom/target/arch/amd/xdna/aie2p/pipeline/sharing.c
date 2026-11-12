@@ -8,6 +8,7 @@
 
 #include "iree/base/internal/math.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/payload.h"
 
 uint8_t loom_aie2p_native_delivery_packet(
     loom_aie2p_native_delivery_t* delivery, uint32_t occupied,
@@ -110,6 +111,11 @@ iree_status_t loom_aie2p_native_prepare_sharing(
       if (path->first != first || !path->routes.count) {
         continue;
       }
+      const loom_aie2p_native_payload_class_t* payload = path->payloads[0];
+      if (!payload->distribution_only || payload->source->class_count != 1 ||
+          payload->distribution_path_count != 1) {
+        continue;
+      }
       bool eligible = true;
       for (loom_aie2p_native_distribution_t* geometry = path->geometries;
            geometry; geometry = geometry->next_geometry) {
@@ -209,6 +215,10 @@ void loom_aie2p_native_commit_sharing(loom_aie2p_native_context_t* context) {
       context->channels[channel_index].grant = grant;
     }
     const loom_aie2p_native_distribution_path_t* path = delivery->path;
+    // This granted singleton is now a framed sender in the shared control
+    // namespace. Retain that decision alongside its descriptor and routes.
+    path->payloads[0]->source->framed = true;
+    path->payloads[0]->packet = payload_packet;
     for (iree_host_size_t j = path->routes.first;
          j < path->routes.first + path->routes.count; ++j) {
       context->routes[j].packet = payload_packet;

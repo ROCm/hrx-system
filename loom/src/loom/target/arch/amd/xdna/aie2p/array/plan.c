@@ -152,6 +152,8 @@ typedef struct loom_aie2p_array_plan_builder_t {
   loom_aie2p_array_binding_plan_t* binding_plans;
   // Retained completion resources sharing the binding-plan allocation.
   loom_aie2p_array_completion_route_t* completion_routes;
+  // Physical sender prefixes indexed by the topology's canonical channel.
+  loom_aie2p_array_route_tree_t* route_trees;
   loom_aie2p_array_route_builder_t route_builder;
 
   iree_host_size_t group_cursor;
@@ -1939,14 +1941,14 @@ static iree_status_t loom_aie2p_array_plan_external_channel(
   const bool routed =
       ingress ? loom_aie2p_array_route_ingress(
                     &builder->route_builder, channel_index,
-                    channel->source_channel_index, shim_dma->coordinate,
-                    shim_dma->dma_channel, compute_dma->coordinate,
-                    compute_dma->dma_channel)
+                    &builder->route_trees[channel->source_channel_index],
+                    shim_dma->coordinate, shim_dma->dma_channel,
+                    compute_dma->coordinate, compute_dma->dma_channel)
               : loom_aie2p_array_route_egress(
                     &builder->route_builder, channel_index,
-                    channel->source_channel_index, compute_dma->coordinate,
-                    compute_dma->dma_channel, shim_dma->coordinate,
-                    shim_dma->dma_channel);
+                    &builder->route_trees[channel->source_channel_index],
+                    compute_dma->coordinate, compute_dma->dma_channel,
+                    shim_dma->coordinate, shim_dma->dma_channel);
   if (!routed) {
     return loom_aie2p_array_diagnose_route_capacity(builder, channel_index);
   }
@@ -2082,7 +2084,8 @@ static iree_status_t loom_aie2p_array_plan_routed_channel(
       builder, channel_index, sender, receiver,
       owns_sender_dma ? &sender_proposal.ring : NULL, &receiver_proposal.ring);
   if (!loom_aie2p_array_route_workers(
-          &builder->route_builder, channel_index, channel->source_channel_index,
+          &builder->route_builder, channel_index,
+          &builder->route_trees[channel->source_channel_index],
           sender_dma->coordinate, sender_dma->dma_channel,
           receiver_dma->coordinate, receiver_dma->dma_channel, false)) {
     return loom_aie2p_array_diagnose_route_capacity(builder, channel_index);
@@ -2336,8 +2339,15 @@ static iree_status_t loom_aie2p_array_allocate_physical_plan(
       builder->arena, builder->plan->dma_channel_count,
       sizeof(*builder->dma_channels), (void**)&builder->dma_channels));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_route_builder_initialize(
-      builder->family, builder->plan->channel_count, builder->plan->route_count,
-      builder->arena, &builder->route_builder));
+      builder->family, builder->plan->route_count, builder->arena,
+      &builder->route_builder));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_array(
+      builder->arena, builder->plan->channel_count,
+      sizeof(*builder->route_trees), (void**)&builder->route_trees));
+  if (builder->plan->channel_count) {
+    memset(builder->route_trees, 0,
+           builder->plan->channel_count * sizeof(*builder->route_trees));
+  }
   IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_array(
       builder->arena, builder->plan->binding_plan_count,
       sizeof(*builder->binding_plans) + sizeof(*builder->completion_routes),

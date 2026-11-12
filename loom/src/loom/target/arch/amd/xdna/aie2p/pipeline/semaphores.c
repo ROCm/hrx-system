@@ -34,7 +34,8 @@ LOOM_DEFINE_ADAPTIVE_SORT(loom_aie2p_semaphore_sort_requirements,
                           loom_aie2p_semaphore_requirement_t,
                           loom_aie2p_semaphore_requirement_less)
 
-// Translates compatible physical requirements into common lifetime requests.
+// Translates physical banks into common lifetime requests. Credits do not limit
+// aliasing: serial owners with different counts initialize their pair at entry.
 // Slot numbers are relative identities, not hardware lock IDs: assigning the
 // latter in original channel order preserves nonaliasing programs' numbering.
 static iree_status_t loom_aie2p_semaphore_slots(
@@ -64,8 +65,7 @@ static iree_status_t loom_aie2p_semaphore_slots(
       arena, count, sizeof(*requests), (void**)&requests));
   iree_host_size_t pool_count = 0;
   for (iree_host_size_t i = 0; i < count; ++i) {
-    if (!i || requirements[i].tile != requirements[i - 1].tile ||
-        requirements[i].credits != requirements[i - 1].credits) {
+    if (!i || requirements[i].tile != requirements[i - 1].tile) {
       ++pool_count;
     }
     requests[i] = (loom_pipeline_lifetime_request_t){
@@ -90,6 +90,27 @@ static iree_status_t loom_aie2p_semaphore_slots(
     }
     slots[requirements[i].channel] =
         pool_offset + (iree_host_size_t)requests[i].offset;
+  }
+  uint64_t* initial_credits = NULL;
+  bool* mixed = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, count, sizeof(*initial_credits), (void**)&initial_credits));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(arena, count, sizeof(*mixed), (void**)&mixed));
+  memset(initial_credits, 0xff, count * sizeof(*initial_credits));
+  memset(mixed, 0, count * sizeof(*mixed));
+  // Preserve zero-cost reuse when every owner has the same initial credits.
+  // Only mixed pairs require acknowledged writes at construction boundaries.
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    const iree_host_size_t slot = slots[requirements[i].channel];
+    if (initial_credits[slot] == UINT64_MAX) {
+      initial_credits[slot] = requirements[i].credits;
+    } else {
+      mixed[slot] |= initial_credits[slot] != requirements[i].credits;
+    }
+  }
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    context->channels[i].initializes_on_entry = mixed[slots[i]];
   }
   return iree_ok_status();
 }

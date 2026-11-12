@@ -39,6 +39,8 @@ typedef struct loom_aie2p_native_input_phase_t {
   const loom_aie2p_native_channel_t* destination;
   // Local DMA receiver and its startup window.
   loom_aie2p_native_distribution_endpoint_t receiver;
+  // Physical sender's destination class, independent of the source phase.
+  struct loom_aie2p_native_payload_class_t* payload;
   // Immutable shim descriptor for this source address period.
   uint16_t descriptor;
   // Shim executions for one complete source address period.
@@ -63,7 +65,7 @@ typedef struct loom_aie2p_native_input_path_t {
   const struct loom_aie2p_native_input_t* last;
   // Physical shim serving the stable caller buffers.
   loom_aie2p_native_tile_t* shim;
-  // Memory-to-stream engine shared by all source phases.
+  // Memory-to-stream engine shared by all phases; UINT8_MAX before layout.
   uint8_t input_engine;
   // Selected core-to-shim control packet class.
   uint8_t control_packet;
@@ -87,8 +89,9 @@ typedef struct loom_aie2p_native_input_t {
   loom_aie2p_native_input_phase_t* phases;
   // Number of phase addresses patched from captured invocation operands.
   iree_host_size_t address_count;
-  // All phase receivers share one ordered physical queue and payload route.
-  bool shared_receiver;
+  // Admission window when all phases share one receiver queue; zero when each
+  // phase retains an independently admitted receiver.
+  uint32_t window_capacity;
   // Physical queues and routes, independent of this occurrence's descriptors.
   loom_aie2p_native_input_path_t* path;
   // Private SSA bulk-position counter assigned during worker materialization.
@@ -111,6 +114,10 @@ iree_status_t loom_aie2p_native_select_input(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization, iree_host_size_t worker,
     bool* out_eligible);
+
+// Retains occurrence-owned input queue demand before lifetime assignment.
+iree_status_t loom_aie2p_native_form_input(loom_aie2p_native_context_t* context,
+                                           loom_aie2p_native_input_t* input);
 
 // Allocates descriptors and routes from the retained source geometry and its
 // invocation controller.

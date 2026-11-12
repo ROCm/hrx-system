@@ -459,12 +459,26 @@ static bool loom_inline_scope_inherits_target(
 static bool loom_inline_shares_target_context(
     const loom_inline_callables_plan_t* state,
     const loom_inline_plan_entry_t* entry) {
-  if (loom_call_like_kind(entry->call) == LOOM_CALL_LIKE_KIND_TEMPLATE) {
+  const loom_call_like_kind_t kind = loom_call_like_kind(entry->call);
+  if (kind == LOOM_CALL_LIKE_KIND_TEMPLATE) {
     return true;
   }
   const loom_target_function_version_t* callee_version =
       loom_target_function_version_snapshot_at(state->options.target_versions,
                                                entry->target_symbol_id);
+  if (callee_version != NULL && entry->execution_scope != 0 &&
+      (kind == LOOM_CALL_LIKE_KIND_SEMANTIC ||
+       kind == LOOM_CALL_LIKE_KIND_LOW_INTERNAL)) {
+    // A worker's projected context can have no authored symbol witness. Use
+    // the same retained environment that selected its call policy instead of
+    // comparing the callee with the enclosing construction's target.
+    const loom_target_execution_scope_t* scope =
+        state->execution_targets->scopes.values[entry->execution_scope - 1];
+    return scope->provider == callee_version->resolved_target.provider &&
+           scope->facts != NULL &&
+           loom_target_facts_are_equivalent(
+               scope->facts, callee_version->resolved_target.facts);
+  }
   if (callee_version != NULL && entry->execution_scope == 0) {
     const loom_target_function_version_t* caller_version =
         loom_target_function_version_snapshot_at(state->options.target_versions,
@@ -733,9 +747,12 @@ static iree_status_t loom_inline_build_plan(
         state, edge->source_symbol_id, edge->execution_scope,
         edge->target_symbol_id, (loom_op_t*)edge->user_op);
     const loom_call_like_kind_t kind = loom_call_like_kind(entry->call);
-    if (state->options.target_policy && entry->execution_scope &&
+    if (entry->execution_scope &&
         (kind == LOOM_CALL_LIKE_KIND_SEMANTIC ||
-         kind == LOOM_CALL_LIKE_KIND_LOW_INTERNAL)) {
+         kind == LOOM_CALL_LIKE_KIND_LOW_INTERNAL) &&
+        (state->options.target_policy ||
+         loom_target_function_version_snapshot_at(
+             state->options.target_versions, entry->target_symbol_id))) {
       IREE_RETURN_IF_ERROR(loom_inline_prepare_execution_target(state, entry));
     }
     if (kind == LOOM_CALL_LIKE_KIND_TEMPLATE) {

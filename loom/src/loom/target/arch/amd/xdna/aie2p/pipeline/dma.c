@@ -6,6 +6,7 @@
 
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_queues.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_submission.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
@@ -140,6 +141,68 @@ static iree_status_t loom_aie2p_native_dma_wait_helper(
   return loom_aie2p_worker_return(&builder, NULL, 0);
 }
 
+static iree_status_t loom_aie2p_native_restore_dma_controllers(
+    loom_aie2p_native_context_t* context, loom_builder_t* caller,
+    iree_host_size_t worker_index) {
+  const loom_aie2p_native_worker_t* worker = &context->workers[worker_index];
+  const loom_aie2p_native_worker_t* owner =
+      &context->workers[context->execution
+                            .workers[context->core_engines[worker_index]]];
+  loom_builder_t builder;
+  loom_symbol_ref_t symbol;
+  loom_op_t* function = NULL;
+  for (const loom_aie2p_native_dma_path_t* demand = worker->transfer_paths;
+       demand; demand = demand->next_demand) {
+    const loom_aie2p_native_dma_path_t* path = demand->selected;
+    const loom_aie2p_native_tile_t* tiles[] = {path->shim, path->local};
+    const uint16_t engines[] = {path->shim_engine, path->local_engine};
+    const unsigned directions[] = {!path->ingress, path->ingress};
+    for (uint8_t i = 0; i < path->completion_tokens; ++i) {
+      const loom_aie2p_native_tile_t* tile = tiles[i];
+      if (!tile->dma_controls[directions[i]][engines[i]].dynamic) {
+        continue;
+      }
+      if (!function) {
+        IREE_RETURN_IF_ERROR(loom_aie2p_worker_helper(
+            &context->code, NULL, 0, NULL, 0, &builder, &symbol, &function));
+      }
+      const loom_xdna_register_field_id_t field =
+          loom_aie2p_native_dma_controller_field(tile, directions[i] + 1);
+      const uint64_t origin =
+          (uint64_t)tile->coordinate.column << context->family->column_shift |
+          (uint64_t)tile->coordinate.row << context->family->row_shift;
+      const uint32_t address = (uint32_t)(loom_xdna_register_field_address(
+                                              context->family, field,
+                                              tile->coordinate, &engines[i]) -
+                                          origin);
+      const iree_host_size_t ordinal = tile - context->tiles;
+      loom_value_id_t value;
+      IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
+          &context->code, &builder,
+          loom_xdna_register_field_encode(field, path->completion_packet),
+          &value));
+      IREE_RETURN_IF_ERROR(loom_aie2p_worker_control_write(
+          &context->code, &builder, owner->control_packets[ordinal], address,
+          &value, 1));
+      // The construction lifetime retires the previous queue owner before
+      // this callable starts. A same-path read fences the controller write
+      // before this owner issues any token-producing task.
+      loom_value_id_t acknowledged[4];
+      IREE_RETURN_IF_ERROR(loom_aie2p_worker_control_read(
+          &context->code, &builder, owner->control_packets[ordinal],
+          owner->control_replies[ordinal], address & ~15u,
+          (address & 15u) / sizeof(uint32_t) + 1, acknowledged));
+    }
+  }
+  if (!function) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_return(&builder, NULL, 0));
+  loom_op_t* invoke;
+  return loom_low_invoke_build(caller, 0, 0, 0, 0, symbol, NULL, 0, NULL, 0,
+                               NULL, 0, LOOM_LOCATION_UNKNOWN, &invoke);
+}
+
 iree_status_t loom_aie2p_native_emit_transfers(
     loom_aie2p_native_context_t* context, loom_rewriter_t* rewriter,
     const loom_pipeline_realization_t* realization,
@@ -149,6 +212,12 @@ iree_status_t loom_aie2p_native_emit_transfers(
   const loom_pipeline_worker_materialization_t* instance =
       &realization->instances[worker_index];
   loom_builder_t* builder = &rewriter->builder;
+  loom_builder_set_before(
+      builder,
+      loom_region_entry_block(loom_func_like_body(instance->channels.function))
+          ->first_op);
+  IREE_RETURN_IF_ERROR(loom_aie2p_native_restore_dma_controllers(
+      context, builder, worker_index));
   for (loom_aie2p_native_transfer_task_t* task = worker->transfer_tasks; task;
        task = task->next) {
     IREE_RETURN_IF_ERROR(loom_aie2p_native_emit_submission(context, task));

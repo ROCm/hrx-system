@@ -25,8 +25,7 @@ iree_status_t loom_aie2p_native_select_channel_endpoint(
     const loom_pipeline_invocation_t* invocation,
     const loom_aie2p_native_channel_t* channel,
     loom_xdna_dma_direction_t direction, uint32_t repetitions,
-    uint32_t credit_interval, uint32_t reserved_tasks,
-    const loom_aie2p_native_distribution_endpoint_t* shared,
+    uint32_t credit_interval, uint32_t reserved_tasks, uint8_t engine,
     const loom_aie2p_native_channel_t* progress_channel,
     loom_aie2p_native_distribution_endpoint_t* out_endpoint,
     iree_string_view_t* out_reason, bool* out_valid);
@@ -43,7 +42,14 @@ loom_aie2p_native_distribution_t* loom_aie2p_native_reusable_distribution(
     const loom_pipeline_transport_t* transport,
     const loom_pipeline_transport_batch_t* batch, uint32_t repetitions);
 
-// Selects on-chip copy programs before transfer and configuration emission.
+// Forms batch geometries, endpoint correspondence, and path compatibility
+// without assigning physical queues, descriptors, or routes.
+iree_status_t loom_aie2p_native_form_worker_distributions(
+    loom_aie2p_native_context_t* context,
+    const loom_pipeline_realization_t* realization,
+    iree_host_size_t worker_index, bool* out_valid);
+
+// Selects physical resources for the retained on-chip copy programs.
 iree_status_t loom_aie2p_native_select_worker_distributions(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization,

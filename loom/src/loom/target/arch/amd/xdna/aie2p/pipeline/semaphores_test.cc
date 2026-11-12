@@ -94,26 +94,51 @@ class Aie2pSemaphoresTest : public ::testing::Test {
   iree_arena_allocator_t arena_;
 };
 
-TEST_F(Aie2pSemaphoresTest, CompatibilityUsesPhysicalCreditsOnEachTileKind) {
+TEST_F(Aie2pSemaphoresTest, SerialReuseUsesPhysicalCreditsOnEachTileKind) {
   sources_[2].capacity = 96;
   for (const uint16_t row : {1, 2}) {
     SCOPED_TRACE(row);
     tiles_[0].coordinate = {0, row};
     tiles_[0].facts = loom_xdna_array_tile_facts(loom_xdna_npu2_array_family(),
                                                  tiles_[0].coordinate);
-    for (const uint32_t credits : {1, 3}) {
+    for (uint32_t credits = 1; credits <= 63; ++credits) {
       SCOPED_TRACE(credits);
       tiles_[0].next_lock = 3;
       selected_[2].replay = {.record_count = 96, .credits = credits};
       Assign();
       EXPECT_EQ(selected_[0].free_lock, 3u);
       EXPECT_EQ(selected_[1].free_lock, 5u);
-      EXPECT_EQ(selected_[2].free_lock, credits == 3 ? 5u : 7u);
-      EXPECT_EQ(selected_[2].ready_lock, credits == 3 ? 6u : 8u);
+      EXPECT_EQ(selected_[2].free_lock, 5u);
+      EXPECT_EQ(selected_[2].ready_lock, 6u);
       EXPECT_TRUE(selected_[0].initializes_locks);
       EXPECT_TRUE(selected_[1].initializes_locks);
-      EXPECT_EQ(selected_[2].initializes_locks, credits != 3);
-      EXPECT_EQ(tiles_[0].next_lock, credits == 3 ? 7u : 9u);
+      EXPECT_FALSE(selected_[2].initializes_locks);
+      EXPECT_FALSE(selected_[0].initializes_on_entry);
+      EXPECT_EQ(selected_[1].initializes_on_entry, credits != 3);
+      EXPECT_EQ(selected_[2].initializes_on_entry, credits != 3);
+      EXPECT_EQ(tiles_[0].next_lock, 7u);
+    }
+  }
+}
+
+TEST_F(Aie2pSemaphoresTest, OrdinaryCapacitiesShareSerialPairs) {
+  for (const uint16_t row : {1, 2}) {
+    SCOPED_TRACE(row);
+    tiles_[0].coordinate = {0, row};
+    tiles_[0].facts = loom_xdna_array_tile_facts(loom_xdna_npu2_array_family(),
+                                                 tiles_[0].coordinate);
+    for (uint32_t capacity = 1; capacity <= 63; ++capacity) {
+      SCOPED_TRACE(capacity);
+      tiles_[0].next_lock = 3;
+      sources_[2].capacity = capacity;
+      Assign();
+      EXPECT_EQ(selected_[0].free_lock, 3u);
+      EXPECT_EQ(selected_[1].free_lock, 5u);
+      EXPECT_EQ(selected_[2].free_lock, 5u);
+      EXPECT_FALSE(selected_[0].initializes_on_entry);
+      EXPECT_EQ(selected_[1].initializes_on_entry, capacity != 3);
+      EXPECT_EQ(selected_[2].initializes_on_entry, capacity != 3);
+      EXPECT_EQ(tiles_[0].next_lock, 7u);
     }
   }
 }
@@ -121,10 +146,12 @@ TEST_F(Aie2pSemaphoresTest, CompatibilityUsesPhysicalCreditsOnEachTileKind) {
 TEST_F(Aie2pSemaphoresTest, ConcurrentChildrenHaveDistinctPairs) {
   nodes_[2].kind = LOOM_PIPELINE_LIFETIME_CONCURRENT;
   realization_.invocations.lifetimes.has_serial = false;
+  sources_[2].capacity = 2;
   Assign();
   for (size_t i = 0; i < 3; ++i) {
     EXPECT_EQ(selected_[i].free_lock, 3u + 2 * i);
     EXPECT_TRUE(selected_[i].initializes_locks);
+    EXPECT_FALSE(selected_[i].initializes_on_entry);
   }
   EXPECT_EQ(tiles_[0].next_lock, 9u);
 }
@@ -136,10 +163,12 @@ TEST_F(Aie2pSemaphoresTest, DescendantsCoexistWithTheirOwnersInSerialScopes) {
   nodes_[4].parent = 3;
   nodes_[5].next_sibling = 4;
   occurrences_[2].parent = &occurrences_[1];
+  sources_[2].capacity = 2;
   Assign();
   for (size_t i = 0; i < 3; ++i) {
     EXPECT_EQ(selected_[i].free_lock, 3u + 2 * i);
     EXPECT_TRUE(selected_[i].initializes_locks);
+    EXPECT_FALSE(selected_[i].initializes_on_entry);
   }
   EXPECT_EQ(tiles_[0].next_lock, 9u);
 }
@@ -155,6 +184,7 @@ TEST_F(Aie2pSemaphoresTest, CompatibleCreditsRemainInTheirPhysicalBank) {
   EXPECT_EQ(tiles_[1].next_lock, 11u);
   for (const auto& channel : selected_) {
     EXPECT_TRUE(channel.initializes_locks);
+    EXPECT_FALSE(channel.initializes_on_entry);
   }
 }
 

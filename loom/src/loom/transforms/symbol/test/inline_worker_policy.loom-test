@@ -107,3 +107,105 @@ pipeline.def public @run(%value: i32) run(%output: buffer) {
     func.call @write(%view, %result) : (view<1xi32>, i32)
   }
 }
+
+// ====
+
+// Required inline helpers use the worker's projected environment. A retained
+// call keeps the helper contextual even when it has no direct target query.
+// Expanding the helper exposes its channel loop to lexical preparation.
+test.target<device> @device
+
+func.def noinline @adjust(%value: i32) -> (i32) {
+  %increment = scalar.constant 1 : i32
+  %result = scalar.addi %value, %increment : i32
+  func.return %result : i32
+}
+
+func.def inline @publish(%output: channel<tile<4xi32>>, %seed: i32) {
+  %write, %record = channel.reserve %output : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%begin to %end step %step] {
+    %value = func.call @adjust(%seed) : (i32) -> (i32)
+    view.store %value, %record[%i] : i32, view<4xi32>
+  }
+  channel.publish %write : write<tile<4xi32>>
+  func.return
+}
+
+pipeline.def public target(@device) @run(%seed: i32) run(%output: channel<tile<4xi32>>) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @publish(%output, %seed) : (channel<tile<4xi32>>, i32)
+  }
+}
+
+// ----
+test.target<device> @device
+
+func.def noinline @adjust(%value: i32) -> (i32) {
+  %increment = scalar.constant 1 : i32
+  %result = scalar.addi %value, %increment : i32
+  func.return %result : i32
+}
+
+pipeline.def public target(@device) @run(%seed: i32) run(%output: channel<tile<4xi32>>) {
+  pipeline.strand workers([0], [1], [1]) {
+    %write, %record = channel.reserve %output : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+    %begin = index.constant 0 : index
+    %end = index.constant 4 : index
+    %step = index.constant 1 : index
+    scf.for %i = [%begin to %end step %step] {
+      %value = func.call pure @adjust(%seed) : (i32) -> (i32)
+      view.store %value, %record[%i] : i32, view<4xi32>
+    }
+    channel.publish %write : write<tile<4xi32>>
+  }
+}
+
+// ====
+
+// Authored inlining uses the same resolved environment without requiring the
+// target-policy option. Both retained calls stay in the worker after expansion.
+// RUN: pass specialize-target-callgraph,inline-callables,canonicalize
+test.target<device> @device
+
+func.def noinline @adjust(%value: i32) -> (i32) {
+  %increment = scalar.constant 1 : i32
+  %result = scalar.addi %value, %increment : i32
+  func.return %result : i32
+}
+
+func.def inline @adjust_twice(%value: i32) -> (i32) {
+  %first = func.call @adjust(%value) : (i32) -> (i32)
+  %second = func.call @adjust(%first) : (i32) -> (i32)
+  func.return %second : i32
+}
+
+pipeline.def public target(@device) @run(%seed: i32) run(%output: buffer) {
+  pipeline.strand workers([0], [1], [1]) {
+    %value = func.call @adjust_twice(%seed) : (i32) -> (i32)
+    %origin = index.constant 0 : offset
+    %view = buffer.view %output[%origin] : buffer -> view<1xi32>
+    view.store %value, %view[0] : i32, view<1xi32>
+  }
+}
+
+// ----
+test.target<device> @device
+
+func.def noinline @adjust(%value: i32) -> (i32) {
+  %increment = scalar.constant 1 : i32
+  %result = scalar.addi %value, %increment : i32
+  func.return %result : i32
+}
+
+pipeline.def public target(@device) @run(%seed: i32) run(%output: buffer) {
+  pipeline.strand workers([0], [1], [1]) {
+    %first = func.call pure @adjust(%seed) : (i32) -> (i32)
+    %second = func.call pure @adjust(%first) : (i32) -> (i32)
+    %origin = index.constant 0 : offset
+    %view = buffer.view %output[%origin] : buffer -> view<1xi32>
+    view.store %second, %view[0] : i32, view<1xi32>
+  }
+}
