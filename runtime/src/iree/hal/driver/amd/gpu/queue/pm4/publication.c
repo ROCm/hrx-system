@@ -6,6 +6,7 @@
 
 #include "iree/hal/driver/amd/gpu/queue/pm4/publication.h"
 
+#include "iree/base/internal/memory_copy.h"
 #include "iree/hal/driver/amd/gpu/queue/blit.h"
 #include "iree/hal/driver/amd/gpu/queue/control_program.h"
 #include "iree/hal/driver/amd/gpu/queue/dma_transfer.h"
@@ -382,7 +383,7 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
     }
   }
   words = iree_hal_amd_gpu_pm4_barrier_emit(words, before);
-  memcpy(words, chunk.words, chunk.word_count * sizeof(*words));
+  iree_memcpy_write_only(words, chunk.words, chunk.word_count * sizeof(*words));
   words += chunk.word_count;
   return iree_hal_amd_gpu_pm4_publish_commit(
       queue, submission, position, &reservation, body_words, 0, words, after,

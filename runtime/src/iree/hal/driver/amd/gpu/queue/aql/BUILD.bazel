@@ -141,6 +141,7 @@ iree_runtime_cc_library(
         ":packet",
         "//libamdf:headers",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:memory_copy",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:user_queue",
     ],

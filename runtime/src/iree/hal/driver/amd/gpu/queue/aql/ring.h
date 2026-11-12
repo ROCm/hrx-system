@@ -64,7 +64,8 @@ bool iree_hal_amd_gpu_aql_ring_try_reserve(iree_hal_amd_gpu_aql_ring_t* ring,
 
 // Copies only the body to an exclusively reserved slot, leaving its header
 // INVALID. The designated host or device publisher later writes the complete
-// header/setup DWORD. The source is disjoint immutable host storage.
+// header/setup DWORD. The source is disjoint immutable host storage. Each body
+// byte is written once, without reading native storage.
 void iree_hal_amd_gpu_aql_ring_write_body(
     const iree_hal_amd_gpu_aql_ring_t* ring, uint64_t position,
     const iree_hal_amd_gpu_aql_packet_t* packet);

@@ -525,6 +525,65 @@ TEST_F(QueueTest, UserAcceptanceFollowsReleaseAndPrecedesIndexCommitment) {
   EXPECT_EQ(submission.retirement, IREE_HAL_AMD_GPU_SDMA_RETIRED);
 }
 
+TEST_F(QueueTest, UserRingWrapPreservesPacketsAndZerosOnlyPadding) {
+  ASSERT_NO_FATAL_FAILURE(Allocate(AMDF_QUEUE_PUBLICATION_MODE_USER));
+  for (auto& word : user_.words) {
+    word = 0xa5a5a5a5;
+  }
+  const uint32_t capacity = static_cast<uint32_t>(user_.words.size());
+  Submission submission;
+  const auto source = submission.words;
+  uint32_t wraps = 0;
+  for (uint32_t i = 0; i < 257; ++i) {
+    // Alternate a single COPY and a full span containing native NOPs. Complete
+    // each published span before reusing it, as the device's fence would.
+    submission.operation.word_count = (i & 1) ? source.size() : 7;
+    const uint32_t body_count = submission.operation.word_count;
+    const uint32_t count = body_count + 10;
+    const uint64_t position = user_.write_index / sizeof(uint32_t);
+    const uint32_t previous_offset = position & (capacity - 1);
+    uint32_t offset = previous_offset;
+    const auto previous = user_.words;
+    iree_hal_amd_gpu_sdma_native_queue_submit(queue_, &submission.operation);
+    if (offset + count > capacity) {
+      ++wraps;
+      for (uint32_t j = offset; j < capacity; ++j) {
+        EXPECT_EQ(user_.words[j], 0u) << j;
+      }
+      offset = 0;
+      EXPECT_EQ(user_.write_index / sizeof(uint32_t),
+                position + capacity - previous_offset + count);
+      EXPECT_EQ(std::memcmp(user_.words.data() + count, previous.data() + count,
+                            (previous_offset - count) * sizeof(uint32_t)),
+                0);
+    } else {
+      EXPECT_EQ(user_.write_index / sizeof(uint32_t), position + count);
+      EXPECT_EQ(std::memcmp(user_.words.data(), previous.data(),
+                            offset * sizeof(uint32_t)),
+                0);
+      EXPECT_EQ(std::memcmp(user_.words.data() + offset + count,
+                            previous.data() + offset + count,
+                            (capacity - offset - count) * sizeof(uint32_t)),
+                0);
+    }
+    EXPECT_EQ(user_.doorbell, user_.write_index);
+    EXPECT_EQ(std::memcmp(user_.words.data() + offset, source.data(),
+                          body_count * sizeof(uint32_t)),
+              0);
+    const auto* fence = user_.words.data() + offset + body_count;
+    ASSERT_EQ(fence[0], 5u);
+    EXPECT_EQ(fence[3], i + 1);
+    const uint64_t address = fence[1] | (uint64_t{fence[2]} << 32);
+    iree_atomic_store(reinterpret_cast<iree_atomic_int32_t*>(address), i + 1,
+                      iree_memory_order_release);
+    Poll();
+    EXPECT_EQ(submission.notifications, i + 1);
+    EXPECT_EQ(submission.acceptances, i + 1);
+    EXPECT_EQ(submission.words, source);
+  }
+  EXPECT_GT(wraps, 0u);
+}
+
 TEST_F(QueueTest, KernelCompletionCannotReturnCaptureDuringAcceptance) {
   ASSERT_NO_FATAL_FAILURE(Allocate());
   using Owner = decltype(this);

@@ -40,7 +40,10 @@ iree_runtime_cc_library(
     name = "commands",
     srcs = ["commands.c"],
     hdrs = ["commands.h"],
-    deps = ["//runtime/src/iree/base"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:memory_copy",
+    ],
 )
 
 iree_runtime_cc_library(
@@ -219,6 +222,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:memory_copy",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/driver/amd/gpu:executable",
         "//runtime/src/iree/hal/driver/amd/gpu:kernarg",
@@ -258,6 +262,7 @@ iree_runtime_cc_library(
         "//libamdf:headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:memory_copy",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal/driver/amd:status",
         "//runtime/src/iree/hal/driver/amd/fabric:memory",
@@ -549,6 +554,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:cpu_data",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:memory_copy",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/base/threading:thread",
         "//runtime/src/iree/hal",

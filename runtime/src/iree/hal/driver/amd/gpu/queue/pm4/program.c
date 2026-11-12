@@ -6,6 +6,7 @@
 
 #include "iree/hal/driver/amd/gpu/queue/pm4/program.h"
 
+#include "iree/base/internal/memory_copy.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/commands.h"
 #include "iree/hal/driver/amd/status.h"
 
@@ -260,7 +261,8 @@ uint32_t* iree_hal_amd_gpu_pm4_program_emit(
     }
   }
   if (fixup_word_count) {
-    memcpy(words, fixup_words, fixup_word_count * sizeof(*words));
+    iree_memcpy_write_only(words, fixup_words,
+                           fixup_word_count * sizeof(*words));
     words += fixup_word_count;
     words = iree_hal_amd_gpu_pm4_emit_acquire(
         words, profile->command_processor_bypasses_l2 ? profile->acquire

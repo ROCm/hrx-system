@@ -55,11 +55,15 @@ TEST_F(RecordingTest, NativeCommandsAndPackedArgumentsSpanIndependentChunks) {
   EXPECT_EQ(data_offset % 64, 0u);
   EXPECT_EQ(iree_hal_amd_gpu_recording_fixup_count(&recording_.storage),
             kCount * 4);
-  std::vector<uint8_t> contents(data_offset + recording_.storage.data.length,
-                                0xAA);
+  std::vector<uint8_t> contents(
+      data_offset + recording_.storage.data.length + 1, 0xAA);
   std::vector<iree_hal_amd_gpu_fixup_t> fixups(kCount * 4);
   iree_hal_amd_gpu_recording_write(&recording_.storage, contents.data(),
                                    fixups.data());
+  for (uint32_t i = recording_.storage.commands.length; i < data_offset; ++i) {
+    EXPECT_EQ(contents[i], 0u) << i;
+  }
+  EXPECT_EQ(contents.back(), 0xAA);
   // Separate placements preserve section bytes and logical relocation offsets.
   // Guard bytes expose stores beyond either independently allocated section.
   std::vector<uint8_t> commands(recording_.storage.commands.length + 1, 0xAA);

@@ -7,6 +7,7 @@
 #include "iree/hal/driver/amd/gpu/queue/pm4/command_buffer.h"
 
 #include "iree/base/internal/arena.h"
+#include "iree/base/internal/memory_copy.h"
 #include "iree/hal/driver/amd/gpu/executable.h"
 #include "iree/hal/driver/amd/gpu/queue/control_program.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/commands.h"
@@ -265,8 +266,8 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_seal(
                                    bounded ? packet_fixups : device_fixups);
   uint32_t fixup_word_count = 0;
   if (bounded) {
-    memcpy(device_fixups, packet_fixups,
-           program->fixup_count * sizeof(*packet_fixups));
+    iree_memcpy_write_only(device_fixups, packet_fixups,
+                           program->fixup_count * sizeof(*packet_fixups));
     fixup_word_count = iree_hal_amd_gpu_pm4_fixup_packet_word_count(
         packet_fixups, program->fixup_count);
   }

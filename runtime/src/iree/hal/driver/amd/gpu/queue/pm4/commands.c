@@ -6,7 +6,7 @@
 
 #include "iree/hal/driver/amd/gpu/queue/pm4/commands.h"
 
-#include <string.h>
+#include "iree/base/internal/memory_copy.h"
 
 // Type-3 counts exclude the header and the following DWORD.
 static inline uint32_t iree_hal_amd_gpu_pm4_header(uint32_t opcode,
@@ -46,7 +46,11 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_registers(uint32_t* words,
   // ShaderCompute selects the ordinary compute form of SET_SH_REG.
   words[0] = iree_hal_amd_gpu_pm4_header(0x76, value_count + 2) | 2;
   words[1] = first_register - 0x2c00;
-  memcpy(words + 2, values, value_count * sizeof(*values));
+  // Register payloads are DWORD-aligned fields. Keep their exact stores small
+  // enough for fixed-count launch operands to specialize at the caller.
+  for (uint32_t i = 0; i < value_count; ++i) {
+    ((volatile uint32_t*)words)[2 + i] = values[i];
+  }
   return words + 2 + value_count;
 }
 
@@ -89,7 +93,7 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_indirect_buffer(uint32_t* words,
 
 uint32_t* iree_hal_amd_gpu_pm4_emit_dma_flush(uint32_t* words) {
   words[0] = UINT32_C(0xc0055000);
-  memset(words + 1, 0, 6 * sizeof(*words));
+  iree_memset_write_only(words + 1, 0, 6 * sizeof(*words));
   return words + 7;
 }
 
@@ -262,12 +266,12 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_write(uint32_t* words,
   words[1] = (2 << 8) | (1 << 20);
   words[2] = (uint32_t)target_address;
   words[3] = (uint32_t)(target_address >> 32);
-  memcpy(words + 4, values, value_count * sizeof(*values));
+  iree_memcpy_write_only(words + 4, values, value_count * sizeof(*values));
   return words + 4 + value_count;
 }
 
 uint32_t* iree_hal_amd_gpu_pm4_emit_nop(uint32_t* words, uint32_t word_count) {
   words[0] = iree_hal_amd_gpu_pm4_header(0x10, word_count);
-  memset(words + 1, 0, (word_count - 1) * sizeof(*words));
+  iree_memset_write_only(words + 1, 0, (word_count - 1) * sizeof(*words));
   return words + word_count;
 }

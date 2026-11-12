@@ -882,6 +882,7 @@ iree_runtime_cc_library(
     deps = [
         ":fixup",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:memory_copy",
     ],
 )
 

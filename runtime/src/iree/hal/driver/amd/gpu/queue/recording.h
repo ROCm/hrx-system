@@ -87,7 +87,8 @@ uint32_t iree_hal_amd_gpu_recording_fixup_count(
 
 // Copies admitted recording bytes and resolves section-relative fixups once.
 // Destination covers data_offset + data.length; table covers fixup_count.
-// Both outputs may be write-combined device memory and are only written.
+// Both outputs may be write-combined device memory. Each byte is written once,
+// without reading either destination.
 void iree_hal_amd_gpu_recording_write(
     const iree_hal_amd_gpu_recording_t* recording, uint8_t* destination,
     iree_hal_amd_gpu_fixup_t* table);
@@ -95,7 +96,8 @@ void iree_hal_amd_gpu_recording_write(
 // Writes command and private-data sections into separate placements. Fixups
 // retain the same logical combined offsets as write; the caller supplies the
 // resolved base used by their consumers. Each destination covers its section's
-// length and may be write-combined memory. No destination bytes are read.
+// length and may be write-combined memory. Each byte is written once, without
+// reading any destination.
 void iree_hal_amd_gpu_recording_write_sections(
     const iree_hal_amd_gpu_recording_t* recording, uint8_t* commands,
     uint8_t* data, iree_hal_amd_gpu_fixup_t* table);

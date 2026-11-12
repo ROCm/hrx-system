@@ -6,6 +6,8 @@
 
 #include "iree/hal/driver/amd/gpu/queue/recording.h"
 
+#include "iree/base/internal/memory_copy.h"
+
 struct iree_hal_amd_gpu_recording_chunk_t {
   // Following initialized chunk, or NULL at the stream end.
   iree_hal_amd_gpu_recording_chunk_t* next;
@@ -148,9 +150,15 @@ uint32_t iree_hal_amd_gpu_recording_fixup_count(
 
 static void iree_hal_amd_gpu_recording_copy(
     const iree_hal_amd_gpu_recording_stream_t* stream, uint8_t* destination) {
+  uint32_t position = 0;
   for (const iree_hal_amd_gpu_recording_chunk_t* chunk = stream->head; chunk;
        chunk = chunk->next) {
-    memcpy(destination + chunk->offset, chunk + 1, chunk->length);
+    // Chunks already contain initialized bytes, including their internal
+    // alignment holes. Only gaps between chunks still need zeroing.
+    iree_memset_write_only(destination + position, 0, chunk->offset - position);
+    iree_memcpy_write_only(destination + chunk->offset, chunk + 1,
+                           chunk->length);
+    position = chunk->offset + chunk->length;
   }
 }
 
@@ -159,8 +167,8 @@ void iree_hal_amd_gpu_recording_write(
     iree_hal_amd_gpu_fixup_t* table) {
   const uint32_t data_offset =
       iree_hal_amd_gpu_recording_data_offset(recording);
-  memset(destination + recording->commands.length, 0,
-         data_offset - recording->commands.length);
+  iree_memset_write_only(destination + recording->commands.length, 0,
+                         data_offset - recording->commands.length);
   iree_hal_amd_gpu_recording_write_sections(recording, destination,
                                             destination + data_offset, table);
 }
@@ -170,8 +178,6 @@ void iree_hal_amd_gpu_recording_write_sections(
     uint8_t* data, iree_hal_amd_gpu_fixup_t* table) {
   const uint32_t data_offset =
       iree_hal_amd_gpu_recording_data_offset(recording);
-  memset(commands, 0, recording->commands.length);
-  memset(data, 0, recording->data.length);
   iree_hal_amd_gpu_recording_copy(&recording->commands, commands);
   iree_hal_amd_gpu_recording_copy(&recording->data, data);
   for (const iree_hal_amd_gpu_recording_chunk_t* chunk = recording->fixups.head;
@@ -189,7 +195,7 @@ void iree_hal_amd_gpu_recording_write_sections(
       if (entries[i].addend_data) {
         value.addend += data_offset;
       }
-      *table++ = value;
+      iree_memcpy_write_only(table++, &value, sizeof(value));
     }
   }
 }
