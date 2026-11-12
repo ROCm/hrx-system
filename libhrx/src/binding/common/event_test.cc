@@ -407,6 +407,199 @@ TEST_F(CpuStreamingContextTest, UsesTheTaskQueueNanosecondClock) {
   EXPECT_EQ(64u, context_->timestamp_domain.valid_bits);
 }
 
+TEST_F(CpuStreamingContextTest, UntimedRecordOnAnEmptyStreamCompletes) {
+  iree_hal_streaming_event_t* event = nullptr;
+  iree_hal_streaming_recorded_point_t point = {};
+  ScopeExit cleanup([&] {
+    iree_hal_streaming_event_release_recorded_point(&point);
+    iree_hal_streaming_event_release(event);
+  });
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      context_, IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      iree_allocator_system(), &event));
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(
+      event, context_->default_stream, /*capture_external_record=*/false));
+  iree_hal_streaming_event_acquire_recorded_point(event, &point);
+  EXPECT_NE(nullptr, point.semaphore);
+  EXPECT_EQ(0u, point.value);
+  EXPECT_EQ(0u, context_->default_stream->pending_value);
+  EXPECT_EQ(nullptr, point.timestamp_slot);
+  IREE_ASSERT_OK(iree_hal_streaming_event_synchronize(event));
+  iree_hal_streaming_completion_state_t completion =
+      IREE_HAL_STREAMING_COMPLETION_STATE_PENDING;
+  IREE_ASSERT_OK(iree_hal_streaming_event_query(event, &completion));
+  EXPECT_EQ(IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE, completion);
+}
+
+TEST_F(CpuStreamingContextTest,
+       UntimedPointSurvivesRerecordAndStreamDestruction) {
+  iree_hal_streaming_stream_t* stream = nullptr;
+  iree_hal_streaming_event_t* event = nullptr;
+  iree_hal_streaming_recorded_point_t first = {};
+  iree_hal_streaming_recorded_point_t second = {};
+  ScopeExit cleanup([&] {
+    IREE_EXPECT_OK(ReleaseAllGates());
+    iree_hal_streaming_event_release_recorded_point(&second);
+    iree_hal_streaming_event_release_recorded_point(&first);
+    iree_hal_streaming_event_release(event);
+    iree_hal_streaming_stream_release(stream);
+  });
+  IREE_ASSERT_OK(CreateNonBlockingStream(context_, &stream));
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      context_, IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      iree_allocator_system(), &event));
+  iree_hal_semaphore_t* gate = nullptr;
+  IREE_ASSERT_OK(CreateGate(/*release_value=*/2, &gate));
+  uint64_t gate_value = 1;
+  IREE_ASSERT_OK(iree_hal_streaming_stream_wait_semaphores(
+      stream, {1, &gate, &gate_value}));
+  const uint64_t first_tail = stream->pending_value;
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(
+      event, stream, /*capture_external_record=*/false));
+  iree_hal_streaming_event_acquire_recorded_point(event, &first);
+  EXPECT_EQ(first_tail, first.value);
+  EXPECT_EQ(first_tail, stream->pending_value);
+
+  gate_value = 2;
+  IREE_ASSERT_OK(iree_hal_streaming_stream_wait_semaphores(
+      stream, {1, &gate, &gate_value}));
+  const uint64_t second_tail = stream->pending_value;
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(
+      event, stream, /*capture_external_record=*/false));
+  iree_hal_streaming_event_acquire_recorded_point(event, &second);
+  EXPECT_EQ(second_tail, second.value);
+  EXPECT_EQ(second_tail, stream->pending_value);
+  EXPECT_EQ(first.semaphore, second.semaphore);
+  EXPECT_GT(second.value, first.value);
+  EXPECT_EQ(stream->stream_id, first.ordered_after_stream_id);
+  EXPECT_EQ(first.value, first.ordered_after_stream_value);
+  EXPECT_EQ(second.value, second.ordered_after_stream_value);
+  EXPECT_TRUE(first.requires_independent_queue);
+
+  IREE_ASSERT_OK(SignalGate(gate, 1));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(first.semaphore, first.value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+  iree_hal_streaming_completion_state_t completion =
+      IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE;
+  IREE_ASSERT_OK(iree_hal_streaming_event_query(event, &completion));
+  EXPECT_EQ(IREE_HAL_STREAMING_COMPLETION_STATE_PENDING, completion);
+
+  IREE_ASSERT_OK(SignalGate(gate, 2));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream));
+  iree_hal_streaming_stream_release(stream);
+  stream = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_event_synchronize(event));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(first.semaphore, first.value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+}
+
+TEST_F(CpuStreamingContextTest,
+       RejectedCrossContextRecordPreservesUntimedPoint) {
+  iree_hal_streaming_context_t* other_context = nullptr;
+  iree_hal_streaming_event_t* event = nullptr;
+  iree_hal_streaming_recorded_point_t before = {};
+  iree_hal_streaming_recorded_point_t after = {};
+  ScopeExit cleanup([&] {
+    IREE_EXPECT_OK(ReleaseAllGates());
+    iree_hal_streaming_event_release_recorded_point(&after);
+    iree_hal_streaming_event_release_recorded_point(&before);
+    iree_hal_streaming_event_release(event);
+    iree_hal_streaming_context_release(other_context);
+  });
+  IREE_ASSERT_OK(iree_hal_streaming_context_create(
+      &device_entry_,
+      {.scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO},
+      iree_allocator_system(), &other_context));
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      context_, IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      iree_allocator_system(), &event));
+  iree_hal_semaphore_t* gate = nullptr;
+  IREE_ASSERT_OK(CreateGate(/*release_value=*/1, &gate));
+  uint64_t gate_value = 1;
+  IREE_ASSERT_OK(iree_hal_streaming_stream_wait_semaphores(
+      context_->default_stream, {1, &gate, &gate_value}));
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(
+      event, context_->default_stream, /*capture_external_record=*/false));
+  iree_hal_streaming_event_acquire_recorded_point(event, &before);
+  IREE_ASSERT_OK(
+      iree_hal_streaming_stream_begin(other_context->default_stream));
+  auto* pending_recording = other_context->default_stream->command_buffer;
+  ASSERT_NE(nullptr, pending_recording);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INCOMPATIBLE,
+      iree_hal_streaming_event_record(event, other_context->default_stream,
+                                      /*capture_external_record=*/false));
+  EXPECT_EQ(pending_recording, other_context->default_stream->command_buffer);
+  EXPECT_EQ(0u, other_context->default_stream->pending_value);
+  iree_hal_streaming_event_acquire_recorded_point(event, &after);
+  EXPECT_EQ(before.semaphore, after.semaphore);
+  EXPECT_EQ(before.value, after.value);
+  EXPECT_EQ(before.ordered_after_stream_id, after.ordered_after_stream_id);
+  iree_hal_streaming_completion_state_t completion =
+      IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE;
+  IREE_ASSERT_OK(iree_hal_streaming_event_query(event, &completion));
+  EXPECT_EQ(IREE_HAL_STREAMING_COMPLETION_STATE_PENDING, completion);
+  IREE_ASSERT_OK(SignalGate(gate, 1));
+  IREE_ASSERT_OK(iree_hal_streaming_event_synchronize(event));
+}
+
+TEST_F(CpuStreamingContextTest, UntimedPointPropagatesHostOperationFailure) {
+  struct HostOperation {
+    // Announces that the host operation owns its pending stream point.
+    std::binary_semaphore entered{0};
+    // Holds completion until the event has recorded that stream point.
+    std::binary_semaphore release{0};
+  } operation;
+  iree_hal_streaming_stream_t* stream = nullptr;
+  iree_hal_streaming_event_t* event = nullptr;
+  std::thread thread;
+  bool released = false;
+  ScopeExit cleanup([&] {
+    if (thread.joinable()) {
+      if (!released) {
+        operation.release.release();
+      }
+      thread.join();
+    }
+    iree_hal_streaming_event_release(event);
+    iree_hal_streaming_stream_release(stream);
+  });
+  IREE_ASSERT_OK(CreateNonBlockingStream(context_, &stream));
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      context_, IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      iree_allocator_system(), &event));
+  thread = std::thread([&] {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_DATA_LOSS,
+        iree_hal_streaming_execute_host_operation(
+            stream,
+            [](void* user_data) -> iree_status_t {
+              auto* operation = static_cast<HostOperation*>(user_data);
+              operation->entered.release();
+              operation->release.acquire();
+              return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                      "host operation failed");
+            },
+            &operation));
+  });
+  operation.entered.acquire();
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(
+      event, stream, /*capture_external_record=*/false));
+  iree_hal_streaming_completion_state_t completion =
+      IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE;
+  IREE_ASSERT_OK(iree_hal_streaming_event_query(event, &completion));
+  EXPECT_EQ(IREE_HAL_STREAMING_COMPLETION_STATE_PENDING, completion);
+  operation.release.release();
+  released = true;
+  thread.join();
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
+                        iree_hal_streaming_event_synchronize(event));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
+                        iree_hal_streaming_event_query(event, &completion));
+}
+
 TEST_F(CpuStreamingContextTest, RepeatedStreamJoinReusesAcceptedSourcePoint) {
   iree_hal_streaming_stream_t* consumer = nullptr;
   IREE_ASSERT_OK(iree_hal_streaming_stream_create(

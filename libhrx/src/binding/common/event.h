@@ -53,7 +53,7 @@ typedef enum iree_hal_streaming_event_flag_bits_e {
   IREE_HAL_STREAMING_EVENT_FLAG_INTERPROCESS = 1ull << 2,
 } iree_hal_streaming_event_flags_t;
 
-// The timeline point a submitted event record names, together with the stream
+// The timeline point an event record names, together with the stream
 // timeline point that reaching it implies and the device tick slot the record
 // captures into. Published and read as one value so no reader can pair one
 // record's semaphore, value or tick with another record's.
@@ -63,15 +63,15 @@ typedef enum iree_hal_streaming_event_flag_bits_e {
 // path has: iree_hal_streaming_event_acquire_recorded_point produces one,
 // iree_hal_streaming_event_commit_recorded_point consumes one, and
 // iree_hal_streaming_event_release_recorded_point drops what one names. A
-// point under construction names the timeline a record is about to signal and
-// owns nothing, which is how a record path builds its point before
-// iree_hal_streaming_event_enqueue_record completes it into an owning one.
+// point under construction owns nothing. A record path either retains an
+// already-accepted stream point or submits a new signal through
+// iree_hal_streaming_event_enqueue_record to make the point owning.
 typedef struct iree_hal_streaming_recorded_point_t {
-  // Timeline semaphore the record's submission signals, or NULL when no record
-  // has been submitted. Retained by whoever holds the point.
+  // Timeline semaphore whose accepted work the record observes, or NULL when
+  // no queue point has been recorded. Retained by whoever holds the point.
   iree_hal_semaphore_t* semaphore;
-  // Value |semaphore| reaches once the recorded work completes, or 0 when
-  // |semaphore| is NULL.
+  // Value |semaphore| reaches once the recorded work completes. Zero for an
+  // empty stream snapshot or when |semaphore| is NULL.
   uint64_t value;
   // Stream whose timeline this point is ordered after, or 0 when the point
   // follows no stream timeline point. Identifies the timeline a cross-stream
@@ -82,9 +82,9 @@ typedef struct iree_hal_streaming_recorded_point_t {
   // inside a graph launch is ordered after the tail the launch waited on,
   // which is earlier than anything the launch signals.
   uint64_t ordered_after_stream_value;
-  // True when the record executes outside its context's shared primary queue.
-  // A dependent stream must keep its wait off that shared queue so producers
-  // submitted later can continue to run.
+  // True when recorded work may execute outside the context's shared primary
+  // queue. A dependent stream must keep its wait off that shared queue so
+  // producers submitted later can continue to run.
   bool requires_independent_queue;
   // Slot the device writes this record's tick into at the point |value| names,
   // or NULL when the record captured no tick because timing is disabled on the
@@ -303,10 +303,12 @@ IREE_MUST_USE_RESULT iree_status_t iree_hal_streaming_event_enqueue_record(
     iree_hal_streaming_recorded_point_t* point);
 
 // Records |event| at the point |stream| has reached. On a stream that is not
-// capturing that point is a queue point: |stream| is flushed so the record
-// lands behind everything already recorded on it, and the record is enqueued
-// there. |stream| must then belong to |event|'s context, or the record is
-// refused with IREE_STATUS_INCOMPATIBLE.
+// capturing, pending command recording is submitted first. An untimed record
+// retains the resulting stream point without submitting new work and flushes
+// every retained queue realization. A timed record enqueues a device timestamp
+// after the stream tail, or a completion barrier when the device has no clock.
+// |stream| must belong to |event|'s context, or the record is refused with
+// IREE_STATUS_INCOMPATIBLE.
 //
 // A default captured record names the stream's dependency frontier and no
 // queue point, so nothing is flushed or enqueued and it is accepted from any
@@ -316,7 +318,8 @@ IREE_MUST_USE_RESULT iree_status_t iree_hal_streaming_event_enqueue_record(
 // node that publishes a submitted event point on each graph launch. Such a
 // node requires the event's context to match the graph's. Outside capture,
 // both modes record the ordinary stream point.
-// Synchronization: stream flush (flushes a stream that is not capturing).
+// Synchronization: stream mutex covers pending recording, point capture, and
+// publication. The event mutex protects replacement of the recorded point.
 iree_status_t iree_hal_streaming_event_record(
     iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream,
     bool capture_external_record);

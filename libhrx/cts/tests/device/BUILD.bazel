@@ -16,6 +16,7 @@ package(
 hrx_cts_test(
     name = "device",
     srcs = ["device_test.cpp"],
+    args = ["--hrx-device=gpu:0"],
     resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
     tags = AMD_GPU_CTS_TAGS,
 )

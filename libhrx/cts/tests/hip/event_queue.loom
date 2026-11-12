@@ -1,0 +1,31 @@
+// Copyright 2026 The HRX Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// A cooperative launch changes the native queue realization. Independent
+// workgroup outputs let an event verify completion without a grid barrier.
+// Accumulating into the output also observes the preceding stream memset.
+kernel.def export("event_queue") @event_queue() {
+  %one = index.constant 1 : index
+  %groups = index.constant 4 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%width, %one, %one) : index
+} launch(%output: buffer, %incarnation: i32) {
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : index
+  %count = index.constant 4 : index
+  %origin = index.constant 0 : offset
+  %values = buffer.view %output[%origin] : buffer -> view<[%count]xi32>
+  %leader = index.cmp eq, %lane, %zero : index
+  scf.if %leader {
+    %previous = view.load %values[%group] : view<[%count]xi32> -> i32
+    %group_value = index.cast %group : index to i32
+    %increment = scalar.addi %incarnation, %group_value : i32
+    %result = scalar.addi %previous, %increment : i32
+    view.store %result, %values[%group] : i32, view<[%count]xi32>
+  }
+  kernel.return
+}

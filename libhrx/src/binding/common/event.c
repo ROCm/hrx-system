@@ -503,18 +503,66 @@ iree_status_t iree_hal_streaming_event_record(
     return iree_ok_status();
   }
 
-  // Flush the stream to ensure all prior operations are submitted.
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
-                                    iree_hal_streaming_stream_flush(stream));
-
   iree_slim_mutex_lock(&stream->mutex);
+  if (event->context != stream->context) {
+    iree_slim_mutex_unlock(&stream->mutex);
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(
+        IREE_STATUS_INCOMPATIBLE,
+        "an event can only be recorded with the context that created it");
+  }
 
-  // The record marks a point on the recording stream's timeline: the barrier
-  // takes the stream's next value and signals it once everything already on the
-  // stream has completed.
+  // Submit any pending command recording under the same lock that snapshots
+  // the accepted tail, so no intervening recording can be left behind it.
+  iree_status_t status = iree_hal_streaming_stream_flush_locked(stream);
+  if (!iree_status_is_ok(status)) {
+    iree_slim_mutex_unlock(&stream->mutex);
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+
+  if (iree_any_bit_set(event->flags,
+                       IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING)) {
+    // An untimed record observes accepted work without extending the stream.
+    // A zero-valued point on an empty stream is already complete. Retaining
+    // the semaphore makes either point independent of the stream's lifetime.
+    iree_hal_streaming_recorded_point_t recorded_point = {
+        .semaphore = stream->timeline_semaphore,
+        .value = stream->pending_value,
+        .ordered_after_stream_id = stream->stream_id,
+        .ordered_after_stream_value = stream->pending_value,
+        .requires_independent_queue = stream->queue != stream->context->queue ||
+                                      stream->value_wait_lane != NULL ||
+                                      stream->cooperative_queue != NULL,
+    };
+    iree_hal_semaphore_retain(recorded_point.semaphore);
+    iree_hal_streaming_graph_t* dropped_capture_graph =
+        iree_hal_streaming_event_commit_recorded_point(event, recorded_point);
+
+    // Accepted work may still await publication on any retained realization.
+    // The stream lock pins the lane against completion-driven recycling. Flush
+    // every owner even if one fails; the recorded point still names accepted
+    // work and must remain installed on a publication failure.
+    status = iree_hal_queue_flush(stream->queue);
+    if (stream->value_wait_lane) {
+      status = iree_status_join(
+          status, iree_hal_queue_flush(stream->value_wait_lane->queue));
+    }
+    if (stream->cooperative_queue) {
+      status = iree_status_join(
+          status, iree_hal_queue_flush(stream->cooperative_queue));
+    }
+    iree_slim_mutex_unlock(&stream->mutex);
+    iree_hal_streaming_graph_release(dropped_capture_graph);
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+
+  // A timed record adds a device timestamp after the accepted stream tail.
+  // Devices without a timestamp domain still submit a completion barrier.
   uint64_t stream_wait_value = 0;
   uint64_t stream_signal_value = 0;
-  iree_status_t status = iree_hal_streaming_stream_reserve_next_value_locked(
+  status = iree_hal_streaming_stream_reserve_next_value_locked(
       stream, &stream_wait_value, &stream_signal_value);
   if (!iree_status_is_ok(status)) {
     iree_slim_mutex_unlock(&stream->mutex);

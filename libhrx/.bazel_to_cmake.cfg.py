@@ -6,9 +6,12 @@
 
 import bazel_to_cmake_config
 import bazel_to_cmake_converter
+from loom_binary import LoomBinaryBuildFileFunctions
 
 
-class HrxBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
+class HrxBuildFileFunctions(
+    LoomBinaryBuildFileFunctions, bazel_to_cmake_converter.BuildFileFunctions
+):
     def _should_emit_python_target(self):
         return self._current_package().startswith("libhrx/cts/")
 

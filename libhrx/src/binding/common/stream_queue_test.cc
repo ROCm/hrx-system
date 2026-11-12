@@ -607,6 +607,41 @@ TEST_F(StreamQueueLeaseTest, OrdinaryWorkDoesNotAllocateACompletionObserver) {
   EXPECT_EQ(0u, context_->peak_value_wait_submission_count);
 }
 
+TEST_F(StreamQueueLeaseTest, UntimedEventDoesNotExtendAcceptedLease) {
+  auto* stream = CreateStream();
+  auto* gate = CreateGate();
+  ASSERT_NE(nullptr, stream);
+  ASSERT_NE(nullptr, gate);
+  IREE_ASSERT_OK(StartLease(stream, gate));
+  ASSERT_EQ(1u, stream->pending_value);
+  iree_hal_streaming_event_t* event = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      context_, IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      iree_allocator_system(), &event));
+  events_.push_back(event);
+
+  for (int i = 0; i < 4; ++i) {
+    IREE_ASSERT_OK(iree_hal_streaming_event_record(
+        event, stream, /*capture_external_record=*/false));
+    iree_hal_streaming_recorded_point_t point = {};
+    iree_hal_streaming_event_acquire_recorded_point(event, &point);
+    EXPECT_EQ(stream->timeline_semaphore, point.semaphore);
+    EXPECT_EQ(1u, point.value);
+    EXPECT_EQ(1u, stream->pending_value);
+    EXPECT_TRUE(point.requires_independent_queue);
+    iree_hal_streaming_event_release_recorded_point(&point);
+    iree_slim_mutex_lock(&context_->value_wait_lane_mutex);
+    EXPECT_EQ(1u, context_->peak_value_wait_submission_count);
+    EXPECT_EQ(1, iree_atomic_load(&context_->active_value_wait_observer_count,
+                                  iree_memory_order_acquire));
+    iree_slim_mutex_unlock(&context_->value_wait_lane_mutex);
+  }
+
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate, 1, nullptr));
+  IREE_ASSERT_OK(iree_hal_streaming_event_synchronize(event));
+  AwaitObserverCount(0);
+}
+
 TEST_F(StreamQueueLeaseTest,
        DependentWorkKeepsLeaseAfterOriginalWaitCompletes) {
   auto* stream = CreateStream();

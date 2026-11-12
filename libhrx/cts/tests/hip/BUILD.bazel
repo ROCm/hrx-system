@@ -17,6 +17,9 @@ load(
     "AMD_GPU_CTS_RESOURCE_GROUP",
     "AMD_GPU_CTS_TAGS",
 )
+load("//loom/build_tools/amdgpu:target_config.bzl", "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//runtime/src/iree/hal/driver/amd/gpu/cts:testdata.bzl", "iree_hal_amd_gpu_cts_testdata")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -27,6 +30,19 @@ package(
 _AMDGPU_CTS_COMPATIBILITY = select(AMDGPU_CTS_COMPATIBILITY_CONDITIONS)
 
 _HIP_GPU_CTS_COMPATIBILITY = ["@platforms//os:linux"] + _AMDGPU_CTS_COMPATIBILITY
+
+_HIP_LOOM_CTS_COMPATIBILITY = _HIP_GPU_CTS_COMPATIBILITY + loom_config_compatible_with([
+    "//loom/config/emit:amdgpu_elf",
+]) + select(dict([
+    (
+        "//loom/config/arch/amdgpu:" + capability,
+        [],
+    )
+    for capability in LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES
+] + [(
+    "//conditions:default",
+    ["@platforms//:incompatible"],
+)]))
 
 _HIP_RUNTIME = "//libhrx/src/binding/hip:amdhip64"
 
@@ -157,6 +173,32 @@ hrx_cc_test(
     tags = AMD_GPU_CTS_TAGS,
     target_compatible_with = _HIP_GPU_CTS_COMPATIBILITY,
     deps = ["//libhrx/src/binding/hip:hip_dso_test_util"] + _HIP_TEST_DEPS,
+)
+
+iree_hal_amd_gpu_cts_testdata(
+    name = "event_queue_testdata",
+    srcs = ["event_queue.loom"],
+    backend_names = ["hrx_hip_event"],
+    target_compatible_with = _HIP_LOOM_CTS_COMPATIBILITY,
+)
+
+hrx_cc_test(
+    name = "hip_event_queue_test",
+    srcs = ["event_queue_test.cpp"],
+    data = [_HIP_RUNTIME],
+    env = _HIP_RUNTIME_ENV,
+    resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
+    sanitizer_suppressions = hsa_suppressions,
+    tags = AMD_GPU_CTS_TAGS,
+    target_compatible_with = _HIP_LOOM_CTS_COMPATIBILITY,
+    deps = [
+        ":event_queue_testdata",
+        "//libhrx/src/binding/hip:hip_dso_test_util",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/driver/amd/gpu/cts:testdata",
+        "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
+    ] + _HIP_TEST_DEPS,
 )
 
 hrx_cc_test(

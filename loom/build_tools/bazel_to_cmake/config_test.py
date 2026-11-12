@@ -425,6 +425,41 @@ loom_library(
         )
         self.assertNotIn("LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_", converter.body)
 
+    def test_amdgpu_cts_projection_reaches_non_runtime_consumers(self):
+        runtime_project = bazel_to_cmake_config.include_project(
+            REPO_ROOT / ".bazel_to_cmake.cfg.py", "runtime/.bazel_to_cmake.cfg.py"
+        )
+        repo_cfg = SimpleNamespace(
+            PROJECTS=[runtime_project, self.project],
+            REPO_MAP={"@hrx": ""},
+            CustomBuildFileFunctions=_LoomBinaryBuildFileFunctions,
+        )
+        output = bazel_to_cmake_converter.convert_build_file(
+            """
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//runtime/src/iree/hal/driver/amd/gpu/cts:testdata.bzl", "iree_hal_amd_gpu_cts_testdata")
+iree_hal_amd_gpu_cts_testdata(
+    name="event_images",
+    srcs=["event_queue.loom"],
+    backend_names=["hip_event"],
+    target_compatible_with=loom_config_compatible_with([
+        "//loom/config/arch/amdgpu:descriptor_set_rdna3_5_core",
+    ]),
+)
+""",
+            repo_cfg,
+            str(REPO_ROOT / "consumer"),
+            repo_root=str(REPO_ROOT),
+        )
+        self.assertIn("iree_hal_amd_gpu_cts_testdata(\n", output)
+        self.assertIn('"event_images"', output)
+        self.assertIn('"event_queue.loom"', output)
+        self.assertIn('"hip_event"', output)
+        self.assertIn("LOOM_ARTIFACT_AMDGPU_ELF", output)
+        self.assertIn("IREE_HAL_DRIVER_AMD_GPU", output)
+        self.assertIn("LOOM_ARCH_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE", output)
+        self.assertIn('"gfx1151=LOOM_ARCH_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE"', output)
+
     def test_shared_tools_preserve_runtime_only_ownership(self):
         runtime_project = bazel_to_cmake_config.include_project(
             REPO_ROOT / ".bazel_to_cmake.cfg.py", "runtime/.bazel_to_cmake.cfg.py"

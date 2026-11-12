@@ -44,6 +44,7 @@ hrx_cts_test(
         "//libhrx/cts/core:amdgpu_executable_test_data.hpp",
         "//libhrx/cts/core:amdgpu_test_data.hpp",
     ],
+    args = ["--hrx-device=gpu:0"],
     resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
     tags = AMD_GPU_CTS_TAGS,
     target_compatible_with = _AMDGPU_CTS_COMPATIBILITY,

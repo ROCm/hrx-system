@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:select.bzl", "iree_select")
+load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
 load(
     "//libhrx/build_tools/bazel:cc.bzl",
     "hrx_cc_library",
@@ -340,9 +341,9 @@ hrx_cc_test(
         "HRX_GPU_DRIVER": "amdgpu",
         "HRX_TEST_RUNTIME_LIBRARY": "$(location :hrx)",
     },
-    resource_group = "iree-hal-drivers-amdgpu-tests",
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = [
-        "iree-run-requirement=runtime.resource.amd_gpu",
+        "iree-run-requirement=libamdf.resource.amd_gpu",
         "runtime-resource=amd-gpu",
     ],
     target_compatible_with = select({
@@ -373,9 +374,9 @@ hrx_cc_test(
     name = "mem_pool_backing_gpu_test",
     srcs = ["mem_pool_backing_test.cc"],
     env = {"HRX_TEST_DEVICE_URI": "amdgpu://0"},
-    resource_group = "iree-hal-drivers-amdgpu-tests",
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = [
-        "iree-run-requirement=runtime.resource.amd_gpu",
+        "iree-run-requirement=libamdf.resource.amd_gpu",
         "runtime-resource=amd-gpu",
     ],
     deps = [
@@ -392,9 +393,9 @@ hrx_cc_test(
     name = "mem_pool_backing_uncached_gpu_test",
     srcs = ["mem_pool_backing_uncached_gpu_test.cc"],
     env = {"HRX_GPU_DRIVER": "amdgpu"},
-    resource_group = "iree-hal-drivers-amdgpu-tests",
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = [
-        "iree-run-requirement=runtime.resource.amd_gpu",
+        "iree-run-requirement=libamdf.resource.amd_gpu",
         "runtime-resource=amd-gpu",
     ],
     deps = [
