@@ -44,8 +44,9 @@ class TransferMemoryTest : public ::testing::Test {
       queue = {
           .kind = AMDF_CACHE_TRANSITION_KIND_GLOBAL,
           .executor = AMDF_CACHE_TRANSITION_EXECUTOR_QUEUE,
-          .operation = direction == 0 ? AMDF_CACHE_OPERATION_ACQUIRE_FROM_SYSTEM
-                                      : AMDF_CACHE_OPERATION_RELEASE_TO_SYSTEM,
+          .operation = static_cast<amdf_cache_operation_t>(
+              direction == 0 ? AMDF_CACHE_OPERATION_ACQUIRE_FROM_SYSTEM
+                             : AMDF_CACHE_OPERATION_RELEASE_TO_SYSTEM),
       };
     }
     families_[2].cache_operations = AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM |

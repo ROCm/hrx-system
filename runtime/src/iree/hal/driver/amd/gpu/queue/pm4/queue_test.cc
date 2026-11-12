@@ -519,8 +519,9 @@ TEST_F(KernelQueueTest, PayloadGrowthPreservesLaunchArgumentCapacity) {
   EXPECT_EQ(queue->producer.transfers.current->capacity, 32768u);
   ASSERT_NO_FATAL_FAILURE(Execute(0));
   Poll(0);
-  std::vector<uint8_t> expected = first;
-  expected.insert(expected.end(), second.begin(), second.end());
+  std::vector<uint8_t> expected(first.size() + second.size());
+  std::copy(first.begin(), first.end(), expected.begin());
+  std::copy(second.begin(), second.end(), expected.begin() + first.size());
   EXPECT_EQ(Read(buffer, expected.size()), expected);
   iree_hal_amd_gpu_pm4_queue_trim(queues_[0]);
   Publish(0);
