@@ -990,6 +990,7 @@ jobs:
             "llvm-22=$LLVM_APT_VERSION" "libclang-rt-22-dev=$LLVM_APT_VERSION" \
             g++-13 p7zip-full python3-venv
           python3 dev.py cmake setup --venv
+          mkdir -p build/iree-cmake-windows/host-tools
           python3 build_tools/devtools/install.py bazelisk \
             --bin-dir build/iree-cmake-windows/host-tools
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
