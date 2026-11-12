@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <array>
+#include <utility>
 #include <vector>
 
 #include "hrx_runtime_cxx.h"
@@ -240,7 +241,7 @@ TEST_F(MemPoolTest, SiblingsReuseBackingAndTrimIndependently) {
   EXPECT_EQ(stats.bytes_committed, 0u);
 }
 
-TEST_F(MemPoolTest, FiniteRangesKeepOwnersThroughEverySuballocatorPair) {
+TEST_F(MemPoolTest, FinitePoolsKeepBackingThroughEverySuballocatorPair) {
   for (unsigned kinds = 0; kinds < 4; ++kinds) {
     SCOPED_TRACE(kinds);
     hrx::runtime::mem_pool_ptr source;
@@ -280,24 +281,23 @@ TEST_F(MemPoolTest, FiniteRangesKeepOwnersThroughEverySuballocatorPair) {
     }
     backing.reset();
     finite.reset();
-    const size_t index = buffers_.size();
-    buffers_.push_back(nullptr);
+    hrx::runtime::buffer_ptr buffer;
     const hrx_pool_reservation_request_t request = {256, 16};
     ASSERT_TRUE(
-        Check(Allocate(0, child, &prior, 1, &request, &buffers_[index])));
-    child.reset();
+        Check(Allocate(0, child, &prior, 1, &request, buffer.for_output())));
     ASSERT_TRUE(
         Check(hrx_semaphore_wait(timelines_[0], tails_[0], UINT64_MAX)));
     void* data = nullptr;
-    ASSERT_TRUE(
-        Check(hrx_buffer_map(buffers_[index], HRX_MAP_WRITE, 0, 256, &data)));
+    ASSERT_TRUE(Check(hrx_buffer_map(buffer, HRX_MAP_WRITE, 0, 256, &data)));
     static_cast<uint32_t*>(data)[63] = kinds;
-    ASSERT_TRUE(Check(hrx_buffer_unmap(buffers_[index])));
-    ASSERT_TRUE(Check(Free(0, &prior, 1, &buffers_[index])));
+    ASSERT_TRUE(Check(hrx_buffer_unmap(buffer)));
+    const hrx_semaphore_list_t allocated = {&timelines_[0], &tails_[0], 1};
+    hrx_buffer_t root = buffer;
+    ASSERT_TRUE(Check(Free(0, &allocated, 1, &root)));
     ASSERT_TRUE(
         Check(hrx_semaphore_wait(timelines_[0], tails_[0], UINT64_MAX)));
-    hrx_buffer_release(buffers_[index]);
-    buffers_[index] = nullptr;
+    buffer.reset();
+    child.reset();
     hrx_pool_stats_t stats;
     hrx_mem_pool_query_stats(source, &stats);
     EXPECT_EQ(stats.reservation_count, 0u);
@@ -407,12 +407,15 @@ TEST_F(MemPoolTest, PlacementAndAtomicContractsAreQueryableBeforePayload) {
   EXPECT_EQ(hrx_mem_pool_query_atomic_operations(source, excluded_program)
                 .system_scope_32,
             0u);
+  // The fixture opens the gate and retires the accepted batch in TearDown.
+  // Keep its explicit pool with those same fixture-owned buffers.
+  pools_.push_back(std::move(source));
   buffers_.resize(1);
   const hrx_pool_reservation_request_t request = {256, 16};
   uint64_t opened = 1;
   const hrx_semaphore_list_t wait_gate = {&gate_, &opened, 1};
-  ASSERT_TRUE(
-      Check(Allocate(0, source, &wait_gate, 1, &request, buffers_.data())));
+  ASSERT_TRUE(Check(
+      Allocate(0, pools_.back(), &wait_gate, 1, &request, buffers_.data())));
   // The accepted handle already carries the immutable access contract. Queries
   // require neither physical backing readiness nor a host completion wait.
   EXPECT_NE(

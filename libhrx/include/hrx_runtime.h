@@ -480,10 +480,11 @@ HRX_API hrx_status_t hrx_stream_update_buffer(hrx_stream_t stream,
 
 // Allocates the entire batch from the explicit pool after waits, without a
 // host join. At least one signal is required. Returned handles retain their
-// native pool and group; addresses and contents become usable at the allocation
-// signal. Record dependent work with those prerequisites, and wait before host
-// address/mapping access. Synchronous failure schedules nothing and clears all
-// output handles; asynchronous failure fails the signal semaphores.
+// group and borrow |pool|, which the caller keeps alive until all allocations,
+// buffer handles, and uses have retired. Addresses and contents become usable
+// at the allocation signal. Record dependent work with those prerequisites,
+// and wait before host address/mapping access. Synchronous failure schedules
+// nothing and clears all output handles; asynchronous failure fails signals.
 HRX_API hrx_status_t hrx_queue_alloca(
     hrx_queue_t queue, const hrx_semaphore_list_t* waits,
     const hrx_semaphore_list_t* signals, hrx_mem_pool_t pool,
@@ -642,8 +643,9 @@ typedef uint32_t hrx_encoding_type_t;
 #define HRX_ENCODING_TYPE_OPAQUE 0u
 #define HRX_ENCODING_TYPE_DENSE_ROW_MAJOR 1u
 
-// Creates shape and encoding metadata retaining |buffer| and its allocation
-// owners. The caller may release its buffer reference after creating the view.
+// Creates shape and encoding metadata retaining |buffer|. The caller may
+// release its buffer reference after creating the view, but must keep the
+// allocation pool alive and order uses before any explicit deallocation.
 HRX_API hrx_status_t hrx_buffer_view_create(hrx_buffer_t buffer,
                                             size_t shape_rank,
                                             const int64_t* shape,
@@ -858,11 +860,13 @@ typedef struct hrx_graph_kernel_node_attrs_t {
   uint32_t export_ordinal;
   // Workgroup geometry for the dispatch.
   hrx_dispatch_config_t config;
-  // Argument bytes copied when the node is added.
+  // Argument bytes copied when the node is added. Embedded pointers do not
+  // imply ownership of the allocations they address.
   const void* constants;
   // Number of bytes in |constants|.
   size_t constants_size;
-  // Buffer references copied and retained when the node is added.
+  // Buffer references copied and their native handles retained when the node
+  // is added. The caller owns their pools and allocation epochs.
   const hrx_buffer_ref_t* bindings;
   // Number of entries in |bindings|.
   size_t binding_count;
@@ -892,8 +896,8 @@ typedef struct hrx_graph_fill_ptr_node_attrs_t {
 
 // Native handle-based buffer copy. Source and destination lengths must be
 // equal and nonzero. Recording uses the buffer handles directly without raw
-// pointer accounting overhead. The ranges are retained by the instantiated
-// graph through the underlying command buffer resources.
+// pointer accounting overhead. The graph retains the native buffer handles;
+// the caller keeps their pools and allocation epochs live for every launch.
 typedef struct hrx_graph_copy_buffer_node_attrs_t {
   hrx_buffer_ref_t src;
   hrx_buffer_ref_t dst;

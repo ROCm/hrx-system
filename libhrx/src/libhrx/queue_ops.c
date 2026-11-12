@@ -109,14 +109,6 @@ static iree_status_t hrx_hal_semaphore_lists_initialize(
   return status;
 }
 
-// Finite-pool allocations preserve the HRX backing owner in the existing
-// final-release attachment. Ordinary growing pools need no extra attachment.
-static void hrx_pool_buffer_release_backing(void* user_data,
-                                            size_t byte_length) {
-  (void)byte_length;
-  hrx_buffer_release((hrx_buffer_t)user_data);
-}
-
 hrx_status_t hrx_queue_alloca(hrx_queue_t queue,
                               const hrx_semaphore_list_t* waits,
                               const hrx_semaphore_list_t* signals,
@@ -175,14 +167,6 @@ hrx_status_t hrx_queue_alloca(hrx_queue_t queue,
                                           (size_t)requests[i].allocation_size,
                                           NULL, &out_buffers[i]);
       if (iree_status_is_ok(status)) {
-        hrx_buffer_t buffer = out_buffers[i];
-        buffer->hal_pool = pool->hal_pool;
-        iree_hal_pool_retain(pool->hal_pool);
-        if (pool->backing_buffer) {
-          hrx_buffer_retain(pool->backing_buffer);
-          buffer->release_user_data = pool->backing_buffer;
-          buffer->release_callback = hrx_pool_buffer_release_backing;
-        }
         ++prepared_count;
       }
     }
@@ -229,9 +213,10 @@ hrx_status_t hrx_queue_dealloca(hrx_queue_t queue,
   }
   for (size_t i = 0; i < buffer_count && iree_status_is_ok(status); ++i) {
     if (!buffers[i] || buffers[i]->group != queue->device->group ||
-        !buffers[i]->hal_buffer || !buffers[i]->hal_pool) {
-      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "buffer %zu is not a group allocation root", i);
+        !buffers[i]->hal_buffer) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "buffer %zu has no native buffer in the queue's group", i);
     } else {
       hal_buffers[i] = buffers[i]->hal_buffer;
     }

@@ -114,15 +114,16 @@ hrx_status_t hrx_buffer_allocate(hrx_stream_t stream, size_t size,
       .payload_values = &signal_value,
   };
 
+  iree_hal_pool_t* pool = NULL;
   iree_status_t status = hrx_mem_pool_backing_retain_allocation_source(
-      stream->queue->device, mem_type, usage, &buf->hal_pool);
+      stream->queue->device, mem_type, usage, &pool);
   if (iree_status_is_ok(status)) {
     const iree_hal_pool_reservation_request_t request =
         iree_hal_make_pool_reservation_request((iree_device_size_t)size,
                                                /*min_alignment=*/0);
-    status = iree_hal_queue_alloca(
-        stream->hal_queue, wait_list, signal_list, buf->hal_pool,
-        /*request_count=*/1, &request, &buf->hal_buffer);
+    status =
+        iree_hal_queue_alloca(stream->hal_queue, wait_list, signal_list, pool,
+                              /*request_count=*/1, &request, &buf->hal_buffer);
   }
   if (iree_status_is_ok(status)) {
     // The returned buffer is immediately available for mapping and native
@@ -130,9 +131,11 @@ hrx_status_t hrx_buffer_allocate(hrx_stream_t stream, size_t size,
     status = iree_hal_semaphore_wait(sem, signal_value, iree_infinite_timeout(),
                                      /*flags=*/0);
   }
+  // The device owns convenience sources until group teardown. Buffers retain
+  // the group, so no additional per-buffer pool reference is needed.
+  iree_hal_pool_release(pool);
   if (!iree_status_is_ok(status)) {
     iree_hal_buffer_release(buf->hal_buffer);
-    iree_hal_pool_release(buf->hal_pool);
     iree_allocator_free(iree_allocator_system(), buf);
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
@@ -169,7 +172,6 @@ void hrx_buffer_release(hrx_buffer_t buffer) {
                                NULL, hrx_buffer_unmap_internal(buffer));
   }
   iree_hal_buffer_release(buffer->hal_buffer);
-  iree_hal_pool_release(buffer->hal_pool);
   if (buffer->release_callback) {
     buffer->release_callback(buffer->release_user_data, buffer->size);
   }

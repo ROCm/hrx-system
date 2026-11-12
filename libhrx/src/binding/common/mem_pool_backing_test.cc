@@ -203,7 +203,7 @@ TEST_F(MemPoolBackingTest, LivePoolsReuseBackingAndKeepIndependentAccounting) {
   EXPECT_EQ(BackingStats().bytes_committed, 0u);
 }
 
-TEST_F(MemPoolBackingTest, BackingOutlivesPublicPoolAndItsLastBuffer) {
+TEST_F(MemPoolBackingTest, SharedBackingOutlivesPoolAndItsLastBuffer) {
   auto first = CreatePool();
   ASSERT_NE(first, nullptr);
   auto buffer = Allocate(first.get());
@@ -211,9 +211,9 @@ TEST_F(MemPoolBackingTest, BackingOutlivesPublicPoolAndItsLastBuffer) {
   const auto* identity =
       iree_hal_buffer_memory_view(buffer->hal_buffer).backing;
   const uint64_t backing_bytes = BackingStats().bytes_committed;
-  first.reset();
   WriteAndCheck(buffer.get(), 0x6B);
   buffer.reset();
+  first.reset();
   EXPECT_EQ(device_->mem_pool_backing.retention_head, nullptr);
   EXPECT_EQ(BackingStats().bytes_committed, backing_bytes);
 

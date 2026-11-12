@@ -69,7 +69,6 @@ TEST_F(CpuPoolTest, MemoryPoolServesSmallAndLargeBuffersFromOneAllocator) {
       &live_backing_bytes));
   EXPECT_EQ(live_backing_bytes, regular_backing_bytes + lengths[1]);
   for (size_t i = 0; i < IREE_ARRAYSIZE(buffers); ++i) {
-    EXPECT_EQ(buffers[i]->hal_pool, pool->hal_pool);
     void* address = nullptr;
     IREE_ASSERT_OK(HRX_CALL(
         hrx_buffer_map(buffers[i], HRX_MAP_WRITE, 0, lengths[i], &address)));
@@ -215,7 +214,6 @@ TEST_F(CpuPoolTest, FiniteDescendantsPreserveCompatibilityAllocationCharge) {
                                 &request, buffer.for_output())));
   IREE_ASSERT_OK(
       HRX_CALL(hrx_semaphore_wait(completion, allocated, UINT64_MAX)));
-  child.reset();
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                         iree_hal_streaming_mem_pool_allocate_buffer(
                             compatibility_pool, 1, &denied));
@@ -228,8 +226,10 @@ TEST_F(CpuPoolTest, FiniteDescendantsPreserveCompatibilityAllocationCharge) {
   IREE_ASSERT_OK(
       HRX_CALL(hrx_semaphore_wait(completion, released, UINT64_MAX)));
   buffer.reset();
+  child.reset();
   IREE_ASSERT_OK(iree_hal_streaming_mem_pool_allocate_buffer(
       compatibility_pool, 65536, backing.for_output()));
+  backing.reset();
   compatibility_pool.reset();
 }
 

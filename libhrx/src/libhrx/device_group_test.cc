@@ -245,10 +245,8 @@ TEST(DeviceGroupTest, SharedReservationHasPerDeviceAddressesAndGraphAccess) {
         devices[i], 0, HRX_MEMORY_SITE_PROGRAM, &program_scopes[i])));
   }
 
-  pool.reset();
-
-  // A buffer keeps every participant and its address contract alive. Neither
-  // the first participant nor a caller-held group reference owns its identity.
+  // Memory resources keep every participant and its address contract alive.
+  // The explicit pool remains owned until its physical backing is released.
   group.reset();
   runtime.reset();
   uint64_t addresses[2];
@@ -291,6 +289,7 @@ TEST(DeviceGroupTest, SharedReservationHasPerDeviceAddressesAndGraphAccess) {
   ASSERT_TRUE(Check(hrx_virtual_buffer_detach(buffer, {})));
   buffer.reset();
   backing.reset();
+  pool.reset();
 }
 
 TEST_F(DeviceGroupLifetimeTest, ViewKeepsAllocationAndServicesAlive) {
