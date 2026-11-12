@@ -43,7 +43,7 @@ loom_bytecode_body_allocate_scratch_array(
 
 // Uses fixed stack storage for ordinary operation records. Larger records take
 // the cold path above to prove their wire bytes before allocating scratch.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
 loom_bytecode_body_prepare_scratch_array(
     loom_bytecode_reader_decoder_t* decoder,
     const loom_bytecode_reader_cursor_t* cursor, iree_string_view_t table_name,
@@ -528,7 +528,7 @@ loom_bytecode_body_reader_read_op_record(
           .values = body_reader->values.value_map,
           .value_count = body_reader->values.next_value_number,
           .bindings = &body_reader->values.bindings,
-      };
+  };
   for (uint64_t i = 0; i < present_attr_count; ++i) {
     uint64_t key_offset = loom_bytecode_reader_cursor_absolute_position(cursor);
     uint64_t key_id = 0;

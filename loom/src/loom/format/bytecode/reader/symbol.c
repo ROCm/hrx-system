@@ -252,7 +252,7 @@ static iree_status_t loom_bytecode_reader_validate_symbol_definition_flags(
       IREE_SV("symbol_definition_flags_must_match_defining_op_contract"));
 }
 
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
 loom_bytecode_reader_value_def_type(loom_bytecode_symbol_validator_t* reader,
                                     loom_bytecode_reader_cursor_t* cursor,
                                     uint64_t* out_type_id) {
@@ -812,11 +812,10 @@ static iree_status_t loom_bytecode_symbols_begin(
   return iree_ok_status();
 }
 
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t
-loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
-                            loom_bytecode_symbol_table_t* table,
-                            iree_host_size_t symbol_index,
-                            loom_bytecode_symbol_metadata_t* out_metadata) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t loom_bytecode_symbol_decode(
+    loom_bytecode_symbol_validator_t* reader,
+    loom_bytecode_symbol_table_t* table, iree_host_size_t symbol_index,
+    loom_bytecode_symbol_metadata_t* out_metadata) {
   uint64_t entry_offset =
       loom_bytecode_reader_cursor_absolute_position(&table->cursor);
   uint64_t entry_relative_offset = entry_offset - table->entries.base;

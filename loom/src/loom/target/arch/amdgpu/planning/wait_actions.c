@@ -89,7 +89,7 @@ iree_status_t loom_amdgpu_wait_actions_append(
 
 // Finalization has one hot caller. Preserve its caller specialization while
 // retaining an external definition for ordinary non-LTO builds.
-IREE_ATTRIBUTE_ALWAYS_INLINE extern inline iree_status_t
+extern IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
 loom_amdgpu_wait_actions_finalize(loom_amdgpu_wait_actions_t* actions,
                                   iree_arena_allocator_t* arena) {
   if (actions->action_count == 0) {
@@ -270,7 +270,7 @@ static void loom_amdgpu_wait_actions_hazard_query(
 
 // Publication likewise has one hot caller and exposes its short-lived replay
 // context to optimized builds when inlined.
-IREE_ATTRIBUTE_ALWAYS_INLINE extern inline iree_status_t
+extern IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
 loom_amdgpu_wait_actions_build_common_tables(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,

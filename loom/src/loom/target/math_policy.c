@@ -202,7 +202,7 @@ static void loom_target_math_policy_decision_from_rule(
   }
 }
 
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline void
+static IREE_ATTRIBUTE_ALWAYS_INLINE void
 loom_target_math_policy_decision_from_direct_rule(
     const loom_target_math_policy_t* policy,
     const loom_target_math_policy_direct_rule_t* rule,

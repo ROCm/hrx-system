@@ -13,7 +13,7 @@
 #include "iree/math/float_bits.h"
 
 // Encodes a nonzero reduced significand with the divisor's binary exponent.
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t
 iree_math_fmod_encode(uint64_t number, int exponent, unsigned fraction_bits) {
   int shift = iree_math_count_leading_zeros_u64(number) - (63 - fraction_bits);
   number <<= shift;
@@ -29,7 +29,7 @@ iree_math_fmod_encode(uint64_t number, int exponent, unsigned fraction_bits) {
 // the upstream template. F32 uses a U32 short-quotient path and the same U64
 // general reducer as F64. The largest finite exponent gap takes at most 186
 // chunks; each consumes the unused leading and trailing significand bits.
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t
 iree_math_fmod_bits(uint64_t numerator, uint64_t denominator, unsigned width,
                     unsigned fraction_bits, unsigned bias) {
   const uint64_t sign_mask = UINT64_C(1) << (width - 1);

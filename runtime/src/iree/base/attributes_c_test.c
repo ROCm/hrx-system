@@ -18,7 +18,7 @@ _Static_assert(sizeof(IREE_TEST_STRINGIFY(IREE_ATTRIBUTE_NOINLINE)) > 1,
 
 #include "iree/base/api.h"
 
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline int iree_attributes_test_add_one(
+static IREE_ATTRIBUTE_ALWAYS_INLINE int iree_attributes_test_add_one(
     int value) {
   return value + 1;
 }

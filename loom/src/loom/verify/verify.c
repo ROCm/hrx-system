@@ -35,9 +35,9 @@ typedef struct loom_verify_region_contract_t {
 // Operation verification is part of the recursive region loop. An out-of-line
 // call here is paid for every operation and prevents the compiler from
 // scheduling region bookkeeping with the operation checks.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t loom_verify_op(
-    loom_verify_state_t* state, const loom_op_t* op,
-    const loom_op_vtable_t* vtable);
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
+loom_verify_op(loom_verify_state_t* state, const loom_op_t* op,
+               const loom_op_vtable_t* vtable);
 
 static iree_string_view_t loom_verify_region_op_kind_name(
     loom_verify_state_t* state, loom_op_kind_t kind) {
@@ -151,11 +151,9 @@ loom_verify_emit_non_command_effect(loom_verify_state_t* state,
                               IREE_ARRAYSIZE(params));
 }
 
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline void
-loom_verify_command_effect_scope(loom_verify_state_t* state,
-                                 const loom_op_t* op,
-                                 const loom_op_vtable_t* vtable,
-                                 loom_trait_flags_t traits) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE void loom_verify_command_effect_scope(
+    loom_verify_state_t* state, const loom_op_t* op,
+    const loom_op_vtable_t* vtable, loom_trait_flags_t traits) {
   if (!state->region_scope.command_effects_only) {
     return;
   }
@@ -448,9 +446,9 @@ static iree_status_t loom_verify_region(
   return status;
 }
 
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t loom_verify_op(
-    loom_verify_state_t* state, const loom_op_t* op,
-    const loom_op_vtable_t* vtable) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
+loom_verify_op(loom_verify_state_t* state, const loom_op_t* op,
+               const loom_op_vtable_t* vtable) {
   const uint32_t initial_error_count = state->result->error_count;
   if (!vtable) {
     // Unknown op kind — emit structured diagnostic.

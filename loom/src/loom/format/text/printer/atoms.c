@@ -396,10 +396,9 @@ static iree_status_t loom_print_dim(loom_output_stream_t* stream,
 
 // Shared in source but kept inline in both complete-type and result-type hot
 // paths so declaration-driven spelling does not add a call per printed type.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t
-loom_print_shaped_interior(loom_output_stream_t* stream, loom_type_t type,
-                           const loom_module_t* module,
-                           const loom_print_context_t* ctx) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t loom_print_shaped_interior(
+    loom_output_stream_t* stream, loom_type_t type, const loom_module_t* module,
+    const loom_print_context_t* ctx) {
   uint8_t rank = loom_type_rank(type);
   for (uint8_t i = 0; i < rank; ++i) {
     if (i > 0) {

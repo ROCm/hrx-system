@@ -115,7 +115,7 @@ static inline iree_host_size_t iree_tokenizer_merge_hash_fn(uint64_t key) {
 // Looks up a merge by token pair, returning the rank and result token.
 // Returns a result with rank=UINT32_MAX if no merge exists for the pair.
 // Inlined for performance - called frequently in BPE pair validation.
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE iree_tokenizer_merge_hash_result_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_tokenizer_merge_hash_result_t
 iree_tokenizer_vocab_merge_hash_lookup(
     const iree_tokenizer_vocab_merge_hash_t* hash, int32_t left_token_id,
     int32_t right_token_id) {

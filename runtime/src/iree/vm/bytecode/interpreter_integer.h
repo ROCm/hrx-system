@@ -23,7 +23,7 @@ typedef enum iree_vm_bytecode_integer_division_failure_e {
   IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_SIGNED_OVERFLOW = 2,
 } iree_vm_bytecode_integer_division_failure_t;
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t
 iree_vm_bytecode_integer_compare_bits(uint64_t lhs, uint64_t rhs,
                                       uint64_t sign_bit, uint8_t predicate) {
   const uint64_t is_equal = lhs == rhs;
@@ -122,7 +122,7 @@ iree_vm_bytecode_integer_compare_bits(uint64_t lhs, uint64_t rhs,
 #undef IREE_VM_BYTECODE_INTEGER_EXECUTE_EXPAND_
 #undef IREE_VM_BYTECODE_INTEGER_EXECUTE_CONCAT_
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t
 iree_vm_bytecode_integer_low_mask(uint8_t width) {
   return width == 64 ? UINT64_MAX : (UINT64_C(1) << width) - UINT64_C(1);
 }
@@ -133,7 +133,7 @@ typedef enum iree_vm_bytecode_integer_bitstream_mode_e {
   IREE_VM_BYTECODE_INTEGER_BITSTREAM_MODE_UNPACK_S = 2,
 } iree_vm_bytecode_integer_bitstream_mode_t;
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+static IREE_ATTRIBUTE_ALWAYS_INLINE void
 iree_vm_bytecode_execute_integer_bitstream(
     uint8_t result_base, uint8_t source_base, uint8_t field_width,
     uint8_t source_count, uint8_t result_count, uint8_t source_width,
@@ -167,7 +167,7 @@ iree_vm_bytecode_execute_integer_bitstream(
   }
 }
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+static IREE_ATTRIBUTE_ALWAYS_INLINE void
 iree_vm_bytecode_execute_integer_bitstream_pack(
     const iree_vm_bytecode_integer_bitstream_pack_t* record, uint64_t* values) {
   iree_vm_bytecode_execute_integer_bitstream(
@@ -177,7 +177,7 @@ iree_vm_bytecode_execute_integer_bitstream_pack(
       values);
 }
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+static IREE_ATTRIBUTE_ALWAYS_INLINE void
 iree_vm_bytecode_execute_integer_bitstream_unpack_u(
     const iree_vm_bytecode_integer_bitstream_unpack_u_t* record,
     uint64_t* values) {
@@ -188,7 +188,7 @@ iree_vm_bytecode_execute_integer_bitstream_unpack_u(
       values);
 }
 
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+static IREE_ATTRIBUTE_ALWAYS_INLINE void
 iree_vm_bytecode_execute_integer_bitstream_unpack_s(
     const iree_vm_bytecode_integer_bitstream_unpack_s_t* record,
     uint64_t* values) {

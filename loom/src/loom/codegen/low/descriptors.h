@@ -1916,14 +1916,14 @@ typedef struct loom_low_descriptor_set_t {
 } loom_low_descriptor_set_t;
 
 // Returns the shared identity metadata for a verified descriptor row.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_descriptor_identity_t*
+static IREE_ATTRIBUTE_ALWAYS_INLINE const loom_low_descriptor_identity_t*
 loom_low_descriptor_identity(const loom_low_descriptor_set_t* descriptor_set,
                              const loom_low_descriptor_t* descriptor) {
   return &descriptor_set->descriptor_identities[descriptor->identity_ordinal];
 }
 
 // Returns the durable stable ID for a verified descriptor row.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline uint64_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t
 loom_low_descriptor_stable_id(const loom_low_descriptor_set_t* descriptor_set,
                               const loom_low_descriptor_t* descriptor) {
   const uint32_t descriptor_ordinal =
@@ -1932,15 +1932,14 @@ loom_low_descriptor_stable_id(const loom_low_descriptor_set_t* descriptor_set,
 }
 
 // Returns the durable stable ID for a verified descriptor ordinal.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline uint64_t
-loom_low_descriptor_stable_id_at(
+static IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t loom_low_descriptor_stable_id_at(
     const loom_low_descriptor_set_t* descriptor_set,
     uint32_t descriptor_ordinal) {
   return descriptor_set->descriptor_stable_ids[descriptor_ordinal];
 }
 
 // Returns the stable key reference for a verified descriptor row.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_string_ref_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE loom_string_ref_t
 loom_low_descriptor_key_string_ref(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor) {
@@ -1949,7 +1948,7 @@ loom_low_descriptor_key_string_ref(
 }
 
 // Returns the semantic-tag reference for a verified descriptor row.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_string_ref_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE loom_string_ref_t
 loom_low_descriptor_semantic_tag_string_ref(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor) {
@@ -1961,7 +1960,7 @@ loom_low_descriptor_semantic_tag_string_ref(
 // layout. Ordinary forms use their own mnemonic. Generated layouts instead
 // select the descriptor mnemonic, a byte prefix of the form mnemonic, or a
 // compact explicit-mnemonic pool row when those spellings differ.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_string_ref_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE loom_string_ref_t
 loom_low_asm_form_native_mnemonic_string_ref(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, const loom_low_asm_form_t* form,
@@ -1985,7 +1984,7 @@ loom_low_asm_form_native_mnemonic_string_ref(
 
 // Returns a verified descriptor's operand by descriptor-local index. Rows are
 // immutable and shared; the local index, not the row address, identifies a use.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_operand_t*
+static IREE_ATTRIBUTE_ALWAYS_INLINE const loom_low_operand_t*
 loom_low_descriptor_operand(const loom_low_descriptor_set_t* descriptor_set,
                             const loom_low_descriptor_t* descriptor,
                             uint16_t operand_index) {
@@ -1997,7 +1996,7 @@ loom_low_descriptor_operand(const loom_low_descriptor_set_t* descriptor_set,
 
 // Returns the operand alternative for |reg_class_id|, or NULL when the
 // operand does not accept that register class.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_reg_class_alt_t*
+static IREE_ATTRIBUTE_ALWAYS_INLINE const loom_low_reg_class_alt_t*
 loom_low_operand_reg_class_alt(const loom_low_descriptor_set_t* descriptor_set,
                                const loom_low_operand_t* operand,
                                uint16_t reg_class_id) {
@@ -2013,8 +2012,7 @@ loom_low_operand_reg_class_alt(const loom_low_descriptor_set_t* descriptor_set,
 }
 
 // Returns whether |descriptor_ordinal| is available in |descriptor_set|.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline bool
-loom_low_descriptor_set_has_descriptor(
+static IREE_ATTRIBUTE_ALWAYS_INLINE bool loom_low_descriptor_set_has_descriptor(
     const loom_low_descriptor_set_t* descriptor_set,
     uint32_t descriptor_ordinal) {
   if (descriptor_ordinal >= descriptor_set->descriptor_ordinal_count) {
@@ -2029,7 +2027,7 @@ loom_low_descriptor_set_has_descriptor(
 }
 
 // Returns the shared structural layout for a verified descriptor in this set.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_descriptor_layout_t*
+static IREE_ATTRIBUTE_ALWAYS_INLINE const loom_low_descriptor_layout_t*
 loom_low_descriptor_layout(const loom_low_descriptor_set_t* descriptor_set,
                            const loom_low_descriptor_t* descriptor) {
   return &descriptor_set->descriptor_layouts[descriptor->layout_index];
@@ -2037,7 +2035,7 @@ loom_low_descriptor_layout(const loom_low_descriptor_set_t* descriptor_set,
 
 // Returns the view-owned facts for |descriptor_ordinal|. The ordinal must be a
 // verified row in |descriptor_set|.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_descriptor_view_t*
+static IREE_ATTRIBUTE_ALWAYS_INLINE const loom_low_descriptor_view_t*
 loom_low_descriptor_set_descriptor_view_at(
     const loom_low_descriptor_set_t* descriptor_set,
     uint32_t descriptor_ordinal) {
@@ -2046,7 +2044,7 @@ loom_low_descriptor_set_descriptor_view_at(
 
 // Returns the view-owned facts corresponding to |descriptor|. The descriptor
 // must be a row in |descriptor_set->descriptors|.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_descriptor_view_t*
+static IREE_ATTRIBUTE_ALWAYS_INLINE const loom_low_descriptor_view_t*
 loom_low_descriptor_set_descriptor_view(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor) {
@@ -2057,7 +2055,7 @@ loom_low_descriptor_set_descriptor_view(
 }
 
 // Resolves a canonical schedule-class ID into a model's physical row pool.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline uint16_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE uint16_t
 loom_low_schedule_model_schedule_class_row_id(
     const loom_low_schedule_model_t* schedule_model, uint16_t canonical_id) {
   return schedule_model->schedule_class_row_ids == NULL
@@ -2067,7 +2065,7 @@ loom_low_schedule_model_schedule_class_row_id(
 
 // Returns the schedule behavior selected by |schedule_model| for a verified
 // descriptor view.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_schedule_class_t*
+static IREE_ATTRIBUTE_ALWAYS_INLINE const loom_low_schedule_class_t*
 loom_low_schedule_model_schedule_class(
     const loom_low_schedule_model_t* schedule_model,
     const loom_low_descriptor_view_t* descriptor_view) {
@@ -2077,7 +2075,7 @@ loom_low_schedule_model_schedule_class(
 }
 
 // Returns the stable semantic name for |canonical_id|.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_string_ref_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE loom_string_ref_t
 loom_low_descriptor_set_schedule_class_name_string_ref(
     const loom_low_descriptor_set_t* descriptor_set, uint16_t canonical_id) {
   return descriptor_set->schedule_class_name_string_refs[canonical_id];

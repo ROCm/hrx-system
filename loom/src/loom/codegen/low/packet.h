@@ -61,13 +61,13 @@ static_assert(sizeof(loom_low_packet_view_t) == 20,
 // instruction. These packets remain in schedule and report tables so their
 // structural position is observable. Emitters omit the packet itself but still
 // consume target insertions anchored at its scheduled position.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline bool
-loom_low_packet_is_compile_time_only(const loom_low_packet_view_t* packet) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE bool loom_low_packet_is_compile_time_only(
+    const loom_low_packet_view_t* packet) {
   return loom_traits_are_compile_time_only(packet->node->traits);
 }
 
 // Returns the number of packets in a successful schedule.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_host_size_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_host_size_t
 loom_low_packet_count(const loom_low_schedule_table_t* schedule) {
   return schedule->scheduled_node_count;
 }
@@ -75,7 +75,7 @@ loom_low_packet_count(const loom_low_schedule_table_t* schedule) {
 // Constructs a view from corresponding node and packet indices in a successful
 // schedule. Indexed accessors supply the known index directly rather than
 // reconstructing it through the inverse mapping.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_low_packet_view_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE loom_low_packet_view_t
 loom_low_packet_make_view(const loom_low_schedule_table_t* schedule,
                           uint32_t node_index, iree_host_size_t packet_index) {
   IREE_ASSERT_LT(node_index, schedule->node_count);
@@ -97,7 +97,7 @@ loom_low_packet_make_view(const loom_low_schedule_table_t* schedule,
 // Returns the packet for |node_index| in a successful schedule.
 //
 // |node_index| must name a scheduled node in |schedule|.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_low_packet_view_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE loom_low_packet_view_t
 loom_low_packet_at_node(const loom_low_schedule_table_t* schedule,
                         uint32_t node_index) {
   IREE_ASSERT_LT(node_index, schedule->node_count);
@@ -112,9 +112,8 @@ loom_low_packet_at_node(const loom_low_schedule_table_t* schedule,
 // Returns the packet at |packet_index| in a successful schedule.
 //
 // |packet_index| must be derived from |schedule|.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_low_packet_view_t
-loom_low_packet_at(const loom_low_schedule_table_t* schedule,
-                   iree_host_size_t packet_index) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE loom_low_packet_view_t loom_low_packet_at(
+    const loom_low_schedule_table_t* schedule, iree_host_size_t packet_index) {
   IREE_ASSERT_LT(packet_index, schedule->scheduled_node_count);
   return loom_low_packet_make_view(
       schedule, schedule->scheduled_node_indices[packet_index], packet_index);
@@ -123,7 +122,7 @@ loom_low_packet_at(const loom_low_schedule_table_t* schedule,
 // Returns the packet at |scheduled_ordinal| in |block_index|.
 //
 // Both indices must be derived from |schedule|.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_low_packet_view_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE loom_low_packet_view_t
 loom_low_packet_at_block_ordinal(const loom_low_schedule_table_t* schedule,
                                  uint32_t block_index,
                                  uint32_t scheduled_ordinal) {
@@ -139,7 +138,7 @@ loom_low_packet_at_block_ordinal(const loom_low_schedule_table_t* schedule,
 // value without register storage. The index is in packet operand order, not
 // descriptor operand order. The packet and allocation must describe the same
 // successfully planned low function.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_allocation_assignment_t*
+static IREE_ATTRIBUTE_ALWAYS_INLINE const loom_low_allocation_assignment_t*
 loom_low_packet_operand_assignment(
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_view_t* packet, uint16_t operand_index) {
@@ -154,7 +153,7 @@ loom_low_packet_operand_assignment(
 // Returns the allocation assignment written by this packet result, or NULL for
 // a value without register storage. The packet and allocation must describe the
 // same successfully planned low function.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_allocation_assignment_t*
+static IREE_ATTRIBUTE_ALWAYS_INLINE const loom_low_allocation_assignment_t*
 loom_low_packet_result_assignment(const loom_low_allocation_table_t* allocation,
                                   const loom_low_packet_view_t* packet,
                                   uint16_t result_index) {
@@ -169,7 +168,7 @@ loom_low_packet_result_assignment(const loom_low_allocation_table_t* allocation,
 // verified packet from a successful allocation. Descriptor operands include
 // results and implicit operands; their generated source mapping selects the
 // corresponding packet occurrence.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_allocation_assignment_t*
+static IREE_ATTRIBUTE_ALWAYS_INLINE const loom_low_allocation_assignment_t*
 loom_low_packet_descriptor_operand_assignment(
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_view_t* packet, uint16_t descriptor_operand_index) {

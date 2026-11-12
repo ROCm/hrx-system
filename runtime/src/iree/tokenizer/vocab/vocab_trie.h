@@ -139,9 +139,9 @@ static inline iree_host_size_t iree_tokenizer_trie_cursor_depth(
 
 // Resets the cursor to the trie root.
 // Must be called before first use or to restart traversal.
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
-iree_tokenizer_trie_cursor_reset(iree_tokenizer_trie_cursor_t* cursor,
-                                 const iree_tokenizer_vocab_trie_t* trie) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE void iree_tokenizer_trie_cursor_reset(
+    iree_tokenizer_trie_cursor_t* cursor,
+    const iree_tokenizer_vocab_trie_t* trie) {
   cursor->trie = trie;
   cursor->node_index = 0;  // Root state.
   cursor->depth = 0;
@@ -156,9 +156,8 @@ iree_tokenizer_trie_cursor_reset(iree_tokenizer_trie_cursor_t* cursor,
 // and the caller should stop traversing.
 //
 // This is O(1): one array lookup plus one comparison.
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE bool
-iree_tokenizer_trie_cursor_advance(iree_tokenizer_trie_cursor_t* cursor,
-                                   uint8_t byte) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE bool iree_tokenizer_trie_cursor_advance(
+    iree_tokenizer_trie_cursor_t* cursor, uint8_t byte) {
   const iree_tokenizer_vocab_trie_t* trie = cursor->trie;
   if (IREE_UNLIKELY(!trie)) {
     return false;
@@ -189,8 +188,7 @@ iree_tokenizer_trie_cursor_advance(iree_tokenizer_trie_cursor_t* cursor,
 // A word boundary means a vocabulary token ends exactly at this position.
 // Multiple tokens may share prefixes, so this can return valid IDs at
 // multiple depths during a single traversal.
-static inline IREE_ATTRIBUTE_ALWAYS_INLINE int32_t
-iree_tokenizer_trie_cursor_token_id(
+static IREE_ATTRIBUTE_ALWAYS_INLINE int32_t iree_tokenizer_trie_cursor_token_id(
     const iree_tokenizer_trie_cursor_t* cursor) {
   const iree_tokenizer_vocab_trie_t* trie = cursor->trie;
   if (IREE_UNLIKELY(!trie)) {

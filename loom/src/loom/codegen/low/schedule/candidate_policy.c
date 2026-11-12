@@ -199,7 +199,7 @@ static bool loom_low_schedule_candidate_defers_replayable_register_move(
          !iree_any_bit_set(score->flags, actionable_flags);
 }
 
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline bool
+static IREE_ATTRIBUTE_ALWAYS_INLINE bool
 loom_low_schedule_candidate_defers_materialization(
     loom_low_schedule_candidate_compare_mode_t compare_mode,
     const loom_low_schedule_candidate_score_t* score) {
