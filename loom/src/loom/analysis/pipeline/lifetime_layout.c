@@ -183,7 +183,8 @@ loom_pipeline_lifetime_layout_columns(
     iree_host_size_t width, iree_host_size_t request_count,
     loom_pipeline_lifetime_column_t* columns,
     loom_pipeline_lifetime_extent_t* extents) {
-  for (iree_host_size_t i = 0; i < lifetimes->count * width; ++i) {
+  const iree_host_size_t column_count = lifetimes->count * width;
+  for (iree_host_size_t i = 0; i < column_count; ++i) {
     columns[i] = (loom_pipeline_lifetime_column_t){.extent = {.alignment = 1}};
   }
   if (!offsets) {
@@ -229,9 +230,9 @@ loom_pipeline_lifetime_layout_columns(
     extents[pools ? pools[p] : p] = columns[p].extent;
   }
   for (iree_host_size_t i = 1; i < lifetimes->count; ++i) {
+    const iree_host_size_t parent = lifetimes->nodes[i].parent;
     for (iree_host_size_t p = 0; p < width; ++p) {
-      columns[i * width + p].offset +=
-          columns[lifetimes->nodes[i].parent * width + p].offset;
+      columns[i * width + p].offset += columns[parent * width + p].offset;
     }
   }
   if (!offsets) {
