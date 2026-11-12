@@ -462,3 +462,78 @@ func.def inline @Decision___Decision_value(%this_value: i32) {
 }
 
 func.decl @observe(%15: i32)
+
+// ====
+// Default array members initialize every element once and destroy them in
+// reverse order after the constructor body observes their completed values.
+void observe(unsigned);
+struct Guard {
+  // Payload observed during construction and destruction.
+  unsigned value;
+  Guard(unsigned input) : value(input) { observe(input); }
+  ~Guard() { observe(value + 100); }
+};
+struct Owner {
+  // Elements initialized by the member default and owned by this object.
+  Guard values[2] = {3, 5};
+  Owner() { observe(values[0].value + values[1].value); }
+};
+void default_array_lifetime() { Owner value; }
+// ----
+func.def public @default_array_lifetime() {
+  %0 = index.constant 8 : offset
+  %value_storage = buffer.alloca<private> align(4) %0 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  func.call @Owner__Owner_storage(%value_storage, %value_storage_byte_offset) : (buffer, offset)
+  func.call @Owner___Owner_storage(%value_storage, %value_storage_byte_offset) : (buffer, offset)
+  func.return
+}
+
+func.def inline @Owner__Owner_storage(%this: buffer, %this_byte_offset: offset) {
+  %8 = scalar.constant 3 : i32
+  func.call @Guard__Guard_storage(%this, %this_byte_offset, %8) : (buffer, offset, i32)
+  %9 = index.constant 4 : offset
+  %10 = index.add %this_byte_offset, %9 : offset
+  %11 = scalar.constant 5 : i32
+  func.call @Guard__Guard_storage(%this, %10, %11) : (buffer, offset, i32)
+  %18 = index.cast %this_byte_offset : offset to i64
+  %20 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
+  %21 = index.cast %20 : i64 to offset
+  %24 = buffer.view %this[%21] : buffer -> view<1xi32>
+  %value$25 = view.load<root_in_bounds> %24[0] : view<1xi32> -> i32
+  %62 = scalar.constant 4 : i64
+  %33 = scalar.addi %20, %62 : i64
+  %34 = scalar.assume %33 [range(%33, 0, 9223372036854775807)] : i64
+  %35 = index.cast %34 : i64 to offset
+  %38 = buffer.view %this[%35] : buffer -> view<1xi32>
+  %value$39 = view.load<root_in_bounds> %38[0] : view<1xi32> -> i32
+  %40 = scalar.addi %value$25, %value$39 : i32
+  func.call @observe(%40) : (i32)
+  func.return
+}
+
+func.def inline @Owner___Owner_storage(%this: buffer, %this_byte_offset: offset) {
+  %45 = index.constant 4 : offset
+  %46 = index.add %this_byte_offset, %45 : offset
+  func.call @Guard___Guard_storage(%this, %46) : (buffer, offset)
+  func.call @Guard___Guard_storage(%this, %this_byte_offset) : (buffer, offset)
+  func.return
+}
+
+func.def inline @Guard__Guard_storage(%this: buffer, %this_byte_offset: offset, %input: i32) {
+  %52 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %input, %52[0] : i32, view<1xi32>
+  func.call @observe(%input) : (i32)
+  func.return
+}
+
+func.def inline @Guard___Guard_storage(%this: buffer, %this_byte_offset: offset) {
+  %57 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
+  %value = view.load<root_in_bounds> %57[0] : view<1xi32> -> i32
+  %59 = scalar.constant 100 : i32
+  %60 = scalar.addi %value, %59 : i32
+  func.call @observe(%60) : (i32)
+  func.return
+}
+
+func.decl @observe(%61: i32)

@@ -16,9 +16,9 @@ forms that extend lifetimes. The VM's
 execute returned copies, closure cleanup, distinct equal-valued objects, and
 references into nonzero-offset bases. The source roundtrip target executes
 those same observations again after public C++ export and reimport.
-The adjacent `array_lifetimes.cxx-test` covers repeated constructor arguments,
-explicit versus omitted element clauses, nested and member arrays, copies,
-and complete-array lifetime extension.
+The VM [array lifetime cases](../../../../target/arch/vm/test/array_lifetimes.cxx-test)
+cover repeated constructor arguments, explicit versus omitted element clauses,
+nested and member arrays, copies, and complete-array lifetime extension.
 
 ```sh
 iree-bazel-test --config=asan --config=loom-importer-cxx \
