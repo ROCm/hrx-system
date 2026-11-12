@@ -164,7 +164,7 @@ iree_status_t loom_sanitizer_assert_layout_facts(
 iree_status_t loom_sanitizer_assert_layout_type_transfer(
     loom_type_transfer_context_t* context,
     const loom_module_t* module, loom_op_t* op);
-iree_status_t loom_sanitizer_assert_layout_verify(
+iree_status_t loom_value_refinement_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 

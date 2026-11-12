@@ -1,7 +1,7 @@
 // RUN: verify
 
 func.def @tensor_conflicting_extent(%source: tensor<2x3x4xf32>) {
-  // ERROR@+1: SHAPE/001 "source static dimension" "4" "result static dimension" "5"
+  // ERROR@+1: SHAPE/008 "source dimension 2 has size 4" "result requires size 5"
   %refined = tensor.refine %source : tensor<2x3x4xf32> -> tensor<2x3x5xf32>
   func.return
 }
@@ -25,7 +25,7 @@ func.def @tensor_different_element(%source: tensor<4xf32>) {
 // ====
 
 func.def @tile_conflicting_extent(%source: tile<2x3x4xf32>) {
-  // ERROR@+1: SHAPE/001 "source static dimension" "4" "result static dimension" "5"
+  // ERROR@+1: SHAPE/008 "source dimension 2 has size 4" "result requires size 5"
   %refined = tile.refine %source : tile<2x3x4xf32> -> tile<2x3x5xf32>
   func.return
 }
@@ -49,7 +49,7 @@ func.def @tile_different_element(%source: tile<4xf32>) {
 // ====
 
 func.def @group_conflicting_extent(%source: group<2x3x4>) {
-  // ERROR@+1: SHAPE/001 "source static dimension" "4" "result static dimension" "5"
+  // ERROR@+1: SHAPE/008 "source dimension 2 has size 4" "result requires size 5"
   %refined = group.refine %source : group<2x3x4> -> group<2x3x5>
   func.return
 }
@@ -60,4 +60,21 @@ func.def @group_different_rank(%source: group<2x3x4>) {
   // ERROR@+1: SHAPE/001
   %refined = group.refine %source : group<2x3x4> -> group<2x3>
   func.return
+}
+
+// ====
+
+// An earlier dependent axis does not hide a later static contradiction.
+func.def @vector_conflicting_extent_after_dynamic(%count: index, %source: vector<[%count]x2x3x4xf32>) {
+  // ERROR@+1: SHAPE/008 "source dimension 3 has size 4" "result requires size 5"
+  %refined = vector.refine %source : vector<[%count]x2x3x4xf32> -> vector<8x2x3x5xf32>
+  func.return
+}
+
+// ====
+
+// Refining a dynamic extent remains an explicit assertion, not a conflict.
+func.def @vector_dynamic_extent(%count: index, %source: vector<[%count]x2x3x4xf32>) -> (vector<8x2x3x4xf32>) {
+  %refined = vector.refine %source : vector<[%count]x2x3x4xf32> -> vector<8x2x3x4xf32>
+  func.return %refined : vector<8x2x3x4xf32>
 }

@@ -34,14 +34,13 @@ iree_status_t loom_value_refinement_verify(const loom_module_t* module,
       continue;
     }
     const loom_diagnostic_param_t params[] = {
-        loom_param_string(IREE_SV("source static dimension")),
+        loom_param_u32(axis),
         loom_param_i64(source_size),
-        loom_param_string(IREE_SV("result static dimension")),
         loom_param_i64(result_size),
     };
     const loom_diagnostic_emission_t emission = {
         .op = op,
-        .error = LOOM_ERR_SHAPE_001,
+        .error = LOOM_ERR_SHAPE_008,
         .params = params,
         .param_count = IREE_ARRAYSIZE(params),
     };
