@@ -47,11 +47,16 @@ def _iree_msvc_masm_object_impl(ctx):
         feature_configuration = feature_configuration,
         variables = compile_variables,
     )
+    execution_requirements = cc_common.get_execution_requirements(
+        action_name = ASSEMBLE_ACTION_NAME,
+        feature_configuration = feature_configuration,
+    )
 
     ctx.actions.run(
         arguments = [arguments],
         env = environment,
         executable = masm_toolchain.assembler,
+        execution_requirements = {requirement: "" for requirement in execution_requirements},
         inputs = depset(
             direct = [source_file],
             transitive = [masm_toolchain.files],

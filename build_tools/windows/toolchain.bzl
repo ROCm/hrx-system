@@ -259,6 +259,7 @@ def windows_cross_toolchain(name, repository_path, execution_architecture, msvc_
     windows_cc_toolchain(
         name = "msvc_toolchain",
         cc = ":msvc_cc_toolchain",
+        dumpbin = "tools/msvc-dumpbin",
         masm = "tools/msvc-ml64",
         masm_arguments = ["/nologo", "/Zi", "/c"],
         masm_files = [":msvc_tool_files"],
