@@ -402,8 +402,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @sanitiz
   %98 = s_cmp_lg_u64 %88, %97
   low.cond_br %98, ^_bb4, ^_bb1 : reg<amdgpu.scc>
 ^_bb1:
-  %101 = s_mov_b64_symbol {symbol = @iree_asan_config}
-  %102 = s_load_dwordx2_offset_only %101 {offset = 16}
+  %102 = s_load_dwordx2_offset_only %5 {offset = 16}
   %105 = s_mov_b32 4
   %112, %113 = s_add_co_u32 %9, %105
   %114, %115 = s_addc_u32 %10, %87, %113

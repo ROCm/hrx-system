@@ -174,6 +174,11 @@ typedef uint16_t loom_low_operand_flags_t;
 // not permit removing, duplicating, or speculating execution. Reads and
 // unmarked writes still observe source order; native write events remain.
 #define LOOM_LOW_OPERAND_FLAG_COMMUTATIVE_STATE_UPDATE ((uint16_t)1u << 12)
+// Implicit write whose value has no hidden reader in the complete descriptor
+// namespace, including register aliases. The generator derives this property;
+// explicit readers name SSA state results instead. Value reuse may ignore the
+// discarded write, while scheduling retains its STATE_WRITE hazard.
+#define LOOM_LOW_OPERAND_FLAG_UNOBSERVED_STATE_WRITE ((uint16_t)1u << 13)
 
 // Bitset of register-class alternative flags.
 typedef uint8_t loom_low_reg_class_alt_flags_t;
@@ -1303,6 +1308,14 @@ typedef struct loom_low_descriptor_t {
 static_assert(sizeof(loom_low_descriptor_t) == 16,
               "loom_low_descriptor_t must be 16 bytes");
 
+// Bitset of generated descriptor-layout properties.
+typedef uint8_t loom_low_descriptor_layout_flags_t;
+
+// At least one operand has architectural state relevant to value reuse.
+// Schedule-only state, discarded writes, and reads explicit in SSA are
+// excluded.
+#define LOOM_LOW_DESCRIPTOR_LAYOUT_FLAG_VALUE_STATE ((uint8_t)1u << 0)
+
 // Immutable structural spans shared by instruction identities and target views.
 // Operand binding and encoding-ID queries stay in the descriptor row;
 // consumers of these spans use the descriptor's layout_index. Stable IDs use
@@ -1346,6 +1359,8 @@ typedef struct loom_low_descriptor_layout_t {
   uint8_t minimum_packet_operand_count;
   // Canonical low IR operation used to represent this descriptor packet.
   loom_low_descriptor_op_kind_t op_kind;
+  // Generated summary properties of the descriptor's operand/effect layout.
+  loom_low_descriptor_layout_flags_t flags;
 } loom_low_descriptor_layout_t;
 
 static_assert(sizeof(loom_low_descriptor_layout_t) == 26,

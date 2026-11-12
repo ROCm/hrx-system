@@ -1389,7 +1389,7 @@ def test_compiler_rejects_overlapping_storage_continuation_parts() -> None:
 
 @pytest.mark.parametrize(
     "projection_flag",
-    [OperandFlag.TIED, OperandFlag.EARLY_CLOBBER],
+    [OperandFlag.TIED, OperandFlag.EARLY_CLOBBER, OperandFlag.UNOBSERVED_STATE_WRITE],
 )
 def test_compiler_rejects_authored_operand_projection_flags(
     projection_flag: OperandFlag,

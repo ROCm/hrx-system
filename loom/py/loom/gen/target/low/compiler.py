@@ -77,42 +77,34 @@ from loom.target.low_descriptors import (
 )
 
 
-def _derive_mutable_state_classes(
-    descriptors: Sequence[Descriptor],
+def _derive_register_class_aliases(
+    classes: frozenset[str],
     register_classes: Mapping[str, RegClass],
     physical_registers: Mapping[str, PhysicalRegister],
 ) -> frozenset[str]:
-    """Returns every register class that may alias descriptor-written state."""
+    """Returns classes overlapping the named storage, including physical aliases."""
 
-    written_classes = {
-        alternative.reg_class
-        for descriptor in descriptors
-        for operand in descriptor.operands
-        if OperandFlag.STATE_WRITE in operand.flags
-        for alternative in operand.reg_alts
-        if alternative.reg_class is not None
-    }
-    written_alias_sets: set[int] = set()
-    written_atomic_units: set[int] = set()
-    for class_name in written_classes:
+    alias_sets: set[int] = set()
+    atomic_units: set[int] = set()
+    for class_name in classes:
         register_class = register_classes.get(class_name)
         if register_class is None:
             continue
         if register_class.alias_set_id:
-            written_alias_sets.add(register_class.alias_set_id)
+            alias_sets.add(register_class.alias_set_id)
         if RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS in register_class.flags:
-            written_atomic_units.update(atomic_unit for register_name in register_class.physical_registers for atomic_unit in physical_registers[register_name].atomic_units)
+            atomic_units.update(atomic_unit for register_name in register_class.physical_registers for atomic_unit in physical_registers[register_name].atomic_units)
 
-    mutable_classes = set(written_classes)
+    aliased_classes = set(classes)
     for register_class in register_classes.values():
-        if register_class.alias_set_id and register_class.alias_set_id in written_alias_sets:
-            mutable_classes.add(register_class.name)
+        if register_class.alias_set_id and register_class.alias_set_id in alias_sets:
+            aliased_classes.add(register_class.name)
             continue
         if RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS not in register_class.flags:
             continue
-        if any(atomic_unit in written_atomic_units for register_name in register_class.physical_registers for atomic_unit in physical_registers[register_name].atomic_units):
-            mutable_classes.add(register_class.name)
-    return frozenset(mutable_classes)
+        if any(atomic_unit in atomic_units for register_name in register_class.physical_registers for atomic_unit in physical_registers[register_name].atomic_units):
+            aliased_classes.add(register_class.name)
+    return frozenset(aliased_classes)
 
 
 def _derive_reg_class_pressure_set_ids(
@@ -278,7 +270,7 @@ _MEMORY_INSTRUCTION_CLASSES = frozenset(
     }
 )
 
-_DERIVED_OPERAND_FLAGS = frozenset((OperandFlag.TIED, OperandFlag.EARLY_CLOBBER))
+_DERIVED_OPERAND_FLAGS = frozenset((OperandFlag.TIED, OperandFlag.EARLY_CLOBBER, OperandFlag.UNOBSERVED_STATE_WRITE))
 
 _INSTRUCTION_CLASS_IMPLICATIONS = {
     InstructionClass.SMFMAC: (InstructionClass.MFMA,),
@@ -428,6 +420,7 @@ def validate_schedule_alternative_instruction_classes(
 def derive_descriptor_projections(
     descriptor: Descriptor,
     operand_layout: validation.DescriptorOperandLayout,
+    hidden_state_classes: frozenset[str],
 ) -> Descriptor:
     """Projects validated descriptor constraints onto compact runtime flags."""
 
@@ -472,7 +465,10 @@ def derive_descriptor_projections(
         if authored_projection_flags:
             names = ", ".join(sorted(flag.name.lower() for flag in authored_projection_flags))
             raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' authors derived projection flag(s): {names}")
-        operand_flags.append(list(operand.flags))
+        flags = list(operand.flags)
+        if operand.role is OperandRole.IMPLICIT and OperandFlag.STATE_WRITE in operand.flags and not any(alternative.reg_class in hidden_state_classes for alternative in operand.reg_alts):
+            flags.append(OperandFlag.UNOBSERVED_STATE_WRITE)
+        operand_flags.append(flags)
 
     for constraint in descriptor.constraints:
         if constraint.kind is ConstraintKind.TIED:
@@ -1018,8 +1014,27 @@ def compile_descriptor_set(
     schedule_inputs = _dedupe_by_name(spec.schedule_classes, lambda item: item.name)
     enum_domain_inputs = _dedupe_by_name(spec.enum_domains, lambda item: item.name)
     _dedupe_by_name(spec.descriptors, lambda item: item.key)
-    mutable_state_classes = _derive_mutable_state_classes(
-        spec.descriptors,
+    mutable_state_classes = _derive_register_class_aliases(
+        frozenset(
+            alternative.reg_class
+            for descriptor in spec.descriptors
+            for operand in descriptor.operands
+            if OperandFlag.STATE_WRITE in operand.flags
+            for alternative in operand.reg_alts
+            if alternative.reg_class is not None
+        ),
+        reg_class_inputs,
+        physical_register_inputs,
+    )
+    hidden_state_classes = _derive_register_class_aliases(
+        frozenset(
+            alternative.reg_class
+            for descriptor in spec.descriptors
+            for operand in descriptor.operands
+            if OperandFlag.STATE_READ in operand.flags and not validation.operand_role_is_packet_input(operand.role)
+            for alternative in operand.reg_alts
+            if alternative.reg_class is not None
+        ),
         reg_class_inputs,
         physical_register_inputs,
     )
@@ -1058,6 +1073,7 @@ def compile_descriptor_set(
         projected_descriptors_by_key[descriptor.key] = derive_descriptor_projections(
             descriptor,
             operand_layout,
+            hidden_state_classes,
         )
     validation.validate_physical_descriptor_set(spec)
 
@@ -1676,6 +1692,13 @@ def compile_descriptor_set(
                 "operand_start": operand_start,
                 "operand_count": len(descriptor.operands),
                 "result_count": operand_layouts_by_descriptor[descriptor.key].result_count,
+                "value_state_operand_count": sum(
+                    1
+                    for operand in descriptor.operands
+                    if OperandFlag.SCHEDULE_ONLY_STATE not in operand.flags
+                    and OperandFlag.UNOBSERVED_STATE_WRITE not in operand.flags
+                    and (OperandFlag.STATE_WRITE in operand.flags or (OperandFlag.STATE_READ in operand.flags and not validation.operand_role_is_packet_input(operand.role)))
+                ),
                 "minimum_packet_operand_count": operand_layouts_by_descriptor[descriptor.key].minimum_packet_operand_count,
                 "immediate_start": immediate_start,
                 "immediate_count": len(descriptor.immediates),

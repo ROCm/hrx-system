@@ -202,11 +202,10 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %30 = v_mov_b32_copy %29
   %31 = concat(%24, %26, %28, %30) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
   %32 = v_mov_b32 0
-  %33 = s_lshl_b32_rhs_inline %workgroup, 4
   %34 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %35 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %36 = s_mov_b32 0
-  %37, %38 = s_add_co_u32 %34, %33
+  %37, %38 = s_add_co_u32 %34, %21
   %39, %40 = s_addc_u32 %35, %36, %38
   %41 = concat(%37, %39) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   global_store_b128_saddr %32, %31, %41

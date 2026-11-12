@@ -40,10 +40,8 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @integer_extrema_i64(%l
   %35 = s_cselect_b32 %24, %26, %32
   %38 = s_cselect_b32 %25, %27, %32
   %signed_min = concat(%35, %38) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %44 = s_xor_b32_lit %25, 2147483648
-  %45 = s_xor_b32_lit %27, 2147483648
   %46 = s_cmp_gt_u32 %24, %26
-  %47, %48 = s_subb_u32 %45, %44, %46
+  %47, %48 = s_subb_u32 %29, %28, %46
   %51 = s_cselect_b32 %24, %26, %48
   %54 = s_cselect_b32 %25, %27, %48
   %signed_max = concat(%51, %54) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>

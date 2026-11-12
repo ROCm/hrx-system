@@ -18,9 +18,8 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @uniform
   %21 = s_lshl_b32 %input, %amount
   %22 = s_lshr_b32 %input, %20
   %left = s_or_b32 %21, %22
-  %25 = s_sub_u32 %19, %amount
   %26 = s_lshr_b32 %input, %amount
-  %27 = s_lshl_b32 %input, %25
+  %27 = s_lshl_b32 %input, %20
   %right = s_or_b32 %26, %27
   %29 = s_clz_i32_u32 %input
   %leading = s_min_u32 %29, %19
