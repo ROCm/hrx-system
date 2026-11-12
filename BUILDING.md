@@ -79,9 +79,11 @@ CMake consumer fixtures live under the owning project's `build_tools/`;
 Presubmit enforces this boundary: product source directories contain no authored
 CMake files. Generated declarations and build artifacts stay in the build tree.
 
-`LIBHRX_BUILD=OFF` selects a runtime/compiler build. Building the HRX GPU
-runtime instead uses `LIBHRX_BUILD=ON` and its AMDGPU dependencies; see
-[ROCm configuration](#rocm) and the [HRX package build](README.md#building).
+`LIBHRX_BUILD=OFF` selects a runtime/compiler build. Building the native HRX
+API and its compatibility bindings uses `LIBHRX_BUILD=ON`; see the
+[libhrx package build](libhrx/README.md#build-and-install). The
+[driver configuration](#runtime-libraries-and-drivers) describes native AMD
+execution separately from the optional [ROCr path](#legacy-rocr-hal-and-rocm).
 
 The default build tree is `build/cmake`. Select another with
 `python dev.py --cmake-build-dir /path/to/build cmake configure ...`; subsequent
@@ -1045,7 +1047,7 @@ cmake --install build/cmake --prefix build/install
 
 Replace `build/cmake` with the configured build tree. HRX's `HrxPublicDist`
 component installs its public SDK; see the
-[HRX package instructions](README.md#building). Public HRX packaging
+[HRX package instructions](libhrx/README.md#build-and-install). Public HRX packaging
 uses `BUILD_SHARED_LIBS=OFF` so private runtime components are incorporated into
 `libhrx`. Shared Loom tool bundles have their own
 [linkage option](#shared-loom-tool-bundles).

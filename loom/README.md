@@ -1,361 +1,148 @@
 # Loom
 
-Loom compiles kernels and asynchronous device programs, links model programs,
-and specializes them for execution on CPUs, AMD GPUs, and AMD NPUs. It carries
-source facts, target facts, configuration, correctness cases, and compiler
-reports through the same authoring and execution path.
+Loom is a language and embeddable compiler for functions, kernels, command
+programs, and pipelines. Its microsecond-scale JIT, execution libraries, and
+multi-model inference server fit in a megabyte-scale SDK, with no LLVM or ROCm
+dependency.
 
-The `hrx-loom` SDK packages the compiler, runtime, Python APIs, and command-line
-tools. `loom-fetch` installs a model's selected programs and assets;
-`loom-serve` loads the resulting card and serves requests over HTTP. The
-[programming guide](https://rocm.github.io/hrx-system/loom/) covers installed
-use, model serving, kernel authoring, and embedding through `loomc`.
+Programs can be written in a subset of C++ or directly in Loom IR, linked with
+reusable libraries, and specialized for the target and workload. The SDK includes
+tools for testing correctness and benchmarking the resulting programs.
 
-## Install and run a model
+> [!TIP]
+> **To run models or troubleshoot a model, start at [loom-dev](https://loom-fun.github.io/loom-dev/).**
+> [Loom skills](https://github.com/loom-fun/loom-skills) help your agent set up,
+> run, and adapt models; the [Loom docs](https://rocm.github.io/hrx-system/loom/)
+> cover installation, serving, and authoring.
+>
+> `hrx-system` is the engineering repository for Loom's compiler, runtime, and tools.
 
-Use Python 3.12 or newer. The first release targets recent Linux x86-64 and
-Windows 11 x86-64; the [installation guide](docs/src/getting-started/acquiring-loom.md)
-defines system runtime prerequisites and development-wheel installation.
-An activated Python virtual environment can install the complete SDK with:
+The [repository overview](../README.md) maps the compiler, services, and execution
+libraries across the monorepo.
 
-```sh
-python -m pip install 'hrx-loom[hf]'
-loom-serve --help
-```
+## Choose an entry point
 
-`[hf]` adds optional Hugging Face acquisition support. The native tools and C++
-importer are included in the base package. AMD execution uses libamdf and the
-operating system device driver, without a ROCm SDK installation.
-
-With the SDK installed, fetch a published Moonshine preset and serve it on an
-AMD GPU:
-
-```sh
-loom-fetch https://raw.githubusercontent.com/ROCm/hrx-loom-library/21637a18079d1f1dd9b8e20d26f700a62e60db4f/model/moonshine-ai/moonshine-streaming-tiny/model.json --preset=streaming --output=./moonshine
-loom-serve --model=./moonshine/model.json --device=amdgpu
-```
-
-The [complete walkthrough](docs/src/serving/workflows/fetch-and-serve.md) includes
-choice discovery, the audio request, expected transcript, offline use, and
-Windows commands. The server JIT compiles the source model with the installed
-SDK; this user workflow needs no Bazel build. The
-[Loom library](https://github.com/ROCm/hrx-loom-library) supplies model packages,
-reusable motifs, kernels, and their tests.
-
-## Current Status
-
-| Area | Status |
+| You want to… | Start here |
 | --- | --- |
-| Loom text, bytecode, IR, passes, linking, reports | Active core infrastructure |
-| `loomc` public C API | Active embedding surface for AOT, JIT, packaging, caller-owned artifact caches, and tuning/search |
-| AMDGPU HSACO | Most established native target path |
-| SPIR-V/Vulkan | Working examples and tests; still hardening as a product target |
-| x86, Wasm | Real early target paths with providers, lowering/check coverage, and initial emission infrastructure; not mature product targets |
-| Portable model cards and serving | Source/bytecode composition, locked acquisition, presets, and native HTTP service contracts |
-| Portable command programs | Source dialect, multi-root preparation, target-neutral Low ISA, and immutable artifact core; public embedding and materialization are staged separately |
-| Whole host programs | Direction of travel beyond reusable command-buffer-shaped subgraphs |
+| Learn the language | [One kernel in IR and C++](https://rocm.github.io/hrx-system/loom/getting-started/first-kernel/), then the [programming guide](https://rocm.github.io/hrx-system/loom/guide/). |
+| Use the installed SDK | [Installation](https://rocm.github.io/hrx-system/loom/getting-started/acquiring-loom/) and [tool workflows](https://rocm.github.io/hrx-system/loom/workflows/). The `hrx-loom` package includes native tools, C++ import, and Python APIs. |
+| Embed the compiler | The [`loomc` C API](binding/c/doc/mainpage.md), [public headers](binding/c/include/loomc/), and [small examples](binding/c/example/). |
+| Emit code for your own runtime | [Compile artifacts](https://rocm.github.io/hrx-system/loom/workflows/compile-artifacts/), with [raw HSA](binding/c/example/emit_amdgpu_hsa.c) and [raw Vulkan](binding/c/example/emit_spirv_vulkan.c) integration examples. |
+| Host or author models | [Fetch and serve](https://rocm.github.io/hrx-system/loom/serving/workflows/fetch-and-serve/), [model programs](https://rocm.github.io/hrx-system/loom/serving/model-programs/), and the [`loom-serve` source guide](src/loom/tools/loom-serve/README.md). |
 
-## Build the tools
+Loom is a tech preview. The [target guide](https://rocm.github.io/hrx-system/loom/targets/)
+tracks compilation, execution, correctness coverage, and performance maturity
+separately for CPU, AMD GPU, XDNA, SPIR-V, and other targets.
 
-Run commands from the repository root.
+## One program through the stack
 
-Set up Bazel tools once:
+Loom text (`.loom`) and bytecode (`.loombc`) represent the same IR. The C++
+frontend imports into that IR, and the compiler C API can construct and compose
+modules in memory. Functions and templates express reusable computation;
+kernels add launch contracts; command programs and pipelines compose execution
+and resource relationships.
+
+```text
+C++ / Loom text / bytecode / in-memory IR
+  → link modules and select providers
+  → specialize using configuration, shapes, and target facts
+  → lower, schedule, allocate, and emit
+  → executable artifacts and structured reports
+```
+
+A template family can have several implementations with explicit applicability
+constraints. Linking and specialization select the implementation using the
+facts available at that point. Shared code can remain portable while providers
+use target-specific operations where they matter. The
+[facts and specialization guide](https://rocm.github.io/hrx-system/loom/guide/facts-and-specialization/)
+explains the authoring contract, and the
+[source-to-artifacts walkthrough](https://rocm.github.io/hrx-system/loom/getting-started/source-to-artifacts/)
+shows it in a complete program.
+
+The compiler can emit ELF, HSACO, SPIR-V, WebAssembly, and command-program
+artifacts. AOT compilation, model-load JIT, and invocation specialization use the
+same modules and compiler. The application chooses when facts become available,
+which roots to compile, and how to retain and cache the result. See
+[Integrate Loom](https://rocm.github.io/hrx-system/loom/integration/) for the
+available boundaries and their ownership model.
+
+## Author, check, and tune
+
+Correctness cases and benchmark workloads can live beside the program they
+exercise. The tools carry those workloads through specialization and execution,
+and produce structured diagnostics and reports for people and agents.
+
+1. [Format and verify](https://rocm.github.io/hrx-system/loom/workflows/format-and-verify/)
+   the source with `loom-lint` and `loom-format`.
+2. [Check correctness](https://rocm.github.io/hrx-system/loom/workflows/test-correctness/)
+   with `loom-test`, using the program's declared cases and numerical acceptance.
+3. [Benchmark](https://rocm.github.io/hrx-system/loom/workflows/benchmark/)
+   the proven workload with `loom-benchmark` and a defined measurement boundary.
+4. [Inspect compile reports](https://rocm.github.io/hrx-system/loom/workflows/compile-reports/)
+   and emitted code, then compare a candidate against the same correctness and
+   performance evidence.
+
+The [documentation examples](docs/examples/) are executable sources for the
+published guides. The [authoring corpus](src/loom/test/corpus/authoring/README.md)
+contains larger examples, including quantized model operations and reusable
+providers. The [agent authoring workflow](https://rocm.github.io/hrx-system/loom/workflows/agent-driven-kernel-development/)
+connects reference implementations, data reuse, numerical checks, and measured
+performance. Reusable models and kernels live in the
+[Loom library](https://github.com/ROCm/hrx-loom-library).
+
+## Model execution and serving
+
+A model package supplies its programs, weights, and descriptor as runtime input.
+The execution layer prepares and specializes the program, manages devices and
+storage, and retains work through completion. Modality services add text, image,
+embedding, decision, recognition, and speech behavior. `loom-serve` composes
+those services with HTTP, registration, and operational controls.
+
+The [serving component map](src/loom/serve/README.md) traces the native owners and
+points to their headers and tests. The shared [Loom runtime](src/loom/runtime/)
+and [service components](src/loom/service/) are being factored for reuse outside
+the HTTP server; their native interfaces are still evolving. The separately
+documented `loomc` API is the public compiler embedding surface.
+
+The [live model development workflow](https://rocm.github.io/hrx-system/loom/serving/workflows/live-model-development/)
+shows how to upload implementations, compare variants using retained weights,
+and change the selected execution without restarting the server.
+
+## Source map
+
+| Path | Responsibility |
+| --- | --- |
+| [src/loom](src/loom/) | Shipping C compiler: IR, verification, linking, analysis, transformations, and target lowering. |
+| [py/loom/dialect](py/loom/dialect/README.md) | Source-of-truth dialect and operation declarations, syntax, and generated contracts. |
+| [src/loom/import/cxx](src/loom/import/cxx/README.md) | C/C++ frontend, supported source constructs, and IR import/export. |
+| [src/loom/target](src/loom/target/) | Target capabilities, lowering, scheduling, artifact emission, and compile reports. |
+| [py/loom/target](py/loom/target/) | Target data, descriptors, generators, and validation. |
+| [binding/c](binding/c/doc/mainpage.md) | Public compiler C API, target adapters, and embedding examples. |
+| [src/loom/runtime](src/loom/runtime/) | Shared host/device ownership, program preparation, storage, parameters, and telemetry over the [system runtime](../runtime/README.md). |
+| [src/loom/service](src/loom/service/) and [src/loom/serve](src/loom/serve/README.md) | Model service components, modality implementations, transports, and server composition. |
+| [src/loom/tools](src/loom/tools/) and [py/loom/tools](py/loom/tools/) | Native and Python command-line tools. |
+| [src/loom/test](src/loom/test/) | Semantic corpus and integration coverage; component unit tests live beside their implementations. |
+| [py/loom/model](py/loom/model/README.md) | Model documents, acquisition, packaging, and publication. |
+| [packaging/python](packaging/python/README.md) | `hrx-loom` SDK assembly, platform wheels, and release workflow. |
+| [docs](docs/) | Documentation source and executable examples. |
+
+## Develop from source
+
+[Building](../BUILDING.md) owns prerequisites, compiler and driver selection,
+Bazel/CMake configuration, and installation. [Contributing](../CONTRIBUTING.md)
+owns the change and review workflow. Run source-development commands from the
+repository root. For example, this builds and runs a small compiler embedder:
 
 ```bash
 python dev.py bazel setup
-```
-
-Build the core Loom tools and the smallest C API examples:
-
-```bash
-python dev.py bazel build \
-  //loom/src/loom/tools/loom-check:loom-check \
-  //loom/src/loom/tools/loom-compile:loom-compile \
-  //loom/src/loom/tools/loom-link:loom-link \
-  //loom/src/loom/tools/loom-test:loom-test \
-  //loom/src/loom/tools/loom-benchmark:loom-benchmark \
-  //loom/py/loom/tools:loom-compile-report \
-  //loom/binding/c:loomc \
-  //loom/binding/c/example:source_info \
-  //loom/binding/c/example:compile_text \
-  //loom/binding/c/example:link_modules
-```
-
-That gives you the command-line tools, the benchmark/test runner used by the
-authoring corpus, and the C ABI examples that show in-memory source, compile,
-link, result, diagnostic, and artifact flow.
-
-## Try The Authoring Corpus
-
-The best starting point for Loom source is:
-
-- [authoring README](src/loom/test/corpus/authoring/README.md)
-- [q6/q8 gate-up SwiGLU example](src/loom/test/corpus/authoring/ffn_gate_up_swiglu_q6q8.loom)
-- [MLP down-projection residual example](src/loom/test/corpus/authoring/mlp_down_projection_residual_bf16.loom)
-
-Run the host-only dry-run tests. Each `loom_kernel_library` declares a
-`<name>_plan_test` that parses the source and proves
-`check.case`/`check.benchmark` planning without requiring a local GPU. The
-documentation examples carry them:
-
-```bash
-python dev.py bazel test \
-  //loom/docs/examples/getting-started/first-kernel:saxpy_plan_test \
-  //loom/docs/examples/guide/functions-and-control:read_ahead_plan_test
-```
-
-You can also run the benchmark planner directly:
-
-```bash
-python dev.py bazel run //loom/src/loom/tools/loom-benchmark:loom-benchmark -- \
-  loom/src/loom/test/corpus/authoring/mlp_down_projection_residual_bf16.loom \
-  --dry-run \
-  --config=mlp_down_projection_residual_bf16.row_capacity=3584
-```
-
-The Bazel HAL driver registry defaults to host-only drivers. On an
-AMDGPU-capable build and machine, include the AMDGPU driver in the Bazel
-configuration and run the smallest correctness and timing smoke through the
-same source:
-
-```bash
-python dev.py bazel run \
-  --//runtime/config/hal:drivers=amd,task \
-  --//libamdf/config:enabled=true \
-  //loom/src/loom/tools/loom-benchmark:loom-benchmark -- \
-  loom/src/loom/test/corpus/authoring/mlp_down_projection_residual_bf16.loom \
-  --config=mlp_down_projection_residual_bf16.row_capacity=3584 \
-  --device=amdgpu \
-  --measure=dispatch_complete \
-  --iterations=1 \
-  --warmup-iterations=0 \
-  --batch-size=1 \
-  --min-time-ms=0 \
-  --max-batches=1 \
-  --input-ring-count=1
-```
-
-The authoring pattern to notice is that correctness policy and benchmark rows
-live beside the source. `template.apply` requests an implementation from a
-declared family, `template.def` operations provide the candidates, and explicit
-config bindings select compile-time choices while case parameters remain
-runtime values.
-
-The authoring README includes the direct quantized AMDGPU flow for
-`loom-compile` HSACO emission, artifact manifests, compile reports, IR dumps,
-target listings, and correctness-gated dispatch benchmark bundles.
-
-## Inspect Compile Reports
-
-`loom-compile-report` provides a bounded first view over the structured reports
-emitted by `loom-compile` and `loom-benchmark`:
-
-```bash
-python dev.py bazel run //loom/py/loom/tools:loom-compile-report -- \
-  show /tmp/kernel.compile-report.json
-python dev.py bazel run //loom/py/loom/tools:loom-compile-report -- \
-  diff /tmp/baseline.json /tmp/candidate.json --format=json
-python dev.py bazel run //loom/py/loom/tools:loom-compile-report -- \
-  suggest /tmp/candidate.json --format=json
-python dev.py bazel run //loom/py/loom/tools:loom-compile-report -- \
-  suggest /tmp/candidate.json --include-experimental --format=json
-```
-
-`show` separates emitted artifact facts from compiler analysis and omits
-unavailable metrics from its compact JSON. `diff` rejects reports unless their
-schema, target, specialization, workload, and entry identities match exactly.
-`suggest` delegates interpretation to the selected target family and cites the
-evidence behind each proposed experiment. Default findings require a documented
-or silicon-calibrated target model. `--include-experimental` also exposes
-structurally exact findings from hardware-unvalidated models and labels them
-`experimental`, allowing pre-silicon search without presenting model
-predictions as measured hardware behavior.
-
-Final-native facts expose the scheduled body separately from the target-owned
-entry envelope, native coissued instructions separately from their semantic
-components, and each matrix family separately from the broad matrix total.
-Dispatch-scaled operation counts appear only when the report carries an exact
-workload scale. Wait analysis distinguishes waits already present in the low
-stream from waits inserted by target planning, while target-insertion coverage
-states whether dynamic packet counts are exact or unknown. These are structural
-search signals rather than cycle estimates; absent values stay unavailable
-instead of being inferred by the report tool.
-
-Compile reports are version-zero, same-compiler-horizon diagnostics. Regenerate
-them with the current checkout instead of treating them as durable records or
-adding compatibility paths to the consumer.
-
-## Try The C API
-
-The public C ABI lives under [binding/c](binding/c). The main docs are:
-
-- [C API main page](binding/c/doc/mainpage.md)
-- [C API style guide](binding/c/doc/STYLE_GUIDE.md)
-- [public headers](binding/c/include/loomc)
-- [examples](binding/c/example)
-
-Run the host-only examples:
-
-```bash
-python dev.py bazel run //loom/binding/c/example:source_info
 python dev.py bazel run //loom/binding/c/example:compile_text
-python dev.py bazel run //loom/binding/c/example:link_modules
 ```
 
-These examples are deliberately small, but they show the intended embedding
-shape:
-
-```text
-source -> module -> link/index -> compile -> result diagnostics/artifacts
-```
-
-The [in-memory composition guide](docs/src/integration/module-composition.md)
-uses `link_modules` to show a caller-owned root input resolving declarations
-against explicitly supplied libraries.
-
-The API is staged instead of one file-oriented entry point because embedders
-need different compositions:
-
-- AOT packaging can compile and emit ahead of deployment.
-- Runtime JITs can link and specialize around live target facts.
-- Caller-owned artifact caches can define storage and invalidation policy.
-- Tuning servers can reuse compilers, linkers, pass programs, target profiles,
-  and frozen indexes across many worker-local workspaces.
-
-## Try AMDGPU/HSA Emission
-
-The AMDGPU examples show the target-profile and HSACO emission side of the C
-API.
-
-Offline synthetic AMDGPU processor profile compiling packaged Loom bytecode:
-
-```bash
-python dev.py bazel run //loom/binding/c/example:emit_amdgpu_offline -- \
-  gfx11-generic \
-  /tmp/targetless_store_i32.hsaco
-```
-
-The generic target emits a portable GFX11 code object. Pass `gfx1151` instead
-when the artifact should be specialized for that exact processor. The example
-build packages `targetless_store_i32.loom` as bytecode and invokes LoomC's
-bytecode-specific deserializer, matching a kernel library that ships
-precompiled Loom modules instead of source text.
-
-Raw HSA probing, HSACO emission, code-object loading, and one kernel dispatch
-without the IREE HAL:
-
-```bash
-python dev.py bazel run //loom/binding/c/example:emit_amdgpu_hsa
-```
-
-Successful launch ends with `launched targetless_store_i32 via raw HSA:
-output=42`.
-
-The same raw-HSA example can start from a checked `.loom` or prelinked
-`.loombc` file when the source defines the one-buffer `targetless_store_i32`
-sample ABI:
-
-```bash
-python dev.py bazel run //loom/binding/c/example:emit_amdgpu_hsa -- \
-  /tmp/targetless_store_i32.loombc \
-  @targetless_store_i32 \
-  targetless_store_i32 \
-  targetless_store_i32
-```
-
-Set `LOOMC_HSA_RUNTIME_PATH` when the HSA runtime is not discoverable through
-the default dynamic loader search path. The value may be the exact
-`libhsa-runtime64.so` path or a directory containing it:
-
-```bash
-LOOMC_HSA_RUNTIME_PATH=/opt/rocm/lib \
-  python dev.py bazel run //loom/binding/c/example:emit_amdgpu_hsa
-```
-
-The raw HSA path is useful when evaluating Loom as an embeddable compiler near
-an application's own HSA/HRX/HIP loading boundary.
-
-## Try SPIR-V/Vulkan Emission
-
-The SPIR-V examples show the target-profile and emission side of the C API.
-
-Offline synthetic SPIR-V profile:
-
-```bash
-python dev.py bazel run //loom/binding/c/example:emit_spirv_offline
-```
-
-Raw Vulkan probing and emission without the IREE HAL:
-
-```bash
-python dev.py bazel run \
-  --//runtime/config/hal:drivers=vulkan,task \
-  //loom/binding/c/example:emit_spirv_vulkan
-```
-
-IREE HAL-derived SPIR-V target facts and emission:
-
-```bash
-python dev.py bazel run \
-  --//runtime/config/hal:drivers=vulkan,task \
-  //loom/binding/c/example:emit_spirv_iree_hal
-```
-
-The raw Vulkan path is useful when evaluating Loom as an embeddable compiler
-near an application's own shader/module loading boundary. The IREE HAL path is
-useful when evaluating Loom as a compiler for target-explicit IREE HAL loading.
-
-## Useful Entry Points
-
-| Path | Why it matters |
-| --- | --- |
-| [binding/c/include/loomc](binding/c/include/loomc) | Public C ABI contracts, ownership, threading, diagnostics, targets, linking, compile, and emit |
-| [binding/c/example](binding/c/example) | Minimal embedders for source info, compile, link, AMDGPU offline, raw HSA, SPIR-V offline, raw Vulkan, and IREE HAL |
-| [loom/py/loom/dialect](/loom/py/loom/dialect) | Python op/dialect authoring DSL, assembly formats, and source-format migration breadcrumbs |
-| [loom/py/loom/migration](/loom/py/loom/migration) | Source migration driver, rule generation, baselines, compatibility windows, and `loom-migrate` |
-| [src/loom/test/corpus/authoring](src/loom/test/corpus/authoring) | Canonical hand-authored Loom examples for model/kernel-shaped source |
-| [src/loom/tools/loom-benchmark](src/loom/tools/loom-benchmark) | Runner for `check.case`, `check.benchmark`, correctness samples, timing, and reports |
-| [src/loom/tools/loom-check](src/loom/tools/loom-check) | Text/test corpus checking and `--update` workflow |
-| [src/loom/target](src/loom/target) | Target providers, target-low infrastructure, artifact plans, and compile reports |
-| [src/loom/target/arch/amdgpu](src/loom/target/arch/amdgpu) | AMDGPU source-to-low policy and target contracts |
-| [src/loom/target/emit/native/amdgpu](src/loom/target/emit/native/amdgpu) | Native AMDGPU/HSACO emission path |
-| [src/loom/target/arch/spirv](src/loom/target/arch/spirv) | SPIR-V target facts, profiles, and cooperative-matrix capability handling |
-| [src/loom/target/arch/cmd](src/loom/target/arch/cmd/README.md) | Reusable command-program source, preparation, portable Low ISA, and artifact contracts |
-
-## Mental Model
-
-For AOT use:
-
-```text
-Loom source/bytecode + libraries + target/config
-  -> link
-  -> specialize
-  -> compile
-  -> emit artifact
-  -> package
-```
-
-For JIT use:
-
-```text
-runtime loads source/bytecode
-  -> reads live or saved target facts
-  -> links the needed root
-  -> specializes config
-  -> emits a loadable artifact
-  -> hands it to the runtime or native loader
-```
-
-For tuning/search:
-
-```text
-prepared compiler/linker/pass/target handles
-  + frozen library indexes
-  + worker-local workspaces
-  + per-job config and target selections
-  -> compile/report/benchmark loop
-```
-
-That is the current center of gravity: a tiny compiler that can be linked into
-the place where executable artifacts are selected, loaded, cached, measured,
-and tuned.
+The [C API examples](binding/c/example/) cover in-memory compilation, linking,
+offline emission, and runtime handoff. The
+[`loom-check` guide](src/loom/tools/loom-check/README.md) covers compiler fixtures,
+exact expected output, and updates. The
+[C++ authoring examples](src/loom/test/corpus/authoring/cxx/README.md) cover the
+frontend's repository workflow. Hardware execution tests additionally need the
+selected driver and a compatible device; the target and build guides describe
+those requirements.

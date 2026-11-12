@@ -1,249 +1,98 @@
 # HRX System
 
-> [!CAUTION]
-> This is early-access runtime infrastructure. Expect API, packaging, and
-> deployment details to move while the fork is brought up. This is not an
-> official component within the ROCm stack.
+**[Documentation](https://rocm.github.io/hrx-system/loom/) ·
+[Get the SDK](https://rocm.github.io/hrx-system/loom/getting-started/acquiring-loom/) ·
+[Build from source](BUILDING.md)**
 
-The HRX System is a collection of minimal runtime components providing an
-alternative implementation of HIP as it presently ships within ROCm. It
-provides a common substrate for low latency, high performance integration
-with AMD's GPU, NPU, and CPU products.
+[Loom](loom/) is a language and compiler for native programs on CPUs, GPUs, and NPUs.
+Its microsecond-scale JIT, runtime, and inference server fit in a megabyte-scale
+SDK, with no LLVM or ROCm dependency.
+[LibHRX](libhrx/) is a C API for graph-based heterogeneous compute with an optional
+[HIP compatibility layer](libhrx/src/binding/hip/).
 
-## What Is Included
+This repository contains the compiler, execution libraries, native AMD device
+support, and `loom-serve`: an inference engine that hosts multiple models and
+modalities together. The pieces can be embedded independently, from compiling
+one program for an existing runtime to running a shared model server.
 
-- `runtime/`: core runtime components
-- `libhrx/`: the public HRX C ABI, C++ helpers, HIP compatibility binding,
-  streaming support, CTS, and debug passthrough tools.
-- `build_tools/`: shared CMake/Bazel translation helpers, CI packaging
-  scripts, sanitizer wiring, and common build overlays.
+> [!TIP]
+> **To run models or troubleshoot a model, start at [loom-dev](https://loom-fun.github.io/loom-dev/).**
+> [Loom skills](https://github.com/loom-fun/loom-skills) help your agent set up,
+> run, and adapt models; the [Loom docs](https://rocm.github.io/hrx-system/loom/)
+> cover installation, serving, and authoring.
+>
+> `hrx-system` is the engineering repository for Loom's compiler, runtime, and tools.
 
-Project-specific build support lives with the project it serves. Runtime CMake
-bootstrap and dependencies are under `runtime/build_tools/`, while libhrx owns
-`libhrx/build_tools/`. Shared generator and build-system mechanics stay under
-root `build_tools/`, with shared third-party CMake configuration beside the
-matching Bazel overlays in `build_tools/third_party/`.
+<!-- Keep adjacent GitHub alerts as separate blockquotes. -->
 
-The public install exports `libhrx.so`, `hrx-info`, public HRX headers for the
-native low-latency API, CMake package files, and the HRX HIP compatibility
-layer as `lib/libamdhip64.so`.
+> [!NOTE]
+> This is a tech preview. Interfaces and target coverage are evolving; see the
+> [target guide](https://rocm.github.io/hrx-system/loom/targets/) for current
+> support. The project is not an official component of the ROCm stack.
 
-## Building
+<sub>This project has been engineered with the assistance of agents.</sub>
 
-The following builds the HRX GPU runtime and installable packages. For runtime
-or compiler-only builds, start with the [build guide](BUILDING.md).
+## How it fits together
 
-Use a ROCm installation or unpacked ROCm build environment that provides HSA,
-AQL profile headers, and a ROCm LLVM toolchain. These commands select ROCm Clang
-and install libraries under `lib`.
+Programs can be written in a [subset of C++](https://rocm.github.io/hrx-system/loom/getting-started/first-kernel/#write-the-same-kernel-in-cpp)
+or directly in [Loom IR](https://rocm.github.io/hrx-system/loom/getting-started/first-kernel/#create-one-source-file).
+Functions, kernels, command programs, and pipelines share a compiler that can
+link and specialize them using shapes, configuration, and target capabilities.
+The same compiler runs ahead of time or inside an application. Kernels compile
+in microseconds to milliseconds, making specialization practical when the
+application has the information it needs.
 
-The blessed local command path uses `dev.py` to keep setup, hook configuration,
-and build-lane selection consistent:
+[Model packages](https://rocm.github.io/hrx-system/loom/serving/model-documents/)
+bundle source or bytecode, weights, and a JSON descriptor. The model supplies its
+implementation; Loom services provide execution, batching, residency, and
+scheduling, with `loom-serve` adding HTTP endpoints and server controls. Models
+can share a process and its resources, and implementations can be changed while
+the server is running. Adding a model means supplying a program to the platform.
 
-The native AMD GPU and XDNA HAL engines are enabled by default. LibHRX and its
-HIP frontend use the native AMD GPU driver for both RDNA and CDNA devices.
+[![HRX architecture: Loom authoring forms and compiler, model services, compiler API, shared runtime, and CPU, AMD GPU, XDNA, and Vulkan execution paths.](docs/assets/loom-platform.svg)](docs/assets/loom-platform.svg)
 
-```bash
-python dev.py cmake setup
-python dev.py cmake configure \
-  -DIREE_ROCM_PATH=/opt/rocm \
-  -DIREE_ROCM_DEPENDENCY_MODE=package \
-  -DCMAKE_INSTALL_LIBDIR=lib \
-  -DCMAKE_C_COMPILER=/opt/rocm/llvm/bin/clang \
-  -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ \
-  -DCMAKE_ASM_COMPILER=/opt/rocm/llvm/bin/clang \
-  -DCMAKE_AR=/opt/rocm/llvm/bin/llvm-ar \
-  -DCMAKE_RANLIB=/opt/rocm/llvm/bin/llvm-ranlib \
-  -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld" \
-  -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=lld" \
-  -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=lld" \
-  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  -DIREE_HAL_AMDGPU_TARGETS='gfx942;gfx1151;gfx1201'
+The compiler emits ELF, HSACO, SPIR-V, WebAssembly, and other artifacts. An
+application can load that output through its own runtime, or use the execution
+libraries here. The shared HAL provides CPU execution, Vulkan execution, and
+native AMD GPU and XDNA execution. Native AMD access uses `libamdf` and the OS
+drivers; it does not require a ROCm SDK or ROCr installation. Vulkan uses the
+system's Vulkan implementation.
 
-python dev.py cmake build
-cmake --install build/cmake --prefix build/hrx-install \
-  --component HrxPublicDist
-```
+These boundaries keep model behavior out of the compiler and hardware layers.
+A new implementation can reuse the surrounding software, and an improvement to
+the compiler or runtime can benefit the programs already using it. `libhrx` is
+another client of the shared runtime, exposing a native HRX API and a HIP
+compatibility binding. Loom's compiler and services use the runtime directly.
 
-The equivalent raw CMake command is still valid when embedding or debugging the
-build without `dev.py`:
+## Find your way around
 
-```bash
-cmake -S . -B build/hrx-system -GNinja \
-  -DIREE_ROCM_PATH=/opt/rocm \
-  -DIREE_ROCM_DEPENDENCY_MODE=package \
-  -DCMAKE_INSTALL_LIBDIR=lib \
-  -DCMAKE_C_COMPILER=/opt/rocm/llvm/bin/clang \
-  -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ \
-  -DCMAKE_ASM_COMPILER=/opt/rocm/llvm/bin/clang \
-  -DCMAKE_AR=/opt/rocm/llvm/bin/llvm-ar \
-  -DCMAKE_RANLIB=/opt/rocm/llvm/bin/llvm-ranlib \
-  -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld" \
-  -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=lld" \
-  -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=lld" \
-  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  -DIREE_HAL_AMDGPU_TARGETS='gfx942;gfx1151;gfx1201'
+| Package | What lives here |
+| --- | --- |
+| [Loom](loom/README.md) | Language, compiler, public compiler C API, tools, model execution, serving, and SDK packaging. Start here for Loom development. |
+| [Shared runtime](runtime/README.md) | HAL, VM, CPU task system, asynchronous I/O, networking, storage, and tokenization. |
+| [libamdf](libamdf/README.md) | Native AMD GPU and NPU access: device capabilities, memory backing, queues, and OS integration. |
+| [libhrx](libhrx/README.md) | Native HRX API, HIP compatibility, conformance tests, and package installation. |
+| [Hardware reference](docs/reference/amd/README.md) | AMD GPU and NPU programming contracts and execution mechanisms. |
+| [Build tools](BUILDING.md) | Source setup, Bazel and CMake workflows, dependency configuration, tests, and embedding. |
 
-cmake --build build/hrx-system
-cmake --install build/hrx-system --prefix build/hrx-install \
-  --component HrxPublicDist
-```
+The shared runtime grew from [IREE](https://github.com/iree-org/iree), which
+explains the `iree/` source paths and API names. Its current contracts live beside
+the implementation in this repository.
 
-Useful options:
+## Build on it
 
-| Option | Default | Purpose |
-|--------|---------|---------|
-| `IREE_DEPENDENCY_MODE` | `pinned` | Controls dependency resolution: `pinned`, `package`, or `auto`. |
-| `LIBHRX_BUILD` | ON | Build libhrx and compatibility targets. |
-| `LIBHRX_BUILD_CTS` | `ON` when libhrx and tests are enabled | Build libhrx CTS binaries. |
-| `LIBHRX_BUILD_HIP_BINDING` | ON | Build the HIP runtime API compatibility DLL. |
-| `LIBHRX_BUILD_PASSTHROUGH` | `ON` on Linux, `OFF` elsewhere | Build HIP passthrough/interception tools. |
-| `IREE_BUILD_TESTS` | ON | Build IREE runtime tests and CTS targets. |
-| `IREE_HAL_DRIVER_AMD_GPU` | ON | Build the native AMD GPU HAL used by LibHRX GPU execution. |
-| `IREE_HAL_DRIVER_AMD_XDNA` | ON | Build the native AMD XDNA HAL. |
-| `IREE_ROCM_DEPENDENCY_MODE` | empty | Overrides ROCm header dependency resolution: `pinned`, `package`, or `auto`; empty selects package mode when `IREE_ROCM_PATH` is set. |
-| `IREE_ROCM_PATH` | empty | ROCm or TheRock SDK root used for package-mode ROCm headers and device tooling. |
-| `IREE_HAL_AMDGPU_TARGETS` | checked-in AMDGPU generic set | AMDGPU target selectors supported by the runtime build. |
+The [Loom library](https://github.com/ROCm/hrx-loom-library) is the home for
+reusable model programs, kernels, and their tests. Community efforts such as
+[loom-fun's models](https://huggingface.co/loom-fun) and
+[authoring skills](https://github.com/loom-fun/loom-skills) show how that corpus
+can grow independently of the compiler and server.
 
-`BUILD_SHARED_LIBS=ON` builds runtime components as shared libraries for in-tree
-development. Public HRX installation and `find_package(hrx)` use a build
-configured with `BUILD_SHARED_LIBS=OFF`, which incorporates the private runtime
-components into `libhrx`.
+For changes to the core, start with [Building](BUILDING.md) and
+[Contributing](CONTRIBUTING.md), then the README, headers, and tests nearest the
+component you are changing. Model ports and experiments belong with their model
+sources; fixes and capabilities that other programs can reuse belong in the
+compiler, runtime, or shared libraries.
 
-`IREE_DEPENDENCY_MODE=pinned` uses the checked-in source lock and is the
-repository default. `package` requires embedding or distribution builds to
-provide package targets and never falls back to source fetching. `auto` tries
-package discovery first and falls back to pinned source dependencies.
-
-## Local Presubmit
-
-Set up the development tools once, install the lane-specific Git hook, and run
-the local change-set checks before committing:
-
-```bash
-python dev.py bazel setup
-python dev.py bazel hook --profile paranoid
-python dev.py bazel precommit
-```
-
-Use the CMake lane when working on native builds or public SDK packaging:
-
-```bash
-python dev.py cmake setup
-python dev.py cmake hook --profile default
-python dev.py cmake precommit
-```
-
-`precommit` checks staged, unstaged, and untracked files. Use
-`python dev.py <lane> precommit --base <git-ref>` to check the branch diff from
-the merge base through `HEAD` plus local changes, or `--staged` for staged
-files only. `--amend` checks the exact amended candidate, the index relative to
-`HEAD^`, without writing files. Add `--profile default`, `--profile paranoid`,
-or `--profile ci` to select the check profile for a manual run. Re-run
-`python dev.py <lane> hook --profile <profile>` to change the default profile
-used by Git commits. Use `python dev.py <lane> presubmit` for the full-tree
-CI-shaped check.
-
-Mechanical fixups are explicit:
-
-```bash
-python dev.py bazel fix
-python dev.py cmake fix
-```
-
-Test-bearing Git commit-hook profiles apply mechanical fixups only to staged
-files and declared generated outputs. When a fixer changes the index, the hook
-names those paths and stops before tests; reviewing the staged diff and retrying
-the commit runs the non-mutating validation. A candidate path with unstaged
-hunks stops before fixers run, preserving partial-staging intent. See
-`CONTRIBUTING.md` for contributor setup and `build_tools/lefthook/README.md`
-for the hook architecture.
-
-## Running Tests
-
-Tests run from the configured build directory. The wrapper builds the targets
-required by the selected tests before invoking CTest:
-
-```bash
-python dev.py cmake test
-```
-
-Tests that require runtime hardware resources are labeled with
-`runtime-resource=*`. CPU-only runs exclude them and opt-in manual tests:
-
-```bash
-python dev.py cmake test -- -LE 'runtime-resource=|manual'
-```
-
-GPU runners select the AMD GPU resource label to build and run GPU-dependent
-tests across HRX and runtime projects:
-
-```bash
-python dev.py cmake test -- -L runtime-resource=amd-gpu -LE manual
-```
-
-For a raw CMake build, build the required targets and run
-`ctest --test-dir build/hrx-system --output-on-failure` with the same filters.
-
-## Release Artifacts
-
-Tagged releases publish one tarball per artifact, plus manifests and environment
-helper scripts where useful:
-
-| Artifact | Contents |
-|----------|----------|
-| `hrx-public-linux-x86_64` | Public HRX install: `libhrx.so`, `libamdhip64.so`, headers, CMake package files, and tools. |
-| `hrx-public-deps-linux-x86_64` | Runtime ROCm dependency subset needed with the public install, including HSA and AQL profile libraries. |
-| `hrx-rocm-buildenv-linux-x86_64` | ROCm build environment used by CI, including ROCm LLVM. |
-| `hrx-public-windows-x86_64` | Public HRX Windows install: `hrx.dll`, import library, public HRX headers, CMake package files, and `hrx-info`. |
-| `hrx-public-deps-windows-x86_64` | Reserved public dependency overlay for the Windows package; the initial Windows package does not bundle ROCm runtime DLLs. |
-| `hrx-rocm-buildenv-windows-x86_64` | ROCm Windows build environment used by CI, including ROCm LLVM. |
-
-To recreate the runtime overlay used by CI, extract the public package and the
-public dependency package into the same root:
-
-```bash
-mkdir -p /tmp/hrx-root
-cp hrx-public-linux-x86_64-env.sh /tmp/hrx-root/
-tar --use-compress-program=unzstd -xf hrx-public-linux-x86_64-<tag>.tar.zst \
-  -C /tmp/hrx-root
-tar --use-compress-program=unzstd -xf hrx-public-deps-linux-x86_64-<tag>.tar.zst \
-  -C /tmp/hrx-root
-source /tmp/hrx-root/hrx-public-linux-x86_64-env.sh
-```
-
-Windows release artifacts use `.zip` archives and include `.ps1` and `.cmd`
-environment helper scripts next to the package archive.
-
-## Running HIP Applications
-
-The public artifact contains an HRX-provided `lib/libamdhip64.so`. Preload that
-library to route a HIP application through HRX without relinking the
-application:
-
-```bash
-export HRX_ROOT=/tmp/hrx-root
-export LD_LIBRARY_PATH="${HRX_ROOT}/lib:${HRX_ROOT}/lib/rocm_sysdeps/lib:${LD_LIBRARY_PATH:-}"
-
-LD_PRELOAD="${HRX_ROOT}/lib/libamdhip64.so" ./my_hip_application
-```
-
-This path uses the native AMD GPU HAL. `HRX_GPU_DRIVER=rdna` or
-`HRX_GPU_DRIVER=cdna` restricts enumeration to one architecture family.
-
-HIP's automatic scheduling mode favors active waiting for low-latency stream
-synchronization. Applications that prefer to release the CPU can select
-`hipDeviceScheduleYield` for a bounded observation period followed by blocking,
-or `hipDeviceScheduleBlockingSync` to block directly. These flags govern host
-synchronization; asynchronous submissions retain their device-side ordering.
-Event synchronization independently follows `hipEventBlockingSync`.
-
-The passthrough/debug libraries under `libhrx/src/passthrough/` are separate
-developer tools for comparing behavior against the real ROCm HIP runtime.
-
-## More Documentation
-
-- `BUILDING.md`: source-build, embedding, and build configuration options.
-- `CONTRIBUTING.md`: contributor workflow and `dev.py` modes.
-- `build_tools/lefthook/README.md`: Lefthook profiles and hook architecture.
-- `libhrx/src/passthrough/README.md`: HIP passthrough and tracing tools.
+See [Security](SECURITY.md) for reporting vulnerabilities and
+[LICENSE](LICENSE) for the Apache 2.0 license with LLVM exceptions. Individual
+third-party components and assets retain their own license notices.

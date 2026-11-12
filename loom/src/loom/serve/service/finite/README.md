@@ -7,10 +7,10 @@ The native runner owns source JIT, shared
 parameter residency, stage submission and result lifetime. The source owns
 tokenization/task framing, model shapes, pooling, normalization and learned
 heads. It does not require a decode loop, KV reservation or VM process per
-request. The HTTP consumers are [embeddings](embedding/protocol.h) and
+request. The HTTP consumers are [embeddings](../../../service/finite/embedding/protocol.h) and
 [SystemOne decisions](decision/README.md).
 
-The [source ABI](model.h) is implemented by the
+The [source ABI](../../../service/finite/model.h) is implemented by the
 [deterministic embedding package](../../fixture/embedding/README.md).
 It uses the same task executor, parameter cache and queue workspace as text and
 image deployments. Model documents name source programs and assets at registration;
@@ -53,8 +53,8 @@ collect_batch(state, batch)
 ```
 
 The native protocol provides ordered, indexed input records. Its layout is
-declared in [embedding/protocol.h](embedding/protocol.h) or
-[decision/protocol.h](decision/protocol.h). Source preparation
+declared in [embedding/protocol.h](../../../service/finite/embedding/protocol.h) or
+[decision/protocol.h](../../../service/finite/decision/protocol.h). Source preparation
 validates model-specific limits through `input.require`; an invalid input is a
 request rejection, not a failed device. The state is immutable across request
 preparation. Returned buffers own their storage or retain any aliased input.
@@ -246,8 +246,8 @@ proof.
 
 ## Evidence and extension boundary
 
-[service.h](service.h) owns the common asynchronous cohort lifecycle.
-[protocol.h](protocol.h) supplies immutable native modality wiring for parsing
+[service.h](../../../service/finite/service.h) owns the common asynchronous cohort lifecycle.
+[protocol.h](../../../service/finite/protocol.h) supplies immutable native modality wiring for parsing
 and encoding. Each accepted job contains its concrete request storage in one
 allocation; model programs are not protocol callbacks. Embeddings and decisions
 share preparation, admission, device readiness, encoding lifetime and retirement.
