@@ -59,12 +59,13 @@ typedef enum loom_link_provider_role_e {
   LOOM_LINK_PROVIDER_ROLE_LIBRARY = 1,
 } loom_link_provider_role_t;
 
-typedef enum loom_link_symbol_identity_e {
+typedef uint8_t loom_link_symbol_identity_t;
+enum loom_link_symbol_identity_e {
   // Symbol identity is scoped to one provider-local module.
   LOOM_LINK_SYMBOL_IDENTITY_PRIVATE = 0,
   // Symbol identity is resolved by name across providers.
   LOOM_LINK_SYMBOL_IDENTITY_GLOBAL = 1,
-} loom_link_symbol_identity_t;
+};
 
 enum loom_link_symbol_flag_bits_e {
   // Symbol is publicly visible in its source module.
@@ -140,6 +141,10 @@ typedef struct loom_link_module_index_module_t {
   // Source ID whose text is the provider's authored input, or invalid when the
   // provider has no exact text snapshot.
   loom_source_id_t primary_source_id;
+  // Immutable unique input contracts, owned by the index admission arena.
+  const loom_input_contract_t* const* input_contracts;
+  // Number of unique retained contracts.
+  uint32_t input_contract_count;
   // First symbol ordinal owned by this module.
   iree_host_size_t symbol_start_ordinal;
   // Number of symbols owned by this module.
@@ -183,14 +188,16 @@ typedef struct loom_link_module_index_symbol_t {
   iree_string_view_t name;
   // Canonical in-memory symbol kind.
   loom_symbol_kind_t kind;
+  // Link identity class.
+  loom_link_symbol_identity_t identity;
   // Operation-local durable product carrier, or UNCLASSIFIED when the symbol
   // definition has no carrier contract.
   loom_symbol_product_carrier_t product_carrier;
   // Dense family identity for template family symbols and providers, or
   // INVALID when this symbol has no template-family role.
   loom_link_template_family_ordinal_t template_family_ordinal;
-  // Link identity class.
-  loom_link_symbol_identity_t identity;
+  // One-based unique contract ordinal in the source module, or zero.
+  uint32_t input_contract_ordinal_plus_one;
   // Linker-index symbol flags.
   loom_link_symbol_flags_t flags;
   // Independently selectable structural projections of this symbol.

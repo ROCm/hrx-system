@@ -1,0 +1,10 @@
+template.decl @load(%n: index, %layout: encoding<storage>, %input: view<2x[%n]xi8, %layout>) -> (i32)
+
+func.def public @entry(%buffer: buffer) -> (i32) {
+  %n = index.constant 34 : index
+  %layout = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q8_0> : encoding<storage>
+  %offset = index.constant 0 : offset
+  %view = buffer.view %buffer[%offset] : buffer -> view<2x34xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q8_0>>
+  %result = template.apply<@load>(%n, %layout, %view) : (index, encoding<storage>, view<2x34xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q8_0>>) -> (i32)
+  func.return %result : i32
+}

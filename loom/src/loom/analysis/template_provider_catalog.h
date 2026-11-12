@@ -17,6 +17,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/symbol_facts.h"
+#include "loom/ir/input_contract.h"
 #include "loom/ir/ir.h"
 #include "loom/target/condition.h"
 #include "loom/target/facts.h"
@@ -24,6 +25,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+typedef struct loom_func_symbol_facts_t loom_func_symbol_facts_t;
 
 typedef uint8_t loom_template_provider_kind_t;
 
@@ -93,13 +96,11 @@ typedef struct loom_template_provider_summary_t {
   // Provider priority used to rank applicable implementations.
   int64_t priority;
 
-  // Borrowed source argument identities mapping predicates to signature
-  // positions. NULL when predicates_use_ordinals is true.
-  const loom_value_id_t* argument_ids;
+  // Borrowed native signature identities; NULL for ordinal-based predicates.
+  const loom_func_symbol_facts_t* source_function;
 
-  // Borrowed source result identities mapping predicates to signature
-  // positions. NULL when predicates_use_ordinals is true.
-  const loom_value_id_t* result_ids;
+  // Input obligations in this summary's module encoding domain.
+  const loom_input_contract_t* input_contract;
 
   // Borrowed predicates in source-identity or signature-ordinal coordinates.
   const loom_predicate_t* predicates;
@@ -144,6 +145,9 @@ typedef struct loom_template_provider_contract_t {
 
   // Provider priority used to rank applicable implementations.
   int64_t priority;
+
+  // Source-owned additional input requirements.
+  const loom_input_contract_t* input_contract;
 
   // Borrowed predicates whose VALUE arguments are signature ordinals.
   const loom_predicate_t* predicates;

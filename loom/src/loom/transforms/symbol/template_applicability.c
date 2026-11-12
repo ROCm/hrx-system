@@ -10,6 +10,8 @@
 
 #include "loom/analysis/integer_relation.h"
 #include "loom/decision/predicate.h"
+#include "loom/ops/encoding/facts.h"
+#include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/template/ops.h"
 
@@ -38,8 +40,13 @@ loom_template_applicability_provider_contract(
       .module = provider->module,
       .target_symbol = provider->target_symbol,
       .target_facts = provider->target_facts,
-      .argument_ids = provider->argument_ids,
-      .result_ids = provider->result_ids,
+      .argument_ids =
+          (provider->source_function ? provider->source_function->argument_ids
+                                     : NULL),
+      .result_ids =
+          (provider->source_function ? provider->source_function->result_ids
+                                     : NULL),
+      .input_contract = provider->input_contract,
       .predicates = provider->predicates,
       .target_conditions = provider->target_conditions,
       .argument_count = provider->argument_count,
@@ -330,6 +337,124 @@ loom_decision_truth_t loom_template_applicability_refine_predicate(
           application_facts, predicate_kind, refined_operands));
 }
 
+static loom_decision_truth_t loom_template_input_encoding_truth(
+    loom_encoding_match_result_t result) {
+  switch (result) {
+    case LOOM_ENCODING_MATCH_RESULT_FALSE:
+      return LOOM_DECISION_TRUTH_FALSE;
+    case LOOM_ENCODING_MATCH_RESULT_TRUE:
+      return LOOM_DECISION_TRUTH_TRUE;
+    case LOOM_ENCODING_MATCH_RESULT_UNKNOWN:
+      return LOOM_DECISION_TRUTH_UNKNOWN;
+  }
+  IREE_ASSERT_UNREACHABLE("invalid encoding match result");
+  IREE_BUILTIN_UNREACHABLE();
+}
+
+// Complete identity is available from retained value facts; matching never
+// walks encoding.define or reconstructs a static specification.
+static bool loom_template_input_encoding_summary(
+    const loom_template_applicability_facts_t* facts, loom_value_id_t value,
+    loom_value_fact_encoding_summary_t* out_summary) {
+  return facts->values &&
+         loom_value_facts_query_encoding_summary(
+             &facts->values->context,
+             loom_value_fact_table_lookup(facts->values, value), out_summary);
+}
+
+static loom_decision_truth_t loom_template_input_match_encoding(
+    const loom_module_t* module, uint32_t actual, bool actual_is_value,
+    uint32_t expected, bool expected_is_value,
+    const loom_template_applicability_facts_t* facts) {
+  if (actual_is_value == expected_is_value && actual == expected) {
+    return LOOM_DECISION_TRUTH_TRUE;
+  }
+  if (!actual_is_value && !expected_is_value) {
+    if (actual && expected) {
+      return LOOM_DECISION_TRUTH_FALSE;
+    }
+    const loom_value_fact_encoding_summary_t summary = {
+        .static_spec_encoding_id = actual ? actual : expected,
+    };
+    return loom_template_input_encoding_truth(
+        loom_encoding_match_spec(module, summary, 0));
+  }
+  if (!actual_is_value) {
+    const uint32_t temporary = actual;
+    actual = expected;
+    expected = temporary;
+    expected_is_value = false;
+  }
+  if (expected_is_value && facts->values &&
+      loom_value_fact_table_query_identity(facts->values, actual) ==
+          loom_value_fact_table_query_identity(facts->values, expected)) {
+    return LOOM_DECISION_TRUTH_TRUE;
+  }
+  loom_value_fact_encoding_summary_t actual_summary = {0};
+  if (!loom_template_input_encoding_summary(facts, actual, &actual_summary)) {
+    return LOOM_DECISION_TRUTH_UNKNOWN;
+  }
+  if (!expected_is_value) {
+    return loom_template_input_encoding_truth(
+        loom_encoding_match_spec(module, actual_summary, expected));
+  }
+  loom_value_fact_encoding_summary_t expected_summary = {0};
+  if (!loom_template_input_encoding_summary(facts, expected,
+                                            &expected_summary)) {
+    return LOOM_DECISION_TRUTH_UNKNOWN;
+  }
+  if (expected_summary.static_spec_encoding_id) {
+    return loom_template_input_encoding_truth(loom_encoding_match_spec(
+        module, actual_summary, expected_summary.static_spec_encoding_id));
+  }
+  if (actual_summary.static_spec_encoding_id) {
+    return loom_template_input_encoding_truth(loom_encoding_match_spec(
+        module, expected_summary, actual_summary.static_spec_encoding_id));
+  }
+  return actual_summary.family_id && expected_summary.family_id &&
+                 actual_summary.family_id != expected_summary.family_id
+             ? LOOM_DECISION_TRUTH_FALSE
+             : LOOM_DECISION_TRUTH_UNKNOWN;
+}
+
+loom_decision_truth_t loom_template_applicability_evaluate_input(
+    const loom_module_t* module, const loom_value_id_t* arguments,
+    const loom_input_requirement_t* requirement,
+    const loom_template_applicability_facts_t* facts) {
+  const loom_type_t type =
+      loom_module_value_type(module, arguments[requirement->argument]);
+  if (requirement->axis == UINT8_MAX) {
+    const uint32_t expected = requirement->expected_is_argument
+                                  ? arguments[requirement->expected]
+                                  : (uint16_t)requirement->expected;
+    return loom_template_input_match_encoding(
+        module, type.encoding_id, loom_type_has_ssa_encoding(type), expected,
+        requirement->expected_is_argument, facts);
+  }
+  loom_decision_predicate_operand_t operands[3];
+  loom_template_predicate_arg_initialize(&operands[0]);
+  loom_template_predicate_arg_initialize(&operands[1]);
+  if (loom_type_dim_is_dynamic_at(type, requirement->axis)) {
+    const loom_value_id_t dimension =
+        loom_type_dim_value_id_at(type, requirement->axis);
+    if (dimension != LOOM_VALUE_ID_INVALID) {
+      loom_template_applicability_resolve_application_value_arg(
+          module, facts, dimension, &operands[0]);
+    }
+  } else {
+    operands[0].facts = loom_value_facts_exact_i64(
+        loom_type_dim_static_size_at(type, requirement->axis));
+  }
+  if (requirement->expected_is_argument) {
+    loom_template_applicability_resolve_application_value_arg(
+        module, facts, arguments[requirement->expected], &operands[1]);
+  } else {
+    operands[1].facts = loom_value_facts_exact_i64(requirement->expected);
+  }
+  return loom_template_applicability_refine_predicate(facts, LOOM_PREDICATE_EQ,
+                                                      operands);
+}
+
 static bool loom_template_applicability_predicate_arity_is_valid(
     const loom_predicate_t* predicate) {
   const uint8_t expected_argument_count =
@@ -576,7 +701,7 @@ static void loom_template_applicability_classify_constraints(
 
   loom_template_provider_feasibility_t predicate_feasibility =
       LOOM_TEMPLATE_PROVIDER_MATCH;
-  if (contract->predicate_count > 0) {
+  if (contract->predicate_count > 0 || contract->input_contract) {
     predicate_feasibility = loom_template_applicability_evaluate_predicates(
         application_module, application_op, contract, application_facts);
     if (predicate_feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) {
@@ -584,8 +709,27 @@ static void loom_template_applicability_classify_constraints(
     }
   }
 
+  loom_decision_truth_t input_truth = LOOM_DECISION_TRUTH_TRUE;
+  if (contract->input_contract) {
+    const loom_value_slice_t arguments =
+        loom_template_applicability_application_operands(application_op);
+    for (uint32_t i = 0; i < contract->input_contract->count; ++i) {
+      const loom_decision_truth_t truth =
+          loom_template_applicability_evaluate_input(
+              application_module, arguments.values,
+              &contract->input_contract->values[i], application_facts);
+      if (truth == LOOM_DECISION_TRUTH_FALSE) {
+        return;
+      }
+      if (truth == LOOM_DECISION_TRUTH_UNKNOWN) {
+        input_truth = truth;
+      }
+    }
+  }
   classification->feasibility =
-      classification->target_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE ||
+      input_truth == LOOM_DECISION_TRUTH_UNKNOWN ||
+              classification->target_feasibility ==
+                  LOOM_TEMPLATE_PROVIDER_MAYBE ||
               target_condition_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE ||
               predicate_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE
           ? LOOM_TEMPLATE_PROVIDER_MAYBE
@@ -600,6 +744,8 @@ static void loom_template_applicability_classify_constraints(
   } else if (predicate_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE) {
     classification->unresolved_reason =
         LOOM_TEMPLATE_PROVIDER_UNRESOLVED_VALUE_PREDICATE;
+  } else if (input_truth == LOOM_DECISION_TRUTH_UNKNOWN) {
+    classification->unresolved_reason = LOOM_TEMPLATE_PROVIDER_UNRESOLVED_INPUT;
   }
 }
 
@@ -644,7 +790,7 @@ bool loom_template_applicability_requires_application_facts(
     const loom_op_t* application_op,
     const loom_template_applicability_contract_t* contract,
     const loom_target_facts_t* target_facts) {
-  if (contract->predicate_count > 0) {
+  if (contract->predicate_count > 0 || contract->input_contract) {
     return true;
   }
   if (!loom_template_applicability_application_has_ancestor(application_op,

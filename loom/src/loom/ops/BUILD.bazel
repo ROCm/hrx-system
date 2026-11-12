@@ -185,6 +185,7 @@ loom_cc_library(
         ":op_defs",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ir:input_contract",
         "//loom/src/loom/target:condition",
         "//loom/src/loom/target:types",
         "//runtime/src/iree/base",

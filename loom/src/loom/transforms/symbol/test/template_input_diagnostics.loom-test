@@ -1,0 +1,45 @@
+// RUN: pass select-templates{mode=final}
+
+template.decl @unknown(%n: index, %value: vector<[%n]xf32>) -> (index)
+
+template.def<@unknown> @specialized(%n: index, %value: vector<16xf32>) -> (index) {
+  template.return %n : index
+}
+
+func.def public @entry(%n: index, %value: vector<[%n]xf32>) -> (index) {
+  // ERROR@+1: LOWERING/045 {op_name="template.apply", phase_name="select-templates", contract_key="unknown", failure_code="missing_facts"}
+  %result = template.apply<@unknown>(%n, %value) : (index, vector<[%n]xf32>) -> (index)
+  func.return %result : index
+}
+
+// ====
+
+// RUN: pass select-templates{mode=final}
+
+template.decl @different(%n: index, %value: vector<[%n]xf32>) -> (index)
+
+template.def<@different> @specialized(%n: index, %value: vector<16xf32>) -> (index) {
+  template.return %n : index
+}
+
+func.def public @entry(%n: index, %value: vector<[%n]xf32>) -> (index) where [range(%n, 32, 32)] {
+  // ERROR@+1: LOWERING/045 {op_name="template.apply", phase_name="select-templates", contract_key="different", failure_code="all_rejected"}
+  %result = template.apply<@different>(%n, %value) : (index, vector<[%n]xf32>) -> (index)
+  func.return %result : index
+}
+
+// ====
+
+// RUN: pass select-templates{mode=final}
+
+template.decl @family(%n: index, %value: vector<16xf32>) -> (index)
+
+template.def<@family> @specialized(%n: index, %value: vector<16xf32>) -> (index) {
+  template.return %n : index
+}
+
+func.def public @entry(%n: index, %value: vector<32xf32>) -> (index) {
+  // ERROR@+1: LOWERING/045 {op_name="template.apply", phase_name="select-templates", contract_key="family", failure_code="family_rejected"}
+  %result = template.apply<@family>(%n, %value) : (index, vector<32xf32>) -> (index)
+  func.return %result : index
+}

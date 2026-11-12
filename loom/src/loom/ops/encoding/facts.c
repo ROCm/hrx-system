@@ -453,6 +453,21 @@ static loom_encoding_match_result_t loom_encoding_match_layout_spec(
 loom_encoding_match_result_t loom_encoding_match_spec(
     const loom_module_t* module, loom_value_fact_encoding_summary_t summary,
     uint16_t required_id) {
+  if (!required_id) {
+    const loom_encoding_family_id_t dense_family =
+        loom_context_resolve_encoding_name(module->context,
+                                           IREE_SV("encoding.layout.dense"))
+            .family_id;
+    const loom_encoding_family_id_t family =
+        summary.static_spec_encoding_id
+            ? loom_module_encoding(module, summary.static_spec_encoding_id)
+                  ->family.id
+            : summary.family_id;
+    return family == LOOM_ENCODING_FAMILY_ID_INVALID
+               ? LOOM_ENCODING_MATCH_RESULT_UNKNOWN
+               : (family == dense_family ? LOOM_ENCODING_MATCH_RESULT_TRUE
+                                         : LOOM_ENCODING_MATCH_RESULT_FALSE);
+  }
   if (summary.static_spec_encoding_id != 0) {
     return summary.static_spec_encoding_id == required_id
                ? LOOM_ENCODING_MATCH_RESULT_TRUE

@@ -39,6 +39,8 @@ loom_check_test_suite(
         "template_cfg_relations.loom-test",
         "template_execution_scope.loom-test",
         "template_expansion.loom-test",
+        "template_input_diagnostics.loom-test",
+        "template_input_shapes.loom-test",
         "template_motion.loom-test",
         "template_relations.loom-test",
         "template_selection.loom-test",

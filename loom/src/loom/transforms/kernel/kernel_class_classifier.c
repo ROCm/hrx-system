@@ -224,6 +224,7 @@ static loom_decision_truth_t loom_kernel_class_truth_from_feasibility(
 
 static loom_decision_truth_t loom_kernel_class_resolve_feature(
     const loom_template_decision_model_t* model, uint32_t feature_ordinal,
+    const loom_op_t* application,
     const loom_template_applicability_target_t* kernel_target,
     const loom_template_applicability_facts_t* kernel_application_facts) {
   const loom_template_decision_feature_t* feature =
@@ -235,6 +236,10 @@ static loom_decision_truth_t loom_kernel_class_resolve_feature(
               model->module, feature->value.target_identity.module,
               feature->value.target_identity.target_symbol,
               feature->value.target_identity.target_facts, kernel_target));
+    case LOOM_TEMPLATE_DECISION_FEATURE_INPUT:
+      return loom_template_applicability_evaluate_input(
+          model->module, loom_op_const_operands(application),
+          &feature->value.input, kernel_application_facts);
     case LOOM_TEMPLATE_DECISION_FEATURE_TARGET_CONDITION:
       return loom_kernel_class_truth_from_feasibility(
           loom_template_applicability_evaluate_target_condition(
@@ -850,9 +855,15 @@ static iree_status_t loom_kernel_class_classifier_build_impl(
     bool has_unresolved_target = false;
     for (uint32_t j = 0; j < decision->model->program.feature_count; ++j) {
       const loom_decision_truth_t outcome = loom_kernel_class_resolve_feature(
-          decision->model, j, kernel_target, &kernel_application_facts);
+          decision->model, j, decision->application, kernel_target,
+          &kernel_application_facts);
       feature_outcomes[feature_cursor++] = outcome;
-      has_unresolved_target |= outcome == LOOM_DECISION_TRUTH_UNKNOWN;
+      if (decision->model->features[j].kind ==
+          LOOM_TEMPLATE_DECISION_FEATURE_INPUT) {
+        has_unprojectable_input |= outcome == LOOM_DECISION_TRUTH_UNKNOWN;
+      } else {
+        has_unresolved_target |= outcome == LOOM_DECISION_TRUTH_UNKNOWN;
+      }
     }
 
     const loom_value_slice_t source_arguments =

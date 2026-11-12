@@ -33,6 +33,7 @@ typedef enum loom_template_provider_unresolved_reason_e {
   LOOM_TEMPLATE_PROVIDER_UNRESOLVED_TARGET_IDENTITY = 1,
   LOOM_TEMPLATE_PROVIDER_UNRESOLVED_TARGET_CONDITION = 2,
   LOOM_TEMPLATE_PROVIDER_UNRESOLVED_VALUE_PREDICATE = 3,
+  LOOM_TEMPLATE_PROVIDER_UNRESOLVED_INPUT = 4,
 } loom_template_provider_unresolved_reason_t;
 
 // Detailed applicability result used by selection and diagnostics.
@@ -87,6 +88,9 @@ typedef struct loom_template_applicability_contract_t {
   // predicate VALUE operands are signature ordinals.
   const loom_value_id_t* result_ids;
 
+  // Declared input requirements in the current module encoding domain.
+  const loom_input_contract_t* input_contract;
+
   // Borrowed value predicates.
   const loom_predicate_t* predicates;
 
@@ -112,6 +116,14 @@ typedef struct loom_template_applicability_contract_t {
   // True when predicate VALUE operands are argument-then-result ordinals.
   bool predicates_use_ordinals;
 } loom_template_applicability_contract_t;
+
+// Proves one declared input requirement using actual input types and retained
+// scalar/encoding facts. SSA identities and lexical relations remain exact;
+// incomplete information returns UNKNOWN and never inspects defining ops.
+loom_decision_truth_t loom_template_applicability_evaluate_input(
+    const loom_module_t* module, const loom_value_id_t* arguments,
+    const loom_input_requirement_t* requirement,
+    const loom_template_applicability_facts_t* facts);
 
 // Returns an allocation-free applicability contract over |provider|.
 loom_template_applicability_contract_t

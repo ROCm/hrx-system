@@ -107,9 +107,12 @@ iree_status_t loom_test_record_symbol_fact_context_lookup_resource(
     loom_symbol_fact_context_t* context,
     const loom_test_record_symbol_fact_resource_t** out_resource) {
   *out_resource = NULL;
-  const void* resource = NULL;
-  IREE_RETURN_IF_ERROR(loom_symbol_fact_context_lookup_resource(
-      context, &loom_test_record_symbol_fact_resource_key, &resource));
+  const void* resource = loom_symbol_fact_context_lookup_resource(
+      context, &loom_test_record_symbol_fact_resource_key);
+  if (!resource) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "record symbol fact resource is not available");
+  }
   *out_resource = (const loom_test_record_symbol_fact_resource_t*)resource;
   return iree_ok_status();
 }

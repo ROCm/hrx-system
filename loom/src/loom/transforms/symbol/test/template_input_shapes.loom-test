@@ -1,0 +1,199 @@
+// RUN: pass select-templates{mode=final}
+
+template.decl @shape(%n: index, %value: vector<[%n]xf32>) -> (index)
+
+template.def<@shape> priority(1) @generic(%n: index, %value: vector<[%n]xf32>) -> (index) {
+  template.return %n : index
+}
+
+template.def<@shape> priority(2) @sixteen(%n: index, %value: vector<16xf32>) -> (index) {
+  %result = index.constant 16 : index
+  template.return %result : index
+}
+
+func.def public @entry(%n: index, %value: vector<[%n]xf32>) -> (index) where [range(%n, 16, 16)] {
+  %result = template.apply<@shape>(%n, %value) : (index, vector<[%n]xf32>) -> (index)
+  func.return %result : index
+}
+
+// ----
+template.decl @shape(%n: index, %value: vector<[%n]xf32>) -> (index)
+
+template.def<@shape> priority(2) @sixteen(%n: index, %value: vector<16xf32>) -> (index) {
+  %result = index.constant 16 : index
+  template.return %result : index
+}
+
+func.def public @entry(%n: index, %value: vector<[%n]xf32>) -> (index) where [range(%n, 16, 16)] {
+  %14 = vector.refine %value : vector<[%n]xf32> -> vector<16xf32>
+  %result = template.call @sixteen(%n, %14) : (index, vector<16xf32>) -> (index)
+  func.return %result : index
+}
+
+// ====
+
+// RUN: pass select-templates{mode=final}
+
+template.decl @shape(%n: index, %value: group<[%n]>) -> (index)
+
+template.def<@shape> priority(1) @generic(%n: index, %value: group<[%n]>) -> (index) {
+  template.return %n : index
+}
+
+template.def<@shape> priority(2) @sixteen(%n: index, %value: group<16>) -> (index) {
+  %result = index.constant 16 : index
+  template.return %result : index
+}
+
+func.def public @entry(%n: index, %value: group<[%n]>) -> (index) where [range(%n, 16, 16)] {
+  %result = template.apply<@shape>(%n, %value) : (index, group<[%n]>) -> (index)
+  func.return %result : index
+}
+
+// ----
+template.decl @shape(%n: index, %value: group<[%n]>) -> (index)
+
+template.def<@shape> priority(2) @sixteen(%n: index, %value: group<16>) -> (index) {
+  %result = index.constant 16 : index
+  template.return %result : index
+}
+
+func.def public @entry(%n: index, %value: group<[%n]>) -> (index) where [range(%n, 16, 16)] {
+  %14 = group.refine %value : group<[%n]> -> group<16>
+  %result = template.call @sixteen(%n, %14) : (index, group<16>) -> (index)
+  func.return %result : index
+}
+
+// ====
+
+// RUN: pass select-templates{mode=final}
+
+template.decl @shape(%n: index, %value: tensor<[%n]xf32>) -> (index)
+
+template.def<@shape> priority(1) @generic(%n: index, %value: tensor<[%n]xf32>) -> (index) {
+  template.return %n : index
+}
+
+template.def<@shape> priority(2) @sixteen(%n: index, %value: tensor<16xf32>) -> (index) {
+  %result = index.constant 16 : index
+  template.return %result : index
+}
+
+func.def public @entry(%n: index, %value: tensor<[%n]xf32>) -> (index) where [range(%n, 16, 16)] {
+  %result = template.apply<@shape>(%n, %value) : (index, tensor<[%n]xf32>) -> (index)
+  func.return %result : index
+}
+
+// ----
+template.decl @shape(%n: index, %value: tensor<[%n]xf32>) -> (index)
+
+template.def<@shape> priority(2) @sixteen(%n: index, %value: tensor<16xf32>) -> (index) {
+  %result = index.constant 16 : index
+  template.return %result : index
+}
+
+func.def public @entry(%n: index, %value: tensor<[%n]xf32>) -> (index) where [range(%n, 16, 16)] {
+  %14 = tensor.refine %value : tensor<[%n]xf32> -> tensor<16xf32>
+  %result = template.call @sixteen(%n, %14) : (index, tensor<16xf32>) -> (index)
+  func.return %result : index
+}
+
+// ====
+
+// RUN: pass select-templates{mode=final}
+
+template.decl @shape(%n: index, %value: tile<[%n]xf32>) -> (index)
+
+template.def<@shape> priority(1) @generic(%n: index, %value: tile<[%n]xf32>) -> (index) {
+  template.return %n : index
+}
+
+template.def<@shape> priority(2) @sixteen(%n: index, %value: tile<16xf32>) -> (index) {
+  %result = index.constant 16 : index
+  template.return %result : index
+}
+
+func.def public @entry(%n: index, %value: tile<[%n]xf32>) -> (index) where [range(%n, 16, 16)] {
+  %result = template.apply<@shape>(%n, %value) : (index, tile<[%n]xf32>) -> (index)
+  func.return %result : index
+}
+
+// ----
+template.decl @shape(%n: index, %value: tile<[%n]xf32>) -> (index)
+
+template.def<@shape> priority(2) @sixteen(%n: index, %value: tile<16xf32>) -> (index) {
+  %result = index.constant 16 : index
+  template.return %result : index
+}
+
+func.def public @entry(%n: index, %value: tile<[%n]xf32>) -> (index) where [range(%n, 16, 16)] {
+  %14 = tile.refine %value : tile<[%n]xf32> -> tile<16xf32>
+  %result = template.call @sixteen(%n, %14) : (index, tile<16xf32>) -> (index)
+  func.return %result : index
+}
+
+// ====
+
+// RUN: pass select-templates{mode=final}
+
+template.decl @shape(%n: index, %value: view<[%n]xf32>) -> (index)
+
+template.def<@shape> priority(1) @generic(%n: index, %value: view<[%n]xf32>) -> (index) {
+  template.return %n : index
+}
+
+template.def<@shape> priority(2) @sixteen(%n: index, %value: view<16xf32>) -> (index) {
+  %result = index.constant 16 : index
+  template.return %result : index
+}
+
+func.def public @entry(%n: index, %value: view<[%n]xf32>) -> (index) where [range(%n, 16, 16)] {
+  %result = template.apply<@shape>(%n, %value) : (index, view<[%n]xf32>) -> (index)
+  func.return %result : index
+}
+
+// ----
+template.decl @shape(%n: index, %value: view<[%n]xf32>) -> (index)
+
+template.def<@shape> priority(2) @sixteen(%n: index, %value: view<16xf32>) -> (index) {
+  %result = index.constant 16 : index
+  template.return %result : index
+}
+
+func.def public @entry(%n: index, %value: view<[%n]xf32>) -> (index) where [range(%n, 16, 16)] {
+  %14 = view.refine %value : view<[%n]xf32> -> view<16xf32>
+  %result = template.call @sixteen(%n, %14) : (index, view<16xf32>) -> (index)
+  func.return %result : index
+}
+
+// ====
+
+// The family relates the input extent to a distinct scalar argument. Only the
+// equal CFG edge supplies that proof; exact output also checks inline wiring.
+// RUN: pass select-templates{mode=final,rewrite=inline},canonicalize,symbol-dce
+
+template.decl @equal(%n: index, %value: vector<[%n]xf32>) -> (index)
+
+template.def<@equal> @selected(%n: index, %value: vector<[%n]xf32>) -> (index) {
+  template.return %n : index
+}
+
+func.def public @entry(%n: index, %m: index, %value: vector<[%m]xf32>) -> (index) {
+  %condition = index.cmp eq, %n, %m : index
+  cfg.cond_br %condition, ^equal, ^different
+^equal:
+  %result = template.apply<@equal>(%n, %value) : (index, vector<[%m]xf32>) -> (index)
+  func.return %result : index
+^different:
+  func.return %m : index
+}
+
+// ----
+func.def public @entry(%n: index, %m: index, %value: vector<[%m]xf32>) -> (index) {
+  %condition = index.cmp eq, %n, %m : index
+  cfg.cond_br %condition, ^equal, ^different
+^equal:
+  func.return %n : index
+^different:
+  func.return %m : index
+}

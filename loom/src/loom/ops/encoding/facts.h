@@ -32,6 +32,7 @@ typedef enum loom_encoding_match_result_e {
 
 // Matches retained encoding facts against a verified complete static spec.
 // Every encoding ID in |summary| and |required_id| belongs to |module|. The
+// required_id zero denotes the native dense representation. The
 // query allocates nothing and neither interns an encoding nor inspects SSA
 // producers. Unknown family identity or incomplete parameters remain unknown.
 loom_encoding_match_result_t loom_encoding_match_spec(

@@ -7,13 +7,90 @@
 #include "loom/transforms/symbol/template_rewrite.h"
 
 #include "loom/ir/module.h"
+#include "loom/ir/type_refs.h"
+#include "loom/ops/group/ops.h"
+#include "loom/ops/op_defs.h"
 #include "loom/ops/template/ops.h"
+#include "loom/ops/tensor/ops.h"
+#include "loom/ops/tile/ops.h"
+#include "loom/ops/vector/ops.h"
+#include "loom/ops/view/ops.h"
+#include "loom/rewrite/remap.h"
 #include "loom/rewrite/rewriter.h"
+
+typedef iree_status_t (*loom_template_refine_fn_t)(loom_builder_t*,
+                                                   loom_value_id_t, loom_type_t,
+                                                   loom_location_id_t,
+                                                   loom_op_t**);
+
+static const loom_template_refine_fn_t loom_template_input_refiners[] = {
+    [LOOM_TYPE_GROUP] = loom_group_refine_build,
+    [LOOM_TYPE_TENSOR] = loom_tensor_refine_build,
+    [LOOM_TYPE_TILE] = loom_tile_refine_build,
+    [LOOM_TYPE_VECTOR] = loom_vector_refine_build,
+    [LOOM_TYPE_VIEW] = loom_view_refine_build,
+};
+
+// Selection proved these input contracts. Preserve ordinary exact call typing
+// with explicit carrier refinements; already-exact applications allocate none.
+static iree_status_t loom_template_rewrite_inputs(
+    loom_rewriter_t* rewriter, const loom_op_t* application,
+    loom_symbol_ref_t callee, const loom_value_id_t** inout_operands) {
+  const loom_module_t* module = rewriter->module;
+  const loom_func_like_t function = loom_func_like_cast(
+      module, module->symbols.entries[callee.symbol_id].defining_op);
+  uint16_t argument_count = 0;
+  const loom_value_id_t* arguments =
+      loom_func_like_arg_ids(function, &argument_count);
+  const loom_type_value_remap_t signature_remap = {
+      .source_values = arguments,
+      .target_values = *inout_operands,
+      .count = argument_count,
+      .flags = LOOM_TYPE_VALUE_REMAP_FLAG_SOURCE_DEFINITION_SLICE,
+  };
+  loom_value_id_t* adapted = NULL;
+  loom_ir_remap_t remap;
+  for (uint16_t i = 0; i < argument_count; ++i) {
+    const loom_type_t expected = loom_module_value_type(module, arguments[i]);
+    if (!loom_type_has_dimensions(expected)) {
+      continue;
+    }
+    const loom_type_t actual =
+        loom_module_value_type(module, (*inout_operands)[i]);
+    if (loom_type_equal_after_value_remap(module, expected, actual,
+                                          &signature_remap)) {
+      continue;
+    }
+    if (!adapted) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          rewriter->arena, argument_count, sizeof(*adapted), (void**)&adapted));
+      memcpy(adapted, *inout_operands, argument_count * sizeof(*adapted));
+      IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
+          module, rewriter->module, rewriter->arena, NULL, &remap));
+      IREE_RETURN_IF_ERROR(loom_ir_remap_map_values(
+          &remap, arguments, *inout_operands, argument_count));
+    }
+    loom_type_t refined_type;
+    IREE_RETURN_IF_ERROR(loom_ir_remap_type(&remap, expected, &refined_type));
+    loom_op_t* refine = NULL;
+    IREE_RETURN_IF_ERROR(loom_template_input_refiners[loom_type_kind(expected)](
+        &rewriter->builder, (*inout_operands)[i], refined_type,
+        application->location, &refine));
+    adapted[i] = loom_op_results(refine)[0];
+  }
+  if (adapted) {
+    *inout_operands = adapted;
+  }
+  return iree_ok_status();
+}
 
 iree_status_t loom_template_rewrite_apply_as_exact_call(
     loom_rewriter_t* rewriter, loom_op_t* apply_op, loom_symbol_ref_t callee,
     const loom_value_id_t* operands, loom_op_t** out_call_op) {
   IREE_ASSERT(loom_template_apply_isa(apply_op));
+  loom_builder_set_before(&rewriter->builder, apply_op);
+  IREE_RETURN_IF_ERROR(
+      loom_template_rewrite_inputs(rewriter, apply_op, callee, &operands));
   const loom_value_slice_t results = loom_template_apply_results(apply_op);
   loom_type_t* result_types = NULL;
   if (results.count > 0) {

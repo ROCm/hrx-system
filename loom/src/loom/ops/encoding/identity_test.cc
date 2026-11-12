@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <cstring>
+
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/context.h"
@@ -130,6 +132,26 @@ class EncodingIdentityTest : public ::testing::Test {
   // Owns the producer summaries used by the query callbacks.
   loom_value_fact_table_t facts_;
 };
+
+TEST_F(EncodingIdentityTest, NativeDenseRequiresCompleteBuiltinIdentity) {
+  for (const char* name : {"encoding.layout.dense", "test.layout"}) {
+    const uint16_t spec = AddSpec(iree_make_cstring_view(name));
+    loom_value_facts_t defined;
+    Define(spec, LOOM_ENCODING_ROLE_ADDRESS_LAYOUT, &defined);
+    loom_value_fact_encoding_summary_t summary;
+    ASSERT_TRUE(loom_value_facts_query_encoding_summary(&facts_.context,
+                                                        defined, &summary));
+    EXPECT_EQ(loom_encoding_match_spec(module_, summary, 0),
+              std::strcmp(name, "encoding.layout.dense") == 0
+                  ? LOOM_ENCODING_MATCH_RESULT_TRUE
+                  : LOOM_ENCODING_MATCH_RESULT_FALSE);
+  }
+  const loom_value_fact_encoding_summary_t geometry_only = {
+      .address_layout = {.kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE},
+  };
+  EXPECT_EQ(loom_encoding_match_spec(module_, geometry_only, 0),
+            LOOM_ENCODING_MATCH_RESULT_UNKNOWN);
+}
 
 TEST_F(EncodingIdentityTest, DenseAssumptionPreservesCustomIdentity) {
   const uint16_t custom = AddSpec(IREE_SV("test.layout"));

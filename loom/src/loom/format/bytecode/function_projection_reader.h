@@ -70,6 +70,13 @@ iree_status_t loom_bytecode_function_projection_reader_bind_symbol(
     loom_bytecode_function_projection_reader_t* reader,
     uint32_t source_symbol_ordinal, loom_symbol_ref_t target_symbol_ref);
 
+// Imports one complete static encoding into the current output module. The
+// source ID is a validated one-based ENCODINGS identity from admitted metadata.
+// Repeated imports reuse this reader's reached-only correspondence.
+iree_status_t loom_bytecode_function_projection_reader_import_encoding(
+    loom_bytecode_function_projection_reader_t* reader,
+    uint16_t source_encoding_id, uint16_t* out_encoding_id);
+
 // Decodes one function-like symbol header without reading root-region bytes.
 //
 // Arrays in |out_header| remain valid until the reader is deinitialized.

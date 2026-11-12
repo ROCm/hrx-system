@@ -427,6 +427,8 @@ static iree_string_view_t loom_template_selection_constraint_reason_code(
       return IREE_SV("target_identity");
     case LOOM_TEMPLATE_PROVIDER_UNRESOLVED_TARGET_CONDITION:
       return IREE_SV("target_condition");
+    case LOOM_TEMPLATE_PROVIDER_UNRESOLVED_INPUT:
+      return IREE_SV("input_contract");
     case LOOM_TEMPLATE_PROVIDER_UNRESOLVED_VALUE_PREDICATE:
       return IREE_SV("value_predicate");
     case LOOM_TEMPLATE_PROVIDER_UNRESOLVED_NONE:

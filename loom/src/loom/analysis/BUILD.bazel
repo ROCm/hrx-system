@@ -572,6 +572,7 @@ loom_cc_library(
     deps = [
         ":symbol_facts",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ir:input_contract",
         "//loom/src/loom/ops:func_symbol_facts",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/target",
@@ -590,6 +591,7 @@ loom_cc_test(
         ":template_provider_catalog",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:func_symbol_facts",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/target",

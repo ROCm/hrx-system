@@ -11,6 +11,7 @@
 #include "loom/analysis/symbol_references.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/link/input_contracts.h"
 #include "loom/link/symbol_policy.h"
 #include "loom/ops/op_defs.h"
 
@@ -1121,17 +1122,29 @@ static iree_status_t loom_link_index_project_materialized_template_families(
         index, symbol->template_family_ordinal, symbol->ordinal,
         /*requires_bytecode_projection=*/false));
   }
-  return iree_ok_status();
+  if (!source_module->symbols.count) {
+    return iree_ok_status();
+  }
+  return loom_link_project_input_contracts(
+      source_module,
+      loom_link_index_local_symbol_at(index, module->symbol_start_ordinal),
+      &index->arena, (const loom_input_contract_t***)&module->input_contracts,
+      &module->input_contract_count);
 }
 
 static iree_status_t loom_link_index_project_bytecode_template_families(
     loom_link_module_index_t* index, loom_link_module_index_module_t* module,
     const loom_bytecode_module_metadata_t* bytecode_module) {
+  module->input_contracts = bytecode_module->input_contracts;
+  module->input_contract_count =
+      (uint32_t)bytecode_module->input_contract_count;
   for (iree_host_size_t i = 0; i < bytecode_module->symbol_count; ++i) {
     const loom_bytecode_symbol_metadata_t* source_symbol =
         &bytecode_module->symbols[i];
     loom_link_module_index_symbol_t* symbol = loom_link_index_local_symbol_at(
         index, module->symbol_start_ordinal + i);
+    symbol->input_contract_ordinal_plus_one =
+        source_symbol->input_contract_ordinal_plus_one;
     if (source_symbol->kind == LOOM_BYTECODE_SYMBOL_TEMPLATE_DECL) {
       IREE_RETURN_IF_ERROR(loom_link_index_resolve_template_family(
           index, symbol->ordinal, &symbol->template_family_ordinal));

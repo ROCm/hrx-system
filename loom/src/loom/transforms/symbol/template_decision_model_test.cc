@@ -222,6 +222,7 @@ class TemplateDecisionModelTest : public ::testing::Test {
         .target_facts = {},
         .argument_ids = facts->argument_ids,
         .result_ids = facts->result_ids,
+        .input_contract = loom_func_symbol_input_contract(facts),
         .predicates = facts->predicates,
         .target_conditions = facts->target_conditions,
         .argument_count = facts->argument_count,
