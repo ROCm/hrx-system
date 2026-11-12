@@ -146,7 +146,10 @@ static iree_host_size_t loom_test_pipeline_collective_reader(
     const loom_pipeline_invocation_schedule_t* scope) {
   const loom_pipeline_execution_schedule_t* participants =
       loom_pipeline_execution_schedule(&state->execution, scope);
-  return participants->workers[0] != IREE_HOST_SIZE_MAX ? 0 : 1;
+  return loom_pipeline_participants_worker(participants->participants, 0) !=
+                 IREE_HOST_SIZE_MAX
+             ? 0
+             : 1;
 }
 
 static iree_status_t loom_test_pipeline_collective_begin(
@@ -236,12 +239,10 @@ static iree_status_t loom_test_pipeline_entry(
   loom_pipeline_control_function_t* functions = NULL;
   IREE_RETURN_IF_ERROR(loom_pipeline_control_materialize(
       rewriter, realization, &state->execution, &options, &functions));
-  for (iree_host_size_t i = 0; i < state->execution.engine_count; ++i) {
-    if (loom_func_like_isa(functions[i].function)) {
-      IREE_RETURN_IF_ERROR(
-          loom_rewriter_set_attr(rewriter, functions[i].function.op, 1,
-                                 loom_attr_enum(LOOM_FUNC_VISIBILITY_PUBLIC)));
-    }
+  for (iree_host_size_t i = 0; i < state->execution.offsets[1]; ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_rewriter_set_attr(rewriter, functions[i].function.op, 1,
+                               loom_attr_enum(LOOM_FUNC_VISIBILITY_PUBLIC)));
   }
   return loom_rewriter_erase(rewriter, realization->function.op);
 }

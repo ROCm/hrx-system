@@ -44,6 +44,8 @@ class DmaQueuesTest : public ::testing::Test {
         .owners = owners_,
         .has_serial = true,
     };
+    IREE_ASSERT_OK(loom_pipeline_lifetimes_index(
+        &arena_, &realization_.invocations.lifetimes));
     for (size_t i = 0; i < IREE_ARRAYSIZE(workers_); ++i) {
       invocations_[i].ordinal = i;
       ownership_[i].invocation = &invocations_[i];

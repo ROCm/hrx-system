@@ -179,10 +179,10 @@ static iree_status_t loom_aie2p_native_select_channel_accesses(
       const iree_host_size_t distributor =
           engine == IREE_HOST_SIZE_MAX
               ? IREE_HOST_SIZE_MAX
-              : context->distribution_execution
-                    .workers[invocation->ordinal *
-                                 context->distribution_execution.engine_count +
-                             engine];
+              : loom_pipeline_participants_worker(
+                    context->distribution_execution
+                        .invocations[invocation->ordinal],
+                    engine);
       if (channel->replay.credits != 1 || distributor == IREE_HOST_SIZE_MAX ||
           (realization->invocations.workers[distributor].invocation !=
                invocation &&

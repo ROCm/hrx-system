@@ -42,6 +42,9 @@ typedef struct loom_pipeline_lifetime_extent_t {
 // lifetimes occupy no space. Offsets are relative to each pool; the caller
 // reserves the returned extents in its physical backing. Status reports arena
 // allocation or an extent exceeding the compiler's INT64_MAX resource bound.
+// Scratch storage is linear in the lifetime, request, and pool inventories.
+// Sparse demand projects only its relevant ancestry; dense demand shares a
+// bounded group of columns instead of retaining a lifetime-by-pool matrix.
 iree_status_t loom_pipeline_lifetime_layout(
     const loom_pipeline_lifetimes_t* lifetimes,
     loom_pipeline_lifetime_request_t* requests, iree_host_size_t request_count,

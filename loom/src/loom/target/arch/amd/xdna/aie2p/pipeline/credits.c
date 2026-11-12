@@ -28,7 +28,8 @@ typedef struct loom_aie2p_native_credit_engine_t {
 } loom_aie2p_native_credit_engine_t;
 
 struct loom_aie2p_native_credit_scope_t {
-  // Per-engine actions, allocated only for a scope with private restoration.
+  // Actions in this boundary's compact participant order; absent without
+  // private restoration.
   loom_aie2p_native_credit_engine_t* engines;
   // Unassigned restorations, consumed when control routes select their engine.
   loom_aie2p_native_credit_action_t* pending;
@@ -103,7 +104,6 @@ iree_status_t loom_aie2p_native_select_credits(
     boundaries[i] =
         invocation->schedule ? i : boundaries[invocation->parent->ordinal];
   }
-  const iree_host_size_t engine_count = context->execution.engine_count;
   for (iree_host_size_t i = 0; i < invocations->channel_count; ++i) {
     const loom_aie2p_native_channel_t* channel = &context->channels[i];
     const iree_host_size_t boundary =
@@ -128,7 +128,11 @@ iree_status_t loom_aie2p_native_select_credits(
     }
     struct loom_aie2p_native_credit_scope_t* scope =
         &context->credit_scopes[boundary];
+    const loom_pipeline_participants_t* participants =
+        context->execution.invocations[boundary];
     if (!scope->engines) {
+      const iree_host_size_t engine_count =
+          loom_pipeline_participants_count(participants);
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, engine_count,
                                                      sizeof(*scope->engines),
                                                      (void**)&scope->engines));
@@ -140,7 +144,11 @@ iree_status_t loom_aie2p_native_select_credits(
         : exact                       ? LOOM_AIE2P_NATIVE_CREDIT_RETIRE
                                       : LOOM_AIE2P_NATIVE_CREDIT_RESET;
     loom_aie2p_native_credit_action_t** actions =
-        exact ? &scope->engines[context->core_engines[worker]].actions[phase]
+        exact ? &scope
+                     ->engines[loom_pipeline_participants_find(
+                                   participants, context->core_engines[worker])
+                                   .index]
+                     .actions[phase]
               : &scope->pending;
     loom_aie2p_native_credit_action_t* action = NULL;
     IREE_RETURN_IF_ERROR(
@@ -172,7 +180,6 @@ iree_status_t loom_aie2p_native_route_credits(
     *out_valid = true;
     return iree_ok_status();
   }
-  const iree_host_size_t engine_count = context->execution.engine_count;
   for (iree_host_size_t boundary = 1; boundary < realization->invocations.count;
        ++boundary) {
     struct loom_aie2p_native_credit_scope_t* scope =
@@ -183,25 +190,25 @@ iree_status_t loom_aie2p_native_route_credits(
       // The common participant row already includes all concurrent descendants.
       // Any existing participant can restore private state after quiescence;
       // reuse an existing request/reply path before selecting a local path.
-      const iree_host_size_t* participants =
-          &context->execution.workers[boundary * engine_count];
+      const loom_pipeline_participants_t* participants =
+          context->execution.invocations[boundary];
       iree_host_size_t worker = IREE_HOST_SIZE_MAX;
       uint32_t best = 0;
       loom_aie2p_native_tile_t* tile = context->pool_tiles[channel->pool_index];
       const iree_host_size_t tile_index = tile - context->tiles;
-      for (iree_host_size_t engine = 0; engine < engine_count; ++engine) {
-        if (participants[engine] == IREE_HOST_SIZE_MAX) {
-          continue;
-        }
+      loom_pipeline_participant_iterator_t iterator;
+      loom_pipeline_participants_begin(participants, &iterator);
+      loom_pipeline_participant_t participant;
+      while (loom_pipeline_participants_next(&iterator, &participant)) {
         const loom_aie2p_native_worker_t* controller =
-            &context->workers[context->execution.workers[engine]];
+            &context->workers[context->execution.workers[participant.engine]];
         const uint32_t preference =
             controller->control_packets &&
                     controller->control_packets[tile_index] != UINT8_MAX
                 ? (controller->control_replies[tile_index] != UINT8_MAX ? 3 : 2)
                 : (controller->tile == tile ? 1 : 0);
         if (worker == IREE_HOST_SIZE_MAX || preference > best) {
-          worker = participants[engine];
+          worker = participant.worker;
           best = preference;
         }
       }
@@ -219,7 +226,9 @@ iree_status_t loom_aie2p_native_route_credits(
       }
       scope->pending = action->next;
       loom_aie2p_native_credit_engine_t* engine =
-          &scope->engines[context->core_engines[worker]];
+          &scope->engines[loom_pipeline_participants_find(
+                              participants, context->core_engines[worker])
+                              .index];
       action->next = engine->actions[action->phase];
       engine->actions[action->phase] = action;
     }
@@ -312,8 +321,15 @@ iree_status_t loom_aie2p_native_emit_credits(
       !context->credit_scopes[child->ordinal].engines) {
     return iree_ok_status();
   }
+  const iree_host_size_t index =
+      loom_pipeline_participants_find(
+          context->execution.invocations[child->ordinal], engine)
+          .index;
+  if (index == IREE_HOST_SIZE_MAX) {
+    return iree_ok_status();
+  }
   const loom_aie2p_native_credit_engine_t* row =
-      &context->credit_scopes[child->ordinal].engines[engine];
+      &context->credit_scopes[child->ordinal].engines[index];
   const loom_aie2p_native_credit_action_t* actions = row->actions[phase];
   if (!actions) {
     return iree_ok_status();

@@ -75,18 +75,23 @@ iree_status_t loom_aie2p_native_select_collectives(
         // Assign its cursor to a participant with a visible storage aperture,
         // preferring the storage owner so broadcasting needs no extra relay.
         if (worker == UINT32_MAX) {
-          if (participants->workers[owner_engine] != IREE_HOST_SIZE_MAX) {
-            worker = (uint32_t)participants->workers[owner_engine];
+          const iree_host_size_t owner_worker =
+              loom_pipeline_participants_worker(participants->participants,
+                                                owner_engine);
+          if (owner_worker != IREE_HOST_SIZE_MAX) {
+            worker = (uint32_t)owner_worker;
           } else {
-            for (iree_host_size_t e = 0; e < execution->engine_count; ++e) {
-              if (participants->workers[e] == IREE_HOST_SIZE_MAX) {
-                continue;
-              }
-              window = loom_xdna_array_load_window(context->family,
-                                                   context->tiles[e].coordinate,
-                                                   owner->coordinate);
+            loom_pipeline_participant_iterator_t iterator;
+            loom_pipeline_participants_begin(participants->participants,
+                                             &iterator);
+            loom_pipeline_participant_t participant;
+            while (loom_pipeline_participants_next(&iterator, &participant)) {
+              window = loom_xdna_array_load_window(
+                  context->family,
+                  context->tiles[participant.engine].coordinate,
+                  owner->coordinate);
               if (window) {
-                worker = (uint32_t)participants->workers[e];
+                worker = (uint32_t)participant.worker;
                 break;
               }
             }
@@ -94,7 +99,8 @@ iree_status_t loom_aie2p_native_select_collectives(
         }
         if (worker == UINT32_MAX ||
             context->core_engines[worker] == IREE_HOST_SIZE_MAX ||
-            participants->workers[context->core_engines[worker]] ==
+            loom_pipeline_participants_worker(participants->participants,
+                                              context->core_engines[worker]) ==
                 IREE_HOST_SIZE_MAX) {
           return loom_aie2p_native_reject(
               context, step->operation,
@@ -133,14 +139,12 @@ iree_status_t loom_aie2p_native_select_collectives(
                   "collective storage visible to its admitted FIFO reader"));
         }
         const iree_host_size_t relay =
-            participants->workers[owner_engine] != IREE_HOST_SIZE_MAX
+            loom_pipeline_participants_worker(
+                participants->participants, owner_engine) != IREE_HOST_SIZE_MAX
                 ? owner_engine
                 : reader;
-        iree_host_size_t peer_count = 0;
-        for (iree_host_size_t e = 0; e < execution->engine_count; ++e) {
-          peer_count +=
-              e != reader && participants->workers[e] != IREE_HOST_SIZE_MAX;
-        }
+        const iree_host_size_t peer_count =
+            loom_pipeline_participants_count(participants->participants) - 1;
         context->collectives[context->collective_count++] =
             (loom_aie2p_native_collective_t){
                 .scope = scope,
@@ -200,16 +204,19 @@ iree_status_t loom_aie2p_native_route_collectives(
           context, collective->source->operations[0],
           IREE_SV("available collective packet identities"));
     }
-    for (iree_host_size_t e = 0; e < execution->engine_count; ++e) {
-      if (e == reader || participants->workers[e] == IREE_HOST_SIZE_MAX) {
+    loom_pipeline_participant_iterator_t iterator;
+    loom_pipeline_participants_begin(participants->participants, &iterator);
+    loom_pipeline_participant_t participant;
+    while (loom_pipeline_participants_next(&iterator, &participant)) {
+      if (participant.engine == reader) {
         continue;
       }
-      const bool first_hop = e == relay || relay == reader;
+      const bool first_hop = participant.engine == relay || relay == reader;
       if (!loom_aie2p_native_packet_route(
               context, next_source,
               (first_hop ? reader_worker : relay_worker)->tile->coordinate,
               LOOM_XDNA_STREAM_PORT_CORE,
-              context->workers[participants->workers[e]].tile->coordinate,
+              context->workers[participant.worker].tile->coordinate,
               LOOM_XDNA_STREAM_PORT_CORE,
               first_hop ? collective->reader_packet : collective->relay_packet,
               NULL)) {

@@ -599,15 +599,6 @@ typedef struct loom_aie2p_native_distribution_command_t {
   loom_aie2p_native_retirement_t* retirement;
 } loom_aie2p_native_distribution_command_t;
 
-// Descriptor state restored at the channel's construction boundary,
-// independently of the child visits that submit work using that descriptor.
-typedef struct loom_aie2p_native_endpoint_initialization_t {
-  // Next distinct endpoint initialized by this construction on this engine.
-  const struct loom_aie2p_native_endpoint_initialization_t* next;
-  // Selected geometry/iterator, already retired before owner reentry.
-  const loom_aie2p_native_distribution_endpoint_t* endpoint;
-} loom_aie2p_native_endpoint_initialization_t;
-
 typedef enum loom_aie2p_native_execution_e {
   LOOM_AIE2P_NATIVE_EXECUTION_CORE,
   LOOM_AIE2P_NATIVE_EXECUTION_CONFIGURATION,
@@ -794,13 +785,13 @@ typedef struct loom_aie2p_native_context_t {
   loom_aie2p_native_collective_t* collectives;
   // Number of closed immutable source borrows.
   iree_host_size_t collective_count;
-  // Invocation-major core controllers of finite distribution boundaries, or
-  // NULL when there are no ordered distributions. Each row retains the
-  // invocation's complete transitive execution participants.
-  iree_host_size_t* distribution_controllers;
-  // Invocation-major per-engine descriptor initialization. NULL when all
-  // geometry is resident and every private endpoint finishes a ring turn.
-  const loom_aie2p_native_endpoint_initialization_t** endpoint_initializers;
+  // Sparse controller set per invocation for finite distribution boundaries.
+  // NULL when there are no ordered distributions.
+  const loom_pipeline_participants_t** distribution_controllers;
+  // Sparse descriptor-restoration controllers by constructing invocation,
+  // independent of its instruction participants. NULL without restoration.
+  struct loom_aie2p_native_endpoint_initialization_scope_t*
+      endpoint_initializers;
   // Private protocol restoration by construction boundary, allocated only when
   // retained endpoint counts cannot prove that every credit returns naturally.
   struct loom_aie2p_native_credit_scope_t* credit_scopes;

@@ -20,6 +20,8 @@ namespace {
 
 class PipelineControlTest : public ::testing::Test {
  protected:
+  static constexpr iree_host_size_t kEngine = 73;
+
   virtual bool HasAutonomousPreparation() const { return false; }
 
   void SetUp() override {
@@ -82,7 +84,7 @@ class PipelineControlTest : public ::testing::Test {
       IREE_ASSERT_OK(
           loom_pipeline_end_build(builder, LOOM_LOCATION_UNKNOWN, &op));
       engines_[1] = IREE_HOST_SIZE_MAX;
-      engines_[2] = 0;
+      engines_[2] = kEngine;
       engines_[3] = IREE_HOST_SIZE_MAX;
     }
     Finish(leaf);
@@ -131,7 +133,7 @@ class PipelineControlTest : public ::testing::Test {
     }
     loom_pipeline_execution_conflict_t conflict;
     IREE_ASSERT_OK(loom_pipeline_execution_build(&realization_.invocations,
-                                                 engines_, 1, &arena_,
+                                                 engines_, kEngine + 1, &arena_,
                                                  &execution_, &conflict));
     EXPECT_EQ(conflict.second_worker, IREE_HOST_SIZE_MAX);
   }
@@ -230,7 +232,7 @@ class PipelineControlTest : public ::testing::Test {
       const loom_pipeline_invocation_t* child, bool before,
       const loom_value_id_t* state) {
     auto* self = static_cast<PipelineControlTest*>(user_data);
-    EXPECT_EQ(engine, 0u);
+    EXPECT_EQ(engine, kEngine);
     EXPECT_NE(scope, nullptr);
     EXPECT_NE(child, nullptr);
     ++self->boundary_count_;
@@ -274,8 +276,8 @@ class PipelineControlTest : public ::testing::Test {
   loom_pipeline_realization_t realization_ = {};
   // Independent cloned worker bodies.
   loom_pipeline_worker_materialization_t instances_[4] = {};
-  // Both serial roles run on one selected engine.
-  iree_host_size_t engines_[4] = {0, 0, 0, 0};
+  // Both serial roles use one engine after an unoccupied physical range.
+  iree_host_size_t engines_[4] = {kEngine, kEngine, kEngine, kEngine};
   // Retained engine participation and serial scopes.
   loom_pipeline_execution_t execution_ = {};
   // Ordinary operation used to make boundary operands observable in emitted IR.
@@ -305,7 +307,8 @@ TEST_F(PipelineControlTest, NestedBoundariesKeepTheirProjectedRuntimeState) {
   EXPECT_EQ(boundary_count_, 8u);
   EXPECT_EQ(entry_count_, 4u);
   for (size_t owner : {0u, 1u, 3u}) {
-    const auto& projected = functions[owner];
+    const auto& projected =
+        functions[loom_pipeline_execution_index(&execution_, owner, kEngine)];
     ASSERT_EQ(projected.argument_count, 2u);
     EXPECT_EQ(projected.arguments[0], 1u);
     EXPECT_EQ(projected.arguments[1], 2u);
@@ -337,8 +340,8 @@ class PipelinePreparationTest : public PipelineControlTest {
 };
 
 TEST_F(PipelinePreparationTest, CapturesPrepareBeforeConsumersAcrossReentry) {
-  const iree_host_size_t preparation[] = {IREE_HOST_SIZE_MAX, 0,
-                                          IREE_HOST_SIZE_MAX, 0};
+  const iree_host_size_t preparation[] = {IREE_HOST_SIZE_MAX, kEngine,
+                                          IREE_HOST_SIZE_MAX, kEngine};
   const loom_pipeline_control_options_t options = {
       .worker_engines = engines_,
       .preparation_engines = preparation,
@@ -351,7 +354,9 @@ TEST_F(PipelinePreparationTest, CapturesPrepareBeforeConsumersAcrossReentry) {
   ASSERT_EQ(functions[0].argument_count, 1u);
   EXPECT_EQ(functions[0].arguments[0], 0u);
   for (size_t leaf : {2u, 4u}) {
-    auto* body = loom_func_like_body(functions[leaf].function);
+    auto* body = loom_func_like_body(
+        functions[loom_pipeline_execution_index(&execution_, leaf, kEngine)]
+            .function);
     const auto* entry = loom_region_entry_block(body);
     ASSERT_EQ(entry->arg_count, 1u);
     const auto* preparation_call = entry->first_op;

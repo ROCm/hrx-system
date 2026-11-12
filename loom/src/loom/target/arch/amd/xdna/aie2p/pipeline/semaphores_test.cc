@@ -38,6 +38,8 @@ class Aie2pSemaphoresTest : public ::testing::Test {
         .owners = owners_,
         .has_serial = true,
     };
+    IREE_ASSERT_OK(loom_pipeline_lifetimes_index(
+        &arena_, &realization_.invocations.lifetimes));
     for (uint16_t i = 0; i < 2; ++i) {
       tiles_[i].coordinate = {0, static_cast<uint16_t>(2 + i)};
       tiles_[i].facts = loom_xdna_array_tile_facts(

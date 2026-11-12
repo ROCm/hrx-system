@@ -62,7 +62,7 @@ typedef struct loom_pipeline_control_sites_t {
   iree_host_size_t visit_count;
   // At least one independently progressing scope needs boundary projections.
   bool has_deferred;
-  // Engines that prepare autonomous worker captures before instruction work.
+  // Compact invocation participants that prepare autonomous worker captures.
   // NULL when no worker in the invocation requires entry preparation.
   bool* preparation_engines;
 } loom_pipeline_control_sites_t;
@@ -143,13 +143,16 @@ static iree_status_t loom_pipeline_control_collect(
           options->preparation_engines[invocation->first_worker + i];
       if (engine != IREE_HOST_SIZE_MAX) {
         if (!sites->preparation_engines) {
+          const iree_host_size_t count = loom_pipeline_participants_count(
+              execution->invocations[invocation->ordinal]);
           IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-              arena, execution->engine_count, sizeof(bool),
-              (void**)&sites->preparation_engines));
-          memset(sites->preparation_engines, 0,
-                 execution->engine_count * sizeof(bool));
+              arena, count, sizeof(bool), (void**)&sites->preparation_engines));
+          memset(sites->preparation_engines, 0, count * sizeof(bool));
         }
-        sites->preparation_engines[engine] = true;
+        sites->preparation_engines
+            [loom_pipeline_participants_find(
+                 execution->invocations[invocation->ordinal], engine)
+                 .index] = true;
       }
     }
     IREE_RETURN_IF_ERROR(loom_pipeline_control_add_site(
@@ -196,14 +199,17 @@ static iree_status_t loom_pipeline_control_collect(
             site.kind = LOOM_PIPELINE_CONTROL_COMPOSITION;
             site.child = scope->blocks[b][s].child;
             if (options->boundary_workers) {
-              for (iree_host_size_t engine = 0;
-                   engine < execution->engine_count; ++engine) {
-                const iree_host_size_t index =
-                    site.child->ordinal * execution->engine_count + engine;
-                instructions |= execution->workers[index] != IREE_HOST_SIZE_MAX;
+              const loom_pipeline_participants_t* child =
+                  execution->invocations[site.child->ordinal];
+              instructions |= child != NULL;
+              loom_pipeline_participant_iterator_t iterator;
+              loom_pipeline_participants_begin(
+                  options->boundary_workers[site.child->ordinal], &iterator);
+              loom_pipeline_participant_t controller;
+              while (loom_pipeline_participants_next(&iterator, &controller)) {
                 autonomous |=
-                    options->boundary_workers[index] != IREE_HOST_SIZE_MAX &&
-                    execution->workers[index] == IREE_HOST_SIZE_MAX;
+                    loom_pipeline_participants_worker(
+                        child, controller.engine) == IREE_HOST_SIZE_MAX;
               }
             }
             break;
@@ -452,7 +458,7 @@ static iree_status_t loom_pipeline_control_project(
     const loom_pipeline_invocation_t* invocation, iree_host_size_t engine,
     loom_symbol_ref_t symbol, loom_pipeline_control_sites_t* sites,
     loom_pipeline_control_function_t* functions,
-    loom_pipeline_control_projection_t projection,
+    loom_pipeline_control_projection_t projection, bool prepares,
     const loom_pipeline_control_function_t* boundaries,
     loom_pipeline_control_function_t* out_function) {
   loom_module_t* module = rewriter->module;
@@ -514,8 +520,7 @@ static iree_status_t loom_pipeline_control_project(
   loom_builder_set_block(&rewriter->builder, entry);
   rewriter->builder.ip.parent_op = function;
   if (projection == LOOM_PIPELINE_CONTROL_COMPLETE &&
-      (sites->has_deferred ||
-       (sites->preparation_engines && sites->preparation_engines[engine]))) {
+      (sites->has_deferred || prepares)) {
     IREE_RETURN_IF_ERROR(loom_pipeline_control_call_projection(
         rewriter, &boundaries[0], arguments));
   }
@@ -550,8 +555,10 @@ static iree_status_t loom_pipeline_control_project(
       }
       case LOOM_PIPELINE_CONTROL_COLLECTIVE:
         if (projection == LOOM_PIPELINE_CONTROL_COMPLETE &&
-            loom_pipeline_execution_schedule(execution, site->scope)
-                    ->workers[engine] != IREE_HOST_SIZE_MAX) {
+            loom_pipeline_participants_worker(
+                loom_pipeline_execution_schedule(execution, site->scope)
+                    ->participants,
+                engine) != IREE_HOST_SIZE_MAX) {
           IREE_RETURN_IF_ERROR(loom_pipeline_control_collective(
               rewriter, options, sites, site, engine, state_arguments));
         }
@@ -561,9 +568,9 @@ static iree_status_t loom_pipeline_control_project(
       case LOOM_PIPELINE_CONTROL_COMPOSITION: {
         if (site->deferred) {
           if (projection != LOOM_PIPELINE_CONTROL_COMPLETE &&
-              options->boundary_workers[site->child->ordinal *
-                                            execution->engine_count +
-                                        engine] != IREE_HOST_SIZE_MAX) {
+              loom_pipeline_participants_worker(
+                  options->boundary_workers[site->child->ordinal], engine) !=
+                  IREE_HOST_SIZE_MAX) {
             IREE_RETURN_IF_ERROR(options->emit.boundary(
                 options->emit.user_data, &rewriter->builder, engine, NULL,
                 site->child, projection == LOOM_PIPELINE_CONTROL_START,
@@ -577,8 +584,10 @@ static iree_status_t loom_pipeline_control_project(
           break;
         }
         if (site->scope &&
-            loom_pipeline_execution_schedule(execution, site->scope)
-                    ->workers[engine] == IREE_HOST_SIZE_MAX) {
+            loom_pipeline_participants_worker(
+                loom_pipeline_execution_schedule(execution, site->scope)
+                    ->participants,
+                engine) == IREE_HOST_SIZE_MAX) {
           IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, site->target));
           break;
         }
@@ -587,11 +596,11 @@ static iree_status_t loom_pipeline_control_project(
               options->emit.user_data, &rewriter->builder, engine, site->scope,
               site->child, true, state_arguments));
         }
-        const loom_pipeline_control_function_t* child =
-            &functions[site->child->ordinal * execution->engine_count + engine];
-        if (loom_func_like_isa(child->function)) {
+        const iree_host_size_t child = loom_pipeline_execution_index(
+            execution, site->child->ordinal, engine);
+        if (child != IREE_HOST_SIZE_MAX) {
           IREE_RETURN_IF_ERROR(loom_pipeline_control_call_child(
-              rewriter, site, child, state_arguments));
+              rewriter, site, &functions[child], state_arguments));
         }
         if (options->emit.boundary) {
           IREE_RETURN_IF_ERROR(options->emit.boundary(
@@ -616,8 +625,11 @@ static iree_status_t loom_pipeline_control_project(
           break;
         }
         if (site->enclosing_scope && options->emit.boundary &&
-            loom_pipeline_execution_schedule(execution, site->enclosing_scope)
-                    ->workers[engine] != IREE_HOST_SIZE_MAX) {
+            loom_pipeline_participants_worker(
+                loom_pipeline_execution_schedule(execution,
+                                                 site->enclosing_scope)
+                    ->participants,
+                engine) != IREE_HOST_SIZE_MAX) {
           IREE_RETURN_IF_ERROR(options->emit.boundary(
               options->emit.user_data, &rewriter->builder, engine,
               site->enclosing_scope, NULL, true, state_arguments));
@@ -626,8 +638,10 @@ static iree_status_t loom_pipeline_control_project(
               options->emit.user_data, &rewriter->builder, engine,
               site->enclosing_scope, NULL, false, state_arguments));
         }
-        if (loom_pipeline_execution_schedule(execution, site->scope)
-                ->workers[engine] == IREE_HOST_SIZE_MAX) {
+        if (loom_pipeline_participants_worker(
+                loom_pipeline_execution_schedule(execution, site->scope)
+                    ->participants,
+                engine) == IREE_HOST_SIZE_MAX) {
           IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, site->target));
         } else {
           IREE_RETURN_IF_ERROR(
@@ -691,11 +705,9 @@ iree_status_t loom_pipeline_control_materialize(
   }
   const loom_pipeline_invocations_t* invocations = &realization->invocations;
   loom_pipeline_control_function_t* functions = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      rewriter->arena, invocations->count,
-      execution->engine_count * sizeof(*functions), (void**)&functions));
-  memset(functions, 0,
-         invocations->count * execution->engine_count * sizeof(*functions));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(rewriter->arena, execution->participant_count,
+                                sizeof(*functions), (void**)&functions));
   *out_functions = functions;
   loom_symbol_map_t names = {0};
   loom_module_t* module = rewriter->module;
@@ -710,18 +722,25 @@ iree_status_t loom_pipeline_control_materialize(
   for (iree_host_size_t reverse = invocations->count; reverse > 0; --reverse) {
     const loom_pipeline_invocation_t* invocation =
         invocations->entries[reverse - 1];
+    const loom_pipeline_participants_t* participants =
+        execution->invocations[invocation->ordinal];
+    if (!participants) {
+      continue;
+    }
     loom_pipeline_control_sites_t sites = {0};
     IREE_RETURN_IF_ERROR(loom_pipeline_control_collect(
         invocation, execution, options, rewriter->arena, &sites));
-    for (iree_host_size_t engine = 0; engine < execution->engine_count;
-         ++engine) {
-      if (execution->workers[invocation->ordinal * execution->engine_count +
-                             engine] == IREE_HOST_SIZE_MAX) {
-        continue;
-      }
+    loom_pipeline_participant_iterator_t iterator;
+    loom_pipeline_participants_begin(participants, &iterator);
+    loom_pipeline_participant_t participant;
+    iree_host_size_t index = execution->offsets[invocation->ordinal];
+    while (loom_pipeline_participants_next(&iterator, &participant)) {
+      const iree_host_size_t engine = participant.engine;
       loom_pipeline_control_function_t boundaries[2] = {0};
       const bool prepares =
-          sites.preparation_engines && sites.preparation_engines[engine];
+          sites.preparation_engines &&
+          sites.preparation_engines[index -
+                                    execution->offsets[invocation->ordinal]];
       for (int phase = sites.has_deferred || prepares ? 0 : 2; phase < 3;
            ++phase) {
         if (phase == 1 && !sites.has_deferred) {
@@ -746,12 +765,10 @@ iree_status_t loom_pipeline_control_materialize(
             phase == 0   ? LOOM_PIPELINE_CONTROL_START
             : phase == 1 ? LOOM_PIPELINE_CONTROL_RETIRE
                          : LOOM_PIPELINE_CONTROL_COMPLETE,
-            boundaries,
-            phase < 2
-                ? &boundaries[phase]
-                : &functions[invocation->ordinal * execution->engine_count +
-                             engine]));
+            prepares, boundaries,
+            phase < 2 ? &boundaries[phase] : &functions[index]));
       }
+      ++index;
     }
   }
   return iree_ok_status();
