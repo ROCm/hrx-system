@@ -6,6 +6,7 @@
 
 #include "loom/transforms/cfg/cfg_converge.h"
 
+#include "loom/ir/float_facts.h"
 #include "loom/ir/local_value_domain.h"
 #include "loom/ir/value_refs.h"
 #include "loom/ir/value_replacement.h"
@@ -23,8 +24,11 @@
   V(statistics_type, loop_exit_frontiers_isolated,                        \
     "loop-exit-frontiers-isolated",                                       \
     "Number of loop exit frontiers isolated from enclosing decisions.")   \
+  V(statistics_type, downstream_frontiers_factored,                       \
+    "downstream-frontiers-factored",                                      \
+    "Number of downstream shared bodies given a predicate join.")         \
   V(statistics_type, values_carried, "values-carried",                    \
-    "Number of scalar live-ins carried across predicate joins.")
+    "Number of scalar live-ins and payloads carried across predicate joins.")
 
 LOOM_PASS_STATISTICS_DEFINE(loom_cfg_converge_statistics,
                             loom_cfg_converge_statistics_t,
@@ -746,6 +750,351 @@ static iree_status_t loom_cfg_converge_apply(loom_cfg_converge_plan_t* plan,
   return loom_rewriter_refresh_cfg_facts(rewriter, body);
 }
 
+typedef struct loom_cfg_converge_downstream_t {
+  // Next independent frontier retained from the same immutable CFG snapshot.
+  struct loom_cfg_converge_downstream_t* next;
+  // Shared body and final continuation, in predicate-true/false order.
+  loom_block_t* destinations[2];
+  // Body predecessors and exits bypassing the body from the selected subtree.
+  loom_cfg_edge_index_span_t edges[2];
+  // Shared body's original dense index, used to exclude its internal backedges.
+  uint16_t entry;
+  // Location of the authored branch whose overlap requires convergence.
+  loom_location_id_t location;
+} loom_cfg_converge_downstream_t;
+
+static bool loom_cfg_converge_downstream_edge(
+    const loom_value_fact_cfg_region_t* facts,
+    const loom_cfg_converge_downstream_t* plan, uint8_t arm,
+    const loom_cfg_edge_info_t* edge) {
+  return facts->graph.blocks[edge->source_block_index].reachable &&
+         (arm != 0 ||
+          !loom_cfg_dominance_block_dominates(&facts->dominance, plan->entry,
+                                              edge->source_block_index));
+}
+
+// The branch subtree exits to a shared body or bypasses it to the final
+// continuation. The body's own subtree exits only to that continuation. Its
+// immediate dominator must dominate the branch: adding a bypass-to-body path
+// then preserves every original dominance relationship. No live-in capture
+// scan is needed, and effects stay in their original blocks.
+static bool loom_cfg_converge_downstream_select(
+    const loom_value_fact_cfg_region_t* facts, uint16_t source, uint16_t entry,
+    uint16_t continuation, loom_cfg_converge_downstream_t* out_plan) {
+  const loom_cfg_graph_t* graph = &facts->graph;
+  const loom_cfg_dominance_t* dominance = &facts->dominance;
+  const loom_cfg_regions_t* regions = &facts->regions;
+  if (entry == LOOM_CFG_REGION_CONTINUATION_NONE || entry == continuation ||
+      regions->blocks[entry].continuation_index != continuation ||
+      loom_cfg_dominance_block_dominates(dominance, source, entry) ||
+      loom_cfg_dominance_block_dominates(dominance, entry, source) ||
+      loom_cfg_dominance_block_dominates(dominance, source, continuation) ||
+      !loom_cfg_dominance_block_dominates(
+          dominance, dominance->immediate_dominators[entry], source)) {
+    return false;
+  }
+  const loom_cfg_loop_nest_t* loops = &facts->loops;
+  if (graph->blocks[source].component_is_cyclic ||
+      graph->blocks[entry].component_is_cyclic) {
+    if (!loops->reducible) {
+      return false;
+    }
+    uint16_t loop = loom_cfg_loop_nest_innermost(loops, source);
+    if (loom_cfg_loop_nest_innermost(loops, continuation) != loop ||
+        (loop != LOOM_CFG_LOOP_NEST_NONE &&
+         (loops->loops[loop].header_index == continuation ||
+          !loom_cfg_loop_nest_contains(loops, loop, entry)))) {
+      return false;
+    }
+  }
+  loom_cfg_edge_index_span_t to_body =
+      loom_cfg_regions_edges_to(graph, dominance, regions, source, entry);
+  loom_cfg_edge_index_span_t bypass = loom_cfg_regions_edges_to(
+      graph, dominance, regions, source, continuation);
+  if (to_body.count == 0 || bypass.count == 0 ||
+      to_body.count + bypass.count != regions->blocks[source].exit_count) {
+    return false;
+  }
+  loom_block_t* body = (loom_block_t*)graph->blocks[entry].block;
+  loom_block_t* end = (loom_block_t*)graph->blocks[continuation].block;
+  if ((uint32_t)body->arg_count + end->arg_count + 1 > UINT16_MAX) {
+    return false;
+  }
+  loom_block_t* destinations[] = {body, end};
+  for (uint8_t arm = 0; arm < 2; ++arm) {
+    for (uint16_t i = 0; i < destinations[arm]->arg_count; ++i) {
+      if (!loom_type_has_constant_materializer(loom_module_value_type(
+              graph->module, destinations[arm]->arg_ids[i]))) {
+        return false;
+      }
+    }
+  }
+  *out_plan = (loom_cfg_converge_downstream_t){
+      .destinations = {body, end},
+      .edges = {loom_cfg_graph_predecessor_edges(graph, entry), bypass},
+      .entry = entry,
+      .location = graph->blocks[source].block->last_op->location,
+  };
+  return true;
+}
+
+// Plans disjoint redirected edge sets. Each rewrite preserves the old blocks'
+// dominance and iteration boundaries, so independent plans can share one fact
+// refresh. An overlapping set waits for the next snapshot.
+static iree_status_t loom_cfg_converge_plan_downstream(
+    loom_rewriter_t* rewriter, const loom_value_fact_cfg_region_t* facts,
+    iree_arena_allocator_t* arena, loom_cfg_converge_downstream_t** out_plans) {
+  *out_plans = NULL;
+  const loom_cfg_graph_t* graph = &facts->graph;
+  const loom_cfg_postdominance_t* postdominance =
+      &facts->control_structure.postdominance;
+  uint8_t* claimed_edges = NULL;
+  uint8_t* claimed_entries = NULL;
+  iree_host_size_t block_count = graph->block_count;
+  loom_cfg_converge_downstream_t** next = out_plans;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < graph->reverse_postorder.count && iree_status_is_ok(status); ++i) {
+    uint16_t source = graph->reverse_postorder.values[i];
+    const loom_op_t* branch = graph->blocks[source].block->last_op;
+    if (!loom_cfg_cond_br_isa(branch)) {
+      continue;
+    }
+    uint32_t continuation =
+        postdominance->nodes[source].immediate_postdominator;
+    if (continuation == postdominance->exit_node) {
+      continue;
+    }
+    uint16_t destinations[] = {
+        loom_cfg_cond_br_true_dest(branch)->region_index,
+        loom_cfg_cond_br_false_dest(branch)->region_index};
+    for (uint8_t arm = 0; arm < 2 && iree_status_is_ok(status); ++arm) {
+      uint16_t entry =
+          facts->regions.blocks[destinations[arm]].continuation_index;
+      // Immediate shared successors belong to ordinary decision factoring.
+      if (entry == destinations[0] || entry == destinations[1] ||
+          entry == LOOM_CFG_REGION_CONTINUATION_NONE ||
+          (claimed_entries && claimed_entries[entry])) {
+        continue;
+      }
+      loom_cfg_converge_downstream_t candidate;
+      if (!loom_cfg_converge_downstream_select(
+              facts, source, entry, (uint16_t)continuation, &candidate)) {
+        continue;
+      }
+      if (loom_value_facts_is_uniform_at_scope(
+              loom_value_fact_control_execution(facts->control, source),
+              LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP) &&
+          loom_value_facts_is_uniform_at_scope(
+              loom_value_fact_table_lookup(rewriter->fact_table,
+                                           loom_cfg_cond_br_condition(branch)),
+              LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP)) {
+        continue;
+      }
+      iree_host_size_t added_blocks =
+          1 + (candidate.destinations[0]->arg_count != 0) +
+          (candidate.destinations[1]->arg_count != 0);
+      bool supported = true;
+      for (uint8_t side = 0; side < 2 && supported; ++side) {
+        for (iree_host_size_t j = 0; j < candidate.edges[side].count; ++j) {
+          loom_cfg_edge_index_t index = candidate.edges[side].values[j];
+          const loom_cfg_edge_info_t* edge = &graph->edges[index];
+          if (!loom_cfg_converge_downstream_edge(facts, &candidate, side,
+                                                 edge)) {
+            continue;
+          }
+          if ((claimed_edges && claimed_edges[index]) ||
+              (!loom_cfg_br_isa(edge->terminator) &&
+               !loom_cfg_cond_br_isa(edge->terminator))) {
+            supported = false;
+            break;
+          }
+          added_blocks += loom_cfg_cond_br_isa(edge->terminator);
+        }
+      }
+      if (!supported || block_count + added_blocks > UINT16_MAX) {
+        continue;
+      }
+      if (!claimed_edges) {
+        iree_host_size_t claim_count = graph->edge_count + graph->block_count;
+        status = iree_arena_allocate_array(
+            arena, claim_count, sizeof(*claimed_edges), (void**)&claimed_edges);
+        if (iree_status_is_ok(status)) {
+          memset(claimed_edges, 0, claim_count * sizeof(*claimed_edges));
+          claimed_entries = claimed_edges + graph->edge_count;
+        }
+      }
+      loom_cfg_converge_downstream_t* plan = NULL;
+      if (iree_status_is_ok(status)) {
+        status = iree_arena_allocate(arena, sizeof(*plan), (void**)&plan);
+      }
+      if (!iree_status_is_ok(status)) {
+        break;
+      }
+      *plan = candidate;
+      *next = plan;
+      next = &plan->next;
+      claimed_entries[entry] = 1;
+      block_count += added_blocks;
+      for (uint8_t side = 0; side < 2; ++side) {
+        for (iree_host_size_t j = 0; j < plan->edges[side].count; ++j) {
+          loom_cfg_edge_index_t index = plan->edges[side].values[j];
+          if (loom_cfg_converge_downstream_edge(facts, plan, side,
+                                                &graph->edges[index])) {
+            claimed_edges[index] = 1;
+          }
+        }
+      }
+      break;
+    }
+  }
+  return status;
+}
+
+// Redirects one original edge with its selected tuple and defined inactive
+// values for the other tuple. Only conditional edges need an adapter block;
+// direct branches retain their original source block and effect ordering.
+static iree_status_t loom_cfg_converge_downstream_incoming(
+    loom_module_t* module, loom_rewriter_t* rewriter,
+    const loom_cfg_converge_downstream_t* plan, uint8_t arm,
+    const loom_cfg_edge_info_t* edge, loom_block_t* join,
+    const uint16_t* offsets, loom_value_id_t* payload) {
+  loom_builder_t* builder = &rewriter->builder;
+  loom_op_t* terminator = (loom_op_t*)edge->terminator;
+  bool direct = loom_cfg_br_isa(terminator);
+  if (direct) {
+    loom_builder_set_before(builder, terminator);
+  } else {
+    loom_block_t* incoming = NULL;
+    IREE_RETURN_IF_ERROR(loom_region_insert_block(
+        module, join->parent_region, join->region_index, &incoming));
+    loom_op_successors(terminator)[edge->successor_index] = incoming;
+    loom_builder_set_block(builder, incoming);
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_constant_build(builder, loom_value_facts_exact_i64(arm == 0),
+                          loom_type_scalar(LOOM_SCALAR_TYPE_I1),
+                          terminator->location, &payload[0]));
+  iree_status_t status = iree_ok_status();
+  for (uint8_t side = 0; side < 2 && iree_status_is_ok(status); ++side) {
+    for (uint16_t j = 0;
+         j < plan->destinations[side]->arg_count && iree_status_is_ok(status);
+         ++j) {
+      if (side == arm) {
+        payload[offsets[side] + j] = loom_op_operands(terminator)[j];
+      } else {
+        loom_type_t type = loom_module_value_type(
+            module, plan->destinations[side]->arg_ids[j]);
+        loom_scalar_type_t element = loom_type_element_type(type);
+        loom_value_facts_t zero = loom_scalar_type_is_float(element)
+                                      ? loom_value_facts_exact_float(element, 0)
+                                      : loom_value_facts_exact_i64(0);
+        status = loom_constant_build(builder, zero, type, terminator->location,
+                                     &payload[offsets[side] + j]);
+      }
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    loom_op_t* branch = NULL;
+    status = loom_cfg_br_build(builder, join, payload, join->arg_count,
+                               terminator->location, &branch);
+  }
+  if (iree_status_is_ok(status) && direct) {
+    status = loom_rewriter_erase(rewriter, terminator);
+  }
+  return status;
+}
+
+static iree_status_t loom_cfg_converge_apply_downstream(
+    loom_module_t* module, loom_rewriter_t* rewriter,
+    const loom_value_fact_cfg_region_t* facts, iree_arena_allocator_t* arena,
+    const loom_cfg_converge_downstream_t* plan) {
+  loom_region_t* region = plan->destinations[0]->parent_region;
+  loom_builder_t* builder = &rewriter->builder;
+  builder->ip.parent_op = plan->destinations[0]->first_op->parent_op;
+  loom_block_t* join = NULL;
+  IREE_RETURN_IF_ERROR(loom_region_insert_block(
+      module, region, plan->destinations[0]->region_index, &join));
+  loom_value_id_t choice = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_builder_define_block_arg(
+      builder, join, loom_type_scalar(LOOM_SCALAR_TYPE_I1), &choice));
+  uint16_t offsets[2] = {1, (uint16_t)(1 + plan->destinations[0]->arg_count)};
+  loom_block_t* destinations[2] = {plan->destinations[0],
+                                   plan->destinations[1]};
+  iree_status_t status = iree_ok_status();
+  for (uint8_t arm = 0; arm < 2 && iree_status_is_ok(status); ++arm) {
+    loom_block_t* destination = plan->destinations[arm];
+    for (uint16_t i = 0;
+         i < destination->arg_count && iree_status_is_ok(status); ++i) {
+      loom_value_id_t argument = LOOM_VALUE_ID_INVALID;
+      status = loom_builder_define_block_arg(
+          builder, join,
+          loom_module_value_type(module, destination->arg_ids[i]), &argument);
+    }
+    if (iree_status_is_ok(status) && destination->arg_count != 0) {
+      status = loom_region_insert_block(
+          module, region, destination->region_index, &destinations[arm]);
+      if (iree_status_is_ok(status)) {
+        loom_builder_set_block(builder, destinations[arm]);
+        loom_op_t* forwarding = NULL;
+        status = loom_cfg_br_build(
+            builder, destination, join->arg_ids + offsets[arm],
+            destination->arg_count, plan->location, &forwarding);
+      }
+    }
+  }
+  IREE_RETURN_IF_ERROR(status);
+  loom_builder_set_block(builder, join);
+  loom_op_t* branch = NULL;
+  IREE_RETURN_IF_ERROR(loom_cfg_cond_br_build(builder, choice, destinations[0],
+                                              destinations[1], plan->location,
+                                              &branch));
+  loom_value_id_t* payload = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, join->arg_count, sizeof(*payload), (void**)&payload));
+  for (uint8_t arm = 0; arm < 2 && iree_status_is_ok(status); ++arm) {
+    for (iree_host_size_t i = 0;
+         i < plan->edges[arm].count && iree_status_is_ok(status); ++i) {
+      const loom_cfg_edge_info_t* edge =
+          &facts->graph.edges[plan->edges[arm].values[i]];
+      if (loom_cfg_converge_downstream_edge(facts, plan, arm, edge)) {
+        status = loom_cfg_converge_downstream_incoming(
+            module, rewriter, plan, arm, edge, join, offsets, payload);
+      }
+    }
+  }
+  return status;
+}
+
+static iree_status_t loom_cfg_converge_factor_downstream(
+    loom_pass_t* pass, loom_module_t* module, loom_rewriter_t* rewriter,
+    iree_arena_allocator_t* arena, const loom_value_fact_cfg_region_t* facts,
+    bool* out_changed) {
+  *out_changed = false;
+  iree_arena_reset(arena);
+  loom_cfg_converge_downstream_t* plans = NULL;
+  iree_status_t status =
+      loom_cfg_converge_plan_downstream(rewriter, facts, arena, &plans);
+  for (const loom_cfg_converge_downstream_t* plan = plans;
+       plan && iree_status_is_ok(status); plan = plan->next) {
+    status = loom_cfg_converge_apply_downstream(module, rewriter, facts, arena,
+                                                plan);
+    if (iree_status_is_ok(status)) {
+      loom_cfg_converge_statistics_t* statistics =
+          loom_cfg_converge_statistics(pass);
+      ++statistics->downstream_frontiers_factored;
+      statistics->values_carried +=
+          plan->destinations[0]->arg_count + plan->destinations[1]->arg_count;
+      *out_changed = true;
+    }
+  }
+  if (iree_status_is_ok(status) && *out_changed) {
+    status = loom_rewriter_refresh_cfg_facts(
+        rewriter, plans->destinations[0]->parent_region);
+  }
+  return status;
+}
+
 static iree_status_t loom_cfg_converge_once(
     loom_pass_t* pass, loom_module_t* module, loom_rewriter_t* rewriter,
     iree_arena_allocator_t* arena, const loom_value_fact_cfg_region_t* facts,
@@ -836,6 +1185,10 @@ iree_status_t loom_cfg_converge_run(loom_pass_t* pass, loom_module_t* module,
     if (iree_status_is_ok(status) && !changed) {
       status = loom_cfg_converge_once(pass, module, &rewriter, &arena, facts,
                                       &changed);
+    }
+    if (iree_status_is_ok(status) && !changed) {
+      status = loom_cfg_converge_factor_downstream(pass, module, &rewriter,
+                                                   &arena, facts, &changed);
     }
     any_changed |= changed;
   }
