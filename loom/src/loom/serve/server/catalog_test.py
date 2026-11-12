@@ -932,6 +932,8 @@ def check_control_contracts(server_command, directory, catalog):
     catalog_path.parent.mkdir()
     write_startup(catalog_path, catalog)
     models = {entry["definition"]["kind"]: entry for entry in catalog["models"]}
+    # Model status exposes the primary error message. The runtime program tests
+    # own the expected/source type-pair annotations attached to these errors.
     cases = [
         (
             "text",
@@ -951,14 +953,12 @@ def check_control_contracts(server_command, directory, catalog):
         (
             "text",
             [("%row: i32, %options: buffer", "%row: i64, %options: buffer")],
-            "model export 'bind_request' argument 1 type mismatch: "
-            "host expects i32, source declares i64",
+            "model export 'bind_request' argument 1 type mismatch",
         ),
         (
             "image",
             [("%tags: buffer, %ranges", "%tags: hal.buffer, %ranges")],
-            "model export 'prepare_batch' argument 1 type mismatch: "
-            "host expects vm.buffer, source declares hal.buffer",
+            "model export 'prepare_batch' argument 1 type mismatch",
         ),
         (
             "image",
@@ -970,14 +970,20 @@ def check_control_contracts(server_command, directory, catalog):
                     "  %loras = buffer.alloca<private> align(1) %empty : buffer",
                 )
             ],
-            "model export 'prepare_request' argument 5 type mismatch: "
-            "host expects vm.buffer, source declares hal.buffer",
+            "model export 'prepare_request' argument 5 type mismatch",
         ),
         (
             "embedding",
-            [("%packed: buffer)", "%packed: buffer, %extra: i32)")],
+            [
+                (
+                    "func.def public @prepare_batch(%state: buffer, %tags: "
+                    "buffer, %batch: ptr<@FiniteBatch>)",
+                    "func.def public @prepare_batch(%state: buffer, %tags: "
+                    "buffer, %batch: ptr<@FiniteBatch>, %extra: i32)",
+                )
+            ],
             "model export 'prepare_batch' argument count mismatch: "
-            "host expects 4, source declares 5",
+            "host expects 3, source declares 4",
         ),
         (
             "decision",

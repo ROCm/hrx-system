@@ -612,11 +612,15 @@ def prepare_catalog(fixtures, directory):
         model = json.loads((directory / package / "model.json").read_text())
         model["base_directory"] = str(directory / package)
         if kind == "text":
+            # Exercise automatic cache sizing with a fixture-sized budget. The
+            # tiny recurrent state would fit millions of endpoints in the
+            # production default.
             model["definition"].update(
                 weights=str(weights),
                 rows=2,
                 context_capacity=128,
                 checkpoint_capacity=2,
+                cache_target_bytes=65536,
             )
         catalog["models"].append(model)
     catalog_path = directory / "configuration" / "models.flags"
