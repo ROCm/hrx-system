@@ -153,6 +153,38 @@ class LoomBinaryBuildFileFunctions:
     def loom_config_compatible_with(self, config_labels):
         return list(config_labels)
 
+    def iree_hal_amd_gpu_cts_testdata(self, name, srcs, backend_names, **kwargs):
+        if not getattr(self, "_amd_gpu_cts_profiles_emitted", False):
+            self._amd_gpu_cts_profiles_emitted = True
+            capabilities = self._loaded_modules.symbol(
+                "//loom/build_tools/amdgpu:target_config.bzl",
+                "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET",
+                self._build_dir,
+            )
+            self._converter.body += (
+                'include("${IREE_SOURCE_DIR}/runtime/build_tools/cmake/iree_runtime_amd_gpu_cts.cmake")\n\n'
+                "set(_IREE_HAL_AMD_GPU_CTS_TARGETS\n"
+                + "".join(
+                    f'  "{target}=LOOM_ARCH_AMDGPU_{capability.upper()}"\n'
+                    for target, capability in capabilities.items()
+                )
+                + ")\n\n"
+            )
+        compatibility = (kwargs.pop("target_compatible_with", None) or []) + [
+            "//loom/config/emit:amdgpu_elf",
+            "//runtime/config/hal:driver_amd_gpu",
+        ]
+        self._emit_platform_guard_begin(compatibility)
+        self._converter.body += (
+            "iree_hal_amd_gpu_cts_testdata(\n"
+            + self._convert_string_arg_block("NAME", name)
+            + self._convert_data_srcs_block(srcs, sort=False)
+            + self._convert_string_list_block("BACKEND_NAMES", backend_names)
+            + "  TARGETS ${_IREE_HAL_AMD_GPU_CTS_TARGETS}\n"
+            + ")\n\n"
+        )
+        self._emit_platform_guard_end(compatibility)
+
     def _register_loom_module_target(self, name):
         if not hasattr(self, "_loom_module_targets"):
             self._loom_module_targets = set()
