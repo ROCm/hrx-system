@@ -303,11 +303,27 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "callable_compile",
+    srcs = ["callable_compile.c"],
+    hdrs = ["callable_compile.h"],
+    deps = [
+        ":leaf_compile",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p:call_abi",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "program_compile",
     srcs = ["program_compile.c"],
     hdrs = ["program_compile.h"],
     visibility = ["//loom/src/loom/target/arch/amd/xdna/aie2p:implementation"],
     deps = [
+        ":callable_compile",
         ":leaf_compile",
         ":program_capacity",
         ":program_object",
@@ -315,9 +331,8 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/low",
-        "//loom/src/loom/target:registers",
         "//loom/src/loom/target/arch/amd/xdna/aie2p:call_abi",
-        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/machine",
         "//loom/src/loom/target/reporting:report",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

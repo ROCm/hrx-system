@@ -6,34 +6,16 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_compile.h"
 
-#include <stdlib.h>
 #include <string.h>
 
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/arch/amd/xdna/aie2p/call_abi.h"
-#include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/callable_compile.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_capacity.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_object.h"
-#include "loom/target/registers.h"
-
-typedef struct loom_aie2p_program_callable_t {
-  // ABI carriers for arguments followed by results.
-  loom_low_allocation_abi_location_t* locations;
-  // Number of argument carriers in |locations|.
-  uint16_t argument_count;
-  // Number of result carriers following the arguments.
-  uint16_t result_count;
-  // Physical registers overwritten by the helper and its ABI transport.
-  loom_low_call_clobber_t* clobbers;
-  // Number of distinct physical-register clobber records.
-  iree_host_size_t clobber_count;
-  // Immutable call contract borrowing the carriers and clobbers above.
-  loom_low_call_contract_t call_contract;
-  // Native object paired with this exact register contract.
-  loom_aie2p_leaf_contribution_t contribution;
-} loom_aie2p_program_callable_t;
+#include "loom/target/arch/amd/xdna/aie2p/machine/machine.h"
 
 struct loom_aie2p_program_compiler_t {
   // Prepared module whose helper target versions remain fixed.
@@ -45,7 +27,7 @@ struct loom_aie2p_program_compiler_t {
   // Requested report detail fixed for every program compiled by this instance.
   loom_target_compile_report_detail_flags_t requested_detail_flags;
   // Compiled helpers indexed by source symbol; allocated on first native call.
-  loom_aie2p_program_callable_t** helpers_by_symbol;
+  loom_aie2p_callable_t** helpers_by_symbol;
   // Optional helper reports indexed in parallel with |helpers_by_symbol|.
   loom_target_compile_report_t** helper_reports_by_symbol;
 };
@@ -116,162 +98,6 @@ static const loom_low_call_contract_t* loom_aie2p_program_call_contract_query(
   return &context->helpers_by_symbol[callee.symbol_id]->call_contract;
 }
 
-static iree_status_t loom_aie2p_program_prepare_abi(
-    const loom_module_t* module, loom_op_t* function_op,
-    iree_arena_allocator_t* arena, loom_aie2p_program_callable_t* callable) {
-  const loom_func_like_t function = loom_func_like_cast(module, function_op);
-  const loom_value_id_t* arguments =
-      loom_func_like_arg_ids(function, &callable->argument_count);
-  callable->result_count = function_op->result_count;
-  const iree_host_size_t location_count =
-      (iree_host_size_t)callable->argument_count + callable->result_count;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, location_count,
-                                                 sizeof(*callable->locations),
-                                                 (void**)&callable->locations));
-  for (uint16_t side = 0; side < 2; ++side) {
-    loom_aie2p_call_abi_requirements_t requirements = {0};
-    const uint16_t count =
-        side == 0 ? callable->argument_count : callable->result_count;
-    for (uint16_t i = 0; i < count; ++i) {
-      const loom_value_id_t value =
-          side == 0 ? arguments[i] : loom_op_results(function_op)[i];
-      loom_low_allocation_abi_location_t* location =
-          &callable->locations[(side == 0 ? 0 : callable->argument_count) + i];
-      IREE_RETURN_IF_ERROR(loom_aie2p_call_abi_select_location(
-          loom_module_value_type(module, value), &requirements, location));
-    }
-  }
-  callable->call_contract = (loom_low_call_contract_t){
-      .arguments = callable->locations,
-      .argument_count = callable->argument_count,
-      .results = callable->locations + callable->argument_count,
-      .result_count = callable->result_count,
-  };
-  return iree_ok_status();
-}
-
-static iree_host_size_t loom_aie2p_program_clobber_count(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_aie2p_leaf_realization_t* realization) {
-  iree_host_size_t count = 0;
-  for (uint16_t class_id = 0; class_id < descriptor_set->reg_class_count;
-       ++class_id) {
-    const loom_low_reg_class_t* reg_class =
-        &descriptor_set->reg_classes[class_id];
-    if (!loom_low_reg_class_uses_explicit_physical_registers(reg_class)) {
-      continue;
-    }
-    for (uint16_t i = 0; i < reg_class->allocatable_count; ++i) {
-      const uint16_t physical_register =
-          loom_low_descriptor_set_physical_register_candidate(descriptor_set,
-                                                              class_id, i);
-      count +=
-          loom_aie2p_leaf_may_write_register(realization, physical_register);
-    }
-  }
-  return count;
-}
-
-static iree_host_size_t loom_aie2p_program_transport_clobber_count(
-    const loom_aie2p_program_callable_t* callable) {
-  iree_host_size_t count = 0;
-  const iree_host_size_t location_count =
-      (iree_host_size_t)callable->argument_count + callable->result_count;
-  for (iree_host_size_t i = 0; i < location_count; ++i) {
-    count += callable->locations[i].location_kind ==
-             LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  }
-  return count;
-}
-
-static int loom_aie2p_program_compare_clobbers(const void* lhs_ptr,
-                                               const void* rhs_ptr) {
-  const loom_low_call_clobber_t* lhs = lhs_ptr;
-  const loom_low_call_clobber_t* rhs = rhs_ptr;
-  if (lhs->location != rhs->location) {
-    return lhs->location < rhs->location ? -1 : 1;
-  }
-  if (lhs->register_class != rhs->register_class) {
-    return lhs->register_class < rhs->register_class ? -1 : 1;
-  }
-  return 0;
-}
-
-static iree_status_t loom_aie2p_program_prepare_clobbers(
-    const loom_low_descriptor_set_t* descriptor_set,
-    iree_arena_allocator_t* arena, loom_aie2p_program_callable_t* callable) {
-  const iree_host_size_t clobber_capacity =
-      loom_aie2p_program_clobber_count(descriptor_set,
-                                       &callable->contribution.realization) +
-      loom_aie2p_program_transport_clobber_count(callable);
-  if (clobber_capacity != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, clobber_capacity, sizeof(*callable->clobbers),
-        (void**)&callable->clobbers));
-  }
-  iree_host_size_t clobber_index = 0;
-  for (uint16_t class_id = 0; class_id < descriptor_set->reg_class_count;
-       ++class_id) {
-    const loom_low_reg_class_t* reg_class =
-        &descriptor_set->reg_classes[class_id];
-    if (!loom_low_reg_class_uses_explicit_physical_registers(reg_class)) {
-      continue;
-    }
-    for (uint16_t i = 0; i < reg_class->allocatable_count; ++i) {
-      const uint16_t physical_register =
-          loom_low_descriptor_set_physical_register_candidate(descriptor_set,
-                                                              class_id, i);
-      if (!loom_aie2p_leaf_may_write_register(
-              &callable->contribution.realization, physical_register)) {
-        continue;
-      }
-      callable->clobbers[clobber_index++] = (loom_low_call_clobber_t){
-          .register_class = class_id,
-          .location = physical_register,
-          .count = 1,
-      };
-    }
-  }
-  // Argument transport overwrites ABI carriers before the helper starts, and
-  // result transport overwrites them before caller values resume. These writes
-  // belong to the call boundary rather than the helper body.
-  const iree_host_size_t location_count =
-      (iree_host_size_t)callable->argument_count + callable->result_count;
-  for (iree_host_size_t i = 0; i < location_count; ++i) {
-    const loom_low_allocation_abi_location_t* location =
-        &callable->locations[i];
-    if (location->location_kind !=
-        LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
-      continue;
-    }
-    callable->clobbers[clobber_index++] = (loom_low_call_clobber_t){
-        .register_class = location->descriptor_reg_class_id,
-        .location = location->location_base,
-        .count = 1,
-    };
-  }
-  IREE_ASSERT_EQ(clobber_index, clobber_capacity);
-  if (clobber_index != 0) {
-    qsort(callable->clobbers, clobber_index, sizeof(*callable->clobbers),
-          loom_aie2p_program_compare_clobbers);
-  }
-  callable->clobber_count = 0;
-  for (iree_host_size_t i = 0; i < clobber_index; ++i) {
-    if (callable->clobber_count != 0 &&
-        loom_aie2p_program_compare_clobbers(
-            &callable->clobbers[callable->clobber_count - 1],
-            &callable->clobbers[i]) == 0) {
-      continue;
-    }
-    callable->clobbers[callable->clobber_count++] = callable->clobbers[i];
-  }
-  callable->call_contract.clobbers = (loom_low_call_clobber_list_t){
-      .values = callable->clobbers,
-      .count = callable->clobber_count,
-  };
-  return iree_ok_status();
-}
-
 // Composes function-local reports into one final physical tile program. Native
 // code is resident once per helper, while its dynamic mix scales by the exact
 // number of calls made by one entry invocation. Final padding remains a target
@@ -292,7 +118,7 @@ static iree_status_t loom_aie2p_program_compose_report(
       report->static_instruction_mix;
   for (iree_host_size_t i = 0; i < direct_helpers.count; ++i) {
     const loom_symbol_ref_t helper_ref = direct_helpers.values[i].function;
-    const loom_aie2p_program_callable_t* helper =
+    const loom_aie2p_callable_t* helper =
         compiler->helpers_by_symbol[helper_ref.symbol_id];
     IREE_ASSERT(helper != NULL);
     const loom_target_compile_report_t* helper_report =
@@ -383,8 +209,6 @@ static iree_status_t loom_aie2p_program_compile_impl(
     iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
     bool* out_compiled, loom_aie2p_leaf_contribution_t* out_contribution) {
   loom_module_t* module = compiler->module;
-  const loom_low_descriptor_set_t* descriptor_set =
-      loom_aie2p_core_descriptor_set();
   // r24 and r25 are the position registers in the two load-FIFO tuples. Keep
   // the link shadow out of both tuples so native calls do not reduce the
   // worker from two simultaneous input streams to one.
@@ -442,7 +266,7 @@ static iree_status_t loom_aie2p_program_compile_impl(
     IREE_ASSERT_EQ(helper_ref.module_id, 0u);
     IREE_ASSERT_LT(helper_ref.symbol_id, module->symbols.count);
     const loom_symbol_id_t symbol_id = helper_ref.symbol_id;
-    const loom_aie2p_program_callable_t* retained_helper =
+    const loom_aie2p_callable_t* retained_helper =
         compiler->helpers_by_symbol[symbol_id];
     if (retained_helper != NULL) {
       contributions[i + 1] = retained_helper->contribution;
@@ -453,12 +277,9 @@ static iree_status_t loom_aie2p_program_compile_impl(
     IREE_ASSERT(loom_low_func_def_isa(symbol->defining_op));
     IREE_ASSERT(loom_func_like_is_module_internal(
         loom_func_like_cast(module, symbol->defining_op)));
-    loom_aie2p_program_callable_t* helper = NULL;
+    loom_aie2p_callable_t* helper = NULL;
     IREE_RETURN_IF_ERROR(
         iree_arena_allocate(arena, sizeof(*helper), (void**)&helper));
-    *helper = (loom_aie2p_program_callable_t){0};
-    IREE_RETURN_IF_ERROR(loom_aie2p_program_prepare_abi(
-        module, symbol->defining_op, arena, helper));
     loom_target_compile_report_t* helper_report_ptr = NULL;
     if (compiler->retains_compile_reports) {
       IREE_RETURN_IF_ERROR(iree_arena_allocate(
@@ -469,15 +290,10 @@ static iree_status_t loom_aie2p_program_compile_impl(
           compiler->requested_detail_flags;
     }
     const loom_aie2p_leaf_compile_options_t helper_options = {
-        .is_helper = true,
         .function_target_facts = helper_input->function_target_facts,
         .memory_accesses = helper_input->memory_accesses,
         .loop_execution = helper_input->loop_execution,
         .descriptor_registry = entry_options->descriptor_registry,
-        .allocation_entry_locations = helper->call_contract.arguments,
-        .allocation_entry_location_count = helper->call_contract.argument_count,
-        .allocation_exit_locations = helper->call_contract.results,
-        .allocation_exit_location_count = helper->call_contract.result_count,
         .allocation_reserved_ranges = helper_reservations,
         .allocation_reserved_range_count =
             LOOM_AIE2P_PROGRAM_HELPER_RESERVATION_COUNT,
@@ -485,9 +301,9 @@ static iree_status_t loom_aie2p_program_compile_impl(
         .compile_report = helper_report_ptr,
     };
     bool helper_compiled = false;
-    iree_status_t status =
-        loom_aie2p_leaf_compile(module, symbol->defining_op, &helper_options,
-                                arena, &helper_compiled, &helper->contribution);
+    iree_status_t status = loom_aie2p_callable_compile(
+        module, symbol->defining_op, &helper_options, arena, &helper_compiled,
+        helper);
     if (helper_report_ptr != NULL) {
       if (!helper_compiled) {
         status = iree_status_join(
@@ -499,8 +315,6 @@ static iree_status_t loom_aie2p_program_compile_impl(
     if (!helper_compiled) {
       return iree_ok_status();
     }
-    IREE_RETURN_IF_ERROR(
-        loom_aie2p_program_prepare_clobbers(descriptor_set, arena, helper));
     compiler->helpers_by_symbol[symbol_id] = helper;
     if (helper_report_ptr != NULL) {
       compiler->helper_reports_by_symbol[symbol_id] = helper_report_ptr;
