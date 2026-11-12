@@ -192,6 +192,22 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "input_contract_test",
+    srcs = ["input_contract_test.cc"],
+    deps = [
+        ":index",
+        ":index_reader",
+        ":writer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/template",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "reader_test",
     srcs = [
         "function_projection_reader_test.cc",

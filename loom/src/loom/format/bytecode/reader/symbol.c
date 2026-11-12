@@ -1100,6 +1100,13 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
                                  kind == LOOM_BYTECODE_SYMBOL_TEMPLATE_DEF ||
                                  kind == LOOM_BYTECODE_SYMBOL_TEMPLATE_UKERNEL);
     if (project_inputs) {
+      // Input types may name any argument, including a later one, but cannot
+      // depend on a result. Result co-dependencies belong to the output scheme
+      // and must never enter a pre-selection input requirement.
+      const loom_bytecode_attribute_ssa_validation_scope_t input_ssa_scope = {
+          .symbol_name = unused_name,
+          .value_count = arg_count,
+      };
       loom_bytecode_input_projection_begin_signature(table->input_projection);
       for (uint64_t i = 0; i < arg_count; ++i) {
         uint64_t type_id = 0;
@@ -1107,8 +1114,8 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
             reader, &table->cursor, &type_id));
         uint32_t shape_id = 0;
         IREE_RETURN_IF_ERROR(loom_bytecode_input_projection_read(
-            table->input_projection, &table->cursor, type_id,
-            &attribute_ssa_scope, &shape_id));
+            table->input_projection, &table->cursor, type_id, &input_ssa_scope,
+            &shape_id));
         IREE_RETURN_IF_ERROR(loom_bytecode_input_projection_add_argument(
             table->input_projection, (uint16_t)i, shape_id));
       }
