@@ -37,7 +37,8 @@ TEST_F(MemoryTest, BackingSelectionCountsActualUnionAndClearsFailedVisitors) {
     // Fail the first callback; every remaining mark must still be cleared.
     bool fail = false;
   } selected;
-  const auto visit = [](void* self, uint64_t offset, uint64_t length) {
+  const auto visit = [](void* self, iree_device_size_t offset,
+                        iree_device_size_t length) {
     auto* selected = static_cast<Selection*>(self);
     selected->ranges.emplace_back(offset, length);
     return selected->fail ? iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -103,7 +104,8 @@ TEST_F(MemoryTest, PendingAndFailedMappingRetainActualBacking) {
       owner(operation, free_operation);
   deferred_backing->WaitForAcquisition();
   EXPECT_EQ(statistics[0].pending_bytes, kSlabSize);
-  const auto visit = [](void* self, uint64_t offset, uint64_t length) {
+  const auto visit = [](void* self, iree_device_size_t offset,
+                        iree_device_size_t length) {
     EXPECT_EQ(offset, 0u);
     *static_cast<uint64_t*>(self) += length;
     return iree_ok_status();

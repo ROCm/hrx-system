@@ -60,6 +60,11 @@ CMAKE_REPOSITORY_SMOKE_CTEST_REGEXES = (
     "^libamdf/cts/core/query_dynamic$",
     "^build_tools/cmake/cmake_spirv_tools_test$",
     "^build_tools/cmake/cmake_generated_packages_test$",
+    "^build_tools/cmake/cmake_msvc_masm_test$",
+)
+CMAKE_HRX_REPOSITORY_SMOKE_CTEST_REGEXES = (
+    *CMAKE_REPOSITORY_SMOKE_CTEST_REGEXES,
+    "^libhrx/cts/tests/status/hrx_cts_status$",
 )
 BAZEL_REPOSITORY_DEVICE_TARGETS = (
     "//runtime/src/iree/hal/driver/amdgpu/util:pm4_dispatch_test_kernels",

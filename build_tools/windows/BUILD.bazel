@@ -43,7 +43,10 @@ platform(
     ],
 )
 
-exports_files(["toolchain.bzl"])
+exports_files([
+    "clang_cl_cross_toolchain.cmake",
+    "toolchain.bzl",
+])
 
 cc_test(
     name = "compiler_runtime_test",

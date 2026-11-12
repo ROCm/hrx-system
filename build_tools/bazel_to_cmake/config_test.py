@@ -411,12 +411,14 @@ objc_library(
             repo_root=str(repo_root),
         )
         self.assertNotIn("native_activity", cmake)
-        cmake = bazel_to_cmake_converter.convert_build_file(
+        converter = bazel_to_cmake_converter.evaluate_build_file(
             build.replace('"skip-bazel_to_cmake"', ""),
             repo_cfg,
             str(repo_root / "synthetic"),
             repo_root=str(repo_root),
         )
+        self.assertTrue(converter.requires_native_scope)
+        cmake = converter.convert()
         self.assertIn(
             'if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")\nenable_language(OBJC)', cmake
         )
