@@ -13,9 +13,11 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Native AMD HSA packet storage. The first DWORD is always published as one
-// complete release store after the remaining fifteen DWORDs. The ring contains
-// no host bookkeeping; even unused native fields belong to the packet ABI.
+// Native AMD HSA packet storage. The first DWORD gates publication. An
+// individually published packet releases it after its remaining fifteen DWORDs;
+// a packet span stays gated by its first INVALID header until all packets are
+// visible. The ring contains no host bookkeeping; even unused native fields
+// belong to the packet ABI.
 typedef struct iree_hal_amd_gpu_aql_packet_t {
   // Complete native representation, including header/setup at words[0].
   uint32_t words[16];

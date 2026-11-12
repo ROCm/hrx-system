@@ -82,6 +82,25 @@ amdf_status_t iree_hal_amd_gpu_aql_ring_write_packets(
                                                   packets[0].words[0]);
 }
 
+amdf_status_t iree_hal_amd_gpu_aql_ring_write_packets_with_completion(
+    const iree_hal_amd_gpu_aql_ring_t* ring,
+    const iree_hal_amd_gpu_user_queue_t* storage, uint64_t position,
+    uint32_t packet_count, const iree_hal_amd_gpu_aql_packet_t* packets,
+    uint64_t completion_address, uint32_t completion_stride) {
+  const uint32_t mask = ring->capacity - 1;
+  uint32_t* words = ring->packets[position & mask].words;
+  memcpy(words + 1, packets[0].words + 1, 13 * sizeof(uint32_t));
+  iree_unaligned_store_le_u64(words + 14, completion_address);
+  const uint64_t stride = completion_address ? completion_stride : 0;
+  for (uint32_t i = 1; i < packet_count; ++i) {
+    words = ring->packets[(position + i) & mask].words;
+    memcpy(words, packets[i].words, 14 * sizeof(uint32_t));
+    iree_unaligned_store_le_u64(words + 14, completion_address + i * stride);
+  }
+  return iree_hal_amd_gpu_aql_ring_publish_header(ring, storage, position,
+                                                  packets[0].words[0]);
+}
+
 void iree_hal_amd_gpu_aql_ring_notify(const iree_hal_amd_gpu_aql_ring_t* ring) {
   const iree_hal_memory_transition_recipe_info_t publication_fence = {
       .host = {.fence_after = IREE_HAL_HOST_CACHE_FENCE_X86_SFENCE},

@@ -44,7 +44,8 @@ uint64_t iree_hal_amd_gpu_aql_argument_length(
     const iree_hal_amd_gpu_aql_dispatch_request_t* request,
     uint32_t grid_length);
 
-// Exact upload extent for the current recorded-command chunk.
+// Exact upload extent for the current recorded-command chunk. Immutable host
+// templates need no invocation storage and return zero.
 uint64_t iree_hal_amd_gpu_aql_execute_argument_length(
     const iree_hal_amd_gpu_aql_command_invocation_t* invocation);
 

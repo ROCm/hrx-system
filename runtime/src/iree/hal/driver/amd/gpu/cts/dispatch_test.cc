@@ -21,6 +21,7 @@
 #include "iree/hal/driver/amd/gpu/image/hsaco.h"
 #include "iree/hal/driver/amd/gpu/kernarg.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/command_buffer.h"
+#include "iree/hal/driver/amd/gpu/queue/aql/publication.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/command_buffer.h"
 #include "iree/hal/slab_pool.h"
 #include "iree/testing/gtest.h"
@@ -1434,6 +1435,12 @@ TEST_P(GpuNativeDispatchTest, FixedArgumentsSurviveQueuedReplayAndTrim) {
         if (immutable_arguments) {
           EXPECT_EQ(program->host_template->fixup_count, 0u);
           EXPECT_EQ(program->host_template->byte_length, dispatch_count * 64);
+          iree_hal_amd_gpu_aql_command_invocation_t invocation;
+          IREE_ASSERT_OK(iree_hal_amd_gpu_aql_command_invocation_initialize(
+              recording, {}, nullptr, 0, &invocation));
+          EXPECT_EQ(iree_hal_amd_gpu_aql_execute_argument_length(&invocation),
+                    0u);
+          iree_hal_amd_gpu_aql_command_invocation_deinitialize(&invocation);
         }
       } else {
         ASSERT_EQ(program->host_template, nullptr);

@@ -35,11 +35,13 @@ typedef struct iree_hal_amd_gpu_aql_program_block_t {
 // template and fixup table follow in the same host allocation. Immutable
 // arguments may instead have a fixed device placement baked into the packets.
 typedef struct iree_hal_amd_gpu_aql_host_template_t {
-  // Complete packet/private-data extent copied into each invocation.
+  // Complete packet/private-data extent. Zero-fixup templates are read directly
+  // by the publisher; others are copied into invocation-private storage.
   uint32_t byte_length;
   // Required power-of-two alignment of the invocation's upload address.
   uint32_t alignment;
   // Independent DWORD replacements applied after resolving unique inputs.
+  // Zero means no invocation upload or dense input table is needed.
   uint32_t fixup_count;
   // Immutable fixup-table offset, also the invocation's dense-value offset.
   uint32_t fixup_offset;
@@ -137,6 +139,7 @@ void iree_hal_amd_gpu_aql_command_invocation_deinitialize(
 // Resolves unique input values once after upload address commitment. A bounded
 // host template is copied and patched into that invocation-private upload;
 // resident programs receive a dense value table for native fixup execution.
+// The publisher borrows zero-fixup host templates directly and omits this call.
 iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
     const iree_hal_amd_gpu_aql_command_invocation_t* invocation,
     uint32_t queue_ordinal, uint64_t upload_address, void* upload);

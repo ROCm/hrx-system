@@ -307,7 +307,7 @@ static iree_status_t iree_hal_amd_gpu_aql_command_drain_timestamps(
 
 // Direct dispatches with no invocation inputs have immutable argument bytes.
 // Resolve their only relocations (packet kernarg pointers) once while sealing.
-// Profiling still replaces completion operands in each invocation's host copy.
+// Profiling writes invocation-specific completion operands into native slots.
 static iree_status_t iree_hal_amd_gpu_aql_command_write_constants(
     iree_hal_amd_gpu_aql_command_buffer_t* buffer, uint8_t* commands) {
   iree_byte_span_t contents;
@@ -393,6 +393,15 @@ static iree_status_t iree_hal_amd_gpu_aql_command_end(
       } else {
         iree_hal_amd_gpu_recording_write(&buffer->recording, contents,
                                          (void*)(contents + fixup_offset));
+      }
+      if (direct) {
+        // All invocation arguments precede the first header publication. One
+        // system acquire makes them visible to the complete native sequence.
+        // These bits are invariant across invocations, including profiling.
+        iree_hal_amd_gpu_aql_packet_t* packet = (void*)contents;
+        packet->words[0] = (packet->words[0] & ~(3u << 9)) |
+                           IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM |
+                           IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED;
       }
     } else {
       iree_hal_amd_gpu_program_t* program = &buffer->program->resident;
