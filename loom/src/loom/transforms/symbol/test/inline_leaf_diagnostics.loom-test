@@ -1,0 +1,36 @@
+// RUN: pass specialize-target-callgraph,inline-callables{policy=target,budget=0,hot-budget=0}
+
+// Two authored retained boundaries cannot nest on a leaf-only ABI.
+test.target<low_leaf> @target
+
+func.def noinline target(@target) @inner(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def noinline target(@target) @outer(%value: i32) -> (i32) {
+  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="inner", failure_code="target_requires_leaf_callee"}
+  %result = func.call @inner(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public target(@target) @entry(%value: i32) -> (i32) {
+  %result = func.call @outer(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// Recursion cannot be repaired by expanding a finite set of call sites.
+test.target<low_leaf> @target
+
+func.def cold target(@target) @recursive(%value: i32) -> (i32) {
+  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="recursive", failure_code="native_call_cycle"}
+  %result = func.call @recursive(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public target(@target) @entry(%value: i32) -> (i32) {
+  %result = func.call @recursive(%value) : (i32) -> (i32)
+  func.return %result : i32
+}

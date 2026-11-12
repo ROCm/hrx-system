@@ -72,7 +72,9 @@ typedef iree_status_t (*loom_target_materialize_definition_fn_t)(
     loom_builder_t* builder, const loom_resolved_target_t* resolved_target,
     loom_symbol_ref_t symbol, loom_location_id_t location);
 
-// Target disposition for semantic calls and retained low.func.call edges.
+// Target constraints for semantic calls and retained low.func.call edges.
+// Flags compose; absence of REQUIRE_INLINE admits a direct boundary subject
+// to the remaining constraints.
 typedef enum loom_target_call_policy_e {
   // The target can preserve and emit the direct call boundary.
   LOOM_TARGET_CALL_POLICY_DIRECT = 0,
@@ -80,6 +82,9 @@ typedef enum loom_target_call_policy_e {
   // physical representation selection; authored Low edges inline after
   // normalization.
   LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE = 1,
+  // A retained callee must contain no native calls after inline selection.
+  // The shared planner chooses a legal cut through the call graph.
+  LOOM_TARGET_CALL_POLICY_REQUIRE_LEAF = 2,
 } loom_target_call_policy_t;
 
 // Physical carrier for lane predicates that cross loop boundaries.

@@ -344,9 +344,14 @@ static loom_target_call_policy_t loom_test_select_call_policy(
   (void)kind;
   (void)call;
   (void)callee;
-  return target->facts->selector == LOOM_TEST_TARGET_KIND_DEVICE
-             ? LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE
-             : LOOM_TARGET_CALL_POLICY_DIRECT;
+  switch (target->facts->selector) {
+    case LOOM_TEST_TARGET_KIND_DEVICE:
+      return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
+    case LOOM_TEST_TARGET_KIND_LOW_LEAF:
+      return LOOM_TARGET_CALL_POLICY_REQUIRE_LEAF;
+    default:
+      return LOOM_TARGET_CALL_POLICY_DIRECT;
+  }
 }
 
 const loom_target_provider_t loom_test_target_provider = {

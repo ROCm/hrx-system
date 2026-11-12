@@ -168,7 +168,7 @@ static loom_target_call_policy_t loom_aie2p_select_call_policy(
     }
   }
   return loom_aie2p_call_abi_requirements_fit(result_requirements)
-             ? LOOM_TARGET_CALL_POLICY_DIRECT
+             ? LOOM_TARGET_CALL_POLICY_REQUIRE_LEAF
              : LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
 }
 

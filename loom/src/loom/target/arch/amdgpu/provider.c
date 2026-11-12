@@ -185,7 +185,7 @@ static loom_target_call_policy_t loom_amdgpu_select_call_policy(
   const bool explicit_noinline =
       loom_call_like_inline_policy(call) == LOOM_INLINE_POLICY_NOINLINE ||
       loom_func_like_inline_policy(callee) == LOOM_INLINE_POLICY_NOINLINE;
-  return explicit_noinline ? LOOM_TARGET_CALL_POLICY_DIRECT
+  return explicit_noinline ? LOOM_TARGET_CALL_POLICY_REQUIRE_LEAF
                            : LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
 }
 

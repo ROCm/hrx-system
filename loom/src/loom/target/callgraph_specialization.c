@@ -737,9 +737,11 @@ static bool loom_target_callgraph_call_requires_exact_context(
           LOOM_INLINE_POLICY_INLINE) {
     return false;
   }
-  return loom_target_provider_select_call_policy(
-             &caller_context->resolved_target, state->module, kind, call,
-             callee->function) == LOOM_TARGET_CALL_POLICY_DIRECT;
+  const loom_target_call_policy_t policy =
+      loom_target_provider_select_call_policy(&caller_context->resolved_target,
+                                              state->module, kind, call,
+                                              callee->function);
+  return !iree_any_bit_set(policy, LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE);
 }
 
 static iree_status_t loom_target_callgraph_emit_external_conflict(
