@@ -107,7 +107,7 @@ iree_status_t loom_template_decl_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_TEMPLATE_DEF: Constraint-matched bodyful implementation of a template family.
+// LOOM_OP_TEMPLATE_DEF: Constraint-matched bodyful implementation of a template family. Declared input dimensions and complete encodings are applicability requirements. Other input structure and the family result contract remain exact.
 // template.def<@vector_transform> device priority(20) @vector_transform_fast(%value: vector<32xf32>) -> (vector<32xf32>) {
 //   template.return %value : vector<32xf32>
 // }
@@ -219,7 +219,7 @@ iree_status_t loom_template_ukernel_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_TEMPLATE_APPLY: Compile-time family application. A specializing link selects one applicable implementation before executable lowering. In a command program this is source composition whose selected implementation is inlined before portable command planning.
+// LOOM_OP_TEMPLATE_APPLY: Compile-time family application. A specializing link selects one applicable implementation before executable lowering. Input shape and complete encoding requirements are proven from application-site facts; result types do not select providers. Selected inputs are explicitly refined before an exactly typed call. In a command program this is source composition whose selected implementation is inlined before portable command planning.
 // %result = template.apply<@vector_transform>(%value) : (vector<32xf32>) -> (vector<32xf32>)
 LOOM_DEFINE_ISA(loom_template_apply_isa, LOOM_OP_TEMPLATE_APPLY)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_template_apply_operands, 0)

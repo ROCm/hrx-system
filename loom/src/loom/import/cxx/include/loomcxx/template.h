@@ -36,8 +36,10 @@ struct template_result<Result (*)(Parameters...) noexcept> {
 }  // namespace detail
 
 // Applies the statically named LOOM_TEMPLATE_DECL family. The family determines
-// the result type; deduced argument types are admitted by the Loom importer.
-// Passing a family through a C++ template parameter does not select a provider.
+// the result type. Deduced inputs preserve their actual shapes and complete
+// encodings for fact-driven template matching; ordinary C++ conversions do not
+// participate. Passing a family through a C++ template parameter does not
+// select a provider, and the requested result type never affects selection.
 template <auto Family, class... Args>
 [[loom::op("template.apply")]]
 typename detail::template_result<decltype(Family)>::type template_apply(
