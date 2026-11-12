@@ -304,15 +304,17 @@ TEST_F(HipVirtualMemoryApiTest,
       .location = properties[1].location,
       .flags = hipMemAccessFlagsProtReadWrite,
   };
-  // Admission rejects the GPU-only class before issuing a native map. The
-  // original GPU permissions and the reservation's timeline remain usable.
-  EXPECT_EQ(hipErrorInvalidContext, set_access_(Address(0), unit_, &host, 1));
-  unsigned long long access = 0;
-  ASSERT_EQ(hipSuccess, get_access_(&access, &host.location, Address(0)));
-  EXPECT_EQ(access, hipMemAccessFlagsProtNone);
-  ASSERT_EQ(hipSuccess, get_access_(&access, &gpu.location, Address(0)));
-  EXPECT_EQ(access, hipMemAccessFlagsProtReadWrite);
+  // Host permissions apply only to the selected virtual ranges, independently
+  // of whether the adjacent device-local backing also permits host mappings.
   ASSERT_EQ(hipSuccess, set_access_(Address(1), 2 * unit_, &host, 1));
+  for (size_t i = 0; i < mapped_.size(); ++i) {
+    unsigned long long access = 0;
+    ASSERT_EQ(hipSuccess, get_access_(&access, &host.location, Address(i)));
+    EXPECT_EQ(access, i == 0 ? hipMemAccessFlagsProtNone
+                             : hipMemAccessFlagsProtReadWrite);
+    ASSERT_EQ(hipSuccess, get_access_(&access, &gpu.location, Address(i)));
+    EXPECT_EQ(access, hipMemAccessFlagsProtReadWrite);
+  }
   for (auto& handle : handles_) {
     ASSERT_EQ(hipSuccess, release_(handle));
     handle = nullptr;
