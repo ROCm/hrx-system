@@ -430,6 +430,26 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "template_input_binding_test",
+    srcs = ["template_input_binding_test.cc"],
+    deps = [
+        ":index_materializer",
+        ":module_index",
+        ":planner",
+        "//loom/src/loom/format/bytecode:writer",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "index_materializer_test",
     srcs = ["index_materializer_test.cc"],
     deps = [

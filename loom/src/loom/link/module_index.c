@@ -689,6 +689,13 @@ static iree_status_t loom_link_index_append_template_provider(
   family->providers.last_symbol_ordinal = symbol_ordinal;
   ++family->providers.count;
   family->requires_bytecode_projection |= requires_bytecode_projection;
+  const loom_link_module_index_symbol_t* provider =
+      loom_link_module_index_symbol_at(index, symbol_ordinal);
+  const loom_link_module_index_module_t* module =
+      loom_link_module_index_symbol_module(index, provider);
+  family->has_input_module_dependencies |=
+      provider->input_contract_ordinal_plus_one &&
+      module->dependencies.root_count;
   return iree_ok_status();
 }
 
@@ -1091,6 +1098,14 @@ static bool loom_link_symbol_is_template_provider(loom_symbol_kind_t kind) {
 static iree_status_t loom_link_index_project_materialized_template_families(
     loom_link_module_index_t* index, loom_link_module_index_module_t* module,
     const loom_module_t* source_module) {
+  if (!source_module->symbols.count) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_link_project_input_contracts(
+      source_module,
+      loom_link_index_local_symbol_at(index, module->symbol_start_ordinal),
+      &index->arena, (const loom_input_contract_t***)&module->input_contracts,
+      &module->input_contract_count));
   for (iree_host_size_t i = 0; i < source_module->symbols.count; ++i) {
     const loom_symbol_t* source_symbol = &source_module->symbols.entries[i];
     loom_link_module_index_symbol_t* symbol = loom_link_index_local_symbol_at(
@@ -1122,14 +1137,7 @@ static iree_status_t loom_link_index_project_materialized_template_families(
         index, symbol->template_family_ordinal, symbol->ordinal,
         /*requires_bytecode_projection=*/false));
   }
-  if (!source_module->symbols.count) {
-    return iree_ok_status();
-  }
-  return loom_link_project_input_contracts(
-      source_module,
-      loom_link_index_local_symbol_at(index, module->symbol_start_ordinal),
-      &index->arena, (const loom_input_contract_t***)&module->input_contracts,
-      &module->input_contract_count);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_link_index_project_bytecode_template_families(
@@ -1513,9 +1521,9 @@ iree_status_t loom_link_module_index_add_materialized(
       /*owns_materialized_module=*/false, &indexed_module));
   IREE_RETURN_IF_ERROR(loom_link_index_module_materialized_symbols(
       index, indexed_module, module));
-  IREE_RETURN_IF_ERROR(loom_link_index_project_materialized_template_families(
-      index, indexed_module, module));
   IREE_RETURN_IF_ERROR(loom_link_index_project_materialized_references(
+      index, indexed_module, module));
+  IREE_RETURN_IF_ERROR(loom_link_index_project_materialized_template_families(
       index, indexed_module, module));
   if (out_provider_ordinal) {
     *out_provider_ordinal = provider->ordinal;
@@ -1568,9 +1576,9 @@ iree_status_t loom_link_module_index_add_bytecode(
         &indexed_module));
     IREE_RETURN_IF_ERROR(loom_link_index_module_bytecode_symbols(
         index, indexed_module, &metadata.modules[i]));
-    IREE_RETURN_IF_ERROR(loom_link_index_project_bytecode_template_families(
-        index, indexed_module, &metadata.modules[i]));
     IREE_RETURN_IF_ERROR(loom_link_index_project_bytecode_references(
+        index, indexed_module, &metadata.modules[i]));
+    IREE_RETURN_IF_ERROR(loom_link_index_project_bytecode_template_families(
         index, indexed_module, &metadata.modules[i]));
   }
 
@@ -1631,12 +1639,12 @@ iree_status_t loom_link_module_index_add_text(
           index, indexed_module, module);
     }
     if (iree_status_is_ok(status)) {
-      status = loom_link_index_project_materialized_template_families(
-          index, indexed_module, module);
-    }
-    if (iree_status_is_ok(status)) {
       status = loom_link_index_project_symbol_references(index, indexed_module,
                                                          &symbol_references);
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_link_index_project_materialized_template_families(
+          index, indexed_module, module);
     }
   }
 

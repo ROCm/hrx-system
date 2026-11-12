@@ -1169,8 +1169,9 @@ static iree_status_t loom_link_plan_expand_symbol_facet_dependencies(
 }
 
 static iree_status_t loom_link_plan_record_template_family_demand(
-    loom_link_plan_t* plan,
-    loom_link_template_family_ordinal_t family_ordinal) {
+    loom_link_plan_t* plan, const loom_link_plan_options_t* options,
+    loom_link_template_family_ordinal_t family_ordinal,
+    loom_link_plan_live_cause_t cause) {
   ++plan->demanded_template_families.occurrence_count;
   if (loom_link_plan_bitmap_test_and_set(&plan->reachability.template_families,
                                          family_ordinal)) {
@@ -1187,13 +1188,33 @@ static iree_status_t loom_link_plan_record_template_family_demand(
   plan->demanded_template_families
       .values[plan->demanded_template_families.count] = family_ordinal;
   plan->demanded_template_families.count = new_count;
+  const loom_link_module_index_template_family_t* family =
+      loom_link_module_index_template_family_at(plan->index, family_ordinal);
+  if (family->has_input_module_dependencies) {
+    const loom_link_module_index_symbol_t* provider =
+        loom_link_module_index_symbol_at(
+            plan->index, family->providers.first_symbol_ordinal);
+    while (provider) {
+      const loom_link_module_index_module_t* module =
+          loom_link_module_index_symbol_module(plan->index, provider);
+      if (provider->input_contract_ordinal_plus_one &&
+          !loom_link_plan_bitmap_test_and_set(&plan->reachability.modules,
+                                              module->ordinal)) {
+        IREE_RETURN_IF_ERROR(loom_link_plan_expand_module_dependencies(
+            plan, options, module, cause));
+      }
+      provider =
+          loom_link_module_index_next_template_provider(plan->index, provider);
+    }
+  }
   return iree_ok_status();
 }
 
 static iree_status_t loom_link_plan_record_symbol_facet_template_demands(
-    loom_link_plan_t* plan, const loom_link_module_index_symbol_t* symbol,
+    loom_link_plan_t* plan, const loom_link_plan_options_t* options,
+    const loom_link_module_index_symbol_t* symbol,
     const loom_link_module_index_module_t* module,
-    loom_link_symbol_facet_kind_t kind) {
+    loom_link_symbol_facet_kind_t kind, loom_link_plan_live_cause_t cause) {
   if (symbol->template_demands.count == 0) {
     return iree_ok_status();
   }
@@ -1211,7 +1232,7 @@ static iree_status_t loom_link_plan_record_symbol_facet_template_demands(
       continue;
     }
     IREE_RETURN_IF_ERROR(loom_link_plan_record_template_family_demand(
-        plan, template_families[i]));
+        plan, options, template_families[i], cause));
   }
   return iree_ok_status();
 }
@@ -1286,8 +1307,16 @@ static iree_status_t loom_link_plan_expand_complete_symbol(
     const loom_link_template_family_ordinal_t* template_families =
         module->template_demands.values + demand_first;
     for (uint32_t i = 0; i < symbol->template_demands.count; ++i) {
+      const loom_link_symbol_facet_kind_t source_kind =
+          loom_link_module_index_symbol_source_root_facet_kind(
+              symbol,
+              module->template_demands
+                  .source_root_region_indices_plus_one[demand_first + i]);
+      const loom_link_plan_live_cause_t cause =
+          loom_link_plan_facet_dependency_cause(plan, symbol_plan_ordinal,
+                                                source_kind);
       IREE_RETURN_IF_ERROR(loom_link_plan_record_template_family_demand(
-          plan, template_families[i]));
+          plan, options, template_families[i], cause));
     }
   }
 
@@ -1368,7 +1397,7 @@ static iree_status_t loom_link_plan_expand_facet(
   IREE_RETURN_IF_ERROR(loom_link_plan_expand_symbol_facet_dependencies(
       plan, options, symbol, module, facet.kind, cause));
   return loom_link_plan_record_symbol_facet_template_demands(
-      plan, symbol, module, facet.kind);
+      plan, options, symbol, module, facet.kind, cause);
 }
 
 //===----------------------------------------------------------------------===//

@@ -10,6 +10,10 @@
 #include "loom/rewrite/remap.h"
 
 struct loom_link_template_input_module_t {
+  // Current query owning the target module and symbol correspondence.
+  loom_link_template_input_binding_t* binding;
+  // Indexed source whose static encoding identities are being imported.
+  const loom_link_module_index_module_t* source;
   // Native source identity correspondence, initialized only when needed.
   loom_ir_remap_t native;
   // Bytecode correspondence, NULL for native sources or before first import.
@@ -20,6 +24,24 @@ struct loom_link_template_input_module_t {
   bool native_initialized;
 };
 
+static iree_status_t loom_link_template_input_resolve_symbol(
+    void* user_data, uint32_t source_symbol_ordinal,
+    loom_symbol_ref_t* out_target_ref) {
+  const loom_link_template_input_module_t* query = user_data;
+  *out_target_ref = loom_link_plan_materialization_lookup_symbol(
+      query->binding->index, query->source, query->binding->materialization,
+      source_symbol_ordinal);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_link_template_input_remap_symbol(
+    void* user_data, const loom_module_t* source_module,
+    loom_module_t* target_module, loom_symbol_ref_t source_ref,
+    loom_symbol_ref_t* out_target_ref) {
+  return loom_link_template_input_resolve_symbol(
+      user_data, source_ref.symbol_id, out_target_ref);
+}
+
 static iree_status_t loom_link_template_input_import_encoding(
     loom_link_template_input_binding_t* binding,
     const loom_link_module_index_module_t* source,
@@ -27,9 +49,13 @@ static iree_status_t loom_link_template_input_import_encoding(
     uint16_t* out_encoding_id) {
   if (source->materialized_module) {
     if (!query->native_initialized) {
-      IREE_RETURN_IF_ERROR(
-          loom_ir_remap_initialize(source->materialized_module, binding->module,
-                                   binding->arena, NULL, &query->native));
+      const loom_ir_remap_options_t options = {
+          .remap_symbol = loom_ir_remap_symbol_callback_make(
+              loom_link_template_input_remap_symbol, query),
+      };
+      IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
+          source->materialized_module, binding->materialization->module,
+          binding->arena, &options, &query->native));
       query->native_initialized = true;
     }
     return loom_ir_remap_encoding_id(&query->native, encoding_id,
@@ -41,9 +67,14 @@ static iree_status_t loom_link_template_input_import_encoding(
                                            source->provider_ordinal);
     const loom_bytecode_module_metadata_t* metadata =
         &provider->bytecode.metadata.modules[source->provider_module_ordinal];
+    const loom_bytecode_function_projection_reader_options_t options = {
+        .symbol_resolver = loom_link_template_input_resolve_symbol,
+        .symbol_resolver_user_data = query,
+    };
     IREE_RETURN_IF_ERROR(loom_bytecode_function_projection_reader_allocate(
         provider->bytecode.contents, provider->bytecode.filename, metadata,
-        binding->module, NULL, binding->arena, &query->reader));
+        binding->materialization->module, &options, binding->arena,
+        &query->reader));
   }
   return loom_bytecode_function_projection_reader_import_encoding(
       query->reader, encoding_id, out_encoding_id);
@@ -71,6 +102,8 @@ iree_status_t loom_link_template_input_bind(
   if (!query) {
     IREE_RETURN_IF_ERROR(iree_allocator_malloc(
         iree_arena_allocator(binding->arena), sizeof(*query), (void**)&query));
+    query->binding = binding;
+    query->source = source;
     binding->modules[source->ordinal] = query;
     IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
         iree_arena_allocator(binding->arena), source->input_contract_count,

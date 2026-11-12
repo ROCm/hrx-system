@@ -7,7 +7,7 @@
 #ifndef LOOM_LINK_TEMPLATE_INPUT_BINDING_H_
 #define LOOM_LINK_TEMPLATE_INPUT_BINDING_H_
 
-#include "loom/link/module_index.h"
+#include "loom/link/plan_materializer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,8 +21,8 @@ typedef struct loom_link_template_input_module_t
 typedef struct loom_link_template_input_binding_t {
   // Frozen source modules owning signature-coordinate input contracts.
   const loom_link_module_index_t* index;
-  // Caller module receiving reached complete encoding definitions.
-  loom_module_t* module;
+  // Caller module and the linker-owned source symbol correspondence.
+  const loom_link_plan_materialization_t* materialization;
   // Query-owned storage, live until every returned provider summary retires.
   iree_arena_allocator_t* arena;
   // Lazy module directory and reached-only readers, owned by this query.
