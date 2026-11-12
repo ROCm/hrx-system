@@ -25,6 +25,8 @@ verify_installation() {
     "$bin_dir/lib.exe" \
     "$bin_dir/link.exe" \
     "$bin_dir/ml64.exe" \
+    "$bin_dir/1033/clui.dll" \
+    "$bin_dir/1033/linkui.dll" \
     "$root/wrappers/cl" \
     "$root/wrappers/lib" \
     "$root/wrappers/link" \

@@ -85,7 +85,7 @@ def windows_cross_toolchain(name, repository_path, execution_architecture, msvc_
     )
     native.filegroup(
         name = "msvc_tool_files",
-        srcs = native.glob(["msvc/bin/*"], allow_empty = True) + [
+        srcs = native.glob(["msvc/bin/**"], allow_empty = True) + [
             "tools/msvc-cl",
             "tools/msvc-dumpbin",
             "tools/msvc-lib",
