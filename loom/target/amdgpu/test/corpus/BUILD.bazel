@@ -218,7 +218,6 @@ loom_corpus_test(
             "numeric/float/remainder.loom:@remainder_f8E4M3_values": "LOWERING/036",
             "numeric/float/remainder.loom:@remainder_f8E5M2_values": "LOWERING/036",
             "numeric/float/roots.loom:@cube_root_values": "LOWERING/036",
-            "numeric/float/roots.loom:@root_values": "EXPECT/006",
             "numeric/float/rounding.loom:@rounding_bf16_values": "LOWERING/036",
             "numeric/float/rounding.loom:@rounding_f16_values": "LOWERING/036",
             "numeric/float/rounding.loom:@rounding_f64_vector_values": "LOWERING/036",

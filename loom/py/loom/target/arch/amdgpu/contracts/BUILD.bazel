@@ -33,6 +33,7 @@ iree_py_library(
         "memory.py",
         "packed_i8.py",
         "reduce.py",
+        "roots.py",
         "sanitizer.py",
         "view.py",
     ],

@@ -1955,3 +1955,59 @@ def test_bitpack_contract_covers_word_and_predicate_lanes() -> None:
         cases.add((types[0].element, types[1].element, width_guard.maximum_i64))
 
     assert cases == {("i32", "i8", 8), ("i1", "i8", 1)}
+
+
+def test_square_root_rules_preserve_subnormal_inputs_without_afn() -> None:
+    compiled = _COMPILED_ARITHMETIC_RULES
+    expected = (
+        "amdgpu.s_mov_b32",
+        "amdgpu.v_cmp_class_f32",
+        "amdgpu.v_mul_f32.lit",
+        "amdgpu.v_cndmask_b32",
+        "amdgpu.v_sqrt_f32",
+        "amdgpu.v_mul_f32.lit",
+        "amdgpu.v_cndmask_b32",
+    )
+    for source_op in (scalar_math.scalar_sqrtf, vector.vector_sqrtf):
+        rules = _rules_for_source_op(compiled, source_op)
+        native = [
+            rule
+            for rule in rules
+            if _rule_descriptor_keys(compiled, rule) == ("amdgpu.v_sqrt_f32",)
+        ]
+        scaled = [
+            rule for rule in rules if _rule_descriptor_keys(compiled, rule) == expected
+        ]
+        assert len(native) == len(scaled) == 1
+        assert rules.index(native[0]) < rules.index(scaled[0])
+        guards = compiled.guards[
+            native[0].guard_start : native[0].guard_start + native[0].guard_count
+        ]
+        assert any(
+            guard.kind == GuardKind.VALUE_NOT_SUBNORMAL_OR_INSTANCE_FLAGS_HAS_ALL
+            and guard.u64 == _AFN_FASTMATH_FLAG
+            for guard in guards
+        )
+        guards = compiled.guards[
+            scaled[0].guard_start : scaled[0].guard_start + scaled[0].guard_count
+        ]
+        assert not any(
+            guard.kind
+            in (GuardKind.INSTANCE_FLAGS_HAS_ALL, GuardKind.INSTANCE_FLAGS_HAS_NONE)
+            for guard in guards
+        )
+        # The family includes all static vector shapes, with one SGPR constant
+        # shared by the per-lane classification and scaling instructions.
+        emits = compiled.emits[
+            scaled[0].emit_start : scaled[0].emit_start + scaled[0].emit_count
+        ]
+        assert emits[0].kind == LowerEmitKind.DESCRIPTOR_CONST
+        if source_op is vector.vector_sqrtf:
+            assert all(
+                emit.kind == LowerEmitKind.DESCRIPTOR_OP_PER_LANE for emit in emits[1:]
+            )
+            assert Vector(
+                "f32",
+                minimum_static_elements=1,
+                maximum_static_elements="LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES",
+            ) in _rule_type_patterns(compiled, scaled[0])
