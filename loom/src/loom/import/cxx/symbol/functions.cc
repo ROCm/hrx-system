@@ -456,15 +456,21 @@ void Functions::analyze(Types& types) {
         : whole          ? Construction::ParameterMode::Value
                          : Construction::ParameterMode::Projected);
     for (auto* parameter : function->parameters()) {
-      if (!unit_.typeTraits().is_reference(parameter->type())) {
+      const bool reference = unit_.typeTraits().is_reference(parameter->type());
+      auto* borrowed_object_type =
+          analysis->borrowed_pointer_object_type(parameter);
+      if (!reference && !borrowed_object_type) {
         continue;
       }
       const bool storage =
-          analysis->reference_requires_storage(parameter) ||
-          unit_.typeTraits().is_volatile(
-              unit_.typeTraits().remove_reference(parameter->type())) ||
-          unit_.typeTraits().is_array(
-              unit_.typeTraits().remove_reference(parameter->type()));
+          borrowed_object_type
+              ? whole || analysis->borrowed_pointer_requires_storage(parameter)
+              : analysis->reference_requires_storage(parameter) ||
+                    unit_.typeTraits().is_volatile(
+                        unit_.typeTraits().remove_reference(
+                            parameter->type())) ||
+                    unit_.typeTraits().is_array(
+                        unit_.typeTraits().remove_reference(parameter->type()));
       analysis->configure_parameter(
           parameter, storage ? Construction::ParameterMode::Storage
                      : whole ? Construction::ParameterMode::Value
@@ -473,7 +479,7 @@ void Functions::analyze(Types& types) {
   }
   check(resolve_call_fields(control_flows_, analyzed_calls,
                             module_->arena.block_pool));
-  reference_parameters_.clear();
+  indirect_parameters_.clear();
   receiver_projections_.clear();
   for (const auto& [canonical, analysis] : analyzed_functions) {
     analysis->publish_pointer_reference_snapshots(types);
@@ -482,37 +488,46 @@ void Functions::analyze(Types& types) {
     if (!function) {
       continue;
     }
-    std::vector<ReferenceParameter> references;
+    std::vector<IndirectParameter> indirect_parameters;
     auto parameters = function->parameters();
+    auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
+    const bool whole = exported_.contains(function) ||
+                       function_contracts_.has_predicates(function) ||
+                       template_definitions_.lookup(function) ||
+                       unit_.typeTraits().is_reference(signature->returnType());
     for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
       auto* parameter = parameters[ordinal];
-      if (!unit_.typeTraits().is_reference(parameter->type())) {
+      const bool source_reference =
+          unit_.typeTraits().is_reference(parameter->type());
+      auto* borrowed_object_type =
+          analysis->borrowed_pointer_object_type(parameter);
+      if (!source_reference &&
+          (!borrowed_object_type || whole ||
+           analysis->borrowed_pointer_requires_storage(parameter))) {
         continue;
       }
-      references.push_back(
-          {ordinal,
-           (analysis->reference_requires_storage(parameter) ||
-            unit_.typeTraits().is_volatile(
-                unit_.typeTraits().remove_reference(parameter->type())) ||
-            unit_.typeTraits().is_array(
-                unit_.typeTraits().remove_reference(parameter->type())))
-               ? ReferenceABI::Storage
-               : ReferenceABI::Value,
-           analysis->reference_written(parameter)});
-      auto& reference = references.back();
-      auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
-      if (reference.abi != ReferenceABI::Value ||
-          exported_.contains(function) ||
-          function_contracts_.has_predicates(function) ||
-          template_definitions_.lookup(function) ||
-          unit_.typeTraits().is_reference(signature->returnType())) {
+      auto* object_type =
+          source_reference
+              ? unit_.typeTraits().remove_reference(parameter->type())
+              : borrowed_object_type;
+      indirect_parameters.push_back(
+          {ordinal, object_type, !source_reference,
+           (source_reference &&
+            (analysis->reference_requires_storage(parameter) ||
+             unit_.typeTraits().is_volatile(object_type) ||
+             unit_.typeTraits().is_array(object_type)))
+               ? IndirectParameterABI::Storage
+               : IndirectParameterABI::Value,
+           analysis->indirect_parameter_written(parameter)});
+      auto& indirect_parameter = indirect_parameters.back();
+      if (indirect_parameter.abi != IndirectParameterABI::Value || whole) {
         continue;
       }
-      const auto groups = types.projections(
-          types.unqualified_value(parameter->type()), function->declaration());
+      const auto groups = types.projections(types.unqualified(object_type),
+                                            function->declaration());
       const bool complete = std::ranges::all_of(groups, [&](const auto& group) {
         return analysis->parameter_input(parameter, group) &&
-               (!reference.mutable_access ||
+               (!indirect_parameter.mutable_access ||
                 analysis->parameter_output(parameter, group));
       });
       if (complete) {
@@ -524,15 +539,15 @@ void Functions::analyze(Types& types) {
           projection->inputs.push_back(group);
           projection->input_component_count += group.partition->component_count;
         }
-        if (reference.mutable_access &&
+        if (indirect_parameter.mutable_access &&
             analysis->parameter_output(parameter, group)) {
           projection->outputs.push_back(group);
         }
       }
-      reference.projection = std::move(projection);
+      indirect_parameter.projection = std::move(projection);
     }
-    if (!references.empty()) {
-      reference_parameters_.emplace(canonical, std::move(references));
+    if (!indirect_parameters.empty()) {
+      indirect_parameters_.emplace(canonical, std::move(indirect_parameters));
     }
     const auto* receiver = analysis->receiver_partition();
     if (!receiver || receiver_requires_storage(function)) {
@@ -1337,12 +1352,12 @@ void Functions::admit_reference_parameters(cxx::FunctionSymbol* symbol,
   }
 }
 
-std::span<const ReferenceParameter> Functions::reference_parameters(
+std::span<const IndirectParameter> Functions::indirect_parameters(
     cxx::FunctionSymbol* symbol) const {
-  auto found = reference_parameters_.find(symbol->canonical());
-  return found == reference_parameters_.end()
-             ? std::span<const ReferenceParameter>{}
-             : std::span<const ReferenceParameter>{found->second};
+  auto found = indirect_parameters_.find(symbol->canonical());
+  return found == indirect_parameters_.end()
+             ? std::span<const IndirectParameter>{}
+             : std::span<const IndirectParameter>{found->second};
 }
 
 const ControlFlow* Functions::control_flow(cxx::FunctionSymbol* symbol) const {
@@ -1467,7 +1482,7 @@ BoundSignature Functions::bind_callable_signature(
   }
   std::vector<const cxx::Type*> sources;
   auto parameters = symbol->parameters();
-  auto references = reference_parameters(symbol);
+  auto indirect_parameters = this->indirect_parameters(symbol);
   auto receiver = implicit_object(instance, source);
   const bool returns_void = unit_.typeTraits().is_void(signature->returnType());
   const bool returns_reference =
@@ -1488,7 +1503,7 @@ BoundSignature Functions::bind_callable_signature(
                                    !returns_parameter_alias &&
                                    !returns_exact_projection;
   sources.reserve(receiver.has_value() + parameters.size() +
-                  has_ordinary_result + references.size() +
+                  has_ordinary_result + indirect_parameters.size() +
                   (receiver ? receiver->written_fields.size() : 0));
   size_t argument_count = 0;
   size_t receiver_argument_count = 0;
@@ -1508,19 +1523,24 @@ BoundSignature Functions::bind_callable_signature(
         types.partition(receiver_type, source).component_count;
     argument_count = receiver_argument_count;
   }
-  size_t reference_index = 0;
+  size_t indirect_parameter_index = 0;
   for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
     auto* parameter = parameters[ordinal];
-    const bool is_reference = reference_index < references.size() &&
-                              references[reference_index].ordinal == ordinal;
+    const bool is_indirect =
+        indirect_parameter_index < indirect_parameters.size() &&
+        indirect_parameters[indirect_parameter_index].ordinal == ordinal;
     auto* value_type =
-        !is_reference ? types.unqualified(parameter->type())
-        : references[reference_index].abi == ReferenceABI::Storage
+        !is_indirect ? types.unqualified(parameter->type())
+        : indirect_parameters[indirect_parameter_index].abi ==
+                IndirectParameterABI::Storage
             ? unit_.typeTraits().add_pointer(
-                  unit_.typeTraits().remove_reference(parameter->type()))
-            : types.unqualified_value(parameter->type());
-    if (is_reference && references[reference_index].projection) {
-      for (const auto& group : references[reference_index].projection->inputs) {
+                  indirect_parameters[indirect_parameter_index].object_type)
+            : types.unqualified(
+                  indirect_parameters[indirect_parameter_index].object_type);
+    if (is_indirect &&
+        indirect_parameters[indirect_parameter_index].projection) {
+      for (const auto& group :
+           indirect_parameters[indirect_parameter_index].projection->inputs) {
         sources.push_back(group.type);
         argument_count += group.partition->component_count;
       }
@@ -1528,7 +1548,7 @@ BoundSignature Functions::bind_callable_signature(
       sources.push_back(value_type);
       argument_count += types.partition(value_type, source).component_count;
     }
-    reference_index += is_reference;
+    indirect_parameter_index += is_indirect;
   }
   size_t ordinary_result_count = 0;
   if (has_ordinary_result) {
@@ -1552,15 +1572,15 @@ BoundSignature Functions::bind_callable_signature(
       sources.push_back(types.unqualified_value(source_object_type(field)));
     }
   }
-  for (const auto& reference : references) {
-    if (reference.abi == ReferenceABI::Value && reference.mutable_access) {
-      if (reference.projection) {
-        for (const auto& group : reference.projection->outputs) {
+  for (const auto& indirect_parameter : indirect_parameters) {
+    if (indirect_parameter.abi == IndirectParameterABI::Value &&
+        indirect_parameter.mutable_access) {
+      if (indirect_parameter.projection) {
+        for (const auto& group : indirect_parameter.projection->outputs) {
           sources.push_back(group.type);
         }
       } else {
-        sources.push_back(
-            types.unqualified_value(parameters[reference.ordinal]->type()));
+        sources.push_back(types.unqualified(indirect_parameter.object_type));
       }
     }
   }
@@ -2094,7 +2114,7 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
       : template_definition ? FunctionKind::TemplateDefinition
                             : FunctionKind::Ordinary,
       parameter_contracts,
-      reference_parameters(symbol),
+      indirect_parameters(symbol),
       implicit_object(instance, definition),
       control_flow(symbol),
       (command_program || pipeline) ? staged_signature.projection : nullptr,

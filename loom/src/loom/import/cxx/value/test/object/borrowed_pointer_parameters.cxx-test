@@ -1,0 +1,178 @@
+// RUN: roundtrip
+// Internal pointer parameters borrow complete semantic records without
+// materializing native pointer storage. Field demand remains sparse through
+// nested forwarding, including buffer-valued fields and null buffers.
+struct BorrowedState {
+  const int* data;
+  int index;
+  int marker;
+};
+
+[[loom::noinline]] static int read_index(const BorrowedState* state) {
+  return state->index;
+}
+
+[[loom::noinline]] static int forward_index(const BorrowedState* state) {
+  return read_index(state);
+}
+
+[[loom::noinline]] static const int* read_data(const BorrowedState* state) {
+  return state->data;
+}
+
+int borrowed_read(const int* data, int index) {
+  BorrowedState state{data, index, 7};
+  return forward_index(&state);
+}
+
+const int* borrowed_null_buffer() {
+  BorrowedState state{nullptr, 3, 7};
+  return read_data(&state);
+}
+
+// ----
+func.def public @borrowed_read(%data: buffer, %data_byte_offset: offset, %index: i32) -> (i32) {
+  %state_marker = scalar.constant 7 : i32
+  %5 = func.call pure @forward_index(%index) : (i32) -> (i32)
+  func.return %5 : i32
+}
+
+func.def public @borrowed_null_buffer() -> (buffer, offset) {
+  %state_data = buffer.null : buffer
+  %state_data_byte_offset = index.constant 0 : offset
+  %state_index = scalar.constant 3 : i32
+  %state_marker = scalar.constant 7 : i32
+  %12, %13 = func.call pure @read_data(%state_data, %state_data_byte_offset) : (buffer, offset) -> (buffer, offset)
+  func.return %12, %13 : buffer, offset
+}
+
+func.def noinline @forward_index(%state_index: i32) -> (i32) {
+  %16 = func.call pure @read_index(%state_index) : (i32) -> (i32)
+  func.return %16 : i32
+}
+
+func.def noinline @read_data(%state_data: buffer, %state_data_byte_offset: offset) -> (buffer, offset) {
+  func.return %state_data, %state_data_byte_offset : buffer, offset
+}
+
+func.def noinline @read_index(%state_index: i32) -> (i32) {
+  func.return %state_index : i32
+}
+
+// ====
+// RUN: roundtrip
+// Mutable borrows return only demanded replacements. Unconditional writes do
+// not transport the old field, while conditional writes retain it for the
+// unmodified path. Argument expressions still execute before the call.
+struct MutableState {
+  const int* data;
+  int index;
+  int marker;
+};
+
+[[loom::noinline]] static void replace_marker(MutableState* state,
+                                              int marker) {
+  state->marker = marker;
+}
+
+[[loom::noinline]] static void replace_marker_if(MutableState* state,
+                                                 bool replace, int marker) {
+  if (replace) {
+    state->marker = marker;
+  }
+}
+
+[[loom::noinline]] static int read_after_argument(MutableState* state,
+                                                 int value) {
+  return state->index + value;
+}
+
+[[loom::noinline]] static void copy_index(const MutableState* source,
+                                          MutableState* target) {
+  target->marker = source->index;
+}
+
+int borrowed_write(int marker) {
+  MutableState state{nullptr, 2, 1};
+  replace_marker(&state, marker);
+  return state.marker;
+}
+
+int borrowed_conditional_write(bool replace, int marker) {
+  MutableState state{nullptr, 2, 1};
+  replace_marker_if(&state, replace, marker);
+  return state.marker;
+}
+
+int borrowed_argument_order(int value) {
+  MutableState state{nullptr, 1, 2};
+  return read_after_argument(&state, (state.index = value));
+}
+
+int borrowed_disjoint(int source_index, int target_index) {
+  MutableState source{nullptr, source_index, 0};
+  MutableState target{nullptr, target_index, 1};
+  copy_index(&source, &target);
+  return target.marker;
+}
+
+// ----
+func.def public @borrowed_write(%marker: i32) -> (i32) {
+  %state_data = buffer.null : buffer
+  %state_data_byte_offset = index.constant 0 : offset
+  %state_index = scalar.constant 2 : i32
+  %state_marker$5 = scalar.constant 1 : i32
+  %state_marker$6 = func.call pure @replace_marker(%marker) : (i32) -> (i32)
+  func.return %state_marker$6 : i32
+}
+
+func.def public @borrowed_conditional_write(%replace: i1, %marker: i32) -> (i32) {
+  %state_data = buffer.null : buffer
+  %state_data_byte_offset = index.constant 0 : offset
+  %state_index = scalar.constant 2 : i32
+  %state_marker$13 = scalar.constant 1 : i32
+  %state_marker$14 = func.call pure @replace_marker_if(%state_marker$13, %replace, %marker) : (i32, i1, i32) -> (i32)
+  func.return %state_marker$14 : i32
+}
+
+func.def public @borrowed_argument_order(%value: i32) -> (i32) {
+  %state_data = buffer.null : buffer
+  %state_data_byte_offset = index.constant 0 : offset
+  %state_index = scalar.constant 1 : i32
+  %state_marker = scalar.constant 2 : i32
+  %21 = func.call pure @read_after_argument(%value, %value) : (i32, i32) -> (i32)
+  func.return %21 : i32
+}
+
+func.def public @borrowed_disjoint(%source_index: i32, %target_index: i32) -> (i32) {
+  %source_data = buffer.null : buffer
+  %source_data_byte_offset = index.constant 0 : offset
+  %source_marker = scalar.constant 0 : i32
+  %target_data = buffer.null : buffer
+  %target_data_byte_offset = index.constant 0 : offset
+  %target_marker$30 = scalar.constant 1 : i32
+  %target_marker$31 = func.call pure @copy_index(%source_index) : (i32) -> (i32)
+  func.return %target_marker$31 : i32
+}
+
+func.def noinline @replace_marker(%marker: i32) -> (i32) {
+  func.return %marker : i32
+}
+
+func.def noinline @replace_marker_if(%state_marker: i32, %replace: i1, %marker: i32) -> (i32) {
+  %state = scf.if %replace -> (i32) {
+    scf.yield %marker : i32
+  } else {
+    scf.yield %state_marker : i32
+  }
+  func.return %state : i32
+}
+
+func.def noinline @read_after_argument(%state_index: i32, %value: i32) -> (i32) {
+  %42 = scalar.addi %state_index, %value : i32
+  func.return %42 : i32
+}
+
+func.def noinline @copy_index(%source_index: i32) -> (i32) {
+  func.return %source_index : i32
+}

@@ -409,8 +409,18 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
     for (auto* parameter : function_->parameters()) {
       const auto traits = unit_.typeTraits();
       const auto* type = traits.remove_reference(parameter->type());
-      if (traits.is_reference(parameter->type()) && !traits.is_array(type) &&
-          !traits.is_volatile(type)) {
+      if (const auto* object_type = candidate_pointer_object_type(parameter)) {
+        construction_.declare_parameter(
+            parameter, types_
+                           .partition(types_.unqualified(object_type),
+                                      function_->declaration())
+                           .component_count);
+        CallArgument identity{.source = nullptr, .write_binding = parameter};
+        append_identity({parameter, 0, nullptr}, identity);
+        pointer_aliases_.emplace(
+            parameter, PointerAlias{nullptr, object_type, std::move(identity)});
+      } else if (traits.is_reference(parameter->type()) &&
+                 !traits.is_array(type) && !traits.is_volatile(type)) {
         construction_.declare_parameter(
             parameter,
             types_.partition(types_.unqualified(type), function_->declaration())
@@ -434,7 +444,11 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
   for (auto& entry : pointer_aliases_) {
     auto& alias = entry.second;
     if (!alias.transparent) {
-      require_identity(alias.identity);
+      if (alias.parameter_object_type) {
+        require_borrowed_pointer_storage(entry.first);
+      } else {
+        require_identity(alias.identity);
+      }
     }
   }
   if (reference_return_ == ReferenceReturn::Parameter) {
@@ -536,8 +550,42 @@ cxx::ExpressionAST* ControlFlow::reference_materialization(
                                            : found->second.materialization;
 }
 
-bool ControlFlow::reference_written(cxx::Symbol* parameter) const {
-  return written_references_.contains(parameter);
+bool ControlFlow::indirect_parameter_written(cxx::Symbol* parameter) const {
+  return written_indirect_parameters_.contains(parameter);
+}
+
+const cxx::Type* ControlFlow::borrowed_pointer_object_type(
+    cxx::Symbol* parameter) const {
+  auto found = pointer_aliases_.find(parameter);
+  return found == pointer_aliases_.end() ? nullptr
+                                         : found->second.parameter_object_type;
+}
+
+bool ControlFlow::borrowed_pointer_requires_storage(
+    cxx::Symbol* parameter) const {
+  auto found = pointer_aliases_.find(parameter);
+  return found != pointer_aliases_.end() &&
+         found->second.parameter_object_type &&
+         (!found->second.transparent ||
+          storage_borrowed_pointers_.contains(parameter));
+}
+
+const cxx::Type* ControlFlow::candidate_pointer_object_type(
+    cxx::Symbol* parameter) {
+  auto traits = unit_.typeTraits();
+  auto* pointer =
+      cxx::type_cast<cxx::PointerType>(types_.unqualified(parameter->type()));
+  if (!pointer) {
+    return nullptr;
+  }
+  auto* object_type = pointer->elementType();
+  auto* unqualified = types_.unqualified(object_type);
+  if (traits.is_volatile(object_type) || traits.is_array(unqualified) ||
+      !traits.is_class(unqualified) || !traits.is_complete(unqualified) ||
+      !types_.requires_value_transport(unqualified)) {
+    return nullptr;
+  }
+  return object_type;
 }
 
 std::span<const size_t> ControlFlow::projected_reference_return_indices(
@@ -787,6 +835,11 @@ bool ControlFlow::argument_requires_storage(const CallArgument& argument,
   }
   auto traits = unit_.typeTraits();
   auto requires_storage = [&](cxx::Symbol* binding) {
+    if (auto found = pointer_aliases_.find(binding);
+        found != pointer_aliases_.end() &&
+        found->second.parameter_object_type) {
+      return storage_borrowed_pointers_.contains(binding);
+    }
     if (traits.is_reference(source_object_type(binding))) {
       return cxx::symbol_cast<cxx::FieldSymbol>(binding) ||
              storage_references_.contains(binding);
@@ -827,12 +880,20 @@ bool ControlFlow::require_reference_storage(cxx::Symbol* parameter) {
   return changed;
 }
 
+bool ControlFlow::require_borrowed_pointer_storage(cxx::Symbol* parameter) {
+  return storage_borrowed_pointers_.insert(parameter).second;
+}
+
 bool ControlFlow::storage_backed(cxx::MemberExpressionAST* expression) const {
   if (expression->accessOp == cxx::TokenKind::T_MINUS_GREATER) {
     auto* base = cxx::ast_cast<cxx::IdExpressionAST>(
         unwrap_expression(expression->baseExpression));
-    if (base && pointer_alias(base->symbol)) {
-      return false;
+    if (base) {
+      auto found = pointer_aliases_.find(base->symbol);
+      if (found != pointer_aliases_.end() && found->second.transparent &&
+          !argument_requires_storage(found->second.identity)) {
+        return false;
+      }
     }
   }
   auto* owner = object_owner(expression);
@@ -843,6 +904,7 @@ bool ControlFlow::storage_backed(cxx::MemberExpressionAST* expression) const {
 cxx::ExpressionAST* ControlFlow::pointer_alias(cxx::Symbol* binding) const {
   auto found = pointer_aliases_.find(binding);
   return found != pointer_aliases_.end() && found->second.transparent &&
+                 found->second.referent &&
                  !argument_requires_storage(found->second.identity)
              ? found->second.referent
              : nullptr;
@@ -1481,7 +1543,7 @@ void ControlFlow::visit(cxx::UnaryExpressionAST* ast) {
     return;
   }
   if (!ast->symbol && ast->op == cxx::TokenKind::T_AMP) {
-    if (ast != pointer_alias_initializer_) {
+    if (ast != pointer_alias_initializer_ && ast != borrowed_call_address_) {
       if (auto* dereference = cxx::ast_cast<cxx::UnaryExpressionAST>(
               unwrap_expression(ast->expression));
           dereference && !dereference->symbol &&
@@ -1867,14 +1929,52 @@ void ControlFlow::visit(cxx::CallExpressionAST* ast) {
   if (ast->isVirtualDispatch) {
     diagnostics_.reject(unit_, ast, "virtual member dispatch is not admitted");
   }
-  cxx::ASTVisitor::visit(ast);
+  auto* function = direct_callee(ast);
+  if (!function) {
+    cxx::ASTVisitor::visit(ast);
+  } else {
+    accept(ast->baseExpression);
+    auto parameters = function->parameters();
+    auto* definition = function->resolvedDefinition();
+    const bool has_definition =
+        function->isDefined() || function->hasPendingBody() ||
+        (definition &&
+         (definition->isDefined() || definition->hasPendingBody()));
+    size_t ordinal = 0;
+    for (auto* argument : cxx::ListView{ast->expressionList}) {
+      const cxx::Type* object_type =
+          has_definition && ordinal < parameters.size()
+              ? candidate_pointer_object_type(parameters[ordinal])
+              : nullptr;
+      auto* source = object_type ? unwrap_expression(argument) : nullptr;
+      auto* address = cxx::ast_cast<cxx::UnaryExpressionAST>(source);
+      if (!address || address->symbol || address->op != cxx::TokenKind::T_AMP ||
+          types_.unqualified(address->expression->type) !=
+              types_.unqualified(object_type)) {
+        address = nullptr;
+      }
+      auto* forwarded = cxx::ast_cast<cxx::IdExpressionAST>(source);
+      if (!forwarded || !pointer_aliases_.contains(forwarded->symbol)) {
+        forwarded = nullptr;
+      }
+      auto* saved_address = borrowed_call_address_;
+      auto* saved_alias_use = pointer_alias_use_;
+      borrowed_call_address_ = address;
+      if (forwarded) {
+        pointer_alias_use_ = forwarded->symbol;
+      }
+      accept(argument);
+      borrowed_call_address_ = saved_address;
+      pointer_alias_use_ = saved_alias_use;
+      ++ordinal;
+    }
+  }
   if (cxx::resolveBuiltinFunctionKind(
           cxx::ast_cast<cxx::IdExpressionAST>(ast->baseExpression)) ==
       cxx::BuiltinFunctionKind::T___BUILTIN_UNREACHABLE) {
     construction_.end_path();
     return;
   }
-  auto* function = direct_callee(ast);
   if (!function) {
     return;
   }
@@ -2044,8 +2144,18 @@ const ArrayCopyInitialization* ControlFlow::array_copy(
 void ControlFlow::retain_call(cxx::CallExpressionAST* call,
                               cxx::FunctionSymbol* function) {
   DirectCall retained = {function, call, {}, std::nullopt, false, false};
+  auto parameters = function->parameters();
+  auto* definition = function->resolvedDefinition();
+  const bool has_definition =
+      function->isDefined() || function->hasPendingBody() ||
+      (definition && (definition->isDefined() || definition->hasPendingBody()));
+  size_t ordinal = 0;
   for (auto* argument : cxx::ListView{call->expressionList}) {
-    retained.arguments.push_back(retain_call_argument(argument));
+    retained.arguments.push_back(retain_call_argument(
+        argument, has_definition && ordinal < parameters.size()
+                      ? candidate_pointer_object_type(parameters[ordinal])
+                      : nullptr));
+    ++ordinal;
   }
   if (function->isImplicitObjectMemberFunction()) {
     auto* base = unwrap_expression(call->baseExpression);
@@ -2075,7 +2185,11 @@ void ControlFlow::retain_call(cxx::CallExpressionAST* call,
 void ControlFlow::retain_call(cxx::SubscriptExpressionAST* call,
                               cxx::FunctionSymbol* function) {
   DirectCall retained = {function, call, {}, std::nullopt, false, false};
-  retained.arguments.push_back(retain_call_argument(call->indexExpression));
+  auto parameters = function->parameters();
+  retained.arguments.push_back(retain_call_argument(
+      call->indexExpression,
+      parameters.empty() ? nullptr
+                         : candidate_pointer_object_type(parameters.front())));
   if (function->isImplicitObjectMemberFunction()) {
     retained.current_receiver = is_current_object(unit_, call->baseExpression);
     if (!retained.current_receiver) {
@@ -2091,8 +2205,11 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
                               cxx::AST* source) {
   DirectCall retained = {call.function, source, {}, std::nullopt, false, false};
   retained.arguments.reserve(call.argument_count + call.has_postfix_dummy);
+  auto parameters = call.function->parameters();
   for (size_t index = 0; index < call.argument_count; ++index) {
-    retained.arguments.push_back(retain_call_argument(call.arguments[index]));
+    retained.arguments.push_back(
+        retain_call_argument(call.arguments[index],
+                             candidate_pointer_object_type(parameters[index])));
   }
   if (call.has_postfix_dummy) {
     retained.arguments.push_back({});
@@ -2144,7 +2261,9 @@ void ControlFlow::retain_reference_arguments(const DirectCall& call) {
   for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
     auto* argument = call.arguments[ordinal].source;
     auto* parameter_type = parameters[ordinal]->type();
-    if (!traits.is_reference(parameter_type) && argument) {
+    const bool borrowed_pointer =
+        candidate_pointer_object_type(parameters[ordinal]) != nullptr;
+    if (!traits.is_reference(parameter_type) && !borrowed_pointer && argument) {
       record_parameter_read(argument);
     }
     if (!traits.is_reference(parameter_type) || !argument ||
@@ -2168,6 +2287,14 @@ void ControlFlow::record_parameter_read(cxx::ExpressionAST* expression) {
   // initializer beneath its frontend conversion (including semantic handles).
   cxx::Initializer initializer(expression);
   auto* value = initializer.singleExpression();
+  if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(
+          value ? unwrap_expression(value) : nullptr);
+      id && pointer_alias_use_ == id->symbol) {
+    // Arrow and dereference syntax evaluates the pointer expression, but a
+    // transparent semantic alias has no pointer value to read. The enclosing
+    // object/member conversion records the exact referent components.
+    return;
+  }
   if (value && !pointer_aliases_.empty() && record_pointer_alias_read(value)) {
     return;
   }
@@ -2304,8 +2431,33 @@ void ControlFlow::record_member_binding_read(cxx::ExpressionAST* expression) {
   }
 }
 
-CallArgument ControlFlow::retain_call_argument(cxx::ExpressionAST* expression) {
+CallArgument ControlFlow::retain_call_argument(
+    cxx::ExpressionAST* expression, const cxx::Type* borrowed_object_type) {
   CallArgument argument = {.source = expression};
+  if (borrowed_object_type) {
+    auto* source = unwrap_expression(expression);
+    auto* address = cxx::ast_cast<cxx::UnaryExpressionAST>(source);
+    if (address && !address->symbol && address->op == cxx::TokenKind::T_AMP &&
+        types_.unqualified(address->expression->type) ==
+            types_.unqualified(borrowed_object_type)) {
+      collect_identity(address->expression, argument);
+      auto target = classify_destination(
+          unwrap_object_identity(unit_, address->expression));
+      argument.write_binding = target ? target->binding : nullptr;
+      return argument;
+    }
+    auto* forwarded = cxx::ast_cast<cxx::IdExpressionAST>(source);
+    if (forwarded) {
+      auto found = pointer_aliases_.find(forwarded->symbol);
+      if (found != pointer_aliases_.end() && found->second.transparent) {
+        append_identity(found->second.identity, argument);
+        argument.write_binding = found->second.identity.write_binding;
+        return argument;
+      }
+    }
+    argument.inherent_storage = true;
+    return argument;
+  }
   collect_identity(expression, argument);
   auto target = classify_destination(unwrap_object_identity(unit_, expression));
   argument.write_binding = target ? target->binding : nullptr;
@@ -2660,6 +2812,12 @@ bool ControlFlow::require_identity(const CallArgument& argument) {
   }
   auto traits = unit_.typeTraits();
   auto require_binding = [&](cxx::Symbol* binding) {
+    if (auto found = pointer_aliases_.find(binding);
+        found != pointer_aliases_.end() &&
+        found->second.parameter_object_type) {
+      changed = require_borrowed_pointer_storage(binding) || changed;
+      return;
+    }
     if (traits.is_reference(source_object_type(binding))) {
       if (function_) {
         auto parameters = function_->parameters();
@@ -2691,11 +2849,15 @@ bool ControlFlow::record_callable_write(cxx::Symbol* binding) {
   if (!binding) {
     return false;
   }
+  if (auto found = pointer_aliases_.find(binding);
+      found != pointer_aliases_.end() && found->second.parameter_object_type) {
+    return written_indirect_parameters_.insert(binding).second;
+  }
   auto traits = unit_.typeTraits();
   if (traits.is_reference(source_object_type(binding)) && function_) {
     auto parameters = function_->parameters();
     if (std::ranges::find(parameters, binding) != parameters.end()) {
-      return written_references_.insert(binding).second;
+      return written_indirect_parameters_.insert(binding).second;
     }
   }
   if (!is_direct_subobject(binding) ||
@@ -2894,8 +3056,14 @@ void ControlFlow::retain_constructor_call(cxx::FunctionSymbol* constructor,
       .current_receiver = receiver.current_receiver,
       .storage_receiver = storage_receiver,
   };
+  auto parameters = constructor->parameters();
+  size_t ordinal = 0;
   for (auto* argument : constructor_arguments(initializer)) {
-    retained.arguments.push_back(retain_call_argument(argument));
+    retained.arguments.push_back(retain_call_argument(
+        argument, ordinal < parameters.size()
+                      ? candidate_pointer_object_type(parameters[ordinal])
+                      : nullptr));
+    ++ordinal;
   }
   retain_reference_arguments(retained);
   if (!retained.current_receiver) {
@@ -3415,7 +3583,7 @@ bool ControlFlow::retain_reference_result_identity(const DirectCall& call,
   return changed;
 }
 
-CallPropagation ControlFlow::propagate_overlapping_references(
+CallPropagation ControlFlow::propagate_overlapping_indirect_parameters(
     const DirectCall& call, ControlFlow& callee,
     iree_arena_allocator_t* scratch_arena) {
   bool caller_changed = false;
@@ -3426,31 +3594,40 @@ CallPropagation ControlFlow::propagate_overlapping_references(
       member_call && !callee.receiver_writes().empty();
   const bool indexed_receiver =
       member_call && !call.current_receiver && call.receiver.has_value();
-  auto reference_parameter = [&](cxx::Symbol* parameter) {
-    return unit_.typeTraits().is_reference(parameter->type());
+  auto borrowed_pointer = [&](cxx::Symbol* parameter) {
+    auto found = callee.pointer_aliases_.find(parameter);
+    return found != callee.pointer_aliases_.end() &&
+           found->second.parameter_object_type;
+  };
+  auto indirect_parameter = [&](cxx::Symbol* parameter) {
+    return unit_.typeTraits().is_reference(parameter->type()) ||
+           borrowed_pointer(parameter);
   };
   auto select_storage = [&](size_t ordinal) {
     auto* parameter = parameters[ordinal];
     callee_changed =
-        callee.require_reference_storage(parameter) || callee_changed;
+        (unit_.typeTraits().is_reference(parameter->type())
+             ? callee.require_reference_storage(parameter)
+             : callee.require_borrowed_pointer_storage(parameter)) ||
+        callee_changed;
     caller_changed =
         require_identity(call.arguments[ordinal]) || caller_changed;
   };
 
-  // A value-reference call represents each mutable parameter as an independent
+  // A value-indirect call represents each mutable parameter as an independent
   // result writeback. Overlapping source intervals require one shared storage
   // identity so reads and writes observe the source language's aliasing order.
   const size_t parameter_count =
       std::min(parameters.size(), call.arguments.size());
-  size_t reference_count = 0;
+  size_t indirect_count = 0;
   size_t written_count = 0;
   for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
-    if (reference_parameter(parameters[ordinal])) {
-      ++reference_count;
-      written_count += callee.reference_written(parameters[ordinal]);
+    if (indirect_parameter(parameters[ordinal])) {
+      ++indirect_count;
+      written_count += callee.indirect_parameter_written(parameters[ordinal]);
     }
   }
-  const size_t alias_count = reference_count + indexed_receiver;
+  const size_t alias_count = indirect_count + indexed_receiver;
   written_count += indexed_receiver && receiver_mutable;
   auto has_unresolved_identity = [&](const CallArgument& argument) {
     return std::ranges::any_of(
@@ -3481,9 +3658,9 @@ CallPropagation ControlFlow::propagate_overlapping_references(
       visit_intervals(argument, {}, [&](ObjectInterval) { ++interval_count; });
     };
     for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
-      if (reference_parameter(parameters[ordinal])) {
+      if (indirect_parameter(parameters[ordinal])) {
         retain_alias(call.arguments[ordinal],
-                     callee.reference_written(parameters[ordinal]));
+                     callee.indirect_parameter_written(parameters[ordinal]));
       }
     }
     if (indexed_receiver) {
@@ -3506,7 +3683,7 @@ CallPropagation ControlFlow::propagate_overlapping_references(
       });
     };
     for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
-      if (reference_parameter(parameters[ordinal])) {
+      if (indirect_parameter(parameters[ordinal])) {
         retain_intervals(call.arguments[ordinal]);
       }
     }
@@ -3519,7 +3696,7 @@ CallPropagation ControlFlow::propagate_overlapping_references(
               .select_storage(scratch_arena, &storage_aliases));
     alias_index = 0;
     for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
-      if (reference_parameter(parameters[ordinal])) {
+      if (indirect_parameter(parameters[ordinal])) {
         if (storage_aliases[alias_index]) {
           select_storage(ordinal);
         }
@@ -3548,8 +3725,8 @@ CallPropagation ControlFlow::propagate_overlapping_references(
   for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
     auto* parameter = parameters[ordinal];
     const auto& argument = call.arguments[ordinal];
-    if (!reference_parameter(parameter) ||
-        (!receiver_mutable && !callee.reference_written(parameter))) {
+    if (!indirect_parameter(parameter) ||
+        (!receiver_mutable && !callee.indirect_parameter_written(parameter))) {
       continue;
     }
     const bool receiver_overlap = argument.current_receiver ||
@@ -3580,12 +3757,18 @@ CallPropagation ControlFlow::propagate_call(
       callee.projected_reference_return_facts_->has_partial_receiver_origin;
   for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
     auto* parameter = parameters[ordinal];
-    if (!unit_.typeTraits().is_reference(parameter->type()) ||
-        ordinal >= call.arguments.size()) {
+    if (ordinal >= call.arguments.size()) {
+      continue;
+    }
+    const bool reference = unit_.typeTraits().is_reference(parameter->type());
+    auto borrowed = callee.pointer_aliases_.find(parameter);
+    const bool borrowed_pointer = borrowed != callee.pointer_aliases_.end() &&
+                                  borrowed->second.parameter_object_type;
+    if (!reference && !borrowed_pointer) {
       continue;
     }
     const auto& argument = call.arguments[ordinal];
-    if (storage_receiver_result &&
+    if (reference && storage_receiver_result &&
         ordinal < callee.projected_reference_return_facts_->parameter_has_origin
                       .size() &&
         callee.projected_reference_return_facts_
@@ -3595,12 +3778,17 @@ CallPropagation ControlFlow::propagate_call(
     }
     if (argument_requires_storage(argument, StorageDemand::Identity)) {
       callee_changed =
-          callee.require_reference_storage(parameter) || callee_changed;
+          (reference ? callee.require_reference_storage(parameter)
+                     : callee.require_borrowed_pointer_storage(parameter)) ||
+          callee_changed;
     }
-    if (callee.reference_requires_storage(parameter)) {
+    const bool requires_storage =
+        reference ? callee.reference_requires_storage(parameter)
+                  : callee.storage_borrowed_pointers_.contains(parameter);
+    if (requires_storage) {
       caller_changed = require_identity(argument) || caller_changed;
     }
-    if (callee.reference_written(parameter)) {
+    if (callee.indirect_parameter_written(parameter)) {
       caller_changed =
           record_projected_write(argument, {}, {}, WriteEffect::Callable) ||
           caller_changed;
@@ -3609,7 +3797,7 @@ CallPropagation ControlFlow::propagate_call(
   caller_changed =
       retain_reference_result_identity(call, callee) || caller_changed;
   auto overlap_changes =
-      propagate_overlapping_references(call, callee, scratch_arena);
+      propagate_overlapping_indirect_parameters(call, callee, scratch_arena);
   caller_changed = overlap_changes.caller_changed || caller_changed;
   callee_changed = overlap_changes.callee_changed || callee_changed;
 
@@ -3824,19 +4012,30 @@ void ControlFlow::bind_field_calls(
     auto parameters = call.function->parameters();
     for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
       auto* parameter = parameters[ordinal];
-      if (!unit_.typeTraits().is_reference(parameter->type())) {
+      const bool reference = unit_.typeTraits().is_reference(parameter->type());
+      const cxx::Type* borrowed_object_type = nullptr;
+      if (callee) {
+        auto found = callee->pointer_aliases_.find(
+            callee->function_->parameters()[ordinal]);
+        if (found != callee->pointer_aliases_.end()) {
+          borrowed_object_type = found->second.parameter_object_type;
+        }
+      }
+      if (!reference && !borrowed_object_type) {
         continue;
       }
-      bind(call.arguments[ordinal],
-           types_
-               .partition(types_.unqualified_value(parameter->type()),
-                          call.source)
-               .component_count,
-           callee ? callee->construction_.parameter(
-                        callee->function_->parameters()[ordinal])
-                  : nullptr,
-           !unit_.typeTraits().is_const(
-               unit_.typeTraits().remove_reference(parameter->type())));
+      auto* object_type = reference
+                              ? types_.unqualified_value(parameter->type())
+                              : types_.unqualified(borrowed_object_type);
+      bind(
+          call.arguments[ordinal],
+          types_.partition(object_type, call.source).component_count,
+          callee ? callee->construction_.parameter(
+                       callee->function_->parameters()[ordinal])
+                 : nullptr,
+          !unit_.typeTraits().is_const(
+              reference ? unit_.typeTraits().remove_reference(parameter->type())
+                        : borrowed_object_type));
     }
     if (callee && callee->receiver_partition_) {
       for (const auto& member : callee->receiver_partition_->members) {
@@ -3890,7 +4089,12 @@ bool ControlFlow::normalize_field_groups(bool inputs) {
     }
   };
   for (auto* parameter : function_->parameters()) {
-    normalize(parameter, types_.unqualified_value(parameter->type()));
+    auto found = pointer_aliases_.find(parameter);
+    auto* object_type =
+        found != pointer_aliases_.end() && found->second.parameter_object_type
+            ? types_.unqualified(found->second.parameter_object_type)
+            : types_.unqualified_value(parameter->type());
+    normalize(parameter, object_type);
   }
   if (receiver_partition_) {
     auto traits = unit_.typeTraits();
@@ -3986,7 +4190,8 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
              !identity.reference_calls.empty())) {
           pointer_alias_initializer_ = address;
           pointer_aliases_.emplace(
-              variable, PointerAlias{address->expression, std::move(identity)});
+              variable,
+              PointerAlias{address->expression, nullptr, std::move(identity)});
         }
       }
     }
