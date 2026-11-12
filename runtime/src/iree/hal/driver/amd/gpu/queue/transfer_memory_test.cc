@@ -104,8 +104,9 @@ class TransferMemoryTest : public ::testing::Test {
     EXPECT_EQ(access.device, context_.device);
     EXPECT_EQ(access.requirements.access,
               AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE);
-    EXPECT_EQ(access.requirements.flags,
-              AMDF_MEMORY_FLAG_DEVICE_ADDRESS | AMDF_MEMORY_FLAG_HOST_COHERENT);
+    EXPECT_EQ(access.requirements.flags, AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+                                             AMDF_MEMORY_FLAG_HOST_COHERENT |
+                                             AMDF_MEMORY_FLAG_DEVICE_UNCACHED);
     EXPECT_EQ(access.requirements.address_kinds,
               UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU);
   }
@@ -131,7 +132,8 @@ class TransferMemoryTest : public ::testing::Test {
   // Independent device-admission results for each backing profile.
   std::array<amdf_status_t, 2> profile_status_ = {};
   // Attachment properties returned separately from backing profiles.
-  amdf_memory_flags_t attachment_flags_ = AMDF_MEMORY_FLAG_HOST_COHERENT;
+  amdf_memory_flags_t attachment_flags_ =
+      AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_UNCACHED;
   // Upload and download visibility recipes from native discovery.
   std::array<amdf_memory_pair_info_t, 2> pairs_ = {};
   // Native discovery failures for each direction.
@@ -162,8 +164,8 @@ TEST_F(TransferMemoryTest, AcceptsCoherentQueueWithoutCacheOperations) {
   IREE_ASSERT_OK(Initialize());
 }
 
-TEST_F(TransferMemoryTest, DoesNotInventPositiveDeviceCacheGuarantee) {
-  attachment_flags_ |= AMDF_MEMORY_FLAG_DEVICE_UNCACHED;
+TEST_F(TransferMemoryTest,
+       RequestsUncachedAttachmentWithoutRequiringBackingFlag) {
   IREE_ASSERT_OK(Initialize());
   EXPECT_EQ(memory_.options.profile.supported_flags,
             AMDF_MEMORY_FLAG_HOST_VISIBLE);

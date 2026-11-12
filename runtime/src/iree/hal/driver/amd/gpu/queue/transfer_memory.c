@@ -38,8 +38,9 @@ iree_status_t iree_hal_amd_gpu_transfer_memory_initialize(
       .device = context->device,
       .requirements = {
           .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
-          .flags =
-              AMDF_MEMORY_FLAG_DEVICE_ADDRESS | AMDF_MEMORY_FLAG_HOST_COHERENT,
+          .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+                   AMDF_MEMORY_FLAG_HOST_COHERENT |
+                   AMDF_MEMORY_FLAG_DEVICE_UNCACHED,
           .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU}};
   amdf_memory_scope_info_t info = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,

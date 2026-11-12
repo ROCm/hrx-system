@@ -25,12 +25,14 @@ typedef struct iree_hal_amd_gpu_transfer_memory_t {
   iree_hal_amd_fabric_memory_options_t options;
 } iree_hal_amd_gpu_transfer_memory_t;
 
-// Selects host write-back, host/device read-write SYSTEM backing for one
-// admitted queue family. Both visibility directions must be implemented by
-// that family's existing system acquire/release operations, without host cache
-// maintenance. Queries passive capabilities only; no backing is acquired.
-// On success out_memory contains a self-reference and remains at this address
-// until all borrowing queues and native acquisition callbacks have finished.
+// Selects host write-back, GPU-uncached SYSTEM backing with host/device
+// read-write access for one admitted queue family. Payloads are streamed data;
+// kernel arguments retain their independent cache policy. Both visibility
+// directions must use that family's existing system acquire/release operations,
+// without host cache maintenance. Queries passive capabilities only; no backing
+// is acquired. On success out_memory contains a self-reference and remains at
+// this address until all borrowing queues and native acquisition callbacks have
+// finished.
 iree_status_t iree_hal_amd_gpu_transfer_memory_initialize(
     const iree_hal_amd_gpu_context_t* context, uint32_t family_ordinal,
     iree_hal_amd_gpu_transfer_memory_t* out_memory);
