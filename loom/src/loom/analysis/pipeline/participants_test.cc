@@ -81,7 +81,7 @@ TEST_F(PipelineParticipantsTest, OrderedUnionSharesUnchangedMembership) {
   const loom_pipeline_participants_t* result = nullptr;
   const auto before = arena_.used_allocation_size;
   IREE_ASSERT_OK(loom_pipeline_participants_merge(&arena_, first, second, false,
-                                                  &result, nullptr));
+                                                  nullptr, &result));
   EXPECT_EQ(result, first);
   EXPECT_EQ(arena_.used_allocation_size, before);
   Check(result, {{1, 10}, {63, 11}, {64, 12}, {128, 13}});
@@ -95,7 +95,7 @@ TEST_F(PipelineParticipantsTest, ConcurrentUnionReportsLowestSharedEngine) {
   const auto* second = Build({{64, 20}, {128, 21}, {4096, 22}});
   const loom_pipeline_participants_t* result = nullptr;
   IREE_ASSERT_OK(loom_pipeline_participants_merge(&arena_, first, second, true,
-                                                  &result, &conflict_));
+                                                  &conflict_, &result));
   EXPECT_EQ(conflict_.first_worker, 11u);
   EXPECT_EQ(conflict_.second_worker, 21u);
   Check(first, {{1, 10}, {128, 11}, {4096, 12}});
@@ -136,7 +136,7 @@ TEST_F(PipelineParticipantsTest,
     const auto* second = Build(right);
     const loom_pipeline_participants_t* result = nullptr;
     IREE_ASSERT_OK(loom_pipeline_participants_merge(&arena_, first, second,
-                                                    false, &result, nullptr));
+                                                    false, nullptr, &result));
     Check(result, expected_union);
     Check(first, expected_left);
     Check(second, expected_right);

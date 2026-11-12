@@ -129,14 +129,16 @@ TEST_F(PipelineLifetimeLayoutTest, MixedPoolDemandsKeepIndependentAlignment) {
       if (owner != 1 && pool % 3 == 0) {
         continue;
       }
-      requests.push_back({.lifetime = owner,
-                          .pool = pool,
-                          .length = owner == 1   ? 3u
-                                    : owner == 5 ? 5u
-                                                 : 11u,
-                          .alignment = owner == 1   ? 1u
-                                       : owner == 5 ? 4u
-                                                    : 8u});
+      requests.push_back({
+          .lifetime = owner,
+          .pool = pool,
+          .length = owner == 1   ? 3u
+                    : owner == 5 ? 5u
+                                 : 11u,
+          .alignment = owner == 1   ? 1u
+                       : owner == 5 ? 4u
+                                    : 8u,
+      });
     }
   }
   const loom_pipeline_lifetime_extent_t* extents = nullptr;
@@ -175,7 +177,10 @@ TEST_F(PipelineLifetimeLayoutTest, NestedBranchesKeepSiblingOrder) {
       {LOOM_PIPELINE_LIFETIME_OWNER, 1, 3, none, none},
   };
   loom_pipeline_lifetimes_t lifetimes = {
-      .nodes = nodes, .count = IREE_ARRAYSIZE(nodes), .has_serial = true};
+      .nodes = nodes,
+      .count = IREE_ARRAYSIZE(nodes),
+      .has_serial = true,
+  };
   IREE_ASSERT_OK(loom_pipeline_lifetimes_index(&arena_, &lifetimes));
   loom_pipeline_lifetime_request_t requests[] = {
       {.lifetime = 6, .pool = 0, .length = 1, .alignment = 8},
@@ -228,8 +233,10 @@ TEST_F(PipelineLifetimeLayoutTest, DeepUnaryPathsDoNotChangePlacement) {
                       !i && !branch ? depth + 1 : none};
     }
   }
-  loom_pipeline_lifetimes_t lifetimes = {.nodes = nodes.data(),
-                                         .count = nodes.size()};
+  loom_pipeline_lifetimes_t lifetimes = {
+      .nodes = nodes.data(),
+      .count = nodes.size(),
+  };
   IREE_ASSERT_OK(loom_pipeline_lifetimes_index(&arena_, &lifetimes));
   loom_pipeline_lifetime_request_t requests[] = {
       {.lifetime = 2 * depth, .pool = 0, .length = 3, .alignment = 16},
@@ -265,7 +272,10 @@ TEST_F(PipelineLifetimeLayoutTest, IndependentSerialBranches) {
                      i + 1 == 64 ? none : nodes.size() + 1});
   }
   loom_pipeline_lifetimes_t lifetimes = {
-      .nodes = nodes.data(), .count = nodes.size(), .has_serial = true};
+      .nodes = nodes.data(),
+      .count = nodes.size(),
+      .has_serial = true,
+  };
   IREE_ASSERT_OK(loom_pipeline_lifetimes_index(&arena_, &lifetimes));
   loom_pipeline_lifetime_request_t requests[] = {
       {.lifetime = 6, .pool = 0, .length = 32, .alignment = 1},

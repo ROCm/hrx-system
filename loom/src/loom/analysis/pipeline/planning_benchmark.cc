@@ -65,10 +65,12 @@ class PipelineFixture {
         invocations_[i].compositions = &entries_[i + 1];
       }
     }
-    graph_ = {.entries = entries_.data(),
-              .count = entries_.size(),
-              .workers = workers_.data(),
-              .worker_count = workers_.size()};
+    graph_ = {
+        .entries = entries_.data(),
+        .count = entries_.size(),
+        .workers = workers_.data(),
+        .worker_count = workers_.size(),
+    };
     requests_.resize(workers_.size());
   }
 

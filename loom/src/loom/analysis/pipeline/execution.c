@@ -150,7 +150,7 @@ iree_status_t loom_pipeline_execution_build(
     for (iree_host_size_t i = 0; i < resources->composition_count; ++i) {
       IREE_RETURN_IF_ERROR(loom_pipeline_participants_merge(
           arena, *row, participants[invocation->compositions[i]->ordinal], true,
-          row, out_conflict));
+          out_conflict, row));
       if (out_conflict->second_worker != IREE_HOST_SIZE_MAX) {
         return iree_ok_status();
       }
@@ -178,7 +178,7 @@ iree_status_t loom_pipeline_execution_build(
             case LOOM_PIPELINE_SCHEDULE_STEP_COMPOSITION: {
               IREE_RETURN_IF_ERROR(loom_pipeline_participants_merge(
                   arena, members, participants[binding.child->ordinal], false,
-                  &members, NULL));
+                  NULL, &members));
               break;
             }
             case LOOM_PIPELINE_SCHEDULE_STEP_SERIAL: {
@@ -202,8 +202,8 @@ iree_status_t loom_pipeline_execution_build(
       const loom_pipeline_participants_t** destination =
           outer ? row : &scopes[scope->parent].schedule.participants;
       IREE_RETURN_IF_ERROR(loom_pipeline_participants_merge(
-          arena, *destination, scope->schedule.participants, outer, destination,
-          out_conflict));
+          arena, *destination, scope->schedule.participants, outer,
+          out_conflict, destination));
       if (out_conflict->second_worker != IREE_HOST_SIZE_MAX) {
         return iree_ok_status();
       }

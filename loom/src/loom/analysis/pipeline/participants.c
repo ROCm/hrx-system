@@ -179,8 +179,8 @@ iree_status_t loom_pipeline_participants_build(
 iree_status_t loom_pipeline_participants_merge(
     iree_arena_allocator_t* arena, const loom_pipeline_participants_t* first,
     const loom_pipeline_participants_t* second, bool concurrent,
-    const loom_pipeline_participants_t** out_participants,
-    loom_pipeline_execution_conflict_t* conflict) {
+    loom_pipeline_execution_conflict_t* conflict,
+    const loom_pipeline_participants_t** out_participants) {
   if (!first || !second) {
     *out_participants = first ? first : second;
     return iree_ok_status();
@@ -240,7 +240,7 @@ iree_status_t loom_pipeline_participants_merge(
         : ((second->prefix & branch) != 0) == side ? second
                                                    : NULL;
     IREE_RETURN_IF_ERROR(loom_pipeline_participants_merge(
-        arena, a, b, concurrent, &children[side], conflict));
+        arena, a, b, concurrent, conflict, &children[side]));
     if (concurrent && conflict->second_worker != IREE_HOST_SIZE_MAX) {
       return iree_ok_status();
     }
@@ -273,7 +273,7 @@ iree_status_t loom_pipeline_participants_insert(
       UINT64_C(1) << (participant.engine % 64), &leaf, &workers));
   workers[0] = participant.worker;
   return loom_pipeline_participants_merge(arena, *participants, leaf, false,
-                                          participants, NULL);
+                                          NULL, participants);
 }
 
 void loom_pipeline_participants_begin(

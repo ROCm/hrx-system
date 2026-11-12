@@ -57,8 +57,8 @@ iree_status_t loom_pipeline_participants_build(
 iree_status_t loom_pipeline_participants_merge(
     iree_arena_allocator_t* arena, const loom_pipeline_participants_t* first,
     const loom_pipeline_participants_t* second, bool concurrent,
-    const loom_pipeline_participants_t** out_participants,
-    loom_pipeline_execution_conflict_t* conflict);
+    loom_pipeline_execution_conflict_t* conflict,
+    const loom_pipeline_participants_t** out_participants);
 
 // Adds a selected controller, preserving an already selected representative.
 iree_status_t loom_pipeline_participants_insert(
