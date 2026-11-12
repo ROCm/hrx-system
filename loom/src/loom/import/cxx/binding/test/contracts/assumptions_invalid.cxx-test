@@ -151,29 +151,6 @@ void entry(unsigned value, unsigned other) {
 
 // ====
 // RUN: verify
-// Addressable storage cannot be rebound to an SSA identity fact.
-[[loom::assume]] void assume(bool);
-int entry(int value) {
-  int* address = &value;
-  // ERROR@+1: LOWERING/059 "assume cannot retain facts for an addressable binding whose storage may change through an alias"
-  assume(value > 0);
-  return *address;
-}
-
-// ====
-// RUN: verify
-// Derived facts cannot read addressable storage either: materializing the
-// expression would snapshot a value that an alias can subsequently change.
-[[loom::assume]] void assume(bool);
-int entry(int value) {
-  int* address = &value;
-  // ERROR@+1: LOWERING/059 "assume expressions cannot read an addressable binding whose storage may change through an alias"
-  assume(value + 1 > 0);
-  return *address;
-}
-
-// ====
-// RUN: verify
 // Non-automatic bindings have no current SSA identity to refine.
 [[loom::assume]] void assume(bool);
 extern int global_value;

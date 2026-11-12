@@ -1,0 +1,183 @@
+// RUN: roundtrip
+// A local pointer used only to access its referent retains the semantic lvalue.
+// Reads and writes keep the existing sparse value-reference ABI.
+struct Box {
+  int lower;
+  int upper;
+};
+
+static int read_lower(const Box& box) {
+  const Box* pointer = &box;
+  return pointer->lower;
+}
+
+static void increment_upper(Box& box) {
+  Box* pointer = &box;
+  ++pointer->upper;
+}
+
+int semantic_pointer_aliases(Box box) {
+  int lower = read_lower(box);
+  increment_upper(box);
+  return lower * 10 + box.upper;
+}
+
+// ----
+func.def public @semantic_pointer_aliases(%box_lower: i32, %box_upper$1: i32) -> (i32) {
+  %lower = func.call pure @read_lower(%box_lower) : (i32) -> (i32)
+  %box_upper$4 = func.call pure @increment_upper(%box_upper$1) : (i32) -> (i32)
+  %5 = scalar.constant 10 : i32
+  %6 = scalar.muli %lower, %5 : i32
+  %7 = scalar.addi %6, %box_upper$4 : i32
+  func.return %7 : i32
+}
+
+func.def @read_lower(%box_lower: i32) -> (i32) {
+  func.return %box_lower : i32
+}
+
+func.def @increment_upper(%box_upper: i32) -> (i32) {
+  %12 = scalar.constant 1 : i32
+  %13 = scalar.addi %box_upper, %12 : i32
+  func.return %13 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Returning the pointer observes its representation and retains durable object
+// storage instead of treating the initializer as a semantic alias.
+struct EscapedBox {
+  int lower;
+  int upper;
+};
+
+static const EscapedBox* escape(const EscapedBox& box) {
+  const EscapedBox* pointer = &box;
+  return pointer;
+}
+
+int escaped_pointer_alias(EscapedBox box) { return escape(box)->upper; }
+
+// ----
+func.def public @escaped_pointer_alias(%box_lower: i32, %box_upper: i32) -> (i32) {
+  %3 = index.constant 8 : offset
+  %box_storage = buffer.alloca<private> align(4) %3 : buffer
+  %box_storage_byte_offset = index.constant 0 : offset
+  %box_view = buffer.view %box_storage[%box_storage_byte_offset] : buffer -> view<8xi8>
+  %7 = index.constant 0 : offset
+  %8 = index.add %box_storage_byte_offset, %7 : offset
+  %9 = index.assume %8 [range(%8, 0, 4)] : offset
+  %10 = buffer.view %box_storage[%9] : buffer -> view<1xi32>
+  view.store %box_lower, %10[0] : i32, view<1xi32>
+  %11 = index.constant 4 : offset
+  %12 = index.add %box_storage_byte_offset, %11 : offset
+  %13 = index.assume %12 [range(%12, 0, 4)] : offset
+  %14 = buffer.view %box_storage[%13] : buffer -> view<1xi32>
+  view.store %box_upper, %14[0] : i32, view<1xi32>
+  %15, %16 = func.call pure @escape(%box_storage, %box_storage_byte_offset) : (buffer, offset) -> (buffer, offset)
+  %17 = index.constant 4 : offset
+  %18 = index.add %16, %17 : offset
+  %19 = buffer.view %15[%18] : buffer -> view<1xi32>
+  %upper = view.load<root_in_bounds> %19[0] : view<1xi32> -> i32
+  func.return %upper : i32
+}
+
+func.def @escape(%box: buffer, %box_byte_offset: offset) -> (buffer, offset) {
+  func.return %box, %box_byte_offset : buffer, offset
+}
+
+// ====
+// RUN: roundtrip
+// A native record captured beside a semantic pointer record remains a value
+// when a helper's nonescaping local pointer only selects one native field.
+struct View {
+  const int* data;
+  int index;
+};
+
+struct CapturedBox {
+  int lower;
+  int upper;
+};
+
+static int captured_lower(const CapturedBox& box) {
+  const CapturedBox* pointer = &box;
+  return pointer->lower;
+}
+
+int mixed_closure(const int* data, int lower) {
+  View view{data, 1};
+  CapturedBox box{lower, 4};
+  auto callable = [=] { return view.data[view.index] + captured_lower(box); };
+  return callable();
+}
+
+// ----
+func.def public @mixed_closure(%data: buffer, %data_byte_offset: offset, %lower: i32) -> (i32) {
+  %view_index = scalar.constant 1 : i32
+  %box_upper = scalar.constant 4 : i32
+  %6 = func.call readonly @operator_call_value(%data, %data_byte_offset, %view_index, %lower) : (buffer, offset, i32, i32) -> (i32)
+  func.return %6 : i32
+}
+
+func.def @operator_call_value(%this_view_data: buffer, %this_view_data_byte_offset: offset, %this_view_index: i32, %this_box_lower: i32) -> (i32) {
+  %12 = scalar.extsi %this_view_index : i32 to i64
+  %13 = scalar.constant 4 : i64
+  %14 = scalar.muli %12, %13 : i64
+  %15 = index.cast %this_view_data_byte_offset : offset to i64
+  %16 = scalar.addi %15, %14 : i64
+  %17 = scalar.assume %16 [range(%16, 0, 9223372036854775807)] : i64
+  %18 = index.cast %17 : i64 to offset
+  %19 = buffer.view %this_view_data[%18] : buffer -> view<1xi32>
+  %20 = view.load<root_in_bounds> %19[0] : view<1xi32> -> i32
+  %21 = func.call pure @captured_lower(%this_box_lower) : (i32) -> (i32)
+  %22 = scalar.addi %20, %21 : i32
+  func.return %22 : i32
+}
+
+func.def @captured_lower(%box_lower: i32) -> (i32) {
+  func.return %box_lower : i32
+}
+
+// ====
+// RUN: roundtrip
+// Rebinding observes the pointer value and keeps subsequent dereferences on
+// the ordinary storage path instead of resolving them to the initializer.
+int rebound_pointer_alias(bool choose, int left, int right) {
+  int* pointer = &left;
+  if (choose) {
+    pointer = &right;
+  }
+  ++*pointer;
+  return left * 10 + right;
+}
+
+// ----
+func.def public @rebound_pointer_alias(%choose: i1, %left$1: i32, %right$2: i32) -> (i32) {
+  %4 = index.constant 4 : offset
+  %left_storage = buffer.alloca<private> align(4) %4 : buffer
+  %left_storage_byte_offset = index.constant 0 : offset
+  %left_view = buffer.view %left_storage[%left_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %left$1, %left_view[0] : i32, view<1xi32>
+  %8 = index.constant 4 : offset
+  %right_storage = buffer.alloca<private> align(4) %8 : buffer
+  %right_storage_byte_offset = index.constant 0 : offset
+  %right_view = buffer.view %right_storage[%right_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %right$2, %right_view[0] : i32, view<1xi32>
+  %pointer, %pointer_byte_offset = scf.if %choose -> (buffer, offset) {
+    scf.yield %right_storage, %right_storage_byte_offset : buffer, offset
+  } else {
+    scf.yield %left_storage, %left_storage_byte_offset : buffer, offset
+  }
+  %14 = buffer.view %pointer[%pointer_byte_offset] : buffer -> view<1xi32>
+  %15 = view.load<root_in_bounds> %14[0] : view<1xi32> -> i32
+  %16 = scalar.constant 1 : i32
+  %17 = scalar.addi %15, %16 : i32
+  view.store<root_in_bounds> %17, %14[0] : i32, view<1xi32>
+  %left$18 = view.load %left_view[0] : view<1xi32> -> i32
+  %19 = scalar.constant 10 : i32
+  %20 = scalar.muli %left$18, %19 : i32
+  %right$21 = view.load %right_view[0] : view<1xi32> -> i32
+  %22 = scalar.addi %20, %right$21 : i32
+  func.return %22 : i32
+}

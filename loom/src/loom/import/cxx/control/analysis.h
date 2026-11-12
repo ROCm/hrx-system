@@ -267,6 +267,10 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Whether this member projects existing memory instead of an SSA record.
   // Object identity is propagated from visited children once during analysis.
   bool storage_backed(cxx::MemberExpressionAST* expression) const;
+  // Referent of a local pointer whose only evaluated uses dereference the
+  // pointer without observing its pointer value. The translator can retain
+  // the already evaluated source lvalue instead of inventing object storage.
+  cxx::ExpressionAST* pointer_alias(cxx::Symbol* binding) const;
   // Null retains ordinary while semantics; a result permits scf.for lowering.
   const CountedLoop* counted(cxx::ForStatementAST* loop) const;
   // Retained lexical clauses for a supported runtime switch. Construction
@@ -297,6 +301,12 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Calls retained by the same source walk for sparse interprocedural effect
   // propagation before callable signatures are frozen.
   std::span<const DirectCall> calls() const { return calls_; }
+  // Frontend-normalized constructor member initializers in source execution
+  // order. Translation consumes this retained plan instead of rescanning the
+  // function body after callable analysis has completed.
+  cxx::List<cxx::MemInitializerAST*>* constructor_initializers() const {
+    return constructor_initializers_;
+  }
   // Static declarations in lexical order within this instantiated function.
   // The ordinal distinguishes same-named objects in separate nested scopes.
   std::span<cxx::InitDeclaratorAST* const> static_locals() const {
@@ -325,6 +335,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   const ArrayCopyInitialization* array_copy(cxx::AST* initializer) const;
   // Whether a reference binding must carry durable storage identity.
   bool reference_requires_storage(cxx::Symbol* binding) const;
+  // Complete semantic temporary whose lifetime is owned by this reference
+  // declaration, or null when the reference aliases another source object.
+  cxx::ExpressionAST* reference_materialization(cxx::Symbol* binding) const;
   // Whether execution may modify the object named by a reference parameter.
   bool reference_written(cxx::Symbol* parameter) const;
   // Complete-group requirements produced after call effects and source
@@ -354,6 +367,10 @@ class ControlFlow final : private cxx::ASTVisitor {
   const RecordPartition* receiver_partition() const {
     return receiver_partition_;
   }
+  // Selects storage for a constructor that cannot publish one complete value
+  // without consuming an incoming receiver. Must precede call propagation so
+  // callers retain the selected object identity.
+  void select_constructor_receiver_storage();
   void configure_receiver(Construction::ParameterMode mode);
   void bind_field_calls(
       const std::unordered_map<cxx::FunctionSymbol*,
@@ -409,6 +426,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   void finalize_callable_effects();
 
  private:
+  bool receiver_can_construct_value() const;
+
   struct TemporaryDestructionFacts;
   struct ReferenceIdentityFacts;
   struct ReferenceWriteFacts;
@@ -482,6 +501,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   void visit(cxx::CompoundAssignmentExpressionAST* ast) override;
   void visit(cxx::PostIncrExpressionAST* ast) override;
   void visit(cxx::UnaryExpressionAST* ast) override;
+  void visit(cxx::MemberExpressionAST* ast) override;
   void visit(cxx::ReturnStatementAST* ast) override;
   void visit(cxx::CallExpressionAST* ast) override;
   void visit(cxx::LambdaExpressionAST* ast) override;
@@ -513,6 +533,7 @@ class ControlFlow final : private cxx::ASTVisitor {
       const CallArgument& argument,
       StorageDemand demand = StorageDemand::Representation) const;
   void record_parameter_read(cxx::ExpressionAST* expression);
+  bool record_pointer_alias_read(cxx::ExpressionAST* expression);
   void record_copy_read(const cxx::Type* type,
                         cxx::List<cxx::ExpressionAST*>* arguments);
   void record_parameter_assignment(cxx::ExpressionAST* expression);
@@ -534,8 +555,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   bool require_reference_storage(cxx::Symbol* parameter);
   bool require_address(cxx::Symbol* binding);
   void retain_automatic_storage(cxx::VariableSymbol* variable,
-                                cxx::ExpressionAST* initializer,
-                                bool record_constructor_call);
+                                cxx::ExpressionAST* initializer);
   bool add_receiver_write(cxx::Symbol* field);
   void retain_reference_receiver_write(const DirectCall& call);
   CallArgument retain_call_argument(cxx::ExpressionAST* expression);
@@ -566,7 +586,8 @@ class ControlFlow final : private cxx::ASTVisitor {
                          cxx::FunctionSymbol* constructor, cxx::AST* owner);
   bool retain_constructor(cxx::VariableSymbol* variable,
                           cxx::ExpressionAST* initializer, cxx::AST* owner);
-  void retain_automatic_destruction(cxx::Symbol* binding, cxx::AST* owner);
+  void retain_automatic_destruction(cxx::Symbol* binding, cxx::AST* owner,
+                                    const cxx::Type* object_type = nullptr);
   void retain_subobject_destructions();
   void retain_temporary_destruction(cxx::ExpressionAST* expression);
   void retain_temporary_destructions();
@@ -590,6 +611,9 @@ class ControlFlow final : private cxx::ASTVisitor {
                                                    ControlFlow& callee);
   std::optional<Destination> classify_destination(
       cxx::ExpressionAST* expression);
+  std::optional<Destination> classify_materialized_destination(
+      cxx::ExpressionAST* expression, cxx::ExpressionAST* materialization,
+      cxx::Symbol* owner);
   bool collect_reference_return_parameters(
       cxx::ExpressionAST* expression, std::vector<size_t>& ordinals,
       std::unordered_map<cxx::Symbol*, size_t>* parameter_indices = nullptr);
@@ -658,10 +682,30 @@ class ControlFlow final : private cxx::ASTVisitor {
     std::optional<Destination> destination;
     // Canonical possible origins and reference-call edges of the initializer.
     CallArgument identity;
+    // Complete lifetime-extended semantic value owned by this declaration.
+    cxx::ExpressionAST* materialization = nullptr;
   };
   // Reference locals retain their initializer facts once. Later identity and
   // effect queries consume these facts without following initializer ASTs.
   std::unordered_map<cxx::Symbol*, ReferenceAlias> reference_aliases_;
+  // Whether the current source subtree can lifetime-extend a semantic prvalue.
+  // Ordinary expressions retain no materialization entry.
+  bool retain_reference_materializations_ = false;
+  struct PointerAlias {
+    // Source lvalue evaluated once by the pointer initializer.
+    cxx::ExpressionAST* referent;
+    // Canonical identity retained if a later use observes the pointer value.
+    CallArgument identity;
+    // False once any use needs an actual pointer representation.
+    bool transparent = true;
+  };
+  // Local address initializers remain aliases only while every pointer use is
+  // a direct dereference or data-member selection.
+  std::unordered_map<cxx::Symbol*, PointerAlias> pointer_aliases_;
+  // Address expression deferred while its declarator candidate is visited.
+  cxx::UnaryExpressionAST* pointer_alias_initializer_ = nullptr;
+  // Candidate binding consumed by the currently traversed transparent use.
+  cxx::Symbol* pointer_alias_use_ = nullptr;
   // Reference parameters requiring buffer-plus-offset transport.
   std::unordered_set<cxx::Symbol*> storage_references_;
   // Reference parameters whose referents may be modified.
@@ -676,6 +720,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   cxx::ExpressionAST* pointer_value_read_ = nullptr;
   // Calls retained once for sparse fixed-point propagation.
   std::vector<DirectCall> calls_;
+  // Frontend-owned constructor plan retained by the owning source traversal.
+  cxx::List<cxx::MemInitializerAST*>* constructor_initializers_ = nullptr;
   // Lvalue identities for assignments resolved after direct call propagation.
   std::vector<CallArgument> field_assignments_;
   // Array copy plans own normalized default arguments and source identity.

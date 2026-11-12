@@ -101,6 +101,8 @@ struct ParameterProjection {
   std::vector<ValueProjection> outputs;
   // Flattened input extent retained for call argument/result correspondence.
   size_t input_component_count = 0;
+  // Flattened output extent retained for result assembly.
+  size_t output_component_count = 0;
 };
 
 // One source reference parameter projected through its selected ABI. Parameters

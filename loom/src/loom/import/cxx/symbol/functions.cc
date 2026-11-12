@@ -367,6 +367,7 @@ void Functions::analyze(Types& types) {
   // distinguish a pointer-value read from a reference to the pointer object.
   std::unordered_set<cxx::FieldSymbol*> capture_identities;
   for (const auto& analyzed : analyzed_functions) {
+    analyzed.second->select_constructor_receiver_storage();
     analyzed.second->collect_pointer_capture_identities(capture_identities);
   }
 
@@ -436,11 +437,11 @@ void Functions::analyze(Types& types) {
                        function_contracts_.has_predicates(function) ||
                        template_definitions_.lookup(function) ||
                        unit_.typeTraits().is_reference(signature->returnType());
+    const bool receiver_storage = receiver_requires_storage(function);
     analysis->configure_receiver(
-        analysis->receiver_requires_storage() || function->isConstructor()
-            ? Construction::ParameterMode::Storage
-        : whole ? Construction::ParameterMode::Value
-                : Construction::ParameterMode::Projected);
+        receiver_storage ? Construction::ParameterMode::Storage
+        : whole          ? Construction::ParameterMode::Value
+                         : Construction::ParameterMode::Projected);
     for (auto* parameter : function->parameters()) {
       if (!unit_.typeTraits().is_reference(parameter->type())) {
         continue;
@@ -521,8 +522,7 @@ void Functions::analyze(Types& types) {
       reference_parameters_.emplace(canonical, std::move(references));
     }
     const auto* receiver = analysis->receiver_partition();
-    if (!receiver || function->isConstructor() ||
-        analysis->receiver_requires_storage()) {
+    if (!receiver || receiver_requires_storage(function)) {
       continue;
     }
     auto written = receiver_writes(function);
@@ -533,10 +533,14 @@ void Functions::analyze(Types& types) {
             traits.is_reference(member.type())
                 ? traits.add_pointer(traits.remove_reference(member.type()))
                 : types.unqualified(member.type());
-        const bool output =
+        const bool member_output =
             std::ranges::find(written, member.source) != written.end();
         for (const auto& group :
              types.projections(type, function->declaration())) {
+          const bool output =
+              function->isConstructor()
+                  ? analysis->parameter_output(member.source, group)
+                  : member_output;
           visit(member, group, output);
         }
       }
@@ -546,7 +550,7 @@ void Functions::analyze(Types& types) {
       complete &= analysis->parameter_input(member.source, group) &&
                   (!output || analysis->parameter_output(member.source, group));
     });
-    if (complete) {
+    if (complete && !function->isConstructor()) {
       continue;
     }
     ParameterProjection projection;
@@ -560,6 +564,7 @@ void Functions::analyze(Types& types) {
       }
       if (output) {
         projection.outputs.push_back(group);
+        projection.output_component_count += group.partition->component_count;
       }
     });
     receiver_projections_.emplace(canonical, std::move(projection));
@@ -1397,15 +1402,24 @@ std::optional<ImplicitObjectParameter> Functions::implicit_object(
     diagnostics_.reject(unit_, source,
                         "member function requires a storage-backed receiver");
   }
+  const auto* projection = instance.receiver_abi == ImplicitObjectABI::Value
+                               ? receiver_projection(symbol)
+                               : nullptr;
+  if (symbol->isConstructor() &&
+      instance.receiver_abi == ImplicitObjectABI::Value) {
+    const auto* record = analysis->receiver_partition();
+    IREE_ASSERT(record);
+    IREE_ASSERT(projection);
+    IREE_ASSERT(projection->inputs.empty());
+    IREE_ASSERT_EQ(projection->output_component_count, record->component_count);
+  }
   return ImplicitObjectParameter{
       instance.receiver_abi, object_type,
       instance.receiver_abi == ImplicitObjectABI::Value &&
               !symbol->isDestructor()
           ? analysis->receiver_writes()
           : std::span<cxx::Symbol* const>{},
-      instance.receiver_abi == ImplicitObjectABI::Value
-          ? receiver_projection(symbol)
-          : nullptr};
+      projection};
 }
 
 const ParameterProjection* Functions::receiver_projection(

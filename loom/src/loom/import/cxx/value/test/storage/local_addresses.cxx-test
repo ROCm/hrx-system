@@ -219,21 +219,21 @@ unsigned mutable_bound(unsigned limit) {
   return total;
 }
 // ----
-func.def public @mutable_bound(%limit: i32) -> (i32) {
-  %total$6 = scalar.constant 0 : i32
-  %total$29, %i, %28 = scf.while(%total = %total$6 : i32, %i = %total$6 : i32, %26 = %limit : i32) -> (i32, i32, i32) {
-    %15 = scalar.cmpi ult, %i, %26 : i32
-    scf.condition %15, %total, %i, %26 : i1, i32, i32, i32
-  } do(%total$33: i32, %i$34: i32, %27: i32) {
-    %total$16 = scalar.addi %total$33, %i$34 : i32
-    %17 = scalar.constant 1 : i32
-    %18 = scalar.cmpi eq, %i$34, %17 : i32
-    %19 = scalar.constant 2 : i32
-    %35 = scf.select %18, %19, %27 : i32
-    %i$23 = scalar.addi %i$34, %17 : i32
-    scf.yield %total$16, %i$23, %35 : i32, i32, i32
+func.def public @mutable_bound(%limit$0: i32) -> (i32) {
+  %total$2 = scalar.constant 0 : i32
+  %total$10, %limit$11, %i = scf.while(%total = %total$2 : i32, %limit = %limit$0 : i32, %i = %total$2 : i32) -> (i32, i32, i32) {
+    %13 = scalar.cmpi ult, %i, %limit : i32
+    scf.condition %13, %total, %limit, %i : i1, i32, i32, i32
+  } do(%total$7: i32, %limit$8: i32, %i$9: i32) {
+    %total$14 = scalar.addi %total$7, %i$9 : i32
+    %15 = scalar.constant 1 : i32
+    %16 = scalar.cmpi eq, %i$9, %15 : i32
+    %limit$18 = scalar.constant 2 : i32
+    %limit$21 = scf.select %16, %limit$18, %limit$8 : i32
+    %i$20 = scalar.addi %i$9, %15 : i32
+    scf.yield %total$14, %limit$21, %i$20 : i32, i32, i32
   }
-  func.return %total$29 : i32
+  func.return %total$10 : i32
 }
 
 // ====

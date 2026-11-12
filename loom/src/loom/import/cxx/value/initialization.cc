@@ -194,12 +194,8 @@ Value Initialization::value(const cxx::Type* type,
   if (!array &&
       types_.record_constructor_requires_call(type, constructor, owner)) {
     auto arguments = constructor_arguments(initializer);
-    auto allocation =
-        storage_.allocate(type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, owner);
-    auto destination = storage_.project(allocation.pointer, type, owner);
-    evaluation_.call_constructor(destination, *types_.record(type, owner), type,
-                                 constructor, arguments, owner);
-    return objects_.load(destination, type, owner);
+    return evaluation_.construct_value(*types_.record(type, owner), type,
+                                       constructor, arguments, owner);
   }
   if (auto* record = types_.record(type, owner);
       record && constructor &&
@@ -1077,17 +1073,14 @@ void Initialization::copy_array(StorageProjection destination,
   }
 }
 
-void Initialization::constructor_receiver(StorageProjection destination,
-                                          const RecordPartition& record,
-                                          const cxx::Type* object_type,
-                                          cxx::FunctionSymbol* constructor,
-                                          cxx::AST* owner) {
+void Initialization::constructor_receiver(
+    StorageProjection destination, const RecordPartition& record,
+    const cxx::Type* object_type, cxx::FunctionSymbol* constructor,
+    cxx::List<cxx::MemInitializerAST*>* initializers, cxx::AST* owner) {
   if (auto* delegate = constructor->delegatingConstructor()) {
     types_.admit_construction(constructor, object_type, owner);
-    cxx::ASTRewriter::requireFunctionDefinition(&unit_, constructor);
-    auto* definition = constructor->resolvedDefinition()->declaration();
-    auto* body = definition->functionBody;
-    auto* initializer = cxx::ctor_initializers(body)->value;
+    IREE_ASSERT(initializers && !initializers->next);
+    auto* initializer = initializers->value;
     ReceiverScope receiver(evaluation_, record, destination, object_type);
     auto* source = cxx::memInitializerClause(unit_.arena(), initializer);
     auto mark = evaluation_.begin_full_expression();
@@ -1098,8 +1091,64 @@ void Initialization::constructor_receiver(StorageProjection destination,
     }
     return;
   }
-  default_storage_record(destination, record, object_type, constructor,
-                         /*zero_initialize=*/false, /*retained=*/false, owner);
+  types_.admit_construction(constructor, object_type, owner);
+  ReceiverScope receiver(evaluation_, record, destination, object_type);
+  for (auto* initializer : cxx::ListView{initializers}) {
+    auto mark = evaluation_.begin_full_expression();
+    auto* field = initializer->symbol;
+    auto* source = cxx::memInitializerClause(unit_.arena(), initializer);
+    auto* field_type = objects_.member_type(object_type, field);
+    object(storage_.member(destination, field, initializer), field_type, source,
+           initializer->constructor, initializer);
+    evaluation_.finish_full_expression(mark);
+    evaluation_.complete_storage_receiver_member(field);
+  }
+}
+
+void Initialization::value_constructor_receiver(
+    const RecordPartition& record, const cxx::Type* object_type,
+    cxx::FunctionSymbol* constructor,
+    cxx::List<cxx::MemInitializerAST*>* initializers, cxx::AST* owner) {
+  if (auto* delegate = constructor->delegatingConstructor()) {
+    types_.admit_construction(constructor, object_type, owner);
+    IREE_ASSERT(initializers && !initializers->next);
+    auto* initializer = initializers->value;
+    auto* source = cxx::memInitializerClause(unit_.arena(), initializer);
+    auto mark = evaluation_.begin_full_expression();
+    auto initialized = value(object_type, source, delegate, initializer);
+    evaluation_.finish_full_expression(mark);
+    for (const auto& member : record.members) {
+      evaluation_.publish_receiver_member(
+          member.source,
+          initialized.project(*member.partition, member.component_offset));
+    }
+    return;
+  }
+
+  types_.admit_construction(constructor, object_type, owner);
+  for (auto* initializer : cxx::ListView{initializers}) {
+    auto mark = evaluation_.begin_full_expression();
+    auto* field = initializer->symbol;
+    auto* source = cxx::memInitializerClause(unit_.arena(), initializer);
+    const auto* field_type = objects_.member_type(object_type, field);
+    Value initialized;
+    if (unit_.typeTraits().is_lvalue_reference(field_type)) {
+      auto* referent =
+          cxx::Initializer(source).referenceExpression(unit_.typeTraits());
+      if (!referent) {
+        diagnostics_.reject(unit_, source,
+                            "reference members require one initializer "
+                            "expression");
+      }
+      initialized = evaluation_.reference(referent, initializer);
+    } else {
+      initialized =
+          value(field_type, source, initializer->constructor, initializer);
+      evaluation_.adopt(source);
+    }
+    evaluation_.publish_receiver_member(field, initialized);
+    evaluation_.finish_full_expression(mark);
+  }
 }
 
 std::optional<ObjectRepresentation> Initialization::literal(

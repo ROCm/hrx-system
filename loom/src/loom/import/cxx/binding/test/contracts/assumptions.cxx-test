@@ -247,6 +247,36 @@ func.def public @derived_identity(%pair_index: i32) -> (i32) {
 
 // ====
 // RUN: roundtrip
+// A nonescaping local pointer remains an SSA alias. Assumptions can therefore
+// refine the source binding or derive a fact without snapshotting mutable
+// storage behind an unknown address.
+[[loom::assume]] void assume(bool);
+int direct_alias(int value) {
+  int* address = &value;
+  assume(value > 0);
+  return *address;
+}
+int derived_alias(int value) {
+  int* address = &value;
+  assume(value + 1 > 0);
+  return *address;
+}
+
+// ----
+func.def public @direct_alias(%value$0: i32) -> (i32) {
+  %value$2 = scalar.assume %value$0 [gt(%value$0, 0)] : i32
+  func.return %value$2 : i32
+}
+
+func.def public @derived_alias(%value: i32) -> (i32) {
+  %5 = scalar.constant 1 : i32
+  %6 = scalar.addi %value, %5 : i32
+  %7 = scalar.assume %6 [gt(%6, 0)] : i32
+  func.return %value : i32
+}
+
+// ====
+// RUN: roundtrip
 // Direct constexpr and consteval calls retain their converted C++ values.
 [[loom::assume]] void assume(bool);
 static constexpr int extent(int scale) { return scale * 4; }

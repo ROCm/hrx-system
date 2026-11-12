@@ -107,34 +107,25 @@ unsigned padding(Child* value) {
 }
 // ----
 func.def public @padding(%value: buffer, %value_byte_offset: offset) -> (i32) {
-  %3 = index.constant 8 : offset
-  %4 = buffer.alloca<private> align(4) %3 : buffer
-  %56 = index.constant 0 : offset
-  %45 = scalar.constant 0 : i32
-  %46 = buffer.view %4[%56] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %45, %46[0] : i32, view<1xi32>
-  %55 = index.constant 4 : offset
-  %54 = scalar.constant 0 : i8
-  %51 = buffer.view %4[%55] : buffer -> view<1xi8>
-  view.store<root_in_bounds> %54, %51[0] : i8, view<1xi8>
-  %11 = view.load %46[0] : view<1xi32> -> i32
-  %16 = view.load %51[0] : view<1xi8> -> i8
-  %21 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %11, %21[0] : i32, view<1xi32>
-  %23 = index.add %value_byte_offset, %55 : offset
-  %24 = buffer.view %value[%23] : buffer -> view<1xi8>
-  view.store<root_in_bounds> %16, %24[0] : i8, view<1xi8>
-  %word = view.load<root_in_bounds> %21[0] : view<1xi32> -> i32
-  %tag = view.load<root_in_bounds> %24[0] : view<1xi8> -> i8
-  %33 = scalar.extui %tag : i8 to i32
-  %34 = scalar.addi %word, %33 : i32
-  %35 = index.constant 5 : offset
-  %36 = index.add %value_byte_offset, %35 : offset
-  %37 = buffer.view %value[%36] : buffer -> view<1xi8>
-  %extra = view.load<root_in_bounds> %37[0] : view<1xi8> -> i8
-  %39 = scalar.extui %extra : i8 to i32
-  %40 = scalar.addi %34, %39 : i32
-  func.return %40 : i32
+  %31 = scalar.constant 0 : i32
+  %34 = scalar.constant 0 : i8
+  %9 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %31, %9[0] : i32, view<1xi32>
+  %10 = index.constant 4 : offset
+  %11 = index.add %value_byte_offset, %10 : offset
+  %12 = buffer.view %value[%11] : buffer -> view<1xi8>
+  view.store<root_in_bounds> %34, %12[0] : i8, view<1xi8>
+  %word = view.load<root_in_bounds> %9[0] : view<1xi32> -> i32
+  %tag = view.load<root_in_bounds> %12[0] : view<1xi8> -> i8
+  %21 = scalar.extui %tag : i8 to i32
+  %22 = scalar.addi %word, %21 : i32
+  %23 = index.constant 5 : offset
+  %24 = index.add %value_byte_offset, %23 : offset
+  %25 = buffer.view %value[%24] : buffer -> view<1xi8>
+  %extra = view.load<root_in_bounds> %25[0] : view<1xi8> -> i8
+  %27 = scalar.extui %extra : i8 to i32
+  %28 = scalar.addi %22, %27 : i32
+  func.return %28 : i32
 }
 
 // ====
@@ -264,15 +255,9 @@ unsigned private_base(unsigned input) {
 }
 // ----
 func.def public @private_base(%input: i32) -> (i32) {
-  %2 = index.constant 4 : offset
-  %value_storage = buffer.alloca<private> align(4) %2 : buffer
-  %34 = index.constant 0 : offset
-  %25 = buffer.view %value_storage[%34] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %input, %25[0] : i32, view<1xi32>
-  %value = view.load<root_in_bounds> %25[0] : view<1xi32> -> i32
-  %18 = scalar.constant 3 : i32
-  %19 = scalar.muli %value, %18 : i32
-  func.return %19 : i32
+  %10 = scalar.constant 3 : i32
+  %11 = scalar.muli %input, %10 : i32
+  func.return %11 : i32
 }
 
 // ====

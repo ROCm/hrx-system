@@ -86,6 +86,13 @@ class Initialization {
         StorageProjection destination, const RecordPartition& record,
         const cxx::Type* object_type, cxx::FunctionSymbol* constructor,
         std::span<cxx::ExpressionAST* const> arguments, cxx::AST* owner) = 0;
+    // Constructs one complete semantic value through the selected constructor.
+    // The evaluator selects value or storage receiver transport from retained
+    // callable analysis and returns the final flattened record either way.
+    virtual Value construct_value(
+        const RecordPartition& record, const cxx::Type* object_type,
+        cxx::FunctionSymbol* constructor,
+        std::span<cxx::ExpressionAST* const> arguments, cxx::AST* owner) = 0;
     // Array copies use their retained element call and projected source
     // storage. The source reference precedes the completed default arguments.
     virtual const ArrayCopyInitialization* array_copy(cxx::AST* owner) = 0;
@@ -153,7 +160,16 @@ class Initialization {
   void constructor_receiver(StorageProjection destination,
                             const RecordPartition& record,
                             const cxx::Type* object_type,
-                            cxx::FunctionSymbol* constructor, cxx::AST* owner);
+                            cxx::FunctionSymbol* constructor,
+                            cxx::List<cxx::MemInitializerAST*>* initializers,
+                            cxx::AST* owner);
+  // Applies a retained constructor initialization plan to the active semantic
+  // receiver. Its ordinary function body then observes and mutates those same
+  // completed field bindings.
+  void value_constructor_receiver(
+      const RecordPartition& record, const cxx::Type* object_type,
+      cxx::FunctionSymbol* constructor,
+      cxx::List<cxx::MemInitializerAST*>* initializers, cxx::AST* owner);
 
  private:
   // Copies or moves each array leaf using its retained nontrivial constructor.

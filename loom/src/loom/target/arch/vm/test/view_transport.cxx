@@ -175,3 +175,80 @@ unsigned unused_carrier(unsigned position) {
   }
   return output[position];
 }
+
+using NativePayload = loom::type::buffer<const unsigned char>;
+
+struct NativeSlice {
+  NativePayload data;
+  unsigned index;
+};
+
+struct ConstructedNativeView {
+  NativeSlice slice;
+  unsigned bias;
+
+  ConstructedNativeView(const NativeSlice& source, unsigned bias)
+      : slice(source), bias(bias) {}
+};
+
+// A user-provided constructor transports the buffer as a semantic
+// buffer component instead of requiring a byte representation of the record.
+unsigned constructed_native_view(NativePayload data, unsigned index,
+                                 unsigned bias) {
+  if (index >= 3u) {
+    return 0u;
+  }
+  ConstructedNativeView value(NativeSlice{data, index}, bias);
+  auto view = loom::buffer::view<loom::type::dynamic>(value.slice.data, {3u});
+  return loom::view::load(view, value.slice.index) + value.bias;
+}
+
+unsigned constructed_native_constant(unsigned index, unsigned bias) {
+  auto data = loom::buffer::root(loom::buffer::constant("\x0b\x0c\x0d"));
+  return constructed_native_view(data, index, bias);
+}
+
+struct ConstructorIdentityBox {
+  unsigned value;
+};
+
+struct ConstructorIdentityIterator {
+  const ConstructorIdentityBox* box;
+
+  explicit ConstructorIdentityIterator(const ConstructorIdentityBox& source)
+      : box(&source) {}
+
+  unsigned read() const { return box->value; }
+};
+
+// The constructed iterator is a semantic value, but its pointer component
+// continues to identify the separately addressable source object.
+unsigned constructed_reference_identity(unsigned initial, unsigned updated) {
+  ConstructorIdentityBox box{initial};
+  ConstructorIdentityIterator iterator(box);
+  box.value = updated;
+  return iterator.read();
+}
+
+struct CapturedPointerAliasBox {
+  unsigned lower;
+  unsigned upper;
+};
+
+[[loom::noinline]] static unsigned captured_pointer_alias_lower(
+    const CapturedPointerAliasBox& box) {
+  const CapturedPointerAliasBox* pointer = &box;
+  return pointer->lower;
+}
+
+// A nonescaping local pointer can select a field from a native record without
+// forcing the neighboring semantic view in the closure into object storage.
+unsigned captured_pointer_alias(unsigned lower) {
+  auto view = loom::buffer::view<loom::type::dynamic>(
+      loom::buffer::constant("\x0b\x0c\x0d"), {3u});
+  CapturedPointerAliasBox box{lower, 4u};
+  auto callable = [=] {
+    return loom::view::load(view, 1u) + captured_pointer_alias_lower(box);
+  };
+  return callable();
+}

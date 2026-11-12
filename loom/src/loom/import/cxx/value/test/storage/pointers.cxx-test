@@ -188,13 +188,18 @@ func.def public @identity(%p: buffer, %p_byte_offset: offset) -> (buffer, offset
 long diff(int* a, int* b) { return a - b; }
 
 // ====
-// RUN: verify
-// A pointer value's buffer and byte origin have no stored object representation.
+// RUN: roundtrip
+// Taking the address of a pointer value needs no stored object representation
+// when the indirect pointer is used only to read the original value.
 int* local(int* input) {
-  // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
   int* pointer = input;
   auto** indirect = &pointer;
   return *indirect;
+}
+
+// ----
+func.def public @local(%input: buffer, %input_byte_offset: offset) -> (buffer, offset) {
+  func.return %input, %input_byte_offset : buffer, offset
 }
 
 // ====

@@ -651,6 +651,16 @@ class Translator final : private Initialization::Evaluation {
     uint64_t byte_offset = 0;
   };
 
+  // One reference declaration currently adopting a semantic temporary. The
+  // existing lvalue evaluator installs the complete value under this owner,
+  // then applies the source-written projection without materializing bytes.
+  struct MaterializedReference {
+    // Reference declaration owning the lifetime-extended object.
+    cxx::Symbol* binding;
+    // Canonical complete-object construction selected by lifetime analysis.
+    cxx::ExpressionAST* origin;
+  };
+
   // One completed source object awaiting destruction. Automatic bindings and
   // current receiver fields resolve their latest value at the cleanup edge;
   // temporary objects retain the value or storage created by their expression.
@@ -989,6 +999,17 @@ class Translator final : private Initialization::Evaluation {
   // the immutable payload and the number of transparent syntax wrappers.
   void adopt_temporary_result(cxx::ExpressionAST* expression) {
     auto* origin = control_->temporary_origins().result(expression);
+    auto found = temporary_results_.find(origin);
+    if (found != temporary_results_.end()) {
+      forget_temporary(found->second);
+    }
+  }
+
+  // A reference can extend a complete temporary through one of its
+  // subobjects. Adopt the complete materialization rather than requiring the
+  // initializer expression itself to be the owning prvalue.
+  void adopt_temporary_materialization(cxx::ExpressionAST* expression) {
+    auto* origin = control_->temporary_origins().materialization(expression);
     auto found = temporary_results_.find(origin);
     if (found != temporary_results_.end()) {
       forget_temporary(found->second);
@@ -1423,6 +1444,7 @@ class Translator final : private Initialization::Evaluation {
     immutable_storage_.clear();
     immutable_preamble_end_ = nullptr;
     references_.clear();
+    pointer_aliases_.clear();
     receivers_.clear();
     value_arena_.reset();
     size_t argument_index = 0;
@@ -1438,7 +1460,9 @@ class Translator final : private Initialization::Evaluation {
         receivers_.enter(*record, std::nullopt, record->source->type());
         for (const auto& member : record->members) {
           values_.declare(member.source, *member.partition);
-          receivers_.mark_complete(member.source);
+          if (!defined.source->symbol->isConstructor()) {
+            receivers_.mark_complete(member.source);
+          }
         }
         for (const auto& group : implicit.projection->inputs) {
           auto value = region_value(region, argument_index, *group.partition);
@@ -1550,13 +1574,21 @@ class Translator final : private Initialization::Evaluation {
       ++parameter_index;
     }
     if (defined.source->symbol->isConstructor()) {
-      IREE_ASSERT(defined.implicit_object &&
-                  defined.implicit_object->abi == ImplicitObjectABI::Storage &&
-                  receivers_.current() && receivers_.current()->storage);
-      initialization_.constructor_receiver(
-          *receivers_.current()->storage, *receivers_.current()->record,
-          defined.implicit_object->object_type, defined.source->symbol,
-          defined.source);
+      IREE_ASSERT(defined.implicit_object && receivers_.current());
+      auto initializers = control_->constructor_initializers();
+      if (defined.implicit_object->abi == ImplicitObjectABI::Storage) {
+        IREE_ASSERT(receivers_.current()->storage);
+        initialization_.constructor_receiver(
+            *receivers_.current()->storage, *receivers_.current()->record,
+            defined.implicit_object->object_type, defined.source->symbol,
+            initializers, defined.source);
+      } else {
+        IREE_ASSERT(defined.implicit_object->abi == ImplicitObjectABI::Value &&
+                    !receivers_.current()->storage);
+        initialization_.value_constructor_receiver(
+            *receivers_.current()->record, defined.implicit_object->object_type,
+            defined.source->symbol, initializers, defined.source);
+      }
     }
     if (defined.source->symbol->isDestructor()) {
       activate_subobject_destructions(defined.source);
@@ -1740,6 +1772,11 @@ class Translator final : private Initialization::Evaluation {
                            cxx::ExpressionAST* initializer,
                            ConstexprContract constexpr_contract,
                            cxx::AST* owner) {
+    if (auto* referent = control_->pointer_alias(variable)) {
+      pointer_aliases_.emplace(
+          variable, reference_lvalue(referent, owner, LvalueAccess::Read));
+      return;
+    }
     if (unit_.typeTraits().is_reference(variable->type())) {
       if (!initializer) {
         fail(owner, "reference locals require an initializer");
@@ -1751,6 +1788,26 @@ class Translator final : private Initialization::Evaluation {
              "reference locals require one initializer expression");
       }
       auto* referent = unit_.typeTraits().remove_reference(variable->type());
+      if (auto* materialization =
+              control_->reference_materialization(variable)) {
+        if (control_->reference_requires_storage(variable)) {
+          fail(initializer,
+               "lifetime-extended semantic objects cannot provide physical "
+               "storage identity");
+        }
+        auto previous = materialized_reference_;
+        materialized_reference_ =
+            MaterializedReference{variable, materialization};
+        auto target = reference_lvalue(referent_expression, owner,
+                                       unit_.typeTraits().is_const(referent)
+                                           ? LvalueAccess::Read
+                                           : LvalueAccess::Write);
+        materialized_reference_ = previous;
+        adopt_temporary_materialization(referent_expression);
+        references_.emplace(variable, std::move(target));
+        activate_automatic_destruction(variable, owner);
+        return;
+      }
       auto target =
           control_->reference_requires_storage(variable)
               ? Lvalue{ObjectLvalue{
@@ -1806,9 +1863,12 @@ class Translator final : private Initialization::Evaluation {
                                 owner);
     }
     auto value = apply_constexpr_contract(
-        initializer ? expression(initializer)
-                    : initialization_.value(variable->type(), nullptr,
-                                            variable->constructor(), owner),
+        record_constructor_call
+            ? initialization_.value(variable->type(), initializer,
+                                    variable->constructor(), owner)
+        : initializer ? expression(initializer)
+                      : initialization_.value(variable->type(), nullptr,
+                                              variable->constructor(), owner),
         constexpr_contract);
     adopt_temporary_result(initializer);
     values_.set(variable, name(value, cxx::to_string(variable->name())));
@@ -2060,6 +2120,16 @@ class Translator final : private Initialization::Evaluation {
     auto* pointer = cxx::type_cast<cxx::PointerType>(types_.unqualified(type));
     return storage_.project(value.pointer(),
                             pointer ? pointer->elementType() : type, owner);
+  }
+
+  const Lvalue* pointer_alias_lvalue(cxx::ExpressionAST* expression) const {
+    auto* source =
+        cxx::ast_cast<cxx::IdExpressionAST>(unwrap_expression(expression));
+    if (!source) {
+      return nullptr;
+    }
+    auto found = pointer_aliases_.find(source->symbol);
+    return found == pointer_aliases_.end() ? nullptr : &found->second;
   }
 
   StorageProjection pointer_expression(cxx::ExpressionAST* ast) {
@@ -2429,6 +2499,24 @@ class Translator final : private Initialization::Evaluation {
 
   enum class LvalueAccess { Read, Write };
 
+  std::optional<Lvalue> pointer_alias_member_lvalue(
+      cxx::MemberExpressionAST* member, cxx::AST* owner, LvalueAccess access) {
+    if (member->accessOp != cxx::TokenKind::T_MINUS_GREATER ||
+        member->vectorComponentKind != cxx::VectorComponentKind::kNone) {
+      return std::nullopt;
+    }
+    auto* alias = pointer_alias_lvalue(member->baseExpression);
+    if (!alias) {
+      return std::nullopt;
+    }
+    if (access == LvalueAccess::Write) {
+      types_.require_mutable(member->type, owner);
+    }
+    return alias->project(
+        types_.selection(member->symbol, member->subobjectPath, member),
+        member->type, storage_, owner);
+  }
+
   ObjectLvalue object_destination(
       cxx::ExpressionAST* expression, cxx::AST* owner,
       LvalueAccess access = LvalueAccess::Write,
@@ -2469,6 +2557,12 @@ class Translator final : private Initialization::Evaluation {
         }
       }
       if (!locals_.contains(destination->binding)) {
+        // A lifetime-extended semantic temporary uses its reference
+        // declaration as the complete SSA owner. Ordinary references have no
+        // value binding and continue to resolve through their retained lvalue.
+        if (values_.contains(destination->binding)) {
+          return {expression->type, *destination};
+        }
         if (references_.contains(destination->binding)) {
           auto traits = unit_.typeTraits();
           if (preserve_identity || traits.is_class(expression->type) ||
@@ -2476,9 +2570,6 @@ class Translator final : private Initialization::Evaluation {
             return {expression->type, object_address(expression)};
           }
           return {expression->type, address(expression)};
-        }
-        if (values_.contains(destination->binding)) {
-          return {expression->type, *destination};
         }
         if (access == LvalueAccess::Write) {
           fail(owner, "mutation requires an owned automatic source binding");
@@ -2853,6 +2944,21 @@ class Translator final : private Initialization::Evaluation {
                      LvalueAccess access = LvalueAccess::Write,
                      bool preserve_identity = false) {
     auto* projected = unwrap_object_identity(unit_, expression);
+    if (auto* dereference = cxx::ast_cast<cxx::UnaryExpressionAST>(projected);
+        dereference && !dereference->symbol &&
+        dereference->op == cxx::TokenKind::T_STAR) {
+      if (auto* alias = pointer_alias_lvalue(dereference->expression)) {
+        if (access == LvalueAccess::Write) {
+          types_.require_mutable(projected->type, owner);
+        }
+        return *alias;
+      }
+    }
+    if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(projected)) {
+      if (auto alias = pointer_alias_member_lvalue(member, owner, access)) {
+        return std::move(*alias);
+      }
+    }
     if (unit_.typeTraits().is_class(projected->type) &&
         is_current_object(unit_, projected)) {
       if (access == LvalueAccess::Write) {
@@ -3079,6 +3185,33 @@ class Translator final : private Initialization::Evaluation {
   Lvalue reference_lvalue(cxx::ExpressionAST* expression, cxx::AST* owner,
                           LvalueAccess access, bool force_ordinal = false) {
     auto* projected = unwrap_object_identity(unit_, expression);
+    if (materialized_reference_ &&
+        projected->valueCategory == cxx::ValueCategory::kPrValue &&
+        control_->temporary_origins().materialization(projected) ==
+            materialized_reference_->origin) {
+      if (access == LvalueAccess::Write) {
+        types_.require_mutable(projected->type, owner);
+      }
+      auto value = this->expression(projected);
+      values_.set(materialized_reference_->binding,
+                  name(value, cxx::to_string(
+                                  materialized_reference_->binding->name())));
+      return {ObjectLvalue{
+          projected->type,
+          Destination{materialized_reference_->binding, 0, nullptr}}};
+    }
+    if (materialized_reference_) {
+      if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(projected);
+          cast &&
+          cast->castKind == cxx::ImplicitCastKind::kDerivedToBaseConversion &&
+          control_->temporary_origins().materialization(cast) ==
+              materialized_reference_->origin) {
+        auto base =
+            reference_lvalue(cast->expression, owner, access, force_ordinal);
+        return base.project(types_.projection(cast->subobjectPath, cast),
+                            cast->type, storage_, owner);
+      }
+    }
     if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(projected);
         member &&
         member->vectorComponentKind != cxx::VectorComponentKind::kNone) {
@@ -3620,6 +3753,9 @@ class Translator final : private Initialization::Evaluation {
     std::span<cxx::Symbol* const> written_fields;
     // Exact evaluated temporary whose current payload cleanup must observe.
     std::optional<TemporaryReference> temporary;
+    // Whether this value receiver has no incoming object and returns a newly
+    // constructed complete record.
+    bool constructing = false;
   };
 
   ReceiverArgument current_receiver_argument(
@@ -4403,6 +4539,37 @@ class Translator final : private Initialization::Evaluation {
                           SourceArguments{.range = arguments}, owner);
   }
 
+  Value construct_value(const RecordPartition& record,
+                        const cxx::Type* object_type,
+                        cxx::FunctionSymbol* constructor,
+                        std::span<cxx::ExpressionAST* const> arguments,
+                        cxx::AST* owner) override {
+    auto* receiver_type = implicit_object_type(unit_, constructor);
+    IREE_ASSERT(receiver_type);
+    IREE_ASSERT(unit_.typeTraits().is_same(types_.unqualified(object_type),
+                                           types_.unqualified(receiver_type)));
+    if (functions_.receiver_requires_storage(constructor)) {
+      auto allocation = storage_.allocate(
+          object_type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, owner);
+      auto destination =
+          storage_.project(allocation.pointer, object_type, owner);
+      emit_constructor_call(destination, record, constructor,
+                            SourceArguments{.range = arguments}, owner);
+      return objects_.load(destination, object_type, owner);
+    }
+    ReceiverArgument receiver = {
+        .abi = ImplicitObjectABI::Value,
+        .record = &record,
+        .written_fields = functions_.receiver_writes(constructor),
+        .constructing = true,
+    };
+    auto result = emit_ordinary_call(
+        owner, constructor, SourceArguments{.range = arguments},
+        std::move(receiver), locations_.get(owner));
+    IREE_ASSERT(result.value && &result.value->partition() == &record);
+    return *result.value;
+  }
+
   const ArrayCopyInitialization* array_copy(cxx::AST* owner) override {
     return control_->array_copy(owner);
   }
@@ -4574,26 +4741,37 @@ class Translator final : private Initialization::Evaluation {
     size_t result_offset = ordinary_result_count;
     std::optional<Value> receiver_result;
     if (receiver_projection) {
-      auto updated = receiver->value;
-      for (const auto& group : receiver_projection->outputs) {
-        const size_t count = group.partition->component_count;
-        auto value = value_arena_.capture(
-            *group.partition, {loom_op_results(op) + result_offset, count});
-        if (receiver->current || receiver->target) {
-          write(
-              project_call_target(receiver->current ? current_receiver_target()
-                                                    : *receiver->target,
-                                  group, call),
-              value, call);
-        } else {
-          updated =
-              value_arena_.replace(*updated, group.component_offset, value);
+      if (receiver->constructing) {
+        IREE_ASSERT(!receiver->value && !receiver->current &&
+                    !receiver->target);
+        IREE_ASSERT_EQ(receiver_projection->output_component_count,
+                       receiver->record->component_count);
+        receiver_result = value_arena_.capture(
+            *receiver->record, {loom_op_results(op) + result_offset,
+                                receiver_projection->output_component_count});
+        result_offset += receiver_projection->output_component_count;
+      } else {
+        auto updated = receiver->value;
+        for (const auto& group : receiver_projection->outputs) {
+          const size_t count = group.partition->component_count;
+          auto value = value_arena_.capture(
+              *group.partition, {loom_op_results(op) + result_offset, count});
+          if (receiver->current || receiver->target) {
+            write(project_call_target(receiver->current
+                                          ? current_receiver_target()
+                                          : *receiver->target,
+                                      group, call),
+                  value, call);
+          } else {
+            updated =
+                value_arena_.replace(*updated, group.component_offset, value);
+          }
+          result_offset += count;
         }
-        result_offset += count;
-      }
-      if (updated && !receiver_projection->outputs.empty()) {
-        write_receiver(*receiver, *updated, call);
-        receiver_result = *updated;
+        if (updated && !receiver_projection->outputs.empty()) {
+          write_receiver(*receiver, *updated, call);
+          receiver_result = *updated;
+        }
       }
     } else if (receiver_writeback) {
       auto updated = *receiver->value;
@@ -4649,7 +4827,9 @@ class Translator final : private Initialization::Evaluation {
       result_offset += component_count;
     }
     if (returns_void) {
-      return {};
+      return receiver && receiver->constructing
+                 ? EvaluatedCallResult{.value = receiver_result}
+                 : EvaluatedCallResult{};
     }
     if (returns_receiver_alias) {
       return {
@@ -5846,6 +6026,10 @@ class Translator final : private Initialization::Evaluation {
         return name(selected_receiver_value(*selected, field->type(), ast),
                     cxx::to_string(field->name()));
       }
+      if (auto alias =
+              pointer_alias_member_lvalue(member, ast, LvalueAccess::Read)) {
+        return name(read(*alias, ast), cxx::to_string(member->symbol->name()));
+      }
       auto* base = cxx::ast_cast<cxx::IdExpressionAST>(member->baseExpression);
       if (is_semantic_array_element(member->baseExpression)) {
         return name(read(destination(member, ast, LvalueAccess::Read), ast),
@@ -6060,6 +6244,9 @@ class Translator final : private Initialization::Evaluation {
         return object_address(unary->expression).pointer;
       }
       if (unary->op == cxx::TokenKind::T_STAR) {
+        if (auto* alias = pointer_alias_lvalue(unary->expression)) {
+          return read(*alias, ast);
+        }
         return load(ast);
       }
       if (unary->op != cxx::TokenKind::T_PLUS &&
@@ -8201,6 +8388,8 @@ class Translator final : private Initialization::Evaluation {
   // Latest evaluated result at each retained construction site. Cleanup tokens
   // remain stable when another result is adopted or extended to lexical scope.
   std::unordered_map<cxx::ExpressionAST*, size_t> temporary_results_;
+  // Active only while one reference initializer adopts its semantic prvalue.
+  std::optional<MaterializedReference> materialized_reference_;
   // Temporary prefix owned by the current full expression. Lexical caller
   // tokens retain parent marks without a heap-backed translator stack.
   std::optional<size_t> full_expression_mark_;
@@ -8220,6 +8409,9 @@ class Translator final : private Initialization::Evaluation {
   // rebind. Storage references therefore preserve their root and byte offset
   // without re-evaluating a source address expression.
   std::unordered_map<cxx::Symbol*, Lvalue> references_;
+  // Nonescaping local pointers retain their evaluated semantic lvalue rather
+  // than forcing the referent through a physical object representation.
+  std::unordered_map<cxx::Symbol*, Lvalue> pointer_aliases_;
   // Lexical current objects share bindings and retain construction completion.
   ReceiverScopes receivers_{values_};
   // Launch configurations not owned by the ordinary reachable-call analysis
