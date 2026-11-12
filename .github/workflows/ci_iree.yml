@@ -960,6 +960,9 @@ jobs:
       run:
         shell: bash
     env:
+      AR: /usr/lib/llvm-22/bin/llvm-ar
+      CC: /usr/lib/llvm-22/bin/clang
+      CXX: /usr/lib/llvm-22/bin/clang++
       LLVM_APT_VERSION: "1:22.1.8~++20260714014902+ca7933e47d3a-1~exp1~20260714135019.80"
       LLVM_ROOT: /usr/lib/llvm-22
       WINDOWS_CROSS_ROOT: ${{ github.workspace }}/build/iree-cmake-windows/toolchain
