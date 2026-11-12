@@ -397,7 +397,8 @@ jobs:
           fi
           if [[ "${{ matrix.kind }}" == windows_msvc ]]; then
             compiler_dir="$(find "$MSVC_WINE_ROOT/VC/Tools/MSVC" -mindepth 1 -maxdepth 1 -type d -print -quit)/bin/Hostx64/x64"
-            wine_executable="$(command -v wine64 || command -v wine)"
+            wine_executable=/usr/lib/wine/wine64
+            test -x "$wine_executable"
             WINEDEBUG=-all WINEPATH="z:$compiler_dir" \
               "$wine_executable" "$compiler_dir/cl.exe" /Bv
           fi

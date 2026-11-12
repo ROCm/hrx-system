@@ -60,7 +60,7 @@ def windows_cross_toolchain(name, repository_path, execution_architecture, msvc_
         name = "all_files",
         srcs = [":compiler_files", ":linker_files", ":archiver_files"] + native.glob(
             ["bin/*", "tools/*"],
-            exclude = ["tools/msvc-*", "tools/msvcenv.sh", "tools/wine-msvc.sh"],
+            exclude = ["tools/msvc-*", "tools/msvcenv.sh", "tools/wine-msvc.sh", "tools/wine64"],
         ),
     )
     native.filegroup(
@@ -93,6 +93,7 @@ def windows_cross_toolchain(name, repository_path, execution_architecture, msvc_
             "tools/msvc-ml64",
             "tools/msvcenv.sh",
             "tools/wine-msvc.sh",
+            "tools/wine64",
         ],
     )
     native.filegroup(
