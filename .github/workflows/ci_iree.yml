@@ -399,8 +399,15 @@ jobs:
             compiler_dir="$(find "$MSVC_WINE_ROOT/VC/Tools/MSVC" -mindepth 1 -maxdepth 1 -type d -print -quit)/bin/Hostx64/x64"
             wine_executable=/usr/lib/wine/wine64
             test -x "$wine_executable"
+            version_source="$RUNNER_TEMP/msvc-version.c"
+            version_object="$RUNNER_TEMP/msvc-version.obj"
+            printf 'int msvc_version_probe(void) { return 0; }\n' > "$version_source"
+            version_source_windows="z:${version_source//\//\\}"
+            version_object_windows="z:${version_object//\//\\}"
             WINEDEBUG=-all WINEPATH="z:$compiler_dir" \
-              "$wine_executable" "$compiler_dir/cl.exe" /Bv
+              "$wine_executable" "$compiler_dir/cl.exe" /nologo /Bv /c \
+              "$version_source_windows" "/Fo$version_object_windows"
+            test -s "$version_object"
           fi
 
       - name: Report ROCm environment
