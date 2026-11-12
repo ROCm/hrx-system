@@ -460,9 +460,13 @@ static iree_status_t loom_run_hal_testbench_scenario_call_ring_prepare(
   if (iree_status_is_ok(status) &&
       iree_all_bits_set(flags,
                         LOOM_RUN_HAL_SCENARIO_RING_FLAG_STAGE_BINDINGS)) {
-    status = loom_run_hal_testbench_staging_initialize(
-        &provider->context->runtime, binding_count, out_ring->binding_table,
-        product->host_allocator, &out_ring->staging);
+    status = loom_run_hal_testbench_context_emit_progress(
+        provider->context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_STAGE);
+    if (iree_status_is_ok(status)) {
+      status = loom_run_hal_testbench_staging_initialize(
+          &provider->context->runtime, binding_count, out_ring->binding_table,
+          product->host_allocator, &out_ring->staging);
+    }
   }
   if (iree_status_is_ok(status)) {
     out_ring->binding_count = binding_count;
@@ -496,9 +500,19 @@ static iree_status_t loom_run_hal_testbench_scenario_call_ring_execute(
   loom_run_hal_dispatch_sequence_options_t sequence_options;
   loom_run_hal_dispatch_sequence_options_initialize(&sequence_options);
   if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_context_emit_progress(
+        product->provider.context,
+        LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_DISPATCH_PREPARE);
+  }
+  if (iree_status_is_ok(status)) {
     status = loom_run_hal_dispatch_sequence_prepare(
         &product->provider.context->runtime, call_count, steps,
         &sequence_options, product->host_allocator, &sequence);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_context_emit_progress(
+        product->provider.context,
+        LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_DISPATCH);
   }
   if (iree_status_is_ok(status)) {
     status = loom_run_hal_dispatch_sequence_execute(
@@ -524,12 +538,22 @@ static iree_status_t loom_run_hal_testbench_scenario_product_execute(
   }
 
   loom_run_hal_testbench_scenario_call_ring_t ring = {0};
-  iree_status_t status = loom_run_hal_testbench_scenario_call_ring_prepare(
-      product, call_count, calls,
-      LOOM_RUN_HAL_SCENARIO_RING_FLAG_STAGE_BINDINGS, &ring);
+  iree_status_t status = loom_run_hal_testbench_context_emit_progress(
+      product->provider.context,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_MATERIALIZE);
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_scenario_call_ring_prepare(
+        product, call_count, calls,
+        LOOM_RUN_HAL_SCENARIO_RING_FLAG_STAGE_BINDINGS, &ring);
+  }
   if (iree_status_is_ok(status)) {
     status = loom_run_hal_testbench_scenario_call_ring_execute(product, &ring,
                                                                call_count);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_context_emit_progress(
+        product->provider.context,
+        LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_READBACK);
   }
   if (iree_status_is_ok(status)) {
     status = loom_run_hal_testbench_staging_readback(
@@ -540,8 +564,17 @@ static iree_status_t loom_run_hal_testbench_scenario_product_execute(
     status = loom_run_hal_testbench_scenario_results_read(
         product, &ring.results, i, calls[i].results);
   }
+  status = iree_status_join(status,
+                            loom_run_hal_testbench_context_emit_progress(
+                                product->provider.context,
+                                LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RETIRE));
   status = iree_status_join(
       status, loom_run_hal_testbench_scenario_call_ring_deinitialize(&ring));
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_context_emit_progress(
+        product->provider.context,
+        LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_COMPLETE);
+  }
   return status;
 }
 
@@ -1086,6 +1119,9 @@ static iree_status_t loom_run_hal_testbench_scenario_product_prepare(
         "HAL scenario profile is not bound to the invocation module");
   }
 
+  IREE_RETURN_IF_ERROR(loom_run_hal_testbench_context_emit_progress(
+      profile->provider_options.context,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_MATERIALIZE));
   loom_run_hal_testbench_scenario_product_t* product = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*product),
                                              (void**)&product));

@@ -65,6 +65,7 @@ iree_executable_test(
     args = [
         "$(rootpath //loom/src/loom/tooling/execution/hal/testdata:command_scenario_dependent_stages.loom)",
         "--device=task",
+        "--execution-progress",
     ],
     data = ["//loom/src/loom/tooling/execution/hal/testdata:command_scenario_dependent_stages.loom"],
     target_compatible_with = _TASK_EXECUTION_COMPATIBLE_WITH,

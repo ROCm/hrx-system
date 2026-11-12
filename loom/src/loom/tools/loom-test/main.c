@@ -93,6 +93,10 @@ IREE_FLAG_LIST_NAMED(
     string, allow_failure, "allow-failure",
     "Permitted record failure as '@record=DOMAIN/NNN[,DOMAIN/NNN...]'. "
     "A pass is valid, while any other diagnostic fails the run.");
+IREE_FLAG_NAMED(
+    bool, execution_progress, "execution-progress", false,
+    "Write synchronously flushed execution phase markers to stderr. Markers "
+    "diagnose an outer harness timeout without adding an inner deadline.");
 
 enum {
   // Total bytes retained per runner scratch arena block.
@@ -102,6 +106,103 @@ enum {
   // Trials submitted through one prepared product callback.
   LOOM_TEST_SCENARIO_BATCH_CAPACITY = 64,
 };
+
+typedef enum loom_test_progress_record_kind_e {
+  LOOM_TEST_PROGRESS_RECORD_NONE = 0,
+  LOOM_TEST_PROGRESS_RECORD_CASE,
+  LOOM_TEST_PROGRESS_RECORD_SCENARIO,
+} loom_test_progress_record_kind_t;
+
+typedef struct loom_test_progress_state_t {
+  // Kind of the record currently executing.
+  loom_test_progress_record_kind_t record_kind;
+  // Borrowed symbol name of the record currently executing.
+  iree_string_view_t record_name;
+  // Current case sample, or IREE_HOST_SIZE_MAX before sample execution.
+  iree_host_size_t sample_ordinal;
+  // Current scenario configuration, or IREE_HOST_SIZE_MAX for a case.
+  iree_host_size_t configuration_ordinal;
+  // Current scenario trial domain, or IREE_HOST_SIZE_MAX before trial
+  // execution.
+  iree_host_size_t trial_index;
+  // First trial ordinal in the current batch, or IREE_HOST_SIZE_MAX before it.
+  iree_host_size_t first_trial_ordinal;
+  // Number of trials in the current batch.
+  iree_host_size_t batch_count;
+} loom_test_progress_state_t;
+
+static iree_status_t loom_test_emit_execution_progress(
+    void* user_data, loom_run_hal_testbench_progress_phase_t phase) {
+  static const char* const kPhaseNames[] = {
+      "record-begin",    "runtime-initialize",
+      "target-select",   "compile",
+      "executable-load", "materialize",
+      "stage",           "dispatch-prepare",
+      "dispatch",        "readback",
+      "retire",          "complete",
+      "record-complete",
+  };
+  static_assert(IREE_ARRAYSIZE(kPhaseNames) ==
+                    LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_COUNT,
+                "progress phase names must remain complete");
+  IREE_ASSERT((uint32_t)phase < IREE_ARRAYSIZE(kPhaseNames));
+  const char* phase_name = kPhaseNames[phase];
+  const loom_test_progress_state_t* state =
+      (const loom_test_progress_state_t*)user_data;
+
+  int write_result = 0;
+  switch (state->record_kind) {
+    case LOOM_TEST_PROGRESS_RECORD_NONE:
+      write_result =
+          fprintf(stderr, "[loom-test] progress phase=%s\n", phase_name);
+      break;
+    case LOOM_TEST_PROGRESS_RECORD_CASE:
+      if (state->sample_ordinal == IREE_HOST_SIZE_MAX) {
+        write_result = fprintf(
+            stderr, "[loom-test] progress record=case name=%.*s phase=%s\n",
+            (int)state->record_name.size, state->record_name.data, phase_name);
+      } else {
+        write_result =
+            fprintf(stderr,
+                    "[loom-test] progress record=case name=%.*s sample=%" PRIhsz
+                    " phase=%s\n",
+                    (int)state->record_name.size, state->record_name.data,
+                    state->sample_ordinal, phase_name);
+      }
+      break;
+    case LOOM_TEST_PROGRESS_RECORD_SCENARIO:
+      if (state->configuration_ordinal == IREE_HOST_SIZE_MAX) {
+        write_result = fprintf(
+            stderr, "[loom-test] progress record=scenario name=%.*s phase=%s\n",
+            (int)state->record_name.size, state->record_name.data, phase_name);
+      } else if (state->trial_index == IREE_HOST_SIZE_MAX) {
+        write_result =
+            fprintf(stderr,
+                    "[loom-test] progress record=scenario name=%.*s "
+                    "configuration=%" PRIhsz " phase=%s\n",
+                    (int)state->record_name.size, state->record_name.data,
+                    state->configuration_ordinal, phase_name);
+      } else {
+        write_result =
+            fprintf(stderr,
+                    "[loom-test] progress record=scenario name=%.*s "
+                    "configuration=%" PRIhsz " trial=%" PRIhsz " first=%" PRIhsz
+                    " count=%" PRIhsz " phase=%s\n",
+                    (int)state->record_name.size, state->record_name.data,
+                    state->configuration_ordinal, state->trial_index,
+                    state->first_trial_ordinal, state->batch_count, phase_name);
+      }
+      break;
+  }
+  if (write_result < 0) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "failed to write execution progress marker");
+  }
+  return fflush(stderr) == 0
+             ? iree_ok_status()
+             : iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "failed to flush execution progress marker");
+}
 
 typedef struct loom_test_file_provider_t {
   // Host allocator used for resolved path storage.
@@ -556,8 +657,8 @@ static iree_status_t loom_test_run_case_samples(
     loom_testbench_compile_result_callback_t result_callback,
     loom_test_diagnostic_capture_t* diagnostic_capture,
     loom_run_hal_testbench_context_t* hal_context,
-    iree_arena_allocator_t* arena, loom_json_array_writer_t* samples,
-    iree_host_size_t* inout_sample_count,
+    loom_test_progress_state_t* progress_state, iree_arena_allocator_t* arena,
+    loom_json_array_writer_t* samples, iree_host_size_t* inout_sample_count,
     iree_host_size_t* inout_failed_sample_count) {
   const loom_testbench_case_plan_t* case_plan = &module_plan->cases[case_index];
 
@@ -566,14 +667,24 @@ static iree_status_t loom_test_run_case_samples(
   IREE_RETURN_IF_ERROR(loom_test_validate_sample_flag(
       case_plan->sample_count, &selected_sample_ordinal, &has_selected_sample));
 
-  iree_status_t status = iree_ok_status();
+  *progress_state = (loom_test_progress_state_t){
+      .record_kind = LOOM_TEST_PROGRESS_RECORD_CASE,
+      .record_name = case_plan->name,
+      .sample_ordinal = IREE_HOST_SIZE_MAX,
+      .configuration_ordinal = IREE_HOST_SIZE_MAX,
+      .trial_index = IREE_HOST_SIZE_MAX,
+      .first_trial_ordinal = IREE_HOST_SIZE_MAX,
+  };
+  iree_status_t status = loom_run_hal_testbench_context_emit_progress(
+      hal_context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RECORD_BEGIN);
   loom_testbench_case_execution_options_t execution_options =
       *base_execution_options;
   loom_run_hal_testbench_actual_sequence_t hal_actual_sequence = {0};
   loom_testbench_reference_matmul_oracle_options_t matmul_oracle_options = {0};
   loom_testbench_oracle_provider_t oracle_providers[2] = {0};
   bool hal_actual_sequence_initialized = false;
-  if (loom_test_case_has_kernel_launch(case_plan)) {
+  if (iree_status_is_ok(status) &&
+      loom_test_case_has_kernel_launch(case_plan)) {
     status = loom_test_configure_hal_actual_sequence(
         compilation, native_module, case_plan, pass_program,
         requested_target_profile, sanitizer, result_callback, hal_context,
@@ -615,6 +726,7 @@ static iree_status_t loom_test_run_case_samples(
   for (iree_host_size_t sample_ordinal = begin_sample;
        iree_status_is_ok(status) && sample_ordinal < end_sample;
        ++sample_ordinal) {
+    progress_state->sample_ordinal = sample_ordinal;
     loom_testbench_case_sample_result_t sample_result = {0};
     status = loom_testbench_run_case_sample(
         &executor, (loom_testbench_case_sample_t){.ordinal = sample_ordinal},
@@ -638,6 +750,10 @@ static iree_status_t loom_test_run_case_samples(
     }
   }
 
+  progress_state->sample_ordinal = IREE_HOST_SIZE_MAX;
+  status = iree_status_join(
+      status, loom_run_hal_testbench_context_emit_progress(
+                  hal_context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RETIRE));
   if (executor_initialized) {
     loom_testbench_case_executor_deinitialize(&executor);
   }
@@ -645,6 +761,10 @@ static iree_status_t loom_test_run_case_samples(
     loom_run_hal_testbench_actual_sequence_deinitialize(&hal_actual_sequence);
   }
   iree_arena_reset(arena);
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_context_emit_progress(
+        hal_context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RECORD_COMPLETE);
+  }
   return status;
 }
 
@@ -655,16 +775,31 @@ static iree_status_t loom_test_run_scenario(
     const loom_testbench_value_materializer_options_t* materializer_options,
     loom_testbench_entropy_t entropy_root,
     loom_test_diagnostic_capture_t* diagnostic_capture,
+    loom_run_hal_testbench_context_t* hal_context,
+    loom_test_progress_state_t* progress_state,
     loom_json_array_writer_t* trial_results,
     iree_host_size_t* inout_trial_count,
     iree_host_size_t* inout_failed_trial_count) {
   const loom_testbench_scenario_plan_t* scenario =
       &module_plan->scenarios[scenario_index];
-  iree_status_t status = iree_ok_status();
+  *progress_state = (loom_test_progress_state_t){
+      .record_kind = LOOM_TEST_PROGRESS_RECORD_SCENARIO,
+      .record_name = scenario->name,
+      .sample_ordinal = IREE_HOST_SIZE_MAX,
+      .configuration_ordinal = IREE_HOST_SIZE_MAX,
+      .trial_index = IREE_HOST_SIZE_MAX,
+      .first_trial_ordinal = IREE_HOST_SIZE_MAX,
+  };
+  iree_status_t status = loom_run_hal_testbench_context_emit_progress(
+      hal_context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RECORD_BEGIN);
   for (iree_host_size_t configuration_ordinal = 0;
        iree_status_is_ok(status) &&
        configuration_ordinal < scenario->configuration_count;
        ++configuration_ordinal) {
+    progress_state->configuration_ordinal = configuration_ordinal;
+    progress_state->trial_index = IREE_HOST_SIZE_MAX;
+    progress_state->first_trial_ordinal = IREE_HOST_SIZE_MAX;
+    progress_state->batch_count = 0;
     loom_testbench_scenario_configuration_values_t configuration = {0};
     status = loom_testbench_scenario_configuration_values_initialize(
         module_plan->module, scenario, execution_options->host_allocator,
@@ -701,6 +836,9 @@ static iree_status_t loom_test_run_scenario(
            first_trial_ordinal += batch_capacity) {
         const iree_host_size_t batch_count =
             iree_min(batch_capacity, trial->trial_count - first_trial_ordinal);
+        progress_state->trial_index = trial_index;
+        progress_state->first_trial_ordinal = first_trial_ordinal;
+        progress_state->batch_count = batch_count;
         loom_testbench_scenario_trial_result_list_t results = {0};
         status = loom_testbench_run_scenario_trial_batch(
             &executor, first_trial_ordinal, batch_count, &results);
@@ -725,8 +863,19 @@ static iree_status_t loom_test_run_scenario(
       }
       loom_testbench_scenario_trial_executor_deinitialize(&executor);
     }
+    progress_state->trial_index = IREE_HOST_SIZE_MAX;
+    progress_state->first_trial_ordinal = IREE_HOST_SIZE_MAX;
+    progress_state->batch_count = 0;
+    status = iree_status_join(
+        status, loom_run_hal_testbench_context_emit_progress(
+                    hal_context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RETIRE));
     loom_testbench_prepared_scenario_configuration_deinitialize(&prepared);
     loom_testbench_scenario_configuration_values_deinitialize(&configuration);
+  }
+  progress_state->configuration_ordinal = IREE_HOST_SIZE_MAX;
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_context_emit_progress(
+        hal_context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RECORD_COMPLETE);
   }
   return status;
 }
@@ -978,6 +1127,12 @@ int loom_test_main(int argc, char** argv,
   iree_hal_pool_t* scenario_host_pool = NULL;
   loom_testbench_device_event_capture_t device_event_capture = {0};
   bool device_event_capture_initialized = false;
+  loom_test_progress_state_t progress_state = {
+      .sample_ordinal = IREE_HOST_SIZE_MAX,
+      .configuration_ordinal = IREE_HOST_SIZE_MAX,
+      .trial_index = IREE_HOST_SIZE_MAX,
+      .first_trial_ordinal = IREE_HOST_SIZE_MAX,
+  };
   iree_arena_allocator_t plan_arena;
   memset(&plan_arena, 0, sizeof(plan_arena));
   iree_arena_allocator_t execution_arena;
@@ -1127,6 +1282,13 @@ int loom_test_main(int argc, char** argv,
     loom_run_hal_testbench_context_initialize(
         configuration->target_environment, configuration->hal_target_routes,
         configuration->hal_target_route_count, allocator, &hal_context);
+    if (FLAG_execution_progress) {
+      loom_run_hal_testbench_context_set_progress_sink(
+          &hal_context, (loom_run_hal_testbench_progress_sink_t){
+                            .fn = loom_test_emit_execution_progress,
+                            .user_data = &progress_state,
+                        });
+    }
     status =
         loom_run_hal_testbench_context_validate_explicit_device(&hal_context);
   }
@@ -1509,7 +1671,8 @@ int loom_test_main(int argc, char** argv,
             &execution_options, pass_program, requested_target_profile,
             sanitizer_enabled ? &loomc_sanitizer_options : NULL,
             compile_result_callback, &diagnostic_capture, &hal_context,
-            &execution_arena, &samples, &sample_count, &failed_sample_count);
+            &progress_state, &execution_arena, &samples, &sample_count,
+            &failed_sample_count);
       }
       if (!loom_test_xfail_try_accept_compile_failure(
               xfail, &diagnostic_capture, &status) &&
@@ -1569,7 +1732,8 @@ int loom_test_main(int argc, char** argv,
         status = loom_test_run_scenario(
             &module_plan, scenario_index, &scenario_execution_options,
             &scenario_materializer_options, entropy_root, &diagnostic_capture,
-            &trials, &trial_count, &failed_trial_count);
+            &hal_context, &progress_state, &trials, &trial_count,
+            &failed_trial_count);
       }
       if (!loom_test_xfail_try_accept_compile_failure(
               xfail, &diagnostic_capture, &status) &&
