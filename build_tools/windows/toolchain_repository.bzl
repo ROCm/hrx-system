@@ -29,6 +29,11 @@ unset LD_PRELOAD LD_AUDIT
 exec "$tool_root/bin/{tool}" "$@"
 """
 
+_MISSING_LLVM_ML = """#!/bin/sh
+echo 'The selected clang-cl Windows toolchain requires LLVM_ROOT/bin/llvm-ml.' >&2
+exit 1
+"""
+
 _MSVC_ENV = """#!/usr/bin/env bash
 tool_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BINDIR="$tool_root/msvc/bin"
@@ -90,8 +95,15 @@ def _windows_toolchain_repository_impl(repository_ctx):
     sdk_root = _required_path(repository_ctx, sdk_root)
     artifacts = {}
     for tool in _TOOLS:
-        artifacts[tool] = _required_path(repository_ctx, llvm_root.get_child("bin", tool))
-        repository_ctx.symlink(artifacts[tool], "bin/" + tool)
+        tool_path = llvm_root.get_child("bin", tool)
+        if tool == "llvm-ml" and not tool_path.exists:
+            # Genuine MSVC supplies ml64.exe. Keep the parallel clang-cl
+            # toolchain definable, but fail clearly if it is selected for a
+            # MASM action with an LLVM distribution that omits llvm-ml.
+            repository_ctx.file("bin/" + tool, _MISSING_LLVM_ML, executable = True)
+        else:
+            artifacts[tool] = _required_path(repository_ctx, tool_path)
+            repository_ctx.symlink(artifacts[tool], "bin/" + tool)
         repository_ctx.file("tools/" + tool, _WRAPPER.replace("{tool}", tool), executable = True)
 
     libraries = resolve_elf_dynamic_library_closure(repository_ctx, artifacts)
