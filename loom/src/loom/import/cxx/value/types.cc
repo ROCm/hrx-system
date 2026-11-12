@@ -74,25 +74,10 @@ const cxx::ParameterPackSymbol* template_argument_pack(
 loom_type_t make_shaped_type(loom_type_kind_t kind, loom_scalar_type_t element,
                              std::span<const uint64_t> dimensions,
                              BoundTypeStorage& storage) {
-  bool all_static = true;
-  for (auto dimension : dimensions) {
-    all_static &= !loom_dim_is_dynamic(dimension);
-  }
-  uint8_t flags = all_static ? LOOM_TYPE_FLAG_ALL_STATIC : 0;
-  if (dimensions.size() <= 2) {
-    flags |= LOOM_TYPE_FLAG_INLINE_DIMS;
-  }
-  loom_type_t result = {
-      .header = loom_type_make_header(
-          kind, element, static_cast<uint8_t>(dimensions.size()), flags),
+  const loom_type_t base = {
+      .header = loom_type_make_header(kind, element, 0, 0),
   };
-  if (dimensions.size() <= 2) {
-    std::copy(dimensions.begin(), dimensions.end(), result.dims);
-  } else {
-    auto* retained = storage.retain_dimensions(dimensions);
-    result.dims[0] = reinterpret_cast<uintptr_t>(retained);
-  }
-  return result;
+  return storage.with_dimensions(base, dimensions);
 }
 
 loom_type_t make_encoded_shaped_type(loom_type_kind_t kind,
@@ -135,6 +120,29 @@ loom_type_t make_channel_handle_type(loom_module_t* module,
 }
 
 }  // namespace
+
+loom_type_t BoundTypeStorage::with_dimensions(
+    loom_type_t type, std::span<const uint64_t> dimensions) {
+  bool all_static = true;
+  for (auto dimension : dimensions) {
+    all_static &= !loom_dim_is_dynamic(dimension);
+  }
+  uint8_t flags = all_static ? LOOM_TYPE_FLAG_ALL_STATIC : 0;
+  if (dimensions.size() <= 2) {
+    flags |= LOOM_TYPE_FLAG_INLINE_DIMS;
+  }
+  type.header =
+      loom_type_make_header(loom_type_kind(type), loom_type_element_type(type),
+                            static_cast<uint8_t>(dimensions.size()), flags) |
+      (type.header & 0xFF000000u);
+  type.dims[0] = type.dims[1] = 0;
+  if (dimensions.size() <= 2) {
+    std::copy(dimensions.begin(), dimensions.end(), type.dims);
+  } else {
+    type.dims[0] = reinterpret_cast<uintptr_t>(retain_dimensions(dimensions));
+  }
+  return type;
+}
 
 const loom_overflow_dim_t* BoundTypeStorage::retain_dimensions(
     std::span<const loom_overflow_dim_t> dimensions) {

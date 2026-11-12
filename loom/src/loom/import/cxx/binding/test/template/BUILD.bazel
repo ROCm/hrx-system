@@ -22,6 +22,7 @@ loom_check_test_suite(
         "template_definitions_invalid.cxx-test",
         "template_explicit_apply.cxx-test",
         "template_explicit_apply_invalid.cxx-test",
+        "template_input_contracts.cxx-test",
     ],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )

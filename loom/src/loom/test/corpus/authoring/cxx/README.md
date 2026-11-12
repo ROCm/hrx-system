@@ -19,7 +19,7 @@ or oracle here never changes the source bytes measured by a benchmark.
 | `q4k_q8_swiglu.cxx` | Serialized Q4_K and Q8_1 records, vectorized decode/dot/reduction, runtime configuration, and a scalar record oracle. |
 | `iq4xs_gate_up.cxx` | IQ4_XS gate/up projection with configurable asynchronous staging, structured schedules, and serialized-format checks. |
 | `nvfp4_matrix*` | One NVFP4 matrix root linked with interchangeable C++ and authored-Loom providers selected by subgroup width. |
-| `q8s32_specialization*` | One Q8S32 root linked with interchangeable C++ and authored-Loom providers selected by target and dynamic configuration predicates. |
+| `q8s32_specialization*` | One Q8S32 root linked with interchangeable C++ and authored-Loom providers selected by declared vector shape, target, and dynamic configuration predicates. |
 
 The package deliberately publishes modules without choosing a device. Target
 packages attach compile targets, execution profiles, configuration variants,

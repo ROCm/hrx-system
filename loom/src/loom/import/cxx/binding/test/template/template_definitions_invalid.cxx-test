@@ -16,7 +16,7 @@ unsigned ordinary_provider(unsigned input) { return input; }
 // ====
 #include <loomcxx/kernel.h>
 LOOM_TEMPLATE_DECL("test.value") unsigned value(unsigned input);
-// ERROR@+1: LOWERING/059 "signature must exactly match"
+// ERROR@+1: LOWERING/059 "signature must match its family carrier and result types"
 LOOM_TEMPLATE_DEF(value)
 int signed_provider(int input) { return input; }
 
@@ -111,3 +111,14 @@ unsigned loop_exit_provider(unsigned input) {
   while (input) return input;
   return 0;
 }
+
+// ====
+#include <loomcxx/template.h>
+#include <loomcxx/view.h>
+namespace t = loom::type;
+using Dynamic = t::view<t::shape<t::dynamic>, float>;
+using Fixed = t::view<t::shape<16>, float>;
+LOOM_TEMPLATE_DECL("input.forward") Dynamic forward(Dynamic value);
+// ERROR@+1: LOWERING/059 "signature must match its family carrier and result types"
+LOOM_TEMPLATE_DEF(forward)
+Fixed wrong_result(Fixed value) { return value; }

@@ -27,6 +27,7 @@
 #include <string_view>
 #include <utility>
 
+#include "loom/import/cxx/binding/template_inputs.h"
 #include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
@@ -1797,6 +1798,22 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
         unit_, definition,
         "target requirements require a template family or definition");
   }
+  std::optional<Intrinsics::TemplateFamily> template_family;
+  bool adapts_template_inputs = false;
+  if (template_definition) {
+    template_family = intrinsics_.bind_template_family(
+        template_definition->family, template_definition->family_source,
+        builder);
+    template_definitions_.validate(*template_definition,
+                                   template_family->function, types);
+    auto* family_signature =
+        cxx::type_cast<cxx::FunctionType>(template_family->function->type());
+    for (size_t i = 0; i < signature->parameterTypes().size(); ++i) {
+      adapts_template_inputs |=
+          types.unqualified(signature->parameterTypes()[i]) !=
+          types.unqualified(family_signature->parameterTypes()[i]);
+    }
+  }
   std::vector<loom_type_t> arguments;
   std::vector<loom_type_t> results;
   std::vector<loom_predicate_t> predicates;
@@ -1839,6 +1856,19 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
     predicates = function_contracts_.bind(
         symbol, types, staged_signature.source_identities,
         FunctionContractSignature::Flattened, definition);
+  } else if (adapts_template_inputs) {
+    auto adapted = bind_template_signature(
+        types,
+        cxx::type_cast<cxx::FunctionType>(template_family->function->type()),
+        signature, definition, builder, has_predicates);
+    arguments.assign(adapted.native.types.begin(),
+                     adapted.native.types.begin() + adapted.argument_count);
+    results.assign(adapted.native.types.begin() + adapted.argument_count,
+                   adapted.native.types.end());
+    predicates = function_contracts_.bind(
+        symbol, types, adapted.source_identities,
+        FunctionContractSignature::Flattened, definition);
+    callable_signature = std::move(adapted.native);
   } else if (!check_case && !check_scenario) {
     callable_signature = bind_callable_signature(
         instance, definition, types, builder, arguments, results, predicates);
@@ -2012,11 +2042,7 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
     loom_builder_restore(builder, saved);
   } else if (template_definition) {
     launches_.reject_ordinary_function(symbol);
-    auto family = intrinsics_.bind_template_family(
-        template_definition->family, template_definition->family_source,
-        builder);
-    template_definitions_.validate(*template_definition, family.function,
-                                   types);
+    const auto& family = *template_family;
     auto target = target_definitions_.reference(symbol);
     bool is_device = annotated(family.function, "device");
     loom_template_def_build_flags_t flags = 0;
@@ -2118,6 +2144,7 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
       implicit_object(instance, definition),
       control_flow(symbol),
       (command_program || pipeline) ? staged_signature.projection : nullptr,
+      adapts_template_inputs ? template_family->function : nullptr,
   };
   std::optional<FunctionBody> configuration;
   if (launch_configuration) {

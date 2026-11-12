@@ -135,6 +135,7 @@ loom_cc_library(
         "//loom/src/loom/import/cxx/binding:schedule_region",
         "//loom/src/loom/import/cxx/binding:target_definitions",
         "//loom/src/loom/import/cxx/binding:template_definitions",
+        "//loom/src/loom/import/cxx/binding:template_inputs",
         "//loom/src/loom/import/cxx/control:analysis",
         "//loom/src/loom/import/cxx/control:regions",
         "//loom/src/loom/import/cxx/lifetime:origins",
