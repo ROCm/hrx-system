@@ -14,6 +14,7 @@
 #include "loom/ir/structural_hash.h"
 #include "loom/link/bytecode_template_contract.h"
 #include "loom/ops/func_symbol_facts.h"
+#include "loom/ops/op_defs.h"
 #include "loom/util/segmented_storage.h"
 
 typedef struct loom_link_template_candidate_module_t {
@@ -434,6 +435,13 @@ iree_status_t loom_link_template_candidate_loader_load(
     const loom_symbol_ref_t target_family =
         materialization->target_template_families.values[family_ordinal];
     IREE_ASSERT(loom_symbol_ref_is_valid(target_family));
+    const loom_func_like_t target_function = loom_func_like_cast(
+        materialization->module,
+        materialization->module->symbols.entries[target_family.symbol_id]
+            .defining_op);
+    uint16_t argument_count = 0;
+    loom_func_like_arg_ids(target_function, &argument_count);
+    const uint16_t result_count = target_function.op->result_count;
 
     loom_link_bytecode_template_provider_projection_t** projections = NULL;
     iree_host_size_t provider_index = 0;
@@ -442,6 +450,8 @@ iree_status_t loom_link_template_candidate_loader_load(
             loader->index, family->providers.first_symbol_ordinal);
     while (provider != NULL) {
       if (!loom_link_plan_contains_symbol(plan, provider->ordinal)) {
+        loom_template_provider_summary_t* candidate =
+            &candidates[candidate_count];
         const loom_link_module_index_module_t* source_module =
             loom_link_module_index_symbol_module(loader->index, provider);
         IREE_ASSERT(source_module != NULL);
@@ -458,10 +468,9 @@ iree_status_t loom_link_template_candidate_loader_load(
                   loom_symbol_ref_is_valid(source_summary->target_symbol)
                       ? source_summary->target_symbol.symbol_id
                       : UINT32_MAX);
-          IREE_RETURN_IF_ERROR(loom_template_provider_summary_bind_family(
+          loom_template_provider_summary_bind_family(
               source_summary, materialization->module, target_family,
-              target_symbol, provider->ordinal,
-              &candidates[candidate_count++]));
+              target_symbol, provider->ordinal, candidate);
         } else {
           if (!projections && family->requires_bytecode_projection) {
             IREE_RETURN_IF_ERROR(
@@ -484,11 +493,17 @@ iree_status_t loom_link_template_candidate_loader_load(
               loom_link_template_candidate_lookup_linked_symbol(
                   loader, source_module, materialization,
                   contract.target_symbol_ordinal);
-          IREE_RETURN_IF_ERROR(loom_template_provider_contract_bind_family(
+          loom_template_provider_contract_bind_family(
               &contract.provider, materialization->module, target_family,
-              target_symbol, provider->ordinal,
-              &candidates[candidate_count++]));
+              target_symbol, provider->ordinal, candidate);
         }
+        if (candidate->argument_count != argument_count ||
+            candidate->result_count != result_count) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "provider signature does not match its bound template family");
+        }
+        ++candidate_count;
       }
       ++provider_index;
       provider = loom_link_module_index_next_template_provider(loader->index,

@@ -550,9 +550,9 @@ func.def public @entry(%x: index, %y: index, %m: index) -> (index, index) {
         .module_id = 0,
         .symbol_id = FindSymbol(module.get(), families[i]),
     };
-    IREE_ASSERT_OK(loom_template_provider_contract_bind_family(
-        &contract, module.get(), family, loom_symbol_ref_null(), i,
-        &external_providers[i]));
+    loom_template_provider_contract_bind_family(&contract, module.get(), family,
+                                                loom_symbol_ref_null(), i,
+                                                &external_providers[i]);
   }
 
   loom_symbol_fact_table_t symbol_facts = {};

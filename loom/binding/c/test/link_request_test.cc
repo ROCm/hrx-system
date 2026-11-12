@@ -564,6 +564,43 @@ TEST_F(LinkRequestTest, OwnsProvidersNeededAfterCallerSpecialization) {
   EXPECT_THAT(text, ::testing::Not(::testing::HasSubstr("@unused")));
 }
 
+TEST_F(LinkRequestTest, RejectsProviderArityMismatchAcrossLibraryForms) {
+  SourcePtr input_source = CreateTemplateSource("arity_input.loom");
+  ModulePtr input_module =
+      DeserializeModule(context_.get(), workspace_.get(), input_source.get());
+  RequestPtr input_request =
+      CreateRequest(context_.get(), input_module.get(), {"entry"});
+  ASSERT_NE(input_request, nullptr);
+
+  for (const char* filename : {"arity_arguments.loom", "arity_results.loom"}) {
+    SCOPED_TRACE(filename);
+    SourcePtr text = CreateTemplateSource(filename);
+    ModulePtr module =
+        DeserializeModule(context_.get(), workspace_.get(), text.get());
+    SourcePtr bytecode = SerializeModuleToSource(
+        module.get(), LOOMC_SOURCE_FORMAT_BYTECODE, "library.loombc");
+    for (auto* source : {text.get(), bytecode.get()}) {
+      LinkIndexPtr library =
+          CreateIndex(context_.get(), source, LOOMC_LINK_PROVIDER_ROLE_LIBRARY);
+      const loomc_link_request_options_t options = {
+          .type = LOOMC_STRUCTURE_TYPE_LINK_REQUEST_OPTIONS,
+          .structure_size = sizeof(options),
+          .library_index = library.get(),
+      };
+      ResultPtr result;
+      RequestPtr output = LinkRequest(input_request.get(), &options, &result);
+      EXPECT_EQ(output, nullptr);
+      ASSERT_NE(result, nullptr);
+      EXPECT_FALSE(loomc_result_succeeded(result.get()));
+      ASSERT_EQ(loomc_result_diagnostic_count(result.get()), 1u);
+      EXPECT_THAT(
+          ToString(loomc_result_diagnostic_at(result.get(), 0)->message),
+          ::testing::HasSubstr(
+              "provider signature does not match its bound template family"));
+    }
+  }
+}
+
 TEST_F(LinkRequestTest, RepeatedLinksProduceIdenticalRequests) {
   SourcePtr library_source = CreateTextSource("library.loom", R"(
 func.def public @identity(%x: i32) -> (i32) {

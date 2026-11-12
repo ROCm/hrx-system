@@ -392,6 +392,7 @@ loom_cc_library(
         "//loom/src/loom/analysis:template_provider_catalog",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/util:segmented_storage",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

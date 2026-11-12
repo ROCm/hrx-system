@@ -235,8 +235,9 @@ iree_status_t loom_template_provider_catalog_build(
 // already-linked target witness when available and may be null when |source|
 // carries immutable target facts. Source-owned signatures, predicates, names,
 // conditions, and target facts must remain live while the bound summary is
-// queried.
-iree_status_t loom_template_provider_summary_bind_family(
+// queried. The caller owns signature compatibility with the linked family;
+// this operation only translates the summary's symbol domain.
+void loom_template_provider_summary_bind_family(
     const loom_template_provider_summary_t* source,
     const loom_module_t* target_module, loom_symbol_ref_t target_family,
     loom_symbol_ref_t target_symbol, iree_host_size_t origin_ordinal,
@@ -248,8 +249,8 @@ iree_status_t loom_template_provider_summary_bind_family(
 // be null when |contract| carries immutable target facts. Contract-owned
 // predicates, names, conditions, and target facts must remain live while the
 // result is queried. Signature-ordinal predicates are borrowed without
-// remapping.
-iree_status_t loom_template_provider_contract_bind_family(
+// remapping. The caller owns signature compatibility with the linked family.
+void loom_template_provider_contract_bind_family(
     const loom_template_provider_contract_t* contract,
     const loom_module_t* target_module, loom_symbol_ref_t target_family,
     loom_symbol_ref_t target_symbol, iree_host_size_t origin_ordinal,

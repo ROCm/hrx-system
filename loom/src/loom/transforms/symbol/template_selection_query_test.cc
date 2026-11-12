@@ -112,9 +112,9 @@ class TemplateSelectionQueryTest : public ::testing::Test {
         .module_id = 0,
         .symbol_id = FindSymbol(module, family_name),
     };
-    IREE_CHECK_OK(loom_template_provider_summary_bind_family(
-        selected, module, target_family, loom_symbol_ref_null(), origin_ordinal,
-        &external));
+    loom_template_provider_summary_bind_family(selected, module, target_family,
+                                               loom_symbol_ref_null(),
+                                               origin_ordinal, &external);
     external_sources_.push_back(std::move(source));
 
     const loom_symbol_id_t provider_symbol_id =
@@ -257,9 +257,9 @@ func.def public @entry(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) 
       .symbol_id = FindSymbol(application.get(), IREE_SV("application.family")),
   };
   loom_template_provider_summary_t external = {};
-  IREE_ASSERT_OK(loom_template_provider_summary_bind_family(
+  loom_template_provider_summary_bind_family(
       &source_provider, application.get(), target_family,
-      loom_symbol_ref_null(), /*origin_ordinal=*/11, &external));
+      loom_symbol_ref_null(), /*origin_ordinal=*/11, &external);
   const std::string module_before = PrintModule(application.get());
 
   const loom_template_selection_query_result_t result =

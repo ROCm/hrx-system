@@ -225,9 +225,9 @@ template.decl @b(%value: i32) -> (i32)
             .name = IREE_SV("external"),
             .priority = (int64_t)i,
         };
-        IREE_ASSERT_OK(loom_template_provider_contract_bind_family(
+        loom_template_provider_contract_bind_family(
             &contract, module.get(), families[order[i] - 'a'],
-            loom_symbol_ref_null(), i, &external[i]));
+            loom_symbol_ref_null(), i, &external[i]);
       }
       IREE_ASSERT_OK(loom_template_provider_catalog_build(
           &catalog_, module.get(), &fact_table_, external,
@@ -405,9 +405,9 @@ template.decl @target.family(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]x
   };
   const iree_host_size_t target_value_count_before = target->values.count;
   loom_template_provider_summary_t bound = {};
-  IREE_ASSERT_OK(loom_template_provider_summary_bind_family(
-      &source_provider, target.get(), target_family, target_target,
-      /*origin_ordinal=*/123, &bound));
+  loom_template_provider_summary_bind_family(&source_provider, target.get(),
+                                             target_family, target_target,
+                                             /*origin_ordinal=*/123, &bound);
 
   EXPECT_EQ(target->values.count, target_value_count_before);
   EXPECT_EQ(bound.module, target.get());

@@ -559,9 +559,9 @@ kernel.def @classified() {
       .symbol_id = family_symbol_id,
   };
   loom_template_provider_summary_t external_provider = {};
-  IREE_ASSERT_OK(loom_template_provider_contract_bind_family(
+  loom_template_provider_contract_bind_family(
       &external_contract, source_module.get(), family, loom_symbol_ref_null(),
-      /*origin_ordinal=*/7, &external_provider));
+      /*origin_ordinal=*/7, &external_provider);
 
   loom_symbol_fact_table_t symbol_facts = {};
   loom_symbol_fact_table_initialize(&symbol_facts, &analysis_arena);
@@ -682,9 +682,9 @@ kernel.def @classified() {
       .symbol_id = FindSymbol(class_module, IREE_SV("external.family")),
   };
   loom_template_provider_summary_t rebound_external_provider = {};
-  IREE_ASSERT_OK(loom_template_provider_contract_bind_family(
+  loom_template_provider_contract_bind_family(
       &external_contract, class_module, class_family, loom_symbol_ref_null(),
-      /*origin_ordinal=*/7, &rebound_external_provider));
+      /*origin_ordinal=*/7, &rebound_external_provider);
   loom_symbol_fact_table_t class_symbol_facts = {};
   loom_symbol_fact_table_initialize(&class_symbol_facts, &query_arena);
   loom_template_provider_catalog_t class_providers = {};
