@@ -258,6 +258,23 @@ static bool loom_amdgpu_source_scalar_value_register_shape(
     return false;
   }
   *out_shape = mapping->default_shape;
+  if (mapping->policy ==
+          LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_OFFSET_WIDTH &&
+      loom_amdgpu_source_address_value_needs_64bit(
+          module, fact_table, source_value_id, source_type)) {
+    out_shape->unit_count = 2;
+  }
+  // Native numeric results already have a declared bank. Keep the source
+  // payload width so call validation still rejects incompatible signatures.
+  loom_amdgpu_register_shape_t native_shape = {0};
+  if (mapping->policy != LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_I1 &&
+      loom_amdgpu_source_invoke_result_shape(
+          module, loom_module_value(module, source_value_id), &native_shape) &&
+      (native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR ||
+       native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR)) {
+    out_shape->class_id = native_shape.class_id;
+    return true;
+  }
   switch (mapping->policy) {
     case LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_FIXED:
       return true;
@@ -274,19 +291,10 @@ static bool loom_amdgpu_source_scalar_value_register_shape(
       }
       return true;
     case LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_PREFERRED_BANK:
-      if (loom_amdgpu_analyzed_source_value_prefers_vgpr(
-              module, fact_table, view_regions, analysis, source_value_id)) {
-        out_shape->class_id = LOOM_AMDGPU_REG_CLASS_ID_VGPR;
-      }
-      return true;
     case LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_OFFSET_WIDTH:
       if (loom_amdgpu_analyzed_source_value_prefers_vgpr(
               module, fact_table, view_regions, analysis, source_value_id)) {
         out_shape->class_id = LOOM_AMDGPU_REG_CLASS_ID_VGPR;
-      }
-      if (loom_amdgpu_source_address_value_needs_64bit(
-              module, fact_table, source_value_id, source_type)) {
-        out_shape->unit_count = 2;
       }
       return true;
     case LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_NONE:
@@ -310,6 +318,15 @@ static bool loom_amdgpu_source_vector_value_register_shape(
   if (iree_any_bit_set(storage_flags,
                        LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_SGPR_MASK)) {
     *out_shape = loom_amdgpu_register_shape(LOOM_AMDGPU_REG_CLASS_ID_SGPR,
+                                            vector_storage.register_count);
+    return true;
+  }
+  loom_amdgpu_register_shape_t native_shape = {0};
+  if (loom_amdgpu_source_invoke_result_shape(
+          module, loom_module_value(module, source_value_id), &native_shape) &&
+      (native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR ||
+       native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR)) {
+    *out_shape = loom_amdgpu_register_shape(native_shape.class_id,
                                             vector_storage.register_count);
     return true;
   }

@@ -1,0 +1,456 @@
+// RUN: pass source-to-low,low-dce
+
+// A native carrier promises the declared low payload bits. Signed and unsigned
+// consumers must normalize those bits in the selected result bank.
+
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @sgpr_i8_bits() -> (reg<amdgpu.sgpr>) asm {
+  %bits = s_mov_b32 305430657
+  return %bits
+}
+
+func.def target(@target) @sgpr_i8_extensions() -> (i16, i32, i64, i16, i32, i64) {
+  %input = low.invoke @sgpr_i8_bits() : () -> (i8)
+  %signed_i16 = scalar.extsi %input : i8 to i16
+  %signed_i32 = scalar.extsi %input : i8 to i32
+  %signed_i64 = scalar.extsi %input : i8 to i64
+  %unsigned_i16 = scalar.extui %input : i8 to i16
+  %unsigned_i32 = scalar.extui %input : i8 to i32
+  %unsigned_i64 = scalar.extui %input : i8 to i64
+  func.return %signed_i16, %signed_i32, %signed_i64, %unsigned_i16, %unsigned_i32, %unsigned_i64 : i16, i32, i64, i16, i32, i64
+}
+
+// ----
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @sgpr_i8_bits() -> (reg<amdgpu.sgpr>) asm {
+  %bits = s_mov_b32 305430657
+  return %bits
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @sgpr_i8_extensions() -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>) asm {
+  %input = low.func.call @sgpr_i8_bits() : () -> (reg<amdgpu.sgpr>)
+  %22 = v_mov_b32_copy %input
+  %signed_i16 = v_bfe_i32_offset_width_inline %22 {offset = 0, width = 8}
+  %signed_i32 = s_bfe_i32_lit %input, 524288
+  %25 = s_bfe_i32_lit %input, 524288
+  %26 = s_ashr_i32_rhs_inline %25, 31
+  %signed_i64 = concat(%25, %26) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %28 = v_mov_b32_copy %input
+  %unsigned_i16 = v_and_b32_lit %28, 255
+  %unsigned_i32 = s_bfe_u32_lit %input, 524288
+  %31 = s_bfe_u32_lit %input, 524288
+  %32 = s_mov_b32 0
+  %unsigned_i64 = concat(%31, %32) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  return %signed_i16, %signed_i32, %signed_i64, %unsigned_i16, %unsigned_i32, %unsigned_i64
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @vgpr_i8_bits() -> (reg<amdgpu.vgpr>) asm {
+  %bits = v_mov_b32 305430657
+  return %bits
+}
+
+func.def target(@target) @vgpr_i8_extensions() -> (i16, i32, i64, i16, i32, i64) {
+  %input = low.invoke @vgpr_i8_bits() : () -> (i8)
+  %signed_i16 = scalar.extsi %input : i8 to i16
+  %signed_i32 = scalar.extsi %input : i8 to i32
+  %signed_i64 = scalar.extsi %input : i8 to i64
+  %unsigned_i16 = scalar.extui %input : i8 to i16
+  %unsigned_i32 = scalar.extui %input : i8 to i32
+  %unsigned_i64 = scalar.extui %input : i8 to i64
+  func.return %signed_i16, %signed_i32, %signed_i64, %unsigned_i16, %unsigned_i32, %unsigned_i64 : i16, i32, i64, i16, i32, i64
+}
+
+// ----
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @vgpr_i8_bits() -> (reg<amdgpu.vgpr>) asm {
+  %bits = v_mov_b32 305430657
+  return %bits
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @vgpr_i8_extensions() -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
+  %input = low.func.call @vgpr_i8_bits() : () -> (reg<amdgpu.vgpr>)
+  %signed_i16 = v_bfe_i32_offset_width_inline %input {offset = 0, width = 8}
+  %signed_i32 = v_bfe_i32_offset_width_inline %input {offset = 0, width = 8}
+  %24 = v_bfe_i32_offset_width_inline %input {offset = 0, width = 8}
+  %25 = v_ashrrev_i32_src0_inline %24, 31
+  %signed_i64 = concat(%24, %25) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %unsigned_i16 = v_and_b32_lit %input, 255
+  %unsigned_i32 = v_and_b32_lit %input, 255
+  %29 = v_and_b32_lit %input, 255
+  %30 = v_mov_b32 0
+  %unsigned_i64 = concat(%29, %30) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %signed_i16, %signed_i32, %signed_i64, %unsigned_i16, %unsigned_i32, %unsigned_i64
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @sgpr_i16_bits() -> (reg<amdgpu.sgpr>) asm {
+  %bits = s_mov_b32 305430657
+  return %bits
+}
+
+func.def target(@target) @sgpr_i16_extensions() -> (i32, i64, i32, i64) {
+  %input = low.invoke @sgpr_i16_bits() : () -> (i16)
+  %signed_i32 = scalar.extsi %input : i16 to i32
+  %signed_i64 = scalar.extsi %input : i16 to i64
+  %unsigned_i32 = scalar.extui %input : i16 to i32
+  %unsigned_i64 = scalar.extui %input : i16 to i64
+  func.return %signed_i32, %signed_i64, %unsigned_i32, %unsigned_i64 : i32, i64, i32, i64
+}
+
+// ----
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @sgpr_i16_bits() -> (reg<amdgpu.sgpr>) asm {
+  %bits = s_mov_b32 305430657
+  return %bits
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @sgpr_i16_extensions() -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>) asm {
+  %input = low.func.call @sgpr_i16_bits() : () -> (reg<amdgpu.sgpr>)
+  %signed_i32 = s_bfe_i32_lit %input, 1048576
+  %17 = s_bfe_i32_lit %input, 1048576
+  %18 = s_ashr_i32_rhs_inline %17, 31
+  %signed_i64 = concat(%17, %18) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %unsigned_i32 = s_bfe_u32_lit %input, 1048576
+  %21 = s_bfe_u32_lit %input, 1048576
+  %22 = s_mov_b32 0
+  %unsigned_i64 = concat(%21, %22) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  return %signed_i32, %signed_i64, %unsigned_i32, %unsigned_i64
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @vgpr_i16_bits() -> (reg<amdgpu.vgpr>) asm {
+  %bits = v_mov_b32 305430657
+  return %bits
+}
+
+func.def target(@target) @vgpr_i16_extensions() -> (i32, i64, i32, i64) {
+  %input = low.invoke @vgpr_i16_bits() : () -> (i16)
+  %signed_i32 = scalar.extsi %input : i16 to i32
+  %signed_i64 = scalar.extsi %input : i16 to i64
+  %unsigned_i32 = scalar.extui %input : i16 to i32
+  %unsigned_i64 = scalar.extui %input : i16 to i64
+  func.return %signed_i32, %signed_i64, %unsigned_i32, %unsigned_i64 : i32, i64, i32, i64
+}
+
+// ----
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @vgpr_i16_bits() -> (reg<amdgpu.vgpr>) asm {
+  %bits = v_mov_b32 305430657
+  return %bits
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @vgpr_i16_extensions() -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
+  %input = low.func.call @vgpr_i16_bits() : () -> (reg<amdgpu.vgpr>)
+  %signed_i32 = v_bfe_i32_offset_width_inline %input {offset = 0, width = 16}
+  %17 = v_bfe_i32_offset_width_inline %input {offset = 0, width = 16}
+  %18 = v_ashrrev_i32_src0_inline %17, 31
+  %signed_i64 = concat(%17, %18) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %unsigned_i32 = v_and_b32_lit %input, 65535
+  %21 = v_and_b32_lit %input, 65535
+  %22 = v_mov_b32 0
+  %unsigned_i64 = concat(%21, %22) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %signed_i32, %signed_i64, %unsigned_i32, %unsigned_i64
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @scalar_predicate() -> (reg<amdgpu.sgpr>) asm {
+  %truth = s_mov_b32 1
+  return %truth
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @lane_predicate() -> (reg<amdgpu.sgpr x2>) asm {
+  %mask = s_mov_b64_exec_read
+  return %mask
+}
+
+func.def target(@target) @construct_native_predicates() -> (vector<3xi1>, vector<3xi1>) {
+  %truth = low.invoke @scalar_predicate() : () -> (i1)
+  %mask = low.invoke @lane_predicate() : () -> (i1)
+  %constructed = vector.from_elements %truth, %mask, %truth : vector<3xi1>
+  %splat = vector.splat %truth : vector<3xi1>
+  func.return %constructed, %splat : vector<3xi1>, vector<3xi1>
+}
+
+// ----
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @scalar_predicate() -> (reg<amdgpu.sgpr>) asm {
+  %truth = s_mov_b32 1
+  return %truth
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @lane_predicate() -> (reg<amdgpu.sgpr x2>) asm {
+  %mask = s_mov_b64_exec_read
+  return %mask
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @construct_native_predicates() -> (reg<amdgpu.sgpr x6>, reg<amdgpu.sgpr x6>) asm {
+  %truth = low.func.call @scalar_predicate() : () -> (reg<amdgpu.sgpr>)
+  %mask = low.func.call @lane_predicate() : () -> (reg<amdgpu.sgpr x2>)
+  %14 = s_cmp_lg_i32_src1_inline %truth {rhs = 0}
+  %15 = s_mov_b64_exec_read
+  %16 = slice %15[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %17 = slice %15[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %18 = s_mov_b32 0
+  %19 = s_cselect_b32 %16, %18, %14
+  %20 = s_cselect_b32 %17, %18, %14
+  %21 = concat(%19, %20) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %constructed = concat(%21, %mask, %21) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x6>
+  %23 = s_cmp_lg_i32_src1_inline %truth {rhs = 0}
+  %24 = s_mov_b64_exec_read
+  %25 = slice %24[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26 = slice %24[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %27 = s_mov_b32 0
+  %28 = s_cselect_b32 %25, %27, %23
+  %29 = s_cselect_b32 %26, %27, %23
+  %30 = concat(%28, %29) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %splat = concat(%30, %30, %30) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x6>
+  return %constructed, %splat
+}
+
+// ====
+
+// Numeric native results keep their declared bank across logical types.
+// Payload word counts still come from the logical scalar or packed-vector type.
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @native_1() -> (reg<amdgpu.sgpr>) asm {
+  %word = s_mov_b32 305430657
+  return %word
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @native_2() -> (reg<amdgpu.sgpr x2>) asm {
+  %word = s_mov_b32 305430657
+  %result = concat(%word, %word) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  return %result
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @native_3() -> (reg<amdgpu.sgpr x3>) asm {
+  %word = s_mov_b32 305430657
+  %result = concat(%word, %word, %word) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x3>
+  return %result
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @native_6() -> (reg<amdgpu.sgpr x6>) asm {
+  %word = s_mov_b32 305430657
+  %result = concat(%word, %word, %word, %word, %word, %word) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x6>
+  return %result
+}
+
+func.def target(@target) @sgpr_payloads() -> (i8, i16, i32, i64, f8E4M3, f8E5M2, bf16, f16, f32, f64, vector<3xi8>, vector<3xi16>, vector<3xi32>, vector<3xf64>) {
+  %byte = low.invoke @native_1() : () -> (i8)
+  %half = low.invoke @native_1() : () -> (i16)
+  %word = low.invoke @native_1() : () -> (i32)
+  %double_word = low.invoke @native_2() : () -> (i64)
+  %e4 = low.invoke @native_1() : () -> (f8E4M3)
+  %e5 = low.invoke @native_1() : () -> (f8E5M2)
+  %brain = low.invoke @native_1() : () -> (bf16)
+  %float_half = low.invoke @native_1() : () -> (f16)
+  %float_word = low.invoke @native_1() : () -> (f32)
+  %float_double = low.invoke @native_2() : () -> (f64)
+  %packed_bytes = low.invoke @native_1() : () -> (vector<3xi8>)
+  %packed_halves = low.invoke @native_2() : () -> (vector<3xi16>)
+  %words = low.invoke @native_3() : () -> (vector<3xi32>)
+  %doubles = low.invoke @native_6() : () -> (vector<3xf64>)
+  func.return %byte, %half, %word, %double_word, %e4, %e5, %brain, %float_half, %float_word, %float_double, %packed_bytes, %packed_halves, %words, %doubles : i8, i16, i32, i64, f8E4M3, f8E5M2, bf16, f16, f32, f64, vector<3xi8>, vector<3xi16>, vector<3xi32>, vector<3xf64>
+}
+
+// ----
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @native_1() -> (reg<amdgpu.sgpr>) asm {
+  %word = s_mov_b32 305430657
+  return %word
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @native_2() -> (reg<amdgpu.sgpr x2>) asm {
+  %word = s_mov_b32 305430657
+  %result = concat(%word, %word) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  return %result
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @native_3() -> (reg<amdgpu.sgpr x3>) asm {
+  %word = s_mov_b32 305430657
+  %result = concat(%word, %word, %word) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x3>
+  return %result
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @native_6() -> (reg<amdgpu.sgpr x6>) asm {
+  %word = s_mov_b32 305430657
+  %result = concat(%word, %word, %word, %word, %word, %word) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x6>
+  return %result
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @sgpr_payloads() -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x3>, reg<amdgpu.sgpr x6>) asm {
+  %byte = low.func.call @native_1() : () -> (reg<amdgpu.sgpr>)
+  %half = low.func.call @native_1() : () -> (reg<amdgpu.sgpr>)
+  %word = low.func.call @native_1() : () -> (reg<amdgpu.sgpr>)
+  %double_word = low.func.call @native_2() : () -> (reg<amdgpu.sgpr x2>)
+  %e4 = low.func.call @native_1() : () -> (reg<amdgpu.sgpr>)
+  %e5 = low.func.call @native_1() : () -> (reg<amdgpu.sgpr>)
+  %brain = low.func.call @native_1() : () -> (reg<amdgpu.sgpr>)
+  %float_half = low.func.call @native_1() : () -> (reg<amdgpu.sgpr>)
+  %float_word = low.func.call @native_1() : () -> (reg<amdgpu.sgpr>)
+  %float_double = low.func.call @native_2() : () -> (reg<amdgpu.sgpr x2>)
+  %packed_bytes = low.func.call @native_1() : () -> (reg<amdgpu.sgpr>)
+  %packed_halves = low.func.call @native_2() : () -> (reg<amdgpu.sgpr x2>)
+  %words = low.func.call @native_3() : () -> (reg<amdgpu.sgpr x3>)
+  %doubles = low.func.call @native_6() : () -> (reg<amdgpu.sgpr x6>)
+  return %byte, %half, %word, %double_word, %e4, %e5, %brain, %float_half, %float_word, %float_double, %packed_bytes, %packed_halves, %words, %doubles
+}
+
+// ====
+
+// Numeric native results keep their declared bank across logical types.
+// Payload word counts still come from the logical scalar or packed-vector type.
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @native_1() -> (reg<amdgpu.vgpr>) asm {
+  %word = v_mov_b32 305430657
+  return %word
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @native_2() -> (reg<amdgpu.vgpr x2>) asm {
+  %word = v_mov_b32 305430657
+  %result = concat(%word, %word) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %result
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @native_3() -> (reg<amdgpu.vgpr x3>) asm {
+  %word = v_mov_b32 305430657
+  %result = concat(%word, %word, %word) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
+  return %result
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @native_6() -> (reg<amdgpu.vgpr x6>) asm {
+  %word = v_mov_b32 305430657
+  %result = concat(%word, %word, %word, %word, %word, %word) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x6>
+  return %result
+}
+
+func.def target(@target) @vgpr_payloads() -> (i8, i16, i32, i64, f8E4M3, f8E5M2, bf16, f16, f32, f64, vector<3xi8>, vector<3xi16>, vector<3xi32>, vector<3xf64>) {
+  %byte = low.invoke @native_1() : () -> (i8)
+  %half = low.invoke @native_1() : () -> (i16)
+  %word = low.invoke @native_1() : () -> (i32)
+  %double_word = low.invoke @native_2() : () -> (i64)
+  %e4 = low.invoke @native_1() : () -> (f8E4M3)
+  %e5 = low.invoke @native_1() : () -> (f8E5M2)
+  %brain = low.invoke @native_1() : () -> (bf16)
+  %float_half = low.invoke @native_1() : () -> (f16)
+  %float_word = low.invoke @native_1() : () -> (f32)
+  %float_double = low.invoke @native_2() : () -> (f64)
+  %packed_bytes = low.invoke @native_1() : () -> (vector<3xi8>)
+  %packed_halves = low.invoke @native_2() : () -> (vector<3xi16>)
+  %words = low.invoke @native_3() : () -> (vector<3xi32>)
+  %doubles = low.invoke @native_6() : () -> (vector<3xf64>)
+  func.return %byte, %half, %word, %double_word, %e4, %e5, %brain, %float_half, %float_word, %float_double, %packed_bytes, %packed_halves, %words, %doubles : i8, i16, i32, i64, f8E4M3, f8E5M2, bf16, f16, f32, f64, vector<3xi8>, vector<3xi16>, vector<3xi32>, vector<3xf64>
+}
+
+// ----
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @native_1() -> (reg<amdgpu.vgpr>) asm {
+  %word = v_mov_b32 305430657
+  return %word
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @native_2() -> (reg<amdgpu.vgpr x2>) asm {
+  %word = v_mov_b32 305430657
+  %result = concat(%word, %word) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %result
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @native_3() -> (reg<amdgpu.vgpr x3>) asm {
+  %word = v_mov_b32 305430657
+  %result = concat(%word, %word, %word) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
+  return %result
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @native_6() -> (reg<amdgpu.vgpr x6>) asm {
+  %word = v_mov_b32 305430657
+  %result = concat(%word, %word, %word, %word, %word, %word) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x6>
+  return %result
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @vgpr_payloads() -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x3>, reg<amdgpu.vgpr x6>) asm {
+  %byte = low.func.call @native_1() : () -> (reg<amdgpu.vgpr>)
+  %half = low.func.call @native_1() : () -> (reg<amdgpu.vgpr>)
+  %word = low.func.call @native_1() : () -> (reg<amdgpu.vgpr>)
+  %double_word = low.func.call @native_2() : () -> (reg<amdgpu.vgpr x2>)
+  %e4 = low.func.call @native_1() : () -> (reg<amdgpu.vgpr>)
+  %e5 = low.func.call @native_1() : () -> (reg<amdgpu.vgpr>)
+  %brain = low.func.call @native_1() : () -> (reg<amdgpu.vgpr>)
+  %float_half = low.func.call @native_1() : () -> (reg<amdgpu.vgpr>)
+  %float_word = low.func.call @native_1() : () -> (reg<amdgpu.vgpr>)
+  %float_double = low.func.call @native_2() : () -> (reg<amdgpu.vgpr x2>)
+  %packed_bytes = low.func.call @native_1() : () -> (reg<amdgpu.vgpr>)
+  %packed_halves = low.func.call @native_2() : () -> (reg<amdgpu.vgpr x2>)
+  %words = low.func.call @native_3() : () -> (reg<amdgpu.vgpr x3>)
+  %doubles = low.func.call @native_6() : () -> (reg<amdgpu.vgpr x6>)
+  return %byte, %half, %word, %double_word, %e4, %e5, %brain, %float_half, %float_word, %float_double, %packed_bytes, %packed_halves, %words, %doubles
+}
+
+// ====
+
+// SCC truth is converted to an execution mask before vector construction.
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @condition_predicate() -> (reg<amdgpu.scc>) asm {
+  %word = s_mov_b32 1
+  %truth = s_cmp_lg_i32_src1_inline %word {rhs = 0}
+  return %truth
+}
+
+func.def target(@target) @construct_condition_predicates() -> (vector<1xi1>, vector<3xi1>) {
+  %truth = low.invoke @condition_predicate() : () -> (i1)
+  %constructed = vector.from_elements %truth : vector<1xi1>
+  %splat = vector.splat %truth : vector<3xi1>
+  func.return %constructed, %splat : vector<1xi1>, vector<3xi1>
+}
+
+// ----
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @condition_predicate() -> (reg<amdgpu.scc>) asm {
+  %word = s_mov_b32 1
+  %truth = s_cmp_lg_i32_src1_inline %word {rhs = 0}
+  return %truth
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @construct_condition_predicates() -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x6>) asm {
+  %truth = low.func.call @condition_predicate() : () -> (reg<amdgpu.scc>)
+  %11 = s_mov_b64_exec_read
+  %12 = slice %11[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %13 = slice %11[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %14 = s_mov_b32 0
+  %15 = s_cselect_b32 %12, %14, %truth
+  %16 = s_cselect_b32 %13, %14, %truth
+  %constructed = concat(%15, %16) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %18 = s_mov_b64_exec_read
+  %19 = slice %18[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %20 = slice %18[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %21 = s_mov_b32 0
+  %22 = s_cselect_b32 %19, %21, %truth
+  %23 = s_cselect_b32 %20, %21, %truth
+  %24 = concat(%22, %23) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %splat = concat(%24, %24, %24) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x6>
+  return %constructed, %splat
+}

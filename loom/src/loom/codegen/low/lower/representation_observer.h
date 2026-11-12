@@ -40,7 +40,7 @@ typedef uint8_t loom_low_lower_representation_boundary_flags_t;
 typedef enum loom_low_lower_representation_callable_boundary_kind_e {
   // Active source FuncLike operation.
   LOOM_LOW_LOWER_REPRESENTATION_CALLABLE_DEFINITION = 0,
-  // Direct semantic CallLike operation.
+  // Direct semantic call or explicit semantic-to-native invocation.
   LOOM_LOW_LOWER_REPRESENTATION_CALLABLE_CALL = 1,
   // Direct terminator of the active source FuncLike body.
   LOOM_LOW_LOWER_REPRESENTATION_CALLABLE_EXIT = 2,
@@ -111,9 +111,9 @@ typedef struct loom_low_lower_representation_provider_t {
   // the target action. Failures and exact alternatives are recorded through
   // |recorder|.
   loom_low_lower_representation_boundary_fn_t observe_boundary;
-  // Observes generic FuncLike definitions and exits and direct semantic
-  // CallLike operations. This keeps target policy independent of concrete
-  // callable dialects.
+  // Observes generic FuncLike definitions and exits, direct semantic calls,
+  // and semantic-to-native invocations through CallLike. Target policy is
+  // independent of concrete callable dialects.
   loom_low_lower_representation_callable_boundary_fn_t
       observe_callable_boundary;
   // Observes each operand use that was not claimed by an accepted common

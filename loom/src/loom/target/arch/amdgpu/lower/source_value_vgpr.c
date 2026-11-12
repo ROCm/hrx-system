@@ -986,15 +986,14 @@ static bool loom_amdgpu_source_value_prefers_vgpr_impl(
   }
   const loom_type_t source_type =
       loom_module_value_type(module, source_value_id);
-  // Fixed physical storage takes precedence over uniformity and producer
-  // transfer rules so consumers use the same bank as value type mapping.
-  if (loom_amdgpu_scalar_type_has_fixed_vgpr_storage(source_type)) {
-    return true;
-  }
   const loom_value_t* value = loom_module_value(module, source_value_id);
   loom_amdgpu_register_shape_t native_shape = {0};
   if (loom_amdgpu_source_invoke_result_shape(module, value, &native_shape)) {
     return native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR;
+  }
+  // Ordinary producer policies apply after an explicit native signature.
+  if (loom_amdgpu_scalar_type_has_fixed_vgpr_storage(source_type)) {
+    return true;
   }
   if (loom_amdgpu_source_value_facts_prefer_vgpr(module, fact_table,
                                                  source_value_id)) {

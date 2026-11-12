@@ -73,14 +73,14 @@ loom_low_representation_id_t loom_amdgpu_source_integer_representation_lookup(
     loom_low_lower_context_t* context, loom_value_id_t source_value_id);
 
 // Normalizes the declared i8/i16 payload in a one-unit SGPR or VGPR
-// |low_source| to |required_representation|. The input is reused when no
-// conversion is required; an emitted normalization produces a full-width
-// VGPR.
+// |low_source| to |required_representation| in the selected |lane_type|.
+// The input has already been materialized in that register bank. It is reused
+// when no conversion is required; normalization defines the complete word.
 iree_status_t loom_amdgpu_normalize_narrow_integer(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t low_source, uint32_t source_bit_count,
     loom_low_representation_id_t source_representation,
-    loom_low_representation_id_t required_representation,
+    loom_low_representation_id_t required_representation, loom_type_t lane_type,
     loom_value_id_t* out_low_result);
 
 // Normalizes an i8/i16 |source_value| already materialized as one native

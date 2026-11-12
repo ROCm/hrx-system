@@ -174,3 +174,51 @@ func.def target(@target) @wrong_address_width(%value: index) -> (vector<4xi32>) 
   %result = low.invoke @packet_input(%value) : (index) -> (vector<4xi32>)
   func.return %result : vector<4xi32>
 }
+
+// ====
+
+// A declared numeric bank does not override the source payload width.
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @wide_scalar() -> (reg<amdgpu.sgpr x2>) asm {
+  %word = s_mov_b32 1
+  %pair = concat(%word, %word) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  return %pair
+}
+
+func.def target(@target) @wrong_narrow_result_width() -> (i8) {
+  // ERROR@+1: TARGET/074 {callee_name="wide_scalar", value_kind="result", actual_type="reg<amdgpu.sgpr>", expected_type="reg<amdgpu.sgpr x2>"}
+  %result = low.invoke @wide_scalar() : () -> (i8)
+  func.return %result : i8
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @scalar_word() -> (reg<amdgpu.sgpr>) asm {
+  %word = s_mov_b32 1
+  return %word
+}
+
+func.def target(@target) @wrong_packed_result_width() -> (vector<3xi16>) {
+  // ERROR@+1: TARGET/074 {callee_name="scalar_word", value_kind="result", actual_type="reg<amdgpu.sgpr x2>", expected_type="reg<amdgpu.sgpr>"}
+  %result = low.invoke @scalar_word() : () -> (vector<3xi16>)
+  func.return %result : vector<3xi16>
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @condition_bit() -> (reg<amdgpu.scc>) asm {
+  %word = s_mov_b32 1
+  %truth = s_cmp_lg_i32_src1_inline %word {rhs = 0}
+  return %truth
+}
+
+func.def target(@target) @wrong_numeric_result_class() -> (i16) {
+  // ERROR@+1: TARGET/074 {callee_name="condition_bit", value_kind="result", actual_type="reg<amdgpu.vgpr>", expected_type="reg<amdgpu.scc>"}
+  %result = low.invoke @condition_bit() : () -> (i16)
+  func.return %result : i16
+}
