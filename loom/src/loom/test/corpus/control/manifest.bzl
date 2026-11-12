@@ -13,6 +13,7 @@ CONTROL_CORPUS = loom_corpus_manifest(
     package = "//loom/src/loom/test/corpus/control",
     srcs = [
         "branch/cfg.loom",
+        "branch/convergence.loom",
         "branch/effects.loom",
         "branch/guards.loom",
         "branch/half.loom",

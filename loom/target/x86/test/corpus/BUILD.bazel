@@ -25,6 +25,7 @@ loom_corpus_test(
     execution_profiles = [X86_TASK_HARDWARE_PROFILE],
     profile_sources = {
         X86_TASK_HARDWARE_PROFILE.name: [
+            "control/branch/convergence.loom",
             "control/loop/scalar_state.loom",
             "function/call/calls.loom",
             "function/call/direct.loom",
@@ -70,6 +71,8 @@ loom_corpus_test(
     target_compatible_with = ["@platforms//cpu:x86_64"],
     xfails = {
         X86_TASK_HARDWARE_PROFILE.name: {
+            "control/branch/convergence.loom:@return_convergence_values": "TARGET/001",
+            "control/branch/convergence.loom:@row_convergence_values": "TARGET/001",
             "numeric/float/activations.loom:@activation_portable_values": "LOWERING/036",
             "numeric/float/activations.loom:@activation_values": "LOWERING/036",
             "numeric/float/activations.loom:@ordinary_activation_values": "LOWERING/036",

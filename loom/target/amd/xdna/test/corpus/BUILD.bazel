@@ -20,6 +20,7 @@ loom_corpus_test(
     execution_profiles = [XDNA_HARDWARE_PROFILE],
     profile_sources = {
         XDNA_HARDWARE_PROFILE.name: [
+            "control/branch/convergence.loom",
             "function/rodata.loom",
             "memory/address/tiled_channel.loom",
             "memory/buffer/null.loom",
@@ -53,6 +54,8 @@ loom_corpus_test(
     },
     xfails = {
         XDNA_HARDWARE_PROFILE.name: {
+            "control/branch/convergence.loom:@return_convergence_values": "XDNA/051",
+            "control/branch/convergence.loom:@row_convergence_values": "XDNA/051",
             "function/rodata.loom:@rodata_copy_values": "XDNA/051",
             "function/rodata.loom:@rodata_gather_values": "XDNA/051",
             "function/rodata.loom:@rodata_values": "XDNA/051",
