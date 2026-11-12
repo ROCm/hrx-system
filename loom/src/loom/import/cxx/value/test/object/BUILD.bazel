@@ -17,6 +17,8 @@ loom_check_test_suite(
     srcs = [
         "array_records.cxx-test",
         "base_objects.cxx-test",
+        "borrowed_pointer_parameters.cxx-test",
+        "borrowed_pointer_parameters_invalid.cxx-test",
         "class_conversions.cxx-test",
         "class_conversions_invalid.cxx-test",
         "const.cxx-test",

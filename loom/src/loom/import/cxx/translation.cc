@@ -1081,26 +1081,14 @@ class Translator final : private Initialization::Evaluation {
     bool unreachable = false;
   };
 
-  const ReferenceParameter* reference_parameter(size_t ordinal) const {
-    for (const auto& reference : current_function_.reference_parameters) {
-      if (reference.ordinal == ordinal) {
-        return &reference;
-      }
-      if (reference.ordinal > ordinal) {
-        break;
-      }
-    }
-    return nullptr;
-  }
-
   bool returns_value_reference_parameter(cxx::FunctionSymbol* function) const {
     auto returned = functions_.reference_return_parameter(function);
     if (!returned) {
       return false;
     }
-    for (const auto& reference : functions_.reference_parameters(function)) {
-      if (reference.ordinal == *returned) {
-        return reference.abi == ReferenceABI::Value;
+    for (const auto& parameter : functions_.indirect_parameters(function)) {
+      if (parameter.ordinal == *returned) {
+        return parameter.abi == IndirectParameterABI::Value;
       }
     }
     return false;
@@ -1164,16 +1152,15 @@ class Translator final : private Initialization::Evaluation {
         }
       }
     }
-    auto parameters = current_function_.source->symbol->parameters();
-    for (const auto& reference : current_function_.reference_parameters) {
-      if (reference.abi == ReferenceABI::Value && reference.mutable_access) {
-        if (reference.projection) {
-          for (const auto& group : reference.projection->outputs) {
+    for (const auto& parameter : current_function_.indirect_parameters) {
+      if (parameter.abi == IndirectParameterABI::Value &&
+          parameter.mutable_access) {
+        if (parameter.projection) {
+          for (const auto& group : parameter.projection->outputs) {
             sources.push_back(group.type);
           }
         } else {
-          sources.push_back(
-              types_.unqualified_value(parameters[reference.ordinal]->type()));
+          sources.push_back(types_.unqualified(parameter.object_type));
         }
       }
     }
@@ -1198,12 +1185,13 @@ class Translator final : private Initialization::Evaluation {
       }
     }
     auto parameters = current_function_.source->symbol->parameters();
-    for (const auto& reference : current_function_.reference_parameters) {
-      if (reference.abi == ReferenceABI::Value && reference.mutable_access) {
-        if (reference.projection) {
-          for (const auto& group : reference.projection->outputs) {
+    for (const auto& parameter : current_function_.indirect_parameters) {
+      if (parameter.abi == IndirectParameterABI::Value &&
+          parameter.mutable_access) {
+        if (parameter.projection) {
+          for (const auto& group : parameter.projection->outputs) {
             auto value =
-                values_.project(parameters[reference.ordinal], *group.partition,
+                values_.project(parameters[parameter.ordinal], *group.partition,
                                 group.component_offset, value_arena_);
             if (!value) {
               fail(returned.source,
@@ -1212,7 +1200,7 @@ class Translator final : private Initialization::Evaluation {
             value->append_to(returned.values);
           }
         } else {
-          values_.at(parameters[reference.ordinal]).append_to(returned.values);
+          values_.at(parameters[parameter.ordinal]).append_to(returned.values);
         }
       }
     }
@@ -1491,18 +1479,23 @@ class Translator final : private Initialization::Evaluation {
       }
     }
     size_t parameter_index = 0;
+    size_t indirect_index = 0;
     for (auto* parameter : parameters) {
-      const auto* reference = reference_parameter(parameter_index);
+      const IndirectParameter* indirect = nullptr;
+      if (indirect_index < defined.indirect_parameters.size() &&
+          defined.indirect_parameters[indirect_index].ordinal ==
+              parameter_index) {
+        indirect = &defined.indirect_parameters[indirect_index++];
+      }
       auto* value_type =
-          !reference ? types_.unqualified(parameter->type())
-          : reference->abi == ReferenceABI::Storage
-              ? unit_.typeTraits().add_pointer(
-                    unit_.typeTraits().remove_reference(parameter->type()))
-              : types_.unqualified_value(parameter->type());
+          !indirect ? types_.unqualified(parameter->type())
+          : indirect->abi == IndirectParameterABI::Storage
+              ? unit_.typeTraits().add_pointer(indirect->object_type)
+              : types_.unqualified(indirect->object_type);
       const auto& partition = types_.partition(value_type, defined.source);
-      if (reference && reference->projection) {
+      if (indirect && indirect->projection) {
         values_.declare(parameter, partition);
-        for (const auto& group : reference->projection->inputs) {
+        for (const auto& group : indirect->projection->inputs) {
           auto value = region_value(region, argument_index, *group.partition);
           auto parameter_name = cxx::to_string(parameter->name());
           if (partition.kind == ValueKind::Record) {
@@ -1518,6 +1511,12 @@ class Translator final : private Initialization::Evaluation {
           }
           values_.replace(parameter, group.component_offset, value,
                           value_arena_);
+        }
+        if (indirect->borrowed_pointer) {
+          pointer_aliases_.emplace(
+              parameter,
+              Lvalue{ObjectLvalue{indirect->object_type,
+                                  Destination{parameter, 0, nullptr}}});
         }
         activate_automatic_destruction(parameter, defined.source);
         ++parameter_index;
@@ -1545,14 +1544,11 @@ class Translator final : private Initialization::Evaluation {
         value = storage_.root(buffer, defined.source);
       }
       value = name(value, cxx::to_string(parameter->name()));
-      if (reference && reference->abi == ReferenceABI::Storage) {
+      if (indirect && indirect->abi == IndirectParameterABI::Storage) {
         auto projection = storage_.project(
-            value.pointer(),
-            unit_.typeTraits().remove_reference(parameter->type()),
-            defined.source);
+            value.pointer(), indirect->object_type, defined.source);
         references_[parameter] = {
-            ObjectLvalue{unit_.typeTraits().remove_reference(parameter->type()),
-                         projection}};
+            ObjectLvalue{indirect->object_type, projection}};
         activate_automatic_destruction(parameter, defined.source);
         ++parameter_index;
         continue;
@@ -1569,6 +1565,12 @@ class Translator final : private Initialization::Evaluation {
         }
       } else {
         values_.set(parameter, value);
+      }
+      if (indirect && indirect->borrowed_pointer) {
+        pointer_aliases_.emplace(
+            parameter,
+            Lvalue{ObjectLvalue{indirect->object_type,
+                                Destination{parameter, 0, nullptr}}});
       }
       activate_automatic_destruction(parameter, defined.source);
       ++parameter_index;
@@ -3477,7 +3479,7 @@ class Translator final : private Initialization::Evaluation {
           update_vector_component(vector, value, component.selection), owner);
   }
 
-  struct ReferenceWriteback {
+  struct IndirectWriteback {
     // Once-evaluated lvalue receiving the mutable result, absent for a prvalue
     // temporary identified by its evaluated cleanup token.
     std::optional<Lvalue> target;
@@ -3496,8 +3498,8 @@ class Translator final : private Initialization::Evaluation {
   };
 
   // One reference result proven to alias an already evaluated source argument.
-  // The value changes only when a mutable value-reference writeback replaces
-  // the corresponding flattened operand interval.
+  // The value changes only when a mutable indirect writeback replaces the
+  // corresponding flattened operand interval.
   struct ReferenceResultAlias {
     // Evaluated argument value reused as the source call result.
     Value value;
@@ -3520,19 +3522,20 @@ class Translator final : private Initialization::Evaluation {
   };
 
   // One source argument evaluated exactly once, before its components are
-  // arranged in callable ABI order. A mutable value reference retains its
+  // arranged in callable ABI order. A mutable indirect parameter retains its
   // destination until the call results are available.
   struct EvaluatedCallArgument {
-    // Completed value or storage pointer. An SSA lvalue reference is read from
-    // |target| only after all argument evaluations have finished.
+    // Completed value or storage pointer. An SSA lvalue is read from |target|
+    // only after all argument evaluations have finished.
     std::optional<Value> value;
-    // Automatic lvalue named by a value-reference argument. Read-only
-    // parameters retain it because an exact reference result can be mutated by
-    // a later call.
+    // Automatic lvalue named by an indirect argument. Read-only parameters
+    // retain it because an exact reference result can be mutated by a later
+    // call.
     std::optional<Lvalue> target;
-    // Admitted value structure of a value reference, including read-only ones.
-    const Partition* reference_partition = nullptr;
-    // Unqualified value type of a mutable value reference.
+    // Admitted value structure of an indirect parameter, including read-only
+    // ones.
+    const Partition* indirect_partition = nullptr;
+    // Unqualified value type of a mutable indirect parameter.
     const cxx::Type* writeback_type = nullptr;
     // Exact temporary construction evaluated for this argument.
     std::optional<TemporaryReference> temporary;
@@ -3542,24 +3545,38 @@ class Translator final : private Initialization::Evaluation {
 
   EvaluatedCallArgument evaluate_call_argument(
       cxx::ExpressionAST* argument, cxx::ParameterSymbol* parameter,
-      const ReferenceParameter* reference, cxx::AST* owner) {
-    if (!reference) {
+      const IndirectParameter* indirect, cxx::AST* owner) {
+    if (!indirect) {
       auto value = expression(argument);
       adopt_temporary_result(argument);
       return {.value = value};
     }
-    auto* expected_type = types_.unqualified_value(parameter->type());
+    auto* expected_type = types_.unqualified(indirect->object_type);
     const auto& expected_partition =
-        reference->abi == ReferenceABI::Storage
+        indirect->abi == IndirectParameterABI::Storage
             ? kPointerPartition
             : types_.partition(expected_type, owner);
-    if (reference->abi == ReferenceABI::Storage) {
+    if (indirect->abi == IndirectParameterABI::Storage) {
       return {.value = reference_value(argument, argument)};
     }
     std::optional<Lvalue> target;
     std::optional<Value> value;
     std::optional<TemporaryReference> temporary;
-    if (argument->valueCategory != cxx::ValueCategory::kPrValue) {
+    if (indirect->borrowed_pointer) {
+      auto* source = unwrap_expression(argument);
+      auto* address = cxx::ast_cast<cxx::UnaryExpressionAST>(source);
+      if (address && !address->symbol && address->op == cxx::TokenKind::T_AMP &&
+          types_.unqualified(address->expression->type) == expected_type) {
+        target = destination(address->expression, owner,
+                             indirect->mutable_access ? LvalueAccess::Write
+                                                      : LvalueAccess::Read);
+      } else if (auto* alias = pointer_alias_lvalue(argument)) {
+        target = *alias;
+      } else {
+        fail(argument,
+             "borrowed pointer argument lost its retained source object");
+      }
+    } else if (argument->valueCategory != cxx::ValueCategory::kPrValue) {
       if (auto called = reference_call(argument)) {
         target = std::move(called->reference_target);
         temporary = called->temporary;
@@ -3569,8 +3586,8 @@ class Translator final : private Initialization::Evaluation {
         }
       } else {
         target = destination(argument, owner,
-                             reference->mutable_access ? LvalueAccess::Write
-                                                       : LvalueAccess::Read);
+                             indirect->mutable_access ? LvalueAccess::Write
+                                                      : LvalueAccess::Read);
       }
     } else {
       value = expression(argument);
@@ -3579,22 +3596,22 @@ class Translator final : private Initialization::Evaluation {
     return {
         .value = value,
         .target = std::move(target),
-        .reference_partition = &expected_partition,
-        .writeback_type = reference->mutable_access ? expected_type : nullptr,
+        .indirect_partition = &expected_partition,
+        .writeback_type = indirect->mutable_access ? expected_type : nullptr,
         .temporary = temporary,
-        .projection = reference->projection.get(),
+        .projection = indirect->projection.get(),
     };
   }
 
   SelectedReferenceCandidate selected_call_argument_candidate(
-      EvaluatedCallArgument& argument, cxx::ParameterSymbol* parameter,
-      const ReferenceParameter& reference, cxx::AST* owner) {
+      EvaluatedCallArgument& argument, const IndirectParameter& indirect,
+      cxx::AST* owner) {
     if (argument.target) {
       return {.target = *argument.target};
     }
-    auto* object_type = unit_.typeTraits().remove_reference(parameter->type());
+    auto* object_type = indirect.object_type;
     IREE_ASSERT(argument.value);
-    if (reference.abi == ReferenceABI::Storage) {
+    if (indirect.abi == IndirectParameterABI::Storage) {
       IREE_ASSERT(argument.value->is_pointer());
       auto projection =
           storage_.project(argument.value->pointer(), object_type, owner);
@@ -3698,10 +3715,10 @@ class Translator final : private Initialization::Evaluation {
     if (!argument.value) {
       argument.value = read(*argument.target, owner);
     }
-    if (argument.reference_partition &&
-        &argument.value->partition() != argument.reference_partition) {
+    if (argument.indirect_partition &&
+        &argument.value->partition() != argument.indirect_partition) {
       fail(owner,
-           "runtime value-reference binding must preserve the admitted "
+           "runtime indirect binding must preserve the admitted "
            "source value type");
     }
   }
@@ -3709,7 +3726,7 @@ class Translator final : private Initialization::Evaluation {
   void append_call_argument(EvaluatedCallArgument argument,
                             size_t receiver_argument_count,
                             std::vector<loom_value_id_t>& arguments,
-                            std::vector<ReferenceWriteback>& writebacks,
+                            std::vector<IndirectWriteback>& writebacks,
                             cxx::AST* owner) {
     const size_t argument_offset = receiver_argument_count + arguments.size();
     if (argument.projection) {
@@ -3728,7 +3745,7 @@ class Translator final : private Initialization::Evaluation {
     if (argument.writeback_type) {
       writebacks.push_back({
           .target = std::move(argument.target),
-          .partition = argument.reference_partition,
+          .partition = argument.indirect_partition,
           .value_type = argument.writeback_type,
           .argument_offset = argument_offset,
           .temporary = argument.temporary,
@@ -4640,7 +4657,7 @@ class Translator final : private Initialization::Evaluation {
       cxx::AST* call, cxx::FunctionSymbol* function, loom_symbol_ref_t callee,
       std::optional<ReceiverArgument> receiver,
       std::vector<loom_value_id_t> arguments,
-      std::vector<ReferenceWriteback> writebacks,
+      std::vector<IndirectWriteback> writebacks,
       std::optional<ReferenceResultAlias> reference_result_alias,
       std::span<const ReferenceResultOrigin> projected_origins,
       std::vector<SelectedReferenceCandidate> selected_reference_candidates,
@@ -4923,8 +4940,8 @@ class Translator final : private Initialization::Evaluation {
     auto parameters = function->parameters();
     auto receiver_abi = receiver ? receiver->abi : ImplicitObjectABI::None;
     auto callee = functions_.declare(function, call, receiver_abi);
-    auto references = functions_.reference_parameters(function);
-    if (references.empty() &&
+    auto indirect_parameters = functions_.indirect_parameters(function);
+    if (indirect_parameters.empty() &&
         !(receiver && receiver->target && receiver->target->selection())) {
       std::vector<loom_value_id_t> arguments;
       for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
@@ -4951,22 +4968,22 @@ class Translator final : private Initialization::Evaluation {
     }
     std::vector<EvaluatedCallArgument> evaluated_arguments;
     evaluated_arguments.reserve(parameters.size());
-    size_t reference_index = 0;
+    size_t indirect_index = 0;
     for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
-      const ReferenceParameter* reference = nullptr;
-      if (reference_index < references.size() &&
-          references[reference_index].ordinal == ordinal) {
-        reference = &references[reference_index++];
+      const IndirectParameter* indirect = nullptr;
+      if (indirect_index < indirect_parameters.size() &&
+          indirect_parameters[indirect_index].ordinal == ordinal) {
+        indirect = &indirect_parameters[indirect_index++];
       }
       EvaluatedCallArgument evaluated;
       if (ordinal == 0 && source_arguments.leading_reference) {
-        IREE_ASSERT(reference && reference->abi == ReferenceABI::Storage);
+        IREE_ASSERT(indirect && indirect->abi == IndirectParameterABI::Storage);
         evaluated.value = *source_arguments.leading_reference;
       } else {
         auto* argument = source_arguments.next();
         IREE_ASSERT(argument);
         evaluated = evaluate_call_argument(argument, parameters[ordinal],
-                                           reference, call);
+                                           indirect, call);
       }
       evaluated_arguments.push_back(std::move(evaluated));
     }
@@ -4993,7 +5010,7 @@ class Translator final : private Initialization::Evaluation {
     const size_t receiver_argument_count =
         receiver_input_count(function, receiver);
     std::vector<loom_value_id_t> arguments;
-    std::vector<ReferenceWriteback> writebacks;
+    std::vector<IndirectWriteback> writebacks;
     std::optional<ReferenceResultAlias> reference_result_alias;
     for (auto& evaluated : evaluated_arguments) {
       materialize_call_argument(evaluated, call);
@@ -5003,11 +5020,11 @@ class Translator final : private Initialization::Evaluation {
         function, receiver ? receiver->abi : ImplicitObjectABI::None);
     if (!projected_origins.empty()) {
       auto parameters = function->parameters();
-      auto references = functions_.reference_parameters(function);
-      std::vector<const ReferenceParameter*> references_by_ordinal(
+      auto indirect_parameters = functions_.indirect_parameters(function);
+      std::vector<const IndirectParameter*> indirect_by_ordinal(
           parameters.size());
-      for (const auto& reference : references) {
-        references_by_ordinal[reference.ordinal] = &reference;
+      for (const auto& parameter : indirect_parameters) {
+        indirect_by_ordinal[parameter.ordinal] = &parameter;
       }
       selected_reference_candidates.reserve(projected_origins.size());
       for (const auto& origin : projected_origins) {
@@ -5017,11 +5034,10 @@ class Translator final : private Initialization::Evaluation {
               *receiver, origin.projection, std::nullopt, call));
           continue;
         }
-        const auto* reference = references_by_ordinal[origin.owner_ordinal];
-        IREE_ASSERT(reference);
+        const auto* indirect = indirect_by_ordinal[origin.owner_ordinal];
+        IREE_ASSERT(indirect);
         auto candidate = selected_call_argument_candidate(
-            evaluated_arguments[origin.owner_ordinal],
-            parameters[origin.owner_ordinal], *reference, call);
+            evaluated_arguments[origin.owner_ordinal], *indirect, call);
         selected_reference_candidates.push_back(project_reference_candidate(
             std::move(candidate), origin.projection, call));
       }
@@ -5055,11 +5071,11 @@ class Translator final : private Initialization::Evaluation {
         call.argument_count + (call.has_postfix_dummy ? 1u : 0u);
     IREE_ASSERT(parameters.size() == parameter_count);
 
-    auto references = functions_.reference_parameters(function);
-    std::array<const ReferenceParameter*, 3> reference_by_ordinal = {};
-    for (const auto& reference : references) {
-      IREE_ASSERT(reference.ordinal < parameter_count);
-      reference_by_ordinal[reference.ordinal] = &reference;
+    auto indirect_parameters = functions_.indirect_parameters(function);
+    std::array<const IndirectParameter*, 3> indirect_by_ordinal = {};
+    for (const auto& parameter : indirect_parameters) {
+      IREE_ASSERT(parameter.ordinal < parameter_count);
+      indirect_by_ordinal[parameter.ordinal] = &parameter;
     }
 
     std::array<std::optional<EvaluatedCallArgument>, 3> evaluated_arguments;
@@ -5074,7 +5090,7 @@ class Translator final : private Initialization::Evaluation {
                   !evaluated_arguments[ordinal]);
       evaluated_arguments[ordinal] =
           evaluate_call_argument(call.arguments[ordinal], parameters[ordinal],
-                                 reference_by_ordinal[ordinal], expression);
+                                 indirect_by_ordinal[ordinal], expression);
     };
 
     switch (call.evaluation_order) {
@@ -5102,7 +5118,7 @@ class Translator final : private Initialization::Evaluation {
 
     if (call.has_postfix_dummy) {
       const size_t ordinal = call.argument_count;
-      IREE_ASSERT(!reference_by_ordinal[ordinal]);
+      IREE_ASSERT(!indirect_by_ordinal[ordinal]);
       auto type = types_.get(parameters[ordinal]->type(), expression);
       IREE_ASSERT(loom_type_kind(type) == LOOM_TYPE_SCALAR);
       evaluated_arguments[ordinal] = EvaluatedCallArgument{
@@ -5113,7 +5129,7 @@ class Translator final : private Initialization::Evaluation {
 
     auto receiver_abi = receiver ? receiver->abi : ImplicitObjectABI::None;
     auto callee = functions_.declare(function, expression, receiver_abi);
-    if (references.empty() && !receiver) {
+    if (indirect_parameters.empty() && !receiver) {
       std::vector<loom_value_id_t> arguments;
       for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
         IREE_ASSERT(evaluated_arguments[ordinal]);
@@ -5129,13 +5145,13 @@ class Translator final : private Initialization::Evaluation {
     const size_t receiver_argument_count =
         receiver_input_count(function, receiver);
     std::vector<loom_value_id_t> arguments;
-    std::vector<ReferenceWriteback> writebacks;
+    std::vector<IndirectWriteback> writebacks;
     std::optional<ReferenceResultAlias> reference_result_alias;
     auto return_parameter =
         unit_.typeTraits().is_reference(signature->returnType())
             ? functions_.reference_return_parameter(function)
             : std::nullopt;
-    writebacks.reserve(references.size());
+    writebacks.reserve(indirect_parameters.size());
     for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
       IREE_ASSERT(evaluated_arguments[ordinal]);
       materialize_call_argument(*evaluated_arguments[ordinal], expression);
@@ -5152,11 +5168,10 @@ class Translator final : private Initialization::Evaluation {
         continue;
       }
       IREE_ASSERT(evaluated_arguments[origin.owner_ordinal]);
-      const auto* reference = reference_by_ordinal[origin.owner_ordinal];
-      IREE_ASSERT(reference);
+      const auto* indirect = indirect_by_ordinal[origin.owner_ordinal];
+      IREE_ASSERT(indirect);
       auto candidate = selected_call_argument_candidate(
-          *evaluated_arguments[origin.owner_ordinal],
-          parameters[origin.owner_ordinal], *reference, expression);
+          *evaluated_arguments[origin.owner_ordinal], *indirect, expression);
       selected_reference_candidates.push_back(project_reference_candidate(
           std::move(candidate), origin.projection, expression));
     }
@@ -7931,10 +7946,16 @@ class Translator final : private Initialization::Evaluation {
     bind_values(written, loom_op_results(op));
   }
 
+  const cxx::Type* binding_value_type(cxx::Symbol* symbol) {
+    auto alias = pointer_aliases_.find(symbol);
+    return alias == pointer_aliases_.end()
+               ? types_.unqualified_value(source_object_type(symbol))
+               : types_.unqualified(alias->second.object().type);
+  }
+
   Mutation whole_mutation(cxx::Symbol* symbol) {
     return {symbol,
-            {types_.unqualified_value(source_object_type(symbol)),
-             &values_.partition(symbol), 0}};
+            {binding_value_type(symbol), &values_.partition(symbol), 0}};
   }
 
   std::vector<Mutation> live_mutations(cxx::AST* owner) {
@@ -7946,15 +7967,15 @@ class Translator final : private Initialization::Evaluation {
     std::vector<Mutation> result;
     for (auto* symbol : candidates) {
       if (auto found = values_.find(symbol); found != values_.end()) {
-        result.push_back({symbol,
-                          {types_.unqualified_value(source_object_type(symbol)),
-                           &found->second.partition(), 0}});
+        result.push_back(
+            {symbol,
+             {binding_value_type(symbol), &found->second.partition(), 0}});
         continue;
       }
       if (!values_.contains(symbol)) {
         continue;
       }
-      auto* type = types_.unqualified_value(source_object_type(symbol));
+      auto* type = binding_value_type(symbol);
       for (const auto& projection :
            types_.projections(type, current_function_.source)) {
         if (values_.initialized(symbol, projection.component_offset,

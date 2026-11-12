@@ -86,7 +86,7 @@ struct ImplicitObjectParameter {
   const ParameterProjection* projection = nullptr;
 };
 
-enum class ReferenceABI {
+enum class IndirectParameterABI {
   // Nonescaping referent transported as flattened values with exact writeback.
   Value,
   // Durable identity transported as the existing buffer-plus-offset pointer.
@@ -105,14 +105,20 @@ struct ParameterProjection {
   size_t output_component_count = 0;
 };
 
-// One source reference parameter projected through its selected ABI. Parameters
-// remain in source order and are indexed by semantic ordinal so redeclarations
-// need not share parameter symbol identities.
-struct ReferenceParameter {
+// One source parameter whose object is passed indirectly in C++, projected
+// through its selected native ABI. Parameters remain in source order and are
+// indexed by semantic ordinal so redeclarations need not share parameter
+// symbol identities.
+struct IndirectParameter {
   // Ordinal in the source function parameter list.
   size_t ordinal;
+  // Complete object transported by the selected indirect ABI.
+  const cxx::Type* object_type;
+  // Whether the source parameter is a nonescaping pointer borrow rather than
+  // a C++ reference.
+  bool borrowed_pointer;
   // Native identity transport selected by the retained callable analysis.
-  ReferenceABI abi;
+  IndirectParameterABI abi;
   // Whether a value ABI callee returns and the caller writes back the result.
   bool mutable_access;
   // Sparse source contract, absent when the complete existing ABI is needed.
@@ -137,8 +143,8 @@ struct FunctionBody {
   FunctionKind kind;
   // Incoming pointer contracts in source parameter order, empty when absent.
   std::span<const ParameterContract> parameter_contracts;
-  // Admitted non-escaping value references in source parameter order.
-  std::span<const ReferenceParameter> reference_parameters;
+  // Admitted non-escaping indirect parameters in source parameter order.
+  std::span<const IndirectParameter> indirect_parameters;
   // Implicit object transport for a reached non-static member definition.
   std::optional<ImplicitObjectParameter> implicit_object;
   // Retained whole-function source facts shared with body translation.
@@ -227,8 +233,8 @@ class Functions {
   // module insertion point. The caller then enters and fills the returned body.
   DefinedFunction define(FunctionInstance instance, Types& types,
                          Locations& locations, loom_builder_t* builder);
-  // Returns the retained value-reference ABI for a reached function.
-  std::span<const ReferenceParameter> reference_parameters(
+  // Returns the retained indirect-parameter ABI for a reached function.
+  std::span<const IndirectParameter> indirect_parameters(
       cxx::FunctionSymbol* symbol) const;
   // Whether calls must transport the implicit object as durable storage.
   bool receiver_requires_storage(cxx::FunctionSymbol* symbol) const;
@@ -370,9 +376,9 @@ class Functions {
   std::unordered_set<cxx::FunctionSymbol*> exported_;
   // Reached bodyless declarations whose names must remain stable for linking.
   std::unordered_set<cxx::FunctionSymbol*> external_;
-  // Nonempty value-reference ABIs indexed by canonical declaration identity.
-  std::unordered_map<cxx::FunctionSymbol*, std::vector<ReferenceParameter>>
-      reference_parameters_;
+  // Nonempty indirect-parameter ABIs indexed by canonical declaration identity.
+  std::unordered_map<cxx::FunctionSymbol*, std::vector<IndirectParameter>>
+      indirect_parameters_;
   // Sparse implicit-object contracts indexed by canonical source identity.
   std::unordered_map<cxx::FunctionSymbol*, ParameterProjection>
       receiver_projections_;

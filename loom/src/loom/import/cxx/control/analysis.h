@@ -21,6 +21,7 @@
 #include <variant>
 #include <vector>
 
+#include "iree/base/internal/arena.h"
 #include "loom/import/cxx/control/construction.h"
 #include "loom/import/cxx/lifetime/destruction.h"
 #include "loom/import/cxx/lifetime/origins.h"
@@ -338,8 +339,12 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Complete semantic temporary whose lifetime is owned by this reference
   // declaration, or null when the reference aliases another source object.
   cxx::ExpressionAST* reference_materialization(cxx::Symbol* binding) const;
-  // Whether execution may modify the object named by a reference parameter.
-  bool reference_written(cxx::Symbol* parameter) const;
+  // Whether execution may modify the object named by an indirect parameter.
+  bool indirect_parameter_written(cxx::Symbol* parameter) const;
+  // Semantic object type eligible for a private pointer-parameter borrow.
+  const cxx::Type* borrowed_pointer_object_type(cxx::Symbol* parameter) const;
+  // Whether an eligible pointer parameter must retain its ordinary pointer ABI.
+  bool borrowed_pointer_requires_storage(cxx::Symbol* parameter) const;
   // Complete-group requirements produced after call effects and source
   // initialization have reached their fixed points.
   bool parameter_input(cxx::Symbol* parameter,
@@ -360,8 +365,12 @@ class ControlFlow final : private cxx::ASTVisitor {
   }
   void configure_parameter(cxx::Symbol* parameter,
                            Construction::ParameterMode mode) {
+    if (mode == Construction::ParameterMode::Storage &&
+        borrowed_pointer_object_type(parameter)) {
+      require_borrowed_pointer_storage(parameter);
+    }
     construction_.configure_parameter(parameter, mode,
-                                      reference_written(parameter));
+                                      indirect_parameter_written(parameter));
   }
   // Direct receiver fields share the reference-parameter effect solver.
   const RecordPartition* receiver_partition() const {
@@ -408,7 +417,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   }
   // Propagates reference and receiver facts in both directions across one
   // retained call edge.
-  CallPropagation propagate_call(const DirectCall& call, ControlFlow& callee);
+  CallPropagation propagate_call(const DirectCall& call, ControlFlow& callee,
+                                 iree_arena_allocator_t* scratch_arena);
   // Adds identity-observing capture uses from this concrete call operator to
   // the shared result. Uninstantiated template patterns are never analyzed.
   void collect_pointer_capture_identities(
@@ -553,12 +563,16 @@ class ControlFlow final : private cxx::ASTVisitor {
                                      std::span<cxx::AST* const> owners,
                                      WriteEffect effect);
   bool require_reference_storage(cxx::Symbol* parameter);
+  bool require_borrowed_pointer_storage(cxx::Symbol* parameter);
+  const cxx::Type* candidate_pointer_object_type(cxx::Symbol* parameter);
   bool require_address(cxx::Symbol* binding);
   void retain_automatic_storage(cxx::VariableSymbol* variable,
                                 cxx::ExpressionAST* initializer);
   bool add_receiver_write(cxx::Symbol* field);
   void retain_reference_receiver_write(const DirectCall& call);
-  CallArgument retain_call_argument(cxx::ExpressionAST* expression);
+  CallArgument retain_call_argument(
+      cxx::ExpressionAST* expression,
+      const cxx::Type* borrowed_object_type = nullptr);
   CallArgument retain_member_receiver(cxx::ExpressionAST* expression,
                                       cxx::List<cxx::Symbol*>* path,
                                       cxx::AST* owner);
@@ -602,13 +616,12 @@ class ControlFlow final : private cxx::ASTVisitor {
   template <typename Visitor>
   void visit_intervals(const CallArgument& argument,
                        ReferenceProjection projection, Visitor&& visitor) const;
-  bool identities_overlap(const CallArgument& left,
-                          const CallArgument& right) const;
   bool references_current_receiver_field(const CallArgument& argument) const;
   bool retain_reference_result_identity(const DirectCall& call,
                                         const ControlFlow& callee);
-  CallPropagation propagate_overlapping_references(const DirectCall& call,
-                                                   ControlFlow& callee);
+  CallPropagation propagate_overlapping_indirect_parameters(
+      const DirectCall& call, ControlFlow& callee,
+      iree_arena_allocator_t* scratch_arena);
   std::optional<Destination> classify_destination(
       cxx::ExpressionAST* expression);
   std::optional<Destination> classify_materialized_destination(
@@ -694,6 +707,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   struct PointerAlias {
     // Source lvalue evaluated once by the pointer initializer.
     cxx::ExpressionAST* referent;
+    // Semantic referent type for a borrowed pointer parameter. Local aliases
+    // derive this from |referent| and leave the field null.
+    const cxx::Type* parameter_object_type = nullptr;
     // Canonical identity retained if a later use observes the pointer value.
     CallArgument identity;
     // False once any use needs an actual pointer representation.
@@ -704,12 +720,18 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::unordered_map<cxx::Symbol*, PointerAlias> pointer_aliases_;
   // Address expression deferred while its declarator candidate is visited.
   cxx::UnaryExpressionAST* pointer_alias_initializer_ = nullptr;
+  // Address expression provisionally transported as a semantic call operand.
+  // Call propagation restores ordinary identity when the callee needs storage.
+  cxx::UnaryExpressionAST* borrowed_call_address_ = nullptr;
   // Candidate binding consumed by the currently traversed transparent use.
   cxx::Symbol* pointer_alias_use_ = nullptr;
   // Reference parameters requiring buffer-plus-offset transport.
   std::unordered_set<cxx::Symbol*> storage_references_;
-  // Reference parameters whose referents may be modified.
-  std::unordered_set<cxx::Symbol*> written_references_;
+  // Candidate pointer parameters whose value is observed or whose reached
+  // callers cannot supply one retained semantic object.
+  std::unordered_set<cxx::Symbol*> storage_borrowed_pointers_;
+  // Indirect parameters whose source objects may be modified.
+  std::unordered_set<cxx::Symbol*> written_indirect_parameters_;
   // Exact current-object field replacements in declaration encounter order.
   std::vector<cxx::Symbol*> receiver_writes_;
   // Capture and write facts are allocated only when captures or identity uses
