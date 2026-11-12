@@ -11,18 +11,16 @@
 typedef struct loom_aie2p_native_join_scope_t {
   // Canonical execution schedule row retained for boundary lookup.
   iree_host_size_t ordinal;
-  // Membership by physical engine, independent of representative worker IDs.
-  bool* participants;
-  // Number of engines in the membership row.
-  iree_host_size_t count;
+  // Shared membership, compared independently of representative worker IDs.
+  const loom_pipeline_participants_t* participants;
 } loom_aie2p_native_join_scope_t;
 
 static int loom_aie2p_native_join_scope_compare(const void* lhs,
                                                 const void* rhs) {
   const loom_aie2p_native_join_scope_t* a = lhs;
   const loom_aie2p_native_join_scope_t* b = rhs;
-  return memcmp(a->participants, b->participants,
-                a->count * sizeof(*a->participants));
+  return loom_pipeline_participants_compare_members(a->participants,
+                                                    b->participants);
 }
 
 iree_status_t loom_aie2p_native_select_joins(
@@ -40,16 +38,12 @@ iree_status_t loom_aie2p_native_select_joins(
       arena, execution->schedule_count, sizeof(*context->joins),
       (void**)&context->joins));
   bool* participants = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, execution->schedule_count * execution->engine_count,
-      sizeof(*participants), (void**)&participants));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, execution->engine_count,
+                                                 sizeof(*participants),
+                                                 (void**)&participants));
   for (iree_host_size_t i = 0; i < execution->schedule_count; ++i) {
-    bool* row = &participants[i * execution->engine_count];
-    for (iree_host_size_t e = 0; e < execution->engine_count; ++e) {
-      row[e] = execution->schedules[i].workers[e] != IREE_HOST_SIZE_MAX;
-    }
     scopes[i] = (loom_aie2p_native_join_scope_t){
-        .ordinal = i, .participants = row, .count = execution->engine_count};
+        .ordinal = i, .participants = execution->schedules[i].participants};
   }
   qsort(scopes, execution->schedule_count, sizeof(*scopes),
         loom_aie2p_native_join_scope_compare);
@@ -72,9 +66,16 @@ iree_status_t loom_aie2p_native_select_joins(
     IREE_RETURN_IF_ERROR(
         iree_arena_allocate(arena, sizeof(*join), (void**)&join));
     *join = (loom_aie2p_native_join_t){.next = context->first_join};
+    memset(participants, 0, execution->engine_count * sizeof(*participants));
+    loom_pipeline_participant_iterator_t iterator;
+    loom_pipeline_participants_begin(scopes[i].participants, &iterator);
+    loom_pipeline_participant_t participant;
+    while (loom_pipeline_participants_next(&iterator, &participant)) {
+      participants[participant.engine] = true;
+    }
     IREE_RETURN_IF_ERROR(loom_aie2p_join_plan_build(
-        context->family, scopes[i].participants, allocated_locks, arena,
-        &join->plan, out_valid));
+        context->family, participants, allocated_locks, arena, &join->plan,
+        out_valid));
     if (!*out_valid) {
       return loom_aie2p_native_reject(
           context,

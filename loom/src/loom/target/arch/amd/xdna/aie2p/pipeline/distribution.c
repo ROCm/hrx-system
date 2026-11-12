@@ -1250,14 +1250,13 @@ iree_status_t loom_aie2p_native_bind_distribution_phases(
     const loom_pipeline_realization_t* realization, bool* out_valid) {
   *out_valid = false;
   const iree_host_size_t count = realization->invocations.worker_count;
-  const iree_host_size_t controller_count =
-      realization->invocations.count * context->execution.engine_count;
+  const iree_host_size_t controller_count = realization->invocations.count;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(context->pass->arena, controller_count,
                                 sizeof(*context->distribution_controllers),
                                 (void**)&context->distribution_controllers));
   for (iree_host_size_t i = 0; i < controller_count; ++i) {
-    context->distribution_controllers[i] = IREE_HOST_SIZE_MAX;
+    context->distribution_controllers[i] = NULL;
   }
   const loom_aie2p_native_distribution_phase_t** next;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(context->pass->arena, count,
@@ -1308,16 +1307,14 @@ iree_status_t loom_aie2p_native_bind_distribution_phases(
         iree_host_size_t controller =
             engine == IREE_HOST_SIZE_MAX
                 ? IREE_HOST_SIZE_MAX
-                : context->execution
-                      .workers[invocation->ordinal *
-                                   context->execution.engine_count +
-                               engine];
+                : loom_pipeline_participants_worker(
+                      context->execution.invocations[invocation->ordinal],
+                      engine);
         if (controller == IREE_HOST_SIZE_MAX && engine != IREE_HOST_SIZE_MAX &&
             invocation->schedule) {
-          controller =
-              context->execution.workers[invocation->parent->ordinal *
-                                             context->execution.engine_count +
-                                         engine];
+          controller = loom_pipeline_participants_worker(
+              context->execution.invocations[invocation->parent->ordinal],
+              engine);
           if (controller != IREE_HOST_SIZE_MAX &&
               realization->invocations.workers[controller].invocation !=
                   invocation->parent) {
@@ -1332,9 +1329,10 @@ iree_status_t loom_aie2p_native_bind_distribution_phases(
                       "child or its concurrent parent invocation"));
         }
         endpoint->controller_engine = engine;
-        context->distribution_controllers[invocation->ordinal *
-                                              context->execution.engine_count +
-                                          engine] = controller;
+        IREE_RETURN_IF_ERROR(loom_pipeline_participants_insert(
+            context->pass->arena,
+            (loom_pipeline_participant_t){engine, controller},
+            &context->distribution_controllers[invocation->ordinal]));
         loom_aie2p_native_distribution_command_t* command;
         IREE_RETURN_IF_ERROR(iree_arena_allocate(
             context->pass->arena, sizeof(*command), (void**)&command));

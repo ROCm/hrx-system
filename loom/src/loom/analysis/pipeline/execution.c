@@ -79,8 +79,6 @@ iree_status_t loom_pipeline_execution_coalesce(
 typedef struct loom_pipeline_execution_scope_t {
   // Published participant row, independent of temporary traversal links.
   loom_pipeline_execution_schedule_t schedule;
-  // Mutable representative workers while collecting this scope's children.
-  iree_host_size_t* workers;
   // Enclosing scope index, or IREE_HOST_SIZE_MAX for an independent scope.
   iree_host_size_t parent;
 } loom_pipeline_execution_scope_t;
@@ -95,48 +93,16 @@ LOOM_DEFINE_ADAPTIVE_SORT(loom_pipeline_execution_sort_schedules,
                           loom_pipeline_execution_schedule_t,
                           loom_pipeline_execution_schedule_less)
 
-// A serial union retains one representative for later conflict reporting;
-// a concurrent union rejects every duplicate, including two copies of one
-// authored definition. Source symbol equality grants no execution sharing.
-static bool loom_pipeline_execution_merge(
-    iree_host_size_t* destination, const iree_host_size_t* source,
-    iree_host_size_t count, bool concurrent,
-    loom_pipeline_execution_conflict_t* conflict) {
-  for (iree_host_size_t i = 0; i < count; ++i) {
-    if (source[i] == IREE_HOST_SIZE_MAX) {
-      continue;
-    }
-    if (concurrent && destination[i] != IREE_HOST_SIZE_MAX) {
-      *conflict = (loom_pipeline_execution_conflict_t){
-          .first_worker = destination[i], .second_worker = source[i]};
-      return false;
-    }
-    if (destination[i] == IREE_HOST_SIZE_MAX) {
-      destination[i] = source[i];
-    }
-  }
-  return true;
-}
-
 static iree_status_t loom_pipeline_execution_append_scope(
     const loom_pipeline_invocation_schedule_t* source, iree_host_size_t parent,
-    iree_host_size_t engine_count, iree_arena_allocator_t* arena,
-    loom_pipeline_execution_scope_t** scopes, iree_host_size_t* count,
-    iree_host_size_t* capacity) {
+    iree_arena_allocator_t* arena, loom_pipeline_execution_scope_t** scopes,
+    iree_host_size_t* count, iree_host_size_t* capacity) {
   if (*count == *capacity) {
     IREE_RETURN_IF_ERROR(iree_arena_grow_array(
         arena, *count, *count + 1, sizeof(**scopes), capacity, (void**)scopes));
   }
-  iree_host_size_t* workers = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, engine_count, sizeof(*workers), (void**)&workers));
-  for (iree_host_size_t i = 0; i < engine_count; ++i) {
-    workers[i] = IREE_HOST_SIZE_MAX;
-  }
   (*scopes)[(*count)++] = (loom_pipeline_execution_scope_t){
-      .schedule = {.source = source, .workers = workers},
-      .workers = workers,
-      .parent = parent};
+      .schedule = {.source = source}, .parent = parent};
   return iree_ok_status();
 }
 
@@ -148,57 +114,59 @@ iree_status_t loom_pipeline_execution_build(
   *out_execution = (loom_pipeline_execution_t){.engine_count = engine_count};
   *out_conflict = (loom_pipeline_execution_conflict_t){
       .first_worker = IREE_HOST_SIZE_MAX, .second_worker = IREE_HOST_SIZE_MAX};
-  iree_host_size_t* workers = NULL;
+  const loom_pipeline_participants_t** participants = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, invocations->count, engine_count * sizeof(*workers),
-      (void**)&workers));
-  out_execution->workers = workers;
-  for (iree_host_size_t i = 0; i < invocations->count * engine_count; ++i) {
-    workers[i] = IREE_HOST_SIZE_MAX;
+      arena, invocations->count, sizeof(*participants), (void**)&participants));
+  out_execution->invocations = participants;
+  iree_host_size_t local_capacity = 0;
+  for (iree_host_size_t i = 0; i < invocations->count; ++i) {
+    local_capacity = iree_max(local_capacity,
+                              invocations->entries[i]->resources->strand_count);
   }
+  loom_pipeline_participant_t* local = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, local_capacity, sizeof(*local), (void**)&local));
   loom_pipeline_execution_scope_t* scopes = NULL;
   iree_host_size_t scope_count = 0, scope_capacity = 0;
   for (iree_host_size_t reverse = invocations->count; reverse > 0; --reverse) {
     const loom_pipeline_invocation_t* invocation =
         invocations->entries[reverse - 1];
     const loom_pipeline_resources_t* resources = invocation->resources;
-    iree_host_size_t* row =
-        engine_count ? workers + invocation->ordinal * engine_count : NULL;
+    const loom_pipeline_participants_t** row =
+        &participants[invocation->ordinal];
+    iree_host_size_t local_count = 0;
     for (iree_host_size_t i = 0; i < resources->strand_count; ++i) {
       const iree_host_size_t worker = invocation->first_worker + i;
       const iree_host_size_t engine = worker_engines[worker];
-      if (engine == IREE_HOST_SIZE_MAX) {
-        continue;
+      if (engine != IREE_HOST_SIZE_MAX) {
+        local[local_count++] = (loom_pipeline_participant_t){engine, worker};
       }
-      if (row[engine] != IREE_HOST_SIZE_MAX) {
-        *out_conflict = (loom_pipeline_execution_conflict_t){
-            .first_worker = row[engine], .second_worker = worker};
-        return iree_ok_status();
-      }
-      row[engine] = worker;
+    }
+    IREE_RETURN_IF_ERROR(loom_pipeline_participants_build(
+        arena, local, local_count, row, out_conflict));
+    if (out_conflict->second_worker != IREE_HOST_SIZE_MAX) {
+      return iree_ok_status();
     }
     for (iree_host_size_t i = 0; i < resources->composition_count; ++i) {
-      const iree_host_size_t* child =
-          engine_count
-              ? workers + invocation->compositions[i]->ordinal * engine_count
-              : NULL;
-      if (!loom_pipeline_execution_merge(row, child, engine_count, true,
-                                         out_conflict)) {
+      IREE_RETURN_IF_ERROR(loom_pipeline_participants_merge(
+          arena, *row, participants[invocation->compositions[i]->ordinal], true,
+          row, out_conflict));
+      if (out_conflict->second_worker != IREE_HOST_SIZE_MAX) {
         return iree_ok_status();
       }
     }
     const iree_host_size_t first_scope = scope_count;
     for (iree_host_size_t i = 0; i < resources->schedule_count; ++i) {
       IREE_RETURN_IF_ERROR(loom_pipeline_execution_append_scope(
-          &invocation->schedules[i], IREE_HOST_SIZE_MAX, engine_count, arena,
-          &scopes, &scope_count, &scope_capacity));
+          &invocation->schedules[i], IREE_HOST_SIZE_MAX, arena, &scopes,
+          &scope_count, &scope_capacity));
     }
     // Discover nested scopes in retained control order. Child occurrence rows
     // already exist because the construction inventory is parent-before-child.
     for (iree_host_size_t i = first_scope; i < scope_count; ++i) {
       const loom_pipeline_invocation_schedule_t* schedule =
           scopes[i].schedule.source;
-      iree_host_size_t* participants = scopes[i].workers;
+      const loom_pipeline_participants_t* members = NULL;
       for (iree_host_size_t b = 0;
            b < schedule->source->control->graph.block_count; ++b) {
         const loom_pipeline_schedule_block_t* block =
@@ -207,16 +175,15 @@ iree_status_t loom_pipeline_execution_build(
           const loom_pipeline_invocation_step_t binding =
               schedule->blocks[b][s];
           switch (block->steps[s].kind) {
-            case LOOM_PIPELINE_SCHEDULE_STEP_COMPOSITION:
-              loom_pipeline_execution_merge(
-                  participants,
-                  engine_count ? workers + binding.child->ordinal * engine_count
-                               : NULL,
-                  engine_count, false, out_conflict);
+            case LOOM_PIPELINE_SCHEDULE_STEP_COMPOSITION: {
+              IREE_RETURN_IF_ERROR(loom_pipeline_participants_merge(
+                  arena, members, participants[binding.child->ordinal], false,
+                  &members, NULL));
               break;
+            }
             case LOOM_PIPELINE_SCHEDULE_STEP_SERIAL: {
               IREE_RETURN_IF_ERROR(loom_pipeline_execution_append_scope(
-                  binding.nested, i, engine_count, arena, &scopes, &scope_count,
+                  binding.nested, i, arena, &scopes, &scope_count,
                   &scope_capacity));
               break;
             }
@@ -225,20 +192,46 @@ iree_status_t loom_pipeline_execution_build(
           }
         }
       }
+      scopes[i].schedule.participants = members;
     }
     // Nested scopes are sequential in their parent. Distinct outer scopes
     // progress concurrently with each other and with the invocation's strands.
     for (iree_host_size_t i = scope_count; i > first_scope; --i) {
       const loom_pipeline_execution_scope_t* scope = &scopes[i - 1];
       const bool outer = scope->parent == IREE_HOST_SIZE_MAX;
-      iree_host_size_t* destination =
-          outer ? row : scopes[scope->parent].workers;
-      if (!loom_pipeline_execution_merge(destination, scope->workers,
-                                         engine_count, outer, out_conflict)) {
+      const loom_pipeline_participants_t** destination =
+          outer ? row : &scopes[scope->parent].schedule.participants;
+      IREE_RETURN_IF_ERROR(loom_pipeline_participants_merge(
+          arena, *destination, scope->schedule.participants, outer, destination,
+          out_conflict));
+      if (out_conflict->second_worker != IREE_HOST_SIZE_MAX) {
         return iree_ok_status();
       }
     }
   }
+  iree_host_size_t* offsets = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, invocations->count + 1, sizeof(*offsets), (void**)&offsets));
+  offsets[0] = 0;
+  for (iree_host_size_t i = 0; i < invocations->count; ++i) {
+    offsets[i + 1] =
+        offsets[i] + loom_pipeline_participants_count(participants[i]);
+  }
+  out_execution->offsets = offsets;
+  out_execution->participant_count = offsets[invocations->count];
+  iree_host_size_t* workers = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, engine_count, sizeof(*workers), (void**)&workers));
+  for (iree_host_size_t i = 0; i < engine_count; ++i) {
+    workers[i] = IREE_HOST_SIZE_MAX;
+  }
+  loom_pipeline_participant_iterator_t iterator;
+  loom_pipeline_participants_begin(participants[0], &iterator);
+  loom_pipeline_participant_t participant;
+  while (loom_pipeline_participants_next(&iterator, &participant)) {
+    workers[participant.engine] = participant.worker;
+  }
+  out_execution->workers = workers;
   loom_pipeline_execution_schedule_t* schedules = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, scope_count, sizeof(*schedules), (void**)&schedules));

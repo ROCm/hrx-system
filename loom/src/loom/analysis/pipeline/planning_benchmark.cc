@@ -85,13 +85,14 @@ class PipelineFixture {
     // Include that iteration so a compact producer cannot hide dense consumers.
     uint64_t checksum = 0;
     for (size_t i = 0; i < graph_.count; ++i) {
-      for (size_t engine = 0; engine < engine_count; ++engine) {
-        const size_t worker = execution.workers[i * engine_count + engine];
-        if (worker != IREE_HOST_SIZE_MAX) {
-          checksum += worker + engine + 1;
-        }
+      loom_pipeline_participant_iterator_t iterator;
+      loom_pipeline_participants_begin(execution.invocations[i], &iterator);
+      loom_pipeline_participant_t participant;
+      while (loom_pipeline_participants_next(&iterator, &participant)) {
+        checksum += participant.worker + participant.engine + 1;
       }
     }
+
     for (size_t i = 0; i < workers_.size(); ++i) {
       requests_[i] = {
           .lifetime = graph_.lifetimes.owners[workers_[i].invocation->ordinal],

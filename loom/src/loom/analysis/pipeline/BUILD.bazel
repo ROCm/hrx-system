@@ -119,11 +119,35 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "participants",
+    srcs = ["participants.c"],
+    hdrs = ["participants.h"],
+    deps = [
+        "//loom/src/loom/util:adaptive_sort",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "participants_test",
+    srcs = ["participants_test.cc"],
+    deps = [
+        ":participants",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "execution",
     srcs = ["execution.c"],
     hdrs = ["execution.h"],
     deps = [
         ":invocations",
+        ":participants",
         ":resources",
         ":schedule",
         "//loom/src/loom/util:adaptive_sort",

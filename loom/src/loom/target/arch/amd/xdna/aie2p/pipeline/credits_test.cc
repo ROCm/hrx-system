@@ -24,6 +24,14 @@ class NativeCreditsTest : public ::testing::Test {
     context_.core_engines = engines_;
     context_.execution.engine_count = 2;
     context_.execution.schedule_count = 1;
+    context_.execution.invocations = participants_;
+    loom_pipeline_participant_t members[] = {{0, 0}, {1, 1}};
+    loom_pipeline_execution_conflict_t conflict;
+    IREE_ASSERT_OK(loom_pipeline_participants_build(
+        &arena_, members, IREE_ARRAYSIZE(members), &participants_[1],
+        &conflict));
+    ASSERT_EQ(conflict.second_worker, IREE_HOST_SIZE_MAX);
+    participants_[0] = participants_[1];
     for (size_t i = 0; i < 3; ++i) {
       invocations_[i].ordinal = i;
       invocations_[i].parent = i ? &invocations_[i - 1] : nullptr;
@@ -103,6 +111,8 @@ class NativeCreditsTest : public ::testing::Test {
   uint32_t access_index_ = 0;
   // Physical engines assigned to the two logical workers.
   const iree_host_size_t engines_[2] = {0, 1};
+  // The enclosing serial boundary retains both endpoint controllers.
+  const loom_pipeline_participants_t* participants_[3] = {};
   // Canonical invocation graph consumed by restoration selection.
   loom_pipeline_realization_t realization_ = {};
   // Native protocol selection owner.

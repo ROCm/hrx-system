@@ -68,10 +68,10 @@ typedef struct loom_pipeline_control_options_t {
   // SIZE_MAX needs no preparation. An admitted instruction participant owns
   // each selected engine; preparation adds no independent execution context.
   const iree_host_size_t* preparation_engines;
-  // Optional invocation-major physical boundary controllers. An autonomous
-  // child has no instruction worker, but its selected controller starts and
-  // retires it around concurrent parent work. Absent entries are SIZE_MAX.
-  const iree_host_size_t* boundary_workers;
+  // Optional controller set per invocation. An autonomous child has no
+  // instruction worker, but its selected controller starts and retires it
+  // around concurrent parent work. Empty controller sets are NULL.
+  const loom_pipeline_participants_t* const* boundary_workers;
   // Additional invocation-private values passed through projected calls.
   // These express actual runtime state, independently of source captures.
   const loom_type_t* state_types;
@@ -102,10 +102,13 @@ typedef struct loom_pipeline_control_function_t {
 // correspondence after signature pruning. Source constructions remain
 // immutable.
 //
-// The returned table is invocation-major with execution->engine_count columns.
-// The physical owner builds each root entry and supplies its surviving runtime
-// state arguments. One root call executes the complete resident engine program;
-// the owner alone initializes state and publishes terminal completion.
+// The returned table uses execution's compact invocation/engine slots. Every
+// entry represents an actual participant; execution_index maps engine
+// identities to these slots, and execution.offsets gives each invocation's
+// ordered range. The physical owner builds each root entry and supplies its
+// surviving runtime state arguments. One root call executes the complete
+// resident engine program; the owner alone initializes state and publishes
+// terminal completion.
 iree_status_t loom_pipeline_control_materialize(
     loom_rewriter_t* rewriter, const loom_pipeline_realization_t* realization,
     const loom_pipeline_execution_t* execution,

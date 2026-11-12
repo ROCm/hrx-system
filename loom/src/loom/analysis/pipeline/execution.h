@@ -8,6 +8,7 @@
 #define LOOM_ANALYSIS_PIPELINE_EXECUTION_H_
 
 #include "loom/analysis/pipeline/invocations.h"
+#include "loom/analysis/pipeline/participants.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,28 +21,29 @@ extern "C" {
 typedef struct loom_pipeline_execution_schedule_t {
   // Bound serial scope, including its occurrence-specific child bindings.
   const loom_pipeline_invocation_schedule_t* source;
-  // Representative worker per engine, or IREE_HOST_SIZE_MAX when absent.
-  const iree_host_size_t* workers;
+  // Shared immutable representatives for the engines used by this scope.
+  const loom_pipeline_participants_t* participants;
 } loom_pipeline_execution_schedule_t;
 
 typedef struct loom_pipeline_execution_t {
   // Number of independently progressing engines in the selected assignment.
   iree_host_size_t engine_count;
-  // Invocation-major representative workers, engine_count entries per row.
-  // Each row includes its concurrent children and all ordered phase visits.
+  // Root representative per physical engine, or SIZE_MAX when absent. This
+  // single physical inventory serves native resource ownership queries.
   const iree_host_size_t* workers;
-  // Serial participant rows, sorted by bound source scope address.
+  // Shared participant sets indexed by invocation ordinal. Each includes its
+  // concurrent children and ordered phase visits without copying unary paths.
+  const loom_pipeline_participants_t* const* invocations;
+  // Compact function/realization ranges, one prefix offset per invocation plus
+  // a terminal offset. Within a range, present engines are in ascending order.
+  const iree_host_size_t* offsets;
+  // Total actual invocation/engine pairs in the compact ranges.
+  iree_host_size_t participant_count;
+  // Serial participant sets, sorted by bound source scope address.
   const loom_pipeline_execution_schedule_t* schedules;
   // Number of bound serial scopes, including nested scopes.
   iree_host_size_t schedule_count;
 } loom_pipeline_execution_t;
-
-typedef struct loom_pipeline_execution_conflict_t {
-  // One worker requiring progress concurrently with second_worker.
-  iree_host_size_t first_worker;
-  // Other worker assigned to the same engine; IREE_HOST_SIZE_MAX when valid.
-  iree_host_size_t second_worker;
-} loom_pipeline_execution_conflict_t;
 
 // Physical resource correspondence requiring two worker occurrences to use the
 // same progress engine. This is a proposed assignment, not an ordering proof.
@@ -73,7 +75,7 @@ iree_status_t loom_pipeline_execution_coalesce(
 // Independent strands, compositions, and outer serial scopes overlap. Children
 // of one serial scope do not, including nested scopes, branches, and loop
 // revisits. Runtime trip counts never expand the inventory. The owning analysis
-// visits retained control once; physical consumers query the participant rows
+// visits retained control once; physical consumers query the participant sets
 // instead of rediscovering transitive worker membership or execution ordering.
 //
 // A conflict identifies incompatible authored placement without mutating IR.
@@ -84,6 +86,18 @@ iree_status_t loom_pipeline_execution_build(
     const iree_host_size_t* worker_engines, iree_host_size_t engine_count,
     iree_arena_allocator_t* arena, loom_pipeline_execution_t* out_execution,
     loom_pipeline_execution_conflict_t* out_conflict);
+
+// Maps an actual invocation/engine pair to its compact realization slot, or
+// returns SIZE_MAX when that engine does not participate in the invocation.
+static inline iree_host_size_t loom_pipeline_execution_index(
+    const loom_pipeline_execution_t* execution, iree_host_size_t invocation,
+    iree_host_size_t engine) {
+  const iree_host_size_t index = loom_pipeline_participants_find(
+                                     execution->invocations[invocation], engine)
+                                     .index;
+  return index == IREE_HOST_SIZE_MAX ? index
+                                     : execution->offsets[invocation] + index;
+}
 
 // Returns the retained physical participant record for a source scope. The
 // scope belongs to the graph used to build execution; the lookup neither

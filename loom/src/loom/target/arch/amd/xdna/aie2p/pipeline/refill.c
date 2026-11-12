@@ -61,16 +61,16 @@ iree_status_t loom_aie2p_native_select_progress(
     // Complete stable input has no external readiness or credit dependency.
     // An existing participant starts it at entry and retires its queues at
     // exit. The retained execution row supplies the complete participant set.
-    const iree_host_size_t* participants =
-        &context->execution.workers[input->invocation->ordinal *
-                                    context->execution.engine_count];
+    const loom_pipeline_participants_t* participants =
+        context->execution.invocations[input->invocation->ordinal];
     uint64_t best_cost = UINT64_MAX;
-    for (iree_host_size_t engine = 0; engine < context->execution.engine_count;
-         ++engine) {
-      const iree_host_size_t candidate = participants[engine];
-      if (candidate == IREE_HOST_SIZE_MAX ||
-          realization->invocations.workers[candidate].invocation !=
-              input->invocation) {
+    loom_pipeline_participant_iterator_t iterator;
+    loom_pipeline_participants_begin(participants, &iterator);
+    loom_pipeline_participant_t participant;
+    while (loom_pipeline_participants_next(&iterator, &participant)) {
+      const iree_host_size_t candidate = participant.worker;
+      if (realization->invocations.workers[candidate].invocation !=
+          input->invocation) {
         continue;
       }
       const uint64_t cost = loom_aie2p_native_input_distance(

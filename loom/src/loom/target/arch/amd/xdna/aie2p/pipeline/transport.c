@@ -1088,10 +1088,15 @@ iree_status_t loom_aie2p_native_select_transfers(
     }
   }
   // Each distribution may also need one receiver-granted sender task route.
-  iree_host_size_t source_count =
-      transfer_count * 4 + cohort_count * 2 + destination_count +
-      child_control_count + remote_control_count + credit_control_count +
-      context->collective_count * context->execution.engine_count;
+  iree_host_size_t source_count = transfer_count * 4 + cohort_count * 2 +
+                                  destination_count + child_control_count +
+                                  remote_control_count + credit_control_count;
+  for (iree_host_size_t i = 0; i < context->collective_count; ++i) {
+    const loom_aie2p_native_collective_t* collective = &context->collectives[i];
+    if (collective->source->result_count) {
+      source_count += collective->peer_count;
+    }
+  }
   for (iree_host_size_t i = 0; i < realization->invocations.channel_count;
        ++i) {
     // One receiver and one sender queue per equal-ordinal channel. Shared

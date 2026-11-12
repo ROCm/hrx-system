@@ -73,6 +73,22 @@ iree_status_t loom_aie2p_native_initialize_cursors(
 iree_status_t loom_aie2p_native_finalize_endpoints(
     loom_aie2p_native_context_t* context);
 
+// Descriptor state restored at construction, independently of the child visits
+// that submit work using that descriptor.
+typedef struct loom_aie2p_native_endpoint_initialization_t {
+  // Next distinct endpoint initialized by this construction on this engine.
+  struct loom_aie2p_native_endpoint_initialization_t* next;
+  // Selected geometry/iterator, already retired before owner reentry.
+  const loom_aie2p_native_distribution_endpoint_t* endpoint;
+} loom_aie2p_native_endpoint_initialization_t;
+
+typedef struct loom_aie2p_native_endpoint_initialization_scope_t {
+  // Admitted restoration controllers, which can belong to a concurrent parent.
+  const loom_pipeline_participants_t* controllers;
+  // Descriptor lists in compact controller order, allocated after selection.
+  loom_aie2p_native_endpoint_initialization_t** engines;
+} loom_aie2p_native_endpoint_initialization_scope_t;
+
 // Binds unique native endpoint state to its channel's constructing owner.
 // Existing distribution controller selection and retirement precede this
 // step. It consumes retained geometry and ownership, without source traversal.

@@ -49,10 +49,8 @@ static iree_status_t loom_aie2p_native_program_boundary(
         context, builder, engine, child));
   }
   if (child && context->distribution_controllers) {
-    const iree_host_size_t worker =
-        context->distribution_controllers[child->ordinal *
-                                              context->execution.engine_count +
-                                          engine];
+    const iree_host_size_t worker = loom_pipeline_participants_worker(
+        context->distribution_controllers[child->ordinal], engine);
     if (worker != IREE_HOST_SIZE_MAX) {
       IREE_RETURN_IF_ERROR(loom_aie2p_native_distribution_boundary(
           context, builder, worker, child, before));
@@ -172,10 +170,12 @@ iree_status_t loom_aie2p_native_emit_programs(
   for (iree_host_size_t engine = 0; engine < context->execution.engine_count;
        ++engine) {
     context->programs[engine] = (loom_func_like_t){0};
-    const loom_pipeline_control_function_t* projected = &functions[engine];
-    if (!loom_func_like_isa(projected->function)) {
+    const iree_host_size_t index =
+        loom_pipeline_execution_index(&context->execution, 0, engine);
+    if (index == IREE_HOST_SIZE_MAX) {
       continue;
     }
+    const loom_pipeline_control_function_t* projected = &functions[index];
     // Source arguments precede generated state in the retained ABI. DMA
     // materialization removes supported external buffer captures; observing
     // their metadata still requires a caller value that this entry cannot

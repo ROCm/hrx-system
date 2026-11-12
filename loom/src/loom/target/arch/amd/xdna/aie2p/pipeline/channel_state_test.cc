@@ -445,16 +445,22 @@ TEST_F(ChannelStateTest, DmaIteratorUsesAdmittedControllerNotArithmeticOwner) {
   ASSERT_EQ(channels_[2].cursor.reader.worker, UINT32_MAX);
   SelectInitializers();
   ASSERT_NE(context_.endpoint_initializers, nullptr);
-  const auto* source = context_.endpoint_initializers[1 * 2 + 1];
-  const auto* destination = context_.endpoint_initializers[1 * 2 + 0];
+  const auto& scope = context_.endpoint_initializers[1];
+  ASSERT_EQ(loom_pipeline_participants_count(scope.controllers), 2u);
+  const auto* source =
+      scope
+          .engines[loom_pipeline_participants_find(scope.controllers, 1).index];
+  const auto* destination =
+      scope
+          .engines[loom_pipeline_participants_find(scope.controllers, 0).index];
   ASSERT_NE(source, nullptr);
   ASSERT_NE(destination, nullptr);
   EXPECT_EQ(source->endpoint, &distribution.sender);
   EXPECT_EQ(destination->endpoint, &receiver);
   EXPECT_EQ(source->next, nullptr);
   EXPECT_EQ(destination->next, nullptr);
-  EXPECT_EQ(context_.endpoint_initializers[2 * 2], nullptr);
-  EXPECT_EQ(context_.endpoint_initializers[2 * 2 + 1], nullptr);
+  EXPECT_EQ(context_.endpoint_initializers[2].controllers, nullptr);
+  EXPECT_EQ(context_.endpoint_initializers[2].engines, nullptr);
 }
 
 TEST_F(ChannelStateTest, RootAndWholeRingDmaNeedNoEntryRestoration) {
@@ -504,6 +510,10 @@ TEST_F(ChannelStateTest, IteratorRestorationWritesOnlyItsCurrentPositionWord) {
     workers_[0].control_packets = packets;
     context_.endpoint_initializers = nullptr;
     SelectInitializers();
+    const auto& restoration = context_.endpoint_initializers[1];
+    ASSERT_EQ(loom_pipeline_participants_count(restoration.controllers), 1u);
+    EXPECT_EQ(loom_pipeline_participants_find(restoration.controllers, 1).index,
+              0u);
     loom_builder_t builder;
     loom_symbol_ref_t caller;
     loom_op_t* function;
@@ -511,6 +521,12 @@ TEST_F(ChannelStateTest, IteratorRestorationWritesOnlyItsCurrentPositionWord) {
                                             0, &builder, &caller, &function));
     IREE_ASSERT_OK(loom_aie2p_native_initialize_endpoints(&context_, &builder,
                                                           1, owners_[1]));
+    // An engine with no restoration and a child borrowing this owner's channel
+    // both leave the descriptor untouched.
+    IREE_ASSERT_OK(loom_aie2p_native_initialize_endpoints(&context_, &builder,
+                                                          0, owners_[1]));
+    IREE_ASSERT_OK(loom_aie2p_native_initialize_endpoints(&context_, &builder,
+                                                          1, owners_[2]));
     auto* block = loom_region_entry_block(loom_low_func_def_body(function));
     ASSERT_EQ(block->op_count, 1u);
     const auto* call = block->first_op;

@@ -237,7 +237,8 @@ static iree_status_t loom_aie2p_native_bind_endpoint_initializer(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization,
     const loom_aie2p_native_distribution_endpoint_t* endpoint,
-    const loom_pipeline_invocation_t* invocation, bool* out_valid) {
+    const loom_pipeline_invocation_t* invocation,
+    loom_aie2p_native_endpoint_initialization_t*** tail, bool* out_valid) {
   const loom_pipeline_invocations_t* invocations = &realization->invocations;
   const iree_host_size_t channel = endpoint->channel - context->channels;
   const loom_pipeline_invocation_t* owner =
@@ -258,25 +259,27 @@ static iree_status_t loom_aie2p_native_bind_endpoint_initializer(
     return iree_ok_status();
   }
   if (!context->endpoint_initializers) {
-    const iree_host_size_t count =
-        invocations->count * context->execution.engine_count;
+    const iree_host_size_t count = invocations->count;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         context->pass->arena, count, sizeof(*context->endpoint_initializers),
         (void**)&context->endpoint_initializers));
     memset(context->endpoint_initializers, 0,
            count * sizeof(*context->endpoint_initializers));
   }
-  // Task admission already selected this controller and its physical routes.
-  // Its engine participates in the constructing owner's retained lifetime.
-  const iree_host_size_t index =
-      owner->ordinal * context->execution.engine_count +
-      endpoint->controller_engine;
+  // A concurrent parent's controller can restore an autonomous child even
+  // when that engine executes no instructions inside the child.
+  const iree_host_size_t engine = endpoint->controller_engine;
+  IREE_RETURN_IF_ERROR(loom_pipeline_participants_insert(
+      context->pass->arena,
+      (loom_pipeline_participant_t){engine, context->execution.workers[engine]},
+      &context->endpoint_initializers[owner->ordinal].controllers));
   loom_aie2p_native_endpoint_initialization_t* initializer;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(
       context->pass->arena, sizeof(*initializer), (void**)&initializer));
-  *initializer = (loom_aie2p_native_endpoint_initialization_t){
-      .next = context->endpoint_initializers[index], .endpoint = endpoint};
-  context->endpoint_initializers[index] = initializer;
+  *initializer =
+      (loom_aie2p_native_endpoint_initialization_t){.endpoint = endpoint};
+  **tail = initializer;
+  *tail = &initializer->next;
   return iree_ok_status();
 }
 
@@ -284,6 +287,8 @@ iree_status_t loom_aie2p_native_select_initializers(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization, bool* out_valid) {
   *out_valid = true;
+  loom_aie2p_native_endpoint_initialization_t* pending = NULL;
+  loom_aie2p_native_endpoint_initialization_t** tail = &pending;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; iree_status_is_ok(status) && *out_valid &&
                                i < realization->invocations.worker_count;
@@ -297,7 +302,7 @@ iree_status_t loom_aie2p_native_select_initializers(
            ++phase) {
         status = loom_aie2p_native_bind_endpoint_initializer(
             context, realization, &input->phases[phase].receiver,
-            input->invocation, out_valid);
+            input->invocation, &tail, out_valid);
       }
     }
     // Physical owners retain each interned geometry once, even when multiple
@@ -312,10 +317,42 @@ iree_status_t loom_aie2p_native_select_initializers(
         const loom_aie2p_native_distribution_endpoint_t* endpoint =
             e ? &distribution->receivers[e - 1] : &distribution->sender;
         status = loom_aie2p_native_bind_endpoint_initializer(
-            context, realization, endpoint, distribution->invocation,
+            context, realization, endpoint, distribution->invocation, &tail,
             out_valid);
       }
     }
+  }
+  if (!iree_status_is_ok(status) || !*out_valid || !pending) {
+    return status;
+  }
+  for (iree_host_size_t i = 0; i < realization->invocations.count; ++i) {
+    loom_aie2p_native_endpoint_initialization_scope_t* scope =
+        &context->endpoint_initializers[i];
+    const iree_host_size_t count =
+        loom_pipeline_participants_count(scope->controllers);
+    if (count) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          context->pass->arena, count, sizeof(*scope->engines),
+          (void**)&scope->engines));
+      memset(scope->engines, 0, count * sizeof(*scope->engines));
+    }
+  }
+  while (pending) {
+    loom_aie2p_native_endpoint_initialization_t* initializer = pending;
+    pending = pending->next;
+    const loom_aie2p_native_distribution_endpoint_t* endpoint =
+        initializer->endpoint;
+    const iree_host_size_t channel = endpoint->channel - context->channels;
+    const iree_host_size_t owner =
+        realization->invocations.channels[channel].invocation->ordinal;
+    loom_aie2p_native_endpoint_initialization_scope_t* scope =
+        &context->endpoint_initializers[owner];
+    const iree_host_size_t index =
+        loom_pipeline_participants_find(scope->controllers,
+                                        endpoint->controller_engine)
+            .index;
+    initializer->next = scope->engines[index];
+    scope->engines[index] = initializer;
   }
   return status;
 }
@@ -323,15 +360,18 @@ iree_status_t loom_aie2p_native_select_initializers(
 iree_status_t loom_aie2p_native_initialize_endpoints(
     loom_aie2p_native_context_t* context, loom_builder_t* builder,
     iree_host_size_t engine, const loom_pipeline_invocation_t* invocation) {
-  const loom_aie2p_native_endpoint_initialization_t* initializer =
-      context->endpoint_initializers
-          ? context->endpoint_initializers[invocation->ordinal *
-                                               context->execution.engine_count +
-                                           engine]
-          : NULL;
-  if (!initializer) {
+  if (!context->endpoint_initializers) {
     return iree_ok_status();
   }
+  const loom_aie2p_native_endpoint_initialization_scope_t* scope =
+      &context->endpoint_initializers[invocation->ordinal];
+  const iree_host_size_t index =
+      loom_pipeline_participants_find(scope->controllers, engine).index;
+  if (index == IREE_HOST_SIZE_MAX) {
+    return iree_ok_status();
+  }
+  const loom_aie2p_native_endpoint_initialization_t* initializer =
+      scope->engines[index];
   loom_aie2p_worker_builder_t* code = &context->code;
   code->worker_index = context->execution.workers[engine];
   const loom_aie2p_native_worker_t* controller =
