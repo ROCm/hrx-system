@@ -44,10 +44,12 @@ TEST(KfdTargetUserQueueTest, LiveMemoryFactsDeterminePlacementAndPublication) {
     topology.vram.visible_byte_length = topology.vram.total_byte_length;
     amdf_gpu_kfd_target_user_queue_plans_initialize(&topology, 4096, 64,
                                                     &plans);
-    const auto placement =
-        amdf_gpu_kfd_target_user_queue_placement(&topology, 4096);
     ASSERT_EQ(plans.count, 3u);
     for (uint32_t i = 0; i < plans.count; ++i) {
+      const auto command_type = plans.values[i].family.command_type;
+      SCOPED_TRACE(command_type);
+      const auto placement = amdf_gpu_kfd_target_user_queue_placement(
+          &topology, 4096, command_type);
       EXPECT_EQ(plans.values[i].family.priority_capabilities,
                 AMDF_QUEUE_PRIORITY_CAPABILITY_LOW |
                     AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL |
@@ -56,25 +58,31 @@ TEST(KfdTargetUserQueueTest, LiveMemoryFactsDeterminePlacementAndPublication) {
                 AMDF_QUEUE_PLACEMENT_HOST_LOCAL);
       EXPECT_EQ(plans.values[i].ring.host_publish_fence,
                 AMDF_HOST_CACHE_FENCE_NONE);
+      EXPECT_EQ(placement.placement_capabilities,
+                AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
+                    (mode ? AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL : 0));
+      EXPECT_EQ(placement.host_publication[AMDF_QUEUE_PLACEMENT_DEFAULT],
+                AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN);
+      EXPECT_EQ(placement.host_publication[AMDF_QUEUE_PLACEMENT_HOST_LOCAL],
+                AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN);
+      EXPECT_EQ(placement.host_publication[AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL],
+                mode == 0 ? AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN
+                : mode == 1 || command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+                    ? AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN
+                    : AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN |
+                          AMDF_QUEUE_HOST_PUBLICATION_FLAG_DEVICE_READ |
+                          AMDF_QUEUE_HOST_PUBLICATION_FLAG_KERNEL_CALL);
     }
-    EXPECT_EQ(placement.placement_capabilities,
-              AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
-                  (mode ? AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL : 0));
-    EXPECT_EQ(placement.host_publication[AMDF_QUEUE_PLACEMENT_DEFAULT],
-              AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN);
-    EXPECT_EQ(placement.host_publication[AMDF_QUEUE_PLACEMENT_HOST_LOCAL],
-              AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN);
-    EXPECT_EQ(placement.host_publication[AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL],
-              mode == 0   ? AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN
-              : mode == 1 ? AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN
-                          : AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN |
-                                AMDF_QUEUE_HOST_PUBLICATION_FLAG_DEVICE_READ |
-                                AMDF_QUEUE_HOST_PUBLICATION_FLAG_KERNEL_CALL);
   }
   topology.vram.visible_byte_length /= 2;
-  EXPECT_EQ(amdf_gpu_kfd_target_user_queue_placement(&topology, 4096)
-                .placement_capabilities,
-            AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL);
+  for (const auto command_type :
+       {AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
+        AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA}) {
+    EXPECT_EQ(
+        amdf_gpu_kfd_target_user_queue_placement(&topology, 4096, command_type)
+            .placement_capabilities,
+        AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL);
+  }
 }
 
 TEST(KfdTargetUserQueueTest,

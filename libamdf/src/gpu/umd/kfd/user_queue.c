@@ -317,8 +317,8 @@ static bool amdf_gpu_kfd_user_queue_select_plan(
   amdf_gpu_kfd_target_user_queue_plans_initialize(
       &device->topology, device->page_size, device->cache_line_size, &plans);
   const amdf_queue_family_placement_info_t placement =
-      amdf_gpu_kfd_target_user_queue_placement(&device->topology,
-                                               device->page_size);
+      amdf_gpu_kfd_target_user_queue_placement(
+          &device->topology, device->page_size, create_info->command_type);
   for (uint32_t i = 0; i < plans.count; ++i) {
     const amdf_gpu_kfd_user_queue_plan_t* plan = &plans.values[i];
     const amdf_gpu_queue_family_properties_t* family = &plan->family;
@@ -348,9 +348,14 @@ static bool amdf_gpu_kfd_user_queue_select_plan(
                ~KFD_IOC_ALLOC_MEM_FLAGS_GTT) |
               KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC |
               KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED;
+          const bool header_commit =
+              family->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL;
           out_plan->ring.host_publish_executor =
-              AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API;
-          out_plan->ring.host_publish_fence = AMDF_HOST_CACHE_FENCE_NONE;
+              header_commit ? AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT
+                            : AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API;
+          out_plan->ring.host_publish_fence =
+              header_commit ? AMDF_HOST_CACHE_FENCE_X86_SFENCE
+                            : AMDF_HOST_CACHE_FENCE_NONE;
         }
       }
       if (create_info->ring_byte_length != 0) {
@@ -512,10 +517,11 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
   }
 
   // AQL INVALID headers must reach the ring before native queue activation.
-  // This also publishes initial PM4/SDMA padding without reading it back.
+  // There is no executable header guarding these initial stores yet. This
+  // cold release also publishes initial PM4/SDMA padding.
   if (amdf_status_is_ok(status) &&
-      queue->plan.ring.host_publish_executor ==
-          AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API) {
+      queue->plan.ring.placement == AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL &&
+      !device->topology.integrated) {
     status = queue->native_api->flush_host_writes(queue->native_api->user_data,
                                                   device);
   }

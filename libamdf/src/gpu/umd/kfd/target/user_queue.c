@@ -71,7 +71,8 @@ void amdf_gpu_kfd_target_user_queue_plans_initialize(
 }
 
 amdf_queue_family_placement_info_t amdf_gpu_kfd_target_user_queue_placement(
-    const amdf_gpu_kfd_topology_t* topology, size_t page_size) {
+    const amdf_gpu_kfd_topology_t* topology, size_t page_size,
+    amdf_queue_command_type_t command_type) {
   const amdf_queue_host_publication_flags_t local_publication =
       topology->integrated ? AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN
                            : amdf_gpu_kfd_hdp_host_publication(topology);
@@ -80,6 +81,13 @@ amdf_queue_family_placement_info_t amdf_gpu_kfd_target_user_queue_placement(
       (topology->vram.total_byte_length != 0 &&
        topology->vram.visible_byte_length >= topology->vram.total_byte_length &&
        page_size <= 4096 && local_publication != 0);
+  // AQL commits through a header in the same uncached ring as its body. Host
+  // store ordering suffices for that relation even when the backing moves.
+  // PM4 and SDMA commit through a separately mapped coherent write index.
+  const amdf_queue_host_publication_flags_t ring_publication =
+      command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+          ? AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN
+          : local_publication;
   return (amdf_queue_family_placement_info_t){
       .placement_capabilities =
           AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
@@ -92,7 +100,7 @@ amdf_queue_family_placement_info_t amdf_gpu_kfd_target_user_queue_placement(
               [AMDF_QUEUE_PLACEMENT_HOST_LOCAL] =
                   AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN,
               [AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL] =
-                  host_visible_local ? local_publication
+                  host_visible_local ? ring_publication
                                      : AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN,
           },
   };

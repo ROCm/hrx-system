@@ -925,8 +925,8 @@ TEST_F(KfdTopologyTest, VirtualFunctionsKeepOnlyHostPublishedSystemRings) {
     ASSERT_EQ(amdf_gpu_kfd_topology_query_memory(
                   descriptor, endpoint_.info.pci.device_id, &topology),
               AMDF_STATUS_OK);
-    const auto placement =
-        amdf_gpu_kfd_target_user_queue_placement(&topology, 4096);
+    const auto placement = amdf_gpu_kfd_target_user_queue_placement(
+        &topology, 4096, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4);
     EXPECT_EQ(placement.placement_capabilities,
               AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
                   (mode != AMDGPU_IDS_FLAGS_MODE_VF
