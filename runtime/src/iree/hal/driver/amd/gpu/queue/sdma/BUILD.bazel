@@ -186,6 +186,10 @@ iree_runtime_cc_library(
     name = "command_buffer",
     srcs = ["command_buffer.c"],
     hdrs = ["command_buffer.h"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":barrier",
         ":commands",
@@ -205,6 +209,10 @@ iree_runtime_cc_library(
 iree_runtime_cc_test(
     name = "command_buffer_test",
     srcs = ["command_buffer_test.cc"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":barrier",
         ":command_buffer",
