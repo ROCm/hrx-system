@@ -306,6 +306,54 @@ struct MappingCase {
   uint32_t unit_count;
 };
 
+TEST(AmdgpuNativeDistributionTest, NumericCarriersAcrossTypesAndWidths) {
+  const loom_scalar_type_t elements[] = {
+      LOOM_SCALAR_TYPE_I8,    LOOM_SCALAR_TYPE_I16, LOOM_SCALAR_TYPE_I32,
+      LOOM_SCALAR_TYPE_I64,   LOOM_SCALAR_TYPE_F16, LOOM_SCALAR_TYPE_BF16,
+      LOOM_SCALAR_TYPE_F32,   LOOM_SCALAR_TYPE_F64, LOOM_SCALAR_TYPE_INDEX,
+      LOOM_SCALAR_TYPE_OFFSET};
+  for (const auto element : elements) {
+    for (uint32_t count : {1u, 2u, 4u, 8u}) {
+      const auto source =
+          count == 1 ? loom_type_scalar(element) : VectorType(element, count);
+      const uint32_t bits = element == LOOM_SCALAR_TYPE_INDEX ||
+                                    element == LOOM_SCALAR_TYPE_OFFSET
+                                ? 64
+                                : loom_scalar_type_bitwidth(element);
+      const uint32_t words = (bits * count + 31) / 32;
+      const auto scalar =
+          loom_low_register_type(0, LOOM_AMDGPU_REG_CLASS_ID_SGPR, words);
+      const auto vector =
+          loom_low_register_type(0, LOOM_AMDGPU_REG_CLASS_ID_VGPR, words);
+      EXPECT_EQ(loom_amdgpu_native_result_distribution(source, scalar),
+                LOOM_VALUE_FACT_SUBGROUP_UNIFORM);
+      EXPECT_EQ(loom_amdgpu_native_result_distribution(source, vector),
+                LOOM_VALUE_FACT_LANE_VARYING);
+    }
+  }
+}
+
+TEST(AmdgpuNativeDistributionTest, ScalarTruthAndPerLanePredicates) {
+  const auto predicate = loom_type_scalar(LOOM_SCALAR_TYPE_I1);
+  for (const auto register_class :
+       {LOOM_AMDGPU_REG_CLASS_ID_SCC, LOOM_AMDGPU_REG_CLASS_ID_SGPR}) {
+    EXPECT_EQ(loom_amdgpu_native_result_distribution(
+                  predicate, loom_low_register_type(0, register_class, 1)),
+              LOOM_VALUE_FACT_SUBGROUP_UNIFORM);
+  }
+  EXPECT_EQ(loom_amdgpu_native_result_distribution(
+                predicate,
+                loom_low_register_type(0, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2)),
+            LOOM_VALUE_FACT_LANE_VARYING);
+  for (uint32_t count : {1u, 2u, 4u, 8u, 16u, 32u}) {
+    EXPECT_EQ(loom_amdgpu_native_result_distribution(
+                  VectorType(LOOM_SCALAR_TYPE_I1, count),
+                  loom_low_register_type(0, LOOM_AMDGPU_REG_CLASS_ID_SGPR,
+                                         2 * count)),
+              LOOM_VALUE_FACT_LANE_VARYING);
+  }
+}
+
 class AmdgpuInvokeMappingTest
     : public AmdgpuSourceTypeMappingTest,
       public ::testing::WithParamInterface<MappingCase> {};

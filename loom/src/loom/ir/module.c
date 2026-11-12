@@ -297,17 +297,17 @@ static void loom_module_adjust_poison_op_count(loom_module_t* module,
   }
 }
 
-static void loom_module_adjust_semantic_call_op_count(loom_module_t* module,
-                                                      const loom_op_t* op,
-                                                      int32_t delta) {
-  if (!iree_any_bit_set(op->flags, LOOM_OP_FLAG_SEMANTIC_CALL)) {
+static void loom_module_adjust_source_call_op_count(loom_module_t* module,
+                                                    const loom_op_t* op,
+                                                    int32_t delta) {
+  if (!iree_any_bit_set(op->flags, LOOM_OP_FLAG_SOURCE_CALL)) {
     return;
   }
   if (delta < 0) {
-    IREE_ASSERT_GT(module->semantic_call_op_count, 0u);
-    --module->semantic_call_op_count;
+    IREE_ASSERT_GT(module->source_call_op_count, 0u);
+    --module->source_call_op_count;
   } else if (delta > 0) {
-    ++module->semantic_call_op_count;
+    ++module->source_call_op_count;
   }
 }
 
@@ -350,7 +350,7 @@ static void loom_module_adjust_op_direct_summaries(loom_module_t* module,
   if (loom_traits_are_poison(traits)) {
     loom_module_adjust_poison_op_count(module, direction);
   }
-  loom_module_adjust_semantic_call_op_count(module, op, direction);
+  loom_module_adjust_source_call_op_count(module, op, direction);
   loom_module_adjust_low_internal_call_op_count(module, op, direction);
 }
 

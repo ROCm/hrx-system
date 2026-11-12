@@ -1040,6 +1040,13 @@ typedef struct loom_low_lower_policy_t {
   // and calls.
   loom_type_t (*join_result_type)(loom_type_t source_type, loom_type_t lhs,
                                   loom_type_t rhs);
+  // Refines a native call result's per-execution distribution from its logical
+  // type and the callee's declared register carrier. Returns distribution
+  // flags only, without inspecting IR. Missing admits different values in
+  // different invocations. The shared fact owner accounts for subgroup size
+  // and observations after divergent iterations.
+  loom_value_fact_flags_t (*native_result_distribution)(
+      loom_type_t source_type, loom_type_t native_type);
   // Optionally emits target live-ins or other structural preamble packets.
   loom_low_lower_emit_preamble_callback_t emit_preamble;
   // Target entry resources planned before Low construction and emitted after

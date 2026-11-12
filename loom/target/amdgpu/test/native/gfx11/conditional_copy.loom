@@ -1,0 +1,173 @@
+amdgpu.target<gfx11-generic> @conditional_copy_gfx11_wave64 {subgroup_size = 64}
+
+low.func.def target<amdgpu.gfx11.generic.core>(@conditional_copy_gfx11_wave64) @copy_native_value(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
+}
+
+// A conditional tail copy carries a uniform final column beside a varying
+// step. Subsequent selection and publication observe both merge results.
+kernel.def target(@conditional_copy_gfx11_wave64) @conditional_copy_state() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %copies: buffer, %output: buffer, %configuration: index) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %advance = index.constant 1 : index
+  %lane = kernel.workitem.id<x> : index
+  %code = index.cast %configuration : index to i32
+  %count_mask = scalar.constant 3 : i32
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %bounded = scalar.andi %code, %count_mask : i32
+  %count = scalar.addi %bounded, %c1 : i32
+  %end = index.cast %count : i32 to index
+  %threshold = scalar.constant 0.0 : f32
+  %values = buffer.view %input[%base] : buffer -> view<64x4xf32>
+  %copied = buffer.view %copies[%base] : buffer -> view<64x4xf32>
+  %results = buffer.view %output[%base] : buffer -> view<64x4xi32>
+  scf.for %column = [%begin to %end step %advance] {
+    %position = index.cast %column : index to i32
+    %next_position = scalar.addi %position, %c1 : i32
+    %next_wrapped = scalar.remui %next_position, %count : i32
+    %next = index.cast %next_wrapped : i32 to index
+    %first_loaded = view.load %values[%lane, %column] : view<64x4xf32> -> f32
+    %first = low.invoke readonly inline @copy_native_value(%first_loaded) : (f32) -> (f32)
+    %second_loaded = view.load %values[%lane, %next] : view<64x4xf32> -> f32
+    %second = low.invoke readonly inline @copy_native_value(%second_loaded) : (f32) -> (f32)
+    %nonzero = scalar.cmpf une, %first, %threshold : f32
+    %selected, %step = scf.if %nonzero -> (i32, i32) {
+      %increasing = scalar.cmpf olt, %first, %second : f32
+      %inner_selected, %inner_step = scf.if %increasing -> (i32, i32) {
+        %square = scalar.mulf %second, %second : f32
+        %large = scalar.cmpf oge, %first, %square : f32
+        %candidate, %candidate_step = scf.if %large -> (i32, i32) {
+          scf.yield %position, %c1 : i32, i32
+        } else {
+          %third_position = scalar.addi %position, %c2 : i32
+          %third_wrapped = scalar.remui %third_position, %count : i32
+          %third_index = index.cast %third_wrapped : i32 to index
+          %third_loaded = view.load %values[%lane, %third_index] : view<64x4xf32> -> f32
+          %third = low.invoke readonly inline @copy_native_value(%third_loaded) : (f32) -> (f32)
+          %copy_tail = scalar.cmpf oge, %third, %second : f32
+          %last, %tail_step = scf.if %copy_tail -> (i32, i32) {
+            scf.for %row = [%column to %end step %advance] {
+              %row_word = index.cast %row : index to i32
+              %following = scalar.addi %row_word, %c1 : i32
+              %wrapped = scalar.remui %following, %count : i32
+              %source = index.cast %wrapped : i32 to index
+              %value_loaded = view.load %values[%lane, %source] : view<64x4xf32> -> f32
+              %value = low.invoke readonly inline @copy_native_value(%value_loaded) : (f32) -> (f32)
+              view.store %value, %copied[%lane, %row] : f32, view<64x4xf32>
+            }
+            %final_column = scalar.subi %count, %c1 : i32
+            scf.yield %final_column, %c1 : i32, i32
+          } else {
+            %final_column = scalar.subi %count, %c1 : i32
+            scf.yield %final_column, %c2 : i32, i32
+          }
+          scf.yield %last, %tail_step : i32, i32
+        }
+        scf.yield %candidate, %candidate_step : i32, i32
+      } else {
+        scf.yield %position, %c1 : i32, i32
+      }
+      scf.yield %inner_selected, %inner_step : i32, i32
+    } else {
+      scf.yield %position, %c1 : i32, i32
+    }
+    %changed = scalar.cmpi ne, %selected, %position : i32
+    scf.if %changed {
+      %source = index.cast %selected : i32 to index
+      %value_loaded = view.load %values[%lane, %source] : view<64x4xf32> -> f32
+      %value = low.invoke readonly inline @copy_native_value(%value_loaded) : (f32) -> (f32)
+      view.store %value, %copied[%lane, %column] : f32, view<64x4xf32>
+    }
+    %result = scalar.addi %selected, %step : i32
+    view.store %result, %results[%lane, %column] : i32, view<64x4xi32>
+  }
+  kernel.return
+}
+
+// The oracle derives the chosen column and step from a flat predicate formula.
+// It models the writes by visiting each destination, independently of the
+// subject's nested control and tail-copy loop.
+func.def @conditional_copy_state_oracle(%input: buffer, %copies: buffer, %output: buffer, %configuration: index) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %width = index.constant 64 : index
+  %advance = index.constant 1 : index
+  %code = index.cast %configuration : index to i32
+  %count_mask = scalar.constant 3 : i32
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %bounded = scalar.andi %code, %count_mask : i32
+  %count = scalar.addi %bounded, %c1 : i32
+  %last = scalar.subi %count, %c1 : i32
+  %end = index.cast %count : i32 to index
+  %threshold = scalar.constant 0.0 : f32
+  %values = buffer.view %input[%base] : buffer -> view<64x4xf32>
+  %copied = buffer.view %copies[%base] : buffer -> view<64x4xf32>
+  %results = buffer.view %output[%base] : buffer -> view<64x4xi32>
+  scf.for %lane = [%begin to %width step %advance] {
+    scf.for %column = [%begin to %end step %advance] {
+      %position = index.cast %column : index to i32
+      %next_position = scalar.addi %position, %c1 : i32
+      %next_wrapped = scalar.remui %next_position, %count : i32
+      %next = index.cast %next_wrapped : i32 to index
+      %third_position = scalar.addi %position, %c2 : i32
+      %third_wrapped = scalar.remui %third_position, %count : i32
+      %third_index = index.cast %third_wrapped : i32 to index
+      %first = view.load %values[%lane, %column] : view<64x4xf32> -> f32
+      %second = view.load %values[%lane, %next] : view<64x4xf32> -> f32
+      %third = view.load %values[%lane, %third_index] : view<64x4xf32> -> f32
+      %square = scalar.mulf %second, %second : f32
+      %nonzero = scalar.cmpf une, %first, %threshold : f32
+      %increasing = scalar.cmpf olt, %first, %second : f32
+      %small = scalar.cmpf olt, %first, %square : f32
+      %guard = scalar.andi %nonzero, %increasing : i1
+      %replace = scalar.andi %guard, %small : i1
+      %third_large = scalar.cmpf oge, %third, %second : f32
+      %copy_tail = scalar.andi %replace, %third_large : i1
+      %candidate_step = scf.select %third_large, %c1, %c2 : i32
+      %step = scf.select %replace, %candidate_step, %c1 : i32
+      %selected = scf.select %replace, %last, %position : i32
+      %result = scalar.addi %selected, %step : i32
+      view.store %result, %results[%lane, %column] : i32, view<64x4xi32>
+      %changed = scalar.cmpi ne, %selected, %position : i32
+      scf.for %row = [%begin to %end step %advance] {
+        %in_tail = index.cmp uge, %row, %column : index
+        %tail_write = scalar.andi %copy_tail, %in_tail : i1
+        %at_column = index.cmp eq, %row, %column : index
+        %column_write = scalar.andi %changed, %at_column : i1
+        %write = scalar.ori %tail_write, %column_write : i1
+        scf.if %write {
+          %row_word = index.cast %row : index to i32
+          %following = scalar.addi %row_word, %c1 : i32
+          %wrapped = scalar.remui %following, %count : i32
+          %source_word = scf.select %column_write, %selected, %wrapped : i32
+          %source = index.cast %source_word : i32 to index
+          %value = view.load %values[%lane, %source] : view<64x4xf32> -> f32
+          view.store %value, %copied[%lane, %row] : f32, view<64x4xf32>
+        }
+      }
+    }
+  }
+  func.return
+}
+
+check.scenario @conditional_copy_values {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(0.0) step(0.25) period(11) : tensor<64x4xf32>
+    %copy_storage = check.generate.fill value(-123.0) : tensor<272xf32>
+    %copies = check.tensor.view %copy_storage offset(32) : tensor<272xf32> -> tensor<64x4xf32>
+    %result_storage = check.generate.fill value(-123) : tensor<272xi32>
+    %output = check.tensor.view %result_storage offset(32) : tensor<272xi32> -> tensor<64x4xi32>
+    check.compare<@conditional_copy_state, @conditional_copy_state_oracle>(%input, %copies, %output, %trial) : (tensor<64x4xf32>, tensor<64x4xf32>, tensor<64x4xi32>, index) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64x4xf32>
+      check.expect.bitwise actual(%copy_storage) expected(%copy_storage) : tensor<272xf32>
+      check.expect.bitwise actual(%result_storage) expected(%result_storage) : tensor<272xi32>
+    }
+  }
+  check.return
+}

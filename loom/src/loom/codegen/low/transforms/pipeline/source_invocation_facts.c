@@ -22,6 +22,15 @@
 typedef struct loom_low_source_invocation_function_t
     loom_low_source_invocation_function_t;
 
+typedef struct loom_low_source_invocation_native_call_t {
+  // Source-typed edge whose results receive fixed native carrier facts.
+  loom_call_like_t source;
+  // Declared native signature and its selected type-only lowering policy.
+  loom_low_source_invocation_function_t* callee;
+  // Next native edge in the same source function.
+  struct loom_low_source_invocation_native_call_t* next;
+} loom_low_source_invocation_native_call_t;
+
 typedef struct loom_low_source_invocation_call_t {
   // Immutable source call, including its actual arguments and result IDs.
   loom_call_like_t source;
@@ -62,12 +71,14 @@ typedef struct loom_low_source_invocation_local_t {
 struct loom_low_source_invocation_function_t {
   // Immutable source callable.
   loom_func_like_t source;
-  // Exact source target selection, or NULL for an unselected callable.
+  // Exact target selection, or NULL for an unselected callable.
   const loom_low_source_selection_t* selection;
   // Retained calls made by this function.
   loom_low_source_invocation_call_t* outgoing;
   // Retained calls entering this function.
   loom_low_source_invocation_call_t* incoming;
+  // Native edges retained by the same call-graph traversal.
+  loom_low_source_invocation_native_call_t* native_calls;
   // Direct-body returns joined into the result summary.
   loom_low_source_invocation_return_t* returns;
   // Result summary in function-result coordinates, owned by boundary facts.
@@ -80,6 +91,8 @@ struct loom_low_source_invocation_function_t {
   loom_low_source_invocation_function_t* next_pending;
   // Number of call results appended to this function's argument seeds.
   iree_host_size_t call_result_count;
+  // Number of immutable native result seeds before semantic call results.
+  iree_host_size_t native_result_count;
   // Whether all possible callers are present and nonrecursive.
   bool refine_arguments;
   // Whether this function is already pending.
@@ -159,7 +172,9 @@ static loom_value_facts_t loom_low_source_invocation_unknown(
 static iree_status_t loom_low_source_invocation_collect_call(
     void* user_data, loom_symbol_id_t caller_symbol, loom_call_like_t call) {
   loom_low_source_invocation_worklist_t* work = user_data;
-  if (loom_call_like_kind(call) != LOOM_CALL_LIKE_KIND_SEMANTIC) {
+  const loom_call_like_kind_t kind = loom_call_like_kind(call);
+  if (kind != LOOM_CALL_LIKE_KIND_SEMANTIC &&
+      kind != LOOM_CALL_LIKE_KIND_LOW_INVOKE) {
     return iree_ok_status();
   }
   loom_low_source_invocation_function_t* caller =
@@ -168,6 +183,16 @@ static iree_status_t loom_low_source_invocation_collect_call(
   loom_low_source_invocation_function_t* callee =
       &work->functions[callee_symbol.symbol_id];
   if (!loom_func_like_isa(callee->source) || !caller->selection) {
+    return iree_ok_status();
+  }
+  if (kind == LOOM_CALL_LIKE_KIND_LOW_INVOKE) {
+    loom_low_source_invocation_native_call_t* edge = NULL;
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate(work->arena, sizeof(*edge), (void**)&edge));
+    *edge = (loom_low_source_invocation_native_call_t){
+        .source = call, .callee = callee, .next = caller->native_calls};
+    caller->native_calls = edge;
+    caller->native_result_count += loom_call_like_results(call).count;
     return iree_ok_status();
   }
   const loom_target_function_version_t* version =
@@ -420,7 +445,9 @@ static iree_status_t loom_low_source_invocation_initialize_function(
       &work->functions[node->symbol_id];
   const loom_module_t* module = work->module;
   loom_value_fact_table_t* facts = &work->facts->boundaries;
-  if (!function->selection && !function->incoming && !function->outgoing) {
+  if ((!function->selection ||
+       function->selection->kind != LOOM_LOW_SOURCE_SELECTION_FUNCTION) &&
+      !function->incoming && !function->outgoing) {
     return iree_ok_status();
   }
   function->refine_arguments =
@@ -441,8 +468,9 @@ static iree_status_t loom_low_source_invocation_initialize_function(
               (function->refine_arguments && function->incoming)
           ? argument_count
           : 0;
-  const iree_host_size_t seed_count =
-      seed_argument_count + function->call_result_count;
+  const iree_host_size_t seed_count = seed_argument_count +
+                                      function->native_result_count +
+                                      function->call_result_count;
   loom_value_id_t* seeds = NULL;
   if (seed_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -469,6 +497,42 @@ static iree_status_t loom_low_source_invocation_initialize_function(
         loom_value_fact_table_define(facts, arguments[i], initial));
   }
   iree_host_size_t next_seed = seed_argument_count;
+  for (const loom_low_source_invocation_native_call_t* call =
+           function->native_calls;
+       call; call = call->next) {
+    const loom_value_slice_t results = loom_call_like_results(call->source);
+    const loom_op_t* callee = call->callee->source.op;
+    const loom_value_id_t* native_results = loom_op_const_results(callee);
+    const loom_low_lower_policy_t* policy =
+        call->callee->selection ? call->callee->selection->policy
+                                : function->selection->policy;
+    for (uint16_t i = 0; i < results.count; ++i) {
+      const loom_value_id_t result = results.values[i];
+      seeds[next_seed++] = result;
+      loom_value_facts_t initial = loom_low_source_invocation_unknown(
+          module, result, function->selection);
+      loom_value_facts_mark_lane_distribution_for_type(
+          loom_module_value_type(module, result), &initial);
+      if (target && target->storage.snapshot.subgroup_size == 1) {
+        loom_value_facts_mark_subgroup_uniform(&initial);
+      } else if (policy && policy->native_result_distribution &&
+                 i < callee->result_count) {
+        const loom_type_t native_type =
+            loom_module_value_type(module, native_results[i]);
+        if (loom_type_is_register(native_type)) {
+          const loom_value_fact_flags_t distribution =
+              policy->native_result_distribution(
+                  loom_module_value_type(module, result), native_type);
+          if (iree_any_bit_set(distribution,
+                               LOOM_VALUE_FACT_SUBGROUP_UNIFORM)) {
+            loom_value_facts_mark_subgroup_uniform(&initial);
+          }
+        }
+      }
+      IREE_RETURN_IF_ERROR(
+          loom_value_fact_table_define(facts, result, initial));
+    }
+  }
   for (loom_low_source_invocation_call_t* call = function->outgoing; call;
        call = call->next_outgoing) {
     const iree_host_size_t bucket =
@@ -587,7 +651,7 @@ iree_status_t loom_low_source_invocation_facts_compute(
     iree_arena_allocator_t* arena,
     loom_low_source_invocation_facts_t* out_facts) {
   memset(out_facts, 0, sizeof(*out_facts));
-  if (!loom_module_has_semantic_calls(module)) {
+  if (!loom_module_has_source_calls(module)) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(
@@ -632,7 +696,7 @@ iree_status_t loom_low_source_invocation_facts_compute(
     }
     for (iree_host_size_t i = 0; i < selections->count; ++i) {
       const loom_low_source_selection_t* selection = &selections->values[i];
-      if (selection->kind == LOOM_LOW_SOURCE_SELECTION_FUNCTION) {
+      if (selection->kind != LOOM_LOW_SOURCE_SELECTION_DECLARATION) {
         work.functions[loom_func_like_callee(selection->func).symbol_id]
             .selection = selection;
       }

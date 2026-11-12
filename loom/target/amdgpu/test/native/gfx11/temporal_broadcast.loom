@@ -74,3 +74,54 @@ check.case public @temporal_nested_broadcast_case {
   check.expect.equal actual(%actual) expected(%expected) : tensor<64xi32>
   check.return
 }
+
+// An explicit assembly helper has the same per-execution uniformity as the
+// source broadcast. Its scalar result must retain each retiring lane's value.
+low.func.def target<amdgpu.gfx11.generic.core>(@temporal_broadcast_gfx11_wave64) @native_first_lane(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %first = v_readfirstlane_b32 %value
+  return %first
+}
+
+kernel.def target(@temporal_broadcast_gfx11_wave64) @native_temporal_broadcast() {
+  %unit = index.constant 1 : index
+  %size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%size, %unit, %unit) : index
+} launch(%output: buffer) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %lane = kernel.subgroup.lane.id : index
+  %lane_value = index.cast %lane : index to i32
+  %end = index.add %lane, %step : index
+  %initial = scalar.constant -1 : i32
+  %last = scf.for %counter = [%begin to %end step %step](%previous = %initial : i32) -> (i32) {
+    %observed = low.invoke @native_first_lane(%lane_value) : (i32) -> (i32)
+    scf.yield %observed : i32
+  }
+  %destination = buffer.view %output[%base] : buffer -> view<64xi32>
+  view.store %last, %destination[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+func.def @native_temporal_broadcast_oracle(%output: buffer) {
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %destination = buffer.view %output[%base] : buffer -> view<64xi32>
+  scf.for %lane = [%begin to %end step %step] {
+    %value = index.cast %lane : index to i32
+    view.store %value, %destination[%lane] : i32, view<64xi32>
+  }
+  func.return
+}
+
+check.scenario @native_temporal_broadcast_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %actual = check.generate.fill value(-1) : tensor<64xi32>
+    check.compare<@native_temporal_broadcast, @native_temporal_broadcast_oracle>(%actual) : (tensor<64xi32>) -> () {
+      check.expect.bitwise actual(%actual) expected(%actual) : tensor<64xi32>
+    }
+  }
+  check.return
+}

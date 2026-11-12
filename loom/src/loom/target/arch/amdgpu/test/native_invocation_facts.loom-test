@@ -1,0 +1,107 @@
+// RUN: pass source-to-low,low-dce
+
+amdgpu.target<gfx1201> @target {subgroup_size = 32}
+
+low.func.def target<amdgpu.rdna4.core>(@target) @lane_value(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
+}
+
+// The native result's distribution reaches the integer merge through a
+// forwarding arm. Placement does not depend on an immediate diamond shape.
+func.def target(@target) @forwarded_native_selection(%input: f32) -> (i32) {
+  %value = low.invoke @lane_value(%input) : (f32) -> (f32)
+  %threshold = scalar.constant 0.0 : f32
+  %positive_result = scalar.constant 1 : i32
+  %negative_result = scalar.constant 2 : i32
+  %positive = scalar.cmpf ogt, %value, %threshold : f32
+  cfg.cond_br %positive, ^positive, ^negative
+^positive:
+  cfg.br ^forward
+^forward:
+  cfg.br ^join(%positive_result: i32)
+^negative:
+  cfg.br ^join(%negative_result: i32)
+^join(%selected: i32):
+  func.return %selected : i32
+}
+
+// ----
+amdgpu.target<gfx1201> @target {subgroup_size = 32}
+
+low.func.def target<amdgpu.rdna4.core>(@target) @lane_value(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
+}
+
+low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @forwarded_native_selection(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %value = low.func.call @lane_value(%input) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
+  %positive = v_cmp_gt_f32_src1_inline %value {rhs = "f32_0_0"}
+  %18, %19 = s_and_saveexec_b64 %positive
+  low.cond_br %19, ^positive, ^_bb3 : reg<amdgpu.scc>
+^positive:
+  low.br ^forward
+^forward:
+  %23 = v_mov_b32 1
+  low.br ^_bb5(%23: reg<amdgpu.vgpr>)
+^_bb3:
+  s_mov_b64_exec %18
+  %20 = v_mov_b32 2
+  low.br ^join(%20: reg<amdgpu.vgpr>)
+^_bb5(%selected$13: reg<amdgpu.vgpr>):
+  s_mov_b64_exec %18
+  %21 = v_mov_b32 2
+  %22 = v_cndmask_b32 %21, %selected$13, %positive
+  low.br ^join(%22: reg<amdgpu.vgpr>)
+^join(%selected$12: reg<amdgpu.vgpr>):
+  return %selected$12
+^negative:
+  %24 = v_mov_b32 2
+  low.br ^join(%24: reg<amdgpu.vgpr>)
+}
+
+// ====
+// RUN: pass source-to-low,low-dce
+
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @scalar_words(%word: reg<amdgpu.sgpr>, %pair: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+  return %word, %pair, %pair
+}
+
+// The same two-word carrier represents a uniform integer or a lane predicate
+// according to the source signature. Numeric consumers stay scalar; selection
+// by the predicate preserves each lane's result.
+func.def target(@target) @numeric_words_and_lane_bits(%input: i32, %wide: i64) -> (i32, i64, i32) {
+  %word, %pair, %mask = low.invoke @scalar_words(%input, %wide) : (i32, i64) -> (i32, i64, i1)
+  %increment = scalar.constant 1 : i32
+  %wide_increment = scalar.constant 1 : i64
+  %incremented = scalar.addi %word, %increment : i32
+  %wide_incremented = scalar.addi %pair, %wide_increment : i64
+  %selected = scf.select %mask, %word, %increment : i32
+  func.return %incremented, %wide_incremented, %selected : i32, i64, i32
+}
+
+// ----
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @scalar_words(%word: reg<amdgpu.sgpr>, %pair: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+  return %word, %pair, %pair
+}
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @numeric_words_and_lane_bits(%input: reg<amdgpu.sgpr>, %wide: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.vgpr>) asm {
+  %word, %pair, %mask = low.func.call @scalar_words(%input, %wide) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>)
+  %increment = s_mov_b32 1
+  %27 = s_mov_b32 1
+  %28 = s_mov_b32 0
+  %wide_increment = concat(%27, %28) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %incremented = s_add_u32 %word, %increment
+  %31 = slice %pair[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %32 = slice %pair[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %33 = slice %wide_increment[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %34 = slice %wide_increment[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %35, %36 = s_add_co_u32 %31, %33
+  %37, %38 = s_addc_u32 %32, %34, %36
+  %wide_incremented = concat(%35, %37) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %40 = v_mov_b32_copy %word
+  %selected = v_cndmask_b32_src0_inline %40, %mask {false_value = 1}
+  return %incremented, %wide_incremented, %selected
+}

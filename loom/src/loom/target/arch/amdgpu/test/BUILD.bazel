@@ -13,5 +13,8 @@ package(
 
 loom_check_test_suite(
     name = "test",
-    srcs = ["call_policy.loom-test"],
+    srcs = [
+        "call_policy.loom-test",
+        "native_invocation_facts.loom-test",
+    ],
 )

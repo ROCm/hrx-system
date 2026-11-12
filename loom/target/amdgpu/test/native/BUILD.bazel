@@ -263,6 +263,7 @@ loom_module(
         "//loom/binding/c/benchmark/kernels/synthetic:paired_scoped_matrix_helpers.loom",
         "//loom/target/amdgpu/test/native/gfx11:attention_prefill.loom",
         "//loom/target/amdgpu/test/native/gfx11:cache_completion.loom",
+        "//loom/target/amdgpu/test/native/gfx11:conditional_copy.loom",
         "//loom/target/amdgpu/test/native/gfx11:divergent_loop_carry.loom",
         "//loom/target/amdgpu/test/native/gfx11:flat_aperture.loom",
         "//loom/target/amdgpu/test/native/gfx11:fp8_finite_storage_fragments.loom",
