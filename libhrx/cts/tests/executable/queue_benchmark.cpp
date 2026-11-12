@@ -39,6 +39,12 @@ void Check(hrx_status_t status) {
 void CheckNative(iree_status_t status) { Check(hrx_status_from_iree(status)); }
 
 enum class Operation { kFill, kDispatch };
+enum class EventOperation {
+  kRecord,
+  kAlternateRecord,
+  kFillAndRecord,
+  kTimedRecord
+};
 
 // One group, queue, and set of owners span the process. Native oracle calls use
 // those exact resources; there is no second driver or separately placed buffer.
@@ -303,6 +309,82 @@ class Environment {
     state.SetItemsProcessed(state.iterations());
   }
 
+  template <EventOperation Op, bool Complete>
+  void EventBatches(benchmark::State& state) {
+    using EventPtr =
+        hrx::runtime::hrx_ptr<hrx_event_t, hrx_event_retain, hrx_event_release>;
+    constexpr size_t kStreamCount =
+        Op == EventOperation::kAlternateRecord ? 2 : 1;
+    std::array<hrx::runtime::stream_ptr, kStreamCount> streams;
+    std::array<hrx_timeline_point_t, kStreamCount> points;
+    EventPtr event;
+    Check(hrx_event_create(device_,
+                           Op == EventOperation::kTimedRecord
+                               ? HRX_EVENT_FLAG_NONE
+                               : HRX_EVENT_FLAG_DISABLE_TIMING,
+                           event.for_output()));
+    expected_ = 0xAABBCCDD;
+    for (auto& stream : streams) {
+      Check(hrx_stream_create(queue_, 0, stream.for_output()));
+      Check(hrx_stream_fill_buffer(stream, output_, 0, sizeof(expected_),
+                                   &expected_, sizeof(expected_)));
+      Check(hrx_stream_synchronize(stream));
+    }
+    const size_t batch = state.range(0);
+    size_t producer = 0;
+    const auto record = [&]() {
+      if constexpr (Op == EventOperation::kFillAndRecord) {
+        ++expected_;
+        Check(hrx_stream_fill_buffer(streams[0], output_, 0, sizeof(expected_),
+                                     &expected_, sizeof(expected_)));
+      }
+      Check(hrx_event_record(event, streams[producer]));
+      if constexpr (Op == EventOperation::kAlternateRecord) {
+        producer ^= 1;
+      }
+    };
+    // Warm one full batch of storage before measuring. Every batch drains
+    // its final point, bounding outstanding work even when a record submits
+    // an operation. Only completion rows include that drain in timing.
+    for (size_t i = 0; i < batch; ++i) {
+      record();
+    }
+    Check(hrx_event_synchronize(event));
+    for (size_t i = 0; i < kStreamCount; ++i) {
+      Check(hrx_stream_get_timeline_position(streams[i], &points[i]));
+    }
+    for (auto _ : state) {
+      for (size_t i = 0; i < batch; ++i) {
+        record();
+      }
+      if constexpr (!Complete) {
+        state.PauseTiming();
+      }
+      Check(hrx_event_synchronize(event));
+      if constexpr (!Complete) {
+        state.ResumeTiming();
+      }
+    }
+    uint64_t advances = 0;
+    for (size_t i = 0; i < kStreamCount; ++i) {
+      Check(hrx_stream_synchronize(streams[i]));
+      hrx_timeline_point_t after;
+      Check(hrx_stream_get_timeline_position(streams[i], &after));
+      advances += after.value - points[i].value;
+    }
+    if constexpr (Op == EventOperation::kTimedRecord) {
+      float elapsed_ms = -1.0f;
+      Check(hrx_event_elapsed_time(event, event, &elapsed_ms));
+      Require(elapsed_ms == 0.0f, "same event has nonzero elapsed time");
+    }
+    Verify();
+    Describe(state);
+    const auto records = state.iterations() * batch;
+    state.counters["producer_points_per_record"] =
+        static_cast<double>(advances) / static_cast<double>(records);
+    state.SetItemsProcessed(records);
+  }
+
   void Describe(benchmark::State& state) {
     state.SetLabel(label_);
     hrx_pool_stats_t stats;
@@ -503,6 +585,11 @@ void EventRecord(benchmark::State& state) {
   GetEnvironment().RecordEvents<AlternateProducers>(state);
 }
 
+template <EventOperation Op, bool Complete>
+void EventBatch(benchmark::State& state) {
+  GetEnvironment().EventBatches<Op, Complete>(state);
+}
+
 #define QUEUE_BENCHMARK(native, operation, complete, name)          \
   BENCHMARK_TEMPLATE(Queue, native, Operation::operation, complete) \
       ->Name(name)                                                  \
@@ -556,5 +643,21 @@ BENCHMARK_TEMPLATE(EventRecord, true)
     ->Name("HRX/EventRecord/AlternateStreams")
     ->UseRealTime()
     ->Unit(benchmark::kNanosecond);
+#define EVENT_BENCHMARK(operation, name)                           \
+  BENCHMARK_TEMPLATE(EventBatch, EventOperation::operation, false) \
+      ->Name("HRX/EventBatch/" name "/Submit")                     \
+      ->Arg(256)                                                   \
+      ->UseRealTime()                                              \
+      ->Unit(benchmark::kNanosecond);                              \
+  BENCHMARK_TEMPLATE(EventBatch, EventOperation::operation, true)  \
+      ->Name("HRX/EventBatch/" name "/Complete")                   \
+      ->Arg(1)                                                     \
+      ->UseRealTime()                                              \
+      ->Unit(benchmark::kNanosecond)
+EVENT_BENCHMARK(kRecord, "SameStream");
+EVENT_BENCHMARK(kAlternateRecord, "AlternateStreams");
+EVENT_BENCHMARK(kFillAndRecord, "FillAndRecord");
+EVENT_BENCHMARK(kTimedRecord, "TimedRecord");
+#undef EVENT_BENCHMARK
 
 }  // namespace
