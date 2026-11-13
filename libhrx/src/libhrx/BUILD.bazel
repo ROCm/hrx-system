@@ -33,6 +33,7 @@ HRX_SRCS = [
     "fence.c",
     "graph.c",
     "graph_analysis.c",
+    "graph_dependencies.c",
     "graph_exec.c",
     "host_allocator.c",
     "mem_pool.c",
@@ -56,6 +57,7 @@ HRX_HDRS = [
     "device_group.h",
     "event_timestamp.h",
     "graph_analysis.h",
+    "graph_dependencies.h",
     "graph_exec.h",
     "hrx_internal.h",
     "mem_pool.h",
@@ -430,6 +432,17 @@ hrx_cc_test(
         ":hrx_static",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "graph_dependencies_test",
+    srcs = ["graph_dependencies_test.cc"],
+    deps = [
+        ":hrx_static",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

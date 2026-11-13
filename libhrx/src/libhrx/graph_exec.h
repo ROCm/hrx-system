@@ -22,7 +22,7 @@ extern "C" {
 typedef struct hrx_graph_recording_t {
   // Retained source graph and device, including captured native resources.
   hrx_graph_t graph;
-  // Storage for compiled blocks, analysis, and semaphore indices.
+  // Storage for compiled blocks and borrowed semaphore pointers.
   iree_arena_allocator_t arena_allocator;
   // Blocks in submission order, ending in a single completion producer.
   struct hrx_graph_exec_block_t** blocks;
