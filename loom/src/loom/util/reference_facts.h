@@ -98,6 +98,10 @@ typedef struct loom_value_fact_buffer_reference_t {
   // Whether root_symbol names the storage root.
   bool has_root_symbol;
 
+  // The retained root has the same byte origin, not merely the same backing
+  // allocation. False when an allocation-only alias promise supplies the root.
+  bool root_is_byte_origin;
+
   // Comparable alias scope for disjointness proofs, or NONE.
   loom_value_fact_alias_scope_id_t alias_scope_id;
 
@@ -107,6 +111,9 @@ typedef struct loom_value_fact_buffer_reference_t {
   // Intrinsic storage origin relative to a projected function entry.
   loom_value_fact_reference_origin_t origin;
 } loom_value_fact_buffer_reference_t;
+
+static_assert(sizeof(loom_value_fact_buffer_reference_t) == 72,
+              "buffer reference facts must remain compact");
 
 // Resolves the concrete storage root for |reference_value_id|. Buffer fact
 // joins use a self-root when control flow chooses between distinct roots.

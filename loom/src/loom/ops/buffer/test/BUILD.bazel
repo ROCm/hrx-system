@@ -16,6 +16,7 @@ loom_check_test_suite(
     name = "test",
     srcs = [
         "compare_address.loom-test",
+        "distance.loom-test",
         "distribution_facts.loom-test",
         "fold.loom-test",
         "literals.loom-test",

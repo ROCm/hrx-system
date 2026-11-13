@@ -6,7 +6,76 @@
 
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/index/ops.h"
+#include "loom/ops/scalar/ops.h"
 #include "loom/rewrite/rewriter.h"
+
+iree_status_t loom_buffer_distance_canonicalize(loom_op_t* op,
+                                                loom_rewriter_t* rewriter) {
+  const loom_value_id_t lhs = loom_buffer_distance_lhs(op);
+  const loom_value_id_t rhs = loom_buffer_distance_rhs(op);
+  // Allocation provenance alone does not establish a common byte origin.
+  // The identity solver retains exact aliases through refinements and CFGs.
+  if (loom_rewriter_value_identity(rewriter, lhs) !=
+      loom_rewriter_value_identity(rewriter, rhs)) {
+    loom_value_fact_buffer_reference_t left = {0};
+    loom_value_fact_buffer_reference_t right = {0};
+    const loom_fact_context_t* context =
+        rewriter->fact_table ? &rewriter->fact_table->context : NULL;
+    if (!loom_value_facts_query_buffer_reference(
+            context, loom_rewriter_value_facts(rewriter, lhs), &left) ||
+        !loom_value_facts_query_buffer_reference(
+            context, loom_rewriter_value_facts(rewriter, rhs), &right)) {
+      return iree_ok_status();
+    }
+    const bool both_null =
+        left.nullability == LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NULL &&
+        right.nullability == LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NULL;
+    const bool same_origin =
+        (left.root_is_byte_origin ||
+         left.root_value_id == LOOM_VALUE_ID_INVALID) &&
+        (right.root_is_byte_origin ||
+         right.root_value_id == LOOM_VALUE_ID_INVALID) &&
+        loom_rewriter_value_identity(
+            rewriter,
+            loom_value_fact_buffer_reference_resolve_root_value(left, lhs)) ==
+            loom_rewriter_value_identity(
+                rewriter, loom_value_fact_buffer_reference_resolve_root_value(
+                              right, rhs));
+    if (!both_null && !same_origin) {
+      return iree_ok_status();
+    }
+  }
+  loom_builder_set_before(&rewriter->builder, op);
+  const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
+  const loom_type_t integer_type = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
+  const loom_type_t offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
+  loom_op_t* left = NULL;
+  loom_op_t* right = NULL;
+  loom_op_t* difference = NULL;
+  IREE_RETURN_IF_ERROR(loom_index_cast_build(
+      &rewriter->builder, loom_buffer_distance_lhs_offset(op), offset_type,
+      integer_type, op->location, &left));
+  IREE_RETURN_IF_ERROR(loom_index_cast_build(
+      &rewriter->builder, loom_buffer_distance_rhs_offset(op), offset_type,
+      integer_type, op->location, &right));
+  IREE_RETURN_IF_ERROR(loom_scalar_subi_build(
+      &rewriter->builder, 0, loom_index_cast_result(left),
+      loom_index_cast_result(right), integer_type, op->location, &difference));
+  loom_value_id_t replacement = loom_scalar_subi_result(difference);
+  const loom_type_t result_type = loom_module_value_type(
+      rewriter->builder.module, loom_buffer_distance_result(op));
+  if (!loom_type_equal(result_type, integer_type)) {
+    loom_op_t* narrowed = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_scalar_trunci_build(&rewriter->builder, replacement, integer_type,
+                                 result_type, op->location, &narrowed));
+    replacement = loom_scalar_trunci_result(narrowed);
+  }
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      rewriter, op, &replacement, 1, checkpoint));
+  return loom_rewriter_replace_all_uses_and_erase(rewriter, op, &replacement,
+                                                  1);
+}
 
 iree_status_t loom_buffer_compare_address_canonicalize(
     loom_op_t* op, loom_rewriter_t* rewriter) {

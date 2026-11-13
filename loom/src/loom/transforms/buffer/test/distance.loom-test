@@ -1,0 +1,22 @@
+// RUN: pass target-legalize{mode=final}
+
+test.target<low_core> @target
+
+// Final legalization diagnoses unresolved roots, including apparent aliases
+// whose relative byte origins are unknown. Equal offsets prove nothing here.
+func.def target(@target) @independent(%left: buffer, %right: buffer, %offset: offset) -> (i64) {
+  // ERROR@+1: LOWERING/073 "same buffer root"
+  %distance = buffer.distance %left[%offset], %right[%offset] : i64
+  func.return %distance : i64
+}
+
+// ====
+
+test.target<low_core> @target
+
+func.def target(@target) @allocation_only(%left: buffer, %right: buffer, %offset: offset) -> (i64) {
+  %shared = buffer.assume.same_root %left, %right : buffer
+  // ERROR@+1: LOWERING/073 "common byte origin could not be proven"
+  %distance = buffer.distance %shared[%offset], %right[%offset] : i64
+  func.return %distance : i64
+}

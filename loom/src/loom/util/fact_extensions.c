@@ -134,7 +134,8 @@ static uint32_t loom_value_fact_hash_buffer_reference(
   hash = loom_structural_hash_mix_u64(hash, reference.minimum_alignment);
   hash = loom_structural_hash_mix_u32(hash, (uint32_t)reference.memory_space);
   hash = loom_structural_hash_mix_u32(hash, reference.root_value_id);
-  hash = loom_structural_hash_mix_u32(hash, reference.has_root_symbol);
+  hash = loom_structural_hash_mix_u32(
+      hash, reference.has_root_symbol | (reference.root_is_byte_origin << 1));
   if (reference.has_root_symbol) {
     hash = loom_structural_hash_mix_u32(
         hash, reference.root_symbol.module_id |
@@ -177,6 +178,7 @@ static bool loom_value_fact_buffer_reference_equal(
          lhs.memory_space == rhs.memory_space &&
          lhs.root_value_id == rhs.root_value_id &&
          lhs.has_root_symbol == rhs.has_root_symbol &&
+         lhs.root_is_byte_origin == rhs.root_is_byte_origin &&
          (!lhs.has_root_symbol ||
           (lhs.root_symbol.module_id == rhs.root_symbol.module_id &&
            lhs.root_symbol.symbol_id == rhs.root_symbol.symbol_id)) &&
@@ -687,6 +689,7 @@ static bool loom_value_fact_table_buffer_reference_equal(
          lhs.memory_space == rhs.memory_space &&
          lhs.root_value_id == rhs.root_value_id &&
          lhs.has_root_symbol == rhs.has_root_symbol &&
+         lhs.root_is_byte_origin == rhs.root_is_byte_origin &&
          (!lhs.has_root_symbol ||
           (lhs.root_symbol.module_id == rhs.root_symbol.module_id &&
            lhs.root_symbol.symbol_id == rhs.root_symbol.symbol_id)) &&

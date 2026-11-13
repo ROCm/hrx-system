@@ -40,9 +40,43 @@ static loom_value_fact_buffer_reference_t loom_buffer_default_reference(
       .minimum_alignment = 1,
       .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN,
       .root_value_id = buffer_value_id,
+      .root_is_byte_origin = true,
       .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
       .nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN,
   };
+}
+
+// Resolves a self-root before forwarding its reference facts to another value.
+static void loom_buffer_resolve_reference_root(
+    loom_value_fact_buffer_reference_t* reference, loom_value_id_t value) {
+  if (reference->root_value_id == LOOM_VALUE_ID_INVALID) {
+    reference->root_value_id = value;
+    reference->root_is_byte_origin = true;
+  }
+}
+
+iree_status_t loom_buffer_duplicate_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  const loom_value_slice_t sources = loom_buffer_duplicate_sources(op);
+  iree_status_t status = iree_ok_status();
+  for (uint16_t i = 0; i < sources.count && iree_status_is_ok(status); ++i) {
+    result_facts[i] = operand_facts[i];
+    loom_value_fact_buffer_reference_t reference;
+    if (loom_value_facts_query_buffer_reference(context, operand_facts[i],
+                                                &reference) &&
+        reference.root_value_id == LOOM_VALUE_ID_INVALID) {
+      // Joins of different roots use INVALID to mean self. Flatten that
+      // coordinate before giving the same buffer another ownership identity.
+      loom_buffer_resolve_reference_root(&reference, sources.values[i]);
+      status = loom_value_facts_make_buffer_reference(context, reference,
+                                                      &result_facts[i]);
+      loom_value_facts_propagate_unary_distribution(operand_facts[i],
+                                                    &result_facts[i]);
+    }
+  }
+  return status;
 }
 
 static iree_status_t loom_buffer_meet_reference_extension(
@@ -79,6 +113,10 @@ static iree_status_t loom_buffer_meet_reference_extension(
               ? lhs_reference.root_value_id
               : LOOM_VALUE_ID_INVALID,
       .root_symbol = loom_symbol_ref_null(),
+      .root_is_byte_origin =
+          lhs_reference.root_is_byte_origin &&
+          rhs_reference.root_is_byte_origin &&
+          lhs_reference.root_value_id == rhs_reference.root_value_id,
       .has_root_symbol = lhs_reference.has_root_symbol &&
                          rhs_reference.has_root_symbol &&
                          lhs_reference.root_symbol.module_id ==
@@ -251,6 +289,7 @@ iree_status_t loom_buffer_constant_facts(
                                : 1,
       .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_CONSTANT,
       .root_value_id = loom_buffer_constant_result(op),
+      .root_is_byte_origin = true,
       .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
       .nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL,
   };
@@ -272,6 +311,7 @@ static iree_status_t loom_buffer_allocation_facts(
       .minimum_alignment = minimum_alignment,
       .memory_space = memory_space,
       .root_value_id = result,
+      .root_is_byte_origin = true,
       .alias_scope_id = result,
       .nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL,
       .origin = origin,
@@ -370,8 +410,8 @@ iree_status_t loom_buffer_assume_memory_space_facts(
       loom_buffer_default_reference(loom_buffer_assume_memory_space_buffer(op));
   (void)loom_value_facts_query_buffer_reference(context, operand_facts[0],
                                                 &reference);
-  reference.root_value_id = loom_value_fact_buffer_reference_resolve_root_value(
-      reference, loom_buffer_assume_memory_space_buffer(op));
+  loom_buffer_resolve_reference_root(
+      &reference, loom_buffer_assume_memory_space_buffer(op));
   reference.memory_space = loom_buffer_assume_memory_space_memory_space(op);
   return loom_value_facts_make_buffer_reference(context, reference,
                                                 &result_facts[0]);
@@ -392,9 +432,7 @@ iree_status_t loom_buffer_assume_alignment_facts(
         loom_buffer_default_reference(buffers.values[i]);
     (void)loom_value_facts_query_buffer_reference(context, operand_facts[i],
                                                   &reference);
-    reference.root_value_id =
-        loom_value_fact_buffer_reference_resolve_root_value(reference,
-                                                            buffers.values[i]);
+    loom_buffer_resolve_reference_root(&reference, buffers.values[i]);
     if (reference.minimum_alignment < minimum_alignment) {
       reference.minimum_alignment = minimum_alignment;
     }
@@ -420,9 +458,7 @@ iree_status_t loom_buffer_assume_noalias_facts(
         loom_buffer_default_reference(buffers.values[i]);
     (void)loom_value_facts_query_buffer_reference(context, operand_facts[i],
                                                   &reference);
-    reference.root_value_id =
-        loom_value_fact_buffer_reference_resolve_root_value(reference,
-                                                            buffers.values[i]);
+    loom_buffer_resolve_reference_root(&reference, buffers.values[i]);
     reference.alias_scope_id = reference.root_value_id;
     IREE_RETURN_IF_ERROR(loom_value_facts_make_buffer_reference(
         context, reference, &result_facts[i]));
@@ -441,8 +477,8 @@ iree_status_t loom_buffer_assume_same_root_facts(
       loom_buffer_default_reference(loom_buffer_assume_same_root_buffer(op));
   (void)loom_value_facts_query_buffer_reference(context, operand_facts[0],
                                                 &reference);
-  reference.root_value_id = loom_value_fact_buffer_reference_resolve_root_value(
-      reference, loom_buffer_assume_same_root_buffer(op));
+  loom_buffer_resolve_reference_root(&reference,
+                                     loom_buffer_assume_same_root_buffer(op));
 
   loom_value_fact_buffer_reference_t root_reference =
       loom_buffer_default_reference(loom_buffer_assume_same_root_root(op));
@@ -450,6 +486,7 @@ iree_status_t loom_buffer_assume_same_root_facts(
                                                 &root_reference);
   reference.root_value_id = loom_value_fact_buffer_reference_resolve_root_value(
       root_reference, loom_buffer_assume_same_root_root(op));
+  reference.root_is_byte_origin = false;
   reference.root_symbol = root_reference.root_symbol;
   reference.has_root_symbol = root_reference.has_root_symbol;
   reference.alias_scope_id = root_reference.alias_scope_id;
