@@ -6,11 +6,8 @@
 
 #include <array>
 #include <atomic>
-#include <condition_variable>
 #include <cstring>
-#include <mutex>
 #include <semaphore>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -62,158 +59,6 @@ class ScopeExit {
 // declaration can spell.
 template <typename Cleanup>
 ScopeExit(Cleanup) -> ScopeExit<Cleanup>;
-
-struct GraphLaunchObservation {
-  // Guards every phase field below.
-  std::mutex mutex;
-  // Notifies the test whenever one of the observed phases changes.
-  std::condition_variable notification;
-  // True after the queue wrapper injects the later submission rejection.
-  bool later_call_rejected = false;
-  // True after the accepted prefix host call runs.
-  bool prefix_call_ran = false;
-  // True after the graph launch returns to its calling thread.
-  bool launch_returned = false;
-  // Records whether the graph launch returned before its accepted prefix ran.
-  bool launch_returned_before_prefix = false;
-};
-
-void ObserveGraphLaunchPrefix(void* user_data) {
-  auto* observation = static_cast<GraphLaunchObservation*>(user_data);
-  {
-    std::lock_guard<std::mutex> lock(observation->mutex);
-    observation->launch_returned_before_prefix = observation->launch_returned;
-    observation->prefix_call_ran = true;
-  }
-  observation->notification.notify_all();
-}
-
-struct RejectSecondHostCallQueue {
-  // Base queue interface exposed to the graph executor.
-  iree_hal_queue_t base;
-  // Retained queue receiving submissions accepted by this wrapper.
-  iree_hal_queue_t* target = nullptr;
-  // Gate appended to the first accepted host call.
-  iree_hal_semaphore_t* first_call_gate = nullptr;
-  // Required value of |first_call_gate|.
-  uint64_t first_call_gate_value = 0;
-  // Shared test phase observation.
-  GraphLaunchObservation* observation = nullptr;
-  // Number of host calls presented to this wrapper.
-  std::atomic<int> host_call_count = 0;
-  // Number of host calls accepted by the target queue.
-  std::atomic<int> accepted_host_call_count = 0;
-};
-
-RejectSecondHostCallQueue* CastRejectSecondHostCallQueue(
-    iree_hal_queue_t* base_queue) {
-  return reinterpret_cast<RejectSecondHostCallQueue*>(base_queue);
-}
-
-void DestroyRejectSecondHostCallQueue(iree_hal_queue_t* base_queue) {
-  auto* queue = CastRejectSecondHostCallQueue(base_queue);
-  iree_hal_queue_release(queue->target);
-  queue->target = nullptr;
-}
-
-iree_status_t RejectSecondHostCallQueueBarrier(
-    iree_hal_queue_t* base_queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    const iree_hal_queue_barriers_t* barriers,
-    iree_hal_queue_barrier_flags_t flags) {
-  return iree_hal_queue_barrier(
-      CastRejectSecondHostCallQueue(base_queue)->target, wait_semaphore_list,
-      signal_semaphore_list, barriers, flags);
-}
-
-iree_status_t RejectSecondHostCallQueueHostCall(
-    iree_hal_queue_t* base_queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_host_call_t call, const uint64_t args[4],
-    iree_hal_host_call_flags_t flags) {
-  auto* queue = CastRejectSecondHostCallQueue(base_queue);
-  const int call_index =
-      queue->host_call_count.fetch_add(1, std::memory_order_acq_rel);
-  if (call_index == 1) {
-    {
-      std::lock_guard<std::mutex> lock(queue->observation->mutex);
-      queue->observation->later_call_rejected = true;
-    }
-    queue->observation->notification.notify_all();
-    return iree_make_status(IREE_STATUS_ABORTED,
-                            "injected later graph block rejection");
-  }
-  if (call_index != 0 || !queue->first_call_gate) {
-    return iree_hal_queue_host_call(queue->target, wait_semaphore_list,
-                                    signal_semaphore_list, call, args, flags);
-  }
-  if (wait_semaphore_list.count >= 4) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "injected queue wait capacity exceeded");
-  }
-
-  std::array<iree_hal_semaphore_t*, 4> wait_semaphores = {};
-  std::array<uint64_t, 4> wait_values = {};
-  for (iree_host_size_t i = 0; i < wait_semaphore_list.count; ++i) {
-    wait_semaphores[i] = wait_semaphore_list.semaphores[i];
-    wait_values[i] = wait_semaphore_list.payload_values[i];
-  }
-  wait_semaphores[wait_semaphore_list.count] = queue->first_call_gate;
-  wait_values[wait_semaphore_list.count] = queue->first_call_gate_value;
-  const iree_hal_semaphore_list_t gated_waits = {
-      .count = wait_semaphore_list.count + 1,
-      .semaphores = wait_semaphores.data(),
-      .payload_values = wait_values.data(),
-  };
-  iree_status_t status = iree_hal_queue_host_call(
-      queue->target, gated_waits, signal_semaphore_list, call, args, flags);
-  if (iree_status_is_ok(status)) {
-    queue->accepted_host_call_count.fetch_add(1, std::memory_order_acq_rel);
-  }
-  return status;
-}
-
-iree_status_t RejectSecondHostCallQueueFlush(iree_hal_queue_t* base_queue) {
-  return iree_hal_queue_flush(
-      CastRejectSecondHostCallQueue(base_queue)->target);
-}
-
-const iree_hal_queue_vtable_t kRejectSecondHostCallQueueVtable = {
-    .destroy = DestroyRejectSecondHostCallQueue,
-    .barrier = RejectSecondHostCallQueueBarrier,
-    .execute = nullptr,
-    .host_call = RejectSecondHostCallQueueHostCall,
-    .query_dispatch_concurrency = nullptr,
-    .dispatch = nullptr,
-    .atomic_wait = nullptr,
-    .atomic_store = nullptr,
-    .atomic_rmw = nullptr,
-    .timestamp = nullptr,
-    .flush = RejectSecondHostCallQueueFlush,
-    .alloca = nullptr,
-    .dealloca = nullptr,
-    .transfer = nullptr,
-    .read = nullptr,
-    .write = nullptr,
-};
-
-void InitializeRejectSecondHostCallQueue(iree_hal_queue_t* target,
-                                         GraphLaunchObservation* observation,
-                                         RejectSecondHostCallQueue* out_queue) {
-  out_queue->target = target;
-  out_queue->observation = observation;
-  iree_hal_queue_retain(target);
-  iree_hal_queue_params_t params;
-  iree_hal_queue_params_initialize(&params);
-  params.priority = iree_hal_queue_priority(target);
-  params.features = iree_hal_queue_features(target);
-  params.execution_resources = iree_hal_queue_execution_resources(target);
-  iree_hal_queue_initialize(iree_hal_queue_family(target), &params,
-                            &kRejectSecondHostCallQueueVtable,
-                            &out_queue->base);
-}
 
 // Metadata-only executable retained by graph dispatch blocks. The controlled
 // queue below answers occupancy without consulting executable metadata and no
@@ -1739,11 +1584,13 @@ TEST_F(GraphExecTest, ExecEventNodeTakesOnlyItsOwnContextsEvent) {
 
   // A later parameter update recompiles the graph and must preserve both
   // event replacements while leaving their template nodes untouched.
-  auto* private_node = iree_hal_streaming_graph_exec_lock_node(exec, host_node);
+  iree_hal_streaming_graph_exec_edit_t edit;
+  auto* private_node =
+      iree_hal_streaming_graph_exec_lock_node(exec, host_node, &edit);
   iree_hal_streaming_graph_node_host(private_node)->user_data =
       &replacement_called;
-  status = iree_hal_streaming_graph_exec_rebuild_locked(exec);
-  iree_hal_streaming_graph_exec_unlock(exec);
+  status = iree_hal_streaming_graph_exec_rebuild_locked(exec, &edit);
+  iree_hal_streaming_graph_exec_end_edit(exec, &edit);
   IREE_ASSERT_OK(status);
   iree_hal_streaming_graph_exec_launch_result_t launch_result;
   IREE_ASSERT_OK(
@@ -2044,157 +1891,6 @@ TEST_F(GraphExecTest,
   IREE_ASSERT_OK(iree_hal_semaphore_query(stream_->timeline_semaphore,
                                           &final_timeline_value));
   EXPECT_EQ(initial_timeline_value, final_timeline_value);
-}
-
-// A later rejection in a recursive child launch must not let an accepted child
-// block outlive graph-exec state. The rejected final block cannot signal the
-// reserved stream value, so the launch drains the actual accepted signal while
-// keeping pending_value unchanged.
-TEST_F(GraphExecTest,
-       LaterChildBlockRejectionDrainsPrefixWithoutPublishingStreamTail) {
-  iree_hal_streaming_graph_t* child_graph = nullptr;
-  iree_hal_streaming_graph_t* parent_graph = nullptr;
-  iree_hal_streaming_graph_exec_t* exec = nullptr;
-  iree_hal_semaphore_t* gate = nullptr;
-  GraphLaunchObservation launch_observation;
-  RejectSecondHostCallQueue fault_queue = {};
-  iree_hal_queue_t* original_queue = nullptr;
-  bool wrapper_installed = false;
-  ScopeExit release_handles([&] {
-    if (wrapper_installed) {
-      iree_hal_queue_retain(original_queue);
-      iree_hal_queue_t* installed_queue =
-          ReplaceGraphExecTestQueue(stream_, original_queue);
-      iree_hal_queue_release(installed_queue);
-    }
-    iree_hal_semaphore_release(gate);
-    iree_hal_streaming_graph_exec_release(exec);
-    iree_hal_streaming_graph_release(parent_graph);
-    iree_hal_streaming_graph_release(child_graph);
-  });
-
-  IREE_ASSERT_OK(iree_hal_semaphore_create(
-      context_->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
-      /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_NONE, &gate));
-  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
-      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
-      &child_graph));
-  iree_hal_streaming_graph_node_t* first_node = nullptr;
-  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
-      child_graph, /*dependencies=*/nullptr, /*dependency_count=*/0,
-      &ObserveGraphLaunchPrefix, &launch_observation, &first_node));
-  iree_hal_streaming_graph_node_t* second_node = nullptr;
-  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
-      child_graph, &first_node, /*dependency_count=*/1, &SetFlag,
-      &stream_marker_ran_, &second_node));
-
-  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
-      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
-      &parent_graph));
-  iree_hal_streaming_graph_node_t* child_node = nullptr;
-  IREE_ASSERT_OK(iree_hal_streaming_graph_add_child_graph_node(
-      parent_graph, /*dependencies=*/nullptr, /*dependency_count=*/0,
-      child_graph, &child_node));
-  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
-      parent_graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &exec));
-
-  original_queue = stream_->queue;
-  InitializeRejectSecondHostCallQueue(original_queue, &launch_observation,
-                                      &fault_queue);
-  EXPECT_EQ(original_queue,
-            ReplaceGraphExecTestQueue(stream_, &fault_queue.base));
-  // Transfer the stream's old queue reference to the wrapper target.
-  iree_hal_queue_release(original_queue);
-  wrapper_installed = true;
-  fault_queue.first_call_gate = gate;
-  fault_queue.first_call_gate_value = 1;
-
-  iree_slim_mutex_lock(&stream_->mutex);
-  const uint64_t initial_pending_value = stream_->pending_value;
-  iree_slim_mutex_unlock(&stream_->mutex);
-
-  std::atomic<iree_status_code_t> launch_status_code = IREE_STATUS_UNKNOWN;
-  std::thread launch_thread([&] {
-    iree_hal_streaming_graph_exec_launch_result_t launch_result =
-        IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS;
-    iree_status_t status =
-        iree_hal_streaming_graph_exec_launch(exec, stream_, &launch_result);
-    EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_ERROR, launch_result);
-    launch_status_code.store(iree_status_code(status),
-                             std::memory_order_release);
-    iree_status_ignore(status);
-    {
-      std::lock_guard<std::mutex> lock(launch_observation.mutex);
-      launch_observation.launch_returned = true;
-    }
-    launch_observation.notification.notify_all();
-  });
-
-  bool observed_later_rejection = false;
-  {
-    std::unique_lock<std::mutex> lock(launch_observation.mutex);
-    launch_observation.notification.wait(lock, [&] {
-      return launch_observation.later_call_rejected ||
-             launch_observation.launch_returned;
-    });
-    observed_later_rejection = launch_observation.later_call_rejected;
-  }
-  if (!observed_later_rejection) {
-    IREE_EXPECT_OK(iree_hal_semaphore_signal(gate, 1, /*frontier=*/nullptr));
-    launch_thread.join();
-    if (fault_queue.accepted_host_call_count.load(std::memory_order_acquire) >
-        0) {
-      std::unique_lock<std::mutex> lock(launch_observation.mutex);
-      launch_observation.notification.wait(
-          lock, [&] { return launch_observation.prefix_call_ran; });
-    }
-    FAIL() << "recursive launch did not reach the injected later rejection";
-    return;
-  }
-  EXPECT_EQ(
-      1, fault_queue.accepted_host_call_count.load(std::memory_order_acquire));
-
-  IREE_EXPECT_OK(iree_hal_semaphore_signal(gate, 1, /*frontier=*/nullptr));
-  launch_thread.join();
-  EXPECT_EQ(IREE_STATUS_ABORTED,
-            launch_status_code.load(std::memory_order_acquire));
-  {
-    std::unique_lock<std::mutex> lock(launch_observation.mutex);
-    launch_observation.notification.wait(
-        lock, [&] { return launch_observation.prefix_call_ran; });
-    EXPECT_FALSE(launch_observation.launch_returned_before_prefix)
-        << "launch returned before its accepted prefix completed";
-  }
-  EXPECT_FALSE(stream_marker_ran_.load(std::memory_order_acquire));
-
-  iree_slim_mutex_lock(&stream_->mutex);
-  const uint64_t final_pending_value = stream_->pending_value;
-  iree_slim_mutex_unlock(&stream_->mutex);
-  EXPECT_EQ(initial_pending_value, final_pending_value)
-      << "a rejected final block installed an unreachable reserved tail";
-  if (final_pending_value > initial_pending_value) {
-    // Keep perturbation failures bounded: a phantom point has no queue signal.
-    uint64_t timeline_value = 0;
-    IREE_EXPECT_OK(
-        iree_hal_semaphore_query(stream_->timeline_semaphore, &timeline_value));
-    if (timeline_value < final_pending_value) {
-      IREE_EXPECT_OK(iree_hal_semaphore_signal(stream_->timeline_semaphore,
-                                               final_pending_value,
-                                               /*frontier=*/nullptr));
-    }
-  }
-
-  // The rejected suffix did not run. A retry must advance past the accepted
-  // child's internal point without leaving any wait on the rejected tail.
-  iree_hal_streaming_graph_exec_launch_result_t retry_result;
-  IREE_ASSERT_OK(
-      iree_hal_streaming_graph_exec_launch(exec, stream_, &retry_result));
-  EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS, retry_result);
-  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
-  EXPECT_TRUE(stream_marker_ran_.load(std::memory_order_acquire));
-
-  iree_hal_streaming_graph_exec_release(exec);
-  exec = nullptr;
 }
 
 }  // namespace

@@ -8,6 +8,7 @@
 #define IREE_EXPERIMENTAL_STREAMING_GRAPH_H_
 
 #include "command_recording.h"
+#include "common/graph_recording.h"
 #include "common/host_callback.h"
 #include "common/memory.h"
 #include "common/stream.h"
@@ -711,8 +712,6 @@ void iree_hal_streaming_graph_exec_release(
     iree_hal_streaming_graph_exec_t* exec);
 bool iree_hal_streaming_graph_exec_try_retain_live(
     iree_hal_streaming_graph_exec_t* exec);
-bool iree_hal_streaming_graph_exec_is_live(
-    iree_hal_streaming_graph_exec_t* exec);
 
 // Invalidates the handle, joins its accepted launches, and releases the
 // handle's reference on success. Independent work and later stream operations
@@ -747,7 +746,7 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
     iree_hal_streaming_graph_exec_t* exec, iree_hal_streaming_stream_t* stream,
     iree_hal_streaming_graph_exec_launch_result_t* out_result);
 
-// Synchronization: none (updates graph structure).
+// Synchronization: edits serialize; launches proceed during preparation.
 iree_status_t iree_hal_streaming_graph_exec_update(
     iree_hal_streaming_graph_exec_t* exec, iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** out_error_node,
@@ -967,23 +966,35 @@ iree_status_t iree_hal_streaming_graph_exec_create(
     iree_allocator_t host_allocator,
     iree_hal_streaming_graph_exec_t** out_exec);
 
-// Compiles the executable's private descriptions during construction.
-iree_status_t iree_hal_streaming_graph_exec_compile(
-    iree_hal_streaming_graph_exec_t* exec);
+// Borrows a completed child's recording during parent compilation. The child
+// is private and cannot be launched or edited until parent publication.
+const iree_hal_streaming_graph_recording_t*
+iree_hal_streaming_graph_exec_recording(
+    const iree_hal_streaming_graph_exec_t* exec);
 
-// Locks the executable and returns its private parameters for |node|, or NULL
-// for an invalid source handle. The caller always unlocks, including on NULL.
-// Successful parameter changes must be compiled before unlocking; a compilation
-// error leaves the old compiled state intact and requires restoring parameters.
+// Stack scratch for one serialized edit. No replay or ownership object is
+// allocated: this holds a rejected candidate or detached recording for cleanup.
+typedef struct iree_hal_streaming_graph_exec_edit_t {
+  // Released after end_edit unlocks, so destruction can reenter the executable.
+  iree_hal_streaming_graph_recording_t recording;
+} iree_hal_streaming_graph_exec_edit_t;
+
+// Locks private descriptions without excluding launches of the installed
+// recording. Returns NULL for an invalid source handle. Always call end_edit,
+// including on NULL. Restore changed descriptions if rebuilding fails.
 iree_hal_streaming_graph_node_t* iree_hal_streaming_graph_exec_lock_node(
     iree_hal_streaming_graph_exec_t* exec,
-    iree_hal_streaming_graph_node_t* node);
-void iree_hal_streaming_graph_exec_unlock(
-    iree_hal_streaming_graph_exec_t* exec);
+    iree_hal_streaming_graph_node_t* node,
+    iree_hal_streaming_graph_exec_edit_t* out_edit);
+void iree_hal_streaming_graph_exec_end_edit(
+    iree_hal_streaming_graph_exec_t* exec,
+    iree_hal_streaming_graph_exec_edit_t* edit);
 
-// Requires the executable lock. Replaces compiled state only on success.
+// Requires the edit lock. Compiles outside launch serialization, publishes
+// only on success, and leaves detached/rejected resources in edit for end_edit.
 iree_status_t iree_hal_streaming_graph_exec_rebuild_locked(
-    iree_hal_streaming_graph_exec_t* exec);
+    iree_hal_streaming_graph_exec_t* exec,
+    iree_hal_streaming_graph_exec_edit_t* edit);
 
 // Replaces one executable's child description with a topology-compatible
 // snapshot. The source template and prior launches retain their parameters.

@@ -2171,23 +2171,11 @@ iree_status_t iree_hal_streaming_graph_instantiate(
   *out_exec = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Create an uninitialized exec object.
-  iree_hal_streaming_graph_exec_t* exec = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_graph_exec_create(graph->context, graph, flags,
-                                               /*execution_owner=*/NULL,
-                                               graph->host_allocator, &exec));
-
-  // Instantiate from the graph template. HIP graph objects are not internally
-  // synchronized; callers must externally serialize access to a graph while it
-  // is being modified, queried, or instantiated.
-  iree_status_t status = iree_hal_streaming_graph_exec_compile(exec);
-
-  if (iree_status_is_ok(status)) {
-    *out_exec = exec;
-  } else {
-    iree_hal_streaming_graph_exec_release(exec);
-  }
+  // Templates are externally serialized by their caller; the constructor
+  // captures descriptions and returns a fully compiled executable.
+  iree_status_t status = iree_hal_streaming_graph_exec_create(
+      graph->context, graph, flags, /*execution_owner=*/NULL,
+      graph->host_allocator, out_exec);
 
   IREE_TRACE_ZONE_END(z0);
   return status;
