@@ -17,6 +17,9 @@
 IREE_FLAG(string, graph_runtime, "hrx",
           "Graph implementation: hrx, hip (HRX frontend), or rocm.");
 IREE_FLAG(string, graph_hip_library, "", "Exact selected libamdhip64 path.");
+IREE_FLAG(int32_t, graph_host_interval, 0,
+          "Insert a host checkpoint after each group of this many dispatches; "
+          "zero records one uninterrupted device sequence.");
 
 namespace {
 
@@ -107,6 +110,8 @@ class HrxRuntime {
   }
 
   void Prepare(size_t count, bool host) {
+    host_call_count_ = 0;
+    launch_count_ = 0;
     values_.assign(count, 0);
     hrx_buffer_params_t params = {
         .type = host ? HRX_MEMORY_TYPE_HOST_LOCAL |
@@ -150,10 +155,18 @@ class HrxRuntime {
     executable_ = executable;
   }
 
-  void Launch() { Check(api_.graph_exec_launch(executable_, stream_)); }
+  void Launch() {
+    Check(api_.graph_exec_launch(executable_, stream_));
+    ++launch_count_;
+  }
   void Wait() { Check(api_.stream_synchronize(stream_)); }
 
   void Verify() {
+    const size_t checkpoints = FLAG_graph_host_interval > 0
+                                   ? values_.size() / FLAG_graph_host_interval
+                                   : 0;
+    Require(host_call_count_ == launch_count_ * checkpoints,
+            "HRX graph host checkpoint count mismatch");
     if (mapped_) {
       std::copy_n(mapped_, values_.size(), values_.begin());
     } else {
@@ -210,6 +223,18 @@ class HrxRuntime {
                                        previous ? &previous : nullptr,
                                        previous ? 1 : 0, &attrs, &node));
       previous = node;
+      if (FLAG_graph_host_interval > 0 &&
+          (i + 1) % FLAG_graph_host_interval == 0) {
+        const hrx_graph_host_call_node_attrs_t host_attrs = {
+            .fn = +[](void* user_data) -> hrx_status_t {
+              ++*static_cast<uint64_t*>(user_data);
+              return hrx_ok_status();
+            },
+            .user_data = &host_call_count_,
+        };
+        Check(api_.graph_add_host_call_node(*out_graph, &node, 1, &host_attrs,
+                                            &previous));
+      }
     }
   }
 
@@ -247,6 +272,10 @@ class HrxRuntime {
   std::vector<uint32_t> values_;
   // Architecture and wait policy included in every result.
   std::string label_;
+  // Ordered graph callbacks observed only after stream completion.
+  uint64_t host_call_count_ = 0;
+  // Accepted invocations used to check every host checkpoint executed.
+  uint64_t launch_count_ = 0;
 };
 
 class HipRuntime {
@@ -299,6 +328,8 @@ class HipRuntime {
   }
 
   void Prepare(size_t count, bool host) {
+    host_call_count_ = 0;
+    launch_count_ = 0;
     values_.assign(count, 0);
     host_ = host;
     if (host) {
@@ -342,10 +373,18 @@ class HipRuntime {
     executable_ = executable;
   }
 
-  void Launch() { Check(launch_(executable_, stream_)); }
+  void Launch() {
+    Check(launch_(executable_, stream_));
+    ++launch_count_;
+  }
   void Wait() { Check(wait_(stream_)); }
 
   void Verify() {
+    const size_t checkpoints = FLAG_graph_host_interval > 0
+                                   ? values_.size() / FLAG_graph_host_interval
+                                   : 0;
+    Require(host_call_count_ == launch_count_ * checkpoints,
+            "HIP graph host checkpoint count mismatch");
     if (host_) {
       std::copy_n(static_cast<uint32_t*>(output_), values_.size(),
                   values_.begin());
@@ -390,6 +429,13 @@ class HipRuntime {
       void* arguments[] = {&output, &value};
       Check(dispatch(function_, 1, 1, 1, 1, 1, 1, 0, stream_, arguments,
                      nullptr));
+      if (FLAG_graph_host_interval > 0 &&
+          (i + 1) % FLAG_graph_host_interval == 0) {
+        Check(Resolve<decltype(&hipLaunchHostFunc)>("hipLaunchHostFunc")(
+            stream_,
+            +[](void* user_data) { ++*static_cast<uint64_t*>(user_data); },
+            &host_call_count_));
+      }
     }
     Check(Resolve<decltype(&hipStreamEndCapture)>("hipStreamEndCapture")(
         stream_, out_graph));
@@ -431,6 +477,10 @@ class HipRuntime {
   decltype(&hipGraphExecDestroy) destroy_ = nullptr;
   // Architecture, PCI identity, and wait policy included in every result.
   std::string label_;
+  // Ordered graph callbacks observed only after stream completion.
+  uint64_t host_call_count_ = 0;
+  // Accepted invocations used to check every host checkpoint executed.
+  uint64_t launch_count_ = 0;
 };
 
 template <typename Runtime>
@@ -471,6 +521,7 @@ void RunGraph(benchmark::State& state) {
       benchmark::Counter(static_cast<double>(launch_count),
                          benchmark::Counter::kIsIterationInvariant);
   state.counters["nodes"] = static_cast<double>(node_count);
+  state.counters["host_interval"] = FLAG_graph_host_interval;
   state.SetItemsProcessed(state.iterations() * launch_count);
 }
 
@@ -512,6 +563,7 @@ void RunGraphEdit(benchmark::State& state) {
   }
   runtime.Reset();
   state.counters["nodes"] = static_cast<double>(node_count);
+  state.counters["host_interval"] = FLAG_graph_host_interval;
   state.SetItemsProcessed(state.iterations());
 }
 
@@ -558,6 +610,7 @@ void RunGraphUpdate(benchmark::State& state) {
       benchmark::Counter(static_cast<double>(launch_count),
                          benchmark::Counter::kIsIterationInvariant);
   state.counters["nodes"] = static_cast<double>(node_count);
+  state.counters["host_interval"] = FLAG_graph_host_interval;
   state.SetItemsProcessed(state.iterations() * launch_count);
 }
 
