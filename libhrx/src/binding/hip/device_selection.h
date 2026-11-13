@@ -17,7 +17,7 @@ extern "C" {
 // unset; an empty ROCr value selects no devices, while an empty HIP value
 // permits the CUDA fallback. No value is retained after initialization.
 typedef struct iree_hip_device_selection_t {
-  // Optional first-stage ROCr filter, already applied by the legacy driver.
+  // Optional first-stage ROCr visibility filter.
   const char* rocr_visible_devices;
   // Preferred second-stage HIP filter when nonempty.
   const char* hip_visible_devices;

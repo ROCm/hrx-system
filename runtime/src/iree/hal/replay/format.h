@@ -91,7 +91,6 @@ enum iree_hal_replay_object_type_e {
   IREE_HAL_REPLAY_OBJECT_TYPE_EXECUTABLE = 6u,
   IREE_HAL_REPLAY_OBJECT_TYPE_SEMAPHORE = 7u,
   IREE_HAL_REPLAY_OBJECT_TYPE_FILE = 8u,
-  IREE_HAL_REPLAY_OBJECT_TYPE_PHYSICAL_MEMORY = 9u,
   IREE_HAL_REPLAY_OBJECT_TYPE_CHANNEL = 10u,
   IREE_HAL_REPLAY_OBJECT_TYPE_HOST_CALL = 11u,
   IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE = 12u,
@@ -119,16 +118,6 @@ enum iree_hal_replay_operation_code_e {
   IREE_HAL_REPLAY_OPERATION_CODE_REPLAY_SCOPE_END = 51u,
 
   IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_QUERY_MEMORY_HEAPS = 101u,
-  IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_QUERY_GRANULARITY =
-      105u,
-  IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_RESERVE = 106u,
-  IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_RELEASE = 107u,
-  IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_PHYSICAL_MEMORY_ALLOCATE = 108u,
-  IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_PHYSICAL_MEMORY_FREE = 109u,
-  IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_MAP = 110u,
-  IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_UNMAP = 111u,
-  IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_PROTECT = 112u,
-  IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_ADVISE = 113u,
 
   IREE_HAL_REPLAY_OPERATION_CODE_VIRTUAL_BUFFER_CREATE = 140u,
   IREE_HAL_REPLAY_OPERATION_CODE_VIRTUAL_BUFFER_DETACH = 141u,
@@ -212,14 +201,6 @@ enum iree_hal_replay_payload_type_e {
   IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_STORE = 43u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_RMW = 44u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_TIMESTAMP = 45u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_RESERVE = 46u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_RELEASE = 47u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_PHYSICAL_MEMORY_ALLOCATE = 48u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_PHYSICAL_MEMORY_FREE = 49u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_MAP = 50u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_UNMAP = 51u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_PROTECT = 52u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_ADVISE = 53u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_DYNAMIC_QUEUE_OBJECT = 54u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_POOL_CREATE_SLAB = 55u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_POOL_TRIM = 56u,
@@ -514,120 +495,6 @@ typedef struct iree_hal_replay_pool_import_buffer_payload_t {
 } iree_hal_replay_pool_import_buffer_payload_t;
 static_assert(sizeof(iree_hal_replay_pool_import_buffer_payload_t) == 96,
               "pool import replay payload must be 96 bytes");
-
-// Payload describing a virtual address reservation request.
-typedef struct iree_hal_replay_allocator_virtual_memory_reserve_payload_t {
-  // Queue family affinity constraining devices that may access the reservation.
-  uint64_t queue_family_affinity;
-  // Requested reservation size, in bytes.
-  uint64_t size;
-} iree_hal_replay_allocator_virtual_memory_reserve_payload_t;
-static_assert(
-    sizeof(iree_hal_replay_allocator_virtual_memory_reserve_payload_t) == 16,
-    "virtual memory reserve replay payload must be 16 bytes");
-
-// Payload identifying a virtual address reservation being released.
-typedef struct iree_hal_replay_allocator_virtual_memory_release_payload_t {
-  // Session-local buffer id assigned to the virtual address reservation.
-  iree_hal_replay_object_id_t virtual_buffer_id;
-} iree_hal_replay_allocator_virtual_memory_release_payload_t;
-static_assert(
-    sizeof(iree_hal_replay_allocator_virtual_memory_release_payload_t) == 8,
-    "virtual memory release replay payload must be 8 bytes");
-
-// Payload describing a physical memory allocation request.
-typedef struct iree_hal_replay_allocator_physical_memory_allocate_payload_t {
-  // Requested physical allocation size, in bytes.
-  uint64_t allocation_size;
-  // Queue families permitted to map and access the allocation.
-  uint64_t queue_family_affinity;
-  // Intended buffer usages for mapped virtual ranges.
-  uint32_t usage;
-  // Required physical memory type bits.
-  uint32_t type;
-  // Reserved for future use; must be zero.
-  uint64_t reserved0;
-} iree_hal_replay_allocator_physical_memory_allocate_payload_t;
-static_assert(
-    sizeof(iree_hal_replay_allocator_physical_memory_allocate_payload_t) == 32,
-    "physical memory allocate replay payload must be 32 bytes");
-
-// Payload identifying a physical memory handle being freed.
-typedef struct iree_hal_replay_allocator_physical_memory_free_payload_t {
-  // Session-local id assigned to the physical memory handle.
-  iree_hal_replay_object_id_t physical_memory_id;
-} iree_hal_replay_allocator_physical_memory_free_payload_t;
-static_assert(
-    sizeof(iree_hal_replay_allocator_physical_memory_free_payload_t) == 8,
-    "physical memory free replay payload must be 8 bytes");
-
-// Payload describing a physical-to-virtual memory mapping.
-typedef struct iree_hal_replay_allocator_virtual_memory_map_payload_t {
-  // Session-local buffer id assigned to the virtual address reservation.
-  iree_hal_replay_object_id_t virtual_buffer_id;
-  // Session-local id assigned to the physical memory handle.
-  iree_hal_replay_object_id_t physical_memory_id;
-  // Byte offset within the virtual address reservation.
-  uint64_t virtual_offset;
-  // Byte offset within the physical memory allocation.
-  uint64_t physical_offset;
-  // Mapping size, in bytes.
-  uint64_t size;
-} iree_hal_replay_allocator_virtual_memory_map_payload_t;
-static_assert(sizeof(iree_hal_replay_allocator_virtual_memory_map_payload_t) ==
-                  40,
-              "virtual memory map replay payload must be 40 bytes");
-
-// Payload describing a virtual memory unmapping.
-typedef struct iree_hal_replay_allocator_virtual_memory_unmap_payload_t {
-  // Session-local buffer id assigned to the virtual address reservation.
-  iree_hal_replay_object_id_t virtual_buffer_id;
-  // Byte offset within the virtual address reservation.
-  uint64_t virtual_offset;
-  // Unmapping size, in bytes.
-  uint64_t size;
-} iree_hal_replay_allocator_virtual_memory_unmap_payload_t;
-static_assert(
-    sizeof(iree_hal_replay_allocator_virtual_memory_unmap_payload_t) == 24,
-    "virtual memory unmap replay payload must be 24 bytes");
-
-// Payload describing a virtual memory protection update.
-typedef struct iree_hal_replay_allocator_virtual_memory_protect_payload_t {
-  // Session-local buffer id assigned to the virtual address reservation.
-  iree_hal_replay_object_id_t virtual_buffer_id;
-  // Byte offset within the virtual address reservation.
-  uint64_t virtual_offset;
-  // Protection range size, in bytes.
-  uint64_t size;
-  // Queue family affinity selecting the topology where protection applies.
-  uint64_t queue_family_affinity;
-  // Host/device execution scope receiving the protection.
-  uint32_t access_scope;
-  // Reserved for future protection metadata; must be zero.
-  uint32_t reserved0;
-  // Memory protection bits applied to the range.
-  uint64_t protection;
-} iree_hal_replay_allocator_virtual_memory_protect_payload_t;
-static_assert(
-    sizeof(iree_hal_replay_allocator_virtual_memory_protect_payload_t) == 48,
-    "virtual memory protect replay payload must be 48 bytes");
-
-// Payload describing a virtual memory usage hint.
-typedef struct iree_hal_replay_allocator_virtual_memory_advise_payload_t {
-  // Session-local buffer id assigned to the virtual address reservation.
-  iree_hal_replay_object_id_t virtual_buffer_id;
-  // Byte offset within the virtual address reservation.
-  uint64_t virtual_offset;
-  // Advised range size, in bytes.
-  uint64_t size;
-  // Queue family affinity selecting the topology where the advice applies.
-  uint64_t queue_family_affinity;
-  // Memory advice bits applied to the range.
-  uint64_t advice;
-} iree_hal_replay_allocator_virtual_memory_advise_payload_t;
-static_assert(
-    sizeof(iree_hal_replay_allocator_virtual_memory_advise_payload_t) == 40,
-    "virtual memory advise replay payload must be 40 bytes");
 
 // Payload describing a buffer byte range operation.
 typedef struct iree_hal_replay_buffer_range_payload_t {

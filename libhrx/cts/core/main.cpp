@@ -74,16 +74,6 @@ hrx_status_t createTestGroup(HrxLoader& loader, const std::string& spec,
       status = loader.runtime_query_available_devices(
           runtime, scheme, loader.host_allocator_system(), &count, &infos);
       if (hrx_status_is_ok(status)) {
-        // The legacy driver's aggregate entry is not a physical GPU ordinal.
-        if (std::string_view(scheme) == "legacy-amdgpu") {
-          size_t physical_count = 0;
-          for (size_t i = 0; i < count; ++i) {
-            if (std::string_view(infos[i].uri) != "legacy-amdgpu://") {
-              infos[physical_count++] = infos[i];
-            }
-          }
-          count = physical_count;
-        }
         if (ordinal >= count) {
           status = loader.make_status(HRX_STATUS_OUT_OF_RANGE,
                                       "device ordinal is not available");

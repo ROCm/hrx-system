@@ -28,9 +28,6 @@ iree_status_t hrx_device_initialize(hrx_device_group_t group, size_t index,
   device->hal_device_group = group->hal_group;
   device->hal_device = iree_hal_device_group_device_at(group->hal_group, index);
   device->allocator.device = device;
-  device->allocator.hal_allocator =
-      iree_hal_device_allocator(device->hal_device);
-  iree_hal_allocator_retain(device->allocator.hal_allocator);
   hrx_mem_pool_backing_initialize(&device->mem_pool_backing);
   hrx_event_timestamp_pool_initialize(NULL, group->runtime->host_allocator,
                                       &device->event_timestamps);
@@ -98,7 +95,6 @@ void hrx_device_deinitialize(hrx_device_t device) {
   iree_arena_block_pool_deinitialize(&device->block_pool);
   hrx_event_timestamp_pool_deinitialize(&device->event_timestamps);
   hrx_mem_pool_backing_deinitialize(&device->mem_pool_backing);
-  iree_hal_allocator_release(device->allocator.hal_allocator);
 }
 
 void hrx_device_report_failure(hrx_device_t device, iree_status_t status) {

@@ -181,9 +181,8 @@ def sanitizer_configure_options(sanitizer: str) -> list[str]:
     ]
 
 
-def amdgpu_device_binary_source_options(rocm_root: Path) -> list[str]:
+def amdgpu_device_toolchain_options(rocm_root: Path) -> list[str]:
     return [
-        "IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE=source",
         "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm",
         f"IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH={rocm_root.as_posix()}",
     ]
@@ -247,7 +246,7 @@ def build_core(args: argparse.Namespace) -> None:
         "LIBHRX_BUILD_CTS=ON",
         "LIBHRX_BUILD_HIP_BINDING=ON",
         f"LIBHRX_BUILD_PASSTHROUGH={'ON' if args.passthrough else 'OFF'}",
-        f"IREE_HAL_DRIVER_AMDGPU={'ON' if args.amdgpu else 'OFF'}",
+        f"IREE_HAL_DRIVER_AMD_GPU={'ON' if args.amdgpu else 'OFF'}",
         f"IREE_ROCM_PATH={rocm_root}",
         "IREE_ENABLE_LIBBACKTRACE=OFF",
         f"IREE_ENABLE_ASSERTIONS={'ON' if args.assertions else 'OFF'}",
@@ -258,7 +257,7 @@ def build_core(args: argparse.Namespace) -> None:
     )
     cmake_defines.extend(sanitizer_configure_options(args.sanitizer))
     if args.amdgpu:
-        cmake_defines.extend(amdgpu_device_binary_source_options(rocm_root))
+        cmake_defines.extend(amdgpu_device_toolchain_options(rocm_root))
     cmake_defines.extend(cmake_options_from_env())
     cmake_defines.extend(args.cmake_option)
 

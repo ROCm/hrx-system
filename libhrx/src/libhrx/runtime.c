@@ -18,10 +18,6 @@
 #ifdef HRX_HAS_IREE_AMD_DRIVER
 #include "iree/hal/driver/amd/registration/driver_module.h"
 #endif
-#ifdef HRX_HAS_IREE_AMDGPU_DRIVER
-#include "iree/hal/driver/amdgpu/registration/driver_module.h"
-#endif
-
 // KFD retains its original render-file identity across device generations.
 // Native connections and their code remain process-owned; execution services
 // belong to individual runtimes and groups.
@@ -395,11 +391,6 @@ static iree_status_t hrx_initialize_gpu_driver_registry(void) {
 #ifdef HRX_HAS_IREE_AMD_DRIVER
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_driver_module_register(registry);
-  }
-#endif
-#ifdef HRX_HAS_IREE_AMDGPU_DRIVER
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_amdgpu_driver_module_register(registry);
   }
 #endif
 #if defined(HRX_BUILDING_SHARED)

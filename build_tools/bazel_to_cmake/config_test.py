@@ -222,30 +222,24 @@ cc_library(
         self.assertIn('"disabled.c"', output)
         self.assertIn("if(REPO_ENABLED)", output)
 
-    def test_gpu_image_targets_use_their_own_driver_selection(self):
-        cases = (
-            ("amdgpu", "IREE_HAL_AMDGPU_TARGETS", "IREE_HAL_AMD_GPU_TARGETS"),
-            ("amd/gpu", "IREE_HAL_AMD_GPU_TARGETS", "IREE_HAL_AMDGPU_TARGETS"),
+    def test_gpu_image_targets_use_runtime_selection(self):
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={}),
+            build_dir="/repo/runtime/src/iree/hal/driver/amd/gpu/image",
+            repo_root="/repo",
         )
-        for driver, variable, other_variable in cases:
-            with self.subTest(driver=driver):
-                converter = SimpleNamespace(body="")
-                functions = bazel_to_cmake_converter.BuildFileFunctions(
-                    converter=converter,
-                    targets=bazel_to_cmake_targets.TargetConverter(repo_map={}),
-                    build_dir=f"/repo/runtime/src/iree/hal/driver/{driver}/image",
-                    repo_root="/repo",
-                )
-                functions._iree_amdgpu_binary_variants_embed_data(
-                    name="hip_images",
-                    target="amdgcn-amd-amdhsa",
-                    srcs=["image.hip"],
-                    target_selectors_flag=f"//runtime/src/iree/hal/driver/{driver}:targets",
-                    source_format="hip",
-                    testonly=True,
-                )
-                self.assertIn("TARGETS\n    ${" + variable + "}", converter.body)
-                self.assertNotIn("${" + other_variable + "}", converter.body)
+        functions._iree_amdgpu_binary_variants_embed_data(
+            name="hip_images",
+            target="amdgcn-amd-amdhsa",
+            srcs=["image.hip"],
+            target_selectors_flag="//runtime/src/iree/hal/driver/amd/gpu:targets",
+            source_format="hip",
+            testonly=True,
+        )
+        self.assertIn("TARGETS\n    ${IREE_HAL_AMD_GPU_TARGETS}", converter.body)
+        self.assertNotIn("${LOOM_ARCH_AMDGPU_TARGETS}", converter.body)
 
     def test_selects_longest_matching_project_for_build_path(self):
         runtime = bazel_to_cmake_config.ProjectConfig(

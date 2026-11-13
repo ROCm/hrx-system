@@ -116,7 +116,7 @@ class CliTest(unittest.TestCase):
                 "build/cmake-ci",
                 "cmake",
                 "configure",
-                "-DIREE_HAL_DRIVER_AMDGPU=OFF",
+                "-DIREE_HAL_DRIVER_AMD_GPU=OFF",
             ]
         )
 
@@ -131,7 +131,7 @@ class CliTest(unittest.TestCase):
             [
                 "bazel",
                 "configure",
-                "-DIREE_HAL_DRIVER_AMDGPU=ON",
+                "-DIREE_HAL_DRIVER_AMD_GPU=ON",
                 "-DIREE_ROCM_PATH=/opt/rocm",
             ]
         )
@@ -139,7 +139,7 @@ class CliTest(unittest.TestCase):
         plan = args.handler(args)
         description = plan.describe()
 
-        self.assertIn("-DIREE_HAL_DRIVER_AMDGPU=ON", description)
+        self.assertIn("-DIREE_HAL_DRIVER_AMD_GPU=ON", description)
         self.assertIn("-DIREE_ROCM_PATH=/opt/rocm", description)
 
     def test_bazel_configure_accepts_portable_loom_target_preset(self):
@@ -161,7 +161,7 @@ class CliTest(unittest.TestCase):
             [
                 "bazel",
                 "configure",
-                "--//runtime/config/hal:drivers=amdgpu,task",
+                "--//runtime/config/hal:drivers=amd-gpu,task",
                 "--repo_env=IREE_ROCM_PATH=/opt/rocm",
             ]
         )
@@ -169,7 +169,7 @@ class CliTest(unittest.TestCase):
         plan = args.handler(args)
         description = plan.describe()
 
-        self.assertIn("--//runtime/config/hal:drivers=amdgpu", description)
+        self.assertIn("--//runtime/config/hal:drivers=amd-gpu,task", description)
         self.assertIn("--repo_env=IREE_ROCM_PATH=/opt/rocm", description)
 
     def test_bazel_build_and_test_default_to_project_targets(self):
@@ -210,7 +210,7 @@ class CliTest(unittest.TestCase):
                 "build",
                 "--",
                 "//runtime/...",
-                "-//runtime/src/iree/hal/driver/amdgpu/...",
+                "-//runtime/src/iree/hal/driver/amd/gpu/...",
             ]
         )
 
@@ -220,7 +220,7 @@ class CliTest(unittest.TestCase):
                 "build",
                 "--",
                 "//runtime/...",
-                "-//runtime/src/iree/hal/driver/amdgpu/...",
+                "-//runtime/src/iree/hal/driver/amd/gpu/...",
             ],
         )
 
@@ -231,7 +231,7 @@ class CliTest(unittest.TestCase):
                 "test",
                 "--test_tag_filters=-requires-gpu",
                 "//runtime/...",
-                "-//runtime/src/iree/hal/driver/amdgpu/...",
+                "-//runtime/src/iree/hal/driver/amd/gpu/...",
             ]
         )
 
@@ -243,7 +243,7 @@ class CliTest(unittest.TestCase):
                 "--test_tag_filters=-requires-gpu",
                 "--",
                 "//runtime/...",
-                "-//runtime/src/iree/hal/driver/amdgpu/...",
+                "-//runtime/src/iree/hal/driver/amd/gpu/...",
             ],
         )
 
@@ -284,7 +284,7 @@ class CliTest(unittest.TestCase):
                 "bazel",
                 "query",
                 "//runtime/...",
-                "-//runtime/src/iree/hal/driver/amdgpu/...",
+                "-//runtime/src/iree/hal/driver/amd/gpu/...",
             ]
         )
 
@@ -294,7 +294,7 @@ class CliTest(unittest.TestCase):
                 "query",
                 "--",
                 "//runtime/...",
-                "-//runtime/src/iree/hal/driver/amdgpu/...",
+                "-//runtime/src/iree/hal/driver/amd/gpu/...",
             ],
         )
 

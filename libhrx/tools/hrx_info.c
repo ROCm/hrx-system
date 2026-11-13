@@ -172,17 +172,6 @@ static int inspect_driver(hrx_runtime_t runtime, const char* driver_name,
     fprintf(stderr, "%s discovery: ", driver_name);
     return report_status_error(status);
   }
-  // Testing the aggregate and each physical entry would create overlapping
-  // execution devices. This tool lists and selects physical legacy GPUs only.
-  if (strcmp(driver_name, "legacy-amdgpu") == 0) {
-    size_t physical_count = 0;
-    for (size_t i = 0; i < count; ++i) {
-      if (strcmp(infos[i].uri, "legacy-amdgpu://") != 0) {
-        infos[physical_count++] = infos[i];
-      }
-    }
-    count = physical_count;
-  }
   printf("%s: %zu device%s\n", driver_name, count, count != 1 ? "s" : "");
   for (size_t i = 0; i < count; ++i) {
     printf("  [%zu] %s (%s)\n", i, infos[i].uri, infos[i].name);

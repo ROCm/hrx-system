@@ -81,7 +81,6 @@ iree_assert_dependency_boundary(
     name = "iree_hal_no_runtime_amdgpu_dependencies",
     forbidden_subtrees = [
         "//runtime/src/iree/amdgpu/...",
-        "//runtime/src/iree/hal/driver/amdgpu/...",
         "//runtime/src/iree/hal/executable/amdgpu/...",
     ],
     target = ":iree_hal",

@@ -10,7 +10,7 @@
 #include <string.h>
 
 static iree_status_t iree_hal_replay_executor_release_entry(
-    iree_hal_replay_executor_t* executor, iree_hal_replay_object_id_t object_id,
+    iree_hal_replay_executor_t* executor,
     iree_hal_replay_object_entry_t* entry) {
   iree_status_t status = iree_ok_status();
   switch (entry->type) {
@@ -31,21 +31,7 @@ static iree_status_t iree_hal_replay_executor_release_entry(
                           entry->value.buffer_mapping);
       break;
     case IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER:
-      if (entry->owning_allocator) {
-        if (iree_hal_replay_executor_has_virtual_memory_mapping(executor,
-                                                                object_id)) {
-          return iree_make_status(
-              IREE_STATUS_FAILED_PRECONDITION,
-              "replay virtual reservation still has live mappings");
-        }
-        status = iree_hal_allocator_virtual_memory_release(
-            entry->owning_allocator, entry->value.buffer);
-        if (!iree_status_is_ok(status)) {
-          return status;
-        }
-      } else {
-        iree_hal_buffer_release(entry->value.buffer);
-      }
+      iree_hal_buffer_release(entry->value.buffer);
       break;
     case IREE_HAL_REPLAY_OBJECT_TYPE_COMMAND_BUFFER:
       iree_hal_command_buffer_release(entry->value.command_buffer);
@@ -64,23 +50,9 @@ static iree_status_t iree_hal_replay_executor_release_entry(
     case IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE:
       iree_hal_queue_release(entry->value.queue);
       break;
-    case IREE_HAL_REPLAY_OBJECT_TYPE_PHYSICAL_MEMORY:
-      if (iree_hal_replay_executor_has_physical_memory_mapping(executor,
-                                                               object_id)) {
-        return iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "replay physical allocation still has live mappings");
-      }
-      status = iree_hal_allocator_physical_memory_free(
-          entry->owning_allocator, entry->value.physical_memory.handle);
-      if (!iree_status_is_ok(status)) {
-        return status;
-      }
-      break;
     default:
       break;
   }
-  iree_hal_allocator_release(entry->owning_allocator);
   memset(entry, 0, sizeof(*entry));
   return status;
 }
@@ -97,31 +69,6 @@ iree_status_t iree_hal_replay_executor_deinitialize(
   executor->queue_completions = NULL;
   executor->queue_completion_count = 0;
   executor->queue_completion_capacity = 0;
-
-  iree_host_size_t retained_mapping_count = 0;
-  const iree_host_size_t mapping_count = executor->virtual_memory_mapping_count;
-  for (iree_host_size_t i = 0; i < mapping_count; ++i) {
-    const iree_hal_replay_virtual_memory_mapping_t mapping =
-        executor->virtual_memory_mappings[i];
-    iree_hal_replay_object_entry_t* virtual_buffer_entry = NULL;
-    iree_status_t unmap_status = iree_hal_replay_executor_lookup(
-        executor, mapping.virtual_buffer_id, IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER,
-        &virtual_buffer_entry);
-    if (iree_status_is_ok(unmap_status)) {
-      unmap_status = iree_hal_allocator_virtual_memory_unmap(
-          virtual_buffer_entry->owning_allocator,
-          virtual_buffer_entry->value.buffer, mapping.virtual_offset,
-          mapping.size);
-    }
-    if (!iree_status_is_ok(unmap_status)) {
-      executor->virtual_memory_mappings[retained_mapping_count++] = mapping;
-    }
-    status = iree_status_join(status, unmap_status);
-  }
-  executor->virtual_memory_mapping_count = retained_mapping_count;
-  if (!iree_status_is_ok(status)) {
-    return status;
-  }
 
   // End host maps before detaching virtual buffers. Keep their actual storage
   // retained until all mappings are removed: a decommitted source may
@@ -143,8 +90,7 @@ iree_status_t iree_hal_replay_executor_deinitialize(
   iree_status_t detach_status = iree_ok_status();
   for (iree_host_size_t i = executor->object_capacity; i > 0; --i) {
     const iree_hal_replay_object_entry_t* entry = &executor->objects[i - 1];
-    if (entry->type != IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER ||
-        entry->owning_allocator) {
+    if (entry->type != IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER) {
       continue;
     }
     iree_hal_buffer_t* buffer = entry->value.buffer;
@@ -173,9 +119,9 @@ iree_status_t iree_hal_replay_executor_deinitialize(
         type == IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE) {
       continue;
     }
-    object_status = iree_status_join(
-        object_status, iree_hal_replay_executor_release_entry(
-                           executor, i - 1, &executor->objects[i - 1]));
+    object_status = iree_status_join(object_status,
+                                     iree_hal_replay_executor_release_entry(
+                                         executor, &executor->objects[i - 1]));
   }
   if (!iree_status_is_ok(object_status)) {
     return object_status;
@@ -184,9 +130,9 @@ iree_status_t iree_hal_replay_executor_deinitialize(
     if (executor->objects[i - 1].type != IREE_HAL_REPLAY_OBJECT_TYPE_POOL) {
       continue;
     }
-    object_status = iree_status_join(
-        object_status, iree_hal_replay_executor_release_entry(
-                           executor, i - 1, &executor->objects[i - 1]));
+    object_status = iree_status_join(object_status,
+                                     iree_hal_replay_executor_release_entry(
+                                         executor, &executor->objects[i - 1]));
   }
   if (!iree_status_is_ok(object_status)) {
     return object_status;
@@ -195,9 +141,9 @@ iree_status_t iree_hal_replay_executor_deinitialize(
     if (executor->objects[i - 1].type != IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE) {
       continue;
     }
-    object_status = iree_status_join(
-        object_status, iree_hal_replay_executor_release_entry(
-                           executor, i - 1, &executor->objects[i - 1]));
+    object_status = iree_status_join(object_status,
+                                     iree_hal_replay_executor_release_entry(
+                                         executor, &executor->objects[i - 1]));
   }
   if (!iree_status_is_ok(object_status)) {
     return object_status;
@@ -207,9 +153,9 @@ iree_status_t iree_hal_replay_executor_deinitialize(
         IREE_HAL_REPLAY_OBJECT_TYPE_ALLOCATOR) {
       continue;
     }
-    object_status = iree_status_join(
-        object_status, iree_hal_replay_executor_release_entry(
-                           executor, i - 1, &executor->objects[i - 1]));
+    object_status = iree_status_join(object_status,
+                                     iree_hal_replay_executor_release_entry(
+                                         executor, &executor->objects[i - 1]));
   }
   if (!iree_status_is_ok(object_status)) {
     return object_status;
@@ -218,9 +164,9 @@ iree_status_t iree_hal_replay_executor_deinitialize(
     if (executor->objects[i - 1].type != IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE) {
       continue;
     }
-    object_status = iree_status_join(
-        object_status, iree_hal_replay_executor_release_entry(
-                           executor, i - 1, &executor->objects[i - 1]));
+    object_status = iree_status_join(object_status,
+                                     iree_hal_replay_executor_release_entry(
+                                         executor, &executor->objects[i - 1]));
   }
   if (!iree_status_is_ok(object_status)) {
     return object_status;
@@ -228,11 +174,6 @@ iree_status_t iree_hal_replay_executor_deinitialize(
   iree_allocator_free(executor->host_allocator, executor->objects);
   executor->objects = NULL;
   executor->object_capacity = 0;
-  iree_allocator_free(executor->host_allocator,
-                      executor->virtual_memory_mappings);
-  executor->virtual_memory_mappings = NULL;
-  executor->virtual_memory_mapping_count = 0;
-  executor->virtual_memory_mapping_capacity = 0;
   iree_hal_device_group_release(executor->device_group);
   executor->device_group = NULL;
   return iree_ok_status();
@@ -274,8 +215,7 @@ iree_status_t iree_hal_replay_executor_store(
                                             " exceeds object table capacity",
                                             object_id);
     return iree_status_join(
-        status, iree_hal_replay_executor_release_entry(
-                    executor, IREE_HAL_REPLAY_OBJECT_ID_NONE, &entry));
+        status, iree_hal_replay_executor_release_entry(executor, &entry));
   }
   iree_hal_replay_object_entry_t* existing = &executor->objects[object_id];
   if (existing->type != IREE_HAL_REPLAY_OBJECT_TYPE_NONE) {
@@ -283,244 +223,10 @@ iree_status_t iree_hal_replay_executor_store(
         IREE_STATUS_ALREADY_EXISTS,
         "replay object id %" PRIu64 " is already assigned", object_id);
     return iree_status_join(
-        status, iree_hal_replay_executor_release_entry(
-                    executor, IREE_HAL_REPLAY_OBJECT_ID_NONE, &entry));
+        status, iree_hal_replay_executor_release_entry(executor, &entry));
   }
   *existing = entry;
   return iree_ok_status();
-}
-
-iree_status_t iree_hal_replay_executor_forget(
-    iree_hal_replay_executor_t* executor, iree_hal_replay_object_id_t object_id,
-    iree_hal_replay_object_type_t expected_type) {
-  iree_hal_replay_object_entry_t* entry = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(executor, object_id,
-                                                       expected_type, &entry));
-  iree_hal_allocator_release(entry->owning_allocator);
-  memset(entry, 0, sizeof(*entry));
-  return iree_ok_status();
-}
-
-static iree_status_t
-iree_hal_replay_executor_reserve_virtual_memory_mapping_capacity(
-    iree_hal_replay_executor_t* executor, iree_host_size_t minimum_capacity) {
-  if (minimum_capacity <= executor->virtual_memory_mapping_capacity) {
-    return iree_ok_status();
-  }
-  iree_host_size_t new_capacity =
-      executor->virtual_memory_mapping_capacity
-          ? executor->virtual_memory_mapping_capacity
-          : 8;
-  while (new_capacity < minimum_capacity) {
-    if (IREE_UNLIKELY(
-            !iree_host_size_checked_mul(new_capacity, 2, &new_capacity))) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "replay VMM mapping capacity overflow");
-    }
-  }
-  iree_host_size_t allocation_size = 0;
-  if (IREE_UNLIKELY(!iree_host_size_checked_mul(
-          new_capacity, sizeof(*executor->virtual_memory_mappings),
-          &allocation_size))) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "replay VMM mapping table size overflow");
-  }
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_realloc(executor->host_allocator, allocation_size,
-                             (void**)&executor->virtual_memory_mappings));
-  executor->virtual_memory_mapping_capacity = new_capacity;
-  return iree_ok_status();
-}
-
-iree_status_t iree_hal_replay_executor_map_virtual_memory(
-    iree_hal_replay_executor_t* executor, iree_hal_allocator_t* allocator,
-    iree_hal_replay_object_id_t virtual_buffer_id,
-    iree_hal_replay_object_id_t physical_memory_id,
-    iree_device_size_t virtual_offset, iree_device_size_t physical_offset,
-    iree_device_size_t size) {
-  if (IREE_UNLIKELY(size == 0 || virtual_offset + size < virtual_offset ||
-                    physical_offset + size < physical_offset)) {
-    return iree_make_status(IREE_STATUS_DATA_LOSS,
-                            "replay virtual memory map range is invalid");
-  }
-  iree_hal_replay_object_entry_t* virtual_buffer_entry = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
-      executor, virtual_buffer_id, IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER,
-      &virtual_buffer_entry));
-  iree_hal_replay_object_entry_t* physical_memory_entry = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
-      executor, physical_memory_id, IREE_HAL_REPLAY_OBJECT_TYPE_PHYSICAL_MEMORY,
-      &physical_memory_entry));
-  if (IREE_UNLIKELY(virtual_buffer_entry->owning_allocator != allocator ||
-                    physical_memory_entry->owning_allocator != allocator)) {
-    return iree_make_status(
-        IREE_STATUS_DATA_LOSS,
-        "replay virtual and physical memory must share an allocator");
-  }
-
-  const iree_device_size_t virtual_end = virtual_offset + size;
-  for (iree_host_size_t i = 0; i < executor->virtual_memory_mapping_count;
-       ++i) {
-    const iree_hal_replay_virtual_memory_mapping_t* mapping =
-        &executor->virtual_memory_mappings[i];
-    if (mapping->virtual_buffer_id == virtual_buffer_id &&
-        virtual_offset < mapping->virtual_offset + mapping->size &&
-        mapping->virtual_offset < virtual_end) {
-      return iree_make_status(
-          IREE_STATUS_DATA_LOSS,
-          "replay virtual memory map overlaps a live mapping");
-    }
-  }
-  iree_host_size_t required_capacity = 0;
-  if (IREE_UNLIKELY(!iree_host_size_checked_add(
-          executor->virtual_memory_mapping_count, 1, &required_capacity))) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "replay VMM mapping count overflow");
-  }
-  IREE_RETURN_IF_ERROR(
-      iree_hal_replay_executor_reserve_virtual_memory_mapping_capacity(
-          executor, required_capacity));
-  IREE_RETURN_IF_ERROR(iree_hal_allocator_virtual_memory_map(
-      allocator, virtual_buffer_entry->value.buffer, virtual_offset,
-      physical_memory_entry->value.physical_memory.handle, physical_offset,
-      size));
-  executor->virtual_memory_mappings[executor->virtual_memory_mapping_count++] =
-      (iree_hal_replay_virtual_memory_mapping_t){
-          .virtual_buffer_id = virtual_buffer_id,
-          .physical_memory_id = physical_memory_id,
-          .virtual_offset = virtual_offset,
-          .physical_offset = physical_offset,
-          .size = size,
-      };
-  return iree_ok_status();
-}
-
-iree_status_t iree_hal_replay_executor_unmap_virtual_memory(
-    iree_hal_replay_executor_t* executor, iree_hal_allocator_t* allocator,
-    iree_hal_replay_object_id_t virtual_buffer_id,
-    iree_device_size_t virtual_offset, iree_device_size_t size) {
-  if (IREE_UNLIKELY(size == 0 || virtual_offset + size < virtual_offset)) {
-    return iree_make_status(IREE_STATUS_DATA_LOSS,
-                            "replay virtual memory unmap range is invalid");
-  }
-  iree_hal_replay_object_entry_t* virtual_buffer_entry = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
-      executor, virtual_buffer_id, IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER,
-      &virtual_buffer_entry));
-  if (IREE_UNLIKELY(virtual_buffer_entry->owning_allocator != allocator)) {
-    return iree_make_status(
-        IREE_STATUS_DATA_LOSS,
-        "replay virtual memory reservation belongs to another allocator");
-  }
-
-  const iree_device_size_t virtual_end = virtual_offset + size;
-  iree_host_size_t replacement_capacity = 0;
-  if (IREE_UNLIKELY(!iree_host_size_checked_add(
-          executor->virtual_memory_mapping_count, 1, &replacement_capacity))) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "replay VMM mapping count overflow");
-  }
-  iree_host_size_t allocation_size = 0;
-  if (IREE_UNLIKELY(!iree_host_size_checked_mul(
-          replacement_capacity, sizeof(*executor->virtual_memory_mappings),
-          &allocation_size))) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "replay VMM mapping table size overflow");
-  }
-  iree_hal_replay_virtual_memory_mapping_t* replacement_mappings = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(executor->host_allocator,
-                                             allocation_size,
-                                             (void**)&replacement_mappings));
-
-  iree_device_size_t covered_size = 0;
-  iree_host_size_t replacement_count = 0;
-  for (iree_host_size_t i = 0; i < executor->virtual_memory_mapping_count;
-       ++i) {
-    const iree_hal_replay_virtual_memory_mapping_t mapping =
-        executor->virtual_memory_mappings[i];
-    const iree_device_size_t mapping_end =
-        mapping.virtual_offset + mapping.size;
-    if (mapping.virtual_buffer_id != virtual_buffer_id ||
-        mapping_end <= virtual_offset ||
-        virtual_end <= mapping.virtual_offset) {
-      replacement_mappings[replacement_count++] = mapping;
-      continue;
-    }
-
-    const iree_device_size_t intersection_start =
-        iree_max(mapping.virtual_offset, virtual_offset);
-    const iree_device_size_t intersection_end =
-        iree_min(mapping_end, virtual_end);
-    const iree_device_size_t intersection_size =
-        intersection_end - intersection_start;
-    if (IREE_UNLIKELY(covered_size + intersection_size < covered_size)) {
-      iree_allocator_free(executor->host_allocator, replacement_mappings);
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "replay VMM unmap coverage overflow");
-    }
-    covered_size += intersection_size;
-    if (mapping.virtual_offset < virtual_offset) {
-      iree_hal_replay_virtual_memory_mapping_t prefix = mapping;
-      prefix.size = virtual_offset - mapping.virtual_offset;
-      replacement_mappings[replacement_count++] = prefix;
-    }
-    if (virtual_end < mapping_end) {
-      iree_hal_replay_virtual_memory_mapping_t suffix = mapping;
-      suffix.physical_offset += virtual_end - mapping.virtual_offset;
-      suffix.virtual_offset = virtual_end;
-      suffix.size = mapping_end - virtual_end;
-      replacement_mappings[replacement_count++] = suffix;
-    }
-  }
-
-  if (IREE_UNLIKELY(covered_size != size)) {
-    iree_allocator_free(executor->host_allocator, replacement_mappings);
-    return iree_make_status(
-        IREE_STATUS_DATA_LOSS,
-        "replay virtual memory unmap range is not fully mapped");
-  }
-  iree_status_t status =
-      iree_hal_replay_executor_drain_queue_completions(executor);
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_allocator_virtual_memory_unmap(
-        allocator, virtual_buffer_entry->value.buffer, virtual_offset, size);
-  }
-  if (!iree_status_is_ok(status)) {
-    iree_allocator_free(executor->host_allocator, replacement_mappings);
-    return status;
-  }
-  iree_allocator_free(executor->host_allocator,
-                      executor->virtual_memory_mappings);
-  executor->virtual_memory_mappings = replacement_mappings;
-  executor->virtual_memory_mapping_count = replacement_count;
-  executor->virtual_memory_mapping_capacity = replacement_capacity;
-  return iree_ok_status();
-}
-
-bool iree_hal_replay_executor_has_virtual_memory_mapping(
-    const iree_hal_replay_executor_t* executor,
-    iree_hal_replay_object_id_t virtual_buffer_id) {
-  for (iree_host_size_t i = 0; i < executor->virtual_memory_mapping_count;
-       ++i) {
-    if (executor->virtual_memory_mappings[i].virtual_buffer_id ==
-        virtual_buffer_id) {
-      return true;
-    }
-  }
-  return false;
-}
-
-bool iree_hal_replay_executor_has_physical_memory_mapping(
-    const iree_hal_replay_executor_t* executor,
-    iree_hal_replay_object_id_t physical_memory_id) {
-  for (iree_host_size_t i = 0; i < executor->virtual_memory_mapping_count;
-       ++i) {
-    if (executor->virtual_memory_mappings[i].physical_memory_id ==
-        physical_memory_id) {
-      return true;
-    }
-  }
-  return false;
 }
 
 iree_status_t iree_hal_replay_executor_allocate_function_map(

@@ -240,22 +240,6 @@ class HrxLoader {
   decltype(&hrx_buffer_view_rank) buffer_view_rank;
   decltype(&hrx_buffer_view_dim) buffer_view_dim;
 
-  // Legacy scalar VMM retained for ROCr-backed HIP.
-  decltype(&hrx_allocator_query_virtual_memory) allocator_query_virtual_memory;
-  decltype(&hrx_allocator_virtual_memory_reserve)
-      allocator_virtual_memory_reserve;
-  decltype(&hrx_allocator_virtual_memory_release)
-      allocator_virtual_memory_release;
-  decltype(&hrx_allocator_physical_memory_allocate)
-      allocator_physical_memory_allocate;
-  decltype(&hrx_allocator_physical_memory_free) allocator_physical_memory_free;
-  decltype(&hrx_allocator_virtual_memory_map) allocator_virtual_memory_map;
-  decltype(&hrx_allocator_virtual_memory_unmap) allocator_virtual_memory_unmap;
-  decltype(&hrx_allocator_virtual_memory_protect)
-      allocator_virtual_memory_protect;
-  decltype(&hrx_allocator_virtual_memory_protect_scoped)
-      allocator_virtual_memory_protect_scoped;
-
   // Address owners and batched mappings.
   decltype(&hrx_device_query_host_memory_scope) device_query_host_memory_scope;
   decltype(&hrx_device_query_queue_family_memory_scope)

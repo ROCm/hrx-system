@@ -207,10 +207,6 @@ class RuntimeBuildFileFunctions(
         kwargs = self._apply_runtime_cmake_policy(kwargs)
         super().iree_hal_amd_gpu_cts_testdata(**kwargs)
 
-    def iree_amdgpu_hal_cts_testdata(self, **kwargs):
-        kwargs = self._apply_runtime_cmake_policy(kwargs)
-        self._iree_amdgpu_hal_cts_testdata(**kwargs)
-
     def iree_amdgpu_binary(self, **kwargs):
         kwargs = self._apply_runtime_cmake_policy(kwargs)
         self._iree_amdgpu_binary(**kwargs)
@@ -233,37 +229,6 @@ class RuntimeBuildFileFunctions(
 
     def iree_amdgpu_target_selectors_flag(self, *args, **kwargs):
         pass
-
-    def iree_hal_amdgpu_source_device_binaries(self, name):
-        module = (
-            "//runtime/src/iree/hal/driver/amdgpu/device/binaries/source:targets.bzl"
-        )
-        inputs = list(
-            self._loaded_modules.symbol(module, "_GENERATOR_INPUTS", self._build_dir)
-        )
-        inputs += self._loaded_modules.symbol(
-            module, "_GENERATOR_SCRIPT_DEPS", self._build_dir
-        )
-        self._converter.body += (
-            "iree_hal_amdgpu_source_device_binaries(\n"
-            + self._convert_string_arg_block("NAME", name)
-            + self._convert_srcs_block(inputs, block_name="INPUTS")
-            + ")\n\n"
-        )
-
-    def iree_hal_amdgpu_device_binaries(
-        self,
-        name,
-        target_selectors_flag="//runtime/src/iree/hal/driver/amdgpu:targets",
-        target="amdgcn-amd-amdhsa",
-    ):
-        self._converter.body += (
-            "iree_hal_amdgpu_device_binaries(\n"
-            + self._convert_string_arg_block("NAME", name)
-            + self._convert_string_arg_block("TARGET", target)
-            + self._convert_amdgpu_target_selectors_block(target_selectors_flag)
-            + ")\n\n"
-        )
 
 
 def convert_unmatched_target(converter, target):

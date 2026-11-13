@@ -20,7 +20,6 @@ SUPPORTED_DRIVERS = [
     "amd",
     "amd-gpu",
     "amd-xdna",
-    "amdgpu",
     "task",
     "vulkan",
     "webgpu",

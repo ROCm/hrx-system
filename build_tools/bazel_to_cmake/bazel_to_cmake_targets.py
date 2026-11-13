@@ -37,9 +37,6 @@ class TargetConverter:
                 "//third_party:hsa_runtime_headers": [
                     "iree::third_party::hsa_runtime_headers"
                 ],
-                "//third_party:aqlprofile_sdk_headers": [
-                    "iree::third_party::aqlprofile_sdk_headers"
-                ],
                 "//third_party:libbacktrace": ["${IREE_LIBBACKTRACE_TARGET}"],
                 "//third_party:mimalloc": ["iree::third_party::mimalloc"],
                 "//third_party:miniaudio": ["iree::third_party::miniaudio"],

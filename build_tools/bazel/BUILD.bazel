@@ -69,10 +69,7 @@ py_library(
 py_library(
     name = "configure_dependencies",
     srcs = ["configure_dependencies.py"],
-    deps = [
-        ":configure_api",
-        "//runtime/build_tools/bazel:configure",
-    ],
+    deps = [":configure_api"],
 )
 
 py_library(

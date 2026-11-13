@@ -64,7 +64,7 @@ class ConfigureBazelTest(unittest.TestCase):
             config = self.configure_bazel.generate_config(
                 self.configure_bazel.parse_arguments(
                     [
-                        "-DIREE_HAL_DRIVER_AMDGPU=ON",
+                        "-DIREE_HAL_DRIVER_AMD_GPU=ON",
                         "-DIREE_HAL_DRIVER_AMD_XDNA=OFF",
                         "-DAMDF_FAMILY_CDNA=OFF",
                         "-DLOOM_TARGET_ALL_CPU=ON",
@@ -76,7 +76,7 @@ class ConfigureBazelTest(unittest.TestCase):
             )
 
         for expected in (
-            "build --//runtime/config/hal:drivers=task,amdgpu,amd-gpu",
+            "build --//runtime/config/hal:drivers=task,amd-gpu",
             "build --//libamdf/config:enabled=true",
             "build --//libamdf/config:families=rdna,xdna",
             "build --//build_tools/vulkan/config:enabled=false",
@@ -203,14 +203,14 @@ class ConfigureBazelTest(unittest.TestCase):
         config = self.configure_bazel.generate_config(
             self.configure_bazel.parse_arguments(
                 [
-                    "--//runtime/src/iree/hal/driver/amdgpu:targets=gfx942,gfx125X-all",
+                    "--//runtime/src/iree/hal/driver/amd/gpu:targets=gfx942,gfx125X-all",
                     "--//loom/config/arch/amdgpu:targets=gfx942,gfx125X-all",
                 ]
             )
         )
 
         self.assertIn(
-            "build --//runtime/src/iree/hal/driver/amdgpu:targets=gfx125X-all,gfx942\n",
+            "build --//runtime/src/iree/hal/driver/amd/gpu:targets=gfx125X-all,gfx942\n",
             config,
         )
         self.assertIn(

@@ -745,8 +745,8 @@ static iree_status_t iree_hal_replay_wrap_device(
                                 : NULL;
   if (iree_status_is_ok(status) && base_allocator) {
     status = iree_hal_replay_recorder_wrap_allocator(
-        recorder, device->device_id, (iree_hal_device_t*)device, base_allocator,
-        host_allocator, &device->allocator);
+        recorder, device->device_id, base_allocator, host_allocator,
+        &device->allocator);
   }
   if (iree_status_is_ok(status)) {
     *out_device = (iree_hal_device_t*)device;

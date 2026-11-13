@@ -543,17 +543,6 @@ iree_status_t iree_hal_streaming_memory_wrap_virtual_reservation(
 void iree_hal_streaming_memory_release_wrapped_buffer(
     iree_hal_streaming_buffer_t* buffer);
 
-// Drops a virtual reservation wrapper's HRX/HAL reference before the allocator
-// attempts to consume the reservation. The pointer-table entry remains in place
-// until release succeeds, and concurrent use of an address being freed is not a
-// valid operation. The prepared wrapper must be restored or released below.
-void iree_hal_streaming_memory_prepare_virtual_reservation_release(
-    iree_hal_streaming_buffer_t* buffer);
-
-// Restores a prepared virtual reservation after the allocator rejects release.
-void iree_hal_streaming_memory_restore_virtual_reservation(
-    iree_hal_streaming_buffer_t* buffer, hrx_buffer_t virtual_buffer);
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif

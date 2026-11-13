@@ -25,7 +25,6 @@ HOST_DRIVERS = ("task",)
 AMD_ENGINES = ("amd-gpu", "amd-xdna")
 DRIVER_DEFINES = {
     "IREE_HAL_DRIVER_TASK": "task",
-    "IREE_HAL_DRIVER_AMDGPU": "amdgpu",
     "IREE_HAL_DRIVER_VULKAN": "vulkan",
     "IREE_HAL_DRIVER_WEBGPU": "webgpu",
     "IREE_HAL_DRIVER_AMD": "amd",
@@ -35,10 +34,9 @@ DRIVER_DEFINES = {
 ALL_DRIVERS = tuple(DRIVER_DEFINES.values())
 DEFAULT_DRIVERS = (*HOST_DRIVERS, "amd")
 SUPPORTED_ENABLED_DRIVERS = frozenset(ALL_DRIVERS).difference(("amd",))
-ROCM_DRIVERS = frozenset(("amdgpu",))
 
 NATIVE_DRIVER_FLAG = "--//runtime/config/hal:drivers"
-NATIVE_AMDGPU_TARGETS_FLAG = "--//runtime/src/iree/hal/driver/amdgpu:targets"
+NATIVE_AMDGPU_TARGETS_FLAG = "--//runtime/src/iree/hal/driver/amd/gpu:targets"
 NATIVE_RDMA_FLAG = "--//runtime/config/net:rdma"
 
 _REMOVED_OPTIONS = (
@@ -57,7 +55,7 @@ class State:
     driver_source: str | None = None  # Portable or native selection spelling.
     # Explicit per-engine choices that override the AMD umbrella in either order.
     amd_engine_overrides: dict[str, bool] = field(default_factory=dict)
-    amdgpu_targets: set[str] | None = None  # Legacy AMDGPU device binaries.
+    amdgpu_targets: set[str] | None = None  # Native AMD GPU device binaries.
     rdma_enabled: bool = False  # Whether native RDMA resources are built.
     rdma_source: str | None = None  # Portable or native RDMA spelling.
 
@@ -136,7 +134,7 @@ def _removed_option(request: ConfigRequest, arg: str) -> None:
         f"{name} was removed. Use portable -DIREE_HAL_DRIVER_* options and "
         "-DIREE_ROCM_PATH=/path/to/rocm when package-mode ROCm headers are "
         "required. The native Bazel form is "
-        f"{NATIVE_DRIVER_FLAG}=amdgpu,task "
+        f"{NATIVE_DRIVER_FLAG}=amd-gpu,task "
         "--repo_env=IREE_ROCM_PATH=/path/to/rocm."
     )
 

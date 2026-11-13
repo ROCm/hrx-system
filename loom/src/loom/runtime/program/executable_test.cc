@@ -86,8 +86,10 @@ class ExecutableTest : public JitTest {
       const auto storage = loom_runtime_jit_cache_storage(jit_);
       EXPECT_EQ(storage.count, 2u);
       EXPECT_EQ(storage.executable_count, 1u);
-      EXPECT_EQ(compilation_.kernels, 2u * (pass + 1));
-      EXPECT_EQ(compilation_.reused_kernels, 0u);
+      // A native publisher may still retain its artifact after delivering the
+      // stage. New work can reuse it even after the device image is trimmed.
+      EXPECT_EQ(compilation_.kernels + compilation_.reused_kernels,
+                2u * (pass + 1));
       if (direct) {
         EXPECT_NE(dispatches_[0], dispatches_[1]);
       }

@@ -107,12 +107,6 @@ HRX_DEPS = [
         "//runtime/src/iree/hal/driver/amd/gpu/target:selection",
     ],
     "//conditions:default": [],
-}) + iree_select({
-    "//runtime/config/hal:driver_amdgpu": [
-        "//runtime/src/iree/hal/driver/amdgpu/registration",
-        "//runtime/src/iree/hal/driver/amdgpu/target:selection",
-    ],
-    "//conditions:default": [],
 })
 
 HRX_AMDGPU_COPTS = iree_select({
@@ -123,11 +117,6 @@ HRX_AMDGPU_COPTS = iree_select({
 }) + iree_select({
     "//runtime/config/hal:driver_amd_gpu": [
         "-DHRX_HAS_IREE_AMD_GPU_DRIVER",
-    ],
-    "//conditions:default": [],
-}) + iree_select({
-    "//runtime/config/hal:driver_amdgpu": [
-        "-DHRX_HAS_IREE_AMDGPU_DRIVER",
     ],
     "//conditions:default": [],
 })

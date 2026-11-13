@@ -68,9 +68,6 @@ set(IREE_HAL_EXECUTABLE_LOADER_EXTRA_DEPS "" CACHE STRING "")
 
 option(IREE_HAL_DRIVER_DEFAULTS
   "Default value for opt-in runtime HAL drivers." OFF)
-if(NOT DEFINED IREE_HAL_DRIVER_AMDGPU_DEFAULT)
-  set(IREE_HAL_DRIVER_AMDGPU_DEFAULT ${IREE_HAL_DRIVER_DEFAULTS})
-endif()
 if(NOT DEFINED IREE_HAL_DRIVER_TASK_DEFAULT)
   set(IREE_HAL_DRIVER_TASK_DEFAULT ${IREE_TARGET_HAS_THREADS})
 endif()
@@ -80,9 +77,6 @@ endif()
 if(NOT DEFINED IREE_HAL_DRIVER_WEBGPU_DEFAULT)
   set(IREE_HAL_DRIVER_WEBGPU_DEFAULT ${IREE_HAL_DRIVER_DEFAULTS})
 endif()
-option(IREE_HAL_DRIVER_AMDGPU
-  "Enables the legacy-amdgpu runtime HAL driver."
-  ${IREE_HAL_DRIVER_AMDGPU_DEFAULT})
 option(IREE_HAL_DRIVER_TASK
   "Enables the task runtime HAL driver."
   ${IREE_HAL_DRIVER_TASK_DEFAULT})
@@ -118,11 +112,6 @@ option(IREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY
   "Enables the system dynamic library loader for the task HAL driver."
   ${IREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY_DEFAULT})
 
-set(IREE_HAL_AMDGPU_TARGETS
-  "gfx9-generic;gfx90a;gfx9-4-generic;gfx10-1-generic;gfx10-3-generic;gfx11-generic;gfx12-generic"
-  CACHE STRING
-  "AMDGPU target selectors supported by this runtime build.")
-
 set(IREE_HAL_AMD_GPU_TARGETS
   "gfx9-generic;gfx90a;gfx9-4-generic;gfx10-1-generic;gfx10-3-generic;gfx11-generic;gfx12-generic"
   CACHE STRING
@@ -130,11 +119,9 @@ set(IREE_HAL_AMD_GPU_TARGETS
 
 include(binary)
 include(selectors)
-include(cts)
 include(iree_cli_test)
 include(iree_external_hal_driver)
 include(iree_runtime_amdgpu_toolchain)
-include(iree_runtime_amdgpu_device_binaries)
 include(iree_runtime_hal_cts_testdata)
 include(iree_runtime_hal_cts_test_suite)
 include(iree_wasm_library)

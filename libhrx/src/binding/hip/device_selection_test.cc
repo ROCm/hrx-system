@@ -125,18 +125,6 @@ TEST(HipDeviceSelectionTest, NativeFilteringRulesAndComposition) {
   }
 }
 
-TEST(HipDeviceSelectionTest, LegacyDoesNotApplyRocrTwice) {
-  auto devices = PhysicalDevices();
-  iree_host_size_t count = devices.size();
-  iree_hip_device_selection_t selection = {"1", "2,0", nullptr};
-  IREE_ASSERT_OK(iree_hip_device_selection_apply(
-      &selection, IREE_SV("legacy-amdgpu"), iree_allocator_system(), &count,
-      devices.data()));
-  ASSERT_EQ(count, 2);
-  EXPECT_EQ(devices[0].device_id, 41);
-  EXPECT_EQ(devices[1].device_id, 19);
-}
-
 TEST(HipDeviceSelectionTest, UnavailableUuidDoesNotMatch) {
   for (const auto path : {IREE_SV("GPU-0000000000000000"), IREE_SV("GPU-XX")}) {
     for (bool rocr : {false, true}) {

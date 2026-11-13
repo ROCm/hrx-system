@@ -560,12 +560,10 @@ static iree_status_t iree_hal_streaming_device_group_create(
   hrx_device_group_t group = NULL;
   const char* driver_name = iree_hal_streaming_gpu_driver_name();
   if (strcmp(driver_name, "amdgpu") != 0 && strcmp(driver_name, "rdna") != 0 &&
-      strcmp(driver_name, "cdna") != 0 &&
-      strcmp(driver_name, "legacy-amdgpu") != 0) {
+      strcmp(driver_name, "cdna") != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "unknown HRX_GPU_DRIVER '%s' (expected amdgpu, rdna, cdna, or "
-        "legacy-amdgpu)",
+        "unknown HRX_GPU_DRIVER '%s' (expected amdgpu, rdna, or cdna)",
         driver_name);
   }
   const iree_allocator_t allocator = runtime->host_allocator;
@@ -580,12 +578,7 @@ static iree_status_t iree_hal_streaming_device_group_create(
   }
   iree_host_size_t selected_count = 0;
   if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < info_count; ++i) {
-      if (strcmp(driver_name, "legacy-amdgpu") == 0 && !infos[i].path.size) {
-        continue;
-      }
-      infos[selected_count++] = infos[i];
-    }
+    selected_count = info_count;
     if (options->device_selector.select) {
       status =
           options->device_selector.select(options->device_selector.self, scheme,

@@ -132,9 +132,8 @@ iree_status_t iree_hal_replay_recorder_create_virtual_buffer(
   iree_allocator_free(host_allocator, scratch);
   if (iree_status_is_ok(status)) {
     *out_buffer = iree_hal_replay_recorder_buffer_initialize_proxy(
-        recorder, IREE_HAL_REPLAY_OBJECT_ID_NONE, buffer_id,
-        IREE_HAL_REPLAY_OBJECT_ID_NONE, NULL, native_buffer, host_allocator,
-        buffer_proxy);
+        recorder, IREE_HAL_REPLAY_OBJECT_ID_NONE, buffer_id, NULL,
+        native_buffer, host_allocator, buffer_proxy);
     buffer_proxy = NULL;
   }
   iree_hal_replay_recorder_buffer_free_proxy(host_allocator, buffer_proxy);

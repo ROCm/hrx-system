@@ -28,9 +28,7 @@ load(
 )
 load(
     "//runtime/requirements:defs.bzl",
-    "AMDGPU_RESOURCE",
     "HAL_AMD",
-    "HAL_AMDGPU",
     "HAL_AMD_GPU",
     "HAL_AMD_XDNA",
     "HAL_VULKAN",
@@ -89,22 +87,6 @@ PACKAGE_POLICIES = [
             "runtime/src/iree/hal/driver/amd/gpu/queue/pm4/umq",
         ],
         build_requirements = [HAL_AMD_GPU, LIBAMDF],
-    ),
-    package_policy(
-        packages = ["runtime/src/iree/hal/driver/amdgpu/..."],
-        excluded_packages = [
-            "runtime/src/iree/hal/driver/amdgpu/abi",
-        ],
-        build_requirements = [HAL_AMDGPU],
-    ),
-    package_policy(
-        packages = ["runtime/src/iree/hal/driver/amdgpu/..."],
-        excluded_packages = [
-            "runtime/src/iree/hal/driver/amdgpu/abi",
-            "runtime/src/iree/hal/driver/amdgpu/target/...",
-        ],
-        run_requirements = [AMDGPU_RESOURCE],
-        resource_group = GPU_DEVICE_RESOURCE_GROUP,
     ),
     package_policy(
         packages = ["runtime/src/iree/hal/driver/vulkan/..."],

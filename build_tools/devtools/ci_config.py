@@ -67,7 +67,7 @@ CMAKE_HRX_REPOSITORY_SMOKE_CTEST_REGEXES = (
     "^libhrx/cts/tests/status/hrx_cts_status$",
 )
 BAZEL_REPOSITORY_DEVICE_TARGETS = (
-    "//runtime/src/iree/hal/driver/amdgpu/util:pm4_dispatch_test_kernels",
+    "//runtime/src/iree/hal/driver/amd/gpu/image:hip_images",
 )
 BAZEL_REPOSITORY_TEST_TARGETS = ("//...",)
 
@@ -142,7 +142,6 @@ CPU_CTEST_EXCLUDE_REGEX = ctest_exclude_regex(CPU_XFAILS)
 CPU_SANITIZERS_XFAIL_TARGETS = bazel_xfail_targets(CPU_SANITIZERS_XFAILS)
 CPU_SANITIZERS_CTEST_EXCLUDE_REGEX = ctest_exclude_regex(CPU_SANITIZERS_XFAILS)
 CPU_BAZEL_TARGET_EXCLUDES = (
-    "-//runtime/src/iree/hal/driver/amdgpu/...",
     "-//runtime/src/iree/hal/driver/vulkan/...",
     "-//runtime/src/iree/hal/driver/webgpu/...",
 )
@@ -169,7 +168,7 @@ REPOSITORY_BUILD_BAZEL_OPTIONS = REPOSITORY_BAZEL_OPTIONS + (
     # build action needs them. Integration lanes own executable coverage.
     "--nobuild_runfile_links",
 )
-NON_CPU_HAL_DRIVER_CTEST_REGEX = r"^iree/hal/driver/(amdgpu|vulkan|webgpu)/"
+NON_CPU_HAL_DRIVER_CTEST_REGEX = r"^iree/hal/driver/(vulkan|webgpu)/"
 
 AMDF_BAZEL_TARGETS = ("//libamdf/...",)
 AMDF_BUILD_REQUIREMENT_TAG = "iree-build-requirement=libamdf"
@@ -305,7 +304,6 @@ AMDGPU_BAZEL_TEST_TAG_FILTERS = (
     AMD_GPU_RUN_REQUIREMENT_TAG,
 )
 AMDGPU_BAZEL_TARGET_EXCLUDES = (
-    "-//runtime/src/iree/hal/driver/amdgpu/...",
     "-//runtime/src/iree/hal/driver/vulkan/...",
     "-//runtime/src/iree/hal/driver/webgpu/...",
 )
@@ -347,13 +345,6 @@ AMDGPU_XFAILS = tuple(
 AMDGPU_SANITIZERS_XFAILS = ()
 AMDGPU_TSAN_XFAILS = ()
 AMDGPU_BAZEL_XFAILS_BY_TARGET_SELECTOR = {
-    # gfx1151 currently hangs while waiting for manually instrumented ASAN
-    # feedback. Keep the remaining gfx1151 coverage active.
-    "gfx1151": (
-        bazel_xfail(
-            "//runtime/src/iree/hal/driver/amdgpu/cts:manual_asan_executable_tests"
-        ),
-    ),
     # gfx120X currently hangs while initializing or executing device-side TSAN.
     # Keep every other Loom AMDGPU execution test active on the runner.
     "gfx120X-all": (bazel_xfail("//loom/target/amdgpu/test/sanitizer:tsan_test"),),
@@ -384,10 +375,7 @@ VULKAN_BAZEL_TEST_TAG_FILTERS = (
     VULKAN_BUILD_REQUIREMENT_TAG,
     VULKAN_RUN_REQUIREMENT_TAG,
 )
-VULKAN_BAZEL_TARGET_EXCLUDES = (
-    "-//runtime/src/iree/hal/driver/amdgpu/...",
-    "-//runtime/src/iree/hal/driver/webgpu/...",
-)
+VULKAN_BAZEL_TARGET_EXCLUDES = ("-//runtime/src/iree/hal/driver/webgpu/...",)
 VULKAN_CMAKE_DRIVER_TARGETS = ("runtime/src/iree/hal/driver/vulkan/all",)
 VULKAN_CTEST_REGEX = r"^iree/hal/driver/vulkan/"
 VULKAN_CTEST_RESOURCE_LABEL_REGEX = "runtime-resource=vulkan-device"

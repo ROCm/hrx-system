@@ -82,7 +82,7 @@ jobs:
       HRX_BUILD_LOOM: "false"
       HRX_SANITIZER: none
       HRX_ASSERTIONS: "false"
-      HRX_CMAKE_OPTIONS: "-DIREE_HAL_AMDGPU_TARGETS=gfx942;gfx1151;gfx1201"
+      HRX_CMAKE_OPTIONS: "-DIREE_HAL_AMD_GPU_TARGETS=gfx942;gfx1151;gfx1201"
       HRX_CTEST_REGEX: "^(libamdf/cts/core/query_dynamic|libhrx/cts/tests/status/hrx_cts_status)$"
       HRX_CTEST_EXCLUDE_REGEX: ""
       HRX_CTEST_LABEL_REGEX: ""
@@ -166,7 +166,6 @@ jobs:
       - name: Configure LibHRX Bazel
         run: |
           python3 dev.py bazel configure \
-            -DIREE_HAL_DRIVER_AMDGPU=OFF \
             -DIREE_HAL_DRIVER_AMD_GPU=ON \
             -DIREE_HAL_DRIVER_AMD_XDNA=OFF \
             -DAMDF_BUILD=ON
@@ -264,7 +263,6 @@ jobs:
       - name: Configure LibHRX Bazel
         run: |
           python3 dev.py bazel configure \
-            -DIREE_HAL_DRIVER_AMDGPU=OFF \
             -DIREE_HAL_DRIVER_AMD_GPU=ON \
             -DIREE_HAL_DRIVER_AMD_XDNA=OFF \
             -DAMDF_BUILD=ON \

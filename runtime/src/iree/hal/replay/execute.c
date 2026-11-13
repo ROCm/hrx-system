@@ -626,12 +626,8 @@ static bool iree_hal_replay_plan_is_completion_boundary(
     return false;
   }
   return record->header.status_code == IREE_STATUS_OK &&
-         (record->header.operation_code ==
-              IREE_HAL_REPLAY_OPERATION_CODE_VIRTUAL_BUFFER_DETACH ||
-          record->header.operation_code ==
-              IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_UNMAP ||
-          record->header.operation_code ==
-              IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_PROTECT);
+         record->header.operation_code ==
+             IREE_HAL_REPLAY_OPERATION_CODE_VIRTUAL_BUFFER_DETACH;
 }
 
 static iree_status_t iree_hal_replay_plan_verify_completion_dependencies(

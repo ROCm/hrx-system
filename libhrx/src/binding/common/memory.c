@@ -640,26 +640,6 @@ void iree_hal_streaming_memory_release_wrapped_buffer(
   iree_hal_streaming_buffer_free(buffer);
 }
 
-void iree_hal_streaming_memory_prepare_virtual_reservation_release(
-    iree_hal_streaming_buffer_t* buffer) {
-  IREE_ASSERT_ARGUMENT(buffer);
-  IREE_ASSERT_ARGUMENT(buffer->hrx_buf);
-  hrx_buffer_t virtual_buffer = buffer->hrx_buf;
-  buffer->hrx_buf = NULL;
-  buffer->buffer = NULL;
-  hrx_buffer_release(virtual_buffer);
-}
-
-void iree_hal_streaming_memory_restore_virtual_reservation(
-    iree_hal_streaming_buffer_t* buffer, hrx_buffer_t virtual_buffer) {
-  IREE_ASSERT_ARGUMENT(buffer);
-  IREE_ASSERT_ARGUMENT(virtual_buffer);
-  IREE_ASSERT_ARGUMENT(!buffer->hrx_buf);
-  buffer->hrx_buf = virtual_buffer;
-  hrx_buffer_retain(virtual_buffer);
-  buffer->buffer = virtual_buffer->hal_buffer;
-}
-
 static void iree_hal_streaming_temporary_host_buffer_free(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_buffer_t* buffer) {
