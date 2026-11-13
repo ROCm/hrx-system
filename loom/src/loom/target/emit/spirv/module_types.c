@@ -912,9 +912,24 @@ iree_status_t loom_spirv_emit_type_id_for_value_type(
     case LOOM_SPIRV_VALUE_CLASS_OFFSET64:
     case LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS:
       return loom_spirv_emit_type_u64(context, out_type_id);
-    case LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER:
+    case LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER: {
+      if (type.vector.lane_count) {
+        uint32_t component_type_id = 0;
+        IREE_RETURN_IF_ERROR(loom_spirv_emit_type_scalar(
+            context, type.scalar_type, &component_type_id));
+        uint32_t vector_type_id = 0;
+        IREE_RETURN_IF_ERROR(loom_spirv_emit_type_vector(
+            context, component_type_id, type.vector.lane_count,
+            &vector_type_id));
+        const uint32_t byte_width =
+            loom_spirv_scalar_type_descriptor(type.scalar_type)->bit_width / 8;
+        return loom_spirv_emit_type_pointer(
+            context, LOOM_SPIRV_STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER,
+            vector_type_id, byte_width * type.vector.lane_count, out_type_id);
+      }
       return loom_spirv_emit_type_ptr_physical_storage_buffer_scalar(
           context, type.scalar_type, out_type_id);
+    }
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP:
       return loom_spirv_emit_type_ptr_workgroup_scalar(
           context, type.scalar_type, out_type_id);

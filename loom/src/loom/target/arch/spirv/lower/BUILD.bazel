@@ -156,6 +156,13 @@ loom_check_test_suite(
 )
 
 loom_check_test_suite(
+    name = "packed_memory_tests",
+    srcs = ["packed_memory_test.loom-test"],
+    tags = ["hostonly"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/emit:spirv_binary"]),
+)
+
+loom_check_test_suite(
     name = "index_tests",
     srcs = [
         "index_control_test.loom-test",

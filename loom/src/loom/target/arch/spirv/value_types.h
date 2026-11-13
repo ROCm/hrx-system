@@ -31,7 +31,7 @@ typedef enum loom_spirv_value_class_e {
   LOOM_SPIRV_VALUE_CLASS_OFFSET64 = 2,
   // Raw 64-bit PhysicalStorageBuffer address before scalar pointer typing.
   LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS = 3,
-  // PhysicalStorageBuffer pointer with a concrete scalar pointee type.
+  // PhysicalStorageBuffer pointer with a concrete scalar or vector pointee.
   LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER = 4,
   // SPIR-V boolean SSA ID produced by compare packets.
   LOOM_SPIRV_VALUE_CLASS_BOOL = 5,
@@ -54,9 +54,10 @@ typedef struct loom_spirv_value_type_t {
   // matrix classes.
   uint8_t scalar_type;
   union {
-    // Ordinary-vector shape metadata.
+    // Ordinary-vector shape metadata, also used by physical storage pointers.
     struct {
-      // Number of vector components.
+      // Number of vector components. A physical storage pointer uses zero
+      // for a scalar pointee and 2-4 for a vector pointee.
       uint16_t lane_count;
     } vector;
     // Cooperative-matrix shape and use metadata.
@@ -100,11 +101,11 @@ static inline bool loom_spirv_value_type_equal(loom_spirv_value_type_t lhs,
   }
   switch (lhs.value_class) {
     case LOOM_SPIRV_VALUE_CLASS_SCALAR:
-    case LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER:
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP:
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY:
       return lhs.scalar_type == rhs.scalar_type;
     case LOOM_SPIRV_VALUE_CLASS_VECTOR:
+    case LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER:
       return lhs.scalar_type == rhs.scalar_type &&
              lhs.vector.lane_count == rhs.vector.lane_count;
     case LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR:

@@ -31,6 +31,7 @@ iree_py_library(
         "memory.py",
         "ordinary_vector.py",
         "ordinary_vector_alu.py",
+        "packed_memory.py",
         "predicate.py",
         "reference_fallback.py",
         "rounding.py",
@@ -147,6 +148,7 @@ iree_py_test(
         "index_test.py",
         "integer_bits_test.py",
         "memory_test.py",
+        "packed_memory_test.py",
         "//loom/py/loom/tools:pytest_style_runner.py",
     ],
     args = [
@@ -158,6 +160,7 @@ iree_py_test(
         "loom.target.arch.spirv.contracts.index_test",
         "loom.target.arch.spirv.contracts.integer_bits_test",
         "loom.target.arch.spirv.contracts.memory_test",
+        "loom.target.arch.spirv.contracts.packed_memory_test",
     ],
     main = "pytest_style_runner.py",
     deps = [

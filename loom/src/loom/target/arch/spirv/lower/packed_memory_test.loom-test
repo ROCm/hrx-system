@@ -1,0 +1,294 @@
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=INT16,STORAGE_BUFFER_16BIT_ACCESS
+
+// The 210-byte Q6 record stride leaves alternating i32 payloads halfword aligned.
+kernel.def @halfword_words() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%source: buffer, %target: buffer, %element: index) {
+  %position = index.assume %element [range(%element, 0, 7)] : index
+  %origin = index.constant 2 : offset
+  %input = buffer.view %source[%origin] : buffer -> view<8xi32, align(2)>
+  %output = buffer.view %target[%origin] : buffer -> view<8xi32, align(2)>
+  %value = view.load<volatile> %input[%position] : view<8xi32, align(2)> -> i32
+  view.store<volatile> %value, %output[%position] : i32, view<8xi32, align(2)>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer, index) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @halfword_words(%position: reg<spirv.id : index>) asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %target = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %12 = OpSConvert.i32.offset64 %position
+  %13 = OpConstant.offset64 4
+  %14 = OpIMul.offset64 %12, %13
+  %15 = OpConstant.offset64 2
+  %16 = OpIAdd.offset64 %14, %15
+  %17 = OpPtrAccessChain.storage_buffer.v2i16.byte_offset %source, %16
+  %18 = OpLoad.storage_buffer.v2i16<volatile> %17
+  %value = OpBitcast.v2i16.i32 %18
+  %20 = OpBitcast.i32.v2i16 %value : reg<spirv.id>
+  %26 = OpPtrAccessChain.storage_buffer.v2i16.byte_offset %target, %16
+  OpStore.storage_buffer.v2i16<volatile> %26, %20
+  return
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=INT8,INT16,STORAGE_BUFFER_8BIT_ACCESS
+
+kernel.def @byte_halfwords() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%source: buffer, %target: buffer) {
+  %origin = index.constant 1 : offset
+  %input = buffer.view %source[%origin] : buffer -> view<1xi16, align(1)>
+  %output = buffer.view %target[%origin] : buffer -> view<1xi16, align(1)>
+  %value = view.load %input[0] : view<1xi16, align(1)> -> i16
+  view.store %value, %output[0] : i16, view<1xi16, align(1)>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @byte_halfwords() asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %target = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %9 = OpConstant.offset64 1
+  %10 = OpPtrAccessChain.storage_buffer.v2i8.byte_offset %source, %9
+  %11 = OpLoad.storage_buffer.v2i8 %10
+  %value = OpBitcast.v2i8.i16 %11
+  %13 = OpBitcast.i16.v2i8 %value : reg<spirv.id>
+  %15 = OpPtrAccessChain.storage_buffer.v2i8.byte_offset %target, %9
+  OpStore.storage_buffer.v2i8 %15, %13
+  return
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=INT8,STORAGE_BUFFER_8BIT_ACCESS
+
+kernel.def @byte_words() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%source: buffer, %target: buffer) {
+  %origin = index.constant 1 : offset
+  %input = buffer.view %source[%origin] : buffer -> view<1xi32, align(1)>
+  %output = buffer.view %target[%origin] : buffer -> view<1xi32, align(1)>
+  %value = view.load %input[0] : view<1xi32, align(1)> -> i32
+  view.store %value, %output[0] : i32, view<1xi32, align(1)>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @byte_words() asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %target = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %9 = OpConstant.offset64 1
+  %10 = OpPtrAccessChain.storage_buffer.v4i8.byte_offset %source, %9
+  %11 = OpLoad.storage_buffer.v4i8 %10
+  %value = OpBitcast.v4i8.i32 %11
+  %13 = OpBitcast.i32.v4i8 %value : reg<spirv.id>
+  %15 = OpPtrAccessChain.storage_buffer.v4i8.byte_offset %target, %9
+  OpStore.storage_buffer.v4i8 %15, %13
+  return
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=FLOAT64
+
+kernel.def @word_doubles() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%source: buffer, %target: buffer) {
+  %origin = index.constant 4 : offset
+  %input = buffer.view %source[%origin] : buffer -> view<1xf64, align(4)>
+  %output = buffer.view %target[%origin] : buffer -> view<1xf64, align(4)>
+  %value = view.load %input[0] : view<1xf64, align(4)> -> f64
+  view.store %value, %output[0] : f64, view<1xf64, align(4)>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @word_doubles() asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %target = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %9 = OpConstant.offset64 4
+  %10 = OpPtrAccessChain.storage_buffer.v2i32.byte_offset %source, %9
+  %11 = OpLoad.storage_buffer.v2i32 %10
+  %value = OpBitcast.v2i32.f64 %11
+  %13 = OpBitcast.f64.v2i32 %value : reg<spirv.id>
+  %15 = OpPtrAccessChain.storage_buffer.v2i32.byte_offset %target, %9
+  OpStore.storage_buffer.v2i32 %15, %13
+  return
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=FLOAT64,INT16,STORAGE_BUFFER_16BIT_ACCESS
+
+kernel.def @halfword_doubles() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%source: buffer, %target: buffer) {
+  %origin = index.constant 2 : offset
+  %input = buffer.view %source[%origin] : buffer -> view<1xf64, align(2)>
+  %output = buffer.view %target[%origin] : buffer -> view<1xf64, align(2)>
+  %value = view.load %input[0] : view<1xf64, align(2)> -> f64
+  view.store %value, %output[0] : f64, view<1xf64, align(2)>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @halfword_doubles() asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %target = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %9 = OpConstant.offset64 2
+  %10 = OpPtrAccessChain.storage_buffer.v4i16.byte_offset %source, %9
+  %11 = OpLoad.storage_buffer.v4i16 %10
+  %value = OpBitcast.v4i16.f64 %11
+  %13 = OpBitcast.f64.v4i16 %value : reg<spirv.id>
+  %15 = OpPtrAccessChain.storage_buffer.v4i16.byte_offset %target, %9
+  OpStore.storage_buffer.v4i16 %15, %13
+  return
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=FLOAT64,INT8,STORAGE_BUFFER_8BIT_ACCESS
+
+// Two byte packets cover exactly eight bytes and retain volatility on both.
+kernel.def @byte_doubles() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%source: buffer, %target: buffer) {
+  %origin = index.constant 1 : offset
+  %input = buffer.view %source[%origin] : buffer -> view<1xf64, align(1)>
+  %output = buffer.view %target[%origin] : buffer -> view<1xf64, align(1)>
+  %value = view.load<volatile> %input[0] : view<1xf64, align(1)> -> f64
+  view.store<volatile> %value, %output[0] : f64, view<1xf64, align(1)>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @byte_doubles() asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %target = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %9 = OpConstant.offset64 0
+  %10 = OpConstant.offset64 1
+  %11 = OpIAdd.storage_buffer.byte_offset %source, %10
+  %12 = OpPtrAccessChain.storage_buffer.v4i8.byte_offset %11, %9
+  %13 = OpLoad.storage_buffer.v4i8<volatile> %12
+  %14 = OpBitcast.v4i8.i32 %13 : reg<spirv.id>
+  %15 = OpConstant.offset64 4
+  %18 = OpPtrAccessChain.storage_buffer.v4i8.byte_offset %11, %15
+  %19 = OpLoad.storage_buffer.v4i8<volatile> %18
+  %20 = OpBitcast.v4i8.i32 %19 : reg<spirv.id>
+  %21 = OpCompositeConstruct.v2i32 %14, %20 : reg<spirv.id>
+  %value = OpBitcast.v2i32.f64 %21
+  %23 = OpBitcast.f64.v2i32 %value : reg<spirv.id>
+  %26 = OpIAdd.storage_buffer.byte_offset %target, %10
+  %27 = OpPtrAccessChain.storage_buffer.v4i8.byte_offset %26, %9
+  %28 = OpCompositeExtract.v2i32.i32 %23, 0 : reg<spirv.id>
+  %29 = OpBitcast.i32.v4i8 %28 : reg<spirv.id>
+  OpStore.storage_buffer.v4i8<volatile> %27, %29
+  %33 = OpPtrAccessChain.storage_buffer.v4i8.byte_offset %26, %15
+  %34 = OpCompositeExtract.v2i32.i32 %23, 1 : reg<spirv.id>
+  %35 = OpBitcast.i32.v4i8 %34 : reg<spirv.id>
+  OpStore.storage_buffer.v4i8<volatile> %33, %35
+  return
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=BFLOAT16_TYPE_KHR,INT8,STORAGE_BUFFER_8BIT_ACCESS
+
+kernel.def @native_bfloat() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%source: buffer, %target: buffer) {
+  %origin = index.constant 1 : offset
+  %input = buffer.view %source[%origin] : buffer -> view<1xbf16, align(1)>
+  %output = buffer.view %target[%origin] : buffer -> view<1xbf16, align(1)>
+  %value = view.load %input[0] : view<1xbf16, align(1)> -> bf16
+  view.store %value, %output[0] : bf16, view<1xbf16, align(1)>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @native_bfloat() asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %target = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %9 = OpConstant.offset64 1
+  %10 = OpPtrAccessChain.storage_buffer.v2i8.byte_offset %source, %9
+  %11 = OpLoad.storage_buffer.v2i8 %10
+  %value = OpBitcast.v2i8.bf16 %11
+  %13 = OpBitcast.bf16.v2i8 %value : reg<spirv.id>
+  %15 = OpPtrAccessChain.storage_buffer.v2i8.byte_offset %target, %9
+  OpStore.storage_buffer.v2i8 %15, %13
+  return
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=INT8,INT16,STORAGE_BUFFER_8BIT_ACCESS
+
+kernel.def @carried_bfloat() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%source: buffer, %target: buffer) {
+  %origin = index.constant 1 : offset
+  %input = buffer.view %source[%origin] : buffer -> view<1xbf16, align(1)>
+  %output = buffer.view %target[%origin] : buffer -> view<1xbf16, align(1)>
+  %value = view.load %input[0] : view<1xbf16, align(1)> -> bf16
+  view.store %value, %output[0] : bf16, view<1xbf16, align(1)>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @carried_bfloat() asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %target = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %9 = OpConstant.offset64 1
+  %10 = OpPtrAccessChain.storage_buffer.v2i8.byte_offset %source, %9
+  %11 = OpLoad.storage_buffer.v2i8 %10
+  %12 = OpBitcast.v2i8.i16 %11 : reg<spirv.id>
+  %13 = OpBitcast.i16.u16 %12
+  %14 = OpUConvert.u16.u32 %13
+  %value = OpBitcast.u32.i32 %14
+  %16 = OpSConvert.i32.i16 %value
+  %17 = OpBitcast.i16.v2i8 %16 : reg<spirv.id>
+  %19 = OpPtrAccessChain.storage_buffer.v2i8.byte_offset %target, %9
+  OpStore.storage_buffer.v2i8 %19, %17
+  return
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=INT8,INT16,STORAGE_BUFFER_8BIT_ACCESS,STORAGE_BUFFER_16BIT_ACCESS
+
+// Retained root alignment can prove more than the declared view alignment.
+kernel.def @proven_word_alignment() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%source: buffer, %target: buffer) {
+  %aligned_source = buffer.assume.alignment %source {minimum_alignment = 4} : buffer
+  %aligned_target = buffer.assume.alignment %target {minimum_alignment = 4} : buffer
+  %origin = index.constant 0 : offset
+  %input = buffer.view %aligned_source[%origin] : buffer -> view<1xi32, align(1)>
+  %output = buffer.view %aligned_target[%origin] : buffer -> view<1xi32, align(1)>
+  %value = view.load %input[0] : view<1xi32, align(1)> -> i32
+  view.store %value, %output[0] : i32, view<1xi32, align(1)>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @proven_word_alignment() asm {
+  %aligned_source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %aligned_target = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %11 = OpConstant.offset64 0
+  %12 = OpPtrAccessChain.storage_buffer.i32.byte_offset %aligned_source, %11
+  %value = OpLoad.storage_buffer.i32 %12
+  %15 = OpPtrAccessChain.storage_buffer.i32.byte_offset %aligned_target, %11
+  OpStore.storage_buffer.i32 %15, %value
+  return
+}

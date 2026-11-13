@@ -124,9 +124,11 @@ from loom.target.arch.spirv.scalar_conversion import (
     ScalarConversion,
 )
 from loom.target.arch.spirv.scalar_memory import (
+    PACKED_STORAGE_BUFFER_VECTORS,
     RAW_STORAGE_BUFFER_BYTE,
     STORAGE_BUFFER_SCALARS,
     StorageBufferScalar,
+    StorageBufferVector,
 )
 from loom.target.arch.spirv.subgroup import (
     SPIRV_SUBGROUP_BALLOT_PACKING_INSTRUCTIONS,
@@ -886,7 +888,7 @@ def _address_conversion_descriptors() -> tuple[Descriptor, ...]:
 
 def _storage_buffer_effect(
     kind: EffectKind,
-    scalar: StorageBufferScalar,
+    scalar: StorageBufferScalar | StorageBufferVector,
 ) -> Effect:
     return Effect(
         kind,
@@ -1241,7 +1243,7 @@ def _float_atomic_descriptors() -> tuple[Descriptor, ...]:
 
 
 def _ptr_access_chain_storage_buffer_descriptor(
-    scalar: StorageBufferScalar,
+    scalar: StorageBufferScalar | StorageBufferVector,
 ) -> Descriptor:
     return Descriptor(
         key=f"spirv.op_ptr_access_chain.storage_buffer.{scalar.suffix}.byte_offset",
@@ -1260,10 +1262,12 @@ def _ptr_access_chain_storage_buffer_descriptor(
     )
 
 
-def _load_storage_buffer_descriptor(scalar: StorageBufferScalar) -> Descriptor:
+def _load_storage_buffer_descriptor(
+    scalar: StorageBufferScalar | StorageBufferVector,
+) -> Descriptor:
     result_value_type = (
         _scalar_result_value_type(scalar.source_type)
-        if scalar.source_rule_enabled
+        if isinstance(scalar, StorageBufferScalar) and scalar.source_rule_enabled
         else None
     )
     return Descriptor(
@@ -1283,7 +1287,9 @@ def _load_storage_buffer_descriptor(scalar: StorageBufferScalar) -> Descriptor:
     )
 
 
-def _store_storage_buffer_descriptor(scalar: StorageBufferScalar) -> Descriptor:
+def _store_storage_buffer_descriptor(
+    scalar: StorageBufferScalar | StorageBufferVector,
+) -> Descriptor:
     return Descriptor(
         key=f"spirv.op_store.storage_buffer.{scalar.suffix}",
         mnemonic=f"OpStore.storage_buffer.{scalar.suffix}",
@@ -1299,7 +1305,7 @@ def _store_storage_buffer_descriptor(scalar: StorageBufferScalar) -> Descriptor:
 
 def _storage_buffer_descriptors() -> tuple[Descriptor, ...]:
     descriptors: list[Descriptor] = []
-    for scalar in STORAGE_BUFFER_SCALARS:
+    for scalar in (*STORAGE_BUFFER_SCALARS, *PACKED_STORAGE_BUFFER_VECTORS):
         descriptors.append(_ptr_access_chain_storage_buffer_descriptor(scalar))
         descriptors.append(_load_storage_buffer_descriptor(scalar))
         descriptors.append(_store_storage_buffer_descriptor(scalar))
