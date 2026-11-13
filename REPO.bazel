@@ -1,0 +1,5 @@
+# Copyright 2026 The IREE Authors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# Python bytecode caches contain no source packages and may be unreadable.
+ignore_directories(["**/__pycache__"])
